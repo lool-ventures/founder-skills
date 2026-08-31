@@ -89,11 +89,11 @@ Every analysis deposits structured JSON artifacts into a working directory. The 
 
 | Step | Artifact | Producer |
 |------|----------|----------|
-| 2 | `product_profile.json` | Agent (main) |
-| 3 | `landscape_draft.json` | Agent (main) |
+| 2 | `product_profile.json` | Agent (main, staged) → `persist_agent_artifact.py` |
+| 3 | `landscape_draft.json` | Agent (main, staged) → `persist_agent_artifact.py` |
 | 3.5 + 3.6 | `competitor_verification.json` | Parallel Context A dispatches: COMPETITOR_VERIFICATION (precision) + COMPETITOR_RECALL (recall) → one `verify_competitors.py` call |
 | 4 | `landscape.json` | Context A dispatch: LANDSCAPE_RESEARCH → `validate_landscape.py` |
-| 5a | `positioning.json` | Agent (main — views, moats, stress-tests) |
+| 5a | `positioning.json` | Agent (main, staged — views, claims) → `persist_agent_artifact.py` |
 | 5b | `moat_scores.json` | Context A dispatch: MOAT_SCORING → `score_moats.py` |
 | 5c | `positioning_scores.json` | Context A dispatch: POSITIONING_SCORING → `score_positioning.py` |
 | 6 | `checklist.json` | Context A dispatch: CHECKLIST → `checklist.py` |
@@ -103,7 +103,7 @@ Every analysis deposits structured JSON artifacts into a working directory. The 
 
 **Rules:**
 - Deposit each artifact before proceeding to the next step
-- For agent-written artifacts, consult `references/artifact-schemas.md` for the JSON schema
+- For agent-authored artifacts, consult `references/artifact-schemas.md` for the JSON schema, and write them through `persist_agent_artifact.py` (stage in `$STAGING_DIR`, pipe to `$ANALYSIS_DIR`) rather than by heredoc. It checks required keys and stamps `_produced_by`; without the stamp `compose_report.py` raises `UNVALIDATED_ARTIFACT` at **high** severity. **What that buys is presence-of-keys and provenance, not shape** — the model still authors the content
 - If a step is not applicable, deposit a stub: `{"skipped": true, "reason": "..."}`
 - **Do NOT use `isolation: "worktree"`** for sub-agents — files written in a worktree won't appear in the main `$ANALYSIS_DIR`
 
@@ -320,7 +320,16 @@ Extract from the founder's materials or conversation: company name, product desc
 
 **Check the deck's vintage.** If a footer date, copyright year, event slide, or embedded metadata shows the materials are noticeably older than today (a rule of thumb: more than ~12 months), flag this to the founder before proceeding — competitor pricing, funding, and positioning claims from a stale deck may already be outdated. Note the observed vintage in `product_profile.json`'s `source_materials` (e.g. `"pitch deck (PDF, copyright 2024)"`).
 
-Write `product_profile.json` to `$ANALYSIS_DIR`. Consult `references/artifact-schemas.md` for the schema. Set `INPUT_MODE` to the chosen mode (`deck`, `conversation`, or `document`) — Step 6's checklist pipe passes it to `checklist.py --input-mode` so mode gating is applied correctly:
+Write `product_profile.json` to `$ANALYSIS_DIR`.
+
+**Write it through the producer, not by a bare heredoc into `$ANALYSIS_DIR`.** Stage the JSON in `$STAGING_DIR` (the `/tmp` scratch dir from Step 0 — never the promoted outputs mount) and pipe it:
+
+```bash
+cat "$STAGING_DIR/product_profile.json" | python3 "$SCRIPTS/persist_agent_artifact.py" \
+  --artifact product_profile.json -o "$ANALYSIS_DIR/product_profile.json" --run-id "$RUN_ID" --pretty
+```
+
+It checks the schema-required top-level keys, stamps `_produced_by`, and writes. **If it rejects, the pipe fails and `$ANALYSIS_DIR` is left untouched** — fix the staged JSON and re-run; never hand-write the destination to get past it. `compose_report.py` raises `UNVALIDATED_ARTIFACT` at high severity on an unstamped artifact, so a bare heredoc here surfaces as a high-severity warning in the delivered report, and fails the run outright on Step 7's `--strict` pass. Do not read it as an unconditional hard stop: Pass 1 runs without `--strict`. Consult `references/artifact-schemas.md` for the schema. Set `INPUT_MODE` to the chosen mode (`deck`, `conversation`, or `document`) — Step 6's checklist pipe passes it to `checklist.py --input-mode` so mode gating is applied correctly:
 
 ```bash
 INPUT_MODE="deck"   # or "conversation" / "document"
@@ -341,6 +350,15 @@ Select 2-3 candidate positioning axis pairs with rationale for each. Follow the 
 If the founder's deck mentions competitors you are excluding from the formal landscape (e.g., too small, different market segment, or redundant with an included competitor), note them with reasons in `landscape_draft.json` under a `deck_competitors_excluded` field. These will be referenced in the report to maintain deck alignment and prevent the NARR_03 checklist item from failing without explanation.
 
 Write `landscape_draft.json` to `$ANALYSIS_DIR`.
+
+**Write it through the producer, not by a bare heredoc into `$ANALYSIS_DIR`.** Stage the JSON in `$STAGING_DIR` (the `/tmp` scratch dir from Step 0 — never the promoted outputs mount) and pipe it:
+
+```bash
+cat "$STAGING_DIR/landscape_draft.json" | python3 "$SCRIPTS/persist_agent_artifact.py" \
+  --artifact landscape_draft.json -o "$ANALYSIS_DIR/landscape_draft.json" --run-id "$RUN_ID" --pretty
+```
+
+It checks the schema-required top-level keys, stamps `_produced_by`, and writes. **If it rejects, the pipe fails and `$ANALYSIS_DIR` is left untouched** — fix the staged JSON and re-run; never hand-write the destination to get past it. `compose_report.py` raises `UNVALIDATED_ARTIFACT` at high severity on an unstamped artifact, so a bare heredoc here surfaces as a high-severity warning in the delivered report, and fails the run outright on Step 7's `--strict` pass. Do not read it as an unconditional hard stop: Pass 1 runs without `--strict`.
 
 ### Step 3.5: Adversarial Competitor Verification -> `competitor_verification.json` (Context A: COMPETITOR_VERIFICATION dispatch)
 
@@ -494,7 +512,11 @@ If founder requests changes, apply corrections and repeat Steps A+B.
 
 Apply all corrections to `landscape_draft.json` before proceeding. **This is also how an approved recall candidate enters the set** — add it to `landscape_draft.json` as a draft entry (name, slug, category, description, `key_differentiators`, plus `why_included` citing the recall check), and Step 4 then enriches it like any other draft entry. Do not route it through Step 4's `suggested_additions` promotion path: that path operates on the *Step 4 output's* additions and does not exist yet at this point in the run. Never exceed `MAX_COMPETITORS` (10) — if the founder approves more than the remaining slots, ask which to keep rather than silently truncating.
 
+**Preserve `_produced_by` when you edit these files.** `landscape_draft.json` and `positioning.json` are provenance-checked at Step 7: `compose_report.py` raises `UNVALIDATED_ARTIFACT` at **high** severity when the `_produced_by` stamp is missing or wrong. A correction here is an **in-place `Edit` that leaves `_produced_by` untouched** — do NOT rewrite the whole file (that drops the stamp and reds a run that did everything right). If you do need to regenerate the file wholesale, re-stage it and re-pipe it through `persist_agent_artifact.py` exactly as the step that first wrote it did.
+
 **A recall candidate the founder does NOT approve is not simply dropped.** Write it into `landscape_draft.json`'s top-level `deferred_recall_candidates[]` array — `{name, slug, category, why_considered, sources}`, copied from how the recall dispatch returned it — rather than discarding it. Step 4's additions gate below draws candidates from this array too, so a declined recall candidate stays reachable if the analysis later needs it, instead of becoming permanently unaddable the moment Step 4's own `suggested_additions` fill the remaining slots.
+
+**Preserve `_produced_by` when you edit this file** — see the note at Gate 1: an in-place `Edit` keeps the stamp, a whole-file rewrite drops it and reds a compliant run at high severity. Regenerating the file wholesale means re-staging and re-piping it through `persist_agent_artifact.py`.
 
 ### Context A hand-off protocol (file transport + gate)
 
@@ -543,6 +565,7 @@ Branch on the exit code (complete state machine — do not improvise):
 - **Exit 5** (receipt echoes a different path) → **repair-dispatch** telling the agent the exact expected OUTPUT_PATH (it wrote somewhere else).
 - **Exit 6** (receipt unparseable / no `output_path` key) → **redo-dispatch** with "return ONLY the receipt JSON — no fences, no prose."
 - **Producer schema rejection** (the pipe fails next) → **repair-dispatch** with the producer's stderr verbatim.
+- **Exit 8** (`path_namespace_mismatch`) → the sub-agent **complied**; the agent-namespace prefix was wrong. Its relative `OUTPUT_PATH` resolved against the outputs mount instead of the session root, so the file landed at the doubled path reported in `found_at`. Do NOT treat this as a fabricated receipt (that is exit 3), and do NOT read the hand-off from `found_at` — it is diagnostic only. Re-run `resolve_artifacts_root.py --agent`, rebuild the agent-namespace prefix from the printed value, and re-dispatch. Counts against the same 2-dispatch retry budget.
 - **Any other exit** (script crash etc.) → STOP with the stderr.
 - **After ANY corrective dispatch, resume from `check_handoff.py`** — never pipe to the producer unchecked.
 
@@ -674,8 +697,8 @@ validate_landscape.py:
 }
 Then return ONLY the receipt JSON in your final assistant message:
 {"status": "complete", "output_path": "<echo of OUTPUT_PATH>"}
-Do NOT write any file other than OUTPUT_PATH — canonical artifacts are
-producer-script-only; anything else you write bypasses schema validation and
+Do NOT write any file other than OUTPUT_PATH — you never write a canonical
+artifact; anything else you write bypasses schema validation and
 run_id stamping.
 ```
 
@@ -714,6 +737,8 @@ depends on a model remembering to copy a field it has no other reason to touch.
 
 **Promoting a `deferred_recall_candidates[]` entry uses this same enrichment re-dispatch path, unchanged** — a declined recall candidate approved later has no `suggested_additions[]` entry to replace in step 3, so relocate the enriched result directly into `competitors[]` instead, and remove the promoted candidate from `landscape_draft.json`'s `deferred_recall_candidates[]` so it is not offered again on a future run.
 
+**Preserve `_produced_by` when you edit this file** — see the note at Gate 1: an in-place `Edit` keeps the stamp, a whole-file rewrite drops it and reds a compliant run at high severity. Regenerating the file wholesale means re-staging and re-piping it through `persist_agent_artifact.py`.
+
 With no approved additions (or none suggested), pipe the hand-off file directly, unchanged — that is the bash block below.
 
 **Retain the declined ones — do not discard them.** Any suggested addition the founder does NOT approve stays in `suggested_additions[]` with `merged: false` (leave the entry in place; only approved entries move to `competitors[]`). This preserves the gap-detection knowledge in `landscape.json` and lets the coaching commentary note "you flagged X as not-a-competitor" rather than silently losing what research surfaced. The same applies to `deferred_recall_candidates[]`: any entry not promoted this round stays in `landscape_draft.json` for exactly the reason Gate 1 put it there — reachable for a later run, not lost.
@@ -750,7 +775,16 @@ If the founder changes an axis pair or the competitor set, apply the change befo
 
 **REQUIRED — read `${CLAUDE_PLUGIN_ROOT}/skills/competitive-positioning/references/moat-definitions.md` now.**
 
-Write `positioning.json` to `$ANALYSIS_DIR` (consult `references/artifact-schemas.md` for the schema). **`moat_assessments` in this draft is optional — write `{}` or omit the key rather than authoring a full per-competitor draft.** It is superseded by `moat_scores.json` once MOAT_SCORING returns below, and nothing reads the draft block for scoring, so drafting one for every slug is effort with no consumer. Then dispatch the sub-agent **twice in parallel** (two Task calls in one message, both with `subagent_type: "founder-skills:competitive-positioning"`) — once for MOAT_SCORING and once for POSITIONING_SCORING.
+Write `positioning.json` to `$ANALYSIS_DIR` (consult `references/artifact-schemas.md` for the schema).
+
+**Write it through the producer, not by a bare heredoc into `$ANALYSIS_DIR`.** Stage the JSON in `$STAGING_DIR` (the `/tmp` scratch dir from Step 0 — never the promoted outputs mount) and pipe it:
+
+```bash
+cat "$STAGING_DIR/positioning.json" | python3 "$SCRIPTS/persist_agent_artifact.py" \
+  --artifact positioning.json -o "$ANALYSIS_DIR/positioning.json" --run-id "$RUN_ID" --pretty
+```
+
+It checks the schema-required top-level keys, stamps `_produced_by`, and writes. **If it rejects, the pipe fails and `$ANALYSIS_DIR` is left untouched** — fix the staged JSON and re-run; never hand-write the destination to get past it. `compose_report.py` raises `UNVALIDATED_ARTIFACT` at high severity on an unstamped artifact, so a bare heredoc here surfaces as a high-severity warning in the delivered report, and fails the run outright on Step 7's `--strict` pass. Do not read it as an unconditional hard stop: Pass 1 runs without `--strict`. **`moat_assessments` in this draft is optional — write `{}` or omit the key rather than authoring a full per-competitor draft.** It is superseded by `moat_scores.json` once MOAT_SCORING returns below, and nothing reads the draft block for scoring, so drafting one for every slug is effort with no consumer. Then dispatch the sub-agent **twice in parallel** (two Task calls in one message, both with `subagent_type: "founder-skills:competitive-positioning"`) — once for MOAT_SCORING and once for POSITIONING_SCORING.
 
 **MOAT_SCORING dispatch prompt:**
 
@@ -815,8 +849,8 @@ score_moats.py:
 }
 Then return ONLY the receipt JSON in your final assistant message:
 {"status": "complete", "output_path": "<echo of OUTPUT_PATH>"}
-Do NOT write any file other than OUTPUT_PATH — canonical artifacts are
-producer-script-only; anything else you write bypasses schema validation and
+Do NOT write any file other than OUTPUT_PATH — you never write a canonical
+artifact; anything else you write bypasses schema validation and
 run_id stamping.
 ```
 
@@ -881,8 +915,8 @@ score_positioning.py:
 }
 Then return ONLY the receipt JSON in your final assistant message:
 {"status": "complete", "output_path": "<echo of OUTPUT_PATH>"}
-Do NOT write any file other than OUTPUT_PATH — canonical artifacts are
-producer-script-only; anything else you write bypasses schema validation and
+Do NOT write any file other than OUTPUT_PATH — you never write a canonical
+artifact; anything else you write bypasses schema validation and
 run_id stamping.
 ```
 
@@ -1031,8 +1065,8 @@ summary (the producer script computes the summary):
 {"items": [{"id": "COVER_01", "criterion": "<the criterion label, copied verbatim>", "status": "pass", "evidence": "...", "notes": "..."}, ...all 25 items...]}
 Then return ONLY the receipt JSON in your final assistant message:
 {"status": "complete", "output_path": "<echo of OUTPUT_PATH>"}
-Do NOT write any file other than OUTPUT_PATH — canonical artifacts are
-producer-script-only; anything else you write bypasses schema validation and
+Do NOT write any file other than OUTPUT_PATH — you never write a canonical
+artifact; anything else you write bypasses schema validation and
 run_id stamping.
 ```
 
@@ -1071,6 +1105,8 @@ anything over.
 
 
 **Pass 2 (with acceptances):** If any medium-severity warnings should be accepted, add `accepted_warnings` to `positioning.json` with the warning code, match pattern, and reason. Then re-run with `--strict`:
+
+**Preserve `_produced_by` when you edit this file** — see the note at Gate 1: an in-place `Edit` keeps the stamp, a whole-file rewrite drops it and reds a compliant run at high severity. Regenerating the file wholesale means re-staging and re-piping it through `persist_agent_artifact.py`.
 
 ```bash
 python3 "$SCRIPTS/compose_report.py" --dir "$ANALYSIS_DIR" --strict --pretty \
@@ -1207,6 +1243,7 @@ The gate (`check_handoff.py --format=markdown`) verifies the sub-agent's hand-of
 - **Exit 6** (receipt unparseable / no `output_path` key) → **redo-dispatch** with "return ONLY the receipt JSON — no fences, no prose." (A `status: "blocked"` final message is NOT exit 6 — it was handled before the gate.)
 - **Exit 7** (content-shape gate failed — receipt-shaped or marker-bearing file) → **repair-dispatch**: "your file wasn't the coaching commentary — write the coaching markdown, nothing else, to `<OUTPUT_PATH>`."
 - **Exit 8** (`path_namespace_mismatch`) → the sub-agent **complied**; the agent-namespace prefix was wrong. Its relative `OUTPUT_PATH` resolved against the outputs mount instead of the session root, so the file landed at the doubled path reported in `found_at`. Do NOT treat this as a fabricated receipt, and do NOT read the hand-off from `found_at` — re-dispatch with the corrected agent-namespace prefix (re-run `resolve_artifacts_root.py --agent` and rebuild `<HANDOFF_AGENT>` from the printed value). Counts against the same 2-dispatch retry budget.
+- **Any other exit** (script crash, unreadable file, invalid UTF-8) → STOP with the stderr. `check_handoff.py` exit 4 is reachable here too: gate 1 already confirmed the file exists and is non-empty, so a failure opening it afterwards is an IO/permission fault, not a malformed hand-off. A decode error raises before any typed exit and surfaces as a traceback.
 - **`insert_coaching.py` exit 1** (blocked; stdout carries `{"status": "blocked", "reason": ...}`) → stop and report the exact reason. Do NOT hand-edit `report.md` — if the reason mentions a truncated report or a missing marker, re-run `compose_report.py --write-md` and retry the chain. If the reason is `commentary_markdown missing or empty`, treat as a malformed hand-off: repair-dispatch quoting the reason.
 - **After ANY corrective dispatch, resume from the gate chain** — never feed the transform+insert pipe an ungated file.
 

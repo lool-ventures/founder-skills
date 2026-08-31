@@ -95,7 +95,17 @@ tool surface and different rules.
     paste-transport.
 
   The sub-agent's own **write** is the single Write to the agent-namespace
-  `OUTPUT_PATH` (never a VM-absolute path). The stable analytical rubric a step
+  `OUTPUT_PATH` (never a VM-absolute path). **Nothing scopes that write
+  by path, and nothing detects an extra one.** `Write` is declared
+  unscoped because the agent must be able to CREATE its hand-off file
+  (`tests/test_cowork_invariants.py` enforces the declaration and records
+  why `Edit` cannot substitute), and no `PreToolUse` hook gates it. What
+  IS enforced is narrower than "the sub-agent cannot write elsewhere":
+  the orchestrator reads only the contracted path, and `check_handoff.py`
+  exit 5 catches a receipt that ECHOES a different path. An agent that
+  writes its hand-off file correctly and also writes a canonical artifact
+  echoes the right path and exits 0 — that write is undetected. The
+  boundary is a read-side contract, not a write-side restriction. The stable analytical rubric a step
   needs (scoring criteria, archetype/persona definitions, checklists) is best
   kept in the **agent definition** (`agents/<skill>.md`), loaded into the
   sub-agent's context with no read at all. (A skill MAY choose the all-inline
@@ -117,11 +127,28 @@ tool surface and different rules.
   final message and re-typing it into a heredoc.
 - Main thread gates the file with `scripts/check_handoff.py` (typed
   exits: 0 ok / 3 missing / 4 invalid JSON / 5 receipt path mismatch /
-  6 receipt unparseable), then pipes it through the producer script
+  6 receipt unparseable / 7 content-shape invalid / 8 path-namespace
+  mismatch). Exit 7 fires only under `--format=markdown` (Context B);
+  exits 3 and 4 are reachable under both formats. **Exit 8 is reported
+  ahead of exit 3** because the two are indistinguishable from the file
+  check yet need opposite responses — 3 = the receipt may be fabricated,
+  8 = the agent complied and the path prefix was wrong. It then pipes
+  the file through the producer script
   (`cat "$HANDOFF_DIR/<step>_output.json" | python3 ...`) for schema
   validation + canonical persistence. Recovery is redo/repair
   re-dispatch with a bounded budget; the complete state machine lives
   in each SKILL.md's "Context A hand-off protocol" section.
+  **That budget is a request, not a limit.** It is a prose bullet the
+  main-thread model counts itself — nothing can refuse a third
+  corrective dispatch, and `check_handoff.py` neither takes an attempt
+  count nor keeps one. Two things would have to be settled before a
+  counter could enforce it, and both are open: the budget is worded
+  differently across the six skills (cap-table counts *transport*
+  dispatches; the other five count corrective dispatches "of any kind,
+  in any combination"), and it is scoped per STEP while ic-sim's Step 6
+  and 6b, market-sizing's dual methodology and competitive-positioning's
+  Steps 3.5/3.6 each dispatch several sub-agents inside one step. Do not
+  describe the budget as enforced.
 - Hand-off files are a permanent per-run audit trail (raw sub-agent
   output before producer validation), never canonical artifacts:
   producers touch them only via the explicit pipe, and
@@ -172,6 +199,17 @@ tool surface and different rules.
 > framing is retracted (the mechanism is name-registration, not
 > filtering); do not reintroduce it from git history.
 
+> **Second retraction (2026-08-31), separate from the box above and not
+> covered by it.** This section also used to say the v0.4.0 sub-agents
+> had "a working shell recipe". They did not: the literal `Bash` name
+> bound nothing, leaving them `{Read, Glob, Grep}` — recorded at
+> `docs/internal/cowork-architecture-and-v0.4.x-learning.md:62-63`, with
+> the platform-scope correction at `:106-108`. The `Write`-based file
+> hand-off postdates v0.4.0, so its absence from that set is expected.
+> The anti-fabrication point survives the correction; the mechanism is
+> capability loss followed by fail-open improvisation, not instructions
+> ignored while capable.
+
 Cowork has no built-in `Bash` tool at ANY dispatch level — main thread
 included. Shell is `mcp__workspace__bash`, an MCP tool registered by
 the desktop's workspace server that runs commands inside the workspace
@@ -179,14 +217,39 @@ VM. The main thread uses it transparently (ToolSearch, then call). A
 sub-agent could too, if its `tools:` frontmatter declared
 `mcp__workspace__bash` + `ToolSearch` — but ours deliberately don't:
 
-- **Anti-fabrication:** the v0.4.0 incident showed sub-agents with a
-  working shell recipe still improvised artifacts and fabricated
-  results. The structural fix is that CANONICAL artifacts are only ever
-  written by producer scripts run by the main thread; a sub-agent writes
-  exactly one thing — its `OUTPUT_PATH` hand-off file, which is gated
-  (`check_handoff.py`) and consumed by a producer or insert script, never
-  promoted to a canonical artifact as-is. A sub-agent shell would blur
-  that line for no benefit.
+- **Anti-fabrication:** in the v0.4.0 incident sub-agents declared the
+  literal `Bash` name, which resolves to nothing in Cowork; left with
+  `{Read, Glob, Grep}` they improvised artifacts rather than failing
+  loudly. Two lessons, and the second is the load-bearing one: an
+  unbound tool name is silent, and the agent's failure mode under
+  capability loss is fabrication, not error.
+  The structural fix is that **no sub-agent writes a canonical
+  artifact** — its entire write surface is one thing, its `OUTPUT_PATH`
+  hand-off file, which is gated (`check_handoff.py`) and consumed by a
+  producer or insert script, never promoted to a canonical artifact
+  as-is. A sub-agent shell would blur that line for no benefit.
+  **What this does NOT claim.** The main thread writes several canonical
+  artifacts itself. As of 2026-08-31 they fall in three groups, and the
+  distinction is the whole point of the rescoping:
+  - **Written through a producer, provenance-checked.**
+    `product_profile.json`, `landscape_draft.json`, `positioning.json`
+    (competitive-positioning, via `persist_agent_artifact.py`) and
+    `coverage_disclosure.json` on cap-table's hand-roll route (via
+    `write_coverage_disclosure.py`). The model still AUTHORS the content;
+    what the producer adds is a required-key check and a `_produced_by`
+    stamp that `compose_report.py` checks at high severity. Not shape
+    validation — a self-reported stamp in a file the model writes.
+  - **Written by heredoc, schema-validated downstream.** cap-table's
+    `inputs.json`, checked by `extract_cap_table.py --mode=validate`.
+  - **Written by heredoc, NOT shape-checked.** market-sizing's
+    `methodology.json` and `validation.json`; ic-sim's
+    `startup_profile.json` and `prior_artifacts.json` (compose-time
+    key checks only, at severity **low**); cap-table's
+    `scenario_requests.json`, consumed raw by `run_scenario.py`; and
+    financial-model-review's `commentary.json`, required at its Gate 2.
+    For these the schema is requested in prose and nothing enforces it.
+    That is a tracked gap, not an invariant.
+
 - **Portability:** `mcp__workspace__bash` doesn't exist in the
   standalone CLI or other hosts; the literal `Bash` name doesn't exist
   in Cowork. Read/Edit/Glob/Grep (+ WebSearch where declared) is the
@@ -295,9 +358,11 @@ internally — pass the final message verbatim.
   `tools:` declares (it is a live escape hatch the platform grants, not
   something our allowlist gates). Do not rely on "sub-agents can't shell
   out" as a hard guarantee when reasoning about failure modes — rely
-  instead on the Context A invariant above (zero reads, inputs inlined)
-  so there is nothing for a sub-agent to need a shell for. Orchestrate
-  from the main thread either way.
+  instead on the Context A input rules above ("Three Dispatch Contexts",
+  the three-way rule): every input a sub-agent is given is either
+  reachable by a relative `Read` or inlined into the dispatch prompt, so
+  a shell buys it nothing — plus the orchestrator-side gate on the one
+  file it writes. Orchestrate from the main thread either way.
 - **Env scrubbing across the host/VM boundary**:
   `mcp__workspace__bash` commands run inside the Linux VM with an
   allowlist-scrubbed environment — no `CLAUDE_CODE_*` variable
@@ -502,6 +567,8 @@ helper implementing the order above rather than ad-hoc env checks.
 | `check_handoff.py` exit 4 (invalid JSON) | Truncated or malformed Write | Repair-dispatch quoting the parse diagnostic verbatim — the analysis on disk survives; only serialization gets fixed. |
 | `check_handoff.py` exit 5 (path mismatch) | Agent wrote somewhere else and echoed that path | Repair-dispatch stating the exact expected OUTPUT_PATH. If the claimed path is the OTHER namespace's spelling of the same file, `--agent-path` should have accepted it — check the gate invocation passes `--agent-path`. |
 | `check_handoff.py` exit 6 (receipt unparseable) | Final message wasn't the receipt JSON | Redo-dispatch: "return ONLY the receipt JSON — no fences, no prose." |
+| `check_handoff.py` exit 7 (content-shape invalid) | `--format=markdown` only: the hand-off file is receipt-shaped or carries the insertion marker — the agent wrote the wrong thing, not nothing | Repair-dispatch: "write the coaching markdown itself to `<OUTPUT_PATH>` — no receipt JSON, no marker." |
+| `check_handoff.py` exit 8 (path-namespace mismatch) | The agent COMPLIED; the agent-namespace prefix was wrong, so the file landed at a doubled path (reported in `found_at`). Reported ahead of exit 3 because the file check cannot tell them apart | Do NOT treat as a fabricated receipt and do NOT read the hand-off from `found_at` (diagnostic only). Re-run `resolve_artifacts_root.py --agent`, rebuild the prefix, re-dispatch. |
 | Producer script schema rejection | Hand-off file (or fallback JSON) shape doesn't match schema | Repair-dispatch with the producer's stderr verbatim; check schema in references/schemas/. |
 | `metadata.run_id` mismatch | `setup_run.py` invocation order issue | Check that all producer scripts use the same `RUN_ID` (set once at Step 0, threaded through). |
 | Coaching commentary missing | Compose didn't emit insertion marker | Check `report.md` for `<!-- COACHING_INSERTION_POINT_<8-hex> -->`. If absent, compose script wasn't updated to v0.4.2 spec. |

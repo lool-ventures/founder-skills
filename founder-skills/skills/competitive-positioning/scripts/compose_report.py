@@ -139,6 +139,12 @@ REQUIRED_ARTIFACTS = [
 # Optional artifacts — nice to have for richer report.
 OPTIONAL_ARTIFACTS = [
     "product_profile.json",
+    # Loaded so its UNVALIDATED_ARTIFACT provenance row below is not a silent no-op:
+    # the provenance loop does `artifacts.get(name)` and skips absent artifacts, so an
+    # EXPECTED_PRODUCERS entry for a file nothing loads asserts nothing. Optional rather
+    # than required because it is superseded by `landscape.json` once LANDSCAPE_RESEARCH
+    # returns -- a run that got that far legitimately no longer needs the draft.
+    "landscape_draft.json",
     # The adversarial competitor-set verdicts. Optional because a run may legitimately skip the
     # verification dispatch, but when present it MUST reach the deliverable: a competitor the
     # verification judged `not_a_competitor` was previously scored, ranked and tabled
@@ -608,6 +614,15 @@ def validate_artifacts(
         # Optional artifact, and the loop below only inspects artifacts that are present, so a run
         # that legitimately skipped verification gains no failure mode.
         "competitor_verification.json": "verify_competitors",
+        # The three artifacts the MAIN THREAD authors. Until `persist_agent_artifact.py`
+        # existed they had no producer to stamp them, so they were the exact complement of
+        # this map -- the enforcement was built, high-severity, and structurally blind to
+        # the artifacts most in need of it. What this buys is presence-of-keys and
+        # provenance, NOT shape: `_produced_by` is a self-reported string in a file the
+        # model writes, and a required-keys check cannot see the extra-keys failure mode.
+        "product_profile.json": "persist_agent_artifact",
+        "landscape_draft.json": "persist_agent_artifact",
+        "positioning.json": "persist_agent_artifact",
     }
     for name, expected in EXPECTED_PRODUCERS.items():
         data = artifacts.get(name)
@@ -617,6 +632,19 @@ def validate_artifacts(
                     "UNVALIDATED_ARTIFACT",
                     f"Artifact '{name}' exists but was not produced by {expected}.py — "
                     f"run the script instead of writing the file directly",
+                    # The agent-facing `message` NAMES A SCRIPT AND AN ARTIFACT FILE, and
+                    # report.md renders `message` when no founder_message is supplied -- so
+                    # every firing of this warning previously put two internal tokens into a
+                    # founder-visible report. `test_composed_report_carries_no_internal_tokens`
+                    # could not see it: fixtures are stamped, so the warning never fires there,
+                    # and a warning that only leaks when it fires is invisible to a zero ratchet
+                    # driven by clean fixtures. Found by running compose against a deliberately
+                    # unstamped artifact.
+                    founder_message=(
+                        "Part of this analysis was assembled outside the checked pipeline, so it "
+                        "hasn't been through the same validation as the rest. Re-run the analysis "
+                        "step that produces it before relying on this section."
+                    ),
                 )
             )
 
@@ -707,6 +735,17 @@ def validate_artifacts(
                     _warn(
                         "STALE_ARTIFACT",
                         f"{name} has run_id '{rid}' but expected '{primary_rid}'",
+                        # Same class as UNVALIDATED_ARTIFACT above: the agent-facing `message`
+                        # names an artifact FILE and two internal run ids, and report.md renders
+                        # `message` when no founder_message is given. Found by running compose
+                        # with deliberately mismatched run_ids -- the fleet zero-token ratchet
+                        # cannot see it, because its fixtures share one run_id so this warning
+                        # never fires there.
+                        founder_message=(
+                            "Part of this analysis is left over from an earlier run and does not "
+                            "match the rest, so the sections below may not be consistent with each "
+                            "other. Re-run the analysis from the start before relying on it."
+                        ),
                     )
                 )
 

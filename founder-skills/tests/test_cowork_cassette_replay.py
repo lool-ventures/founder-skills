@@ -65,6 +65,75 @@ SCENARIOS_DIR = Path(__file__).resolve().parents[2] / "cowork-tests" / "scenario
 # quietly matching nothing (a directory glob finding zero new scenarios is not evidence
 # anything is fine — see leak_scan.py's own docstring on that exact failure mode).
 _NO_CASSETTE_ALLOWLIST: dict[str, str] = {
+    "cap-table-handroll-disclosure": (
+        "The `covered: false` hand-roll route, un-cassetted for the same reason as the naturalistic "
+        "lanes: it exercises a LIVE decision (does the agent write the disclosure through the "
+        "producer rather than by heredoc?) that a frozen recording would convert into a replay of "
+        "the one time it went right. Reaching this route at all depends on the coverage registry — "
+        "measured, exactly one combination is uncovered (the declared incompatible note+acquisition "
+        "couple), so if the registry changes this lane silently stops testing what it claims."
+    ),
+    "competitive-positioning-gate1-correction": (
+        "The Gate-1 correction path, un-cassetted by design. It exists to prove that applying a "
+        "founder correction to `landscape_draft.json` PRESERVES the `_produced_by` stamp — a "
+        "whole-file rewrite drops it and reds a compliant run at high severity. That is a live "
+        "model decision about HOW to edit a file; freezing one past run's choice asserts nothing "
+        "about the next one."
+    ),
+    "cap-table-naturalistic": (
+        "NATURALISTIC-PROMPT VARIANT, un-cassetted BY DESIGN (2026-08-31). It pairs with an "
+        "enumerated sibling scenario and exists to measure whether the skill is invoked and driven "
+        "SPONTANEOUSLY from a founder-register prompt that names neither the skill nor the steps. A "
+        "cassette freezes one past agent's behaviour and re-asserts it, which is the opposite of what "
+        "this lane is for: the property under test is a live decision, and a frozen recording would "
+        "convert it into a replay of the one time it happened to go right. Recording also costs a paid "
+        "run and needs explicit approval. Validate with `record --dry-run` and `lint --strict` instead."
+    ),
+    "competitive-positioning-naturalistic": (
+        "NATURALISTIC-PROMPT VARIANT, un-cassetted BY DESIGN (2026-08-31). It pairs with an "
+        "enumerated sibling scenario and exists to measure whether the skill is invoked and driven "
+        "SPONTANEOUSLY from a founder-register prompt that names neither the skill nor the steps. A "
+        "cassette freezes one past agent's behaviour and re-asserts it, which is the opposite of what "
+        "this lane is for: the property under test is a live decision, and a frozen recording would "
+        "convert it into a replay of the one time it happened to go right. Recording also costs a paid "
+        "run and needs explicit approval. Validate with `record --dry-run` and `lint --strict` instead."
+    ),
+    "deck-review-naturalistic": (
+        "NATURALISTIC-PROMPT VARIANT, un-cassetted BY DESIGN (2026-08-31). It pairs with an "
+        "enumerated sibling scenario and exists to measure whether the skill is invoked and driven "
+        "SPONTANEOUSLY from a founder-register prompt that names neither the skill nor the steps. A "
+        "cassette freezes one past agent's behaviour and re-asserts it, which is the opposite of what "
+        "this lane is for: the property under test is a live decision, and a frozen recording would "
+        "convert it into a replay of the one time it happened to go right. Recording also costs a paid "
+        "run and needs explicit approval. Validate with `record --dry-run` and `lint --strict` instead."
+    ),
+    "financial-model-review-naturalistic": (
+        "NATURALISTIC-PROMPT VARIANT, un-cassetted BY DESIGN (2026-08-31). It pairs with an "
+        "enumerated sibling scenario and exists to measure whether the skill is invoked and driven "
+        "SPONTANEOUSLY from a founder-register prompt that names neither the skill nor the steps. A "
+        "cassette freezes one past agent's behaviour and re-asserts it, which is the opposite of what "
+        "this lane is for: the property under test is a live decision, and a frozen recording would "
+        "convert it into a replay of the one time it happened to go right. Recording also costs a paid "
+        "run and needs explicit approval. Validate with `record --dry-run` and `lint --strict` instead."
+    ),
+    "ic-sim-naturalistic": (
+        "NATURALISTIC-PROMPT VARIANT, un-cassetted BY DESIGN (2026-08-31). It pairs with an "
+        "enumerated sibling scenario and exists to measure whether the skill is invoked and driven "
+        "SPONTANEOUSLY from a founder-register prompt that names neither the skill nor the steps. A "
+        "cassette freezes one past agent's behaviour and re-asserts it, which is the opposite of what "
+        "this lane is for: the property under test is a live decision, and a frozen recording would "
+        "convert it into a replay of the one time it happened to go right. Recording also costs a paid "
+        "run and needs explicit approval. Validate with `record --dry-run` and `lint --strict` instead."
+    ),
+    "market-sizing-naturalistic": (
+        "NATURALISTIC-PROMPT VARIANT, un-cassetted BY DESIGN (2026-08-31). It pairs with an "
+        "enumerated sibling scenario and exists to measure whether the skill is invoked and driven "
+        "SPONTANEOUSLY from a founder-register prompt that names neither the skill nor the steps. A "
+        "cassette freezes one past agent's behaviour and re-asserts it, which is the opposite of what "
+        "this lane is for: the property under test is a live decision, and a frozen recording would "
+        "convert it into a replay of the one time it happened to go right. Recording also costs a paid "
+        "run and needs explicit approval. Validate with `record --dry-run` and `lint --strict` instead."
+    ),
     "market-sizing-smoke": (
         "DELIBERATELY UN-CASSETTED as of 2026-08-24 — the cassette was deleted, the scenario kept. Rationale for "
         "the whole batch: a cassette replays FROZEN events and re-evaluates frozen assertions against them, so it "

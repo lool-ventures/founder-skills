@@ -1,0 +1,80 @@
+{
+  "_produced_by": "persist_agent_artifact",
+  "competitors": [
+    {
+      "name": "QuickBooks Online",
+      "slug": "quickbooks-online",
+      "category": "direct",
+      "description": "Market-leading SMB accounting software with broad third-party integrations and accountant-firm distribution.",
+      "key_differentiators": [
+        "Largest SMB install base",
+        "Deep accountant/bookkeeper channel",
+        "Extensive app marketplace"
+      ],
+      "why_included": "Competes for the same SMB bookkeeping budget."
+    },
+    {
+      "name": "Xero",
+      "slug": "xero",
+      "category": "direct",
+      "description": "Cloud accounting platform popular with SMBs and their accountants, strong outside the US.",
+      "key_differentiators": [
+        "Strong bank-feed reconciliation",
+        "Popular with accountants internationally",
+        "Clean UI"
+      ],
+      "why_included": "Competes for the same SMB bookkeeping budget."
+    },
+    {
+      "name": "FreshBooks",
+      "slug": "freshbooks",
+      "category": "adjacent",
+      "description": "Invoicing-first accounting tool aimed at freelancers and very small service businesses rather than full-book SMBs.",
+      "key_differentiators": [
+        "Invoicing-first UX",
+        "Strong for solo/freelance service businesses",
+        "Time tracking built in"
+      ],
+      "why_included": "Competes for the same SMB bookkeeping budget."
+    },
+    {
+      "name": "Pilot.com",
+      "slug": "pilot-com",
+      "category": "emerging",
+      "description": "VC-backed bookkeeping-as-a-service that pairs software with a human bookkeeping team, targeting funded startups.",
+      "key_differentiators": [
+        "Human + software hybrid model",
+        "Targets VC-backed startups specifically",
+        "Handles month-end close end-to-end"
+      ],
+      "why_included": "Competes for the same SMB bookkeeping budget."
+    },
+    {
+      "name": "Manual spreadsheets + bookkeeper",
+      "slug": "manual-spreadsheets",
+      "category": "do_nothing",
+      "description": "Status quo for many pre-seed/seed SMBs: a spreadsheet plus a part-time or outsourced bookkeeper, no dedicated software.",
+      "key_differentiators": [
+        "Zero software cost",
+        "Full control",
+        "No vendor dependency"
+      ],
+      "why_included": "Competes for the same SMB bookkeeping budget."
+    }
+  ],
+  "candidate_axes": [
+    {
+      "x_axis": "Deployment speed",
+      "y_axis": "Workflow depth",
+      "rationale": "Separates fast-to-adopt point tools from deep suites."
+    },
+    {
+      "x_axis": "Price point",
+      "y_axis": "Target segment size",
+      "rationale": "Separates SMB self-serve from mid-market sales-led."
+    }
+  ],
+  "metadata": {
+    "run_id": "fixture-competitive-positioning-001"
+  }
+}

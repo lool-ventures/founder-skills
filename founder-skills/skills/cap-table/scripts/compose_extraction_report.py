@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as _dt
+import importlib.util
 import json
 import os
 import shutil
@@ -582,6 +583,24 @@ def compose_extraction_report(
     return sentinel
 
 
+def _validate_coverage_disclosure(payload: dict[str, Any]) -> list[str]:
+    """Check the extraction-only disclosure against the shared closed schema.
+
+    Reuses `write_coverage_disclosure.validate` rather than copying the logic: a fourth copy
+    of the rules is exactly the drift surface this consolidation exists to remove.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    schema_path = os.path.join(here, "..", "references", "schemas", "coverage-disclosure.schema.json")
+    spec = importlib.util.spec_from_file_location("_wcd", os.path.join(here, "write_coverage_disclosure.py"))
+    if spec is None or spec.loader is None:  # pragma: no cover - import plumbing
+        return []
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    with open(schema_path, encoding="utf-8") as f:
+        schema = json.load(f)
+    return list(mod.validate(payload, schema))
+
+
 def _cli() -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--inputs", required=True, help="Path to inputs.json (per the inputs schema)")
@@ -631,6 +650,21 @@ def _cli() -> int:
     os.makedirs(args.review_dir, exist_ok=True)
 
     md_path = os.path.join(args.review_dir, "report_extraction_only.md")
+    # Validate BEFORE writing anything. Validating just before the disclosure write left
+    # Validate the disclosure payload BEFORE writing anything. This is the third writer of
+    # coverage_disclosure.json and was the only one validating nothing -- compose_report.py
+    # loads the schema, and the hand-roll route goes through write_coverage_disclosure.py.
+    # It runs ahead of the first write on purpose: validating just before the disclosure write
+    # left report_extraction_only.md already on disk when the payload was rejected, i.e. a
+    # partial output dir, which is what the fleet's reject-without-clobbering contract forbids.
+    _disclosure_errors = _validate_coverage_disclosure(sentinel["_coverage_disclosure"])
+    if _disclosure_errors:
+        print(
+            "Error: coverage_disclosure payload does not match its schema: " + "; ".join(_disclosure_errors),
+            file=sys.stderr,
+        )
+        return 1
+
     with open(md_path, "w") as f:
         f.write(sentinel.pop("_report_md"))
     sentinel["extraction_report_path"] = os.path.abspath(md_path)

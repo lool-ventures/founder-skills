@@ -97,5 +97,6 @@
   "accepted_warnings": [],
   "metadata": {
     "run_id": "fixture-competitive-positioning-001"
-  }
+  },
+  "_produced_by": "persist_agent_artifact"
 }

@@ -1,0 +1,48 @@
+name: cap-table-naturalistic
+session: ../sessions/default.yaml
+fidelity: cowork
+on_unanswered: first
+skills: [cap-table]
+
+# NATURALISTIC-PROMPT VARIANT (2026-08-31). Pairs with `cap-table-acquisition.yaml`, which stays as-is.
+#
+# WHY BOTH EXIST. The enumerated sibling is a good PIPELINE regression test and a bad
+# COMPLIANCE test: it pre-walks the agent through the workflow whose SPONTANEOUS execution
+# is the property under test, which structurally cannot fail on the failure. This variant
+# removes the two forms of scaffolding, which fail differently and are therefore separated:
+#   AXIS 1 — step enumeration. No list of what to produce or in what order.
+#   AXIS 2 — skill naming. Measured 2026-08-31 across all 27 scenarios: 18 carried an
+#            explicit "use the <skill> skill" imperative and 26 of 27 named the hyphenated
+#            skill identifier somewhere, leaving exactly ONE scenario in the whole corpus
+#            (cap-table-antihallucination) in which triggering was even in principle
+#            observable. A prompt that names the skill measures the pipeline, never the
+#            decision to invoke it.
+#
+# The CONTRAST between this and its enumerated sibling is the measurement. Do not "fix" a
+# failure here by adding detail back to the prompt — that converts it into its sibling.
+#
+# NOT RECORDED. Authoring a scenario is free; recording costs a paid run and needs explicit
+# approval, and the corpus is already fleet-stale on a baseline move. Validate with
+# `cowork-harness record --dry-run` and `lint --strict`; a cassette comes later, if ever.
+prompt: |
+  We're closing our Series A next month and I want to understand what it does to my ownership
+  before I sign anything.
+
+  Two founders: Alex Stone has 4,000,000 common shares, Sam Lee has 3,500,000. Option pool is
+  1,000,000 authorized with 400,000 issued. We took a $500,000 SAFE from Foobar Capital last
+  year on a $10,000,000 post-money cap, no discount.
+
+  The new round is $4,000,000 at a $16,000,000 pre-money, and they want the pool topped up to
+  10% post-close.
+
+  Full review of the round please.
+
+assert:
+  # `result: success` ALONE CANNOT FAIL ON THE PROPERTY THIS LANE EXISTS FOR. A run in which
+  # the agent never invoked the skill and answered from memory also succeeds -- so the first
+  # draft of this file asserted only that, which is the same "structurally cannot fail on the
+  # failure" defect its own header accuses the enumerated sibling of. All 26 pre-existing
+  # scenarios assert `skill_triggered`; these must too, and here it is the WHOLE POINT rather
+  # than a formality, because triggering from an unscaffolded prompt is what is under test.
+  - result: success
+  - skill_triggered: cap-table

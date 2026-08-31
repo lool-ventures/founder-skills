@@ -1,0 +1,69 @@
+name: competitive-positioning-gate1-correction
+session: ../sessions/default.yaml
+fidelity: cowork
+# `first` for any gate this lane does not script. The default is `fail`, which would hard-error a
+# PAID record on any second gate the skill raises — and this skill raises several (founder context,
+# additions). Only Gate 1 is scripted below; everything else may take its default branch, because
+# the property under test is what happens AFTER a correction, not which other options were chosen.
+on_unanswered: first
+skills: [competitive-positioning]
+
+# GATE-1 MUTATION LANE. Every other competitive-positioning scenario takes Gate 1's PROCEED
+# branch, so the correction path has never run. That path is the one live risk left by the
+# 2026-08-31 provenance change: `landscape_draft.json` is now written through
+# `persist_agent_artifact.py` and carries a `_produced_by` stamp that `compose_report.py` checks
+# at HIGH severity — and SKILL.md separately tells the main thread to "apply all corrections to
+# landscape_draft.json" at this gate. A whole-file rewrite there DROPS the stamp and reds a run
+# that did everything right; an in-place edit keeps it. SKILL.md now says which to do, and this
+# lane is what makes that instruction falsifiable.
+#
+# `on_unanswered` is deliberately ABSENT: this lane must take a NON-first branch, so a silent
+# fallback to option 1 would turn it back into the proceed path it exists to avoid. An unanswered
+# gate fails the run loudly instead, which is the correct outcome for a lane whose whole point is
+# the branch it takes.
+prompt: |
+  I'm the founder of Cadence, a US seed-stage B2B SaaS company selling field-service scheduling
+  and dispatch software to SMB service businesses (HVAC, plumbing, electrical). Use the
+  competitive-positioning skill to map our competitive landscape and moats, then produce the
+  positioning report. Use exactly these four competitors to start: ServiceTitan, Jobber,
+  Housecall Pro, and Calendly.
+
+answers:
+  # FREE TEXT, and the reason matters because an earlier version of this comment got it wrong.
+  # `choose:` is NOT limited to exact labels + first/recommended: upstream documents a leading
+  # SUBSTRING anchor and a 1-based INDEX (`choose: "2"`) as well. The index is the documented way
+  # to pin a non-first branch when labels regenerate. It is still the wrong tool HERE: this fleet
+  # regenerates option ORDER as well as wording, and upstream says the substring form is preferred
+  # precisely because it "survives option re-ordering (it matches content, not slot)" — i.e. the
+  # index does not. With both wording and order moving, neither anchor is reliable, so `answer:`
+  # (Cowork's free-text Other path) is the only order- and label-independent way to state the
+  # correction. That is the reason; "choose can't pattern-match" was not.
+  #
+  # Calendly is a planted false positive (shares the word "scheduling"; schedules meetings for
+  # knowledge workers, no shared buyer or job) — the same plant `competitive-positioning-false-positive`
+  # uses. Naming it here makes the correction deterministic instead of hoping the model volunteers one.
+  # Narrow: "competitor|landscape|set|look" also matched later gates (the additions prompt asks
+  # about competitors too), which would have answered them with the Calendly correction text.
+  - when_question: "competitor set|landscape.*(look|right|correct)|these competitors"
+    answer: "Remove Calendly — it schedules meetings for knowledge workers and does not compete for the same buyer or job. Keep the other three and continue."
+
+assert:
+  - result: success
+  - skill_triggered: '(founder-skills:)?competitive-positioning$'
+  # THE ASSERT THAT MATTERS: after the correction, the stamp must survive. Without it
+  # compose raises UNVALIDATED_ARTIFACT at high severity on correct founder behaviour.
+  - artifact_json:
+      artifact: outputs/artifacts/competitive-positioning-cadence/landscape_draft.json
+      path: _produced_by
+      equals: persist_agent_artifact
+  - file_exists: outputs/artifacts/competitive-positioning-cadence/report.json
+  # And the run must not have been degraded by the correction.
+  - artifact_json:
+      artifact: outputs/artifacts/competitive-positioning-cadence/positioning.json
+      path: _produced_by
+      equals: persist_agent_artifact
+  - no_delete_in_outputs: true
+  - subagent_tool_absent: 'mcp__workspace__bash'
+  - allow_stall: true
+  - gate_answers_delivered: true
+  - gate_answer_count_min: 1

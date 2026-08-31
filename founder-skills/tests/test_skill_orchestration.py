@@ -894,3 +894,95 @@ def test_leak_prone_steps_supply_the_founder_line(skill_md: Path) -> None:
             "Restate it rather than relying on the global narration rule — that rule is already "
             "in the file and these are the sites where it measurably fails."
         )
+
+
+# ---------------------------------------------------------------------------
+# Heredoc quoting: the fleet rule, and cap-table's documented exception.
+#
+# `market-sizing/SKILL.md` states the rule ("always single-quote the delimiter
+# when the body may contain a `$`") because an UNQUOTED delimiter lets the shell
+# expand `$`-bearing values: a literal `$8M` becomes `M` before it reaches the
+# file. cap-table cannot follow it as stated -- its two templated heredocs
+# interpolate `$RUN_ID` / `$(date …)` and MUST stay unquoted -- so the fleet rule
+# read as a rule cap-table silently violated.
+#
+# This ships as a TEST and not a fourth paragraph of prose deliberately. The
+# note at test_skill_md_narration_rule_is_colocated_with_dispatch records that
+# three prose approaches to a *different* guardrail were measured ineffective.
+# That finding is about narration-vocabulary echo, a different failure class
+# from a factual quoting instruction -- but a cheap mechanical check exists here,
+# so there is no reason to rely on wording at all.
+# ---------------------------------------------------------------------------
+
+# BOTH orderings occur in this repo and an earlier version matched only the first, making the
+# escape check a silent no-op for three skills: `cat <<DELIM > "path"` (cap-table, ic-sim,
+# market-sizing) and `cat > "path" <<DELIM` (financial-model-review:735). Delimiters may carry
+# digits. Groups are normalised to (delimiter, target) by _heredocs() below.
+_HEREDOC_A = re.compile(r"cat\s+<<(?P<q>')?(?P<delim>[A-Z][A-Z0-9_]*)(?(q)')\s*>\s*\"(?P<target>[^\"]+)\"")
+_HEREDOC_B = re.compile(r"cat\s*>\s*\"(?P<target>[^\"]+)\"\s*<<(?P<q>')?(?P<delim>[A-Z][A-Z0-9_]*)(?(q)')")
+
+
+def _heredocs(body: str) -> list[tuple[str, str, bool, int]]:
+    """Every `cat`-heredoc in a SKILL.md as (delimiter, target, quoted, match_offset).
+
+    Covers both orderings (see the note on the patterns above). `quoted` is True when the
+    delimiter is single-quoted, i.e. the body does NOT interpolate and a literal `$` is safe.
+    """
+    found: list[tuple[str, str, bool, int]] = []
+    for pattern in (_HEREDOC_A, _HEREDOC_B):
+        for m in pattern.finditer(body):
+            found.append((m.group("delim"), m.group("target"), m.group("q") == "'", m.start()))
+    return found
+
+
+def test_cap_table_documents_its_heredoc_quoting_exception() -> None:
+    """cap-table must carry its own guardrail, since the fleet rule excludes it."""
+    body = (SKILLS_DIR / "cap-table" / "SKILL.md").read_text(encoding="utf-8")
+    assert any(not quoted for _, _, quoted, _off in _heredocs(body)), (
+        "cap-table no longer has an unquoted heredoc — if the templates were converted to "
+        "single-quoted delimiters, delete this test and the guardrail prose with them."
+    )
+    flat = " ".join(body.split()).lower()
+    assert "heredoc guardrail" in flat, (
+        "cap-table/SKILL.md has unquoted heredocs and no heredoc guardrail. The fleet rule lives "
+        "in market-sizing/SKILL.md and is stated absolutely ('always single-quote'), which cap-table "
+        "cannot follow — both its templates must interpolate. State the exception locally."
+    )
+    assert "unquoted" in flat and ("escape" in flat or "escaped" in flat), (
+        "the guardrail must name BOTH halves: that the delimiter is unquoted on purpose, and that "
+        "every literal `$` in a value must therefore be escaped"
+    )
+
+
+@pytest.mark.parametrize("skill", ALL_SKILLS)
+def test_unquoted_heredoc_bodies_escape_literal_dollars(skill: str) -> None:
+    """In an unquoted heredoc, a literal `$` in a VALUE must be written `\\$`.
+
+    The failure is silent and lands in a producer input: `"Series A at $20M pre"`
+    reaches the file as `"Series A at M pre"`, because the shell expands `$20`
+    (unset) and leaves `M`. cap-table's `scenario_requests.json` label feeds the
+    solver, so this is a money-path defect, not a cosmetic one.
+
+    Legitimate interpolations are exempt by construction: `$VAR`, `${VAR}` and
+    `$(cmd)` are what an unquoted delimiter is FOR. What is flagged is `$` followed
+    by a digit -- a dollar amount -- which is never a shell construct anyone means.
+    """
+    body = (SKILLS_DIR / skill / "SKILL.md").read_text(encoding="utf-8")
+    offenders: list[str] = []
+    for delim, target, quoted, at in _heredocs(body):
+        if quoted:
+            continue  # a single-quoted delimiter does not interpolate; `$8M` is safe as written
+        # From the MATCH position, not `body.index(delim)`: index() finds the delimiter's FIRST
+        # occurrence anywhere in the file, so one sentence of prose naming INPUTS_EOF would move
+        # the scan window silently.
+        start = at
+        end = body.find(f"\n{delim}\n", start)
+        assert end != -1, f"{skill}: unterminated heredoc {delim} -> {target}"
+        for raw in body[start:end].splitlines()[1:]:
+            for hit in re.finditer(r"(?<!\\)\$(?=\d)", raw):
+                offenders.append(f"{target}: {raw.strip()[:90]} (col {hit.start()})")
+    assert not offenders, (
+        f"{skill}/SKILL.md: unescaped literal `$<digit>` inside an UNQUOTED heredoc — the shell "
+        "eats it before the file is written. Escape as `\\$`, or move the figure into a numeric "
+        "field.\n  " + "\n  ".join(offenders)
+    )

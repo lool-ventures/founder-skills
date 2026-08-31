@@ -191,21 +191,92 @@ def test_agent_body_forbids_glob_and_guess_recovery(agent: str) -> None:
 # ---------------------------------------------------------------------------
 
 
+# Anchors bounding the Context A gate branch table. VERIFIED across all six before
+# being written here, which is the step two drafts of this change skipped:
+#   * `_CTX_A_OPEN` is present in all six. cap-table's copy is UNBOLDED while the other
+#     five are bolded, so the pattern must not require `**`.
+#   * The heading `### Context A hand-off protocol (file transport + gate)` is NOT usable:
+#     it exists in five and cap-table has none (its only match is a cross-reference). A
+#     naive `^#` fallback there matches bash comments inside a fenced block.
+#   * `_CTX_A_CLOSE` occurs twice per file (Context A and Context B); the FIRST occurrence
+#     after the open anchor is the Context A one.
+_CTX_A_OPEN = re.compile(r"After EVERY Context A dispatch, gate before piping")
+_CTX_A_CLOSE = re.compile(r"\*\*Retry budget:\*\*")
+
+
+def _context_a_gate_block(body: str, skill: str) -> str:
+    """The Context A gate branch table, bounded by two verified anchors.
+
+    Block-bounded rather than character-windowed (see the whole-file note above:
+    a fixed offset stops checking once its target moves) and rather than
+    whole-file (the token being asserted already occurs in Context B, so a
+    whole-file positive would pass pre-fix — measured).
+    """
+    lines = body.splitlines()
+    opens = [i for i, ln in enumerate(lines) if _CTX_A_OPEN.search(ln)]
+    assert len(opens) == 1, f"{skill}: expected exactly 1 Context A gate anchor, found {len(opens)}"
+    closes = [i for i, ln in enumerate(lines) if i > opens[0] and _CTX_A_CLOSE.search(ln)]
+    assert closes, f"{skill}: no `**Retry budget:**` after the Context A gate anchor"
+    block = "\n".join(lines[opens[0] : closes[0]])
+    # A guard that can silently empty itself is the vacuity class this file exists to
+    # prevent: assert the block is substantive, not merely that it was located.
+    assert len(block.splitlines()) >= 10, f"{skill}: Context A gate block is only {len(block.splitlines())} lines"
+    assert "check_handoff.py" in block, f"{skill}: located block is not the gate table"
+    return block
+
+
+@pytest.mark.parametrize("skill", SKILLS)
+def test_context_a_gate_table_documents_exit_8(skill: str) -> None:
+    """Exit 8 must have a branch in the CONTEXT A table, not only in Context B.
+
+    Exit 8 is the branch Context A was written for: Context A is where `OUTPUT_PATH`
+    is built from `$HANDOFF_AGENT`, i.e. where the doubled-agent-namespace-prefix
+    condition actually occurs. Measured before this test existed, all six Context A
+    tables listed 0/3/4/5/6 and stopped — so a Context A exit 8 fell through to
+    `- **Any other exit** ... -> STOP with the stderr`, halting the run over a
+    condition `check_handoff.py`'s own diagnostic says is recoverable ("the agent
+    complied; re-dispatch with the corrected prefix").
+
+    Exit 7's absence from Context A is CORRECT and deliberately not asserted here:
+    `EXIT_SHAPE_INVALID` is raised only inside `if args.format == "markdown"`, which
+    is Context B's invocation.
+    """
+    block = _context_a_gate_block(_skill(skill), skill).lower()
+    assert "exit 8" in block, (
+        f"{skill}: the Context A gate table does not document exit 8. It is the branch this "
+        "code path exists for, and without a row it falls to 'any other exit -> STOP'."
+    )
+    assert "found_at" in block, f"{skill}: the Context A exit-8 branch must name found_at"
+    assert "do not read" in block or "never read" in block, (
+        f"{skill}: the Context A exit-8 branch MUST forbid reading the hand-off from found_at"
+    )
+
+
 @pytest.mark.parametrize("skill", SKILLS)
 def test_exit_8_branch_present_and_read_only(skill: str) -> None:
+    """Every exit-8 branch in the file must forbid reading the hand-off from `found_at`.
+
+    REWRITTEN 2026-08-31. This used to do `body.find("path_namespace_mismatch")` and
+    slice a 900-char window from the FIRST occurrence. That was safe only while the
+    token appeared exactly once per file (Context B). Adding the Context A branch made
+    `find()` return the new, earlier occurrence — so the test would either red, or
+    (worse) pass while silently ceasing to check the Context B branch it was written
+    to guard. It now iterates EVERY occurrence, which is also what removes the
+    fixed-offset window this file's own whole-file note argues against.
+    """
     body = _skill(skill)
-    assert "path_namespace_mismatch" in body, f"{skill}: no exit-8 branch in the hand-off state machine"
-    # locate the branch text and assert it forbids reading from found_at
-    idx = body.find("path_namespace_mismatch")
-    branch = body[idx : idx + 900].lower()
-    assert "found_at" in branch, f"{skill}: the exit-8 branch must name found_at"
-    assert "do not read" in branch or "never read" in branch, (
-        f"{skill}: the exit-8 branch MUST forbid reading the hand-off from found_at — it is a "
-        "diagnostic, and honouring it would silently break the exit-0 path contract"
-    )
-    assert "re-dispatch" in branch, (
-        f"{skill}: the exit-8 recovery is a re-dispatch with the corrected prefix, not a read"
-    )
+    starts = [m.start() for m in re.finditer("path_namespace_mismatch", body)]
+    assert len(starts) >= 2, f"{skill}: expected an exit-8 branch in BOTH Context A and Context B, found {len(starts)}"
+    for n, idx in enumerate(starts, 1):
+        branch = body[idx : idx + 900].lower()
+        assert "found_at" in branch, f"{skill}: exit-8 branch #{n} must name found_at"
+        assert "do not read" in branch or "never read" in branch, (
+            f"{skill}: exit-8 branch #{n} MUST forbid reading the hand-off from found_at — it is a "
+            "diagnostic, and honouring it would silently break the exit-0 path contract"
+        )
+        assert "re-dispatch" in branch, (
+            f"{skill}: exit-8 branch #{n} recovery is a re-dispatch with the corrected prefix, not a read"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -293,4 +364,74 @@ def test_anti_substitution_framing_is_in_description_too(skill: str) -> None:
     assert any(t in desc for t in family), (
         f"{skill}: the anti-substitution framing must appear in `description`, not only in "
         "`when_to_use` — Desktop's discovery scanner never reads when_to_use"
+    )
+
+
+# Context B's gate table. Its heading is NOT stable across the six (competitive-positioning
+# uses "### Step 7: Compose, Validate, and Post-Compose Coaching", step numbers run 7/8/8c/10/11,
+# and market-sizing punctuates POST_COMPOSE_COACHING differently), so bound on the invocation
+# itself, which every skill shares.
+_CTX_B_OPEN = re.compile(r"check_handoff\.py --format=markdown|--format=markdown`\) verifies")
+_CTX_B_CLOSE = re.compile(r"\*\*Retry budget:\*\*")
+
+
+def _context_b_gate_block(body: str, skill: str) -> str:
+    lines = body.splitlines()
+    opens = [i for i, ln in enumerate(lines) if _CTX_B_OPEN.search(ln)]
+    assert opens, f"{skill}: no Context B gate anchor (`--format=markdown`)"
+    start = opens[-1]
+    closes = [i for i, ln in enumerate(lines) if i > start and _CTX_B_CLOSE.search(ln)]
+    assert closes, f"{skill}: no `**Retry budget:**` after the Context B gate anchor"
+    block = "\n".join(lines[start : closes[0]])
+    assert len(block.splitlines()) >= 5, f"{skill}: Context B gate block is only {len(block.splitlines())} lines"
+    assert "insert_coaching.py" in block, f"{skill}: located block is not the Context B gate table"
+    return block
+
+
+@pytest.mark.parametrize("skill", SKILLS)
+def test_context_b_gate_table_has_a_catch_all(skill: str) -> None:
+    """Context B must carry an `Any other exit` row. Context A always had one; Context B had none.
+
+    Two exits reach Context B with no dedicated row, and both were undocumented there:
+
+      * exit 4 (`EXIT_BAD_JSON`) is raised in the `except OSError` around the file READ, which
+        sits BEFORE the `--format` split -- so it is not json-mode-only, as the `--format` help
+        text can be misread to imply. Gate 1 has already confirmed the file exists and is
+        non-empty, so it fires on an IO/permission fault on a file that just stat'd clean.
+      * invalid UTF-8 raises `UnicodeDecodeError`, which nothing catches at all: it surfaces as a
+        traceback, i.e. an exit no typed row describes.
+
+    An exit-4 row alone would not cover the second. The catch-all covers both, which is why the
+    remediation chose it over the narrower edit.
+    """
+    block = _context_b_gate_block(_skill(skill), skill).lower()
+    assert "any other exit" in block, (
+        f"{skill}: the Context B gate table has no catch-all row. Context A's table ends with one; "
+        "without it, an exit with no dedicated row (exit 4 on an IO fault, or an uncaught decode "
+        "error) leaves the main thread with no documented branch at all."
+    )
+
+
+@pytest.mark.parametrize("doc", COMMENTARY_ENVELOPE_GUARDED, ids=lambda p: p.stem)
+def test_no_document_asserts_the_unscoped_canonical_writer_claim(doc: Path) -> None:
+    """No agent body or shared reference may say canonical artifacts are producer-script-only.
+
+    The claim is FALSE as a statement about the system: the main thread writes several canonical
+    artifacts by heredoc (market-sizing's methodology/validation, ic-sim's startup_profile and
+    prior_artifacts, cap-table's inputs and scenario_requests, fmr's commentary). It appeared in
+    22 places as the JUSTIFICATION for a correct sub-agent instruction ("write only OUTPUT_PATH"),
+    which is how a false general claim survives review — the rule it supports is right, so nobody
+    re-reads the reason.
+
+    The sub-agent-scoped form ("you never write a canonical artifact") is true and is what the
+    instruction actually needs. This guards the file set where the claim can do damage: agent
+    bodies, which a sub-agent loads wholesale, and the shared reference, which contributors read
+    as the source of truth. It deliberately does NOT scan SKILL.md dispatch templates — the same
+    rescoping was applied there, but a fleet-wide ban would red on any future legitimate
+    discussion of the producer contract in main-thread prose.
+    """
+    assert "producer-script-only" not in doc.read_text(encoding="utf-8"), (
+        f"{doc.name} asserts that canonical artifacts are producer-script-only. They are not — "
+        "the main thread writes several by heredoc. Scope the claim to the sub-agent instead: "
+        '"you never write a canonical artifact".'
     )

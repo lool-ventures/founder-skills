@@ -239,8 +239,8 @@ computes the summary):
 
 - Write your output JSON ONLY to the exact `OUTPUT_PATH` from your prompt
   (create it with your Write tool; on a repair dispatch, rewrite the same
-  path). Do not write artifacts anywhere else — canonical artifacts are
-  producer-script-only.
+  path). Do not write artifacts anywhere else — you never write a canonical
+  artifact; the main thread persists them.
 - Your final assistant message is ONLY the receipt:
   `{"status": "complete", "output_path": "<echo of OUTPUT_PATH>"}` — no
   prose, no markdown wrapper. If your prompt carries no `OUTPUT_PATH:` line

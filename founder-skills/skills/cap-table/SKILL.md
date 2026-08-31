@@ -216,14 +216,24 @@ For covered deals, `compose_report.py` writes `coverage_disclosure.json` (with `
 When `uncovered_parts` is non-empty, the deal combines primitives the engine does not fully handle. You may produce numbers manually, but:
 
 1. **Build manually from rule-pack formulas** — cite each `rule_id` explicitly so the math is traceable.
-2. **Write `coverage_disclosure.json`** into `$REVIEW_DIR/` by heredoc:
+2. **Write `coverage_disclosure.json` through `write_coverage_disclosure.py`** — stage the JSON in `$STAGING_DIR` (the `/tmp` scratch dir from Step 0), then:
+   ```bash
+   cat "$STAGING_DIR/disclosure.json" | python3 "$SCRIPTS/write_coverage_disclosure.py" \
+     -o "$REVIEW_DIR/coverage_disclosure.json" --run-id "$RUN_ID" --pretty
+   ```
+   **`uncovered_parts` is an array of STRINGS, not the raw detection objects.** The detection
+   output gives you `{"combination": [...], "reason": "..."}` entries; flatten each to
+   `"<a> + <b>: <reason>"` as shown. The schema is closed and the producer rejects a list of
+   objects (`uncovered_parts[0]: expected type string, got dict`).
+
+   **Do NOT heredoc it straight into `$REVIEW_DIR`.** The disclosure form is CLOSED: the producer rejects an unknown key, because the failure it exists to catch is a hand-authored *richer* schema than the template, not a missing field. If it rejects, the pipe fails and `$REVIEW_DIR` is untouched — fix the staged JSON. The payload:
    ```json
    {
      "schema_version": "v0.1-coverage-disclosure",
      "covered": false,
      "computation_method": "manual_outside_pipeline",
      "required_primitives": ["<from detection output>"],
-     "uncovered_parts": ["<from detection output>"],
+     "uncovered_parts": ["note_conversion + acquisition_consideration: declared incompatible"],
      "counsel_review": true
    }
    ```
@@ -414,6 +424,7 @@ as omitting it originally:*
 - **Exit 5** (receipt echoes a different path) → **repair-dispatch** with the exact expected OUTPUT_PATH.
 - **Exit 6** (receipt unparseable / no `output_path` key) → **redo-dispatch** with "return ONLY the receipt JSON — no fences, no prose."
 - **Validator schema rejection** (the pipe fails next) → **repair-dispatch** with the validator's stderr verbatim. (Evidence-verifier rejections keep their OWN lane-specific protocol — `retry_hint` re-dispatch — which is a content correction, not a transport correction, and does not consume the transport retry budget.)
+- **Exit 8** (`path_namespace_mismatch`) → the sub-agent **complied**; the agent-namespace prefix was wrong. Its relative `OUTPUT_PATH` resolved against the outputs mount instead of the session root, so the file landed at the doubled path reported in `found_at`. Do NOT treat this as a fabricated receipt (that is exit 3), and do NOT read the hand-off from `found_at` — it is diagnostic only. Re-run `resolve_artifacts_root.py --agent`, rebuild the agent-namespace prefix from the printed value, and re-dispatch. Counts against the same 2-dispatch retry budget.
 - **Any other exit** (script crash etc.) → STOP with the stderr.
 - **After ANY corrective dispatch, resume from `check_handoff.py`** — never pipe unchecked.
 
@@ -564,6 +575,8 @@ python3 "$SCRIPTS/compose_extraction_report.py" \
 — which writes `report_extraction_only.md` (an instrument-terms report carrying a prominent "instrument terms only — no cap base modeled" banner), the `extraction_only.json` sentinel, and `coverage_disclosure.json` (`computation_method: "extraction_only"`), and does NOT invoke `cap_state.py`/`rule_audit.py`/`compose_report.py`. To cite a specific rule for the instrument without the pipeline, use `verify_one.py --rule-lookup <rule_id>`.
 
 **Then jump to Step 12, extraction-only branch.** `report_extraction_only.md` is this route's ONLY deliverable — finishing without handing it over leaves the founder nothing. Its source dir is `$ARTIFACTS_ROOT/cap-table-$SLUG-extraction`, **not** `$REVIEW_DIR`.
+
+**Heredoc guardrail — cap-table's exception, and the obligation it carries.** The two templated heredocs in this file (`inputs.json` here, `scenario_requests.json` at Step 5) use an **UNQUOTED** delimiter on purpose: both bodies interpolate (`$RUN_ID`, `$(date -u …)`). That is the opposite of the fleet default — every other skill single-quotes its delimiter so a literal dollar amount like `$8M` cannot shell-expand away (`$8` reads as a variable, `M` is left dangling). **Because the delimiter is unquoted here, every literal `$` in a VALUE must be escaped `\$`** — a founder-supplied label such as `Series A at $20M pre` silently becomes `Series A at M pre` otherwise, and in `scenario_requests.json` that value feeds the solver. Escape it, or restructure so the figure lives in a numeric field rather than a label. If you improvise a heredoc whose body needs no expansion, single-quote the delimiter and the question does not arise.
 
 ```bash
 cat <<INPUTS_EOF > "$REVIEW_DIR/inputs.json"
@@ -1074,6 +1087,7 @@ The gate (`check_handoff.py --format=markdown`) verifies the sub-agent's hand-of
 - **Exit 6** (receipt unparseable / no `output_path` key) → **redo-dispatch** with "return ONLY the receipt JSON — no fences, no prose." (A `status: "blocked"` final message is NOT exit 6 — it was handled before the gate.)
 - **Exit 7** (content-shape gate failed — receipt-shaped or marker-bearing file) → **repair-dispatch**: "your file wasn't the coaching commentary — write the coaching markdown, nothing else, to `<OUTPUT_PATH>`."
 - **Exit 8** (`path_namespace_mismatch`) → the sub-agent **complied**; the agent-namespace prefix was wrong. Its relative `OUTPUT_PATH` resolved against the outputs mount instead of the session root, so the file landed at the doubled path reported in `found_at`. Do NOT treat this as a fabricated receipt, and do NOT read the hand-off from `found_at` — re-dispatch with the corrected agent-namespace prefix (re-run `resolve_artifacts_root.py --agent` and rebuild `<HANDOFF_AGENT>` from the printed value). Counts against the same 2-dispatch retry budget.
+- **Any other exit** (script crash, unreadable file, invalid UTF-8) → STOP with the stderr. `check_handoff.py` exit 4 is reachable here too: gate 1 already confirmed the file exists and is non-empty, so a failure opening it afterwards is an IO/permission fault, not a malformed hand-off. A decode error raises before any typed exit and surfaces as a traceback.
 - **`insert_coaching.py` exit 1** (blocked; stdout carries `{"status": "blocked", "reason": ...}`) → stop and report the exact reason. Do NOT hand-edit `report.md` — if the reason mentions a truncated report or a missing marker, re-run `compose_report.py --write-md` and retry the chain. If the reason is `commentary_markdown missing or empty`, treat as a malformed hand-off: repair-dispatch quoting the reason.
 - **After ANY corrective dispatch, resume from the gate chain** — never feed the transform+insert pipe an ungated file.
 

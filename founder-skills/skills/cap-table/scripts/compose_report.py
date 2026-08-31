@@ -1770,6 +1770,187 @@ def main() -> int:
     )
 
     # Build report.md
+    # ORDERING IS LOAD-BEARING: this block must run BEFORE render_report_markdown, which
+    # snapshots `validation_warnings` into the founder-facing markdown. Appending after the
+    # render leaves a high-severity finding in report.json and NOWHERE a founder looks --
+    # which is what shipped when these two codes were first added.
+    # Write coverage_disclosure.json.
+    #
+    # `covered` USED TO BE HARDCODED `True` here, on the reasoning that reaching compose means
+    # the deterministic pipeline ran. A live run disproved it: on a note + share-acquisition
+    # deal `detect_structure.py` wrote `coverage_result.json` with `covered: false`, the agent
+    # ran the pipeline anyway, and compose asserted `covered: true` -- a false statement in a
+    # founder-facing disclosure, beside the artifact contradicting it. That is the "a sidecar
+    # needs a downstream reader" rule: the detection verdict was read by NOTHING.
+    #
+    # RUN_ID PARITY IS PART OF THAT RULE AND WAS MISSED THE FIRST TIME. The same CLAUDE.md note
+    # continues: "key it on absence alone and a prior run's file silences it, so compare
+    # run_ids." Without it a stale disclosure pins every later compose to the hand-roll claim
+    # FOREVER -- self-sustaining, because the file compose writes re-triggers it next run, and
+    # unrecoverable, because the outputs mount denies delete.
+    def _read_run_scoped(path: str, label: str) -> dict[str, Any] | None:
+        """Load a sibling artifact, ignoring one left behind by a DIFFERENT run."""
+        if not os.path.exists(path):
+            return None
+        try:
+            with open(path, encoding="utf-8") as _f:
+                _obj = json.load(_f)
+        except (OSError, json.JSONDecodeError, ValueError) as _exc:
+            validation_warnings.append(
+                {
+                    "code": "COVERAGE_ARTIFACT_UNREADABLE",
+                    "severity": "medium",
+                    "message": (
+                        f"{label} exists but could not be read ({_exc.__class__.__name__}); "
+                        f"this compose fell back to its default coverage claim"
+                    ),
+                }
+            )
+            return None
+        if not isinstance(_obj, dict):
+            validation_warnings.append(
+                {
+                    "code": "COVERAGE_ARTIFACT_UNREADABLE",
+                    "severity": "medium",
+                    "message": (f"{label} is not a JSON object; this compose fell back to its default coverage claim"),
+                }
+            )
+            return None
+        _rid = _obj.get("run_id")
+        if not isinstance(_rid, str):
+            _meta = _obj.get("metadata")
+            _rid = _meta.get("run_id") if isinstance(_meta, dict) else None
+        if isinstance(_rid, str) and _rid and args.run_id and _rid != args.run_id:
+            validation_warnings.append(
+                {
+                    "code": "STALE_ARTIFACT",
+                    "severity": "high",
+                    "message": (
+                        f"{label} is from an earlier run and was ignored by this one. Re-run the "
+                        f"coverage step for the current engagement rather than trusting it."
+                    ),
+                }
+            )
+            return None
+        return _obj
+
+    _detected_covered: bool | None = None
+    _uncovered_parts: list[Any] = []
+    _cov = _read_run_scoped(
+        os.path.join(os.path.abspath(args.dir), "coverage_result.json"), "the coverage detection result"
+    )
+    if _cov is not None:
+        if isinstance(_cov.get("covered"), bool):
+            _detected_covered = _cov["covered"]
+            # Guard the TYPE, not just truthiness: a bare string here would iterate per
+            # CHARACTER and a number would raise. Both were reachable.
+            _raw_parts = _cov.get("uncovered_parts")
+            _uncovered_parts = _raw_parts if isinstance(_raw_parts, list) else []
+        else:
+            # Fails CLOSED. The previous version fell through to the covered default for every
+            # shape that was not dict+bool -- including `"covered": "false"`, the most plausible
+            # malformation and exactly the class this block exists to catch.
+            validation_warnings.append(
+                {
+                    "code": "COVERAGE_ARTIFACT_UNREADABLE",
+                    "severity": "medium",
+                    "message": (
+                        "the coverage detection result carries no boolean coverage verdict; this "
+                        "compose fell back to its default claim. Re-run the coverage step."
+                    ),
+                }
+            )
+
+    def _describe_uncovered(part: Any) -> str:
+        """Name WHAT is uncovered, not only why.
+
+        Measured across all 127 registry subsets, every uncovered part carries the same reason
+        string ("declared incompatible"), so a reason-only rendering told the founder their deal
+        was incompatible without ever saying incompatible with what.
+        """
+        if not isinstance(part, dict):
+            return str(part)
+        _reason = part.get("reason", "not covered")
+        _combo = part.get("combination")
+        if isinstance(_combo, list) and _combo:
+            return f"{' + '.join(str(c) for c in _combo)}: {_reason}"
+        if part.get("primitive"):
+            return f"{part['primitive']}: {_reason}"
+        return str(_reason)
+
+    _coverage_disclosure: dict[str, Any] = {
+        "schema_version": "v0.1-coverage-disclosure",
+        "covered": True if _detected_covered is None else _detected_covered,
+        "computation_method": "deterministic_pipeline",
+        "reconciliation": {
+            "status": _recon_status,
+            "max_divergence_ppm": _max_ppm,
+        },
+    }
+    if _detected_covered is False:
+        _coverage_disclosure["uncovered_parts"] = [_describe_uncovered(p) for p in _uncovered_parts]
+        _coverage_disclosure["counsel_review"] = True
+        validation_warnings.append(
+            {
+                "code": "COVERAGE_ROUTE_MISMATCH",
+                "severity": "high",
+                "message": (
+                    "the engine produced these figures, but structure detection found this deal "
+                    "combines primitives the engine does not fully cover "
+                    f"({len(_uncovered_parts)} uncovered part(s)). The disclosure now records "
+                    "this deal as not fully covered. Re-check the routing: the not-covered branch "
+                    "is a manual computation with a provisional banner and counsel items, not an "
+                    "engine run."
+                ),
+            }
+        )
+
+    _disclosure_schema = _artifact_writer.load_schema(os.path.join(_SCHEMA_DIR, "coverage-disclosure.schema.json"))
+    _disclosure_path = os.path.join(os.path.abspath(args.dir), "coverage_disclosure.json")
+
+    # DO NOT DOWNGRADE A HAND-ROLL DISCLOSURE -- AND PRESERVE ALL OF IT, NOT JUST THE METHOD.
+    #
+    # This artifact has TWO writers: `write_coverage_disclosure.py` for the covered:false
+    # hand-roll, and this block. Measured in a live run, the agent wrote the hand-roll
+    # disclosure and then ran the pipeline, and compose overwrote it -- handing the founder the
+    # LESS cautionary of two statements about their own numbers.
+    #
+    # The first fix carried `computation_method` across and rebuilt everything else from
+    # scratch, which destroyed `uncovered_parts`, `required_primitives` and `manual_artifacts`
+    # -- producing a disclosure that `write_coverage_disclosure.py` would itself REFUSE to
+    # write ("a hand-roll disclosure that names no uncovered primitive tells the founder
+    # nothing"). Start from the prior document and overlay only what THIS compose knows.
+    _prior = _read_run_scoped(_disclosure_path, "the existing coverage disclosure")
+    if _prior is not None and _prior.get("computation_method") == "manual_outside_pipeline":
+        _coverage_disclosure = {
+            **_prior,
+            "reconciliation": {"status": _recon_status, "max_divergence_ppm": _max_ppm},
+            "computation_method": "manual_outside_pipeline",
+            "covered": False,
+            "counsel_review": True,
+        }
+        validation_warnings.append(
+            {
+                "code": "DISCLOSURE_ROUTE_COLLISION",
+                "severity": "high",
+                "message": (
+                    "a hand-rolled coverage disclosure was already written for this engagement "
+                    "-- figures produced manually, outside the validated engine -- and the "
+                    "engine then ran as well. The hand-rolled disclosure is PRESERVED: figures "
+                    "computed by hand do not become engine-produced because the engine ran "
+                    "afterwards. Only one route should run; re-check the coverage branch taken."
+                ),
+            }
+        )
+
+    _artifact_writer.write_artifact(
+        data=_coverage_disclosure,
+        schema=_disclosure_schema,
+        run_id=args.run_id,
+        output_path=_disclosure_path,
+        pretty=args.pretty,
+    )
+
     report_md = render_report_markdown(
         artifacts=artifacts,
         validation_warnings=validation_warnings,
@@ -1847,26 +2028,6 @@ def main() -> int:
         with open(md_path, "w", encoding="utf-8") as f:
             f.write(report_md)
 
-    # Write coverage_disclosure.json (deterministic pipeline = covered path)
-    _coverage_disclosure: dict[str, Any] = {
-        "schema_version": "v0.1-coverage-disclosure",
-        "covered": True,
-        "computation_method": "deterministic_pipeline",
-        "reconciliation": {
-            "status": _recon_status,
-            "max_divergence_ppm": _max_ppm,
-        },
-    }
-    _disclosure_schema = _artifact_writer.load_schema(os.path.join(_SCHEMA_DIR, "coverage-disclosure.schema.json"))
-    _disclosure_path = os.path.join(os.path.abspath(args.dir), "coverage_disclosure.json")
-    _artifact_writer.write_artifact(
-        data=_coverage_disclosure,
-        schema=_disclosure_schema,
-        run_id=args.run_id,
-        output_path=_disclosure_path,
-        pretty=args.pretty,
-    )
-
     # Assemble report.json (pre-coaching markdown + coaching_payload)
     report_json: dict[str, Any] = {
         "report_markdown": report_md,
@@ -1918,7 +2079,17 @@ def main() -> int:
 
     # --strict exits 1 on any high-severity warning (MISSING_METADATA + STALE_ARTIFACT, plus the
     # circular-reconciliation false-green guard — see build_reconciliation_provenance_warnings).
-    high_severity_codes = {"MISSING_METADATA", "STALE_ARTIFACT", "E_CIRCULAR_RECONCILIATION"}
+    # `--strict` gates on THIS SET, not on the `severity` field. A code carrying
+    # `severity: "high"` and absent here fails nothing -- which is exactly what shipped when
+    # COVERAGE_ROUTE_MISMATCH and DISCLOSURE_ROUTE_COLLISION were added. Add a new high code
+    # here in the same edit that creates it.
+    high_severity_codes = {
+        "MISSING_METADATA",
+        "STALE_ARTIFACT",
+        "E_CIRCULAR_RECONCILIATION",
+        "COVERAGE_ROUTE_MISMATCH",
+        "DISCLOSURE_ROUTE_COLLISION",
+    }
     if args.strict and any(w.get("code") in high_severity_codes for w in validation_warnings):
         return 1
     return 0

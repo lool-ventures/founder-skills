@@ -1,0 +1,72 @@
+name: cap-table-handroll-disclosure
+session: ../sessions/default.yaml
+fidelity: cowork
+on_unanswered: first
+skills: [cap-table]
+
+# THE `covered: false` HAND-ROLL ROUTE — the only route whose disclosure artifact had no producer
+# until 2026-08-31, and the route the 2026-07-05 incident drove through (the agent hand-authored
+# `coverage_disclosure.json` with an ad-hoc RICHER schema than SKILL.md's template).
+#
+# HOW THIS PROMPT REACHES IT, because it is not obvious and was measured rather than guessed.
+# `detect_structure.py` maps the deal to primitives, then `_coverage_registry.is_covered()` decides.
+# Every primitive in the registry is `completeness: full` except `flip` (structural_only, combinable
+# with priced_round), and `_round_like()` filters out everything `priced_round` couples — so the
+# obvious "hard" deals all come back COVERED, including the 2026-07-05 shape itself
+# (SAFE + acquisition + flip + priced = covered). Measured across the registry, exactly ONE
+# combination is reachable and uncovered: the declared incompatible couple
+#   priced_round.incompatible_couples = [["note_conversion", "acquisition_consideration"]]
+# i.e. a CONVERTIBLE NOTE plus a share-consideration ACQUISITION. Hence this prompt. If the registry
+# ever marks that couple compatible, this lane stops testing what it says it does — re-derive with
+# `is_covered(["note_conversion","acquisition_consideration","priced_round"], load_registry())`.
+prompt: |
+  I'm raising a Series A for Cadence, a US Delaware C-corp (field-service scheduling SaaS), and
+  I need the full cap-table review before we sign.
+
+  Cap table today:
+  - Founder Alex Stone: 4,500,000 common shares
+  - Founder Sam Lee: 3,000,000 common shares
+  - Option pool: 1,200,000 authorized, 600,000 issued, 600,000 unallocated
+
+  Outstanding instrument: one convertible note from Foobar Capital — $750,000 principal, 6%
+  simple interest, issued 2025-03-01, $12,000,000 valuation cap, 20% discount, maturing
+  2027-03-01.
+
+  Concurrent acquisition: as part of this closing we are acquiring TargetCo Ltd, whose
+  shareholders receive 15% of our fully-diluted post-closing cap table in shares.
+
+  Incoming round: $5,000,000 of new money at an $18,000,000 pre-money valuation.
+
+answers:
+  - when_question: "jurisdiction structure"
+    choose: "Delaware (already flipped)"
+  - when_question: "IIA"
+    choose: "No IIA grants"
+
+assert:
+  - result: success
+  - skill_triggered: '(founder-skills:)?cap-table$'
+  # THE POINT OF THE LANE: the hand-roll disclosure exists and declares the manual route.
+  - file_exists: outputs/artifacts/cap-table-cadence/coverage_disclosure.json
+  - artifact_json:
+      artifact: outputs/artifacts/cap-table-cadence/coverage_disclosure.json
+      path: covered
+      equals: false
+  - artifact_json:
+      artifact: outputs/artifacts/cap-table-cadence/coverage_disclosure.json
+      path: computation_method
+      equals: manual_outside_pipeline
+  # The schema is CLOSED, so a hand-authored richer payload cannot validate. Pin the version
+  # rather than the absence of extra keys, which no assert key can express.
+  - artifact_json:
+      artifact: outputs/artifacts/cap-table-cadence/coverage_disclosure.json
+      path: schema_version
+      equals: v0.1-coverage-disclosure
+  # SKILL.md requires the provisional banner alongside the artifact; without it a founder reads
+  # hand-rolled figures as pipeline output.
+  - transcript_matches: '(provisional|outside the validated|confirm with counsel)'
+  - no_delete_in_outputs: true
+  - subagent_tool_absent: 'mcp__workspace__bash'
+  - allow_stall: true
+  - gate_answers_delivered: true
+  - gate_answer_count_min: 1

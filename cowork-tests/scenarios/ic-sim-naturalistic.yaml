@@ -1,0 +1,42 @@
+name: ic-sim-naturalistic
+session: ../sessions/default.yaml
+fidelity: cowork
+on_unanswered: first
+skills: [ic-sim]
+
+# NATURALISTIC-PROMPT VARIANT (2026-08-31). Pairs with `ic-sim-smoke.yaml`, which stays as-is.
+#
+# WHY BOTH EXIST. The enumerated sibling is a good PIPELINE regression test and a bad
+# COMPLIANCE test: it pre-walks the agent through the workflow whose SPONTANEOUS execution
+# is the property under test, which structurally cannot fail on the failure. This variant
+# removes the two forms of scaffolding, which fail differently and are therefore separated:
+#   AXIS 1 — step enumeration. No list of what to produce or in what order.
+#   AXIS 2 — skill naming. Measured 2026-08-31 across all 27 scenarios: 18 carried an
+#            explicit "use the <skill> skill" imperative and 26 of 27 named the hyphenated
+#            skill identifier somewhere, leaving exactly ONE scenario in the whole corpus
+#            (cap-table-antihallucination) in which triggering was even in principle
+#            observable. A prompt that names the skill measures the pipeline, never the
+#            decision to invoke it.
+#
+# The CONTRAST between this and its enumerated sibling is the measurement. Do not "fix" a
+# failure here by adding detail back to the prompt — that converts it into its sibling.
+#
+# NOT RECORDED. Authoring a scenario is free; recording costs a paid run and needs explicit
+# approval, and the corpus is already fleet-stale on a baseline move. Validate with
+# `cowork-harness record --dry-run` and `lint --strict`; a cassette comes later, if ever.
+prompt: |
+  Cadence is a US Delaware C-corp, seed stage, selling field-service scheduling software to small
+  HVAC and plumbing businesses. Two technical founders, $40k MRR growing about 12% a month,
+  raising $3,000,000 at a $15,000,000 pre-money.
+
+  What would a VC partnership actually say about us behind closed doors?
+
+assert:
+  # `result: success` ALONE CANNOT FAIL ON THE PROPERTY THIS LANE EXISTS FOR. A run in which
+  # the agent never invoked the skill and answered from memory also succeeds -- so the first
+  # draft of this file asserted only that, which is the same "structurally cannot fail on the
+  # failure" defect its own header accuses the enumerated sibling of. All 26 pre-existing
+  # scenarios assert `skill_triggered`; these must too, and here it is the WHOLE POINT rather
+  # than a formality, because triggering from an unscaffolded prompt is what is under test.
+  - result: success
+  - skill_triggered: ic-sim

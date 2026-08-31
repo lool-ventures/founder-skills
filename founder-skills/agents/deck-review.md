@@ -165,8 +165,8 @@ State what is true of the DECK.
 
 - Write your output JSON ONLY to the exact `OUTPUT_PATH` from your prompt
   (create it with your Write tool; on a repair dispatch, rewrite the same
-  path). Do not write artifacts anywhere else — canonical artifacts are
-  producer-script-only.
+  path). Do not write artifacts anywhere else — you never write a canonical
+  artifact; the main thread persists them.
 - Every string value must be JSON-escaped: escape line breaks as `\n` and
   embedded double quotes as `\"`. A literal line break inside a string value
   (common in long `weaknesses`/`evidence` text) makes the file unparseable and

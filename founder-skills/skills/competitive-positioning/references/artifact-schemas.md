@@ -33,7 +33,7 @@ Every artifact includes a `metadata` object:
 
 ## product_profile.json
 
-**Producer:** Agent (main, Step 2)
+**Producer:** Agent (main, Step 2) — staged, then written by `persist_agent_artifact.py`
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
@@ -81,7 +81,7 @@ Every artifact includes a `metadata` object:
 
 ## landscape_draft.json
 
-**Producer:** Agent (main, Step 3 — before Gate 1)
+**Producer:** Agent (main, Step 3 — before Gate 1) — staged, then written by `persist_agent_artifact.py`
 
 Contains the initial competitor identification and candidate axis pairs. Updated after Gate 1 corrections.
 
@@ -337,7 +337,7 @@ Contains enriched competitor profiles with sourced evidence. The main agent merg
 
 ## positioning.json
 
-**Producer:** Agent (main, Step 5 — after Gate 2 corrections applied)
+**Producer:** Agent (main, Step 5 — after Gate 2 corrections applied) — staged, then written by `persist_agent_artifact.py`
 
 Contains the canonical positioning views, moat assessments, differentiation stress-tests, and accepted warnings. This is the last agent-produced artifact before scripts run.
 

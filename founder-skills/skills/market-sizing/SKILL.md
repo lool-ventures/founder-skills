@@ -593,6 +593,7 @@ Branch on the exit code (complete state machine — do not improvise):
 - **Exit 5** (receipt echoes a different path) → **repair-dispatch** telling the agent the exact expected OUTPUT_PATH (it wrote somewhere else).
 - **Exit 6** (receipt unparseable / no `output_path` key) → **redo-dispatch** with "return ONLY the receipt JSON — no fences, no prose."
 - **Producer schema rejection** (the pipe fails next) → **repair-dispatch** with the producer's stderr verbatim. **One exception: a message naming `E_FX_RATE_MISSING` is NOT a sub-agent fault and must NOT be repair-dispatched** — the sub-agent correctly reported a figure in its source's currency and has no network to look up a rate. You look the rate up and re-run the same pipe with the rate flags added (see the sizing step). Re-dispatching here burns the retry budget and invites the sub-agent to invent a rate.
+- **Exit 8** (`path_namespace_mismatch`) → the sub-agent **complied**; the agent-namespace prefix was wrong. Its relative `OUTPUT_PATH` resolved against the outputs mount instead of the session root, so the file landed at the doubled path reported in `found_at`. Do NOT treat this as a fabricated receipt (that is exit 3), and do NOT read the hand-off from `found_at` — it is diagnostic only. Re-run `resolve_artifacts_root.py --agent`, rebuild the agent-namespace prefix from the printed value, and re-dispatch. Counts against the same 2-dispatch retry budget.
 - **Any other exit** (script crash etc.) → STOP with the stderr.
 - **After ANY corrective dispatch, resume from `check_handoff.py`** — never pipe to the producer unchecked.
 
@@ -683,8 +684,8 @@ expected by market_sizing.py --stdin for approach "top_down":
 }
 Then return ONLY the receipt JSON in your final assistant message:
 {"status": "complete", "output_path": "<echo of OUTPUT_PATH>"}
-Do NOT write any file other than OUTPUT_PATH — canonical artifacts are
-producer-script-only; anything else you write bypasses schema validation and
+Do NOT write any file other than OUTPUT_PATH — you never write a canonical
+artifact; anything else you write bypasses schema validation and
 run_id stamping.
 ```
 
@@ -730,8 +731,8 @@ expected by market_sizing.py --stdin for approach "bottom_up":
 }
 Then return ONLY the receipt JSON in your final assistant message:
 {"status": "complete", "output_path": "<echo of OUTPUT_PATH>"}
-Do NOT write any file other than OUTPUT_PATH — canonical artifacts are
-producer-script-only; anything else you write bypasses schema validation and
+Do NOT write any file other than OUTPUT_PATH — you never write a canonical
+artifact; anything else you write bypasses schema validation and
 run_id stamping.
 ```
 
@@ -880,8 +881,8 @@ the tier from here instead of silently falling back to `sourced` (which widens
 nothing). Emit both — the range's own `confidence` still wins where present.
 Then return ONLY the receipt JSON in your final assistant message:
 {"status": "complete", "output_path": "<echo of OUTPUT_PATH>"}
-Do NOT write any file other than OUTPUT_PATH — canonical artifacts are
-producer-script-only; anything else you write bypasses schema validation and
+Do NOT write any file other than OUTPUT_PATH — you never write a canonical
+artifact; anything else you write bypasses schema validation and
 run_id stamping.
 ```
 
@@ -980,8 +981,8 @@ Presentation:
 
 Then return ONLY the receipt JSON in your final assistant message:
 {"status": "complete", "output_path": "<echo of OUTPUT_PATH>"}
-Do NOT write any file other than OUTPUT_PATH — canonical artifacts are
-producer-script-only; anything else you write bypasses schema validation and
+Do NOT write any file other than OUTPUT_PATH — you never write a canonical
+artifact; anything else you write bypasses schema validation and
 run_id stamping.
 ```
 
@@ -1194,6 +1195,7 @@ The gate (`check_handoff.py --format=markdown`) verifies the sub-agent's hand-of
 - **Exit 6** (receipt unparseable / no `output_path` key) → **redo-dispatch** with "return ONLY the receipt JSON — no fences, no prose." (A `status: "blocked"` final message is NOT exit 6 — it was handled before the gate.)
 - **Exit 7** (content-shape gate failed — receipt-shaped or marker-bearing file) → **repair-dispatch**: "your file wasn't the coaching commentary — write the coaching markdown, nothing else, to `<OUTPUT_PATH>`."
 - **Exit 8** (`path_namespace_mismatch`) → the sub-agent **complied**; the agent-namespace prefix was wrong. Its relative `OUTPUT_PATH` resolved against the outputs mount instead of the session root, so the file landed at the doubled path reported in `found_at`. Do NOT treat this as a fabricated receipt, and do NOT read the hand-off from `found_at` — re-dispatch with the corrected agent-namespace prefix (re-run `resolve_artifacts_root.py --agent` and rebuild `<HANDOFF_AGENT>` from the printed value). Counts against the same 2-dispatch retry budget.
+- **Any other exit** (script crash, unreadable file, invalid UTF-8) → STOP with the stderr. `check_handoff.py` exit 4 is reachable here too: gate 1 already confirmed the file exists and is non-empty, so a failure opening it afterwards is an IO/permission fault, not a malformed hand-off. A decode error raises before any typed exit and surfaces as a traceback.
 - **`insert_coaching.py` exit 1** (blocked; stdout carries `{"status": "blocked", "reason": ...}`) → stop and report the exact reason. Do NOT hand-edit `report.md` — if the reason mentions a truncated report or a missing marker, re-run `compose_report.py --write-md` and retry the chain. If the reason is `commentary_markdown missing or empty`, treat as a malformed hand-off: repair-dispatch quoting the reason.
 - **After ANY corrective dispatch, resume from the gate chain** — never feed the transform+insert pipe an ungated file.
 

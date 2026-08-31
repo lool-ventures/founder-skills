@@ -14,11 +14,15 @@ from __future__ import annotations
 
 import json
 import os
+import pathlib
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
 from typing import Any
+
+_FIXTURE_DIR = pathlib.Path(__file__).resolve().parent / "fixtures" / "competitive-positioning"
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 FOUNDER_SKILLS_DIR = os.path.dirname(SCRIPT_DIR)
@@ -2460,6 +2464,8 @@ def _make_product_profile(
 ) -> dict[str, Any]:
     """Build a product_profile.json artifact."""
     return {
+        # See the note on _make_positioning_artifact: written via persist_agent_artifact.py now.
+        "_produced_by": "persist_agent_artifact",
         "company_name": company_name,
         "slug": slug,
         "product_description": "A test product for automated testing.",
@@ -2546,6 +2552,11 @@ def _make_positioning_artifact(
                 ]
             }
     result: dict[str, Any] = {
+        # Stamped because `positioning.json` is now written through
+        # `persist_agent_artifact.py` rather than by a bare main-thread heredoc; an
+        # unstamped copy raises UNVALIDATED_ARTIFACT at high severity, which is the
+        # point of the change.
+        "_produced_by": "persist_agent_artifact",
         "views": views,
         "moat_assessments": moat_assessments,
         "differentiation_claims": [
@@ -6115,3 +6126,280 @@ def test_a_prior_good_verification_does_not_silence_a_fresh_rejection(tmp_path: 
     artifacts["competitor_verification.json"]["metadata"]["run_id"] = "RUN_2"
     codes = {w["code"] for w in cr.validate_artifacts(dict(artifacts), str(tmp_path))}
     assert "VERIFICATION_REJECTED" not in codes
+
+
+class TestAgentArtifactProvenance:
+    """`persist_agent_artifact.py` and the wiring that makes it load-bearing.
+
+    Context: `compose_report.py`'s `UNVALIDATED_ARTIFACT` check (high severity) compares each
+    artifact's `_produced_by` stamp against an expected producer. Its map covered five artifacts,
+    and the three this skill has the MAIN THREAD author were its exact complement -- unlisted
+    because they had no producer to stamp them. So a high-severity provenance gate existed and
+    was structurally blind to the artifacts most in need of it.
+    """
+
+    _SCRIPT = (
+        pathlib.Path(__file__).resolve().parents[1]
+        / "skills"
+        / "competitive-positioning"
+        / "scripts"
+        / "persist_agent_artifact.py"
+    )
+    _SKILL_MD = pathlib.Path(__file__).resolve().parents[1] / "skills" / "competitive-positioning" / "SKILL.md"
+    _SCHEMAS = (
+        pathlib.Path(__file__).resolve().parents[1]
+        / "skills"
+        / "competitive-positioning"
+        / "references"
+        / "artifact-schemas.md"
+    )
+
+    def _required_keys(self) -> dict[str, set[str]]:
+        spec: dict[str, Any] = {}
+        exec(  # noqa: S102 - reading a literal out of our own script, not user input
+            compile(
+                "\n".join(
+                    ln
+                    for ln in self._SCRIPT.read_text(encoding="utf-8").splitlines()
+                    if not ln.startswith(("import ", "from "))
+                ).split("def _fail_invalid")[0],
+                str(self._SCRIPT),
+                "exec",
+            ),
+            spec,
+        )
+        keys = spec["REQUIRED_KEYS"]
+        assert isinstance(keys, dict) and keys, "REQUIRED_KEYS is missing or not a dict"
+        return {str(k): set(v) for k, v in keys.items()}
+
+    @staticmethod
+    def _top_level_table(doc: str, artifact: str) -> str:
+        """The artifact's TOP-LEVEL field table only.
+
+        A section contains sub-tables (`### competitors[] entry`, `### points[] entry`, ...)
+        whose rows look identical to top-level rows. Reading the whole section therefore
+        accepts a nested field as if it were a top-level key -- measured, it let
+        `x_evidence_source` (a `points[]` field) and `category` (a `competitors[]` field)
+        through, and `category` is one of the two keys the first draft INVENTED, so the test
+        written to catch that invention would not have caught it.
+        """
+        section = doc.split(f"## {artifact}", 1)
+        assert len(section) == 2, f"{artifact} has no section in artifact-schemas.md"
+        body = section[1].split("\n## ", 1)[0]
+        return body.split("\n### ", 1)[0]
+
+    def test_required_keys_exist_in_the_documented_schema(self) -> None:
+        """Every key the producer demands must be a real field in `artifact-schemas.md`.
+
+        THIS TEST EXISTS BECAUSE THE FIRST DRAFT INVENTED TWO. `product_profile.json` was given
+        `category` and `target_customer`; neither exists -- the field is `target_customers`
+        (plural), and `category` belongs to a `competitors[]` entry in a different artifact. A
+        producer that requires a field the schema does not define rejects every compliant input,
+        and the failure surfaces as "the model wrote the artifact wrong" rather than "the
+        validator is wrong". It was caught by a fixture, not by review.
+        """
+        doc = self._SCHEMAS.read_text(encoding="utf-8")
+        for artifact, keys in self._required_keys().items():
+            body = self._top_level_table(doc, artifact)
+            documented = set(re.findall(r"^\|\s*`([a-z_]+)`\s*\|", body, re.M))
+            unknown = sorted(keys - documented)
+            assert not unknown, (
+                f"persist_agent_artifact.py requires key(s) {unknown} for {artifact}, which the "
+                f"schema does not define. Documented fields: {sorted(documented)}. Read the schema "
+                f"table before editing REQUIRED_KEYS."
+            )
+
+    def test_required_keys_are_actually_required_in_the_schema(self) -> None:
+        """A key the producer demands must be marked `Required: yes`, not merely present.
+
+        The inverse of the test above: demanding an OPTIONAL field is just as wrong, and rejects
+        artifacts the schema calls compliant. `positioning.json`'s `moat_assessments` is the live
+        example -- optional, and SKILL.md tells the main thread to omit it.
+        """
+        doc = self._SCHEMAS.read_text(encoding="utf-8")
+        for artifact, keys in self._required_keys().items():
+            body = self._top_level_table(doc, artifact)
+            optional = {m.group(1) for m in re.finditer(r"^\|\s*`([a-z_]+)`\s*\|[^|]*\|\s*no\s*\|", body, re.M)}
+            wrong = sorted(keys & optional)
+            assert not wrong, (
+                f"persist_agent_artifact.py requires {wrong} for {artifact}, but the schema marks "
+                f"them optional. Requiring an optional field rejects compliant artifacts."
+            )
+
+    def test_required_keys_match_the_documented_top_level_table(self) -> None:
+        """REQUIRED_KEYS must equal the schema's top-level `Required: yes` set — both directions.
+
+        The two tests above are one-directional: they catch a key the producer INVENTS, and a
+        key it demands that the schema calls optional. Neither catches an OMISSION, and an
+        omission is what happened next: `metadata` is Required:yes on all three artifacts and
+        was missing from all three sets. That was not cosmetic — the producer only creates
+        `metadata` when `--run-id` is passed, so an artifact could be persisted with no
+        `run_id`, and `compose_report.py`'s STALE_ARTIFACT parity loop SKIPS artifacts that
+        carry none. Omitting one required key silently disabled a different check.
+        """
+        doc = self._SCHEMAS.read_text(encoding="utf-8")
+        for artifact, keys in self._required_keys().items():
+            body = self._top_level_table(doc, artifact)
+            documented_required = {
+                m.group(1) for m in re.finditer(r"^\|\s*`([a-z_]+)`\s*\|[^|]*\|\s*yes\s*\|", body, re.M)
+            }
+            assert keys == documented_required, (
+                f"{artifact}: REQUIRED_KEYS != the schema's top-level Required:yes set.\n"
+                f"  missing from REQUIRED_KEYS: {sorted(documented_required - keys)}\n"
+                f"  extra in REQUIRED_KEYS:     {sorted(keys - documented_required)}"
+            )
+
+    def test_skill_md_routes_the_three_artifacts_through_the_producer(self) -> None:
+        """The SKILL.md must PIPE these artifacts, not heredoc them into `$ANALYSIS_DIR`.
+
+        Without this, a revert to a bare heredoc reds nothing: the producer would still exist,
+        still be tested, and simply never be called -- which is the state this whole change set
+        was written to end.
+        """
+        body = self._SKILL_MD.read_text(encoding="utf-8")
+        for stem in ("product_profile", "landscape_draft", "positioning"):
+            assert re.search(rf"persist_agent_artifact\.py[^`]*--artifact {stem}\.json", body, re.S), (
+                f"competitive-positioning/SKILL.md does not pipe {stem}.json through persist_agent_artifact.py"
+            )
+            assert not re.search(rf"cat <<'?[A-Z_]+'? > \"\$ANALYSIS_DIR/{stem}\.json\"", body), (
+                f"competitive-positioning/SKILL.md still heredocs {stem}.json straight into $ANALYSIS_DIR"
+            )
+
+    def test_expected_producers_covers_every_artifact_the_producer_writes(self) -> None:
+        """Each artifact this producer can write must have an EXPECTED_PRODUCERS row.
+
+        A row is what makes the stamp load-bearing; without one the stamp is inert decoration.
+        """
+        compose = (
+            pathlib.Path(__file__).resolve().parents[1]
+            / "skills"
+            / "competitive-positioning"
+            / "scripts"
+            / "compose_report.py"
+        ).read_text(encoding="utf-8")
+        block = compose.split("EXPECTED_PRODUCERS = {", 1)[1].split("}", 1)[0]
+        mapped = dict(re.findall(r'"([^"]+)":\s*"([^"]+)"', block))
+        for artifact in self._required_keys():
+            assert mapped.get(artifact) == "persist_agent_artifact", (
+                f"{artifact} has no EXPECTED_PRODUCERS row naming persist_agent_artifact — "
+                f"its `_produced_by` stamp is then never checked. Got: {mapped.get(artifact)!r}"
+            )
+
+    def test_removing_the_stamp_actually_raises_the_high_warning(self) -> None:
+        """BEHAVIOURAL, not lexical: strip `_produced_by` and the run must warn at HIGH.
+
+        The first version of this test grepped compose_report.py for the artifact name in a
+        quoted list and called that "loaded". That is the failure mode this whole change set
+        is about -- asserting a fact about code from something adjacent to it. A name can
+        appear in a quoted list that is not the load list; the only proof that a provenance
+        row does anything is that removing the stamp changes the output.
+
+        `landscape_draft.json` was in exactly the state this catches: a real canonical
+        artifact, consumed by `verify_competitors.py`, with a provenance row and NO entry in
+        either load list -- so the row was a silent no-op.
+        """
+        for artifact in self._required_keys():
+            with tempfile.TemporaryDirectory() as tmp:
+                for src in _FIXTURE_DIR.glob("*.json"):
+                    shutil.copy(src, os.path.join(tmp, src.name))
+                target = os.path.join(tmp, artifact)
+                if not os.path.exists(target):
+                    raise AssertionError(
+                        f"no {artifact} fixture — the provenance row for it is untested. "
+                        f"Add one to tests/fixtures/competitive-positioning/."
+                    )
+                with open(target) as f:
+                    data = json.load(f)
+                data.pop("_produced_by", None)
+                with open(target, "w") as f:
+                    json.dump(data, f)
+
+                proc = subprocess.run(
+                    [sys.executable, str(self._SCRIPT.parent / "compose_report.py"), "--dir", tmp],
+                    capture_output=True,
+                    text=True,
+                )
+                assert proc.returncode == 0, proc.stderr[:400]
+                out = json.loads(proc.stdout)
+                high = [w for w in out["warnings"] if w["code"] == "UNVALIDATED_ARTIFACT" and artifact in w["message"]]
+                assert high, (
+                    f"stripping _produced_by from {artifact} raised no UNVALIDATED_ARTIFACT — "
+                    f"its provenance row is a no-op. Codes seen: "
+                    f"{sorted({w['code'] for w in out['warnings']})}"
+                )
+                assert high[0]["severity"] == "high", f"{artifact}: expected high, got {high[0]['severity']}"
+
+    def test_the_provenance_warning_does_not_leak_internal_tokens_to_the_founder(self) -> None:
+        """When the warning FIRES, report.md must not name the script or the artifact file.
+
+        The agent-facing `message` names both (`persist_agent_artifact.py`,
+        `landscape_draft.json`) and report.md renders `message` whenever no `founder_message`
+        is supplied -- so every firing put two internal tokens in front of a founder.
+
+        `test_compose_invariants.py::test_composed_report_carries_no_internal_tokens` is the
+        fleet ratchet for exactly this and CANNOT catch it: its fixtures are stamped, so the
+        warning never fires there. A warning that leaks only when it fires is invisible to a
+        zero-ratchet driven by clean fixtures. That is a general lesson about the ratchet, not
+        a fact about this one warning -- any conditional message needs its own firing test.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            for src in _FIXTURE_DIR.glob("*.json"):
+                shutil.copy(src, os.path.join(tmp, src.name))
+            target = os.path.join(tmp, "landscape_draft.json")
+            with open(target) as f:
+                data = json.load(f)
+            data.pop("_produced_by", None)
+            with open(target, "w") as f:
+                json.dump(data, f)
+
+            proc = subprocess.run(
+                [sys.executable, str(self._SCRIPT.parent / "compose_report.py"), "--dir", tmp],
+                capture_output=True,
+                text=True,
+            )
+            out = json.loads(proc.stdout)
+            md = out["report_markdown"]
+            for token in ("persist_agent_artifact", "landscape_draft.json", "_produced_by"):
+                assert token not in md, (
+                    f"report.md leaks the internal token {token!r} when UNVALIDATED_ARTIFACT "
+                    f"fires. Supply a founder_message on the warning; do not reword `message`, "
+                    f"which is agent-facing and read by the coaching payload."
+                )
+            assert any(w["code"] == "UNVALIDATED_ARTIFACT" for w in out["warnings"]), (
+                "the warning must still be raised — this test guards the RENDERING, not the check"
+            )
+
+    def test_stale_artifact_warning_does_not_leak_internal_tokens_either(self) -> None:
+        """`STALE_ARTIFACT` names an artifact file and two run ids; report.md must not.
+
+        Found the same way and belongs to the same class as the test above. It is a SEPARATE
+        test because the two warnings fire on disjoint conditions -- an unstamped artifact vs a
+        mismatched run_id -- so one firing proves nothing about the other. Adding
+        `landscape_draft.json` to the load lists widened this warning's reach by one artifact,
+        which is how it surfaced.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            for src in _FIXTURE_DIR.glob("*.json"):
+                shutil.copy(src, os.path.join(tmp, src.name))
+            target = os.path.join(tmp, "landscape_draft.json")
+            with open(target) as f:
+                data = json.load(f)
+            data.setdefault("metadata", {})["run_id"] = "some-other-run-id"
+            with open(target, "w") as f:
+                json.dump(data, f)
+
+            proc = subprocess.run(
+                [sys.executable, str(self._SCRIPT.parent / "compose_report.py"), "--dir", tmp],
+                capture_output=True,
+                text=True,
+            )
+            out = json.loads(proc.stdout)
+            assert any(w["code"] == "STALE_ARTIFACT" for w in out["warnings"]), (
+                "expected STALE_ARTIFACT on a mismatched run_id — if this stops firing the test below becomes vacuous"
+            )
+            md = out["report_markdown"]
+            for token in ("landscape_draft.json", "some-other-run-id", "run_id"):
+                assert token not in md, (
+                    f"report.md leaks {token!r} when STALE_ARTIFACT fires — supply a "
+                    f"founder_message rather than rewording the agent-facing `message`."
+                )

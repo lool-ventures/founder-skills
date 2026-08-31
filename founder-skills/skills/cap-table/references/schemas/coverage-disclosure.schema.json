@@ -1,16 +1,30 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "cap-table coverage_disclosure.json",
+  "$comment": "CLOSED 2026-08-31 at EVERY object level -- top level, `reconciliation` AND `metadata`. The first pass closed the first two and left `metadata` open, which reinstated the exact hole one level down: a richer payload nested under `metadata` validated clean. If you add a nested object here, close it in the same edit. The 2026-07-05 incident's failure mode was an ad-hoc RICHER payload -- extra keys, not missing ones -- so a validator that only checks `required` accepts it unchanged. Top-level `additionalProperties: false` alone does not close a nested `{\"type\": \"object\"}` with no `properties`, which is what `reconciliation` was: a richer payload nests inside it and validates clean. This is a deliberate, narrow exception to the standing decision not to add `additionalProperties: false` generically -- the general objection is that it rejects valid inputs, which does not apply to a fixed disclosure form whose whole purpose is to be a fixed disclosure form. Do NOT generalize it to the other cap-table schemas. ENFORCEMENT IS PARTIAL, and the closure describes the document rather than every writer: `_cap_table_schema_validator.py` silently IGNORES `additionalProperties` (its own docstring says so), so `compose_report.py` and `compose_extraction_report.py` -- both writing via `_artifact_writer.write_artifact` -- do not enforce it. Only `write_coverage_disclosure.py`'s validator does. That is the hand-roll route, which is the route the 2026-07-05 incident took, so the closure covers the case it was written for -- but do not read it as a fleet-wide guarantee.",
   "type": "object",
   "required": ["schema_version", "covered", "computation_method"],
+  "additionalProperties": false,
   "properties": {
     "schema_version": { "const": "v0.1-coverage-disclosure" },
     "covered": { "type": "boolean" },
     "computation_method": { "enum": ["deterministic_pipeline", "manual_outside_pipeline", "extraction_only"] },
     "required_primitives": { "type": "array", "items": { "type": "string" } },
-    "uncovered_parts": { "type": "array" },
+    "uncovered_parts": { "type": "array", "items": { "type": "string" } },
     "counsel_review": { "type": "boolean" },
-    "reconciliation": { "type": "object" },
-    "manual_artifacts": { "type": "array", "items": { "type": "string" } }
+    "reconciliation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "status": { "type": ["string", "null"] },
+        "max_divergence_ppm": { "type": ["number", "null"] }
+      }
+    },
+    "manual_artifacts": { "type": "array", "items": { "type": "string" } },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": { "run_id": { "type": ["string", "null"] } }
+    }
   }
 }

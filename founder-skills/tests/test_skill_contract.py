@@ -610,7 +610,20 @@ SKILL_MD_CEILING: dict[str, int] = {
     # figure ("or omit the parameter"), and sources almost never state a range -- so the tier meant "never
     # stress-tested", silently, for a figure that may be corroborated but imprecise. Nothing downstream
     # could see the omission either. The rule has to be where the sub-agent reads it.
-    "market-sizing": 92_822,
+    # +exit-8 Context A bullet and +Context B "any other exit" catch-all, all six (2026-08-31).
+    # ONE shared reason for six near-identical raises, referenced rather than repeated:
+    # `check_handoff.py` defines seven typed exits; the Context A gate table documented five and
+    # omitted exit 8 -- the branch the code was written for, since Context A is where OUTPUT_PATH is
+    # built from $HANDOFF_AGENT and where the doubled-prefix condition occurs. Exit 8 therefore fell
+    # to "Any other exit -> STOP", halting a run over a condition the gate's own diagnostic says is
+    # recoverable by a prefix correction. Context B separately had no catch-all at all, so an exit 4
+    # (reachable there on an IO fault) or an uncaught decode error had no documented branch.
+    # Guarded by test_context_a_gate_table_documents_exit_8 in test_handoff_contract_ratchet.py.
+    # SHRANK: the unscoped "canonical artifacts are producer-script-only" justification was
+    # rescoped to "you never write a canonical artifact" across all 22 sites (W2 audit). The
+    # instruction was always correct; the REASON given for it asserted the general claim P0-2
+    # established is false — the main thread writes several canonical artifacts by heredoc.
+    "market-sizing": 93_719,
     # fmr raised for two founder-facing-correctness items measured in a live run: the CHECKLIST
     # dispatch now forbids citing our artifact filenames in evidence (that run put `inputs.json` in 10
     # items' evidence, printed verbatim into the founder's report), and the producer pipe passes
@@ -637,7 +650,20 @@ SKILL_MD_CEILING: dict[str, int] = {
     # from its first draft by rewriting a captured-variable form that violated
     # test_no_shell_variable_capture_of_python_output. Analysis:
     # docs/internal/2026-08-27-cowork-harness-2.4.0-adoption-plan.md SS3.2.
-    "financial-model-review": 79_867,
+    # +exit-8 Context A bullet and +Context B "any other exit" catch-all, all six (2026-08-31).
+    # ONE shared reason for six near-identical raises, referenced rather than repeated:
+    # `check_handoff.py` defines seven typed exits; the Context A gate table documented five and
+    # omitted exit 8 -- the branch the code was written for, since Context A is where OUTPUT_PATH is
+    # built from $HANDOFF_AGENT and where the doubled-prefix condition occurs. Exit 8 therefore fell
+    # to "Any other exit -> STOP", halting a run over a condition the gate's own diagnostic says is
+    # recoverable by a prefix correction. Context B separately had no catch-all at all, so an exit 4
+    # (reachable there on an IO fault) or an uncaught decode error had no documented branch.
+    # Guarded by test_context_a_gate_table_documents_exit_8 in test_handoff_contract_ratchet.py.
+    # SHRANK: the unscoped "canonical artifacts are producer-script-only" justification was
+    # rescoped to "you never write a canonical artifact" across all 22 sites (W2 audit). The
+    # instruction was always correct; the REASON given for it asserted the general claim P0-2
+    # established is false — the main thread writes several canonical artifacts by heredoc.
+    "financial-model-review": 80_780,
     # ic-sim SHRANK: the REQUIRED ic-dynamics.md read at Step 7 is deleted. Step 7 is a pure producer
     # pipe — compose_discussion.py derives discussion.json from the partners' own files and nothing
     # is authored by the main thread — so the read informed no decision while pulling a whole
@@ -646,7 +672,20 @@ SKILL_MD_CEILING: dict[str, int] = {
     # the pre-coaching text and a raw uuid insertion marker (measured 5,592 B adrift on a live
     # run). Syncing rather than dropping the key, because ~200 test sites across the fleet read
     # report_markdown out of the composed JSON to inspect report content.
-    "ic-sim": 89_426,
+    # +exit-8 Context A bullet and +Context B "any other exit" catch-all, all six (2026-08-31).
+    # ONE shared reason for six near-identical raises, referenced rather than repeated:
+    # `check_handoff.py` defines seven typed exits; the Context A gate table documented five and
+    # omitted exit 8 -- the branch the code was written for, since Context A is where OUTPUT_PATH is
+    # built from $HANDOFF_AGENT and where the doubled-prefix condition occurs. Exit 8 therefore fell
+    # to "Any other exit -> STOP", halting a run over a condition the gate's own diagnostic says is
+    # recoverable by a prefix correction. Context B separately had no catch-all at all, so an exit 4
+    # (reachable there on an IO fault) or an uncaught decode error had no documented branch.
+    # Guarded by test_context_a_gate_table_documents_exit_8 in test_handoff_contract_ratchet.py.
+    # SHRANK: the unscoped "canonical artifacts are producer-script-only" justification was
+    # rescoped to "you never write a canonical artifact" across all 22 sites (W2 audit). The
+    # instruction was always correct; the REASON given for it asserted the general claim P0-2
+    # established is false — the main thread writes several canonical artifacts by heredoc.
+    "ic-sim": 90_323,
     # deck-review +1,165 B: Step 0 carried only a parenthetical fresh-shell mention buried in a code
     # comment, unlike the four skills that mint RUN_ID in a LATER block and so carry the shared banner.
     # deck-review mints RUN_ID INSIDE this re-runnable Step-0 block (like cap-table), so the shared
@@ -848,7 +887,20 @@ SKILL_MD_CEILING: dict[str, int] = {
     # from its first draft by rewriting a captured-variable form that violated
     # test_no_shell_variable_capture_of_python_output. Analysis:
     # docs/internal/2026-08-27-cowork-harness-2.4.0-adoption-plan.md SS3.2.
-    "deck-review": 101_267,
+    # +exit-8 Context A bullet and +Context B "any other exit" catch-all, all six (2026-08-31).
+    # ONE shared reason for six near-identical raises, referenced rather than repeated:
+    # `check_handoff.py` defines seven typed exits; the Context A gate table documented five and
+    # omitted exit 8 -- the branch the code was written for, since Context A is where OUTPUT_PATH is
+    # built from $HANDOFF_AGENT and where the doubled-prefix condition occurs. Exit 8 therefore fell
+    # to "Any other exit -> STOP", halting a run over a condition the gate's own diagnostic says is
+    # recoverable by a prefix correction. Context B separately had no catch-all at all, so an exit 4
+    # (reachable there on an IO fault) or an uncaught decode error had no documented branch.
+    # Guarded by test_context_a_gate_table_documents_exit_8 in test_handoff_contract_ratchet.py.
+    # SHRANK: the unscoped "canonical artifacts are producer-script-only" justification was
+    # rescoped to "you never write a canonical artifact" across all 22 sites (W2 audit). The
+    # instruction was always correct; the REASON given for it asserted the general claim P0-2
+    # established is false — the main thread writes several canonical artifacts by heredoc.
+    "deck-review": 102_180,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
@@ -902,7 +954,26 @@ SKILL_MD_CEILING: dict[str, int] = {
     # from its first draft by rewriting a captured-variable form that violated
     # test_no_shell_variable_capture_of_python_output. Analysis:
     # docs/internal/2026-08-27-cowork-harness-2.4.0-adoption-plan.md SS3.2.
-    "competitive-positioning": 120_307,
+    # +exit-8 Context A bullet and +Context B "any other exit" catch-all, all six (2026-08-31).
+    # ONE shared reason for six near-identical raises, referenced rather than repeated:
+    # `check_handoff.py` defines seven typed exits; the Context A gate table documented five and
+    # omitted exit 8 -- the branch the code was written for, since Context A is where OUTPUT_PATH is
+    # built from $HANDOFF_AGENT and where the doubled-prefix condition occurs. Exit 8 therefore fell
+    # to "Any other exit -> STOP", halting a run over a condition the gate's own diagnostic says is
+    # recoverable by a prefix correction. Context B separately had no catch-all at all, so an exit 4
+    # (reachable there on an IO fault) or an uncaught decode error had no documented branch.
+    # Guarded by test_context_a_gate_table_documents_exit_8 in test_handoff_contract_ratchet.py.
+    # +persist_agent_artifact.py pipe on the three main-thread-authored artifacts (W6). They were
+    # the exact complement of compose_report.py's EXPECTED_PRODUCERS map, so a high-severity
+    # provenance gate existed and was structurally blind to them.
+    # SHRANK: the unscoped "canonical artifacts are producer-script-only" justification was
+    # rescoped to "you never write a canonical artifact" across all 22 sites (W2 audit). The
+    # instruction was always correct; the REASON given for it asserted the general claim P0-2
+    # established is false — the main thread writes several canonical artifacts by heredoc.
+    # Net of the 2026-08-31 adversarial pass: cap-table +uncovered_parts stringify guidance;
+    # competitive-positioning -1.4 KB from de-duplicating the "Preserve _produced_by" note,
+    # which had been pasted verbatim four times (twice four lines apart).
+    "competitive-positioning": 126_009,
     # cap-table, the largest raise (+2,383 B) and the one with the most founder-visible payoff:
     #   * Main-Thread Return named THREE of the four files Step 12 copies; a live run delivered exactly
     #     three and dropped `{Company}_Cap_Table.html`. All four are now named explicitly.
@@ -928,7 +999,24 @@ SKILL_MD_CEILING: dict[str, int] = {
     # the pre-coaching text and a raw uuid insertion marker (measured 5,592 B adrift on a live
     # run). Syncing rather than dropping the key, because ~200 test sites across the fleet read
     # report_markdown out of the composed JSON to inspect report content.
-    "cap-table": 146_053,
+    # +exit-8 Context A bullet and +Context B "any other exit" catch-all, all six (2026-08-31).
+    # ONE shared reason for six near-identical raises, referenced rather than repeated:
+    # `check_handoff.py` defines seven typed exits; the Context A gate table documented five and
+    # omitted exit 8 -- the branch the code was written for, since Context A is where OUTPUT_PATH is
+    # built from $HANDOFF_AGENT and where the doubled-prefix condition occurs. Exit 8 therefore fell
+    # to "Any other exit -> STOP", halting a run over a condition the gate's own diagnostic says is
+    # recoverable by a prefix correction. Context B separately had no catch-all at all, so an exit 4
+    # (reachable there on an IO fault) or an uncaught decode error had no documented branch.
+    # Guarded by test_context_a_gate_table_documents_exit_8 in test_handoff_contract_ratchet.py.
+    # +write_coverage_disclosure.py pipe on the hand-roll route (W7) and the heredoc-quoting
+    # guardrail (W11): cap-table is the only skill with UNQUOTED heredoc delimiters (both
+    # templates interpolate), so the fleet rule in market-sizing/SKILL.md is unfollowable here
+    # and read as a rule cap-table violated. Guarded by the two heredoc tests in
+    # test_skill_orchestration.py.
+    # Net of the 2026-08-31 adversarial pass: cap-table +uncovered_parts stringify guidance;
+    # competitive-positioning -1.4 KB from de-duplicating the "Preserve _produced_by" note,
+    # which had been pasted verbatim four times (twice four lines apart).
+    "cap-table": 148_920,
 }
 
 
@@ -1149,7 +1237,11 @@ REFERENCES_CEILING: dict[str, int] = {
     # fix — register the severity and forward the message — ships an unpublishable review. A
     # contract whose violation is a delivery-gate failure has to be written down where the next
     # producer author looks.
-    "competitive-positioning": 140_402,
+    # +the three `**Producer:**` lines in artifact-schemas.md now naming
+    # persist_agent_artifact.py: the file is the source of truth the new REQUIRED_KEYS
+    # conformance tests read, so leaving it saying "Agent (main, Step 2)" would have made
+    # the documentation disagree with both the pipeline and its own tests.
+    "competitive-positioning": 140_570,
     # cap-table +422 B: inputs-skeleton.md promised "no warning, and downstream artifacts that look
     # right but contain zeros" — the PRE-FIX world. cap_state.py hard-errors E_NO_EQUITY_BASE now,
     # and prose telling a model that a missing base yields plausible zeros invites it to invent one.
@@ -2322,6 +2414,29 @@ def test_plugin_root_block_pipes_candidates_on_stdin_with_expected_version(skill
 # tuple[skill, script, extra argv, rejecting payload] plus an OPTIONAL 5th element naming the
 # canonical-path flag when it is not `-o` (see the header comment above).
 _REJECTING_PAYLOADS: list[tuple[str, str, list[str], str] | tuple[str, str, list[str], str, str]] = [
+    # The hand-roll disclosure route. Registered because it writes a canonical artifact on
+    # the route with the WEAKEST guarantees -- figures the deterministic engine could not
+    # cover -- and because the 2026-07-05 incident hand-authored exactly this file with an
+    # ad-hoc richer schema. The payload below is rejected for the extra-key reason, which is
+    # the failure mode a required-keys-only validator cannot see.
+    (
+        "cap-table",
+        "write_coverage_disclosure.py",
+        [],
+        '{"schema_version": "v0.1-coverage-disclosure", "covered": false, "computation_method":'
+        ' "manual_outside_pipeline", "uncovered_parts": ["x"], "counsel_review": true,'
+        ' "my_own_richer_field": {"a": 1}}',
+    ),
+    # persist_agent_artifact.py is the write path for competitive-positioning's three
+    # main-thread-authored artifacts. It is the newest member of this registry and the reason
+    # the registry exists: it writes a CANONICAL artifact, so a rejected input that clobbered
+    # `-o` would destroy the prior good copy exactly as the six original offenders did.
+    (
+        "competitive-positioning",
+        "persist_agent_artifact.py",
+        ["--artifact", "positioning.json"],
+        '{"not_the_required_key": 1}',
+    ),
     ("market-sizing", "market_sizing.py", ["--stdin"], '{"approach":"top_down","industry_total":-5}'),
     ("market-sizing", "sensitivity.py", [], '{"approach":"bottom_up","base":{},"ranges":{}}'),
     ("market-sizing", "checklist.py", [], '{"notitems":1}'),

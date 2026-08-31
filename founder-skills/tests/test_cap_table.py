@@ -13907,3 +13907,380 @@ class TestCrossPathAgreement:
             assert math.isclose(snap["cap_implied_shares"], per["conversion_shares"], rel_tol=1e-9), (
                 f"{sid}: cap-implied {snap['cap_implied_shares']:,.0f} vs priced {per['conversion_shares']:,.0f}"
             )
+
+
+class TestCoverageDisclosureReflectsDetection:
+    """`coverage_disclosure.json` must not claim `covered: true` when detection said otherwise.
+
+    FOUND BY A LIVE RUN, not by this suite. `covered` was hardcoded `True` in
+    `compose_report.py` on the reasoning that reaching compose means the deterministic
+    pipeline ran. A `cowork-harness` run of the note + share-acquisition deal (the one
+    declared-incompatible couple in `_coverage_registry`) produced
+    `coverage_result.json` with `covered: false` -- the agent ran the pipeline anyway, and
+    compose then asserted `covered: true` / `computation_method: deterministic_pipeline`
+    into a FOUNDER-FACING disclosure, in the same directory as the artifact contradicting it.
+
+    The class of defect is the one CLAUDE.md names: a sidecar with no downstream reader.
+    `coverage_result.json` was written by the detection step and read by NOTHING, so its
+    verdict could not reach the deliverable. These tests pin both directions.
+    """
+
+    @staticmethod
+    def _compose_dir(tmp: str, covered: bool | None) -> str:
+        """Seed a real artifact chain, optionally carrying a detection verdict.
+
+        Runs the actual producers rather than hand-writing artifacts: compose validates
+        cross-artifact consistency, so a hand-built set would be testing the fixture.
+        """
+        rid = "20260831T000000Z"
+        j = lambda n: os.path.join(tmp, n)  # noqa: E731
+        inputs = dict(_BASIC_INPUTS)
+        inputs["metadata"] = {"run_id": rid}
+        instruments = {**_BASIC_INSTRUMENTS, "safes": [_SAFE_BASIC], "metadata": {"run_id": rid}}
+        with open(j("inputs.json"), "w") as f:
+            json.dump(inputs, f)
+        with open(j("instruments.json"), "w") as f:
+            json.dump(instruments, f)
+
+        # The detection verdict under test. Absent when `covered is None`.
+        if covered is not None:
+            with open(j("coverage_result.json"), "w") as f:
+                json.dump(
+                    {
+                        "required_primitives": ["note_conversion", "acquisition_consideration"],
+                        "covered": covered,
+                        "uncovered_parts": []
+                        if covered
+                        else [
+                            {
+                                "combination": ["note_conversion", "acquisition_consideration"],
+                                "reason": "declared incompatible",
+                            }
+                        ],
+                    },
+                    f,
+                )
+
+        rc, _, e = _run(
+            "cap_state.py",
+            [
+                "--inputs",
+                j("inputs.json"),
+                "--instruments",
+                j("instruments.json"),
+                "--run-id",
+                rid,
+                "-o",
+                j("cap_state.json"),
+            ],
+        )
+        assert rc == 0, e
+        rc, _, e = _run(
+            "rule_audit.py",
+            [
+                "--phase",
+                "pre_math",
+                "--inputs",
+                j("inputs.json"),
+                "--instruments",
+                j("instruments.json"),
+                "--cap-state",
+                j("cap_state.json"),
+                "--run-id",
+                rid,
+                "-o",
+                j("rule_audit.json"),
+            ],
+        )
+        assert rc == 0, e
+        with open(j("scenario_requests.json"), "w") as f:
+            json.dump(
+                [{"scenario_id": "base", "label": "Cap-implied SAFE", "type": "safe_conversion", "parameters": {}}], f
+            )
+        rc, _, e = _run(
+            "run_scenario.py",
+            [
+                "--inputs",
+                j("inputs.json"),
+                "--instruments",
+                j("instruments.json"),
+                "--cap-state",
+                j("cap_state.json"),
+                "--scenarios-input",
+                j("scenario_requests.json"),
+                "--run-id",
+                rid,
+                "-o",
+                j("scenarios.json"),
+            ],
+        )
+        assert rc == 0, e
+        rc, _, e = _run("rule_audit.py", ["--phase", "post_math", "--run-id", rid, "-o", j("rule_audit.json")])
+        assert rc == 0, e
+        rc, _, e = _run(
+            "counsel_packet.py",
+            [
+                "--rule-audit",
+                j("rule_audit.json"),
+                "--inputs",
+                j("inputs.json"),
+                "--scenarios",
+                j("scenarios.json"),
+                "--run-id",
+                rid,
+                "-o",
+                j("counsel_packet.json"),
+                "--write-md",
+                j("counsel_packet.md"),
+            ],
+        )
+        assert rc == 0, e
+        return rid
+
+    def _compose(self, tmp: str, rid: str) -> dict[str, Any]:
+        rc, out, err = _run(
+            "compose_report.py",
+            [
+                "--dir",
+                tmp,
+                "--run-id",
+                rid,
+                "-o",
+                os.path.join(tmp, "report.json"),
+                "--write-md",
+                os.path.join(tmp, "report.md"),
+            ],
+        )
+        assert rc == 0, err
+        with open(os.path.join(tmp, "coverage_disclosure.json")) as f:
+            disclosure = json.load(f)
+        with open(os.path.join(tmp, "report.json")) as f:
+            report = json.load(f)
+        return {"disclosure": disclosure, "report": report, "stderr": err, "stdout": out}
+
+    def test_uncovered_detection_is_reflected_and_warned_at_high(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            rid = self._compose_dir(tmp, covered=False)
+            got = self._compose(tmp, rid)
+            assert got["disclosure"]["covered"] is False, (
+                "compose asserted covered=true while coverage_result.json said false — a FALSE "
+                "statement in a founder-facing disclosure"
+            )
+            assert got["disclosure"].get("counsel_review") is True
+            assert got["disclosure"].get("uncovered_parts"), "uncovered_parts must be carried through"
+            codes = [
+                w["code"]
+                for w in got["report"].get("validation", {}).get("warnings", [])
+                if w.get("severity") == "high"
+            ]
+            assert "COVERAGE_ROUTE_MISMATCH" in codes, (
+                f"running the pipeline on an uncovered deal must warn at HIGH; got {codes}"
+            )
+
+    def test_hand_roll_disclosure_is_not_downgraded_by_compose(self) -> None:
+        """A `manual_outside_pipeline` disclosure must survive a later compose.
+
+        FOUND BY A LIVE RUN. `coverage_disclosure.json` has two writers -- the hand-roll
+        producer `write_coverage_disclosure.py` and `compose_report.py` -- and there was no
+        precedence rule. Measured: the agent correctly wrote the hand-roll disclosure and then
+        ran the pipeline; compose silently overwrote `manual_outside_pipeline` with
+        `deterministic_pipeline`, leaving the founder the LESS cautionary of two statements
+        about their own numbers, with nothing recording that the other had been made.
+
+        The rule is that the more cautionary claim wins: figures computed by hand outside the
+        engine do not become engine-produced because compose ran afterwards.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            rid = self._compose_dir(tmp, covered=False)
+            with open(os.path.join(tmp, "coverage_disclosure.json"), "w") as f:
+                json.dump(
+                    {
+                        "schema_version": "v0.1-coverage-disclosure",
+                        "covered": False,
+                        "computation_method": "manual_outside_pipeline",
+                        "uncovered_parts": ["declared incompatible"],
+                        "counsel_review": True,
+                    },
+                    f,
+                )
+            got = self._compose(tmp, rid)
+            assert got["disclosure"]["computation_method"] == "manual_outside_pipeline", (
+                "compose downgraded a hand-roll disclosure to deterministic_pipeline — the "
+                "founder is then told the engine produced figures it did not produce"
+            )
+            assert got["disclosure"]["covered"] is False
+            assert got["disclosure"].get("counsel_review") is True
+            codes = [
+                w["code"]
+                for w in got["report"].get("validation", {}).get("warnings", [])
+                if w.get("severity") == "high"
+            ]
+            assert "DISCLOSURE_ROUTE_COLLISION" in codes, (
+                f"both routes ran; that is a routing bug and must be reported. Got {codes}"
+            )
+
+    def test_hand_roll_content_survives_compose_intact(self) -> None:
+        """PRESERVED must mean the whole document, not just `computation_method`.
+
+        The first version of this fix carried the method across and rebuilt the rest from
+        scratch, destroying `uncovered_parts`, `required_primitives` and `manual_artifacts`.
+        The result was a disclosure `write_coverage_disclosure.py` would itself REFUSE to write
+        ("a hand-roll disclosure that names no uncovered primitive tells the founder nothing"):
+        the founder was told the figures were hand-computed and nothing about what was uncovered
+        or where the hand math lived.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            rid = self._compose_dir(tmp, covered=False)
+            rich = {
+                "schema_version": "v0.1-coverage-disclosure",
+                "covered": False,
+                "computation_method": "manual_outside_pipeline",
+                "uncovered_parts": ["note_conversion + acquisition_consideration: declared incompatible"],
+                "required_primitives": ["note_conversion", "acquisition_consideration"],
+                "manual_artifacts": ["hand_math.xlsx"],
+                "counsel_review": True,
+                "metadata": {"run_id": rid},
+            }
+            with open(os.path.join(tmp, "coverage_disclosure.json"), "w") as f:
+                json.dump(rich, f)
+            got = self._compose(tmp, rid)["disclosure"]
+            for key in ("uncovered_parts", "required_primitives", "manual_artifacts"):
+                assert got.get(key) == rich[key], (
+                    f"compose destroyed {key!r} while claiming to PRESERVE the hand-roll "
+                    f"disclosure: {got.get(key)!r} != {rich[key]!r}"
+                )
+
+    def test_a_stale_prior_disclosure_is_ignored_not_inherited(self) -> None:
+        """A disclosure from an EARLIER run must not pin this one to the hand-roll claim.
+
+        Without run_id parity the precedence rule is self-sustaining: the file compose writes
+        carries `manual_outside_pipeline`, so the next compose re-triggers it, and a clean
+        fully-covered engagement is permanently labelled hand-rolled — with no way out, because
+        the outputs mount denies delete. CLAUDE.md states the rule this missed: "key it on
+        absence alone and a prior run's file silences it, so compare run_ids."
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            rid = self._compose_dir(tmp, covered=True)
+            with open(os.path.join(tmp, "coverage_disclosure.json"), "w") as f:
+                json.dump(
+                    {
+                        "schema_version": "v0.1-coverage-disclosure",
+                        "covered": False,
+                        "computation_method": "manual_outside_pipeline",
+                        "counsel_review": True,
+                        "metadata": {"run_id": "19990101T000000Z"},
+                    },
+                    f,
+                )
+            got = self._compose(tmp, rid)
+            assert got["disclosure"]["computation_method"] == "deterministic_pipeline", (
+                "a stale hand-roll disclosure was inherited — this compose is now permanently "
+                "pinned to a claim made by a different run"
+            )
+            codes = [w["code"] for w in got["report"].get("validation", {}).get("warnings", [])]
+            assert "STALE_ARTIFACT" in codes, f"the stale artifact must be reported; got {codes}"
+
+    def test_covered_detection_with_a_prior_hand_roll_disclosure(self) -> None:
+        """Detection says covered, a CURRENT-run hand-roll disclosure exists. Both routes ran.
+
+        This combination was untested and is the one the precedence rule most easily gets wrong:
+        the hand-roll claim wins (it is the more cautionary), so `covered` is forced false even
+        though detection said true — and that disagreement is exactly why the collision is
+        reported rather than silently resolved.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            rid = self._compose_dir(tmp, covered=True)
+            with open(os.path.join(tmp, "coverage_disclosure.json"), "w") as f:
+                json.dump(
+                    {
+                        "schema_version": "v0.1-coverage-disclosure",
+                        "covered": False,
+                        "computation_method": "manual_outside_pipeline",
+                        "uncovered_parts": ["hand-rolled: see counsel packet"],
+                        "counsel_review": True,
+                        "metadata": {"run_id": rid},
+                    },
+                    f,
+                )
+            got = self._compose(tmp, rid)
+            assert got["disclosure"]["computation_method"] == "manual_outside_pipeline"
+            assert got["disclosure"]["covered"] is False
+            assert got["disclosure"]["uncovered_parts"] == ["hand-rolled: see counsel packet"]
+            codes = [w["code"] for w in got["report"].get("validation", {}).get("warnings", [])]
+            assert "DISCLOSURE_ROUTE_COLLISION" in codes
+
+    def test_a_malformed_detection_verdict_warns_rather_than_defaulting_silently(self) -> None:
+        """`covered: "false"` (a string) must not silently restore the covered default.
+
+        The block's own comment promised this and the code did the opposite for every shape that
+        was not dict+bool. A string is the most plausible malformation and is precisely the
+        class the block exists to catch.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            rid = self._compose_dir(tmp, covered=True)
+            path = os.path.join(tmp, "coverage_result.json")
+            with open(path) as f:
+                cov = json.load(f)
+            cov["covered"] = "false"
+            with open(path, "w") as f:
+                json.dump(cov, f)
+            got = self._compose(tmp, rid)
+            codes = [w["code"] for w in got["report"].get("validation", {}).get("warnings", [])]
+            assert "COVERAGE_ARTIFACT_UNREADABLE" in codes, (
+                f"a non-boolean coverage verdict must be reported, not silently defaulted; got {codes}"
+            )
+
+    def test_uncovered_parts_names_what_is_uncovered_not_only_why(self) -> None:
+        """Measured across all registry subsets, every reason string is "declared incompatible".
+
+        A reason-only rendering therefore told the founder their deal was incompatible without
+        ever saying incompatible with what.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            rid = self._compose_dir(tmp, covered=False)
+            parts = self._compose(tmp, rid)["disclosure"]["uncovered_parts"]
+            assert parts and all(isinstance(p, str) for p in parts), parts
+            assert any("note_conversion" in p and "acquisition_consideration" in p for p in parts), (
+                f"uncovered_parts must name the primitives, not just the reason: {parts}"
+            )
+
+    def test_a_prior_pipeline_disclosure_is_not_treated_as_a_collision(self) -> None:
+        """Re-composing over compose's OWN prior disclosure must not warn.
+
+        The precedence rule keys on `manual_outside_pipeline` specifically. A plain re-run
+        (compose over a `deterministic_pipeline` disclosure it wrote itself) is ordinary and
+        must stay silent, or the warning fires on every second compose and stops meaning
+        anything.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            rid = self._compose_dir(tmp, covered=True)
+            first = self._compose(tmp, rid)
+            assert first["disclosure"]["computation_method"] == "deterministic_pipeline"
+            second = self._compose(tmp, rid)
+            codes = [w["code"] for w in second["report"].get("validation", {}).get("warnings", [])]
+            assert "DISCLOSURE_ROUTE_COLLISION" not in codes, (
+                "re-composing over compose's own disclosure is not a route collision"
+            )
+
+    def test_covered_detection_leaves_the_covered_path_unchanged(self) -> None:
+        """The fix must not turn every run into a warning — the covered path is the common case."""
+        with tempfile.TemporaryDirectory() as tmp:
+            rid = self._compose_dir(tmp, covered=True)
+            got = self._compose(tmp, rid)
+            assert got["disclosure"]["covered"] is True
+            codes = [w["code"] for w in got["report"].get("validation", {}).get("warnings", [])]
+            assert "COVERAGE_ROUTE_MISMATCH" not in codes
+
+    def test_absent_detection_artifact_keeps_the_covered_default(self) -> None:
+        """No detection artifact = no verdict to contradict; must not invent covered=false.
+
+        The lightweight and Lane-4 routes do not always run `detect_structure.py`, so absence
+        is ordinary. Inventing an uncovered verdict here would put a counsel-review banner on
+        every such run.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            rid = self._compose_dir(tmp, covered=None)
+            got = self._compose(tmp, rid)
+            assert got["disclosure"]["covered"] is True
+            codes = [w["code"] for w in got["report"].get("validation", {}).get("warnings", [])]
+            assert "COVERAGE_ROUTE_MISMATCH" not in codes

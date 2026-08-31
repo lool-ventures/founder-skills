@@ -79,6 +79,18 @@ tier should at least match it before being recommended.
 
 ## Pipeline-bypass telemetry (`bypass_telemetry.py`)
 
+> **What this does NOT measure — read before quoting a bypass rate.**
+> Classification is by **artifact existence**. A skipped *gate* leaves no file, so
+> gate compliance is invisible to this tool: a `pipeline_ran` verdict means *the
+> canonical artifacts exist*, **not** *the process was followed*. On 2026-07-05 a
+> real unscaffolded session skipped the mandatory cap-base confirmation gate, the
+> jurisdiction gate and scenario selection, and this instrument scored that
+> dimension as nothing at all. The compliance ledger designed to close the gap (the
+> `O1`–`O7` classifier) is **not implemented** — see
+> `docs/internal/2026-07-05-cap-table-gate-compliance-loop-plan.md`, whose own audit
+> header records it as Pending. Until it exists, a clean bypass rate is a statement
+> about artifacts and silence about process; do not read the silence as health.
+
 A separate, read-only tool that measures a different failure mode: whether the
 agent **actually ran the deterministic pipeline** in a Cowork run, or **bypassed
 it** — hand-rolling an analysis and producing no canonical artifacts (a

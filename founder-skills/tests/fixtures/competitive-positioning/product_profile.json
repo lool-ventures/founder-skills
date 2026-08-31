@@ -2,7 +2,9 @@
   "company_name": "Acmecorp",
   "slug": "acmecorp",
   "product_description": "Cloud-based accounting software for SMBs that uses AI to automate transaction categorization and bookkeeping busywork.",
-  "target_customers": ["Small businesses (1-50 employees)"],
+  "target_customers": [
+    "Small businesses (1-50 employees)"
+  ],
   "value_propositions": [
     "Automates the bulk of monthly bookkeeping with no manual rules setup",
     "Cuts SMB owner/bookkeeper time spent on books"
@@ -16,6 +18,12 @@
   "sector": "Fintech / Accounting",
   "business_model": "SaaS",
   "input_mode": "conversation",
-  "source_materials": ["founder conversation", "pitch deck"],
-  "metadata": {"run_id": "fixture-competitive-positioning-001"}
+  "source_materials": [
+    "founder conversation",
+    "pitch deck"
+  ],
+  "metadata": {
+    "run_id": "fixture-competitive-positioning-001"
+  },
+  "_produced_by": "persist_agent_artifact"
 }
