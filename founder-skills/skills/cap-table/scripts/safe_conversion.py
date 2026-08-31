@@ -120,8 +120,14 @@ def convert_safes_cap_implied(
     # from BOTH the denominator and the output with no diagnostic. That is the same class as the
     # all-or-nothing rule above -- a converting security missing from `total` inflates every other
     # SAFE's ownership -- and nothing upstream prevents it: the schemas declare no `uniqueItems`,
-    # `cap_state` does not dedupe, and `extract_instrument.py` guards ids only on its own lane, so a
+    # and `extract_instrument.py` guards ids only on its own lane, so a
     # hand-authored or freeform-mapped instruments.json reaches this function directly.
+    #
+    # `cap_state.build_cap_state` now refuses this artifact-wide, so on the orchestrated path this
+    # is a second line of defence rather than the only one. It stays because this function is also
+    # called directly (its own CLI, and callers that build a SAFE list without a cap state), and a
+    # guard that only holds when someone remembered to route through another module is not a
+    # guarantee.
     # A MISSING id is its own defect, reported separately. Folding it in as a duplicate of `None`
     # names a value that appears nowhere in the founder's documents, and the two need different
     # fixes. It also has to be checked FIRST: `priced[safe["id"]]` below is a subscript, so a single

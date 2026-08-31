@@ -46,7 +46,7 @@ from typing import Any
 # Import sibling math producers
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _rule_pack import RULE_PACK_VERSION  # noqa: E402
-from cap_state import build_cap_state  # noqa: E402
+from cap_state import CapStateInvariantError, build_cap_state  # noqa: E402
 from priced_round import solve_priced_round  # noqa: E402
 
 SCHEMA_VERSION = "v0.1.0-cap-table-fast-assess"
@@ -535,20 +535,32 @@ def _cli() -> int:
         )
         company_name_raw = "Unknown"
 
-    sentinel = quick_assess(
-        company_name=company_name_raw,
-        inputs=inputs,
-        safes=safes,
-        notes=notes,
-        pre_money=args.pre_money,
-        new_money=args.new_money,
-        target_pool_percent=args.target_pool_percent,
-        target_basis=args.target_basis,
-        event_date=args.event_date,
-        founder_prompt=args.founder_prompt,
-        attached_docs=args.attached_doc,
-        run_id_override=args.run_id,
-    )
+    # THE SAME LOUD-FAILURE CONTRACT THE cap_state CLI GOT, and it is the same fix: this is the other
+    # of `build_cap_state`'s two callers. Fixing one and not the other is the habit this workstream
+    # keeps getting caught in -- measured, a duplicate instrument id here produced an empty stdout and
+    # a raw Python traceback, in the lane whose whole selling point is a fast real calculation for a
+    # founder. Four properties: a machine-readable diagnostic on stdout, a line on stderr, nothing
+    # written to the review dir, exit non-zero.
+    try:
+        sentinel = quick_assess(
+            company_name=company_name_raw,
+            inputs=inputs,
+            safes=safes,
+            notes=notes,
+            pre_money=args.pre_money,
+            new_money=args.new_money,
+            target_pool_percent=args.target_pool_percent,
+            target_basis=args.target_basis,
+            event_date=args.event_date,
+            founder_prompt=args.founder_prompt,
+            attached_docs=args.attached_doc,
+            run_id_override=args.run_id,
+        )
+    except CapStateInvariantError as e:
+        sys.stdout.write(json.dumps({"validation": {"status": "invalid", "errors": [str(e)]}}) + "\n")
+        sys.stderr.write(f"quick_assess.py: cap table rejected: {e}\n")
+        sys.stderr.write(f"quick_assess.py: {os.path.abspath(args.review_dir)} was left unchanged.\n")
+        return 1
 
     os.makedirs(args.review_dir, exist_ok=True)
     md_path = os.path.join(args.review_dir, "report_fast_assess.md")

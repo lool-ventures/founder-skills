@@ -2038,30 +2038,30 @@ class TestCapStateRejectsDuplicateIds:
             },
         )
 
-    def test_every_guarded_array_is_actually_reached(self) -> None:
-        """The vacuity check, and it caught a real defect while this was being written.
+    def test_the_check_reads_the_CANONICAL_rows_not_the_raw_input(self) -> None:
+        """Behavioural replacement for a grep test that could not fail.
 
-        The canonical row RENAMES the input's `id` to `safe_id`/`note_id`/`warrant_id`/`grant_id`,
-        so a uniqueness check written against `"id"` inspects a field nothing carries and passes
-        silently. The notes entry was written that way: five arrays were caught and notes sailed
-        through. Asserting per-array is what surfaced it -- a single "duplicates are refused" test
-        over one array would have shipped the hole.
+        The version here before greped the source for `("convertible_notes", "note_id"` tuples. That
+        passes when the guard is deleted outright (measured: 7 behavioural tests fail, the grep test
+        passes) AND when the rows argument is swapped to the raw input — which is precisely the
+        vacuous-guard defect its docstring claimed it existed to catch. It was theatre, and the
+        commit message credited it with a catch the per-array behavioural tests actually made.
+
+        This asserts the property instead. `preferred_series` ids are DERIVED during canonicalization
+        when the document states none, so a check reading the raw input cannot see a derived
+        collision. Two series named "Series A" and "series a" carry no duplicate in the input and a
+        duplicate in the canonical rows; only a check on the canonical rows refuses them.
         """
         import cap_state  # type: ignore[import-not-found]
 
-        for array, canonical_key in (
-            ("founders", "founder_id"),
-            ("preferred_series", "series_id"),
-            ("option_grants", "grant_id"),
-            ("safes", "safe_id"),
-            ("convertible_notes", "note_id"),
-            ("warrants", "warrant_id"),
-        ):
-            source = (Path(cap_state.__file__).read_text(encoding="utf-8")).split("_check_unique_ids(")[-1]
-            assert f'("{array}", "{canonical_key}"' in source, (
-                f"{array} is checked against a key other than {canonical_key!r}, so its uniqueness "
-                "check inspects a field the canonical rows do not carry and can never fire"
-            )
+        raw = [self._series(None, "Series A", 1.0), self._series(None, "series a", 2.0)]
+        assert len({s["series_name"] for s in raw}) == 2, "the raw input carries no duplicate"
+        with pytest.raises(cap_state.CapStateInvariantError) as exc:
+            self._build({"preferred_series": raw}, {})
+        assert "E_DUPLICATE_ID_IN_CAP_TABLE" in str(exc.value), (
+            "the collision exists only after canonicalization, so a guard reading the raw input "
+            f"would pass here: {exc.value}"
+        )
 
     def test_distinct_ids_across_every_array_still_build(self) -> None:
         """No false positives: a populated, well-formed cap table must be unaffected."""
@@ -2247,3 +2247,84 @@ def test_the_prose_matchers_catch_what_shipped_and_spare_what_must_survive() -> 
             if hit
         ]
         assert tripped == [], f"{label!r} is correct prose and would be flagged by {tripped}: {s[:70]}"
+
+
+class TestAoaMergeRefusesWithinPayloadDuplicates:
+    """A collapse UPSTREAM of the artifact guard, which the artifact guard structurally cannot see.
+
+    `merge_into_inputs` snapshots `existing_index` from the pre-loop series list and then MUTATES
+    that same index as it appends. So two entries in one AoA payload sharing a `series_name` take the
+    "already present" branch on the second iteration and overwrite the first — even with
+    `replace_existing=False`, which this function documents as an atomic no-write.
+
+    Measured: a payload of "Series A" 1,000,000 and "Series A" 2,000,000 persisted ONE row of
+    2,000,000 and reported `added_count: 1, replaced_count: 1` against a file with no preferred
+    series at all. Founder ownership then rendered 80.0% where the truth was 72.7%.
+
+    `cap_state`'s uniqueness guard could not catch it: by the time the artifact is built there
+    genuinely IS only one series. A guard downstream of a collapse cannot detect the collapse — which
+    is the lesson this class exists to record, not just the bug.
+
+    Note the two checks catch DIFFERENT things and neither subsumes the other. `cap_state` derives
+    ids case-insensitively, so it catches "Series A" vs "series a"; this one is an exact-name match,
+    so it catches the identical repeat — the likelier extraction artifact of the two.
+    """
+
+    @staticmethod
+    def _series(name: str, shares: int) -> dict:
+        return {
+            "series_name": name,
+            "shares": shares,
+            "original_issue_price": 1.0,
+            "original_conversion_price": 1.0,
+            "current_conversion_price": 1.0,
+            "anti_dilution_protection": "broad_based_weighted_average",
+        }
+
+    @staticmethod
+    def _inputs(tmp_path: Path) -> Path:
+        p = tmp_path / "inputs.json"
+        p.write_text(
+            json.dumps(
+                {
+                    "company_name": "X",
+                    "founders": [{"founder_id": "f1", "name": "F", "common_shares": 8_000_000}],
+                    "metadata": {"run_id": "t", "schema_version": "v0.5.0-inputs"},
+                }
+            ),
+            encoding="utf-8",
+        )
+        return p
+
+    def test_a_repeated_series_name_in_one_payload_writes_nothing(self, tmp_path: Path) -> None:
+        import extract_aoa  # type: ignore[import-not-found]
+
+        path = self._inputs(tmp_path)
+        receipt = extract_aoa.merge_into_inputs(
+            str(path), [self._series("Series A", 1_000_000), self._series("Series A", 2_000_000)], source_doc="a.pdf"
+        )
+        assert receipt["status"] == "conflict", (
+            f"a payload with two 'Series A' rows was merged. One series' shares are gone from the cap "
+            f"table while the totals move, and nothing downstream can tell. {receipt}"
+        )
+        assert "Series A" in (receipt.get("conflicts") or []), receipt
+        merged = json.loads(path.read_text(encoding="utf-8"))
+        assert not merged.get("preferred_series"), (
+            "the refusal must be atomic — this function documents a no-flag conflict as writing "
+            f"nothing: {merged.get('preferred_series')}"
+        )
+
+    def test_distinct_series_names_still_merge_with_every_share_kept(self, tmp_path: Path) -> None:
+        """Non-vacuity, and it pins the number the collapse got wrong."""
+        import extract_aoa  # type: ignore[import-not-found]
+
+        path = self._inputs(tmp_path)
+        receipt = extract_aoa.merge_into_inputs(
+            str(path), [self._series("Series A", 1_000_000), self._series("Series B", 2_000_000)], source_doc="a.pdf"
+        )
+        assert receipt["status"] == "merged", receipt
+        merged = json.loads(path.read_text(encoding="utf-8"))
+        assert len(merged["preferred_series"]) == 2
+        assert sum(s["shares"] for s in merged["preferred_series"]) == 3_000_000, (
+            "both series' shares must survive the merge; the collapse reported 2,000,000 of 3,000,000"
+        )

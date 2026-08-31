@@ -831,8 +831,7 @@ def _duplicate_id_blockers(safes: list[dict[str, Any]], notes: list[dict[str, An
     """Refuse instrument sets whose ids collapse the per-instrument output.
 
     Separate from a schema `uniqueItems` because nothing upstream enforces one: the instruments
-    schema declares no uniqueness, `cap_state` does not dedupe, and the extraction-lane guard covers
-    only its own lane -- so a hand-authored or freeform-mapped instruments.json reaches the solver
+    schema declares no uniqueness and the extraction-lane guard covers only its own lane -- so a hand-authored or freeform-mapped instruments.json reaches the solver
     directly.
 
     A MISSING id is reported as its own defect rather than folded in as a duplicate of `None`. They

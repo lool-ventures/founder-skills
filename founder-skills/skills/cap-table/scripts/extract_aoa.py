@@ -403,8 +403,39 @@ def merge_into_inputs(
 
     now = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    # First pass: detect conflicts WITHOUT mutating, so a no-flag conflict is an
-    # atomic no-write (nothing partially merged).
+    # WITHIN-PAYLOAD DUPLICATES ARE REFUSED BEFORE ANYTHING ELSE, and this is not the same check as
+    # the conflict pass below. That one compares the payload against series ALREADY in inputs.json;
+    # this one compares the payload against ITSELF. Two entries sharing a series_name took the
+    # `name in existing_index` branch on the second iteration -- because the loop mutates the very
+    # index the pre-pass snapshotted -- and OVERWROTE the first row, even with replace_existing=False,
+    # which this function documents as an atomic no-write.
+    #
+    # Measured: an AoA payload carrying "Series A" 1,000,000 shares and "Series A" 2,000,000 shares
+    # persisted ONE row of 2,000,000 and reported `added_count: 1, replaced_count: 1` for a file that
+    # had no preferred series in it at all. Founder ownership then rendered 80.0% against a truth of
+    # 72.7% -- and `cap_state`'s uniqueness guard could not see it, because by then there genuinely
+    # was only one series. A guard downstream of a collapse cannot detect the collapse.
+    #
+    # An exact repeat is the likelier extraction artifact than a case variant, so this catches what
+    # `cap_state`'s case-insensitive derived-id check structurally cannot.
+    payload_names: list[str] = [s["series_name"] for s in preferred_series if isinstance(s.get("series_name"), str)]
+    within = sorted({n for n in payload_names if payload_names.count(n) > 1})
+    if within:
+        return {
+            "status": "conflict",
+            "added": [],
+            "conflicts": within,
+            "reason": (
+                f"the extraction carries {len(within)} repeated series name(s): {within}. Two entries "
+                "with one name would merge into a single row, dropping the other series' shares from "
+                "the cap table while the totals move. Nothing was written. If these are genuinely "
+                "different series, give each one its own name; if they are one series read twice, "
+                "remove the duplicate."
+            ),
+        }
+
+    # Second pass: detect conflicts against what is ALREADY in inputs.json, WITHOUT mutating, so a
+    # no-flag conflict is an atomic no-write (nothing partially merged).
     conflicts = [
         series.get("series_name")
         for series in preferred_series
