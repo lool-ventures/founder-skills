@@ -471,7 +471,7 @@ def convert_note(
     return base
 
 
-def derive_scenario_completeness(per_note: dict[str, dict[str, Any]]) -> str:
+def derive_scenario_completeness(per_note: list[dict[str, Any]]) -> str:
     """Per design rev14: derive scenario-level completeness from per-note branches.
 
     Returns one of: full | repay_only | structural_only | mixed.
@@ -480,7 +480,19 @@ def derive_scenario_completeness(per_note: dict[str, dict[str, Any]]) -> str:
     cash_set = {"maturity_repay"}
     struct_set = {"maturity_extend", "maturity_counsel_review", "threshold_not_met"}
 
-    branches = {p["branch"] for p in per_note.values() if "branch" in p}
+    # REFUSE THE WRONG SHAPE rather than answering permissively. `per_note` became a list of
+    # id-bearing rows; handed the old id-keyed dict, iteration yields KEY STRINGS, `"branch" in p`
+    # is False for every one, `branches` comes out empty, and the empty set is a subset of
+    # `share_set` -- so the function returns "full". A shape mismatch would resolve to the most
+    # permissive completeness there is, which is the answer that lets a wrong number through to a
+    # founder. Measured while migrating: a caller passing the old dict got "full" where the correct
+    # answer was "structural_only".
+    if not isinstance(per_note, list):
+        raise TypeError(
+            f"derive_scenario_completeness expects a LIST of per-note rows, got {type(per_note).__name__}. "
+            "Per-instrument outputs are lists of id-bearing rows, not dicts keyed by id."
+        )
+    branches = {p["branch"] for p in per_note if isinstance(p, dict) and "branch" in p}
     # Errors are not in any set; they're hard rejects
     if any(b in {"no_conversion_path", "override_mismatch", "priced_round_no_cap_or_discount"} for b in branches):
         return "structural_only"  # caller should also surface the error

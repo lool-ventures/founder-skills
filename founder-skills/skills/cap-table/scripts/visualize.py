@@ -585,10 +585,10 @@ def render_report_html(
     for s in cap_implied:
         co = s["computed_outputs"]
         rows = "".join(
-            f'<tr><td>{_esc(sid)}</td><td class="num">{_pct(r.get("cap_implied_ownership", 0))}</td>'
+            f'<tr><td>{_esc(r["id"])}</td><td class="num">{_pct(r.get("cap_implied_ownership", 0))}</td>'
             f'<td class="num">${float(r.get("safe_price") or 0):.4f}</td>'
             f'<td class="num">{int(r.get("cap_implied_shares") or 0):,}</td></tr>'
-            for sid, r in co["per_safe"].items()
+            for r in co["per_safe"]
         )
         scenario_cards.append(f"""
 <div class="card card-dashed avoid-break">

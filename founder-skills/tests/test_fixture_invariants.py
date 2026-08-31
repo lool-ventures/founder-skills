@@ -41,9 +41,9 @@ def _cap_implied_entries(scenarios: dict) -> list[tuple[str, dict, float | None]
     for scenario in scenarios.get("scenarios") or []:
         computed = scenario.get("computed_outputs") or {}
         total = computed.get("company_capitalization")
-        for safe_id, entry in (computed.get("per_safe") or {}).items():
+        for entry in computed.get("per_safe") or []:
             if entry.get("branch") == "cap_implied":
-                out.append((safe_id, entry, total))
+                out.append((entry["id"], entry, total))
     return out
 
 
@@ -103,7 +103,7 @@ def test_fixture_cap_implied_denominator_closes(path: Path) -> None:
     for scenario in scenarios.get("scenarios") or []:
         computed = scenario.get("computed_outputs") or {}
         total = computed.get("company_capitalization")
-        cap_implied = [e for e in (computed.get("per_safe") or {}).values() if e.get("branch") == "cap_implied"]
+        cap_implied = [e for e in computed.get("per_safe") or [] if e.get("branch") == "cap_implied"]
         if not (total and cap_implied):
             continue
         closed = pre_fd + sum(e["cap_implied_shares"] for e in cap_implied)

@@ -165,7 +165,7 @@ def run_safe_conversion_scenario(
                     ),
                 }
             ],
-            "per_safe": {},
+            "per_safe": [],
             "math_provenance": [
                 {
                     "output_field": "blockers",
@@ -177,7 +177,7 @@ def run_safe_conversion_scenario(
             ],
         }
 
-    per_safe: dict[str, dict[str, Any]] = {}
+    per_safe: list[dict[str, Any]] = []
     if priced_pre is None or priced_new is None:
         # Cap-implied path only. MFN elections need a priced round to resolve against
         # (the cap-implied path has no election path) — surface a blocker once rather
@@ -271,7 +271,7 @@ def run_note_conversion_scenario(
         return {
             "completeness": "structural_only",
             "blockers": id_blockers,
-            "per_note": {},
+            "per_note": [],
             "math_provenance": [],
         }
 
@@ -292,13 +292,13 @@ def run_note_conversion_scenario(
                     "remedy": "Provide transaction_event_date for note conversion.",
                 }
             ],
-            "per_note": {},
+            "per_note": [],
             "math_provenance": [],
         }
 
     priced_new = params.get("priced_round_new_money")
     qfp = params.get("qualified_financing_price")
-    per_note: dict[str, dict[str, Any]] = {}
+    per_note: list[dict[str, Any]] = []
     blockers: list[dict[str, Any]] = []
     for n in usable_notes:
         r = convert_note(
@@ -307,7 +307,8 @@ def run_note_conversion_scenario(
             priced_round_new_money=priced_new,
             qualified_financing_price=qfp,
         )
-        per_note[n["id"]] = r
+        r["id"] = n["id"]
+        per_note.append(r)
         if "error" in r:
             blockers.append(
                 {
@@ -321,10 +322,13 @@ def run_note_conversion_scenario(
 
     # Surface terms-only notes (excluded from math above) so they never vanish silently.
     for n in terms_only_notes:
-        per_note[n["id"]] = {
-            "branch": "terms_only_excluded",
-            "reason": "principal or issuance_date absent in the document — terms-only, not converted",
-        }
+        per_note.append(
+            {
+                "id": n["id"],
+                "branch": "terms_only_excluded",
+                "reason": "principal or issuance_date absent in the document — terms-only, not converted",
+            }
+        )
     out: dict[str, Any] = {
         "completeness": completeness,
         "blockers": blockers,
@@ -333,7 +337,7 @@ def run_note_conversion_scenario(
     }
 
     # Aggregate cash repayment when at least one note hit repay branch
-    cash = sum(p.get("cash_repayment", 0.0) for p in per_note.values() if p.get("branch") == "maturity_repay")
+    cash = sum(p.get("cash_repayment", 0.0) for p in per_note if p.get("branch") == "maturity_repay")
     if cash > 0:
         out["aggregate_cash_repayment"] = cash
 

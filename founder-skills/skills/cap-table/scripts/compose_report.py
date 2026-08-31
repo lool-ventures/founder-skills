@@ -212,8 +212,8 @@ def build_scenario_digest(scenarios: list[dict[str, Any]]) -> list[dict[str, Any
             "target_pool_percent": params.get("target_pool_percent"),
         }
         # Branch summary
-        per_note = co.get("per_note", {}) or {}
-        per_safe = co.get("per_safe", {}) or {}
+        per_note = co.get("per_note") or []
+        per_safe = co.get("per_safe") or []
         share_branches = {
             "cap_conversion",
             "discount_only",
@@ -226,8 +226,8 @@ def build_scenario_digest(scenarios: list[dict[str, Any]]) -> list[dict[str, Any
         cash_branches = {"maturity_repay"}
         struct_branches = {"maturity_extend", "maturity_counsel_review", "threshold_not_met"}
         branches_seen = [
-            *(p.get("branch") for p in per_note.values()),
-            *(p.get("branch") for p in per_safe.values()),
+            *(p.get("branch") for p in per_note),
+            *(p.get("branch") for p in per_safe),
         ]
         branch_summary = {
             "share_producing_count": sum(1 for b in branches_seen if b in share_branches),
@@ -1388,10 +1388,11 @@ def render_report_markdown(
                 lines.append(f"**Founder Impact Lens:** {fi['plain_language']}")
                 lines.append("")
         if completeness == "structural_only" and co.get("cap_implied_only"):
-            ps = co.get("per_safe", {})
+            ps = co.get("per_safe") or []
             if ps:
                 lines.append("**Cap-implied ownership (pre-financing):**")
-                for sid, r in ps.items():
+                for r in ps:
+                    sid = r["id"]
                     if "cap_implied_ownership" in r:
                         lines.append(
                             f"- {_instrument_label(instruments, sid)}: "
@@ -1445,13 +1446,14 @@ def render_report_markdown(
         # than scenario type so priced_round scenarios that populate these fields
         # (fully-coupled solver produces per_safe/per_note for every instrument
         # that participates in the round) also get the conversion-math tables.
-        per_note = co.get("per_note") or {}
+        per_note = co.get("per_note") or []
         if per_note:
             lines.append("**Per-note conversion math:**")
             lines.append("")
             lines.append("| Note | Branch | Accrued interest | Conversion price | Conversion shares |")
             lines.append("|---|---|---:|---:|---:|")
-            for nid, r in per_note.items():
+            for r in per_note:
+                nid = r["id"]
                 branch = r.get("branch", "—")
                 ai = r.get("accrued_interest")
                 cp = r.get("conversion_price")
@@ -1463,15 +1465,16 @@ def render_report_markdown(
                     f"{(f'{int(shares):,}') if shares is not None else '—'} |"
                 )
             lines.append("")
-        per_safe = co.get("per_safe") or {}
+        per_safe = co.get("per_safe") or []
         # Render only when there are rows that are NOT the cap_implied_only snapshot
-        per_safe_rows = {sid: r for sid, r in per_safe.items() if "cap_implied_ownership" not in r}
+        per_safe_rows = [r for r in per_safe if "cap_implied_ownership" not in r]
         if per_safe_rows:
             lines.append("**Per-SAFE conversion math:**")
             lines.append("")
             lines.append("| SAFE | Branch | Purchase ÷ Cap | Conversion price | Conversion shares |")
             lines.append("|---|---|---|---:|---:|")
-            for sid, r in per_safe_rows.items():
+            for r in per_safe_rows:
+                sid = r["id"]
                 branch = r.get("branch", "—")
                 cp = r.get("conversion_price")
                 shares = r.get("conversion_shares")

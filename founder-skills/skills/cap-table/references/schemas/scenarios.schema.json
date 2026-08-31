@@ -2,54 +2,145 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "cap-table scenarios.json",
   "type": "object",
-  "required": ["scenarios", "metadata"],
+  "required": [
+    "scenarios",
+    "metadata"
+  ],
   "properties": {
     "scenarios": {
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["scenario_id", "label", "type", "parameters", "computed_outputs"],
+        "required": [
+          "scenario_id",
+          "label",
+          "type",
+          "parameters",
+          "computed_outputs"
+        ],
         "properties": {
-          "scenario_id": {"type": "string"},
-          "label": {"type": "string"},
-          "type": {"enum": ["safe_conversion", "note_conversion", "priced_round", "flip"]},
-          "chained_from_scenario_id": {"type": ["string", "null"], "default": null, "description": "If set, this scenario runs against the post-round cap_state from the named parent scenario (§6.7). If null, runs against original pre-financing cap_state. Validator rejects cycles with E_SCENARIO_CHAIN_CYCLE."},
+          "scenario_id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "safe_conversion",
+              "note_conversion",
+              "priced_round",
+              "flip"
+            ]
+          },
+          "chained_from_scenario_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null,
+            "description": "If set, this scenario runs against the post-round cap_state from the named parent scenario (\u00a76.7). If null, runs against original pre-financing cap_state. Validator rejects cycles with E_SCENARIO_CHAIN_CYCLE."
+          },
           "parameters": {
             "type": "object",
             "properties": {
               "mfn_elections": {
                 "description": "Optional map {electing_safe_id: elected_against_safe_id} directing each yc_uncapped_mfn SAFE to inherit a specific sibling's terms for this scenario. Documentation only: shape is enforced at runtime in priced_round._apply_mfn_election_overrides (E_MFN_ELECTIONS_BAD_SHAPE), NOT by this schema (the local validator declares no 'type' here so a malformed value reaches the runtime guard instead of failing artifact validation)."
               },
-              "pre_money_basis": { "enum": ["includes_safe_conversion", "excludes_safe_conversion"], "default": "includes_safe_conversion" },
-              "pool_consideration_basis": { "enum": ["include", "exclude"], "default": "include" },
+              "pre_money_basis": {
+                "enum": [
+                  "includes_safe_conversion",
+                  "excludes_safe_conversion"
+                ],
+                "default": "includes_safe_conversion"
+              },
+              "pool_consideration_basis": {
+                "enum": [
+                  "include",
+                  "exclude"
+                ],
+                "default": "include"
+              },
               "acquisition": {
                 "type": "object",
                 "properties": {
-                  "acquired_entity": { "type": "string" },
-                  "consideration_pct": { "type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1 },
-                  "consideration_form": { "const": "shares" },
-                  "acquisition_timing": { "enum": ["concurrent_with_round", "pre_round_closed"] }
+                  "acquired_entity": {
+                    "type": "string"
+                  },
+                  "consideration_pct": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "exclusiveMaximum": 1
+                  },
+                  "consideration_form": {
+                    "const": "shares"
+                  },
+                  "acquisition_timing": {
+                    "enum": [
+                      "concurrent_with_round",
+                      "pre_round_closed"
+                    ]
+                  }
                 }
               }
             }
           },
           "computed_outputs": {
             "type": "object",
-            "required": ["completeness", "math_provenance", "blockers"],
+            "required": [
+              "completeness",
+              "math_provenance",
+              "blockers"
+            ],
             "properties": {
-              "completeness": {"enum": ["full", "structural_only", "repay_only", "mixed"]},
-              "cap_implied_only": {"type": "boolean"},
+              "completeness": {
+                "enum": [
+                  "full",
+                  "structural_only",
+                  "repay_only",
+                  "mixed"
+                ]
+              },
+              "cap_implied_only": {
+                "type": "boolean"
+              },
               "math_provenance": {
                 "type": "array",
                 "items": {
                   "type": "object",
-                  "required": ["output_field", "source_type"],
+                  "required": [
+                    "output_field",
+                    "source_type"
+                  ],
                   "properties": {
-                    "output_field": {"type": "string"},
-                    "source_type": {"enum": ["rule", "counsel_supplied_override", "solver_intermediate"]},
-                    "rule_id": {"type": ["string", "null"]},
-                    "rule_pack_version": {"type": ["string", "null"]},
-                    "source_ref": {"type": ["string", "null"]}
+                    "output_field": {
+                      "type": "string"
+                    },
+                    "source_type": {
+                      "enum": [
+                        "rule",
+                        "counsel_supplied_override",
+                        "solver_intermediate"
+                      ]
+                    },
+                    "rule_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "rule_pack_version": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "source_ref": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
                   }
                 }
               },
@@ -57,115 +148,315 @@
                 "type": "array",
                 "items": {
                   "type": "object",
-                  "required": ["code", "remedy"],
+                  "required": [
+                    "code",
+                    "remedy"
+                  ],
                   "properties": {
-                    "code": {"type": "string"},
-                    "instance_id": {"type": ["string", "null"]},
-                    "remedy": {"type": "string"}
+                    "code": {
+                      "type": "string"
+                    },
+                    "instance_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "remedy": {
+                      "type": "string"
+                    }
                   }
                 }
               },
-              "post_round_cap_table": {"type": "array"},
+              "post_round_cap_table": {
+                "type": "array"
+              },
               "founder_impact": {
-                "type": ["object", "null"],
+                "type": [
+                  "object",
+                  "null"
+                ],
                 "properties": {
-                  "before_pct": {"type": "number"},
-                  "after_pct": {"type": "number"},
-                  "delta_pp": {"type": "number"},
-                  "plain_language": {"type": "string"}
+                  "before_pct": {
+                    "type": "number"
+                  },
+                  "after_pct": {
+                    "type": "number"
+                  },
+                  "delta_pp": {
+                    "type": "number"
+                  },
+                  "plain_language": {
+                    "type": "string"
+                  }
                 }
               },
               "aggregate_ownership_by_class": {
-                "type": ["object", "null"],
+                "type": [
+                  "object",
+                  "null"
+                ],
                 "description": "Includes optional `founders_pct_pre_anti_dilution`, `preferred_pct_pre_anti_dilution`, `anti_dilution_delta_pct_points` fields when AD fires on the scenario."
               },
-              "aggregate_cash_repayment": {"type": ["number", "null"]},
-              "per_note": {"type": ["object", "null"]},
-              "per_safe": {"type": ["object", "null"]},
+              "aggregate_cash_repayment": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "per_note": {
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ]
+                },
+                "description": "One row per instrument, each carrying its own id. A LIST rather than an object keyed by id: an id read out of a founder's document can collide, and an id-keyed object silently drops a row while the totals keep counting it, which is a wrong ownership figure with no warning. A list cannot lose a row."
+              },
+              "per_safe": {
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ]
+                },
+                "description": "One row per instrument, each carrying its own id. A LIST rather than an object keyed by id: an id read out of a founder's document can collide, and an id-keyed object silently drops a row while the totals keep counting it, which is a wrong ownership figure with no warning. A list cannot lose a row."
+              },
               "anti_dilution_breakdown": {
                 "type": "array",
                 "description": "Optional. Per-AD-protected-series breakdown emitted by AntiDilutionAdjuster. Present only when AD fired on at least one series.",
                 "items": {
                   "type": "object",
-                  "required": ["series_id", "protection_type", "ccp_before", "ccp_after", "rule_id"],
+                  "required": [
+                    "series_id",
+                    "protection_type",
+                    "ccp_before",
+                    "ccp_after",
+                    "rule_id"
+                  ],
                   "properties": {
-                    "series_id": {"type": "string"},
-                    "protection_type": {"enum": ["broad_based_weighted_average", "narrow_based_weighted_average", "full_ratchet"]},
-                    "ad_trigger_basis": {"enum": ["original_issue_price", "current_conversion_price"]},
-                    "ad_a_denominator_basis": {"enum": ["nvca_broad", "nvca_narrow", null]},
-                    "trigger_price": {"type": "number"},
-                    "new_pps": {"type": "number"},
-                    "ccp_before": {"type": "number"},
-                    "ccp_after": {"type": "number"},
-                    "ccp_unfloored": {"type": "number"},
-                    "floor_applied": {"type": "boolean"},
-                    "A": {"type": "number"},
-                    "B": {"type": ["number", "null"]},
-                    "C": {"type": ["number", "null"]},
-                    "rule_id": {"type": "string"},
-                    "rule_pack_version": {"type": "string"}
+                    "series_id": {
+                      "type": "string"
+                    },
+                    "protection_type": {
+                      "enum": [
+                        "broad_based_weighted_average",
+                        "narrow_based_weighted_average",
+                        "full_ratchet"
+                      ]
+                    },
+                    "ad_trigger_basis": {
+                      "enum": [
+                        "original_issue_price",
+                        "current_conversion_price"
+                      ]
+                    },
+                    "ad_a_denominator_basis": {
+                      "enum": [
+                        "nvca_broad",
+                        "nvca_narrow",
+                        null
+                      ]
+                    },
+                    "trigger_price": {
+                      "type": "number"
+                    },
+                    "new_pps": {
+                      "type": "number"
+                    },
+                    "ccp_before": {
+                      "type": "number"
+                    },
+                    "ccp_after": {
+                      "type": "number"
+                    },
+                    "ccp_unfloored": {
+                      "type": "number"
+                    },
+                    "floor_applied": {
+                      "type": "boolean"
+                    },
+                    "A": {
+                      "type": "number"
+                    },
+                    "B": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "C": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "rule_id": {
+                      "type": "string"
+                    },
+                    "rule_pack_version": {
+                      "type": "string"
+                    }
                   }
                 }
               },
               "ccp_mutations": {
                 "type": "object",
                 "description": "Optional. Map series_id -> CCP-after-this-scenario. Used by cap_state_after_round.json builder.",
-                "additionalProperties": {"type": "number"}
+                "additionalProperties": {
+                  "type": "number"
+                }
               },
               "per_safe_breakdown": {
-                "type": ["object", "null"],
+                "type": [
+                  "object",
+                  "null"
+                ],
                 "description": "Per-SAFE breakdown for compose_report's per-instrument narrative (Bug E fix). Keyed by safe_id.",
                 "additionalProperties": {
                   "type": "object",
                   "properties": {
-                    "branch": {"type": "string"},
-                    "candidate_set": {"type": "object"},
-                    "conversion_price": {"type": "number"},
-                    "conversion_shares": {"type": "integer"},
-                    "investor_name": {"type": ["string", "null"]}
+                    "branch": {
+                      "type": "string"
+                    },
+                    "candidate_set": {
+                      "type": "object"
+                    },
+                    "conversion_price": {
+                      "type": "number"
+                    },
+                    "conversion_shares": {
+                      "type": "integer"
+                    },
+                    "investor_name": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
                   }
                 }
               },
               "per_note_breakdown": {
-                "type": ["object", "null"],
+                "type": [
+                  "object",
+                  "null"
+                ],
                 "description": "Per-note breakdown for compose_report's per-instrument narrative (Bug E fix). Keyed by note_id.",
                 "additionalProperties": {
                   "type": "object",
                   "properties": {
-                    "branch": {"type": "string"},
-                    "accrued_interest": {"type": "number"},
-                    "days_elapsed": {"type": "integer"},
-                    "conversion_price": {"type": "number"},
-                    "conversion_shares": {"type": "integer"},
-                    "investor_name": {"type": ["string", "null"]}
+                    "branch": {
+                      "type": "string"
+                    },
+                    "accrued_interest": {
+                      "type": "number"
+                    },
+                    "days_elapsed": {
+                      "type": "integer"
+                    },
+                    "conversion_price": {
+                      "type": "number"
+                    },
+                    "conversion_shares": {
+                      "type": "integer"
+                    },
+                    "investor_name": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
                   }
                 }
               },
               "warrant_exercise_events": {
                 "type": "array",
-                "description": "Per-warrant exercise events from the pre-round pump (§6.1.5). Emitted by run_scenario.py orchestration.",
+                "description": "Per-warrant exercise events from the pre-round pump (\u00a76.1.5). Emitted by run_scenario.py orchestration.",
                 "items": {
                   "type": "object",
                   "properties": {
-                    "warrant_id": {"type": "string"},
-                    "exercised_at_pps": {"type": "number"},
-                    "shares_added": {"type": "integer"},
-                    "settlement_type": {"enum": ["cash_exercise", "net_share_settlement", "holder_election"]},
-                    "fmv_approximation_used": {"type": "boolean", "default": false}
+                    "warrant_id": {
+                      "type": "string"
+                    },
+                    "exercised_at_pps": {
+                      "type": "number"
+                    },
+                    "shares_added": {
+                      "type": "integer"
+                    },
+                    "settlement_type": {
+                      "enum": [
+                        "cash_exercise",
+                        "net_share_settlement",
+                        "holder_election"
+                      ]
+                    },
+                    "fmv_approximation_used": {
+                      "type": "boolean",
+                      "default": false
+                    }
                   }
                 }
               },
-              "convergence_history": {"type": ["array", "null"]},
-              "iterations": {"type": ["integer", "null"]},
-              "converged": {"type": ["boolean", "null"]},
-              "post_round_fully_diluted_shares": {"type": ["integer", "null"]},
+              "convergence_history": {
+                "type": [
+                  "array",
+                  "null"
+                ]
+              },
+              "iterations": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "converged": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "post_round_fully_diluted_shares": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
               "cap_state_after_pump": {
-                "type": ["object", "null"],
-                "description": "Phase F (v0.5.0): post-pump cap_state delta when a pre-round warrant pump fires. Embeds only the changing parts (as_converted_totals + outstanding_warrants + cap_table_history). Future debugging + the §4.5 FD-sum invariant trip-wire consume this.",
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "description": "Phase F (v0.5.0): post-pump cap_state delta when a pre-round warrant pump fires. Embeds only the changing parts (as_converted_totals + outstanding_warrants + cap_table_history). Future debugging + the \u00a74.5 FD-sum invariant trip-wire consume this.",
                 "properties": {
-                  "as_converted_totals": {"type": "object"},
-                  "outstanding_warrants": {"type": "array"},
-                  "cap_table_history": {"type": "array"}
+                  "as_converted_totals": {
+                    "type": "object"
+                  },
+                  "outstanding_warrants": {
+                    "type": "array"
+                  },
+                  "cap_table_history": {
+                    "type": "array"
+                  }
                 }
               }
             }
@@ -175,8 +466,14 @@
     },
     "metadata": {
       "type": "object",
-      "required": ["run_id"],
-      "properties": {"run_id": {"type": "string"}}
+      "required": [
+        "run_id"
+      ],
+      "properties": {
+        "run_id": {
+          "type": "string"
+        }
+      }
     }
   }
 }

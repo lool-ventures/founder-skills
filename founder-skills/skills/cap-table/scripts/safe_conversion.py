@@ -40,6 +40,7 @@ import sys
 from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _artifact_io  # type: ignore[import-not-found]  # noqa: E402
 from _emit import add_output_args, emit  # noqa: E402
 from _rule_pack import RULE_PACK_VERSION  # noqa: E402
 
@@ -224,39 +225,42 @@ def convert_safes_cap_implied(
             ),
         }
 
-    per_safe: dict[str, Any] = {}
+    per_safe: list[dict[str, Any]] = []
     for safe in safes:
         cap = safe["post_money_valuation_cap"]
         safe_price = cap / total
         shares = safe["purchase_amount"] / safe_price
-        per_safe[safe["id"]] = {
-            "branch": "cap_implied",
-            "cap_implied_ownership": priced[safe["id"]],
-            "safe_price": safe_price,
-            "cap_implied_shares": shares,
-            "math_provenance": [
-                {
-                    "output_field": field,
-                    "source_type": "rule",
-                    # The stacked rule governs the denominator; the per-SAFE percentage is still the
-                    # post-money cap conversion. Citing both is the honest provenance.
-                    "rule_id": rule_id,
-                    "rule_pack_version": RULE_PACK_VERSION,
-                    "source_ref": None,
-                }
-                for field, rule_id in (
-                    ("cap_implied_ownership", "safe.post_money_cap_conversion"),
-                    ("safe_price", "safe.stacked_post_money_caps"),
-                    ("cap_implied_shares", "safe.stacked_post_money_caps"),
-                )
-            ],
-        }
+        per_safe.append(
+            {
+                "id": safe["id"],
+                "branch": "cap_implied",
+                "cap_implied_ownership": priced[safe["id"]],
+                "safe_price": safe_price,
+                "cap_implied_shares": shares,
+                "math_provenance": [
+                    {
+                        "output_field": field,
+                        "source_type": "rule",
+                        # The stacked rule governs the denominator; the per-SAFE percentage is still the
+                        # post-money cap conversion. Citing both is the honest provenance.
+                        "rule_id": rule_id,
+                        "rule_pack_version": RULE_PACK_VERSION,
+                        "source_ref": None,
+                    }
+                    for field, rule_id in (
+                        ("cap_implied_ownership", "safe.post_money_cap_conversion"),
+                        ("safe_price", "safe.stacked_post_money_caps"),
+                        ("cap_implied_shares", "safe.stacked_post_money_caps"),
+                    )
+                ],
+            }
+        )
 
     # THE INVARIANT THAT HAS CONTENT. Asserting `shares/total == ownership` would be a tautology --
     # `shares` is derived from `total` -- which is the same "checked against the formula that produced
     # it" failure that let the original defect ship. This checks the FIXED POINT actually closed: the
     # denominator must equal the pre-financing base plus the shares it produced.
-    closed = pre_financing_fd + sum(v["cap_implied_shares"] for v in per_safe.values())
+    closed = pre_financing_fd + sum(v["cap_implied_shares"] for v in per_safe)
     if abs(closed - total) > 1e-6 * max(1.0, total):
         return {
             "branch": "rejected",
@@ -292,7 +296,12 @@ def convert_safe_cap_implied(
     )
     if result["branch"] != "cap_implied_set":
         return result
-    single: dict[str, Any] = result["per_safe"]["_single"]
+    # `per_safe` is a list of id-bearing rows, so this reads the one row back out rather than
+    # indexing by id. Caught by an adversarial read of the migration, not by a test: this wrapper's
+    # only callers are the CLI subcommand and single-instrument users, and no test exercised it --
+    # so the migration turned it into an unconditional TypeError and the suite stayed green.
+    single = _artifact_io.row_by_id(result["per_safe"], "_single")
+    assert single is not None, "the set solver returned no row for the single SAFE it was given"
     return single
 
 

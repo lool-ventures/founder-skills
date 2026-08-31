@@ -33,6 +33,23 @@ import note_conversion  # type: ignore[import-not-found]  # noqa: E402
 import run_scenario  # type: ignore[import-not-found]  # noqa: E402
 
 
+def _ids(rows: list) -> set:
+    """The id set of a per-instrument LIST — the list-shaped answer to `set(some_dict)`."""
+    return {r.get("id") for r in rows}
+
+
+def _row(rows: list, row_id: str) -> dict:
+    """Look one per-instrument row out of a LIST by id.
+
+    `per_safe`/`per_note` are lists of id-bearing rows, not dicts keyed by id: an id-keyed dict
+    silently drops a row when two ids collide while the totals keep counting both, which is a wrong
+    ownership figure with no warning. Tests read them the same way production does.
+    """
+    match = next((r for r in rows if isinstance(r, dict) and r.get("id") == row_id), None)
+    assert match is not None, f"no row with id {row_id!r} in {[r.get('id') for r in rows]}"
+    return dict(match)
+
+
 def _cap_state(pre_fd: int) -> dict:
     import cap_state as cap_state_mod  # type: ignore[import-not-found]
 
@@ -160,7 +177,7 @@ class TestCapImpliedNotesGuard:
             cap_state=_cap_state(8_000_000),
         )
         assert not out.get("blockers"), out.get("blockers")
-        assert out["per_safe"]["s1"]["cap_implied_shares"] > 0
+        assert _row(out["per_safe"], "s1")["cap_implied_shares"] > 0
 
 
 class TestNoConversionPathBranch:
@@ -1689,7 +1706,7 @@ class TestCapImpliedRefusesUnusableInstrumentSets:
         )
         assert r["branch"] == "cap_implied_set", r
         assert r["company_capitalization"] > 8_000_000
-        assert set(r["per_safe"]) == {"a", "b"}
+        assert _ids(r["per_safe"]) == {"a", "b"}
 
 
 class TestNoteRejectsANonPositiveDiscount:
@@ -1838,7 +1855,7 @@ class TestPricedRoundRefusesCollapsingInstrumentIds:
         out = self._solve([self._safe(id="s1"), self._safe(id="s2")])
         assert not (out.get("blockers") or []), out
         assert out["completeness"] == "full"
-        assert set(out["per_safe"]) == {"s1", "s2"}, (
+        assert _ids(out["per_safe"]) == {"s1", "s2"}, (
             f"two distinct SAFEs must produce two rows; got {list(out['per_safe'])}"
         )
 
@@ -2490,7 +2507,7 @@ class TestBlankIdsAreNotIds:
         assert out["completeness"] == "full"
         per_note = out["per_note"]
         assert len(per_note) == 2, f"both notes must be reported separately: {list(per_note)}"
-        total = sum((v or {}).get("conversion_shares") or 0 for v in per_note.values())
+        total = sum((v or {}).get("conversion_shares") or 0 for v in per_note)
         assert round(total) == 1_120_000, f"expected 1,120,000 shares, got {total:,.0f}"
 
 
@@ -2692,3 +2709,44 @@ class TestRunScenarioRefusesMismatchedArtifacts:
         rc, _stdout, stderr, wrote = self._run(tmp_path, paths, "RUN-A")
         assert rc == 0, stderr
         assert wrote, "a matched run must produce its scenario set"
+
+
+class TestSingleSafeWrapperSurvivesTheListMigration:
+    """`convert_safe_cap_implied` — the wrapper no test exercised, so the migration broke it silently.
+
+    It calls the set solver with one synthetic SAFE and reads the single row back. When `per_safe`
+    became a list, the read stayed `result["per_safe"]["_single"]` — an unconditional `TypeError` on
+    every call. The suite went green anyway, because the wrapper's only callers are the CLI
+    subcommand and single-instrument users and nothing covered it. Found by an adversarial read of
+    the migration diff, not by a test.
+
+    Pinned here so the wrapper has coverage at all, which is the actual gap: a function reachable
+    from the CLI with no test is one refactor away from being broken in a way nothing reports.
+    """
+
+    def test_the_single_safe_wrapper_returns_a_row(self) -> None:
+        import safe_conversion  # type: ignore[import-not-found]
+
+        r = safe_conversion.convert_safe_cap_implied(
+            purchase_amount=500_000,
+            post_money_valuation_cap=5_000_000,
+            company_capitalization=8_000_000,
+        )
+        assert r["branch"] == "cap_implied", r
+        assert round(r["cap_implied_ownership"], 4) == 0.10, (
+            f"a $500k SAFE at a $5M post-money cap owns 10%; got {r['cap_implied_ownership']}"
+        )
+        assert round(r["cap_implied_shares"]) == 888_889, (
+            "the wrapper must agree with the set solver it delegates to — 8,000,000 / (1 - 0.10) "
+            f"gives 8,888,889 total and 888,889 to the SAFE; got {r['cap_implied_shares']}"
+        )
+
+    def test_the_wrapper_propagates_a_rejection_rather_than_indexing_into_it(self) -> None:
+        """A rejected set has no rows at all, so the row read must not run."""
+        import safe_conversion  # type: ignore[import-not-found]
+
+        r = safe_conversion.convert_safe_cap_implied(
+            purchase_amount=500_000, post_money_valuation_cap=5_000_000, company_capitalization=0
+        )
+        assert r["branch"] == "rejected", r
+        assert r["error"] == "E_SAFE_CAP_MISSING_DENOMINATOR", r

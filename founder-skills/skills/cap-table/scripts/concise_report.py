@@ -84,12 +84,13 @@ def _scenario_facts(co: dict) -> list[str]:
     if price is not None:
         out.append(f"- **Price per share:** ${float(price):,.4f}")
 
-    per_safe = co.get("per_safe") or {}
+    per_safe = co.get("per_safe") or []
 
     # PRICED conversion. The cap-implied arm emits a different key set entirely (below), so this
     # loop must stay keyed on the priced fields -- widening it to cover both is what would break
     # the priced path.
-    for sid, s in per_safe.items():
+    for s in per_safe:
+        sid = s["id"]
         cp = s.get("conversion_price")
         shares = s.get("conversion_shares")
         if cp is not None:
@@ -109,10 +110,11 @@ def _scenario_facts(co: dict) -> list[str]:
         # and `visualize`. Gated on `per_safe` as well as the flag: a BLOCKED cap-implied run
         # carries `cap_implied_only: True` with an empty `per_safe`, and heading a refusal with an
         # ownership label prints a promise with nothing under it.
-        rows = [(sid, r) for sid, r in per_safe.items() if "cap_implied_ownership" in r]
+        rows = [r for r in per_safe if "cap_implied_ownership" in r]
         if rows:
             out.append("- **Cap-implied ownership (pre-financing):**")
-            for sid, r in rows:
+            for r in rows:
+                sid = r["id"]
                 bits = _pct(r["cap_implied_ownership"])
                 price_i = r.get("safe_price")
                 shares_i = r.get("cap_implied_shares")

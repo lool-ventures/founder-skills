@@ -14,6 +14,19 @@ import importlib.util
 import pathlib
 from typing import Any
 
+
+def _row(rows: list, row_id: str) -> dict:
+    """Look one per-instrument row out of a LIST by id.
+
+    `per_safe`/`per_note` are lists of id-bearing rows, not dicts keyed by id: an id-keyed dict
+    silently drops a row when two ids collide while the totals keep counting both, which is a wrong
+    ownership figure with no warning. Tests read them the same way production does.
+    """
+    match = next((r for r in rows if isinstance(r, dict) and r.get("id") == row_id), None)
+    assert match is not None, f"no row with id {row_id!r} in {[r.get('id') for r in rows]}"
+    return dict(match)
+
+
 # Import priced_round.solve_priced_round
 SOLVER_PATH = pathlib.Path(__file__).parent.parent / "skills" / "cap-table" / "scripts" / "priced_round.py"
 spec = importlib.util.spec_from_file_location("priced_round", SOLVER_PATH)
@@ -140,7 +153,7 @@ def test_golden_4_ad_plus_safe_conversion() -> None:
 
     assert r["converged"], f"did not converge: {r.get('blockers')}"
     # SAFE conversion fired (cap-implied price < equity_financing_price)
-    assert r["per_safe"]["safe_a"]["branch"] != "rejected"
+    assert _row(r["per_safe"], "safe_a")["branch"] != "rejected"
     assert r["shares_breakdown"]["safe_converted"] > 0
     # AD adjustment fired on Series Seed (new_pps < OIP=$1.00)
     assert len(r.get("anti_dilution_breakdown", [])) == 1
@@ -206,7 +219,7 @@ def test_golden_18_ad_plus_note_convert_at_cap_maturity() -> None:
 
     assert r["converged"], f"did not converge: {r.get('blockers')}"
     # Note converted
-    assert r["per_note"]["note_a"]["branch"] in {
+    assert _row(r["per_note"], "note_a")["branch"] in {
         "cap_conversion",
         "discount_only",
         "maturity_convert_at_cap",

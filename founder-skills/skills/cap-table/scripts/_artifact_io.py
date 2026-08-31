@@ -156,6 +156,28 @@ def _check_semantic_invariants_cap_state(cap_state: dict[str, Any], path: Path) 
                 )
 
 
+def row_by_id(rows: list[dict[str, Any]], row_id: str) -> dict[str, Any] | None:
+    """Look one row out of a per-instrument LIST by its id.
+
+    The per-instrument outputs (`per_safe`, `per_note`) are lists of rows, each carrying its own
+    `id`, rather than dicts keyed by id. That is deliberate and it is the structural half of the
+    id-collapse fix: a dict keyed by an id read out of a founder's PDF silently drops a row when two
+    ids collide, and no amount of downstream checking can recover the dropped one. A list cannot
+    lose a row.
+
+    THIS FUNCTION IS NOT A WAY BACK TO THE DICT. It answers "which row is this id" for the handful
+    of callers that genuinely need a single lookup; it does NOT build an index, so re-collapsing the
+    list by id is not something a caller can do by accident. Duplicate ids are refused upstream
+    (`instrument_id_blockers`, `cap_state._check_unique_ids`), so a match here is unambiguous — but
+    if one ever slipped through, this returns the FIRST match and the other row still exists in the
+    list, visible to every renderer. Wrong label, not vanished money.
+    """
+    for row in rows:
+        if isinstance(row, dict) and row.get("id") == row_id:
+            return row
+    return None
+
+
 def id_missing(value: Any) -> bool:
     """THE definition of "this instrument has no id", for the whole skill.
 

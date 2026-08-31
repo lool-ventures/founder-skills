@@ -167,6 +167,14 @@ def _run_anti_dilution(subcommand: str, *args: str) -> dict[str, Any]:
     return json.loads(proc.stdout)  # type: ignore[no-any-return]
 
 
+def _row(rows: list, row_id: str) -> dict:
+    """One per-instrument row out of a LIST by id — `per_safe`/`per_note` are lists, not id-keyed
+    dicts, because an id-keyed dict silently drops a row when two ids collide."""
+    match = next((r for r in rows if r.get("id") == row_id), None)
+    assert match is not None, f"no row with id {row_id!r} in {[r.get('id') for r in rows]}"
+    return match
+
+
 def _round(value: float, digits: int = 6) -> float:
     return round(float(value), digits)
 
@@ -204,8 +212,8 @@ def _derive_discount_only_iterative(tmp: Path) -> dict[str, Any]:
     agg = out["aggregate_ownership_by_class"]
     return {
         "equity_financing_price": _round(out["equity_financing_price"], 3),
-        "safe_conversion_price": _round(out["per_safe"]["safe_disc"]["conversion_price"], 3),
-        "safe_conversion_shares": round(out["per_safe"]["safe_disc"]["conversion_shares"]),
+        "safe_conversion_price": _round(_row(out["per_safe"], "safe_disc")["conversion_price"], 3),
+        "safe_conversion_shares": round(_row(out["per_safe"], "safe_disc")["conversion_shares"]),
         "founders_pct": _round(agg["founders_pct"], 4),
         "safe_pct": _round(agg["safe_pct"], 4),
         "new_money_pct": _round(agg["new_money_pct"], 4),
@@ -253,7 +261,7 @@ def _derive_stacked_safes(tmp: Path) -> dict[str, Any]:
     per_safe = out["per_safe"]
     # safe_conversion yields per-SAFE cap-implied ownership; the canonical total is
     # the SUM of these (they stack), and founders retain the complement.
-    fractions = {sid: _round(per_safe[sid]["cap_implied_ownership"]) for sid in per_safe}
+    fractions = {r["id"]: _round(r["cap_implied_ownership"]) for r in per_safe}
     total_given = _round(sum(fractions.values()), 4)
     return {
         "per_safe_cap_implied_ownership": fractions,
@@ -346,7 +354,7 @@ def _derive_mfn_circular(tmp: Path) -> dict[str, Any]:
         "raises_circular": "E_SAFE_CIRCULAR_MFN" in codes,
         "blocker_code": "E_SAFE_CIRCULAR_MFN",
         # The producer must NOT surface a numeric conversion price for the cycle.
-        "has_conversion_price": any(v.get("conversion_price") is not None for v in out.get("per_safe", {}).values()),
+        "has_conversion_price": any(v.get("conversion_price") is not None for v in out.get("per_safe", []) or []),
     }
 
 

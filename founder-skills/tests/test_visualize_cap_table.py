@@ -99,14 +99,15 @@ def _make_fixture_dir(tmp: str, *, company_name: str = "TestCo", safe_id: str = 
                     "cap_implied_only": True,
                     "blockers": [],
                     "math_provenance": [],
-                    "per_safe": {
-                        safe_id: {
+                    "per_safe": [
+                        {
+                            "id": safe_id,
                             "branch": "cap_implied",
                             "cap_implied_ownership": 0.05,
                             "safe_price": 0.4545,
                             "cap_implied_shares": 550_000,
                         }
-                    },
+                    ],
                 },
             }
         ],
@@ -1600,8 +1601,8 @@ def _full_scenario(scenario_id: str, label: str, founders_pct: float) -> dict[st
                 "pool_topup": 0,
             },
             "founder_impact": {"plain_language": "Founders diluted to a controlling-but-shared stake."},
-            "per_safe": {},
-            "per_note": {},
+            "per_safe": [],
+            "per_note": [],
         },
     }
 

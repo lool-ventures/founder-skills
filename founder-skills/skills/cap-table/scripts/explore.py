@@ -95,8 +95,8 @@ def _sweep_payload(sweep: dict[str, Any] | None) -> dict[str, Any] | None:
     _safe_keys = ("branch", "conversion_shares", "conversion_price", "cap_implied_shares", "safe_price")
     _note_keys = ("branch", "conversion_shares", "cash_repayment")
 
-    def _trim(d: dict[str, Any], keys: tuple[str, ...]) -> dict[str, Any]:
-        return {sid: {k: r.get(k) for k in keys if k in r} for sid, r in (d or {}).items()}
+    def _trim(rows: list[dict[str, Any]] | None, keys: tuple[str, ...]) -> list[dict[str, Any]]:
+        return [{"id": r["id"], **{k: r.get(k) for k in keys if k in r}} for r in (rows or [])]
 
     frames = []
     for fr in sweep["frames"]:
@@ -110,8 +110,8 @@ def _sweep_payload(sweep: dict[str, Any] | None) -> dict[str, Any] | None:
                 "post_round_fd": o.get("post_round_fully_diluted_shares"),
                 "shares_breakdown": o.get("shares_breakdown") or {},
                 "impact_text": (o.get("founder_impact") or {}).get("plain_language"),
-                "per_safe": _trim(o.get("per_safe") or {}, _safe_keys),
-                "per_note": _trim(o.get("per_note") or {}, _note_keys),
+                "per_safe": _trim(o.get("per_safe") or [], _safe_keys),
+                "per_note": _trim(o.get("per_note") or [], _note_keys),
             }
         )
     return {
@@ -226,8 +226,8 @@ def render_explorer_html(
                 "shares_breakdown": s["computed_outputs"].get("shares_breakdown", {}),
                 "post_round_fd": s["computed_outputs"].get("post_round_fully_diluted_shares"),
                 "founder_impact": s["computed_outputs"].get("founder_impact"),
-                "per_safe": s["computed_outputs"].get("per_safe", {}),
-                "per_note": s["computed_outputs"].get("per_note", {}),
+                "per_safe": s["computed_outputs"].get("per_safe", []),
+                "per_note": s["computed_outputs"].get("per_note", []),
                 "parameters": s.get("parameters", {}),
             }
             for s in scenarios_doc.get("scenarios", [])
@@ -1058,18 +1058,20 @@ function renderFounderDelta(foundersFrac) {{
 // shared by selectScenario + the slider so a drag keeps them in sync.
 function instrumentDetailsHTML(perSafe, perNote) {{
   let out = "";
-  if (perSafe && Object.keys(perSafe).length > 0) {{
+  if (perSafe && perSafe.length > 0) {{
     out += "<details><summary>Per-SAFE detail</summary><table><thead><tr><th>SAFE</th><th><span class='term' title='Which conversion rule applied — e.g. valuation cap, discount, or most-favored-nation'>How it converts</span></th><th class='num'>Shares</th><th class='num'>Price</th></tr></thead><tbody>";
-    for (const [sid, r] of Object.entries(perSafe)) {{
+    for (const r of perSafe) {{
+      const sid = r.id;
       const shares = r.conversion_shares || r.cap_implied_shares || 0;
       const price = r.conversion_price || r.safe_price || 0;
       out += `<tr><td>${{escape(sid)}}</td><td>${{escape(r.branch)}}</td><td class="num">${{fmtShares(shares)}}</td><td class="num">$${{price.toFixed(4)}}</td></tr>`;
     }}
     out += "</tbody></table></details>";
   }}
-  if (perNote && Object.keys(perNote).length > 0) {{
+  if (perNote && perNote.length > 0) {{
     out += "<details><summary>Per-note detail</summary><table><thead><tr><th>Note</th><th><span class='term' title='Which conversion rule applied — e.g. valuation cap, discount, or cash repayment at maturity'>How it converts</span></th><th class='num'>Shares / Cash</th></tr></thead><tbody>";
-    for (const [nid, r] of Object.entries(perNote)) {{
+    for (const r of perNote) {{
+      const nid = r.id;
       const val = r.conversion_shares !== undefined
         ? fmtShares(r.conversion_shares) + " shares"
         : (r.cash_repayment !== undefined ? fmtMoney(r.cash_repayment) : "—");
@@ -1171,10 +1173,11 @@ function selectScenario(idx) {{
       + `<p class="meta" style="margin:0 0 12px;max-width:64ch;">This view shows only what each SAFE locks in from its valuation cap — there's no share price until a priced round sets one. Open a modeled round to see ownership, price, and dilution.</p>`
       + `<button class="btn primary" id="go-modeled">View a modeled round →</button></div>`;
   }}
-  if (!isFull && s.cap_implied_only && Object.keys(s.per_safe || {{}}).length > 0) {{
+  if (!isFull && s.cap_implied_only && (s.per_safe || []).length > 0) {{
     variable += `<h3>Pre-round ownership snapshot</h3><p class="meta">${{CAP_IMPLIED_GLOSS}}</p>`;
     variable += `<table><thead><tr><th>SAFE</th><th class="num"><span class="term" title="Ownership this SAFE locks in from its valuation cap, before a priced round sets a share price">Cap-implied %</span></th><th class="num"><span class="term" title="Effective price per share implied by the SAFE's valuation cap">Cap price</span></th><th class="num">Shares</th></tr></thead><tbody>`;
-    for (const [sid, r] of Object.entries(s.per_safe)) {{
+    for (const r of s.per_safe) {{
+      const sid = r.id;
       variable += `<tr><td>${{escape(sid)}}</td><td class="num">${{pct(r.cap_implied_ownership || 0)}}</td><td class="num">$${{(r.safe_price || 0).toFixed(4)}}</td><td class="num">${{fmtShares(r.cap_implied_shares || 0)}}</td></tr>`;
     }}
     variable += `</tbody></table>`;

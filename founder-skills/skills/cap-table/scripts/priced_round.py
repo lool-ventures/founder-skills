@@ -388,7 +388,7 @@ def _apply_mfn_election_overrides(
 
 
 def _mfn_not_most_favorable_warnings(
-    safes: list[dict[str, Any]], per_safe: dict[str, dict[str, Any]]
+    safes: list[dict[str, Any]], per_safe: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
     """Post-solve check: flag any MFN-resolved SAFE that did NOT elect the most-favorable
     (lowest realized conversion price) sibling available to it.
@@ -407,7 +407,7 @@ def _mfn_not_most_favorable_warnings(
         # anchor, but they are not themselves an electable sibling).
         if sid is None or s.get("form") == "yc_uncapped_mfn" or s.get("_mfn_inherited_from"):
             continue
-        entry = per_safe.get(sid) or {}
+        entry = _artifact_io.row_by_id(per_safe, sid) or {}
         if entry.get("branch") == "rejected":
             continue
         cp = entry.get("conversion_price")
@@ -421,7 +421,7 @@ def _mfn_not_most_favorable_warnings(
         sid = s.get("id")
         if sid is None:
             continue
-        elected_price = (per_safe.get(sid) or {}).get("conversion_price")
+        elected_price = (_artifact_io.row_by_id(per_safe, sid) or {}).get("conversion_price")
         others = {k: v for k, v in candidate_prices.items() if k != sid}
         if elected_price is None or not others:
             continue
@@ -755,7 +755,7 @@ def _safe_shares_at_price(
     pre_money_fd: float,
     equity_financing_price: float,
     pre_money_valuation: float | None = None,
-) -> tuple[float, dict[str, dict[str, Any]]]:
+) -> tuple[float, list[dict[str, Any]]]:
     """Sum SAFE shares at a given (candidate) equity_financing_price.
 
     Passes BOTH `company_capitalization` (YC "Company Capitalization" measured
@@ -771,7 +771,7 @@ def _safe_shares_at_price(
     §(a)(1)/§(a)(2) branch selection can fire for pre-money SAFE forms.
     """
     total = 0.0
-    per_safe: dict[str, dict[str, Any]] = {}
+    per_safe: list[dict[str, Any]] = []
     for s in safes:
         r = convert_safe_priced_round(
             purchase_amount=s["purchase_amount"],
@@ -794,7 +794,8 @@ def _safe_shares_at_price(
         ):
             if s.get(_mfn_key) is not None:
                 r[_mfn_key] = s[_mfn_key]
-        per_safe[s["id"]] = r
+        r["id"] = s["id"]
+        per_safe.append(r)
         if r.get("branch") != "rejected":
             total += r.get("conversion_shares", 0.0)
     return total, per_safe
@@ -806,9 +807,9 @@ def _note_shares_at_price(
     conversion_event_date: str,
     priced_round_new_money: float,
     qualified_financing_price: float,
-) -> tuple[float, dict[str, dict[str, Any]]]:
+) -> tuple[float, list[dict[str, Any]]]:
     total = 0.0
-    per_note: dict[str, dict[str, Any]] = {}
+    per_note: list[dict[str, Any]] = []
     for n in notes:
         r = convert_note(
             n,
@@ -816,7 +817,8 @@ def _note_shares_at_price(
             priced_round_new_money=priced_round_new_money,
             qualified_financing_price=qualified_financing_price,
         )
-        per_note[n["id"]] = r
+        r["id"] = n["id"]
+        per_note.append(r)
         if r.get("branch") in {"cap_conversion", "discount_only", "maturity_convert_at_cap"}:
             total += r.get("conversion_shares", 0.0)
     return total, per_note
@@ -931,8 +933,8 @@ def solve_priced_round(
                     "remedy": "Provide conversion_event_date when convertible notes are present.",
                 }
             ],
-            "per_safe": {},
-            "per_note": {},
+            "per_safe": [],
+            "per_note": [],
             "math_provenance": [],
         }
 
@@ -958,8 +960,8 @@ def solve_priced_round(
         return {
             "completeness": "structural_only",
             "blockers": _mfn_override_blockers,
-            "per_safe": {},
-            "per_note": {},
+            "per_safe": [],
+            "per_note": [],
             "math_provenance": [],
         }
 
@@ -979,8 +981,8 @@ def solve_priced_round(
         return {
             "completeness": "structural_only",
             "blockers": _dupe_blockers,
-            "per_safe": {},
-            "per_note": {},
+            "per_safe": [],
+            "per_note": [],
             "math_provenance": [],
         }
 
@@ -1001,8 +1003,8 @@ def solve_priced_round(
         return {
             "completeness": "structural_only",
             "blockers": blockers,
-            "per_safe": {},
-            "per_note": {},
+            "per_safe": [],
+            "per_note": [],
             "math_provenance": [],
         }
 
@@ -1020,8 +1022,8 @@ def solve_priced_round(
         return {
             "completeness": "structural_only",
             "blockers": blockers,
-            "per_safe": {},
-            "per_note": {},
+            "per_safe": [],
+            "per_note": [],
             "math_provenance": [],
         }
 
@@ -1045,8 +1047,8 @@ def solve_priced_round(
                     ),
                 }
             ],
-            "per_safe": {},
-            "per_note": {},
+            "per_safe": [],
+            "per_note": [],
             "math_provenance": [],
         }
 
@@ -1126,8 +1128,8 @@ def solve_priced_round(
             return {
                 "completeness": "structural_only",
                 "blockers": blockers,
-                "per_safe": {},
-                "per_note": {},
+                "per_safe": [],
+                "per_note": [],
                 "math_provenance": [],
             }
 
@@ -1186,8 +1188,8 @@ def solve_priced_round(
                     "block are present; pass exactly one (concurrent → kwarg; pre_round_closed → cap_state).",
                 }
             ],
-            "per_safe": {},
-            "per_note": {},
+            "per_safe": [],
+            "per_note": [],
             "math_provenance": [],
         }
     if acquisition and acq_t * k_factor >= 1.0:
@@ -1204,8 +1206,8 @@ def solve_priced_round(
                     ),
                 }
             ],
-            "per_safe": {},
-            "per_note": {},
+            "per_safe": [],
+            "per_note": [],
             "math_provenance": [],
         }
 
@@ -1243,8 +1245,8 @@ def solve_priced_round(
                     ),
                 }
             ],
-            "per_safe": {},
-            "per_note": {},
+            "per_safe": [],
+            "per_note": [],
             "math_provenance": [],
         }
 
@@ -1275,8 +1277,8 @@ def solve_priced_round(
                         ),
                     }
                 ],
-                "per_safe": {},
-                "per_note": {},
+                "per_safe": [],
+                "per_note": [],
                 "math_provenance": [],
             }
 
@@ -1735,7 +1737,7 @@ def solve_priced_round(
             )
         else:
             note_shares = 0.0
-            per_note = {}
+            per_note = []
 
         # Post-loop NewMoneyAdjuster write: CONVERGED PPS basis. The pool top-up and
         # the acquisition consideration C couple only when pool_consideration_basis is
@@ -1884,7 +1886,7 @@ def solve_priced_round(
             fin_converged = False
 
         # Determine scenario completeness — bucket rejected SAFEs by error code.
-        rejected_safes = {s: r for s, r in per_safe.items() if r.get("branch") == "rejected"}
+        rejected_safes: dict[str, dict[str, Any]] = {str(r["id"]): r for r in per_safe if r.get("branch") == "rejected"}
         if rejected_safes:
             from collections import defaultdict  # noqa: PLC0415 (local import to avoid top-level dep)
 
@@ -1893,7 +1895,7 @@ def solve_priced_round(
                 by_code[rr.get("error", "E_SAFE_REQUIRES_CONVERSION_EVENT")].append(sid)
             for code, ids in by_code.items():
                 if code == "E_UNKNOWN_SAFE_FORM":
-                    sample_reason = per_safe[ids[0]].get("reason", "")
+                    sample_reason = (_artifact_io.row_by_id(per_safe, ids[0]) or {}).get("reason", "")
                     fin_blockers.append(
                         {"code": "E_UNKNOWN_SAFE_FORM", "instance_id": ",".join(ids), "remedy": sample_reason}
                     )

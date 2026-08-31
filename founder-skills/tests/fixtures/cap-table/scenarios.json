@@ -10,8 +10,9 @@
         "cap_implied_only": true,
         "blockers": [],
         "math_provenance": [],
-        "per_safe": {
-          "safe_001": {
+        "per_safe": [
+          {
+            "id": "safe_001",
             "branch": "cap_implied",
             "cap_implied_ownership": 0.05,
             "safe_price": 0.43181818181818177,
@@ -40,7 +41,7 @@
               }
             ]
           }
-        },
+        ],
         "company_capitalization": 11578947.368421054
       }
     }

@@ -367,12 +367,16 @@ def quick_assess(
             md_lines.append(f"| Option pool (unallocated) | {pool_total_shares:,} | {_percent(option_pool_pct)} |")
 
         # SAFE rows — per-holder when ≤ 3 SAFEs, aggregate otherwise
-        per_safe_results = solver_result.get("per_safe", {})
+        # `per_safe` is a LIST of id-bearing rows, iterated in producer order. `safe_investors` is a
+        # local id index over the CALLER's instruments, which `build_cap_state` has already refused
+        # for duplicate or blank ids by the time this runs -- so the lookup is unambiguous, and no
+        # per-instrument OUTPUT row can be lost to it.
+        per_safe_results = solver_result.get("per_safe", []) or []
         safe_investors = {s["id"]: s for s in safes}
         active_safes = [
-            (sid, safe_investors[sid], per_safe_results[sid])
-            for sid in per_safe_results
-            if sid in safe_investors and per_safe_results[sid].get("branch") != "rejected"
+            (row["id"], safe_investors[row["id"]], row)
+            for row in per_safe_results
+            if row.get("id") in safe_investors and row.get("branch") != "rejected"
         ]
         if len(active_safes) <= 3:
             for sid, sinst, sres in active_safes:

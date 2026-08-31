@@ -37,6 +37,23 @@ import run_scenario  # type: ignore[import-not-found]  # noqa: E402
 import safe_conversion  # type: ignore[import-not-found]  # noqa: E402
 
 
+def _ids(rows: list) -> set:
+    """The id set of a per-instrument LIST — the list-shaped answer to `set(some_dict)`."""
+    return {r.get("id") for r in rows}
+
+
+def _row(rows: list, row_id: str) -> dict:
+    """Look one per-instrument row out of a LIST by id.
+
+    `per_safe`/`per_note` are lists of id-bearing rows, not dicts keyed by id: an id-keyed dict
+    silently drops a row when two ids collide while the totals keep counting both, which is a wrong
+    ownership figure with no warning. Tests read them the same way production does.
+    """
+    match = next((r for r in rows if isinstance(r, dict) and r.get("id") == row_id), None)
+    assert match is not None, f"no row with id {row_id!r} in {[r.get('id') for r in rows]}"
+    return dict(match)
+
+
 def _run(script_name: str, args: list[str], stdin_data: str = "") -> tuple[int, str, str]:
     """Invoke a cap-table script as a subprocess. Returns (rc, stdout, stderr)."""
     res = subprocess.run(
@@ -338,7 +355,7 @@ class TestSafeConversion:
         assert r["branch"] == "cap_implied_set"
         assert math.isclose(r["company_capitalization"], 10_000_000, rel_tol=1e-9)
         for sid in ("s1", "s2"):
-            per = r["per_safe"][sid]
+            per = _row(r["per_safe"], sid)
             assert math.isclose(per["cap_implied_shares"], 1_000_000, rel_tol=1e-9)
             assert math.isclose(
                 per["cap_implied_shares"] / r["company_capitalization"],
@@ -668,28 +685,28 @@ class TestNoteConversion:
 
     def test_completeness_partition_full(self) -> None:
         """All notes share-producing → completeness=full."""
-        per_note = {
-            "n1": {"branch": "cap_conversion"},
-            "n2": {"branch": "discount_only"},
-        }
+        per_note = [
+            {"id": "n1", "branch": "cap_conversion"},
+            {"id": "n2", "branch": "discount_only"},
+        ]
         assert note_conversion.derive_scenario_completeness(per_note) == "full"
 
     def test_completeness_partition_repay_only(self) -> None:
-        per_note = {"n1": {"branch": "maturity_repay"}, "n2": {"branch": "maturity_repay"}}
+        per_note = [{"id": "n1", "branch": "maturity_repay"}, {"id": "n2", "branch": "maturity_repay"}]
         assert note_conversion.derive_scenario_completeness(per_note) == "repay_only"
 
     def test_completeness_partition_mixed(self) -> None:
-        per_note = {
-            "n1": {"branch": "cap_conversion"},
-            "n2": {"branch": "maturity_repay"},
-        }
+        per_note = [
+            {"id": "n1", "branch": "cap_conversion"},
+            {"id": "n2", "branch": "maturity_repay"},
+        ]
         assert note_conversion.derive_scenario_completeness(per_note) == "mixed"
 
     def test_completeness_partition_structural_only(self) -> None:
-        per_note = {
-            "n1": {"branch": "maturity_extend"},
-            "n2": {"branch": "threshold_not_met"},
-        }
+        per_note = [
+            {"id": "n1", "branch": "maturity_extend"},
+            {"id": "n2", "branch": "threshold_not_met"},
+        ]
         assert note_conversion.derive_scenario_completeness(per_note) == "structural_only"
 
     def test_statutory_ita_3j_with_null_rate_uses_proxy(self) -> None:
@@ -1437,11 +1454,11 @@ class TestStackedPostMoneySAFEsGolden:
         )
         per_safe = r["per_safe"]
         # safe_1: $500k × 13,200,000 / $10M = 660,000
-        assert math.isclose(per_safe["safe_1"]["conversion_shares"], 660_000, rel_tol=1e-3)
+        assert math.isclose(_row(per_safe, "safe_1")["conversion_shares"], 660_000, rel_tol=1e-3)
         # safe_2: $1M × 13,200,000 / $15M = 880,000
-        assert math.isclose(per_safe["safe_2"]["conversion_shares"], 880_000, rel_tol=1e-3)
+        assert math.isclose(_row(per_safe, "safe_2")["conversion_shares"], 880_000, rel_tol=1e-3)
         # safe_3: $500k × 13,200,000 / $10M = 660,000
-        assert math.isclose(per_safe["safe_3"]["conversion_shares"], 660_000, rel_tol=1e-3)
+        assert math.isclose(_row(per_safe, "safe_3")["conversion_shares"], 660_000, rel_tol=1e-3)
 
     def test_eval2_new_investor_and_pool_shares(self) -> None:
         """Verify share counts for new investor and pool top-up.
@@ -1582,7 +1599,7 @@ class TestStackedPostMoneySAFEsGolden:
         assert r["converged"] is True
 
         # safe_shares = 11M/9 ≈ 1,222,222.22
-        assert math.isclose(r["per_safe"]["safe_s1"]["conversion_shares"], 11_000_000 / 9, rel_tol=1e-4)
+        assert math.isclose(_row(r["per_safe"], "safe_s1")["conversion_shares"], 11_000_000 / 9, rel_tol=1e-4)
         # PPS = 36/55
         assert math.isclose(r["equity_financing_price"], 36 / 55, rel_tol=1e-4), (
             f"PPS: got {r['equity_financing_price']:.8f}, expected {36 / 55:.8f}"
@@ -1883,12 +1900,12 @@ class TestStackedPostMoneySAFEsGolden:
                 b.get("code") in {"E_SAFE_REQUIRES_CONVERSION_EVENT", "E_SAFE_CIRCULAR_MFN"}
                 for b in r.get("blockers", [])
             )
-            or "safe_orphan" in r["per_safe"]
-            and r["per_safe"]["safe_orphan"]["branch"] == "rejected"
+            or "safe_orphan" in _ids(r["per_safe"])
+            and _row(r["per_safe"], "safe_orphan")["branch"] == "rejected"
         )
 
     def test_mfn_inheritance_provenance_propagated_to_per_safe_result(self) -> None:
-        """M5: per_safe[safe_id]['_mfn_inherited_from'] must be set when the
+        """M5: _row(per_safe, safe_id)['_mfn_inherited_from'] must be set when the
         SAFE was MFN-resolved. Lets downstream counsel-review reporting phrase
         'Investor X's MFN-inherited terms from Investor Y'.
         """
@@ -1927,7 +1944,7 @@ class TestStackedPostMoneySAFEsGolden:
             target_pool_percent=0.10,
             target_basis="post_money",
         )
-        per_safe_3 = r["per_safe"]["safe_3_mfn"]
+        per_safe_3 = _row(r["per_safe"], "safe_3_mfn")
         # Provenance must be propagated from shadow record to per_safe result
         assert per_safe_3.get("_mfn_inherited_from") == "safe_1", (
             f"MFN inheritance provenance lost: {per_safe_3.get('_mfn_inherited_from')} != 'safe_1'"
@@ -1948,7 +1965,7 @@ class TestStackedPostMoneySAFEsGolden:
             target_basis="post_money",
         )
         total_fd = r["post_round_fully_diluted_shares"]
-        sum_per_safe_shares = sum(s["conversion_shares"] for s in r["per_safe"].values())
+        sum_per_safe_shares = sum(s["conversion_shares"] for s in r["per_safe"])
         agg_from_detail = sum_per_safe_shares / total_fd
         agg_reported = r["aggregate_ownership_by_class"]["safe_pct"]
         assert math.isclose(agg_reported, agg_from_detail, abs_tol=1e-6), (
@@ -2060,11 +2077,11 @@ class TestLegacyPreMoneySAFEs:
         assert math.isclose(r["post_round_fully_diluted_shares"], 220_000_000 / 9, rel_tol=1e-4)
 
         # safe_shares = 11M/9 ≈ 1,222,222
-        assert math.isclose(r["per_safe"]["safe_pre_1"]["conversion_shares"], 11_000_000 / 9, rel_tol=1e-4), (
+        assert math.isclose(_row(r["per_safe"], "safe_pre_1")["conversion_shares"], 11_000_000 / 9, rel_tol=1e-4), (
             f"safe_shares: got {r['per_safe']['safe_pre_1']['conversion_shares']:.0f}, expected {11_000_000 / 9:.0f}"
         )
         # SAFE converted at round_price_branch, not cap_branch
-        assert r["per_safe"]["safe_pre_1"]["branch"] == "round_price_branch", (
+        assert _row(r["per_safe"], "safe_pre_1")["branch"] == "round_price_branch", (
             f"expected round_price_branch, got {r['per_safe']['safe_pre_1']['branch']}"
         )
 
@@ -2157,10 +2174,10 @@ class TestLegacyPreMoneySAFEs:
         )
 
         # safe_A (post-money) shares = 11M/8 = 1,375,000 (exact)
-        assert math.isclose(r["per_safe"]["safe_a"]["conversion_shares"], 11_000_000 / 8, rel_tol=1e-3)
+        assert math.isclose(_row(r["per_safe"], "safe_a")["conversion_shares"], 11_000_000 / 8, rel_tol=1e-3)
         # safe_B (pre-money, §(a)(1)) shares = 11M/8 = 1,375,000 (exact, same as safe_A)
-        assert math.isclose(r["per_safe"]["safe_pre_1"]["conversion_shares"], 11_000_000 / 8, rel_tol=1e-3)
-        assert r["per_safe"]["safe_pre_1"]["branch"] == "round_price_branch"
+        assert math.isclose(_row(r["per_safe"], "safe_pre_1")["conversion_shares"], 11_000_000 / 8, rel_tol=1e-3)
+        assert _row(r["per_safe"], "safe_pre_1")["branch"] == "round_price_branch"
 
         agg = r["aggregate_ownership_by_class"]
         # Combined safe_pct = 2 × 1.375M / 27.5M = 10.0%
@@ -2200,8 +2217,8 @@ class TestLegacyPreMoneySAFEs:
 
         # safe_shares = 1,100,000 (cap price branch; non-iterative since pre-money forms
         # use a constant denominator in §(a)(2))
-        assert math.isclose(r["per_safe"]["safe_pre_1"]["conversion_shares"], 1_100_000, rel_tol=1e-4)
-        assert r["per_safe"]["safe_pre_1"]["branch"] == "cap_branch"
+        assert math.isclose(_row(r["per_safe"], "safe_pre_1")["conversion_shares"], 1_100_000, rel_tol=1e-4)
+        assert _row(r["per_safe"], "safe_pre_1")["branch"] == "cap_branch"
 
         # PPS = 60/121 ≈ 0.49587
         assert math.isclose(r["equity_financing_price"], 60 / 121, rel_tol=1e-4), (
@@ -2301,7 +2318,7 @@ class TestLegacyPreMoneySAFEs:
         # The test checks the LOWER bound to confirm the fix:
         expected_fixed = 20_000_000 / 43  # ≈ 465,116
         expected_buggy = 500_000 * 10_000_000 / 12_000_000  # ≈ 416,667
-        safe_shares = r["per_safe"]["safe_pool_test"]["conversion_shares"]
+        safe_shares = _row(r["per_safe"], "safe_pool_test")["conversion_shares"]
         assert safe_shares > expected_buggy + 1000, (
             f"safe_shares={safe_shares:.0f} should be well above the buggy value "
             f"{expected_buggy:.0f}; expected ≈{expected_fixed:.0f} (pool top-up included in denominator)"
@@ -2310,7 +2327,7 @@ class TestLegacyPreMoneySAFEs:
             f"safe_shares={safe_shares:.2f}, expected 20M/43={expected_fixed:.2f} "
             "(pool top-up = 50M/43 included in cap-price denominator)"
         )
-        assert r["per_safe"]["safe_pool_test"]["branch"] == "cap_branch"
+        assert _row(r["per_safe"], "safe_pool_test")["branch"] == "cap_branch"
 
 
 # ===========================================================================
@@ -5750,7 +5767,7 @@ class TestUnknownSafeForm:
         codes = [b["code"] for b in r.get("blockers", [])]
         assert "E_UNKNOWN_SAFE_FORM" in codes, f"Expected E_UNKNOWN_SAFE_FORM in blockers; got: {codes}"
         # The per_safe dict also carries the error
-        ps = r["per_safe"]["safe_bogus"]
+        ps = _row(r["per_safe"], "safe_bogus")
         assert ps.get("error") == "E_UNKNOWN_SAFE_FORM"
         # The remedy message should name the valid forms
         blocker = next(b for b in r["blockers"] if b["code"] == "E_UNKNOWN_SAFE_FORM")
@@ -8433,15 +8450,16 @@ class TestPerSafeTableRendering:
         scenario = _minimal_scenario(
             "s_safe",
             computed_outputs={
-                "per_safe": {
-                    "safe_001": {
+                "per_safe": [
+                    {
+                        "id": "safe_001",
                         "branch": "cap_conversion",
                         "conversion_price": 0.2500,
                         "conversion_shares": 2_000_000,
                         "purchase_amount": 500_000,
                         "post_money_cap": 10_000_000,
                     }
-                }
+                ]
             },
         )
         d = _make_cap_compose_dir(scenarios=[scenario])
@@ -8455,15 +8473,16 @@ class TestPerSafeTableRendering:
         scenario = _minimal_scenario(
             "s_safe_div",
             computed_outputs={
-                "per_safe": {
-                    "safe_001": {
+                "per_safe": [
+                    {
+                        "id": "safe_001",
                         "branch": "cap_conversion",
                         "conversion_price": 0.25,
                         "conversion_shares": 2_000_000,
                         "purchase_amount": 500_000,
                         "post_money_cap": 10_000_000,
                     }
-                }
+                ]
             },
         )
         d = _make_cap_compose_dir(scenarios=[scenario])
@@ -8478,13 +8497,14 @@ class TestPerSafeTableRendering:
         scenario = _minimal_scenario(
             "s_cap_impl",
             computed_outputs={
-                "per_safe": {
-                    "safe_001": {
+                "per_safe": [
+                    {
+                        "id": "safe_001",
                         "cap_implied_ownership": 0.05,
                         "safe_price": 0.25,
                         "cap_implied_shares": 200_000,
                     }
-                }
+                ]
             },
         )
         d = _make_cap_compose_dir(scenarios=[scenario])
@@ -8651,10 +8671,10 @@ class TestPerSafeCapImpliedOnlySkip:
         scenario = _minimal_scenario(
             "s_ci",
             computed_outputs={
-                "per_safe": {
-                    "safe_a": {"cap_implied_ownership": 0.05, "safe_price": 0.20, "cap_implied_shares": 250_000},
-                    "safe_b": {"cap_implied_ownership": 0.03, "safe_price": 0.20, "cap_implied_shares": 150_000},
-                }
+                "per_safe": [
+                    {"id": "safe_a", "cap_implied_ownership": 0.05, "safe_price": 0.20, "cap_implied_shares": 250_000},
+                    {"id": "safe_b", "cap_implied_ownership": 0.03, "safe_price": 0.20, "cap_implied_shares": 150_000},
+                ]
             },
         )
         d = _make_cap_compose_dir(scenarios=[scenario])
@@ -8670,9 +8690,9 @@ class TestPerSafeCapImpliedOnlySkip:
             "s_ci_narr",
             computed_outputs={
                 "cap_implied_only": True,
-                "per_safe": {
-                    "safe_a": {"cap_implied_ownership": 0.05, "safe_price": 0.20, "cap_implied_shares": 250_000},
-                },
+                "per_safe": [
+                    {"id": "safe_a", "cap_implied_ownership": 0.05, "safe_price": 0.20, "cap_implied_shares": 250_000},
+                ],
             },
         )
         d = _make_cap_compose_dir(scenarios=[scenario])
@@ -8688,16 +8708,22 @@ class TestPerSafeCapImpliedOnlySkip:
         scenario = _minimal_scenario(
             "s_mixed",
             computed_outputs={
-                "per_safe": {
-                    "safe_ci": {"cap_implied_ownership": 0.05, "safe_price": 0.20, "cap_implied_shares": 250_000},
-                    "safe_conv": {
+                "per_safe": [
+                    {
+                        "id": "safe_ci",
+                        "cap_implied_ownership": 0.05,
+                        "safe_price": 0.20,
+                        "cap_implied_shares": 250_000,
+                    },
+                    {
+                        "id": "safe_conv",
                         "branch": "cap_conversion",
                         "conversion_price": 0.25,
                         "conversion_shares": 2_000_000,
                         "purchase_amount": 500_000,
                         "post_money_cap": 10_000_000,
                     },
-                }
+                ]
             },
         )
         d = _make_cap_compose_dir(scenarios=[scenario])
@@ -8768,8 +8794,8 @@ class TestMfnElectionOverride:
     def test_election_override_changes_conversion(self) -> None:
         r10 = self._solve({"safe_mfn": "cap10"})
         r15 = self._solve({"safe_mfn": "cap15"})
-        p10 = r10["per_safe"]["safe_mfn"]["conversion_price"]
-        p15 = r15["per_safe"]["safe_mfn"]["conversion_price"]
+        p10 = _row(r10["per_safe"], "safe_mfn")["conversion_price"]
+        p15 = _row(r15["per_safe"], "safe_mfn")["conversion_price"]
         assert p10 != p15, "MFN election must change the conversion price"
         assert p15 > p10, "$15M cap -> higher conversion price than $10M"
         f10 = r10["aggregate_ownership_by_class"]["founders_pct"]
@@ -8862,11 +8888,14 @@ class TestMfnElectionOverride:
         r10 = run("cap10")
         r15 = run("cap15")
         # the param actually reaches the solver -> the two scenarios differ
-        assert r10["per_safe"]["safe_mfn"]["conversion_price"] != r15["per_safe"]["safe_mfn"]["conversion_price"]
+        assert (
+            _row(r10["per_safe"], "safe_mfn")["conversion_price"]
+            != _row(r15["per_safe"], "safe_mfn")["conversion_price"]
+        )
         # and the resolved election is visible in per_safe for audit
-        assert r15["per_safe"]["safe_mfn"]["_mfn_election_source"] == "scenario_override"
-        assert r15["per_safe"]["safe_mfn"]["_mfn_inherited_cap"] == 15_000_000
-        assert r15["per_safe"]["safe_mfn"]["_mfn_inherited_cap_type"] == "post_money"
+        assert _row(r15["per_safe"], "safe_mfn")["_mfn_election_source"] == "scenario_override"
+        assert _row(r15["per_safe"], "safe_mfn")["_mfn_inherited_cap"] == 15_000_000
+        assert _row(r15["per_safe"], "safe_mfn")["_mfn_inherited_cap_type"] == "post_money"
 
     def test_cap_implied_path_blocks_mfn_elections(self) -> None:
         import run_scenario  # type: ignore[import-not-found]
@@ -9327,8 +9356,8 @@ def test_solver_skips_non_convertible_safe_cap_implied() -> None:
     result = run_scenario.run_safe_conversion_scenario(
         {"type": "safe_conversion", "parameters": {}}, instruments=instruments, cap_state=cs
     )
-    assert "safe_ok" in result["per_safe"]
-    assert "safe_blank" not in result["per_safe"]
+    assert "safe_ok" in _ids(result["per_safe"])
+    assert "safe_blank" not in _ids(result["per_safe"])
 
 
 def test_solver_skips_non_convertible_safe_priced_round() -> None:
@@ -9339,8 +9368,8 @@ def test_solver_skips_non_convertible_safe_priced_round() -> None:
     cs = cap_state_mod.build_cap_state(_BASIC_INPUTS, instruments)
     scenario = {"type": "priced_round", "parameters": {"pre_money": 10_000_000, "new_money": 2_000_000}}
     result = run_scenario.run_priced_round_scenario(scenario, instruments=instruments, cap_state=cs)
-    assert "safe_ok" in result["per_safe"]
-    assert "safe_blank" not in result["per_safe"]
+    assert "safe_ok" in _ids(result["per_safe"])
+    assert "safe_blank" not in _ids(result["per_safe"])
 
 
 def test_quick_assess_terms_only_safe_no_purchase_amount() -> None:
@@ -9842,7 +9871,7 @@ class TestExecutiveSummaryCompletenessWording:
                     "computed_outputs": {
                         "completeness": "structural_only",
                         "cap_implied_only": True,
-                        "per_safe": {"safe_1": {"ownership_pct": 0.05}},
+                        "per_safe": [{"id": "safe_1", "ownership_pct": 0.05}],
                     },
                 }
             ]
@@ -9878,7 +9907,7 @@ class TestExecutiveSummaryCompletenessWording:
                     "computed_outputs": {
                         "completeness": "structural_only",
                         "cap_implied_only": True,
-                        "per_safe": {"safe_1": {"ownership_pct": 0.05}},
+                        "per_safe": [{"id": "safe_1", "ownership_pct": 0.05}],
                     },
                 },
                 {
@@ -11277,8 +11306,8 @@ class TestNoteUsableGuard:
         instruments = {"convertible_notes": [self._partial_note()]}
         out = run_scenario.run_note_conversion_scenario(scenario, instruments=instruments, cap_state={})
         # Not silently dropped, not converted, surfaced as terms-only excluded.
-        assert "note_partial" in out["per_note"]
-        assert out["per_note"]["note_partial"].get("branch") == "terms_only_excluded"
+        assert "note_partial" in _ids(out["per_note"])
+        assert _row(out["per_note"], "note_partial").get("branch") == "terms_only_excluded"
 
     def test_note_has_usable_math_inputs_predicate(self) -> None:
         assert note_conversion.note_has_usable_math_inputs({"principal": 100_000, "issuance_date": "2025-06-01"})
@@ -12577,8 +12606,19 @@ class TestNotePricedRoundNoCapNoDiscount:
         assert "cash_repayment" in result
 
     def test_scenario_completeness_structural_only_for_new_branch(self) -> None:
-        out = note_conversion.derive_scenario_completeness({"n1": {"branch": "priced_round_no_cap_or_discount"}})
+        out = note_conversion.derive_scenario_completeness([{"id": "n1", "branch": "priced_round_no_cap_or_discount"}])
         assert out == "structural_only"
+
+    def test_completeness_refuses_the_old_dict_shape_rather_than_answering_full(self) -> None:
+        """The wrong shape must raise, not resolve to the most permissive answer.
+
+        Iterating a dict yields its KEYS, so `"branch" in key` is False for every one, `branches`
+        comes out empty, and an empty set is a subset of the share set -- the function returned
+        "full". A shape mismatch silently producing the completeness value that lets a scenario be
+        reported as fully modelled is the exact failure this migration exists to remove.
+        """
+        with pytest.raises(TypeError, match="LIST"):
+            note_conversion.derive_scenario_completeness({"n1": {"branch": "priced_round_no_cap_or_discount"}})
 
     def test_run_note_scenario_surfaces_new_blocker_code(self) -> None:
         note = self._note()
@@ -13859,7 +13899,7 @@ class TestCrossPathAgreement:
 
         snapshot = safe_conversion.convert_safes_cap_implied([safe], pre_financing_fd=pre_fd)
         assert snapshot["branch"] == "cap_implied_set"
-        snap = snapshot["per_safe"]["s1"]
+        snap = _row(snapshot["per_safe"], "s1")
 
         priced = priced_round.solve_priced_round(
             cap_state=self._cap_state(pre_fd),
@@ -13868,7 +13908,7 @@ class TestCrossPathAgreement:
             pre_money=12_000_000,
             new_money=3_000_000,
         )
-        per = (priced.get("per_safe") or {}).get("s1") or {}
+        per = _row(priced.get("per_safe") or [], "s1")
         priced_shares = per.get("conversion_shares")
         priced_price = per.get("conversion_price")
         assert priced_shares, f"priced round returned no conversion_shares for the SAFE: {priced}"
@@ -13905,8 +13945,8 @@ class TestCrossPathAgreement:
             new_money=3_000_000,
         )
         for sid in ("s1", "s2"):
-            snap = snapshot["per_safe"][sid]
-            per = (priced.get("per_safe") or {}).get(sid) or {}
+            snap = _row(snapshot["per_safe"], sid)
+            per = _row(priced.get("per_safe") or [], sid)
             assert per.get("conversion_shares"), f"priced round returned no shares for {sid}"
             assert math.isclose(snap["cap_implied_shares"], per["conversion_shares"], rel_tol=1e-9), (
                 f"{sid}: cap-implied {snap['cap_implied_shares']:,.0f} vs priced {per['conversion_shares']:,.0f}"

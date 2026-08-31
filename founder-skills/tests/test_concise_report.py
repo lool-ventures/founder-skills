@@ -34,7 +34,7 @@ FULL_SCENARIO = {
             "computed_outputs": {
                 "completeness": "full",
                 "equity_financing_price": 0.875,
-                "per_safe": {"safe_disc": {"conversion_price": 0.70, "conversion_shares": 1428571}},
+                "per_safe": [{"id": "safe_disc", "conversion_price": 0.70, "conversion_shares": 1428571}],
                 "aggregate_ownership_by_class": {
                     "founders_pct": 0.625,
                     "safe_pct": 0.0893,
@@ -207,7 +207,7 @@ def test_cap_implied_snapshot_renders_its_numbers() -> None:
     fact_lines = [ln for ln in md.splitlines() if ln.startswith("- ") and "completeness" not in ln]
     assert fact_lines, f"cap-implied snapshot rendered no facts:\n{md}"
     assert "Cap-implied ownership (pre-financing)" in md
-    sid = next(iter(co["per_safe"]))
+    sid = co["per_safe"][0]["id"]
     assert sid in md, "the per-SAFE cap-implied row must name its instrument"
 
 
