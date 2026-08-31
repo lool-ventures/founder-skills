@@ -26,6 +26,7 @@ import sys
 from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _artifact_io import id_missing as _id_missing  # noqa: E402
 from _artifact_writer import ArtifactValidationError, load_schema, write_artifact  # noqa: E402
 from cross_checker import cross_check as _cross_check  # noqa: E402
 from evidence_verifier import (  # noqa: E402
@@ -808,8 +809,27 @@ def main() -> int:
         When no duplicate exists, append and return None.
 
         Requires entry to have an 'id' key already set.
+
+        A BLANK id is refused here rather than upserted. `setdefault` above mints an id only when the
+        key is ABSENT, so an explicit `""` from an extraction survives it, and `instruments.schema.json`
+        types every id as a bare `{"type": "string"}` with no `minLength` -- so neither the minting nor
+        the schema catches it. A blank id then keys the per-instrument output: two blank-id notes
+        reported 720,000 shares against a true 1,120,000, one row for two instruments. The downstream
+        guards (`cap_state`'s builders, the point-of-use blockers) now catch that, but this is the
+        INGRESS, and an id-rejecting ingress is the difference between a founder being told which
+        document is wrong and a founder being told the arithmetic refused.
+
+        Deliberately a DIFFERENT code from the duplicate case: "give it an id" and "make the ids
+        distinct" are different instructions, and a diagnostic naming an id the founder never wrote
+        (`''`) sends them looking for something that is not in their documents.
         """
         eid = entry.get("id")
+        if _id_missing(eid):
+            return (
+                f"E_INSTRUMENT_ID_MISSING: the entry for {array_name}[] has no usable id ({eid!r}). "
+                f"An id keys the per-instrument output, so an instrument without one cannot be "
+                f"reported separately from the others. Re-run with a distinct, non-blank id."
+            )
         for i, existing in enumerate(array):
             if existing.get("id") == eid:
                 if args.replace:
@@ -852,7 +872,7 @@ def main() -> int:
         dup_err = _upsert_or_error(instruments["safes"], fields, array_name="safes")
         if dup_err:
             sys.stderr.write(f"extract_instrument.py: {dup_err}\n")
-            print(json.dumps({"error": "E_DUPLICATE_INSTRUMENT_ID", "detail": dup_err}))
+            print(json.dumps({"error": dup_err.split(":", 1)[0], "detail": dup_err}))
             return 1
     elif itype == "convertible_note":
         fields.setdefault("id", f"note_{len(instruments['convertible_notes']) + 1:03d}")
@@ -873,7 +893,7 @@ def main() -> int:
         dup_err = _upsert_or_error(instruments["convertible_notes"], fields, array_name="convertible_notes")
         if dup_err:
             sys.stderr.write(f"extract_instrument.py: {dup_err}\n")
-            print(json.dumps({"error": "E_DUPLICATE_INSTRUMENT_ID", "detail": dup_err}))
+            print(json.dumps({"error": dup_err.split(":", 1)[0], "detail": dup_err}))
             return 1
     elif itype == "warrant":
         # v0.5.0: warrants require a full item shape (shares_underlying,
@@ -911,7 +931,7 @@ def main() -> int:
             dup_err = _upsert_or_error(instruments["warrants"], fields, array_name="warrants")
             if dup_err:
                 sys.stderr.write(f"extract_instrument.py: {dup_err}\n")
-                print(json.dumps({"error": "E_DUPLICATE_INSTRUMENT_ID", "detail": dup_err}))
+                print(json.dumps({"error": dup_err.split(":", 1)[0], "detail": dup_err}))
                 return 1
         else:
             warnings.append(

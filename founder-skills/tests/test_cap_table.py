@@ -3479,6 +3479,48 @@ class TestPreBaselinePatches:
             "ambiguities": [],
         }
 
+    def test_a_blank_id_is_refused_at_ingress_not_upserted(self) -> None:
+        """An explicit blank id must be refused BEFORE it reaches the file.
+
+        Two things that look like they cover this do not. `fields.setdefault("id", ...)` mints an id
+        only when the key is ABSENT, so an explicit `""` survives it; and `instruments.schema.json`
+        types every instrument id as a bare `{"type": "string"}` with no `minLength`, so validation
+        on write accepts it. A blank id then keys the per-instrument output, which is how two notes
+        with `id: ""` reported 720,000 shares against a true 1,120,000.
+
+        The code must be `E_INSTRUMENT_ID_MISSING`, not the duplicate code: "give it an id" and
+        "make the ids distinct" are different instructions, and a diagnostic naming an id the founder
+        never wrote sends them hunting through their documents for `''`.
+        """
+        with tempfile.TemporaryDirectory() as d:
+            instr_path = os.path.join(d, "instruments.json")
+            with open(instr_path, "w") as f:
+                json.dump(self._base_instr(), f)
+            with open(instr_path, "rb") as f:
+                before = f.read()
+
+            rc, stdout, stderr = _run(
+                "extract_instrument.py",
+                ["--instruments", instr_path, "--run-id", "t1", "--no-verify", "--no-invariants"],
+                stdin_data=json.dumps(self._safe_extraction("")),
+            )
+
+            assert rc == 1, f"a blank id must be refused; got rc={rc}\n{stdout}\n{stderr}"
+            combined = stdout + stderr
+            assert "E_INSTRUMENT_ID_MISSING" in combined, (
+                f"expected E_INSTRUMENT_ID_MISSING (not the duplicate code); got:\n{combined}"
+            )
+            assert json.loads(stdout.strip().splitlines()[-1])["error"] == "E_INSTRUMENT_ID_MISSING", (
+                "the machine-readable error key must carry the code the helper returned, not a "
+                f"hardcoded duplicate code: {stdout!r}"
+            )
+            with open(instr_path, "rb") as f:
+                after = f.read()
+            assert after == before, (
+                "the refusal wrote to instruments.json anyway. This script APPENDS, so a bad write "
+                "is unrecoverable -- the refusal must leave the file byte-identical."
+            )
+
     def test_duplicate_id_exits_1_no_flag(self) -> None:
         """Second insert with same id and no --replace flag must exit 1,
         emit E_DUPLICATE_INSTRUMENT_ID in output, and leave the file with
