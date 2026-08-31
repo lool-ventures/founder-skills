@@ -442,8 +442,59 @@ Measured workarounds, current through **1.15.0**. Full detail in
   Measured: deleting the last rule under `answers:` left the key parsing as `None`, which `lint`
   passed as *"1 scenario(s) clean"* while the runtime rejected the file outright. It was caught only
   by `rerecord.sh`'s budget preflight, which silently **omitted the broken scenario from its list**
-  rather than announcing it. Validate with **`cowork-harness record scenarios/<s>.yaml --dry-run`**
-  (free, no token, no Docker) — a broken file prints `✗ broken:` and exits non-zero.
+  rather than announcing it. Validate ONE scenario with **`cowork-harness record scenarios/<s>.yaml
+  --dry-run --out /tmp/probe.cassette.json`** (free, no token, no Docker) — a broken file prints
+  `✗ broken:` and exits non-zero.
+  **`--out` is not optional, and the bare form is a trap.** The single-file arm ALSO pre-checks the
+  cassette DESTINATION, which is `--out` if you pass it, else `cassettes/<slug>.cassette.json`
+  **relative to your cwd** — so a perfectly valid scenario with no committed cassette is REFUSED for
+  path policy, and at 3.0.x that refusal and a schema error are both **exit 2**, i.e. indistinguishable.
+  Measured on this corpus (35 scenarios, 10 cassettes): the bare form refuses 25 of 35 run from
+  `cowork-tests/`, and 34 of 35 run from the repo root, where no `cassettes/` exists at all. A third
+  term is TIER — `fidelity: container` is exempt (`host-path-canary` passes with a brand-new
+  repo-visible `--out`), so the guard is destination AND tier, never destination alone. Do NOT reach for
+  `--allow-host-inventory-fixture` to get past it: that flag is consent for a recording you intend to
+  make, and spending it on a load check is how it stops meaning anything (`rerecord.sh` passes it only
+  when authoring a genuinely new cassette, which is the correct use).
+  **The single-file split lands in 3.2.0 — NOT "above 3.0.1", and 3.1.0 is the counterexample.**
+  Measured 2026-08-31 across four builds (2.5.0 / 3.0.0 / 3.1.0 published / 3.2.0 pre-release), single
+  file: the destination refusal and a path-independent policy refusal (`on_unanswered: prompt`) BOTH
+  exit **2** through 3.1.0 and **1** at 3.2.0; a scenario that will not load stays **2** throughout;
+  valid-with-cassette stays **0**. Inheriting "above 3.0.1" from upstream prose would have been wrong
+  for the version actually on this machine — derive the boundary, do not quote it.
+  **The DIRECTORY arm splits ALREADY, at every version measured, and an earlier version of this note
+  wrongly called that future work.** For `record scenarios/ --dry-run --max-budget-usd N`, identical at
+  2.5.0 / 3.0.0 / 3.1.0 / 3.2.0: **0** = all load and under cap; **2** = the BUDGET gate refused;
+  **1** = a scenario did not LOAD (`✗ broken: <file>` naming the rejected key, on **stderr**, so a
+  `>/dev/null` does not hide it); both together = **2**, budget winning, with the broken line still
+  printed. 3.2.0's CHANGELOG states batch exit codes are deliberately unchanged, and adds one case:
+  a directory where EVERY file fails to load exits **1** (was 2) — same branch, nothing to revisit.
+  `rerecord.sh`'s budget preflight collapsed 1 and 2 into *"batch cost pre-flight refused — raise
+  COWORK_RERECORD_MAX_USD"*, sending you to raise a cap for a broken scenario; **fixed 2026-08-31**
+  with a `case` on the code. Anything else wrapping this command needs the same split.
+- **`lint --strict` ALONE exits 1 on an INFO-only corpus — our CI is safe only because it pairs
+  `--min-severity WARN`.** Measured 2026-08-31 at 3.0.0, 3.1.0 and 3.2.0, all identical: bare
+  `lint scenarios/ --strict` over our 35 reports `0 error(s), 0 warning(s), 55 info` and exits **1**;
+  add `--min-severity WARN` (which `cowork-replay.yml` passes via `extra-args`) and it is `✓ 35
+  scenario(s) clean`, exit **0**. The 55 are `manifest-needs-snapshot` (29) and `gate-needs-controlout`
+  (26) — both "re-record and these become live", neither actionable in CI. **The 2026-08-31 sweep
+  report filed `lint --strict` under "what behaved correctly" having read the counts and not the exit
+  code**; that is the whole failure mode — a green-looking summary line above a non-zero exit.
+- **3.2.0's `enum-value-invalid` ERROR does NOT red this repo, and the green is earned, not vacuous.**
+  Measured on the 3.2.0 pre-release: CI's exact invocation (`lint cowork-tests/scenarios/ --strict
+  --min-severity WARN`) exits **0** with zero `enum-value-invalid` findings across all 35, and the CI
+  load check (`record cowork-tests/scenarios/ --dry-run --quiet`) exits **0**. Non-vacuity confirmed by
+  probe rather than assumed — a copy with `fidelity: bogus` lints `✓ clean` at 3.0.0 and 3.1.0 and
+  raises `✗ ERROR [enum-value-invalid]` (exit 1) at 3.2.0. Also clean at 3.2.0: all **10** cassettes
+  replay green (identical to 3.1.0), and `verify-cassettes` + the expanded allowlist is byte-identical
+  to 3.1.0 with `findings by class: unscanned 22` (informational — the PII gate is clean; the exit 1 is
+  the known staleness/scenario-drift), with the email canary still firing.
+  **For the WHOLE corpus use the DIRECTORY arm** — `cowork-harness record scenarios/ --dry-run --quiet`
+  — where the destination policy is reported as an advisory note and does **not** affect the exit code.
+  That is what `cowork-replay.yml`'s "Scenario load check" step already runs. Its limits: non-recursive,
+  a file with no `prompt:` key reports `· skipped:` rather than broken (so a mis-indented `prompt:`
+  reads as "not a scenario" and the batch still exits 0), and exit 1 covers path-independent *refusals*
+  (prompt policy, assert contradiction, duplicate target) as well as *broken*.
 - **A `gate_answers_delivered` that lint flags as vacuous has TWO valid remedies, and lint only names
   one.** Its fix line says to pair it with `gate_answer_count_min: 1` / `question_asked` /
   `tool_called`. That is wrong for a scenario **designed** to fire no gates: there the remedy is to

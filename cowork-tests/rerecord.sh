@@ -335,12 +335,39 @@ echo "re-recording: ${scns[*]}"
 BUDGET="${COWORK_RERECORD_MAX_USD:-120}"
 if [ "$BUDGET" != "0" ]; then
   echo "=== cost pre-flight (cap \$$BUDGET; set COWORK_RERECORD_MAX_USD=0 to skip) ==="
-  cowork-harness record scenarios/ --dry-run --max-budget-usd "$BUDGET" >/dev/null || {
-    echo "FATAL: batch cost pre-flight refused — re-run the command below to see the estimate, then"
-    echo "       raise COWORK_RERECORD_MAX_USD deliberately or narrow the scenario list."
-    echo "       cowork-harness record scenarios/ --dry-run --max-budget-usd $BUDGET"
-    exit 1
-  }
+  # THE TWO FAILURE EXIT CODES ARE NOT INTERCHANGEABLE. Measured 2026-08-31, identical at 2.5.0,
+  # 3.0.0 (the pin), 3.1.0, and the 3.2.0 pre-release:
+  #     0 = every scenario loads AND the estimate is under the cap
+  #     2 = the BUDGET gate refused (estimate over the cap)
+  #     1 = a scenario did not LOAD — `✗ broken: <file>` naming the rejected key
+  #   Budget wins when both apply (broken + over cap -> 2, with the `✗ broken:` line still printed).
+  #   The broken line goes to STDERR, so the `>/dev/null` below (stdout only) does not hide it.
+  #   3.2.0 states batch exit codes are UNCHANGED and adds one case: a directory where EVERY file
+  #   fails to load exits 1 (was 2) — the same branch, so nothing here changes at a pin raise.
+  #   (The single-file arm DOES change at 3.2.0 — policy refusals there go 2 -> 1 — but this gate does
+  #   not use that arm. Do not port the boundary across: "above 3.0.1" is wrong, 3.1.0 still exits 2.)
+  # This block used to collapse both into "batch cost pre-flight refused", which sent you off to raise
+  # COWORK_RERECORD_MAX_USD for a problem that has nothing to do with money: you raise it, re-run, and
+  # get the identical message. Keep the branches distinct.
+  preflight_rc=0
+  cowork-harness record scenarios/ --dry-run --max-budget-usd "$BUDGET" >/dev/null || preflight_rc=$?
+  case "$preflight_rc" in
+    0) ;;
+    2)
+      echo "FATAL: batch cost pre-flight refused ON COST — re-run the command below to see the"
+      echo "       estimate, then raise COWORK_RERECORD_MAX_USD deliberately or narrow the list."
+      echo "       cowork-harness record scenarios/ --dry-run --max-budget-usd $BUDGET"
+      exit 1
+      ;;
+    *)
+      echo "FATAL: cost pre-flight exited $preflight_rc — a scenario did not LOAD (above 3.0.1, this"
+      echo "       code also covers a policy refusal). THIS IS NOT A COST PROBLEM: raising"
+      echo "       COWORK_RERECORD_MAX_USD will not help. The '✗ broken:' line(s) above name the file"
+      echo "       and the rejected key. Fix the scenario, then re-run. To see it again:"
+      echo "       cowork-harness record scenarios/ --dry-run"
+      exit 1
+      ;;
+  esac
 fi
 
 # Authoring a NEW cassette (or one whose gates are hard to pre-script)? Don't iterate THIS batch loop
