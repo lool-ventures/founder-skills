@@ -204,6 +204,44 @@ def render(inputs: dict, scenarios_doc: dict, rule_audit: dict | None, cap_state
     return "\n".join(lines) + "\n"
 
 
+def _apply_founder_text_policy(md: str) -> str:
+    """Unsnake our vocabulary before this reaches a founder.
+
+    This deliverable ran NEITHER the substitution nor the scan while its three siblings ran both, so
+    it shipped rule titles verbatim. Measured on the committed fixture: "Stale
+    current_conversion_price detected" and "did not converge within max_iterations" -- two internal
+    field names, in the one document the fast route delivers, on a lane sold as a real answer.
+
+    Same construction as `compose_report` / `counsel_packet` / `quick_assess`, including code-span
+    protection: this is markdown, and a backticked token is a name the founder must type.
+
+    Degrades to the empty keep set rather than to no deliverable, matching the other three: a report
+    with an unglossed term is worth more than a missing report.
+    """
+    try:
+        # The shared policy module lives OUTSIDE this skill (four levels up, in `scripts/`), and this
+        # file's own sys.path setup only adds its sibling directory -- so a bare import silently
+        # returned the unpolicied markdown, which is how the first version of this fix shipped
+        # nothing. Verified by re-running the producer, not by reading the import.
+        sys.path.insert(
+            0,
+            os.path.join(
+                os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "scripts"
+            ),
+        )
+        import _founder_text  # type: ignore[import-not-found]
+
+        try:
+            from _founder_text_keep import cap_table_keep
+
+            keep = cap_table_keep()
+        except Exception:
+            keep = frozenset()
+        return str(_founder_text.substitute(md, extra_keep=keep, protect_code_spans=True))
+    except Exception:
+        return md
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description="Concise cap-table answer from solver output.")
     p.add_argument("--inputs", required=True, help="inputs.json")
@@ -270,6 +308,8 @@ def main() -> int:
         )
         print(f"Error: {os.path.abspath(args.output_md)} was left unchanged.", file=sys.stderr)
         return 2
+
+    md = _apply_founder_text_policy(md)
 
     with open(args.output_md, "w", encoding="utf-8") as fh:
         fh.write(md)

@@ -606,7 +606,27 @@ _EXTRA_DELIVERABLES: dict[str, list[tuple[str, list[str]]]] = {
                 "--write-md",
                 "{dir}/counsel_packet.md",
             ],
-        )
+        ),
+        # The fast route's ONLY deliverable, and it ran neither the substitution nor the scan while
+        # its three siblings ran both. Measured on this fixture before the fix: "Stale
+        # current_conversion_price detected" and "did not converge within max_iterations" shipped to
+        # a founder. A deliverable nothing scans can say anything.
+        (
+            "report_concise.md",
+            [
+                "concise_report.py",
+                "--inputs",
+                "{dir}/inputs.json",
+                "--scenarios",
+                "{dir}/scenarios.json",
+                "--rule-audit",
+                "{dir}/rule_audit.json",
+                "--run-id",
+                "ratchet",
+                "-o",
+                "{dir}/report_concise.md",
+            ],
+        ),
     ],
 }
 
