@@ -3026,7 +3026,11 @@ class TestGotchas:
             with open(inst, "w") as f:
                 json.dump(inst_safe, f)
             cs = cap_state_mod.build_cap_state(_BASIC_INPUTS, inst_safe)
-            cs["metadata"]["run_id"] = "rid"
+            # Must match `_BASIC_INPUTS`'s run_id: `run_scenario.py` now refuses artifacts from
+            # different runs BEFORE computing, and a cap_state stamped with a run_id its own inputs
+            # never carried is an artifact set that cannot occur outside a test. This fixture said
+            # "rid" while inputs and instruments said "test"; nothing checked, so nothing noticed.
+            cs["metadata"]["run_id"] = "test"
             with open(cap, "w") as f:
                 json.dump(cs, f)
             with open(reqs, "w") as f:
@@ -3053,7 +3057,7 @@ class TestGotchas:
                     "--scenarios-input",
                     reqs,
                     "--run-id",
-                    "rid",
+                    "test",
                     "-o",
                     scen,
                 ],

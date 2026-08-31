@@ -553,6 +553,17 @@ def run_all_scenarios(
     return results
 
 
+def _fail(code: str, message: str, output_path: str) -> None:
+    """The four-property loud-failure contract (CLAUDE.md, Script Conventions).
+
+    Machine-readable diagnostic on stdout, a line on stderr, `-o` left untouched, and the caller
+    returns non-zero. Split out so every refusal in `main()` states all four rather than three.
+    """
+    sys.stdout.write(json.dumps({"validation": {"status": "invalid", "errors": [f"{code}: {message}"]}}) + "\n")
+    sys.stderr.write(f"run_scenario.py: {code}: {message}\n")
+    sys.stderr.write(f"run_scenario.py: {os.path.abspath(output_path)} was left unchanged.\n")
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--inputs", required=True)
@@ -574,6 +585,44 @@ def main() -> int:
         scenario_requests = json.load(f)
     if isinstance(scenario_requests, dict):
         scenario_requests = scenario_requests.get("scenarios", [])
+
+    # STALENESS IS CHECKED BEFORE THE MATH, NOT AFTER IT. `compose_report.validate_run_id_parity`
+    # already catches a run_id mismatch -- but it runs at the END, so by then the numbers have been
+    # computed from mismatched artifacts and the founder is shown a high-severity warning ABOUT a
+    # report rather than being spared the report. Nothing stopped a fresh `instruments.json` being
+    # run against a stale `cap_state.json`, and the two disagree in exactly the way that matters:
+    # `cap_state` carries the share counts every percentage is measured against, while
+    # `instruments` carries what converts into them.
+    #
+    # This refuses instead of warning because a producer that cannot trust its inputs has nothing
+    # useful to emit, and because the remedy is mechanical (re-run the earlier step). Deliberately
+    # NOT a `run_id` equality check against `--run-id`: the three artifacts must agree with EACH
+    # OTHER, and an artifact carrying no run_id at all is its own defect, reported separately so
+    # the remedy differs ("re-run the step that wrote it" vs "re-run both steps").
+    _rids = {
+        "inputs.json": (inputs.get("metadata") or {}).get("run_id"),
+        "instruments.json": (instruments.get("metadata") or {}).get("run_id"),
+        "cap_state.json": (cap_state.get("metadata") or {}).get("run_id"),
+    }
+    _absent = sorted(n for n, r in _rids.items() if id_missing(r))
+    if _absent:
+        _fail(
+            "E_ARTIFACT_RUN_ID_MISSING",
+            f"{', '.join(_absent)} carries no run identifier, so it cannot be checked against the "
+            "other artifacts in this run. Re-run the step that wrote it.",
+            args.output,
+        )
+        return 1
+    if len(set(_rids.values())) > 1:
+        _seen = "; ".join(f"{n}={r}" for n, r in _rids.items())
+        _fail(
+            "E_ARTIFACT_RUN_ID_MISMATCH",
+            f"these artifacts are from different runs ({_seen}), so the share counts and the "
+            "instruments that convert into them do not describe the same cap table. Re-run the "
+            "earlier steps so all three come from one run.",
+            args.output,
+        )
+        return 1
 
     scenarios = run_all_scenarios(
         inputs=inputs,

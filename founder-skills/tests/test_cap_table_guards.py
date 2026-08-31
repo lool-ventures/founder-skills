@@ -2552,3 +2552,143 @@ class TestScenarioIdsMustBeUniqueAndPresent:
         out = self._run(["s1", "s2"])
         assert [s.get("scenario_id") for s in out] == ["s1", "s2"]
         assert [s["parameters"]["pre_money"] for s in out] == [12_000_000, 20_000_000]
+
+
+class TestRunScenarioRefusesMismatchedArtifacts:
+    """Staleness is caught BEFORE the math, not after it.
+
+    `compose_report.validate_run_id_parity` already detects a run_id mismatch — but it runs at the
+    END of the chain, so by the time it fires the numbers have been computed from artifacts
+    describing different cap tables, and the founder gets a high-severity warning ABOUT a report
+    rather than being spared the report. Nothing stopped a fresh `instruments.json` being run
+    against a stale `cap_state.json`, and those two disagree in exactly the way that matters:
+    `cap_state` carries the share counts every percentage is measured against, `instruments`
+    carries what converts into them.
+
+    A different defect family from the id collapse — staleness rather than identity — with the same
+    founder-visible shape: a confident wrong number. Guarded here rather than folded into the id
+    work because the remedy is different (re-run the earlier step, not fix the document).
+    """
+
+    @staticmethod
+    def _artifacts(tmp_path: Path, inputs_rid: str, instruments_rid: str) -> tuple[Path, ...]:
+        import subprocess
+
+        inputs = tmp_path / "inputs.json"
+        inputs.write_text(
+            json.dumps(
+                {
+                    "company_name": "X",
+                    "founders": [{"founder_id": "f1", "name": "F", "common_shares": 8_000_000}],
+                    "metadata": {"run_id": inputs_rid, "schema_version": "v0.5.0-inputs"},
+                }
+            ),
+            encoding="utf-8",
+        )
+        instruments = tmp_path / "instruments.json"
+        instruments.write_text(
+            json.dumps(
+                {
+                    "safes": [],
+                    "convertible_notes": [],
+                    "metadata": {"run_id": instruments_rid, "schema_version": "v0.5.0-instruments"},
+                }
+            ),
+            encoding="utf-8",
+        )
+        state = tmp_path / "cap_state.json"
+        subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPTS / "cap_state.py"),
+                "--inputs",
+                str(inputs),
+                "--instruments",
+                str(instruments),
+                "--run-id",
+                inputs_rid,
+                "-o",
+                str(state),
+            ],
+            capture_output=True,
+            check=True,
+        )
+        scenarios = tmp_path / "scenarios_in.json"
+        scenarios.write_text(
+            json.dumps(
+                [
+                    {
+                        "scenario_id": "s1",
+                        "label": "r",
+                        "type": "priced_round",
+                        "parameters": {"pre_money": 12_000_000, "new_money": 3_000_000},
+                    }
+                ]
+            ),
+            encoding="utf-8",
+        )
+        return inputs, instruments, state, scenarios
+
+    @staticmethod
+    def _run(tmp_path: Path, paths: tuple[Path, ...], run_id: str) -> tuple[int, str, str, bool]:
+        import subprocess
+
+        inputs, instruments, state, scenarios = paths
+        out = tmp_path / "scenarios.json"
+        r = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPTS / "run_scenario.py"),
+                "--inputs",
+                str(inputs),
+                "--instruments",
+                str(instruments),
+                "--cap-state",
+                str(state),
+                "--scenarios-input",
+                str(scenarios),
+                "--run-id",
+                run_id,
+                "-o",
+                str(out),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        return r.returncode, r.stdout, r.stderr, out.exists()
+
+    def test_mismatched_run_ids_are_refused_before_any_math(self, tmp_path: Path) -> None:
+        """All four properties of the loud-failure contract, on the case that matters.
+
+        A stale `cap_state.json` beside a fresh `instruments.json` — the exact shape of running one
+        step and forgetting to re-run the earlier one.
+        """
+        paths = self._artifacts(tmp_path, "RUN-A", "RUN-B")
+        rc, stdout, stderr, wrote = self._run(tmp_path, paths, "RUN-B")
+        assert rc != 0, "artifacts from two different runs must not produce a scenario set"
+        assert "E_ARTIFACT_RUN_ID_MISMATCH" in stdout, f"no machine-readable diagnostic on stdout: {stdout!r}"
+        assert "E_ARTIFACT_RUN_ID_MISMATCH" in stderr, stderr
+        assert not wrote, "the output artifact must be left untouched on a refusal"
+
+    def test_an_artifact_with_no_run_id_is_its_own_diagnostic(self, tmp_path: Path) -> None:
+        """Absent and mismatched need different remedies, so they get different codes.
+
+        "Re-run the step that wrote it" is not the same instruction as "re-run both steps".
+        """
+        paths = self._artifacts(tmp_path, "RUN-A", "RUN-A")
+        instruments = paths[1]
+        payload = json.loads(instruments.read_text(encoding="utf-8"))
+        payload["metadata"].pop("run_id")
+        instruments.write_text(json.dumps(payload), encoding="utf-8")
+        rc, stdout, _stderr, wrote = self._run(tmp_path, paths, "RUN-A")
+        assert rc != 0
+        assert "E_ARTIFACT_RUN_ID_MISSING" in stdout, stdout
+        assert "E_ARTIFACT_RUN_ID_MISMATCH" not in stdout, "an absent run_id is not a mismatch"
+        assert not wrote
+
+    def test_matched_artifacts_still_run(self, tmp_path: Path) -> None:
+        """Non-vacuity: the ordinary one-run case must be entirely unaffected."""
+        paths = self._artifacts(tmp_path, "RUN-A", "RUN-A")
+        rc, _stdout, stderr, wrote = self._run(tmp_path, paths, "RUN-A")
+        assert rc == 0, stderr
+        assert wrote, "a matched run must produce its scenario set"
