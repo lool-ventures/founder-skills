@@ -5,6 +5,75 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.11.0] - 2026-08-31 — Two instruments, one row, and a number nobody could see was wrong
+
+### Highlights
+
+**Two instruments that shared an id — or carried no id at all — became one row, and the
+percentages were computed from both.** Ids come out of your documents, so two SAFEs from the same
+investor, or two notes an extraction left unlabelled, could collide. When they did, the detail
+section showed one instrument, the totals counted two, and nothing said so. Measured on a real
+pair of convertible notes, the report claimed 720,000 shares where the true figure was 1,120,000,
+described itself as complete, and raised no warning. Colliding and blank ids are now refused with
+an explanation naming which entry to fix, and the per-instrument results are a list rather than a
+lookup keyed on those ids — so a row cannot be lost even if a future check misses something.
+
+**Ownership percentages on a cap-implied SAFE snapshot were computed against a denominator that
+left out the SAFEs doing the converting.** A SAFE that converts is part of what it converts into.
+Leaving them out overstated every holder's share.
+
+**Anti-dilution protection could increase your dilution.** The broad-based weighted-average
+calculation applied a floor that, in some rounds, produced a worse conversion price than no
+protection at all.
+
+**A report can no longer be built from figures that describe two different cap tables.** If the
+instrument list has been updated but the cap-table snapshot has not, the run now stops before the
+arithmetic instead of computing numbers from a mismatched pair and warning about the result
+afterwards. A warning that arrives after the report is a warning about a report you already have.
+
+**Instructions that named things you could not find have been fixed.** A blocker told you to
+author a scenario with "parameters `pre money` / `new money`" — two names that exist nowhere.
+The report's text policy, which rewrites our internal vocabulary into plain English, was rewriting
+these names inside the backticks marking them as literal. Names in backticks are now left exactly
+as written, everywhere they appear in a cap-table report or counsel packet.
+
+**The coverage note in a cap-table report could contradict the check it was reporting on.** On a
+deal combining a convertible note with a share acquisition, the check recorded that the deal was
+outside what the calculator covers, and the note beside it asserted the opposite. The note now
+reads the check, names which part of the deal is uncovered, and says plainly when figures were
+computed by hand rather than by the calculator.
+
+### Added
+
+- A quick cap-table answer is now delivered as its own short document, rather than being produced
+  and then discarded before you saw it.
+- Warnings the solver raises now reach every surface that shows results, not just one of them.
+- The counsel packet and the interactive explorer now carry the same source-document
+  reconciliation and warning detail the main report does.
+
+### Changed
+
+- Anti-dilution, conversion and charter terms are written for a lawyer to read: no field names,
+  no internal codes, and sentences that survive being pasted into an email.
+- The interactive report no longer hides a figure's raw value behind a hover — the number and its
+  label are both on the page.
+- A run that refuses its input leaves your previous report untouched. Refusing and overwriting at
+  the same time destroyed the only good copy.
+
+### Fixed
+
+- A convertible note excluded from a calculation was reported as excluded for the wrong reason,
+  sending you to check a term that was not the problem.
+- A note whose maturity terms were absent was treated as a note whose maturity terms were zero.
+- A remedy told you to re-run through a route that re-enters the very path that dropped your note.
+- Preferred series sharing a name were merged into one, reporting founder ownership as 80.0%
+  where the truth was 72.7%, and reporting both an addition and a replacement against a file that
+  held neither.
+- A cap-table question asked without a document produced a raw error trace instead of an answer.
+- Two skills quoted internal file paths in messages meant for you.
+- A step that located your uploaded files by a relative path stopped finding them when the
+  workspace layout moved.
+
 ## [0.10.0] - 2026-08-26 — A check that refuses writes nothing down
 
 ### Highlights
