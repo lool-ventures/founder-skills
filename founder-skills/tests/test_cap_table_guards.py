@@ -396,30 +396,41 @@ def _unasserted_rules() -> tuple[list[str], list[str]]:
 # counted comments and docstrings -- and the two are not comparable, so the constant is renamed rather
 # than adjusted. Under the AST oracle the true figure is 60; the five-rule difference is the prose
 # mentions the old scan was crediting.
-UNASSERTED_RULE_BASELINE_AST = 60
-UNASSERTED_COUNSEL_RULE_BASELINE = 22  # same correction as above
+RULES_NAMED_NOWHERE_BASELINE = 60
+COUNSEL_RULES_NAMED_NOWHERE_BASELINE = 22  # same correction as above
 
 
 def test_rule_assertion_ratchet() -> None:
-    """How many rule_ids can be deleted from the pack without failing a test?
+    """How many rule_ids are NAMED NOWHERE in the suite? Not how many are unguarded.
 
-    Coverage says a predicate executed. This says whether anyone would notice if the rule it gates
-    stopped firing -- which for a counsel-review item is the difference between a founder being told
-    to consult counsel and not being told.
+    THE NAME OF THIS TEST OVERSTATES IT, and the constants were renamed rather than the function
+    because the mutation corpus deselects this test by its exact node id (`mutation_corpus._DESELECT`)
+    -- renaming the function silently stops that deselection, and a count ratchet inside a mutant run
+    trips the no-op control and reports a broken harness about a harness that is fine.
+
+    What it computes: a rule id appearing in no non-docstring string literal anywhere in the suite.
+    That is a MENTION oracle and it over-credits in both directions -- measured, 12 of the 26 rules it
+    counts as covered appear in no `assert` at all, one of them qualifying solely by being a sample
+    string in an unrelated text-policy test. Restricting to assert-only literals gives 72 rather than
+    60, and the REAL oracle (delete the rule, does the suite red?) gives >= 72.
+
+    The real oracle is a deletion run and belongs in the `mutation` lane, not here; it is planned and
+    unbuilt. Read this number as "rules nothing names", never as a coverage figure -- the difference
+    is at least twelve rules wide.
     """
     unasserted, counsel = _unasserted_rules()
-    assert len(unasserted) <= UNASSERTED_RULE_BASELINE_AST, (
-        f"{len(unasserted)} rule_ids have no assertion (baseline {UNASSERTED_RULE_BASELINE_AST}); "
+    assert len(unasserted) <= RULES_NAMED_NOWHERE_BASELINE, (
+        f"{len(unasserted)} rule_ids have no assertion (baseline {RULES_NAMED_NOWHERE_BASELINE}); "
         f"a new unguarded rule shipped: {sorted(set(unasserted))[:8]}"
     )
-    assert len(counsel) <= UNASSERTED_COUNSEL_RULE_BASELINE, (
+    assert len(counsel) <= COUNSEL_RULES_NAMED_NOWHERE_BASELINE, (
         f"{len(counsel)} COUNSEL-REVIEW rules have no assertion (baseline "
-        f"{UNASSERTED_COUNSEL_RULE_BASELINE}): {counsel[:8]}"
+        f"{COUNSEL_RULES_NAMED_NOWHERE_BASELINE}): {counsel[:8]}"
     )
-    if len(unasserted) < UNASSERTED_RULE_BASELINE_AST or len(counsel) < UNASSERTED_COUNSEL_RULE_BASELINE:
+    if len(unasserted) < RULES_NAMED_NOWHERE_BASELINE or len(counsel) < COUNSEL_RULES_NAMED_NOWHERE_BASELINE:
         pytest.fail(
-            f"unasserted rules down to {len(unasserted)} (baseline {UNASSERTED_RULE_BASELINE_AST}) and "
-            f"counsel-review to {len(counsel)} (baseline {UNASSERTED_COUNSEL_RULE_BASELINE}) -- good. "
+            f"unasserted rules down to {len(unasserted)} (baseline {RULES_NAMED_NOWHERE_BASELINE}) and "
+            f"counsel-review to {len(counsel)} (baseline {COUNSEL_RULES_NAMED_NOWHERE_BASELINE}) -- good. "
             "Lower the baselines to lock the win in."
         )
 

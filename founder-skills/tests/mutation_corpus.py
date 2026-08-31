@@ -44,7 +44,7 @@ header. Hand-run mutation is exactly as perishable as any other undated measurem
 argument for executing the list rather than writing it down.)
 
 So this is a REGISTRY of named defects, in the pattern this repo already uses three times
-(`_REJECTING_PAYLOADS`, `UNASSERTED_RULE_BASELINE`, `_NO_CASSETTE_ALLOWLIST`). Honest framing, since
+(`_REJECTING_PAYLOADS`, `RULES_NAMED_NOWHERE_BASELINE`, `_NO_CASSETTE_ALLOWLIST`). Honest framing, since
 the question is fair: this is defect-injection regression testing. It does not search for new mutants;
 it pins the ones already found so a guard cannot silently stop being guarded -- which, given that this
 work began by finding a guard added one day and unprotected the next, is the failure mode with the
