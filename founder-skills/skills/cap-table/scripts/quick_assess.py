@@ -478,7 +478,8 @@ def quick_assess(
             _keep = cap_table_keep()
         except Exception:
             _keep = frozenset()
-        _md = str(_founder_text.substitute(_md, extra_keep=_keep))
+        # Markdown, same contract as compose: code spans are names, not our vocabulary.
+        _md = str(_founder_text.substitute(_md, extra_keep=_keep, protect_code_spans=True))
     except Exception:
         pass
     sentinel["_report_md"] = _md

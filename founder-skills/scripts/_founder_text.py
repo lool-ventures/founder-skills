@@ -277,7 +277,105 @@ def _is_shouting_token(token: str) -> bool:
     return not all(p.lower() in _ACRONYMS for p in parts)
 
 
-def scan(text: str, *, extra_keep: frozenset[str] | None = None) -> dict[str, list[str]]:
+# ---------------------------------------------------------------------------
+# Code spans — a token the author marked literal
+# ---------------------------------------------------------------------------
+#
+# Backticks are the author asserting "this is a name, not prose". Rewriting inside them produces the
+# worst outcome available: the page still claims the mangled string IS the name. Measured live, a
+# cap-table blocker shipped `Author a `priced_round` scenario (parameters `pre money` / `new money`)`
+# — two parameters that do not exist, in an instruction telling the founder what to type.
+#
+# OPT-IN, and only for MARKDOWN callers. In HTML a backtick is a literal character, not markup, so
+# protecting there would ship a founder ``valuation_cap`` where prose reads better. The flag is off by
+# default so every existing caller keeps its behaviour byte-for-byte.
+#
+# SUBSTITUTE AND SCAN MOVE TOGETHER. An earlier attempt changed `substitute` alone and manufactured
+# warnings no caller could clear — the only way to silence them was to un-backtick, undoing the fix.
+# A token inside a code span is not a leak of our vocabulary; it is a name the founder must type.
+
+_BACKTICK_RUN_RE = re.compile(r"`+")
+_FENCE_RE = re.compile(r"(`{3,}|~{3,})")
+
+
+def _inline_code_spans(line: str) -> list[tuple[int, int]]:
+    """Spans of one line covered by inline code, opener run matched to a run of EQUAL length.
+
+    Equal-length matching is what makes a doubled span work: in ``` ``a `x` b`` ``` the outer pair is
+    two backticks and the inner single one never closes it, so `x` stays protected.
+
+    An UNMATCHED run protects nothing. That is the important property: a stray backtick must not
+    invert protection — leaking an unrelated token while still corrupting the target — which is how
+    the previous attempt at this failed.
+    """
+    runs = [(m.start(), m.end()) for m in _BACKTICK_RUN_RE.finditer(line)]
+    spans: list[tuple[int, int]] = []
+    i = 0
+    while i < len(runs):
+        start, end = runs[i]
+        width = end - start
+        j = i + 1
+        while j < len(runs) and (runs[j][1] - runs[j][0]) != width:
+            j += 1
+        if j < len(runs):
+            spans.append((start, runs[j][1]))
+            i = j + 1
+        else:
+            i += 1
+    return spans
+
+
+def code_span_ranges(text: str) -> list[tuple[int, int]]:
+    """Character ranges of `text` that are code: fenced blocks and inline spans.
+
+    Fenced blocks are handled BEFORE inline spans because a fence is three backticks and the inline
+    matcher would otherwise pair fences with each other across unrelated lines.
+
+    An UNCLOSED fence protects nothing, deliberately. Protecting to end-of-document would match how
+    most renderers display it, but it hands one stray fence the power to silence the policy over the
+    whole rest of the report. Failing toward today's behaviour is the smaller error, and producers
+    generate these documents, so an unclosed fence is a producer bug to fix at the source.
+    """
+    ranges: list[tuple[int, int]] = []
+    offset = 0
+    fence: str | None = None
+    fence_start = 0
+    for line in text.splitlines(keepends=True):
+        body = line.lstrip(" ")
+        indent = len(line) - len(body)
+        marker = _FENCE_RE.match(body) if indent <= 3 else None
+        if fence is None:
+            if marker is not None:
+                fence, fence_start = marker.group(1), offset
+            else:
+                ranges.extend((offset + s, offset + e) for s, e in _inline_code_spans(line))
+        elif (
+            marker is not None
+            and marker.group(1)[0] == fence[0]
+            and len(marker.group(1)) >= len(fence)
+            and not body[marker.end() :].strip()
+        ):
+            ranges.append((fence_start, offset + len(line)))
+            fence = None
+        offset += len(line)
+    return ranges
+
+
+def _blank_ranges(text: str, ranges: list[tuple[int, int]]) -> str:
+    """Replace each range with spaces, preserving every offset after it."""
+    if not ranges:
+        return text
+    out = list(text)
+    for start, end in ranges:
+        for i in range(start, min(end, len(out))):
+            if out[i] != "\n":  # keep line structure intact for the fence walker's callers
+                out[i] = " "
+    return "".join(out)
+
+
+def scan(
+    text: str, *, extra_keep: frozenset[str] | None = None, protect_code_spans: bool = False
+) -> dict[str, list[str]]:
     """Find founder-facing text that violates the policy.
 
     Returns {"enums": [...], "filenames": [...]} — sorted, de-duplicated. An empty result means the
@@ -291,6 +389,10 @@ def scan(text: str, *, extra_keep: frozenset[str] | None = None) -> dict[str, li
     not survive the fleet's differing report dialects (`**Label**: value` and others).
     """
     keep = (extra_keep or frozenset()) | DIAGNOSTIC_CODES
+    # A code span is the author marking a literal. `substitute` (below) leaves those alone under the
+    # same flag, so reporting them here would warn about text the policy deliberately preserved.
+    if protect_code_spans:
+        text = _blank_ranges(text, code_span_ranges(text))
     # Strip URLs first: a citation's path segment is not an artifact of ours.
     de_urled = _URL_RE.sub(" ", text)
     filenames = sorted({m.group(0) for m in _FILENAME_RE.finditer(de_urled) if _is_internal_file(m.group(0))})
@@ -315,8 +417,12 @@ def scan(text: str, *, extra_keep: frozenset[str] | None = None) -> dict[str, li
     return {"enums": enums, "filenames": filenames}
 
 
-def substitute(text: str, *, extra_keep: frozenset[str] | None = None) -> str:
+def substitute(text: str, *, extra_keep: frozenset[str] | None = None, protect_code_spans: bool = False) -> str:
     """Rewrite every policy-violating token in `text` to its founder-readable form.
+
+    `protect_code_spans` leaves anything inside a fenced block or an inline code span byte-exact.
+    MARKDOWN CALLERS ONLY, and `scan` must be given the same flag — see the note above
+    `code_span_ranges`.
 
     Identifiers and diagnostic codes are left alone. Filenames are NOT rewritten — renaming a file in
     prose would be a lie; the caller should stop mentioning it instead.
@@ -324,14 +430,23 @@ def substitute(text: str, *, extra_keep: frozenset[str] | None = None) -> str:
     Longest token first, so a token that is a prefix of another is not partially replaced.
     """
     keep = (extra_keep or frozenset()) | DIAGNOSTIC_CODES
+
     # URLs are rewritten by NOBODY. A token that also appears inside a citation link must be
     # humanized in the prose and left byte-exact in the link: substituting there silently turns
     # "…/press_release/…" into "…/press release/…" and the founder is handed a dead citation
     # for a claim the report is challenging. Worse, scan() runs AFTER substitute() at every call
     # site, so the evidence is gone by the time anything looks -- the corruption reported clean.
     # Fleet-wide: every skill that renders a source URL goes through this function.
-    spans = [(m.start(), m.end()) for m in _URL_RE.finditer(text)]
-    protected = _URL_RE.sub(" ", text)
+    def _protected_spans(s: str) -> list[tuple[int, int]]:
+        # URLs always; code spans only when the caller opted in. Both are "leave byte-exact" regions
+        # and the loop below treats them identically, so they are one list.
+        spans = [(m.start(), m.end()) for m in _URL_RE.finditer(s)]
+        if protect_code_spans:
+            spans += code_span_ranges(s)
+        return spans
+
+    spans = _protected_spans(text)
+    protected = _blank_ranges(_URL_RE.sub(" ", text), code_span_ranges(text) if protect_code_spans else [])
     found = {m.group(0) for m in _CANDIDATE_RE.finditer(_FILENAME_RE.sub(" ", protected))}
 
     # ALLCAPS tokens are DETECT-ONLY. They are one of three things and rewriting is wrong for two:
@@ -341,6 +456,8 @@ def substitute(text: str, *, extra_keep: frozenset[str] | None = None) -> str:
     # caller keeps the legitimate ones via extra_keep.
     def _outside_url(pos: int) -> bool:
         return not any(s <= pos < e for s, e in spans)
+
+    # NAME KEPT for the URL case it was written for; it now answers "outside every protected region".
 
     for token in sorted(found, key=len, reverse=True):
         if is_verbatim_token(token) or token in keep:
@@ -357,5 +474,5 @@ def substitute(text: str, *, extra_keep: frozenset[str] | None = None) -> str:
         if out:
             out.append(text[last:])
             text = "".join(out)
-            spans = [(m.start(), m.end()) for m in _URL_RE.finditer(text)]
+            spans = _protected_spans(text)
     return text

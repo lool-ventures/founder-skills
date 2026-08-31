@@ -136,6 +136,52 @@ class TestCapImpliedNotesGuard:
         )
         assert "priced_round" in remedy, "remedy must name the scenario type that counts notes"
 
+    def test_the_remedy_reaches_the_founder_naming_parameters_THAT_EXIST(self) -> None:
+        """The producer's remedy is correct and the DELIVERED one was not.
+
+        `compose_report` runs the whole report through the founder-text policy, which rewrote
+        `pre_money` / `new_money` INSIDE their own backticks. The founder read "parameters `pre money`
+        / `new money`" -- two names that exist nowhere -- in an instruction telling them what to type.
+
+        The test above asserts on the producer's return value and could never see this: the corruption
+        happens one layer downstream, in the layer every skill shares. So this asserts on the text
+        AFTER the policy runs, with the exact keep set and flag `compose_report` passes.
+        """
+        import sys as _sys
+
+        # `_founder_text` is the FLEET-SHARED module and lives beside the skills, not inside one;
+        # `_founder_text_keep` is cap-table's static floor and lives in the skill. Both paths needed.
+        _sys.path.insert(0, str(SCRIPTS))
+        _sys.path.insert(0, str(SCRIPTS.parents[2] / "scripts"))
+        import _founder_text as _ft  # type: ignore[import-not-found]
+        import _founder_text_keep as _ftk  # type: ignore[import-not-found]
+
+        out = run_scenario.run_safe_conversion_scenario(
+            {"scenario_id": "snap", "label": "snap", "type": "safe_conversion", "parameters": {}},
+            instruments={
+                "safes": [SAFE],
+                "convertible_notes": [{"id": "n1", "principal": 1_000_000, "valuation_cap": 10_000_000}],
+            },
+            cap_state=_cap_state(8_000_000),
+        )
+        remedy = next(b["remedy"] for b in out["blockers"] if b.get("code") == "E_CAP_IMPLIED_NOTES_PRESENT")
+        keep = _ftk.cap_table_keep()
+        delivered = _ft.substitute(remedy, extra_keep=keep, protect_code_spans=True)
+
+        for name in ("pre_money", "new_money", "priced_round"):
+            assert f"`{name}`" in delivered, (
+                f"the delivered remedy no longer names `{name}`. A founder cannot act on a parameter "
+                f"whose name we rewrote: {delivered!r}"
+            )
+        for mangled in ("pre money", "new money"):
+            assert f"`{mangled}`" not in delivered, (
+                f"the policy rewrote a parameter name inside its own backticks: {delivered!r}"
+            )
+        # Non-vacuity: without the flag this exact assertion fails, so the flag is what is being tested.
+        assert "`pre money`" in _ft.substitute(remedy, extra_keep=keep), (
+            "the unprotected path no longer corrupts, so this test would pass with the fix reverted"
+        )
+
     def test_note_present_blocks_the_snapshot(self) -> None:
         out = run_scenario.run_safe_conversion_scenario(
             {"scenario_id": "snap", "label": "snap", "type": "safe_conversion", "parameters": {}},

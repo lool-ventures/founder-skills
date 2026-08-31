@@ -1979,8 +1979,12 @@ def main() -> int:
         # Static floor shared with quick_assess / counsel_packet / _rules, unioned with the
         # data-dependent ids only this call site has (scenario + instrument ids from the artifacts).
         _keep = cap_table_keep() | _ft.identifier_values(artifacts, include_map_keys=True)
-        report_md = _ft.substitute(report_md, extra_keep=_keep)
-        _found = _ft.scan(report_md, extra_keep=_keep)
+        # MARKDOWN, so code spans are protected -- a backticked token is a name the founder must
+        # type, and rewriting it inside its own backticks shipped "parameters `pre money` / `new
+        # money`" in a blocker remedy. `scan` gets the same flag or it warns about the text the
+        # substitution deliberately preserved.
+        report_md = _ft.substitute(report_md, extra_keep=_keep, protect_code_spans=True)
+        _found = _ft.scan(report_md, extra_keep=_keep, protect_code_spans=True)
         for _tok in _found["enums"]:
             validation_warnings.append(
                 {

@@ -115,7 +115,8 @@ def _apply_founder_text_policy(md: str) -> str:
         keep = cap_table_keep()
     except Exception:
         keep = frozenset()
-    return str(_founder_text.substitute(md, extra_keep=keep))
+    # Markdown for a lawyer: a backticked charter/field name must survive verbatim.
+    return str(_founder_text.substitute(md, extra_keep=keep, protect_code_spans=True))
 
 
 def render_markdown(packet: dict[str, Any]) -> str:

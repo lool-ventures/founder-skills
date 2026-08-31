@@ -351,3 +351,73 @@ def test_scan_does_not_report_url_path_segments_as_internal_tokens() -> None:
     assert found["enums"] == [] and found["filenames"] == []
     # and a real token in prose is still caught
     assert ft.scan("the ai_core flag was set")["enums"]
+
+
+# ---------------------------------------------------------------------------
+# Code spans — the author marked it literal, so the policy must not rewrite it
+# ---------------------------------------------------------------------------
+#
+# Specimens live INSIDE the tests, both directions. Two earlier attempts at this fix were refuted by
+# measurement rather than by review, and each refutation is a case below: a fenced block, a doubled
+# span, and a stray backtick that INVERTED protection (leaked an unrelated token AND still corrupted
+# the target). A matcher that regresses on any of them reds here rather than in a founder's report.
+
+# The exact string that shipped, from `run_scenario.py`'s E_CAP_IMPLIED_NOTES_PRESENT remedy.
+_SHIPPED_CORRUPTION = "Author a `priced_round` scenario (parameters `pre_money` / `new_money`) — that route converts."
+
+
+def test_the_flag_is_off_by_default_so_no_existing_caller_moves() -> None:
+    """Default OFF is load-bearing: `_rules.founder_text` feeds HTML TEXT NODES, where a backtick is a
+    literal character rather than markup. Protecting there would hand a founder ``valuation_cap``
+    where prose reads better, and `test_html_founder_text.py` scans those nodes with NO keep set."""
+    assert ft.substitute(_SHIPPED_CORRUPTION) == (
+        "Author a `priced round` scenario (parameters `pre money` / `new money`) — that route converts."
+    )
+
+
+def test_a_backticked_parameter_name_survives_when_protection_is_on() -> None:
+    assert ft.substitute(_SHIPPED_CORRUPTION, protect_code_spans=True) == _SHIPPED_CORRUPTION
+
+
+def test_bare_tokens_beside_a_code_span_are_still_humanized() -> None:
+    """Protection is scoped to the span, not to the line. Without this the fix would be a licence to
+    leak: one backtick anywhere and the rest of the sentence stops being policed."""
+    assert ft.substitute("`pre_money` and bare pre_money", protect_code_spans=True) == (
+        "`pre_money` and bare pre money"
+    )
+
+
+def test_a_fenced_block_is_protected_and_prose_after_it_is_not() -> None:
+    out = ft.substitute("text\n```\npre_money\n```\nmore new_money here", protect_code_spans=True)
+    assert "```\npre_money\n```" in out, "a fenced block was rewritten"
+    assert "more new money here" in out, "prose after the fence stopped being humanized"
+
+
+def test_a_doubled_span_protects_its_inner_backticks() -> None:
+    """Equal-length matching: the outer pair is two backticks, so the single inner one cannot close
+    it. Measured as a failure of the previous attempt's regex."""
+    assert ft.substitute("see ``a `pre_money` b`` now", protect_code_spans=True) == "see ``a `pre_money` b`` now"
+
+
+def test_a_stray_backtick_does_not_invert_protection() -> None:
+    """The previous attempt's worst failure: an unmatched backtick both leaked an unrelated token and
+    still corrupted the target. An unmatched run must protect NOTHING."""
+    out = ft.substitute("a `pre_money` b ` c switching_costs", protect_code_spans=True)
+    assert "`pre_money`" in out, "the matched span stopped being protected"
+    assert "switching costs" in out, "a stray backtick silenced the policy for the rest of the line"
+
+
+def test_an_unclosed_fence_protects_nothing() -> None:
+    """Deliberate: protecting to end-of-document would let one stray fence silence the policy over the
+    whole rest of a report. Failing toward the pre-flag behaviour is the smaller error."""
+    assert ft.substitute("```\npre_money\nstill open", protect_code_spans=True) == "```\npre money\nstill open"
+
+
+def test_scan_moves_with_substitute_or_the_warning_cannot_be_cleared() -> None:
+    """The reason the previous attempt was rejected. Changing `substitute` alone manufactures a
+    warning whose only remedy is to un-backtick — undoing the fix. Under the flag, a token the
+    substitution deliberately preserved is not reported."""
+    kept = ft.substitute(_SHIPPED_CORRUPTION, protect_code_spans=True)
+    assert ft.scan(kept, protect_code_spans=True) == {"enums": [], "filenames": []}
+    # ... and without the flag the same text IS reported, so the pair is not vacuously silent.
+    assert ft.scan(kept)["enums"], "scan reports nothing even with protection off — the test proves nothing"
