@@ -62,6 +62,10 @@ computed by hand rather than by the calculator.
 
 ### Fixed
 
+- The short answer from a quick cap-table question named two internal fields where it should have
+  used plain English — it reported a "stale current_conversion_price" and a solver that "did not
+  converge within max_iterations". It now reads the way the full report does. The quick answer was
+  the one document that had never been checked for this.
 - A convertible note excluded from a calculation was reported as excluded for the wrong reason,
   sending you to check a term that was not the problem.
 - A note whose maturity terms were absent was treated as a note whose maturity terms were zero.
