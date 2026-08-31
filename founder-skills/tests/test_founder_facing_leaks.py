@@ -22,6 +22,7 @@ baseline". When cassettes are re-recorded against the fixed skills the count dro
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -249,6 +250,38 @@ def test_the_published_command_keep_set_is_narrow() -> None:
         leak_scan.PUBLISHED_COMMANDS = original
 
 
+# The matcher, hoisted so the specimens below exercise the SAME object the live scan does. Inside the
+# function it could be blinded without any control noticing -- which is the whole defect class.
+_JSON_PATH_RE = re.compile(r"\b[a-z_]{3,}(?:\[[^\]]*\])?(?:\.[a-z_]{3,}(?:\[[^\]]*\])?)+\b")
+
+# A dotted token ending in a real file extension is a FILENAME, not a JSON path. Founder-facing prose
+# legitimately names the founder's own upload.
+_NOT_A_PATH_SUFFIXES = (".py", ".json", ".md", ".csv", ".xlsx")
+
+
+def _json_path_tokens(text: str) -> list[str]:
+    """Internal JSON paths named in `text`, ignoring anything file-shaped."""
+    return [tok for tok in _JSON_PATH_RE.findall(text) if not tok.endswith(_NOT_A_PATH_SUFFIXES)]
+
+
+# HISTORICAL -- every one of these shipped to a founder in a validation message.
+_PATH_SPECIMENS_BAD = (
+    "expenses.headcount[0].salary_monthly",
+    "cash.monthly_net_burn",
+    "metadata.warning_overrides[0].reviewed_by",
+    "x_axis.rationale",
+)
+
+# LEGITIMATE -- live prose that must survive. `sample_model.xlsx` is the FOUNDER'S OWN upload, which
+# they must be able to find; `growth_rate_monthly` is a bare field name with no path, deliberately
+# NOT this detector's business (the founder-text policy handles undotted tokens, and duplicating that
+# here would produce two warnings for one defect with different remedies).
+_PATH_SPECIMENS_OK = (
+    "Could not read sample_model.xlsx -- check the file opens in Excel.",
+    "growth_rate_monthly is above the stage benchmark.",
+)
+
+
 def test_validation_messages_carry_no_json_paths() -> None:
     """Founder-facing validation messages are a surface NOTHING else scans.
 
@@ -266,10 +299,16 @@ def test_validation_messages_carry_no_json_paths() -> None:
     half a human reads is checked.
     """
     import ast as _ast
-    import re as _re
+
+    # POSITIVE CASE FIRST. Everything below scans live repo data and asserts the collection empty --
+    # which proves nothing once the data is clean, and clean is the goal. This detector had a coverage
+    # FLOOR (a rotted SCAN reds) and no specimens (a rotted MATCHER stayed green). Both directions now.
+    for bad in _PATH_SPECIMENS_BAD:
+        assert _json_path_tokens(bad), f"the matcher no longer catches a path that actually shipped: {bad}"
+    for ok in _PATH_SPECIMENS_OK:
+        assert not _json_path_tokens(ok), f"the matcher flags legitimate founder-facing prose: {ok}"
 
     SKILLS = Path(__file__).resolve().parents[1] / "skills"
-    path_re = _re.compile(r"\b[a-z_]{3,}(?:\[[^\]]*\])?(?:\.[a-z_]{3,}(?:\[[^\]]*\])?)+\b")
     offenders: list[str] = []
     scripts_scanned = 0
     messages_examined = 0
@@ -299,9 +338,7 @@ def test_validation_messages_carry_no_json_paths() -> None:
                         stack.extend([cur.left, cur.right])
                 text = " ".join(parts)
                 messages_examined += 1
-                for tok in path_re.findall(text):
-                    if tok.endswith((".py", ".json", ".md", ".csv", ".xlsx")):
-                        continue
+                for tok in _json_path_tokens(text):
                     offenders.append(f"{script.parent.parent.name}/{script.name}:{node.lineno} {tok}")
     # COVERAGE FLOOR, before the verdict. This scan walks skill scripts for `"message"` dict keys, and
     # every step of that is fragile in a way that fails SILENTLY: a moved directory, a renamed key, a
