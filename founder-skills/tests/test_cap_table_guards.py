@@ -17,6 +17,8 @@ theatre and does not belong here.
 
 from __future__ import annotations
 
+import ast
+import collections
 import json
 import re
 import sys
@@ -2796,3 +2798,172 @@ class TestSingleSafeWrapperSurvivesTheListMigration:
         )
         assert r["branch"] == "rejected", r
         assert r["error"] == "E_SAFE_CAP_MISSING_DENOMINATOR", r
+
+
+# ---------------------------------------------------------------------------
+# The id-keyed write inventory — a ratchet, not a scan
+# ---------------------------------------------------------------------------
+#
+# `_artifact_io.id_missing` centralizes the DECISION. This centralizes the OBLIGATION TO CONSULT IT.
+# Without it the family is closed at the sites we happened to find: six review passes each found one
+# more consumer keying a dict on an id read out of a founder's PDF, and the seventh would have been
+# found by a founder. A repeated key silently drops a row while the totals keep counting it, so the
+# summary and the detail disagree with no warning anywhere.
+#
+# Keyed on (file, nearest enclosing function, id field) rather than line number: line numbers drift
+# with every edit and a registry that reds on formatting teaches people to update it without reading.
+# A NEW site fails as unregistered; a REMOVED site fails as stale, because a registry that only grows
+# stops describing the code.
+
+_ID_KEYED_WRITE_REGISTRY: dict[tuple[str, str, str], tuple[int, str]] = {
+    # Read-only indices built to compare two artifacts against each other. A collision here changes
+    # which of two identically-keyed INPUTS the drift check reads; it cannot drop an output row.
+    ("_artifact_io.py", "_check_mirror_drift", "id"): (4, "checker-only"),
+    # `priced_round` calls `instrument_id_blockers` on its inputs and refuses before solving, so
+    # these indices cannot be reached with a colliding id.
+    ("priced_round.py", "_apply_mfn_election_overrides", "id"): (2, "point-of-use-blockers"),
+    ("priced_round.py", "_resolve_mfn_elections", "id"): (1, "point-of-use-blockers"),
+    # `series_id` is DERIVED from `series_name` during canonicalization, and `_check_unique_ids`
+    # raises on both a duplicate and a blank. This is the anti-dilution CP1 snapshot -- the site
+    # reachable with no duplicate typed by anyone, because two series names differing only in case
+    # derive one id.
+    ("priced_round.py", "_finalize", "series_id"): (1, "guarded-at-ingress"),
+    ("priced_round.py", "solve_priced_round", "series_id"): (1, "guarded-at-ingress"),
+    # `build_cap_state` has already refused duplicate and blank ids by the time this runs, and the
+    # per-SAFE OUTPUT it indexes into is a list of id-bearing rows, so no output row can be lost.
+    ("quick_assess.py", "quick_assess", "id"): (1, "guarded-at-ingress"),
+    # E_SCENARIO_ID_MISSING / E_SCENARIO_ID_DUPLICATE fire before the dispatch loop. Scenario ids
+    # cost a founder-visible ROW rather than a number -- two scenarios sharing one id yield one
+    # date-sensitivity watchlist entry, and a financing date's legal-window status disappears.
+    ("run_scenario.py", "run_all_scenarios", "scenario_id"): (1, "point-of-use-blockers"),
+    # Refuses duplicates itself; `in (None, "")` was already the correct call here before the
+    # shared predicate existed.
+    ("safe_conversion.py", "convert_safes_cap_implied", "id"): (1, "point-of-use-blockers"),
+    # `warrants`/`warrant_id` and `preferred_series`/`series_id` are both in `_check_unique_ids`'s
+    # array list, so a duplicate raises at canonicalization.
+    ("warrant_exercise.py", "apply_pump_results", "warrant_id"): (1, "guarded-at-ingress"),
+    ("warrant_exercise.py", "apply_pump_results", "series_id"): (1, "guarded-at-ingress"),
+}
+
+_ID_KEYED_DEFENSES = {"guarded-at-ingress", "point-of-use-blockers", "defended-fallback", "checker-only"}
+
+# Measured at freeze time. The repo's own rule: an extraction must assert its own pattern matched, or
+# a rotted matcher reports a clean inventory and the ratchet greens on nothing.
+_ID_KEYED_SITE_FLOOR = 14
+
+_ID_FIELD_EXCLUSIONS = {"run_id", "rule_id", "source_id"}
+
+
+def _id_field(node: ast.AST) -> str | None:
+    """The id-ish field this expression reads, or None.
+
+    Two spellings, because both are live: `x["id"]` and `x.get("id")`. `run_id`/`rule_id`/`source_id`
+    are excluded -- they are provenance and rule-pack handles, not per-instrument keys.
+    """
+    if isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Constant) and isinstance(node.slice.value, str):
+        key = node.slice.value
+        if (key == "id" or key.endswith("_id")) and key not in _ID_FIELD_EXCLUSIONS:
+            return key
+    if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "get"
+        and node.args
+        and isinstance(node.args[0], ast.Constant)
+        and isinstance(node.args[0].value, str)
+    ):
+        key = node.args[0].value
+        if (key == "id" or key.endswith("_id")) and key not in _ID_FIELD_EXCLUSIONS:
+            return key
+    return None
+
+
+def _scan_id_keyed_writes() -> collections.Counter[tuple[str, str, str]]:
+    """Every `d[x["id"]] = ...` and `{x["id"]: ... for ...}` in cap-table's scripts.
+
+    Attributed to the NEAREST enclosing function: a naive `ast.walk` per function counts a nested
+    function's sites twice (measured -- it reported 15 sites where there are 14).
+    """
+    found: collections.Counter[tuple[str, str, str]] = collections.Counter()
+
+    def visit(node: ast.AST, filename: str, func: str) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                visit(child, filename, child.name)
+                continue
+            if isinstance(child, ast.Assign):
+                for target in child.targets:
+                    if isinstance(target, ast.Subscript):
+                        key = _id_field(target.slice)
+                        if key:
+                            found[(filename, func, key)] += 1
+            if isinstance(child, ast.DictComp):
+                key = _id_field(child.key)
+                if key:
+                    found[(filename, func, key)] += 1
+            visit(child, filename, func)
+
+    for path in sorted(SCRIPTS.glob("*.py")):
+        visit(ast.parse(path.read_text(encoding="utf-8")), path.name, "<module>")
+    return found
+
+
+def test_every_id_keyed_write_site_is_registered_with_its_defense() -> None:
+    """A new dict keyed on an id read out of a founder's document must declare how it is defended.
+
+    This is what makes the id-collapse work a CLASS fix rather than a seventh pass over the same
+    family. The shared predicate says what "missing" means; this says every site had to ask.
+    """
+    found = _scan_id_keyed_writes()
+
+    total = sum(found.values())
+    assert total >= _ID_KEYED_SITE_FLOOR, (
+        f"the inventory scan found only {total} id-keyed write sites (floor {_ID_KEYED_SITE_FLOOR}). "
+        "A scan that goes quiet reads exactly like a codebase that got safer. Either the matcher "
+        "rotted or sites were genuinely removed -- if removed, lower the floor in the same commit."
+    )
+
+    unregistered = {k: v for k, v in found.items() if k not in _ID_KEYED_WRITE_REGISTRY}
+    assert not unregistered, (
+        "id-keyed write site(s) not in the registry: "
+        + "; ".join(f"{f}::{fn} keyed on {key!r} (x{n})" for (f, fn, key), n in sorted(unregistered.items()))
+        + ". A dict keyed on an id read out of a founder's document drops a row on a collision while "
+        "the totals keep counting it. Confirm the ids reaching it are refused when missing or "
+        "duplicate (see `_artifact_io.id_missing` / `instrument_id_blockers`), then register the "
+        f"site with one of {sorted(_ID_KEYED_DEFENSES)}."
+    )
+
+    vanished = {k for k in _ID_KEYED_WRITE_REGISTRY if k not in found}
+    assert not vanished, (
+        f"registered site(s) no longer exist: {sorted(vanished)}. Remove them -- a registry that only "
+        "grows stops describing the code, and the next reader trusts it."
+    )
+
+    miscounted = {
+        k: (found[k], _ID_KEYED_WRITE_REGISTRY[k][0])
+        for k in _ID_KEYED_WRITE_REGISTRY
+        if found[k] != _ID_KEYED_WRITE_REGISTRY[k][0]
+    }
+    assert not miscounted, (
+        f"site count changed without a registry update: {miscounted} (found, registered). A second "
+        "id-keyed write in an already-registered function is a NEW site and needs the same check."
+    )
+
+    bad = {k: d for k, (_, d) in _ID_KEYED_WRITE_REGISTRY.items() if d not in _ID_KEYED_DEFENSES}
+    assert not bad, f"registry entries name an unknown defense: {bad}; expected one of {sorted(_ID_KEYED_DEFENSES)}"
+
+
+def test_the_inventory_matcher_sees_both_spellings_and_ignores_provenance_ids() -> None:
+    """The positive case for the scan above, which is otherwise unfalsifiable.
+
+    `test_every_guarded_array_is_actually_reached` was theatre for exactly this reason -- it greped
+    for tuple literals and passed with the guard deleted. Blind `_id_field` and this reds.
+    """
+    seen = {_id_field(ast.parse(src, mode="eval").body) for src in ('x["id"]', 'x.get("id")', 'x["series_id"]')}
+    assert seen == {"id", "series_id"}, f"the matcher stopped recognising a live spelling: {seen}"
+    for provenance in ('x["run_id"]', 'x.get("rule_id")', 'x["source_id"]'):
+        assert _id_field(ast.parse(provenance, mode="eval").body) is None, (
+            f"{provenance} is provenance, not a per-instrument key; registering it would bury the real sites"
+        )
+    for miss in ('x["identity"]', 'x.get("label")', "x[key]"):
+        assert _id_field(ast.parse(miss, mode="eval").body) is None, f"the matcher over-matches: {miss}"
