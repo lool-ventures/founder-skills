@@ -1016,7 +1016,7 @@ SKILL_MD_CEILING: dict[str, int] = {
     # Net of the 2026-08-31 adversarial pass: cap-table +uncovered_parts stringify guidance;
     # competitive-positioning -1.4 KB from de-duplicating the "Preserve _produced_by" note,
     # which had been pasted verbatim four times (twice four lines apart).
-    "cap-table": 148_920,
+    "cap-table": 149_836,
 }
 
 
@@ -2860,4 +2860,97 @@ def test_no_cwd_relative_path_addresses_the_session_layout(skill: str) -> None:
         + "\n".join(offenders)
         + "\n  Fix: derive the path from resolve_artifacts_root.py (--uploads for the uploads mount) "
         "and address the printed value, or anchor it on an already-resolved $VAR."
+    )
+
+
+# A label whose presence is CONDITIONAL on something the runtime may not have. `_option_specs`
+# yields only the backticked span per comma-segment, so this marker is discarded before any
+# existing test sees it -- which is why the arity test reads a collapsible row as fully populated.
+_CONDITIONAL_OPTION = re.compile(r"\(\s*present only when\b", re.I)
+
+
+def _unconditional_option_counts(skill: str) -> list[tuple[int, str, int, int]]:
+    """(line_no, row name, declared options, options that are NOT conditionally present).
+
+    Re-derives the `Option labels` column by scanning back to the table header: `_table_specs`
+    yields the row's line number but not the column index it computed, so the cell cannot be
+    recovered from `line_no` alone.
+    """
+    lines = (SKILLS_ROOT / skill / "SKILL.md").read_text(encoding="utf-8").splitlines()
+    out: list[tuple[int, str, int, int]] = []
+    for line_no, _form, name, options in _option_specs("\n".join(lines)):
+        if _form != "table-cell" or not options:
+            continue
+        column = None
+        for back in range(line_no - 1, -1, -1):
+            row = lines[back].strip()
+            if not row.startswith("|"):
+                break
+            cells = [c.strip() for c in _split_outside_backticks(row.strip("|"), "|")]
+            if _TABLE_LABEL_COLUMN in cells:
+                column = cells.index(_TABLE_LABEL_COLUMN)
+                break
+        if column is None:
+            continue
+        cells = [c.strip() for c in _split_outside_backticks(lines[line_no - 1].strip().strip("|"), "|")]
+        if column >= len(cells):
+            continue
+        segments = _split_outside_backticks(cells[column], ",")
+        unconditional = sum(1 for s in segments if "`" in s and not _CONDITIONAL_OPTION.search(s))
+        out.append((line_no, name or "", len(options), unconditional))
+    return out
+
+
+@pytest.mark.parametrize("skill", sorted(SKILL_MD_CEILING))
+def test_option_lists_still_render_when_a_conditional_label_is_absent(skill: str) -> None:
+    """A row whose affirmative label is conditional must still leave 2 options without it.
+
+    THE ARITY TEST CANNOT SEE THIS. It counts DECLARED options, so a row marked
+    `(present only when a candidate was derived)` reads as fully populated and passes -- while the
+    skill's own Notes instruct "Omit it entirely if nothing was derived", leaving ONE option.
+
+    That is not cosmetic: `AskUserQuestion`'s 2-option floor is a hard schema bound, and the runtime
+    REJECTS the whole call -- "This call included a question with fewer than 2 options, so it was
+    rejected and the person never saw it." Since these gates are asked in one batched call, a single
+    collapsed row costs the other questions in that call a round-trip too.
+
+    Exemptions come from `ARITY_EXEMPT`, deliberately reused rather than re-derived: the catalog's
+    general-shape row carries no backticked labels by design, and a class rule like "skip rows with
+    no options" is exactly the silent skip that row's own exemption note argues against.
+
+    KNOWN UNCOVERED SIBLING, recorded rather than chased: cap-table's **Scenario selection** row
+    declares four labels and conditions them in PROSE -- "Offer only the scenarios that apply to
+    this cap table" -- so it can collapse the same way and neither this scan nor the arity test can
+    see it. Measured in the committed corpus: `cap-table-safe-full` rendered 2 of those options and
+    `cap-table-carta-folder` rendered 3, so the conditioning is live. Teaching this test to parse
+    prose conditionals is the enumerated-blocklist trap `leak_scan.py`'s design note says this repo
+    has already lost once; the durable fix is to express that row's condition as a marker, at which
+    point this scan covers it for free.
+    """
+    bad = [
+        (line_no, name, declared, uncond)
+        for line_no, name, declared, uncond in _unconditional_option_counts(skill)
+        if uncond < ASKUSER_MIN_OPTIONS and (skill, name) not in ARITY_EXEMPT
+    ]
+    assert not bad, (
+        f"{skill}/SKILL.md declares an option set that collapses below "
+        f"{ASKUSER_MIN_OPTIONS} when a conditional label is absent:\n"
+        + "\n".join(f"  line {ln} ({nm}): {d} declared, only {u} unconditional" for ln, nm, d, u in bad)
+        + "\n\nAdd an explicit defer as the last option — the catalog's own general-shape row "
+        "requires one, and the fleet vocabulary is `Not sure` / `Not stated`. It must go in the "
+        "Option labels cell: a caveat in Notes is invisible to this check and to the runtime."
+    )
+
+
+def test_the_conditional_marker_scan_still_finds_the_rows_it_was_built_for() -> None:
+    """Non-vacuity, keyed on row NAMES rather than a count.
+
+    A count floor reds when one row is legitimately reshaped; a name set says which rows the
+    detector was calibrated on. `ARITY_EXEMPT` is keyed the same way for the same reason.
+    """
+    seen = {name for line_no, name, declared, uncond in _unconditional_option_counts("cap-table") if declared > uncond}
+    assert {"Company name", "Sector", "Geography"} <= seen, (
+        "the conditional-presence marker is no longer detected on the rows this scan was built "
+        f"for (found: {sorted(seen)}). If a row legitimately dropped its marker, remove it here; "
+        "if the regex rotted, every collapsible row is now invisible."
     )
