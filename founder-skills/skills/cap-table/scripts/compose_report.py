@@ -1459,7 +1459,7 @@ def render_report_markdown(
                 cp = r.get("conversion_price")
                 shares = r.get("conversion_shares")
                 lines.append(
-                    f"| `{nid}` | `{branch}` | "
+                    f"| `{nid}` | {_labels.humanize('branch', branch)} | "
                     f"{_money(ai) if ai is not None else '—'} | "
                     f"{('$' + format(cp, '.4f')) if cp is not None else '—'} | "
                     f"{(f'{int(shares):,}') if shares is not None else '—'} |"
@@ -1486,7 +1486,7 @@ def render_report_markdown(
                     pct_of_cap = purchase / cap
                     deriv = f"{_money(purchase)} ÷ {_money(cap)} = {pct_of_cap * 100:.2f}%"
                 lines.append(
-                    f"| {_instrument_label(instruments, sid)} | `{branch}` | {deriv} | "
+                    f"| {_instrument_label(instruments, sid)} | {_labels.humanize('branch', branch)} | {deriv} | "
                     f"{('$' + format(cp, '.4f')) if cp is not None else '—'} | "
                     f"{(f'{int(shares):,}') if shares is not None else '—'} |"
                 )
@@ -1509,7 +1509,7 @@ def render_report_markdown(
                 shares = evt.get("shares_added")
                 approx = "Yes" if evt.get("fmv_approximation_used") else "No"
                 lines.append(
-                    f"| `{wid}` | `{stype}` | "
+                    f"| `{wid}` | {_labels.humanize('settlement_type', stype)} | "
                     f"{('$' + format(pps, '.4f')) if pps is not None else '—'} | "
                     f"{(f'{int(shares):,}') if shares is not None else '—'} | "
                     f"{approx} |"

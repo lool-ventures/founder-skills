@@ -24,6 +24,38 @@ SCENARIO_TYPE = {
     "flip": "Entity flip",
 }
 
+# How an instrument converted. These reached founders UNGLOSSED in every release: `humanize()`
+# has no `branch` category, so it fell through to the underscore-to-space transform and delivered
+# `cap and discount branch` — the enum respelled, not a label. The code-span change in the
+# founder-text policy then preserved the raw form instead, which made the same defect visible.
+# Neither spelling is a founder-facing sentence; this map is.
+BRANCH = {
+    # SAFE conversion
+    "cap_branch": "Converted at the valuation cap",
+    "discount_branch": "Converted at the discount",
+    "cap_and_discount_branch": "Cap and discount both applied — whichever gave more shares",
+    "round_price_branch": "Converted at the round price",
+    "round_price_and_discount_branch": "Round price with the discount applied",
+    "cap_implied": "Cap-implied ownership (pre-financing snapshot)",
+    "cap_implied_set": "Cap-implied ownership across all SAFEs",
+    "conversion_price_override": "Converted at a price you supplied",
+    "terms_only_excluded": "Terms recorded, not converted",
+    "rejected": "Not converted — see the blocker",
+    # Convertible note
+    "cap_conversion": "Converted at the valuation cap",
+    "discount_only": "Converted at the discount",
+    "maturity_convert_at_cap": "Matured — converted at the cap",
+    "maturity_extend": "Matured — term extended",
+    "maturity_repay": "Matured — repaid in cash",
+    "maturity_counsel_review": "Matured — needs counsel to decide",
+    "maturity_conversion_price_override": "Matured — converted at a price you supplied",
+    "threshold_not_met": "Round too small to trigger conversion",
+    "override_mismatch": "Your stated terms disagree with the document",
+    # Warrant settlement
+    "cash_exercise": "Exercised for cash",
+    "net_share_settlement": "Net-settled in shares",
+}
+
 SCOPE = {
     "legal_tax_applicability": "Legal/tax window",
     "benchmark_freshness": "Benchmark freshness",
@@ -45,6 +77,8 @@ STATUS = {
 MAPS: dict[str, dict[str, str]] = {
     "completeness": COMPLETENESS,
     "scenario_type": SCENARIO_TYPE,
+    "branch": BRANCH,
+    "settlement_type": BRANCH,
     "scope": SCOPE,
     "status": STATUS,
 }

@@ -2978,3 +2978,72 @@ def test_the_inventory_matcher_sees_both_spellings_and_ignores_provenance_ids() 
         )
     for miss in ('x["identity"]', 'x.get("label")', "x[key]"):
         assert _id_field(ast.parse(miss, mode="eval").body) is None, f"the matcher over-matches: {miss}"
+
+
+# ---------------------------------------------------------------------------
+# A glossed enum must be RENDERED as its gloss, not merely permitted to be raw
+# ---------------------------------------------------------------------------
+
+
+def test_no_delivered_markdown_renders_a_raw_branch_enum() -> None:
+    """The leak scan CANNOT catch this, and the reason is worth stating.
+
+    `cap_table_keep()` is every key of `_labels.MAPS`. Adding a `BRANCH` gloss therefore added all
+    22 branch values to the keep set, so `scan` now treats a RAW `cap_and_discount_branch` as a
+    deliberately-kept term and reports clean. That is correct for the policy -- a glossed term is
+    kept on purpose -- and it means the fleet leak scan is structurally blind to a revert of the
+    renderer. Measured: reverting `compose_report.py` to `` `{branch}` `` leaves
+    `test_compose_invariants.py` fully green.
+
+    So this asserts the POSITIVE: the delivered markdown carries the human sentence, and carries no
+    backticked branch value at all. A negative-only guard cannot express it.
+    """
+    import subprocess
+    import sys as _sys
+    import tempfile
+
+    import _labels  # type: ignore[import-not-found]
+
+    fixtures = Path(__file__).resolve().parent / "fixtures" / "cap-table"
+    with tempfile.TemporaryDirectory() as tmp:
+        work = Path(tmp)
+        for f in fixtures.glob("*.json"):
+            (work / f.name).write_bytes(f.read_bytes())
+        rc = subprocess.run(
+            [
+                _sys.executable,
+                str(SCRIPTS / "compose_report.py"),
+                "--dir",
+                str(work),
+                "--run-id",
+                "branch-gloss",
+                "-o",
+                str(work / "report.json"),
+                "--write-md",
+                str(work / "report.md"),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        assert rc.returncode == 0, f"compose failed: {rc.stderr[-400:]}"
+        md = (work / "report.md").read_text(encoding="utf-8")
+
+    # NON-VACUITY: the fixture must actually exercise the branch column. A row carrying
+    # `cap_implied_ownership` is filtered out before the render, so a fixture of only those makes
+    # every assertion below trivially true.
+    assert "safe_002" in md, (
+        "the fixture no longer renders a per-SAFE row through the branch column -- this test would "
+        "pass on a report that never printed a branch at all. Restore a per_safe row WITHOUT "
+        "`cap_implied_ownership`."
+    )
+
+    raw = sorted({v for v in _labels.BRANCH if f"`{v}`" in md})
+    assert not raw, (
+        f"delivered report.md renders raw branch enum(s) in a code span: {raw}. They are in the keep "
+        "set because they are glossed, so the founder-text scan reports clean -- render "
+        "`_labels.humanize('branch', ...)` instead."
+    )
+    assert _labels.BRANCH["cap_and_discount_branch"] in md, (
+        "the fixture's branch row is no longer rendering its gloss; either the renderer regressed or "
+        "the label text changed without this test"
+    )

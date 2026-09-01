@@ -43,7 +43,9 @@ _FOUNDER_TEXT_KEYS = frozenset({"remedy", "reason", "detail", "message", "guidan
 # ratchet could not see the very remedy it was written about. Widening the walk to f-string and
 # concatenation segments took the true count to 68. Re-measure whenever `_FOUNDER_TEXT_KEYS` or
 # `_literal_parts` changes; never inherit a count from a review or a sibling file.
-_BASELINE = 68
+# 68 -> 66: `_labels.BRANCH` now glosses the SAFE/note/warrant branch enums, so two tokens that
+# the founder used to read mangled are rendered as sentences. Earned, not conceded.
+_BASELINE = 66
 
 
 def _founder_text() -> types.ModuleType:

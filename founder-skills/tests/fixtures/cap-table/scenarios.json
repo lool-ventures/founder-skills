@@ -40,6 +40,21 @@
                 "source_ref": null
               }
             ]
+          },
+          {
+            "id": "safe_002",
+            "branch": "cap_and_discount_branch",
+            "conversion_price": 1.0556,
+            "conversion_shares": 473684,
+            "math_provenance": [
+              {
+                "output_field": "conversion_shares",
+                "source_type": "rule",
+                "rule_id": "safe.post_money_cap_conversion",
+                "rule_pack_version": "0.4.1",
+                "source_ref": null
+              }
+            ]
           }
         ],
         "company_capitalization": 11578947.368421054
