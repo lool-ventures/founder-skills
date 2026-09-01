@@ -127,6 +127,32 @@ assert:
   # set AT the observed count turns ordinary variance into a red suite.
   - gate_answer_count_min: 1
 
+  # NO INVENTED STATUTORY NAME REACHES THE FOUNDER (F3, 2026-09-01).
+  #
+  # MEASURED: three DIFFERENT invented expansions of OBBBA across two cassettes, two of them in a
+  # single run -- "Opportunity, Balance, and Broader-Based Allowance Act", "Opportunity, Growth, and
+  # Biosecurity Act", "One Big Beautiful Budget Act". The rule pack carries the bare acronym and
+  # expands it nowhere, so a literal matcher is non-durable by construction; this matches the SHAPE
+  # (a line naming OBBBA and an 'Act' that is not the real one). ORDER-INDEPENDENT on purpose:
+  # the chat variant is `OBBBA (<invented> Act)` and the Context B variant is `The <invented>
+  # Act (OBBBA, ...)`. A first draft assumed the acronym came first and missed the second.
+  # SCOPED TO THE APPOSITION, not proximity: an earlier draft matched any 'Act' within 120
+  # chars of OBBBA and flagged 'The Securities Act of 1933 governs. Separately, OBBBA...'.
+  # An acronym expansion IS an apposition, so the parenthesis is the discriminator.
+  # NOTE the harness compiles these as JAVASCRIPT regex -- inline flags like (?m) are a load
+  # error (measured: `record --dry-run` rc=2, 'Invalid group'), lookbehind is fine.
+  #
+  # BOTH KEYS ARE REQUIRED AND NEITHER SUBSUMES THE OTHER. `transcript_not_matches` sees top-level
+  # assistant_text ONLY, which is where the chat variant lives; the Context B variants are written
+  # inside a `tool_use` and reach the artifact, which only `artifact_text` can see.
+  - transcript_not_matches: 'OBBBA[^\n]{0,20}\([^)\n]{0,80}(?<!Bill )\bAct\b|(?<!Bill )\bAct\b\s*\(\s*OBBBA'
+  - artifact_text:
+      artifact: 'outputs/artifacts/cap-table-cadence/report.md'
+      not_matches: 'OBBBA[^\n]{0,20}\([^)\n]{0,80}(?<!Bill )\bAct\b|(?<!Bill )\bAct\b\s*\(\s*OBBBA'
+  - artifact_text:
+      artifact: 'outputs/Cadence_Cap_Table.md'
+      not_matches: 'OBBBA[^\n]{0,20}\([^)\n]{0,80}(?<!Bill )\bAct\b|(?<!Bill )\bAct\b\s*\(\s*OBBBA'
+
   # NO INTERNAL FILENAME REACHES A DELIVERED DOCUMENT (harness 1.24.0 `artifact_text`).
   #
   # WHY THIS EXISTS. A leak of this class was shipped to a founder: an internal name appeared in
