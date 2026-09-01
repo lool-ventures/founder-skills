@@ -37,6 +37,15 @@ The report's text policy, which rewrites our internal vocabulary into plain Engl
 these names inside the backticks marking them as literal. Names in backticks are now left exactly
 as written, everywhere they appear in a cap-table report or counsel packet.
 
+**A counsel note could name a law that does not exist.** When the cap-table review flagged a
+question for your attorney, the summary sometimes supplied the full name of a tax statute — and
+invented it. Three different wrong names for the same Act appeared across our test runs, one of them
+in a delivered report, inside a paragraph that correctly told you to consult counsel. The cause was
+that the step writing that summary was asked to cite sources it had never been given: it received
+rule identifiers and no rule text, so the only way to comply was to supply wording from memory. It
+now receives the actual wording, and is told to leave an abbreviation unexpanded rather than guess
+at it — and never to state an issuance date you did not provide.
+
 **The coverage note in a cap-table report could contradict the check it was reporting on.** On a
 deal combining a convertible note with a share acquisition, the check recorded that the deal was
 outside what the calculator covers, and the note beside it asserted the opposite. The note now
@@ -53,6 +62,9 @@ computed by hand rather than by the calculator.
 
 ### Changed
 
+- The "how it converted" column in a cap-table report now reads as a sentence — "Cap and discount
+  both applied — whichever gave more shares" — instead of an internal code with the underscores
+  taken out.
 - Anti-dilution, conversion and charter terms are written for a lawyer to read: no field names,
   no internal codes, and sentences that survive being pasted into an email.
 - The interactive report no longer hides a figure's raw value behind a hover — the number and its
@@ -62,6 +74,10 @@ computed by hand rather than by the calculator.
 
 ### Fixed
 
+- A question the cap-table skill asks early on — your company name, sector and location — could
+  fail to appear at all when it had nothing to suggest, because it was left with a single choice
+  and a question needs at least two. It now always offers a way to say "not sure", so the question
+  appears and you can move on without inventing an answer.
 - The short answer from a quick cap-table question named two internal fields where it should have
   used plain English — it reported a "stale current_conversion_price" and a solver that "did not
   converge within max_iterations". It now reads the way the full report does. The quick answer was
