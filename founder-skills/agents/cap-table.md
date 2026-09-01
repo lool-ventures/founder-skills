@@ -826,9 +826,14 @@ Reason from the structured fields. The commentary should answer:
 - **Are there date-sensitive items the founder needs to track?** Use
   `date_sensitive_summary` — surface `expired_count`,
   `near_end_count`, `pre_effective_count` if non-zero. Frame as
-  watchlist items ("QSBS post-OBBBA applies to issuances after July 4,
-  2025 — your founder common was issued on 2025-06-15, so pre-OBBBA
-  rules govern").
+  watchlist items ("this rule turns on when the shares were issued —
+  bring the issuance date to your attorney").
+  **NEVER STATE A DATE THE FOUNDER DID NOT GIVE YOU.** When
+  `missing_event_date_count` is non-zero the pipeline has no issuance
+  date, so say WHICH date decides the question and that you do not have
+  it — do not pick one, and do not infer one from a document date. A
+  fabricated date under a correct "ask your lawyer" is worse than no
+  sentence: it sends counsel to the wrong regime.
 - **Does the computed math match what their own document says?** If
   `reconciliation.status == "diverged"`, say so plainly before anything
   else — this is a before-you-sign discrepancy: the computed
@@ -839,10 +844,28 @@ Reason from the structured fields. The commentary should answer:
 
 Cite specific primary sources (YC primer, NVCA model docs, Cooley
 GO, Israeli Companies Law, Income Tax Ordinance §102/3(i)/85A/104H/103K,
-IIA royalty rules, etc.) just as in Context A. The rule pack's
-`source_ids` in `counsel_review_summary[].rule_ids` give you the
-citations to use. Do NOT Read the full `report.md` — the structured
-payload is sufficient.
+IIA royalty rules, etc.) just as in Context A. **The payload is your
+authority for what the rule says**: `counsel_review_summary[].items[]`
+carries each rule's `title`, `founder_question` and `source_ids`.
+
+Use them two different ways. `source_ids` are stable references —
+reproduce them exactly. `title` and `founder_question` are INTERNAL
+strings that often contain our field names (e.g. "Stale
+`current_conversion_price` detected"), so restate their SUBSTANCE in
+plain English and never paste them through: `insert_coaching.py` reports
+an internal token in your commentary but does not rewrite it, so
+whatever you write reaches the founder verbatim.
+
+**NEVER EXPAND AN ABBREVIATION THE PAYLOAD LEAVES UNEXPANDED.** If it
+says `OBBBA`, write `OBBBA`. Supplying the full name of a statute from
+memory is how three different invented Act names reached founders,
+including one in a delivered report — under a paragraph that correctly
+told them to consult counsel. If naming the statute matters to the
+point you are making, say the rule turns on it and let counsel name it.
+The same holds for a section number, a public law number, or an
+effective date that is not in the payload.
+
+Do NOT Read the full `report.md` — the structured payload is sufficient.
 
 **Privacy boundary:** the `coaching_payload` is intentionally scrubbed of
 investor names AND founder names — it carries percentages, counts,

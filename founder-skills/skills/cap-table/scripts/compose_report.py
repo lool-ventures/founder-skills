@@ -359,12 +359,33 @@ def build_top_dilution_drivers(scenarios: list[dict[str, Any]]) -> list[dict[str
 def build_counsel_review_summary(
     counsel_packet: dict[str, Any],
 ) -> list[dict[str, Any]]:
+    """Per-domain counsel summary for the coaching payload.
+
+    CARRIES THE PACK'S OWN WORDS, not just ids. It used to emit `{domain, item_count, rule_ids}`
+    while the agent body instructed the sub-agent to "cite specific primary sources" and said the
+    rule ids "give you the citations to use". They do not: an id is not a citation, and the payload
+    carried no rule text at all. The only way to satisfy that instruction was to supply the wording
+    from memory -- and it did, inventing a statutory name that appears nowhere in the pack and
+    reached the founder's delivered report.
+
+    That is this repo's own recorded anti-pattern: a gate clearable only by fabrication. Passing the
+    pack's `title` / `founder_question` / `source_ids` through makes restating possible, which is
+    what the instruction assumed all along.
+    """
     by_domain: dict[str, dict[str, Any]] = {}
     for item in counsel_packet.get("items", []):
         d = item.get("domain", "other")
-        by_domain.setdefault(d, {"domain": d, "item_count": 0, "rule_ids": []})
+        by_domain.setdefault(d, {"domain": d, "item_count": 0, "rule_ids": [], "items": []})
         by_domain[d]["item_count"] += 1
         by_domain[d]["rule_ids"].append(item["rule_id"])
+        by_domain[d]["items"].append(
+            {
+                "rule_id": item.get("rule_id"),
+                "title": item.get("title"),
+                "founder_question": item.get("founder_question"),
+                "source_ids": item.get("source_ids") or [],
+            }
+        )
     return list(by_domain.values())
 
 
