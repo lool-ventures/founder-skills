@@ -95,7 +95,12 @@ sys.path.insert(0, str(_REPO_ROOT / "cowork-tests"))
 # 12 of the 22 cassettes are still at their pre-fix recordings, and cap-table alone holds 30 of the
 # remaining leaks against a one-line skill change — so the bulk of this number has never been
 # re-measured against fixed narration.
-BASELINE = 20
+# 20 -> 17: the cap-table Context B guidance fix (`4c0c19c`) cut that lane 4 -> 1 on re-record.
+# Earned, not conceded. NOTE this restores ZERO headroom, deliberately per the ratchet-down rule
+# above -- and this signal is measured NOISY run-to-run (financial-model-review-smoke moved 5 -> 2
+# with no narration edit). So the next re-record of an unrelated lane may red this for variance
+# rather than regression. The response is still to fix the narration, never to raise the number.
+BASELINE = 17
 
 
 pytestmark = pytest.mark.skipif(
