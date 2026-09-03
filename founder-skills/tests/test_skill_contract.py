@@ -900,7 +900,15 @@ SKILL_MD_CEILING: dict[str, int] = {
     # rescoped to "you never write a canonical artifact" across all 22 sites (W2 audit). The
     # instruction was always correct; the REASON given for it asserted the general claim P0-2
     # established is false — the main thread writes several canonical artifacts by heredoc.
-    "deck-review": 102_180,
+    # deck-review 102,180 -> 102,508 (+328): the LEDGER_EXTRACTION template now says a count
+    # the slide spells out in words IS a figure, recorded with the words as printed. Measured on a
+    # real deck across two runs: "three production R&D organizations", "Six patent applications",
+    # "Fifteen years" and "Five people" were refused by ledger.py on the first ("contains no
+    # number", a repair dispatch) and silently omitted on the second, once the extractor had
+    # learned to avoid the refusal. ledger.py now reads spelled-out cardinals through
+    # `numeral_form`, so the instruction and the validator agree; without the sentence the model
+    # keeps choosing between the two failures, and neither records what the deck says.
+    "deck-review": 102_508,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.

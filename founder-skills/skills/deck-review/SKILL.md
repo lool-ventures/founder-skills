@@ -675,6 +675,11 @@ A slide reading "200-400m" of building height is `raw: "200-400 metres"`, not
 `k`, `b` and `t`. You are the only one who can tell these apart; nothing
 downstream can.
 
+A count the slide spells out in words is a number the deck states: "three design
+partners" is value 3 with raw "three"; "Fifteen years" is 15 with raw "Fifteen years".
+Record it with the words as printed — never skip it, never retype it as digits.
+Ordinals ("a fourth partner") and fractions are not counts; leave those out.
+
 `quote` must be the VERBATIM sentence or table row the figure was read from. It is
 re-found by a ledger-blind reader in the same extracted text; a quote that is not
 found there at all — one you composed, summarised, or read off a chart — is dropped.

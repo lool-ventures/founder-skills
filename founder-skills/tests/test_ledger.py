@@ -52,37 +52,76 @@ def _run(payload: dict, extra: list[str] | None = None) -> tuple[int, str, str]:
     return res.returncode, res.stdout, res.stderr
 
 
-def test_rejects_a_word_number_as_raw() -> None:
-    """`raw` must be the slide's printed string, and a spelled-out count is not one.
+def _word_count_fig(raw: str, value: float, **over: object) -> dict:
+    fig = _fig(
+        id="founder_count",
+        value=value,
+        raw=raw,
+        unit_kind="count",
+        currency=None,
+        quote="Two founders, ex-Stripe and ex-Notion",
+    )
+    fig.update(over)
+    return fig
 
-    Found by a live run, not by this file: the `deck-review-smoke` fixture said "Two
-    founders", the extractor recorded `raw: "Two"`, and the guard at ledger.py:347 rejected
-    it correctly — costing a repair dispatch that blew the scenario's sub-agent budget. The
-    guard worked; it simply had NO test, so nothing here would have caught its removal.
 
-    The rejection matters beyond tidiness, per the guard's own note: a numeral-free `raw`
-    reads downstream as an approximation and widens tolerance, which once turned a summed
-    108 against a stated 100 from a contradiction into a confirmation.
+def test_accepts_a_spelled_out_count_the_slide_prints() -> None:
+    """`raw` must be the slide's printed string — and when the slide prints "Two", that IS it.
 
-    The fixture now says "2 co-founders" — the figure is kept, the trap is gone, and this
-    test holds the behaviour instead of a paid run holding it.
+    History: this guard used to REJECT a spelled-out count. Found by a live run, not by this
+    file: the `deck-review-smoke` fixture said "Two founders", the extractor recorded
+    `raw: "Two"`, and the guard refused it as "containing no number" — costing a repair
+    dispatch that blew the scenario's sub-agent budget. The fixture was edited to print "2"
+    instead, which fixed the fixture and left every real deck: measured on one, "three
+    production R&D organizations", "Six patent applications filed", "Fifteen years" and
+    "Five people" were all either refused (one run) or silently dropped (the next, once the
+    extractor had learned to avoid the refusal). Neither outcome records what the deck says.
+
+    The guard's own reasons for refusing were real — a numeral-free `raw` gave the scale check
+    nothing to compare and read downstream as an approximation, widening tolerance — and both
+    are answered by reading the words: `numeral_form` gives every parser "2" where the slide
+    printed "Two", so the figure is validated, scaled and bounded exactly as its digit form.
     """
+    rc, _, err = _run({"figures": [_fig(), _word_count_fig("Two", 2)]})
+    assert rc == 0, err
+
+
+def test_rejects_a_spelled_out_count_whose_value_disagrees() -> None:
+    """Reading the words is what makes the scale check RUN on them — so it has to catch this."""
+    rc, _, err = _run({"figures": [_fig(), _word_count_fig("Two", 3)]})
+    assert rc != 0, "raw 'Two' with value 3 passed — the spelled-out count was accepted unread"
+    assert "disagrees with raw" in err, err
+
+
+def test_a_spelled_out_count_keeps_its_unit_word() -> None:
+    """ "Fifteen years" is 15 with the unit left in place, the same as "15 years"."""
     rc, _, err = _run(
         {
             "figures": [
                 _fig(),
-                _fig(
-                    id="founder_count",
-                    value=2,
-                    raw="Two",
-                    unit_kind="count",
-                    currency=None,
-                    quote="Two founders, ex-Stripe and ex-Notion",
+                _word_count_fig(
+                    "Fifteen years", 15, id="ceo_tenure", unit_kind="duration", quote="Fifteen years on executive teams"
                 ),
             ]
         }
     )
-    assert rc != 0, "a spelled-out count passed as the slide's printed string"
+    assert rc == 0, err
+
+
+def test_a_compound_spelled_out_number_is_read_whole() -> None:
+    """ "Twenty-five" is 25, not 20 — and a hyphen or a space joins the two words equally."""
+    for raw in ("Twenty-five", "twenty five"):
+        rc, _, err = _run({"figures": [_fig(), _word_count_fig(raw, 25, quote="Twenty-five design partners")]})
+        assert rc == 0, f"{raw!r}: {err}"
+        rc, _, err = _run({"figures": [_fig(), _word_count_fig(raw, 20, quote="Twenty-five design partners")]})
+        assert rc != 0, f"{raw!r} accepted as 20"
+
+
+def test_an_ordinal_is_still_not_a_number() -> None:
+    """ "a fourth" names a position, not a count. The grammar does not read it, so the figure is
+    refused rather than guessed at — same as any other raw with no magnitude in it."""
+    rc, _, err = _run({"figures": [_fig(), _word_count_fig("a fourth", 4, quote="a fourth in agreements")]})
+    assert rc != 0
     assert "contains no number" in err, err
 
 
