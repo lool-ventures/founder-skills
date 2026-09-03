@@ -1543,3 +1543,71 @@ def test_untested_claims_survive_into_the_artifact_even_though_the_relation_does
         "founder is told their figures line up about a claim that was never checked"
     )
     assert any("4x" in c for c in artifact["untested_claims"]), artifact["untested_claims"]
+
+
+# --- spelled-out cardinals ---------------------------------------------------------------
+#
+# `numeral_form` is what lets a raw of "three" reach the same precision, scale, range and
+# approximation checks as "3". It rewrites ONLY when the string prints no digit; a raw that
+# already carries a numeral is the figure's printed string and must come back untouched.
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("Fifteen years", "15 years"),
+        ("Six", "6"),
+        ("three", "3"),
+        ("Twenty-five percent", "25 percent"),
+        ("twenty five", "25"),
+        ("a hundred customers", "100 customers"),
+        ("one hundred and five", "105"),
+        ("about three", "about 3"),
+        ("three million", "3 million"),  # the scale word is `_NUM_RE`'s to read
+        ("zero", "0"),
+        ("$493K", "$493K"),  # prints a digit: untouched
+        ("12 projects", "12 projects"),
+        ("three of the 500", "three of the 500"),  # a digit anywhere wins; the words are prose
+        ("a fourth", "a fourth"),  # ordinal
+        ("hundred", "hundred"),  # no mantissa
+        ("TBD", "TBD"),
+        ("", ""),
+    ],
+)
+def test_numeral_form_reads_spelled_out_cardinals_only_where_no_digit_is_printed(raw: str, expected: str) -> None:
+    from reconcile import numeral_form
+
+    assert numeral_form(raw) == expected
+
+
+def test_a_spelled_out_count_has_the_precision_and_scale_of_its_digit_form() -> None:
+    from reconcile import _precision, _raw_scale, implied_tolerance
+
+    assert _precision("three") == _precision("3")
+    assert _precision("Fifteen years") == _precision("15 years")
+    assert _raw_scale("three million") == _raw_scale("3 million") == 1e6
+    assert implied_tolerance("Twenty-five") == implied_tolerance("25")
+
+
+def test_a_spelled_out_count_is_bounded_like_its_digit_form() -> None:
+    """The word path in `detect_bound` requires a number to bind to — and now it finds one.
+
+    `raw="about"` alone stays unbound (that hole is closed upstream by ledger.py's refusal), but
+    "about three" is an approximation of three, exactly as "about 3" is.
+    """
+    from reconcile import detect_bound
+
+    assert detect_bound("three", "design partners") is None
+    assert detect_bound("about three", "design partners") == "approximate"
+    assert detect_bound("about 3", "design partners") == "approximate"
+    assert detect_bound("about", "design partners") is None
+    assert (
+        detect_bound("over three", "design partners") is None
+    )  # the leading-word bound grammar wants a digit; unchanged
+
+
+def test_a_spelled_out_range_is_a_range() -> None:
+    from reconcile import parse_range
+
+    assert parse_range("three-five") is None  # only the first cardinal is rewritten; a word range is not read
+    assert parse_range("3-5") == (3.0, 5.0)

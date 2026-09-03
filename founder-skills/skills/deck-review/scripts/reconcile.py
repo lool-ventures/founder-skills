@@ -191,6 +191,135 @@ def strip_group_marks(digits: str) -> str:
     return digits
 
 
+# SPELLED-OUT CARDINALS. Decks print small counts as words far more often than as digits --
+# "three design partners", "six patent applications", "fifteen years", "two founders" -- and
+# the extraction prompt says to record every number the deck states, with `raw` required to
+# be the slide's own printed string. The honest record of such a figure is `raw: "three"`,
+# and that was refused for "containing no number": the scale check had nothing to read, so
+# the guard was right to refuse rather than skip. It cost a repair dispatch on nearly every
+# real deck, and the smoke fixture that first hit it was edited to print "2" instead.
+#
+# So read the words. `numeral_form` rewrites the FIRST spelled-out cardinal as digits, and
+# ONLY when the string prints no digit at all -- a raw that already carries a numeral is the
+# figure's printed string and is left exactly as it is. Every grammar that parses `raw` reads
+# through it, so "three" gets the precision, scale and approximation treatment of "3" while
+# the printed string itself stays verbatim wherever a founder reads it.
+#
+# The grammar is deliberately narrow: cardinals below a thousand, joined by whitespace or
+# hyphens, with an optional article before "hundred". Scale WORDS are not consumed here --
+# `_NUM_RE` already reads "million" as a suffix, so "three million" becomes "3 million" and
+# is scaled by the same table every other grammar uses. Ordinals ("a fourth"), fractions and
+# "dozen" are left alone on purpose: they resemble a count and are not one, and a figure the
+# grammar does not read is still refused rather than guessed at.
+_WORD_VALUES: dict[str, int] = {
+    "zero": 0,
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
+    "eleven": 11,
+    "twelve": 12,
+    "thirteen": 13,
+    "fourteen": 14,
+    "fifteen": 15,
+    "sixteen": 16,
+    "seventeen": 17,
+    "eighteen": 18,
+    "nineteen": 19,
+    "twenty": 20,
+    "thirty": 30,
+    "forty": 40,
+    "fifty": 50,
+    "sixty": 60,
+    "seventy": 70,
+    "eighty": 80,
+    "ninety": 90,
+}
+_WORD_TOKEN = re.compile(r"[A-Za-z]+")
+# What may sit between two words of one number: whitespace, a hyphen ("twenty-five"), or
+# nothing else. A comma or a full stop ends the number.
+_WORD_JOIN = re.compile(r"[\s\-\u2010\u2011]+")
+
+
+def _extends(current: int, word_value: int) -> bool:
+    """Does `word_value` continue the cardinal `current` ("twenty" -> "five", "hundred" -> "ten")?"""
+    if current >= 100 and current % 100 == 0:
+        return 0 < word_value < 100
+    tail = current % 100
+    return tail >= 20 and tail % 10 == 0 and 1 <= word_value <= 9
+
+
+def spelled_number(text: str) -> tuple[int, int, int] | None:
+    """The first spelled-out cardinal in `text`, as (value, start, end), or None."""
+    tokens = list(_WORD_TOKEN.finditer(text or ""))
+    for start, head in enumerate(tokens):
+        first = head.group().lower()
+        if first in ("a", "an"):
+            # "a hundred": the article is the mantissa, and only before "hundred".
+            if start + 1 < len(tokens) and tokens[start + 1].group().lower() == "hundred":
+                current, j = 1, start + 1
+            else:
+                continue
+        elif first in _WORD_VALUES:
+            current, j = _WORD_VALUES[first], start + 1
+        else:
+            continue
+        end = head.end()
+        while j < len(tokens):
+            nxt = tokens[j]
+            gap = text[tokens[j - 1].end() : nxt.start()]
+            word = nxt.group().lower()
+            if not _WORD_JOIN.fullmatch(gap) and not (word == "and" or gap.isspace()):
+                break
+            if word == "hundred" and 0 < current < 100:
+                current *= 100
+            elif word == "and":
+                # "one hundred and five": only between a whole hundred and its remainder.
+                follower = tokens[j + 1].group().lower() if j + 1 < len(tokens) else ""
+                if (
+                    current >= 100
+                    and current % 100 == 0
+                    and follower in _WORD_VALUES
+                    and _extends(current, _WORD_VALUES[follower])
+                ):
+                    j += 1
+                    continue
+                break
+            elif word in _WORD_VALUES and _extends(current, _WORD_VALUES[word]):
+                current += _WORD_VALUES[word]
+            else:
+                break
+            end = nxt.end()
+            j += 1
+        return current, head.start(), end
+    return None
+
+
+def numeral_form(raw: str) -> str:
+    """`raw` with its first spelled-out cardinal written in digits -- only when it prints none.
+
+    "Fifteen years" -> "15 years"; "about three" -> "about 3"; "a hundred customers" ->
+    "100 customers"; "three million" -> "3 million" (the scale word is left for `_NUM_RE`).
+    "$493K", "12 projects" and "a fourth" come back unchanged: the first two already print
+    a numeral, the last is an ordinal. Every parser of `raw` below reads through this, so a
+    spelled-out count is validated, scaled and bounded exactly as its digit form would be.
+    """
+    text = raw or ""
+    if _NUM_RE.search(text):
+        return text
+    found = spelled_number(text)
+    if found is None:
+        return text
+    value, start, end = found
+    return f"{text[:start]}{value}{text[end:]}"
+
+
 # Scientific notation, plain or superscript, written `e6`, `x10^6` or `×10⁶`.
 _EXPONENT = r"(?:[eE][-+]?(?P<eexp>\d+)|\s*[\u00d7xX*\u00b7]\s*10\s*\^?\s*(?P<exp>[-+]?[\d\u2070-\u209f]+))"
 
@@ -231,10 +360,11 @@ def _raw_scale(raw: str) -> float:
     tolerance of 0.5 on a figure denominated in thousands, 1000x too small, on a class
     that is 26% of every ledger.
     """
-    rng = _RANGE_RE.search(raw or "")
+    raw = numeral_form(raw)
+    rng = _RANGE_RE.search(raw)
     if rng and rng.group("suf"):
         return _SCALE.get(rng.group("suf").lower(), 1.0)
-    m = _NUM_RE.search(raw or "")
+    m = _NUM_RE.search(raw)
     if not m:
         return 1.0
     scale = _SCALE.get((m.group("suf") or "").lower(), 1.0)
@@ -258,7 +388,8 @@ def implied_tolerance(raw: str) -> float:
     reads the raw string, and the comparison runs on values -- `implied_tolerance
     ("(19,391)")` is 0.5 while the value being compared is 19,391,000.
     """
-    m = _NUM_RE.search(raw or "")
+    raw = numeral_form(raw)
+    m = _NUM_RE.search(raw)
     if not m:
         return 0.0
     decimals = len(m.group("frac") or "")
@@ -277,7 +408,7 @@ def _precision(raw: str) -> tuple[float, float] | None:
     Trailing zeros are NOT significant: "1,700" claims two figures and tolerates +/-50,
     while "1,696" claims four and tolerates +/-0.5.
     """
-    m = _NUM_RE.search(raw or "")
+    m = _NUM_RE.search(numeral_form(raw))
     if not m:
         return None
     ints = strip_group_marks(m.group("int") or "")
@@ -316,7 +447,7 @@ def parse_range(raw: str) -> tuple[float, float] | None:
     A trailing scale suffix binds to BOTH endpoints: "$150-250K" is 150k to 250k, not
     150 to 250,000.
     """
-    m = _RANGE_RE.search(raw or "")
+    m = _RANGE_RE.search(numeral_form(raw))
     if not m:
         return None
     scale = _SCALE.get((m.group("suf") or "").lower(), 1.0)
@@ -388,6 +519,7 @@ _APPROX_SYMBOLS = re.compile(r"[~≈]")
 
 def _approx_symbol_marks_this_figure(raw: str) -> bool:
     """Is there an approximation glyph before this figure's own number?"""
+    raw = numeral_form(raw)
     match = _NUM_RE.search(raw)
     if not match:
         return False
@@ -548,7 +680,7 @@ def detect_bound(raw: str, label: str, quote: str = "") -> str | None:
     # The LABEL is deliberately exempt: a label is prose ABOUT the figure, so "about 100
     # customers" as a label qualifies the figure it describes whether or not the label
     # itself repeats the number. `raw` is supposed to BE the figure's printed string.
-    raw_word_binds = bool(_APPROX_WORDS.search(raw) and _NUM_RE.search(raw))
+    raw_word_binds = bool(_APPROX_WORDS.search(raw) and _NUM_RE.search(numeral_form(raw)))
     if (
         _approx_symbol_marks_this_figure(raw)
         or raw_word_binds

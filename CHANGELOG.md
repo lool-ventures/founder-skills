@@ -5,6 +5,50 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.11.1] - 2026-09-03 — A number written in words is still a number
+
+### Highlights
+
+**Counts your deck spells out in words are now read.** "Three design partners", "six patent
+applications", "fifteen years on executive teams" — decks state their smallest and most
+checkable claims as words far more often than as digits, and the deck review either refused
+them (costing a retry) or, on the next run, left them out without saying so. Measured on a real
+deck: the founder count, the patent count and the CEO's tenure never reached the numbers
+section in either run. They are now recorded exactly as printed and checked like any other
+figure, so "three organizations" on one slide can be held against "3 customers" on another.
+
+**A PowerPoint deck gets its design reviewed on a laptop without LibreOffice.** The review
+converts `.pptx` to PDF so it can see the slides; until now only LibreOffice could do that, and
+without it the five design criteria were silently set aside. It now also uses Keynote on a Mac
+and PowerPoint on Windows, whichever is installed, and still falls back to the text-only review
+when none of the three is present.
+
+### Added
+
+- **deck-review:** Step 2's PowerPoint conversion tries three converters in order, each only
+  where it is installed — LibreOffice (any OS, now including the default Windows install path),
+  Keynote via AppleScript on macOS, PowerPoint via COM on Windows — and reports `convert-failed`
+  with the converter's own error when the one it found breaks. A host with none of them takes
+  the existing text-only path unchanged. The Keynote path is measured on a real run; the
+  PowerPoint path follows Microsoft's documented `Presentations.Open` / `SaveAs(…, ppSaveAsPDF)`
+  automation and has not been exercised on a Windows host by the author.
+
+### Fixed
+
+- **deck-review:** `ledger.py` refused a figure whose printed string was a spelled-out count
+  ("Two", "Fifteen years") as "containing no number". The refusal was right about its reason —
+  the scale check had nothing to read — and wrong about the remedy: the extraction prompt says to
+  record every number the deck states, and the slide's own string IS the words. The shared numeric
+  grammar in `reconcile.py` now reads a spelled-out cardinal (below a thousand; "a hundred",
+  "twenty-five", "three million" with the scale word left for the existing suffix table) wherever
+  a raw string prints no digit, so precision, scale, range and approximation checks see "3" where
+  the slide printed "three" while the founder-facing text keeps the words. A raw with no
+  magnitude at all ("about", "TBD", the ordinal "a fourth") is still refused.
+- **deck-review:** the LEDGER_EXTRACTION dispatch and the agent body now say so explicitly —
+  record a spelled-out count with the words as printed, never skip it, never retype it as digits.
+  Without the instruction the extractor learns from one refusal to omit the figure on the next
+  run, which is the quieter of the two failures.
+
 ## [0.11.0] - 2026-08-31 — Two instruments, one row, and a number nobody could see was wrong
 
 ### Highlights

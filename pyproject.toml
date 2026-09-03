@@ -1,6 +1,6 @@
 [project]
 name = "founder-skills"
-version = "0.11.0"
+version = "0.11.1"
 license = "Apache-2.0"
 requires-python = ">=3.10"
 dependencies = [
