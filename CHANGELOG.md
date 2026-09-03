@@ -17,6 +17,22 @@ deck: the founder count, the patent count and the CEO's tenure never reached the
 section in either run. They are now recorded exactly as printed and checked like any other
 figure, so "three organizations" on one slide can be held against "3 customers" on another.
 
+**A PowerPoint deck gets its design reviewed on a laptop without LibreOffice.** The review
+converts `.pptx` to PDF so it can see the slides; until now only LibreOffice could do that, and
+without it the five design criteria were silently set aside. It now also uses Keynote on a Mac
+and PowerPoint on Windows, whichever is installed, and still falls back to the text-only review
+when none of the three is present.
+
+### Added
+
+- **deck-review:** Step 2's PowerPoint conversion tries three converters in order, each only
+  where it is installed — LibreOffice (any OS, now including the default Windows install path),
+  Keynote via AppleScript on macOS, PowerPoint via COM on Windows — and reports `convert-failed`
+  with the converter's own error when the one it found breaks. A host with none of them takes
+  the existing text-only path unchanged. The Keynote path is measured on a real run; the
+  PowerPoint path follows Microsoft's documented `Presentations.Open` / `SaveAs(…, ppSaveAsPDF)`
+  automation and has not been exercised on a Windows host by the author.
+
 ### Fixed
 
 - **deck-review:** `ledger.py` refused a figure whose printed string was a spelled-out count
