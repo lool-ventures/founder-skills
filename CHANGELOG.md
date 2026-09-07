@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Development
+
+Contributor-facing only; nothing here changes what a founder installs or runs.
+
+- The suite's gate-spec parser could backtrack exponentially on a malformed
+  `options` list, turning a contract check into a hang. Each element is now anchored
+  on its own separator. Verified equivalent rather than assumed: old and new patterns
+  match the same 67 lines across every markdown, Python, JSON and YAML file in the
+  repository and extract identical labels, so the check did not go quiet in the
+  process.
+- Thirty-five places located `<script>` and `<style>` blocks in generated HTML with a
+  pattern blind to an uppercase tag or to any attribute on the opening tag. Nothing
+  produced either shape, so nothing was being missed, but a generator that grew an
+  attribute would have taken the extraction with it. They now share two scanners that
+  read the markup directly instead.
+
+These were the repository's 36 open code-scanning alerts (`py/redos`,
+`py/bad-tag-filter`).
+
 ## [0.11.0] - 2026-08-31 — Two instruments, one row, and a number nobody could see was wrong
 
 ### Highlights
