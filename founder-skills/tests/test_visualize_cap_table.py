@@ -44,6 +44,28 @@ def _run(script_name: str, args: list[str]) -> tuple[int, str, str]:
     return res.returncode, res.stdout, res.stderr
 
 
+def _script_blocks(html: str) -> list[str]:
+    """Bodies of every `<script>` block, in document order.
+
+    Scanned rather than matched with `<script>(.*?)</script>`, which is blind
+    to `<SCRIPT>` and to any attribute on the open tag — a generated page that
+    grew either would yield no blocks at all here.
+    """
+    lowered = html.lower()
+    blocks: list[str] = []
+    pos = 0
+    while (start := lowered.find("<script", pos)) != -1:
+        open_end = lowered.find(">", start)
+        if open_end == -1:
+            break
+        close = lowered.find("</script", open_end)
+        if close == -1:
+            break
+        blocks.append(html[open_end + 1 : close])
+        pos = close
+    return blocks
+
+
 def _make_fixture_dir(tmp: str, *, company_name: str = "TestCo", safe_id: str = "safe_001") -> str:
     """Build a complete artifact set in tmp; return the dir path."""
     inputs: dict[str, Any] = {
@@ -1412,7 +1434,7 @@ def _render_explorer_app_script(tmp: str) -> str:
     assert rc == 0, err
     with open(out, encoding="utf-8") as f:
         html = f.read()
-    blocks = re.findall(r"<script>(.*?)</script>", html, re.DOTALL)
+    blocks = _script_blocks(html)
     assert blocks, "explorer.html has no <script> blocks"
     return blocks[-1]  # type: ignore[no-any-return]
 
@@ -1652,7 +1674,7 @@ class TestExploreRuntimeSmoke:
             rc, _, err = _run("explore.py", ["--dir", d, "-o", out])
             assert rc == 0, err
             with open(out, encoding="utf-8") as f:
-                app = re.findall(r"<script>(.*?)</script>", f.read(), re.DOTALL)[-1]
+                app = _script_blocks(f.read())[-1]
             # load (auto-selects scenario 0 → new Chart), then switch to 1 → morph.
             runner = (
                 _DOM_SHIM
@@ -1806,7 +1828,7 @@ class TestExploreSweepSlider:
         with tempfile.TemporaryDirectory() as d:
             html = self._render_with_sweep(d)
         assert 'id="sweep-slider"' in html
-        app = re.findall(r"<script>(.*?)</script>", html, re.DOTALL)[-1]
+        app = _script_blocks(html)[-1]
         assert "function initSweep" in app and "function applySweepFrame" in app
         assert "aria-valuetext" in app, "slider must announce its value to screen readers"
 
@@ -1818,7 +1840,7 @@ class TestExploreSweepSlider:
             rc, _, err = _run("explore.py", ["--dir", d, "-o", out])
             assert rc == 0, err
             with open(out, encoding="utf-8") as f:
-                app = re.findall(r"<script>(.*?)</script>", f.read(), re.DOTALL)[-1]
+                app = _script_blocks(f.read())[-1]
         assert '"sweep": null' in app or '"sweep":null' in app
 
     def test_slider_snaps_number_to_real_frame_headless(self) -> None:
@@ -1829,7 +1851,7 @@ class TestExploreSweepSlider:
             pytest.skip("node not available")
         with tempfile.TemporaryDirectory() as d:
             html = self._render_with_sweep(d)
-            app = re.findall(r"<script>(.*?)</script>", html, re.DOTALL)[-1]
+            app = _script_blocks(html)[-1]
             runner = (
                 _DOM_SHIM
                 + "\n"
@@ -1856,7 +1878,7 @@ class TestExploreSweepSlider:
             pytest.skip("node not available")
         with tempfile.TemporaryDirectory() as d:
             html = self._render_with_sweep(d)
-            app = re.findall(r"<script>(.*?)</script>", html, re.DOTALL)[-1]
+            app = _script_blocks(html)[-1]
             runner = (
                 _DOM_SHIM
                 + "\n"
@@ -1892,7 +1914,7 @@ class TestExploreSweepSlider:
             pytest.skip("node not available")
         with tempfile.TemporaryDirectory() as d:
             html = self._render_with_sweep(d)
-            app = re.findall(r"<script>(.*?)</script>", html, re.DOTALL)[-1]
+            app = _script_blocks(html)[-1]
             # Reduced-motion so selectScenario direct-sets metrics (matching the
             # slider's snap), making the two panels directly comparable.
             shim_rm = _DOM_SHIM.replace(
@@ -2121,7 +2143,7 @@ class TestExploreDefaultView:
         # The default landing index is firstModeledIdx(), not a hardcoded 0.
         with tempfile.TemporaryDirectory() as d:
             html = _render_explorer_full(d)
-        app = re.findall(r"<script>(.*?)</script>", html, re.DOTALL)[-1]
+        app = _script_blocks(html)[-1]
         assert "function firstModeledIdx" in app
         assert "selectScenario(firstModeledIdx())" in app
         assert "selectScenario(0)" not in app, "default must not hardcode scenario 0"
@@ -2136,7 +2158,7 @@ class TestExplorePlainLanguageFlow:
 
     def test_flow_keeps_transition_helper_and_path_class(self) -> None:
         with tempfile.TemporaryDirectory() as d:
-            app = re.findall(r"<script>(.*?)</script>", _render_explorer_full(d), re.DOTALL)[-1]
+            app = _script_blocks(_render_explorer_full(d))[-1]
         assert "function setSankeyHTML" in app and "setSankeyHTML(container" in app
         assert "sankey-path" in app
 
@@ -2156,13 +2178,13 @@ class TestExploreContainedSlider:
         with tempfile.TemporaryDirectory() as d:
             html = self._with_sweep(d)
         assert 'id="sweep-reset"' in html, "reset-to-scenario control missing"
-        app = re.findall(r"<script>(.*?)</script>", html, re.DOTALL)[-1]
+        app = _script_blocks(html)[-1]
         assert "function enterModeled" in app and "function exitModeled" in app
         assert "enterModeled()" in app, "a slider drag must mark the cards modeled"
 
     def test_slider_gated_to_sweep_base_scenario(self) -> None:
         with tempfile.TemporaryDirectory() as d:
-            app = re.findall(r"<script>(.*?)</script>", self._with_sweep(d), re.DOTALL)[-1]
+            app = _script_blocks(self._with_sweep(d))[-1]
         assert "function _isSweepBase" in app
         assert "base_scenario_id" in app, "sweep payload must carry the base scenario id"
 
@@ -2172,13 +2194,13 @@ class TestExploreCounselRail:
         with tempfile.TemporaryDirectory() as d:
             html = _render_explorer_full(d)
         assert 'id="counsel-cue"' in html
-        app = re.findall(r"<script>(.*?)</script>", html, re.DOTALL)[-1]
+        app = _script_blocks(html)[-1]
         assert "function renderCounselCue" in app
         assert "for your lawyer" in app
 
     def test_relevance_tiers_present(self) -> None:
         with tempfile.TemporaryDirectory() as d:
-            app = re.findall(r"<script>(.*?)</script>", _render_explorer_full(d), re.DOTALL)[-1]
+            app = _script_blocks(_render_explorer_full(d))[-1]
         assert "Applies here" in app and "Likely relevant" in app and "General" in app
         assert "function _counselTier" in app
 
@@ -2196,7 +2218,7 @@ class TestExplorePrint:
         with tempfile.TemporaryDirectory() as d:
             html = _render_explorer_full(d)
         assert "@media print" in html
-        app = re.findall(r"<script>(.*?)</script>", html, re.DOTALL)[-1]
+        app = _script_blocks(html)[-1]
         assert "window.print()" in app
         # print CSS must respect the [hidden] attribute so torn-down widgets
         # don't print empty.
@@ -2206,13 +2228,13 @@ class TestExplorePrint:
 class TestExploreDonutA11y:
     def test_aria_text_alternative(self) -> None:
         with tempfile.TemporaryDirectory() as d:
-            app = re.findall(r"<script>(.*?)</script>", _render_explorer_full(d), re.DOTALL)[-1]
+            app = _script_blocks(_render_explorer_full(d))[-1]
         assert "function renderDonutSummary" in app
         assert 'setAttribute("aria-label"' in app, "donut needs a text alternative"
 
     def test_pattern_fills_with_headless_fallback(self) -> None:
         with tempfile.TemporaryDirectory() as d:
-            app = re.findall(r"<script>(.*?)</script>", _render_explorer_full(d), re.DOTALL)[-1]
+            app = _script_blocks(_render_explorer_full(d))[-1]
         assert "function _wedgeFill" in app and "function _wedgePattern" in app
         assert 'typeof document.createElement !== "function"' in app, (
             "pattern builder must fall back to solid color under the headless shim"
@@ -2227,13 +2249,13 @@ class TestExploreWalkthroughControls:
             html = _render_explorer_full(d)
         for el in ('id="wt-prev"', 'id="wt-next"', 'id="wt-playpause"'):
             assert el in html, f"walkthrough control {el} missing"
-        app = re.findall(r"<script>(.*?)</script>", html, re.DOTALL)[-1]
+        app = _script_blocks(html)[-1]
         assert "function _wtStep" in app and "function _wtPlayPause" in app
 
     def test_walkthrough_counsel_copy_preserved(self) -> None:
         # The verbatim counsel copy that the zero/plural test pins must stay intact.
         with tempfile.TemporaryDirectory() as d:
-            app = re.findall(r"<script>(.*?)</script>", _render_explorer_full(d), re.DOTALL)[-1]
+            app = _script_blocks(_render_explorer_full(d))[-1]
         assert "No counsel-review items were flagged" in app
         assert 'nCounsel === 1 ? "" : "s"' in app
 
@@ -2244,13 +2266,13 @@ class TestExploreCompareView:
             html = _render_explorer_full(d)
         assert 'id="compare-toggle"' in html, "Compare button missing"
         assert 'id="compare-view"' in html and 'id="compare-grid"' in html
-        app = re.findall(r"<script>(.*?)</script>", html, re.DOTALL)[-1]
+        app = _script_blocks(html)[-1]
         assert "function renderCompare" in app and "function toggleCompare" in app
         assert "cmp-donut-a" in app and "cmp-donut-b" in app
 
     def test_chart_registry_replaces_single_global(self) -> None:
         with tempfile.TemporaryDirectory() as d:
-            app = re.findall(r"<script>(.*?)</script>", _render_explorer_full(d), re.DOTALL)[-1]
+            app = _script_blocks(_render_explorer_full(d))[-1]
         assert "const _charts" in app and "function _destroyChart" in app
         # The single-global must be fully gone so two donuts can coexist.
         assert "_chartInstance" not in app, "the single shared chart instance must be gone"
@@ -2274,7 +2296,7 @@ class TestExploreCompareView:
             rc, _, err = _run("explore.py", ["--dir", d, "-o", out])
             assert rc == 0, err
             with open(out, encoding="utf-8") as f:
-                app = re.findall(r"<script>(.*?)</script>", f.read(), re.DOTALL)[-1]
+                app = _script_blocks(f.read())[-1]
             runner = (
                 _DOM_SHIM
                 + "\n"
@@ -2314,7 +2336,7 @@ class TestExploreHeadlessBehavior:
         rc, _, err = _run("explore.py", ["--dir", d, "-o", out])
         assert rc == 0, err
         with open(out, encoding="utf-8") as f:
-            return re.findall(r"<script>(.*?)</script>", f.read(), re.DOTALL)[-1]  # type: ignore[no-any-return]
+            return _script_blocks(f.read())[-1]  # type: ignore[no-any-return]
 
     def _node(self, runner: str, d: str) -> subprocess.CompletedProcess:  # type: ignore[type-arg]
         js_path = os.path.join(d, "runner.js")
@@ -2394,7 +2416,7 @@ class TestExploreHeadlessBehavior:
 class TestExploreBlockerDemotion:
     def test_blocker_leads_with_remedy_not_code(self) -> None:
         with tempfile.TemporaryDirectory() as d:
-            app = re.findall(r"<script>(.*?)</script>", _render_explorer_full(d), re.DOTALL)[-1]
+            app = _script_blocks(_render_explorer_full(d))[-1]
         # The remedy is the first thing in the blocker; the raw code sits on a
         # muted secondary line, never leading.
         assert 'class="blocker">${escape(b.remedy)}' in app, "blocker must lead with the remedy"
@@ -2434,7 +2456,7 @@ class TestExploreDefaultViewBehavior:
             rc, _, err = _run("explore.py", ["--dir", d, "-o", out])
             assert rc == 0, err
             with open(out, encoding="utf-8") as f:
-                app = re.findall(r"<script>(.*?)</script>", f.read(), re.DOTALL)[-1]
+                app = _script_blocks(f.read())[-1]
             runner = (
                 _DOM_SHIM
                 + "\n"
@@ -2462,7 +2484,7 @@ class TestExploreMockFidelity:
             html = _render_explorer_full(d)
         assert 'id="donut-center-val"' in html and "founders" in html, "donut hole needs a founder% overlay"
         assert "what new investors pay" in html and "fully diluted total" in html, "metric sub-captions missing"
-        app = re.findall(r"<script>(.*?)</script>", html, re.DOTALL)[-1]
+        app = _script_blocks(html)[-1]
         assert "function _setDonutCenter" in app
 
     def test_compare_dilution_greener_and_center(self) -> None:
@@ -2470,13 +2492,13 @@ class TestExploreMockFidelity:
             html = _render_explorer_full(d)
         assert "The greener column keeps more" in html, "compare subtitle should match the mock"
         assert ".compare-card.better" in html, "winning column must tint greener"
-        app = re.findall(r"<script>(.*?)</script>", html, re.DOTALL)[-1]
+        app = _script_blocks(html)[-1]
         assert '_cmpRow("Dilution"' in app, "compare card needs the Dilution row"
         assert "cmp-center" in app, "compare donuts need a center % overlay"
 
     def test_flow_uses_constant_reference(self) -> None:
         with tempfile.TemporaryDirectory() as d:
-            app = re.findall(r"<script>(.*?)</script>", _render_explorer_full(d), re.DOTALL)[-1]
+            app = _script_blocks(_render_explorer_full(d))[-1]
         # The Before stack must stay a constant height across frames, so the
         # scale divides by a fixed reference, not the per-frame post-round total.
         assert "_FLOW_REF" in app
@@ -2485,19 +2507,19 @@ class TestExploreMockFidelity:
     def test_scenario_pills_have_status_and_b_badge(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             html = _render_explorer_full(d)
-        app = re.findall(r"<script>(.*?)</script>", html, re.DOTALL)[-1]
+        app = _script_blocks(html)[-1]
         assert "function _scenarioStatus" in app
         assert "pill-dot" in app and 'class="b-badge"' in app, "pills need a status dot + compare B badge"
         assert ".scenario-pill.pinned .b-badge" in html, "B badge shows on the pinned compare target"
 
     def test_legend_shows_per_class_shares(self) -> None:
         with tempfile.TemporaryDirectory() as d:
-            app = re.findall(r"<script>(.*?)</script>", _render_explorer_full(d), re.DOTALL)[-1]
+            app = _script_blocks(_render_explorer_full(d))[-1]
         assert "fmtShares(frac * fd)" in app, "legend rows should carry the per-class share count"
 
     def test_counsel_intro_is_cap_table_level(self) -> None:
         with tempfile.TemporaryDirectory() as d:
-            app = re.findall(r"<script>(.*?)</script>", _render_explorer_full(d), re.DOTALL)[-1]
+            app = _script_blocks(_render_explorer_full(d))[-1]
         assert "most relevant to your cap table first" in app
 
     def test_slider_end_labels_and_reset_visibility(self) -> None:
@@ -2529,7 +2551,7 @@ class TestExploreMockFidelity:
             rc, _, err = _run("explore.py", ["--dir", d, "-o", out])
             assert rc == 0, err
             with open(out, encoding="utf-8") as f:
-                app = re.findall(r"<script>(.*?)</script>", f.read(), re.DOTALL)[-1]
+                app = _script_blocks(f.read())[-1]
             runner = (
                 _DOM_SHIM
                 + "\n"
@@ -2554,7 +2576,7 @@ class TestExploreCompareSetB:
             html = _render_explorer_full(d)
         # The pin button + delta banner were retired in favor of click-to-set-B.
         assert 'id="pin-btn"' not in html and 'id="compare-banner"' not in html
-        app = re.findall(r"<script>(.*?)</script>", html, re.DOTALL)[-1]
+        app = _script_blocks(html)[-1]
         assert "function onPillClick" in app
         # The empty B placeholder must left-align so its "B" slot tag stays a
         # small inline badge, not a full-width bar.
@@ -2580,7 +2602,7 @@ class TestExploreCompareSetB:
             rc, _, err = _run("explore.py", ["--dir", d, "-o", out])
             assert rc == 0, err
             with open(out, encoding="utf-8") as f:
-                app = re.findall(r"<script>(.*?)</script>", f.read(), re.DOTALL)[-1]
+                app = _script_blocks(f.read())[-1]
             runner = (
                 _DOM_SHIM
                 + "\n"
@@ -2614,7 +2636,7 @@ class TestExploreSliderHomeFrame:
         rc, _, err = _run("explore.py", ["--dir", d, "-o", out])
         assert rc == 0, err
         with open(out, encoding="utf-8") as f:
-            return re.findall(r"<script>(.*?)</script>", f.read(), re.DOTALL)[-1]  # type: ignore[no-any-return]
+            return _script_blocks(f.read())[-1]  # type: ignore[no-any-return]
 
     def test_home_frame_clears_modeled_other_frames_set_it(self) -> None:
         node = shutil.which("node")

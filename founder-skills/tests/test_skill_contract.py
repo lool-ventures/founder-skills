@@ -1468,7 +1468,11 @@ ASKUSER_MAX_OPTIONS = 4
 _OPTION_ITEM = re.compile(r"\A\s*(`[^`]+`)(?:\s*/\s*(`[^`]+`))*")
 _OPTION_SPLIT = re.compile(r"\s*/\s*")
 _PIPE_SPAN = re.compile(r"\A\s*`([^`]*\|[^`]*)`")
-_JSON_OPTIONS = re.compile(r'\boptions\b\W{0,4}\[((?:\s*"(?:[^"\\]|\\.)*"\s*,?)+)\]')
+# The repeated group anchors each element on its own comma. Written as
+# `(?:\s*"…"\s*,?)+` the whitespace either side of an absent comma is
+# ambiguous, so a line like `options: [ "" "" "" …` with no closing bracket
+# backtracks exponentially (measured: 4 more repetitions is ~16x the time).
+_JSON_OPTIONS = re.compile(r'\boptions\b\W{0,4}\[(\s*"(?:[^"\\]|\\.)*"(?:\s*,\s*"(?:[^"\\]|\\.)*")*[\s,]*)\]')
 _JSON_STRING = re.compile(r'"((?:[^"\\]|\\.)*)"')
 _TABLE_LABEL_COLUMN = "Option labels"
 

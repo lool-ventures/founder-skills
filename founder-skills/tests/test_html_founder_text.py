@@ -67,10 +67,34 @@ def _founder_text():  # type: ignore[no-untyped-def]
     return mod
 
 
+def _strip_element(html: str, tag: str) -> str:
+    """Drop every `<tag>...</tag>` span, whatever its case or attributes.
+
+    Scanned rather than matched with `<tag.*?</tag>`, which is blind to
+    `<TAG>` and so would leave a whole script body in the founder-visible
+    text this file asserts over.
+    """
+    lowered = html.lower()
+    kept: list[str] = []
+    pos = 0
+    while (start := lowered.find(f"<{tag}", pos)) != -1:
+        close = lowered.find(f"</{tag}", start)
+        if close == -1:
+            break
+        end = lowered.find(">", close)
+        if end == -1:
+            break
+        kept.append(html[pos:start])
+        kept.append(" ")
+        pos = end + 1
+    kept.append(html[pos:])
+    return "".join(kept)
+
+
 def _text_nodes(html: str) -> str:
     """Founder-visible text only: no script/style bodies, no attribute values."""
-    html = re.sub(r"<script.*?</script>", " ", html, flags=re.S)
-    html = re.sub(r"<style.*?</style>", " ", html, flags=re.S)
+    html = _strip_element(html, "script")
+    html = _strip_element(html, "style")
     return re.sub(r"<[^>]+>", " ", html)
 
 
