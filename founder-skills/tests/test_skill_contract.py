@@ -916,7 +916,11 @@ SKILL_MD_CEILING: dict[str, int] = {
     # deck-review raised 103,337 -> 104,243 (+906 B) for the at_most/per relation fields and
     # the three sites the new verdict was invisible to -- one of which would have told a
     # founder their figures line up while the report said the plan exceeds a stated limit.
-    "deck-review": 104_251,
+    # deck-review raised 104,251 -> 104,833 (+582 B) so a deck given as a link is in scope and has
+    # a branch. `when_to_use` admitted only an attached FILE, so the skill did not trigger on a link
+    # at all; the branch is conditioned on what a single fetch RETURNS rather than on the input
+    # being a link, because refusing every link would refuse the public ones that work.
+    "deck-review": 104_833,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.

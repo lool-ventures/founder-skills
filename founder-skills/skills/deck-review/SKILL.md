@@ -3,7 +3,7 @@ name: deck-review
 description: "Scores and strengthens startup pitch decks (pre-seed through Series A) against 35 investor-grade criteria grounded in Sequoia, DocSend, YC, a16z, and Carta data. Run the scored rubric rather than giving deck advice from memory."
 when_to_use: >
   Use ONLY when the user has attached a pitch deck file (PDF, PPTX, markdown,
-  or pasted slide text describing slide-by-slide content) AND has asked for
+  pasted slide text, or a link to one) AND has asked for
   review, scoring, feedback, or critique of the deck. Do not auto-invoke on
   general fundraising or pitch questions; use ONLY when there is actual
   deck content to review.
@@ -294,7 +294,15 @@ python3 "<printed PLUGIN_ROOT>/scripts/resolve_artifacts_root.py" --uploads   # 
 Then `ls -la <printed UPLOADS_DIR>`. Measured: on one run the agent never looked, replied "I don't
 see a pitch deck attached", and stopped — with the deck sitting in the uploads mount the whole
 time. Only ask the founder to upload after that listing actually comes back empty. Set `DECK_SRC`
-to the file you find. Exit 3 means there is no uploads mount at all (not an empty one): ask for a
+to the file you find.
+
+**A link is not a dead end, and it is not a licence to scrape.** When the listing comes back empty
+and the founder gave a link instead, fetch it ONCE. A public export returns the slides and the
+review proceeds normally from there. What comes back is often a login, consent or password page
+instead — that is where this stops: say BLOCKED, name the link as gated, and ask for a PDF export or
+the slides as text. Do not try to authenticate, and do not fetch twice. The condition is what the
+fetch RETURNED, never that the input was a link: refusing every link would refuse the public ones
+that work. Exit 3 means there is no uploads mount at all (not an empty one): ask for a
 path rather than reporting the deck missing. Never hand-build this path — a relative `./mnt/uploads`
 resolves against the shell's cwd, which has already moved once underneath us.
 
