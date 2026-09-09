@@ -1326,8 +1326,9 @@ def _section_numbers(
     # founder their deck disagreeing with itself was a matter of interpretation.
     parsed = [_as_dict(x) for x in relations]
     contradictions = [r for r in parsed if r.get("verdict") == "contradiction"]
+    exceeded = [r for r in parsed if r.get("verdict") == "exceeds_stated_limit"]
     derived = [r for r in parsed if r.get("verdict") == "derived"]
-    if not contradictions and not derived:
+    if not contradictions and not exceeded and not derived:
         return ""
 
     lines = ["## What Your Numbers Say About Each Other\n"]
@@ -1343,6 +1344,16 @@ def _section_numbers(
     if untested:
         lines.append(untested)
 
+    if exceeded:
+        # A SEPARATE HEADING, not folded under "figures that disagree": the deck is not
+        # contradicting itself, it is planning past a ceiling it stated. Rendered in both
+        # renderers in the same change, or the two drift.
+        lines.append("### Where the plan passes a stated limit\n")
+        for rel in exceeded:
+            rendered = str(_as_dict(rel).get("rendered", "")).strip()
+            if rendered:
+                lines.append(f"- {rendered}\n")
+        lines.append("")
     if contradictions:
         lines.append("### Figures that disagree\n")
         for rel in contradictions:

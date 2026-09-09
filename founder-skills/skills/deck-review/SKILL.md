@@ -830,6 +830,12 @@ Use your Write tool to write to OUTPUT_PATH:
 components is `derived_ratio`; the name refers to how the comparison is framed, not to
 the operator, and a value invented to fit the operator is rejected.
 `operator` must be one of `ratio`, `product`, `sum`, `increase_by`, `difference`.
+Two optional fields go with `expected_id`. `"relation": "at_most"` says the deck states a
+**ceiling** the other figures must not exceed — a production capacity, a budget, a headcount
+cap — rather than a target they should match; the default is `equals`. `"per": "year"` says
+the two operands are snapshots one year apart, so their difference is an annual rate; it is
+checked against the years the figures carry and ignored when they do not bear it out. Use
+them together for "the plan needs more per year than the line can build".
 `operands` are `id` values from the ledger, in order — for `ratio`, numerator first.
 `expected_id` is optional and omitted when the deck states no counterpart.
 Then return ONLY the receipt JSON in your final assistant message:
@@ -863,16 +869,20 @@ cat "$HANDOFF_DIR/relations_output.json" | \
 Do not report a contradiction to the founder from this step. Step 6 renders them, once,
 from the artifact.
 
-**Say exactly one of these, and nothing more:** with no contradictions, *"Your figures line
-up."* With one or more, *"I found a couple of things in your numbers — I'll detail them in
-the report."* **Name no figure, no count, and no slide before Step 6** — a described limit
+**Say exactly one of these, and nothing more:** with no `contradiction` and no
+`exceeds_stated_limit` relation, *"Your figures line up."* With one or more of either,
+*"I found a couple of things in your numbers — I'll detail them in the report."* Read both
+verdicts: a plan running past a limit the deck states is a finding, and saying the figures
+line up in front of one is false. **Name no figure, no count, and no slide before Step 6** — a described limit
 ("at most one plain sentence") produced a mid-pipeline line that gave both contradictions
 with their figures, pre-empting the render.
 
 ### Step 3.9: Review the Disagreements Before Showing Them (Context A dispatch)
 
 **Run this only when `reconciliation.json` reports at least one `contradiction`.** With none,
-`interpretation.status` is already `not_needed` and there is nothing to review.
+`interpretation.status` is already `not_needed` and there is nothing to review. An
+`exceeds_stated_limit` relation is NOT reviewable here — the interpretation pass may withdraw
+only a contradiction — so a run whose findings are all of that kind skips this step.
 
 Arithmetic can be right about a comparison that should never have been made. Two cases
 recur, both of which a founder would rightly reject: a sum of listed components against a

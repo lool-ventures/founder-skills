@@ -113,6 +113,7 @@ def coverage_line(
     # establishes that anything held; two of them mean the comparison could not be made.
     verdicts = [str(_as_dict(r).get("verdict")) for r in _as_list(reconciliation.get("relations"))]
     disagreements = sum(1 for v in verdicts if v == "contradiction")
+    exceeded = sum(1 for v in verdicts if v == "exceeds_stated_limit")
     suppressed_counts = _as_dict(reconciliation.get("suppressed"))
     # `dropped` counts comparisons that were REFUSED before any arithmetic ran; it is
     # already subtracted from `evaluated` above and reported on its own line. Including it
@@ -139,7 +140,14 @@ def coverage_line(
         + int(suppressed_counts.get("confirmation", 0) or 0)
         + int(suppressed_counts.get("restatement", 0) or 0)
     )
-    if disagreements:
+    if exceeded and not disagreements:
+        # ITS OWN WORDS. A plan running past a stated ceiling is not the deck disagreeing
+        # with itself; describing it as a disagreement names the wrong problem.
+        settled = (
+            f". {emphasis(str(exceeded))} of those comparisons show a plan running past a "
+            "limit your deck itself states, and they are listed below"
+        )
+    elif disagreements:
         settled = (
             f". {emphasis(str(disagreements))} of those comparisons disagree with a figure your deck itself "
             "states, and they are listed below"
@@ -167,7 +175,9 @@ def coverage_line(
     # `dropped` is deliberately not in the inconclusive set: it counts comparisons refused
     # before any arithmetic ran, is already excluded from `evaluated`, and reported on its
     # own line above -- counting it here produced arithmetic a founder can see is impossible.
-    if inconclusive and disagreements:
+    if exceeded and disagreements:
+        settled += f". A further {emphasis(str(exceeded))} show a plan running past a limit your deck itself states"
+    if inconclusive and (disagreements or exceeded):
         settled += (
             f". Separately, {emphasis(str(inconclusive))} could not be settled either way — "
             "the two sides were not comparable, or the comparison was withdrawn on review"

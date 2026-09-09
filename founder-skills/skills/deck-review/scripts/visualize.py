@@ -1267,8 +1267,9 @@ def _numbers_section(reconciliation: dict[str, Any] | None) -> str:
     # VERDICT, not `kind` — see the note in compose_report._section_numbers. The two
     # renderers must agree, and `kind` is the model's proposal, not the engine's finding.
     contradictions = [r for r in relations if r.get("verdict") == "contradiction"]
+    exceeded = [r for r in relations if r.get("verdict") == "exceeds_stated_limit"]
     derived = [r for r in relations if r.get("verdict") == "derived"]
-    if not contradictions and not derived and not coverage:
+    if not contradictions and not exceeded and not derived and not coverage:
         return ""
 
     parts: list[str] = []
@@ -1280,6 +1281,11 @@ def _numbers_section(reconciliation: dict[str, Any] | None) -> str:
     if contradictions:
         rows = "".join(f'<li class="finding-fail">{_esc(r.get("rendered", ""))}</li>' for r in contradictions)
         parts.append(f"<h3>Figures that disagree</h3><ul>{rows}</ul>")
+    if exceeded:
+        # Its own heading, matching report.md: a plan past a stated ceiling is not the deck
+        # disagreeing with itself.
+        rows = "".join(f'<li class="finding-fail">{_esc(r.get("rendered", ""))}</li>' for r in exceeded)
+        parts.append(f"<h3>Where the plan passes a stated limit</h3><ul>{rows}</ul>")
     if derived:
         rows = "".join(f'<li class="finding-warn">{_esc(r.get("rendered", ""))}</li>' for r in derived)
         parts.append(

@@ -703,6 +703,31 @@ def _is_exact_count(fig: Figure) -> bool:
     return bool(p and p[0] == 0.5 and _raw_scale(fig.raw) == 1.0)
 
 
+_YEAR_RE = re.compile(r"\b(?:19|20)\d{2}\b")
+
+
+def _spans_one_period(operands: list[Figure], per: str) -> bool:
+    """Verify the model's `per` claim rather than trusting it.
+
+    A `difference` of two snapshots is a RATE only if the snapshots are one period apart,
+    and the engine cannot know that from unit kinds alone. The model declares it; this
+    checks the declaration against the years each figure carries in its own label, raw and
+    quote. Unverifiable means False, so the relation falls back to the existing refusal.
+
+    FAILS SAFE by construction: a wrong `per` suppresses a finding, it never manufactures
+    one -- the same direction every model claim in this file is allowed to fail in.
+    """
+    if per != "year" or len(operands) != 2:
+        return False
+    years: list[int] = []
+    for f in operands:
+        found = {int(m.group()) for m in _YEAR_RE.finditer(f"{f.label or ''} {f.raw or ''} {f.quote or ''}")}
+        if len(found) != 1:
+            return False
+        years.append(found.pop())
+    return abs(years[0] - years[1]) == 1
+
+
 def figure_tolerance(fig: Figure) -> float:
     """How far a value may differ from this figure before the gap is real -- IN VALUE SPACE.
 
@@ -1567,6 +1592,17 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
         # against a raw percent). A false contradiction is the worst thing this feature
         # can emit: it tells a founder their deck disagrees with itself when it does not.
         exp_unit = exp.unit_kind + (f":{exp.period}" if exp.period else "")
+        # A DIFFERENCE OF TWO ANNUAL SNAPSHOTS IS AN ANNUAL RATE, but only the proposer knows
+        # the snapshots are a year apart -- the unit kinds say `count` either way. `per` is
+        # that declaration, and `_spans_one_period` checks it against the years the figures
+        # carry. Re-typing here rather than bypassing the guard below means the existing unit
+        # check still passes on its own terms.
+        #
+        # Read as literal strings so `test_dispatch_schema_drift.py` can see them consumed.
+        relation = str(rel_spec.get("relation", "equals"))
+        per = str(rel_spec.get("per", ""))
+        if per and not r.computed_unit.endswith(f":{per}") and _spans_one_period(real, per):
+            r.computed_unit = f"{r.computed_unit}:{per}"
         cu = r.computed_unit or ""
         comparable: float | None = None
         if cu == exp_unit or (cu.startswith(exp.unit_kind) and not exp.period):
@@ -1622,6 +1658,22 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
         c_hi = (r.span_hi if r.span_hi is not None else r.computed) * scale
         c_lo, c_hi = min(c_lo, c_hi), max(c_lo, c_hi)
         e_lo, e_hi = exp.span()
+        # ONE-SIDED BY DECLARATION. A capacity, a budget or a headcount ceiling is not a
+        # figure the deck claims to MATCH -- it is one it claims not to EXCEED. Testing it
+        # for equality asks the wrong question, and the deck exceeding it is the finding.
+        # `detect_bound` already makes figure-level comparisons one-sided; this is the same
+        # idea at relation level, declared by the proposer instead of read off the raw text.
+        #
+        # Deliberately NOT rendered as "but the deck states X": the deck is not contradicting
+        # itself, it is planning past a limit it stated. Different finding, different words.
+        if relation == "at_most":
+            if c_lo > e_hi + tol:
+                r.verdict = "exceeds_stated_limit"
+                src = "the deck states a limit of" if exp.visible else "the underlying data behind that chart gives"
+                r.rendered += f"  — more than {src} {_stated(exp)}" + (f" ({exp.label})" if exp.label else "")
+            else:
+                r.verdict = "confirmation"
+            return r
         # A bounded figure gets a ONE-SIDED test. "$200B+" is satisfied by anything at or
         # above it, so a computed $212.3B confirms it rather than contradicting it.
         if exp.bound == "at_least":
@@ -1773,7 +1825,14 @@ def select(relations: list[Relation], max_derived: int = 3) -> list[Relation]:
             return 0.0
         return abs(r.computed - r.expected_value) / abs(r.expected_value)
 
-    contradictions = sorted((r for r in live if r.verdict == "contradiction"), key=_wrongness, reverse=True)
+    # `exceeds_stated_limit` is a finding of the same weight as a contradiction and is
+    # promoted with them -- but it keeps its own verdict, because the two render differently
+    # and founder-facing output splits on verdict, never on kind.
+    contradictions = sorted(
+        (r for r in live if r.verdict in ("contradiction", "exceeds_stated_limit")),
+        key=_wrongness,
+        reverse=True,
+    )
     derived = [r for r in live if r.verdict == "derived" and r.confidence == "high"]
     return contradictions + derived[:max_derived]
 

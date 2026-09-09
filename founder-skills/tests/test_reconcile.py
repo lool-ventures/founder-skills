@@ -1543,3 +1543,94 @@ def test_untested_claims_survive_into_the_artifact_even_though_the_relation_does
         "founder is told their figures line up about a claim that was never checked"
     )
     assert any("4x" in c for c in artifact["untested_claims"]), artifact["untested_claims"]
+
+
+# --------------------------------------------------------------------------
+# One-sided comparisons: a plan that exceeds a limit the deck itself states
+# --------------------------------------------------------------------------
+
+
+def test_a_plan_that_needs_more_than_capacity_is_a_finding_not_a_refusal() -> None:
+    """The deck states 250 appliances a year and plans 371 net adds inside one year.
+
+    That is an INEQUALITY -- needed exceeds available -- and the engine could express only
+    equality, so it refused on a unit mismatch and the founder was told nothing at all. The
+    refusal was correct; the vocabulary was missing.
+    """
+    a = fig("667", 667, unit_kind="count", id="f29", label="Fleet 2029")
+    b = fig("296", 296, unit_kind="count", id="f28", label="Fleet 2028")
+    cap = fig(
+        "250 appliances a year",
+        250,
+        unit_kind="count",
+        period="year",
+        id="cap",
+        label="Manufacturing capacity per year",
+    )
+    r = compute(
+        {
+            "kind": "derived_ratio",
+            "operator": "difference",
+            "operands": ["f29", "f28"],
+            "expected_id": "cap",
+            "relation": "at_most",
+            "per": "year",
+        },
+        {"f29": a, "f28": b, "cap": cap},
+    )
+    assert r.verdict == "exceeds_stated_limit", (r.verdict, r.reasons)
+    assert r.computed == 371.0
+    assert "250" in r.rendered and "371" in r.rendered, r.rendered
+
+
+def test_a_plan_inside_a_stated_limit_is_a_confirmation() -> None:
+    """The one-sided test must not fire merely because a limit was named."""
+    a = fig("400", 400, unit_kind="count", id="f29", label="Fleet 2029")
+    b = fig("296", 296, unit_kind="count", id="f28", label="Fleet 2028")
+    cap = fig(
+        "250 appliances a year",
+        250,
+        unit_kind="count",
+        period="year",
+        id="cap",
+        label="Manufacturing capacity per year",
+    )
+    r = compute(
+        {
+            "kind": "derived_ratio",
+            "operator": "difference",
+            "operands": ["f29", "f28"],
+            "expected_id": "cap",
+            "relation": "at_most",
+            "per": "year",
+        },
+        {"f29": a, "f28": b, "cap": cap},
+    )
+    assert r.verdict == "confirmation", (r.verdict, r.reasons)
+
+
+def test_an_unverifiable_per_claim_falls_back_to_the_refusal() -> None:
+    """`per` is a MODEL claim, so the code checks it. Two snapshots that are not one period
+    apart cannot be read as a rate, and the engine must refuse rather than assert."""
+    a = fig("667", 667, unit_kind="count", id="f29", label="Fleet 2030")
+    b = fig("296", 296, unit_kind="count", id="f28", label="Fleet 2026")
+    cap = fig(
+        "250 appliances a year",
+        250,
+        unit_kind="count",
+        period="year",
+        id="cap",
+        label="Manufacturing capacity per year",
+    )
+    r = compute(
+        {
+            "kind": "derived_ratio",
+            "operator": "difference",
+            "operands": ["f29", "f28"],
+            "expected_id": "cap",
+            "relation": "at_most",
+            "per": "year",
+        },
+        {"f29": a, "f28": b, "cap": cap},
+    )
+    assert r.verdict == "incomparable", (r.verdict, r.reasons)

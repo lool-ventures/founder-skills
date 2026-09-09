@@ -191,7 +191,7 @@
             ]
           },
           "verdict": {
-            "description": "contradiction and derived are the only two that reach a founder. convention_differs, confirmation and restatement are suppressed by select() and appear only in the counts above.",
+            "description": "contradiction, exceeds_stated_limit and derived are the only three that reach a founder. convention_differs, confirmation and restatement are suppressed by select() and appear only in the counts above.",
             "type": "string",
             "enum": [
               "contradiction",
@@ -199,7 +199,8 @@
               "confirmation",
               "restatement",
               "convention_differs",
-              "downgraded"
+              "downgraded",
+              "exceeds_stated_limit"
             ]
           },
           "expected_id": {

@@ -104,7 +104,11 @@ a figure your relation should reproduce, name it as `expected_id` — that is wh
 turns a calculation into a finding, because a computed number disagreeing with a
 figure the deck itself states is established rather than judged. Write a single
 `relations` array; each entry carries `kind`, `operator`, `operands` and an
-optional `expected_id`.
+optional `expected_id`. Alongside `expected_id` you may add `"relation":
+"at_most"` when the stated figure is a ceiling the others must not exceed (a
+capacity, a budget, a headcount cap) rather than a target they should match,
+and `"per": "year"` when the two operands are snapshots one year apart so
+their difference is an annual rate.
 
 For `INTERPRETATION`: review comparisons the arithmetic found to disagree with a
 figure the deck itself states, and withdraw any that should not be put to a founder
