@@ -384,6 +384,24 @@ def _apply_design_gating(
     items: list[dict[str, Any]] = result.get("items", [])
     _force_not_applicable(items, _DESIGN_CRITERIA_IDS, f"Auto-gated: not_applicable — {reason}")
 
+    # A GATED CRITERION IS NO LONGER SCORED, so it can no longer be scored-without-measuring.
+    # `validate_checklist` raises UNVERIFIED_MEASUREMENT before this runs, and on the gate's
+    # COMMON path -- a deck with no rendered page -- the two statements contradict each other
+    # in one report: "4 design criteria could not be reviewed" beside "these judgements were
+    # reasoned rather than measured". The second is about a score that no longer exists.
+    gated_ids = {item["id"] for item in items if item.get("status") == "not_applicable"}
+    warnings = result.get("validation", {}).get("warnings")
+    if isinstance(warnings, list):
+        result["validation"]["warnings"] = [
+            w
+            for w in warnings
+            if not (
+                isinstance(w, str)
+                and w.startswith("UNVERIFIED_MEASUREMENT")
+                and any(f": {gid} " in w for gid in gated_ids)
+            )
+        ]
+
     if result.get("summary") is not None:
         result["summary"] = _recompute_summary(items)
     return result

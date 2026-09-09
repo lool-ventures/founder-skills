@@ -242,6 +242,11 @@ def _design_gate_note(checklist: dict[str, Any] | None) -> str:
         why = "its slides are images with no readable text layer"
     elif reason.startswith("quality=partial"):
         why = "not every page could be read"
+    elif reason.startswith("quality=slide_not_rendered"):
+        # Its own branch. The fallback below says the deck "reached the review as text",
+        # which is FALSE for this reason -- it fires on a rendered format when a particular
+        # slide was never seen, and compose_report carries the correct sentence already.
+        why = "at least one slide could not be rendered"
     else:
         why = "it reached the review as text rather than as a rendered file"
     return (

@@ -1140,3 +1140,25 @@ def test_every_failed_criterion_reaches_the_html() -> None:
     text = _visible_text(html)
     missing = [n for n in range(len(_SIX_FAILING_IDS)) if f"EVIDENCE_MARKER_{n}" not in text]
     assert not missing, f"failed criteria dropped from the HTML: {missing}"
+
+
+def test_the_unrendered_slide_caption_does_not_call_a_pdf_text() -> None:
+    """The fallback branch says the deck "reached the review as text rather than as a
+    rendered file". That is FALSE for the per-slide reason, which fires on a PDF -- and
+    report.md carried the correct sentence while the HTML did not."""
+    items = [
+        {
+            "id": cid,
+            "category": "Design & Readability",
+            "label": cid,
+            "status": "not_applicable",
+            "evidence": "Auto-gated: not_applicable — input_quality=slide_not_rendered",
+        }
+        for cid in ("one_idea_per_slide", "minimal_text", "consistent_design", "mobile_readable")
+    ]
+    d = _make_artifact_dir({**_all_artifacts(), "checklist.json": {"items": items}})
+    code, html, err = _run_viz(d)
+    assert code == 0, err
+    text = _visible_text(html)
+    assert "could not be rendered" in text, text[:400]
+    assert "reached the review as text" not in text, "a PDF was described as text"
