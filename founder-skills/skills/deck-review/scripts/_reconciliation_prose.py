@@ -157,11 +157,6 @@ def coverage_line(
             f". Of those, {emphasis(str(inconclusive))} could not be settled either way — the two sides were "
             "not comparable, or the comparison was withdrawn on review"
         )
-    elif withheld_derived:
-        settled = (
-            f". Of those, {emphasis(str(withheld_derived))} produced a figure worked out from your numbers "
-            "that I am not confident enough to report"
-        )
     elif agreed and agreed == evaluated:
         # UNIVERSAL, so it needs universal evidence. `agreed > 0` licensed "the comparisons
         # that ran held" from a single confirmation sitting beside an unproven derived
@@ -180,10 +175,15 @@ def coverage_line(
     # ADDITIVE for the same reason the unsettled clause is. A run with a contradiction and
     # thirty withheld derived readings mentioned neither the thirty nor why -- the `elif`
     # was fixed one line above and left in place here, in the same function.
-    if withheld_derived and (disagreements or exceeded):
+    # UNCONDITIONAL, and out of the chain entirely. Copying the `disagreements or exceeded`
+    # guard from the clause above reproduced the same defect one branch over: a run with
+    # inconclusive comparisons and thirty withheld readings reported the two and never the
+    # thirty. Every one of these counts is an independent fact about the run.
+    if withheld_derived:
+        lead = ". Of those," if settled.endswith("what was checked") else ". A further"
         settled += (
-            f". A further {emphasis(str(withheld_derived))} produced figures worked out from "
-            "your numbers that I am not confident enough to report"
+            f"{lead} {emphasis(str(withheld_derived))} produced figures worked out from your "
+            "numbers that I am not confident enough to report"
         )
     if inconclusive and (disagreements or exceeded):
         settled += (

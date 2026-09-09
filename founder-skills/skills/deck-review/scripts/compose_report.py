@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import re
 import sys
@@ -401,7 +402,7 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
         if isinstance(w, str) and w.startswith("UNVERIFIED_MEASUREMENT")
     ]
     if checklist_warnings:
-        criteria = ", ".join(sorted({w.split(":", 1)[1].split()[0] for w in checklist_warnings if ":" in w}))
+        criteria = ", ".join(sorted({(w.split(":", 1)[1].split() or ["?"])[0] for w in checklist_warnings if ":" in w}))
         warnings.append(
             _warn(
                 "UNVERIFIED_MEASUREMENT",
@@ -995,23 +996,37 @@ _PROSE_NUMERAL = re.compile(r"\b\d[\d,]*(?:\.\d+)?\s*(?:%|[KMB]\b|billion|millio
 _NOT_A_CLAIM = re.compile(r"^(?:19|20)\d{2}$|^[1-9]\d?$")
 
 
-def _scaled_variants(token: str) -> set[str]:
-    """The same magnitude written at thousand/million/billion scale, as bare tokens.
+def _prose_magnitude(match: str) -> float | None:
+    """The magnitude a prose numeral asserts, at full scale, or None if it is not one.
 
-    Neither side records its own scale: the ledger strips "$1.5M" to `1.5` while prose may
-    write `1,500,000`. Matching only the literal token reported a figure the chain holds.
+    `_PROSE_NUMERAL` captures the scale suffix and the token then throws it away, which is
+    what made "1,500" and "$1.5M" look unrelated. The ledger records `value` at full scale
+    (its own schema says so), so putting the prose side on the same footing is what lets the
+    two be compared exactly -- rather than blanketing six magnitude bands per token, which
+    silenced a count against a percent and a count against a multiple.
     """
+    digits = re.sub(r"[^\d.]", "", match)
+    if not digits or digits.count(".") > 1:
+        return None
     try:
-        value = float(token)
+        value = float(digits)
     except ValueError:
-        return set()
-    out: set[str] = set()
-    for factor in (1e3, 1e6, 1e9):
-        for scaled in (value * factor, value / factor):
-            if scaled == int(scaled):
-                out.add(str(int(scaled)))
-            out.add(f"{scaled:g}")
-    return out
+        return None
+    tail = match.strip().lower()
+    for suffix, factor in (
+        ("billion", 1e9),
+        ("million", 1e6),
+        ("thousand", 1e3),
+        ("b", 1e9),
+        ("m", 1e6),
+        ("k", 1e3),
+    ):
+        if tail.endswith(suffix):
+            value *= factor
+            break
+    # A 300-digit numeral in free text parses to `inf`, and `int(inf)` raises. Prose is
+    # written by a sub-agent off a deck; a producer must not die on its input.
+    return value if math.isfinite(value) else None
 
 
 def _unledgered_inventory_figures(inventory: Any, ledger: Any) -> list[str]:
@@ -1022,12 +1037,18 @@ def _unledgered_inventory_figures(inventory: Any, ledger: Any) -> list[str]:
     the founder their figures were unverified -- on a run where the check had no input at
     all. A corrupt ledger is the same case, and is reported separately by its own cause.
     """
-    if not isinstance(ledger, dict) or not isinstance(ledger.get("figures"), list):
+    # AN EMPTY FIGURE LIST IS ALSO "NO INPUT", and it is the LIKELIER shape: `ledger.py`
+    # accepts one and reconcile only refuses it above a numeral threshold, so a run the
+    # check cannot speak about usually still writes a file. Flagging everything on it is the
+    # same founder-facing harm as flagging everything on an absent file.
+    if not isinstance(ledger, dict) or not ledger.get("figures"):
         return []
-    ledger_tokens = {
-        re.sub(r"[^\d.]", "", str(_as_dict(f).get("raw", ""))) for f in _as_list(_as_dict(ledger).get("figures"))
-    }
+    figures = [_as_dict(f) for f in _as_list(ledger.get("figures"))]
+    ledger_tokens = {re.sub(r"[^\d.]", "", str(f.get("raw", ""))) for f in figures}
     ledger_tokens.discard("")
+    # The ledger's own full-scale numbers, which make a cross-scale comparison exact rather
+    # than a guess: "$1.5M" in the deck is `value: 1500000.0` here.
+    ledger_values = {float(v) for f in figures if isinstance(v := f.get("value"), int | float)}
     found: list[str] = []
     for raw_slide in _as_list(_as_dict(inventory).get("slides")):
         slide = _as_dict(raw_slide)
@@ -1041,7 +1062,8 @@ def _unledgered_inventory_figures(inventory: Any, ledger: Any) -> list[str]:
             # SCALE-NAIVE ON BOTH SIDES, so compare across scales. Otherwise a ledger
             # holding "$1.5M" as 1.5 does not match prose writing 1,500,000, and the check
             # reports a figure the numeric chain does in fact hold.
-            if token in ledger_tokens or _scaled_variants(token) & ledger_tokens:
+            magnitude = _prose_magnitude(match)
+            if token in ledger_tokens or (magnitude is not None and magnitude in ledger_values):
                 continue
             entry = f"slide {slide.get('number')}: {match.strip()}"
             if entry not in found:
@@ -1702,7 +1724,9 @@ def compose(
     for name in all_names:
         artifacts[name] = _load_artifact(dir_path, name)
 
-    artifacts_found = [n for n in all_names if artifacts[n] is not None and artifacts[n] is not _CORRUPT]
+    # REQUIRED only, matching `artifacts_missing`. An optional artifact belongs to neither
+    # side of the completeness statement.
+    artifacts_found = [n for n in REQUIRED_ARTIFACTS if artifacts[n] is not None and artifacts[n] is not _CORRUPT]
     # REQUIRED only. An OPTIONAL artifact that is absent is not missing -- it is optional,
     # and reporting it as missing makes a complete review look incomplete. Latent until
     # deck-review had its first optional artifact.
@@ -1961,7 +1985,9 @@ def compose(
     # Stderr summary
     # REQUIRED in the denominator, matching `artifacts_missing`. Counting optionals made a
     # complete review announce itself as 5/6.
-    _required_found = len([n for n in REQUIRED_ARTIFACTS if artifacts[n] is not None])
+    # `is not _CORRUPT` as well as `is not None`: fixing the denominator while dropping this
+    # made a run with an unparseable artifact announce itself complete.
+    _required_found = len([n for n in REQUIRED_ARTIFACTS if artifacts[n] is not None and artifacts[n] is not _CORRUPT])
     print(f"Artifacts found: {_required_found}/{len(REQUIRED_ARTIFACTS)}", file=sys.stderr)
     if warnings:
         high = [w for w in warnings if w["severity"] == "high"]

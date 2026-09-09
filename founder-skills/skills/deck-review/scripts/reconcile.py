@@ -1554,6 +1554,16 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
     # a machine can establish, while "important" is not. A relation that disagrees with a
     # figure the deck ITSELF states is a finding, no judgement required. Everything else
     # is either an opinion (derived), a non-event (confirmation), or noise (restatement).
+    # VALIDATED HERE, not inside the expected_id branch below: a relation carrying an
+    # unrecognised `relation` is undeclarable whether or not it names a stated figure, and
+    # confining the check to one path left the field silently inert on every other.
+    if str(rel_spec.get("relation", "equals")) not in _RELATION_KINDS:
+        r.verdict = "incomparable"
+        r.reasons.append(
+            f"relation {rel_spec.get('relation')!r} is not one of {sorted(_RELATION_KINDS)}, so "
+            "what the deck claims about these figures is undeclared and nothing is established"
+        )
+        return r
     exp_id = rel_spec.get("expected_id")
     exp_id = alias.get(str(exp_id), exp_id) if exp_id else exp_id
     if exp_id and (exp := by_id.get(str(exp_id))) is not None and not exp.verified:
@@ -1614,16 +1624,6 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
         # Read as literal strings so `test_dispatch_schema_drift.py` can see them consumed.
         relation = str(rel_spec.get("relation", "equals"))
         per = str(rel_spec.get("per", ""))
-        # AN UNRECOGNISED `relation` IS REFUSED, NOT SILENTLY DEFAULTED. Falling back to
-        # `equals` on a typo turns a stated ceiling back into an equality test and emits the
-        # exact false contradiction this field exists to prevent -- with no diagnostic.
-        if relation not in _RELATION_KINDS:
-            r.verdict = "incomparable"
-            r.reasons.append(
-                f"relation {relation!r} is not one of {sorted(_RELATION_KINDS)}, so what the "
-                "deck claims about these figures is undeclared and nothing is established"
-            )
-            return r
         # RE-TYPE ONLY A BARE UNIT KIND. `dimensionless` is not a quantity a period can
         # qualify, and appending one made a ratio incomparable to a stated percent that had
         # matched it before -- a comparison silently lost by adding a field.
@@ -1750,7 +1750,12 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
                     f"differs from the stated {exp.raw} by {abs(mid - exp.value) / abs(exp.value):.1%} "
                     f"— below the materiality floor for a percentage"
                 )
-        if conv:
+        # NOT FOR A CEILING. `convention_differs` says the two sides agreed and only the
+        # convention differed; for an `at_most` relation nothing agreed -- a ceiling was
+        # exceeded by less than the materiality floor. The suppression is the right
+        # direction, but the founder-facing sentence attached to this verdict would be
+        # false, so a ceiling takes the ordinary immateriality path into `confirmation`.
+        if conv and relation != "at_most":
             r.verdict = "convention_differs"
             r.reasons.append(conv)
             return r

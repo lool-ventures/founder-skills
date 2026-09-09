@@ -1728,3 +1728,41 @@ def test_select_promotes_an_exceeded_limit_to_the_founder() -> None:
     r = compute(_AT_MOST_SPEC, figures)
     assert r.verdict == "exceeds_stated_limit"
     assert r in select([r]), "an exceeded limit must reach the founder"
+
+
+def test_a_ceiling_exceeded_below_the_materiality_floor_is_not_a_convention_difference() -> None:
+    """The at_most branch now falls through to inherit the scale and convention guards. It
+    must inherit their GUARDS, not their prose: `convention_differs` means the two sides
+    agreed and only the convention differed, which is false of a breached ceiling."""
+    figures = {
+        "a": fig("8.06%", 8.06, unit_kind="percent", id="a", label="Rate 2029"),
+        "b": fig("4.50%", 4.50, unit_kind="percent", id="b", label="Rate 2028"),
+        "cap": fig("3.50%", 3.50, unit_kind="percent", period="year", id="cap", label="Ceiling"),
+    }
+    r = compute(
+        {
+            "kind": "derived_ratio",
+            "operator": "difference",
+            "operands": ["a", "b"],
+            "expected_id": "cap",
+            "relation": "at_most",
+            "per": "year",
+        },
+        figures,
+    )
+    assert r.verdict != "convention_differs", (r.verdict, r.reasons)
+
+
+def test_an_unrecognised_relation_is_refused_without_an_expected_id() -> None:
+    """The check used to sit inside the expected_id branch, so the field was silently inert
+    on every other path."""
+    figures = {
+        "a": fig("667", 667, unit_kind="count", id="a", label="Fleet 2029"),
+        "b": fig("296", 296, unit_kind="count", id="b", label="Fleet 2028"),
+    }
+    r = compute(
+        {"kind": "derived_ratio", "operator": "ratio", "operands": ["a", "b"], "relation": "at_leest"},
+        figures,
+    )
+    assert r.verdict == "incomparable", (r.verdict, r.reasons)
+    assert any("at_leest" in x for x in r.reasons), r.reasons

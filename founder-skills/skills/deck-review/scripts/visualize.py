@@ -547,22 +547,13 @@ def _key_findings(
     def _render_items(items: list[str], css_class: str, max_items: int = 3) -> str:
         return "".join(f'<div class="finding-item {css_class}">{_esc(item)}</div>' for item in items[:max_items])
 
-    def _actions_overflow(items: list[str]) -> str:
-        """report.md renders up to five fixes; the HTML capped at three and dropped the
-        rest. Same class as the attention list -- cap what is shown, not what is delivered."""
-        tail = items[5:]
-        if not tail:
-            return ""
-        return (
-            f"<details><summary>{len(tail)} more</summary>"
-            f"{_render_items(tail, 'finding-action', max_items=len(tail))}</details>"
-        )
-
     parts: list[str] = []
     if strong:
         parts.append(
             '<div class="findings-subsection"><h3>What\'s strong</h3>'
-            f"{_render_items(strong, 'finding-strong', max_items=len(strong))}</div>"
+            # Five. Strengths are not findings the founder is owed in full, and report.md
+            # has no strengths section for this to diverge from.
+            f"{_render_items(strong, 'finding-strong', max_items=5)}</div>"
         )
     if attention:
         # A FAIL is a finding the founder is owed, not a display-budget line item. Cap what
@@ -589,8 +580,11 @@ def _key_findings(
     if actions:
         parts.append(
             '<div class="findings-subsection"><h3>Top actions</h3>'
-            f"{_render_items(actions[:5], 'finding-action', max_items=5)}"
-            f"{_actions_overflow(actions)}</div>"
+            # FIVE, HARD, matching report.md's "Up to 5 Fixes to Make". That section caps
+            # rather than discloses BECAUSE the tail order is arbitrary and must not read as
+            # a ranking -- so a disclosure here would deliver what the markdown deliberately
+            # withholds. Parity in the opposite direction is still divergence.
+            f"{_render_items(actions, 'finding-action', max_items=5)}</div>"
         )
 
     return "".join(parts)

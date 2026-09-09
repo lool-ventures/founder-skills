@@ -5581,7 +5581,23 @@ def test_a_number_stated_only_in_inventory_prose_is_flagged() -> None:
             "slide_reviews.json": _VALID_REVIEWS,
             "checklist.json": _VALID_CHECKLIST,
             "reconciliation.json": _VALID_RECONCILIATION,
-            "ledger.json": {"figures": [], "metadata": {"run_id": "run-test"}},
+            # A REAL extraction that simply does not contain the prose figure. An empty
+            # `figures` list means the check had no input at all, and asserting the flag on
+            # it pinned the very defect this test is about.
+            "ledger.json": {
+                "figures": [
+                    {
+                        "id": "f1",
+                        "raw": "$1.5M",
+                        "value": 1500000.0,
+                        "slide": 17,
+                        "quote": "$1.5M",
+                        "label": "ARR 2026",
+                        "unit_kind": "money",
+                    }
+                ],
+                "metadata": {"run_id": "run-test"},
+            },
         }
     )
     code, report, err = _run_compose(d)
@@ -5877,7 +5893,20 @@ def test_a_headline_figure_is_scanned_too() -> None:
         **_VALID_INVENTORY,
         "slides": [{"number": 4, "headline": "$4.2M ARR and 12,500 seats", "content_summary": "x"}],
     }
-    ledger = {"figures": [], "metadata": {"run_id": "run-test"}}
+    ledger = {
+        "figures": [
+            {
+                "id": "f1",
+                "raw": "250",
+                "value": 250.0,
+                "slide": 19,
+                "quote": "250",
+                "label": "Capacity",
+                "unit_kind": "count",
+            }
+        ],
+        "metadata": {"run_id": "run-test"},
+    }
     d = _make_artifact_dir(_compose_artifacts(inv, ledger))
     code, report, err = _run_compose(d)
     assert report is not None, err
@@ -5918,6 +5947,121 @@ def test_both_renderers_order_the_numbers_sections_the_same_way() -> None:
     code, html, err = run_script_raw("visualize.py", ["--dir", d, "--ungated"])
     assert code == 0, err
     limit, disagree = "Where the plan passes a stated limit", "Figures that disagree"
-    assert (md.index(limit) < md.index(disagree)) == (html.index(limit) < html.index(disagree)), (
-        "report.md and report.html order the two findings differently"
+    # Pins the ORDER, not merely agreement: comparing two booleans stays green if a future
+    # change flips both renderers the wrong way together.
+    assert md.index(limit) < md.index(disagree), "report.md puts the exceeded limit second"
+    assert html.index(limit) < html.index(disagree), "report.html puts the exceeded limit second"
+
+
+def test_an_empty_ledger_flags_nothing() -> None:
+    """`{"figures": []}` is "the check had no input", not "nothing was extracted" -- and it
+    is the LIKELIER shape, because the ledger step writes a file either way. Flagging every
+    numeral on it is the same founder-facing harm as flagging them on an absent file."""
+    d = _make_artifact_dir(
+        _compose_artifacts(
+            _inventory_with_prose("Q3 hit 47,000 accounts and 12,500 seats."),
+            {"figures": [], "metadata": {"run_id": "run-test"}},
+        )
     )
+    code, report, err = _run_compose(d)
+    assert report is not None, err
+    codes = [w["code"] for w in report["validation"]["warnings"]]
+    assert "UNLEDGERED_INVENTORY_FIGURE" not in codes, codes
+
+
+def test_the_prose_check_does_not_silence_unrelated_magnitudes() -> None:
+    """The cross-scale match must compare MAGNITUDES, not blanket six bands per token.
+
+    Measured on the blanket version: a ledger holding `3.2x` silenced "3,200 sites" and one
+    holding `12%` silenced "12,000 leads" -- unit-blind collisions that turned a real check
+    into a near-dead one. Nothing else in the suite can see over-suppression, because every
+    other case passes a ledger whose token set is empty.
+    """
+    ledger = {
+        "figures": [
+            {
+                "id": "a",
+                "raw": "3.2x",
+                "value": 3.2,
+                "slide": 1,
+                "quote": "3.2x",
+                "label": "Multiple",
+                "unit_kind": "multiple",
+            },
+            {
+                "id": "b",
+                "raw": "12%",
+                "value": 12.0,
+                "slide": 1,
+                "quote": "12%",
+                "label": "Margin",
+                "unit_kind": "percent",
+            },
+        ],
+        "metadata": {"run_id": "run-test"},
+    }
+    d = _make_artifact_dir(_compose_artifacts(_inventory_with_prose("3,200 sites and 12,000 leads."), ledger))
+    code, report, err = _run_compose(d)
+    assert report is not None, err
+    flagged = [w for w in report["validation"]["warnings"] if w["code"] == "UNLEDGERED_INVENTORY_FIGURE"]
+    assert flagged, "a count is not silenced by an unrelated multiple or percent"
+    assert "3,200" in flagged[0]["message"] and "12,000" in flagged[0]["message"], flagged[0]
+
+
+def test_a_prose_numeral_too_large_to_parse_does_not_crash_the_producer() -> None:
+    """Prose is free text written by a sub-agent off a deck. A 300-digit numeral parses to
+    inf and `int(inf)` raises -- which would take out report.md and report.json entirely."""
+    d = _make_artifact_dir(
+        _compose_artifacts(
+            _inventory_with_prose("An absurd figure: " + "9" * 320 + " users."),
+            {
+                "figures": [
+                    {
+                        "id": "f1",
+                        "raw": "250",
+                        "value": 250.0,
+                        "slide": 1,
+                        "quote": "250",
+                        "label": "C",
+                        "unit_kind": "count",
+                    }
+                ],
+                "metadata": {"run_id": "run-test"},
+            },
+        )
+    )
+    code, report, err = _run_compose(d)
+    assert report is not None, f"the producer died on its own input: {err}"
+
+
+def test_a_corrupt_required_artifact_is_not_counted_as_found() -> None:
+    """Fixing the denominator while dropping the `is not _CORRUPT` term made a run with an
+    unparseable artifact announce itself complete. A broken run reporting itself whole is
+    the one direction that matters."""
+    artifacts = _compose_artifacts(_VALID_INVENTORY)
+    d = _make_artifact_dir(artifacts)
+    (Path(d) / "checklist.json").write_text("{not json", encoding="utf-8")
+    code, report, err = _run_compose(d)
+    found = [line for line in err.splitlines() if "Artifacts found" in line]
+    assert found, err
+    assert "5/5" not in found[0], f"a corrupt artifact was counted as found: {found[0]}"
+    if report is not None:
+        assert "checklist.json" not in report["validation"]["artifacts_found"]
+
+
+def test_an_immaterial_ceiling_breach_is_not_called_a_convention_difference() -> None:
+    """`convention_differs` says the two sides agreed and only the convention differed. For
+    a ceiling nothing agreed -- it was exceeded by less than the materiality floor -- and the
+    founder-facing sentence attached to that verdict would be false."""
+    prose = _load_prose_module()
+    recon = {
+        "status": "checked",
+        "figures_total": 4,
+        "figures_verified": 4,
+        "relations_proposed": 1,
+        "relations": [],
+        "suppressed": {"convention_differs": 1},
+        "untested_claims": [],
+    }
+    line = prose.coverage_line(recon, lambda x: x)
+    assert "differed only in the convention" in line, "the sentence still exists for real cases"
