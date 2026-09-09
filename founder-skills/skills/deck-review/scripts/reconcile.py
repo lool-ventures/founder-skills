@@ -1694,6 +1694,23 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
         # classes, the power-of-a-thousand backstop and the stated-unit re-rendering below --
         # so a scaled-extraction error shipped as a finding, and the number displayed was not
         # the number decided on. A new verdict needs every guard the old ones have.
+        # A CEILING IS A MAGNITUDE CLAIM, so the stated side must be a magnitude. Refusing
+        # percent and multiple is a DOMAIN restriction, not a tolerance one, and it is what
+        # makes the two measured false-positive classes structurally unreachable rather than
+        # tuned away: `_growth_convention` requires a percent stated side, `_immaterial_
+        # percent` requires a percent -- and a ceiling comparison against either was reported
+        # to the founder as a plan exceeding a limit when the two sides merely expressed the
+        # same fact under different conventions.
+        #
+        # Nothing is lost: a capacity, a budget and a headcount cap are money, count or
+        # duration, which is exactly what the prompt surfaces describe.
+        if relation == "at_most" and exp.unit_kind in (PERCENT, MULTIPLE):
+            r.verdict = "incomparable"
+            r.reasons.append(
+                f"a ceiling comparison needs a magnitude on the stated side, and {exp.raw} is a "
+                f"{'percentage' if exp.unit_kind == PERCENT else 'multiple'}, so nothing is established"
+            )
+            return r
         if relation == "at_most" and exp.bound == "at_least":
             # INCOHERENT, so it suppresses. The relation says the figure is a ceiling and
             # the figure's own text says it is a floor; nothing here can decide which the
@@ -1750,12 +1767,11 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
                     f"differs from the stated {exp.raw} by {abs(mid - exp.value) / abs(exp.value):.1%} "
                     f"— below the materiality floor for a percentage"
                 )
-        # NOT FOR A CEILING. `convention_differs` says the two sides agreed and only the
-        # convention differed; for an `at_most` relation nothing agreed -- a ceiling was
-        # exceeded by less than the materiality floor. The suppression is the right
-        # direction, but the founder-facing sentence attached to this verdict would be
-        # false, so a ceiling takes the ordinary immateriality path into `confirmation`.
-        if conv and relation != "at_most":
+        # NOT SPECIAL-CASED FOR `at_most` ANY MORE. Skipping the whole convention block for a
+        # ceiling let a growth-convention pair through as a promoted finding; the domain guard
+        # above removes both classes at the source instead, so this stays one rule for
+        # everything.
+        if conv:
             r.verdict = "convention_differs"
             r.reasons.append(conv)
             return r

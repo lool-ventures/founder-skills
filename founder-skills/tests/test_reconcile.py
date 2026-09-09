@@ -1750,7 +1750,10 @@ def test_a_ceiling_exceeded_below_the_materiality_floor_is_not_a_convention_diff
         },
         figures,
     )
-    assert r.verdict != "convention_differs", (r.verdict, r.reasons)
+    # ASSERT THE POSITIVE. `!= "convention_differs"` also passes on the promoted false
+    # finding this case actually produced, which is how it stayed green through two rounds.
+    assert r.verdict == "incomparable", (r.verdict, r.reasons)
+    assert not select([r]), "an immaterial percentage breach must not reach the founder"
 
 
 def test_an_unrecognised_relation_is_refused_without_an_expected_id() -> None:
@@ -1766,3 +1769,67 @@ def test_an_unrecognised_relation_is_refused_without_an_expected_id() -> None:
     )
     assert r.verdict == "incomparable", (r.verdict, r.reasons)
     assert any("at_leest" in x for x in r.reasons), r.reasons
+
+
+# --------------------------------------------------------------------------
+# THE DECISION TABLE for one-sided comparisons.
+#
+# Every `at_most` defect reported against this engine -- an early return that skipped the
+# scale backstop, a fall-through that inherited the convention prose, a whole-block skip that
+# promoted a growth-convention pair -- was a WRONG CELL in this table, found by a reader
+# rather than by a test. Each earlier fix pinned the one counterexample it was shown and moved
+# the bug to the neighbouring cell.
+#
+# The axes are what `compute()` is actually indexed by: the declared relation, the stated
+# figure's own bound, its unit kind, and where the computed value falls. `promoted` is part of
+# the expectation because a verdict a founder never sees and one that leads the report are
+# different outcomes, and only `select()` knows which.
+# --------------------------------------------------------------------------
+
+_TABLE_CASES = [
+    # (name, relation, stated raw/value/unit/period, computed operands, verdict, promoted)
+    ("ceiling exceeded", "at_most", ("250 a year", 250, "count", "year"), (667, 296), "exceeds_stated_limit", True),
+    ("ceiling met exactly", "at_most", ("400 a year", 400, "count", "year"), (696, 296), "confirmation", False),
+    ("ceiling not reached", "at_most", ("500 a year", 500, "count", "year"), (667, 296), "confirmation", False),
+    ("ceiling on a percent", "at_most", ("3.50%", 3.50, "percent", "year"), (8.06, 4.50), "incomparable", False),
+    ("ceiling on a multiple", "at_most", ("2.0x", 2.0, "multiple", "year"), (667, 296), "incomparable", False),
+    ("equality still contradicts", "equals", ("250 a year", 250, "count", "year"), (667, 296), "contradiction", True),
+    ("equality still confirms", "equals", ("371 a year", 371, "count", "year"), (667, 296), "confirmation", False),
+]
+
+
+@pytest.mark.parametrize(
+    ("name", "relation", "stated", "operands", "expected_verdict", "expected_promoted"),
+    _TABLE_CASES,
+    ids=[c[0] for c in _TABLE_CASES],
+)
+def test_the_one_sided_decision_table(
+    name: str,
+    relation: str,
+    stated: tuple,
+    operands: tuple,
+    expected_verdict: str,
+    expected_promoted: bool,
+) -> None:
+    """One cell per row. A fix that moves the bug to a neighbouring cell reds this."""
+    raw, value, unit, period = stated
+    figures = {
+        "a": fig(str(operands[0]), operands[0], unit_kind="count", id="a", label="Fleet 2029"),
+        "b": fig(str(operands[1]), operands[1], unit_kind="count", id="b", label="Fleet 2028"),
+        "cap": fig(raw, value, unit_kind=unit, period=period, id="cap", label="Stated"),
+    }
+    if unit == "percent":
+        figures["a"] = fig(str(operands[0]), operands[0], unit_kind="percent", id="a", label="Rate 2029")
+        figures["b"] = fig(str(operands[1]), operands[1], unit_kind="percent", id="b", label="Rate 2028")
+    spec = {
+        "kind": "derived_ratio",
+        "operator": "difference",
+        "operands": ["a", "b"],
+        "expected_id": "cap",
+        "per": "year",
+    }
+    if relation != "equals":
+        spec["relation"] = relation
+    r = compute(spec, figures)
+    assert r.verdict == expected_verdict, (name, r.verdict, r.reasons)
+    assert bool(select([r])) == expected_promoted, (name, r.verdict, "promoted", bool(select([r])))
