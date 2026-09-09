@@ -116,6 +116,7 @@ WARNING_SEVERITY: dict[str, str] = {
     "CORRUPT_ARTIFACT": "high",
     "MISSING_ARTIFACT": "high",
     "UNLEDGERED_INVENTORY_FIGURE": "medium",
+    "UNVERIFIED_MEASUREMENT": "medium",
     "STALE_ARTIFACT": "high",
     "SCHEMA_VIOLATION": "high",
     "MISSING_METADATA": "high",
@@ -186,6 +187,7 @@ WARNING_LABELS: dict[str, str] = {
     "CORRUPT_ARTIFACT": "Corrupt Artifact",
     "MISSING_ARTIFACT": "Missing Artifact",
     "UNLEDGERED_INVENTORY_FIGURE": "Figure Stated Only in Prose",
+    "UNVERIFIED_MEASUREMENT": "Design Judgement Not Measured",
     "STALE_ARTIFACT": "Stale Artifact",
     "SCHEMA_VIOLATION": "Schema Violation",
     "MISSING_METADATA": "Missing Metadata",
@@ -314,8 +316,9 @@ def _founder_text_policy() -> Any:
 
 
 INCONCLUSIVE_SUPPRESSION_CLASSES = _reconciliation_prose.INCONCLUSIVE_SUPPRESSION_CLASSES
-"""Re-export. The set and its rationale live in `_reconciliation_prose`, which is what both
-renderers read; kept here so existing importers of this name keep working.
+"""Re-export, kept because the name is part of this module's read surface. The set and its
+rationale live in `_reconciliation_prose`, which is what both renderers read; nothing in the
+repo imports this alias today.
 
 Suppression classes the coverage line may describe as "could not be settled either way".
 
@@ -386,6 +389,37 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
         meta = _as_dict(data.get("metadata"))
         if not isinstance(meta.get("run_id"), str) or not meta.get("run_id"):
             warnings.append(_warn("MISSING_METADATA", f"{name} has no metadata.run_id"))
+
+    # UNVERIFIED_MEASUREMENT — a design criterion scored without the observation it rests on.
+    # `checklist.py` records these in its own validation.warnings, which NOTHING downstream
+    # reads: compose loads the checklist for `validation.status` alone. That is this repo's
+    # documented failure mode -- a warning that reaches a JSON file and no human -- so the
+    # count is surfaced here, where warnings are actually rendered.
+    checklist_warnings = [
+        w
+        for w in _as_list(_as_dict(artifacts.get("checklist.json")).get("validation", {}).get("warnings"))
+        if isinstance(w, str) and w.startswith("UNVERIFIED_MEASUREMENT")
+    ]
+    if checklist_warnings:
+        criteria = ", ".join(sorted({w.split(":", 1)[1].split()[0] for w in checklist_warnings if ":" in w}))
+        warnings.append(
+            _warn(
+                "UNVERIFIED_MEASUREMENT",
+                f"design criteria scored without the observation they rest on: {criteria}",
+                founder_message=(
+                    "Some design judgements in this review were reasoned rather than measured, "
+                    f"so treat them as weaker than the rest: {criteria}."
+                ),
+            )
+        )
+
+    # A CORRUPT OPTIONAL ARTIFACT IS STILL CORRUPT. Only REQUIRED artifacts were checked, so
+    # an unparseable ledger was silent -- and the prose check, with no figures to compare
+    # against, then told the founder their numbers were unverified. Right symptom, wrong
+    # cause, and the cause is the one they can act on.
+    for name in OPTIONAL_ARTIFACTS:
+        if artifacts.get(name) is _CORRUPT:
+            warnings.append(_warn("CORRUPT_ARTIFACT", f"Optional artifact could not be parsed: {name}"))
 
     # UNLEDGERED_INVENTORY_FIGURE — a number that reached the report without the chain
     unledgered = _unledgered_inventory_figures(artifacts.get("deck_inventory.json"), artifacts.get("ledger.json"))
@@ -961,8 +995,35 @@ _PROSE_NUMERAL = re.compile(r"\b\d[\d,]*(?:\.\d+)?\s*(?:%|[KMB]\b|billion|millio
 _NOT_A_CLAIM = re.compile(r"^(?:19|20)\d{2}$|^[1-9]\d?$")
 
 
+def _scaled_variants(token: str) -> set[str]:
+    """The same magnitude written at thousand/million/billion scale, as bare tokens.
+
+    Neither side records its own scale: the ledger strips "$1.5M" to `1.5` while prose may
+    write `1,500,000`. Matching only the literal token reported a figure the chain holds.
+    """
+    try:
+        value = float(token)
+    except ValueError:
+        return set()
+    out: set[str] = set()
+    for factor in (1e3, 1e6, 1e9):
+        for scaled in (value * factor, value / factor):
+            if scaled == int(scaled):
+                out.add(str(int(scaled)))
+            out.add(f"{scaled:g}")
+    return out
+
+
 def _unledgered_inventory_figures(inventory: Any, ledger: Any) -> list[str]:
-    """Numerals stated in inventory prose that never became a ledger figure."""
+    """Numerals stated in inventory prose that never became a ledger figure.
+
+    NO LEDGER MEANS NO CHECK, not "nothing was extracted". `ledger.json` is optional, and
+    reading its absence as an empty extraction flagged every numeral in the deck and told
+    the founder their figures were unverified -- on a run where the check had no input at
+    all. A corrupt ledger is the same case, and is reported separately by its own cause.
+    """
+    if not isinstance(ledger, dict) or not isinstance(ledger.get("figures"), list):
+        return []
     ledger_tokens = {
         re.sub(r"[^\d.]", "", str(_as_dict(f).get("raw", ""))) for f in _as_list(_as_dict(ledger).get("figures"))
     }
@@ -970,12 +1031,21 @@ def _unledgered_inventory_figures(inventory: Any, ledger: Any) -> list[str]:
     found: list[str] = []
     for raw_slide in _as_list(_as_dict(inventory).get("slides")):
         slide = _as_dict(raw_slide)
-        prose = " ".join(str(slide.get(k, "")) for k in ("content_summary", "visuals"))
+        # `headline` too: it is a required field, free text by the same argument, and where
+        # a deck's flagship number lives.
+        prose = " ".join(str(slide.get(k, "")) for k in ("headline", "content_summary", "visuals"))
         for match in _PROSE_NUMERAL.findall(prose):
             token = re.sub(r"[^\d.]", "", match)
-            if not token or _NOT_A_CLAIM.match(token) or token in ledger_tokens:
+            if not token or _NOT_A_CLAIM.match(token):
                 continue
-            found.append(f"slide {slide.get('number')}: {match.strip()}")
+            # SCALE-NAIVE ON BOTH SIDES, so compare across scales. Otherwise a ledger
+            # holding "$1.5M" as 1.5 does not match prose writing 1,500,000, and the check
+            # reports a figure the numeric chain does in fact hold.
+            if token in ledger_tokens or _scaled_variants(token) & ledger_tokens:
+                continue
+            entry = f"slide {slide.get('number')}: {match.strip()}"
+            if entry not in found:
+                found.append(entry)
     return found
 
 
@@ -1889,7 +1959,10 @@ def compose(
             )
 
     # Stderr summary
-    print(f"Artifacts found: {len(artifacts_found)}/{len(all_names)}", file=sys.stderr)
+    # REQUIRED in the denominator, matching `artifacts_missing`. Counting optionals made a
+    # complete review announce itself as 5/6.
+    _required_found = len([n for n in REQUIRED_ARTIFACTS if artifacts[n] is not None])
+    print(f"Artifacts found: {_required_found}/{len(REQUIRED_ARTIFACTS)}", file=sys.stderr)
     if warnings:
         high = [w for w in warnings if w["severity"] == "high"]
         medium = [w for w in warnings if w["severity"] == "medium"]

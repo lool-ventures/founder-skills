@@ -177,6 +177,14 @@ def coverage_line(
     # own line above -- counting it here produced arithmetic a founder can see is impossible.
     if exceeded and disagreements:
         settled += f". A further {emphasis(str(exceeded))} show a plan running past a limit your deck itself states"
+    # ADDITIVE for the same reason the unsettled clause is. A run with a contradiction and
+    # thirty withheld derived readings mentioned neither the thirty nor why -- the `elif`
+    # was fixed one line above and left in place here, in the same function.
+    if withheld_derived and (disagreements or exceeded):
+        settled += (
+            f". A further {emphasis(str(withheld_derived))} produced figures worked out from "
+            "your numbers that I am not confident enough to report"
+        )
     if inconclusive and (disagreements or exceeded):
         settled += (
             f". Separately, {emphasis(str(inconclusive))} could not be settled either way — "

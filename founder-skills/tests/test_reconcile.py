@@ -1634,3 +1634,97 @@ def test_an_unverifiable_per_claim_falls_back_to_the_refusal() -> None:
         {"f29": a, "f28": b, "cap": cap},
     )
     assert r.verdict == "incomparable", (r.verdict, r.reasons)
+
+
+def _at_most_figures() -> dict[str, Figure]:
+    return {
+        "f29": fig("667", 667, unit_kind="count", id="f29", label="Fleet 2029"),
+        "f28": fig("296", 296, unit_kind="count", id="f28", label="Fleet 2028"),
+        "cap": fig(
+            "250 appliances a year",
+            250,
+            unit_kind="count",
+            period="year",
+            id="cap",
+            label="Manufacturing capacity per year",
+        ),
+    }
+
+
+_AT_MOST_SPEC = {
+    "kind": "derived_ratio",
+    "operator": "difference",
+    "operands": ["f29", "f28"],
+    "expected_id": "cap",
+    "relation": "at_most",
+    "per": "year",
+}
+
+
+def test_an_unrecognised_relation_is_refused_not_defaulted() -> None:
+    """Falling back to `equals` on a typo turns a stated ceiling into an equality test and
+    emits the exact false contradiction the field exists to prevent -- silently."""
+    r = compute({**_AT_MOST_SPEC, "relation": "at_leest"}, _at_most_figures())
+    assert r.verdict == "incomparable", r.verdict
+    assert any("at_leest" in x for x in r.reasons), r.reasons
+
+
+def test_per_is_refused_on_an_operator_that_is_not_a_difference() -> None:
+    """A SUM of two annual snapshots is not an annual rate. The declaration is about a
+    difference; nothing checked the operator."""
+    r = compute({**_AT_MOST_SPEC, "operator": "sum"}, _at_most_figures())
+    assert r.verdict != "exceeds_stated_limit", (r.verdict, r.rendered)
+
+
+def test_years_in_a_surrounding_quote_do_not_license_a_rate() -> None:
+    """The quote routinely carries a year belonging to something else -- a founding date, a
+    comparison period. Reading it MANUFACTURES a finding out of an unverifiable claim."""
+    figures = _at_most_figures()
+    figures["f29"] = fig("667", 667, unit_kind="count", id="f29", label="Fleet", quote="Founded 2019, fleet 667")
+    figures["f28"] = fig("296", 296, unit_kind="count", id="f28", label="Fleet", quote="In 2020 we had 296")
+    r = compute(_AT_MOST_SPEC, figures)
+    assert r.verdict == "incomparable", (r.verdict, r.rendered)
+
+
+def test_a_one_sided_comparison_still_gets_the_scale_backstop() -> None:
+    """The power-of-a-thousand guard exists for an extraction that expands some cells of a
+    scaled table and not others. A new verdict must inherit every guard the old ones have."""
+    figures = _at_most_figures()
+    figures["f29"] = fig("250,000", 250_000, unit_kind="count", id="f29", label="Fleet 2029")
+    figures["f28"] = fig("0", 0, unit_kind="count", id="f28", label="Fleet 2028")
+    r = compute(_AT_MOST_SPEC, figures)
+    assert r.verdict == "incomparable", (r.verdict, r.rendered)
+
+
+def test_per_does_not_break_a_dimensionless_comparison() -> None:
+    """`dimensionless` is not a quantity a period can qualify. Appending one lost a
+    ratio-vs-percent comparison that had matched before."""
+    figures = {
+        "a": fig("$50M", 50_000_000, id="a", label="Rev 2029"),
+        "b": fig("$200M", 200_000_000, id="b", label="Rev 2028"),
+        "p": fig("25%", 25, unit_kind="percent", id="p", label="Share"),
+    }
+    r = compute(
+        {"kind": "derived_ratio", "operator": "ratio", "operands": ["a", "b"], "expected_id": "p", "per": "year"},
+        figures,
+    )
+    assert r.verdict == "confirmation", (r.verdict, r.reasons)
+
+
+def test_a_ceiling_claim_against_a_stated_floor_is_refused() -> None:
+    """The relation says ceiling, the figure's own text says floor. Nothing here can decide
+    which the deck meant, and an undecidable claim suppresses."""
+    figures = _at_most_figures()
+    figures["cap"] = fig("250+", 250, unit_kind="count", period="year", id="cap", label="Capacity")
+    r = compute(_AT_MOST_SPEC, figures)
+    assert r.verdict == "incomparable", (r.verdict, r.rendered)
+
+
+def test_select_promotes_an_exceeded_limit_to_the_founder() -> None:
+    """select() is the only thing entitled to decide what a founder sees. Every renderer
+    test hands it a pre-built verdict, so nothing pinned the promotion itself -- and
+    reverting it makes the finding vanish into the suppressed counts with a green suite."""
+    figures = _at_most_figures()
+    r = compute(_AT_MOST_SPEC, figures)
+    assert r.verdict == "exceeds_stated_limit"
+    assert r in select([r]), "an exceeded limit must reach the founder"

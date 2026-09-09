@@ -547,10 +547,22 @@ def _key_findings(
     def _render_items(items: list[str], css_class: str, max_items: int = 3) -> str:
         return "".join(f'<div class="finding-item {css_class}">{_esc(item)}</div>' for item in items[:max_items])
 
+    def _actions_overflow(items: list[str]) -> str:
+        """report.md renders up to five fixes; the HTML capped at three and dropped the
+        rest. Same class as the attention list -- cap what is shown, not what is delivered."""
+        tail = items[5:]
+        if not tail:
+            return ""
+        return (
+            f"<details><summary>{len(tail)} more</summary>"
+            f"{_render_items(tail, 'finding-action', max_items=len(tail))}</details>"
+        )
+
     parts: list[str] = []
     if strong:
         parts.append(
-            f'<div class="findings-subsection"><h3>What\'s strong</h3>{_render_items(strong, "finding-strong")}</div>'
+            '<div class="findings-subsection"><h3>What\'s strong</h3>'
+            f"{_render_items(strong, 'finding-strong', max_items=len(strong))}</div>"
         )
     if attention:
         # A FAIL is a finding the founder is owed, not a display-budget line item. Cap what
@@ -576,7 +588,9 @@ def _key_findings(
         )
     if actions:
         parts.append(
-            f'<div class="findings-subsection"><h3>Top actions</h3>{_render_items(actions, "finding-action")}</div>'
+            '<div class="findings-subsection"><h3>Top actions</h3>'
+            f"{_render_items(actions[:5], 'finding-action', max_items=5)}"
+            f"{_actions_overflow(actions)}</div>"
         )
 
     return "".join(parts)
@@ -1278,14 +1292,14 @@ def _numbers_section(reconciliation: dict[str, Any] | None) -> str:
         parts.append(f'<p class="coverage">{coverage}</p>')
     if untested:
         parts.append(f'<p class="coverage">{untested}</p>')
+    # ORDER MATCHES report.md. Two renderers over one artifact set must not disagree about
+    # what comes first either -- that is the same drift in a quieter costume.
+    if exceeded:
+        rows = "".join(f'<li class="finding-fail">{_esc(r.get("rendered", ""))}</li>' for r in exceeded)
+        parts.append(f"<h3>Where the plan passes a stated limit</h3><ul>{rows}</ul>")
     if contradictions:
         rows = "".join(f'<li class="finding-fail">{_esc(r.get("rendered", ""))}</li>' for r in contradictions)
         parts.append(f"<h3>Figures that disagree</h3><ul>{rows}</ul>")
-    if exceeded:
-        # Its own heading, matching report.md: a plan past a stated ceiling is not the deck
-        # disagreeing with itself.
-        rows = "".join(f'<li class="finding-fail">{_esc(r.get("rendered", ""))}</li>' for r in exceeded)
-        parts.append(f"<h3>Where the plan passes a stated limit</h3><ul>{rows}</ul>")
     if derived:
         rows = "".join(f'<li class="finding-warn">{_esc(r.get("rendered", ""))}</li>' for r in derived)
         parts.append(

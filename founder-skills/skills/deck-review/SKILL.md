@@ -899,7 +899,7 @@ and slide of every figure involved. Retyping those is how a withdrawal comes bac
 nothing, which fails the step:
 
 ```sh
-"$SCRIPTS/reconcile.py" --print-downgrade-stanza "$REVIEW_DIR/reconciliation.json" \
+python3 "$SCRIPTS/reconcile.py" --print-downgrade-stanza "$REVIEW_DIR/reconciliation.json" \
   --ledger "$REVIEW_DIR/ledger.json"
 ```
 

@@ -910,10 +910,13 @@ SKILL_MD_CEILING: dict[str, int] = {
     # deck-review raised 103,003 -> 103,337 (+334 B) for verified_by on the four measurement
     # criteria: the status enum let an agent that could not observe a property score it
     # anyway, and the artifact could not tell a guess from a measurement.
+    # deck-review raised 104,243 -> 104,251 (+8 B): the stanza step was missing its `python3`
+    # prefix, and the scripts are committed non-executable -- so the command exited 126 and
+    # the feature was inert.
     # deck-review raised 103,337 -> 104,243 (+906 B) for the at_most/per relation fields and
     # the three sites the new verdict was invisible to -- one of which would have told a
     # founder their figures line up while the report said the plan exceeds a stated limit.
-    "deck-review": 104_243,
+    "deck-review": 104_251,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.

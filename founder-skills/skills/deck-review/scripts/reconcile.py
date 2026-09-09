@@ -62,6 +62,12 @@ from _quote_match import quote_in_doc  # type: ignore[import-not-found]  # noqa:
 # ---------------------------------------------------------------------------
 
 MONEY, COUNT, PERCENT, MULTIPLE, DURATION, DATE = "money", "count", "percent", "multiple", "duration", "date"
+# The bare unit kinds a period may qualify. `dimensionless` is deliberately absent: a ratio
+# is not a quantity "per year" can describe.
+UNIT_KINDS = frozenset({MONEY, COUNT, PERCENT, MULTIPLE, DURATION, DATE})
+# What a relation may claim the deck asserts about its figures. `equals` is the default and
+# the historical behaviour; `at_most` marks a stated ceiling.
+_RELATION_KINDS = frozenset({"equals", "at_most"})
 
 
 @dataclass
@@ -706,22 +712,29 @@ def _is_exact_count(fig: Figure) -> bool:
 _YEAR_RE = re.compile(r"\b(?:19|20)\d{2}\b")
 
 
-def _spans_one_period(operands: list[Figure], per: str) -> bool:
+def _spans_one_period(operands: list[Figure], per: str, operator: str) -> bool:
     """Verify the model's `per` claim rather than trusting it.
 
-    A `difference` of two snapshots is a RATE only if the snapshots are one period apart,
-    and the engine cannot know that from unit kinds alone. The model declares it; this
-    checks the declaration against the years each figure carries in its own label, raw and
-    quote. Unverifiable means False, so the relation falls back to the existing refusal.
+    A DIFFERENCE of two snapshots is a rate only if the snapshots are one period apart, and
+    the engine cannot know that from unit kinds alone. The model declares it; this checks the
+    declaration against the years each figure carries in its own label and raw text.
 
-    FAILS SAFE by construction: a wrong `per` suppresses a finding, it never manufactures
-    one -- the same direction every model claim in this file is allowed to fail in.
+    Three things are checked, and each of the first two was missing once: the OPERATOR must
+    be `difference` (a sum of two annual snapshots is not an annual rate), the years must
+    come from the figure's own attribution rather than the surrounding quote, and they must
+    be exactly one apart. Anything unverifiable returns False, and the relation falls back
+    to the ordinary unit refusal.
     """
-    if per != "year" or len(operands) != 2:
+    if per != "year" or operator != "difference" or len(operands) != 2:
         return False
     years: list[int] = []
     for f in operands:
-        found = {int(m.group()) for m in _YEAR_RE.finditer(f"{f.label or ''} {f.raw or ''} {f.quote or ''}")}
+        # LABEL AND RAW ONLY. The quote is the surrounding sentence and routinely carries
+        # years belonging to something else -- a founding date, a comparison period. Reading
+        # it turned two unrelated consecutive years into a licence to treat a difference as
+        # an annual rate, which MANUFACTURES a founder-facing finding. The label is the
+        # ledger's own attribution of the figure, which is the only year that qualifies it.
+        found = {int(m.group()) for m in _YEAR_RE.finditer(f"{f.label or ''} {f.raw or ''}")}
         if len(found) != 1:
             return False
         years.append(found.pop())
@@ -1601,7 +1614,20 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
         # Read as literal strings so `test_dispatch_schema_drift.py` can see them consumed.
         relation = str(rel_spec.get("relation", "equals"))
         per = str(rel_spec.get("per", ""))
-        if per and not r.computed_unit.endswith(f":{per}") and _spans_one_period(real, per):
+        # AN UNRECOGNISED `relation` IS REFUSED, NOT SILENTLY DEFAULTED. Falling back to
+        # `equals` on a typo turns a stated ceiling back into an equality test and emits the
+        # exact false contradiction this field exists to prevent -- with no diagnostic.
+        if relation not in _RELATION_KINDS:
+            r.verdict = "incomparable"
+            r.reasons.append(
+                f"relation {relation!r} is not one of {sorted(_RELATION_KINDS)}, so what the "
+                "deck claims about these figures is undeclared and nothing is established"
+            )
+            return r
+        # RE-TYPE ONLY A BARE UNIT KIND. `dimensionless` is not a quantity a period can
+        # qualify, and appending one made a ratio incomparable to a stated percent that had
+        # matched it before -- a comparison silently lost by adding a field.
+        if per and r.computed_unit in UNIT_KINDS and _spans_one_period(real, per, r.operator):
             r.computed_unit = f"{r.computed_unit}:{per}"
         cu = r.computed_unit or ""
         comparable: float | None = None
@@ -1664,19 +1690,25 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
         # `detect_bound` already makes figure-level comparisons one-sided; this is the same
         # idea at relation level, declared by the proposer instead of read off the raw text.
         #
-        # Deliberately NOT rendered as "but the deck states X": the deck is not contradicting
-        # itself, it is planning past a limit it stated. Different finding, different words.
-        if relation == "at_most":
-            if c_lo > e_hi + tol:
-                r.verdict = "exceeds_stated_limit"
-                src = "the deck states a limit of" if exp.visible else "the underlying data behind that chart gives"
-                r.rendered += f"  — more than {src} {_stated(exp)}" + (f" ({exp.label})" if exp.label else "")
-            else:
-                r.verdict = "confirmation"
+        # SETS `disjoint` RATHER THAN RETURNING. An early return skipped the convention
+        # classes, the power-of-a-thousand backstop and the stated-unit re-rendering below --
+        # so a scaled-extraction error shipped as a finding, and the number displayed was not
+        # the number decided on. A new verdict needs every guard the old ones have.
+        if relation == "at_most" and exp.bound == "at_least":
+            # INCOHERENT, so it suppresses. The relation says the figure is a ceiling and
+            # the figure's own text says it is a floor; nothing here can decide which the
+            # deck meant, and the module's rule for an undecidable claim is to refuse.
+            r.verdict = "incomparable"
+            r.reasons.append(
+                f"{exp.raw} reads as a floor while the comparison claims it is a ceiling, so "
+                "what the deck asserts about it is undecided and nothing is established"
+            )
             return r
+        if relation == "at_most":
+            disjoint = c_lo > e_hi + tol
         # A bounded figure gets a ONE-SIDED test. "$200B+" is satisfied by anything at or
         # above it, so a computed $212.3B confirms it rather than contradicting it.
-        if exp.bound == "at_least":
+        elif exp.bound == "at_least":
             disjoint = c_hi < e_lo - tol
         elif exp.bound == "at_most":
             disjoint = c_lo > e_hi + tol
@@ -1738,6 +1770,14 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
                 f"({exp.raw}); these are probably not in the same units, so no "
                 f"disagreement is established"
             )
+        elif disjoint and relation == "at_most":
+            r.verdict = "exceeds_stated_limit"
+            # Deliberately NOT "but the deck states X": the deck is not contradicting
+            # itself, it is planning past a limit it stated. Different finding, different
+            # words -- and `visible` gates the claim about what the document SAYS exactly as
+            # it does for a contradiction.
+            src = "the deck states a limit of" if exp.visible else "the underlying data behind that chart gives"
+            r.rendered += f"  — more than {src} {_stated(exp)}" + (f" ({exp.label})" if exp.label else "")
         elif disjoint:
             r.verdict = "contradiction"
             # "the deck states X" is a claim about what the document SAYS, and it must
@@ -1758,7 +1798,13 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
             # A satisfied bound is not a match. 1,195 against "fewer than 2,000" agrees
             # with the deck without equalling anything it says, and calling that a match
             # misdescribes what was established.
-            verb = "is consistent with the stated" if exp.bound in ("at_least", "at_most") else "matches the stated"
+            verb = (
+                "is within the stated"
+                if relation == "at_most"
+                else "is consistent with the stated"
+                if exp.bound in ("at_least", "at_most")
+                else "matches the stated"
+            )
             r.rendered += f"  — {verb} {_stated(exp)}"
     elif r.operator == "sum" and len(real) == 2 and r.kind != "contradiction":
         # "52 + 3 = 55 customers" restates the deck rather than testing it.

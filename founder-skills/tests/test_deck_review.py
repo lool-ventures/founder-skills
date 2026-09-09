@@ -1439,6 +1439,7 @@ def test_compose_severity_map_complete() -> None:
         # should know the stage their deck was graded at was never confirmed.
         "UNGATED_REVIEW",
         "UNLEDGERED_INVENTORY_FIGURE",
+        "UNVERIFIED_MEASUREMENT",
     ]
     assert len(sev_map) == len(expected), f"expected {len(expected)} codes, got {len(sev_map)}"
     for code in expected:
@@ -5693,7 +5694,13 @@ def test_an_unknown_verified_by_value_is_an_error_not_a_kept_string() -> None:
         }
     )
     code, out, err = run_script_raw("checklist.py", ["--run-id", "T8"], stdin_data=json.dumps({"items": items}))
-    assert "verified_by" in (out + err), (out, err)
+    # NOT `"verified_by" in out` -- the enriched item emits that key on every run, so the
+    # substring is there whether or not the guard exists, and the test passed on a mutant
+    # that kept the bad value verbatim. Assert what a kept typo would actually change.
+    result = json.loads(out)
+    assert result["validation"]["status"] == "invalid", result["validation"]
+    assert "eyeballed" not in json.dumps(result.get("items", [])), result.get("items")
+    assert "eyeballed" in (out + err), "the diagnostic must name the offending value"
 
 
 # --------------------------------------------------------------------------
@@ -5797,4 +5804,120 @@ def test_the_consistency_cross_check_fires_on_an_exceeded_limit() -> None:
     md = report["report_markdown"]
     assert "the criteria review marked your figures internally consistent" in md, (
         "the cross-check ignored the one-sided verdict"
+    )
+
+
+def _inventory_with_prose(text: str) -> dict:
+    return {**_VALID_INVENTORY, "slides": [{"number": 4, "headline": "T", "content_summary": text}]}
+
+
+def _compose_artifacts(inventory: dict, ledger: object = "OMIT") -> dict:
+    artifacts = {
+        "deck_inventory.json": inventory,
+        "stage_profile.json": _VALID_PROFILE,
+        "slide_reviews.json": _VALID_REVIEWS,
+        "checklist.json": _VALID_CHECKLIST,
+        "reconciliation.json": _VALID_RECONCILIATION,
+    }
+    if ledger != "OMIT":
+        artifacts["ledger.json"] = ledger  # type: ignore[assignment]
+    return artifacts
+
+
+def test_an_absent_ledger_flags_nothing() -> None:
+    """ledger.json is OPTIONAL. Reading its absence as an empty extraction flagged every
+    numeral in the deck and told the founder their figures were unverified -- on a run where
+    the check simply had no input."""
+    d = _make_artifact_dir(_compose_artifacts(_inventory_with_prose("Q3 hit 47,000 accounts.")))
+    code, report, err = _run_compose(d)
+    assert report is not None, err
+    codes = [w["code"] for w in report["validation"]["warnings"]]
+    assert "UNLEDGERED_INVENTORY_FIGURE" not in codes, codes
+
+
+def test_a_corrupt_ledger_is_reported_by_its_own_cause() -> None:
+    """Only REQUIRED artifacts were checked for corruption, so an unparseable ledger was
+    silent -- and the prose check then blamed the founder's figures instead."""
+    d = _make_artifact_dir(_compose_artifacts(_inventory_with_prose("Q3 hit 47,000 accounts.")))
+    (Path(d) / "ledger.json").write_text("{not json", encoding="utf-8")
+    code, report, err = _run_compose(d)
+    assert report is not None, err
+    codes = [w["code"] for w in report["validation"]["warnings"]]
+    assert "CORRUPT_ARTIFACT" in codes, codes
+
+
+def test_a_figure_the_chain_holds_at_another_scale_is_not_flagged() -> None:
+    """The ledger strips "$1.5M" to 1.5 while prose may write 1,500,000. Matching only the
+    literal token reported a figure the numeric chain does in fact hold."""
+    ledger = {
+        "figures": [
+            {
+                "id": "f1",
+                "raw": "$1.5M",
+                "value": 1500000.0,
+                "slide": 4,
+                "quote": "$1.5M",
+                "label": "ARR",
+                "unit_kind": "money",
+            }
+        ],
+        "metadata": {"run_id": "run-test"},
+    }
+    d = _make_artifact_dir(_compose_artifacts(_inventory_with_prose("We booked 1,500,000 dollars."), ledger))
+    code, report, err = _run_compose(d)
+    assert report is not None, err
+    codes = [w["code"] for w in report["validation"]["warnings"]]
+    assert "UNLEDGERED_INVENTORY_FIGURE" not in codes, codes
+
+
+def test_a_headline_figure_is_scanned_too() -> None:
+    """The headline is a required field, free text by the same argument, and where a deck's
+    flagship number lives."""
+    inv = {
+        **_VALID_INVENTORY,
+        "slides": [{"number": 4, "headline": "$4.2M ARR and 12,500 seats", "content_summary": "x"}],
+    }
+    ledger = {"figures": [], "metadata": {"run_id": "run-test"}}
+    d = _make_artifact_dir(_compose_artifacts(inv, ledger))
+    code, report, err = _run_compose(d)
+    assert report is not None, err
+    codes = [w["code"] for w in report["validation"]["warnings"]]
+    assert "UNLEDGERED_INVENTORY_FIGURE" in codes, codes
+
+
+def test_an_unmeasured_design_judgement_reaches_the_report() -> None:
+    """checklist.py records these in its own validation.warnings, which nothing downstream
+    reads -- this repo's documented failure mode of a warning that reaches a file and no
+    human."""
+    checklist = {
+        **_VALID_CHECKLIST,
+        "validation": {
+            "status": "valid",
+            "errors": [],
+            "warnings": ["UNVERIFIED_MEASUREMENT: mobile_readable is scored 'fail' but verified_by is 'not_possible'"],
+        },
+    }
+    artifacts = _compose_artifacts(_VALID_INVENTORY)
+    artifacts["checklist.json"] = checklist
+    code, report, err = _run_compose(_make_artifact_dir(artifacts))
+    assert report is not None, err
+    codes = [w["code"] for w in report["validation"]["warnings"]]
+    assert "UNVERIFIED_MEASUREMENT" in codes, codes
+
+
+def test_both_renderers_order_the_numbers_sections_the_same_way() -> None:
+    """Two renderers over one artifact set must not disagree about what comes first either;
+    that is the same drift in a quieter costume."""
+    recon = {
+        **_VALID_RECONCILIATION,
+        "relations": [dict(_EXCEEDS_RELATION), dict(_CONTRADICTION_RELATION)],
+        "relations_proposed": 2,
+    }
+    report, d = _compose_from_reconciliation(recon)
+    md = report["report_markdown"]
+    code, html, err = run_script_raw("visualize.py", ["--dir", d, "--ungated"])
+    assert code == 0, err
+    limit, disagree = "Where the plan passes a stated limit", "Figures that disagree"
+    assert (md.index(limit) < md.index(disagree)) == (html.index(limit) < html.index(disagree)), (
+        "report.md and report.html order the two findings differently"
     )
