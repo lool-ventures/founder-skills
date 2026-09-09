@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 import os
 import re
 import sys
@@ -116,7 +115,6 @@ WARNING_SEVERITY: dict[str, str] = {
     # High — structural integrity violations
     "CORRUPT_ARTIFACT": "high",
     "MISSING_ARTIFACT": "high",
-    "UNLEDGERED_INVENTORY_FIGURE": "medium",
     "UNVERIFIED_MEASUREMENT": "medium",
     "STALE_ARTIFACT": "high",
     "SCHEMA_VIOLATION": "high",
@@ -187,7 +185,6 @@ WARNING_LABELS: dict[str, str] = {
     "FOUNDER_TEXT_TOKEN": "Internal Token In Report",
     "CORRUPT_ARTIFACT": "Corrupt Artifact",
     "MISSING_ARTIFACT": "Missing Artifact",
-    "UNLEDGERED_INVENTORY_FIGURE": "Figure Stated Only in Prose",
     "UNVERIFIED_MEASUREMENT": "Design Judgement Not Measured",
     "STALE_ARTIFACT": "Stale Artifact",
     "SCHEMA_VIOLATION": "Schema Violation",
@@ -421,23 +418,6 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
     for name in OPTIONAL_ARTIFACTS:
         if artifacts.get(name) is _CORRUPT:
             warnings.append(_warn("CORRUPT_ARTIFACT", f"Optional artifact could not be parsed: {name}"))
-
-    # UNLEDGERED_INVENTORY_FIGURE — a number that reached the report without the chain
-    unledgered = _unledgered_inventory_figures(artifacts.get("deck_inventory.json"), artifacts.get("ledger.json"))
-    if unledgered:
-        shown = "; ".join(unledgered[:5])
-        more = f" (and {len(unledgered) - 5} more)" if len(unledgered) > 5 else ""
-        warnings.append(
-            _warn(
-                "UNLEDGERED_INVENTORY_FIGURE",
-                f"figures stated only in slide prose, never extracted: {shown}{more}",
-                founder_message=(
-                    "Some numbers in this review were read off your slides as description rather "
-                    "than extracted as figures, so the arithmetic checks never saw them: "
-                    f"{shown}{more}. Treat those as unverified."
-                ),
-            )
-        )
 
     # 2. STALE_ARTIFACT — run_id mismatch across artifacts
     run_ids: dict[str, str] = {}
@@ -979,96 +959,6 @@ _DESIGN_GATE_REASONS: dict[str, str] = {
         "complete PDF gets them reviewed."
     ),
 }
-
-
-# A NUMERAL IN INVENTORY PROSE HAS NO ADVERSARY. The ledger / second-read / reconcile chain
-# reads `figures`; `content_summary` and `visuals` are free text that reaches slide reviews,
-# the checklist and the report uncorroborated. A number the ingesting agent read off a
-# rendered chart and wrote here is unfalsifiable by every later step -- which is the class
-# the numeric chain exists to stop.
-#
-# HEURISTIC, hence medium and acceptable. Known misses, stated rather than papered over:
-# `_NOT_A_CLAIM` also excludes bare percentages under 100 ("47% margin" -> 47) and
-# four-digit counts that look like years ("2,000 customers" -> 2000). That is the price of a
-# low false-positive rate, and a high-severity heuristic nobody can waive is how a guard
-# gets disabled wholesale.
-_PROSE_NUMERAL = re.compile(r"\b\d[\d,]*(?:\.\d+)?\s*(?:%|[KMB]\b|billion|million|thousand)?")
-_NOT_A_CLAIM = re.compile(r"^(?:19|20)\d{2}$|^[1-9]\d?$")
-
-
-def _prose_magnitude(match: str) -> float | None:
-    """The magnitude a prose numeral asserts, at full scale, or None if it is not one.
-
-    `_PROSE_NUMERAL` captures the scale suffix and the token then throws it away, which is
-    what made "1,500" and "$1.5M" look unrelated. The ledger records `value` at full scale
-    (its own schema says so), so putting the prose side on the same footing is what lets the
-    two be compared exactly -- rather than blanketing six magnitude bands per token, which
-    silenced a count against a percent and a count against a multiple.
-    """
-    digits = re.sub(r"[^\d.]", "", match)
-    if not digits or digits.count(".") > 1:
-        return None
-    try:
-        value = float(digits)
-    except ValueError:
-        return None
-    tail = match.strip().lower()
-    for suffix, factor in (
-        ("billion", 1e9),
-        ("million", 1e6),
-        ("thousand", 1e3),
-        ("b", 1e9),
-        ("m", 1e6),
-        ("k", 1e3),
-    ):
-        if tail.endswith(suffix):
-            value *= factor
-            break
-    # A 300-digit numeral in free text parses to `inf`, and `int(inf)` raises. Prose is
-    # written by a sub-agent off a deck; a producer must not die on its input.
-    return value if math.isfinite(value) else None
-
-
-def _unledgered_inventory_figures(inventory: Any, ledger: Any) -> list[str]:
-    """Numerals stated in inventory prose that never became a ledger figure.
-
-    NO LEDGER MEANS NO CHECK, not "nothing was extracted". `ledger.json` is optional, and
-    reading its absence as an empty extraction flagged every numeral in the deck and told
-    the founder their figures were unverified -- on a run where the check had no input at
-    all. A corrupt ledger is the same case, and is reported separately by its own cause.
-    """
-    # AN EMPTY FIGURE LIST IS ALSO "NO INPUT", and it is the LIKELIER shape: `ledger.py`
-    # accepts one and reconcile only refuses it above a numeral threshold, so a run the
-    # check cannot speak about usually still writes a file. Flagging everything on it is the
-    # same founder-facing harm as flagging everything on an absent file.
-    if not isinstance(ledger, dict) or not ledger.get("figures"):
-        return []
-    figures = [_as_dict(f) for f in _as_list(ledger.get("figures"))]
-    ledger_tokens = {re.sub(r"[^\d.]", "", str(f.get("raw", ""))) for f in figures}
-    ledger_tokens.discard("")
-    # The ledger's own full-scale numbers, which make a cross-scale comparison exact rather
-    # than a guess: "$1.5M" in the deck is `value: 1500000.0` here.
-    ledger_values = {float(v) for f in figures if isinstance(v := f.get("value"), int | float)}
-    found: list[str] = []
-    for raw_slide in _as_list(_as_dict(inventory).get("slides")):
-        slide = _as_dict(raw_slide)
-        # `headline` too: it is a required field, free text by the same argument, and where
-        # a deck's flagship number lives.
-        prose = " ".join(str(slide.get(k, "")) for k in ("headline", "content_summary", "visuals"))
-        for match in _PROSE_NUMERAL.findall(prose):
-            token = re.sub(r"[^\d.]", "", match)
-            if not token or _NOT_A_CLAIM.match(token):
-                continue
-            # SCALE-NAIVE ON BOTH SIDES, so compare across scales. Otherwise a ledger
-            # holding "$1.5M" as 1.5 does not match prose writing 1,500,000, and the check
-            # reports a figure the numeric chain does in fact hold.
-            magnitude = _prose_magnitude(match)
-            if token in ledger_tokens or (magnitude is not None and magnitude in ledger_values):
-                continue
-            entry = f"slide {slide.get('number')}: {match.strip()}"
-            if entry not in found:
-                found.append(entry)
-    return found
 
 
 def design_gate_reason(checklist: dict[str, Any] | None) -> str | None:
