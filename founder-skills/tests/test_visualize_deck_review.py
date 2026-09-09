@@ -1104,3 +1104,39 @@ def test_html_carries_the_same_coverage_counts_as_markdown() -> None:
     assert "108" in text, "the figure count never reaches the HTML"
     assert "49" in text, "the comparison count never reaches the HTML"
     assert "not a clean bill of health" in text, "the qualifier never reaches the HTML"
+
+
+_SIX_FAILING_IDS = (
+    "purpose_clear",
+    "headlines_carry_story",
+    "narrative_arc_present",
+    "strongest_proof_early",
+    "story_stands_alone",
+    "problem_quantified",
+)
+
+
+def test_every_failed_criterion_reaches_the_html() -> None:
+    """A FAIL the markdown reports must not be dropped by an HTML display cap.
+
+    Measured on a live run: report.html carried three attention items and omitted the
+    internal-consistency failure entirely, which report.md carried on three separate
+    channels. Cap what is SHOWN, never what is DELIVERED.
+    """
+    items = [
+        {
+            "id": cid,
+            "category": "Narrative Flow",
+            "label": f"Criterion {n}",
+            "status": "fail",
+            "evidence": f"EVIDENCE_MARKER_{n}",
+            "notes": f"fix {n}",
+        }
+        for n, cid in enumerate(_SIX_FAILING_IDS)
+    ]
+    d = _make_artifact_dir({**_all_artifacts(), "checklist.json": {"items": items}})
+    code, html, err = _run_viz(d)
+    assert code == 0, err
+    text = _visible_text(html)
+    missing = [n for n in range(len(_SIX_FAILING_IDS)) if f"EVIDENCE_MARKER_{n}" not in text]
+    assert not missing, f"failed criteria dropped from the HTML: {missing}"

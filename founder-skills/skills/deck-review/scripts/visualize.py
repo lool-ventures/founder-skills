@@ -553,10 +553,25 @@ def _key_findings(
             f'<div class="findings-subsection"><h3>What\'s strong</h3>{_render_items(strong, "finding-strong")}</div>'
         )
     if attention:
+        # A FAIL is a finding the founder is owed, not a display-budget line item. Cap what
+        # is SHOWN, never what is DELIVERED: the overflow goes behind a disclosure so the
+        # page stays scannable and nothing is dropped. report.md carries every one of these,
+        # and a finding in one renderer and not the other is a delivery defect.
+        #
+        # max_items is passed EXPLICITLY. The helper defaults to 3, so handing it a longer
+        # list without this silently re-caps and the overflow is lost twice over.
+        head, tail = attention[:5], attention[5:]
+        overflow = (
+            f"<details><summary>{len(tail)} more</summary>"
+            f"{_render_items(tail, 'finding-attention', max_items=len(tail))}</details>"
+            if tail
+            else ""
+        )
         parts.append(
             '<div class="findings-subsection">'
             "<h3>What needs attention</h3>"
-            f"{_render_items(attention, 'finding-attention')}"
+            f"{_render_items(head, 'finding-attention', max_items=len(head))}"
+            f"{overflow}"
             "</div>"
         )
     if actions:
