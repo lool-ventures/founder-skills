@@ -1224,7 +1224,10 @@ REFERENCES_CEILING: dict[str, int] = {
     # 50_124 -> 50_422 (design gate): checklist-criteria.md records that the gate covers
     # FOUR criteria, not five — slide_count_appropriate is arithmetic, not a visual
     # judgement, and stays scored whether or not anyone saw a rendered page.
-    "deck-review": 50_422,
+    # deck-review raised 50,422 -> 51,459 (+1,037 B) so the criteria reference states the
+    # two things the Design & Readability entries had stopped describing: the per-slide
+    # render gate, and verified_by on the four measurement criteria.
+    "deck-review": 51_459,
     # competitive-positioning +474 B: artifact-schemas.md documented the `startup_rank` RENDERING
     # convention but not its SENTINEL. `score_moats.py` stamps {"rank": -1, "total": 0} when the
     # startup is not_applicable on a dimension, and compose_report.py rendered it verbatim —

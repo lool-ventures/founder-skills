@@ -5694,3 +5694,107 @@ def test_an_unknown_verified_by_value_is_an_error_not_a_kept_string() -> None:
     )
     code, out, err = run_script_raw("checklist.py", ["--run-id", "T8"], stdin_data=json.dumps({"items": items}))
     assert "verified_by" in (out + err), (out, err)
+
+
+# --------------------------------------------------------------------------
+# The one-sided verdict must survive every step between the engine and the page.
+# The engine is guarded by test_reconcile.py; everything downstream of select()
+# was not, and a finding computed correctly but rendered nowhere is the exact
+# defect this whole surface was built to stop.
+# --------------------------------------------------------------------------
+
+_EXCEEDS_RELATION = {
+    "kind": "derived_ratio",
+    "operator": "difference",
+    "operands": ["appliances_fleet_2029", "appliances_fleet_2028"],
+    "computed": 371.0,
+    "rendered": "667 − 296 = 371  — more than the deck states a limit of 250 (Manufacturing capacity per year)",
+    "confidence": "high",
+    "verdict": "exceeds_stated_limit",
+    "expected_id": "manufacturing_capacity_annual",
+}
+
+
+_CONTRADICTION_RELATION = {
+    "kind": "contradiction",
+    "operator": "ratio",
+    "operands": ["net_revenue", "gross_volume"],
+    "computed": 0.018,
+    "rendered": "$9K \u00f7 $493K = 1.8%  \u2014 but the deck states 6.2% (take rate)",
+    "confidence": "high",
+    "verdict": "contradiction",
+    "expected_id": "take_rate",
+}
+
+
+def _reconciliation_with_exceeds(*, also_contradiction: bool = False) -> dict:
+    relations: list[dict] = [dict(_EXCEEDS_RELATION)]
+    if also_contradiction:
+        relations.append(dict(_CONTRADICTION_RELATION))
+    return {
+        **_VALID_RECONCILIATION,
+        "relations_proposed": len(relations),
+        "relations": relations,
+    }
+
+
+def _compose_from_reconciliation(reconciliation: dict, checklist: dict | None = None) -> tuple[dict, str]:
+    d = _make_artifact_dir(
+        {
+            "deck_inventory.json": _VALID_INVENTORY,
+            "stage_profile.json": _VALID_PROFILE,
+            "slide_reviews.json": _VALID_REVIEWS,
+            "checklist.json": checklist if checklist is not None else _VALID_CHECKLIST,
+            "reconciliation.json": reconciliation,
+        }
+    )
+    code, report, err = _run_compose(d)
+    assert report is not None, err
+    return report, d
+
+
+def test_the_exceeded_limit_reaches_report_md() -> None:
+    """A plan running past a stated ceiling must be rendered, and under its own heading --
+    the deck is not disagreeing with itself, so filing it under "figures that disagree"
+    would name the wrong problem."""
+    report, _ = _compose_from_reconciliation(_reconciliation_with_exceeds())
+    md = report["report_markdown"]
+    assert "Where the plan passes a stated limit" in md
+    assert "371" in md and "250" in md
+
+
+def test_the_exceeded_limit_reaches_report_html() -> None:
+    """report.md and report.html are two renderers over one artifact set."""
+    _, d = _compose_from_reconciliation(_reconciliation_with_exceeds())
+    code, html, err = run_script_raw("visualize.py", ["--dir", d, "--ungated"])
+    assert code == 0, err
+    assert "Where the plan passes a stated limit" in html
+    assert "371" in html
+
+
+def test_the_coverage_line_reports_an_exceeded_limit_in_its_own_words() -> None:
+    """Counting it as a disagreement would tell the founder their deck contradicts itself."""
+    prose = _load_prose_module()
+    line = prose.coverage_line(_reconciliation_with_exceeds(), lambda x: x)
+    assert "running past a limit" in line, line
+    assert "disagree" not in line, f"an exceeded limit is not a disagreement: {line!r}"
+
+
+def test_both_findings_are_reported_when_both_are_present() -> None:
+    """Neither may hide the other: they are independent facts about the deck."""
+    prose = _load_prose_module()
+    line = prose.coverage_line(_reconciliation_with_exceeds(also_contradiction=True), lambda x: x)
+    assert "disagree" in line, line
+    assert "running past a limit" in line, line
+
+
+def test_the_consistency_cross_check_fires_on_an_exceeded_limit() -> None:
+    """The criteria review calling the figures internally consistent, while the arithmetic
+    finds the plan needs more than the deck says can be built, is precisely the
+    two-methods-disagree case this note exists for -- it must not key on `contradiction`
+    alone."""
+    report, _ = _compose_from_reconciliation(_reconciliation_with_exceeds())
+    md = report["report_markdown"]
+    assert "the criteria review marked your figures internally consistent" in md, (
+        "the cross-check ignored the one-sided verdict"
+    )

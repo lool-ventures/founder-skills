@@ -147,6 +147,20 @@ the producer apply the gate.
 slides is arithmetic rather than a visual judgement, and the slide count is already
 known — so it is answerable whether or not anyone saw the deck.
 
+The gate also fires per slide: if any slide carries `visual_evidence_captured: false`
+in the inventory, the same four are forced to `not_applicable` whatever `input_quality`
+claims. A slide nobody rendered cannot support a design judgement.
+
+**These four take `verified_by`.** The status values say what you concluded; this says
+how you reached it — `measured` only when you directly observed the property with a tool
+that can observe it, `inferred` when you reasoned it from other evidence, `not_possible`
+when you had no way to observe it at all. Omitting it means unstated, which is not the
+same as `measured`. It exists because the four status values cannot express "I could not
+check this", so an agent without the means to measure something is otherwise forced to
+guess — and a guess and a measurement then look identical in the artifact. Scoring one
+of these `pass` or `fail` with `inferred` or `not_possible` is recorded as a warning; it
+is not an error, because a judgement reached by real reasoning is still worth having.
+
 ### `one_idea_per_slide`
 **Label:** One idea per slide
 **Pass:** Each slide communicates a single concept clearly.

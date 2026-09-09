@@ -1378,14 +1378,19 @@ def _section_numbers(
     # section computes it. When they disagree the report says so rather than quietly
     # preferring one — there is no adjudication rule yet, and inventing one here would
     # bury the more interesting fact that two methods reached different answers.
-    if contradictions and checklist is not None and not _is_stub(checklist):
+    # BOTH FINDING VERDICTS, not just `contradiction`. The criteria review calling the
+    # figures internally consistent while the arithmetic finds the plan needs more than the
+    # deck says can be built is the same two-methods-disagree case -- keying on one verdict
+    # let the other pass silently.
+    if (contradictions or exceeded) and checklist is not None and not _is_stub(checklist):
         for raw_item in _as_list(checklist.get("items")):
             item = _as_dict(raw_item)
             if item.get("id") == "numbers_consistent" and item.get("status") == "pass":
                 lines.append(
                     "> Note: the criteria review marked your figures internally consistent, "
-                    "while the arithmetic above found a disagreement. The two looked at the "
-                    "deck differently and reached different answers; both are shown.\n"
+                    "while the arithmetic above found something that does not hold. The two "
+                    "looked at the deck differently and reached different answers; both are "
+                    "shown.\n"
                 )
                 break
 
