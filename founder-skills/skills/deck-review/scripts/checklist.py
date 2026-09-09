@@ -188,6 +188,17 @@ _UNRENDERED_QUALITY = frozenset({"image_only", "partial"})
 # The other four stay gated. Word count is likewise knowable, which makes `minimal_text`
 # the tempting next one, but "big type, minimal paragraphs" is half a question about type
 # size — under-claiming is the safer error where a founder's score is concerned.
+_VERIFIED_BY_VALUES = frozenset({"measured", "inferred", "not_possible"})
+
+# WHICH CRITERIA REST ON SEEING SOMETHING. The design gate above keys on whether slides were
+# SEEN; this keys on whether a property was MEASURED. Different questions, and a run can
+# satisfy the first and fail the second -- the checklist sub-agent's tools are
+# Read/Write/Edit/Glob/Grep, which cannot render a phone viewport.
+#
+# Seeded from the visual design set because those are the four whose judgement rests on an
+# observation the assigned reviewer may be unable to make.
+_MEASUREMENT_DEPENDENT_IDS: frozenset[str]
+
 _DESIGN_CRITERIA_IDS = frozenset(
     {
         "one_idea_per_slide",
@@ -196,6 +207,9 @@ _DESIGN_CRITERIA_IDS = frozenset(
         "mobile_readable",
     }
 )
+
+
+_MEASUREMENT_DEPENDENT_IDS = frozenset(_DESIGN_CRITERIA_IDS)
 
 
 def _recompute_summary(items: list[dict[str, Any]]) -> dict[str, Any]:
@@ -397,6 +411,12 @@ def validate_checklist(items: list[dict[str, Any]]) -> tuple[dict[str, Any], lis
             errors.append(f"Duplicate checklist ID '{item_id}'")
             continue
         seen_ids.add(item_id)
+        vb = item.get("verified_by")
+        if vb is not None and vb not in _VERIFIED_BY_VALUES:
+            # An unknown value is an ERROR, not a kept string: a typo would otherwise read as
+            # a real claim about how the judgement was reached. Same shape as the status check.
+            errors.append(f"Item '{item_id}' has unknown verified_by '{vb}'")
+            continue
 
         status = item.get("status", "")
         if status not in VALID_STATUSES:
@@ -437,6 +457,8 @@ def validate_checklist(items: list[dict[str, Any]]) -> tuple[dict[str, Any], lis
             enriched_item["evidence"] = evidence
         if notes is not None:
             enriched_item["notes"] = notes
+        if item.get("verified_by") is not None:
+            enriched_item["verified_by"] = item["verified_by"]
         enriched.append(enriched_item)
 
     # Evidence is required for fail/warn items at checklist generation time.
@@ -469,6 +491,25 @@ def validate_checklist(items: list[dict[str, Any]]) -> tuple[dict[str, Any], lis
                 msg = f"{item['id']} has status 'pass' but no evidence"
                 print(f"Warning: {msg}", file=sys.stderr)
                 pass_evidence_warnings.append(msg)
+
+    # A MEASUREMENT CRITERION SCORED WITHOUT A MEASUREMENT. Warning, not gating: a
+    # `not_possible` FAIL reached by real reasoning is still information, and forcing it to
+    # not_applicable would discard it -- the same mistake already recorded above for
+    # slide_count_appropriate. What the founder gains is that a guess and a measurement stop
+    # looking identical in the artifact.
+    for item in enriched:
+        if (
+            item["id"] in _MEASUREMENT_DEPENDENT_IDS
+            and item["status"] in ("pass", "fail")
+            and item.get("verified_by") in ("inferred", "not_possible")
+        ):
+            msg = (
+                f"UNVERIFIED_MEASUREMENT: {item['id']} is scored '{item['status']}' but "
+                f"verified_by is '{item['verified_by']}' — the judgement rests on an "
+                "observation that was not made"
+            )
+            print(f"Warning: {msg}", file=sys.stderr)
+            pass_evidence_warnings.append(msg)
 
     # ONE summary implementation. This used to be a second, inline copy of
     # _recompute_summary's body; the two drifting apart is a whole bug class, and the

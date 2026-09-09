@@ -5629,3 +5629,67 @@ def test_a_number_that_reached_the_ledger_is_not_flagged() -> None:
     assert report is not None, err
     codes = [w["code"] for w in report["validation"]["warnings"]]
     assert "UNLEDGERED_INVENTORY_FIGURE" not in codes, codes
+
+
+def _run_checklist_items(items: list[dict]) -> dict:
+    code, out, err = run_script_raw("checklist.py", ["--run-id", "T8"], stdin_data=json.dumps({"items": items}))
+    assert code == 0, err
+    return json.loads(out)
+
+
+def test_a_measurement_criterion_scored_without_measurement_is_flagged() -> None:
+    """The four-value status enum forces an agent that cannot measure a property to guess,
+    and the output makes the guess indistinguishable from a measurement. The checklist
+    sub-agent's tools are Read/Write/Edit/Glob/Grep -- it cannot render a phone viewport,
+    yet `mobile_readable` asks it to judge one.
+    """
+    items = _make_checklist_items(
+        overrides={
+            "mobile_readable": {
+                "status": "fail",
+                "evidence": "text looks dense",
+                # REQUIRED for a fail. Without it the payload is rejected, `items` is
+                # written EMPTY, and the script still exits 0 -- so the assertions below
+                # would IndexError rather than fail usefully.
+                "notes": "Ship a phone layout or a phone-readable PDF.",
+                "verified_by": "not_possible",
+            }
+        }
+    )
+    result = _run_checklist_items(items)
+    assert any("UNVERIFIED_MEASUREMENT" in w for w in result["validation"]["warnings"]), result["validation"][
+        "warnings"
+    ]
+    scored = [i for i in result["items"] if i["id"] == "mobile_readable"][0]
+    assert scored["verified_by"] == "not_possible", "the field must survive enrichment"
+
+
+def test_a_measured_criterion_is_not_flagged() -> None:
+    """A criterion actually measured is exactly what the field exists to distinguish."""
+    items = _make_checklist_items(
+        overrides={
+            "mobile_readable": {
+                "status": "fail",
+                "evidence": "median 16px text renders at 3.1px on a 375px viewport",
+                "notes": "Reflow at device width.",
+                "verified_by": "measured",
+            }
+        }
+    )
+    result = _run_checklist_items(items)
+    assert not any("UNVERIFIED_MEASUREMENT" in w for w in result["validation"]["warnings"])
+
+
+def test_an_unknown_verified_by_value_is_an_error_not_a_kept_string() -> None:
+    """A typo must not read as a real claim about how the judgement was reached."""
+    items = _make_checklist_items(
+        overrides={
+            "mobile_readable": {
+                "status": "pass",
+                "evidence": "e",
+                "verified_by": "eyeballed",
+            }
+        }
+    )
+    code, out, err = run_script_raw("checklist.py", ["--run-id", "T8"], stdin_data=json.dumps({"items": items}))
+    assert "verified_by" in (out + err), (out, err)

@@ -142,6 +142,11 @@ file) — `checklist.py` applies deterministic Design-criteria gating from
 `fail`/`warn` `evidence` MUST include BOTH what the deck actually does
 (quote or describe the specific slide content) AND the best-practice
 principle it falls short of — the deck observation is not optional.
+On the four visual Design & Readability criteria, `verified_by` records how
+the judgement was reached: `measured` only when you directly observed the
+property with a tool that can observe it, `inferred` when you reasoned it
+from other evidence, `not_possible` when you had no way to observe it.
+Omitting it means unstated, which is not the same as `measured`.
 `notes` is the specific change the founder should make: imperative,
 concrete, particular to this deck, never a restatement of the criterion
 or a record of what you checked. Required on fail/warn; omit it entirely

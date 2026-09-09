@@ -907,7 +907,10 @@ SKILL_MD_CEILING: dict[str, int] = {
     # deck-review raised 102,786 -> 103,003 (+217 B) to state the third design-gate axis on
     # both prose sites: a slide the ingesting agent never rendered gates the visual criteria
     # whatever input_quality claims.
-    "deck-review": 103_003,
+    # deck-review raised 103,003 -> 103,337 (+334 B) for verified_by on the four measurement
+    # criteria: the status enum let an agent that could not observe a property score it
+    # anyway, and the artifact could not tell a guess from a measurement.
+    "deck-review": 103_337,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.

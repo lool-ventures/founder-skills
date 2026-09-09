@@ -19,6 +19,11 @@
           "category": {"type": "string"},
           "label": {"type": "string"},
           "status": {"type": "string", "enum": ["pass", "fail", "warn", "not_applicable"]},
+          "verified_by": {
+            "type": "string",
+            "enum": ["measured", "inferred", "not_possible"],
+            "description": "How this criterion's judgement was reached. 'measured' = the property was directly observed with a tool that can observe it. 'inferred' = reasoned from other evidence. 'not_possible' = the assigned reviewer had no way to observe it. Optional; ABSENCE MEANS UNSTATED, which is not the same as 'measured'."
+          },
           "evidence": {"type": "string"},
           "notes": {"type": "string"}
         }

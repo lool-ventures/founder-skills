@@ -1124,6 +1124,10 @@ State what is true of the DECK.
 Use your Write tool to write to OUTPUT_PATH the items array without a summary
 (the producer script computes the summary):
 {"items": [{"id": "purpose_clear", "status": "pass", "evidence": "...", "notes": "..."}, ...all 35 items...]}
+On the four visual Design & Readability criteria add `"verified_by"`: `"measured"` only
+when you directly observed the property with a tool that can observe it, `"inferred"` when
+you reasoned it from other evidence, `"not_possible"` when you had no way to observe it.
+Leaving it off means unstated, which is not the same as measured.
 All string values must be JSON-escaped (`\n` for line breaks, `\"` for embedded
 quotes); the file must parse with a strict JSON parser.
 Then return ONLY the receipt JSON in your final assistant message:
