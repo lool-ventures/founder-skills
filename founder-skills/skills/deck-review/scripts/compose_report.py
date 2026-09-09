@@ -115,6 +115,7 @@ WARNING_SEVERITY: dict[str, str] = {
     # High — structural integrity violations
     "CORRUPT_ARTIFACT": "high",
     "MISSING_ARTIFACT": "high",
+    "UNLEDGERED_INVENTORY_FIGURE": "medium",
     "STALE_ARTIFACT": "high",
     "SCHEMA_VIOLATION": "high",
     "MISSING_METADATA": "high",
@@ -184,6 +185,7 @@ WARNING_LABELS: dict[str, str] = {
     "FOUNDER_TEXT_TOKEN": "Internal Token In Report",
     "CORRUPT_ARTIFACT": "Corrupt Artifact",
     "MISSING_ARTIFACT": "Missing Artifact",
+    "UNLEDGERED_INVENTORY_FIGURE": "Figure Stated Only in Prose",
     "STALE_ARTIFACT": "Stale Artifact",
     "SCHEMA_VIOLATION": "Schema Violation",
     "MISSING_METADATA": "Missing Metadata",
@@ -230,7 +232,10 @@ REQUIRED_ARTIFACTS = [
     "checklist.json",
     "reconciliation.json",
 ]
-OPTIONAL_ARTIFACTS: list[str] = []  # No optional artifacts for deck review
+# OPTIONAL, deliberately. Absent, nothing fires -- every review predating the check stays
+# valid. Present, it joins the run_id parity loop, which is the point: a stale ledger would
+# otherwise clear the prose check by agreeing with nothing.
+OPTIONAL_ARTIFACTS: list[str] = ["ledger.json"]
 
 
 def _write_output(data: str, output_path: str | None, *, summary: dict[str, Any] | None = None) -> None:
@@ -381,6 +386,23 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
         meta = _as_dict(data.get("metadata"))
         if not isinstance(meta.get("run_id"), str) or not meta.get("run_id"):
             warnings.append(_warn("MISSING_METADATA", f"{name} has no metadata.run_id"))
+
+    # UNLEDGERED_INVENTORY_FIGURE — a number that reached the report without the chain
+    unledgered = _unledgered_inventory_figures(artifacts.get("deck_inventory.json"), artifacts.get("ledger.json"))
+    if unledgered:
+        shown = "; ".join(unledgered[:5])
+        more = f" (and {len(unledgered) - 5} more)" if len(unledgered) > 5 else ""
+        warnings.append(
+            _warn(
+                "UNLEDGERED_INVENTORY_FIGURE",
+                f"figures stated only in slide prose, never extracted: {shown}{more}",
+                founder_message=(
+                    "Some numbers in this review were read off your slides as description rather "
+                    "than extracted as figures, so the arithmetic checks never saw them: "
+                    f"{shown}{more}. Treat those as unverified."
+                ),
+            )
+        )
 
     # 2. STALE_ARTIFACT — run_id mismatch across artifacts
     run_ids: dict[str, str] = {}
@@ -922,6 +944,39 @@ _DESIGN_GATE_REASONS: dict[str, str] = {
         "complete PDF gets them reviewed."
     ),
 }
+
+
+# A NUMERAL IN INVENTORY PROSE HAS NO ADVERSARY. The ledger / second-read / reconcile chain
+# reads `figures`; `content_summary` and `visuals` are free text that reaches slide reviews,
+# the checklist and the report uncorroborated. A number the ingesting agent read off a
+# rendered chart and wrote here is unfalsifiable by every later step -- which is the class
+# the numeric chain exists to stop.
+#
+# HEURISTIC, hence medium and acceptable. Known misses, stated rather than papered over:
+# `_NOT_A_CLAIM` also excludes bare percentages under 100 ("47% margin" -> 47) and
+# four-digit counts that look like years ("2,000 customers" -> 2000). That is the price of a
+# low false-positive rate, and a high-severity heuristic nobody can waive is how a guard
+# gets disabled wholesale.
+_PROSE_NUMERAL = re.compile(r"\b\d[\d,]*(?:\.\d+)?\s*(?:%|[KMB]\b|billion|million|thousand)?")
+_NOT_A_CLAIM = re.compile(r"^(?:19|20)\d{2}$|^[1-9]\d?$")
+
+
+def _unledgered_inventory_figures(inventory: Any, ledger: Any) -> list[str]:
+    """Numerals stated in inventory prose that never became a ledger figure."""
+    ledger_tokens = {
+        re.sub(r"[^\d.]", "", str(_as_dict(f).get("raw", ""))) for f in _as_list(_as_dict(ledger).get("figures"))
+    }
+    ledger_tokens.discard("")
+    found: list[str] = []
+    for raw_slide in _as_list(_as_dict(inventory).get("slides")):
+        slide = _as_dict(raw_slide)
+        prose = " ".join(str(slide.get(k, "")) for k in ("content_summary", "visuals"))
+        for match in _PROSE_NUMERAL.findall(prose):
+            token = re.sub(r"[^\d.]", "", match)
+            if not token or _NOT_A_CLAIM.match(token) or token in ledger_tokens:
+                continue
+            found.append(f"slide {slide.get('number')}: {match.strip()}")
+    return found
 
 
 def design_gate_reason(checklist: dict[str, Any] | None) -> str | None:
@@ -1562,7 +1617,10 @@ def compose(
         artifacts[name] = _load_artifact(dir_path, name)
 
     artifacts_found = [n for n in all_names if artifacts[n] is not None and artifacts[n] is not _CORRUPT]
-    artifacts_missing = [n for n in all_names if artifacts[n] is None]
+    # REQUIRED only. An OPTIONAL artifact that is absent is not missing -- it is optional,
+    # and reporting it as missing makes a complete review look incomplete. Latent until
+    # deck-review had its first optional artifact.
+    artifacts_missing = [n for n in REQUIRED_ARTIFACTS if artifacts[n] is None]
 
     # Run validation
     warnings = validate_artifacts(artifacts)

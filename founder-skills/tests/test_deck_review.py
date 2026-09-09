@@ -1438,6 +1438,7 @@ def test_compose_severity_map_complete() -> None:
         # Composing with no stage gate is legitimate for a direct caller, but the founder
         # should know the stage their deck was graded at was never confirmed.
         "UNGATED_REVIEW",
+        "UNLEDGERED_INVENTORY_FIGURE",
     ]
     assert len(sev_map) == len(expected), f"expected {len(expected)} codes, got {len(sev_map)}"
     for code in expected:
@@ -5555,3 +5556,76 @@ def test_a_convention_difference_is_not_reported_as_unsettled() -> None:
     line = prose.coverage_line(recon, lambda s: s)
     assert "could not be settled" not in line, f"a settled agreement was reported as unsettled: {line!r}"
     assert "convention" in line, f"a settled agreement must still be reported: {line!r}"
+
+
+def test_a_number_stated_only_in_inventory_prose_is_flagged() -> None:
+    """A figure the ingesting agent derived from pixels and wrote into content_summary
+    reaches slide reviews, the checklist and the report without ever entering the numeric
+    chain -- the machinery built to catch exactly that class never sees it.
+    """
+    inv = {
+        **_VALID_INVENTORY,
+        "slides": [
+            {
+                "number": 4,
+                "headline": "Traction",
+                "content_summary": "Chart gridlines put Q3 at 47,000 accounts.",
+            }
+        ],
+    }
+    d = _make_artifact_dir(
+        {
+            "deck_inventory.json": inv,
+            "stage_profile.json": _VALID_PROFILE,
+            "slide_reviews.json": _VALID_REVIEWS,
+            "checklist.json": _VALID_CHECKLIST,
+            "reconciliation.json": _VALID_RECONCILIATION,
+            "ledger.json": {"figures": [], "metadata": {"run_id": "run-test"}},
+        }
+    )
+    code, report, err = _run_compose(d)
+    assert report is not None, err
+    codes = [w["code"] for w in report["validation"]["warnings"]]
+    assert "UNLEDGERED_INVENTORY_FIGURE" in codes, codes
+
+
+def test_a_number_that_reached_the_ledger_is_not_flagged() -> None:
+    """The check must not fire on prose that merely repeats a figure the chain already has,
+    or it becomes noise a founder learns to accept away."""
+    inv = {
+        **_VALID_INVENTORY,
+        "slides": [
+            {
+                "number": 4,
+                "headline": "Traction",
+                "content_summary": "The plan shows $1.5M for 2026.",
+            }
+        ],
+    }
+    d = _make_artifact_dir(
+        {
+            "deck_inventory.json": inv,
+            "stage_profile.json": _VALID_PROFILE,
+            "slide_reviews.json": _VALID_REVIEWS,
+            "checklist.json": _VALID_CHECKLIST,
+            "reconciliation.json": _VALID_RECONCILIATION,
+            "ledger.json": {
+                "figures": [
+                    {
+                        "id": "f1",
+                        "raw": "$1.5M",
+                        "value": 1500000.0,
+                        "slide": 4,
+                        "quote": "$1.5M",
+                        "label": "ARR 2026",
+                        "unit_kind": "money",
+                    }
+                ],
+                "metadata": {"run_id": "run-test"},
+            },
+        }
+    )
+    code, report, err = _run_compose(d)
+    assert report is not None, err
+    codes = [w["code"] for w in report["validation"]["warnings"]]
+    assert "UNLEDGERED_INVENTORY_FIGURE" not in codes, codes
