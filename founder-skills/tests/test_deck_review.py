@@ -5634,7 +5634,8 @@ def test_a_number_that_reached_the_ledger_is_not_flagged() -> None:
 def _run_checklist_items(items: list[dict]) -> dict:
     code, out, err = run_script_raw("checklist.py", ["--run-id", "T8"], stdin_data=json.dumps({"items": items}))
     assert code == 0, err
-    return json.loads(out)
+    parsed: dict = json.loads(out)
+    return parsed
 
 
 def test_a_measurement_criterion_scored_without_measurement_is_flagged() -> None:
