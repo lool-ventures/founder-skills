@@ -800,3 +800,109 @@ def test_the_no_figures_fuse_reads_the_field_production_writes() -> None:
 
     empty = {"slides": [{"slide_number": n, "content_summary": "Team photo and a logo"} for n in range(1, 9)]}
     assert rec._inventory_numerals(empty) == 0
+
+
+def _write(tmp_path, name: str, payload: dict) -> str:
+    path = tmp_path / name
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return str(path)
+
+
+_STANZA_LEDGER = {
+    "figures": [
+        {"id": "f37", "raw": "10", "value": 10.0, "slide": 19, "quote": "10 signed"},
+        {"id": "f38", "raw": "23", "value": 23.0, "slide": 19, "quote": "23 in talks"},
+        {"id": "f39", "raw": "67", "value": 67.0, "slide": 19, "quote": "7 to 67 active"},
+    ],
+    "metadata": {"run_id": "T3"},
+}
+
+
+def test_the_downgrade_stanza_is_printed_ready_to_copy(tmp_path) -> None:
+    """The interpretation step must not depend on hand-transcribed operand ids.
+
+    apply_downgrades matches a withdrawal on its exact (operator, operands, expected_id)
+    and rejects anything else outright, so a transcription slip costs a full re-dispatch.
+    """
+    recon = {
+        "status": "checked",
+        "figures_total": 2,
+        "figures_verified": 2,
+        "relations": [
+            {
+                "kind": "derived_ratio",
+                "operator": "sum",
+                "operands": ["f37", "f38"],
+                "expected_id": "f39",
+                "computed": 33.0,
+                "rendered": "10 + 23 = 33",
+                "confidence": "high",
+                "verdict": "contradiction",
+            }
+        ],
+        "suppressed": {},
+        "untested_claims": [],
+        "relations_proposed": 1,
+        "metadata": {"run_id": "T3"},
+    }
+    out = subprocess.run(
+        [
+            sys.executable,
+            SCRIPT,
+            "--print-downgrade-stanza",
+            _write(tmp_path, "reconciliation.json", recon),
+            "--ledger",
+            _write(tmp_path, "ledger.json", _STANZA_LEDGER),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert out.returncode == 0, out.stderr
+    stanza = json.loads(out.stdout)
+    assert len(stanza) == 1
+    assert stanza[0]["operator"] == "sum"
+    assert stanza[0]["operands"] == ["f37", "f38"]
+    assert stanza[0]["expected_id"] == "f39"
+    assert stanza[0]["class"] == "REPLACE_ME"
+    assert stanza[0]["reason"] == "REPLACE_ME"
+    assert stanza[0]["rendered"] == "10 + 23 = 33"
+    assert "10 signed" in json.dumps(stanza[0]["evidence"]), "the judge needs the quotes"
+
+
+def test_the_stanza_omits_relations_that_cannot_be_withdrawn(tmp_path) -> None:
+    """select() returns contradictions PLUS derived readings, and apply_downgrades rejects
+    a withdrawal targeting anything but a contradiction -- which fails the whole step."""
+    recon = {
+        "status": "checked",
+        "figures_total": 2,
+        "figures_verified": 2,
+        "relations": [
+            {
+                "kind": "derived_ratio",
+                "operator": "ratio",
+                "operands": ["f37", "f38"],
+                "computed": 0.43,
+                "rendered": "10 / 23 = 0.43",
+                "confidence": "high",
+                "verdict": "derived",
+            }
+        ],
+        "suppressed": {},
+        "untested_claims": [],
+        "relations_proposed": 1,
+        "metadata": {"run_id": "T3"},
+    }
+    out = subprocess.run(
+        [
+            sys.executable,
+            SCRIPT,
+            "--print-downgrade-stanza",
+            _write(tmp_path, "reconciliation.json", recon),
+            "--ledger",
+            _write(tmp_path, "ledger.json", _STANZA_LEDGER),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert out.returncode == 0, out.stderr
+    assert json.loads(out.stdout) == [], "a derived reading is not withdrawable"

@@ -881,6 +881,19 @@ how the slide was laid out, the second about how loose an approximation was mean
 This pass may only **withdraw**. It cannot add a finding, change a number, or turn a
 disagreement into an agreement.
 
+Build the contradiction list with the engine rather than by hand — it prints each one with
+the exact operator, operand ids and expected_id that a withdrawal must name, plus the quote
+and slide of every figure involved. Retyping those is how a withdrawal comes back matching
+nothing, which fails the step:
+
+```sh
+"$SCRIPTS/reconcile.py" --print-downgrade-stanza "$REVIEW_DIR/reconciliation.json" \
+  --ledger "$REVIEW_DIR/ledger.json"
+```
+
+Paste that output verbatim under `CONTRADICTIONS:` below. An empty array is printed when
+there is nothing to interpret, and that is a complete and correct answer.
+
 **Dispatch prompt template:**
 
 ```
@@ -913,8 +926,8 @@ When in doubt, keep it. A disagreement left in is reviewed by the founder, who k
 their own deck; one withdrawn here is never seen by anyone.
 
 CONTRADICTIONS:
-<for each: the rendered line, the operator, the operand ids, the expected_id, and the
-verbatim quote and slide number of every figure involved>
+<the printed stanza: each entry carries its rendered line, operator, operand ids,
+expected_id, and the quote and slide of every figure involved>
 
 Use your Write tool to write to OUTPUT_PATH:
 {

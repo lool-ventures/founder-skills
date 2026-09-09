@@ -900,7 +900,11 @@ SKILL_MD_CEILING: dict[str, int] = {
     # rescoped to "you never write a canonical artifact" across all 22 sites (W2 audit). The
     # instruction was always correct; the REASON given for it asserted the general claim P0-2
     # established is false — the main thread writes several canonical artifacts by heredoc.
-    "deck-review": 102_180,
+    # deck-review raised 102,180 -> 102,786 (+606 B) for the downgrade-stanza step: the
+    # interpretation dispatch used to ask the main thread to hand-transcribe each
+    # contradiction's operator, operand ids and expected_id, and a slip there fails the
+    # whole step. The engine prints them instead.
+    "deck-review": 102_786,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.

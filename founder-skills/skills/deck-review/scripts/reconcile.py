@@ -2131,8 +2131,69 @@ def _read_json(path: str, label: str) -> tuple[dict[str, Any] | None, str | None
     return data, None
 
 
+def _print_downgrade_stanza(recon_path: str, ledger_path: str) -> int:
+    """Print the interpretation pass's `downgrades` skeleton, ready to fill in.
+
+    READS ARTIFACTS, WRITES NOTHING. `apply_downgrades` matches a withdrawal on its exact
+    (operator, operands, expected_id) and rejects anything else, so the dispatch has to name
+    each contradiction precisely. The engine already holds those values; printing them
+    removes the transcription entirely. Quotes and slides ride along because the judgement
+    is made on the evidence, not on the signature.
+
+    CONTRADICTIONS ONLY. `select()` returns contradictions PLUS high-confidence derived
+    readings, and `apply_downgrades` refuses a target that is not a contradiction -- which
+    fails the whole step. Reads `relations` and never the suppressed counts, so it cannot
+    reach past `select()`.
+
+    NOTE the coupling: this is sound only while `select()` promotes EVERY contradiction. If
+    a cap is ever put on that promotion, this stanza and `apply_downgrades`' signature map
+    (built over all non-dropped computed relations) diverge silently.
+    """
+    recon, err = _read_json(recon_path, "reconciliation")
+    if err:
+        print(err, file=sys.stderr)
+        return 1
+    ledger, err = _read_json(ledger_path, "ledger")
+    if err:
+        print(err, file=sys.stderr)
+        return 1
+    by_id = {str(f.get("id")): f for f in (ledger or {}).get("figures", []) if isinstance(f, dict)}
+    stanza: list[dict[str, Any]] = []
+    for rel in (recon or {}).get("relations", []):
+        if not isinstance(rel, dict) or rel.get("verdict") != "contradiction":
+            continue
+        ids = [*rel.get("operands", []), rel.get("expected_id")]
+        stanza.append(
+            {
+                "operator": rel.get("operator"),
+                "operands": rel.get("operands"),
+                "expected_id": rel.get("expected_id"),
+                "class": "REPLACE_ME",
+                "reason": "REPLACE_ME",
+                "rendered": rel.get("rendered"),
+                "evidence": [
+                    {k: by_id[str(i)].get(k) for k in ("id", "raw", "slide", "quote")} for i in ids if str(i) in by_id
+                ],
+            }
+        )
+    # An empty stanza is exit 0: SKILL.md states that an empty `downgrades` array is a
+    # complete and correct answer, so a run with no contradictions is a success, not a
+    # failure. Non-zero is reserved for input this cannot read.
+    print(json.dumps(stanza, indent=2))
+    return 0
+
+
 def main() -> int:
     import argparse  # noqa: PLC0415
+
+    # A PRE-PASS, because this mode reads one artifact pair and writes nothing -- it cannot
+    # satisfy --second-read/--run-id, and it must run before the stdin check below.
+    if "--print-downgrade-stanza" in sys.argv:
+        pre = argparse.ArgumentParser(add_help=False)
+        pre.add_argument("--print-downgrade-stanza", required=True)
+        pre.add_argument("--ledger", required=True)
+        known, _unused = pre.parse_known_args()
+        return _print_downgrade_stanza(known.print_downgrade_stanza, known.ledger)
 
     ap = argparse.ArgumentParser(description="Verify a deck's numeric ledger and reconcile it against itself.")
     ap.add_argument("--ledger", required=True, help="ledger.json from LEDGER_EXTRACTION")
