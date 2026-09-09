@@ -27,6 +27,7 @@ from typing import Any, TypeGuard
 if os.path.dirname(os.path.abspath(__file__)) not in sys.path:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _notes  # noqa: E402
+import _reconciliation_prose  # noqa: E402
 import _thresholds  # noqa: E402
 
 # ---------------------------------------------------------------------------
@@ -106,6 +107,11 @@ def _write_output(data: str, output_path: str | None, *, summary: dict[str, Any]
 def _esc(text: Any) -> str:
     """Escape text for safe HTML embedding."""
     return html.escape(str(text), quote=True)
+
+
+def _html_emphasis(text: str) -> str:
+    """Bold, for the shared reconciliation prose. Escapes what it wraps."""
+    return f"<strong>{_esc(text)}</strong>"
 
 
 def _num(value: Any, default: float = 0.0) -> float:
@@ -1237,15 +1243,25 @@ def _numbers_section(reconciliation: dict[str, Any] | None) -> str:
     """
     if not _usable(reconciliation):
         return ""
+    # THE COVERAGE PROSE COMES FIRST, and it is built before the early return below: a run
+    # with no selected relation still owes the founder the counts. report.md has carried
+    # these sentences all along; this page carried none of them.
+    coverage = _reconciliation_prose.coverage_line(reconciliation, _html_emphasis, _esc)
+    untested = _reconciliation_prose.untested_claims_line(reconciliation, _html_emphasis, _esc)
     relations = [_as_dict(r) for r in _as_list(reconciliation.get("relations"))]
     # VERDICT, not `kind` — see the note in compose_report._section_numbers. The two
     # renderers must agree, and `kind` is the model's proposal, not the engine's finding.
     contradictions = [r for r in relations if r.get("verdict") == "contradiction"]
     derived = [r for r in relations if r.get("verdict") == "derived"]
-    if not contradictions and not derived:
+    if not contradictions and not derived and not coverage:
         return ""
 
     parts: list[str] = []
+    # Already carries markup from `_html_emphasis`/`_esc`; escaping again would show tags.
+    if coverage:
+        parts.append(f'<p class="coverage">{coverage}</p>')
+    if untested:
+        parts.append(f'<p class="coverage">{untested}</p>')
     if contradictions:
         rows = "".join(f'<li class="finding-fail">{_esc(r.get("rendered", ""))}</li>' for r in contradictions)
         parts.append(f"<h3>Figures that disagree</h3><ul>{rows}</ul>")

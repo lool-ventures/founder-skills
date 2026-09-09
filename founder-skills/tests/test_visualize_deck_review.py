@@ -15,6 +15,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -1049,3 +1050,57 @@ def test_visualize_ungated_still_renders() -> None:
     it just has to be said out loud."""
     rc, _, err = _run_viz(_make_artifact_dir(_all_artifacts()), ["--ungated"])
     assert rc == 0, err
+
+
+def _visible_text(html: str) -> str:
+    """Tag-stripped text of the page, as a reader sees it.
+
+    Script and style bodies are not founder-facing prose, so they are removed before the
+    text is examined -- a token that appears only inside a <script> has not reached anyone.
+    """
+    body = re.sub(r"<script.*?</script>", " ", html, flags=re.S)
+    body = re.sub(r"<style.*?</style>", " ", body, flags=re.S)
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", body))
+
+
+def test_html_carries_the_same_coverage_counts_as_markdown() -> None:
+    """report.html must not omit what report.md tells the founder.
+
+    Measured on a live run: the delivered report.html contained zero occurrences of the
+    figure count, the comparison count, and every coverage phrase report.md carried. The
+    two files are renderers over one artifact set, and a sentence in one and not the other
+    is the delivery defect this fleet has shipped before.
+    """
+    recon = {
+        "status": "checked",
+        "figures_total": 108,
+        "figures_verified": 108,
+        "relations_proposed": 49,
+        "relations": [
+            {
+                "kind": "derived_ratio",
+                "operator": "product",
+                "operands": ["a", "b"],
+                "computed": 1755000.0,
+                "rendered": "13 x $135K = 1,755,000",
+                "confidence": "high",
+                "verdict": "contradiction",
+            }
+        ],
+        "suppressed": {
+            "incomparable": 2,
+            "downgraded": 1,
+            "derived": 30,
+            "confirmation": 11,
+            "restatement": 1,
+        },
+        "untested_claims": [],
+        "metadata": {"run_id": "run-test"},
+    }
+    d = _make_artifact_dir({**_all_artifacts(), "reconciliation.json": recon})
+    code, html, err = _run_viz(d)
+    assert code == 0, err
+    text = _visible_text(html)
+    assert "108" in text, "the figure count never reaches the HTML"
+    assert "49" in text, "the comparison count never reaches the HTML"
+    assert "not a clean bill of health" in text, "the qualifier never reaches the HTML"

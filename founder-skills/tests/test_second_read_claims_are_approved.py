@@ -57,7 +57,7 @@ DECK_REVIEW = REPO_ROOT / "founder-skills" / "skills" / "deck-review"
 APPROVED: list[tuple[str, pathlib.Path, str, str]] = [
     (
         "coverage line, partial",
-        DECK_REVIEW / "scripts" / "compose_report.py",
+        DECK_REVIEW / "scripts" / "_reconciliation_prose.py",
         # Branch-specific on purpose. A bare "had their wording checked back against your
         # deck" is a SUBSTRING of the all-verified line below, so it would keep passing
         # while this branch drifted. Caught by mutating the branch and watching the suite
@@ -69,7 +69,7 @@ APPROVED: list[tuple[str, pathlib.Path, str, str]] = [
     ),
     (
         "coverage line, all verified",
-        DECK_REVIEW / "scripts" / "compose_report.py",
+        DECK_REVIEW / "scripts" / "_reconciliation_prose.py",
         "all of them had closely matching wording returned by a second pass over the same ",
         "founder",
     ),
@@ -293,6 +293,7 @@ _CLAIM_SURFACES = (
     DECK_REVIEW / "scripts" / "reconcile.py",
     DECK_REVIEW / "scripts" / "ledger.py",
     DECK_REVIEW / "scripts" / "_quote_match.py",
+    DECK_REVIEW / "scripts" / "_reconciliation_prose.py",
     DECK_REVIEW / "references" / "schemas" / "ledger.schema.json",
     DECK_REVIEW / "references" / "schemas" / "reconciliation.schema.json",
     REPO_ROOT / "founder-skills" / "agents" / "deck-review.md",
