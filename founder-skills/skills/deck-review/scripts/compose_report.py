@@ -309,7 +309,10 @@ def _founder_text_policy() -> Any:
 
 
 INCONCLUSIVE_SUPPRESSION_CLASSES = _reconciliation_prose.INCONCLUSIVE_SUPPRESSION_CLASSES
-"""Suppression classes the coverage line may describe as "could not be settled either way".
+"""Re-export. The set and its rationale live in `_reconciliation_prose`, which is what both
+renderers read; kept here so existing importers of this name keep working.
+
+Suppression classes the coverage line may describe as "could not be settled either way".
 
 A CLOSED SET, and the reason it is closed rather than an exclusion list: the sentence names a
 specific cause ("the two sides were not comparable, or the comparison was withdrawn on

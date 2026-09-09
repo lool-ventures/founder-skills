@@ -5494,3 +5494,64 @@ def test_the_unrendered_slide_reason_is_disclosed_not_silent() -> None:
     assert payload["gated_count"] == 4
     assert payload["reason"], "the coach is told design was gated but not why"
     assert "design" not in mod._scope_note(gated)
+
+
+def _load_prose_module() -> Any:
+    """Load _reconciliation_prose.py by path, same as the other standalone helpers."""
+    import importlib.util
+
+    if DECK_REVIEW_DIR not in sys.path:
+        sys.path.insert(0, DECK_REVIEW_DIR)
+    path = os.path.join(DECK_REVIEW_DIR, "_reconciliation_prose.py")
+    spec = importlib.util.spec_from_file_location("deck_review_prose_module", path)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["deck_review_prose_module"] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_unsettled_comparisons_are_reported_even_when_a_contradiction_exists() -> None:
+    """The branches were mutually exclusive, so one contradiction hid every inconclusive
+    comparison. Measured on a live run: 1 contradiction, 3 unsettled, and the report
+    mentioned none of the three -- one of which was the deck's most consequential number.
+    """
+    prose = _load_prose_module()
+    recon = {
+        "status": "checked",
+        "figures_total": 108,
+        "figures_verified": 108,
+        "relations_proposed": 49,
+        "relations": [{"verdict": "contradiction", "rendered": "x"}],
+        "suppressed": {
+            "incomparable": 2,
+            "downgraded": 1,
+            "derived": 30,
+            "confirmation": 11,
+            "restatement": 1,
+        },
+        "untested_claims": [],
+    }
+    line = prose.coverage_line(recon, lambda s: s)
+    assert "disagree" in line, "the contradiction must still lead"
+    assert "3" in line and "could not be settled" in line, (
+        f"the unsettled count vanished behind the contradiction branch: {line!r}"
+    )
+
+
+def test_a_convention_difference_is_not_reported_as_unsettled() -> None:
+    """convention_differs means the comparison RAN and the magnitudes AGREED; only a stated
+    convention differed. Reporting it as 'could not be settled' understates the deck."""
+    prose = _load_prose_module()
+    recon = {
+        "status": "checked",
+        "figures_total": 4,
+        "figures_verified": 4,
+        "relations_proposed": 2,
+        "relations": [],
+        "suppressed": {"convention_differs": 1, "confirmation": 1},
+        "untested_claims": [],
+    }
+    line = prose.coverage_line(recon, lambda s: s)
+    assert "could not be settled" not in line, f"a settled agreement was reported as unsettled: {line!r}"
+    assert "convention" in line, f"a settled agreement must still be reported: {line!r}"

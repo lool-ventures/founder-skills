@@ -119,7 +119,7 @@ def coverage_line(
     # here counted it twice and produced arithmetic a founder can see is impossible — "ran
     # 1", "1 could not be made", "of those, 2 could not be settled". Unsettled means
     # evaluated-but-inconclusive, so it must exclude what was never evaluated.
-    # ALLOW-LIST, not a deny-list. These three are the classes the sentence below is TRUE of:
+    # ALLOW-LIST, not a deny-list. These are the classes the sentence below is TRUE of:
     # two sides that could not be compared, or a comparison withdrawn on review. Written as
     # `key not in ("confirmation", "restatement", "dropped")`, every other suppression class
     # inherited their explanation -- measured on a live run, `suppressed: {"derived": 2}` told
@@ -161,6 +161,27 @@ def coverage_line(
         settled = ". That is what was checked, and the comparisons that ran held"
     else:
         settled = ". That is what was checked"
+    # ADDITIVE, NOT ALTERNATIVE. Written as another `elif`, a single contradiction suppressed
+    # the unsettled count entirely -- and a run carrying both is the normal case, not an edge
+    # one. The two facts are independent: what disagreed, and what could not be adjudicated.
+    # `dropped` is deliberately not in the inconclusive set: it counts comparisons refused
+    # before any arithmetic ran, is already excluded from `evaluated`, and reported on its
+    # own line above -- counting it here produced arithmetic a founder can see is impossible.
+    if inconclusive and disagreements:
+        settled += (
+            f". Separately, {emphasis(str(inconclusive))} could not be settled either way — "
+            "the two sides were not comparable, or the comparison was withdrawn on review"
+        )
+    # A SETTLED AGREEMENT, reported as one. `convention_differs` means the comparison ran and
+    # the magnitudes agreed; only the convention each side stated them under differed. It sat
+    # in the inconclusive set and so was described as a comparison that could not be made,
+    # which understates the deck.
+    convention = int(suppressed_counts.get("convention_differs", 0) or 0)
+    if convention:
+        settled += (
+            f". A further {emphasis(str(convention))} agreed on the figures and differed only "
+            "in the convention each side stated them under"
+        )
     # A NEW SENTENCE, not an appositive. Written as "— not that every number ...", this
     # qualifier parsed only after ". That is what was checked"; after every other branch
     # ending the "not that" clause had no head, and a founder read "the comparison was
