@@ -904,7 +904,10 @@ SKILL_MD_CEILING: dict[str, int] = {
     # interpretation dispatch used to ask the main thread to hand-transcribe each
     # contradiction's operator, operand ids and expected_id, and a slip there fails the
     # whole step. The engine prints them instead.
-    "deck-review": 102_786,
+    # deck-review raised 102,786 -> 103,003 (+217 B) to state the third design-gate axis on
+    # both prose sites: a slide the ingesting agent never rendered gates the visual criteria
+    # whatever input_quality claims.
+    "deck-review": 103_003,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.

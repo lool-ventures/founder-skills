@@ -313,7 +313,25 @@ def _apply_ai_gating(result: dict[str, Any], ai_company_status: str) -> dict[str
     return result
 
 
-def _apply_design_gating(result: dict[str, Any], input_format: str, input_quality: str = "") -> dict[str, Any]:
+def _every_slide_was_seen(inventory: dict[str, Any] | None) -> bool:
+    """False when any slide explicitly reports it was not rendered.
+
+    ABSENCE IS NOT DENIAL. The per-slide flag is optional and older inventories omit it, so
+    only an explicit `false` counts -- reading omission as "unseen" would gate design
+    criteria on every deck produced before the field existed.
+    """
+    slides = (inventory or {}).get("slides")
+    if not isinstance(slides, list):
+        return True
+    return not any(isinstance(s, dict) and s.get("visual_evidence_captured") is False for s in slides)
+
+
+def _apply_design_gating(
+    result: dict[str, Any],
+    input_format: str,
+    input_quality: str = "",
+    inventory: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Apply deterministic Design & Readability gating based on input_format.
 
     Force the 4 VISUAL Design & Readability criteria to not_applicable when there is no
@@ -330,9 +348,24 @@ def _apply_design_gating(result: dict[str, Any], input_format: str, input_qualit
     "pdf" and "pptx" render, and pass through unchanged.
     """
     quality = str(input_quality or "").lower()
-    if input_format not in _UNRENDERED_FORMATS and quality not in _UNRENDERED_QUALITY:
+    # A THIRD AXIS. `input_quality: good` asserts every page rendered; the per-slide flag
+    # asserts it per slide, and nothing compared them -- so a deck could claim good quality
+    # while carrying a slide the ingesting agent says it never saw, and all four design
+    # criteria were scored off it anyway.
+    every_slide_seen = _every_slide_was_seen(inventory)
+    if input_format not in _UNRENDERED_FORMATS and quality not in _UNRENDERED_QUALITY and every_slide_seen:
         return result
-    reason = f"input_format={input_format}" if input_format in _UNRENDERED_FORMATS else f"input_quality={quality}"
+    # The evidence string is PARSED downstream, not just displayed: compose_report's
+    # `design_gate_reason` reads the `input_` prefix and then a `format=`/`quality=` tail,
+    # and visualize.py keys its category charts on the same prefix. A reason outside that
+    # shape makes the disclosure vanish while the scope note still claims design was
+    # reviewed -- so the new reason wears the `quality=` shape deliberately.
+    if input_format in _UNRENDERED_FORMATS:
+        reason = f"input_format={input_format}"
+    elif quality in _UNRENDERED_QUALITY:
+        reason = f"input_quality={quality}"
+    else:
+        reason = "input_quality=slide_not_rendered"
 
     items: list[dict[str, Any]] = result.get("items", [])
     _force_not_applicable(items, _DESIGN_CRITERIA_IDS, f"Auto-gated: not_applicable — {reason}")
@@ -550,6 +583,7 @@ def main() -> None:
                 result,
                 inventory_data.get("input_format", ""),
                 inventory_data.get("input_quality", ""),
+                inventory_data,
             )
 
     out = json.dumps(result, indent=indent) + "\n"

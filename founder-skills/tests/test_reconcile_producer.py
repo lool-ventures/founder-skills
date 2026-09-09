@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import pathlib
 import subprocess
 import sys
 import tempfile
@@ -802,7 +803,7 @@ def test_the_no_figures_fuse_reads_the_field_production_writes() -> None:
     assert rec._inventory_numerals(empty) == 0
 
 
-def _write(tmp_path, name: str, payload: dict) -> str:
+def _write(tmp_path: pathlib.Path, name: str, payload: dict) -> str:
     path = tmp_path / name
     path.write_text(json.dumps(payload), encoding="utf-8")
     return str(path)
@@ -818,7 +819,7 @@ _STANZA_LEDGER = {
 }
 
 
-def test_the_downgrade_stanza_is_printed_ready_to_copy(tmp_path) -> None:
+def test_the_downgrade_stanza_is_printed_ready_to_copy(tmp_path: pathlib.Path) -> None:
     """The interpretation step must not depend on hand-transcribed operand ids.
 
     apply_downgrades matches a withdrawal on its exact (operator, operands, expected_id)
@@ -869,7 +870,7 @@ def test_the_downgrade_stanza_is_printed_ready_to_copy(tmp_path) -> None:
     assert "10 signed" in json.dumps(stanza[0]["evidence"]), "the judge needs the quotes"
 
 
-def test_the_stanza_omits_relations_that_cannot_be_withdrawn(tmp_path) -> None:
+def test_the_stanza_omits_relations_that_cannot_be_withdrawn(tmp_path: pathlib.Path) -> None:
     """select() returns contradictions PLUS derived readings, and apply_downgrades rejects
     a withdrawal targeting anything but a contradiction -- which fails the whole step."""
     recon = {

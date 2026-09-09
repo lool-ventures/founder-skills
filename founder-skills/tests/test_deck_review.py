@@ -4187,7 +4187,7 @@ _GATE_ROWS = [
 ]
 
 
-def _gated_checklist(fmt: str, quality: str) -> dict:
+def _gated_checklist(fmt: str, quality: str, inventory: dict | None = None) -> dict:
     import importlib.util
 
     spec = importlib.util.spec_from_file_location("ck_gate2", os.path.join(DECK_REVIEW_DIR, "checklist.py"))
@@ -4197,7 +4197,7 @@ def _gated_checklist(fmt: str, quality: str) -> dict:
     items = [{"id": i["id"], "status": "pass", "evidence": "e"} for i in ck.CHECKLIST_ITEMS]
     result, errors, _ = ck.validate_checklist(json.loads(json.dumps(items)))
     assert not errors, errors
-    gated: dict = ck._apply_design_gating(result, fmt, quality)
+    gated: dict = ck._apply_design_gating(result, fmt, quality, inventory)
     return gated
 
 
@@ -5451,3 +5451,46 @@ def test_deck_inventory_still_rejects_null_on_a_required_field(tmp_path: Path) -
     )
     assert result.returncode != 0, "a required field set to null must still be rejected"
     assert not os.path.exists(out_path)
+
+
+_UNRENDERED_SLIDE_INVENTORY = {
+    "input_format": "pdf",
+    "input_quality": "good",
+    "slides": [
+        {"number": 1, "headline": "A", "content_summary": "x", "visual_evidence_captured": True},
+        {"number": 2, "headline": "B", "content_summary": "y", "visual_evidence_captured": False},
+    ],
+}
+
+
+def test_an_unrendered_slide_gates_design_even_when_quality_says_good() -> None:
+    """`input_quality: good` asserts every page rendered; the per-slide flag asserts it per
+    slide. Nothing compared them, so the flag had no reader at all and four design criteria
+    were scored off a slide the ingesting agent says it never saw.
+
+    The reason is ORTHOGONAL to format and quality, which is why it is not a row in the
+    format/quality table -- ("pdf", "good") is that table's ungated control.
+    """
+    gated = _gated_checklist("pdf", "good", _UNRENDERED_SLIDE_INVENTORY)
+    design = [i for i in gated["items"] if i["id"] == "mobile_readable"][0]
+    assert design["status"] == "not_applicable", (
+        "a slide nobody rendered cannot support a design judgement, whatever input_quality claims"
+    )
+
+
+def test_the_unrendered_slide_reason_is_disclosed_not_silent() -> None:
+    """The evidence string is PARSED downstream by prefix. A reason outside the
+    `input_` + `quality=` shape makes the disclosure vanish, the scope note keep claiming
+    design was reviewed, and the coaching payload report design_reviewed: True -- with the
+    whole suite green. That silence is the failure mode this asserts against.
+    """
+    mod = _load_compose_report_module()
+    gated = _gated_checklist("pdf", "good", _UNRENDERED_SLIDE_INVENTORY)
+    assert mod.design_gate_reason(gated) == "quality:slide_not_rendered"
+    note = mod._unreviewed_design_note(gated)
+    assert note and "could not be rendered" in note[0], note
+    payload = mod._design_gate_payload(gated)
+    assert payload["design_reviewed"] is False
+    assert payload["gated_count"] == 4
+    assert payload["reason"], "the coach is told design was gated but not why"
+    assert "design" not in mod._scope_note(gated)

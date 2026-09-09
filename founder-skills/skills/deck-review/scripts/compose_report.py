@@ -908,6 +908,11 @@ _DESIGN_GATE_REASONS: dict[str, str] = {
         "deck to PDF from the original file — rather than scanning or screenshotting it — gets "
         "them reviewed."
     ),
+    "quality:slide_not_rendered": (
+        "At least one slide of this deck could not be rendered, so nothing here judges how the "
+        "deck *looks*: layout, typography, whitespace, or how it reads on a phone. Re-sending the "
+        "deck as a complete PDF gets them reviewed."
+    ),
     "quality:partial": (
         "Not every page of this deck could be read, so nothing here judges how the deck *looks*: "
         "layout, typography, whitespace, or how it reads on a phone. Re-sending the deck as a "
