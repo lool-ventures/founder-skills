@@ -908,15 +908,17 @@ SKILL_MD_CEILING: dict[str, int] = {
     # learned to avoid the refusal. ledger.py now reads spelled-out cardinals through
     # `numeral_form`, so the instruction and the validator agree; without the sentence the model
     # keeps choosing between the two failures, and neither records what the deck says.
-    # deck-review 102,508 -> 104,641 (+2133): the PowerPoint conversion block tries three converters
-    # instead of one — LibreOffice (any OS), then Keynote on macOS, then PowerPoint over COM on
-    # Windows — each only where it is installed, and falls through to the text-only path otherwise.
-    # Claude Code hosts are laptops, and a laptop without LibreOffice is the common case; measured on
-    # a Mac, the whole design category was gated to not_applicable with Keynote sitting in
-    # /Applications. Two of the three are inline scripts (AppleScript, PowerShell), which is where
-    # the bytes are: a converter the skill only names, without the invocation, is one the model
-    # improvises — and the improvised Keynote script is what failed on the run that measured this.
-    "deck-review": 104_641,
+    # deck-review 102,508 -> 103,781 (+1,273): the PowerPoint conversion block tries two converters
+    # instead of one — LibreOffice (any OS, now including the default Windows install path), then
+    # Keynote on macOS — each only where it is installed, and falls through to the text-only path
+    # otherwise. Claude Code hosts are laptops, and a laptop without LibreOffice is the common case;
+    # measured on a Mac, the whole design category was gated to not_applicable with Keynote sitting
+    # in /Applications. The Keynote path is an inline AppleScript, which is where the bytes are: a
+    # converter the skill only names, without the invocation, is one the model improvises — and the
+    # improvised Keynote script is what failed on the run that measured this. A PowerPoint-over-COM
+    # branch for Windows was written and then dropped before merge: nothing in CI can exercise a
+    # Windows host, so it would have shipped unvouched-for. It is a follow-up once it can be measured.
+    "deck-review": 103_781,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.

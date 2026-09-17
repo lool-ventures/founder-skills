@@ -17,21 +17,19 @@ deck: the founder count, the patent count and the CEO's tenure never reached the
 section in either run. They are now recorded exactly as printed and checked like any other
 figure, so "three organizations" on one slide can be held against "3 customers" on another.
 
-**A PowerPoint deck gets its design reviewed on a laptop without LibreOffice.** The review
+**A PowerPoint deck gets its design reviewed on a Mac without LibreOffice.** The review
 converts `.pptx` to PDF so it can see the slides; until now only LibreOffice could do that, and
-without it the five design criteria were silently set aside. It now also uses Keynote on a Mac
-and PowerPoint on Windows, whichever is installed, and still falls back to the text-only review
-when none of the three is present.
+without it the five design criteria were silently set aside. It now also uses Keynote when it is
+installed, and still falls back to the text-only review when neither is present.
 
 ### Added
 
-- **deck-review:** Step 2's PowerPoint conversion tries three converters in order, each only
+- **deck-review:** Step 2's PowerPoint conversion tries two converters in order, each only
   where it is installed — LibreOffice (any OS, now including the default Windows install path),
-  Keynote via AppleScript on macOS, PowerPoint via COM on Windows — and reports `convert-failed`
-  with the converter's own error when the one it found breaks. A host with none of them takes
-  the existing text-only path unchanged. The Keynote path is measured on a real run; the
-  PowerPoint path follows Microsoft's documented `Presentations.Open` / `SaveAs(…, ppSaveAsPDF)`
-  automation and has not been exercised on a Windows host by the author.
+  then Keynote via AppleScript on macOS — and reports `convert-failed` with the converter's own
+  error when the one it found breaks. A host with neither takes the existing text-only path
+  unchanged. The Keynote path is measured on a real run. A PowerPoint-over-COM converter for
+  Windows is deferred until it can be exercised on a Windows host.
 
 ### Fixed
 
@@ -41,8 +39,9 @@ when none of the three is present.
   record every number the deck states, and the slide's own string IS the words. The shared numeric
   grammar in `reconcile.py` now reads a spelled-out cardinal (below a thousand; "a hundred",
   "twenty-five", "three million" with the scale word left for the existing suffix table) wherever
-  a raw string prints no digit, so precision, scale, range and approximation checks see "3" where
-  the slide printed "three" while the founder-facing text keeps the words. A raw with no
+  a raw string prints no digit, so precision, scale, range, bound and approximation checks see
+  "3" where the slide printed "three" while the founder-facing text keeps the words: "over ten"
+  is the floor "over 10" is, and "three years" names its unit as "3 years" does. A raw with no
   magnitude at all ("about", "TBD", the ordinal "a fourth") is still refused.
 - **deck-review:** the LEDGER_EXTRACTION dispatch and the agent body now say so explicitly —
   record a spelled-out count with the words as printed, never skip it, never retype it as digits.

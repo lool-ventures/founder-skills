@@ -300,7 +300,7 @@ resolves against the shell's cwd, which has already moved once underneath us.
 
 **Convert a PowerPoint deck to PDF before reading it.** Design & Readability are scored from
 what a reader SEES, and only a rendered page gives you that. The block tries LibreOffice, then
-Keynote (macOS), then PowerPoint (Windows), each only where it is installed. Today `.pptx`/`.ppt` are binary
+Keynote on macOS, each only where it is installed. Today `.pptx`/`.ppt` are binary
 and Read refuses them outright, so without this the slides are invisible — but do not treat
 that as the reason: if some future Read does open PowerPoint, still convert unless it returns
 actual page images, because text and structure without layout cannot support a design score.
@@ -313,16 +313,14 @@ case "$DECK_SRC" in
   *.pptx|*.PPTX|*.ppt|*.PPT)
     DECK_READ="no-converter"
     B="$(basename "$DECK_SRC")"; PDF_OUT="$STAGING_DIR/${B%.*}.pdf"
-    # Three converters, tried in this order and each ONLY when it is installed: LibreOffice
-    # on any OS, Keynote on macOS, PowerPoint over COM on Windows. A host with none of them
-    # takes the text-only path below unchanged.
+    # Two converters, tried in this order and each ONLY when it is installed: LibreOffice
+    # on any OS, then Keynote on macOS. A host with neither takes the text-only path below
+    # unchanged.
     for c in libreoffice soffice /Applications/LibreOffice.app/Contents/MacOS/soffice \
              "/c/Program Files/LibreOffice/program/soffice.exe" "${PROGRAMFILES:-}/LibreOffice/program/soffice.exe"; do
       command -v "$c" >/dev/null 2>&1 && { SOFFICE="$c"; CONVERTER="libreoffice"; break; }
     done
     if [ -z "$CONVERTER" ] && [ -d /Applications/Keynote.app ]; then CONVERTER="keynote"; fi
-    if [ -z "$CONVERTER" ] && command -v reg.exe >/dev/null 2>&1 \
-       && reg.exe query 'HKCR\PowerPoint.Application' >/dev/null 2>&1; then CONVERTER="powerpoint"; fi
     case "$CONVERTER" in
       libreoffice)
         # -env:UserInstallation is REQUIRED: $HOME is read-only, so profile creation
@@ -347,16 +345,6 @@ on run argv
   end tell
 end run
 KEYNOTE_EOF
-        ;;
-      powerpoint)
-        # PowerPoint over COM (ppSaveAsPDF = 32). COM wants Windows-native paths; cygpath is
-        # what Git Bash, Claude Code's shell on Windows, provides for that.
-        SRC_W="$(cygpath -w "$DECK_SRC" 2>/dev/null || printf '%s' "$DECK_SRC")"
-        DST_W="$(cygpath -w "$PDF_OUT" 2>/dev/null || printf '%s' "$PDF_OUT")"
-        powershell.exe -NoProfile -NonInteractive -Command "
-          \$app = New-Object -ComObject PowerPoint.Application
-          \$pres = \$app.Presentations.Open('$SRC_W', -1, 0, 0)
-          \$pres.SaveAs('$DST_W', 32); \$pres.Close(); \$app.Quit()" 2>&1 | tail -3
         ;;
     esac
     if [ -s "$PDF_OUT" ]; then
