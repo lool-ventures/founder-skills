@@ -1601,9 +1601,50 @@ def test_a_spelled_out_count_is_bounded_like_its_digit_form() -> None:
     assert detect_bound("about three", "design partners") == "approximate"
     assert detect_bound("about 3", "design partners") == "approximate"
     assert detect_bound("about", "design partners") is None
-    assert (
-        detect_bound("over three", "design partners") is None
-    )  # the leading-word bound grammar wants a digit; unchanged
+
+
+@pytest.mark.parametrize(
+    ("words", "digits", "expected"),
+    [
+        ("over ten", "over 10", "at_least"),
+        ("more than three", "more than 3", "at_least"),
+        ("at least twenty-five", "at least 25", "at_least"),
+        ("under ten", "under 10", "at_most"),
+        ("fewer than three", "fewer than 3", "at_most"),
+        ("up to a hundred", "up to 100", "at_most"),
+        ("three+", "3+", "at_least"),
+        ("≈three", "≈3", "approximate"),
+        ("~ fifteen years", "~ 15 years", "approximate"),
+    ],
+)
+def test_every_bound_grammar_reads_a_spelled_out_count_like_its_digit_form(
+    words: str, digits: str, expected: str
+) -> None:
+    """Parity across ALL the `raw` grammars, not just the approximation path.
+
+    A half-converted `detect_bound` is what produced the defect: `_parsed_magnitude` admitted
+    "over ten" while the leading-word bound grammars still wanted a literal digit, so "Over ten
+    enterprise pilots" reached `reconcile` as an EXACT 10 and a per-region breakdown summing to
+    12 was shown to the founder as a contradiction. Every grammar must agree with its digit
+    form, and a grammar that reads one and not the other is the bug, whichever way round.
+    """
+    from reconcile import detect_bound
+
+    assert detect_bound(digits, "pilots") == expected
+    assert detect_bound(words, "pilots") == detect_bound(digits, "pilots")
+
+
+def test_a_spelled_out_duration_names_its_unit() -> None:
+    """`_denominator_noun` reads the words too: "three years" is per YEAR, not "per period"."""
+    from reconcile import DURATION, _denominator_noun
+
+    def duration(raw: str, value: float) -> Figure:
+        return Figure(id="d", value=value, raw=raw, unit_kind=DURATION, label="payback period", slide=1, quote="")
+
+    assert _denominator_noun(duration("three years", 3)) == "year"
+    assert _denominator_noun(duration("3 years", 3)) == "year"
+    assert _denominator_noun(duration("Fifteen years", 15)) == "year"
+    assert _denominator_noun(duration("six months", 6)) == "month"
 
 
 def test_a_spelled_out_range_is_a_range() -> None:

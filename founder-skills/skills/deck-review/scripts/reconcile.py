@@ -645,16 +645,24 @@ def detect_bound(raw: str, label: str, quote: str = "") -> str | None:
     never manufacture one -- which is the direction this whole module errs in.
     """
     raw, label, quote = raw or "", label or "", quote or ""
+    # Every grammar that wants a digit reads the numeral form, so "over ten" is the floor
+    # that "over 10" is. Half-converting this function is what turned "Over ten enterprise
+    # pilots" into an EXACT 10: `_parsed_magnitude` admitted the words while the bound
+    # grammars below still searched the unconverted string, found no digit, and the figure
+    # reached `reconcile` unbounded -- the false-contradiction direction against a per-region
+    # breakdown summing to 12. The QUOTE path keeps the printed `raw`: it locates the
+    # figure's own string verbatim inside the quote, and the quote prints the words.
+    numeric = numeral_form(raw)
     votes: set[str] = set()
-    if _PLUS_RE.search(raw):
+    if _PLUS_RE.search(numeric):
         votes.add("at_least")
-    if _LEAD_AT_MOST.search(raw):
+    if _LEAD_AT_MOST.search(numeric):
         votes.add("at_most")
-    if _LEAD_AT_LEAST.search(raw):
+    if _LEAD_AT_LEAST.search(numeric):
         votes.add("at_least")
-    if _LEAD_AT_LEAST_WORDS.search(raw):
+    if _LEAD_AT_LEAST_WORDS.search(numeric):
         votes.add("at_least")
-    if _LEAD_AT_MOST_WORDS.search(raw):
+    if _LEAD_AT_MOST_WORDS.search(numeric):
         votes.add("at_most")
     if _AT_MOST_WORDS.search(label):
         votes.add("at_most")
@@ -680,9 +688,9 @@ def detect_bound(raw: str, label: str, quote: str = "") -> str | None:
     # The LABEL is deliberately exempt: a label is prose ABOUT the figure, so "about 100
     # customers" as a label qualifies the figure it describes whether or not the label
     # itself repeats the number. `raw` is supposed to BE the figure's printed string.
-    raw_word_binds = bool(_APPROX_WORDS.search(raw) and _NUM_RE.search(numeral_form(raw)))
+    raw_word_binds = bool(_APPROX_WORDS.search(numeric) and _NUM_RE.search(numeric))
     if (
-        _approx_symbol_marks_this_figure(raw)
+        _approx_symbol_marks_this_figure(numeric)
         or raw_word_binds
         or _APPROX_WORDS.search(label)
         or _approx_symbol_marks_this_figure_in_quote(raw, quote)
@@ -1104,8 +1112,11 @@ def _denominator_noun(den: Figure) -> str:
     error, and the two are not worth trading.
     """
     if den.unit_kind == DURATION:
-        match = _NUM_RE.search(den.raw or "")
-        tail = (den.raw or "")[match.end() :].strip().lower() if match else ""
+        # Read through `numeral_form`: "three years" names the same unit "3 years" does, and
+        # a rate over the spelled duration otherwise rendered "$1.33M per period".
+        text = numeral_form(den.raw or "")
+        match = _NUM_RE.search(text)
+        tail = text[match.end() :].strip().lower() if match else ""
         for unit in ("month", "year", "quarter", "week", "day"):
             if tail.startswith(unit):
                 return unit
