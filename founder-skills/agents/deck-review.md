@@ -76,6 +76,9 @@ deck does not state. Two rules carry the weight:
   `raw` keeps the slide's own string and the producer checks the two against each
   other, so a scale slip is caught rather than silently multiplying every later
   calculation by a thousand.
+  A count the slide spells out — "three design partners", "Fifteen years" — is a
+  number the deck states: record `value: 3` with `raw: "three"`, words as printed.
+  The producer reads the words; a spelled-out count is neither skipped nor retyped.
 - **`quote` is verbatim.** A second reader, who never sees your ledger, looks for that
   wording in the same extracted deck text. A quote that is not found there at all — one
   you composed, summarised, or built out of a chart you were reading — is dropped from the
