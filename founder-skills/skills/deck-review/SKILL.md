@@ -341,15 +341,22 @@ case "$DECK_SRC" in
         # Keynote imports PowerPoint and exports PDF. `launch` first: a Keynote left running
         # headless by an earlier attempt answers every document command with "doesn't
         # understand" (-1708) and only quitting it cures that — measured on a real run.
+        # So this block QUITS on both exits. Without that, the first conversion leaves the
+        # exact headless Keynote behind that breaks the second, and the founder is told a
+        # converter failed.
         osascript - "$DECK_SRC" "$PDF_OUT" <<'KEYNOTE_EOF' 2>&1 | tail -3
 on run argv
   tell application "Keynote"
     launch
     open (POSIX file (item 1 of argv))
     delay 5
-    if (count documents) is 0 then error "Keynote opened nothing; quit Keynote and retry"
+    if (count documents) is 0 then
+      quit
+      error "Keynote opened nothing; retry"
+    end if
     export document 1 to (POSIX file (item 2 of argv)) as PDF
     close document 1 saving no
+    quit
   end tell
 end run
 KEYNOTE_EOF

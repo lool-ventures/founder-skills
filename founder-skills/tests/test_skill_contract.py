@@ -942,7 +942,12 @@ SKILL_MD_CEILING: dict[str, int] = {
     # prose to the same body, so the merged size is larger than either branch anticipated and
     # neither branch's ceiling is correct for it. The value is the measured merged size, not a
     # carried-over one.
-    "deck-review": 106_434,
+    # deck-review raised 106,434 -> 106,663 (+229 B): the Keynote converter now quits on both
+    # exits. Its own comment recorded that a Keynote left running headless answers every
+    # document command with -1708 and only quitting cures it -- measured on a real run -- and
+    # the block then exited without quitting, so the first conversion in a session set up the
+    # exact failure the second would hit.
+    "deck-review": 106_663,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
