@@ -567,7 +567,7 @@ python3 "$SCRIPTS/review_inputs.py" "$REVIEW_DIR/inputs.json" --static "$REVIEW_
 ```
 
 **This is a STOP point — do not proceed to Step 4 until the founder responds.** Present the `review.html` path to the founder, then ask via `AskUserQuestion`: "I reviewed the page — do the values look right?"
-Options: `I reviewed the page — the values look right, proceed` / `I edited values and will upload the corrections file`
+Options: `I reviewed the page — the values look right, proceed` / `I edited values and will upload the corrections file` / `I'll tell you the corrections in chat`
 
 Generating the page and silently moving on defeats the human verification gate: the founder is the last check on extracted numbers before math runs on them. When they upload `corrections.json`:
 
@@ -575,7 +575,15 @@ Generating the page and silently moving on defeats the human verification gate: 
 python3 "$SCRIPTS/apply_corrections.py" <uploaded-file> --original "$REVIEW_DIR/inputs.json" --output-dir "$REVIEW_DIR"
 ```
 
-Then promote `corrected_inputs.json` to `inputs.json` (same as Step 3) and re-run the Step 3.5 validation before proceeding.
+When they state corrections in chat instead, run the same script with one `--set` per field — never edit `inputs.json` by hand, so the same coercion, path check and audit record apply whichever way they corrected. A value is read as a number, boolean or null where it parses as one and as text otherwise:
+
+```bash
+python3 "$SCRIPTS/apply_corrections.py" --set revenue.mrr=45000 --set cash.current_balance=1200000 --original "$REVIEW_DIR/inputs.json" --output-dir "$REVIEW_DIR"
+```
+
+A path that does not exist in `inputs.json` is refused rather than created, so a misheard field name stops here instead of becoming a new key.
+
+Either way, then promote `corrected_inputs.json` to `inputs.json` (same as Step 3) and re-run the Step 3.5 validation before proceeding.
 
 In Claude Code (local terminal), use **server mode**:
 

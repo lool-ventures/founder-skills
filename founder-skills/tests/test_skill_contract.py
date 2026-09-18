@@ -663,7 +663,11 @@ SKILL_MD_CEILING: dict[str, int] = {
     # rescoped to "you never write a canonical artifact" across all 22 sites (W2 audit). The
     # instruction was always correct; the REASON given for it asserted the general claim P0-2
     # established is false — the main thread writes several canonical artifacts by heredoc.
-    "financial-model-review": 80_780,
+    # financial-model-review 80,780 -> 81,462 (+682 B): Step 3.6 offered "I need to correct something --
+    # I'll say what in chat" on the upload lane and nothing implemented it. The route now exists
+    # (`apply_corrections.py --set PATH=VALUE`, same pipeline as the page download, so coercion and
+    # the audit record survive), and Path A names it as a third option with the command.
+    "financial-model-review": 81_462,
     # ic-sim SHRANK: the REQUIRED ic-dynamics.md read at Step 7 is deleted. Step 7 is a pure producer
     # pipe — compose_discussion.py derives discussion.json from the partners' own files and nothing
     # is authored by the main thread — so the read informed no decision while pulling a whole

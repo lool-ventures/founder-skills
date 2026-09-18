@@ -11,6 +11,14 @@ merging, and writes corrected_inputs.json + extraction_corrections.json.
 
 Usage:
     python apply_corrections.py <corrections.json> --original <inputs.json> --output-dir <dir>
+    python apply_corrections.py --set revenue.mrr=45000 [--set ...] --original <inputs.json> --output-dir <dir>
+
+The second form is the CHAT route: a correction the founder states in conversation rather than
+on the review page. It builds the same patch payload the page would download, computes the
+base_hash of the original itself (a model cannot do that by hand, which is why chat corrections
+previously had no route through this script), and then runs the unchanged pipeline -- so
+coercion, path validation and the audit record are identical whichever way the founder
+corrected. A value is read as JSON first (45000, true, null) and as text otherwise (series_a).
 
 Output:
     stdout: {"status": "completed"|"error", "correction_count": N, ...}
@@ -506,9 +514,60 @@ def _apply_patches(
 # ---------------------------------------------------------------------------
 
 
+def _payload_from_chat(sets: list[str], original: dict[str, Any]) -> dict[str, Any]:
+    """The patch payload the review page would have downloaded, built from `--set PATH=VALUE` pairs.
+
+    `expected_old` is left None: the stale-edit check exists because a page can be edited against a
+    file that has since changed, and a chat correction has no such page. Path validation still runs
+    downstream, so a misspelt path is refused rather than created. Returns {"errors": [...]} on a
+    malformed pair so the caller can emit it through the same channel as every other refusal.
+    """
+    changes: list[dict[str, Any]] = []
+    errors: list[dict[str, Any]] = []
+    for raw in sets:
+        if "=" not in raw:
+            errors.append(
+                {
+                    "code": "INVALID_SET",
+                    "message": f"--set expects PATH=VALUE, got {raw!r}",
+                    "field": raw,
+                    "layer": 0,
+                }
+            )
+            continue
+        path, text = raw.split("=", 1)
+        path = path.strip()
+        if not path:
+            errors.append(
+                {"code": "INVALID_SET", "message": f"--set has an empty path: {raw!r}", "field": raw, "layer": 0}
+            )
+            continue
+        try:
+            value: Any = json.loads(text)
+        except json.JSONDecodeError:
+            value = text
+        changes.append({"path": path, "type": "scalar", "expected_old": None, "new": value})
+    if errors:
+        return {"errors": errors}
+    return {
+        "base_hash": _canonical_hash(original),
+        "changes": changes,
+        "warning_overrides": [],
+        "ils_fields": {},
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Apply founder corrections")
-    parser.add_argument("corrections", help="Path to corrections JSON file")
+    parser.add_argument("corrections", nargs="?", help="Path to corrections JSON file (omit when using --set)")
+    parser.add_argument(
+        "--set",
+        dest="sets",
+        action="append",
+        default=[],
+        metavar="PATH=VALUE",
+        help="A correction stated in chat, e.g. revenue.mrr=45000. Repeatable. Mutually exclusive with a file.",
+    )
     parser.add_argument("--original", required=True, help="Path to original inputs.json")
     parser.add_argument("--output-dir", required=True, help="Directory for output files")
     parser.add_argument("--pretty", action="store_true", help="Pretty-print stdout JSON")
@@ -568,8 +627,35 @@ def main() -> None:
             sys.exit(1)
         return loaded
 
-    payload = _read_json_file(args.corrections, "corrections")
+    if bool(args.corrections) == bool(args.sets):
+        _emit(
+            {
+                "status": "error",
+                "errors": [
+                    {
+                        "code": "INVALID_INVOCATION",
+                        "message": (
+                            "Give either a corrections file or one or more --set PATH=VALUE, not both and not neither."
+                        ),
+                        "field": "",
+                        "layer": 0,
+                    }
+                ],
+            },
+            args,
+        )
+        sys.exit(1)
+
     original = _read_json_file(args.original, "original")
+    channel = "review_page"
+    if args.sets:
+        channel = "chat"
+        payload = _payload_from_chat(args.sets, original)
+        if "errors" in payload:
+            _emit({"status": "error", "errors": payload["errors"]}, args)
+            sys.exit(1)
+    else:
+        payload = _read_json_file(args.corrections, "corrections")
 
     # Detect payload shape: new (changes[]) vs legacy (corrected{})
     if "changes" in payload:
@@ -658,6 +744,7 @@ def main() -> None:
     audit = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "source_file": "inputs.json",
+        "channel": channel,
         "correction_count": len(corrections),
         "corrections": corrections,
         "override_count": len(overrides_added),

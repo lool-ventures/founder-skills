@@ -6440,6 +6440,123 @@ def test_compose_default_alive_breakeven_month_in_runway_table() -> None:
     )
 
 
+# === Step 3.6: a correction the founder states in chat goes through the same pipeline ===
+
+
+def _original_inputs_for_chat_corrections() -> dict[str, Any]:
+    return {
+        "company": {"company_name": "TestCo", "stage": "seed"},
+        "revenue": {"mrr": 40_000},
+        "cash": {"current_balance": 1_000_000, "monthly_net_burn": 50_000},
+    }
+
+
+def test_a_chat_correction_is_applied_through_apply_corrections_with_an_audit_record() -> None:
+    """Step 3.6 offered "I need to correct something -- I'll say what in chat" on the upload lane, and
+    nothing implemented it. `apply_corrections.py` requires a `base_hash` of the original, which a
+    model cannot compute by hand, so a chat correction had no route through the script that owns
+    coercion, validation and the audit record. `--set PATH=VALUE` builds the same payload the review
+    page would, hashes the original itself, and runs the unchanged pipeline.
+    """
+    original = _original_inputs_for_chat_corrections()
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as orig_f:
+        json.dump(original, orig_f)
+        orig_path = orig_f.name
+    with tempfile.TemporaryDirectory() as out_dir:
+        rc, data, stderr = run_script(
+            "apply_corrections.py",
+            [
+                "--set",
+                "revenue.mrr=45000",
+                "--set",
+                "cash.current_balance=1200000",
+                "--original",
+                orig_path,
+                "--output-dir",
+                out_dir,
+            ],
+        )
+        assert rc == 0, f"apply_corrections --set failed: {stderr}\n{data}"
+        assert data.get("status") == "completed", data
+        assert data.get("correction_count") == 2, data
+        with open(os.path.join(out_dir, "corrected_inputs.json"), encoding="utf-8") as f:
+            corrected = json.load(f)
+        assert corrected["revenue"]["mrr"] == 45_000
+        assert corrected["cash"]["current_balance"] == 1_200_000
+        assert corrected["cash"]["monthly_net_burn"] == 50_000, "an untouched field must survive"
+        with open(os.path.join(out_dir, "extraction_corrections.json"), encoding="utf-8") as f:
+            audit = json.load(f)
+        assert audit["channel"] == "chat", audit
+        by_path = {c["path"]: c for c in audit["corrections"]}
+        assert by_path["revenue.mrr"] == {"path": "revenue.mrr", "was": 40_000, "now": 45_000}
+    os.unlink(orig_path)
+
+
+def test_a_chat_correction_to_a_path_that_does_not_exist_is_refused() -> None:
+    """The same typo guard the page route has: a misspelt path must not create a new key."""
+    original = _original_inputs_for_chat_corrections()
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as orig_f:
+        json.dump(original, orig_f)
+        orig_path = orig_f.name
+    with tempfile.TemporaryDirectory() as out_dir:
+        rc, data, stderr = run_script(
+            "apply_corrections.py",
+            ["--set", "revenue.mrrr=45000", "--original", orig_path, "--output-dir", out_dir],
+        )
+        assert rc != 0, "a path that does not exist in the original must be refused"
+        assert data.get("status") == "error", data
+        assert not os.path.exists(os.path.join(out_dir, "corrected_inputs.json")), "refusal must write nothing"
+    os.unlink(orig_path)
+
+
+def test_a_chat_correction_and_a_corrections_file_cannot_be_mixed() -> None:
+    """Two sources of truth for one edit is how a correction gets applied twice or not at all."""
+    original = _original_inputs_for_chat_corrections()
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as orig_f:
+        json.dump(original, orig_f)
+        orig_path = orig_f.name
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as corr_f:
+        json.dump({"changes": []}, corr_f)
+        corr_path = corr_f.name
+    with tempfile.TemporaryDirectory() as out_dir:
+        rc, data, stderr = run_script(
+            "apply_corrections.py",
+            [corr_path, "--set", "revenue.mrr=1", "--original", orig_path, "--output-dir", out_dir],
+        )
+        assert rc != 0
+        assert data.get("status") == "error", data
+    os.unlink(orig_path)
+    os.unlink(corr_path)
+
+
+def test_a_chat_correction_value_is_parsed_as_json_then_as_text() -> None:
+    """45000 is a number, "seed" is a string, true is a boolean -- the founder says it, not the shell."""
+    original = _original_inputs_for_chat_corrections()
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as orig_f:
+        json.dump(original, orig_f)
+        orig_path = orig_f.name
+    with tempfile.TemporaryDirectory() as out_dir:
+        rc, data, stderr = run_script(
+            "apply_corrections.py",
+            [
+                "--set",
+                "company.stage=series_a",
+                "--set",
+                "revenue.mrr=45000.5",
+                "--original",
+                orig_path,
+                "--output-dir",
+                out_dir,
+            ],
+        )
+        assert rc == 0, f"{stderr}\n{data}"
+        with open(os.path.join(out_dir, "corrected_inputs.json"), encoding="utf-8") as f:
+            corrected = json.load(f)
+        assert corrected["company"]["stage"] == "series_a"
+        assert corrected["revenue"]["mrr"] == 45_000.5
+    os.unlink(orig_path)
+
+
 # === Fix D: apply_corrections.py neutral informational stderr for corrected payload ===
 
 
