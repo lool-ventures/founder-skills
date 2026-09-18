@@ -5,7 +5,102 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.12.0] - 2026-09-18 — The page you open now carries everything the review found
+
+### Highlights
+
+**Counts your deck spells out in words are now read.** "Three design partners", "six patent
+applications", "fifteen years on executive teams" — decks state their smallest and most
+checkable claims as words far more often than as digits, and the deck review either refused
+them (costing a retry) or, on the next run, left them out without saying so. Measured on a real
+deck: the founder count, the patent count and the CEO's tenure never reached the numbers
+section in either run. They are now recorded exactly as printed and checked like any other
+figure, so "three organizations" on one slide can be held against "3 customers" on another.
+
+**A deck given as a link is now in scope.** Paste a link to a hosted deck and the review runs.
+A public export is read as the slides; a login, consent or password page stops the review and
+asks for an export rather than trying to get past it. Previously a link was not recognised as
+a deck at all, so the review never started — measured on a hosted deck, the skill was never
+invoked and every line of its guidance was unreachable.
+
+**A plan that exceeds a limit the deck itself states is now a finding.** A deck planning 371
+new units a year against its own stated capacity of 250 could not be checked before: the
+comparison is an inequality, and the numbers check only knew equality, so the founder was told
+nothing. It now has a verdict for exactly this, with its own heading in both the markdown and
+HTML reports. It is refused rather than guessed when the stated ceiling is a percentage or a
+multiple, where the same comparison produced false findings.
+
+**The HTML report stopped losing findings.** It never carried the coverage counts — how many
+figures were read, how many comparisons ran, and the qualifier that a clean numbers check is
+not a clean bill of health — and it showed at most three "needs attention" items and dropped
+the rest without saying so. On a measured run the internal-consistency failure appeared on
+three channels in the markdown and nowhere in the HTML. It now shows five with the remainder
+behind a disclosure, and carries the same coverage sentences the markdown does.
+
+**A PowerPoint deck gets its design reviewed on a Mac without LibreOffice.** The review
+converts `.pptx` to PDF so it can see the slides; until now only LibreOffice could do that, and
+without it the five design criteria were silently set aside. It now also uses Keynote when it is
+installed, and still falls back to the text-only review when neither is present.
+
+### Added
+
+- **deck-review:** Step 2's PowerPoint conversion tries two converters in order, each only
+  where it is installed — LibreOffice (any OS, now including the default Windows install path),
+  then Keynote via AppleScript on macOS — and reports `convert-failed` with the converter's own
+  error when the one it found breaks. A host with neither takes the existing text-only path
+  unchanged. The Keynote path is measured on a real run. A PowerPoint-over-COM converter for
+  Windows is deferred until it can be exercised on a Windows host.
+- **deck-review:** a proposed comparison can declare a stated ceiling (`at_most`) and an annual
+  rate (`per: year`), so a capacity, a budget or a headcount cap can be checked against a plan.
+  The rate declaration is checked against the years the figures carry and refused when it
+  cannot be, so a wrong declaration suppresses a finding rather than manufacturing one.
+- **deck-review:** `verified_by` on the four measurement criteria (mobile readability and the
+  like). The reviewing agent cannot render a phone screen, and the status values had no way to
+  say "I could not check this", so a guess was indistinguishable from a measurement. A
+  criterion scored without measurement is now disclosed as reasoned rather than measured.
+
+### Changed
+
+- **deck-review:** the reconciliation `verdict` field gained a value, `exceeds_stated_limit`.
+  Anything switching on that field should expect it.
+- **deck-review:** a slide the ingesting agent never rendered no longer supports a design
+  score, whatever the overall input quality says. The four visual criteria are gated per slide,
+  and the report states the reason.
+- **deck-review:** when a run carries a contradiction, the count of comparisons that could not
+  be settled is still reported — previously the first fact suppressed the second, and on a
+  measured run the most consequential comparison in the deck went unmentioned. A comparison
+  whose magnitudes agreed and only the stated convention differed is no longer described as
+  unsettled; it gets its own sentence.
+- **deck-review:** the interpretation step's withdrawal skeleton is printed by the engine rather
+  than hand-transcribed. A transcription slip used to fail the step and cost a re-dispatch; it
+  cost two in one observed session.
+
+### Fixed
+
+- **deck-review:** the numeric ledger refused a figure whose printed string was a spelled-out count
+  ("Two", "Fifteen years") as "containing no number". The refusal was right about its reason —
+  the scale check had nothing to read — and wrong about the remedy: the extraction prompt says to
+  record every number the deck states, and the slide's own string IS the words. The shared numeric
+  grammar now reads a spelled-out cardinal (below a thousand; "a hundred",
+  "twenty-five", "three million" with the scale word left for the existing suffix table) wherever
+  a raw string prints no digit, so precision, scale, range, bound and approximation checks see
+  "3" where the slide printed "three" while the founder-facing text keeps the words: "over ten"
+  is the floor "over 10" is, and "three years" names its unit as "3 years" does. A raw with no
+  magnitude at all ("about", "TBD", the ordinal "a fourth") is still refused.
+- **deck-review:** the LEDGER_EXTRACTION dispatch and the agent body now say so explicitly —
+  record a spelled-out count with the words as printed, never skip it, never retype it as digits.
+  Without the instruction the extractor learns from one refusal to omit the figure on the next
+  run, which is the quieter of the two failures.
+- **deck-review:** the Keynote converter left Keynote running after export, which makes the next
+  conversion in the same session fail with "doesn't understand". It now quits on both exits.
+- **deck-review:** a criterion the design gate had set aside was also reported as scored without
+  measuring, in the same report; and the HTML captioned a partially rendered PDF as having
+  arrived as text. Both say the right thing now.
+- **deck-review:** corrections to the new comparison and coverage logic found before release:
+  an absent or corrupt ledger no longer flags every prose numeral; an unrecognised relation is
+  refused rather than defaulting to equality; a growth-convention pair can no longer be promoted
+  as exceeding a limit; and the checklist's internal-consistency cross-check now also fires
+  when the arithmetic finds a plan past a stated limit.
 
 ### Development
 
@@ -26,54 +121,12 @@ Contributor-facing only; nothing here changes what a founder installs or runs.
 These were the repository's 36 open code-scanning alerts (`py/redos`,
 `py/bad-tag-filter`).
 
-## [0.11.1] - 2026-09-18 — A number written in words is still a number
-
-### Highlights
-
-**Counts your deck spells out in words are now read.** "Three design partners", "six patent
-applications", "fifteen years on executive teams" — decks state their smallest and most
-checkable claims as words far more often than as digits, and the deck review either refused
-them (costing a retry) or, on the next run, left them out without saying so. Measured on a real
-deck: the founder count, the patent count and the CEO's tenure never reached the numbers
-section in either run. They are now recorded exactly as printed and checked like any other
-figure, so "three organizations" on one slide can be held against "3 customers" on another.
-
-**A PowerPoint deck gets its design reviewed on a Mac without LibreOffice.** The review
-converts `.pptx` to PDF so it can see the slides; until now only LibreOffice could do that, and
-without it the five design criteria were silently set aside. It now also uses Keynote when it is
-installed, and still falls back to the text-only review when neither is present.
-
-### Added
-
-- **deck-review:** Step 2's PowerPoint conversion tries two converters in order, each only
-  where it is installed — LibreOffice (any OS, now including the default Windows install path),
-  then Keynote via AppleScript on macOS — and reports `convert-failed` with the converter's own
-  error when the one it found breaks. A host with neither takes the existing text-only path
-  unchanged. The Keynote path is measured on a real run. A PowerPoint-over-COM converter for
-  Windows is deferred until it can be exercised on a Windows host.
-
-### Fixed
-
-- **deck-review:** `ledger.py` refused a figure whose printed string was a spelled-out count
-  ("Two", "Fifteen years") as "containing no number". The refusal was right about its reason —
-  the scale check had nothing to read — and wrong about the remedy: the extraction prompt says to
-  record every number the deck states, and the slide's own string IS the words. The shared numeric
-  grammar in `reconcile.py` now reads a spelled-out cardinal (below a thousand; "a hundred",
-  "twenty-five", "three million" with the scale word left for the existing suffix table) wherever
-  a raw string prints no digit, so precision, scale, range, bound and approximation checks see
-  "3" where the slide printed "three" while the founder-facing text keeps the words: "over ten"
-  is the floor "over 10" is, and "three years" names its unit as "3 years" does. A raw with no
-  magnitude at all ("about", "TBD", the ordinal "a fourth") is still refused.
-- **deck-review:** the LEDGER_EXTRACTION dispatch and the agent body now say so explicitly —
-  record a spelled-out count with the words as printed, never skip it, never retype it as digits.
-  Without the instruction the extractor learns from one refusal to omit the figure on the next
-  run, which is the quieter of the two failures.
-
 ### Contributors
 
-Both changes in this release were contributed by [@eladzaa](https://github.com/eladzaa) in [#7](https://github.com/lool-ventures/founder-skills/pull/7) — found by running the deck
-review twice on a real deck and noticing that the second run had learned to work around a
-guard rather than fail against it.
+The spelled-out-counts fix and the Keynote converter were contributed by
+[@eladzaa](https://github.com/eladzaa) in [#7](https://github.com/lool-ventures/founder-skills/pull/7) —
+found by running the deck review twice on a real deck and noticing that the second run had
+learned to work around a guard rather than fail against it.
 
 ## [0.11.0] - 2026-08-31 — Two instruments, one row, and a number nobody could see was wrong
 
