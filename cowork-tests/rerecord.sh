@@ -31,7 +31,7 @@ command -v cowork-harness >/dev/null || { echo "FATAL: cowork-harness not on PAT
 ver="$(cowork-harness --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
 [ -n "$ver" ] || { echo "FATAL: could not parse cowork-harness version"; exit 1; }
 echo "cowork-harness $ver"
-# FLOOR: >=3.5.0 with no upper bound. Recording is the one operation where the harness version is
+# FLOOR: >=3.6.0 with no upper bound. Recording is the one operation where the harness version is
 #   THIS HEADER WAS ONE MINOR BEHIND THE GATE when 2.3.0 was adopted (header said 2.1.0, gate required
 #   2.2) — the exact drift the next paragraph warns about, sitting unfixed in the file that warns about
 #   it. If you are here to change the floor, change all FOUR sites: this header, the numeric gate, its
@@ -254,8 +254,8 @@ major="${ver%%.*}"; minor="$(echo "$ver" | cut -d. -f2)"
 # and that test asserts its own pattern matched — so collapsing this to `[ "$major" -ge 3 ]` does not
 # simplify the gate, it makes the guard that watches the gate match nothing. It re-earns its keep the
 # moment the floor moves off a .0 — as it did at 3.2.0.
-{ [ "$major" -gt 3 ] || { [ "$major" -eq 3 ] && [ "$minor" -ge 5 ]; }; } \
-  || { echo "FATAL: need >=3.5.0 (have $ver) — see the floor note above"; exit 1; }
+{ [ "$major" -gt 3 ] || { [ "$major" -eq 3 ] && [ "$minor" -ge 6 ]; }; } \
+  || { echo "FATAL: need >=3.6.0 (have $ver) — see the floor note above"; exit 1; }
 if [ -n "${COWORK_AGENT_BINARY:-}" ]; then
   [ -x "$COWORK_AGENT_BINARY" ] || { echo "FATAL: agent binary not executable: $COWORK_AGENT_BINARY"; exit 1; }
 fi
