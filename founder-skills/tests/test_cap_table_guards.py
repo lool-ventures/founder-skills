@@ -272,7 +272,10 @@ def _all_error_codes() -> dict[str, list[str]]:
 # Recorded as a measured baseline rather than an aspiration, in the pattern this repo already uses for
 # the founder-facing leak scan and the no-cassette allowlist. Shrinking it is the work; growing it
 # means a new unguarded diagnostic shipped.
-UNASSERTED_CODE_BASELINE = 27
+# 27 -> 20: the dead loader took its codes with it (E_SCHEMA_VERSION_MISMATCH, E_MIRRORED_FIELD_DRIFT
+# and kin were declared by code nothing called), and E_FD_SUM_MISMATCH, E_DEPRECATED_KEY_NOTES and
+# E_FOUNDER_SHARES_REQUIRED gained their first assertions when they were moved to live read sites.
+UNASSERTED_CODE_BASELINE = 20
 
 
 def test_error_code_assertion_ratchet() -> None:
@@ -2769,6 +2772,28 @@ class TestRunScenarioRefusesMismatchedArtifacts:
         assert rc == 0, stderr
         assert wrote, "a matched run must produce its scenario set"
 
+    def test_a_hand_edited_fully_diluted_total_is_refused_before_any_math(self, tmp_path: Path) -> None:
+        """The FD-sum invariant has a READ site now, so a hand-edited cap_state.json cannot feed the math.
+
+        `cap_state.py` computes `fully_diluted_shares` AS the component sum, so a write-time check is
+        tautological. The only place the invariant has teeth is where the artifact is read back --
+        and every reader used a bare `json.load`. The check used to live in a loader nothing called,
+        recorded as a known mutation survivor; it is now the orchestrator's own precondition, beside
+        the run-id parity checks, with the same four loud-failure properties.
+        """
+        paths = self._artifacts(tmp_path, "RUN-A", "RUN-A")
+        state = paths[2]
+        cs = json.loads(state.read_text(encoding="utf-8"))
+        totals = cs["as_converted_totals"]
+        totals["fully_diluted_shares"] = int(totals["fully_diluted_shares"]) + 1_000  # the hand-edit
+        state.write_text(json.dumps(cs), encoding="utf-8")
+
+        rc, stdout, stderr, wrote = self._run(tmp_path, paths, "RUN-A")
+        assert rc != 0, "a cap_state whose FD total disagrees with its own components must not produce a scenario set"
+        assert "E_FD_SUM_MISMATCH" in stdout, f"no machine-readable diagnostic on stdout: {stdout!r}"
+        assert "E_FD_SUM_MISMATCH" in stderr, stderr
+        assert not wrote, "the output artifact must be left untouched on a refusal"
+
 
 class TestSingleSafeWrapperSurvivesTheListMigration:
     """`convert_safe_cap_implied` — the wrapper no test exercised, so the migration broke it silently.
@@ -2827,9 +2852,6 @@ class TestSingleSafeWrapperSurvivesTheListMigration:
 # stops describing the code.
 
 _ID_KEYED_WRITE_REGISTRY: dict[tuple[str, str, str], tuple[int, str]] = {
-    # Read-only indices built to compare two artifacts against each other. A collision here changes
-    # which of two identically-keyed INPUTS the drift check reads; it cannot drop an output row.
-    ("_artifact_io.py", "_check_mirror_drift", "id"): (4, "checker-only"),
     # `priced_round` calls `instrument_id_blockers` on its inputs and refuses before solving, so
     # these indices cannot be reached with a colliding id.
     ("priced_round.py", "_apply_mfn_election_overrides", "id"): (2, "point-of-use-blockers"),
@@ -2860,7 +2882,8 @@ _ID_KEYED_DEFENSES = {"guarded-at-ingress", "point-of-use-blockers", "defended-f
 
 # Measured at freeze time. The repo's own rule: an extraction must assert its own pattern matched, or
 # a rotted matcher reports a clean inventory and the ratchet greens on nothing.
-_ID_KEYED_SITE_FLOOR = 14
+# 14 -> 10: the four `_check_mirror_drift` indices went with the loader nothing called.
+_ID_KEYED_SITE_FLOOR = 10
 
 _ID_FIELD_EXCLUSIONS = {"run_id", "rule_id", "source_id"}
 

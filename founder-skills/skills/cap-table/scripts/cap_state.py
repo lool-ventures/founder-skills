@@ -681,6 +681,18 @@ def build_cap_state(
     Hard-rejects v0.4.x dividend fields. Runs §4.5 semantic invariants on
     preferred_series + warrants before assembling the canonical state.
     """
+    # The v0.4.x `notes` key is refused HERE, at the first read of instruments.json, because this
+    # is where its consequence originates: nothing downstream reads the old key, so an old-format
+    # file does not have zero notes -- it has notes that every number silently omits. The
+    # rejection used to live only in a loader nothing called.
+    _old_key = _artifact_io.deprecated_instrument_key(instruments)
+    if _old_key is not None:
+        raise CapStateInvariantError(
+            f"E_DEPRECATED_KEY_NOTES: instruments.json uses the deprecated top-level key '{_old_key}'. "
+            "Rename it to 'convertible_notes'; nothing reads the old key, so these notes would be "
+            "missing from every figure."
+        )
+
     founders = inputs.get("founders", []) or []
     preferred_series = inputs.get("preferred_series", []) or []
     option_pool = inputs.get("option_pool", {}) or {}

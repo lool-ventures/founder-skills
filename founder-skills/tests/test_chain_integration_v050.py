@@ -3,18 +3,16 @@
 These tests exercise the producer chain end-to-end (in-process, no SDK
 spawning) covering the most-recently-bug-prone integration paths. They
 catch the class of bugs that the in-process math goldens can't catch —
-canonicalization drift, schema-version mismatch, mirror-drift, and the
-v0.4.x → v0.5.0 hard-reject migration boundary.
+canonicalization drift and the v0.4.x → v0.5.0 hard-reject migration boundary.
 
 Fixtures map to the v0.5.0 contract §9.3:
   1. Single SAFE → priced round (baseline)
   4. Warrants in FD + cash-exercise pre-round
   5. §102 grants + flip
   6. Cumulative-preferred rejection (E_DIVIDEND_FIELDS_REMOVED)
-  7. `notes` → `convertible_notes` rename (E_DEPRECATED_KEY_NOTES)
+  7. `notes` → `convertible_notes` rename (E_DEPRECATED_KEY_NOTES), refused at build
   9. §102 canonicalization end-to-end
  10. Cumulative-dividend + AoA extraction (aoa_findings.dividend_provisions_present)
- 11. Inputs has top-level `pay_to_play_detected` (v0.4.10 hotfix migration carve-out)
 """
 
 from __future__ import annotations
@@ -33,7 +31,6 @@ sys.path.insert(0, str(_SCRIPTS_DIR))
 # After the path manipulation above
 import cap_state as cap_state_mod  # type: ignore[import-not-found]  # noqa: E402
 import warrant_exercise  # type: ignore[import-not-found]  # noqa: E402
-from _artifact_io import ArtifactIOError, load_cap_state, load_inputs  # type: ignore[import-not-found]  # noqa: E402
 
 
 def _write(path: Path, data: dict[str, Any]) -> None:
@@ -103,7 +100,8 @@ def test_chain_1_single_safe_baseline() -> None:
         cs["metadata"]["run_id"] = "test_chain"
         _write(ws / "cap_state.json", cs)
 
-        loaded = load_cap_state(ws)
+        with open(ws / "cap_state.json", encoding="utf-8") as f:
+            loaded = json.load(f)  # the way every production reader does it
         assert loaded["as_converted_totals"]["fully_diluted_shares"] == 11_000_000
         assert loaded["outstanding_safes"][0]["mfn_status"] == "absent"
 
@@ -221,8 +219,15 @@ def test_chain_6_dividend_fields_rejected() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_chain_7_deprecated_notes_key_rejected_by_loader() -> None:
-    # Write an instruments.json with the old `notes` key
+def test_chain_7_deprecated_notes_key_rejected_at_build() -> None:
+    """The v0.4.x `notes` key is refused where instruments are first READ, not in a loader nothing called.
+
+    The rejection used to live only in `_artifact_io.load_instruments`, which had zero production
+    callers -- so an old-format file's notes were silently dropped from the cap table while a test
+    asserted they were refused. `build_cap_state` is the first consumer of instruments.json and the
+    place the founder-facing consequence (notes missing from every downstream number) originates.
+    """
+    inputs = _minimal_inputs()
     bad_instruments = {
         "safes": [],
         "notes": [
@@ -239,43 +244,23 @@ def test_chain_7_deprecated_notes_key_rejected_by_loader() -> None:
         "option_grants": [],
         "metadata": {"run_id": "test", "schema_version": "v0.5.0-instruments"},
     }
-    with tempfile.TemporaryDirectory() as d:
-        ws = Path(d)
-        _write(ws / "instruments.json", bad_instruments)
-        # Note: schema validation catches "notes" not being a known property
-        # AFTER our typed loader's explicit check fires for the deprecated key.
-        with pytest.raises(ArtifactIOError) as exc_info:
-            from _artifact_io import load_instruments
-
-            load_instruments(ws, validate_schema=False)
-        assert exc_info.value.code == "E_DEPRECATED_KEY_NOTES"
+    with pytest.raises(cap_state_mod.CapStateInvariantError) as exc_info:
+        cap_state_mod.build_cap_state(inputs, bad_instruments)
+    assert "E_DEPRECATED_KEY_NOTES" in str(exc_info.value)
 
 
-# ---------------------------------------------------------------------------
-# Fixture 11 — v0.4.10 pay_to_play_detected at top level is rewritten under
-# aoa_findings (the one back-compat carve-out per §10.2)
-# ---------------------------------------------------------------------------
+def test_chain_founder_shares_zero_refused_at_build() -> None:
+    """A founder table whose shares sum to zero is refused by the WRITER.
 
-
-def test_chain_11_pay_to_play_top_level_rewritten() -> None:
-    legacy_inputs = _minimal_inputs(
-        {
-            "pay_to_play_detected": True,  # v0.4.10 hotfix shape — top-level
-        }
-    )
-    # Note: not part of v0.5.0 schema; loader silently rewrites under aoa_findings
-    with tempfile.TemporaryDirectory() as d:
-        ws = Path(d)
-        _write(ws / "inputs.json", legacy_inputs)
-        # The schema validation will fail because pay_to_play_detected isn't a
-        # documented top-level field, so disable strict schema validation. The
-        # loader's `pay_to_play_detected` rewrite hook fires before the structural
-        # check.
-        loaded = load_inputs(ws, validate_schema=False)
-        # Top-level key gone
-        assert "pay_to_play_detected" not in loaded
-        # Rewritten under aoa_findings
-        assert loaded["aoa_findings"]["pay_to_play_detected"] is True
+    `E_FOUNDER_SHARES_REQUIRED` fires in `build_cap_state`; this pins it. A copy of the same check
+    used to sit in a loader nothing called and was recorded as a known mutation survivor for that
+    reason. The write-side guard is the live one, and until this test it had no test of its own --
+    so disabling it was invisible.
+    """
+    inputs = _minimal_inputs({"founders": [{"name": "Alice", "common_shares": 0}, {"name": "Bob", "common_shares": 0}]})
+    with pytest.raises(cap_state_mod.CapStateInvariantError) as exc_info:
+        cap_state_mod.build_cap_state(inputs, _minimal_instruments())
+    assert "E_FOUNDER_SHARES_REQUIRED" in str(exc_info.value)
 
 
 # ---------------------------------------------------------------------------
@@ -304,43 +289,6 @@ def test_chain_holder_election_unspecified_rejected() -> None:
     with pytest.raises(cap_state_mod.CapStateInvariantError) as exc_info:
         cap_state_mod.build_cap_state(inputs, instruments)
     assert "E_WARRANT_HOLDER_ELECTION_UNSPECIFIED" in str(exc_info.value)
-
-
-# ---------------------------------------------------------------------------
-# Fixture: mirror-drift detected by typed loader (§2.1 enforcement point)
-# ---------------------------------------------------------------------------
-
-
-def test_chain_mirror_drift_detected_on_load() -> None:
-    inputs = _minimal_inputs()
-    instruments = _minimal_instruments(
-        {
-            "option_grants": [
-                {
-                    "id": "grant_001",
-                    "holder_id": "employee_1",
-                    "grant_date": "2024-06-01",
-                    "shares_granted": 100_000,
-                    "strike_price": 0.10,
-                    "plan_type": "iso",
-                }
-            ]
-        }
-    )
-    with tempfile.TemporaryDirectory() as d:
-        ws = Path(d)
-        _write(ws / "inputs.json", inputs)
-        _write(ws / "instruments.json", instruments)
-        cs = cap_state_mod.build_cap_state(inputs, instruments)
-        cs["metadata"]["schema_version"] = "v0.5.0-cap-state"
-        cs["metadata"]["run_id"] = "test_chain"
-        # Tamper: change plan_type in cap_state to disagree with instruments
-        cs["outstanding_options"][0]["plan_type"] = "section_102_cg"
-        _write(ws / "cap_state.json", cs)
-
-        with pytest.raises(ArtifactIOError) as exc_info:
-            load_cap_state(ws)
-        assert exc_info.value.code == "E_MIRRORED_FIELD_DRIFT"
 
 
 # ---------------------------------------------------------------------------

@@ -26,7 +26,7 @@ import sys
 from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _artifact_io import id_missing, instrument_id_blockers  # noqa: E402
+from _artifact_io import fd_sum_mismatch, id_missing, instrument_id_blockers  # noqa: E402
 from _artifact_writer import ArtifactValidationError, load_schema, write_artifact  # noqa: E402
 from _rule_pack import RULE_PACK_VERSION  # noqa: E402
 from flip_scenario import flip_share_for_share  # noqa: E402
@@ -624,6 +624,25 @@ def main() -> int:
             f"these artifacts are from different runs ({_seen}), so the share counts and the "
             "instruments that convert into them do not describe the same cap table. Re-run the "
             "earlier steps so all three come from one run.",
+            args.output,
+        )
+        return 1
+
+    # THE FD-SUM INVARIANT HAS ITS ONE READ SITE HERE. `build_cap_state` computes
+    # `fully_diluted_shares` AS the sum of its components, so checking it where it is written is a
+    # tautology; it has teeth only where the artifact is read back into the math. Every reader used
+    # a bare `json.load`, and the check lived in a loader nothing called -- recorded in the mutation
+    # corpus as a survivor for that reason. A cap_state whose denominator disagrees with its own
+    # rows cannot produce a trustworthy percentage, so this refuses on the same terms as the
+    # run-id checks above.
+    _fd = fd_sum_mismatch(cap_state)
+    if _fd is not None:
+        _fail(
+            "E_FD_SUM_MISMATCH",
+            f"cap_state.json records fully_diluted_shares={_fd['actual']:,} but its own components sum "
+            f"to {_fd['expected']:,}, so every ownership percentage would be measured against a "
+            "denominator the rows do not support. Re-run the cap-state step rather than editing the "
+            "artifact.",
             args.output,
         )
         return 1

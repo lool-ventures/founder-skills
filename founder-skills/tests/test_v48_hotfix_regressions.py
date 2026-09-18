@@ -86,27 +86,27 @@ def _inputs_with_v48_fields() -> dict[str, Any]:
 
 def test_ad_cp2_floor_survives_canonicalization() -> None:
     """The v0.4.8 floor knob must reach cap_state.preferred_series so priced_round can read it."""
-    cs = cap_state.build_cap_state(_inputs_with_v48_fields(), {"safes": [], "notes": []})
+    cs = cap_state.build_cap_state(_inputs_with_v48_fields(), {"safes": [], "convertible_notes": []})
     assert cs["preferred_series"][0]["ad_cp2_floor"] == 0.50
 
 
 def test_ad_trigger_basis_survives_canonicalization() -> None:
-    cs = cap_state.build_cap_state(_inputs_with_v48_fields(), {"safes": [], "notes": []})
+    cs = cap_state.build_cap_state(_inputs_with_v48_fields(), {"safes": [], "convertible_notes": []})
     assert cs["preferred_series"][0]["ad_trigger_basis"] == "current_conversion_price"
 
 
 def test_ad_a_denominator_basis_survives_canonicalization() -> None:
-    cs = cap_state.build_cap_state(_inputs_with_v48_fields(), {"safes": [], "notes": []})
+    cs = cap_state.build_cap_state(_inputs_with_v48_fields(), {"safes": [], "convertible_notes": []})
     assert cs["preferred_series"][0]["ad_a_denominator_basis"] == "nvca_narrow"
 
 
 def test_ad_carve_outs_survives_canonicalization() -> None:
-    cs = cap_state.build_cap_state(_inputs_with_v48_fields(), {"safes": [], "notes": []})
+    cs = cap_state.build_cap_state(_inputs_with_v48_fields(), {"safes": [], "convertible_notes": []})
     assert cs["preferred_series"][0]["ad_carve_outs"] == "nvca_default"
 
 
 def test_cap_table_history_survives_canonicalization() -> None:
-    cs = cap_state.build_cap_state(_inputs_with_v48_fields(), {"safes": [], "notes": []})
+    cs = cap_state.build_cap_state(_inputs_with_v48_fields(), {"safes": [], "convertible_notes": []})
     assert "cap_table_history" in cs
     assert len(cs["cap_table_history"]) == 1
     assert cs["cap_table_history"][0]["event_type"] == "anti_dilution_applied"
@@ -119,7 +119,7 @@ def test_v48_defaults_when_input_omits_fields() -> None:
     for k in ("ad_trigger_basis", "ad_a_denominator_basis", "ad_cp2_floor", "ad_carve_outs"):
         inputs["preferred_series"][0].pop(k, None)
     inputs.pop("cap_table_history", None)
-    cs = cap_state.build_cap_state(inputs, {"safes": [], "notes": []})
+    cs = cap_state.build_cap_state(inputs, {"safes": [], "convertible_notes": []})
     s = cs["preferred_series"][0]
     # NVCA defaults
     assert s["ad_trigger_basis"] == "original_issue_price"

@@ -1063,7 +1063,11 @@ SKILL_MD_CEILING: dict[str, int] = {
     # Net of the 2026-08-31 adversarial pass: cap-table +uncovered_parts stringify guidance;
     # competitive-positioning -1.4 KB from de-duplicating the "Preserve _produced_by" note,
     # which had been pasted verbatim four times (twice four lines apart).
-    "cap-table": 149_836,
+    # cap-table 149,836 -> 149,866 (+30 B): a sentence cited `E_SCHEMA_VERSION_MISMATCH` as what
+    # validate mode rejects a missing schema_version with. That code lived only in a loader nothing
+    # called; measured, validate mode rejects via the schema ("required field 'schema_version'
+    # missing"). The prose now says what happens.
+    "cap-table": 149_866,
 }
 
 

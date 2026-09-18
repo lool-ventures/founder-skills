@@ -562,6 +562,46 @@ MUST_KILL: tuple[Mutant, ...] = (
             "ungated for cap-table: a test asserting the section merely EXISTS passes against it."
         ),
     ),
+    Mutant(
+        id="fd_sum_invariant_disabled_at_read",
+        killed_by=(
+            "TestRunScenarioRefusesMismatchedArtifacts::"
+            "test_a_hand_edited_fully_diluted_total_is_refused_before_any_math"
+        ),
+        file=f"{_SCRIPTS}/_artifact_io.py",
+        find="    if expected != actual:",
+        replace="    if False:",
+        rationale=(
+            "Disables `E_FD_SUM_MISMATCH` at its one read site. A hand-edited cap_state.json whose "
+            "fully-diluted total disagrees with its own components would then feed the math, and "
+            "every ownership percentage is measured against that denominator. This was a KNOWN "
+            "SURVIVOR while the check lived in a loader nothing called."
+        ),
+    ),
+    Mutant(
+        id="founder_shares_invariant_disabled_at_build",
+        killed_by="test_chain_integration_v050.py::test_chain_founder_shares_zero_refused_at_build",
+        file=f"{_SCRIPTS}/cap_state.py",
+        find='    if founders and sum(f["common_shares"] for f in canonical_founders) <= 0:',
+        replace="    if False:",
+        rationale=(
+            "Disables `E_FOUNDER_SHARES_REQUIRED` where it is live. A founder table summing to zero "
+            "shares then builds a cap_state into which every conversion divides. The guard existed "
+            "and had no test of its own; its loader copy was the KNOWN SURVIVOR, for the wrong file."
+        ),
+    ),
+    Mutant(
+        id="deprecated_notes_key_accepted_at_build",
+        killed_by="test_chain_integration_v050.py::test_chain_7_deprecated_notes_key_rejected_at_build",
+        file=f"{_SCRIPTS}/cap_state.py",
+        find="    if _old_key is not None:",
+        replace="    if False:",
+        rationale=(
+            "Accepts the v0.4.x `notes` key. Nothing downstream reads it, so an old-format file does "
+            "not have zero notes: it has notes silently missing from every figure. The rejection "
+            "lived only in the loader nothing called, with a test asserting against that dead code."
+        ),
+    ),
 )
 
 
@@ -583,32 +623,12 @@ MUST_KILL: tuple[Mutant, ...] = (
 # "all executed by the suite" when coverage showed every one of them dead -- a hand-maintained list
 # of "what the suite misses" drifting in the direction that shows least, since a stale survivor entry
 # reads as ordinary debt and fails nothing.
-KNOWN_SURVIVORS: tuple[Mutant, ...] = (
-    Mutant(
-        id="artifact_io_fd_sum_invariant_disabled",
-        file=f"{_SCRIPTS}/_artifact_io.py",
-        find='        actual_fd = int(totals.get("fully_diluted_shares", 0))\n        if expected_fd != actual_fd:',
-        replace='        actual_fd = int(totals.get("fully_diluted_shares", 0))\n        if False:',
-        rationale=(
-            "Disables `E_FD_SUM_MISMATCH` on load: a hand-edited cap_state.json whose fully-diluted "
-            "total disagrees with its own components loads clean. NOT worth a test on today's "
-            "evidence -- no producer imports `_artifact_io` (only `test_chain_integration_v050.py` "
-            "does), so the guard protects a path nothing takes. Recorded so that stops being true "
-            "silently."
-        ),
-    ),
-    Mutant(
-        id="artifact_io_founder_shares_invariant_disabled",
-        file=f"{_SCRIPTS}/_artifact_io.py",
-        find='    if founders and sum(int(f.get("common_shares", 0)) for f in founders) <= 0:',
-        replace="    if False:",
-        rationale=(
-            "Disables `E_FOUNDER_SHARES_REQUIRED` on load. Same standing as the FD-sum invariant "
-            "above and for the same reason -- an unimported module -- so the two rise and fall "
-            "together."
-        ),
-    ),
-)
+KNOWN_SURVIVORS: tuple[Mutant, ...] = ()
+# EMPTY, and shrink-only, so it stays that way unless a new survivor is MEASURED. The two entries
+# that lived here -- the FD-sum and founder-shares invariants disabled on load -- were survivors
+# because they guarded `_artifact_io`'s loader, which nothing called. The loader is gone: the
+# FD-sum check moved to `run_scenario`'s read of cap_state.json and the founder-shares check was
+# already live in `build_cap_state` (its loader copy was a duplicate). Both are MUST_KILL now.
 
 
 _ALL: tuple[Mutant, ...] = MUST_KILL + KNOWN_SURVIVORS

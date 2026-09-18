@@ -102,7 +102,7 @@ def _make_fixture_dir(tmp: str, *, company_name: str = "TestCo", safe_id: str = 
                 "extraction_confidence": "high",
             }
         ],
-        "notes": [],
+        "convertible_notes": [],
         "warrants": [],
         "option_grants": [],
         "metadata": {"run_id": "rid1"},

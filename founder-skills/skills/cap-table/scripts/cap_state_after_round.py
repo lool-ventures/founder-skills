@@ -5,13 +5,12 @@
 # ///
 """
 STATUS: UNREACHED BY ANY WORKFLOW. Nothing in any SKILL.md, reference or agent body invokes this
-producer, and the loader that would validate its output (`_artifact_io.load_cap_state`) has no
-production callers either. It is kept because multi-round modelling is a product decision that
-has not been taken, not because it is live. It now writes through `_artifact_writer.write_artifact`,
-so it cannot emit an artifact its own schema rejects, and it stamps a fresh `run_id` rather than
-inheriting the pre-round one from the deep copy. STILL OUTSTANDING before wiring it up: a round-trip
-test through `load_cap_state` -- which is itself callerless in production, so that test proves the
-output loads, not that anything loads it.
+producer. It is kept because multi-round modelling is a product decision that has not been taken,
+not because it is live. It writes through `_artifact_writer.write_artifact`, so it cannot emit an
+artifact its own schema rejects, and it stamps a fresh `run_id` rather than inheriting the
+pre-round one from the deep copy. Its output is read the way every cap_state.json is -- with a
+bare `json.load` -- and `run_scenario` now checks the FD-sum invariant at that read, so a
+post-round snapshot fed back into the math is held to the same precondition as a first-round one.
 Builds cap_state_after_round.json — the post-round cap-state snapshot.
 
 Per v3 design §4.5: when a priced_round scenario applies AD adjustments, the
