@@ -41,6 +41,7 @@ from reconcile import (  # type: ignore[import-not-found]  # noqa: E402
     MONEY,
     _precision,
     _raw_scale,
+    numeral_form,
     quote_is_identifying,
     strip_group_marks,
 )
@@ -74,7 +75,8 @@ that; keeping the floor afterwards was leftover scaffolding that only ever loose
 
 def _parsed_magnitude(raw: str) -> float | None:
     """What `raw` says the figure is, read independently of `value`."""
-    match = _NUM_RE.search(raw or "")
+    raw = numeral_form(raw)
+    match = _NUM_RE.search(raw)
     if not match or not match.group("int"):
         return None
     # Strip every grouping mark the shared mantissa admits, not just the comma: "$20 000"
@@ -97,7 +99,7 @@ def _numeric_tokens(raw: str) -> list[float]:
     numbers on the slide — so the date check compares against all of them.
     """
     out: list[float] = []
-    for match in _NUM_RE.finditer(raw or ""):
+    for match in _NUM_RE.finditer(numeral_form(raw)):
         digits = strip_group_marks(match.group("int") or "")
         if not digits:
             continue
@@ -256,6 +258,7 @@ def _ambiguous_suffix(raw: str, value: float, unit_kind: object, currency: objec
     """
     if unit_kind == MONEY or currency:
         return False
+    raw = numeral_form(raw)
     if not _BARE_SUFFIX.search(raw):
         return False
     match = _NUM_RE.search(raw)
@@ -332,9 +335,12 @@ def validate_ledger(data: dict[str, Any], total_slides: int | None = None) -> tu
         raw = fig.get("raw")
         if not isinstance(raw, str) or not raw.strip():
             errors.append(f"{where} has no raw; without the slide's own string, scale cannot be checked")
-        elif not _NUM_RE.search(raw):
-            # A `raw` WITH NO NUMBER IN IT IS NOT THE FIGURE'S PRINTED STRING, and every
-            # check that depends on `raw` quietly does nothing on one. The scale check —
+        elif not _NUM_RE.search(numeral_form(raw)):
+            # A `raw` WITH NO NUMBER IN IT IS NOT THE FIGURE'S PRINTED STRING. A count the
+            # slide SPELLS OUT ("three", "Fifteen years") is a number: `numeral_form` reads
+            # it as digits for every parser here, so it is validated rather than refused.
+            # What is refused is a raw with no magnitude at all -- and on one of those,
+            # every check that depends on `raw` quietly does nothing. The scale check —
             # the whole reason the field is required — needs a magnitude to compare, and
             # the date rule needs tokens to match against; both simply skip. So the one
             # guarantee `raw` carries is absent exactly where nothing announces it.

@@ -920,7 +920,29 @@ SKILL_MD_CEILING: dict[str, int] = {
     # a branch. `when_to_use` admitted only an attached FILE, so the skill did not trigger on a link
     # at all; the branch is conditioned on what a single fetch RETURNS rather than on the input
     # being a link, because refusing every link would refuse the public ones that work.
-    "deck-review": 104_833,
+    # deck-review 102,180 -> 102,508 (+328): the LEDGER_EXTRACTION template now says a count
+    # the slide spells out in words IS a figure, recorded with the words as printed. Measured on a
+    # real deck across two runs: "three production R&D organizations", "Six patent applications",
+    # "Fifteen years" and "Five people" were refused by ledger.py on the first ("contains no
+    # number", a repair dispatch) and silently omitted on the second, once the extractor had
+    # learned to avoid the refusal. ledger.py now reads spelled-out cardinals through
+    # `numeral_form`, so the instruction and the validator agree; without the sentence the model
+    # keeps choosing between the two failures, and neither records what the deck says.
+    # deck-review 102,508 -> 103,781 (+1,273): the PowerPoint conversion block tries two converters
+    # instead of one — LibreOffice (any OS, now including the default Windows install path), then
+    # Keynote on macOS — each only where it is installed, and falls through to the text-only path
+    # otherwise. Claude Code hosts are laptops, and a laptop without LibreOffice is the common case;
+    # measured on a Mac, the whole design category was gated to not_applicable with Keynote sitting
+    # in /Applications. The Keynote path is an inline AppleScript, which is where the bytes are: a
+    # converter the skill only names, without the invocation, is one the model improvises — and the
+    # improvised Keynote script is what failed on the run that measured this. A PowerPoint-over-COM
+    # branch for Windows was written and then dropped before merge: nothing in CI can exercise a
+    # Windows host, so it would have shipped unvouched-for. It is a follow-up once it can be measured.
+    # deck-review raised to 106,434 on merging the spelled-out-counts work: both sides added
+    # prose to the same body, so the merged size is larger than either branch anticipated and
+    # neither branch's ceiling is correct for it. The value is the measured merged size, not a
+    # carried-over one.
+    "deck-review": 106_434,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.

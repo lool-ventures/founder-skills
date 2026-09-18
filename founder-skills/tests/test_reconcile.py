@@ -1833,3 +1833,112 @@ def test_the_one_sided_decision_table(
     r = compute(spec, figures)
     assert r.verdict == expected_verdict, (name, r.verdict, r.reasons)
     assert bool(select([r])) == expected_promoted, (name, r.verdict, "promoted", bool(select([r])))
+
+
+# --- spelled-out cardinals ---------------------------------------------------------------
+#
+# `numeral_form` is what lets a raw of "three" reach the same precision, scale, range and
+# approximation checks as "3". It rewrites ONLY when the string prints no digit; a raw that
+# already carries a numeral is the figure's printed string and must come back untouched.
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("Fifteen years", "15 years"),
+        ("Six", "6"),
+        ("three", "3"),
+        ("Twenty-five percent", "25 percent"),
+        ("twenty five", "25"),
+        ("a hundred customers", "100 customers"),
+        ("one hundred and five", "105"),
+        ("about three", "about 3"),
+        ("three million", "3 million"),  # the scale word is `_NUM_RE`'s to read
+        ("zero", "0"),
+        ("$493K", "$493K"),  # prints a digit: untouched
+        ("12 projects", "12 projects"),
+        ("three of the 500", "three of the 500"),  # a digit anywhere wins; the words are prose
+        ("a fourth", "a fourth"),  # ordinal
+        ("hundred", "hundred"),  # no mantissa
+        ("TBD", "TBD"),
+        ("", ""),
+    ],
+)
+def test_numeral_form_reads_spelled_out_cardinals_only_where_no_digit_is_printed(raw: str, expected: str) -> None:
+    from reconcile import numeral_form
+
+    assert numeral_form(raw) == expected
+
+
+def test_a_spelled_out_count_has_the_precision_and_scale_of_its_digit_form() -> None:
+    from reconcile import _precision, _raw_scale, implied_tolerance
+
+    assert _precision("three") == _precision("3")
+    assert _precision("Fifteen years") == _precision("15 years")
+    assert _raw_scale("three million") == _raw_scale("3 million") == 1e6
+    assert implied_tolerance("Twenty-five") == implied_tolerance("25")
+
+
+def test_a_spelled_out_count_is_bounded_like_its_digit_form() -> None:
+    """The word path in `detect_bound` requires a number to bind to — and now it finds one.
+
+    `raw="about"` alone stays unbound (that hole is closed upstream by ledger.py's refusal), but
+    "about three" is an approximation of three, exactly as "about 3" is.
+    """
+    from reconcile import detect_bound
+
+    assert detect_bound("three", "design partners") is None
+    assert detect_bound("about three", "design partners") == "approximate"
+    assert detect_bound("about 3", "design partners") == "approximate"
+    assert detect_bound("about", "design partners") is None
+
+
+@pytest.mark.parametrize(
+    ("words", "digits", "expected"),
+    [
+        ("over ten", "over 10", "at_least"),
+        ("more than three", "more than 3", "at_least"),
+        ("at least twenty-five", "at least 25", "at_least"),
+        ("under ten", "under 10", "at_most"),
+        ("fewer than three", "fewer than 3", "at_most"),
+        ("up to a hundred", "up to 100", "at_most"),
+        ("three+", "3+", "at_least"),
+        ("≈three", "≈3", "approximate"),
+        ("~ fifteen years", "~ 15 years", "approximate"),
+    ],
+)
+def test_every_bound_grammar_reads_a_spelled_out_count_like_its_digit_form(
+    words: str, digits: str, expected: str
+) -> None:
+    """Parity across ALL the `raw` grammars, not just the approximation path.
+
+    A half-converted `detect_bound` is what produced the defect: `_parsed_magnitude` admitted
+    "over ten" while the leading-word bound grammars still wanted a literal digit, so "Over ten
+    enterprise pilots" reached `reconcile` as an EXACT 10 and a per-region breakdown summing to
+    12 was shown to the founder as a contradiction. Every grammar must agree with its digit
+    form, and a grammar that reads one and not the other is the bug, whichever way round.
+    """
+    from reconcile import detect_bound
+
+    assert detect_bound(digits, "pilots") == expected
+    assert detect_bound(words, "pilots") == detect_bound(digits, "pilots")
+
+
+def test_a_spelled_out_duration_names_its_unit() -> None:
+    """`_denominator_noun` reads the words too: "three years" is per YEAR, not "per period"."""
+    from reconcile import DURATION, _denominator_noun
+
+    def duration(raw: str, value: float) -> Figure:
+        return Figure(id="d", value=value, raw=raw, unit_kind=DURATION, label="payback period", slide=1, quote="")
+
+    assert _denominator_noun(duration("three years", 3)) == "year"
+    assert _denominator_noun(duration("3 years", 3)) == "year"
+    assert _denominator_noun(duration("Fifteen years", 15)) == "year"
+    assert _denominator_noun(duration("six months", 6)) == "month"
+
+
+def test_a_spelled_out_range_is_a_range() -> None:
+    from reconcile import parse_range
+
+    assert parse_range("three-five") is None  # only the first cardinal is rewritten; a word range is not read
+    assert parse_range("3-5") == (3.0, 5.0)
