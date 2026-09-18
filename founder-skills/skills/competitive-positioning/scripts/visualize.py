@@ -40,6 +40,7 @@ REQUIRED_ARTIFACTS = [
 
 OPTIONAL_ARTIFACTS = [
     "report.json",
+    "competitor_verification.json",
 ]
 
 
@@ -899,11 +900,58 @@ def _chart_moat_radar(moat_scores: dict[str, Any] | None) -> str:
 # ---------------------------------------------------------------------------
 
 
+_VERDICT_LABELS = {
+    "genuine": "Genuine",
+    "adjacent": "Adjacent",
+    "not_a_competitor": "Not a competitor",
+}
+
+
+def _verification_verdicts(
+    competitor_verification: dict[str, Any] | None,
+    landscape: dict[str, Any] | None,
+) -> dict[str, str] | None:
+    """slug -> verdict for the verification pass that belongs to THIS run, else None.
+
+    None means "nothing to say", and the table then makes no verification claim at all -- the
+    same rule the markdown section follows when the artifact is absent. A verification file from
+    an EARLIER run is treated as absent too: it vouches only for the set it saw, and a landscape
+    re-run in the same directory can carry competitors it never judged. Run-id parity is the
+    cheapest thing that tells the two apart.
+    """
+    if not _usable(competitor_verification) or not _usable(landscape):
+        return None
+    verdicts = [_as_dict(v) for v in _as_list(competitor_verification.get("verdicts"))]
+    if not verdicts:
+        return None
+    ver_rid = _as_dict(competitor_verification.get("metadata")).get("run_id")
+    land_rid = _as_dict(landscape.get("metadata")).get("run_id")
+    if ver_rid and land_rid and str(ver_rid) != str(land_rid):
+        return None
+    out: dict[str, str] = {}
+    for v in verdicts:
+        slug = str(v.get("slug") or "")
+        verdict = str(v.get("verdict") or "")
+        if slug and verdict in _VERDICT_LABELS:
+            out[slug] = verdict
+    return out or None
+
+
 def _section_competitor_table(
     landscape: dict[str, Any] | None,
     moat_scores: dict[str, Any] | None,
+    competitor_verification: dict[str, Any] | None = None,
 ) -> str:
-    """Render competitor comparison table sorted by defensibility."""
+    """Render competitor comparison table sorted by defensibility.
+
+    Carries the competitor-set verification as a COLUMN when the pass ran. The markdown report
+    already disclosed which competitors the verification pass never saw -- anything approved at a
+    gate is added after the pass runs, so it is scored and ranked without ever being challenged --
+    but that disclosure reached only report.md. This table is the deliverable a founder actually
+    reads, and on a measured run the unverified set included the competitor the skill itself named
+    as rebutting the founder's white-space claim. A table with no such column presents a verified
+    and an unverified competitor identically.
+    """
     ph = _artifact_placeholder(landscape, "Landscape")
     if ph is not None:
         return f'<div class="chart-box full"><h2>Competitor Comparison</h2>{ph}</div>'
@@ -911,6 +959,7 @@ def _section_competitor_table(
     land = _as_dict(landscape)
     competitors = _as_list(land.get("competitors"))
     companies = _as_dict(_as_dict(moat_scores).get("companies")) if _usable(moat_scores) else {}
+    verdicts = _verification_verdicts(competitor_verification, landscape)
 
     # Build rows with defensibility for sorting
     rows: list[tuple[int, str, str]] = []
@@ -939,6 +988,14 @@ def _section_competitor_table(
 
         sort_key = order.get(defensibility, 3)
 
+        verification_cell = ""
+        if verdicts is not None:
+            verdict = verdicts.get(slug)
+            if verdict is None:
+                verification_cell = '<td style="color:#8A939B;">Not challenged</td>'
+            else:
+                verification_cell = f"<td>{_esc(_VERDICT_LABELS[verdict])}</td>"
+
         row = (
             f"<tr>"
             f"<td><strong>{name}</strong></td>"
@@ -946,20 +1003,46 @@ def _section_competitor_table(
             f'<td style="color:{_esc(def_color)};font-weight:600;">{def_label}</td>'
             f"<td>{funding}</td>"
             f"<td>{research}</td>"
+            f"{verification_cell}"
             f"</tr>"
         )
         rows.append((sort_key, slug, row))
 
     rows.sort(key=lambda r: (r[0], r[1]))
 
+    verification_th = "<th>Verification</th>" if verdicts is not None else ""
     table = (
         '<table class="comp-table">'
-        "<tr><th>Name</th><th>Category</th><th>Defensibility</th><th>Funding</th><th>Research Depth</th></tr>"
-        + "".join(r[2] for r in rows)
-        + "</table>"
+        "<tr><th>Name</th><th>Category</th><th>Defensibility</th><th>Funding</th>"
+        f"<th>Research Depth</th>{verification_th}</tr>" + "".join(r[2] for r in rows) + "</table>"
     )
 
-    return f'<div class="chart-box full"><h2>Competitor Comparison</h2>{table}</div>'
+    # The two sentences the markdown carries beneath its verdicts, so the two renderers say the
+    # same thing about the same set. Names, not slugs, because these reach a founder.
+    notes: list[str] = []
+    if verdicts is not None:
+        name_by_slug = {str(c.get("slug", "")): str(c.get("name", "?")) for c in competitors if isinstance(c, dict)}
+        retained = [name_by_slug.get(sl, sl) for sl, v in verdicts.items() if v == "not_a_competitor"]
+        if retained:
+            notes.append(
+                f"<p><strong>Retained despite the challenge:</strong> {_esc(', '.join(retained))}. "
+                "Scored and ranked alongside the rest, so read that position with the verdict in mind.</p>"
+            )
+        unverified = [
+            str(c.get("name", "?"))
+            for c in competitors
+            if isinstance(c, dict) and str(c.get("slug", "")) and str(c.get("slug", "")) not in verdicts
+        ]
+        if unverified:
+            one = len(unverified) == 1
+            notes.append(
+                f"<p><strong>Not independently challenged:</strong> {_esc(', '.join(unverified))}. "
+                f"{'This competitor was' if one else 'These competitors were'} added after the verification "
+                f"pass had run, so {'it has' if one else 'they have'} not been through it. "
+                f"{'It is' if one else 'They are'} scored and ranked alongside the rest.</p>"
+            )
+
+    return f'<div class="chart-box full"><h2>Competitor Comparison</h2>{table}{"".join(notes)}</div>'
 
 
 # ---------------------------------------------------------------------------
@@ -1128,7 +1211,7 @@ def compose_html(dir_path: str) -> str:
     moat_radar = _chart_moat_radar(moat_scores)
 
     # Competitor table
-    comp_table = _section_competitor_table(landscape, moat_scores)
+    comp_table = _section_competitor_table(landscape, moat_scores, artifacts.get("competitor_verification.json"))
 
     # Defensibility timeline
     timeline = _section_defensibility_timeline(positioning, moat_scores)

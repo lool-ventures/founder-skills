@@ -155,6 +155,76 @@ def test_axis_rationale_comes_from_the_scored_artifact_not_the_draft() -> None:
         assert scored in stdout, f"the scored rationale never reached the page; expected: {scored!r}"
 
 
+def _verification_for(artifacts: dict[str, Any], verdicts: dict[str, str], run_id: str | None = None) -> None:
+    """Attach a competitor_verification.json carrying the given slug -> verdict map."""
+    rid = run_id or artifacts["landscape.json"]["metadata"]["run_id"]
+    artifacts["competitor_verification.json"] = {
+        "metadata": {"run_id": rid, "schema_version": "v1.0.0-competitor-verification"},
+        "verdicts": [{"slug": sl, "verdict": v, "reasoning": "fixture"} for sl, v in verdicts.items()],
+        "recall_gaps": {"unmatched": []},
+    }
+
+
+def test_competitor_table_distinguishes_verified_from_unverified() -> None:
+    """A founder reading only report.html could not tell a verified competitor from an unverified one.
+
+    The verification pass runs BEFORE the founder confirms the set, so a competitor added at a gate is
+    scored and ranked without ever being challenged. report.md disclosed this; the HTML table -- the
+    deliverable a founder actually reads -- presented both identically. On a measured run the
+    unverified set included the competitor the skill itself called a direct rebuttal of the founder's
+    white-space claim. The verdict is now a column, and the same two sentences sit under the table.
+    """
+    artifacts = copy.deepcopy(_all_artifacts())
+    slugs = [c["slug"] for c in artifacts["landscape.json"]["competitors"]]
+    names = {c["slug"]: c["name"] for c in artifacts["landscape.json"]["competitors"]}
+    # Three judged, two never seen by the pass -- the measured 6-of-9 shape, scaled to the fixture.
+    _verification_for(artifacts, {slugs[0]: "genuine", slugs[1]: "adjacent", slugs[2]: "not_a_competitor"})
+
+    with _make_artifact_dir(artifacts) as d:
+        rc, stdout, stderr = _run_visualize(d)
+        assert rc == 0, f"exit {rc}, stderr={stderr}"
+        table = stdout.split("Competitor Comparison")[1].split("</div>")[0]
+        assert "<th>Verification</th>" in table, f"no verification column:\n{table[:600]}"
+        assert "Not a competitor" in table and "Genuine" in table and "Adjacent" in table
+        assert table.count("Not challenged") == 2, f"expected the two unjudged rows marked, got:\n{table}"
+        assert "not_a_competitor" not in table, "the verdict enum reached the page raw"
+        # The two markdown sentences, naming NAMES not slugs.
+        assert "Not independently challenged:" in table
+        assert names[slugs[3]] in table.split("Not independently challenged:")[1]
+        assert names[slugs[4]] in table.split("Not independently challenged:")[1]
+        assert "Retained despite the challenge:" in table
+        assert names[slugs[2]] in table.split("Retained despite the challenge:")[1]
+
+
+def test_competitor_table_makes_no_verification_claim_when_the_pass_did_not_run() -> None:
+    """Absence must read as silence, not as "all verified" and not as "none verified"."""
+    artifacts = copy.deepcopy(_all_artifacts())
+    artifacts.pop("competitor_verification.json", None)
+    with _make_artifact_dir(artifacts) as d:
+        rc, stdout, stderr = _run_visualize(d)
+        assert rc == 0, f"exit {rc}, stderr={stderr}"
+        table = stdout.split("Competitor Comparison")[1].split("</div>")[0]
+        assert "<th>Verification</th>" not in table
+        assert "challenged" not in table
+
+
+def test_a_stale_verification_file_is_not_trusted_by_the_html() -> None:
+    """A verification from an EARLIER run vouches only for the set it saw.
+
+    The landscape can be re-run into a directory still holding an old verification file, carrying
+    competitors that file never judged. Run-id parity is what tells "verified" from "stale but
+    present" -- the same distinction compose_report draws for VERIFICATION_REJECTED.
+    """
+    artifacts = copy.deepcopy(_all_artifacts())
+    slugs = [c["slug"] for c in artifacts["landscape.json"]["competitors"]]
+    _verification_for(artifacts, {sl: "genuine" for sl in slugs}, run_id="19990101T000000Z")
+    with _make_artifact_dir(artifacts) as d:
+        rc, stdout, stderr = _run_visualize(d)
+        assert rc == 0, f"exit {rc}, stderr={stderr}"
+        table = stdout.split("Competitor Comparison")[1].split("</div>")[0]
+        assert "<th>Verification</th>" not in table, "a stale verification vouched for the current set"
+
+
 def test_competitor_table_shows_funding() -> None:
     """The HTML comparison table carried no capital column, so relative funding reached a founder
     reading only report.html nowhere at all.
