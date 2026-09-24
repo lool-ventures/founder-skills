@@ -99,3 +99,16 @@ assert:
   - skill_triggered: '(founder-skills:)?market-sizing$'
   # Outputs mount is append-only (live-lane key; replay skips it loudly).
   - no_delete_in_outputs: true
+  # The plugin's Stop hook RAN. market-sizing is the only skill that calls closing_message.py, so
+  # this is the only lane where the hook can act at all -- and 3.8.0 is the first release under
+  # which any hook is assertable (it passes `--include-hook-events` because plugin.json declares
+  # hooks, and cassette.ts learned the `hook_response` frame types). Before it the harness's own
+  # diagnostic said there was no assertion key for any event but PreToolUse.
+  #
+  # DO NOT "strengthen" this to `hook_event_blocked: Stop`. That key reads `exit_code: 2` off the
+  # frame, and our hook signals a block by writing `{"decision":"block"}` to stdout and exiting 0
+  # (stop_handover_check.py:190,203). It would fail on a hook that blocked correctly.
+  #
+  # Freezing this raises the REPLAY floor to 3.8.0 (test_cowork_cassette_replay.py::_MIN_HARNESS):
+  # an older CLI cannot grade the key, and a silent skip is worse than a red.
+  - hook_event_fired: Stop

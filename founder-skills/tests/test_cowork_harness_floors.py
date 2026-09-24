@@ -44,19 +44,24 @@ CANARY = REPO_ROOT / "cowork-tests" / "canary" / "email-canary.cassette.json"
 # questions -- "which CLI runs this gate" vs "is this CLI new enough for the check to mean anything"
 # -- and collapsing them is the error this split exists to prevent. Rationale:
 # docs/internal/2026-08-27-cowork-harness-2.4.0-adoption-plan.md SS7.4-7.5.
-_CI_PIN = "3.7.0"
+_CI_PIN = "3.8.1"
 
 # The declared floor per site, with the reason it differs where it does.
 #
-# 2026-09-21: the pin and the recording floor DIFFER for the first time, deliberately. 3.7.0 is
-# entirely critique-evidence packaging -- `baselines/` is absent from the whole v3.6.0..v3.7.0 diff,
-# `CASSETTE_VERSION`/`MIN_SUPPORTED_CASSETTE_VERSION` are unchanged at 12/9, and nothing under
-# src/{runtime,hostloop,staging,agent,egress,sync}/ moved -- so none of this repo's three re-record
-# triggers (emulated tool surface, spawn env, system prompt) fired. Every past floor raise had a named
-# mechanism; this release has none, and raising a floor to chase a pin is what this split exists to
-# prevent. CI adopts 3.7.0 because the corpus packaging it fixes is what our ceiling guard measures.
-_RECORDING_FLOOR = "3.6.0"
-_REPLAY_FLOOR = "2.1.0"
+# 2026-09-24: all three numbers move together for 3.8.1, and each for its own reason.
+#   CI pin 3.8.1  -- the release adopted; plan in the internal docs dir.
+#   Recording 3.8.0 -- NOT 3.8.1. 3.8.0 is where all three re-record triggers fired: spawn env
+#     (`runtime/argv.ts` passes --include-hook-events), emulated tool surface
+#     (`hostloop/{skills,workspace}-handler.ts`) and system prompt (`prompt.ts`,
+#     `prompt/subagent-manifest.ts`). It also added hook-event recording, which is what makes a
+#     Stop hook assertable at all. 3.8.1's patch content is not a recording requirement, and a
+#     floor tracks the mechanism, not the pin.
+#   Replay 3.8.0 -- raised because `market-sizing-remote-lane` now FREEZES `hook_event_fired: Stop`.
+#     An older CLI cannot grade that key, and a silent skip is worse than a red. This is the first
+#     time the replay floor has moved; it moved because a scenario needed it, not to match anything.
+# CASSETTE_VERSION/MIN_SUPPORTED are unchanged at 12/9, so old cassettes stay readable.
+_RECORDING_FLOOR = "3.8.0"
+_REPLAY_FLOOR = "3.8.0"
 
 # Sites that SELECT the CLI a gate runs. Exact, never a range: a caret auto-adopted every upstream
 # release into CI with nobody choosing it (2.4.0 was live in these gates before its adoption plan was
