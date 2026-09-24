@@ -763,7 +763,11 @@ SKILL_MD_CEILING: dict[str, int] = {
     # the founder said", the main thread picked the deck's on a red-team finding's say-so and wrote
     # it over the founder's. Now the founder picks, the choice records its source, and the other
     # figure is kept and shown. Plus the no-questions default names this question too.
-    "market-sizing": 105_149,
+    # +151 B (105_149 -> 105_300): the founder's answer is recorded (founder_stated_choice) and the
+    # report claims a choice only then -- MEASURED on a live run, the question was skipped and the
+    # report still said "the one you chose"; and the inline `factors` rule names `role: divisor`,
+    # because a live run wrote a ratio as a bare chain, hit the mismatch and gave up.
+    "market-sizing": 105_300,
     # fmr raised for two founder-facing-correctness items measured in a live run: the CHECKLIST
     # dispatch now forbids citing our artifact filenames in evidence (that run put `inputs.json` in 10
     # items' evidence, printed verbatim into the founder's report), and the producer pipe passes
@@ -1504,7 +1508,9 @@ REFERENCES_CEILING: dict[str, int] = {
     # entry, which lets a derived figure be itemized as a ratio (e.g. 15,000,000 / 64,200,000)
     # instead of only as a product -- the live run this fixes had itemized both numbers as plain
     # multiplicands and the mismatch warning read as a nonsensical product of the two.
-    "market-sizing": 52_071,
+    # +281 B (52_071 -> 52_352): the founder_stated_choice row -- the recorded answer that alone lets
+    # the report say "the one you chose".
+    "market-sizing": 52_352,
     # fmr raised to document `graded_against` on the three producer outputs that stamp it — a new
     # artifact field is not discoverable from a schema doc that omits it, and the field exists to make
     # staleness detectable at all (run_id parity cannot see corrections applied within a run).

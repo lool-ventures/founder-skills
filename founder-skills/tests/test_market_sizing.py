@@ -9341,6 +9341,7 @@ def test_a_founder_figure_the_analysis_did_not_use_is_shown_beside_the_one_it_di
         founder_stated_inputs={"arpu": 203},
         founder_stated_inputs_period={"arpu": "month"},
         founder_stated_inputs_source={"arpu": "chat"},
+        founder_stated_choice={"arpu": "the $203 I gave you"},
         founder_stated_alternatives={
             "arpu": [
                 {
@@ -9560,3 +9561,34 @@ def test_a_ratio_is_shown_in_numbers_a_founder_can_check() -> None:
     assert "built from: 15,000,000 ÷ 64,200,000" in md, md
     assert "e+0" not in md
     assert "0.3732 × 0.5" in md
+
+
+def test_the_report_never_claims_a_choice_the_founder_was_not_offered() -> None:
+    """Measured live: the two-figures question was skipped, and the report still told the founder
+    "this analysis uses ARPU $203.00 per month, the one you chose". A choice is claimed only when the
+    founder's answer is recorded; otherwise the report says they were not asked."""
+    base = {
+        "founder_stated_inputs": {"arpu": 203},
+        "founder_stated_inputs_period": {"arpu": "month"},
+        "founder_stated_alternatives": {
+            "arpu": [{"value": 385, "period": "month", "source": "document:deck.pdf#page=2", "label": "blended"}]
+        },
+    }
+    d = _gated_dir()
+    _set_inputs(d, **base)  # the live shape: no source, no recorded answer
+    _pipe_review(d, "Something.")
+    md = _compose_dir(d)["report_markdown"]
+    assert "the one you chose" not in md
+    assert "You also gave ARPU $385.00 per month" in md
+    assert "you were not asked which to use" in md
+
+    d2 = _gated_dir()
+    _set_inputs(d2, **base, founder_stated_inputs_source={"arpu": "chat"})  # a source alone is not a choice
+    _pipe_review(d2, "Something.")
+    assert "the one you chose" not in _compose_dir(d2)["report_markdown"]
+
+    d3 = _gated_dir()
+    _set_inputs(d3, **base, founder_stated_choice={"arpu": "Use the $203 recurring rate"})
+    _pipe_review(d3, "Something.")
+    md3 = _compose_dir(d3)["report_markdown"]
+    assert "the one you chose" in md3 and "not asked" not in md3

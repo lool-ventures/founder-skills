@@ -1684,3 +1684,13 @@ def test_step_6d_gives_the_revision_its_route_and_its_bounds() -> None:
         "do not wait",
     ):
         assert needle in step, needle
+
+
+def test_the_skill_says_how_to_record_the_founders_choice_and_how_to_itemize_a_ratio() -> None:
+    text = SKILL_MD.read_text(encoding="utf-8")
+    q = text.index("**Two figures for one input.**")
+    block = text[q : text.index("\n\n", q)]
+    assert "`founder_stated_choice`" in block
+    factors = text[text.index("`factors` lists every multiplicand") :]
+    factors = factors[: factors.index("\n\n")]
+    assert '"role": "divisor"' in factors

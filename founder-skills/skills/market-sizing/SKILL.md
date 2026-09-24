@@ -382,7 +382,8 @@ $2,436 is agreement, not an override.
 input (a rate typed in chat and a blended rate in the deck, or two rates in the deck), ask before
 Step A via `AskUserQuestion` which one the sizing uses: one option per figure naming its source,
 the typed one first. Record the chosen figure in `founder_stated_inputs` with
-`founder_stated_inputs_source` (`{"arpu": "chat"}` or `"document:<file>#page=<n>"`), and every other
+`founder_stated_inputs_source` (`{"arpu": "chat"}` or `"document:<file>#page=<n>"`), their answer in
+`founder_stated_choice` (`{"arpu": "<their words>"}`; unasked, the report says so), and every other
 one in `founder_stated_alternatives` (`{"arpu": [{"value": 385, "period": "month", "source":
 "document:<file>#page=<n>", "label": "<the deck's words>"}]}`). The report shows both; never drop one.
 
@@ -578,8 +579,9 @@ cat <<'VAL_EOF' > "$ANALYSIS_DIR/validation.json"
 VAL_EOF
 ```
 
-`factors` lists every multiplicand of a narrowing step (two or more); one entry is the value under
-another name, and a sum is not a chain — describe a sum in `label` and leave `factors` out.
+`factors` lists every multiplicand of a narrowing step (two or more); a ratio's denominator carries
+`"role": "divisor"`. One entry is the value under another name, and a sum is not a chain — describe a
+sum in `label` and leave `factors` out.
 
 ### Context A hand-off protocol (file transport + gate)
 

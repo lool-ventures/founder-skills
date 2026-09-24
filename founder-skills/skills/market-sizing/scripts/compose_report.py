@@ -2891,6 +2891,10 @@ def _stated_alternatives(inputs: dict[str, Any] | None) -> list[str]:
     stated = _as_dict(i.get("founder_stated_inputs"))
     periods = _as_dict(i.get("founder_stated_inputs_period"))
     sources = _as_dict(i.get("founder_stated_inputs_source"))
+    # A choice is claimed only when the founder's answer is recorded. Measured: the question was
+    # skipped and the report still said "the one you chose". A source alone is not a choice -- the
+    # analysis knows where a figure came from whether or not anyone asked.
+    chosen = _as_dict(i.get("founder_stated_choice"))
     lines: list[str] = []
     for field, alts in _as_dict(i.get("founder_stated_alternatives")).items():
         for alt in _as_list(alts):
@@ -2899,7 +2903,12 @@ def _stated_alternatives(inputs: dict[str, Any] | None) -> list[str]:
             other = _stated_figure(field, alt["value"], alt.get("period"), alt.get("source"), alt.get("label"))
             if field in stated:
                 used = _stated_figure(field, stated[field], periods.get(field), sources.get(field))
-                lines.append(f"You also gave {other}; this analysis uses {used}, the one you chose.")
+                if str(chosen.get(field) or "").strip():
+                    lines.append(f"You also gave {other}; this analysis uses {used}, the one you chose.")
+                else:
+                    lines.append(
+                        f"You also gave {other}; this analysis used {used}, and you were not asked which to use."
+                    )
             else:
                 lines.append(f"You also gave {other}.")
     return lines
