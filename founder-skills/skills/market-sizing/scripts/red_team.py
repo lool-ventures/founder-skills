@@ -280,7 +280,13 @@ def validate_findings(
                 label = str(finding.get("claim_attacked") or "").strip()
             rejected.append({"claim_attacked": label or "(unnamed)", "reason": reason})
 
-    could_not_check = [str(c).strip() for c in (data.get("could_not_check") or []) if str(c).strip()]
+    # Printed to the founder under "Not checked", so worded exactly like the three prose fields.
+    could_not_check = []
+    for c in data.get("could_not_check") or []:
+        if str(c).strip():
+            worded, n = humanize_review_text(str(c).strip(), documents)
+            humanized += n
+            could_not_check.append(policy.substitute(worded))
 
     # What the red team OPENED, against what the founder SUPPLIED. Self-reported -- the only
     # evidence it is honest is the tool stream a harness records, which the e2e lane reads -- but a

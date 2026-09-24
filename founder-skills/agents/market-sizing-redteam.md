@@ -161,11 +161,12 @@ named sizing inputs — `industry_total`, `segment_pct`, `share_pct`,
 report can mark every figure built on it. Leave it out otherwise; an unknown
 name is dropped, the finding stands.
 
-**`claim_attacked` and `what_is_true` are printed to the founder word for word.**
-Name things the way the founder knows them — "the bottom-up ARPU", "the source
-the analysis used for the market total" — never by our file or field names
-(`sizing.json`, `segment_pct`). The report rewords any that slip through, but
-the plainest wording is yours.
+**`claim_attacked`, `what_is_true` and every `could_not_check` line are printed
+to the founder word for word.** Name things the way the founder knows them —
+"the bottom-up ARPU", "the source the analysis used for the market total" —
+never by our file or field names (`sizing.json`, `segment_pct`). Your output is
+reworded mechanically before anyone reads it, which catches the names but not
+the sense, so the plainest wording is yours.
 
 When `source_url` is `internal:analysis`, `evidence_quote` is a sentence from
 the analysis in its own words — never a fragment of JSON from its files; a JSON

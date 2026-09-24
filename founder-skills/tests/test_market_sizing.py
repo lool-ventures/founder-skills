@@ -2163,6 +2163,39 @@ def test_compose_assumptions_label() -> None:
     assert "Customer Count" in assumptions_section
 
 
+def test_compose_assumptions_small_rate_is_not_shown_as_zero() -> None:
+    """A per-person rate below 0.01 keeps its significant figures; "0.00" is a number that is wrong on its face."""
+    validation = dict(_VALID_VALIDATION)
+    validation["assumptions"] = [
+        {
+            "name": "inquiry_rate_per_covered_life",
+            "label": "Monthly inquiry rate",
+            "value": 0.0002,
+            "category": "sourced",
+        },
+        {"name": "response_share", "label": "Response share", "value": 0.0068, "category": "derived"},
+        {"name": "avg_visits", "label": "Average visits", "value": 2.5, "category": "derived"},
+    ]
+    d = _make_artifact_dir(
+        {
+            "inputs.json": _VALID_INPUTS,
+            "methodology.json": _VALID_METHODOLOGY,
+            "validation.json": validation,
+            "sizing.json": _VALID_SIZING,
+            "sensitivity.json": _VALID_SENSITIVITY,
+            "checklist.json": _VALID_CHECKLIST,
+        }
+    )
+    rc, data, _ = _run_compose(d)
+    assert rc == 0 and data is not None
+    report = data["report_markdown"]
+    start = report.index("## Assumptions\n")
+    section = report[start : report.index("\n## ", start + 1)]
+    assert "**Monthly inquiry rate** = 0.0002 (Sourced)" in section, section
+    assert "**Response share** = 0.0068 (Derived)" in section, section
+    assert "**Average visits** = 2.50 (Derived)" in section, section  # unchanged above 0.01
+
+
 def test_compose_accepted_malformed() -> None:
     """accepted_warnings with missing code field -> silently skipped, no crash."""
     methodology = dict(_VALID_METHODOLOGY)
@@ -8916,6 +8949,38 @@ def test_red_team_wording_leaves_the_founders_files_and_urls_alone(tmp_path: Pat
     f = data["findings"][0]
     assert f["what_is_true"] == finding["what_is_true"]
     assert f["source_title"] == "notes.md, page 1"
+
+
+def test_red_team_words_could_not_check_like_the_findings(tmp_path: Path) -> None:
+    """`could_not_check` is printed to the founder under "Not checked", so it is worded too.
+
+    A live run's review ended a could-not-check line with "...assumptions in validation.json or
+    sizing.json". The report scan flagged the two names, the only carrier was the review, and the
+    main thread rewrote the review to clear it -- which the tamper check then reported to the
+    founder as a changed review. Worded here, the names never reach the scan.
+    """
+    uploads = tmp_path / "docs"
+    uploads.mkdir()
+    (uploads / "notes.md").write_text("RECURRING (M2+) n=17 patient-months -- $203 per patient month\n")
+    unchecked = [
+        "ledger.pdf pages 2-4, because no figure from them is consumed by the assumptions in "
+        "validation.json or sizing.json",
+        "notes.md page 2, because the segment_pct derivation it describes was not stated",
+    ]
+    rc, _stdout, data = _run_red_team(
+        tmp_path,
+        {"findings": [_doc_finding()], "could_not_check": unchecked},
+        ["--uploads-dir", str(uploads)],
+    )
+    assert rc == 0 and data is not None, _stdout
+    out = data["could_not_check"]
+    assert len(out) == 2
+    text = " ".join(out)
+    for leaked in ("validation.json", "sizing.json", "segment_pct"):
+        assert leaked not in text, f"{leaked!r} reached the founder: {text}"
+    # The founder's own file keeps its name; a PDF was never ours to reword.
+    assert out[1].startswith("notes.md page 2")
+    assert out[0].startswith("ledger.pdf pages 2-4")
 
 
 def test_red_team_fails_loudly_when_the_shared_scripts_are_missing(tmp_path: Path) -> None:

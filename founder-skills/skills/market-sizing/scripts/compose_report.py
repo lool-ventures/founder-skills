@@ -335,6 +335,11 @@ def _fmt_number(value: Any) -> str:
     if isinstance(value, float):
         if value == int(value):
             return f"{int(value):,}"
+        if abs(value) < 0.01:
+            # Two decimals would print a per-person rate like 0.0002 as "0.00"; keep two
+            # significant figures instead.
+            decimals = 1 - math.floor(math.log10(abs(value)))
+            return f"{value:.{decimals}f}".rstrip("0")
         return f"{value:,.2f}"
     if isinstance(value, int):
         return f"{value:,}"
