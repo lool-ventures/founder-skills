@@ -303,6 +303,20 @@ def validate_findings(
         base = os.path.basename(str(raw).strip())
         m = re.match(r"^(.+)\.p\d+\.txt$", base)
         read_names.add(m.group(1) if m else base)
+    # A CITATION IS EVIDENCE OF READING, and it is evidence we already hold. `sources_read` is
+    # self-reported, and on a live run the review quoted page 2 of the founder's deck in two
+    # accepted findings while declaring it read nowhere -- so the report told the founder, four
+    # times and once at high severity, that the review never opened a document it had just quoted
+    # back to them. The verdict paragraph carried both sentences. Validation above already refuses
+    # a `document:` citation naming a file that was not supplied, so an ACCEPTED finding citing
+    # `document:<name>#page=<n>` is a checked claim to have opened <name>; rejected findings are
+    # not, and do not count. Deliberately not gated on `quote_verified`: a quote that fails to
+    # verify is a fabrication signal with its own handling, and "we could not confirm your quote"
+    # and "we never opened your file" are different statements -- saying the second because of the
+    # first is how the contradiction got in front of a founder in the first place.
+    cited_docs = {m.group(1) for f in accepted if (m := _DOC_RE.match(str(f.get("source_url", "")).strip()))}
+    reconciled = sorted(n for n in documents if n in cited_docs and n not in read_names)
+    read_names |= cited_docs
     sources_read = [n for n in documents if n in read_names]
     sources_unread = [n for n in documents if n not in read_names]
 
@@ -320,6 +334,7 @@ def validate_findings(
             "sources_unread": len(sources_unread),
             "by_severity": by_severity,
             "humanized": humanized,
+            "sources_read_from_citation": reconciled,
         },
     }
 

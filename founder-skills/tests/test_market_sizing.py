@@ -8951,6 +8951,60 @@ def test_red_team_wording_leaves_the_founders_files_and_urls_alone(tmp_path: Pat
     assert f["source_title"] == "notes.md, page 1"
 
 
+def test_a_document_the_review_quoted_is_not_reported_as_unopened(tmp_path: Path) -> None:
+    """The live shape: quote the founder's page, then declare nothing read.
+
+    On the 0.13.0 e2e the review cited page 2 of the founder's deck in two accepted findings,
+    both with a verified quote, and returned an EMPTY `sources_read`. Every document therefore
+    fell into `sources_unread`, and the report told the founder four times -- once at high
+    severity, and once in the verdict paragraph that also carried the citation -- that the review
+    never opened a file it had just quoted back to them.
+    """
+    uploads = tmp_path / "docs"
+    uploads.mkdir()
+    (uploads / "notes.md").write_text("RECURRING (M2+) n=17 patient-months -- $203 per patient month\n")
+    (uploads / "other.pdf").write_bytes(b"%PDF-1.4\n")
+    rc, stdout, data = _run_red_team(
+        tmp_path,
+        # sources_read empty, exactly as the live review returned it.
+        {"findings": [_doc_finding()], "sources_read": []},
+        ["--uploads-dir", str(uploads)],
+    )
+    assert rc == 0 and data is not None, stdout
+    assert "notes.md" in data["sources_read"], data["sources_read"]
+    assert "notes.md" not in data["sources_unread"], data["sources_unread"]
+    # The reconciliation is recorded, so a run cannot claim it silently.
+    assert data["summary"]["sources_read_from_citation"] == ["notes.md"]
+    # A document nothing cited is still unread -- the rule reads citations, it does not clear the list.
+    assert data["sources_unread"] == ["other.pdf"], data["sources_unread"]
+
+
+def test_a_rejected_findings_citation_does_not_count_as_reading(tmp_path: Path) -> None:
+    """A document whose only citation was thrown out is still unread.
+
+    SCOPE, measured rather than assumed: the producer's `accepted`-only restriction is belt-and-
+    braces TODAY, not load-bearing. A rejected entry keeps `claim_attacked` and `reason` and
+    nothing else (red_team.py's reject branch drops `source_url`), so widening the citation scan
+    to `[*accepted, *rejected]` is a no-op -- I ran that mutation and this test stayed green. It
+    is kept because the restriction states the intent, and because the day a rejected entry keeps
+    its `source_url` this test is already standing there. Do not cite it as evidence that the
+    restriction is enforced.
+    """
+    uploads = tmp_path / "docs"
+    uploads.mkdir()
+    (uploads / "notes.md").write_text("RECURRING (M2+) n=17 patient-months -- $203 per patient month\n")
+    rc, stdout, data = _run_red_team(
+        tmp_path,
+        # Too short a quote for a document citation: validation rejects it.
+        {"findings": [_doc_finding(evidence_quote="n=17")], "sources_read": []},
+        ["--uploads-dir", str(uploads)],
+    )
+    assert rc == 0 and data is not None, stdout
+    assert data["findings"] == [] and data["rejected"], data
+    assert data["sources_unread"] == ["notes.md"], data["sources_unread"]
+    assert data["summary"]["sources_read_from_citation"] == []
+
+
 def test_red_team_words_could_not_check_like_the_findings(tmp_path: Path) -> None:
     """`could_not_check` is printed to the founder under "Not checked", so it is worded too.
 
