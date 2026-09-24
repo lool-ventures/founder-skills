@@ -84,6 +84,11 @@ DOUBLED prefix, silently, for every blind-writing sub-agent. (See `references/sk
 opening docstring already asserted.) Host-loop is the production topology, so `"artifacts"` is correct for
 any real Cowork session tree.
 
+REMOTE LANE (Cowork "in the cloud", the default for new sessions and where the live report came from):
+no `/sessions` tree; shell cwd `/home/claude`; `CLAUDE_CODE_REMOTE=true`. Artifacts fall through to the
+CLI branch (`/home/claude/artifacts`, one shared filesystem, so both roots are the same absolute path),
+which is correct. Uploads do NOT: see `_remote_uploads_dir`.
+
 A genuine VM-loop topology (the agent loop itself inside the VM, cwd `/sessions/<id>`) does exist as a
 test tier, and there `"artifacts"` would resolve to `/sessions/<id>/artifacts` — sandbox scratch OUTSIDE
 outputs. That case is served by the explicit `$COWORK_AGENT_ARTIFACTS_ROOT` override rather than by
@@ -194,9 +199,42 @@ def resolve_uploads_dir(cwd: str, env: dict[str, str]) -> str | None:
         return os.path.join(m.group(1), "mnt", "uploads")
     if _SESSION_ROOT.match(cwd):
         return os.path.join(cwd, "mnt", "uploads")
+    remote = _remote_uploads_dir(env)
+    if remote is not None:
+        return remote
     # Plain CLI: no session tree, so no uploads mount. None, never a fabricated path — a guessed
     # `./uploads` would `ls` clean-empty and read as "the founder attached nothing".
     return None
+
+
+def _remote_uploads_dir(env: dict[str, str]) -> str | None:
+    """Cowork's REMOTE (cloud) lane: the agent runs in a Linux VM with no `/sessions` tree at all.
+
+    Measured in a real session 2026-09-22 (the lane the live bug report came from, and the default
+    for new sessions): shell cwd `/home/claude`, `CLAUDE_CODE_REMOTE=true`, and an attached PDF at
+    `$HOME/.claude/uploads/<session id>/<8-hex>-<original name>` -- NOT at `/mnt/user-data/uploads`,
+    which the lane's own environment description names and which does not exist. Before this branch
+    the resolver answered "no session tree" here, Step 6c skipped its document mirror, and the red
+    team was told the founder supplied no documents -- on the production lane.
+
+    THE DIRECTORY IS THE SIGNAL, NOT THE ENV. Runtime markers are served per session and have been
+    added and removed across releases (ccinternals.dev/cowork, "detect.markers-come-and-go"), so this
+    keys on what is on disk: `$HOME/.claude/uploads/<CLAUDE_CODE_SESSION_ID>` when the id is known,
+    else the single session dir under `$HOME/.claude/uploads/` (one session per remote VM). With
+    nothing attached there is no dir, and None is the honest answer, never a fabricated path. Never
+    reached on a `/sessions` tree (the branches above answer first) and never on a CLI host unless a
+    `~/.claude/uploads/<session>` dir actually exists there, which nothing on the CLI creates.
+    """
+    home = env.get("HOME") or os.path.expanduser("~")
+    base = os.path.join(home, ".claude", "uploads")
+    session = env.get("CLAUDE_CODE_SESSION_ID")
+    if session:
+        candidate = os.path.join(base, session)
+        return candidate if os.path.isdir(candidate) else None
+    if not os.path.isdir(base):
+        return None
+    dirs = [d for d in sorted(os.listdir(base)) if os.path.isdir(os.path.join(base, d))]
+    return os.path.join(base, dirs[0]) if len(dirs) == 1 else None
 
 
 def build_agent_paths(agent_root: str, dir_name: str, run_id: str | None = None) -> dict[str, str]:

@@ -37,6 +37,11 @@ _VALID_INPUTS: dict = {
 }
 
 _VALID_METHODOLOGY: dict = {
+    # A recorded decision, because the adversarial-review gate refuses to compose without one.
+    # These fixtures predate the red-team step, so they represent a run where someone chose not to
+    # attack the figures -- which is a legitimate state, and is exactly what the enum is for. The
+    # gate's own tests omit this field deliberately.
+    "red_team_skipped": "founder_declined",
     "approach_chosen": "both",
     "rationale": "Both data sources available",
     "reference_file_read": True,
@@ -1605,3 +1610,217 @@ def test_html_prints_no_delta_when_the_comparison_was_refused(tmp_path: Any) -> 
         "HTML drops the blocked comparison silently — the founder gets no attention item and no "
         "reason, which is what the suppressed-arm comment warned against"
     )
+
+
+def test_html_comparison_chart_carries_all_three_caveats() -> None:
+    """report.html's top-down vs bottom-up chart must state the same three caveats report.md does.
+
+    The two surfaces ship together: three August reviews in a row caught a fix landing on one only.
+    """
+    # The producer's caveat is byte-identical across all three notes (the literal appears four
+    # times in market_sizing.py); the fixture must mirror that or it pins a shape that never ships.
+    caveat = (
+        "Closeness is not confirmation: the pipeline cannot tell whether the two builds rest on "
+        "the same underlying figures. Check whether they do."
+    )
+    arts = _all_artifacts()
+    sizing = json.loads(json.dumps(arts["sizing.json"]))
+    sizing["comparison"] = {
+        "tam_delta_pct": 0.0,
+        "note": f"TAM estimates differ by 0.0%. {caveat}",
+        "sam_delta_pct": 9.4,
+        "sam_note": f"SAM estimates differ by 9.4%. {caveat}",
+        "som_delta_pct": 3.0,
+        "som_note": f"SOM estimates differ by 3.0%. {caveat}",
+    }
+    arts["sizing.json"] = sizing
+    # _run_visualize returns (exit_code, stdout, stderr) -- unpack before asserting; `"x" in tuple`
+    # is element equality and is always False.
+    rc, html, err = _run_visualize(_make_artifact_dir(arts))
+    assert rc == 0, err
+    assert "SAM estimates differ by 9.4%." in html, html[:2000]
+    assert "SOM estimates differ by 3.0%." in html
+    # The caveat all three share is rendered once, matching report.md.
+    assert html.count("Closeness is not confirmation") == 1, html[:2000]
+
+
+def test_visualize_copies_of_compose_helpers_have_not_drifted() -> None:
+    """visualize.py carries byte-identical copies of five compose_report.py functions.
+
+    Skill scripts are standalone and cannot import across files, so the shared-input detector and
+    the two helpers it needs exist twice. Compared as parsed bodies rather than as text, so
+    reformatting is allowed and a behaviour change is not — the pattern test_quote_match_sync.py
+    uses for deck-review's copy of cap-table's matcher.
+
+    A drift here means the two founder-facing surfaces can disagree about what the founder is
+    told, which is the failure three August reviews in a row caught in this skill.
+    """
+    import ast
+    import pathlib
+
+    scripts = pathlib.Path(__file__).resolve().parent.parent / "skills" / "market-sizing" / "scripts"
+    bodies: dict[str, dict[str, str]] = {}
+    for stem in ("compose_report", "visualize"):
+        tree = ast.parse((scripts / f"{stem}.py").read_text(encoding="utf-8"))
+        bodies[stem] = {n.name: ast.dump(n) for n in tree.body if isinstance(n, ast.FunctionDef)}
+
+    shared = (
+        "_as_number",
+        "_factor_chain",
+        "_shared_input_values",
+        "_contested_rows",
+        "_source_class",
+        "_adversarial_outcome",
+        "_top_challenge",
+        "_summary_verdict",
+        "_self_check_line",
+        "_document_cite",
+    )
+    for name in shared:
+        assert name in bodies["compose_report"], f"compose_report.py lost {name}"
+        assert name in bodies["visualize"], f"visualize.py lost its copy of {name}"
+        assert bodies["compose_report"][name] == bodies["visualize"][name], (
+            f"{name} has drifted between compose_report.py and visualize.py — the two founder "
+            "surfaces would disagree. Edit one, re-copy to the other."
+        )
+
+    # Non-vacuity: a typo in a name above would make the loop assert nothing.
+    assert len(shared) == 10
+
+    # The label helpers are not copied: both scripts import the ONE definition from _redteam_text,
+    # which red_team.py also uses to word the review before either renderer sees it. Checked on the
+    # parsed source -- importing compose_report here would collide with other skills' same-named file.
+    wanted = {
+        ("humanize_claim", "_humanize_claim"),
+        ("humanize_param", "_humanize_param"),
+    }
+    for stem in ("compose_report", "visualize"):
+        tree = ast.parse((scripts / f"{stem}.py").read_text(encoding="utf-8"))
+        imported = {
+            (a.name, a.asname or a.name)
+            for n in tree.body
+            if isinstance(n, ast.ImportFrom) and n.module == "_redteam_text"
+            for a in n.names
+        }
+        assert wanted <= imported, f"{stem}.py must import {sorted(wanted - imported)} from _redteam_text"
+        assert "_humanize_claim" not in bodies[stem] and "_humanize_param" not in bodies[stem], (
+            f"{stem}.py defines its own label helper again -- import it from _redteam_text"
+        )
+
+
+def test_html_reports_the_factors_the_two_narrowing_chains_share() -> None:
+    """The overlap reaches report.html, not just report.md.
+
+    Three August reviews in a row caught a fix landing on one surface only, and this detector is
+    the one the whole change set exists for — it must not be the fourth.
+    """
+    factors_td = [
+        {"factor_id": "has_adult_child", "value": 0.61, "source_id": "company_stated"},
+        {"factor_id": "caregiver_employed", "value": 0.60, "source_id": "caregiving_survey_2025"},
+        {"factor_id": "worker_benefit_access", "value": 0.61, "source_id": "labour_stats_2024"},
+        {"factor_id": "fee_for_service_share", "value": 0.45, "source_id": "health_policy_2026"},
+    ]
+    factors_bu = [
+        {"factor_id": "caregivers_per_recipient", "value": 0.5513, "source_id": "caregiving_survey_2025"},
+        {"factor_id": "caregiver_employed", "value": 0.60, "source_id": "caregiving_survey_2025"},
+        {"factor_id": "worker_benefit_access", "value": 0.61, "source_id": "labour_stats_2024"},
+        {"factor_id": "fee_for_service_share", "value": 0.45, "source_id": "health_policy_2026"},
+    ]
+    arts = _all_artifacts()
+    arts["validation.json"] = {
+        **_VALID_VALIDATION,
+        "assumptions": [
+            {"name": "segment_pct", "value": 10.0, "category": "derived", "factors": factors_td},
+            {"name": "serviceable_pct", "value": 9.1, "category": "derived", "factors": factors_bu},
+        ],
+    }
+    d = _make_artifact_dir(arts)
+    rc, html, err = _run_visualize(d)
+    assert rc == 0, err
+    assert "share 3 of the 4 figures they narrow by" in html, html[:400]
+    # Founder-facing: the snake_case ids are spaced out, never printed raw.
+    assert "caregiver employed" in html and "caregiver_employed" not in html
+
+
+_REDTEAM_HTML_ARTIFACT = {
+    "findings": [
+        {
+            "claim_attacked": "segment_pct",
+            "what_is_true": "The published share is 6.1%, not the 10% the analysis uses.",
+            "evidence_quote": "Six point one percent of employers offered the benefit in 2025.",
+            "source_url": "https://example.org/benefits-2025",
+            "source_title": "Benefits Survey 2025",
+            "severity": "high",
+        }
+    ],
+    "rejected": [{"claim_attacked": "cost-sharing", "reason": "missing or empty: source_url"}],
+    "could_not_check": ["The data-room deck, because the PDF has no text layer"],
+    "summary": {"accepted": 1, "rejected": 1, "unchecked": 1},
+    "validation": {"status": "valid", "errors": []},
+}
+
+
+def test_html_carries_the_adversarial_findings_with_their_sources() -> None:
+    arts = _all_artifacts()
+    arts["redteam.json"] = _REDTEAM_HTML_ARTIFACT
+    rc, html, err = _run_visualize(_make_artifact_dir(arts))
+    assert rc == 0, err
+    assert "Adversarial Findings" in html
+    assert "Six point one percent of employers offered the benefit in 2025." in html
+    assert "https://example.org/benefits-2025" in html
+    assert "Segment %" in html and "segment_pct" not in html
+
+
+def test_html_distinguishes_a_review_that_found_nothing_from_one_that_never_ran() -> None:
+    """Opposite facts about a report. A founder shown a clean page cannot tell them apart
+    unless the page says which — which is the whole reason the section renders in both states."""
+    arts = _all_artifacts()
+    arts["redteam.json"] = {
+        "findings": [],
+        "rejected": [],
+        "could_not_check": [],
+        "summary": {"accepted": 0, "rejected": 0, "unchecked": 0},
+        "validation": {"status": "valid", "errors": []},
+    }
+    rc_ran, html_ran, err = _run_visualize(_make_artifact_dir(arts))
+    assert rc_ran == 0, err
+
+    rc_absent, html_absent, err2 = _run_visualize(_make_artifact_dir(_all_artifacts()))
+    assert rc_absent == 0, err2
+
+    assert "found nothing it could evidence" in html_ran
+    assert "No adversarial review ran" in html_absent
+    assert "found nothing it could evidence" not in html_absent
+
+
+def test_html_discloses_a_dropped_challenge_rather_than_dropping_it_silently() -> None:
+    arts = _all_artifacts()
+    arts["redteam.json"] = _REDTEAM_HTML_ARTIFACT
+    rc, html, err = _run_visualize(_make_artifact_dir(arts))
+    assert rc == 0, err
+    assert "1 further challenge could not be shown" in html
+    assert "no text layer" in html
+
+
+def test_html_labels_an_internal_finding_instead_of_linking_it() -> None:
+    """Both surfaces must distinguish the two kinds of evidence, or only one does."""
+    arts = _all_artifacts()
+    arts["redteam.json"] = {
+        **_REDTEAM_HTML_ARTIFACT,
+        "findings": [
+            {
+                "claim_attacked": "TAM convergence is presented as validation",
+                "what_is_true": "The two builds share an ARPU anchor.",
+                "evidence_quote": "Top-down and bottom-up SOM differ by 67.3% (>30%).",
+                "source_url": "internal:analysis",
+                "source_title": "This analysis' own comparison",
+                "severity": "medium",
+            }
+        ],
+    }
+    rc, html, err = _run_visualize(_make_artifact_dir(arts))
+    assert rc == 0, err
+    assert "Top-down and bottom-up SOM differ by 67.3%" in html
+    assert "internal:analysis" not in html, "the internal marker leaked to the founder"
+    assert 'href="internal' not in html, "rendered as a link to nowhere"
+    assert "own output, not an outside source" in html

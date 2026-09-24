@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from typing import Any, NoReturn
 
@@ -145,6 +146,17 @@ CHECKLIST_ITEMS: list[dict[str, Any]] = [
         "model_format_gate": "spreadsheet",
     },
     {
+        # SCOPE, decided 2026-09-19 and recorded so it is not "restored" as an accident.
+        # `checklist-criteria.md`'s label for this criterion used to promise internal
+        # reconciliation as well -- unit economics rolling into the P&L, assets = liabilities +
+        # equity, ending cash on the CF tying to the BS, net income reaching retained earnings --
+        # while its own pass/warn/fail bars spoke only of error tokens, and this label (the one a
+        # founder reads) never mentioned reconciliation at all. An assessor handed half a rubric
+        # with no bar for it has a standing reason to answer `not_applicable`, which is the
+        # judgement that had been failing the release gate. The reference label now matches the
+        # bars. CONSEQUENCE: internal reconciliation is checked by no criterion in this list and
+        # promised by nothing. Restoring it means a new criterion with its own bars -- and that
+        # moves the item count off 46, which several tests and the score's own denominator pin.
         "id": "STRUCT_08",
         "category": "Structure & Presentation",
         "label": "No structural errors",
@@ -507,6 +519,25 @@ VALID_IDS = {item["id"] for item in CHECKLIST_ITEMS}
 VALID_STATUSES = {"pass", "fail", "warn", "not_applicable"}
 ITEM_LOOKUP: dict[str, dict[str, Any]] = {item["id"]: item for item in CHECKLIST_ITEMS}
 
+# A criterion id the ASSESSOR wrote into its own evidence ("see CASH_23", "cross-ref UNIT_10").
+# Three renderers print evidence and notes straight through -- `compose_report.py` into report.md,
+# `visualize.py` into report.html, `explore.py` into explorer.html -- and none of them can rewrite
+# what a sub-agent authored, so the substitution has to happen HERE, at the single point all three
+# read from. Rewriting rather than merely detecting is deliberate: `_founder_text.scan` already
+# REPORTS this shape (`FOUNDER_TEXT_TOKEN`, severity low, and it lands in report.json only), and a
+# report that names the criterion in the founder's own words is what the id was standing in for.
+# Because rewriting also silences that report, the guard is a POSITIVE assertion in the tests --
+# the label must be present -- never the absence of the id.
+_CRITERION_ID_RE = re.compile(r"\b(" + "|".join(sorted(ITEM_LOOKUP)) + r")\b")
+
+
+def _ids_to_labels(text: Any) -> Any:
+    """Rewrite any criterion id inside assessor-written prose into that criterion's label."""
+    if not isinstance(text, str) or not text:
+        return text
+    return _CRITERION_ID_RE.sub(lambda m: str(ITEM_LOOKUP[m.group(1)]["label"]), text)
+
+
 # --- Profile normalization maps ---
 
 # Note: a few of these 2-letter codes are ambiguous outside a geography context
@@ -821,8 +852,11 @@ def validate_checklist(
         item_id = item["id"]
         meta = ITEM_LOOKUP[item_id]
         status = item["status"]
-        evidence = item.get("evidence")
-        notes = item.get("notes")
+        # Substitute BEFORE `original_evidence` is captured below, so the SECTOR_40 restore
+        # inherits the clean string. `notes` matters as much as `evidence`: visualize.py falls
+        # back to it in two places.
+        evidence = _ids_to_labels(item.get("evidence"))
+        notes = _ids_to_labels(item.get("notes"))
         category = meta["category"]
 
         # Auto-gate based on company profile

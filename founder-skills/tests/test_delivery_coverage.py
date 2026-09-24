@@ -44,6 +44,15 @@ DISJOINT vocabularies, so exactly one value could ever match. That is the test_d
 shape — two ends of one contract drifting — not "computed but never shown", and its remedy differs
 too: the judgement moved into the producer and the prose was deleted rather than corrected.
 
+A second class-A instance, fixed 2026-09-20 and recorded because its GUARD is weaker than it looks:
+market-sizing's producer computed a "closeness is not confirmation" caveat for SAM and SOM that no
+renderer consumed, so on a real run a 9.4% SAM delta reached the founder only through LLM-written
+prose that called it corroboration. Both surfaces now render it, pinned by
+test_compose_renders_sam_and_som_comparison_notes and its report.html twin. Those pins are
+FIXTURE-DRIVEN and therefore NOT a class-A downstream gate by this module's own definition below —
+they catch deletion of the renderer, not the next field that is computed and never shown.
+market-sizing accordingly STAYS in _UNGATED_SKILLS.
+
 Deliberate, for a reason worth keeping: a fixture-driven detector for it is blind by construction.
 Fixtures are schema-correct, so scanning one answers "does the renderer behave on good input", which is
 not the question any of these defects lived in. The highest-severity instance of class A found so far

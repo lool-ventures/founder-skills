@@ -192,6 +192,42 @@ _SOLVER_WARNING_PROSE: dict[str, str] = {
 }
 
 
+# Short founder-facing LABELS for the same codes, beside the long prose deliberately: the coaching
+# payload needs a NAME the sub-agent can write inline, where `_SOLVER_WARNING_PROSE` is a paragraph
+# for the report's callout block. Kept in this module so cap-table has ONE per-code text source and
+# the two cannot drift -- `compose_report.py` growing its own dict is how a third one starts.
+#
+# NOT in `_labels.py`, and the reason is load-bearing: `_founder_text_keep.cap_table_keep()` reads
+# `_labels.MAPS` LIVE and passes it as `extra_keep` to the report scan, so putting codes there would
+# make every one of them a KEEP token and silently disarm the leak scan for the whole class.
+_SOLVER_WARNING_LABELS: dict[str, str] = {
+    "W_MFN_NOT_MOST_FAVORABLE": "MFN election modelled as a counterfactual",
+    "W_MFN_ELECTION_OVERRIDES_INSTRUMENT": "Scenario setting overrode the instrument's terms",
+    "W_CP2_FLOOR_APPLIED": "Anti-dilution conversion price hit its charter floor",
+    "W_STALE_CCP_SUSPECTED": "Conversion price may predate an earlier adjustment",
+    "W_SOLVER_AITKEN_FALLBACK": "Round solved by a fallback method",
+}
+
+
+def humanize_warning(code: str) -> str:
+    """A founder-facing label for a cap-table warning or blocker code.
+
+    The dict covers the solver warnings that have bespoke wording. Everything else -- including all
+    of the `E_` blocker codes, which have no prose map -- goes through the FALLBACK, so the fallback
+    is what has to be right. It strips the `E_`/`W_` prefix (which is our severity vocabulary, not a
+    word) and unsnakes the rest.
+
+    `tests/test_cap_table_warning_labels.py` asserts the OUTPUT never comes back internal-code-shaped,
+    over every code literal in this skill's scripts -- a per-code coverage test would red on codes that
+    never reach a founder and be deleted, where an output-shape test cannot rot.
+    """
+    label = _SOLVER_WARNING_LABELS.get(code)
+    if label:
+        return label
+    stem = code[2:] if code[:2] in ("E_", "W_") else code
+    return stem.replace("_", " ").capitalize() if stem else code
+
+
 def _solver_subject(w: dict) -> str:
     """The 'which one' half of a solver callout: the instrument or series the warning is about."""
     for key in ("instance_id", "series_id", "safe_id", "note_id"):

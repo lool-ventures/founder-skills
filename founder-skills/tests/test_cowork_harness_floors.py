@@ -44,9 +44,17 @@ CANARY = REPO_ROOT / "cowork-tests" / "canary" / "email-canary.cassette.json"
 # questions -- "which CLI runs this gate" vs "is this CLI new enough for the check to mean anything"
 # -- and collapsing them is the error this split exists to prevent. Rationale:
 # docs/internal/2026-08-27-cowork-harness-2.4.0-adoption-plan.md SS7.4-7.5.
-_CI_PIN = "3.6.0"
+_CI_PIN = "3.7.0"
 
 # The declared floor per site, with the reason it differs where it does.
+#
+# 2026-09-21: the pin and the recording floor DIFFER for the first time, deliberately. 3.7.0 is
+# entirely critique-evidence packaging -- `baselines/` is absent from the whole v3.6.0..v3.7.0 diff,
+# `CASSETTE_VERSION`/`MIN_SUPPORTED_CASSETTE_VERSION` are unchanged at 12/9, and nothing under
+# src/{runtime,hostloop,staging,agent,egress,sync}/ moved -- so none of this repo's three re-record
+# triggers (emulated tool surface, spawn env, system prompt) fired. Every past floor raise had a named
+# mechanism; this release has none, and raising a floor to chase a pin is what this split exists to
+# prevent. CI adopts 3.7.0 because the corpus packaging it fixes is what our ceiling guard measures.
 _RECORDING_FLOOR = "3.6.0"
 _REPLAY_FLOOR = "2.1.0"
 
@@ -277,7 +285,12 @@ def test_prose_pin_statements_are_not_stale() -> None:
         ("workflow install step NAME", wf, r"- name: Install cowork-harness \(pinned (\d+\.\d+\.\d+)", 1, _CI_PIN),
         ("CLAUDE.md 'PINNED EXACTLY at'", claude, r"PINNED EXACTLY at `(\d+\.\d+\.\d+)`", 2, _CI_PIN),
         ("CLAUDE.md registry description (pin)", claude, r"pinned exactly, `(\d+\.\d+\.\d+)`\)", 1, _CI_PIN),
-        ("CLAUDE.md 'RECORDING floor'", claude, r"RECORDING floor `>=(\d+\.\d+\.\d+)`", 1, _RECORDING_FLOOR),
+        # Two sites: the version-posture headline in Release Process and the privacy-gate clause. The
+        # headline was written "Recording floor" (title case) once, to keep this count at 1 -- which put
+        # the sentence a fresh session reads OUTSIDE every pattern, the exact miss the file used to warn
+        # about (then via whitespace: `>= 3.0.0`). Spell it RECORDING or the count reds; that is the point.
+        ("CLAUDE.md 'RECORDING floor'", claude, r"RECORDING floor `>=(\d+\.\d+\.\d+)`", 2, _RECORDING_FLOOR),
+        ("CLAUDE.md 'Replay skip-guard'", claude, r"Replay skip-guard `\^(\d+\.\d+\.\d+)`", 1, _REPLAY_FLOOR),
         (
             "CLAUDE.md registry description (floor)",
             claude,

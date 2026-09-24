@@ -22,9 +22,14 @@ JSON schemas for all analysis artifacts deposited during the market sizing workf
 | `existing_claims_detail` | object \| null | no | Narrative-only deck claims that don't fit the canonical `{tam, sam, som}` shape (regional sub-SAMs, time-anchored figures, alternative TAM frames). Rendered as a "Deck Claims (Narrative)" sub-section in the report; **not** validated, **not** reconciled. |
 | `currency` | string | no | ISO code every money figure in the analysis is denominated in (default `"USD"`). A label, and the conversion TARGET. Nothing is converted unless a money input declares a different source currency (`industry_total_currency` / `arpu_currency`) **and** a rate is supplied (`--fx-rate SRC:TGT=RATE`); a declared foreign currency with no rate is a hard error, never a guess. Any conversion performed is recorded in `sizing.json`'s `fx` block and disclosed in the report. `compose_report.py` and `visualize.py` render `"USD"` as a `$` prefix and any other code as a suffix (`270.0M EUR`); a non-USD analysis that converted nothing gets an explicit no-FX disclosure, and a converted one gets the rate, its date and its source instead. Checked ahead of `sizing.json`'s own `currency`; a disagreement between the two raises `CURRENCY_MISMATCH`. |
 | `sizing_basis` | string | no | Convention this analysis' figures follow: `"current_year"` (default) \| `"forecast_year"` \| `"mixed"` — see `tam-sam-som-methodology.md` §5. Carried into `sizing.json` via `market_sizing.py --sizing-basis` (Step 5). Absence means not declared; `compose_report.py` and `visualize.py` render "Not declared", never a silent default to `"current_year"`. |
-| `founder_stated_inputs` | object | no | Flat object of quantitative parameters the founder **stated outright** — any of `customer_count`, `arpu`, `serviceable_pct`, `target_pct`, `industry_total`, `segment_pct`, `share_pct`. Not for researched, inferred, or estimated values. `compose_report.py` compares these against what the sizing math actually consumed and raises `FOUNDER_VALUE_OVERRIDDEN` on a >0.5% divergence, so a researched figure cannot silently replace a founder-stated one. Empty/absent disables the check. |
+| `founder_stated_inputs` | object | no | Facts the founder stated about their **own business** — today `arpu` (what they charge or collect per customer) when stated outright. A figure about the market (`customer_count`, `industry_total`, `segment_pct`, `serviceable_pct`, `share_pct`, `target_pct`) is a claim even when the deck states it and belongs in `existing_claims`/`existing_claims_detail`; recording one here raises `FOUNDER_STATED_MARKET_FIGURE` (high), because the build that consumed it restated the deck instead of testing it. `compose_report.py` compares each stated value against what the sizing consumed and raises `FOUNDER_VALUE_OVERRIDDEN` (medium) on a >0.5% divergence. Empty object = check disabled. |
+| `founder_stated_inputs_period` | object | no | Per-field period a `founder_stated_inputs` figure was quoted per — `{"arpu": "month"}`; one of `year`, `quarter`, `month`, `week`. The math's `arpu` is annual, so `compose_report.py` multiplies the stated figure up before the fidelity comparison; a founder-stated $203/month against a computed $2,436 then agrees. An unrecognised value raises `FOUNDER_PERIOD_UNKNOWN` (medium) and the figure is compared as annual. |
+| `founder_stated_inputs_source` | object | no | Per-field source of a `founder_stated_inputs` figure: `"chat"` or `"document:<file>#page=<n>"`. Shown beside the figure in the report. |
+| `founder_stated_alternatives` | object | no | Other figures the founder stated for the same input, not used by the sizing: `{"arpu": [{"value", "period", "source", "label"}]}`. Recorded after the founder chose one (Steps 2–3); the report shows each under "Your Answers". Never compared by `FOUNDER_VALUE_OVERRIDDEN`. |
 | `founder_stated_inputs_currency` | string | no | ISO code the `founder_stated_inputs` money figures are in. Only consulted when a money input was FX-converted: without it the comparison against the converted figure would diverge by exactly the exchange rate, so `compose_report.py` reports `COMPARISON_CURRENCY_UNKNOWN` instead of a false `FOUNDER_VALUE_OVERRIDDEN`. Declare it whenever the founder's figures are not in `currency`. |
 | `existing_claims_currency` | string | no | ISO code the `existing_claims` figures are in — the deck's own currency, which is not always the analysis currency. Same rule as above: without it a converted run reports `COMPARISON_CURRENCY_UNKNOWN` rather than a false `DECK_CLAIM_MISMATCH`. |
+| `existing_claims_horizon_months` | object | no | `{tam, sam, som}` — the period each stated figure represents, in months (`null` when not stated or not time-bound). Only `som` is read today: a SOM stated as a plan-year run-rate is `12`, a "by 2028" figure is the months from `analysis_date`. Compared against `capture_horizon_months`; when they differ the report says so instead of computing a delta between two periods, which is what reported a plan case as a 5.6x understatement. |
+| `capture_horizon_months` | integer | no | The period the computed SOM represents — what `share_pct` / `target_pct` describe, typically 36 or 60. Required for the horizon check to run; without it the comparison behaves exactly as before. |
 | `competitive_landscape_notes` | string \| null | no | Summary of any competitor/competitive-positioning content found in the deck (or `null` if the deck doesn't address competition). The CHECKLIST sub-agent never reads the deck itself — it scores `competitive_landscape_acknowledged` from this field only. |
 | `gtm_evidence_notes` | string \| null | no | Summary of any customer-acquisition strategy, sales-funnel metrics, or comparable-company benchmark found in the materials (or `null` if none found). The CHECKLIST sub-agent never reads the deck itself — it scores `som_backed_by_gtm` from this field only. Distinct from `projections_alignment_notes` below: this is customer-acquisition evidence, not financial-plan evidence, and one field cannot stand in for both. |
 | `projections_alignment_notes` | string \| null | no | Summary of whether the materials show the SOM figure lining up with the hiring plan, sales capacity, or burn rate (or `null` if not addressed). The CHECKLIST sub-agent never reads the financial model itself — it scores `som_consistent_with_projections` from this field only. |
@@ -69,6 +74,10 @@ JSON schemas for all analysis artifacts deposited during the market sizing workf
 | `approach_chosen` | string | yes | One of: `"top_down"`, `"bottom_up"`, `"both"` |
 | `rationale` | string | yes | Why this approach was chosen |
 | `accepted_warnings` | object[] | no | Warning codes the analyst expects and accepts |
+| `red_team_revision` | object | no | The one founder-approved revision after the adversarial review (Step 6d): `{"approved_by_founder": true, "founder_words": "<their answer>", "changes": [{"field", "from", "to"}]}`. Without it a second review round raises `RED_TEAM_RERUN_UNAPPROVED` and the first review is shown; a founder-stated figure changed after the review and not listed in `changes` raises `FOUNDER_INPUT_REWRITTEN`. |
+| `founder_notes` | string[] | no | Founder answers given after the revision round was used; rendered under "Your Answers" instead of restated in chat. |
+| `gate_defaults` | string[] | no | Questions not asked because the founder asked not to be asked; the default (option 1) was taken. Rendered under "Your Answers". |
+| `red_team_skipped` | string | no | Why no adversarial review ran (Step 6c). One of exactly `founder_declined`, `dispatch_failed`, `no_network_available`, `no_subagent_dispatch` — a closed enum, because this value selects the sentence the founder reads and free text would be an un-reviewed founder-facing string. `compose_report.py` REFUSES to compose when there is neither a fresh `redteam.json` for this run nor a recognised value here; an unrecognised value is refused too. There is deliberately no value meaning "not necessary". |
 | `metadata` | object | yes | `{"run_id": "<RUN_ID>"}` — stamped on every artifact (see inputs.json) |
 
 ### accepted_warnings[] entry
@@ -83,7 +92,7 @@ JSON schemas for all analysis artifacts deposited during the market sizing workf
 ```json
 {
   "approach_chosen": "both",
-  "rationale": "Industry reports available for top-down, company has customer/pricing data for bottom-up. Cross-validation preferred.",
+  "rationale": "Industry reports available for top-down, company has customer/pricing data for bottom-up. Running both lets us say what drives any gap.",
   "accepted_warnings": [
     {"code": "TAM_DISCREPANCY", "reason": "Different scopes intended", "match": "differ by"}
   ],
@@ -139,6 +148,7 @@ JSON schemas for all analysis artifacts deposited during the market sizing workf
 | `category` | string | yes | One of: `"sourced"` (cite the source), `"derived"` (show formula), `"agent_estimate"` (flagged as unsupported) |
 | `source` | string | no | Citation for sourced assumptions |
 | `derivation` | string | no | Formula/logic for derived assumptions |
+| `factors` | object[] | no | For `derived` assumptions: **two or more multiplicands**, each `{"factor_id": "<snake_case>", "value": <number>, "source_id": "<a sources[] title or short slug, or company_stated / agent_estimate>"}`. Percent-point parameters (`segment_pct`, `serviceable_pct`, `share_pct`, `target_pct`) store the product ×100. `compose_report.py` recomputes it and raises `FACTOR_PRODUCT_MISMATCH` (medium) beyond 2%, and reports figures the two approaches share. An entry may carry `"role": "divisor"` to itemize a ratio instead of only a product — e.g. `{"factor_id": "target_segment", "value": 15000000, "source_id": "..."}, {"factor_id": "total_market", "value": 64200000, "source_id": "...", "role": "divisor"}` narrows to 15,000,000 ÷ 64,200,000, not a nonsensical product of the two. A single entry is the value under another name, not a chain, and reads as un-itemized. A sum is not a chain either: describe it in `label` and omit `factors`; the report will say the figure is not itemized, which is true. A derived assumption with no usable `factors` raises `UNSTRUCTURED_DERIVATION` (low), aggregated into one warning naming every such figure. |
 
 **Quantitative parameter names** (must match exactly for UNSOURCED_ASSUMPTIONS check):
 `customer_count`, `arpu`, `serviceable_pct`, `target_pct`, `industry_total`, `segment_pct`, `share_pct`
@@ -166,7 +176,8 @@ Qualitative assumptions (e.g., `market_growing`, `regulatory_favorable`) are exe
   ],
   "assumptions": [
     {"name": "industry_total", "value": 50000000000, "category": "sourced", "source": "Grand View Research 2025"},
-    {"name": "segment_pct", "label": "SMB Segment Share", "value": 16, "category": "derived", "derivation": "SMB share of total market from BLS data"},
+    {"name": "segment_pct", "label": "SMB Segment Share", "value": 16, "category": "derived", "derivation": "SMB share of total market from BLS data",
+     "factors": [{"factor_id": "has_payroll", "value": 0.40, "source_id": "BLS 2024"}, {"factor_id": "uses_accounting_software", "value": 0.40, "source_id": "company_stated"}]},
     {"name": "customer_count", "value": 4500000, "category": "agent_estimate"},
     {"name": "market_growing", "value": true, "category": "sourced", "source": "Grand View Research 2025"}
   ],
@@ -180,6 +191,8 @@ Qualitative assumptions (e.g., `market_growing`, `regulatory_favorable`) are exe
 - `UNSOURCED_ASSUMPTIONS`: agent_estimate assumptions whose `name` is a quantitative parameter but not found in sensitivity.json scenarios with `confidence: "agent_estimate"`
 - `REFUTED_CLAIMS`: any figure with `status: "refuted"` (medium severity)
 - `REFUTED_MISSING_REASON`: refuted figure without `refutation` field (medium severity)
+- `FACTOR_PRODUCT_MISMATCH`: a `derived` assumption whose `factors` do not multiply to its stated value, beyond 2% (medium severity)
+- `UNSTRUCTURED_DERIVATION`: `derived` assumptions carrying no `factors` (low severity; one warning per run, naming each)
 
 ---
 
@@ -198,7 +211,7 @@ This is the direct output of `market_sizing.py`. Structure depends on approach u
 | `sizing_basis` | when declared | `"current_year"` \| `"forecast_year"` \| `"mixed"` — passed through from `inputs.json` via `market_sizing.py --sizing-basis` (Step 5). **Absent, not defaulted, when the run never declared one** — `compose_report.py` / `visualize.py` render "Not declared" rather than assuming `"current_year"`. See `tam-sam-som-methodology.md` §5. |
 | `top_down` | approach is `"top-down"` or `"both"` | Top-down results |
 | `bottom_up` | approach is `"bottom-up"` or `"both"` | Bottom-up results |
-| `comparison` | approach is `"both"` | Cross-validation results |
+| `comparison` | approach is `"both"` | Top-down vs bottom-up comparison |
 | `fx` | only when a conversion happened | `{as_of, source, conversions: [{field, from, to, rate, original_value, converted_value}]}`. Present only when a money input declared a source currency differing from `currency` AND a rate was supplied. `converted_value` **is** the number the sizing math consumed, so `compose_report.py` can compare a founder-stated or deck-claimed figure across the conversion. Absent on every run that converted nothing — which is every run that does not opt in. |
 | `metadata` | when `--run-id` passed | `{"run_id": "<RUN_ID>"}` — stamped by the producer for `STALE_ARTIFACT` detection |
 
@@ -271,6 +284,21 @@ Provenance is **not stored** in `sizing.json` — it is computed at render time 
 Only parameters in `QUANTITATIVE_PARAMS` are matched: `customer_count`, `arpu`, `serviceable_pct`, `target_pct`, `industry_total`, `segment_pct`, `share_pct`. Intermediate keys (like `tam`, `sam`, `serviceable_customers`, `target_customers`) in figure inputs are silently skipped.
 
 ---
+
+## redteam.json
+
+Written by `red_team.py` from the RED_TEAM sub-agent's hand-off (Step 6c). Optional artifact; when absent, `methodology.red_team_skipped` must say why. `red_team.py` also writes an append-only copy per round, `handoff/<run_id>/redteam.r<N>.json` (the review plus `_review_copy: {round, handoff_sha256, inputs_at_review}`); compose and visualize render the review from that copy, so an edit to `redteam.json` changes nothing the founder reads and raises `REDTEAM_ALTERED`.
+
+| Field | Type | Notes |
+|---|---|---|
+| `findings[]` | object[] | Accepted findings: `claim_attacked`, `what_is_true`, `evidence_quote`, `source_url`, `source_title`, `severity` (`high`/`medium`/`low`), `quote_verified`. |
+| `findings[].source_url` | string | One of three provenances: a web address; exactly `internal:analysis` (the sentence is the analysis's own); or `document:<filename>#page=<n>` (`n` ≥ 1; required for a PDF, omitted for a file with no pages such as `.md`) — the founder's own page, where `<filename>` must be a file the founder supplied (as mirrored under the hand-off dir's `docs/`). A document citation needs a six-word quote. |
+| `findings[].parameter` | string | Optional: the sizing input the claim is about (one of the seven parameter names). With `severity: high` and the input in `inputs.founder_stated_inputs`, both reports mark every row built on it with §. Unknown names are dropped from the finding, never a rejection. |
+| `findings[].quote_verified` | bool or null | Document citations only: `true`/`false` when the page had text (a text layer, or an `ocr_uploads.py` sidecar) and the quote was / was not found on it; `null` when nothing on disk could check it. Web and internal findings are always `null`. |
+| `rejected[]` | object[] | `{claim_attacked, reason}` for each finding that could not be shown (no source, a document not supplied, a token quoted as a sentence, an internal quote that is JSON rather than a sentence). Counted, never dropped silently. |
+| `could_not_check[]` | string[] | Claims the review could not assess, each with its reason. |
+| `sources_read[]` / `sources_unread[]` | string[] | Documents the red team opened / did not open, by filename, against the uploads directory. `sources_unread` non-empty raises `RED_TEAM_SOURCES_UNREAD` (high). |
+| `summary` | object | `accepted`, `rejected`, `unchecked`, `sources_unread`, `by_severity`, `humanized` (how many of our file names and identifiers `red_team.py` reworded in `claim_attacked` / `what_is_true` / `source_title`; `evidence_quote` is never reworded). |
 
 ## sensitivity.json
 

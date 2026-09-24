@@ -156,8 +156,8 @@
       "id": "CASH_20",
       "category": "Expenses, Cash & Runway",
       "label": "Headcount plan drives expenses",
-      "status": "pass",
-      "evidence": "fixture",
+      "status": "fail",
+      "evidence": "Opex is a flat monthly number; no headcount plan drives it, so hiring does not move the burn.",
       "notes": null
     },
     {
@@ -284,9 +284,9 @@
       "id": "BRIDGE_36",
       "category": "Fundraising Bridge",
       "label": "Raise-runway-milestones-next round",
-      "status": "pass",
-      "evidence": "fixture",
-      "notes": null
+      "status": "warn",
+      "evidence": "Raise size and runway are stated; no milestone ties the spend to the next round.",
+      "notes": "Milestones are named in prose but not costed."
     },
     {
       "id": "BRIDGE_37",
@@ -371,13 +371,13 @@
   ],
   "summary": {
     "total": 46,
-    "pass": 34,
-    "fail": 0,
-    "warn": 0,
+    "pass": 32,
+    "fail": 1,
+    "warn": 1,
     "not_applicable": 12,
-    "score_pct": 100.0,
-    "business_quality_pct": 100.0,
-    "model_maturity_pct": 100.0,
+    "score_pct": 95.6,
+    "business_quality_pct": 97.1,
+    "model_maturity_pct": 94.1,
     "overall_status": "strong",
     "by_category": {
       "Structure & Presentation": {
@@ -393,8 +393,8 @@
         "not_applicable": 0
       },
       "Expenses, Cash & Runway": {
-        "pass": 8,
-        "fail": 0,
+        "pass": 7,
+        "fail": 1,
         "warn": 0,
         "not_applicable": 5
       },
@@ -405,9 +405,9 @@
         "not_applicable": 0
       },
       "Fundraising Bridge": {
-        "pass": 3,
+        "pass": 2,
         "fail": 0,
-        "warn": 0,
+        "warn": 1,
         "not_applicable": 0
       },
       "Sector-Specific": {
@@ -423,8 +423,28 @@
         "not_applicable": 1
       }
     },
-    "failed_items": [],
-    "warned_items": []
+    "failed_items": [
+      {
+        "id": "CASH_20",
+        "category": "Expenses, Cash & Runway",
+        "label": "Headcount plan drives expenses",
+        "evidence": "Opex is a flat monthly number; no headcount plan drives it, so hiring does not move the burn.",
+        "notes": null,
+        "severity": "high"
+      }
+    ],
+    "warned_items": [
+      {
+        "id": "BRIDGE_36",
+        "category": "Fundraising Bridge",
+        "label": "Raise-runway-milestones-next round",
+        "evidence": "Raise size and runway are stated; no milestone ties the spend to the next round.",
+        "notes": "Milestones are named in prose but not costed.",
+        "severity": "high"
+      }
+    ],
+    "self_gated_items": [],
+    "unresolved_profile_exclusions": {}
   },
   "validation": {
     "status": "valid",

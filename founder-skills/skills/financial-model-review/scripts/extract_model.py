@@ -173,9 +173,35 @@ def detect_periodicity(headers: list[str]) -> str:
 # Spreadsheet error tokens. openpyxl with data_only=True returns the cached
 # computed value, so a broken cell arrives as this literal string — the signal is
 # already in the extracted values, it just needs counting. STRUCT_08 is scored on
-# exactly these, and without a summary the assessor (which reads inputs.json, not
-# this file) has no way to see them.
+# exactly these, and without a summary the assessor (which reads model_data.json
+# per SKILL.md's CHECKLIST dispatch, not inputs.json) has no way to see them.
+# Note: this is a DIFFERENT field from `inputs.structure.structural_errors`
+# (references/schema-inputs.md:312, a `string[]`) — that one is founder-authored
+# prose, this one is a `dict[str, int]` tally computed from the extracted cells.
 _SPREADSHEET_ERROR_TOKENS = ("#REF!", "#DIV/0!", "#VALUE!", "#NAME?", "#N/A", "#NULL!", "#NUM!")
+
+
+def _error_scan_view(sheets: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """A scan-only copy whose `rows` also covers the header and any pre-header rows.
+
+    Fresh dicts and fresh lists: the returned sheet structure keeps its headers/rows split, which
+    every other consumer reads.
+    """
+    return [
+        {
+            **sheet,
+            "rows": [
+                row
+                for row in (
+                    *(sheet.get("pre_header_rows") or []),
+                    sheet.get("headers") or [],
+                    *(sheet.get("rows") or []),
+                )
+                if row
+            ],
+        }
+        for sheet in sheets
+    ]
 
 
 def _count_structural_errors(sheets: list[dict[str, Any]]) -> dict[str, int]:
@@ -535,7 +561,10 @@ def extract_xlsx(file_path: str) -> dict[str, Any]:
         "source_format": "xlsx",
         "source_file": os.path.basename(file_path),
         "periodicity_summary": _periodicity_summary(sheets),
-        "structural_errors": _count_structural_errors(sheets),
+        # Header and pre-header rows carry error tokens too -- an exported model's `#REF!` lands
+        # wherever the break was. Scanning `rows` alone made the same file tally differently as an
+        # .xlsx and as a .csv, which is the opposite of the parity this exists for.
+        "structural_errors": _count_structural_errors(_error_scan_view(sheets)),
     }
     if extraction_warnings:
         result["extraction_warnings"] = extraction_warnings
@@ -566,6 +595,7 @@ def extract_csv(file_path: str) -> dict[str, Any]:
             "source_format": "csv",
             "source_file": os.path.basename(file_path),
             "periodicity_summary": "unknown",
+            "structural_errors": _count_structural_errors(empty_sheets),
         }
 
     headers = rows_raw[0]
@@ -597,11 +627,16 @@ def extract_csv(file_path: str) -> dict[str, Any]:
             "cell_refs": [],
         }
     ]
+    # `headers` (rows_raw[0]) sits outside `rows_data`, so an error token in row 0 would
+    # otherwise go uncounted. Same scan-only view the .xlsx path uses, so one file tallies
+    # the same either way.
+    error_scan_sheets = _error_scan_view(csv_sheets)
     return {
         "sheets": csv_sheets,
         "source_format": "csv",
         "source_file": os.path.basename(file_path),
         "periodicity_summary": _periodicity_summary(csv_sheets),
+        "structural_errors": _count_structural_errors(error_scan_sheets),
     }
 
 

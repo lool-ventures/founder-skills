@@ -27,6 +27,11 @@ import sys
 import uuid
 from typing import Any, TypeGuard
 
+# Sibling helper: the unsupported-multiple detector, shared with visualize.py and explore.py so a
+# flagged figure is caveated on every founder-facing surface, not just the one compose renders.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _evidence_multiple  # noqa: E402
+
 # Sentinel for corrupt (unparseable) artifact files
 _CORRUPT: dict[str, Any] = {"__corrupt__": True}
 
@@ -77,6 +82,7 @@ WARNING_SEVERITY: dict[str, str] = {
     "RUNWAY_INCONSISTENCY": "medium",
     "METRICS_GAPS": "medium",
     "METRIC_SELF_CONTRADICTION": "medium",
+    "UNSUPPORTED_MULTIPLE": "medium",
     # v0.4.2 Mitigation 2 — informational only (uuid is per-run, won't collide)
     "MARKER_COLLISION": "low",
 }
@@ -412,6 +418,68 @@ def _metric_claims_in_text(text: str, labels: tuple[str, ...]) -> list[float]:
     return found
 
 
+#: Founder-facing stand-in when a checklist item carries no label. Never the criterion id.
+_CHECKLIST_LABEL_FALLBACK = "one of the checks"
+
+# --- unsupported-multiple check -------------------------------------------------------------
+#
+# Detection lives in the sibling `_evidence_multiple` because `visualize.py` and `explore.py`
+# render the same assessor-written evidence and never see compose's output -- a check in only one
+# of the three warns on one surface while the other two ship the unsupported number plain. That is
+# what the first cut of this change did.
+
+
+def _items_with_unsupported_multiple(checklist: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Checklist items whose own evidence or notes state a multiple their figures contradict."""
+    if not _usable(checklist):
+        return []
+    assert checklist is not None
+    flagged: list[dict[str, Any]] = []
+    for item in _as_list(checklist.get("items")):
+        if not isinstance(item, dict):
+            continue
+        for field in ("evidence", "notes"):
+            divergence = _evidence_multiple.unsupported_multiple(item.get(field))
+            if divergence is not None:
+                flagged.append(
+                    {
+                        "id": str(item.get("id") or ""),
+                        # The item's OWN label. NOT `_harvest`, which keys on `id` and would ship
+                        # `UNIT_19` to a founder; and `_ids_to_labels` does not save this -- it
+                        # rewrites ids inside evidence prose and never touches `items[].id`.
+                        "label": str(item.get("label") or ""),
+                        "field": field,
+                        "divergence": divergence,
+                    }
+                )
+                break
+    return flagged
+
+
+def _check_unsupported_multiple(checklist: dict[str, Any] | None) -> list[dict[str, str]]:
+    """Warn when a checklist item states a multiple the figures beside it do not support."""
+    flagged = _items_with_unsupported_multiple(checklist)
+    if not flagged:
+        return []
+    # NEVER the bare id as a fallback: this message is founder-facing, and an item with no label
+    # is exactly the case both HTML renderers already code around. `_ft.scan` would only report a
+    # leaked id at LOW severity, so it would ship.
+    labels = [f["label"] or _CHECKLIST_LABEL_FALLBACK for f in flagged]
+    return [
+        _warn(
+            "UNSUPPORTED_MULTIPLE",
+            f"{len(flagged)} checklist item(s) state a multiple contradicted by the figures cited "
+            f"in the same sentence: {[f['id'] for f in flagged]}",
+            founder_message=(
+                f"{len(flagged)} check{'s' if len(flagged) > 1 else ''} state a 'times' comparison "
+                f"the numbers quoted beside it do not support "
+                f"({', '.join(labels)}). Treat that comparison as unchecked — the other figures in "
+                f"{'those checks are' if len(flagged) > 1 else 'that check are'} unaffected."
+            ),
+        )
+    ]
+
+
 def _check_metric_self_contradiction(
     unit_economics: dict[str, Any] | None,
     checklist: dict[str, Any] | None,
@@ -582,6 +650,7 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
 
     # 0. METRIC_SELF_CONTRADICTION -- two different values for one metric.
     warnings.extend(_check_metric_self_contradiction(unit_economics, checklist))
+    warnings.extend(_check_unsupported_multiple(checklist))
 
     # 1. CORRUPT_ARTIFACT / MISSING_ARTIFACT -- required artifacts
     for name in REQUIRED_ARTIFACTS:
@@ -976,7 +1045,15 @@ def _section_checklist(checklist: dict[str, Any] | None) -> str:
     if failed_items:
         lines.append("### Failed Items\n")
         for item in failed_items:
-            evidence = item.get("evidence", "")
+            # Caveat inline, beside the claim, not only in the warnings section at the foot of the
+            # report. The two HTML pages have no warnings section at all, so they depend on this;
+            # report.md has both, and a founder reading a failed item should not have to scroll to
+            # learn that its comparison is unchecked.
+            # `notes` as well: detection and the warning read both fields, and caveating only one
+            # means a finding whose multiple sits in `notes` is warned about and never qualified
+            # where it is read. Neither of these two blocks renders `notes` today, so this is a
+            # guard against one line of rendering change, not a live leak.
+            evidence = _evidence_multiple.caveat(item.get("evidence", ""))
             lines.append(f"- **{_item_heading(item)}**: {_md_safe(evidence)}")
         lines.append("")
 
@@ -985,7 +1062,11 @@ def _section_checklist(checklist: dict[str, Any] | None) -> str:
     if warned_items:
         lines.append("### Warned Items\n")
         for item in warned_items:
-            evidence = item.get("evidence", "")
+            # Caveat inline, beside the claim, not only in the warnings section at the foot of the
+            # report. The two HTML pages have no warnings section at all, so they depend on this;
+            # report.md has both, and a founder reading a failed item should not have to scroll to
+            # learn that its comparison is unchecked.
+            evidence = _evidence_multiple.caveat(item.get("evidence", ""))
             lines.append(f"- **{_item_heading(item)}**: {_md_safe(evidence)}")
         lines.append("")
 
@@ -1484,6 +1565,37 @@ def _emit_coaching_payload(
     raw_warned: list[dict[str, Any]] = _as_list(summary.get("warned_items"))
 
     failed_items, warned_items, truncated, truncated_count = _truncate_actionable_items(raw_failed, raw_warned)
+
+    # Drop the criterion id before the coach sees it. Its commentary is appended to the founder's
+    # report, and both prompts tell it never to name a checklist id -- while this payload handed it
+    # one in every item, which is the same "rests on the model obeying prose" the coverage field
+    # three functions down deliberately refuses ("no criterion ids, since this text reaches a
+    # founder via commentary"). `label`, `category`, `evidence` and `severity` are what the coach
+    # writes from; the id was never one of them.
+    failed_items = [{k: v for k, v in item.items() if k != "id"} for item in failed_items]
+    warned_items = [{k: v for k, v in item.items() if k != "id"} for item in warned_items]
+
+    # Caveat an unsupported multiple IN the payload, not only in the warnings section.
+    #
+    # WHY THIS IS A PREREQUISITE AND NOT A FOLLOW-UP. `_section_warnings` is spliced last and the
+    # coaching marker after it, so the warning renders IMMEDIATELY ABOVE the commentary -- and on
+    # the run that produced this finding, the unsupported multiple became the commentary's
+    # HEADLINE. Warning without this ships a report that visibly contradicts itself one line apart,
+    # which is the harm `_check_metric_self_contradiction`'s header describes. `high_severity_warnings`
+    # filters to `high` (below), so a medium warning cannot reach the coach by that route.
+    #
+    # The caveat is appended to the evidence text rather than carried as a flag key, deliberately:
+    # a new key needs the coach to be told to read it, which is SKILL.md and agent-body prose and a
+    # fresh dispatch contract. A sentence the coach already reads needs neither, and stays true if
+    # the flag is a false positive.
+    for bucket in (failed_items, warned_items):
+        for item in bucket:
+            for field in ("evidence", "notes"):
+                # No `break`: an item can carry an unsupported multiple in BOTH fields, and the
+                # coach reads whichever the renderer happens to prefer.
+                caveated = _evidence_multiple.caveat(item.get(field))
+                if caveated is not item.get(field):
+                    item[field] = caveated
 
     company_name: str | None = None
     if inputs is not None:

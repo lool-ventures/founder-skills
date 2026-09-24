@@ -468,7 +468,13 @@ keys (do not refetch from disk):
   moderate_conviction_count, concern_count, dealbreaker_count)
 - `dealbreakers` — array of `{dimension, description, severity: "high"}`
 - `concerns` — array of `{dimension, description}` (no severity field)
-- `high_severity_warnings` (codes only)
+- `consensus_strength` — `strong`, `mixed` or `weak`: how far the three
+  partners agreed. Qualify the verdict with it. A `weak` consensus means
+  they reached three different conclusions, so the headline is one reading
+  among three and must not be written as the committee's settled view.
+- `high_severity_warnings` — objects, one per warning, each with `code`,
+  `label` and `message`. Write the `label`; the `code` is ours, not the
+  founder's.
 - `company_name`
 - `review_dir`, `report_path` — context only; you don't open either.
 - `insertion_marker` — consumed by the main thread's

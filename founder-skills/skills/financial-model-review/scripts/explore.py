@@ -26,10 +26,12 @@ from pathlib import Path
 from typing import Any, TypeGuard
 
 # ---------------------------------------------------------------------------
-# Import benchmark tables from unit_economics.py
+# Sibling imports: the shared unsupported-multiple detector (see compose_report.py, so this page
+# cannot drift from report.md) and the benchmark tables from unit_economics.py.
 # ---------------------------------------------------------------------------
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _evidence_multiple  # noqa: E402
 from unit_economics import CAC_PAYBACK_BY_ACV, STAGE_BENCHMARKS, gm_benchmark_for, has_ai_cogs  # noqa: E402, I001
 
 # ---------------------------------------------------------------------------
@@ -485,12 +487,22 @@ def _checklist_item_row(item: Any, kind: str) -> str:
         return ""
     item_id = str(item.get("id") or "").strip()
     label = str(item.get("label") or item.get("criterion") or "").strip()
-    evidence = str(item.get("evidence") or "").strip()
+    # Same caveat as report.md and report.html: this page reads checklist.json directly and never
+    # sees compose's warnings, so an unsupported comparison would render here unqualified.
+    evidence = _evidence_multiple.caveat(str(item.get("evidence") or "").strip())
     badge_class = "fail" if kind == "fail" else "warning"
     icon = "✗" if kind == "fail" else "⚠"
-    title = ": ".join(part for part in (item_id, label) if part)
+    # The id is NOT founder-facing text. This rendered `STRUCT_01: No structural errors` on every
+    # failed row -- a criterion id in front of every finding, built from the item's own `id` field,
+    # so no amount of scrubbing the EVIDENCE could reach it. It went unseen because the fmr HTML
+    # fixture carried 34 pass / 12 not_applicable and zero fail or warn, so this row was never
+    # walked by `test_html_founder_text.py`; the fixture now carries one of each.
+    # The id stays available to anyone inspecting the DOM as a data- attribute, which that scan
+    # correctly does not treat as prose.
+    title = label or "Checklist item"
+    id_attr = f' data-criterion="{_esc(item_id)}"' if item_id else ""
     detail = f' <span class="checklist-item-evidence">&mdash; {_esc(evidence)}</span>' if evidence else ""
-    return f'<li><span class="badge {badge_class}">{icon}</span> {_esc(title)}{detail}</li>'
+    return f'<li{id_attr}><span class="badge {badge_class}">{icon}</span> {_esc(title)}{detail}</li>'
 
 
 def _render_checklist_summary(checklist: dict[str, Any] | None) -> str:

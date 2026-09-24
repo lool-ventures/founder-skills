@@ -22,17 +22,53 @@ rather than the skill.
 
 from __future__ import annotations
 
+import importlib.util
 import json
+import shlex
+import subprocess
+import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 from _e2e_harness import (
+    PLUGIN_PATH,
     assert_coaching_commentary_landed,
     assert_run_id_parity,
     has_claude_auth,
     locate_review_dir,
-    run_skill,
+    run_skill_capture,
 )
+
+# A two-page IMAGE-ONLY synthetic deck. Attached so the run exercises the branch that failed live:
+# every one of the founder's PDFs on that run had no text layer, and the red team never opened them.
+SCANNED_DECK = Path(__file__).resolve().parent / "fixtures" / "market-sizing" / "synthetic-deck-scanned.pdf"
+SCRIPTS = PLUGIN_PATH / "skills" / "market-sizing" / "scripts"
+
+_HANDOVER_CHECK = PLUGIN_PATH / "scripts" / "_handover_check.py"
+
+
+def _load_handover_check() -> Any:
+    """The containment rule the Stop hook runs, loaded by path so the lane and the hook share it."""
+    spec = importlib.util.spec_from_file_location("_handover_check", _HANDOVER_CHECK)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+_handover = _load_handover_check()
+
+
+def _squash(text: str) -> str:
+    """Whitespace-normalised: an added sentence or a dropped line still differs; a re-typed
+    indent or a trailing newline does not."""
+    return " ".join(text.split())
+
+
+def _script(name: str, args: list[str]) -> str:
+    r = subprocess.run([sys.executable, str(SCRIPTS / name), *args], capture_output=True, text=True, check=True)
+    return r.stdout
 
 
 @pytest.mark.e2e
@@ -48,17 +84,152 @@ def test_market_sizing_smoke(tmp_path: Path) -> None:
     workdir = tmp_path / "workspace"
     workdir.mkdir()
 
+    # The attached deck is Foobar HEALTH (a synthetic eldercare care-management company), and its
+    # page 2 says the recurring rate rests on n=17 patient-months. The prompt states the same figure
+    # on n=47 -- the misread from the run that motivated all of this -- so a red team that reads the
+    # page has something to cite. The TAM is stated without a currency on purpose (see the module
+    # docstring: that is the comparison_blocked shape).
     prompt = (
-        "Use the market-sizing skill. Foobar Systems is a fictional seed-stage company "
-        "selling payments-reconciliation software to equipment rental marketplaces, "
-        "priced per marketplace per month. Size the market top-down AND bottom-up. "
-        "Our deck states a TAM of 3.2 billion. Use 'foobar-systems' as the slug and USD "
-        "as the analysis currency. Don't ask clarifying questions — just run it end to "
-        "end and produce the report."
+        "Use the market-sizing skill. Foobar Health is a fictional seed-stage company delivering "
+        "clinician-led care management to seniors, distributed through employer benefit programs and "
+        "reimbursed under care-management codes, priced per patient per month. Our deck is attached as "
+        "a scanned PDF. Our recurring net-collectible rate is $203 per patient-month, measured over 47 "
+        "patient-months from 30 patients. Our deck states a TAM of 3.2 billion. Size the market "
+        "top-down AND bottom-up. Use 'foobar-health' as the slug and USD as the analysis currency. "
+        "Don't ask clarifying questions — just run it end to end and produce the report."
     )
 
-    captured = run_skill(prompt, workdir, label="market-sizing")
+    cap = run_skill_capture(prompt, workdir, label="market-sizing", uploads=[SCANNED_DECK])
+    captured = cap.messages
     review_dir = locate_review_dir(workdir, "market-sizing-*", captured, "market-sizing")
+
+    # === The three boundaries the boundary-control work put under script control. ===
+    #
+    # (a0) The scored steps were DISPATCHED, not inlined. MEASURED 2026-09-22 on a surface that
+    # serves the skill without its plugin (claude.ai, flat skill mount): every Context A step ran
+    # inline, the model hand-wrote each hand-off file, and it graded its own 22-item checklist
+    # 81.8% -- a report indistinguishable from a checked one. Step 0's preflight stops that surface;
+    # this is the guard for a surface where dispatch EXISTS and the model inlines the step anyway,
+    # which no artifact can show (a hand-off file looks the same whoever wrote it). The checklist is
+    # the one that matters: it is the skill's own self-assessment, so a self-graded one is a score
+    # with no second party in it at all.
+    contexts = [
+        str(t["input"].get("prompt", "")).split("\n", 1)[0] for t in cap.tool_uses if t["name"] in ("Task", "Agent")
+    ]
+    assert "CONTEXT: CHECKLIST" in contexts, (
+        f"the checklist was not dispatched -- a self-graded score is not a score. Dispatched: {contexts}"
+    )
+
+    # (a) The red-team prompt is the GENERATED one, byte for byte. On the live run that motivated
+    # this, the main thread hand-filled the template and added a "Key things worth attacking"
+    # list from its own hypotheses; every finding mapped onto it. A sentinel check would let a
+    # steer through in the middle; equality with a regeneration does not.
+    dispatches = [
+        t
+        for t in cap.tool_uses
+        if t["name"] in ("Task", "Agent") and t["input"].get("subagent_type") == "founder-skills:market-sizing-redteam"
+    ]
+    assert len(dispatches) == 1, f"expected one red-team dispatch, saw {len(dispatches)}"
+    rt_dispatch = dispatches[0]
+    dispatched = str(rt_dispatch["input"].get("prompt", ""))
+    assert dispatched.startswith("CONTEXT: RED_TEAM\n"), dispatched[:200]
+    # Regenerate from what the prompt itself declares plus the on-disk hand-off dir. The agent-
+    # namespace forms are read back out of the prompt (OUTPUT_PATH, the inputs.json line), so the
+    # comparison does not depend on how the skill derived them.
+    run_id = dispatched.split("RUN_ID: ", 1)[1].split("\n", 1)[0]
+    handoff_agent = dispatched.split("OUTPUT_PATH: ", 1)[1].split("/redteam_output.json", 1)[0]
+    inputs_line = next(ln.strip() for ln in dispatched.splitlines() if ln.strip().endswith("/inputs.json"))
+    analysis_dir_agent = inputs_line[: -len("/inputs.json")]
+    handoff_dir = review_dir / "handoff" / run_id
+    regenerated = _script(
+        "dispatch_prompt.py",
+        [
+            "red_team",
+            "--run-id",
+            run_id,
+            "--analysis-dir",
+            str(review_dir),
+            "--handoff-dir",
+            str(handoff_dir),
+            "--analysis-dir-agent",
+            analysis_dir_agent,
+            "--handoff-agent",
+            handoff_agent,
+        ],
+    )
+    assert _squash(dispatched) == _squash(regenerated), (
+        "the dispatched red-team prompt is not the generated one -- something was added, removed or "
+        "rewritten between the script and the Task call"
+    )
+
+    # (b) The red team actually OPENED the deck, and opened it BEFORE the artifacts -- SDK evidence,
+    # not the self-report. "Documents first" is a sentence in the prompt; the tool stream is the fact.
+    rt_reads = cap.calls("Read", parent=rt_dispatch["id"])
+    read_paths = [str(t["input"].get("file_path", "")) for t in rt_reads]
+    deck_idx = next((i for i, p in enumerate(read_paths) if SCANNED_DECK.name in p), None)
+    artifact_idx = next((i for i, p in enumerate(read_paths) if p.endswith(".json")), None)
+    assert deck_idx is not None, f"the red team never opened the deck; it read {read_paths}"
+    assert artifact_idx is None or deck_idx < artifact_idx, (
+        f"the red team read the artifacts before the deck: {read_paths}"
+    )
+    redteam = json.loads((review_dir / "redteam.json").read_text(encoding="utf-8"))
+    assert redteam["sources_unread"] == [], redteam["sources_unread"]
+    assert SCANNED_DECK.name in redteam["sources_read"], redteam["sources_read"]
+    # Evidence, not a gate: is the page misread cited? Printed so the write-up can quote it.
+    doc_findings = [f for f in redteam["findings"] if str(f.get("source_url", "")).startswith("document:")]
+    print(
+        f"[e2e:market-sizing] document citations: {len(doc_findings)} -> "
+        f"{[(f['source_url'], f['quote_verified']) for f in doc_findings]}",
+        flush=True,
+    )
+
+    # (c) The founder's message CONTAINS the printed hand-over, whole, and carries nothing with a
+    # digit outside it. Containment, not digit-absence: at hostloop the model kept one printed
+    # line of four, rewrote two (one of them digit-free) and deleted one -- deletion and rewriting
+    # are what a digit check cannot see. Regenerated from the model's OWN closing_message.py call
+    # (its labels and paths), so a legitimate label choice cannot fail the check.
+    cm_calls = [t for t in cap.calls("Bash") if "closing_message.py" in str(t["input"].get("command", ""))]
+    assert cm_calls, "the run never printed the hand-over message"
+    argv = shlex.split(str(cm_calls[-1]["input"]["command"]))
+    deliverables = [argv[i + 1] for i, a in enumerate(argv) if a == "--deliverable" and i + 1 < len(argv)]
+    assert deliverables, f"no --deliverable in the model's call: {argv}"
+    printed = _script(
+        "closing_message.py",
+        [
+            "--report",
+            str(review_dir / "report.json"),
+            "--link",
+            "path",
+            *sum((["--deliverable", d] for d in deliverables), []),
+        ],
+    )
+    # The founder sees EVERY top-level assistant text after that call, not only the last message:
+    # tool calls (present_files, TaskUpdate) routinely sit between the call and the final text,
+    # and a Stop-hook block APPENDS a corrected message under the one it faulted -- it does not
+    # retract it. Two readings, printed for the write-up: clean before any block (the printed
+    # verdict alone held) and clean after the last block (the correction landed). The gate is
+    # the second; the first is the number that says whether the hook was needed.
+    call_id = str(cm_calls[-1]["id"])
+    before = cap.text_after(call_id, until_stop_feedback=True)
+    after = cap.text_after(call_id)
+    ok_before, why_before = _handover.contained(printed, before)
+    ok_after, why_after = _handover.contained(printed, after)
+    blocks = cap.stop_hook_blocks()
+    print(
+        f"[e2e:market-sizing] hand-over containment: before any Stop-hook block={ok_before} "
+        f"({why_before or 'clean'}); stop-hook blocks={blocks}; on screen at the end={ok_after} "
+        f"({why_after or 'clean'})",
+        flush=True,
+    )
+    # Print-only: the harness cuts message text at 90 chars, which hides whether a correction's
+    # lead sentence arrived as dictated. Not a gate -- the lead's wording is the hook's to pin.
+    if blocks:
+        print(f"[e2e:market-sizing] on screen after the block: {after[:400]!r}", flush=True)
+    assert ok_after, f"{why_after}\nprinted: {printed}\non screen: {after[-1500:]}"
+    # ...and the verdict those figures belong to is the first paragraph of the report.
+    report_md = json.loads((review_dir / "report.json").read_text(encoding="utf-8"))["report_markdown"]
+    head = report_md[report_md.index("## Executive Summary") : report_md.index("| Metric | Value | Method |")]
+    assert "An outside review" in head or "No adversarial review ran" in head, head
 
     payload = assert_coaching_commentary_landed(review_dir, payload_key="comparison_blocked")
 
@@ -75,13 +246,27 @@ def test_market_sizing_smoke(tmp_path: Path) -> None:
     if blocked["any"]:
         assert blocked["reason"], "a refused cross-check with no reason for the coach to relay"
 
-    # The claim about the two methodologies must not reappear. It was removed from the
-    # notes, the HTML heading and the checklist label before it was removed from the
-    # Methodology line, and this is the surface a founder quotes into a deck footnote.
-    md = (review_dir / "report.md").read_text(encoding="utf-8")
-    assert "cross-validation" not in md.lower(), (
-        f"report.md claims the two approaches cross-validate each other; inspect {review_dir}"
-    )
+    # REMOVED: a scan of the whole report.md for the word "cross-validation".
+    #
+    # It read as a guard on compose's own vocabulary, but report.md carries four model-authored
+    # free-text channels -- methodology.rationale, accepted_warnings[].reason, checklist item
+    # notes, and the coaching commentary -- and the scan could not tell them apart from compose's
+    # labels. So it gated a paid release on a model's word choice, and did it badly in both
+    # directions: it failed a run whose rationale said "cross-validation", and passed one whose
+    # rationale said "cross-check ... from two independent directions", which asserts exactly the
+    # independence the term is banned for claiming.
+    #
+    # Measured over the deduplicated live-run corpus, about a third of rationales carry the exact
+    # spelling and most state the idea some other way, so this was a coin-flip on every run.
+    # `524619c` removed the same shape from the financial-model-review lane after it failed 2 of 3
+    # CI runs.
+    #
+    # Compose's own labels are guarded for free, on every PR, by
+    # test_market_sizing.py::test_methodology_never_claims_the_two_builds_validate_each_other and
+    # ::test_a_rationale_passes_through_verbatim_while_compose_labels_stay_clean -- the second of
+    # which pins the SPLIT this assert conflated. The real detector for the underlying claim is
+    # not a word list at all: `_shared_input_values` decides independence from value identity and
+    # factor overlap, and reaches report.md, report.html and the coaching payload.
 
     # A converted figure must never be labelled with the wrong currency, and an unstated
     # one must not be labelled at all. Both were shipped defects.
@@ -96,7 +281,7 @@ def test_market_sizing_smoke(tmp_path: Path) -> None:
     # tests pin that these keys are emitted and named on both prompts; only a live run can
     # show them arriving in a payload a coach then works from. Without these assertions this
     # lane is green whether or not the change landed, and a paid run proves nothing about it.
-    assert payload["schema_version"] == "v0.5.0-market-sizing", (
+    assert payload["schema_version"] == "v0.7.0-market-sizing", (
         f"coaching payload is at {payload.get('schema_version')!r}; the band change bumped it"
     )
     assert summary.get("overall_status") in {"strong", "solid", "needs_work", "major_revision"}, (

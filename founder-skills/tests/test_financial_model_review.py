@@ -76,6 +76,71 @@ def test_extract_model_csv() -> None:
     assert len(data["sheets"]) == 1  # CSV = single sheet
 
 
+def test_extract_csv_structural_errors_tallied() -> None:
+    """A CSV whose cells carry literal error tokens must tally them, the same as
+    extract_xlsx does — STRUCT_08's evidence, not zero-only (which a hardcoded {}
+    would also pass)."""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
+        f.write("Month,Revenue,Expenses\n2025-01,#REF!,80000\n2025-02,55000,#DIV/0!\n2025-03,#REF!,82000\n")
+        f.flush()
+        rc, data, stderr = run_script("extract_model.py", ["--file", f.name, "--pretty"])
+    os.unlink(f.name)
+    assert rc == 0
+    assert data is not None
+    assert data.get("structural_errors") == {"#REF!": 2, "#DIV/0!": 1}
+
+
+def test_extract_csv_clean_structural_errors_empty() -> None:
+    """A clean CSV (no error tokens) must still carry the key, empty."""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
+        f.write("Month,Revenue,Expenses\n2025-01,50000,80000\n2025-02,55000,82000\n")
+        f.flush()
+        rc, data, stderr = run_script("extract_model.py", ["--file", f.name, "--pretty"])
+    os.unlink(f.name)
+    assert rc == 0
+    assert data is not None
+    assert "structural_errors" in data
+    assert data["structural_errors"] == {}
+
+
+def test_extract_csv_empty_file_has_structural_errors_key() -> None:
+    """The empty-file return path must also carry the key — both extract_csv
+    returns, not just the populated one."""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
+        pass  # zero bytes -> csv.reader yields no rows -> the empty-file branch
+        rc, data, stderr = run_script("extract_model.py", ["--file", f.name, "--pretty"])
+    os.unlink(f.name)
+    assert rc == 0
+    assert data is not None
+    assert data.get("sheets") == [
+        {
+            "name": "Sheet1",
+            "headers": [],
+            "rows": [],
+            "detected_type": None,
+            "periodicity": "unknown",
+            "row_count": 0,
+            "col_count": 0,
+            "cell_refs": [],
+        }
+    ]
+    assert "structural_errors" in data
+    assert data["structural_errors"] == {}
+
+
+def test_extract_csv_structural_errors_counts_header_row() -> None:
+    """`headers` (rows_raw[0]) sits outside `rows`, so a naive scan of only `rows`
+    would miss an error token that lands in row 0. extract_csv must count it too."""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
+        f.write("Month,#REF!,Expenses\n2025-01,50000,80000\n")
+        f.flush()
+        rc, data, stderr = run_script("extract_model.py", ["--file", f.name, "--pretty"])
+    os.unlink(f.name)
+    assert rc == 0
+    assert data is not None
+    assert data.get("structural_errors") == {"#REF!": 1}
+
+
 def test_extract_model_xlsx() -> None:
     """XLSX extraction produces structured JSON with multiple sheets."""
     import pytest
@@ -2742,6 +2807,31 @@ def test_compose_flags_self_gated_criteria() -> None:
     assert "UNIT_10" in hits[0]["message"] and "METRIC_33" in hits[0]["message"]
 
 
+def test_e2e_self_gated_diagnostic_reads_where_compose_writes() -> None:
+    """The paid lane's failure message must name the self-gated criterion, on a real compose output.
+
+    Free lane, so it runs on every PR: the e2e diagnostic previously read a key compose never
+    writes and only the paid gate could have shown it, which it did -- once, on a release tag.
+    """
+    from test_e2e_financial_model_review import self_gated_diagnostic
+
+    checklist_self_gated = json.loads(json.dumps(_VALID_CHECKLIST))
+    checklist_self_gated["summary"]["self_gated_items"] = ["UNIT_10"]
+    d = _make_fmr_artifact_dir(
+        {
+            "inputs.json": _VALID_INPUTS,
+            "checklist.json": checklist_self_gated,
+            "unit_economics.json": _VALID_UNIT_ECONOMICS,
+            "runway.json": _VALID_RUNWAY,
+        }
+    )
+    rc, data, _stderr = _run_compose(d)
+    assert rc == 0 and data is not None
+    text = self_gated_diagnostic(data)
+    assert "UNIT_10" in text, f"the diagnostic did not name the criterion: {text!r}"
+    assert "no CHECKLIST_SELF_GATED warning" not in text
+
+
 def test_compose_flags_unresolved_profile_exclusions(tmp_path: Any) -> None:
     """Criteria the gates dropped on an unmatched profile field must reach the founder."""
     checklist_unresolved = json.loads(json.dumps(_VALID_CHECKLIST))
@@ -3689,10 +3779,16 @@ def test_payload_truncation_over_30() -> None:
     for item in payload["warned_items"]:
         assert item["severity"] == "medium", f"Expected medium severity in warned_items: {item}"
 
-    # Original order preserved within each severity tier (first 10 warns kept)
-    kept_warn_ids = [item["id"] for item in payload["warned_items"]]
-    assert kept_warn_ids == [f"UNIT_{10 + i}" for i in range(10)], (
-        f"Original order not preserved in warned_items: {kept_warn_ids}"
+    # Original order preserved within each severity tier (first 10 warns kept). Keyed on `label`,
+    # not `id`: the payload no longer carries criterion ids -- the coach's commentary is appended to
+    # the founder's report and both prompts forbid naming one, so handing it one to copy rested on
+    # the model obeying prose. This assertion is about ORDER, and the label carries it.
+    assert all("id" not in item for item in payload["failed_items"] + payload["warned_items"]), (
+        "coaching_payload items carry a criterion id; the coach must not be handed one"
+    )
+    kept_warn_labels = [item["label"] for item in payload["warned_items"]]
+    assert kept_warn_labels == [f"MedWarn{i}" for i in range(10)], (
+        f"Original order not preserved in warned_items: {kept_warn_labels}"
     )
 
 

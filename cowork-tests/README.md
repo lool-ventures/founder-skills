@@ -43,12 +43,12 @@ Docker); replay/verify are **token/agent-free** (stock CI).
 >   records silently and freezes a vacuous assert into a paid cassette — and nothing downstream will
 >   ever flag it (the new cassette-satisfiability guard covers `tool_not_called` only, and lives in
 >   upstream's test suite, not a CLI surface). See the dispatch-contract bullet below.
-> - **The four `version:` inputs in the `replay` job — PINNED EXACTLY at `3.6.0`.** LINT, PRIVACY,
+> - **The four `version:` inputs in the `replay` job — PINNED EXACTLY at `3.7.0`.** LINT, PRIVACY,
 >   STALENESS and REPLAY. Exact, not a floor, since 2026-08-27: a caret auto-adopted every upstream
 >   release into CI with nobody choosing it, and five CI steps red on rules the harness adds.
 >   Enumerate with `grep -n 'version: "' ../.github/workflows/cowork-replay.yml`. The **email canary is
 >   not among them**: it is a bare `run:` step riding the CLI the preceding Action step installed.
-> - **The `skill-static-analysis` job's standalone `npm i -g` — PINNED EXACTLY at `3.6.0`.** That step runs
+> - **The `skill-static-analysis` job's standalone `npm i -g` — PINNED EXACTLY at `3.7.0`.** That step runs
 >   `record --dry-run`, i.e. the LOADER, which is the strict surface `lint` cannot substitute for.
 > - **`test_cowork_cassette_replay.py::_MIN_HARNESS` — `(2, 1, 0)`, and it STAYS A FLOOR.** It is a
 >   skip guard, not a selector: raising it turns a below-floor developer's red into a silent skip.

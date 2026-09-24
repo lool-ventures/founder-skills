@@ -152,7 +152,7 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "Exercises the deck-review skill end-to-end against a synthetic seed-stage fixture via the Claude Agent SDK." >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "**Coverage scope:** 1 of 5 skills. The remaining 4 (market-sizing, ic-sim, financial-model-review, competitive-positioning) are covered by the free contract + Cowork-invariant tests in the per-PR job, not by end-to-end SDK exercise." >> "$GITHUB_STEP_SUMMARY"
+          echo "**Coverage scope:** 3 of 6 skills exercised end to end (deck-review, financial-model-review, market-sizing). The remaining 3 (ic-sim, competitive-positioning, cap-table) are covered by the free contract + Cowork-invariant tests in the per-PR job, not by end-to-end SDK exercise." >> "$GITHUB_STEP_SUMMARY"
 
       - uses: astral-sh/setup-uv@v3
         with:
@@ -181,12 +181,19 @@ jobs:
           # does not pay for a fourth document. Collecting it anyway is the point — its
           # skip becomes VISIBLE in the XML, so "we have a cap-table lane" cannot quietly
           # become false the way an uncollected file would.
+          # --basetemp pins pytest's tmp_path root to a known location so the "Upload e2e
+          # review workspaces" step below can glob it. Without it pytest picks a fresh
+          # /tmp/pytest-of-<user>-N dir per run with no stable name to glob. Safe: nothing
+          # in the harness assumes the default layout -- locate_review_dir() resolves
+          # workdir/"artifacts" from whatever tmp_path it is handed
+          # (_e2e_harness.py:169,175-176).
           uv run pytest \
             founder-skills/tests/test_e2e_deck_review.py \
             founder-skills/tests/test_e2e_financial_model_review.py \
             founder-skills/tests/test_e2e_market_sizing.py \
             founder-skills/tests/test_e2e_cap_table.py \
-            -v -m e2e --tb=short -rs --junitxml=e2e-results.xml
+            -v -m e2e --tb=short -rs --junitxml=e2e-results.xml \
+            --basetemp "$RUNNER_TEMP/pytest"
         env:
           # THIS is the authorized place to spend, and it has to say so. The paid lanes
           # require an explicit opt-in because a credential alone once started billed runs
@@ -196,6 +203,31 @@ jobs:
           RUN_PAID_E2E: "1"
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY_CI }}
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN_CI }}
+      # `if: always()`, deliberately not `failure()`. A run that lands on a self-gated
+      # not_applicable is a PASS (checklist.py records it, discloses it, and the gate
+      # asserts the disclosure -- it does not assert the judgement never fires), and a
+      # passing run's checklist.json is exactly the evidence that answers "why did the
+      # assessor mark this criterion not applicable". Gating this on failure() would keep
+      # evidence for the runs nobody needs it for and discard it for the runs that call
+      # for a look. Do not "optimise" this back to `failure()`.
+      #
+      # The glob also catches deck-review's and market-sizing's workspaces, not just
+      # financial-model-review's -- all three lanes share $RUNNER_TEMP/pytest as their
+      # --basetemp root and all three inputs are synthetic fixtures, so publishing all
+      # three is acceptable on a public repo.
+      #
+      # `if-no-files-found: ignore` is explicit rather than relied on as a default: a lane
+      # skipped for missing auth writes nothing under artifacts/, and that must not red
+      # this step -- "Fail if any paid lane was skipped" (below) is the step whose job it
+      # is to catch that, not this one.
+      - name: Upload e2e review workspaces (checklist/report artifacts, all lanes)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-review-workspaces
+          path: ${{ runner.temp }}/pytest/**/artifacts/**
+          if-no-files-found: ignore
+          retention-days: 14
       # A SKIPPED LANE MUST NOT LOOK LIKE A PASSING ONE. pytest exits 0 on an all-skipped
       # run, so the missing opt-in above produced a green release gate that ran nothing.
       # Whatever the next reason for skipping turns out to be — a rotated secret, a marker

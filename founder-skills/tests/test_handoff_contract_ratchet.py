@@ -57,13 +57,19 @@ def _flat(text: str) -> str:
 
 
 def test_all_six_skills_present() -> None:
-    """Guard the parametrization itself — a renamed dir must not silently shrink coverage."""
+    """Guard the parametrization itself — a renamed dir must not silently shrink coverage.
+
+    AGENTS is 7 against 6 skills, and the asymmetry is deliberate: market-sizing carries a second,
+    skill-scoped agent for the red-team step because tool allowlists are PER AGENT. Granting it
+    WebSearch on the shared agent would hand the network to every other market-sizing dispatch,
+    two of which state in writing that they have none.
+    """
     assert len(SKILLS) == 6, SKILLS
-    assert len(AGENTS) == 6, AGENTS
+    assert len(AGENTS) == 7, AGENTS
     # Same guard, same reason: an empty glob turns a parametrized test into `1 skipped` and
     # exit 0 — measured. A guard that can silently delete itself is the vacuity class this
     # whole file exists to prevent.
-    assert len(COMMENTARY_ENVELOPE_GUARDED) == 7, COMMENTARY_ENVELOPE_GUARDED
+    assert len(COMMENTARY_ENVELOPE_GUARDED) == 8, COMMENTARY_ENVELOPE_GUARDED
     for doc in COMMENTARY_ENVELOPE_GUARDED:
         assert doc.is_file(), f"guarded document is missing: {doc}"
 

@@ -200,13 +200,30 @@ keys (do not refetch from disk):
 - `score_coverage` (not_assessed_count, total_criteria, unmatched_profile_fields,
   complete) — **what the score was NOT computed over.** When `complete` is false the
   percentage was computed over fewer criteria than the company warrants, so it is
-  **not** a clean result: say so in the commentary, name the unmatched profile field,
-  and do NOT lead with `overall_status` as though the review were whole. A shrunken
+  **not** a clean result: say so in the commentary and do NOT lead with
+  `overall_status` as though the review were whole. Name the cause the payload gives —
+  a non-empty `unmatched_profile_fields` means a company detail we could not match, and
+  checks may ALSO have been set aside during the assessment; `not_assessed_count` is the
+  sum of both, so an empty field list means the second alone. A shrunken
   denominator is a gap in the review, not a strength and not a criticism.
 - `failed_items`, `warned_items`
-- `high_severity_warnings` (codes only)
+- `high_severity_warnings` — objects, one per warning, each with `code`,
+  `label` and `message`. Write the `label`; the `code` is ours, not the
+  founder's.
 - `company_name`
-- `runway_months` (may be `null` for default-alive companies)
+- `runway_months` — projected months of runway. Legitimately `null` when the
+  company is default-alive: that means cash never depletes in the projection
+  window, NOT that the figure is unknown. Never report it as a bare `null`,
+  a gap, or an error.
+- `static_runway_months` — cash at today's net burn, independent of the
+  projection. When `runway_months` is `null`, lead with this as the concrete
+  number. When both are present and this one is materially lower, give both —
+  the projected figure holds burn flat while revenue compounds; this is what
+  the founder has today.
+- `base_runway_note` — present ONLY when the base scenario is default-alive
+  with a null `runway_months`, and carries the wording for that null. Its
+  absence means the base scenario is not default-alive; infer nothing further
+  from it.
 - `review_dir`, `report_path` — context only; you don't open either.
 - `insertion_marker` — consumed by the main thread's
   `insert_coaching.py` invocation, NOT by you. Ignore it.

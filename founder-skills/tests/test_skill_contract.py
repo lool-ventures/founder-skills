@@ -21,6 +21,7 @@ import sys
 from collections.abc import Iterator
 from pathlib import Path
 
+import _critique_corpus
 import pytest
 import yaml
 
@@ -201,6 +202,9 @@ def test_the_internal_version_matcher_and_its_exemptions_work() -> None:
         )
 
 
+_SCHEMA_VERSION_LITERAL = re.compile(r"\bv\d+\.\d+\.\d+-[a-z][a-z0-9-]*\b")
+
+
 def test_no_internal_version_refs_in_user_facing_files() -> None:
     """Internal plugin version numbers belong in CHANGELOG / commits /
     docs/internal — never in SKILL.md, skill references, or agent bodies
@@ -211,7 +215,11 @@ def test_no_internal_version_refs_in_user_facing_files() -> None:
     repo = Path(__file__).resolve().parents[2] / "founder-skills"
     files = (
         list(repo.glob("skills/*/SKILL.md"))
-        + list(repo.glob("skills/*/references/*.md"))
+        # `**` and the plugin-root tree, both deliberately. The flat `references/*.md` missed
+        # cap-table's `references/lanes/` and `references/schemas/`; the plugin-root tree was missed
+        # entirely, and cowork-harness 3.7.0 made it evaluator-visible corpus for five of six skills.
+        + list(repo.glob("skills/*/references/**/*.md"))
+        + list(repo.glob("references/**/*.md"))
         + list(repo.glob("agents/*.md"))
     )
     assert files, "glob found no user-facing files — path layout changed?"
@@ -219,6 +227,13 @@ def test_no_internal_version_refs_in_user_facing_files() -> None:
     for path in files:
         for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             if "schema_version" in line or "cap-table-rules" in line:
+                continue
+            # A `vX.Y.Z-<skill>` literal IS a schema_version value — the contractual artifact
+            # identifier this test's docstring already exempts. The word-based exemption above
+            # only sees it when the line says "schema_version" too, which a TABLE ROW under a
+            # `| Skill | schema_version | … |` header does not. Surfaced when the scan widened to
+            # the plugin-root references, where that table lives.
+            if _SCHEMA_VERSION_LITERAL.search(line):
                 continue
             if _INTERNAL_VERSION_REF.search(line):
                 offenders.append(f"{path.relative_to(repo)}:{i}: {line.strip()}")
@@ -333,6 +348,9 @@ def test_runnable_shell_snippets_are_posix_sh() -> None:
     files = (
         list(repo.glob("skills/*/SKILL.md"))
         + list(repo.glob("skills/*/references/**/*.md"))
+        # The plugin-root tree carries runnable snippets too (skill-execution-model.md), and every
+        # skill points at it — so a bash-ism there reaches every lane, not one.
+        + list(repo.glob("references/**/*.md"))
         + list(repo.glob("agents/*.md"))
     )
     assert files, "glob found no user-facing files — path layout changed?"
@@ -358,11 +376,12 @@ def test_runnable_shell_snippets_are_posix_sh() -> None:
 # truncated package is NOT evidence" and routes claims to `not-adjudicable`.
 #
 # The harness has since fixed that: skill-authored content (SKILL.md, every
-# references/** file, agents/<skill>.md) now ships WHOLE to the evaluator, bounded
-# only by a 512 KiB sanity ceiling across all three COMBINED — and a breach is cut
-# loudly and by name in `evidenceBudget.corpusCuts`, never silently. Measured, our
-# worst skill (cap-table) sits at 370,905 B, 71% of that ceiling — after its rule
-# pack moved out of references/ to data/ — and nothing is cut.
+# references/** file, and every agent the skill pins) now ships WHOLE to the
+# evaluator, bounded
+# only by a 512 KiB sanity ceiling across ALL FOUR classes COMBINED — and a breach is cut
+# loudly and by name in `evidenceBudget.corpusCuts`, never silently. Read the live number off
+# `_corpus_bytes` below; quote no figure from a comment, this one included — every one that has
+# been written here went stale, twice while a test stayed green.
 # The caps below are historical context only.
 #
 # One consequence worth stating because it reverses old guidance: relocating prose
@@ -623,7 +642,128 @@ SKILL_MD_CEILING: dict[str, int] = {
     # rescoped to "you never write a canonical artifact" across all 22 sites (W2 audit). The
     # instruction was always correct; the REASON given for it asserted the general claim P0-2
     # established is false — the main thread writes several canonical artifacts by heredoc.
-    "market-sizing": 93_719,
+    # market-sizing +247 B (93_719 -> 93_966): the dispatch skeleton described
+    # `high_severity_warnings` as bare codes while compose has emitted {code, label, message},
+    # so the coach was told to write the code we forbid it from writing; and
+    # `market_size_approach` was emitted, asserted by four tests, and named on NO prompt
+    # surface -- the coach could not say whether the headline figure was built top-down or
+    # bottom-up, which is the distinction this skill exists to police.
+    # market-sizing 93,966 -> 94,077 (+111 B): inputs.json gains existing_claims_horizon_months
+    # and capture_horizon_months. The deck-claim check compared an 18-month plan-case SOM against a
+    # 5-year capture SOM and told the founder they were understating themselves by +564.9%; two
+    # optional fields are what let it say "different period" instead of inventing a delta.
+    # market-sizing 94,077 -> 94,292 (+215 B): the Step 8 payload template gains
+    # approach_comparison. The key must appear on BOTH prompt surfaces -- the contract test reads
+    # the agent body too -- or it is documented nowhere the coach reads, which is the defect it
+    # was added to fix.
+    # +273 B (94_292 -> 94_565): the Step 4 validation.json heredoc gains one `derived`
+    # assumption carrying a two-factor `factors` list. Two factors is enough to set the shape, and
+    # the sub-agent demonstrably copies the shape it is shown.
+    # +2,959 B (94_565 -> 97_524): Step 6c, the adversarial-review dispatch. It is the only step
+    # in this skill that dispatches a DIFFERENT agent, so the step has to say why in the body the
+    # model reads -- a pin to the wrong agent silently costs the step its web search, and the
+    # findings it is contractually required to source. Well past char 19,900, so it is never
+    # re-attached after a compaction and evicts nothing that is.
+    # +1,073 B (97_524 -> 98_597): Step 6c probes the founder's PDFs for a text layer before
+    # dispatching. The red-team sub-agent has no shell, so this has to run in the main thread and
+    # ride the dispatch prompt -- and it has to happen at all because a vision read of an
+    # image-only page drops dense content SILENTLY, which turns "nothing found" into a claim
+    # about a page nobody saw.
+    # +729 B (98_597 -> 99_326): Step 6c is reworded from "optional" to "run it; its success is
+    # optional". MEASURED on a paid run: the "optional" draft was skipped outright, and the step's
+    # only downstream consumer is a low-severity disclosure -- the same shape deck-review's numeric
+    # chain was caught by, where a step whose only consumer is a warning gets skipped in silence.
+    # +903 B (99_326 -> 100_229): the three-value skip enum and why compose REFUSES without one of
+    # them. The table earns its bytes -- this is the step the model has to decide about, and the
+    # decision is now binary rather than a judgement call.
+    # +424 B (100_229 -> 100_653): the two SOM-horizon fields were in the inputs TEMPLATE as `null`
+    # and described in references/artifact-schemas.md, but no sentence in this file told the main
+    # thread what to put in them. MEASURED on both live runs after the horizon check landed: null on
+    # every run, so HORIZON_MISMATCH -- the fix for a founder read as understating by 5.6x -- could
+    # never fire. A field the schema documents and the skill never mentions is a field the model
+    # leaves null.
+    # -1,902 B (100_653 -> 98_751): Step 6c's hand-filled Task( template moved into
+    # scripts/dispatch_prompt.py. MEASURED on a live run, the main thread filled that template and
+    # added a "Key things worth attacking" list from its own hypotheses plus an instruction not to
+    # re-read the founder's documents; every red-team finding mapped onto the list. A prompt a script
+    # prints can be regenerated and compared byte for byte; a prompt the model writes cannot.
+    # +211 B (98_751 -> 98_962): the ocr_uploads.py call in Step 6c. Every PDF on the run that
+    # motivated the adversarial step was image-only, so a red-team citation to a page could be checked
+    # by nothing; one line buys a text sidecar per scanned page that red_team.py verifies quotes against.
+    # +194 B (98_962 -> 99_156): one sentence saying `factors` is two or more multiplicands and a
+    # sum is not a chain. MEASURED live: the one factors[] list emitted had ONE element (the value
+    # under another name) and an additive decomposition was mis-encoded as a product; the schema
+    # doc said "the figures the value multiplies" and the model read it as "any list".
+    # +862 B (99_156 -> 100_018): the closing_message.py call after the fleet-shared delivery
+    # block (which is byte-identical across six skills and cannot absorb it). MEASURED live: the
+    # closing chat message stated "$4.66M ... about 2% of the illustrative $100M" (4.7%) under a
+    # rule that forbids chat arithmetic; the message is now printed from report.json and the e2e
+    # lane checks every number in it exists there.
+    # +203 B (100_018 -> 100_221): Step 6c mirrors the uploads into the hand-off dir and passes
+    # agent-namespace paths to the generator, and the red_team.py pipe gets --uploads-dir/--ocr-dir.
+    # Caught by adversarial review before a paid run: the first cut rendered VM /sessions paths to
+    # a sub-agent (denied on Cowork) and never told the validator where the documents were, so every
+    # page citation would have been rejected as "not supplied".
+    # -673 B (100_221 -> 99_548): Step 10's hand-over paragraph shrinks to the script call plus one
+    # sentence, and Main-Thread Return stops listing headline fields as what the main thread
+    # "delivers" -- measured at hostloop, that instruction sat 24 lines below a step saying the
+    # printed message is the delivery, and the model delivered the fields. The prohibition
+    # sentence ("no ratio, no comparison, no percentage") is gone: it did not land; the e2e
+    # containment assertion is the guard.
+    # +289 B (99_548 -> 99_837): founder_stated_inputs is facts about the founder's OWN business
+    # (arpu); a market figure the deck states is a claim and belongs in existing_claims. MEASURED
+    # on a live investor run, in the analyst's own words: the deck's population and capture went
+    # in as founder-stated, the value-fidelity rule then forbade the bottom-up build from departing
+    # from them, and the "independent" build replayed the deck until a re-dispatch.
+    # +229 B (99_837 -> 100_066): Step 6c runs ocr_uploads.py as its own call. MEASURED live (eight
+    # documents, 35 pages): the bundled mirror+OCR+dispatch call hit the shell tool's 120 s limit,
+    # tesseract kept running orphaned, and the prompt was generated twice before the last two
+    # documents' sidecars existed -- the red team was told they had no machine-read copy. The
+    # generator now refuses on an OCR receipt that does not cover a scanned PDF; the sentence says
+    # why the call stands alone and that a re-run resumes.
+    # -48 B (100_066 -> 100_018): `--link computer` and "(--link path in Claude Code.)" leave Step 10.
+    # MEASURED in a real cloud-lane session: no link form opens there, so a SKILL.md that pins one
+    # form is wrong on the default lane; closing_message.py now decides per lane (`--link auto`).
+    # +129 B (fleet, one shared edit): the delivery block's hand-over sentence said the link form in
+    # Cowork is `computer://` + the absolute path. MEASURED in-app on the remote lane (2026-09-21/22,
+    # the default lane for new sessions and the one the market-sizing bug report came from): no link
+    # form opens a file there -- computer:// is plain text and a bare path becomes a broken claude.ai
+    # URL; the presented card is the delivery. The sentence now says: a link where this surface
+    # renders one that opens (on a /sessions tree, computer:// + the path), otherwise the label with
+    # the path stated beside it. Same edit in all six; test_delivery_block_is_identical_fleet_wide
+    # is the proof.
+    # +80 B (100_147 -> 100_227): the founder_stated_inputs rule no longer says "update this field"
+    # when the founder agrees; it says a discrepancy is a question for the founder, never an edit,
+    # and names founder_stated_inputs_period. MEASURED live: the constructor followed the old
+    # sentence literally -- rewrote a founder-stated $203/month to the model's annual $2,436 with
+    # no founder in the loop -- after the check called the correct x12 an override.
+    # +1,275 B (fleet, one shared edit): the Step 0 preflight and its stop. MEASURED 2026-09-22 on
+    # claude.ai, which mounts skills FLAT at /mnt/skills/plugins/<plugin>:<skill>/ and serves no
+    # plugin: the shared scripts were unreachable and no sub-agent could be dispatched, and
+    # market-sizing ran anyway -- hand-writing every hand-off file, grading its own checklist, and
+    # shipping a report with no adversarial review and no gates. One line detects it; the skill now
+    # stops and says so instead of producing something that reads as checked.
+    # +592 B (101_686 -> 102_278): a review is final. MEASURED on a live run, with no
+    # compaction and the full SKILL.md in context: the main thread re-ran the whole pipeline three
+    # times on red-team findings and then rewrote the review itself, because the text told it a
+    # filename "must be removed" and gave no route but editing the review. The sentence is gone (the
+    # producer now words the review); RED_TEAM_FINDINGS joins the content findings, the four review
+    # codes are named, Late-edits is scoped to before Step 6c, the percent-scale question moves
+    # before the review (Step 5.5), and a what-if writes to staging. The durable half is in the
+    # scripts and warning messages; this is the half that says why.
+    # +2,157 B (102_278 -> 104_435): Step 6d, the one founder-approved revision round. Without it a
+    # true red-team finding had no sanctioned route but editing, and the measured run took three
+    # unapproved rounds. The step names the trigger, both questions, the approval record the
+    # producer checks, the round-2 hand-off paths (the resolver and generator refuse or misroute
+    # without them -- measured in the rev-3 review), and the no-questions default. The bounds live
+    # in _redteam_copy.py (rounds, FOUNDER_INPUT_REWRITTEN); this is what a model in context needs to
+    # take the route instead of improvising one.
+    # +714 B (104_435 -> 105_149): the two-figures question, before Step A. MEASURED on the same run:
+    # the founder typed $203/month and the deck stated a $385 blended rate; with one slot for "what
+    # the founder said", the main thread picked the deck's on a red-team finding's say-so and wrote
+    # it over the founder's. Now the founder picks, the choice records its source, and the other
+    # figure is kept and shown. Plus the no-questions default names this question too.
+    "market-sizing": 105_149,
     # fmr raised for two founder-facing-correctness items measured in a live run: the CHECKLIST
     # dispatch now forbids citing our artifact filenames in evidence (that run put `inputs.json` in 10
     # items' evidence, printed verbatim into the founder's report), and the producer pipe passes
@@ -667,7 +807,32 @@ SKILL_MD_CEILING: dict[str, int] = {
     # I'll say what in chat" on the upload lane and nothing implemented it. The route now exists
     # (`apply_corrections.py --set PATH=VALUE`, same pipeline as the page download, so coercion and
     # the audit record survive), and Path A names it as a third option with the command.
-    "financial-model-review": 81_462,
+    # financial-model-review 81,462 -> 81,660 (+198 B): the Context B instruction gave the coach ONE
+    # cause for an incomplete score -- "because `unmatched_profile_fields` could not be matched" --
+    # and that list is EMPTY for the cause that actually occurs (the assessor setting a criterion
+    # aside), so the founder was being told the wrong reason. The replacement names both causes,
+    # says which field distinguishes them, and says they can BOTH apply: `not_assessed_count` is
+    # their sum, so an either/or reading loses the self-gated half of a mixed run.
+    # financial-model-review 81,660 -> 81,685 (+25 B): a fourth medium-severity warning class
+    # exists (a finding stating a "times" comparison its own cited figures contradict), and :718
+    # enumerates the medium classes rather than describing them generically -- so leaving it out
+    # would have made SKILL.md assert an incomplete fact about `validation.warnings`, which is the
+    # same recurring shape as the `company_name` and STRUCT_08 defects.
+    # +129 B (fleet, one shared edit): the delivery block's hand-over sentence said the link form in
+    # Cowork is `computer://` + the absolute path. MEASURED in-app on the remote lane (2026-09-21/22,
+    # the default lane for new sessions and the one the market-sizing bug report came from): no link
+    # form opens a file there -- computer:// is plain text and a bare path becomes a broken claude.ai
+    # URL; the presented card is the delivery. The sentence now says: a link where this surface
+    # renders one that opens (on a /sessions tree, computer:// + the path), otherwise the label with
+    # the path stated beside it. Same edit in all six; test_delivery_block_is_identical_fleet_wide
+    # is the proof.
+    # +1,275 B (fleet, one shared edit): the Step 0 preflight and its stop. MEASURED 2026-09-22 on
+    # claude.ai, which mounts skills FLAT at /mnt/skills/plugins/<plugin>:<skill>/ and serves no
+    # plugin: the shared scripts were unreachable and no sub-agent could be dispatched, and
+    # market-sizing ran anyway -- hand-writing every hand-off file, grading its own checklist, and
+    # shipping a report with no adversarial review and no gates. One line detects it; the skill now
+    # stops and says so instead of producing something that reads as checked.
+    "financial-model-review": 83_089,
     # ic-sim SHRANK: the REQUIRED ic-dynamics.md read at Step 7 is deleted. Step 7 is a pure producer
     # pipe — compose_discussion.py derives discussion.json from the partners' own files and nothing
     # is authored by the main thread — so the read informed no decision while pulling a whole
@@ -689,7 +854,25 @@ SKILL_MD_CEILING: dict[str, int] = {
     # rescoped to "you never write a canonical artifact" across all 22 sites (W2 audit). The
     # instruction was always correct; the REASON given for it asserted the general claim P0-2
     # established is false — the main thread writes several canonical artifacts by heredoc.
-    "ic-sim": 90_323,
+    # ic-sim +20 B (90_323 -> 90_343): `consensus_strength` added to the dispatch key list.
+    # compose emitted it and the FINAL-SUMMARY section read it, but the coaching dispatch did
+    # not name it, so commentary was composed blind to a 1-1-1 partner split and the headline
+    # read as the committee's settled view.
+    # +129 B (fleet, one shared edit): the delivery block's hand-over sentence said the link form in
+    # Cowork is `computer://` + the absolute path. MEASURED in-app on the remote lane (2026-09-21/22,
+    # the default lane for new sessions and the one the market-sizing bug report came from): no link
+    # form opens a file there -- computer:// is plain text and a bare path becomes a broken claude.ai
+    # URL; the presented card is the delivery. The sentence now says: a link where this surface
+    # renders one that opens (on a /sessions tree, computer:// + the path), otherwise the label with
+    # the path stated beside it. Same edit in all six; test_delivery_block_is_identical_fleet_wide
+    # is the proof.
+    # +1,275 B (fleet, one shared edit): the Step 0 preflight and its stop. MEASURED 2026-09-22 on
+    # claude.ai, which mounts skills FLAT at /mnt/skills/plugins/<plugin>:<skill>/ and serves no
+    # plugin: the shared scripts were unreachable and no sub-agent could be dispatched, and
+    # market-sizing ran anyway -- hand-writing every hand-off file, grading its own checklist, and
+    # shipping a report with no adversarial review and no gates. One line detects it; the skill now
+    # stops and says so instead of producing something that reads as checked.
+    "ic-sim": 91_747,
     # deck-review +1,165 B: Step 0 carried only a parenthetical fresh-shell mention buried in a code
     # comment, unlike the four skills that mint RUN_ID in a LATER block and so carry the shared banner.
     # deck-review mints RUN_ID INSIDE this re-runnable Step-0 block (like cap-table), so the shared
@@ -951,7 +1134,21 @@ SKILL_MD_CEILING: dict[str, int] = {
     # document command with -1708 and only quitting cures it -- measured on a real run -- and
     # the block then exited without quitting, so the first conversion in a session set up the
     # exact failure the second would hit.
-    "deck-review": 106_663,
+    # +129 B (fleet, one shared edit): the delivery block's hand-over sentence said the link form in
+    # Cowork is `computer://` + the absolute path. MEASURED in-app on the remote lane (2026-09-21/22,
+    # the default lane for new sessions and the one the market-sizing bug report came from): no link
+    # form opens a file there -- computer:// is plain text and a bare path becomes a broken claude.ai
+    # URL; the presented card is the delivery. The sentence now says: a link where this surface
+    # renders one that opens (on a /sessions tree, computer:// + the path), otherwise the label with
+    # the path stated beside it. Same edit in all six; test_delivery_block_is_identical_fleet_wide
+    # is the proof.
+    # +1,275 B (fleet, one shared edit): the Step 0 preflight and its stop. MEASURED 2026-09-22 on
+    # claude.ai, which mounts skills FLAT at /mnt/skills/plugins/<plugin>:<skill>/ and serves no
+    # plugin: the shared scripts were unreachable and no sub-agent could be dispatched, and
+    # market-sizing ran anyway -- hand-writing every hand-off file, grading its own checklist, and
+    # shipping a report with no adversarial review and no gates. One line detects it; the skill now
+    # stops and says so instead of producing something that reads as checked.
+    "deck-review": 108_067,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
@@ -1024,7 +1221,21 @@ SKILL_MD_CEILING: dict[str, int] = {
     # Net of the 2026-08-31 adversarial pass: cap-table +uncovered_parts stringify guidance;
     # competitive-positioning -1.4 KB from de-duplicating the "Preserve _produced_by" note,
     # which had been pasted verbatim four times (twice four lines apart).
-    "competitive-positioning": 126_009,
+    # +129 B (fleet, one shared edit): the delivery block's hand-over sentence said the link form in
+    # Cowork is `computer://` + the absolute path. MEASURED in-app on the remote lane (2026-09-21/22,
+    # the default lane for new sessions and the one the market-sizing bug report came from): no link
+    # form opens a file there -- computer:// is plain text and a bare path becomes a broken claude.ai
+    # URL; the presented card is the delivery. The sentence now says: a link where this surface
+    # renders one that opens (on a /sessions tree, computer:// + the path), otherwise the label with
+    # the path stated beside it. Same edit in all six; test_delivery_block_is_identical_fleet_wide
+    # is the proof.
+    # +1,275 B (fleet, one shared edit): the Step 0 preflight and its stop. MEASURED 2026-09-22 on
+    # claude.ai, which mounts skills FLAT at /mnt/skills/plugins/<plugin>:<skill>/ and serves no
+    # plugin: the shared scripts were unreachable and no sub-agent could be dispatched, and
+    # market-sizing ran anyway -- hand-writing every hand-off file, grading its own checklist, and
+    # shipping a report with no adversarial review and no gates. One line detects it; the skill now
+    # stops and says so instead of producing something that reads as checked.
+    "competitive-positioning": 127_413,
     # cap-table, the largest raise (+2,383 B) and the one with the most founder-visible payoff:
     #   * Main-Thread Return named THREE of the four files Step 12 copies; a live run delivered exactly
     #     three and dropped `{Company}_Cap_Table.html`. All four are now named explicitly.
@@ -1035,8 +1246,9 @@ SKILL_MD_CEILING: dict[str, int] = {
     #     reach — its sole deliverable could not be handed over.
     # cap-table +13 B on top of that: the rule pack's move to skills/cap-table/data/ (out of the
     # critique corpus) retargeted its two SKILL.md location mentions (`data/`, `../data/`). The OTHER
-    # ceiling here — the 524,288 B critique evidence corpus — went from 98% to ~71% with that move;
-    # the reclaimed margin is pinned in test_cap_table_corpus_headroom_is_tracked below.
+    # ceiling here — the 524,288 B critique evidence corpus — went from 98% to ~71% with that move
+    # (the post-move value, not the current one — see test_cap_table_corpus_headroom_is_tracked
+    # below, which carries the live figure); the reclaimed margin is pinned there.
     # cap-table +720 B: fixed two residual defects in its bespoke fresh-shell note. (1) "Writing the
     # assignments again at the top of a block is fine too" was wrong for the RUN_ID mint line
     # specifically — qualified to say re-deriving pure path vars is fine, re-running the RUN_ID mint is
@@ -1071,7 +1283,21 @@ SKILL_MD_CEILING: dict[str, int] = {
     # validate mode rejects a missing schema_version with. That code lived only in a loader nothing
     # called; measured, validate mode rejects via the schema ("required field 'schema_version'
     # missing"). The prose now says what happens.
-    "cap-table": 149_866,
+    # +129 B (fleet, one shared edit): the delivery block's hand-over sentence said the link form in
+    # Cowork is `computer://` + the absolute path. MEASURED in-app on the remote lane (2026-09-21/22,
+    # the default lane for new sessions and the one the market-sizing bug report came from): no link
+    # form opens a file there -- computer:// is plain text and a bare path becomes a broken claude.ai
+    # URL; the presented card is the delivery. The sentence now says: a link where this surface
+    # renders one that opens (on a /sessions tree, computer:// + the path), otherwise the label with
+    # the path stated beside it. Same edit in all six; test_delivery_block_is_identical_fleet_wide
+    # is the proof.
+    # +1,275 B (fleet, one shared edit): the Step 0 preflight and its stop. MEASURED 2026-09-22 on
+    # claude.ai, which mounts skills FLAT at /mnt/skills/plugins/<plugin>:<skill>/ and serves no
+    # plugin: the shared scripts were unreachable and no sub-agent could be dispatched, and
+    # market-sizing ran anyway -- hand-writing every hand-off file, grading its own checklist, and
+    # shipping a report with no adversarial review and no gates. One line detects it; the skill now
+    # stops and says so instead of producing something that reads as checked.
+    "cap-table": 151_270,
 }
 
 
@@ -1237,7 +1463,48 @@ REFERENCES_CEILING: dict[str, int] = {
     # +223 B (44_183 -> 44_406): the CHECKLIST_FAILURES row still said "between 1 and 6", which is
     # the same all-22-applicable assumption its critical counterpart had just been corrected for —
     # the two adjacent lines contradicted each other whenever any item was not_applicable.
-    "market-sizing": 44_406,
+    # market-sizing 44,406 -> 45,137 (+731 B): the two horizon fields documented in
+    # artifact-schemas.md's inputs.json table, including which one is read today (som only).
+    # +1,050 B (45_137 -> 46_187): artifact-schemas.md documents `factors[]` on derived
+    # assumptions -- the field row, the example entry, and the two warning codes that read it.
+    # +515 B (46_187 -> 46_702): methodology.json's `red_team_skipped` row -- the closed enum, and
+    # the fact that compose refuses without it.
+    # +294 B (46_702 -> 46_996): the references stopped teaching the one term compose refuses in
+    # its own labels -- the schema example FOR the rationale field said "Cross-validation
+    # preferred", and a live run transcribed it almost verbatim into a founder's report. The
+    # methodology section that carried the same header also contradicted this skill's own
+    # checklist rubric on substance: it said only a BIG mismatch needs work, while the rubric
+    # grades agreement-presented-as-confirmation a failure. Rewritten to the rubric's position.
+    # +1,594 B (46_996 -> 48_590): artifact-schemas.md gains the redteam.json section it never had.
+    # The hand-off gained a third provenance (`document:<file>#page=<n>`, the founder's own page),
+    # `quote_verified`, and `sources_read`/`sources_unread`; a field the schema doc does not name is
+    # a field the model leaves out -- the two horizon fields sat null on every live run for exactly
+    # that reason.
+    # +226 B (48_590 -> 48_816): the `factors` row now says two-or-more multiplicands, one entry is
+    # not a chain, and a sum is described in `label` -- the live run's mis-encodings, both.
+    # +303 B (48_816 -> 49_119): the optional `parameter` field on a red-team finding, which is what
+    # lets the report mark every row built on a stated figure a cited source contradicts.
+    # +59 B (49_119 -> 49_178): the document citation's page must be >= 1 and the file is the
+    # hand-off mirror, not the raw uploads mount.
+    # +68 B (49_178 -> 49_246): the page is required for a PDF and omitted for a file with no pages.
+    # MEASURED live: the red team cited a markdown file, the rule demanded #page, and a real
+    # finding was set aside.
+    # +198 B (49_246 -> 49_444): the founder_stated_inputs row says which parameter is a fact about
+    # the founder's own business and which are market claims, and names the warning.
+    # +468 B (49_444 -> 49_912): the founder_stated_inputs_period row in artifact-schemas.md.
+    # +24 B (49_912 -> 49_936): `no_subagent_dispatch` added to the red_team_skipped enum.
+    # +1,296 B (49_936 -> 51_232): the adversarial review's new contract, in artifact-schemas.md --
+    # the three methodology fields Step 6d writes (red_team_revision, founder_notes, gate_defaults),
+    # the append-only review copy compose renders from, summary.humanized, and the JSON-quote reason.
+    # Documented because the critique corpus cannot see scripts/: a field only the code knows is a
+    # field an evaluator (and a model reading the schema) will report as undocumented.
+    # +509 B (51_232 -> 51_741): the two inputs.json fields the two-figures question writes,
+    # founder_stated_inputs_source and founder_stated_alternatives.
+    # +330 B (51_741 -> 52_071): the `factors` row now documents the optional `"role": "divisor"`
+    # entry, which lets a derived figure be itemized as a ratio (e.g. 15,000,000 / 64,200,000)
+    # instead of only as a product -- the live run this fixes had itemized both numbers as plain
+    # multiplicands and the mismatch warning read as a nonsensical product of the two.
+    "market-sizing": 52_071,
     # fmr raised to document `graded_against` on the three producer outputs that stamp it — a new
     # artifact field is not discoverable from a schema doc that omits it, and the field exists to make
     # staleness detectable at all (run_id parity cannot see corrections applied within a run).
@@ -1255,7 +1522,26 @@ REFERENCES_CEILING: dict[str, int] = {
     # the fleet distinguishes — a rule that documented behaviour it did not implement. Replaced with
     # what actually matters: the case where NEITHER SaaS type fits, where the default silently
     # switches on the whole SaaS metric suite for a business the taxonomy cannot express.
-    "financial-model-review": 74_538,
+    # financial-model-review -209 B (74_538 -> 74_329, e2e-gate-root-cause §3.3/§3.5): STRUCT_08's
+    # label promised internal reconciliation (BS ties, retained earnings) that no Pass/Warn/Fail bar
+    # ever assessed and that no other criterion covers either — narrowed to the error-token half the
+    # bars actually score (-122 B), which also matches checklist.py's plain "No structural errors"
+    # label. Also deleted checklist-criteria.md:324's self-gating instruction, which contradicted the
+    # file's own :17 (-87 B).
+    # financial-model-review 74,538 -> 74,328 (-210 B): STRUCT_08's label promised internal
+    # reconciliation its own pass/fail bars never covered, which handed the assessor a standing
+    # reason to set the criterion aside; the label now matches the bars. Also deleted the line
+    # telling the assessor to gate items itself -- the same file opens by telling it not to --
+    # and the blank line it left behind.
+    # financial-model-review +417 B (74_328 -> 74_745): two coaching_payload rows that disagreed
+    # with the producer. `high_severity_warnings` was documented `string[]` / "warning codes" while
+    # compose_report.py has emitted `{code, label, message}` — the agent body said "codes only" and
+    # SKILL.md said to write the label, so one of the coach's two instructions was false either way,
+    # on the surface founder prose is written from. And `score_coverage` was absent from the table
+    # entirely though compose emits it top-level and both prompts instruct the model to read it: the
+    # one field that says how much of the review actually ran was undocumented where a producer
+    # author looks.
+    "financial-model-review": 74_745,
     # ic-sim +1446 B: evaluation-criteria.md omitted `to_confirm` from the status table AND from the
     # scoring formula, which excluded only not_applicable. Following it changed the conviction
     # score, since score_dimensions.py excludes both. The >6 coverage cap was undocumented too.
@@ -1391,8 +1677,13 @@ def test_references_total_does_not_grow(skill: str) -> None:
 #      was at 96%. (The 144 KB rule pack has since moved to skills/cap-table/data/
 #      — outside the counted set — for exactly this reason; references/ JSON is
 #      now ~80 KB, all of it schemas whose prose descriptions ARE cited evidence.)
-#   2. The agents/<skill>.md file counts too, and it is neither in the skill dir
-#      nor obvious. For cap-table it is 65 KB — 12% of the ceiling on its own.
+#   2. Agent bodies count too, and they are neither in the skill dir nor obvious.
+#      For cap-table that file is 65 KB — 12% of the ceiling on its own. It is no
+#      longer just `agents/<skill>.md`: the resolver packages every in-plugin agent
+#      the skill PINS via a `subagent_type` literal, matched on the agent's declared
+#      frontmatter `name:`. So corpus size is no longer a function of the files a
+#      given change touches — an edit elsewhere can widen it. Read `corpusPackaged`
+#      on a real report rather than predicting it.
 #
 # The per-file ratchets above cannot see this: SKILL.md and references/ can each
 # be individually unremarkable while their sum is over. Hence a separate guard.
@@ -1401,16 +1692,87 @@ def test_references_total_does_not_grow(skill: str) -> None:
 CRITIQUE_CORPUS_CEILING = 512 * 1024
 
 
+def _declared_agent_name(path: Path) -> str:
+    """The agent's frontmatter `name:`, falling back to the filename stem.
+
+    The resolver matches on the DECLARED name, not the filename, so a file whose frontmatter
+    disagrees with its stem resolves under the declared one. Falling back to the stem rather than
+    skipping keeps a frontmatter-less file countable instead of silently free.
+    """
+    text = path.read_text(encoding="utf-8")
+    m = re.search(r"^name:\s*([A-Za-z0-9_-]+)\s*$", text, re.MULTILINE)
+    return m.group(1) if m else path.stem
+
+
+def _pinned_agent_files(skill: str) -> list[Path]:
+    """agents/<skill>.md plus every in-plugin agent this skill PINS, matched the resolver's way.
+
+    A pin is a `subagent_type` literal in the skill's SKILL.md or any references/** file; the
+    agent it names is resolved by declared frontmatter `name:`. Deliberately NOT a glob over
+    agents/** — that counts agents the skill cannot dispatch, which is a different wrong number
+    and not a safe one.
+    """
+    agents_dir = SKILLS_ROOT.parent / "agents"
+    skill_dir = SKILLS_ROOT / skill
+    sources = [skill_dir / "SKILL.md"]
+    refs = skill_dir / "references"
+    if refs.is_dir():
+        sources += [p for p in refs.glob("**/*") if p.is_file()]
+    pinned_names: set[str] = set()
+    for src in sources:
+        try:
+            text = src.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        pinned_names.update(re.findall(r'subagent_type"?\s*[:=]\s*"founder-skills:([a-z0-9-]+)"', text))
+
+    out: list[Path] = []
+    namesake = agents_dir / f"{skill}.md"
+    if namesake.is_file():
+        out.append(namesake)
+    if agents_dir.is_dir():
+        for path in sorted(agents_dir.glob("*.md")):
+            if path in out:
+                continue
+            if _declared_agent_name(path) in pinned_names:
+                out.append(path)
+    return out
+
+
 def _corpus_bytes(skill: str) -> int:
-    """SKILL.md + all of references/ + agents/<skill>.md — what the packager counts."""
+    """What a `critique` actually packages for this skill, in bytes.
+
+    FOUR classes since cowork-harness 3.7.0, and the three-term formula this replaced under-reported
+    SILENTLY — the dangerous direction, because over the ceiling the failure mode is content cut
+    before grading, with nothing louder than a `corpusCuts` entry nobody reads:
+
+      1. `SKILL.md`
+      2. every file under the skill's OWN `references/`
+      3. every agent the skill RESOLVES — the union of `agents/<skill>.md`, every agent a pinned
+         `subagent_type` literal names, every agent whose declared `name:` equals the skill name,
+         and the transitive closure of pins inside those agent bodies
+      4. every PLUGIN-ROOT `references/` file the skill's own text points at
+
+    Class 4 is what 3.7.0 added and what this repo was blind to: worth +37,793 B to cap-table, which
+    it moved from a believed 76.3% of the ceiling to a measured 83%.
+
+    Classes 3 and 4 are delegated to `_critique_corpus`, a verbatim vendored copy of the harness's
+    own resolver, rather than re-derived here — upstream cross-language-pins that logic against its
+    TypeScript implementation with shared fixtures both sides execute, and a hand-rolled
+    approximation inherits none of that. `test_critique_corpus_sync.py` holds the copy to the
+    installed CLI's.
+
+    The result is a FLOOR, never an exact match: upstream also packages plugin-root references an
+    agent READ at runtime, which is run-dependent and cannot be resolved statically.
+    """
     skill_dir = SKILLS_ROOT / skill
     total = len((skill_dir / "SKILL.md").read_bytes())
     refs = skill_dir / "references"
     if refs.is_dir():
         total += sum(len(p.read_bytes()) for p in refs.glob("**/*") if p.is_file())
-    agent = SKILLS_ROOT.parent / "agents" / f"{skill}.md"
-    if agent.is_file():
-        total += len(agent.read_bytes())
+    agents = _critique_corpus.resolve_agents(str(skill_dir))
+    total += sum(len(Path(a).read_bytes()) for a in agents)
+    total += sum(len(Path(r).read_bytes()) for r in _critique_corpus.resolve_root_references(str(skill_dir), agents))
     return total
 
 
@@ -1447,7 +1809,9 @@ def test_cap_table_corpus_headroom_is_tracked() -> None:
     # (144,194 B) moved out of `references/` to `skills/cap-table/data/`. The critique packager counts
     # SKILL.md + references/** + agents/<skill>.md and does NOT count scripts/ or sibling data dirs,
     # so relocating a machine-read rule pack that no evaluator needs as evidence removed 28% of the
-    # corpus in one move. Headroom went 9,719 -> ~153,800 B; cap-table sits at ~71% of the ceiling.
+    # corpus in one move. Headroom went 9,719 -> ~153,800 B at that point (~71% of the ceiling).
+    # The assert pins the MARGIN, not any claim about it — which is why it stayed honest while the
+    # percentages quoted around it went stale. Read the live number off `_corpus_bytes("cap-table")`.
     #
     # Note this is the ONE relocation that helps. Moving prose from SKILL.md INTO references/ is
     # corpus-neutral (both are packaged), which is why that older advice is retired. Only moving a
@@ -1881,10 +2245,12 @@ GATE_SITES: dict[str, dict[str, tuple[str, ...]]] = {
             "methodology-change follow-up",
             "founder-context init — stage",
         ),
-        "prose": (),
+        "prose": ("percent-scale question (Step 5.5)", "revision question (Step 6d)"),
         "runtime-labelled": (
             "founder-context init — name/sector/geography",
             "data-correction follow-up",
+            "revision changes follow-up (Step 6d)",
+            "two-figures question (Steps 2-3)",
         ),
         "exempt": (),
         "unspecified": (),
@@ -2033,8 +2399,17 @@ GATE_SITES: dict[str, dict[str, tuple[str, ...]]] = {
 #     tool-available ban (anti-lazy-model: do not dump questions in chat) is preserved. NO new gate
 #     SITE — verified: each skill's Gate Catalog row count is unchanged; these are mentions inside
 #     prose about gates that already existed.
+#   market-sizing 9->10 (2026-09-24): ONE new gate SITE, Step 5.5's percent-scale question. It used
+#     to be asked at Step 7, after the adversarial review had already seen the unanswered figure; asked
+#     there, a changed answer revised an analysis that had been reviewed. Labels are narrated in the
+#     sentence (option 1 = the value as given), so it goes in the `prose` bucket.
+#   market-sizing 10->11 (2026-09-24): Step 6d, one mention, TWO new gate sites -- the revision question
+#     (labels narrated: `prose`) and its follow-up listing the proposed changes (one option per change,
+#     built from this run's figures: `runtime-labelled`).
+#   market-sizing 11->12 (2026-09-24): ONE new gate SITE, the two-figures question before Step A --
+#     one option per founder figure, each naming its source: `runtime-labelled`.
 ASKUSER_MENTIONS: dict[str, int] = {
-    "market-sizing": 9,
+    "market-sizing": 12,
     "deck-review": 7,
     "ic-sim": 5,
     "financial-model-review": 9,
@@ -2153,6 +2528,33 @@ def test_gate_label_coverage_is_reported(capsys: pytest.CaptureFixture[str]) -> 
         print("  unspecified == 0 fleet-wide: enforced. Both remaining `prose` entries are deliberate:")
         print("  deck-review stage_choice is runtime-SELECTED (no static array can exist), and")
         print("  competitive-positioning's scoring-basis follow-up has no no-change branch to declare.")
+
+
+# The Step 0 preflight is fleet-shared prose, for the same reason the delivery block is: it is one
+# rule about the runtime, and a copy that drifts is a skill that runs where the others stop.
+PREFLIGHT_LINE = (
+    '[ -f "$SHARED_SCRIPTS/check_handoff.py" ] || echo "UNSUPPORTED_ENVIRONMENT: '
+    "the plugin's shared scripts are not reachable from here\""
+)
+
+
+@pytest.mark.parametrize("skill", sorted(SKILL_MD_CEILING))
+def test_every_skill_preflights_the_environment(skill: str) -> None:
+    """A surface that serves the skill without its plugin must stop the run, not degrade it.
+
+    MEASURED 2026-09-22 on claude.ai, which mounts skills flat at
+    `/mnt/skills/plugins/<plugin>:<skill>/`: `${SCRIPTS%/skills/*}` yields `/mnt`, the shared
+    scripts are absent and no sub-agent can be dispatched. market-sizing ran anyway -- it
+    hand-wrote every hand-off file, graded its own checklist 81.8%, dispatched no adversary, and
+    delivered a report that reads exactly like a checked one.
+    """
+    text = (SKILLS_ROOT / skill / "SKILL.md").read_text(encoding="utf-8")
+    assert PREFLIGHT_LINE in text, f"{skill}/SKILL.md lost the Step 0 environment preflight"
+    assert "UNSUPPORTED_ENVIRONMENT" in text.split("### Step 1")[0], (
+        f"{skill}/SKILL.md must preflight in Step 0, before any work"
+    )
+    stop = text[text.index("UNSUPPORTED_ENVIRONMENT") :]
+    assert "stop here" in stop[:2000], f"{skill}/SKILL.md prints the marker but never says to stop"
 
 
 # The delivery block is fleet-shared prose. It is guarded by a test rather than by
@@ -2502,6 +2904,7 @@ _REJECTING_PAYLOADS: list[tuple[str, str, list[str], str] | tuple[str, str, list
     ("market-sizing", "market_sizing.py", ["--stdin"], '{"approach":"top_down","industry_total":-5}'),
     ("market-sizing", "sensitivity.py", [], '{"approach":"bottom_up","base":{},"ranges":{}}'),
     ("market-sizing", "checklist.py", [], '{"notitems":1}'),
+    ("market-sizing", "red_team.py", [], '{"findings":"not a list"}'),
     ("deck-review", "checklist.py", ["--run-id", "RID"], '{"items":[{"id":"bogus","status":"pass"}]}'),
     ("financial-model-review", "checklist.py", [], '{"notitems":1}'),
     ("financial-model-review", "unit_economics.py", [], '{"nocompany":1}'),
@@ -3015,4 +3418,70 @@ def test_the_conditional_marker_scan_still_finds_the_rows_it_was_built_for() -> 
         "the conditional-presence marker is no longer detected on the rows this scan was built "
         f"for (found: {sorted(seen)}). If a row legitimately dropped its marker, remove it here; "
         "if the regex rotted, every collapsible row is now invisible."
+    )
+
+
+def test_corpus_counts_every_agent_the_skill_pins_not_just_its_namesake() -> None:
+    """`_corpus_bytes` must apply the resolver's rule, not the scalar one it replaced.
+
+    The harness used to derive a SINGLE agent path from the skill name. It now packages the UNION
+    of `agents/<skill>.md` and every in-plugin agent a pinned `subagent_type` literal in that
+    skill's SKILL.md or references/** resolves to — matched on the agent's declared frontmatter
+    `name:`, not on its filename.
+
+    So the moment any skill pins a second agent, the old formula counts a corpus SMALLER than the
+    one that ships. For market-sizing that gap is immaterial against ~357 KB of headroom; the
+    reason it has to be right anyway is cap-table, where the margin is thin and the failure mode
+    over the ceiling is silent until someone reads `corpusCuts`. A guard that reports a number is
+    worse than no guard when the number is wrong in the direction that hides a breach.
+
+    Deliberately NOT a glob over `agents/**`: that counts agents the skill cannot dispatch, which
+    is a different wrong number and not a safe one.
+    """
+    agents_dir = SKILLS_ROOT.parent / "agents"
+    extra = sorted(p.name for p in agents_dir.glob("*.md") if p.stem != "market-sizing")
+    assert extra, "no non-namesake agent files at all — the helper below would be untestable"
+
+    # Every agent this skill actually pins must be inside the counted corpus.
+    pinned = _pinned_agent_files("market-sizing")
+    namesake = agents_dir / "market-sizing.md"
+    assert namesake in pinned, "the skill's own agent must always be counted"
+
+    total = _corpus_bytes("market-sizing")
+    assert total >= sum(len(p.read_bytes()) for p in pinned), (
+        "corpus total is smaller than the agents the skill pins — the scalar rule is back"
+    )
+
+    # Non-vacuity: the helper must actually read the pins rather than return the namesake always.
+    skill_text = (SKILLS_ROOT / "market-sizing" / "SKILL.md").read_text(encoding="utf-8")
+    for p in pinned:
+        stem = p.stem
+        assert stem == "market-sizing" or f"founder-skills:{stem}" in skill_text, (
+            f"{p.name} was counted but market-sizing pins no such subagent_type"
+        )
+
+
+# The SHARED reference tree — `founder-skills/references/`, not any one skill's.
+#
+# Bounded because cowork-harness 3.7.0 made it critique evidence: every skill that points at a file
+# here carries its bytes in THAT skill's corpus, so one edit spends up to six budgets at once, and
+# cap-table has the least headroom (83% of the 524,288 B ceiling). Over the ceiling, content is cut
+# before grading and the only signal is a `corpusCuts` entry.
+#
+# Measured 2026-09-21: 120,601 B across 9 files. Raise it deliberately, with the reason recorded
+# here; a lowering needs none.
+ROOT_REFERENCES_CEILING = 120_601
+
+
+def test_shared_reference_tree_does_not_grow() -> None:
+    """The plugin-root reference tree is bounded, because it now feeds six critique corpora."""
+    root = REPO_ROOT / "founder-skills" / "references"
+    files = sorted(p for p in root.rglob("*") if p.is_file())
+    assert files, "no files under founder-skills/references/ — path layout changed?"
+    size = sum(len(p.read_bytes()) for p in files)
+    assert size <= ROOT_REFERENCES_CEILING, (
+        f"founder-skills/references/ grew to {size:,} B (ceiling {ROOT_REFERENCES_CEILING:,}). This tree "
+        "is shared: every skill that points at a file here carries its bytes in that skill's critique "
+        "evidence corpus, so growth here spends SIX budgets at once, and cap-table has the least room. "
+        "Raise the ceiling deliberately, with the reason recorded beside the constant."
     )

@@ -150,11 +150,26 @@ PLUGIN_ROOT="${SCRIPTS%/skills/*}"
 echo "PLUGIN_ROOT=$PLUGIN_ROOT"   # resolved ONCE, here — paste this literal into every later block; never re-run this resolution
 REFS="$PLUGIN_ROOT/skills/competitive-positioning/references"
 SHARED_SCRIPTS="$PLUGIN_ROOT/scripts"
+# PREFLIGHT, one line, and the run STOPS if it prints. Some surfaces serve a skill WITHOUT its
+# plugin -- claude.ai mounts skills flat at /mnt/skills/plugins/<plugin>:<skill>/, where this
+# resolution yields /mnt, the shared scripts do not exist, and no sub-agent can be dispatched.
+# MEASURED there 2026-09-22: the analysis still ran, hand-wrote every hand-off file the file
+# hand-off exists to replace, graded its own checklist, and shipped a report with no adversarial
+# review and no gates. Degrading silently is worse than not running.
+[ -f "$SHARED_SCRIPTS/check_handoff.py" ] || echo "UNSUPPORTED_ENVIRONMENT: the plugin's shared scripts are not reachable from here"
 SHARED_REFS="$PLUGIN_ROOT/references"
 # Resolve the canonical artifacts root via a SCRIPT, not inline bash (the agent paraphrases inline
 # path computations → outputs/ vs outputs/artifacts/ drift across runs). Deterministic + creates it.
 python3 "$SHARED_SCRIPTS/resolve_artifacts_root.py"   # prints ARTIFACTS_ROOT — use the printed path verbatim as ARTIFACTS_ROOT in every later block (a captured var dies in the next fresh shell)
 ```
+
+**If the preflight line printed `UNSUPPORTED_ENVIRONMENT`, stop here.** This environment serves the
+skill without the rest of its plugin: the shared scripts are missing and sub-agents cannot be
+dispatched, so the gates, the hand-off checks and the independent review steps below cannot run.
+Tell the founder, in one sentence, that this skill needs Claude Cowork or Claude Code and that you
+have not run it — then stop. Do not improvise the missing steps: an analysis that grades itself and
+reviews itself reads exactly like one that was checked, which is the failure this stop exists to
+prevent.
 
 Reaching the self-heal branch is normal in Cowork — `${CLAUDE_PLUGIN_ROOT}` resolves to a HOST path that does not exist inside the VM, so the `[ ! -d "$SCRIPTS" ]` test fails by design rather than by misconfiguration. It is not a sign anything is wrong, and it is not worth narrating to the founder — **say nothing about this step at all, including the version you read and the path you resolved.** A live run announced *"EXPECT_VERSION = 0.6.0. Now running the Step 0 path resolution block"*: three internal tokens and a step label in one sentence, and the founder's first line should be about their company, not about locating files.
 
@@ -1314,14 +1329,15 @@ reason for sending files; it is not something to tell the founder — see the no
 every finished document you produced for them, and frame them as results you generated rather than
 something they asked to look at.
 
-**Then hand them over by name — one link per document.** Sending the files and handing them over are
-different acts: a founder looking at a row of cards cannot tell which document is which. Write each
-deliverable into your message as its own named link — in Cowork, `computer://` followed by the
-absolute path you just copied it to — labelled by what the document IS, in the founder's words:
-*"Here's your finished analysis: [the written report](…) — everything scored, with the evidence
-behind it; [the interactive version](…) has the charts."* "The files are above" is not a hand-over.
-This does not conflict with the never-name-a-file rule: the founder reads your label, never the path.
-Never paste a report's body into the message — link it.
+**Then hand them over by name — one named entry per document.** Sending the files and handing them
+over are different acts: a founder looking at a row of cards cannot tell which document is which.
+Write each deliverable into your message as its own named entry — a link where this surface renders
+one that opens (on a `/sessions` session tree, `computer://` + the absolute path you just copied it
+to), otherwise the label with the path stated beside it — labelled by what the document IS, in the
+founder's words: *"Here's your finished analysis: [the written report](…) — everything scored, with
+the evidence behind it; [the interactive version](…) has the charts."* "The files are above" is not a
+hand-over. This does not conflict with the never-name-a-file rule: the founder reads your label,
+never the path. Never paste a report's body into the message — link or name it.
 
 **Then offer the working data — once, in one sentence.** For example: *"If you want to keep the working
 data behind this — to pick it up later, or feed it into another analysis — say so and I'll send it as a

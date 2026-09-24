@@ -667,9 +667,13 @@ def validate_artifacts(
             warnings.append(
                 _warn(
                     "CHECKLIST_STALE_VS_POSITIONING",
-                    "checklist.json was graded against a different positioning map than the "
-                    "current positioning_scores.json (fingerprint mismatch) — re-run "
+                    "the quality checklist was graded against a different positioning map than "
+                    "the current positioning scores (fingerprint mismatch) — re-run "
                     "checklist.py against the current scores before composing",
+                    founder_message=(
+                        "The quality score was calculated from an earlier version of the "
+                        "positioning map, so it does not describe the analysis in this report."
+                    ),
                 )
             )
 
@@ -763,7 +767,7 @@ def validate_artifacts(
                     warnings.append(
                         _warn(
                             "CORRUPT_ARTIFACT",
-                            f"Orphan competitor '{slug}' in moat_scores.json — not in landscape",
+                            f"Orphan competitor '{slug}' in the moat scoring — not in landscape",
                         )
                     )
 
@@ -778,7 +782,7 @@ def validate_artifacts(
                         warnings.append(
                             _warn(
                                 "CORRUPT_ARTIFACT",
-                                f"Orphan competitor '{p_slug}' in positioning.json views — not in landscape",
+                                f"Orphan competitor '{p_slug}' in the positioning analysis views — not in landscape",
                             )
                         )
             for slug in _as_dict(positioning.get("moat_assessments")):
@@ -788,7 +792,8 @@ def validate_artifacts(
                     warnings.append(
                         _warn(
                             "CORRUPT_ARTIFACT",
-                            f"Orphan competitor '{slug}' in positioning.json moat_assessments — not in landscape",
+                            f"Orphan competitor '{slug}' in the positioning analysis "
+                            "moat_assessments — not in landscape",
                         )
                     )
 
@@ -884,8 +889,8 @@ def validate_artifacts(
                 warnings.append(
                     _warn(
                         "CORRUPT_ARTIFACT",
-                        f"View '{vid}': positioning.json coordinates for {mismatched} differ from "
-                        "positioning_scores.json — the scored merge back into positioning.json was "
+                        f"View '{vid}': the positioning analysis coordinates for {mismatched} differ from "
+                        "the positioning scores — the scored merge back into the positioning analysis was "
                         "skipped or partial; the report would show stale/placeholder coordinates "
                         "instead of the scored values",
                     )

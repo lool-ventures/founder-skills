@@ -46,3 +46,8 @@ evals-local/
 # stage would otherwise put a host path into a public commit. privacy_guard.py
 # does not flag them (its path class is not in the tree scan).
 cowork-tests/*-critique.json
+
+# The cowork-canary probe kit (docs/internal/cowork-canary) used to log to $PWD; never track its logs.
+cowork-canary-hooks.log
+cowork-canary-report.md
+cowork-canary-facts.json

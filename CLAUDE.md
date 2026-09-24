@@ -1,5 +1,10 @@
 # CLAUDE.md
 
+> Distilled 2026-09-21 (`002fb97..91fb4d9`), from ~164 KB to ~94 KB. What came out was the
+> measurement narrative behind the rules that remain, plus the harness adoption log:
+> `git show d99aa0d:CLAUDE.md`. Read it when a rule here states a conclusion and you need to
+> know what was measured to reach it — several were learned by a run that cost money.
+
 ## Repository Structure
 
 - `founder-skills/` — Claude Code plugin (SDK/CLI-based)
@@ -8,6 +13,7 @@
 - `founder-skills/skills/market-sizing/` — Market sizing skill with scripts and references
 - `founder-skills/skills/deck-review/` — Deck review skill with scripts and references
 - `founder-skills/agents/market-sizing.md` — Market sizing agent definition
+- `founder-skills/agents/market-sizing-redteam.md` — RED_TEAM agent: attacks a finished sizing the way a skeptical investor would, dispatched at exactly one step after the math and validation are complete. **The fleet has SEVEN agents, not six** — and market-sizing pinning two is why the critique-corpus agent term is a UNION rather than the scalar `agents/<skill>.md`.
 - `founder-skills/agents/deck-review.md` — Deck review agent definition
 - `founder-skills/skills/ic-sim/` — IC simulation skill with scripts and references
 - `founder-skills/agents/ic-sim.md` — IC simulation agent definition
@@ -18,7 +24,7 @@
 - `founder-skills/scripts/check_handoff.py` — Shared Context A file hand-off gate (typed exit codes for main-thread branching)
 - `founder-skills/scripts/merge_json.py` — Shallow-merge of parallel sub-agent hand-off files for producer pipes
 - `founder-skills/scripts/md_to_commentary.py` — Wraps a sub-agent's raw-markdown coaching commentary into the JSON envelope `insert_coaching.py` consumes (the model never hand-escapes the commentary)
-- `founder-skills/scripts/_founder_text.py` — Shared founder-facing text policy: which internal tokens may reach a founder and how they render. Four token types, three behaviours (humanize private enums + field names; keep stable identifiers and diagnostic codes verbatim). Every skill's `compose_report.py` substitutes then scans with it; `insert_coaching.py` scans the coaching commentary. `identifier_values()` is **cap-table-only** — elsewhere an `id` field can hold a field name (fmr's `unit_economics.metrics[].id` is `gross_margin`), and keeping it leaves our vocabulary in the report *and* silences the warning.
+- `founder-skills/scripts/_founder_text.py` — Shared founder-facing text policy: four token types, three behaviours (humanize private enums + field names; keep stable identifiers and diagnostic codes verbatim). Every `compose_report.py` substitutes then scans with it; `insert_coaching.py` scans the commentary. `identifier_values()` is cap-table-only — its docstring says why.
 - `founder-skills/scripts/resolve_artifacts_root.py` — Canonical + agent-namespace artifacts-root resolver (`--agent` for HANDOFF_AGENT derivation)
 - `founder-skills/references/` — Shared reference files (benchmarks, Israel guidance, etc.)
 - `founder-skills/references/brand/` — Brand tokens + Sora variable webfont (OFL) for generated HTML artifacts; embedded base64-inline so artifacts stay self-contained
@@ -45,50 +51,29 @@
 - `founder-skills/tests/test_cap_table.py` — Cap-table regression tests (math producers + 11-gotcha regression suite)
 - `founder-skills/tests/test_cap_table_freeform.py` — Lane-3 freeform mapper tests (`freeform_mapper.map_freeform` golden maps + blockers + `--mode=freeform-emit` CLI + the `cap_state` `E_NO_EQUITY_BASE` guard)
 - `founder-skills/tests/test_visualize_cap_table.py` — Cap-table HTML visualization tests
-- `founder-skills/tests/mutation_corpus.py` + `test_mutation_corpus.py` — Curated mutant corpus over cap-table's
-  math producers: named defects injected into a temp-dir copy of the repo, with the cap-table selection asserted to
-  notice (`MUST_KILL`) or recorded as not noticing (`KNOWN_SURVIVORS`). Both lists are SHRINK-ONLY. The registry lives
-  in the non-`test_*` module **deliberately**: its mutants quote error-code literals verbatim, and inside a scanned
-  test file those payloads make `test_cap_table_guards.py`'s ratchets count a code as guarded that the corpus is
-  simultaneously recording as unguarded — measured, it dropped `test_error_code_assertion_ratchet` below its baseline.
-  Carries a **no-op control**: a comment-only mutant that must leave the selection PASSING, without which a broken
-  harness greens every entry. The two count ratchets are `--deselect`ed from the child run — a count ratchet is not a
-  defect detector, so a rename mutant can red it while noticing nothing. Every `MUST_KILL` entry names the test
-  that must be the one to notice (`killed_by`, **measured by running the mutant, never guessed**) and a kill from
-  anywhere else fails: this corpus has twice been caught scoring a kill for the wrong reason (a count ratchet, then
-  a collection error — `pytest` exits 1 for a failed import exactly as for a failed test), so "something went red"
-  is deliberately not accepted as "the guard noticed".
-- `founder-skills/tests/test_release_gating.py` — The release chain, asserted rather than assumed:
-  whenever `publish-release` runs, every job in its TRANSITIVE `needs` closure must run too. **In Actions
-  a skipped dependency SKIPS the dependent** (no status function in `publish-release`'s `if:`), so a
-  condition that stops firing on a tag push does not merely stop gating — it stops the Release
-  publishing, invisibly, and this repo has already shipped four tags with no Release. Two independent
-  checks because they fail differently: the job `if:` strings are **frozen verbatim** beside a
-  hand-derived tag-push truth value (an edit reds and forces re-derivation), AND a small evaluator runs
-  the closure under a simulated tag push. The evaluator **raises on an unknown context property** rather
-  than defaulting it — a silent default would green a job GitHub actually skips, i.e. the exact failure
-  it exists to catch. Asserts WIRING, never that a job passes. Note the chain is unexercised: v0.10.0
-  predates the `publish-release` job.
+- `founder-skills/tests/mutation_corpus.py` + `test_mutation_corpus.py` — Curated mutant corpus over cap-table's math producers: `MUST_KILL` / `KNOWN_SURVIVORS`, both SHRINK-ONLY; every kill names the test that must notice (`killed_by`, measured never guessed — a kill from anywhere else fails); a no-op control must stay PASSING. The registry lives in the non-`test_*` module deliberately — its docstring says why.
+- `founder-skills/tests/test_release_gating.py` — The release chain asserted: every job in `publish-release`'s TRANSITIVE `needs` closure must run on a tag push, because in Actions a skipped dependency SKIPS the dependent (four tags once shipped with no Release). Frozen `if:` strings + a simulated-tag-push evaluator that raises on an unknown context property. Wiring only, never that a job passes. The chain is unexercised: v0.10.0 predates the `publish-release` job.
 - `founder-skills/tests/cowork_async_subagent_filter.py` — Cowork sub-agent tool-name compatibility helper (skill-quality CI; v0.4.0-regression detector)
-- `cowork-tests/leak_scan.py` — Shared detector for founder-facing "internal plumbing" leaks in assistant narration. Ten classes: nine syntactic (script names, `*.py`, `--flags`, `$vars`, exit codes, `W_`/`E_` codes, JSON, step/route labels, ALLCAPS-with-underscore) plus `plumbing_verb`, which is semantic. Reads a cassette or a run dir's `events.jsonl` — point it at the FILE, since a directory glob finds only `*.json` and reports a silent false-clean.
-- `founder-skills/tests/test_founder_facing_leaks.py` — Ratchet over `leak_scan.py` across the committed cassettes. **Gates "no NEW leaks beyond `BASELINE`", not zero** — the cassettes predate the narration rule. Ratchet the constant DOWN after a re-record; never raise it.
-  - **Scope warning — a green here still does not mean the narration is clean, but the gap is now narrower than this note used to claim.** Nine of the ten classes match on FORM (backticks, `--flags`, `$vars`, `*.py`, exit codes, `W_`/`E_` codes, JSON, a literal route-label list, ALLCAPS-with-underscore). The tenth, `plumbing_verb`, is SEMANTIC: it targets the verb+object construction that only appears when narrating internals, so "gating the hand-off", "piping it through the producer" and "dispatching the sub-agent" ARE caught (measured: 3 such leaks, and zero syntactic ones, in one live run's `events.jsonl`). **What still passes clean is internal vocabulary with no plumbing verb** — "canonical artifacts", "schema-drift warning", "gap-detection pass", bare `STOP`/`BLOCKED` (no underscore), and "Gate 1 passes". That residue is the live-run/hand-read surface; it is smaller than "every plain-English mention". Do not fix it by enumerating more words — `leak_scan.py`'s own design note says an enumerated blocklist is unwinnable, which is why the classes are class-based. **Superseded advice, recorded so it is not re-derived:** this note used to say never to extend the existing classes because doing so "raises the measured count on the committed cassettes and reds the suite". That was tried and is false — the ten-class total over the committed cassettes is **61 against the then-current `BASELINE = 144`**, green, because the nine-class count had already fallen far below its own baseline. (`BASELINE` is now **59** — measured 2026-08-06 at `test_founder_facing_leaks.py:74`. It went 144 → 64 → 55, then was **RAISED 55 → 59**, which breaks the ratchet-down rule deliberately and once; the file's own comment states the obligation to fix the narration leak, re-record, and ratchet back below **55**, not to it. Read the constant from the file, never from this line — it has now been stale twice.)
+- `cowork-tests/leak_scan.py` — Founder-facing "internal plumbing" leak detector: nine syntactic classes plus the semantic `plumbing_verb`. Point it at a cassette FILE or `events.jsonl`; a directory glob finds only `*.json` and reports a silent false-clean.
+- `founder-skills/tests/test_founder_facing_leaks.py` — Ratchet over `leak_scan.py` across the committed cassettes. Gates "no NEW leaks beyond `BASELINE`", not zero; ratchet the constant DOWN after a re-record (it was raised once, deliberately, and the file's comment states the obligation to ratchet back). A green does not mean clean narration: what still passes is internal vocabulary with no plumbing verb ("canonical artifacts", "schema-drift warning", bare `STOP`/`BLOCKED`, "Gate 1 passes"). Do not fix that by enumerating words — extending the classes was tried and does NOT red the suite, but an enumerated blocklist is unwinnable by the detector's own design note.
 - `founder-skills/tests/compose_invocations.py` — Per-skill compose-script invocation registry (skill-quality CI)
 - `founder-skills/tests/test_cowork_async_subagent_filter.py` — Helper unit tests
 - `founder-skills/tests/test_cowork_invariants.py` — Per-agent persistence + dangerous-tool declaration invariants
-- `founder-skills/tests/test_cowork_harness_floors.py` — Drift guards for the cowork-harness version surface: the per-site registry splitting CI SELECTORS (pinned exactly, `3.6.0`) from FLOORS (recording `>=3.6.0`, replay `^2.1.0`) — three postures, deliberately different, `uses:`-vs-`version:` major agreement (the action ref and the CLI move independently), and the derived cassette-format facts prose keeps restating wrongly. Every extraction asserts its own pattern matched, so a rotted regex reds instead of greening.
+- `founder-skills/tests/test_cowork_harness_floors.py` — Drift guards for the cowork-harness version surface: the per-site registry splitting CI SELECTORS (pinned exactly, `3.7.0`) from FLOORS (recording `>=3.6.0`, replay `^2.1.0`) — three postures, deliberately different, `uses:`-vs-`version:` major agreement (the action ref and the CLI move independently), and the derived cassette-format facts prose keeps restating wrongly. Every extraction asserts its own pattern matched, so a rotted regex reds instead of greening.
 - `founder-skills/tests/test_skill_orchestration.py` — Per-SKILL.md frontmatter + sub-agent-cue-then-bash regression detector
 - `founder-skills/tests/test_compose_invariants.py` — `coaching_payload` shape + `STALE_ARTIFACT` regression
+- `founder-skills/tests/coaching_payload_keys.py` + `test_coaching_payload_key_coverage.py` — The coach's key list DERIVED from each `compose_report.py` by static AST (every unresolvable construct raises), asserted against agent bodies only. A lower bound in the addition direction — it does not replace `test_compose_invariants.py`'s `_COACHING_COVERAGE_KEYS` and is blind to SHAPE; `test_high_severity_warning_shape_matches_the_producer` covers that axis.
+- `founder-skills/tests/test_cap_table_warning_labels.py` — cap-table may not hand the coach a raw `E_` / `W_` code under a founder-facing name. Asserts the humanizer's OUTPUT SHAPE over every code literal (not per-code coverage, which rots and gets deleted), and SEEDS a blocker + solver warning because the fixture carries none.
 - `founder-skills/tests/test_insert_coaching.py` — `insert_coaching.py` suite (6-state idempotency matrix, run_id parity, single-pass write-back, adversarial commentary)
 - `founder-skills/tests/test_check_handoff.py` — `check_handoff.py` suite (typed exit paths 0/3/4/5/6, adversarial file states, tolerant receipt extraction)
 - `founder-skills/tests/test_merge_json.py` — `merge_json.py` suite (merge order, --set overrides, error paths)
 - `founder-skills/tests/test_resolve_artifacts_root.py` — Artifacts-root resolver suite (Cowork mount signatures + agent-namespace root)
-- `founder-skills/tests/dead_payload.py` — Shared analyzer for embedded-but-unread JS payload keys. Three verdicts, because two cannot express what is known: `read`, `unread`, and **`unverifiable`** (the script indexes the payload by computed name, so no read can be attributed to a specific key). Treating dynamic access as blanket consumption hides real dead keys; treating it as death reports false ones.
+- `founder-skills/tests/dead_payload.py` — Shared analyzer for embedded-but-unread JS payload keys with three verdicts: `read`, `unread`, `unverifiable` (computed-name access — neither blanket consumption nor death).
 - `founder-skills/tests/test_dead_payload.py` — Analyzer unit tests + all four embedders (three `explore.py` + `review_inputs.py`). Pins which payload objects are dynamic, so a generator switching to computed access cannot quietly reduce coverage.
-- `founder-skills/tests/test_dispatch_schema_drift.py` — Guards a dispatch template instructing a field nothing consumes. Reads **every** fenced block on both prompt surfaces (templates also appear untagged and in `bash` heredocs; json-only sees about a third). Consumers include shared scripts, JSON schemas, and JS member access. **Cannot** detect shape-level drift for a name consumed elsewhere — `x_axis_rationale` is the obsolete authoring shape *and* the legitimate internal shape of `positioning_scores.json` — so a direct axis-shape assertion covers that regression.
+- `founder-skills/tests/test_dispatch_schema_drift.py` — A dispatch template may not instruct a field nothing consumes; reads every fenced block on both prompt surfaces (json-only sees about a third). Cannot see shape-level drift (`x_axis_rationale` is both the obsolete authoring shape and a legitimate internal one), so a direct axis-shape assertion covers that.
 - `founder-skills/tests/test_html_founder_text.py` — Fleet ratchet: no internal token in founder-visible text of any generated HTML. Text nodes only; attribute values and script bodies are not founder-facing prose.
-- `founder-skills/tests/test_compose_invariants.py` also scans **every delivered markdown, not just `report.md`** — `_EXTRA_DELIVERABLES` names the non-compose producers (cap-table's counsel packet today). A deliverable nothing scans can say anything: `counsel_packet.md` shipped a raw rule-domain token to a founder while the fleet scan looked only at `report.md`. The cap-table fixture flags **zero** counsel items, so the scan seeds one — without it the packet is 315 B of boilerplate and passes with the leak present.
-- `founder-skills/tests/test_delivery_coverage.py` — The fleet's delivery-defect coverage map, asserted rather than described. Records the known gap: the downstream half of "computed, not rendered" is gated only in competitive-positioning and financial-model-review — a third row records a Gate-1 render contract as explicitly WEAK (a string assertion over SKILL.md prose, which cannot fail a run), and does not narrow that count.
+- `founder-skills/tests/test_compose_invariants.py` also scans **every delivered markdown, not just `report.md`** via `_EXTRA_DELIVERABLES` (cap-table's counsel packet today), seeding one counsel item because the fixture flags none — without it the packet is boilerplate and passes with the leak present.
+- `founder-skills/tests/test_delivery_coverage.py` — The fleet's delivery-defect coverage map, asserted rather than described; records the known "computed, not rendered" gap (gated only in competitive-positioning and financial-model-review) and one Gate-1 render contract as explicitly WEAK.
 - `founder-skills/tests/test_theme_sync.py` — Brand-theme invariants: per-skill `_theme.py` copies identical, brand font present, font embeds in CSS
 - `founder-skills/tests/test_e2e_deck_review.py`, `test_e2e_financial_model_review.py`,
   `test_e2e_market_sizing.py` — the three paid end-to-end lanes; LLM-driven; carry the `e2e` marker.
@@ -126,6 +111,8 @@
 - **`merge_json.py`** — Shallow-merges multiple JSON object hand-off files (later files win; `--set key=value` overrides) into one stream for producer pipes — used when a step consumes the union of parallel sub-agent outputs (e.g. market-sizing "both").
 - **`md_to_commentary.py`** — Transport envelope for Context B: the sub-agent writes coaching commentary as **plain markdown** (never JSON, never escaped), this wraps it into the payload `insert_coaching.py` reads. Quotes and line breaks in the commentary can't break the hand-off.
 - **`resolve_artifacts_root.py`** — Resolves the canonical artifacts root AND the agent-namespace root (`--agent` / `--json`): in Cowork the sub-agents' file tools see the `outputs/` mount at a different prefix than the VM shell, so SKILL.mds derive `HANDOFF_AGENT` from `--agent` when building `OUTPUT_PATH` dispatch lines. Warns (never fails) when `--dir-name` names a directory with no mirror under the canonical root: a mistyped name still yields a well-formed path, and the symptom — every hand-off failing `check_handoff.py` exit 3 — reads as a fabricated receipt rather than a bad path, so the state machine spends its retry budget on redo-dispatches that cannot succeed.
+- **`_handover_check.py`** — The hand-over containment rule, in ONE place: the e2e lane and the Stop hook both ask whether the founder's message carries the printed message whole, and a rule with two copies drifts (the lane greens on one reading while the hook blocks on another). Link targets are dropped and whitespace squashed before comparing — the two runtimes render different links for the same file, and a re-typed indent is not a change. Containment, not digit-absence: a message is also wrong when it DELETES a printed line, which no digit check can see.
+- **`stop_handover_check.py`** — The Stop hook's body (see **Hooks**); loads `_handover_check.py` by path, since plugin-root `scripts/` is not a package.
 
 ## Market Sizing Scripts
 
@@ -133,6 +120,10 @@
 - **`sensitivity.py`** — Stress-test assumptions with low/base/high ranges and confidence-based auto-widening. **RECONCILES rather than defers:** a range's own `confidence` used to be absolute, which let a caller tag a medium-confidence parameter `sourced` and escape widening entirely; the stricter of the declared and cross-referenced tiers now wins (it can only ever WIDEN). `confidence_source` on each scenario records where the tier came from — `range` / `validation` / `reconciled` / `default` — because "no widening happened" and "no widening was called for" were previously the same artifact.
 - **`checklist.py`** — Validates 22-item self-check with pass/fail per item
 - **`compose_report.py`** — Assembles report from artifacts, validates cross-artifact consistency
+- **`closing_message.py`** — Prints the founder-facing hand-over message from `report.json`, and writes the same text to `handover.txt` beside the report for the check that runs after. It carries the report's own `verdict` paragraph — the words the page opens with — because a message that asked the founder to go read the verdict was measured 0/2 at hostloop: the model dropped the pointer and wrote the verdict itself, with its own rounding. Composing this message in chat is what it replaces.
+- **`_upload_names.py`** — The founder's filenames as uploaded: the cloud-lane `<8-hex>-` upload prefix is stripped at RENDER time only (compose's final markdown + `verdict`, and visualize's adversarial section + verdict, where it runs BEFORE `_esc` or an escaped `'`/`&` stops matching). It is not renamed at the source, because `red_team.py` opens `<uploads-dir>/<file>` and the OCR sidecars key on it. The coaching payload keeps the raw names, and `test_upload_names.py` pins that by whole-payload equality. Stripping needs EVERY known name to be prefixed; a batch of one needs an a-f letter, since `20240115-deck.pdf` is a date; a collision keeps the prefix. The root fix is to strip while mirroring in Step 6c, but that is a SKILL.md change and cannot be exercised on the lane it targets.
+- **`dispatch_prompt.py`** — Generates the RED_TEAM sub-agent dispatch from identifiers on disk: the model supplies paths and ids, every sentence comes from this file, and the e2e lane regenerates the prompt and asserts the dispatched one is byte-identical. The founder's documents are listed FIRST, before any of our artifacts — a reader who opens the analysis's reading of the deck before the deck inherits its frame, and the step exists to escape the constructor's framing.
+- **`ocr_uploads.py`** — Writes a machine-read text sidecar per page of every image-only upload, so a red-team citation to a scanned page can be checked against text rather than re-read by vision. Binary-only (`pdftoppm` + `tesseract`, the cap-table pattern) with NO Python OCR dependency: when either binary is absent it exits 0 with `ocr_available: false` and writes only its receipt (no sidecars), every document citation stays `quote_verified: null`, and that is disclosed. A missing OCR binary must never block a run. It writes `<out>/receipt.json` per document as it goes, so a re-run after a timeout RESUMES; `dispatch_prompt.py` refuses (exit 2) while any image-only PDF is not covered by the receipt — an `ocr_available: false` receipt counts as covered.
 - **`visualize.py`** — Generates self-contained HTML with SVG charts; outputs HTML (not JSON)
 
 ## Deck Review Scripts
@@ -168,6 +159,7 @@
 - **`review_inputs.py`** — Dual-mode review viewer: HTTP server with live validation (Claude Code) or self-contained static HTML with JS sanity metrics (Cowork); outputs HTML. The static/Cowork branch must stay write-back-safe: guard every `/api/*` `fetch` behind the build-time `IS_STATIC` flag with a lexical `if/else` (an early-return guard reads as unguarded to the write-back analyzer), name the fetch response `resp`/`res`/`response` and check `resp.ok`, and keep literal `<script>`/`</script>` tokens out of docstrings (the block extractor mis-reads them). The `financial-model-review-smoke` cassette's `no_lost_write_back` assert locks this in.
 - **`_theme.py`** — Brand theme helper: design-token CSS + base64 @font-face from `references/brand/`; every skill's scripts dir carries an identical copy (standalone scripts can't import across skills) and all HTML generators inject `_theme.brand_css()`; `tests/test_theme_sync.py` enforces the copies stay identical — edit one, re-copy to all
 - **`apply_corrections.py`** — Processes founder's downloaded corrections file: coerces, normalizes, merges overrides, writes corrected_inputs.json + extraction_corrections.json
+- **`_evidence_multiple.py`** — Detects a "times" comparison an assessor's own cited figures contradict, and appends the founder-facing caveat. A sibling module because FOUR surfaces render the same assessor-written evidence and none sees the others' output (`compose_report.py` → `report.md` and the coaching payload, `visualize.py` → `report.html`, `explore.py` → `explorer.html`); the first cut lived in compose and left both HTML pages showing the unsupported number plain. Calibration is a measured false-positive rate, not a judgement: `founder-skills/tests/evidence_multiple_corpus.py` re-runs it over kept run dirs and **imports this module** rather than restating the grammar — a tool with its own copy reports a healthy rate for a detector that has stopped working, which is how an earlier attempt shipped a pattern containing a literal backspace that matched nothing. Baseline 2026-09-19: 2,854 real findings, 39 stating a comparison, 1 fire (the defect). **Re-run it as reviews accumulate**; a fire count above the number of real defects means the check is miscalibrated.
 - **`_fingerprint.py`** — Stable fingerprints of a producer's inputs, so a stale output is detectable. `run_id` parity cannot see this class: `apply_corrections.py` rewrites `inputs.json` **within** a run, so pre- and post-correction outputs share a run_id. `checklist.py` / `unit_economics.py` / `runway.py` stamp `graded_against`; `verify_review.py` recomputes the current `inputs.json` hash and compares. Comparing outputs to each other is insufficient — they agree while all are stale.
 - **`verify_review.py`** — Review completeness gate: checks artifact existence, content quality (evidence, critical fields, metrics), and cross-artifact consistency; exit 0 = publishable, exit 1 = gaps
 
@@ -248,382 +240,54 @@ uv run mypy founder-skills/tests/
 
 ## Using `cowork-harness critique` (read before trusting a grade)
 
-Measured workarounds, current through **1.15.0**. Full detail in
-`docs/internal/2026-07-27-cowork-harness-issues.md`, plus the per-release adoption plans
-(`docs/internal/2026-07-31-cowork-harness-1.14.0-adoption-plan.md` and `…-1.15.0-…`).
+Rules live at **3.7.0**. Each was learned by measurement; the measurements and the version-by-version
+history are archived locally beside the per-release adoption plans.
 
-- **`critique`'s tier prerequisites were misstated upstream until 1.19.0 backfilled the correction.**
-  `critique --help` and `docs/critique.md` said the `container` and `hostloop` tiers need an
-  authenticated `claude` CLI on PATH. They do not: they need a **token in the environment or `.env`**
-  (`CLAUDE_CODE_OAUTH_TOKEN`, or `ANTHROPIC_API_KEY` as a CI fallback), because the graded turns run the
-  staged agent binary, not the host CLI. It is the **evaluator passes** that require `claude` on PATH,
-  overridable with `COWORK_HARNESS_CLAUDE_BIN`. (Our token lives in `cowork-tests/.env`, discovered from
-  CWD only.)
-- **Evidence budgets — FIXED UPSTREAM, and the old advice is now backwards.** `critique` used to cap
-  evidence at 64 KiB per SKILL.md and **8 KiB total** across all `references/`, silently, which cost LOST
-  findings (`not-adjudicable`, never a false positive). It now ships skill-authored content **whole** —
-  SKILL.md + every `references/**` + `agents/<skill>.md` — under a 512 KiB ceiling across all three
-  combined, and cuts loudly by name in `evidenceBudget.corpusCuts`. Measured, our worst skill is 52% of
-  that. **Two reversals:** `skillMdTruncated` is gone from the report (read `evidenceBudget.corpusCuts`
-  instead, empty on every real skill), and *"never fix a SKILL.md size problem by moving prose into
-  `references/`"* is **retired** — with a shared ceiling and whole packaging, relocation is neutral.
-- **Know your critique corpus size, and know what counts.** `critique` packages **SKILL.md + every file
-  under `references/` + `agents/<skill>.md`** against a 512 KiB ceiling; over it, content is cut before
-  grading. Two traps we hit: **every file under `references/` counts regardless of extension** (cap-table's
-  JSON schemas and rule packs were corpus, not just its markdown), and the agent body
-  counts too though it lives outside the skill dir. Measuring `**/*.md` put cap-table at 52% when it was at
-  98%. **Resolved 2026-08-01: `cap-table-rules.json` (144 KB, machine-read only) moved out of
-  `references/` to `skills/cap-table/data/` — scripts and sibling data dirs are NOT corpus — taking
-  cap-table to ~71% (370,905 B, ~153 KB headroom).** The lesson stands for future additions: a data file
-  scripts read by path belongs in `data/`, not `references/`; only evaluator-citable evidence belongs there.
-  Check free with `cowork-harness lint-skill <skill-dir>` (>=1.13.2; earlier
-  versions omit the agent file and under-report). `test_skill_contract.py` guards the ceiling and
-  cap-table's margin; `corpusCuts` in a critique report is the final authority.
-- **`git add` an untracked skill file before you critique — but know which case you are in.** Staging only
-  ever delivered git-tracked files to the agent, while the packager used to read the host directory, so the
-  evaluator could see material the agent never received. Two different outcomes now, and conflating them
-  misreads a report:
-  - **Untracked `references/**` or `agents/<skill>.md` → EXCLUDED, named in
-    `evidenceBudget.corpusExcluded`, with a `::warning::`. This is the CORRECT outcome, not a degraded
-    one.** The evaluator's view now matches the agent's, so a finding like *"the skill never explains X"*
-    against an excluded reference is **properly grounded**. Previously the evaluator saw a file the agent
-    never got and marked that true finding `already-covered`.
-  - **Untracked `SKILL.md` → `skillMdStatus: "untracked"`, content withheld, forces `not-adjudicable`** —
-    coverage claims cannot be judged with no skill source at all. Only this case is a downgrade.
-- **`noSkillFilesRead` is observational, and for ic-sim it is expected.** The 1.13.0 signal fires when the
-  graded turn Read no `references/` or `scripts/` file — main agent or sub-agent. **ic-sim trips it on a
-  complete, correct run** (measured: 21 artifacts, 22 bash calls, 5 sub-agents, zero reference reads), and
-  that is by design: `evaluation-criteria.md` and `partner-archetypes.md` have their operative rubrics
-  **inlined into `agents/ic-sim.md`**, and `partner-archetypes.md` is fund-specific-mode only. Do not
-  "fix" it by adding reads. Treat the flag as a prompt to check whether the skill's references are
-  documentation or operative — for ic-sim the answer is documented at `SKILL.md:73-75`.
-  **ITS PREDICATE CHANGED IN 2.5.0 — "Read no file" is no longer what it means.** The signal is now keyed
-  on the **wide** `unionReferenceAccesses` (Read ∪ Grep ∪ a Bash command naming the path, main agent ∪
-  sub-agents), not on `Read` calls alone, and it gained a third state — `referenceAccessUnobservable`,
-  for a run that recorded no observable tool stream, which must never be read as "none". The evaluator's
-  evidence section was split into wide + narrow, and the grading prompt now forbids a finding whose only
-  support is a path missing from that list. **Measured blast radius for us: nil, but fragile —** our
-  SKILL.mds invoke scripts via `"$SCRIPTS/…"` / `"$SHARED_SCRIPTS/…"`, and 2.5.0 documents a
-  `$VAR`-built path as an **accepted detector miss**, so the bash channel does not see them today. One
-  SKILL.md switching to a literal path flips the signal. The new `reference_read` /
-  `no_observed_reference_access` assertion keys gate the same thing deliberately — they are content keys
-  and evaluate on replay (verified: a 2.5.0 replay of the existing `ic-sim-smoke` cassette reconstructs
-  `referencesAccessed` = `references/artifact-schemas.md` via `read`, sub-agents `[]`). **Not adopted
-  yet**: a scenario key cannot reach replay without a re-record, and freezing one raises the replay floor
-  to 2.5.0. Queue it for the next re-record pass.
-- **Pre-upgrade critique reports: keep them.** Per-item verdicts are not comparable across the
-  whole-content change, but aggregate counts are — the `not-adjudicable` count on identical prompts is the
-  measure, and archived reports are the only "before" that exists. Report **per-skill, not
-  fleet-aggregate**. Pair it with the `citationResolved:false` (DROPPED) rate as the guard in the other
-  direction — a much larger corpus could make the evaluator's citations sloppier and nothing else would
-  surface that. `costUsd` now also carries a per-pass token split (`{input, output, cacheRead}`), which
-  answers "is this money evidence or thinking?" without a sweep.
-- **Budget from `report.costUsd.totalUsd`, never from `index.jsonl`.** The index omits both evaluator
-  passes, so summing it under-reports a critique by ~39% (measured: $10.17 vs $16.67 across three runs). **Fixed
-  upstream:** each critique now writes a roll-up row carrying `critiqueTotalUsd`, so `sum(costUsd)` across
-  rows is exactly true spend. The default task-turn timeout is also now 30 min (was 10), so `--timeout` is
-  no longer needed for a fan-out skill. Note whole-content packaging costs **+5% to +18%** per critique.
-  **`stats` was a separate, later bug** (fixed 1.14.0): it dropped every roll-up row before any filter
-  ran, so a $1.0588 critique reported as $0.368 — 65–84% light. It now reports **`totalUsd`** (plus
-  `unpricedRuns`, so a total that is a floor says so); counts, rates and percentiles stay per-run and are
-  unchanged. The manual-sum guidance above was always correct — the roll-up partition is exact by design.
-- **`--out <skill>.json` writes TEXT unless you also pass `--output-format json`.** The format is
-  decided by a *different* flag whose default is `text`, so the flag most likely to be scripted
-  against silently produces something `json.load()` rejects with `Expecting value: line 1 column 1`
-  — which reads as a corrupt or missing report, not a format mismatch. 1.24.0 warns about the
-  mismatch at argument-parse time, **before** the four workloads spawn (deliberately a warning, not
-  extension inference). Pass both flags. This matters here because the budget guidance above tells
-  you to read `report.costUsd.totalUsd` out of that file.
-- **The "evaluator passes dominate spend" ratio INVERTS for the skills in this fleet.** `--help` and
-  `docs/critique.md` said the two evaluator passes are ~3/4 of an end-to-end total; that holds for a
-  trivial probe. Measured on a real document-analysis run — which is every skill here — it is **task
-  turn ~61%, evaluator ~30%**, because evaluator cost is roughly fixed (bounded by the evidence
-  package) while the graded task turn is unbounded. **Consequence: do NOT swap `--evaluator-model` on
-  a fleet sweep.** That trades the injection-resistance property, which is verified for the DEFAULT
-  evaluator only, for a saving a third of its advertised size. When the task turn dominates the levers
-  are `--model`, `--timeout` and probe scope. As of 1.24.0 the report's `cost:` line prints the
-  evaluator's share of the total, so a single run corrects this guidance itself.
-- **A `scripts/`-grounded `not-adjudicable` means "the evaluator could not SEE the code", not "the
-  claim is false".** `scripts/` is outside the critique corpus by design — it grades authored
-  guidance. We read one such verdict on a claim about our own `gate_state.py` and treated it as
-  unproven; it was a verified product bug. 1.24.0 appends a note saying so. The documented remedy is
-  to state a script's contract in `SKILL.md` or a `references/` file if it matters to how the skill
-  is used. Note this bites deck-review hardest: the gate contract lives in `gate_state.py`, invisible
-  to every critique ever run against that skill.
-- **A fleet-consistency defect is out of scope for ANY single critique, by construction** (the graded
-  agent mounts the whole plugin; the evaluator's corpus is one skill). That is what the per-skill
-  drift tests are for. And **one critique is a sample**: upstream measured two runs of one skill over
-  one document producing 78 vs 50 extracted figures and 12 vs 0 first-pass errors from the same real
-  bug — the same discipline as the local rig's >=2-run reproduction bar.
-- **`assertions --list` does NOT emit a replay class.** Its output is `{key, description}`. A `jq`
-  selector written against a class field selects on something that has never existed; read replay
-  classes from the catalog tables in `docs/scenario.md`.
-- **`result.json`'s `models` array can contain `<synthetic>`** — the agent's own marker for a turn it
-  fabricated locally with no API call, recorded verbatim. Two runs of the SAME pinned model can differ
-  on this array purely by whether such a turn occurred. Drop any `<…>`-wrapped entry before using
-  `models` as run provenance (this touches the skill-latency methodology).
-- **`--ablate-skill` is ONE arm, not a paired experiment.** Composed with `--repeat N` it produces N
-  *ablated* runs and zero treatment runs. Run the prompt again without the flag for the other arm.
-  **As of 1.25.0 the tool enforces this rather than leaving it to the reader:** the rollup verdict
-  reads `repeat "<skill>": PASS [ABLATED — control arm] — 5/5 passed (100%)`, a hand-assembled mixed
-  batch reads `[MIXED ARMS: 2/3 ablated]`, and a normal batch carries no tag. **This lands on a
-  surface we DO read** — `evals/cap-table/run_reliability_bench.py` shells `run --repeat N
-  --output-format json` and parses `rollups[]`, and the release process makes that bench mandatory for
-  a model-tier change. Both the arm label and the new aggregate `provenance:` row are additive, and
-  the bench reads defensively, so nothing breaks.
-- **A recorded cassette is NOT relocatable.** It rewrites `scenario.session` and `scenarioSource`
-  relative to its OWN directory at record time, so any move — a different `--out`, a `git mv`, a copy
-  into another repo — leaves them unresolvable and `verify-cassettes` reports `unverifiable-skill`
-  (exit 3) until a re-record. **Practical consequence for debugging:** never rehearse
-  `replay --assert-from` on a `/tmp` copy. A copied cassette reports `skill dirs not resolvable from
-  the cassette location`, which is NOT skill-content drift — it is this, induced by the copy. Both
-  exit 1 and read alike, so a copy manufactures a finding and hides the real one. 1.24.0 adds a
-  pre-spend `record` preflight that warns when a cassette would be written outside the scenario tree.
-- **Always pass `--out <skill>.json`.** The index cannot attribute a critique: it records
-  `command: "skill"` (not `critique`), carries no `skill` field despite `--skill`, and `session.json` has
-  neither `skill` nor `prompt`. Concurrent critiques are otherwise indistinguishable. `--label` still
-  lands on turn 1 only — deliberately, since labelling the reflection turn would inject a near-always-green
-  row and inflate `passRate` — but as of 1.14.0 a label-filtered **cost** total is no longer short: `stats`
-  re-admits the dropped rows by shared `runId`, counting them toward cost only, never toward
-  `runs`/`passRate`/percentiles.
-- **Everything the harness prints goes to STDERR; stdout is empty.** Verified on `run`, `replay` and
-  `status` at 1.17.0. Two consequences. First, a wrapper that captures only stdout gets an empty
-  log — which is where the older "no progress output" note came from. Second, and this one bites:
-  the obvious poll `until ! cowork-harness status "$D" | grep -q '● running'` **exits immediately
-  and silently** (grep sees nothing on stdout, returns 1, `!` inverts it). **Do not "fix" it with
-  `2>&1` — that is the worst of the three options.** Two stdout forms already exist and are the right
-  answer: **`status <dir> --follow`** (the harness owns the poll loop and exits at a terminal state —
-  prefer this) and **`status <dir> --output-format json`** (one envelope on stdout carrying `state`
-  and `stale`). A long run also self-reports on stderr — `… still running (450s · 52 tools)` —
-  documented in `run --help` under "Long runs", with `COWORK_HARNESS_NO_HEARTBEAT` /
-  `_HEARTBEAT_MS` to disable or tune. That heartbeat is NOT new in 1.17.0; the older note here was
-  wrong when written, and reading `run --help` would have caught it. Do NOT poll the outputs dir for artifacts (the advice that used to live here): use
-  **`cowork-harness status <dir> [--follow]`**, which reads the `status.json` the harness maintains
-  throughout the lifecycle. It reports `state` / `elapsedMs` / live `toolCounts`, and detects both a
-  thrown error and a `SIGKILL`/OOM staleness — so `"running"` is never permanently trusted, which
-  artifact-watching cannot tell you. The run prints `[status] <outDir>` to stderr at startup — **except
-  under `--compact`/`--demo`**, which withhold it deliberately (it is a raw host path). `status.json` is
-  written either way, and `cowork-harness status` also accepts the run-dir root.
-- **`[provenance]` (1.25.0) answers "which experiment actually ran?" for free — and `model` is the
-  part that is new to us.** Every run verdict, passing or failing, replay lane included, now prints
-  `[provenance] model=… skill=offered,invoked ablated=…`, and the same object rides
-  `results[].provenance` in the JSON envelope. **Measured across all committed cassettes (22 AT THE TIME; the corpus was cut to 10 on 2026-08-24 — re-derive, never inherit):
-  `claude-sonnet-4-6` and `offered,invoked`, uniform.** Record that: a corpus silently spanning two
-  models is a real hazard here (the model-tier acceptance rule exists because tier changes
-  correctness), and nothing checked it before. **Do NOT read `skill=…invoked` as proof the skill under
-  test ran** — `provenance.ts:52-57` says it is deliberately "was the Skill channel used at all" and
-  that identity belongs to `skill_triggered`, which this fleet already asserts on **22/22** cassettes.
-  `offered,unknown`/`unknown` mean evidence-UNAVAILABLE, never "no". `--compact`/`--demo` suppress the
-  line, matching `[status]`.
-- **A green run is no longer silent — read the verdict footer.** As of 1.14.0 it prints `warn`-severity
-  signals on pass and fail alike, prefixed `·` (`undelivered_deliverables`, `ended_with_question`,
-  `scan_unavailable`, `exec_infra_error`, `prompt_asset_missing`). Before that, every warn on a passing
-  run reached `result.json` and no human-read surface. A single run's footer also now reports its cost.
-- **A/B-ing a skill change? `stats <scenario> --group-by skill-hash --runs` is the whole comparison in
-  one command** (harness 1.14.0+). Runs from before and after an edit pile up in the SAME scenario dir,
-  and `stats` used to blend them into one aggregate with no warning — measured: `stats <scenario>
-  --last 10` reported "5 runs" spanning three different skillHashes. That silent blend is now a
-  `::warning::` driven by `distinctSkillHashes`, and `--skill-hash <prefix>` (the 12-char index prefix
-  or the full hash from `result.json`, 6-char floor) and `--label <tag>` narrow it. `--group-by` also
-  takes `scenario|label|fidelity`; `--runs` lists the individual runs behind each summary (timestamp,
-  verdict, runId, skillHash, runLabel, fidelity, cost, duration, `(pruned)`). Rows lacking the grouped-on
-  field are reported as `hashlessRuns`, never bucketed under a blank key. `--since <date>` remains only
-  a proxy and still breaks the moment two versions run on one day.
-- **After editing any `assert:` block, run `replay --assert-from` BEFORE paying for a re-record.**
-  `cowork-harness replay cassettes/<s>.cassette.json --assert-from scenarios/<s>.yaml` re-checks the
-  on-disk assertions against the committed cassette — token-free, no Docker, ~1 second. Measured: it
-  reports a bad assertion as `✗ only 0 gate answer(s) confirmed delivered, need ≥ 1`, the exact
-  failure that later cost **two paid runs (~$6.70)** to discover. It refuses (correctly) when the
-  **prompt** drifted — the frozen events no longer correspond to the scenario — and that refusal is
-  itself the answer: a prompt change requires a re-record and cannot be pre-checked. `verify-run`
-  is the equivalent against a kept run dir, but it **fail-closes on a PARTIAL run**, so a run that
-  died on an unanswered gate cannot vouch for anything.
-- **`lint` is LENIENT; the loader is STRICT — a clean lint does not mean the scenario loads.**
-  Measured: deleting the last rule under `answers:` left the key parsing as `None`, which `lint`
-  passed as *"1 scenario(s) clean"* while the runtime rejected the file outright. It was caught only
-  by `rerecord.sh`'s budget preflight, which silently **omitted the broken scenario from its list**
-  rather than announcing it. Validate ONE scenario with **`cowork-harness record scenarios/<s>.yaml
-  --dry-run --out /tmp/probe.cassette.json`** (free, no token, no Docker) — a broken file prints
-  `✗ broken:` and exits non-zero.
-  **`--out` is not optional, and the bare form is a trap.** The single-file arm ALSO pre-checks the
-  cassette DESTINATION, which is `--out` if you pass it, else `cassettes/<slug>.cassette.json`
-  **relative to your cwd** — so a perfectly valid scenario with no committed cassette is REFUSED for
-  path policy, and at 3.0.x that refusal and a schema error are both **exit 2**, i.e. indistinguishable.
-  Measured on this corpus (35 scenarios, 10 cassettes): the bare form refuses 25 of 35 run from
-  `cowork-tests/`, and 34 of 35 run from the repo root, where no `cassettes/` exists at all. A third
-  term is TIER — `fidelity: container` is exempt (`host-path-canary` passes with a brand-new
-  repo-visible `--out`), so the guard is destination AND tier, never destination alone. Do NOT reach for
-  `--allow-host-inventory-fixture` to get past it: that flag is consent for a recording you intend to
-  make, and spending it on a load check is how it stops meaning anything (`rerecord.sh` passes it only
-  when authoring a genuinely new cassette, which is the correct use).
-  **The single-file split lands in 3.2.0 — NOT "above 3.0.1", and 3.1.0 is the counterexample.**
-  Measured 2026-08-31 across four builds (2.5.0 / 3.0.0 / 3.1.0 published / 3.2.0 pre-release), single
-  file: the destination refusal and a path-independent policy refusal (`on_unanswered: prompt`) BOTH
-  exit **2** through 3.1.0 and **1** at 3.2.0; a scenario that will not load stays **2** throughout;
-  valid-with-cassette stays **0**. Inheriting "above 3.0.1" from upstream prose would have been wrong
-  for the version actually on this machine — derive the boundary, do not quote it.
-  **The DIRECTORY arm splits ALREADY, at every version measured, and an earlier version of this note
-  wrongly called that future work.** For `record scenarios/ --dry-run --max-budget-usd N`, identical at
-  2.5.0 / 3.0.0 / 3.1.0 / 3.2.0: **0** = all load and under cap; **2** = the BUDGET gate refused;
-  **1** = a scenario did not LOAD (`✗ broken: <file>` naming the rejected key, on **stderr**, so a
-  `>/dev/null` does not hide it); both together = **2**, budget winning, with the broken line still
-  printed — but only when SOME files are broken. **ALL broken + over cap answers 1**, and the reason is
-  worth keeping because it makes the rule derivable rather than memorised: nothing loaded, so there is
-  nothing to spend on and **the budget gate never runs**. `SPEC.md` states it that way as of 3.2.0.
-  Measured identical at 3.1.0 and 3.2.0 — the split is not new.
-  The ONE batch outcome 3.2.0 moves is the **REAL** arm (`record <dir/>`, no `--dry-run`) on an
-  all-broken directory, **2 → 1**; the PREVIEW arm this gate uses already answered 1 at 3.0.0 and
-  3.1.0. Verified by running the whole batch matrix at 3.1.0 vs 3.2.0 — ten outcomes, exactly one
-  differs. (3.2.0's CHANGELOG briefly claimed *"Batch exit codes are unchanged"* while a later entry
-  documented that very move; **reported and fixed before release**, and the line now scopes itself to
-  the all-broken case. Recorded because the general lesson stands: settle an exit code by measuring.)
-  `rerecord.sh`'s budget preflight collapsed 1 and 2 into *"batch cost pre-flight refused — raise
-  COWORK_RERECORD_MAX_USD"*, sending you to raise a cap for a broken scenario; **fixed 2026-08-31**
-  with a `case` on the code. Anything else wrapping this command needs the same split.
-- **`lint --strict` ALONE exits 1 on an INFO-only corpus — our CI is safe only because it pairs
-  `--min-severity WARN`.** Measured 2026-08-31 at 3.0.0, 3.1.0 and 3.2.0, all identical: bare
-  `lint scenarios/ --strict` over our 35 reports `0 error(s), 0 warning(s), 55 info` and exits **1**;
-  add `--min-severity WARN` (which `cowork-replay.yml` passes via `extra-args`) and it is `✓ 35
-  scenario(s) clean`, exit **0**. The 55 are `manifest-needs-snapshot` (29) and `gate-needs-controlout`
-  (26) — both "re-record and these become live", neither actionable in CI. **The 2026-08-31 sweep
-  report filed `lint --strict` under "what behaved correctly" having read the counts and not the exit
-  code**; that is the whole failure mode — a green-looking summary line above a non-zero exit.
-- **3.2.0's `enum-value-invalid` ERROR does NOT red this repo, and the green is earned, not vacuous.**
-  Measured on the 3.2.0 pre-release: CI's exact invocation (`lint cowork-tests/scenarios/ --strict
-  --min-severity WARN`) exits **0** with zero `enum-value-invalid` findings across all 35, and the CI
-  load check (`record cowork-tests/scenarios/ --dry-run --quiet`) exits **0**. Non-vacuity confirmed by
-  probe rather than assumed — a copy with `fidelity: bogus` lints `✓ clean` at 3.0.0 and 3.1.0 and
-  raises `✗ ERROR [enum-value-invalid]` (exit 1) at 3.2.0. Also clean at 3.2.0: all **10** cassettes
-  replay green (identical to 3.1.0), and `verify-cassettes` + the expanded allowlist is byte-identical
-  to 3.1.0 with `findings by class: unscanned 22` (informational — the PII gate is clean; the exit 1 is
-  the known staleness/scenario-drift), with the email canary still firing.
-  **For the WHOLE corpus use the DIRECTORY arm** — `cowork-harness record scenarios/ --dry-run --quiet`
-  — where the destination policy is reported as an advisory note and does **not** affect the exit code.
-  That is what `cowork-replay.yml`'s "Scenario load check" step already runs. Its limits: non-recursive,
-  a file with no `prompt:` key reports `· skipped:` rather than broken (so a mis-indented `prompt:`
-  reads as "not a scenario" and the batch still exits 0), and exit 1 covers path-independent *refusals*
-  (prompt policy, assert contradiction, duplicate target) as well as *broken*.
-- **A `gate_answers_delivered` that lint flags as vacuous has TWO valid remedies, and lint only names
-  one.** Its fix line says to pair it with `gate_answer_count_min: 1` / `question_asked` /
-  `tool_called`. That is wrong for a scenario **designed** to fire no gates: there the remedy is to
-  **drop `gate_answers_delivered`**. `cap-table-lane3-freeform` is gate-clean by design (its cap base
-  is `deterministic_mapped`, which SKILL.md exempts from the confirmation gate) and its own header
-  says so; adding the companion there asserted a gate the skill correctly never raises. Check whether
-  the scenario expects a gate before taking lint's advice.
-- **Never pipe `verify-cassettes` to `tail`** — deterministic `EAGAIN` crash (unbuffered `writeSync` to a
-  non-draining pipe) that replaces the verdict line with a stack trace. Redirect to a file instead.
-- **The PII gate needs the allowlist EXPANDED, not merely sourced — and every `--allow*` regex is
-  FULL-MATCH.** `privacy-allowlist.sh` defines a bash **array**, so `source` alone changes nothing;
-  the gate is `source cowork-tests/privacy-allowlist.sh && cowork-harness verify-cassettes
-  cowork-tests/cassettes "${ALLOW[@]}"`. Sourced-but-not-expanded reports ~7,200 findings and exit 1
-  (synthetic deal amounts and public citation domains, not leaks) — which reads exactly like the
-  allowlist breaking. Expanded it is **0 PII findings across the whole corpus** — re-measured 2026-08-27 at 10 cassettes; the count in this line has been 16, then 21, and is now stale by construction (the count was 16 when this
-  line was written; re-derive it, don't trust it). Full-match matters when editing an entry:
-  `founder-skills:.*` clears the host-inventory class, the tighter-looking `^founder-skills:` clears
-  **zero**, because an explicit anchor lands inside the harness's own wrapping. An over-tight regex
-  fails safe (findings stay); an over-loose one disarms a whole class with no signal — so re-count
-  findings after any edit, and confirm `canary/email-canary.cassette.json` still flags `[email]`.
-- **`host-inventory`: 1.18.0 flagged our own plugin's agents; 1.19.0 fixed it, and the allow entry is
-  GONE.** The class catches a recording machine's MCP servers / account / agents / skills frozen into a
-  cassette by a host-inheriting tier — our tier. At 1.18.0 it reported **240 findings, all
-  `agents[] — founder-skills:<skill>`**: the six agents of the plugin under test, i.e. the fixture. We
-  suppressed them with `--allow-host-inventory 'founder-skills:.*'`. **1.19.0 exempts them
-  automatically** — an `agents[]`/`skills[]` entry namespaced `<plugin>:<name>` whose plugin the same
-  recording declares in `plugins[]` is not host inventory. The exemption is derived from the cassette,
-  so it applied to every existing recording with **no re-record**: measured 240 → 0, with
-  `verify-cassettes` output byte-identical to the run that still carried the allow. The entry was
-  **deleted**, not kept: a suppression that suppresses nothing invites misreading the gate.
-  **This makes the CLI floor load-bearing** — on 1.18.0 the current allowlist reds on 240 non-findings
-  (measured, `npx cowork-harness@1.18.0`: exactly 240, exit 1). Floor every consumer of
-  `privacy-allowlist.sh` at `>=1.19.0` — though the **replay floor is `^2.1.0`, the RECORDING floor `>=3.6.0`, and the CI selectors are PINNED EXACTLY at `3.6.0`** — see the 2.x section below. 1.24.0 was an earlier repo-wide floor, raised because the
-  scenarios stop LOADING below it (`deck-review-gate-stop` asserts `file_absent` + `question_options`;
-  measured, a 1.23.0 `record --dry-run` reports `Unrecognized key`, while `lint` on the same file exits
-  0 — the loader catches it and lint does not). See the 1.24.0 adoption plan. Keep both numbers: 1.19.0 is what
-  *this file* needs, and is the level to fall back to if the repo floor is ever lowered.
-  **Standing risk:** the green now depends on `plugins[]` carrying
-  `founder-skills` in every future recording — strip `plugins[]` from one cassette and it alone yields
-  18 findings. If a re-record ever reds this gate en masse on our own namespace, the cause is a missing
-  `plugins[]` declaration, not a leak; do not re-add an allow.
-  **New axis (1.19.0): `skills[]`**, same two exemptions (the agent's built-ins — currently just
-  `deep-research` — plus a declared plugin's own). All **22** cassettes carry a populated `skills[]`; 7
-  names, 0 flagged (re-measured 2026-08-20 — the count was 21 when written).
-  **Where to look, because this has now cost one wrong finding:** the array is inside the `system`
-  init frame in `events[]`, and **`events[]` entries are JSON-ENCODED STRINGS**. A recursive walk that
-  does not `json.loads` every string leaf finds nothing and will conclude the axis does not exist —
-  an adoption-plan draft did exactly that, then mistook `scenario.skills` (the per-cassette
-  single-element STALENESS-SCOPING key, corpus union 6) for this axis and proposed rewriting this
-  paragraph as false. It is not false. **That zero is structural, not earned**: the axis targets the `protocol` tier, where
-  the harness keeps the operator's real `CLAUDE_CONFIG_DIR`; we record at hostloop, which does not. A
-  population count does NOT prove the axis works — every name we carry is exempt by construction, so a
-  no-op would produce the same zero. Non-vacuity was confirmed by **probe**: inject a foreign skill name
-  into a cassette copy and it fires. Note the scan is tier-gated, so `skills[]` is *present* in 21/21 but
-  *read* in 21/22 (`host-path-canary` records at `container`).
-  **1.25.0 fixed the built-in roster** — it held one name (`deep-research`) while the agent had grown
-  fourteen more, so a fresh `protocol` recording reported 14 false host-inventory findings, the exact
-  push toward a blanket `--allow-host-inventory`. **Measured impact on us: 0 → 0**, because our one
-  bare name was already in the old roster. It would matter the moment we record at `protocol`.
-  The three predicates that would mean a **real** leak — `mcp_servers[].name`,
-  `account.email`/`.organization`/`.subscriptionType`, and a `mcp__<server>__…` tool naming a foreign
-  server — return **NONE** across the corpus (22 when measured, 10 today — the verdict held at both). Not covered by the class (upstream's `docs/cassette.md`): the
-  **command and plugin** catalogs and command descriptions. (The *skill* catalog used to be on that list
-  and no longer is — see the new axis above. `plugins[].name` is deliberately not an axis: it is the
-  harness's own declaration channel.) A green is a backstop, not proof.
-- **`verify-cassettes` opens with a per-class rollup (1.19.0) — and it counts INFORMATIONAL classes
-  too.** e.g. `findings by class: unscanned 54`. Our current corpus reads exactly that and still
-  **exits 1** — from staleness + scenario-drift, not privacy. A non-empty header is not a privacy
-  failure; a header showing only `unscanned` means the PII gate is clean (the CI privacy step skips
-  both non-PII classes and exits 0). The rollup is additive — every per-file row still prints. JSON
-  consumers already had `findings[].cls`.
-- **`replay --mutate` SAMPLES — never read its ratio as an assertion-failure rate.** It reports e.g.
-  `50/50 perturbation(s) CAUGHT BY NOTHING`, which parses as "50 of your 50 fields". It is not.
-  **There are TWO caps, not one: 10 per file and 50 in total, and the PER-FILE cap is applied first.**
-  (The single-cap reading is what produced a wrong "`--mutate-max-total 25000` perturbs everything"
-  claim — measured, it yields 2,567 of 21,478, because per-file still binds.) On our corpus **19**
-  cassettes report `50/50` and **two** (`cap-table-fast-assess`, `host-path-canary`) report `35/35`;
-  1,020 = 19×50 + 2×35. As of 1.19.0 the caps are documented in `--help`, the changelog **and**
-  `docs/`, and the report appends the eligible total and names the binding cap:
-  `(sampled 35 of 55 eligible value(s); per-file cap 10 reached on 2 file(s))`. **`55` is the eligible
-  total, NOT the ratio's denominator** — reading the new parenthetical back into the ratio is the same
-  conflation in a new costume. JSON carries it as `mutation` = `{sampled, eligible, truncatedBy, caps,
-  uncaught}`; aggregate over that, not over stderr text.
-  Measured fleet-wide: **1,020 sampled of 21,478 eligible = 4.75% coverage**, all uncaught. That is
-  **coverage thinness, not assertion failure**. Of the uncaught, **31%** sit under `handoff/` — the
-  older note here said "most", which was generalized from one cassette and is false (range 0 to 31 of
-  50). Scoped to the delivered report (`--mutate-include '**/report.json' --mutate-max-per-file 500`)
-  the pass is **exhaustive**, not sampled: **1,221 of 1,221 values across 16 scenarios guarded by no
-  *value* assertion** (some scenarios do carry `exists: true` asserts, which are structurally
-  insensitive to a perturbation). Reporting-only by design and deliberately NOT a CI gate — a count
-  ratchet over `report.json` would red on every legitimate re-record.
-  Two glob traps: the matcher is **anchored and case-sensitive**, so `--mutate-exclude 'handoff/**'`
-  (the form upstream's own `--help` and `docs/` print) matches **nothing** against our `outputs/…`-
-  prefixed paths — use `'**/handoff/**'` (measured 1,236 → 1,141 on `cap-table-acquisition`); and
-  `'**/report.json'` cannot match a root-level `report.json`. Also: `report.json` is committed
-  **body-less** on `deck-review-smoke` and `ic-sim-contested`, so it is neither mutatable nor
-  `artifact_json`-assertable there.
-- **`--fidelity cowork`, as of harness 1.14.0.** The default is `container` — a *different* tier from
-  what the cassettes record at, so an unqualified critique is not a production-parity grade. `cowork` was
-  refused until 1.14.0 (the old advice here was `hostloop`, always); it is now accepted and is the better
-  choice, because it resolves via the pinned baseline's loop gate instead of hardcoding a tier that can
-  drift from it. Resolution happens **once, before either turn spawns**, is echoed as `[loop] cowork →
-  <tier>` on stderr, and is reported as `requestedFidelity` beside the tier that ran. `microvm`/`protocol`
-  stay refused; **`chat` still refuses `cowork`**. Note `--dotenv`: the child CLI loads that file before
-  deciding, so a `CLAUDE_FORCE_HOST_LOOP` in `./.env` is read during resolution (read, not applied to
-  critique's own env).
-- Report items carry `idea` / `recommendedAction` / `evidence` / `source`. There is **no `title`**.
-- **Corrected in 1.17.0 — re-check anything you concluded from the old docs.** Three of these were
-  documented wrongly before, so a scenario written against the old text can be unassertable rather than
-  merely wrong. **`semantic_matches` judges a much narrower document than "the union of the final
-  message, the transcript, and any authored files"**: the transcript is **top-level `assistant_text`
-  only** — no `tool_use`/`tool_result`, and **no sub-agent text at all**, including fork-scoped
-  `Skill`/`Agent(fork)` dispatches. So a rubric claim like *"the agent used a tool to surface the file"*
-  **can never grade true**, regardless of behaviour — the evidence is not in the document. Use
-  `tool_called` / `present_files_called` / `subagent_dispatched` instead, or opt in to
-  `semantic_matches: {include_subagent_text: true}` (new in 1.17.0; it enlarges the judged document, so
-  it can re-grade an existing rubric). This fleet uses no `semantic_matches` today — keep it that way
-  unless you have read this row. Also: **`subagent_dispatched`** is the real key; four upstream surfaces
-  spelled it `subagent_dispatch` (no trailing "ed"), which does not exist — our scenarios use the correct
-  form, verified. And `present_files_called` is **still** `z.literal(true)` / "at least one file", with no
-  per-file match, re-verified against 1.17.0 — which is why `cowork-tests/delivery_check.py` still exists.
+**Invoking**
+- `critique` takes a POSITIONAL skill folder. Always pass `--out <skill>.json --output-format json`: `--out` alone writes TEXT, and `json.load` then fails with `Expecting value: line 1 column 1`, which reads as a corrupt report (1.24.0 warns at parse time). The index cannot attribute a critique (records `command: "skill"`, no `skill` field, `session.json` has neither `skill` nor `prompt`), so `--out` is the only provenance. `--label` lands on turn 1 only, deliberately.
+- Tier prerequisites: `container` / `hostloop` need a token in the environment or in `.env` (`CLAUDE_CODE_OAUTH_TOKEN`, or `ANTHROPIC_API_KEY`) — ours lives in `cowork-tests/.env`, and `.env` is discovered from CWD only, so run from `cowork-tests/` or `doctor` reports a misleading Keychain error. The evaluator passes need `claude` on PATH (`COWORK_HARNESS_CLAUDE_BIN` overrides). Upstream docs said the opposite until 1.19.0.
+- Use `--fidelity cowork` (resolved once, before either turn spawns, via the pinned baseline's loop gate; echoed `[loop] cowork → <tier>`, reported as `requestedFidelity`). The default `container` is not the tier the cassettes record at. `microvm` / `protocol` refused; `chat` refuses `cowork`. `--dotenv`: the child CLI loads that file before deciding, so a `CLAUDE_FORCE_HOST_LOOP` in `./.env` is read during resolution.
+- Do NOT swap `--evaluator-model` on a fleet sweep. For document-analysis skills — every skill here — the task turn is ~61% of spend and the evaluator ~30%, so the saving is a third of its advertised size and it trades away the injection-resistance property verified for the default evaluator only. The levers are `--model` and probe scope; the default task-turn timeout is 30 min, so `--timeout` is no longer needed for a fan-out skill. The report's `cost:` line prints the evaluator share.
+- `--ablate-skill` is ONE arm; with `--repeat N` it yields N ablated runs and zero treatment runs — run again without the flag. Rollups label arms (`[ABLATED — control arm]`, `[MIXED ARMS: k/n ablated]`); `evals/cap-table/run_reliability_bench.py` parses `rollups[]` and reads these defensively.
+- `git add` untracked skill files first. Untracked `references/**` or the agent body → EXCLUDED and named in `evidenceBudget.corpusExcluded` — the CORRECT outcome (evaluator sees what the agent sees), and a "the skill never explains X" finding against it is properly grounded. Untracked `SKILL.md` → `skillMdStatus: "untracked"`, content withheld, forces `not-adjudicable`. A plugin-root reference shows up as `corpusOmitted[].alsoUntracked` — three-state, absent ≠ false.
+
+**Reading a report**
+- Budget from `report.costUsd.totalUsd`; `index.jsonl` omits the evaluator passes. Each critique also writes a roll-up row (`critiqueTotalUsd`), so `stats` totals are exact and label-filtered totals are not short (`unpricedRuns` says when a total is a floor). `costUsd` carries a per-pass `{input, output, cacheRead}` split. Whole-content packaging costs +5–18% per critique.
+- Items carry `idea` / `recommendedAction` / `evidence` / `source`. There is no `title`.
+- A `scripts/`-grounded `not-adjudicable` means "the evaluator could not SEE the code", not "the claim is false" — `scripts/` is outside the corpus by design. If a script's contract matters to how the skill is used, state it in SKILL.md or a `references/` file. Bites deck-review hardest: its gate contract lives in `gate_state.py`.
+- `noSkillFilesRead` is observational. ic-sim trips it on a correct run because `evaluation-criteria.md` / `partner-archetypes.md` are inlined into `agents/ic-sim.md` (`SKILL.md:73-75`); do not add reads to silence it. Since 2.5.0 it keys on the wide `unionReferenceAccesses` (Read ∪ Grep ∪ a Bash command naming the path, main ∪ sub-agents) with a third state `referenceAccessUnobservable` that must never be read as "none". A `$VAR`-built path is an accepted detector miss, and our SKILL.mds use `"$SCRIPTS/…"` — one literal path flips the signal. The matching `reference_read` / `no_observed_reference_access` scenario keys evaluate on replay but are NOT adopted (freezing one raises the replay floor to 2.5.0).
+- One critique is a sample (upstream measured 78 vs 50 extracted figures across two runs of one bug). Reproduce ≥ 2 runs. A fleet-consistency defect is out of scope for any single critique by construction; that is what the drift tests are for.
+- `result.json`'s `models` can contain `<synthetic>` (a locally fabricated turn, recorded verbatim). Drop `<…>` entries before using it as provenance. After a re-record, check `provenance.model` is UNIFORM across the corpus — a corpus silently spanning two models is a real hazard (tier changes correctness) and nothing else checks it.
+- A green run prints `·`-prefixed warn signals in its footer (`undelivered_deliverables`, `ended_with_question`, `scan_unavailable`, `exec_infra_error`, `prompt_asset_missing`). Read it.
+- `[provenance] model=… skill=offered,invoked ablated=…` rides every verdict and `results[].provenance`. `skill=…invoked` means the Skill channel was used, NOT that the skill under test ran — `skill_triggered` is the identity assert. `offered,unknown` / `unknown` mean evidence unavailable, never "no". `--compact` / `--demo` suppress it, and `[status]`.
+- Keep pre-upgrade reports: per-item verdicts are not comparable across corpus-packaging changes, but per-skill `not-adjudicable` counts on identical prompts are, paired with the `citationResolved:false` rate.
+
+**Corpus size (`evidenceBudget`)**
+- Four classes count against a 512 KiB ceiling: SKILL.md + every file under the skill's own `references/` (ANY extension — schemas and rule packs count) + every agent the skill resolves (a UNION: `agents/<skill>.md`, every pinned `subagent_type` literal, every agent whose `name:` equals the skill, and the transitive closure of pins inside those bodies — market-sizing pins two, which is why the term is a union and the fleet has SEVEN agents) + every plugin-root `references/` file the skill's own text points at. Over the ceiling, content is cut before grading and named in `evidenceBudget.corpusCuts` (`skillMdTruncated` is gone).
+- A data file scripts read by path belongs in `data/`, not `references/` (`cap-table-rules.json` moved 2026-08-01). Only evaluator-citable evidence is corpus. Relocating prose between SKILL.md and `references/` is corpus-neutral.
+- Measure with `tests/_critique_corpus.py` (`_corpus_bytes` in `test_skill_contract.py`) or `evidenceBudget.corpusBytes` on a real report. `lint-skill` (>=3.7.0 — earlier versions omit a whole class) prints the number only at ≥ 80% of the ceiling, so its silence is not a measurement. `test_skill_contract.py` guards the ceiling and cap-table's `> 10,000 B` margin; the margin figure has rotted in prose repeatedly — derive it.
+
+**Scenario and cassette tooling**
+- Everything the harness prints goes to STDERR; stdout is empty. Never poll with `status | grep` (exits immediately and silently) and never "fix" that with `2>&1`. Use `status <dir> --follow` or `status <dir> --output-format json`; long runs also heartbeat on stderr (`COWORK_HARNESS_NO_HEARTBEAT` / `_HEARTBEAT_MS`). `[status] <outDir>` is withheld under `--compact`/`--demo` but `status.json` is written regardless. Do not watch the outputs dir for artifacts.
+- `lint` is LENIENT; the loader is STRICT. Validate ONE scenario with `record scenarios/<s>.yaml --dry-run --out /tmp/probe.cassette.json` — `--out` is mandatory, because the bare form also pre-checks the cassette DESTINATION and refuses a valid scenario with no committed cassette (exit 2 at ≤ 3.1.0, 1 at ≥ 3.2.0; `fidelity: container` is exempt). Never spend `--allow-host-inventory-fixture` on a load check. For the WHOLE corpus use the DIRECTORY arm, `record scenarios/ --dry-run --quiet` (what CI runs): 0 = all load and under cap; 1 = a scenario did not LOAD (`✗ broken:` on stderr) or a path-independent refusal (prompt policy, assert contradiction, duplicate target); 2 = the budget gate refused; some-broken + over-cap = 2 with the broken line still printed; ALL-broken + over-cap = 1 (nothing loaded, so the budget gate never ran). Anything wrapping it needs that 1-vs-2 split (`rerecord.sh` has it). Non-recursive; a file with no `prompt:` key is `· skipped:`, not broken.
+- `lint --strict` alone exits 1 on INFO-only findings; CI pairs it with `--min-severity WARN`. Read the exit code, not the summary line. `strict: true` belongs on the lint step only — on replay steps it also fails on cassette staleness, which is WARN-only by design.
+- `lint`'s vacuous-gate fix line is wrong for a scenario DESIGNED to fire no gates (`cap-table-lane3-freeform`): the remedy there is to drop `gate_answers_delivered`, not add a companion.
+- NONE of `lint`, the bundled `scenario.py lint`, or `record --dry-run` catches a `tool_not_called` / `subagent_tool_absent` naming a tool the tier does not serve (their tier table has no `cowork` row; the refusal lives in `executeScenario`). At hostloop the shell is `mcp__workspace__bash`, so `'Bash'` there is vacuous. Our own Context A agents declare no shell tool of any name, so the corrected assert is unviolatable for agents we wrote; its live value is a dispatch we did NOT write — a `Task` with no `subagent_type` falls back to `general-purpose` with a wildcard tool surface including workspace bash. Do not delete it as vacuous. `test_cowork_invariants.py`'s per-agent tool declarations are the primary enforcement.
+- After editing any `assert:` block: `replay cassettes/<s>.cassette.json --assert-from scenarios/<s>.yaml` — free, ~1 s, no Docker. It refuses on prompt drift, and that refusal means "re-record required". On every stale lane its exit 1 also carries a `skill-source drift (--fail-on-skill-drift)` line — read the per-assert lines, and never waive it with `--allow-failing`. `verify-run` is the kept-run-dir equivalent and fail-closes on a PARTIAL run.
+- A recorded cassette is NOT relocatable (`scenario.session` / `scenarioSource` are directory-relative). Never rehearse on a `/tmp` copy — the copy manufactures `unverifiable-skill` / "skill dirs not resolvable" and hides the real finding.
+- `semantic_matches` judges top-level `assistant_text` ONLY — no tool blocks, no sub-agent text (unless `include_subagent_text: true`). We use none; keep it that way. The key is `subagent_dispatched` (with "ed"; four upstream surfaces misspelled it). `present_files_called` is `z.literal(true)` / "at least one file", no per-file match — which is why `cowork-tests/delivery_check.py` exists. `subagent_declared_but_unused` is near-always vacuous (0 of 1091 real dispatches carry a declared tool list).
+- `assertions --list` emits `{key, description}` — no replay class; read classes from `docs/scenario.md`.
+- A/B a skill change with `stats <scenario> --group-by skill-hash --runs`; runs before and after an edit share a scenario dir and `stats` warns on `distinctSkillHashes`. Narrow with `--skill-hash <prefix>` or `--label`; `--since` breaks when two versions run on one day.
+
+**Privacy gate**
+- `privacy-allowlist.sh` defines a bash ARRAY, so `source` alone changes nothing: `source cowork-tests/privacy-allowlist.sh && cowork-harness verify-cassettes cowork-tests/cassettes "${ALLOW[@]}"`. Sourced-but-unexpanded reports thousands of findings and looks exactly like a broken allowlist. Every `--allow*` regex is FULL-MATCH inside the harness's own wrapping — `founder-skills:.*` clears a class, `^founder-skills:` clears zero. Over-tight fails safe; over-loose disarms a class silently. Re-count after any edit and confirm `canary/email-canary.cassette.json` still flags `[email]` — it is hand-authored, deliberately `cassetteVersion` 10, and is never re-recorded.
+- Never pipe `verify-cassettes` to `tail` (deterministic `EAGAIN` crash replaces the verdict). Redirect to a file.
+- The per-class header counts INFORMATIONAL classes; `findings by class: unscanned N` with exit 1 is staleness / scenario-drift, not PII. CI's privacy step passes `--skip-staleness --skip-scenario-drift` and exits 0. A `replaced-builtin` NOTE on `host-path-canary` is not a finding and not a reason to re-record.
+- `host-inventory`: our own plugin's `agents[]` / `skills[]` entries are exempt because every recording declares `founder-skills` in `plugins[]` (1.19.0+; the built-in skill roster was fixed in 1.25.0 and extended for 3.6.0 — fix the roster, never allow). There is deliberately NO allow entry for them — a suppression that suppresses nothing invites misreading the gate. If a re-record reds this gate on our namespace, the cause is a missing `plugins[]` declaration, not a leak. The arrays live inside the `system` init frame in `events[]`, whose entries are JSON-ENCODED STRINGS — a walker that does not `json.loads` string leaves concludes the axis does not exist (and `scenario.skills` is a different, staleness-scoping key). The zero is structural (the axis targets `protocol`; we record at hostloop), confirmed non-vacuous by probe. This makes the CLI floor load-bearing: floor every consumer of `privacy-allowlist.sh` at `>=1.19.0` — though the **replay floor is `^2.1.0`, the RECORDING floor `>=3.6.0`, and the CI selectors are PINNED EXACTLY at `3.7.0`** (see Release Process).
+- The predicates that would mean a REAL leak — `mcp_servers[].name`, `account.email` / `.organization` / `.subscriptionType`, a `mcp__<server>__…` tool naming a foreign server — return NONE across the corpus. Not covered: the command and plugin catalogs and command descriptions. A green is a backstop, not proof.
+
+**`replay --mutate`**
+- It SAMPLES — 10 per file, 50 total, per-file cap applied first — so `50/50 … CAUGHT BY NOTHING` is coverage thinness, not an assertion-failure rate, and the `(sampled N of M eligible …)` parenthetical's M is not the ratio's denominator. Aggregate over the JSON `mutation` object (`{sampled, eligible, truncatedBy, caps, uncaught}`), not stderr. Globs are anchored and case-sensitive against `outputs/…`-prefixed paths: `'**/handoff/**'`, never `'handoff/**'`; `'**/report.json'` cannot match a root-level `report.json`. Scoped to the delivered report it is exhaustive, not sampled: `--mutate-include '**/report.json' --mutate-max-per-file 500`. Reporting-only by design — a count ratchet over `report.json` would red on every legitimate re-record. `report.json` is committed body-less on `deck-review-smoke` and `ic-sim-contested`, so it is neither mutatable nor `artifact_json`-assertable there.
 
 ## Running Tests
 
@@ -631,7 +295,7 @@ Measured workarounds, current through **1.15.0**. Full detail in
 uv run pytest                                       # all tests (e2e auto-skips without auth; cowork auto-skips without the harness CLI)
 uv run pytest founder-skills/tests/ -v              # verbose
 uv run pytest founder-skills/tests/ -v -m "not e2e and not mutation" # explicitly skip the paid + slow lanes
-uv run pytest -m cowork                             # token-free cowork-harness cassette replay (needs `npm i -g cowork-harness@3.6.0` — exact, matching CI; no Docker/token)
+uv run pytest -m cowork                             # token-free cowork-harness cassette replay (needs `npm i -g cowork-harness@3.7.0` — exact, matching CI; no Docker/token)
 uv run pytest -m mutation                           # curated mutant corpus (~3 min; deselected by default — see the WARNING below)
 ```
 
@@ -686,6 +350,7 @@ The `e2e` marker keeps these tests out of the default per-PR `ci.yml` run; they 
 ## Hooks
 
 - **SessionStart** (`founder-skills/scripts/session-setup.sh`): Persists `CLAUDE_PLUGIN_ROOT` into `CLAUDE_ENV_FILE` so scripts can locate plugin files at runtime.
+- **Stop** (`founder-skills/scripts/stop-handover-check.sh` → `stop_handover_check.py`): after the model's final turn, checks that the founder's message carries market-sizing's printed hand-over whole and adds nothing numeric; a `{"decision": "block", "reason": …}` reply sends the model back **once**. A block APPENDS — the faulted message stays on screen and the rewrite lands beneath it — so the reason dictates a follow-up the founder will read, not an internal note. Its lead (`CORRECTION_LEAD`) states provenance and which figure wins on a conflict, never that the message above was wrong: neither failure `_handover_check.py` reports establishes a wrong figure (a correct paraphrase fails containment too), and a production block once told a founder to disregard figures that were right. The wrapper is POSIX `sh` (it runs host-native on macOS at hostloop and under dash in the Cowork VM) and **fails open** when `python3` is absent: the hook enforces, the skill never depends on it. It fires at the end of EVERY turn in every session with the plugin enabled; any stop without a `closing_message.py` call since the last real user prompt exits 0 with no output, and any error exits 0 with one stderr line.
 - **pre-commit** (`scripts/hooks/pre-commit`): ruff format/lint on staged Python + the privacy-leak guard. Activate once per clone: `git config core.hooksPath scripts/hooks`. Bypass a confirmed false positive with `git commit --no-verify`.
 - **commit-msg** (`scripts/hooks/commit-msg`): DCO gate — rejects a commit with no `Signed-off-by:` trailer matching the commit author. Validates only; it deliberately does not auto-append the trailer (a sign-off certifies that *you* have the right to submit, so a hook adding it silently would certify on your behalf).
 
@@ -720,104 +385,10 @@ Run manually: `uv run python scripts/privacy_guard.py --staged` (or `--tree`). T
 
 Verified against the Claude Code v2.1.120 skill runtime contract and Desktop v1.6259.1 architecture:
 
-- **Skill re-attachment after auto-compaction has TWO budgets, and the second one deletes silently.**
-  Values verified first-party across 2.1.246→2.1.250 and independently re-derived by a second reader.
-  **Cite VALUES and behaviour, never minified identifiers** — every symbol rotates each release and one
-  collides destructively: `_On` means **25,000 in 2.1.248 and 5,000 in 2.1.250**. (This machine runs
-  **2.1.250**; an earlier version of this note said 2.1.248, which was never the running binary.)
-  **Cap 1 — 5,000 tokens per skill, and the token gate IS a character gate.** The estimator is
-  `Math.round(len/4)`, not a tokenizer, so the two units are exactly interconvertible and a `wc -m`
-  check measures the RIGHT unit with **zero** conversion error. (An earlier version of this note claimed
-  the char check was an approximation whose error tracks chars-per-token. That was wrong — refuted on
-  the estimator's own source.) The exact numbers: truncation triggers at **len ≥ 20,002 chars**, so the
-  last safe length is **20,001** — not 19,900, which is merely what survives (`slice(0,19900)` + a
-  100-char marker = exactly 20,000). All six of our SKILL.mds are far over, so **every one truncates on
-  every compaction, discarding 75–86% of its body.** That is not a tail risk; it is certain.
-  **Cap 1 IS recoverable in practice — an earlier version of this note said otherwise and was wrong.**
-  The stored content is prefixed with `Base directory for this skill: <ABSOLUTE PATH>`, and truncation
-  is head-preserving (`slice(0,19900)` + marker), so **that line survives truncation by construction**.
-  The marker's "use Read on the skill path" is therefore directly executable. **Measured here, 651
-  attached entries: 586 (90.0%) carry the absolute base directory, and 99 of 101 TRUNCATED entries
-  (98.0%) carry it.**
-  **The rule for anything we ship: a skill that OWNS A DIRECTORY is recoverable; a single-file command
-  is not.** Verified by the cleanest available test — one plugin ships both sides:
-  `plugin:superpowers:brainstorming` (a `SKILL.md` owning its folder) carries the base directory
-  **81/81**; `plugin:superpowers:brainstorm` (the single-file command beside it) **0/17**. Same plugin,
-  same sessions, opposite behaviour, and **no path in the corpus ever appears both ways** — the
-  classification is clean, not statistical. **All six of our skills own their directory and are
-  recoverable.** Our only single-file command is `commands/feedback.md` at 2,737 chars — 13.7% of the
-  20,001 limit, so it cannot truncate today, but if it ever grew past the limit it would truncate with
-  **no recovery path at all**. That is the class to watch, and it is easy to miss precisely because
-  commands rarely approach the cap.
-  Do NOT record the wider generalization "bundled and builtin skills have no base directory" — measured
-  counterexample: `bundled:verify` carries one (1/1), while `bundled:artifact-design` (0/5),
-  `bundled:artifact-diagramming` (0/2), `bundled:fewer-permission-prompts` (0/4) and `builtin:init`
-  (0/12) do not. Directory ownership predicts recoverability; the source prefix does not.
-  **Refinement: the predicate is directory DURABILITY, and the recovery path can die on a plugin
-  upgrade.** Three states, not two — (1) durable owned directory (installed `SKILL.md`), recovery works;
-  (2) no directory at all (single-file command), recovery cannot fire but nothing misleads; (3) **a
-  directory that evaporates**, which is *worse than (2)* because the model is handed an absolute path,
-  burns a turn on a `Read`, and gets an error that looks like a real lead. Bundled skills are state 3
-  (extracted to a random per-run temp dir). **We ship none — but state 3 is NOT bundled-only.**
-  **Measured here: 46 of 52 distinct plugin-cache base directories are DEAD**, because the cache path is
-  version-stamped and the old version dir is removed on upgrade (`…/superpowers/6.1.1/…` dead, `6.3.0`
-  present). **Scope this correctly — it does NOT mean recovery is broken.** Inside a live run the path
-  names the currently-mounted version and resolves; every dead one above was alive when written. The
-  exposure is **resume**: a session resumed after a plugin upgrade re-registers the stored content
-  verbatim, so its recovery path points at a removed version dir. **INFERENCE, not observation** — the
-  path-death is measured, the failing resume `Read` is not. Applies to our six skills in Cowork (mounted
-  from the version-stamped cache), never in the harness (working tree).
-  The narrower fact that misled me is still true and still worth knowing: the `skills[].path` field is a
-  source-qualified identifier (`<source>:<name>`, e.g. `plugin:cap-table`), **not** a file location — so
-  a recovery attempt keyed on `path` fails, while one keyed on the content's first line succeeds. The
-  registry's internal field is `skillPath` but the attachment builder renames it to `path` on the way
-  out, so grepping transcripts for `skillPath` finds nothing and reads as "absent".
-  **What remains true regardless of recovery:** truncation is certain on every compaction, discards
-  75–86% of each body, and is written back to session state — so recovery depends on the model noticing
-  and spending a Read, which is a real cost and not guaranteed. The preamble's "Do NOT re-execute these
-  skills… shown here for context only" discourages it, though re-*reading* a file is not re-*executing*
-  a skill, so that pressure is weaker than it first appears.
-  **Cap 2 — 25,000 tokens combined across all skills; over budget the stored content is set to `""`
-  permanently.** No marker, nothing to notice its absence against — so a "re-read if something looks
-  missing" instruction works for truncation and **structurally cannot fire** for zeroing. Consumed by
-  *post-truncation* sizes (each of ours contributes exactly 5,000); iterates **most-recently-invoked
-  first**, so the skill that vanishes is the least recently used, not the biggest; **per-agent**, so our
-  heavy sub-agent dispatch materially reduces main-thread pressure. Six co-invoked = 30,000 > 25,000 →
-  five fit at exactly 25,000 (the comparison is strict `>`) and the sixth is zeroed. A third silent path
-  exists: a skill still visible in a retained **attachment** is skipped entirely and consumes no budget.
-  **Frequency — do not repeat the underestimate.** An earlier version called the whole thing a "compound
-  rarity" off 1 compaction in 453 cowork-harness run dirs. That number is a **floor for the wrong
-  population**: it scanned only `compact_boundary` and missed `microcompact_boundary`, and harness runs
-  are short and single-skill by construction. Measured on this machine's real Claude Code transcripts:
-  **380 files with `compact_boundary`, 27 with `microcompact_boundary`.** Compaction is ordinary. Only
-  the *zeroing* is rare; the truncation is not.
-  **Mitigations, in increasing cost.** (a) **Front-loading is WITHDRAWN — do not re-propose the additive
-  form.** `slice(0,19900)` is a **fixed-size window**, so prepending a "survival core" **evicts exactly
-  as much from the tail as it adds**; measured, a 2,500-char core would have evicted the `STAGING_DIR`
-  definitions and outputs-mount guards — the very invariants it was written to state. "Additive"
-  described the diff, not the effect. Two further corrections from that pass: the stored attachment is
-  the `Base directory…` prefix **+ body with YAML frontmatter STRIPPED** (prefix 101–240 chars,
-  install-dependent), so raw `wc -m` against 19,900 is the wrong basis — corrected, only **2 of 6**
-  skills keep Step 0 whole (deck-review 146 chars of headroom, ic-sim 1,327); and reordering is NOT
-  invisible to tests, `test_ic_sim_skill_contract.py:1354` asserts step order. The **subtractive** form
-  is the right shape but it simply IS (b), and there is no cheap duplicate to harvest — the per-skill
-  `## Skill Execution Model` sections overlap the shared `references/skill-execution-model.md` by only
-  20.6–28.0%. Any future attempt must be gated on an **e2e A/B (~$10)**: contract tests cannot see
-  behavioural change, and a size-ratchet test (`test_skill_md_does_not_grow`) requires a justified
-  ceiling raise per skill. Full record: `docs/internal/2026-08-28-skill-frontloading-plan.md` rev 2.
-  (b) **Relocate prose to `references/`** — exempt from both caps above (the
-  budget reads a dedicated invoked-skills registry and never scans messages or tool results), target
-  ≤20,001 chars of rendered prompt. But this is **not free**: a Read-ed file competes in a separate
-  post-compaction file-restore budget — the **5 most recently read files**, 5,000 tokens each, 50,000
-  combined. Relocation moves content into a different, larger, 5-slot budget rather than out of every
-  budget. **That budget is per-agent too**, so it does NOT weaken under our heavy sub-agent fan-out: a
-  plain Task/agent dispatch starts with a FRESH empty file cache, a `context: fork` dispatch starts with
-  a COPY of the parent's, and a child's reads never propagate back. The `fork` sharing caveat does not
-  apply to us — **measured: no `context: fork` in any of the six SKILL.mds or six agent bodies.** If one
-  is ever added, re-check this. (`gOn=5` is the slice applied at restore time, not the cache size; the
-  backing store is 5,000 entries / 25 MiB.) **Neither conflicts with the retired "never move prose into `references/`" rule below** —
-  that retirement was decided on *critique-corpus* grounds (512 KiB whole-content packaging), a
-  different budget entirely.
+- **Skill re-attachment after auto-compaction has TWO budgets, and the second deletes silently.** Cite VALUES, never minified identifiers — every symbol rotates per release and one has collided destructively (`_On` meant 25,000 in one build and 5,000 in the next).
+  **Cap 1 — 5,000 tokens per skill, and it is a CHARACTER cap**: the estimator is `Math.round(len/4)`, so `wc -m` measures the right unit with zero conversion error. The stored content is the `Base directory for this skill: <abs path>` prefix (101–240 chars, install-dependent) + the body with frontmatter STRIPPED; it truncates at ≥ 20,002 chars — the last safe length is **20,001**, and 19,900 is merely what survives (`slice(0,19900)` + a 100-char marker). All six of our SKILL.mds are far over, so every one truncates on every compaction, discarding 75–86% of its body — and compaction is ordinary (380 transcripts with `compact_boundary` on this machine), not rare. Truncation is head-preserving, so the base-directory line survives and a skill that OWNS A DIRECTORY is recoverable (measured 98% of truncated entries carry it). A single-file command has no recovery path at all: `commands/feedback.md` is 2,737 chars today and is the class to watch. Do NOT generalize this to "bundled/builtin skills have no base directory" — `bundled:verify` carries one; directory ownership predicts recoverability, the source prefix does not. Refinement: the predicate is directory DURABILITY — a plugin upgrade removes the version-stamped cache dir, so a session RESUMED after an upgrade holds a recovery path to a dead directory (path-death measured; the failing resume `Read` inferred, not observed). `skills[].path` is a source-qualified identifier (`plugin:cap-table`), not a location — recovery keyed on `path` fails, keyed on the content's first line succeeds; the registry's `skillPath` is renamed to `path` on the way out, so grepping transcripts for `skillPath` finds nothing.
+  **Cap 2 — 25,000 tokens combined**, over post-truncation sizes (each of ours contributes exactly 5,000), most-recently-invoked first, per-agent: over budget (strict `>`), the least-recently-used skill's content is set to `""` with no marker — a "re-read if something looks missing" instruction structurally cannot fire for zeroing. Six co-invoked = one zeroed. A skill still visible in a retained attachment is skipped and consumes no budget. Sub-agent fan-out relieves the main thread.
+  **Front-loading a "survival core" is WITHDRAWN** — do not re-propose the additive form: the window is fixed-size, so a prepended core evicts exactly as much from the tail (measured: it would have evicted the `STAGING_DIR` invariants it was written to protect). Reordering is not invisible to tests (`test_ic_sim_skill_contract.py` asserts step order), and the subtractive form has no cheap duplicate to harvest — the per-skill `## Skill Execution Model` sections overlap the shared reference by only 20.6–28.0%. Any front-loading or reordering attempt needs an e2e A/B (~$10) — contract tests cannot see behavioural change — and a justified `test_skill_md_does_not_grow` ceiling raise. Relocating prose to `references/` (target ≤ 20,001 chars of rendered prompt) is exempt from both caps but lands in the separate post-compaction file-restore budget: the 5 most recently read files, 5,000 tokens each, per-agent (a plain dispatch starts empty, `context: fork` copies the parent's — we use no `fork`; re-check if one is added). Neither conflicts with the retired "never move prose into `references/`" rule, which was about the 512 KiB critique corpus. Full derivation: `docs/internal/2026-08-28-skill-frontloading-plan.md` rev 2 and `docs/internal/2026-08-28-skill-compaction-budget-and-frontloading-plan.md`.
 - **Env vars in skill bodies:** Use `${CLAUDE_PLUGIN_ROOT}` (braced form) — the plugin content expander substitutes it at load time. Bare `$CLAUDE_PLUGIN_ROOT` only resolves at Bash subprocess time and depends on `CLAUDE_ENV_FILE` being sourced; the gist flags this as unconfirmed for skill subprocesses. The braced form is the contract.
 - **Frontmatter keys** must come from the documented set: `name`, `description`, `when_to_use`, `allowed-tools`, `argument-hint`, `arguments`, `context`, `agent`, `model`, `effort`, `user-invocable`, `disable-model-invocation`, `paths`, `hooks`, `shell`, `created_by`. (`version` is parsed but tagged "[Undocumented] Informational only" in gist 1 — don't rely on it.) Custom keys are silently dropped — put human-readable metadata in a `## Skill Metadata` body section instead. **Avoid undocumented nested structures** (e.g. don't add a custom `metadata: {…}` block). The documented fields that *do* take structured values (`shell.interpreter`, `hooks.PreToolUse`, `paths` list, `arguments` list) are fine — they're explicitly specified.
 - **Two parsers, two discovery outcomes (important):**
@@ -836,290 +407,31 @@ Tag-push triggers `deck-review-e2e-smoke` in `.github/workflows/skill-quality.ym
 
 ### Release ordering
 
-0. **Refresh cowork cassettes** (release cadence): `cowork-tests/rerecord.sh` (paid/local; it preflights `cowork-harness doctor --tier hostloop` — needs Docker, the `:2` agent image, and BOTH staged agent binaries: the Linux/arm64 ELF and the native Desktop host binary the hostloop agent loop spawns) → confirm green, commit refreshed `cassettes/` by name. Since the 0.24.0 pin, `fidelity: cowork` records at **native hostloop** (real host paths in transcripts, stripped by the `cowork-tests/.cowork-redact.json` redaction policy at record time — `record` refuses to write a cassette whose asserts or `computer://` links redaction broke). `rerecord.sh` records in a bounded parallel pool, prints a normalized `cowork-harness diff` per refreshed cassette (the primary drift review), and tails `stats` + `prune`; runs land in the harness-default `~/.cowork-harness/runs` so `stats` can trend reliability across re-records. The cowork-replay staleness gate is WARN-only, so cassettes drift between releases; this re-records them against the current baseline/format. Skip only if no skill/`scripts/`/`references/`/`agents/` change landed since the last refresh. **Staleness is skill-scoped, and knowing that bounds the refresh:** every scenario declares a `skills:` key (`competitive-positioning-smoke.yaml:5` — "scope the staleness hash to this skill + shared roots"), so an edit under `skills/<skill>/` stales only that skill's cassettes. The mount stays whole-plugin either way — narrowing it is what reintroduces a false-green. **"Shared root" means everything NOT under `skills/<x>/`**, per the harness (`docs/cassette.md`), and the cassette `fileSigs` confirm it: `competitive-positioning-smoke` hashes `.claude-plugin`, `LICENSE`, `agents`, `commands`, `references`, `scripts` alongside its own skill dir. So `commands/feedback.md` and `plugin.json` stale the fleet too — do not read the shared set as just `scripts/`/`references/`/`agents/`.
+0. **Refresh cowork cassettes** (release cadence, paid, local): `cowork-tests/rerecord.sh`. It preflights `cowork-harness doctor --tier hostloop` (needs Docker, the `:2` agent image, and BOTH staged agent binaries — the Linux/arm64 ELF and the native Desktop host binary the hostloop agent loop spawns), records in a bounded parallel pool, prints a normalized `cowork-harness diff` per refreshed cassette (the primary drift review), and tails `stats` + `prune` (runs land in `~/.cowork-harness/runs`, so `stats` can trend reliability across re-records). `fidelity: cowork` records at native hostloop; host paths are stripped by `cowork-tests/.cowork-redact.json`, and `record` refuses a cassette whose asserts or `computer://` links redaction broke. The cowork-replay staleness gate is WARN-only, so cassettes drift between releases. Skip only if nothing under `skills/`, `scripts/`, `references/`, `agents/`, `commands/` or `plugin.json` changed since the last refresh — see "Cassettes and the assert block" below.
 
-**CURRENT STATE (2.x). Read this before any per-release note below it — those are floor history and several of their numbers are superseded here.**
+**cowork-harness version posture.** Three postures, per site — never collapse them into one number:
 
-* **Three postures, per site, not one number — and two of them are no longer floors at all.**
-  **CI selectors are PINNED EXACTLY at `3.6.0`** (raised 3.2.0 → 3.5.0 → 3.6.0 on 2026-09-18; from 3.0.0 on 2026-09-01) (the four workflow `version:` inputs, the
-  `skill-static-analysis` `npm i -g`, and the three install instructions in `CONTRIBUTING.md`,
-  `CLAUDE.md` and `pyproject.toml`). Carets auto-adopted every upstream release into CI with nobody
-  choosing it — 2.4.0 was live in our gates before its adoption plan was written — and five CI steps
-  red on rules the harness adds. Raise them deliberately, in an adoption pass, never to chase a red.
-  `test_cowork_harness_floors.py` gates all of them, `CLAUDE.md` included (it was ungated until
-  2026-08-27). Recording: **`>= 3.6.0`** (`rerecord.sh` — FOUR sites, and the file
-  says so itself at its `# FLOOR:` header: that header, the numeric gate, its FATAL message, and
-  `_RECORDING_FLOOR`. Find the gate with `grep -n 'minor.*-ge'`, never by line number, which has been
-  wrong here before. The gate keeps the shape `-eq <major> && -ge <minor>`, which at the 3.2.0 floor is
-  finally load-bearing (`-ge 2`) rather than vacuous as it was at every `.0` floor before it — the
-  floors test's regex reads that shape and asserts its own pattern matched, so "simplifying" it blinds
-  the guard rather than the gate). **NOTE this sentence was UNGATED and went stale through the 3.2.0
-  raise** — its `>= 3.0.0` spelling (a space after `>=`) misses the gated `RECORDING floor `>=X`` and
-  `FLOORS (recording `>=X`` patterns. Caught by a widened `git grep '3\.0\.0'` audit, not by a test. Replay floor: **`^2.1.0` at exactly ONE site now** —
-  `test_cowork_cassette_replay.py::_MIN_HARNESS`. The other sites this line used to name (the four
-  workflow `version:` inputs, the `skill-static-analysis` install, `pyproject.toml`'s marker) became
-  exact CI pins on 2026-08-27 and are no longer floors. `_MIN_HARNESS` is a SKIP GUARD, not a
-  selector: it decides whether the replay test runs at all, not which CLI CI installs — which is why
-  it does not track the pin. It is deliberately NOT at 2.2.0 or above:
-  measured, there is no requirement, and raising `_MIN_HARNESS` converts a below-floor developer's red
-  into a silent skip. `test_cowork_harness_floors.py` pins every site.
-* **`uses:` pins the ACTION, `version:` pins the CLI, and they move independently** — a workflow on
-  `@v1` installs a 2.x CLI perfectly happily, which is how the wrapper pin sat a major behind. Keep the
-  majors in step; a test enforces it.
-* **Corpus and cassette format are DERIVED, not restated.** Run `python
-  cowork-tests/cassette_inventory.py`. Every cassette in `cowork-tests/cassettes/` is `cassetteVersion`
-  **12**; `MIN_SUPPORTED_CASSETTE_VERSION` is **9**; the hand-authored email canary is deliberately
-  **v10**. Any count in prose elsewhere in this file is stale by construction — the corpus was cut on
-  2026-08-24 and prose has been wrong about it repeatedly.
-* **`3.6.0` (adopted 2026-09-18, hours after 3.5.0) is the release that makes recording POSSIBLE on
-  this machine, and its one fidelity change is invisible to a baseline diff.** Desktop **2.2553.1**
-  (the first 2.x) stages only agent 2.1.275; 3.5.0 pinned 2.1.260, so a real `record` refused and
-  offered only `COWORK_HARNESS_ALLOW_AGENT_FALLBACK=1` — a tolerated ELF mismatch frozen into a paid
-  cassette, and one that could have died mid-run on the two-model-envelope transport bug 3.6.0 fixes.
-  Exhaustive leaf diff `1.46388.4` → `2.2553.1`: the ELF and `appVersion` move, **zero `spawn.*` leaves
-  move**, `allowDomains` set-equal. What DID move is in `src/runtime/argv.ts`: the harness now injects
-  **`CLAUDE_CODE_DESKTOP_APP_VERSION`** from `appVersion` (gated ≥ 2.2553.1) — a spawn-env change no
-  baseline diff can see, same class as the 1.20.0 `NO_PROXY` note. It is what production sends. Also:
-  `design` added to the built-in skill roster (extended, not re-derived from 2.1.275 — the first
-  hostloop recording may surface more; fix the roster, never `--allow-host-inventory`). Measured
-  identical on all 20 token-free surfaces vs 3.5.0; `doctor --tier hostloop` reads `sha256 ✓`.
-  `CASSETTE_VERSION` 12 / `MIN_SUPPORTED` 9. Full analysis:
-  `docs/internal/2026-09-18-cowork-harness-3.6.0-adoption-plan.md`.
-* **`3.5.0` (adopted 2026-09-18, covering 3.3.0 / 3.4.0 / 3.4.1 / 3.5.0 in one pass) moves ONE fidelity
-  input and it is the one A5 already re-records for.** Exhaustive leaf diff `desktop-1.40609.0` →
-  `desktop-1.46388.4`: agent ELF 2.1.247 → 2.1.260, and **`spawn.subagentAppendHostLoop` repointed** —
-  3.4.0 now tells a host-loop sub-agent which folders exist and mixes that generated text into
-  `promptAssetsHash`. That is a system-prompt change on the tier this fleet records at, hence a
-  re-record trigger. Everything else byte-identical: `spawn.tools`/`env`/`promptTemplate`/`options`,
-  `allowDomains` set-equal without even an order change. `CASSETTE_VERSION` 12 / `MIN_SUPPORTED` 9
-  unchanged. Whole-`src/` diff read: the manifest generator, `semantic_matches` machinery (we use zero),
-  hook-event list 9 → 33, two scrubbed env keys we never set. **Measured identical on all 20 token-free
-  surfaces** 3.2.0 vs 3.5.0 (10 replays, verify-cassettes 0 PII both, lint, dry-run, analyze-skill,
-  6× lint-skill); the only text delta is the staleness target plus `cap-table-safe-full` newly
-  baseline-stale, which is correct. Pins raised at every gated site by letting
-  `test_cowork_harness_floors.py` enumerate them; `_MIN_HARNESS` deliberately left at `(2, 1, 0)`.
-  Target moved from the decision's 3.4.1 to 3.5.0 because 3.5.0 was npm `latest` before the pass ran.
-  Full analysis: `docs/internal/2026-09-18-cowork-harness-3.5.0-adoption-plan.md`.
-* **`3.2.0` (adopted 2026-09-01, skipping 3.1.0) adds NO fidelity debt but DOES add record-time debt —
-  and the two are different things.** No emulation moved: `git diff --name-only v3.0.0..v3.2.0 --
-  baselines/` is **empty**, and so is the same diff over `src/{runtime,hostloop,staging,agent,egress,sync}/`;
-  `CASSETTE_VERSION` stays 12, `MIN_SUPPORTED` 9, default baseline `desktop-1.40609.0`. **But that pair of
-  greps is NOT the whole answer, and a first pass concluded "no re-record debt" from it and was wrong.**
-  Thirteen `src/`+`schema/` files moved OUTSIDE that prefix list, including `src/run/cassette.ts`
-  (+261/−78) and a new `src/run/model-provenance.ts`. **Diff `src/` and `schema/` WHOLE.** This repo had
-  already written the lesson down for 3.0.0 — *"an exhaustive diff that pre-classifies a prefix is a
-  hand-list with extra steps"* — and it was repeated one directory over.
-  **What actually moved (from 3.1.0):** `schema/cassette.v12.json` gains `environment.model` — the model
-  the recording ran (`id`, from what the agent reported, so it survives a mid-run fallback) plus `source`
-  — and the **session fingerprint widens to cover the pinned `model:`**. Both are stamped at RECORD time
-  and cannot be backfilled, exactly the 1.11.0 `environment.harnessVersion` class. Measured 2026-09-01,
-  same corpus and allowlist, 3.0.0 vs 3.2.0: `verify-cassettes` goes **60 → 70 lines**, the delta being
-  ten `[note] session-fingerprint: predates \`model\` coverage … Re-record to adopt it.` lines, one per
-  cassette. **CI is unaffected** — its privacy step passes `--skip-staleness --skip-scenario-drift`,
-  measured rc=0 / `✓ 10 cassette(s) clean` / 0 notes.
-  **That is why the RECORDING floor moved to `>=3.2.0` while nothing forced a re-record today.** The next
-  re-record is a full paid batch already owed for baseline staleness; recording it below 3.1.0 would buy
-  ten cassettes that cannot say which model produced them, which CI's own gate flags on sight, and which
-  `rehash` cannot repair (it migrates hash FORMATS, not fingerprint SHAPE). Floor and pin are both 3.2.0 —
-  equal VALUES, still separate postures.
-  **Everything else in 3.2.0 is exit codes, one new lint rule, and docs**, all measured against our tree:
-  `enum-value-invalid` (ERROR, eleven enum locations) finds **zero** on our 35 scenarios and the green is
-  earned, not vacuous — a `fidelity: bogus` probe lints `✓ clean` at 3.0.0/3.1.0 and errors at 3.2.0. All
-  six CI gates pass at the released 3.2.0: lint `--strict --min-severity WARN` rc=0, load check rc=0,
-  10/10 replay, `analyze-skill --strict` rc=0, `lint-skill --strict` rc=0. Full analysis:
-  `docs/internal/2026-09-01-cowork-harness-3.2.0-adoption-plan.md`.
-* **`3.0.0` (adopted 2026-08-30) adds NO fidelity debt and NO re-record debt of its own — every
-  breaking change is `protocol`/L0, and we run ZERO protocol scenarios.** The rename
-  `l0_plugin_divergence` → `l0_host_config_contamination` (signal, modifier, `RunResult` field)
-  appears nowhere here. L0 now actually passes `--plugin-dir` (it was silently inert before, so an L0
-  run measured whatever the operator had installed). Measured 2.5.0-vs-3.0.0 across every token-free
-  surface on this tree — `replay` ×10, `verify-cassettes` + allowlist, `lint --strict`, both
-  `record --dry-run` forms, `analyze-skill --strict`, `lint-skill --strict` — **identical verdicts and
-  exit codes**, 0 PII findings both, `lint` byte-identical; the only textual delta anywhere is the
-  staleness target string. `CASSETTE_VERSION` 12 / `MIN_SUPPORTED` 9 unchanged. Four emulation files
-  changed and each was READ (`baselines/` byte-identity is NOT the argument — 2.4.0 is the
-  counterexample): `argv.ts` is a pure refactor extracting `pluginDirArgs()` with `baseAgentArgs`
-  unchanged, `lima.ts` is microvm-only, `protocol.ts` is L0-only, `sync/cowork-sync.ts` is the
-  authoring tool.
-  **Why the recording floor moved anyway — a THIRD class of reason, not fidelity.** 2.5.0's newest
-  baseline pins agent 2.1.246, whose directory is empty on this recording host; 3.0.0's pins 2.1.247,
-  which is staged, so `doctor --tier hostloop` reads `sha256 ✓ vs baseline`. Recording below it needs
-  `COWORK_HARNESS_ALLOW_AGENT_FALLBACK=1` and freezes a tolerated ELF mismatch into a paid cassette.
-  Host-specific, not a 2.5.0 defect.
-  **One gate DID move and an "exhaustive" diff first reported zero**:
-  `provenance.gates.subagentPromptServerOverride:124685897` flips OFF→ON at `1.40609.0`, meaning a
-  server-delivered sub-agent-append override is active with no captured text. No run path reads it
-  (only `sync/cowork-sync.ts`) and it is server-side, so it is already true of production whatever
-  baseline we record against — but **no cassette can now prove what sub-agent prompt text production
-  sent**. It was missed by classifying the whole `provenance.*` prefix as noise; an exhaustive diff
-  that pre-classifies a prefix is a hand-list with extra steps.
-  **Upstream bug found during this pass, FIXED but UNRELEASED — 3.0.0 still ships it.** The harness's
-  hook detection keys only on `<plugin>/hooks/hooks.json`, so it is blind to hooks declared in a
-  plugin **manifest** — which is how this plugin declares its `SessionStart` hook. Proven from our own
-  cassettes: all 10 carry a matched `hook_started`/`hook_response` `SessionStart:startup` pair, one
-  each, **including `host-path-canary` at sealed `container`** (`HOME=/tmp`, no host-config
-  inheritance), so it cannot be the operator's. Consequences: 3.0.0's new `checkHostHookConsent` gate
-  is **bypassable** by that spelling, and the tier-independent disclosure has never fired for us — 9
-  hostloop recordings ran `session-setup.sh` as a native host process silently. Fixed upstream in
-  `3c4d5fe` (union of both channels), **SHIPPED by 3.2.0 — and the prediction this note used to
-  make is RETRACTED.** It said a hook disclosure naming `founder-skills (SessionStart)` would appear at
-  our next re-record. It will not. Verified at source: `manifestHookEvents()` (`hook-events.ts:124`) is
-  unioned in by `pluginRootsWithRunnableHooks()` (`:147-155`), whose only consumers —
-  `checkHostHookConsent` and `logHostHookNotice` — sit inside `if (effectiveFidelity === "protocol")` at
-  `execute.ts:624-630`. The tier-INDEPENDENT `warnUnservedHookEvents()` (`:79`) was NOT changed and
-  still keys on `hooks/hooks.json` placement. We record at hostloop and run zero protocol scenarios, so
-  the disclosure cannot fire here, and 3.2.0's consent gate adds **no** recording refusal for us — good
-  news, but reached by reading the gating rather than assuming a fix reaches every tier. Full analysis:
-  `docs/internal/2026-08-29-cowork-harness-3.0.0-adoption-plan.md`.
-* **`2.5.0` adds NO fidelity debt, and BLOCKS RECORDING until 24 scenarios are fixed. Read the second
-  half before the next re-record.** The blocker: 2.5.0 refuses, at scenario load and **pre-spend**, a
-  `tool_not_called`/`subagent_tool_absent` naming a tool the tier provably does not serve. All 26
-  non-canary scenarios are `fidelity: cowork` → **hostloop**, where the built-in shell is aliased to
-  `mcp__workspace__bash` — so the 24 that asserted `subagent_tool_absent: 'Bash'` were **vacuous, always**.
-  Fixed 2026-08-28 to `'mcp__workspace__bash'`. **Do not overstate that fix**: our own Context A agents
-  declare no shell tool of *any* name (measured across all 10 cassettes, sub-agent tool use is exactly
-  `{Read, Write, WebSearch}`), and two lanes dispatch zero sub-agents, so the assert stays unviolatable
-  for agents we wrote. Its live value is a dispatch we did NOT write — a `Task` with no `subagent_type`
-  falls back to `general-purpose` with a wildcard tool surface including workspace bash.
-  `test_cowork_invariants.py`'s per-agent tool declarations remain the primary enforcement.
-  **NONE of our three pre-flight gates catches this class**, and that is the durable trap: `lint`, the
-  bundled `scenario.py lint`, and `record --dry-run` all exit 0. The two linters' tier table has no
-  `cowork` row (they are offline and cannot resolve the baseline gate — proven by probe: the same file
-  with `fidelity: hostloop` WARNs), and the refusal lives in `executeScenario`, which `--dry-run`
-  returns before reaching. So CI stays green while `rerecord.sh` aborts on scenario 1.
-  **The 8 cassettes freezing `'Bash'` stay green-and-vacuous** until a re-record: `replay --assert-from`
-  hard-fails on skill-source drift on 10/10 (`--allow-failing` waives the drift gate wholesale — do not),
-  and 2.5.0's new cassette-satisfiability guard covers `tool_not_called` **only**, explicitly excluding
-  `subagent_tool_absent`, and lives in upstream's test suite rather than any CLI surface. Nothing will
-  ever flag them.
-  **Why no fidelity debt — and why `baselines/` byte-identity is NOT the argument.** That inference was
-  wrong at 2.4.0 (baseline identical, emulation moved), so do not repeat it: the sufficient evidence is
-  that `git diff --name-only v2.4.0..v2.5.0 | grep -E '^src/(runtime|hostloop|staging|agent|egress|sync)/'`
-  is **empty**, and `CASSETTE_VERSION` stays 12 / `MIN_SUPPORTED` stays 9. The recording floor moved to
-  `>=2.5.0` anyway, as a **new kind of floor**: an authoring guard, not a fidelity guard.
-  Also in 2.5.0, inert for us but worth not rediscovering: `tool_called: "Task"` could never pass and
-  `tool_not_called: "Task"` always did (now alias-aware `Task`↔`Agent`; we assert neither), and
-  `subagent_declared_but_unused` is documented near-always-vacuous (**0 of 1091** real dispatches carry
-  a declared tool list — a green means "not applicable", never "no fabrication"). Full analysis:
-  `docs/internal/2026-08-28-cowork-harness-2.5.0-adoption-plan.md`.
-* **`2.4.0` moves NO baseline leaf, but DOES add re-record debt — the two are different things.**
-  `baselines/` is byte-identical `v2.3.0..v2.4.0`, so a baseline diff shows nothing. The change is in
-  the harness's own EMULATION code, which the baseline does not describe: (a) hostloop's workspace
-  bash now starts at the **bare session root** `/sessions/<id>` (`hostLoopCwds`), not
-  `<session>/mnt/<first-folder-else-outputs>` — upstream measured production on 2026-08-27 and the
-  replaced derivation reproduced a prompt claim, not a behaviour; (b) `container` no longer offers the
-  built-in `WebFetch` under `run`/`record` (aliased to `mcp__workspace__web_fetch`; `microvm` and
-  `chat` unchanged). Both are emulated-tool-surface triggers by our own rule, hence the 2.4.0
-  recording floor. **Blast radius here, measured:** `resolve_artifacts_root.py` flips from branch 2 to
-  branch 3 and returns **identical** roots (the branches converge on purpose — do not let them
-  diverge); zero `tool_not_called`/`WebFetch` anywhere in the scenario corpus; 27 of 27 scenarios
-  already declare `fidelity:`, so the new `fidelity-defaulted` deprecation is pre-satisfied. What it
-  DID surface: two SKILL.mds ran `mkdir -p ./artifacts` (now `"$ARTIFACTS_ROOT"`) and deck-review
-  located uploads via a cwd-relative `./mnt/uploads` (now `resolve_artifacts_root.py --uploads`).
-  `verify-cassettes` gained a `replaced-builtin` NOTE (not a finding, does not affect exit code) that
-  fires on `host-path-canary`; upstream says explicitly it is not a reason to re-record. Full
-  analysis: `docs/internal/2026-08-27-cowork-harness-2.4.0-adoption-plan.md`.
-* **`2.2.0` adds no re-record debt and changes no replay verdict.** Measured against a pinned 2.1.0:
-  every token-free surface byte-identical on this repo (`replay` ×10, `verify-cassettes` + allowlist,
-  `lint --strict`, `record --dry-run` over all scenarios, `analyze-skill --strict`, `lint-skill
-  --strict`), and `baselines/` byte-identical between the two releases, so no fidelity input moved.
-  Our baseline is whatever `latest` resolves to (nothing declares `baseline:`) — re-derive after any
-  `sync` or Desktop bump.
-* **What 2.2.0 DOES change, and it is the reason the recording floor moved:** `present_files_called`
-  takes presence from `RunResult.presentFilesCalls`, a count of `present_files` invocations carrying a
-  well-formed `file_path`, read from the tool_use input's SHAPE. Below that floor it reads the
-  classified `presentedFiles` list, which drops a non-absolute path — and at hostloop every presented
-  path is a host path that `cowork-tests/.cowork-redact.json` rewrites, so the assert flips false under
-  redaction and `record` refuses to write. **The count is RE-DERIVED from frozen events at replay, not
-  stored in the cassette**, so it evaluates on recordings made before the field existed: measured, all
-  seven delivering lanes fail the key under 2.1.0 and pass under 2.2.0 on their *existing* cassettes.
-  Those seven now carry the assert on disk; it freezes at their next re-record (plain `replay` reads the
-  frozen block, so it gates nothing until then).
-* **`analyze-skill --strict` does not exit 1 on an advisory finding** — measured 2 advisory
-  `artifact-write-back-suspect` findings, exit 0, under both 2.1.0 and 2.2.0. Only `error` severity
-  gates.
-* **Two behaviour changes in 2.2.0 that are inert HERE but would not be everywhere:**
-  `no_scratchpad_leak` can now genuinely fail at container (we assert it nowhere), and a baseline with
-  no `spawn` block is refused at the sandbox tiers (ours has one).
+* **CI selectors are PINNED EXACTLY at `3.7.0`** — the four workflow `version:` inputs, the `skill-static-analysis` `npm i -g`, and the install lines in `CONTRIBUTING.md`, this file and `pyproject.toml`. Never a caret: a range auto-adopts upstream releases into CI with nobody choosing it, and CI steps have gone red on rules the harness added. Raise the pin in a deliberate adoption pass (write the adoption plan first, under the internal docs dir), never to chase a red.
+* **RECORDING floor `>=3.6.0`** — `cowork-tests/rerecord.sh`, four sites; find the gate with `grep -n 'minor.*-ge'`, never by line number. The gate keeps the shape `-eq <major> && -ge <minor>` because the floors test's regex READS that shape — "simplifying" it blinds the guard, not the gate. The floor moves for four distinct kinds of reason, and only the first is a re-record trigger: (1) a release changes a fidelity input (emulated tool surface, spawn env, system prompt); (2) a release adds a record-time field that cannot be backfilled (`environment.harnessVersion` 1.11.0, `environment.model` + session fingerprint 3.1.0 — `rehash` migrates hash FORMATS, never fingerprint shape, and cannot cross a cassette-version boundary) or refuses pre-spend — in `executeScenario`, past the loader, so `--dry-run` never sees it — a scenario older versions accepted (2.5.0); (3) the pinned agent ELF no longer matches what Desktop stages — `doctor --tier hostloop` then reports a tolerated mismatch that a paid cassette would freeze, and recording needs `COWORK_HARNESS_ALLOW_AGENT_FALLBACK=1`; (4) a scenario asserts a key newer than the CLI — the loader HARD-REJECTS with `Unrecognized key`, `lint` on the same file exits 0, and `cassetteVersion` does not bump, so nothing warns (1.24.0, `file_absent` / `question_options`). 3.6.0 is the floor for reasons (1) and (3): it injects `CLAUDE_CODE_DESKTOP_APP_VERSION` into the spawn env (invisible to a baseline diff) and is the first release pinning the ELF Desktop 2.2553.1 stages.
+* **Replay skip-guard `^2.1.0`** — `test_cowork_cassette_replay.py::_MIN_HARNESS`, the only replay-floor site. It decides whether the local replay test runs at all, not which CLI CI installs; raising it turns a below-floor developer's red into a silent skip. The one known future requirement: freezing `reference_read` / `no_observed_reference_access` into a scenario raises this floor to 2.5.0 — queued for the next re-record pass, not adopted.
 
-**In principle a single-skill fix is a single-skill re-record. In practice, right now, it is not** — measured 2026-08-15, all committed cassettes are ALREADY fleet-stale on two counts that no skill edit can avoid: a baseline move, and shared-root changes since record. **Do NOT quote a baseline number from this paragraph — it has been wrong. DERIVE it:** each cassette's own `fingerprint.baseline` is what it recorded against, and `latest` is the numerically highest file in the harness's `baselines/` dir. Measured 2026-08-29: `1.32885.1` (×4, the harness-1.25.0 lanes) and `1.34493.1` (×6), against a current `latest` of `desktop-1.40609.0` — NOT the `1.32352.0` this line asserted for months. Zero cassettes are stale for skill-local reasons alone. So scoping tells you what a change *adds* to the backlog, not that the backlog is small; until the next full refresh clears the baseline drift, "just re-record that skill's four" leaves everything else red. Re-derive with `cowork-harness verify-cassettes cowork-tests/cassettes --skip-scenario-drift` rather than trusting this paragraph. `rerecord.sh` enforces a **harness floor of `>=3.6.0`** (see its own header for why each floor moved; the numeric gate and its message are ADJACENT LINES — locate them with `grep -n 'minor.*-ge' cowork-tests/rerecord.sh`, because editing the string alone leaves the gate a minor behind, and the line numbers quoted here have already been wrong once) — recording is the one operation that bakes the harness version into the artifact: **1.12.0 fixes a bug that made an upload-bearing scenario impossible to record while still spending the paid run** (the artifact↔root check measured `uploads/` artifacts against the user-visible roots, which exclude uploads, and threw *after* the agent run — five scenarios here are upload-bearing), 1.11.0 stamps `environment.harnessVersion` (never backfilled, so an older CLI records a permanently provenance-less cassette), and 1.10.0 is the first release whose sandbox declares the skill/plugin discovery SDK-MCP servers (an older CLI freezes a tool inventory five tools short of what real Cowork advertises). **Committed cassette state — SUPERSEDED, kept only because the paragraph's MECHANISM is still right. Re-measured 2026-08-27: 27 scenarios / 10 cassettes. The 2026-08-18 reading below (26 scenarios / 22 cassettes — 4 uncassetted)** (`competitive-positioning-deck-no-slide`, `competitive-positioning-recall-adoption`, `deck-review-numeric-chain` — the last deliberately, see `_NO_CASSETTE_ALLOWLIST` — and `market-sizing-fx-conversion`). Three were re-recorded at 1.19.0 for 0.7.0 (`ic-sim-smoke`, `competitive-positioning-smoke`, `financial-model-review-smoke`); the rest are older and stale-but-accepted; `cassetteVersion` is 10 except the `lane: remote` one, which is v11. (This line previously said "all 16, recorded at 1.12.0" — **re-derive it after every re-record rather than trusting the number here**; it has now been wrong twice.) The v9-read-floor urgency that used to live here is spent, and so is the outstanding 1.10.0 discovery-surface refresh — that re-record happened. What remains is *mostly* ordinary `skillHash` staleness, which the WARN-only gate reports and only a re-record clears — the one exception is `market-sizing-smoke`, whose on-disk `present_files_called` assert postdates its 1.12.0 recording and so never runs under plain `replay` at all (see the mechanism note below — it is NOT the "evaluated but vacuous" case this line used to describe). A future read-floor raise would refuse them at load time and `rehash` cannot cross a version boundary, so the next floor bump still means a re-record — but that is a future event, not a live risk. The bare form refreshes only scenarios that already have a committed cassette (it prints what it skipped); author a new cassette by name.
+`test_cowork_harness_floors.py` pins every site, this file included, and `uses:` (action) vs `version:` (CLI) major agreement — the two move independently. Read values from it; a version number in prose here has been stale on four separate occasions.
 
-**Re-record trigger (beyond "a skill changed"):** re-record on every harness **major**, *and* on any release — including a minor — whose changelog reports a change to the **emulated tool surface, spawn env, or system prompt**. Those are the fidelity inputs with no automatic staleness tripwire, so nothing will tell you: the changelog is the authority. `1.10.0` was the first such minor (it added the discovery SDK-MCP servers) and **that debt is settled** — every committed cassette is at `1.12.0` or later, which necessarily carries them. The `1.14.0` trigger (`present_files` served at **hostloop**, the tier this fleet records at, where the harness previously served it only at `container`, so a recording froze a toolset one `alwaysLoad` tool short of production's) is **now discharged for 20 of 21** — see the measured note below. The one remaining `1.12.0` cassette (`market-sizing-smoke`) still carries the short toolset. (`1.15.0` adds no re-record debt: a CLI flag, a notice and docs, with `baselines/` and `schema/` byte-identical to 1.14.0.) Full analysis: `docs/internal/2026-07-31-cowork-harness-1.14.0-adoption-plan.md`.
+**Adopting a new harness release** — the checklist that has been wrong most often:
+- Diff `src/` and `schema/` WHOLE between tags. A prefix list (`baselines/`, `src/runtime/…`) is a hand-list with extra steps; it missed a moved session fingerprint (3.2.0).
+- Diff the baseline JSON leaf-by-leaf; compare `network.allowDomains` as a SET (order-only churn has read as a change three times); name what moved rather than listing what you checked (a hand-list once "verified" three keys that do not exist, and classifying the whole `provenance.*` prefix as noise missed a flipped gate — 3.0.0's `subagentPromptServerOverride` ON means no cassette can prove what sub-agent prompt text production sent). `baselines/` byte-identity is NOT "no fidelity debt" — 2.4.0 moved emulation code (`hostLoopCwds`, `container` `WebFetch` aliasing) with an identical baseline, and spawn-env changes in `src/runtime/argv.ts` (`NO_PROXY`, `CLAUDE_CODE_DESKTOP_APP_VERSION`) are invisible to any baseline diff.
+- Our baseline is whatever `latest` resolves to (nothing declares `baseline:`): each cassette's `fingerprint.baseline` is what it recorded against, `latest` is the numerically highest file in the harness's `baselines/` dir. Re-derive after any `sync` or Desktop bump.
+- Run every token-free surface before and after — `replay` over all cassettes, `verify-cassettes` with the expanded allowlist, `lint --strict --min-severity WARN`, `record --dry-run` (both arms), `analyze-skill --strict` (exits 0 on advisory findings; only `error` gates), `lint-skill --strict` — and diff the outputs. Settle an exit code by measuring, never by inheriting upstream prose.
+- Standing risks with no cassette tripwire: (1) the elicitation-conflict gap — every SKILL.md's `AskUserQuestion` "(NOT plain chat)" directive can be silently overridden by the host's injected form guidance, unobservable by any harness run; cap-table's Step 0 hand-off gate is the one site without the fallback sentence (its fallback is scoped to a different gate). (2) The `Artifact` tool now reaches hostloop but the harness serves it at no tier; revisit when a real session shows it. (3) Real Cowork re-syncs host skills/plugins into a live session (~20 min); the harness stages once and never re-stages — a limit on what a green cassette proves. (4) `COWORK_EGRESS_PROXY` / `COWORK_DOCKER_NETWORK` never worked and were removed in 1.20.0 — do not add them from an old README (`COWORK_PROXY_IMAGE` is live).
+- The upstream hook-detection fix (manifest-declared hooks) is gated to `protocol` only; our `SessionStart` hook disclosure cannot fire at hostloop. Not a bug for us; recorded so nobody expects it.
 
-**`1.17.0` adds no re-record debt either — verified, not assumed.** `baselines/desktop-1.24012.9.json` DID change between `v1.16.0` and `v1.17.0`, so the byte-identical test that cleared 1.15.0 does not apply; the change had to be read. Diffing the parsed baseline field-by-field: `spawn.tools`, `spawn.allowedTools`, `spawn.env`, `spawn.promptTemplate`, `spawn.subagentPrompt`, `spawn.options` and `spawn.effortDefault` are **byte-identical**. The only additions are a `hooks` object and its `$comment_hooks`, which the harness itself labels "Recorded as a DRIFT TRIPWIRE, not an emulation source — `served` marks what this harness actually installs (`PreToolUse:Task` only)". So none of the three fidelity inputs (tool surface, spawn env, system prompt) moved. **When a future release touches `baselines/`, run that field-level diff rather than a file-level one — a changed baseline is not by itself a re-record trigger.**
+**Cassettes and the assert block** — rules, not history (the history is archived locally with the per-release adoption plans):
+- Staleness is skill-scoped (each scenario's `skills:` key) but the mount is whole-plugin — narrowing the mount is what reintroduces a false-green. "Shared root" = everything NOT under `skills/<x>/`, so `commands/feedback.md` and `plugin.json` stale the fleet too. In practice every cassette is already fleet-stale on baseline drift, so "just re-record that skill's lanes" leaves the rest red. Derive corpus facts with `python cowork-tests/cassette_inventory.py` and `cowork-harness verify-cassettes cowork-tests/cassettes --skip-scenario-drift`; never from prose. Bare `rerecord.sh` refreshes only scenarios with a committed cassette (it prints what it skipped); author a new one by name. After a refresh: confirm green, commit `cassettes/` by name, then grep the new cassettes for improvised shell (`curl|wget|pip install|uv run|npx|apt-get|git clone`) — egress from bash has been live since 1.20.0 and no SKILL.md sanctions it.
+- Plain `replay` evaluates the assert block FROZEN in the cassette, never the on-disk YAML. An assert added after recording is invisible to CI; one deleted after recording still runs. After any `assert:` edit, diff `json.load(cassette)["scenario"]["assert"]` against `yaml.safe_load(scenario)["assert"]` key sets.
+- `replay <cassette> --assert-from <yaml> --write` persists the on-disk block for free — but `--allow-failing` disables its only drift gate, so a block written that way passes against pre-drift events, which is worse than silence (silence prompts a re-record; green does not). Do not cite those greens as evidence about current gate handling — `deck-review-gate-stop` (recorded fresh) is the evidence. Sequence a write-back with the fix, never before it. A refusal (`answers drifted`, `prompt drifted`) means a real re-record; re-derive which lanes refuse with a loop of `replay <cassette> --reassert` checking rc=2.
+- `deck-review-numeric-chain` is in `_NO_CASSETTE_ALLOWLIST` and must never be recorded: a frozen recording would preserve the defects it exists to surface.
+- Re-record trigger: every harness major, and any release whose changelog touches one of the three fidelity inputs. Nothing automatic flags it — the changelog is the authority. `rerecord.sh` enforces a **harness floor of `>=3.6.0`**.
 
-**`1.18.0` DOES add re-record debt, and the field-level diff is what sized it.** Default baseline moves to `desktop-1.25927.0` (the installed Desktop), and the proactive skill-suggest gate now models **ON** — a **server-side** rollout, so it reads ON on earlier Desktop versions too; `suggest_skills` therefore declares a proactive description plus an optional `trigger` param by default. That is a **tool-surface** change, hence a trigger. Diffing `desktop-1.24012.9` (what the committed cassettes recorded against) → `1.25927.0` field by field, the only moving fidelity inputs are the **agent ELF (2.1.219 → 2.1.221)** and **`spawn.env.MCP_TOOL_TIMEOUT` (60000 → 180000)**. Everything else holds: `spawn.tools`, `allowedTools`, `promptTemplate`, `subagentPrompt`, `options`, `effortDefault`, `settings`, `guest`, `platform` byte-identical; `network.allowDomains` differs in **order only** (added `[]`, removed `[]` — a naive first-element comparison reads as a change and is not one); the `mountLayout` `projects` row's `rw`→`r` correction is documented **in the baseline itself** as "consumed by nothing". Upstream reports its own cassettes replay clean across this move and were **re-stamped, not re-recorded**. Verdict: real debt, materially smaller than the 1.14.0 `present_files` trigger, and **folded into the existing re-record batch rather than treated as a new one** — every cassette is already `skillHash`-stale anyway. `rerecord.sh`'s floor is now `>=1.18.0`, because a 1.17.0 recording would freeze the pre-rollout tool surface and carry no gate-label fingerprint. Full analysis: `docs/internal/2026-08-06-cowork-harness-1.18.0-adoption-plan.md`.
-
-**`1.20.0` adds NO re-record debt from its baseline, but IS the floor — and the two facts are separate.** Default baseline moves `desktop-1.25927.0` → `desktop-1.26832.0` (agent ELF 2.1.221 → **2.1.222**). An **exhaustive recursive** leaf diff — not a hand-list — leaves every fidelity input byte-identical: `spawn.tools`, `allowedTools`, `env` (21 keys), `promptTemplate`, `subagentAppend`, `subagentAppendHostLoop`, `hooks`, `effortDefault`, `settings`, `guest`, `platform`, `mountLayout`, plus top-level `bgEnvStrip` / `requireFullVmSandbox`. Only the ELF, `capturedAt` and `provenance.*` move. **`network.allowDomains` differs in ORDER ONLY** (set-difference empty both ways) — that trap has now fired **three times** (1.18.0, 1.20.0, 1.24.0). Treat it as a standing rule, not a per-release discovery: **always compare `allowDomains` as a SET.** `provenance.spawnEnvKeys` gains `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` (spread 29 → 30) but it is **not** in `spawn.env`: allowlisted, not pinned. Two gate movements the upstream changelog names, both inert here: `scheduledTaskToolsApprovableByAutoMode` flips force-on (Cowork spawns `CLAUDE_CODE_DISABLE_CRON=1` regardless — verified in the new baseline's `spawn.env`), and `coworkRuntimeConfig` begins serving `skillsSyncIntervalMs`/`pluginsSyncIntervalMs` (20 min) + `pluginsFullSyncStalenessMs` (1 h). **Use the hand-list trap as a warning:** a first pass at this diff "verified" `spawn.subagentPrompt`, `spawn.options` and `coworkSyspromptMap` as IDENTICAL when **none of those keys exists** — three vacuous passes in the check whose entire job is to detect movement. Diff every leaf, then name what moved.
-
-**Why 1.20.0 is nonetheless the floor:** our Desktop stages **only** agent 2.1.222. On a 1.19.0 CLI, `doctor --tier hostloop` records but reports `sha256 ✗ vs baseline` / `parity mount: patch-tolerated (pinned 2.1.221, using 2.1.222)`; at 1.20.0 the same check reads `sha256 ✓`. Recording at 1.19.0 freezes a tolerated ELF mismatch into every cassette. Separately, the **harness-side spawn env** did move in ways no baseline diff can see — `NO_PROXY`/`no_proxy=localhost,127.0.0.1,::1` added (`src/runtime/argv.ts:173-174`), and the hostloop `bash` sidecar's empty literal env replaced by the computed proxy env, restoring egress that had been dead since v0.21.0. By our own trigger rule that is a spawn-env change; **measured blast radius for this fleet is zero** (no script makes a network call from bash; no SKILL.md shells out to the network; the one localhost server, `review_inputs.py --workspace`, is Claude-Code-only and the Cowork lane asserts `transcript_not_matches: "--workspace"`; cassettes freeze no spawn env). Folded into the existing batch, not treated as new debt. **Watch item:** a re-recorded agent can now improvise a shell command no SKILL.md mentions, and its failure mode changed (allowlist `403` vs DNS error) — measured zero hits for `curl|wget|pip install|uv run|npx|apt-get|git clone` across all 21 committed cassettes, so the risk is real but small.
-
-**`1.20.0` tooling changes that alter how we validate.** `record --dry-run` now **refuses what the real `record` refuses** — `assert-contradiction` and `on_unanswered: prompt`, the latter previously enforced in the single-file arm only and never in a directory batch — reports **every** offender rather than stopping at the first, and prints the batch cost estimate **on stderr** without needing a `--max-budget-usd` bisect (JSON carries `estimatedCostUsd` + `unpricedScenarios` on stdout). Both dry-run fixes came from this repo's pre-release review. `lint`'s `vacuous-gate-assert` was wrong four ways, two of them silent false-greens (`gate_answer_count_min: 0` accepted as a presence companion though `delivered >= 0` always holds; a wrong-case `tool_called` glob silencing the rule), and `assert-contradiction` (ERROR) is new. **Our CI lint step therefore gained `strict: true`** — measured, a WARN-class finding exits 0 without it and 1 with it, so the rule 1.20.0 just fixed was ungated here; ERROR-class reds either way. Do **not** copy `strict: true` onto the replay steps: there it also fails on cassette staleness, which is WARN-only by design. Also new and worth knowing: upstream's `docs/fidelity-gaps.md` now documents that real Cowork **re-syncs host skills/plugins into a live session** (~20 min), while the harness stages once per run and never re-stages — a deliberate divergence, and a limit on what a green cassette proves. Full analysis: `docs/internal/2026-08-07-cowork-harness-1.20.0-adoption-plan.md`.
-
-**`1.21.0`–`1.24.0`: real but tiny re-record debt, and the floor moves for a DIFFERENT reason.** Default baseline moves `desktop-1.26832.0` → **`desktop-1.32352.0`** (agent ELF 2.1.222 → **2.1.229**), spanning four releases with no adoption pass between them. **Exhaustive recursive leaf diff, 2026-08-18:** `spawn.tools`, `allowedTools`, `promptTemplate`, `subagentAppend`, `subagentAppendHostLoop`, `hooks`, `effortDefault`, `effortByModel`, `permissionMode`, `settingSources`, `maxThinkingTokens`, `configDirInGuest`, and top-level `settings` / `guest` / `platform` / `mountLayout` / `bgEnvStrip` / `requireFullVmSandbox` are **byte-identical**. Exactly one pinned spawn-env key is added — **`CLAUDE_PREVIEW_CLASSIFIER_FLOOR: "1"`** — which is a spawn-env change and therefore a re-record trigger by our own rule, with a blast radius of approximately nothing. `provenance.spawnEnvKeys` 60 → 63 (the other two are **allowlisted, not pinned**), plus four gate sentinels and a `coworkWebFetchDedupTtlMs` bump. `allowDomains` order-only again (see the standing rule above). Fold into the existing batch; every cassette is already stale.
-
-**The floor is `>=1.24.0` for a reason unrelated to fidelity: the scenarios stop LOADING below it.** `deck-review-gate-stop` now asserts `file_absent` and `question_options`. Measured against `npx cowork-harness@1.23.0`: `record --dry-run` (the loader) HARD-REJECTS with `Unrecognized key: "file_absent"`, while `lint` on the same file exits 0 with `0 error(s)` — the lenient-vs-strict split, live. The same applies to `replay` once a key is frozen into a cassette, and **`cassetteVersion` does NOT bump** (stays 10), so the version field gives no warning. (A developer pinned below the floor gets a SKIP, not a red: `_require_harness` calls `pytest.skip` for a below-floor version as well as an absent CLI. Raising `_MIN_HARNESS` therefore converts a loud red into a silent skip for exactly the developer it warns.)
-
-**Two fidelity gaps that are NOT re-record debt and need watching.** (1) **The elicitation CONFLICT gap** — because the host's injected form guidance is absent here, so is every conflict between it and a skill's own instructions. All six SKILL.mds carry a literal `AskUserQuestion` "(NOT plain chat)" directive, and **all six also carry the host-override fallback sentence** — an earlier claim here that two skills lacked it was WRONG and is corrected: `financial-model-review:270` is covered at `:279`, `cap-table:518` at `:526`. The one uncovered site is **`cap-table:451`** (the Step 0 gate, 75 lines from `:526`, whose text is scoped to "this gate"). This class is structurally unobservable by any harness run — a skill can ship a directive production silently overrides with every cassette green, so do not expect a cassette to prove a fix. (2) **The `Artifact` tool** — 1.24.0 records that the frame-artifacts predicate dropped its `!isHostLoop` term, so `Artifact` now reaches the hostloop tier this fleet records at, while the harness serves it at **no** tier and the selecting flag is server-delivered and not locally observable (off by default today). Revisit trigger: a real session showing `Artifact` in its tool list. Full analysis: `docs/internal/2026-08-18-cowork-harness-1.24.0-adoption-plan.md`.
-
-**Two `COWORK_*` env vars were REMOVED in 1.20.0 and never worked:** `COWORK_EGRESS_PROXY` and `COWORK_DOCKER_NETWORK` sat behind values the caller always supplies, so the env branch could not execute in any tier. Neither appears anywhere in this repo, so there is nothing to migrate — recorded only so nobody adds them from an old README. `COWORK_PROXY_IMAGE`, in the same upstream bullet, is genuinely live.
-
-**The `1.14.0` `present_files` trigger is DISCHARGED and COMMITTED** (as of `cf0277a`). Re-measured across every committed cassette on 2026-08-06: **21 tracked cassettes — 14 at 1.16.0, 3 at 1.17.0 (`cap-table-safe-full`, `market-sizing-remote-lane`, `competitive-positioning-false-positive`), 3 at 1.19.0 (`ic-sim-smoke`, `financial-model-review-smoke`, `competitive-positioning-smoke`), and exactly ONE still at 1.12.0 — `market-sizing-smoke`.** Everything >= 1.14.0 necessarily carries the hostloop `present_files` surface, so `market-sizing-smoke` is the entire remaining scope. **This supersedes BOTH earlier counts in this file** — "all 16 at 1.12.0" and "19 at 1.16.0, 2 still at 1.12.0 (`ic-sim-smoke`, `market-sizing-smoke`)" are each wrong; `ic-sim-smoke` was re-recorded at 1.19.0. Derive the distribution by reading `environment.harnessVersion` out of the cassettes; this line has now been wrong twice.
-
-`market-sizing-smoke` is not merely "stale". Its on-disk scenario asserts `present_files_called: true`, the frozen 1.12.0 cassette contains no `present_files` call, and a plain `replay` nonetheless returns `✓ success` — only `replay --assert-from` surfaces the failure. Treat it as a guard that reads live in the repo and gates nothing in CI, not as ordinary drift.
-
-**The MECHANISM is not what this note said until 2026-08-15, and the difference decides where else to look.** The old text called the assert "vacuously" green — evaluated, and trivially true against a cassette with no `present_files` call. It is not evaluated at all. **The cassette's frozen scenario carries 16 asserts and `present_files_called` is not among them**: the assert was added to the on-disk YAML *after* the 1.12.0 recording, and `replay` reads the frozen copy (`cowork-replay.yml` says so in its own comments — "`replay` evaluates the scenario FROZEN in each cassette and never reads the on-disk YAML"). Measured on harness 1.23.0, 2026-08-15:
-
-```
-replay cassettes/market-sizing-smoke.cassette.json                    -> exit 0, "✓ success"
-replay ... --assert-from scenarios/market-sizing-smoke.yaml           -> exit 1
-   ✗ present_files_called: no file was delivered via present_files (the tool was never called)
-   ✗ skill-source drift (--fail-on-skill-drift): skills/market-sizing changed since record
-```
-
-**Generalize it, because this is not about one cassette — measured, it is about most of them.** ANY assert added to a scenario YAML after its cassette was recorded is invisible to plain `replay`: CI reports on the assert set frozen at record time, not the one in the repo. `replay --assert-from` evaluates the on-disk block (which is why "run `--assert-from` BEFORE paying for a re-record" appears in the `critique` section above) — **and `--write` then persists it back into the cassette for free.**
-
-Comparing every on-disk `assert:` key against its cassette's frozen `scenario.assert` — **re-measured 2026-08-20: still 2 lanes, down from 13** (the free `--assert-from --write` remedy was applied to the rest), but **both key lists grew by `artifact_text`**, added in `d9297dc` after the last write-back — so the divergence is not static and a stable lane COUNT does not mean a stable key SET. `market-sizing-smoke` (`artifact_text`, `gate_answer_count_min`, `gate_answers_delivered`, `present_files_called` authored but never evaluated) and `cap-table-acquisition` (`artifact_text`, `gate_answer_count_min`; its write-back REFUSES on answer drift, so only a re-record clears it). **Re-derive rather than trusting either number** — the historical table below is kept because the MECHANISM it teaches is permanent, not because the counts are current:
-
-| direction | key | lanes |
-|---|---|---|
-| authored in the repo, **never evaluated** in CI | `gate_answer_count_min` | **12** |
-| " | `gate_answers_delivered` | 10 |
-| " | `present_files_called` | 1 (`market-sizing-smoke`) |
-| **deleted** from the repo, **still evaluated** in CI | `gate_answers_delivered` | 1 (`cap-table-lane3-freeform`) |
-
-That first row is the quantified form of the vacuous-gate hole this file discusses under `lint`: `gate_answer_count_min` is authored on 12 lanes and evaluated on **zero**. The last row is the mirror hazard and the less obvious one — deleting a wrong assert does not stop CI running it either, so lane3 still asserts in CI the very gate its own header explains the skill correctly never raises.
-
-**THE REMEDY IS FREE BUT NOT SOUND — read this before using it again (added 2026-08-20, verified at
-upstream source).** `--assert-from --write` has exactly one drift protection, the verdict gate
-(`writeReassertedAssertBlock`, `src/run/cassette.ts:4092`), and **`--allow-failing` skips it** with no
-staleness re-check anywhere downstream. You reach for `--allow-failing` *because* the asserts are
-failing — that is why you are re-asserting — so **the flag added for the expected failure silently
-disables the protection the forced drift gate exists to provide.** Measured: **11 of 11 write-back
-lanes show drift today**, so every block `10396cb` persisted was validated against a drifted recording.
-What that commit actually froze is two keys — `gate_answer_count_min` (10 lanes) and
-`gate_answers_delivered` (9) — which now pass against **pre-authorization-change** `controlOut`. **Do
-not cite those greens as evidence about current gate handling**; `deck-review-gate-stop` (recorded
-fresh at 1.23.0) is the evidence. The 11 lanes went from *authored-but-never-evaluated* (CI silent) to
-*evaluated-against-stale-events* (CI green), and for a regression guard **green-against-old-events is
-worse than silence, because silence prompts a re-record and green does not.** A full re-record clears
-it. **Not the same as "the block is meaningless":** the M1 evaluability guard (`:4081-4089`) still
-refuses keys that would freeze as silent no-ops and is NOT skipped by `--allow-failing`, so the written
-asserts do evaluate — they just evaluate against the wrong events. Upstream documents this at the flag
-as of the unreleased `--help`. Full exchange: cowork-harness#118.
-
-**The remedy is FREE, and an earlier version of this note got that wrong — do not re-derive the pessimistic version.** It claimed editing an `assert:` block "buys nothing until a re-record", which would make the 13 lanes above a ~$60 re-record backlog. They are not. `replay <cassette> --assert-from <scenario.yaml> --write --allow-failing` rewrites the frozen block in place, no paid run. Measured 2026-08-15 on a scratch copy of `market-sizing-smoke`: frozen asserts **16 → 19** (`present_files_called`, `gate_answer_count_min`, `gate_answers_delivered` all now present), `environment.harnessVersion` still `1.12.0` (nothing re-recorded), and plain `replay` afterwards correctly **FAILS** on `present_files_called`.
-
-Two limits, both measured across the 13 divergent lanes:
-
-- **`--assert-from` hard-fails on recording-shaping drift**, so the write-back is unavailable where the recording no longer corresponds to the scenario. **Re-measured 2026-08-20 across the then-22 cassettes (corpus is 10 as of 2026-08-24 — re-derive): TWO refuse outright (rc=2), not one** — `cap-table-acquisition` (*"answers drifted from the recording"*) and `deck-review-smoke` (*"prompt drifted"*). Both need a real re-record. The older "12 of 13 accept it; exactly one refuses" was scoped to the then-divergent lanes and reads as a corpus-wide count, which it never was; `deck-review-smoke` refuses for a different reason (prompt, not answers) and was outside that set. **Re-derive, do not inherit** — a loop of `replay <cassette> --reassert` checking for rc=2.
-- **Writing the block back turns a green lane red** wherever the guard genuinely fails, which is the honest state but is a decision, not a free win. Sequence it with the fix, not before it.
-
-And **a green CI replay is evidence about the *recorded* scenario**: read the frozen `scenario.assert` array out of the cassette before concluding a guard is live. The one-liner that produces the table above is a `json.load(cassette)["scenario"]["assert"]` vs `yaml.safe_load(scenario)["assert"]` key-set diff — cheap enough to re-run after any `assert:` edit.
-
-**Do NOT generalize this into "never record a scenario whose asserts are not yet written."** That rule was stated here and is wrong in the one place it was aimed at. `deck-review-numeric-chain` is not "not yet recorded" — it is in `test_cowork_cassette_replay.py`'s `_NO_CASSETTE_ALLOWLIST` and must **never** be recorded: most of what it verifies is PROSE, and *"a cassette freezes one past agent's behaviour and re-asserts it, which is the opposite of what this lane is for; it already found one defect (an invented `kind` value) that a frozen recording would have preserved rather than surfaced."* Writing its asserts unlocks no recording, because no recording is wanted. Its missing case-asserts are a real and separate defect in a LIVE lane — see the numeric-chain note — and gate nothing about tagging.
-
-**DISCHARGED — do not re-record for this reason.** This note used to say `market-sizing-remote-lane` had frozen the spurious `undelivered_deliverables` warn that 1.17.0 fixes, and needed a targeted re-record. That re-record happened: the committed cassette is `harnessVersion: 1.17.0`, `cassetteVersion: 11`, and contains **zero** occurrences of `undelivered_deliverables` (measured 2026-08-06). The stale "the committed cassette is `harnessVersion: 1.16.0` … re-record this scenario" note still sits in `cowork-tests/scenarios/market-sizing-remote-lane.yaml` around lines 40-41 and 60-61 and is likewise spent — a reader who trusts it will pay for a re-record that is already done.
 0.5. **Run the gates `pytest` does not.** A green `uv run pytest` is NOT a green CI. Two separate
    gates have to pass before you tag, and neither is reachable from the test suite:
    - **mypy over all SEVEN directories** — the six `skills/*/scripts/` dirs **and

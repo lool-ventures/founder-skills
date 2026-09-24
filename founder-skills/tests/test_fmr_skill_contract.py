@@ -539,7 +539,11 @@ def test_agent_coaching_writes_raw_markdown_no_json_escaping() -> None:
     md_to_commentary.py's json.dumps, which cannot emit malformed JSON."""
     agent_body = AGENT_MD.read_text(encoding="utf-8")
     idx = agent_body.index("### Context B")
-    section = agent_body[idx : idx + 4000]
+    # Bound on the next same-level heading, not a character count. The 4,000-char window this
+    # replaced failed on content that was still present the moment the key list above it grew --
+    # the exact failure mode CLAUDE.md warns about, reproduced here.
+    end = agent_body.find("\n## ", idx + 1)
+    section = agent_body[idx : end if end != -1 else len(agent_body)]
     assert "plain markdown" in section.lower()
     assert "do not escape anything" in section.lower() or "do not escape" in section.lower()
     assert "escaped as `\\n`" not in agent_body

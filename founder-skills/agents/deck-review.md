@@ -219,7 +219,9 @@ keys (do not refetch from disk):
 - `summary` (score_pct, overall_status, total, pass, fail, warn,
   not_applicable)
 - `failed_items`, `warned_items`
-- `high_severity_warnings` (codes only)
+- `high_severity_warnings` — objects, one per warning, each with `code`,
+  `label` and `message`. Write the `label`; the `code` is ours, not the
+  founder's.
 - `stage`, `ai_company_status`, `company_name`
 - `design_gate` (design_reviewed, gated_count, reason) — when `design_reviewed`
   is false, `gated_count` design criteria were **never assessed** because

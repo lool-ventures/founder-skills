@@ -415,10 +415,58 @@ def test_uploads_is_identical_across_every_cowork_cwd_shape() -> None:
     assert seen == {"/sessions/abc/mnt/uploads"}, f"uploads varies with shell cwd: {seen}"
 
 
-def test_uploads_is_none_on_the_plain_cli_never_a_guessed_path() -> None:
+def test_uploads_is_none_on_the_plain_cli_never_a_guessed_path(tmp_path: Path) -> None:
     """None, not './uploads'. A fabricated path would `ls` clean-empty and be reported
     to the founder as 'you attached nothing' — the exact failure this replaced."""
-    assert resolve_uploads_dir("/home/dev/project", {}) is None
+    assert resolve_uploads_dir("/home/dev/project", {"HOME": str(tmp_path)}) is None
+
+
+_REMOTE_ENV = {
+    "CLAUDE_CODE_REMOTE": "true",
+    "CLAUDE_CODE_ENTRYPOINT": "remote_cowork",
+    "CLAUDE_CODE_SESSION_ID": "117a27ba",
+}
+
+
+def test_uploads_on_the_remote_lane_is_the_per_session_uploads_dir(tmp_path: Path) -> None:
+    """Measured in a real cloud session 2026-09-22: no `/sessions` tree, shell cwd /home/claude,
+    an attached PDF at `$HOME/.claude/uploads/<CLAUDE_CODE_SESSION_ID>/<8-hex>-<name>.pdf` — and NOT
+    at `/mnt/user-data/uploads`, which the lane's own environment text names and which does not
+    exist. The live report came from this lane; before this branch its red team was told the
+    founder supplied no documents."""
+    up = tmp_path / ".claude" / "uploads" / "117a27ba"
+    up.mkdir(parents=True)
+    (up / "85451e6d-deck.pdf").write_bytes(b"%PDF")
+    env = {**_REMOTE_ENV, "HOME": str(tmp_path)}
+    assert resolve_uploads_dir("/home/claude", env) == str(up)
+
+
+def test_uploads_on_the_remote_lane_with_nothing_attached_is_none(tmp_path: Path) -> None:
+    """No attachment, no dir (measured): None, never a path that lists clean-empty."""
+    env = {**_REMOTE_ENV, "HOME": str(tmp_path)}
+    assert resolve_uploads_dir("/home/claude", env) is None
+
+
+def test_remote_uploads_keys_on_the_directory_not_the_env_markers(tmp_path: Path) -> None:
+    """Runtime markers are served per session and have changed across releases; the directory on
+    disk is the durable signal. With the session id: that dir. Without it: the single session dir.
+    Two session dirs and no id: ambiguous, None."""
+    up = tmp_path / ".claude" / "uploads" / "117a27ba"
+    up.mkdir(parents=True)
+    assert resolve_uploads_dir("/home/claude", {"HOME": str(tmp_path), "CLAUDE_CODE_SESSION_ID": "117a27ba"}) == str(up)
+    assert resolve_uploads_dir("/home/claude", {"HOME": str(tmp_path)}) == str(up)  # no markers at all
+    (tmp_path / ".claude" / "uploads" / "other").mkdir()
+    assert resolve_uploads_dir("/home/claude", {"HOME": str(tmp_path)}) is None
+    assert resolve_uploads_dir("/home/claude", {"HOME": str(tmp_path), "CLAUDE_CODE_SESSION_ID": "117a27ba"}) == str(up)
+    assert resolve_uploads_dir("/home/claude", {"HOME": str(tmp_path), "CLAUDE_CODE_SESSION_ID": "gone"}) is None
+
+
+def test_cli_uploads_flag_on_the_remote_lane(tmp_path: Path) -> None:
+    up = tmp_path / ".claude" / "uploads" / "117a27ba"
+    up.mkdir(parents=True)
+    rc, out, err = _run_cli(["--uploads"], {**_REMOTE_ENV, "HOME": str(tmp_path)})
+    assert rc == 0, err
+    assert out.strip() == str(up)
 
 
 def test_uploads_is_not_derived_from_the_artifacts_root_override() -> None:

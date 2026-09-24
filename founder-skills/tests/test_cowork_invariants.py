@@ -156,6 +156,12 @@ def test_agent_declares_no_mcp_tools(agent_path: Path) -> None:
 _AGENTS_REQUIRING_WEBSEARCH: frozenset[str] = frozenset(
     {
         "competitive-positioning",
+        # The red-team step's entire job is finding a published figure that contradicts the
+        # analysis. Without the declaration it degrades to training-cutoff recall stamped as a
+        # sourced finding — the exact v0.4.7 class this registry exists to catch, and worse here,
+        # because every finding is contractually required to carry a source_url it could not have
+        # fetched.
+        "market-sizing-redteam",
     }
 )
 

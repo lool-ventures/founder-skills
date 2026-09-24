@@ -21,7 +21,12 @@ import json
 import math
 import os
 import sys
+
+# Sibling helper: see compose_report.py. Shared so this page cannot drift from report.md.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from typing import Any, TypeGuard
+
+import _evidence_multiple  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Artifact loading infrastructure (duplicated from compose_report.py per PEP 723)
@@ -573,8 +578,16 @@ def _chart_checklist_heatmap(checklist: dict[str, Any] | None) -> str:
             status = str(item.get("status", "not_applicable"))
             icon = _STATUS_ICONS.get(status, "\u2014")
             color = _STATUS_COLORS.get(status, _CLR_NA)
-            label = _CHECKLIST_LABELS.get(item_id, item_id)
-            evidence = str(item.get("evidence") or item.get("notes") or "")
+            # Never fall back to the id: printing it puts `CASH_23` in front of a founder. Prefer
+            # the item's OWN label over the map -- `_CHECKLIST_LABELS` below is a hand-maintained
+            # literal, nothing keeps it in step with `checklist.py`, and it has already drifted on
+            # five of the forty-six. The artifact is the fresher source.
+            label = str(item.get("label") or "") or _CHECKLIST_LABELS.get(item_id) or "Checklist item"
+            # Caveat here too, not only in report.md. This page renders the same assessor-written
+            # evidence straight from checklist.json and never sees compose's warnings section, so a
+            # founder handed only the HTML would read the unsupported comparison with nothing beside
+            # it. Shared detector, so the three surfaces cannot drift.
+            evidence = _evidence_multiple.caveat(str(item.get("evidence") or item.get("notes") or ""))
             parts.append(
                 f'<div style="display:flex;align-items:flex-start;gap:0.5rem;'
                 f'padding:0.35rem 0;border-bottom:1px solid var(--lool-line-2);">'
@@ -1285,12 +1298,12 @@ def _key_findings(
             strong.append(f"Checklist: {pass_count} of {total_applicable} criteria pass")
         for item in fail_items[:3]:
             cat = str(item.get("category", ""))
-            notes = str(item.get("notes") or item.get("evidence") or "")
+            notes = _evidence_multiple.caveat(str(item.get("notes") or item.get("evidence") or ""))
             label = f"{cat}: {notes}" if notes else cat
             attention.append(label)
         for item in warn_items[:2]:
             cat = str(item.get("category", ""))
-            notes = str(item.get("notes") or item.get("evidence") or "")
+            notes = _evidence_multiple.caveat(str(item.get("notes") or item.get("evidence") or ""))
             label = f"{cat}: {notes}" if notes else cat
             attention.append(label)
 

@@ -137,11 +137,26 @@ PLUGIN_ROOT="${SCRIPTS%/skills/*}"
 echo "PLUGIN_ROOT=$PLUGIN_ROOT"   # resolved ONCE, here — paste this literal into every later block; never re-run this resolution
 REFS="$PLUGIN_ROOT/skills/market-sizing/references"
 SHARED_SCRIPTS="$PLUGIN_ROOT/scripts"
+# PREFLIGHT, one line, and the run STOPS if it prints. Some surfaces serve a skill WITHOUT its
+# plugin -- claude.ai mounts skills flat at /mnt/skills/plugins/<plugin>:<skill>/, where this
+# resolution yields /mnt, the shared scripts do not exist, and no sub-agent can be dispatched.
+# MEASURED there 2026-09-22: the analysis still ran, hand-wrote every hand-off file the file
+# hand-off exists to replace, graded its own checklist, and shipped a report with no adversarial
+# review and no gates. Degrading silently is worse than not running.
+[ -f "$SHARED_SCRIPTS/check_handoff.py" ] || echo "UNSUPPORTED_ENVIRONMENT: the plugin's shared scripts are not reachable from here"
 SHARED_REFS="$PLUGIN_ROOT/references"
 # Resolve the canonical artifacts root via a SCRIPT, not inline bash (the agent paraphrases inline
 # path computations → outputs/ vs outputs/artifacts/ drift across runs). Deterministic + creates it.
 python3 "$SHARED_SCRIPTS/resolve_artifacts_root.py"   # prints ARTIFACTS_ROOT — use the printed path verbatim as ARTIFACTS_ROOT in every later block (a captured var dies in the next fresh shell)
 ```
+
+**If the preflight line printed `UNSUPPORTED_ENVIRONMENT`, stop here.** This environment serves the
+skill without the rest of its plugin: the shared scripts are missing and sub-agents cannot be
+dispatched, so the gates, the hand-off checks and the independent review steps below cannot run.
+Tell the founder, in one sentence, that this skill needs Claude Cowork or Claude Code and that you
+have not run it — then stop. Do not improvise the missing steps: an analysis that grades itself and
+reviews itself reads exactly like one that was checked, which is the failure this stop exists to
+prevent.
 
 Reaching the self-heal branch is normal in Cowork — `${CLAUDE_PLUGIN_ROOT}` resolves to a HOST path that does not exist inside the VM, so the `[ ! -d "$SCRIPTS" ]` test fails by design rather than by misconfiguration. It is not a sign anything is wrong, and it is not worth narrating to the founder.
 
@@ -343,19 +358,33 @@ carried into this field, the checklist item scores blind to what the deck actual
 
 If the deck states figures that don't fit the flat shape — regional sub-SAMs, time-anchored SOM projections, alternative TAM frames — put them in the optional `existing_claims_detail` field (any structure). This field does NOT participate in deck-vs-computed reconciliation, but it is rendered as a "Deck Claims (Narrative)" sub-section in the report.
 
-**`founder_stated_inputs` — record the numbers the founder actually gave you.** A flat object holding
-any of `customer_count`, `arpu`, `serviceable_pct`, `target_pct`, `industry_total`, `segment_pct`,
-`share_pct` that the founder or their materials **stated outright** (not researched, not inferred,
-not your estimate). Leave it `{}` when the founder gave no quantitative inputs — this is opt-in and
-an empty object disables the check rather than failing it.
+**Record the period each SOM covers.** `existing_claims_horizon_months.som` = the deck SOM's period in months (a plan-year run-rate is `12`; "by 2028" is months from `analysis_date`); `capture_horizon_months` = the period YOUR `share_pct`/`target_pct` describe (typically `36`/`60`). Differing periods are reported as such, not as a gap — an 18-month plan held against a 5-year figure once read as a 5.6x understatement.
+
+**`founder_stated_inputs` — facts the founder stated about their own business.** A flat object
+holding `arpu` (what they charge or collect per customer) when the founder or their materials
+**stated it outright** (not researched, not inferred, not your estimate). A figure about the
+MARKET — a population or `customer_count`, an `industry_total`, a share or capture rate — is a
+claim even when the deck states it: it goes in `existing_claims` / `existing_claims_detail` to be
+compared against, never here, or the build that consumes it restates the deck instead of testing
+it (compose flags that at high). Leave it `{}` when the founder gave no quantitative inputs —
+this is opt-in and an empty object disables the check rather than failing it.
 
 Its purpose is enforcement, not documentation: `compose_report.py` compares these against the values
 the sizing math actually consumed and raises `FOUNDER_VALUE_OVERRIDDEN` if they diverge by more than
 0.5%. A better-sourced researched figure may be **presented as a cross-check** — it must never
-silently replace what the founder said. If the founder reviews the discrepancy and agrees to the
-researched figure, update this field and record the reason via `accepted_warnings` **in `methodology.json`**, so the change is
-disclosed rather than invisible. (A unit normalization — `"18k"` → `18000` — is within tolerance and
-does not trip it.)
+silently replace what the founder said. A discrepancy is a question for the founder, never an
+edit: a figure the founder did not confirm is not founder-stated. If the founder quoted a rate per
+month or per quarter, say so in `founder_stated_inputs_period` (`{"arpu": "month"}`) and the check
+normalises it to the annual figure the math uses — a founder-stated $203/month against a computed
+$2,436 is agreement, not an override.
+
+**Two figures for one input.** When the founder's materials state more than one figure for the same
+input (a rate typed in chat and a blended rate in the deck, or two rates in the deck), ask before
+Step A via `AskUserQuestion` which one the sizing uses: one option per figure naming its source,
+the typed one first. Record the chosen figure in `founder_stated_inputs` with
+`founder_stated_inputs_source` (`{"arpu": "chat"}` or `"document:<file>#page=<n>"`), and every other
+one in `founder_stated_alternatives` (`{"arpu": [{"value": 385, "period": "month", "source":
+"document:<file>#page=<n>", "label": "<the deck's words>"}]}`). The report shows both; never drop one.
 
 **Currency — set it, do not assume dollars.** `currency` is the ISO code every money figure in this
 analysis is denominated in (`"USD"`, `"EUR"`, `"ILS"`, …). Derive it from the materials: an explicitly
@@ -415,6 +444,8 @@ cat <<'INPUTS_EOF' > "$ANALYSIS_DIR/inputs.json"
   "pricing_model": "...",
   "revenue_model": "...",
   "existing_claims": {"tam": null, "sam": null, "som": null},
+  "existing_claims_horizon_months": {"tam": null, "sam": null, "som": null},
+  "capture_horizon_months": null,
   "existing_claims_detail": null,
   "founder_stated_inputs": {},
   "competitive_landscape_notes": "...",
@@ -492,7 +523,7 @@ Then ask why (plain text — the reason isn't a fixed choice). Update `methodolo
 
 **If "Correct or add data":** Ask which values are wrong or missing via `AskUserQuestion`. The labels are runtime data — the specific inputs at stake differ every run — so build them from what is actually on screen: **one option per input you just showed in the Step-A message, each naming that input and its current value** (e.g. `Paying accounts: 4,200` — so the founder is correcting a number they can see, not recalling one), capped at three, plus a final `Something else — I'll say which in chat` so nothing is unreachable. Never emit a bare free-text prompt with no options. Then correct/patch `inputs.json`, and check whether the updated inputs change what methodology is viable. If so, update `methodology.json` too. Repeat Steps A+B.
 
-**Late edits to `inputs.json` (any point after Step 6b has already run):** `checklist.json` and
+**Late edits to `inputs.json` (after Step 6b has run, and before the adversarial review in Step 6c):** `checklist.json` and
 `report.md` are snapshots of `inputs.json` at the time their producing step ran — patching
 `inputs.json` alone does NOT retroactively update them. If you edit `inputs.json` after CHECKLIST
 has already been dispatched (e.g. adding `competitive_landscape_notes` found later in the deck),
@@ -533,6 +564,7 @@ cat <<'VAL_EOF' > "$ANALYSIS_DIR/validation.json"
 {
   "assumptions": [
     {"name": "industry_total", "value": 50000000000, "category": "sourced", "label": "Global RegTech market", "source_url": "...", "source_title": "...", "confidence": "high"},
+    {"name": "segment_pct", "value": 16, "category": "derived", "label": "Regulated SMB share", "factors": [{"factor_id": "regulated_share", "value": 0.40, "source_id": "Regulator register 2025"}, {"factor_id": "smb_share", "value": 0.40, "source_id": "company_stated"}]},
     ...
   ],
   "figure_validations": [
@@ -545,6 +577,9 @@ cat <<'VAL_EOF' > "$ANALYSIS_DIR/validation.json"
 }
 VAL_EOF
 ```
+
+`factors` lists every multiplicand of a narrowing step (two or more); one entry is the value under
+another name, and a sum is not a chain — describe a sum in `label` and leave `factors` out.
 
 ### Context A hand-off protocol (file transport + gate)
 
@@ -825,6 +860,7 @@ Before proceeding, answer:
 2. **Scope match:** Does TAM cover all `commercial` and `r_and_d` verticals from `inputs.json`?
 3. **Customer count sanity:** Can you name a representative sample of the customers in your count?
 4. **Convergence integrity:** Were top-down and bottom-up parameters set independently? If you adjusted one after seeing the other, revert and accept the delta. Check TAM, SAM, and SOM delta separately — a converged TAM does not guarantee converged SAM/SOM.
+5. **Percent scale:** if `market_sizing.py` printed `IMPLAUSIBLE_PCT_SCALE`, ask the founder now, via `AskUserQuestion`, whether they meant the value as given (option 1) or that many percent — the review in Step 6c must see the answer.
 
 This step produces no artifact. If it reveals problems, fix them before proceeding.
 
@@ -996,6 +1032,117 @@ cat "$HANDOFF_DIR/checklist_output.json" | \
 
 **Verify after both sub-agents return:** check that `$ANALYSIS_DIR` contains fresh `sensitivity.json` and `checklist.json`. If either is missing, re-run the failed dispatch before proceeding. Share a coaching update with the founder.
 
+### Step 6c: Adversarial Review -> `redteam.json` (Context A dispatch, RED_TEAM)
+
+**Dispatch the red-team agent ONCE** via the Task tool, with
+`subagent_type: "founder-skills:market-sizing-redteam"`. This is a **different agent** from the
+one every other step in this skill dispatches, and the difference is its tool allowlist: it has
+`WebSearch` and the others do not. Allowlists are per-agent, so putting web search on the shared
+agent would hand the network to dispatches that state in writing that they have none — including
+the one whose FX rule depends on that being true.
+
+**RUN THIS STEP. Its SUCCESS is optional; attempting it is not.** If the dispatch fails, or the
+agent returns BLOCKED, or the producer rejects the hand-off, continue to Step 7 — the report
+discloses that no adversarial review ran rather than presenting an unchallenged analysis as a
+checked one. Do NOT abort the run over it.
+
+Do **not** skip it because the founder supplied no documents: most of what this step finds comes
+from published figures, not from the founder's deck, and a conversational run is the case with the
+LEAST corroboration and the most to gain. The only reason to skip is an explicit instruction from
+the founder not to.
+
+**You cannot silently skip it.** `compose_report.py` in Step 7 REFUSES to produce a report unless
+one of two things is true: a fresh `redteam.json` exists for this run, or the decision not to run
+one is recorded in `methodology.json` as `red_team_skipped`, whose value must be one of exactly
+three:
+
+| Value | When |
+|---|---|
+| `founder_declined` | the founder asked you not to run one |
+| `dispatch_failed` | you dispatched it and it returned BLOCKED, or the producer rejected the hand-off |
+| `no_network_available` | this run has no access to outside sources |
+| `no_subagent_dispatch` | this environment runs the analysis as ONE agent and cannot dispatch a reviewer at all — nothing was attempted, so "worth re-running" would be false here |
+
+There is deliberately no value meaning "it did not seem necessary". Each value maps to a different
+sentence the founder reads, because "you asked us not to" and "we tried and could not" are
+different disclosures.
+
+*(Measured, and the reason this is a refusal rather than a warning: on a live run an earlier draft
+that called the step "optional" was skipped outright. Its only downstream consumer was a
+low-severity disclosure, and this repo had already learned once — in deck-review's numeric chain —
+that a step whose only consumer is a warning gets skipped in silence. Severity could not fix it
+either: Step 7 runs compose without `--strict`, so even a high warning halts nothing.)*
+
+The founder's uploads live outside `outputs/`, where a sub-agent cannot reach them, so mirror them
+into the hand-off dir first (exit 3 from the resolver = no session tree: skip the `cp`), machine-read
+every scanned page so a citation to one can be checked, then generate the dispatch prompt and pass it
+unchanged — the lane that tests this regenerates it and compares the two:
+
+```bash
+python3 "$SHARED_SCRIPTS/resolve_artifacts_root.py" --uploads   # prints UPLOADS_DIR, or exits 3
+mkdir -p "$HANDOFF_DIR/docs" && cp "<printed UPLOADS_DIR>"/* "$HANDOFF_DIR/docs/"
+```
+
+Machine-reading is its own call — minutes on a large data room, and a timeout kills a bundled call
+mid-way. Re-run it after a timeout; it resumes. The generator refuses until the receipt covers every
+scanned PDF:
+
+```bash
+python3 "$SCRIPTS/ocr_uploads.py" --uploads-dir "$HANDOFF_DIR/docs" --out "$HANDOFF_DIR/ocr"   # exit 0 always
+python3 "$SCRIPTS/dispatch_prompt.py" red_team --run-id "$RUN_ID" \
+  --analysis-dir "$ANALYSIS_DIR" --handoff-dir "$HANDOFF_DIR" \
+  --analysis-dir-agent "<ANALYSIS_DIR_AGENT>" --handoff-agent "<HANDOFF_AGENT>"
+```
+
+`Task(subagent_type="founder-skills:market-sizing-redteam", prompt=<the printed text, whole>)`.
+
+**After the sub-agent returns:** gate the hand-off per the Context A hand-off protocol, then pipe:
+
+```bash
+cat "$HANDOFF_DIR/redteam_output.json" | \
+  python3 "$SCRIPTS/red_team.py" --pretty --run-id "$RUN_ID" \
+    --uploads-dir "$HANDOFF_DIR/docs" --ocr-dir "$HANDOFF_DIR/ocr" -o "$ANALYSIS_DIR/redteam.json"
+```
+<!-- skill-quality-ci: bash-after-subagent-ok -->
+
+A finding that arrives without a source is set aside with its reason and the rest are kept — the
+producer never discards the whole hand-off over one weak finding, and the count of what was set
+aside reaches the founder. An empty findings list is a valid result: report it as "the review ran
+and found nothing", never as a failure.
+
+### Step 6d: One Revision, Only If the Founder Asks for It
+
+A review is final. Only if an accepted finding in `redteam.json` is `high` and names a `parameter`,
+ask via `AskUserQuestion`: option 1 "Deliver with the challenges shown", option 2 "Revise the
+challenged inputs and have it reviewed once more (about 10 minutes)". Otherwise go to Step 7.
+
+On "Revise", ask which changes to make: one option per change you propose, written
+`<input>: <from> → <to> (<its source>)`, plus "None of these". A figure the founder stated changes
+only to one of their own figures or one they type. Record exactly what they confirmed, then make
+exactly those edits:
+`"red_team_revision": {"approved_by_founder": true, "founder_words": "<their answer>", "changes": [{"field": "<input>", "from": <v>, "to": <v>}]}`
+in `methodology.json`. Re-run Steps 5, 6a/6b and 6c once, with the same `RUN_ID`, on round-2 hand-off
+paths, reusing round 1's documents and their OCR:
+
+```bash
+HANDOFF_DIR="$ANALYSIS_DIR/handoff/$RUN_ID/r2"; mkdir -p "$HANDOFF_DIR"
+python3 "$SHARED_SCRIPTS/resolve_artifacts_root.py" --handoff-dir-agent \
+  --dir-name "market-sizing-${SLUG}" --run-id "$RUN_ID/r2"   # the round-2 HANDOFF_AGENT
+# Step 6c in round 2: no mirror, no OCR. The generator and the producer read round 1's documents:
+#   dispatch_prompt.py ... --review-docs-dir "$ANALYSIS_DIR/handoff/$RUN_ID" --review-docs-agent "<round-1 HANDOFF_AGENT>"
+#   red_team.py ... --uploads-dir "$ANALYSIS_DIR/handoff/$RUN_ID/docs" --ocr-dir "$ANALYSIS_DIR/handoff/$RUN_ID/ocr"
+```
+
+Whatever the second review says is delivered; there is no third. Labels, prompts and chat describe
+figures, never their history — the report says in one line that a revision happened. A founder
+answer after Step 6c that would change an input is this round while it is unused; once it is used,
+record the answer in `methodology.json` `founder_notes` and deliver.
+
+**If the founder asked you not to ask questions**, take option 1 here, at Step 5.5's
+percent-scale question and at the two-figures question (Steps 2–3), list each in
+`methodology.json` `gate_defaults`, and continue. For these
+questions only, this overrides the plain-chat fallback: do not wait.
+
 ### Step 7: Compose and Validate Report
 
 ```bash
@@ -1010,10 +1157,12 @@ re-running fix it?**
 - **Pipeline-integrity** (`SIZING_INVALID`, `ARTIFACT_INVALID`, `CORRUPT_ARTIFACT`,
   `MISSING_ARTIFACT`, `STALE_ARTIFACT`, `OVERCLAIMED_VALIDATION`) mean the run itself is
   broken. Fix the underlying issue and re-run compose.
-- **Content findings** (`CHECKLIST_FAILURES`, `CHECKLIST_FAILURES_CRITICAL`) are the
-  analysis's honest verdict about the sizing. Report them to the founder as-is — never
-  re-score, re-dispatch, or otherwise make them disappear. Re-running cannot fix a
-  finding that is true.
+- **Content findings** (`CHECKLIST_FAILURES`, `CHECKLIST_FAILURES_CRITICAL`,
+  `RED_TEAM_FINDINGS`) are the analysis's honest verdict about the sizing. Report them to the
+  founder as-is — never re-score, re-dispatch, reword, or edit the analysis or the review to make
+  them disappear. Re-running cannot fix a finding that is true.
+- **About the review itself** (`REDTEAM_ALTERED`, `RED_TEAM_RERUN_UNAPPROVED`,
+  `REVIEW_COPY_MISSING`, `RED_TEAM_SKIP_CONTRADICTED`): each message states its own remedy.
 
 Two codes sit in neither class, and saying so is more useful than filing them wrongly:
 
@@ -1021,7 +1170,7 @@ Two codes sit in neither class, and saying so is more useful than filing them wr
   35% and a legitimate `0.35%` are indistinguishable from the number alone — the producer
   says so itself. Treating it as pipeline-integrity would tell you to "fix and re-run" a
   figure that may be correct, which is an instruction to change a right number. Ask the
-  founder which they meant.
+  founder which they meant at Step 5.5, before the review; here it is already answered.
 - **`UNVALIDATED_CLAIMS`** cannot distinguish *not investigated* from *searched and no
   support found*. The first is a gap in the run, the second is a finding about the market.
   Say which one it is, from what the run actually did.
@@ -1031,9 +1180,8 @@ cannot be used as a pipeline-only gate — a content finding stops it too.
 
 **A warning code you do not recognise is still real.** Treat it by what it is, never
 by silence: fix it and re-run if the run itself is broken, otherwise say what it means
-for the founder in plain language. A `FOUNDER_TEXT_TOKEN` naming an internal FILE is
-the one to watch — that text is still in the report and must be removed before you hand
-anything over.
+for the founder in plain language. A `FOUNDER_TEXT_TOKEN` message says where the token
+is and what to do about it.
 
 
 **Post-write verification:** `compose_report.py` exits non-zero (code 2) if the declared output files don't exist or are empty after writing. If compose exits non-zero, stop and report the exact stderr — do not proceed to Step 8.
@@ -1108,7 +1256,7 @@ re-issue the dispatch. Reporting it is the correct outcome.
 
 Its shape (for reference — read the file, do not reconstruct it):
 {
-  "schema_version": "v0.5.0-market-sizing",
+  "schema_version": "v0.7.0-market-sizing",
   "summary": {
     "score_pct": <number from checklist.json summary>,
     "overall_status": "<strong | solid | needs_work | major_revision — how good the sizing is>",
@@ -1120,7 +1268,7 @@ Its shape (for reference — read the file, do not reconstruct it):
   },
   "failed_items": [<array of failed checklist item objects with id and notes>],
   "warned_items": [],
-  "high_severity_warnings": [<codes from report.json validation.warnings where severity=="high">],
+  "high_severity_warnings": [<objects {code, label, message} — copy verbatim from coaching_payload; write the label, never the code>],
   "comparison_blocked": <copy from report.json coaching_payload.comparison_blocked — when `any` is
                          true those figures were never cross-checked; do not coach as if they were>,
   "methodology": "<top_down|bottom_up|both from methodology.json>",
@@ -1128,8 +1276,10 @@ Its shape (for reference — read the file, do not reconstruct it):
   "tam": <tam value from sizing.json>,
   "sam": <sam value from sizing.json>,
   "som": <som value from sizing.json>,
+  "market_size_approach": "<bottom_up | top_down | null — which build produced the tam/sam/som above; null means no sizing.json was resolvable, so say the figures are unsourced rather than naming a build>",
   "company_name": "<from inputs.json>",
   "deck_coverage": <null OR {"deck_reviewed": true, "stated": [<canonical keys with values>], "missing": [<canonical keys with null>]} — copy verbatim from coaching_payload emitted by compose_report.py>,
+  "approach_comparison": <null on a single-approach run, else {"tam_delta_pct": ..., "sam_delta_pct": ..., "som_delta_pct": ..., "shared_inputs": [{"metric": ..., "detail": ...}], "caveat": ...} — copy verbatim>,
   "review_dir": "<ANALYSIS_DIR absolute path>",
   "report_path": "<ANALYSIS_DIR>/report.md",
   "insertion_marker": "<EXACT marker string from report.json, e.g. <!-- COACHING_INSERTION_POINT_a1b2c3d4 -->"
@@ -1222,14 +1372,15 @@ reason for sending files; it is not something to tell the founder — see the no
 every finished document you produced for them, and frame them as results you generated rather than
 something they asked to look at.
 
-**Then hand them over by name — one link per document.** Sending the files and handing them over are
-different acts: a founder looking at a row of cards cannot tell which document is which. Write each
-deliverable into your message as its own named link — in Cowork, `computer://` followed by the
-absolute path you just copied it to — labelled by what the document IS, in the founder's words:
-*"Here's your finished analysis: [the written report](…) — everything scored, with the evidence
-behind it; [the interactive version](…) has the charts."* "The files are above" is not a hand-over.
-This does not conflict with the never-name-a-file rule: the founder reads your label, never the path.
-Never paste a report's body into the message — link it.
+**Then hand them over by name — one named entry per document.** Sending the files and handing them
+over are different acts: a founder looking at a row of cards cannot tell which document is which.
+Write each deliverable into your message as its own named entry — a link where this surface renders
+one that opens (on a `/sessions` session tree, `computer://` + the absolute path you just copied it
+to), otherwise the label with the path stated beside it — labelled by what the document IS, in the
+founder's words: *"Here's your finished analysis: [the written report](…) — everything scored, with
+the evidence behind it; [the interactive version](…) has the charts."* "The files are above" is not a
+hand-over. This does not conflict with the never-name-a-file rule: the founder reads your label,
+never the path. Never paste a report's body into the message — link or name it.
 
 **Then offer the working data — once, in one sentence.** For example: *"If you want to keep the working
 data behind this — to pick it up later, or feed it into another analysis — say so and I'll send it as a
@@ -1246,6 +1397,17 @@ inputs — the validated figures and extractions this analysis was built from, p
 data. Never include pipeline hand-off files, receipts, coaching payloads, or gate state: they mean
 nothing outside the run that made them.
 
+**In this skill the hand-over message is printed, not written.** It is the links, the report's
+opening verdict paragraph (the same words, its marks explained), and the offer:
+
+```bash
+python3 "$SCRIPTS/closing_message.py" --report "$ANALYSIS_DIR/report.json" \
+  --deliverable "the written report=<absolute path you copied the .md to>" \
+  --deliverable "the interactive version=<absolute path of the .html, if generated>"
+```
+
+Send its output as your message; a greeting before it is fine.
+
 No cleanup needed: scratch lives in `$STAGING_DIR` (`/tmp`, reclaimed by the sandbox). **Do not `rm`
 anything under `$ANALYSIS_DIR`** — it is the promoted `outputs/` tree in Cowork, where deleting a
 user-visible path is unsafe (and the parity gate flags it).
@@ -1257,15 +1419,13 @@ user-visible path is unsafe (and the parity gate flags it).
 
 ## Main-Thread Return
 
-This skill runs inline in the main thread (not as a sub-agent). The final outcome the main thread delivers to the founder is:
-
-- **In Claude Code:** the path to `$ANALYSIS_DIR/report.md` — there the path *is* the deliverable,
-  because `./artifacts/` is durable. **In Cowork:** the delivered files are the deliverable; a path
-  names a workspace that may not outlive the task.
-- The headline outcome fields, sourced from the `coaching_payload` staged in Step 8 (`tam`, `sam`, `som`, `methodology`, `confidence`, `high_severity_warnings`, `comparison_blocked`) plus the `insert_coaching.py` receipt (`status`, `report_path`, `run_id`). The Context B sub-agent no longer echoes these — do not source them from its return.
-- Optionally: the HTML report path from Step 9.
-
-**Do NOT inline `report_markdown` in the assistant message.** The founder reads the file via the path. Inlining round-trips ~25 KB of markdown through the parent context unnecessarily.
+This skill runs inline in the main thread (not as a sub-agent). What reaches the founder is the
+delivered files and the printed hand-over message (Step 10) — nothing else. The headline fields in
+the staged `coaching_payload` (`tam`, `sam`, `som`, `methodology`, `confidence`,
+`high_severity_warnings`, `comparison_blocked`) and the `insert_coaching.py` receipt (`status`,
+`report_path`, `run_id`) are what the main thread HAS for its own bookkeeping; they are already on
+the page, and the Context B sub-agent does not echo them. In Claude Code the report path is the
+deliverable; in Cowork the files are.
 
 ## Scoring
 
@@ -1275,7 +1435,7 @@ This skill runs inline in the main thread (not as a sub-agent). The final outcom
 
 ## What-If Recomputation Rule
 
-If the founder asks "what if [parameter] were [value]": re-run `market_sizing.py` and/or `sensitivity.py` with the modified input and present the script's output. Never recompute TAM/SAM/SOM by hand — the compound formula (customer count × ARPU × serviceable % × target %) makes mental arithmetic error-prone and the script output is the authoritative source.
+If the founder asks "what if [parameter] were [value]": re-run `market_sizing.py` and/or `sensitivity.py` with the modified input, `-o` into `$STAGING_DIR` (never `$ANALYSIS_DIR` — a what-if presents, it does not revise the reviewed analysis), and present the script's output. Never recompute TAM/SAM/SOM by hand — the compound formula (customer count × ARPU × serviceable % × target %) makes mental arithmetic error-prone and the script output is the authoritative source.
 
 ## Feedback
 

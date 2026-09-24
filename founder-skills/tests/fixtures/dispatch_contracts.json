@@ -405,7 +405,7 @@
   },
   "market-sizing": {
     "POST_COMPOSE_COACHING": {
-      "schema_version": "v0.5.0-market-sizing",
+      "schema_version": "v0.7.0-market-sizing",
       "validates_via": "test_market_sizing_context_b_contract_documented",
       "transport": "file_handoff",
       "required_input_keys": [
@@ -484,6 +484,20 @@
         "items"
       ],
       "notes": "market-sizing/checklist.py requires 'items' (array of all 22 canonical IDs: structural_tam_gt_sam_gt_som, structural_definitions_correct, tam_matches_product_scope, source_segments_match, som_share_defensible, som_backed_by_gtm, som_consistent_with_projections, data_current, sources_reputable, figures_triangulated, unsupported_figures_flagged, validated_used_precisely, assumptions_categorized, both_approaches_used, approaches_reconciled, growth_dynamics_considered, market_properly_segmented, competitive_landscape_acknowledged, sam_expansion_path_noted, assumptions_explicit, formulas_shown, sources_cited). Each item requires id, status (pass|fail|not_applicable). Optional: notes (string). No evidence field required (unlike other skills)."
+    },
+    "RED_TEAM": {
+      "schema": "",
+      "validates_via": "inline_dict_check",
+      "transport": "file_handoff",
+      "receipt_payload_keys": [
+        "status",
+        "output_path",
+        "findings"
+      ],
+      "required_fields_minus_metadata": [
+        "findings"
+      ],
+      "notes": "market-sizing/red_team.py requires 'findings' (array; MAY be empty -- a review that found nothing is a valid result and must not be an error). Each finding is validated INDIVIDUALLY and requires claim_attacked, what_is_true, evidence_quote, source_url (http/https), source_title and severity (high|medium|low); a finding failing any of these is moved to rejected[] with its reason and the rest are kept, so one weak finding never discards the hand-off. claim_attacked is FREE TEXT and is deliberately never checked against a vocabulary -- the most valuable findings are about what the analysis omitted, which by construction has no parameter name. Optional 'could_not_check' (array of strings). Dispatched to the market-sizing-redteam agent, NOT the market-sizing agent: it is the only dispatch in this skill with WebSearch, and allowlists are per-agent."
     }
   }
 }

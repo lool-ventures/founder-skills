@@ -1,6 +1,6 @@
 {
   "name": "founder-skills",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "description": "Skills for startup founders by lool ventures",
   "author": {
     "name": "lool ventures",
@@ -35,6 +35,18 @@
             "command": "${CLAUDE_PLUGIN_ROOT}/scripts/session-setup.sh",
             "timeout": 30,
             "statusMessage": "Setting up founder-skills..."
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/stop-handover-check.sh",
+            "timeout": 30
           }
         ]
       }

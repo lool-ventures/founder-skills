@@ -473,8 +473,19 @@ def build_coaching_payload(
     # otherwise KeyError here. Existing convention elsewhere in this file uses
     # `.get("computed_outputs", {}) or {}` (see line 464+); align this call.
     failed_items = [b for s in scenarios for b in ((s.get("computed_outputs", {}) or {}).get("blockers") or [])]
+    # {code, label, message} -- the shape the other five skills emit and their agent bodies name.
+    # This used to be {warning_id, severity, title, detail}, where `title` was assigned the RAW CODE:
+    # two of four fields were the same internal string and one of them was named like prose, so a coach
+    # writing "the title" wrote `E_ACQUISITION_DOUBLE_SPECIFIED`. `warning_id` is dropped rather than
+    # renamed -- it had zero readers repo-wide, cassettes included.
     high_severity = [
-        {"warning_id": b["code"], "severity": "high", "title": b["code"], "detail": b["remedy"]} for b in failed_items
+        {
+            "code": b["code"],
+            "severity": "high",
+            "label": _warning_callouts.humanize_warning(b["code"]),
+            "message": b["remedy"],
+        }
+        for b in failed_items
     ]
     # SOLVER warnings, not just blockers. The Context-B sub-agent's commentary is inserted into
     # `report.md`, so this payload is a founder-facing surface -- and sourcing it from `failed_items`
@@ -484,10 +495,10 @@ def build_coaching_payload(
     # does not exist.
     high_severity.extend(
         {
-            "warning_id": w.get("code"),
+            "code": w.get("code"),
             "severity": "medium",
-            "title": w.get("code"),
-            "detail": w.get("detail") or w.get("reason") or "",
+            "label": _warning_callouts.humanize_warning(str(w.get("code") or "")),
+            "message": w.get("detail") or w.get("reason") or "",
         }
         for w in _warning_callouts.collect_solver_warnings(scenarios)
         if isinstance(w, dict) and str(w.get("code") or "").startswith("W_")
@@ -510,7 +521,14 @@ def build_coaching_payload(
             "warned": 0,
             "score_percent": None,
         },
-        "failed_items": [{"code": b["code"], "detail": b["remedy"]} for b in failed_items],
+        "failed_items": [
+            {
+                "code": b["code"],
+                "label": _warning_callouts.humanize_warning(b["code"]),
+                "detail": b["remedy"],
+            }
+            for b in failed_items
+        ],
         "warned_items": [],
         "high_severity_warnings": high_severity,
         "company_name": inputs.get("company_name", ""),

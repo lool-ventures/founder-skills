@@ -764,12 +764,16 @@ context isolation, but inline is acceptable and the outputs are
 identical.
 
 The staged `coaching_payload.json` (Read it from the path in your dispatch prompt) contains these
-keys (do not refetch from disk — design doc §11 is the authoritative
-schema):
+keys (do not refetch from disk — the staged file is the whole contract):
 
 - `summary` (passed / failed / warned / score_percent)
-- `failed_items`, `warned_items`
-- `high_severity_warnings` (codes + titles + detail)
+- `failed_items` — objects with `code`, `label` and `detail`; write the
+  `label` and the `detail`, never the `code`. `warned_items`
+- `high_severity_warnings` — objects, one per warning, each with `code`,
+  `severity`, `label` and `message`. Write the `label` or the `message`; the
+  `code` is ours, not the founder's. (Note the field names differ from the
+  other skills' `{code, label, message}` only by carrying `severity`, and
+  `message` is the remedy text.)
 - `company_name`, `mode` (`standard` or `flip_focused`)
 - `scenarios_modeled`, `counsel_review_count`
 - `review_dir`, `report_path` — context only; you don't open either.

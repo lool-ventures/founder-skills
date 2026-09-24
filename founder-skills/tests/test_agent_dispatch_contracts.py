@@ -84,6 +84,28 @@ def _load_context_a_handoff_rows() -> list[tuple[str, str, list[str]]]:
 CONTEXT_A_HANDOFF_ROWS = _load_context_a_handoff_rows()
 
 
+def _agent_body_for(skill: str, dispatch_type: str) -> str:
+    """The body of the agent that ACTUALLY serves this dispatch, not the skill's namesake.
+
+    A skill may carry more than one agent, and market-sizing does: the RED_TEAM dispatch goes to
+    `market-sizing-redteam` because tool allowlists are per-agent and only that step needs the
+    network. Resolving `agents/<skill>.md` unconditionally would assert the red-team contract
+    against a body that never documents it, and -- worse -- would keep passing for the five
+    dispatches that DO live there while the sixth went unchecked.
+
+    Union rather than a lookup table: the contract is "some agent this skill dispatches documents
+    this", and which file it lives in is not the thing being guarded.
+    """
+    agents_dir = REPO_ROOT / "agents"
+    bodies = [(agents_dir / f"{skill}.md").read_text()]
+    for extra in sorted(agents_dir.glob(f"{skill}-*.md")):
+        bodies.append(extra.read_text())
+    for body in bodies:
+        if dispatch_type in body:
+            return body
+    return bodies[0]
+
+
 @pytest.mark.parametrize("skill,dispatch_type,schema_file,expected_fields", DISPATCH_CONTRACTS)
 def test_dispatch_contract_matches_schema(
     skill: str,
@@ -95,7 +117,7 @@ def test_dispatch_contract_matches_schema(
     the fields the producer script's schema requires (minus metadata)."""
     agent_path = REPO_ROOT / "agents" / f"{skill}.md"
     assert agent_path.is_file(), f"Agent file not found: {agent_path}"
-    agent_body = agent_path.read_text()
+    agent_body = _agent_body_for(skill, dispatch_type)
 
     # The agent body must mention this dispatch type
     assert dispatch_type in agent_body, f"{skill}.md doesn't document Context A subtype {dispatch_type!r}"
@@ -125,7 +147,7 @@ def test_context_a_file_handoff_contract_documented(
     assert agent_path.is_file(), f"Agent file not found: {agent_path}"
     assert skill_md_path.is_file(), f"SKILL.md not found: {skill_md_path}"
 
-    agent_body = agent_path.read_text()
+    agent_body = _agent_body_for(skill, dispatch_type)
     skill_md = skill_md_path.read_text()
 
     assert "OUTPUT_PATH" in agent_body, (
@@ -763,6 +785,11 @@ def test_all_skills_have_disable_flag_removed() -> None:
 # templates the model actually reads) and compare, rather than trusting a
 # hand-maintained enumeration to have stayed complete.
 _CONTEXT_HEADER = re.compile(r"(?m)^CONTEXT:\s*(\S+)")
+# A dispatch prompt a SCRIPT prints carries the same envelope as a quoted string literal, not at
+# column zero: `"CONTEXT: RED_TEAM",`. market-sizing moved its red-team template into
+# scripts/dispatch_prompt.py so the prompt can be regenerated and compared; the dispatch is as real
+# as before, and a scanner that reads only prose would report it as dead coverage.
+_CONTEXT_LITERAL = re.compile(r"[\"\']CONTEXT:\s*([A-Z_]+)[\"\']")
 
 SKILLS_DIR = REPO_ROOT / "skills"
 
@@ -770,7 +797,7 @@ SKILLS_DIR = REPO_ROOT / "skills"
 def _declared_contexts(skill_dir: Path) -> set[str]:
     """Every `CONTEXT: <NAME>` header declared in a skill's dispatch templates.
 
-    Scans SKILL.md plus every references/**.md — cap-table puts its dispatch
+    Scans SKILL.md, every references/**.md, and scripts/dispatch_prompt.py — cap-table puts its dispatch
     prompt templates in references/lanes/*.md, so a SKILL.md-only scan would
     under-report and reintroduce exactly the blind spot this test closes.
 
@@ -787,6 +814,10 @@ def _declared_contexts(skill_dir: Path) -> set[str]:
             continue
         for m in _CONTEXT_HEADER.finditer(src.read_text(encoding="utf-8")):
             found.add(m.group(1).rstrip(",").strip())
+    generator = skill_dir / "scripts" / "dispatch_prompt.py"
+    if generator.is_file():
+        for m in _CONTEXT_LITERAL.finditer(generator.read_text(encoding="utf-8")):
+            found.add(m.group(1))
     return found
 
 

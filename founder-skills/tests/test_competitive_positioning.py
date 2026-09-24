@@ -4680,7 +4680,7 @@ class TestComposeMergeIntegrity:
             rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
             assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
             assert data is not None
-            merge_warnings = [w for w in data["warnings"] if "differ from positioning_scores.json" in w["message"]]
+            merge_warnings = [w for w in data["warnings"] if "differ from the positioning scores" in w["message"]]
             assert merge_warnings, f"Expected a merge-integrity warning, got: {data['warnings']}"
             warn = merge_warnings[0]
             assert warn["code"] == "CORRUPT_ARTIFACT"
@@ -4702,7 +4702,7 @@ class TestComposeMergeIntegrity:
                 positioning_scores_overrides={"views": [self._scores_view(list(self._PRIMARY_POINTS))]},
             )
             codes, messages = self._mismatch_codes_and_messages(tmp)
-            assert "differ from positioning_scores.json" not in messages
+            assert "differ from the positioning scores" not in messages
             assert not [c for c in codes if c == "CORRUPT_ARTIFACT"]
 
     # 3. Partial merge — one competitor updated, one left stale
@@ -4719,7 +4719,7 @@ class TestComposeMergeIntegrity:
             rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
             assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
             assert data is not None
-            merge_warnings = [w for w in data["warnings"] if "differ from positioning_scores.json" in w["message"]]
+            merge_warnings = [w for w in data["warnings"] if "differ from the positioning scores" in w["message"]]
             assert len(merge_warnings) == 1, f"Expected exactly one merge warning, got: {merge_warnings}"
             msg = merge_warnings[0]["message"]
             assert "gamma-ltd" in msg
@@ -4740,7 +4740,7 @@ class TestComposeMergeIntegrity:
             assert "Traceback" not in stderr
             assert data is not None
             messages = " ".join(w["message"] for w in data["warnings"])
-            assert "differ from positioning_scores.json" not in messages
+            assert "differ from the positioning scores" not in messages
 
 
 class TestValidateLandscapeNoStdinFlag:

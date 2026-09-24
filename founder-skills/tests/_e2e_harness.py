@@ -23,6 +23,9 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
+import shutil
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -105,7 +108,7 @@ def summarize_sdk_message(msg: object) -> str:
         return f"<unsummarizable message: {exc}>"
 
 
-def build_options(workdir: Path) -> Any:
+def build_options(workdir: Path, env_extra: dict[str, str] | None = None) -> Any:
     """SDK options shared by every lane.
 
     See `test_e2e_deck_review.py` for the full derivation of each field; the two that
@@ -132,25 +135,118 @@ def build_options(workdir: Path) -> Any:
         plugins=[{"type": "local", "path": str(PLUGIN_PATH)}],
         setting_sources=[],
         skills="all",
-        allowed_tools=["Bash", "Read", "Write", "Edit", "Glob", "Grep", "Task", "Skill"],
+        # WebSearch is here for ONE dispatch: market-sizing's adversarial review, whose whole job
+        # is finding a published figure that contradicts the analysis. Its agent declares the tool,
+        # but this session-level list is the outer bound, so without it the lane could never
+        # exercise that step -- MEASURED: a live run recorded `no_network_available` and skipped
+        # it, which was the honest answer and also a permanent one. A lane that structurally
+        # cannot run a step is not a smoke test of that step.
+        #
+        # It widens the surface for the other lanes that share this harness, which is the cost.
+        # Accepted because the alternative is a market-sizing lane that green-lights a feature it
+        # never touches -- and because production DOES offer it: tool allowlists are per-agent
+        # there, so only the red-team agent receives it.
+        allowed_tools=["Bash", "Read", "Write", "Edit", "Glob", "Grep", "Task", "Skill", "WebSearch"],
         env={
             **os.environ,
             "CLAUDE_PLUGIN_ROOT": str(PLUGIN_PATH),
             "CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS": os.environ.get("CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS", "600000"),
+            **(env_extra or {}),
         },
     )
 
 
-def run_skill(prompt: str, workdir: Path, label: str) -> list[str]:
-    """Drive one skill run to completion. Returns the captured message stream."""
-    from claude_agent_sdk import query
+class RunCapture:
+    """What one skill run left behind, in the shape the assertions need.
 
-    options = build_options(workdir)
-    captured: list[str] = []
+    `messages` is the stringified stream every lane already reads. `tool_uses` is the structured
+    record: one entry per ToolUseBlock across every AssistantMessage, carrying the block's `id`,
+    `name`, `input`, and the message's `parent_tool_use_id` -- non-null for a call a SUB-AGENT
+    made, which is the only way to know what the red team actually opened rather than what it
+    says it opened. `final_text` is the ResultMessage's `result`: the text the user received.
+
+    A plain class, not a dataclass: test_skill_contract.py loads this module by file path
+    without registering it in sys.modules, and a dataclass under postponed annotations cannot
+    resolve its field types there.
+    """
+
+    def __init__(self) -> None:
+        self.messages: list[str] = []
+        self.tool_uses: list[dict[str, Any]] = []
+        self.final_text: str = ""
+        # Every founder-visible thing in stream order: {"kind": "text"|"tool_use"|"user", ...}.
+        # `final_text` is the LAST message only; a block-then-rewrite from a Stop hook leaves the
+        # first message on screen, so the lane judges everything the founder saw after a point.
+        self.events: list[dict[str, Any]] = []
+
+    def calls(self, name: str, *, parent: str | None = None) -> list[dict[str, Any]]:
+        """Tool calls by name; with `parent`, only those made inside that dispatch."""
+        return [
+            t for t in self.tool_uses if t["name"] == name and (parent is None or t["parent_tool_use_id"] == parent)
+        ]
+
+    def text_after(self, tool_use_id: str, *, until_stop_feedback: bool = False) -> str:
+        """Top-level assistant text after the named tool call, concatenated in order.
+
+        With `until_stop_feedback`, stops at the first "Stop hook feedback:" user turn -- the
+        message as the founder saw it BEFORE any hook sent the model back. Without it, the text
+        after the LAST such turn: the model's latest attempt, which is what a correction is.
+        (The faulted message is still on screen above it; a block appends, it does not retract.)
+        """
+        out: list[str] = []
+        seen = False
+        for ev in self.events:
+            if ev["kind"] == "tool_use" and ev["id"] == tool_use_id:
+                seen = True
+                continue
+            if not seen:
+                continue
+            if ev["kind"] == "user" and ev["text"].startswith("Stop hook feedback:"):
+                if until_stop_feedback:
+                    break
+                out = []
+                continue
+            if ev["kind"] == "text" and ev["parent_tool_use_id"] is None:
+                out.append(ev["text"])
+        return "\n".join(out)
+
+    def stop_hook_blocks(self) -> int:
+        return sum(1 for ev in self.events if ev["kind"] == "user" and ev["text"].startswith("Stop hook feedback:"))
+
+
+def run_skill(prompt: str, workdir: Path, label: str, uploads: Sequence[Path] = ()) -> list[str]:
+    """Drive one skill run to completion. Returns the captured message stream.
+
+    Kept for the lanes that read only the stream; `run_skill_capture` is the structured form.
+    """
+    return run_skill_capture(prompt, workdir, label, uploads).messages
+
+
+def run_skill_capture(prompt: str, workdir: Path, label: str, uploads: Sequence[Path] = ()) -> RunCapture:
+    """Drive one skill run to completion, with sub-agent tool calls attributed.
+
+    `uploads` are copied to `<workdir>/mnt/uploads/` and `COWORK_UPLOADS_DIR` points there, which
+    is the override `resolve_artifacts_root.py --uploads` honours outside a Cowork session tree.
+    Without it the skill's document-reading steps run against nothing, and a lane that cannot
+    attach a document cannot exercise the branch that failed live.
+    """
+    from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock, ToolUseBlock, UserMessage, query
+
+    env_extra: dict[str, str] = {}
+    if uploads:
+        uploads_dir = workdir / "mnt" / "uploads"
+        uploads_dir.mkdir(parents=True, exist_ok=True)
+        for src in uploads:
+            shutil.copy(src, uploads_dir / src.name)
+        env_extra["COWORK_UPLOADS_DIR"] = str(uploads_dir)
+    options = build_options(workdir, env_extra)
+    cap = RunCapture()
 
     print(f"\n[e2e:{label}] Auth detected: {detect_auth_kind()}", flush=True)
     print(f"[e2e:{label}] Plugin path:   {PLUGIN_PATH}", flush=True)
     print(f"[e2e:{label}] Workdir:       {workdir}", flush=True)
+    if uploads:
+        print(f"[e2e:{label}] Uploads:       {', '.join(p.name for p in uploads)}", flush=True)
     print(f"[e2e:{label}] Prompt:        {prompt[:140]}{'...' if len(prompt) > 140 else ''}", flush=True)
     print(f"[e2e:{label}] --- starting SDK query (5-20 min) ---", flush=True)
 
@@ -158,12 +254,77 @@ def run_skill(prompt: str, workdir: Path, label: str) -> list[str]:
         count = 0
         async for msg in query(prompt=prompt, options=options):
             count += 1
-            captured.append(str(msg))
+            cap.messages.append(str(msg))
+            if isinstance(msg, AssistantMessage):
+                for block in msg.content:
+                    if isinstance(block, ToolUseBlock):
+                        call = {
+                            "id": block.id,
+                            "name": block.name,
+                            "input": block.input,
+                            "parent_tool_use_id": msg.parent_tool_use_id,
+                        }
+                        cap.tool_uses.append(call)
+                        cap.events.append({"kind": "tool_use", **call})
+                    elif isinstance(block, TextBlock):
+                        cap.events.append(
+                            {"kind": "text", "text": block.text, "parent_tool_use_id": msg.parent_tool_use_id}
+                        )
+            elif isinstance(msg, UserMessage):
+                # A Stop hook's block arrives as a user turn "Stop hook feedback:\n<reason>".
+                content = msg.content
+                text = (
+                    content
+                    if isinstance(content, str)
+                    else " ".join(getattr(b, "text", "") for b in content if isinstance(getattr(b, "text", None), str))
+                )
+                cap.events.append({"kind": "user", "text": text, "parent_tool_use_id": msg.parent_tool_use_id})
+            elif isinstance(msg, ResultMessage) and isinstance(msg.result, str):
+                cap.final_text = msg.result
             print(f"[e2e:{label} #{count:03d}] {summarize_sdk_message(msg)}", flush=True)
         print(f"[e2e:{label}] --- SDK loop complete ({count} messages) ---", flush=True)
 
     asyncio.run(_run())
-    return captured
+    return cap
+
+
+def step_summary(text: str) -> None:
+    """Append a note to GitHub's per-job summary. No-op outside Actions.
+
+    Evidence, not decoration. Every failure of this lane so far reported a COUNT of criteria that
+    were not assessed, and the runner's workspace -- the only place the identity lived -- was
+    destroyed with the job, so the same failure was investigated twice and the criterion recovered
+    neither time. A line here survives the job, on a surface a human already opens.
+    """
+    path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not path:
+        return
+    try:
+        with open(path, "a", encoding="utf-8") as handle:
+            handle.write(text.rstrip() + "\n")
+    except OSError:
+        # Never fail a paid run over its own logging.
+        pass
+
+
+def model_from_capture(captured: list[str]) -> str:
+    """The model the graded turn actually ran on, out of the SDK's init message.
+
+    Not available from `summarize_sdk_message`, which truncates its PRINTED line at 120 chars --
+    but `run_skill` keeps the full `str(msg)` in `captured`, so nothing in the harness has to
+    change to recover it. Worth recording on every run: this lane pins no model, so a green and a
+    red can come from different ones and nothing else would say so.
+    """
+    for line in captured:
+        # Scoped to the init frame. Scanning every message would take the first `"model":` anywhere
+        # -- a tool result, a JSON echo, a prompt quoting the word -- and return a wrong-but-
+        # plausible answer in the one field added to say which experiment ran.
+        if "subtype='init'" not in line and '"subtype": "init"' not in line:
+            continue
+        match = re.search(r"['\"]model['\"]:\s*['\"]([^'\"]+)['\"]", line)
+        if match:
+            return match.group(1)
+    return "unknown"
 
 
 def locate_review_dir(workdir: Path, glob: str, captured: list[str], skill: str) -> Path:
@@ -238,7 +399,24 @@ def assert_coaching_commentary_landed(review_dir: Path, payload_key: str) -> dic
         "report.md has no '## Coaching Commentary' heading — the Context B dispatch, its "
         "file hand-off, or the deterministic insertion did not complete"
     )
-    body = md.split("## Coaching Commentary", 1)[1].strip()
+    # Bound at the footer before measuring. `compose_report.py` appends ~400 chars of boilerplate
+    # after the coaching marker, and `insert_coaching.py` replaces the marker in place -- so the
+    # unbounded slice measured `len(commentary) + 399` and ANY commentary of one character passed
+    # this check. (It could never be zero: `insert_coaching.py` refuses a missing or whitespace-only
+    # `commentary_markdown` before it writes.) `rsplit`, because a `---` inside the commentary must
+    # not move the boundary.
+    body = md.split("## Coaching Commentary", 1)[1]
+    # `rsplit` on a MISSING separator returns the whole string, which would silently restore the
+    # vacuous measurement this bound exists to remove -- so the anchor is asserted, not assumed.
+    # It differs per skill: fmr and market-sizing emit `\n\n---\n*Generated by`, cap-table joins
+    # its footer line-by-line and emits a blank line more. Match the shortest stable form and
+    # require exactly one of it.
+    anchor = "---\n\n*Generated by" if md.count("---\n\n*Generated by") == 1 else "---\n*Generated by"
+    assert md.count(anchor) == 1, (
+        f"the report footer anchor {anchor!r} appears {md.count(anchor)} times; the commentary "
+        "length below would measure the footer as commentary"
+    )
+    body = body.rsplit(anchor, 1)[0].strip()
     assert len(body) > 200, f"coaching commentary is only {len(body)}B — the sub-agent wrote nothing usable"
     # The marker is replaced in a single write-back; a surviving uuid means insertion ran
     # against the wrong file or the marker drifted.

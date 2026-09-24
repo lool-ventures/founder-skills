@@ -284,11 +284,21 @@ keys (do not refetch from disk):
   `failed_items` only)
 - `warned_items` — always `[]` for market-sizing; do not be confused by
   an empty array here
-- `high_severity_warnings` (codes only)
+- `high_severity_warnings` — objects, one per warning, each with `code`,
+  `label` and `message`. Write the `label`; the `code` is ours, not the
+  founder's.
 - `methodology` (top_down/bottom_up/both)
 - `confidence` (high/medium/low)
 - `tam`, `sam`, `som` — headline values from sizing.json, denominated in the run's `currency` (also in the payload); never relabel them USD
+- `tam_display`, `sam_display`, `som_display`, `self_check_line` — the same figures and the
+  self-check score exactly as the report prints them. Quote these strings when you name a
+  headline figure; do not re-format the numbers above or re-derive the score.
 - `company_name`
+- `market_size_approach` — `bottom_up`, `top_down`, or `null`: which build
+  produced the headline TAM/SAM/SOM. Say which one the numbers rest on; a
+  top-down figure and a bottom-up figure are different claims, and the
+  founder will be asked which they built. `null` means no sizing was
+  resolvable — then do not name a build at all.
 - `deck_coverage` — `null` when no canonical deck figure was stated; otherwise
   `{deck_reviewed: true, stated: [...], missing: [...]}` listing which of
   `tam`/`sam`/`som` the deck stated vs left null. Use this to frame coaching
@@ -298,6 +308,24 @@ keys (do not refetch from disk):
   ours: they are in a different currency and none was stated. `deck_coverage`
   will still list them as stated, so do NOT write as though they were verified.
   Say the check could not run and what would let it run.
+- `approach_comparison` — `null` on a single-approach run; otherwise
+  `{tam_delta_pct, sam_delta_pct, som_delta_pct, shared_inputs: [...], caveat}`.
+  `caveat` says what the pipeline could see about independence: nothing, when
+  no input is itemized; otherwise that `shared_inputs` is the list of what it
+  saw. `shared_inputs` lists what they demonstrably share,
+  each as a ready-to-quote `detail` sentence; when it is non-empty the
+  agreement on those metrics is arithmetic, so quote the sentence rather than
+  describing the builds as separate.
+- `red_team_findings` — `null` when no adversarial review ran; otherwise
+  `{findings: [...], dropped, unchecked, could_not_check, unread}`. **`null` and an
+  empty `findings` list are different facts and must not be written the same
+  way**: one means nobody looked, the other that somebody looked and found
+  nothing. Each finding quotes the source it relies on — quote it too rather
+  than restating it in your own words. `dropped` counts challenges filed
+  without a source; they were not assessed, so do not imply they were refuted.
+  `unread` names the founder's documents the review never opened; a figure
+  from one of them was checked against the analysis's reading, not the page —
+  say so rather than writing as though every page had been read.
 - `review_dir`, `report_path` — context only; you don't open either.
 - `insertion_marker` — consumed by the main thread's
   `insert_coaching.py` invocation, NOT by you. Ignore it.

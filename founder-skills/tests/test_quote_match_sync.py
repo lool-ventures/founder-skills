@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""deck-review's copy of the quote matcher must not drift from cap-table's original.
+"""deck-review's and market-sizing's copies of the quote matcher must not drift from cap-table's original.
 
 WHY A COPY EXISTS AT ALL: skill scripts are standalone, run by path with no package
 context, so deck-review cannot import cap-table's `evidence_verifier`. `_theme.py` is
@@ -26,6 +26,10 @@ import pytest
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 DECK_COPY = REPO / "founder-skills" / "skills" / "deck-review" / "scripts" / "_quote_match.py"
+# market-sizing's red team verifies a quoted sentence against the founder's page the same way, and
+# for the same reason cannot import either sibling. Third copy, same guard.
+MS_COPY = REPO / "founder-skills" / "skills" / "market-sizing" / "scripts" / "_quote_match.py"
+COPIES = (DECK_COPY, MS_COPY)
 CAP_NORMALIZE = REPO / "founder-skills" / "skills" / "cap-table" / "scripts" / "_normalize.py"
 CAP_VERIFIER = REPO / "founder-skills" / "skills" / "cap-table" / "scripts" / "evidence_verifier.py"
 
@@ -61,10 +65,11 @@ def _function_source(path: pathlib.Path, name: str) -> str:
     ],
 )
 def test_copied_function_matches_origin(func: str, origin: pathlib.Path) -> None:
-    assert _function_source(DECK_COPY, func) == _function_source(origin, func), (
-        f"{func} has drifted from {origin.name}. These are copies by necessity — edit one, "
-        "re-copy to the other. Do not 'fix' this by deleting the assertion."
-    )
+    for copy in COPIES:
+        assert _function_source(copy, func) == _function_source(origin, func), (
+            f"{func} in {copy.parent.parent.name} has drifted from {origin.name}. These are copies by "
+            "necessity — edit one, re-copy to the others. Do not 'fix' this by deleting the assertion."
+        )
 
 
 def test_fuzzy_threshold_matches_origin() -> None:
@@ -73,9 +78,9 @@ def test_fuzzy_threshold_matches_origin() -> None:
     Retuning it from deck data alone would silently move a constant two skills share.
     """
     origin = CAP_VERIFIER.read_text(encoding="utf-8")
-    copy = DECK_COPY.read_text(encoding="utf-8")
     assert "DEFAULT_FUZZY_THRESHOLD = 0.85" in origin
-    assert "DEFAULT_FUZZY_THRESHOLD = 0.85" in copy
+    for copy in COPIES:
+        assert "DEFAULT_FUZZY_THRESHOLD = 0.85" in copy.read_text(encoding="utf-8")
 
 
 def test_value_matching_is_deliberately_absent() -> None:
@@ -87,10 +92,11 @@ def test_value_matching_is_deliberately_absent() -> None:
     relative to cap-table's precedent, and re-adding a value check here would undo that
     without anyone noticing.
     """
-    tree = ast.parse(DECK_COPY.read_text(encoding="utf-8"))
-    defined = {n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
-    # Names in the module docstring are the file EXPLAINING the absence, which is the
-    # opposite of the thing being tested — so this reads definitions, not text.
-    assert defined == {"normalize_text", "compact_form", "quote_in_doc"}, (
-        f"unexpected functions in the deck-review copy: {sorted(defined)}"
-    )
+    for copy in COPIES:
+        tree = ast.parse(copy.read_text(encoding="utf-8"))
+        defined = {n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
+        # Names in the module docstring are the file EXPLAINING the absence, which is the
+        # opposite of the thing being tested — so this reads definitions, not text.
+        assert defined == {"normalize_text", "compact_form", "quote_in_doc"}, (
+            f"unexpected functions in the {copy.parent.parent.name} copy: {sorted(defined)}"
+        )

@@ -81,7 +81,7 @@ Thresholds: **strong** >= 85%, **solid** >= 70%, **needs_work** >= 50%, **major_
 **Fail:** Weekly revenue mixed with monthly costs.
 
 ### `STRUCT_08`
-**Label:** No structural errors (internal reconciliation: unit economics roll into P&L/S&M spend; balance sheet assets = liabilities + equity if BS present; ending cash on CF = cash on BS; net income flows to retained earnings)
+**Label:** No structural errors (circular references, #REF!, #DIV/0!, and other spreadsheet error tokens)
 **Stage:** all | **Geography:** all | **Sector:** all | **Model format:** spreadsheet only
 **Pass:** Zero circular refs, #REF!, #DIV/0!.
 **Warn:** Minor issues.
@@ -320,8 +320,6 @@ double-counts it. **Read the burn multiple off `unit_economics.json` rather than
 ---
 
 ## Category 6 — Sector-Specific (6 items)
-
-Mark items as `not_applicable` if the company's sector or traits don't match the gate.
 
 Note: `saas` and `retail` sector types match no item in this category by design — such companies get all six auto-gated `not_applicable`, not force-fitted into the nearest gate. For `retail` companies, cover the sector-specific ground manually: assess store-level contribution, buildout capex and payback, inventory/working capital, and same-store vs new-store growth in the `notes` fields of the relevant Revenue & Unit Economics and Expenses/Cash items — a store rollout without a dedicated gate still needs its store economics reviewed.
 

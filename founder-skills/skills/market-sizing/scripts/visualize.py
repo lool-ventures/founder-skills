@@ -20,8 +20,15 @@ import html
 import json
 import math
 import os
+import re
 import sys
 from typing import Any, TypeGuard
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _redteam_copy  # noqa: E402
+import _upload_names  # noqa: E402
+from _redteam_text import humanize_claim as _humanize_claim  # noqa: E402
+from _redteam_text import humanize_param as _humanize_param  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Artifact loading infrastructure (duplicated from compose_report.py per PEP 723)
@@ -37,7 +44,7 @@ REQUIRED_ARTIFACTS = [
     "checklist.json",
     "sensitivity.json",
 ]
-OPTIONAL_ARTIFACTS: list[str] = []
+OPTIONAL_ARTIFACTS: list[str] = ["redteam.json"]
 
 # Canonical category order for assumption confidence donut
 _CONFIDENCE_CATEGORIES: list[str] = ["sourced", "derived", "agent_estimate"]
@@ -337,6 +344,13 @@ def _compute_provenance(
             # A converted money input with no declared claim currency makes the delta carry the
             # exchange rate's magnitude on a perfectly correct analysis. compose_report.py refuses
             # the comparison in that case; the renderers must not assert closeness there either.
+            # Mirrors compose_report.py: a horizon mismatch kills the delta exactly as a blocked
+            # currency comparison does, so this renderer cannot assert closeness across it either.
+            horizon = _horizon_mismatch(inputs, metric)
+            if horizon is not None:
+                delta = None
+                comparable = None
+
             approach_prov[metric] = {
                 "classification": classification,
                 "confidence_breakdown": breakdown,
@@ -344,6 +358,7 @@ def _compute_provenance(
                 "delta_vs_deck_pct": delta,
                 "deck_claim_comparable": comparable,
                 "comparison_blocked": blocked,
+                "horizon_mismatch": ({"claim_months": horizon[0], "ours_months": horizon[1]} if horizon else None),
                 "input_provenances": input_provenances,
             }
         provenance[approach_key] = approach_prov
@@ -1110,6 +1125,187 @@ def _chart_tornado(sensitivity: dict[str, Any] | None) -> str:
     return _render_tornado_svg(bar_data, base_som)
 
 
+# --- COPIES of compose_report.py, kept byte-identical -----------------------
+def _horizon_mismatch(inputs: dict[str, Any] | None, metric: str) -> tuple[int, int] | None:
+    """(claim_months, ours_months) when both are stated for SOM and differ; else None.
+
+    SOM ONLY, and the scoping is load-bearing. `capture_horizon_months` describes the period
+    `share_pct` / `target_pct` represent, which is a SOM concept. Read for TAM or SAM it would let
+    an analyst who records a stated SAM horizon blank the SAM comparison -- which on the run that
+    motivated this check is the one deck finding that is real.
+    """
+    if metric != "som" or not isinstance(inputs, dict):
+        return None
+    claim = _as_dict(inputs.get("existing_claims_horizon_months")).get(metric)
+    ours = inputs.get("capture_horizon_months")
+    if not isinstance(claim, int) or isinstance(claim, bool):
+        return None
+    if not isinstance(ours, int) or isinstance(ours, bool):
+        return None
+    return (claim, ours) if claim != ours else None
+
+
+# The shared-input detector and its helpers exist here and in compose_report.py.
+# test_visualize_market_sizing.py parses both files and compares the bodies, so a drift reds rather
+# than shipping two surfaces that disagree about what the founder is told. The label helpers
+# (PARAM_LABELS, _humanize_param, _humanize_claim) come from _redteam_text, one source for both.
+
+
+def _as_number(value: Any) -> float | None:
+    """The value as a float when it is a real number, else None.
+
+    `bool` is excluded deliberately: it is an int subclass, so a stray `True` would compare equal
+    to 1 and could manufacture an identity out of nothing.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+_PAIRED_SLOTS: tuple[tuple[str, str, str, str], ...] = (
+    # metric, top-down input key, bottom-up input key, sizing block carrying them
+    ("sam", "segment_pct", "serviceable_pct", "sam"),
+    ("som", "share_pct", "target_pct", "som"),
+)
+
+
+def _factor_chain(assumption: dict[str, Any]) -> list[dict[str, Any]] | None:
+    """The assumption's `factors` list if it is well-formed and has TWO OR MORE entries, else None.
+
+    Well-formed: a list of objects each carrying a str `factor_id`, a finite numeric `value` (bool
+    excluded, as everywhere else here), a str `source_id`, and an optional `role`. Anything else
+    is "no chain" -- a malformed chain must read as UNSTRUCTURED, never crash compose, and never
+    be graded as reconciling, because a chain we cannot parse is exactly as uncheckable as one
+    that is absent.
+
+    Two or more. A one-element list is the value under another name: on a live run that is exactly
+    what arrived (`segment_pct` <- one factor of 0.3732), it reconciled trivially, and the report
+    called the figure itemized.
+
+    `role` defaults to `"multiplicand"`; the only other accepted value is `"divisor"`, which lets
+    a derived figure be itemized as a RATIO (numerator multiplicands over denominator divisors --
+    e.g. 15,000,000 / 64,200,000) rather than only as a chain of narrowing multiplicands. An
+    additive decomposition was mis-encoded here once and caught only by the product check; an
+    unrecognized `role` string is malformed the same way a missing `factor_id` is.
+    """
+    raw = assumption.get("factors")
+    if not isinstance(raw, list) or len(raw) < 2:
+        return None
+    out: list[dict[str, Any]] = []
+    for f in raw:
+        if not isinstance(f, dict):
+            return None
+        fid, src = f.get("factor_id"), f.get("source_id")
+        if not isinstance(fid, str) or not isinstance(src, str):
+            return None
+        val = _as_number(f.get("value"))
+        if val is None or not math.isfinite(val):
+            return None
+        role = f.get("role", "multiplicand")
+        if role not in ("multiplicand", "divisor"):
+            return None
+        out.append({"factor_id": fid, "value": val, "source_id": src, "role": role})
+    return out
+
+
+def _shared_input_values(
+    sizing: dict[str, Any] | None, validation: dict[str, Any] | None = None
+) -> list[dict[str, Any]]:
+    """Inputs the two builds share BY VALUE. Empty unless both approaches are present.
+
+    Each item carries a founder-facing `detail` sentence and NO raw field name: these items reach
+    `coaching_payload`, and a raw id in that payload is a defect the fleet has already fixed once.
+
+    Tolerance is 1e-6 relative. This is an IDENTITY check, not a closeness one: an honest
+    near-agreement of even 0.5% must not trip it -- that case is what the comparison caveat is for.
+    """
+    if not isinstance(sizing, dict):
+        return []
+    td = _as_dict(sizing.get("top_down"))
+    bu = _as_dict(sizing.get("bottom_up"))
+    if not td or not bu:
+        return []
+    found: list[dict[str, Any]] = []
+
+    it = _as_number(_as_dict(_as_dict(td.get("tam")).get("inputs")).get("industry_total"))
+    bu_tam_in = _as_dict(_as_dict(bu.get("tam")).get("inputs"))
+    cc = _as_number(bu_tam_in.get("customer_count"))
+    arpu = _as_number(bu_tam_in.get("arpu"))
+    if it and cc is not None and arpu is not None and math.isclose(it, cc * arpu, rel_tol=1e-6):
+        found.append(
+            {
+                "metric": "tam",
+                "kind": "identity",
+                "code": "SHARED_TAM_IDENTITY",
+                "detail": (
+                    f"Your {_humanize_param('industry_total')} equals "
+                    f"{_humanize_param('customer_count')} \u00d7 {_humanize_param('arpu')} exactly, "
+                    "so the two TAM figures are one computation, shown two ways."
+                ),
+            }
+        )
+
+    for metric, td_key, bu_key, block in _PAIRED_SLOTS:
+        a = _as_number(_as_dict(_as_dict(td.get(block)).get("inputs")).get(td_key))
+        b = _as_number(_as_dict(_as_dict(bu.get(block)).get("inputs")).get(bu_key))
+        if a and b is not None and math.isclose(a, b, rel_tol=1e-6):
+            found.append(
+                {
+                    "metric": metric,
+                    "kind": "equal_value",
+                    "code": "PAIRED_SLOT_SAME_VALUE",
+                    "detail": (
+                        f"{_humanize_param(td_key)} and {_humanize_param(bu_key)} carry the same "
+                        f"value ({a:g}), so the two {metric.upper()} figures narrow by one "
+                        "number, not two."
+                    ),
+                }
+            )
+
+    # Factor-level overlap. Value identity on the slot (above) could not see the motivating run:
+    # 10.0 and 9.1 are different numbers whose chains share three of four factors. A factor counts
+    # as shared when its `factor_id` matches, OR its (source_id, value) pair matches -- the same
+    # figure under two names is still the same figure, while two coincidentally-equal fractions
+    # from different sources are not. Reported as a list, never a threshold: one shared factor is
+    # one shared factor, and the reader decides what it means.
+    if isinstance(validation, dict):
+        by_name = {a2.get("name"): a2 for a2 in _as_list(validation.get("assumptions")) if isinstance(a2, dict)}
+        for metric, td_key, bu_key, _block in _PAIRED_SLOTS:
+            td_chain = _factor_chain(by_name.get(td_key) or {})
+            bu_chain = _factor_chain(by_name.get(bu_key) or {})
+            if not td_chain or not bu_chain:
+                continue
+            bu_ids = {f["factor_id"] for f in bu_chain}
+            bu_pairs = {(f["source_id"], round(f["value"], 6)) for f in bu_chain}
+            shared_ids = [
+                f["factor_id"]
+                for f in td_chain
+                if f["factor_id"] in bu_ids or (f["source_id"], round(f["value"], 6)) in bu_pairs
+            ]
+            if not shared_ids:
+                continue
+            mass = 1.0
+            for f in td_chain:
+                if f["factor_id"] in shared_ids:
+                    mass *= f["value"]
+            found.append(
+                {
+                    "metric": metric,
+                    "kind": "shared_factor",
+                    "code": "SHARED_FACTOR_OVERLAP",
+                    "shared": shared_ids,
+                    "shared_mass": round(mass, 6),
+                    "detail": (
+                        f"The two {metric.upper()} builds share {len(shared_ids)} of the "
+                        f"{len(td_chain)} figures they narrow by "
+                        f"({', '.join(sid.replace('_', ' ') for sid in shared_ids)}), so they "
+                        "differ only where the remaining figures do."
+                    ),
+                }
+            )
+    return found
+
+
 # ---------------------------------------------------------------------------
 # Chart 3: Top-down vs bottom-up comparison (grouped bars).
 # NOT "cross-validation" -- that word asserts the comparison validates something. The pipeline
@@ -1118,7 +1314,7 @@ def _chart_tornado(sensitivity: dict[str, Any] | None) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _chart_cross_validation(sizing: dict[str, Any] | None) -> str:
+def _chart_cross_validation(sizing: dict[str, Any] | None, validation: dict[str, Any] | None = None) -> str:
     """Chart 3: Grouped bars comparing TD vs BU for TAM/SAM/SOM."""
     if sizing is None:
         return '<div class="placeholder">No data available</div>'
@@ -1237,7 +1433,57 @@ def _chart_cross_validation(sizing: dict[str, Any] | None) -> str:
         "</div>"
     )
 
-    return '<div class="chart-container">' + "\n".join(parts) + "</div>" + legend
+    # The same sentence group per metric that report.md prints under its sizing table.
+    # compose_report.py owns the wording (`_comparison_sentences`); this is a copy because skill
+    # scripts are standalone and cannot import across files. Keep the two in step -- the producer
+    # computed sam_note/som_note for a long time with NO consumer on either surface, which is the
+    # defect this renders away.
+    comparison = _as_dict(sizing.get("comparison"))
+    note_html = ""
+    if comparison:
+        leads: list[str] = []
+        rest: list[str] = []
+        for delta_key, note_key, warn_key in (
+            ("tam_delta_pct", "note", "warning"),
+            ("sam_delta_pct", "sam_note", "sam_warning"),
+            ("som_delta_pct", "som_note", "som_warning"),
+        ):
+            if delta_key not in comparison:
+                continue
+            text = str(comparison.get(warn_key) or comparison.get(note_key) or "").strip()
+            if not text:
+                continue
+            for i, raw in enumerate([s.strip() for s in text.split(". ") if s.strip()]):
+                sentence = raw if raw.endswith(".") else raw + "."
+                target = leads if i == 0 else rest
+                if sentence not in leads and sentence not in rest:
+                    target.append(sentence)
+        # The same shared-input sentences report.md appends to its comparison paragraph -- and the
+        # same caveat swap (compose_report.py `_comparison_paragraph`): once a shared figure has
+        # been SEEN, "the pipeline cannot tell" is contradicted by the next sentence.
+        text = " ".join(leads + rest)
+        shared_details = [str(_shared["detail"]) for _shared in _shared_input_values(sizing, validation)]
+        if shared_details:
+            producer_caveat = (
+                "Closeness is not confirmation: the pipeline cannot tell whether the two builds rest on "
+                "the same underlying figures. Check whether they do."
+            )
+            seen_caveat = (
+                "Closeness is not confirmation \u2014 and where the inputs are itemized, the pipeline "
+                "can see what the two builds share:"
+            )
+            text = (
+                (text.replace(producer_caveat, seen_caveat) if producer_caveat in text else text)
+                + " "
+                + " ".join(shared_details)
+            )
+        if text.strip():
+            note_html = (
+                '<p class="chart-note" style="color:var(--lool-mute);font-size:0.8rem;'
+                'margin-top:0.5rem;">' + _esc(text) + "</p>"
+            )
+
+    return '<div class="chart-container">' + "\n".join(parts) + "</div>" + legend + note_html
 
 
 # ---------------------------------------------------------------------------
@@ -1345,9 +1591,45 @@ def _chart_checklist_donut(checklist: dict[str, Any] | None) -> str:
     return '<div class="chart-container">' + svg + "</div>" + legend
 
 
+def _contested_rows(
+    sizing: dict[str, Any] | None, inputs: dict[str, Any] | None, redteam: dict[str, Any] | None
+) -> set[tuple[str, str]]:
+    """(approach, metric) pairs built on a founder-stated input that a HIGH red-team finding names.
+
+    A mark, not a re-basing: the red team may not propose a replacement figure, and the live
+    finding that motivated this quoted a monthly rate against an annual ARPU -- a number field
+    would have laundered that unit mismatch into a warning. What the founder needs is to see which
+    rows rest on the contested figure. A metric consumes a parameter if that parameter appears in
+    its own `inputs` or in any block above it in the same approach (SAM is built on TAM).
+    """
+    if not isinstance(sizing, dict) or not _usable(redteam):
+        return set()
+    stated = _as_dict(_as_dict(inputs).get("founder_stated_inputs"))
+    contested = {
+        str(f.get("parameter"))
+        for f in _as_list(_as_dict(redteam).get("findings"))
+        if isinstance(f, dict) and f.get("severity") == "high" and isinstance(f.get("parameter"), str)
+    }
+    contested &= set(stated.keys())
+    if not contested:
+        return set()
+    rows: set[tuple[str, str]] = set()
+    for approach in ("top_down", "bottom_up"):
+        consumed: set[str] = set()
+        for metric in ("tam", "sam", "som"):
+            block = _as_dict(_as_dict(sizing.get(approach)).get(metric))
+            consumed |= set(_as_dict(block.get("inputs")).keys())
+            if consumed & contested:
+                rows.add((approach, metric))
+    return rows
+
+
 def _chart_provenance_summary(
     provenance: dict[str, dict[str, Any]] | None,
     sizing: dict[str, Any] | None = None,
+    validation: dict[str, Any] | None = None,
+    inputs: dict[str, Any] | None = None,
+    redteam: dict[str, Any] | None = None,
 ) -> str:
     """Render provenance summary HTML table below funnels."""
     if not provenance:
@@ -1355,6 +1637,13 @@ def _chart_provenance_summary(
 
     rows: list[str] = []
     close_agreement = False
+    # The same marks report.md's summary table carries, from the same detector: a dagger for two
+    # builds that are ONE computation, a double dagger for two builds narrowing by the SAME number.
+    # From `_shared_input_values`, never from the warning list -- acceptance must not remove them.
+    shared = _shared_input_values(_as_dict(sizing), validation)
+    identity_metrics = {str(x["metric"]) for x in shared if x["kind"] == "identity"}
+    shared_metrics = {str(x["metric"]) for x in shared if x["kind"] in ("equal_value", "shared_factor")}
+    contested_rows = _contested_rows(sizing, inputs, redteam)
     for approach_key in ("top_down", "bottom_up"):
         if approach_key not in provenance:
             continue
@@ -1390,7 +1679,17 @@ def _chart_provenance_summary(
             _shown_claim = deck_claim if _comparable is None else _comparable
             deck_claim_num = _try_float(_shown_claim) if _shown_claim is not None else None
             deck_str = _esc(_fmt_usd(deck_claim_num)) if deck_claim_num is not None else "\u2014"
-            delta_str = _esc(f"{delta:+.1f}%") if delta is not None else "\u2014"
+            # An em-dash reads as missing data; a horizon mismatch is two figures for different
+            # periods. Mirrors report.md.
+            _hm_prov = _as_dict(prov.get("horizon_mismatch"))
+            if _hm_prov:
+                delta_str = _esc(
+                    f"different horizon ({_hm_prov.get('claim_months')} vs {_hm_prov.get('ours_months')} mo)"
+                )
+            elif delta is not None:
+                delta_str = _esc(f"{delta:+.1f}%")
+            else:
+                delta_str = "\u2014"
             if delta is not None and abs(delta) <= CLOSE_AGREEMENT_PCT and not prov.get("comparison_blocked"):
                 delta_str += " *"
                 close_agreement = True
@@ -1404,9 +1703,14 @@ def _chart_provenance_summary(
                 if estimate_num is not None:
                     estimate_str = _esc(_fmt_usd(estimate_num))
 
+            mark = (
+                ("\u2020" if metric in identity_metrics else "")
+                + ("\u2021" if metric in shared_metrics else "")
+                + ("\u00a7" if (approach_key, metric) in contested_rows else "")
+            )
             rows.append(
                 f"<tr>"
-                f"<td>{_esc(metric.upper())} ({_esc(method)})</td>"
+                f"<td>{_esc(metric.upper())} ({_esc(method)}){(' ' + mark) if mark else ''}</td>"
                 f'<td style="color:{_esc(color)}">{_esc(label)}</td>'
                 f"<td>{estimate_str}</td>"
                 f"<td>{deck_str}</td>"
@@ -1423,8 +1727,26 @@ def _chart_provenance_summary(
         for label in ("Metric", "Classification", "Our Estimate", "Deck Claim", "Delta")
     )
     footnote = ""
+    if identity_metrics:
+        footnote += (
+            '<p style="color:var(--lool-mute);font-size:0.8rem;margin-top:0.5rem;">&dagger; '
+            + _esc(" ".join(str(x["detail"]) for x in shared if x["kind"] == "identity"))
+            + " Agreement on these rows is arithmetic, not corroboration.</p>"
+        )
+    if shared_metrics:
+        footnote += (
+            '<p style="color:var(--lool-mute);font-size:0.8rem;margin-top:0.5rem;">&Dagger; Both builds '
+            "narrow this figure by the same number(s), so their agreement on it is not a cross-check: "
+            + _esc(" ".join(str(x["detail"]) for x in shared if x["kind"] in ("equal_value", "shared_factor")))
+            + "</p>"
+        )
+    if contested_rows:
+        footnote += (
+            '<p style="color:var(--lool-mute);font-size:0.8rem;margin-top:0.5rem;">&sect; Built on a '
+            "figure you stated that a cited source contradicts; see Adversarial Findings.</p>"
+        )
     if close_agreement:
-        footnote = (
+        footnote += (
             '<p style="color:var(--lool-mute);font-size:0.8rem;margin-top:0.5rem;">'
             f"* Within {CLOSE_AGREEMENT_PCT:.0f}% of the figure in your materials. "
             "Agreement on a number is not independent confirmation &mdash; it can mean both "
@@ -1436,6 +1758,293 @@ def _chart_provenance_summary(
         '<table style="width:100%;border-collapse:collapse;">'
         "<tr>" + headers + "</tr>" + "".join(rows) + "</table>" + footnote + "</div>"
     )
+
+
+# Mirrors red_team.py's INTERNAL_PROVENANCE: a finding grounded in this run's own output.
+_INTERNAL_PROVENANCE = "internal:analysis"
+
+_SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2}
+
+
+# Copies of compose_report.py's verdict helpers (skill scripts cannot import each other); kept in
+# step by test_visualize_market_sizing.py's helper-sync test.
+_SOURCE_CLASS_LABEL = {
+    "published": "from published sources",
+    "internal": "from this analysis's own output",
+    "document": "from your own documents",
+}
+
+_RED_TEAM_SKIP_REASONS: dict[str, str] = {
+    "founder_declined": (
+        "No adversarial review ran, because you asked us not to run one. Nothing in this report "
+        "has been checked against an outside source that was trying to contradict it."
+    ),
+    "dispatch_failed": (
+        "An adversarial review was attempted and did not complete, so nothing in this report has "
+        "been checked against an outside source. This is a gap in the process, not a finding "
+        "about your figures — it is worth re-running."
+    ),
+    "no_network_available": (
+        "No adversarial review ran, because this run had no access to outside sources. Nothing "
+        "here has been checked against published figures that might contradict it."
+    ),
+    "no_subagent_dispatch": (
+        "No adversarial review ran, because this environment runs the whole analysis as a single "
+        "agent and cannot dispatch a separate reviewer. Nothing here has been checked against an "
+        "outside source that was trying to contradict it — running the same analysis in Claude "
+        "Cowork or Claude Code can do that."
+    ),
+}
+
+
+def _source_class(url: str) -> str:
+    """Where a red-team finding's sentence came from: `published` (a web address), `internal`
+    (`internal:analysis`) or `document` (the founder's own page). The validator accepts exactly
+    these three forms, so the counts always sum to the findings."""
+    u = url.strip()
+    if u == _INTERNAL_PROVENANCE:
+        return "internal"
+    if u.startswith("document:"):
+        return "document"
+    return "published"
+
+
+def _adversarial_outcome(redteam: dict[str, Any] | None, skip_reason: str | None) -> str:
+    """The ONE sentence for what the outside review found, said the same way everywhere it appears.
+
+    By state, then by source class. It used to say "found N published sources" for every accepted
+    finding; on a live run both findings were the analysis's own output, the sentence was false at
+    the top of the report, and the model's chat paragraph partly consisted of correcting it.
+    """
+    if not _usable(redteam):
+        if isinstance(skip_reason, str) and skip_reason in _RED_TEAM_SKIP_REASONS:
+            return _RED_TEAM_SKIP_REASONS[skip_reason]
+        return "No outside review ran; the report says why."
+    findings = [f for f in _as_list(redteam.get("findings")) if isinstance(f, dict)]
+    rejected = int(_as_dict(redteam.get("summary")).get("rejected") or 0)
+    if not findings:
+        if rejected:
+            noun = "challenge" if rejected == 1 else "challenges"
+            text = f"An outside review raised {rejected} {noun} but could evidence none of them."
+        else:
+            text = "An outside review ran against this analysis and found nothing it could evidence."
+    else:
+        counts: dict[str, int] = {}
+        for f in findings:
+            cls = _source_class(str(f.get("source_url") or ""))
+            counts[cls] = counts.get(cls, 0) + 1
+        n = len(findings)
+        noun = "challenge" if n == 1 else "challenges"
+        parts = [
+            f"{counts[c]} {_SOURCE_CLASS_LABEL[c]}" for c in ("published", "internal", "document") if counts.get(c)
+        ]
+        text = f"An outside review raised {n} {noun}: {', '.join(parts)}."
+    unread = [str(x) for x in _as_list(redteam.get("sources_unread")) if str(x).strip()]
+    if unread:
+        text += f" It did not open {', '.join(unread)}."
+    return text
+
+
+def _top_challenge(redteam: dict[str, Any] | None) -> str:
+    """The most serious accepted finding, as one sentence with its provenance class."""
+    if not _usable(redteam):
+        return ""
+    findings = [f for f in _as_list(redteam.get("findings")) if isinstance(f, dict)]
+    for sev in ("high", "medium"):
+        for f in findings:
+            if f.get("severity") != sev:
+                continue
+            truth = str(f.get("what_is_true") or "").strip()
+            first = truth.split(". ")[0].rstrip(".") if truth else ""
+            url = str(f.get("source_url") or "")
+            cls = _source_class(url)
+            where = _document_cite(url) if cls == "document" else _SOURCE_CLASS_LABEL[cls]
+            where = f"from {where}" if cls == "document" else where
+            claim = _humanize_claim(str(f.get("claim_attacked") or "").strip())
+            return f"The most serious: {claim} — {first} ({where})."
+    return ""
+
+
+def _summary_verdict(
+    sizing: dict[str, Any],
+    provenance: dict[str, dict[str, Any]] | None,
+    checklist: dict[str, Any] | None,
+    redteam: dict[str, Any] | None,
+    skip_reason: str | None,
+    marks: dict[tuple[str, str], str],
+    inputs: dict[str, Any] | None,
+) -> tuple[str, set[str]]:
+    """The paragraph a reader wants first, from fields only. Returns (text, metrics it stated).
+
+    Measured on 2 of 2 hostloop runs: the model wrote this paragraph in chat -- what the deck
+    claims against what each build found, how far the builds disagree, the sharpest challenge --
+    with ratios it rounded itself. Nothing on the page carried it, so it had to. Every figure
+    here is the table's figure with the table's mark; every delta is the producer's.
+    """
+    sentences: list[str] = []
+    stated: set[str] = set()
+    approaches = [a for a in ("top_down", "bottom_up") if _as_dict(sizing.get(a))]
+    label = {"top_down": "top-down", "bottom_up": "bottom-up"}
+    claim_ccy = _as_dict(inputs).get("existing_claims_currency") if isinstance(inputs, dict) else None
+    for metric in ("tam", "sam", "som"):
+        claim_text = None
+        for a in approaches:
+            prov = _as_dict(_as_dict(_as_dict(provenance).get(a)).get(metric))
+            raw = prov.get("deck_claim")
+            comparable = prov.get("deck_claim_comparable")
+            if raw is None:
+                continue
+            if _as_dict(prov.get("horizon_mismatch")):
+                claim_text = (
+                    f"Your materials state {metric.upper()} {_fmt_usd(float(raw))} for a different period than "
+                    f"this analysis covers, so the two are not compared."
+                )
+                stated.add(metric)
+                break
+            comp = _as_number(comparable)
+            raw_n = _as_number(raw)
+            if comp is None or comp <= 0 or raw_n is None:
+                break  # blocked (currency not stated) or not a comparable figure: the table says so
+            shown = _fmt_usd(comp)
+            if comp != raw_n and isinstance(claim_ccy, str) and claim_ccy:
+                shown += f" (converted from {raw_n:,.0f} {claim_ccy})"
+            values = [(x, _as_number(_as_dict(_as_dict(sizing.get(x)).get(metric)).get("value"))) for x in approaches]
+            found = " and ".join(
+                f"{_fmt_usd(v)}{marks.get((x, metric), '')} ({label[x]})" for x, v in values if v is not None
+            )
+            if not found:
+                break
+            claim_text = f"Your materials state {metric.upper()} {shown}; this analysis finds {found}."
+            stated.add(metric)
+            break
+        if claim_text:
+            sentences.append(claim_text)
+    comparison = _as_dict(sizing.get("comparison"))
+    if len(approaches) == 2 and comparison:
+        gaps = []
+        for metric in ("tam", "sam", "som"):
+            delta = _as_number(comparison.get(f"{metric}_delta_pct"))
+            if delta is not None and delta > 30:
+                gaps.append(f"{delta:g}% on {metric.upper()}")
+        if gaps:
+            sentences.append(f"The two builds differ by {' and '.join(gaps)} — one approach likely has a flawed input.")
+    sentences.append(_adversarial_outcome(redteam, skip_reason))
+    top = _top_challenge(redteam)
+    if top:
+        sentences.append(top)
+    if _usable(checklist):
+        sentences.append(_self_check_line(checklist))
+    return " ".join(sentences), stated
+
+
+def _self_check_line(checklist: dict[str, Any]) -> str:
+    """The one line a founder reads for the score, rendered ONCE and copied everywhere else.
+
+    "<score>% (<pass>/<applicable> pass, ...)" -- NOT a bare "pass/total" fraction (e.g. "100/22"),
+    which reads as a malformed ratio rather than 100% across 22 items. The closing message copies
+    this string rather than re-deriving it, so the chat and the report cannot disagree.
+    """
+    summary = _as_dict(checklist.get("summary"))
+    pass_ct = summary.get("pass", 0)
+    fail_ct = summary.get("fail", 0)
+    na_ct = summary.get("not_applicable", 0)
+    total_ct = summary.get("total", pass_ct + fail_ct + na_ct)
+    applicable_ct = total_ct - na_ct
+    score_pct = summary.get("score_pct")
+    if isinstance(score_pct, (int, float)):
+        score_str = f"{int(score_pct)}" if float(score_pct) == int(score_pct) else f"{score_pct:.1f}"
+        return f"Self-check: {score_str}% ({pass_ct}/{applicable_ct} pass, {fail_ct} fail, {na_ct} N/A)"
+    return f"Self-check: {pass_ct} pass, {fail_ct} fail, {na_ct} N/A"
+
+
+def _document_cite(url: str) -> str:
+    """`document:<file>#page=<n>` -> "<file>, page <n>"; `document:<file>` -> "<file>"."""
+    m = re.match(r"^document:([^#]+)(?:#page=(\d+))?$", url)
+    if not m:
+        return url[len("document:") :]
+    return f"{m.group(1)}, page {m.group(2)}" if m.group(2) else m.group(1)
+
+
+def _chart_adversarial(
+    redteam: dict[str, Any] | None, names: dict[str, str] | None = None, revision_note: str | None = None
+) -> str:
+    """Mirror of compose_report.py's Adversarial Findings section.
+
+    Three states that must read DIFFERENTLY -- never ran, ran and found nothing, ran and found
+    something. Collapsing the first two lets a founder read a clean report as a checked one.
+    """
+    if redteam is None:
+        return (
+            '<p class="placeholder">No adversarial review ran. Nothing in this report has been '
+            "checked against an outside source that was trying to contradict it.</p>"
+        )
+    if redteam is _CORRUPT or _is_stub(redteam):
+        return '<p class="placeholder">The adversarial review did not produce a readable result.</p>'
+
+    findings = [f for f in _as_list(redteam.get("findings")) if isinstance(f, dict)]
+    summary = _as_dict(redteam.get("summary"))
+    dropped = int(summary.get("rejected") or 0)
+    unchecked = _as_list(redteam.get("could_not_check"))
+
+    def _named(text: str) -> str:
+        # The founder's filenames as uploaded (see _upload_names). BEFORE _esc: an escaped
+        # apostrophe or ampersand in a filename would no longer match the name it replaces.
+        return _upload_names.humanize(text, names or {})
+
+    outcome = _esc(_named(_adversarial_outcome(redteam, None)))
+    parts: list[str] = []
+    if revision_note:
+        parts.append(f"<p><em>{_esc(revision_note)}</em></p>")
+    if not findings:
+        parts.append(f"<p>{outcome} That is a result, not an absence of one.</p>")
+    else:
+        parts.append(f"<p>{outcome} Each quotes the sentence it relies on.</p>")
+        for f in sorted(findings, key=lambda x: _SEVERITY_ORDER.get(str(x.get("severity")), 3)):
+            claim = _esc(_named(_humanize_claim(str(f.get("claim_attacked") or "").strip())))
+            truth = _esc(_named(str(f.get("what_is_true") or "").strip()))
+            quote = _esc(str(f.get("evidence_quote") or "").strip())
+            title = _esc(str(f.get("source_title") or "").strip())
+            url = _esc(str(f.get("source_url") or "").strip())
+            if url == _INTERNAL_PROVENANCE:
+                # Labelled, never linked -- see compose_report.py for why the two kinds of
+                # evidence must stay distinguishable.
+                cite = "from this analysis&rsquo; own output, not an outside source"
+            elif url.startswith("document:"):
+                # The founder's own page -- named, never linked; same wording as report.md.
+                cite = _esc(_named(_document_cite(str(f.get("source_url") or "").strip())))
+                verified = f.get("quote_verified")
+                if verified is False:
+                    cite += " (this sentence was not found on that page)"
+                elif verified is not True:
+                    cite += " (quoted from a page that could not be machine-read)"
+            else:
+                cite = f'<a href="{url}">{title or url}</a>' if url else ""
+            parts.append(
+                f'<div style="margin-bottom:1rem;"><strong>{claim}</strong>'
+                f"<p>{truth}</p>"
+                + (
+                    f'<blockquote style="border-left:3px solid var(--lool-mute);margin:0;'
+                    f'padding-left:0.75rem;color:var(--lool-mute);">{quote}</blockquote>'
+                    if quote
+                    else ""
+                )
+                + (f'<p style="font-size:0.85rem;">&mdash; {cite}</p>' if cite else "")
+                + "</div>"
+            )
+
+    if unchecked:
+        items = "".join(f"<li>{_esc(_named(str(u).strip()))}</li>" for u in unchecked)
+        parts.append(f"<p><strong>Not checked</strong></p><ul>{items}</ul>")
+
+    if dropped:
+        noun = "challenge" if dropped == 1 else "challenges"
+        them = "it" if dropped == 1 else "them"
+        parts.append(
+            f'<p style="color:var(--lool-mute);font-size:0.85rem;">{dropped} further {noun} '
+            f"could not be shown here because no source was given for {them}.</p>"
+        )
+
+    return "".join(parts)
 
 
 def _chart_key_findings(
@@ -1564,7 +2173,32 @@ def _chart_key_findings(
 
 
 def compose_html(dir_path: str) -> str:
-    """Load artifacts and compose full HTML report."""
+    """Load artifacts and compose the HTML report.
+
+    THIS IS A CHART DECK, NOT A SECOND RENDERING OF report.md, and the difference is deliberate.
+    Measured 2026-09-21 on a replayed real run: report.md carries 40,516 characters across 12
+    sections; this carries 5,190 across 6, and they are mostly DIFFERENT sections rather than a
+    subset. Absent here by design: Methodology (and so its rationale), Definitions, Deck Claims
+    (Narrative), Sources Used, and most warning prose.
+
+    Do not read that as the two-renderer rule being broken. That rule exists because three
+    August reviews in a row caught a FIX landing on one surface only, leaving a founder reading
+    the HTML something the markdown had already corrected. It is about shared content staying in
+    AGREEMENT, not about content parity -- and it is honoured: the TAM-identity caveat, the
+    comparison caveat and the Adversarial Findings section all render here.
+
+    So a field that lives only in report.md is not automatically a defect. Before adding one
+    here, ask whether it is a CORRECTION to something both surfaces already say (it belongs
+    here) or a section this deck never carried (it probably does not). The methodology rationale
+    is the second kind, and there is a second reason to leave it out: it is model-written free
+    text, which is the channel that produced this skill's 2026-09-21 defects. A field whose
+    companions -- sources, definitions, validation prose -- are equally absent does not become
+    consistent by adding it alone.
+
+    The open question this does NOT settle, recorded so it is not mistaken for settled: whether a
+    5,190-character deck with no sources and no validation is the right second deliverable at
+    all. That is a product decision, not a rendering one.
+    """
     scripts_dir = os.path.dirname(os.path.abspath(__file__))
     if scripts_dir not in sys.path:
         sys.path.insert(0, scripts_dir)
@@ -1574,6 +2208,16 @@ def compose_html(dir_path: str) -> str:
     artifacts: dict[str, dict[str, Any] | None] = {}
     for name in all_names:
         artifacts[name] = _load_artifact(dir_path, name)
+
+    # The same review report.md shows: its append-only copy, never `redteam.json` as it now stands.
+    _rt_shown, _rt_codes, _rt_facts = _redteam_copy.resolve(
+        dir_path,
+        _redteam_copy.primary_run_id(artifacts.get(n) for n in REQUIRED_ARTIFACTS),
+        artifacts.get("redteam.json"),
+        artifacts.get("methodology.json"),
+    )
+    if _rt_facts["rounds"]:
+        artifacts["redteam.json"] = _rt_shown
 
     inputs = artifacts.get("inputs.json")
     sizing = artifacts.get("sizing.json")
@@ -1600,12 +2244,46 @@ def compose_html(dir_path: str) -> str:
 
     # Build sections
     funnel_html = _chart_funnel(sizing)
-    provenance_summary_html = _chart_provenance_summary(provenance_data, sizing)
+    provenance_summary_html = _chart_provenance_summary(
+        provenance_data, sizing, validation, inputs, _as_dict(artifacts.get("redteam.json")) or None
+    )
     key_findings_html = _chart_key_findings(checklist, validation, provenance_data)
     tornado_html = _chart_tornado(sensitivity)
-    cross_val_html = _chart_cross_validation(sizing)
+    cross_val_html = _chart_cross_validation(sizing, _as_dict(validation) or None)
     confidence_html = _chart_confidence_donut(validation)
     checklist_html = _chart_checklist_donut(checklist)
+    _upload_display = _upload_names.for_redteam(artifacts.get("redteam.json"))
+    adversarial_html = _chart_adversarial(
+        artifacts.get("redteam.json"), _upload_display, _redteam_copy.revision_note(_rt_facts)
+    )
+    # The same verdict paragraph report.md opens with -- the second renderer is where this class of
+    # defect survives. Marks recomputed from the same detectors the provenance table uses.
+    verdict_html = ""
+    _rt_art = artifacts.get("redteam.json")
+    _rt_for_verdict = _rt_art if _usable(_rt_art) else None
+    _meth = artifacts.get("methodology.json")
+    _skip = _as_dict(_meth).get("red_team_skipped") if _usable(_meth) else None
+    if _usable(sizing) and not _is_stub(sizing):
+        _shared_v = _shared_input_values(sizing, validation)
+        _identity_v = {str(x["metric"]) for x in _shared_v if x["kind"] == "identity"}
+        _shared_m = {str(x["metric"]) for x in _shared_v if x["kind"] in ("equal_value", "shared_factor")}
+        _contested_v = _contested_rows(sizing, inputs, _rt_for_verdict)
+        _marks = {
+            (a, m): (
+                (" \u2020" if m in _identity_v else "")
+                + (" \u2021" if m in _shared_m else "")
+                + (" \u00a7" if (a, m) in _contested_v else "")
+            )
+            for a in ("top_down", "bottom_up")
+            for m in ("tam", "sam", "som")
+        }
+        _verdict_text, _ = _summary_verdict(
+            sizing, provenance_data, checklist if _usable(checklist) else None, _rt_for_verdict, _skip, _marks, inputs
+        )
+        verdict_html = f'<p class="verdict">{_esc(_upload_names.humanize(_verdict_text, _upload_display))}</p>'
+    else:
+        _outcome = _esc(_upload_names.humanize(_adversarial_outcome(_rt_for_verdict, _skip), _upload_display))
+        verdict_html = f'<p class="verdict">No sizing was produced; see Warnings. {_outcome}</p>'
 
     date_line = ""
     if analysis_date:
@@ -1655,6 +2333,7 @@ def compose_html(dir_path: str) -> str:
         {fx_line}
         <p>Generated by <a href="https://github.com/lool-ventures/founder-skills">founder skills</a>
         by <a href="https://lool.vc">lool ventures</a> — Market Sizing Agent</p>
+        {verdict_html}
     </header>
     <main>
         <section>
@@ -1682,6 +2361,10 @@ def compose_html(dir_path: str) -> str:
         <section>
             <h2>Checklist Status</h2>
             {checklist_html}
+        </section>
+        <section>
+            <h2>Adversarial Findings</h2>
+            {adversarial_html}
         </section>
     </main>
     <footer>

@@ -112,13 +112,17 @@ def test_skill_md_uses_braced_plugin_root(skill_md: Path) -> None:
     )
 
 
-# Per gist update 2026-05-10: plugin hooks declared in plugin.json never
-# fire in Cowork sessions (desktop-side scope restriction excludes plugin
-# scope; only ~/.claude/settings.json hooks fire). founder-skills'
-# session-setup.sh is OK because ${CLAUDE_PLUGIN_ROOT} is substituted at
-# skill-load time by the plugin content expander (v0.4.3 invariant) — the
-# hook is defense-in-depth only. This test guards against future SKILL.md
-# changes that would re-introduce a dependency on the hook firing.
+# The premise this guard was written on -- "plugin hooks declared in plugin.json
+# never fire in Cowork sessions" (a 2026-05-10 gist reading) -- is REFUTED: every
+# committed hostloop cassette and the kept hostloop runs record our SessionStart
+# hook firing (events.jsonl `hook_started SessionStart:startup`, exit 0, with no
+# hooks in the run's own claude-config). The guard stands anyway, on the stronger
+# ground: a hook is a RUNTIME that can be disabled, time out, or run under a shell
+# without python, and a SKILL.md that depends on one has no fallback. The braced
+# ${CLAUDE_PLUGIN_ROOT} form is substituted at skill-load time by the plugin
+# content expander, so no hook is needed for it. The same rule covers the Stop
+# hook (scripts/stop-handover-check.sh): it enforces the printed hand-over after
+# the fact and nothing in a SKILL.md may assume it ran.
 _HOOK_DEPENDENT_PATTERNS = (
     # Bash idioms that suggest the hook (or some other env-setting thing
     # that doesn't run in Cowork) populated CLAUDE_PLUGIN_ROOT before the

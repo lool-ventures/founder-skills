@@ -936,6 +936,10 @@ def test_post_compose_coaching_dispatch_includes_coaching_payload_keys() -> None
         "summary",
         "dealbreakers",
         "concerns",
+        # The coach was composing commentary blind to whether the three partners agreed:
+        # compose emits this, SKILL.md's FINAL-SUMMARY section reads it, and the agent body's
+        # key list did not name it -- so a 1-1-1 split read as the committee's settled view.
+        "consensus_strength",
         "high_severity_warnings",
         "company_name",
     }

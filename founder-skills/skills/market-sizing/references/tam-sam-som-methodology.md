@@ -46,9 +46,9 @@ Build the market size using granular data — your specific product, pricing, an
 
 For new markets without existing pricing data, estimate how much value customers would ascribe to your solution to infer pricing and market size. Essentially a bottom-up variant where you gauge willingness-to-pay rather than relying on existing prices.
 
-### Cross-Validation
+### Comparing The Two Builds
 
-Use both methods where possible. Top-down gives a reality check against industry totals; bottom-up shows assumptions make sense at the ground level. If there's a big mismatch, refine assumptions. The hybrid approach (bottom-up core, top-down corroboration) is most convincing.
+Use both methods where possible. Top-down anchors against industry totals; bottom-up shows the assumptions hold at the ground level. Whatever the gap between them, say what drives it — which inputs differ, and why. A small gap is not confirmation: the two builds can rest on the same underlying figures, and unless each derived figure lists the factors it multiplies and where each one came from, nothing can tell whether the two are independent. The hybrid approach (bottom-up core, top-down comparison) is the most convincing shape.
 
 ## 3. Industry Examples
 

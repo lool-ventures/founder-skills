@@ -253,9 +253,10 @@ Assembled report from all artifacts with cross-artifact validation.
 |-------|------|----------|-------------|
 | `schema_version` | string | yes | Coaching-payload schema version |
 | `summary` | object | yes | `score_pct`, `overall_status`, `total`, `pass`, `fail`, `warn`, `not_applicable` |
+| `score_coverage` | object | yes | `not_assessed_count`, `total_criteria`, `unmatched_profile_fields`, `complete` — what the score was NOT computed over. Deliberately TOP-LEVEL, not nested under `summary`: a qualification folded into the summary is one a consumer can drop without noticing. |
 | `failed_items` | object[] | yes | Failed checklist items (top 30 by severity when `truncated`) |
 | `warned_items` | object[] | yes | Warned checklist items (subject to the same truncation) |
-| `high_severity_warnings` | string[] | yes | High-severity validation warning codes |
+| `high_severity_warnings` | object[] | yes | High-severity validation warnings, each `{code, label, message}`. The `label` is the founder-facing name — coaching commentary writes that, never the `code`. |
 | `company_name` | string | yes | Company name |
 | `runway_months` | number \| null | yes | Base-case runway months. **`null` is a RESULT, not a gap**: it means cash never depletes in the projection window (default-alive), so never report it as unknown, missing or an error. |
 | `static_runway_months` | number \| null | yes | Cash at today's net burn, independent of the projection. Lead with this when `runway_months` is `null` — the projection that produced default-alive holds burn flat while revenue compounds, so the static figure is the concrete number a founder can act on. When both exist and this one is materially lower, give both. |

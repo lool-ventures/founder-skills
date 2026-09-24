@@ -5,6 +5,287 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.13.0] - 2026-09-23 — The message that ends a market sizing now says what the report says
+
+### Highlights
+
+**The message that ends a market sizing is now the report's own words, and it is checked.** The
+closing chat message was the one thing you read that nothing stood behind, and on real runs it
+carried figures the model had rounded itself — "about 2% of $100M" for a figure the report put at
+4.7%. The report now opens with a verdict: what your materials claim against what each build found,
+how far the two builds disagree, what the outside review found, and the most serious challenge. The
+software writes it from the analysis's own figures; the model does not compose it. The closing
+message prints that same paragraph between the links to your documents. A new Stop hook then
+checks, after the model's last turn, that the message it sent carries that text whole and adds no
+figure of its own. If it does not, the model is sent back once, and the report's own text appears
+beneath the message, introduced as "For the record, this is the summary as the analysis produced
+it; if a figure in my message above differs from one here, use the one here:". It says where the
+text comes from, not that the message above was wrong — the check can tell that a message is not
+the report's text, but not whether a reworded figure is right. The hook is part of the plugin, so
+it runs at the end of every turn in any session where the plugin is enabled; unless the turn
+delivered a market-sizing hand-over it does nothing, and if anything goes wrong it lets the turn
+end rather than holding it. No skill depends on it.
+
+**The outside review of your market sizing can no longer be rewritten by the analysis it
+reviews.** On a real run the analysis edited the review's own findings before you saw them: two
+challenges to its numbers came out reading as its own account of having already fixed them, in its
+own voice, under the heading that says an outsider wrote them. It did that while following an
+instruction to take an internal file name out of the text, which left it no other way to comply.
+The review is now written to a separate copy the moment it is produced, and your report, the visual
+version and the coaching notes are all built from that copy — so changing the review changes nothing
+you read, and the attempt is reported to you. The instruction that caused it is gone: the review is
+worded for you where it is written, so there is nothing left to clean up afterwards, and what an
+outside source is quoted as saying now reaches you exactly as that source wrote it. Known limit:
+starting the analysis again under a new identifier is disclosed to you rather than blocked, and the
+note explaining it is written by the analysis itself.
+
+**The skills are now told to stop where they cannot be checked.** claude.ai can serve a skill's
+files without the rest of its plugin. There none of the checks can run and no independent step can
+be started — and market sizing ran anyway: it wrote every intermediate result itself, graded its
+own checklist, skipped the adversarial review, and delivered a report that read exactly like a
+checked one. All six skills now test for this before anything else, and where it holds they are
+told to tell you the skill needs Claude Cowork or Claude Code, and to stop.
+
+**In a Cowork session that runs in the cloud, your attachments are found and your documents can be
+opened.** On that lane — the default for new sessions — attached files land somewhere the skills
+did not look, so market sizing's adversarial review was told you had supplied no documents. They
+are now found. File links do not open there either: they showed as plain text above the file cards
+that do work. Market sizing now picks the form for the surface it is on — a link where one opens,
+otherwise each document's name with its location beside it — and the other five skills are told to
+do the same.
+
+**A model given as a CSV was never checked for the broken cells one of its criteria scores.**
+The review looks for `#REF!`, `#DIV/0!` and their relatives and reports what it finds. That
+scan ran on spreadsheets and not on CSV files, so on a CSV the criterion was scored against no
+evidence at all — including error cells sitting in the file as plain text, which is exactly how
+they arrive when a broken spreadsheet is exported. It now scans every row, the header included.
+
+**A check's internal identifier no longer appears in what you read.** That identifier
+could reach you three ways: it opened every finding in the interactive explorer, it stood in for
+a missing name in the visual report, and it came through in text the assessment wrote about its
+own work. All three now show the check's name instead.
+
+**The coaching notes gave the wrong reason a score was incomplete.** A check can be missing
+from a score for two reasons — a detail of the company we could not match, or a check set aside
+during the assessment — and the notes were told only the first, including on the runs where the
+second is what happened.
+
+### Added
+
+- **The adversarial review of a market sizing may now cite your own page, and its quote is
+  checked against it.** It could cite only a published source or the analysis itself, so a finding
+  like "slide 8 says 17, the analysis says 47" had no acceptable source and was set aside — the step
+  meant to catch a misread page could not name the page. It can now cite a page of a document you
+  supplied (or the whole file, for one with no pages), must quote a full sentence from it, and the
+  report says which of three things is true: the sentence was found on the page, it was not, or
+  nothing could check it.
+
+- **Scanned pages are machine-read before the adversarial review starts.** A PDF with no text
+  layer could only be looked at, by the same model that had already read it for the analysis, so a
+  citation to one of its pages could be checked by nothing. Each such page is now machine-read
+  first, where the environment has the tools for it, and the review does not start until every
+  scanned document is covered. Where the tools are missing, the report says the page could not be
+  machine-read.
+
+- **A review is final, and you decide what follows it.** A finding the analysis disliked could be
+  answered by running the whole thing again — on one run it ran three times. Now a review stands. If
+  it found something worth acting on you are asked once, with each proposed change shown as
+  from-and-to with its source, whether to revise and review again or deliver as it is. There is no
+  third round, and if your figures are changed beyond what you approved you are told, with both
+  numbers.
+
+- **When you have given two figures for one input, you choose which one is used.** If you say one
+  number in chat and your deck says another, you are asked before the work starts, with each option
+  naming where it came from. The figure you did not choose still appears in your report with its
+  source, so the report says which one the analysis used and which you also gave.
+
+- **A question about the scale of a percentage is asked before the review, not after.** Asked
+  afterwards, your answer changed an analysis that had already been reviewed.
+
+- **The adversarial review is told to read your documents first, and is no longer told where to
+  look.** On a real run its instructions had been written out by hand, with a list of "things
+  worth attacking" and a note not to re-read your documents added along the way; its findings
+  matched that list one for one, and it opened only the analysis's own files. The instructions are
+  now generated the same way every time. They list your documents first and ask for what each page
+  says to be recorded before the analysis's reading of it is opened.
+
+- **The report names every document of yours the adversarial review never opened.** Findings
+  checked against the analysis's summary of a page were presented as though they had been checked
+  against the page. Each unopened document is now named at high severity, and the coaching notes
+  are told not to write as though every page was read.
+
+- **A figure of yours that an outside finding contradicts now marks every number built on it.**
+  When a serious finding disputes a figure you stated, each row of the summary table that rests on
+  it carries a mark pointing to the finding, in the written and the visual report alike. Your
+  figure itself is not changed.
+
+- **A finding that states a "times" comparison your own figures contradict is now flagged.** A
+  review of a real model reported projections as "roughly 2,000x" the actuals while quoting, in the
+  same sentence, two numbers whose ratio is under 7x — and that comparison led the report, the
+  charts, the interactive page and the coaching notes. Where a finding's own quoted figures do not
+  support the comparison it states, every one of those pages now says so beside it, and the notes
+  are told not to repeat it.
+
+- **When both ways of sizing your market rest on the same figure, the report says so.** Building
+  the market from the top down and from the bottom up is only a cross-check if the two builds are
+  independent. On a real review they were not: the industry total was the customer count multiplied
+  by revenue per customer, so the two figures agreed exactly — one computation, presented as two
+  methods confirming each other, with nothing beside it. The summary table now marks those rows and
+  explains why their agreement is arithmetic. The same check reports a narrowing step that carries
+  an identical value on both sides.
+
+- **Something now argues with your market sizing before you see it.** Every other part of this
+  analysis is built to produce a defensible number. A new step is built to attack one: it searches
+  for published figures that contradict yours and reports each with the sentence it relies on and a
+  link, so you can check it yourself. A challenge that arrives without a source is set aside — and
+  counted, so a review that raised five and kept one does not read as a review that found one. If
+  it finds nothing, it says so, which is a different sentence from the one you get when no review
+  ran at all. The report never presents an unchecked analysis as a checked one.
+
+- **You can now show the figures a narrowing step is built from, and the report will check the
+  arithmetic.** A step like "10% of the market is reachable" is usually several figures multiplied
+  together. Recorded separately, they are multiplied back and compared against the number you
+  stated, and the report prints the chain so a reader can follow it. Where a derived figure is not
+  itemized, the report says which ones — because a number nothing can check is worth knowing about.
+
+- **When both ways of sizing your market are built from the same figures, the report counts them.**
+  On a real review the two supposedly independent builds shared three of the four figures they
+  narrowed by, and the 9.4% gap between them was one substituted number — reported as agreement
+  between two independent chains. The report now names the shared figures. Reusing one authoritative
+  published share on both sides can be perfectly reasonable; calling the result a cross-check is
+  not.
+
+- **A figure you stated for a different period is no longer reported as a discrepancy.** A
+  five-year market estimate compared against an eighteen-month plan produced a warning that you
+  were understating yourself by more than five times. Two figures covering different periods are
+  not in disagreement — they are not comparable — and where you tell us the period each one covers,
+  the report now says that instead of inventing a gap. Put both on the same period and the
+  cross-check runs as before.
+
+### Fixed
+
+- **A figure built by division is reported as a division.** A number derived by dividing one
+  figure by another was described as though the two had been multiplied. The figures behind it are
+  also printed in full rather than in scientific notation, so you can check the arithmetic.
+
+- **Warnings in a competitive positioning report no longer name the files behind it.** Five of them
+  named internal working files, and one told you to re-run a script. They now say what the problem
+  means for your analysis.
+
+- **Your documents are named the way you named them.** In a Cowork session that runs in the cloud,
+  each attachment is stored with a short code in front of its name, and a challenge citing your
+  page read "from a1b2c3d4-market-study.pdf, page 1". The report, the visual version and
+  the closing message now say "market-study.pdf, page 1". The code is removed only when
+  every document in the session carries one, so a file you named with a date or a code of your own
+  keeps its name, and two uploads with the same name keep their codes so you can tell them apart.
+  The coaching notes can still repeat a coded name.
+
+- **An internal field name no longer reaches you inside a challenge.** The verdict at the top of a
+  report once opened its most serious challenge with the software's own name for "the TAM your
+  materials state". Names like that inside a finding are now replaced with words — in the report,
+  the visual version, the closing message and the coaching notes.
+
+- **The report no longer credits outside sources that were not outside.** Its sentence about the
+  adversarial review said it had found published sources for every finding it kept; on a real run
+  both kept findings were the analysis's own figures. Findings are now counted by where each came
+  from.
+
+- **A review that could not be started is no longer described as one worth re-running.** Where the
+  environment cannot start an adversarial review at all, the report now says so and names where one
+  can run, instead of saying one was attempted and failed.
+
+- One check promised more than it measured. Its name described a set of internal
+  reconciliation checks that its own pass/fail bars never covered, which gave the assessment a
+  standing reason to set it aside. The name now matches what is measured.
+- Guidance that told the assessment to set checks aside itself, in a document that opens by
+  telling it not to, is removed. Deciding which checks apply is not the assessment's job.
+
+- **The line listing which checks failed is now a sentence.** It was printing the raw shape the
+  program stores those names in — square brackets and quote marks around each one — on what is
+  often the most actionable line in the report.
+
+- **A challenge to one of your figures no longer has its capitals rewritten.** Where an outside
+  finding referred to your five-year addressable market, the heading above it could come back with
+  the market-sizing abbreviations spelled as ordinary words, which reads as a typo on the line you
+  are asked to read first.
+
+- **The report no longer says it cannot see what the two market-sizing builds share in the
+  sentence before it lists what they share.** The note under the comparison was written for the
+  case where nothing is itemized, and it kept its wording after the report gained the ability to
+  name shared figures — so on a real review it read "the pipeline cannot tell whether the two builds
+  rest on the same underlying figures", followed by exactly that. Where shared figures were found,
+  the note now introduces them; where none were, it still says so. Same wording in the visual report
+  and in what the coaching notes are told. Also: a single set-aside challenge was described in the
+  plural.
+
+- **The guidance and the report no longer disagree about one word.** The reference material
+  handed to the analysis used a term for comparing the two market-sizing methods that the report
+  itself refuses, because it claims more than the comparison can show — so the word kept arriving
+  in your write-up by way of the instructions. The guidance now says what the report says, and
+  says plainly that two methods landing close together is not, on its own, confirmation.
+
+### Changed
+
+- **A market figure your deck states is treated as a claim to test, not a fact to protect.** A
+  figure you give about your own business — what you charge a customer — is protected: a researched
+  number may not quietly replace it. That protection was also being applied to figures about the
+  market, such as a population or a capture rate, so on a real run the "independent" build simply
+  replayed the deck's own arithmetic. Only facts about your own business are protected now; a
+  market figure recorded as one is flagged at high severity, saying that the build which used it
+  restates your claim rather than tests it.
+
+- **A gap between a figure you gave and the one the analysis used is now to be put to you as a
+  question.**
+  The warning's advice was to update the recorded figure, and on a real run the analysis did
+  exactly that — rewrote what you had said to match its own number, without asking you. It now says
+  to recompute from your figure or to ask you; a figure you did not confirm is not yours. And a
+  price you quoted per month is converted to the annual figure the arithmetic uses before the two
+  are compared, so $203 a month against $2,436 a year is agreement, not a discrepancy.
+
+- **Accepting a warning no longer removes its mark from the summary table.** When both market
+  builds narrow by the same figure, the rows affected are marked — and that mark used to vanish
+  once the warning was accepted, even when the reason given for accepting it said the report should
+  say so plainly. Acceptance now explains the mark without hiding it. Separately, a "chain" of one
+  figure — the same value under another name — is no longer reported as an itemized derivation.
+
+- **The caution about the two market-sizing methods agreeing now appears wherever the comparison
+  does.** It was written for all three figures and shown only for the first, so a 9.4% gap between
+  the two builds reached the report with no caution attached to it — and the written commentary
+  called that gap independent confirmation. All three now carry it, in the report and the visual
+  version alike, and the commentary is given the same figures the report shows rather than being
+  left to infer them.
+
+- **Cap-table's coaching data now names each warning the way you read it.** Each entry used to
+  carry the internal identifier twice — once under a field whose name made it look like a
+  title — and the notes were never told which field to use. They now carry a plain-language
+  label beside the identifier, and the notes are told to write the label. Measured across kept
+  runs, notes given a label used it every time; notes given only an identifier printed the
+  identifier. The fields carrying these warnings and failed checks were renamed or extended to
+  do this; nothing outside the plugin read them.
+- **Every skill's coaching notes are now told about the results they are handed.** Two values
+  were computed and sent but named on no page the notes read — which market-sizing approach
+  produced the headline figure, and how far the three simulated partners agreed — so the notes
+  could not qualify a result by either. Four more pages described the warning data in a shape
+  the software had stopped sending.
+- The release's own quality gate no longer fails on a judgement it was never meant to police.
+  It used to require that the assessment never set a check aside, which is a decision a
+  reviewer is entitled to make; on identical input it went one way about half the time and
+  blocked a release. It now requires what the software owes you instead: that when a check is
+  set aside, you are told, everywhere the result is shown.
+
+### Development
+
+Contributor-facing only; nothing here changes what a founder installs or runs.
+
+- The paid market-sizing end-to-end lane now attaches a scanned deck and checks, from the tool
+  calls themselves, that the adversarial review was neither steered nor blind: the instructions it
+  received match a fresh generation exactly, it opened the deck before the analysis, and the
+  founder's closing message contains the printed hand-over whole. It also fails a run that grades
+  the checklist inline instead of handing it to a separate step, because a self-graded score looks
+  identical to a real one in every file the run leaves behind.
+- The test suite no longer leaves temporary directories behind. Measured on one machine, earlier
+  runs had accumulated over sixty thousand of them.
+
 ## [0.12.0] - 2026-09-18 — The page you open now carries everything the review found
 
 ### Highlights

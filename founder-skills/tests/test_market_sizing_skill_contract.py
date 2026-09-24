@@ -1036,6 +1036,11 @@ def test_post_compose_coaching_dispatch_includes_coaching_payload_keys() -> None
         "high_severity_warnings",
         "company_name",
         "methodology",
+        # Which build produced the headline tam/sam/som. It was emitted and asserted by four
+        # tests while NO prompt surface named it — a dead payload key, and the one distinction
+        # this skill exists to police (a top-down figure and a bottom-up figure are different
+        # claims). This test's own docstring enumerated the emitted keys and omitted it.
+        "market_size_approach",
         "confidence",
         "deck_coverage",
         # A refused cross-check is invisible in every other key: the figure is present and
@@ -1043,6 +1048,11 @@ def test_post_compose_coaching_dispatch_includes_coaching_payload_keys() -> None
         # though it had been verified. COMPARISON_CURRENCY_UNKNOWN is medium, so it never
         # arrives via high_severity_warnings.
         "comparison_blocked",
+        # What the two builds share, and the pipeline's own statement that it cannot tell whether
+        # they are independent. Absent from this list the key is documented on no prompt surface,
+        # which is the exact defect the key was added to fix: the coach called a 9.4% gap "two
+        # independent chains" while a rule saying otherwise sat in its own body.
+        "approach_comparison",
         "tam",
         "sam",
         "som",
@@ -1104,7 +1114,13 @@ def test_post_compose_coaching_dispatch_includes_coaching_payload_keys() -> None
     agent_anchor = "### Context B"
     agent_start = agent_text.find(agent_anchor)
     assert agent_start != -1, f"{AGENT_MD.name} has no '### Context B' section"
-    agent_section = agent_text[agent_start : agent_start + 8000]
+    # Bound on STRUCTURE, not a fixed character count. The Context B section is ~9,200 chars,
+    # longer than every fixed window previously used against it, so an additive edit to the
+    # payload key list pushed a string past the boundary and failed this test on content that
+    # is still present. The section ends at the next level-2 heading; CLAUDE.md prescribes
+    # exactly this over widening N, which only defers the next break.
+    _agent_end = agent_text.find("\n## ", agent_start)
+    agent_section = agent_text[agent_start : _agent_end if _agent_end != -1 else len(agent_text)]
 
     for key in required_keys:
         assert key in agent_section, f"{AGENT_MD.name} Context B section is missing coaching_payload key '{key}'"
@@ -1217,6 +1233,12 @@ def test_context_b_commentary_payload_keys() -> None:
     mt_section = skill_text[mt_start : mt_start + 1000]
     for key in {"tam", "sam", "som", "methodology", "confidence", "high_severity_warnings"}:
         assert key in mt_section, f"{SKILL_MD.name} Main-Thread Return section does not mention '{key}'"
+    # ...as what the main thread HAS, not what it SAYS. The old wording ("the final outcome the
+    # main thread delivers to the founder is: ... the headline outcome fields") sat 24 lines below
+    # a Step 10 that says the printed message is the delivery, and pointed the other way.
+    squashed = " ".join(mt_section.split())
+    assert "What reaches the founder is the delivered files and the printed hand-over message" in squashed
+    assert "delivers to the founder" not in squashed
 
 
 def test_run_id_parity_artifact_list_matches_required_artifacts() -> None:
@@ -1569,7 +1591,96 @@ def test_the_coaching_payload_carries_the_band_and_the_boolean() -> None:
     agent_text = AGENT_MD.read_text(encoding="utf-8")
     agent_start = agent_text.find("### Context B")
     assert agent_start != -1
-    agent_section = agent_text[agent_start : agent_start + 8000]
+    # Bound on STRUCTURE, not a fixed character count. The Context B section is ~9,200 chars,
+    # longer than every fixed window previously used against it, so an additive edit to the
+    # payload key list pushed a string past the boundary and failed this test on content that
+    # is still present. The section ends at the next level-2 heading; CLAUDE.md prescribes
+    # exactly this over widening N, which only defers the next break.
+    _agent_end = agent_text.find("\n## ", agent_start)
+    agent_section = agent_text[agent_start : _agent_end if _agent_end != -1 else len(agent_text)]
     for key in ("overall_status", "all_pass"):
         assert f'"{key}"' in skill_text, f"SKILL.md's Context B template does not name {key!r}"
         assert key in agent_section, f"agents/market-sizing.md Context B does not name {key!r}"
+
+
+def test_red_team_dispatch_is_generated_not_hand_written() -> None:
+    """Step 6c must call the generator and carry no free-text Task( template.
+
+    On a live run the hand-filled template arrived with a "Key things worth attacking" list the main
+    thread wrote from its own hypotheses, and every red-team finding mapped onto that list. A prompt a
+    script prints can be regenerated and compared; a prompt the model writes cannot. Bound on the
+    Step 6c / Step 7 headings, not a character window.
+    """
+    text = SKILL_MD.read_text(encoding="utf-8")
+    step = text[text.index("### Step 6c") : text.index("### Step 7")]
+    assert 'dispatch_prompt.py" red_team' in step
+    assert 'prompt="""' not in step, "a free-text prompt body is back in Step 6c"
+    assert "worth attacking" not in step
+    # The generator RENDERS the agent namespace and CHECKS the caller's; every other dispatch in
+    # this file hands sub-agents <ANALYSIS_DIR_AGENT>, and a /sessions read is denied on Cowork.
+    assert '--analysis-dir-agent "<ANALYSIS_DIR_AGENT>"' in step
+    assert '--handoff-agent "<HANDOFF_AGENT>"' in step
+    # The founder's uploads have no agent-namespace form; they are mirrored under the hand-off dir.
+    assert 'cp "<printed UPLOADS_DIR>"/* "$HANDOFF_DIR/docs/"' in step
+    # The validator must be told where the documents and sidecars are, or every document citation
+    # is rejected as "not supplied" and sources_unread can never fire -- which is exactly what the
+    # first cut of this step did.
+    pipe = step[step.index('red_team.py" --pretty') :]
+    pipe = pipe[: pipe.index("```")]
+    assert '--uploads-dir "$HANDOFF_DIR/docs"' in pipe and '--ocr-dir "$HANDOFF_DIR/ocr"' in pipe, pipe
+
+
+def test_hand_over_message_is_generated_not_written() -> None:
+    """Step 10 must produce the closing message from the report.
+
+    On a live run the closing chat message said "$4.66M ... about 2% of the illustrative $100M" (it
+    is 4.7%), with the never-compute-in-chat rule sitting 1,000 lines above it. The message is now a
+    script's output; the SKILL.md sentence only points at the script.
+    """
+    text = SKILL_MD.read_text(encoding="utf-8")
+    step = text[text.index("### Step 10") : text.index("## Edge Cases")]
+    assert 'closing_message.py" --report' in step
+    # No --link flag: the script decides the form per lane (`computer://` on the desktop-local
+    # Cowork tree, none on the remote lane where no link form opens, bare path on the CLI). A
+    # SKILL.md that pinned one form was wrong on the lane the live report came from -- measured.
+    assert "--link" not in step, "the link form is the script's decision, not the model's"
+    assert "In this skill the hand-over message is printed, not written." in step
+    assert "no ratio" not in step, "the prohibition sentence is back; the e2e assertion is the guard"
+    # The generator call must come AFTER the fleet-shared delivery block, which is byte-identical
+    # across the six skills and may not be edited here.
+    assert step.index("nothing outside the run that made them.") < step.index('closing_message.py" --report')
+
+
+def test_a_review_is_final_in_the_skill_text() -> None:
+    """The red team's findings are content findings; the old "must be removed" sentence, which could
+    only be satisfied by editing the review, is gone; a what-if never writes the reviewed analysis."""
+    text = SKILL_MD.read_text(encoding="utf-8")
+    content = text[text.index("- **Content findings**") : text.index("Two codes sit in neither class")]
+    assert "`RED_TEAM_FINDINGS`" in content and "edit the analysis or the review" in content
+    for code in ("REDTEAM_ALTERED", "RED_TEAM_RERUN_UNAPPROVED", "REVIEW_COPY_MISSING", "RED_TEAM_SKIP_CONTRADICTED"):
+        assert f"`{code}`" in content
+    assert "must be removed before you hand" not in text
+    assert "before the adversarial review in Step 6c" in text
+    what_if = text[text.index("## What-If Recomputation Rule") :]
+    what_if = what_if[: what_if.index("\n## ", 5)]
+    assert "`$STAGING_DIR`" in what_if and "never `$ANALYSIS_DIR`" in what_if
+    reality = text[text.index("### Step 5.5: Reality Check") : text.index("### Steps 6a & 6b")]
+    assert "IMPLAUSIBLE_PCT_SCALE" in reality
+
+
+def test_step_6d_gives_the_revision_its_route_and_its_bounds() -> None:
+    text = SKILL_MD.read_text(encoding="utf-8")
+    step = text[text.index("### Step 6d") : text.index("### Step 7")]
+    for needle in (
+        "`AskUserQuestion`",
+        '"approved_by_founder": true',
+        '"changes"',
+        '--run-id "$RUN_ID/r2"',
+        "--review-docs-dir",
+        '--uploads-dir "$ANALYSIS_DIR/handoff/$RUN_ID/docs"',
+        "there is no third",
+        "`founder_notes`",
+        "`gate_defaults`",
+        "do not wait",
+    ):
+        assert needle in step, needle

@@ -189,37 +189,20 @@ tool surface and different rules.
 
 ## Why Inline (Not Forked Sub-Agent)
 
-> **Corrected mechanism (2026-07, verified against the CLI v2.1.198 /
-> Desktop v1.18286.0 binaries):** "Cowork has no built-in Bash/WebFetch
-> at any dispatch level; subagents with a wildcard or explicit
-> `mcp__workspace__*` grant can still shell and fetch via the workspace
-> MCP tools. Outside Cowork, subagents can use Bash and WebFetch
-> normally, including in async mode." Earlier versions of this file
-> described a runtime filter that removed Bash from sub-agents — that
-> framing is retracted (the mechanism is name-registration, not
-> filtering); do not reintroduce it from git history.
+Cowork has no built-in `Bash` or `WebFetch` tool at ANY dispatch level —
+main thread included. The mechanism is name registration, not a runtime
+filter that strips tools from sub-agents: the name `Bash` is simply not
+registered, so declaring it binds nothing. Shell is
+`mcp__workspace__bash`, an MCP tool registered by the desktop's
+workspace server that runs commands inside the workspace VM. The main
+thread uses it transparently (ToolSearch, then call). A sub-agent could
+too, if its `tools:` frontmatter declared `mcp__workspace__bash` +
+`ToolSearch` — but ours deliberately don't. Outside Cowork, sub-agents
+use `Bash` and `WebFetch` normally.
 
-> **Second retraction (2026-08-31), separate from the box above and not
-> covered by it.** This section also used to say the v0.4.0 sub-agents
-> had "a working shell recipe". They did not: the literal `Bash` name
-> bound nothing, leaving them `{Read, Glob, Grep}` — recorded at
-> `docs/internal/cowork-architecture-and-v0.4.x-learning.md:62-63`, with
-> the platform-scope correction at `:106-108`. The `Write`-based file
-> hand-off postdates v0.4.0, so its absence from that set is expected.
-> The anti-fabrication point survives the correction; the mechanism is
-> capability loss followed by fail-open improvisation, not instructions
-> ignored while capable.
-
-Cowork has no built-in `Bash` tool at ANY dispatch level — main thread
-included. Shell is `mcp__workspace__bash`, an MCP tool registered by
-the desktop's workspace server that runs commands inside the workspace
-VM. The main thread uses it transparently (ToolSearch, then call). A
-sub-agent could too, if its `tools:` frontmatter declared
-`mcp__workspace__bash` + `ToolSearch` — but ours deliberately don't:
-
-- **Anti-fabrication:** in the v0.4.0 incident sub-agents declared the
-  literal `Bash` name, which resolves to nothing in Cowork; left with
-  `{Read, Glob, Grep}` they improvised artifacts rather than failing
+- **Anti-fabrication:** a sub-agent that declares the literal `Bash`
+  name gets nothing, and is left with `{Read, Glob, Grep}`. In that
+  state they improvise artifacts rather than failing
   loudly. Two lessons, and the second is the load-bearing one: an
   unbound tool name is silent, and the agent's failure mode under
   capability loss is fabrication, not error.
@@ -229,8 +212,8 @@ sub-agent could too, if its `tools:` frontmatter declared
   producer or insert script, never promoted to a canonical artifact
   as-is. A sub-agent shell would blur that line for no benefit.
   **What this does NOT claim.** The main thread writes several canonical
-  artifacts itself. As of 2026-08-31 they fall in three groups, and the
-  distinction is the whole point of the rescoping:
+  artifacts itself. They fall in three groups, and the distinction is what
+  the rule turns on:
   - **Written through a producer, provenance-checked.**
     `product_profile.json`, `landscape_draft.json`, `positioning.json`
     (competitive-positioning, via `persist_agent_artifact.py`) and
@@ -280,7 +263,7 @@ two simultaneously for MOAT_SCORING + POSITIONING_SCORING.
 
 ## Mitigation 2: Trimmed Context B Coaching Context
 
-v0.4.2 introduces structured `coaching_payload` in `report.json`.
+Compose emits a structured `coaching_payload` in `report.json`.
 Context B reads the payload (~5K tokens) instead of the full `report.md`
 (10-30K tokens), and saves the difference per coaching dispatch. The
 payload is STAGED AS A FILE in the hand-off dir and Read from there — a
@@ -309,7 +292,7 @@ Each skill's `coaching_payload` has a distinct `schema_version`:
 | competitive-positioning | v0.4.2-competitive-positioning | checklist (failed_items + warned_items) |
 | financial-model-review | v0.4.2-financial-model-review | checklist + severity-sorted truncation |
 | ic-sim | v0.4.2-ic-sim | dimension-based (dealbreakers + concerns) |
-| market-sizing | v0.5.0-market-sizing | checklist (failed_items only — no warn status; `summary` carries the 4-band `overall_status` plus `all_pass`) |
+| market-sizing | v0.7.0-market-sizing | checklist (failed_items only — no warn status; `summary` carries the 4-band `overall_status` plus `all_pass`) |
 
 The 4 checklist-using skills share a `summary` block shape with
 `failed_items`/`warned_items` arrays (market-sizing's `warned_items`
@@ -418,8 +401,8 @@ internally — pass the final message verbatim.
   installed:
   - a marketplace / local plugin → `mnt/.local-plugins/marketplaces/<marketplace>/<plugin>`
   - an **uploaded or org-remote plugin** → `mnt/.remote-plugins/plugin_<id>`,
-    where the id is a stable hash of the DECLARED SOURCE (not a basename — two
-    entries sharing a basename used to collide)
+    where the id is a stable hash of the DECLARED SOURCE, not a basename — two
+    entries sharing a basename would otherwise collide)
   So a shell step must DISCOVER the mount rather than depend on the token, which
   is what the `find /sessions/*/mnt/.*-plugins …` self-heal in Step 0 is for.
   Finding the plugin at `.remote-plugins/plugin_<id>` does NOT mean the "leave
@@ -571,7 +554,7 @@ helper implementing the order above rather than ad-hoc env checks.
 | `check_handoff.py` exit 8 (path-namespace mismatch) | The agent COMPLIED; the agent-namespace prefix was wrong, so the file landed at a doubled path (reported in `found_at`). Reported ahead of exit 3 because the file check cannot tell them apart | Do NOT treat as a fabricated receipt and do NOT read the hand-off from `found_at` (diagnostic only). Re-run `resolve_artifacts_root.py --agent`, rebuild the prefix, re-dispatch. |
 | Producer script schema rejection | Hand-off file (or fallback JSON) shape doesn't match schema | Repair-dispatch with the producer's stderr verbatim; check schema in references/schemas/. |
 | `metadata.run_id` mismatch | `setup_run.py` invocation order issue | Check that all producer scripts use the same `RUN_ID` (set once at Step 0, threaded through). |
-| Coaching commentary missing | Compose didn't emit insertion marker | Check `report.md` for `<!-- COACHING_INSERTION_POINT_<8-hex> -->`. If absent, compose script wasn't updated to v0.4.2 spec. |
+| Coaching commentary missing | Compose didn't emit insertion marker | Check `report.md` for `<!-- COACHING_INSERTION_POINT_<8-hex> -->`. If absent, the compose script does not implement the coaching-payload contract. |
 | `Operation not permitted` on `rm` | File written to `$OUTPUTS_ROOT/` (write-yes, delete-no by default) | Don't delete — overwrite in place, or put disposable files in a `/tmp` `$STAGING_DIR` instead. Hand-off files are intentionally permanent (audit trail). |
 | `insert_coaching.py` exits 1 (blocked) | Marker missing/duplicated, or `run_id` parity failure across `--verify-artifact` paths | Read the JSON diagnostic on stdout — it names the failing state. Marker issues: re-run `compose_report.py --write-md` and retry. Never hand-edit `report.md`. |
 | Sub-agent can't reach network | The agent's `tools:` allowlist doesn't declare `WebSearch` (strict allowlist mode — undeclared names don't bind); also note literal `WebFetch` doesn't exist in Cowork at all | Either the sub-agent's frontmatter declares `WebSearch` (competitive-positioning's Context A is the documented case), or move research to the main thread before dispatch and pass data inline in the prompt. |
