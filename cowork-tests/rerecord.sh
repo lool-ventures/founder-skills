@@ -36,6 +36,16 @@ echo "cowork-harness $ver"
 #   2.2) — the exact drift the next paragraph warns about, sitting unfixed in the file that warns about
 #   it. If you are here to change the floor, change all FOUR sites: this header, the numeric gate, its
 #   FATAL message, and `_RECORDING_FLOOR` in founder-skills/tests/test_cowork_harness_floors.py.
+#   * 3.8.0 is the current floor, and it is a reason-(1) raise on ALL THREE fidelity inputs at once:
+#     `runtime/argv.ts` passes `--include-hook-events` (spawn env), `hostloop/{skills,workspace}-handler.ts`
+#     move the emulated tool surface, and `prompt.ts` / `prompt/subagent-manifest.ts` move the system
+#     prompt. It is also the first release under which a HOOK is assertable at all — `run/cassette.ts`
+#     learned the `hook_response` frame types, and before it the harness's own diagnostic said there was
+#     no assertion key for any event but PreToolUse. `market-sizing-remote-lane` now freezes
+#     `hook_event_fired: Stop`, which is why the REPLAY floor moved to 3.8.0 too (first time it has ever
+#     moved). The floor is 3.8.0 and the CI pin is 3.8.1: a floor tracks the mechanism, not the pin.
+#     CASSETTE_VERSION stays 12, MIN_SUPPORTED stays 9. Baseline `latest` moves 2.2553.1 -> 2.7032.0.
+#     Full analysis: docs/internal/2026-09-24-cowork-harness-3.8.1-adoption-plan.md.
 #   * 3.2.0 is required because 3.1.0 STAMPS A RECORD-TIME FIELD NO LATER RUN CAN BACKFILL — the
 #     `environment.model` block in `schema/cassette.v12.json`: the model the recording actually ran
 #     (`id`, from what the agent reported, so it survives a mid-run fallback) plus where it came from
@@ -523,4 +533,6 @@ echo "=== prune kept runs (keep last 5) ===";  cowork-harness prune --keep-last 
 # here so the person who just changed them sees the new truth, rather than trusting a number
 # written into a README months ago.
 echo "=== cassette inventory (post-record truth; update any prose you copy it into) ==="
-python3 "$(dirname "$0")/cassette_inventory.py" || true
+# cwd is this script's own dir (line 24 cd's there), so a $0-relative path double-prefixes it:
+# invoked as `cowork-tests/rerecord.sh`, dirname "$0" is `cowork-tests` and the open fails.
+python3 cassette_inventory.py || true
