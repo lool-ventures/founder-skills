@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [0.13.0] - 2026-09-23 — The message that ends a market sizing now says what the report says
+## [0.13.0] - 2026-09-24 — The message that ends a market sizing now says what the report says
 
 ### Highlights
 
@@ -292,6 +292,11 @@ Contributor-facing only; nothing here changes what a founder installs or runs.
   founder's closing message contains the printed hand-over whole. It also fails a run that grades
   the checklist inline instead of handing it to a separate step, because a self-graded score looks
   identical to a real one in every file the run leaves behind.
+- The paid end-to-end gate now exercises three skills rather than one: deck-review,
+  financial-model-review and market-sizing. The other three remain covered by the free contract
+  and Cowork-invariant tests.
+- `cowork-harness` is pinned exactly at 3.7.0 across CI and the contributor install line, up from
+  3.6.0. Its evidence-corpus measurement gained a class our own guard had been under-reporting.
 - The test suite no longer leaves temporary directories behind. Measured on one machine, earlier
   runs had accumulated over sixty thousand of them.
 
