@@ -9120,6 +9120,24 @@ def test_red_team_writes_a_copy_per_round_and_counts_rounds_by_hand_off(tmp_path
     assert sorted(p.name for p in (d / "handoff" / _CRUN).iterdir()) == ["redteam.r1.json", "redteam.r2.json"]
 
 
+def test_re_piping_the_same_review_cannot_move_its_baseline() -> None:
+    """A round's content may refresh on a re-pipe; the inputs it was taken against may not.
+
+    The copy's baseline was rebuilt on every write, so editing a founder figure after the review
+    and re-running the review producer with the same hand-off moved the baseline to the edited
+    figure, and the rewrite was no longer reported.
+    """
+    d = _gated_dir()
+    _pipe_review(d, "The published share is 6.1%.")
+    inputs = json.loads((d / "inputs.json").read_text())
+    inputs["founder_stated_inputs"]["arpu"] = 999
+    (d / "inputs.json").write_text(json.dumps(inputs))
+    assert _pipe_review(d, "The published share is 6.1%.")["round"] == 1
+    copy1 = json.loads((d / "handoff" / _CRUN / "redteam.r1.json").read_text())
+    assert copy1["_review_copy"]["inputs_at_review"]["founder_stated_inputs"] == {"arpu": 203}
+    assert "FOUNDER_INPUT_REWRITTEN" in _warning_codes(_compose_dir(d))
+
+
 def test_an_honest_single_review_raises_none_of_the_review_codes() -> None:
     d = _gated_dir()
     _pipe_review(d, "The published share is 6.1%.")

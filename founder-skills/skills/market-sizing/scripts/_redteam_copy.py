@@ -93,9 +93,12 @@ def write_copy(analysis_dir: str, run_id: str, result: dict[str, Any], handoff_s
     block = {"handoff_sha256": handoff_sha256, "inputs_at_review": inputs_at_review(analysis_dir)}
     for n, doc in existing:
         if isinstance(doc, dict) and _as_dict(doc.get(COPY_KEY)).get("handoff_sha256") == handoff_sha256:
-            # The same hand-off re-piped: the same round, not a new one.
+            # The same hand-off re-piped: the same round, not a new one. Its content may refresh; its
+            # baseline may not. Rebuilding the block here re-read inputs.json, so a figure edited
+            # after the review became the round's own baseline and the rewrite went unreported.
+            kept = {**_as_dict(doc.get(COPY_KEY)), "round": n}
             with open(os.path.join(d, f"redteam.r{n}.json"), "w", encoding="utf-8") as fh:
-                json.dump({**result, COPY_KEY: {**block, "round": n}}, fh, indent=2)
+                json.dump({**result, COPY_KEY: kept}, fh, indent=2)
             return n
     n = max([0, *(r for r, _ in existing)]) + 1
     while True:
