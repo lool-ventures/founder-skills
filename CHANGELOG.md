@@ -267,6 +267,15 @@ second is what happened.
   produced the headline figure, and how far the three simulated partners agreed — so the notes
   could not qualify a result by either. Four more pages described the warning data in a shape
   the software had stopped sending.
+- **A checklist item about structural errors now says what it actually checks, and it checks less
+  than its label promised.** The label said your model's parts reconcile — unit economics rolling
+  into the P&L, the balance sheet balancing, ending cash tying to the balance sheet, net income
+  reaching retained earnings — while the bars it was actually scored against only ever looked for
+  spreadsheet error tokens: circular references, `#REF!`, `#DIV/0!`. An assessor handed half a
+  rubric had good reason to set the item aside, which is what kept happening. The label now matches
+  the bars. **No item in this review checks internal reconciliation, and nothing now claims to** —
+  if that is what you need from a model review, it is not covered here.
+
 - The release's own quality gate no longer fails on a judgement it was never meant to police.
   It used to require that the assessment never set a check aside, which is a decision a
   reviewer is entitled to make; on identical input it went one way about half the time and
