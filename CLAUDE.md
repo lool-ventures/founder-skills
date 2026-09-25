@@ -1,13 +1,11 @@
 # CLAUDE.md
 
-> Distilled 2026-09-21, from ~164 KB to ~94 KB. What came out was the measurement narrative behind
-> the rules that remain, plus the harness adoption log. **It is NOT in git history.** The pre-push
-> squash that removed a real company name from three commit messages destroyed every commit before
-> 2026-09-25, so the pre-trim file exists only in `docs/internal/claude-md-archive/` — one untracked
-> copy, on one disk. Read it when a rule here states a conclusion and you need what was measured to
-> reach it; several were learned by a run that cost money. If that directory is gone, so is the
-> reasoning. (This sentence previously named a commit; the squash killed it, which is the same
-> lesson in miniature — after a history rewrite, nothing that CITES a SHA still resolves.)
+> This file is distilled: it keeps the rules and not the measurements behind them. **Those are NOT
+> in git history** — `docs/internal/claude-md-archive/` holds the only copy of the pre-distillation
+> file, untracked, on one disk. Read it when a rule here states a conclusion and you need what was
+> measured to reach it; several were learned by a run that cost money. If that directory is gone, so
+> is the reasoning. Cite nothing in this file by SHA: the history has been rewritten and pre-rewrite
+> hashes do not resolve. Name the change and grep for the identifier.
 
 ## Repository Structure
 
@@ -81,8 +79,8 @@
 - `founder-skills/tests/test_theme_sync.py` — Brand-theme invariants: per-skill `_theme.py` copies identical, brand font present, font embeds in CSS
 - `founder-skills/tests/test_e2e_deck_review.py`, `test_e2e_financial_model_review.py`,
   `test_e2e_market_sizing.py`, `test_e2e_cap_table.py` — the FOUR paid end-to-end lanes; LLM-driven;
-  carry the `e2e` marker. This said "three" until 2026-09-25; cap-table's lane existed and was
-  uncounted, so derive the list with `ls founder-skills/tests/test_e2e_*.py` rather than quoting it.
+  carry the `e2e` marker. Derive the list with `ls founder-skills/tests/test_e2e_*.py`; a hand-list
+  here has gone stale before.
   Shared plumbing in `tests/_e2e_harness.py` — deck-review deliberately does NOT use it (it is the
   lane the release tag gates on; fold it in when a failure costs a re-run rather than a re-tag).
   **One lane per changed coaching-payload builder is the rule**: contract tests pin that a payload
@@ -392,15 +390,12 @@ Run manually: `uv run python scripts/privacy_guard.py --staged` (or `--tree`). T
 Verified against the Claude Code v2.1.120 skill runtime contract and Desktop v1.6259.1 architecture:
 
 - **Skill re-attachment after auto-compaction has TWO budgets, and the second deletes silently.** Cite VALUES, never minified identifiers — every symbol rotates per release and one has collided destructively (`_On` meant 25,000 in one build and 5,000 in the next).
-  **Cap 1 — 5,000 tokens per skill, and it is a CHARACTER cap**: the estimator is `Math.round(len/4)`, so `wc -m` measures the right unit with zero conversion error. The stored content is the `Base directory for this skill: <abs path>` prefix (101–240 chars, install-dependent) + the body with frontmatter STRIPPED; it truncates at ≥ 20,002 chars — the last safe length is **20,001**, and 19,900 is merely what survives (`slice(0,19900)` + a 100-char marker). All six of our SKILL.mds are far over, so every one truncates on every compaction, discarding 75–86% of its body — and compaction is REAL BUT NOT COMMON — the "380 transcripts, ordinary, not rare" figure this
-sentence carried until 2026-09-25 was a SUBSTRING grep, which counts any transcript that merely
-mentions the token, this one included. Re-measured over 26,608 transcripts: 1,286 contain the
-substring, **424 contain the quoted token — about 1.6%**. A separate measurement scoped to
-founder-skills sessions put it near 2.8%; the scopes differ, so quote the method with the number.
-Cowork is unmeasured. Treat truncation as CERTAIN WHEN COMPACTION HAPPENS and its frequency as low
-single-digit percent, not as routine: a live data-room run in 2026-09 recorded ZERO
-`compact_boundary` events across 30+ minutes and fifteen dispatches, which is why an argument that
-a late SKILL.md rule "will have been truncated by then" was wrong for that run. Truncation is head-preserving, so the base-directory line survives and a skill that OWNS A DIRECTORY is recoverable (measured 98% of truncated entries carry it). A single-file command has no recovery path at all: `commands/feedback.md` is 2,737 chars today and is the class to watch. Do NOT generalize this to "bundled/builtin skills have no base directory" — `bundled:verify` carries one; directory ownership predicts recoverability, the source prefix does not. Refinement: the predicate is directory DURABILITY — a plugin upgrade removes the version-stamped cache dir, so a session RESUMED after an upgrade holds a recovery path to a dead directory (path-death measured; the failing resume `Read` inferred, not observed). `skills[].path` is a source-qualified identifier (`plugin:cap-table`), not a location — recovery keyed on `path` fails, keyed on the content's first line succeeds; the registry's `skillPath` is renamed to `path` on the way out, so grepping transcripts for `skillPath` finds nothing.
+  **Cap 1 — 5,000 tokens per skill, and it is a CHARACTER cap**: the estimator is `Math.round(len/4)`, so `wc -m` measures the right unit with zero conversion error. The stored content is the `Base directory for this skill: <abs path>` prefix (101–240 chars, install-dependent) + the body with frontmatter STRIPPED; it truncates at ≥ 20,002 chars — the last safe length is **20,001**, and 19,900 is merely what survives (`slice(0,19900)` + a 100-char marker). All six of our SKILL.mds are far over, so every one truncates on every compaction, discarding 75–86% of its body — and truncation is CERTAIN once compaction happens — but compaction itself is low single-digit
+percent, not routine: **424 of 26,608 transcripts carry a quoted `compact_boundary`, about 1.6%**
+(founder-skills-scoped, ~2.8%; Cowork unmeasured). COUNT THE QUOTED TOKEN, never the bare substring
+— a substring grep matches any transcript that merely mentions it and returns roughly three times
+as many. Do not argue that a rule late in a SKILL.md "will have been truncated by then": a 30-minute
+run with fifteen dispatches recorded zero boundaries. Truncation is head-preserving, so the base-directory line survives and a skill that OWNS A DIRECTORY is recoverable (measured 98% of truncated entries carry it). A single-file command has no recovery path at all: `commands/feedback.md` is 2,737 chars today and is the class to watch. Do NOT generalize this to "bundled/builtin skills have no base directory" — `bundled:verify` carries one; directory ownership predicts recoverability, the source prefix does not. Refinement: the predicate is directory DURABILITY — a plugin upgrade removes the version-stamped cache dir, so a session RESUMED after an upgrade holds a recovery path to a dead directory (path-death measured; the failing resume `Read` inferred, not observed). `skills[].path` is a source-qualified identifier (`plugin:cap-table`), not a location — recovery keyed on `path` fails, keyed on the content's first line succeeds; the registry's `skillPath` is renamed to `path` on the way out, so grepping transcripts for `skillPath` finds nothing.
   **Cap 2 — 25,000 tokens combined**, over post-truncation sizes (each of ours contributes exactly 5,000), most-recently-invoked first, per-agent: over budget (strict `>`), the least-recently-used skill's content is set to `""` with no marker — a "re-read if something looks missing" instruction structurally cannot fire for zeroing. Six co-invoked = one zeroed. A skill still visible in a retained attachment is skipped and consumes no budget. Sub-agent fan-out relieves the main thread.
   **Front-loading a "survival core" is WITHDRAWN** — do not re-propose the additive form: the window is fixed-size, so a prepended core evicts exactly as much from the tail (measured: it would have evicted the `STAGING_DIR` invariants it was written to protect). Reordering is not invisible to tests (`test_ic_sim_skill_contract.py` asserts step order), and the subtractive form has no cheap duplicate to harvest — the per-skill `## Skill Execution Model` sections overlap the shared reference by only 20.6–28.0%. Any front-loading or reordering attempt needs an e2e A/B (~$10) — contract tests cannot see behavioural change — and a justified `test_skill_md_does_not_grow` ceiling raise. Relocating prose to `references/` (target ≤ 20,001 chars of rendered prompt) is exempt from both caps but lands in the separate post-compaction file-restore budget: the 5 most recently read files, 5,000 tokens each, per-agent (a plain dispatch starts empty, `context: fork` copies the parent's — we use no `fork`; re-check if one is added). Neither conflicts with the retired "never move prose into `references/`" rule, which was about the 512 KiB critique corpus. Full derivation: `docs/internal/2026-08-28-skill-frontloading-plan.md` rev 2 and `docs/internal/2026-08-28-skill-compaction-budget-and-frontloading-plan.md`.
 - **Env vars in skill bodies:** Use `${CLAUDE_PLUGIN_ROOT}` (braced form) — the plugin content expander substitutes it at load time. Bare `$CLAUDE_PLUGIN_ROOT` only resolves at Bash subprocess time and depends on `CLAUDE_ENV_FILE` being sourced; the gist flags this as unconfirmed for skill subprocesses. The braced form is the contract.
