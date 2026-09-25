@@ -173,8 +173,31 @@ def test_market_sizing_smoke(tmp_path: Path) -> None:
         f"the red team read the artifacts before the deck: {read_paths}"
     )
     redteam = json.loads((review_dir / "redteam.json").read_text(encoding="utf-8"))
+    # THE INVARIANT, not the outcome. `sources_unread == []` alone passes whether the review
+    # DECLARED the deck read or the producer reconciled it from a citation, and on 2026-09-24 the
+    # two runs differed: the first declared nothing (report told the founder four times that the
+    # review never opened a file it quoted on page 2, once at high severity and once in the verdict
+    # paragraph that carried the citation), the second declared correctly. So the gate could not
+    # say which path produced its green. What must hold either way: a document a finding CITES was
+    # opened, so it cannot be listed unopened.
+    cited = {
+        str(f["source_url"]).split("document:", 1)[1].split("#", 1)[0]
+        for f in redteam["findings"]
+        if str(f.get("source_url", "")).startswith("document:")
+    }
+    contradicted = sorted(cited & set(redteam["sources_unread"]))
+    assert not contradicted, f"the report says these were never opened while a finding quotes them: {contradicted}"
     assert redteam["sources_unread"] == [], redteam["sources_unread"]
     assert SCANNED_DECK.name in redteam["sources_read"], redteam["sources_read"]
+    # Which path produced the pass -- printed, never asserted, because both are legitimate. An
+    # empty list means the review declared honestly and the reconciliation was not exercised; a
+    # non-empty one means it fired and is the only live evidence that it works.
+    print(
+        "[e2e:market-sizing] sources_read reconciled from a citation: "
+        f"{redteam['summary'].get('sources_read_from_citation')} "
+        "(empty = the review declared them itself, so the reconciliation was NOT exercised)",
+        flush=True,
+    )
     # Evidence, not a gate: is the page misread cited? Printed so the write-up can quote it.
     doc_findings = [f for f in redteam["findings"] if str(f.get("source_url", "")).startswith("document:")]
     print(

@@ -31,6 +31,15 @@ it may have rewritten. stdin's `cwd` is a contract: hostloop = the outputs host 
 the working dir, VM-loop = `/sessions/<id>`. `handover.txt` is found under
 `<cwd>/artifacts/market-sizing-*/` or `<cwd>/mnt/outputs/artifacts/market-sizing-*/`, newest first.
 
+`stop-hook-error` IN THE SDK STREAM IS NOT AN ERROR HERE. A blocking Stop hook surfaces to the SDK
+as a `notification` whose key is `stop-hook-error`, whatever the hook's outcome was. MEASURED from
+the `market-sizing-remote-lane` cassette (2026-09-24), which records all three frames of a real run:
+the block carries `exit_code: 0`, `outcome: "success"`, `stderr: ""` and the decision JSON on
+stdout; the second Stop invocation carries `exit_code: 0`, `outcome: "success"` and empty output,
+which is `stop_hook_active` spending the one-rewrite budget. So a `stop-hook-error` line in a
+transcript is the host's label for "a Stop hook returned a block", not evidence this script failed.
+Check `stderr` on the frame before believing otherwise.
+
 FAIL OPEN. Any error, any unexpected shape, any other skill's stop: exit 0, no stdout, one stderr
 line at most. `stop_hook_active` true: exit 0 -- one rewrite is the budget. The skill does not
 depend on this hook (test_skill_orchestration.py forbids that); it is enforcement, not plumbing.
