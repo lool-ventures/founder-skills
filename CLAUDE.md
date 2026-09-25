@@ -1,9 +1,13 @@
 # CLAUDE.md
 
-> Distilled 2026-09-21 (`002fb97..91fb4d9`), from ~164 KB to ~94 KB. What came out was the
-> measurement narrative behind the rules that remain, plus the harness adoption log:
-> `git show d99aa0d:CLAUDE.md`. Read it when a rule here states a conclusion and you need to
-> know what was measured to reach it — several were learned by a run that cost money.
+> Distilled 2026-09-21, from ~164 KB to ~94 KB. What came out was the measurement narrative behind
+> the rules that remain, plus the harness adoption log. **It is NOT in git history.** The pre-push
+> squash that removed a real company name from three commit messages destroyed every commit before
+> 2026-09-25, so the pre-trim file exists only in `docs/internal/claude-md-archive/` — one untracked
+> copy, on one disk. Read it when a rule here states a conclusion and you need what was measured to
+> reach it; several were learned by a run that cost money. If that directory is gone, so is the
+> reasoning. (This sentence previously named a commit; the squash killed it, which is the same
+> lesson in miniature — after a history rewrite, nothing that CITES a SHA still resolves.)
 
 ## Repository Structure
 
