@@ -260,7 +260,10 @@ def test_range_mode_scans_added_lines_and_messages_and_never_prints_the_source(t
     assert str(private) not in out.stderr and "vault-alpha" not in out.stderr and "zebra" not in out.stderr.lower()
 
 
-def test_commit_msg_mode_flags_a_private_figure(tmp_path):
+def test_commit_msg_mode_flags_a_private_figure(tmp_path, monkeypatch):
+    # Outside any repo, so nothing is subtracted as our own code: run in this checkout, the guard reads its real
+    # origin/main, which carries this file -- and this file's invented figure -- once it has been pushed.
+    monkeypatch.chdir(tmp_path)
     cfg, _ = _fake_sources(tmp_path)
     msg = tmp_path / "MSG"
     msg.write_text("fix: handle 7,777.77 margins\n\n# comment line ignored 13.3x\nSigned-off-by: T <t@example.com>\n")
