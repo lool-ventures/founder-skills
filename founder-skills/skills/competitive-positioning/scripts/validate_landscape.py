@@ -743,6 +743,16 @@ def main() -> None:
         args.output,
         summary={"warning_count": warning_count, "competitor_count": len(result["competitors"])},
     )
+    if args.output:
+        # The run's first landscape, kept beside the artifact (`_cp_first_copy`): it holds the
+        # research pass's own suggested additions before any merge, which is what compose's
+        # CAP_DISPLACED_DIRECT compares the final set against.
+        scripts_dir = os.path.dirname(os.path.abspath(__file__))
+        if scripts_dir not in sys.path:
+            sys.path.insert(0, scripts_dir)
+        import _cp_first_copy
+
+        _cp_first_copy.keep_first(args.output, result)
 
 
 if __name__ == "__main__":

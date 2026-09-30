@@ -48,6 +48,9 @@ answers:
     answer: "Remove Calendly — it schedules meetings for knowledge workers and does not compete for the same buyer or job. Keep the other three and continue."
 
 assert:
+  # A relative or /sessions/ file-tool path is refused at host-loop; the Step 0 proof exists so none is used.
+  # Content-class, so it covers sub-agent tool results too (checked by replay on a sub-agent-only string).
+  - tool_result_not_contains: "denied by your permission settings"
   - result: success
   - skill_triggered: '(founder-skills:)?competitive-positioning$'
   # THE ASSERT THAT MATTERS: after the correction, the stamp must survive. Without it

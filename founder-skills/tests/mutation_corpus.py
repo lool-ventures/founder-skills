@@ -114,6 +114,7 @@ _SELECTION = tuple(
     for name in (
         "test_cap_table.py",
         "test_cap_table_guards.py",
+        "test_cap_table_pool_basis.py",
         "test_cap_table_canonicals.py",
         "test_cap_table_extraction_only.py",
         "test_cap_table_freeform.py",
@@ -135,6 +136,8 @@ _SELECTION = tuple(
         "test_v48_hotfix_regressions.py",
         "test_verify_one.py",
         "test_visualize_cap_table.py",
+        # The paid lane's judge, so a mutant that disarms it is measured like a producer defect.
+        "test_pool_sizing_claims.py",
     )
 )
 
@@ -218,6 +221,434 @@ NO_OP = Mutant(
 # ---------------------------------------------------------------------------------------------
 
 MUST_KILL: tuple[Mutant, ...] = (
+    Mutant(
+        id="pool_counterfactual_uses_modeled_basis",
+        # MEASURED under -x.
+        killed_by="TestPoolSizingCounterfactual::test_the_other_sizing_is_a_real_solve_and_differs",
+        file=f"{_SCRIPTS}/run_scenario.py",
+        find='        other = solve_priced_round(**{**solve_kwargs, "target_basis": other_basis})\n',
+        replace="        other = solve_priced_round(**solve_kwargs)\n",
+        rationale=(
+            "The option pool's other sizing is re-solved on the MODELED basis, so the comparison the coach "
+            "cites is the modeled round again, labelled as the other sizing."
+        ),
+    ),
+    Mutant(
+        id="pool_counterfactual_uses_pre_pump_cap_state",
+        # MEASURED under -x.
+        killed_by="TestPoolSizingCounterfactual::test_the_counterfactual_reuses_every_modeled_input",
+        file=f"{_SCRIPTS}/run_scenario.py",
+        find="        _cf = _pool_sizing_counterfactual(solve_kwargs, result, params)\n",
+        replace='        _cf = _pool_sizing_counterfactual({**solve_kwargs, "cap_state": cap_state}, result, params)\n',
+        rationale=(
+            "The counterfactual solves against the cap state before the pre-round warrant exercise, so it "
+            "differs from the modeled round in two inputs, not one, and its difference is misattributed "
+            "to the pool's sizing."
+        ),
+    ),
+    Mutant(
+        id="pool_counterfactual_ignores_acquisition_timing_filter",
+        # MEASURED under -x.
+        killed_by="TestPoolSizingCounterfactual::test_the_counterfactual_reuses_every_modeled_input",
+        file=f"{_SCRIPTS}/run_scenario.py",
+        find="        _cf = _pool_sizing_counterfactual(solve_kwargs, result, params)\n",
+        replace=(
+            "        _cf = _pool_sizing_counterfactual(\n"
+            '            {**solve_kwargs, "acquisition": params.get("acquisition")}, result, params\n'
+            "        )\n"
+        ),
+        rationale=(
+            "The counterfactual takes the scenario's acquisition unfiltered by timing, so an acquisition "
+            "the modeled round excluded dilutes the other sizing -- a difference not caused by the pool."
+        ),
+    ),
+    Mutant(
+        id="pool_counterfactual_catches_every_exception",
+        # MEASURED under -x.
+        killed_by="TestPoolSizingCounterfactual::test_an_anti_dilution_contradiction_on_the_other_sizing_propagates",
+        file=f"{_SCRIPTS}/run_scenario.py",
+        find=(
+            "    except AntiDilutionContradiction:\n"
+            "        raise\n"
+            "    except ValueError as e:\n"
+            '        sys.stderr.write(f"run_scenario: pool sizing counterfactual ({other_basis}) could not be solved: '
+            '{e}\\n")\n'
+        ),
+        replace=(
+            "    except Exception as e:\n"
+            '        sys.stderr.write(f"run_scenario: pool sizing counterfactual ({other_basis}) could not be solved: '
+            '{e}\\n")\n'
+        ),
+        rationale=(
+            "A producer defect (anti-dilution contradiction) on the other sizing is swallowed as "
+            "'unavailable', and the modeled figures ship as if nothing had happened."
+        ),
+    ),
+    Mutant(
+        id="increase_reading_uses_modeled_basis",
+        # MEASURED under -x.
+        killed_by="TestPoolIncreaseReading::test_computed_exactly_when_the_reading_is_disclosed",
+        file=f"{_SCRIPTS}/run_scenario.py",
+        find='        other = solve_priced_round(**{**solve_kwargs, "target_basis": "post_money_increase"})\n',
+        replace="        other = solve_priced_round(**solve_kwargs)\n",
+        rationale=(
+            "The new-options-only reading is re-solved on the modeled basis, so the figure beside the "
+            "disclosure is the modeled round again, labelled as the other reading."
+        ),
+    ),
+    Mutant(
+        id="increase_reading_gate_ignores_disclosure",
+        # MEASURED under -x. The first to notice is the comparison's whole-result equality (an unrequested block
+        # appears on a pre-money round); the dedicated gate test,
+        # TestPoolIncreaseReading::test_computed_exactly_when_the_reading_is_disclosed, also kills it (checked).
+        killed_by=(
+            "TestPoolSizingCounterfactual::"
+            "test_a_returned_blocker_on_the_other_sizing_is_unavailable_and_leaves_the_modeled_result_alone"
+        ),
+        file=f"{_SCRIPTS}/run_scenario.py",
+        find=(
+            "    if comparison is None or not any(\n"
+            '        isinstance(w, dict) and w.get("code") == "W_POOL_BASIS_READING_NOT_CONFIRMED"\n'
+            '        for w in modeled.get("warnings") or []\n'
+            "    ):\n"
+        ),
+        replace="    if comparison is None:\n",
+        rationale=(
+            "The reading is computed for every pool scenario, including rounds with no existing pool or a "
+            "basis the founder confirmed, so a figure for a reading nobody raised reaches the coach."
+        ),
+    ),
+    Mutant(
+        id="increase_reading_catches_every_exception",
+        # MEASURED under -x.
+        killed_by="TestPoolIncreaseReading::test_an_anti_dilution_contradiction_on_the_re_solve_propagates",
+        file=f"{_SCRIPTS}/run_scenario.py",
+        find=(
+            "    except AntiDilutionContradiction:\n"
+            "        raise\n"
+            "    except ValueError as e:\n"
+            '        sys.stderr.write(f"run_scenario: pool increase reading could not be solved: {e}\\n")\n'
+        ),
+        replace=(
+            "    except Exception as e:\n"
+            '        sys.stderr.write(f"run_scenario: pool increase reading could not be solved: {e}\\n")\n'
+        ),
+        rationale=(
+            "A producer defect (anti-dilution contradiction) on the new-options-only re-solve is swallowed "
+            "as 'unavailable', and the modeled figures ship as if nothing had happened."
+        ),
+    ),
+    Mutant(
+        id="increase_reading_payload_uses_comparison_figures",
+        # MEASURED under -x.
+        killed_by="TestPoolIncreaseReadingDigest::test_computed_reaches_the_payload_as_display_strings",
+        file=f"{_SCRIPTS}/_pool_text.py",
+        find=(
+            "    return cf, build_pool_increase_reading_digest("
+            'co.get("pool_increase_reading"), params, modeled_reading=modeled)\n'
+        ),
+        replace=(
+            '    _inc = co.get("pool_increase_reading")\n'
+            '    _cmp = (co.get("pool_sizing_counterfactual") or {}).get("founders") or {}\n'
+            '    if isinstance(_inc, dict) and _inc.get("founders"):\n'
+            '        _f = {"modeled_value": _cmp.get("modeled_value"), "increase_value": _cmp.get("other_value")}\n'
+            '        _inc = {**_inc, "founders": _f}\n'
+            "    return cf, build_pool_increase_reading_digest(_inc, params, modeled_reading=modeled)\n"
+        ),
+        rationale=(
+            "The report's new-options-only founders figure is read from the pre-/post-round comparison, so "
+            "the Option pool section shows that comparison's number under this reading's name."
+        ),
+    ),
+    Mutant(
+        id="judge_accepts_attached_pre_money_figure",
+        # MEASURED under -x.
+        killed_by=(
+            "test_pool_sizing_claims.py::test_increase_reading_judgement"
+            "[the comparison's figure beside this one, with no words for the comparison]"
+        ),
+        file="founder-skills/tests/_pool_sizing_claims.py",
+        find=(
+            "            if allowed and any(_near(p, allowed) for p in stated) "
+            "and not _other_sizing_mentions(raw, other):\n"
+        ),
+        replace="            if False:\n",
+        rationale=(
+            "The paid lane's judge stops flagging the pre-money comparison's figure attached to the "
+            "new-options-only reading, so a coach that borrows it greens the lane."
+        ),
+    ),
+    Mutant(
+        id="excluding_pool_basis_guard_disabled",
+        # MEASURED: the first test to fail with the guard disabled.
+        killed_by="TestExcludingConvertingSecuritiesBasis::test_blocked_when_converting_securities_are_present",
+        file=f"{_SCRIPTS}/priced_round.py",
+        find="            if converting and excluding_basis_modeled_as != EXCLUDING_AS_POST_MONEY:\n",
+        replace="            if False:\n",
+        rationale=(
+            "Removes the refusal of post_money_excluding_converting_securities when SAFEs or notes "
+            "convert. The solver then computes it as plain post_money with no disclosure -- a basis the "
+            "model does not compute, reaching the founder as if it did."
+        ),
+    ),
+    Mutant(
+        id="excluding_blocks_with_nothing_converting",
+        # MEASURED: the first test to fail with the converting check dropped.
+        killed_by=(
+            "TestExcludingConvertingSecuritiesBasis::"
+            "test_no_converting_securities_passes_with_numbers_identical_to_post_money"
+        ),
+        file=f"{_SCRIPTS}/priced_round.py",
+        find="            if converting and excluding_basis_modeled_as != EXCLUDING_AS_POST_MONEY:\n",
+        replace="            if excluding_basis_modeled_as != EXCLUDING_AS_POST_MONEY:\n",
+        rationale=(
+            "Refuses the excluding basis even when nothing converts, where it is the same number as plain "
+            "post-money. The founder is asked a question whose answer cannot change the figures."
+        ),
+    ),
+    Mutant(
+        id="pool_basis_allow_list_disabled",
+        # MEASURED: the first test to fail with the allow-list disabled.
+        killed_by="test_cap_table_pool_basis.py::test_an_unknown_basis_is_refused_by_the_solver",
+        file=f"{_SCRIPTS}/priced_round.py",
+        find="        elif basis not in COMPUTED_POOL_BASES:\n",
+        replace="        elif False:\n",
+        rationale=(
+            "Lets an unrecognised pool basis past the solver's gate, so it reaches the pool arithmetic "
+            "unrefused and the founder gets a traceback or a silent post-money figure instead of a blocker."
+        ),
+    ),
+    Mutant(
+        id="custom_basis_accepted_without_an_answer",
+        # MEASURED: the first test to fail when `custom` solves without the founder's stated measure.
+        killed_by=(
+            "TestPoolSizingCounterfactual::test_custom_and_founder_choice_excluding_are_not_computed_with_a_plain_reason"
+        ),
+        file=f"{_SCRIPTS}/priced_round.py",
+        find=(
+            "            if custom_basis_stated_by_founder not in _STATED_CUSTOM_ANSWERS:\n"
+            '                return _pool_basis_blocker("E_POOL_BASIS_NOT_MODELED", _REMEDY_NOT_MODELED)\n'
+            "            basis = str(custom_basis_stated_by_founder)\n"
+        ),
+        replace='            basis = str(custom_basis_stated_by_founder or "post_money")\n',
+        rationale=(
+            "Solves a `custom` pool basis as plain post-money when the founder never said which measure "
+            "their document matches -- a guessed definition presented as the founder's own."
+        ),
+    ),
+    Mutant(
+        id="pool_basis_disclosure_dropped",
+        # MEASURED: the first test to fail with the disclosures not appended.
+        killed_by=(
+            "TestExcludingConvertingSecuritiesBasis::test_a_founder_choice_to_model_it_as_post_money_runs_and_is_disclosed"
+        ),
+        file=f"{_SCRIPTS}/priced_round.py",
+        find='        result.setdefault("warnings", []).extend(disclosures)\n',
+        replace="        disclosures.clear()\n",
+        rationale=(
+            "Solves the founder's substituted basis but drops the warning that says so, so the report "
+            "presents plain post-money figures with nothing telling the founder they are a substitute."
+        ),
+    ),
+    Mutant(
+        id="required_topup_unmodelled_bases_silently_post_money",
+        # MEASURED: the first test to fail when option_pool computes the unmodelled bases as post-money.
+        killed_by="TestOptionPool::test_post_money_excluding_converting_securities",
+        file=f"{_SCRIPTS}/option_pool.py",
+        find='    elif target_basis == "post_money":\n',
+        replace='    elif target_basis in {"post_money", "custom", "post_money_excluding_converting_securities"}:\n',
+        rationale=(
+            "Restores the old silent fall-through: option_pool computes `custom` and the excluding basis "
+            "as plain post-money for any caller that bypasses the solver's gate (its own CLI included)."
+        ),
+    ),
+    Mutant(
+        id="quick_assess_founder_choice_not_forwarded",
+        # MEASURED: the first test to fail when fast-assess drops the founder's choice.
+        killed_by=(
+            "test_cap_table_pool_basis.py::test_fast_assess_honours_the_founders_choice_and_shows_the_disclosure"
+        ),
+        file=f"{_SCRIPTS}/quick_assess.py",
+        find="        excluding_basis_modeled_as=excluding_basis_modeled_as,\n",
+        replace="        excluding_basis_modeled_as=None,\n",
+        rationale=(
+            "Fast-assess stops forwarding the founder's choice to the solver, so a founder who answered "
+            "the question is blocked again with the question they already answered."
+        ),
+    ),
+    Mutant(
+        id="increase_basis_credits_existing_pool",
+        # MEASURED: the first test to fail when the increase branch credits the existing pool. Re-measured when
+        # the new-options-only reading's tests (earlier in the selection) began to notice it too; the original
+        # killer, test_cap_table_pool_basis.py::test_the_increase_is_sized_alone_at_a_fixed_price, still does.
+        killed_by="TestPoolIncreaseReading::test_computed_exactly_when_the_reading_is_disclosed",
+        file=f"{_SCRIPTS}/option_pool.py",
+        find="        x = target * (pre_fd + nm + acq) / (1 - target)\n",
+        replace="        x = (target * (pre_fd + nm + acq) - existing) / (1 - target)\n",
+        rationale=(
+            "Turns an increase-sized pool back into a resulting-pool one: the existing unallocated options "
+            "are credited against a percentage that sizes the new options alone, so the top-up is short by "
+            "about the existing pool and nothing says so."
+        ),
+    ),
+    Mutant(
+        id="acquisition_pool_C_increase_credits_existing",
+        # MEASURED: the first test to fail when the acquisition system keeps the existing pool.
+        killed_by=(
+            "test_cap_table_pool_basis.py::"
+            "test_the_acquisition_system_does_not_credit_the_existing_pool_on_the_increase_basis"
+        ),
+        file=f"{_SCRIPTS}/priced_round.py",
+        find="        existing = 0.0\n",
+        replace="        existing = float(existing)\n",
+        rationale=(
+            "The same credit, on the acquisition path only: an increase-sized pool solved beside an "
+            "acquisition comes out short while the path without one is right."
+        ),
+    ),
+    Mutant(
+        id="increase_basis_missing_from_post_money_set",
+        # MEASURED: the first test to fail when the increase basis leaves the post-money family.
+        killed_by=(
+            "test_cap_table_pool_basis.py::"
+            "test_the_acquisition_system_does_not_credit_the_existing_pool_on_the_increase_basis"
+        ),
+        file=f"{_SCRIPTS}/priced_round.py",
+        find=(
+            'POST_MONEY_POOL_BASES = frozenset({"post_money", "post_money_excluding_converting_securities", '
+            '"post_money_increase"})\n'
+        ),
+        replace='POST_MONEY_POOL_BASES = frozenset({"post_money", "post_money_excluding_converting_securities"})\n',
+        rationale=(
+            "With an acquisition, the increase basis silently takes the pre-money branch of the pool system "
+            "and escapes the over-determination guard, which asks the same set."
+        ),
+    ),
+    Mutant(
+        id="increase_counsel_item_never_raised",
+        # MEASURED: the first test to fail when the counsel predicate never fires.
+        killed_by=(
+            "test_cap_table_pool_basis.py::"
+            "test_counsel_is_asked_about_the_increase_reading_only_when_a_pool_is_sized_that_way"
+        ),
+        file=f"{_SCRIPTS}/rule_audit.py",
+        find=(
+            '            if params.get("target_basis") == "post_money_increase" '
+            'and params.get("target_pool_percent"):\n'
+        ),
+        replace="            if False:\n",
+        rationale=(
+            "The increase reading is document-specific, so its rule sends it to counsel. With the predicate "
+            "dead the founder gets the figures and the counsel packet says nothing."
+        ),
+    ),
+    Mutant(
+        id="increase_compared_on_two_axes",
+        # MEASURED: the first test to fail when the increase is compared with a pre-money sizing.
+        killed_by="test_cap_table_pool_basis.py::test_the_increase_reading_is_compared_with_the_resulting_pool_reading",
+        file=f"{_SCRIPTS}/run_scenario.py",
+        find='    "post_money_increase": "post_money",\n',
+        replace='    "post_money_increase": "pre_money",\n',
+        rationale=(
+            "Compares the increase reading with a pre-money sizing, which changes the numerator AND the "
+            "denominator at once, so the founder cannot tell which of the two moved the figures."
+        ),
+    ),
+    Mutant(
+        id="pool_clause_accepts_fuzzy",
+        # MEASURED: the first test to fail when the pool-sentence check falls back to fuzzy matching.
+        killed_by="test_cap_table_pool_basis.py::test_a_meaning_flipped_pool_sentence_passes_fuzzy_matching_and_fails_here",
+        file=f"{_SCRIPTS}/pool_clause.py",
+        find='    return _verdict(False, None, "not_found")\n',
+        replace='    return _verdict(evidence_verifier.quote_in_doc(quote, doc_text)[0], "fuzzy", "found")\n',
+        rationale=(
+            "A sentence whose meaning is flipped (the percentage moved from the new options to the total "
+            "pool) passes a fuzzy ratio, and would be quoted to the founder as their document's words."
+        ),
+    ),
+    Mutant(
+        id="pool_clause_accepts_compact",
+        # MEASURED: the first test to fail when the pool-sentence check falls back to compact matching.
+        killed_by="test_cap_table_pool_basis.py::test_compact_matching_is_not_used_because_it_joins_different_numbers",
+        file=f"{_SCRIPTS}/pool_clause.py",
+        find='    return _verdict(False, None, "not_found")\n',
+        replace=(
+            "    from _normalize import compact_form\n\n"
+            '    return _verdict(compact_form(quote) in compact_form(doc_text), "compact", "found")\n'
+        ),
+        rationale=(
+            "Compact form strips the decimal point, so a sentence stating 105% verifies against a document "
+            "stating 10.5%."
+        ),
+    ),
+    Mutant(
+        id="pool_clause_deletes_unrecovered_glyphs",
+        killed_by="test_cap_table_pool_basis.py::test_an_unrecovered_glyph_is_a_barrier_not_a_deletion",
+        file=f"{_SCRIPTS}/pool_clause.py",
+        find='    doc = normalize_text(re.sub(r"\\(cid:\\d+\\)", _CID_BARRIER, doc_text))\n',
+        replace="    doc = normalize_text(doc_text)\n",
+        rationale=(
+            "An unrecovered glyph is deleted instead of blocking the match, so a document reading "
+            "'shall [not] be counted' verifies the quote 'shall be counted'."
+        ),
+    ),
+    Mutant(
+        id="pool_clause_accepts_a_partial_sentence",
+        killed_by=(
+            "test_cap_table_pool_basis.py::"
+            "test_a_quote_cut_short_of_its_qualifier_or_begun_after_a_negation_verifies_nothing"
+        ),
+        file=f"{_SCRIPTS}/pool_clause.py",
+        find="        if _bounded(doc, start, start + len(q), q):\n",
+        replace="        if True:\n",
+        rationale=(
+            "A quote cut short of its qualifier, or begun after a negation, verifies and is shown to the "
+            "founder as their document's words."
+        ),
+    ),
+    Mutant(
+        id="post_money_reading_never_disclosed",
+        # MEASURED: the first test to fail when the post-money reading is never disclosed. Re-measured when the
+        # new-options-only reading's tests (earlier in the selection) began to notice it too; the original killer,
+        # test_cap_table_pool_basis.py::test_either_post_money_reading_beside_an_existing_pool_is_disclosed,
+        # still does.
+        killed_by="TestPoolIncreaseReading::test_computed_exactly_when_the_reading_is_disclosed",
+        file=f"{_SCRIPTS}/priced_round.py",
+        find=('        if basis == "post_money" and existing_pool > 0:\n'),
+        replace="        if False:\n",
+        rationale=(
+            "Beside an existing pool, a post-money percentage can size the whole pool or only the new "
+            "options; the model silently takes the first, which gives the smaller top-up."
+        ),
+    ),
+    Mutant(
+        id="new_options_reading_never_disclosed",
+        # MEASURED: the first test to fail when the new-options-only reading is never disclosed.
+        killed_by=(
+            "TestPoolIncreaseReadingDigest::test_the_new_options_reading_modeled_is_disclosed_with_no_second_solve_of_it"
+        ),
+        file=f"{_SCRIPTS}/priced_round.py",
+        find=('        elif basis == "post_money_increase" and existing_pool > 0:\n'),
+        replace="        elif False:\n",
+        rationale=(
+            "Beside an existing pool, a percentage the model read as sizing only the new options could size "
+            "the whole pool instead; the report shows the larger top-up with no word that it is one reading."
+        ),
+    ),
+    Mutant(
+        id="comparison_drops_every_warning",
+        # MEASURED: the first test to fail when the comparison's warning filter drops everything.
+        killed_by="test_cap_table_pool_basis.py::test_the_comparison_drops_only_the_reading_disclosures",
+        file=f"{_SCRIPTS}/run_scenario.py",
+        find=(
+            '            if str(w.get("code") or "").startswith("W_") and w.get("code") not in _READING_DISCLOSURES\n'
+        ),
+        replace='            if str(w.get("code") or "").startswith("W_") and False\n',
+        rationale=(
+            "The filter that drops the reading codes from the comparison's re-solve becomes a general warning "
+            "dropper, and the coach loses every caveat on the other sizing."
+        ),
+    ),
     Mutant(
         id="cap_implied_denominator_is_pre_financing_base",
         killed_by="TestSafeConversion::test_cap_implied_basic",
@@ -341,9 +772,13 @@ MUST_KILL: tuple[Mutant, ...] = (
     ),
     Mutant(
         id="solver_warnings_collected_but_never_rendered",
-        # MEASURED. Caught by the pre-existing report.md guard, not by the new per-surface suite --
-        # the shared collector is upstream of both, so the oldest assertion reaches it first.
-        killed_by="TestSolverWarningsReachTheFounder::test_mfn_counterfactual_is_labelled_as_the_agent_contract_requires",
+        # MEASURED. The shared collector is upstream of every surface, so the first assertion in selection
+        # order that reads any of them notices: today the hand-over / report.md check on the pool-basis
+        # disclosures, which sits earlier in the file than the report.md guard that noticed it first before.
+        killed_by=(
+            "TestPoolSizingCounterfactualDigest::"
+            "test_each_pool_basis_disclosure_reaches_the_hand_over_with_its_severity_and_the_page_with_its_words"
+        ),
         file=f"{_SCRIPTS}/_warning_callouts.py",
         find="    collected: list[dict] = []\n    for s in scenarios or []:",
         replace="    collected: list[dict] = []\n    for s in []:",
@@ -676,6 +1111,10 @@ class _Harness:
                 "-rfE",
                 "-p",
                 "no:cacheprovider",
+                # The verdict is parsed from lines that START with `FAILED ` / `ERROR `. A shell that forces
+                # colour (FORCE_COLOR, PY_COLORS) makes pytest prefix them with ANSI codes, so nothing
+                # matches and every kill reads as caught by no test. The flag outranks the environment.
+                "--color=no",
                 *[arg for nodeid in _DESELECT for arg in ("--deselect", nodeid)],
             ],
             cwd=self.tree,

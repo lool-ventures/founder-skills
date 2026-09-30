@@ -230,15 +230,22 @@ RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
 # the hand-off gate when a dispatch fails to write.
 HANDOFF_DIR="$ANALYSIS_DIR/handoff/$RUN_ID"
 mkdir -p "$HANDOFF_DIR"
-# Sub-agents address the SAME dir by a different path (their file tools are rooted at the outputs
-# mount in Cowork). Resolve the FULL agent-namespace paths via the script — never hand-splice the
+# FILE-TOOL PATHS (Cowork only; skip when ARTIFACTS_ROOT does not start with /sessions/). File tools
+# refuse a RELATIVE path and cannot open /sessions/... paths. FIRST, with the Write tool, write
+# "<HOST_OUTPUTS>/artifacts/.host-outputs-probe" containing exactly <HOST_OUTPUTS>: the file-tool path
+# your context maps to /sessions/<id>/mnt/outputs/ (the "Paths in bash differ from what file tools
+# see" list; no such list -> that /sessions/.../mnt/outputs path itself). Then prove it (quoted; it may
+# contain spaces). Exit 0 = proven. 2/4/5 -> fix per its JSON, retry once, then STOP:
+python3 "$SHARED_SCRIPTS/resolve_artifacts_root.py" --set-host-outputs-dir "<HOST_OUTPUTS>"
+# Sub-agents address the SAME dir by a different path (the absolute file-tool path proven above).
+# Resolve the FULL agent-namespace paths via the script — never hand-splice the
 # printed root with a literal skill-name/slug/run-id string yourself (that string-splicing is
 # exactly the non-determinism the resolver script exists to remove):
 python3 "$SHARED_SCRIPTS/resolve_artifacts_root.py" --handoff-dir-agent \
   --dir-name "market-sizing-${SLUG}" --run-id "$RUN_ID"   # prints HANDOFF_AGENT verbatim
 HANDOFF_AGENT="<printed value>"   # use verbatim in OUTPUT_PATH lines
-# Sub-agent READ paths for under-outputs artifacts use the SAME agent namespace (relative — the
-# sub-agent's file-tool cwd IS the outputs mount on host-loop; an absolute /sessions/... read is denied):
+# Sub-agent READ paths for under-outputs artifacts use the SAME agent namespace (absolute once proven;
+# a relative or /sessions/... read is refused):
 python3 "$SHARED_SCRIPTS/resolve_artifacts_root.py" --analysis-dir-agent \
   --dir-name "market-sizing-${SLUG}"   # prints the dir in the agent namespace
 ANALYSIS_DIR_AGENT="<printed value>"   # e.g. inputs.json, validation.json, sizing.json reads
@@ -354,9 +361,9 @@ competition). This field exists because the CHECKLIST sub-agent (Step 6b) scores
 `sizing.json` only — it never reads the deck itself. If competitive content from the deck isn't
 carried into this field, the checklist item scores blind to what the deck actually said.
 
-`existing_claims` must be a flat object with lowercase keys `tam`, `sam`, `som`. Use `null` for any figure the deck does not state. Custom keys (e.g., `SAM_Israel_only`) are silently ignored by reconciliation and will trigger an `EXISTING_CLAIMS_SHAPE` warning.
+`existing_claims` is a flat object with lowercase keys `tam`, `sam`, `som` (`null` if not stated); a stated range puts its low end here and its high end in `existing_claims_high`. Custom keys (`SAM_Israel_only`) are ignored and raise `EXISTING_CLAIMS_SHAPE`.
 
-If the deck states figures that don't fit the flat shape — regional sub-SAMs, time-anchored SOM projections, alternative TAM frames — put them in the optional `existing_claims_detail` field (any structure). This field does NOT participate in deck-vs-computed reconciliation, but it is rendered as a "Deck Claims (Narrative)" sub-section in the report.
+A second figure for the same metric goes in `existing_claims_alternatives` as `{value, slide, label}`; the founder is told both. Other figures outside the flat shape (regional sub-SAMs, dated SOMs) go in `existing_claims_detail` (any structure; shown as narrative, not reconciled).
 
 **Record the period each SOM covers.** `existing_claims_horizon_months.som` = the deck SOM's period in months (a plan-year run-rate is `12`; "by 2028" is months from `analysis_date`); `capture_horizon_months` = the period YOUR `share_pct`/`target_pct` describe (typically `36`/`60`). Differing periods are reported as such, not as a gap — an 18-month plan held against a 5-year figure once read as a 5.6x understatement.
 
@@ -375,8 +382,8 @@ the sizing math actually consumed and raises `FOUNDER_VALUE_OVERRIDDEN` if they 
 silently replace what the founder said. A discrepancy is a question for the founder, never an
 edit: a figure the founder did not confirm is not founder-stated. If the founder quoted a rate per
 month or per quarter, say so in `founder_stated_inputs_period` (`{"arpu": "month"}`) and the check
-normalises it to the annual figure the math uses — a founder-stated $203/month against a computed
-$2,436 is agreement, not an override.
+normalises it to the annual figure the math uses — a founder-stated $157/month against a computed
+$1,884 is agreement, not an override.
 
 **Two figures for one input.** When the founder's materials state more than one figure for the same
 input (a rate typed in chat and a blended rate in the deck, or two rates in the deck), ask before
@@ -384,8 +391,11 @@ Step A via `AskUserQuestion` which one the sizing uses: one option per figure na
 the typed one first. Record the chosen figure in `founder_stated_inputs` with
 `founder_stated_inputs_source` (`{"arpu": "chat"}` or `"document:<file>#page=<n>"`), their answer in
 `founder_stated_choice` (`{"arpu": "<their words>"}`; unasked, the report says so), and every other
-one in `founder_stated_alternatives` (`{"arpu": [{"value": 385, "period": "month", "source":
+one in `founder_stated_alternatives` (`{"arpu": [{"value": 261, "period": "month", "source":
 "document:<file>#page=<n>", "label": "<the deck's words>"}]}`). The report shows both; never drop one.
+`label` is copied exactly from that page, a sentence of six words or more: the report names the
+page only when those words are found on it, and otherwise says "in your materials". A `"chat"`
+source is never shown, since nothing on disk can confirm what was typed.
 
 **Currency — set it, do not assume dollars.** `currency` is the ISO code every money figure in this
 analysis is denominated in (`"USD"`, `"EUR"`, `"ILS"`, …). Derive it from the materials: an explicitly
@@ -497,7 +507,7 @@ Here's what I've extracted and how I plan to approach the sizing:
 |-------|-------|--------|
 | Current ARR | $850K | Deck slide 7 |
 | Customers | 12 | Deck slide 8 |
-| ARPU (monthly) | $4,000 | Derived from ARR/customers |
+| ARPU (annual) | $48K | Deck slide 8 |
 | Growth rate | 15% MoM | Deck slide 9 |
 
 **Missing / needs clarification:**
@@ -545,11 +555,11 @@ precisely to catch a skipped re-dispatch (mismatched `run_id` across artifacts).
 
 **When methodology is single:** Perform one research pass for the chosen approach.
 
-**When pure calculation (user provides all numbers):** Skip research. Write a stub `validation.json` with `{"skipped": true, "reason": "User-provided inputs, no external validation required"}`.
+**When pure calculation (user provides all numbers):** Skip research. Write a stub `validation.json` with `{"skipped": true, "reason": "User-provided inputs, no external validation required"}`, and size with the founder's numbers as they gave them (no `--validation`). Record each in `inputs.json` (`founder_stated_inputs` or `existing_claims`): the report then says the figures are theirs and unchecked. A figure that is not theirs makes it an unchecked sizing, reported as such.
 
 **Source quality hierarchy:** Government/regulatory > Established analysts > Industry associations > Academic > Business press > Company blogs (product facts only).
 
-Triangulate key numbers with 2+ independent sources. Every assumption must appear in the `assumptions` array with a `name` matching script parameter names and a `category` of `sourced`, `derived`, or `agent_estimate`.
+Triangulate key numbers with 2+ independent sources. Every figure goes in the `assumptions` array under a name of its own, with a `category` of `sourced`, `derived`, or `agent_estimate`, and a **`unit`** saying what it measures: `money_total_per_year` or `money_per_customer` (both with `currency`; per-customer also with `period`: month, quarter or year), `count`, `fraction` (0-1), `ratio`, `percent_points` (35 = 35%). Record a figure as its source states it: a head-count is a `count`, even if the market total is built from it. A `sourced` figure names a `sources[]` entry in `source_title`/`source_url`, or it is graded as an estimate. **A figure in another currency needs its rate here too**: `{"name": "fx_usd_ils", "unit": "fx_rate", "from": "USD", "to": "ILS", "value": 3.72, "as_of": "YYYY-MM-DD", "category": "sourced", ...}`, looked up now, never from memory.
 
 Every `figure_validations[]` entry's `status` MUST be one of exactly 4 canonical values —
 do not invent others (e.g. `validated_with_caveat`, `unverified` are NOT valid and will
@@ -564,8 +574,8 @@ Write `validation.json` directly:
 cat <<'VAL_EOF' > "$ANALYSIS_DIR/validation.json"
 {
   "assumptions": [
-    {"name": "industry_total", "value": 50000000000, "category": "sourced", "label": "Global RegTech market", "source_url": "...", "source_title": "...", "confidence": "high"},
-    {"name": "segment_pct", "value": 16, "category": "derived", "label": "Regulated SMB share", "factors": [{"factor_id": "regulated_share", "value": 0.40, "source_id": "Regulator register 2025"}, {"factor_id": "smb_share", "value": 0.40, "source_id": "company_stated"}]},
+    {"name": "regtech_market", "value": 50000000000, "unit": "money_total_per_year", "currency": "USD", "category": "sourced", "label": "Global RegTech market", "source_url": "...", "source_title": "...", "confidence": "high"},
+    {"name": "regulated_smb_share", "value": 16, "unit": "percent_points", "category": "derived", "label": "Regulated SMB share", "factors": [{"factor_id": "regulated_share", "value": 0.40, "source_id": "Regulator register 2025"}, {"factor_id": "smb_share", "value": 0.40, "source_id": "company_stated"}]},
     ...
   ],
   "figure_validations": [
@@ -592,8 +602,8 @@ exactly once (into the Write call) — never re-type sub-agent JSON into a hered
 
 **`$HANDOFF_AGENT` and `$HANDOFF_DIR` name the SAME directory by two different paths — they are not
 interchangeable.** `$HANDOFF_DIR` is the absolute VM path your shell uses (`python3`, `check_handoff.py`,
-producer pipes). `$HANDOFF_AGENT` is the relative path a sub-agent's file tools resolve against the
-outputs mount, and it is the ONLY one that goes in a dispatch prompt. Putting `$HANDOFF_DIR` in an
+producer pipes). `$HANDOFF_AGENT` is the absolute file-tool path of the same directory (proven at
+Step 0), and it is the ONLY one that goes in a dispatch prompt. Putting `$HANDOFF_DIR` in an
 `OUTPUT_PATH` line hands the sub-agent an absolute `/sessions/...` path the host-loop gate denies;
 putting `$HANDOFF_AGENT` in a shell command resolves it against the wrong cwd. Rule of thumb: **agent
 namespace in prompts, shell namespace in bash.**
@@ -605,7 +615,8 @@ The receipt is a two-field acknowledgement the sub-agent returns in its final me
 were forbidden, the hand-off could not be gated at all.
 
 **Path idiom for dispatch prompts (host-loop path gate):** `OUTPUT_PATH` and any under-outputs artifact
-READ path a sub-agent is given are **relative to the sub-agent's file-tool cwd** (the outputs mount) —
+READ path a sub-agent is given are **absolute file-tool paths**, never relative ones (a relative
+file-tool path is refused) —
 built from the `resolve_artifacts_root.py --agent` namespace (`$HANDOFF_AGENT` / `$ANALYSIS_DIR_AGENT`).
 Never hand a sub-agent an absolute `/sessions/...` path for a file-tool Read/Write — the host-loop path
 gate denies it (steering shell work to the `bash` tool instead). Bundled `references/*.md` are the one
@@ -625,12 +636,13 @@ printf '%s' '<agent final message verbatim>' | \
 Branch on the exit code (complete state machine — do not improvise):
 
 - **Exit 0** → pipe the file through the producer: `cat "$HANDOFF_DIR/<step>_output.json" | python3 "$SCRIPTS/<producer>.py" ...`
-- **Exit 3** (missing/empty file — receipt may be fabricated) → **redo-dispatch**: fresh Task, same prompt plus one line: "your receipt claimed a file at `<path>` but none exists; use Write to create exactly that path."
+- **Exit 3** (missing/empty file — receipt may be fabricated) → **redo-dispatch**: fresh Task, same prompt plus one line: "your receipt claimed a file at `<path>` but none exists; use Write to create exactly that path." For a generated prompt (RED_TEAM, CHECKLIST), re-run `dispatch_prompt.py` with the same arguments plus `--correction missing-file` and send that output instead.
 - **Exit 4** (file exists, invalid JSON) → **repair-dispatch**: fresh Task: "Read `<OUTPUT_PATH>`; it fails JSON parsing with `<verbatim detail from the diagnostic>`; fix and rewrite it; return the receipt."
 - **Exit 5** (receipt echoes a different path) → **repair-dispatch** telling the agent the exact expected OUTPUT_PATH (it wrote somewhere else).
-- **Exit 6** (receipt unparseable / no `output_path` key) → **redo-dispatch** with "return ONLY the receipt JSON — no fences, no prose."
-- **Producer schema rejection** (the pipe fails next) → **repair-dispatch** with the producer's stderr verbatim. **One exception: a message naming `E_FX_RATE_MISSING` is NOT a sub-agent fault and must NOT be repair-dispatched** — the sub-agent correctly reported a figure in its source's currency and has no network to look up a rate. You look the rate up and re-run the same pipe with the rate flags added (see the sizing step). Re-dispatching here burns the retry budget and invites the sub-agent to invent a rate.
-- **Exit 8** (`path_namespace_mismatch`) → the sub-agent **complied**; the agent-namespace prefix was wrong. Its relative `OUTPUT_PATH` resolved against the outputs mount instead of the session root, so the file landed at the doubled path reported in `found_at`. Do NOT treat this as a fabricated receipt (that is exit 3), and do NOT read the hand-off from `found_at` — it is diagnostic only. Re-run `resolve_artifacts_root.py --agent`, rebuild the agent-namespace prefix from the printed value, and re-dispatch. Counts against the same 2-dispatch retry budget.
+- **Exit 6** (receipt unparseable / no `output_path` key) → **redo-dispatch** with "return ONLY the receipt JSON — no fences, no prose." For a generated prompt, use `--correction receipt-only`.
+- **Producer schema rejection** (the pipe fails next) → **repair-dispatch** with the producer's stderr verbatim, **unless the message names another remedy**: `(remedy: record_research)` is NOT a sub-agent fault (a missing exchange rate, currency or period that only you can look up): record it and re-run the same pipe. Re-dispatching there burns the retry budget and invites the sub-agent to invent the figure.
+- **Exit 8** (`path_namespace_mismatch`) → the sub-agent **complied**; the agent-namespace prefix was wrong. Its relative `OUTPUT_PATH` resolved against the outputs mount instead of the session root, so the file landed at the doubled path reported in `found_at`. Only a RELATIVE agent path can do this, so the Step 0 proof did not run: run it. Do NOT treat this as a fabricated receipt (that is exit 3), and do NOT read the hand-off from `found_at` — it is diagnostic only. Re-run `resolve_artifacts_root.py --agent`, rebuild the agent-namespace prefix from the printed value, and re-dispatch. Counts against the same 2-dispatch retry budget.
+- **Blocked `write_refused`** (the sub-agent's Write was refused — its path was relative or a `/sessions/...` path) → run the Step 0 proof if it did not run, rebuild the agent-namespace paths from the resolver, re-dispatch ONCE. A second `write_refused` STOPs with both details quoted.
 - **Any other exit** (script crash etc.) → STOP with the stderr.
 - **After ANY corrective dispatch, resume from `check_handoff.py`** — never pipe to the producer unchecked.
 
@@ -645,7 +657,9 @@ re-dispatch per step; a second blocked return STOPs with both reasons quoted.
 agent's receipt claims `complete` with the correctly echoed path, treat the host's filesystem
 topology as hand-off-incompatible: fall back to message-channel transport for the REST of this run
 (sub-agent returns full JSON in its final message; stage to `$STAGING_DIR/<step>_input.json`; same
-producer pipe), and note the fallback in your final summary.
+producer pipe), and tell the founder in one plain sentence that this run's working files were passed
+directly instead of through `outputs/`, so its audit trail is incomplete (the results are unaffected).
+A refused write is NOT this case: it returns `write_refused` (above).
 
 Retries overwrite the same OUTPUT_PATH (the mount is write-allowed / delete-denied — never `rm`
 under `$ANALYSIS_DIR`). Hand-off files are not canonical artifacts: producers ignore them except
@@ -688,36 +702,28 @@ You are the market-sizing agent dispatched in Context A (TOP_DOWN_METHODOLOGY).
 Read inputs.json at <ANALYSIS_DIR_AGENT>/inputs.json and validation.json at
 <ANALYSIS_DIR_AGENT>/validation.json.
 
-Using the top-down approach, compute TAM/SAM/SOM. Pre-fetched research data:
-<inline the relevant assumptions from validation.json — industry_total, segment_pct, share_pct>
+Using the top-down approach, size TAM/SAM/SOM from the research in validation.json.
 
-segment_pct and share_pct are percentage POINTS, not fractions — 35 means 35%, not 0.35.
-A fractional value silently computes ~100x low (market_sizing.py divides by 100 once already).
-segment_pct narrows TAM to SAM; share_pct narrows SAM to SOM — do not swap them.
+REFERENCES, NOT NUMBERS: each input names where its value comes from, and the calculator reads the
+value from there, so a figure is never retyped. For each input write ONE of:
+  {"assumption": "<the name of a figure in validation.json>"}
+  {"derived": {"op": "multiply"|"divide"|"to_percent", "factors": [<reference>, ...]}}  (e.g. a head-count
+    times a price per customer is a money total; a ratio of two counts becomes a percentage via to_percent)
+  {"estimate": <number>, "unit": "<unit>", "why": "<one sentence: why no recorded figure fits>"}
+industry_total must resolve to money per year, segment_pct and share_pct to percentage points (35 means
+35%, not 0.35). segment_pct narrows TAM to SAM; share_pct narrows SAM to SOM — do not swap them. A
+recorded figure keeps the currency and period it was recorded with; you convert nothing.
 
-CURRENCY: this analysis is denominated in inputs.json's `currency`. Do NOT convert anything — you
-have no network and no exchange rate, so any rate you applied would come from memory. Report
-industry_total as the source states it, and add `industry_total_currency` with that source's ISO
-code (e.g. "USD"; industry totals usually are quoted in USD). Omit the field only when the figure
-is already in inputs.json's `currency`. The producer converts, using a rate the main thread
-supplies, and records it in the report.
+SIZING_BASIS: this analysis' declared basis is inputs.json's `sizing_basis`. When the research quotes
+both a current-year and a forecast-year figure, reference the one matching it, not whichever the
+source headlines.
 
-SIZING_BASIS: this analysis' declared basis is inputs.json's `sizing_basis`. When your research
-source quotes both a current-year and a forecast-year figure for the same market, pick the one that
-matches this basis (`current_year` → use the report's stated-today figure; `forecast_year` → use its
-stated future-year projection) — do NOT default to whichever number the source headlines. Note which
-figure (and which year) you used in your `sources` note.
-
-Use your Write tool to write to OUTPUT_PATH exactly this JSON — the shape
-expected by market_sizing.py --stdin for approach "top_down":
+Use your Write tool to write to OUTPUT_PATH exactly this JSON:
 {
   "approach": "top_down",
-  "industry_total": <number, AS THE SOURCE STATES IT — never converted by you>,
-  "industry_total_currency": <REQUIRED when the source's currency differs from inputs.json's
-    `currency`; the source's ISO code, e.g. "USD". Omit ONLY when the figure is already in
-    inputs.json's `currency`>,
-  "segment_pct": <percentage POINTS, 0-100 — e.g. 35 for 35%, NOT 0.35 — narrows TAM to SAM>,
-  "share_pct": <percentage POINTS, 0-100 — e.g. 5 for 5%, NOT 0.05 — narrows SAM to SOM>
+  "industry_total": <reference>,
+  "segment_pct": <reference>,
+  "share_pct": <reference>
 }
 Then return ONLY the receipt JSON in your final assistant message:
 {"status": "complete", "output_path": "<echo of OUTPUT_PATH>"}
@@ -737,34 +743,30 @@ You are the market-sizing agent dispatched in Context A (BOTTOM_UP_METHODOLOGY).
 Read inputs.json at <ANALYSIS_DIR_AGENT>/inputs.json and validation.json at
 <ANALYSIS_DIR_AGENT>/validation.json.
 
-Using the bottom-up approach, compute TAM/SAM/SOM. Pre-fetched research data:
-<inline the relevant assumptions from validation.json — customer_count, arpu, serviceable_pct, target_pct>
+Using the bottom-up approach, size TAM/SAM/SOM from the research in validation.json.
 
-`serviceable_pct` and `target_pct` are percentage POINTS, not fractions — 35 means 35%, not 0.35.
-A fractional value silently computes ~100x low (market_sizing.py divides by 100 once already).
+REFERENCES, NOT NUMBERS: each input names where its value comes from, and the calculator reads the
+value from there, so a figure is never retyped. For each input write ONE of:
+  {"assumption": "<the name of a figure in validation.json>"}
+  {"derived": {"op": "multiply"|"divide"|"to_percent", "factors": [<reference>, ...]}}  (e.g. accounts
+    times seats per account is a count; revenue divided by customers is a price per customer)
+  {"estimate": <number>, "unit": "<unit>", "why": "<one sentence: why no recorded figure fits>"}
+  {"founder_stated": "arpu"}  (arpu only: the founder's own figure)
+customer_count must resolve to a count, arpu to money per customer (a recorded price keeps its period;
+the calculator makes it annual), serviceable_pct and target_pct to percentage points (35 means 35%,
+not 0.35).
+You convert nothing.
 
-CURRENCY: this analysis is denominated in inputs.json's `currency`. Do NOT convert anything — you
-have no network and no exchange rate, so any rate you applied would come from memory. Report `arpu`
-as the source states it, and add `arpu_currency` with that source's ISO code (e.g. "USD"). Omit the
-field only when the figure is already in inputs.json's `currency`. The producer converts, using a
-rate the main thread supplies. Getting this wrong is not caught by arithmetic: an unconverted USD
-arpu silently produces an ILS-labelled TAM carrying dollar figures.
+SIZING_BASIS: if a customer_count or arpu figure exists both as a current and a forecast-year value,
+reference the one matching inputs.json's `sizing_basis`.
 
-SIZING_BASIS: this analysis' declared basis is inputs.json's `sizing_basis`. If your `customer_count`
-or `arpu` benchmark comes from a source that quotes both a current figure and a forecast-year
-projection, pick the one matching this basis and note which you used in your `sources` note.
-
-Use your Write tool to write to OUTPUT_PATH exactly this JSON — the shape
-expected by market_sizing.py --stdin for approach "bottom_up":
+Use your Write tool to write to OUTPUT_PATH exactly this JSON:
 {
   "approach": "bottom_up",
-  "customer_count": <integer>,
-  "arpu": <number, AS THE SOURCE STATES IT — never converted by you>,
-  "arpu_currency": <REQUIRED when the source's currency differs from inputs.json's `currency`;
-    the source's ISO code, e.g. "USD". Omit ONLY when the figure is already in inputs.json's
-    `currency`>,
-  "serviceable_pct": <percentage POINTS, 0-100 — e.g. 35 for 35%, NOT 0.35>,
-  "target_pct": <percentage POINTS, 0-100 — e.g. 0.5 for 0.5%, NOT a fraction of 1>
+  "customer_count": <reference>,
+  "arpu": <reference>,
+  "serviceable_pct": <reference>,
+  "target_pct": <reference>
 }
 Then return ONLY the receipt JSON in your final assistant message:
 {"status": "complete", "output_path": "<echo of OUTPUT_PATH>"}
@@ -784,57 +786,30 @@ python3 "$SHARED_SCRIPTS/merge_json.py" \
   "$HANDOFF_DIR/top_down_output.json" "$HANDOFF_DIR/bottom_up_output.json" \
   --set approach=both | \
   python3 "$SCRIPTS/market_sizing.py" --stdin --pretty --run-id "$RUN_ID" \
+    --validation "$ANALYSIS_DIR/validation.json" --inputs "$ANALYSIS_DIR/inputs.json" \
     --currency "$CURRENCY" --sizing-basis "$SIZING_BASIS" -o "$ANALYSIS_DIR/sizing.json"
 ```
 <!-- skill-quality-ci: bash-after-subagent-ok -->
 
-`--currency` carries the label from `inputs.json` into `sizing.json` so the report and HTML render the
-right unit. On its own it converts nothing. Omitting it silently labels every figure in dollars — and if
-`inputs.json` and `sizing.json` end up disagreeing, `compose_report.py` raises `CURRENCY_MISMATCH`
-rather than picking a winner.
+The calculator reads each input's value from the research record, checks it measures what the input
+needs, and records in `sizing.json` what it used and where from. `--currency` labels the analysis;
+`--sizing-basis` carries `inputs.json`'s convention (an empty value means "not declared").
 
-**When the sub-agent hands back a foreign-currency figure.** If its output carries
-`industry_total_currency` or `arpu_currency` naming a code other than `$CURRENCY`, the pipe above will
-stop with a nonzero exit and name the pair it needs. Look the rate up from a real source, then re-run
-the same pipe with the rate added:
+**When it refuses**, its message ends with the remedy. `(remedy: redispatch)`: repair-dispatch the
+sizing step with the message verbatim (a head-count referenced as the market total is fixed by deriving
+the total from the head-count and a price, never by relabelling the figure). `(remedy: record_research)`:
+the record lacks something only you can look up (a currency, a period, an exchange rate with its source
+and date); record it in `validation.json` and re-run the SAME pipe; this is not a sub-agent fault, so do
+not re-dispatch. `(remedy: founder_question)`: ask the founder (e.g. whether their price is per month or
+per year). Tell the founder what you are doing in their terms, never the code.
 
-**Re-run the SAME pipe you just ran**, adding only the three rate flags — do not substitute a
-different one. For a single-methodology run that is the command above with:
-
-```
-  --fx-rate USD:"$CURRENCY"=<rate> --fx-as-of <YYYY-MM-DD> --fx-source "<url>"
-```
-
-appended. For a `both` run it is the `merge_json.py … | market_sizing.py …` pipe with the same three
-flags appended to the `market_sizing.py` end. **Re-running the single-methodology pipe after a `both`
-dispatch would silently drop `bottom_up` and `comparison` and still exit 0** — the artifact would
-look fine and be half an analysis. Pass the rate flags on the `market_sizing.py` invocation, never
-inside the merged JSON: merging two sub-agent files lets one file's rate block overwrite the other's.
-
-The rate is never inferred by inverting another pair, and never guessed — that is the point of the
-stop. Supply the rate for the exact direction named. It lands in `sizing.json` and is disclosed in the
-report, so the founder sees the conversion rather than inheriting it. **This stop is NOT a sub-agent
-repair** — do not re-dispatch, and do not quote the producer's message to the sub-agent. It did its
-job correctly by reporting the source's own currency; the missing piece is a rate, which only you can
-look up. **Tell the founder what you are doing in their terms** — "the market figure I found is in
-dollars, so I'm converting it to shekels at today's rate" — never the exit status, the flag names, or
-the pair syntax.
-
-If the founder's own stated figures or the deck's TAM/SAM/SOM claims are in a different currency from
-`$CURRENCY`, record which one in `inputs.json` (`founder_stated_inputs_currency`,
-`existing_claims_currency`). Without them a converted run cannot check the founder's numbers against
-the computed ones and says so instead of guessing.
-
-`--sizing-basis` carries `inputs.json`'s declared convention into `sizing.json` the same way. Passing
-an empty string (the shell variable is unset because `inputs.json` never declared it) is safe —
-`market_sizing.py` treats an empty/absent value as "not declared" and omits the field from
-`sizing.json` rather than fabricating `"current_year"`; the report then renders "Not declared"
-instead of asserting a convention that was never in force for this run.
+If the founder's own figures or the deck's claims are in another currency, record which in `inputs.json`
+(`founder_stated_inputs_currency`, `existing_claims_currency`).
 
 #### Single methodology dispatch
 
 When methodology is "top_down" only: dispatch one TOP_DOWN_METHODOLOGY task, gate the hand-off, then
-`cat "$HANDOFF_DIR/top_down_output.json" | python3 "$SCRIPTS/market_sizing.py" --stdin --pretty --run-id "$RUN_ID" --currency "$CURRENCY" --sizing-basis "$SIZING_BASIS" -o "$ANALYSIS_DIR/sizing.json"`
+`cat "$HANDOFF_DIR/top_down_output.json" | python3 "$SCRIPTS/market_sizing.py" --stdin --pretty --run-id "$RUN_ID" --validation "$ANALYSIS_DIR/validation.json" --inputs "$ANALYSIS_DIR/inputs.json" --currency "$CURRENCY" --sizing-basis "$SIZING_BASIS" -o "$ANALYSIS_DIR/sizing.json"`
 (deriving `$CURRENCY` and `$SIZING_BASIS` from `inputs.json` exactly as above).
 When methodology is "bottom_up" only: same with `bottom_up_output.json`.
 
@@ -878,16 +853,10 @@ OUTPUT_PATH: <HANDOFF_AGENT>/sensitivity_output.json
 RUN_ID: <RUN_ID>
 
 You are the market-sizing agent dispatched in Context A (SENSITIVITY_TEST).
-Read:
-- <ANALYSIS_DIR_AGENT>/validation.json — for confidence tiers
-- <ANALYSIS_DIR_AGENT>/sizing.json — for base values and approach. Base values are the ones the
-  math used, under each figure's `inputs`. If an `fx` block is present, ignore its
-  `original_value` entries — those are pre-conversion figures in another currency, and mixing one
-  into a range would silently size a different market.
-
-Construct sensitivity input with confidence-based ranges. Tag each parameter
-with confidence from validation: `sourced`, `derived` (min +/-30%), `agent_estimate`
-(min +/-50%). Include EVERY `agent_estimate` parameter — compose_report.py flags
+Read <ANALYSIS_DIR_AGENT>/sizing.json: `input_provenance` gives, for each input, the value the sizing
+used (`value_consumed`) and its grade (`category`). sensitivity.py takes both from there itself, so
+you choose only the ranges. Tag each with a confidence: `sourced`, `derived` (min +/-30%),
+`agent_estimate` (min +/-50%). Include EVERY `agent_estimate` input — compose_report.py flags
 missing ones as UNSOURCED_ASSUMPTIONS.
 
 Use your Write tool to write to OUTPUT_PATH exactly the shape expected by
@@ -897,11 +866,9 @@ sensitivity.py. Each range MUST include a `confidence` of `sourced`,
 fires:
 {
   "approach": "bottom_up|top_down|both",
-  "base": {<parameter: value pairs from sizing.json>},
   "ranges": {
     "<parameter>": {"low_pct": <negative number>, "high_pct": <positive number>, "confidence": "sourced|derived|agent_estimate"}
-  },
-  "validation_confidence": {"<parameter>": "sourced|derived|agent_estimate"}
+  }
 }
 **`sourced` splits on the assumption's own `confidence`; omission is the narrow case, not the default.**
 Source states a range → `sourced`. `sourced` + `confidence: high` + no stated range → omitting is
@@ -909,14 +876,8 @@ acceptable. **`sourced` + `confidence` medium or low → include at `derived` (�
 corroborated, not precise, and that cell is often the least certain input in the model. Any consumed
 parameter with no range is reported as `SENSITIVITY_OMITS_PARAM` unless it is `sourced`/`high`.
 
-**A declared `confidence` cannot narrow a validated one.** `sensitivity.py` applies whichever of the
-range's `confidence` and `validation_confidence` is stricter, so tagging a medium-confidence parameter
-`sourced` does not avoid widening. Tag honestly.
-
-`validation_confidence` mirrors each parameter's `category` from validation.json
-and is the BACKSTOP: if you omit a range's own `confidence`, sensitivity.py reads
-the tier from here instead of silently falling back to `sourced` (which widens
-nothing). Emit both — the range's own `confidence` still wins where present.
+**A declared `confidence` cannot narrow the recorded grade**: sensitivity.py applies the stricter
+of the two, so tagging an estimate `sourced` does not avoid widening. Tag honestly.
 Then return ONLY the receipt JSON in your final assistant message:
 {"status": "complete", "output_path": "<echo of OUTPUT_PATH>"}
 Do NOT write any file other than OUTPUT_PATH — you never write a canonical
@@ -928,107 +889,30 @@ run_id stamping.
 
 ```bash
 cat "$HANDOFF_DIR/sensitivity_output.json" | \
-  python3 "$SCRIPTS/sensitivity.py" --pretty --run-id "$RUN_ID" -o "$ANALYSIS_DIR/sensitivity.json"
+  python3 "$SCRIPTS/sensitivity.py" --pretty --run-id "$RUN_ID" --sizing "$ANALYSIS_DIR/sizing.json" \
+    --inputs "$ANALYSIS_DIR/inputs.json" -o "$ANALYSIS_DIR/sensitivity.json"
 ```
 <!-- skill-quality-ci: bash-after-subagent-ok -->
 
 #### CHECKLIST dispatch prompt template
 
-```
-CONTEXT: CHECKLIST
-OUTPUT_PATH: <HANDOFF_AGENT>/checklist_output.json
-RUN_ID: <RUN_ID>
+The prompt is printed, not written: run this, then dispatch the CHECKLIST sub-agent with the printed
+text as its prompt, unchanged — nothing added, removed or reworded, in either round. It also writes the
+copy of `methodology.json` the grader reads, which leaves out the revision record.
 
-You are the market-sizing agent dispatched in Context A (CHECKLIST). Read:
-- ${CLAUDE_PLUGIN_ROOT}/skills/market-sizing/references/pitfalls-checklist.md
-- ${CLAUDE_PLUGIN_ROOT}/skills/market-sizing/references/artifact-schemas.md
-  (read the "Canonical 22 checklist IDs" section)
-- <ANALYSIS_DIR_AGENT>/inputs.json
-- <ANALYSIS_DIR_AGENT>/methodology.json
-- <ANALYSIS_DIR_AGENT>/validation.json
-- <ANALYSIS_DIR_AGENT>/sizing.json
-
-**Materials-dependent items on a run with no materials.** If `inputs.materials_provided` is empty —
-a conversational run, no deck, no model — then an item that can only be evidenced BY a deck or
-financial model (competitive content, GTM evidence, hiring/burn alignment) scores `not_applicable`,
-not `fail`. There was nothing to acknowledge competition, GTM, or projections alignment *in*. Scoring
-it `fail` penalises the founder for a document they were never asked for and moves the headline
-percentage, which is the number they quote. `not_applicable` is excluded from the denominator, so the
-score reflects what was actually assessable. Say in the item's notes that it was skipped for want of
-materials.
-
-You do NOT see the original deck — score `competitive_landscape_acknowledged` from
-`inputs.json`'s `competitive_landscape_notes` field only (present or `null`), not from
-inference about what the deck "probably" said. Score `som_backed_by_gtm` from
-`inputs.json`'s `gtm_evidence_notes` field only, and `som_consistent_with_projections` from
-`inputs.json`'s `projections_alignment_notes` field only — same rule, two different fields, because
-GTM/customer-acquisition evidence and hiring-plan/burn-rate evidence are different things and one
-field cannot stand in for both.
-
-Assess all 22 items with status (pass/fail/not_applicable) and notes.
-
-`notes` prints VERBATIM in the founder's report, so name the source the way the
-founder knows it — never by our filename. They never saw `inputs.json` or
-`sizing.json`; they saw their deck and the figures they gave you.
-  Instead of: "sizing.json records formula strings for every figure"
-  Write:      "every figure shows the formula behind it"
-  Instead of: "inputs.json gtm_evidence_notes is null"
-  Write:      "the deck states no go-to-market plan"
-State what is true of the MARKET or the founder's own materials.
-
-Use your Write tool to write to OUTPUT_PATH the items array without a summary
-(the producer script computes the summary). Each item has this shape:
-{
-  "items": [
-    {"id": "structural_tam_gt_sam_gt_som", "status": "pass", "notes": null}
-  ]
-}
-status is one of: pass, fail, not_applicable.
-
-Assess every one of these 22 items — one item per id, no omissions, no invented
-ids. The 22 ids, grouped by category:
-Structural Checks:
-    {"id": "structural_tam_gt_sam_gt_som"}
-    {"id": "structural_definitions_correct"}
-TAM Scoping:
-    {"id": "tam_matches_product_scope"}
-    {"id": "source_segments_match"}
-SOM Realism:
-    {"id": "som_share_defensible"}
-    {"id": "som_backed_by_gtm"}
-    {"id": "som_consistent_with_projections"}
-Data Quality:
-    {"id": "data_current"}
-    {"id": "sources_reputable"}
-    {"id": "figures_triangulated"}
-    {"id": "unsupported_figures_flagged"}
-    {"id": "validated_used_precisely"}
-    {"id": "assumptions_categorized"}
-Methodology:
-    {"id": "both_approaches_used"}
-    {"id": "approaches_reconciled"}
-    {"id": "growth_dynamics_considered"}
-Market Understanding:
-    {"id": "market_properly_segmented"}
-    {"id": "competitive_landscape_acknowledged"}
-    {"id": "sam_expansion_path_noted"}
-Presentation:
-    {"id": "assumptions_explicit"}
-    {"id": "formulas_shown"}
-    {"id": "sources_cited"}
-
-Then return ONLY the receipt JSON in your final assistant message:
-{"status": "complete", "output_path": "<echo of OUTPUT_PATH>"}
-Do NOT write any file other than OUTPUT_PATH — you never write a canonical
-artifact; anything else you write bypasses schema validation and
-run_id stamping.
+```bash
+python3 "$SCRIPTS/dispatch_prompt.py" checklist --run-id "$RUN_ID" \
+  --analysis-dir "$ANALYSIS_DIR" --analysis-dir-agent "$ANALYSIS_DIR_AGENT" \
+  --handoff-dir "$HANDOFF_DIR" --handoff-agent "$HANDOFF_AGENT" \
+  --plugin-root-agent "${CLAUDE_PLUGIN_ROOT}"
 ```
 
 **After the sub-agent returns:** gate the hand-off per the Context A hand-off protocol, then pipe:
 
 ```bash
 cat "$HANDOFF_DIR/checklist_output.json" | \
-  python3 "$SCRIPTS/checklist.py" --pretty --run-id "$RUN_ID" -o "$ANALYSIS_DIR/checklist.json"
+  python3 "$SCRIPTS/checklist.py" --pretty --run-id "$RUN_ID" --sizing "$ANALYSIS_DIR/sizing.json" \
+    -o "$ANALYSIS_DIR/checklist.json"
 ```
 <!-- skill-quality-ci: bash-after-subagent-ok -->
 
@@ -1116,15 +1000,21 @@ and found nothing", never as a failure.
 
 A review is final. Only if an accepted finding in `redteam.json` is `high` and names a `parameter`,
 ask via `AskUserQuestion`: option 1 "Deliver with the challenges shown", option 2 "Revise the
-challenged inputs and have it reviewed once more (about 10 minutes)". Otherwise go to Step 7.
+challenged inputs and have it reviewed once more (about 10 minutes)". Otherwise go to Step 7. Record
+the answer (without it, compose discloses `REVISION_NOT_OFFERED`):
+`python3 "$SCRIPTS/record_revision_answer.py" --dir "$ANALYSIS_DIR" --answer deliver|revise --source founder`
 
 On "Revise", ask which changes to make: one option per change you propose, written
 `<input>: <from> → <to> (<its source>)`, plus "None of these". A figure the founder stated changes
-only to one of their own figures or one they type. Record exactly what they confirmed, then make
-exactly those edits:
-`"red_team_revision": {"approved_by_founder": true, "founder_words": "<their answer>", "changes": [{"field": "<input>", "from": <v>, "to": <v>}]}`
-in `methodology.json`. Re-run Steps 5, 6a/6b and 6c once, with the same `RUN_ID`, on round-2 hand-off
-paths, reusing round 1's documents and their OCR:
+only to one of their own figures or one they type. Make exactly the edits they confirmed; if a
+change's reason needs recording, it goes in `methodology.json`
+`"red_team_revision": {"changes": [{"field": "<input>", "reason": "<why>"}]}`, which nothing reads or
+prints. The report states what changed between the reviews from the reviews themselves. Change those figures
+in `validation.json`, then re-run the sizing with `market_sizing.py --replay "$ANALYSIS_DIR/sizing.json"
+--validation "$ANALYSIS_DIR/validation.json" --inputs "$ANALYSIS_DIR/inputs.json" -o "$ANALYSIS_DIR/sizing.json"`
+(a change that swaps what an input refers to, such as the founder's own ARPU for the researched one,
+re-dispatches that sizing step instead). Then re-run 6a/6b and 6c once, with the same `RUN_ID`, on
+round-2 hand-off paths, reusing round 1's documents and their OCR:
 
 ```bash
 HANDOFF_DIR="$ANALYSIS_DIR/handoff/$RUN_ID/r2"; mkdir -p "$HANDOFF_DIR"
@@ -1135,12 +1025,16 @@ python3 "$SHARED_SCRIPTS/resolve_artifacts_root.py" --handoff-dir-agent \
 #   red_team.py ... --uploads-dir "$ANALYSIS_DIR/handoff/$RUN_ID/docs" --ocr-dir "$ANALYSIS_DIR/handoff/$RUN_ID/ocr"
 ```
 
-Whatever the second review says is delivered; there is no third. Labels, prompts and chat describe
-figures, never their history — the report says in one line that a revision happened. A founder
+The review shown is the first one of the analysis as delivered; any later review of the same analysis
+is listed beneath it, so a re-run neither replaces nor hides one. Labels, prompts and chat describe
+figures, never their history — the report states the reviews and what changed between them. Why a
+figure changed goes in that change's `reason`, which no page prints and the review never reads; a `label`
+names only what the figure is ("Reseller-channel share of qualifying accounts", not "set independently"). A founder
 answer after Step 6c that would change an input is this round while it is unused; once it is used,
 record the answer in `methodology.json` `founder_notes` and deliver.
 
-**If the founder asked you not to ask questions**, take option 1 here, at Step 5.5's
+**If the founder asked you not to ask questions**, take option 1 here (recorded with
+`--source no_questions`), at Step 5.5's
 percent-scale question and at the two-figures question (Steps 2–3), list each in
 `methodology.json` `gate_defaults`, and continue. For these
 questions only, this overrides the plain-chat fallback: do not wait.
@@ -1163,8 +1057,16 @@ re-running fix it?**
   `RED_TEAM_FINDINGS`) are the analysis's honest verdict about the sizing. Report them to the
   founder as-is — never re-score, re-dispatch, reword, or edit the analysis or the review to make
   them disappear. Re-running cannot fix a finding that is true.
-- **About the review itself** (`REDTEAM_ALTERED`, `RED_TEAM_RERUN_UNAPPROVED`,
-  `REVIEW_COPY_MISSING`, `RED_TEAM_SKIP_CONTRADICTED`): each message states its own remedy.
+- **About the review itself** (`REDTEAM_ALTERED`, `REVIEW_COPY_MISSING`, `RED_TEAM_SKIP_CONTRADICTED`):
+  each message states its own remedy. `REVISION_NOT_OFFERED`: ask Step 6d's question now,
+  record the answer, re-run compose. `ANALYSIS_CHANGED_BETWEEN_REVIEWS` is a disclosure: deliver.
+- **About the sizing's inputs.** `SIZING_STALE` (research changed before the review): re-run with
+  `--replay` as in Step 6d. `SENSITIVITY_STALE`: re-run the Step 6a pipe. `CHECKLIST_STALE`: re-dispatch
+  the checklist, or accept it with the reason. `SIZING_UNRESOLVABLE`: restore the research figure the
+  sizing named. `SIZING_NOT_CHECKED`: re-run Step 5 with references. `RECORD_CHANGED_AFTER_REVIEW`:
+  restore what the review saw, or ask the founder (Step 6d); a replay does not clear it.
+  `SIZING_ALTERED` and `UNIT_CHANGED_AFTER_REJECTION` are disclosures: deliver. Never edit
+  `sizing.json`, the review, or a research figure's unit to make any of these agree.
 
 Two codes sit in neither class, and saying so is more useful than filing them wrongly:
 
@@ -1281,7 +1183,7 @@ Its shape (for reference — read the file, do not reconstruct it):
   "market_size_approach": "<bottom_up | top_down | null — which build produced the tam/sam/som above; null means no sizing.json was resolvable, so say the figures are unsourced rather than naming a build>",
   "company_name": "<from inputs.json>",
   "deck_coverage": <null OR {"deck_reviewed": true, "stated": [<canonical keys with values>], "missing": [<canonical keys with null>]} — copy verbatim from coaching_payload emitted by compose_report.py>,
-  "approach_comparison": <null on a single-approach run, else {"tam_delta_pct": ..., "sam_delta_pct": ..., "som_delta_pct": ..., "shared_inputs": [{"metric": ..., "detail": ...}], "caveat": ...} — copy verbatim>,
+  "approach_comparison": <null on a single-approach run, else {"tam_gap": ..., "sam_gap": ..., "som_gap": ..., "shared_inputs": [{"metric": ..., "detail": ...}], "caveat": ...} — copy verbatim>,
   "review_dir": "<ANALYSIS_DIR absolute path>",
   "report_path": "<ANALYSIS_DIR>/report.md",
   "insertion_marker": "<EXACT marker string from report.json, e.g. <!-- COACHING_INSERTION_POINT_a1b2c3d4 -->"
@@ -1308,7 +1210,7 @@ OR if the payload is unusable (write no file):
 {"status": "blocked", "reason": "<specific gap>"}
 ```
 
-**After the sub-agent returns:** if its final message is a `{"status": "blocked", "reason": ...}` object, stop and report the reason to the founder — do not run the gate. Otherwise gate the hand-off, then (on gate exit 0) transform and insert deterministically. **The commentary leaves the model exactly once (into the sub-agent's Write call) — NEVER re-type the sub-agent's markdown into a heredoc or a `python -c` argument.**
+**After the sub-agent returns:** if its final message is a `{"status": "blocked", "reason": ...}` object, stop and report the reason to the founder — do not run the gate. The one exception is `write_refused`: run the Step 0 proof if it did not run, rebuild `<HANDOFF_AGENT>` from the resolver, and re-dispatch once; a second `write_refused` stops. Otherwise gate the hand-off, then (on gate exit 0) transform and insert deterministically. **The commentary leaves the model exactly once (into the sub-agent's Write call) — NEVER re-type the sub-agent's markdown into a heredoc or a `python -c` argument.**
 
 <!-- skill-quality-ci: bash-after-subagent-ok -->
 ```bash
@@ -1346,12 +1248,12 @@ The gate (`check_handoff.py --format=markdown`) verifies the sub-agent's hand-of
 - **Exit 5** (receipt echoes a different path) → **repair-dispatch** telling the agent the exact expected OUTPUT_PATH.
 - **Exit 6** (receipt unparseable / no `output_path` key) → **redo-dispatch** with "return ONLY the receipt JSON — no fences, no prose." (A `status: "blocked"` final message is NOT exit 6 — it was handled before the gate.)
 - **Exit 7** (content-shape gate failed — receipt-shaped or marker-bearing file) → **repair-dispatch**: "your file wasn't the coaching commentary — write the coaching markdown, nothing else, to `<OUTPUT_PATH>`."
-- **Exit 8** (`path_namespace_mismatch`) → the sub-agent **complied**; the agent-namespace prefix was wrong. Its relative `OUTPUT_PATH` resolved against the outputs mount instead of the session root, so the file landed at the doubled path reported in `found_at`. Do NOT treat this as a fabricated receipt, and do NOT read the hand-off from `found_at` — re-dispatch with the corrected agent-namespace prefix (re-run `resolve_artifacts_root.py --agent` and rebuild `<HANDOFF_AGENT>` from the printed value). Counts against the same 2-dispatch retry budget.
+- **Exit 8** (`path_namespace_mismatch`) → the sub-agent **complied**; the agent-namespace prefix was wrong. Its relative `OUTPUT_PATH` resolved against the outputs mount instead of the session root, so the file landed at the doubled path reported in `found_at` (only a relative path can do this: run the Step 0 proof). Do NOT treat this as a fabricated receipt, and do NOT read the hand-off from `found_at` — re-dispatch with the corrected agent-namespace prefix (re-run `resolve_artifacts_root.py --agent` and rebuild `<HANDOFF_AGENT>` from the printed value). Counts against the same 2-dispatch retry budget.
 - **Any other exit** (script crash, unreadable file, invalid UTF-8) → STOP with the stderr. `check_handoff.py` exit 4 is reachable here too: gate 1 already confirmed the file exists and is non-empty, so a failure opening it afterwards is an IO/permission fault, not a malformed hand-off. A decode error raises before any typed exit and surfaces as a traceback.
 - **`insert_coaching.py` exit 1** (blocked; stdout carries `{"status": "blocked", "reason": ...}`) → stop and report the exact reason. Do NOT hand-edit `report.md` — if the reason mentions a truncated report or a missing marker, re-run `compose_report.py --write-md` and retry the chain. If the reason is `commentary_markdown missing or empty`, treat as a malformed hand-off: repair-dispatch quoting the reason.
 - **After ANY corrective dispatch, resume from the gate chain** — never feed the transform+insert pipe an ungated file.
 
-**Retry budget:** max 2 corrective dispatches (same rule as Context A). **Graceful degrade:** if the FIRST corrective dispatch also exits 3 while the receipt claims `complete` with the correctly echoed path, treat the host topology as hand-off-incompatible and fall back to message-channel transport. **The corrective dispatch MUST ask for the commentary inline for this to be reachable** — add: "the file hand-off is not working in this environment; return the coaching commentary itself as your final message, as raw markdown, with no receipt JSON and no fences." Without that line the fallback is unreachable: the normal Context B prompt instructs the agent to return ONLY the receipt and not to narrate, so its final message contains no markdown to stage. Then stage that returned markdown to `$STAGING_DIR/coaching.md` via a **single-quoted** `<<'COACHING_EOF'` heredoc (apostrophe-safe; NEVER `python -c`, NEVER the `outputs/` root — `$STAGING_DIR` is the `/tmp` scratch dir from Step 0, never the promoted outputs mount), and run the same `md_to_commentary.py "$STAGING_DIR/coaching.md" | insert_coaching.py` chain against that staged file.
+**Retry budget:** max 2 corrective dispatches (same rule as Context A). **Graceful degrade:** if the FIRST corrective dispatch also exits 3 while the receipt claims `complete` with the correctly echoed path, treat the host topology as hand-off-incompatible and fall back to message-channel transport, and tell the founder in one plain sentence (see Context A's degrade rule). **The corrective dispatch MUST ask for the commentary inline for this to be reachable** — add: "the file hand-off is not working in this environment; return the coaching commentary itself as your final message, as raw markdown, with no receipt JSON and no fences." Without that line the fallback is unreachable: the normal Context B prompt instructs the agent to return ONLY the receipt and not to narrate, so its final message contains no markdown to stage. Then stage that returned markdown to `$STAGING_DIR/coaching.md` via a **single-quoted** `<<'COACHING_EOF'` heredoc (apostrophe-safe; NEVER `python -c`, NEVER the `outputs/` root — `$STAGING_DIR` is the `/tmp` scratch dir from Step 0, never the promoted outputs mount), and run the same `md_to_commentary.py "$STAGING_DIR/coaching.md" | insert_coaching.py` chain against that staged file.
 
 **Verify the receipt before presenting** (Step 10 must not deliver a report whose marker was never consumed): the chain's exit 0 IS that verification — do not skip the gate/insert chain and present `report.md` directly after the dispatch.
 
@@ -1379,9 +1281,8 @@ over are different acts: a founder looking at a row of cards cannot tell which d
 Write each deliverable into your message as its own named entry — a link where this surface renders
 one that opens (on a `/sessions` session tree, `computer://` + the absolute path you just copied it
 to), otherwise the label with the path stated beside it — labelled by what the document IS, in the
-founder's words: *"Here's your finished analysis: [the written report](…) — everything scored, with
-the evidence behind it; [the interactive version](…) has the charts."* "The files are above" is not a
-hand-over. This does not conflict with the never-name-a-file rule: the founder reads your label,
+founder's words (the written report, the charts), not by its filename. "The files are above" is not a
+hand-over. Where a step prints the hand-over, the printed entries are these. This does not conflict with the never-name-a-file rule: the founder reads your label,
 never the path. Never paste a report's body into the message — link or name it.
 
 **Then offer the working data — once, in one sentence.** For example: *"If you want to keep the working
@@ -1405,10 +1306,11 @@ opening verdict paragraph (the same words, its marks explained), and the offer:
 ```bash
 python3 "$SCRIPTS/closing_message.py" --report "$ANALYSIS_DIR/report.json" \
   --deliverable "the written report=<absolute path you copied the .md to>" \
-  --deliverable "the interactive version=<absolute path of the .html, if generated>"
+  --deliverable "the charts=<absolute path you copied the .html to, if generated>"
 ```
 
-Send its output as your message; a greeting before it is fine.
+Send its output as your message: the printed text is the message. It already answers whether the
+founder's figures hold up, so there is nothing to add before it.
 
 No cleanup needed: scratch lives in `$STAGING_DIR` (`/tmp`, reclaimed by the sandbox). **Do not `rm`
 anything under `$ANALYSIS_DIR`** — it is the promoted `outputs/` tree in Cowork, where deleting a
@@ -1437,7 +1339,7 @@ deliverable; in Cowork the files are.
 
 ## What-If Recomputation Rule
 
-If the founder asks "what if [parameter] were [value]": re-run `market_sizing.py` and/or `sensitivity.py` with the modified input, `-o` into `$STAGING_DIR` (never `$ANALYSIS_DIR` — a what-if presents, it does not revise the reviewed analysis), and present the script's output. Never recompute TAM/SAM/SOM by hand — the compound formula (customer count × ARPU × serviceable % × target %) makes mental arithmetic error-prone and the script output is the authoritative source.
+If the founder asks "what if [parameter] were [value]": re-run `market_sizing.py` (plain numbers, no `--validation`; the result says it was not checked against the research) and/or `sensitivity.py` with the modified input, `-o` into `$STAGING_DIR` (never `$ANALYSIS_DIR` — a what-if presents, it does not revise the reviewed analysis), and present the script's output. Never recompute TAM/SAM/SOM by hand — the compound formula (customer count × ARPU × serviceable % × target %) makes mental arithmetic error-prone and the script output is the authoritative source.
 
 ## Feedback
 

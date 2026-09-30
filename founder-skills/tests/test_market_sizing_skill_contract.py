@@ -459,7 +459,8 @@ def test_bottom_up_dispatch_return_shape_keys() -> None:
 
 def test_sensitivity_dispatch_return_shape_keys() -> None:
     """The SENSITIVITY_TEST dispatch template in SKILL.md must include the keys
-    sensitivity.py reads from stdin: approach, base, ranges.
+    sensitivity.py reads from stdin: approach, ranges. (The base values are not the sub-agent's to
+    write: sensitivity.py takes them from the sizing it is given with --sizing, pinned below.)
     Each ranges entry must carry low_pct, high_pct, confidence.
 
     The agent body's SENSITIVITY_TEST subtype must show the same shape.
@@ -473,7 +474,7 @@ def test_sensitivity_dispatch_return_shape_keys() -> None:
         "sensitivity.py CONFIDENCE_MIN_RANGE has unexpected number of keys — check module load"
     )
 
-    required_top_keys = {"approach", "base", "ranges"}
+    required_top_keys = {"approach", "ranges"}
     required_range_keys = {"low_pct", "high_pct", "confidence"}
 
     skill_text = SKILL_MD.read_text(encoding="utf-8")
@@ -517,6 +518,25 @@ def test_sensitivity_dispatch_return_shape_keys() -> None:
 # ---------------------------------------------------------------------------
 
 
+def _generated_checklist_prompt() -> str:
+    """The CHECKLIST prompt as dispatch_prompt.py prints it: the template moved out of SKILL.md so the
+    main thread cannot rewrite it (it did, both rounds, on a live run)."""
+    import importlib.util
+    import tempfile
+
+    scripts = SKILL_MD.parent / "scripts"
+    spec = importlib.util.spec_from_file_location("ms_dp_contract", scripts / "dispatch_prompt.py")
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    with tempfile.TemporaryDirectory() as tmp:
+        d = Path(tmp)
+        for name in ("inputs.json", "validation.json", "sizing.json", "methodology.json"):
+            (d / name).write_text("{}")
+        out: str = mod.checklist("R", str(d), str(d / "h"), "H", "A", "P")
+    return out
+
+
 def test_checklist_dispatch_return_shape_keys() -> None:
     """The CHECKLIST dispatch template in SKILL.md must include 'items' (the only
     top-level key checklist.py reads from stdin), and status values
@@ -527,14 +547,7 @@ def test_checklist_dispatch_return_shape_keys() -> None:
     mod = _load_checklist_module()
     valid_statuses: frozenset[str] = frozenset(mod.VALID_STATUSES)  # type: ignore[attr-defined]
 
-    skill_text = SKILL_MD.read_text(encoding="utf-8")
-    anchor = "CONTEXT: CHECKLIST"
-    assert anchor in skill_text, f"{SKILL_MD.name} has no '{anchor}' section"
-    # Bound on the enclosing fence, not a fixed byte count — the third time a
-    # fixed window has failed on correct content after a paragraph was added above
-    # the asserted line.
-    fence_end = skill_text.index("```", skill_text.index(anchor))
-    section = skill_text[skill_text.index(anchor) : fence_end]
+    section = _generated_checklist_prompt()
 
     assert '"items"' in section, (
         f"{SKILL_MD.name} CHECKLIST return shape must include 'items' key (checklist.py reads data['items'] from stdin)"
@@ -638,8 +651,9 @@ def test_context_a_dispatch_templates_contain_no_write_instruction() -> None:
         ("TOP_DOWN_METHODOLOGY", "**Full dispatch prompt template (TOP_DOWN_METHODOLOGY):**"),
         ("BOTTOM_UP_METHODOLOGY", "**Full dispatch prompt template (BOTTOM_UP_METHODOLOGY):**"),
         ("SENSITIVITY_TEST", "#### SENSITIVITY_TEST dispatch prompt template"),
-        ("CHECKLIST", "#### CHECKLIST dispatch prompt template"),
     ]
+    # CHECKLIST's prompt is generated; its no-write instruction is asserted on the printed text.
+    assert "Do NOT write any file other than OUTPUT_PATH." in _generated_checklist_prompt()
 
     for context_name, anchor in contexts:
         start = skill_text.find(anchor)
@@ -1382,17 +1396,7 @@ def test_checklist_dispatch_template_enumerates_all_canonical_ids() -> None:
         f"update this test if the canonical set genuinely changed"
     )
 
-    skill_text = SKILL_MD.read_text(encoding="utf-8")
-
-    # Bound search to the CHECKLIST dispatch template fence
-    anchor = "#### CHECKLIST dispatch prompt template"
-    start = skill_text.find(anchor)
-    assert start != -1, f"{SKILL_MD.name} has no '{anchor}' section"
-    open_fence = skill_text.find("\n```\n", start)
-    assert open_fence != -1, f"{SKILL_MD.name} CHECKLIST: no opening fence after section anchor"
-    close_fence = skill_text.find("\n```\n", open_fence + 4)
-    assert close_fence != -1, f"{SKILL_MD.name} CHECKLIST: no closing fence"
-    template_body = skill_text[open_fence:close_fence]
+    template_body = _generated_checklist_prompt()
 
     # Extract all "id": "some_id" values from the template body
     template_ids = set(re.findall(r'"id"\s*:\s*"([a-z][a-z0-9_]+)"', template_body))
@@ -1553,22 +1557,25 @@ def test_agent_final_message_contract_context_a_is_receipt_only() -> None:
     )
 
 
-def test_sensitivity_dispatch_emits_validation_confidence_backstop() -> None:
-    """The SENSITIVITY_TEST dispatch must ask for `validation_confidence`.
+def test_the_sensitivity_and_checklist_pipes_pass_the_sizing() -> None:
+    """sensitivity.py takes its base values and grade tiers from the sizing, and both producers
+    record which sizing they were built on, ONLY when the pipe passes --sizing.
 
-    `sensitivity.py` grew an optional `validation_confidence` map so a range that
-    omits its own `confidence` still gets the right widening floor (derived +/-30%,
-    agent_estimate +/-50%) instead of silently defaulting to `sourced`, which widens
-    nothing. That producer change is INERT unless the dispatch actually emits the
-    key -- nothing else in the pipeline constructs it, and this repo has shipped a
-    guardrail inert before. This pins the wiring, not the producer.
+    That capability is INERT unless the SKILL.md pipe actually passes the flag: without it the
+    sensitivity base falls back to the sub-agent's own copy of every input, and neither artifact
+    says which sizing it was built on, so compose reports both as stale. This pins the wiring, not
+    the producer (it replaces the pin on the `validation_confidence` backstop, which the sizing's
+    recorded grades made redundant).
     """
     text = SKILL_MD.read_text(encoding="utf-8")
-    assert "validation_confidence" in text, (
-        "market-sizing/SKILL.md no longer asks the SENSITIVITY_TEST sub-agent for "
-        "`validation_confidence`. Without it, a range missing its own `confidence` falls back "
-        "to `sourced` and a derived/agent_estimate parameter loses its widening floor silently."
-    )
+    for producer in ("sensitivity.py", "checklist.py"):
+        at = text.find(f'"$SCRIPTS/{producer}"')
+        assert at != -1, f"no {producer} pipe in {SKILL_MD.name}"
+        pipe = text[at : text.find("```", at)]
+        assert '--sizing "$ANALYSIS_DIR/sizing.json"' in pipe, (
+            f"the {producer} pipe in {SKILL_MD.name} does not pass --sizing; the producer then cannot say "
+            f"which sizing it was built on"
+        )
 
 
 def test_the_coaching_payload_carries_the_band_and_the_boolean() -> None:
@@ -1633,8 +1640,8 @@ def test_red_team_dispatch_is_generated_not_hand_written() -> None:
 def test_hand_over_message_is_generated_not_written() -> None:
     """Step 10 must produce the closing message from the report.
 
-    On a live run the closing chat message said "$4.66M ... about 2% of the illustrative $100M" (it
-    is 4.7%), with the never-compute-in-chat rule sitting 1,000 lines above it. The message is now a
+    On a live run the closing chat message called a SOM "about 2%" of the illustrative $100M (it
+    was more than twice that), with the never-compute-in-chat rule sitting 1,000 lines above it. The message is now a
     script's output; the SKILL.md sentence only points at the script.
     """
     text = SKILL_MD.read_text(encoding="utf-8")
@@ -1657,8 +1664,15 @@ def test_a_review_is_final_in_the_skill_text() -> None:
     text = SKILL_MD.read_text(encoding="utf-8")
     content = text[text.index("- **Content findings**") : text.index("Two codes sit in neither class")]
     assert "`RED_TEAM_FINDINGS`" in content and "edit the analysis or the review" in content
-    for code in ("REDTEAM_ALTERED", "RED_TEAM_RERUN_UNAPPROVED", "REVIEW_COPY_MISSING", "RED_TEAM_SKIP_CONTRADICTED"):
+    for code in (
+        "REDTEAM_ALTERED",
+        "REVIEW_COPY_MISSING",
+        "RED_TEAM_SKIP_CONTRADICTED",
+        "ANALYSIS_CHANGED_BETWEEN_REVIEWS",
+    ):
         assert f"`{code}`" in content
+    # RED_TEAM_RERUN_UNAPPROVED is gone: which review is shown is computed from the review copies.
+    assert "RED_TEAM_RERUN_UNAPPROVED" not in text
     assert "must be removed before you hand" not in text
     assert "before the adversarial review in Step 6c" in text
     what_if = text[text.index("## What-If Recomputation Rule") :]
@@ -1671,14 +1685,16 @@ def test_a_review_is_final_in_the_skill_text() -> None:
 def test_step_6d_gives_the_revision_its_route_and_its_bounds() -> None:
     text = SKILL_MD.read_text(encoding="utf-8")
     step = text[text.index("### Step 6d") : text.index("### Step 7")]
+    # The model no longer writes an approval: the one it recorded on a live run was an answer to a
+    # different question, and the page told the founder they had approved a change that did nothing.
+    assert "approved_by_founder" not in text
     for needle in (
         "`AskUserQuestion`",
-        '"approved_by_founder": true',
         '"changes"',
         '--run-id "$RUN_ID/r2"',
         "--review-docs-dir",
         '--uploads-dir "$ANALYSIS_DIR/handoff/$RUN_ID/docs"',
-        "there is no third",
+        "the first one of the analysis as delivered",
         "`founder_notes`",
         "`gate_defaults`",
         "do not wait",
@@ -1694,3 +1710,40 @@ def test_the_skill_says_how_to_record_the_founders_choice_and_how_to_itemize_a_r
     factors = text[text.index("`factors` lists every multiplicand") :]
     factors = factors[: factors.index("\n\n")]
     assert '"role": "divisor"' in factors
+
+
+def test_the_step_a_example_computes_nothing_in_chat() -> None:
+    """The Step-A gate example is the form the model copies, and the Execution checkpoint forbids
+    computing a figure in chat. It used to show an ARPU "Derived from ARR/customers" and a bottom-up line
+    whose ARPU was that monthly figure times twelve; a live run copied it and computed an implied TAM at
+    the gate. Every value in the example comes from a named source, and the methodology line cites only
+    values the table sources."""
+    text = SKILL_MD.read_text(encoding="utf-8")
+    start = text.index("**Step A: Output a chat message**")
+    fence = text.index("```", start)
+    block = text[fence + 3 : text.index("```", fence + 3)]
+    rows = [ln for ln in block.splitlines() if ln.startswith("|") and not set(ln) <= set("|- ")]
+    assert len(rows) >= 4, block  # positive control: the table was found (header + inputs)
+    values: set[str] = set()
+    for row in rows[1:]:
+        cells = [c.strip() for c in row.strip("|").split("|")]
+        source = cells[-1]
+        assert not re.search(r"deriv|comput|calculat|implied|/|÷|×", source, re.IGNORECASE), row
+        values |= set(re.findall(r"\$?\d[\d,.]*[KMB]?", cells[1]))
+    method = [ln for ln in block.splitlines() if ln.lstrip().startswith("- Bottom-up") or "×" in ln]
+    for ln in method:
+        for fig in re.findall(r"\$\d[\d,.]*[KMB]?", ln):
+            assert fig in values, (fig, ln, values)
+
+
+def test_no_reference_presents_the_fx_rate_flag_as_how_a_sizing_converts() -> None:
+    """The sizing SKILL.md runs is the reference path, where the rate comes from an `fx_rate` entry in the
+    record and `--fx-rate` is refused (`market_sizing.py`'s caller-fx check). A reference that names the flag
+    as the way to convert sends a model to a refusal. Every mention must say where the flag applies."""
+    root = Path(__file__).resolve().parents[1] / "skills" / "market-sizing"
+    offenders = []
+    for path in [root / "SKILL.md", *sorted((root / "references").glob("*.md"))]:
+        for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if "--fx-rate" in line and "refused" not in line:
+                offenders.append(f"{path.name}:{n}")
+    assert not offenders, offenders

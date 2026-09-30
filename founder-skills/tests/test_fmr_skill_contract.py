@@ -452,15 +452,20 @@ def test_context_b_commentary_payload_keys() -> None:
         "['output_path', 'status'] — the receipt is the ONLY thing the sub-agent returns"
     )
 
-    # SKILL.md Main-Thread Return section must still present the headline keys
-    # (sourced from coaching_payload / the insert_coaching.py receipt)
+    # SKILL.md Main-Thread Return names the headline keys as the COACHING sub-agent's, never the founder
+    # message's: the hand-over is printed by fmr_closing_message.py, and a model restating those fields in
+    # chat is how runway figures reached a founder recomputed. Bounded on the next heading, not a window.
     skill_text = SKILL_MD.read_text(encoding="utf-8")
     main_thread_anchor = "## Main-Thread Return"
     mt_start = skill_text.find(main_thread_anchor)
     assert mt_start != -1, f"{SKILL_MD.name} has no '## Main-Thread Return' section"
-    mt_section = skill_text[mt_start : mt_start + 2000]
+    mt_end = skill_text.find("\n## ", mt_start + len(main_thread_anchor))
+    assert mt_end != -1, f"{SKILL_MD.name}: Main-Thread Return has no terminating heading"
+    mt_section = skill_text[mt_start:mt_end]
     for key in {"runway_months", "overall_status", "high_severity_warnings"}:
         assert key in mt_section, f"{SKILL_MD.name} Main-Thread Return section does not mention '{key}'"
+    assert "printed hand-over" in mt_section and "do not restate them" in mt_section, mt_section
+    assert 'python3 "$SCRIPTS/fmr_closing_message.py"' in skill_text
 
 
 # ---------------------------------------------------------------------------

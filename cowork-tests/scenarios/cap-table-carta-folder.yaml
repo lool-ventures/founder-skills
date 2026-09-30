@@ -36,8 +36,24 @@ answers:
   # cannot un-benign it silently.
   - when_question: "IIA"
     choose: "No IIA grants"
+  # ATOMIC-BATCH RULE (the harness's, long-standing): a gate's sub-questions are answered together, and if ANY
+  # sub-question has no scripted rule the WHOLE gate falls through to `on_unanswered: first`, discarding the
+  # rules that did match. The skill asks jurisdiction in one call with the mode, the cap-base confirmation and
+  # the note-interest question, so at the 4.0.0 re-record the jurisdiction anchor above was dropped, "Israeli
+  # company" was delivered, and the skill re-asked ("Jurisdiction fix"). These three are pinned to EXACTLY
+  # what `first` already picks, so only jurisdiction's answer changes. If the model batches another
+  # unscripted sibling with it, the record log's "scripted rules answered N/M sub-questions" line names it.
+  - when_question: "flip-focused engagement"
+    choose: "Standard cap-table modeling"
+  - when_question: "cap-table base"
+    choose: "Confirmed"
+  - when_question: "accrued interest"
+    choose: "Yes"
 
 assert:
+  # A relative or /sessions/ file-tool path is refused at host-loop; the Step 0 proof exists so none is used.
+  # Content-class, so it covers sub-agent tool results too (checked by replay on a sub-agent-only string).
+  - tool_result_not_contains: "denied by your permission settings"
   - result: success
   # No `all_tasks_completed` here: nothing in this skill asks the agent for a task list, so the
   # assert is satisfiable only by chance and a losing run blocks a paid record rather than
@@ -68,7 +84,7 @@ assert:
   # Dispatch contract: sub-agents declare no Bash (agents/*.md) — regression tripwire.
   - subagent_tool_absent: 'mcp__workspace__bash'
   # Usability budget: gates asked before value (observed + headroom, from discovery).
-  - questions_count_max: 14
+  - questions_count_max: 15   # 14 + the Pool-basis gate added to the skill (2026-09-28)
   # Author-chosen dispatch budget (production has NO Task-fan-out cap; this is an
   # efficiency tripwire, not a platform mirror). tightened from discovery actuals (observed x1.5).
   - dispatch_count_max: 6
@@ -80,6 +96,7 @@ assert:
   # the mount; this key catches a regression if the mount mode ever loosens). Allowlist = artifact
   # namespace (incl. handoff/**) + founder-context sidecar + promoted deliverables. tightened from discovery actuals (observed x1.5).
   - no_unexpected_files:
+      - 'outputs/artifacts/.host-outputs-*'  # Step 0's file-tool path proof (artifacts root)
       - 'outputs/artifacts/cap-table-cadence/**'
       - 'outputs/artifacts/founder-context-cadence.json'
       - 'outputs/Cadence_*'

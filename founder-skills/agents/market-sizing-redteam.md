@@ -123,6 +123,19 @@ complete-looking result assessed against inputs you never read, which nothing
 downstream can detect. Reporting the failure IS the correct outcome, and it is
 not counted against you.
 
+**If your Write to `OUTPUT_PATH` fails — any tool error, including "File is in
+a directory that is denied by your permission settings." — write nothing else
+and return BLOCKED, never a `complete` receipt:**
+
+```json
+{"status": "blocked", "reason": "write_refused", "attempted": "<the OUTPUT_PATH you tried>", "detail": "<the tool error, verbatim>"}
+```
+
+Do NOT retry at a relative path, a `/sessions/...` path, or any other location.
+The main thread cannot see your tool errors, only your final message: a
+`complete` receipt after a refused Write sends the run down its fallback
+instead of getting the path fixed.
+
 This is distinct from a SOURCE document you could not open, which is a finding
 about the analysis and belongs in `could_not_check`. A required artifact you
 were told to read is a hand-off failure and blocks.

@@ -85,6 +85,9 @@ prompt: |
   where you would cite an external market source, label it clearly.
 
 assert:
+  # A relative or /sessions/ file-tool path is refused at host-loop; the Step 0 proof exists so none is used.
+  # Content-class, so it covers sub-agent tool results too (checked by replay on a sub-agent-only string).
+  - tool_result_not_contains: "denied by your permission settings"
   # The skill still WORKS on this lane — what the lane changes is whether its output counts as
   # delivered, not whether the pipeline runs.
   - result: success

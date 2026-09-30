@@ -17,24 +17,43 @@ Carries the `e2e` marker, so the default suite skips it.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import re
+import shlex
 import shutil
+import subprocess
+import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 from _e2e_harness import (
     FIXTURES,
+    PLUGIN_PATH,
     assert_coaching_commentary_landed,
     assert_run_id_parity,
     has_claude_auth,
     locate_review_dir,
     model_from_capture,
-    run_skill,
+    run_skill_capture,
     step_summary,
 )
 
 MODEL_FIXTURE = FIXTURES / "models" / "synthetic-seed-model.csv"
+SCRIPTS = PLUGIN_PATH / "skills" / "financial-model-review" / "scripts"
+
+
+def _load_handover_check() -> Any:
+    """The containment rule the Stop hook runs, loaded by path so the lane and the hook share it."""
+    spec = importlib.util.spec_from_file_location("_handover_check", PLUGIN_PATH / "scripts" / "_handover_check.py")
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+_handover = _load_handover_check()
 
 
 def self_gated_diagnostic(report_json: dict) -> str:
@@ -117,7 +136,8 @@ def test_financial_model_review_smoke(tmp_path: Path) -> None:
         f"just run the review end to end and produce the report."
     )
 
-    captured = run_skill(prompt, workdir, label="fmr")
+    cap = run_skill_capture(prompt, workdir, label="fmr")
+    captured = cap.messages
     review_dir = locate_review_dir(workdir, "financial-model-review-*", captured, "financial-model-review")
 
     # The contract this lane exists for: the coach read the payload and wrote from it.
@@ -252,3 +272,42 @@ def test_financial_model_review_smoke(tmp_path: Path) -> None:
         review_dir,
         ["inputs.json", "checklist.json", "unit_economics.json", "runway.json", "report.json"],
     )
+
+    # The founder's message CONTAINS the printed hand-over, whole: the report's own verdict (rating and
+    # runway) in the report's words, not restated in chat. Regenerated from the model's OWN
+    # fmr_closing_message.py call (its labels and paths), so a legitimate label choice cannot fail it,
+    # and judged with the Stop hook's own rule. Two readings, as in the market-sizing lane: before any
+    # Stop-hook block (did the printed message hold on its own) and at the end (what stayed on screen).
+    closer_calls = [t for t in cap.calls("Bash") if "fmr_closing_message.py" in str(t["input"].get("command", ""))]
+    assert closer_calls, "the run never printed the hand-over message"
+    argv = shlex.split(str(closer_calls[-1]["input"]["command"]))
+    deliverables = [argv[i + 1] for i, a in enumerate(argv) if a == "--deliverable" and i + 1 < len(argv)]
+    assert deliverables, f"no --deliverable in the model's call: {argv}"
+    printed = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPTS / "fmr_closing_message.py"),
+            "--report",
+            str(review_dir / "report.json"),
+            "--link",
+            "path",
+            *sum((["--deliverable", d] for d in deliverables), []),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    call_id = str(closer_calls[-1]["id"])
+    before = cap.text_after(call_id, until_stop_feedback=True)
+    after = cap.text_after(call_id)
+    ok_before, why_before = _handover.contained(printed, before)
+    ok_after, why_after = _handover.contained(printed, after)
+    blocks = cap.stop_hook_blocks()
+    print(
+        f"[e2e:fmr] hand-over containment: before any Stop-hook block={ok_before} ({why_before or 'clean'}); "
+        f"stop-hook blocks={blocks}; on screen at the end={ok_after} ({why_after or 'clean'})",
+        flush=True,
+    )
+    assert ok_after, f"{why_after}\nprinted: {printed}\non screen: {after[-1500:]}"
+    # A block after a message that already carried the hand-over is the hook misreading the session.
+    assert not (ok_before and blocks), "the Stop hook blocked a message that already carried the hand-over"

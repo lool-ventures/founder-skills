@@ -19,6 +19,9 @@ prompt: |
   produce the report.
 
 assert:
+  # A relative or /sessions/ file-tool path is refused at host-loop; the Step 0 proof exists so none is used.
+  # Content-class, so it covers sub-agent tool results too (checked by replay on a sub-agent-only string).
+  - tool_result_not_contains: "denied by your permission settings"
   - result: success
   # DROPPED 2026-08-24 — `all_tasks_completed` asserts agent behaviour nothing requires, so it is
   # FLAKY on re-record. Measured on two runs of THIS scenario, minutes apart, same harness (2.1.0):
@@ -88,6 +91,7 @@ assert:
   # Allowlist = artifact namespace (incl. handoff/**) + founder-context sidecar + promoted
   # deliverables. Pre-0.24 cassettes exclude loudly (no preRunPaths). tightened from discovery actuals (observed x1.5).
   - no_unexpected_files:
+      - 'outputs/artifacts/.host-outputs-*'  # Step 0's file-tool path proof (artifacts root)
       - 'outputs/artifacts/ic-sim-cadence/**'
       - 'outputs/artifacts/founder-context-cadence.json'
       - 'outputs/Cadence_IC_Simulation.*'

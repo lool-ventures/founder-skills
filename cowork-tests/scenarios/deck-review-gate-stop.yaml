@@ -71,6 +71,9 @@ prompt: |
   Give me the full review with the scored checklist and the written report.
 
 assert:
+  # A relative or /sessions/ file-tool path is refused at host-loop; the Step 0 proof exists so none is used.
+  # Content-class, so it covers sub-agent tool results too (checked by replay on a sub-agent-only string).
+  - tool_result_not_contains: "denied by your permission settings"
   # Declining is a SUCCESSFUL run. The skill was asked to review a deck, asked a question, got
   # "no", and honoured it. Asserting failure here would encode the opposite contract and make
   # an obedient stop look like a crash.
@@ -129,6 +132,7 @@ assert:
   # promoted deliverable are all ABSENT from it, so producing one reds the lane. That is the
   # "a founder who said no got a report" tripwire.
   - no_unexpected_files:
+      - 'outputs/artifacts/.host-outputs-*'  # Step 0's file-tool path proof (artifacts root)
       - 'outputs/artifacts/deck-review-testco/gate_state.json'
       # The advisory lock `gate_state.py answer` takes before its compare-and-set. A real,
       # expected side effect of writing the answer — measured as the ONLY entry outside the

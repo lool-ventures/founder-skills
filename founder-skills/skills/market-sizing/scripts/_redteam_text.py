@@ -70,7 +70,7 @@ def humanize_claim(text: str) -> str:
         if tok.rsplit(".", 1)[-1] in _FILE_EXTENSIONS:
             return tok  # a filename: the founder-text scan owns that case and names it
         if head == "existing_claims" and tail:
-            return f"the {tail.upper()} your materials state"
+            return f"the {tail.upper()} you stated"
         return tok.replace(".", " ").replace("_", " ")
 
     return _EMBEDDED_TOKEN_RE.sub(_one, stripped)
@@ -105,7 +105,7 @@ _PATH_WORDS: dict[str, str] = {
 _B_L = r"(?<![\w.\-/$])"
 _FILE_RE = re.compile(_B_L + r"[a-z][a-z0-9_]*\.(?:json|py|md|html)(?![\w\-])")
 # Our identifiers: snake_case with at least one underscore, optionally dotted, and -- measured --
-# validation ids carry a `$` figure inside them (`arpu_founder_$203_pppm`, `founder_stated_tam_$12B`).
+# validation ids carry a `$` figure inside them (`arpu_founder_$157_pppm`, `founder_stated_tam_$12B`).
 _IDENT_RE = re.compile(_B_L + r"[a-z][a-z0-9]*(?:_[A-Za-z0-9$]+)+(?:\.[a-z][a-z0-9_]*)*(?![\w\-/])")
 # The one parameter with no underscore. Lowercase only: "ARPU" is the founder's word already.
 _BARE_ARPU_RE = re.compile(_B_L + r"arpu(?![\w\-])")
@@ -121,9 +121,9 @@ def _ident_words(tok: str) -> str:
         parts = parts[:-1]
     head, rest = parts[0], parts[1:]
     if head == "existing_claims" and rest:
-        return f"the {rest[0].upper()} your materials state"
+        return f"the {rest[0].upper()} you stated"
     if head == "existing_claims_detail":
-        return "the figure your materials state"
+        return "the figure you stated"
     words: list[str] = []
     for p in parts:
         if p in PARAM_LABELS:

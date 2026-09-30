@@ -1,7 +1,7 @@
 name: cowork-replay
 
 # Token-free, agent-free PR gate for the fleet cowork-harness cassettes, built on the packaged
-# cowork-harness GitHub Action (0.22.0+). Four gates, each rendering a verdict table into the
+# cowork-harness GitHub Action (0.22.0+). Five gates, each rendering a verdict table into the
 # PR job summary:
 #   1. lint            — scenario no-silent-false-green invariants
 #   2. privacy gate    — HARD: PII/host-path scan (PII only — --skip-staleness AND
@@ -12,9 +12,10 @@ name: cowork-replay
 #                        `fileSigs` names the exact changed file — a real drift points at the file.
 #                        Re-record on a cadence (see cowork-tests/README.md).
 #   4. replay          — content + manifest-backed file_exists/artifact_json across the whole dir.
+#   5. hand-over       — HARD: each recording that ran a closing script carries the printed hand-over.
 # No model tokens, no Docker, no staged agent binary → runs on a stock GitHub-hosted runner.
 #
-# Version policy: **PINNED EXACTLY at 3.8.1 as of 2026-09-18** (3.5.0 earlier the same day; 3.2.0 from 2026-09-01) — see the block at the `npm i -g` site
+# Version policy: **PINNED EXACTLY at 4.0.0 as of 2026-09-29** (3.10.0 from 2026-09-28; 3.8.1 from 2026-09-18; 3.5.0 earlier that day; 3.2.0 from 2026-09-01) — see the block at the `npm i -g` site
 # below for why the caret was retired. The paragraphs that follow are the FLOOR-ERA history, kept
 # because each explains why a given step depends on a version at all; read every `^1.x` in them as a
 # historical reason, NOT as the current value. There are TWO independent CLI sources here:
@@ -27,7 +28,7 @@ name: cowork-replay
 #     `--min-severity`, which needs >=1.11.0. Without that floor a
 #     `latest` that resolved older would not degrade — it hard-fails, exit 2, "unrecognized arguments".
 #     ALL FOUR carried `^1.20.0` at the time, each for its own reason — this is not a blanket bump;
-#     all four are now the exact `3.8.1`. NOTE the
+#     all four are now the exact `4.0.0`. NOTE the
 #     four sites are LINT / PRIVACY / STALENESS / REPLAY. The email canary is NOT one of them: it is a
 #     bare `run:` step with no `version:` input, riding whatever CLI the preceding Action step
 #     installed. Enumerate with `grep -n 'version: "' ` before editing this list — a plan-stage draft
@@ -55,7 +56,7 @@ name: cowork-replay
 #     (A RANGE in that input is DOCUMENTED as of harness 1.12.0 — `action.yml` now states `version`
 #     accepts an npm range, not only an exact pin. It was already mechanically sound: the value is
 #     interpolated as `cowork-harness@$v` into `npm install --global`.)
-#   * the `skill-static-analysis` job's standalone `npm i -g cowork-harness@3.8.1`.
+#   * the `skill-static-analysis` job's standalone `npm i -g cowork-harness@4.0.0`.
 #
 #   PINNED EXACTLY AS OF 2026-08-27 — these five sites are SELECTORS (they decide which CLI runs a
 #   gate), and they were carets until 2.4.0. The caret auto-adopted every upstream release into CI
@@ -81,7 +82,7 @@ name: cowork-replay
 #   docs/internal/2026-08-27-cowork-harness-2.4.0-adoption-plan.md §7.4-7.5.
 #   (A RANGE is still accepted in the Action's `version` input — documented since harness 1.12.0 —
 #   so reverting to a caret is mechanically possible; it is a posture decision, not a limitation.)
-# THE FLOOR WAS 1.25.0 (historical — the sites are now PINNED at 3.8.1). Five reasons, and they
+# THE FLOOR WAS 1.25.0 (historical — the sites are now PINNED at 4.0.0). Five reasons, and they
 # raised the floor for different steps:
 #   (0'') 1.25.0 — CI HYGIENE ONLY, deliberately. `^1.24.0` already resolves to 1.25.0, so CI was
 #       running it before this pin moved; nothing CI executes reads a surface 1.25.0 changed.
@@ -228,11 +229,11 @@ jobs:
       # CLI hard-fails (exit 2, "unrecognized arguments"), so this step cannot ride the Action's default
       # `latest`. See the header's version policy.
       - name: Lint scenarios (no silent false-greens)
-        uses: yaniv-golan/cowork-harness@v3
+        uses: yaniv-golan/cowork-harness@v4
         with:
           command: lint
           path: cowork-tests/scenarios/
-          version: "3.8.1"
+          version: "4.0.0"
           # `strict: true` is the Action's first-class input (action.yml `inputs.strict` -> `--strict`),
           # not `extra-args`. WITHOUT it this step CANNOT fail on a WARN-class rule — measured: a WARN
           # finding exits 0 bare and 1 under --strict, while an ERROR (`assert-contradiction`) exits 1
@@ -260,11 +261,11 @@ jobs:
       # `--skip-scenario-drift`. Scenario-drift, like staleness, is only fixable by re-recording, which
       # CI can't do; it surfaces (WARN) in the staleness step below instead of reddening this gate.
       - name: Privacy gate (HARD)
-        uses: yaniv-golan/cowork-harness@v3
+        uses: yaniv-golan/cowork-harness@v4
         with:
           command: verify-cassettes
           path: cowork-tests/cassettes/
-          version: "3.8.1"
+          version: "4.0.0"
           extra-args: "--skip-staleness --skip-scenario-drift ${{ steps.allow.outputs.args }}"
 
       # Email canary: the SAME allowlist must still FLAG a non-synthetic email. The check asserts an
@@ -288,11 +289,11 @@ jobs:
 
       - name: Staleness gate (WARN — does not fail the job; CI cannot re-record)
         continue-on-error: true
-        uses: yaniv-golan/cowork-harness@v3
+        uses: yaniv-golan/cowork-harness@v4
         with:
           command: verify-cassettes
           path: cowork-tests/cassettes/
-          version: "3.8.1"
+          version: "4.0.0"
           extra-args: "--skip-privacy"
 
       # Floored, and NOT for a missing flag. An unknown top-level scenario key inside a frozen
@@ -301,11 +302,11 @@ jobs:
       # it can return the OPPOSITE verdict with no signal. Frozen assertions ARE validated and
       # hard-reject, so this is not "replay validates nothing"; only the scenario object is loose.
       - name: Replay content + manifest-backed assertions (token-free)
-        uses: yaniv-golan/cowork-harness@v3
+        uses: yaniv-golan/cowork-harness@v4
         with:
           command: replay
           path: cowork-tests/cassettes/
-          version: "3.8.1"
+          version: "4.0.0"
 
       # `cowork-tests/gate_prefix_check.py` and `delivery_check.py` are implemented and
       # unit-tested (`founder-skills/tests/test_gate_prefix_check.py` /
@@ -383,6 +384,25 @@ jobs:
           done
           exit "$fail"
 
+      # The printed hand-over, checked in each recording that ran a closing script (market-sizing,
+      # competitive-positioning, financial-model-review): the final message must carry it whole, and no Stop
+      # hook_response may say it found no hand-over (it checked nothing). No harness assertion can see
+      # either -- `transcript_*` matches literals over assistant text, and `hook_event_*` sees a hook's frame
+      # and exit code, not its stderr. `handover_check_cassette.py` reads the cassette with the Stop hook's
+      # own logic (one owner). HARD, unlike the step above: every recording it exercises passes at 4.0.0.
+      - name: Hand-over check (the final message carries the printed hand-over)
+        run: |
+          fail=0
+          for f in cowork-tests/cassettes/*.cassette.json; do
+            out="$(python3 cowork-tests/handover_check_cassette.py "$f" 2>&1)"
+            case "$?" in
+              0) echo "✓ $(basename "$f"): $out" ;;
+              2) : ;;  # no closing script in this recording
+              *) echo "::error::$(basename "$f"): $out"; fail=1 ;;
+            esac
+          done
+          exit "$fail"
+
   # Token-free static gate (latest 1.x analyzers) for the Cowork host-loop /sessions path-fidelity class
   # — the failure mode the Context A/B file-hand-off work fixed — plus skill-body footguns and a
   # self-heal `find` that targets the wrong skill. The single plugin-root scan covers every
@@ -409,8 +429,8 @@ jobs:
       - uses: actions/setup-python@v5   # lint-skill bundles scenario.py (needs python3)
         with:
           python-version: '3.12'
-      - name: Install cowork-harness (pinned 3.8.1 — see header version policy)
-        run: npm i -g cowork-harness@3.8.1
+      - name: Install cowork-harness (pinned 4.0.0 — see header version policy)
+        run: npm i -g cowork-harness@4.0.0
       # The LOADER is the strict surface, and nothing else in CI reaches it:
       #   * `lint` WARNS on an unknown/too-new top-level key and exits 0 (lenient by design);
       #   * `replay` evaluates the scenario FROZEN in each cassette and never reads the on-disk YAML;
@@ -431,7 +451,7 @@ jobs:
       # >=1.16.0 to do anything.
       - name: Scenario load check (token-free — lint warns, the loader rejects)
         run: cowork-harness record cowork-tests/scenarios/ --dry-run --quiet
-      - name: analyze-skill --strict (whole plugin) + lint-skill --strict
+      - name: analyze-skill --strict (whole plugin) + lint-skill (allowlist gate)
         run: |
           # `bash -eo pipefail`; the `|| fail=1` accumulator keeps one finding from aborting the run
           # and hiding the rest. fail is initialised so `exit "$fail"` is always a real code.
@@ -441,7 +461,13 @@ jobs:
           echo "::group::analyze-skill founder-skills/ (all SKILL.md + agents + references + commands)"
           cowork-harness analyze-skill founder-skills/ --strict || fail=1
           echo "::endgroup::"
-          echo "::group::lint-skill --strict (all skills)"
-          cowork-harness lint-skill founder-skills/skills/*/ --strict || fail=1
+          # lint-skill through a pinned, shrink-only allowlist (cowork-tests/lint-skill-allowlist.json):
+          # it has no per-rule suppression, and a few of its warnings are accepted on purpose, each with its
+          # reason. The gate keeps every other WARN rule gating, fails on any ERROR, and fails when an
+          # accepted entry stops firing (so the list only shrinks). `|| true` because lint-skill exits 1 on
+          # any finding; the gate decides, and fails closed on output that is not a findings list.
+          echo "::group::lint-skill (all skills) via lint_skill_gate.py"
+          cowork-harness lint-skill founder-skills/skills/*/ --json > lint-skill.json || true
+          python3 cowork-tests/lint_skill_gate.py lint-skill.json || fail=1
           echo "::endgroup::"
           exit "$fail"

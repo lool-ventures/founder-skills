@@ -6,8 +6,8 @@
 """Print the founder-facing hand-over message from report.json.
 
 WHY. The closing message used to be composed in chat, from memory, after a rule that said never to
-compute a figure there. On a live run it said "$4.66M ... about 2% of the illustrative $100M" -- it
-is 4.7% -- and nothing checked it. A first cut printed the headline figures here; measured at
+compute a figure there. On a live run it called a SOM "about 2%" of the illustrative $100M -- it was
+more than twice that -- and nothing checked it. A first cut printed the headline figures here; measured at
 hostloop, the model kept one line of four, rewrote two, deleted one and appended its own verdict
 paragraph with ratios it rounded itself. The paragraph was the verdict, and nothing on the page
 carried it. A second cut moved the verdict to the report's first paragraph and made this message
@@ -17,7 +17,8 @@ time it wrote the answer to the question it was asked, in the channel it was ask
 printed message yet contained one. So this message now carries the report's own verdict paragraph
 (compose_report.py's `verdict`, the same words the page opens with), with a legend for the marks it
 quotes. What it prints is also written to `handover.txt` beside the report, for the check that runs
-after the model's final turn.
+after the model's final turn; where that check cannot reach the file, it reads the same text from the
+transcript's record of this script's output, so the last line printed must stay the offer.
 
 WHICH LINK FORM. Measured in a real cloud-lane Cowork session (2026-09-22, the default lane for new
 sessions): `computer://` links render as PLAIN TEXT, and a bare path becomes a broken
@@ -79,7 +80,7 @@ _PAGE_PHRASES = (
 )
 _MARK_LEGEND = (
     ("\u2020", "one computation shown two ways, not two that agree"),
-    ("\u2021", "both builds narrow this figure by the same number, so their agreement is no cross-check"),
+    ("\u2021", "both builds narrow this figure by the same number, so on it they are not independent"),
     ("\u00a7", "built on a figure you stated that a cited source contradicts"),
 )
 
@@ -104,11 +105,9 @@ def build(report: dict[str, Any], deliverables: list[tuple[str, str | None]]) ->
         tail = ""
         if i == 0:
             tail = (
-                " \u2014 it opens with the verdict: what your materials claim, what each build found, "
+                " \u2014 it opens with the verdict: what you stated, what each build found, "
                 "and the strongest challenge to it"
             )
-        elif label.lower().startswith("the interactive"):
-            tail = " has the charts"
         # `none` arrives as a backticked path: state the path even when no link form opens it,
         # because the stated path is the one thing that survives every surface (ccinternals.dev/
         # cowork, "delivery.name-the-path-anyway").

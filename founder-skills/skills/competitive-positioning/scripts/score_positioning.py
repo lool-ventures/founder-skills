@@ -132,8 +132,134 @@ def _compute_rank(startup_val: float, competitor_vals: list[float], lower_is_bet
     return rank
 
 
-def _score_view(view: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    """Score a single positioning view. Returns (scored_view, warnings)."""
+def _geometry(
+    startup_point: dict[str, Any],
+    competitor_points: list[dict[str, Any]],
+    x_lower_better: bool,
+    y_lower_better: bool,
+) -> dict[str, Any]:
+    """Who beats the startup on both axes, who is nearest, and the lead over the best rival per axis.
+
+    `dominated_by`: competitors at least as good on both axes and strictly better on one -- "no
+    competitor beats you on both axes" is the direct answer to an investor's "why won't X crush
+    you". `x_lead_over_best` / `y_lead_over_best`: the startup's value minus the best competitor's,
+    signed so positive means ahead; negative means that many points behind the leader.
+    `nearest_competitor` / `nearest_distance`: straight-line distance on the two 0-100 axes.
+    `x_best_competitors` / `y_best_competitors`: the competitor(s) the lead is measured against.
+    """
+    sx, sy = float(startup_point["x"]), float(startup_point["y"])
+
+    def better(a: float, b: float, lower: bool) -> bool:
+        return a < b if lower else a > b
+
+    def at_least(a: float, b: float, lower: bool) -> bool:
+        return a <= b if lower else a >= b
+
+    dominated_by: list[str] = []
+    nearest: str | None = None
+    nearest_d: float | None = None
+    for p in competitor_points:
+        px, py = float(p["x"]), float(p["y"])
+        slug = str(p["competitor"])
+        if (
+            at_least(px, sx, x_lower_better)
+            and at_least(py, sy, y_lower_better)
+            and (better(px, sx, x_lower_better) or better(py, sy, y_lower_better))
+        ):
+            dominated_by.append(slug)
+        d = ((px - sx) ** 2 + (py - sy) ** 2) ** 0.5
+        if nearest_d is None or d < nearest_d or (d == nearest_d and slug < str(nearest)):
+            nearest, nearest_d = slug, d
+
+    def lead(values: list[float], own: float, lower: bool) -> float | None:
+        if not values:
+            return None
+        best = min(values) if lower else max(values)
+        return round(best - own if lower else own - best, 1)
+
+    def best_of(axis: str, lower: bool) -> list[str]:
+        values = [float(p[axis]) for p in competitor_points]
+        if not values:
+            return []
+        best = min(values) if lower else max(values)
+        return sorted(str(p["competitor"]) for p in competitor_points if float(p[axis]) == best)
+
+    return {
+        "x_best_competitors": best_of("x", x_lower_better),
+        "y_best_competitors": best_of("y", y_lower_better),
+        "dominated_by": sorted(dominated_by),
+        "nearest_competitor": nearest,
+        "nearest_distance": None if nearest_d is None else round(nearest_d, 1),
+        "x_lead_over_best": lead([float(p["x"]) for p in competitor_points], sx, x_lower_better),
+        "y_lead_over_best": lead([float(p["y"]) for p in competitor_points], sy, y_lower_better),
+    }
+
+
+CLAIM_VERDICTS = ("holds", "partially_holds", "does_not_hold", "unproven")
+
+
+def _verdict_counts(claims: Any) -> dict[str, int]:
+    """Tally of stress-test verdicts. `unrecognised` holds anything outside CLAIM_VERDICTS, so the
+    parts always sum to `total`."""
+    counts = dict.fromkeys(CLAIM_VERDICTS, 0)
+    counts["unrecognised"] = 0
+    items = claims if isinstance(claims, list) else []
+    for claim in items:
+        verdict = claim.get("verdict") if isinstance(claim, dict) else None
+        counts[verdict if verdict in CLAIM_VERDICTS else "unrecognised"] += 1
+    counts["total"] = len(items)
+    return counts
+
+
+PROOF_LEVELS = ("shipping", "customer_validated", "demonstrated", "claimed")
+AVAILABILITY = ("concept", "poc", "pilot", "shipping")
+
+
+def _planned(point: dict[str, Any]) -> tuple[float, float] | None:
+    px, py = point.get("planned_x"), point.get("planned_y")
+    if isinstance(px, (int, float)) and isinstance(py, (int, float)):
+        return float(px), float(py)
+    return None
+
+
+def _today_block(
+    today_point: dict[str, Any],
+    competitor_points: list[dict[str, Any]],
+    x_lower_better: bool,
+    y_lower_better: bool,
+    availability: str | None,
+) -> dict[str, Any]:
+    """Where the startup is today, when a planned point is the scored one.
+
+    Built only from today's `x`/`y` -- never a planned value -- because scoring the plan as the
+    present is the failure this separation exists to prevent. Ranked only when availability says
+    there is something to buy.
+    """
+    tx, ty = float(today_point["x"]), float(today_point["y"])
+    return {
+        "x": tx,
+        "y": ty,
+        "ranked": availability == "shipping",
+        "startup_x_rank": _compute_rank(tx, [float(p["x"]) for p in competitor_points], x_lower_better),
+        "startup_y_rank": _compute_rank(ty, [float(p["y"]) for p in competitor_points], y_lower_better),
+        "startup_x_tied_with": sorted(str(p["competitor"]) for p in competitor_points if float(p["x"]) == tx),
+        "startup_y_tied_with": sorted(str(p["competitor"]) for p in competitor_points if float(p["y"]) == ty),
+        **_geometry({"x": tx, "y": ty}, competitor_points, x_lower_better, y_lower_better),
+    }
+
+
+def _score_view(view: dict[str, Any], availability: str | None = None) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Score a single positioning view. Returns (scored_view, warnings).
+
+    PLAN-STAGE STARTUPS. Most users raise on a plan, not a shipping product, and a baseline run
+    placed a pre-product startup's planned price and claimed abilities as its position TODAY. When
+    `_startup` carries `planned_x`/`planned_y`, the PLANNED point is the scored one: rank, ties,
+    geometry and the score are computed on it, so every reader (Gate 3 included) sees the plan and no
+    field chooses a headline. Today's coordinates are scored separately into `today`, which carries
+    no planned value, and is `ranked: false` unless `product_availability` is "shipping".
+    RESIDUAL: availability is recorded by the analysis; a false "shipping" ranks today's point, which
+    recreates the baseline's failure on the today view (the headline still says "if delivered").
+    """
     warnings: list[dict[str, Any]] = []
     points = view["points"]
 
@@ -149,6 +275,11 @@ def _score_view(view: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, An
     if startup_point is None:
         # Caller should have validated this already
         raise ValueError("_startup not found in view points")
+
+    today_point = startup_point
+    planned = _planned(startup_point)
+    if planned is not None:
+        startup_point = {**startup_point, "x": planned[0], "y": planned[1]}
 
     n = len(competitor_points)
     startup_x = float(startup_point["x"])
@@ -267,7 +398,23 @@ def _score_view(view: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, An
         "differentiation_score": diff_score,
         "startup_x_rank": rank_x,
         "startup_y_rank": rank_y,
+        # Competitors at exactly the startup's value. `startup_*_rank` counts only those strictly
+        # ahead, so a tie takes the better place; these lists let every reader state the tie
+        # instead (the rank and the score are unchanged, so fixtures and gates keep their numbers).
+        "startup_x_tied_with": sorted(str(p["competitor"]) for p in competitor_points if float(p["x"]) == startup_x),
+        "startup_y_tied_with": sorted(str(p["competitor"]) for p in competitor_points if float(p["y"]) == startup_y),
         "competitor_count": n,
+        # Geometry, computed here so no renderer derives it and no model writes it. Polarity-aware:
+        # "ahead" always means better on the axis. Used to state the startup's position in words
+        # instead of the differentiation score, which reads as a percentage and is blind to spacing
+        # (two maps at the same rank but with the nearest rival 3 vs 10 points away score the same).
+        **_geometry(startup_point, competitor_points, x_lower_better, y_lower_better),
+        "scored_point": "planned" if planned is not None else "today",
+        **(
+            {"today": _today_block(today_point, competitor_points, x_lower_better, y_lower_better, availability)}
+            if planned is not None
+            else {}
+        ),
         # Passthrough of the input view's per-competitor coordinates. Coordinates are
         # assigned upstream (by the founder/main thread, or refined by the POSITIONING_SCORING
         # sub-agent) and validated, never recomputed here — this just makes
@@ -290,6 +437,18 @@ def _score_view(view: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, An
 # ---------------------------------------------------------------------------
 
 
+def _fingerprint_row(p: dict[str, Any]) -> list[Any]:
+    row: list[Any] = [
+        str(p.get("competitor", "")),
+        round(float(p.get("x", 0) or 0), 4),
+        round(float(p.get("y", 0) or 0), 4),
+    ]
+    plan = _planned(p)
+    if plan is not None:
+        row += [round(plan[0], 4), round(plan[1], 4)]
+    return row
+
+
 def views_fingerprint(views: list[dict]) -> str:
     """Stable hash of the scored map's identity. Excludes ALL prose (evidence, rationale,
     provenance) so a reworded evidence string is not a moved map. Order-insensitive over
@@ -310,13 +469,9 @@ def views_fingerprint(views: list[dict]) -> str:
     """
     payload = []
     for v in sorted(views, key=lambda d: str(d.get("view_id", d.get("id", "")))):
-        pts = sorted(
-            [
-                [str(p.get("competitor", "")), round(float(p.get("x", 0) or 0), 4), round(float(p.get("y", 0) or 0), 4)]
-                for p in v.get("points", []) or []
-                if isinstance(p, dict)
-            ]
-        )
+        # A planned point is identity too (it is the scored one); encoded only when present, so a map
+        # with no plan hashes as it did before the field existed.
+        pts = sorted([_fingerprint_row(p) for p in v.get("points", []) or [] if isinstance(p, dict)])
         entry = {
             "view_id": str(v.get("view_id", v.get("id", ""))),
             "x_axis_name": str(v.get("x_axis_name", "")),
@@ -495,6 +650,20 @@ def _validate_input(data: dict[str, Any]) -> list[str]:
                     errors.append(f"views[{i}].points[{j}]: duplicate competitor '{comp_slug}'")
                 seen_competitors.add(comp_slug)
 
+            # Planned coordinates and proof levels: `_startup` only, both or neither, 0-100.
+            has_plan = [k for k in ("planned_x", "planned_y") if k in p]
+            if has_plan and p.get("competitor") != "_startup":
+                errors.append(f"views[{i}].points[{j}]: planned coordinates are for _startup only")
+            elif len(has_plan) == 1:
+                errors.append(f"views[{i}].points[{j}]: planned_x and planned_y go together")
+            for coord in has_plan:
+                val = p.get(coord)
+                if not isinstance(val, (int, float)) or isinstance(val, bool) or not 0 <= val <= 100:
+                    errors.append(f"views[{i}].points[{j}].{coord} must be a number in 0-100")
+            for proof in ("x_proof", "y_proof"):
+                if proof in p and p[proof] not in PROOF_LEVELS:
+                    errors.append(f"views[{i}].points[{j}].{proof} must be one of {list(PROOF_LEVELS)}")
+
             # Coordinate validation — x and y are required
             for coord in ("x", "y"):
                 val = p.get(coord)
@@ -516,6 +685,22 @@ def _validate_input(data: dict[str, Any]) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
+def _read_availability(path: str | None) -> tuple[str | None, str | None]:
+    """product_availability and its quote from product_profile.json; (None, None) when absent or unknown."""
+    if not path:
+        return None, None
+    try:
+        with open(path, encoding="utf-8") as f:
+            profile = json.load(f)
+    except (OSError, ValueError):
+        return None, None
+    if not isinstance(profile, dict):
+        return None, None
+    value = profile.get("product_availability")
+    quote = profile.get("availability_quote")
+    return (value if value in AVAILABILITY else None), (quote if isinstance(quote, str) and quote.strip() else None)
+
+
 def _apply_run_id(result: dict, run_id: str | None) -> None:
     """CLI run_id overrides stdin-passthrough metadata.run_id (CLI > stdin)."""
     if not run_id:
@@ -527,6 +712,16 @@ def _apply_run_id(result: dict, run_id: str | None) -> None:
     result["metadata"] = md
 
 
+def _keep_first_copy(output_path: str, result: dict[str, Any]) -> None:
+    """Keep this run's first scored copy beside the output (see `_cp_first_copy`)."""
+    scripts_dir = os.path.dirname(os.path.abspath(__file__))
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    import _cp_first_copy
+
+    _cp_first_copy.keep_first(output_path, result)
+
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Positioning scorer (reads JSON from stdin)")
     p.add_argument("--pretty", action="store_true", help="Pretty-print JSON")
@@ -535,6 +730,11 @@ def parse_args() -> argparse.Namespace:
         "--run-id",
         default=None,
         help="Stamp metadata.run_id (overrides any run_id from stdin metadata)",
+    )
+    p.add_argument(
+        "--product-profile",
+        default=None,
+        help="product_profile.json: its product_availability decides whether today's point is ranked",
     )
     return p.parse_args()
 
@@ -559,6 +759,12 @@ def main() -> None:
     if not isinstance(data, dict):
         print("Error: JSON must be an object", file=sys.stderr)
         sys.exit(1)
+    # Our own file names in the scorer's evidence become plain words HERE, at pipe time: the report's
+    # wording pass flags any it finds, and removing one by hand after the outside review reads as an
+    # analysis changed after it was reviewed. One table, shared with the review (`_cp_redteam_text`).
+    import _cp_redteam_text
+
+    _cp_redteam_text.reword_evidence(data)
 
     norm_errors = _normalize_positioning_input(data)
     if norm_errors:
@@ -573,11 +779,12 @@ def main() -> None:
         sys.exit(1)
 
     # Score each view
+    availability, availability_quote = _read_availability(args.product_profile)
     scored_views: list[dict[str, Any]] = []
     all_warnings: list[dict[str, Any]] = []
 
     for view in data["views"]:
-        sv, warns = _score_view(view)
+        sv, warns = _score_view(view, availability)
         scored_views.append(sv)
         all_warnings.extend(warns)
 
@@ -591,6 +798,10 @@ def main() -> None:
         "views": scored_views,
         "overall_differentiation": overall,
         "differentiation_claims": data.get("differentiation_claims", []),
+        # Counted here, once, so every surface states the same tally and the parts always sum to
+        # the total: a fourth verdict (`unproven`) used to vanish from a three-way count that
+        # still printed "(of N tested)" with N including it.
+        "verdict_counts": _verdict_counts(data.get("differentiation_claims", [])),
         "warnings": all_warnings,
         "_produced_by": "score_positioning",
         "metadata": data.get("metadata", {}),
@@ -605,6 +816,13 @@ def main() -> None:
     if "data_confidence" in data:
         result["data_confidence"] = data["data_confidence"]
 
+    # How far the product has got, as recorded in the product profile, with its quote. It decides
+    # only whether a separate today point is ranked (see `_score_view`); stated so it can be checked.
+    if availability is not None:
+        result["product_availability"] = availability
+        if availability_quote:
+            result["availability_quote"] = availability_quote
+
     # Passthrough scoring_basis if present. Deliberately NOT defaulted when absent —
     # artifacts produced before this convention existed have a genuinely undefined
     # basis, and stamping "shipped" on them would assert a convention that was never
@@ -618,6 +836,8 @@ def main() -> None:
     out = json.dumps(result, indent=indent) + "\n"
     summary = {"overall_differentiation": overall} if scored_views else None
     _write_output(out, args.output, summary=summary)
+    if args.output:
+        _keep_first_copy(args.output, result)
 
     # Summary to stderr for visibility in batch runs
     if scored_views:

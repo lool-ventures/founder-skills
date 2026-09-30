@@ -85,6 +85,10 @@ WARNING_SEVERITY: dict[str, str] = {
     "UNSUPPORTED_MULTIPLE": "medium",
     # v0.4.2 Mitigation 2 — informational only (uuid is per-run, won't collide)
     "MARKER_COLLISION": "low",
+    # A step whose output reached its producer without passing the hand-off gate (see
+    # `_handoff_bypassed`). Medium: the results are valid and must not block. Nothing here can
+    # clear it -- this skill has no post-compose acceptance mechanism (see above).
+    "HANDOFF_BYPASSED": "medium",
 }
 
 # How old a benchmark may be before the founder is told. 18 months is a judgement, not a
@@ -155,6 +159,7 @@ WARNING_LABELS: dict[str, str] = {
     "METRICS_GAPS": "Metrics Gaps",
     "METRIC_SELF_CONTRADICTION": "Contradictory Metric Figures",
     "MARKER_COLLISION": "Marker Collision",
+    "HANDOFF_BYPASSED": "Some Steps Were Not Checked",
 }
 
 # Rating display labels
@@ -298,6 +303,60 @@ def _as_list(value: Any) -> list[Any]:
 def _as_dict(value: Any) -> dict[str, Any]:
     """Coerce to dict -- returns {} if not a dict."""
     return value if isinstance(value, dict) else {}
+
+
+def _handoff_audit() -> Any:
+    """The fleet's shared gate-record check from `founder-skills/scripts/` (same loading as
+    `_founder_text_policy`). None if unavailable: a missing module must never block a report."""
+    try:
+        shared = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "scripts"))
+        if shared not in sys.path:
+            sys.path.insert(0, shared)
+        import _handoff_audit  # type: ignore[import-not-found]
+
+        return _handoff_audit
+    except ImportError:
+        return None
+
+
+def _handoff_bypassed(dir_path: str, artifacts: dict[str, Any]) -> list[str]:
+    """Which sub-agent steps this report's artifacts came from have no gated hand-off in this run.
+
+    Built from the artifacts present, never from what SKILL.md says should run. The inputs review runs
+    only on an extracted model, and its hand-off is the argument `apply_corrections.py` turns into
+    `extraction_corrections.json` -- so that artifact is the evidence it ran. The checklist always runs.
+
+    Silent when `handoff/<run_id>/` does not exist: every real run creates it at Step 0, so its absence
+    means this is not a run whose transport can be judged, not that nothing was bypassed.
+
+    RESIDUAL: a pass proves a gated hand-off exists and still matches its record -- not that the
+    producer consumed it. See `_handoff_audit.py`.
+    """
+    audit = _handoff_audit()
+    if audit is None:
+        return []
+    run_id = next(
+        (
+            rid
+            for name in REQUIRED_ARTIFACTS
+            if isinstance(artifacts.get(name), dict)
+            and isinstance(rid := _as_dict(artifacts[name].get("metadata")).get("run_id"), str)
+            and rid
+        ),
+        None,
+    )
+    if not run_id:
+        return []
+    run_dir = os.path.join(dir_path, "handoff", run_id)
+    if not os.path.isdir(run_dir):
+        return []
+    requirements: list[tuple[str, list[str]]] = []
+    if isinstance(artifacts.get("extraction_corrections.json"), dict):
+        requirements.append(("the review of the extracted model", ["inputs_review_output.json"]))
+    if isinstance(artifacts.get("checklist.json"), dict):
+        requirements.append(("the scored checklist", ["checklist_output.json"]))
+    labels: list[str] = audit.bypassed(run_dir, requirements)
+    return labels
 
 
 def _founder_text_policy() -> Any:
@@ -740,13 +799,14 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
             dropped = [str(i) for i in _as_list(ids)]
             if not dropped:
                 continue
+            _clause = _unresolved_clause(str(field), inputs)
             warnings.append(
                 _warn(
                     "CHECKLIST_PROFILE_UNRESOLVED",
-                    f"company {_profile_field_name(field)} could not be matched to a known value, so {len(dropped)} "
+                    f"company {_profile_field_name(field)}: {_clause.removeprefix('your ')}, so {len(dropped)} "
                     f"criteria keyed to it were excluded without being assessed: {dropped}",
                     founder_message=(
-                        f"We could not match your {_profile_field_name(field)} to a known value, so {len(dropped)} "
+                        f"{_clause[0].upper()}{_clause[1:]}, so {len(dropped)} "
                         f"checks that may apply to you were excluded from the score without being "
                         f"assessed: {_checklist_labels(checklist, dropped)}."
                     ),
@@ -851,6 +911,72 @@ def _section_title(inputs: dict[str, Any] | None) -> str:
     return f"# Financial Model Review: {company_name}\n"
 
 
+def _quality_line(checklist: dict[str, Any] | None, data_confidence: str) -> tuple[str, str, str] | None:
+    """(label, status, score) exactly as the Executive Summary prints the model's rating; None without a
+    checklist. One owner, so the verdict and the summary can never round or label the same figure apart."""
+    if checklist is None or _is_stub(checklist):
+        return None
+    summary = _as_dict(checklist.get("summary"))
+    status = str(summary.get("overall_status", "unknown"))
+    score = summary.get("score_pct", 0)
+    if summary.get("model_maturity_pct") is None and data_confidence != "exact":
+        bq_score = summary.get("business_quality_pct")
+        if bq_score is not None:
+            return "Deck Financial Readiness", status, f"{bq_score:.0f}%"
+    return "Model Quality", status, f"{score:.0f}%"
+
+
+def _runway_figures(runway: dict[str, Any] | None) -> tuple[str, str, str | None, bool] | None:
+    """(base runway, default-alive word, runway at today's burn or None, projected runway is infinite) in the
+    report's own formats; None without a base scenario. Today's-burn runway is returned when the projection
+    is infinite or longer than it -- the two cases where the projected figure alone overstates the cash."""
+    if runway is None or _is_stub(runway):
+        return None
+    base = next((s for s in _as_list(runway.get("scenarios")) if s.get("name") == "base"), None)
+    if not base:
+        return None
+    months_raw = base.get("runway_months")
+    alive = base.get("default_alive", None)
+    alive_str = "Yes" if alive else "No" if alive is not None else "Unknown"
+    # Derive breakeven month when base scenario is default-alive (months_raw is None)
+    be_month: int | None = None
+    if months_raw is None:
+        projs = _as_list(base.get("monthly_projections"))
+        be_month = next(
+            (p["month"] for p in projs if isinstance(p, dict) and p.get("net_burn", 1) <= 0),
+            None,
+        )
+    static: str | None = None
+    static_raw = base.get("static_runway_months")
+    if isinstance(static_raw, (int, float)) and (
+        months_raw is None or (isinstance(months_raw, (int, float)) and static_raw < months_raw)
+    ):
+        static = f"{static_raw:g} months"  # the runway table's format, every row
+    return _format_runway_months(months_raw, be_month), alive_str, static, months_raw is None
+
+
+def _verdict(inputs: dict[str, Any] | None, checklist: dict[str, Any] | None, runway: dict[str, Any] | None) -> str:
+    """The report's own first paragraph, and the one the printed hand-over carries: the rating and the runway,
+    in the Executive Summary's words and figures. Empty when neither exists."""
+    data_confidence = "exact"
+    if inputs is not None and not _is_stub(inputs):
+        data_confidence = str(_as_dict(inputs.get("company")).get("data_confidence", "exact"))
+    parts: list[str] = []
+    quality = _quality_line(checklist, data_confidence)
+    if quality is not None:
+        label, status, score = quality
+        parts.append(f"{label}: {status} ({score}).")
+    figures = _runway_figures(runway)
+    if figures is not None:
+        base, alive, static, _infinite = figures
+        parts.append(f"Base runway: {base} (default alive: {alive.lower()}).")
+        if static is not None:
+            parts.append(
+                f"At today's burn, held flat with no growth, it is {static}; treat that as the planning number."
+            )
+    return " ".join(parts)
+
+
 def _section_executive_summary(
     inputs: dict[str, Any] | None,
     checklist: dict[str, Any] | None,
@@ -873,24 +999,12 @@ def _section_executive_summary(
             dq_label = "Mixed" if data_confidence == "mixed" else "Estimated"
             lines.append(f"**Data Quality:** {dq_label} — review based on {model_format}, not audited financials  ")
 
-    if checklist is not None and not _is_stub(checklist):
-        summary = _as_dict(checklist.get("summary"))
-        status = summary.get("overall_status", "unknown")
-        score = summary.get("score_pct", 0)
-        model_maturity = summary.get("model_maturity_pct")
-        if model_maturity is None and data_confidence != "exact":
-            bq_score = summary.get("business_quality_pct")
-            if bq_score is not None:
-                lines.append(
-                    f"**Deck Financial Readiness:** {status} ({bq_score:.0f}%) "
-                    f"(business quality only — no spreadsheet model)  "
-                )
-            else:
-                # all business items gated N/A — deck-readiness score not computable;
-                # fall back to the overall score with an honest label
-                lines.append(f"**Model Quality:** {status} ({score:.0f}%)  ")
-        else:
-            lines.append(f"**Model Quality:** {status} ({score:.0f}%)  ")
+    quality = _quality_line(checklist, data_confidence)
+    if quality is not None:
+        label, status, score = quality
+        # All business items gated N/A leaves no deck-readiness score; the overall score is used, labelled so.
+        tail = " (business quality only — no spreadsheet model)" if label == "Deck Financial Readiness" else ""
+        lines.append(f"**{label}:** {status} ({score}){tail}  ")
 
     if unit_economics is not None and not _is_stub(unit_economics):
         metrics = _as_list(unit_economics.get("metrics"))
@@ -908,37 +1022,21 @@ def _section_executive_summary(
                     parts.append(f"{name}: {_fmt_number(val)} ({rating})")
             lines.append(f"**Key Metrics:** {', '.join(parts)}  ")
 
-    if runway is not None and not _is_stub(runway):
-        scenarios = _as_list(runway.get("scenarios"))
-        base = next((s for s in scenarios if s.get("name") == "base"), None)
-        if base:
-            months_raw = base.get("runway_months")
-            alive = base.get("default_alive", None)
-            alive_str = "Yes" if alive else "No" if alive is not None else "Unknown"
-            # Derive breakeven month when base scenario is default-alive (months_raw is None)
-            be_month_exec: int | None = None
-            if months_raw is None:
-                projs_exec = _as_list(base.get("monthly_projections"))
-                be_month_exec = next(
-                    (p["month"] for p in projs_exec if isinstance(p, dict) and p.get("net_burn", 1) <= 0),
-                    None,
-                )
+    figures = _runway_figures(runway)
+    if figures is not None:
+        base_runway, alive_str, static, infinite = figures
+        lines.append(f"**Base Runway:** {base_runway} (Default Alive: {alive_str})  ")
+        # A default-alive headline of "Infinite" hides the founder's actual cash
+        # position: the projection holds burn flat while revenue compounds, an
+        # assumption a seed company hiring plan almost never survives. Pair the
+        # optimistic headline with the static (today's-burn) floor so the two
+        # never travel apart — see runway.py's static_runway_months + risk_assessment.
+        if static is not None and infinite:
             lines.append(
-                f"**Base Runway:** {_format_runway_months(months_raw, be_month_exec)} (Default Alive: {alive_str})  "
+                f"**At Today's Burn (flat, no growth):** {static} — "
+                'the "Infinite" figure above assumes burn stays flat while revenue grows; '
+                "treat this static figure as the planning number  "
             )
-            # A default-alive headline of "Infinite" hides the founder's actual cash
-            # position: the projection holds burn flat while revenue compounds, an
-            # assumption a seed company hiring plan almost never survives. Pair the
-            # optimistic headline with the static (today's-burn) floor so the two
-            # never travel apart — see runway.py's static_runway_months + risk_assessment.
-            if months_raw is None:
-                static_months = base.get("static_runway_months")
-                if static_months is not None:
-                    lines.append(
-                        f"**At Today's Burn (flat, no growth):** {static_months:g} months — "
-                        'the "Infinite" figure above assumes burn stays flat while revenue grows; '
-                        "treat this static figure as the planning number  "
-                    )
 
     return "\n".join(lines) + "\n"
 
@@ -953,6 +1051,19 @@ def _profile_field_name(field: str) -> str:
     same criteria. One field, three names. Mirrors `checklist.py`'s `_UNRESOLVED_GATE_FIELDS`.
     """
     return {"sector": "revenue model"}.get(field, field)
+
+
+def _revenue_model_not_stated(inputs: dict[str, Any] | None) -> bool:
+    """`unclassified`: no revenue model we can benchmark is stated, as opposed to one we could not match."""
+    company = _as_dict(_as_dict(inputs).get("company"))
+    return str(company.get("revenue_model_type") or "").strip().lower() == "unclassified"
+
+
+def _unresolved_clause(field: str, inputs: dict[str, Any] | None) -> str:
+    """Why a profile field dropped criteria, in founder words. "Not stated" is not a matching failure."""
+    if field == "sector" and _revenue_model_not_stated(inputs):
+        return "no revenue model we have benchmarks for is stated in your materials"
+    return f"your {_profile_field_name(field)} could not be matched to a known value"
 
 
 def _item_heading(item: dict[str, Any]) -> str:
@@ -991,7 +1102,7 @@ def _checklist_labels(checklist: dict[str, Any] | None, ids: list[Any]) -> str:
     return ", ".join(parts)
 
 
-def _section_checklist(checklist: dict[str, Any] | None) -> str:
+def _section_checklist(checklist: dict[str, Any] | None, inputs: dict[str, Any] | None = None) -> str:
     """Checklist results section."""
     if checklist is None:
         return "## Checklist Results\n\n*No checklist data available.*\n"
@@ -1034,8 +1145,9 @@ def _section_checklist(checklist: dict[str, Any] | None) -> str:
     for field, ids in sorted(unresolved.items()):
         dropped = _as_list(ids)
         if dropped:
+            _label = "Not assessed" if field == "sector" and _revenue_model_not_stated(inputs) else "Not matched"
             lines.append(
-                f"**Not matched:** your {_profile_field_name(field)} could not be matched to a known value, so "
+                f"**{_label}:** {_unresolved_clause(str(field), inputs)}, so "
                 f"{len(dropped)} checks that may apply were excluded from the score above: "
                 f"{_named(dropped)}\n"
             )
@@ -1689,6 +1801,10 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
 
     # Run validation
     warnings = validate_artifacts(artifacts)
+    _bypassed_steps = _handoff_bypassed(dir_path, artifacts)
+    if _bypassed_steps:
+        _msg = _handoff_audit().founder_message(_bypassed_steps)
+        warnings.append(_warn("HANDOFF_BYPASSED", _msg, _msg))
 
     # Assemble report -- treat corrupt artifacts as None for rendering
     def _render_safe(data: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -1703,10 +1819,14 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
     # Render every section EXCEPT the Warnings section first; the Warnings
     # section is spliced in after the marker pre-scan so MARKER_COLLISION (which
     # is itself a warning) is reflected in both the status and the report body.
+    # The verdict is the report's first paragraph AND what the printed hand-over carries
+    # (fmr_closing_message.py), so the founder's chat message is the page's own words.
+    verdict_raw = _verdict(inputs, checklist, runway)
     sections = [
         _section_title(inputs),
+        *([verdict_raw + "\n"] if verdict_raw else []),
         _section_executive_summary(inputs, checklist, unit_economics, runway),
-        _section_checklist(checklist),
+        _section_checklist(checklist, inputs),
         _section_model_completeness(inputs, checklist),
         _section_unit_economics(unit_economics),
         _section_runway(runway),
@@ -1769,6 +1889,8 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
         # "ARPU $500 x gross_margin 0.75" in a delivered report AND suppressed the warning, since the
         # scan honours the same keep-set.
         report_markdown = _ft.substitute(report_markdown)
+        # The same pass over the verdict alone, so the printed hand-over matches the page word for word.
+        verdict_raw = _ft.substitute(verdict_raw)
         # Our own warning codes are kept: compose renders them in small print beside a humanized
         # label (the md_term convention), which is deliberate. A code leaking anywhere else is
         # caught by the skill's own gate, not by widening this scan into a false positive.
@@ -1820,6 +1942,7 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
 
     return {
         "report_markdown": report_markdown,
+        "verdict": verdict_raw or None,
         "validation": {
             "status": status,
             "warnings": warnings,

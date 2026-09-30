@@ -215,3 +215,17 @@ def test_every_must_kill_entry_names_the_test_that_must_notice() -> None:
         f"these name a bare class rather than `Class::method`: {bare}. Any test in the class would "
         "satisfy the assertion, including one that cannot notice this mutant."
     )
+
+
+@pytest.mark.parametrize("colour_env", ["FORCE_COLOR", "PY_COLORS"])
+def test_a_colour_forcing_environment_does_not_hide_the_failure_line(
+    harness: _Harness, monkeypatch: pytest.MonkeyPatch, colour_env: str
+) -> None:
+    """A shell that forces colour made the child pytest wrap its summary in ANSI codes, so no line started with
+    `FAILED ` and every `killed_by` check compared against an empty string: 34 of 41 mutants read as caught by
+    the wrong test while every one of them was killed."""
+    monkeypatch.setenv(colour_env, "3" if colour_env == "FORCE_COLOR" else "1")
+    mutant = next(m for m in MUST_KILL if m.id == "increase_basis_credits_existing_pool")
+    verdict = harness.verdict(mutant)
+    assert verdict.killed, verdict.tail
+    assert mutant.killed_by in verdict.first_failure, verdict.tail

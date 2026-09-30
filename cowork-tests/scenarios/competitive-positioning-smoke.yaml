@@ -4,7 +4,7 @@ fidelity: cowork
 on_unanswered: first   # NOT paraphrase-proof — see the option-1 caveat below; retained deliberately, with its risk stated
 skills: [competitive-positioning]                # 0.5.0: scope the staleness hash to this skill + shared roots (F-6)
 
-# Phase 1 fleet-parity smoke — competitive-positioning (conversational lane, Cadence).
+# Phase 1 fleet-parity smoke — competitive-positioning (conversational lane, Tessivane).
 # Validation STOP gate(s): SKILL.md defines Gate 1 (competitor-set) and Gate 2 (axis-selection) as
 # "MANDATORY STOP"s, but the agent may MERGE them into one question ("Does this competitor set and these
 # axis pairs look right?") — DISCOVERED at record time.
@@ -27,20 +27,23 @@ skills: [competitive-positioning]                # 0.5.0: scope the staleness ha
 #
 # Multi-dispatch: Step 5 dispatches MOAT_SCORING + POSITIONING_SCORING in parallel.
 prompt: |
-  I'm the founder of Cadence, a US seed-stage B2B SaaS company selling field-service scheduling and
+  I'm the founder of Tessivane, a US seed-stage B2B SaaS company selling field-service scheduling and
   dispatch software to SMB service businesses. Use the competitive-positioning skill to map our
   competitive landscape and moats. Use exactly these three competitors — do not add others:
   ServiceTitan, Jobber, and Housecall Pro. Then produce the positioning report and the explorer.
 
 assert:
+  # A relative or /sessions/ file-tool path is refused at host-loop; the Step 0 proof exists so none is used.
+  # Content-class, so it covers sub-agent tool results too (checked by replay on a sub-agent-only string).
+  - tool_result_not_contains: "denied by your permission settings"
   - result: success
   # No `all_tasks_completed` here: nothing in this skill asks the agent for a task list, so the
   # assert is satisfiable only by chance and a losing run blocks a paid record rather than
   # reporting a defect. To assert it, mandate a tracker in SKILL.md first, then pair it with
   # `task_count_min: 1` — see financial-model-review-smoke.yaml.
-  - file_exists: outputs/artifacts/competitive-positioning-cadence/report.json
+  - file_exists: outputs/artifacts/competitive-positioning-tessivane/report.json
   - artifact_json:
-      artifact: outputs/artifacts/competitive-positioning-cadence/report.json
+      artifact: outputs/artifacts/competitive-positioning-tessivane/report.json
       path: coaching_payload.schema_version
       exists: true
   - subagent_dispatched: 'competitive-positioning'
@@ -51,12 +54,12 @@ assert:
   # blind agent produced a set; do NOT assert unmatched is non-empty (whether a specific gap is
   # found is model judgment, and a genuinely complete draft returning zero gaps is correct).
   - artifact_json:
-      artifact: outputs/artifacts/competitive-positioning-cadence/competitor_verification.json
+      artifact: outputs/artifacts/competitive-positioning-tessivane/competitor_verification.json
       path: recall_gaps.blind_set_size
       gt: 0
   # The diff ran against the draft rather than silently no-op'ing.
   - artifact_json:
-      artifact: outputs/artifacts/competitive-positioning-cadence/competitor_verification.json
+      artifact: outputs/artifacts/competitive-positioning-tessivane/competitor_verification.json
       path: recall_gaps.note
       exists: true
   # --- recency (Step 4) ---
@@ -64,7 +67,7 @@ assert:
   # assert on the schema addition — unlike recent_developments, whose population depends on
   # what research actually finds.
   - artifact_json:
-      artifact: outputs/artifacts/competitive-positioning-cadence/landscape.json
+      artifact: outputs/artifacts/competitive-positioning-tessivane/landscape.json
       path: landscape_as_of
       exists: true
   # Context-B coaching hand-off: the coaching sub-agent WRITES its commentary to the
@@ -110,7 +113,12 @@ assert:
   - questions_count_max: 8
   # Author-chosen dispatch budget (production has NO Task-fan-out cap; this is an
   # efficiency tripwire, not a platform mirror). tightened from discovery actuals (observed x1.5).
-  - dispatch_count_max: 9
+  # Re-derived 2026-09-29 at the 4.0.0 re-record: the skill now makes 9 real dispatches (competitor
+  # verification, competitor recall and the red team were added since discovery), x1.5 = 13. A dispatch
+  # the PreToolUse dispatch-prompt hook HOLDS never runs but still counts here as a tool_use dispatch --
+  # the designed recovery for a rewritten prompt -- which is why the budget needs headroom: at 9, one
+  # held STARTUP_RESEARCH failed the 4.0.0 recording while every step ran correctly.
+  - dispatch_count_max: 13
   # Efficiency budgets — generous ceilings; tightened to observed x1.5 post-record.
   - max_turns: 130
   - tool_calls_max: 120
@@ -118,9 +126,10 @@ assert:
   # Allowlist = artifact namespace (incl. handoff/**) + founder-context sidecar + promoted
   # deliverables. Pre-0.24 cassettes exclude loudly (no preRunPaths). tightened from discovery actuals (observed x1.5).
   - no_unexpected_files:
-      - 'outputs/artifacts/competitive-positioning-cadence/**'
-      - 'outputs/artifacts/founder-context-cadence.json'
-      - 'outputs/Cadence_Competitive_*'
+      - 'outputs/artifacts/.host-outputs-*'  # Step 0's file-tool path proof (artifacts root)
+      - 'outputs/artifacts/competitive-positioning-tessivane/**'
+      - 'outputs/artifacts/founder-context-tessivane.json'
+      - 'outputs/Tessivane_Competitive_*'
   # GATE FLOOR. `questions_count_max` above is a CEILING — it caps interruption but has never once
   # asserted that the skill asked anything at all. A run that silently skips its confirmation gates and
   # assumes the answers produces a well-formed report, a green suite, and a founder who was never
@@ -159,10 +168,10 @@ assert:
   # Manifest-class: a body-less capture (over the cap, or a read-only/uploaded input) fails
   # EVIDENCE-UNAVAILABLE rather than passing, so this cannot green vacuously.
   - artifact_text:
-      artifact: 'outputs/Cadence_Competitive_Positioning.md'
+      artifact: 'outputs/Tessivane_Competitive_Positioning.md'
       not_matches: '(?<!"_?produced_by":\\s{0,4}")\\b\\w+\\.py\\b'
   - artifact_text:
-      artifact: 'outputs/artifacts/competitive-positioning-cadence/report.md'
+      artifact: 'outputs/artifacts/competitive-positioning-tessivane/report.md'
       not_matches: '(?<!"_?produced_by":\\s{0,4}")\\b\\w+\\.py\\b'
   # Delivery: the skill HANDED the deliverable over via `present_files`, not merely wrote it and named
   # a path.

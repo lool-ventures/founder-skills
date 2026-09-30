@@ -5,6 +5,462 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — Market sizing built by reference, an outside review for competitive positioning, and an option pool modelled on what its percentage measures
+
+### Highlights
+
+**A market sizing is now built by reference, so the number in the report is the number the
+calculation used.** Until now the research record and the calculation were joined by name: a figure
+recorded under the same name as a calculation input was assumed to be that input. A head count
+recorded as the industry total was consumed as money and presented as "$12.0M", carrying the grade
+of the research it was never taken from, and the figure shown in the report was a second copy that
+could go stale. Every figure the sizing uses now declares what it measures — money per year, money per
+customer, a count, a percentage — with its currency and period where those apply. The sizing names
+the figures it wants rather than restating their values, the calculator refuses a figure whose unit
+does not fit the slot it is asked to fill, and it records what each reference resolved to: the value
+as recorded, any conversion applied, the value actually consumed, the grade that value earned and
+the research entries it depends on. The report and the HTML page render that record, so a count
+prints as a count and the market size is graded by the research behind it.
+
+**The report now tells you when the analysis and the research have come apart.** Eight new
+statements appear in your report when they apply, each named in plain language: the sizing was
+calculated from earlier research; a source figure is no longer in the research; the saved
+calculation was changed after it was calculated; research changed after the outside review; a figure
+was relabelled after it was refused; the sensitivity table is from a different sizing; the self-check
+is from a different sizing; the figures were not taken from the research. A ninth tells you when the
+analysis rests on figures you supplied that were never independently checked. Rewording the
+explanation next to an estimate is not a change: it does not mark the analysis as changed after its
+review, or the sensitivity table and self-check as out of date.
+
+**The outside review of a market sizing now records what it reviewed.** Previously a research figure
+could be edited after the review and the calculation re-run, leaving the two agreeing again with
+nothing to show that neither was what the reviewer saw. The review now records the figures it was
+taken against, so a later change is reported rather than absorbed.
+
+**Every competitive positioning analysis now has an outside review, or a recorded reason it did
+not run, and you read what it found.** Once the analysis is finished, a separate reviewer that was never given the scoring rubric
+the analysis was built with tries to contradict it: a competitor placed where its own material says
+it is not, a claim of yours that your public record contradicts, a claim in your documents the
+analysis never checked, a competitor left out, an axis choice that could only have come out one
+way. Every finding must cite a web page, a page of your documents, or the analysis's own words, and
+one that does not is set aside; a quote from your documents that is not found on the page it cites
+is shown with a note saying so. The report
+and the visual version gain a "What an Outside Review Found" section that says what the review
+found (most serious first, each with its quote and source), that it found nothing it could
+evidence, or that it did not run and why. The review is shown from a copy kept the moment it was
+written, so editing it afterwards changes nothing you read, every other review of the same analysis
+is listed in full below it, and if the analysis changed after the review the report says the review
+was taken against an earlier version. A report is not produced at all unless the review ran or the
+reason it did not was recorded. When the review raised a serious challenge, or did not run, the
+review section says so first, and the closing message carries the same sentence.
+
+**A startup raising on a plan is mapped as a plan, beside where it stands today.** Until now a
+planned price or a claimed capability was placed on the map as today's position and ranked as if it
+shipped. When your pitch goes beyond what you ship, each "Where you stand" sentence now opens "If
+delivered:", gives today's position beside it ("Today: not ranked — there is no product to buy
+yet" when there is nothing to buy, otherwise how far the plan moves you on each axis), and states
+the difference once: "You are placed where your plan puts you; competitors are placed at what they
+ship today." The visual map draws today as a hollow ring with an arrow to the planned point, and a
+new "What Is Shown and What Is Claimed" section says, for each axis, whether the planned position
+is shipping, validated by customers, demonstrated, or claimed but not yet shown. The analysis also
+now researches your own public record, not only your competitors': your registered legal name and
+your patent filings. Whether a patent is granted is worked out from the filing itself rather than
+taken from your pitch, and a filing with no grant found is called a published application, never
+"pending". A new "What Public Records Show" section lists each filing with its source and the
+searches that found nothing, and the coaching notes may not call a patent granted or pending when
+the record says otherwise.
+
+**The option pool is now modelled on what your term sheet's percentage actually measures, and cap
+table asks when it cannot tell.** A pool percentage can be read three ways that the model computes:
+the pool available for new grants after the round, only the new options added in this round, or a
+share of the share count before the round. When the company already has unallocated options, the first two give
+different top-ups. The skill now asks what your percentage measures; the last of its four answers,
+"Something else / not sure — ask counsel", models no top-up and says why. When the company already
+has unallocated options, a post-money pool is always shown with both readings, whether or not you
+were asked: the report says which reading it modelled and gives the other reading's figures. Every priced round with a pool target is also solved with the pool sized the other
+way, where that comparison is defined, and the report puts founders' share on that sizing beside the modelled one. It never recommends one
+sizing over the other; it tells you the difference is worth raising with counsel. Each scenario
+explains its option pool in its own section of the report, and the visual report and the explorer
+show the same section: what the percentage is measured against, in the words a term sheet uses; how
+the pool's cost falls; the other sizing's figures; and what to confirm with counsel. The coaching
+commentary leaves all of this to that section. A basis the model
+does not compute used to be computed as a neighbouring one with nothing on the page saying so: a
+pool measured without the converting SAFEs and notes was computed as if they were counted, and one
+defined in your documents' own terms as measured against the share count before the round. Such a scenario now shows no figures and asks you a question instead, and if you answer, the
+report says every time which reading it computed.
+
+**A financial model review now opens with its own verdict, and the closing message carries it word
+for word.** The report's first paragraph states the model's rating and score, its base runway and
+whether the company is default alive. When the projected runway is infinite, or longer than the
+runway at today's burn, it also gives the runway at today's burn held flat and says to plan on that
+figure. It is built from the same figures and rounding the report prints in its summary and runway
+table, so they cannot disagree. The message you receive at the end of the review is now that paragraph plus the
+links to your files, each page named by what it is, rather than a summary written in chat. If the message leaves the paragraph
+out or adds a figure it does not carry, a follow-up gives you the paragraph as the review printed it.
+
+**A financial model that never says how the company makes money is no longer reviewed as if it were
+SaaS.** The revenue model type had to be one of eleven values, so a model or deck that states no
+revenue model, or one none of them fits, was placed on the nearest one, usually a SaaS type. That
+graded gross margin against the SaaS table (a 55% margin could read as a fail) and switched on the
+SaaS-only metrics. A new "unclassified" choice for the revenue model (it also appears in the list on
+the page where you review the extracted model) makes the review stand back instead: gross margin is
+shown without a benchmark and says why, net and gross revenue retention, magic number, Rule of 40
+and ARR per employee are marked not applicable, and checks specific to a sector are listed as not
+assessed. The gross margin, the checklist and its warning say why in plain words: "no revenue model we have benchmarks for is stated in your
+materials".
+
+### Added
+
+- A figure that calls itself sourced but names no listed source is graded as an estimate, on the
+  report and the HTML page alike.
+- The report and the HTML page list each estimate the sizing used, with its reason and the research
+  it departed from. The reason reads the same on both pages, and a figure the sizing is built from —
+  directly, through the figures it multiplies, because it is the same figure you stated, or because
+  the sizing typed its value in as an estimate — is never labelled "not used in the sizing".
+- An exchange rate the analysis needs is now recorded in the research record like any other figure —
+  which currencies, the rate, the date it applied and where it came from. A rate with no listed source
+  is refused, and a rate is never worked out from the reverse pair. (Both pages already disclosed the rate they used; what is new is that the rate
+  is part of the record the outside review sees.)
+- **The market sizing verdict now starts by answering "do my numbers hold up?".** When you stated a
+  TAM, SAM or SOM, the report, the HTML page and the closing message open with a short answer, for
+  example "Short answer: the SOM you stated ($100.0M) does not hold up — both builds come in below
+  it." The answer comes from the same comparison as the sentence after it. A figure holds up when it
+  is within 25% of every build, holds up against only one build when it is within 25% of just one,
+  and otherwise does not hold up. A direction ("below it" or "above it") is given only when every
+  build agrees on it.
+- **When your materials give two figures for one input, you are asked which one the sizing should
+  use before it runs.** For example, you might give one price in chat and another in the deck. If
+  that question was never put to you, the sizing step is held once with the question to ask, naming
+  any figure an earlier question left out. The step then goes ahead whether or not you were asked,
+  and the report says which figure was used and whether the analysis recorded asking you.
+- **Your own figure is stress-tested.** An input taken from your materials was sometimes left
+  out of the sensitivity table, and it was often the figure the outside review challenged. In a full
+  analysis it is now always in the table. When no range was set for it, it is varied by at least ±30%, and across every
+  other figure you gave for the same input.
+- **The market sizing HTML page now has a "Your Answers" section**, matching the report. It shows
+  the other figures you gave, and whether the analysis recorded asking you which one to use.
+- **Every later review of the same market sizing is shown, not only the first.** When the outside
+  review ran more than once on the analysis you received, the first review is shown and each later
+  one is listed in full below it. Re-running the review cannot soften the first one or hide a
+  harsher later one.
+- **A multiple the outside review attributes to your own analysis is checked against its figures.**
+  An example is "the analysis's own bottom-up build estimates roughly 5x this figure". If none of the
+  analysis's figures, or the figures quoted in that sentence, are in that ratio, the sentence gets a
+  note saying the multiple is the reviewer's own arithmetic. This applies on both pages, in the
+  verdict and in the coaching.
+- **A pitch claim can now be "unproven" in competitive positioning.** The stress-test of your
+  differentiation claims had three verdicts, so a claim the research could neither support nor
+  refute was forced into "partially holds" or worse. It can now be marked unproven, and the coaching
+  notes are told to say so in those words. The tally in Key Findings always adds up to the number of claims
+  tested.
+- **You are told when a direct competitor was left out because the list was full.** A competitive
+  positioning competitor set holds at most ten. When research found a direct competitor that could
+  not be added while a company judged not to be a competitor kept its place, the report now names
+  both and says a swap would compare you against the right company.
+- **The competitive positioning closing message is now built from the analysis itself, and it is
+  checked.** It carries a verdict paragraph drawn from the analysis: where you stand on
+  each map, the plan-versus-today difference when there is one, the pitch-claim tally and each
+  claim that does not hold, overall defensibility, your public patent record, and the outside
+  review when it raised something serious. The closing message prints that paragraph unchanged
+  after the links to your documents, each page named by what it is, and the same end-of-turn check that market sizing uses now
+  sends the message back once if it leaves out any of that text or adds a figure of its own. The
+  report, the visual version and the explorer open with the same paragraph, so the message quotes
+  what the report says.
+- **The cap-table option pool on the other sizing.** Each priced round with a pool target is solved a
+  second time with only the pool's sizing flipped, and the report adds one line: "Option pool
+  on the other sizing: … founders X% (vs Y% as modeled)". When the two sizings give the same result it
+  says that instead, and names which two sizings it compared. When the other sizing, or the
+  new-options-only reading, is not computed, the line says so and why. It never tells you which sizing to choose.
+  Founders' two figures are given to two decimals, for example 63.04% and 64.86%.
+- **A cap-table pool sized by its increase.** "Only the new options added in this round" is now its
+  own reading, computed as an increase: new options equal to X% of the fully diluted share count
+  after the round, on top of the existing unallocated options, which are not counted toward the
+  target. The report describes the pool as growing by that share rather than topping up to it, and
+  the quick answer reads "new options only, measured against the fully diluted share count after the round". When such a scenario is computed and the company already has
+  unallocated options, the counsel packet adds an item asking counsel to confirm that the document
+  sizes the increase and not the resulting pool.
+- **Both readings of a cap-table post-money pool, whichever one is modelled.** When a post-money pool
+  target sits beside existing unallocated options, the report says which reading it modelled and that
+  the other one changes the top-up, and shows the other reading's figures. Read as the pool available
+  after the round, a line directly underneath gives the new-options-only figure: "If your term sheet
+  sizes only the new options: N new options instead of M (…), founders X% (vs Y% as modeled)". Read as
+  only the new options, the report says the whole-pool reading gives a smaller top-up, and the pool's
+  other-sizing line gives that reading's figures. The disclosure appears in the report, on both HTML
+  pages and in the quick answer; the quick answer computes no second reading, so it shows the
+  disclosure without that figure.
+- **Cap table checks what the coaching says about the option pool before it is added to your report.**
+  A statement about how the pool is sized that the computed figures do not back can be sent back once
+  for correction. If it is still there, it is removed, and the commentary says that what it said
+  about the pool was removed and points to the report's Option pool section. If the check cannot
+  judge the commentary, the commentary is still added, and it says its pool statements were not
+  checked. Commentary that did not go through the check is not added to the report.
+- **A pool sentence from your document is checked before cap table quotes it to you.** When an
+  uploaded document states how the pool is sized, the pool question can quote that sentence. It does
+  so only after checking that the sentence is really in the document, as a whole sentence or clause,
+  word for word apart from spacing, line breaks and the style of quote marks and dashes. The quote is shown as evidence. Your answer decides.
+- **The market sizing report tells you when your materials state two different figures for the
+  same market.** If one slide gives a TAM of $70.0B and another a total market of $130.0B, both the
+  report and the HTML page now say so, naming each other figure and the slide it came from, which
+  figure the analysis compared against, and asking which one you stand behind. A second figure that
+  only restates the first (within 1%, or inside a range you gave) is not flagged. The comparison
+  itself is unchanged.
+- **The market sizing report tells you when you were not offered a revision.** When the outside
+  review raises a serious challenge to one of the sizing's inputs, you are meant to be offered one
+  revision round: change the challenged inputs and have the analysis reviewed once more. If the
+  report has no record that you were offered it, it now says so, names the challenged inputs, and
+  says you can still ask for the revision. The challenges themselves are shown as they stand.
+
+### Changed
+
+- The sensitivity table takes each base value from the sizing itself rather than from a separate copy,
+  so it can no longer stress a different market than the report shows.
+- **Which market sizing review you see is worked out from the reviews themselves, and nothing says
+  you approved anything.** Previously a recorded "approval" decided which review was shown. It could
+  be set from your answer to a different question, and the report then said "This analysis was
+  revised once, with your approval" beside a change that changed nothing. Now the report shows the
+  first review of the analysis you received. One line states how many reviews ran and whether they
+  were of that analysis. A "What changed" list gives, in the figures' own units, what changed
+  between the first review and the one shown. If one of your own figures has changed since the first
+  review, the report says so in your units: "Your ARPU was $150 per month when the outside review
+  first ran and is $240 per month now." A later review cannot clear that statement.
+- **A wide gap between the two market sizing builds is now stated as a factor.** It used to be a
+  percentage of their average, which cannot exceed 200% and reads like growth. When the builds differ
+  by more than 30%, the report now says "Top-down and bottom-up SAM differ by a factor of 6.2
+  (bottom-up is higher).", and the verdict, the warnings and the coaching use the same wording.
+  A smaller gap is still given as a percentage. In the coaching, builds within 5% of each other are
+  described that way.
+- **A market figure you stated is now "your figure" or "you stated", never the deck's.** This covers
+  the comparison table ("Your Figures vs. Our Estimates"), the mismatch warning, the narrative
+  section, the verdict and the closing message. Previously, uploading any document made every stated
+  figure a "deck claim", including figures you typed in chat. When one of your figures is shown with
+  its source page, the page is named only if the words recorded for it are found on that page;
+  otherwise it reads "in your materials". A figure given in chat carries no source label. The notes
+  on a result close to your figure, or on a figure covering a different period, now say "the figure
+  you gave".
+- **The market sizing outside review and self-check grader are now held to their instructions as
+  generated.** In a second review round they were sometimes told what had been revised and why,
+  and they repeated that account back to you. The instructions are now produced from the analysis
+  files alone. Any other version is sent back, with the generated text, up to twice, and then let through. Competitive
+  positioning's scoring, self-check, research and outside-review steps are held the same way. The
+  grader no longer
+  reads the record of what was revised, so it grades the analysis as it stands.
+- These checks, and the one that holds a market sizing step until you are asked which of two figures
+  to use, run as a new hook on every helper dispatch in any session where the plugin is enabled.
+  Outside those steps it does nothing, and if it cannot run it lets the dispatch through.
+- **Where you stand on each competitive positioning map is stated in words, not as a
+  differentiation percentage.** The score reached you as, for example, "35.0% (Weak — positioned
+  close to competitors on key axes)", though it was not a percentage of anything, and its bands
+  called a startup that ranked first on every map "close to competitors". Each map now carries one
+  sentence — your place on each axis, who leads, who is ahead of you on both axes, and who is
+  nearest — for example "Price: tied 1st–2nd of 11, level with Competitor A; reach: 11th of 11,
+  well behind Competitor B. Ahead of you on both axes: Competitor A. Nearest competitor: Competitor
+  A, right next to you." "Level with" is used only for a genuine tie; a narrow lead reads "just
+  ahead of" or "just behind". The same sentence appears in the report, the visual version, the
+  explorer and the coaching notes.
+- **The competitive positioning reality check gains a "no clear edge" trigger**, raised when a
+  competitor sits right next to you and you lead on neither axis — the crowded middle, which no
+  ranking trigger saw. It no longer quotes the differentiation score. It also treats a flattering
+  result on a plan as a target rather than a finding, and a weak result as one that holds even if
+  everything in the plan is delivered.
+- **The competitive positioning coaching notes now see your map and your pitch-claim verdicts**, and
+  are told to address every claim that does not hold and every serious outside-review finding. Before, they
+  saw neither, and could tell you nothing had raised a serious concern while your headline claim
+  failed.
+- Cap table's rule set is updated. The option-pool top-up rule gains the increase-sized basis
+  and its formula. A new counsel-review rule covers pool targets sized as an increase, citing a
+  publicly filed financing agreement that sizes the pool that way. The top-up rule also now records
+  that no source defines a pool denominator that excludes converting securities, and that a basis
+  defined by the transaction documents is not computed.
+- **Cap table names each option pool measure by the share count it counts.** The report reads "The
+  unallocated options after the round equal 10% of the fully diluted share count after the round (a
+  term sheet writes this as a "10% post-money pool")", or "…before the round". This replaces
+  "post-money basis" and "pre-money basis" in the report, on both HTML pages and in the quick answer.
+  "Pre-money pool" is also what term sheets call the way every pool's cost falls on the holders before
+  the round, so the old label read as that. The pool question's third answer now reads "Measured
+  against the share count before the round".
+- The cap-table pool top-up question no longer puts "post-money" into its answers ("Top up to 10%",
+  not "Top up to 10% post-money"), and the quick answer no longer offers "Not sure — use
+  post-money". The basis is asked as its own question in the same batch.
+- The cap-table pool comparisons and the acquisition note name which options each figure counts:
+  "unallocated options equal to 10% of
+  the fully diluted share count after the round". When the existing pool already covers the target,
+  it says no new options are added. When the pool's base leaves out shares issued in an acquisition,
+  it says so.
+- The cap-table quick answer names the pool basis that was actually computed ("basis not modelled",
+  "measured with the conversion shares, at your choice", "measured against the fully diluted share count
+  before the round, from your answer"), in the Option pool section's words, never the basis requested beside figures computed on another.
+- **Every report now says when one of its steps skipped the check that confirms a helper's saved
+  output.** A step can reach the report without that check if it fell back to another way of passing
+  its results, or if the check was skipped. The report names each such step in plain words, for
+  example "the scored checklist" or "the slide-by-slide review" — in cap table, the extraction of one
+  or more of your documents (counted, never named), the reading of your spreadsheet's structure, or
+  the reading of your articles of association — and says the results are unaffected. Market sizing
+  also says it in the verdict. This notice cannot be dismissed. It relies on the run's working
+  folder, so a run that has none shows no notice. It appears in market sizing, deck
+  review, financial model review, IC simulation, competitive positioning and cap table.
+- **Helper steps are now given full file paths, which newer Claude Desktop versions of Cowork
+  require.** The paths are checked once at the start of each Cowork run. If a helper cannot save its work, the run is told to correct the path and retry once, or to stop
+  and tell you why. Previously it switched quietly to a fallback. If a run does use the fallback, it
+  is told to say so in one sentence that its working files were passed directly and its record is incomplete, with the
+  results unaffected. Before, this appeared only in an internal summary.
+- **A deck review is told not to fail "company purpose is clear" when the deck does say what the
+  company does.** A cover tagline that isn't in the "[Category] for [customer] that delivers
+  [outcome]" form used to be read as a missing purpose. The check is now told to look through the whole
+  deck and name the slide where the purpose is stated. A purpose that is stated but late, split across
+  sentences, missing its outcome, or only a category label is a warning. It fails only when no slide
+  says what the company does or for whom, or the deck contradicts itself. "No vague purpose" now
+  fails only when the purpose is buzzwords with nothing concrete, so one weak statement is not failed
+  twice.
+- **A market figure you gave as a range is compared and quoted as that range.** A TAM stated as
+  "$8–12B" used to be shown as "$8.0B", and a result inside your range but well above its low end
+  could be flagged as differing from your figure. Now a result inside your range reads "within your
+  range" on the report and the HTML page and is not flagged. A result outside it is measured against
+  the nearer end, and every place that quotes your figure quotes the range.
+
+### Fixed
+
+- **The HTML page printed a currency it could not place as "$".** On an analysis in another currency
+  that was a wrong unit on the headline figure. It now prints no marker, matching the report.
+- **The HTML page compared your deck's figures against the analysis using its own conversion**, which
+  had drifted from the report's. Both now use the same one.
+- A non-numeric figure in the research record could stop the report being written; it is now handled
+  the way the HTML page already handled it.
+- Percentages and counts in the method table and the narrative now print by what they measure —
+  "37%", not "37" or "37.0%". Customer counts the sizing works out print as whole numbers, not
+  "Target Customers: 2,417.38", and percentage differences print the same way everywhere, to one
+  decimal place.
+- **The strongest challenge quoted in the market sizing verdict and the closing message is a whole
+  sentence.** It was cut at an abbreviation ("… — i.e (from deck.pdf, page 2).").
+- **The note on a figure both builds narrow by the same number no longer implies they agree.** It
+  now says the builds are not independent checks of each other on that figure, whether or not they
+  agree.
+- **Challenges the market sizing report cannot show are now described accurately.** It used to say
+  they had no source. It now says they were incomplete or did not cite their evidence in a form that
+  can be checked.
+- **The additional figures you stated are now listed in words.** They used to be printed as raw data
+  with quotes, braces and internal unit names. Nested figures are grouped under their heading, and
+  each figure prints by what it measures.
+- **The list of estimates that were not stress-tested no longer prints brackets and quote marks**
+  around the names.
+- **"Your Answers" no longer shows internal question identifiers** when the questions you asked to
+  skip were recorded in an unexpected form. Those questions are now counted instead ("and 2 other
+  questions").
+- **The warning about a figure built from other numbers now names the actual gap.** Some such figures
+  do list the numbers they are built from but give no source for each. The warning used to say those
+  numbers were "not recorded separately", which was false; it now says they lack a source.
+- **The sensitivity table no longer silently drops ranges with malformed names.** A range named, for
+  example, "bottom_up.arpu" used to be discarded. The table could shrink to one row, and the report
+  then listed those inputs as never stress-tested. The step now fails and is redone.
+- **The sensitivity warning no longer says your own figure was "graded sourced"**, which suggested it
+  had been checked against research. It now says "your own figure".
+- **A competitor you removed after it was challenged was reported as kept and ranked.** The
+  competitive positioning competitor-set check lists as "Retained despite the challenge" only a
+  competitor still on your map; one you dropped now reads "Removed after the challenge", by name.
+- **A moat nobody has no longer gives you a rank.** On a moat you and every competitor lacked, the
+  competitive positioning report read "Rank 1 of 8". An absent moat now says how many competitors
+  have it; a tie is stated as a tie, with who shares it; and every competitor at the top is named
+  as a leader, not just the first one listed.
+- **A tie on a competitive positioning map axis is stated as a tie**, as a range of places, rather
+  than giving you the better place, and a tie can no longer be what sets off the positioning reality
+  check's "flattering result" trigger.
+- **A patent is scored as a regulatory barrier, not as a separate custom moat.** A provisional
+  patent could be scored as its own moat, become your "strongest moat", and be counted twice. A
+  custom moat named after a patent, licence or certification is now refused, and every custom moat
+  must say what it is.
+- **"Founder Override" appears only where you actually changed a value.** The label, and the count
+  of overrides, could appear on competitive positioning ratings from the first scoring pass, before
+  you had corrected anything.
+- **Competitive positioning tables, map labels and legends name companies.** Rows and points were
+  labelled with internal identifiers, legends read "Your Company", the moat table's column headings
+  were cut off mid-word, and the moat radar called a competitor "strongest" when others shared that
+  grade (it now says "tied for strongest").
+- **An estimated competitive positioning position is marked as one.** Positions the analysis
+  estimated rather than sourced looked exactly like researched ones. They now carry a "~", and each
+  map's table says how many of its positions are estimates. Evidence in tables is cut at a word, not
+  mid-word.
+- **A competitor name found in web research can no longer render as markup** in the written
+  competitive positioning report. The visual version and the explorer already handled this.
+- **Evidence in the competitive positioning report no longer names the analysis's working files.**
+  Phrases like "per the landscape file" are now worded in plain language when the scores are
+  produced, so nothing has to be edited afterwards.
+- **The cap-table coaching could give pool advice that did not fit the round.** A 10%
+  post-money pool was described as "sized into the pre-money valuation", with advice to negotiate a
+  post-money pool the round already had. The coaching is now told to mention the pool only as a
+  source of dilution, and what it says about the pool's sizing is checked before it is added. The
+  report's Option pool section, computed from the scenario, says how it was sized, including when a
+  basis was assumed.
+- **A pool basis that excludes converting securities was computed as plain post-money, silently.**
+  With SAFEs or notes converting, the cap-table figures could differ from your term sheet's, and the
+  quick answer printed the requested basis beside them. The scenario is now refused unless you
+  choose to see plain post-money figures, and that choice is disclosed as a serious warning every
+  time. With nothing converting, the two bases are one number and it is computed as before.
+- **A pool basis defined by your documents was computed as pre-money, silently.** Cap table now
+  refuses it unless you say which computed measure your document matches. The figures then use that
+  measure, and the report says the basis came from your answer and asks you to confirm it with
+  counsel.
+- **A cap-table pool figure labelled "unallocated" showed the whole pool.** The quick answer's top-up
+  line gave the unallocated share count beside the whole pool's percentage, so on a round with
+  granted options the percentage printed was larger than those shares' actual share of the company.
+  The percentage now comes from the same shares, and the whole pool is named separately. The
+  cap-table row is now labelled "Option pool (granted and unallocated)", with counted shares rather
+  than a count worked back from the percentage.
+- **The cap-table acquisition note stated the whole pool as the sized figure.** It now states the
+  sized options' share and names the whole pool separately when granted options make the two
+  differ. It says when no options were added, and describes a pre-money sizing as a share of the
+  pre-round count. It leaves an acquisition's shares out of the base only for an acquisition
+  concurrent with the round.
+- **The end-of-turn check on the closing message works in local Cowork sessions on newer Desktop
+  versions.** There it could not find the report's files and let every closing message through,
+  including one rewritten with figures of its own. It now reads the message as it was printed.
+  This applies to every skill whose closing message is checked: market sizing, competitive
+  positioning and financial model review.
+- **A run that links its finished reports without attaching them is asked to attach them.** A run
+  could end with links to its report without attaching the files, and a link does not open
+  everywhere. Wherever the app offers a way to attach files (not the plain command line), a run that
+  linked its finished files without attaching them is now asked, once, to attach them.
+- **A correct closing message is no longer followed by a correction.** When the message arrived a
+  moment before the session record was updated, it was treated as missing. A "for the record" copy
+  was then added below a message that already had every figure right. When a correction is
+  warranted, it now also says to check any figure it does not contain against the report.
+- **Reports no longer end with the "Generated by founder skills" line twice.** This happened in
+  financial model review, and could happen in IC simulation, when the coaching commentary added its
+  own copy.
+- **Internal names that include a number are now written as plain words** in text a helper wrote
+  for your report, for example a name containing a year. Numbered item IDs are still printed
+  exactly, so they stay searchable.
+- **The deck review warning about an AI claim the deck does not back up no longer ends with an
+  internal status name in brackets.**
+- **The financial model review's interactive explorer showed a bare dash where a gross margin has no
+  benchmark**, for example on a marketplace, while the report and the HTML page gave the reason. The
+  explorer now shows the reason too.
+- **Reports no longer occasionally warn about internal wording that isn't there.** The spot where
+  the coaching is inserted, which you never see, could be flagged.
+
+### Development
+
+Contributor-facing only; nothing here changes what a founder installs or runs.
+
+- `cowork-harness` is pinned exactly at 4.0.0 across CI and the contributor install line, up from
+  3.8.1, and the GitHub Action moves to `@v4`. Recording now needs 4.0.0: its pinned agent binary
+  matches the one Claude Desktop stages, and the host-loop agent no longer runs in the outputs
+  folder, so a relative file path is refused there as it is in production. Every cassette was
+  re-recorded under it.
+- `lint-skill` gates through a pinned list of accepted findings instead of `--strict`, which has no
+  per-rule suppression. Any other warning still fails, and an accepted finding that stops firing
+  fails too, so the list can only shrink.
+- A new CI step checks every recording that ran a closing message: the final message must carry the
+  printed hand-over whole, and the end-of-turn check must have found it. It reuses that check's own
+  logic.
+- The re-record cost pre-flight tells a budget refusal from a scenario that did not load by the
+  harness's message, not its exit code, which 4.0.0 made the same for both.
+- Recordings' path redaction is widened (macOS `/private` paths, case-insensitive, never inside a
+  URL), and every scenario but one asserts that no tool call was refused by the permission settings.
+- Cap table's paid end-to-end lane judges the coaching's option-pool sentences against the figures
+  the model computed, across the whole commentary, and asserts that the check before insertion ran
+  on that run. A second, separately opted-in cap-table lane reaches the unconfirmed pool-reading
+  disclosure. The curated mutation corpus gains cases for the pool-basis gate, the
+  increase-sized pool, both pool comparisons and the pool-sentence check.
+
 ## [0.13.0] - 2026-09-24 — The message that ends a market sizing now says what the report says
 
 ### Highlights
@@ -240,7 +696,7 @@ second is what happened.
   exactly that — rewrote what you had said to match its own number, without asking you. It now says
   to recompute from your figure or to ask you; a figure you did not confirm is not yours. And a
   price you quoted per month is converted to the annual figure the arithmetic uses before the two
-  are compared, so $203 a month against $2,436 a year is agreement, not a discrepancy.
+  are compared, so $150 a month against $1,800 a year is agreement, not a discrepancy.
 
 - **Accepting a warning no longer removes its mark from the summary table.** When both market
   builds narrow by the same figure, the rows affected are marked — and that mark used to vanish

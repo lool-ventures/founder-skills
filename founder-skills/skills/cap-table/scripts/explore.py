@@ -38,6 +38,7 @@ _VENDOR_DIR = Path(__file__).resolve().parent / "vendor"
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _palette  # noqa: E402
+import _pool_text  # noqa: E402
 
 
 def _js_palette_block() -> str:
@@ -170,7 +171,9 @@ def render_explorer_html(
     import _warning_callouts as _wc
 
     solver_banner_html = ""
-    _solver_lines = _wc.solver_callouts_plaintext(scenarios_doc.get("scenarios") or [])
+    _solver_lines = _wc.solver_callouts_plaintext(
+        scenarios_doc.get("scenarios") or [], owned_by_scenario=_pool_text.pool_section_codes
+    )
     if _solver_lines:
         _items = "".join(f"<li>{_esc(line)}</li>" for line in _solver_lines)
         solver_banner_html = (
@@ -229,6 +232,8 @@ def render_explorer_html(
                 "per_safe": s["computed_outputs"].get("per_safe", []),
                 "per_note": s["computed_outputs"].get("per_note", []),
                 "parameters": s.get("parameters", {}),
+                # The report's Option pool section, pre-rendered and escaped from the one builder.
+                "pool_section_html": _pool_text.pool_section_html(_pool_text.pool_section(s, cap_state)),
             }
             for s in scenarios_doc.get("scenarios", [])
         ],
@@ -324,6 +329,11 @@ def render_explorer_html(
   .badge.structural_only {{ background: var(--lool-warning-tint); color: var(--lool-warning); }}
   .badge.repay_only {{ background: var(--lool-paper-2); color: var(--lool-slate); }}
   .badge.mixed {{ background: var(--lool-line-2); color: var(--lool-royal); }}
+  .pool-section {{ margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--lool-cloud, #e5e7eb);
+    font-size: 13px; line-height: 1.55; }}
+  .pool-section h4 {{ margin: 0 0 6px; font-size: 13px; }}
+  .pool-section p {{ margin: 0 0 6px; }}
+  .pool-callout {{ background: var(--lool-warning-tint); border-left: 3px solid var(--lool-warning); padding: 6px 10px; }}
   .blocker {{ background: var(--lool-danger-tint); border-left: 3px solid var(--lool-danger); padding: 8px 12px;
               margin: 8px 0; border-radius: 0; font-size: 13px; color: var(--lool-danger); }}
   .blocker code {{ font-weight: 600; }}
@@ -535,6 +545,7 @@ def render_explorer_html(
     <div id="scenario-view">
       <div id="scenario-head"></div>
       <div id="scenario-blockers"></div>
+      <div id="scenario-pool"></div>
       <div id="sweep-wrap" class="no-print" hidden>
         <div class="sweep-head">
           <div class="sweep-title">
@@ -1004,6 +1015,8 @@ function enterModeled() {{
   const t = document.getElementById("sweep-title-text"); if (t) t.textContent = "Modeled what-if — not the agreed round";
   // Toggle visibility (not display) so the panel height never shifts.
   const rb = document.getElementById("sweep-reset"); if (rb) rb.classList.remove("invisible");
+  // The section's figures belong to the scenario as entered, not to a modeled pre-money frame.
+  const pl = document.getElementById("scenario-pool"); if (pl) pl.hidden = true;
 }}
 function exitModeled() {{
   _modeled = false;
@@ -1011,6 +1024,7 @@ function exitModeled() {{
   const mr = document.getElementById("metric-row"); if (mr) mr.classList.remove("modeled");
   const t = document.getElementById("sweep-title-text"); if (t) t.textContent = "Model the round — drag to explore a valuation";
   const rb = document.getElementById("sweep-reset"); if (rb) rb.classList.add("invisible");
+  const pl = document.getElementById("scenario-pool"); if (pl) pl.hidden = false;
 }}
 
 // Plain-language ownership summary under the shared legend (founder-facing
@@ -1123,6 +1137,8 @@ function selectScenario(idx) {{
     }}
   }}
   document.getElementById("scenario-blockers").innerHTML = blockers;
+  // Server-built and escaped: the same Option pool section report.md and report.html show.
+  document.getElementById("scenario-pool").innerHTML = s.pool_section_html || "";
 
   // Persistent widgets (P0a): show + update in place for full/mixed, hide +
   // tear down otherwise. The canvas/sankey nodes survive the switch so P1/P2

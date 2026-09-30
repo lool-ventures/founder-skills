@@ -29,13 +29,14 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _artifact_io import fd_sum_mismatch, id_missing, instrument_id_blockers  # noqa: E402
 from _artifact_writer import ArtifactValidationError, load_schema, write_artifact  # noqa: E402
 from _rule_pack import RULE_PACK_VERSION  # noqa: E402
+from _warning_callouts import humanize_warning  # noqa: E402
 from flip_scenario import flip_share_for_share  # noqa: E402
 from note_conversion import (  # noqa: E402
     convert_note,
     derive_scenario_completeness,
     note_has_usable_math_inputs,
 )
-from priced_round import solve_priced_round  # noqa: E402
+from priced_round import AntiDilutionContradiction, solve_priced_round  # noqa: E402
 from safe_conversion import (  # noqa: E402
     convert_safes_cap_implied,
     detect_mfn_cycles,
@@ -47,6 +48,277 @@ _SCHEMA_DIR = os.path.join(
     "references",
     "schemas",
 )
+
+
+# The pool-basis gate lives in the solver (`priced_round.solve_priced_round`), which every entry point
+# reaches. The two founder-choice parameters below are passed through to it from the scenario request.
+_POOL_BASIS_CHOICE_PARAMS = (
+    "excluding_basis_modeled_as",
+    "custom_basis_stated_by_founder",
+)
+
+
+# The option pool's other sizing, keyed on the TERM-SHEET basis (the scenario's stated or defaulted
+# `target_basis`), never on the basis actually solved -- the excluding gate can rebind that. None means no
+# comparison is defined; `_POOL_NOT_COMPUTED_REASON` says why, in words a founder can read.
+_OTHER_POOL_BASIS: dict[str, str | None] = {
+    "post_money": "pre_money",
+    "pre_money": "post_money",
+    # Reached only when no SAFEs or notes convert (the gate blocks it otherwise) -- then it IS post_money.
+    # SEAM: once the excluding basis is modelled distinctly, the blocked case with converting securities
+    # becomes computable here too; today it never reaches this function.
+    "post_money_excluding_converting_securities": "pre_money",
+    # The other sourced reading of the same sentence: the resulting pool on the same post-round denominator.
+    # One axis changes (what the percentage counts), not two; no source sizes an increase before the new money.
+    "post_money_increase": "post_money",
+    "custom": None,
+}
+_POOL_NOT_COMPUTED_REASON = {
+    "custom": "the pool's denominator is defined by your documents, so there is no single other sizing",
+    "founder_choice": "the pool basis is only approximated in this scenario, so a comparison would read as exact",
+    "stated": (
+        "the pool's measure comes from your answer about your documents rather than from the documents "
+        "themselves, so no other sizing is compared"
+    ),
+}
+# The same causes, worded for the new-options-only reading (`_pool_increase_reading`).
+_INCREASE_NOT_COMPUTED_REASON = {
+    "custom": (
+        "the pool's denominator is defined by your documents, so no figure is computed for sizing only the new options"
+    ),
+    "founder_choice": (
+        "the pool basis is only approximated in this scenario, so a figure for sizing only the new options would "
+        "read as exact"
+    ),
+    "stated": (
+        "the pool's measure comes from your answer about your documents rather than from the documents "
+        "themselves, so no figure is computed for sizing only the new options"
+    ),
+}
+# Share classes a pool sizing can move, keyed as the solver's aggregate names them. "other_existing_pct" is
+# the residual (non-founder common, warrants): the aggregate has no row for it.
+_POOL_CF_CLASSES = (
+    "founders_pct",
+    "safe_pct",
+    "note_pct",
+    "preferred_pct",
+    "option_pool_pct",
+    "new_money_pct",
+    "acquisition_pct",
+)
+# Holders who can gain on the other sizing: those in the company before the round. The pool itself and the
+# new investors are never "gainers" -- the pool is what changes size, and the investors' money is fixed.
+_POOL_CF_NOT_GAINERS = {"option_pool_pct", "new_money_pct", "acquisition_pct"}
+_POOL_CF_EPSILON = 0.0005  # 0.05 percentage points, on unrounded shares
+
+
+def _pool_classes(aggregate: dict[str, Any]) -> dict[str, float]:
+    shares = {k: float(aggregate.get(k) or 0.0) for k in _POOL_CF_CLASSES}
+    residual = 1.0 - sum(shares.values())
+    # Float noise from summing seven shares is not a holder; a real residual row is whole shares' worth.
+    shares["other_existing_pct"] = residual if residual > 1e-9 else 0.0
+    return shares
+
+
+# The two readings of a post-money pool beside existing unallocated options, one per reading the solver took.
+_READING_DISCLOSURES = frozenset({"W_POOL_BASIS_READING_NOT_CONFIRMED", "W_POOL_BASIS_READ_AS_NEW_OPTIONS_ONLY"})
+
+
+def _comparison_warning_codes(other: dict[str, Any]) -> list[str]:
+    """The comparison re-solve's warnings, for the report. The reading disclosures are dropped: the re-solve's
+    sizing is OUR comparison, not a reading of the founder's document, so "your target was read as ..." would be
+    false there. Nothing else is filtered."""
+    return sorted(
+        {
+            str(w.get("code"))
+            for w in other.get("warnings") or []
+            if str(w.get("code") or "").startswith("W_") and w.get("code") not in _READING_DISCLOSURES
+        }
+    )
+
+
+def _pool_sizing_counterfactual(
+    solve_kwargs: dict[str, Any], modeled: dict[str, Any], params: dict[str, Any]
+) -> dict[str, Any] | None:
+    """Re-solve the round with only the pool's sizing basis flipped, and say what changes.
+
+    The second solve gets exactly the first solve's keyword arguments with `target_basis` replaced, so the
+    comparison differs in one input only. A counterfactual that cannot be solved never alters the modeled
+    result: a returned blocker makes it `unavailable`; a `ValueError` from the solver does too, loudly (one
+    stderr line and a warning on the scenario); `AntiDilutionContradiction` -- a documented producer defect,
+    and a `ValueError` subclass -- propagates.
+    """
+    if not params.get("target_pool_percent") or modeled.get("completeness") not in {"full", "mixed"}:
+        return None
+    assumed = params.get("target_basis") is None
+    term_basis = str(params.get("target_basis") or "pre_money")
+    # Approximated only when the solver's basis gate actually REBOUND the excluding basis, which is exactly
+    # when it emitted its disclosure warning. The raw parameter is not the signal: on a round with no
+    # converting securities the gate passes the basis through and the solve is exact, and on any other basis
+    # the flag is inert.
+    approximated = any(
+        isinstance(w, dict) and w.get("code") == "W_EXCLUDING_BASIS_MODELED_AS_POST_MONEY"
+        for w in modeled.get("warnings") or []
+    )
+    block: dict[str, Any] = {
+        "modeled_basis": term_basis,
+        "modeled_basis_assumed": assumed,
+        "modeled_as_approximation": approximated,
+    }
+    other_basis = _OTHER_POOL_BASIS.get(term_basis)
+    if approximated:
+        return {**block, "status": "not_computed", "reason": _POOL_NOT_COMPUTED_REASON["founder_choice"]}
+    if other_basis is None:
+        stated = any(
+            isinstance(w, dict) and w.get("code") == "W_CUSTOM_BASIS_STATED_BY_FOUNDER"
+            for w in modeled.get("warnings") or []
+        )
+        return {
+            **block,
+            "status": "not_computed",
+            "reason": _POOL_NOT_COMPUTED_REASON["stated" if stated else "custom"],
+        }
+    block["other_basis"] = other_basis
+    try:
+        other = solve_priced_round(**{**solve_kwargs, "target_basis": other_basis})
+    except AntiDilutionContradiction:
+        raise
+    except ValueError as e:
+        sys.stderr.write(f"run_scenario: pool sizing counterfactual ({other_basis}) could not be solved: {e}\n")
+        modeled.setdefault("warnings", []).append(
+            {
+                "code": "W_POOL_COUNTERFACTUAL_UNAVAILABLE",
+                "severity": "medium",
+                "detail": "The comparison with the other option-pool sizing could not be computed for this scenario.",
+            }
+        )
+        return {**block, "status": "unavailable", "reason": "the other sizing could not be solved"}
+    if other.get("completeness") not in {"full", "mixed"} or other.get("blockers"):
+        codes = [str(b.get("code") or "") for b in other.get("blockers") or []]
+        reason = "the other sizing could not be solved"
+        if codes:
+            reason += ": " + "; ".join(humanize_warning(c) for c in codes if c)
+        return {**block, "status": "unavailable", "reason": reason}
+
+    modeled_classes = _pool_classes(modeled.get("aggregate_ownership_by_class") or {})
+    other_classes = _pool_classes(other.get("aggregate_ownership_by_class") or {})
+    classes = {
+        k: {"modeled": modeled_classes[k], "other": other_classes[k]}
+        for k in modeled_classes
+        if modeled_classes[k] > 0 or other_classes[k] > 0
+    }
+    topups = {
+        "modeled": float((modeled.get("shares_breakdown") or {}).get("pool_topup") or 0),
+        "other": float((other.get("shares_breakdown") or {}).get("pool_topup") or 0),
+    }
+    # "Same" must be true of EVERY holder, not only founders: a round where founders hold a sliver can move
+    # the pool and other holders by points while founders move by less than the epsilon.
+    same = (topups["modeled"] == 0 and topups["other"] == 0) or all(
+        abs(other_classes[k] - modeled_classes[k]) <= _POOL_CF_EPSILON for k in modeled_classes
+    )
+    block.update(
+        {
+            "status": "same_on_both_sizings" if same else "computed",
+            "founders": {
+                "modeled_value": modeled_classes["founders_pct"],
+                "other_value": other_classes["founders_pct"],
+            },
+            "classes": classes,
+            "pool_topup_shares": topups,
+            "price_per_share": {
+                "modeled": modeled.get("equity_financing_price"),
+                "other": other.get("equity_financing_price"),
+            },
+            "gains_on_other_sizing": sorted(
+                k
+                for k in classes
+                if k not in _POOL_CF_NOT_GAINERS and other_classes[k] - modeled_classes[k] > _POOL_CF_EPSILON
+            ),
+            "other_solve_warnings": _comparison_warning_codes(other),
+        }
+    )
+    return block
+
+
+def _pool_increase_reading(
+    solve_kwargs: dict[str, Any], modeled: dict[str, Any], comparison: dict[str, Any] | None
+) -> dict[str, Any] | None:
+    """Re-solve a post-money round on the "only the new options" reading, when the solver disclosed it.
+
+    The gate is the disclosure itself (`W_POOL_BASIS_READING_NOT_CONFIRMED` on the modeled result), never the
+    parameters, so the figure exists exactly where the caveat does. Where the pre-money comparison refuses to
+    compute (the modeled basis is approximated, or taken from the founder's answer), so does this: an increase
+    solve there would drop the approximation and present a figure as exact. Otherwise the second solve gets
+    exactly the first solve's keyword arguments with `target_basis` replaced, and fails the way the
+    comparison does: a returned blocker or a `ValueError` makes it `unavailable` (the latter loudly), and
+    `AntiDilutionContradiction` propagates.
+    """
+    if comparison is None or not any(
+        isinstance(w, dict) and w.get("code") == "W_POOL_BASIS_READING_NOT_CONFIRMED"
+        for w in modeled.get("warnings") or []
+    ):
+        return None
+    if comparison.get("status") == "not_computed":
+        # The comparison refused for the same cause; the reason is worded for THIS reading, since the coach may
+        # relay it under this reading's name.
+        if comparison.get("modeled_as_approximation"):
+            cause = "founder_choice"
+        elif any(
+            isinstance(w, dict) and w.get("code") == "W_CUSTOM_BASIS_STATED_BY_FOUNDER"
+            for w in modeled.get("warnings") or []
+        ):
+            cause = "stated"
+        else:
+            cause = "custom"
+        return {"status": "not_computed", "reason": _INCREASE_NOT_COMPUTED_REASON[cause]}
+    try:
+        other = solve_priced_round(**{**solve_kwargs, "target_basis": "post_money_increase"})
+    except AntiDilutionContradiction:
+        raise
+    except ValueError as e:
+        sys.stderr.write(f"run_scenario: pool increase reading could not be solved: {e}\n")
+        modeled.setdefault("warnings", []).append(
+            {
+                "code": "W_POOL_INCREASE_READING_UNAVAILABLE",
+                "severity": "medium",
+                "detail": (
+                    "The figures for a term sheet that sizes only the new options could not be computed "
+                    "for this scenario."
+                ),
+            }
+        )
+        return {"status": "unavailable", "reason": "the new-options-only reading could not be solved"}
+    if other.get("completeness") not in {"full", "mixed"} or other.get("blockers"):
+        codes = [str(b.get("code") or "") for b in other.get("blockers") or []]
+        reason = "the new-options-only reading could not be solved"
+        if codes:
+            reason += ": " + "; ".join(humanize_warning(c) for c in codes if c)
+        return {"status": "unavailable", "reason": reason}
+
+    modeled_classes = _pool_classes(modeled.get("aggregate_ownership_by_class") or {})
+    other_classes = _pool_classes(other.get("aggregate_ownership_by_class") or {})
+    # The comparison's rule: "same" only when EVERY holder is within the epsilon.
+    same = all(abs(other_classes[k] - modeled_classes[k]) <= _POOL_CF_EPSILON for k in modeled_classes)
+    return {
+        "status": "same_on_both_readings" if same else "computed",
+        "founders": {
+            "modeled_value": modeled_classes["founders_pct"],
+            "increase_value": other_classes["founders_pct"],
+        },
+        "pool_topup_shares": {
+            "modeled": float((modeled.get("shares_breakdown") or {}).get("pool_topup") or 0),
+            "increase": float((other.get("shares_breakdown") or {}).get("pool_topup") or 0),
+        },
+        "whole_pool_pct": {
+            "modeled": modeled_classes["option_pool_pct"],
+            "increase": other_classes["option_pool_pct"],
+        },
+        "price_per_share": {
+            "modeled": modeled.get("equity_financing_price"),
+            "increase": other.get("equity_financing_price"),
+        },
+        "other_solve_warnings": _comparison_warning_codes(other),
+    }
 
 
 def _resolve_target_basis(params: dict[str, Any]) -> tuple[str, dict[str, Any] | None]:
@@ -62,7 +334,8 @@ def _resolve_target_basis(params: dict[str, Any]) -> tuple[str, dict[str, Any] |
     modeled, so target_basis has no math effect — defaulting it is a no-op, not an assumption,
     and no warning is emitted.
     """
-    if "target_basis" in params:
+    # An explicit null states no basis, so it takes the defaulted path rather than being refused as one.
+    if params.get("target_basis") is not None:
         return params["target_basis"], None
     if not params.get("target_pool_percent"):
         return "pre_money", None
@@ -110,6 +383,7 @@ def run_safe_conversion_scenario(
     *,
     instruments: dict[str, Any],
     cap_state: dict[str, Any],
+    pool_counterfactual: bool = True,
 ) -> dict[str, Any]:
     params = scenario.get("parameters", {}) or {}
     safes_filter = params.get("safe_ids")
@@ -229,22 +503,30 @@ def run_safe_conversion_scenario(
 
     # Has a priced round — delegate to solver
     target_basis, tb_warning = _resolve_target_basis(params)
-    priced_outputs = solve_priced_round(
-        cap_state=cap_state,
-        safes=safes,
+    solve_kwargs: dict[str, Any] = {
+        "cap_state": cap_state,
+        "safes": safes,
         # Unreachable with notes outstanding: the guard above returns before this point. Kept
         # explicit so the empty list reads as an asserted invariant rather than an omission.
-        notes=[],
-        pre_money=priced_pre,
-        new_money=priced_new,
-        target_pool_percent=params.get("target_pool_percent"),
-        target_basis=target_basis,
-        conversion_event_date=params.get("transaction_event_date"),
-        mfn_elections=params.get("mfn_elections"),
-    )
+        "notes": [],
+        "pre_money": priced_pre,
+        "new_money": priced_new,
+        "target_pool_percent": params.get("target_pool_percent"),
+        "target_basis": target_basis,
+        "conversion_event_date": params.get("transaction_event_date"),
+        "mfn_elections": params.get("mfn_elections"),
+        **{k: params[k] for k in _POOL_BASIS_CHOICE_PARAMS if k in params},
+    }
+    priced_outputs = solve_priced_round(**solve_kwargs)
     if tb_warning:
-        priced_outputs.setdefault("warnings", [])
-        priced_outputs["warnings"].append(tb_warning)
+        priced_outputs.setdefault("warnings", []).append(tb_warning)
+    if pool_counterfactual:
+        _cf = _pool_sizing_counterfactual(solve_kwargs, priced_outputs, params)
+        if _cf is not None:
+            priced_outputs["pool_sizing_counterfactual"] = _cf
+        _inc = _pool_increase_reading(solve_kwargs, priced_outputs, _cf)
+        if _inc is not None:
+            priced_outputs["pool_increase_reading"] = _inc
     return priced_outputs
 
 
@@ -350,6 +632,7 @@ def run_priced_round_scenario(
     instruments: dict[str, Any],
     cap_state: dict[str, Any],
     last_priced_round_pps: float | None = None,
+    pool_counterfactual: bool = True,
 ) -> dict[str, Any]:
     params = scenario.get("parameters", {}) or {}
 
@@ -414,23 +697,31 @@ def run_priced_round_scenario(
         else None
     )
     target_basis, tb_warning = _resolve_target_basis(params)
-    result = solve_priced_round(
-        cap_state=cap_state_post_pump,
-        safes=instruments.get("safes", []),
-        notes=instruments.get("convertible_notes", []),
-        pre_money=params["pre_money"],
-        new_money=params["new_money"],
-        target_pool_percent=params.get("target_pool_percent"),
-        target_basis=target_basis,
-        conversion_event_date=params.get("transaction_event_date"),
-        mfn_elections=params.get("mfn_elections"),
-        pre_money_basis=params.get("pre_money_basis", "includes_safe_conversion"),
-        acquisition={"consideration_pct": _acq_for_solver["consideration_pct"]} if _acq_for_solver else None,
-        pool_consideration_basis=params.get("pool_consideration_basis", "include"),
-    )
+    solve_kwargs: dict[str, Any] = {
+        "cap_state": cap_state_post_pump,
+        "safes": instruments.get("safes", []),
+        "notes": instruments.get("convertible_notes", []),
+        "pre_money": params["pre_money"],
+        "new_money": params["new_money"],
+        "target_pool_percent": params.get("target_pool_percent"),
+        "target_basis": target_basis,
+        "conversion_event_date": params.get("transaction_event_date"),
+        "mfn_elections": params.get("mfn_elections"),
+        "pre_money_basis": params.get("pre_money_basis", "includes_safe_conversion"),
+        "acquisition": {"consideration_pct": _acq_for_solver["consideration_pct"]} if _acq_for_solver else None,
+        "pool_consideration_basis": params.get("pool_consideration_basis", "include"),
+        **{k: params[k] for k in _POOL_BASIS_CHOICE_PARAMS if k in params},
+    }
+    result = solve_priced_round(**solve_kwargs)
     if tb_warning:
-        result.setdefault("warnings", [])
-        result["warnings"].append(tb_warning)
+        result.setdefault("warnings", []).append(tb_warning)
+    if pool_counterfactual:
+        _cf = _pool_sizing_counterfactual(solve_kwargs, result, params)
+        if _cf is not None:
+            result["pool_sizing_counterfactual"] = _cf
+        _inc = _pool_increase_reading(solve_kwargs, result, _cf)
+        if _inc is not None:
+            result["pool_increase_reading"] = _inc
 
     if warrant_events:
         result["warrant_exercise_events"] = warrant_events
@@ -474,8 +765,12 @@ def run_all_scenarios(
     instruments: dict[str, Any],
     cap_state: dict[str, Any],
     scenario_requests: list[dict[str, Any]],
+    pool_counterfactual: bool = True,
 ) -> list[dict[str, Any]]:
     """Dispatch each scenario_request to the right runner and collect outputs.
+
+    `pool_counterfactual=False` skips the option pool's re-solves (see `_pool_sizing_counterfactual` and
+    `_pool_increase_reading`); `sweep.py` passes it, since its frames discard the result.
 
     SCENARIO IDS MUST BE UNIQUE AND NON-BLANK, checked here because this is where they are first
     consumed as keys. The math itself survives a repeat -- both scenarios are computed and both come
@@ -525,11 +820,15 @@ def run_all_scenarios(
             step_cap_state = fo.get("post_flip_cap_state", cap_state)
             step_instruments = fo.get("post_flip_instruments") or instruments
         if stype == "safe_conversion":
-            outputs = run_safe_conversion_scenario(req, instruments=step_instruments, cap_state=step_cap_state)
+            outputs = run_safe_conversion_scenario(
+                req, instruments=step_instruments, cap_state=step_cap_state, pool_counterfactual=pool_counterfactual
+            )
         elif stype == "note_conversion":
             outputs = run_note_conversion_scenario(req, instruments=step_instruments, cap_state=step_cap_state)
         elif stype == "priced_round":
-            outputs = run_priced_round_scenario(req, instruments=step_instruments, cap_state=step_cap_state)
+            outputs = run_priced_round_scenario(
+                req, instruments=step_instruments, cap_state=step_cap_state, pool_counterfactual=pool_counterfactual
+            )
         elif stype == "flip":
             outputs = run_flip_scenario(req, cap_state=step_cap_state, instruments=step_instruments)
             flip_outputs[req["scenario_id"]] = outputs

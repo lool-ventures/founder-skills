@@ -41,6 +41,8 @@ REQUIRED_ARTIFACTS = [
 OPTIONAL_ARTIFACTS = [
     "report.json",
     "competitor_verification.json",
+    "landscape_draft.json",
+    "startup_research.json",
 ]
 
 
@@ -321,6 +323,7 @@ def _css(brand_css: str) -> str:
             border-bottom: 1px solid var(--lool-line-2); padding-bottom: 0.5rem;
         }
         .subtitle { color: var(--lool-mute); font-size: 0.9rem; margin-bottom: 0.5rem; }
+        .verdict { font-size: 1rem; line-height: 1.55; max-width: 60rem; margin: 0.75rem 0 1.25rem; }
         .chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-bottom: 1.5rem; }
         .chart-box {
             background: var(--lool-paper); padding: 1.5rem;
@@ -437,11 +440,6 @@ def _section_header(
                 f'<span class="badge" style="background:var(--lool-slate-blue);">Checklist: {checklist_pct:.0f}%</span>'
             )
 
-    if _usable(positioning_scores):
-        diff = _num(positioning_scores.get("overall_differentiation"), -1)
-        if diff >= 0:
-            badges.append(f'<span class="badge" style="background:{_CLR_ACCENT};">Differentiation: {diff:.0f}%</span>')
-
     if _usable(moat_scores):
         startup_data = _as_dict(_as_dict(moat_scores.get("companies")).get("_startup"))
         defensibility = str(startup_data.get("overall_defensibility", "")).lower()
@@ -491,14 +489,15 @@ def _chart_positioning_map(
     view_scores: dict[str, Any] | None,
     company_name: str,
     point_styles: dict[str, dict[str, Any]] | None = None,
+    name_by_slug: dict[str, str] | None = None,
 ) -> str:
     """Render a 2D SVG scatter plot for one positioning view."""
     scripts_dir = os.path.dirname(os.path.abspath(__file__))
     if scripts_dir not in sys.path:
         sys.path.insert(0, scripts_dir)
     import _axis_compat
+    import _cp_view
 
-    view_id = str(view.get("id", "primary"))
     view_label = view.get("label")
     x_axis = _as_dict(view.get("x_axis"))
     y_axis = _as_dict(view.get("y_axis"))
@@ -536,7 +535,14 @@ def _chart_positioning_map(
     svg_w = pad_left + plot_w + pad_right
     svg_h = pad_top + plot_h + pad_bottom
 
-    svg: list[str] = [f'<svg viewBox="0 0 {svg_w:.0f} {svg_h:.0f}" xmlns="http://www.w3.org/2000/svg">']
+    # One arrowhead per map, with an id unique to the map: several maps share one HTML document.
+    arrow_id = "plan-arrow-" + "".join(c if c.isalnum() else "-" for c in str(view.get("id", "view")).lower())
+    svg: list[str] = [
+        f'<svg viewBox="0 0 {svg_w:.0f} {svg_h:.0f}" xmlns="http://www.w3.org/2000/svg">',
+        f'<defs><marker id="{arrow_id}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" '
+        f'markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="{_CLR_STARTUP}"/>'
+        "</marker></defs>",
+    ]
 
     # Grid lines
     for i in range(5):
@@ -597,7 +603,7 @@ def _chart_positioning_map(
     )
 
     # Plot points — two passes: circles first, then labels on top
-    startup_label = _esc(company_name) if company_name != "Unknown" else "Your Company"
+    startup_label = _esc(company_name) if company_name != "Unknown" else "This company"
     label_entries: list[tuple[float, float, float, str, str]] = []  # cx, cy, radius, label, weight
     for pt in points:
         if not isinstance(pt, dict):
@@ -624,12 +630,40 @@ def _chart_positioning_map(
         stroke = "#fff" if is_startup else "none"
         stroke_w = "2" if is_startup else "0"
 
-        svg.append(
-            f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="{radius:.0f}" '
-            f'fill="{fill}" stroke="{stroke}" stroke-width="{stroke_w}"/>'
+        planned = (
+            (_num(pt.get("planned_x"), -1), _num(pt.get("planned_y"), -1))
+            if is_startup and pt.get("planned_x") is not None and pt.get("planned_y") is not None
+            else None
         )
+        if planned is not None and planned[0] >= 0 and planned[1] >= 0:
+            # A plan: today as a hollow ring, an arrow to the planned point, and the planned point solid.
+            # The arrow's length is itself a finding -- how far the plan is from today.
+            pcx = pad_left + (planned[0] / 100.0) * plot_w
+            pcy = pad_top + (1.0 - planned[1] / 100.0) * plot_h
+            svg.append(
+                f'<circle class="startup-today" cx="{cx:.1f}" cy="{cy:.1f}" r="{radius:.0f}" '
+                f'fill="none" stroke="{fill}" stroke-width="2"/>'
+            )
+            svg.append(
+                f'<line class="startup-plan-arrow" x1="{cx:.1f}" y1="{cy:.1f}" x2="{pcx:.1f}" y2="{pcy:.1f}" '
+                f'stroke="{fill}" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#{arrow_id})"/>'
+            )
+            svg.append(
+                f'<circle class="startup-planned" cx="{pcx:.1f}" cy="{pcy:.1f}" r="{radius:.0f}" '
+                f'fill="{fill}" stroke="{stroke}" stroke-width="{stroke_w}"/>'
+            )
+            cx, cy = pcx, pcy
+        else:
+            svg.append(
+                f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="{radius:.0f}" '
+                f'fill="{fill}" stroke="{stroke}" stroke-width="{stroke_w}"/>'
+            )
 
-        label = startup_label if is_startup else _esc(slug.replace("-", " ").title())
+        label = (
+            startup_label
+            if is_startup
+            else _esc(_cp_view.display_name(slug, name_by_slug or {slug: slug.replace("-", " ").title()}))
+        )
         font_weight = "bold" if is_startup else "normal"
         label_entries.append((cx, cy, radius, label, font_weight))
 
@@ -645,7 +679,8 @@ def _chart_positioning_map(
 
     svg.append("</svg>")
 
-    display_title = view_label.strip() if isinstance(view_label, str) and view_label.strip() else view_id.title()
+    # A label, else "<X axis> vs <Y axis>" -- never a title-cased slug id.
+    display_title = _cp_view.view_label({"label": view_label, "x_axis_name": x_name, "y_axis_name": y_name})
     title = f"Positioning Map: {_esc(display_title)}"
     vanity_note = ""
     if x_vanity or y_vanity:
@@ -669,10 +704,13 @@ def _chart_positioning_map(
     if rationale_parts:
         vanity_note += f'<div class="axis-rationale">{"".join(rationale_parts)}</div>'
 
-    return f'<div class="chart-box full"><h2>{title}</h2>{"".join(svg)}{vanity_note}</div>'
+    # Where the startup stands, in words -- the same sentence report.md carries (`_cp_view`).
+    stand = _cp_view.view_sentence(view_scores or {}, name_by_slug)
+    stand_html = f'<p class="where-you-stand"><strong>Where you stand:</strong> {_esc(stand)}</p>' if stand else ""
+    return f'<div class="chart-box full"><h2>{title}</h2>{"".join(svg)}{stand_html}{vanity_note}</div>'
 
 
-def _chart_legends(point_styles: dict[str, dict[str, Any]] | None) -> str:
+def _chart_legends(point_styles: dict[str, dict[str, Any]] | None, company_name: str | None = None) -> str:
     """Render size and color legends for the positioning map."""
     if not point_styles:
         return ""
@@ -701,7 +739,10 @@ def _chart_legends(point_styles: dict[str, dict[str, Any]] | None) -> str:
     )
     parts.append('<div class="color-legend" style="display: flex; flex-wrap: wrap; gap: 1rem;">')
     legend_items = [
-        ("Your Company", _CATEGORY_COLORS["_startup"]),
+        (
+            _esc(company_name) if company_name and company_name != "Unknown" else "This company",
+            _CATEGORY_COLORS["_startup"],
+        ),
         ("Direct", _CATEGORY_COLORS["direct"]),
         ("Adjacent", _CATEGORY_COLORS["adjacent"]),
         ("Do Nothing", _CATEGORY_COLORS["do_nothing"]),
@@ -757,7 +798,11 @@ def _find_strongest_competitor(
     return best_slug, best_moats
 
 
-def _chart_moat_radar(moat_scores: dict[str, Any] | None) -> str:
+def _chart_moat_radar(
+    moat_scores: dict[str, Any] | None,
+    name_by_slug: dict[str, str] | None = None,
+    company_name: str | None = None,
+) -> str:
     """Render hexagonal radar chart for moat dimensions."""
     ph = _artifact_placeholder(moat_scores, "Moat scores")
     if ph is not None:
@@ -854,16 +899,29 @@ def _chart_moat_radar(moat_scores: dict[str, Any] | None) -> str:
     svg.append("</svg>")
 
     # Legend
+    import _cp_view
+
+    startup_legend = _esc(_cp_view.row_name("_startup", name_by_slug, company_name))
     legend_parts = [
         '<div class="legend">',
-        f'<div class="legend-item"><div class="legend-dot" style="background:{_CLR_STARTUP};"></div>Your Company</div>',
+        f'<div class="legend-item"><div class="legend-dot" style="background:{_CLR_STARTUP};"></div>'
+        f"{startup_legend}</div>",
     ]
     if comp_slug:
-        comp_label = _esc(comp_slug.replace("-", " ").title())
+        comp_label = _esc(_cp_view.display_name(comp_slug, name_by_slug))
+        # The overlay is the first competitor at the top defensibility grade; when others share that
+        # grade, "strongest" alone would claim a lead the scores do not show.
+        comp_grade = str(_as_dict(companies.get(comp_slug)).get("overall_defensibility", "")).lower()
+        sharing = sum(
+            1
+            for sl, co in companies.items()
+            if sl != "_startup" and str(_as_dict(co).get("overall_defensibility", "")).lower() == comp_grade
+        )
+        qualifier = "tied for strongest" if sharing > 1 else "strongest"
         legend_parts.append(
             f'<div class="legend-item">'
             f'<div class="legend-dot" style="background:{_CLR_ACCENT};"></div>'
-            f"{comp_label} (strongest)</div>"
+            f"{comp_label} ({qualifier})</div>"
         )
     legend_parts.append("</div>")
 
@@ -937,10 +995,142 @@ def _verification_verdicts(
     return out or None
 
 
+def _section_outside_review(dir_path: str, artifacts: dict[str, Any]) -> str:
+    """What an outside review of this analysis found -- the same review, order and words as report.md.
+
+    Resolved from its append-only copy (`_cp_redteam_copy.resolve`), never from `redteam.json` as it now
+    stands, so editing the review changes nothing here either. Every field is the reviewer's text and is
+    escaped; a link is shown only for an http(s) source.
+    """
+    import _cp_redteam_copy
+    import _cp_view
+
+    required = [artifacts.get(n) for n in REQUIRED_ARTIFACTS]
+    run_id = _cp_redteam_copy.primary_run_id(a for a in required if _usable(a))
+    redteam = _load_artifact(dir_path, "redteam.json")
+    skip_record = _load_artifact(dir_path, "red_team_skip.json")
+    shown, _codes, facts = _cp_redteam_copy.resolve(
+        dir_path, run_id, redteam if _usable(redteam) else None, skip_record if _usable(skip_record) else None
+    )
+    review = shown if _usable(shown) else None
+    skip = _cp_redteam_copy.skip_reason(skip_record if _usable(skip_record) else None, run_id)
+    outcome = _cp_view.review_outcome(review, skip)
+    if outcome is None:
+        return ""
+    parts = ['<div class="chart-box full"><h2>What an Outside Review Found</h2>', f"<p><em>{_esc(outcome)}</em></p>"]
+
+    def _finding(f: dict[str, Any]) -> str:
+        sev = _cp_view.SEVERITY_WORDS.get(str(f.get("severity")), "")
+        out = [
+            f"<p><strong>{_esc(sev)}: {_esc(str(f.get('claim_attacked') or '').strip())}</strong></p>",
+            f"<p>{_esc(str(f.get('what_is_true') or '').strip())}</p>",
+        ]
+        quote = str(f.get("evidence_quote") or "").strip()
+        if quote:
+            out.append(f"<blockquote>{_esc(quote)}</blockquote>")
+        src = _cp_view.review_source(f)
+        if src["kind"] == "link" and src["url"].lower().startswith(("http://", "https://")):
+            out.append(f'<p>— <a href="{_esc(src["url"])}" rel="noopener noreferrer">{_esc(src["text"])}</a></p>')
+        else:
+            out.append(f"<p>— {_esc(src['text'])}</p>")
+        return "".join(out)
+
+    if review is not None:
+        parts.extend(_finding(f) for f in _cp_view.review_findings(review))
+        unchecked = [str(c) for c in _as_list(review.get("could_not_check")) if str(c).strip()]
+        if unchecked:
+            parts.append("<p><strong>What the review could not check:</strong></p><ul>")
+            parts.extend(f"<li>{_esc(c)}</li>" for c in unchecked)
+            parts.append("</ul>")
+        unread = [str(n) for n in _as_list(review.get("sources_unread")) if str(n).strip()]
+        if unread:
+            parts.append(f"<p><strong>Your documents the review did not open:</strong> {_esc(', '.join(unread))}</p>")
+    for n, doc in _cp_redteam_copy.other_rounds(dir_path, run_id, facts.get("round_shown")):
+        parts.append(f"<h3>Another review of this analysis (review {n})</h3>")
+        extra = _cp_view.review_findings(doc)
+        if not extra:
+            parts.append("<p>It raised no challenges it could evidence.</p>")
+        parts.extend(_finding(f) for f in extra)
+    parts.append("</div>")
+    return "".join(parts)
+
+
+def _section_startup_record(first: dict[str, Any] | None, current: dict[str, Any] | None) -> str:
+    """What public records show about the startup -- the same record, rows and words as report.md.
+
+    From the run's first record, with each publication's source; empty when the step did not run.
+    """
+    import _cp_view
+
+    record = first if _usable(first) else (current if _usable(current) else None)
+    if record is None:
+        return ""
+    parts = ['<div class="chart-box full"><h2>What Public Records Show</h2>']
+    legal = _as_dict(record.get("legal_name"))
+    if legal.get("value"):
+        parts.append(
+            f"<p><strong>Registered legal name:</strong> {_esc(str(legal['value']))} "
+            f"(source: {_esc(str(legal.get('source') or ''))})</p>"
+        )
+    family = _cp_view.FAMILY_WORDS.get(str(record.get("family_status")))
+    if family:
+        parts.append(f"<p><strong>Patents:</strong> {_esc(family)}.</p>")
+    rows = _cp_view.publication_rows(record)
+    if rows:
+        parts.append(
+            '<table class="comp-table"><tr><th>Publication</th><th>Office</th><th>Status</th>'
+            "<th>What was read</th><th>Source</th></tr>"
+        )
+        for r in rows:
+            cells = "".join(f"<td>{_esc(r[k])}</td>" for k in ("number", "office", "status", "read", "source"))
+            parts.append(f"<tr>{cells}</tr>")
+        parts.append("</table>")
+        parts.append(
+            "<p><em>Each record above was found by the analysis's web research; check it at its source "
+            "before relying on it.</em></p>"
+        )
+    nothing = [str(q) for q in _as_list(record.get("searched_none")) if q]
+    if nothing:
+        parts.append(f"<p><strong>Searched, nothing found:</strong> {_esc('; '.join(nothing))}</p>")
+    if _usable(first) and _usable(current):
+        disagreements = _cp_view.record_disagreements(first, current)
+        if disagreements:
+            parts.append(f"<p><strong>A later record disagreed:</strong> {_esc('; '.join(disagreements))}</p>")
+    parts.append("</div>")
+    return "".join(parts)
+
+
+def _section_proof_gap(positioning_scores: dict[str, Any] | None) -> str:
+    """What is shown and what is claimed -- the same rows and words as report.md."""
+    import _cp_view
+
+    gap = _cp_view.proof_gap(positioning_scores if _usable(positioning_scores) else None)
+    if gap is None:
+        return ""
+    parts = ['<div class="chart-box full"><h2>What Is Shown and What Is Claimed</h2>']
+    parts.append(f"<p>{_esc(_cp_view.ASYMMETRY)}</p>")
+    if gap["availability"]:
+        quote = f" (&ldquo;{_esc(gap['availability_quote'])}&rdquo;)" if gap["availability_quote"] else ""
+        parts.append(f"<p><strong>How far the product has got:</strong> {_esc(gap['availability'])}{quote}</p>")
+    parts.append(
+        '<table class="comp-table"><tr><th>Map</th><th>Axis</th><th>Planned position</th><th>What backs it</th></tr>'
+    )
+    for r in gap["rows"]:
+        cells = "".join(f"<td>{_esc(v or '—')}</td>" for v in (r["map"], r["axis"], r["proof"], r["quote"]))
+        parts.append(f"<tr>{cells}</tr>")
+    parts.append("</table>")
+    if gap["open_claims"]:
+        items = "".join(f"<li>{_esc(c)}</li>" for c in gap["open_claims"])
+        parts.append(f"<p><strong>Claims not yet settled:</strong></p><ul>{items}</ul>")
+    parts.append("</div>")
+    return "".join(parts)
+
+
 def _section_competitor_table(
     landscape: dict[str, Any] | None,
     moat_scores: dict[str, Any] | None,
     competitor_verification: dict[str, Any] | None = None,
+    landscape_draft: dict[str, Any] | None = None,
 ) -> str:
     """Render competitor comparison table sorted by defensibility.
 
@@ -1021,12 +1211,26 @@ def _section_competitor_table(
     # same thing about the same set. Names, not slugs, because these reach a founder.
     notes: list[str] = []
     if verdicts is not None:
-        name_by_slug = {str(c.get("slug", "")): str(c.get("name", "?")) for c in competitors if isinstance(c, dict)}
-        retained = [name_by_slug.get(sl, sl) for sl, v in verdicts.items() if v == "not_a_competitor"]
+        scripts_dir = os.path.dirname(os.path.abspath(__file__))
+        if scripts_dir not in sys.path:
+            sys.path.insert(0, scripts_dir)
+        import _cp_view as _view
+
+        draft = landscape_draft if _usable(landscape_draft) else None
+        name_by_slug = _view.competitor_names(land, draft)
+        retained, removed = _view.challenge_outcome(verdicts.items(), land)
         if retained:
+            names = ", ".join(_view.display_name(sl, name_by_slug) for sl in retained)
             notes.append(
-                f"<p><strong>Retained despite the challenge:</strong> {_esc(', '.join(retained))}. "
+                f"<p><strong>Retained despite the challenge:</strong> {_esc(names)}. "
                 "Scored and ranked alongside the rest, so read that position with the verdict in mind.</p>"
+            )
+        if removed:
+            names = ", ".join(_view.display_name(sl, name_by_slug) for sl in removed)
+            one = len(removed) == 1
+            notes.append(
+                f"<p><strong>Removed after the challenge:</strong> {_esc(names)}. "
+                f"{'It is' if one else 'They are'} not part of the scored set.</p>"
             )
         unverified = [
             str(c.get("name", "?"))
@@ -1173,8 +1377,13 @@ def compose_html(dir_path: str) -> str:
     # Build point style lookup for bubble encoding
     point_styles = _build_point_style_lookup(moat_scores, landscape)
 
-    # Header
+    # Header, then the report's own verdict paragraph
     header = _section_header(report, positioning_scores, moat_scores)
+    import _cp_view
+
+    verdict_text = _cp_view.report_verdict(report, positioning_scores, moat_scores)
+    if verdict_text:
+        header += f'\n<p class="verdict">{_esc(verdict_text)}</p>'
 
     # Scoring basis — rendered next to the positioning map since it determines
     # what the map's coordinates mean.
@@ -1183,6 +1392,11 @@ def compose_html(dir_path: str) -> str:
 
     # Positioning maps
     positioning_maps: list[str] = []
+
+    map_names = _cp_view.competitor_names(
+        landscape if _usable(landscape) else None,
+        artifacts.get("landscape_draft.json") if _usable(artifacts.get("landscape_draft.json")) else None,
+    )
     if _usable(positioning):
         views = _as_list(positioning.get("views"))
         scores_by_id: dict[str, dict[str, Any]] = {}
@@ -1196,7 +1410,7 @@ def compose_html(dir_path: str) -> str:
                 continue
             view_id = str(view.get("id", ""))
             view_score = scores_by_id.get(view_id)
-            positioning_maps.append(_chart_positioning_map(view, view_score, company_name, point_styles))
+            positioning_maps.append(_chart_positioning_map(view, view_score, company_name, point_styles, map_names))
 
     if not positioning_maps:
         positioning_maps.append(
@@ -1205,13 +1419,20 @@ def compose_html(dir_path: str) -> str:
         )
 
     # Legends for positioning maps
-    legends_html = _chart_legends(point_styles if _usable(moat_scores) or _usable(landscape) else None)
+    legends_html = _chart_legends(point_styles if _usable(moat_scores) or _usable(landscape) else None, company_name)
 
     # Moat radar
-    moat_radar = _chart_moat_radar(moat_scores)
+    moat_radar = _chart_moat_radar(moat_scores, map_names, company_name)
 
     # Competitor table
-    comp_table = _section_competitor_table(landscape, moat_scores, artifacts.get("competitor_verification.json"))
+    comp_table = _section_competitor_table(
+        landscape, moat_scores, artifacts.get("competitor_verification.json"), artifacts.get("landscape_draft.json")
+    )
+    proof_gap = _section_proof_gap(positioning_scores)
+    startup_record = _section_startup_record(
+        _load_artifact(dir_path, _cp_view.FIRST_STARTUP_RESEARCH), artifacts.get("startup_research.json")
+    )
+    outside_review = _section_outside_review(dir_path, artifacts)
 
     # Defensibility timeline
     timeline = _section_defensibility_timeline(positioning, moat_scores)
@@ -1229,6 +1450,9 @@ def compose_html(dir_path: str) -> str:
 <div class="chart-grid">
 {moat_radar}
 </div>
+{outside_review}
+{startup_record}
+{proof_gap}
 {comp_table}
 {timeline}
 <div class="footer">

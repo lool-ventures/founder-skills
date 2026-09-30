@@ -84,18 +84,18 @@ def test_market_sizing_smoke(tmp_path: Path) -> None:
     workdir = tmp_path / "workspace"
     workdir.mkdir()
 
-    # The attached deck is Foobar HEALTH (a synthetic eldercare care-management company), and its
-    # page 2 says the recurring rate rests on n=17 patient-months. The prompt states the same figure
-    # on n=47 -- the misread from the run that motivated all of this -- so a red team that reads the
+    # The attached deck is Foobar FLEET (a synthetic fleet-maintenance software company), and its
+    # page 2 says the renewal rate rests on n=13 customer-months. The prompt states the same figure
+    # on n=37 -- the misread from the run that motivated all of this -- so a red team that reads the
     # page has something to cite. The TAM is stated without a currency on purpose (see the module
     # docstring: that is the comparison_blocked shape).
     prompt = (
-        "Use the market-sizing skill. Foobar Health is a fictional seed-stage company delivering "
-        "clinician-led care management to seniors, distributed through employer benefit programs and "
-        "reimbursed under care-management codes, priced per patient per month. Our deck is attached as "
-        "a scanned PDF. Our recurring net-collectible rate is $203 per patient-month, measured over 47 "
-        "patient-months from 30 patients. Our deck states a TAM of 3.2 billion. Size the market "
-        "top-down AND bottom-up. Use 'foobar-health' as the slug and USD as the analysis currency. "
+        "Use the market-sizing skill. Foobar Fleet is a fictional seed-stage company selling "
+        "maintenance-scheduling software to delivery fleets, sold through regional vehicle dealers "
+        "and priced per customer per month. Our deck is attached as "
+        "a scanned PDF. Our renewal rate is $157 per customer per month, measured over 37 "
+        "customer-months from 24 customers. Our deck states a TAM of 3.2 billion. Size the market "
+        "top-down AND bottom-up. Use 'foobar-fleet' as the slug and USD as the analysis currency. "
         "Don't ask clarifying questions — just run it end to end and produce the report."
     )
 
@@ -249,6 +249,10 @@ def test_market_sizing_smoke(tmp_path: Path) -> None:
     if blocks:
         print(f"[e2e:market-sizing] on screen after the block: {after[:400]!r}", flush=True)
     assert ok_after, f"{why_after}\nprinted: {printed}\non screen: {after[-1500:]}"
+    # A block after a clean message is the hook misreading the session (measured: the Stop event
+    # arrived before the final text reached the transcript file), and it tells the founder to doubt
+    # figures that were right. The two readings above are the signature; this lane passed on it once.
+    assert not (ok_before and blocks), "the Stop hook blocked a message that already carried the hand-over"
     # ...and the verdict those figures belong to is the first paragraph of the report.
     report_md = json.loads((review_dir / "report.json").read_text(encoding="utf-8"))["report_markdown"]
     head = report_md[report_md.index("## Executive Summary") : report_md.index("| Metric | Value | Method |")]

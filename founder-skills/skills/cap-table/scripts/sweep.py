@@ -124,6 +124,8 @@ def build_sweep(
         instruments=instruments,
         cap_state=cap_state,
         scenario_requests=requests,
+        # The frames keep only `_SLIDER_FIELDS`, so the pool's other-sizing re-solve would be discarded.
+        pool_counterfactual=False,
     )
     frames: list[dict[str, Any]] = []
     for req, res in zip(requests, results, strict=True):

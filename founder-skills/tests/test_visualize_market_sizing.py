@@ -408,7 +408,11 @@ def test_xss_safety_text() -> None:
 
 
 def test_xss_safety_attribute() -> None:
-    """XSS in assumption category with attribute injection is escaped."""
+    """XSS in assumption category with attribute injection never reaches the page.
+
+    A category outside the known three is graded as an estimate (it earns nothing by claiming), so the
+    injected string is not rendered at all rather than rendered escaped.
+    """
     arts = dict(_all_artifacts())
     arts["validation.json"] = {
         "sources": [],
@@ -424,9 +428,9 @@ def test_xss_safety_attribute() -> None:
     d = _make_artifact_dir(arts)
     rc, stdout, _stderr = _run_visualize(d)
     assert rc == 0
-    # The quotes should be escaped -- category becomes a legend label
     assert 'onload="alert(1)"' not in stdout
-    assert "&quot;" in stdout
+    assert "alert(1)" not in stdout
+    assert "Agent Estimate: 1" in stdout
 
 
 def test_deterministic_output() -> None:
@@ -620,7 +624,7 @@ def test_visualize_provenance_summary_table() -> None:
     d = _make_artifact_dir(arts)
     rc, stdout, _stderr = _run_visualize(d)
     assert rc == 0
-    assert "Deck Claim" in stdout
+    assert "Your Figure" in stdout
     assert "Delta" in stdout
     assert "$50.0B" in stdout
 
@@ -761,19 +765,10 @@ def _extract_provenance_from_html(html_text: str) -> dict[str, str]:
 
 def test_provenance_correctness_golden() -> None:
     """Golden test: known fixture → exact expected classifications in compose_report output."""
-    validation = {
-        "sources": [],
-        "figure_validations": [],
-        "assumptions": [
-            {"name": "industry_total", "value": 100000000000, "category": "sourced"},
-            {"name": "segment_pct", "value": 6, "category": "sourced"},
-            {"name": "share_pct", "value": 5, "category": "derived"},
-            {"name": "customer_count", "value": 4500000, "category": "sourced"},
-            {"name": "arpu", "value": 15000, "category": "agent_estimate"},
-        ],
-    }
-    arts = _all_artifacts()
-    arts["validation.json"] = validation
+    # A real run: each input resolved by reference, graded by the recorded figure it used.
+    from test_market_sizing import _v1_artifacts
+
+    arts = _v1_artifacts(categories={"share_pct": "derived", "arpu": "agent_estimate"})
     d = _make_artifact_dir(arts)
 
     rc, data, _stderr = _run_compose(d)
@@ -1543,6 +1538,8 @@ def test_html_close_agreement_row_carries_the_caveat() -> None:
     rc, stdout, _stderr = _run_visualize(d)
     assert rc == 0
     assert "Agreement on a number is not independent confirmation" in stdout
+    note = stdout[stdout.index("Agreement on a number") - 200 :][:600]
+    assert "the figure you gave" in note and "your materials" not in note, note
 
 
 def test_html_distant_row_carries_no_caveat() -> None:
@@ -1644,28 +1641,39 @@ def test_html_comparison_chart_carries_all_three_caveats() -> None:
     assert html.count("Closeness is not confirmation") == 1, html[:2000]
 
 
-def test_visualize_copies_of_compose_helpers_have_not_drifted() -> None:
-    """visualize.py carries byte-identical copies of five compose_report.py functions.
+def test_the_two_renderers_share_one_owner_for_founder_facing_helpers() -> None:
+    """compose_report.py and visualize.py render the same founder-facing facts from ONE module.
 
-    Skill scripts are standalone and cannot import across files, so the shared-input detector and
-    the two helpers it needs exist twice. Compared as parsed bodies rather than as text, so
-    reformatting is allowed and a behaviour change is not — the pattern test_quote_match_sync.py
-    uses for deck-review's copy of cap-table's matcher.
-
-    A drift here means the two founder-facing surfaces can disagree about what the founder is
-    told, which is the failure three August reviews in a row caught in this skill.
+    They used to carry copies held equal by a test that compared their bodies, and two had drifted
+    anyway (the deck-claim currency comparison, and the "$" printed for an unknown currency). Now
+    every such helper lives in _view.py and both renderers import it. This fails if either renderer
+    defines one of them again, or if a new function appears in BOTH renderers: a second copy of
+    anything is how the two pages come to disagree about what the founder is told.
     """
     import ast
     import pathlib
 
     scripts = pathlib.Path(__file__).resolve().parent.parent / "skills" / "market-sizing" / "scripts"
-    bodies: dict[str, dict[str, str]] = {}
-    for stem in ("compose_report", "visualize"):
-        tree = ast.parse((scripts / f"{stem}.py").read_text(encoding="utf-8"))
-        bodies[stem] = {n.name: ast.dump(n) for n in tree.body if isinstance(n, ast.FunctionDef)}
 
-    shared = (
-        "_as_number",
+    def defs(stem: str) -> set[str]:
+        tree = ast.parse((scripts / f"{stem}.py").read_text(encoding="utf-8"))
+        return {n.name for n in tree.body if isinstance(n, ast.FunctionDef)}
+
+    def imported_from_view(stem: str) -> set[str]:
+        tree = ast.parse((scripts / f"{stem}.py").read_text(encoding="utf-8"))
+        return {
+            a.asname or a.name
+            for n in tree.body
+            if isinstance(n, ast.ImportFrom) and n.module == "_view"
+            for a in n.names
+        }
+
+    view = defs("_view")
+    owned = {
+        "_compute_provenance",
+        "_comparable_claim",
+        "_compute_delta",
+        "_horizon_mismatch",
         "_factor_chain",
         "_shared_input_values",
         "_contested_rows",
@@ -1675,26 +1683,25 @@ def test_visualize_copies_of_compose_helpers_have_not_drifted() -> None:
         "_summary_verdict",
         "_self_check_line",
         "_document_cite",
-    )
-    for name in shared:
-        assert name in bodies["compose_report"], f"compose_report.py lost {name}"
-        assert name in bodies["visualize"], f"visualize.py lost its copy of {name}"
-        assert bodies["compose_report"][name] == bodies["visualize"][name], (
-            f"{name} has drifted between compose_report.py and visualize.py — the two founder "
-            "surfaces would disagree. Edit one, re-copy to the other."
-        )
+        "_fmt_usd",
+        "_sizing_basis_label",
+    }
+    assert owned <= view, sorted(owned - view)
+    for stem in ("compose_report", "visualize"):
+        mine = defs(stem)
+        assert not owned & mine, f"{stem}.py defines {sorted(owned & mine)} again; import it from _view"
+    assert "_compute_provenance" in imported_from_view("visualize")
+    # Plumbing each CLI legitimately has; anything else defined in both is a second copy.
+    plumbing = {"main", "parse_args", "_write_output", "_load_artifact"}
+    both = (defs("compose_report") & defs("visualize")) - plumbing
+    assert not both, f"defined in both renderers: {sorted(both)}; give it one owner in _view.py"
 
-    # Non-vacuity: a typo in a name above would make the loop assert nothing.
-    assert len(shared) == 10
-
-    # The label helpers are not copied: both scripts import the ONE definition from _redteam_text,
-    # which red_team.py also uses to word the review before either renderer sees it. Checked on the
-    # parsed source -- importing compose_report here would collide with other skills' same-named file.
+    # The label helpers are not copied: both scripts import the ONE definition from _redteam_text.
     wanted = {
         ("humanize_claim", "_humanize_claim"),
         ("humanize_param", "_humanize_param"),
     }
-    for stem in ("compose_report", "visualize"):
+    for stem in ("compose_report", "visualize", "_view"):
         tree = ast.parse((scripts / f"{stem}.py").read_text(encoding="utf-8"))
         imported = {
             (a.name, a.asname or a.name)
@@ -1702,10 +1709,9 @@ def test_visualize_copies_of_compose_helpers_have_not_drifted() -> None:
             if isinstance(n, ast.ImportFrom) and n.module == "_redteam_text"
             for a in n.names
         }
-        assert wanted <= imported, f"{stem}.py must import {sorted(wanted - imported)} from _redteam_text"
-        assert "_humanize_claim" not in bodies[stem] and "_humanize_param" not in bodies[stem], (
-            f"{stem}.py defines its own label helper again -- import it from _redteam_text"
-        )
+        if stem == "_view":
+            assert wanted <= imported, "_view.py must import the label helpers from _redteam_text"
+        assert "_humanize_claim" not in defs(stem) and "_humanize_param" not in defs(stem)
 
 
 def test_html_reports_the_factors_the_two_narrowing_chains_share() -> None:
@@ -1726,14 +1732,27 @@ def test_html_reports_the_factors_the_two_narrowing_chains_share() -> None:
         {"factor_id": "worker_benefit_access", "value": 0.61, "source_id": "labour_stats_2024"},
         {"factor_id": "fee_for_service_share", "value": 0.45, "source_id": "health_policy_2026"},
     ]
-    arts = _all_artifacts()
-    arts["validation.json"] = {
-        **_VALID_VALIDATION,
-        "assumptions": [
-            {"name": "segment_pct", "value": 10.0, "category": "derived", "factors": factors_td},
-            {"name": "serviceable_pct", "value": 9.1, "category": "derived", "factors": factors_bu},
+    # A real run, each input resolved by reference: the chains compared are those of the figures used.
+    from test_market_sizing import _stamped, _v1_entry, _v1_run
+
+    params = ("industry_total", "segment_pct", "share_pct", "customer_count", "arpu", "serviceable_pct", "target_pct")
+    validation, sizing = _v1_run(
+        [
+            _v1_entry("segment_pct", 10.0, "percent_points", "derived", factors=factors_td),
+            _v1_entry("serviceable_pct", 9.1, "percent_points", "derived", factors=factors_bu),
+            _v1_entry("industry_total", 114_924_000_000, "money_total_per_year", currency="USD"),
+            _v1_entry("share_pct", 0.3, "percent_points"),
+            _v1_entry("customer_count", 61_000_000, "count"),
+            _v1_entry("arpu", 1884, "money_per_customer", currency="USD", period="year"),
+            _v1_entry("target_pct", 0.32, "percent_points"),
         ],
-    }
+        {"approach": "both", **{p: {"assumption": p} for p in params}},
+    )
+    arts = _all_artifacts()
+    arts["validation.json"] = validation
+    arts["sizing.json"] = sizing
+    arts["sensitivity.json"] = _stamped(arts["sensitivity.json"], sizing)
+    arts["checklist.json"] = _stamped(arts["checklist.json"], sizing)
     d = _make_artifact_dir(arts)
     rc, html, err = _run_visualize(d)
     assert rc == 0, err

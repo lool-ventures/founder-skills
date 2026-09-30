@@ -93,10 +93,15 @@ WARNING_SEVERITY: dict[str, str] = {
     # Info — transparency, no action needed
     "PARTNER_CONVERGENCE": "info",
     "SEQUENTIAL_FALLBACK": "info",
+    # A step whose output reached its producer without passing the hand-off gate (see
+    # `_handoff_bypassed`). Medium: the results are valid and must not block. In
+    # _UNACCEPTABLE_MEDIUM: a disclosure about the run that model-written accepted_warnings cannot clear.
+    "HANDOFF_BYPASSED": "medium",
 }
 
 # Only medium-severity codes can be accepted. High-severity = integrity violations.
 ACCEPTIBLE_SEVERITIES = {"medium"}
+_UNACCEPTABLE_MEDIUM = {"HANDOFF_BYPASSED"}
 
 # Human-readable warning code labels
 WARNING_LABELS: dict[str, str] = {
@@ -130,6 +135,7 @@ WARNING_LABELS: dict[str, str] = {
     "PARTNER_CAPITULATION": "Partner Capitulation (Unconfirmed)",
     "UNDEBATED_DEALBREAKER": "Undebated Dealbreaker",
     "DEALBREAKER_PROVENANCE_UNVERIFIABLE": "Dealbreaker Provenance Unverifiable",
+    "HANDOFF_BYPASSED": "Some Steps Were Not Checked",
 }
 
 
@@ -320,6 +326,70 @@ def _as_list(value: Any) -> list[Any]:
 def _as_dict(value: Any) -> dict[str, Any]:
     """Coerce to dict — returns {} if not a dict."""
     return value if isinstance(value, dict) else {}
+
+
+def _handoff_audit() -> Any:
+    """The fleet's shared gate-record check from `founder-skills/scripts/` (same loading as
+    `_founder_text_policy`). None if unavailable: a missing module must never block a report."""
+    try:
+        shared = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "scripts"))
+        if shared not in sys.path:
+            sys.path.insert(0, shared)
+        import _handoff_audit  # type: ignore[import-not-found]
+
+        return _handoff_audit
+    except ImportError:
+        return None
+
+
+_ARCHETYPES = ("visionary", "operator", "analyst")
+
+
+def _handoff_bypassed(dir_path: str, artifacts: dict[str, Any]) -> list[str]:
+    """Which sub-agent steps this report's artifacts came from have no gated hand-off in this run.
+
+    Built from the artifacts present, never from what SKILL.md says should run: each partner's
+    assessment and rebuttal on disk means that partner's dispatch ran; the scoring always runs; the
+    conflict check is dispatched only for a fund-specific fund -- a generic fund's is a stub the
+    producer writes itself (`--generic-stub`).
+
+    Silent when `handoff/<run_id>/` does not exist: every real run creates it at Step 0, so its absence
+    means this is not a run whose transport can be judged, not that nothing was bypassed.
+
+    RESIDUAL: a pass proves a gated hand-off exists and still matches its record -- not that the
+    producer consumed it. See `_handoff_audit.py`.
+    """
+    audit = _handoff_audit()
+    if audit is None:
+        return []
+    run_id = next(
+        (
+            rid
+            for name in REQUIRED_ARTIFACTS
+            if isinstance(artifacts.get(name), dict)
+            and isinstance(rid := _as_dict(artifacts[name].get("metadata")).get("run_id"), str)
+            and rid
+        ),
+        None,
+    )
+    if not run_id:
+        return []
+    run_dir = os.path.join(dir_path, "handoff", run_id)
+    if not os.path.isdir(run_dir):
+        return []
+    requirements: list[tuple[str, list[str]]] = []
+    fund_mode = _as_dict(artifacts.get("fund_profile.json")).get("mode", "fund_specific")
+    if isinstance(artifacts.get("conflict_check.json"), dict) and fund_mode != "generic":
+        requirements.append(("the portfolio conflict check", ["detect_conflicts_output.json"]))
+    for archetype in _ARCHETYPES:
+        if os.path.isfile(os.path.join(dir_path, f"partner_assessment_{archetype}.json")):
+            requirements.append((f"the {archetype} partner's assessment", [f"partner_{archetype}_output.json"]))
+        if os.path.isfile(os.path.join(dir_path, f"partner_rebuttal_{archetype}.json")):
+            requirements.append((f"the {archetype} partner's rebuttal", [f"partner_rebuttal_{archetype}_output.json"]))
+    if isinstance(artifacts.get("score_dimensions.json"), dict):
+        requirements.append(("the dimension scoring", ["score_dimensions_output.json"]))
+    labels: list[str] = audit.bypassed(run_dir, requirements)
+    return labels
 
 
 def _founder_text_policy() -> Any:
@@ -1563,6 +1633,10 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
 
     # Run validation
     warnings = validate_artifacts(artifacts)
+    _bypassed_steps = _handoff_bypassed(dir_path, artifacts)
+    if _bypassed_steps:
+        _msg = _handoff_audit().founder_message(_bypassed_steps)
+        warnings.append(_warn("HANDOFF_BYPASSED", _msg, _msg))
 
     # Apply accepted_warnings from fund_profile (medium-severity only)
     fund_art = artifacts.get("fund_profile.json")
@@ -1578,7 +1652,13 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
             if not isinstance(reason, str) or not reason.strip():
                 print(f"Warning: accepted_warnings entry for '{code}' missing 'reason' — skipped", file=sys.stderr)
                 continue
-            if code in WARNING_SEVERITY and WARNING_SEVERITY[code] in ACCEPTIBLE_SEVERITIES:
+            if code in _UNACCEPTABLE_MEDIUM:
+                print(
+                    f"Warning: cannot accept '{code}' -- it discloses how this run was carried out and "
+                    "stays in the report; ignored",
+                    file=sys.stderr,
+                )
+            elif code in WARNING_SEVERITY and WARNING_SEVERITY[code] in ACCEPTIBLE_SEVERITIES:
                 acceptances.append(
                     {
                         "code": code,

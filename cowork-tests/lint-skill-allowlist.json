@@ -1,0 +1,59 @@
+{
+  "_doc": "Warnings `lint-skill --strict` raises that this repo accepts, by (rule, file, count). Read by lint_skill_gate.py. SHRINK-ONLY: every entry must still fire exactly `count` times under the pinned CLI, or the gate reds and the entry is lowered or removed. A new rule, file or site is never added here to make CI green; it is fixed, or accepted with its reason in a reviewed change.",
+  "accepted": [
+    {
+      "rule": "plugin-root-in-vm-bash",
+      "file": "founder-skills/skills/competitive-positioning/SKILL.md",
+      "count": 5,
+      "reason": "`--plugin-root-agent \"${CLAUDE_PLUGIN_ROOT}\"` is an argument VALUE: the agent-namespace path the host-side sub-agents' file tools use, deliberately not a VM path. Probable harness false positive on a quoted argument; reported upstream."
+    },
+    {
+      "rule": "plugin-root-in-vm-bash",
+      "file": "founder-skills/skills/market-sizing/SKILL.md",
+      "count": 1,
+      "reason": "Same as competitive-positioning: `--plugin-root-agent \"${CLAUDE_PLUGIN_ROOT}\"` passes the agent-namespace path as a value, not a VM path. Reported upstream."
+    },
+    {
+      "rule": "skill-body-over-reattach-cap",
+      "file": "founder-skills/skills/cap-table/SKILL.md",
+      "count": 1,
+      "reason": "SKILL.md is over the ~19,000 B re-attach cap on purpose. CLAUDE.md records the measured decision: compaction is ~1.6% of transcripts, truncation is head-preserving and a directory-owning skill is recoverable, and front-loading a survival core was withdrawn because the window is fixed-size. Shrinking every body below the cap needs an e2e A/B."
+    },
+    {
+      "rule": "skill-body-over-reattach-cap",
+      "file": "founder-skills/skills/competitive-positioning/SKILL.md",
+      "count": 1,
+      "reason": "SKILL.md is over the ~19,000 B re-attach cap on purpose. CLAUDE.md records the measured decision: compaction is ~1.6% of transcripts, truncation is head-preserving and a directory-owning skill is recoverable, and front-loading a survival core was withdrawn because the window is fixed-size. Shrinking every body below the cap needs an e2e A/B."
+    },
+    {
+      "rule": "skill-body-over-reattach-cap",
+      "file": "founder-skills/skills/deck-review/SKILL.md",
+      "count": 1,
+      "reason": "SKILL.md is over the ~19,000 B re-attach cap on purpose. CLAUDE.md records the measured decision: compaction is ~1.6% of transcripts, truncation is head-preserving and a directory-owning skill is recoverable, and front-loading a survival core was withdrawn because the window is fixed-size. Shrinking every body below the cap needs an e2e A/B."
+    },
+    {
+      "rule": "skill-body-over-reattach-cap",
+      "file": "founder-skills/skills/financial-model-review/SKILL.md",
+      "count": 1,
+      "reason": "SKILL.md is over the ~19,000 B re-attach cap on purpose. CLAUDE.md records the measured decision: compaction is ~1.6% of transcripts, truncation is head-preserving and a directory-owning skill is recoverable, and front-loading a survival core was withdrawn because the window is fixed-size. Shrinking every body below the cap needs an e2e A/B."
+    },
+    {
+      "rule": "skill-body-over-reattach-cap",
+      "file": "founder-skills/skills/ic-sim/SKILL.md",
+      "count": 1,
+      "reason": "SKILL.md is over the ~19,000 B re-attach cap on purpose. CLAUDE.md records the measured decision: compaction is ~1.6% of transcripts, truncation is head-preserving and a directory-owning skill is recoverable, and front-loading a survival core was withdrawn because the window is fixed-size. Shrinking every body below the cap needs an e2e A/B."
+    },
+    {
+      "rule": "skill-body-over-reattach-cap",
+      "file": "founder-skills/skills/market-sizing/SKILL.md",
+      "count": 1,
+      "reason": "SKILL.md is over the ~19,000 B re-attach cap on purpose. CLAUDE.md records the measured decision: compaction is ~1.6% of transcripts, truncation is head-preserving and a directory-owning skill is recoverable, and front-loading a survival core was withdrawn because the window is fixed-size. Shrinking every body below the cap needs an e2e A/B."
+    },
+    {
+      "rule": "skill-reference-over-read-cap",
+      "file": "founder-skills/skills/competitive-positioning/references/artifact-schemas.md",
+      "count": 1,
+      "reason": "SKILL.md consults it per artifact ('consult as needed' when depositing an agent-written artifact), for that artifact's schema, rather than reading it whole at a step. Splitting it is a separate change with its own contract tests. Accepted at the 4.0.0 adoption, when the rule first fired."
+    }
+  ]
+}

@@ -127,7 +127,19 @@ sys.path.insert(0, str(_REPO_ROOT / "cowork-tests"))
 # not to keep moving the constant. All 11 leaks in the new recording are chat progress narration
 # (the known-open item); every delivered artifact is clean, which is why this was not treated as a
 # release defect.
-BASELINE = 24
+#
+# 24 -> 17 (2026-09-29, the fleet re-recorded under cowork-harness 4.0.0): lowered per the ratchet-down
+# rule. Per file: ic-sim-smoke 8, cap-table-carta-folder 4, competitive-positioning-smoke 3,
+# cap-table-safe-full 1, cap-table-antihallucination 1, every other lane 0. Given the variance measured
+# above, this is one more draw, not an earned floor.
+#
+# 17 -> 21 (2026-09-30, cap-table-safe-full + cap-table-antihallucination re-recorded for the pool-check
+# step): RAISED, as on 2026-09-24 and for the same reason, by the owner's decision. safe-full 1 -> 4,
+# antihallucination 1 -> 2. MEASURED, free, from the run dirs already on disk for these two lanes:
+# safe-full 1, 1, 1, 2, 3, 4 and antihallucination 1, 1, 2, 2, 3, 4, the new recordings included. Both sit inside
+# their lane's own spread. All six are chat progress narration (plumbing verbs, two code spans); the
+# delivered files are clean.
+BASELINE = 21
 
 
 pytestmark = pytest.mark.skipif(

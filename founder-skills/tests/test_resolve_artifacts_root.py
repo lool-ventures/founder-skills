@@ -18,6 +18,8 @@ import sys
 import types
 from pathlib import Path
 
+import pytest
+
 _SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "resolve_artifacts_root.py"
 
 
@@ -559,3 +561,214 @@ def test_default_artifacts_root_matches_the_cli_case() -> None:
     for host in _HELPER_HOSTS:
         got = _root_at(host, "/home/dev/project")
         assert got == "/home/dev/project/artifacts", f"{host}: {got}"
+
+
+# ---------------------------------------------------------------------------
+# Host-loop: the agent process does not run in the outputs dir and a RELATIVE file-tool path is
+# refused, so the agent namespace must be the ABSOLUTE file-tool path of the outputs folder. Only the
+# model knows it; the main thread supplies it once and a probe written by its file tool PROVES it.
+# ---------------------------------------------------------------------------
+
+_REAL_RESOLVE_ROOTS = _mod.resolve_roots
+_HOST = "/Users/u/Library/Application Support/Claude/local-agent-mode-sessions/o/u/1a2b3c4d/outputs"
+
+
+def test_host_outputs_dir_shape_accepts_the_production_path_with_a_space() -> None:
+    assert _mod.normalize_host_outputs_dir(_HOST) == (_HOST, None)
+    assert _mod.normalize_host_outputs_dir(_HOST + "/") == (_HOST, None)
+    # The harness layout ends in mnt/outputs; same rule.
+    assert _mod.normalize_host_outputs_dir("/tmp/run/mnt/outputs")[0] == "/tmp/run/mnt/outputs"
+
+
+def test_host_outputs_dir_shape_rejects_what_the_file_tools_would_refuse_or_misplace() -> None:
+    for bad in ("artifacts", "outputs", _HOST + "/artifacts", "/a/outputs\n/b/outputs"):
+        normalized, reason = _mod.normalize_host_outputs_dir(bad)
+        assert normalized is None and reason, bad
+
+
+def test_verify_probe_distinguishes_absent_from_wrong(tmp_path: Path) -> None:
+    code, detail = _mod.verify_probe(str(tmp_path), _HOST)
+    assert code == _mod.EXIT_PROBE_MISSING and _mod.PROBE_NAME in detail
+    (tmp_path / _mod.PROBE_NAME).write_text("/elsewhere/outputs\n", encoding="utf-8")
+    assert _mod.verify_probe(str(tmp_path), _HOST)[0] == _mod.EXIT_PROBE_MISMATCH
+    (tmp_path / _mod.PROBE_NAME).write_text(_HOST + "\n", encoding="utf-8")
+    assert _mod.verify_probe(str(tmp_path), _HOST) == (0, "ok")
+
+
+def test_persisted_value_round_trips_and_a_malformed_file_reads_as_absent(tmp_path: Path) -> None:
+    assert _mod.read_persisted(str(tmp_path)) is None
+    _mod.write_persisted(str(tmp_path), _HOST)
+    assert _mod.read_persisted(str(tmp_path)) == _HOST
+    for junk in ("not json", '{"host_outputs_dir": "relative/outputs"}', '["x"]'):
+        (tmp_path / _mod.PERSIST_NAME).write_text(junk, encoding="utf-8")
+        assert _mod.read_persisted(str(tmp_path)) is None, junk
+
+
+def test_a_proven_host_path_makes_the_agent_root_absolute_on_every_session_shape() -> None:
+    for cwd in ("/sessions/abc", "/sessions/abc/mnt", "/sessions/abc/mnt/outputs"):
+        root, agent = resolve_roots(cwd, {}, _HOST)
+        assert root == "/sessions/abc/mnt/outputs/artifacts"
+        assert agent == _HOST + "/artifacts"
+
+
+def test_the_declared_override_still_beats_a_proven_host_path() -> None:
+    _, agent = resolve_roots("/sessions/abc", {"COWORK_AGENT_ARTIFACTS_ROOT": "/declared"}, _HOST)
+    assert agent == "/declared"
+
+
+def test_off_a_session_tree_the_host_path_is_ignored(tmp_path: Path) -> None:
+    root, agent = resolve_roots(str(tmp_path), {}, _HOST)
+    assert root == agent == os.path.join(str(tmp_path), "artifacts")
+
+
+def _session_main(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, argv: list[str], keep_agent_env: bool = False
+) -> tuple[int, str, str, list[str]]:
+    """Run main() as if the shell sat at /sessions/abc, with that tree's outputs mapped onto tmp_path.
+
+    Literal /sessions/ dirs cannot be created, so the resolver's own resolve_roots is wrapped to relocate
+    the ABSOLUTE root. `used` records every relocation: a test that asserts on the result must also see it
+    non-empty, or the mapping did not engage and the test proved nothing.
+    """
+    import contextlib
+    import io
+
+    real = _REAL_RESOLVE_ROOTS  # never the wrapper a previous call in the same test installed
+    used: list[str] = []
+
+    def mapped(cwd: str, env: dict[str, str], host_outputs_dir: str | None = None) -> tuple[str, str]:
+        root, agent = real(cwd, env, host_outputs_dir)
+        prefix = "/sessions/abc/mnt/outputs"
+        if root.startswith(prefix):
+            used.append(root)
+            root = str(tmp_path / "outputs") + root[len(prefix) :]
+        return root, agent
+
+    monkeypatch.setattr(_mod, "resolve_roots", mapped)
+    monkeypatch.setattr(_mod.os, "getcwd", lambda: "/sessions/abc")
+    monkeypatch.delenv("COWORK_ARTIFACTS_ROOT", raising=False)
+    if not keep_agent_env:
+        monkeypatch.delenv("COWORK_AGENT_ARTIFACTS_ROOT", raising=False)
+    monkeypatch.setattr(sys, "argv", ["resolve_artifacts_root.py", *argv])
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        try:
+            rc = _mod.main()
+        except SystemExit as e:  # argparse
+            rc = int(e.code or 0)
+    return rc, out.getvalue(), err.getvalue(), used
+
+
+def test_set_host_outputs_dir_proves_persists_and_later_calls_print_absolute_paths(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    artifacts = tmp_path / "outputs" / "artifacts"
+    artifacts.mkdir(parents=True)
+    (artifacts / _mod.PROBE_NAME).write_text(_HOST, encoding="utf-8")  # what the file tool wrote
+
+    rc, out, err, used = _session_main(monkeypatch, tmp_path, ["--set-host-outputs-dir", _HOST + "/"])
+    assert used, "the /sessions -> tmp_path mapping never engaged"
+    assert rc == 0, err
+    assert out.strip() == _HOST + "/artifacts"
+    assert _mod.read_persisted(str(artifacts)) == _HOST
+
+    # A later fresh shell reads the persisted value: absolute paths, and no relative-root warning.
+    rc, out, err, used = _session_main(
+        monkeypatch, tmp_path, ["--handoff-dir-agent", "--dir-name", "market-sizing-acme", "--run-id", "R1"]
+    )
+    assert used and rc == 0, err
+    assert out.strip() == f"{_HOST}/artifacts/market-sizing-acme/handoff/R1"
+    assert "RELATIVE" not in err
+
+
+def test_set_host_outputs_dir_refuses_without_the_probe_and_persists_nothing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    rc, out, err, used = _session_main(monkeypatch, tmp_path, ["--set-host-outputs-dir", _HOST])
+    assert used, "the /sessions -> tmp_path mapping never engaged"
+    assert rc == _mod.EXIT_PROBE_MISSING
+    diag = json.loads(out)
+    assert diag["code"] == "probe_missing"
+    assert diag["shell_outputs_dir"] == str(tmp_path / "outputs")
+    assert _mod.read_persisted(str(tmp_path / "outputs" / "artifacts")) is None
+
+
+def test_set_host_outputs_dir_refuses_a_value_that_differs_from_the_probe(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    artifacts = tmp_path / "outputs" / "artifacts"
+    artifacts.mkdir(parents=True)
+    (artifacts / _mod.PROBE_NAME).write_text(_HOST, encoding="utf-8")
+    typo = _HOST.replace("1a2b3c4d", "1a2b3c4e")
+    rc, out, _, used = _session_main(monkeypatch, tmp_path, ["--set-host-outputs-dir", typo])
+    assert used and rc == _mod.EXIT_PROBE_MISMATCH
+    assert json.loads(out)["code"] == "probe_mismatch"
+    assert _mod.read_persisted(str(artifacts)) is None
+
+
+def test_set_host_outputs_dir_refuses_a_bad_shape_before_touching_the_probe(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    rc, out, _, _ = _session_main(monkeypatch, tmp_path, ["--set-host-outputs-dir", "artifacts"])
+    assert rc == _mod.EXIT_BAD_HOST_DIR
+    assert json.loads(out)["code"] == "bad_host_outputs_dir"
+
+
+def test_without_a_proven_path_an_agent_call_refuses_instead_of_printing_a_relative_root(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    for flags in (["--agent"], ["--json"], ["--handoff-dir-agent", "--dir-name", "x", "--run-id", "R"]):
+        rc, out, err, used = _session_main(monkeypatch, tmp_path, flags)
+        assert used, "the /sessions -> tmp_path mapping never engaged"
+        assert rc == _mod.EXIT_NOT_PROVEN, (flags, out, err)
+        diag = json.loads(out)
+        assert diag["code"] == "host_outputs_dir_not_proven"
+        assert diag["shell_outputs_dir"] == str(tmp_path / "outputs")
+        assert "artifacts\n" not in out, "a relative root must never be printed"
+
+
+def test_without_a_proven_path_the_plain_root_still_resolves(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Only agent-namespace calls need the proof: the absolute root is the shell's own path."""
+    rc, out, _, used = _session_main(monkeypatch, tmp_path, [])
+    assert used and rc == 0
+    assert out.strip() == str(tmp_path / "outputs" / "artifacts")
+
+
+def test_a_declared_agent_root_needs_no_proof(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    rc, out, err, used = _session_main(monkeypatch, tmp_path, ["--agent"])
+    assert rc == _mod.EXIT_NOT_PROVEN  # control: without the declaration it refuses
+    monkeypatch.setenv("COWORK_AGENT_ARTIFACTS_ROOT", "/declared/artifacts")
+    rc, out, err, used = _session_main(monkeypatch, tmp_path, ["--agent"], keep_agent_env=True)
+    assert used and rc == 0, err
+    assert out.strip() == "/declared/artifacts"
+
+
+def test_set_host_outputs_dir_is_a_no_op_off_a_session_tree(tmp_path: Path) -> None:
+    root = str(tmp_path / "artifacts")
+    rc, out, err = _run_cli(["--set-host-outputs-dir", _HOST], {"COWORK_ARTIFACTS_ROOT": root})
+    assert rc == 0, err
+    payload = json.loads(out)
+    assert payload == {"code": "not_needed", "agent_artifacts_root": os.path.abspath(root)}
+    assert not (tmp_path / "artifacts" / _mod.PERSIST_NAME).exists()
+
+
+def test_vm_loop_a_sessions_path_is_proven_by_the_probe_and_accepted(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """On a VM-loop tier the file tools take the shell's own `/sessions/...` paths and no "Paths in bash
+    differ" list exists. The shape rule must not reject that path: the probe is the test. Proven -> the
+    agent root is that absolute path; unproven -> the agent call still refuses."""
+    vm_outputs = "/sessions/abc/mnt/outputs"
+    assert _mod.normalize_host_outputs_dir(vm_outputs) == (vm_outputs, None)
+
+    rc, out, _, used = _session_main(monkeypatch, tmp_path, ["--agent"])
+    assert used and rc == _mod.EXIT_NOT_PROVEN  # unproven: refuses
+
+    artifacts = tmp_path / "outputs" / "artifacts"
+    (artifacts / _mod.PROBE_NAME).write_text(vm_outputs, encoding="utf-8")  # the VM file tool's write
+    rc, out, err, used = _session_main(monkeypatch, tmp_path, ["--set-host-outputs-dir", vm_outputs])
+    assert used and rc == 0, err
+    assert out.strip() == vm_outputs + "/artifacts"
+    rc, out, err, used = _session_main(monkeypatch, tmp_path, ["--agent"])
+    assert used and rc == 0, err
+    assert out.strip() == vm_outputs + "/artifacts"

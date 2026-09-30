@@ -86,7 +86,7 @@ The model's native currency, as an ISO 4217 code (`"USD"`, `"INR"`, `"ILS"`, `"E
 | `stage` | string | yes | One of: `"pre-seed"`, `"seed"`, `"series-a"`, `"series-b"`, `"later"` |
 | `sector` | string | yes | Normalized sector string |
 | `geography` | string | yes | Primary geography |
-| `revenue_model_type` | string | yes | One of: `"saas-plg"`, `"saas-sales-led"`, `"marketplace"`, `"usage-based"`, `"ai-native"`, `"hardware"`, `"hardware-subscription"`, `"consumer-subscription"`, `"transactional-fintech"`, `"annual-contracts"`, `"retail"` |
+| `revenue_model_type` | string | yes | One of: `"saas-plg"`, `"saas-sales-led"`, `"marketplace"`, `"usage-based"`, `"ai-native"`, `"hardware"`, `"hardware-subscription"`, `"consumer-subscription"`, `"transactional-fintech"`, `"annual-contracts"`, `"retail"`, `"unclassified"` |
 | `model_format` | string | no | One of: `"spreadsheet"`, `"deck"`, `"conversational"`, `"partial"`. Defaults to `"spreadsheet"`. Controls which checklist items are applicable. |
 | `data_confidence` | string | no | One of: `"exact"`, `"estimated"`, `"mixed"`. Indicates reliability of input values. |
 
@@ -101,11 +101,11 @@ both map to `"saas"` in `checklist.py`, and CAC payback keys on `acv_tier`, not 
 paragraph previously said to default to `saas-sales-led` "(the more conservative CAC-payback band)" —
 a band it does not control, between two values no code tells apart.
 
-**What DOES matter is when neither fits.** `revenue_model_type` is required and has no "unknown", so a
-business the enum cannot express — outcome-priced, or deep tech that ships software — falls through to
-a SaaS default and switches on the whole SaaS metric suite (NRR, GRR, magic number, Rule of 40,
-ARR/FTE) plus the SaaS gross-margin table. Prefer the closest NON-SaaS type over a SaaS one you do not
-believe, and say in `agent_supplied` that the taxonomy did not fit.
+**No revenue model stated, or none fits → `unclassified`, not a guessed SaaS type.** A SaaS type
+switches on NRR, GRR, magic number, Rule of 40, ARR/FTE and the SaaS gross-margin table;
+`unclassified` makes the review abstain from those and say why. If a model is stated,
+prefer a NON-SaaS type that fits; otherwise use `unclassified` and describe the model in
+`agent_supplied`.
 
 **Choosing `data_confidence` for conversational input.** A figure the founder stated from memory in chat is
 `estimated`, not `exact`. Reserve `exact` for a value read off a document — a spreadsheet cell, a bank
@@ -441,6 +441,7 @@ When top-level `currency` is present and not `"USD"`, `unit_economics.py` cannot
 | `transactional-fintech` | Payment/transaction-fee revenue | Stripe, Wise |
 | `annual-contracts` | Enterprise annual/multi-year | Workday, ServiceNow |
 | `retail` | Physical-store/franchise rollout or D2C physical goods | Sweetgreen, Warby Parker |
+| `unclassified` | No model stated, or none fits: the review abstains | — |
 
 ### Sector Gate Mapping
 

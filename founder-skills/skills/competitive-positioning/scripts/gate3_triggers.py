@@ -40,8 +40,15 @@ change here silently re-grades every trigger):
     other, and `rank <= 2` excludes 3rd, so the trigger missed the exact shape it was added for.
     An exhaustive test caught it; no live run would have, because the mean trigger fires on that
     data anyway and masks the miss. Top-tercile admits 3rd of 11 and still excludes 4th.
-  * TIES take the WORSE rank. `_compute_rank` already does this (it counts strictly-ahead
-    competitors), so a tie yields the higher — worse — rank number and needs no handling here.
+  * TIES take the BETTER rank in `startup_*_rank`: `_compute_rank` counts only competitors
+    strictly ahead, so a startup level with two others reads 1st. (This line once said the
+    opposite.) The scorer also records `startup_*_tied_with`, and every trigger here reads the
+    tie in the direction that makes it harder to fire: the strong side of a trigger uses the
+    worst place in the tie, the weak side the best. A tie can then never be what fires a trigger,
+    and the founder is told the range ("tied 1st-3rd").
+  * NO EDGE (the fifth trigger, added later): the nearest competitor closer than 15 on the two
+    0-100 axes AND no axis lead over the best competitor of 10 or more. Reads the scorer's geometry
+    (`nearest_distance`, `x_/y_lead_over_best`); a view without it is NOT EVALUATED. Provisional.
   * SMALL SETS: a quartile is meaningless on very few points, so the two quartile-dependent
     readings are NOT EVALUATED when `n < 4`. That is reported as `not_evaluated`, never as
     "did not fire" — the distinction matters, because "we could not tell" and "we checked and it
@@ -59,6 +66,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from typing import Any
 
@@ -69,6 +77,17 @@ _BOTTOM_QUARTILE = 0.75
 _TOP_TERCILE_DIVISOR = 3
 _MIN_N_FOR_QUARTILE = 4
 _LOW_DIFFERENTIATION_PCT = 25.0
+# Wording for a view that scores the startup's plan (see the end of `evaluate_view`).
+EVEN_IF_DELIVERED = "even if everything in the plan is delivered, "
+PLAN_CAVEAT = (
+    " — and this is your plan, if delivered: it rests on claims not yet shown, so treat it as a target "
+    "rather than a finding"
+)
+# no_edge (PROVISIONAL, set before any run was measured against it): the nearest competitor within
+# this distance on the two 0-100 axes, and no axis lead over the best competitor of at least this
+# much. The same edges `_cp_view` uses for "right next to you" and "level with".
+_NO_EDGE_NEAREST = 15.0
+_NO_EDGE_LEAD = 10.0
 
 
 def _as_list(v: Any) -> list[Any]:
@@ -109,10 +128,19 @@ def _ordinal(n: int) -> str:
     return f"{n}{suffix}"
 
 
+def _place(best: int, worst: int) -> str:
+    """ "3rd", or "tied 3rd-5th" when the startup shares its value with competitors."""
+    return _ordinal(best) if worst == best else f"tied {_ordinal(best)}–{_ordinal(worst)}"
+
+
 def evaluate_view(view: dict[str, Any], overall_differentiation: float | None) -> dict[str, Any]:
     """Evaluate every trigger for one scored view."""
     vid = str(view.get("view_id", "?"))
-    label = str(view.get("label") or "").strip() or vid
+    # Founder-facing (it reaches the no_edge description): a label, else the two axis names, and the
+    # id only as a last resort -- real runs use slug ids.
+    # Trailing parentheticals dropped, as the report does (`_cp_view.short_axis_name`).
+    axes = [re.sub(r"\s*\([^()]*\)\s*$", "", str(view.get(k) or "")).strip() for k in ("x_axis_name", "y_axis_name")]
+    label = str(view.get("label") or "").strip() or (" vs ".join(axes) if all(axes) else vid)
     x_rank = view.get("startup_x_rank")
     y_rank = view.get("startup_y_rank")
     n = _ranked_total(view)
@@ -138,6 +166,10 @@ def evaluate_view(view: dict[str, Any], overall_differentiation: float | None) -
 
     x_name = str(view.get("x_axis_name", "the X axis"))
     y_name = str(view.get("y_axis_name", "the Y axis"))
+    # Worst place in a tie (see TIES in the module docstring). Absent lists mean no tie.
+    x_worst = x_rank + len(_as_list(view.get("startup_x_tied_with")))
+    y_worst = y_rank + len(_as_list(view.get("startup_y_tied_with")))
+    x_place, y_place = _place(x_rank, x_worst), _place(y_rank, y_worst)
 
     # --- 1. bottom half on BOTH axes (PROVISIONAL) --------------------------
     if _is_bottom_half(x_rank, n) and _is_bottom_half(y_rank, n):
@@ -147,7 +179,7 @@ def evaluate_view(view: dict[str, Any], overall_differentiation: float | None) -
                 "provisional": True,
                 "description": (
                     f"the scored position puts you in the bottom half of the set on both axes "
-                    f"({_ordinal(x_rank)} of {n} on {x_name}, {_ordinal(y_rank)} of {n} on {y_name})"
+                    f"({x_place} of {n} on {x_name}, {y_place} of {n} on {y_name})"
                 ),
             }
         )
@@ -155,7 +187,7 @@ def evaluate_view(view: dict[str, Any], overall_differentiation: float | None) -
     # --- 2. top-2 on BOTH axes with no vanity flag --------------------------
     x_vanity = bool(view.get("x_axis_vanity_flag"))
     y_vanity = bool(view.get("y_axis_vanity_flag"))
-    if _is_top(x_rank) and _is_top(y_rank) and not x_vanity and not y_vanity:
+    if _is_top(x_worst) and _is_top(y_worst) and not x_vanity and not y_vanity:
         out["triggers"].append(
             {
                 "id": "flattering_both_axes",
@@ -177,16 +209,16 @@ def evaluate_view(view: dict[str, Any], overall_differentiation: float | None) -
         )
     else:
         x_bq, y_bq = _is_bottom_quartile(x_rank, n), _is_bottom_quartile(y_rank, n)
-        if (x_bq and _is_top_tercile(y_rank, n)) or (y_bq and _is_top_tercile(x_rank, n)):
-            weak_axis, weak_rank = (x_name, x_rank) if x_bq else (y_name, y_rank)
-            strong_axis, strong_rank = (y_name, y_rank) if x_bq else (x_name, x_rank)
+        if (x_bq and _is_top_tercile(y_worst, n)) or (y_bq and _is_top_tercile(x_worst, n)):
+            weak_axis, weak_place = (x_name, x_place) if x_bq else (y_name, y_place)
+            strong_axis, strong_place = (y_name, y_place) if x_bq else (x_name, x_place)
             out["triggers"].append(
                 {
                     "id": "trade_off_shape",
                     "provisional": True,
                     "description": (
                         f"the scored position is a genuine trade-off rather than a middling one — "
-                        f"{_ordinal(strong_rank)} of {n} on {strong_axis} but {_ordinal(weak_rank)} of {n} "
+                        f"{strong_place} of {n} on {strong_axis} but {weak_place} of {n} "
                         f"on {weak_axis}"
                     ),
                 }
@@ -201,11 +233,55 @@ def evaluate_view(view: dict[str, Any], overall_differentiation: float | None) -
                 "id": "low_overall_differentiation",
                 "provisional": True,
                 "file_level": True,
+                # No number: the score reads as a percentage of something, and the founder is never
+                # shown it (see `_cp_view`). State what it measures instead.
                 "description": (
-                    f"overall differentiation across the map came out at {overall_differentiation:.0f}%, on the low end"
+                    "across these maps, your scored position leaves little separation from the competitors"
                 ),
             }
         )
+
+    # --- 5. no edge: a competitor right next to you and no clear lead (PROVISIONAL) ---
+    # The crowded middle, which no rank trigger sees: 5th of 10 on both axes is not bottom half, and
+    # the mean score can sit above the low threshold. Reads the scorer's geometry; an artifact
+    # without it is not evaluated rather than silently passing.
+    nearest = view.get("nearest_distance")
+    raw_leads = [view.get("x_lead_over_best"), view.get("y_lead_over_best")]
+    leads = [float(v) for v in raw_leads if isinstance(v, (int, float)) and not isinstance(v, bool)]
+    if not isinstance(nearest, (int, float)) or len(leads) != 2:
+        out["not_evaluated"].append({"trigger": "no_edge", "reason": "view carries no positioning geometry"})
+    elif nearest < _NO_EDGE_NEAREST and all(v < _NO_EDGE_LEAD for v in leads):
+        out["triggers"].append(
+            {
+                "id": "no_edge",
+                "provisional": True,
+                "description": (
+                    f"on {label}, a competitor sits right next to your scored position and you do not "
+                    f"clearly lead on either axis"
+                ),
+            }
+        )
+
+    # --- a scored PLAN (score_positioning.py's scored_point) ---------------------------------
+    # The planned view is the startup's best case: its plan is assumed delivered while competitors
+    # sit at what they ship today. So a LOW result is robust (it holds even then) and is said that
+    # way; a FLATTERING result is the weak case and always says it rests on a plan (D1: no
+    # evidence field decides this -- a plan is undelivered by construction). Today's position, when
+    # it is unranked, is not evaluated, and says so rather than "did not fire".
+    if view.get("scored_point") == "planned":
+        for trig in out["triggers"]:
+            if trig["id"] == "flattering_both_axes":
+                trig["description"] += PLAN_CAVEAT
+            else:
+                trig["description"] = EVEN_IF_DELIVERED + trig["description"]
+        today = view.get("today")
+        if isinstance(today, dict) and not today.get("ranked"):
+            out["not_evaluated"].append(
+                {
+                    "trigger": "today_position",
+                    "reason": "today's position is not ranked: there is no product to buy yet",
+                }
+            )
 
     return out
 

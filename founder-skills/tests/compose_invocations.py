@@ -39,13 +39,29 @@ def _stage_fixtures(fixture_dir: Path, work_dir: Path) -> None:
             shutil.copy(f, work_dir / f.name)
 
 
-def _run_compose_subprocess(skill: str, work_dir: Path, extra_args: list[str]) -> subprocess.CompletedProcess[str]:
+# Runs a compose with `uuid.uuid4()` pinned, so a test can choose the per-run random suffixes (the
+# coaching insertion marker's among them) instead of waiting for the one run in forty-three that draws
+# an all-digit one. argv: <pinned uuid> <compose script> <compose args...>.
+_PINNED_UUID_SHIM = """
+import os, runpy, sys, uuid
+pinned = uuid.UUID(sys.argv[1])
+uuid.uuid4 = lambda: pinned
+script = sys.argv[2]
+sys.argv = sys.argv[2:]
+sys.path.insert(0, os.path.dirname(script))
+runpy.run_path(script, run_name="__main__")
+"""
+
+
+def _run_compose_subprocess(
+    skill: str, work_dir: Path, extra_args: list[str], pinned_uuid: str | None = None
+) -> subprocess.CompletedProcess[str]:
     """Run compose; return CompletedProcess. Does NOT raise on non-zero exit.
 
     `REPORT_JSON_OUT` placeholders in extra_args are replaced with
     `<work_dir>/report.json`. `REPORT_MD_OUT` is replaced with
     `<work_dir>/report.md` for skills (like cap-table) whose compose
-    requires both.
+    requires both. `pinned_uuid` fixes every `uuid.uuid4()` the compose draws.
     """
     scripts = REPO_ROOT / "founder-skills" / "skills" / skill / "scripts"
     compose = scripts / "compose_report.py"
@@ -60,6 +76,8 @@ def _run_compose_subprocess(skill: str, work_dir: Path, extra_args: list[str]) -
         else:
             resolved_args.append(a)
     cmd = [sys.executable, str(compose), "--dir", str(work_dir), *resolved_args]
+    if pinned_uuid is not None:
+        cmd = [sys.executable, "-c", _PINNED_UUID_SHIM, pinned_uuid, *cmd[1:]]
     return subprocess.run(cmd, capture_output=True, text=True)
 
 
@@ -142,7 +160,9 @@ def drive_compose(skill: str, fixture_dir: Path, work_dir: Path) -> Path:
     return report
 
 
-def run_compose_capturing(skill: str, fixture_dir: Path, work_dir: Path) -> subprocess.CompletedProcess[str]:
+def run_compose_capturing(
+    skill: str, fixture_dir: Path, work_dir: Path, *, pinned_uuid: str | None = None
+) -> subprocess.CompletedProcess[str]:
     """Stage fixtures, run compose; return the CompletedProcess unchanged.
 
     For tests that need to inspect stderr / returncode (e.g., asserting that
@@ -151,4 +171,4 @@ def run_compose_capturing(skill: str, fixture_dir: Path, work_dir: Path) -> subp
     """
     flags = _ensure_registered(skill)
     _stage_fixtures(fixture_dir, work_dir)
-    return _run_compose_subprocess(skill, work_dir, flags)
+    return _run_compose_subprocess(skill, work_dir, flags, pinned_uuid)

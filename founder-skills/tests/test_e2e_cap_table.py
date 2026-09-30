@@ -45,8 +45,16 @@ from _e2e_harness import (
     locate_review_dir,
     run_skill,
 )
+from _pool_sizing_claims import (
+    coaching_body,
+    counterfactual_lever_problems,
+    increase_reading_lever_problems,
+    judge_arguments,
+    pool_sizing_problems,
+)
 
 CAP_TABLE_OPT_IN = "RUN_PAID_E2E_CAP_TABLE"
+POOL_READING_OPT_IN = "RUN_PAID_E2E_CAP_TABLE_POOL"
 
 # The artifacts a full-pipeline run writes that carry `metadata.run_id`. Parity across them is what
 # catches a stale artifact surviving from an earlier run of the same slug — an existence check cannot.
@@ -67,6 +75,24 @@ ELIGIBILITY_CONCLUSIONS = [
     r"strong eligibility posture",
     r"\bqualifies for QSBS\b",
 ]
+
+
+# A phrase above that is the object of an open question or a refusal to decide is the boundary holding, not a
+# conclusion: "whether you qualify", "if you qualify", "not concluding that you qualify". Only the words right
+# before the phrase count, so "Whether or not the board agrees, you qualify." is still a conclusion.
+_DEFERS = re.compile(
+    r"(?:\bwhether|\bif|\b(?:not|never|cannot|can't|won't)\s+(?:conclud|say|tell|determin)\w*(?:\s+that)?)\s+$",
+    re.IGNORECASE,
+)
+
+
+def eligibility_conclusion(text: str) -> re.Match[str] | None:
+    """The first place `text` concludes eligibility, or None."""
+    for pattern in ELIGIBILITY_CONCLUSIONS:
+        for hit in re.finditer(pattern, text, re.IGNORECASE):
+            if not _DEFERS.search(text[: hit.start()]):
+                return hit
+    return None
 
 
 def _cap_table_lane_authorized() -> bool:
@@ -134,13 +160,12 @@ def test_cap_table_smoke(tmp_path: Path) -> None:
     assert founder_facing, f"no founder-facing markdown in {review_dir}"
     for path in founder_facing:
         text = path.read_text(encoding="utf-8")
-        for pattern in ELIGIBILITY_CONCLUSIONS:
-            hit = re.search(pattern, text, re.IGNORECASE)
-            assert hit is None, (
-                f"{path.name} concludes eligibility ({hit.group(0)!r}) — the Reliance Boundary "
-                "permits stating the cited date or threshold and stopping there, never the "
-                "determination. This is the one thing a founder must take to counsel."
-            )
+        hit = eligibility_conclusion(text)
+        assert hit is None, (
+            f"{path.name} concludes eligibility ({hit.group(0)!r}) — the Reliance Boundary "
+            "permits stating the cited date or threshold and stopping there, never the "
+            "determination. This is the one thing a founder must take to counsel."
+        )
 
     # Non-vacuity guard for the block above. If the run never engaged the QSBS question at all, the
     # absence of a conclusion proves nothing — the assertion would pass on a report about anything.
@@ -175,6 +200,7 @@ def test_cap_table_smoke(tmp_path: Path) -> None:
 
     assert_cap_implied_self_consistent(review_dir)
     assert_pool_basis_commentary_matches_inputs(review_dir)
+    assert_pool_backstop_engaged(review_dir)
 
 
 def assert_cap_implied_self_consistent(review_dir: Path) -> None:
@@ -248,55 +274,173 @@ def assert_cap_implied_self_consistent(review_dir: Path) -> None:
             )
 
 
-def assert_pool_basis_commentary_matches_inputs(review_dir: Path) -> None:
-    """The coaching prose must not contradict the option-pool basis the math actually used.
+def assert_pool_backstop_engaged(review_dir: Path) -> None:
+    """The in-pipeline backstop (`pool_claims_check.py`) ran on THIS run's commentary, and what report.md shows is
+    the file it wrote. The lane still judges the delivered text itself; this proves the gate engaged, so a green
+    judgement is not a coach that simply happened to stay off the topic while the check never ran."""
+    report = json.loads((review_dir / "report.json").read_text(encoding="utf-8"))
+    run_id = (report.get("metadata") or {}).get("run_id")
+    records = [
+        *review_dir.glob("handoff/*/coaching.md.pool-check.json"),
+        *review_dir.glob("coaching.md.pool-check.json"),
+    ]
+    mine = [p for p in records if json.loads(p.read_text(encoding="utf-8")).get("run_id") == run_id]
+    assert mine, f"no pool-claims check record for run {run_id} under {review_dir} (found {records})"
+    record_path = mine[0]
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    assert record["action"] in {"clean", "stripped", "not_judged", "no_pool_target"}, record
+    checked = record_path.parent / "coaching.checked.json"
+    assert checked.is_file(), f"the check wrote no {checked.name}, so nothing it checked was inserted"
+    inserted = coaching_body((review_dir / "report.md").read_text(encoding="utf-8")) or ""
+    written = json.loads(checked.read_text(encoding="utf-8"))["checked_commentary_markdown"]
+    assert " ".join(inserted.split()) == " ".join(written.split()), "report.md's commentary is not the checked file"
+    print(
+        f"[e2e:cap-table] pool backstop: action={record['action']} findings={len(record.get('findings') or [])}",
+        flush=True,
+    )
 
-    A run whose `target_basis` was `post_money` was told its pool was sized *pre-money*, given the
-    dilution consequence that only follows from pre-money, and advised to negotiate FOR post-money
-    — which it already had. Structural assertions cannot see this: the payload key was present and
-    the commentary was non-empty.
+
+def assert_pool_basis_commentary_matches_inputs(review_dir: Path) -> None:
+    """The coaching prose's option-pool sizing claims must be grounded in what the model computed.
+
+    Judged by `_pool_sizing_claims.pool_sizing_problems`, which the free `test_pool_sizing_claims.py`
+    pins on a labelled table (this lane's previous check failed correct, cited advice and passed a
+    wrong statement). The other sizing's computed founders percentage comes from `scenarios.json`
+    when the model produced one; without it, any advice about the other sizing is unsupported.
     """
+    # This lane's prompt states a post-money pool, so every early exit is a failure: a judge that skips
+    # reports green on a run it never judged.
     requests_path = review_dir / "scenario_requests.json"
-    if not requests_path.is_file():
-        return
+    assert requests_path.is_file(), "no scenario_requests.json -- the pool-sizing judge had nothing to judge"
     requests = json.loads(requests_path.read_text(encoding="utf-8"))
     bases = {
         (r.get("parameters") or {}).get("target_basis")
         for r in requests
         if (r.get("parameters") or {}).get("target_basis")
     }
-    if bases != {"post_money"}:
-        return  # mixed or pre-money bases: the contradiction below is not well-defined
+    assert bases == {"post_money"}, f"the prompt states a post-money pool; the scenarios model {bases or 'none'}"
+    modeled_basis = "post_money"
 
     md = (review_dir / "report.md").read_text(encoding="utf-8")
-    commentary = md.split("## Coaching Commentary", 1)
-    if len(commentary) < 2:
-        return
-    body = commentary[1]
+    body = coaching_body(md)
+    assert body is not None, "report.md has no Coaching Commentary to judge"
 
-    # SENTENCE-SCOPED, and narrow on purpose. "pre-money" is the correct word for the VALUATION in
-    # this same commentary ("raising $3M at $12M pre-money, with the pool topped up to 10%
-    # post-money"), so a document-wide `pool … pre-money` proximity match flags a true sentence. A
-    # first draft of this check did exactly that. Two exclusions carry the precision:
-    #   - only `pool` → `pre-money` adjacency counts, never `pre-money` → `pool` (that ordering is
-    #     the valuation reading);
-    #   - a sentence naming BOTH bases is contrasting them, which is legitimate advice.
-    claims = []
-    for sentence in re.split(r"(?<=[.!?])\s+", body):
-        # A sentence naming BOTH bases is contrasting or asking, never asserting this deal's basis.
-        # That covers the legitimate forms this skill actually writes: the general explainer
-        # ("Pre-money pool sizing lands the dilution on existing shareholders; post-money spreads
-        # it…"), the question ("is it sized pre-money or post-money?"), and the correct verdict
-        # ("On these numbers the pool is post-money"). An earlier version excluded only the narrower
-        # `post-money pool` bigram and false-flagged the explainer, which says "post-money spreads"
-        # — a false positive in a paid lane, which is worse than no assertion at all.
-        if re.search(r"pre[- ]money", sentence, re.IGNORECASE) and re.search(r"post[- ]money", sentence, re.IGNORECASE):
-            continue
-        hit = re.search(r"pool\W{0,12}(?:\*\*\s*)?pre[- ]money|pre[- ]money\s+pool", sentence, re.IGNORECASE)
-        if hit:
-            claims.append(" ".join(sentence.split())[:160])
-    assert not claims, (
-        "the pool was sized post_money but the commentary asserts a pre-money pool basis: "
-        f"{claims!r} — it states the wrong basis, draws the dilution consequence that only follows "
-        "from the wrong basis, and advises negotiating for what the founder already has"
+    scenarios = json.loads((review_dir / "scenarios.json").read_text(encoding="utf-8"))
+    lever = counterfactual_lever_problems(scenarios, md)
+    assert not lever, f"the pool-sizing counterfactual did not engage, so the judgement below means nothing: {lever}"
+
+    # The run's figures, derived exactly as the in-pipeline backstop derives them.
+    other_founders_pcts = judge_arguments(scenarios)["other_founders_pct"]
+    # target_pct: the pool target itself is not a founders figure. It lands with the judge's rule that any mention
+    # of an uncomputed new-options reading is a finding -- before that rule, the untargeted 10% was the only
+    # thing that caught an invented reading.
+    problems = pool_sizing_problems(
+        body, modeled_basis=modeled_basis, other_founders_pct=other_founders_pcts, target_pct=10.0
     )
+    assert not problems, (
+        f"the pool was sized {modeled_basis} and the commentary's pool-sizing claims are not grounded in "
+        f"the computed figures: {problems!r}"
+    )
+
+
+def _pool_reading_lane_authorized() -> bool:
+    return os.environ.get(POOL_READING_OPT_IN, "").strip().lower() in {"1", "true", "yes"}
+
+
+def _payload_percentages(review_dir: Path) -> list[float]:
+    """Every percentage the coaching payload SHOWS the coach, as numbers: the closed world a founders figure in
+    the coaching must come from."""
+    payload = json.loads((review_dir / "report.json").read_text(encoding="utf-8")).get("coaching_payload") or {}
+    found: list[float] = []
+
+    def walk(o: object) -> None:
+        if isinstance(o, str):
+            found.extend(float(m) for m in re.findall(r"(\d{1,3}(?:\.\d+)?)\s*%", o))
+        elif isinstance(o, dict):
+            for v in o.values():
+                walk(v)
+        elif isinstance(o, list):
+            for v in o:
+                walk(v)
+        elif isinstance(o, float) and 0.0 <= o <= 1.0:
+            found.append(round(o * 100, 1))
+
+    walk(payload)
+    return found
+
+
+@pytest.mark.e2e
+@pytest.mark.skipif(
+    not (has_claude_auth() and _pool_reading_lane_authorized()),
+    reason=(
+        f"cap-table's pool-reading lane needs Claude auth, RUN_PAID_E2E=1, and {POOL_READING_OPT_IN}=1. "
+        "It is the only run that reaches the unconfirmed pool-reading disclosure and the figure computed "
+        "for it; billed on demand, never by a tag."
+    ),
+)
+def test_cap_table_pool_reading_lane(tmp_path: Path) -> None:
+    """A post-money pool target beside existing unallocated options, and a founder who says not to ask.
+
+    Asking nothing is correct here, and the disclosure fires on any post-money pool beside unallocated options,
+    so neither is what this lane tests about the model. What it tests is that the model models the basis the
+    founder STATED (`post_money`) rather than writing the other reading in unasked, and that the report then
+    reads the target as the pool available after the round, discloses the other reading (the percentage may
+    count only the new options) and computes that reading's figure; the coach may state it only by citing it.
+    No other lane reaches this path: the smoke lane's prompt names no pool, so nothing is disclosed there. THE
+    VERDICT STILL NEEDS A HUMAN READ of the coaching paragraph -- the judge is a pattern matcher and cannot see
+    a sentence that swaps two computed figures.
+    """
+    workdir = tmp_path / "workspace"
+    workdir.mkdir()
+
+    pool_prompt = (
+        "Use the cap-table skill. Barbaz Labs is a fictional Delaware C-corp. Founders hold 8,000,000 common "
+        "shares. The existing option plan has 1,000,000 options authorized: 800,000 granted and outstanding, "
+        "and 200,000 unallocated and available for grant. There is one outstanding YC post-money SAFE for "
+        "$500,000 at a $5,000,000 post-money valuation cap, signed 2024-03-01. We are modelling a priced "
+        "Series A: $3,000,000 of new money at a $12,000,000 pre-money valuation, with a 10% post-money option "
+        "pool. Use 'barbaz' as the slug. Don't ask me questions -- just run it end to end and produce the full "
+        "review."
+    )
+
+    captured = run_skill(pool_prompt, workdir, label="cap-table-pool-reading")
+    review_dir = locate_review_dir(workdir, "cap-table-*", captured, "cap-table")
+    assert_run_id_parity(review_dir, RUN_ID_ARTIFACTS)
+    assert_coaching_commentary_landed(review_dir, payload_key="scenario_digest")
+
+    md = (review_dir / "report.md").read_text(encoding="utf-8")
+    scenarios = json.loads((review_dir / "scenarios.json").read_text(encoding="utf-8"))
+    # The founder stated a post-money pool and asked not to be asked, so the only basis the model may write is the
+    # stated one; the new-options-only reading written in unasked would be a reading nobody gave.
+    requests = json.loads((review_dir / "scenario_requests.json").read_text(encoding="utf-8"))
+    pool_bases = [
+        (r.get("parameters") or {}).get("target_basis")
+        for r in requests
+        if (r.get("parameters") or {}).get("target_pool_percent")
+    ]
+    assert pool_bases and set(pool_bases) == {"post_money"}, f"modelled pool bases {pool_bases}, stated post_money"
+    # The lever: disclosure fired, the reading was computed, report.md carries its line.
+    lever = increase_reading_lever_problems(scenarios, md)
+    assert not lever, f"the new-options-only reading did not engage, so nothing below is evidence: {lever}"
+    assert "read as the pool available after the round" in md, "the disclosure is not on report.md"
+
+    body = coaching_body(md)
+    assert body is not None, "report.md has no Coaching Commentary to judge"
+    # The run's figures, derived exactly as the in-pipeline backstop derives them.
+    args = judge_arguments(scenarios)
+    problems = pool_sizing_problems(
+        body,
+        modeled_basis="post_money",
+        other_founders_pct=args["other_founders_pct"],
+        increase_founders_pct=args["increase_founders_pct"],
+        target_pct=10.0,
+        # The run's own figures as well as the payload's: the comparison's and the new-options reading's figures
+        # left the coaching payload for the report, and a citation of one is not an invented number.
+        known_figures=[
+            *_payload_percentages(review_dir),
+            *(args["other_founders_pct"] or []),
+            *(args["increase_founders_pct"] or []),
+        ],
+    )
+    assert not problems, f"the coach's pool-sizing figures are not the computed ones: {problems!r}"
+    assert_pool_backstop_engaged(review_dir)

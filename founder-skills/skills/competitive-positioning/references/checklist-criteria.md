@@ -202,7 +202,7 @@ Items are auto-gated to `not_applicable` based on `input_mode`. The main thread 
 **Label:** Differentiation claims stress-tested
 **Pass:** Every differentiation claim in `positioning.json` has been stress-tested with a `verifiable` assessment, `evidence`, and `challenge` (what an investor would push on). At least one claim has verdict `holds`.
 **Fail:** No stress-testing performed, or all claims have verdict `does_not_hold`. The competitive narrative has no defensible differentiation.
-**Warn:** Stress-testing performed but most claims are `partially_holds` — differentiation exists but is not strong.
+**Warn:** Stress-testing performed but most claims are `partially_holds` or `unproven` — differentiation exists but is not strong, or is not yet evidenced.
 **Basis:** Investors will push on every differentiation claim. The founder must know which claims hold up under scrutiny and which need qualification.
 
 ### `NARR_02`

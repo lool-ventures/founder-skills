@@ -1439,6 +1439,8 @@ def test_compose_severity_map_complete() -> None:
         # should know the stage their deck was graded at was never confirmed.
         "UNGATED_REVIEW",
         "UNVERIFIED_MEASUREMENT",
+        # A step whose output reached its producer without passing the hand-off gate.
+        "HANDOFF_BYPASSED",
     ]
     assert len(sev_map) == len(expected), f"expected {len(expected)} codes, got {len(sev_map)}"
     for code in expected:
@@ -3515,7 +3517,9 @@ def test_compose_unsubstantiated_ai_claim_warning_for_ai_claimed_unverified(tmp_
     assert "UNSUBSTANTIATED_AI_CLAIM" in codes
     w = next(w for w in data["validation"]["warnings"] if w["code"] == "UNSUBSTANTIATED_AI_CLAIM")
     assert w["severity"] == "medium"
-    assert "ai_claimed_unverified" in w["message"]
+    # The message says what is wrong in the founder's words; the status enum it keys on stays internal.
+    assert "no AI-core evidence" in w["message"]
+    assert "ai_claimed_unverified" not in w["message"]
 
 
 def test_compose_no_unsubstantiated_ai_claim_for_ai_core(tmp_path: Path) -> None:
@@ -5903,3 +5907,106 @@ def test_an_ungated_unmeasured_criterion_is_still_reported() -> None:
     assert any("UNVERIFIED_MEASUREMENT" in w for w in result["validation"]["warnings"]), result["validation"][
         "warnings"
     ]
+
+
+# ---------------------------------------------------------------------------
+# HANDOFF_BYPASSED: a step whose output reached its producer without passing check_handoff.py.
+# Built from the artifacts present, so the optional numeric chain is required only when it ran.
+# ---------------------------------------------------------------------------
+
+_CHECK_HANDOFF = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "scripts", "check_handoff.py")
+_CORE_STEPS = ["slide_reviews_output.json", "checklist_output.json"]
+_CHAIN_STEPS = ["ledger_output.json", "second_read_output.json", "relations_output.json"]
+
+
+def _seed_gated(d: str, stems: list[str], run_id: str = "run-test") -> None:
+    run_dir = Path(d) / "handoff" / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    for stem in stems:
+        (run_dir / stem).write_text('{"from": "the sub-agent"}', encoding="utf-8")
+        result = subprocess.run([sys.executable, _CHECK_HANDOFF, str(run_dir / stem)], capture_output=True, text=True)
+        assert result.returncode == 0, result.stdout
+
+
+def _bypass_message(d: str) -> str | None:
+    rc, data, err = _run_compose(d)
+    assert data is not None, err
+    hits = [w for w in data["validation"]["warnings"] if w["code"] == "HANDOFF_BYPASSED"]
+    assert len(hits) <= 1, hits
+    if hits:
+        assert hits[0]["severity"] == "medium"
+        assert "handoff" not in hits[0]["message"].lower() and ".json" not in hits[0]["message"]
+    return hits[0]["message"] if hits else None
+
+
+def _chain_dir(interpretation: str = "not_needed") -> str:
+    recon = {**_VALID_RECONCILIATION, "interpretation": {"status": interpretation, "contradictions_before": 1}}
+    d = _make_artifact_dir(
+        {
+            **_compose_artifacts(_VALID_INVENTORY, ledger={"metadata": {"run_id": "run-test"}, "figures": []}),
+            "reconciliation.json": recon,
+            "second_read.json": {"metadata": {"run_id": "run-test"}, "figures": []},
+        }
+    )
+    (Path(d) / "handoff" / "run-test").mkdir(parents=True)  # Step 0 creates it in every real run
+    return d
+
+
+def test_handoff_bypass_names_each_ungated_step_and_a_fully_gated_run_is_silent() -> None:
+    d = _chain_dir()
+    msg = _bypass_message(d)  # lever engaged: nothing gated, every step named
+    assert msg is not None
+    for label in ("slide-by-slide review", "scored checklist", "reading of the deck's figures", "second reading"):
+        assert label in msg, (label, msg)
+    _seed_gated(d, _CORE_STEPS + ["ledger_output.json", "second_read_output.json"])
+    msg = _bypass_message(d)
+    assert msg is not None and "how the deck's figures relate" in msg and "scored checklist" not in msg
+    _seed_gated(d, ["relations_output.json"])
+    assert _bypass_message(d) is None
+
+
+def test_handoff_bypass_requires_the_numeric_chain_only_when_it_ran() -> None:
+    """Dynamic map: with no ledger and no second read, only the slide reviews and checklist count."""
+    d = _make_artifact_dir(_compose_artifacts(_VALID_INVENTORY))
+    (Path(d) / "handoff" / "run-test").mkdir(parents=True)
+    msg = _bypass_message(d)
+    assert msg is not None and "reading of the deck's figures" not in msg and "relate" not in msg
+    _seed_gated(d, _CORE_STEPS)
+    assert _bypass_message(d) is None
+
+
+def test_handoff_bypass_requires_the_interpretation_pass_only_when_it_was_applied() -> None:
+    applied = _chain_dir("applied")
+    _seed_gated(applied, _CORE_STEPS + _CHAIN_STEPS)
+    msg = _bypass_message(applied)
+    assert msg is not None and "figures that disagree" in msg
+    _seed_gated(applied, ["interpretation_output.json"])
+    assert _bypass_message(applied) is None
+
+    not_run = _chain_dir("not_run")
+    _seed_gated(not_run, _CORE_STEPS + _CHAIN_STEPS)
+    assert _bypass_message(not_run) is None
+
+
+def test_handoff_bypass_is_silent_without_a_handoff_dir() -> None:
+    d = _make_artifact_dir(_compose_artifacts(_VALID_INVENTORY))
+    assert _bypass_message(d) is None
+
+
+def test_handoff_bypass_cannot_be_accepted_away() -> None:
+    profile = {**_VALID_PROFILE, "accepted_warnings": [{"code": "HANDOFF_BYPASSED", "match": "results", "reason": "x"}]}
+    d = _make_artifact_dir({**_compose_artifacts(_VALID_INVENTORY), "stage_profile.json": profile})
+    (Path(d) / "handoff" / "run-test").mkdir(parents=True)
+    assert _bypass_message(d) is not None  # asserts severity stays medium, not acknowledged
+
+
+def test_unsubstantiated_ai_claim_warning_carries_no_internal_token() -> None:
+    """The warning renders into the founder-facing Warnings section; it once quoted the enum it keys on."""
+    inventory = {**_VALID_INVENTORY, "ai_company_status": "ai_claimed_unverified"}
+    d = _make_artifact_dir({**_compose_artifacts(inventory)})
+    rc, data, err = _run_compose(d)
+    assert data is not None, err
+    hits = [w for w in data["validation"]["warnings"] if w["code"] == "UNSUBSTANTIATED_AI_CLAIM"]
+    assert hits, "control: the AI-claim warning must fire for this inventory"
+    assert not re.search(r"\b[a-z]+_[a-z_]+\b", hits[0]["message"]), hits[0]["message"]
+    assert "ai_claimed_unverified" not in data["report_markdown"]

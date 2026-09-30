@@ -221,8 +221,60 @@ def test_kept_not_a_competitor_must_be_named(tmp_path: Path) -> None:
     )
     rc, _, stderr = _run(tmp_path)
     assert rc == 1
-    assert "was judged not_a_competitor and kept" in stderr
-    assert "acme-co" in stderr
+    assert "was judged not a competitor and kept" in stderr
+    assert "Acme Co" in stderr
+
+
+def test_kept_not_a_competitor_named_as_retained_passes(tmp_path: Path) -> None:
+    """Positive control for the check above: the named sentence satisfies it."""
+    _publishable(tmp_path)
+    md = (tmp_path / "report.md").read_text() + (
+        "\n## Competitor Set Verification\n\n**Retained despite the challenge:** Acme Co. Scored.\n"
+    )
+    _write(tmp_path, "report.md", md)
+    _write(
+        tmp_path,
+        "competitor_verification.json",
+        {"verdicts": [{"slug": "acme-co", "verdict": "not_a_competitor"}], "recall_gaps": {}},
+    )
+    rc, _, stderr = _run(tmp_path)
+    assert rc == 0, stderr
+
+
+def test_dropped_competitor_reported_as_retained_is_a_gap(tmp_path: Path) -> None:
+    """The verdict predates the founder's confirmation. A competitor dropped from the set and still
+    listed as "retained … scored and ranked" is a false sentence; the old gate only checked that the
+    sentence existed, and compose always wrote it."""
+    _publishable(tmp_path)
+    _write(tmp_path, "landscape_draft.json", {"competitors": [{"slug": "omega-co", "name": "Omega Systems"}]})
+    md = (tmp_path / "report.md").read_text() + (
+        "\n## Competitor Set Verification\n\n**Retained despite the challenge:** Omega Systems. Scored.\n"
+    )
+    _write(tmp_path, "report.md", md)
+    _write(
+        tmp_path,
+        "competitor_verification.json",
+        {"verdicts": [{"slug": "omega-co", "verdict": "not_a_competitor"}], "recall_gaps": {}},
+    )
+    rc, _, stderr = _run(tmp_path)
+    assert rc == 1
+    assert "'Omega Systems' was removed from the set after the challenge, but the page reports it" in stderr
+
+
+def test_dropped_competitor_reported_as_removed_passes(tmp_path: Path) -> None:
+    _publishable(tmp_path)
+    _write(tmp_path, "landscape_draft.json", {"competitors": [{"slug": "omega-co", "name": "Omega Systems"}]})
+    md = (tmp_path / "report.md").read_text() + (
+        "\n## Competitor Set Verification\n\n**Removed after the challenge:** Omega Systems. Not scored.\n"
+    )
+    _write(tmp_path, "report.md", md)
+    _write(
+        tmp_path,
+        "competitor_verification.json",
+        {"verdicts": [{"slug": "omega-co", "verdict": "not_a_competitor"}], "recall_gaps": {}},
+    )
+    rc, _, stderr = _run(tmp_path)
+    assert rc == 0, stderr
 
 
 def test_checklist_graded_against_a_stale_map_is_a_gap(tmp_path: Path) -> None:
@@ -407,3 +459,50 @@ def test_gate_flags_a_filename_in_checklist_evidence_even_when_unrendered(tmp_pa
     assert rc == 0, "unrendered evidence is not founder-facing yet, so it must not block hand-over"
     assert out is not None and out["summary"]["error_count"] == 0
     assert out["summary"]["warning_count"] >= 1
+
+
+# --- the startup's public record ----------------------------------------------
+
+_RECORD = {
+    "publications": [{"number": "WO2024000001A1", "status": "published", "grant_event": True}],
+    "family_status": "granted",
+}
+
+
+def _with_record(tmp_path: Path, commentary: str, record: dict = _RECORD, show_number: bool = True) -> Any:
+    _publishable(tmp_path)
+    _write(tmp_path, "startup_research.json", record)
+    md = (tmp_path / "report.md").read_text()
+    if show_number:
+        md += "\n## What Public Records Show\n\n| WO2024000001A1 |\n"
+    md += f"\n## Coaching Commentary\n\n{commentary}\n"
+    _write(tmp_path, "report.md", md)
+    return _run(tmp_path)
+
+
+def test_a_granted_family_called_pending_is_a_contradiction(tmp_path: Path) -> None:
+    rc, _, stderr = _with_record(tmp_path, "Your patent-pending mechanism is the moat.")
+    assert rc == 1 and "STATUS_CONTRADICTION" in stderr
+
+
+def test_a_family_with_no_grant_called_granted_is_a_contradiction(tmp_path: Path) -> None:
+    record = {**_RECORD, "family_status": "published"}
+    rc, _, stderr = _with_record(tmp_path, "Your granted patent protects the mechanism.", record)
+    assert rc == 1 and "STATUS_CONTRADICTION" in stderr
+
+
+def test_consistent_commentary_passes(tmp_path: Path) -> None:
+    """Positive control, and "take for granted" is not a patent status."""
+    rc, _, stderr = _with_record(tmp_path, "Your granted patent is a real asset; do not take it for granted.")
+    assert rc == 0, stderr
+
+
+def test_a_publication_missing_from_the_report_is_a_gap(tmp_path: Path) -> None:
+    rc, _, stderr = _with_record(tmp_path, "Nothing about patents.", show_number=False)
+    assert rc == 1 and "WO2024000001A1" in stderr and "report.md" in stderr
+
+
+def test_a_publication_missing_from_report_html_is_a_gap(tmp_path: Path) -> None:
+    _write(tmp_path, "report.html", "<html><body>no record here</body></html>")
+    rc, _, stderr = _with_record(tmp_path, "Nothing about patents.")
+    assert rc == 1 and "report.html" in stderr and "WO2024000001A1" in stderr

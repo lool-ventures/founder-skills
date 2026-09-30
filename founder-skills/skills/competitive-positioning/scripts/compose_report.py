@@ -27,6 +27,12 @@ import uuid
 from datetime import date
 from typing import Any, TypeGuard
 
+_SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
+if _SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPTS_DIR)
+import _cp_redteam_copy  # noqa: E402
+import _cp_view as _view  # noqa: E402
+
 # Sentinel for corrupt artifacts
 _CORRUPT: dict[str, Any] = {"__corrupt__": True}
 
@@ -84,6 +90,9 @@ WARNING_SEVERITY: dict[str, str] = {
     # it has run clean on real runs. Raising it here alone would escalate an unmeasured signal
     # into a --strict blocker and split the judgement across two files — change both together.
     "CRITERION_MISMATCH": "medium",
+    # A direct competitor research found was left out at the cap while a competitor judged
+    # not_a_competitor kept a slot. Medium: a disclosure the founder can act on (swap them).
+    "CAP_DISPLACED_DIRECT": "medium",
     # Low
     "FOUNDER_OVERRIDE_COUNT": "low",
     # v0.4.2 Mitigation 2 — informational only (uuid is per-run, won't collide)
@@ -91,10 +100,32 @@ WARNING_SEVERITY: dict[str, str] = {
     # Info
     "SEQUENTIAL_FALLBACK": "info",
     "CHECKLIST_ALL_PASS": "info",
+    # A step whose output reached its producer without passing the hand-off gate (see
+    # `_handoff_bypassed`). Medium: the results are valid and must not block. In
+    # _UNACCEPTABLE_MEDIUM: a disclosure about the run that model-written accepted_warnings cannot clear.
+    "HANDOFF_BYPASSED": "medium",
+    # The outside review (`_cp_redteam_copy`, rules in the shared `_redteam_core`). Step 7's second pass
+    # runs --strict, so a disclosure whose only remedy is "deliver as it is" cannot be high: it would
+    # stop a run nothing can fix, or invite editing the review to clear it. Those three are medium and
+    # in _UNACCEPTABLE_MEDIUM, the HANDOFF_BYPASSED posture. REVIEW_COPY_MISSING is fixed by re-running
+    # the producer, so it stays high.
+    "REDTEAM_ALTERED": "medium",
+    "RED_TEAM_SKIP_CONTRADICTED": "medium",
+    "ANALYSIS_CHANGED_AFTER_REVIEW": "medium",
+    "ANALYSIS_CHANGED_BETWEEN_REVIEWS": "medium",
+    "REVIEW_COPY_MISSING": "high",
+    "EARLIER_REVIEW_THIS_ANALYSIS": "medium",
 }
 
 # Only medium-severity codes can be accepted. High-severity = integrity violations.
 ACCEPTIBLE_SEVERITIES = {"medium"}
+_UNACCEPTABLE_MEDIUM = {
+    "HANDOFF_BYPASSED",
+    "REDTEAM_ALTERED",
+    "RED_TEAM_SKIP_CONTRADICTED",
+    "ANALYSIS_CHANGED_AFTER_REVIEW",
+    "ANALYSIS_CHANGED_BETWEEN_REVIEWS",
+}
 
 # Human-readable warning code labels
 WARNING_LABELS: dict[str, str] = {
@@ -121,10 +152,18 @@ WARNING_LABELS: dict[str, str] = {
     "STALE_DEVELOPMENT": "Stale Development",
     "RATIONALE_MISSING": "Rationale Missing",
     "CHECKLIST_STALE_VS_POSITIONING": "Checklist Stale vs Positioning",
+    "CAP_DISPLACED_DIRECT": "Direct Competitor Left Out",
     "FOUNDER_OVERRIDE_COUNT": "Founder Override Count",
     "MARKER_COLLISION": "Marker Collision",
     "SEQUENTIAL_FALLBACK": "Sequential Fallback",
     "CHECKLIST_ALL_PASS": "Checklist All Pass",
+    "HANDOFF_BYPASSED": "Some Steps Were Not Checked",
+    "REDTEAM_ALTERED": "The Outside Review Was Changed After It Was Written",
+    "RED_TEAM_SKIP_CONTRADICTED": "A Review Ran That Was Recorded As Skipped",
+    "ANALYSIS_CHANGED_AFTER_REVIEW": "The Analysis Changed After The Outside Review",
+    "ANALYSIS_CHANGED_BETWEEN_REVIEWS": "The Analysis Changed Between Reviews",
+    "REVIEW_COPY_MISSING": "The Outside Review Cannot Be Shown Unchanged",
+    "EARLIER_REVIEW_THIS_ANALYSIS": "An Earlier Run Also Reviewed This Analysis",
 }
 
 # Required artifacts — missing any of these produces a high-severity warning.
@@ -150,6 +189,13 @@ OPTIONAL_ARTIFACTS = [
     # verification judged `not_a_competitor` was previously scored, ranked and tabled
     # indistinguishably from a genuine one, so the challenge survived only in chat.
     "competitor_verification.json",
+    # What public records show about the startup itself (STARTUP_RESEARCH). Optional: a run that
+    # predates the step has none, and the section then says nothing rather than implying a search.
+    "startup_research.json",
+    # The outside review (RED_TEAM), or the record of why none ran. Optional here; which of the two a
+    # run must carry is decided where the review is resolved (`_cp_redteam_copy`).
+    "redteam.json",
+    "red_team_skip.json",
 ]
 
 # Map artifact filename to missing-warning code.
@@ -182,6 +228,201 @@ def _as_dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def _handoff_audit() -> Any:
+    """The fleet's shared gate-record check from `founder-skills/scripts/` (same loading as
+    `_founder_text_policy`). None if unavailable: a missing module must never block a report."""
+    try:
+        shared = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "scripts"))
+        if shared not in sys.path:
+            sys.path.insert(0, shared)
+        import _handoff_audit  # type: ignore[import-not-found]
+
+        return _handoff_audit
+    except ImportError:
+        return None
+
+
+_ENRICHMENT_HANDOFF = "landscape_research_enrichment_output.json"
+
+
+_REVIEW_FOUNDER_MESSAGES = {
+    "REDTEAM_ALTERED": "The outside review was changed after it was written. This report shows it as it was written.",
+    "RED_TEAM_SKIP_CONTRADICTED": (
+        "The analysis recorded that no outside review ran, but one did; this report shows it."
+    ),
+    "ANALYSIS_CHANGED_AFTER_REVIEW": (
+        "The analysis changed after the outside review was written, so the review in this report was "
+        "taken against an earlier version of it."
+    ),
+    "ANALYSIS_CHANGED_BETWEEN_REVIEWS": (
+        "The analysis changed between two outside reviews. The one shown is of the analysis as delivered; "
+        "the earlier one, of the version before the change, is listed with it."
+    ),
+    "REVIEW_COPY_MISSING": (
+        "The outside review carries no record of how it was written, so nothing can show it is unchanged."
+    ),
+    "EARLIER_REVIEW_THIS_ANALYSIS": (
+        "An earlier run today also had this analysis reviewed; this report shows only this run's review."
+    ),
+}
+
+
+def _rt_refuse(
+    dir_path: str, run_id: str | None, review: dict[str, Any] | None, skip_record: Any, skip: str | None
+) -> None:
+    """THE OUTSIDE-REVIEW GATE: a run's report is composed only when its review ran or the decision not to
+    run one was recorded. Silence is not a third option.
+
+    A refusal, not a warning: Step 7's first pass runs without --strict, so even a high warning stops
+    nothing, and a step whose only consumer is a warning gets skipped in silence (market-sizing's review
+    was, on a live paid run). Only a non-zero exit reaches SKILL.md's stop-and-report branch.
+
+    Keyed on the run's hand-off dir, like `_handoff_bypassed`: Step 0 creates `handoff/<run_id>/` on every
+    run, so its absence means this is not a run whose steps can be judged (a fixture, an older layout).
+    RESIDUAL, stated: on the CLI lane, deleting that dir silences this gate and HANDOFF_BYPASSED together;
+    Cowork refuses the delete.
+    """
+    if not run_id or not os.path.isdir(os.path.join(dir_path, "handoff", run_id)):
+        return
+    if review is not None and _as_dict(review.get("metadata")).get("run_id") == run_id:
+        return
+    if skip is not None:
+        return
+    recorded = _as_dict(skip_record).get("reason")
+    if isinstance(recorded, str) and _as_dict(_as_dict(skip_record).get("metadata")).get("run_id") == run_id:
+        detail = f"red_team_skip.json records {recorded!r}, which is not a recognised reason"
+    else:
+        detail = "no outside review ran for this run and no decision to skip one was recorded"
+    known = ", ".join(_cp_redteam_copy.SKIP_REASONS)
+    errors = [
+        f"{detail}. Run Step 6.5, or record why it did not run with record_red_team_skip.py --reason <one of: {known}>."
+    ]
+    sys.stdout.write(json.dumps({"validation": {"status": "invalid", "errors": errors}}, indent=2) + "\n")
+    print(f"Error: report not composed: {errors[0]}", file=sys.stderr)
+    sys.exit(1)
+
+
+# A review's quote is the source's words. The founder-text pass rewrites internal tokens in the assembled
+# report and would run over quotes too, showing the founder a "quotation" the source never contained. The
+# review section fences each quote with these private-use sentinels; compose lifts them out before any
+# rewriting and restores them after.
+_QUOTE_OPEN = "\ue000"
+_QUOTE_CLOSE = "\ue001"
+_QUOTE_RE = re.compile("\ue000(.*?)\ue001", re.DOTALL)
+_QUOTE_SLOT_RE = re.compile("\ue002(\\d+)\ue003")
+
+
+def _section_outside_review(
+    review: dict[str, Any] | None, skip: str | None, others: list[tuple[int, dict[str, Any]]]
+) -> str:
+    """What an outside review of this analysis turned up.
+
+    Three states that must read differently: it never ran, it ran and found nothing, it found
+    something. "No findings" and "nobody looked" are opposite facts about a report. Every field is the
+    reviewer's text, already worded by the producer, and is made inert for markdown here; quotes are
+    fenced so no later pass rewords them.
+    """
+    outcome = _view.review_outcome(review, skip)
+    if outcome is None:
+        return ""
+    lines = ["## What an Outside Review Found\n", f"*{_view.md_inline(outcome)}*\n"]
+
+    def _finding(f: dict[str, Any]) -> list[str]:
+        sev = _view.SEVERITY_WORDS.get(str(f.get("severity")), "")
+        claim = _md_escape(_view.md_inline(str(f.get("claim_attacked") or "").strip()))
+        out = [f"\n**{sev}: {claim}**\n", _md_escape(_view.md_inline(str(f.get("what_is_true") or "").strip())) + "\n"]
+        quote = str(f.get("evidence_quote") or "").strip()
+        if quote:
+            out.append(f"> {_QUOTE_OPEN}{_view.md_inline(quote)}{_QUOTE_CLOSE}\n")
+        src = _view.review_source(f)
+        if src["kind"] == "link" and src["url"].lower().startswith(("http://", "https://")):
+            label = _md_escape(_view.md_inline(src["text"])).replace("]", "\\]")
+            out.append(f"— [{label}](<{src['url'].replace('>', '%3E')}>)\n")
+        else:
+            out.append(f"— {_md_escape(_view.md_inline(src['text']))}\n")
+        return out
+
+    if review is not None:
+        for f in _view.review_findings(review):
+            lines.extend(_finding(f))
+        unchecked = [str(c) for c in _as_list(review.get("could_not_check")) if str(c).strip()]
+        if unchecked:
+            lines.append("\n**What the review could not check:**\n")
+            lines.extend(f"- {_md_escape(_view.md_inline(c))}" for c in unchecked)
+            lines.append("")
+        unread = [str(n) for n in _as_list(review.get("sources_unread")) if str(n).strip()]
+        if unread:
+            lines.append(
+                "\n**Your documents the review did not open:** " + ", ".join(_view.md_inline(n) for n in unread) + "\n"
+            )
+    # Every other review of this run, in full (`_cp_redteam_copy.other_rounds`).
+    for n, doc in others:
+        lines.append(f"\n### Another review of this analysis (review {n})\n")
+        extra = _view.review_findings(doc)
+        if not extra:
+            lines.append("It raised no challenges it could evidence.\n")
+        for f in extra:
+            lines.extend(_finding(f))
+    return "\n".join(lines) + "\n"
+
+
+def _handoff_bypassed(dir_path: str, artifacts: dict[str, Any]) -> list[str]:
+    """Which sub-agent steps this report's artifacts came from have no gated hand-off in this run.
+
+    Built from the artifacts present, never from what SKILL.md says should run: each artifact a
+    sub-agent's hand-off is piped into means that step ran. The blind recall is optional -- required
+    only when the verification recorded a non-empty blind set -- and the landscape enrichment
+    re-dispatch only when its hand-off is on disk.
+
+    Silent when `handoff/<run_id>/` does not exist: every real run creates it at Step 0, so its absence
+    means this is not a run whose transport can be judged, not that nothing was bypassed.
+
+    RESIDUAL: a pass proves a gated hand-off exists and still matches its record -- not that the
+    producer consumed it. See `_handoff_audit.py`.
+    """
+    audit = _handoff_audit()
+    if audit is None:
+        return []
+    run_id = next(
+        (
+            rid
+            for name in REQUIRED_ARTIFACTS
+            if isinstance(artifacts.get(name), dict)
+            and isinstance(rid := _as_dict(artifacts[name].get("metadata")).get("run_id"), str)
+            and rid
+        ),
+        None,
+    )
+    if not run_id:
+        return []
+    run_dir = os.path.join(dir_path, "handoff", run_id)
+    if not os.path.isdir(run_dir):
+        return []
+    requirements: list[tuple[str, list[str]]] = []
+    verification = artifacts.get("competitor_verification.json")
+    if isinstance(verification, dict):
+        requirements.append(("the challenge to the competitor list", ["competitor_verification_output.json"]))
+        blind = _as_dict(verification.get("recall_gaps")).get("blind_set_size")
+        if isinstance(blind, int) and blind > 0:
+            requirements.append(("the independent recall of competitors", ["competitor_recall_output.json"]))
+    if isinstance(artifacts.get("landscape.json"), dict):
+        requirements.append(("the competitor research", ["landscape_research_output.json"]))
+    if os.path.isfile(os.path.join(run_dir, _ENRICHMENT_HANDOFF)):
+        requirements.append(("the research on the competitors you added", [_ENRICHMENT_HANDOFF]))
+    if isinstance(artifacts.get("startup_research.json"), dict):
+        requirements.append(("the research on your company's public record", ["startup_research_output.json"]))
+    if isinstance(artifacts.get("moat_scores.json"), dict):
+        requirements.append(("the moat scoring", ["moat_scoring_output.json"]))
+    if isinstance(artifacts.get("positioning_scores.json"), dict):
+        requirements.append(("the positioning scoring", ["positioning_scoring_output.json"]))
+    if isinstance(artifacts.get("checklist.json"), dict):
+        requirements.append(("the quality checklist", ["checklist_output.json"]))
+    if isinstance(artifacts.get("redteam.json"), dict):
+        requirements.append(("the outside review", ["redteam_output.json"]))
+    labels: list[str] = audit.bypassed(run_dir, requirements)
+    return labels
+
+
 def _founder_text_policy() -> Any:
     """Import the fleet's shared founder-text policy from `founder-skills/scripts/`.
 
@@ -202,31 +443,20 @@ def _founder_text_policy() -> Any:
         return None
 
 
-def _competitor_names(landscape: dict[str, Any] | None) -> dict[str, str]:
-    """Map competitor slug -> display name from landscape.json.
+def _competitor_names(
+    landscape: dict[str, Any] | None, landscape_draft: dict[str, Any] | None = None
+) -> dict[str, str]:
+    """Map competitor slug -> display name for report.md, made inert for markdown.
 
-    Used so a rendered surface never shows a slug. Returns {} when the landscape is absent or
-    unusable — callers fall back to the slug, which is worse but never wrong.
+    The one choke point for names in this file: every table, sentence, warning and coaching line
+    compose writes takes its names from here (see `_view.md_inline`).
     """
-    out: dict[str, str] = {}
-    if not isinstance(landscape, dict):
-        return out
-    for comp in _as_list(landscape.get("competitors")):
-        comp = _as_dict(comp)
-        slug = comp.get("slug")
-        name = comp.get("name")
-        if isinstance(slug, str) and slug and isinstance(name, str) and name.strip():
-            out[slug] = name.strip()
-    return out
+    return _view.md_names(_view.competitor_names(landscape, landscape_draft))
 
 
 def _display_name(slug: str, name_by_slug: dict[str, str] | None) -> str:
     """Render a competitor's display name; fall back to the slug when unknown."""
-    if slug == "_startup":
-        return "This company"
-    if name_by_slug:
-        return name_by_slug.get(slug, slug)
-    return slug
+    return _view.display_name(slug, name_by_slug)
 
 
 def _humanize(value: str) -> str:
@@ -253,6 +483,7 @@ def _humanize(value: str) -> str:
         "not_applicable": "N/A",
         "holds": "Holds",
         "partially_holds": "Partially holds",
+        "unproven": "Unproven",
         "does_not_hold": "Does not hold",
         "genuine": "Genuine competitor",
         "not_a_competitor": "Not a competitor",
@@ -331,10 +562,17 @@ def _md_escape(text: str) -> str:
 
 
 def _truncate_evidence(text: str, max_len: int = 120) -> str:
-    """Truncate long evidence strings for table cells."""
+    """Truncate long evidence strings for table cells, at a word boundary.
+
+    A plain character cut ended cells mid-token ("…$500K-$1.4M+ (newer G2 600 model ~$1.4M) plus"
+    was fine; "…but th…" was not), which reads as a rendering bug.
+    """
     if not text or len(text) <= max_len:
         return text
-    return text[:max_len].rstrip() + "…"
+    cut = text[:max_len]
+    if " " in cut and not text[max_len].isspace():
+        cut = cut.rsplit(" ", 1)[0]
+    return cut.rstrip(" ,;:—-") + "…"
 
 
 def _warn(code: str, message: str, founder_message: str | None = None) -> dict[str, Any]:
@@ -471,52 +709,23 @@ def _normalize_positioning(positioning: dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _count_founder_overrides(positioning: dict[str, Any]) -> int:
-    """Count evidence_source == 'founder_override' across positioning coordinates."""
-    count = 0
-    for view in _as_list(positioning.get("views")):
-        for point in _as_list(_as_dict(view).get("points")):
-            p = _as_dict(point)
-            if p.get("x_evidence_source") == "founder_override":
-                count += 1
-            if p.get("y_evidence_source") == "founder_override":
-                count += 1
-    return count
+def _confirmed_override_count(artifacts: dict[str, dict[str, Any] | None]) -> int:
+    """Founder overrides that changed a scored value: coordinates plus moat ratings.
 
-
-def _count_moat_founder_overrides(
-    moat_scores: dict[str, Any] | None,
-    positioning: dict[str, Any] | None,
-) -> int:
-    """Count evidence_source == 'founder_override' among moat ratings.
-
-    Counts the UNION of two sources, deduplicated by (slug, moat id).
-
-    moat_scores.json is the authoritative moat artifact: a founder moat
-    override is re-piped through score_moats.py and lands there.
-    positioning.json's moat_assessments block is a superseded draft that is
-    never merged back, but an override may still have been recorded only
-    there. Preferring one source would silently drop the override recorded
-    in the other; counting both without a key would double-count the single
-    founder decision that appears in both. The (slug, id) key does neither.
+    The `founder_override` stamp alone is model-written, and was measured on a first-pass rating
+    the founder never saw. An override counts only where the value differs from the scorer's first
+    copy of this run (`_cp_view.confirmed_*_overrides`). positioning.json's draft moat block is
+    not read: it is superseded by moat_scores.json and has no first copy to compare against.
     """
-    seen: set[tuple[str, str]] = set()
 
-    def _collect(companies: dict[str, Any]) -> None:
-        for slug, company_data in companies.items():
-            for idx, moat in enumerate(_as_list(_as_dict(company_data).get("moats"))):
-                m = _as_dict(moat)
-                if m.get("evidence_source") != "founder_override":
-                    continue
-                moat_id = m.get("id")
-                key = moat_id if isinstance(moat_id, str) and moat_id.strip() else f"#{idx}"
-                seen.add((slug, key))
+    def _safe(name: str) -> dict[str, Any] | None:
+        data = artifacts.get(name)
+        return data if _usable(data) else None
 
-    if _usable(moat_scores):
-        _collect(_as_dict(moat_scores.get("companies")))
-    if _usable(positioning):
-        _collect(_as_dict(_as_dict(positioning).get("moat_assessments")))
-    return len(seen)
+    positioning = _safe("positioning.json")
+    coords = _view.confirmed_coordinate_overrides(positioning, _safe(_view.FIRST_POSITIONING_SCORES))
+    moats = _view.confirmed_moat_overrides(_safe("moat_scores.json"), _safe(_view.FIRST_MOAT_SCORES))
+    return len(coords) + len(moats)
 
 
 # score_positioning.py's _score_view() passes each view's input `points` straight
@@ -538,37 +747,6 @@ _POINT_MERGE_TOLERANCE = 0.01
 # what it is guarding rather than testing a bare -1. Both sides are documented in
 # references/artifact-schemas.md — a consumer that does not know the convention renders `Rank -1 of 0`.
 _NOT_RANKABLE_RANK = -1
-
-# ONE banding contract for `overall_differentiation`, because there were three.
-#
-# The headline label used these four tiers; Key Findings used three (no 25 boundary); and the summary
-# paragraph gated its top tier on defensibility as well, directly beneath a comment asserting that the
-# label and the paragraph never disagree. A report could call one score "Strong — clearly
-# differentiated" and "moderate differentiation" two lines apart.
-#
-# The 25 boundary is KEPT rather than dropped: `gate3_triggers._LOW_DIFFERENTIATION_PCT` is 25.0 and
-# drives the founder-facing Gate 3 prose, with a test pinning it. Dropping it here would desynchronise
-# the delivered report from the gate the founder just answered.
-_DIFFERENTIATION_BANDS: tuple[tuple[float, str], ...] = (
-    (75.0, "strong"),
-    (50.0, "moderate"),
-    (25.0, "weak"),
-    (float("-inf"), "undifferentiated"),
-)
-
-
-def _differentiation_band(score: Any) -> str | None:
-    """The single source of truth for which differentiation tier a score falls in.
-
-    Returns None for a non-numeric score so callers keep their existing "say nothing" behaviour rather
-    than inventing a tier.
-    """
-    if not isinstance(score, (int, float)) or isinstance(score, bool):
-        return None
-    for floor, name in _DIFFERENTIATION_BANDS:
-        if score >= floor:
-            return name
-    return None
 
 
 def _points_by_slug(points: list[Any]) -> dict[str, tuple[float, float]]:
@@ -614,6 +792,9 @@ def validate_artifacts(
         # Optional artifact, and the loop below only inspects artifacts that are present, so a run
         # that legitimately skipped verification gains no failure mode.
         "competitor_verification.json": "verify_competitors",
+        "startup_research.json": "validate_startup_research",
+        "redteam.json": "cp_red_team",
+        "red_team_skip.json": "record_red_team_skip",
         # The three artifacts the MAIN THREAD authors. Until `persist_agent_artifact.py`
         # existed they had no producer to stamp them, so they were the exact complement of
         # this map -- the enforcement was built, high-severity, and structurally blind to
@@ -724,8 +905,16 @@ def validate_artifacts(
             )
 
     # 2. STALE_ARTIFACT — run_id consistency
+    #
+    # Not the review or its skip record: a run writes one of the two, so the other is routinely an
+    # earlier run's, left in place because Cowork refuses the delete. Flagged here it would be high
+    # with a remedy ("re-run") that never rewrites it, stopping Step 7's --strict pass on a file the
+    # run had no reason to touch. Their parity is decided where the review is resolved: an earlier
+    # run's review or skip is simply not this run's (`_cp_redteam_copy.resolve` / `skip_reason`).
     run_ids: dict[str, str] = {}
     for name in REQUIRED_ARTIFACTS + OPTIONAL_ARTIFACTS:
+        if name in _cp_redteam_copy.RUN_SCOPED:
+            continue
         data = artifacts.get(name)
         if _usable(data):
             rid = _as_dict(data.get("metadata")).get("run_id")
@@ -1034,14 +1223,42 @@ def validate_artifacts(
             warnings.append(_warn("CHECKLIST_ALL_PASS", "All checklist items passed — review for self-grading bias"))
 
     # 10. FOUNDER_OVERRIDE_COUNT
-    coordinate_overrides = _count_founder_overrides(positioning) if _usable(positioning) else 0
-    moat_overrides = _count_moat_founder_overrides(moat_scores, positioning)
-    override_count = coordinate_overrides + moat_overrides
+    # 11. CAP_DISPLACED_DIRECT
+    verification = artifacts.get("competitor_verification.json")
+    verdict_pairs = [
+        (str(_as_dict(v).get("slug") or ""), str(_as_dict(v).get("verdict") or ""))
+        for v in (_as_list(verification.get("verdicts")) if _usable(verification) else [])
+    ]
+    first_landscape = artifacts.get(_view.FIRST_LANDSCAPE)
+    left_out, kept_non = _view.displaced_direct(
+        artifacts.get("landscape.json") if _usable(artifacts.get("landscape.json")) else None,
+        first_landscape if _usable(first_landscape) else None,
+        verdict_pairs,
+    )
+    if left_out:
+        names = _competitor_names(artifacts.get("landscape.json") if _usable(artifacts.get("landscape.json")) else None)
+        out_names = ", ".join(_view.md_inline(name) for _, name in left_out)
+        kept_names = ", ".join(_view.display_name(slug, names) for slug in kept_non)
+        warnings.append(
+            _warn(
+                "CAP_DISPLACED_DIRECT",
+                f"set at {_view.MAX_COMPETITORS}: direct suggestion(s) {[s for s, _ in left_out]} left out while "
+                f"not_a_competitor entries {kept_non} kept a slot",
+                founder_message=(
+                    f"Research found {out_names}, a direct competitor, but the set was full at "
+                    f"{_view.MAX_COMPETITORS} and it was left out, while {kept_names}, judged not to be a "
+                    f"competitor, kept its place. Swapping them would compare you against the right company."
+                ),
+            )
+        )
+
+    override_count = _confirmed_override_count(artifacts)
     if override_count > 0:
         warnings.append(
             _warn(
                 "FOUNDER_OVERRIDE_COUNT",
-                f"{override_count} positioning coordinates or moat ratings have evidence_source='founder_override'",
+                f"{override_count} positioning coordinates or moat ratings were changed at the founder's "
+                f"correction after they were first scored",
             )
         )
 
@@ -1069,6 +1286,7 @@ def _section_executive_summary(
     positioning_scores: dict[str, Any] | None,
     moat_scores: dict[str, Any] | None,
     checklist: dict[str, Any] | None,
+    name_by_slug: dict[str, str] | None = None,
 ) -> str:
     """Executive summary with key metrics."""
     lines = ["## Executive Summary\n"]
@@ -1081,18 +1299,16 @@ def _section_executive_summary(
         lines.append("")
 
     # Key scores
-    diff_score = None
     if positioning_scores is not None and not _is_stub(positioning_scores):
-        diff_score = positioning_scores.get("overall_differentiation")
-        if diff_score is not None:
-            # Add context: rank + gap = score
-            diff_label = {
-                "strong": "Strong — clearly differentiated from the competitive set",
-                "moderate": "Moderate — differentiated but the lead is narrow",
-                "weak": "Weak — positioned close to competitors on key axes",
-                "undifferentiated": "Undifferentiated — clustered with competitors",
-            }.get(_differentiation_band(diff_score) or "", "Undifferentiated — clustered with competitors")
-            lines.append(f"**Overall Differentiation Score:** {diff_score}% ({diff_label})")
+        # Where the startup stands, in words, per map. No differentiation number: it read as a
+        # percentage and mislabelled a startup that led on both axes (see `_cp_view.view_sentence`).
+        # No label prefix: each sentence already names its two axes.
+        stand = [_view.view_sentence(_as_dict(v), name_by_slug) for v in _as_list(positioning_scores.get("views"))]
+        stand = [st for st in stand if st]
+        if stand:
+            lines.append("**Where you stand:**")
+            lines.extend(f"- {st}" for st in stand)
+            lines.append("")
 
     defensibility = None
     if moat_scores is not None and not _is_stub(moat_scores):
@@ -1109,32 +1325,76 @@ def _section_executive_summary(
         if checklist_score is not None:
             lines.append(f"**Analysis Quality Score:** {checklist_score}%")
 
-    # Summary paragraph
-    lines.append("")
-    if diff_score is not None and defensibility is not None:
-        # Banded from `_differentiation_band` so this paragraph cannot disagree with the label above.
-        # The previous version added `and defensibility in ("high","moderate")` to its top arm — under a
-        # comment claiming the two never disagree — so a 90% score with low defensibility was labelled
-        # "Strong" and then described as "moderate differentiation" two lines below. Defensibility is
-        # STATED in the sentence rather than used to demote the differentiation tier: they are two
-        # different findings, and collapsing one into the other is what produced the contradiction.
-        if _differentiation_band(diff_score) == "strong":
-            lines.append(
-                "The startup shows strong competitive differentiation with "
-                f"{defensibility} defensibility. The positioning analysis "
-                "suggests a clear value proposition relative to the competitive set."
-            )
-        elif _differentiation_band(diff_score) == "moderate":
-            lines.append(
-                "The startup demonstrates moderate differentiation in the market. "
-                "Key areas for strengthening competitive position are identified below."
-            )
-        else:
-            lines.append(
-                "The startup's differentiation is limited relative to the current "
-                "competitive set. Strategic repositioning or moat-building may be needed."
-            )
+    return "\n".join(lines) + "\n"
 
+
+def _section_startup_record(first: dict[str, Any] | None, current: dict[str, Any] | None) -> str:
+    """What public records show about the startup: its legal name and its patent publications.
+
+    Rendered from the run's FIRST record (the producer's frozen copy), with each publication's
+    computed status and its source; a later record that disagrees is listed, never substituted.
+    Empty when the research step did not run, so no search is implied.
+    """
+    record = first if first is not None else current
+    if record is None:
+        return ""
+    lines = ["## What Public Records Show\n"]
+    legal = _as_dict(record.get("legal_name"))
+    if legal.get("value"):
+        lines.append(
+            f"**Registered legal name:** {_view.md_inline(str(legal['value']))} "
+            f"(source: {_view.md_inline(str(legal.get('source') or ''))})"
+        )
+    family = _view.FAMILY_WORDS.get(str(record.get("family_status")))
+    if family:
+        lines.append(f"**Patents:** {family}.")
+    lines.append("")
+    rows = _view.publication_rows(record)
+    if rows:
+        lines.append("| Publication | Office | Status | What was read | Source |")
+        lines.append("|-------------|--------|--------|---------------|--------|")
+        for r in rows:
+            cells = [r["number"], r["office"], r["status"], r["read"], r["source"]]
+            lines.append("| " + " | ".join(_md_escape(_view.md_inline(c)) for c in cells) + " |")
+        lines.append("")
+        lines.append(
+            "_Each record above was found by the analysis's web research; check it at its source before relying on it._"
+        )
+        lines.append("")
+    nothing = [str(q) for q in _as_list(record.get("searched_none")) if q]
+    if nothing:
+        lines.append("**Searched, nothing found:** " + "; ".join(_view.md_inline(q) for q in nothing))
+        lines.append("")
+    if first is not None and current is not None:
+        disagreements = _view.record_disagreements(first, current)
+        if disagreements:
+            lines.append("**A later record disagreed:** " + "; ".join(_view.md_inline(d) for d in disagreements))
+            lines.append("")
+    return "\n".join(lines) + "\n"
+
+
+def _section_proof_gap(positioning_scores: dict[str, Any] | None) -> str:
+    """What is shown and what is claimed, for a map that scores the startup's plan."""
+    gap = _view.proof_gap(positioning_scores)
+    if gap is None:
+        return ""
+    lines = ["## What Is Shown and What Is Claimed\n"]
+    lines.append(_view.ASYMMETRY)
+    lines.append("")
+    if gap["availability"]:
+        quote = f' ("{_view.md_inline(gap["availability_quote"])}")' if gap["availability_quote"] else ""
+        lines.append(f"**How far the product has got:** {gap['availability']}{quote}")
+        lines.append("")
+    lines.append("| Map | Axis | Planned position | What backs it |")
+    lines.append("|-----|------|------------------|---------------|")
+    for r in gap["rows"]:
+        cells = [r["map"], r["axis"], r["proof"], r["quote"] or "—"]
+        lines.append("| " + " | ".join(_md_escape(_view.md_inline(c)) for c in cells) + " |")
+    lines.append("")
+    if gap["open_claims"]:
+        lines.append("**Claims not yet settled:**")
+        lines.extend(f"- {_view.md_inline(c)}" for c in gap["open_claims"])
+        lines.append("")
     return "\n".join(lines) + "\n"
 
 
@@ -1161,7 +1421,7 @@ def _section_competitor_landscape(landscape: dict[str, Any] | None) -> str:
     lines.append("|------|----------|---------|---------|---------------|----------------|")
     for c in competitors:
         c = _as_dict(c)
-        name = c.get("name", "?")
+        name = _view.md_inline(str(c.get("name", "?")))
         cat = _humanize(str(c.get("category", "?")))
         rd = _humanize(str(c.get("research_depth", "?")))
         sfc = c.get("sourced_fields_count", "?")
@@ -1190,7 +1450,7 @@ def _section_recent_developments(landscape: dict[str, Any] | None) -> str:
     entries: list[tuple[str, dict[str, Any]]] = []
     for c in _as_list(landscape.get("competitors")):
         c = _as_dict(c)
-        name = str(c.get("name") or c.get("slug") or "?")
+        name = _view.md_inline(str(c.get("name") or c.get("slug") or "?"))
         for dev in _as_list(c.get("recent_developments")):
             dev = _as_dict(dev)
             if dev:
@@ -1287,12 +1547,21 @@ def _section_competitor_verification(
                 f"| {_humanize(str(v.get('confidence', '') or '')) or '—'} | {reasoning or '—'} |"
             )
         lines.append("")
-        kept = [v for v in verdicts if str(v.get("verdict")) == "not_a_competitor"]
-        if kept:
-            names = ", ".join(_display_name(str(v.get("slug", "?")), name_by_slug) for v in kept)
+        retained, removed = _view.challenge_outcome(
+            ((str(v.get("slug") or ""), str(v.get("verdict") or "")) for v in verdicts), landscape
+        )
+        if retained:
+            names = ", ".join(_display_name(slug, name_by_slug) for slug in retained)
             lines.append(
                 f"**Retained despite the challenge:** {names}. This entry is scored and ranked "
                 f"alongside the rest, so read its position with the verdict above in mind."
+            )
+            lines.append("")
+        if removed:
+            names = ", ".join(_display_name(slug, name_by_slug) for slug in removed)
+            lines.append(
+                f"**Removed after the challenge:** {names}. "
+                f"{'It is' if len(removed) == 1 else 'They are'} not part of the scored set."
             )
             lines.append("")
 
@@ -1311,7 +1580,8 @@ def _section_competitor_verification(
         ]
         if unverified:
             names = ", ".join(
-                _display_name(str(c.get("slug", "?")), name_by_slug) or str(c.get("name", "?")) for c in unverified
+                _display_name(str(c.get("slug", "?")), name_by_slug) or _view.md_inline(str(c.get("name", "?")))
+                for c in unverified
             )
             lines.append(
                 f"**Not independently challenged:** {names}. "
@@ -1330,7 +1600,7 @@ def _section_competitor_verification(
         )
         lines.append("")
         for u in unmatched:
-            label = str(u.get("name", u.get("slug", "?")))
+            label = _view.md_inline(str(u.get("name", u.get("slug", "?"))))
             why = str(u.get("why_considered", "") or "").strip()
             if len(why) > 240:
                 why = why[:237].rstrip() + "..."
@@ -1355,6 +1625,8 @@ def _section_competitor_verification(
 def _section_positioning(
     positioning_scores: dict[str, Any] | None,
     positioning: dict[str, Any] | None = None,
+    name_by_slug: dict[str, str] | None = None,
+    startup_name: str | None = None,
 ) -> str:
     """Positioning analysis with per-view details and evidence points table."""
     if positioning_scores is None or _is_stub(positioning_scores):
@@ -1363,9 +1635,6 @@ def _section_positioning(
     lines = ["## Positioning Analysis\n"]
     basis_label = _scoring_basis_label(_resolve_scoring_basis(positioning_scores, positioning))
     lines.append(f"**Scoring Basis:** {basis_label}\n")
-    overall = positioning_scores.get("overall_differentiation")
-    if overall is not None:
-        lines.append(f"**Overall Differentiation:** {overall}%\n")
 
     # Build a lookup: view_id → points list from positioning.json
     pos_views_by_id: dict[str, list[dict[str, Any]]] = {}
@@ -1381,8 +1650,9 @@ def _section_positioning(
         vid_key = str(view.get("view_id", ""))
         # Prefer an explicit human-readable label; fall back to title-casing the id. Real runs use
         # descriptive slug ids, and title-casing a slug leaks it into a founder-facing heading.
-        vid = str(view.get("label") or "").strip() or str(view.get("view_id", "?")).title()
-        lines.append(f"### {vid} View\n")
+        # A label, else "<X axis> vs <Y axis>": title-casing a slug id leaked it into the heading.
+        vid = _view.view_label(view)
+        lines.append(f"### {vid}\n")
         lines.append(f"- **X-Axis:** {view.get('x_axis_name', '?')}")
         lines.append(f"  - Rationale: {view.get('x_axis_rationale', '?')}")
         vanity_x = "Yes — axis may not reveal meaningful differentiation" if view.get("x_axis_vanity_flag") else "No"
@@ -1391,7 +1661,9 @@ def _section_positioning(
         lines.append(f"  - Rationale: {view.get('y_axis_rationale', '?')}")
         vanity_y = "Yes — axis may not reveal meaningful differentiation" if view.get("y_axis_vanity_flag") else "No"
         lines.append(f"  - Vanity axis: {vanity_y}")
-        lines.append(f"- **Differentiation Score:** {view.get('differentiation_score', '?')}%")
+        stand = _view.view_sentence(view, name_by_slug)
+        if stand:
+            lines.append(f"- **Where you stand:** {stand}")
         # `_compute_rank` counts competitors strictly ahead, +1 — so rank `competitor_count + 1`
         # is reachable and means "behind every competitor". Rendering that against
         # `competitor_count` produced the literal nonsense "Y=11 (of 10 competitors)". Report the
@@ -1399,32 +1671,50 @@ def _section_positioning(
         # the convention the moat section uses.
         _ccount = view.get("competitor_count")
         _ranked = f"{_ccount + 1}" if isinstance(_ccount, int) else "?"
-        lines.append(
-            f"- **Startup Rank:** X={view.get('startup_x_rank', '?')}, "
-            f"Y={view.get('startup_y_rank', '?')} "
-            f"(of {_ranked} ranked)"
-        )
+        x_place = _view.axis_place(view.get("startup_x_rank"), view.get("startup_x_tied_with"), name_by_slug)
+        y_place = _view.axis_place(view.get("startup_y_rank"), view.get("startup_y_tied_with"), name_by_slug)
+        lines.append(f"- **Startup Rank:** X={x_place}, Y={y_place} (of {_ranked} ranked)")
         lines.append("")
 
         # Points evidence table (from positioning.json views[].points[])
         points = pos_views_by_id.get(vid_key, [])
         if points:
-            x_name = view.get("x_axis_name", "X")
-            y_name = view.get("y_axis_name", "Y")
+            x_name = _view.short_axis_name(view.get("x_axis_name")) or "X"
+            y_name = _view.short_axis_name(view.get("y_axis_name")) or "Y"
             lines.append(
                 f"| Company | {_md_escape(x_name)} | {_md_escape(y_name)} "
                 f"| {_md_escape(x_name)} evidence | {_md_escape(y_name)} evidence |"
             )
             lines.append("|---------|------|------|------------|------------|")
+            estimated = 0
             for pt in points:
                 pt = _as_dict(pt)
                 slug = pt.get("competitor", "?")
-                x_val = pt.get("x", "?")
-                y_val = pt.get("y", "?")
+                # "~" marks a position the analysis estimated rather than sourced -- a disclosure of
+                # what the scoring pass itself recorded, so a guess never reads as a measurement.
+                x_est = pt.get("x_evidence_source") == "agent_estimate"
+                y_est = pt.get("y_evidence_source") == "agent_estimate"
+                estimated += int(x_est) + int(y_est)
+                x_val = f"~{pt.get('x', '?')}" if x_est else pt.get("x", "?")
+                y_val = f"~{pt.get('y', '?')}" if y_est else pt.get("y", "?")
                 x_ev = _md_escape(_truncate_evidence(str(pt.get("x_evidence", ""))))
                 y_ev = _md_escape(_truncate_evidence(str(pt.get("y_evidence", ""))))
-                lines.append(f"| {_md_escape(slug)} | {x_val} | {y_val} | {x_ev} | {y_ev} |")
+                company = _md_escape(_view.row_name(str(slug), name_by_slug, startup_name))
+                lines.append(f"| {company} | {x_val} | {y_val} | {x_ev} | {y_ev} |")
+                if slug == "_startup" and pt.get("planned_x") is not None and pt.get("planned_y") is not None:
+                    px_ev = _md_escape(_truncate_evidence(str(pt.get("planned_x_evidence", ""))))
+                    py_ev = _md_escape(_truncate_evidence(str(pt.get("planned_y_evidence", ""))))
+                    lines.append(
+                        f"| {company} (if delivered) | {pt.get('planned_x')} | {pt.get('planned_y')} "
+                        f"| {px_ev} | {py_ev} |"
+                    )
             lines.append("")
+            if estimated:
+                lines.append(
+                    f"_~ marks the analysis's own estimate ({estimated} of {2 * len(points)} positions on this map); "
+                    f"unmarked positions cite research or the founder._"
+                )
+                lines.append("")
 
     return "\n".join(lines) + "\n"
 
@@ -1432,6 +1722,8 @@ def _section_positioning(
 def _section_moat_assessment(
     moat_scores: dict[str, Any] | None,
     name_by_slug: dict[str, str] | None = None,
+    first_moat_scores: dict[str, Any] | None = None,
+    startup_name: str | None = None,
 ) -> str:
     """Moat assessment section with evidence, leader context, and per-dimension matrix.
 
@@ -1455,6 +1747,7 @@ def _section_moat_assessment(
         lines.append(f"**Strongest Moat:** {strongest}")
         lines.append("")
 
+        confirmed = _view.confirmed_moat_overrides(moat_scores, first_moat_scores)
         # Moat table for _startup — with evidence text as a bullet under each row
         lines.append("| Moat | Status | Trajectory | Evidence Source |")
         lines.append("|------|--------|------------|----------------|")
@@ -1464,7 +1757,12 @@ def _section_moat_assessment(
             mid = _humanize(str(moat.get("id", "?")))
             status = _humanize(str(moat.get("status", "?")))
             traj = _humanize(str(moat.get("trajectory", "?")))
-            src = _humanize(str(moat.get("evidence_source", "?")))
+            source = str(moat.get("evidence_source", "?"))
+            if source == "founder_override" and ("_startup", str(moat.get("id"))) not in confirmed:
+                # A stamp with no change behind it: say nothing about who set this rating.
+                src = "—"
+            else:
+                src = _humanize(source)
             lines.append(f"| {mid} | {status} | {traj} | {src} |")
             evidence_text = str(moat.get("evidence", "")).strip()
             if evidence_text:
@@ -1486,36 +1784,17 @@ def _section_moat_assessment(
         lines.append("### Startup Ranking by Moat Dimension\n")
         for dim, rank_info in startup_rank.items():
             ri = _as_dict(rank_info)
-            rank_val = ri.get("rank", "?")
-            total_val = ri.get("total", "?")
-            # `score_moats.py` stamps {"rank": -1, "total": 0} when the STARTUP is `not_applicable`
-            # on this dimension — a producer sentinel meaning "not rankable", correct in the artifact
-            # and documented in references/artifact-schemas.md. Rendered verbatim it produced
-            # `Rank -1 of 0 ranked` in delivered reports. Say the thing the sentinel means instead of
-            # dropping the line: `not_applicable` asserts the moat type does not structurally apply
-            # to this business model (references/moat-definitions.md), which is worth telling a
-            # founder. No leader is offered, because there is no comparison to lead.
-            if rank_val == _NOT_RANKABLE_RANK or total_val == 0:
+            # The producer's `{"rank": -1, "total": 0}` sentinel means the startup is `not_applicable`
+            # here; rendered verbatim it produced `Rank -1 of 0 ranked`.
+            if ri.get("rank") == _NOT_RANKABLE_RANK or ri.get("total") == 0:
                 lines.append(f"- **{_humanize(dim)}:** Not applicable to this business model")
                 continue
-            # Identify the leader: competitor with the strongest status in this dimension
-            leader_name: str | None = None
-            leader_status: str | None = None
-            _status_order = {"strong": 0, "moderate": 1, "weak": 2, "absent": 3, "not_applicable": 4}
-            dim_scores = _as_dict(by_dimension.get(dim))
-            for slug in competitor_slugs:
-                s = dim_scores.get(slug, "absent")
-                if leader_name is None or _status_order.get(s, 99) < _status_order.get(leader_status or "absent", 99):
-                    leader_name = slug
-                    leader_status = s
-            leader_note = ""
-            # `not_applicable` sorts last, so it wins only when EVERY competitor is unassessed on this
-            # dimension — "leader: X (N/A)" is not leadership, it is nobody being assessed.
-            if leader_name and leader_status and leader_status != "not_applicable" and rank_val != 1:
-                # Render the competitor's display name, never its slug — a slug in the
-                # deliverable is an internal token the founder has no use for.
-                leader_note = f" — leader: {_display_name(leader_name, name_by_slug)} ({_humanize(leader_status)})"
-            lines.append(f"- **{_humanize(dim)}:** Rank {rank_val} of {total_val} ranked{leader_note}")
+            # Standing, ties and leaders are computed from the scored statuses by `_cp_view`: the
+            # producer's rank gives a tie the better place, so an absent moat read "Rank 1 of 8".
+            standing = _view.moat_standing(_as_dict(by_dimension.get(dim)), competitor_slugs, name_by_slug, _humanize)
+            if standing is None:
+                continue
+            lines.append(f"- **{_humanize(dim)}:** {standing}")
         lines.append("")
 
     # Per-dimension comparison matrix (rows=companies, cols=6 canonical moat dimensions)
@@ -1538,7 +1817,8 @@ def _section_moat_assessment(
     all_slugs = ["_startup"] + competitor_slugs
     if all_slugs and by_dimension:
         lines.append("### Moat Dimension Comparison Matrix\n")
-        header_dims = " | ".join(_humanize(d)[:12] for d in canonical_dims)
+        # Full names: a 12-character cut printed "Network Effe" and "Regulatory B" as headers.
+        header_dims = " | ".join(_humanize(d) for d in canonical_dims)
         lines.append(f"| Company | {header_dims} |")
         lines.append("|---------|" + "|".join(["-------"] * len(canonical_dims)) + "|")
         for slug in all_slugs:
@@ -1547,7 +1827,7 @@ def _section_moat_assessment(
                 dim_map = _as_dict(by_dimension.get(dim))
                 val = dim_map.get(slug, "—")
                 row_data.append(_status_short.get(val, val[:3] if isinstance(val, str) else "—"))
-            display = "_startup_" if slug == "_startup" else slug
+            display = _md_escape(_view.row_name(slug, name_by_slug, startup_name))
             lines.append(f"| {display} | " + " | ".join(row_data) + " |")
         lines.append("")
         lines.append("_Legend: S=Strong, M=Moderate, W=Weak, —=Absent, N/A=Not Applicable_")
@@ -1586,6 +1866,7 @@ def _section_key_findings(
     positioning_scores: dict[str, Any] | None,
     moat_scores: dict[str, Any] | None,
     checklist: dict[str, Any] | None,
+    name_by_slug: dict[str, str] | None = None,
 ) -> str:
     """Script-generated key findings from scoring data."""
     lines = ["## Key Findings\n"]
@@ -1593,49 +1874,38 @@ def _section_key_findings(
 
     # From positioning scores
     if positioning_scores is not None and not _is_stub(positioning_scores):
-        overall = positioning_scores.get("overall_differentiation")
-        band = _differentiation_band(overall)
-        if band is not None:
-            # Same banding as the headline label. This chain previously had only three tiers — no 25
-            # boundary — so a score of 24 and a score of 26 changed the headline and not this line.
-            if band == "strong":
-                findings.append(
-                    f"Strong differentiation ({overall}%) — the startup occupies "
-                    "a distinct position in the competitive landscape."
-                )
-            elif band == "moderate":
-                findings.append(
-                    f"Moderate differentiation ({overall}%) — some positioning overlap exists with competitors."
-                )
-            elif band == "weak":
-                findings.append(
-                    f"Weak differentiation ({overall}%) — the startup sits close to competitors on key axes."
-                )
-            else:
-                findings.append(
-                    f"Limited differentiation ({overall}%) — the startup is "
-                    "closely clustered with competitors on key axes."
-                )
+        # Per map, who is ahead on both axes and who is nearest -- computed, no score (see
+        # `_cp_view.view_verdict`). The banded "Weak differentiation (35%)" line called a startup
+        # that ranked 1st on an axis of every map "close to competitors".
+        for view in _as_list(positioning_scores.get("views")):
+            view = _as_dict(view)
+            verdict = _view.view_verdict(view, name_by_slug)
+            if verdict:
+                findings.append(f"{_view.view_label(view)}: {verdict}")
 
         # Vanity axis findings
         for view in _as_list(positioning_scores.get("views")):
             view = _as_dict(view)
             if view.get("x_axis_vanity_flag") or view.get("y_axis_vanity_flag"):
                 findings.append(
-                    f"Vanity axis detected in {view.get('view_id', '?')} view — "
+                    f"Vanity axis detected in the {_view.view_label(view)} map — "
                     "axis may not reveal meaningful differentiation."
                 )
 
         # Stress-test findings
-        claims = _as_list(positioning_scores.get("differentiation_claims"))
-        holds = sum(1 for c in claims if _as_dict(c).get("verdict") == "holds")
-        partial = sum(1 for c in claims if _as_dict(c).get("verdict") == "partially_holds")
-        fails = sum(1 for c in claims if _as_dict(c).get("verdict") == "does_not_hold")
-        if claims:
-            findings.append(
-                f"Differentiation claims: {holds} hold, {partial} partially hold, "
-                f"{fails} do not hold (of {len(claims)} tested)."
-            )
+        # From the scorer's tally (`_cp_view.claims_tally`), so the parts sum to the total. An
+        # artifact that predates the tally gets the same tally computed here.
+        scored = dict(positioning_scores)
+        if "verdict_counts" not in scored:
+            counts = {v: 0 for v in ("holds", "partially_holds", "does_not_hold", "unproven", "unrecognised")}
+            claims = _as_list(positioning_scores.get("differentiation_claims"))
+            for c in claims:
+                v = _as_dict(c).get("verdict")
+                counts[v if v in counts and v != "unrecognised" else "unrecognised"] += 1
+            scored["verdict_counts"] = {**counts, "total": len(claims)}
+        tally = _view.claims_tally(scored)
+        if tally:
+            findings.append(tally)
 
     # From moat scores
     if moat_scores is not None and not _is_stub(moat_scores):
@@ -1750,6 +2020,10 @@ def _emit_coaching_payload(
     report_path: str,
     insertion_marker: str,
     moat_scores: dict[str, Any] | None = None,
+    positioning_scores: dict[str, Any] | None = None,
+    name_by_slug: dict[str, str] | None = None,
+    startup_research: dict[str, Any] | None = None,
+    outside_review: list[str] | None = None,
 ) -> dict[str, Any]:
     """Build the v0.4.2 coaching_payload for competitive-positioning.
 
@@ -1762,6 +2036,12 @@ def _emit_coaching_payload(
     forbidden to read report.md. Without these numbers it can only invent moat
     claims, and its commentary is appended to the same investor-facing report that
     carries the scored table, so an invented claim lands next to the real one.
+
+    `positioning` and `claim_verdicts` are the same computed sentences the report shows, for the
+    same reason: the coach is asked how to answer "why won't X crush you", and with no map and no
+    stress-test it never mentioned that the pitch's headline claim failed (both baseline runs; one
+    told the founder nothing had raised a serious red flag). Sentences, not numbers, so there is
+    nothing to convert.
     """
     summary = _as_dict(checklist.get("summary"))
     startup = _as_dict(_as_dict(_as_dict(moat_scores).get("companies")).get("_startup"))
@@ -1782,6 +2062,16 @@ def _emit_coaching_payload(
     }
     return {
         "defensibility": defensibility,
+        "positioning": _view.map_sentences(positioning_scores, name_by_slug),
+        "claim_verdicts": _view.claim_sentences(positioning_scores),
+        # What public records show about the startup, from the run's first record: the coach quotes
+        # the computed patent status instead of restating the pitch's ("patent-pending" for a
+        # granted family was the measured failure).
+        "startup_record": _view.startup_record_sentences(startup_research),
+        # What the outside review found, in the report's own words: its outcome, then one sentence per
+        # finding, most serious first. The coach otherwise has no way to know a serious challenge was
+        # raised, and would reassure the founder beside it.
+        "outside_review": list(outside_review or []),
         "schema_version": "v0.4.2-competitive-positioning",
         "summary": {
             "score_pct": summary.get("score_pct"),
@@ -1816,6 +2106,32 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
     artifacts: dict[str, dict[str, Any] | None] = {}
     for name in all_names:
         artifacts[name] = _load_artifact(dir_path, name)
+    # The scorers' first copies of this run, the comparand for a founder override (`_cp_first_copy`).
+    for name in (
+        _view.FIRST_MOAT_SCORES,
+        _view.FIRST_POSITIONING_SCORES,
+        _view.FIRST_LANDSCAPE,
+        _view.FIRST_STARTUP_RESEARCH,
+    ):
+        artifacts[name] = _load_artifact(dir_path, name)
+
+    # The review every reader below sees is its append-only copy, never `redteam.json` as it now stands
+    # (`_cp_redteam_copy`, rules in the shared `_redteam_core`).
+    _rt_shown, _rt_codes, _rt_facts = _cp_redteam_copy.resolve(
+        dir_path,
+        _cp_redteam_copy.primary_run_id(artifacts.get(n) for n in REQUIRED_ARTIFACTS),
+        artifacts.get("redteam.json"),
+        artifacts.get("red_team_skip.json"),
+    )
+    # Unconditionally, not only when this run has copies: `resolve` returns None for an earlier run's
+    # review, and every check below (the hand-off audit, provenance) must key on THIS run's review. The
+    # analysis dir is per company, so a re-run that recorded a skip otherwise inherited the last run's
+    # review and was told the review had bypassed a hand-off it never made.
+    artifacts["redteam.json"] = _rt_shown
+    _rt_run_id = _cp_redteam_copy.primary_run_id(artifacts.get(n) for n in REQUIRED_ARTIFACTS)
+    _rt_skip = _cp_redteam_copy.skip_reason(artifacts.get("red_team_skip.json"), _rt_run_id)
+    _rt_review = _rt_shown if isinstance(_rt_shown, dict) and _rt_shown is not _CORRUPT else None
+    _rt_refuse(dir_path, _rt_run_id, _rt_review, artifacts.get("red_team_skip.json"), _rt_skip)
 
     # Normalize positioning.json before validation (best-effort)
     positioning_raw = artifacts.get("positioning.json")
@@ -1826,6 +2142,12 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
 
     # Run validation
     warnings = validate_artifacts(artifacts, dir_path)
+    _bypassed_steps = _handoff_bypassed(dir_path, artifacts)
+    if _bypassed_steps:
+        _msg = _handoff_audit().founder_message(_bypassed_steps)
+        warnings.append(_warn("HANDOFF_BYPASSED", _msg, _msg))
+    # `message` carries the remedy for the run; the founder reads what happened.
+    warnings.extend(_warn(code, message, _REVIEW_FOUNDER_MESSAGES.get(code)) for code, message in _rt_codes)
 
     # Apply accepted_warnings from positioning.json (medium-severity only)
     positioning = artifacts.get("positioning.json")
@@ -1848,7 +2170,13 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
                     file=sys.stderr,
                 )
                 continue
-            if code in WARNING_SEVERITY and WARNING_SEVERITY[code] in ACCEPTIBLE_SEVERITIES:
+            if code in _UNACCEPTABLE_MEDIUM:
+                print(
+                    f"Warning: cannot accept '{code}' -- it discloses how this run was carried out and "
+                    "stays in the report; ignored",
+                    file=sys.stderr,
+                )
+            elif code in WARNING_SEVERITY and WARNING_SEVERITY[code] in ACCEPTIBLE_SEVERITIES:
                 acceptances.append({"code": code, "reason": reason, "match": match_str})
             elif code in WARNING_SEVERITY:
                 print(
@@ -1880,17 +2208,47 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
     # first. The Warnings section must be spliced in only after the marker
     # prescan has had a chance to append MARKER_COLLISION, otherwise that
     # warning would never reach the rendered ## Warnings list.
-    name_by_slug = _competitor_names(landscape)
+    name_by_slug = _competitor_names(landscape, _render_safe(artifacts.get("landscape_draft.json")))
+    startup_name = _view.md_inline(str(_as_dict(product_profile).get("company_name") or "").strip()) or None
+    # The verdict: the report's first paragraph, and what the pages and cp_closing_message.py carry, word
+    # for word. Built once, here, by `_cp_view.verdict`; the pages read it from report.json.
+    research_record = next(
+        (
+            a
+            for a in (artifacts.get(_view.FIRST_STARTUP_RESEARCH), artifacts.get("startup_research.json"))
+            if _usable(a)
+        ),
+        None,
+    )
+    verdict_text = _view.verdict(
+        _as_dict(positioning_scores) if _usable(positioning_scores) else None,
+        _as_dict(moat_scores) if _usable(moat_scores) else None,
+        research_record,
+        name_by_slug,
+        _rt_review,
+        _rt_skip,
+    )
     sections = [
         _section_title(product_profile, landscape),
-        _section_executive_summary(product_profile, positioning_scores, moat_scores, checklist),
+        verdict_text + "\n" if verdict_text else "",
+        _section_executive_summary(product_profile, positioning_scores, moat_scores, checklist, name_by_slug),
+        _section_outside_review(
+            _rt_review, _rt_skip, _cp_redteam_copy.other_rounds(dir_path, _rt_run_id, _rt_facts.get("round_shown"))
+        ),
+        _section_startup_record(
+            _render_safe(artifacts.get(_view.FIRST_STARTUP_RESEARCH)),
+            _render_safe(artifacts.get("startup_research.json")),
+        ),
         _section_competitor_landscape(landscape),
         _section_recent_developments(landscape),
         _section_competitor_verification(competitor_verification, name_by_slug, landscape),
-        _section_positioning(positioning_scores, positioning_safe),
-        _section_moat_assessment(moat_scores, name_by_slug),
+        _section_positioning(positioning_scores, positioning_safe, name_by_slug, startup_name),
+        _section_proof_gap(positioning_scores),
+        _section_moat_assessment(
+            moat_scores, name_by_slug, _render_safe(artifacts.get(_view.FIRST_MOAT_SCORES)), startup_name
+        ),
         _section_stress_test(positioning_scores),
-        _section_key_findings(positioning_scores, moat_scores, checklist),
+        _section_key_findings(positioning_scores, moat_scores, checklist, name_by_slug),
     ]
 
     report_markdown = "\n".join(s for s in sections if s)
@@ -1934,12 +2292,21 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
     # It runs HERE, on the assembled markdown, rather than in CI over fixtures: a fixture is
     # schema-correct by construction, so a fixture-only scan answers "does the renderer behave on good
     # input" — not the question any measured defect lived in. This is the string the founder reads.
+    _quotes: list[str] = []
+
+    def _lift(m: re.Match[str]) -> str:
+        _quotes.append(m.group(1))
+        return f"\ue002{len(_quotes) - 1}\ue003"
+
+    report_markdown = _QUOTE_RE.sub(_lift, report_markdown)
     _ft = _founder_text_policy()
     if _ft is not None:
         report_markdown = _ft.substitute(report_markdown)
         # Our own warning codes are kept: compose renders them in small print beside a humanized
         # label (the md_term convention), which is deliberate. A code leaking anywhere else is
         # caught by the skill's own gate, not by widening this scan into a false positive.
+        # The same pass over the verdict alone, so the pages and the hand-over match report.md.
+        verdict_text = _ft.substitute(verdict_text) if verdict_text else verdict_text
         found = _ft.scan(report_markdown, extra_keep=frozenset(WARNING_SEVERITY))
         for token in found["enums"]:
             warnings.append(
@@ -1956,6 +2323,9 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
                     f"the report names the internal file '{name}' — drop the reference rather than renaming it",
                 )
             )
+
+    # The review's quotes go back exactly as the source wrote them (see _QUOTE_OPEN).
+    report_markdown = _QUOTE_SLOT_RE.sub(lambda m: _quotes[int(m.group(1))].replace("\n", "\n> "), report_markdown)
 
     report_markdown += (
         f"\n\n{marker}\n\n---\n"
@@ -1990,10 +2360,7 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
     if assessment_mode == "unknown" and landscape is not None and not _is_stub(landscape):
         assessment_mode = landscape.get("assessment_mode", "unknown")
 
-    founder_override_count = 0
-    if positioning_safe is not None and not _is_stub(positioning_safe):
-        founder_override_count = _count_founder_overrides(positioning_safe)
-    founder_override_count += _count_moat_founder_overrides(moat_scores, positioning_safe)
+    founder_override_count = _confirmed_override_count(artifacts)
 
     # Extract run_id from first usable artifact
     run_id = ""
@@ -2058,10 +2425,22 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
         report_path=resolved_report_path,
         insertion_marker=marker,
         moat_scores=_as_dict(moat_scores) if _usable(moat_scores) else None,
+        positioning_scores=_as_dict(positioning_scores) if _usable(positioning_scores) else None,
+        name_by_slug=name_by_slug,
+        startup_research=next(
+            (
+                a
+                for a in (artifacts.get(_view.FIRST_STARTUP_RESEARCH), artifacts.get("startup_research.json"))
+                if _usable(a)
+            ),
+            None,
+        ),
+        outside_review=_view.review_sentences(_rt_review, _rt_skip),
     )
 
     return {
         "report_markdown": report_markdown,
+        "verdict": verdict_text,
         "metadata": {
             "run_id": run_id,
             "company_name": company_name,

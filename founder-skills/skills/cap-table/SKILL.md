@@ -122,7 +122,8 @@ All scripts live at `${CLAUDE_PLUGIN_ROOT}/skills/cap-table/scripts/`:
 - **`safe_conversion.py`** — SAFE conversion math (cap-only, cap-plus-discount, discount-only, uncapped-MFN). Binds rule-pack inputs per the §5.1 binding table (see design doc).
 - **`note_conversion.py`** — Convertible-note conversion math (cap, discount, both, repay, extend, counsel-review, override branches). Binds rule-pack inputs per the §5.2 binding table.
 - **`priced_round.py`** — Priced-round math (pre-money, new-money, pool top-up, anti-dilution). Coupled with SAFE/note conversion via the solver.
-- **`option_pool.py`** — Option-pool top-up math (rule pack `option_pool.pre_money_topup`). Uses `target_basis` denominator.
+- **`option_pool.py`** — Pool top-up by `target_basis` (`option_pool.pre_money_topup`, `option_pool.increase_sized_target`).
+- **`pool_clause.py`** — Checks a quoted pool sentence is really in the uploaded document (exact or normalized only, never fuzzy), so it may be shown inside the *Pool basis* question. Evidence only; the founder's answer decides.
 - **`anti_dilution.py`** — BBWA / full-ratchet anti-dilution (Gotcha #2 enforced here).
 - **`flip_scenario.py`** — Israeli ↔ Delaware flip mechanics (share-for-share 1:1 only — see Gotcha #7).
 - **`counsel_packet.py`** — Extracts counsel-review items from `rule_audit.json` into a standalone counsel-handoff packet.
@@ -374,8 +375,15 @@ mkdir -p "$REVIEW_DIR"
 # the hand-off gate when a dispatch fails to write.
 HANDOFF_DIR="$REVIEW_DIR/handoff/$RUN_ID"
 mkdir -p "$HANDOFF_DIR"
-# Sub-agents address the SAME dir by a different path (their file tools are rooted at the outputs
-# mount in Cowork). Resolve the FULL agent-namespace path via the script — never hand-splice the
+# FILE-TOOL PATHS (Cowork only; skip when ARTIFACTS_ROOT does not start with /sessions/). File tools
+# refuse a RELATIVE path and cannot open /sessions/... paths. FIRST, with the Write tool, write
+# "<HOST_OUTPUTS>/artifacts/.host-outputs-probe" containing exactly <HOST_OUTPUTS>: the file-tool path
+# your context maps to /sessions/<id>/mnt/outputs/ (the "Paths in bash differ from what file tools
+# see" list; no such list -> that /sessions/.../mnt/outputs path itself). Then prove it (quoted; it may
+# contain spaces). Exit 0 = proven. 2/4/5 -> fix per its JSON, retry once, then STOP:
+python3 "$SHARED_SCRIPTS/resolve_artifacts_root.py" --set-host-outputs-dir "<HOST_OUTPUTS>"
+# Sub-agents address the SAME dir by a different path (the absolute file-tool path
+# proven above). Resolve the FULL agent-namespace path via the script — never hand-splice the
 # printed root with a literal skill-name/slug/run-id string yourself (that string-splicing is
 # exactly the non-determinism the resolver script exists to remove):
 python3 "$SHARED_SCRIPTS/resolve_artifacts_root.py" --handoff-dir-agent \
@@ -397,8 +405,8 @@ model exactly once (into the Write call) — never re-type sub-agent JSON into a
 
 **`$HANDOFF_AGENT` and `$HANDOFF_DIR` name the SAME directory by two different paths — they are not
 interchangeable.** `$HANDOFF_DIR` is the absolute VM path your shell uses (`python3`,
-`check_handoff.py`, producer pipes). `$HANDOFF_AGENT` is the relative path a sub-agent's file tools
-resolve against the outputs mount, and it is the ONLY one that goes in a dispatch prompt. Putting
+`check_handoff.py`, producer pipes). `$HANDOFF_AGENT` is the absolute file-tool path of the same
+directory (proven at Step 0), and it is the ONLY one that goes in a dispatch prompt. Putting
 `$HANDOFF_DIR` in an `OUTPUT_PATH` line hands the sub-agent an absolute `/sessions/...` path the
 host-loop gate denies; putting `$HANDOFF_AGENT` in a shell command resolves it against the wrong cwd.
 Rule of thumb: **agent namespace in prompts, shell namespace in bash.**
@@ -410,7 +418,8 @@ reading `output_path` out of it to pass to `check_handoff.py --agent-path` is ex
 violation. If it were forbidden, the hand-off could not be gated at all.
 
 **Path idiom for dispatch prompts (host-loop path gate):** `OUTPUT_PATH` and any under-outputs artifact
-READ path a sub-agent is given are **relative to the sub-agent's file-tool cwd** (the outputs mount) —
+READ path a sub-agent is given are **absolute file-tool paths**, never relative ones (a relative
+file-tool path is refused) —
 built from the `resolve_artifacts_root.py --agent` namespace (`$HANDOFF_AGENT`, or the equivalent
 agent-namespace path for any other under-outputs artifact a dispatch prompt reads). Never hand a
 sub-agent an absolute `/sessions/...` path for a file-tool Read/Write — the host-loop path gate denies
@@ -439,7 +448,8 @@ as omitting it originally:*
 - **Exit 5** (receipt echoes a different path) → **repair-dispatch** with the exact expected OUTPUT_PATH.
 - **Exit 6** (receipt unparseable / no `output_path` key) → **redo-dispatch** with "return ONLY the receipt JSON — no fences, no prose."
 - **Validator schema rejection** (the pipe fails next) → **repair-dispatch** with the validator's stderr verbatim. (Evidence-verifier rejections keep their OWN lane-specific protocol — `retry_hint` re-dispatch — which is a content correction, not a transport correction, and does not consume the transport retry budget.)
-- **Exit 8** (`path_namespace_mismatch`) → the sub-agent **complied**; the agent-namespace prefix was wrong. Its relative `OUTPUT_PATH` resolved against the outputs mount instead of the session root, so the file landed at the doubled path reported in `found_at`. Do NOT treat this as a fabricated receipt (that is exit 3), and do NOT read the hand-off from `found_at` — it is diagnostic only. Re-run `resolve_artifacts_root.py --agent`, rebuild the agent-namespace prefix from the printed value, and re-dispatch. Counts against the same 2-dispatch retry budget.
+- **Exit 8** (`path_namespace_mismatch`) → the sub-agent **complied**; the agent-namespace prefix was wrong. Its relative `OUTPUT_PATH` resolved against the outputs mount instead of the session root, so the file landed at the doubled path reported in `found_at`. Only a RELATIVE agent path can do this, so the Step 0 proof did not run: run it. Do NOT treat this as a fabricated receipt (that is exit 3), and do NOT read the hand-off from `found_at` — it is diagnostic only. Re-run `resolve_artifacts_root.py --agent`, rebuild the agent-namespace prefix from the printed value, and re-dispatch. Counts against the same 2-dispatch retry budget.
+- **Blocked `write_refused`** (the sub-agent's Write was refused — its path was relative or a `/sessions/...` path) → run the Step 0 proof if it did not run, rebuild the agent-namespace paths from the resolver, re-dispatch ONCE. A second `write_refused` STOPs with both details quoted.
 - **Any other exit** (script crash etc.) → STOP with the stderr.
 - **After ANY corrective dispatch, resume from `check_handoff.py`** — never pipe unchecked.
 
@@ -453,8 +463,9 @@ ONE input-fix re-dispatch per step; a second blocked return STOPs with both reas
 agent's receipt claims `complete` with the correctly echoed path, treat the host's filesystem
 topology as hand-off-incompatible: fall back to message-channel transport for the REST of this run
 (sub-agent returns full JSON in its final message; apply the tolerant JSON extraction protocol;
-stage to `$STAGING_DIR/<step>_input.json`; same validator pipe), and note the fallback in your
-final summary.
+stage to `$STAGING_DIR/<step>_input.json`; same validator pipe), and tell the founder in one plain sentence that this run's working files were passed
+directly instead of through `outputs/`, so its audit trail is incomplete (the results are unaffected).
+A refused write is NOT this case: it returns `write_refused` (above).
 
 Retries overwrite the same OUTPUT_PATH (the mount is write-allowed / delete-denied — never `rm`
 under `$REVIEW_DIR`). Hand-off files are not canonical artifacts: validators consume them only via
@@ -793,10 +804,9 @@ python3 "$SCRIPTS/quick_assess.py" \
 
 **Convertible notes need a conversion date.** If the founder has notes, pass `--event-date YYYY-MM-DD` (the date the notes convert). If you omit it when notes are present, fast-assess defaults to today and discloses the assumption (an Assumptions line in the report + a sentinel `assumptions[]` entry) — the math producer itself never assumes a date.
 
-**Never assume a pool top-up — and never assume its basis.** Pass `--target-pool-percent X --target-basis <pre_money|post_money>` ONLY when the founder stated a pool target (or confirmed one when you asked), and pass the basis they actually stated — `--target-basis` is NOT always `post_money`; a term sheet just as often sizes the pool pre-money. If the founder gave a percent without saying which denominator, add it to the same batched `AskUserQuestion` below rather than defaulting silently. Otherwise run WITHOUT those flags — the report then carries an explicit "No pool top-up modeled" note, and you offer the 10% what-if as a follow-up re-run. A silently assumed pool target — or a silently assumed basis — materially changes the founder's headline ownership; both are the founder's negotiation variables, not yours.
+**Never assume a pool top-up — and never assume its basis.** Pass `--target-pool-percent X --target-basis <pre_money|post_money|post_money_increase>` ONLY when the founder stated a pool target (or confirmed one when you asked), and pass the basis they actually stated — `--target-basis` is NOT always `post_money`; a term sheet just as often sizes the pool pre-money. If the founder gave a percent without saying which denominator, add it to the same batched `AskUserQuestion` below rather than defaulting silently. Otherwise run WITHOUT those flags — the report then carries an explicit "No pool top-up modeled" note, and you offer the 10% what-if as a follow-up re-run. A silently assumed pool target — or a silently assumed basis — materially changes the founder's headline ownership; both are the founder's negotiation variables, not yours.
 
-Inputs are built from the founder's conversational description via `AskUserQuestion` (Lane 4 only — fast-assess does NOT invoke Lane-1/2/3 extractors). **Do not skip the question gate, and do not split it:** batch everything still missing into ONE `AskUserQuestion` call before running — typically jurisdiction structure (Gate Catalog row *Jurisdiction structure*, if not obvious), IIA/OCS grant history (Gate Catalog row *IIA / OCS grants*, Israeli companies), and pool-target intent. **The catalog's *Pool top-up intent* row covers whether/how-much (post-money only, 4 labels — pre-money and post-money together would exceed the tool's 4-option max); it does NOT cover basis.** If the founder picks a top-up amount, ask basis as a second question in the SAME batched call rather than defaulting silently — the paragraph above states why a silently assumed basis materially changes their headline ownership.
-Options: `Pre-money` / `Post-money` / `Not sure — use post-money`
+Inputs are built from the founder's conversational description via `AskUserQuestion` (Lane 4 only — fast-assess does NOT invoke Lane-1/2/3 extractors). **Do not skip the question gate, and do not split it:** batch everything still missing into ONE `AskUserQuestion` call before running — typically jurisdiction structure (Gate Catalog row *Jurisdiction structure*, if not obvious), IIA/OCS grant history (Gate Catalog row *IIA / OCS grants*, Israeli companies), and pool-target intent. **The catalog's *Pool top-up intent* row covers whether/how-much; it does NOT cover basis.** When a pool target is being modelled, ask what it measures with the *Pool basis* row in the SAME batched call, under that row's rule — never default silently; the paragraph above states why. Everything in Step 5's **Pool basis** paragraph applies here too; the flags are `--custom-basis-stated-by-founder` and `--excluding-basis-modeled-as`.
 
 If the founder's message already supplied everything, ask nothing and run. When you present the result, state in one line any flag choices that encode an assumption (e.g. "modeled with no pool top-up" / "modeled with the 10% post-money pool you mentioned"). The script writes:
 
@@ -850,6 +860,8 @@ Ask the founder via `AskUserQuestion` which scenarios to model (1–4). Common p
 
 - **Standalone SAFE conversion** (cap-implied math; no priced round): `{type: "safe_conversion", parameters: {}}`
 - **Series A priced round**: `{type: "priced_round", parameters: {pre_money, new_money, target_pool_percent, target_basis}}`
+
+**Pool basis — from the founder, never defaulted.** `target_basis` is the basis the founder stated, or the Gate Catalog's *Pool basis* answer (`post_money` / `post_money_increase` / `pre_money`); on `Something else / not sure — ask counsel`, omit `target_pool_percent` and say no top-up was modelled and why. Either post-money reading beside existing unallocated options is always disclosed, and the full review shows the other reading's figures: the answer chooses which reading is modelled, never whether it is disclosed. If the founder asked not to be asked where this row would have asked: with post-money stated, use `post_money`; with no basis stated, omit `target_basis` (the assumed basis is disclosed) — never write one in. If an uploaded document states the pool sentence, first run `python3 "$SCRIPTS/pool_clause.py" --doc <file> --quote "<the whole sentence, verbatim>"`, and quote it in the question body only when it returns `verified: true`; otherwise ask plainly. It is evidence, never the answer. **On `E_POOL_BASIS_NOT_MODELED`**, ask the remedy's question and pass the founder's answer as `custom_basis_stated_by_founder`; **on `E_POOL_BASIS_EXCLUDING_NOT_MODELED`**, ask whether to see the figures that count the conversion shares and pass `excluding_basis_modeled_as: "post_money_by_founder_choice"` only on a yes. Never change `target_basis` to clear either block.
 - **Convertible note conversion at financing**: `{type: "note_conversion", parameters: {transaction_event_date, priced_round_new_money, qualified_financing_price}}`
 - **Israeli ↔ Delaware flip** (only when mode=flip_focused or explicitly requested): `{type: "flip", parameters: {iia_grants_in_history, section_102_grants_outstanding}}`. `section_102_grants_outstanding` is derived from `cap_state.outstanding_options` (count of grants whose `plan_type` starts with `section_102`), so on a flip where `option_grants[]` is empty but the pool has issued options, first collect per-grant tax-route data (per holder: `plan_type` + `grant_date`; strike optional) via one batched `AskUserQuestion`, shaped per the Gate Catalog's *§102 per-grant tax route* row — never pass `0` merely because grants weren't captured (an empty grant list otherwise reports zero §102 exposure).
 
@@ -883,7 +895,8 @@ Ask the founder via `AskUserQuestion` which scenarios to model (1–4). Common p
 | **Note maturity default** | S3 | "If the note reaches maturity before a qualified financing, what happens?" | `Convert at cap`, `Repay principal`, `Extend maturity`, `Counsel review / unclear` | — |
 | **Qualified-financing threshold** | S3 | "What dollar amount triggers the note's automatic conversion (its 'qualified financing' threshold)?" | `Same as this round's total new money`, `A different specific amount — I'll state it`, `I'd need to check the note text` | The dollar figure is deal-specific and cannot be a fixed label; these brackets cover the real cases and the tool's built-in **Other** carries the exact amount. Do NOT invent a "market-standard" figure as a fourth option — none is cited in this skill's references. |
 | **Existing-review routing** | S0 | "I found an existing cap-table review for [Company]. Use it, or start fresh?" | `Use existing review`, `Start fresh` | — |
-| **Pool top-up intent** | fast-assess / priced round | "Are you planning to top up your option pool as part of this round?" | `No top-up planned`, `Top up to 10% post-money`, `Top up to 15% post-money`, `Not sure yet` | — |
+| **Pool top-up intent** | fast-assess / priced round | "Are you planning to top up your option pool as part of this round?" | `No top-up planned`, `Top up to 10%`, `Top up to 15%`, `Not sure yet` | Basis-free on purpose: the *Pool basis* row asks what the percentage measures. |
+| **Pool basis** | a pool target is modelled and either no basis was stated, or post-money was stated and the company already has unallocated options | "What does your pool target percentage measure?" | `The pool available for new grants after the round` (→ `post_money`), `Only the new options added in this round` (→ `post_money_increase`), `Measured against the share count before the round` (→ `pre_money`), `Something else / not sure — ask counsel` (→ no pool target) | Percent-free, so it batches with *Pool top-up intent*; put a known percent in the question body. Keep this ORDER — an unanswered question takes option 1; never asked, a stated basis stands, else pre-money, disclosed. With unallocated options the first two differ; with none they coincide, so "post-money" alone then needs no question. Stated pre-money asks nothing. See Step 5's **Pool basis** paragraph. |
 | **Engagement mode** | S2 | "Is this a flip-focused engagement (Israeli → Delaware), or a standard cap-table modeling engagement?" | `Standard cap-table modeling`, `Flip-focused (Israeli → Delaware)` | → `standard \| flip_focused`. Added here because Step 2's mode question was the sole spec for this gate with no catalog row to anchor it; that step now names this row and carries the enum mapping only. |
 | **Company name** | S0/S2 company-context, first run | "What's the company's name?" | `Use "<name>" — as it appeared in the conversation / on the deck` (present only when a candidate was derived), `A different name — I'll state it`, `No name yet — use a working title I can rename later` | RUNTIME-LABELLED — the affirmative label carries whatever was derived (a deck title, a conversational mention), never a placeholder. Omit it entirely if nothing was derived — the defer is what keeps the question renderable at 2 options when that happens. **The defer names its own value on purpose: this answer becomes the SLUG** (§Slug discipline), so on that pick choose a short working title, TELL the founder the slug it produced, and say it can be changed by re-running with the real name. Never write the label text itself as the name. |
 | **Company stage** | S0/S2 company-context | "What stage is [Company] at?" | `Pre-seed`, `Seed`, `Series A`, `Series B+` | Stage only, never with sector (NOT `Seed / B2B SaaS`). **Write the ENUM, not the label** — `Pre-seed`→`pre-seed`, `Seed`→`seed`, `Series A`→`series-a`; the displayed label fails `metadata.stage` validation. **`Series B+` has no enum value**: it collapses `series-b`/`-c`/`-d`/`later` to fit the 4-option max, so on that pick ask a plain-text follow-up and write the specific stage — never default to `series-b`. |
@@ -989,7 +1002,7 @@ python3 "$SCRIPTS/explore.py" --dir "$REVIEW_DIR" -o "$REVIEW_DIR/explorer.html"
 
 **Dispatch the cap-table sub-agent in Context B.** **Call the `Task` tool with `subagent_type: "founder-skills:cap-table"`** after `compose_report.py` has successfully written both `report.json` and `report.md`.
 
-**Mitigation 2 protocol:** the main thread reads the structured `coaching_payload` from `report.json` and STAGES it as a file in the hand-off dir. The sub-agent Reads it from the agent namespace (a required read, so a wrong prefix fails loudly before anything is written), does NOT Read full `report.md`, and **WRITES its commentary as plain markdown to `OUTPUT_PATH` — no JSON, no escaping — returning only a receipt**. The main thread then gates that file with `check_handoff.py --format=markdown`, wraps it via `md_to_commentary.py` (deterministic escaping), and pipes it into `insert_coaching.py`. Full procedure: the cap-table agent body's Context B section.
+**Mitigation 2 protocol:** the main thread reads the structured `coaching_payload` from `report.json` and STAGES it as a file in the hand-off dir. The sub-agent Reads it from the agent namespace (a required read, so a wrong prefix fails loudly before anything is written), does NOT Read full `report.md`, and **WRITES its commentary as plain markdown to `OUTPUT_PATH` — no JSON, no escaping — returning only a receipt**. The main thread then gates that file with `check_handoff.py --format=markdown`, checks its option-pool claims with `pool_claims_check.py` (which writes the escaped envelope), and inserts that file with `insert_coaching.py`. Full procedure: the cap-table agent body's Context B section.
 
 <!-- skill-quality-ci: bash-after-subagent-ok -->
 ```bash
@@ -1054,7 +1067,7 @@ Follow your agent body's Context B procedure (POST_COMPOSE_COACHING):
    Write tool handles newlines and quotes). WITHOUT a '## Coaching Commentary'
    heading and WITHOUT the insertion_marker string.
    Do NOT write any file other than OUTPUT_PATH — insertion into report.md is the
-   main thread's job, via the shared md_to_commentary.py + insert_coaching.py scripts.
+   main thread's job, via pool_claims_check.py and the shared insert_coaching.py script.
 3. Return:
    {"status": "complete", "output_path": "<echo of OUTPUT_PATH>"}
    OR, if the payload is unusable (write no file):
@@ -1063,7 +1076,7 @@ Follow your agent body's Context B procedure (POST_COMPOSE_COACHING):
 Stop after returning the receipt JSON. Do not narrate.
 ```
 
-**After the sub-agent returns:** if its final message is a `{"status": "blocked", "reason": ...}` object, stop and report the reason to the founder — do not run the gate. Otherwise gate the hand-off, then (on gate exit 0) transform and insert deterministically. **The commentary leaves the model exactly once (into the sub-agent's Write call) — NEVER re-type the sub-agent's markdown into a heredoc or a `python -c` argument.**
+**After the sub-agent returns:** if its final message is a `{"status": "blocked", "reason": ...}` object, stop and report the reason to the founder — do not run the gate. The one exception is `write_refused`: run the Step 0 proof if it did not run, rebuild `<HANDOFF_AGENT>` from the resolver, and re-dispatch once; a second `write_refused` stops. Otherwise gate the hand-off, then (on gate exit 0) transform and insert deterministically. **The commentary leaves the model exactly once (into the sub-agent's Write call) — NEVER re-type the sub-agent's markdown into a heredoc or a `python -c` argument.**
 
 <!-- skill-quality-ci: bash-after-subagent-ok -->
 ```bash
@@ -1076,13 +1089,19 @@ printf '%s' '<agent final message verbatim>' | \
     --marker '<EXACT insertion_marker string from report.json coaching_payload>'
 ```
 
-**On gate exit 0**, transform the gated hand-off FILE into the JSON transport envelope and insert (feed the file, never re-type the message):
+**On gate exit 0**, check the gated hand-off FILE's option-pool claims (this writes the escaped envelope) and insert that checked file (feed the file, never re-type the message):
 
 <!-- skill-quality-ci: bash-after-subagent-ok -->
 ```bash
 SHARED_SCRIPTS="<printed PLUGIN_ROOT>/scripts"
-python3 "$SHARED_SCRIPTS/md_to_commentary.py" "$HANDOFF_DIR/coaching.md" | \
-  python3 "$SHARED_SCRIPTS/insert_coaching.py" \
+python3 "$SCRIPTS/pool_claims_check.py" "$HANDOFF_DIR/coaching.md" --scenarios "$REVIEW_DIR/scenarios.json" \
+  -o "$HANDOFF_DIR/coaching.checked.json"
+# Only on exit 0 (exit 9: see below).
+python3 "$SCRIPTS/pool_check_release.py" "$HANDOFF_DIR/coaching.md" --checked "$HANDOFF_DIR/coaching.checked.json" \
+  --scenarios "$REVIEW_DIR/scenarios.json" -o "$HANDOFF_DIR/coaching.released.json"
+# Only on exit 0 (exit 1: see below).
+python3 "$SHARED_SCRIPTS/insert_coaching.py" \
+    --commentary-file "$HANDOFF_DIR/coaching.released.json" \
     --report "$REVIEW_DIR/report.md" \
     --report-json "$REVIEW_DIR/report.json" \
     --marker '<EXACT insertion_marker string from report.json coaching_payload>' \
@@ -1094,21 +1113,24 @@ python3 "$SHARED_SCRIPTS/md_to_commentary.py" "$HANDOFF_DIR/coaching.md" | \
     --verify-artifact "$REVIEW_DIR/counsel_packet.json"
 ```
 
-The gate (`check_handoff.py --format=markdown`) verifies the sub-agent's hand-off file exists, is non-empty, matches the receipt's echoed path, and passes the content-shape gate (not receipt-shaped, no marker collision); `md_to_commentary.py` wraps the raw markdown in the `{"commentary_markdown": ...}` envelope (escaping by construction via `json.dumps`); `insert_coaching.py` then performs the 6-state idempotency check, replaces the marker with `## Coaching Commentary` + the commentary in a single in-place write, and verifies `run_id` parity across all 6 producer artifacts. Branch on the exit code (complete state machine — do not improvise):
+The gate (`check_handoff.py --format=markdown`) verifies the sub-agent's hand-off file exists, is non-empty, matches the receipt's echoed path, and passes the content-shape gate (not receipt-shaped, no marker collision); `pool_claims_check.py` judges the commentary's option-pool sizing claims against the run's computed figures (the report's Option pool section covers the pool, not the commentary) and writes the file `pool_check_release.py` turns into `insert_coaching.py`'s envelope only when the check's record matches this commentary, that file and this run -- skip the check and there is nothing to insert; `insert_coaching.py` then performs the 6-state idempotency check, replaces the marker with `## Coaching Commentary` + the commentary in a single in-place write, and verifies `run_id` parity across all 6 producer artifacts. Branch on the exit code (complete state machine — do not improvise):
 
+- **`pool_claims_check.py` exit 9** (the commentary makes option-pool sizing claims the figures do not back; the segments are on stdout, nothing was written) → if the 2-dispatch retry budget has a dispatch left, ONE repair-dispatch quoting the segments: "remove these sentences; the report's Option pool section covers the pool." (on the degrade path it also asks for the commentary inline, and you re-stage it; on the inline path there is no dispatch — rewrite without the segments once and re-stage). Re-gate, then re-run the check; the dispatch counts against the budget. If the budget is already spent, or it exits 9 again, re-run it with `--strip`: it removes those claims, keeps `coaching.md` as written, adds one line for the founder, and writes the file to release.
+- **`pool_claims_check.py` exit 2** (`pool_claims_check: refused: <reason>`: it could not read this run's `scenarios.json`) → fix the `--scenarios` path to `$REVIEW_DIR/scenarios.json` and re-run the check. Never insert without it, and never a repair-dispatch.
+- **`pool_check_release.py` exit 1** (`pool_check_release: refused: <reason>`) → the check's record does not match this commentary: re-run `pool_claims_check.py` on the gated file, then the release. Never write the envelope yourself, and never a repair-dispatch.
 - **Exit 0 from the chain** — `insert_coaching.py`'s receipt on stdout says `inserted` (or `already_inserted` on a resume). Proceed to Step 12.
 - **`check_handoff.py` exit 3** (missing/empty file — receipt may be fabricated) → **redo-dispatch**: fresh Task, same prompt plus one line: "your receipt claimed a file at `<path>` but none exists; use Write to create exactly that path."
 - **Exit 5** (receipt echoes a different path) → **repair-dispatch** telling the agent the exact expected OUTPUT_PATH.
 - **Exit 6** (receipt unparseable / no `output_path` key) → **redo-dispatch** with "return ONLY the receipt JSON — no fences, no prose." (A `status: "blocked"` final message is NOT exit 6 — it was handled before the gate.)
 - **Exit 7** (content-shape gate failed — receipt-shaped or marker-bearing file) → **repair-dispatch**: "your file wasn't the coaching commentary — write the coaching markdown, nothing else, to `<OUTPUT_PATH>`."
-- **Exit 8** (`path_namespace_mismatch`) → the sub-agent **complied**; the agent-namespace prefix was wrong. Its relative `OUTPUT_PATH` resolved against the outputs mount instead of the session root, so the file landed at the doubled path reported in `found_at`. Do NOT treat this as a fabricated receipt, and do NOT read the hand-off from `found_at` — re-dispatch with the corrected agent-namespace prefix (re-run `resolve_artifacts_root.py --agent` and rebuild `<HANDOFF_AGENT>` from the printed value). Counts against the same 2-dispatch retry budget.
+- **Exit 8** (`path_namespace_mismatch`) → the sub-agent **complied**; the agent-namespace prefix was wrong. Its relative `OUTPUT_PATH` resolved against the outputs mount instead of the session root, so the file landed at the doubled path reported in `found_at` (only a relative path can do this: run the Step 0 proof). Do NOT treat this as a fabricated receipt, and do NOT read the hand-off from `found_at` — re-dispatch with the corrected agent-namespace prefix (re-run `resolve_artifacts_root.py --agent` and rebuild `<HANDOFF_AGENT>` from the printed value). Counts against the same 2-dispatch retry budget.
 - **Any other exit** (script crash, unreadable file, invalid UTF-8) → STOP with the stderr. `check_handoff.py` exit 4 is reachable here too: gate 1 already confirmed the file exists and is non-empty, so a failure opening it afterwards is an IO/permission fault, not a malformed hand-off. A decode error raises before any typed exit and surfaces as a traceback.
-- **`insert_coaching.py` exit 1** (blocked; stdout carries `{"status": "blocked", "reason": ...}`) → stop and report the exact reason. Do NOT hand-edit `report.md` — if the reason mentions a truncated report or a missing marker, re-run `compose_report.py --write-md` and retry the chain. If the reason is `commentary_markdown missing or empty`, treat as a malformed hand-off: repair-dispatch quoting the reason.
+- **`insert_coaching.py` exit 1** (blocked; stdout carries `{"status": "blocked", "reason": ...}`) → stop and report the exact reason. Do NOT hand-edit `report.md` — if the reason mentions a truncated report or a missing marker, re-run `compose_report.py --write-md` and retry the chain. If the reason says the report takes commentary only with a passing check record, re-run the check and the release on the gated file (never a repair-dispatch). If the reason is `commentary_markdown missing or empty`, treat as a malformed hand-off: repair-dispatch quoting the reason.
 - **After ANY corrective dispatch, resume from the gate chain** — never feed the transform+insert pipe an ungated file.
 
-**Retry budget:** max 2 corrective dispatches (same rule as Context A). **Graceful degrade:** if the FIRST corrective dispatch also exits 3 while the receipt claims `complete` with the correctly echoed path, treat the host topology as hand-off-incompatible and fall back to message-channel transport. **The corrective dispatch MUST ask for the commentary inline for this to be reachable** — add: "the file hand-off is not working in this environment; return the coaching commentary itself as your final message, as raw markdown, with no receipt JSON and no fences." Without that line the fallback is unreachable: the normal Context B prompt instructs the agent to return ONLY the receipt and not to narrate, so its final message contains no markdown to stage. Then stage that returned markdown to `$STAGING_DIR/coaching.md` via a **single-quoted** `<<'COACHING_EOF'` heredoc (apostrophe-safe; NEVER `python -c`, NEVER the `outputs/` root — `$STAGING_DIR` is the `/tmp` scratch dir from Step 0, never the promoted outputs mount), and run the same `md_to_commentary.py "$STAGING_DIR/coaching.md" | insert_coaching.py` chain against that staged file.
+**Retry budget:** max 2 corrective dispatches (same rule as Context A). **Graceful degrade:** if the FIRST corrective dispatch also exits 3 while the receipt claims `complete` with the correctly echoed path, treat the host topology as hand-off-incompatible and fall back to message-channel transport, and tell the founder in one plain sentence (see Context A's degrade rule). **The corrective dispatch MUST ask for the commentary inline for this to be reachable** — add: "the file hand-off is not working in this environment; return the coaching commentary itself as your final message, as raw markdown, with no receipt JSON and no fences." Without that line the fallback is unreachable: the normal Context B prompt instructs the agent to return ONLY the receipt and not to narrate, so its final message contains no markdown to stage. Then stage that returned markdown to `$STAGING_DIR/coaching.md` via a **single-quoted** `<<'COACHING_EOF'` heredoc (apostrophe-safe; NEVER `python -c`, NEVER the `outputs/` root — `$STAGING_DIR` is the `/tmp` scratch dir from Step 0, never the promoted outputs mount), and run the same chain against that staged file: the check, the release and `insert_coaching.py` with every `$HANDOFF_DIR/coaching.*` path under `$STAGING_DIR` instead.
 
-**Inline alternative (permitted but discouraged).** The main thread may compose the commentary itself (from the same `coaching_payload`, following the agent body's content guidance including the no-legal-conclusions rule) instead of dispatching. It then stages the commentary to `$REVIEW_DIR/coaching_commentary.json` via the quoted `<<'COACHING_EOF'` heredoc (the same graceful-degrade file above; single-quoted → apostrophe-safe; NEVER `python -c`, NEVER the `outputs/` root) and runs the SAME `insert_coaching.py --commentary-file "$REVIEW_DIR/coaching_commentary.json"` invocation — the script is the single insertion path regardless of who composed. Never Edit the marker by hand. This bypasses the fresh-sub-agent isolation that protects Context A's verifier loop from Context B reasoning — prefer the dispatched path. The privacy boundary (no investor names, no document text in coaching commentary) is enforced at compose time by `_assert_coaching_payload_privacy_clean()` in `compose_report.py` — that check runs regardless of which path composed, so the privacy invariant holds even when inline is used.
+**Inline alternative (permitted but discouraged).** The main thread may compose the commentary itself (from the same `coaching_payload`, following the agent body's content guidance including the no-legal-conclusions rule) instead of dispatching. It then stages the commentary as markdown to `"$HANDOFF_DIR/coaching.md"` (a scratch file, never in `$REVIEW_DIR`) via the quoted `<<'COACHING_EOF'` heredoc (single-quoted → apostrophe-safe; NEVER `python -c`, NEVER the `outputs/` root), and runs the SAME three commands — the check, the release and the script are the single insertion path regardless of who composed. Never Edit the marker by hand. This bypasses the fresh-sub-agent isolation that protects Context A's verifier loop from Context B reasoning — prefer the dispatched path. The privacy boundary (no investor names, no document text in coaching commentary) is enforced at compose time by `_assert_coaching_payload_privacy_clean()` in `compose_report.py` — that check runs regardless of which path composed, so the privacy invariant holds even when inline is used.
 
 ### Step 12: Deliver Artifacts
 
@@ -1152,9 +1174,8 @@ over are different acts: a founder looking at a row of cards cannot tell which d
 Write each deliverable into your message as its own named entry — a link where this surface renders
 one that opens (on a `/sessions` session tree, `computer://` + the absolute path you just copied it
 to), otherwise the label with the path stated beside it — labelled by what the document IS, in the
-founder's words: *"Here's your finished analysis: [the written report](…) — everything scored, with
-the evidence behind it; [the interactive version](…) has the charts."* "The files are above" is not a
-hand-over. This does not conflict with the never-name-a-file rule: the founder reads your label,
+founder's words (the written report, the charts), not by its filename. "The files are above" is not a
+hand-over. Where a step prints the hand-over, the printed entries are these. This does not conflict with the never-name-a-file rule: the founder reads your label,
 never the path. Never paste a report's body into the message — link or name it.
 
 **Then offer the working data — once, in one sentence.** For example: *"If you want to keep the working
@@ -1243,7 +1264,7 @@ This skill runs inline in the main thread (not as a sub-agent). The final outcom
   `{Company}_Cap_Table.md`, `{Company}_Cap_Table.html` (**the one that goes missing**),
   `{Company}_Cap_Table_Explorer.html`, `{Company}_Counsel_Packet.md`. On a lightweight route, name that
   route's single deliverable instead.
-- The headline outcome fields, sourced from the `coaching_payload` staged in Step 11 (`scenario_digest`, `counsel_review_summary`, `high_severity_warnings`) plus the `insert_coaching.py` receipt (`status`, `report_path`, `run_id`). The Context B sub-agent no longer echoes these — do not source them from its return.
+- The headline outcome fields, sourced from the `coaching_payload` staged in Step 11 (`scenario_digest`, `counsel_review_summary`, `high_severity_warnings`) and `report.json`'s `report_disclosures` (the option pool's disclosures, by `label`) plus the `insert_coaching.py` receipt (`status`, `report_path`, `run_id`). The Context B sub-agent no longer echoes these — do not source them from its return.
 
   **Nesting — for cap-table all three are TOP LEVEL** on `coaching_payload`: `scenario_digest`, `counsel_review_summary`, `high_severity_warnings`. Do not reach under `.summary` (it holds only scenario counts and a deliberately-null `score_percent`). There is no checklist and no score to fall back to — if a field is null read `report.json`, never invent a number.
 

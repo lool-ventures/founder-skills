@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -808,27 +809,27 @@ class TestOptionPool:
         assert math.isclose(r["post_topup_pool_percent"], 0.15, abs_tol=1e-4)
 
     def test_post_money_excluding_converting_securities(self) -> None:
-        """Same formula as post_money for v0.1 — the rule pack distinguishes
-        the denominator policy via parameterization_points, not the math directly."""
-        r = option_pool.required_topup(
-            pre_topup_fully_diluted_shares=10_000_000,
-            existing_unallocated_pool=500_000,
-            target_pool_percent=0.10,
-            new_money_shares=1_000_000,
-            target_basis="post_money_excluding_converting_securities",
-        )
-        assert r["target_basis"] == "post_money_excluding_converting_securities"
-        assert r["required_pool_topup_shares"] >= 0
+        """Refused, not computed as plain post-money: no published source defines an excluding pool
+        denominator. The solver's basis gate resolves this basis before it reaches the pool math."""
+        with pytest.raises(ValueError, match="not modelled"):
+            option_pool.required_topup(
+                pre_topup_fully_diluted_shares=10_000_000,
+                existing_unallocated_pool=500_000,
+                target_pool_percent=0.10,
+                new_money_shares=1_000_000,
+                target_basis="post_money_excluding_converting_securities",
+            )
 
     def test_custom_basis(self) -> None:
-        r = option_pool.required_topup(
-            pre_topup_fully_diluted_shares=10_000_000,
-            existing_unallocated_pool=100_000,
-            target_pool_percent=0.08,
-            new_money_shares=None,
-            target_basis="custom",
-        )
-        assert r["target_basis"] == "custom"
+        """Refused, not computed as pre-money: a document-defined basis carries no definition to compute."""
+        with pytest.raises(ValueError, match="not modelled"):
+            option_pool.required_topup(
+                pre_topup_fully_diluted_shares=10_000_000,
+                existing_unallocated_pool=100_000,
+                target_pool_percent=0.08,
+                new_money_shares=None,
+                target_basis="custom",
+            )
 
     def test_invalid_target_rejected(self) -> None:
         with pytest.raises(ValueError):
@@ -1713,7 +1714,7 @@ class TestStackedPostMoneySAFEsGolden:
         assert sentinel["schema_version"] == "v0.1.0-cap-table-fast-assess"
         assert sentinel["mode"] == "fast_assess"
         assert sentinel["produces_canonical_artifacts"] is False
-        assert sentinel["rule_pack_version"] == "0.4.9"
+        assert sentinel["rule_pack_version"] == "0.4.10"
         # inputs_fingerprint structurally valid
         fp = sentinel["inputs_fingerprint"]
         assert "sha256" in fp and len(fp["sha256"]) == 64
@@ -6039,7 +6040,7 @@ class TestQuickAssessUX:
 
     def test_no_topup_label_when_pool_not_topped_up(self) -> None:
         """Fix 2a: when target_pool_percent is None (no top-up), dilution table must say
-        'Existing option pool (no top-up)' and must NOT say 'Pool Refresh'."""
+        'Existing option pool, granted and unallocated (no top-up)' and must NOT say 'Pool Refresh'."""
         import quick_assess as qa  # type: ignore[import-not-found]
 
         sentinel = qa.quick_assess(
@@ -6054,8 +6055,8 @@ class TestQuickAssessUX:
         )
         report_md = sentinel.pop("_report_md")
         assert "Pool Refresh" not in report_md, f"'Pool Refresh' must not appear when no top-up ran; got:\n{report_md}"
-        assert "Existing option pool (no top-up)" in report_md, (
-            f"Expected 'Existing option pool (no top-up)' in dilution table; got:\n{report_md}"
+        assert "Existing option pool, granted and unallocated (no top-up)" in report_md, (
+            f"Expected the whole-pool label in the dilution list; got:\n{report_md}"
         )
 
     def test_topup_label_when_pool_topped_up(self) -> None:
@@ -8386,6 +8387,7 @@ class TestNoteMaturityDefaultWarning:
 def _make_cap_compose_dir(
     scenarios: list[dict[str, Any]] | None = None,
     founders: list[dict[str, Any]] | None = None,
+    option_pool: dict[str, Any] | None = None,
 ) -> str:
     """Create a temporary artifact directory for compose_report.py with
     injected scenario list and optional founder override.
@@ -8398,6 +8400,8 @@ def _make_cap_compose_dir(
     inputs = json.loads(json.dumps(_BASIC_INPUTS))
     if founders is not None:
         inputs["founders"] = founders
+    if option_pool is not None:  # so cap_state.json carries the same pool as an injected scenario
+        inputs["option_pool"] = option_pool
     inputs["metadata"] = {"run_id": RID}
 
     instruments = json.loads(json.dumps(_BASIC_INSTRUMENTS))
@@ -10792,7 +10796,7 @@ class TestPoolBasisNote:
             realized_pool_pct=0.08,
             acquisition_pct=0.20,
         )
-        assert "10.0%" in note
+        assert "sized to 10% of" in note
         assert "8.0%" in note
         assert "pre-consideration" in note
         assert "post-closing" in note
@@ -10805,7 +10809,7 @@ class TestPoolBasisNote:
             realized_pool_pct=0.10,
             acquisition_pct=0.20,
         )
-        assert "10.0%" in note
+        assert "sized to 10% of" in note
         assert "post-closing" in note
 
     def test_no_acquisition_returns_empty(self) -> None:
@@ -13271,9 +13275,9 @@ class TestTargetBasisAssumedDisclosure:
         md = report["report_markdown"]
         assert "ASSUMED, not stated" in md, f"expected assumed-basis callout in report.md; got:\n{md}"
 
-    def test_scenario_digest_marks_basis_assumed(self) -> None:
-        """The coaching-payload scenario digest's driver line must also flag the assumption —
-        it feeds the Context-B coaching commentary, a separate render path from report.md."""
+    def test_the_pool_section_marks_basis_assumed(self) -> None:
+        """The assumption is disclosed in the scenario's Option pool section, on every completeness: the
+        coaching commentary no longer carries it (it does not discuss the pool's sizing)."""
         import compose_report  # type: ignore[import-not-found]
 
         scenario = _minimal_scenario(
@@ -13285,9 +13289,10 @@ class TestTargetBasisAssumedDisclosure:
             },
         )
         scenario["parameters"]["target_pool_percent"] = 0.10
-        digest = compose_report.build_scenario_digest([scenario])
-        drivers = digest[0]["scenario_drivers"]
-        assert any("assumed" in d.lower() for d in drivers), f"expected an assumed-basis driver note; got {drivers}"
+        section = compose_report.pool_section_markdown(compose_report.pool_section(scenario, cap_state={}))
+        assert any("ASSUMED" in ln for ln in section), section
+        drivers = compose_report.build_scenario_digest([scenario])[0]["scenario_drivers"]
+        assert not any("assumed" in d.lower() for d in drivers), drivers
 
 
 class TestQuickAssessTargetBasisDisclosure:
@@ -13310,8 +13315,8 @@ class TestQuickAssessTargetBasisDisclosure:
         )
         report_md = sentinel.pop("_report_md")
         assumptions = sentinel.get("assumptions", [])
-        assert any("pool-sizing basis" in a for a in assumptions), (
-            f"expected a pool-sizing-basis assumption; got {assumptions}"
+        assert any("No measure was given for the pool target" in a for a in assumptions), (
+            f"expected the pool target's assumed measure to be disclosed; got {assumptions}"
         )
         assert "## Assumptions" in report_md
 
@@ -13366,7 +13371,7 @@ class TestQuickAssessTargetBasisDisclosure:
             with open(os.path.join(d, "report_fast_assess.md")) as f:
                 report_md = f.read()
             assert "## Assumptions" in report_md
-            assert "basis" in report_md.lower()
+            assert "no measure was given for the pool target" in report_md.lower()
 
 
 def test_skill_md_fast_assess_pool_basis_gate_offers_pre_money() -> None:
@@ -13378,7 +13383,7 @@ def test_skill_md_fast_assess_pool_basis_gate_offers_pre_money() -> None:
     assert "--target-basis post_money` ONLY when the founder stated" not in text, (
         "the old hardcoded-post_money-only instruction should have been replaced"
     )
-    assert "<pre_money|post_money>" in text or "pre-money-vs-post-money basis" in text
+    assert "<pre_money|post_money|post_money_increase>" in text
 
 
 # ===========================================================================
@@ -14370,3 +14375,1491 @@ class TestCoverageDisclosureReflectsDetection:
             assert got["disclosure"]["covered"] is True
             codes = [w["code"] for w in got["report"].get("validation", {}).get("warnings", [])]
             assert "COVERAGE_ROUTE_MISMATCH" not in codes
+
+
+# ---------------------------------------------------------------------------
+# HANDOFF_BYPASSED: an extraction hand-off that never passed check_handoff.py. cap-table's map is the
+# fleet's weakest (see compose_report._handoff_bypassed): it checks hand-offs PRESENT in the run dir,
+# plus the articles-of-association step when cap_state records its findings.
+# ---------------------------------------------------------------------------
+
+_CHECK_HANDOFF = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "scripts", "check_handoff.py")
+# Filename-shaped slugs, as a model derives them from what the founder uploaded. None may reach the page.
+_DOC_HANDOFFS = [
+    "Acme_Series_Seed_SAFE_v3-FINAL.pdf_extraction_output.json",
+    "acmecorp-convertible-note-2024-signed_extraction_output.json",
+]
+
+
+def _cap_run_dir(d: str) -> str:
+    run_dir = os.path.join(d, "handoff", "test-rid")
+    os.makedirs(run_dir, exist_ok=True)
+    return run_dir
+
+
+def _cap_write_handoff(d: str, name: str, *, gate: bool) -> None:
+    path = os.path.join(_cap_run_dir(d), name)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write('{"from": "the sub-agent"}')
+    if gate:
+        result = subprocess.run([sys.executable, _CHECK_HANDOFF, path], capture_output=True, text=True)
+        assert result.returncode == 0, result.stdout
+
+
+def _cap_bypass(d: str) -> tuple[dict[str, Any] | None, str]:
+    rc, report, err = _run_cap_compose(d)
+    assert rc == 0, err
+    hits = [w for w in report["validation"]["warnings"] if w.get("code") == "HANDOFF_BYPASSED"]
+    assert len(hits) <= 1, hits
+    with open(os.path.join(d, "report.md"), encoding="utf-8") as f:
+        md = f.read()
+    return (hits[0] if hits else None), md
+
+
+def test_handoff_bypass_an_ungated_extraction_hand_off_fires_and_never_names_the_document() -> None:
+    d = _make_cap_compose_dir()
+    _cap_write_handoff(d, _DOC_HANDOFFS[0], gate=False)  # present, never gated: the gate was skipped
+    hit, md = _cap_bypass(d)
+    assert hit is not None and hit["severity"] == "medium" and hit["label"] == "Some Steps Were Not Checked"
+    assert "the extraction of one of your documents" in hit["message"]
+    for leak in ("Acme_Series", "SAFE_v3", "FINAL", ".pdf", ".json", "handoff", "extraction_output"):
+        assert leak not in hit["message"], leak
+    assert hit["message"] in md
+    # Gated: silent.
+    _cap_write_handoff(d, _DOC_HANDOFFS[0], gate=True)
+    hit, _ = _cap_bypass(d)
+    assert hit is None
+
+
+def test_handoff_bypass_several_unchecked_documents_are_counted_not_listed() -> None:
+    d = _make_cap_compose_dir()
+    for name in _DOC_HANDOFFS:
+        _cap_write_handoff(d, name, gate=False)
+    hit, md = _cap_bypass(d)
+    assert hit is not None and "the extraction of 2 of your documents" in hit["message"]
+    assert "acmecorp-convertible" not in md and "Acme_Series_Seed" not in md
+
+
+def test_handoff_bypass_an_aoa_reading_on_record_must_be_gated() -> None:
+    d = _make_cap_compose_dir()
+    cs_path = os.path.join(d, "cap_state.json")
+    with open(cs_path, encoding="utf-8") as f:
+        cs = json.load(f)
+    cs["aoa_findings"] = {"liquidation_preference": "1x non-participating"}
+    with open(cs_path, "w", encoding="utf-8") as f:
+        json.dump(cs, f)
+    _cap_run_dir(d)
+    hit, _ = _cap_bypass(d)  # findings on record, no gated hand-off at all
+    assert hit is not None and "articles of association" in hit["message"]
+    _cap_write_handoff(d, "aoa_extraction_output.json", gate=True)
+    hit, _ = _cap_bypass(d)
+    assert hit is None
+
+
+def test_handoff_bypass_is_silent_without_a_handoff_dir() -> None:
+    d = _make_cap_compose_dir()
+    hit, _ = _cap_bypass(d)
+    assert hit is None
+
+
+def test_handoff_bypass_known_residual_a_fallback_extraction_leaves_nothing_to_see() -> None:
+    """KNOWN, NOT A GUARANTEE. A lane-1 extraction that took the message-channel fallback writes no
+    hand-off file, and extract_instrument.py records no link from an instrument to its hand-off, so the
+    run below -- instruments extracted, no extraction hand-off on disk -- is not disclosed. The deferred
+    stdin stamp in the two extraction validators is what would close it."""
+    d = _make_cap_compose_dir()
+    _cap_run_dir(d)
+    hit, _ = _cap_bypass(d)
+    assert hit is None
+
+
+# ---------------------------------------------------------------------------
+# The option pool's basis is the report's, not the coach's. A live coach told the founder a post-money
+# pool was "sized into the pre-money valuation"; given the basis as a named field, later coaches still
+# said "you confirmed it" of a stated basis, and named a post-money pool by the other measure's name.
+# The basis, its assumption and its confirmation are now stated by the report's Option pool section.
+# ---------------------------------------------------------------------------
+
+
+def _pool_scenario(basis: str | None, *, defaulted: bool = False) -> dict[str, Any]:
+    params: dict[str, Any] = {"pre_money": 12_000_000, "new_money": 3_000_000, "target_pool_percent": 0.1}
+    if basis is not None:
+        params["target_basis"] = basis
+    warnings = [{"code": "target_basis_defaulted", "detail": "no basis stated"}] if defaulted else []
+    return {
+        "scenario_id": "s_round",
+        "label": "Series A",
+        "type": "priced_round",
+        "parameters": params,
+        "computed_outputs": {"completeness": "full", "blockers": [], "warnings": warnings},
+    }
+
+
+def test_the_coach_is_handed_no_pool_basis() -> None:
+    import compose_report as cr  # type: ignore[import-not-found]
+
+    for scenario in (_pool_scenario("post_money"), _pool_scenario(None, defaulted=True), _pool_scenario("pre_money")):
+        entry = cr.build_scenario_digest([scenario])[0]
+        assert not {"pool_basis", "pool_basis_assumed", "pool_basis_confirmed"} & set(entry["headline_inputs"])
+        assert cr.POOL_DRIVER_REFERENCE in entry["scenario_drivers"], entry["scenario_drivers"]
+
+
+def test_the_pool_section_states_the_basis_the_scenario_modeled() -> None:
+    import compose_report as cr  # type: ignore[import-not-found]
+
+    def text(scenario: dict[str, Any]) -> str:
+        return "\n".join(cr.pool_section_markdown(cr.pool_section(scenario, cap_state={})))
+
+    assert "fully diluted share count after the round" in text(_pool_scenario("post_money"))
+    defaulted = text(_pool_scenario(None, defaulted=True))
+    assert (
+        "fully diluted share count before the round" in defaulted and "ASSUMED" in defaulted
+    )  # the solver's default, disclosed
+    assert "ASSUMED" not in text(_pool_scenario("post_money"))
+    no_pool = _pool_scenario("post_money")
+    no_pool["parameters"]["target_pool_percent"] = None
+    assert cr.pool_section(no_pool, cap_state={}) == []
+
+
+# ---------------------------------------------------------------------------
+# post_money_excluding_converting_securities has no published definition as a pool-sizing denominator, so it
+# is not computed. A scenario selecting it with converting securities present is BLOCKED by the solver's basis
+# gate (tests/test_cap_table_pool_basis.py covers every entry point); with none present the two readings are
+# the same number and it passes.
+# ---------------------------------------------------------------------------
+
+_EXCL = "post_money_excluding_converting_securities"
+
+
+def _excl_setup(safes_total: float) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    inputs = {
+        "company_name": "Foobar",
+        "founders": [{"id": "f", "name": "Founders", "common_shares": 8_000_000, "share_class": "class_a"}],
+        "option_pool": {"authorized": 1_000_000, "issued": 400_000, "available_for_grant": 600_000},
+        "metadata": {"run_id": "r"},
+    }
+    safes = [
+        {
+            "id": f"s{i}",
+            "investor_name": f"Investor {i}",
+            "purchase_amount": safes_total / 3,
+            "form": "yc_postmoney_cap",
+            "post_money_valuation_cap": 12_000_000,
+            "issuance_date": "2024-01-01",
+        }
+        for i in range(3 if safes_total else 0)
+    ]
+    instruments = {"safes": safes, "convertible_notes": [], "metadata": {"run_id": "r"}}
+    return inputs, instruments, cap_state_mod.build_cap_state(inputs, instruments)
+
+
+def _excl_run(safes_total: float, basis: str, **extra: Any) -> dict[str, Any]:
+    inputs, instruments, state = _excl_setup(safes_total)
+    params = {"pre_money": 20_000_000, "new_money": 6_000_000, "target_pool_percent": 0.12, "target_basis": basis}
+    params.update(extra)
+    req = {"scenario_id": "a", "type": "priced_round", "parameters": params}
+    out: dict[str, Any] = run_scenario.run_all_scenarios(
+        inputs=inputs, instruments=instruments, cap_state=state, scenario_requests=[req]
+    )[0]["computed_outputs"]
+    return out
+
+
+class TestExcludingConvertingSecuritiesBasis:
+    def test_blocked_when_converting_securities_are_present(self) -> None:
+        co = _excl_run(3_000_000, _EXCL)
+        assert co["completeness"] == "structural_only"
+        codes = [b["code"] for b in co.get("blockers") or []]
+        assert codes == ["E_POOL_BASIS_EXCLUDING_NOT_MODELED"], codes
+        # No ownership figure may ride a blocked scenario.
+        assert not (co.get("aggregate_ownership_by_class") or {}).get("founders_pct")
+
+    def test_the_remedy_states_what_is_known_and_does_not_prescribe_a_switch(self) -> None:
+        """Only what holds for ANY excluding definition: the basis leaves the conversion shares out of the
+        count plain post-money includes. Which way ownership would move is not stated: nobody has published
+        the formula."""
+        remedy = _excl_run(3_000_000, _EXCL)["blockers"][0]["remedy"]
+        assert "without the SAFE and note conversion shares" in remedy, remedy
+        assert not re.search(r"overstat|understat|conservativ", remedy, re.I), remedy
+        assert "counsel" in remedy.lower()
+        # Clearable-by-fabrication guard: the remedy must not tell the model to re-run on either basis.
+        assert not re.search(
+            r"\b(?:switch|change|set|use|re-?run)\b[^.]{0,40}\b(?:pre|post)[-_ ]money\b", remedy, re.I
+        ), remedy
+
+    def test_no_converting_securities_passes_with_numbers_identical_to_post_money(self) -> None:
+        excl = _excl_run(0, _EXCL)
+        post = _excl_run(0, "post_money")
+        assert excl["completeness"] == "full" and not excl.get("blockers")
+        assert excl["aggregate_ownership_by_class"] == post["aggregate_ownership_by_class"]
+        assert excl["equity_financing_price"] == post["equity_financing_price"]
+        assert excl["shares_breakdown"] == post["shares_breakdown"]
+
+    def test_a_founder_choice_to_model_it_as_post_money_runs_and_is_disclosed(self) -> None:
+        chose = _excl_run(3_000_000, _EXCL, excluding_basis_modeled_as="post_money_by_founder_choice")
+        post = _excl_run(3_000_000, "post_money")
+        assert chose["completeness"] == "full" and not chose.get("blockers")
+        assert chose["aggregate_ownership_by_class"] == post["aggregate_ownership_by_class"]
+        codes = [w.get("code") for w in chose.get("warnings") or []]
+        assert "W_EXCLUDING_BASIS_MODELED_AS_POST_MONEY" in codes, codes
+
+
+def test_the_founder_choice_disclosure_reaches_report_md() -> None:
+    """The warning is only worth what reaches the page: rendered next to the scenario, in the shared wording.
+    Control: the same compose without the choice (a plain post-money scenario) carries no disclosure."""
+    chose = _excl_run(3_000_000, _EXCL, excluding_basis_modeled_as="post_money_by_founder_choice")
+    plain = _excl_run(3_000_000, "post_money")
+    pages = {}
+    for name, co in (("chose", chose), ("plain", plain)):
+        scenario = {
+            "scenario_id": "s_round",
+            "label": "Series A",
+            "type": "priced_round",
+            "parameters": {"pre_money": 20_000_000, "new_money": 6_000_000, "target_pool_percent": 0.12},
+            "computed_outputs": co,
+        }
+        d = _make_cap_compose_dir(scenarios=[scenario])
+        rc, _report, err = _run_cap_compose(d)
+        assert rc == 0, err
+        with open(os.path.join(d, "report.md"), encoding="utf-8") as f:
+            pages[name] = f.read()
+    assert "The option pool is measured with the converting securities counted, at your choice." in pages["chose"]
+    assert "may differ from your term sheet" in pages["chose"]
+    assert "measured with the converting securities counted, at your choice" not in pages["plain"]
+
+
+def test_the_blocked_scenario_remedy_reaches_report_md() -> None:
+    co = _excl_run(3_000_000, _EXCL)
+    scenario = {
+        "scenario_id": "s_round",
+        "label": "Series A",
+        "type": "priced_round",
+        "parameters": {},
+        "computed_outputs": co,
+    }
+    d = _make_cap_compose_dir(scenarios=[scenario])
+    rc, _report, err = _run_cap_compose(d)
+    assert rc == 0, err
+    with open(os.path.join(d, "report.md"), encoding="utf-8") as f:
+        page = f.read()
+    assert "does not yet compute that basis distinctly" in page
+
+
+def test_the_excluding_basis_texts_pass_the_founder_text_scan() -> None:
+    sys.path.insert(0, os.path.join(_REPO, "founder-skills", "scripts"))
+    try:
+        import _founder_text  # type: ignore[import-not-found]
+    finally:
+        sys.path.pop(0)
+    remedy = _excl_run(3_000_000, _EXCL)["blockers"][0]["remedy"]
+    choice = _excl_run(3_000_000, _EXCL, excluding_basis_modeled_as="post_money_by_founder_choice")
+    message = next(w["message"] for w in choice["warnings"] if w["code"] == "W_EXCLUDING_BASIS_MODELED_AS_POST_MONEY")
+    for text in (remedy, message):
+        assert _founder_text.scan(text) == {"enums": [], "filenames": []}, text
+
+
+# ---------------------------------------------------------------------------
+# The option pool's other-sizing counterfactual: the same round re-solved by the real priced-round solver
+# with only the pool's sizing basis flipped, so any advice about the other sizing rests on a number.
+# Fixture reproduces the live e2e round: 8M founder shares, one $500K SAFE at a $5M post-money cap,
+# $12M pre / $3M raise / 10% pool -> founders 63.0% post-round sizing, 64.8% pre-round sizing.
+# ---------------------------------------------------------------------------
+
+import priced_round as _pr  # type: ignore[import-not-found]  # noqa: E402
+
+
+def _cf_setup(
+    *,
+    available_pool: int = 0,
+    outstanding: int = 0,
+    other_common: int = 0,
+    warrant: int = 0,
+    warrant_exercised_before_round: int = 0,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    inputs: dict[str, Any] = {
+        "company_name": "Foobar",
+        "founders": [{"id": "f", "name": "Founders", "common_shares": 8_000_000, "share_class": "class_a"}],
+        "option_pool": {
+            "authorized": available_pool + outstanding,
+            "issued": outstanding,
+            "unallocated": available_pool,
+        },
+        "metadata": {"run_id": "r"},
+    }
+    safe = {
+        "id": "safe_1",
+        "investor_name": "Seed Investor",
+        "purchase_amount": 500_000,
+        "form": "yc_postmoney_cap",
+        "post_money_valuation_cap": 5_000_000,
+        "issuance_date": "2024-03-01",
+    }
+    instruments: dict[str, Any] = {"safes": [safe], "convertible_notes": [], "metadata": {"run_id": "r"}}
+    if other_common:
+        inputs["common_batches"] = [{"holder_id": "angel_1", "shares": other_common, "issuance_date": "2024-06-01"}]
+    if warrant_exercised_before_round:
+        # Net-share settled before the round, so the pre-round pump changes the share count the solver sees.
+        instruments["warrants"] = [
+            {
+                "id": "warrant_1",
+                "shares_underlying": warrant_exercised_before_round,
+                "warrant_type": "common_stock",
+                "issuance_date": "2024-06-01",
+                "settlement_type": "net_share",
+                "exercise_price": 0.5,
+                "exercise_event_date": "2026-01-01",
+                "vested_flag": True,
+            }
+        ]
+    if warrant:
+        instruments["warrants"] = [
+            {
+                "id": "warrant_1",
+                "shares_underlying": warrant,
+                "warrant_type": "common_stock",
+                "issuance_date": "2024-06-01",
+                "settlement_type": "physical",
+                "exercise_price": 0.01,
+            }
+        ]
+    return inputs, instruments, cap_state_mod.build_cap_state(inputs, instruments)
+
+
+def _cf_run(params: dict[str, Any], *, counterfactual: bool = True, **setup: int) -> dict[str, Any]:
+    inputs, instruments, state = _cf_setup(**setup)
+    base = {"pre_money": 12_000_000, "new_money": 3_000_000, "target_pool_percent": 0.1}
+    base.update(params)
+    req = {"scenario_id": "s", "type": "priced_round", "parameters": base}
+    out: dict[str, Any] = run_scenario.run_all_scenarios(
+        inputs=inputs,
+        instruments=instruments,
+        cap_state=state,
+        scenario_requests=[req],
+        pool_counterfactual=counterfactual,
+    )[0]["computed_outputs"]
+    return out
+
+
+class TestPoolSizingCounterfactual:
+    def test_the_other_sizing_is_a_real_solve_and_differs(self) -> None:
+        co = _cf_run({"target_basis": "post_money"})
+        cf = co["pool_sizing_counterfactual"]
+        assert cf["status"] == "computed"
+        assert (cf["modeled_basis"], cf["other_basis"]) == ("post_money", "pre_money")
+        assert round(cf["founders"]["modeled_value"] * 100, 1) == 63.0
+        assert round(cf["founders"]["other_value"] * 100, 1) == 64.8  # non-vacuous: it moved
+        # ...and it IS the solver's answer, not a restated formula: an independent direct solve agrees.
+        _i, inst, state = _cf_setup()
+        direct = _pr.solve_priced_round(
+            cap_state=state,
+            safes=inst["safes"],
+            notes=[],
+            pre_money=12_000_000,
+            new_money=3_000_000,
+            target_pool_percent=0.1,
+            target_basis="pre_money",
+        )
+        assert cf["founders"]["other_value"] == direct["aggregate_ownership_by_class"]["founders_pct"]
+
+    def test_the_mapping_covers_every_rule_pack_basis(self) -> None:
+        with open(os.path.join(_REPO, "founder-skills", "skills", "cap-table", "data", "cap-table-rules.json")) as f:
+            rules = json.load(f)
+        found: list[list[str]] = []
+
+        def walk(node: Any) -> None:
+            if isinstance(node, dict):
+                if node.get("name") == "target_basis" and isinstance(node.get("allowed_values"), list):
+                    found.append(node["allowed_values"])
+                for v in node.values():
+                    walk(v)
+            elif isinstance(node, list):
+                for v in node:
+                    walk(v)
+
+        walk(rules)
+        assert found, "the rule pack's target_basis enum was not found"
+        assert set(run_scenario._OTHER_POOL_BASIS) == set(found[0])
+
+    def test_a_stated_pre_money_round_compares_with_post_money(self) -> None:
+        cf = _cf_run({"target_basis": "pre_money"})["pool_sizing_counterfactual"]
+        assert (cf["status"], cf["other_basis"], cf["modeled_basis_assumed"]) == ("computed", "post_money", False)
+
+    def test_a_defaulted_basis_is_compared_and_marked_assumed(self) -> None:
+        cf = _cf_run({})["pool_sizing_counterfactual"]
+        assert (cf["status"], cf["modeled_basis"], cf["other_basis"]) == ("computed", "pre_money", "post_money")
+        assert cf["modeled_basis_assumed"] is True
+
+    def test_custom_and_founder_choice_excluding_are_not_computed_with_a_plain_reason(self) -> None:
+        # `custom` with a pool target is refused by the solver's basis gate, so it has no counterfactual; the
+        # founder's stated answer is what reaches this path, and the comparison stays not computed.
+        blocked = _cf_run({"target_basis": "custom"})
+        assert blocked["completeness"] == "structural_only" and "pool_sizing_counterfactual" not in blocked
+        for params in (
+            {"target_basis": "custom", "custom_basis_stated_by_founder": "pre_money"},
+            {
+                "target_basis": "post_money_excluding_converting_securities",
+                "excluding_basis_modeled_as": "post_money_by_founder_choice",
+            },
+        ):
+            cf = _cf_run(params)["pool_sizing_counterfactual"]
+            assert cf["status"] == "not_computed", params
+            assert cf["reason"] and not re.search(r"\b[a-z]+_[a-z_]+\b", cf["reason"]), cf["reason"]
+            assert "founders" not in cf
+
+    def test_excluding_with_no_converting_securities_is_computed(self) -> None:
+        inputs, _inst, _state = _cf_setup()
+        instruments = {"safes": [], "convertible_notes": [], "metadata": {"run_id": "r"}}
+        state = cap_state_mod.build_cap_state(inputs, instruments)
+        req = {
+            "scenario_id": "s",
+            "type": "priced_round",
+            "parameters": {
+                "pre_money": 12_000_000,
+                "new_money": 3_000_000,
+                "target_pool_percent": 0.1,
+                "target_basis": "post_money_excluding_converting_securities",
+            },
+        }
+        co = run_scenario.run_all_scenarios(
+            inputs=inputs, instruments=instruments, cap_state=state, scenario_requests=[req]
+        )
+        cf = co[0]["computed_outputs"]["pool_sizing_counterfactual"]
+        assert (cf["status"], cf["other_basis"]) == ("computed", "pre_money")
+
+    def test_an_oversized_existing_pool_is_the_same_on_both_sizings(self) -> None:
+        cf = _cf_run({"target_basis": "post_money"}, available_pool=3_000_000)["pool_sizing_counterfactual"]
+        assert cf["status"] == "same_on_both_sizings"
+
+    def test_no_pool_carries_no_block(self) -> None:
+        assert "pool_sizing_counterfactual" not in _cf_run({"target_pool_percent": None, "target_basis": "post_money"})
+
+    def test_the_sweep_path_can_opt_out(self) -> None:
+        assert "pool_sizing_counterfactual" not in _cf_run({"target_basis": "post_money"}, counterfactual=False)
+
+    def test_gainers_come_from_unrounded_deltas_and_never_include_the_pool(self) -> None:
+        cf = _cf_run({"target_basis": "post_money"})["pool_sizing_counterfactual"]
+        assert set(cf["gains_on_other_sizing"]) == {"founders_pct", "safe_pct"}
+        classes = cf["classes"]
+        assert abs(sum(v["modeled"] for v in classes.values()) - 1.0) < 1e-9
+        assert abs(sum(v["other"] for v in classes.values()) - 1.0) < 1e-9
+
+    def test_outstanding_options_count_in_the_pool_row(self) -> None:
+        cf = _cf_run({"target_basis": "post_money"}, outstanding=800_000)["pool_sizing_counterfactual"]
+        classes = cf["classes"]
+        # Outstanding options sit in the pool row (granted + unallocated), so it exceeds the 10% target.
+        assert classes["option_pool_pct"]["modeled"] > 0.1
+        assert abs(sum(v["modeled"] for v in classes.values()) - 1.0) < 1e-9
+
+    def test_other_common_and_warrants_land_in_the_residual_row(self) -> None:
+        """The aggregate has no row for non-founder common or warrants; the residual carries them, so a
+        founder reading the rows sees 100% rather than a silent gap."""
+        base = _cf_run({"target_basis": "post_money"})["pool_sizing_counterfactual"]["classes"]
+        cf = _cf_run({"target_basis": "post_money"}, other_common=500_000, warrant=200_000)
+        classes = cf["pool_sizing_counterfactual"]["classes"]
+        # Positive control: the plain fixture has no residual row at all.
+        assert "other_existing_pct" not in base
+        assert classes["other_existing_pct"]["modeled"] > 0.03
+        assert classes["other_existing_pct"]["other"] > classes["other_existing_pct"]["modeled"]
+        assert abs(sum(v["other"] for v in classes.values()) - 1.0) < 1e-9
+        assert "other_existing_pct" in cf["pool_sizing_counterfactual"]["gains_on_other_sizing"]
+
+    def test_the_safe_conversion_arm_carries_the_block(self) -> None:
+        inputs, instruments, state = _cf_setup()
+        req = {
+            "scenario_id": "s",
+            "type": "safe_conversion",
+            "parameters": {
+                "priced_round_pre_money": 12_000_000,
+                "priced_round_new_money": 3_000_000,
+                "target_pool_percent": 0.1,
+                "target_basis": "post_money",
+            },
+        }
+        co = run_scenario.run_all_scenarios(
+            inputs=inputs, instruments=instruments, cap_state=state, scenario_requests=[req]
+        )[0]["computed_outputs"]
+        cf = co["pool_sizing_counterfactual"]
+        direct = _pr.solve_priced_round(
+            cap_state=state,
+            safes=instruments["safes"],
+            notes=[],
+            pre_money=12_000_000,
+            new_money=3_000_000,
+            target_pool_percent=0.1,
+            target_basis="pre_money",
+        )
+        assert cf["status"] == "computed"
+        assert cf["founders"]["other_value"] == pytest.approx(direct["aggregate_ownership_by_class"]["founders_pct"])
+
+    def test_the_sweep_passes_the_opt_out(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import sweep  # type: ignore[import-not-found]
+
+        seen: list[Any] = []
+        real = sweep.run_all_scenarios
+
+        def recording(**kw: Any) -> list[dict[str, Any]]:
+            seen.append(kw.get("pool_counterfactual", "absent"))
+            result: list[dict[str, Any]] = real(**kw)
+            return result
+
+        monkeypatch.setattr(sweep, "run_all_scenarios", recording)
+        inputs, instruments, state = _cf_setup()
+        base = {
+            "scenario_id": "s",
+            "type": "priced_round",
+            "parameters": {"pre_money": 12_000_000, "new_money": 3_000_000, "target_pool_percent": 0.1},
+        }
+        out = sweep.build_sweep(inputs=inputs, instruments=instruments, cap_state=state, scenarios=[base], steps=3)
+        assert seen == [False]
+        assert out["frames"] and all("pool_sizing_counterfactual" not in f["outputs"] for f in out["frames"])
+
+    def test_each_status_has_its_shape(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The schema cannot say this (the local validator ignores oneOf), so it is pinned here: a
+        figure-bearing status carries figures, and a figure-less one carries a reason and no figures."""
+        blocks = {
+            "computed": _cf_run({"target_basis": "post_money"}),
+            "same_on_both_sizings": _cf_run({"target_basis": "post_money"}, available_pool=3_000_000),
+            "not_computed": _cf_run({"target_basis": "custom", "custom_basis_stated_by_founder": "pre_money"}),
+            "unavailable": _cf_run(
+                {"target_basis": "pre_money", "target_pool_percent": 0.45, "acquisition": {"consideration_pct": 0.6}}
+            ),
+        }
+        figures = {"founders", "classes", "pool_topup_shares", "price_per_share", "gains_on_other_sizing"}
+        for status, co in blocks.items():
+            cf = co["pool_sizing_counterfactual"]
+            assert cf["status"] == status, (status, cf)
+            if status in {"computed", "same_on_both_sizings"}:
+                assert figures <= set(cf), (status, cf)
+                assert "reason" not in cf
+            else:
+                assert not figures & set(cf), (status, cf)
+                assert cf["reason"] and "_" not in cf["reason"], (status, cf)
+
+    def test_the_approximation_flag_counts_only_when_the_basis_was_actually_approximated(self) -> None:
+        flag = {"excluding_basis_modeled_as": "post_money_by_founder_choice"}
+        # Inert on a pre-money round: the round is compared, and nothing says "approximated".
+        cf = _cf_run({"target_basis": "pre_money", **flag})["pool_sizing_counterfactual"]
+        assert cf["status"] == "computed" and cf["modeled_as_approximation"] is False
+        digest, _p = _cf_compose({"target_basis": "pre_money", **flag})
+        assert "approximation" not in digest["report_pool_sizing_counterfactual"]["modeled_sizing"]
+        # Control: with a SAFE converting, the excluding basis IS approximated and is not compared.
+        approx = _cf_run({"target_basis": "post_money_excluding_converting_securities", **flag})
+        assert approx["pool_sizing_counterfactual"]["status"] == "not_computed"
+        assert approx["pool_sizing_counterfactual"]["modeled_as_approximation"] is True
+
+    def test_same_means_every_holder_not_only_founders(self) -> None:
+        """Founders holding a sliver move by less than the epsilon while the pool and other holders move by
+        points; that is not "the same on both sizings"."""
+        inputs = {
+            "company_name": "Foobar",
+            "founders": [{"id": "f", "name": "Founders", "common_shares": 50_000, "share_class": "class_a"}],
+            "common_batches": [{"holder_id": "x", "shares": 8_000_000, "issuance_date": "2024-01-01"}],
+            "metadata": {"run_id": "r"},
+        }
+        instruments: dict[str, Any] = {"safes": [], "convertible_notes": [], "metadata": {"run_id": "r"}}
+        state = cap_state_mod.build_cap_state(inputs, instruments)
+        req = {
+            "scenario_id": "s",
+            "type": "priced_round",
+            "parameters": {**_CF_BASE_PARAMS, "target_basis": "post_money"},
+        }
+        cf = run_scenario.run_all_scenarios(
+            inputs=inputs, instruments=instruments, cap_state=state, scenario_requests=[req]
+        )[0]["computed_outputs"]["pool_sizing_counterfactual"]
+        # Positive control: founders really do move by less than the epsilon here.
+        assert abs(cf["founders"]["other_value"] - cf["founders"]["modeled_value"]) <= run_scenario._POOL_CF_EPSILON
+        assert cf["status"] == "computed"
+
+    def test_same_with_top_ups_on_both_sides_carries_the_every_holder_note(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The epsilon branch: both sides add options, yet no holder moves. Forced by solving the "other"
+        side on the modeled basis, so the two results are identical."""
+        real = run_scenario.solve_priced_round
+
+        def same(**kw: Any) -> dict[str, Any]:
+            result: dict[str, Any] = real(**{**kw, "target_basis": "post_money"})
+            return result
+
+        monkeypatch.setattr(run_scenario, "solve_priced_round", same)
+        digest, _p = _cf_compose({"target_basis": "post_money"})
+        cf = digest["report_pool_sizing_counterfactual"]
+        assert cf["status"] == "same on both sizings"
+        assert cf["note"] == "The two sizings differ by less than a tenth of a point for every holder."
+
+    def test_the_pool_is_never_a_gainer_even_when_it_grows(self) -> None:
+        cf = _cf_run({"target_basis": "pre_money"})["pool_sizing_counterfactual"]
+        pool = cf["classes"]["option_pool_pct"]
+        assert pool["other"] > pool["modeled"] + 0.01  # positive control: the pool grows on the other sizing
+        assert "option_pool_pct" not in cf["gains_on_other_sizing"]
+
+    def test_a_returned_blocker_on_the_other_sizing_is_unavailable_and_leaves_the_modeled_result_alone(self) -> None:
+        # A pre-money round whose post-money counterfactual is over-determined by an acquisition.
+        params = {"target_basis": "pre_money", "target_pool_percent": 0.45, "acquisition": {"consideration_pct": 0.6}}
+        with_cf = _cf_run(params)
+        without = _cf_run(params, counterfactual=False)
+        cf = with_cf.pop("pool_sizing_counterfactual")
+        assert cf["status"] == "unavailable", cf
+        assert "founders" not in cf and cf["reason"]
+        assert with_cf == without
+
+    def test_a_named_solver_failure_on_the_other_sizing_is_loud(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        real = run_scenario.solve_priced_round
+
+        def failing(**kw: Any) -> dict[str, Any]:
+            if kw.get("target_basis") == "pre_money":
+                raise ValueError("synthetic solver failure")
+            result: dict[str, Any] = real(**kw)
+            return result
+
+        monkeypatch.setattr(run_scenario, "solve_priced_round", failing)
+        co = _cf_run({"target_basis": "post_money"})
+        assert co["pool_sizing_counterfactual"]["status"] == "unavailable"
+        assert "W_POOL_COUNTERFACTUAL_UNAVAILABLE" in [w.get("code") for w in co.get("warnings") or []]
+        assert "pool sizing counterfactual" in capsys.readouterr().err
+
+    def test_an_anti_dilution_contradiction_on_the_other_sizing_propagates(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        real = run_scenario.solve_priced_round
+
+        def contradicting(**kw: Any) -> dict[str, Any]:
+            if kw.get("target_basis") == "pre_money":
+                raise _pr.AntiDilutionContradiction("E_SYNTHETIC", "synthetic")
+            result: dict[str, Any] = real(**kw)
+            return result
+
+        monkeypatch.setattr(run_scenario, "solve_priced_round", contradicting)
+        with pytest.raises(_pr.AntiDilutionContradiction):
+            _cf_run({"target_basis": "post_money"})
+
+    def test_the_counterfactual_reuses_every_modeled_input(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Drift guard: the second solve gets exactly the first solve's inputs, basis aside -- the
+        post-pump cap state, the timing-filtered acquisition, pre_money_basis, pool_consideration_basis,
+        MFN elections, the event date."""
+        calls: list[dict[str, Any]] = []
+        real = run_scenario.solve_priced_round
+
+        def recording(**kw: Any) -> dict[str, Any]:
+            calls.append(kw)
+            result: dict[str, Any] = real(**kw)
+            return result
+
+        monkeypatch.setattr(run_scenario, "solve_priced_round", recording)
+        _cf_run(
+            {
+                "target_basis": "post_money",
+                "pre_money_basis": "excludes_safe_conversion",
+                "pool_consideration_basis": "exclude",
+                "acquisition": {"consideration_pct": 0.1, "acquisition_timing": "concurrent_with_round"},
+                "transaction_event_date": "2026-06-01",
+            },
+            warrant_exercised_before_round=400_000,
+        )
+        assert len(calls) == 2
+        modeled, other = calls
+        # Positive control: the pump ran, so "the post-pump cap state" is a different state from the one
+        # the scenario started with -- otherwise a counterfactual on the pre-pump state would pass here.
+        pre_pump = _cf_setup(warrant_exercised_before_round=400_000)[2]
+        assert modeled["cap_state"]["as_converted_totals"] != pre_pump["as_converted_totals"]
+        assert other["target_basis"] == "pre_money" and modeled["target_basis"] == "post_money"
+        assert {k: v for k, v in other.items() if k != "target_basis"} == {
+            k: v for k, v in modeled.items() if k != "target_basis"
+        }
+
+
+# ---------------------------------------------------------------------------
+# The counterfactual as the founder and the coach read it: display strings in the payload, one line in
+# report.md, both from the same digest. Built from real producer output, never a hand-written block.
+# ---------------------------------------------------------------------------
+
+_CF_BASE_PARAMS = {"pre_money": 12_000_000, "new_money": 3_000_000, "target_pool_percent": 0.1}
+
+
+def _cf_compose(
+    params: dict[str, Any], *, available_pool: int = 0, other_common: int = 0, warrant: int = 0
+) -> tuple[dict[str, Any], str]:
+    """Compose a report around one priced scenario the real producer solved; return (payload digest, page)."""
+    co = _cf_run(params, available_pool=available_pool, other_common=other_common, warrant=warrant)
+    scenario = {
+        "scenario_id": "s_round",
+        "label": "Series A",
+        "type": "priced_round",
+        "parameters": {**_CF_BASE_PARAMS, **params},
+        "computed_outputs": co,
+    }
+    d = _make_cap_compose_dir(scenarios=[scenario])
+    rc, report, err = _run_cap_compose(d)
+    assert rc == 0, err
+    with open(os.path.join(d, "report.md"), encoding="utf-8") as f:
+        page = f.read()
+    digest = report["coaching_payload"]["scenario_digest"][0]
+    # The comparison and the new-options reading are the report's, not the payload's: tests of their strings read
+    # the digests report.md's Option pool section is built from, under their own names.
+    import compose_report  # type: ignore[import-not-found]
+
+    cf, inc = compose_report._pool_digests(co, {**_CF_BASE_PARAMS, **params})
+    digest["report_pool_sizing_counterfactual"] = cf
+    digest["report_pool_increase_reading"] = inc
+    digest["report_disclosures"] = report["report_disclosures"]
+    return digest, page
+
+
+def _strings(o: Any) -> list[str]:
+    if isinstance(o, str):
+        return [o]
+    if isinstance(o, dict):
+        return [s for v in o.values() for s in _strings(v)]
+    if isinstance(o, list):
+        return [s for v in o for s in _strings(v)]
+    return []
+
+
+class TestPoolSizingCounterfactualDigest:
+    @staticmethod
+    def _payload_warning(params: dict[str, Any], code: str) -> dict[str, Any]:
+        co = _cf_run(params)
+        scenario = {
+            "scenario_id": "s_round",
+            "label": "Series A",
+            "type": "priced_round",
+            "parameters": {**_CF_BASE_PARAMS, **params},
+            "computed_outputs": co,
+        }
+        d = _make_cap_compose_dir(scenarios=[scenario])
+        rc, report, err = _run_cap_compose(d)
+        assert rc == 0, err
+        # The pool-basis disclosures are the report's (its Option pool section) and the hand-over's, not the coach's.
+        assert not [w for w in report["coaching_payload"]["high_severity_warnings"] if w.get("code") == code]
+        hits = [w for w in report["report_disclosures"] if w.get("code") == code]
+        assert len(hits) == 1, report["report_disclosures"]
+        produced = next(w for w in co["warnings"] if isinstance(w, dict) and w.get("code") == code)
+        with open(os.path.join(d, "report.md"), encoding="utf-8") as f:
+            page = f.read()
+        return {"disclosure": hits[0], "produced": produced, "page": page}
+
+    def test_each_pool_basis_disclosure_reaches_the_hand_over_with_its_severity_and_the_page_with_its_words(
+        self,
+    ) -> None:
+        # Every solver warning was once flattened to medium; the excluding-basis substitution is high by design.
+        import _warning_callouts  # type: ignore[import-not-found]
+
+        excl = self._payload_warning(
+            {
+                "target_basis": "post_money_excluding_converting_securities",
+                "excluding_basis_modeled_as": "post_money_by_founder_choice",
+            },
+            "W_EXCLUDING_BASIS_MODELED_AS_POST_MONEY",
+        )
+        assert excl["disclosure"]["severity"] == "high"
+        stated = self._payload_warning(
+            {"target_basis": "custom", "custom_basis_stated_by_founder": "pre_money"},
+            "W_CUSTOM_BASIS_STATED_BY_FOUNDER",
+        )
+        assert stated["disclosure"]["severity"] == "medium"
+        for case in (excl, stated):
+            prose = _warning_callouts._SOLVER_WARNING_PROSE[case["produced"]["code"]]
+            assert prose in case["page"], case["produced"]["code"]
+
+    def test_a_stated_custom_basis_is_not_called_undefined_beside_the_measure_it_names(self) -> None:
+        digest, page = _cf_compose({"target_basis": "custom", "custom_basis_stated_by_founder": "pre_money"})
+        assert (
+            "The unallocated options after the round equal 10% of the fully diluted share count before the round"
+            in page
+        )
+        cf = digest["report_pool_sizing_counterfactual"]
+        assert cf["status"] == "not computed"
+        assert "your answer" in cf["reason"] and "no single other sizing" not in cf["reason"], cf["reason"]
+
+    def test_computed_reaches_the_payload_as_display_strings(self) -> None:
+        digest, _page = _cf_compose({"target_basis": "post_money"})
+        cf = digest["report_pool_sizing_counterfactual"]
+        assert cf["status"] == "computed"
+        assert (
+            cf["modeled_sizing"] == "unallocated options equal to 10% of the fully diluted share count after the round"
+        )
+        assert (
+            cf["other_sizing"] == "unallocated options equal to 10% of the fully diluted share count before the round"
+        )
+        assert cf["founders"] == {"modeled": "63.00%", "other": "64.80%", "change": "+1.80 points"}
+        assert cf["who_gains_on_the_other_sizing"] == ["Founders", "SAFE holders"]
+        holders = [r["holder"] for r in cf["rows"]]
+        assert "Option pool, granted and unallocated" in holders and "Other existing holders" in holders
+        for side in ("modeled", "other"):
+            assert abs(sum(float(r[side].rstrip("%")) for r in cf["rows"]) - 100.0) <= 0.3
+        assert cf["mechanism"].startswith("Under both sizings the pool is created before")
+
+    def test_change_is_computed_from_the_displayed_figures(self) -> None:
+        """Founders' figures and the change are shown at two decimals, and the change is the difference of the
+        two DISPLAYED figures: 63.0449 -> 63.04 and 64.8651 -> 64.87 read +1.83, not the unrounded +1.8202 ->
+        +1.82. At one decimal the pair could not be exact and self-consistent at once (63.04 / 64.86 showed
+        as 63.0 / 64.9, so +1.9 from the display against +1.8 exact)."""
+        import compose_report  # type: ignore[import-not-found]
+
+        cf = {
+            "status": "computed",
+            "modeled_basis": "post_money",
+            "other_basis": "pre_money",
+            "modeled_basis_assumed": False,
+            "founders": {"modeled_value": 0.630449, "other_value": 0.648651},
+            "classes": {"founders_pct": {"modeled": 0.630449, "other": 0.648651}},
+            "gains_on_other_sizing": [],
+        }
+        out = compose_report.build_pool_sizing_counterfactual_digest(cf, {"target_pool_percent": 0.1})
+        f = out["founders"]
+        assert (f["modeled"], f["other"], f["change"]) == ("63.04%", "64.87%", "+1.83 points")
+        assert float(f["change"].split()[0]) == round(float(f["other"][:-1]) - float(f["modeled"][:-1]), 2)
+        # The same rule on the new-options-only reading.
+        inc = compose_report.build_pool_increase_reading_digest(
+            {"status": "computed", "founders": {"modeled_value": 0.648651, "increase_value": 0.630449}},
+            {"target_pool_percent": 0.1, "target_basis": "post_money"},
+            modeled_reading="m",
+        )
+        assert (inc["founders"]["modeled"], inc["founders"]["increase"], inc["founders"]["change"]) == (
+            "64.87%",
+            "63.04%",
+            "-1.83 points",
+        )
+
+    def test_no_string_in_any_status_is_internal_vocabulary(self) -> None:
+        sys.path.insert(0, os.path.join(_REPO, "founder-skills", "scripts"))
+        try:
+            import _founder_text  # type: ignore[import-not-found]
+        finally:
+            sys.path.pop(0)
+        cases: list[tuple[dict[str, Any], dict[str, int]]] = [
+            ({"target_basis": "post_money"}, {}),
+            ({"target_basis": "pre_money"}, {}),
+            ({}, {}),
+            ({"target_basis": "post_money"}, {"available_pool": 3_000_000}),
+            ({"target_basis": "custom", "custom_basis_stated_by_founder": "pre_money"}, {}),
+            ({"target_basis": "pre_money", "target_pool_percent": 0.45, "acquisition": {"consideration_pct": 0.6}}, {}),
+            ({"target_basis": "post_money"}, {"other_common": 500_000, "warrant": 200_000}),
+        ]
+        seen = set()
+        for params, setup in cases:
+            digest, _page = _cf_compose(params, **setup)
+            cf = digest["report_pool_sizing_counterfactual"]
+            seen.add(cf["status"])
+            for s in _strings(cf):
+                assert _founder_text.scan(s) == {"enums": [], "filenames": []}, s
+                assert "_" not in s and not re.search(r"\b[EW]_[A-Z]", s), s
+        # Positive control: every status was exercised, so a clean scan is not a scan of nothing.
+        assert seen == {"computed", "same on both sizings", "not computed", "unavailable"}
+
+    def test_report_md_carries_one_line_for_computed_and_same_and_none_otherwise(self) -> None:
+        _d, page = _cf_compose({"target_basis": "post_money"})
+        line = (
+            "**Option pool on the other sizing:** Unallocated options equal to 10% of the "
+            "fully diluted share count before the round: founders 64.80% (vs 63.00% as modeled)."
+        )
+        assert page.count(line) == 1
+        _d, page = _cf_compose({"target_basis": "post_money"}, available_pool=3_000_000)
+        assert page.count("**Option pool on the other sizing:**") == 1
+        assert "already meets the target on both sizings" in page
+        for params in ({"target_basis": "custom"}, {"target_pool_percent": None}):
+            _d, page = _cf_compose(params)
+            assert "Option pool on the other sizing" not in page
+
+    def test_the_label_names_the_numerator_the_solver_sizes(self) -> None:
+        """The label says "unallocated options equal to 10%"; the solver must size exactly that -- granted
+        options outside the 10%, existing unallocated options inside it. Granted options are present, so a
+        label naming the whole pool would be measurably wrong here."""
+        co = _cf_run({"target_basis": "post_money"}, available_pool=200_000, outstanding=300_000)
+        sb = co["shares_breakdown"]
+        post_fd = sb["pre_round_fully_diluted"] + sb["safe_converted"] + sb["pool_topup"] + sb["new_money"]
+        assert (200_000 + sb["pool_topup"]) / post_fd == pytest.approx(0.10, abs=1e-6)
+        # Positive control: counting granted options in the numerator would miss the target by a mile.
+        assert (500_000 + sb["pool_topup"]) / post_fd > 0.12
+        digest, _page = _cf_compose({"target_basis": "post_money"}, available_pool=200_000)
+        modeled_sizing = digest["report_pool_sizing_counterfactual"]["modeled_sizing"]
+        assert modeled_sizing.startswith("unallocated options equal to 10%")
+
+    def test_a_side_whose_existing_pool_covers_the_target_is_not_labelled_equal_to_it(self) -> None:
+        digest, _page = _cf_compose({"target_basis": "pre_money"}, available_pool=1_100_000)
+        cf = digest["report_pool_sizing_counterfactual"]
+        assert cf["status"] == "computed"
+        assert cf["modeled_sizing"] == (
+            "unallocated options already at or above 10% of the fully diluted share count before the round, "
+            "so no new options are added"
+        )
+        # Control: the other side does add options, so it keeps "equal to".
+        assert cf["other_sizing"].startswith("unallocated options equal to 10%")
+
+    def test_a_pool_sized_without_the_acquisition_says_so_on_the_post_round_count_only(self) -> None:
+        acq = {"acquisition": {"consideration_pct": 0.1, "acquisition_timing": "concurrent_with_round"}}
+        post, _p = _cf_compose({"target_basis": "post_money", **acq, "pool_consideration_basis": "exclude"})
+        assert post["report_pool_sizing_counterfactual"]["modeled_sizing"] == (
+            "unallocated options equal to 10% of the fully diluted share count after the round, not counting shares "
+            "issued for the acquisition"
+        )
+        assert "acquisition" not in post["report_pool_sizing_counterfactual"]["other_sizing"]  # pre-round count
+        included, _p = _cf_compose({"target_basis": "post_money", **acq})
+        assert "acquisition" not in included["report_pool_sizing_counterfactual"]["modeled_sizing"]
+
+    def test_a_defaulted_basis_is_marked_assumed_in_the_payload(self) -> None:
+        digest, _page = _cf_compose({})
+        cf = digest["report_pool_sizing_counterfactual"]
+        assert cf["modeled_basis_assumed"] is True
+        assert (
+            cf["modeled_sizing"] == "unallocated options equal to 10% of the fully diluted share count before the round"
+        )
+        assert cf["other_sizing"] == "unallocated options equal to 10% of the fully diluted share count after the round"
+
+
+# ---------------------------------------------------------------------------
+# The pool's NUMERATOR on every surface that prints a pool figure: a share count and the percentage beside
+# it must describe the same set of options, and a line labelled "unallocated" must show the unallocated
+# figure. The solver's `option_pool_pct` counts granted options too (outstanding + available + top-up), so
+# any surface that labels it "unallocated" misstates the free pool whenever options have been granted.
+# ---------------------------------------------------------------------------
+
+_NUM_GRANTED, _NUM_FREE = 800_000, 200_000
+
+
+def _numerator_inputs() -> dict[str, Any]:
+    return {
+        "company_name": "Foobar",
+        "founders": [{"id": "f", "name": "Founders", "common_shares": 8_000_000, "share_class": "class_a"}],
+        "option_pool": {
+            "authorized": _NUM_GRANTED + _NUM_FREE,
+            "issued": _NUM_GRANTED,
+            "unallocated": _NUM_FREE,
+        },
+        "metadata": {"run_id": "r"},
+    }
+
+
+class TestPoolNumeratorOnEverySurface:
+    def _fast(self) -> tuple[str, dict[str, Any]]:
+        import quick_assess  # type: ignore[import-not-found]
+
+        out = quick_assess.quick_assess(
+            company_name="Foobar",
+            inputs=_numerator_inputs(),
+            safes=[],
+            notes=[],
+            pre_money=12_000_000,
+            new_money=3_000_000,
+            target_pool_percent=0.10,
+            target_basis="post_money",
+        )
+        state = cap_state_mod.build_cap_state(
+            _numerator_inputs(), {"safes": [], "convertible_notes": [], "metadata": {"run_id": "r"}}
+        )
+        solved = _pr.solve_priced_round(
+            cap_state=state,
+            safes=[],
+            notes=[],
+            pre_money=12_000_000,
+            new_money=3_000_000,
+            target_pool_percent=0.10,
+            target_basis="post_money",
+        )
+        return str(out["_report_md"]), solved
+
+    def test_fast_assess_top_up_line_prints_the_free_pool_percentage_for_the_free_pool_shares(self) -> None:
+        import quick_assess  # type: ignore[import-not-found]
+
+        md, solved = self._fast()
+        topup = int(solved["shares_breakdown"]["pool_topup"])
+        post_fd = solved["post_round_fully_diluted_shares"]
+        free = _NUM_FREE + topup
+        # Positive control: granted options make the free pool and the whole pool differ by points.
+        assert solved["aggregate_ownership_by_class"]["option_pool_pct"] - free / post_fd > 0.05
+        line = next(ln for ln in md.splitlines() if ln.startswith("- Pool Top-Up:"))
+        assert f"unallocated pool grows to {free:,} = {quick_assess._percent(free / post_fd)} post-money" in line, line
+
+    def test_fast_assess_table_row_labels_the_whole_pool_as_the_whole_pool(self) -> None:
+        import quick_assess  # type: ignore[import-not-found]
+
+        md, solved = self._fast()
+        topup = int(solved["shares_breakdown"]["pool_topup"])
+        total = _NUM_GRANTED + _NUM_FREE + topup
+        pct = quick_assess._percent(solved["aggregate_ownership_by_class"]["option_pool_pct"])
+        assert f"| Option pool (granted and unallocated) | {total:,} | {pct} |" in md
+        assert "| Option pool (unallocated) |" not in md
+
+    def test_report_md_pool_note_states_the_sized_options_not_the_whole_pool(self) -> None:
+        acq = {"consideration_pct": 0.1, "acquisition_timing": "concurrent_with_round"}
+        params = {"target_basis": "post_money", "acquisition": acq, "pool_consideration_basis": "exclude"}
+        co = _cf_run(params, outstanding=_NUM_GRANTED, available_pool=_NUM_FREE)
+        post_fd = co["post_round_fully_diluted_shares"]
+        free_pct = (_NUM_FREE + co["shares_breakdown"]["pool_topup"]) / post_fd
+        total_pct = co["aggregate_ownership_by_class"]["option_pool_pct"]
+        assert total_pct - free_pct > 0.03  # positive control
+        scenario = {
+            "scenario_id": "s_round",
+            "label": "Series A",
+            "type": "priced_round",
+            "parameters": {**_CF_BASE_PARAMS, **params},
+            "computed_outputs": co,
+        }
+        pool = {"authorized": _NUM_GRANTED + _NUM_FREE, "issued": _NUM_GRANTED, "unallocated": _NUM_FREE}
+        d = _make_cap_compose_dir(scenarios=[scenario], option_pool=pool)
+        rc, _report, err = _run_cap_compose(d)
+        assert rc == 0, err
+        with open(os.path.join(d, "report.md"), encoding="utf-8") as f:
+            page = f.read()
+        note = next(ln for ln in page.splitlines() if "Option pool sizing basis" in ln)
+        assert f"which is {free_pct:.1%} of post-closing" in note, note
+        assert f"counting granted options, the whole pool is {total_pct:.1%}" in note, note
+
+
+_NOTE_ACQ = {"consideration_pct": 0.1, "acquisition_timing": "concurrent_with_round"}
+
+
+def _note_for(params: dict[str, Any], *, outstanding: int, available_pool: int) -> tuple[str, dict[str, Any]]:
+    """The acquisition pool note exactly as compose builds it, from a real solve."""
+    import compose_report  # type: ignore[import-not-found]
+
+    co = _cf_run(params, outstanding=outstanding, available_pool=available_pool)
+    agg = co["aggregate_ownership_by_class"]
+    note = compose_report.build_pool_basis_note(
+        target_pool_percent=0.1,
+        pool_consideration_basis=params.get("pool_consideration_basis", "include"),
+        realized_pool_pct=agg["option_pool_pct"],
+        acquisition_pct=agg.get("acquisition_pct"),
+        target_basis=params.get("target_basis"),
+        unallocated_pool_pct=compose_report._unallocated_pool_pct(
+            co, _cf_setup(outstanding=outstanding, available_pool=available_pool)[2]
+        ),
+        pool_topup_shares=co["shares_breakdown"].get("pool_topup"),
+        consideration_excluded=compose_report._consideration_excluded_from_pool_sizing(params),
+    )
+    return str(note), co
+
+
+class TestAcquisitionPoolNoteStatesWhatTheSolverDid:
+    def test_a_zero_top_up_is_not_described_as_sizing(self) -> None:
+        params = {"target_basis": "post_money", "acquisition": _NOTE_ACQ, "pool_consideration_basis": "exclude"}
+        note, co = _note_for(params, outstanding=_NUM_GRANTED, available_pool=3_000_000)
+        assert co["shares_breakdown"]["pool_topup"] == 0  # positive control: nothing was added
+        assert "no new options were added" in note and "sized to" not in note, note
+
+    def test_a_pre_money_sizing_is_of_the_pre_round_count_whatever_the_consideration_setting(self) -> None:
+        for pcb in ("exclude", "include"):
+            params = {"target_basis": "pre_money", "acquisition": _NOTE_ACQ, "pool_consideration_basis": pcb}
+            note, co = _note_for(params, outstanding=_NUM_GRANTED, available_pool=_NUM_FREE)
+            sb = co["shares_breakdown"]
+            base = sb["pre_round_fully_diluted"] + sb["safe_converted"] + sb["pool_topup"]
+            # Positive control: the unallocated options really are 10% of the pre-round count.
+            assert (_NUM_FREE + sb["pool_topup"]) / base == pytest.approx(0.10, abs=1e-6)
+            assert "of the fully diluted share count before the round" in note, (pcb, note)
+            assert "pre-consideration" not in note and "consideration shares counted" not in note, (pcb, note)
+
+    def test_the_increase_basis_names_the_unallocated_share_and_the_whole_pool_apart(self) -> None:
+        params = {
+            "target_basis": "post_money_increase",
+            "acquisition": _NOTE_ACQ,
+            "pool_consideration_basis": "exclude",
+        }
+        note, co = _note_for(params, outstanding=_NUM_GRANTED, available_pool=_NUM_FREE)
+        post_fd = co["post_round_fully_diluted_shares"]
+        free = (_NUM_FREE + co["shares_breakdown"]["pool_topup"]) / post_fd
+        whole = co["aggregate_ownership_by_class"]["option_pool_pct"]
+        assert f"unallocated options are {free:.1%}" in note, note
+        assert f"the whole pool is {whole:.1%}" in note, note
+        assert "the pool is" not in note.replace("the whole pool is", ""), note
+
+    def test_only_a_concurrent_acquisition_is_left_out_of_the_sizing_base(self) -> None:
+        import compose_report  # type: ignore[import-not-found]
+
+        f = compose_report._consideration_excluded_from_pool_sizing
+        assert f({"pool_consideration_basis": "exclude", "acquisition": _NOTE_ACQ})
+        assert f({"pool_consideration_basis": "exclude", "acquisition": {"consideration_pct": 0.1}})  # default timing
+        # Closed before the round: its shares are already in the pre-round cap table, so in the base.
+        closed = {"consideration_pct": 0.1, "acquisition_timing": "pre_round_closed"}
+        assert not f({"pool_consideration_basis": "exclude", "acquisition": closed})
+        # An acquisition from the inputs (no scenario acquisition) never reaches the solver's exclusion.
+        assert not f({"pool_consideration_basis": "exclude"})
+        assert not f({"pool_consideration_basis": "include", "acquisition": _NOTE_ACQ})
+
+    def test_fast_assess_pool_line_names_the_whole_pool_the_json_carries(self) -> None:
+        import quick_assess  # type: ignore[import-not-found]
+
+        out = quick_assess.quick_assess(
+            company_name="Foobar",
+            inputs=_numerator_inputs(),
+            safes=[],
+            notes=[],
+            pre_money=12_000_000,
+            new_money=3_000_000,
+            target_pool_percent=0.10,
+            target_basis="post_money",
+        )
+        md = str(out.pop("_report_md"))
+        driver = next(d for d in _walk_drivers(out) if d.get("type") == "pool_refresh")
+        line = next(ln for ln in md.splitlines() if ln.startswith("- Pool Top-Up:"))
+        assert f"the whole pool is {quick_assess._percent(driver['impact_pct'])}" in line, line
+
+
+def _walk_drivers(o: Any) -> list[dict[str, Any]]:
+    """Every driver record in the fast-assess JSON, wherever the schema nests them."""
+    found: list[dict[str, Any]] = []
+    if isinstance(o, dict):
+        if "type" in o and "impact_pct" in o:
+            found.append(o)
+        for v in o.values():
+            found.extend(_walk_drivers(v))
+    elif isinstance(o, list):
+        for v in o:
+            found.extend(_walk_drivers(v))
+    return found
+
+
+# ---------------------------------------------------------------------------
+# The "only the new options" reading, computed when it is disclosed. A post-money target beside existing
+# unallocated options (E > 0), with the founder not having said what the percentage counts, is modeled as the
+# pool available after the round; the solver discloses the other reading. The same round is re-solved on the
+# increase basis -- one input changed -- so the disclosure carries a number.
+# Identity (pool in the price denominator, no acquisition): post-round count D = (P + x)·k, k = post/pre, so
+# the available-after top-up is x1 = (tkP - E)/(1 - tk) and the new-options-only top-up x2 = tkP/(1 - tk):
+# x2 - x1 = E/(1 - tk) while x1 > 0, and founders on the increase reading = F/((P + x2)·k) always. When the
+# price excludes the SAFE's conversion, its shares S sit outside the scaled count: D = (P0 + x)·k + S.
+# ---------------------------------------------------------------------------
+
+_READING = "W_POOL_BASIS_READING_NOT_CONFIRMED"
+
+
+def _disclosed(co: dict[str, Any]) -> bool:
+    return any(isinstance(w, dict) and w.get("code") == _READING for w in co.get("warnings") or [])
+
+
+class TestPoolIncreaseReading:
+    def test_computed_exactly_when_the_reading_is_disclosed(self) -> None:
+        on = _cf_run({"target_basis": "post_money"}, available_pool=200_000)
+        assert _disclosed(on)  # positive control: the solver disclosed it
+        assert on["pool_increase_reading"]["status"] == "computed"
+        cases: dict[str, tuple[dict[str, Any], int]] = {
+            "no existing pool": ({"target_basis": "post_money"}, 0),
+            "pre-money": ({"target_basis": "pre_money"}, 200_000),
+            "increase modeled": ({"target_basis": "post_money_increase"}, 200_000),
+            "no pool target": ({"target_basis": "post_money", "target_pool_percent": None}, 200_000),
+        }
+        for name, (params, free) in cases.items():
+            co = _cf_run(params, available_pool=free)
+            assert not _disclosed(co), name
+            assert "pool_increase_reading" not in co, name
+
+    def test_the_top_up_difference_and_founders_match_the_hand_computed_identity(self) -> None:
+        t, k, founders = 0.10, 15_000_000 / 12_000_000, 8_000_000
+        for extra in ({}, {"pre_money_basis": "excludes_safe_conversion"}):
+            for granted in (0, 800_000):
+                E = 200_000
+                co = _cf_run({"target_basis": "post_money", **extra}, available_pool=E, outstanding=granted)
+                block = co["pool_increase_reading"]
+                x1, x2 = block["pool_topup_shares"]["modeled"], block["pool_topup_shares"]["increase"]
+                assert x1 > 0  # the identity holds only unclamped
+                assert abs((x2 - x1) - E / (1 - t * k)) <= 1.0, (extra, granted, x1, x2)
+                sb = co["shares_breakdown"]
+                if extra:
+                    # The price excludes the SAFE's shares, so they sit outside the scaled count.
+                    count = (sb["pre_round_fully_diluted"] + x2) * k + sb["safe_converted"]
+                else:
+                    count = (sb["pre_round_fully_diluted"] + sb["safe_converted"] + x2) * k
+                assert block["founders"]["increase_value"] == pytest.approx(founders / count, abs=1e-6)
+                # Non-vacuity: the two readings are points apart, not a rounding apart.
+                assert block["founders"]["modeled_value"] - block["founders"]["increase_value"] > 0.01
+
+    def test_a_clamped_modeled_top_up_still_gives_the_increase_reading(self) -> None:
+        """E at or above the target: nothing is added on the modeled reading, yet the new options alone are sized
+        at the target. The top-up identity no longer holds (x1 is clamped at 0); the founders formula does."""
+        k, founders = 15_000_000 / 12_000_000, 8_000_000
+        co = _cf_run({"target_basis": "post_money"}, available_pool=1_600_000)
+        block = co["pool_increase_reading"]
+        assert block["pool_topup_shares"]["modeled"] == 0
+        assert block["status"] == "computed" and block["pool_topup_shares"]["increase"] > 0
+        P = co["shares_breakdown"]["pre_round_fully_diluted"] + co["shares_breakdown"]["safe_converted"]
+        x2 = block["pool_topup_shares"]["increase"]
+        assert block["founders"]["increase_value"] == pytest.approx(founders / ((P + x2) * k), abs=1e-6)
+
+    def test_an_approximated_or_document_defined_basis_is_not_computed(self) -> None:
+        """The disclosure fires on these too, but the comparison refuses them -- the modeled basis is not plain
+        post-money -- and an increase figure beside them would read as exact."""
+        for params in (
+            {
+                "target_basis": "post_money_excluding_converting_securities",
+                "excluding_basis_modeled_as": "post_money_by_founder_choice",
+            },
+            {"target_basis": "custom", "custom_basis_stated_by_founder": "post_money"},
+        ):
+            co = _cf_run(params, available_pool=200_000)
+            assert _disclosed(co), params  # positive control
+            assert co["pool_sizing_counterfactual"]["status"] == "not_computed", params
+            block = co["pool_increase_reading"]
+            assert block["status"] == "not_computed", params
+            # The same cause as the comparison's refusal, worded for this reading.
+            assert "sizing only the new options" in block["reason"], (params, block)
+            assert block["reason"] != co["pool_sizing_counterfactual"]["reason"], params
+            assert "founders" not in block, params
+        reasons = {
+            _cf_run(p, available_pool=200_000)["pool_increase_reading"]["reason"]
+            for p in (
+                {
+                    "target_basis": "post_money_excluding_converting_securities",
+                    "excluding_basis_modeled_as": "post_money_by_founder_choice",
+                },
+                {"target_basis": "custom", "custom_basis_stated_by_founder": "post_money"},
+            )
+        }
+        assert len(reasons) == 2, reasons  # each cause keeps its own wording
+
+    def test_the_re_solve_reuses_every_modeled_input_at_the_priced_round_site(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls: list[dict[str, Any]] = []
+        real = run_scenario.solve_priced_round
+
+        def recording(**kw: Any) -> dict[str, Any]:
+            calls.append(kw)
+            result: dict[str, Any] = real(**kw)
+            return result
+
+        monkeypatch.setattr(run_scenario, "solve_priced_round", recording)
+        co = _cf_run(
+            {
+                "target_basis": "post_money",
+                "pre_money_basis": "excludes_safe_conversion",
+                "pool_consideration_basis": "exclude",
+                "acquisition": {"consideration_pct": 0.1, "acquisition_timing": "concurrent_with_round"},
+                "transaction_event_date": "2026-06-01",
+            },
+            available_pool=200_000,
+            warrant_exercised_before_round=400_000,
+        )
+        assert co["pool_increase_reading"]["status"] == "computed"
+        modeled = calls[0]
+        increase = [c for c in calls if c.get("target_basis") == "post_money_increase"]
+        assert len(increase) == 1
+        assert {k: v for k, v in increase[0].items() if k != "target_basis"} == {
+            k: v for k, v in modeled.items() if k != "target_basis"
+        }
+
+    def test_the_re_solve_reuses_every_modeled_input_at_the_safe_conversion_site(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls: list[dict[str, Any]] = []
+        real = run_scenario.solve_priced_round
+
+        def recording(**kw: Any) -> dict[str, Any]:
+            calls.append(kw)
+            result: dict[str, Any] = real(**kw)
+            return result
+
+        monkeypatch.setattr(run_scenario, "solve_priced_round", recording)
+        inputs, instruments, state = _cf_setup(available_pool=200_000)
+        req = {
+            "scenario_id": "s",
+            "type": "safe_conversion",
+            "parameters": {
+                "priced_round_pre_money": 12_000_000,
+                "priced_round_new_money": 3_000_000,
+                "target_pool_percent": 0.1,
+                "target_basis": "post_money",
+                "transaction_event_date": "2026-06-01",
+            },
+        }
+        co = run_scenario.run_all_scenarios(
+            inputs=inputs, instruments=instruments, cap_state=state, scenario_requests=[req]
+        )[0]["computed_outputs"]
+        assert co["pool_increase_reading"]["status"] == "computed"
+        increase = [c for c in calls if c.get("target_basis") == "post_money_increase"]
+        assert len(increase) == 1
+        assert {k: v for k, v in increase[0].items() if k != "target_basis"} == {
+            k: v for k, v in calls[0].items() if k != "target_basis"
+        }
+
+    def test_a_named_solver_failure_is_loud_and_leaves_the_modeled_result_alone(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        real = run_scenario.solve_priced_round
+
+        def failing(**kw: Any) -> dict[str, Any]:
+            if kw.get("target_basis") == "post_money_increase":
+                raise ValueError("synthetic solver failure")
+            result: dict[str, Any] = real(**kw)
+            return result
+
+        without = _cf_run({"target_basis": "post_money"}, counterfactual=False, available_pool=200_000)
+        monkeypatch.setattr(run_scenario, "solve_priced_round", failing)
+        co = _cf_run({"target_basis": "post_money"}, available_pool=200_000)
+        block = co.pop("pool_increase_reading")
+        assert block["status"] == "unavailable" and block["reason"] and "founders" not in block
+        assert "pool increase reading" in capsys.readouterr().err
+        codes = [w.get("code") for w in co.get("warnings") or []]
+        assert codes.count("W_POOL_INCREASE_READING_UNAVAILABLE") == 1
+        # Equal to the run without re-solves, except exactly that appended warning and the comparison's block.
+        co["warnings"] = [w for w in co["warnings"] if w.get("code") != "W_POOL_INCREASE_READING_UNAVAILABLE"]
+        co.pop("pool_sizing_counterfactual", None)
+        assert co == without
+
+    def test_an_anti_dilution_contradiction_on_the_re_solve_propagates(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        real = run_scenario.solve_priced_round
+
+        def contradicting(**kw: Any) -> dict[str, Any]:
+            if kw.get("target_basis") == "post_money_increase":
+                raise _pr.AntiDilutionContradiction("E_SYNTHETIC", "synthetic")
+            result: dict[str, Any] = real(**kw)
+            return result
+
+        monkeypatch.setattr(run_scenario, "solve_priced_round", contradicting)
+        with pytest.raises(_pr.AntiDilutionContradiction):
+            _cf_run({"target_basis": "post_money"}, available_pool=200_000)
+
+    def test_a_returned_refusal_on_the_re_solve_is_unavailable(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        real = run_scenario.solve_priced_round
+
+        def refusing(**kw: Any) -> dict[str, Any]:
+            if kw.get("target_basis") == "post_money_increase":
+                return {
+                    "completeness": "structural_only",
+                    "blockers": [{"code": "E_SYNTHETIC_REFUSAL", "instance_id": None, "remedy": "x"}],
+                }
+            result: dict[str, Any] = real(**kw)
+            return result
+
+        monkeypatch.setattr(run_scenario, "solve_priced_round", refusing)
+        block = _cf_run({"target_basis": "post_money"}, available_pool=200_000)["pool_increase_reading"]
+        assert block["status"] == "unavailable" and "_" not in block["reason"], block
+
+    def test_same_on_both_readings_when_no_holder_moves(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        real = run_scenario.solve_priced_round
+
+        def same(**kw: Any) -> dict[str, Any]:
+            result: dict[str, Any] = real(**{**kw, "target_basis": "post_money"})
+            return result
+
+        monkeypatch.setattr(run_scenario, "solve_priced_round", same)
+        block = _cf_run({"target_basis": "post_money"}, available_pool=200_000)["pool_increase_reading"]
+        assert block["status"] == "same_on_both_readings"
+
+    def test_the_sweep_path_skips_it(self) -> None:
+        co = _cf_run({"target_basis": "post_money"}, counterfactual=False, available_pool=200_000)
+        assert _disclosed(co) and "pool_increase_reading" not in co
+
+    def test_each_status_has_its_shape_and_validates(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The local validator ignores oneOf, so per-status shape is pinned here; the schema check proves the
+        typed block accepts what the producer writes and refuses an unknown status."""
+        import _cap_table_schema_validator as v  # type: ignore[import-not-found]
+
+        schema_path = os.path.join(_REPO, "founder-skills", "skills", "cap-table", "references", "schemas")
+        with open(os.path.join(schema_path, "scenarios.schema.json"), encoding="utf-8") as f:
+            schema = json.load(f)
+        blocks = {
+            "computed": _cf_run({"target_basis": "post_money"}, available_pool=200_000),
+            "not_computed": _cf_run(
+                {"target_basis": "custom", "custom_basis_stated_by_founder": "post_money"}, available_pool=200_000
+            ),
+        }
+        real = run_scenario.solve_priced_round
+
+        def failing(**kw: Any) -> dict[str, Any]:
+            if kw.get("target_basis") == "post_money_increase":
+                raise ValueError("synthetic")
+            result: dict[str, Any] = real(**kw)
+            return result
+
+        monkeypatch.setattr(run_scenario, "solve_priced_round", failing)
+        blocks["unavailable"] = _cf_run({"target_basis": "post_money"}, available_pool=200_000)
+        figures = {"founders", "pool_topup_shares", "whole_pool_pct", "price_per_share", "other_solve_warnings"}
+        for status, co in blocks.items():
+            block = co["pool_increase_reading"]
+            assert block["status"] == status, (status, block)
+            if status == "computed":
+                assert figures <= set(block) and "reason" not in block, block
+            else:
+                assert not figures & set(block) and block["reason"] and "_" not in block["reason"], block
+            doc = {
+                "metadata": {"run_id": "r"},
+                "scenarios": [
+                    {"scenario_id": "s", "label": "s", "type": "priced_round", "parameters": {}, "computed_outputs": co}
+                ],
+            }
+            assert v.validate(doc, schema) == [], status
+            co["pool_increase_reading"] = {**block, "status": "bogus"}
+            assert v.validate(doc, schema), status  # positive control: the typed block is enforced
+
+
+class TestPoolIncreaseReadingDigest:
+    def test_computed_reaches_the_payload_as_display_strings(self) -> None:
+        import compose_report  # type: ignore[import-not-found]
+
+        digest, _page = _cf_compose({"target_basis": "post_money"}, available_pool=200_000)
+        assert [d["code"] for d in digest["report_disclosures"]] == ["W_POOL_BASIS_READING_NOT_CONFIRMED"]
+        block = digest["report_pool_increase_reading"]
+        assert block["status"] == "computed"
+        assert block["reading"] == compose_report._pool_sizing_label("post_money_increase", 0.1)
+        assert block["modeled_reading"] == digest["report_pool_sizing_counterfactual"]["modeled_sizing"]
+        f = block["founders"]
+        # The figures are this block's own, not the pre-/post-round comparison's.
+        produced = _cf_run({"target_basis": "post_money"}, available_pool=200_000)["pool_increase_reading"]
+        assert f["increase"] == f"{produced['founders']['increase_value'] * 100:.2f}%", (f, produced)
+        assert f["modeled"] == f"{produced['founders']['modeled_value'] * 100:.2f}%", (f, produced)
+        change = float(f["increase"].rstrip("%")) - float(f["modeled"].rstrip("%"))
+        assert f["change"] == f"{change:+.2f} points" and change < 0
+        n = block["new_options"]
+        assert int(n["increase"].replace(",", "")) - int(n["modeled"].replace(",", "")) == int(
+            n["additional"].replace(",", "")
+        )
+
+    def test_no_string_in_any_status_is_internal_vocabulary(self) -> None:
+        sys.path.insert(0, os.path.join(_REPO, "founder-skills", "scripts"))
+        try:
+            import _founder_text  # type: ignore[import-not-found]
+        finally:
+            sys.path.pop(0)
+        seen = set()
+        for params in (
+            {"target_basis": "post_money"},
+            {"target_basis": "custom", "custom_basis_stated_by_founder": "post_money"},
+        ):
+            digest, _page = _cf_compose(params, available_pool=200_000)
+            block = digest["report_pool_increase_reading"]
+            seen.add(block["status"])
+            for s in _strings(block):
+                assert _founder_text.scan(s) == {"enums": [], "filenames": []}, s
+                assert "_" not in s and not re.search(r"\b[EW]_[A-Z]", s), s
+        assert seen == {"computed", "not computed"}  # positive control: both shapes were scanned
+
+    def test_the_new_options_reading_modeled_is_disclosed_with_no_second_solve_of_it(self) -> None:
+        """Modelled on the new-options-only reading, the scenario discloses THAT reading; the whole-pool figures
+        are the comparison's, and the new-options line is not repeated."""
+        digest, _page = _cf_compose({"target_basis": "post_money_increase"}, available_pool=200_000)
+        assert [d["code"] for d in digest["report_disclosures"]] == ["W_POOL_BASIS_READ_AS_NEW_OPTIONS_ONLY"]
+        assert digest.get("report_pool_increase_reading") is None
+        assert digest["report_pool_sizing_counterfactual"]["status"] == "computed"
+
+    def test_report_md_line_sits_under_its_scenarios_disclosure(self) -> None:
+        sys.path.insert(0, os.path.join(_REPO, "founder-skills", "tests"))
+        from _pool_sizing_claims import INCREASE_LINE_LEAD  # the lane's lever check reads this exact lead
+
+        digest, page = _cf_compose({"target_basis": "post_money"}, available_pool=200_000)
+        block = digest["report_pool_increase_reading"]
+        lines = page.splitlines()
+        at = [i for i, ln in enumerate(lines) if ln.startswith(INCREASE_LINE_LEAD)]
+        assert len(at) == 1, page
+        line = lines[at[0]]
+        assert block["founders"]["increase"] in line and block["founders"]["modeled"] in line, line
+        assert block["new_options"]["increase"] in line, line
+        disclosure = max(i for i, ln in enumerate(lines[: at[0]]) if "read as the pool available after the round" in ln)
+        assert at[0] - disclosure <= 3, (disclosure, at[0])
+        # Not computed: the line says so, with the producer's reason, and carries no figure.
+        _d, stated = _cf_compose(
+            {"target_basis": "custom", "custom_basis_stated_by_founder": "post_money"}, available_pool=200_000
+        )
+        [not_computed] = [ln for ln in stated.splitlines() if ln.startswith(INCREASE_LINE_LEAD)]
+        assert "Not computed:" in not_computed and "%" not in not_computed, not_computed
+        # Modelled on that reading itself: there is no second solve of it, so no line.
+        _d, other = _cf_compose({"target_basis": "post_money_increase"}, available_pool=200_000)
+        assert INCREASE_LINE_LEAD not in other
+
+    def test_the_comparisons_same_note_names_the_two_sizings_it_compared(self) -> None:
+        """With the existing pool above the target, pre- and post-round sizings agree, while the new-options-only
+        reading moves founders by points; the comparison's note must not read as "the sizing does not matter"."""
+        digest, _page = _cf_compose({"target_basis": "post_money"}, available_pool=1_600_000)
+        cf = digest["report_pool_sizing_counterfactual"]
+        assert cf["status"] == "same on both sizings"
+        assert "measuring against the share count after the round or before it" in cf["note"], cf["note"]
+        assert digest["report_pool_increase_reading"]["status"] == "computed"

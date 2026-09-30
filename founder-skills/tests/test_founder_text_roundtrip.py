@@ -45,7 +45,9 @@ _FOUNDER_TEXT_KEYS = frozenset({"remedy", "reason", "detail", "message", "guidan
 # `_literal_parts` changes; never inherit a count from a review or a sibling file.
 # 68 -> 66: `_labels.BRANCH` now glosses the SAFE/note/warrant branch enums, so two tokens that
 # the founder used to read mangled are rendered as sentences. Earned, not conceded.
-_BASELINE = 66
+# 66 -> 65: the option pool's sizing labels name the share count they count; "post-money basis" / "pre-money
+# basis" left the founder's surfaces.
+_BASELINE = 65
 
 
 def _founder_text() -> types.ModuleType:

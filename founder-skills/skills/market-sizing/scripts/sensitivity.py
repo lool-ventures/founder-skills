@@ -39,15 +39,34 @@ with no confidence anywhere — reported as ``confidence_source: "default"``, be
 happened" and "no widening was called for" are not the same statement.
 
 Output: JSON with scenario table and sensitivity ranking.
+
+Optional ``--sizing PATH``: a v1-stamped ``sizing.json`` (``provenance_version == 1`` with a dict
+``input_provenance``, as produced by ``market_sizing.py``'s references path). When given, the base
+value for every parameter the approach needs comes from ``input_provenance[param]["value_consumed"]``
+— the number the sizing actually consumed — never from the hand-off's own ``base``. A hand-off
+``base`` entry that disagrees is IGNORED, not rejected (rejecting it would create an incentive to
+edit the hand-off to match), and recorded in ``base_ignored`` so the disagreement is visible rather
+than silently overridden. ``base_source`` is stamped ``"sizing"``, and ``graded_against`` records the
+sizing's fingerprint (``_provenance.sizing_fingerprint``), so a stale sizing is detectable downstream.
+The sizing's own per-parameter category (sourced / derived / agent_estimate / founder_stated) is also
+folded into the confidence-tier reconciliation below — a range cannot declare a stamped
+``agent_estimate`` input "sourced" and escape widening. A ``--sizing`` path that is unreadable or not
+v1-stamped fails loudly (``E_SIZING_NOT_STAMPED: ...``) rather than silently falling back to the
+hand-off's ``base``.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
 from typing import Any, NoReturn
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _params  # noqa: E402
+import _provenance  # noqa: E402
 
 VALID_APPROACHES = {"bottom_up", "top_down", "both"}
 TD_PARAMS = {"industry_total", "segment_pct", "share_pct"}
@@ -129,6 +148,7 @@ def fmt(v: float) -> float:
 
 def _validate_config(
     data: dict[str, Any],
+    sizing_params: set[str] | None = None,
 ) -> tuple[str, dict[str, float], dict[str, dict[str, float]], dict[str, str], list[str]]:
     """Validate sensitivity config. Returns (approach, base_params, ranges, validation_confidence, errors).
 
@@ -141,13 +161,21 @@ def _validate_config(
     contract). When a range omits its own ``confidence``, run_sensitivity()
     cross-references this map before falling back to the 'sourced' default —
     see run_sensitivity() for the fallback chain.
+
+    ``sizing_params``: when ``--sizing`` supplies a value for a parameter (a numeric
+    ``value_consumed`` in the sizing's ``input_provenance``), the hand-off's own ``base`` no longer
+    needs to carry that parameter — the required-fields check below treats it as satisfied. ``None``
+    (no ``--sizing``) preserves prior behaviour exactly.
     """
     errors: list[str] = []
 
-    # Validate 'base' key
+    # Validate 'base' key. With --sizing the base values are the sizing's own, and the hand-off the
+    # skill dispatches carries none: a missing `base` is then an empty one, not an error.
     if "base" not in data:
-        errors.append("Missing required key: 'base'")
-        return "", {}, {}, {}, errors
+        if sizing_params is None:
+            errors.append("Missing required key: 'base'")
+            return "", {}, {}, {}, errors
+        data = {**data, "base": {}}
 
     if not isinstance(data["base"], dict):
         errors.append(f"'base' must be an object (got {type(data['base']).__name__})")
@@ -179,6 +207,8 @@ def _validate_config(
     else:
         required = REQUIRED_FIELDS.get(approach, set())
     missing = required - set(base_params.keys())
+    if sizing_params:
+        missing -= sizing_params
     if missing:
         errors.append(f"approach '{approach}' requires these fields in 'base': {sorted(missing)}")
 
@@ -221,8 +251,20 @@ def _validate_config(
     # Validate and coerce range specs (only for relevant params)
     relevant_range_count = 0
     for param_name, range_spec in ranges.items():
+        if param_name not in TD_PARAMS | BU_PARAMS:
+            # Not the other approach's parameter -- no approach's. A live hand-off named every range
+            # "top_down.industry_total", "bottom_up.arpu", ... and all seven were dropped as irrelevant,
+            # leaving a one-row table. Refused, so the step is redone rather than silently thinned.
+            bare = param_name.rsplit(".", 1)[-1]
+            hint = f" (did you mean '{bare}'?)" if bare in TD_PARAMS | BU_PARAMS else ""
+            errors.append(
+                f"range '{param_name}' names no sizing parameter{hint}; use exactly one of: "
+                + ", ".join(sorted(TD_PARAMS | BU_PARAMS))
+            )
+            continue
         if param_name not in relevant_params:
-            # Irrelevant params will be filtered with warnings in run_sensitivity()
+            # The other approach's parameter on a single-approach run: filtered with a warning in
+            # run_sensitivity().
             continue
         relevant_range_count += 1
 
@@ -244,8 +286,8 @@ def _validate_config(
                 except (TypeError, ValueError):
                     errors.append(f"ranges.{param_name}.{pct_key} must be numeric (got {val!r})")
 
-        # Validate range key exists in base params
-        if param_name not in base_params:
+        # Validate range key exists in base params (or comes from --sizing)
+        if param_name not in base_params and not (sizing_params and param_name in sizing_params):
             errors.append(f"range key '{param_name}' not found in base params (available: {list(base_params.keys())})")
 
         # Validate confidence level
@@ -514,7 +556,56 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--pretty", action="store_true", help="Pretty-print JSON")
     p.add_argument("-o", "--output", help="Write JSON to file instead of stdout")
     p.add_argument("--run-id", help="Inject metadata.run_id into output (for stale-artifact detection)")
+    p.add_argument(
+        "--sizing",
+        help=(
+            "Path to a v1-stamped sizing.json. When given, base values for the parameters the "
+            "approach needs come from the sizing's input_provenance[param].value_consumed rather "
+            "than the hand-off's own 'base' — see the module docstring."
+        ),
+    )
+    p.add_argument(
+        "--inputs",
+        help=(
+            "Path to inputs.json. With --sizing, a founder-stated input left without a range is varied "
+            "across the founder's own other figures for it (founder_stated_alternatives), never less "
+            "than +/-30%%."
+        ),
+    )
     return p.parse_args()
+
+
+# category -> validation-tier map for the sizing-derived confidence cross-reference. founder_stated
+# is a fact the founder gave, not researched, but it is not an estimate either — it maps to the
+# tier that widens nothing on its own (the tier a range would default to anyway).
+_CATEGORY_TIER = {
+    "sourced": "sourced",
+    "derived": "derived",
+    "agent_estimate": "agent_estimate",
+    "founder_stated": "sourced",
+}
+
+
+# The founder's own figure grades as sourced, and a sourced figure may be left without a range, so on
+# two of three live runs the founder's ARPU -- the figure the red team disputed on every run -- was
+# never varied. A figure nobody checked against research is varied at least as widely as a derived
+# one, and across every other figure the founder's materials gave for it.
+FOUNDER_FLOOR_PCT = 30.0
+
+
+def founder_range(consumed: float, param: str, inputs: dict[str, Any] | None) -> dict[str, float]:
+    low, high = -FOUNDER_FLOOR_PCT, FOUNDER_FLOOR_PCT
+    alts = ((inputs or {}).get("founder_stated_alternatives") or {}).get(param)
+    for alt in alts if isinstance(alts, list) and consumed else []:
+        value = alt.get("value") if isinstance(alt, dict) else None
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            continue
+        per_year = _params.PERIOD_TO_YEAR.get(str(alt.get("period") or "year"))
+        if per_year is None:
+            continue
+        pct = round((float(value) * per_year / consumed - 1) * 100, 1)
+        low, high = min(low, pct), max(high, pct)
+    return {"low_pct": low, "high_pct": high}
 
 
 def main() -> None:
@@ -537,20 +628,114 @@ def main() -> None:
         print("Error: JSON must be an object", file=sys.stderr)
         sys.exit(1)
 
+    result: dict[str, Any]
+
+    # --- --sizing: loaded and validated up front — a bad --sizing path is a caller error
+    # independent of whatever the hand-off otherwise says, so it fails before the hand-off's own
+    # validation runs. ---
+    sizing: dict[str, Any] | None = None
+    sizing_values: dict[str, float] = {}
+    sizing_fp: str | None = None
+    if args.sizing:
+        sizing, sizing_err = _provenance.load_stamped_sizing(args.sizing)
+        if sizing_err:
+            result = {"validation": {"status": "invalid", "errors": [sizing_err]}}
+            if args.run_id:
+                result["metadata"] = {"run_id": args.run_id}
+            _fail_invalid(result, args.output, indent)
+        assert sizing is not None
+        prov: dict[str, Any] = sizing["input_provenance"]
+        sizing_values = {
+            p: float(v["value_consumed"])
+            for p, v in prov.items()
+            if isinstance(v, dict)
+            and isinstance(v.get("value_consumed"), (int, float))
+            and not isinstance(v.get("value_consumed"), bool)
+        }
+        sizing_fp = _provenance.sizing_fingerprint(sizing)
+
     # --- Validation (JSON error dict on stdout, exit 1, no file written) ---
-    approach, base_params, ranges, validation_confidence, errors = _validate_config(data)
+    approach, base_params, ranges, validation_confidence, errors = _validate_config(
+        data, sizing_params=set(sizing_values) if sizing is not None else None
+    )
 
     if errors:
-        result: dict[str, Any] = {"validation": {"status": "invalid", "errors": errors}}
+        result = {"validation": {"status": "invalid", "errors": errors}}
         if args.run_id:
             result["metadata"] = {"run_id": args.run_id}
         _fail_invalid(result, args.output, indent)
 
+    base_ignored: dict[str, float] = {}
+    if sizing is not None:
+        # (i) MUTATION-CHECKED: the base value comes from the sizing, not the hand-off — a
+        # hand-off entry that disagrees is recorded in base_ignored, never used for the math.
+        if approach == "both":
+            required = REQUIRED_FIELDS["bottom_up"] | REQUIRED_FIELDS["top_down"]
+        else:
+            required = REQUIRED_FIELDS.get(approach, set())
+
+        # (ii) MUTATION-CHECKED: the sizing's own per-parameter category is folded into the
+        # confidence-tier reconciliation, so a range cannot declare a stamped agent_estimate
+        # input "sourced" and escape widening. "not_checked" (the numeric, unresolved path)
+        # contributes no tier at all.
+        prov = sizing["input_provenance"]
+        for param, entry in prov.items():
+            if not isinstance(entry, dict) or entry.get("kind") == "not_checked":
+                continue
+            tier = _CATEGORY_TIER.get(str(entry.get("category")))
+            if tier is None:
+                continue
+            existing = validation_confidence.get(param)
+            if existing is None or CONFIDENCE_MIN_RANGE.get(tier, 0) > CONFIDENCE_MIN_RANGE.get(existing, 0):
+                validation_confidence[param] = tier
+
+        for param in required:
+            sval = sizing_values.get(param)
+            if sval is None:
+                continue
+            if param in base_params:
+                hoff_val = float(base_params[param])
+                if not math.isclose(hoff_val, sval, rel_tol=1e-9):
+                    base_ignored[param] = hoff_val
+            base_params[param] = sval
+
+    added_for_founder: set[str] = set()
+    if sizing is not None:
+        founder_inputs: dict[str, Any] | None = None
+        if args.inputs:
+            try:
+                with open(args.inputs, encoding="utf-8") as fh:
+                    loaded = json.load(fh)
+                founder_inputs = loaded if isinstance(loaded, dict) else None
+            except (OSError, ValueError):
+                founder_inputs = None
+        for param in sorted(required):
+            entry = sizing["input_provenance"].get(param)
+            if not isinstance(entry, dict) or entry.get("category") != "founder_stated" or param in ranges:
+                continue
+            consumed = sizing_values.get(param)
+            if consumed is None:
+                continue
+            spread: dict[str, Any] = {**founder_range(consumed, param, founder_inputs), "confidence": "derived"}
+            ranges[param] = spread
+            added_for_founder.add(param)
+
     result = run_sensitivity(approach, base_params, ranges, validation_confidence)
+    for scenario in result.get("scenarios", []):
+        if scenario.get("parameter") in added_for_founder:
+            scenario["confidence_source"] = "founder_stated"
     result["validation"] = {"status": "valid", "errors": []}
     # Count scenarios actually analyzed (irrelevant range params are filtered
     # out with stderr warnings inside run_sensitivity), not the raw input count.
     analyzed_params = len(result.get("scenarios", []))
+
+    if sizing is not None:
+        result["base_source"] = "sizing"
+        result["base_ignored"] = base_ignored
+        # (iii) MUTATION-CHECKED: graded_against records what this table was checked against, so
+        # a stale sizing (or none at all) is detectable downstream the same way every other
+        # producer's graded_against is.
+        result["graded_against"] = {"sizing.json": sizing_fp}
 
     if args.run_id:
         result["metadata"] = {"run_id": args.run_id}

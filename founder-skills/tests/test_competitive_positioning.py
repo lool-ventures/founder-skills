@@ -12,6 +12,8 @@ All tests use subprocess to exercise the scripts exactly as the agent does.
 
 from __future__ import annotations
 
+import copy
+import html
 import json
 import os
 import pathlib
@@ -21,6 +23,8 @@ import subprocess
 import sys
 import tempfile
 from typing import Any
+
+import pytest
 
 _FIXTURE_DIR = pathlib.Path(__file__).resolve().parent / "fixtures" / "competitive-positioning"
 
@@ -1119,13 +1123,49 @@ class TestScoreMoats:
 
     # 2. Custom moat accepted
     def test_score_moats_custom_moat_accepted(self) -> None:
-        custom = _make_moat_entry("custom_ip_patents", status="strong")
+        custom = _make_moat_entry("custom_distribution_channel", status="strong")
+        custom["definition"] = "A reseller reaching most of the target market."
         payload = _make_valid_moat_input(extra_startup_moats=[custom])
         rc, data, stderr = run_script("score_moats.py", stdin_data=json.dumps(payload))
         assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
         assert data is not None
         startup_ids = [m["id"] for m in data["companies"]["_startup"]["moats"]]
-        assert "custom_ip_patents" in startup_ids
+        assert "custom_distribution_channel" in startup_ids
+
+    # 2a. A custom moat that restates regulatory_barriers is refused, and so is one with no definition.
+    # A run scored a founder's unverifiable provisional patent as `custom_ip_patents: weak` beside
+    # `regulatory_barriers: absent`, and the custom one became the startup's "Strongest Moat".
+    @pytest.mark.parametrize(
+        "moat_id",
+        ["custom_ip_patents", "custom_patent_portfolio", "custom_licensing", "custom_ip", "custom_certification"],
+    )
+    def test_score_moats_refuses_a_regulatory_custom_moat(self, moat_id: str) -> None:
+        custom = _make_moat_entry(moat_id, status="weak")
+        custom["definition"] = "Patent filings on the core mechanism."
+        rc, _, stderr = run_script(
+            "score_moats.py", stdin_data=json.dumps(_make_valid_moat_input(extra_startup_moats=[custom]))
+        )
+        assert rc != 0, f"{moat_id} was accepted"
+        assert "duplicates regulatory_barriers" in stderr + str(_)
+
+    @pytest.mark.parametrize("moat_id", ["custom_partnership", "custom_shipping", "custom_membership"])
+    def test_score_moats_does_not_refuse_a_slug_that_merely_contains_ip(self, moat_id: str) -> None:
+        """Positive control: segment matching, not substring matching."""
+        custom = _make_moat_entry(moat_id, status="weak")
+        custom["definition"] = "Something distinct from the six canonical types."
+        rc, _, stderr = run_script(
+            "score_moats.py", stdin_data=json.dumps(_make_valid_moat_input(extra_startup_moats=[custom]))
+        )
+        assert rc == 0, stderr
+
+    def test_score_moats_refuses_a_custom_moat_without_a_definition(self) -> None:
+        custom = _make_moat_entry("custom_distribution_channel", status="weak")
+        custom.pop("definition", None)
+        rc, out, stderr = run_script(
+            "score_moats.py", stdin_data=json.dumps(_make_valid_moat_input(extra_startup_moats=[custom]))
+        )
+        assert rc != 0
+        assert "needs a 'definition'" in stderr + str(out)
 
     # 2b. founder_provided evidence_source accepted (CP-1)
     def test_score_moats_accepts_founder_provided_evidence(self) -> None:
@@ -1135,6 +1175,7 @@ class TestScoreMoats:
         separately in compose). The observed Gen-2 failure was a wasted repair dispatch when the
         sub-agent stamped a founder-stated moat 'founder_provided' and the producer rejected it."""
         entry = _make_moat_entry("custom_founder_stated", status="moderate", evidence_source="founder_provided")
+        entry["definition"] = "A founder-stated advantage outside the six canonical types."
         payload = _make_valid_moat_input(extra_startup_moats=[entry])
         rc, data, stderr = run_script("score_moats.py", stdin_data=json.dumps(payload))
         assert rc == 0, f"founder_provided must be accepted. stderr: {stderr}"
@@ -3418,14 +3459,12 @@ class TestCompose:
             rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
             assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
             assert data is not None
-            # 3 founder_override in positioning points (2 for _startup + 1 for alpha-corp y)
-            # + 1 founder_override in moat assessments (_startup network_effects)
-            # = 4 total
-            assert data["metadata"]["founder_override_count"] == 4
+            # Stamps alone are not overrides: with no first scored copy to compare against, none of
+            # the four stamps above is counted (TestComposeFounderOverrideComputed has the rule and
+            # its positive control).
+            assert data["metadata"]["founder_override_count"] == 0
             codes = [w["code"] for w in data["warnings"]]
-            assert "FOUNDER_OVERRIDE_COUNT" in codes
-            warn = next(w for w in data["warnings"] if w["code"] == "FOUNDER_OVERRIDE_COUNT")
-            assert warn["severity"] == "low"
+            assert "FOUNDER_OVERRIDE_COUNT" not in codes
 
     # 16. Report markdown has expected sections
     def test_compose_report_markdown_structure(self) -> None:
@@ -3550,8 +3589,9 @@ class TestCompose:
             rc_base, data_base, _ = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
             assert rc_base == 0
             assert data_base is not None
+            # The draft block is no longer counted (overrides are computed against the scorer's first
+            # copy), so both forms give the same count; the normalisation itself is what this pins.
             base_override_count = data_base["metadata"]["founder_override_count"]
-            assert base_override_count > 0, "Baseline must have at least one founder_override"
 
         with tempfile.TemporaryDirectory() as tmp:
             _make_artifact_dir(tmp)
@@ -3742,85 +3782,130 @@ class TestComposeScoringBasis:
             assert "**Scoring Basis:** Mixed" in data["report_markdown"]
 
 
-class TestComposeFounderOverrideUnion:
-    """metadata.founder_override_count (and the FOUNDER_OVERRIDE_COUNT warning)
-    must be the UNION of moat_scores.json and positioning.json's draft
-    moat_assessments block, deduplicated by (slug, moat_id) — a founder moat
-    override recorded in only one of the two sources must still be counted,
-    and the same override present in both must be counted once, not twice."""
+class TestComposeFounderOverrideComputed:
+    """A founder override is reported only where the value changed since it was first scored.
 
-    def test_override_recorded_only_in_moat_scores_is_counted_even_when_draft_omits_the_block(self) -> None:
+    The `founder_override` stamp is model-written. A run showed "Founder Override" on two moat
+    ratings from the first scoring pass, which had no founder input, and counted them in
+    FOUNDER_OVERRIDE_COUNT. The comparand is the scorer's first copy of this run
+    (`<output>.first.json`), which a re-pipe does not replace. This replaces the earlier rule that
+    counted every stamp, including the superseded draft block in positioning.json.
+    """
+
+    @staticmethod
+    def _stamp_startup_moat(tmp: str, status: str | None = None) -> tuple[dict[str, Any], str]:
+        ms_path = os.path.join(tmp, "moat_scores.json")
+        with open(ms_path) as f:
+            moat_scores = json.load(f)
+        moat = moat_scores["companies"]["_startup"]["moats"][0]
+        before = copy.deepcopy(moat_scores)
+        moat["evidence_source"] = "founder_override"
+        if status is not None:
+            moat["status"] = status
+        with open(ms_path, "w") as f:
+            json.dump(moat_scores, f)
+        return before, moat["id"]
+
+    @staticmethod
+    def _write_first(tmp: str, name: str, data: dict[str, Any]) -> None:
+        with open(os.path.join(tmp, f"{name}.first.json"), "w") as f:
+            json.dump(data, f)
+
+    @staticmethod
+    def _compose(tmp: str) -> dict[str, Any]:
+        rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+        assert rc == 0, stderr
+        assert data is not None
+        return data
+
+    def test_a_stamp_with_no_first_copy_is_not_an_override(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _make_artifact_dir(tmp)
+            self._stamp_startup_moat(tmp)
+            data = self._compose(tmp)
+        assert data["metadata"]["founder_override_count"] == 0
+        assert "FOUNDER_OVERRIDE_COUNT" not in [w["code"] for w in data["warnings"]]
+        assert "Founder Override" not in data["report_markdown"]
+
+    def test_a_stamp_on_an_unchanged_rating_is_not_an_override(self) -> None:
+        """The measured case: stamped on the first pass, so the first copy carries the same status."""
+        with tempfile.TemporaryDirectory() as tmp:
+            _make_artifact_dir(tmp)
+            before, _ = self._stamp_startup_moat(tmp)
+            self._write_first(tmp, "moat_scores.json", before)
+            data = self._compose(tmp)
+        assert data["metadata"]["founder_override_count"] == 0
+        assert "Founder Override" not in data["report_markdown"]
+
+    def test_a_changed_rating_is_an_override(self) -> None:
+        """Positive control: the lever (a changed value) engaged, the override is reported."""
         with tempfile.TemporaryDirectory() as tmp:
             _make_artifact_dir(tmp)
             ms_path = os.path.join(tmp, "moat_scores.json")
             with open(ms_path) as f:
-                moat_scores = json.load(f)
-            moat_scores["companies"]["alpha-corp"]["moats"][0]["evidence_source"] = "founder_override"
-            with open(ms_path, "w") as f:
-                json.dump(moat_scores, f)
+                current = json.load(f)["companies"]["_startup"]["moats"][0]["status"]
+            changed = "absent" if current != "absent" else "strong"
+            before, _ = self._stamp_startup_moat(tmp, status=changed)
+            self._write_first(tmp, "moat_scores.json", before)
+            data = self._compose(tmp)
+        assert data["metadata"]["founder_override_count"] == 1
+        assert "FOUNDER_OVERRIDE_COUNT" in [w["code"] for w in data["warnings"]]
+        assert "Founder Override" in data["report_markdown"]
 
-            # SKILL.md now instructs writing {} or omitting moat_assessments in the
-            # positioning.json draft entirely (it's superseded by moat_scores.json).
+    def test_a_changed_coordinate_is_an_override_and_an_unchanged_one_is_not(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _make_artifact_dir(tmp)
+            with open(os.path.join(tmp, "positioning_scores.json")) as f:
+                first = json.load(f)
             pos_path = os.path.join(tmp, "positioning.json")
             with open(pos_path) as f:
                 positioning = json.load(f)
-            del positioning["moat_assessments"]
+            points = positioning["views"][0]["points"]
+            # The first copy as the scorer writes it: the view's points passed through.
+            first["views"][0]["points"] = copy.deepcopy(points)
+            points[0]["x_evidence_source"] = "founder_override"
+            points[0]["x"] = (points[0]["x"] + 17) % 100
+            points[1]["y_evidence_source"] = "founder_override"  # stamped, value unchanged
             with open(pos_path, "w") as f:
                 json.dump(positioning, f)
+            self._write_first(tmp, "positioning_scores.json", first)
+            data = self._compose(tmp)
+        assert data["metadata"]["founder_override_count"] == 1
 
-            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
-            assert rc == 0, f"compose must succeed with moat_assessments omitted: {stderr}"
-            assert data is not None
-            assert data["metadata"]["founder_override_count"] >= 1, (
-                "a founder_override recorded only in moat_scores.json must be counted "
-                "even when positioning.json omits moat_assessments entirely"
-            )
-            codes = [w["code"] for w in data["warnings"]]
-            assert "FOUNDER_OVERRIDE_COUNT" in codes
-
-    def test_override_recorded_only_in_positioning_draft_is_counted(self) -> None:
+    def test_a_stamp_only_in_the_positioning_draft_is_not_counted(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            _make_artifact_dir(tmp)  # default moat_scores.json has no founder_override
+            _make_artifact_dir(tmp)
             pos_path = os.path.join(tmp, "positioning.json")
             with open(pos_path) as f:
                 positioning = json.load(f)
             positioning["moat_assessments"]["alpha-corp"]["moats"][0]["evidence_source"] = "founder_override"
             with open(pos_path, "w") as f:
                 json.dump(positioning, f)
+            data = self._compose(tmp)
+        assert data["metadata"]["founder_override_count"] == 0
 
-            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
-            assert rc == 0, stderr
-            assert data is not None
-            assert data["metadata"]["founder_override_count"] >= 1
-
-    def test_same_override_present_in_both_sources_is_counted_once(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            _make_artifact_dir(tmp)
-            ms_path = os.path.join(tmp, "moat_scores.json")
-            with open(ms_path) as f:
-                moat_scores = json.load(f)
-            moat_scores["companies"]["alpha-corp"]["moats"][0]["evidence_source"] = "founder_override"
-            same_moat_id = moat_scores["companies"]["alpha-corp"]["moats"][0]["id"]
-            with open(ms_path, "w") as f:
-                json.dump(moat_scores, f)
-
-            pos_path = os.path.join(tmp, "positioning.json")
-            with open(pos_path) as f:
-                positioning = json.load(f)
-            for moat in positioning["moat_assessments"]["alpha-corp"]["moats"]:
-                if moat["id"] == same_moat_id:
-                    moat["evidence_source"] = "founder_override"
-            with open(pos_path, "w") as f:
-                json.dump(positioning, f)
-
-            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
-            assert rc == 0, stderr
-            assert data is not None
-            assert data["metadata"]["founder_override_count"] == 1, (
-                f"the same (slug, moat_id) override present in both moat_scores.json and "
-                f"positioning.json's draft must be counted ONCE, got "
-                f"{data['metadata']['founder_override_count']}"
-            )
+    def test_the_scorer_keeps_the_first_copy_across_a_re_pipe(self, tmp_path: Any) -> None:
+        """A re-pipe must not erase the difference the first copy exists to show."""
+        out = tmp_path / "moat_scores.json"
+        payload = _make_valid_moat_input()
+        rc, _, stderr = run_script(
+            "score_moats.py", args=["--run-id", "R1", "-o", str(out)], stdin_data=json.dumps(payload)
+        )
+        assert rc == 0, stderr
+        first = json.loads((tmp_path / "moat_scores.json.first.json").read_text())
+        payload["moat_assessments"]["_startup"]["moats"][0]["status"] = "absent"
+        payload["moat_assessments"]["_startup"]["moats"][0]["evidence_source"] = "founder_override"
+        rc, _, stderr = run_script(
+            "score_moats.py", args=["--run-id", "R1", "-o", str(out)], stdin_data=json.dumps(payload)
+        )
+        assert rc == 0, stderr
+        assert json.loads((tmp_path / "moat_scores.json.first.json").read_text()) == first
+        # A new run starts a new first copy.
+        rc, _, stderr = run_script(
+            "score_moats.py", args=["--run-id", "R2", "-o", str(out)], stdin_data=json.dumps(payload)
+        )
+        assert rc == 0, stderr
+        assert json.loads((tmp_path / "moat_scores.json.first.json").read_text())["metadata"]["run_id"] == "R2"
 
     def test_compose_succeeds_when_moat_assessments_is_empty_dict(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -4573,36 +4658,59 @@ class TestComposeNonDictArtifact:
             assert rc == 1
 
 
-class TestComposeExecutiveSummaryStrongThreshold:
-    """The executive-summary 'strong' label and 'strong differentiation' paragraph
-    must use the same >=75 threshold (audit cp-scripts-3). A score in [70, 75)
-    labelled Moderate must not be described as strong in the paragraph below."""
+class TestComposeWhereYouStand:
+    """No differentiation score reaches the founder; each map is stated from computed geometry.
 
-    def test_score_72_not_described_as_strong(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            _make_artifact_dir(
-                tmp,
-                positioning_scores_overrides={"overall_differentiation": 72.0},
-                moat_scores_overrides=None,
-            )
-            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
-            assert rc == 0, stderr
-            assert data is not None
-            md = data["report_markdown"]
-            # The score label for 72 is "Moderate"; the paragraph must not call it strong.
-            assert "Moderate — differentiated but the lead is narrow" in md
-            assert "strong competitive differentiation" not in md
+    Replaces the band-threshold tests (audit cp-scripts-3): the score itself is no longer shown. It
+    read as a percentage ("35.0%"), and its bands called a startup that ranked 1st on an axis of every
+    map "Weak -- positioned close to competitors" on two baseline runs.
+    """
 
-    def test_score_80_still_described_as_strong(self) -> None:
+    GEOMETRY = {
+        "dominated_by": [],
+        "nearest_competitor": "beta-inc",
+        "nearest_distance": 12.0,
+        "x_lead_over_best": 30.0,
+        "y_lead_over_best": -12.0,
+        "x_best_competitors": ["alpha-corp"],
+        "y_best_competitors": ["beta-inc"],
+    }
+
+    def _md(self, overall: float, geometry: bool = True) -> str:
         with tempfile.TemporaryDirectory() as tmp:
-            _make_artifact_dir(
-                tmp,
-                positioning_scores_overrides={"overall_differentiation": 80.0},
-            )
+            _make_artifact_dir(tmp, positioning_scores_overrides={"overall_differentiation": overall})
+            path = os.path.join(tmp, "positioning_scores.json")
+            with open(path) as f:
+                ps = json.load(f)
+            if geometry:
+                ps["views"][0].update(self.GEOMETRY)
+            with open(path, "w") as f:
+                json.dump(ps, f)
             rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
-            assert rc == 0, stderr
-            assert data is not None
-            assert "strong competitive differentiation" in data["report_markdown"]
+        assert rc == 0, stderr
+        assert data is not None
+        md: str = data["report_markdown"]
+        return md
+
+    @pytest.mark.parametrize("overall", [80.0, 72.0, 30.0, 8.8])
+    def test_no_score_or_score_derived_verdict_reaches_the_founder(self, overall: float) -> None:
+        md = self._md(overall)
+        assert f"{overall}%" not in md
+        for tier in ("Differentiation Score", "Overall Differentiation", "competitive differentiation", "clustered"):
+            assert tier not in md, tier
+
+    def test_the_map_is_stated_from_geometry(self) -> None:
+        md = self._md(50.0)
+        assert "well ahead of Alpha Corp" in md
+        assert "behind Beta Inc" in md
+        assert "No competitor is ahead of you on both axes." in md
+        assert "Nearest competitor: Beta Inc, right next to you." in md
+
+    def test_an_artifact_without_geometry_states_nothing_rather_than_the_score(self) -> None:
+        """Positive control on the lever: without the scorer's geometry there is no sentence."""
+        md = self._md(50.0, geometry=False)
+        assert "Where you stand" not in md
+        assert "50.0%" not in md
 
 
 class TestComposeNonStringViewId:
@@ -4960,8 +5068,14 @@ class TestComposeMoatEvidenceAndLeader:
             assert "Moat Dimension Comparison Matrix" in md, "Matrix section should appear"
             # Legend
             assert "S=Strong" in md, "Legend line should appear"
-            # _startup row marker
-            assert "_startup_" in md, "_startup row should appear in matrix"
+            # The startup's row carries its own name, not the internal `_startup` slug.
+            matrix = md.split("Moat Dimension Comparison Matrix")[1]
+            assert "| TestCo |" in matrix, "the startup row should be named"
+            assert "_startup" not in matrix
+            # Full dimension names: a 12-character cut printed "Network Effe".
+            assert "Network Effects" in matrix and "Network Effe |" not in matrix
+            # Competitor rows by name, not slug.
+            assert "| Alpha Corp |" in matrix and "| alpha-corp |" not in matrix
 
     def test_moat_matrix_uses_status_initials(self) -> None:
         """Status initials (S/M/W/—) appear in the matrix rows."""
@@ -5086,10 +5200,22 @@ def test_skill_md_moat_scoring_dispatch_requires_source_citation() -> None:
     """The MOAT_SCORING dispatch prompt must tell the sub-agent to attach a source (URL or
     search query) beside every evidence_source:'researched' moat, matching score_moats.py's
     (warn-only) RESEARCHED_WITHOUT_SOURCE check."""
-    skill_md = _read(CP_SKILL_MD)
-    start = skill_md.index("**MOAT_SCORING dispatch prompt:**")
-    end = skill_md.index("**POSITIONING_SCORING dispatch prompt:**")
-    block = skill_md[start:end]
+    # The prompt is printed by cp_dispatch_prompt.py; SKILL.md carries only the command.
+    import importlib.util
+
+    path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "..",
+        "skills",
+        "competitive-positioning",
+        "scripts",
+        "cp_dispatch_prompt.py",
+    )
+    spec = importlib.util.spec_from_file_location("cp_dispatch_prompt_source_test", path)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    block = mod.render("moat_scoring", run_id="R", handoff_agent="/h", analysis_dir_agent="/a", plugin_root_agent="/p")
     assert "source" in block.lower()
     assert '"source"' in block, "MOAT_SCORING template should show the 'source' field in its JSON example"
 
@@ -5267,7 +5393,10 @@ def test_agent_coaching_writes_raw_markdown_no_json_escaping() -> None:
     thing that broke ~17-22% of the time) must be gone."""
     agent_body = _read(CP_AGENT_MD)
     idx = agent_body.index("### Context B")
-    section = agent_body[idx : idx + 4000]
+    # Bounded on structure (the next same-level heading), not a fixed character window: an additive
+    # edit to the payload key list once pushed the asserted phrase past a 4,000-character slice.
+    nxt = agent_body.find("\n### ", idx + 1)
+    section = agent_body[idx : nxt if nxt > 0 else len(agent_body)]
     assert "plain markdown" in section.lower()
     assert "do not escape anything" in section.lower() or "do not escape" in section.lower()
     assert "escaped as `\\n`" not in agent_body
@@ -6403,3 +6532,1456 @@ class TestAgentArtifactProvenance:
                     f"report.md leaks {token!r} when STALE_ARTIFACT fires — supply a "
                     f"founder_message rather than rewording the agent-facing `message`."
                 )
+
+
+class TestChallengeOutcome:
+    """A competitor judged not_a_competitor is either still scored (retained) or gone (removed).
+
+    The verdicts are written before the founder confirms the set, so they cannot say which. compose
+    used to list every not_a_competitor verdict under "Retained despite the challenge … scored and
+    ranked", so a competitor the founder dropped was reported as ranked, under its slug, since the
+    final landscape no longer carried its name.
+    """
+
+    @staticmethod
+    def _compose(tmp: str, verdicts: dict[str, str]) -> str:
+        _make_artifact_dir(tmp)
+        with open(os.path.join(tmp, "landscape.json"), encoding="utf-8") as f:
+            run_id = json.load(f)["metadata"]["run_id"]
+        draft = {
+            "competitors": [
+                {"name": "Gamma Ltd", "slug": "gamma-ltd"},
+                {"name": "Omega Systems", "slug": "omega-co"},
+            ],
+            "metadata": {"run_id": run_id},
+        }
+        verification = {
+            "startup_characterization": {"buyer": "b", "job_to_be_done": "j"},
+            "verdicts": [
+                {
+                    "slug": slug,
+                    "verdict": verdict,
+                    "reasoning": "Sells to a different buyer for a different job.",
+                    "overlap": {"buyer": False, "job_to_be_done": False, "category": True},
+                    "confidence": "high",
+                }
+                for slug, verdict in verdicts.items()
+            ],
+            "summary": {"total": len(verdicts), "genuine": 0, "flagged": len(verdicts)},
+            "recall_gaps": {"unmatched": [], "probable_duplicates": []},
+            "_produced_by": "verify_competitors",
+            "metadata": {"run_id": run_id},
+        }
+        for name, body in (("landscape_draft.json", draft), ("competitor_verification.json", verification)):
+            with open(os.path.join(tmp, name), "w", encoding="utf-8") as f:
+                json.dump(body, f)
+        rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+        assert rc == 0, stderr
+        assert data is not None
+        md: str = data["report_markdown"]
+        return md
+
+    @staticmethod
+    def _note(md: str, marker: str) -> str:
+        line = next((ln for ln in md.splitlines() if marker in ln), "")
+        return line
+
+    def test_a_dropped_competitor_is_reported_removed_not_retained(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            md = self._compose(tmp, {"gamma-ltd": "not_a_competitor", "omega-co": "not_a_competitor"})
+        retained = self._note(md, "Retained despite the challenge")
+        removed = self._note(md, "Removed after the challenge")
+        # Positive control: the lever is the final set, and a competitor still in it stays "retained".
+        assert "Gamma Ltd" in retained, md
+        assert "Omega Systems" not in retained, f"a dropped competitor was reported as ranked:\n{retained}"
+        assert "Omega Systems" in removed, f"the dropped competitor went unmentioned:\n{md}"
+        assert "omega-co" not in md, "the dropped competitor reached the page as a slug"
+
+    def test_no_removed_note_when_every_challenged_competitor_was_kept(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            md = self._compose(tmp, {"gamma-ltd": "not_a_competitor"})
+        assert "Gamma Ltd" in self._note(md, "Retained despite the challenge")
+        assert "Removed after the challenge" not in md
+
+    def test_no_retained_note_when_every_challenged_competitor_was_dropped(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            md = self._compose(tmp, {"omega-co": "not_a_competitor"})
+        assert "Retained despite the challenge" not in md
+        assert "Omega Systems" in self._note(md, "Removed after the challenge")
+
+
+class TestMoatStanding:
+    """A tie is stated as a tie, and an absent moat gets no rank.
+
+    `score_moats.py` counts only the companies strictly ahead, so a tie takes the better place. On
+    a dimension every company lacked, a delivered report read "Network Effects: Rank 1 of 8 ranked"
+    for a startup whose network effects were scored absent.
+    """
+
+    @staticmethod
+    def _view() -> Any:
+        scripts = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", "skills", "competitive-positioning", "scripts"
+        )
+        if scripts not in sys.path:
+            sys.path.insert(0, scripts)
+        import _cp_view  # type: ignore[import-not-found]
+
+        return _cp_view
+
+    NAMES = {"a": "Alpha", "b": "Beta", "c": "Gamma"}
+
+    def _standing(self, scores: dict[str, str]) -> str | None:
+        v = self._view()
+        line: str | None = v.moat_standing(scores, ["a", "b", "c"], self.NAMES, lambda s: s.title())
+        return line
+
+    def test_an_all_absent_dimension_gets_no_rank(self) -> None:
+        line = self._standing({"_startup": "absent", "a": "absent", "b": "absent", "c": "absent"})
+        assert line == "Absent — no competitor assessed has it either"
+        assert "Rank" not in (line or "")
+
+    def test_an_absent_moat_names_who_has_it(self) -> None:
+        line = self._standing({"_startup": "absent", "a": "strong", "b": "strong", "c": "absent"})
+        assert line == "Absent — 2 of 3 competitors have it — leader: Alpha, Beta (Strong)"
+
+    def test_a_tie_is_a_range_with_the_names(self) -> None:
+        line = self._standing({"_startup": "weak", "a": "strong", "b": "weak", "c": "weak"})
+        assert line == "Tied 2–4 of 4 ranked, with Beta, Gamma — leader: Alpha (Strong)"
+
+    def test_a_tie_at_the_top_is_joint_leadership(self) -> None:
+        line = self._standing({"_startup": "strong", "a": "strong", "b": "weak", "c": "absent"})
+        assert line == "Joint leader of 4 ranked, with Alpha"
+
+    def test_an_untied_rank_keeps_its_wording(self) -> None:
+        # Positive control: the lever (a tie) absent, the old sentence is unchanged.
+        line = self._standing({"_startup": "moderate", "a": "strong", "b": "weak", "c": "absent"})
+        assert line == "Rank 2 of 4 ranked — leader: Alpha (Strong)"
+
+    def test_not_applicable_is_said_not_ranked(self) -> None:
+        assert self._standing({"_startup": "not_applicable", "a": "strong"}) == (
+            "Not applicable to this business model"
+        )
+
+    def test_compose_renders_no_rank_for_an_all_absent_dimension(self) -> None:
+        """End to end through compose: the producer's rank says 1; the report must not."""
+        with tempfile.TemporaryDirectory() as tmp:
+            _make_artifact_dir(tmp)
+            path = os.path.join(tmp, "moat_scores.json")
+            with open(path, encoding="utf-8") as f:
+                ms = json.load(f)
+            slugs = [s for s in ms["companies"] if s != "_startup"]
+            ms["comparison"]["by_dimension"]["network_effects"] = {s: "absent" for s in ["_startup", *slugs]}
+            ms["comparison"]["startup_rank"]["network_effects"] = {"rank": 1, "total": len(slugs) + 1}
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(ms, f)
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+        assert rc == 0, stderr
+        assert data is not None
+        block = data["report_markdown"].split("Startup Ranking by Moat Dimension")[1].split("###")[0]
+        line = next(ln for ln in block.splitlines() if ln.startswith("- **Network Effects:**"))
+        assert "Rank" not in line, f"an absent moat was ranked: {line}"
+        assert "no competitor assessed has it either" in line
+
+
+class TestPositioningTies:
+    """The scorer records who the startup is tied with, and the report says so.
+
+    A run placed the startup and Aigen at the same cost per acre and reported the startup as 1st.
+    """
+
+    def test_scorer_records_ties_without_moving_rank_or_score(self) -> None:
+        payload = _make_valid_positioning_input()
+        view = payload["views"][0]
+        sx = next(p for p in view["points"] if p["competitor"] == "_startup")["x"]
+        other = next(p for p in view["points"] if p["competitor"] != "_startup")
+        rc0, before, _ = run_script("score_positioning.py", stdin_data=json.dumps(payload))
+        other["x"] = sx
+        rc1, after, stderr = run_script("score_positioning.py", stdin_data=json.dumps(payload))
+        assert rc0 == 0 and rc1 == 0, stderr
+        assert before is not None and after is not None
+        v = after["views"][0]
+        assert v["startup_x_tied_with"] == [other["competitor"]]
+        assert before["views"][0]["startup_x_tied_with"] == [], "control: no tie before the move"
+
+    def test_compose_states_the_tie(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _make_artifact_dir(tmp)
+            path = os.path.join(tmp, "positioning_scores.json")
+            with open(path, encoding="utf-8") as f:
+                ps = json.load(f)
+            ps["views"][0]["startup_x_rank"] = 1
+            ps["views"][0]["startup_x_tied_with"] = ["alpha-corp"]
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(ps, f)
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+        assert rc == 0, stderr
+        assert data is not None
+        line = next(ln for ln in data["report_markdown"].splitlines() if ln.startswith("- **Startup Rank:**"))
+        assert "X=1–2 (tied with Alpha Corp)" in line, line
+
+
+def test_sentences_use_the_axis_name_without_its_parenthetical() -> None:
+    """A real axis name, "Distribution / go-to-market reach (dealer network, existing customer base,
+    service infrastructure)", repeated three times per line and buried the finding."""
+    scripts = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "..", "skills", "competitive-positioning", "scripts"
+    )
+    if scripts not in sys.path:
+        sys.path.insert(0, scripts)
+    import _cp_view  # type: ignore[import-not-found]
+
+    long_name = "Distribution / go-to-market reach (dealer network, existing customer base, service infrastructure)"
+    assert _cp_view.short_axis_name(long_name) == "Distribution / go-to-market reach"
+    assert _cp_view.short_axis_name("Price (USD)") == "Price"
+    assert _cp_view.short_axis_name("Plain name") == "Plain name"
+    assert _cp_view.view_label({"x_axis_name": long_name, "y_axis_name": "Price (USD)"}) == (
+        "Distribution / go-to-market reach vs Price"
+    )
+
+
+class TestCoachingPayloadCarriesTheMapAndTheClaims:
+    """D5: the coach is given the report's own sentences for the map and the pitch claims.
+
+    On both baseline runs the coach never mentioned that the pitch's headline claim failed, and one
+    told the founder nothing had raised a serious red flag: it had no stress-test and no map.
+    """
+
+    CLAIMS = [
+        {"claim": "Only solar-powered weeder", "verdict": "does_not_hold", "evidence": "Aigen sells one. More detail."},
+        {"claim": "A fraction of the laser price", "verdict": "holds", "evidence": "Priced at 5%."},
+        {"claim": "Not a real verdict", "verdict": "maybe", "evidence": "x"},
+    ]
+
+    def _payload(self, geometry: bool = True) -> dict[str, Any]:
+        with tempfile.TemporaryDirectory() as tmp:
+            _make_artifact_dir(tmp)
+            path = os.path.join(tmp, "positioning_scores.json")
+            with open(path) as f:
+                ps = json.load(f)
+            ps["differentiation_claims"] = self.CLAIMS
+            if geometry:
+                ps["views"][0].update(TestComposeWhereYouStand.GEOMETRY)
+            with open(path, "w") as f:
+                json.dump(ps, f)
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+        assert rc == 0, stderr
+        assert data is not None
+        payload: dict[str, Any] = data["coaching_payload"]
+        return payload
+
+    def test_a_failed_claim_reaches_the_coach_with_its_evidence(self) -> None:
+        verdicts = self._payload()["claim_verdicts"]
+        assert 'Your claim "Only solar-powered weeder" does not hold. Aigen sells one.' in verdicts
+        assert 'Your claim "A fraction of the laser price" holds.' in verdicts, "a holding claim carries no evidence"
+        assert not any("Not a real verdict" in v for v in verdicts), "an unknown verdict is not guessed at"
+
+    def test_the_map_reaches_the_coach_as_the_report_states_it(self) -> None:
+        payload = self._payload()
+        assert payload["positioning"], "the map sentence did not reach the coach"
+        assert "No competitor is ahead of you on both axes." in payload["positioning"][0]
+
+    def test_no_geometry_means_no_map_sentence_rather_than_a_number(self) -> None:
+        payload = self._payload(geometry=False)
+        assert payload["positioning"] == []
+        assert "overall_differentiation" not in json.dumps(payload)
+
+
+def test_points_table_names_companies_not_slugs() -> None:
+    """Both baseline runs printed `_startup` and `carbon-robotics` in the points tables."""
+    with tempfile.TemporaryDirectory() as tmp:
+        _make_artifact_dir(tmp)
+        rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+    assert rc == 0, stderr
+    assert data is not None
+    section = data["report_markdown"].split("## Positioning Analysis")[1].split("\n## ")[0]
+    rows = [ln for ln in section.splitlines() if ln.startswith("| ") and not ln.startswith("| Company")]
+    assert rows, "fixture no longer renders a points table"
+    first_cells = [ln.split("|")[1].strip() for ln in rows if not ln.startswith("|---")]
+    assert "TestCo" in first_cells
+    assert "Alpha Corp" in first_cells
+    assert not any(c.startswith("_startup") or c == "alpha-corp" for c in first_cells), first_cells
+
+
+class TestEstimateMarkers:
+    """A position the scoring pass recorded as its own estimate is marked "~", with a count."""
+
+    def _md(self, sources: dict[str, str] | None) -> str:
+        with tempfile.TemporaryDirectory() as tmp:
+            _make_artifact_dir(tmp)
+            path = os.path.join(tmp, "positioning.json")
+            with open(path) as f:
+                pos = json.load(f)
+            for pt in pos["views"][0]["points"]:
+                for axis in ("x", "y"):
+                    pt[f"{axis}_evidence_source"] = (sources or {}).get(f"{pt['competitor']}:{axis}", "researched")
+            with open(path, "w") as f:
+                json.dump(pos, f)
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+        assert rc == 0, stderr
+        assert data is not None
+        md: str = data["report_markdown"]
+        return md
+
+    def test_an_estimated_position_is_marked_and_counted(self) -> None:
+        md = self._md({"_startup:x": "agent_estimate", "alpha-corp:y": "agent_estimate"})
+        row = next(ln for ln in md.splitlines() if ln.startswith("| TestCo |"))
+        assert row.split("|")[2].strip().startswith("~"), row
+        assert not row.split("|")[3].strip().startswith("~"), "a sourced position must not be marked"
+        assert "~ marks the analysis's own estimate (2 of" in md
+
+    def test_no_marker_or_footer_when_nothing_is_estimated(self) -> None:
+        """Positive control: the lever is the recorded source."""
+        md = self._md(None)
+        section = md.split("## Positioning Analysis")[1].split("\n## ")[0]
+        assert "~ marks" not in section
+        assert "| ~" not in section
+
+
+def test_evidence_is_cut_at_a_word_boundary() -> None:
+    scripts = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "..", "skills", "competitive-positioning", "scripts"
+    )
+    if scripts not in sys.path:
+        sys.path.insert(0, scripts)
+    import importlib.util
+
+    # Loaded by path under its own name: every skill has a `compose_report`, and the suite imports
+    # several into one process.
+    spec = importlib.util.spec_from_file_location("cp_compose_under_test", os.path.join(scripts, "compose_report.py"))
+    assert spec is not None and spec.loader is not None
+    compose_report = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(compose_report)
+
+    text = "alpha " * 30
+    cut = compose_report._truncate_evidence(text, 20)
+    assert cut == "alpha alpha alpha…", cut
+    assert compose_report._truncate_evidence("short", 20) == "short"
+    # A single long token has no boundary to cut at; it is cut, not dropped.
+    assert compose_report._truncate_evidence("x" * 30, 10) == "x" * 10 + "…"
+
+
+class TestCapDisplacedDirect:
+    """A direct competitor research found is left out at the cap while a not-a-competitor keeps a slot."""
+
+    @staticmethod
+    def _run(n: int, verdict: str, suggestion_in: str, category: str = "direct") -> list[dict[str, Any]]:
+        with tempfile.TemporaryDirectory() as tmp:
+            competitors = [_make_competitor(f"Comp {i}", f"comp-{i}", "direct") for i in range(n)]
+            _make_artifact_dir(tmp, landscape_overrides={"competitors": competitors})
+            path = os.path.join(tmp, "landscape.json")
+            with open(path) as f:
+                landscape = json.load(f)
+            suggestion = {"name": "Wallarm", "slug": "wallarm", "category": category, "merged": False}
+            first = copy.deepcopy(landscape)
+            first["suggested_additions"] = [suggestion]
+            if suggestion_in == "final":
+                landscape["suggested_additions"] = [suggestion]
+            with open(path, "w") as f:
+                json.dump(landscape, f)
+            with open(os.path.join(tmp, "landscape.json.first.json"), "w") as f:
+                json.dump(first, f)
+            verification = {
+                "verdicts": [{"slug": "comp-0", "verdict": verdict, "reasoning": "r"}],
+                "summary": {"total": 1, "genuine": 0, "flagged": 1},
+                "recall_gaps": {"unmatched": []},
+                "_produced_by": "verify_competitors",
+                "metadata": landscape["metadata"],
+            }
+            with open(os.path.join(tmp, "competitor_verification.json"), "w") as f:
+                json.dump(verification, f)
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+        assert rc == 0, stderr
+        assert data is not None
+        warnings: list[dict[str, Any]] = data["warnings"]
+        return warnings
+
+    def _fired(self, warnings: list[dict[str, Any]]) -> dict[str, Any] | None:
+        return next((w for w in warnings if w["code"] == "CAP_DISPLACED_DIRECT"), None)
+
+    def test_fires_when_full_and_a_not_a_competitor_holds_a_slot(self) -> None:
+        w = self._fired(self._run(10, "not_a_competitor", "final"))
+        assert w is not None
+        assert w["severity"] == "medium"
+
+    def test_a_suggestion_dropped_from_the_merge_still_counts(self) -> None:
+        """The final file lost the suggestion; the run's first landscape kept it."""
+        assert self._fired(self._run(10, "not_a_competitor", "first_only")) is not None
+
+    def test_silent_below_the_cap(self) -> None:
+        assert self._fired(self._run(9, "not_a_competitor", "final")) is None
+
+    def test_silent_when_every_kept_competitor_is_genuine(self) -> None:
+        assert self._fired(self._run(10, "genuine", "final")) is None
+
+    def test_silent_for_a_non_direct_suggestion(self) -> None:
+        assert self._fired(self._run(10, "not_a_competitor", "final", category="adjacent")) is None
+
+
+def test_cap_constant_matches_the_validator() -> None:
+    """The check reads "full" from _cp_view; the cap is enforced by validate_landscape."""
+    import importlib.util
+
+    scripts = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "..", "skills", "competitive-positioning", "scripts"
+    )
+    mods = {}
+    for name in ("validate_landscape", "_cp_view"):
+        spec = importlib.util.spec_from_file_location(f"cp_{name}_cap", os.path.join(scripts, f"{name}.py"))
+        assert spec is not None and spec.loader is not None
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        mods[name] = mod
+    assert mods["validate_landscape"].MAX_COMPETITORS == mods["_cp_view"].MAX_COMPETITORS
+
+
+def test_a_competitor_name_carrying_markup_cannot_render_as_a_tag_in_report_md() -> None:
+    """Names come from web research; report.md is read rendered (where a viewer may render inline
+    HTML) and raw. Every name compose writes goes through one choke point that backslash-escapes
+    "<" and ">": inert when rendered, readable raw."""
+    evil = "<img src=x onerror=alert(1)>Acme"
+    with tempfile.TemporaryDirectory() as tmp:
+        competitors = [_make_competitor(evil, "acme", "direct")] + [
+            _make_competitor(f"Comp {i}", f"comp-{i}", "direct") for i in range(4)
+        ]
+        _make_artifact_dir(tmp, landscape_overrides={"competitors": competitors})
+        rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+    assert rc == 0, stderr
+    assert data is not None
+    md = data["report_markdown"]
+    assert "Acme" in md, "fixture did not put the name on the page"
+    # No unescaped "<" or ">" anywhere the name appears: every one is backslash-escaped.
+    for line in md.splitlines():
+        if "onerror" in line:
+            assert "<img" not in line.replace("\\<img", ""), line
+            assert "\\<img src=x onerror=alert(1)\\>Acme" in line, line
+
+
+class TestVerdictTally:
+    """`unproven` is a fourth verdict, and the tally's parts always sum to the number tested."""
+
+    CLAIMS = [
+        {"claim": "a", "verdict": "holds"},
+        {"claim": "b", "verdict": "partially_holds"},
+        {"claim": "c", "verdict": "does_not_hold"},
+        {"claim": "d", "verdict": "unproven"},
+        {"claim": "e", "verdict": "maybe"},
+    ]
+
+    def test_the_scorer_counts_every_verdict(self) -> None:
+        payload = _make_valid_positioning_input()
+        payload["differentiation_claims"] = self.CLAIMS
+        rc, data, stderr = run_script("score_positioning.py", stdin_data=json.dumps(payload))
+        assert rc == 0, stderr
+        assert data is not None
+        counts = data["verdict_counts"]
+        assert counts == {
+            "holds": 1,
+            "partially_holds": 1,
+            "does_not_hold": 1,
+            "unproven": 1,
+            "unrecognised": 1,
+            "total": 5,
+        }
+
+    def test_key_findings_states_unproven_and_sums_to_the_total(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _make_artifact_dir(tmp)
+            path = os.path.join(tmp, "positioning_scores.json")
+            with open(path) as f:
+                ps = json.load(f)
+            ps["differentiation_claims"] = self.CLAIMS
+            ps.pop("verdict_counts", None)  # an artifact from before the tally: compose computes it
+            with open(path, "w") as f:
+                json.dump(ps, f)
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+        assert rc == 0, stderr
+        assert data is not None
+        md = data["report_markdown"]
+        assert (
+            "Differentiation claims: 1 hold, 1 partially hold, 1 do not hold, 1 unproven, "
+            "1 with no recognised verdict (of 5 tested)." in md
+        )
+        assert "**Verdict:** Unproven" in md
+
+
+class TestCpDispatchPrompt:
+    """MOAT_SCORING, POSITIONING_SCORING and CHECKLIST prompts are printed from identifiers.
+
+    A hand-applied review once wrote new scoring rules into these prompts. The generator leaves
+    nothing to write in, and the shared hook holds a dispatch that differs from what it printed.
+    """
+
+    SCRIPTS = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "..", "skills", "competitive-positioning", "scripts"
+    )
+    HOOK = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "scripts", "dispatch_prompt_check.py")
+    END = "Do NOT write any file other than OUTPUT_PATH.\n"
+
+    @classmethod
+    def _load(cls, path: str, name: str) -> Any:
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(name, path)
+        assert spec is not None and spec.loader is not None
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def _gen(self) -> Any:
+        return self._load(os.path.join(self.SCRIPTS, "cp_dispatch_prompt.py"), "cp_dispatch_prompt_t")
+
+    def _render(self, context: str, **kw: Any) -> str:
+        args = {"run_id": "R1", "handoff_agent": "/h/", "analysis_dir_agent": "/a", "plugin_root_agent": "/p"}
+        args.update(kw)
+        text: str = self._gen().render(context, **args)
+        return text
+
+    @pytest.mark.parametrize("context", ["moat_scoring", "positioning_scoring", "checklist", "startup_research"])
+    def test_every_placeholder_is_filled_and_the_hook_line_closes_it(self, context: str) -> None:
+        text = self._render(context)
+        leftovers = set(re.findall(r"<[A-Z_]+>", text))
+        assert not leftovers, leftovers
+        assert "${CLAUDE_PLUGIN_ROOT}" not in text
+        assert text.endswith(self.END)
+        assert f"OUTPUT_PATH: /h/{context}_output.json" in text or "OUTPUT_PATH: /h/checklist_output.json" in text
+        assert "RUN_ID: R1" in text
+
+    def test_the_job_to_be_done_is_carried_only_when_recorded(self) -> None:
+        with_job = self._render("positioning_scoring", job="Remove weeds without chemicals.")
+        assert "as the verification pass characterised it: Remove weeds without chemicals." in with_job
+        assert "The startup's job to be done" not in self._render("positioning_scoring")
+
+    def test_the_job_is_read_from_the_verification_artifact(self, tmp_path: Any) -> None:
+        (tmp_path / "competitor_verification.json").write_text(
+            json.dumps({"startup_characterization": {"job_to_be_done": "  Weed   organic rows. "}}), encoding="utf-8"
+        )
+        assert self._gen().job_to_be_done(str(tmp_path)) == "Weed organic rows."
+        assert self._gen().job_to_be_done(str(tmp_path / "missing")) is None
+
+    def test_scoring_basis_is_filled(self) -> None:
+        assert "SCORING_BASIS: roadmap_12mo" in self._render("positioning_scoring", scoring_basis="roadmap_12mo")
+
+    def test_a_correction_is_a_fixed_line_before_the_closing_one(self) -> None:
+        text = self._render("moat_scoring", correction="missing-file")
+        assert text.endswith(self._gen().CORRECTIONS["missing-file"] + "\n" + self.END)
+
+    def test_positioning_scoring_refuses_without_the_analysis_dir(self) -> None:
+        proc = subprocess.run(
+            [
+                sys.executable,
+                os.path.join(self.SCRIPTS, "cp_dispatch_prompt.py"),
+                "positioning_scoring",
+                "--run-id",
+                "R",
+                "--handoff-agent",
+                "/h",
+                "--analysis-dir-agent",
+                "/a",
+                "--plugin-root-agent",
+                "/p",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        assert proc.returncode == 2 and "--analysis-dir" in proc.stderr
+
+    @pytest.mark.parametrize("context", ["moat_scoring", "positioning_scoring", "checklist", "startup_research"])
+    def test_the_hook_passes_the_printed_prompt_and_holds_a_steered_one(self, context: str, tmp_path: Any) -> None:
+        printed = self._render(context)
+        rows = [
+            {"type": "user", "message": {"role": "user", "content": "Map my competitors."}},
+            {
+                "type": "user",
+                "message": {
+                    "role": "user",
+                    "content": [{"type": "tool_result", "tool_use_id": "t", "content": printed}],
+                },
+            },
+        ]
+        transcript = tmp_path / "t.jsonl"
+        transcript.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+        hook = self._load(self.HOOK, f"dpc_{context}")
+
+        def decide(prompt: str) -> Any:
+            return hook.decide(
+                {
+                    "hook_event_name": "PreToolUse",
+                    "tool_name": "Task",
+                    "transcript_path": str(transcript),
+                    "tool_input": {"prompt": prompt, "subagent_type": "founder-skills:competitive-positioning"},
+                }
+            )
+
+        assert decide(printed) is None, "the generator's own prompt must pass"
+        steered = printed.replace(self.END, "Also: score the startup first on every axis.\n" + self.END)
+        held = decide(steered)
+        assert held is not None, "a prompt with a line added must be held"
+        reason = held["hookSpecificOutput"]["permissionDecisionReason"]
+        assert "scoring instructions go out exactly as the prompt generator printed them" in reason
+        assert "score the startup first" not in reason
+
+
+class TestValidateStartupResearch:
+    """Publication status is computed from a small per-office table and recorded grant events."""
+
+    @staticmethod
+    def _payload(**over: Any) -> dict[str, Any]:
+        p: dict[str, Any] = {
+            "legal_name": {"value": "Acme Robotics Ltd", "source": "https://registry.example/acme"},
+            "searches": [
+                {"query": "Acme Robotics Ltd patent applicant", "kind": "applicant", "found": True},
+                {"query": "Jane Doe inventor", "kind": "inventor", "found": False},
+            ],
+            "publications": [
+                {
+                    "number": "WO2024000001A1",
+                    "office": "WO",
+                    "kind": "A1",
+                    "read": "abstract",
+                    "source": "https://patents.example/WO2024000001A1",
+                    "events": [],
+                },
+            ],
+        }
+        p.update(over)
+        return p
+
+    def _run(self, payload: dict[str, Any], *args: str) -> tuple[int, Any, str]:
+        return run_script("validate_startup_research.py", args=list(args), stdin_data=json.dumps(payload))
+
+    def test_a_published_application_is_published_not_pending(self) -> None:
+        rc, data, stderr = self._run(self._payload())
+        assert rc == 0, stderr
+        assert data["publications"][0]["status"] == "published"
+        assert data["family_status"] == "published"
+        assert data["searched_none"] == ["Jane Doe inventor"]
+
+    def test_a_recorded_grant_event_makes_the_family_granted(self) -> None:
+        pubs = [
+            {
+                "number": "WO2024000001A1",
+                "office": "WO",
+                "kind": "A1",
+                "read": "abstract",
+                "source": "https://patents.example/x",
+                "events": [{"code": "WWG", "date": "2026-04-12"}],
+            }
+        ]
+        rc, data, stderr = self._run(self._payload(publications=pubs))
+        assert rc == 0, stderr
+        assert data["publications"][0]["grant_event"] is True
+        assert data["family_status"] == "granted"
+
+    def test_the_same_kind_letter_means_different_things_in_two_offices(self) -> None:
+        """US B1 is a granted patent; an unlisted office's B1 is unknown, never assumed granted."""
+        pubs = [
+            {"number": "US1111111B1", "office": "US", "kind": "B1", "read": "claims", "source": "q1", "events": []},
+            {"number": "IL222222B1", "office": "IL", "kind": "B1", "read": "none", "source": "q2", "events": []},
+        ]
+        rc, data, stderr = self._run(self._payload(publications=pubs))
+        assert rc == 0, stderr
+        status = {p["number"]: p["status"] for p in data["publications"]}
+        assert status == {"US1111111B1": "granted", "IL222222B1": "unknown"}
+
+    def test_an_unlisted_pair_alone_leaves_the_family_unknown(self) -> None:
+        pubs = [{"number": "IL222222B1", "office": "IL", "kind": "B1", "read": "none", "source": "q", "events": []}]
+        rc, data, stderr = self._run(self._payload(publications=pubs))
+        assert rc == 0, stderr
+        assert data["family_status"] == "unknown"
+
+    def test_nothing_found_is_recorded_as_such(self) -> None:
+        rc, data, stderr = self._run(self._payload(publications=[]))
+        assert rc == 0, stderr
+        assert data["family_status"] == "none_found"
+
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            {"searches": []},
+            {"publications": [{"number": "X1", "office": "US", "kind": "B1", "read": "none", "events": []}]},
+            {
+                "publications": [
+                    {"number": "X1", "office": "US", "kind": "B1", "read": "skimmed", "source": "q", "events": []}
+                ]
+            },
+            {"legal_name": {"value": "Acme", "source": ""}},
+        ],
+    )
+    def test_rejects_loudly_without_writing(self, bad: dict[str, Any], tmp_path: Any) -> None:
+        out = tmp_path / "startup_research.json"
+        out.write_text('{"sentinel": true}', encoding="utf-8")
+        rc, _, stderr = self._run(self._payload(**bad), "-o", str(out))
+        assert rc != 0 and stderr.strip()
+        assert json.loads(out.read_text(encoding="utf-8")) == {"sentinel": True}
+
+    def test_the_first_copy_is_kept_across_a_re_pipe(self, tmp_path: Any) -> None:
+        out = tmp_path / "startup_research.json"
+        rc, _, stderr = self._run(self._payload(), "--run-id", "R1", "-o", str(out))
+        assert rc == 0, stderr
+        first = json.loads((tmp_path / "startup_research.json.first.json").read_text())
+        pubs = [{"number": "US1111111B1", "office": "US", "kind": "B1", "read": "claims", "source": "q", "events": []}]
+        rc, _, stderr = self._run(self._payload(publications=pubs), "--run-id", "R1", "-o", str(out))
+        assert rc == 0, stderr
+        assert json.loads((tmp_path / "startup_research.json.first.json").read_text()) == first
+
+
+class TestStartupRecordRendering:
+    """What public records show about the startup reaches report.md and the coach, from the first record."""
+
+    RECORD: dict[str, Any] = {
+        "legal_name": {"value": "Acme Robotics Ltd", "source": "https://registry.example/acme"},
+        "searches": [{"query": "Acme applicant", "kind": "applicant", "found": True}],
+        "searched_none": ["Jane Doe inventor"],
+        "publications": [
+            {
+                "number": "WO2024000001A1",
+                "office": "WO",
+                "kind": "A1",
+                "read": "abstract",
+                "source": "https://patents.example/WO2024000001A1",
+                "status": "published",
+                "grant_event": True,
+                "events": [{"code": "WWG", "date": "2026-04-12"}],
+            },
+        ],
+        "family_status": "granted",
+        "_produced_by": "validate_startup_research",
+    }
+
+    def _compose(self, first: dict[str, Any] | None, current: dict[str, Any] | None) -> dict[str, Any]:
+        with tempfile.TemporaryDirectory() as tmp:
+            _make_artifact_dir(tmp)
+            with open(os.path.join(tmp, "landscape.json")) as f:
+                rid = json.load(f)["metadata"]["run_id"]
+            for name, body in (("startup_research.json.first.json", first), ("startup_research.json", current)):
+                if body is not None:
+                    with open(os.path.join(tmp, name), "w") as f:
+                        json.dump({**body, "metadata": {"run_id": rid}}, f)
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+        assert rc == 0, stderr
+        assert data is not None
+        out: dict[str, Any] = data
+        return out
+
+    def test_the_record_is_shown_with_its_computed_status_and_source(self) -> None:
+        data = self._compose(self.RECORD, self.RECORD)
+        md = data["report_markdown"]
+        section = md.split("## What Public Records Show")[1].split("\n## ")[0]
+        assert "Acme Robotics Ltd" in section
+        assert "at least one patent in the family is granted" in section
+        assert "WO2024000001A1" in section and "https://patents.example/WO2024000001A1" in section
+        assert "a grant in a national office is recorded (2026-04-12)" in section
+        assert "Jane Doe inventor" in section
+        assert any("granted" in s for s in data["coaching_payload"]["startup_record"])
+
+    def test_the_first_record_is_shown_and_a_later_disagreement_listed(self) -> None:
+        later = copy.deepcopy(self.RECORD)
+        later["publications"][0]["grant_event"] = False
+        later["family_status"] = "published"
+        md = self._compose(self.RECORD, later)["report_markdown"]
+        section = md.split("## What Public Records Show")[1].split("\n## ")[0]
+        assert "at least one patent in the family is granted" in section, "the first record must be the one shown"
+        assert "A later record disagreed" in section
+
+    def test_no_section_when_the_step_did_not_run(self) -> None:
+        data = self._compose(None, None)
+        assert "What Public Records Show" not in data["report_markdown"]
+        assert data["coaching_payload"]["startup_record"] == []
+
+
+class TestPlanStageScoring:
+    """A planned position is the scored point; today's is kept apart and never takes a planned value.
+
+    Two baseline runs placed a pre-product startup's planned price and claimed abilities as its
+    position TODAY. The planned point is now what is ranked ("if delivered"), and `today` is built
+    from today's coordinates only.
+    """
+
+    @staticmethod
+    def _payload(planned: tuple[int, int] | None = (90, 90), **extra: Any) -> dict[str, Any]:
+        payload = _make_valid_positioning_input()
+        pt = next(p for p in payload["views"][0]["points"] if p["competitor"] == "_startup")
+        pt["x"], pt["y"] = 10, 10
+        if planned is not None:
+            pt["planned_x"], pt["planned_y"] = planned
+        pt.update(extra)
+        return payload
+
+    def _score(self, payload: dict[str, Any], availability: str | None = None, tmp: str | None = None) -> Any:
+        args: list[str] = []
+        if availability is not None and tmp is not None:
+            path = os.path.join(tmp, "product_profile.json")
+            with open(path, "w") as f:
+                json.dump({"product_availability": availability, "availability_quote": "q"}, f)
+            args = ["--product-profile", path]
+        rc, data, stderr = run_script("score_positioning.py", args=args, stdin_data=json.dumps(payload))
+        assert rc == 0, stderr
+        return data
+
+    def test_the_planned_point_is_the_scored_one(self) -> None:
+        view = self._score(self._payload())["views"][0]
+        assert view["scored_point"] == "planned"
+        assert view["startup_x_rank"] == 1 and view["startup_y_rank"] == 1
+
+    @pytest.mark.parametrize("availability", [None, "concept", "pilot", "shipping"])
+    def test_today_never_carries_a_planned_value(self, availability: str | None) -> None:
+        """The property the baseline broke, whatever availability says."""
+        with tempfile.TemporaryDirectory() as tmp:
+            view = self._score(self._payload(), availability, tmp)["views"][0]
+        today = view["today"]
+        assert (today["x"], today["y"]) == (10.0, 10.0)
+        assert not any(k.startswith("planned") for k in today)
+        assert today["startup_x_rank"] > view["startup_x_rank"], "today was ranked on the plan"
+
+    def test_today_is_ranked_only_when_shipping(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            assert self._score(self._payload(), "shipping", tmp)["views"][0]["today"]["ranked"] is True
+            assert self._score(self._payload(), "pilot", tmp)["views"][0]["today"]["ranked"] is False
+        assert self._score(self._payload())["views"][0]["today"]["ranked"] is False
+
+    def test_availability_is_recorded_with_its_quote(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            data = self._score(self._payload(), "pilot", tmp)
+        assert data["product_availability"] == "pilot" and data["availability_quote"] == "q"
+
+    def test_no_plan_scores_today_as_before(self) -> None:
+        view = self._score(self._payload(planned=None))["views"][0]
+        assert view["scored_point"] == "today" and "today" not in view
+
+    def test_a_plan_moves_the_fingerprint_and_no_plan_leaves_it(self) -> None:
+        base = self._score(self._payload(planned=None))["views_fingerprint"]
+        with_plan = self._score(self._payload())["views_fingerprint"]
+        moved = self._score(self._payload(planned=(80, 90)))["views_fingerprint"]
+        assert base != with_plan != moved
+
+    @pytest.mark.parametrize(
+        "extra",
+        [{"planned_x": 90}, {"x_proof": "rumoured"}, {"planned_x": 90, "planned_y": 140}],
+    )
+    def test_invalid_plan_fields_are_rejected(self, extra: dict[str, Any]) -> None:
+        payload = self._payload(planned=None, **extra)
+        rc, _, stderr = run_script("score_positioning.py", stdin_data=json.dumps(payload))
+        assert rc != 0 and stderr.strip()
+
+    def test_planned_coordinates_on_a_competitor_are_rejected(self) -> None:
+        payload = self._payload(planned=None)
+        comp = next(p for p in payload["views"][0]["points"] if p["competitor"] != "_startup")
+        comp["planned_x"], comp["planned_y"] = 50, 50
+        rc, _, stderr = run_script("score_positioning.py", stdin_data=json.dumps(payload))
+        assert rc != 0 and "for _startup only" in stderr
+
+
+class TestPlanStageRendering:
+    """A planned position is stated as a plan on every surface, beside where the startup is today."""
+
+    ASYM = "You are placed where your plan puts you; competitors are placed at what they ship today."
+
+    @staticmethod
+    def _dir(tmp: str, availability: str) -> None:
+        _make_artifact_dir(tmp)
+        payload = _make_valid_positioning_input()
+        pt = next(p for p in payload["views"][0]["points"] if p["competitor"] == "_startup")
+        pt.update(
+            {
+                "x": 10,
+                "y": 10,
+                "planned_x": 95,
+                "planned_y": 95,
+                "x_proof": "claimed",
+                "y_proof": "demonstrated",
+                "x_proof_quote": "we will ship in 2027",
+                "planned_x_evidence": "PLANNED-EVIDENCE-X",
+            }
+        )
+        profile_path = os.path.join(tmp, "product_profile.json")
+        with open(profile_path) as f:
+            profile = json.load(f)
+        profile.update({"product_availability": availability, "availability_quote": "field trials only"})
+        with open(profile_path, "w") as f:
+            json.dump(profile, f)
+        with open(os.path.join(tmp, "positioning_scores.json")) as f:
+            rid = json.load(f)["metadata"]["run_id"]
+        rc, scored, stderr = run_script(
+            "score_positioning.py",
+            args=["--run-id", rid, "--product-profile", profile_path],
+            stdin_data=json.dumps(payload),
+        )
+        assert rc == 0, stderr
+        with open(os.path.join(tmp, "positioning_scores.json"), "w") as f:
+            json.dump(scored, f)
+        pos_path = os.path.join(tmp, "positioning.json")
+        with open(pos_path) as f:
+            pos = json.load(f)
+        pos["views"] = payload["views"]
+        with open(pos_path, "w") as f:
+            json.dump(pos, f)
+
+    def _render(self, availability: str) -> tuple[dict[str, Any], str]:
+        with tempfile.TemporaryDirectory() as tmp:
+            self._dir(tmp, availability)
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, stderr
+            proc = subprocess.run(
+                [sys.executable, os.path.join(CP_SCRIPTS_DIR, "visualize.py"), "-d", tmp],
+                capture_output=True,
+                text=True,
+            )
+            assert proc.returncode == 0, proc.stderr
+        assert data is not None
+        return data, proc.stdout
+
+    def test_the_asymmetry_is_stated_on_all_three_surfaces(self) -> None:
+        data, page = self._render("pilot")
+        assert self.ASYM in data["report_markdown"]
+        assert self.ASYM in page
+        assert any(self.ASYM in s for s in data["coaching_payload"]["positioning"])
+
+    def test_the_plan_is_labelled_and_today_is_unranked_without_a_product(self) -> None:
+        data, _ = self._render("pilot")
+        md = data["report_markdown"]
+        assert "If delivered:" in md
+        assert "Today: not ranked — there is no product to buy yet." in md
+        assert " -- " not in md, "a founder reads a real dash, not two hyphens"
+
+    def test_today_is_stated_from_todays_ranks_only(self) -> None:
+        """Ranked (shipping): the Today sentence carries today's places, never the plan's 1st."""
+        data, _ = self._render("shipping")
+        stand = next(s for s in data["coaching_payload"]["positioning"] if "Today:" in s)
+        today = stand.split("Today:", 1)[1].split("The plan", 1)[0]
+        assert "1st of" not in today, f"the plan's rank reached the Today sentence: {today}"
+        assert "The plan moves you from" in stand
+
+    def test_proof_gap_and_planned_row_reach_both_pages(self) -> None:
+        data, page = self._render("pilot")
+        md = data["report_markdown"]
+        assert "## What Is Shown and What Is Claimed" in md
+        assert "claimed, not yet shown" in md and "we will ship in 2027" in md
+        assert "(if delivered)" in md and "PLANNED-EVIDENCE-X" in md
+        assert "What Is Shown and What Is Claimed" in page and "claimed, not yet shown" in page
+
+    def test_the_map_draws_today_hollow_with_an_arrow_to_the_plan(self) -> None:
+        _, page = self._render("pilot")
+        assert 'class="startup-today"' in page and 'class="startup-plan-arrow"' in page
+        assert 'class="startup-planned"' in page
+
+
+def test_the_positioning_prompt_asks_for_the_plan_apart_from_today() -> None:
+    """The scorer can only keep plan and today apart if the prompt asks for them apart."""
+    import importlib.util
+
+    path = os.path.join(CP_SCRIPTS_DIR, "cp_dispatch_prompt.py")
+    spec = importlib.util.spec_from_file_location("cp_dispatch_prompt_plan_test", path)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    text = mod.render(
+        "positioning_scoring", run_id="R", handoff_agent="/h", analysis_dir_agent="/a", plugin_root_agent="/p"
+    )
+    for field in ("planned_x", "planned_y", "x_proof", "y_proof", "x_proof_quote"):
+        assert field in text, field
+    assert "never put a planned value in them" in text
+
+
+# ---------------------------------------------------------------------------
+# HANDOFF_BYPASSED: a step whose output reached its producer without passing check_handoff.py.
+# ---------------------------------------------------------------------------
+
+_CHECK_HANDOFF = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "scripts", "check_handoff.py")
+_CP_RID = "20260319T143045Z"  # _make_artifact_dir's default run_id
+_CP_CORE = [
+    "landscape_research_output.json",
+    "moat_scoring_output.json",
+    "positioning_scoring_output.json",
+    "checklist_output.json",
+]
+
+
+def _cp_bypass_dir(tmp: str, *, verification: bool = False, blind: int = 0, startup: bool = False) -> None:
+    _make_artifact_dir(tmp)
+    with open(os.path.join(tmp, "landscape.json")) as f:
+        meta = json.load(f)["metadata"]
+    if verification:
+        with open(os.path.join(tmp, "competitor_verification.json"), "w") as f:
+            json.dump(
+                {
+                    "verdicts": [],
+                    "summary": {"total": 0, "genuine": 0, "flagged": 0},
+                    "recall_gaps": {"blind_set_size": blind, "unmatched": []},
+                    "_produced_by": "verify_competitors",
+                    "metadata": meta,
+                },
+                f,
+            )
+    if startup:
+        with open(os.path.join(tmp, "startup_research.json"), "w") as f:
+            json.dump({"_produced_by": "validate_startup_research", "metadata": meta}, f)
+    os.makedirs(os.path.join(tmp, "handoff", _CP_RID))  # Step 0 creates it in every real run
+    # A real run's report is composed only with its outside review or a recorded skip (compose's
+    # `_rt_refuse`). A skip keeps these tests about the hand-offs they seed: a review would add its own.
+    with open(os.path.join(tmp, "red_team_skip.json"), "w") as f:
+        json.dump({"reason": "dispatch_failed", "_produced_by": "record_red_team_skip", "metadata": meta}, f)
+
+
+def _cp_seed_gated(tmp: str, stems: list[str]) -> None:
+    for stem in stems:
+        path = os.path.join(tmp, "handoff", _CP_RID, stem)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write('{"from": "the sub-agent"}')
+        result = subprocess.run([sys.executable, _CHECK_HANDOFF, path], capture_output=True, text=True)
+        assert result.returncode == 0, result.stdout
+
+
+def _cp_bypass(tmp: str) -> str | None:
+    rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+    assert rc == 0 and data is not None, stderr
+    hits = [w for w in data["warnings"] if w["code"] == "HANDOFF_BYPASSED"]
+    assert len(hits) <= 1, hits
+    if hits:
+        assert hits[0]["severity"] == "medium" and ".json" not in hits[0]["message"]
+    return hits[0]["message"] if hits else None
+
+
+def test_handoff_bypass_names_each_ungated_step_and_a_fully_gated_run_is_silent() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        _cp_bypass_dir(tmp, verification=True, blind=3, startup=True)
+        msg = _cp_bypass(tmp)  # lever engaged: every step named
+        assert msg is not None
+        for label in ("challenge to the competitor list", "independent recall", "competitor research", "public record"):
+            assert label in msg, (label, msg)
+        _cp_seed_gated(
+            tmp,
+            [*_CP_CORE, "competitor_verification_output.json", "competitor_recall_output.json"],
+        )
+        msg = _cp_bypass(tmp)
+        assert msg is not None and "public record" in msg and "moat scoring" not in msg
+        _cp_seed_gated(tmp, ["startup_research_output.json"])
+        assert _cp_bypass(tmp) is None
+
+
+def test_handoff_bypass_follows_the_optional_steps_that_actually_ran() -> None:
+    """Dynamic map: the recall is required only for a non-empty blind set, the startup research and
+    the verification only when their artifacts exist, the enrichment only when its hand-off is on disk."""
+    with tempfile.TemporaryDirectory() as tmp:
+        _cp_bypass_dir(tmp, verification=True, blind=0)
+        _cp_seed_gated(tmp, [*_CP_CORE, "competitor_verification_output.json"])
+        assert _cp_bypass(tmp) is None
+        # An enrichment hand-off present but never gated: the gate was skipped.
+        with open(os.path.join(tmp, "handoff", _CP_RID, "landscape_research_enrichment_output.json"), "w") as f:
+            f.write("{}")
+        msg = _cp_bypass(tmp)
+        assert msg is not None and "competitors you added" in msg
+        _cp_seed_gated(tmp, ["landscape_research_enrichment_output.json"])
+        assert _cp_bypass(tmp) is None
+
+
+def test_handoff_bypass_is_silent_without_a_handoff_dir() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        _make_artifact_dir(tmp)
+        assert _cp_bypass(tmp) is None
+
+
+def test_handoff_bypass_cannot_be_accepted_away() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        _cp_bypass_dir(tmp)
+        path = os.path.join(tmp, "positioning.json")
+        with open(path) as f:
+            positioning = json.load(f)
+        positioning["accepted_warnings"] = [{"code": "HANDOFF_BYPASSED", "match": "results", "reason": "x"}]
+        with open(path, "w") as f:
+            json.dump(positioning, f)
+        assert _cp_bypass(tmp) is not None  # still medium, not acknowledged
+
+
+class TestVerdictAndClosingMessage:
+    """The hand-over is printed from the report's own verdict, which is built from computed facts."""
+
+    def _report(self, tmp: str) -> dict[str, Any]:
+        TestPlanStageRendering._dir(tmp, "pilot")
+        path = os.path.join(tmp, "positioning_scores.json")
+        with open(path) as f:
+            ps = json.load(f)
+        ps["differentiation_claims"] = [
+            {"claim": "Only solar weeder", "verdict": "does_not_hold", "evidence": "Aigen is solar."}
+        ]
+        # The scorer's tally, agreeing with the claims above (the scorer counted the fixture's own claims).
+        ps["verdict_counts"] = {"holds": 0, "partially_holds": 0, "does_not_hold": 1, "unproven": 0, "total": 1}
+        with open(path, "w") as f:
+            json.dump(ps, f)
+        rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+        assert rc == 0, stderr
+        assert data is not None
+        out: dict[str, Any] = data
+        return out
+
+    def test_the_verdict_states_the_plan_and_the_failed_claim(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            verdict = self._report(tmp)["verdict"]
+        assert "If delivered:" in verdict
+        assert verdict.count(TestPlanStageRendering.ASYM) == 1, "the asymmetry is stated once"
+        assert 'Your claim "Only solar weeder" does not hold.' in verdict
+        assert "0 hold, 0 partially hold, 1 do not hold (of 1 tested)" in verdict, "the tally agrees with the claim"
+        assert "Overall defensibility:" in verdict
+
+    def test_the_closing_message_carries_the_verdict_and_writes_the_handover(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            report = self._report(tmp)
+            report_path = os.path.join(tmp, "report.json")
+            with open(report_path, "w") as f:
+                json.dump(report, f)
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    os.path.join(CP_SCRIPTS_DIR, "cp_closing_message.py"),
+                    "--report",
+                    report_path,
+                    "--deliverable",
+                    "the written report=/out/Acme.md",
+                    "--link",
+                    "path",
+                ],
+                capture_output=True,
+                text=True,
+            )
+            assert proc.returncode == 0, proc.stderr
+            with open(os.path.join(tmp, "handover.txt")) as f:
+                assert f.read() == proc.stdout
+        assert report["verdict"] in proc.stdout
+        assert proc.stdout.startswith(
+            "Here's your finished competitive positioning analysis: [the written report](/out/Acme.md)"
+        )
+
+    # The verdict is the report's own first paragraph, and both pages open with the same words. It is
+    # built once, by `_cp_view.verdict` inside compose; report.md, report.html, explorer.html and the
+    # printed hand-over all carry that one string.
+
+    _FIGURE = re.compile(r"\d[\d,.]*(?:st|nd|rd|th)?(?: of \d+)?(?: [a-z]+)?")
+
+    def test_the_verdict_is_the_reports_own_first_paragraph(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            report = self._report(tmp)
+        verdict, md = report["verdict"], report["report_markdown"]
+        assert verdict in md, (verdict, md[:600])
+        assert md.index("# Competitive Positioning Analysis") < md.index(verdict) < md.index("## Executive Summary")
+        figures = self._FIGURE.findall(verdict)
+        assert figures, verdict  # positive control: the verdict carries figures
+        body = md.replace(verdict, "")
+        for fig in figures:
+            assert fig in body, (fig, "the verdict states only figures the report itself prints")
+
+    def _pages(self, tmp: str, report: dict[str, Any]) -> tuple[str, str]:
+        with open(os.path.join(tmp, "report.json"), "w") as f:
+            json.dump(report, f)
+        pages = []
+        for script in ("visualize.py", "explore.py"):
+            proc = subprocess.run(
+                [sys.executable, os.path.join(CP_SCRIPTS_DIR, script), "--dir", tmp],
+                capture_output=True,
+                text=True,
+            )
+            assert proc.returncode == 0, proc.stderr
+            pages.append(proc.stdout)
+        return pages[0], pages[1]
+
+    def test_both_pages_open_with_the_same_verdict(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            report = self._report(tmp)
+            report_html, explorer_html = self._pages(tmp, report)
+        shown = html.escape(report["verdict"], quote=True)
+        # Each page's first section: report.html's first chart box, the explorer's tab bar.
+        for page, first_section in ((report_html, "<h2"), (explorer_html, 'class="tab-bar"')):
+            assert page.count(shown) == 1
+            body = page[page.index("<body") :]
+            assert body.index(shown) < body.index(first_section), "the verdict opens the page"
+
+    def test_a_report_from_another_run_puts_no_verdict_on_the_pages(self) -> None:
+        """The pages read the verdict from report.json; one left by an earlier run must not lead them."""
+        with tempfile.TemporaryDirectory() as tmp:
+            report = self._report(tmp)
+            report["metadata"]["run_id"] = "an-earlier-run"
+            report_html, explorer_html = self._pages(tmp, report)
+        shown = html.escape(report["verdict"], quote=True)
+        assert shown not in report_html and shown not in explorer_html
+
+    def test_a_report_with_no_verdict_is_refused(self, tmp_path: Any) -> None:
+        report_path = tmp_path / "report.json"
+        report_path.write_text(json.dumps({"verdict": None}), encoding="utf-8")
+        proc = subprocess.run(
+            [sys.executable, os.path.join(CP_SCRIPTS_DIR, "cp_closing_message.py"), "--report", str(report_path)],
+            capture_output=True,
+            text=True,
+        )
+        assert proc.returncode == 2 and "no verdict" in proc.stderr
+        assert not (tmp_path / "handover.txt").exists()
+
+
+# ---------------------------------------------------------------------------
+# RED_TEAM prompt: printed from what is on disk, the founder's documents first.
+# ---------------------------------------------------------------------------
+
+
+def _red_team_gen() -> Any:
+    import importlib.util
+
+    path = os.path.join(CP_SCRIPTS_DIR, "cp_dispatch_prompt.py")
+    spec = importlib.util.spec_from_file_location("cp_dispatch_prompt_red_team_test", path)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _red_team_dirs(tmp_path: pathlib.Path, *, docs: tuple[str, ...] = ("deck.md",), research: bool = True) -> Any:
+    analysis = tmp_path / "a"
+    handoff = tmp_path / "h"
+    analysis.mkdir()
+    (handoff / "docs").mkdir(parents=True)
+    for name in ("product_profile", "landscape", "positioning_scores", "moat_scores", "checklist"):
+        (analysis / f"{name}.json").write_text("{}", encoding="utf-8")
+    if research:
+        (analysis / "startup_research.json").write_text("{}", encoding="utf-8")
+    for d in docs:
+        (handoff / "docs" / d).write_text("x", encoding="utf-8")
+    (handoff / "docs" / "._deck.md").write_text("x", encoding="utf-8")  # AppleDouble: never listed
+    return analysis, handoff
+
+
+def _red_team_text(tmp_path: pathlib.Path, **kw: Any) -> str:
+    analysis, handoff = _red_team_dirs(tmp_path, **{k: v for k, v in kw.items() if k in ("docs", "research")})
+    text: str = _red_team_gen().red_team(
+        run_id="R1",
+        analysis_dir=str(analysis),
+        handoff_dir=str(handoff),
+        handoff_agent="/agent/h/",
+        analysis_dir_agent="/agent/a",
+        correction=kw.get("correction"),
+    )
+    return text
+
+
+def test_red_team_prompt_lists_the_founders_documents_before_the_analysis(tmp_path: pathlib.Path) -> None:
+    text = _red_team_text(tmp_path)
+    assert text.startswith("CONTEXT: RED_TEAM\nOUTPUT_PATH: /agent/h/redteam_output.json\nRUN_ID: R1\n")
+    assert text.index("/agent/h/docs/deck.md") < text.index("/agent/a/product_profile.json")
+    assert "._deck.md" not in text
+    assert text.endswith("Do NOT write any file other than OUTPUT_PATH.\n")
+
+
+def test_red_team_prompt_leaves_out_the_analysis_grading_itself(tmp_path: pathlib.Path) -> None:
+    """The checklist is the analysis's grade of its own work: a reviewer handed it inherits a verdict."""
+    text = _red_team_text(tmp_path)
+    assert "checklist.json" not in text
+    for name in ("product_profile", "landscape", "positioning_scores", "moat_scores", "startup_research"):
+        assert f"/agent/a/{name}.json" in text
+
+
+def test_red_team_prompt_names_the_public_record_only_when_it_exists(tmp_path: pathlib.Path) -> None:
+    assert "startup_research.json" not in _red_team_text(tmp_path, research=False)
+
+
+def test_red_team_prompt_says_when_the_founder_supplied_nothing(tmp_path: pathlib.Path) -> None:
+    text = _red_team_text(tmp_path, docs=())
+    assert "The founder supplied no documents." in text
+    assert "/agent/h/docs/" not in text
+
+
+def test_red_team_correction_sits_before_the_closing_line(tmp_path: pathlib.Path) -> None:
+    text = _red_team_text(tmp_path, correction="missing-file")
+    assert text.endswith("use Write to create exactly that path.\nDo NOT write any file other than OUTPUT_PATH.\n"), (
+        text[-200:]
+    )
+
+
+def test_red_team_prompt_is_refused_on_an_unfinished_analysis(tmp_path: pathlib.Path) -> None:
+    analysis, handoff = _red_team_dirs(tmp_path)
+    (analysis / "moat_scores.json").unlink()
+    r = subprocess.run(
+        [
+            sys.executable,
+            os.path.join(CP_SCRIPTS_DIR, "cp_dispatch_prompt.py"),
+            "red_team",
+            "--run-id",
+            "R1",
+            "--handoff-agent",
+            "/agent/h",
+            "--analysis-dir-agent",
+            "/agent/a",
+            "--plugin-root-agent",
+            "/p",
+            "--analysis-dir",
+            str(analysis),
+            "--handoff-dir",
+            str(handoff),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert r.returncode == 2 and r.stdout == ""
+    assert "moat_scores.json" in r.stderr
+
+
+# ---------------------------------------------------------------------------
+# The scorers reword OUR file names in evidence at pipe time, before the outside review, so no later
+# step edits a scored artifact to remove them (which both wave-1 runs did, disclosing a changed analysis).
+# ---------------------------------------------------------------------------
+
+_OUR_FILES_SEED = "Per landscape.json and the product_profile.json pricing, see https://x.com/landscape.json."
+
+
+def _no_our_files(text: str) -> None:
+    for name in ("landscape.json", "product_profile.json"):
+        assert name not in text.replace("https://x.com/landscape.json", ""), text
+
+
+def test_positioning_evidence_carries_no_file_of_ours(tmp_path: pathlib.Path) -> None:
+    payload = _make_valid_positioning_input()
+    pt = payload["views"][0]["points"][1]
+    pt["x_evidence"] = _OUR_FILES_SEED
+    pt["y_evidence"] = "Founder's notes.md says so; landscape.json agrees."
+    payload["differentiation_claims"][0]["evidence"] = "As product_profile.json states."
+    out = tmp_path / "positioning_scores.json"
+    rc, _, stderr = run_script(
+        "score_positioning.py", args=["--run-id", "R", "-o", str(out)], stdin_data=json.dumps(payload)
+    )
+    assert rc == 0, stderr
+    for path in (out, tmp_path / "positioning_scores.json.first.json"):
+        data = json.loads(path.read_text())
+        point = next(p for p in data["views"][0]["points"] if p["competitor"] == "acme-corp")
+        _no_our_files(point["x_evidence"])
+        assert "https://x.com/landscape.json" in point["x_evidence"], "a URL is never reworded"
+        assert point["x_evidence"].startswith("Per the competitor research and the profile of your company pricing")
+        assert "notes.md" in point["y_evidence"], "a file that is not ours stays as written"
+        _no_our_files(point["y_evidence"])
+        _no_our_files(data["differentiation_claims"][0]["evidence"])
+
+
+def test_moat_evidence_carries_no_file_of_ours(tmp_path: pathlib.Path) -> None:
+    payload = _make_valid_moat_input()
+    payload["moat_assessments"]["acme-corp"]["moats"][0]["evidence"] = _OUR_FILES_SEED
+    out = tmp_path / "moat_scores.json"
+    rc, _, stderr = run_script("score_moats.py", args=["--run-id", "R", "-o", str(out)], stdin_data=json.dumps(payload))
+    assert rc == 0, stderr
+    for path in (out, tmp_path / "moat_scores.json.first.json"):
+        data = json.loads(path.read_text())
+        moat = data["companies"]["acme-corp"]["moats"][0]
+        _no_our_files(moat["evidence"])
+        assert moat["evidence"].startswith("Per the competitor research")
+
+
+def test_red_team_prompt_carries_the_reports_own_where_you_stand_sentences() -> None:
+    """The reviewer is handed the positions exactly as the founder reads them, so it attacks those and
+    not its own reading of the raw scores: a live reviewer read a planned view's raw x/y as "the plotted
+    point" and filed a false serious finding that the report's own "If delivered" line answers."""
+    with tempfile.TemporaryDirectory() as tmp:
+        TestPlanStageRendering._dir(tmp, "pilot")
+        handoff = os.path.join(tmp, "handoff", "R")
+        os.makedirs(os.path.join(handoff, "docs"))
+        text: str = _red_team_gen().red_team(
+            run_id="R", analysis_dir=tmp, handoff_dir=handoff, handoff_agent="/agent/h", analysis_dir_agent="/agent/a"
+        )
+        with open(os.path.join(tmp, "positioning_scores.json")) as f:
+            scores = json.load(f)
+        with open(os.path.join(tmp, "landscape.json")) as f:
+            landscape = json.load(f)
+    view = _red_team_gen_view()
+    sentences = view.map_sentences(scores, view.competitor_names(landscape, None))
+    assert sentences, "the fixture must produce a sentence, or this test checks nothing"
+    for s in sentences:
+        assert s in text, s
+    assert "If delivered" in text and TestPlanStageRendering.ASYM in text
+    assert text.index("/agent/a/positioning_scores.json") < text.index(sentences[0])
+    assert "_startup" not in text.split("OUTPUT_PATH")[1].split("Write your findings")[0].replace("_startup.", "")
+    assert text.endswith("Do NOT write any file other than OUTPUT_PATH.\n")
+
+
+def test_red_team_prompt_has_no_positions_block_without_scores(tmp_path: pathlib.Path) -> None:
+    analysis, handoff = _red_team_dirs(tmp_path)
+    text: str = _red_team_gen().red_team(
+        run_id="R",
+        analysis_dir=str(analysis),
+        handoff_dir=str(handoff),
+        handoff_agent="/agent/h",
+        analysis_dir_agent="/agent/a",
+    )
+    assert "What the report tells the founder" not in text
+
+
+def _red_team_gen_view() -> Any:
+    import importlib.util
+
+    path = os.path.join(CP_SCRIPTS_DIR, "_cp_view.py")
+    spec = importlib.util.spec_from_file_location("cp_view_red_team_test", path)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+# ---------------------------------------------------------------------------
+# "level with" is a tie. A small lead that is not a tie reads "just ahead of" / "just behind": the
+# confirmation run printed "2nd of 11, level with John Deere" with no tie and the startup 5 behind.
+# ---------------------------------------------------------------------------
+
+
+def _view_with(**axis: Any) -> dict[str, Any]:
+    view: dict[str, Any] = {
+        "x_axis_name": "Total cost of ownership per acre-season",
+        "y_axis_name": "Crop-type flexibility",
+        "competitor_count": 10,
+        "dominated_by": [],
+        "startup_y_rank": 1,
+        "startup_y_tied_with": [],
+        "y_best_competitors": ["hand-crews"],
+        "y_lead_over_best": 30.0,
+    }
+    view.update(axis)
+    return view
+
+
+def _say(view: dict[str, Any]) -> str:
+    names = {"john-deere": "John Deere", "carbon": "Carbon Robotics", "hand-crews": "Hand weeding crews"}
+    text: str = _red_team_gen_view().view_sentence(view, names)
+    return text
+
+
+def test_a_small_lead_behind_the_leader_is_just_behind_not_level() -> None:
+    """The confirmation run's shape: rank 2, no tie, 5 behind the leader."""
+    text = _say(
+        _view_with(startup_x_rank=2, startup_x_tied_with=[], x_best_competitors=["john-deere"], x_lead_over_best=-5.0)
+    )
+    assert "Total cost of ownership per acre-season: 2nd of 11, just behind John Deere;" in text
+    assert "level with" not in text
+
+
+def test_a_small_lead_ahead_of_the_runner_up_is_just_ahead_not_level() -> None:
+    """Wave-1 run 1's shape: 1st, no tie, a small margin over the next competitor."""
+    text = _say(
+        _view_with(startup_x_rank=1, startup_x_tied_with=[], x_best_competitors=["carbon"], x_lead_over_best=5.0)
+    )
+    assert "1st of 11, just ahead of Carbon Robotics;" in text
+    assert "level with" not in text
+
+
+def test_a_real_tie_still_reads_level_with() -> None:
+    text = _say(
+        _view_with(
+            startup_x_rank=1, startup_x_tied_with=["carbon"], x_best_competitors=["carbon"], x_lead_over_best=0.0
+        )
+    )
+    assert "tied 1st–2nd of 11, level with Carbon Robotics;" in text
+
+
+def test_the_wider_bands_are_unchanged() -> None:
+    ahead = _say(
+        _view_with(startup_x_rank=1, startup_x_tied_with=[], x_best_competitors=["carbon"], x_lead_over_best=15.0)
+    )
+    well = _say(
+        _view_with(startup_x_rank=1, startup_x_tied_with=[], x_best_competitors=["carbon"], x_lead_over_best=25.0)
+    )
+    behind = _say(
+        _view_with(startup_x_rank=3, startup_x_tied_with=[], x_best_competitors=["carbon"], x_lead_over_best=-12.0)
+    )
+    assert "1st of 11, ahead of Carbon Robotics;" in ahead
+    assert "1st of 11, well ahead of Carbon Robotics;" in well
+    assert "3rd of 11, behind Carbon Robotics;" in behind

@@ -231,6 +231,17 @@ Write to OUTPUT_PATH:
 ```
 Slugs kebab-case. Do NOT write any file other than OUTPUT_PATH.
 
+#### STARTUP_RESEARCH subtype
+
+Research the STARTUP's own public record — not competitors — and record what you find, where you
+found it, and every search that found nothing. The printed prompt lists the searches and the output
+shape: `legal_name`, `searches` (every search, each with `query`, `kind` and `found`) and
+`publications` (each with `number`, `office`, `kind`, `events`, `read` and `source`). Two rules it states bear repeating because a status is the easy thing to get wrong: record
+each publication's number, office, kind code and legal events exactly as the source shows them, and
+never write a status such as granted or pending — `validate_startup_research.py` computes it. A
+publication you did not see in a result is not recorded; a missing record is a search with
+`found: false`. Do NOT write any file other than OUTPUT_PATH.
+
 #### MOAT_SCORING subtype
 
 Read `positioning.json`, `landscape.json` and `product_profile.json` from the
@@ -243,7 +254,7 @@ Score every slug (including `_startup`) across the 6 canonical moat dimensions:
 `cost_structure`, `brand_reputation`. Each moat entry requires: `id`, `status`
 (`strong`/`moderate`/`weak`/`absent`/`not_applicable`), `evidence` (required even
 for `not_applicable`), `evidence_source`
-(`researched`/`agent_estimate`/`founder_override`), `trajectory`
+(`researched`/`agent_estimate`/`founder_provided`), `trajectory`
 (`building`/`stable`/`eroding`).
 
 For `trajectory` and any moat where `landscape.json` evidence is thin, use
@@ -277,7 +288,7 @@ Read `positioning.json` from the ANALYSIS_DIR.
 For each view in `positioning.json`, assign coordinates (0-100) for every competitor
 and `_startup` on both axes. Every point needs `x_evidence`, `y_evidence`, and
 provenance source fields. Assess differentiation claims with: `verifiable` (boolean),
-`evidence`, `challenge`, `verdict` (`holds`/`partially_holds`/`does_not_hold`).
+`evidence`, `challenge`, `verdict` (`holds`/`partially_holds`/`does_not_hold`/`unproven`).
 
 The axes in `positioning.json` drive the search queries — when an axis is
 "customer support depth" or "pricing transparency," issue WebSearch queries
@@ -426,6 +437,21 @@ keys (do not refetch from disk):
 - `defensibility` — the SCORED moat picture: `moat_count`, `strongest_moat`,
   `overall_defensibility` (`high`/`moderate`/`low`), and `moats[]` with each
   dimension's `id` and `status`. This is your ONLY source for moat claims.
+- `positioning` — one sentence per positioning map, computed from the scores: where the startup
+  ranks on each axis, who leads, who is ahead of it on both axes, and who is nearest. This is your
+  ONLY source for positioning claims. Quote it or restate it without changing a rank, a name or a
+  "both axes"; never invent a position it does not state.
+- `claim_verdicts` — one sentence per claim from the founder's pitch that the analysis
+  stress-tested, with its verdict (holds / only partly holds / does not hold / is unproven). This is
+  your ONLY source for whether a pitch claim holds.
+- `startup_record` — what public records show about the startup: its registered legal name and each
+  patent publication with its status as the analysis computed it (granted / published application,
+  no grant found / status not established). This is your ONLY source for the startup's patent status.
+  A pitch that says "patent-pending" does not make it so, and a granted family must never be called
+  pending.
+- `outside_review` — what the outside review of this analysis found, in the report's words: first one
+  sentence saying whether it ran and what it found, then one sentence per finding, most serious first
+  ("Serious: …", "Moderate: …", "Minor: …"). This is your ONLY source for what the review found.
 - `company_name`
 - `review_dir`, `report_path` — context only; you don't open either.
 - `insertion_marker` — consumed by the main thread's
@@ -446,12 +472,23 @@ should answer:
   positioning? (anchor on the highest-impact entry in `failed_items`).
 - How should the founder prepare for investor pushback on competition?
   (specific questions they'll face and how to answer them — use
-  `summary.overall_status` and checklist failures to ground this).
+  `summary.overall_status`, checklist failures, `positioning` and `claim_verdicts` to ground
+  this). **Every claim in `claim_verdicts` that does not hold must be addressed here:** name the
+  claim, say it will be challenged, and say how to reframe it. A pitch claim the analysis found
+  false is the most useful thing to tell a founder before investor meetings; one run's commentary
+  omitted it and said nothing had raised a serious red flag. **The same goes for every "Serious:"
+  finding in `outside_review`:** name it and say how to answer it. Never tell the founder that nothing
+  raised a serious concern while `outside_review` carries one, and if its first sentence says no review
+  ran, say so rather than implying the analysis was checked.
 - A concrete defensibility roadmap: which moats to invest in, in what
   order, and what milestones signal progress. Order it off
   `defensibility.moats[]` — a `weak` dimension is the cheapest upgrade, an
   `absent` one the most expensive; `strongest_moat` is what to defend, not
   what to build.
+
+**Never state a positioning fact that is not in `positioning`, a verdict on a pitch claim that is
+not in `claim_verdicts`, a patent status that is not in `startup_record`, or a review finding that is
+not in `outside_review`.** Both are rendered in the same report your commentary joins.
 
 **Never state a moat fact that is not in `defensibility`.** Your commentary is
 appended to the same investor-facing report that carries the scored moat table,
@@ -503,6 +540,19 @@ re-dispatch, but only if you say so. Improvising instead is strictly worse than
 failing: it produces a complete-looking deliverable assessed against inputs you
 never actually read, which nothing downstream can detect. Reporting the failure
 IS the correct outcome, and it is not counted against you.
+
+**If your Write to `OUTPUT_PATH` fails — any tool error, including "File is in
+a directory that is denied by your permission settings." — write nothing else
+and return BLOCKED, never a `complete` receipt:**
+
+```json
+{"status": "blocked", "reason": "write_refused", "attempted": "<the OUTPUT_PATH you tried>", "detail": "<the tool error, verbatim>"}
+```
+
+Do NOT retry at a relative path, a `/sessions/...` path, or any other location.
+The main thread cannot see your tool errors, only your final message: a
+`complete` receipt after a refused Write sends the run down its fallback
+instead of getting the path fixed.
 
 The main thread gates your hand-off file with `check_handoff.py`, transforms it
 via `md_to_commentary.py`, and runs the shared `insert_coaching.py` script,

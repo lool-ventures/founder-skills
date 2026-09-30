@@ -797,7 +797,7 @@ SKILLS_DIR = REPO_ROOT / "skills"
 def _declared_contexts(skill_dir: Path) -> set[str]:
     """Every `CONTEXT: <NAME>` header declared in a skill's dispatch templates.
 
-    Scans SKILL.md, every references/**.md, and scripts/dispatch_prompt.py — cap-table puts its dispatch
+    Scans SKILL.md, every references/**.md, and scripts/*dispatch_prompt.py — cap-table puts its dispatch
     prompt templates in references/lanes/*.md, so a SKILL.md-only scan would
     under-report and reintroduce exactly the blind spot this test closes.
 
@@ -814,8 +814,9 @@ def _declared_contexts(skill_dir: Path) -> set[str]:
             continue
         for m in _CONTEXT_HEADER.finditer(src.read_text(encoding="utf-8")):
             found.add(m.group(1).rstrip(",").strip())
-    generator = skill_dir / "scripts" / "dispatch_prompt.py"
-    if generator.is_file():
+    # A skill's prompt generator: dispatch_prompt.py (market-sizing) or <prefix>_dispatch_prompt.py
+    # (competitive-positioning's cp_dispatch_prompt.py, named apart to avoid an import clash).
+    for generator in sorted((skill_dir / "scripts").glob("*dispatch_prompt.py")):
         for m in _CONTEXT_LITERAL.finditer(generator.read_text(encoding="utf-8")):
             found.add(m.group(1))
     return found

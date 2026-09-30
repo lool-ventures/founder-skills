@@ -104,6 +104,240 @@
               "cap_implied_only": {
                 "type": "boolean"
               },
+              "pool_sizing_counterfactual": {
+                "type": "object",
+                "description": "The option pool re-solved on the other sizing basis, every other input held. Absent when the scenario has no pool target or its modeled solve is not full or mixed.",
+                "required": [
+                  "status",
+                  "modeled_basis",
+                  "modeled_basis_assumed"
+                ],
+                "properties": {
+                  "status": {
+                    "enum": [
+                      "computed",
+                      "same_on_both_sizings",
+                      "not_computed",
+                      "unavailable"
+                    ]
+                  },
+                  "modeled_basis": {
+                    "type": "string"
+                  },
+                  "other_basis": {
+                    "type": "string"
+                  },
+                  "modeled_basis_assumed": {
+                    "type": "boolean"
+                  },
+                  "modeled_as_approximation": {
+                    "type": "boolean"
+                  },
+                  "reason": {
+                    "type": "string"
+                  },
+                  "founders": {
+                    "type": "object",
+                    "required": [
+                      "modeled_value",
+                      "other_value"
+                    ],
+                    "properties": {
+                      "modeled_value": {
+                        "type": "number"
+                      },
+                      "other_value": {
+                        "type": "number"
+                      }
+                    }
+                  },
+                  "classes": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "object",
+                      "required": [
+                        "modeled",
+                        "other"
+                      ],
+                      "properties": {
+                        "modeled": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "other": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        }
+                      }
+                    }
+                  },
+                  "pool_topup_shares": {
+                    "type": "object",
+                    "required": [
+                      "modeled",
+                      "other"
+                    ],
+                    "properties": {
+                      "modeled": {
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      },
+                      "other": {
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      }
+                    }
+                  },
+                  "price_per_share": {
+                    "type": "object",
+                    "required": [
+                      "modeled",
+                      "other"
+                    ],
+                    "properties": {
+                      "modeled": {
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      },
+                      "other": {
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      }
+                    }
+                  },
+                  "gains_on_other_sizing": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "other_solve_warnings": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "pool_increase_reading": {
+                "type": "object",
+                "description": "The round re-solved as if the pool percentage sized only the new options, every other input held. Present only when the solver disclosed that reading (W_POOL_BASIS_READING_NOT_CONFIRMED).",
+                "required": [
+                  "status"
+                ],
+                "properties": {
+                  "status": {
+                    "enum": [
+                      "computed",
+                      "same_on_both_readings",
+                      "not_computed",
+                      "unavailable"
+                    ]
+                  },
+                  "reason": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "founders": {
+                    "type": "object",
+                    "required": [
+                      "modeled_value",
+                      "increase_value"
+                    ],
+                    "properties": {
+                      "modeled_value": {
+                        "type": "number"
+                      },
+                      "increase_value": {
+                        "type": "number"
+                      }
+                    }
+                  },
+                  "pool_topup_shares": {
+                    "type": "object",
+                    "required": [
+                      "modeled",
+                      "increase"
+                    ],
+                    "properties": {
+                      "modeled": {
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      },
+                      "increase": {
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      }
+                    }
+                  },
+                  "whole_pool_pct": {
+                    "type": "object",
+                    "required": [
+                      "modeled",
+                      "increase"
+                    ],
+                    "properties": {
+                      "modeled": {
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      },
+                      "increase": {
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      }
+                    }
+                  },
+                  "price_per_share": {
+                    "type": "object",
+                    "required": [
+                      "modeled",
+                      "increase"
+                    ],
+                    "properties": {
+                      "modeled": {
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      },
+                      "increase": {
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      }
+                    }
+                  },
+                  "other_solve_warnings": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
               "math_provenance": {
                 "type": "array",
                 "items": {

@@ -394,6 +394,7 @@ def _validate_structural(
                 "transactional-fintech",
                 "annual-contracts",
                 "retail",
+                "unclassified",
             ],
         ),
         "model_format": (

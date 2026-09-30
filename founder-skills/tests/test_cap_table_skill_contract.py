@@ -603,7 +603,10 @@ def test_context_b_hard_rules_forbid_edits() -> None:
     anchor = "### Context B"
     start = agent_text.find(anchor)
     assert start != -1, f"{AGENT_MD.name} has no '### Context B' section"
-    section = agent_text[start : start + 12000]
+    # Bounded on structure (the next ## or ### heading), not a fixed character window: a fixed window
+    # reds on an additive edit to the section while the rule it checks is still present.
+    nxt = re.search(r"\n#{2,3} (?!#)", agent_text[start + len(anchor) :])
+    section = agent_text[start : start + len(anchor) + nxt.start()] if nxt else agent_text[start:]
 
     assert "Do NOT" in section, f"{AGENT_MD.name} Context B section lost the 'Do NOT' phrasing"
     assert "edit_report_md" in section, (
@@ -1124,15 +1127,17 @@ def test_lane1_repipe_guidance_pins_replace_and_dup_warning() -> None:
 
 def test_skill_md_coaching_pipe_uses_format_markdown_adapter() -> None:
     """R2 coaching-transport fix: Step 11's Context-B pipe must gate the raw
-    .md hand-off with check_handoff.py --format=markdown and transform it
-    through the shared md_to_commentary.py adapter before insert_coaching.py
-    — never hand the sub-agent a JSON-escaping burden."""
+    .md hand-off with check_handoff.py --format=markdown and turn it into the
+    envelope by script, never by hand -- in cap-table that script is
+    pool_claims_check.py, which also checks the option-pool claims (see
+    test_pool_claims_check.py) -- so the sub-agent carries no JSON-escaping burden."""
     skill_md = SKILL_MD.read_text(encoding="utf-8")
     start = skill_md.index("### Step 11: Post-Compose Coaching Commentary")
     end = skill_md.index("### Step 12: Deliver Artifacts")
     step11 = skill_md[start:end]
     assert "--format=markdown" in step11
-    assert "md_to_commentary.py" in step11
+    assert "pool_claims_check.py" in step11 and "coaching.checked.json" in step11
+    assert "pool_check_release.py" in step11
     assert "OUTPUT_PATH: <HANDOFF_AGENT>/coaching.md" in step11
     assert "coaching_commentary_output.json" not in step11
 
@@ -1168,3 +1173,183 @@ def test_agent_coaching_writes_raw_markdown_no_json_escaping() -> None:
     assert "escaped as `\\n`" not in agent_body
     assert 'escaped as `\\"`' not in agent_body
     assert "no pretty-print" not in agent_body.lower()
+
+
+def _context_b_section() -> str:
+    """The agent body's Context B section, bounded on the next ## or ### heading."""
+    text = AGENT_MD.read_text(encoding="utf-8")
+    anchor = "### Context B"
+    start = text.find(anchor)
+    assert start != -1, f"{AGENT_MD.name} has no '### Context B' section"
+    nxt = re.search(r"\n#{2,3} (?!#)", text[start + len(anchor) :])
+    return text[start : start + len(anchor) + nxt.start()] if nxt else text[start:]
+
+
+def test_the_coach_is_told_the_pool_is_a_dilution_driver_and_nothing_more() -> None:
+    """Every coach handed the pool's basis, reading or comparison wrote something about the sizing without its
+    figure, invented a reading nobody computed, or named a post-money pool by the other measure's name. The
+    report's Option pool section explains the pool; the commentary gives the driver and points to it."""
+    flat = " ".join(_context_b_section().split())
+    assert "**The option pool is a dilution driver here and nothing more:**" in flat
+    assert "give its `founder_impact_pp` and its `reference`, as written" in flat
+    assert "write none of it, and do not name the pool by any sizing" in flat
+
+
+def test_the_coach_is_told_no_pool_sizing_key() -> None:
+    """The keys the payload no longer carries are not left on the prompt: a coach told to use a key that is not
+    there improvises it."""
+    flat = " ".join(AGENT_MD.read_text(encoding="utf-8").split())
+    for gone in (
+        "pool_basis",
+        "pool_basis_assumed",
+        "pool_basis_confirmed",
+        "pool_sizing_counterfactual",
+        "pool_increase_reading",
+        "pool_basis_reading_unconfirmed",
+        "who_gains_on_the_other_sizing",
+        "mechanism",
+    ):
+        assert f"`{gone}`" not in flat, gone
+        assert f"`headline_inputs.{gone}`" not in flat, gone
+
+
+def test_the_extraction_guidance_does_not_teach_the_other_measures_name() -> None:
+    """ "Sized into the pre-money" is what a term sheet reader says of every pool; this skill's measures are
+    named by what they count, so the agent body never teaches the phrase."""
+    text = AGENT_MD.read_text(encoding="utf-8")
+    assert "sized into the pre-money." not in text
+    assert "created before the round's price is set" in text
+
+
+_RECOMMENDS_A_BASIS = re.compile(
+    r"(?:negotiat\w*|push|ask|argue|aim)\s+(?:for|toward|towards|to get)?\s*"
+    r"(?:a\s+)?(?:pre|post)-money\b[^.]{0,40}\bpool"
+)
+
+
+def test_context_b_never_recommends_a_pool_basis() -> None:
+    # Positive control: the pattern catches the sentence a live run actually wrote.
+    assert _RECOMMENDS_A_BASIS.search("if you can negotiate a pre-money pool (where the pool is sized before")
+    assert _RECOMMENDS_A_BASIS.search("push for a post-money pool")
+    flat = " ".join(_context_b_section().split()).lower()
+    recommending = _RECOMMENDS_A_BASIS.findall(flat)
+    assert not recommending, recommending
+    # The worked example that primed pre-money must stay gone.
+    assert "pool top-up to 15% pre-money" not in flat
+
+
+# ---------------------------------------------------------------------------------------------
+# The option pool's basis: one catalog row, asked where the readings differ, answered by the founder
+# ---------------------------------------------------------------------------------------------
+
+_SKILL_MD = CAP_TABLE_DIR / "SKILL.md"
+
+
+def _catalog_row(name: str) -> str:
+    text = _SKILL_MD.read_text(encoding="utf-8")
+    rows = [line for line in text.splitlines() if line.startswith(f"| **{name}** |")]
+    assert len(rows) == 1, f"expected exactly one Gate Catalog row named {name!r}, found {len(rows)}"
+    return rows[0]
+
+
+def test_the_pool_basis_row_offers_the_three_readings_in_the_order_the_fallback_relies_on() -> None:
+    """Option 1 is the reading the model used before this row existed, and an unanswered harness gate takes
+    option 1 -- so the order is load-bearing, not cosmetic."""
+    row = _catalog_row("Pool basis")
+    labels = re.findall(r"`([^`]+)` \(→", row)
+    assert labels == [
+        "The pool available for new grants after the round",
+        "Only the new options added in this round",
+        "Measured against the share count before the round",
+        "Something else / not sure — ask counsel",
+    ], labels
+    # Percent-free: the percent can come from the top-up intent answer in the SAME batch, so a label that
+    # needed it could not be written.
+    assert not [label for label in labels if "%" in label or "[" in label], labels
+    assert re.findall(r"\(→ `([a-z_]+)`\)", row) == ["post_money", "post_money_increase", "pre_money"]
+
+
+def test_the_pool_basis_question_cannot_be_mistaken_for_another_gate() -> None:
+    """A scenario that answers the pool-EXISTENCE gate matches the substring "option pool" and fails on any
+    question it cannot answer, so this question must not contain it."""
+    question = _catalog_row("Pool basis").split(" | ")[2]
+    assert "option pool" not in question.lower(), question
+
+
+def test_the_top_up_intent_row_is_basis_free_and_keeps_its_anchor() -> None:
+    row = _catalog_row("Pool top-up intent")
+    labels = re.findall(r"`([^`]+)`", row)
+    assert labels[0] == "No top-up planned", labels  # a committed scenario answers with this exact label
+    assert not [label for label in labels if "money" in label.lower()], labels
+
+
+def test_step_5_names_every_way_the_basis_is_settled() -> None:
+    flat = " ".join(_SKILL_MD.read_text(encoding="utf-8").split())
+    start = flat.find("**Pool basis — from the founder, never defaulted.**")
+    assert start != -1
+    para = flat[start : flat.find("**Note-conversion parameter key", start)]
+    for needle in (
+        "Either post-money reading beside existing unallocated options is always disclosed",
+        "pool_clause.py",
+        "verified: true",
+        "E_POOL_BASIS_NOT_MODELED",
+        "custom_basis_stated_by_founder",
+        "E_POOL_BASIS_EXCLUDING_NOT_MODELED",
+        "excluding_basis_modeled_as",
+        "Never change `target_basis` to clear either block",
+        "with post-money stated, use `post_money`",
+        "with no basis stated, omit `target_basis`",
+    ):
+        assert needle in para, needle
+
+
+def test_no_flag_clears_the_pool_reading_disclosure() -> None:
+    """A founder-answer flag the model writes is satisfied by writing it; the disclosure has no such switch."""
+    for path in (_SKILL_MD, REPO_ROOT / "founder-skills" / "agents" / "cap-table.md"):
+        text = path.read_text(encoding="utf-8")
+        assert "pool_basis_answered_by_founder" not in text and "pool-basis-answered" not in text, path
+
+
+def test_the_paid_lanes_prompt_states_no_existing_pool() -> None:
+    """The Pool basis question fires on a post-money target beside existing unallocated options, and the
+    paid lane says "Don't ask clarifying questions". Adding a pool to its prompt would make it answer a
+    question it has no way to answer, and a paid run would be the first to find out."""
+    source = (REPO_ROOT / "founder-skills" / "tests" / "test_e2e_cap_table.py").read_text(encoding="utf-8")
+    start = source.find("prompt = (")
+    prompt = source[start : source.find(")", start)].lower()
+    assert "post-money option pool" in prompt  # positive control: this is the prompt, not some other string
+    for needle in ("unallocated", "authorized", "issued", "available for", "existing pool"):
+        assert needle not in prompt, needle
+
+
+def test_the_new_options_lanes_prompt_does_state_an_existing_pool() -> None:
+    """The inverse of the no-pool test above: the second lane exists to reach the disclosure, which needs
+    unallocated options beside a post-money target and a founder who is not asked."""
+    source = (REPO_ROOT / "founder-skills" / "tests" / "test_e2e_cap_table.py").read_text(encoding="utf-8")
+    start = source.find("pool_prompt = (")
+    assert start != -1, "the new-options lane's prompt is gone"
+    # Join the adjacent string literals, so a phrase wrapped across two source lines still reads as one.
+    prompt = re.sub(r'"\s+"', "", source[start : source.find(")", start)]).lower()
+    assert "post-money option pool" in prompt and "unallocated" in prompt
+    assert "don't ask" in prompt
+
+
+def test_the_pool_basis_note_matches_what_the_solver_does_when_the_question_is_never_asked() -> None:
+    """Two different situations, and the note used to state only one as if it covered both.
+
+    An ASKED but unanswered question takes option 1 (post-money). A question never asked (the founder
+    asked not to be asked) leaves the basis as stated -- and with no basis stated the solver falls back to
+    pre-money and discloses it. The second half is read off the code, not restated, so the note cannot
+    drift from `_resolve_target_basis` again.
+    """
+    run_scenario = _load_script_module("run_scenario.py", "_ct_run_scenario_pool_note")
+    basis, disclosure = run_scenario._resolve_target_basis({"target_pool_percent": 10})
+    assert disclosure is not None, "an unstated basis with a pool target must be disclosed"
+    stated, _ = run_scenario._resolve_target_basis({"target_pool_percent": 10, "target_basis": "post_money"})
+    assert stated == "post_money"
+
+    note = _catalog_row("Pool basis").split(" | ")[-1].lower()
+    assert "unanswered" in note and "option 1" in note, note
+    assert basis.replace("_", "-") in note, f"the never-asked, no-basis fallback ({basis}) must be named: {note}"
+    assert "disclos" in note, note
+    assert "option 1 is the reading used when no one is asked" not in note

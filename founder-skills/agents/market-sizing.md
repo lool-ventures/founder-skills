@@ -62,136 +62,110 @@ your prompt. You do not need network access for Context A dispatches — your
 tool allowlist deliberately includes no network tools (a design choice, not a
 platform limitation).
 
-#### Value fidelity — applies to BOTH methodology subtypes
+#### References, not numbers — applies to BOTH methodology subtypes
 
-"Determine the best values" below means **choose which sourced figure to use and justify it** — it
-does **not** license replacing a figure the founder stated. A founder-stated input is the analysis's
-premise, not a candidate to be improved on.
+You do not write numbers for the sizing inputs. Each input names WHERE its value comes from, and the
+calculator reads the value from there, so a figure is never retyped and has one copy, in the record.
+Each input is ONE of:
 
-- **A founder-stated value goes into your output unchanged.** If `inputs.json` (or the dispatch
-  prompt) states a figure, use exactly that figure.
-- **A researched figure that disagrees is a finding, not a substitution.** Never silently swap it in.
-  Record the disagreement in your output's `sources`/notes: name the founder's figure, name the
-  researched figure and its source, and state which one the numbers were computed from (the
-  founder's). The founder can then decide to revise the input and re-run.
-- **Research fills gaps; it does not overwrite.** Where the founder stated nothing, use the best
-  sourced value and cite it.
-- **A rounding or unit normalization is not a substitution** — converting "18k" to `18000` is fine.
-  Changing 18,000 to 16,601 is not, however much better-sourced the second figure is.
+- `{"assumption": "<name>"}` — a figure recorded in `validation.json`. It keeps the unit, currency and
+  period it was recorded with; you convert nothing.
+- `{"derived": {"op": "multiply"|"divide"|"to_percent"|"to_fraction", "factors": [<reference>, ...]}}` —
+  a figure built from recorded ones. A head-count times a price per customer is money per year; a count
+  times a ratio (seats per account) is a count; a money total divided by a count is a price per
+  customer; a ratio of two counts becomes a percentage only through `to_percent`. Other combinations
+  are refused, with the rules.
+- `{"estimate": <number>, "unit": "<unit>", "why": "<one sentence>"}` — your own figure, when nothing
+  recorded fits. It is graded as an estimate and widened in the stress test, and the report shows any
+  research it departs from beside it. An exchange rate is never an estimate.
+- `{"founder_stated": "arpu"}` — arpu only: the founder's own figure, a fact about their business.
 
-Why this is strict: the founder recognises their own numbers. A report whose headline TAM was
-computed from a figure they never gave, without saying so, reads as an arithmetic error and
-discredits the whole analysis — including the parts that are right.
+The founder's own figure is the premise, not a candidate to improve on: when they stated their ARPU,
+reference it. Research that disagrees is a finding for the report, not a substitution.
+
+Each input must resolve to what it measures: `industry_total` money per year; `customer_count` a count;
+`arpu` money per customer; the four `*_pct` inputs percentage POINTS (35 means 35%, not 0.35). A figure
+that measures something else is refused. The fix is the derivation it should have been (a head-count
+and a price, not the head-count relabelled as money), never a change to the record.
 
 #### TOP_DOWN_METHODOLOGY subtype
 
-Your prompt includes pre-fetched research data from validation.json. Read:
-- `<ANALYSIS_DIR>/inputs.json` — company context, target segments, geography
-- `<ANALYSIS_DIR>/validation.json` — sourced assumptions (industry_total, segment_pct, share_pct)
+Read `<ANALYSIS_DIR>/inputs.json` (company, segments, geography) and `<ANALYSIS_DIR>/validation.json`
+(the recorded research). segment_pct and share_pct are percentage POINTS (35 means 35%, not 0.35).
+segment_pct narrows TAM to SAM; share_pct narrows SAM to SOM; do not swap them. **SIZING_BASIS** in your prompt names the analysis' convention (`current_year` |
+`forecast_year` | `mixed`, see `references/tam-sam-som-methodology.md` §5): when both a current- and a
+forecast-year figure are recorded, reference the one that matches, and say which in `why` if you
+estimate.
 
-Using the top-down approach, determine the best values for `industry_total`,
-`segment_pct`, and `share_pct` based on the research data provided and the
-company's market position.
-
-**SIZING_BASIS** in your prompt names this analysis' declared convention (`current_year` |
-`forecast_year` | `mixed` — see `references/tam-sam-som-methodology.md` §5). When a research source
-quotes both a current-year and a forecast-year figure for the same market, pick `industry_total`
-from the one matching SIZING_BASIS, not whichever number the source headlines — and note which
-figure/year you used.
-
-segment_pct and share_pct are percentage POINTS, not fractions — 35 means 35%,
-not 0.35 (the calculator divides by 100 once already; a fractional value
-computes ~100x low). segment_pct narrows TAM to SAM; share_pct narrows SAM to
-SOM — do not swap them.
-
-Write to OUTPUT_PATH — exactly the shape expected by `market_sizing.py --stdin`
-for approach "top_down":
+Write to OUTPUT_PATH — the shape `market_sizing.py --stdin` reads for approach "top_down":
 ```json
 {
   "approach": "top_down",
-  "industry_total": <total addressable market, AS THE SOURCE STATES IT — you never convert>,
-  "industry_total_currency": <the source's ISO code, e.g. "USD" — REQUIRED whenever it differs
-    from inputs.json's `currency`; omit only when the figure is already in that currency>,
-  "segment_pct": <percentage POINTS (0-100) of industry in target segment — e.g. 35 for 35%, NOT 0.35; narrows TAM to SAM>,
-  "share_pct": <percentage POINTS (0-100) realistically capturable market share — e.g. 5 for 5%, NOT 0.05; narrows SAM to SOM>
+  "industry_total": <reference>,
+  "segment_pct": <reference>,
+  "share_pct": <reference>
 }
+```
+Worked example — an industry_total built from a head-count and a price: the head-count is a `count`, the
+price a `money_per_customer` with its period, and their product is money per year (the calculator
+annualises a monthly price). A count times a count, or a market total times a count, does not combine.
+```json
+{"industry_total": {"derived": {"op": "multiply", "factors": [{"assumption": "trades_contractor_count"}, {"assumption": "fsm_price_per_account"}]}}}
 ```
 
 #### BOTTOM_UP_METHODOLOGY subtype
 
-Your prompt includes pre-fetched research data from validation.json. Read:
-- `<ANALYSIS_DIR>/inputs.json` — company context, pricing model, target customers
-- `<ANALYSIS_DIR>/validation.json` — sourced assumptions (customer_count, arpu, serviceable_pct, target_pct)
+Read `<ANALYSIS_DIR>/inputs.json` (pricing model, target customers) and `<ANALYSIS_DIR>/validation.json`.
+serviceable_pct and target_pct are percentage POINTS (35 means 35%, not 0.35). serviceable_pct narrows
+customers to the serviceable ones; target_pct to the ones realistically won.
+A recorded price keeps its period; the calculator makes it annual. SIZING_BASIS applies as for the
+top-down subtype.
 
-Using the bottom-up approach, determine the best values for `customer_count`,
-`arpu`, `serviceable_pct`, and `target_pct` based on the research data provided
-and the company's actual market position.
-
-**SIZING_BASIS** in your prompt names this analysis' declared convention (`current_year` |
-`forecast_year` | `mixed`). If your `customer_count` or `arpu` benchmark comes from a source
-quoting both a current and a forecast-year figure, pick the one matching SIZING_BASIS and note
-which you used.
-
-serviceable_pct and target_pct are percentage POINTS, not fractions — 35 means
-35%, not 0.35 (the calculator divides by 100 once already; a fractional value
-computes ~100x low).
-
-Write to OUTPUT_PATH — exactly the shape expected by `market_sizing.py --stdin`
-for approach "bottom_up":
+Write to OUTPUT_PATH — the shape `market_sizing.py --stdin` reads for approach "bottom_up":
 ```json
 {
   "approach": "bottom_up",
-  "customer_count": <total addressable customer count, integer>,
-  "arpu": <annual revenue per user, AS THE SOURCE STATES IT — you never convert>,
-  "arpu_currency": <the source's ISO code, e.g. "USD" — REQUIRED whenever it differs from
-    inputs.json's `currency`; omit only when the figure is already in that currency>,
-  "serviceable_pct": <percentage POINTS (0-100) that can be served — e.g. 35 for 35%, NOT 0.35>,
-  "target_pct": <percentage POINTS (0-100) realistic capture — e.g. 0.5 for 0.5%, NOT a fraction of 1>
+  "customer_count": <reference>,
+  "arpu": <reference>,
+  "serviceable_pct": <reference>,
+  "target_pct": <reference>
 }
+```
+Worked example — a funnel with more stages than inputs: customer_count is the WIDEST recorded count;
+every narrowing stage before winning goes into serviceable_pct, multiplied into one percentage
+(30% of 40% is 12%); target_pct is only the share you expect to win. Never narrow customer_count and
+then apply the same stage again in serviceable_pct.
+```json
+{"customer_count": {"assumption": "trades_contractor_count"},
+ "serviceable_pct": {"derived": {"op": "multiply", "factors": [{"assumption": "share_with_five_plus_techs"}, {"assumption": "share_using_scheduling_software"}]}},
+ "target_pct": {"assumption": "expected_win_share"}}
 ```
 
 #### SENSITIVITY_TEST subtype
 
-Read:
-- `<ANALYSIS_DIR>/validation.json` — for confidence tiers of each assumption
-- `<ANALYSIS_DIR>/sizing.json` — for base values and approach
-
-Construct sensitivity ranges based on confidence:
-- `sourced`: range stands — do NOT widen it, and do not invent one; a sourced figure's range is
-  whatever the source states, or omit the parameter
+Read `<ANALYSIS_DIR>/sizing.json`. Its `input_provenance` gives, for each input, the value the sizing
+used and its grade (`category`); `sensitivity.py` takes both from there itself, so you choose only
+the ranges, by grade:
+- `sourced`: range stands — do NOT widen it, and do not invent one; the range is
+  whatever the source states, or omit the input
 - `derived`: minimum ±30%
 - `agent_estimate`: minimum ±50%
 
-Include EVERY parameter tagged `agent_estimate` in validation.json that
-appears in `QUANTITATIVE_PARAMS` (`customer_count`, `arpu`, `serviceable_pct`,
-`target_pct`, `industry_total`, `segment_pct`, `share_pct`). Missing
-`agent_estimate` parameters triggers `UNSOURCED_ASSUMPTIONS` in compose.
+Include EVERY `agent_estimate` input. A missing one triggers `UNSOURCED_ASSUMPTIONS` in compose. A
+declared `confidence` cannot narrow the recorded grade: the stricter of the two applies.
 
-Write to OUTPUT_PATH — exactly the shape expected by `sensitivity.py`. Each
-range MUST carry the parameter's `confidence` (`sourced` / `derived` /
-`agent_estimate`); without it, `sensitivity.py` defaults to `sourced` and the
-auto-widening above never fires:
+Write to OUTPUT_PATH — exactly the shape `sensitivity.py` reads:
 ```json
 {
   "approach": "bottom_up|top_down|both",
-  "base": {
-    "customer_count": <from sizing.json>,
-    "arpu": <from sizing.json>,
-    "serviceable_pct": <from sizing.json>,
-    "target_pct": <from sizing.json>
-  },
   "ranges": {
-    "<parameter>": {"low_pct": <negative>, "high_pct": <positive>, "confidence": "sourced|derived|agent_estimate"}
-  },
-  "validation_confidence": {"<parameter>": "sourced|derived|agent_estimate"}
+    "<input>": {"low_pct": <negative>, "high_pct": <positive>, "confidence": "sourced|derived|agent_estimate"}
+  }
 }
 ```
-
-`validation_confidence` mirrors each parameter's `category` from `validation.json` and is the
-BACKSTOP: if you omit a range's own `confidence`, `sensitivity.py` reads the tier from here
-instead of silently falling back to `sourced` — which widens nothing, so the stress test would
-report ranges it never actually stressed. Emit both; the range's own `confidence` still wins
-where present.
+`<input>` is the calculator's parameter, exactly one of: `arpu`, `customer_count`, `industry_total`,
+`segment_pct`, `serviceable_pct`, `share_pct`, `target_pct` — never a recorded figure's own name (a range
+for a figure named `us_fsm_market_2025` goes under `industry_total`).
 
 #### CHECKLIST subtype
 
@@ -201,14 +175,9 @@ way the founder knows it — never by our filename. They never saw `inputs.json`
 states no go-to-market plan", not "inputs.json gtm_evidence_notes is null". State
 what is true of the MARKET or the founder's own materials.
 
-Read:
-- `${CLAUDE_PLUGIN_ROOT}/skills/market-sizing/references/pitfalls-checklist.md`
-- `${CLAUDE_PLUGIN_ROOT}/skills/market-sizing/references/artifact-schemas.md`
-  (read the "Canonical 22 checklist IDs" section)
-- `<ANALYSIS_DIR>/inputs.json`
-- `<ANALYSIS_DIR>/methodology.json`
-- `<ANALYSIS_DIR>/validation.json`
-- `<ANALYSIS_DIR>/sizing.json`
+Read the files your prompt names, and only those: the checklist reference, the schema's canonical 22
+IDs, and the analysis's inputs, methodology, validation and sizing. The methodology file it names is a
+copy that leaves out the revision record; grade the analysis as it now stands.
 
 You do NOT see the original deck — score `competitive_landscape_acknowledged` from
 `inputs.json`'s `competitive_landscape_notes` field only (present or `null`), not from
@@ -299,17 +268,22 @@ keys (do not refetch from disk):
   top-down figure and a bottom-up figure are different claims, and the
   founder will be asked which they built. `null` means no sizing was
   resolvable — then do not name a build at all.
-- `deck_coverage` — `null` when no canonical deck figure was stated; otherwise
+- `deck_coverage` — `null` when the founder stated no TAM/SAM/SOM; otherwise
   `{deck_reviewed: true, stated: [...], missing: [...]}` listing which of
-  `tam`/`sam`/`som` the deck stated vs left null. Use this to frame coaching
-  about figures the deck omitted — see "Composing commentary" below.
+  `tam`/`sam`/`som` the founder stated vs left null. `stated` does NOT say
+  where: a figure typed in chat and one on a slide look the same here, so never
+  write that the deck stated it. Use this to frame coaching about figures
+  missing from what they stated — see "Composing commentary" below.
 - `comparison_blocked` — `{metrics: [...], any: bool, reason: str}`. When `any`
   is true, the figures named in `metrics` were **never cross-checked** against
   ours: they are in a different currency and none was stated. `deck_coverage`
   will still list them as stated, so do NOT write as though they were verified.
   Say the check could not run and what would let it run.
 - `approach_comparison` — `null` on a single-approach run; otherwise
-  `{tam_delta_pct, sam_delta_pct, som_delta_pct, shared_inputs: [...], caveat}`.
+  `{tam_gap, sam_gap, som_gap, shared_inputs: [...], caveat}`. Each `<metric>_gap` is
+  a ready-to-quote sentence stating how far apart the two builds are as a factor
+  of the two figures ("differ by a factor of 6.5 (bottom-up is higher)"), or
+  `null` when that metric was not compared; quote it for any gap you mention.
   `caveat` says what the pipeline could see about independence: nothing, when
   no input is itemized; otherwise that `shared_inputs` is the list of what it
   saw. `shared_inputs` lists what they demonstrably share,
@@ -317,7 +291,7 @@ keys (do not refetch from disk):
   agreement on those metrics is arithmetic, so quote the sentence rather than
   describing the builds as separate.
 - `red_team_findings` — `null` when no adversarial review ran; otherwise
-  `{findings: [...], dropped, unchecked, could_not_check, unread}`. **`null` and an
+  `{findings: [...], later_reviews: [...], dropped, unchecked, could_not_check, unread}`. **`null` and an
   empty `findings` list are different facts and must not be written the same
   way**: one means nobody looked, the other that somebody looked and found
   nothing. Each finding quotes the source it relies on — quote it too rather
@@ -326,6 +300,14 @@ keys (do not refetch from disk):
   `unread` names the founder's documents the review never opened; a figure
   from one of them was checked against the analysis's reading, not the page —
   say so rather than writing as though every page had been read.
+  `later_reviews` lists later reviews of the same analysis, each `{review, findings}`: the
+  first review is the one shown, and these are shown beneath it — treat their findings as
+  the founder's to read too, never as superseded.
+- `review_rounds` — `{count, shown, note, changes}`: how many times the outside review
+  ran, which one is shown, the page's one line about it, and what changed in the analysis
+  between the first review and the shown one. Computed from the review records. It says
+  nothing about who decided anything, so neither do you: never write that the founder
+  approved, chose or asked for a revision.
 - `review_dir`, `report_path` — context only; you don't open either.
 - `insertion_marker` — consumed by the main thread's
   `insert_coaching.py` invocation, NOT by you. Ignore it.
@@ -355,8 +337,8 @@ The commentary should answer:
 
 **Deck-coverage framing (`deck_coverage` field).** If `deck_coverage` is
 present and `deck_coverage.missing` is non-empty, frame the relevant
-coaching as: "your deck stated {stated} but should also show {missing}."
-Do **not** frame this as understatement — the deck simply omitted figures;
+coaching as: "you stated {stated}; your materials should also show {missing}."
+Do **not** frame this as understatement — the figures were simply omitted;
 that is semantically distinct from `DECK_CLAIM_MISMATCH`, which fires only
 when stated figures diverge from computed values.
 
@@ -366,8 +348,8 @@ medium-severity warnings the founder will see, do **not** trust
 captured deck claims in non-canonical keys that the reconciler ignored.
 In that case, frame the coaching around the warning: "your inputs used
 non-canonical keys for deck claims; flatten to `{tam, sam, som}` so the
-comparison can run." The deck's nuanced figures may also be captured in
-`existing_claims_detail` — point the founder at the "Deck Claims
+comparison can run." Their nuanced figures may also be captured in
+`existing_claims_detail` — point the founder at the "Your Stated Figures
 (Narrative)" section of the report for context.
 
 Do NOT Read the full `report.md` — the structured payload is sufficient.
@@ -408,6 +390,19 @@ re-dispatch, but only if you say so. Improvising instead is strictly worse than
 failing: it produces a complete-looking deliverable assessed against inputs you
 never actually read, which nothing downstream can detect. Reporting the failure
 IS the correct outcome, and it is not counted against you.
+
+**If your Write to `OUTPUT_PATH` fails — any tool error, including "File is in
+a directory that is denied by your permission settings." — write nothing else
+and return BLOCKED, never a `complete` receipt:**
+
+```json
+{"status": "blocked", "reason": "write_refused", "attempted": "<the OUTPUT_PATH you tried>", "detail": "<the tool error, verbatim>"}
+```
+
+Do NOT retry at a relative path, a `/sessions/...` path, or any other location.
+The main thread cannot see your tool errors, only your final message: a
+`complete` receipt after a refused Write sends the run down its fallback
+instead of getting the path fixed.
 
 The main thread gates your hand-off file with `check_handoff.py` and runs the
 shared `insert_coaching.py` script, which performs the idempotency check, the

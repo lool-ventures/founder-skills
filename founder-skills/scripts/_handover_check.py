@@ -18,7 +18,7 @@ remains once it is removed may carry no digit. Containment rather than digit-abs
 message is also wrong when it DELETES: at hostloop the model kept one printed line of four and
 rewrote two, one of them without a digit, which no digit check can see.
 
-Deliberately blind to a digit-free paraphrase around the message ("a greeting before it is fine").
+Deliberately blind to a digit-free paraphrase around the message (a greeting, a sign-off).
 """
 
 from __future__ import annotations

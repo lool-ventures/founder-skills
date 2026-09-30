@@ -235,7 +235,7 @@ When the 6 canonical types do not capture a company's defensibility, the agent m
 
 | Custom ID | When to use |
 |-----------|------------|
-| `custom_ip_patents` | Company has a patent portfolio that is actively enforced and covers core functionality (beyond what `regulatory_barriers` captures) |
+| — | Not for patents, licences or certifications: they are `regulatory_barriers`, and `score_moats.py` rejects a custom moat for them |
 | `custom_talent_moat` | Company has exclusive access to a rare talent pool that competitors cannot easily recruit from |
 | `custom_ecosystem_lock_in` | Company is deeply embedded in a platform ecosystem (e.g., Shopify app store) where the platform relationship creates unique advantage |
 | `custom_geographic_monopoly` | Company has exclusive access to a geographic market through relationships, licenses, or first-mover dynamics |
@@ -247,7 +247,7 @@ When the 6 canonical types do not capture a company's defensibility, the agent m
 2. Must include a `definition` field explaining what the moat is and why it is distinct from canonical types
 3. Must meet the same evidence standards as canonical moats (strong/moderate/weak/absent ratings with evidence)
 4. Should be used sparingly — most defensibility fits within the 6 canonical types
-5. `score_moats.py` passes custom moats through without validation against canonical definitions but applies the same evidence quality checks
+5. `score_moats.py` refuses a custom moat with no `definition`, or one that restates `regulatory_barriers`, and applies the same evidence quality checks
 
 ---
 

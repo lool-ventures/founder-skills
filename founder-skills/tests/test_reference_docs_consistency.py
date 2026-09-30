@@ -150,7 +150,7 @@ def test_no_zero_reads_inputs_inlined_invariant() -> None:
     """There is no "zero reads, inputs inlined" Context A invariant.
 
     The three-way input rule says the opposite for under-`outputs/` artifacts
-    ("Relative reads are preferred over inlining these"), and names ic-sim's
+    ("Reads are preferred over inlining these"), and names ic-sim's
     all-inline variant as one skill's OPT-IN. The stale parenthetical was cited
     as THE mitigation for the un-gated workspace-shell escape hatch, so it
     reassured a reader about a risk it did not address.
@@ -158,11 +158,13 @@ def test_no_zero_reads_inputs_inlined_invariant() -> None:
     flat = _body()
     assert "zero reads, inputs inlined" not in flat, (
         "skill-execution-model.md cites a 'zero reads, inputs inlined' Context A invariant. "
-        "No such invariant exists — the three-way rule PREFERS relative reads for "
+        "No such invariant exists — the three-way rule PREFERS agent-namespace reads for "
         "under-outputs artifacts. Cite the input rules instead."
     )
-    assert "reachable by a relative `read` or inlined" in flat, (
-        "the corrected mitigation must state the real rule (relative-read OR inlined), not a "
+    # "agent-namespace", not "relative": a relative file-tool path is refused,
+    # so the read form is the absolute agent-namespace path the Step 0 proof yields.
+    assert "reachable by an agent-namespace `read` or inlined" in flat, (
+        "the corrected mitigation must state the real rule (agent-namespace read OR inlined), not a "
         "one-sided summary of it — the third input form is deliberately NOT readable"
     )
 

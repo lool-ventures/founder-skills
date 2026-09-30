@@ -247,15 +247,22 @@ RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
 # the hand-off gate when a dispatch fails to write.
 HANDOFF_DIR="$REVIEW_DIR/handoff/$RUN_ID"
 mkdir -p "$HANDOFF_DIR"
-# Sub-agents address the SAME dir by a different path (their file tools are rooted at the outputs
-# mount in Cowork). Resolve the FULL agent-namespace paths via the script — never hand-splice the
+# FILE-TOOL PATHS (Cowork only; skip when ARTIFACTS_ROOT does not start with /sessions/). File tools
+# refuse a RELATIVE path and cannot open /sessions/... paths. FIRST, with the Write tool, write
+# "<HOST_OUTPUTS>/artifacts/.host-outputs-probe" containing exactly <HOST_OUTPUTS>: the file-tool path
+# your context maps to /sessions/<id>/mnt/outputs/ (the "Paths in bash differ from what file tools
+# see" list; no such list -> that /sessions/.../mnt/outputs path itself). Then prove it (quoted; it may
+# contain spaces). Exit 0 = proven. 2/4/5 -> fix per its JSON, retry once, then STOP:
+python3 "$SHARED_SCRIPTS/resolve_artifacts_root.py" --set-host-outputs-dir "<HOST_OUTPUTS>"
+# Sub-agents address the SAME dir by a different path (the absolute file-tool path
+# proven above). Resolve the FULL agent-namespace paths via the script — never hand-splice the
 # printed root with a literal skill-name/slug/run-id string yourself (that string-splicing is
 # exactly the non-determinism the resolver script exists to remove):
 python3 "$SHARED_SCRIPTS/resolve_artifacts_root.py" --handoff-dir-agent \
   --dir-name "financial-model-review-${SLUG}" --run-id "$RUN_ID"   # prints HANDOFF_AGENT verbatim
 HANDOFF_AGENT="<printed value>"   # use verbatim in OUTPUT_PATH lines
-# Sub-agent READ paths for under-outputs artifacts use the SAME agent namespace (relative — the
-# sub-agent's file-tool cwd IS the outputs mount on host-loop; an absolute /sessions/... read is denied):
+# Sub-agent READ paths for under-outputs artifacts use the SAME agent namespace (absolute once proven;
+# a relative or /sessions/... read is refused):
 python3 "$SHARED_SCRIPTS/resolve_artifacts_root.py" --analysis-dir-agent \
   --dir-name "financial-model-review-${SLUG}"   # prints the dir in the agent namespace
 REVIEW_DIR_AGENT="<printed value>"   # e.g. model_data.json, inputs.json reads
@@ -380,8 +387,8 @@ exactly once (into the Write call) — never re-type sub-agent JSON into a hered
 
 **`$HANDOFF_AGENT` and `$HANDOFF_DIR` name the SAME directory by two different paths — they are not
 interchangeable.** `$HANDOFF_DIR` is the absolute VM path your shell uses (`python3`, `check_handoff.py`,
-producer pipes). `$HANDOFF_AGENT` is the relative path a sub-agent's file tools resolve against the
-outputs mount, and it is the ONLY one that goes in a dispatch prompt. Putting `$HANDOFF_DIR` in an
+producer pipes). `$HANDOFF_AGENT` is the absolute file-tool path of the same directory (proven at
+Step 0), and it is the ONLY one that goes in a dispatch prompt. Putting `$HANDOFF_DIR` in an
 `OUTPUT_PATH` line hands the sub-agent an absolute `/sessions/...` path the host-loop gate denies;
 putting `$HANDOFF_AGENT` in a shell command resolves it against the wrong cwd. Rule of thumb: **agent
 namespace in prompts, shell namespace in bash.**
@@ -393,7 +400,8 @@ The receipt is a two-field acknowledgement the sub-agent returns in its final me
 were forbidden, the hand-off could not be gated at all.
 
 **Path idiom for dispatch prompts (host-loop path gate):** `OUTPUT_PATH` and any under-outputs artifact
-READ path a sub-agent is given are **relative to the sub-agent's file-tool cwd** (the outputs mount) —
+READ path a sub-agent is given are **absolute file-tool paths**, never relative ones (a relative
+file-tool path is refused) —
 built from the `resolve_artifacts_root.py --agent` namespace (`$HANDOFF_AGENT` / `$REVIEW_DIR_AGENT`).
 Never hand a sub-agent an absolute `/sessions/...` path for a file-tool Read/Write — the host-loop path
 gate denies it (steering shell work to the `bash` tool instead). Bundled `references/*.md` are the one
@@ -418,7 +426,8 @@ Branch on the exit code (complete state machine — do not improvise):
 - **Exit 5** (receipt echoes a different path) → **repair-dispatch** telling the agent the exact expected OUTPUT_PATH (it wrote somewhere else).
 - **Exit 6** (receipt unparseable / no `output_path` key) → **redo-dispatch** with "return ONLY the receipt JSON — no fences, no prose."
 - **Producer schema rejection** (the pipe fails next) → **repair-dispatch** with the producer's stderr verbatim.
-- **Exit 8** (`path_namespace_mismatch`) → the sub-agent **complied**; the agent-namespace prefix was wrong. Its relative `OUTPUT_PATH` resolved against the outputs mount instead of the session root, so the file landed at the doubled path reported in `found_at`. Do NOT treat this as a fabricated receipt (that is exit 3), and do NOT read the hand-off from `found_at` — it is diagnostic only. Re-run `resolve_artifacts_root.py --agent`, rebuild the agent-namespace prefix from the printed value, and re-dispatch. Counts against the same 2-dispatch retry budget.
+- **Exit 8** (`path_namespace_mismatch`) → the sub-agent **complied**; the agent-namespace prefix was wrong. Its relative `OUTPUT_PATH` resolved against the outputs mount instead of the session root, so the file landed at the doubled path reported in `found_at`. Only a RELATIVE agent path can do this, so the Step 0 proof did not run: run it. Do NOT treat this as a fabricated receipt (that is exit 3), and do NOT read the hand-off from `found_at` — it is diagnostic only. Re-run `resolve_artifacts_root.py --agent`, rebuild the agent-namespace prefix from the printed value, and re-dispatch. Counts against the same 2-dispatch retry budget.
+- **Blocked `write_refused`** (the sub-agent's Write was refused — its path was relative or a `/sessions/...` path) → run the Step 0 proof if it did not run, rebuild the agent-namespace paths from the resolver, re-dispatch ONCE. A second `write_refused` STOPs with both details quoted.
 - **Any other exit** (script crash etc.) → STOP with the stderr.
 - **After ANY corrective dispatch, resume from `check_handoff.py`** — never pipe to the producer unchecked.
 
@@ -433,8 +442,9 @@ re-dispatch per step; a second blocked return STOPs with both reasons quoted.
 agent's receipt claims `complete` with the correctly echoed path, treat the host's filesystem
 topology as hand-off-incompatible: fall back to message-channel transport for the REST of this run
 (sub-agent returns full JSON in its final message; apply the tolerant JSON extraction protocol;
-stage to `$STAGING_DIR/<step>_input.json`; same producer pipe), and note the fallback in your
-final summary.
+stage to `$STAGING_DIR/<step>_input.json`; same producer pipe), and tell the founder in one plain sentence that this run's working files were passed
+directly instead of through `outputs/`, so its audit trail is incomplete (the results are unaffected).
+A refused write is NOT this case: it returns `write_refused` (above).
 
 Retries overwrite the same OUTPUT_PATH (the mount is write-allowed / delete-denied — never `rm`
 under `$REVIEW_DIR`). Hand-off files are not canonical artifacts: producers consume them only via
@@ -465,7 +475,7 @@ input is a legitimate input shape here, not a degraded one; see `validate_inputs
 
 **Dispatch the financial-model-review sub-agent in Context A (INPUTS_REVIEW).** **Call the `Task` tool with `subagent_type: "founder-skills:financial-model-review"`** and the prompt below. This is the highest context-pressure dispatch — the sub-agent reads the full `model_data.json` inside its own context window and returns only the corrected `inputs.json`. This is the primary Mitigation 1 win: the raw extraction output never accumulates in the main thread context.
 
-**Before dispatching, substitute placeholders in the template below:** replace `<HANDOFF_AGENT>` and `<REVIEW_DIR_AGENT>` with the agent-namespace values (from `resolve_artifacts_root.py --agent` — relative paths the sub-agent's file tools resolve against the outputs mount; NOT absolute `/sessions/...` paths, which the host-loop gate denies) and `<RUN_ID>` with `$RUN_ID`. Leave the `${CLAUDE_PLUGIN_ROOT}/...` reference paths **literal** — they are pre-resolved to a host-readable path. The sub-agent has no access to your shell variables.
+**Before dispatching, substitute placeholders in the template below:** replace `<HANDOFF_AGENT>` and `<REVIEW_DIR_AGENT>` with the agent-namespace values (from `resolve_artifacts_root.py --agent` — absolute file-tool paths, proven at Step 0; NOT absolute `/sessions/...` paths, which the host-loop gate denies) and `<RUN_ID>` with `$RUN_ID`. Leave the `${CLAUDE_PLUGIN_ROOT}/...` reference paths **literal** — they are pre-resolved to a host-readable path. The sub-agent has no access to your shell variables.
 
 **Dispatch prompt template:**
 
@@ -870,7 +880,7 @@ Follow your agent body's Context B procedure (POST_COMPOSE_COACHING):
 Stop after returning the receipt JSON. Do not narrate.
 ```
 
-**After the sub-agent returns:** if its final message is a `{"status": "blocked", "reason": ...}` object, stop and report the reason to the founder — do not run the gate. Otherwise gate the hand-off, then (on gate exit 0) transform and insert deterministically. **The commentary leaves the model exactly once (into the sub-agent's Write call) — NEVER re-type the sub-agent's markdown into a heredoc or a `python -c` argument.**
+**After the sub-agent returns:** if its final message is a `{"status": "blocked", "reason": ...}` object, stop and report the reason to the founder — do not run the gate. The one exception is `write_refused`: run the Step 0 proof if it did not run, rebuild `<HANDOFF_AGENT>` from the resolver, and re-dispatch once; a second `write_refused` stops. Otherwise gate the hand-off, then (on gate exit 0) transform and insert deterministically. **The commentary leaves the model exactly once (into the sub-agent's Write call) — NEVER re-type the sub-agent's markdown into a heredoc or a `python -c` argument.**
 
 <!-- skill-quality-ci: bash-after-subagent-ok -->
 ```bash
@@ -906,12 +916,12 @@ The gate (`check_handoff.py --format=markdown`) verifies the sub-agent's hand-of
 - **Exit 5** (receipt echoes a different path) → **repair-dispatch** telling the agent the exact expected OUTPUT_PATH.
 - **Exit 6** (receipt unparseable / no `output_path` key) → **redo-dispatch** with "return ONLY the receipt JSON — no fences, no prose." (A `status: "blocked"` final message is NOT exit 6 — it was handled before the gate.)
 - **Exit 7** (content-shape gate failed — receipt-shaped or marker-bearing file) → **repair-dispatch**: "your file wasn't the coaching commentary — write the coaching markdown, nothing else, to `<OUTPUT_PATH>`."
-- **Exit 8** (`path_namespace_mismatch`) → the sub-agent **complied**; the agent-namespace prefix was wrong. Its relative `OUTPUT_PATH` resolved against the outputs mount instead of the session root, so the file landed at the doubled path reported in `found_at`. Do NOT treat this as a fabricated receipt, and do NOT read the hand-off from `found_at` — re-dispatch with the corrected agent-namespace prefix (re-run `resolve_artifacts_root.py --agent` and rebuild `<HANDOFF_AGENT>` from the printed value). Counts against the same 2-dispatch retry budget.
+- **Exit 8** (`path_namespace_mismatch`) → the sub-agent **complied**; the agent-namespace prefix was wrong. Its relative `OUTPUT_PATH` resolved against the outputs mount instead of the session root, so the file landed at the doubled path reported in `found_at` (only a relative path can do this: run the Step 0 proof). Do NOT treat this as a fabricated receipt, and do NOT read the hand-off from `found_at` — re-dispatch with the corrected agent-namespace prefix (re-run `resolve_artifacts_root.py --agent` and rebuild `<HANDOFF_AGENT>` from the printed value). Counts against the same 2-dispatch retry budget.
 - **Any other exit** (script crash, unreadable file, invalid UTF-8) → STOP with the stderr. `check_handoff.py` exit 4 is reachable here too: gate 1 already confirmed the file exists and is non-empty, so a failure opening it afterwards is an IO/permission fault, not a malformed hand-off. A decode error raises before any typed exit and surfaces as a traceback.
 - **`insert_coaching.py` exit 1** (blocked; stdout carries `{"status": "blocked", "reason": ...}`) → stop and report the exact reason. Do NOT hand-edit `report.md` — if the reason mentions a truncated report or a missing marker, re-run `compose_report.py --write-md` and retry the chain. If the reason is `commentary_markdown missing or empty`, treat as a malformed hand-off: repair-dispatch quoting the reason.
 - **After ANY corrective dispatch, resume from the gate chain** — never feed the transform+insert pipe an ungated file.
 
-**Retry budget:** max 2 corrective dispatches (same rule as Context A). **Graceful degrade:** if the FIRST corrective dispatch also exits 3 while the receipt claims `complete` with the correctly echoed path, treat the host topology as hand-off-incompatible and fall back to message-channel transport. **The corrective dispatch MUST ask for the commentary inline for this to be reachable** — add: "the file hand-off is not working in this environment; return the coaching commentary itself as your final message, as raw markdown, with no receipt JSON and no fences." Without that line the fallback is unreachable: the normal Context B prompt instructs the agent to return ONLY the receipt and not to narrate, so its final message contains no markdown to stage. Then stage that returned markdown to `$STAGING_DIR/coaching.md` via a **single-quoted** `<<'COACHING_EOF'` heredoc (apostrophe-safe; NEVER `python -c`, NEVER the `outputs/` root — `$STAGING_DIR` is the `/tmp` scratch dir from Step 0, never the promoted outputs mount), and run the same `md_to_commentary.py "$STAGING_DIR/coaching.md" | insert_coaching.py` chain against that staged file.
+**Retry budget:** max 2 corrective dispatches (same rule as Context A). **Graceful degrade:** if the FIRST corrective dispatch also exits 3 while the receipt claims `complete` with the correctly echoed path, treat the host topology as hand-off-incompatible and fall back to message-channel transport, and tell the founder in one plain sentence (see Context A's degrade rule). **The corrective dispatch MUST ask for the commentary inline for this to be reachable** — add: "the file hand-off is not working in this environment; return the coaching commentary itself as your final message, as raw markdown, with no receipt JSON and no fences." Without that line the fallback is unreachable: the normal Context B prompt instructs the agent to return ONLY the receipt and not to narrate, so its final message contains no markdown to stage. Then stage that returned markdown to `$STAGING_DIR/coaching.md` via a **single-quoted** `<<'COACHING_EOF'` heredoc (apostrophe-safe; NEVER `python -c`, NEVER the `outputs/` root — `$STAGING_DIR` is the `/tmp` scratch dir from Step 0, never the promoted outputs mount), and run the same `md_to_commentary.py "$STAGING_DIR/coaching.md" | insert_coaching.py` chain against that staged file.
 
 ### Step 8d: Cleanup
 
@@ -952,9 +962,8 @@ over are different acts: a founder looking at a row of cards cannot tell which d
 Write each deliverable into your message as its own named entry — a link where this surface renders
 one that opens (on a `/sessions` session tree, `computer://` + the absolute path you just copied it
 to), otherwise the label with the path stated beside it — labelled by what the document IS, in the
-founder's words: *"Here's your finished analysis: [the written report](…) — everything scored, with
-the evidence behind it; [the interactive version](…) has the charts."* "The files are above" is not a
-hand-over. This does not conflict with the never-name-a-file rule: the founder reads your label,
+founder's words (the written report, the charts), not by its filename. "The files are above" is not a
+hand-over. Where a step prints the hand-over, the printed entries are these. This does not conflict with the never-name-a-file rule: the founder reads your label,
 never the path. Never paste a report's body into the message — link or name it.
 
 **Then offer the working data — once, in one sentence.** For example: *"If you want to keep the working
@@ -972,6 +981,20 @@ inputs — the validated figures and extractions this analysis was built from, p
 data. Never include pipeline hand-off files, receipts, coaching payloads, or gate state: they mean
 nothing outside the run that made them.
 
+**In this skill the hand-over message is printed, not written.** It is the links, the report's own
+verdict paragraph (the model's rating and its runway, with runway at today's burn when that is shorter),
+and the offer:
+
+```bash
+python3 "$SCRIPTS/fmr_closing_message.py" --report "$REVIEW_DIR/report.json" \
+  --deliverable "the written report=<absolute path of report.md>" \
+  --deliverable "the charts=<absolute path of report.html>" \
+  --deliverable "the what-if explorer=<absolute path of explore.html>"
+```
+
+Send its output as your message: the printed text is the message. Never compute or restate a figure
+around it — runway, burn and scores come from the report, in the report's words.
+
 **Do not `rm` anything under `$REVIEW_DIR`** — it is the promoted `outputs/` tree in Cowork, where
 deleting a user-visible path is unsafe. Scratch lives in `$STAGING_DIR` (`/tmp`), which the sandbox
 reclaims on its own.
@@ -983,16 +1006,11 @@ This skill runs inline in the main thread (not as a sub-agent). The final outcom
 - **In Claude Code:** the path to `$REVIEW_DIR/report.md` — there the path *is* the deliverable, because
   `./artifacts/` is durable. **In Cowork:** the delivered files are the deliverable; a path
   names a workspace that may not outlive the task.
-- The headline outcome fields, sourced from the `coaching_payload` staged in Step 8c (`runway_months`, `static_runway_months`, `summary.overall_status`, `high_severity_warnings`, `score_coverage`) plus the `insert_coaching.py` receipt (`status`, `report_path`, `run_id`). The Context B sub-agent no longer echoes these — do not source them from its return.
-
-  **Nesting matters here, and it is mixed — read the path, not the pattern:** only `overall_status` sits under `coaching_payload.summary`. The other three named fields are **top level** on `coaching_payload`: `runway_months`, `static_runway_months`, `high_severity_warnings`. Reaching under `summary` for those returns null. `summary` also carries `score_pct` if you need it.
-  - **Source these from `report.json`'s `coaching_payload` block — NOT from `runway.json`.** Two separate
-    runs looked in `runway.json`, found no top-level `runway_months`/`static_runway_months`, and reported
-    the fields as missing. They are not: `runway.json` holds them per-scenario inside `scenarios[]`, and
-    `compose_report.py` lifts the base scenario's values into `coaching_payload` for exactly this step.
-    Shape reminder: `unit_economics.metrics` and `runway.scenarios` are **lists**, not objects.
-  - **`runway_months` is legitimately `null` for a default-alive company** — it means "cash never depletes in the projection window", not "unknown". Never report it as a bare `null`, an error, or a missing value. When it is null, say the company is projected default-alive and lead with **`static_runway_months`** (cash at today's net burn) as the concrete number, because the projection that produced default-alive holds burn flat while revenue compounds. `base_runway_note` carries that wording when present.
-  - **When `runway_months` is present but `static_runway_months` is materially lower**, give both: the projected figure is contingent on flat burn, the static one is what the founder has today.
+- The printed hand-over from Step 12, unchanged: its verdict already states the rating and the runway
+  (including runway at today's burn for a default-alive company, where the projected figure is
+  "Infinite"). The headline fields in `coaching_payload` (`runway_months`, `static_runway_months`,
+  `summary.overall_status`, `high_severity_warnings`) are for the coaching sub-agent; do not restate them
+  in chat.
 - Optionally: the HTML report and explorer paths.
 
 ## Scoring

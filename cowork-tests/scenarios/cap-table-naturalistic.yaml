@@ -38,6 +38,9 @@ prompt: |
   Full review of the round please.
 
 assert:
+  # A relative or /sessions/ file-tool path is refused at host-loop; the Step 0 proof exists so none is used.
+  # Content-class, so it covers sub-agent tool results too (checked by replay on a sub-agent-only string).
+  - tool_result_not_contains: "denied by your permission settings"
   # `result: success` ALONE CANNOT FAIL ON THE PROPERTY THIS LANE EXISTS FOR. A run in which
   # the agent never invoked the skill and answered from memory also succeeds -- so the first
   # draft of this file asserted only that, which is the same "structurally cannot fail on the

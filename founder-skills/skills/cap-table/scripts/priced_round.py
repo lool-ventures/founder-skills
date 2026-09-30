@@ -96,6 +96,11 @@ ACQ_BISECT_MAX_ITERS = 100
 # solved in closed form (affine `cc` + closed-form pool), so it never iterates.
 ACQ_INNER_MAX_ITERS = 2000
 
+# Bases whose pool denominator is the post-round share count, so an acquisition's consideration can sit in it.
+# ONE set for every site that asks, so the 2x2 system and the over-determination guard cannot disagree about
+# a basis. The excluding basis stays a member so it reads as post-money wherever the gate lets it through.
+POST_MONEY_POOL_BASES = frozenset({"post_money", "post_money_excluding_converting_securities", "post_money_increase"})
+
 
 def _acquisition_pool_C(
     *,
@@ -123,7 +128,10 @@ def _acquisition_pool_C(
     a = target / (1.0 - target)
     b = acq_t / (1.0 - acq_t) if 0.0 < acq_t < 1.0 else 0.0
     base = pre_pool + nm
-    post_money = target_basis in ("post_money", "post_money_excluding_converting_securities")
+    post_money = target_basis in POST_MONEY_POOL_BASES
+    if target_basis == "post_money_increase":
+        # The target sizes the increase alone, so the existing pool is credited in neither branch below.
+        existing = 0.0
     if post_money and pool_basis == "include":
         det = 1.0 - a * b
         if det <= 0.0:
@@ -874,7 +882,200 @@ def _duplicate_id_blockers(safes: list[dict[str, Any]], notes: list[dict[str, An
     return out
 
 
+# --- The option pool's sizing basis: one allow-list gate for every entry point -------------------------------
+#
+# The solver computes three bases: `pre_money`, `post_money`, and `post_money_increase` (the post-money
+# denominator with the percentage sizing the new options alone). The rule pack also names
+# `post_money_excluding_converting_securities` and `custom`, and no published source defines either as a
+# pool-sizing denominator (NVCA's model term sheets, the YC safe user guide and Cooley's option-pool guide all
+# size the pool on fully-diluted post-money capitalization with the SAFE and note conversions in it). So
+# neither is invented here. This gate sits in the solver, not in one caller: run_scenario, quick_assess and
+# the priced-round CLI all reach the pool math through it, and a gate in only one of them left the others
+# solving the excluding basis as plain post-money with no signal, and crashing on any other string.
+COMPUTED_POOL_BASES = frozenset({"pre_money", "post_money", "post_money_increase"})
+EXCLUDING_POOL_BASIS = "post_money_excluding_converting_securities"
+# The founder's explicit choice to see the excluding basis modelled as plain post-money.
+EXCLUDING_AS_POST_MONEY = "post_money_by_founder_choice"
+# The answers a founder can give when their document defines its own basis: each is computed, or (the
+# excluding reading) reaches the excluding refusal below.
+_STATED_CUSTOM_ANSWERS = frozenset({"pre_money", "post_money", EXCLUDING_POOL_BASIS})
+
+_POOL_BASIS_QUESTION = (
+    "Ask counsel how your term sheet measures the pool: against the company before the new money, against "
+    "the company after it counting the SAFE and note conversions, or against the company after it not "
+    "counting them. Tell us which, and the scenario will be modelled on that; if it is measured some other "
+    "way, it stays unmodelled."
+)
+_REMEDY_NOT_MODELED = (
+    "The option pool target was given on a basis this model does not compute, so no figures are shown for "
+    "this scenario. " + _POOL_BASIS_QUESTION
+)
+# "does not yet compute that basis distinctly" is kept word for word: the report and its tests key on it.
+_REMEDY_EXCLUDING = (
+    "Your term sheet measures the option pool against the share count after the round without the SAFE and "
+    "note conversion shares, and this model does not yet compute that basis distinctly, so no figures are shown for this "
+    "scenario. A share count that counts the SAFE and note conversion shares, as this model's does, may not "
+    "match your term sheet. Confirm with counsel how your term sheet defines the pool's denominator. If you "
+    "decide to see the figures that count the conversion shares anyway, say so explicitly and they will be "
+    "shown with that disclosure."
+)
+
+
+def _pool_basis_blocker(code: str, remedy: str) -> dict[str, Any]:
+    return {
+        "completeness": "structural_only",
+        "blockers": [{"code": code, "instance_id": None, "remedy": remedy}],
+        "per_safe": [],
+        "per_note": [],
+        "math_provenance": [
+            {
+                "output_field": "blockers",
+                "source_type": "rule",
+                "rule_id": "option_pool.target_basis",
+                "rule_pack_version": RULE_PACK_VERSION,
+                "source_ref": None,
+            }
+        ],
+    }
+
+
 def solve_priced_round(
+    *,
+    cap_state: dict[str, Any],
+    safes: list[dict[str, Any]],
+    notes: list[dict[str, Any]],
+    pre_money: float,
+    new_money: float,
+    target_pool_percent: float | None = None,
+    target_basis: str = "pre_money",
+    pre_money_basis: str = "includes_safe_conversion",
+    acquisition: dict[str, Any] | None = None,
+    pool_consideration_basis: str = "include",
+    conversion_event_date: str | None = None,
+    mfn_elections: dict[str, Any] | None = None,
+    max_iterations: int = DEFAULT_MAX_ITERATIONS,
+    convergence_threshold: float = DEFAULT_CONVERGENCE_THRESHOLD,
+    excluding_basis_modeled_as: str | None = None,
+    custom_basis_stated_by_founder: str | None = None,
+) -> dict[str, Any]:
+    """Resolve the pool's sizing basis, then solve (`_solve_priced_round_basis_resolved`).
+
+    With no pool target (None or 0.0) the basis has no effect and passes through untouched. With one:
+      * `custom` is refused (`E_POOL_BASIS_NOT_MODELED`) unless the founder stated which measure their
+        document matches (`custom_basis_stated_by_founder`); that answer is solved and disclosed
+        (`W_CUSTOM_BASIS_STATED_BY_FOUNDER`).
+      * the excluding basis with SAFEs or notes that actually convert is refused
+        (`E_POOL_BASIS_EXCLUDING_NOT_MODELED`) unless the founder chose plain post-money
+        (`excluding_basis_modeled_as`), which is solved and disclosed
+        (`W_EXCLUDING_BASIS_MODELED_AS_POST_MONEY`). With nothing converting, the two readings are the same
+        number and it is solved as post-money. "Converting" uses the same usability filters the solver
+        applies, so a SAFE with no purchase amount does not trigger a refusal. RESIDUAL: a usable note that
+        takes a zero-share branch (repaid at maturity, threshold not met) still triggers it; refusing is the
+        safe direction.
+      * any other value is refused (`E_POOL_BASIS_NOT_MODELED`), never a traceback.
+      * either post-money reading beside an existing unallocated pool is disclosed: plain post-money as
+        `W_POOL_BASIS_READING_NOT_CONFIRMED`, the new-options-only reading as
+        `W_POOL_BASIS_READ_AS_NEW_OPTIONS_ONLY`. "X% post-money" is then either the pool after the round or
+        the new options alone, and those are different numbers. Nothing clears it: the founder's answer
+        chooses which reading is solved, and a record of that answer would be written by the model, which
+        satisfies a check by writing it.
+    Disclosures are appended at this single exit, after every internal re-solve, and only to a solve that
+    produced figures.
+    """
+    basis = target_basis
+    disclosures: list[dict[str, Any]] = []
+    if target_pool_percent:
+        if basis == "custom":
+            if custom_basis_stated_by_founder not in _STATED_CUSTOM_ANSWERS:
+                return _pool_basis_blocker("E_POOL_BASIS_NOT_MODELED", _REMEDY_NOT_MODELED)
+            basis = str(custom_basis_stated_by_founder)
+            disclosures.append(
+                {
+                    "code": "W_CUSTOM_BASIS_STATED_BY_FOUNDER",
+                    "severity": "medium",
+                    "message": (
+                        "The pool basis was given in your document's own terms, and the figures use the "
+                        "measure you told us it matches. Confirm with counsel that your term sheet's "
+                        "definition is that one."
+                    ),
+                    "stated_basis": basis,
+                }
+            )
+        if basis == EXCLUDING_POOL_BASIS:
+            converting = any(safe_has_usable_purchase_amount(s) for s in safes or []) or any(
+                note_has_usable_math_inputs(n) for n in notes or []
+            )
+            if converting and excluding_basis_modeled_as != EXCLUDING_AS_POST_MONEY:
+                return _pool_basis_blocker("E_POOL_BASIS_EXCLUDING_NOT_MODELED", _REMEDY_EXCLUDING)
+            if converting:
+                disclosures.append(
+                    {
+                        "code": "W_EXCLUDING_BASIS_MODELED_AS_POST_MONEY",
+                        "severity": "high",
+                        "message": (
+                            "Your term sheet measures the option pool against the share count after the round "
+                            "without the converting securities, which this model does not compute. At your "
+                            "choice the pool is measured with the SAFE and note conversion shares counted, so "
+                            "these figures may differ from your term sheet's. Confirm the exact definition "
+                            "with counsel."
+                        ),
+                    }
+                )
+            basis = "post_money"
+        elif basis not in COMPUTED_POOL_BASES:
+            return _pool_basis_blocker("E_POOL_BASIS_NOT_MODELED", _REMEDY_NOT_MODELED)
+        existing_pool = float(((cap_state or {}).get("option_pool") or {}).get("available_for_grant") or 0)
+        # Not suppressed by the other disclosures: they speak about the denominator (converting securities,
+        # a document-defined measure); this one is about what the percentage counts, which neither settles.
+        if basis == "post_money" and existing_pool > 0:
+            disclosures.append(
+                {
+                    "code": "W_POOL_BASIS_READING_NOT_CONFIRMED",
+                    "severity": "medium",
+                    "message": (
+                        "The pool target was read as the pool available for new grants after the round. With "
+                        "unallocated options already in the pool, it could instead size only the new options, "
+                        "which gives a larger top-up. Confirm with counsel which your term sheet means."
+                    ),
+                }
+            )
+        elif basis == "post_money_increase" and existing_pool > 0:
+            disclosures.append(
+                {
+                    "code": "W_POOL_BASIS_READ_AS_NEW_OPTIONS_ONLY",
+                    "severity": "medium",
+                    "message": (
+                        "The pool target was read as sizing only the new options added in the round. With "
+                        "unallocated options already in the pool, it could instead size the whole pool available "
+                        "for new grants after the round, which gives a smaller top-up. Confirm with counsel which "
+                        "your term sheet means."
+                    ),
+                }
+            )
+    result = _solve_priced_round_basis_resolved(
+        cap_state=cap_state,
+        safes=safes,
+        notes=notes,
+        pre_money=pre_money,
+        new_money=new_money,
+        target_pool_percent=target_pool_percent,
+        target_basis=basis,
+        pre_money_basis=pre_money_basis,
+        acquisition=acquisition,
+        pool_consideration_basis=pool_consideration_basis,
+        conversion_event_date=conversion_event_date,
+        mfn_elections=mfn_elections,
+        max_iterations=max_iterations,
+        convergence_threshold=convergence_threshold,
+    )
+    # A disclosure qualifies figures, so it rides only a solve that produced some: a scenario blocked for
+    # another reason has nothing for it to qualify.
+    if disclosures and result.get("completeness") in {"full", "mixed"}:
+        result.setdefault("warnings", []).extend(disclosures)
+    return result
+
+
+def _solve_priced_round_basis_resolved(
     *,
     cap_state: dict[str, Any],
     safes: list[dict[str, Any]],
@@ -1227,7 +1428,7 @@ def solve_priced_round(
         and target_pool_percent
         and float(target_pool_percent) > 0
         and pool_consideration_basis == "include"
-        and target_basis in {"post_money", "post_money_excluding_converting_securities"}
+        and target_basis in POST_MONEY_POOL_BASES
         and (acq_t + float(target_pool_percent)) >= 1.0
     ):
         return {
@@ -2061,6 +2262,16 @@ def _cli() -> int:
     p.add_argument("--new-money", type=float, required=True)
     p.add_argument("--target-pool-pct", type=float, default=None)
     p.add_argument("--target-basis", default="pre_money")
+    p.add_argument(
+        "--excluding-basis-modeled-as",
+        default=None,
+        help="The founder's explicit choice for the excluding basis: post_money_by_founder_choice.",
+    )
+    p.add_argument(
+        "--custom-basis-stated-by-founder",
+        default=None,
+        help="The measure the founder said a document-defined (custom) basis matches.",
+    )
     p.add_argument("--conversion-date", default=None)
     p.add_argument("--max-iter", type=int, default=DEFAULT_MAX_ITERATIONS)
     p.add_argument("--threshold", type=float, default=DEFAULT_CONVERGENCE_THRESHOLD)
@@ -2091,6 +2302,8 @@ def _cli() -> int:
         mfn_elections=mfn_elections,
         max_iterations=args.max_iter,
         convergence_threshold=args.threshold,
+        excluding_basis_modeled_as=args.excluding_basis_modeled_as,
+        custom_basis_stated_by_founder=args.custom_basis_stated_by_founder,
     )
     emit(result, args, default=str)
     return 0

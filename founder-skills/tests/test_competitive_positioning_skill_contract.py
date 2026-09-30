@@ -66,6 +66,48 @@ REFS_DIR = CP_DIR / "references"
 _SCRIPTS_DIR_LOCAL_MODULES: tuple[str, ...] = ("_theme",)
 
 
+_GENERATED_CONTEXTS = {
+    "MOAT_SCORING": "moat_scoring",
+    "POSITIONING_SCORING": "positioning_scoring",
+    "CHECKLIST": "checklist",
+}
+
+
+def _dispatch_section(context_name: str) -> str:
+    """The dispatch prompt a sub-agent is sent for `context_name`.
+
+    MOAT_SCORING, POSITIONING_SCORING and CHECKLIST are printed by cp_dispatch_prompt.py (SKILL.md now
+    carries only the command), so their text is read from the rendered prompt -- the same text these
+    assertions used to read from SKILL.md's template. Other contexts still live in SKILL.md.
+    """
+    if context_name in _GENERATED_CONTEXTS:
+        import importlib.util
+
+        path = SKILL_MD.parent / "scripts" / "cp_dispatch_prompt.py"
+        spec = importlib.util.spec_from_file_location("cp_dispatch_prompt_under_test", path)
+        assert spec is not None and spec.loader is not None
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        rendered: str = mod.render(
+            _GENERATED_CONTEXTS[context_name],
+            run_id="RUN",
+            handoff_agent="/agent/handoff",
+            analysis_dir_agent="/agent/analysis",
+            plugin_root_agent="${CLAUDE_PLUGIN_ROOT}",
+            job="the job",
+        )
+        return rendered
+    skill_text = SKILL_MD.read_text(encoding="utf-8")
+    anchor = f"CONTEXT: {context_name}"
+    start = skill_text.find(anchor)
+    assert start != -1, f"{SKILL_MD.name} has no '{anchor}' section"
+    open_fence = skill_text.rfind("\n```", 0, start)
+    assert open_fence != -1, f"{SKILL_MD.name} {context_name}: no opening ``` fence before anchor"
+    close_fence = skill_text.find("\n```\n", start)
+    assert close_fence != -1, f"{SKILL_MD.name} {context_name}: no closing ``` fence"
+    return skill_text[open_fence:close_fence]
+
+
 def _load_script_module(script_name: str, sys_key: str) -> types.ModuleType:
     """Load a script from SCRIPTS_DIR, injecting the scripts dir on sys.path.
 
@@ -339,17 +381,7 @@ def test_moat_dimension_prose_mentions_in_skill_md_and_agent_body() -> None:
 
     assert len(canonical) == 6, f"CANONICAL_MOAT_IDS has {len(canonical)} entries (expected 6)"
 
-    skill_text = SKILL_MD.read_text(encoding="utf-8")
-    anchor = "CONTEXT: MOAT_SCORING"
-    start = skill_text.find(anchor)
-    assert start != -1, f"{SKILL_MD.name} has no 'CONTEXT: MOAT_SCORING' section"
-    # Template is inside a code fence: the opening fence is the last \n``` before
-    # the anchor; the closing fence is the first \n```\n after the anchor.
-    open_fence = skill_text.rfind("\n```", 0, start)
-    assert open_fence != -1, f"{SKILL_MD.name} MOAT_SCORING: no opening ``` fence before anchor"
-    close_fence = skill_text.find("\n```\n", start)
-    assert close_fence != -1, f"{SKILL_MD.name} MOAT_SCORING section: no closing ``` fence"
-    section = skill_text[open_fence:close_fence]
+    section = _dispatch_section("MOAT_SCORING")
 
     # Extract the comma-or-space-separated moat ID list from the template.
     # The list follows the moat-definitions.md citation and spans 1-2 lines of
@@ -582,16 +614,7 @@ def test_moat_scoring_dispatch_return_shape_keys() -> None:
     # rather than as quoted JSON keys in the per-entry JSON snippet.
     required_moat_entry_prose = {"id", "status", "evidence", "evidence_source", "trajectory"}
 
-    skill_text = SKILL_MD.read_text(encoding="utf-8")
-    anchor = "CONTEXT: MOAT_SCORING"
-    start = skill_text.find(anchor)
-    assert start != -1, f"{SKILL_MD.name} has no 'CONTEXT: MOAT_SCORING' section"
-    # Anchor is inside the template fence.
-    open_fence = skill_text.rfind("\n```", 0, start)
-    assert open_fence != -1, f"{SKILL_MD.name} MOAT_SCORING: no opening fence before anchor"
-    close_fence = skill_text.find("\n```\n", start)
-    assert close_fence != -1, f"{SKILL_MD.name} MOAT_SCORING: no closing fence"
-    section = skill_text[open_fence:close_fence]
+    section = _dispatch_section("MOAT_SCORING")
 
     for key in required_top_keys:
         assert f'"{key}"' in section, f"{SKILL_MD.name} MOAT_SCORING return shape missing top-level key '{key}'"
@@ -637,16 +660,7 @@ def test_positioning_scoring_dispatch_return_shape_keys() -> None:
     required_view_keys = {"id", "x_axis", "y_axis", "points"}
     required_point_keys = {"competitor", "x", "y", "x_evidence", "y_evidence"}
 
-    skill_text = SKILL_MD.read_text(encoding="utf-8")
-    anchor = "CONTEXT: POSITIONING_SCORING"
-    start = skill_text.find(anchor)
-    assert start != -1, f"{SKILL_MD.name} has no 'CONTEXT: POSITIONING_SCORING' section"
-    # Anchor is inside the template fence.
-    open_fence = skill_text.rfind("\n```", 0, start)
-    assert open_fence != -1, f"{SKILL_MD.name} POSITIONING_SCORING: no opening fence before anchor"
-    close_fence = skill_text.find("\n```\n", start)
-    assert close_fence != -1, f"{SKILL_MD.name} POSITIONING_SCORING: no closing fence"
-    section = skill_text[open_fence:close_fence]
+    section = _dispatch_section("POSITIONING_SCORING")
 
     for key in required_top_keys:
         assert f'"{key}"' in section, f"{SKILL_MD.name} POSITIONING_SCORING return shape missing top-level key '{key}'"
@@ -677,16 +691,7 @@ def test_checklist_dispatch_return_shape_keys() -> None:
     mod = _load_checklist_module()
     valid_statuses: frozenset[str] = frozenset(mod.VALID_STATUSES)  # type: ignore[attr-defined]
 
-    skill_text = SKILL_MD.read_text(encoding="utf-8")
-    anchor = "CONTEXT: CHECKLIST"
-    start = skill_text.find(anchor)
-    assert start != -1, f"{SKILL_MD.name} has no 'CONTEXT: CHECKLIST' section"
-    # Anchor is inside the template fence.
-    open_fence = skill_text.rfind("\n```", 0, start)
-    assert open_fence != -1, f"{SKILL_MD.name} CHECKLIST: no opening fence before anchor"
-    close_fence = skill_text.find("\n```\n", start)
-    assert close_fence != -1, f"{SKILL_MD.name} CHECKLIST: no closing fence"
-    section = skill_text[open_fence:close_fence]
+    section = _dispatch_section("CHECKLIST")
 
     assert '"items"' in section, (
         f"{SKILL_MD.name} CHECKLIST return shape must include 'items' key (checklist.py reads data['items'] from stdin)"
@@ -889,21 +894,9 @@ def test_context_a_dispatch_templates_contain_no_write_instruction() -> None:
     Templates checked: LANDSCAPE_RESEARCH, MOAT_SCORING, POSITIONING_SCORING,
     CHECKLIST. Each bounded at its closing ``` fence.
     """
-    skill_text = SKILL_MD.read_text(encoding="utf-8")
-
     for context_name in ("LANDSCAPE_RESEARCH", "MOAT_SCORING", "POSITIONING_SCORING", "CHECKLIST"):
-        anchor = f"CONTEXT: {context_name}"
-        start = skill_text.find(anchor)
-        assert start != -1, f"{SKILL_MD.name} has no '{anchor}' section"
-
-        # All four Context A templates have the anchor inside the code fence.
-        # Use rfind to locate the opening fence (last \n``` before the anchor)
-        # and find for the closing fence (first \n```\n after the anchor).
-        open_fence = skill_text.rfind("\n```", 0, start)
-        assert open_fence != -1, f"{SKILL_MD.name} {context_name}: no opening ``` fence before anchor"
-        close_fence = skill_text.find("\n```\n", start)
-        assert close_fence != -1, f"{SKILL_MD.name} {context_name}: no closing ``` fence"
-        section = skill_text[open_fence:close_fence]
+        # Generated contexts are read from the rendered prompt, the rest from SKILL.md's fenced template.
+        section = _dispatch_section(context_name)
 
         assert "Do NOT write" in section or "do not write" in section.lower(), (
             f"{SKILL_MD.name} {context_name} dispatch template must explicitly forbid "
@@ -1643,15 +1636,7 @@ def test_checklist_dispatch_reads_all_six_artifacts_for_narr_03() -> None:
         "landscape_draft.json",
     )
 
-    skill_text = SKILL_MD.read_text(encoding="utf-8")
-    anchor = "CONTEXT: CHECKLIST"
-    start = skill_text.find(anchor)
-    assert start != -1, f"{SKILL_MD.name} has no 'CONTEXT: CHECKLIST' section"
-    open_fence = skill_text.rfind("\n```", 0, start)
-    assert open_fence != -1, f"{SKILL_MD.name} CHECKLIST: no opening fence before anchor"
-    close_fence = skill_text.find("\n```\n", start)
-    assert close_fence != -1, f"{SKILL_MD.name} CHECKLIST: no closing fence"
-    section = skill_text[open_fence:close_fence]
+    section = _dispatch_section("CHECKLIST")
 
     for artifact in required_reads:
         assert artifact in section, f"{SKILL_MD.name} CHECKLIST dispatch template missing read of {artifact!r}"
@@ -1742,11 +1727,7 @@ def test_moat_scoring_dispatch_offers_the_custom_moat_path() -> None:
     six axes to seven, and stale every cassette — disproportionate to a gap the existing custom path
     already covers once the agent is told it exists.
     """
-    skill_text = SKILL_MD.read_text(encoding="utf-8")
-    start = skill_text.find("CONTEXT: MOAT_SCORING")
-    assert start != -1, "no MOAT_SCORING dispatch"
-    close_fence = skill_text.find("\n```\n", start)
-    section = skill_text[start:close_fence]
+    section = _dispatch_section("MOAT_SCORING")
 
     assert "custom_" in section, (
         "the MOAT_SCORING dispatch never mentions the custom-moat path, so a sub-agent cannot know it "
@@ -1806,3 +1787,44 @@ def test_gate1_renders_the_possible_overlap_annotation() -> None:
         "gate is the one place it changes a decision"
     )
     assert "may already be covered by" in text
+
+
+def test_step7_never_names_a_reviewed_file_as_editable() -> None:
+    """Step 7 tells the main thread where to remove a leaked file name. It may name only files the outside
+    review does NOT fingerprint: an edit to one it read, after Step 6.5, is disclosed to the founder as an
+    analysis changed after its review -- the hand-edit both runs of the first live check made."""
+    spec = importlib.util.spec_from_file_location(
+        "cp_dispatch_prompt_step7_test", SCRIPTS_DIR / "cp_dispatch_prompt.py"
+    )
+    assert spec is not None and spec.loader is not None
+    gen = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(gen)
+    reviewed = {*gen.RED_TEAM_ARTIFACTS, *gen.RED_TEAM_OPTIONAL}
+    text = " ".join(SKILL_MD.read_text(encoding="utf-8").split())
+    clauses = re.findall(r"The one file you may edit for it at this step: (.*?)\. ", text)  # to the sentence end
+    assert len(clauses) == 1, "the permitted-edit clause is gone or duplicated -- this guard no longer reads it"
+    editable = set(re.findall(r"`([a-z_]+\.json)`", clauses[0]))
+    assert editable, "the clause names no file, so the guard would pass vacuously"
+    assert not editable & reviewed, f"Step 7 licenses editing a file the review fingerprints: {editable & reviewed}"
+
+
+def _step(text: str, heading: str) -> str:
+    """One `### Step …` section of SKILL.md, from its heading to the next `### ` heading."""
+    start = text.index(heading)
+    end = text.find("\n### ", start + len(heading))
+    return text[start : end if end != -1 else len(text)]
+
+
+def test_step3_names_the_field_the_candidate_axes_go_under() -> None:
+    """Step 3 said "Select 2-3 candidate positioning axis pairs" without the field name; a live run wrote
+    `suggested_axes` (the research payload's field) and the persist producer rejected it."""
+    step3 = " ".join(_step(SKILL_MD.read_text(encoding="utf-8"), "### Step 3: Identify Competitors").split())
+    assert "`candidate_axes`" in step3
+
+
+def test_step5_says_polarity_stays_nested_in_the_axis_object() -> None:
+    """Step 5 said "copy each view's axis `polarity` across"; a live run wrote it as top-level view fields,
+    where nothing reads it, and had to backtrack. The schema nests it inside `x_axis` / `y_axis`."""
+    step5 = " ".join(_step(SKILL_MD.read_text(encoding="utf-8"), "### Step 5: Positioning & Moat Assessment").split())
+    assert "`x_axis.polarity`" in step5 and "`y_axis.polarity`" in step5
+    assert "never as top-level view fields" in step5

@@ -144,7 +144,8 @@ def test_quartile_is_evaluated_at_the_minimum_set_size(tmp_path: Path) -> None:
     _, res, _ = _run(
         {"views": [_view(x_rank=4, y_rank=1, competitor_count=3)], "overall_differentiation": 60.0}, tmp_path
     )
-    assert [ne["trigger"] for ne in res["not_evaluated"]] == []
+    # no_edge is not evaluated here for a different reason (the fixture view carries no geometry).
+    assert [ne["trigger"] for ne in res["not_evaluated"] if ne["trigger"] != "no_edge"] == []
     assert "trade_off_shape" in _ids(res)
 
 
@@ -281,3 +282,140 @@ def test_missing_overall_differentiation_is_silent(tmp_path: Path) -> None:
 def test_no_views_at_all(tmp_path: Path) -> None:
     rc, res, _ = _run({"views": []}, tmp_path)
     assert rc == 0 and res["fired"] is False
+
+
+# --- ties -------------------------------------------------------------------
+# `startup_*_rank` counts only competitors strictly ahead, so a tie takes the better place. The
+# scorer records who the startup is tied with, and a trigger reads a tie in the direction that makes
+# it harder to fire. The docstring once claimed ties take the worse rank; they never did.
+
+
+def test_flattering_fires_on_an_untied_top_two(tmp_path: Path) -> None:
+    """Positive control for the tie tests below."""
+    _, out, _ = _run({"views": [_view(x_rank=1, y_rank=2)]}, tmp_path)
+    assert "flattering_both_axes" in _ids(out)
+
+
+def test_a_tie_does_not_make_a_result_flattering(tmp_path: Path) -> None:
+    """1st on firmness, but level with two competitors: 1st-3rd, not top-2."""
+    v = _view(x_rank=1, y_rank=2)
+    v["startup_x_tied_with"] = ["acme", "bolt"]
+    _, out, _ = _run({"views": [v]}, tmp_path)
+    assert "flattering_both_axes" not in _ids(out)
+
+
+def test_a_tie_does_not_push_a_result_into_the_bottom_half(tmp_path: Path) -> None:
+    """6th of 10 is bottom half; tied 5th-6th is not bottom half on every reading, so no fire."""
+    control = _view(x_rank=6, y_rank=6, competitor_count=9)
+    _, out, _ = _run({"views": [control]}, tmp_path)
+    assert "bottom_half_both_axes" in _ids(out), "control: untied 6th of 10 on both axes fires"
+    v = _view(x_rank=5, y_rank=6, competitor_count=9)
+    v["startup_x_tied_with"] = ["acme"]
+    _, out, _ = _run({"views": [v]}, tmp_path)
+    assert "bottom_half_both_axes" not in _ids(out)
+
+
+def test_a_fired_trigger_states_the_tie(tmp_path: Path) -> None:
+    v = _view(x_rank=7, y_rank=8, competitor_count=9)
+    v["startup_y_tied_with"] = ["acme"]
+    _, out, _ = _run({"views": [v]}, tmp_path)
+    desc = next(t["description"] for t in out["triggers"] if t["id"] == "bottom_half_both_axes")
+    assert "tied 8th–9th of 10" in desc, desc
+
+
+# --- no_edge: the crowded middle ---------------------------------------------
+
+
+def _geo(view: dict[str, Any], nearest: float, x_lead: float, y_lead: float) -> dict[str, Any]:
+    view.update({"nearest_distance": nearest, "x_lead_over_best": x_lead, "y_lead_over_best": y_lead})
+    return view
+
+
+def test_no_edge_fires_on_a_crowded_middle_no_rank_trigger_sees(tmp_path: Path) -> None:
+    """5th of 10 on both axes: not bottom half, not top -- and a rival right next to you."""
+    v = _geo(_view(x_rank=5, y_rank=5, competitor_count=9), nearest=7.0, x_lead=-20.0, y_lead=-15.0)
+    _, out, _ = _run({"views": [v], "overall_differentiation": 40.0}, tmp_path)
+    assert _ids(out) == {"no_edge"}
+    trig = next(t for t in out["triggers"] if t["id"] == "no_edge")
+    assert trig["provisional"] is True
+    assert "firmness vs integration burden" in trig["description"], "the view is named by its axes, not its id"
+
+
+def test_no_edge_does_not_fire_with_clear_space(tmp_path: Path) -> None:
+    v = _geo(_view(x_rank=5, y_rank=5, competitor_count=9), nearest=20.0, x_lead=-20.0, y_lead=-15.0)
+    _, out, _ = _run({"views": [v], "overall_differentiation": 40.0}, tmp_path)
+    assert "no_edge" not in _ids(out)
+
+
+def test_no_edge_does_not_fire_with_a_clear_lead_on_one_axis(tmp_path: Path) -> None:
+    v = _geo(_view(x_rank=5, y_rank=1, competitor_count=9), nearest=7.0, x_lead=-20.0, y_lead=12.0)
+    _, out, _ = _run({"views": [v], "overall_differentiation": 40.0}, tmp_path)
+    assert "no_edge" not in _ids(out)
+
+
+def test_no_edge_is_not_evaluated_without_geometry(tmp_path: Path) -> None:
+    _, out, _ = _run({"views": [_view()], "overall_differentiation": 40.0}, tmp_path)
+    assert "no_edge" not in _ids(out)
+    assert any(ne["trigger"] == "no_edge" for ne in out["not_evaluated"])
+
+
+def test_no_edge_edges_match_the_report_wording() -> None:
+    """The gate's "right next to you" and "clear lead" must be the report's, or the founder is told two things."""
+    import importlib.util
+
+    scripts = SCRIPT.parent
+    specs = {}
+    for name in ("gate3_triggers", "_cp_view"):
+        spec = importlib.util.spec_from_file_location(name, scripts / f"{name}.py")
+        assert spec is not None and spec.loader is not None
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        specs[name] = mod
+    assert specs["gate3_triggers"]._NO_EDGE_NEAREST == specs["_cp_view"].NEAR_NEXT_TO
+    assert specs["gate3_triggers"]._NO_EDGE_LEAD == specs["_cp_view"].LEAD_LEVEL
+
+
+def test_low_differentiation_description_carries_no_number(tmp_path: Path) -> None:
+    _, out, _ = _run({"views": [_view()], "overall_differentiation": 12.0}, tmp_path)
+    trig = next(t for t in out["triggers"] if t["id"] == "low_overall_differentiation")
+    assert "%" not in trig["description"] and "12" not in trig["description"]
+
+
+# --- a scored plan (D1) -------------------------------------------------------
+
+
+def _planned(view: dict[str, Any], today_ranked: bool = False) -> dict[str, Any]:
+    view["scored_point"] = "planned"
+    view["today"] = {"ranked": today_ranked}
+    return view
+
+
+def test_a_flattering_plan_always_says_it_is_a_plan(tmp_path: Path) -> None:
+    _, out, _ = _run({"views": [_planned(_view(x_rank=1, y_rank=2))]}, tmp_path)
+    trig = next(t for t in out["triggers"] if t["id"] == "flattering_both_axes")
+    assert "this is your plan, if delivered" in trig["description"]
+    assert "rests on claims not yet shown" in trig["description"]
+    assert " -- " not in trig["description"], "a founder reads a real dash, not two hyphens"
+
+
+def test_a_flattering_result_that_is_not_a_plan_has_no_caveat(tmp_path: Path) -> None:
+    """Positive control: the lever is scored_point."""
+    _, out, _ = _run({"views": [_view(x_rank=1, y_rank=2)]}, tmp_path)
+    trig = next(t for t in out["triggers"] if t["id"] == "flattering_both_axes")
+    assert "if delivered" not in trig["description"]
+
+
+def test_a_low_plan_still_fires_and_says_even_if_delivered(tmp_path: Path) -> None:
+    view = _planned(_view(x_rank=7, y_rank=8, competitor_count=9))
+    _, out, _ = _run({"views": [view], "overall_differentiation": 10.0}, tmp_path)
+    ids = _ids(out)
+    assert {"bottom_half_both_axes", "low_overall_differentiation"} <= ids
+    for t in out["triggers"]:
+        assert t["description"].startswith("even if everything in the plan is delivered, "), t
+
+
+def test_an_unranked_today_is_not_evaluated_not_passed(tmp_path: Path) -> None:
+    _, out, _ = _run({"views": [_planned(_view())]}, tmp_path)
+    assert any(ne["trigger"] == "today_position" for ne in out["not_evaluated"])
+    _, ranked, _ = _run({"views": [_planned(_view(), today_ranked=True)]}, tmp_path)
+    assert not any(ne["trigger"] == "today_position" for ne in ranked["not_evaluated"])

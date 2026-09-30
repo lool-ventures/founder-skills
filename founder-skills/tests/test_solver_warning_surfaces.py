@@ -231,3 +231,148 @@ class TestTermsOnlyNoteDisclosure:
                 f"{code} does not tell the founder their ownership is shown HIGHER than it will be — "
                 "'contributes no shares' is the mechanism, not the consequence"
             )
+
+
+# The option pool's basis disclosures, on every surface a founder reads. One registry, so a new code cannot
+# render in report.md and vanish from the HTML pages, the concise answer or the coach's payload.
+_POOL_BASIS_DISCLOSURES = (
+    "W_EXCLUDING_BASIS_MODELED_AS_POST_MONEY",
+    "W_CUSTOM_BASIS_STATED_BY_FOUNDER",
+    "W_POOL_BASIS_READING_NOT_CONFIRMED",
+    "W_POOL_BASIS_READ_AS_NEW_OPTIONS_ONLY",
+)
+
+
+def _pool_scenarios(code: str) -> list[dict]:
+    return [
+        {
+            "scenario_id": "s1",
+            "type": "priced_round",
+            "label": "Series A",
+            "computed_outputs": {"completeness": "full", "warnings": [{"code": code, "message": "m"}], "blockers": []},
+        }
+    ]
+
+
+class TestPoolBasisDisclosuresReachEverySurface:
+    @staticmethod
+    def _label(code: str) -> str:
+        label = WC._SOLVER_WARNING_LABELS[code]
+        assert isinstance(label, str) and label
+        return label
+
+    def test_each_has_prose_and_a_label(self) -> None:
+        for code in _POOL_BASIS_DISCLOSURES:
+            assert WC._SOLVER_WARNING_PROSE.get(code), code
+            assert self._label(code)
+
+    def test_report_md_callouts(self) -> None:
+        for code in _POOL_BASIS_DISCLOSURES:
+            out = "\n".join(WC.render_solver_warning_callouts([{"code": code}]))
+            assert WC._SOLVER_WARNING_PROSE[code].split("**")[1] in out, code
+
+    def test_html_pages(self) -> None:
+        viz, exp = _load("visualize"), _load("explore")
+        for code in _POOL_BASIS_DISCLOSURES:
+            kw = {
+                "inputs": _fx("inputs.json"),
+                "cap_state": _fx("cap_state.json"),
+                "scenarios_doc": {"scenarios": _pool_scenarios(code)},
+                "rule_audit": _fx("rule_audit.json"),
+                "counsel_packet": _fx("counsel_packet.json"),
+            }
+            report = str(viz.render_report_html(**kw))
+            explorer = str(exp.render_explorer_html(**{k: v for k, v in kw.items() if k != "rule_audit"}))
+            needle = WC._SOLVER_WARNING_PROSE[code].split("**")[1]
+            assert needle in report or self._label(code) in report, ("report.html", code)
+            assert needle in explorer or self._label(code) in explorer, ("explorer.html", code)
+
+    def test_concise(self) -> None:
+        cr = _load("concise_report")
+        for code in _POOL_BASIS_DISCLOSURES:
+            md = cr.render({"company_name": "Acme"}, {"scenarios": _pool_scenarios(code)}, rule_audit=None)
+            needle = WC._SOLVER_WARNING_PROSE[code].split("**")[1]
+            assert needle in md or self._label(code) in md, code
+
+    def test_the_hand_over_list_and_not_the_coaching_payload(self) -> None:
+        """The pool-basis disclosures are the report's (its Option pool section) and the main thread's hand-over
+        list (report.json `report_disclosures`); the coach, which does not discuss the pool's sizing, is not
+        handed them."""
+        cm = _load("compose_report")
+        for code in _POOL_BASIS_DISCLOSURES:
+            payload = cm.build_coaching_payload(
+                artifacts={
+                    "inputs.json": _fx("inputs.json"),
+                    "instruments.json": _fx("instruments.json"),
+                    "scenarios.json": {"scenarios": _pool_scenarios(code)},
+                    "rule_audit.json": _fx("rule_audit.json"),
+                    "counsel_packet.json": _fx("counsel_packet.json"),
+                },
+                review_dir="/tmp/x",
+                report_path="/tmp/x/report.md",
+                insertion_marker="MARKER",
+            )
+            assert not [w for w in payload["high_severity_warnings"] if w.get("code") == code], code
+            listed = [d for d in cm.build_report_disclosures(_pool_scenarios(code)) if d["code"] == code]
+            assert len(listed) == 1 and listed[0]["label"], (code, listed)
+
+    def test_the_text_passes_the_founder_text_scan(self) -> None:
+        sys.path.insert(0, str(REPO / "scripts"))
+        try:
+            import _founder_text  # type: ignore[import-not-found]
+        finally:
+            sys.path.pop(0)
+        for code in _POOL_BASIS_DISCLOSURES:
+            for text in (WC._SOLVER_WARNING_PROSE[code], self._label(code)):
+                assert _founder_text.scan(text) == {"enums": [], "filenames": []}, (code, text)
+
+
+def test_the_two_reading_disclosures_are_judged_alike() -> None:
+    """The new-options-only callout mirrors the whole-pool one, so the coaching judge takes both the same way:
+    clean when both readings' figures were computed, and (report text being exempt from the backstop) flagged the
+    same way when a coach repeats one with no second reading computed."""
+    judge = _load("_pool_sizing_claims")
+    whole = WC._SOLVER_WARNING_PROSE["W_POOL_BASIS_READING_NOT_CONFIRMED"]
+    mirror = WC._SOLVER_WARNING_PROSE["W_POOL_BASIS_READ_AS_NEW_OPTIONS_ONLY"]
+    for other, increase in (([60.0], [58.0]), (None, None), ([60.0], None)):
+
+        def reasons(text: str, other: list[float] | None = other, increase: list[float] | None = increase) -> list:
+            found = judge.pool_sizing_findings(
+                text,
+                modeled_basis="post_money",
+                other_founders_pct=other,
+                increase_founders_pct=increase,
+                target_pct=10.0,
+            )
+            return [f["reason"] for f in found]
+
+        assert reasons(mirror) == reasons(whole), (other, increase)
+    assert not judge.pool_sizing_findings(
+        mirror, modeled_basis="post_money", other_founders_pct=[60.0], increase_founders_pct=[58.0], target_pct=10.0
+    )
+
+
+def test_a_non_w_code_is_not_dropped_unless_another_renderer_owns_it() -> None:
+    """The callout filter kept only `W_` codes while its own fallback promised "say the honest generic
+    thing rather than dropping it". The one non-`W_` code the orchestrator writes into a scenario's
+    warnings today, `target_basis_defaulted`, has its own callout in the report and its own payload flag,
+    so it is named as the exception; any other code, a future one included, reaches the founder."""
+    unknown = [{"code": "pool_target_already_met_check_intent", "severity": "high", "message": "x"}]
+    lines = WC.render_solver_warning_callouts(unknown)
+    assert lines and "round math flagged" in " ".join(lines), lines
+    assert "pool_target" not in " ".join(lines)  # the code itself is withheld
+    assert WC.render_solver_warning_callouts([{"code": "target_basis_defaulted", "severity": "medium"}]) == []
+    # Positive control: a W_ code still renders.
+    assert WC.render_solver_warning_callouts([{"code": "W_SOLVER_AITKEN_FALLBACK"}])
+
+
+def test_the_coach_sees_the_same_warnings_the_callouts_render() -> None:
+    """One predicate for both surfaces: the payload's `high_severity_warnings` used to repeat the `W_`
+    prefix test, so a code the report showed could still be missing from what the coach reads."""
+    assert WC.is_solver_callout("W_SOLVER_AITKEN_FALLBACK")
+    assert WC.is_solver_callout("pool_target_already_met_check_intent")
+    assert not WC.is_solver_callout("target_basis_defaulted")
+    assert not WC.is_solver_callout("")
+    compose = (SCRIPTS / "compose_report.py").read_text(encoding="utf-8")
+    assert "_warning_callouts.is_solver_callout(" in compose
+    assert 'str(w.get("code") or "").startswith("W_")\n    )' not in compose

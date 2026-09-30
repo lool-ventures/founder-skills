@@ -6815,7 +6815,10 @@ class TestChecklistSummaryKeysCoverage:
 
         fn_match = re.search(r"def _section_executive_summary\(.*?\n(?=def |\Z)", src, re.DOTALL)
         assert fn_match, "Could not locate _section_executive_summary in compose_report.py"
-        fn_body = fn_match.group(0)
+        # The summary reads the rating through `_quality_line`, which it shares with the report's verdict.
+        helper = re.search(r"def _quality_line\(.*?\n(?=def |\Z)", src, re.DOTALL)
+        assert helper and "_quality_line(" in fn_match.group(0), "the summary no longer reads through _quality_line"
+        fn_body = fn_match.group(0) + helper.group(0)
 
         exec_read_keys = set(re.findall(r'summary\.get\("([^"]+)"', fn_body))
 
@@ -9349,3 +9352,74 @@ def test_an_unparseable_vintage_is_not_silently_treated_as_current() -> None:
     assert data is not None
     codes = [w["code"] for w in data["validation"]["warnings"]]
     assert "BENCHMARK_VINTAGE" in codes, "an unreadable vintage passed as current"
+
+
+# ---------------------------------------------------------------------------
+# HANDOFF_BYPASSED: a step whose output reached its producer without passing check_handoff.py.
+# ---------------------------------------------------------------------------
+
+_CHECK_HANDOFF = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "scripts", "check_handoff.py")
+_FMR_RUN = "run-fmr-bypass"
+
+
+def _fmr_bypass_dir(with_corrections: bool) -> str:
+    arts: dict[str, Any] = {
+        name: {**base, "metadata": {**base.get("metadata", {}), "run_id": _FMR_RUN}}
+        for name, base in (
+            ("inputs.json", _VALID_INPUTS),
+            ("checklist.json", _VALID_CHECKLIST),
+            ("unit_economics.json", _VALID_UNIT_ECONOMICS),
+            ("runway.json", _VALID_RUNWAY),
+        )
+    }
+    if with_corrections:
+        arts["extraction_corrections.json"] = {"metadata": {"run_id": _FMR_RUN}, "corrections": []}
+    d = _make_fmr_artifact_dir(arts)
+    os.makedirs(os.path.join(d, "handoff", _FMR_RUN))  # Step 0 creates it in every real run
+    return d
+
+
+def _fmr_seed_gated(d: str, stems: list[str]) -> None:
+    for stem in stems:
+        path = os.path.join(d, "handoff", _FMR_RUN, stem)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write('{"from": "the sub-agent"}')
+        result = subprocess.run([sys.executable, _CHECK_HANDOFF, path], capture_output=True, text=True)
+        assert result.returncode == 0, result.stdout
+
+
+def _fmr_bypass(d: str) -> dict[str, Any] | None:
+    rc, data, err = _run_compose(d)
+    assert data is not None, err
+    hits = [w for w in data["validation"]["warnings"] if w["code"] == "HANDOFF_BYPASSED"]
+    assert len(hits) <= 1, hits
+    return hits[0] if hits else None
+
+
+def test_handoff_bypass_names_each_ungated_step_and_a_fully_gated_run_is_silent() -> None:
+    d = _fmr_bypass_dir(with_corrections=True)
+    hit = _fmr_bypass(d)  # lever engaged: nothing gated, both steps named
+    assert hit is not None and hit["severity"] == "medium"
+    assert "review of the extracted model" in hit["message"] and "scored checklist" in hit["message"]
+    assert hit["founder_message"] == hit["message"] and ".json" not in hit["message"]
+    _fmr_seed_gated(d, ["checklist_output.json"])
+    hit = _fmr_bypass(d)
+    assert hit is not None and "extracted model" in hit["message"] and "checklist" not in hit["message"]
+    _fmr_seed_gated(d, ["inputs_review_output.json"])
+    assert _fmr_bypass(d) is None
+
+
+def test_handoff_bypass_requires_the_inputs_review_only_when_a_model_was_extracted() -> None:
+    """Dynamic map: a conversational or deck run authors inputs.json directly and never dispatches
+    the inputs review, so only the checklist is required."""
+    d = _fmr_bypass_dir(with_corrections=False)
+    hit = _fmr_bypass(d)
+    assert hit is not None and "extracted model" not in hit["message"]
+    _fmr_seed_gated(d, ["checklist_output.json"])
+    assert _fmr_bypass(d) is None
+
+
+def test_handoff_bypass_is_silent_without_a_handoff_dir() -> None:
+    d = _fmr_bypass_dir(with_corrections=True)
+    os.rmdir(os.path.join(d, "handoff", _FMR_RUN))
+    assert _fmr_bypass(d) is None

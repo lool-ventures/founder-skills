@@ -56,6 +56,7 @@ Builds credible TAM/SAM/SOM analysis — the kind that earns investor trust rath
 - Stress-tests assumptions with sensitivity analysis and confidence-based range widening
 - Runs a 22-item self-check against common market sizing pitfalls
 - Cross-checks every figure across the analysis before writing the report, so the numbers agree with each other
+- Has a separate reviewer try to contradict the finished sizing, and shows every finding it can source
 
 **What to provide:** A pitch deck, financial model, market data, or just describe the business (product, target customer, geography, pricing). The skill will research external sources to validate and build the estimate.
 
@@ -169,10 +170,10 @@ Reviews startup financial models for investor readiness — validating structure
 
 ### Competitive Positioning
 
-Maps a startup's competitive landscape, scores differentiation and moat strength, and stress-tests positioning claims — producing investor-ready competitive analysis.
+Maps a startup's competitive landscape, states where it stands on each positioning map, scores moat strength, and stress-tests positioning claims — producing investor-ready competitive analysis.
 
 **What it does:**
-- Identifies 5-7 competitors across direct, adjacent, emerging, and do-nothing categories
+- Identifies 3–10 competitors across direct, adjacent, emerging, and do-nothing categories
 - Places you and your rivals on two axes, and calls out an axis chosen to flatter you rather than to inform
 - Assesses 6 canonical moat dimensions per company with trajectory tracking
 - Stress-tests differentiation claims against competitive evidence
@@ -181,7 +182,7 @@ Maps a startup's competitive landscape, scores differentiation and moat strength
 
 **What to provide:** A pitch deck, product description, or conversation about the business. The skill will identify competitors, select meaningful positioning axes, and build the analysis. Works best after running deck review — competition slide claims are cross-validated automatically.
 
-**What you get back:** A scored competitive landscape with positioning maps, moat radar charts, differentiation scores with stress-test results, a quality checklist, and an interactive explorer for navigating the competitive set.
+**What you get back:** A competitive landscape with positioning maps (where you stand on each, in words; a plan shown beside where you stand today), moat radar charts, pitch-claim stress-test results, what public records show about your own patents, an outside review that tries to contradict the analysis, a quality checklist, and an interactive explorer.
 
 **Example prompts:**
 - "Use the competitive-positioning skill on our landscape."
@@ -289,9 +290,9 @@ In **Cowork** the skill writes them into the task's workspace under `artifacts/<
 - every skill resolves its scripts through the plugin root, which that layout doesn't create;
 - the shared helper scripts all six skills call live outside any single skill folder, so a per-skill copy can't contain them;
 - the sub-agent definitions the skills dispatch to aren't skills and don't come along;
-- neither does the `/founder-skills:feedback` command or the session-start hook.
+- neither does the `/founder-skills:feedback` command or the plugin's hooks.
 
-A skill installed that way fails on its first step. This isn't a bug at either end: the standard assumes self-contained skills, and this is a plugin — six skills over a shared script library, a shared agent pool and a hook. Use the Cowork or Claude Code sections above.
+A skill installed that way fails on its first step. This isn't a bug at either end: the standard assumes self-contained skills, and this is a plugin — six skills over a shared script library, a shared agent pool and hooks. Use the Cowork or Claude Code sections above.
 
 ### Other platforms (roadmap)
 
@@ -351,7 +352,7 @@ Your documents stay in your Claude session. **No data is collected, transmitted,
 
 Two things do reach the network, both worth knowing before you start on something unannounced:
 
-- **Three skills search the web** as part of the work — market sizing validates your figures against external sources, IC simulation researches a named fund, competitive positioning researches competitors. Search queries derived from your materials therefore pass through Claude to a search provider. Cap-table, deck review and financial model review never touch the network.
+- **Three skills search the web** as part of the work — market sizing validates your figures against external sources, IC simulation researches a named fund, competitive positioning researches competitors and your company's own public record (registered name, patent filings). Search queries derived from your materials therefore pass through Claude to a search provider. Cap-table, deck review and financial model review never touch the network.
 - **The competitive-positioning explorer's optional 3D view** loads a charting library from a public CDN the first time you open that tab. Every other generated file is fully self-contained and works offline.
 
 Feedback is opt-in and user-initiated: `/founder-skills:feedback` drafts a message and hands you a link to submit yourself — nothing is sent automatically.

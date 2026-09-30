@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from typing import Any
 
@@ -86,6 +87,21 @@ EVIDENCE_MIN_LENGTH = 20
 # ---------------------------------------------------------------------------
 
 
+# Custom-moat slugs that restate `regulatory_barriers`, whose definition already covers patents,
+# licences and certifications. A run scored a founder's unverified provisional patent as
+# `custom_ip_patents: weak` beside `regulatory_barriers: absent`, and the custom one became the
+# startup's "Strongest Moat". Matched on whole slug segments, with stems for the words that take
+# suffixes: a plain substring test would also reject `custom_partnership` ("ip") and
+# `custom_shipping`.
+_REGULATORY_SEGMENTS = {"ip", "ipr"}
+_REGULATORY_STEMS = ("patent", "licen", "certif", "regulat")
+
+
+def _is_regulatory_custom(moat_id: str) -> bool:
+    segments = re.split(r"[_\-]+", moat_id.removeprefix("custom_").lower())
+    return any(seg in _REGULATORY_SEGMENTS or seg.startswith(_REGULATORY_STEMS) for seg in segments if seg)
+
+
 def _validate_moat_entry(entry: dict[str, Any], company: str, errors: list[str]) -> bool:
     """Validate a single moat entry. Returns True if valid."""
     moat_id = entry.get("id", "")
@@ -97,6 +113,21 @@ def _validate_moat_entry(entry: dict[str, Any], company: str, errors: list[str])
     if moat_id not in CANONICAL_MOAT_SET and not moat_id.startswith("custom_"):
         errors.append(f"{company}: unknown moat ID '{moat_id}' (must be canonical or custom_*)")
         return False
+
+    if moat_id.startswith("custom_"):
+        if _is_regulatory_custom(moat_id):
+            errors.append(
+                f"{company}: custom moat '{moat_id}' duplicates regulatory_barriers — patents, licences and "
+                f"certifications are scored there, not as a custom moat"
+            )
+            return False
+        definition = entry.get("definition")
+        if not isinstance(definition, str) or not definition.strip():
+            errors.append(
+                f"{company}: custom moat '{moat_id}' needs a 'definition' saying what it is and why none of "
+                f"the six canonical types covers it"
+            )
+            return False
 
     status = entry.get("status", "")
     if status not in VALID_STATUSES:
@@ -404,6 +435,16 @@ def _apply_run_id(result: dict, run_id: str | None) -> None:
     result["metadata"] = md
 
 
+def _keep_first_copy(output_path: str, result: dict[str, Any]) -> None:
+    """Keep this run's first scored copy beside the output (see `_cp_first_copy`)."""
+    scripts_dir = os.path.dirname(os.path.abspath(__file__))
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    import _cp_first_copy
+
+    _cp_first_copy.keep_first(output_path, result)
+
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Moat scorer (reads JSON from stdin)")
     p.add_argument("--pretty", action="store_true", help="Pretty-print JSON")
@@ -436,6 +477,15 @@ def main() -> None:
     if not isinstance(data, dict) or "moat_assessments" not in data:
         print("Error: JSON must be an object with a 'moat_assessments' key", file=sys.stderr)
         sys.exit(1)
+    # Our own file names in the scorer's evidence become plain words HERE, at pipe time: the report's
+    # wording pass flags any it finds, and removing one by hand after the outside review reads as an
+    # analysis changed after it was reviewed. One table, shared with the review (`_cp_redteam_text`).
+    scripts_dir = os.path.dirname(os.path.abspath(__file__))
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    import _cp_redteam_text
+
+    _cp_redteam_text.reword_evidence(data)
 
     result, errs = score_moats(data)
     if errs:
@@ -459,6 +509,8 @@ def main() -> None:
         else None
     )
     _write_output(out, args.output, summary=summary)
+    if args.output:
+        _keep_first_copy(args.output, result)
 
     # Summary to stderr for visibility in batch runs
     if startup_co:

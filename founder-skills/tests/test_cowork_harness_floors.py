@@ -44,11 +44,29 @@ CANARY = REPO_ROOT / "cowork-tests" / "canary" / "email-canary.cassette.json"
 # questions -- "which CLI runs this gate" vs "is this CLI new enough for the check to mean anything"
 # -- and collapsing them is the error this split exists to prevent. Rationale:
 # docs/internal/2026-08-27-cowork-harness-2.4.0-adoption-plan.md SS7.4-7.5.
-_CI_PIN = "3.8.1"
+_CI_PIN = "4.0.0"
 
 # The declared floor per site, with the reason it differs where it does.
 #
-# 2026-09-24: all three numbers move together for 3.8.1, and each for its own reason.
+# 2026-09-29: CI pin and recording floor move to 4.0.0 (a harness major); the replay floor stays 3.8.0.
+#   CI pin 4.0.0 -- the release adopted; plan in the internal docs dir.
+#   Recording 4.0.0 -- reason (3): 4.0.0's pinned agent ELF matches the one Desktop stages (2.1.284; `doctor`
+#     reports sha256 match), 3.10.0's did not (patch-tolerated mismatch a paid cassette would freeze); and a
+#     harness major is itself a re-record trigger.
+#   Replay 3.8.0 -- unchanged: the check is `version < (3, 8, 0)` with no upper bound (4.0.0 runs it), and the
+#     re-recorded cassettes freeze no assert key newer than 3.8.0. Whether it moves is decided at the re-record.
+#
+# 2026-09-28: CI pin and recording floor move to 3.10.0; the replay floor stays 3.8.0.
+#   CI pin 3.10.0 -- the release adopted; plan in the internal docs dir.
+#   Recording 3.10.0 -- 3.10.0 is the floor for reason (1): the host-loop spawn moved -- the agent process runs at
+#     `/var/empty` (or a per-run `host-cwd`), with `--settings`, deny rules on `--disallowedTools` and the path gate's
+#     re-anchoring (`src/runtime/hostloop.ts`, `src/runtime/argv.ts`), plus one system-prompt line (`hostloop-
+#     prompt.ts`). Under it a relative file-tool path is refused as production refuses it; a cassette recorded below
+#     it freezes a world where one passes.
+#   Replay 3.8.0 -- unchanged: the re-recorded cassettes freeze no assert key newer than 3.8.0, and
+#     they replay green under 3.8.1 (both checked at the re-record).
+#
+# 2026-09-24: all three numbers moved together for 3.8.1, and each for its own reason.
 #   CI pin 3.8.1  -- the release adopted; plan in the internal docs dir.
 #   Recording 3.8.0 -- NOT 3.8.1. 3.8.0 is where all three re-record triggers fired: spawn env
 #     (`runtime/argv.ts` passes --include-hook-events), emulated tool surface
@@ -60,7 +78,7 @@ _CI_PIN = "3.8.1"
 #     An older CLI cannot grade that key, and a silent skip is worse than a red. This is the first
 #     time the replay floor has moved; it moved because a scenario needed it, not to match anything.
 # CASSETTE_VERSION/MIN_SUPPORTED are unchanged at 12/9, so old cassettes stay readable.
-_RECORDING_FLOOR = "3.8.0"
+_RECORDING_FLOOR = "4.0.0"
 _REPLAY_FLOOR = "3.8.0"
 
 # Sites that SELECT the CLI a gate runs. Exact, never a range: a caret auto-adopted every upstream
@@ -295,7 +313,9 @@ def test_prose_pin_statements_are_not_stale() -> None:
         # the sentence a fresh session reads OUTSIDE every pattern, the exact miss the file used to warn
         # about (then via whitespace: `>= 3.0.0`). Spell it RECORDING or the count reds; that is the point.
         ("CLAUDE.md 'RECORDING floor'", claude, r"RECORDING floor `>=(\d+\.\d+\.\d+)`", 2, _RECORDING_FLOOR),
-        ("CLAUDE.md 'Replay skip-guard'", claude, r"Replay skip-guard `\^(\d+\.\d+\.\d+)`", 1, _REPLAY_FLOOR),
+        # `>=`, not `^`: the guard is `version < _MIN_HARNESS` with no upper bound (4.0.0 runs it). The caret
+        # spelling, pinned here until 2026-09-29, told a reader a 4.x CLI would skip.
+        ("CLAUDE.md 'Replay skip-guard'", claude, r"Replay skip-guard `>=(\d+\.\d+\.\d+)`", 1, _REPLAY_FLOOR),
         (
             "CLAUDE.md registry description (floor)",
             claude,

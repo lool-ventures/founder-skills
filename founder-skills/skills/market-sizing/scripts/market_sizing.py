@@ -37,6 +37,10 @@ import re
 import sys
 from typing import Any, NoReturn
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _params  # noqa: E402
+import _provenance  # noqa: E402
+
 # Convention this analysis' headline figures follow — see
 # references/tam-sam-som-methodology.md §5. Optional and NOT defaulted here: an
 # unset sizing_basis must surface downstream (compose_report.py / visualize.py)
@@ -521,18 +525,18 @@ def compare(td: dict[str, Any], bu: dict[str, Any]) -> dict[str, Any]:
 
         if delta_pct > 30:
             result["warning"] = (
-                f"Top-down and bottom-up TAM differ by {result['tam_delta_pct']}% "
-                f"(>{30}%). Review assumptions — one approach likely has a flawed input."
-            )
+                _params.gap_sentence("tam", td_tam, bu_tam)
+                or f"Top-down and bottom-up TAM differ by {_params.fmt_delta(result['tam_delta_pct'])}."
+            ) + " Review assumptions — one approach likely has a flawed input."
         elif delta_pct > 15:
             result["note"] = (
-                f"TAM estimates differ by {result['tam_delta_pct']}%. "
+                f"TAM estimates differ by {_params.fmt_delta(result['tam_delta_pct'])}. "
                 + "Closeness is not confirmation: the pipeline cannot tell whether the two builds "
                 "rest on the same underlying figures. Check whether they do."
             )
         else:
             result["note"] = (
-                f"TAM estimates differ by {result['tam_delta_pct']}%. "
+                f"TAM estimates differ by {_params.fmt_delta(result['tam_delta_pct'])}. "
                 + "Closeness is not confirmation: the pipeline cannot tell whether the two builds "
                 "rest on the same underlying figures. Check whether they do."
             )
@@ -559,18 +563,19 @@ def compare(td: dict[str, Any], bu: dict[str, Any]) -> dict[str, Any]:
 
         if m_delta_pct > 30:
             result[f"{metric}_warning"] = (
-                f"Top-down and bottom-up {metric.upper()} differ by {result[f'{metric}_delta_pct']}% "
-                f"(>{30}%). Review assumptions — one approach likely has a flawed input."
-            )
+                _params.gap_sentence(metric, td_val, bu_val)
+                or f"Top-down and bottom-up {metric.upper()} differ by "
+                f"{_params.fmt_delta(result[f'{metric}_delta_pct'])}."
+            ) + " Review assumptions — one approach likely has a flawed input."
         elif m_delta_pct > 15:
             result[f"{metric}_note"] = (
-                f"{metric.upper()} estimates differ by {result[f'{metric}_delta_pct']}%. "
+                f"{metric.upper()} estimates differ by {_params.fmt_delta(result[f'{metric}_delta_pct'])}. "
                 + "Closeness is not confirmation: the pipeline cannot tell whether the two builds "
                 "rest on the same underlying figures. Check whether they do."
             )
         else:
             result[f"{metric}_note"] = (
-                f"{metric.upper()} estimates differ by {result[f'{metric}_delta_pct']}%. "
+                f"{metric.upper()} estimates differ by {_params.fmt_delta(result[f'{metric}_delta_pct'])}. "
                 + "Closeness is not confirmation: the pipeline cannot tell whether the two builds "
                 "rest on the same underlying figures. Check whether they do."
             )
@@ -582,6 +587,7 @@ def _validate_inputs(
     data: dict[str, Any] | None,
     args: argparse.Namespace,
     approach: str,
+    units_declared: bool = False,
 ) -> tuple[dict[str, Any], list[str], list[dict[str, str]]]:
     """Validate and parse all inputs. Returns (parsed, errors, warnings).
 
@@ -596,6 +602,11 @@ def _validate_inputs(
         # artifact (validation.warnings), not just stderr — a stderr-only warning
         # leaves validation.status "valid" and the founder never sees it (the exact
         # silent-100x class). Emit to both.
+        # A value that reached here by reference resolved to percentage POINTS by its recorded unit,
+        # so "did you mean 27% or 0.27%?" is already answered: the record says. The warning exists
+        # only for a bare number, where the two readings are indistinguishable.
+        if units_declared:
+            return
         w = check_pct_plausibility(field, value)
         if w:
             warnings.append({"code": "IMPLAUSIBLE_PCT_SCALE", "field": field, "message": w})
@@ -825,6 +836,23 @@ def parse_args() -> argparse.Namespace:
         "--arpu-currency",
         help="ISO code --arpu is actually in, when it differs from --currency",
     )
+    # --- inputs by reference (the skill's path) ---
+    p.add_argument(
+        "--validation",
+        help=(
+            "validation.json, the research record. Required when the sizing inputs are references "
+            '({"assumption": ...}, {"founder_stated": ...}, {"derived": ...}, {"estimate": ...}).'
+        ),
+    )
+    p.add_argument("--inputs", help="inputs.json (the founder's own figures). Required with --validation.")
+    p.add_argument(
+        "--replay",
+        metavar="SIZING_JSON",
+        help=(
+            "Re-resolve an existing sizing.json's own references against the CURRENT record, and "
+            "recompute. The remedy when the record has moved since the sizing ran."
+        ),
+    )
     p.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
     p.add_argument("-o", "--output", help="Write JSON to file instead of stdout")
     p.add_argument("--run-id", help="Inject metadata.run_id into output (for stale-artifact detection)")
@@ -839,11 +867,185 @@ def _stamp_run_id(result: dict[str, Any], run_id: str | None) -> dict[str, Any]:
     return result
 
 
+def _needed_params(approach: str) -> tuple[str, ...]:
+    if approach == "top-down":
+        return _params.TOP_DOWN_PARAMS
+    if approach == "bottom-up":
+        return _params.BOTTOM_UP_PARAMS
+    return _params.TOP_DOWN_PARAMS + _params.BOTTOM_UP_PARAMS
+
+
+def _is_reference_payload(data: Any) -> bool:
+    return isinstance(data, dict) and any(isinstance(data.get(p), dict) for p in _params.PARAM_UNITS)
+
+
+def _load_json(path: str | None) -> tuple[Any, str | None]:
+    if not path:
+        return None, "missing"
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh), None
+    except (OSError, json.JSONDecodeError) as exc:
+        return None, str(exc)
+
+
+def _keep_unit_rejections(
+    output: str | None, run_id: str | None, refs: dict[str, Any], refusals: list[dict[str, Any]], validation: Any
+) -> None:
+    """Append every unit refusal of a directly referenced record entry to an append-only list.
+
+    A refused head-count is a recorded fact. Without it, relabelling that entry's unit to the one the
+    input needs is indistinguishable from research, and the head-count comes back labelled "sourced".
+    """
+    if not output or not run_id:
+        return
+    by_name = {a.get("name"): a for a in _provenance._assumptions(validation)}
+    rows = []
+    for r in refusals:
+        if r.get("code") != "E_UNIT_MISMATCH":
+            continue
+        ref = refs.get(str(r.get("param")))
+        name = ref.get("assumption") if isinstance(ref, dict) else None
+        entry = by_name.get(name)
+        if entry is None:
+            continue
+        rows.append({"param": r.get("param"), "name": name, "value": entry.get("value"), "unit": entry.get("unit")})
+    if not rows:
+        return
+    d = os.path.join(os.path.dirname(os.path.abspath(output)), "handoff", run_id)
+    path = os.path.join(d, "unit_rejections.json")
+    try:
+        os.makedirs(d, exist_ok=True)
+        existing: list[Any] = []
+        if os.path.exists(path):
+            with open(path, encoding="utf-8") as fh:
+                loaded = json.load(fh)
+            existing = loaded if isinstance(loaded, list) else []
+        for row in rows:
+            if row not in existing:
+                existing.append(row)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(existing, fh, indent=2)
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"Warning: could not record the unit refusal: {exc}", file=sys.stderr)
+
+
+def _resolve_references(
+    data: dict[str, Any], args: argparse.Namespace, approach: str
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], list[dict[str, Any]], list[str]]:
+    """Resolve the reference payload. Returns (numeric_data, refs, provenance, conversions, errors)."""
+    errors: list[str] = []
+    if not args.validation or not args.inputs:
+        return (
+            data,
+            {},
+            {},
+            [],
+            [
+                "E_REF_CONTEXT_MISSING: the sizing inputs are references, so the producer needs the record: "
+                "pass --validation <validation.json> --inputs <inputs.json>."
+            ],
+        )
+    caller_fx = [
+        name
+        for name, given in (
+            ("--fx-rate", args.fx_rate),
+            ("--fx-as-of", args.fx_as_of),
+            ("--fx-source", args.fx_source),
+            ("--industry-total-currency", args.industry_total_currency),
+            ("--arpu-currency", args.arpu_currency),
+            ("fx", data.get("fx")),
+            ("industry_total_currency", data.get("industry_total_currency")),
+            ("arpu_currency", data.get("arpu_currency")),
+        )
+        if given
+    ]
+    if caller_fx:
+        return (
+            data,
+            {},
+            {},
+            [],
+            [
+                f"E_FX_ON_REFERENCE_PATH: {', '.join(caller_fx)} given, but on this path a figure's currency and "
+                f"any exchange rate come from the research record: record the rate there, with its source and "
+                f"date, and re-run."
+            ],
+        )
+    validation, verr = _load_json(args.validation)
+    inputs, ierr = _load_json(args.inputs)
+    if verr or ierr or not isinstance(inputs, dict):
+        return (
+            data,
+            {},
+            {},
+            [],
+            [
+                f"E_REF_CONTEXT_MISSING: could not read the record ({args.validation}: {verr or 'ok'}; "
+                f"{args.inputs}: {ierr or 'ok'})."
+            ],
+        )
+    refs = {p: data[p] for p in _needed_params(approach) if p in data}
+    resolved, refusals = _provenance.resolve(refs, validation=validation, inputs=inputs, currency=args.currency)
+    _keep_unit_rejections(args.output, args.run_id, refs, refusals, validation)
+    for r in refusals:
+        errors.append(f"{r['code']}: {r['param']}: {r['message']} (remedy: {r['remedy_kind']})")
+    numeric = dict(data)
+    for p, prov in resolved.items():
+        numeric[p] = prov["value_consumed"]
+    conversions: list[dict[str, Any]] = []
+    meta: list[tuple[Any, Any]] = []
+    for p, prov in resolved.items():
+        for st in _provenance.fx_steps(prov):
+            src, _, tgt = str(st.get("pair")).partition(":")
+            conversions.append(
+                {
+                    "field": p,
+                    "from": src,
+                    "to": tgt,
+                    "rate": st.get("rate"),
+                    "original_value": st.get("before"),
+                    "converted_value": prov["value_consumed"] if not prov.get("factors") else None,
+                }
+            )
+            meta.append((st.get("as_of"), st.get("source")))
+    args.fx_as_of = next((a for a, _ in meta if a), None)
+    args.fx_source = next((src for _, src in meta if src), None)
+    return numeric, refs, resolved, conversions, errors
+
+
 def main() -> None:
     args = parse_args()
     indent = 2 if args.pretty else None
 
-    if args.stdin:
+    if args.replay:
+        prior, perr = _load_json(args.replay)
+        prior_refs = prior.get("input_refs") if isinstance(prior, dict) else None
+        if perr or not isinstance(prior_refs, dict) or not prior_refs:
+            result_r: dict[str, Any] = {
+                "validation": {
+                    "status": "invalid",
+                    "errors": [
+                        f"E_REPLAY_UNUSABLE: {args.replay} carries no references to re-resolve "
+                        f"({perr or 'no input_refs'}). Re-run the sizing step from its hand-off."
+                    ],
+                }
+            }
+            _fail_invalid(_stamp_run_id(result_r, args.run_id), args.output, indent)
+        assert isinstance(prior, dict) and isinstance(prior_refs, dict)
+        args.stdin = False
+        data = {
+            "approach": str(prior.get("approach") or "both"),
+            **prior_refs,
+            **_provenance._as_dict(prior.get("projection_inputs")),
+        }
+        for key in ("currency", "sizing_basis"):
+            if prior.get(key) is not None:
+                data[key] = prior[key]
+        if args.run_id is None:
+            args.run_id = _provenance._as_dict(prior.get("metadata")).get("run_id")
+        approach = data["approach"].replace("_", "-")
+    elif args.stdin:
         # --- Infrastructure checks (sys.exit(1)) ---
         try:
             data = json.load(sys.stdin)
@@ -901,17 +1103,34 @@ def main() -> None:
     if isinstance(args.sizing_basis, str):
         args.sizing_basis = args.sizing_basis.strip().lower() or None
 
+    # Inputs by reference: resolve against the research record first, so everything below runs on
+    # the numbers the record produces. The numeric path is unchanged and stamped "not_checked".
+    ref_mode = _is_reference_payload(data)
+    refs: dict[str, Any] = {}
+    resolved: dict[str, Any] = {}
+    ref_conversions: list[dict[str, Any]] = []
+    ref_errors: list[str] = []
+    if ref_mode:
+        assert isinstance(data, dict)
+        data, refs, resolved, ref_conversions, ref_errors = _resolve_references(data, args, approach)
+        if ref_errors:
+            result = {"validation": {"status": "invalid", "errors": ref_errors, "warnings": []}}
+            _fail_invalid(_stamp_run_id(result, args.run_id), args.output, indent)
+
     # FX inputs are resolved BEFORE validation (so shape errors join the same list) but the
     # conversion itself happens AFTER it, on coerced numbers — see _apply_fx_in_place.
     fx_rates, fx_as_of, fx_source, fx_field_currencies, fx_errors = _resolve_fx(data, args, args.currency)
 
-    parsed, errors, input_warnings = _validate_inputs(data, args, approach)
+    parsed, errors, input_warnings = _validate_inputs(data, args, approach, units_declared=ref_mode)
     errors = fx_errors + errors
 
-    conversions: list[dict[str, Any]] = []
+    conversions: list[dict[str, Any]] = list(ref_conversions)
     if not errors:
-        conversions, conv_errors = _apply_fx_in_place(parsed, approach, args.currency, fx_rates, fx_field_currencies)
-        errors.extend(conv_errors)
+        if not ref_mode:
+            conversions, conv_errors = _apply_fx_in_place(
+                parsed, approach, args.currency, fx_rates, fx_field_currencies
+            )
+            errors.extend(conv_errors)
         if conversions and not (fx_as_of and fx_source):
             # This message is FOUNDER-FACING: compose forwards it verbatim into the report's
             # Warnings section. Two constraints follow, and neither is enforced by a scanner.
@@ -963,6 +1182,34 @@ def main() -> None:
             result["comparison"] = compare(result["top_down"], result["bottom_up"])
 
         result["validation"] = {"status": "valid", "errors": [], "warnings": input_warnings}
+
+        # Provenance, stamped by the producer that consumed the values. Renderers read this and
+        # re-resolve `input_refs` against the current record; they never join by name.
+        result["provenance_version"] = 1
+        if ref_mode:
+            result["input_refs"] = refs
+            result["input_provenance"] = resolved
+        else:
+            consumed = {
+                "td": ("industry_total", "segment_pct", "share_pct"),
+                "bu": ("customer_count", "arpu", "serviceable_pct", "target_pct"),
+            }
+            result["input_provenance"] = {
+                name: {"kind": "not_checked", "unit": _params.PARAM_UNITS[name], "value_consumed": parsed[slot][i]}
+                for slot, names in consumed.items()
+                if slot in parsed
+                for i, name in enumerate(names)
+            }
+        projection = {
+            k: v
+            for k, v in (
+                ("growth_rate", data.get("growth_rate") if isinstance(data, dict) else None),
+                ("years", data.get("years") if isinstance(data, dict) else None),
+            )
+            if v not in (None, 0)
+        }
+        if projection:
+            result["projection_inputs"] = projection
 
     _stamp_run_id(result, args.run_id)
     out = json.dumps(result, indent=indent) + "\n"

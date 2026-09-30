@@ -45,6 +45,7 @@ from typing import Any
 
 # Import sibling math producers
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _pool_text import _AFTER_THE_ROUND, _BEFORE_THE_ROUND, _TERM_SHEET_BRIDGE, pool_target_pct  # noqa: E402
 from _rule_pack import RULE_PACK_VERSION  # noqa: E402
 from cap_state import CapStateInvariantError, build_cap_state  # noqa: E402
 from priced_round import solve_priced_round  # noqa: E402
@@ -81,6 +82,39 @@ def _money(m: float) -> str:
     return f"${m:,.0f}"
 
 
+# Named by the share count each measure counts, in the Option pool section's words: "fully diluted", and the one
+# bridge to a term sheet's wording on the plain post-money measure only (`{target}` is filled at render time).
+_POOL_BASIS_LABELS = {
+    "pre_money": f"measured against the {_BEFORE_THE_ROUND}",
+    "post_money": f"measured against the {_AFTER_THE_ROUND}; {_TERM_SHEET_BRIDGE}",
+    "post_money_increase": f"new options only, measured against the {_AFTER_THE_ROUND}",
+}
+
+
+def _solved_pool_basis_label(solver_result: dict[str, Any], requested: str) -> str:
+    """The pool basis the solver actually used, in founder words -- never the requested value echoed. A
+    refused basis solved nothing, and a substituted one (the founder's choice, or the measure the founder
+    said their document matches) solved a different basis than the one requested."""
+    codes = {str(b.get("code")) for b in solver_result.get("blockers") or [] if isinstance(b, dict)}
+    if codes & {"E_POOL_BASIS_NOT_MODELED", "E_POOL_BASIS_EXCLUDING_NOT_MODELED"}:
+        return "basis not modelled"
+    warnings = [w for w in solver_result.get("warnings") or [] if isinstance(w, dict)]
+    if any(w.get("code") == "W_EXCLUDING_BASIS_MODELED_AS_POST_MONEY" for w in warnings):
+        return "measured with the conversion shares, at your choice"
+    stated = next(
+        (w.get("stated_basis") for w in warnings if w.get("code") == "W_CUSTOM_BASIS_STATED_BY_FOUNDER"), None
+    )
+    if isinstance(stated, str):
+        solved = "post_money" if stated == "post_money_excluding_converting_securities" else stated
+        # "from your answer" qualifies the measure, so it goes before any term-sheet wording, never after it.
+        measure, sep, bridge = _POOL_BASIS_LABELS.get(solved, "basis not modelled").partition("; ")
+        return f"{measure}, from your answer{sep}{bridge}"
+    # Nothing converting: the excluding basis is the same number as post-money and solves as it.
+    if requested == "post_money_excluding_converting_securities":
+        return _POOL_BASIS_LABELS["post_money"]
+    return _POOL_BASIS_LABELS.get(requested, "basis not modelled")
+
+
 def quick_assess(
     *,
     company_name: str,
@@ -95,6 +129,8 @@ def quick_assess(
     founder_prompt: str = "",
     attached_docs: list[str] | None = None,
     run_id_override: str | None = None,
+    excluding_basis_modeled_as: str | None = None,
+    custom_basis_stated_by_founder: str | None = None,
 ) -> dict[str, Any]:
     """Run a fast-assess directional review.
 
@@ -131,9 +167,9 @@ def quick_assess(
     resolved_target_basis = target_basis or "pre_money"
     if target_pool_percent and not target_basis:
         assumptions.append(
-            "No pool-sizing basis supplied for the pool top-up; assumed pre-money. Pre-money vs "
-            "post-money changes the pool top-up and post-round ownership — confirm which basis "
-            "your term sheet uses."
+            "No measure was given for the pool target, so it was taken as a share of the fully diluted "
+            "share count before the round. Measuring it against the share count after the round changes "
+            "the pool top-up and post-round ownership — confirm what your term sheet's percentage counts."
         )
 
     # Scope note: fast-assess does NOT honor scenario-level mfn_elections overrides — it has
@@ -148,9 +184,12 @@ def quick_assess(
         target_pool_percent=target_pool_percent,
         target_basis=resolved_target_basis,
         conversion_event_date=resolved_event_date,
+        excluding_basis_modeled_as=excluding_basis_modeled_as,
+        custom_basis_stated_by_founder=custom_basis_stated_by_founder,
     )
 
     completeness = solver_result.get("completeness", "structural_only")
+    pool_basis_label = _solved_pool_basis_label(solver_result, resolved_target_basis)
     drivers: list[dict[str, Any]] = []
     headline: dict[str, Any] = {}
 
@@ -164,7 +203,7 @@ def quick_assess(
             },
             "branch_summary": (
                 f"priced_round: SAFE conversion + "
-                f"{int(target_pool_percent * 100) if target_pool_percent else 0}% pool "
+                f"{pool_target_pct(target_pool_percent) if target_pool_percent else '0%'} pool "
                 f"+ new money"
             ),
             # R4 LOW.c: drivers expose dilution magnitudes as POSITIVE
@@ -255,7 +294,8 @@ def quick_assess(
     md_lines.append(f"- New money: {_money(new_money)}")
     md_lines.append(f"- Post-money valuation: {_money(pre_money + new_money)}")
     if target_pool_percent:
-        md_lines.append(f"- Pool target: {target_pool_percent:.0%} ({resolved_target_basis.replace('_', ' ')})")
+        t = pool_target_pct(target_pool_percent)
+        md_lines.append(f"- Pool target: {t} ({pool_basis_label.replace('{target}', t)})")
     else:
         # This file has no stage input, so it cannot say what investors expect of
         # THIS company. Pool asks are also a market benchmark, not a requirement
@@ -298,14 +338,27 @@ def quick_assess(
             if dtype == "pool_refresh":
                 topup_shares = int(shares_bd.get("pool_topup", 0))
                 if topup_shares > 0:
-                    total_pool = existing_unallocated + topup_shares
+                    # The share count and its percentage describe the SAME options: the free pool. The
+                    # driver's `impact_pct` is the solver's `option_pool_pct`, which counts granted options
+                    # too, so it would state a larger pool than the shares printed beside it.
+                    free_pool = existing_unallocated + topup_shares
+                    post_fd = solver_result.get("post_round_fully_diluted_shares") or 0
+                    free_pct = free_pool / post_fd if post_fd else 0.0
+                    # The whole pool is the driver's figure (and the JSON's); naming it too keeps this list
+                    # adding up with founders' share and agreeing with `headline_data.drivers`.
+                    whole = ""
+                    if d["impact_pct"] - free_pct > 0.00005:
+                        whole = f"; counting granted options, the whole pool is {_percent(d['impact_pct'])}"
                     line = (
                         f"- Pool Top-Up: +{topup_shares:,} shares"
-                        f" (unallocated pool grows to {total_pool:,}"
-                        f" = {_percent(d['impact_pct'])} post-money)"
+                        f" (unallocated pool grows to {free_pool:,}"
+                        f" = {_percent(free_pct)} post-money{whole})"
                     )
                 else:
-                    line = f"- Existing option pool (no top-up): {_percent(d['impact_pct'])} post-money"
+                    line = (
+                        f"- Existing option pool, granted and unallocated (no top-up): "
+                        f"{_percent(d['impact_pct'])} post-money"
+                    )
             elif dtype == "safe_conversion":
                 safe_shares = int(shares_bd.get("safe_converted", 0))
                 if safe_shares > 0:
@@ -360,11 +413,20 @@ def quick_assess(
             pref_shares = final_ats.get("preferred_shares_as_converted", 0)
             md_lines.append(f"| Existing preferred (as-converted) | {int(pref_shares):,} | {_percent(preferred_pct)} |")
 
-        # Option pool row (total: outstanding + unallocated + topup)
+        # Option pool row: the WHOLE pool (granted + unallocated + top-up), labelled as such. It is a cap-table
+        # row, so granted options belong in it -- they appear nowhere else. Shares are counted, not
+        # back-computed from the percentage.
         option_pool_pct = agg.get("option_pool_pct", 0.0)
         if option_pool_pct > 0:
-            pool_total_shares = int(round(option_pool_pct * post_fd))
-            md_lines.append(f"| Option pool (unallocated) | {pool_total_shares:,} | {_percent(option_pool_pct)} |")
+            _ats = cs.get("as_converted_totals") or {}
+            pool_total_shares = (
+                int(_ats.get("options_outstanding", 0))
+                + int(_ats.get("options_available", 0))
+                + int(shares_bd.get("pool_topup", 0))
+            )
+            md_lines.append(
+                f"| Option pool (granted and unallocated) | {pool_total_shares:,} | {_percent(option_pool_pct)} |"
+            )
 
         # SAFE rows — per-holder when ≤ 3 SAFEs, aggregate otherwise
         # `per_safe` is a LIST of id-bearing rows, iterated in producer order. `safe_investors` is a
@@ -504,10 +566,24 @@ def _cli() -> int:
     p.add_argument(
         "--target-basis",
         default=None,
-        help="pre_money | post_money | post_money_excluding_converting_securities. Omit only when no "
+        help="pre_money | post_money | post_money_increase (the percentage sizes the new options alone) | "
+        "post_money_excluding_converting_securities (not computed when SAFEs "
+        "or notes convert: refused unless --excluding-basis-modeled-as is given). Omit only when no "
         "pool top-up is being modeled (--target-pool-percent also omitted); if a pool target IS "
         "given without this flag, the assumption is disclosed in the report rather than silently "
         "defaulted.",
+    )
+    p.add_argument(
+        "--excluding-basis-modeled-as",
+        default=None,
+        help="post_money_by_founder_choice: ONLY after the founder chose to see the excluding basis modelled "
+        "as plain post-money (disclosed in the report).",
+    )
+    p.add_argument(
+        "--custom-basis-stated-by-founder",
+        default=None,
+        help="ONLY the founder's own answer to the pool-basis refusal's question: pre_money | post_money | "
+        "post_money_excluding_converting_securities (disclosed in the report).",
     )
     p.add_argument(
         "--event-date",
@@ -556,6 +632,8 @@ def _cli() -> int:
             new_money=args.new_money,
             target_pool_percent=args.target_pool_percent,
             target_basis=args.target_basis,
+            excluding_basis_modeled_as=args.excluding_basis_modeled_as,
+            custom_basis_stated_by_founder=args.custom_basis_stated_by_founder,
             event_date=args.event_date,
             founder_prompt=args.founder_prompt,
             attached_docs=args.attached_doc,

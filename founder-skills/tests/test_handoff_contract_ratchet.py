@@ -59,17 +59,19 @@ def _flat(text: str) -> str:
 def test_all_six_skills_present() -> None:
     """Guard the parametrization itself — a renamed dir must not silently shrink coverage.
 
-    AGENTS is 7 against 6 skills, and the asymmetry is deliberate: market-sizing carries a second,
-    skill-scoped agent for the red-team step because tool allowlists are PER AGENT. Granting it
-    WebSearch on the shared agent would hand the network to every other market-sizing dispatch,
-    two of which state in writing that they have none.
+    AGENTS is 8 against 6 skills, and the asymmetry is deliberate: two skills carry a second,
+    skill-scoped agent for their red-team step. market-sizing's exists because tool allowlists are PER
+    AGENT: granting WebSearch on the shared agent would hand the network to every other market-sizing
+    dispatch, two of which state in writing that they have none. competitive-positioning's exists
+    because its shared agent's body is the scoring rubric the analysis was built with, and the review
+    exists to look at the analysis without that frame.
     """
     assert len(SKILLS) == 6, SKILLS
-    assert len(AGENTS) == 7, AGENTS
+    assert len(AGENTS) == 8, AGENTS
     # Same guard, same reason: an empty glob turns a parametrized test into `1 skipped` and
     # exit 0 — measured. A guard that can silently delete itself is the vacuity class this
     # whole file exists to prevent.
-    assert len(COMMENTARY_ENVELOPE_GUARDED) == 8, COMMENTARY_ENVELOPE_GUARDED
+    assert len(COMMENTARY_ENVELOPE_GUARDED) == 9, COMMENTARY_ENVELOPE_GUARDED  # the eight agents + one shared reference
     for doc in COMMENTARY_ENVELOPE_GUARDED:
         assert doc.is_file(), f"guarded document is missing: {doc}"
 
@@ -441,3 +443,64 @@ def test_no_document_asserts_the_unscoped_canonical_writer_claim(doc: Path) -> N
         "the main thread writes several by heredoc. Scope the claim to the sub-agent instead: "
         '"you never write a canonical artifact".'
     )
+
+
+def test_shared_reference_carries_the_absolute_path_proof_and_the_refusal_contract() -> None:
+    """A relative file-tool path is refused. Three things keep that from turning
+    into a silent message-channel run, and the shared reference is where each is stated once:
+    the Step 0 proof of the file-tool path of outputs, the `write_refused` blocked return (the main
+    thread cannot see a sub-agent's tool results, so without it a refused write plus a templated
+    `complete` receipt reads as a transport-visibility failure), and telling the founder when a run
+    does degrade."""
+    text = _flat((_SHARED_REFS_DIR / "skill-execution-model.md").read_text(encoding="utf-8"))
+    assert "--set-host-outputs-dir" in text
+    assert ".host-outputs-probe" in text
+    assert '"reason": "write_refused"' in text
+    assert "tell the founder" in text
+    assert "never a relative one" in text
+    # The retired premise must not come back: the agent no longer runs in the outputs dir.
+    assert "cwd is the session outputs dir" not in text
+    assert "the agent-namespace root is `artifacts` on any cowork session tree" not in text
+
+
+# Every skill's SKILL.md and every agent body carry the absolute file-tool path contract. The agent map
+# is checked for completeness below, so a new skill or agent cannot join the fleet without it.
+_PATH_CONTRACT_SKILLS = SKILLS
+_PATH_CONTRACT_AGENTS = {
+    "cap-table": ["cap-table.md"],
+    "competitive-positioning": ["competitive-positioning.md", "competitive-positioning-redteam.md"],
+    "deck-review": ["deck-review.md"],
+    "financial-model-review": ["financial-model-review.md"],
+    "ic-sim": ["ic-sim.md"],
+    "market-sizing": ["market-sizing.md", "market-sizing-redteam.md"],
+}
+
+
+def test_every_skill_and_agent_carries_the_path_contract() -> None:
+    """Guard the parametrization: the map must name exactly the fleet's skills and agents."""
+    assert sorted(_PATH_CONTRACT_AGENTS) == SKILLS
+    assert sorted(a for agents in _PATH_CONTRACT_AGENTS.values() for a in agents) == AGENTS
+
+
+@pytest.mark.parametrize("skill", _PATH_CONTRACT_SKILLS)
+def test_skill_proves_the_file_tool_path_and_handles_a_refused_write(skill: str) -> None:
+    """Step 0 must prove the file-tool path of outputs before any agent-namespace path is built, the
+    hand-off protocol must route `write_refused` to a fix-and-re-dispatch (not to the fallback), and
+    the fallback must be told to the founder. Presence only -- a live run is what shows it works."""
+    text = _skill(skill)
+    flat = _flat(text)
+    proof = text.find("--set-host-outputs-dir")
+    first_agent_path = text.find("--handoff-dir-agent")
+    assert proof != -1, f"{skill}: Step 0 never proves the file-tool path of outputs"
+    assert proof < first_agent_path, f"{skill}: the proof must run BEFORE the agent-namespace paths are built"
+    assert ".host-outputs-probe" in text
+    assert "write_refused" in flat
+    assert "tell the founder" in flat
+    assert "relative to the sub-agent's file-tool cwd" not in flat, f"{skill}: the retired relative-path idiom is back"
+
+
+@pytest.mark.parametrize("agent", [a for s in _PATH_CONTRACT_SKILLS for a in _PATH_CONTRACT_AGENTS[s]], ids=lambda a: a)
+def test_agent_returns_blocked_on_a_refused_write(agent: str) -> None:
+    flat = _flat(_agent(agent))
+    assert '"reason": "write_refused"' in flat
+    assert "never a `complete` receipt" in flat

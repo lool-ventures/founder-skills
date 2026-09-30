@@ -54,8 +54,8 @@ tool surface and different rules.
   competitive-positioning's also declares `WebSearch` for its own
   LANDSCAPE_RESEARCH/MOAT_SCORING/POSITIONING_SCORING research — it is
   the only skill where Context A makes network calls. **WebSearch
-  resolves for any sub-agent that declares it, in Cowork too**
-  (live-confirmed 2026-07). Keeping the other skills' Context A
+  resolves for any sub-agent that declares it, in Cowork too**.
+  Keeping the other skills' Context A
   network-free is our design choice, not a platform limit.
 - Role: heavy analytical work in isolated context. Produces structured
   JSON matching a producer script's input schema. Does NOT write
@@ -69,10 +69,13 @@ tool surface and different rules.
     RUNWAY_SCENARIOS steps are NOT dispatched to a sub-agent — those
     producers consume `inputs.json` verbatim, so the main thread
     pipes the file directly.
-- **Invariant: a Context-A sub-agent never handles a VM-absolute path.** In
-  Cowork hostloop a sub-agent's file tools run host-native (cwd IS the session
-  outputs dir) while the main thread's shell (`mcp__workspace__bash`) runs in
-  the VM; a host-side containment hook denies any gated file op
+- **Invariant: a Context-A sub-agent never handles a VM-absolute path, and
+  never a relative one.** In Cowork hostloop a sub-agent's file tools run
+  host-native while the main thread's shell (`mcp__workspace__bash`) runs in
+  the VM. The agent process does not run in the outputs dir, so a RELATIVE
+  Read/Write/Edit is refused ("File is in a directory that is denied by your
+  permission settings.") — for the main thread and every sub-agent alike (see "Proving the file-tool path of
+  outputs" below); a host-side containment hook denies any gated file op
   (Read/Write/Edit/Glob/Grep) whose path is a VM-namespace
   `/sessions/<id>/mnt/…` path — **for the main thread's own file tools too**,
   not just the sub-agent's (see "Two path namespaces" below). So a dispatch
@@ -82,13 +85,13 @@ tool surface and different rules.
     token. It is pre-resolved (at skill-body load) to a host-readable plugin
     path — do NOT pass a `find /sessions`-discovered `$REFS` value (a VM path a
     file tool can't read). This holds for MAIN-THREAD `Read` directives as well.
-  - **An artifact under `outputs/`** (a prior step's `*.json`) → a **cwd-relative
-    `artifacts/…` path** from the `resolve_artifacts_root.py --agent` namespace
-    (the same namespace as `OUTPUT_PATH`; build a `<WORKDIR>_AGENT` var beside
-    `HANDOFF_AGENT`). The sub-agent's cwd is the outputs mount, so the relative
-    read resolves; an absolute `/sessions/…` read is denied. Relative reads are
-    preferred over inlining these (inlining double-pays tokens through the
-    orchestrator context).
+  - **An artifact under `outputs/`** (a prior step's `*.json`) → an **absolute
+    agent-namespace path** from `resolve_artifacts_root.py` (the same namespace
+    as `OUTPUT_PATH`; build a `<WORKDIR>_AGENT` var beside `HANDOFF_AGENT`).
+    After the Step 0 proof it is `<host outputs>/artifacts/…`, which the
+    sub-agent's host-native Read reaches; a `/sessions/…` read and a relative
+    read are both refused. Reads are preferred over inlining these (inlining
+    double-pays tokens through the orchestrator context).
   - **Content OUTSIDE outputs** (an uploaded file, raw deck/document text) →
     **inline it** into the dispatch prompt (the main thread reads it; the
     sub-agent gets the text, not a path). This is the only content that needs
@@ -110,8 +113,8 @@ tool surface and different rules.
   kept in the **agent definition** (`agents/<skill>.md`), loaded into the
   sub-agent's context with no read at all. (A skill MAY choose the all-inline
   variant — zero sub-agent reads, every input pasted in, as `ic-sim` does — but
-  the relative-read forms above are the cheaper default for under-outputs
-  artifacts.)
+  the agent-namespace read forms above are the cheaper default for
+  under-outputs artifacts.)
   cap-table is the exemplar this generalizes from: its Context A extraction
   dispatch already passes document text inline and reads nothing (see
   "Cowork-Specific Quirks" below, and the per-skill "Available References"
@@ -153,12 +156,28 @@ tool surface and different rules.
   output before producer validation), never canonical artifacts:
   producers touch them only via the explicit pipe, and
   `compose_report.py` never reads `handoff/`.
-- **Graceful degrade**: if the host's filesystem topology makes the
-  hand-off invisible to the main thread (gate exits 3 while the agent's
-  receipt correctly claims completion — again on the first corrective
-  dispatch), fall back to message-channel transport for the rest of the
-  run: the sub-agent returns full JSON in its final message, the main
-  thread stages it to `$STAGING_DIR` and pipes the same way.
+- **A refused write is a BLOCKED return, never a `complete` receipt.** Every
+  agent body says: if a file tool returns an error on `OUTPUT_PATH`, write
+  nothing else and return
+  `{"status": "blocked", "reason": "write_refused", "attempted": "<path>", "detail": "<verbatim error>"}`.
+  The main thread cannot see a sub-agent's tool results — only its final
+  message and the file check — so without this a refused write plus a
+  templated `complete` receipt looks exactly like the transport-visibility
+  failure below, and the run would degrade silently instead of fixing the
+  path. `write_refused` is handled like any blocked return: at most one
+  re-dispatch after fixing the path (re-run the Step 0 proof if it never
+  ran), then STOP.
+- **Graceful degrade — disclosed, never silent**: if the host's filesystem
+  topology makes the hand-off invisible to the main thread (gate exits 3
+  while the agent's receipt correctly claims completion — again on the
+  first corrective dispatch), fall back to message-channel transport for
+  the rest of the run: the sub-agent returns full JSON in its final
+  message, the main thread stages it to `$STAGING_DIR` and pipes the same
+  way. **Tell the founder**, in the final message, in one plain sentence,
+  that this run's intermediate files could not be exchanged through the
+  outputs folder and were passed directly instead — the results are the
+  same, but the audit trail under `handoff/` is incomplete. A run that
+  degrades is a failure for any test or recording, even when it finishes.
 
 ### 3. Context B — Post-Compose Coaching Sub-Agent
 
@@ -343,19 +362,20 @@ internally — pass the final message verbatim.
   out" as a hard guarantee when reasoning about failure modes — rely
   instead on the Context A input rules above ("Three Dispatch Contexts",
   the three-way rule): every input a sub-agent is given is either
-  reachable by a relative `Read` or inlined into the dispatch prompt, so
+  reachable by an agent-namespace `Read` or inlined into the dispatch prompt, so
   a shell buys it nothing — plus the orchestrator-side gate on the one
   file it writes. Orchestrate from the main thread either way.
 - **Env scrubbing across the host/VM boundary**:
   `mcp__workspace__bash` commands run inside the Linux VM with an
-  allowlist-scrubbed environment — no `CLAUDE_CODE_*` variable
-  survives, and hook-exported vars don't cross the boundary. The
+  allowlist-scrubbed environment — in the host-loop VM shell no
+  `CLAUDE_CODE_*` variable survives, and hook-exported vars don't cross
+  the boundary. The
   general rule: nothing host-side reaches the VM shell except the
   filesystem. (The invariant is about the BOUNDARY, not about hooks —
   hooks do fire on desktop-local; their exported vars just do not reach
-  the VM shell. See the Host-Capability Matrix.) Never detect Cowork
-  from a script via
-  `$CLAUDE_CODE_IS_COWORK` — see "Runtime Detection" below.
+  the VM shell. See the Host-Capability Matrix.) A script must never
+  infer "not Cowork" from the absence of `$CLAUDE_CODE_IS_COWORK` — see
+  "Runtime Detection" below.
 - **`$OUTPUTS_ROOT/` is write-yes, delete-no by default**: files
   written there can be overwritten in place, but a plain `rm` is
   denied (`Operation not permitted`) until the user approves a delete.
@@ -370,24 +390,53 @@ internally — pass the final message verbatim.
   agent file tools. This is why `resolve_artifacts_root.py --agent`
   exists: it prints the agent-namespace root so SKILL.md can build
   `OUTPUT_PATH` lines the sub-agent's Write tool can actually reach.
-  In the standalone CLI both namespaces are the same absolute path.
+  In the standalone CLI (and on the remote lane) both namespaces are the same
+  absolute path.
   **Never derive the agent namespace from the VM shell's cwd.** They are
   different processes in different namespaces: the shell can sit at the
   session root while the sub-agent's cwd is the outputs dir. Inferring one
   from the other once shipped a DOUBLED `<outputs>/mnt/outputs/artifacts/…`
   prefix that only bit the sub-agents doing no reads — a read-first agent
-  self-healed and hid it. The agent-namespace root is `artifacts` on any
-  Cowork session tree; a genuine VM-loop tier declares
-  `$COWORK_AGENT_ARTIFACTS_ROOT` instead of being guessed at.
+  self-healed and hid it. On a Cowork session tree the agent-namespace root
+  is the PROVEN `<host outputs>/artifacts` (next bullet); a declared
+  `$COWORK_AGENT_ARTIFACTS_ROOT` still wins over it. Without a proof, an
+  agent-namespace call on a session tree exits 6
+  (`host_outputs_dir_not_proven`) instead of printing a relative root the
+  file tools would refuse: run the Step 0 proof.
+- **Proving the file-tool path of outputs (Step 0, Cowork only)**: the
+  host path the file tools need is named to the MODEL only — in the
+  "Paths in bash differ from what file tools (Read/Write/Edit) see:" list,
+  as `- <host outputs> → /sessions/<id>/mnt/outputs/ (your outputs directory)`
+  (production: `…/local-agent-mode-sessions/<org>/<user>/<8hex>/outputs`, which
+  contains a space). No script in the VM can see it, and sub-agents given a
+  relative `OUTPUT_PATH` routinely ignore the platform's own "Pass absolute
+  paths to these tools." — so the main thread resolves it ONCE and a probe
+  proves it:
+  1. with the **Write tool**, write `<host outputs>/artifacts/.host-outputs-probe`
+     containing exactly `<host outputs>`;
+  2. `resolve_artifacts_root.py --set-host-outputs-dir "<host outputs>"` (quoted)
+     checks the shape and that the probe landed where THIS shell sees the
+     artifacts root, with that content; only then does it persist the value
+     (exit 0, prints the absolute agent root). Exit 2 = bad shape, 4 = the
+     probe is not there (the Write was refused or went elsewhere — wrong
+     path), 5 = the probe holds a different path. Its JSON diagnostic names
+     the shell's outputs dir, so the matching line in the list can be found.
+     Retry once with the corrected path; a second failure STOPs.
+  3. every later agent-namespace call, in any fresh shell, reads the
+     persisted value and prints absolute paths.
+  With no such list in context (a VM-loop tier), the file tools take the
+  shell's `/sessions/<id>/mnt/outputs` path itself: use it as
+  `<host outputs>` and the same proof holds. Skip the whole step when the
+  printed `ARTIFACTS_ROOT` does not start with `/sessions/` (CLI, remote
+  lane) — `--set-host-outputs-dir` says `not_needed` there.
   **The same asymmetry that makes `OUTPUT_PATH` need `--agent` makes any
   VM-path handed to a sub-agent for READING fail identically** — a
   host-side containment hook gates Read AND Write alike, so a
   `/sessions/…`-style path denies whether the sub-agent tries to Read it
   or Write to it. `--agent` resolves the outputs ROOT, not arbitrary paths —
   but that root is exactly what an under-outputs artifact READ needs: build the
-  read path in the SAME agent namespace as `OUTPUT_PATH` (a cwd-relative
-  `artifacts/…` under the `--agent` root), which the sub-agent's host-native
-  Read reaches. Only content OUTSIDE the outputs tree (uploads, raw document
+  read path in the SAME agent namespace as `OUTPUT_PATH` (under the proven
+  `--agent` root), which the sub-agent's host-native Read reaches. Only content OUTSIDE the outputs tree (uploads, raw document
   text) has no path form the sub-agent can reach — inline those bytes into the
   dispatch prompt. References are the third case: the literal
   `${CLAUDE_PLUGIN_ROOT}/…` token (pre-resolved to a host-readable plugin path).
@@ -453,8 +502,7 @@ internally — pass the final message verbatim.
 
 ## Host-Capability Matrix
 
-Pinned to CLI v2.1.198 / Desktop (Cowork) v1.18286.0. "Other host"
-covers Codex, Cursor, and similar agent harnesses running these skills.
+"Other host" covers Codex, Cursor, and similar agent harnesses running these skills.
 ChatGPT Work has its own column because its sub-agents are hosted and
 unscoped — see "Context A" above for what that costs.
 
@@ -466,9 +514,10 @@ unscoped — see "Context A" above for what that costs.
 | `WebSearch` in sub-agents | yes, if declared | yes, if declared | n/a (no scoping) | varies |
 | Per-spawn sub-agent tool scoping | yes (declaration binds) | yes (declaration binds) | **no** — hosted sub-agents use the parent chat's tools | varies |
 | Blocking structured question | `AskUserQuestion` | `AskUserQuestion` | no in-chat equivalent observed; MCP elicitation is a possible path, unconfirmed | varies |
-| Sub-agent resume after completion | no (`SendMessage` omitted from the spawn tool list) | yes (`SendMessage`, ≥ ~v2.1.159) | varies | varies |
+| Sub-agent resume after completion | no (`SendMessage` omitted from the spawn tool list) | yes (`SendMessage`) | varies | varies |
 | Background tasks | disabled (`CLAUDE_CODE_DISABLE_BACKGROUND_TASKS`) | available | varies | varies |
-| Hooks fire | yes on desktop-local; unverified on cloud | yes | varies | varies |
+| Stop hooks fire | yes, on desktop-local and on cloud | yes | varies | varies |
+| PreToolUse hooks fire | yes on desktop-local; not observed on cloud | yes | varies | varies |
 | `outputs/` delete/overwrite-by-delete | denied post-write (in-place edit works) | normal filesystem | varies | normal filesystem |
 
 **Hooks.** Plugin-declared `SessionStart` hooks run on the desktop-local
@@ -509,18 +558,21 @@ optimization, gated on `SendMessage` presence.
 
 Prefer not branching at all — the transparent-tool-name design means
 most logic doesn't care which host it's on. When a script genuinely
-must know, use these signals **in order** (pinned to CLI v2.1.198 /
-Desktop v1.18286.0; the host-loop/VM-loop split is itself
+must know, use these signals **in order** (the host-loop/VM-loop split is
 feature-gated, and this order is robust to that flip):
 
-1. `$CLAUDE_CODE_IS_COWORK` set → Cowork (catches VM-loop orgs and
-   host-side hook contexts).
-2. Filesystem signature: cwd or mounts match `/sessions/<id>/...` →
+1. `$CLAUDE_CODE_IS_COWORK` set → Cowork. Positive only: it is visible
+   where the agent process's environment is (a VM-loop shell, a host-side
+   hook) and scrubbed from the host-loop VM shell, so its absence proves
+   nothing.
+2. `$CLAUDE_CODE_REMOTE == true` → Cowork's remote (cloud) lane: the
+   agent and the shell share one Linux VM, so nothing is scrubbed.
+3. Filesystem signature: cwd or mounts match `/sessions/<id>/...` →
    Cowork VM shell (catches host-loop orgs, where the env var is
    scrubbed before the command reaches the VM).
-3. `$CLAUDECODE == 1` → some Claude Code Bash subprocess (refine with
+4. `$CLAUDECODE == 1` → some Claude Code Bash subprocess (refine with
    `$CLAUDE_CODE_ENTRYPOINT` if CLI-vs-SDK matters).
-4. Otherwise → other host; assume nothing beyond the intersection
+5. Otherwise → other host; assume nothing beyond the intersection
    column.
 
 Content-side (model branching inside a SKILL.md, not a script): the
@@ -546,7 +598,10 @@ helper implementing the order above rather than ad-hoc env checks.
 | Symptom | Likely cause | First check |
 |---|---|---|
 | Sub-agent returns BLOCKED | Dispatch prompt missing required field | Check the agent body's "input keys" requirements vs. what the dispatch prompt actually inlines. |
-| `check_handoff.py` exit 3 (missing/empty file) | Agent never wrote, or wrote outside the mount (fabricated/mistaken receipt) | Redo-dispatch with the one-line correction. If the receipt correctly echoes the path AND the first corrective dispatch exits 3 again → transport-visibility failure, not agent failure: degrade to message-channel for the rest of the run. |
+| `check_handoff.py` exit 3 (missing/empty file) | Agent never wrote, or wrote outside the mount (fabricated/mistaken receipt) | Redo-dispatch with the one-line correction. If the receipt correctly echoes the path AND the first corrective dispatch exits 3 again → transport-visibility failure, not agent failure: degrade to message-channel for the rest of the run, and tell the founder. |
+| Sub-agent returns `write_refused` | Its `OUTPUT_PATH` was relative or a `/sessions/…` path (refused), usually because the Step 0 proof never ran | Run the Step 0 proof (`--set-host-outputs-dir`), rebuild the agent-namespace paths from the resolver, re-dispatch once. A second `write_refused` STOPs with both details quoted. |
+| An agent-namespace resolver call exits 6 (`host_outputs_dir_not_proven`) | The Step 0 proof never ran (or ran in a different session) | Run the Step 0 proof, then repeat the call. On a tier whose file tools take the shell's `/sessions/…` paths, the proof still works with that path; `$COWORK_AGENT_ARTIFACTS_ROOT` is the declared alternative. |
+| `--set-host-outputs-dir` exits 4 or 5 | The path given is not the file-tool path of this session's outputs folder (4: the probe never landed; 5: the probe holds a different path) | Take the path from the "Paths in bash differ" line that maps to the diagnostic's `shell_outputs_dir`, Write the probe with exactly that path, retry once. |
 | `check_handoff.py` exit 4 (invalid JSON) | Truncated or malformed Write | Repair-dispatch quoting the parse diagnostic verbatim — the analysis on disk survives; only serialization gets fixed. |
 | `check_handoff.py` exit 5 (path mismatch) | Agent wrote somewhere else and echoed that path | Repair-dispatch stating the exact expected OUTPUT_PATH. If the claimed path is the OTHER namespace's spelling of the same file, `--agent-path` should have accepted it — check the gate invocation passes `--agent-path`. |
 | `check_handoff.py` exit 6 (receipt unparseable) | Final message wasn't the receipt JSON | Redo-dispatch: "return ONLY the receipt JSON — no fences, no prose." |

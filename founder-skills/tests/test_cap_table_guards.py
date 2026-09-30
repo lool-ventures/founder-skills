@@ -2861,7 +2861,7 @@ _ID_KEYED_WRITE_REGISTRY: dict[tuple[str, str, str], tuple[int, str]] = {
     # reachable with no duplicate typed by anyone, because two series names differing only in case
     # derive one id.
     ("priced_round.py", "_finalize", "series_id"): (1, "guarded-at-ingress"),
-    ("priced_round.py", "solve_priced_round", "series_id"): (1, "guarded-at-ingress"),
+    ("priced_round.py", "_solve_priced_round_basis_resolved", "series_id"): (1, "guarded-at-ingress"),
     # `build_cap_state` has already refused duplicate and blank ids by the time this runs, and the
     # per-SAFE OUTPUT it indexes into is a list of id-bearing rows, so no output row can be lost.
     ("quick_assess.py", "quick_assess", "id"): (1, "guarded-at-ingress"),

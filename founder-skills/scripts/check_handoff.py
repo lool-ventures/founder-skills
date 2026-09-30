@@ -78,6 +78,9 @@ import os
 import re
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _handoff_audit  # noqa: E402
+
 EXIT_OK = 0
 EXIT_MISSING = 3
 EXIT_BAD_JSON = 4
@@ -386,12 +389,24 @@ def main() -> None:
                 )
             )
 
+    # Record the pass beside the file. A step that bypassed the gate (the message-channel fallback) has
+    # no record, which is how compose discloses it (_handoff_audit.py). A record that cannot be written
+    # does not fail the gate -- the hand-off is good -- it only makes compose disclose this step, which
+    # errs toward telling the founder.
+    gate_record: str | None = expected + _handoff_audit.GATE_SUFFIX
+    try:
+        _handoff_audit.write_gate_record(expected, args.format)
+    except OSError as e:
+        gate_record = None
+        sys.stderr.write(f"check_handoff: could not write the gate record for {expected}: {e}\n")
+
     sys.exit(
         _diag(
             "ok",
             EXIT_OK,
             output_path=expected,
             bytes=os.path.getsize(expected),
+            gate_record=gate_record,
         )
     )
 

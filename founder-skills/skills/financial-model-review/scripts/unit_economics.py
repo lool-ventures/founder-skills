@@ -278,13 +278,19 @@ _GM_SECTOR_TABLE: dict[str, str] = {
 #   hardware vs service margin split a blend must be judged on.
 # - usage-based: healthy consumption models span passthrough-heavy CPaaS
 #   (~51%) to software-margin platforms (~72%+); one bar mis-rates one end.
-_GM_CONTEXTUAL_TYPES = frozenset({"marketplace", "transactional-fintech", "hardware-subscription", "usage-based"})
+# - unclassified: no revenue model we can benchmark is stated, so there is no table to
+#   grade against. Grading it on the SaaS table is the confidently-wrong answer
+#   this value exists to prevent.
+_GM_CONTEXTUAL_TYPES = frozenset(
+    {"marketplace", "transactional-fintech", "hardware-subscription", "usage-based", "unclassified"}
+)
 
 _GM_CONTEXTUAL_SOURCES: dict[str, str] = {
     "marketplace": "FY2024 public comps, net-revenue basis (Airbnb ~83% vs DoorDash ~46%, 10-K filings)",
     "transactional-fintech": "FY2024 public comps, net-revenue basis (Airbnb ~83% vs DoorDash ~46%, 10-K filings)",
     "hardware-subscription": "Hardware >=50% GM rule (Barros, Adafruit hardware-startup guide) — device-only scope",
     "usage-based": "FY2024 public comps (Twilio 10-K ~51% GAAP GM) vs KeyBanc SaaS Survey 2024 (median ~72%)",
+    "unclassified": "No benchmark: no revenue model we have benchmarks for is stated",
 }
 
 _GM_CONTEXTUAL_EVIDENCE: dict[str, str] = {
@@ -303,6 +309,10 @@ _GM_CONTEXTUAL_EVIDENCE: dict[str, str] = {
     "usage-based": (
         "consumption models span passthrough-heavy infrastructure to software-margin platforms; "
         "a single benchmark would mis-rate one end"
+    ),
+    "unclassified": (
+        "no revenue model we have benchmarks for is stated in your materials, so no gross-margin "
+        "benchmark applies; state how the company makes money and this can be graded"
     ),
 }
 
@@ -1351,6 +1361,12 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
             sector_key = _GM_SECTOR_TABLE.get(model_type)
             src = GM_BENCHMARKS_BY_SECTOR[sector_key]["source"] if sector_key else "declared gross_margin_basis"
             metrics.append(_metric("gross_margin", gm, "contextual", evidence, src, ""))
+        elif contextual_reason == "unclassified":
+            # No type name in the sentence: the value is our word for "not stated", not the founder's.
+            evidence = f"Gross margin of {gm:.0%}; {_GM_CONTEXTUAL_EVIDENCE[contextual_reason]}"
+            metrics.append(
+                _metric("gross_margin", gm, "contextual", evidence, _GM_CONTEXTUAL_SOURCES[contextual_reason], "")
+            )
         elif contextual_reason is not None:
             evidence = f"Gross margin of {gm:.0%}; {model_type} {_GM_CONTEXTUAL_EVIDENCE[contextual_reason]}"
             metrics.append(

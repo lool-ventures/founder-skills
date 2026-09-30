@@ -650,7 +650,7 @@ SKILL_MD_CEILING: dict[str, int] = {
     # bottom-up, which is the distinction this skill exists to police.
     # market-sizing 93,966 -> 94,077 (+111 B): inputs.json gains existing_claims_horizon_months
     # and capture_horizon_months. The deck-claim check compared an 18-month plan-case SOM against a
-    # 5-year capture SOM and told the founder they were understating themselves by +564.9%; two
+    # 5-year capture SOM and told the founder they were understating themselves by several hundred percent; two
     # optional fields are what let it say "different period" instead of inventing a delta.
     # market-sizing 94,077 -> 94,292 (+215 B): the Step 8 payload template gains
     # approach_comparison. The key must appear on BOTH prompt surfaces -- the contract test reads
@@ -696,7 +696,7 @@ SKILL_MD_CEILING: dict[str, int] = {
     # doc said "the figures the value multiplies" and the model read it as "any list".
     # +862 B (99_156 -> 100_018): the closing_message.py call after the fleet-shared delivery
     # block (which is byte-identical across six skills and cannot absorb it). MEASURED live: the
-    # closing chat message stated "$4.66M ... about 2% of the illustrative $100M" (4.7%) under a
+    # closing chat message called a SOM "about 2%" of the illustrative $100M (it was more than double) under a
     # rule that forbids chat arithmetic; the message is now printed from report.json and the e2e
     # lane checks every number in it exists there.
     # +203 B (100_018 -> 100_221): Step 6c mirrors the uploads into the hand-off dir and passes
@@ -735,7 +735,7 @@ SKILL_MD_CEILING: dict[str, int] = {
     # +80 B (100_147 -> 100_227): the founder_stated_inputs rule no longer says "update this field"
     # when the founder agrees; it says a discrepancy is a question for the founder, never an edit,
     # and names founder_stated_inputs_period. MEASURED live: the constructor followed the old
-    # sentence literally -- rewrote a founder-stated $203/month to the model's annual $2,436 with
+    # sentence literally -- rewrote a founder-stated monthly figure to the model's annual one with
     # no founder in the loop -- after the check called the correct x12 an override.
     # +1,275 B (fleet, one shared edit): the Step 0 preflight and its stop. MEASURED 2026-09-22 on
     # claude.ai, which mounts skills FLAT at /mnt/skills/plugins/<plugin>:<skill>/ and serves no
@@ -759,7 +759,7 @@ SKILL_MD_CEILING: dict[str, int] = {
     # in _redteam_copy.py (rounds, FOUNDER_INPUT_REWRITTEN); this is what a model in context needs to
     # take the route instead of improvising one.
     # +714 B (104_435 -> 105_149): the two-figures question, before Step A. MEASURED on the same run:
-    # the founder typed $203/month and the deck stated a $385 blended rate; with one slot for "what
+    # the founder typed a monthly rate and the deck stated a different blended rate; with one slot for "what
     # the founder said", the main thread picked the deck's on a red-team finding's say-so and wrote
     # it over the founder's. Now the founder picks, the choice records its source, and the other
     # figure is kept and shown. Plus the no-questions default names this question too.
@@ -767,7 +767,41 @@ SKILL_MD_CEILING: dict[str, int] = {
     # report claims a choice only then -- MEASURED on a live run, the question was skipped and the
     # report still said "the one you chose"; and the inline `factors` rule names `role: divisor`,
     # because a live run wrote a ratio as a bare chain, hit the mismatch and gave up.
-    "market-sizing": 105_300,
+    # -1,552 B (105_300 -> 103_748), LOWERED: sizing inputs are now references to recorded figures,
+    # so the dispatch templates lost their per-figure currency instructions and the pipe's FX
+    # re-run recipe (currency and rates now live on the research record); Step 4 gained the unit
+    # vocabulary, Steps 5/6a/6b/6d the reference contract, the --validation/--inputs/--sizing
+    # flags and --replay, and Step 7 the inputs-integrity codes. Net smaller.
+    # +264 B (103_748 -> 104_012): a founder figure's `label` is the page's own words, because the
+    # report names the page only when they are found on it -- MEASURED on a live run, two deck
+    # figures were labelled "chat" and the report told the founder they had typed them. A size
+    # reduction pass over this SKILL.md is planned separately.
+    # +237 B (104_012 -> 104_249): a revision's reason for changing a figure goes in the approved
+    # change's unrendered `reason` -- MEASURED on a live run, the flat "labels never describe history"
+    # rule was broken with the reason written into the label, and the report printed it.
+    # +37 B (104_249 -> 104_286): the sensitivity pipe passes --inputs, so a founder figure left
+    # without a range is varied across the founder's own other figures for it.
+    # -3,475 B (104_286 -> 100_811), LOWERED: the CHECKLIST prompt template moved into
+    # dispatch_prompt.py, which prints it -- the main thread rewrote it on both rounds of a live run.
+    # +99 B (100_811 -> 100_910): Step 10 no longer invites "a greeting before" the printed hand-over --
+    # both live evaluators read it as licence for the model's own verdict (3/3 runs) -- and says the
+    # printed text already answers whether the founder's figures hold up.
+    # +121 B (100_910 -> 101_031): Step 6d stops asking the model to write an approval (a live run
+    # recorded one from an answer to a different question, and the page claimed a revision the founder
+    # never made), and says which review is shown and that later ones are listed.
+    # +1,518 B (101_013 -> 102_531): the file tools refuse a relative path, so
+    # Step 0 gains the proof of the file-tool path of outputs (probe + --set-host-outputs-dir), the
+    # hand-off protocol gains the `write_refused` branch (both contexts), and the degrade rule tells
+    # the founder instead of noting it. The procedure itself lives once in skill-execution-model.md.
+    # +218 B (102_531 -> 102_749): the exit-3 / exit-6 corrective redo of a GENERATED prompt
+    # (RED_TEAM, CHECKLIST) re-runs dispatch_prompt.py with --correction; a line typed onto the
+    # printed prompt is held by the dispatch hook and its correction dropped.
+    # +313 B (102_749 -> 103_062): Step 6d records the revise-or-deliver answer with
+    # record_revision_answer.py (both paths, including no-questions); a live run skipped the question
+    # silently, and compose now discloses REVISION_NOT_OFFERED when no answer was recorded. Step 7 names it.
+    # -17 B (103_062 -> 103_045): the Step-A gate example's ARPU is quoted from the deck, not "derived from
+    # ARR/customers" in chat, which the Execution checkpoint forbids and a live run copied.
+    "market-sizing": 102_926,
     # fmr raised for two founder-facing-correctness items measured in a live run: the CHECKLIST
     # dispatch now forbids citing our artifact filenames in evidence (that run put `inputs.json` in 10
     # items' evidence, printed verbatim into the founder's report), and the producer pipe passes
@@ -836,7 +870,14 @@ SKILL_MD_CEILING: dict[str, int] = {
     # market-sizing ran anyway -- hand-writing every hand-off file, grading its own checklist, and
     # shipping a report with no adversarial review and no gates. One line detects it; the skill now
     # stops and says so instead of producing something that reads as checked.
-    "financial-model-review": 83_089,
+    # +1,485 B (83_089 -> 84_574): the file tools refuse a relative path, so Step 0 gains the proof
+    # of the file-tool path of outputs (probe + --set-host-outputs-dir), the hand-off protocol gains
+    # the `write_refused` branch (both contexts), and the degrade rule tells the founder instead of
+    # noting it. The procedure itself lives once in skill-execution-model.md.
+    # -893 B (84_574 -> 83_681): the hand-over is printed by fmr_closing_message.py; Main-Thread Return no
+    # longer walks the model through restating runway and status fields in chat, which is how a live run
+    # computed figures in the hand-over.
+    "financial-model-review": 83_680,
     # ic-sim SHRANK: the REQUIRED ic-dynamics.md read at Step 7 is deleted. Step 7 is a pure producer
     # pipe — compose_discussion.py derives discussion.json from the partners' own files and nothing
     # is authored by the main thread — so the read informed no decision while pulling a whole
@@ -876,7 +917,11 @@ SKILL_MD_CEILING: dict[str, int] = {
     # market-sizing ran anyway -- hand-writing every hand-off file, grading its own checklist, and
     # shipping a report with no adversarial review and no gates. One line detects it; the skill now
     # stops and says so instead of producing something that reads as checked.
-    "ic-sim": 91_747,
+    # +1,574 B (91_747 -> 93_321): the file tools refuse a relative path, so Step 0 gains the proof
+    # of the file-tool path of outputs (probe + --set-host-outputs-dir), the hand-off protocol gains
+    # the `write_refused` branch (both contexts), and the degrade rule tells the founder instead of
+    # noting it. The procedure itself lives once in skill-execution-model.md.
+    "ic-sim": 93_281,
     # deck-review +1,165 B: Step 0 carried only a parenthetical fresh-shell mention buried in a code
     # comment, unlike the four skills that mint RUN_ID in a LATER block and so carry the shared banner.
     # deck-review mints RUN_ID INSIDE this re-runnable Step-0 block (like cap-table), so the shared
@@ -1152,7 +1197,11 @@ SKILL_MD_CEILING: dict[str, int] = {
     # market-sizing ran anyway -- hand-writing every hand-off file, grading its own checklist, and
     # shipping a report with no adversarial review and no gates. One line detects it; the skill now
     # stops and says so instead of producing something that reads as checked.
-    "deck-review": 108_067,
+    # +1,485 B (108_067 -> 109_552): the file tools refuse a relative path, so Step 0 gains the proof
+    # of the file-tool path of outputs (probe + --set-host-outputs-dir), the hand-off protocol gains
+    # the `write_refused` branch (both contexts), and the degrade rule tells the founder instead of
+    # noting it. The procedure itself lives once in skill-execution-model.md.
+    "deck-review": 109_512,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
@@ -1239,7 +1288,42 @@ SKILL_MD_CEILING: dict[str, int] = {
     # market-sizing ran anyway -- hand-writing every hand-off file, grading its own checklist, and
     # shipping a report with no adversarial review and no gates. One line detects it; the skill now
     # stops and says so instead of producing something that reads as checked.
-    "competitive-positioning": 127_413,
+    # +14 B (competitive-positioning only): Gate 3 gained a fifth trigger, no_edge (a competitor
+    # right next to the startup and no clear lead on either axis, the crowded middle no rank trigger
+    # sees), so the Gate 3 trigger list names "no clear edge" and the script summary no longer says
+    # "four" triggers.
+    # +1,518 B (127_427 -> 128_945): the file tools refuse a relative path, so Step 0 gains the proof
+    # of the file-tool path of outputs (probe + --set-host-outputs-dir), the hand-off protocol gains
+    # the `write_refused` branch (both contexts), and the degrade rule tells the founder instead of
+    # noting it. The procedure itself lives once in skill-execution-model.md.
+    # +9 B (competitive-positioning): the POSITIONING_SCORING verdict list names `unproven`, the
+    # fourth verdict every surface renders (a claim the research could not settle either way).
+    # -8,874 B (competitive-positioning): the MOAT_SCORING, POSITIONING_SCORING and CHECKLIST dispatch
+    # templates moved into cp_dispatch_prompt.py, which prints them from identifiers; SKILL.md keeps
+    # the command and the "send it unchanged" rule. (The +9 B for `unproven` above is kept inside it.)
+    # +1,203 B (competitive-positioning): Step 4b, the STARTUP_RESEARCH dispatch that looks up the
+    # startup's own public record (legal name, patents and their legal events), dispatched beside
+    # LANDSCAPE_RESEARCH and piped through validate_startup_research.py.
+    # +431 B (competitive-positioning): plan-stage scoring (D1). Step 2 records product_availability
+    # with its quote, Gate 2 states that a pre-product startup is mapped where its plan puts it
+    # (replacing the "score what's live today" default), and the scorer pipe reads the profile.
+    # +640 B (competitive-positioning): Step 8's hand-over is printed by cp_closing_message.py (the
+    # links, the report's verdict paragraph, the offer) and sent unchanged, as market-sizing's is.
+    # +2,967 B (competitive-positioning): Step 6.5, the outside review -- its own agent, the rule that it
+    # runs (compose refuses otherwise) with the four recorded skip reasons, the uploads mirror, the
+    # printed prompt, the producer pipe, the skip command, "a review is final"; and Step 7's line on
+    # the review's four deliver-only disclosures. +184 B more: Step 7 says compose's refusal for a run
+    # with neither a review nor a recorded skip is not a stop -- do Step 6.5 and re-run -- since its
+    # general "exits non-zero: stop" rule would otherwise halt the run the refusal exists to redirect.
+    # +384 B (competitive-positioning): Step 7 says where a leaked file name is removed -- only in
+    # positioning.json, the one file it names that the outside review does not fingerprint -- and never in
+    # a file the review read (the company profile, the scores, whose evidence the scorers now reword);
+    # both runs of the first live check hand-edited a scored artifact after the review.
+    # +146 B (competitive-positioning): Step 3 names `candidate_axes` and Step 5 says polarity stays
+    # nested as x_axis.polarity / y_axis.polarity -- a live run guessed the first and misplaced the second.
+    # +104 B (competitive-positioning): Step 8's closer names both HTML pages -- the maps and the
+    # interactive explorer -- where one "the interactive version" line could hand over only one of them.
+    "competitive-positioning": 126_099,
     # cap-table, the largest raise (+2,383 B) and the one with the most founder-visible payoff:
     #   * Main-Thread Return named THREE of the four files Step 12 copies; a live run delivered exactly
     #     three and dropped `{Company}_Cap_Table.html`. All four are now named explicitly.
@@ -1301,7 +1385,32 @@ SKILL_MD_CEILING: dict[str, int] = {
     # market-sizing ran anyway -- hand-writing every hand-off file, grading its own checklist, and
     # shipping a report with no adversarial review and no gates. One line detects it; the skill now
     # stops and says so instead of producing something that reads as checked.
-    "cap-table": 151_270,
+    # +1,571 B (151_270 -> 152_841): the file tools refuse a relative path, so Step 0 gains the proof
+    # of the file-tool path of outputs (probe + --set-host-outputs-dir), the hand-off protocol gains
+    # the `write_refused` branch (both contexts), and the degrade rule tells the founder instead of
+    # noting it. The procedure itself lives once in skill-execution-model.md.
+    # +2,603 B (152_841 -> 155_444): the option pool's basis is asked, not defaulted -- a Pool basis
+    # catalog row (the three computed readings plus "ask counsel", in the order the fallback relies on),
+    # the top-up intent row made basis-free, and Step 5's paragraph saying where the answer goes, which
+    # flag records it, how the document's own pool sentence may be quoted, and what to do on each
+    # pool-basis refusal. It replaces fast-assess's inline pre/post question rather than adding a second.
+    # +85 B (cap-table): the hand-over names report.json's `report_disclosures`. The option pool's disclosures left
+    # the coaching payload (the coach no longer discusses the pool's sizing), and one of them is high severity.
+    # +40 B (cap-table): the Pool basis row's third option is named by what it counts ("Measured against the share
+    # count before the round", not "The pool before the new money", which is how every pool works), and the
+    # excluding-basis question offers "the figures that count the conversion shares", not "plain post-money".
+    # +1,165 B (cap-table): Step 11 runs the option-pool claims check (`pool_claims_check.py`) on every insertion
+    # path -- normal, graceful-degrade and inline -- and states its exit-9 branch (one redo inside the existing
+    # budget, then `--strip`). A new pipeline step, not prose: the check writes the only file insert_coaching reads.
+    # +509 B (cap-table): Step 11 runs `pool_check_release.py` before insert_coaching on all three insertion paths,
+    # and states its refusal branch. A new pipeline step, not prose: the check's own file is no longer insertable,
+    # so only a release whose record matches the commentary, the checked file and the run reaches the report.
+    # +288 B (cap-table): Step 11's exit-9 branch says what happens with the redo budget spent (straight to
+    # `--strip`) and how the redo works on the degrade and inline paths, whose scratch files move out of the
+    # delivered review dir.
+    # +263 B (cap-table): Step 11 states the check's exit-2 branch (it could not read this run's scenarios.json: fix
+    # the path, re-run). A new refusal, not prose: failing open there let a mistyped path skip the judge.
+    "cap-table": 157_645,
 }
 
 
@@ -1505,12 +1614,21 @@ REFERENCES_CEILING: dict[str, int] = {
     # +509 B (51_232 -> 51_741): the two inputs.json fields the two-figures question writes,
     # founder_stated_inputs_source and founder_stated_alternatives.
     # +330 B (51_741 -> 52_071): the `factors` row now documents the optional `"role": "divisor"`
-    # entry, which lets a derived figure be itemized as a ratio (e.g. 15,000,000 / 64,200,000)
+    # entry, which lets a derived figure be itemized as a ratio (e.g. 15,000,000 / 52,800,000)
     # instead of only as a product -- the live run this fixes had itemized both numbers as plain
     # multiplicands and the mismatch warning read as a nonsensical product of the two.
     # +281 B (52_071 -> 52_352): the founder_stated_choice row -- the recorded answer that alone lets
     # the report say "the one you chose".
-    "market-sizing": 52_352,
+    # +2,911 B (52_352 -> 55_263): artifact-schemas.md documents the reference contract -- a unit,
+    # currency, period and exchange-rate fields on every recorded figure; sizing.json's input_refs /
+    # input_provenance / provenance_version; the stamped provenance and the checks that re-derive
+    # it; the review's inputs_reviewed; and sensitivity/checklist --sizing stamps. It is the one
+    # place those contracts are written down, and it replaces a section that documented the name
+    # join this change removes.
+    # +157 B (55_263 -> 55_420): the schema row for a founder figure's `label` states the rule SKILL.md does.
+    # +99 B (55_420 -> 55_519): the red_team_revision row names the approved change's unrendered `reason`.
+    # -184 B (55_519 -> 55_335), LOWERED: the red_team_revision row no longer documents an approval.
+    "market-sizing": 55_312,
     # fmr raised to document `graded_against` on the three producer outputs that stamp it — a new
     # artifact field is not discoverable from a schema doc that omits it, and the field exists to make
     # staleness detectable at all (run_id parity cannot see corrections applied within a run).
@@ -1561,7 +1679,7 @@ REFERENCES_CEILING: dict[str, int] = {
     # deck-review raised 50,422 -> 51,459 (+1,037 B) so the criteria reference states the
     # two things the Design & Readability entries had stopped describing: the per-slide
     # render gate, and verified_by on the four measurement criteria.
-    "deck-review": 51_459,
+    "deck-review": 51_449,
     # competitive-positioning +474 B: artifact-schemas.md documented the `startup_rank` RENDERING
     # convention but not its SENTINEL. `score_moats.py` stamps {"rank": -1, "total": 0} when the
     # startup is not_applicable on a dimension, and compose_report.py rendered it verbatim —
@@ -1591,7 +1709,24 @@ REFERENCES_CEILING: dict[str, int] = {
     # persist_agent_artifact.py: the file is the source of truth the new REQUIRED_KEYS
     # conformance tests read, so leaving it saying "Agent (main, Step 2)" would have made
     # the documentation disagree with both the pipeline and its own tests.
-    "competitive-positioning": 140_570,
+    # +1,423 B (competitive-positioning): artifact-schemas.md documents what the step-2 fixes added --
+    # the per-view tie and geometry fields in positioning_scores.json, the three first-copy sidecars,
+    # the coaching payload's positioning / claim_verdicts, CAP_DISPLACED_DIRECT, and the changed
+    # FOUNDER_OVERRIDE_COUNT meaning. The same commit restores two phrases that earlier commits had
+    # bent to hit this ceiling exactly ("retained or as removed", "they fall within"); those bytes
+    # are in the delta too, as they should have been from the start.
+    # +643 B (competitive-positioning): `unproven` defined in the methodology's verdict scale (with
+    # the guidance that an abstract-only read of a detail-dependent claim is unproven) and named in
+    # NARR_01 and the claim schema; `verdict_counts` documented on positioning_scores.json.
+    # +1,354 B (competitive-positioning): artifact-schemas.md documents startup_research.json (the
+    # startup's public record, its computed patent status and the per-office rule), its first copy,
+    # and the coaching payload's startup_record.
+    # +1,074 B (competitive-positioning): artifact-schemas.md documents the plan-stage fields --
+    # product_availability, the startup point's planned_x/planned_y, their evidence and proof levels,
+    # and the scored view's scored_point and today block.
+    # +165 B (competitive-positioning): artifact-schemas.md documents the coaching payload's
+    # outside_review (the review's outcome and one sentence per finding).
+    "competitive-positioning": 145_229,
     # cap-table +422 B: inputs-skeleton.md promised "no warning, and downstream artifacts that look
     # right but contain zeros" — the PRE-FIX world. cap_state.py hard-errors E_NO_EQUITY_BASE now,
     # and prose telling a model that a missing base yields plausible zeros invites it to invent one.
@@ -2973,6 +3108,28 @@ _REJECTING_PAYLOADS: list[tuple[str, str, list[str], str] | tuple[str, str, list
         '{"startup_characterization":{},"verdicts":[{"slug":"x","verdict":"not_a_competitor"}]}',
         "--output",
     ),
+    # A publication with no source cannot be shown to the founder with a way to check it.
+    (
+        "competitive-positioning",
+        "validate_startup_research.py",
+        ["--run-id", "RID"],
+        '{"searches":[{"query":"q","kind":"applicant","found":true}],'
+        '"publications":[{"number":"US1B1","office":"US","kind":"B1","read":"none","events":[]}]}',
+    ),
+    # The outside review: a hand-off with no findings array is not a review.
+    (
+        "competitive-positioning",
+        "cp_red_team.py",
+        ["--run-id", "RID"],
+        '{"could_not_check": []}',
+    ),
+    # A skip reason off the closed list would reach the founder as a sentence nobody wrote.
+    (
+        "competitive-positioning",
+        "record_red_team_skip.py",
+        ["--run-id", "RID", "--reason", "not_needed"],
+        "",
+    ),
 ]
 
 
@@ -3476,7 +3633,18 @@ def test_corpus_counts_every_agent_the_skill_pins_not_just_its_namesake() -> Non
 #
 # Measured 2026-09-21: 120,601 B across 9 files. Raise it deliberately, with the reason recorded
 # here; a lowering needs none.
-ROOT_REFERENCES_CEILING = 120_601
+# Raised 2026-09-27 to 124,642 B (+4,041): skill-execution-model.md gained the Step 0 proof of the
+# file-tool path of outputs (the file tools refuse a relative path), the `write_refused` blocked
+# contract, and the founder disclosure on a degraded run. The procedure lives here, once, rather than
+# six times in the SKILL.mds, which carry only the short block.
+# Lowered 2026-09-28 to 124,496 B (-146): the dated version and confirmation stamps in
+# skill-execution-model.md were removed; each fact is now stated as a current rule.
+# Raised 2026-09-28 to 124,911 B (+415): the Host-Capability Matrix splits the hooks row (Stop fires on
+# desktop-local and cloud; PreToolUse on desktop-local, unobserved on cloud), and Runtime Detection states
+# that $CLAUDE_CODE_IS_COWORK is positive-only and adds the $CLAUDE_CODE_REMOTE signal the code uses.
+# Raised 2026-09-28 to 125,350 B (+439): an agent-namespace resolver call with no proven host path now
+# refuses (exit 6) instead of printing a relative root; the reference says so and gains its symptom row.
+ROOT_REFERENCES_CEILING = 125_350
 
 
 def test_shared_reference_tree_does_not_grow() -> None:
@@ -3491,3 +3659,48 @@ def test_shared_reference_tree_does_not_grow() -> None:
         "evidence corpus, so growth here spends SIX budgets at once, and cap-table has the least room. "
         "Raise the ceiling deliberately, with the reason recorded beside the constant."
     )
+
+
+def test_every_opt_in_paid_lane_is_a_named_allowed_skip() -> None:
+    """A paid test that is not one of the `_smoke` lanes the tag gates on runs only on its own opt-in, so a tag
+    run skips it -- and the workflow reds any skip it was not told about. Every such test must be named in
+    ALLOWED_SKIPS, or the first tag after adding one reds for a lane nobody meant to gate on."""
+    workflow = (REPO_ROOT / ".github" / "workflows" / "skill-quality.yml").read_text(encoding="utf-8")
+    start = workflow.find("ALLOWED_SKIPS = {")
+    assert start != -1
+    allowed = set(re.findall(r'"(test_\w+)"', workflow[start : workflow.find("}", start)]))
+    opt_in = set()
+    for lane in sorted((REPO_ROOT / "founder-skills" / "tests").glob("test_e2e_*.py")):
+        opt_in |= {
+            n
+            for n in re.findall(r"^def (test_\w+)\(", lane.read_text(encoding="utf-8"), re.M)
+            if not n.endswith("_smoke")
+        }
+    assert "test_deck_review_contradiction_lane" in opt_in  # positive control: the precedent is collected
+    assert opt_in <= allowed, sorted(opt_in - allowed)
+
+
+# --- the printed hand-over names every HTML page by what it is -------------------------------------
+# Three skills print their hand-over from a closer that takes `--deliverable "LABEL=PATH"`. One generic
+# `the interactive version=<the .html>` line cannot say which page it is, and where a skill makes two
+# pages it hands the founder one of them.
+
+_CLOSERS = {
+    "financial-model-review": "fmr_closing_message.py",
+    "competitive-positioning": "cp_closing_message.py",
+    "market-sizing": "closing_message.py",
+}
+
+
+@pytest.mark.parametrize("skill", sorted(_CLOSERS))
+def test_the_printed_hand_over_names_each_html_page(skill: str) -> None:
+    text = (SKILLS_ROOT / skill / "SKILL.md").read_text(encoding="utf-8")
+    block = re.search(rf'{re.escape(_CLOSERS[skill])}" --report.*?\n```', text, re.S)
+    assert block is not None, skill
+    pairs = re.findall(r'--deliverable "([^"=]+)=([^"]+)"', block.group(0))
+    labels = [label for label, _ in pairs]
+    assert len(labels) == len(set(labels)), pairs
+    assert "the interactive version" not in labels, pairs
+    pages = set(re.findall(r'-o "\$[A-Z_]+/([a-z_]+\.html)"', text))
+    html_entries = [p for _, p in pairs if ".html" in p]
+    assert pages and len(html_entries) == len(pages), (pages, pairs)

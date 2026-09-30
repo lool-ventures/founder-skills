@@ -26,18 +26,57 @@ import re
 import sys
 import uuid
 from collections.abc import Callable
-from typing import Any, NoReturn, TypeGuard
+from typing import Any, NoReturn
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _params  # noqa: E402
+import _provenance  # noqa: E402
 import _redteam_copy  # noqa: E402
+import _revision_answer  # noqa: E402
 import _thresholds  # noqa: E402
 import _upload_names  # noqa: E402
+import _view  # noqa: E402
 from _redteam_text import PARAM_LABELS  # noqa: E402
 from _redteam_text import humanize_claim as _humanize_claim  # noqa: E402
 from _redteam_text import humanize_param as _humanize_param  # noqa: E402
-
-# Sentinel for corrupt (unparseable) artifact files
-_CORRUPT: dict[str, Any] = {"__corrupt__": True}
+from _view import (  # noqa: E402
+    _CORRUPT,
+    _INTERNAL_PROVENANCE,
+    _RED_TEAM_SKIP_REASONS,
+    CLOSE_AGREEMENT_PCT,
+    DECK_MISMATCH_PCT,
+    QUANTITATIVE_PARAMS,
+    _adversarial_outcome,
+    _as_dict,
+    _as_list,
+    _as_number,
+    _claim_high,
+    _comparable_claim,
+    _compute_delta,
+    _compute_provenance,
+    _contested_rows,
+    _document_cite,
+    _factor_chain,
+    _fmt_param_value,
+    _fmt_usd,
+    _fx_conversions,
+    _horizon_mismatch,
+    _is_stub,
+    _range_delta,
+    _resolve_currency,
+    _resolve_sizing_basis,
+    _self_check_line,
+    _set_currency,
+    _shared_input_values,
+    _sizing_basis_label,
+    _summary_verdict,
+    _to_analysis_currency,
+    _usable,
+    _your_answers_lines,
+    claim_disagreements,
+    claim_display,
+    disagreement_sentence,
+)
 
 # Canonical warning severity map — stable API, tested for completeness
 WARNING_SEVERITY: dict[str, str] = {
@@ -150,6 +189,11 @@ WARNING_SEVERITY: dict[str, str] = {
     # Low severity — informational; do not block under --strict
     "MISSING_OPTIONAL_ARTIFACT": "low",
     "DECK_CLAIM_MISMATCH": "low",
+    # The founder's own materials state more than one figure for the same metric. MEDIUM: the analysis is
+    # valid (it compares against the stated figure) and Step 7 composes without --strict, so nothing halts.
+    # In _UNACCEPTABLE_MEDIUM: it is a fact about the founder's materials, and `accepted_warnings` is
+    # model-written.
+    "DECK_CLAIMS_DISAGREE": "medium",
     # The SOM in the founder's materials and ours cover different periods. Not a disagreement
     # about the market -- an incomparable pair, reported as such instead of as a >5x
     # understatement, which is what comparing an 18-month plan case to a 5-year capture produced.
@@ -184,7 +228,21 @@ WARNING_SEVERITY: dict[str, str] = {
     # the review shown is not simply the file on disk, and none may be accepted away by the thread
     # whose edit or re-run caused it.
     "REDTEAM_ALTERED": "high",
-    "RED_TEAM_RERUN_UNAPPROVED": "high",
+    # Inputs by reference (_view.sizing_integrity). All high: each names a figure the founder reads
+    # that is no longer what it claims to be, and none may be accepted away.
+    "SIZING_STALE": "high",
+    "SIZING_UNRESOLVABLE": "high",
+    "SIZING_ALTERED": "high",
+    "RECORD_CHANGED_AFTER_REVIEW": "high",
+    "UNIT_CHANGED_AFTER_REJECTION": "high",
+    "SENSITIVITY_STALE": "high",
+    # Medium on purpose: the self-check is judgement, so it can only be re-graded, and a high code
+    # here would reward forging the stamp over re-dispatching.
+    "CHECKLIST_STALE": "medium",
+    "SIZING_NOT_CHECKED": "high",
+    # Medium: an honest disclosure of pure calculation, allowed only when every figure is the founder's.
+    "INPUTS_USER_PROVIDED": "medium",
+    "ANALYSIS_CHANGED_BETWEEN_REVIEWS": "medium",
     "REVIEW_COPY_MISSING": "high",
     "RED_TEAM_SKIP_CONTRADICTED": "high",
     # MEDIUM: a review from an earlier run of this same analysis, today. A restart under a new run
@@ -192,9 +250,22 @@ WARNING_SEVERITY: dict[str, str] = {
     # analysis is legitimate, so it is disclosed and may be accepted with a reason.
     "EARLIER_REVIEW_THIS_ANALYSIS": "medium",
     # HIGH: a figure the founder stated changed after the review saw it, and the founder did not
-    # confirm the change -- measured: a stated 203 rewritten to 385 on a red-team finding's say-so.
+    # confirm the change -- measured: a stated figure rewritten to the deck's on a red-team finding's say-so.
     "FOUNDER_INPUT_REWRITTEN": "high",
+    # MEDIUM because the results are valid -- the steps ran, their output reached the report -- so it
+    # must not block. But it is a disclosure, not a finding the model may reason away, so it is in
+    # _UNACCEPTABLE_MEDIUM: `accepted_warnings` is model-written, and a disclosure it could clear
+    # is not one.
+    "HANDOFF_BYPASSED": "medium",
+    # Step 6d's question was owed (a high finding names a parameter) and no answer was recorded for this
+    # run's findings. MEDIUM for the HANDOFF_BYPASSED reasons: Step 7 composes without --strict, so no
+    # severity halts the run, and the findings themselves are valid and shown. In _UNACCEPTABLE_MEDIUM
+    # because `accepted_warnings` is model-written, and the model is the one that skipped the question.
+    "REVISION_NOT_OFFERED": "medium",
 }
+
+# Medium codes that `accepted_warnings` can never clear: disclosures about the run itself.
+_UNACCEPTABLE_MEDIUM = {"HANDOFF_BYPASSED", "REVISION_NOT_OFFERED", "DECK_CLAIMS_DISAGREE"}
 
 # Only medium-severity codes can be accepted. High-severity = integrity violations.
 ACCEPTIBLE_SEVERITIES = {"medium"}
@@ -242,16 +313,6 @@ def _checklist_below_solid(summary: dict[str, Any]) -> bool:
 # literal silently dropped FX_UNSOURCED for the two releases it existed.
 _PRODUCER_FORWARDABLE = {"IMPLAUSIBLE_PCT_SCALE", "FX_UNSOURCED"}
 
-# Quantitative params that should appear in sensitivity analysis if agent_estimate
-QUANTITATIVE_PARAMS = {
-    "customer_count",
-    "arpu",
-    "serviceable_pct",
-    "target_pct",
-    "industry_total",
-    "segment_pct",
-    "share_pct",
-}
 
 REQUIRED_ARTIFACTS = [
     "inputs.json",
@@ -302,7 +363,8 @@ WARNING_LABELS: dict[str, str] = {
     "LOW_CHECKLIST_COVERAGE": "Low Checklist Coverage",
     "REFUTED_CLAIMS": "Refuted Claims",
     "REFUTED_MISSING_REASON": "Refuted Claim Missing Reason",
-    "DECK_CLAIM_MISMATCH": "Deck Claim Mismatch",
+    "DECK_CLAIM_MISMATCH": "Differs From Your Figure",
+    "DECK_CLAIMS_DISAGREE": "Your Materials State Two Figures",
     "HORIZON_MISMATCH": "Different Period Than Your Materials",
     "SHARED_TAM_IDENTITY": "Both Approaches Share One Total",
     "PAIRED_SLOT_SAME_VALUE": "Same Value On Both Sides",
@@ -317,11 +379,22 @@ WARNING_LABELS: dict[str, str] = {
     "EXISTING_CLAIMS_SHAPE": "Existing Claims Shape",
     "MARKER_COLLISION": "Marker Collision",
     "REDTEAM_ALTERED": "The Outside Review Was Changed After It Was Written",
-    "RED_TEAM_RERUN_UNAPPROVED": "The Outside Review Was Run Again",
+    "SIZING_STALE": "The Sizing Was Calculated From Earlier Research",
+    "SIZING_UNRESOLVABLE": "A Source Figure Is No Longer In The Research",
+    "SIZING_ALTERED": "The Saved Calculation Was Changed After It Was Calculated",
+    "RECORD_CHANGED_AFTER_REVIEW": "Research Changed After The Outside Review",
+    "UNIT_CHANGED_AFTER_REJECTION": "A Figure Was Relabelled After It Was Refused",
+    "SENSITIVITY_STALE": "The Sensitivity Table Is From A Different Sizing",
+    "CHECKLIST_STALE": "The Self-Check Is From A Different Sizing",
+    "SIZING_NOT_CHECKED": "The Figures Were Not Taken From The Research",
+    "INPUTS_USER_PROVIDED": "These Are Your Figures, Unchecked",
+    "ANALYSIS_CHANGED_BETWEEN_REVIEWS": "The Analysis Changed Between Reviews",
     "REVIEW_COPY_MISSING": "The Outside Review Cannot Be Shown Unchanged",
     "RED_TEAM_SKIP_CONTRADICTED": "A Review Ran That Was Recorded As Skipped",
     "EARLIER_REVIEW_THIS_ANALYSIS": "An Earlier Run Also Reviewed This Analysis",
     "FOUNDER_INPUT_REWRITTEN": "A Figure You Gave Was Changed Without Your Confirmation",
+    "HANDOFF_BYPASSED": "Some Steps Were Not Checked",
+    "REVISION_NOT_OFFERED": "You Were Not Offered A Revision",
 }
 
 
@@ -331,19 +404,8 @@ def _humanize_warning(code: str) -> str:
 
 
 def _fmt_number(value: Any) -> str:
-    """Format a numeric value for display (with commas, no unnecessary decimals)."""
-    if isinstance(value, float):
-        if value == int(value):
-            return f"{int(value):,}"
-        if abs(value) < 0.01:
-            # Two decimals would print a per-person rate like 0.0002 as "0.00"; keep two
-            # significant figures instead.
-            decimals = 1 - math.floor(math.log10(abs(value)))
-            return f"{value:.{decimals}f}".rstrip("0")
-        return f"{value:,.2f}"
-    if isinstance(value, int):
-        return f"{value:,}"
-    return str(value)
+    """Format a numeric value for display. One owner: `_params.fmt_number`."""
+    return _params.fmt_number(value)
 
 
 def _write_output(data: str, output_path: str | None, *, summary: dict[str, Any] | None = None) -> None:
@@ -395,424 +457,29 @@ def _load_artifact(dir_path: str, name: str) -> dict[str, Any] | None:
         return _CORRUPT
 
 
-def _is_stub(data: dict[str, Any] | None) -> bool:
-    """Check if artifact is a stub (intentionally skipped)."""
-    return isinstance(data, dict) and data.get("skipped") is True
+def _stated_as(field: str, stated: dict[str, Any]) -> str:
+    """A founder figure as they stated it: "$157 per month", or "not stated"."""
+    value = stated.get("founder_stated_inputs")
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return "not stated"
+    currency = stated.get("founder_stated_inputs_currency")
+    amount = f"{value:,.2f}".rstrip("0").rstrip(".")
+    shown = f"${amount}" if currency in (None, "USD") else f"{currency} {amount}"
+    period = stated.get("founder_stated_inputs_period")
+    return shown + (f" per {period}" if isinstance(period, str) and period.strip() else "")
 
 
-def _usable(data: dict[str, Any] | None) -> TypeGuard[dict[str, Any]]:
-    """Check if artifact is loaded, not corrupt, and not a stub."""
-    return data is not None and data is not _CORRUPT and not _is_stub(data)
-
-
-def _as_list(value: Any) -> list[Any]:
-    """Coerce to list — returns [] if not a list."""
-    return value if isinstance(value, list) else []
-
-
-def _as_dict(value: Any) -> dict[str, Any]:
-    """Coerce to dict — returns {} if not a dict."""
-    return value if isinstance(value, dict) else {}
-
-
-def _has_document_materials(inputs: dict[str, Any] | None) -> bool:
-    """True when the founder actually supplied a document (deck, model, etc.).
-
-    `materials_provided` is required (artifact-schemas.md). A conversational-only
-    run — the founder describing their market in chat, with no upload — sets it
-    to `["text"]` per SKILL.md's "Founder provided text, not a file" edge case, or
-    leaves it empty. Anything else ("pitch deck", "financial model", "cap table", ...)
-    means a real document existed, so deck-attributed language ("the deck stated...")
-    is accurate. Used to keep claims-reconciliation copy from crediting a deck that
-    was never provided.
-    """
-    if not isinstance(inputs, dict):
-        return False
-    materials = _as_list(inputs.get("materials_provided"))
-    return any(isinstance(m, str) and m.strip().lower() != "text" for m in materials)
-
-
-# Process-wide currency label for money formatting, set once per run from the
-# artifacts by _set_currency(). A bare "$" on a non-USD analysis is a wrong UNIT
-# on the headline number, and a wrong unit in a TAM travels into a deck. Callers
-# may still pass currency_code explicitly; the global is only the default, so
-# threading a code through every one of the ~30 _fmt_usd call sites (each inside
-# a section renderer that has no business knowing about currency) isn't needed.
-# Safe as process state because these scripts are single-shot CLIs.
-_CURRENCY: str = "USD"
-
-
-def _resolve_currency(*artifacts: dict[str, Any] | None) -> str:
-    """Return the analysis currency code from the first artifact carrying one.
-
-    Checked in the order passed by the caller; falls back to "USD" (the
-    back-compat default) when none carry a currency field.
-    """
-    for artifact in artifacts:
-        if isinstance(artifact, dict):
-            currency = artifact.get("currency")
-            if isinstance(currency, str) and currency.strip():
-                return currency.strip().upper()
-    return "USD"
-
-
-def _set_currency(code: str) -> None:
-    """Set the process-wide default currency label for _fmt_usd."""
-    global _CURRENCY
-    _CURRENCY = code.strip().upper() if isinstance(code, str) and code.strip() else "USD"
-
-
-# Human-readable labels for the declared sizing_basis convention — see
-# references/tam-sam-som-methodology.md §5.
-_SIZING_BASIS_LABELS: dict[str, str] = {
-    "current_year": "Current-year market size",
-    "forecast_year": "Forecast-year market size",
-    "mixed": "Mixed (current- and forecast-year figures)",
-}
-
-
-def _sizing_basis_label(value: Any) -> str:
-    """Human-readable label for sizing_basis.
-
-    Anything outside the three known tokens — including absence — renders as
-    "Not declared" rather than defaulting to "current_year". An artifact
-    produced before this field existed (or a run that never set it) has a
-    genuinely undeclared basis; silently stamping "current_year" on it would
-    assert a convention that was not actually in force when the figures were
-    sourced.
-    """
-    if isinstance(value, str) and value in _SIZING_BASIS_LABELS:
-        return _SIZING_BASIS_LABELS[value]
-    return "Not declared"
-
-
-def _resolve_sizing_basis(
-    sizing: dict[str, Any] | None,
-    inputs: dict[str, Any] | None,
-) -> str | None:
-    """Resolve the raw sizing_basis token.
-
-    sizing.json is the artifact the figures actually came out of and is
-    authoritative for which convention was used; inputs.json only carries the
-    field at intake (Steps 2-3), so it is the fallback rather than the
-    primary source.
-    """
-    if _usable(sizing):
-        val = sizing.get("sizing_basis")
-        if isinstance(val, str) and val:
-            return val
-    if _usable(inputs):
-        val = inputs.get("sizing_basis")
-        if isinstance(val, str) and val:
-            return val
-    return None
-
-
-def _fmt_usd(value: float | int, currency_code: str | None = None) -> str:
-    """Format a number as a compact currency string, scaled with K/M/B suffixes.
-
-    Defaults to the process-wide currency (``_set_currency``), itself defaulting
-    to "USD" and rendering a bare "$" prefix. Any other ISO code is tagged as a
-    suffix instead (e.g. "1.5M ILS") — a bare "$" would misrepresent a
-    non-USD-denominated analysis.
-
-    Passing "" means NO currency marker at all, for the one case where the currency is
-    genuinely unknown: a founder-stated figure whose currency was never declared. Falling
-    back to USD there stamps "$" on a figure we are simultaneously saying we cannot place,
-    and stamping the analysis currency asserts the very thing the comparison was refused for.
-    """
-    code = _CURRENCY if currency_code is None else currency_code
-    if value < 0:
-        return "-" + _fmt_usd(-value, code)
-    prefix = "$" if code == "USD" else ""
-    suffix = "" if code in ("USD", "") else f" {code}"
-    if value >= 1_000_000_000:
-        return f"{prefix}{value / 1_000_000_000:,.1f}B{suffix}"
-    if value >= 1_000_000:
-        return f"{prefix}{value / 1_000_000:,.1f}M{suffix}"
-    if value >= 1_000:
-        return f"{prefix}{value / 1_000:,.1f}K{suffix}"
-    return f"{prefix}{value:,.2f}{suffix}"
-
-
-def _fmt_param_value(name: str, value: Any) -> str:
-    """Unit-aware formatting for a sensitivity parameter's input value.
-
-    The Value column holds the parameter itself, not a market-size figure, so its unit varies:
-    percentages (``*_pct``), counts (``*_count``), and currency (everything else, e.g. ``arpu``,
-    ``industry_total``). Formatting all three the same way (the old behavior — USD for low/high,
-    raw number for base) renders percents and counts as dollars and leaves base inconsistent.
-    """
-    if not isinstance(value, (int, float)):
-        return "—"
-    lname = name.lower()
-    if lname.endswith("_pct") or "pct" in lname or "percent" in lname or "share" in lname or "rate" in lname:
-        return f"{float(value):.2f}".rstrip("0").rstrip(".") + "%"
-    if (
-        "count" in lname
-        or "customers" in lname
-        or "users" in lname
-        or "establishments" in lname
-        or lname.startswith("num_")
-        or lname.endswith("_num")
-    ):
-        return _fmt_number(int(value) if float(value).is_integer() else value)
-    return _fmt_usd(float(value))
+def _input_shown(name: str, *where: dict[str, Any]) -> str:
+    """A sizing input as the first of `where` holding it records it, printed by its unit, or "?"."""
+    for inputs in where:
+        if name in inputs:
+            return _params.format_value(_params.unit_of(name), inputs[name], _view._CURRENCY)
+    return "?"
 
 
 def _md_safe(text: str) -> str:
     """Escape text for safe markdown table cell interpolation."""
     return text.replace("|", "\\|").replace("\n", " ")
-
-
-def _fx_conversions(sizing: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
-    """Map money-field name -> its conversion record from `sizing.fx`. Empty when no FX ran."""
-    fx = _as_dict(_as_dict(sizing).get("fx"))
-    out: dict[str, dict[str, Any]] = {}
-    for entry in _as_list(fx.get("conversions")):
-        rec = _as_dict(entry)
-        field = rec.get("field")
-        if isinstance(field, str):
-            out[field] = rec
-    return out
-
-
-def _to_analysis_currency(
-    stated: float,
-    declared: Any,
-    target: Any,
-    conversions: list[dict[str, Any]],
-) -> tuple[float | None, str | None]:
-    """Express a founder-stated / deck-claimed figure in the analysis currency.
-
-    Returns (value, reason_it_cannot_be_compared). Exactly one is non-None.
-
-    Only meaningful once FX exists: before it, every figure on the page was in one currency by
-    construction and this returned the input unchanged. The undeclared-currency case is
-    genuinely undecidable — the founder of an ILS company may state ILS while the researched
-    source was USD, so guessing either way manufactures a false positive of the FX rate's
-    magnitude. Say so instead.
-    """
-    # A declared currency is honoured FIRST, before the was-this-field-converted question. The
-    # declaration is object-level (one code for all of founder_stated_inputs), so a run that
-    # converted `industry_total` but sourced `arpu` domestically has no conversion record for
-    # `arpu` — and short-circuiting on `conversion is None` here would compare a declared-USD
-    # figure against an ILS one and report the founder's own number as overridden.
-    dec = str(declared).upper() if _valid_ccy(declared) else None
-    tgt = str(target).upper() if _valid_ccy(target) else None
-
-    if dec is not None and tgt is not None and dec == tgt:
-        return stated, None  # already in the analysis currency, converted field or not
-
-    if not conversions:
-        # Nothing was converted anywhere: every figure is in one currency by construction, which
-        # is the pre-FX world and the overwhelmingly common case.
-        return stated, None
-
-    if dec is None:
-        _froms = sorted({str(c.get("from")) for c in conversions if c.get("from")})
-        return None, (
-            f"the calculation converted its input from {' and '.join(_froms) or 'another currency'} "
-            f"to {tgt or 'the analysis currency'}, and no currency was stated for the figure being "
-            f"compared"
-        )
-
-    # Match by CURRENCY PAIR, not by field. A run can convert two fields from two different
-    # source currencies, and the deck-claim check has no single field to key on — picking the
-    # first record would refuse a comparison that is fully computable from the second. Rates come
-    # from one pair-keyed map upstream, so every record sharing a pair shares its rate.
-    for rec in conversions:
-        if str(rec.get("from", "")).upper() == dec and (tgt is None or str(rec.get("to", "")).upper() == tgt):
-            try:
-                return float(stated) * float(rec["rate"]), None
-            except (TypeError, ValueError, KeyError):
-                return None, "the recorded conversion rate is unusable"
-
-    return None, (
-        f"the figure is in {dec}, and this run supplied no rate from {dec} to {tgt or 'the analysis currency'}"
-    )
-
-
-def _valid_ccy(value: Any) -> bool:
-    """ISO-4217 shape check, mirrored from market_sizing.py."""
-    return isinstance(value, str) and len(value) == 3 and value.isalpha()
-
-
-# Below this |delta| vs a founder-stated figure, agreement carries no evidentiary weight: it can
-# mean both analyses read the same source, or that our input came from their materials. Measured
-# across a 3-deck corpus every close agreement was the top-down TAM and none was flagged.
-# Above it, DECK_CLAIM_MISMATCH fires -- but NOT immediately above: see DECK_MISMATCH_PCT for the
-# (25, 50] band where neither speaks. visualize.py carries the same constant.
-CLOSE_AGREEMENT_PCT = 25.0
-
-# DECK_CLAIM_MISMATCH's threshold. Deliberately NOT lowered to meet CLOSE_AGREEMENT_PCT, which would
-# have closed the (25, 50] band where neither the footnote nor a warning speaks. Measured: lowering
-# it also fires on a bottom-up figure against a claim the deck only stated for its top-down TAM
-# (-32.5% on the shared fixture). That was originally read as noise; it is not. `existing_claims` is
-# keyed by METRIC with no approach dimension, so comparing one claim against both approaches is
-# established, deliberate behaviour -- it already fires today (deck-01 bottom-up TAM at -95.9%, one
-# of the pilot's best catches) and the note renderer below has purpose-built per-approach wording for
-# it. The only real gap is that this block's message omits the approach label that renderer already
-# carries. So the band is a KNOWN GAP, not a design: a deck-01 SOM sits at -43.2% with no warning.
-# Closing it = add the approach label here, then lower this to CLOSE_AGREEMENT_PCT.
-DECK_MISMATCH_PCT = 50.0
-
-
-def _horizon_mismatch(inputs: dict[str, Any] | None, metric: str) -> tuple[int, int] | None:
-    """(claim_months, ours_months) when both are stated for SOM and differ; else None.
-
-    SOM ONLY, and the scoping is load-bearing. `capture_horizon_months` describes the period
-    `share_pct` / `target_pct` represent, which is a SOM concept. Read for TAM or SAM it would let
-    an analyst who records a stated SAM horizon blank the SAM comparison -- which on the run that
-    motivated this check is the one deck finding that is real.
-    """
-    if metric != "som" or not isinstance(inputs, dict):
-        return None
-    claim = _as_dict(inputs.get("existing_claims_horizon_months")).get(metric)
-    ours = inputs.get("capture_horizon_months")
-    if not isinstance(claim, int) or isinstance(claim, bool):
-        return None
-    if not isinstance(ours, int) or isinstance(ours, bool):
-        return None
-    return (claim, ours) if claim != ours else None
-
-
-def _compute_delta(calculated: float, deck_claim: Any) -> float | None:
-    """Returns signed percentage delta, or None if claim is invalid."""
-    try:
-        claim = float(deck_claim)
-    except (TypeError, ValueError):
-        return None
-    if claim <= 0:
-        return None
-    return round((calculated - claim) / claim * 100, 1)
-
-
-def _comparable_claim(claim: Any, sizing: dict[str, Any], inputs: dict[str, Any] | None) -> tuple[float | None, bool]:
-    """Express a deck claim in the analysis currency. Returns (value, blocked).
-
-    Delegates to _to_analysis_currency -- the SAME function the DECK_CLAIM_MISMATCH block uses --
-    rather than re-implementing a subset of it. An earlier version of this checked only for an
-    UNDECLARED claim currency, which missed three of that function's refusal conditions and, worse,
-    left the declared-and-convertible case comparing a RAW claim here against a CONVERTED one in the
-    warning. Measured, that shipped a single report saying "+11.1% *" in the table and
-    "differs from deck claim by -72.2%" in the warnings, about one figure.
-
-    Non-FX runs are unaffected: with no conversions recorded, _to_analysis_currency returns the
-    claim unchanged and never blocks.
-    """
-    if not isinstance(claim, (int, float)) or isinstance(claim, bool):
-        return None, False
-    value, reason = _to_analysis_currency(
-        float(claim),
-        (inputs or {}).get("existing_claims_currency"),
-        sizing.get("currency"),
-        list(_fx_conversions(sizing).values()),
-    )
-    return value, reason is not None
-
-
-def _compute_provenance(
-    sizing: dict[str, Any],
-    validation: dict[str, Any] | None,
-    inputs: dict[str, Any] | None,
-) -> tuple[dict[str, dict[str, Any]], list[tuple[str, str]]]:
-    """Compute provenance classification for each TAM/SAM/SOM figure.
-
-    Cross-references validation.json assumptions with sizing.json inputs
-    and inputs.json existing_claims.
-    """
-    # Build assumption name -> category map from validation
-    assumption_map: dict[str, str] = {}
-    if validation is not None and not _is_stub(validation):
-        for assumption in _as_list(validation.get("assumptions")):
-            if isinstance(assumption, dict):
-                name = assumption.get("name", "")
-                cat = assumption.get("category", "")
-                if name and cat:
-                    assumption_map[name] = cat
-
-    # Get deck claims from inputs
-    existing_claims: dict[str, Any] = {}
-    if inputs is not None and not _is_stub(inputs):
-        existing_claims = _as_dict(inputs.get("existing_claims"))
-
-    provenance: dict[str, dict[str, Any]] = {}
-    unresolved: list[tuple[str, str]] = []  # (param, metric) pairs
-
-    for approach_key in ("top_down", "bottom_up"):
-        approach_data = sizing.get(approach_key)
-        if approach_data is None:
-            continue
-        approach_prov: dict[str, Any] = {}
-        for metric in ("tam", "sam", "som"):
-            m = _as_dict(approach_data.get(metric))
-            figure_inputs = _as_dict(m.get("inputs"))
-            # Filter to quantitative params only (skip intermediates like tam, sam, etc.)
-            relevant_inputs = {k: v for k, v in figure_inputs.items() if k in QUANTITATIVE_PARAMS}
-
-            # Look up each input's category
-            input_provenances: dict[str, str] = {}
-            for param_name in relevant_inputs:
-                if param_name in assumption_map:
-                    input_provenances[param_name] = assumption_map[param_name]
-                else:
-                    unresolved.append((param_name, metric.upper()))
-
-            # Classify the figure
-            if not input_provenances:
-                classification = "unknown"
-            else:
-                categories = set(input_provenances.values())
-                if "agent_estimate" in categories:
-                    classification = "agent_estimate"
-                elif categories == {"sourced"}:
-                    classification = "sourced"
-                else:
-                    classification = "derived"
-
-            # Confidence breakdown
-            breakdown: dict[str, int] = {"sourced": 0, "derived": 0, "agent_estimate": 0}
-            for cat in input_provenances.values():
-                if cat in breakdown:
-                    breakdown[cat] += 1
-
-            # Deck claim and delta
-            deck_claim = existing_claims.get(metric)
-            value = m.get("value", 0)
-            # Compare like with like: when the claim converts, the delta (and the figure the table
-            # prints) must be the CONVERTED claim, matching the warning block.
-            comparable, blocked = _comparable_claim(deck_claim, sizing, inputs)
-            # A BLOCKED comparison has no delta -- not a delta computed from the wrong operand.
-            # Falling back to the raw claim here is what produced "+11.1%" in the table beside a
-            # warning saying the figure could not be cross-checked at all: the number was the
-            # exchange rate's magnitude, not a disagreement. Killing it at the producer means no
-            # renderer has to remember the guard.
-            delta = (
-                _compute_delta(float(value), comparable) if deck_claim is not None and comparable is not None else None
-            )
-
-            # A horizon mismatch kills the delta exactly as a blocked currency comparison does --
-            # same shape, so neither renderer has to learn a second guard to avoid asserting
-            # closeness across an incomparable pair.
-            horizon = _horizon_mismatch(inputs, metric)
-            if horizon is not None:
-                delta = None
-                comparable = None
-
-            approach_prov[metric] = {
-                "classification": classification,
-                "confidence_breakdown": breakdown,
-                "deck_claim": deck_claim,
-                "delta_vs_deck_pct": delta,
-                "deck_claim_comparable": comparable,
-                "comparison_blocked": blocked,
-                "horizon_mismatch": ({"claim_months": horizon[0], "ours_months": horizon[1]} if horizon else None),
-                "input_provenances": input_provenances,
-            }
-        provenance[approach_key] = approach_prov
-
-    return provenance, unresolved
 
 
 def _founder_text_policy() -> Any:
@@ -832,6 +499,92 @@ def _founder_text_policy() -> Any:
         return _founder_text
     except ImportError:
         return None
+
+
+def _handoff_audit() -> Any:
+    """The fleet's shared gate-record check from `founder-skills/scripts/` (same loading as
+    `_founder_text_policy`). None if unavailable: a missing module must never block a report."""
+    try:
+        shared = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "scripts"))
+        if shared not in sys.path:
+            sys.path.insert(0, shared)
+        import _handoff_audit  # type: ignore[import-not-found]
+
+        return _handoff_audit
+    except ImportError:
+        return None
+
+
+def _revision_not_offered(dir_path: str, run_id: str | None, redteam: Any, *, rounds: int) -> list[str]:
+    """The parameters whose high findings asked Step 6d's question when no answer was recorded; [] when
+    nothing is owed.
+
+    A second review round is the answer "revise" by construction: that round exists only because the
+    founder chose it. Silent when `handoff/<run_id>/` does not exist, for the reason `_handoff_bypassed`
+    gives: every real run creates it at Step 0.
+
+    RESIDUAL (pinned in tests): the record is written by a script the model runs, so a pass proves the
+    question step ran the recorder, not that the question was put to the founder.
+    """
+    if not run_id or rounds >= 2 or not os.path.isdir(os.path.join(dir_path, "handoff", run_id)):
+        return []
+    parameters = _revision_answer.qualifying_parameters(redteam)
+    if not parameters or _revision_answer.recorded(dir_path, run_id, parameters):
+        return []
+    return parameters
+
+
+def _handoff_bypassed(dir_path: str, run_id: str | None, artifacts: dict[str, Any]) -> list[str]:
+    """Which sub-agent steps this report's artifacts came from have no gated hand-off in this run.
+
+    No record means the step's output reached its producer without the gate: through the
+    message-channel fallback, or with the gate skipped. The founder text says only that it was not
+    checked, which is true of both.
+
+    Built from the artifacts actually present, never from what SKILL.md says should run: a sizing block
+    means its sizing dispatch ran; a sensitivity, checklist or review artifact means that step ran.
+
+    REVISION ROUNDS. Step 6d re-runs the sensitivity test, the checklist and the review into
+    `handoff/<run_id>/r2/`. When that dir exists those three must be gated THERE -- round 1's record
+    would otherwise vouch for a round-2 step that degraded. A sizing is re-run with `--replay` (no
+    dispatch) or re-dispatched into r2, so either round's record satisfies it.
+
+    Silent when `handoff/<run_id>/` does not exist: every real run creates it at Step 0, so its absence
+    means this is not a run whose transport can be judged, not that nothing was bypassed.
+
+    RESIDUAL (pinned in tests): a pass proves a gated hand-off exists and still matches its record --
+    not that the producer consumed it. A step gated once and then degraded on a re-dispatch within the
+    same round passes. See `_handoff_audit.py`.
+    """
+    audit = _handoff_audit()
+    if audit is None or not run_id:
+        return []
+    run_dir = os.path.join(dir_path, "handoff", run_id)
+    if not os.path.isdir(run_dir):
+        return []
+    revised = os.path.isdir(os.path.join(run_dir, "r2"))
+
+    def rerun(stem: str) -> list[str]:
+        return [f"r2/{stem}"] if revised else [stem]
+
+    def either(stem: str) -> list[str]:
+        return [f"r2/{stem}", stem]
+
+    requirements: list[tuple[str, list[str]]] = []
+    sizing = artifacts.get("sizing.json")
+    if isinstance(sizing, dict):
+        if isinstance(sizing.get("top_down"), dict):
+            requirements.append(("the top-down sizing", either("top_down_output.json")))
+        if isinstance(sizing.get("bottom_up"), dict):
+            requirements.append(("the bottom-up sizing", either("bottom_up_output.json")))
+    if isinstance(artifacts.get("sensitivity.json"), dict):
+        requirements.append(("the sensitivity test", rerun("sensitivity_output.json")))
+    if isinstance(artifacts.get("checklist.json"), dict):
+        requirements.append(("the quality checklist", rerun("checklist_output.json")))
+    if isinstance(artifacts.get("redteam.json"), dict):
+        requirements.append(("the outside review", rerun("redteam_output.json")))
+    labels: list[str] = audit.bypassed(run_dir, requirements)
+    return labels
 
 
 def _warn(code: str, message: str) -> dict[str, str]:
@@ -897,8 +650,9 @@ def _check_founder_stated_are_facts(inputs: dict[str, Any] | None) -> list[dict[
     ]
 
 
-# The period a founder-stated money figure is quoted per, to the analysis's annual basis.
-_PERIOD_TO_YEAR: dict[str, float] = {"year": 1.0, "annual": 1.0, "quarter": 4.0, "month": 12.0, "week": 52.0}
+# The period a founder-stated money figure is quoted per, to the analysis's annual basis. One table,
+# owned by _params: the resolver normalises with it too, and two copies would drift.
+_PERIOD_TO_YEAR: dict[str, float] = _params.PERIOD_TO_YEAR
 
 
 def _check_founder_value_fidelity(
@@ -921,6 +675,27 @@ def _check_founder_value_fidelity(
     stated = _as_dict(_as_dict(inputs).get("founder_stated_inputs"))
     if not stated:
         return warnings
+    stamped = _view.stamped_provenance(sizing)
+    if stamped is not None and all(_as_dict(v).get("kind") != "not_checked" for v in stamped.values()):
+        # A stamped sizing says exactly which figures it used, so this is not a numeric comparison: the
+        # founder's figure was used if the input's references reach it, including through a derivation.
+        for name in sorted(stated):
+            entry = _as_dict(stamped.get(name))
+            if name not in _provenance.FOUNDER_FACT_PARAMS or not entry:
+                continue
+            if f"founder:{name}" in _as_list(entry.get("entries")):
+                continue
+            warnings.append(
+                _warn(
+                    "FOUNDER_VALUE_OVERRIDDEN",
+                    f"You stated your {_humanize_param(name)}, but the sizing used a different figure "
+                    f"({_params.format_value(_params.PARAM_UNITS[name], entry.get('value_consumed'), _view._CURRENCY)} "
+                    f"per year). A researched figure may be shown as a cross-check; it must not replace yours "
+                    f"without your say. Before the outside review, re-run the sizing on your figure or ask you "
+                    f"which to use; after it, that is the one revision you approve at Step 6d.",
+                )
+            )
+        return warnings
     used = _collect_sizing_inputs(sizing)
     all_conversions = list(_fx_conversions(sizing).values())
     target_ccy = _as_dict(sizing).get("currency")
@@ -934,7 +709,7 @@ def _check_founder_value_fidelity(
         if name not in used:
             continue
         # Bring the founder's figure onto the analysis's PERIOD before comparing. MEASURED on a live
-        # run: the founder stated $203 per patient-MONTH, the sizing consumed the annual $2,436, this
+        # run: the founder stated a price per MONTH, the sizing consumed the annual figure (x12), this
         # check called the correct x12 an override at 0.5% tolerance, and its remedy text told the
         # constructor to "update inputs.founder_stated_inputs" -- which it did, rewriting the
         # founder's stated figure to match the model's, with no founder in the loop. A stated period
@@ -1134,13 +909,12 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
                 )
 
     # 3. UNSOURCED_ASSUMPTIONS — agent_estimate assumptions not in sensitivity
-    if _usable(validation):
-        agent_estimate_names: set[str] = set()
-        for assumption in _as_list(validation.get("assumptions")):
-            if isinstance(assumption, dict) and assumption.get("category") == "agent_estimate":
-                name = assumption.get("name", "")
-                if name in QUANTITATIVE_PARAMS:
-                    agent_estimate_names.add(name)
+    if _usable(sizing):
+        # The inputs the calculator stamped as estimates. A research entry that merely shares an
+        # input's name says nothing about what the sizing used.
+        agent_estimate_names: set[str] = {
+            p for p, g in _view.input_grades(sizing, validation).items() if g["category"] == "agent_estimate"
+        }
 
         sensitivity_params: set[str] = set()
         if _usable(sensitivity):
@@ -1154,7 +928,9 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
                 _warn(
                     "UNSOURCED_ASSUMPTIONS",
                     "Agent-estimate assumptions not stress-tested in sensitivity: "
-                    f"{[_humanize_param(p) for p in sorted(unsourced)]}",
+                    # Joined, not interpolated: an f-string around the list comprehension printed a
+                    # Python list repr -- quotes and brackets -- into a sentence a founder reads.
+                    + ", ".join(_humanize_param(p) for p in sorted(unsourced)),
                 )
             )
 
@@ -1198,11 +974,7 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
             if isinstance(s, dict) and s.get("parameter")
         }
 
-        grades: dict[str, dict[str, Any]] = {}
-        if _usable(validation):
-            for assumption in _as_list(validation.get("assumptions")):
-                if isinstance(assumption, dict) and assumption.get("name"):
-                    grades[str(assumption["name"])] = assumption
+        grades: dict[str, dict[str, Any]] = _view.input_grades(sizing, validation)
 
         for param in sorted(consumed - varied):
             grade = grades.get(param, {})
@@ -1210,7 +982,10 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
             confidence = grade.get("confidence")
             if category == "sourced" and confidence == "high":
                 continue  # a high-confidence sourced figure whose source states no range
-            detail = f"graded {category or 'ungraded'}"
+            # The founder's own figure grades as sourced for the table, but it was never checked
+            # against research; saying "graded sourced" told the founder it had been.
+            stamped_category = _as_dict(_as_dict(_view.stamped_provenance(sizing)).get(param)).get("category")
+            detail = "your own figure" if stamped_category == "founder_stated" else f"graded {category or 'ungraded'}"
             if confidence:
                 detail += f"/{confidence} confidence"
             warnings.append(
@@ -1336,21 +1111,21 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
             warnings.append(
                 _warn(
                     "TAM_DISCREPANCY",
-                    f"Top-down and bottom-up TAM differ by {comparison['tam_delta_pct']}% (>30%)",
+                    _gap_message(comparison, "tam"),
                 )
             )
         if comparison.get("sam_delta_pct", 0) > 30:
             warnings.append(
                 _warn(
                     "SAM_DISCREPANCY",
-                    f"Top-down and bottom-up SAM differ by {comparison['sam_delta_pct']}% (>30%)",
+                    _gap_message(comparison, "sam"),
                 )
             )
         if comparison.get("som_delta_pct", 0) > 30:
             warnings.append(
                 _warn(
                     "SOM_DISCREPANCY",
-                    f"Top-down and bottom-up SOM differ by {comparison['som_delta_pct']}% (>30%)",
+                    _gap_message(comparison, "som"),
                 )
             )
 
@@ -1492,7 +1267,7 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
                             warnings.append(
                                 _warn(
                                     "HORIZON_MISMATCH",
-                                    f"The {metric.upper()} in your materials covers {_hm[0]} months "
+                                    f"The {metric.upper()} you gave covers {_hm[0]} months "
                                     f"and ours covers {_hm[1]}, so the two are not compared. Put "
                                     f"both on the same period and this cross-check can run.",
                                 )
@@ -1512,16 +1287,26 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
                         )
                         continue
                     claim = comparable
-                delta = _compute_delta(float(val), claim)
+                # A stated RANGE: inside it is not a disagreement, outside it is measured to the
+                # nearest bound, and the message quotes the range the founder gave.
+                claim_high: float | None = None
+                if claim is not None:
+                    _raw_high = _claim_high(inputs_art, metric)
+                    if _raw_high is not None:
+                        claim_high, _hb = _to_analysis_currency(
+                            float(_raw_high), _claim_ccy, sizing.get("currency"), _claim_convs
+                        )
+                delta = (
+                    _range_delta(float(val), float(claim), claim_high)[0]
+                    if isinstance(claim, (int, float)) and not isinstance(claim, bool)
+                    else _compute_delta(float(val), claim)
+                )
                 if delta is not None and abs(delta) > DECK_MISMATCH_PCT and claim is not None:
-                    # Code stays DECK_CLAIM_MISMATCH (stable API, asserted elsewhere);
-                    # only the human-readable wording follows where the claim came from.
-                    _src = (
-                        "deck claim"
-                        if _has_document_materials(artifacts.get("inputs.json"))
-                        else "the figure you stated"
-                    )
-                    _lbl = "deck" if _has_document_materials(artifacts.get("inputs.json")) else "you said"
+                    # Code stays DECK_CLAIM_MISMATCH (stable API, asserted elsewhere). The wording
+                    # does not say where the claim came from: nothing records that per figure, and
+                    # "deck claim" on a TAM the founder typed in chat is a false statement to them.
+                    _src = "the figure you stated"
+                    _lbl = "you stated"
                     # Pass the currency EXPLICITLY. Validation runs ~60 lines before
                     # `_set_currency()`, so the module default ("USD") is still in force here and
                     # both figures rendered with a bare "$" on an ILS analysis -- in the same
@@ -1531,8 +1316,9 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
                     warnings.append(
                         _warn(
                             "DECK_CLAIM_MISMATCH",
-                            f"{metric.upper()} differs from {_src} by {delta:+.1f}% "
-                            f"({_lbl}: {_fmt_usd(float(claim), _ccy)}, calculated: {_fmt_usd(val, _ccy)})",
+                            f"{metric.upper()} differs from {_src} by {_params.fmt_delta(delta, signed=True)} "
+                            f"({_lbl}: {claim_display(float(claim), claim_high, _ccy)}, "
+                            f"calculated: {_fmt_usd(val, _ccy)})",
                         )
                     )
 
@@ -1581,12 +1367,55 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
                     f"inputs.existing_claims must be a dict of {{tam, sam, som}}; got {type(raw).__name__}.",
                 )
             )
+        # The upper bound of a stated range. One that cannot form a range with its low end is
+        # ignored by every comparison (_claim_high), and said so here rather than dropped in silence.
+        raw_high = inputs_art.get("existing_claims_high")
+        if isinstance(raw_high, dict):
+            for metric, high in sorted(raw_high.items()):
+                if metric not in ("tam", "sam", "som"):
+                    problem = "is not one of 'tam', 'sam', 'som'"
+                elif _claim_high(inputs_art, metric) is not None:
+                    continue
+                elif _as_dict(raw).get(metric) is None:
+                    problem = "has no lower bound in existing_claims"
+                else:
+                    problem = "is not a number above its lower bound"
+                warnings.append(
+                    _warn(
+                        "EXISTING_CLAIMS_SHAPE",
+                        f"inputs.existing_claims_high.{metric} ({high!r}) {problem}, so this upper bound "
+                        f"was ignored and the figure is compared as a single value.",
+                    )
+                )
+        raw_alts = inputs_art.get("existing_claims_alternatives")
+        if isinstance(raw_alts, dict):
+            for metric in sorted(raw_alts):
+                if metric not in ("tam", "sam", "som") or _as_dict(raw).get(metric) is None:
+                    warnings.append(
+                        _warn(
+                            "EXISTING_CLAIMS_SHAPE",
+                            f"inputs.existing_claims_alternatives.{metric} has no stated figure in "
+                            f"existing_claims to disagree with, so it was ignored.",
+                        )
+                    )
+        for item in claim_disagreements(inputs_art):
+            warnings.append(_warn("DECK_CLAIMS_DISAGREE", disagreement_sentence(item)))
+        if raw_high is not None and not isinstance(raw_high, dict) and raw_high != {}:
+            warnings.append(
+                _warn(
+                    "EXISTING_CLAIMS_SHAPE",
+                    f"inputs.existing_claims_high must be a dict of {{tam, sam, som}}; got {type(raw_high).__name__}.",
+                )
+            )
 
     # 18. FACTOR_PRODUCT_MISMATCH / UNSTRUCTURED_DERIVATION -- a derivation is checkable only when
     # it is itemized. On the run that motivated this, four narrowing factors lived inside an
     # English label, three of them shared with the other build, and nothing could see either fact.
     if _usable(validation):
         unstructured: list[str] = []
+        # Factors listed by name but not in a checkable form (a live run's lacked `source_id`). The
+        # warning used to say they were "not recorded separately", which was false; it names the gap.
+        factors_unsourced: list[str] = []
         for a in _as_list(validation.get("assumptions")):
             if not isinstance(a, dict) or a.get("category") != "derived":
                 continue
@@ -1595,12 +1424,13 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
                 continue
             chain = _factor_chain(a)
             if chain is None:
-                unstructured.append(_humanize_param(derived_name))
+                listed = [f for f in _as_list(a.get("factors")) if isinstance(f, dict) and f.get("factor_id")]
+                (factors_unsourced if len(listed) >= 2 else unstructured).append(_humanize_param(derived_name))
                 continue
             value = _as_number(a.get("value"))
             if value is None:
                 continue
-            expected = _factor_product(derived_name, chain)
+            expected = _factor_product(derived_name, chain, a.get("unit"))
             if expected and not math.isclose(value, expected, rel_tol=FACTOR_PRODUCT_TOL):
                 shown = _render_factor_chain(chain, _fmt_factor)
                 warnings.append(
@@ -1614,17 +1444,26 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
         # ONE warning per run naming every affected figure, not one per assumption. Both forms
         # report the same figures by name, so aggregating loses no signal, and four near-identical
         # paragraphs would crowd out the mediums beside them. CHECKLIST_FAILURES is the precedent.
-        if unstructured:
-            one = len(unstructured) == 1
-            noun = "figure is" if one else "figures are"
-            them = "it" if one else "them"
+        if unstructured or factors_unsourced:
+            parts = []
+            if unstructured:
+                one = len(unstructured) == 1
+                parts.append(
+                    f"{len(unstructured)} {'figure is' if one else 'figures are'} derived from other numbers "
+                    f"that are not recorded separately ({', '.join(unstructured)})"
+                )
+            if factors_unsourced:
+                one = len(factors_unsourced) == 1
+                parts.append(
+                    f"{len(factors_unsourced)} {'figure lists' if one else 'figures list'} the numbers "
+                    f"{'it is' if one else 'they are'} built from without a source for each "
+                    f"({', '.join(factors_unsourced)})"
+                )
             warnings.append(
                 _warn(
                     "UNSTRUCTURED_DERIVATION",
-                    f"{len(unstructured)} {noun} derived from other numbers that are not recorded "
-                    f"separately ({', '.join(unstructured)}) — so nothing can check the "
-                    f"arithmetic behind {them}, or tell whether both approaches lean on the same "
-                    f"figure.",
+                    "; ".join(parts) + " — so nothing can check the arithmetic behind them, or tell whether "
+                    "both approaches lean on the same figure.",
                 )
             )
 
@@ -1684,26 +1523,107 @@ def _section_deck_claims_narrative(inputs: dict[str, Any] | None) -> str:
     detail = inputs.get("existing_claims_detail")
     if not detail:  # None, empty dict, empty list, empty string, etc.
         return ""
-    # Attribute the claim to where it actually came from. This skill supports
-    # conversational runs (no upload at all), and crediting a founder's spoken
-    # figures to "the deck" is a wrong provenance statement about their own input.
-    from_doc = _has_document_materials(inputs)
-    heading = "Deck Claims" if from_doc else "Your Stated Figures"
-    source = "The deck stated" if from_doc else "You stated"
+    # Not attributed to "the deck": nothing records where each figure came from, and one uploaded
+    # document used to make every claim the deck's, including figures the founder typed in chat.
+    heading = "Your Stated Figures"
+    source = "You stated"
     lines = [f"## {heading} (Narrative)\n"]
     lines.append(
         f"*{source} additional figures that don't fit the canonical "
         "TAM/SAM/SOM shape. These are captured for context but are not "
         "reconciled against the computed sizing.*\n"
     )
-    if isinstance(detail, dict):
-        for key, val in detail.items():
-            lines.append(f"- **{_md_safe(str(key))}:** {_md_safe(str(val))}")
-    else:
-        lines.append("```")
-        lines.append(_md_safe(str(detail)))
-        lines.append("```")
+    lines.extend(_claim_lines(detail))
     return "\n".join(lines) + "\n"
+
+
+def _claim_key(key: str) -> str:
+    """A founder-authored data key as words, acronyms kept.
+
+    `humanize_token` is the right call even for a key carrying a numeric segment. The shared policy's
+    numeric-segment blind spot is in DETECTION -- `_CANDIDATE_RE` has to find a token inside free prose
+    -- not in the transformation, and a key is already known here, so detection is not involved:
+    `active_accounts_april_2028` comes back as words, and `regional_sam_north_america` keeps SAM as an
+    acronym where a plain underscore-to-space would flatten it to "sam".
+
+    Falls back to plain spacing when the policy is unavailable, since a missing policy module must never
+    block a report.
+    """
+    ft = _founder_text_policy()
+    if ft is not None:
+        humanized = str(ft.humanize_token(key)).strip()
+        if humanized:
+            return humanized
+    words = key.replace("_", " ").strip()
+    return (words[:1].upper() + words[1:]) if words else key
+
+
+def _claim_figure(val: dict[str, Any]) -> str | None:
+    """A figure leaf printed by its own unit, or None when this mapping is not a figure.
+
+    The unit DECIDES the format and is never itself printed -- a unit is a dimension, not a label.
+    """
+    if "value" not in val:
+        return None
+    unit = val.get("unit")
+    unit_s = unit if isinstance(unit, str) else None
+    shown = _params.format_value(unit_s, val.get("value"), str(val.get("currency") or "USD"))
+    period = val.get("period")
+    if unit_s == _params.MONEY_PER_CUSTOMER and isinstance(period, str) and period.strip():
+        # The convention the Assumptions rows already use, so one figure reads one way on every page.
+        shown += f" per {period}"
+    label = val.get("label")
+    if isinstance(label, str) and label.strip():
+        shown += f" — {_md_safe(label.strip())}"
+    return shown
+
+
+def _claim_scalar(val: Any) -> str:
+    """A plain value beside the figures: grouped if it is a number, never given a currency.
+
+    A bare scalar declares no unit, so nothing here may decide it is money; `format_value` with no unit
+    groups the digits and does exactly that ("an unknown unit prints the bare number, never money").
+    """
+    if isinstance(val, bool) or not isinstance(val, (int, float)):
+        return _md_safe(str(val))
+    return _params.format_value(None, val)
+
+
+def _claim_lines(detail: Any, depth: int = 0) -> list[str]:
+    """`existing_claims_detail` as labelled lines, nested maps indented under their key.
+
+    `str()` on this structure put a Python repr in front of founders -- quoted keys, nested braces and
+    unit enums -- because the shape is nested more than one level: a figure leaf, a plain scalar and a
+    sub-map of figures all appear side by side. So it is walked rather than stringified.
+    """
+    indent = "  " * depth
+    out: list[str] = []
+    if isinstance(detail, dict):
+        # A bare `label` describes the mapping it sits in, not a figure of its own.
+        note = detail.get("label")
+        described = depth > 0 and isinstance(note, str) and bool(note.strip())
+        if described:
+            out.append(f"{indent}- {_md_safe(str(note).strip())}")
+        for key, val in detail.items():
+            if key == "label" and described:
+                continue
+            shown = _claim_figure(val) if isinstance(val, dict) else None
+            if shown is not None:
+                out.append(f"{indent}- **{_claim_key(str(key))}:** {shown}")
+            elif isinstance(val, (dict, list)):
+                out.append(f"{indent}- **{_claim_key(str(key))}:**")
+                out.extend(_claim_lines(val, depth + 1))
+            else:
+                out.append(f"{indent}- **{_claim_key(str(key))}:** {_claim_scalar(val)}")
+    elif isinstance(detail, list):
+        for item in detail:
+            if isinstance(item, (dict, list)):
+                out.extend(_claim_lines(item, depth))
+            else:
+                out.append(f"{indent}- {_claim_scalar(item)}")
+    else:
+        out.append(f"{indent}- {_claim_scalar(detail)}")
+    return out
 
 
 def _section_title_provenance(
@@ -1758,186 +1678,6 @@ def _widest_stressed(sensitivity: dict[str, Any] | None) -> list[str]:
     return [str(r.get("parameter", "?")) for r in ranking if r.get("som_swing_pct") == top]
 
 
-def _contested_rows(
-    sizing: dict[str, Any] | None, inputs: dict[str, Any] | None, redteam: dict[str, Any] | None
-) -> set[tuple[str, str]]:
-    """(approach, metric) pairs built on a founder-stated input that a HIGH red-team finding names.
-
-    A mark, not a re-basing: the red team may not propose a replacement figure, and the live
-    finding that motivated this quoted a monthly rate against an annual ARPU -- a number field
-    would have laundered that unit mismatch into a warning. What the founder needs is to see which
-    rows rest on the contested figure. A metric consumes a parameter if that parameter appears in
-    its own `inputs` or in any block above it in the same approach (SAM is built on TAM).
-    """
-    if not isinstance(sizing, dict) or not _usable(redteam):
-        return set()
-    stated = _as_dict(_as_dict(inputs).get("founder_stated_inputs"))
-    contested = {
-        str(f.get("parameter"))
-        for f in _as_list(_as_dict(redteam).get("findings"))
-        if isinstance(f, dict) and f.get("severity") == "high" and isinstance(f.get("parameter"), str)
-    }
-    contested &= set(stated.keys())
-    if not contested:
-        return set()
-    rows: set[tuple[str, str]] = set()
-    for approach in ("top_down", "bottom_up"):
-        consumed: set[str] = set()
-        for metric in ("tam", "sam", "som"):
-            block = _as_dict(_as_dict(sizing.get(approach)).get(metric))
-            consumed |= set(_as_dict(block.get("inputs")).keys())
-            if consumed & contested:
-                rows.add((approach, metric))
-    return rows
-
-
-def _source_class(url: str) -> str:
-    """Where a red-team finding's sentence came from: `published` (a web address), `internal`
-    (`internal:analysis`) or `document` (the founder's own page). The validator accepts exactly
-    these three forms, so the counts always sum to the findings."""
-    u = url.strip()
-    if u == _INTERNAL_PROVENANCE:
-        return "internal"
-    if u.startswith("document:"):
-        return "document"
-    return "published"
-
-
-_SOURCE_CLASS_LABEL = {
-    "published": "from published sources",
-    "internal": "from this analysis's own output",
-    "document": "from your own documents",
-}
-
-
-def _adversarial_outcome(redteam: dict[str, Any] | None, skip_reason: str | None) -> str:
-    """The ONE sentence for what the outside review found, said the same way everywhere it appears.
-
-    By state, then by source class. It used to say "found N published sources" for every accepted
-    finding; on a live run both findings were the analysis's own output, the sentence was false at
-    the top of the report, and the model's chat paragraph partly consisted of correcting it.
-    """
-    if not _usable(redteam):
-        if isinstance(skip_reason, str) and skip_reason in _RED_TEAM_SKIP_REASONS:
-            return _RED_TEAM_SKIP_REASONS[skip_reason]
-        return "No outside review ran; the report says why."
-    findings = [f for f in _as_list(redteam.get("findings")) if isinstance(f, dict)]
-    rejected = int(_as_dict(redteam.get("summary")).get("rejected") or 0)
-    if not findings:
-        if rejected:
-            noun = "challenge" if rejected == 1 else "challenges"
-            text = f"An outside review raised {rejected} {noun} but could evidence none of them."
-        else:
-            text = "An outside review ran against this analysis and found nothing it could evidence."
-    else:
-        counts: dict[str, int] = {}
-        for f in findings:
-            cls = _source_class(str(f.get("source_url") or ""))
-            counts[cls] = counts.get(cls, 0) + 1
-        n = len(findings)
-        noun = "challenge" if n == 1 else "challenges"
-        parts = [
-            f"{counts[c]} {_SOURCE_CLASS_LABEL[c]}" for c in ("published", "internal", "document") if counts.get(c)
-        ]
-        text = f"An outside review raised {n} {noun}: {', '.join(parts)}."
-    unread = [str(x) for x in _as_list(redteam.get("sources_unread")) if str(x).strip()]
-    if unread:
-        text += f" It did not open {', '.join(unread)}."
-    return text
-
-
-def _top_challenge(redteam: dict[str, Any] | None) -> str:
-    """The most serious accepted finding, as one sentence with its provenance class."""
-    if not _usable(redteam):
-        return ""
-    findings = [f for f in _as_list(redteam.get("findings")) if isinstance(f, dict)]
-    for sev in ("high", "medium"):
-        for f in findings:
-            if f.get("severity") != sev:
-                continue
-            truth = str(f.get("what_is_true") or "").strip()
-            first = truth.split(". ")[0].rstrip(".") if truth else ""
-            url = str(f.get("source_url") or "")
-            cls = _source_class(url)
-            where = _document_cite(url) if cls == "document" else _SOURCE_CLASS_LABEL[cls]
-            where = f"from {where}" if cls == "document" else where
-            claim = _humanize_claim(str(f.get("claim_attacked") or "").strip())
-            return f"The most serious: {claim} — {first} ({where})."
-    return ""
-
-
-def _summary_verdict(
-    sizing: dict[str, Any],
-    provenance: dict[str, dict[str, Any]] | None,
-    checklist: dict[str, Any] | None,
-    redteam: dict[str, Any] | None,
-    skip_reason: str | None,
-    marks: dict[tuple[str, str], str],
-    inputs: dict[str, Any] | None,
-) -> tuple[str, set[str]]:
-    """The paragraph a reader wants first, from fields only. Returns (text, metrics it stated).
-
-    Measured on 2 of 2 hostloop runs: the model wrote this paragraph in chat -- what the deck
-    claims against what each build found, how far the builds disagree, the sharpest challenge --
-    with ratios it rounded itself. Nothing on the page carried it, so it had to. Every figure
-    here is the table's figure with the table's mark; every delta is the producer's.
-    """
-    sentences: list[str] = []
-    stated: set[str] = set()
-    approaches = [a for a in ("top_down", "bottom_up") if _as_dict(sizing.get(a))]
-    label = {"top_down": "top-down", "bottom_up": "bottom-up"}
-    claim_ccy = _as_dict(inputs).get("existing_claims_currency") if isinstance(inputs, dict) else None
-    for metric in ("tam", "sam", "som"):
-        claim_text = None
-        for a in approaches:
-            prov = _as_dict(_as_dict(_as_dict(provenance).get(a)).get(metric))
-            raw = prov.get("deck_claim")
-            comparable = prov.get("deck_claim_comparable")
-            if raw is None:
-                continue
-            if _as_dict(prov.get("horizon_mismatch")):
-                claim_text = (
-                    f"Your materials state {metric.upper()} {_fmt_usd(float(raw))} for a different period than "
-                    f"this analysis covers, so the two are not compared."
-                )
-                stated.add(metric)
-                break
-            comp = _as_number(comparable)
-            raw_n = _as_number(raw)
-            if comp is None or comp <= 0 or raw_n is None:
-                break  # blocked (currency not stated) or not a comparable figure: the table says so
-            shown = _fmt_usd(comp)
-            if comp != raw_n and isinstance(claim_ccy, str) and claim_ccy:
-                shown += f" (converted from {raw_n:,.0f} {claim_ccy})"
-            values = [(x, _as_number(_as_dict(_as_dict(sizing.get(x)).get(metric)).get("value"))) for x in approaches]
-            found = " and ".join(
-                f"{_fmt_usd(v)}{marks.get((x, metric), '')} ({label[x]})" for x, v in values if v is not None
-            )
-            if not found:
-                break
-            claim_text = f"Your materials state {metric.upper()} {shown}; this analysis finds {found}."
-            stated.add(metric)
-            break
-        if claim_text:
-            sentences.append(claim_text)
-    comparison = _as_dict(sizing.get("comparison"))
-    if len(approaches) == 2 and comparison:
-        gaps = []
-        for metric in ("tam", "sam", "som"):
-            delta = _as_number(comparison.get(f"{metric}_delta_pct"))
-            if delta is not None and delta > 30:
-                gaps.append(f"{delta:g}% on {metric.upper()}")
-        if gaps:
-            sentences.append(f"The two builds differ by {' and '.join(gaps)} — one approach likely has a flawed input.")
-    sentences.append(_adversarial_outcome(redteam, skip_reason))
-    top = _top_challenge(redteam)
-    if top:
-        sentences.append(top)
-    if _usable(checklist):
-        sentences.append(_self_check_line(checklist))
-    return " ".join(sentences), stated
-
-
 def _verdict_marks(
     sizing: dict[str, Any],
     validation: dict[str, Any] | None,
@@ -1968,6 +1708,7 @@ def _verdict_paragraph(
     redteam: dict[str, Any] | None,
     checklist: dict[str, Any] | None,
     skip_reason: str | None,
+    bypassed: bool = False,
 ) -> str:
     """The report's first paragraph, as one string. Never empty: with no sizing it says so.
 
@@ -1976,11 +1717,13 @@ def _verdict_paragraph(
     the model wrote its own verdict with its own rounding in front of the pointer. A message that
     already answers leaves nothing to add.
     """
+    _ha = _handoff_audit() if bypassed else None
+    tail = (" " + _ha.VERDICT_SENTENCE) if _ha is not None else ""
     if sizing is None or _is_stub(sizing):
-        return "No sizing was produced; see Warnings. " + _adversarial_outcome(redteam, skip_reason)
+        return "No sizing was produced; see Warnings. " + _adversarial_outcome(redteam, skip_reason) + tail
     marks = _verdict_marks(sizing, validation, inputs, redteam)
     text, _stated = _summary_verdict(sizing, provenance, checklist, redteam, skip_reason, marks, inputs)
-    return text
+    return text + tail
 
 
 def _section_executive_summary(
@@ -1992,9 +1735,10 @@ def _section_executive_summary(
     redteam: dict[str, Any] | None = None,
     checklist: dict[str, Any] | None = None,
     skip_reason: str | None = None,
+    bypassed: bool = False,
 ) -> str:
     """Executive summary: the verdict paragraph, then the marked table, then the deck-claim notes."""
-    verdict = _verdict_paragraph(sizing, provenance, validation, inputs, redteam, checklist, skip_reason)
+    verdict = _verdict_paragraph(sizing, provenance, validation, inputs, redteam, checklist, skip_reason, bypassed)
     if sizing is None or _is_stub(sizing):
         # Never silence: the first thing a reader sees says what happened.
         return "## Executive Summary\n\n" + verdict + "\n"
@@ -2048,8 +1792,8 @@ def _section_executive_summary(
         )
     if shared_metrics:
         lines.append(
-            "\n‡ Both builds narrow this figure by the same number(s), so their agreement on it is not "
-            "a cross-check: "
+            "\n‡ Both builds narrow this figure by the same number(s), so on it they are not independent "
+            "checks of each other: "
             + " ".join(str(s["detail"]) for s in shared if s["kind"] in ("equal_value", "shared_factor"))
         )
     if contested_rows:
@@ -2061,6 +1805,7 @@ def _section_executive_summary(
         for metric in ("tam", "sam", "som"):
             # Collect mismatches across approaches for this metric
             mismatches: list[tuple[str, float, float]] = []  # (label, val, deck_claim)
+            claim_high_shown: float | None = None
             for approach_key in ("top_down", "bottom_up"):
                 if approach_key not in provenance:
                     continue
@@ -2077,25 +1822,26 @@ def _section_executive_summary(
                     # 24 lines apart.
                     _cmp = prov.get("deck_claim_comparable")
                     mismatches.append((label, float(val), float(deck_claim if _cmp is None else _cmp)))
+                    claim_high_shown = _as_number(prov.get("deck_claim_high_comparable"))
             if mismatches:
-                claim_str = _fmt_usd(mismatches[0][2])
+                claim_str = claim_display(mismatches[0][2], claim_high_shown)
                 if both_mode and len(mismatches) > 1:
                     parts = ", ".join(f"{lbl}: {_fmt_usd(v)}" for lbl, v, _ in mismatches)
                     lines.append(
                         f"\n**Note:** Both {metric.upper()} estimates differ significantly "
-                        f"from the deck's claim of {claim_str} ({parts})."
+                        f"from the figure you stated, {claim_str} ({parts})."
                     )
                 elif both_mode:
                     lbl, val, _ = mismatches[0]
                     lines.append(
                         f"\n**Note:** Our {lbl.lower()} {metric.upper()} estimate differs significantly "
-                        f"from the deck's claim ({_fmt_usd(val)} vs {claim_str})."
+                        f"from the figure you stated ({_fmt_usd(val)} vs {claim_str})."
                     )
                 else:
                     _, val, _ = mismatches[0]
                     lines.append(
                         f"\n**Note:** Our {metric.upper()} estimate differs significantly "
-                        f"from the deck's claim ({_fmt_usd(val)} vs {claim_str})."
+                        f"from the figure you stated ({_fmt_usd(val)} vs {claim_str})."
                     )
 
     return "\n".join(lines) + "\n"
@@ -2126,26 +1872,6 @@ def _section_methodology(methodology: dict[str, Any] | None) -> str:
     if rationale:
         lines.append(f"**Rationale:** {rationale}")
     return "\n".join(lines) + "\n"
-
-
-def _self_check_line(checklist: dict[str, Any]) -> str:
-    """The one line a founder reads for the score, rendered ONCE and copied everywhere else.
-
-    "<score>% (<pass>/<applicable> pass, ...)" -- NOT a bare "pass/total" fraction (e.g. "100/22"),
-    which reads as a malformed ratio rather than 100% across 22 items. The closing message copies
-    this string rather than re-deriving it, so the chat and the report cannot disagree.
-    """
-    summary = _as_dict(checklist.get("summary"))
-    pass_ct = summary.get("pass", 0)
-    fail_ct = summary.get("fail", 0)
-    na_ct = summary.get("not_applicable", 0)
-    total_ct = summary.get("total", pass_ct + fail_ct + na_ct)
-    applicable_ct = total_ct - na_ct
-    score_pct = summary.get("score_pct")
-    if isinstance(score_pct, (int, float)):
-        score_str = f"{int(score_pct)}" if float(score_pct) == int(score_pct) else f"{score_pct:.1f}"
-        return f"Self-check: {score_str}% ({pass_ct}/{applicable_ct} pass, {fail_ct} fail, {na_ct} N/A)"
-    return f"Self-check: {pass_ct} pass, {fail_ct} fail, {na_ct} N/A"
 
 
 def _section_analysis_checklist(checklist: dict[str, Any] | None, artifacts_found: list[str]) -> str:
@@ -2200,17 +1926,6 @@ def _section_definitions() -> str:
     )
 
 
-def _as_number(value: Any) -> float | None:
-    """The value as a float when it is a real number, else None.
-
-    `bool` is excluded deliberately: it is an int subclass, so a stray `True` would compare equal
-    to 1 and could manufacture an identity out of nothing.
-    """
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return None
-    return float(value)
-
-
 # The four narrowing/capture parameters whose `value` is stored in PERCENTAGE POINTS while their
 # factors are fractions, so the product needs x100 to reconcile. Keyed on the name because that is
 # what the schema contracts; a `derived` percentage under a descriptive name outside this set is
@@ -2222,47 +1937,12 @@ _PCT_PARAMS: frozenset[str] = frozenset({"segment_pct", "share_pct", "serviceabl
 FACTOR_PRODUCT_TOL = 0.02
 
 
-def _factor_chain(assumption: dict[str, Any]) -> list[dict[str, Any]] | None:
-    """The assumption's `factors` list if it is well-formed and has TWO OR MORE entries, else None.
+def _factor_product(name: str, chain: list[dict[str, Any]], unit: Any = None) -> float:
+    """What the chain says the value should be. A percentage is stored x100.
 
-    Well-formed: a list of objects each carrying a str `factor_id`, a finite numeric `value` (bool
-    excluded, as everywhere else here), a str `source_id`, and an optional `role`. Anything else
-    is "no chain" -- a malformed chain must read as UNSTRUCTURED, never crash compose, and never
-    be graded as reconciling, because a chain we cannot parse is exactly as uncheckable as one
-    that is absent.
-
-    Two or more. A one-element list is the value under another name: on a live run that is exactly
-    what arrived (`segment_pct` <- one factor of 0.3732), it reconciled trivially, and the report
-    called the figure itemized.
-
-    `role` defaults to `"multiplicand"`; the only other accepted value is `"divisor"`, which lets
-    a derived figure be itemized as a RATIO (numerator multiplicands over denominator divisors --
-    e.g. 15,000,000 / 64,200,000) rather than only as a chain of narrowing multiplicands. An
-    additive decomposition was mis-encoded here once and caught only by the product check; an
-    unrecognized `role` string is malformed the same way a missing `factor_id` is.
-    """
-    raw = assumption.get("factors")
-    if not isinstance(raw, list) or len(raw) < 2:
-        return None
-    out: list[dict[str, Any]] = []
-    for f in raw:
-        if not isinstance(f, dict):
-            return None
-        fid, src = f.get("factor_id"), f.get("source_id")
-        if not isinstance(fid, str) or not isinstance(src, str):
-            return None
-        val = _as_number(f.get("value"))
-        if val is None or not math.isfinite(val):
-            return None
-        role = f.get("role", "multiplicand")
-        if role not in ("multiplicand", "divisor"):
-            return None
-        out.append({"factor_id": fid, "value": val, "source_id": src, "role": role})
-    return out
-
-
-def _factor_product(name: str, chain: list[dict[str, Any]]) -> float:
-    """What the chain says the value should be. Percent-point parameters are stored x100.
+    A figure that records its unit is a percentage when the unit says so, whatever its name. Only a
+    figure with no recorded unit falls back to the name, because a percentage recorded under a
+    descriptive name would otherwise miss the x100 and read as a false mismatch.
 
     A `divisor`-role factor divides instead of multiplying, so a chain can itemize a RATIO
     (multiplicands ÷ divisors) rather than only a product of narrowing multiplicands. A zero
@@ -2281,7 +1961,8 @@ def _factor_product(name: str, chain: list[dict[str, Any]]) -> float:
     if denominator == 0.0:
         return 0.0
     prod = numerator / denominator
-    return prod * 100.0 if name in _PCT_PARAMS else prod
+    is_pct = _params.is_percent(unit) if unit in _params.UNITS else name in _PCT_PARAMS
+    return prod * 100.0 if is_pct else prod
 
 
 def _fmt_factor(value: Any) -> str:
@@ -2308,111 +1989,6 @@ def _render_factor_chain(chain: list[dict[str, Any]], fmt: Callable[[Any], str])
         sep = " ÷ " if f.get("role") == "divisor" else (" × " if i else "")
         parts.append(sep + fmt(f["value"]))
     return "".join(parts)
-
-
-_PAIRED_SLOTS: tuple[tuple[str, str, str, str], ...] = (
-    # metric, top-down input key, bottom-up input key, sizing block carrying them
-    ("sam", "segment_pct", "serviceable_pct", "sam"),
-    ("som", "share_pct", "target_pct", "som"),
-)
-
-
-def _shared_input_values(
-    sizing: dict[str, Any] | None, validation: dict[str, Any] | None = None
-) -> list[dict[str, Any]]:
-    """Inputs the two builds share BY VALUE. Empty unless both approaches are present.
-
-    Each item carries a founder-facing `detail` sentence and NO raw field name: these items reach
-    `coaching_payload`, and a raw id in that payload is a defect the fleet has already fixed once.
-
-    Tolerance is 1e-6 relative. This is an IDENTITY check, not a closeness one: an honest
-    near-agreement of even 0.5% must not trip it -- that case is what the comparison caveat is for.
-    """
-    if not isinstance(sizing, dict):
-        return []
-    td = _as_dict(sizing.get("top_down"))
-    bu = _as_dict(sizing.get("bottom_up"))
-    if not td or not bu:
-        return []
-    found: list[dict[str, Any]] = []
-
-    it = _as_number(_as_dict(_as_dict(td.get("tam")).get("inputs")).get("industry_total"))
-    bu_tam_in = _as_dict(_as_dict(bu.get("tam")).get("inputs"))
-    cc = _as_number(bu_tam_in.get("customer_count"))
-    arpu = _as_number(bu_tam_in.get("arpu"))
-    if it and cc is not None and arpu is not None and math.isclose(it, cc * arpu, rel_tol=1e-6):
-        found.append(
-            {
-                "metric": "tam",
-                "kind": "identity",
-                "code": "SHARED_TAM_IDENTITY",
-                "detail": (
-                    f"Your {_humanize_param('industry_total')} equals "
-                    f"{_humanize_param('customer_count')} \u00d7 {_humanize_param('arpu')} exactly, "
-                    "so the two TAM figures are one computation, shown two ways."
-                ),
-            }
-        )
-
-    for metric, td_key, bu_key, block in _PAIRED_SLOTS:
-        a = _as_number(_as_dict(_as_dict(td.get(block)).get("inputs")).get(td_key))
-        b = _as_number(_as_dict(_as_dict(bu.get(block)).get("inputs")).get(bu_key))
-        if a and b is not None and math.isclose(a, b, rel_tol=1e-6):
-            found.append(
-                {
-                    "metric": metric,
-                    "kind": "equal_value",
-                    "code": "PAIRED_SLOT_SAME_VALUE",
-                    "detail": (
-                        f"{_humanize_param(td_key)} and {_humanize_param(bu_key)} carry the same "
-                        f"value ({a:g}), so the two {metric.upper()} figures narrow by one "
-                        "number, not two."
-                    ),
-                }
-            )
-
-    # Factor-level overlap. Value identity on the slot (above) could not see the motivating run:
-    # 10.0 and 9.1 are different numbers whose chains share three of four factors. A factor counts
-    # as shared when its `factor_id` matches, OR its (source_id, value) pair matches -- the same
-    # figure under two names is still the same figure, while two coincidentally-equal fractions
-    # from different sources are not. Reported as a list, never a threshold: one shared factor is
-    # one shared factor, and the reader decides what it means.
-    if isinstance(validation, dict):
-        by_name = {a2.get("name"): a2 for a2 in _as_list(validation.get("assumptions")) if isinstance(a2, dict)}
-        for metric, td_key, bu_key, _block in _PAIRED_SLOTS:
-            td_chain = _factor_chain(by_name.get(td_key) or {})
-            bu_chain = _factor_chain(by_name.get(bu_key) or {})
-            if not td_chain or not bu_chain:
-                continue
-            bu_ids = {f["factor_id"] for f in bu_chain}
-            bu_pairs = {(f["source_id"], round(f["value"], 6)) for f in bu_chain}
-            shared_ids = [
-                f["factor_id"]
-                for f in td_chain
-                if f["factor_id"] in bu_ids or (f["source_id"], round(f["value"], 6)) in bu_pairs
-            ]
-            if not shared_ids:
-                continue
-            mass = 1.0
-            for f in td_chain:
-                if f["factor_id"] in shared_ids:
-                    mass *= f["value"]
-            found.append(
-                {
-                    "metric": metric,
-                    "kind": "shared_factor",
-                    "code": "SHARED_FACTOR_OVERLAP",
-                    "shared": shared_ids,
-                    "shared_mass": round(mass, 6),
-                    "detail": (
-                        f"The two {metric.upper()} builds share {len(shared_ids)} of the "
-                        f"{len(td_chain)} figures they narrow by "
-                        f"({', '.join(sid.replace('_', ' ') for sid in shared_ids)}), so they "
-                        "differ only where the remaining figures do."
-                    ),
-                }
-            )
-    return found
 
 
 # The producer's closing caveat, verbatim (market_sizing.py emits it on every sub-30% note). It is
@@ -2524,17 +2100,17 @@ def _section_sizing_table(
             for c in _fx_conv.values()
         )
         lines.append(
-            f"> **Currency: {_CURRENCY}.** Some inputs were supplied in another currency and "
-            f"converted into {_CURRENCY}: {_each}. Rate as of {_as_of} ({_src}). Every figure below "
-            f"is in {_CURRENCY}; check the rate if you are comparing against a source in its "
+            f"> **Currency: {_view._CURRENCY}.** Some inputs were supplied in another currency and "
+            f"converted into {_view._CURRENCY}: {_each}. Rate as of {_as_of} ({_src}). Every figure below "
+            f"is in {_view._CURRENCY}; check the rate if you are comparing against a source in its "
             f"original currency.\n"
         )
-    elif _CURRENCY != "USD":
+    elif _view._CURRENCY != "USD":
         lines.append(
-            f"> **Currency: {_CURRENCY}.** All figures are stated in {_CURRENCY} as supplied — "
+            f"> **Currency: {_view._CURRENCY}.** All figures are stated in {_view._CURRENCY} as supplied — "
             f"**no FX conversion is applied anywhere in this analysis.** If any input came from an "
             f"external source quoted in another currency (industry totals usually are quoted in USD), "
-            f"convert it to {_CURRENCY} yourself before relying on the combined figure.\n"
+            f"convert it to {_view._CURRENCY} yourself before relying on the combined figure.\n"
         )
 
     # One-line narrative per approach
@@ -2543,32 +2119,25 @@ def _section_sizing_table(
     if td_data:
         tam_inputs = _as_dict(_as_dict(td_data.get("tam")).get("inputs"))
         td_sam_inputs = _as_dict(_as_dict(td_data.get("sam")).get("inputs"))
-        industry = _fmt_usd(tam_inputs.get("industry_total", 0)) if "industry_total" in tam_inputs else "?"
-        seg = td_sam_inputs.get("segment_pct", "?") if "segment_pct" in td_sam_inputs else "?"
+        industry = _input_shown("industry_total", tam_inputs)
+        seg = _input_shown("segment_pct", td_sam_inputs)
         share_inputs = _as_dict(_as_dict(td_data.get("som")).get("inputs"))
-        share = share_inputs.get("share_pct", "?") if "share_pct" in share_inputs else "?"
+        share = _input_shown("share_pct", share_inputs)
         lines.append(
             f"**Top-down:** Starting from industry total of {industry}, "
-            f"targeting {seg}% segment with {share}% market share.\n"
+            f"targeting {seg} segment with {share} market share.\n"
         )
     if bu_data:
         tam_inputs = _as_dict(_as_dict(bu_data.get("tam")).get("inputs"))
-        cust = tam_inputs.get("customer_count", "?")
-        arpu_val = _fmt_usd(tam_inputs.get("arpu", 0)) if "arpu" in tam_inputs else "?"
+        cust = _input_shown("customer_count", tam_inputs)
+        arpu_val = _input_shown("arpu", tam_inputs)
         sam_inputs = _as_dict(_as_dict(bu_data.get("sam")).get("inputs"))
-        serv = tam_inputs.get("serviceable_pct", sam_inputs.get("serviceable_pct", "?"))
+        serv = _input_shown("serviceable_pct", tam_inputs, sam_inputs)
         som_inputs = _as_dict(_as_dict(bu_data.get("som")).get("inputs"))
-        tgt = tam_inputs.get("target_pct", som_inputs.get("target_pct", "?"))
-        if isinstance(cust, (int, float)):
-            bu_line = (
-                f"**Bottom-up:** {cust:,} potential customers x "
-                f"{arpu_val} ARPU, {serv}% serviceable, {tgt}% target capture.\n"
-            )
-        else:
-            bu_line = (
-                f"**Bottom-up:** {cust} potential customers x "
-                f"{arpu_val} ARPU, {serv}% serviceable, {tgt}% target capture.\n"
-            )
+        tgt = _input_shown("target_pct", tam_inputs, som_inputs)
+        bu_line = (
+            f"**Bottom-up:** {cust} potential customers x {arpu_val} ARPU, {serv} serviceable, {tgt} target capture.\n"
+        )
         lines.append(bu_line)
 
     lines.append("| Metric | Value | Method | Provenance | Key Assumptions |")
@@ -2586,7 +2155,7 @@ def _section_sizing_table(
             assumption_parts = []
             for k, v in inputs_data.items():
                 label = _humanize_param(k)
-                formatted = _fmt_usd(v) if k in ("industry_total", "arpu", "tam", "sam") else _fmt_number(v)
+                formatted = _params.format_value(_params.unit_of(k), v, _view._CURRENCY)
                 assumption_parts.append(f"{label}: {formatted}")
             assumptions = ", ".join(assumption_parts)
             # Look up provenance classification
@@ -2645,6 +2214,7 @@ def _section_sizing_table(
                         delta_pct is not None
                         and abs(float(delta_pct)) <= CLOSE_AGREEMENT_PCT
                         and not prov.get("comparison_blocked")
+                        and not prov.get("within_claim_range")
                     ):
                         marker = " *"
                         close_agreement = True
@@ -2658,10 +2228,13 @@ def _section_sizing_table(
                     # printing it here labelled the founder's figure "ILS" one line above the
                     # sentence saying its currency is unknown. Same mislabel this commit fixed on
                     # the converting branch; it must not survive on the branch beside it.
+                    _high_shown = _as_number(
+                        prov.get("deck_claim_high") if _blocked else prov.get("deck_claim_high_comparable")
+                    )
                     _claim_cell = (
-                        f"{_fmt_usd(float(_shown_claim), '')} (currency not stated)"
+                        f"{claim_display(float(_shown_claim), _high_shown, '')} (currency not stated)"
                         if _blocked
-                        else _fmt_usd(float(_shown_claim))
+                        else claim_display(float(_shown_claim), _high_shown)
                     )
                     # An em-dash reads as missing data. A horizon mismatch is not missing data:
                     # it is two figures for different periods, and saying which periods is what
@@ -2671,8 +2244,10 @@ def _section_sizing_table(
                         _delta_cell = (
                             f"different horizon ({_hm_prov.get('claim_months')} vs {_hm_prov.get('ours_months')} mo)"
                         )
+                    elif prov.get("within_claim_range"):
+                        _delta_cell = "within your range"
                     elif delta_pct is not None:
-                        _delta_cell = f"{delta_pct:+.1f}%{marker}"
+                        _delta_cell = f"{_params.fmt_delta(delta_pct, signed=True)}{marker}"
                     else:
                         _delta_cell = "—"
                     comparison_rows.append(
@@ -2685,8 +2260,8 @@ def _section_sizing_table(
                     if _blocked:
                         blocked_rows = True
         if comparison_rows:
-            lines.append("\n### Deck Claims vs. Our Estimates\n")
-            lines.append("| Metric | Deck Claim | Our Estimate | Delta | Classification |")
+            lines.append("\n### Your Figures vs. Our Estimates\n")
+            lines.append("| Metric | Your Figure | Our Estimate | Delta | Classification |")
             lines.append("|--------|-----------|--------------|-------|----------------|")
             lines.extend(comparison_rows)
             if blocked_rows:
@@ -2704,41 +2279,52 @@ def _section_sizing_table(
                 )
             if close_agreement:
                 lines.append(
-                    f"\n\\* Our figure lands within {CLOSE_AGREEMENT_PCT:.0f}% of the figure in "
-                    "your materials. Agreement on a number is not independent confirmation — it can "
-                    "mean both analyses drew on the same source, or that our input came from your "
-                    "materials. To get a real check, size it again from an independently chosen "
+                    # "the figure you gave", not "in your materials": a TAM/SAM/SOM claim carries no
+                    # source, and it may have been typed in chat rather than taken from a document.
+                    f"\n\\* Our figure lands within {CLOSE_AGREEMENT_PCT:.0f}% of the figure you "
+                    "gave. Agreement on a number is not independent confirmation — it can "
+                    "mean both analyses drew on the same source, or that our input came from a "
+                    "figure you gave. To get a real check, size it again from an independently chosen "
                     "value."
                 )
 
     return "\n".join(lines) + "\n"
 
 
-def _section_assumptions(validation: dict[str, Any] | None) -> str:
-    """Section 5: Assumptions."""
+def _section_assumptions(validation: dict[str, Any] | None, sizing: dict[str, Any] | None = None) -> str:
+    """Section 5: Assumptions.
+
+    For a sizing whose inputs carry their provenance, a figure prints by the unit it RECORDS, never by
+    its name: a head-count recorded under an input's name is a head-count. Research the sizing did
+    not use is marked as context, and an estimate the sizing used instead of research says so.
+    """
+    stamped = _view.stamped_provenance(sizing)
     if validation is None:
         return "## Assumptions\n\n*No validation data available.*\n"
     if _is_stub(validation):
         return f"## Assumptions\n\n*Validation not performed — {validation.get('reason', 'unknown reason')}*\n"
 
-    assumptions = _as_list(validation.get("assumptions"))
-    if not assumptions:
+    rows = _view.assumption_rows(validation, sizing)
+    if not rows:
         return "## Assumptions\n\n*No assumptions recorded.*\n"
 
     lines = ["## Assumptions\n"]
     cat_labels = {"sourced": "Sourced", "derived": "Derived", "agent_estimate": "Estimate"}
-    # Params whose values are monetary
-    monetary_params = {"industry_total", "arpu"}
-    for a in assumptions:
-        if not isinstance(a, dict):
+    for row in rows:
+        cat_display = cat_labels[row["grade"]]
+        if row["kind"] == "estimate":
+            lines.append(f"- **{row['label']}** = {row['shown']} ({cat_display}) — {row['note']}")
             continue
-        cat = a.get("category", "unknown")
-        cat_display = cat_labels.get(cat, cat)
+        a = row["entry"]
         name = a.get("name", "unnamed")
         display_name = a.get("label", _humanize_param(name))
         value = a.get("value", "")
-        if isinstance(value, (int, float)) and name in monetary_params:
-            formatted_val = _fmt_usd(value)
+        unit = a.get("unit")
+        if stamped is not None and unit in _params.UNITS and isinstance(value, (int, float)):
+            ccy = str(a.get("currency") or _view._CURRENCY)
+            formatted_val = _params.format_value(unit, value, ccy)
+            if unit == _params.MONEY_PER_CUSTOMER and a.get("period"):
+                formatted_val += f" per {a.get('period')}"
         elif isinstance(value, (int, float)):
             formatted_val = _fmt_number(value)
         else:
@@ -2756,52 +2342,13 @@ def _section_assumptions(validation: dict[str, Any] | None) -> str:
             line += f" — {src_url}"
         # The chain the figure is built from -- multiplied or, for a ratio, divided -- so a
         # founder can check the arithmetic themselves rather than take a derived number on trust.
-        # report.md only: visualize.py has no per-assumption surface to mirror this into -- see
-        # the commit message for why that asymmetry is deliberate rather than a half-landed fix.
-        chain = _factor_chain(a) if isinstance(a, dict) else None
+        chain = _factor_chain(a)
         if chain:
             line += " — built from: " + _render_factor_chain(chain, _fmt_factor)
+        if row["used"] is False and unit in _params.UNITS:
+            line += " — research context; not used in the sizing"
         lines.append(line)
     return "\n".join(lines) + "\n"
-
-
-# The ONLY reasons an adversarial review may be absent, and the sentence each one puts in front of
-# the founder. A CLOSED ENUM, not free text, for four reasons -- the last is the one that decides it:
-#   1. Free text lets the agent write a rationalization that READS like a reason ("not needed for
-#      this analysis"), which is the exact move the gate exists to stop.
-#   2. An enum is countable. "How often is the red team skipped, and why" is answerable across runs;
-#      a corpus of prose is not.
-#   3. An unknown value fails loudly here instead of passing through as plausible prose.
-#   4. This text reaches a FOUNDER. An open reason is an un-reviewed founder-facing string written
-#      by a sub-agent. Each value below maps to a sentence we wrote and can stand behind.
-#
-# DELIBERATELY ABSENT: any value meaning "it did not seem necessary". There is no market sizing
-# whose figures are not worth attacking, so such a value would be the escape hatch this gate was
-# built to close. Do not add one.
-#
-# `founder_declined` is a DECISION; the other two are FAILURES. They read differently on purpose --
-# "you asked us not to" and "we tried and could not" are not the same disclosure.
-_RED_TEAM_SKIP_REASONS: dict[str, str] = {
-    "founder_declined": (
-        "No adversarial review ran, because you asked us not to run one. Nothing in this report "
-        "has been checked against an outside source that was trying to contradict it."
-    ),
-    "dispatch_failed": (
-        "An adversarial review was attempted and did not complete, so nothing in this report has "
-        "been checked against an outside source. This is a gap in the process, not a finding "
-        "about your figures — it is worth re-running."
-    ),
-    "no_network_available": (
-        "No adversarial review ran, because this run had no access to outside sources. Nothing "
-        "here has been checked against published figures that might contradict it."
-    ),
-    "no_subagent_dispatch": (
-        "No adversarial review ran, because this environment runs the whole analysis as a single "
-        "agent and cannot dispatch a separate reviewer. Nothing here has been checked against an "
-        "outside source that was trying to contradict it — running the same analysis in Claude "
-        "Cowork or Claude Code can do that."
-    ),
-}
 
 
 def _red_team_state(
@@ -2837,18 +2384,7 @@ def _red_team_state(
     return ("ungated", reason if isinstance(reason, str) else None)
 
 
-# Mirrors red_team.py's INTERNAL_PROVENANCE: a finding grounded in this run's own output.
-_INTERNAL_PROVENANCE = "internal:analysis"
-
 _SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2}
-
-
-def _document_cite(url: str) -> str:
-    """`document:<file>#page=<n>` -> "<file>, page <n>"; `document:<file>` -> "<file>"."""
-    m = re.match(r"^document:([^#]+)(?:#page=(\d+))?$", url)
-    if not m:
-        return url[len("document:") :]
-    return f"{m.group(1)}, page {m.group(2)}" if m.group(2) else m.group(1)
 
 
 def _quote_verified_suffix(verified: Any) -> str:
@@ -2871,55 +2407,9 @@ _QUOTE_RE = re.compile("\ue000(.*?)\ue001", re.DOTALL)
 _QUOTE_SLOT_RE = re.compile("\ue002(\\d+)\ue003")
 
 
-def _stated_figure(field: str, value: Any, period: Any, source: Any, label: Any = None) -> str:
-    """ "ARPU $385.00 per month (from deck.pdf, page 2: blended net collectible)" -- one founder figure."""
-    amount = _fmt_param_value(field, value)
-    per = f" per {period}" if isinstance(period, str) and period.strip() else ""
-    src = str(source or "").strip()
-    where = _document_cite(src) if src.startswith("document:") else ("you gave it in chat" if src == "chat" else src)
-    note = f": {str(label).strip()}" if isinstance(label, str) and label.strip() else ""
-    tail = (
-        f" ({'from ' if src.startswith('document:') else ''}{where}{note})"
-        if where
-        else (f" ({note[2:]})" if note else "")
-    )
-    return f"{_humanize_param(field)} {amount}{per}{tail}"
-
-
-def _stated_alternatives(inputs: dict[str, Any] | None) -> list[str]:
-    """One line per founder-stated figure the analysis did NOT use, beside the one it did.
-
-    A founder whose materials state two figures for one input (a recurring rate in chat, a blended
-    rate in the deck) is asked which the sizing uses; the other is kept and shown, never dropped.
-    """
-    i = _as_dict(inputs)
-    stated = _as_dict(i.get("founder_stated_inputs"))
-    periods = _as_dict(i.get("founder_stated_inputs_period"))
-    sources = _as_dict(i.get("founder_stated_inputs_source"))
-    # A choice is claimed only when the founder's answer is recorded. Measured: the question was
-    # skipped and the report still said "the one you chose". A source alone is not a choice -- the
-    # analysis knows where a figure came from whether or not anyone asked.
-    chosen = _as_dict(i.get("founder_stated_choice"))
-    lines: list[str] = []
-    for field, alts in _as_dict(i.get("founder_stated_alternatives")).items():
-        for alt in _as_list(alts):
-            if not isinstance(alt, dict) or not isinstance(alt.get("value"), (int, float)):
-                continue
-            other = _stated_figure(field, alt["value"], alt.get("period"), alt.get("source"), alt.get("label"))
-            if field in stated:
-                used = _stated_figure(field, stated[field], periods.get(field), sources.get(field))
-                if str(chosen.get(field) or "").strip():
-                    lines.append(f"You also gave {other}; this analysis uses {used}, the one you chose.")
-                else:
-                    lines.append(
-                        f"You also gave {other}; this analysis used {used}, and you were not asked which to use."
-                    )
-            else:
-                lines.append(f"You also gave {other}.")
-    return lines
-
-
-def _section_your_answers(methodology: dict[str, Any] | None, inputs: dict[str, Any] | None = None) -> str:
+def _section_your_answers(
+    methodology: dict[str, Any] | None, inputs: dict[str, Any] | None = None, analysis_dir: str | None = None
+) -> str:
     """What the founder said after the analysis could still change, and which questions were not asked.
 
     `founder_notes`: an answer given after the one revision round was used, so it could not change
@@ -2927,22 +2417,20 @@ def _section_your_answers(methodology: dict[str, Any] | None, inputs: dict[str, 
     check would block a figure outside the printed hand-over. `gate_defaults`: questions the founder
     asked not to be asked, and whose first option was taken.
     """
-    m = _as_dict(methodology)
-    notes = [str(n).strip() for n in _as_list(m.get("founder_notes")) if str(n).strip()]
-    defaults = [str(g).strip() for g in _as_list(m.get("gate_defaults")) if str(g).strip()]
-    alternatives = _stated_alternatives(inputs)
-    if not notes and not defaults and not alternatives:
+    lines = _your_answers_lines(methodology, inputs, analysis_dir)
+    if not lines:
         return ""
-    lines = ["## Your Answers\n"]
-    lines += [f"- {a}" for a in alternatives]
-    lines += [f"- {n}" for n in notes]
-    if defaults:
-        lines.append(f"- You asked not to be asked questions, so the default was taken for: {', '.join(defaults)}.")
-    return "\n".join(lines) + "\n"
+    return "\n".join(["## Your Answers\n"] + [f"- {line}" for line in lines]) + "\n"
 
 
 def _section_adversarial(
-    redteam: dict[str, Any] | None, skip_reason: str | None = None, revision_note: str | None = None
+    redteam: dict[str, Any] | None,
+    skip_reason: str | None = None,
+    review_note: str | None = None,
+    review_changes: list[str] | None = None,
+    sizing: Any = None,
+    inputs: Any = None,
+    later: list[tuple[int, dict[str, Any]]] | None = None,
 ) -> str:
     """Section: what an outside look at this analysis turned up.
 
@@ -2969,8 +2457,43 @@ def _section_adversarial(
     unchecked = _as_list(redteam.get("could_not_check"))
 
     lines = ["## Adversarial Findings\n"]
-    if revision_note:
-        lines.append(f"*{revision_note}*\n")
+    if review_note:
+        lines.append(f"*{review_note}*\n")
+        if review_changes:
+            lines.append("What changed:\n\n" + "\n".join(f"- {c}" for c in review_changes) + "\n")
+
+    def _finding_lines(f: dict[str, Any]) -> list[str]:
+        out: list[str] = []
+        claim = str(f.get("claim_attacked") or "").strip()
+        out.append(f"\n**{_humanize_claim(claim)}**\n")
+        truth = _view.checked_multiples(str(f.get("what_is_true") or "").strip(), sizing, inputs)
+        out.append(f"{truth}\n")
+        quote = str(f.get("evidence_quote") or "").strip()
+        if quote:
+            # Fenced by sentinels so the founder-text pass leaves it verbatim (see _QUOTE_OPEN).
+            out.append(f"> {_QUOTE_OPEN}{quote}{_QUOTE_CLOSE}\n")
+        title = str(f.get("source_title") or "").strip()
+        url = str(f.get("source_url") or "").strip()
+        # An internal finding is labelled, never linked. Two reasons: there is nothing to
+        # click, and the founder must be able to tell the two kinds apart -- an outside
+        # source contradicting a figure and the analysis contradicting ITSELF are both worth
+        # knowing and are not interchangeable. Rendering the second as a citation would
+        # dress an internal inconsistency up as external corroboration.
+        if url == _INTERNAL_PROVENANCE:
+            out.append("— from this analysis' own output, not an outside source\n")
+        elif url.startswith("document:"):
+            # The founder's own page: named, never linked. `quote_verified` says whether the
+            # quoted sentence was found on that page -- true/false when the page had text (a
+            # text layer or an OCR sidecar), null when it did not and the red team read it by
+            # eye. Both states are shown; a citation nothing could check is not hidden, it is
+            # labelled, so the founder knows which of the two they are looking at.
+            out.append(f"— {_document_cite(url)}{_quote_verified_suffix(f.get('quote_verified'))}\n")
+        elif title and url:
+            out.append(f"— [{title}]({url})\n")
+        elif url:
+            out.append(f"— {url}\n")
+        return out
+
     if not findings:
         lines.append(_adversarial_outcome(redteam, None) + " That is a result, not an absence of one.\n")
     else:
@@ -2979,33 +2502,17 @@ def _section_adversarial(
             + " Each quotes the sentence it relies on. Read these before the summary above.\n"
         )
         for f in sorted(findings, key=lambda x: _SEVERITY_ORDER.get(str(x.get("severity")), 3)):
-            claim = str(f.get("claim_attacked") or "").strip()
-            lines.append(f"\n**{_humanize_claim(claim)}**\n")
-            lines.append(f"{str(f.get('what_is_true') or '').strip()}\n")
-            quote = str(f.get("evidence_quote") or "").strip()
-            if quote:
-                # Fenced by sentinels so the founder-text pass leaves it verbatim (see _QUOTE_OPEN).
-                lines.append(f"> {_QUOTE_OPEN}{quote}{_QUOTE_CLOSE}\n")
-            title = str(f.get("source_title") or "").strip()
-            url = str(f.get("source_url") or "").strip()
-            # An internal finding is labelled, never linked. Two reasons: there is nothing to
-            # click, and the founder must be able to tell the two kinds apart -- an outside
-            # source contradicting a figure and the analysis contradicting ITSELF are both worth
-            # knowing and are not interchangeable. Rendering the second as a citation would
-            # dress an internal inconsistency up as external corroboration.
-            if url == _INTERNAL_PROVENANCE:
-                lines.append("— from this analysis' own output, not an outside source\n")
-            elif url.startswith("document:"):
-                # The founder's own page: named, never linked. `quote_verified` says whether the
-                # quoted sentence was found on that page -- true/false when the page had text (a
-                # text layer or an OCR sidecar), null when it did not and the red team read it by
-                # eye. Both states are shown; a citation nothing could check is not hidden, it is
-                # labelled, so the founder knows which of the two they are looking at.
-                lines.append(f"— {_document_cite(url)}{_quote_verified_suffix(f.get('quote_verified'))}\n")
-            elif title and url:
-                lines.append(f"— [{title}]({url})\n")
-            elif url:
-                lines.append(f"— {url}\n")
+            lines.extend(_finding_lines(f))
+
+    # Every later review of the same analysis, in full: the first is shown so that re-running cannot
+    # soften it, and the later ones are listed so that re-running cannot hide a harsher one either.
+    for n, doc in later or []:
+        extra = [f for f in _as_list(_as_dict(doc).get("findings")) if isinstance(f, dict)]
+        lines.append(f"\n### A later review of the same analysis (review {n})\n")
+        if not extra:
+            lines.append("It raised no challenges.\n")
+        for f in sorted(extra, key=lambda x: _SEVERITY_ORDER.get(str(x.get("severity")), 3)):
+            lines.extend(_finding_lines(f))
 
     if unchecked:
         lines.append("\n**Not checked**\n")
@@ -3017,8 +2524,9 @@ def _section_adversarial(
         # Counted, never silent. A review that filed five and kept one must not read as one.
         noun = "challenge" if dropped == 1 else "challenges"
         lines.append(
-            f"\n*{dropped} further {noun} could not be shown here because no source was given "
-            f"for {'it' if dropped == 1 else 'them'}.*\n"
+            f"\n*{dropped} further {noun} could not be shown here because "
+            f"{'it was' if dropped == 1 else 'they were'} incomplete or did not cite "
+            f"{'its' if dropped == 1 else 'their'} evidence in a form that can be checked.*\n"
         )
 
     return "\n".join(lines) + "\n"
@@ -3344,7 +2852,12 @@ def _blocked_comparisons(inputs: dict[str, Any] | None, sizing: dict[str, Any] |
     }
 
 
-def _red_team_findings(redteam: dict[str, Any] | None) -> dict[str, Any] | None:
+def _red_team_findings(
+    redteam: dict[str, Any] | None,
+    sizing: Any = None,
+    inputs: Any = None,
+    later: list[tuple[int, dict[str, Any]]] | None = None,
+) -> dict[str, Any] | None:
     """The adversarial findings as the coach should read them, or None if the step did not run.
 
     None and an empty `findings` list are DIFFERENT and the coach must be able to tell them
@@ -3356,7 +2869,26 @@ def _red_team_findings(redteam: dict[str, Any] | None) -> dict[str, Any] | None:
     if not _usable(redteam):
         return None
     summary = _as_dict(redteam.get("summary"))
+
+    def _coachable(f: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "claim_attacked": _humanize_claim(str(f.get("claim_attacked") or "").strip()),
+            "what_is_true": _view.checked_multiples(str(f.get("what_is_true") or "").strip(), sizing, inputs),
+            "evidence_quote": str(f.get("evidence_quote") or "").strip(),
+            "source_url": str(f.get("source_url") or "").strip(),
+            "source_title": str(f.get("source_title") or "").strip(),
+            "severity": f.get("severity"),
+        }
+
     return {
+        # Later reviews of the same analysis, in full: the page lists them, so the coach sees them.
+        "later_reviews": [
+            {
+                "review": n,
+                "findings": [_coachable(f) for f in _as_list(_as_dict(doc).get("findings")) if isinstance(f, dict)],
+            }
+            for n, doc in later or []
+        ],
         "findings": [
             {
                 # HUMANIZED, like the renderer does it. `claim_attacked` is free text and is
@@ -3365,7 +2897,9 @@ def _red_team_findings(redteam: dict[str, Any] | None) -> dict[str, Any] | None:
                 # founder-facing prose, so passing it raw is the defect the fleet fixed once in
                 # cap-table, reintroduced one field over.
                 "claim_attacked": _humanize_claim(str(f.get("claim_attacked") or "").strip()),
-                "what_is_true": str(f.get("what_is_true") or "").strip(),
+                # Checked like every other surface: the coach repeated an unsupported "5x" as a fact
+                # about the founder's own build.
+                "what_is_true": _view.checked_multiples(str(f.get("what_is_true") or "").strip(), sizing, inputs),
                 "evidence_quote": str(f.get("evidence_quote") or "").strip(),
                 "source_url": str(f.get("source_url") or "").strip(),
                 "source_title": str(f.get("source_title") or "").strip(),
@@ -3383,6 +2917,26 @@ def _red_team_findings(redteam: dict[str, Any] | None) -> dict[str, Any] | None:
     }
 
 
+def _gap_message(comparison: dict[str, Any], metric: str) -> str:
+    """The discrepancy warning: the factor between the two recorded figures, or the producer's
+    percentage when the figures are not recorded (an artifact from before they were)."""
+    sentence = _params.gap_sentence(metric, comparison.get(f"top_down_{metric}"), comparison.get(f"bottom_up_{metric}"))
+    if sentence is not None:
+        return sentence.rstrip(".")
+    return (
+        f"Top-down and bottom-up {metric.upper()} differ by "
+        f"{_params.fmt_delta(comparison[f'{metric}_delta_pct'])} (>30%)"
+    )
+
+
+def _payload_gap(comparison: dict[str, Any], metric: str) -> str | None:
+    if f"{metric}_delta_pct" not in comparison:
+        return None
+    return _params.gap_sentence(
+        metric, comparison.get(f"top_down_{metric}"), comparison.get(f"bottom_up_{metric}")
+    ) or (str(comparison.get("note" if metric == "tam" else f"{metric}_note") or "") or None)  # TAM's is unprefixed
+
+
 def _approach_comparison(
     sizing: dict[str, Any] | None, validation: dict[str, Any] | None = None
 ) -> dict[str, Any] | None:
@@ -3397,9 +2951,11 @@ def _approach_comparison(
         return None
     shared = _shared_input_values(sizing, validation)
     return {
-        "tam_delta_pct": comparison.get("tam_delta_pct"),
-        "sam_delta_pct": comparison.get("sam_delta_pct"),
-        "som_delta_pct": comparison.get("som_delta_pct"),
+        # The gap as a sentence with its factor, never the percentage: measured against the two
+        # figures' average, a gap under 200% was coached as a small multiple on a far wider pair.
+        "tam_gap": _payload_gap(comparison, "tam"),
+        "sam_gap": _payload_gap(comparison, "sam"),
+        "som_gap": _payload_gap(comparison, "som"),
         "shared_inputs": [{"metric": s["metric"], "detail": s["detail"]} for s in shared],
         # The same split the report makes: "cannot tell" is only true while nothing was seen.
         "caveat": (
@@ -3424,6 +2980,7 @@ def _emit_coaching_payload(
     currency: str = "USD",
     validation: dict[str, Any] | None = None,
     red_team: dict[str, Any] | None = None,
+    review_facts: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the coaching_payload for market-sizing (schema_version v0.7.0-market-sizing).
 
@@ -3507,7 +3064,15 @@ def _emit_coaching_payload(
         # What an outside look turned up, with its sources. `null` when the step did not run --
         # which the coach must be able to tell apart from "it ran and found nothing", because
         # those are opposite facts about the report it is writing commentary on.
-        "red_team_findings": _red_team_findings(red_team),
+        "red_team_findings": _red_team_findings(red_team, sizing, inputs, _as_dict(review_facts).get("later")),
+        # How many times the outside review ran and what the page says about it -- computed from the
+        # review copies, never from a model-written approval. The coach had no re-run signal otherwise.
+        "review_rounds": {
+            "count": int(_as_dict(review_facts).get("rounds") or 0),
+            "shown": _as_dict(review_facts).get("round_shown"),
+            "note": _view.review_note(_as_dict(review_facts)),
+            "changes": _view.review_changes(_as_dict(review_facts), validation, currency),
+        },
         # {code, label, message}, matching competitive-positioning — NOT a bare code list. The
         # coaching sub-agent reads this payload and echoes it into commentary the founder reads;
         # handing it only `UNVALIDATED_CLAIMS` is how raw warning codes reached delivered reports.
@@ -3544,6 +3109,12 @@ def _emit_coaching_payload(
 
 
 def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
+    """Render inside one currency scope: the default is back to USD when this returns or raises."""
+    with _view.render_scope():
+        return _compose(dir_path, report_path)
+
+
+def _compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
     """Main composition: load artifacts, validate, assemble report."""
     # Load all artifacts
     all_names = REQUIRED_ARTIFACTS + OPTIONAL_ARTIFACTS
@@ -3558,9 +3129,30 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
         _redteam_copy.primary_run_id(artifacts.get(n) for n in REQUIRED_ARTIFACTS),
         artifacts.get("redteam.json"),
         artifacts.get("methodology.json"),
+        same_as_now=_view.review_matcher(
+            artifacts.get("sizing.json") if isinstance(artifacts.get("sizing.json"), dict) else {},
+            artifacts.get("validation.json"),
+            artifacts.get("inputs.json"),
+        ),
     )
     if _rt_facts["rounds"]:
         artifacts["redteam.json"] = _rt_shown
+
+    # The sizing every reader below sees has been re-checked: against the research record it was
+    # resolved from, and against its own math. An edited sizing is replaced by the recomputation, so no
+    # section, verdict or payload can render a figure the inputs do not give.
+    _sz_render, _sz_codes = _view.sizing_integrity(
+        dir_path,
+        _redteam_copy.primary_run_id(artifacts.get(n) for n in REQUIRED_ARTIFACTS),
+        artifacts.get("sizing.json"),
+        artifacts.get("validation.json"),
+        artifacts.get("inputs.json"),
+        reviewed=bool(_rt_facts["rounds"]),
+        review_facts=_rt_facts,
+        methodology=artifacts.get("methodology.json"),
+    )
+    if _sz_render is not None:
+        artifacts["sizing.json"] = _sz_render
 
     # REQUIRED only, on both sides. An OPTIONAL artifact that is absent is not missing -- it is
     # optional, and reporting it as missing makes a complete analysis look incomplete. Latent
@@ -3606,17 +3198,56 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
 
     # Run validation
     warnings = validate_artifacts(artifacts)
+    _bypassed_steps = _handoff_bypassed(
+        dir_path, _redteam_copy.primary_run_id(artifacts.get(n) for n in REQUIRED_ARTIFACTS), artifacts
+    )
+    if _bypassed_steps:
+        warnings.append(_warn("HANDOFF_BYPASSED", _handoff_audit().founder_message(_bypassed_steps)))
+    _unoffered = _revision_not_offered(
+        dir_path,
+        _redteam_copy.primary_run_id(artifacts.get(n) for n in REQUIRED_ARTIFACTS),
+        artifacts.get("redteam.json"),
+        rounds=int(_rt_facts.get("rounds") or 0),
+    )
+    if _unoffered:
+        _named = ", ".join(_humanize_param(p) for p in _unoffered)
+        warnings.append(
+            _warn(
+                "REVISION_NOT_OFFERED",
+                f"The outside review raised a high-severity challenge to {_named}, and there is no record that "
+                "you were offered the one revision round: changing the challenged inputs and having the analysis "
+                "reviewed once more. The challenges are shown as they stand, and you can still ask for that revision.",
+            )
+        )
     warnings.extend(_warn(code, message) for code, message in _rt_codes)
+    warnings.extend(_warn(code, message) for code, message in _sz_codes)
+    warnings.extend(
+        _warn(code, message)
+        for code, message in _view.unchecked_sizing(
+            artifacts.get("sizing.json"),
+            artifacts.get("validation.json"),
+            artifacts.get("inputs.json"),
+            review_facts=_rt_facts,
+        )
+    )
+    warnings.extend(
+        _warn(code, message)
+        for code, message in _view.downstream_staleness(
+            artifacts.get("sizing.json"), artifacts.get("sensitivity.json"), artifacts.get("checklist.json")
+        )
+    )
     if "inputs_at_review" in _rt_facts:
-        for _field, _was, _now in _redteam_copy.rewritten_inputs(
-            _rt_facts["inputs_at_review"], artifacts.get("inputs.json"), artifacts.get("methodology.json")
+        # Keyed on the FIRST review only, and stated as a fact: a later review could otherwise clear it
+        # by being re-dispatched, and the founder's own figure is the one thing they must be told about.
+        for _field, _then, _now in _redteam_copy.rewritten_inputs(
+            _rt_facts["inputs_at_review"], artifacts.get("inputs.json")
         ):
             warnings.append(
                 _warn(
                     "FOUNDER_INPUT_REWRITTEN",
-                    f"The founder's stated {_humanize_param(_field)} was {_was!r} when the outside review "
-                    f"ran and is now {_now!r}, and the founder did not confirm that change. Tell the "
-                    f"founder, and restore the figure they gave unless they confirm the new one at Step 6d.",
+                    f"Your {_humanize_param(_field)} was {_stated_as(_field, _then)} when the outside review "
+                    f"first ran and is {_stated_as(_field, _now)} now. If you chose the new figure, nothing "
+                    f"needs to change; if you did not, it should go back to the one you gave.",
                 )
             )
 
@@ -3637,7 +3268,13 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
             if not isinstance(reason, str) or not reason.strip():
                 print(f"Warning: accepted_warnings entry for '{code}' missing 'reason' — skipped", file=sys.stderr)
                 continue
-            if code in WARNING_SEVERITY and WARNING_SEVERITY[code] in ACCEPTIBLE_SEVERITIES:
+            if code in _UNACCEPTABLE_MEDIUM:
+                print(
+                    f"Warning: cannot accept '{code}' -- it discloses how this run was carried out and "
+                    "stays in the report; ignored",
+                    file=sys.stderr,
+                )
+            elif code in WARNING_SEVERITY and WARNING_SEVERITY[code] in ACCEPTIBLE_SEVERITIES:
                 acceptances.append(
                     {
                         "code": code,
@@ -3702,17 +3339,24 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
             _render_safe(artifacts.get("redteam.json")),
             checklist,
             _rt_reason,
+            bool(_bypassed_steps),
         ),
         _section_analysis_checklist(checklist, artifacts_found),
         _section_methodology(methodology),
         _section_definitions(),
         _section_sizing_table(sizing, provenance_data, validation_data),
         _section_deck_claims_narrative(inputs),
-        _section_assumptions(validation_data),
+        _section_assumptions(validation_data, sizing),
         _section_adversarial(
-            _render_safe(artifacts.get("redteam.json")), _rt_reason, _redteam_copy.revision_note(_rt_facts)
+            _render_safe(artifacts.get("redteam.json")),
+            _rt_reason,
+            _view.review_note(_rt_facts),
+            _view.review_changes(_rt_facts, validation_data, _view._CURRENCY),
+            sizing,
+            inputs,
+            _rt_facts.get("later"),
         ),
-        _section_your_answers(methodology, inputs),
+        _section_your_answers(methodology, inputs, dir_path),
         _section_validation(validation_data),
         _section_sensitivity(sensitivity),
         _WARNINGS_PLACEHOLDER,
@@ -3843,9 +3487,10 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
         report_path=resolved_report_path,
         insertion_marker=marker,
         sizing=sizing,
-        currency=_CURRENCY,
+        currency=_view._CURRENCY,
         validation=_as_dict(artifacts.get("validation.json")) or None,
         red_team=_render_safe(artifacts.get("redteam.json")),
+        review_facts=_rt_facts,
     )
 
     result = {
@@ -3867,6 +3512,7 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
                 _render_safe(artifacts.get("redteam.json")),
                 checklist,
                 _rt_reason,
+                bool(_bypassed_steps),
             ),
             _upload_display,
         ),

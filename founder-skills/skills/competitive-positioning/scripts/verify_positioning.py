@@ -113,7 +113,15 @@ _ALWAYS_REQUIRED = [
 # Required only at the end-of-run gate — mid-pipeline these legitimately do not exist yet.
 _GATE2_REQUIRED = ["report.json", "report.md"]
 
-_OPTIONAL = ["product_profile.json", "competitor_verification.json", "report.html", "explore.html"]
+_OPTIONAL = [
+    "product_profile.json",
+    "competitor_verification.json",
+    "landscape_draft.json",
+    "startup_research.json",
+    "startup_research.json.first.json",
+    "report.html",
+    "explore.html",
+]
 
 
 def _internal_files_in(text: str) -> list[str]:
@@ -186,6 +194,34 @@ _FIELD_NAME_RE = re.compile(
     r"\b(?:recent_developments|out_of_window_developments|moat_count|"
     r"deferred_recall_candidates|key_differentiators|research_depth|"
     r"sourced_fields_count|views_fingerprint|graded_against)\b"
+)
+
+
+def _sentence_after(text: str, marker: str) -> str:
+    """The note that starts at `marker`, up to the end of its line or paragraph -- "" when absent.
+
+    report.html puts both notes in one line, so a line-based read would credit a name in the
+    "Removed" note to the "Retained" one.
+    """
+    start = text.find(marker)
+    if start < 0:
+        return ""
+    end = len(text)
+    for stop in ("\n", "</p>"):
+        i = text.find(stop, start)
+        if i >= 0:
+            end = min(end, i)
+    return text[start:end]
+
+
+# STATUS_CONTRADICTION: a patent status stated in the coaching that the computed record contradicts.
+# Deliberately narrow: patent-anchored phrases only, so "take for granted" never matches.
+_PENDING_RE = re.compile(
+    r"(?i)\bpatent[- ]pending\b|\bpending (?:patent|application)s?\b"
+    r"|\bpatents? (?:application )?(?:is |are |remains? )?pending\b|\bpatents? (?:is |are )?not (?:yet )?granted\b"
+)
+_GRANTED_RE = re.compile(
+    r"(?i)\b(?:granted|issued) patents?\b|\bpatents? (?:was |were |has been |have been |is |are )?(?:granted|issued)\b"
 )
 
 
@@ -342,18 +378,107 @@ def _check_rendered(artifacts: dict[str, dict[str, Any]], gate: int) -> list[dic
                     "section — a challenged competitor is tabled indistinguishably from a genuine one",
                 )
             )
-        for v in verdicts:
-            v = _as_dict(v)
-            if str(v.get("verdict")) == "not_a_competitor" and "Retained despite the challenge" not in report_md:
+        # Per competitor, and against the FINAL set: a not_a_competitor verdict is written before the
+        # founder confirms the set, so the verdict alone cannot say whether the competitor was kept.
+        # Checking only that the "Retained" sentence exists passed a report that listed a dropped
+        # competitor as "retained … scored and ranked" -- compose always wrote the sentence.
+        # Computed here independently of `_view`, so the gate does not share the renderers' logic.
+        draft = artifacts.get("landscape_draft.json", {}).get("_data")
+        names: dict[str, str] = {}
+        for source in (draft, landscape):
+            for comp in _as_list(_as_dict(source).get("competitors")):
+                comp = _as_dict(comp)
+                comp_key, comp_label = comp.get("slug"), comp.get("name")
+                if isinstance(comp_key, str) and comp_key and isinstance(comp_label, str) and comp_label.strip():
+                    names[comp_key] = comp_label.strip()
+        final = {
+            str(_as_dict(c).get("slug"))
+            for c in _as_list(_as_dict(landscape).get("competitors"))
+            if _as_dict(c).get("slug")
+        }
+        pages = [("report.md", report_md)]
+        if report_html is not None:
+            pages.append(("report.html", html.unescape(report_html)))
+        for page, text in pages:
+            retained_line = _sentence_after(text, "Retained despite the challenge")
+            removed_line = _sentence_after(text, "Removed after the challenge")
+            for v in verdicts:
+                v = _as_dict(v)
+                if str(v.get("verdict")) != "not_a_competitor":
+                    continue
+                slug = str(v.get("slug") or "")
+                name = names.get(slug, slug)
+                if not slug:
+                    continue
+                if slug in final and name not in retained_line:
+                    issues.append(
+                        _issue(
+                            "error",
+                            f"{page}: '{name}' was judged not a competitor and kept in the scored set, but "
+                            f"the page does not say so -- reading its position with the verdict in mind "
+                            f"is exactly what the founder cannot do",
+                        )
+                    )
+                elif slug not in final and name in retained_line:
+                    issues.append(
+                        _issue(
+                            "error",
+                            f"{page}: '{name}' was removed from the set after the challenge, but the page "
+                            f"reports it as retained and ranked",
+                        )
+                    )
+                elif slug not in final and name not in removed_line:
+                    issues.append(
+                        _issue(
+                            "error",
+                            f"{page}: '{name}' was removed from the set after the challenge, but the page "
+                            f"does not say so",
+                        )
+                    )
+
+    # --- 6b. the startup's public record reaches both pages, and the coaching does not contradict it
+    # The run's FIRST record (the producer's frozen copy), else the current one. Its family status was
+    # COMPUTED by validate_startup_research.py; rewording the commentary is the only remedy for a
+    # contradiction, and that cannot change the comparand.
+    record = artifacts.get("startup_research.json.first.json", {}).get("_data") or artifacts.get(
+        "startup_research.json", {}
+    ).get("_data")
+    if isinstance(record, dict):
+        numbers = [
+            str(_as_dict(p).get("number")) for p in _as_list(record.get("publications")) if _as_dict(p).get("number")
+        ]
+        pages = [("report.md", report_md)]
+        if report_html is not None:
+            pages.append(("report.html", html.unescape(report_html)))
+        for page, text in pages:
+            missing = [n for n in numbers if n not in text]
+            if missing:
                 issues.append(
                     _issue(
                         "error",
-                        f"'{v.get('slug')}' was judged not_a_competitor and kept, but report.md does not "
-                        f"say so — read its position with the verdict in mind is exactly what the "
-                        f"founder cannot do",
+                        f"{page} does not show the startup's patent publication(s) {missing} that public-records "
+                        f"research found -- computed and not rendered",
                     )
                 )
-                break
+        if "## Coaching Commentary" in report_md:
+            commentary = report_md.split("## Coaching Commentary", 1)[1]
+            family = record.get("family_status")
+            if family == "granted" and _PENDING_RE.search(commentary):
+                issues.append(
+                    _issue(
+                        "error",
+                        "STATUS_CONTRADICTION: the coaching commentary calls the startup's patent pending or "
+                        "not granted, but public records show a grant in the family -- reword the commentary",
+                    )
+                )
+            if family in ("published", "none_found") and _GRANTED_RE.search(commentary):
+                issues.append(
+                    _issue(
+                        "error",
+                        "STATUS_CONTRADICTION: the coaching commentary calls the startup's patent granted, but "
+                        "no grant was found in public records -- reword the commentary",
+                    )
+                )
 
     # --- 7. the explorer must render the scored layer it embeds --------------------------
     explore = artifacts.get("explore.html", {}).get("_text")

@@ -7,19 +7,23 @@
 
 Per Gotcha #1 + the rule's warnings: when target_basis is `pre_money`, the
 top-up increases pre-money FD; when `post_money`, denominator includes new
-money. The rule pack's `target_basis` enum has four values
-(`pre_money | post_money | post_money_excluding_converting_securities |
-custom`). `pre_money`, `post_money`, and `custom` (a `pre_money` fallback)
-have distinct formulas here. `post_money_excluding_converting_securities`
-shares the `post_money` formula: the converting-securities exclusion is the
-caller's responsibility (it must pre-adjust pre_topup_FD to remove SAFE/note
-shares before calling), so no separate branch is needed.
+money. `post_money_increase` sizes the INCREASE alone on the post-money
+denominator (rule `option_pool.increase_sized_target`): the percentage is
+predicated of the new options, so the existing unallocated pool is not
+credited against it. Those are the three bases computed here. The rule pack's `target_basis`
+enum also names `post_money_excluding_converting_securities` and `custom`;
+no published source defines either as a pool-sizing denominator, so both are
+refused here (ValueError) rather than silently computed as a neighbour. The
+solver's basis gate (`priced_round.solve_priced_round`) resolves them first:
+it refuses them, or maps the founder's stated answer to a computed basis.
 
 Formula (rule pack):
   For post-money target:
     (existing_unallocated_pool + x) / (pre_topup_FD + x + new_money_shares) = target_pool_percent
   For pre-money target:
     (existing_unallocated_pool + x) / (pre_topup_FD + x) = target_pool_percent
+  For an increase-sized post-money target:
+    x / (pre_topup_FD + x + new_money_shares) = target_pool_percent
 """
 
 from __future__ import annotations
@@ -66,26 +70,32 @@ def required_topup(
         # x - target * x = target * pre_fd - existing
         # x = (target * pre_fd - existing) / (1 - target)
         x = (target * pre_fd - existing) / (1 - target)
-    elif target_basis in {"post_money", "post_money_excluding_converting_securities"}:
+    elif target_basis == "post_money":
         nm = float(new_money_shares or 0)
         acq = float(acquisition_shares or 0)
         # (existing + x) / (pre_fd + x + nm + acq) = target
         x = (target * (pre_fd + nm + acq) - existing) / (1 - target)
-    elif target_basis == "custom":
-        # Custom denominator policy is document-defined; for v0.1 we treat it
-        # as pre_money fallback with a counsel-review flag (caller responsibility).
-        x = (target * pre_fd - existing) / (1 - target)
+    elif target_basis == "post_money_increase":
+        nm = float(new_money_shares or 0)
+        acq = float(acquisition_shares or 0)
+        # x / (pre_fd + x + nm + acq) = target: the existing pool is not credited against the increase.
+        x = target * (pre_fd + nm + acq) / (1 - target)
+    elif target_basis in {"custom", "post_money_excluding_converting_securities"}:
+        raise ValueError(
+            f"target_basis {target_basis!r} is not modelled: resolve it with the solver's basis gate first"
+        )
     else:
         raise ValueError(f"unknown target_basis: {target_basis}")
 
     required = max(0, int(round(x)))
 
     # Recompute realized percent
-    if target_basis == "pre_money" or target_basis == "custom":
+    if target_basis == "pre_money":
         denom = pre_fd + required
     else:
         denom = pre_fd + required + float(new_money_shares or 0) + float(acquisition_shares or 0)
     realized = (existing + required) / denom if denom > 0 else 0.0
+    increase_share = required / denom if denom > 0 else 0.0
 
     # Phase M+S: when the founder-supplied target_basis would silently no-op
     # (existing pool already meets target under literal pre_money basis math)
@@ -95,7 +105,7 @@ def required_topup(
     # see "0 top-up needed" and think the refresh has no cost — incorrect.
     warnings: list[dict[str, Any]] = []
     clarifying_question: dict[str, Any] | None = None
-    if target_basis in {"pre_money", "custom"} and required == 0 and target > 0:
+    if target_basis == "pre_money" and required == 0 and target > 0:
         # Compute what the post_money interpretation would give for comparison
         nm = float(new_money_shares or 0)
         post_money_x = (target * (pre_fd + nm) - existing) / (1 - target)
@@ -106,7 +116,7 @@ def required_topup(
     # interpretation produces a NONZERO top-up. If both interpretations yield 0
     # top-up, the pool is legitimately oversized and there's no real ambiguity.
     # M7 guard: pre_fd may be 0 for library callers; protect the warning message.
-    if target_basis in {"pre_money", "custom"} and required == 0 and target > 0 and post_money_required > 0:
+    if target_basis == "pre_money" and required == 0 and target > 0 and post_money_required > 0:
         existing_pct_of_pre_fd = (existing / pre_fd) if pre_fd > 0 else 0.0
         warnings.append(
             {
@@ -117,20 +127,21 @@ def required_topup(
                     f"({existing:,.0f} shares = {existing_pct_of_pre_fd:.1%} of pre-FD) already "
                     f"meets or exceeds the target of {target:.1%}, so the script computed 0 top-up. "
                     f"Series A term-sheet practice for 'X% pool refresh' usually means "
-                    f"X% post-close unallocated (post_money basis). Under that reading, "
+                    f"X% post-close unallocated (measured after the round). Under that reading, "
                     f"top-up would be {post_money_required:,d} shares. Confirm founder intent."
                 ),
             }
         )
         clarifying_question = {
             "question": (
-                f"You asked for a {target:.1%} pool refresh on a pre-money basis. Under the literal "
+                f"You asked for a {target:.1%} pool refresh measured against the share count before the round. "
+                "Under the literal "
                 "reading, the existing pool already meets that target so the refresh is "
                 f'a no-op. Series A term sheets usually mean "{target:.1%} post-close unallocated" — '
                 "which would require a real top-up. Which interpretation matches your term sheet?"
             ),
             "options": [
-                "Literal pre-money basis (no top-up needed — keep existing pool)",
+                "Measured before the round, as written (no top-up needed — keep existing pool)",
                 f"Industry norm: post-close unallocated ({post_money_required:,d} share top-up)",
             ],
             "context": {
@@ -156,6 +167,19 @@ def required_topup(
             }
         ],
     }
+    if target_basis == "post_money_increase":
+        # Both shares, because they are the two readings of one sentence: the increase alone is the target,
+        # and the pool after the round also holds the existing unallocated options.
+        result["post_topup_increase_percent"] = increase_share
+        result["math_provenance"].append(
+            {
+                "output_field": "required_pool_topup_shares",
+                "source_type": "rule",
+                "rule_id": "option_pool.increase_sized_target",
+                "rule_pack_version": RULE_PACK_VERSION,
+                "source_ref": None,
+            }
+        )
     if warnings:
         result["warnings"] = warnings
     if clarifying_question:
@@ -172,7 +196,7 @@ def _cli() -> int:
     p.add_argument(
         "--basis",
         required=True,
-        choices=["pre_money", "post_money", "post_money_excluding_converting_securities", "custom"],
+        choices=["pre_money", "post_money", "post_money_increase"],
     )
     add_output_args(p)
     args = p.parse_args()

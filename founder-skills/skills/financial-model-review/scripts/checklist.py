@@ -642,6 +642,14 @@ def _normalize_profile(company: dict[str, Any]) -> tuple[dict[str, Any], set[str
         derived = _REVENUE_MODEL_TO_SECTOR.get(rmt)
         if derived:
             result["sector_type"] = derived
+        elif rmt == _NOT_STATED_MODEL:
+            # Deliberately unmapped: no benchmarkable revenue model is stated, so no sector gate can
+            # be decided. Recorded as unresolved so the dropped criteria are disclosed.
+            print(
+                "Note: revenue model not stated (unclassified); sector-specific criteria are not assessed.",
+                file=sys.stderr,
+            )
+            unresolved.add("sector_gate")
         elif rmt:
             print(
                 f"Warning: could not derive sector_type from revenue_model_type '{rmt}'",
@@ -707,6 +715,9 @@ _GATE_LABELS = {
 # internal token the founder-text policy flags, and HTML is NOT run through `substitute()`
 # (test_html_founder_text.py), so naming it accurately would leak it into report.html and red the
 # fleet ratchet. "your revenue model" is the same fact in founder language.
+# The revenue-model value meaning "the materials state none". Not a sector; see `_REVENUE_MODEL_TO_SECTOR`.
+_NOT_STATED_MODEL = "unclassified"
+
 _UNRESOLVED_GATE_FIELDS = {
     "geography_gate": "geography",
     "sector_gate": "revenue model",
@@ -720,6 +731,11 @@ def _unresolved_gate_reason(gate_type: str, company: dict[str, Any] | None) -> s
     if company is not None:
         source_key = "revenue_model_type" if gate_type == "sector_gate" else field
         raw = str(company.get(source_key, "") or "").strip()
+    if gate_type == "sector_gate" and raw.lower() == _NOT_STATED_MODEL:
+        return (
+            "no revenue model we have benchmarks for is stated in your materials, "
+            "so we could not tell whether this applies to you"
+        )
     seen = f" ('{raw}')" if raw else ""
     return f"we could not match your {field}{seen}, so we could not tell whether this applies to you"
 

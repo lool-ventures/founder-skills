@@ -20,16 +20,28 @@ from and which figure wins on a conflict -- never that the message above was wro
 tell a wrong figure from a correctly paraphrased one, and a block fires on both.
 
 TRIGGER FROM THE TRANSCRIPT, NOT THE MESSAGE. Keying on the message's first words fails exactly when
-the model rewrites the first words. The trigger is a `closing_message.py` tool call after the last
-real user prompt -- the same key the e2e lane uses. What is judged is EVERY top-level assistant text
+the model rewrites the first words. The trigger is a skill's closing-message script (SKILLS below:
+market-sizing's `closing_message.py`, competitive-positioning's `cp_closing_message.py`) called after
+the last real user prompt -- the same key the e2e lane uses. Each script is matched as a WHOLE name,
+so neither name matches inside the other and the table's order does not matter; the last such call
+in the prompt decides which skill's hand-over is judged. What is judged is EVERY top-level assistant text
 after that call, not `last_assistant_message`: tool calls (present_files, TaskUpdate) sit between
 the call and the final text on real runs, and text emitted before them is founder-visible.
 
-LOCATE FROM cwd, NOT FROM THE MESSAGE. The model's `--report` path is in whichever namespace its shell
-had (VM `/sessions/…` at hostloop) while this hook runs host-side; the links in the message are what
-it may have rewritten. stdin's `cwd` is a contract: hostloop = the outputs host dir, Claude Code =
-the working dir, VM-loop = `/sessions/<id>`. `handover.txt` is found under
-`<cwd>/artifacts/market-sizing-*/` or `<cwd>/mnt/outputs/artifacts/market-sizing-*/`, newest first.
+THE PRINTED TEXT: handover.txt UNDER cwd, ELSE THE CLOSING CALL'S RESULT. Never from the message:
+its links are what the model may have rewritten, and the model's `--report` path is in whichever
+namespace its shell had (VM `/sessions/…` at hostloop) while this hook runs host-side.
+`handover.txt` is looked for under that skill's `<cwd>/artifacts/<skill>-*/` or
+`<cwd>/mnt/outputs/artifacts/<skill>-*/`, newest first -- found that way on the CLI (the working dir)
+and the cloud lane (`/home/claude`). Under the host-loop spawn newer Desktop uses, cwd is
+`/var/empty`, nothing is under it, and a live run's rewritten hand-over went through unchecked. So
+when no file is found, the printed text is read from the transcript's record of the closing call:
+its tool result, paired by a non-empty id, which a measured run showed equal to handover.txt byte
+for byte. That result can carry other commands' output around the hand-over (a recorded run ran
+`cp` and `ls` in the same command; stderr lands after stdout), so it is SLICED from the last opener
+line to the closing offer both scripts print last, and a result with no such slice -- cut short by
+a pipe, or empty after a redirect -- is not used: judging against part of the text would pass a
+message that drops the rest. The file stays first so every lane where it works today is unchanged.
 
 `stop-hook-error` IN THE SDK STREAM IS NOT AN ERROR HERE. A blocking Stop hook surfaces to the SDK
 as a `notification` whose key is `stop-hook-error`, whatever the hook's outcome was. MEASURED from
@@ -51,20 +63,76 @@ import glob
 import importlib.util
 import json
 import os
+import re
 import sys
 from typing import Any
 
+# market-sizing's values, unchanged; the table below adds skills beside it.
 TRIGGER = "closing_message.py"
 HANDOVER_GLOBS = ("artifacts/market-sizing-*/handover.txt", "mnt/outputs/artifacts/market-sizing-*/handover.txt")
+
+
+def _script(name: str) -> re.Pattern[str]:
+    """A script name as a whole word: not preceded by a name character, so "closing_message.py" does
+    not match inside "cp_closing_message.py", whatever order the table is in."""
+    return re.compile(r"(?<![\w-])" + re.escape(name) + r"\b")
+
+
+# (skill, trigger script, handover globs, the opener the no-transcript fallback keys on).
+SKILLS: tuple[tuple[str, re.Pattern[str], tuple[str, ...], str], ...] = (
+    ("market-sizing", _script(TRIGGER), HANDOVER_GLOBS, "finished market sizing"),
+    (
+        "competitive-positioning",
+        _script("cp_closing_message.py"),
+        (
+            "artifacts/competitive-positioning-*/handover.txt",
+            "mnt/outputs/artifacts/competitive-positioning-*/handover.txt",
+        ),
+        "finished competitive positioning",
+    ),
+    (
+        "financial-model-review",
+        _script("fmr_closing_message.py"),
+        (
+            "artifacts/financial-model-review-*/handover.txt",
+            "mnt/outputs/artifacts/financial-model-review-*/handover.txt",
+        ),
+        "finished financial model review",
+    ),
+)
 STOP_FEEDBACK_PREFIX = "Stop hook feedback:"
+# The first and last lines of every printed hand-over, the ends of the slice taken from a tool result.
+# test_stop_handover_hook.py holds both closing scripts' output to them.
+OPENER_PREFIX = "Here's your "
+OFFER_START = "If you want to keep the working data behind this"
+OFFER_END = "as a single archive."
 CORRECTION_LEAD = (
     "For the record, this is the summary as the analysis produced it; "
-    "if a figure in my message above differs from one here, use the one here:"
+    "if a figure in my message above differs from one here, use the one here, "
+    "and check any figure above that is not here against the report before relying on it:"
 )
 
 
 def _log(msg: str) -> None:
     print(f"stop_handover_check: {msg}", file=sys.stderr)
+
+
+def _load_delivery() -> Any:
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_delivery_check.py")
+    spec = importlib.util.spec_from_file_location("_delivery_check", path)
+    if spec is None or spec.loader is None:
+        raise ImportError(path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _current_prompt_start(rows: list[dict[str, Any]]) -> int:
+    start = 0
+    for i, row in enumerate(rows):
+        if _is_real_user_prompt(row):
+            start = i
+    return start
 
 
 def _load_contained() -> Any:
@@ -115,15 +183,66 @@ def read_transcript(path: str) -> list[dict[str, Any]]:
     return rows
 
 
+def _skill_of_call(tool_input: Any) -> str | None:
+    """The skill whose closing-message script this tool call ran, or None."""
+    text = json.dumps(tool_input)
+    for skill, trigger, _globs, _opener in SKILLS:
+        if trigger.search(text):
+            return skill
+    return None
+
+
+def printed_from_result(text: str, opener: str) -> str | None:
+    """The printed hand-over inside a closing call's tool result, or None when the result holds no
+    whole one: the lines from the last opener line to the first closing offer after it."""
+    lines = text.splitlines()
+    for start in reversed(range(len(lines))):
+        if not (lines[start].startswith(OPENER_PREFIX) and opener in lines[start]):
+            continue
+        for end in range(start, len(lines)):
+            line = lines[end].strip()
+            if line.startswith(OFFER_START) and line.endswith(OFFER_END):
+                return "\n".join(lines[start : end + 1]) + "\n"
+        return None
+    return None
+
+
+def _results_by_id(rows: list[dict[str, Any]]) -> dict[str, str]:
+    """Top-level tool results keyed by their non-empty tool_use_id."""
+    out: dict[str, str] = {}
+    for row in rows:
+        if row.get("type") != "user" or row.get("isSidechain"):
+            continue
+        content = (row.get("message") or {}).get("content")
+        if not isinstance(content, list):
+            continue
+        for b in content:
+            if isinstance(b, dict) and b.get("type") == "tool_result":
+                rid = b.get("tool_use_id")
+                if isinstance(rid, str) and rid:
+                    out[rid] = _text_of(b.get("content"))
+    return out
+
+
 def text_after_closing_call(rows: list[dict[str, Any]]) -> str | None:
-    """Every top-level assistant text after the last closing_message.py call of the current prompt
-    (restarting after any Stop-hook feedback turn), or None when the current prompt made no such
-    call: this stop is not ours."""
+    """Every top-level assistant text after the last closing-message call of the current prompt, or
+    None when there was none (see `closing_call`)."""
+    found = closing_call(rows)
+    return found[1] if found is not None else None
+
+
+def closing_call(rows: list[dict[str, Any]]) -> tuple[str, str, str | None] | None:
+    """(skill, every top-level assistant text after the last closing-message call of the current
+    prompt, restarting after any Stop-hook feedback turn, the printed hand-over sliced from the
+    latest of that skill's closing calls whose result holds one -- else None), or None when the
+    current prompt made no such call: this stop is not ours."""
     start = 0
     for i, row in enumerate(rows):
         if _is_real_user_prompt(row):
             start = i
     call_at = None
+    call_skill: str | None = None
+    calls: list[tuple[str, str]] = []  # (skill, call id) in order
     for i in range(start, len(rows)):
         row = rows[i]
         if row.get("type") != "assistant" or row.get("isSidechain"):
@@ -132,9 +251,13 @@ def text_after_closing_call(rows: list[dict[str, Any]]) -> str | None:
         if not isinstance(content, list):
             continue
         for b in content:
-            if isinstance(b, dict) and b.get("type") == "tool_use" and TRIGGER in json.dumps(b.get("input")):
-                call_at = i
-    if call_at is None:
+            if isinstance(b, dict) and b.get("type") == "tool_use":
+                skill = _skill_of_call(b.get("input"))
+                if skill is not None:
+                    call_at, call_skill = i, skill
+                    if isinstance(b.get("id"), str) and b["id"]:
+                        calls.append((skill, b["id"]))
+    if call_at is None or call_skill is None:
         return None
     texts: list[str] = []
     for row in rows[call_at + 1 :]:
@@ -150,12 +273,35 @@ def text_after_closing_call(rows: list[dict[str, Any]]) -> str | None:
         t = _text_of(content)
         if t.strip():
             texts.append(t)
-    return "\n".join(texts)
+    results = _results_by_id(rows[start:])
+    opener = next(o for name, _t, _g, o in SKILLS if name == call_skill)
+    printed: str | None = None
+    for skill, cid in reversed(calls):
+        if skill == call_skill and cid in results:
+            printed = printed_from_result(results[cid], opener)
+            if printed is not None:
+                break
+    return call_skill, "\n".join(texts), printed
 
 
-def find_handover(cwd: str) -> str | None:
+def _ends_on_tool_result(rows: list[dict[str, Any]]) -> bool:
+    """The session's last top-level row is a tool result: a stop cannot follow one, so the final
+    assistant text exists and has not reached the file yet."""
+    for row in reversed(rows):
+        if row.get("isSidechain") or row.get("type") not in ("user", "assistant") or row.get("isMeta"):
+            continue
+        content = (row.get("message") or {}).get("content")
+        if row.get("type") == "assistant":
+            return False
+        return isinstance(content, list) and any(
+            isinstance(b, dict) and b.get("type") == "tool_result" for b in content
+        )
+    return False
+
+
+def find_handover(cwd: str, globs: tuple[str, ...] = HANDOVER_GLOBS) -> str | None:
     candidates: list[str] = []
-    for pattern in HANDOVER_GLOBS:
+    for pattern in globs:
         candidates.extend(glob.glob(os.path.join(cwd, pattern)))
     candidates = [c for c in candidates if os.path.isfile(c)]
     if not candidates:
@@ -163,39 +309,91 @@ def find_handover(cwd: str) -> str | None:
     return max(candidates, key=os.path.getmtime)
 
 
-def decide(payload: dict[str, Any]) -> dict[str, str] | None:
-    """The block to emit, or None to let the stop through. Raises on nothing; callers fail open."""
-    if payload.get("hook_event_name") != "Stop" or payload.get("stop_hook_active"):
-        return None
-    transcript = payload.get("transcript_path")
+def _handover_problem(payload: dict[str, Any], rows: list[dict[str, Any]] | None) -> tuple[str, str] | None:
+    """(why, printed hand-over) when the closing message did not carry the printed hand-over, else None."""
     final: str | None = None
-    if isinstance(transcript, str) and os.path.isfile(transcript):
-        final = text_after_closing_call(read_transcript(transcript))
+    skill: str | None = None
+    from_transcript: str | None = None
+    if rows is not None:
+        found = closing_call(rows)
+        if found is not None:
+            skill, final, from_transcript = found
+        last = payload.get("last_assistant_message")
+        if final is not None and isinstance(last, str) and last.strip() and _ends_on_tool_result(rows):
+            # The Stop event can arrive before the final text reaches the transcript file (measured:
+            # 65 ms after it was written, not yet there), and a verbatim hand-over read as missing.
+            # Added only when the transcript visibly lacks a final text, so the payload's copy never
+            # stands in for text the transcript already holds.
+            final = f"{final}\n{last}" if final else last
     else:
         # No transcript to trigger from: the message's own opener is the only key left.
         last = payload.get("last_assistant_message")
-        if isinstance(last, str) and "finished market sizing" in last:
-            final = last
-    if final is None:
+        if isinstance(last, str):
+            for name, _trigger, _globs, opener in SKILLS:
+                if opener in last:
+                    skill, final = name, last
+                    break
+    if final is None or skill is None:
         return None
     cwd = payload.get("cwd")
-    if not isinstance(cwd, str):
+    globs = next(g for name, _t, g, _o in SKILLS if name == skill)
+    handover = find_handover(cwd, globs) if isinstance(cwd, str) else None
+    if handover is not None:
+        with open(handover, encoding="utf-8") as fh:
+            printed = fh.read()
+    elif from_transcript is not None:
+        printed = from_transcript
+    else:
+        _log(
+            f"{skill}'s closing message ran but no handover.txt under {cwd}, "
+            "and the transcript holds no whole printed hand-over"
+        )
         return None
-    handover = find_handover(cwd)
-    if handover is None:
-        _log(f"closing_message.py ran but no handover.txt under {cwd}")
-        return None
-    with open(handover, encoding="utf-8") as fh:
-        printed = fh.read()
     ok, why = _load_contained()(printed, final)
-    if ok:
+    return None if ok else (why, printed)
+
+
+def decide(payload: dict[str, Any]) -> dict[str, str] | None:
+    """The block to emit, or None to let the stop through. Raises on nothing; callers fail open.
+
+    Two checks, each independent of the other, merged into ONE block because a stop gets one: the
+    hand-over (the closing message carries the printed text) and delivery (finished files were
+    attached, not only linked -- `_delivery_check.py`). When both fail, the delivery comes first and
+    the printed hand-over is the last thing sent, since nothing after the rewrite is checked.
+    """
+    if payload.get("hook_event_name") != "Stop" or payload.get("stop_hook_active"):
         return None
-    reason = (
-        f"Your last message did not deliver the printed hand-over as written ({why}). "
-        "That message is already in front of the founder, so send a follow-up: the line below, then the "
-        "printed hand-over exactly as printed, and nothing with a number outside it.\n\n"
-        f"{CORRECTION_LEAD}\n\n{printed.rstrip()}"
+    transcript = payload.get("transcript_path")
+    rows = read_transcript(transcript) if isinstance(transcript, str) and os.path.isfile(transcript) else None
+    handover = _handover_problem(payload, rows)
+    tool: str | None = None
+    if rows is not None:
+        try:
+            tool = _load_delivery().missing_delivery(rows, _current_prompt_start(rows))
+        except Exception as e:  # noqa: BLE001 - the delivery check must never cost the hand-over check
+            _log(f"delivery check: {type(e).__name__}: {e}")
+    if handover is None and tool is None:
+        return None
+    attach = (
+        f"If the files your message points to are the finished deliverables, attach them now with {tool}; "
+        "if they are not finished, say so in one line instead."
     )
+    if handover is None:
+        reason = (
+            "Your last message links the finished files but did not attach them, and a link alone does "
+            f"not reach the founder on every host. {attach} Add nothing else."
+        )
+    else:
+        why, printed = handover
+        lead = (
+            f"Your last message did not deliver the printed hand-over as written ({why}). "
+            "That message is already in front of the founder, so send a follow-up: "
+        )
+        steps = f"first, {attach[0].lower()}{attach[1:]} Then send " if tool is not None else "send "
+        reason = (
+            f"{lead}{steps}the line below, then the printed hand-over exactly as printed, and nothing with "
+            f"a number outside it.\n\n{CORRECTION_LEAD}\n\n{printed.rstrip()}"
+        )
     return {"decision": "block", "reason": reason}
 
 

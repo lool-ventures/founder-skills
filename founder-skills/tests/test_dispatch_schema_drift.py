@@ -37,6 +37,7 @@ informs the sub-agent's own judgement and is not meant to be rendered. The latte
 
 from __future__ import annotations
 
+import ast
 import json
 import re
 from pathlib import Path
@@ -128,8 +129,36 @@ _SCAFFOLD: dict[str, dict[str, str]] = {
 }
 
 
-def _template_keys(skill: str) -> set[str]:
-    """Field names appearing in any JSON return-shape template on either prompt surface."""
+# A prompt generator is a third prompt surface: its templates are printed and sent verbatim, so a field
+# one asks for is a template field like any in SKILL.md. It is also NOT a consumer -- the field names in
+# its strings are the questions, not answers read back. Before this, both errors held at once for
+# market-sizing's RED_TEAM and CHECKLIST templates, so drift in either was invisible.
+_GENERATORS: dict[str, str] = {
+    "market-sizing": "dispatch_prompt.py",
+    "competitive-positioning": "cp_dispatch_prompt.py",
+}
+
+
+def _generator_path(skill: str) -> Path | None:
+    name = _GENERATORS.get(skill)
+    if name is None:
+        return None
+    path = REPO_ROOT / "founder-skills" / "skills" / skill / "scripts" / name
+    return path if path.is_file() else None
+
+
+def _generator_template_keys(source: str) -> set[str]:
+    """JSON-shape field names in every string literal of a generator (constants, prompt-line lists and
+    f-string fragments alike), found by parsing the module rather than by pattern-matching its text."""
+    text: list[str] = []
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            text.append(node.value)
+    return set(re.findall(r'"([a-z][a-z0-9_]*)"\s*:', "\n".join(text)))
+
+
+def _template_keys(skill: str, generator_source: str | None = None) -> set[str]:
+    """Field names appearing in any JSON return-shape template on any prompt surface."""
     keys: set[str] = set()
     for path in (
         REPO_ROOT / "founder-skills" / "agents" / f"{skill}.md",
@@ -139,6 +168,11 @@ def _template_keys(skill: str) -> set[str]:
         # EVERY fence, not just ```json: templates appear untagged and inside ```bash heredocs.
         for block in re.findall(r"^```[a-z]*\n(.*?)^```", text, re.S | re.M):
             keys |= set(re.findall(r'"([a-z][a-z0-9_]*)"\s*:', block))
+    gen = _generator_path(skill)
+    if generator_source is None and gen is not None:
+        generator_source = gen.read_text(encoding="utf-8")
+    if generator_source is not None:
+        keys |= _generator_template_keys(generator_source)
     return keys
 
 
@@ -149,9 +183,10 @@ def _consumer_names(skill: str) -> set[str]:
         REPO_ROOT / "founder-skills" / "skills" / skill / "scripts",
         REPO_ROOT / "founder-skills" / "scripts",  # shared producers
     ]
+    generator = _generator_path(skill)
     for scripts in script_dirs:
         for py in scripts.glob("*.py"):
-            if py.name in _COMPAT_MODULES:
+            if py.name in _COMPAT_MODULES or (generator is not None and py == generator):
                 continue
             text = py.read_text(encoding="utf-8")
             names |= set(re.findall(r'"([a-z][a-z0-9_]*)"', text))
@@ -272,3 +307,24 @@ def test_the_nested_axis_shape_is_actually_present_in_a_template() -> None:
     assert '"x_axis": {"name"' in combined or '"x_axis": {' in combined, (
         "no template instructs the nested axis shape, so the sibling check above proves nothing"
     )
+
+
+def test_a_field_asked_for_only_in_a_generator_is_caught() -> None:
+    """Non-vacuity. Seed a field no producer reads into market-sizing's CHECKLIST template (in memory,
+    never in the shipped file): the current test must report it; the previous rules -- generator not a
+    surface, and counted as a consumer -- must not have."""
+    gen = _generator_path("market-sizing")
+    assert gen is not None, "market-sizing's generator moved; update _GENERATORS"
+    source = gen.read_text(encoding="utf-8")
+    anchor = '"RUN_ID: <RUN_ID>\\n"'
+    assert anchor in source, "seed anchor not found in the CHECKLIST template"
+    seeded = source.replace(anchor, anchor + "\n    '{\"zz_unread_seed_field\": 1}\\n'", 1)
+
+    template = _template_keys("market-sizing", generator_source=seeded)
+    orphans = template - _PROTOCOL - _consumer_names("market-sizing") - set(_SCAFFOLD.get("market-sizing", {}))
+    assert "zz_unread_seed_field" in orphans, "the seeded field was not reported"
+
+    # The previous rules: SKILL.md + agent only, and every script string (the generator's included) a consumer.
+    old_template = _template_keys("market-sizing", generator_source="")
+    old_consumers = _consumer_names("market-sizing") | set(re.findall(r'"([a-z][a-z0-9_]*)"', seeded))
+    assert "zz_unread_seed_field" not in old_template - old_consumers, "the old rules would have caught it"

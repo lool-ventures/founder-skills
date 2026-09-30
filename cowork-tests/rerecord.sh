@@ -31,19 +31,30 @@ command -v cowork-harness >/dev/null || { echo "FATAL: cowork-harness not on PAT
 ver="$(cowork-harness --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
 [ -n "$ver" ] || { echo "FATAL: could not parse cowork-harness version"; exit 1; }
 echo "cowork-harness $ver"
-# FLOOR: >=3.8.0 with no upper bound. Recording is the one operation where the harness version is
+# FLOOR: >=4.0.0 with no upper bound. Recording is the one operation where the harness version is
 #   THIS HEADER WAS ONE MINOR BEHIND THE GATE when 2.3.0 was adopted (header said 2.1.0, gate required
 #   2.2) — the exact drift the next paragraph warns about, sitting unfixed in the file that warns about
 #   it. If you are here to change the floor, change all FOUR sites: this header, the numeric gate, its
 #   FATAL message, and `_RECORDING_FLOOR` in founder-skills/tests/test_cowork_harness_floors.py.
-#   * 3.8.0 is the current floor, and it is a reason-(1) raise on ALL THREE fidelity inputs at once:
+#   * 4.0.0 is the current floor (2026-09-29), a reason-(3) raise plus the major-version trigger: 4.0.0's
+#     pinned agent ELF matches the one Desktop stages (2.1.284 — `doctor --tier hostloop` reports a sha256
+#     match), where 3.10.0 reported a patch-tolerated mismatch a paid cassette would freeze. Baseline
+#     `latest` is 2.9939.4. A `record` budget refusal exits 1 (was 2) — the cost pre-flight below keys on
+#     the message, not the code. Full analysis: docs/internal/2026-09-29-cowork-harness-4.0.0-adoption-plan.md.
+#   * 3.10.0 was the floor before, a reason-(1) raise: the host-loop agent process runs at
+#     `/var/empty` (or a per-run host-cwd), with `--settings`, deny rules on `--disallowedTools` and
+#     the path gate's re-anchoring, plus one system-prompt line. A relative file-tool path is now
+#     refused as production refuses it; a cassette recorded below 3.10.0 freezes a world where it
+#     passes. CASSETTE_VERSION stays 12. Baseline `latest` is 2.9939.2 (moved in 3.9.0).
+#     Full analysis: docs/internal/2026-09-27-cowork-harness-3.10.0-adoption-plan.md.
+#   * 3.8.0 was the floor before, a reason-(1) raise on ALL THREE fidelity inputs at once:
 #     `runtime/argv.ts` passes `--include-hook-events` (spawn env), `hostloop/{skills,workspace}-handler.ts`
 #     move the emulated tool surface, and `prompt.ts` / `prompt/subagent-manifest.ts` move the system
 #     prompt. It is also the first release under which a HOOK is assertable at all — `run/cassette.ts`
 #     learned the `hook_response` frame types, and before it the harness's own diagnostic said there was
 #     no assertion key for any event but PreToolUse. `market-sizing-remote-lane` now freezes
 #     `hook_event_fired: Stop`, which is why the REPLAY floor moved to 3.8.0 too (first time it has ever
-#     moved). The floor is 3.8.0 and the CI pin is 3.8.1: a floor tracks the mechanism, not the pin.
+#     moved). The floor was 3.8.0 and the CI pin 3.8.1: a floor tracks the mechanism, not the pin.
 #     CASSETTE_VERSION stays 12, MIN_SUPPORTED stays 9. Baseline `latest` moves 2.2553.1 -> 2.7032.0.
 #     Full analysis: docs/internal/2026-09-24-cowork-harness-3.8.1-adoption-plan.md.
 #   * 3.2.0 is required because 3.1.0 STAMPS A RECORD-TIME FIELD NO LATER RUN CAN BACKFILL — the
@@ -264,8 +275,8 @@ major="${ver%%.*}"; minor="$(echo "$ver" | cut -d. -f2)"
 # and that test asserts its own pattern matched — so collapsing this to `[ "$major" -ge 3 ]` does not
 # simplify the gate, it makes the guard that watches the gate match nothing. It re-earns its keep the
 # moment the floor moves off a .0 — as it did at 3.2.0.
-{ [ "$major" -gt 3 ] || { [ "$major" -eq 3 ] && [ "$minor" -ge 8 ]; }; } \
-  || { echo "FATAL: need >=3.8.0 (have $ver) — see the floor note above"; exit 1; }
+{ [ "$major" -gt 4 ] || { [ "$major" -eq 4 ] && [ "$minor" -ge 0 ]; }; } \
+  || { echo "FATAL: need >=4.0.0 (have $ver) — see the floor note above"; exit 1; }
 if [ -n "${COWORK_AGENT_BINARY:-}" ]; then
   [ -x "$COWORK_AGENT_BINARY" ] || { echo "FATAL: agent binary not executable: $COWORK_AGENT_BINARY"; exit 1; }
 fi
@@ -372,41 +383,39 @@ echo "re-recording: ${scns[*]}"
 BUDGET="${COWORK_RERECORD_MAX_USD:-120}"
 if [ "$BUDGET" != "0" ]; then
   echo "=== cost pre-flight (cap \$$BUDGET; set COWORK_RERECORD_MAX_USD=0 to skip) ==="
-  # THE TWO FAILURE EXIT CODES ARE NOT INTERCHANGEABLE. Measured 2026-08-31, identical at 2.5.0,
-  # 3.0.0, 3.1.0, and 3.2.0 (the pin as of 2026-09-01):
-  #     0 = every scenario loads AND the estimate is under the cap
-  #     2 = the BUDGET gate refused (estimate over the cap)
-  #     1 = a scenario did not LOAD — `✗ broken: <file>` naming the rejected key
-  #   When both apply the answer depends on whether SOME or ALL files are broken — measured, and the
-  #   distinction is easy to miss: SOME broken + over cap -> 2 (budget wins); ALL broken + over cap
-  #   -> 1 (broken wins). Both land in a sensible branch below, so this is a precision note, not a
-  #   hazard. The `✗ broken:` lines go to STDERR, so the `>/dev/null` (stdout only) never hides them.
-  #   WHY that split: all-broken means nothing loaded, so there is nothing to spend on and the budget
-  #   gate never runs (SPEC.md states this as of 3.2.0). Derivable, not arbitrary.
-  #   THE 3.2.0 PIN RAISE (2026-09-01) changed nothing here. The one batch outcome that moves is the REAL arm
-  #   (`record <dir/>` with no --dry-run) on an all-broken dir, 2 -> 1; this gate uses the PREVIEW arm,
-  #   which already answered 1 at 3.0.0 and 3.1.0. Verified against the full batch matrix, 3.1.0 vs
-  #   3.2.0: ten outcomes, exactly one differs.
-  #   (The SINGLE-FILE arm also changes at 3.2.0 — policy refusals there go 2 -> 1 — but this gate does
-  #   not use that arm. Do not port the boundary across: "above 3.0.1" is wrong, 3.1.0 still exits 2.)
-  # This block used to collapse both into "batch cost pre-flight refused", which sent you off to raise
-  # COWORK_RERECORD_MAX_USD for a problem that has nothing to do with money: you raise it, re-run, and
-  # get the identical message. Keep the branches distinct.
+  # CLASSIFIED BY THE HARNESS'S MESSAGE, NOT ITS EXIT CODE (preflight_classify.sh). Up to 3.10.0 a
+  # budget refusal exited 2 and a scenario that did not load exited 1; from 4.0.0 both exit 1 (measured
+  # on the 4.0.0 pre-release: the same "refused before spending" message, rc 2 at 3.10.0 and rc 1 at
+  # 4.0.0), and an exit-code branch sent a cost refusal to "THIS IS NOT A COST PROBLEM". The message is
+  # the same on both versions, so this works under either. Every harness line goes to STDERR: it is
+  # captured for the classifier and printed back, so the "✗ broken:" lines naming the file are still seen.
+  # Keep the branches distinct: collapsing them sent people to raise COWORK_RERECORD_MAX_USD for a
+  # problem that has nothing to do with money.
+  . ./preflight_classify.sh
   preflight_rc=0
-  cowork-harness record scenarios/ --dry-run --max-budget-usd "$BUDGET" >/dev/null || preflight_rc=$?
-  case "$preflight_rc" in
-    0) ;;
-    2)
+  preflight_err="$(mktemp)"
+  cowork-harness record scenarios/ --dry-run --max-budget-usd "$BUDGET" >/dev/null 2>"$preflight_err" || preflight_rc=$?
+  cat "$preflight_err" >&2
+  preflight_kind="$(classify_preflight "$preflight_rc" "$preflight_err")"
+  rm -f "$preflight_err"
+  case "$preflight_kind" in
+    ok) ;;
+    cost)
       echo "FATAL: batch cost pre-flight refused ON COST — re-run the command below to see the"
       echo "       estimate, then raise COWORK_RERECORD_MAX_USD deliberately or narrow the list."
       echo "       cowork-harness record scenarios/ --dry-run --max-budget-usd $BUDGET"
       exit 1
       ;;
+    load_and_cost)
+      echo "FATAL: cost pre-flight: a scenario did not LOAD (the '✗' line(s) above), and the batch is"
+      echo "       also over the cap. Fix the scenario first; the estimate may change once it loads."
+      echo "       cowork-harness record scenarios/ --dry-run"
+      exit 1
+      ;;
     *)
-      echo "FATAL: cost pre-flight exited $preflight_rc — a scenario did not LOAD (above 3.0.1, this"
-      echo "       code also covers a policy refusal). THIS IS NOT A COST PROBLEM: raising"
-      echo "       COWORK_RERECORD_MAX_USD will not help. The '✗ broken:' line(s) above name the file"
-      echo "       and the rejected key. Fix the scenario, then re-run. To see it again:"
+      echo "FATAL: cost pre-flight exited $preflight_rc — a scenario did not LOAD or was refused."
+      echo "       THIS IS NOT A COST PROBLEM: raising COWORK_RERECORD_MAX_USD will not help. The '✗'"
+      echo "       line(s) above name the file and the reason. Fix the scenario, then re-run. To see it again:"
       echo "       cowork-harness record scenarios/ --dry-run"
       exit 1
       ;;

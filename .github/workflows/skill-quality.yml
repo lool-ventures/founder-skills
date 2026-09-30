@@ -262,6 +262,9 @@ jobs:
               # fourth billed document to it would trade reliability for coverage it does not
               # need. Naming it here keeps an UNEXPECTED skip red.
               "test_cap_table_smoke",
+              # cap-table's pool-reading lane: its own RUN_PAID_E2E_CAP_TABLE_POOL opt-in. The only run that
+              # reaches the unconfirmed pool-reading disclosure (the smoke lane's prompt names no pool).
+              "test_cap_table_pool_reading_lane",
           }
           suite = ET.parse("e2e-results.xml").getroot()
           cases = list(suite.iter("testcase"))

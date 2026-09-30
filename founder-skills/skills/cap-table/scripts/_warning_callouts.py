@@ -14,6 +14,8 @@ that name is unreachable on `sys.path`.)
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 
 def render_warning_callouts(cap_state_warnings: list[str]) -> list[str]:
     """Render the cap_state warning families as a founder-facing markdown callout block.
@@ -189,6 +191,41 @@ _SOLVER_WARNING_PROSE: dict[str, str] = {
         "calculation was hard to converge and an acceleration step had to be reverted. The result "
         "below is the settled one, but it is worth a second look."
     ),
+    # The option pool's sizing basis (priced_round's basis gate). Neither says which way the figures would
+    # move: no published source defines the excluding pool denominator, and a document-defined basis could
+    # differ in either direction.
+    "W_EXCLUDING_BASIS_MODELED_AS_POST_MONEY": (
+        "**The option pool is measured with the converting securities counted, at your choice.** Your term "
+        "sheet measures the pool against the share count after the round without the converting securities, "
+        "which this model does not compute. Counting the SAFE and note conversion shares in the pool's "
+        "denominator means the pool and ownership figures below may differ from your term sheet's. Confirm "
+        "the exact definition with counsel."
+    ),
+    "W_CUSTOM_BASIS_STATED_BY_FOUNDER": (
+        "**The option pool basis comes from your answer, not from your document.** Your term sheet "
+        "defines the pool in its own terms, and the figures below use the measure you told us it "
+        "matches. Confirm with counsel that your term sheet's definition is that one."
+    ),
+    "W_POOL_BASIS_READING_NOT_CONFIRMED": (
+        "**The option pool is read as the pool available after the round.** The company already has "
+        'unallocated options, so a term sheet\'s "post-money pool" percentage can mean two things: the pool '
+        "available for new grants after the round, or only the new options added in it. The figures below use the "
+        "first. If your term sheet sizes the new options instead, the top-up is larger. Confirm with "
+        "counsel which one your term sheet means."
+    ),
+    "W_POOL_BASIS_READ_AS_NEW_OPTIONS_ONLY": (
+        "**The option pool is read as only the new options added in the round.** The company already has "
+        'unallocated options, so a term sheet\'s "post-money pool" percentage can mean two things: only the new '
+        "options added in the round, or the whole pool available for new grants after the round. The figures below "
+        "use the first. If your term sheet sizes the whole pool instead, the top-up is smaller. Confirm with "
+        "counsel which one your term sheet means."
+    ),
+    "W_POOL_INCREASE_READING_UNAVAILABLE": (
+        "**The figures for the new-options-only reading could not be computed.** The option pool is read "
+        "as the pool available after the round, and the other reading (only the new options sized at the "
+        "percentage) could not be solved for this scenario, so no figure is given for it. Confirm with "
+        "counsel which one your term sheet means."
+    ),
 }
 
 
@@ -206,6 +243,11 @@ _SOLVER_WARNING_LABELS: dict[str, str] = {
     "W_CP2_FLOOR_APPLIED": "Anti-dilution conversion price hit its charter floor",
     "W_STALE_CCP_SUSPECTED": "Conversion price may predate an earlier adjustment",
     "W_SOLVER_AITKEN_FALLBACK": "Round solved by a fallback method",
+    "W_EXCLUDING_BASIS_MODELED_AS_POST_MONEY": "Option pool measured with the conversion shares, at your choice",
+    "W_CUSTOM_BASIS_STATED_BY_FOUNDER": "Option pool basis taken from your answer",
+    "W_POOL_BASIS_READING_NOT_CONFIRMED": "Option pool read as the pool available after the round",
+    "W_POOL_BASIS_READ_AS_NEW_OPTIONS_ONLY": "Option pool read as only the new options added in the round",
+    "W_POOL_INCREASE_READING_UNAVAILABLE": "New-options-only pool reading could not be computed",
 }
 
 
@@ -237,7 +279,9 @@ def _solver_subject(w: dict) -> str:
     return ""
 
 
-def solver_callouts_plaintext(scenarios: list[dict]) -> list[str]:
+def solver_callouts_plaintext(
+    scenarios: list[dict], *, owned_by_scenario: Callable[[dict], frozenset[str]] | None = None
+) -> list[str]:
     """Solver callouts as PLAIN PROSE, for the HTML renderers.
 
     Deliberately not `visualize._strip_md_markers`, which does `.replace("_", "")` -- it deletes
@@ -249,7 +293,7 @@ def solver_callouts_plaintext(scenarios: list[dict]) -> list[str]:
     Callers still HTML-escape.
     """
     out: list[str] = []
-    lines = render_solver_warning_callouts(collect_solver_warnings(scenarios))
+    lines = render_solver_warning_callouts(collect_solver_warnings(scenarios, owned_by_scenario=owned_by_scenario))
     for line in lines:
         s = line.strip()
         if not s:
@@ -261,7 +305,21 @@ def solver_callouts_plaintext(scenarios: list[dict]) -> list[str]:
     return out
 
 
-def collect_solver_warnings(scenarios: list[dict]) -> list[dict]:
+# Scenario warnings another renderer already owns. `target_basis_defaulted` has its own callout beside its
+# scenario in report.md and its own payload flag (`pool_basis_assumed`), so a generic callout would say it
+# twice. Everything else that reaches a scenario's warnings is rendered here: a prefix test used to drop any
+# code not spelled `W_`, which the fallback below exists to prevent.
+RENDERED_ELSEWHERE = frozenset({"target_basis_defaulted"})
+
+
+def is_solver_callout(code: str) -> bool:
+    """Is this scenario-warning code rendered as a solver callout (and handed to the coach)?"""
+    return bool(code) and code not in RENDERED_ELSEWHERE
+
+
+def collect_solver_warnings(
+    scenarios: list[dict], *, owned_by_scenario: Callable[[dict], frozenset[str]] | None = None
+) -> list[dict]:
     """Walk scenarios -> `computed_outputs.warnings` and return the solver's warning dicts.
 
     Shared because it must be: this walk lived inline in `compose_report`, which is precisely why
@@ -271,6 +329,9 @@ def collect_solver_warnings(scenarios: list[dict]) -> list[dict]:
 
     Tolerant of a scenario with no `computed_outputs` and of a null `warnings`: this is read back off
     a JSON artifact, and one malformed scenario must not cost the founder the warnings beside it.
+
+    `owned_by_scenario(scenario)` names the codes a surface already renders beside that scenario (its Option
+    pool section); those are left out, so a surface states each once.
     """
     collected: list[dict] = []
     for s in scenarios or []:
@@ -278,7 +339,10 @@ def collect_solver_warnings(scenarios: list[dict]) -> list[dict]:
             continue
         co = s.get("computed_outputs") or {}
         if isinstance(co, dict):
-            collected.extend(co.get("warnings") or [])
+            owned = owned_by_scenario(s) if owned_by_scenario else frozenset()
+            collected.extend(
+                w for w in co.get("warnings") or [] if not (isinstance(w, dict) and w.get("code") in owned)
+            )
     return collected
 
 
@@ -295,7 +359,7 @@ def render_solver_warning_callouts(solver_warnings: list[dict]) -> list[str]:
         if not isinstance(w, dict):
             continue
         code = str(w.get("code") or "").strip()
-        if not code or not code.startswith("W_"):
+        if not is_solver_callout(code):
             continue
         subject = _solver_subject(w)
         # The solver runs per scenario and the composer may pass several scenarios' lists; the same

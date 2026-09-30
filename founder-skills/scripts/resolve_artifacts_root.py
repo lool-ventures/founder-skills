@@ -19,72 +19,83 @@ for user-facing deliverables. In the CLI (no session tree) they live at `./artif
 
 TOPOLOGY IS DETECTED FROM THE cwd STRING SHAPE, NOT FROM THE FILESYSTEM. This resolver runs in the
 main-thread workspace shell, whose cwd is a DIFFERENT path space from the file tools'. On Cowork
-host-loop — the production topology — that shell starts at the BARE SESSION ROOT `/sessions/<id>`
-(branch 3 below), while the agent process, and so the file tools, sit at the outputs dir. Measured
-upstream against desktop-local Cowork 2026-08-27 and pinned in cowork-harness >=2.4.0
-(`hostLoopCwds`: `{agentProcessCwd: hostOutputsDir, workspaceBashCwd: sessionRoot}`).
+host-loop -- the production topology -- that shell starts at the BARE SESSION ROOT `/sessions/<id>`
+(branch 3 below). The agent process, and so the file tools, run host-native, outside the VM, and not in
+the outputs dir: they address the outputs folder by its HOST path (see HOST-LOOP below). Branch 2 (a
+shell inside `/sessions/<id>/mnt/...`) serves the VM-loop tiers.
 
-An earlier version of this note asserted the shell sits inside `/sessions/<id>/mnt/<first-connected-
-folder-else-outputs>`, citing the asar's "first-folder-else-outputs". That derivation came from a
-`cwd:` spawn argument which is NOT load-bearing on the cowork path, so it described a prompt claim
-rather than an observed behaviour; harness <2.4.0 emulated it, which is why branch 2 was the one
-production appeared to take. Branch 2 is still REQUIRED — it serves the VM-loop tiers and any
-pre-2.4.0 recording — but it is no longer the production shape.
+**Branches 2 and 3 return IDENTICAL roots, and that convergence is the invariant.** Do not "simplify"
+either away, and do not let them diverge: a change that makes them disagree silently relocates every
+artifact the moment the shell's cwd moves.
 
-**Branches 2 and 3 return IDENTICAL roots, and that convergence is the invariant that made the move
-harmless.** Do not "simplify" either away, and do not let them diverge: a change that makes them
-disagree silently relocates every artifact the moment the shell's cwd moves again.
+The shell's cwd is NOT necessarily the outputs mount. Probing the filesystem for a sibling `outputs/`
+mis-anchors: if a connected folder contains its own `outputs/`, an `isdir(cwd/outputs)` branch would point
+artifacts INSIDE the user's real project, while the sub-agents' file tools write to the session's outputs
+folder -- write and gate would then address different physical dirs. So we key on the session ROOT
+extracted from the cwd shape and anchor unconditionally on `<session>/mnt/outputs`, regardless of where
+in the tree the shell cwd sits.
 
-The shell's cwd is NOT necessarily the outputs mount. Probing the filesystem for a sibling `outputs/` mis-anchors: if a
-connected folder contains its own `outputs/`, an `isdir(cwd/outputs)` branch would point artifacts
-INSIDE the user's real project while a sub-agent's host-native file tools (whose cwd IS the session
-outputs dir) resolve the returned relative root against the outputs mount — write and gate then address
-different physical dirs. So we key on the session ROOT extracted from the cwd shape and anchor
-unconditionally on `<session>/mnt/outputs` (the bind-mount identity of the sub-agent's host cwd),
-regardless of where in the tree the shell cwd sits.
-
-Resolution (first match wins; pure string logic, no FS probe except the CLI mkdir in main()):
+Resolution (first match wins; pure string logic, no FS probe except the CLI mkdir and the persisted
+host path in main()):
   1. $COWORK_ARTIFACTS_ROOT (explicit override / tests) -> (abs, abs)
   2. Cowork session tree, shell inside the mount: `^/sessions/<id>/mnt(/...)?`
-                                                           -> (<session>/mnt/outputs/artifacts, "artifacts")
+                                              -> (<session>/mnt/outputs/artifacts, <host outputs>/artifacts)
   3. Cowork session tree, shell AT the session root: `^/sessions/<id>$`
-                                                           -> (cwd/mnt/outputs/artifacts, "artifacts")
-  4. CLI default:                                          -> (cwd/artifacts, cwd/artifacts)
+                                              -> (cwd/mnt/outputs/artifacts, <host outputs>/artifacts)
+  4. CLI default:                             -> (cwd/artifacts, cwd/artifacts)
+  On a session tree with no proven host path, an agent-namespace call refuses (exit 6) rather than print
+  a relative root the file tools would refuse.
   $COWORK_AGENT_ARTIFACTS_ROOT overrides ONLY the agent-namespace half (see below).
 
 Prints the absolute artifacts root on stdout (one line). With --json, prints
 {"artifacts_root": ..., "agent_artifacts_root": ..., "uploads_dir": ...}. Creates the dir unless
---no-create. `--uploads` prints the uploads mount alone (exit 3 when there is no session tree) —
+--no-create. `--uploads` prints the uploads mount alone (exit 3 when there is no session tree) --
 see `resolve_uploads_dir`.
 
 THREE CONSUMERS READ THE SHELL cwd, NOT ONE. Beyond this module, `find_artifact.py` and
 `founder_context.py` both default `--artifacts-root` to `os.path.join(os.getcwd(), "artifacts")`.
-Every SKILL.md passes the flag explicitly, so those defaults are latent — but "the flag is always
-passed" is a property of PROSE the agent paraphrases (see WHY THIS EXISTS above), and the cost of a
-dropped flag changed with the harness 2.4.0 cwd move: it used to land on the correct root and now
+Every SKILL.md passes the flag explicitly, so those defaults are latent -- but "the flag is always
+passed" is a property of PROSE the agent paraphrases (see WHY THIS EXISTS above), and a dropped flag
 lands at `/sessions/<id>/artifacts`, outside `mnt/`, where nothing is ever delivered and nothing
-reports it. If you add a fourth consumer, pass the root in — do not re-derive it from `getcwd()`.
+reports it. If you add a fourth consumer, pass the root in -- do not re-derive it from `getcwd()`.
 
-AGENT NAMESPACE (branch C hand-off): in Cowork a sub-agent's native file tools are rooted at the
-outputs mount itself (its cwd IS the outputs dir), so the same file has two addresses — the main
-thread's absolute path under the outputs root, and the agent's path RELATIVE to its cwd. On the CLI both
-sides share one filesystem, so both roots are the same absolute path. Print it with --agent. Dispatch
-prompts build OUTPUT_PATH (and under-outputs read paths) from the agent namespace; shell-side gates use
-the absolute namespace.
+AGENT NAMESPACE (branch C hand-off): the same file has two addresses -- the main thread's absolute VM
+path under the outputs root, and the path the file tools use. On the CLI both sides share one
+filesystem, so both roots are the same absolute path. Print it with --agent. Dispatch prompts build
+OUTPUT_PATH (and under-outputs read paths) from the agent namespace; shell-side gates use the absolute
+namespace.
 
-**THE SHELL'S cwd CANNOT TELL YOU THE SUB-AGENT'S cwd.** Branches 2 and 3 differ only in how they LOCATE
-the session root (from the `/mnt` match, or from the cwd itself) — which the ABSOLUTE root depends on.
-They must NOT differ in the agent-namespace root, and a previous version's branch 3 got this wrong: it
-returned `"mnt/outputs/artifacts"` on the premise that a shell sitting at `/sessions/<id>` implies the
-sub-agent also sits there. Those are independent facts. On Cowork host-loop the sub-agent's file tools run
-host-native with cwd = the session outputs dir while the main thread's shell runs in the VM sidecar, and
-that shell can sit at the session root — so the premise produced `<outputs>/mnt/outputs/artifacts/...`, a
-DOUBLED prefix, silently, for every blind-writing sub-agent. (See `references/skill-execution-model.md`
-"a sub-agent's file tools run host-native (cwd IS the session outputs dir)", which this module's own
-opening docstring already asserted.) Host-loop is the production topology, so `"artifacts"` is correct for
-any real Cowork session tree.
+**THE SHELL'S cwd CANNOT TELL YOU WHERE THE FILE TOOLS ARE.** Branches 2 and 3 differ only in how they
+LOCATE the session root (from the `/mnt` match, or from the cwd itself) -- which the ABSOLUTE root
+depends on. They must NOT differ in the agent-namespace root: inferring the file tools' location from
+the shell's cwd shape produces a DOUBLED `<outputs>/mnt/outputs/artifacts/...` prefix, silently, for
+every blind-writing sub-agent.
 
-REMOTE LANE (Cowork "in the cloud", the default for new sessions and where the live report came from):
+HOST-LOOP: THE AGENT NAMESPACE MUST BE ABSOLUTE, AND ONLY THE MODEL KNOWS IT.
+The agent process does not run in the outputs dir, and a RELATIVE `Read`/`Write`/`Edit` is refused
+("File is in a directory that is denied by your permission settings."). So the relative `"artifacts"`
+root described above is refused, for the main thread and every sub-agent alike. The file
+tools need the HOST path of the outputs folder (production: `.../local-agent-mode-sessions/<org>/<user>/
+<8hex>/outputs`; it contains a space), and nothing in the VM shell can see it: Desktop names it to the
+MODEL only, in a "Paths in bash differ from what file tools (Read/Write/Edit) see:" block mapping it to
+`/sessions/<id>/mnt/outputs/`. Sub-agents given a relative OUTPUT_PATH routinely ignore the
+platform's own "Pass absolute paths to these tools."
+
+So the main thread supplies the host path ONCE, and a probe PROVES it before anything uses it:
+  1. the main thread Writes, with its FILE tool, `<host outputs>/artifacts/.host-outputs-probe`
+     containing exactly `<host outputs>`;
+  2. `--set-host-outputs-dir "<host outputs>"` checks the shape, then checks that the probe landed at
+     THIS shell's `<artifacts root>/.host-outputs-probe` with that exact content -- which can only happen
+     if the file tool and this shell address the same directory under those two names;
+  3. only then is the value persisted to `<artifacts root>/.host-outputs-dir.json`, and every later
+     agent-namespace call (in any fresh shell) reads it and prints ABSOLUTE agent paths.
+A mistyped path fails at step 2 (the probe is absent or its content differs), at Step 0, where it can be
+retried -- not as an exit 3 on every hand-off later. The proof also serves a VM-loop tier unchanged: there
+the file tool takes the `/sessions/...` path itself, so `<host outputs>` IS the shell path and the probe
+lands. Without a proven value, agent-namespace calls on a session tree exit 6 (`EXIT_NOT_PROVEN`) with a
+JSON diagnostic, unless `$COWORK_AGENT_ARTIFACTS_ROOT` declares the agent root.
+
+REMOTE LANE (Cowork "in the cloud", the default for new sessions):
 no `/sessions` tree; shell cwd `/home/claude`; `CLAUDE_CODE_REMOTE=true`. Artifacts fall through to the
 CLI branch (`/home/claude/artifacts`, one shared filesystem, so both roots are the same absolute path),
 which is correct. Uploads do NOT: see `_remote_uploads_dir`.
@@ -127,7 +138,86 @@ def _agent_override(env: dict[str, str], default: str) -> str:
     return env.get("COWORK_AGENT_ARTIFACTS_ROOT") or default
 
 
-def resolve_roots(cwd: str, env: dict[str, str]) -> tuple[str, str]:
+# The proof and the persisted value live in the canonical artifacts root (shell namespace), so any later
+# fresh shell finds them. Dot-files: never artifacts, never read by a producer. The outputs mount is
+# delete-denied, so they persist -- harmless, and a later run in the same session re-proves over them.
+PROBE_NAME = ".host-outputs-probe"
+PERSIST_NAME = ".host-outputs-dir.json"
+
+EXIT_BAD_HOST_DIR = 2
+EXIT_PROBE_MISSING = 4
+EXIT_PROBE_MISMATCH = 5
+# An agent-namespace call on a session tree with no proven host path and no declared override. Answering
+# with the relative root would hand every sub-agent a path the file tools refuse, and the refusal would
+# surface much later, as a hand-off failure that reads like a fabricated receipt.
+EXIT_NOT_PROVEN = 6
+
+
+def normalize_host_outputs_dir(value: str) -> tuple[str | None, str | None]:
+    """Return (normalized, None) or (None, reason). Shape only -- the probe is the proof."""
+    v = value.strip()
+    if "\n" in v or "\r" in v:
+        return None, "the path contains a line break -- pass exactly one path"
+    v = v.rstrip("/")
+    if not v.startswith("/"):
+        return None, "the path is not absolute -- a relative path is what the file tools refuse"
+    if os.path.basename(v) != "outputs":
+        return None, (
+            "the path does not end in an `outputs` folder -- pass the file-tool path your context maps to "
+            "this session's outputs directory, not a folder inside it"
+        )
+    return v, None
+
+
+def verify_probe(artifacts_dir: str, host_outputs_dir: str) -> tuple[int, str]:
+    """Check the probe the main thread's file tool wrote. Returns (exit_code, detail)."""
+    probe = os.path.join(artifacts_dir, PROBE_NAME)
+    try:
+        with open(probe, encoding="utf-8") as f:
+            content = f.read().strip()
+    except OSError:
+        return EXIT_PROBE_MISSING, (
+            f"no probe at {probe}: the file tool's Write to `{host_outputs_dir}/artifacts/{PROBE_NAME}` did "
+            "not land in this session's outputs folder (it was refused, or went to a different folder), so "
+            "that path is not the one the file tools use for it"
+        )
+    if content != host_outputs_dir:
+        return EXIT_PROBE_MISMATCH, (
+            f"the probe exists but contains {content!r}, not {host_outputs_dir!r}: write the SAME path you "
+            "pass here, character for character"
+        )
+    return 0, "ok"
+
+
+def read_persisted(artifacts_dir: str) -> str | None:
+    """The proven host outputs dir, or None. A malformed file reads as absent, never as a path."""
+    try:
+        with open(os.path.join(artifacts_dir, PERSIST_NAME), encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return None
+    value = data.get("host_outputs_dir") if isinstance(data, dict) else None
+    if not isinstance(value, str):
+        return None
+    normalized, _ = normalize_host_outputs_dir(value)
+    return normalized
+
+
+def write_persisted(artifacts_dir: str, host_outputs_dir: str) -> None:
+    with open(os.path.join(artifacts_dir, PERSIST_NAME), "w", encoding="utf-8") as f:
+        json.dump({"host_outputs_dir": host_outputs_dir}, f)
+        f.write("\n")
+
+
+def on_session_tree(cwd: str) -> bool:
+    return bool(_SESSION_TREE.match(cwd) or _SESSION_ROOT.match(cwd))
+
+
+def _session_agent_root(host_outputs_dir: str | None) -> str:
+    return f"{host_outputs_dir}/artifacts" if host_outputs_dir else _AGENT_ROOT_COWORK
+
+
+def resolve_roots(cwd: str, env: dict[str, str], host_outputs_dir: str | None = None) -> tuple[str, str]:
     """Return (artifacts_root, agent_artifacts_root).
 
     agent_artifacts_root is the artifacts root as a SUB-AGENT's native file tools address it: relative
@@ -136,6 +226,11 @@ def resolve_roots(cwd: str, env: dict[str, str]) -> tuple[str, str]:
     in a different namespace. Identical to the absolute root on the shared-filesystem CLI. See the module
     docstring's AGENT NAMESPACE section for why this must not branch on the shell's cwd shape, and for
     the `$COWORK_AGENT_ARTIFACTS_ROOT` escape hatch that serves a real VM-loop tier.
+
+    `host_outputs_dir` is the PROVEN file-tool path of the outputs folder (see the module docstring's
+    HOST-LOOP section). When given, the session-tree agent root is
+    `<host_outputs_dir>/artifacts` -- absolute, which current Desktop requires. The explicit env override
+    still wins over it: a declared fact beats a derived one.
     """
     override = env.get("COWORK_ARTIFACTS_ROOT")
     if override:
@@ -149,7 +244,7 @@ def resolve_roots(cwd: str, env: dict[str, str]) -> tuple[str, str]:
         session_root = m.group(1)  # /sessions/<id>
         return (
             os.path.join(session_root, "mnt", "outputs", "artifacts"),
-            _agent_override(env, _AGENT_ROOT_COWORK),
+            _agent_override(env, _session_agent_root(host_outputs_dir)),
         )
 
     # Cowork session tree, shell AT the session root /sessions/<id>. Only the ABSOLUTE root differs from
@@ -159,7 +254,7 @@ def resolve_roots(cwd: str, env: dict[str, str]) -> tuple[str, str]:
     if _SESSION_ROOT.match(cwd):
         return (
             os.path.join(cwd, "mnt", "outputs", "artifacts"),
-            _agent_override(env, _AGENT_ROOT_COWORK),
+            _agent_override(env, _session_agent_root(host_outputs_dir)),
         )
 
     # CLI: ./artifacts (matches find_artifact.py's default artifacts root); both roots identical.
@@ -176,14 +271,10 @@ def resolve_uploads_dir(cwd: str, env: dict[str, str]) -> str | None:
 
     WHY THIS IS A SCRIPT FLAG AND NOT SHELL IN A SKILL.md: an attached file lands under
     `<session>/mnt/uploads`, and a skill that cannot list that dir tells the founder their upload is
-    missing while it sits there. deck-review carried
-    `ls -la "$(dirname "$REVIEW_DIR")"/../uploads 2>/dev/null || ls -la ./mnt/uploads` — two arms, both
-    keyed off something other than the session root. The second resolved against the WORKSPACE SHELL's
-    cwd, so its meaning moved when cowork-harness 2.4.0 corrected that cwd from
-    `<session>/mnt/<first-folder-else-outputs>` to the bare session root: before, `./mnt/uploads` pointed
-    at `<session>/mnt/outputs/mnt/uploads` (never existed); after, at the real mount. A path whose
-    correctness depends on the harness version is not a path — hence one opaque command, per this
-    module's opening rationale.
+    missing while it sits there. A hand-built path keyed off anything other than the session root --
+    `../uploads` from an analysis dir, or `./mnt/uploads` against the workspace shell's cwd -- points at
+    the real mount only for one shell cwd, and the shell's cwd is not a stable fact. Hence one opaque
+    command, per this module's opening rationale.
 
     NOT derived from the artifacts root: `$COWORK_ARTIFACTS_ROOT` may point anywhere, and uploads is a
     property of the session tree, not of where artifacts were redirected. Keyed on the cwd shape only,
@@ -210,12 +301,11 @@ def resolve_uploads_dir(cwd: str, env: dict[str, str]) -> str | None:
 def _remote_uploads_dir(env: dict[str, str]) -> str | None:
     """Cowork's REMOTE (cloud) lane: the agent runs in a Linux VM with no `/sessions` tree at all.
 
-    Measured in a real session 2026-09-22 (the lane the live bug report came from, and the default
-    for new sessions): shell cwd `/home/claude`, `CLAUDE_CODE_REMOTE=true`, and an attached PDF at
+    On this lane (the default for new sessions) the shell cwd is `/home/claude`,
+    `CLAUDE_CODE_REMOTE=true`, and an attached file sits at
     `$HOME/.claude/uploads/<session id>/<8-hex>-<original name>` -- NOT at `/mnt/user-data/uploads`,
-    which the lane's own environment description names and which does not exist. Before this branch
-    the resolver answered "no session tree" here, Step 6c skipped its document mirror, and the red
-    team was told the founder supplied no documents -- on the production lane.
+    which the lane's own environment description names and which does not exist. Answering "no session
+    tree" here would make a skill tell the founder they supplied no documents.
 
     THE DIRECTORY IS THE SIGNAL, NOT THE ENV. Runtime markers are served per session and have been
     added and removed across releases (ccinternals.dev/cowork, "detect.markers-come-and-go"), so this
@@ -290,7 +380,18 @@ def main() -> int:
         action="store_true",
         help="Print the full agent-namespace HANDOFF_AGENT (requires --dir-name and --run-id)",
     )
+    p.add_argument(
+        "--set-host-outputs-dir",
+        default=None,
+        metavar="PATH",
+        help="PROVE and persist the file-tool path of this session's outputs folder (Cowork only). "
+        "First Write, with a file tool, <PATH>/artifacts/" + PROBE_NAME + " containing exactly <PATH>; "
+        "this checks that probe from the shell, persists PATH, and prints the absolute agent root. "
+        "Exits 2 (bad shape), 4 (probe absent) or 5 (probe content differs) with a JSON diagnostic",
+    )
     args = p.parse_args()
+    cwd = os.getcwd()
+    env = dict(os.environ)
 
     # ANSWERED FIRST, BEFORE ANY SIDE EFFECT OR UNRELATED VALIDATION. `--uploads` is a pure query
     # about the SESSION TREE: it needs no artifacts root, no --dir-name mirror, and no filesystem
@@ -309,7 +410,7 @@ def main() -> int:
         ]
         if conflicting:
             p.error("--uploads cannot be combined with " + ", ".join(conflicting))
-        uploads_dir = resolve_uploads_dir(os.getcwd(), dict(os.environ))
+        uploads_dir = resolve_uploads_dir(cwd, env)
         if uploads_dir is None:
             sys.stderr.write(
                 "No uploads mount: this is not a Cowork session tree, so nothing was attached "
@@ -325,9 +426,35 @@ def main() -> int:
     if (args.analysis_dir_agent or args.handoff_dir_agent) and not args.dir_name:
         p.error("--analysis-dir-agent/--handoff-dir-agent require --dir-name")
 
-    root, agent_root = resolve_roots(os.getcwd(), dict(os.environ))
+    if args.set_host_outputs_dir is not None:
+        return _set_host_outputs_dir(args.set_host_outputs_dir, cwd, env, create=not args.no_create)
+
+    root, _ = resolve_roots(cwd, env)
     if not args.no_create:
         os.makedirs(root, exist_ok=True)
+    wants_agent = args.agent or args.json or args.analysis_dir_agent or args.handoff_dir_agent
+    host_outputs_dir = read_persisted(root) if on_session_tree(cwd) else None
+    root, agent_root = resolve_roots(cwd, env, host_outputs_dir)
+    if wants_agent and on_session_tree(cwd) and not host_outputs_dir and not env.get("COWORK_AGENT_ARTIFACTS_ROOT"):
+        detail = (
+            "no proven file-tool path for this session's outputs folder, so there is no agent-namespace "
+            "path to give a sub-agent (a relative one is refused). Run the Step 0 proof first: Write "
+            f"`<host outputs>/artifacts/{PROBE_NAME}` with a file tool, then --set-host-outputs-dir. On a "
+            "tier whose file tools take this shell's paths, declare $COWORK_AGENT_ARTIFACTS_ROOT instead."
+        )
+        sys.stdout.write(
+            json.dumps(
+                {
+                    "code": "host_outputs_dir_not_proven",
+                    "detail": detail,
+                    "shell_outputs_dir": os.path.dirname(root),
+                    "probe_name": PROBE_NAME,
+                }
+            )
+            + "\n"
+        )
+        sys.stderr.write(f"resolve_artifacts_root: {detail}\n")
+        return EXIT_NOT_PROVEN
 
     agent_paths = build_agent_paths(agent_root, args.dir_name, args.run_id) if args.dir_name else {}
 
@@ -353,7 +480,7 @@ def main() -> int:
                 f"'<skill>-<slug>'.\n"
             )
 
-    uploads = resolve_uploads_dir(os.getcwd(), dict(os.environ))
+    uploads = resolve_uploads_dir(cwd, env)
 
     if args.handoff_dir_agent:
         sys.stdout.write(agent_paths["handoff_dir_agent"] + "\n")
@@ -373,6 +500,41 @@ def main() -> int:
         sys.stdout.write(agent_root + "\n")
     else:
         sys.stdout.write(root + "\n")
+    return 0
+
+
+def _set_host_outputs_dir(value: str, cwd: str, env: dict[str, str], *, create: bool) -> int:
+    """`--set-host-outputs-dir`: shape check, probe check, persist, print the absolute agent root.
+
+    Diagnostics go to stdout as one JSON object and a line to stderr; nothing is persisted on failure,
+    so a rejected value can never become the root later calls read.
+    """
+    root, _ = resolve_roots(cwd, env)
+    shell_outputs = os.path.dirname(root)
+
+    def fail(code: str, exit_code: int, detail: str) -> int:
+        sys.stdout.write(
+            json.dumps({"code": code, "detail": detail, "shell_outputs_dir": shell_outputs, "probe_name": PROBE_NAME})
+            + "\n"
+        )
+        sys.stderr.write(f"--set-host-outputs-dir: {detail}\n")
+        return exit_code
+
+    if not on_session_tree(cwd):
+        # CLI, the remote lane, or an explicit override: the file tools and this shell share one
+        # filesystem, and the agent root is already absolute. Nothing to prove; say so, change nothing.
+        sys.stdout.write(json.dumps({"code": "not_needed", "agent_artifacts_root": resolve_roots(cwd, env)[1]}) + "\n")
+        return 0
+    normalized, reason = normalize_host_outputs_dir(value)
+    if normalized is None:
+        return fail("bad_host_outputs_dir", EXIT_BAD_HOST_DIR, reason or "invalid path")
+    if create:
+        os.makedirs(root, exist_ok=True)
+    status, detail = verify_probe(root, normalized)
+    if status != 0:
+        return fail("probe_missing" if status == EXIT_PROBE_MISSING else "probe_mismatch", status, detail)
+    write_persisted(root, normalized)
+    sys.stdout.write(resolve_roots(cwd, env, normalized)[1] + "\n")
     return 0
 
 

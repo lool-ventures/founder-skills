@@ -36,6 +36,38 @@ import _artifact_writer  # noqa: E402
 import _labels  # noqa: E402
 import _rules  # noqa: E402
 import _warning_callouts  # noqa: E402
+
+# The pool text lives in _pool_text.py; its names are re-exported here for the callers and tests that reach them
+# through compose_report.
+from _pool_text import (  # noqa: E402, F401
+    _POOL_BASIS_BLOCKER_CODES,
+    _POOL_BASIS_SUBSTITUTED_CODES,
+    _POOL_CF_HOLDERS,
+    _POOL_CF_STATUS,
+    _POOL_INCREASE_STATUS,
+    _POOL_SIZING_DENOMINATOR,
+    POOL_DISCLOSURE_CODES,
+    POOL_DISCLOSURE_POINTER,
+    POOL_DRIVER_REFERENCE,
+    POOL_INCREASE_LINE_LEAD,
+    POOL_SIZING_MECHANISM,
+    TARGET_BASIS_WORDS,
+    _consideration_excluded_from_pool_sizing,
+    _founders_pair,
+    _pool_digests,
+    _pool_sizing_label,
+    _shares,
+    _solved_pool_basis,
+    _unallocated_pool_pct,
+    build_pool_basis_note,
+    build_pool_increase_reading_digest,
+    build_pool_sizing_counterfactual_digest,
+    pool_increase_reading_line,
+    pool_section,
+    pool_section_codes,
+    pool_section_markdown,
+    pool_sizing_counterfactual_line,
+)
 from compose_extraction_report import (  # noqa: E402
     _load_ambiguity_map,
     _load_amendment_deltas,
@@ -72,6 +104,67 @@ _SELF_REFERENTIAL_SOURCE_MARKERS = (
     "model_output",
     "model-output",
 )
+
+
+def _handoff_audit() -> Any:
+    """The fleet's shared gate-record check from `founder-skills/scripts/` (same loading as
+    `_founder_text_policy`). None if unavailable: a missing module must never block a report."""
+    try:
+        shared = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "scripts"))
+        if shared not in sys.path:
+            sys.path.insert(0, shared)
+        import _handoff_audit  # type: ignore[import-not-found]
+
+        return _handoff_audit
+    except ImportError:
+        return None
+
+
+_EXTRACTION_SUFFIX = "_extraction_output.json"
+_AOA_HANDOFF = "aoa_extraction_output.json"
+_STRUCTURE_HANDOFF = "structure_detection_output.json"
+
+
+def _handoff_bypassed(dir_path: str, run_id: str, cap_state: dict[str, Any]) -> list[str]:
+    """Which extraction steps of this run have no gated hand-off, as founder-facing labels.
+
+    WEAKER THAN THE OTHER SKILLS' MAP, deliberately stated. A lane-1 extraction is per document
+    (`<doc_slug>_extraction_output.json`, the slug chosen by the model) and `extract_instrument.py`
+    APPENDS to instruments.json with no link back to the hand-off it came from -- so nothing in the
+    artifacts says which extraction hand-offs should exist. What is checkable:
+      (a) every extraction hand-off PRESENT in the run's hand-off dir must be gated: a file there that
+          never passed the gate was piped with the gate skipped;
+      (b) when cap_state records articles-of-association findings, the AoA extraction must be gated --
+          the one step whose artifact identifies it.
+    RESIDUAL: a lane-1 or lane-3 extraction that took the message-channel fallback leaves no hand-off
+    file, so (a) cannot see it. Closing that needs the two extraction validators to stamp the sha of
+    their stdin -- the deferred upgrade, first in line for this skill. Also, as fleet-wide: a pass
+    proves a gated hand-off exists and matches, not that the producer consumed it.
+
+    Labels never name a document: a doc_slug is the model's choice of filename, not founder text.
+    Several unchecked documents are counted, not listed. Silent when `handoff/<run_id>/` is absent.
+    """
+    audit = _handoff_audit()
+    if audit is None or not run_id:
+        return []
+    run_dir = os.path.join(dir_path, "handoff", run_id)
+    if not os.path.isdir(run_dir):
+        return []
+    present = set(os.listdir(run_dir))
+    documents = sorted(name for name in present if name.endswith(_EXTRACTION_SUFFIX) and name != _AOA_HANDOFF)
+    ungated_docs = audit.bypassed(run_dir, [(name, [name]) for name in documents])
+    labels: list[str] = []
+    if len(ungated_docs) == 1:
+        labels.append("the extraction of one of your documents")
+    elif ungated_docs:
+        labels.append(f"the extraction of {len(ungated_docs)} of your documents")
+    if _STRUCTURE_HANDOFF in present and audit.bypassed(run_dir, [("s", [_STRUCTURE_HANDOFF])]):
+        labels.append("the reading of your spreadsheet's structure")
+    aoa = cap_state.get("aoa_findings") or {}
+    aoa_ran = isinstance(aoa, dict) and any(v is not None and v is not False for v in aoa.values())
+    if (aoa_ran or _AOA_HANDOFF in present) and audit.bypassed(run_dir, [("a", [_AOA_HANDOFF])]):
+        labels.append("the reading of your articles of association")
+    return labels
 
 
 def _founder_text_policy() -> Any:
@@ -197,6 +290,14 @@ def validate_run_id_parity(artifacts: dict[str, dict[str, Any]]) -> list[dict[st
     return warnings
 
 
+# ---------------------------------------------------------------------------
+# The option pool on the other sizing basis -- display strings for the coach and report.md
+# ---------------------------------------------------------------------------
+# `run_scenario.py` records the counterfactual numerically; everything below turns it into text a founder
+# can read. The coach may state what the other sizing changes ONLY from these strings, so they are the
+# single rendering: report.md's line is built from the same digest.
+
+
 def build_scenario_digest(scenarios: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Per rev15 coaching_payload schema."""
     digest = []
@@ -206,6 +307,9 @@ def build_scenario_digest(scenarios: list[dict[str, Any]]) -> list[dict[str, Any
         blockers = co.get("blockers", [])
         founder_impact = co.get("founder_impact")  # nullable per rev15
         params = s.get("parameters", {})
+        # Nothing about the pool's sizing reaches the coach: its basis, reading, comparison and disclosures are
+        # the report's Option pool section (`_pool_text.pool_section`). Every coach that was handed them wrote
+        # something about the sizing without its figure, or named the pool by the other measure's name.
         headline_inputs = {
             "pre_money": params.get("pre_money"),
             "new_money": params.get("new_money"),
@@ -239,12 +343,7 @@ def build_scenario_digest(scenarios: list[dict[str, Any]]) -> list[dict[str, Any
         if params.get("pre_money"):
             drivers.append(f"{s['type'].replace('_', ' ').title()} at {_money(params['pre_money'])} pre-money")
         if params.get("target_pool_percent"):
-            _tb_assumed = any(
-                isinstance(w, dict) and w.get("code") == "target_basis_defaulted" for w in (co.get("warnings") or [])
-            )
-            _basis_label = params.get("target_basis", "pre_money").replace("_", " ")
-            _basis_suffix = " (basis assumed — not stated)" if _tb_assumed else ""
-            drivers.append(f"Pool top-up to {params['target_pool_percent']:.0%} {_basis_label}{_basis_suffix}")
+            drivers.append(POOL_DRIVER_REFERENCE)
         if branch_summary["structural_only_count"] > 0:
             drivers.append(f"{branch_summary['structural_only_count']} note(s) / SAFE(s) pending")
         digest.append(
@@ -261,6 +360,23 @@ def build_scenario_digest(scenarios: list[dict[str, Any]]) -> list[dict[str, Any
             }
         )
     return digest
+
+
+def build_report_disclosures(scenarios: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The pool-basis disclosures, for the main thread's hand-over. They are the report's, shown in each
+    scenario's Option pool section, and deliberately NOT in `coaching_payload`: that file is staged whole to the
+    coach, and the pool's sizing is not the commentary's to explain. One of them is high severity, so the
+    hand-over still names it."""
+    return [
+        {
+            "code": w.get("code"),
+            "severity": "high" if w.get("severity") == "high" else "medium",
+            "label": _warning_callouts.humanize_warning(str(w.get("code") or "")),
+            "pointer": POOL_DISCLOSURE_POINTER,
+        }
+        for w in _warning_callouts.collect_solver_warnings(scenarios)
+        if isinstance(w, dict) and w.get("code") in POOL_DISCLOSURE_CODES
+    ]
 
 
 def build_ownership_range(scenarios: list[dict[str, Any]]) -> dict[str, Any]:
@@ -349,6 +465,7 @@ def build_top_dilution_drivers(scenarios: list[dict[str, Any]]) -> list[dict[str
                         "driver": "Option pool top-up",
                         "scenarios": [scenario_id],
                         "founder_impact_pp": round(pool_topup_pct * 100, 1),
+                        "reference": POOL_DRIVER_REFERENCE,
                     }
                 )
     # Sort by impact desc, top 5
@@ -493,15 +610,22 @@ def build_coaching_payload(
     # line it was reading is a counterfactual, which `agents/cap-table.md` requires the report to
     # label. Kept at medium: a solver warning qualifies a number, where a blocker means the number
     # does not exist.
+    solver_warnings = [
+        w
+        for w in _warning_callouts.collect_solver_warnings(scenarios)
+        if isinstance(w, dict) and _warning_callouts.is_solver_callout(str(w.get("code") or "").strip())
+    ]
     high_severity.extend(
         {
             "code": w.get("code"),
-            "severity": "medium",
+            # A solver warning qualifies a number, so it is medium -- except a disclosure the producer itself
+            # marks high (a pool basis substituted at the founder's choice), whose severity is its point.
+            "severity": "high" if w.get("severity") == "high" else "medium",
             "label": _warning_callouts.humanize_warning(str(w.get("code") or "")),
-            "message": w.get("detail") or w.get("reason") or "",
+            "message": w.get("detail") or w.get("reason") or w.get("message") or "",
         }
-        for w in _warning_callouts.collect_solver_warnings(scenarios)
-        if isinstance(w, dict) and str(w.get("code") or "").startswith("W_")
+        for w in solver_warnings
+        if w.get("code") not in POOL_DISCLOSURE_CODES
     )
 
     # summary.passed / summary.failed are SCENARIO counts, not blocker counts. A
@@ -748,31 +872,8 @@ def _render_solver_warning_callouts(scenarios: list[dict[str, Any]]) -> list[str
     written to `scenarios.json`, and dropped before the founder -- including the MFN counterfactual
     that `agents/cap-table.md` requires the report to label.
     """
-    return _warning_callouts.render_solver_warning_callouts(_warning_callouts.collect_solver_warnings(scenarios))
-
-
-def build_pool_basis_note(
-    *,
-    target_pool_percent: float | None,
-    pool_consideration_basis: str,
-    realized_pool_pct: float,
-    acquisition_pct: float | None,
-) -> str:
-    """Labeled option-pool sizing-basis note. Returns '' unless there is BOTH an acquisition
-    (acquisition_pct truthy) AND a pool (target_pool_percent truthy). The negotiated headline is a
-    SIZING input, surfaced separately here; the ownership table keeps the true realized % (pool/post_fd)."""
-    if not acquisition_pct or not target_pool_percent:
-        return ""
-    if pool_consideration_basis == "exclude":
-        return (
-            f"Option pool sizing basis: sized to {target_pool_percent:.1%} of pre-consideration "
-            f"fully-diluted, which is {realized_pool_pct:.1%} of post-closing combined "
-            f"fully-diluted after the acquisition's consideration shares."
-        )
-    # "include" (or default)
-    return (
-        f"Option pool: {realized_pool_pct:.1%} of post-closing combined fully-diluted "
-        f"(sized including acquisition consideration)."
+    return _warning_callouts.render_solver_warning_callouts(
+        _warning_callouts.collect_solver_warnings(scenarios, owned_by_scenario=pool_section_codes)
     )
 
 
@@ -1274,6 +1375,8 @@ def render_report_markdown(
             lines.append("**Inputs:**")
             for k, v in params.items():
                 if v is not None and v != "":
+                    if k == "target_basis":
+                        v = TARGET_BASIS_WORDS.get(str(v), v)
                     lines.append(f"- `{k}`: {v}")
             lines.append("")
         # Blockers
@@ -1285,17 +1388,8 @@ def render_report_markdown(
                     f"- `{b['code']}`{(' on ' + b['instance_id']) if b.get('instance_id') else ''}: {b['remedy']}"
                 )
             lines.append("")
-        # Assumed-basis disclosure: when target_basis was defaulted rather than supplied, it is
-        # absent from `params` above, so the Inputs list never mentions it. Render the assumption
-        # explicitly so a defaulted pool denominator never reads as a founder-confirmed input.
-        if any(isinstance(w, dict) and w.get("code") == "target_basis_defaulted" for w in (co.get("warnings") or [])):
-            lines.append(
-                "> ⚠ **Option pool basis ASSUMED, not stated.** No pool-sizing basis was confirmed "
-                "for this scenario — pre-money was assumed. Pre-money vs post-money changes the "
-                "pool top-up and post-round ownership; confirm which basis your term sheet uses "
-                "before relying on these figures."
-            )
-            lines.append("")
+        # The option pool's explanation, from the one builder report.html and explorer.html render too.
+        lines.extend(pool_section_markdown(pool_section(s, cap_state)))
         # Math outputs (when full/mixed)
         if completeness in {"full", "mixed"} and co.get("aggregate_ownership_by_class"):
             agg = co["aggregate_ownership_by_class"]
@@ -1379,16 +1473,6 @@ def render_report_markdown(
                     "in the totals above but are not broken out per person here.)*"
                 )
             lines.append("")
-            # Option-pool sizing-basis note (acquisition deals only; ownership table unchanged)
-            _pool_note = build_pool_basis_note(
-                target_pool_percent=params.get("target_pool_percent"),
-                pool_consideration_basis=params.get("pool_consideration_basis", "include"),
-                realized_pool_pct=agg.get("option_pool_pct") or 0.0,
-                acquisition_pct=agg.get("acquisition_pct"),
-            )
-            if _pool_note:
-                lines.append(f"> _{_pool_note}_")
-                lines.append("")
             # Per-series AD breakdown
             if ad_breakdown:
                 lines.append("**Anti-dilution adjustments (per series):**")
@@ -1761,6 +1845,17 @@ def main() -> int:
 
     # Validate run_id parity
     validation_warnings = validate_run_id_parity(artifacts)
+    _bypassed_steps = _handoff_bypassed(args.dir, args.run_id, artifacts["cap_state.json"])
+    if _bypassed_steps:
+        _ha = _handoff_audit()
+        validation_warnings.append(
+            {
+                "code": "HANDOFF_BYPASSED",
+                "severity": "medium",
+                "label": _ha.WARNING_LABEL,
+                "message": _ha.founder_message(_bypassed_steps),
+            }
+        )
 
     # Generate per-run uuid for the insertion marker
     run_uuid = uuid.uuid4().hex[:8]
@@ -2046,6 +2141,13 @@ def main() -> int:
                 }
             )
 
+    # The commentary this report takes must come with the record of a pool check that passed it, for this run:
+    # insert_coaching reads this declaration and refuses anything else, so a skipped check cannot reach the
+    # report. It is removed when the commentary goes in. Added after the founder-text pass, which would reword it.
+    report_md = report_md.replace(
+        insertion_marker, f"<!-- COACHING_REQUIRES_CHECK_RECORD run_id={args.run_id} -->\n{insertion_marker}", 1
+    )
+
     # Write report.md
     md_path = os.path.abspath(args.write_md)
     os.makedirs(os.path.dirname(md_path) or ".", exist_ok=True)
@@ -2079,6 +2181,7 @@ def main() -> int:
         "report_markdown": report_md,
         "validation": {"warnings": validation_warnings},
         "coaching_payload": coaching_payload,
+        "report_disclosures": build_report_disclosures((artifacts.get("scenarios.json") or {}).get("scenarios") or []),
         "metadata": {"run_id": args.run_id, "produced_by": "compose_report.py"},
         "reconciliation_status": _recon_status,
         "max_divergence_ppm": _max_ppm,

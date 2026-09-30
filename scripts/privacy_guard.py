@@ -19,9 +19,32 @@ Three layers, in order of value and precision:
                  The detector logic ships in the repo; the names do NOT. CI has no
                  list, so layer 3 simply no-ops there.
 
+Three more layers keep figures and quoted lines from private data out of ADDED text (staged lines,
+commit messages, a push range). None of them discloses what it guards: findings print a path, a line
+and the added token only, never which private file matched or any of its text.
+
+  4. figure     — LOCAL ONLY. A figure token the change adds ($ amounts, thousands-separated numbers,
+                  decimals, percentages, multiples, integers of 3+ digits) that also occurs in the
+                  local private sources. Whole-token: 385 never matches inside 1385 or $3,850.
+  5. verbatim   — LOCAL ONLY. A 6-word run of added text that also occurs in the private sources and
+                  not in our own tracked code.
+  6. figure-provenance — everywhere. A figure token on a line that also says where real data came
+                  from ("a live run", "the founder's", …). Blocking locally, warning-only in CI. A
+                  reviewed line is accepted with the inline marker `privacy-guard: synthetic`.
+
+The private sources are folders listed in a LOCAL, git-ignored file (default
+docs/internal/privacy-private-sources.txt): one path per line, `#` comments, and `!<substring>` lines
+that exclude any file whose path contains the substring (copies of our own code). Without that file
+layers 4-5 skip silently, like layer 3 without its list. The index holds HASHES only and is cached
+outside the repo (~/.cache/founder-skills/privacy-guard), rebuilt when a source file changes. False
+alarms go in a LOCAL, git-ignored allowlist (docs/internal/privacy-figure-allowlist.txt, one figure
+per line): a committed one would reveal that a public number equals a private one.
+
 Usage:
-  privacy_guard.py --staged              # scan git-staged files (pre-commit hook)
-  privacy_guard.py --tree                # scan all tracked files (CI; layers 1+2)
+  privacy_guard.py --staged              # staged files (layers 1-3) + staged ADDED lines (4-6)
+  privacy_guard.py --commit-msg FILE     # a commit message (commit-msg hook; layers 3-6)
+  privacy_guard.py --range A..B          # added lines + messages of a range (pre-push; layers 3-6)
+  privacy_guard.py --tree                # scan all tracked files (CI; layers 1+2, layer 6 warn-only)
   privacy_guard.py FILE [FILE ...]       # scan specific files
   privacy_guard.py --staged --names-file docs/internal/privacy-denylist.txt
   privacy_guard.py --tree --no-names     # force-skip layer 3
@@ -32,11 +55,15 @@ Exit 0 = clean, 1 = findings (printed to stderr), 2 = usage error.
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import os
 import re
+import shutil
 import subprocess
 import sys
-from dataclasses import dataclass
+from collections.abc import Iterable
+from dataclasses import dataclass, field
 
 # Confidential document file types. .csv is intentionally excluded (commonly
 # legitimate structured test data); add it here if that changes.
@@ -55,7 +82,7 @@ ALLOWLISTED_DOCS = frozenset(
         "cowork-tests/fixtures/term_sheet_blank_exclusivity.pdf",
         "founder-skills/tests/fixtures/cap-table-corpus/synthetic_carta.xlsx",
         "founder-skills/tests/fixtures/sample_model.xlsx",
-        # Two-page IMAGE-ONLY deck for fictional Foobar Health: synthetic text rendered to PNG and
+        # Two-page IMAGE-ONLY deck for fictional Foobar Fleet: synthetic text rendered to PNG and
         # wrapped back into a PDF, so the market-sizing OCR sidecar and document-citation checks
         # can be exercised on a page with no text layer. Regenerate rather than hand-edit.
         "founder-skills/tests/fixtures/market-sizing/synthetic-deck-scanned.pdf",
@@ -96,8 +123,9 @@ _TEXT_SKIP_EXTS = DOC_EXTS | {".png", ".jpg", ".jpeg", ".gif", ".woff", ".woff2"
 @dataclass
 class Finding:
     path: str
-    layer: str  # "document" | "provenance" | "name"
+    layer: str  # "document" | "provenance" | "name" | "figure" | "verbatim" | "figure-provenance"
     detail: str
+    token: str = ""  # the ADDED token, never private text
 
 
 def load_names(path: str) -> list[str]:
@@ -169,6 +197,327 @@ def scan_text_and_paths(paths: list[str], contents: dict[str, str], names: list[
     return findings
 
 
+# ---------------------------------------------------------------------------
+# Layers 4-6: figures, verbatim runs, figure + provenance phrase
+# ---------------------------------------------------------------------------
+
+DEFAULT_SOURCES_FILE = "docs/internal/privacy-private-sources.txt"
+DEFAULT_ALLOWLIST_FILE = "docs/internal/privacy-figure-allowlist.txt"
+DEFAULT_CACHE_DIR = os.path.join(os.path.expanduser("~"), ".cache", "founder-skills", "privacy-guard")
+SYNTHETIC_MARKER = "privacy-guard: synthetic"
+NGRAM = 6
+# Bump when what the index holds changes, so a cached index built by older logic is never reused.
+INDEX_VERSION = "2"
+# Machine-generated recordings of synthetic runs: their timings, byte and token counts collide with
+# private figures by chance, and they narrate those runs in the skills' own words ("the founder's",
+# "the deck's"), so the figure and figure-provenance layers skip them. Verbatim and names still scan them.
+FIGURE_LAYER_SKIP_PREFIXES = ("cowork-tests/cassettes/",)
+
+# A figure token. The look-arounds make it WHOLE-TOKEN: no digit, letter, `.`, `,` or `$` may touch
+# either side, so 385 is not found inside 1385, $3,850, 2.1.385 or 0x385.
+_FIGURE_RE = re.compile(
+    r"(?<![\w.,$-])"
+    r"(\$\s?\d{1,3}(?:,\d{3})+(?:\.\d+)?|\$\s?\d+(?:\.\d+)?"  # $ amounts
+    r"|\d{1,3}(?:,\d{3})+(?:\.\d+)?"  # thousands-separated
+    r"|\d+\.\d+"  # decimals
+    r"|\d{3,})"  # integers of 3+ digits
+    r"([%x]|[kKmMbB](?![a-zA-Z]))?"  # percent / multiple / scale suffix
+    r"(?![\w]|[.,]\d|-\w)"
+)
+_SMALL_PCT_OR_MULT = re.compile(r"(?<![\w.,$-])(\d{1,2})([%x])(?![\w]|[.,]\d)")
+
+# Values too common to mean anything. Keep this list MINIMAL: every entry is a figure the guard can
+# no longer see. Years 1900-2100 are skipped by rule, not listed.
+GENERIC_FIGURES = frozenset({"100", "1000", "10000", "100000", "1000000", "0.5", "10%", "25%", "50%", "100%"})
+
+
+def _norm_figure(raw: str, suffix: str | None) -> str:
+    core = re.sub(r"[$,\s]", "", raw)
+    return core + (suffix.lower() if suffix else "")
+
+
+def extract_figures(text: str) -> list[tuple[str, str]]:
+    """(normalised, raw) figure tokens in `text`, generic values dropped."""
+    out: list[tuple[str, str]] = []
+    for m in list(_FIGURE_RE.finditer(text)) + list(_SMALL_PCT_OR_MULT.finditer(text)):
+        raw, suffix = m.group(1), m.group(2)
+        norm = _norm_figure(raw, suffix)
+        digits = re.sub(r"\D", "", raw)
+        plain = not suffix and "." not in raw and "," not in raw and "$" not in raw
+        if plain and len(digits) == 4 and 1900 <= int(digits) <= 2100:
+            continue  # a year
+        if norm in GENERIC_FIGURES:
+            continue
+        out.append((norm, m.group(0)))
+    return out
+
+
+def _words(text: str) -> list[str]:
+    toks = re.findall(r"[A-Za-z0-9$%.\-']+", text.lower())
+    return [t.strip(".'-") for t in toks if t.strip(".'-")]
+
+
+def _h(value: str) -> str:
+    return hashlib.blake2b(value.encode("utf-8"), digest_size=10).hexdigest()
+
+
+def _grams(words: list[str]) -> Iterable[str]:
+    for i in range(len(words) - NGRAM + 1):
+        yield " ".join(words[i : i + NGRAM])
+
+
+@dataclass
+class SourcesSpec:
+    roots: list[str]
+    excludes: list[str]
+    config_text: str
+
+
+@dataclass
+class PrivateIndex:
+    figures: set[str] = field(default_factory=set)  # hashes of normalised figures
+    grams: set[str] = field(default_factory=set)  # hashes of 6-word runs, our own code's removed
+    allow: set[str] = field(default_factory=set)  # normalised figures accepted locally
+
+
+def load_sources(path: str) -> SourcesSpec | None:
+    """The local sources file, or None when it is absent (layers 4-5 then skip silently)."""
+    if not os.path.isfile(path):
+        return None
+    roots: list[str] = []
+    excludes: list[str] = []
+    with open(path, encoding="utf-8") as fh:
+        text = fh.read()
+    for line in text.splitlines():
+        s = line.strip()
+        if not s or s.startswith("#"):
+            continue
+        if s.startswith("!"):
+            excludes.append(s[1:].strip())
+        else:
+            roots.append(os.path.expanduser(s))
+    return SourcesSpec(roots, excludes, text)
+
+
+_BINARY_EXTS = _TEXT_SKIP_EXTS - {".pdf"}
+
+
+def _source_files(spec: SourcesSpec) -> list[str]:
+    files: list[str] = []
+    for root in spec.roots:
+        for dirpath, _dirs, names in os.walk(root):
+            for n in names:
+                fp = os.path.join(dirpath, n)
+                if any(ex in fp for ex in spec.excludes):
+                    continue
+                if _ext(fp) in _BINARY_EXTS or _ext(fp) in {".xlsx", ".xls", ".docx", ".doc", ".pptx", ".ppt"}:
+                    continue
+                files.append(fp)
+    return sorted(files)
+
+
+def _source_text(fp: str, notes: list[str]) -> str:
+    if _ext(fp) == ".pdf":
+        if not shutil.which("pdftotext"):
+            if "pdftotext" not in " ".join(notes):
+                notes.append("privacy-guard: pdftotext not found; PDF sources skipped")
+            return ""
+        out = subprocess.run(["pdftotext", "-q", fp, "-"], capture_output=True, text=True)
+        return out.stdout
+    try:
+        if os.path.getsize(fp) > 20_000_000:
+            return ""
+        with open(fp, encoding="utf-8") as f:
+            return f.read()
+    except (OSError, UnicodeDecodeError):
+        return ""
+
+
+def _own_code_texts() -> Iterable[str]:
+    """Our tracked files at origin/main: figures and 6-word runs found there are ours, not private.
+    Read in ONE `git cat-file --batch` stream; a subprocess per file is minutes on this repo."""
+    # Only the PUBLISHED tree counts as ours. Falling back to HEAD would let a leak already committed
+    # locally subtract itself out of the index, so with no origin/main nothing is subtracted.
+    ref = "origin/main"
+    if subprocess.run(["git", "rev-parse", "--verify", "-q", ref], capture_output=True).returncode != 0:
+        return
+    listing = subprocess.run(["git", "ls-tree", "-r", "-z", ref], capture_output=True, text=True).stdout
+    shas = []
+    for entry in listing.split("\0"):
+        if not entry or "\t" not in entry:
+            continue
+        meta, name = entry.split("\t", 1)
+        parts = meta.split()
+        if len(parts) == 3 and parts[1] == "blob" and _ext(name) not in _TEXT_SKIP_EXTS:
+            shas.append(parts[2])
+    proc = subprocess.run(["git", "cat-file", "--batch"], input=("\n".join(shas) + "\n").encode(), capture_output=True)
+    buf, pos = proc.stdout, 0
+    while pos < len(buf):
+        nl = buf.index(b"\n", pos)
+        header = buf[pos:nl].split()
+        pos = nl + 1
+        if len(header) < 3 or header[1] != b"blob":
+            continue
+        size = int(header[2])
+        body, pos = buf[pos : pos + size], pos + size + 1
+        try:
+            yield body.decode("utf-8")
+        except UnicodeDecodeError:
+            continue
+
+
+def _own_tree_id() -> str:
+    r = subprocess.run(["git", "rev-parse", "-q", "origin/main^{tree}"], capture_output=True, text=True)
+    return r.stdout.strip() if r.returncode == 0 else "none"
+
+
+def build_private_index(
+    spec: SourcesSpec,
+    own_code_texts: Iterable[str] | None = None,
+    cache_dir: str = DEFAULT_CACHE_DIR,
+    allowlist_path: str = DEFAULT_ALLOWLIST_FILE,
+) -> PrivateIndex:
+    """Hashes of every figure and 6-word run in the private sources, minus our own code's runs.
+
+    Cached (hashes only) outside the repo; the key covers the sources config, every source file's
+    path/size/mtime and, when our own code is read from git, the tree it came from."""
+    files = _source_files(spec)
+    sig = hashlib.sha256()
+    sig.update(INDEX_VERSION.encode())
+    sig.update(spec.config_text.encode())
+    for fp in files:
+        st = os.stat(fp)
+        sig.update(f"{fp}\0{st.st_size}\0{st.st_mtime_ns}\0".encode())
+    own_given = own_code_texts is not None
+    sig.update((("given:" + _h("\0".join(own_code_texts or []))) if own_given else _own_tree_id()).encode())
+    key = sig.hexdigest()[:24]
+    cache = os.path.join(cache_dir, f"index-{key}.json")
+    idx = PrivateIndex()
+    if os.path.isfile(cache):
+        with open(cache, encoding="utf-8") as fh:
+            data = json.load(fh)
+        idx.figures, idx.grams = set(data["figures"]), set(data["grams"])
+    else:
+        notes: list[str] = []
+        for fp in files:
+            text = _source_text(fp, notes)
+            if not text:
+                continue
+            for norm, _raw in extract_figures(text):
+                idx.figures.add(_h(norm))
+            idx.grams.update(_h(g) for g in _grams(_words(text)))
+        for note in notes:
+            print(note, file=sys.stderr)
+        # Our own code is public: a figure or a 6-word run that also occurs there is not a leak signal.
+        own_texts: Iterable[str] = own_code_texts if own_code_texts is not None else _own_code_texts()
+        for own in own_texts:
+            if idx.grams:
+                idx.grams.difference_update(_h(g) for g in _grams(_words(own or "")))
+            if idx.figures:
+                idx.figures.difference_update(_h(n) for n, _ in extract_figures(own or ""))
+        os.makedirs(cache_dir, exist_ok=True)
+        with open(cache, "w", encoding="utf-8") as f:
+            json.dump({"figures": sorted(idx.figures), "grams": sorted(idx.grams)}, f)
+    if os.path.isfile(allowlist_path):
+        with open(allowlist_path, encoding="utf-8") as fh:
+            for line in fh:
+                entry = line.strip()
+                if entry and not entry.startswith("#"):
+                    idx.allow.update(n for n, _ in extract_figures(entry))
+    return idx
+
+
+def find_figure_leaks(path: str, lines: list[tuple[int, str]], idx: PrivateIndex) -> list[Finding]:
+    out = []
+    for lineno, text in lines:
+        for norm, raw in extract_figures(text):
+            if norm not in idx.allow and _h(norm) in idx.figures:
+                out.append(Finding(f"{path}:{lineno}", "figure", "matches a figure in local private sources", raw))
+    return out
+
+
+def find_verbatim_leaks(path: str, lines: list[tuple[int, str]], idx: PrivateIndex) -> list[Finding]:
+    """A 6-word run of the added text found in the private sources. Runs may span added lines of one file."""
+    out = []
+    flat: list[tuple[int, str]] = [(n, w) for n, text in lines for w in _words(text)]
+    seen_lines: set[int] = set()
+    for i in range(len(flat) - NGRAM + 1):
+        gram = " ".join(w for _, w in flat[i : i + NGRAM])
+        lineno = flat[i][0]
+        if lineno not in seen_lines and _h(gram) in idx.grams:
+            seen_lines.add(lineno)
+            out.append(Finding(f"{path}:{lineno}", "verbatim", "a 6-word run matches text in local private sources"))
+    return out
+
+
+_PROVENANCE_PHRASES = re.compile(
+    r"\b(?:a\s+live\s+(?:run|report)|live\s+run|real\s+run|the\s+real\b|in\s+production\b"
+    r"|the\s+founder'?s\b|the\s+deck'?s\b|from\s+the\s+data\s+room)",
+    re.IGNORECASE,
+)
+
+
+def find_figure_provenance(path: str, lines: list[tuple[int, str]]) -> list[Finding]:
+    if path in _SELF_EXEMPT or path.startswith(FIGURE_LAYER_SKIP_PREFIXES):
+        return []
+    out = []
+    for lineno, text in lines:
+        if SYNTHETIC_MARKER in text or not _PROVENANCE_PHRASES.search(text):
+            continue
+        figs = extract_figures(text)
+        if figs:
+            out.append(
+                Finding(f"{path}:{lineno}", "figure-provenance", "a figure beside a real-data phrase", figs[0][1])
+            )
+    return out
+
+
+def added_lines_from_diff(diff: str) -> dict[str, list[tuple[int, str]]]:
+    """{path: [(new line number, text)]} for the ADDED lines of a `git diff -U0` patch."""
+    out: dict[str, list[tuple[int, str]]] = {}
+    path: str | None = None
+    lineno = 0
+    for line in diff.splitlines():
+        if line.startswith("+++ "):
+            target = line[4:]
+            path = None if target == "/dev/null" else target[2:] if target.startswith("b/") else target
+            continue
+        if line.startswith("@@"):
+            m = re.search(r"\+(\d+)", line)
+            lineno = int(m.group(1)) if m else 0
+            continue
+        if path is None or line.startswith("---"):
+            continue
+        if line.startswith("+"):
+            out.setdefault(path, []).append((lineno, line[1:]))
+            lineno += 1
+        elif line.startswith(" "):
+            lineno += 1
+    return out
+
+
+def scan_added(
+    added: dict[str, list[tuple[int, str]]],
+    idx: PrivateIndex | None,
+    names: list[str],
+) -> list[Finding]:
+    """Layers 3-6 over added text (files, or a commit message under a pseudo-path)."""
+    findings: list[Finding] = []
+    for path, lines in added.items():
+        if idx is not None and path not in _SELF_EXEMPT:
+            if not path.startswith(FIGURE_LAYER_SKIP_PREFIXES):
+                findings.extend(find_figure_leaks(path, lines, idx))
+            findings.extend(find_verbatim_leaks(path, lines, idx))
+        findings.extend(find_figure_provenance(path, lines))
+        if names:
+            findings.extend(find_names(path, "\n".join(t for _, t in lines), names))
+    return findings
+
+
+def _message_lines(text: str) -> list[tuple[int, str]]:
+    return [(i, ln) for i, ln in enumerate(text.splitlines(), 1) if not ln.startswith("#")]
+
+
 def _read_text(path: str) -> str | None:
     if _ext(path) in _TEXT_SKIP_EXTS:
         return None
@@ -190,37 +539,107 @@ def scan(paths: list[str], names: list[str]) -> list[Finding]:
     return scan_text_and_paths(paths, contents, names)
 
 
+def _git(*args: str) -> str:
+    return subprocess.run(["git", *args], capture_output=True, text=True, check=True).stdout
+
+
+def _report(findings: list[Finding], warn_layers: set[str]) -> int:
+    blocking = [f for f in findings if f.layer not in warn_layers]
+    warnings = [f for f in findings if f.layer in warn_layers]
+    for f in warnings:
+        tok = f"  ({f.token})" if f.token else ""
+        print(f"  warning [{f.layer}] {f.path}{tok}: {f.detail}", file=sys.stderr)
+    if blocking:
+        print("✗ privacy-guard: potential leak(s) detected:\n", file=sys.stderr)
+        for f in blocking:
+            tok = f"  ({f.token})" if f.token else ""
+            print(f"  [{f.layer:<10}] {f.path}{tok}\n               {f.detail}", file=sys.stderr)
+        print(
+            "\nFix the text, mark a reviewed synthetic line with `privacy-guard: synthetic`, add a local false "
+            "alarm to the git-ignored figure allowlist, or — as a last resort — bypass with `--no-verify`.",
+            file=sys.stderr,
+        )
+        return 1
+    return 0
+
+
+def _verbatim_report(added: dict[str, list[tuple[int, str]]], idx: PrivateIndex | None) -> int:
+    """Verbatim finding COUNTS per file, largest first, for triage. Never prints text."""
+    if idx is None:
+        print("privacy-guard: no local private-sources file; nothing to report", file=sys.stderr)
+        return 0
+    counts = {p: len(find_verbatim_leaks(p, lines, idx)) for p, lines in added.items() if p not in _SELF_EXEMPT}
+    rows = sorted(((n, p) for p, n in counts.items() if n), key=lambda r: (-r[0], r[1]))
+    for n, p in rows:
+        print(f"{n:6d}  {p}")
+    print(f"total {sum(n for n, _ in rows)} in {len(rows)} file(s)")
+    return 0
+
+
 def _main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description="Privacy leak detector (pre-commit / CI).")
+    ap = argparse.ArgumentParser(description="Privacy leak detector (pre-commit / commit-msg / pre-push / CI).")
     g = ap.add_mutually_exclusive_group()
-    g.add_argument("--staged", action="store_true", help="scan git-staged files")
+    g.add_argument("--staged", action="store_true", help="scan git-staged files and their added lines")
     g.add_argument("--tree", action="store_true", help="scan all tracked files")
+    g.add_argument("--commit-msg", metavar="FILE", help="scan a commit message file")
+    g.add_argument("--range", metavar="REVS", help="scan added lines + commit messages of a rev range")
     ap.add_argument("files", nargs="*", help="explicit files to scan")
     ap.add_argument("--names-file", default=DEFAULT_NAMES_FILE, help="local denylist path")
     ap.add_argument("--no-names", action="store_true", help="skip layer 3 (name list)")
+    ap.add_argument("--sources-file", default=DEFAULT_SOURCES_FILE, help="local private-sources list")
+    ap.add_argument("--allowlist-file", default=DEFAULT_ALLOWLIST_FILE, help="local figure allowlist")
+    ap.add_argument("--cache-dir", default=DEFAULT_CACHE_DIR, help="where the hashed index is cached")
+    ap.add_argument("--provenance-warn-only", action="store_true", help="report figure-provenance as warnings")
+    ap.add_argument(
+        "--verbatim-report",
+        action="store_true",
+        help="with --range/--staged: print verbatim finding COUNTS per file (no text), exit 0",
+    )
     args = ap.parse_args(argv)
+
+    names = [] if args.no_names else load_names(args.names_file)
+    warn_layers = {"figure-provenance"} if (args.tree or args.provenance_warn_only) else set()
+
+    def index() -> PrivateIndex | None:
+        spec = load_sources(args.sources_file)
+        return None if spec is None else build_private_index(spec, None, args.cache_dir, args.allowlist_file)
+
+    if args.commit_msg:
+        with open(args.commit_msg, encoding="utf-8") as fh:
+            text = fh.read()
+        return _report(scan_added({"commit message": _message_lines(text)}, index(), names), warn_layers)
+
+    if args.range:
+        added = added_lines_from_diff(_git("diff", "-U0", "--no-color", "--no-ext-diff", args.range))
+        for sha in _git("rev-list", args.range).split():
+            added[f"commit message {sha[:10]}"] = _message_lines(_git("log", "-1", "--format=%B", sha))
+        if args.verbatim_report:
+            return _verbatim_report(added, index())
+        return _report(scan_added(added, index(), names), warn_layers)
 
     if args.staged or args.tree:
         paths = _git_files(staged=args.staged)
     elif args.files:
         paths = args.files
     else:
-        ap.error("provide --staged, --tree, or explicit files")
+        ap.error("provide --staged, --tree, --commit-msg, --range, or explicit files")
         return 2
 
-    names = [] if args.no_names else load_names(args.names_file)
-    findings = scan(paths, names)
-
-    if findings:
-        print("✗ privacy-guard: potential leak(s) detected:\n", file=sys.stderr)
-        for f in findings:
-            print(f"  [{f.layer:<10}] {f.path}\n               {f.detail}", file=sys.stderr)
-        print(
-            "\nFix the file, or — if this is a confirmed false positive — bypass with `git commit --no-verify`.",
-            file=sys.stderr,
+    if args.staged and args.verbatim_report:
+        return _verbatim_report(
+            added_lines_from_diff(_git("diff", "--cached", "-U0", "--no-color", "--no-ext-diff")), index()
         )
-        return 1
-    return 0
+    findings = scan(paths, names)
+    if args.staged:
+        added = added_lines_from_diff(_git("diff", "--cached", "-U0", "--no-color", "--no-ext-diff"))
+        findings.extend(f for f in scan_added(added, index(), []) if f.layer != "name")
+    else:
+        # --tree / explicit files: layer 6 over whole files; layers 4-5 are for ADDED text only.
+        for p in paths:
+            body = _read_text(p)
+            if body is not None:
+                findings.extend(find_figure_provenance(p, list(enumerate(body.splitlines(), 1))))
+    return _report(findings, warn_layers)
 
 
 if __name__ == "__main__":

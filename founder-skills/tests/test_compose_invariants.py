@@ -10,10 +10,14 @@ emits the contract-required keys.
 
 from __future__ import annotations
 
+import html
 import json
 import re
 import shutil
+import subprocess
+import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 from compose_invocations import drive_compose, get_mutation_target, run_compose_capturing
@@ -181,6 +185,7 @@ def test_compose_enforces_run_id_parity(tmp_path: Path, skill: str) -> None:
 # ---------------------------------------------------------------------------
 
 CP_FIXTURES = REPO_ROOT / "founder-skills" / "tests" / "fixtures" / "competitive-positioning"
+CP_SCRIPTS = REPO_ROOT / "founder-skills" / "skills" / "competitive-positioning" / "scripts"
 
 
 def _cp_compose(tmp_path: Path, mutate: object = None) -> str:
@@ -261,13 +266,33 @@ def test_cp_one_differentiation_score_gets_one_verdict(tmp_path: Path, score: fl
     stating "the label and the prose paragraph never disagree". At 90% with low defensibility the report
     said "Strong — clearly differentiated" and then "moderate differentiation" two lines below.
 
-    Parametrised across every band so the disagreement cannot hide in the one range a fixture happens to
-    sit in — 3 of the 4 eval runs scored below 25.
+    The score is now not shown at all: it read as a percentage, and on two baseline runs its bands
+    called a startup that ranked 1st on an axis of every map "Weak — positioned close to competitors".
+    So the one-statement property applies to the computed "Where you stand" sentence instead: no
+    score-derived verdict on any surface, and the same sentence in the executive summary, the
+    positioning section and report.html.
+
+    Parametrised across every former band so a verdict cannot hide in the one range a fixture happens
+    to sit in — 3 of the 4 eval runs scored below 25.
     """
+    staged: list[Path] = []
 
     def mutate(d: Path) -> None:
+        staged.append(d)
         ps = _read(d, "positioning_scores.json")
         ps["overall_differentiation"] = score
+        first = next(c["slug"] for c in _read(d, "landscape.json")["competitors"])
+        ps["views"][0].update(
+            {
+                "dominated_by": [],
+                "nearest_competitor": first,
+                "nearest_distance": 12.0,
+                "x_lead_over_best": 30.0,
+                "y_lead_over_best": -12.0,
+                "x_best_competitors": [first],
+                "y_best_competitors": [first],
+            }
+        )
         _write(d, "positioning_scores.json", ps)
         # Force LOW defensibility: the old top arm was gated on it, so this is the case that split
         # the label from the prose.
@@ -276,25 +301,37 @@ def test_cp_one_differentiation_score_gets_one_verdict(tmp_path: Path, score: fl
         _write(d, "moat_scores.json", ms)
 
     md = _cp_compose(tmp_path, mutate)
-    headline = [ln for ln in md.splitlines() if "Overall Differentiation Score" in ln]
-    assert headline, "the headline differentiation label is gone"
     assert "Startup Defensibility:** Low" in md, "the low-defensibility mutation did not take effect"
-    strong_headline = "Strong —" in headline[0]
-
-    # Each prose surface is checked SEPARATELY against the headline. An `or` across them hides the
-    # defect: Key Findings said "Strong differentiation" while the summary paragraph said "moderate",
-    # so a combined check is satisfied by whichever one happens to agree.
-    strong_paragraph = "shows strong competitive differentiation" in md
-    strong_key_finding = "Strong differentiation" in md
-
-    assert strong_headline == strong_paragraph, (
-        f"at {score}% with low defensibility the headline says strong={strong_headline} but the summary "
-        f"paragraph says strong={strong_paragraph} — one score, two verdicts:\n{headline[0]}"
+    proc = subprocess.run(
+        [sys.executable, str(CP_SCRIPTS / "visualize.py"), "-d", str(staged[0])],
+        capture_output=True,
+        text=True,
     )
-    assert strong_headline == strong_key_finding, (
-        f"at {score}% the headline says strong={strong_headline} but Key Findings says "
-        f"strong={strong_key_finding} — the two chains band the same number differently"
+    assert proc.returncode == 0, proc.stderr
+    page = html.unescape(proc.stdout)
+
+    tiers = (
+        "Overall Differentiation",
+        "Strong differentiation",
+        "Moderate differentiation",
+        "Weak differentiation",
+        "Limited differentiation",
+        "clustered with competitors",
+        "shows strong competitive differentiation",
+        "Differentiation:",
     )
+    for surface, text in (("report.md", md), ("report.html", page)):
+        for tier in tiers:
+            assert tier not in text, f"{surface}: a score-derived verdict reached the founder at {score}: {tier!r}"
+        for shown in (f"{score}%", f"{int(score)}%"):
+            assert shown not in text, f"{surface}: the differentiation score reached the founder as {shown!r}"
+
+    summary = md.split("## Executive Summary")[1].split("\n## ")[0]
+    section = md.split("## Positioning Analysis")[1].split("\n## ")[0]
+    stand = next(ln for ln in section.splitlines() if ln.startswith("- **Where you stand:**"))
+    sentence = stand.split("**Where you stand:** ", 1)[1]
+    assert sentence in summary, "the executive summary and the positioning section state the map differently"
+    assert sentence in page, "report.html states the map differently from report.md"
 
 
 def test_cp_quality_score_verdict_matches_the_checklist_canon(tmp_path: Path) -> None:
@@ -369,7 +406,10 @@ def test_cp_not_rankable_sentinel_never_reaches_the_founder(tmp_path: Path) -> N
         f"expected the two `not_applicable` dimensions to render as prose; got:\n{block}"
     )
     # Real ranks must be untouched.
-    assert "Rank 4 of 5 ranked" in block, f"a valid rank line changed:\n{block}"
+    # The line pinned here was a hidden tie ("Rank 4 of 5" shared 4th with FreshBooks); ties now say so.
+    assert "Tied 4–5 of 5 ranked, with FreshBooks" in block, f"a valid rank line changed:\n{block}"
+    # An untied rank keeps its wording; tied leaders are all named.
+    assert "Rank 4 of 6 ranked — leader: QuickBooks Online, Xero, Pilot.com (Strong)" in block, block
 
 
 def test_cp_no_leader_attributed_on_a_dimension_that_does_not_apply(tmp_path: Path) -> None:
@@ -398,7 +438,7 @@ def test_cp_view_label_preferred_over_title_cased_id(tmp_path: Path) -> None:
         _write(d, "positioning_scores.json", ps)
 
     md = _cp_compose(tmp_path, mutate)
-    assert "### Capacity firmness vs integration burden View" in md
+    assert "### Capacity firmness vs integration burden\n" in md
 
 
 def test_cp_verification_verdicts_reach_the_report(tmp_path: Path) -> None:
@@ -1267,3 +1307,35 @@ def test_overall_status_bands_agree_across_every_skill_that_has_them() -> None:
             "would see the same score described two different ways"
         )
         assert floor == _EXPECTED_FLOOR, f"{skill} floor band {floor!r} != {_EXPECTED_FLOOR!r}"
+
+
+def _warnings_naming(node: Any, needle: str) -> list[Any]:
+    """Every warning anywhere in report.json whose text names `needle`."""
+    found: list[Any] = []
+    if isinstance(node, dict):
+        if "code" in node and needle in json.dumps(node):
+            found.append(node)
+        else:
+            for v in node.values():
+                found += _warnings_naming(v, needle)
+    elif isinstance(node, list):
+        for v in node:
+            found += _warnings_naming(v, needle)
+    return found
+
+
+@pytest.mark.parametrize("skill", COACHING_SKILLS)
+def test_an_all_digit_insertion_marker_is_not_reported_as_a_leak(tmp_path: Path, skill: str) -> None:
+    """The marker's suffix is random hex; about one run in forty-three draws eight digits, and the
+    shared scanner read that as internal vocabulary in the founder's report. One skill had a local
+    workaround for years and the other five never got it, so this runs every compose, not the scanner."""
+    fixture_dir = REPO_ROOT / "founder-skills" / "tests" / "fixtures" / skill
+    work_dir = tmp_path / "work"
+    work_dir.mkdir()
+    result = run_compose_capturing(skill, fixture_dir, work_dir, pinned_uuid="12345678-1234-4234-8234-123456789012")
+    assert result.returncode == 0, result.stdout + result.stderr
+    marker = "COACHING_INSERTION_POINT_12345678"
+    # Not vacuous: the pinned suffix is the one this compose actually wrote.
+    assert marker in (work_dir / "report.md").read_text(), f"{skill}: the pinned marker was not written"
+    report = json.loads((work_dir / "report.json").read_text())
+    assert _warnings_naming(report, marker) == [], skill

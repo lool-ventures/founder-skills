@@ -289,7 +289,7 @@ the plan document — §102 continuity reads per-grant, not the pool aggregate.
 
 7. **Drag-along in term sheets is class-composition, not %.** Pattern: "holders representing at least a majority of the issued and outstanding share capital + majority of preferred." Extract the class composition verbatim; do not return a percentage.
 
-8. **Option pool % is post-financing fully-diluted target.** Typical range: 7–12%; occasional larger (~18% for hiring runway). Phrasing: "the reservation of a pool of X%, post actual investment amount". Founders take the dilution because pool is sized into the pre-money.
+8. **Option pool % is post-financing fully-diluted target.** Typical range: 7–12%; occasional larger (~18% for hiring runway). Phrasing: "the reservation of a pool of X%, post actual investment amount". Founders take the dilution because the pool is created before the round's price is set.
 
 9. **Liquidation preference often described qualitatively** as "greater of [invested amount + accrued dividends] or as-converted basis" — this is functionally `1x non_participating`. Don't return null when this language appears; return `1.0x non_participating` with `confidence: medium`.
 
@@ -783,9 +783,15 @@ keys (do not refetch from disk — the staged file is the whole contract):
   `scenario_id`, `label`, `type`, `completeness`, `blockers`,
   `headline_inputs`, `founder_impact` (nullable; null for
   structural_only / repay_only), `branch_summary`, `scenario_drivers`.
+  `headline_inputs` carries the round's `pre_money`, `new_money` and
+  `target_pool_percent`. Nothing in the payload describes how the option
+  pool was sized: the report explains that itself, in each scenario's
+  Option pool section.
 - `ownership_range_across_scenarios` — min/max % across scenarios with
   resolved ownership (excludes structural_only / repay_only)
-- `top_dilution_drivers` — per-driver impact records
+- `top_dilution_drivers` — per-driver impact records; the option pool's
+  entry also carries `reference`, the one sentence you use for how the
+  pool was sized
 - `extraction_confidence` — counts by confidence level + outstanding
   user-confirmations
 - `counsel_review_summary` — per-domain counts + rule_ids
@@ -812,8 +818,12 @@ Reason from the structured fields. The commentary should answer:
   modeled is pending a conversion event — here's what's blocking each."
 - **What are the 2–3 highest-impact dilution drivers?** From
   `top_dilution_drivers[]`, surface the biggest founder_impact_pp items
-  with their drivers ("Pool top-up to 15% pre-money costs you ~5pp more
-  than 12% post-money").
+  with their drivers. **The option pool is a dilution driver here and
+  nothing more:** give its `founder_impact_pp` and its `reference`, as
+  written. How the pool was sized, what its percentage counts, any other
+  way of sizing it, and anything to confirm about it are the report's
+  Option pool section, computed from the scenario, not the commentary's:
+  write none of it, and do not name the pool by any sizing.
 - **What's the founder being asked to live with?** From
   `counsel_review_summary[]`, group by domain and call out the highest-
   leverage counsel items (e.g., "Three §102 questions: trustee deposit
@@ -923,6 +933,19 @@ re-dispatch, but only if you say so. Improvising instead is strictly worse than
 failing: it produces a complete-looking deliverable assessed against inputs you
 never actually read, which nothing downstream can detect. Reporting the failure
 IS the correct outcome, and it is not counted against you.
+
+**If your Write to `OUTPUT_PATH` fails — any tool error, including "File is in
+a directory that is denied by your permission settings." — write nothing else
+and return BLOCKED, never a `complete` receipt:**
+
+```json
+{"status": "blocked", "reason": "write_refused", "attempted": "<the OUTPUT_PATH you tried>", "detail": "<the tool error, verbatim>"}
+```
+
+Do NOT retry at a relative path, a `/sessions/...` path, or any other location.
+The main thread cannot see your tool errors, only your final message: a
+`complete` receipt after a refused Write sends the run down its fallback
+instead of getting the path fixed.
 
 The main thread gates your hand-off file (`check_handoff.py`), transforms it
 via `md_to_commentary.py`, and runs the shared `insert_coaching.py` script,

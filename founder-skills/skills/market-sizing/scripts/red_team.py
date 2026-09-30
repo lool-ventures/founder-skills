@@ -26,12 +26,11 @@ import argparse
 import hashlib
 import json
 import os
-import re
 import sys
 from typing import Any, NoReturn
 
+import _redteam_copy
 from _quote_match import quote_in_doc
-from _redteam_copy import write_copy
 from _redteam_text import humanize_review_text
 
 # The review's prose goes to the founder verbatim, so it is worded here, once, before anyone else
@@ -53,83 +52,25 @@ def _founder_text_policy() -> Any:
     return _founder_text
 
 
-_SEVERITIES = ("high", "medium", "low")
+# Which findings may reach a founder, and which review is shown, are decided in the plugin's shared
+# `scripts/_redteam_core.py` (loaded through `_redteam_copy.core()`), because every skill with a
+# reviewer follows the same rules and a rule with two copies drifts. What is a sizing's own is below.
 
-# The ONE non-web provenance a finding may claim: the sentence is from this run's own output.
-#
-# It exists because a real run produced exactly that shape -- the red team quoted the analysis'
-# own comparison note back at it -- and, with only http(s) accepted, hung an unrelated external
-# URL on it to get through. A link that does not contain the quote quietly breaks this step's
-# whole promise, which is that every finding carries the sentence it relies on.
-#
-# A CLOSED single value, for the same reason the skip reason is closed: an open one lets a
-# finding claim a provenance nobody can check. Exact match, case-sensitive -- "internal",
-# "internal:whatever" and "INTERNAL:ANALYSIS" are all refused.
-INTERNAL_PROVENANCE = "internal:analysis"
-
-# Every field a finding must carry to reach a founder. `source_url` is the load-bearing one and
-# the requirement is POSITIVE on purpose.
-#
-# An earlier design tried to catch the failure from the other side, with a regex refusing any
-# finding that "proposes a number". Measured against real findings it failed BOTH ways: it
-# accepted "closer to $66 than $203" and "5.1 billed months rather than 12", and it REFUSED
-# "the recurring rate is actually $203 on n=17" -- a correct finding quoting its source to
-# correct a misread, which is the single most valuable shape this step produces. A negative
-# rule over prose cannot separate those, because the difference is not in the grammar.
-#
-# What does separate them is whether the claim is anchored: a finding that names where its
-# sentence came from can be checked by the founder, and one that cannot is an opinion no matter
-# how it is phrased.
-_REQUIRED_FIELDS = ("claim_attacked", "what_is_true", "evidence_quote", "source_url", "source_title")
-
-# The THIRD provenance: the founder's own page. `document:<filename>#page=<n>`, where the file
-# is one the founder supplied. It exists because, with only a web address and `internal:analysis`
-# accepted, a finding whose evidence is the deck itself -- "slide 8 says n=17, the analysis says
-# n=47" -- had no legal source and was dropped as unsourced. The step that should catch a misread
-# of a page was forbidden from citing the page. Measured on a live run: the misread was repeated.
-#
-# A document citation is CHECKED where it can be: against the page's text layer, else against the
-# OCR sidecar ocr_uploads.py wrote, else it is `quote_verified: null` -- shown, and marked as not
-# machine-checked. It is never rejected for being unverifiable; it IS rejected for naming a file
-# the founder did not supply, or for quoting a token rather than a sentence (a three-character
-# "quote" always matches something).
-DOCUMENT_PREFIX = "document:"
-# `#page=<n>` is REQUIRED for a paginated file and OPTIONAL otherwise: a live red team cited a
-# markdown file -- which has no pages -- and the first rule, which demanded a page on every
-# citation, set a real finding aside.
-_DOC_RE = re.compile(r"^document:([^#/\\]+)(?:#page=([1-9]\d*))?$")
-_PAGINATED_SUFFIXES = (".pdf", ".pptx", ".docx")
-_MIN_DOC_QUOTE_WORDS = 6
 # The sizing inputs a finding may NAME so the report can mark the rows built on one. An unknown
 # name is dropped from the finding, never a reason to reject it -- the most valuable findings are
 # about what the analysis omitted, which by construction has no parameter name.
 _PARAMETER_NAMES = frozenset(
     {"industry_total", "segment_pct", "share_pct", "customer_count", "arpu", "serviceable_pct", "target_pct"}
 )
-# Copy of dispatch_prompt.list_documents (skill scripts cannot import each other); keep in step.
-DOCUMENT_SUFFIXES = (".pdf", ".md", ".txt", ".docx", ".pptx", ".xlsx", ".csv")
-# An `internal:analysis` quote is shown to the founder as a quotation of this analysis. A live red
-# team quoted raw JSON (`"existing_claims": {"tam": 12000000000}`) -- a founder cannot read that, and
-# the report must not reword a quote to make it readable. So it is set aside, per finding, with its
-# reason: the sentence form exists in the analysis for anything worth quoting.
-_JSON_QUOTE_RE = re.compile(r'^\s*[\[{]\s*["\[{\d]|"\w+"\s*:\s*(?:[{\["\d-]|true\b|false\b|null\b)')
+
+
 # The probe's per-page floor: under this, a text layer is treated as absent and the sidecar is used.
 _TEXT_LAYER_FLOOR = 100
 
 
-def list_documents(uploads_dir: str | None) -> list[str]:
-    """Regular files with a document suffix, sorted; dotfiles and AppleDouble `._*` excluded."""
-    if not uploads_dir or not os.path.isdir(uploads_dir):
-        return []
-    out: list[str] = []
-    for name in sorted(os.listdir(uploads_dir)):
-        if name.startswith(".") or not name.lower().endswith(DOCUMENT_SUFFIXES):
-            continue
-        if os.path.isfile(os.path.join(uploads_dir, name)):
-            out.append(name)
-    return out
-
-
+# The page reader this review checks a document citation with. It stays here, and is handed to the
+# shared validation, because the report checks a founder's quote with a copy of it (`_view._page_text`)
+# and the two are pinned identical: a quote the review verified must verify on the page the same way.
 def _page_text(uploads_dir: str | None, ocr_dir: str | None, filename: str, page: int) -> str | None:
     """Text of one page: the text layer if it has one, else the OCR sidecar, else None."""
     if not uploads_dir:
@@ -197,146 +138,23 @@ def _fail_invalid(result: dict[str, Any], output_path: str | None, indent: int |
     sys.exit(1)
 
 
-def _reject_reason(finding: Any, documents: list[str] | None = None) -> str | None:
-    """Why this ONE finding cannot be shown to a founder, or None if it can.
-
-    Per-finding, never whole-payload. An earlier design discarded the entire hand-off when any
-    finding named something absent from the artifacts -- measured against a real run, the
-    "known" set is exactly the twelve parameter names the sizing math uses, and EVERY finding
-    about something the analysis OMITTED is by construction outside it. That gate would have
-    thrown away the most valuable findings and raised a high-severity warning while doing it.
-
-    `claim_attacked` is therefore free text and is never checked against a vocabulary.
-    """
-    if not isinstance(finding, dict):
-        return "not an object"
-    missing = [f for f in _REQUIRED_FIELDS if not str(finding.get(f) or "").strip()]
-    if missing:
-        return f"missing or empty: {', '.join(missing)}"
-    url = str(finding["source_url"]).strip()
-    doc = _DOC_RE.match(url)
-    if doc:
-        if doc.group(1) not in (documents or []):
-            return f"source_url names a document that was not supplied: {doc.group(1)}"
-        if doc.group(2) is None and doc.group(1).lower().endswith(_PAGINATED_SUFFIXES):
-            return "a citation to a PDF must name the page: document:<filename>#page=<n>"
-        if len(str(finding["evidence_quote"]).split()) < _MIN_DOC_QUOTE_WORDS:
-            return f"quote the sentence, not a token ({_MIN_DOC_QUOTE_WORDS} words minimum for a document citation)"
-    elif url.startswith(DOCUMENT_PREFIX):
-        return "source_url for a document must be exactly document:<filename>#page=<n>"
-    elif url == INTERNAL_PROVENANCE and _JSON_QUOTE_RE.search(str(finding["evidence_quote"])):
-        return "quote this analysis in its own words, as a sentence -- not as JSON from its files"
-    elif url != INTERNAL_PROVENANCE and not url.lower().startswith(("http://", "https://")):
-        return f"source_url must be a web address, a document citation, or exactly {INTERNAL_PROVENANCE!r}"
-    severity = finding.get("severity")
-    if severity not in _SEVERITIES:
-        return f"severity must be one of {', '.join(_SEVERITIES)}"
-    return None
-
-
 def validate_findings(
     data: dict[str, Any], uploads_dir: str | None = None, ocr_dir: str | None = None
 ) -> dict[str, Any]:
     """Split the sub-agent's findings into accepted and rejected, keeping both."""
-    documents = list_documents(uploads_dir)
     policy = _founder_text_policy()
-    humanized = 0
-    accepted: list[dict[str, Any]] = []
-    rejected: list[dict[str, Any]] = []
-    for finding in data.get("findings") or []:
-        reason = _reject_reason(finding, documents)
-        if reason is None:
-            url = str(finding["source_url"]).strip()
-            quote = str(finding["evidence_quote"]).strip()
-            # One shape for every provenance: web and internal findings are `null` (nothing on disk
-            # to check them against); a document citation is true/false when the page has text.
-            quote_verified: bool | None = None
-            doc = _DOC_RE.match(url)
-            if doc:
-                text = _page_text(uploads_dir, ocr_dir, doc.group(1), int(doc.group(2) or 1))
-                if text is not None:
-                    quote_verified = bool(quote_in_doc(quote, text)[0])
-            kept: dict[str, Any] = {
-                "claim_attacked": str(finding["claim_attacked"]).strip(),
-                "what_is_true": str(finding["what_is_true"]).strip(),
-                "evidence_quote": quote,
-                "source_url": url,
-                "source_title": str(finding["source_title"]).strip(),
-                "severity": finding["severity"],
-                "quote_verified": quote_verified,
-            }
-            for field in _PROSE_FIELDS:
-                worded, n = humanize_review_text(kept[field], documents)
-                humanized += n
-                kept[field] = policy.substitute(worded)
-            parameter = finding.get("parameter")
-            if isinstance(parameter, str) and parameter.strip() in _PARAMETER_NAMES:
-                kept["parameter"] = parameter.strip()
-            accepted.append(kept)
-        else:
-            # Keep enough to identify it without echoing a field we just called unusable.
-            label = ""
-            if isinstance(finding, dict):
-                label = str(finding.get("claim_attacked") or "").strip()
-            rejected.append({"claim_attacked": label or "(unnamed)", "reason": reason})
-
-    # Printed to the founder under "Not checked", so worded exactly like the three prose fields.
-    could_not_check = []
-    for c in data.get("could_not_check") or []:
-        if str(c).strip():
-            worded, n = humanize_review_text(str(c).strip(), documents)
-            humanized += n
-            could_not_check.append(policy.substitute(worded))
-
-    # What the red team OPENED, against what the founder SUPPLIED. Self-reported -- the only
-    # evidence it is honest is the tool stream a harness records, which the e2e lane reads -- but a
-    # red team that lists nothing when documents exist is caught here, and that is the live case:
-    # told the artifacts were "a faithful transcription", it opened three files, none of them the
-    # deck. A file opened but unreadable belongs in BOTH sources_read and could_not_check.
-    # The prompt lists documents by agent-namespace PATH and their OCR sidecars beside them; an
-    # honest red team echoes those. Normalise to the document's basename: strip directories, and
-    # map a `<name>.p<N>.txt` sidecar to `<name>` -- reading the machine-read text of a page IS
-    # reading that document. (Measured: an exact-basename match read a correct transcription of
-    # the prompt as "unread", which would have put a high warning on the honest behaviour.)
-    read_names: set[str] = set()
-    for raw in data.get("sources_read") or []:
-        base = os.path.basename(str(raw).strip())
-        m = re.match(r"^(.+)\.p\d+\.txt$", base)
-        read_names.add(m.group(1) if m else base)
-    # A CITATION IS EVIDENCE OF READING, and it is evidence we already hold. `sources_read` is
-    # self-reported, and on a live run the review quoted page 2 of the founder's deck in two
-    # accepted findings while declaring it read nowhere -- so the report told the founder, four
-    # times and once at high severity, that the review never opened a document it had just quoted
-    # back to them. The verdict paragraph carried both sentences. Validation above already refuses
-    # a `document:` citation naming a file that was not supplied, so an ACCEPTED finding citing
-    # `document:<name>#page=<n>` is a checked claim to have opened <name>; rejected findings are
-    # not, and do not count. Deliberately not gated on `quote_verified`: a quote that fails to
-    # verify is a fabrication signal with its own handling, and "we could not confirm your quote"
-    # and "we never opened your file" are different statements -- saying the second because of the
-    # first is how the contradiction got in front of a founder in the first place.
-    cited_docs = {m.group(1) for f in accepted if (m := _DOC_RE.match(str(f.get("source_url", "")).strip()))}
-    reconciled = sorted(n for n in documents if n in cited_docs and n not in read_names)
-    read_names |= cited_docs
-    sources_read = [n for n in documents if n in read_names]
-    sources_unread = [n for n in documents if n not in read_names]
-
-    by_severity = {s: sum(1 for f in accepted if f["severity"] == s) for s in _SEVERITIES}
-    return {
-        "findings": accepted,
-        "rejected": rejected,
-        "could_not_check": could_not_check,
-        "sources_read": sources_read,
-        "sources_unread": sources_unread,
-        "summary": {
-            "accepted": len(accepted),
-            "rejected": len(rejected),
-            "unchecked": len(could_not_check),
-            "sources_unread": len(sources_unread),
-            "by_severity": by_severity,
-            "humanized": humanized,
-            "sources_read_from_citation": reconciled,
-        },
-    }
+    result: dict[str, Any] = _redteam_copy.core().validate_findings(
+        data,
+        uploads_dir,
+        ocr_dir,
+        page_text=_page_text,
+        quote_in_doc=quote_in_doc,
+        humanize=humanize_review_text,
+        substitute=policy.substitute,
+        prose_fields=_PROSE_FIELDS,
+        parameter_names=_PARAMETER_NAMES,
+    )
+    return result
 
 
 def main() -> None:
@@ -396,6 +214,7 @@ def main() -> None:
         )
     try:
         _founder_text_policy()
+        _redteam_copy.core()
     except ImportError as exc:
         _fail_invalid(
             {
@@ -428,7 +247,7 @@ def main() -> None:
         assert args.run_id
         analysis_dir = os.path.dirname(os.path.abspath(args.output))
         try:
-            summary["round"] = write_copy(
+            summary["round"] = _redteam_copy.write_copy(
                 analysis_dir, args.run_id, result, hashlib.sha256(raw.encode("utf-8")).hexdigest()
             )
         except OSError as exc:

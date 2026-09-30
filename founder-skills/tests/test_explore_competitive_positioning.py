@@ -522,17 +522,17 @@ def test_view_score_panel_container_exists() -> None:
         assert 'id="view-score-panel"' in stdout
 
 
-def test_view_score_panel_renders_differentiation_score_and_rank() -> None:
-    """The JS must read DATA.view_scores and render a differentiation score
-    and a rank string following the 'Rank N of M ranked' convention — M is
-    competitor_count + 1 (the startup counted among the ranked entities),
-    never 'of M competitors'."""
+def test_view_score_panel_renders_where_you_stand_and_rank() -> None:
+    """The JS must read DATA.view_scores and render the computed "Where you stand" sentence (never
+    the differentiation score, which read as a percentage) and a rank string following the
+    'Rank N of M ranked' convention — M is competitor_count + 1, never 'of M competitors'."""
     arts = _all_artifacts()
     with _make_artifact_dir(arts) as d:
         rc, stdout, stderr = _run_explore(d)
         assert rc == 0, f"exit {rc}, stderr={stderr}"
         assert "DATA.view_scores" in stdout
-        assert "Differentiation score" in stdout
+        assert "Where you stand" in stdout
+        assert "Differentiation score" not in stdout
         assert "totalRanked = (vs.competitor_count || 0) + 1" in stdout
         assert "totalRanked + ' ranked" in stdout
         assert "competitors</div>" not in stdout, "must never render 'of M competitors'"

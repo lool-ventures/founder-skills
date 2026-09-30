@@ -496,6 +496,7 @@ _RULE_MATCHERS: dict[str, Any] = {
     "option_pool.pre_money_topup": _matcher_always,
     "option_pool.post_money_topup": _matcher_always,
     "option_pool.target_basis": _matcher_always,
+    "option_pool.increase_sized_target": _matcher_always,  # gated at runtime on the scenario's basis
     "option_pool.us_market_benchmarks": _matcher_always,
     # Anti-dilution — applies only when preferred has AD protection
     "anti_dilution.broad_based_weighted_average": lambda i, inst, cs: any(
@@ -970,6 +971,8 @@ _RUNTIME_EVENT_RULE_IDS = frozenset(
         # scenarios[*].computed_outputs.warrant_exercise_events[*].
         "warrant.net_share_pre_round_fmv_approximation",
         "warrant.exercise_event_before_round_pump",
+        # Gates on a scenario's parameters, not an event: only a pool actually sized as an increase.
+        "option_pool.increase_sized_target",
     }
 )
 
@@ -1069,6 +1072,20 @@ def _runtime_event_predicate(
                 return True
         findings = inputs.get("aoa_findings") or {}
         return findings.get("pay_to_play_detected") is True
+
+    if rule_id == "option_pool.increase_sized_target":
+        # Read off the scenario's PARAMETERS, since the basis is a founder input rather than a solver event.
+        # Counsel is asked only where the two readings differ: a pool target that was actually solved, with an
+        # existing unallocated pool (with none, the increase and the resulting pool are one number).
+        existing = float(((inputs or {}).get("option_pool") or {}).get("unallocated") or 0)
+        for s in scenarios:
+            params = s.get("parameters", {}) or {}
+            solved = ((s.get("computed_outputs") or {}).get("completeness")) in {"full", "mixed"}
+            if not (solved and existing > 0):
+                continue
+            if params.get("target_basis") == "post_money_increase" and params.get("target_pool_percent"):
+                return True
+        return False
 
     # v0.5.0 warrant runtime events
     def _any_warrant_event_with(field: str, value: Any = True) -> bool:

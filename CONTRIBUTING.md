@@ -42,7 +42,7 @@ git config core.hooksPath scripts/hooks
    uv run pytest                                               # tests (e2e auto-skips without auth)
    ```
 
-   The deck-review e2e smoke (`tests/test_e2e_deck_review.py`) is gated by the `e2e` marker and skips unless one of these is set: `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, or local `claude /login` auth (macOS Keychain or `~/.claude/.credentials.json`). To explicitly skip it for a faster run:
+   The paid e2e smokes (`tests/test_e2e_*.py`: deck review, financial model review, market sizing, cap table) are gated by the `e2e` marker and skip unless one of these is set: `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, or local `claude /login` auth (macOS Keychain or `~/.claude/.credentials.json`). To explicitly skip it for a faster run:
 
    ```bash
    uv run pytest -m "not e2e and not mutation"
@@ -59,11 +59,12 @@ Most of these skills are run by founders inside **Claude Cowork**, whose runtime
 Two CI jobs cover it, both token-free, both runnable locally. They use [`cowork-harness`](https://github.com/yaniv-golan/cowork-harness) (MIT), a Cowork-runtime emulator installed as a dev-time CLI — it is **not** part of the distributed plugin and is not a runtime dependency:
 
 ```bash
-npm i -g cowork-harness@3.8.1           # Node 22+; EXACT, matching CI — see the pin note in .github/workflows/cowork-replay.yml
+npm i -g cowork-harness@4.0.0          # Node 22+; EXACT, matching CI — see the pin note in .github/workflows/cowork-replay.yml
 
 # 1. Static analysis over every skill body, agent, reference and command
 cowork-harness analyze-skill founder-skills/ --strict
-cowork-harness lint-skill founder-skills/skills/*/ --strict
+cowork-harness lint-skill founder-skills/skills/*/ --json > lint-skill.json || true
+python3 cowork-tests/lint_skill_gate.py lint-skill.json   # accepted findings: cowork-tests/lint-skill-allowlist.json
 
 # 2. Deterministic replay of recorded Cowork runs (no model, no Docker, no token)
 uv run pytest -m cowork
@@ -73,7 +74,7 @@ The `cowork` lane **auto-skips** when the CLI is absent, so you are not required
 
 **Recording new cassettes is local and paid, and is not expected of contributors.** Replay uses cassettes committed to `cowork-tests/cassettes/`; re-recording needs Docker, staged Cowork agent binaries and a model token. See [`cowork-tests/README.md`](cowork-tests/README.md) if you need to understand or refresh them — otherwise a maintainer will handle it.
 
-**Privacy guard.** The pre-commit hook you enabled above also scans for confidential data. It checks file *paths* as well as content, so naming a fixture after a real company will block the commit even if the file's contents are synthetic. Real founder documents belong outside the repo entirely; synthetic fixtures go under `tests/fixtures/`.
+**Privacy guard.** The pre-commit hook you enabled above also scans for confidential data. It checks file *paths* as well as content, so naming a fixture after a real company will block the commit even if the file's contents are synthetic. The commit-msg and pre-push hooks run it over your commit messages and over what you push. A figure on the same line as a phrase like "a live run" or "the founder's" is flagged; if the line is synthetic, append `privacy-guard: synthetic` to it. Real founder documents belong outside the repo entirely; synthetic fixtures go under `tests/fixtures/`.
 
 ## DCO Sign-Off
 

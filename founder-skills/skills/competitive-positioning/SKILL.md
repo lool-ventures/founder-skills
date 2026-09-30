@@ -62,7 +62,7 @@ All scripts are at `${CLAUDE_PLUGIN_ROOT}/skills/competitive-positioning/scripts
 - **`compose_report.py`** — Assembles report with cross-artifact validation; `--strict` exits 1 on high-severity warnings
 - **`visualize.py`** — Generates self-contained HTML with SVG charts (not JSON)
 - **`explore.py`** — Generates interactive HTML explorer with Chart.js scatter plot, view switching, bubble encoding controls, and company detail panels (not JSON)
-- **`gate3_triggers.py`** — Evaluates the four Gate 3 positioning-reality-check triggers from `positioning_scores.json` and returns founder-ready descriptions. Thresholds pinned and exhaustively tested; reports `not_evaluated` separately from "did not fire". Reports only — Gate 3 is a founder decision, so it never exits non-zero
+- **`gate3_triggers.py`** — Evaluates the Gate 3 positioning-reality-check triggers from `positioning_scores.json` and returns founder-ready descriptions. Thresholds pinned and exhaustively tested; reports `not_evaluated` separately from "did not fire". Reports only — Gate 3 is a founder decision, so it never exits non-zero
 - **`verify_positioning.py`** — Delivery gate (Step 7f). Checks that the deliverable SHOWS what the artifacts contain (axis rationales, claim verdicts, the adversarial competitor verdicts, the explorer's scored layer) and that no internal token reached the founder (raw enums, field names, slugs, criterion IDs in the coaching commentary), plus cross-artifact consistency. `--gate 1` mid-pipeline, `--gate 2` pre-delivery. Exit 0 = publishable, exit 1 = gaps
 
 Also available from `${CLAUDE_PLUGIN_ROOT}/scripts/` (shared):
@@ -236,15 +236,22 @@ RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
 # the hand-off gate when a dispatch fails to write.
 HANDOFF_DIR="$ANALYSIS_DIR/handoff/$RUN_ID"
 mkdir -p "$HANDOFF_DIR"
-# Sub-agents address the SAME dir by a different path (their file tools are rooted at the outputs
-# mount in Cowork). Resolve the FULL agent-namespace paths via the script — never hand-splice the
+# FILE-TOOL PATHS (Cowork only; skip when ARTIFACTS_ROOT does not start with /sessions/). File tools
+# refuse a RELATIVE path and cannot open /sessions/... paths. FIRST, with the Write tool, write
+# "<HOST_OUTPUTS>/artifacts/.host-outputs-probe" containing exactly <HOST_OUTPUTS>: the file-tool path
+# your context maps to /sessions/<id>/mnt/outputs/ (the "Paths in bash differ from what file tools
+# see" list; no such list -> that /sessions/.../mnt/outputs path itself). Then prove it (quoted; it may
+# contain spaces). Exit 0 = proven. 2/4/5 -> fix per its JSON, retry once, then STOP:
+python3 "$SHARED_SCRIPTS/resolve_artifacts_root.py" --set-host-outputs-dir "<HOST_OUTPUTS>"
+# Sub-agents address the SAME dir by a different path (the absolute file-tool path
+# proven above). Resolve the FULL agent-namespace paths via the script — never hand-splice the
 # printed root with a literal skill-name/slug/run-id string yourself (that string-splicing is
 # exactly the non-determinism the resolver script exists to remove):
 python3 "$SHARED_SCRIPTS/resolve_artifacts_root.py" --handoff-dir-agent \
   --dir-name "competitive-positioning-${SLUG}" --run-id "$RUN_ID"   # prints HANDOFF_AGENT verbatim
 HANDOFF_AGENT="<printed value>"   # use verbatim in OUTPUT_PATH lines
-# Sub-agent READ paths for under-outputs artifacts use the SAME agent namespace (relative — the
-# sub-agent's file-tool cwd IS the outputs mount on host-loop; an absolute /sessions/... read is denied):
+# Sub-agent READ paths for under-outputs artifacts use the SAME agent namespace (absolute once proven;
+# a relative or /sessions/... read is refused):
 python3 "$SHARED_SCRIPTS/resolve_artifacts_root.py" --analysis-dir-agent \
   --dir-name "competitive-positioning-${SLUG}"   # prints ANALYSIS_DIR_AGENT verbatim
 ANALYSIS_DIR_AGENT="<printed value>"   # e.g. landscape_draft.json, positioning.json reads
@@ -335,6 +342,8 @@ Extract from the founder's materials or conversation: company name, product desc
 
 **Check the deck's vintage.** If a footer date, copyright year, event slide, or embedded metadata shows the materials are noticeably older than today (a rule of thumb: more than ~12 months), flag this to the founder before proceeding — competitor pricing, funding, and positioning claims from a stale deck may already be outdated. Note the observed vintage in `product_profile.json`'s `source_materials` (e.g. `"pitch deck (PDF, copyright 2024)"`).
 
+Record `product_availability` — `concept`, `poc`, `pilot` or `shipping` — with `availability_quote`, the words in the materials that show it. It decides only whether today's position is ranked beside a planned one.
+
 Write `product_profile.json` to `$ANALYSIS_DIR`.
 
 **Write it through the producer, not by a bare heredoc into `$ANALYSIS_DIR`.** Stage the JSON in `$STAGING_DIR` (the `/tmp` scratch dir from Step 0 — never the promoted outputs mount) and pipe it:
@@ -360,7 +369,7 @@ Identify 5-7 competitors across categories: 2-3 direct, 1-2 adjacent, 1 do-nothi
 
 **When one entry represents several companies as a cohort** (e.g. "PCM/next-gen entrants (Rondo, Antora, Sunamp)"), record the member company names in an optional `constituents: ["Rondo", "Antora", "Sunamp"]` array on that entry. This turns the blind-recall duplicate check (Step 3.6) from a text heuristic into an exact lookup — without it, a recall candidate that IS one of the cohort's named members can misread as a genuine gap.
 
-Select 2-3 candidate positioning axis pairs with rationale for each. Follow the axis selection principles from the methodology reference — axes must differentiate, matter to the buyer, and be measurable.
+Select 2-3 candidate positioning axis pairs with rationale for each, recorded under `candidate_axes`. Follow the axis selection principles from the methodology reference — axes must differentiate, matter to the buyer, and be measurable.
 
 If the founder's deck mentions competitors you are excluding from the formal landscape (e.g., too small, different market segment, or redundant with an included competitor), note them with reasons in `landscape_draft.json` under a `deck_competitors_excluded` field. These will be referenced in the report to maintain deck alignment and prevent the NARR_03 checklist item from failing without explanation.
 
@@ -542,8 +551,8 @@ exactly once (into the Write call) — never re-type sub-agent JSON into a hered
 
 **`$HANDOFF_AGENT` and `$HANDOFF_DIR` name the SAME directory by two different paths — they are not
 interchangeable.** `$HANDOFF_DIR` is the absolute VM path your shell uses (`python3`, `check_handoff.py`,
-producer pipes). `$HANDOFF_AGENT` is the relative path a sub-agent's file tools resolve against the
-outputs mount, and it is the ONLY one that goes in a dispatch prompt. Putting `$HANDOFF_DIR` in an
+producer pipes). `$HANDOFF_AGENT` is the absolute file-tool path of the same directory (proven at
+Step 0), and it is the ONLY one that goes in a dispatch prompt. Putting `$HANDOFF_DIR` in an
 `OUTPUT_PATH` line hands the sub-agent an absolute `/sessions/...` path the host-loop gate denies;
 putting `$HANDOFF_AGENT` in a shell command resolves it against the wrong cwd. Rule of thumb: **agent
 namespace in prompts, shell namespace in bash.**
@@ -555,7 +564,8 @@ The receipt is a two-field acknowledgement the sub-agent returns in its final me
 were forbidden, the hand-off could not be gated at all.
 
 **Path idiom for dispatch prompts (host-loop path gate):** `OUTPUT_PATH` and any under-outputs artifact
-READ path a sub-agent is given are **relative to the sub-agent's file-tool cwd** (the outputs mount) —
+READ path a sub-agent is given are **absolute file-tool paths**, never relative ones (a relative
+file-tool path is refused) —
 built from the `resolve_artifacts_root.py --agent` namespace (`$HANDOFF_AGENT` / `$ANALYSIS_DIR_AGENT`).
 Never hand a sub-agent an absolute `/sessions/...` path for a file-tool Read/Write — the host-loop path
 gate denies it (steering shell work to the `bash` tool instead). Bundled `references/*.md` are the one
@@ -575,12 +585,13 @@ printf '%s' '<agent final message verbatim>' | \
 Branch on the exit code (complete state machine — do not improvise):
 
 - **Exit 0** → pipe the file through the producer: `cat "$HANDOFF_DIR/<step>_output.json" | python3 "$SCRIPTS/<producer>.py" ...`
-- **Exit 3** (missing/empty file — receipt may be fabricated) → **redo-dispatch**: fresh Task, same prompt plus one line: "your receipt claimed a file at `<path>` but none exists; use Write to create exactly that path."
+- **Exit 3** (missing/empty file — receipt may be fabricated) → **redo-dispatch**: fresh Task, same prompt plus one line: "your receipt claimed a file at `<path>` but none exists; use Write to create exactly that path." For a generated prompt (MOAT_SCORING, POSITIONING_SCORING, CHECKLIST), re-run its generator with `--correction missing-file` and send that output instead.
 - **Exit 4** (file exists, invalid JSON) → **repair-dispatch**: fresh Task: "Read `<OUTPUT_PATH>`; it fails JSON parsing with `<verbatim detail from the diagnostic>`; fix and rewrite it; return the receipt."
 - **Exit 5** (receipt echoes a different path) → **repair-dispatch** telling the agent the exact expected OUTPUT_PATH (it wrote somewhere else).
-- **Exit 6** (receipt unparseable / no `output_path` key) → **redo-dispatch** with "return ONLY the receipt JSON — no fences, no prose."
+- **Exit 6** (receipt unparseable / no `output_path` key) → **redo-dispatch** with "return ONLY the receipt JSON — no fences, no prose." For a generated prompt, use `--correction receipt-only`.
 - **Producer schema rejection** (the pipe fails next) → **repair-dispatch** with the producer's stderr verbatim.
-- **Exit 8** (`path_namespace_mismatch`) → the sub-agent **complied**; the agent-namespace prefix was wrong. Its relative `OUTPUT_PATH` resolved against the outputs mount instead of the session root, so the file landed at the doubled path reported in `found_at`. Do NOT treat this as a fabricated receipt (that is exit 3), and do NOT read the hand-off from `found_at` — it is diagnostic only. Re-run `resolve_artifacts_root.py --agent`, rebuild the agent-namespace prefix from the printed value, and re-dispatch. Counts against the same 2-dispatch retry budget.
+- **Exit 8** (`path_namespace_mismatch`) → the sub-agent **complied**; the agent-namespace prefix was wrong. Its relative `OUTPUT_PATH` resolved against the outputs mount instead of the session root, so the file landed at the doubled path reported in `found_at`. Only a RELATIVE agent path can do this, so the Step 0 proof did not run: run it. Do NOT treat this as a fabricated receipt (that is exit 3), and do NOT read the hand-off from `found_at` — it is diagnostic only. Re-run `resolve_artifacts_root.py --agent`, rebuild the agent-namespace prefix from the printed value, and re-dispatch. Counts against the same 2-dispatch retry budget.
+- **Blocked `write_refused`** (the sub-agent's Write was refused — its path was relative or a `/sessions/...` path) → run the Step 0 proof if it did not run, rebuild the agent-namespace paths from the resolver, re-dispatch ONCE. A second `write_refused` STOPs with both details quoted.
 - **Any other exit** (script crash etc.) → STOP with the stderr.
 - **After ANY corrective dispatch, resume from `check_handoff.py`** — never pipe to the producer unchecked.
 
@@ -623,7 +634,9 @@ sub-agent artifact, that is content authoring and is forbidden — repair-dispat
 agent's receipt claims `complete` with the correctly echoed path, treat the host's filesystem
 topology as hand-off-incompatible: fall back to message-channel transport for the REST of this run
 (sub-agent returns full JSON in its final message; stage to `$STAGING_DIR/<step>_input.json`; same
-producer pipe), and note the fallback in your final summary.
+producer pipe), and tell the founder in one plain sentence that this run's working files were passed
+directly instead of through `outputs/`, so its audit trail is incomplete (the results are unaffected).
+A refused write is NOT this case: it returns `write_refused` (above).
 
 Retries overwrite the same OUTPUT_PATH (the mount is write-allowed / delete-denied — never `rm`
 under `$ANALYSIS_DIR`). Hand-off files are not canonical artifacts: producers ignore them except
@@ -775,7 +788,7 @@ Fix any errors (exit 1) and re-run. Warnings are acceptable — address medium-s
 
 At this point no competitor coordinates exist yet — those are produced in Step 5 (POSITIONING_SCORING) and written to `positioning.json`. Gate 2 validates **which axis pair(s)** to plot on and **which competitors** belong on the map, NOT coordinate positions.
 
-**Step A: Output a chat message** with the chosen axis pair(s) (the candidate axes from Step 3, with their rationale) and the confirmed competitor set that will be positioned. **State the scoring basis this run will use** — by default, positions reflect what the startup has actually shipped and can demonstrate today, not its roadmap. Say so in plain language (e.g. "I'll score based on what's live today, not the full roadmap — let me know if you'd rather I score against where the product is headed").
+**Step A: Output a chat message** with the chosen axis pair(s) (the candidate axes from Step 3, with their rationale) and the confirmed competitor set that will be positioned. **State how the startup will be placed.** When its pitch rests on what it plans to deliver — no product to buy yet, or claims beyond what ships — it is mapped where the plan puts it, labelled "if delivered", with today's position beside it and competitors at what they ship today. Otherwise positions reflect what is live today. Say so in plain language (e.g. "You don't have an orderable product yet, so I'll map where you're aiming and show where you are today alongside it").
 
 **Step B: AFTER the chat message, call `AskUserQuestion`** with a short question that **names the axis pair** so the founder isn't confirming blind. Plain text, one sentence, no markdown/tables — this question is about axes only; the scoring basis was stated in the Step-A message and is offered as an option below, not folded into the question text.
 
@@ -785,6 +798,31 @@ Options: `No changes — proceed to scoring` / `Change axes` / `Adjust competito
 **Four options, never five — `AskUserQuestion` accepts at most four.** A fifth cannot be rendered, so specifying one does not add a choice; it silently forfeits whichever the model drops. There is also no need for an `Other changes` catch-all: the tool always offers the founder a free-text **Other** of its own, so spending a slot on one buys nothing and costs a real option.
 
 If the founder changes an axis pair or the competitor set, apply the change before proceeding to Step 5. If the founder picks `Change scoring basis`, ask a short follow-up for which basis (shipped / 12-month roadmap / mixed) and carry the answer into the POSITIONING_SCORING dispatch below as `SCORING_BASIS`. **Deliberately left as prose, not declared:** this follow-up has no legitimate no-change branch (the founder just chose to change the basis), so declaring it would either fail this skill's exactly-one reserved-prefix rule or force a fabricated no-change option onto a gate that shouldn't have one — the same class of case §4.1's split exists to prevent, one level down. Converting it needs the confirm-gate marker Phase 2 deferred until a real non-confirm case arrived within an adopted skill; this is that case, parked rather than improvised. Founder adjustments to individual coordinates happen later — at the Step 5 founder-override flow, after coordinates have been assigned.
+
+### Step 4b: The Startup's Public Record -> `startup_research.json` (Context A: STARTUP_RESEARCH dispatch)
+
+**Dispatch this in the same message as Step 4's LANDSCAPE_RESEARCH, so the two run in parallel** (two
+Task calls, both `subagent_type: "founder-skills:competitive-positioning"`). It researches the
+startup's own record — its registered legal name, its founders as inventors, its patent publications
+and their legal events — which nothing else in the run looks up. The prompt is printed; send it
+unchanged:
+
+```bash
+python3 "$SCRIPTS/cp_dispatch_prompt.py" startup_research --run-id "$RUN_ID" \
+  --handoff-agent "$HANDOFF_AGENT" --analysis-dir-agent "$ANALYSIS_DIR_AGENT" \
+  --plugin-root-agent "${CLAUDE_PLUGIN_ROOT}"
+```
+
+**After it returns:** gate the hand-off per the Context A hand-off protocol, then pipe it through the
+validator, which computes every publication's status from its office, kind code and legal events:
+
+```bash
+cat "$HANDOFF_DIR/startup_research_output.json" | \
+  python3 "$SCRIPTS/validate_startup_research.py" --pretty --run-id "$RUN_ID" \
+    -o "$ANALYSIS_DIR/startup_research.json"
+```
+
+The report and the coaching read it; never state a patent status yourself.
 
 ### Step 5: Positioning & Moat Assessment -> `positioning.json` + Dispatch Moat/Positioning Scoring (Context A)
 
@@ -801,138 +839,18 @@ cat "$STAGING_DIR/positioning.json" | python3 "$SCRIPTS/persist_agent_artifact.p
 
 It checks the schema-required top-level keys, stamps `_produced_by`, and writes. **If it rejects, the pipe fails and `$ANALYSIS_DIR` is left untouched** — fix the staged JSON and re-run; never hand-write the destination to get past it. `compose_report.py` raises `UNVALIDATED_ARTIFACT` at high severity on an unstamped artifact, so a bare heredoc here surfaces as a high-severity warning in the delivered report, and fails the run outright on Step 7's `--strict` pass. Do not read it as an unconditional hard stop: Pass 1 runs without `--strict`. **`moat_assessments` in this draft is optional — write `{}` or omit the key rather than authoring a full per-competitor draft.** It is superseded by `moat_scores.json` once MOAT_SCORING returns below, and nothing reads the draft block for scoring, so drafting one for every slug is effort with no consumer. Then dispatch the sub-agent **twice in parallel** (two Task calls in one message, both with `subagent_type: "founder-skills:competitive-positioning"`) — once for MOAT_SCORING and once for POSITIONING_SCORING.
 
-**MOAT_SCORING dispatch prompt:**
+**The two prompts are printed, not written.** Run the generator once per context and send each printed
+text as that dispatch's prompt, unchanged — nothing added, removed or reworded. `--scoring-basis` is the
+basis Gate 2 recorded (default `shipped`). Anything the scorers should know goes in the files they read,
+never in the prompt.
 
-```
-CONTEXT: MOAT_SCORING
-OUTPUT_PATH: <HANDOFF_AGENT>/moat_scoring_output.json
-RUN_ID: <RUN_ID>
-
-You are the competitive-positioning agent dispatched in Context A (MOAT_SCORING).
-Read positioning.json at <ANALYSIS_DIR_AGENT>/positioning.json, landscape.json at
-<ANALYSIS_DIR_AGENT>/landscape.json, and product_profile.json at
-<ANALYSIS_DIR_AGENT>/product_profile.json. You are scoring _startup among the others, and
-product_profile.json is the ONLY source for what the startup actually does — positioning.json's
-pre-dispatch block carries placeholder evidence, so without it you would be scoring the startup
-from nothing.
-
-Score every slug (including _startup) across the 6 canonical moat dimensions from
-${CLAUDE_PLUGIN_ROOT}/skills/competitive-positioning/references/moat-definitions.md:
-network_effects, data_advantages, switching_costs, regulatory_barriers,
-cost_structure, brand_reputation.
-
-Each moat: status (strong/moderate/weak/absent/not_applicable), evidence (required),
-evidence_source (researched/agent_estimate/founder_override), trajectory
-(building/stable/eroding).
-
-Those six are the comparison grid, not the whole vocabulary. You may ALSO add a
-`custom_{slug}` moat when a real, evidenced form of defensibility does not fit any of them —
-see the Custom Moat Types table in moat-definitions.md. Distribution is the case that keeps
-arising: a named partner or reseller covering a large share of the addressable market is
-defensibility, and it is NOT a network effect. Recording it as `network_effects: absent`
-because channel leverage does not make the product better with scale is correct reasoning
-that throws the finding away; use `custom_distribution_channel` instead. A custom moat needs
-the same evidence quality as a canonical one, and it reaches the founder's report — it does
-not appear on the six-axis radar, which stays canonical so companies remain comparable.
-
-trajectory is a DIFFERENT enum from status — it is one of building/stable/eroding only. Never write
-a status value (strong/moderate/weak/absent/not_applicable) into trajectory: the producer rejects it
-and the whole file comes back for repair, costing a round-trip.
-
-For trajectory and any moat where landscape.json evidence is thin, use WebSearch
-to find recent (last 12 months) signals — funding rounds, M&A, hiring, executive
-changes, patent filings, product launches. Stamp evidence_source: "researched"
-only when the signal came from a WebSearch result. Whenever you stamp
-evidence_source: "researched", also add a "source" field on that same moat
-entry — the URL or the exact search query that produced the signal. The main
-thread never sees your WebSearch results, only this artifact, so an unsourced
-"researched" claim (e.g. a dated funding/M&A event) can't be spot-checked
-later. score_moats.py warns (does not fail) on a "researched" moat with no
-"source".
-
-Use your Write tool to write to OUTPUT_PATH — exactly the shape expected by
-score_moats.py:
-{
-  "moat_assessments": {
-    "_startup": {"moats": [{"id": "...", "status": "...", "evidence": "...",
-      "evidence_source": "researched", "source": "https://... OR the exact search query used",
-      "trajectory": "..."}]},
-    "<slug>": {"moats": [...]},
-    ...
-  },
-  "metadata": {"run_id": "<RUN_ID>"}
-}
-Then return ONLY the receipt JSON in your final assistant message:
-{"status": "complete", "output_path": "<echo of OUTPUT_PATH>"}
-Do NOT write any file other than OUTPUT_PATH — you never write a canonical
-artifact; anything else you write bypasses schema validation and
-run_id stamping.
-```
-
-**POSITIONING_SCORING dispatch prompt:**
-
-```
-CONTEXT: POSITIONING_SCORING
-OUTPUT_PATH: <HANDOFF_AGENT>/positioning_scoring_output.json
-RUN_ID: <RUN_ID>
-SCORING_BASIS: <shipped|roadmap_12mo|mixed — default "shipped" unless Gate 2 recorded a change>
-
-You are the competitive-positioning agent dispatched in Context A (POSITIONING_SCORING).
-Read positioning.json at <ANALYSIS_DIR_AGENT>/positioning.json and product_profile.json at
-<ANALYSIS_DIR_AGENT>/product_profile.json (the only source for what the startup actually does —
-you are placing _startup on the map alongside researched competitors).
-
-Set each axis's `polarity` to say which END IS GOOD. Default `higher_is_better`; use
-`lower_is_better` whenever a LOW number is the desirable one — price, total cost of ownership,
-friction, latency, time-to-value, switching effort. This is not cosmetic: rank 1 means "best",
-and it feeds the differentiation score. Get it wrong on a price axis and the founder is told they
-rank last while being the second-cheapest in the set, with the score rewarding being expensive.
-If an axis genuinely has no good end, phrase it so it does, or leave the default.
-
-Position every competitor and _startup according to SCORING_BASIS: "shipped" means
-score only what is live and verifiable today, ignoring roadmap claims; "roadmap_12mo"
-means score the startup's stated 12-month roadmap as if already delivered; "mixed"
-means score today's shipped surface, but call out roadmap-only capabilities
-separately in the evidence text rather than folding them into the coordinate. A
-startup that ranks low under "shipped" because its stack is still roadmap is a
-finding about stage, not a defect — say so in the evidence, don't just place the dot.
-
-For each view in positioning.json, assign coordinates (0-100) for every competitor
-and _startup on both axes. Every point needs x_evidence, y_evidence, and provenance.
-Assess differentiation claims: verifiable (boolean), evidence, challenge, verdict
-(holds/partially_holds/does_not_hold).
-
-The axes themselves drive the search queries — when an axis is "customer support
-depth" or "pricing transparency," issue WebSearch queries targeting that specific
-dimension per competitor. Stamp x_evidence_source / y_evidence_source as
-"researched" only when the coordinate came from a WebSearch result. For each
-differentiation_claim, use WebSearch to find supporting or contradicting evidence
-before assigning a verdict.
-
-Use your Write tool to write to OUTPUT_PATH — exactly the shape expected by
-score_positioning.py:
-{
-  "scoring_basis": "<echo of SCORING_BASIS>",
-  "views": [
-    {
-      "id": "...", "x_axis": {"name": "...", "rationale": "...", "polarity": "higher_is_better|lower_is_better"},
-      "y_axis": {"name": "...", "rationale": "...", "polarity": "higher_is_better|lower_is_better"},
-      "points": [
-        {"competitor": "...", "x": 0-100, "y": 0-100,
-         "x_evidence": "...", "y_evidence": "...",
-         "x_evidence_source": "researched|agent_estimate",
-         "y_evidence_source": "researched|agent_estimate"}
-      ]
-    }
-  ],
-  "differentiation_claims": [...],
-  "metadata": {"run_id": "<RUN_ID>"}
-}
-Then return ONLY the receipt JSON in your final assistant message:
-{"status": "complete", "output_path": "<echo of OUTPUT_PATH>"}
-Do NOT write any file other than OUTPUT_PATH — you never write a canonical
-artifact; anything else you write bypasses schema validation and
-run_id stamping.
+```bash
+python3 "$SCRIPTS/cp_dispatch_prompt.py" moat_scoring --run-id "$RUN_ID" \
+  --handoff-agent "$HANDOFF_AGENT" --analysis-dir-agent "$ANALYSIS_DIR_AGENT" \
+  --plugin-root-agent "${CLAUDE_PLUGIN_ROOT}"
+python3 "$SCRIPTS/cp_dispatch_prompt.py" positioning_scoring --run-id "$RUN_ID" \
+  --handoff-agent "$HANDOFF_AGENT" --analysis-dir-agent "$ANALYSIS_DIR_AGENT" \
+  --plugin-root-agent "${CLAUDE_PLUGIN_ROOT}" --analysis-dir "$ANALYSIS_DIR" --scoring-basis shipped
 ```
 
 **After both sub-agents return:** gate EACH hand-off per the Context A hand-off protocol (run `check_handoff.py` per file, branch on exit codes). Then pipe each file through its producer:
@@ -945,7 +863,8 @@ cat "$HANDOFF_DIR/moat_scoring_output.json" | \
 
 ```bash
 cat "$HANDOFF_DIR/positioning_scoring_output.json" | \
-  python3 "$SCRIPTS/score_positioning.py" --pretty --run-id "$RUN_ID" -o "$ANALYSIS_DIR/positioning_scores.json"
+  python3 "$SCRIPTS/score_positioning.py" --pretty --run-id "$RUN_ID" \
+    --product-profile "$ANALYSIS_DIR/product_profile.json" -o "$ANALYSIS_DIR/positioning_scores.json"
 ```
 <!-- skill-quality-ci: bash-after-subagent-ok -->
 
@@ -964,7 +883,8 @@ evidence fields verbatim, changing nothing else in `positioning.json`. This is a
 merge (see the carve-out above) — you are relocating the sub-agent's own output, not authoring new
 scores or evidence.
 
-**Also copy each view's axis `polarity` across in this same pass** — the sub-agent sets it and
+**Also copy each view's axis `polarity` across in this same pass**, nested as `x_axis.polarity` /
+`y_axis.polarity` exactly as the hand-off has it (never as top-level view fields) — the sub-agent sets it and
 `positioning.json` is what the founder-override path re-pipes. Lose it there and the re-scored
 ranks silently revert to higher-is-better on a cost axis, on exactly the runs where the founder
 engaged with the map. Same failure mode as `scoring_basis` below, same one-line fix.
@@ -1002,8 +922,8 @@ Do NOT re-derive it here — that is exactly how this section once came to name 
 script had already corrected. The triggers it evaluates — check **every view** in
 `positioning_scores.json` — vanity flags, rank, and `overall_differentiation` live there, not in `positioning.json`. **Primary view = `views[0]`** — real runs use descriptive slug ids rather than the documented `primary`/`secondary`, so do not look for those literal strings when deciding which view is primary; a `views[]` entry may also carry an optional `label` field used for display, which is not a signal of which view is primary either. Evaluate every trigger below **per view, not on the primary view alone** — a trade-off or flattering shape on a secondary view is invisible if only the primary view is checked:
 
-- **Bottom-half-on-both**, **suspiciously-flattering**, **trade-off shape**, and **low overall
-  differentiation**. The exact predicates, thresholds and tie-handling live in the script and are
+- **Bottom-half-on-both**, **suspiciously-flattering**, **trade-off shape**, **low overall
+  differentiation**, and **no clear edge**. The exact predicates, thresholds and tie-handling live in the script and are
   exhaustively tested there — this list names them so you can recognise what fired; it does not
   restate the arithmetic, which is what let a stale copy here drift out of step with the script.
 - **Relay the script's `provisional` flag to the founder.** A trigger carrying `provisional: true` is
@@ -1016,7 +936,7 @@ If one fires: **Step A: Output a chat message** naming which pattern triggered, 
 
 **Step B: AFTER the chat message, call `AskUserQuestion`**, plain text, one sentence, no markdown/tables: `The scored position <plain-language description of the trigger> — keep it, dig deeper, or reconsider how it's scored?` Options: `No changes — keep the scoring` / `Re-score with founder facts` / `Change scoring basis` / `Show both positions`.
 
-If the founder picks `Re-score with founder facts`, gather the additional detail and re-dispatch POSITIONING_SCORING (and MOAT_SCORING if the new facts bear on a moat) before re-merging into `positioning.json`. **Then re-run Step 6's checklist pipe too** (with `--positioning-scores` pointed at the refreshed `positioning_scores.json`) — `score_positioning.py`'s rank and differentiation numbers just moved, and POS_04 reads that data directly, so a checklist graded before this re-score no longer matches the map it is grading. If `Change scoring basis`, follow the same basis-change mechanism as Gate 2. If `Show both positions`, note both the scored map and the deck's claimed position in the report rather than picking one.
+If the founder picks `Re-score with founder facts`, gather the additional detail, record it in `product_profile.json` (the scorers' source for what the startup does; re-stage and re-pipe it through `persist_agent_artifact.py`), then re-run the generator and re-dispatch POSITIONING_SCORING (and MOAT_SCORING if the new facts bear on a moat) before re-merging into `positioning.json`. The facts travel in the file, never in the prompt. **Then re-run Step 6's checklist pipe too** (with `--positioning-scores` pointed at the refreshed `positioning_scores.json`) — `score_positioning.py`'s rank and differentiation numbers just moved, and POS_04 reads that data directly, so a checklist graded before this re-score no longer matches the map it is grading. If `Change scoring basis`, follow the same basis-change mechanism as Gate 2. If `Show both positions`, note both the scored map and the deck's claimed position in the report rather than picking one.
 
 **Founder coordinate-override flow (optional):** Now that competitor coordinates exist, present the positioned map to the founder if they ask to adjust positions in chat, or if Gate 3 above triggered and the founder picked `Re-score with founder facts`. If the founder corrects a specific coordinate, update the corresponding point in `positioning.json` and re-run `score_positioning.py`, stamping `x_evidence_source` / `y_evidence_source: "founder_override"` on the changed coordinate so `compose_report.py` records it via `FOUNDER_OVERRIDE_COUNT`. Re-pipe the updated `positioning.json` views through `score_positioning.py` to refresh `positioning_scores.json` — **then re-run Step 6's checklist pipe as well**, so `checklist.json`'s recorded fingerprint matches the map the founder just changed, not the one from before the override.
 
@@ -1026,63 +946,13 @@ If the founder picks `Re-score with founder facts`, gather the additional detail
 
 **Dispatch the competitive-positioning sub-agent in Context A (CHECKLIST).** **Call the `Task` tool with `subagent_type: "founder-skills:competitive-positioning"`.**
 
-**Dispatch prompt template:**
+**The prompt is printed, not written.** Run the generator and send the printed text as the prompt,
+unchanged — nothing added, removed or reworded, including on a re-run after a re-score.
 
-```
-CONTEXT: CHECKLIST
-OUTPUT_PATH: <HANDOFF_AGENT>/checklist_output.json
-RUN_ID: <RUN_ID>
-
-You are the competitive-positioning agent dispatched in Context A (CHECKLIST).
-Read landscape.json, positioning.json, moat_scores.json, positioning_scores.json,
-product_profile.json, and landscape_draft.json from <ANALYSIS_DIR_AGENT>. Also read
-${CLAUDE_PLUGIN_ROOT}/skills/competitive-positioning/references/checklist-criteria.md.
-product_profile.json's deck_competition_slide field (deck mode) and
-landscape_draft.json's deck_competitors_excluded field are what the
-competition-slide cross-check item (NARR_03) needs — without them it has
-nothing to grade. When deck_competition_slide.present is false (the deck had
-no competition slide at all), that IS a concrete answer — grade NARR_03 **warn**,
-never not_applicable, using the stated reason as your evidence and saying plainly
-that the deck names no competitor. not_applicable would drop the item out of the
-score denominator, inflating the score while hiding the finding, and a deck that
-never engages competition is one of the strongest findings this review returns.
-Do not treat the field's absence as "nothing to grade" once a present:false
-record with a reason exists. references/checklist-criteria.md's NARR_03 bands are
-the authority.
-
-Assess all 25 checklist items (COVER_01..05, POS_01..05, MOAT_01..04,
-EVID_01..04, NARR_01..04, MISS_01..03). Mode-based gating applies: when
-input_mode is conversation, research-dependent items auto-gate to not_applicable.
-
-Evidence is MANDATORY for every item: every fail and warn MUST have a non-empty
-evidence string citing specific findings. Every pass MUST have evidence noting
-what was checked.
-
-Evidence prints VERBATIM in the founder's report, so name the source the way the
-founder knows it — never by our filename. They never saw `landscape.json` or
-`moat_scores.json`; they saw their deck and the competitors in it.
-  Instead of: "landscape.json reports input_mode: deck"
-  Write:      "the deck names three competitors and no others"
-  Instead of: "moat_scores.json shows switching_costs weak"
-  Write:      "switching costs are weak — customers can leave in a day"
-State what is true of the COMPANY or its competitive set. The delivery gate
-flags an internal filename in evidence, so this is checked.
-
-**Copy each criterion's label verbatim into `criterion`.** It is a cross-check, not decoration:
-the label you are shown and the evidence you write are joined by `id` downstream, so if the id
-and the criterion you actually graded drift apart, a founder reads a real criterion above a
-justification for a different one — measured on real runs, e.g. "Do-nothing / status quo
-included" carrying evidence about how many direct competitors were named. Echoing the label is
-what makes that detectable. Grade the criterion you name.
-
-Use your Write tool to write to OUTPUT_PATH — the items array without a
-summary (the producer script computes the summary):
-{"items": [{"id": "COVER_01", "criterion": "<the criterion label, copied verbatim>", "status": "pass", "evidence": "...", "notes": "..."}, ...all 25 items...]}
-Then return ONLY the receipt JSON in your final assistant message:
-{"status": "complete", "output_path": "<echo of OUTPUT_PATH>"}
-Do NOT write any file other than OUTPUT_PATH — you never write a canonical
-artifact; anything else you write bypasses schema validation and
-run_id stamping.
+```bash
+python3 "$SCRIPTS/cp_dispatch_prompt.py" checklist --run-id "$RUN_ID" \
+  --handoff-agent "$HANDOFF_AGENT" --analysis-dir-agent "$ANALYSIS_DIR_AGENT" \
+  --plugin-root-agent "${CLAUDE_PLUGIN_ROOT}"
 ```
 
 **After the sub-agent returns:** gate the hand-off per the Context A hand-off protocol, then pipe through the producer script. The sub-agent writes items only — pass the real input mode and run_id on the CLI so `checklist.py` gates the right items and stamps `metadata.run_id`:
@@ -1095,6 +965,53 @@ cat "$HANDOFF_DIR/checklist_output.json" | python3 "$SCRIPTS/checklist.py" --pre
 <!-- skill-quality-ci: bash-after-subagent-ok -->
 
 `$INPUT_MODE` is the mode established in Steps 1-2 (`deck`, `conversation`, or `document`). Without `--input-mode`, deck/document runs silently default to `conversation` and mis-gate NARR_03/EVID_04; without `--run-id`, `checklist.json` carries no run_id and the Step 7c verifier blocks. `--positioning-scores` records which scored positioning map this checklist graded (a `views_fingerprint` copied verbatim from `positioning_scores.json`), so a later `compose_report.py` run can detect a checklist that was graded against a map that has since moved — this is the ONLY place `checklist.json` is produced on a normal run, so omitting the flag here means the whole staleness check can never fire.
+
+### Step 6.5: Outside Review -> `redteam.json` (Context A: RED_TEAM dispatch)
+
+**Dispatch the reviewer ONCE**, with `subagent_type: "founder-skills:competitive-positioning-redteam"` —
+a **different agent** from every other step's. It carries none of the scoring rubric: it looks at the
+finished analysis the way a skeptical investor would, and every finding must cite a source the founder
+can check.
+
+**RUN THIS STEP. Its success is optional; attempting it is not.** Do not skip it because the founder
+supplied no documents — most of what it finds comes from competitors' own material. `compose_report.py`
+refuses to compose unless this run's review ran, or the decision not to run one was recorded with
+`record_red_team_skip.py`, whose `--reason` is exactly one of: `founder_declined` (the founder asked not
+to run one), `dispatch_failed` (it returned BLOCKED, or the producer below rejected it),
+`no_network_available`, `no_subagent_dispatch` (this environment cannot dispatch a reviewer). Each is a
+different sentence the founder reads; there is no reason meaning "it did not seem necessary".
+
+Mirror the founder's uploads into the hand-off dir (exit 3 from the resolver = no session tree: skip the
+`cp`), then print the prompt and send it unchanged:
+
+```bash
+python3 "$SHARED_SCRIPTS/resolve_artifacts_root.py" --uploads   # prints UPLOADS_DIR, or exits 3
+mkdir -p "$HANDOFF_DIR/docs" && cp "<printed UPLOADS_DIR>"/* "$HANDOFF_DIR/docs/"
+python3 "$SCRIPTS/cp_dispatch_prompt.py" red_team --run-id "$RUN_ID" \
+  --handoff-agent "$HANDOFF_AGENT" --analysis-dir-agent "$ANALYSIS_DIR_AGENT" \
+  --plugin-root-agent "${CLAUDE_PLUGIN_ROOT}" --analysis-dir "$ANALYSIS_DIR" --handoff-dir "$HANDOFF_DIR"
+```
+
+**After it returns:** gate the hand-off per the Context A hand-off protocol, then pipe:
+
+```bash
+cat "$HANDOFF_DIR/redteam_output.json" | python3 "$SCRIPTS/cp_red_team.py" --pretty \
+  --run-id "$RUN_ID" --uploads-dir "$HANDOFF_DIR/docs" -o "$ANALYSIS_DIR/redteam.json"
+```
+<!-- skill-quality-ci: bash-after-subagent-ok -->
+
+If the dispatch failed or the producer rejected it, record that and continue to Step 7 — never abort the
+run over it:
+
+```bash
+python3 "$SCRIPTS/record_red_team_skip.py" --reason dispatch_failed --run-id "$RUN_ID" \
+  -o "$ANALYSIS_DIR/red_team_skip.json"
+```
+
+**A review is final.** Do not change the analysis after it, and do not dispatch it again: the report
+shows the review from its own copy and lists every review this run made, so neither an edit nor a
+re-run changes what the founder reads. An empty findings list is a result ("the review found nothing it
+could evidence"), not a failure.
 
 ### Step 7: Compose, Validate, and Post-Compose Coaching
 
@@ -1112,11 +1029,22 @@ python3 "$SCRIPTS/compose_report.py" --dir "$ANALYSIS_DIR" --pretty \
 
 Inspect the warnings in the output. Fix any high-severity warnings (missing artifacts, stale run_id, corrupt JSON, artifacts not written by their producer script) and re-run Pass 1.
 
+**If compose refuses because this run has neither an outside review nor a recorded skip, that refusal
+is not a stop:** do Step 6.5 (or record why it did not run), then re-run Pass 1.
+
+**About the outside review** (`REDTEAM_ALTERED`, `RED_TEAM_SKIP_CONTRADICTED`,
+`ANALYSIS_CHANGED_AFTER_REVIEW`, `ANALYSIS_CHANGED_BETWEEN_REVIEWS`): each is a disclosure — deliver the
+report as it is; re-running or editing cannot clear it. `REVIEW_COPY_MISSING`: re-run Step 6.5's
+producer exactly as given; never edit the review.
+
 **A warning code you do not recognise is still real.** Treat it by what it is, never
 by silence: fix it and re-run if the run itself is broken, otherwise say what it means
 for the founder in plain language. A `FOUNDER_TEXT_TOKEN` naming an internal FILE is
 the one to watch — that text is still in the report and must be removed before you hand
-anything over.
+anything over. The one file you may edit for it at this step: `positioning.json` (in place). Every file
+the outside review read is fingerprinted, and an edit after Step 6.5 is disclosed to the founder as an
+analysis changed after its review — so never write our file names into the company profile at Step 2,
+and never edit the scores: the scorers already reword our file names in their evidence.
 
 
 **Pass 2 (with acceptances):** If any medium-severity warnings should be accepted, add `accepted_warnings` to `positioning.json` with the warning code, match pattern, and reason. Then re-run with `--strict`:
@@ -1216,7 +1144,7 @@ Follow your agent body's Context B procedure (POST_COMPOSE_COACHING):
 Stop after returning the receipt JSON. Do not narrate.
 ```
 
-**After the sub-agent returns:** if its final message is a `{"status": "blocked", "reason": ...}` object, stop and report the reason to the founder — do not run the gate. Otherwise gate the hand-off, then (on gate exit 0) transform and insert deterministically. **The commentary leaves the model exactly once (into the sub-agent's Write call) — NEVER re-type the sub-agent's markdown into a heredoc or a `python -c` argument.**
+**After the sub-agent returns:** if its final message is a `{"status": "blocked", "reason": ...}` object, stop and report the reason to the founder — do not run the gate. The one exception is `write_refused`: run the Step 0 proof if it did not run, rebuild `<HANDOFF_AGENT>` from the resolver, and re-dispatch once; a second `write_refused` stops. Otherwise gate the hand-off, then (on gate exit 0) transform and insert deterministically. **The commentary leaves the model exactly once (into the sub-agent's Write call) — NEVER re-type the sub-agent's markdown into a heredoc or a `python -c` argument.**
 
 <!-- skill-quality-ci: bash-after-subagent-ok -->
 ```bash
@@ -1257,12 +1185,12 @@ The gate (`check_handoff.py --format=markdown`) verifies the sub-agent's hand-of
 - **Exit 5** (receipt echoes a different path) → **repair-dispatch** telling the agent the exact expected OUTPUT_PATH.
 - **Exit 6** (receipt unparseable / no `output_path` key) → **redo-dispatch** with "return ONLY the receipt JSON — no fences, no prose." (A `status: "blocked"` final message is NOT exit 6 — it was handled before the gate.)
 - **Exit 7** (content-shape gate failed — receipt-shaped or marker-bearing file) → **repair-dispatch**: "your file wasn't the coaching commentary — write the coaching markdown, nothing else, to `<OUTPUT_PATH>`."
-- **Exit 8** (`path_namespace_mismatch`) → the sub-agent **complied**; the agent-namespace prefix was wrong. Its relative `OUTPUT_PATH` resolved against the outputs mount instead of the session root, so the file landed at the doubled path reported in `found_at`. Do NOT treat this as a fabricated receipt, and do NOT read the hand-off from `found_at` — re-dispatch with the corrected agent-namespace prefix (re-run `resolve_artifacts_root.py --agent` and rebuild `<HANDOFF_AGENT>` from the printed value). Counts against the same 2-dispatch retry budget.
+- **Exit 8** (`path_namespace_mismatch`) → the sub-agent **complied**; the agent-namespace prefix was wrong. Its relative `OUTPUT_PATH` resolved against the outputs mount instead of the session root, so the file landed at the doubled path reported in `found_at` (only a relative path can do this: run the Step 0 proof). Do NOT treat this as a fabricated receipt, and do NOT read the hand-off from `found_at` — re-dispatch with the corrected agent-namespace prefix (re-run `resolve_artifacts_root.py --agent` and rebuild `<HANDOFF_AGENT>` from the printed value). Counts against the same 2-dispatch retry budget.
 - **Any other exit** (script crash, unreadable file, invalid UTF-8) → STOP with the stderr. `check_handoff.py` exit 4 is reachable here too: gate 1 already confirmed the file exists and is non-empty, so a failure opening it afterwards is an IO/permission fault, not a malformed hand-off. A decode error raises before any typed exit and surfaces as a traceback.
 - **`insert_coaching.py` exit 1** (blocked; stdout carries `{"status": "blocked", "reason": ...}`) → stop and report the exact reason. Do NOT hand-edit `report.md` — if the reason mentions a truncated report or a missing marker, re-run `compose_report.py --write-md` and retry the chain. If the reason is `commentary_markdown missing or empty`, treat as a malformed hand-off: repair-dispatch quoting the reason.
 - **After ANY corrective dispatch, resume from the gate chain** — never feed the transform+insert pipe an ungated file.
 
-**Retry budget:** max 2 corrective dispatches (same rule as Context A). **Graceful degrade:** if the FIRST corrective dispatch also exits 3 while the receipt claims `complete` with the correctly echoed path, treat the host topology as hand-off-incompatible and fall back to message-channel transport. **The corrective dispatch MUST ask for the commentary inline for this to be reachable** — add: "the file hand-off is not working in this environment; return the coaching commentary itself as your final message, as raw markdown, with no receipt JSON and no fences." Without that line the fallback is unreachable: the normal Context B prompt instructs the agent to return ONLY the receipt and not to narrate, so its final message contains no markdown to stage. Then stage that returned markdown to `$STAGING_DIR/coaching.md` via a **single-quoted** `<<'COACHING_EOF'` heredoc (apostrophe-safe; NEVER `python -c`, NEVER the `outputs/` root — `$STAGING_DIR` is the `/tmp` scratch dir from Step 0, never the promoted outputs mount), and run the same `md_to_commentary.py "$STAGING_DIR/coaching.md" | insert_coaching.py` chain against that staged file.
+**Retry budget:** max 2 corrective dispatches (same rule as Context A). **Graceful degrade:** if the FIRST corrective dispatch also exits 3 while the receipt claims `complete` with the correctly echoed path, treat the host topology as hand-off-incompatible and fall back to message-channel transport, and tell the founder in one plain sentence (see Context A's degrade rule). **The corrective dispatch MUST ask for the commentary inline for this to be reachable** — add: "the file hand-off is not working in this environment; return the coaching commentary itself as your final message, as raw markdown, with no receipt JSON and no fences." Without that line the fallback is unreachable: the normal Context B prompt instructs the agent to return ONLY the receipt and not to narrate, so its final message contains no markdown to stage. Then stage that returned markdown to `$STAGING_DIR/coaching.md` via a **single-quoted** `<<'COACHING_EOF'` heredoc (apostrophe-safe; NEVER `python -c`, NEVER the `outputs/` root — `$STAGING_DIR` is the `/tmp` scratch dir from Step 0, never the promoted outputs mount), and run the same `md_to_commentary.py "$STAGING_DIR/coaching.md" | insert_coaching.py` chain against that staged file.
 
 **7d — Visualize (optional):**
 
@@ -1334,9 +1262,8 @@ over are different acts: a founder looking at a row of cards cannot tell which d
 Write each deliverable into your message as its own named entry — a link where this surface renders
 one that opens (on a `/sessions` session tree, `computer://` + the absolute path you just copied it
 to), otherwise the label with the path stated beside it — labelled by what the document IS, in the
-founder's words: *"Here's your finished analysis: [the written report](…) — everything scored, with
-the evidence behind it; [the interactive version](…) has the charts."* "The files are above" is not a
-hand-over. This does not conflict with the never-name-a-file rule: the founder reads your label,
+founder's words (the written report, the charts), not by its filename. "The files are above" is not a
+hand-over. Where a step prints the hand-over, the printed entries are these. This does not conflict with the never-name-a-file rule: the founder reads your label,
 never the path. Never paste a report's body into the message — link or name it.
 
 **Then offer the working data — once, in one sentence.** For example: *"If you want to keep the working
@@ -1353,6 +1280,20 @@ finished archive moves.) Include only the reusable
 inputs — the validated figures and extractions this analysis was built from, plus the composed report
 data. Never include pipeline hand-off files, receipts, coaching payloads, or gate state: they mean
 nothing outside the run that made them.
+
+**In this skill the hand-over message is printed, not written.** It is the links, the report's own
+verdict paragraph (where you stand on each map, the pitch claims that do not hold, defensibility and
+the patent record), and the offer:
+
+```bash
+python3 "$SCRIPTS/cp_closing_message.py" --report "$ANALYSIS_DIR/report.json" \
+  --deliverable "the written report=<absolute path you copied the .md to>" \
+  --deliverable "the maps=<absolute path of the copied _Competitive_Positioning.html>" \
+  --deliverable "the interactive explorer=<absolute path of the copied _Competitive_Explorer.html>"
+```
+
+Send its output as your message: the printed text is the message. It already states where the founder
+stands, so there is nothing to add before it.
 
 Scratch lives in `$STAGING_DIR` (`/tmp`, reclaimed by the sandbox) — no cleanup needed. **Do not `rm`
 anything under `$ANALYSIS_DIR`** — it is the promoted `outputs/` tree in Cowork, where deleting a

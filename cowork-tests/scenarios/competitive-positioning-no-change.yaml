@@ -71,6 +71,9 @@ answers:
     choose: "No changes"
 
 assert:
+  # A relative or /sessions/ file-tool path is refused at host-loop; the Step 0 proof exists so none is used.
+  # Content-class, so it covers sub-agent tool results too (checked by replay on a sub-agent-only string).
+  - tool_result_not_contains: "denied by your permission settings"
   - result: success
   # No `all_tasks_completed` here: nothing in this skill asks the agent for a task list, so the
   # assert is satisfiable only by chance and a losing run blocks a paid record rather than
@@ -105,6 +108,7 @@ assert:
   - max_turns: 170
   - tool_calls_max: 160
   - no_unexpected_files:
+      - 'outputs/artifacts/.host-outputs-*'  # Step 0's file-tool path proof (artifacts root)
       - 'outputs/artifacts/competitive-positioning-cadence/**'
       - 'outputs/artifacts/founder-context-cadence.json'
       - 'outputs/Cadence_*'

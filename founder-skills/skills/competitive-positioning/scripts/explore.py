@@ -182,13 +182,18 @@ def _build_data_payload(dir_path: str) -> dict[str, Any]:
 
     # View scores keyed by view id. Built BEFORE the views themselves, because the scored view is the
     # authoritative source for a view's axis rationale — the draft carries a placeholder there.
+    import _cp_view
+
+    names = _cp_view.competitor_names(landscape if _usable(landscape) else None)
     view_scores_map: dict[str, dict[str, Any]] = {}
     if _usable(positioning_scores):
         for sv in _as_list(positioning_scores.get("views")):
             if isinstance(sv, dict):
                 vid = str(sv.get("view_id", sv.get("id", "")))
                 if vid:
-                    view_scores_map[vid] = sv
+                    # The same sentence report.md and report.html carry, computed here: the page
+                    # shows it and does no geometry of its own. The score is not shown.
+                    view_scores_map[vid] = {**sv, "where_you_stand": _cp_view.view_sentence(sv, names)}
 
     # Views with points
     views: list[dict[str, Any]] = []
@@ -234,6 +239,8 @@ def _build_data_payload(dir_path: str) -> dict[str, Any]:
 
     return {
         "company_name": company_name,
+        # Competitor names from the landscape, so the page never labels a point by its slug.
+        "display_names": names,
         "views": views,
         "view_scores": view_scores_map,
         "competitors": competitors,
@@ -275,6 +282,7 @@ def _css(brand_css: str) -> str:
               border-bottom: 1px solid var(--lool-line-2); }
     .header h1 { font-size: 1.5rem; font-weight: 400; color: var(--lool-blue); }
     .header .subtitle { font-size: 0.875rem; color: var(--lool-mute); }
+    .verdict { font-size: 1rem; line-height: 1.55; max-width: 60rem; margin: 0.75rem 0 1.25rem; }
     .toolbar { display: flex; flex-wrap: wrap; gap: 1rem; padding: 1rem 2rem;
                background: var(--lool-white); border-bottom: 1px solid var(--lool-line-2);
                align-items: center; }
@@ -383,11 +391,21 @@ def compose_explorer(dir_path: str) -> str:
     payload = _build_data_payload(dir_path)
     data_json = _safe_json_embed(payload)
     company_name = _esc(payload["company_name"])
+    # The report's own verdict paragraph, the same words report.md opens with. Rendered here, not
+    # embedded in DATA: the page's script has no use for it.
+    import _cp_view
+
+    verdict_text = _cp_view.report_verdict(
+        _load_artifact(dir_path, "report.json"),
+        _load_artifact(dir_path, "positioning_scores.json"),
+        _load_artifact(dir_path, "moat_scores.json"),
+    )
+    verdict_html = f'<p class="verdict">{_esc(verdict_text)}</p>' if verdict_text else ""
 
     # Build legend bar
     legend_parts: list[str] = []
     for label, color in [
-        ("Your Company", _CATEGORY_COLORS["_startup"]),
+        (company_name if payload["company_name"] != "Unknown" else "This company", _CATEGORY_COLORS["_startup"]),
         ("Direct", _CATEGORY_COLORS["direct"]),
         ("Adjacent", _CATEGORY_COLORS["adjacent"]),
         ("Do Nothing", _CATEGORY_COLORS["do_nothing"]),
@@ -415,6 +433,7 @@ def compose_explorer(dir_path: str) -> str:
     <a href="https://github.com/lool-ventures/founder-skills">founder skills</a>
     by <a href="https://lool.vc">lool ventures</a></div>
 </div>
+{verdict_html}
 
 <div class="tab-bar">
   <button class="tab active" data-tab="2d" onclick="switchTab('2d')">2D Explorer</button>
@@ -509,7 +528,8 @@ const STARTUP_MIN_RADIUS = 8;
 const VERDICT_COLORS = {{
   holds: 'var(--lool-success)',
   partially_holds: 'var(--lool-warning)',
-  does_not_hold: 'var(--lool-danger)'
+  does_not_hold: 'var(--lool-danger)',
+  unproven: 'var(--lool-mute)'
 }};
 
 // State
@@ -744,7 +764,8 @@ function render2D() {{
   points.forEach(function(pt) {{
     var slug = pt.competitor;
     var style = getCompanyStyle(slug);
-    var label = slug === '_startup' ? DATA.company_name : humanize(slug.replace(/-/g, ' '));
+    var label = slug === '_startup' ? DATA.company_name
+      : (DATA.display_names[slug] || humanize(slug.replace(/-/g, ' ')));
 
     datasets.push({{
       label: label,
@@ -841,16 +862,22 @@ function render2D() {{
   if (vs) {{
     var totalRanked = (vs.competitor_count || 0) + 1;
     var lines = [];
-    if (vs.differentiation_score !== undefined && vs.differentiation_score !== null) {{
-      lines.push('<div><strong>Differentiation score:</strong> ' + vs.differentiation_score + '%</div>');
+    if (vs.where_you_stand) {{
+      lines.push('<div><strong>Where you stand:</strong> ' + escHtml(vs.where_you_stand) + '</div>');
+    }}
+    // A tie is shown as a range: startup_*_rank counts only competitors strictly ahead.
+    function placeText(rank, tied) {{
+      var k = (tied && tied.length) ? tied.length : 0;
+      return k ? (rank + '\u2013' + (rank + k) + ' of ' + totalRanked + ' ranked (tied)')
+               : (rank + ' of ' + totalRanked + ' ranked');
     }}
     if (vs.startup_x_rank !== undefined && vs.startup_x_rank !== null) {{
-      lines.push('<div><strong>' + escHtml(xName) + ' rank:</strong> Rank ' + vs.startup_x_rank +
-        ' of ' + totalRanked + ' ranked</div>');
+      lines.push('<div><strong>' + escHtml(xName) + ' rank:</strong> Rank ' +
+        placeText(vs.startup_x_rank, vs.startup_x_tied_with) + '</div>');
     }}
     if (vs.startup_y_rank !== undefined && vs.startup_y_rank !== null) {{
-      lines.push('<div><strong>' + escHtml(yName) + ' rank:</strong> Rank ' + vs.startup_y_rank +
-        ' of ' + totalRanked + ' ranked</div>');
+      lines.push('<div><strong>' + escHtml(yName) + ' rank:</strong> Rank ' +
+        placeText(vs.startup_y_rank, vs.startup_y_tied_with) + '</div>');
     }}
     if (vs.x_axis_vanity_flag) {{
       lines.push('<div class="vanity-flag">Vanity axis warning: ' + escHtml(xName) + '</div>');
@@ -903,11 +930,12 @@ function updateLegend() {{
   var items = [];
 
   if (colorMode === 'category') {{
-    var cats = [['Your Company','_startup'],['Direct','direct'],['Adjacent','adjacent'],
+    var startupLabel = DATA.company_name !== 'Unknown' ? DATA.company_name : 'This company';
+    var cats = [[startupLabel,'_startup'],['Direct','direct'],['Adjacent','adjacent'],
                 ['Do Nothing','do_nothing'],['Emerging','emerging'],['Custom','custom']];
     cats.forEach(function(c) {{
       items.push('<span class="legend-item"><span class="legend-dot" style="background:' +
-        CATEGORY_COLORS[c[1]] + '"></span>' + c[0] + '</span>');
+        CATEGORY_COLORS[c[1]] + '"></span>' + escHtml(c[0]) + '</span>');
     }});
   }} else {{
     var defs = [['High','high'],['Moderate','moderate'],['Low','low']];
@@ -983,7 +1011,8 @@ function render3D() {{
   points.forEach(function(pt) {{
     var slug = pt.competitor;
     var style = getCompanyStyle(slug);
-    var label = slug === '_startup' ? DATA.company_name : humanize(slug.replace(/-/g, ' '));
+    var label = slug === '_startup' ? DATA.company_name
+      : (DATA.display_names[slug] || humanize(slug.replace(/-/g, ' ')));
     var def = DATA.company_moats[slug] ? DATA.company_moats[slug].overall_defensibility : 'low';
     var zVal = def === 'high' ? 3 : def === 'moderate' ? 2 : 1;
 

@@ -26,6 +26,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _confidence  # noqa: E402
 import _labels  # noqa: E402
 import _palette  # noqa: E402
+import _pool_text  # noqa: E402
 import _rules  # noqa: E402
 from _rule_pack import RULE_PACK_VERSION  # noqa: E402
 
@@ -580,6 +581,7 @@ def render_report_html(
   </div>
   {ad_html}
   <p class="impact">{impact}</p>
+  {_pool_text.pool_section_html(_pool_text.pool_section(s, cap_state))}
 </div>""")
 
     for s in cap_implied:
@@ -618,6 +620,7 @@ def render_report_html(
     <span class="pill">{_esc(_labels.humanize("completeness", co.get("completeness", "structural_only")))}</span>
   </div>
   {body}
+  {_pool_text.pool_section_html(_pool_text.pool_section(s, cap_state))}
 </div>""")
 
     # Disclosure/divergence banner — rendered at top of report body when non-empty.
@@ -662,7 +665,9 @@ def render_report_html(
     import _warning_callouts as _wc
 
     solver_banner_html = ""
-    _solver_lines = _wc.solver_callouts_plaintext(scenarios_doc.get("scenarios") or [])
+    _solver_lines = _wc.solver_callouts_plaintext(
+        scenarios_doc.get("scenarios") or [], owned_by_scenario=_pool_text.pool_section_codes
+    )
     if _solver_lines:
         _items = "".join(f"<li>{_esc(line)}</li>" for line in _solver_lines)
         solver_banner_html = (
@@ -767,6 +772,11 @@ def render_report_html(
   .metric-blue {{ color: var(--lool-blue); }}
   .metric-l {{ font-size: 12px; color: var(--lool-mute); margin-top: 4px; }}
   .delta {{ color: var(--lool-danger); font-weight: 600; }}
+  .pool-section {{ margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--lool-cloud, #e5e7eb);
+    font-size: 13px; line-height: 1.55; }}
+  .pool-section h4 {{ margin: 0 0 6px; font-size: 13px; }}
+  .pool-section p {{ margin: 0 0 6px; }}
+  .pool-callout {{ background: var(--lool-warning-tint); border-left: 3px solid var(--lool-warning); padding: 6px 10px; }}
   .impact {{ font-size: 14px; line-height: 1.55; color: var(--lool-slate);
          margin: 16px 0 0; padding-top: 14px; border-top: 1px solid var(--lool-paper-2); }}
   .gloss {{ font-size: 13px; color: var(--lool-mute); margin: 0 0 12px; }}

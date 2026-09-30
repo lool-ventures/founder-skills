@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Canonical pre-push hook (version-controlled). Activate with:
+#   git config core.hooksPath scripts/hooks
+#
+# Runs the privacy guard over everything this push publishes: the ADDED lines and the commit
+# messages of each pushed range. A commit made with --no-verify, or before the guard existed, is
+# checked here before it leaves the machine. Bypass a confirmed false positive with --no-verify.
+set -euo pipefail
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+zero="0000000000000000000000000000000000000000"
+status=0
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [ -z "${local_sha:-}" ] && continue
+  [ "$local_sha" = "$zero" ] && continue          # deleting a ref publishes nothing
+  if [ "$remote_sha" = "$zero" ]; then
+    # A new remote branch: everything since it left origin/main (or, with no common history, since
+    # its root commit -- the root commit's own content is then the one thing not re-checked).
+    base="$(git merge-base "$local_sha" origin/main 2>/dev/null || true)"
+    [ -z "$base" ] && base="$(git rev-list --max-parents=0 "$local_sha" | tail -1)"
+    range="$base..$local_sha"
+  else
+    range="$remote_sha..$local_sha"
+  fi
+  if ! uv run python scripts/privacy_guard.py --range "$range"; then
+    echo "pre-push: REJECTED by the privacy guard for $local_ref -> $remote_ref (see above)." >&2
+    status=1
+  fi
+done
+exit $status

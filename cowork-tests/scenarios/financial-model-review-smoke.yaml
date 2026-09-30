@@ -43,6 +43,9 @@ prompt: |
 # corrections file to upload).
 
 assert:
+  # A relative or /sessions/ file-tool path is refused at host-loop; the Step 0 proof exists so none is used.
+  # Content-class, so it covers sub-agent tool results too (checked by replay on a sub-agent-only string).
+  - tool_result_not_contains: "denied by your permission settings"
   - result: success
   # Paired because financial-model-review/SKILL.md mandates a task tracker. Unpaired,
   # `all_tasks_completed` passes vacuously on a task-free run ("no tasks were created — cannot
@@ -150,6 +153,7 @@ assert:
   # Allowlist = artifact namespace (incl. handoff/**) + founder-context sidecar + promoted
   # deliverables. Pre-0.24 cassettes exclude loudly (no preRunPaths). tightened from discovery actuals (observed x1.5).
   - no_unexpected_files:
+      - 'outputs/artifacts/.host-outputs-*'  # Step 0's file-tool path proof (artifacts root)
       - 'outputs/artifacts/financial-model-review-cadence/**'
       - 'outputs/artifacts/founder-context-cadence.json'
 

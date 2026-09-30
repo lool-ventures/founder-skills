@@ -18,18 +18,20 @@ JSON schemas for all analysis artifacts deposited during the market sizing workf
 | `geography` | string | yes | Where they operate |
 | `pricing_model` | string | yes | How they charge |
 | `revenue_model` | string | yes | Revenue model (e.g., `"subscription"`, `"usage"`) |
-| `existing_claims` | object | no | Deck's TAM/SAM/SOM figures. Must be a flat object with lowercase keys `tam`, `sam`, `som` (use `null` when the deck does not state a figure). Non-canonical keys are silently ignored by reconciliation and trigger `EXISTING_CLAIMS_SHAPE`. |
-| `existing_claims_detail` | object \| null | no | Narrative-only deck claims that don't fit the canonical `{tam, sam, som}` shape (regional sub-SAMs, time-anchored figures, alternative TAM frames). Rendered as a "Deck Claims (Narrative)" sub-section in the report; **not** validated, **not** reconciled. |
-| `currency` | string | no | ISO code every money figure in the analysis is denominated in (default `"USD"`). A label, and the conversion TARGET. Nothing is converted unless a money input declares a different source currency (`industry_total_currency` / `arpu_currency`) **and** a rate is supplied (`--fx-rate SRC:TGT=RATE`); a declared foreign currency with no rate is a hard error, never a guess. Any conversion performed is recorded in `sizing.json`'s `fx` block and disclosed in the report. `compose_report.py` and `visualize.py` render `"USD"` as a `$` prefix and any other code as a suffix (`270.0M EUR`); a non-USD analysis that converted nothing gets an explicit no-FX disclosure, and a converted one gets the rate, its date and its source instead. Checked ahead of `sizing.json`'s own `currency`; a disagreement between the two raises `CURRENCY_MISMATCH`. |
+| `existing_claims` | object | no | Deck's TAM/SAM/SOM, flat, lowercase `tam`/`sam`/`som` (`null` if not stated); other keys are ignored and raise `EXISTING_CLAIMS_SHAPE`. |
+| `existing_claims_high` | object | no | High ends of ranges, `{tam, sam, som}`. In range: no mismatch; outside: vs nearest bound. Ignored (`EXISTING_CLAIMS_SHAPE`) without a lower bound or if not above it. |
+| `existing_claims_alternatives` | object | no | Per metric, `[{value, slide, label}]`: other deck figures; each raises `DECK_CLAIMS_DISAGREE`. |
+| `existing_claims_detail` | object \| null | no | Deck claims outside the flat shape (regional sub-SAMs, dated figures); shown as "Deck Claims (Narrative)", **not** reconciled. |
+| `currency` | string | no | ISO code every money figure in the analysis is denominated in (default `"USD"`). A label, and the conversion TARGET. Nothing is converted unless a money input is in another currency **and** its rate is recorded, as an `fx_rate` entry in `validation.json` (Step 4); `--fx-rate` is refused on the reference path. No rate is a hard error, never a guess. Any conversion performed is recorded in `sizing.json`'s `fx` block and disclosed in the report. `compose_report.py` and `visualize.py` render `"USD"` as a `$` prefix and any other code as a suffix (`270.0M EUR`); a non-USD analysis that converted nothing gets an explicit no-FX disclosure, and a converted one gets the rate, its date and its source instead. Checked ahead of `sizing.json`'s own `currency`; a disagreement between the two raises `CURRENCY_MISMATCH`. |
 | `sizing_basis` | string | no | Convention this analysis' figures follow: `"current_year"` (default) \| `"forecast_year"` \| `"mixed"` — see `tam-sam-som-methodology.md` §5. Carried into `sizing.json` via `market_sizing.py --sizing-basis` (Step 5). Absence means not declared; `compose_report.py` and `visualize.py` render "Not declared", never a silent default to `"current_year"`. |
-| `founder_stated_inputs` | object | no | Facts the founder stated about their **own business** — today `arpu` (what they charge or collect per customer) when stated outright. A figure about the market (`customer_count`, `industry_total`, `segment_pct`, `serviceable_pct`, `share_pct`, `target_pct`) is a claim even when the deck states it and belongs in `existing_claims`/`existing_claims_detail`; recording one here raises `FOUNDER_STATED_MARKET_FIGURE` (high), because the build that consumed it restated the deck instead of testing it. `compose_report.py` compares each stated value against what the sizing consumed and raises `FOUNDER_VALUE_OVERRIDDEN` (medium) on a >0.5% divergence. Empty object = check disabled. |
-| `founder_stated_inputs_period` | object | no | Per-field period a `founder_stated_inputs` figure was quoted per — `{"arpu": "month"}`; one of `year`, `quarter`, `month`, `week`. The math's `arpu` is annual, so `compose_report.py` multiplies the stated figure up before the fidelity comparison; a founder-stated $203/month against a computed $2,436 then agrees. An unrecognised value raises `FOUNDER_PERIOD_UNKNOWN` (medium) and the figure is compared as annual. |
+| `founder_stated_inputs` | object | no | Facts the founder stated about their **own business** — today `arpu` when stated outright. A figure about the market (`customer_count`, `industry_total`, `segment_pct`, `serviceable_pct`, `share_pct`, `target_pct`) is a claim even when the deck states it and belongs in `existing_claims`/`existing_claims_detail`; recording one here raises `FOUNDER_STATED_MARKET_FIGURE` (high), because the build that consumed it restated the deck instead of testing it. `compose_report.py` compares each stated value against what the sizing consumed and raises `FOUNDER_VALUE_OVERRIDDEN` (medium) on a >0.5% divergence. Empty object = check disabled. |
+| `founder_stated_inputs_period` | object | no | Per-field period a `founder_stated_inputs` figure was quoted per — `{"arpu": "month"}`; one of `year`, `quarter`, `month`, `week`. The math's `arpu` is annual, so `compose_report.py` multiplies the stated figure up before the fidelity comparison; a founder-stated $157/month against a computed $1,884 then agrees. An unrecognised value raises `FOUNDER_PERIOD_UNKNOWN` (medium) and the figure is compared as annual. |
 | `founder_stated_inputs_source` | object | no | Per-field source of a `founder_stated_inputs` figure: `"chat"` or `"document:<file>#page=<n>"`. Shown beside the figure in the report. |
 | `founder_stated_choice` | object | no | The founder's answer to the two-figures question, per field, in their words (`{"arpu": "<their answer>"}`). The report says "the one you chose" only when this is recorded; otherwise it says the founder was not asked which figure to use. |
-| `founder_stated_alternatives` | object | no | Other figures the founder stated for the same input, not used by the sizing: `{"arpu": [{"value", "period", "source", "label"}]}`. Recorded after the founder chose one (Steps 2–3); the report shows each under "Your Answers". Never compared by `FOUNDER_VALUE_OVERRIDDEN`. |
+| `founder_stated_alternatives` | object | no | Other figures the founder stated for one input, unused by the sizing: `{"arpu": [{"value", "period", "source", "label"}]}`. Recorded after the founder chose one (Steps 2–3); the report shows each under "Your Answers". Never compared by `FOUNDER_VALUE_OVERRIDDEN`. `label` is the page's own words (six or more); the page is named only when they are found on it, else "in your materials". A `"chat"` source is never shown. |
 | `founder_stated_inputs_currency` | string | no | ISO code the `founder_stated_inputs` money figures are in. Only consulted when a money input was FX-converted: without it the comparison against the converted figure would diverge by exactly the exchange rate, so `compose_report.py` reports `COMPARISON_CURRENCY_UNKNOWN` instead of a false `FOUNDER_VALUE_OVERRIDDEN`. Declare it whenever the founder's figures are not in `currency`. |
-| `existing_claims_currency` | string | no | ISO code the `existing_claims` figures are in — the deck's own currency, which is not always the analysis currency. Same rule as above: without it a converted run reports `COMPARISON_CURRENCY_UNKNOWN` rather than a false `DECK_CLAIM_MISMATCH`. |
-| `existing_claims_horizon_months` | object | no | `{tam, sam, som}` — the period each stated figure represents, in months (`null` when not stated or not time-bound). Only `som` is read today: a SOM stated as a plan-year run-rate is `12`, a "by 2028" figure is the months from `analysis_date`. Compared against `capture_horizon_months`; when they differ the report says so instead of computing a delta between two periods, which is what reported a plan case as a 5.6x understatement. |
+| `existing_claims_currency` | string | no | ISO code the `existing_claims` figures are in (the deck's own, not always the analysis currency). Same rule as above: without it a converted run reports `COMPARISON_CURRENCY_UNKNOWN` rather than a false `DECK_CLAIM_MISMATCH`. |
+| `existing_claims_horizon_months` | object | no | `{tam, sam, som}` — the period each stated figure represents, in months (`null` when not stated or not time-bound). Only `som` is read today: a SOM stated as a plan-year run-rate is `12`, a "by 2028" figure is the months from `analysis_date`. Compared against `capture_horizon_months`; when they differ the report says so instead of computing a delta between two periods. |
 | `capture_horizon_months` | integer | no | The period the computed SOM represents — what `share_pct` / `target_pct` describe, typically 36 or 60. Required for the horizon check to run; without it the comparison behaves exactly as before. |
 | `competitive_landscape_notes` | string \| null | no | Summary of any competitor/competitive-positioning content found in the deck (or `null` if the deck doesn't address competition). The CHECKLIST sub-agent never reads the deck itself — it scores `competitive_landscape_acknowledged` from this field only. |
 | `gtm_evidence_notes` | string \| null | no | Summary of any customer-acquisition strategy, sales-funnel metrics, or comparable-company benchmark found in the materials (or `null` if none found). The CHECKLIST sub-agent never reads the deck itself — it scores `som_backed_by_gtm` from this field only. Distinct from `projections_alignment_notes` below: this is customer-acquisition evidence, not financial-plan evidence, and one field cannot stand in for both. |
@@ -75,7 +77,7 @@ JSON schemas for all analysis artifacts deposited during the market sizing workf
 | `approach_chosen` | string | yes | One of: `"top_down"`, `"bottom_up"`, `"both"` |
 | `rationale` | string | yes | Why this approach was chosen |
 | `accepted_warnings` | object[] | no | Warning codes the analyst expects and accepts |
-| `red_team_revision` | object | no | The one founder-approved revision after the adversarial review (Step 6d): `{"approved_by_founder": true, "founder_words": "<their answer>", "changes": [{"field", "from", "to"}]}`. Without it a second review round raises `RED_TEAM_RERUN_UNAPPROVED` and the first review is shown; a founder-stated figure changed after the review and not listed in `changes` raises `FOUNDER_INPUT_REWRITTEN`. |
+| `red_team_revision` | object | no | `{"changes": [{"field", "reason"}]}`: why a figure changed in the one revision after the adversarial review (Step 6d). Read by nothing and printed nowhere, so a `label` never carries history. The reviews themselves record what changed; nothing here licenses anything. |
 | `founder_notes` | string[] | no | Founder answers given after the revision round was used; rendered under "Your Answers" instead of restated in chat. |
 | `gate_defaults` | string[] | no | Questions not asked because the founder asked not to be asked; the default (option 1) was taken. Rendered under "Your Answers". |
 | `red_team_skipped` | string | no | Why no adversarial review ran (Step 6c). One of exactly `founder_declined`, `dispatch_failed`, `no_network_available`, `no_subagent_dispatch` — a closed enum, because this value selects the sentence the founder reads and free text would be an un-reviewed founder-facing string. `compose_report.py` REFUSES to compose when there is neither a fresh `redteam.json` for this run nor a recognised value here; an unrecognised value is refused too. There is deliberately no value meaning "not necessary". |
@@ -143,18 +145,21 @@ JSON schemas for all analysis artifacts deposited during the market sizing workf
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `name` | string | yes | Parameter name — must match market_sizing.py / sensitivity.py parameter names for quantitative assumptions (see list below). Qualitative assumptions use descriptive names. |
+| `name` | string | yes | This figure's own name, unique in the record. A sizing input references it by this name (`{"assumption": "<name>"}`); the name implies nothing about what it measures. |
 | `label` | string | no | Human-readable display name. If omitted, falls back to title-cased `name`. |
-| `value` | any | yes | The assumed value |
-| `category` | string | yes | One of: `"sourced"` (cite the source), `"derived"` (show formula), `"agent_estimate"` (flagged as unsupported) |
+| `value` | any | yes | The figure as its source states it |
+| `unit` | string | for figures | What it measures: `money_total_per_year`, `money_per_customer`, `count`, `fraction` (0-1), `ratio`, `percent_points` (35 = 35%), `percent_change`, `years`, or `fx_rate`. A figure without one cannot be referenced by the sizing. |
+| `currency` | string | money units | ISO code the source states it in. A figure in another currency than the analysis converts through an `fx_rate` entry. |
+| `period` | string | `money_per_customer` | `month`, `quarter` or `year`. Never assumed; the calculator makes it annual. |
+| `from` / `to` / `as_of` | string | `fx_rate` | The rate converts one `from` into `to`, as quoted on `as_of`. Must be `sourced`; never inverted or estimated. |
+| `category` | string | yes | One of: `"sourced"` (cite the source: `source_title` / `source_url` naming a `sources[]` entry, or it grades as an estimate), `"derived"` (show formula), `"agent_estimate"` (flagged as unsupported) |
 | `source` | string | no | Citation for sourced assumptions |
 | `derivation` | string | no | Formula/logic for derived assumptions |
-| `factors` | object[] | no | For `derived` assumptions: **two or more multiplicands**, each `{"factor_id": "<snake_case>", "value": <number>, "source_id": "<a sources[] title or short slug, or company_stated / agent_estimate>"}`. Percent-point parameters (`segment_pct`, `serviceable_pct`, `share_pct`, `target_pct`) store the product ×100. `compose_report.py` recomputes it and raises `FACTOR_PRODUCT_MISMATCH` (medium) beyond 2%, and reports figures the two approaches share. An entry may carry `"role": "divisor"` to itemize a ratio instead of only a product — e.g. `{"factor_id": "target_segment", "value": 15000000, "source_id": "..."}, {"factor_id": "total_market", "value": 64200000, "source_id": "...", "role": "divisor"}` narrows to 15,000,000 ÷ 64,200,000, not a nonsensical product of the two. A single entry is the value under another name, not a chain, and reads as un-itemized. A sum is not a chain either: describe it in `label` and omit `factors`; the report will say the figure is not itemized, which is true. A derived assumption with no usable `factors` raises `UNSTRUCTURED_DERIVATION` (low), aggregated into one warning naming every such figure. |
+| `factors` | object[] | no | For `derived` assumptions: **two or more multiplicands**, each `{"factor_id": "<snake_case>", "value": <number>, "source_id": "<a sources[] title or short slug, or company_stated / agent_estimate>"}`. Percent-point parameters (`segment_pct`, `serviceable_pct`, `share_pct`, `target_pct`) store the product ×100. `compose_report.py` recomputes it and raises `FACTOR_PRODUCT_MISMATCH` (medium) beyond 2%, and reports figures the two approaches share. An entry may carry `"role": "divisor"` to itemize a ratio instead of only a product — e.g. `{"factor_id": "target_segment", "value": 15000000, "source_id": "..."}, {"factor_id": "total_market", "value": 52800000, "source_id": "...", "role": "divisor"}` narrows to 15,000,000 ÷ 52,800,000, not a nonsensical product of the two. A single entry is the value under another name, not a chain, and reads as un-itemized. A sum is not a chain either: describe it in `label` and omit `factors`; the report will say the figure is not itemized, which is true. A derived assumption with no usable `factors` raises `UNSTRUCTURED_DERIVATION` (low), aggregated into one warning naming every such figure. |
 
-**Quantitative parameter names** (must match exactly for UNSOURCED_ASSUMPTIONS check):
-`customer_count`, `arpu`, `serviceable_pct`, `target_pct`, `industry_total`, `segment_pct`, `share_pct`
-
-Qualitative assumptions (e.g., `market_growing`, `regulatory_favorable`) are exempt from the sensitivity cross-check.
+`factors` describes how a researched figure was assembled, for the founder to check. It does not feed
+the math: what feeds the math is the sizing's own references (see sizing.json). Qualitative assumptions
+(e.g., `market_growing`) carry no `unit` and are never referenced.
 
 **Example:**
 ```json
@@ -176,10 +181,10 @@ Qualitative assumptions (e.g., `market_growing`, `regulatory_favorable`) are exe
     {"figure": "customer_count", "label": "SMB Customer Count", "status": "unsupported", "source_count": 0, "notes": "No public data on SMB count"}
   ],
   "assumptions": [
-    {"name": "industry_total", "value": 50000000000, "category": "sourced", "source": "Grand View Research 2025"},
-    {"name": "segment_pct", "label": "SMB Segment Share", "value": 16, "category": "derived", "derivation": "SMB share of total market from BLS data",
+    {"name": "smb_accounting_market", "value": 50000000000, "unit": "money_total_per_year", "currency": "USD", "category": "sourced", "source_title": "Global SMB Accounting Software Market Report 2025"},
+    {"name": "smb_share", "label": "SMB Segment Share", "value": 16, "unit": "percent_points", "category": "derived", "derivation": "SMB share of total market from BLS data",
      "factors": [{"factor_id": "has_payroll", "value": 0.40, "source_id": "BLS 2024"}, {"factor_id": "uses_accounting_software", "value": 0.40, "source_id": "company_stated"}]},
-    {"name": "customer_count", "value": 4500000, "category": "agent_estimate"},
+    {"name": "smb_count", "value": 4500000, "unit": "count", "category": "agent_estimate"},
     {"name": "market_growing", "value": true, "category": "sourced", "source": "Grand View Research 2025"}
   ],
   "metadata": {"run_id": "20260115T120000Z"}
@@ -215,6 +220,18 @@ This is the direct output of `market_sizing.py`. Structure depends on approach u
 | `comparison` | approach is `"both"` | Top-down vs bottom-up comparison |
 | `fx` | only when a conversion happened | `{as_of, source, conversions: [{field, from, to, rate, original_value, converted_value}]}`. Present only when a money input declared a source currency differing from `currency` AND a rate was supplied. `converted_value` **is** the number the sizing math consumed, so `compose_report.py` can compare a founder-stated or deck-claimed figure across the conversion. Absent on every run that converted nothing — which is every run that does not opt in. |
 | `metadata` | when `--run-id` passed | `{"run_id": "<RUN_ID>"}` — stamped by the producer for `STALE_ARTIFACT` detection |
+| `provenance_version` | always (new runs) | `1`. A sizing without it predates inputs carrying their provenance. |
+| `input_refs` | reference path | The hand-off's reference for each input, as given. `--replay` re-resolves these. |
+| `input_provenance` | always (new runs) | Per input: `kind` (`assumption` / `founder_stated` / `derived` / `estimate`, or `not_checked` on the numeric path), `category`, `unit`, `value_as_recorded`, `normalisation` (period, fx, rounding steps), `value_consumed` (the number the math used), `source_title`/`source_url`, `entries` (the record entries it depends on), and for an estimate `why` and any `research_value`. |
+| `projection_inputs` | growth projection used | `{growth_rate, years}` |
+
+**Inputs by reference.** The sizing hand-off names each input's origin instead of carrying a number:
+`{"assumption": "<name>"}`, `{"founder_stated": "arpu"}`, `{"derived": {"op": "multiply"|"divide"|"to_percent"|"to_fraction", "factors": [...]}}`
+or `{"estimate": <n>, "unit": ..., "why": ...}`. `market_sizing.py --validation --inputs` resolves them, and
+refuses an input whose unit does not fit (`industry_total` money per year, `customer_count` a count,
+`arpu` money per customer, the `*_pct` inputs percentage points). A unit refusal of a directly
+referenced figure is kept in `handoff/<run_id>/unit_rejections.json`. On this path currency and rates
+come from the record; `--fx-rate` is refused.
 
 **Rejected runs.** `market_sizing.py` refuses an invalid input rather than writing a figure-less stub:
 the diagnostic goes to stdout, a line to stderr, `-o` is left untouched, and it exits non-zero. So a
@@ -250,45 +267,36 @@ Each contains `tam`, `sam`, `som` objects with:
 - `APPROACH_MISMATCH`: cross-checks with methodology.json `approach_chosen`
 - `TAM_DISCREPANCY`: `comparison.tam_delta_pct > 30`
 
-### Provenance (computed at render time)
+### Provenance (stamped by the producer, re-checked at render)
 
-Provenance is **not stored** in `sizing.json` — it is computed at render time by `compose_report.py` (persisted in output JSON) and `visualize.py` (used for chart rendering).
+`input_provenance` is written by `market_sizing.py`, the step that consumed the values. `compose_report.py`
+and `visualize.py` read it through `_view.py` and never join the research record to the sizing by name.
+Each figure is graded by the worst grade among its inputs (`agent_estimate` > `derived` > `sourced`; the
+founder's own figure counts as sourced; a `not_checked` input grades nothing). The deck comparison
+(`deck_claim`, `delta_vs_deck_pct`, ...) is in the same output block:
 
-**How it works:**
-1. Cross-references `validation.json` `assumptions[].category` with `sizing.json` figure `inputs`
-2. For each TAM/SAM/SOM figure, looks up which input parameters were used and their assumption categories
-3. Classifies the figure based on the "worst" category among its inputs:
-   - All inputs `sourced` → figure classified as `"sourced"`
-   - Any input `agent_estimate` → figure classified as `"agent_estimate"`
-   - Otherwise (mix of sourced+derived, or all derived) → `"derived"`
-   - No inputs found in assumption map → `"unknown"`
-4. Deck claims come from `inputs.json` `existing_claims`
-5. Delta vs deck is computed as `(calculated - claim) / claim * 100` (signed percentage)
-
-**Output structure** (in `compose_report.py` output JSON, top-level `provenance` key):
 ```json
-{
-  "provenance": {
-    "top_down": {
-      "tam": {
-        "classification": "sourced",
-        "confidence_breakdown": {"sourced": 2, "derived": 0, "agent_estimate": 0},
-        "deck_claim": 50000000000,
-        "delta_vs_deck_pct": 35.0,
-        "input_provenances": {"industry_total": "sourced", "segment_pct": "sourced"}
-      }
-    }
-  }
-}
+{"provenance": {"top_down": {"tam": {"classification": "derived",
+  "confidence_breakdown": {"sourced": 0, "derived": 1, "agent_estimate": 0},
+  "deck_claim": 50000000000, "delta_vs_deck_pct": 35.0,
+  "input_provenances": {"industry_total": "derived"}}}}}
 ```
 
-Only parameters in `QUANTITATIVE_PARAMS` are matched: `customer_count`, `arpu`, `serviceable_pct`, `target_pct`, `industry_total`, `segment_pct`, `share_pct`. Intermediate keys (like `tam`, `sam`, `serviceable_customers`, `target_customers`) in figure inputs are silently skipped.
+Before rendering, `_view.sizing_integrity` re-resolves `input_refs` against the current record and
+recomputes the figures with the calculator's own math: `SIZING_ALTERED` (the saved figures disagree;
+both pages render the recomputation), `SIZING_STALE` (the record moved, before any review),
+`RECORD_CHANGED_AFTER_REVIEW` (against the shown review's `inputs_reviewed`), `SIZING_UNRESOLVABLE`,
+`UNIT_CHANGED_AFTER_REJECTION`. A change between the first review and the shown one is
+`ANALYSIS_CHANGED_BETWEEN_REVIEWS` (medium, a disclosure).
+All high. A sizing without provenance, or with `not_checked` inputs, beside a real research record is
+`SIZING_NOT_CHECKED` (high); with a stub record and every input the founder's own, `INPUTS_USER_PROVIDED`
+(medium).
 
 ---
 
 ## redteam.json
 
-Written by `red_team.py` from the RED_TEAM sub-agent's hand-off (Step 6c). Optional artifact; when absent, `methodology.red_team_skipped` must say why. `red_team.py` also writes an append-only copy per round, `handoff/<run_id>/redteam.r<N>.json` (the review plus `_review_copy: {round, handoff_sha256, inputs_at_review}`); compose and visualize render the review from that copy, so an edit to `redteam.json` changes nothing the founder reads and raises `REDTEAM_ALTERED`.
+Written by `red_team.py` from the RED_TEAM sub-agent's hand-off (Step 6c). Optional artifact; when absent, `methodology.red_team_skipped` must say why. It carries `inputs_reviewed` (each sizing input's reference, consumed value and record entries, plus the quantitative record as it stood), written once per round; editing it is an edit of the review. `red_team.py` also writes an append-only copy per round, `handoff/<run_id>/redteam.r<N>.json` (the review plus `_review_copy: {round, handoff_sha256, inputs_at_review}`); compose and visualize render the review from that copy, so an edit to `redteam.json` changes nothing the founder reads and raises `REDTEAM_ALTERED`.
 
 | Field | Type | Notes |
 |---|---|---|
@@ -321,6 +329,13 @@ Direct output of `sensitivity.py` with confidence extensions.
 ```
 
 **`ranges` must be an object (dict), not an array.** Keys are parameter names, values are `{low_pct, high_pct, confidence}`.
+
+With `--sizing sizing.json` (the skill's path), `base` is optional: base values and grade tiers come
+from the sizing's `input_provenance`, a disagreeing hand-off `base` is ignored (recorded in
+`base_ignored`, with `base_source: "sizing"`), and the output carries
+`graded_against: {"sizing.json": <fingerprint>}`. compose raises `SENSITIVITY_STALE` (high) when that
+is not the sizing the report shows, or is missing. `checklist.py --sizing` stamps the same, and a
+mismatch there is `CHECKLIST_STALE` (medium).
 
 ### Output format
 

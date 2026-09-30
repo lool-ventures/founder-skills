@@ -2119,6 +2119,8 @@ def test_compose_severity_map_complete() -> None:
         "PARTNER_CAPITULATION",
         "UNDEBATED_DEALBREAKER",
         "DEALBREAKER_PROVENANCE_UNVERIFIABLE",
+        # A step whose output reached its producer without passing the hand-off gate.
+        "HANDOFF_BYPASSED",
     ]
     assert len(sev_map) == len(expected), (
         f"expected {len(expected)} codes, got {len(sev_map)}: {sorted(sev_map.keys())}"
@@ -5009,3 +5011,99 @@ def test_compose_flags_an_invalid_score_dimensions_at_high_severity() -> None:
     hits = [w for w in data["validation"]["warnings"] if w["code"] == "ARTIFACT_INVALID"]
     assert hits, "a rejected producer artifact must raise ARTIFACT_INVALID"
     assert hits[0]["severity"] == "high", "must not be acceptable-away"
+
+
+# ---------------------------------------------------------------------------
+# HANDOFF_BYPASSED: a step whose output reached its producer without passing check_handoff.py.
+# The map is per archetype and per round, built from the files present.
+# ---------------------------------------------------------------------------
+
+_CHECK_HANDOFF = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "scripts", "check_handoff.py")
+_IC_RUN = "run-ic-bypass"
+_PARTNER_STEPS = [f"partner_{a}_output.json" for a in ("visionary", "operator", "analyst")]
+_REBUTTAL_STEPS = [f"partner_rebuttal_{a}_output.json" for a in ("visionary", "operator", "analyst")]
+
+
+def _ic_bypass_dir(fund_mode: str = "fund_specific", rebuttals: bool = True) -> str:
+    arts: dict[str, dict[str, Any]] = {
+        name: {**data, "metadata": {"run_id": _IC_RUN}} for name, data in _all_required_artifacts().items()
+    }
+    fund: dict[str, Any] = dict(arts["fund_profile.json"])
+    fund["mode"] = fund_mode
+    arts["fund_profile.json"] = fund
+    for archetype, data in (
+        ("visionary", _VALID_PARTNER_VISIONARY),
+        ("operator", _VALID_PARTNER_OPERATOR),
+        ("analyst", _VALID_PARTNER_ANALYST),
+    ):
+        arts[f"partner_assessment_{archetype}.json"] = data
+    if rebuttals:
+        for archetype, rebuttal in (
+            ("visionary", _VALID_REBUTTAL_VISIONARY),
+            ("operator", _VALID_REBUTTAL_OPERATOR),
+            ("analyst", _VALID_REBUTTAL_ANALYST),
+        ):
+            arts[f"partner_rebuttal_{archetype}.json"] = rebuttal
+    d = _make_artifact_dir(arts)
+    os.makedirs(os.path.join(d, "handoff", _IC_RUN))  # Step 0 creates it in every real run
+    return d
+
+
+def _ic_seed_gated(d: str, stems: list[str]) -> None:
+    for stem in stems:
+        path = os.path.join(d, "handoff", _IC_RUN, stem)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write('{"from": "the sub-agent"}')
+        result = subprocess.run([sys.executable, _CHECK_HANDOFF, path], capture_output=True, text=True)
+        assert result.returncode == 0, result.stdout
+
+
+def _ic_bypass(d: str) -> str | None:
+    rc, data, err = _run_compose(d)
+    assert data is not None, err
+    hits = [w for w in data["validation"]["warnings"] if w["code"] == "HANDOFF_BYPASSED"]
+    assert len(hits) <= 1, hits
+    if hits:
+        assert hits[0]["severity"] == "medium" and ".json" not in hits[0]["message"]
+    return hits[0]["message"] if hits else None
+
+
+def test_handoff_bypass_names_each_ungated_partner_step_and_a_fully_gated_run_is_silent() -> None:
+    d = _ic_bypass_dir()
+    msg = _ic_bypass(d)  # lever engaged: every step named, per archetype and round
+    assert msg is not None
+    for label in ("portfolio conflict check", "operator partner's assessment", "analyst partner's rebuttal", "scoring"):
+        assert label in msg, (label, msg)
+    _ic_seed_gated(d, ["detect_conflicts_output.json", "score_dimensions_output.json", *_PARTNER_STEPS])
+    _ic_seed_gated(d, [s for s in _REBUTTAL_STEPS if "operator" not in s])
+    msg = _ic_bypass(d)
+    assert msg is not None and "operator partner's rebuttal" in msg and "assessment" not in msg
+    _ic_seed_gated(d, ["partner_rebuttal_operator_output.json"])
+    assert _ic_bypass(d) is None
+
+
+def test_handoff_bypass_follows_the_files_present_and_the_fund_mode() -> None:
+    """Dynamic map: a generic fund's conflict check is a stub the producer writes itself, and a run
+    whose rebuttal round has not produced files is not asked for rebuttal hand-offs."""
+    d = _ic_bypass_dir(fund_mode="generic", rebuttals=False)
+    msg = _ic_bypass(d)
+    assert msg is not None and "conflict check" not in msg and "rebuttal" not in msg
+    _ic_seed_gated(d, ["score_dimensions_output.json", *_PARTNER_STEPS])
+    assert _ic_bypass(d) is None
+
+
+def test_handoff_bypass_is_silent_without_a_handoff_dir() -> None:
+    d = _ic_bypass_dir()
+    os.rmdir(os.path.join(d, "handoff", _IC_RUN))
+    assert _ic_bypass(d) is None
+
+
+def test_handoff_bypass_cannot_be_accepted_away() -> None:
+    d = _ic_bypass_dir()
+    fund_path = os.path.join(d, "fund_profile.json")
+    with open(fund_path, encoding="utf-8") as f:
+        fund = json.load(f)
+    fund["accepted_warnings"] = [{"code": "HANDOFF_BYPASSED", "match": "results", "reason": "x"}]
+    with open(fund_path, "w", encoding="utf-8") as f:
+        json.dump(fund, f)
+    assert _ic_bypass(d) is not None  # still medium, not acknowledged

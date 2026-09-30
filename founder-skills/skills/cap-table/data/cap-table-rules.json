@@ -1,6 +1,6 @@
 {
   "metadata": {
-    "version": "0.4.9",
+    "version": "0.4.10",
     "generated_date": "2026-05-21",
     "purpose": "Verified source-backed rule pack for the cap-table skill: SAFE conversion, convertible-note math, option-pool top-up, anti-dilution (including coupled-AD priced-round variants), Israeli equity-tax + AoA gotchas, Delaware cross-border / flip mechanics, and founder benchmarks. Every rule cites a primary or near-primary source (NVCA Model Certificate of Incorporation, Y Combinator SAFE primer / documents, Cooley GO down-round article, Israeli Companies Law / Income Tax Ordinance, Carta benchmarks, etc.). Version history lives in CHANGELOG.md.",
     "source_policy": "Rules cite original quotable legal documents, issuer documents, official agency pages, law-firm publications, and benchmark datasets. AI research notes and intermediate consolidated files are excluded from final references."
@@ -309,6 +309,16 @@
       "publication_date": "2025",
       "accessed_date": "2026-05-18",
       "notes": "Israel pre-seed benchmark source."
+    },
+    {
+      "source_id": "REGENTIS-SPA-SERIES-B",
+      "title": "Series B Preferred Share Purchase Agreement (filed as Exhibit 10.2 to Form F-1)",
+      "publisher": "Regentis Biomaterials Ltd. (SEC EDGAR)",
+      "url": "https://www.sec.gov/Archives/edgar/data/1912966/000121390022069365/ea167101ex10-2_regentisbio.htm",
+      "source_type": "primary",
+      "publication_date": "2022",
+      "accessed_date": "2026-09-28",
+      "notes": "Issuer document that sizes an option-pool INCREASE, not the resulting pool: the additional reserved shares alone constitute the stated percentage of the share capital on a Fully Diluted Basis immediately following the closing. It shows the convention exists in a real financing; that company's pre-existing unallocated pool was about zero, so it does not show the two readings diverging economically in that deal."
     }
   ],
   "domains": {
@@ -1091,6 +1101,7 @@
             "allowed_values": [
               "pre_money",
               "post_money",
+              "post_money_increase",
               "post_money_excluding_converting_securities",
               "custom"
             ]
@@ -1113,7 +1124,8 @@
         "formula": [
           "required_pool_topup_shares = max(0, solved_x)",
           "For post-money target: (existing_unallocated_pool + x) / (pre_topup_fully_diluted_shares + x + new_money_shares) = target_pool_percent",
-          "For pre-money target: (existing_unallocated_pool + x) / (pre_topup_fully_diluted_shares + x) = target_pool_percent"
+          "For pre-money target: (existing_unallocated_pool + x) / (pre_topup_fully_diluted_shares + x) = target_pool_percent",
+          "For an increase-sized post-money target: x / (pre_topup_fully_diluted_shares + x + new_money_shares) = target_pool_percent (the existing unallocated pool is not credited against the target)"
         ],
         "rounding_policy": "Solve using decimal precision; round pool share authorization to whole shares using corporate-document requirements.",
         "parameterization_points": [
@@ -1123,7 +1135,31 @@
           "authorized versus reserved versus available pool distinction"
         ],
         "warnings": [
-          "Warn when a term sheet labels the pool as post-closing but shifts the economics into pre-money pricing."
+          "Warn when a term sheet labels the pool as post-closing but shifts the economics into pre-money pricing.",
+          "post_money_excluding_converting_securities has no sourced definition as a pool denominator: NVCA's model term sheet and the cited Cooley source size the pool on fully-diluted post-money capitalization including conversions. The model refuses it when SAFEs or notes convert, unless the founder chooses the plain post-money reading, which is then disclosed.",
+          "custom is defined by the transaction documents, so the model does not compute it; it is refused unless the founder states which computed measure the document matches, which is then disclosed."
+        ]
+      },
+      {
+        "rule_id": "option_pool.increase_sized_target",
+        "domain": "option_pool",
+        "behavior_target": "warning_rule",
+        "title": "Increase-sized option pool target",
+        "summary": "Some financing documents size the option pool INCREASE as a percentage of post-closing fully-diluted capital, rather than the resulting pool. The two readings of the same percentage differ by the existing unallocated pool's post-closing share. The increase reading does not credit the existing pool against the target.",
+        "implementation_action": "warn",
+        "confidence": "medium",
+        "source_ids": [
+          "REGENTIS-SPA-SERIES-B"
+        ],
+        "source_basis": "primary",
+        "counsel_review": true,
+        "jurisdiction": "Document-specific",
+        "applies_when": "Use when a scenario sizes the option pool as an increase: the percentage is predicated of the additional shares, not of the total or available pool.",
+        "formula": [
+          "x / (pre_topup_fully_diluted_shares + x + new_money_shares) = target_pool_percent"
+        ],
+        "warnings": [
+          "Confirm with counsel that the document sizes the increase and not the resulting or available pool: the wording decides, and it is document-specific."
         ]
       },
       {

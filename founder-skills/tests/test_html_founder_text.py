@@ -17,8 +17,16 @@ SCOPE, stated so a green is not over-read:
     from a provenance map keyed by field name (`evidence_source.description == "agent_estimate"` is
     not a label), and produced a false positive on the first page it examined. What covers that
     surface today is the Cowork UI gate, i.e. a human reading the rendered page.
-  * Unlike `report.md`, HTML output is not run through `substitute()`. This asserts that our PRODUCERS
-    emit no internal token; it cannot rewrite one a sub-agent authors into free text.
+  * HTML output is not run through `substitute()` as a whole document, the way `report.md` is. This
+    asserts that our PRODUCERS emit no internal token; it cannot rewrite one a sub-agent authors into
+    free text.
+  * CORRECTED: this file used to say an authored token "reaches `report.html` exactly as it reaches the
+    markdown". That has not been true since compose began substituting the whole markdown document: the
+    markdown was repaired and the HTML was not, so the two delivered pages read the SAME sentence two
+    ways, which is worse than both being wrong and is a shape this scan cannot see. Where a string is
+    shared, the repair now belongs at the one owner both renderers read it from (`_view._founder_prose`
+    on the assumption rows). Strings only the HTML renders still bypass the policy -- the red team's
+    `what_is_true` through `checked_multiples`, and the checklist notes.
 """
 
 from __future__ import annotations
@@ -342,3 +350,111 @@ def test_a_disabled_lens_explains_itself_without_naming_an_artifact() -> None:
         "act on a filename — say which analysis is missing, not which file."
     )
     assert found["enums"] == [], found["enums"]
+
+
+# A review written the way a reviewer slips: a competitor's slug, our file names and our field names in
+# the three fields printed to the founder word for word. The competitive-positioning fixture carries no
+# review, so without this seed the fleet scans above pass over "What an Outside Review Found" having
+# rendered nothing into it -- the counsel-packet precedent in test_compose_invariants.py.
+_CP_SEEDED_FINDINGS: list[dict[str, str]] = [
+    {
+        "claim_attacked": "The rating of quickbooks-online on switching_costs in moat_scores.json",
+        "what_is_true": "pilot-com publishes a migration guide, so the placement in positioning_scores.json "
+        "overstates lock-in; see landscape.json",
+        "evidence_quote": "Most customers complete their migration within two weeks of signing up",
+        "source_url": "https://example.com/migration",
+        "source_title": "Help centre",
+        "severity": "high",
+    },
+    {
+        "claim_attacked": "The differentiation claim in product_profile.json",
+        "what_is_true": "manual-spreadsheets remains the default for most small firms per checklist.json",
+        "evidence_quote": "Most small firms still reconcile their books in a spreadsheet every month",
+        "source_url": "https://example.com/survey",
+        "source_title": "Survey",
+        "severity": "low",
+    },
+]
+_CP_SEEDED_UNCHECKED = ["The quickbooks-online rating on network_effects, because the directory needs a login"]
+
+
+def test_the_outside_review_section_carries_no_internal_tokens_on_either_page() -> None:
+    import json as _json
+    import sys as _sys
+
+    ft = _founder_text()
+    scripts = REPO_ROOT / "founder-skills" / "skills" / "competitive-positioning" / "scripts"
+    raw = " ".join(
+        [f[k] for f in _CP_SEEDED_FINDINGS for k in ("claim_attacked", "what_is_true")] + _CP_SEEDED_UNCHECKED
+    )
+    seeded = ft.scan(raw)
+    assert seeded["filenames"] and seeded["enums"], (
+        f"the seed no longer carries the tokens it exists to push through the renderers: {seeded}"
+    )
+    with tempfile.TemporaryDirectory() as td:
+        work = Path(td) / "analysis"
+        work.mkdir()
+        for src in (FIXTURES / "competitive-positioning").glob("*.json"):
+            (work / src.name).write_bytes(src.read_bytes())
+        run_id = _json.loads((work / "landscape.json").read_text(encoding="utf-8"))["metadata"]["run_id"]
+        docs = Path(td) / "docs"
+        docs.mkdir()
+        piped = subprocess.run(
+            [
+                _sys.executable,
+                str(scripts / "cp_red_team.py"),
+                "--run-id",
+                run_id,
+                "--uploads-dir",
+                str(docs),
+                "-o",
+                str(work / "redteam.json"),
+            ],
+            input=_json.dumps(
+                {
+                    "findings": _CP_SEEDED_FINDINGS,
+                    "could_not_check": _CP_SEEDED_UNCHECKED,
+                    "sources_read": [],
+                    "metadata": {"run_id": run_id},
+                }
+            ),
+            capture_output=True,
+            text=True,
+        )
+        assert piped.returncode == 0, piped.stderr[-400:]
+        assert _json.loads(piped.stdout)["accepted"] == 2, piped.stdout
+        composed = subprocess.run(
+            [
+                _sys.executable,
+                str(scripts / "compose_report.py"),
+                "--dir",
+                str(work),
+                "-o",
+                str(work / "report.json"),
+                "--write-md",
+                str(work / "report.md"),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        assert composed.returncode == 0, composed.stderr[-400:]
+        md = (work / "report.md").read_text(encoding="utf-8")
+        page = subprocess.run(
+            [_sys.executable, str(scripts / "visualize.py"), "--dir", str(work)],
+            capture_output=True,
+            text=True,
+        )
+        assert page.returncode == 0, page.stderr[-400:]
+
+    heading = "What an Outside Review Found"
+    md_section = md[md.index(heading) :]
+    md_section = md_section[: md_section.find("\n## ", 1)]
+    text = _text_nodes(page.stdout)
+    html_section = text[text.index(heading) :][:4000]
+    for name, section in (("report.md", md_section), ("report.html", html_section)):
+        # Non-vacuity: the seeded findings reached the section, rather than a "no review" sentence.
+        assert "Most customers complete their migration" in section, f"{name} did not render the seed"
+        found = ft.scan(section)
+        assert found == {"enums": [], "filenames": []}, (
+            f"{name}'s outside-review section reaches the founder with internal tokens: {found}"
+        )

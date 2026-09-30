@@ -51,9 +51,29 @@ DIAGNOSTIC_CODES: frozenset[str] = frozenset(
 )
 
 
+# A minted id carrying a SUFFIX. The producers mint ids as `<word>_<n:02d>` or `<word>_<n:03d>` --
+# `safe_001`, `note_002`, `warrant_007`, `founder_001`, `common_001`, `sweep_01` -- so the digit run is
+# two or three wide and NEVER four. That width is the whole discriminator: it is what separates a minted
+# id from a year, and it is why this keys on the run's LENGTH rather than on the looser "a digit run
+# follows a word". Written the loose way this also protects `fy_2025_plan`, a descriptive name whose
+# repair is the entire point of allowing numeric segments. Bound worth knowing: an id past 999 would
+# print four digits and be humanized; nothing in the fleet mints that many.
+_SUFFIXED_ID_RE = re.compile(r"[a-z][a-z0-9]*_\d{2,3}(?:_[a-z0-9]+)+")
+
+# A version written with underscores. The dotted forms (`v0.13.0`, `3.10.0`) were never candidates --
+# `_CANDIDATE_RE` needs an underscore and stops at a dot -- but this one becomes one the moment a numeric
+# segment is allowed.
+_UNDERSCORE_VERSION_RE = re.compile(r"v\d+(?:_\d+)+")
+
+
 def is_verbatim_token(token: str) -> bool:
     """True when the token must reach the founder unchanged (types 3 and 4)."""
-    return bool(_IDENTIFIER_RE.fullmatch(token)) or token in DIAGNOSTIC_CODES
+    return (
+        bool(_IDENTIFIER_RE.fullmatch(token))
+        or bool(_SUFFIXED_ID_RE.fullmatch(token))
+        or bool(_UNDERSCORE_VERSION_RE.fullmatch(token))
+        or token in DIAGNOSTIC_CODES
+    )
 
 
 # Keys whose VALUES are identifiers by contract. Used by `identifier_values` below.
@@ -206,7 +226,31 @@ def humanize_token(token: str, *, capitalize: bool = True) -> str:
 # The detector — for the compose-side scan (P6)
 # ---------------------------------------------------------------------------
 
-# A token shaped like our vocabulary: lowercase, at least one underscore, no digits-only tail.
+# A token shaped like our vocabulary: lowercase-initial, at least one underscore. A segment after an
+# underscore MAY begin with a digit.
+#
+# It used to require every segment to begin with a letter, which made a token carrying a numeric segment
+# invisible -- not mis-handled, never a candidate. MEASURED on delivered pages: 49 occurrences across 37
+# distinct tokens, every one inside sub-agent-authored prose (an estimate's `why`, or a record label),
+# reaching founders raw while every detector reported clean. Note the blind spot was in DETECTION only:
+# `humanize_token` rendered these correctly all along, so a caller that already knows its key never
+# needed the widening -- only free prose did.
+#
+# The token must still begin with a LETTER. Allowing a digit-led token as well was measured and rejected:
+# it rewrites an underscore-written date (`2026_09_27` -> "2026 09 27"), which the letter-initial form
+# leaves alone. The cost of the narrower choice is that a digit-led name is still not repaired.
+#
+# Widening detection alone would have broken tokens that were safe only because the pattern could not
+# reach them -- suffixed minted ids and an underscore version string -- so `is_verbatim_token` widened in
+# the same change. A SECOND cost, fail-safe rather than founder-visible: a descriptive name whose number
+# happens to be two or three digits wide (`top_50_accounts`) now reads as an id shape and is left
+# verbatim. A missed repair, not a mangled identifier.
+#
+# COVERAGE, so a green suite is not over-read: live-prose evidence exists for market-sizing (41 delivered
+# pages) and competitive-positioning (6 pages, zero instances). Four skills have no kept delivered pages,
+# so their behaviour here is inferred from token shape, not measured. Fixture-rendered pages for all six
+# skills carry zero instances, which measures our PRODUCERS -- clean fleet-wide -- and not sub-agent
+# prose, which is where the class actually occurs.
 #
 # The lookarounds exclude a DOT-NAMESPACED identifier, and they are load-bearing: cap-table's rule ids
 # are dotted (`safe.post_money_cap_conversion`) and are deliberately kept verbatim because counsel
@@ -223,7 +267,7 @@ def humanize_token(token: str, *, capitalize: bool = True) -> str:
 # Why not the simpler `(?![\w.])` trailing guard: that also excludes a SENTENCE-FINAL token
 # (`… is switching_costs.`), a real miss. Namespacing is specifically a dot ADJACENT TO a word char,
 # so `(?!\.\w)` excludes `foo_bar.baz` while still matching a token that merely ends a sentence.
-_CANDIDATE_RE = re.compile(r"(?<![\w.])[a-z][a-z0-9]*(?:_[a-z][a-z0-9]*)+(?!\w)(?!\.\w)")
+_CANDIDATE_RE = re.compile(r"(?<![\w.])[a-z][a-z0-9]*(?:_[a-z0-9]+)+(?!\w)(?!\.\w)")
 
 # File-shaped tokens. Used to strip filenames before enum matching so `model_data.json` is not also
 # reported as the enum `model_data`.
@@ -269,6 +313,18 @@ _SHOUTING_RE = re.compile(r"(?<![\w.])[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+(?!\w)(?!\.\w
 # `NARR_01` shape: an id, not a phrase. Humanizing it yields "NARR 01", which is no better for a
 # founder — the fix belongs at the source (render the criterion's label). Reported, never rewritten.
 _SHOUTING_ID_RE = re.compile(r"^[A-Z]+_\d+$")
+
+
+# The coaching step's insertion point, `<!-- COACHING_INSERTION_POINT_<8 hex> -->`, written by every
+# compose and replaced by `insert_coaching.py`. It is an HTML comment, so a founder never sees it; but
+# its suffix is random hex, and when all eight are digits (about one run in forty-three) the token
+# matches the ALLCAPS rule and was reported as a leak. The exemption is the whole comment, never the
+# word: the same token in prose is still reported.
+_INSERTION_MARKER_RE = re.compile(
+    r"<!--\s*COACHING_INSERTION_POINT_[0-9A-Za-z]+\s*-->"
+    # Its companion on cap-table: the check-record declaration beside the marker, removed by the same insert.
+    r"|<!--\s*COACHING_REQUIRES_CHECK_RECORD run_id=\S+\s*-->"
+)
 
 
 def _is_shouting_token(token: str) -> bool:
@@ -389,6 +445,7 @@ def scan(
     not survive the fleet's differing report dialects (`**Label**: value` and others).
     """
     keep = (extra_keep or frozenset()) | DIAGNOSTIC_CODES
+    text = _INSERTION_MARKER_RE.sub(" ", text)
     # A code span is the author marking a literal. `substitute` (below) leaves those alone under the
     # same flag, so reporting them here would warn about text the policy deliberately preserved.
     if protect_code_spans:

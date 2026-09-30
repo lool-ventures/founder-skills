@@ -176,9 +176,14 @@ WARNING_SEVERITY: dict[str, str] = {
     # deliverable, not a presentation nit.
     "SLIDE_REVIEW_MISSING": "high",
     "SLIDE_REVIEW_DUPLICATE": "medium",
+    # A step whose results reached the report without passing the hand-off gate (see
+    # `_handoff_bypassed`). Medium: the results are valid and must not block. In
+    # _UNACCEPTABLE_MEDIUM: a disclosure about the run that model-written accepted_warnings cannot clear.
+    "HANDOFF_BYPASSED": "medium",
 }
 
 ACCEPTIBLE_SEVERITIES = {"medium"}
+_UNACCEPTABLE_MEDIUM = {"HANDOFF_BYPASSED"}
 
 # Human-readable warning code labels
 WARNING_LABELS: dict[str, str] = {
@@ -206,6 +211,7 @@ WARNING_LABELS: dict[str, str] = {
     "DUPLICATE_SLIDE_NUMBER": "Duplicate Slide Number",
     "SLIDE_REVIEW_MISSING": "Slides Not Reviewed",
     "SLIDE_REVIEW_DUPLICATE": "Slide Reviewed More Than Once",
+    "HANDOFF_BYPASSED": "Some Steps Were Not Checked",
 }
 
 
@@ -292,6 +298,71 @@ def _as_dict(value: Any) -> dict[str, Any]:
 def _md_safe(text: Any) -> str:
     """Escape text for safe markdown table cell interpolation."""
     return str(text).replace("|", "\\|").replace("\n", " ")
+
+
+def _handoff_audit() -> Any:
+    """The fleet's shared gate-record check from `founder-skills/scripts/` (same loading as
+    `_founder_text_policy`). None if unavailable: a missing module must never block a report."""
+    try:
+        shared = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "scripts"))
+        if shared not in sys.path:
+            sys.path.insert(0, shared)
+        import _handoff_audit  # type: ignore[import-not-found]
+
+        return _handoff_audit
+    except ImportError:
+        return None
+
+
+def _handoff_bypassed(dir_path: str, artifacts: dict[str, Any]) -> list[str]:
+    """Which sub-agent steps this report's artifacts came from have no gated hand-off in this run.
+
+    Built from the artifacts actually present, never from what SKILL.md says should run: each artifact a
+    sub-agent's hand-off is piped into means that step ran. The numeric chain is optional, so its steps
+    are required only when their artifacts exist; the interpretation pass only when the reconciliation
+    records that it was applied.
+
+    Silent when `handoff/<run_id>/` does not exist: every real run creates it at Step 0, so its absence
+    means this is not a run whose transport can be judged, not that nothing was bypassed.
+
+    RESIDUAL: a pass proves a gated hand-off exists and still matches its record -- not that the
+    producer consumed it. A step gated once and then degraded on a re-dispatch passes. See
+    `_handoff_audit.py`.
+    """
+    audit = _handoff_audit()
+    if audit is None:
+        return []
+    run_id = next(
+        (
+            rid
+            for name in REQUIRED_ARTIFACTS
+            if isinstance(artifacts.get(name), dict)
+            and isinstance(rid := _as_dict(artifacts[name].get("metadata")).get("run_id"), str)
+            and rid
+        ),
+        None,
+    )
+    if not run_id:
+        return []
+    run_dir = os.path.join(dir_path, "handoff", run_id)
+    if not os.path.isdir(run_dir):
+        return []
+    requirements: list[tuple[str, list[str]]] = []
+    if isinstance(artifacts.get("slide_reviews.json"), dict):
+        requirements.append(("the slide-by-slide review", ["slide_reviews_output.json"]))
+    if isinstance(artifacts.get("checklist.json"), dict):
+        requirements.append(("the scored checklist", ["checklist_output.json"]))
+    if isinstance(artifacts.get("ledger.json"), dict):
+        requirements.append(("the reading of the deck's figures", ["ledger_output.json"]))
+    if os.path.isfile(os.path.join(dir_path, "second_read.json")):
+        requirements.append(("the second reading of the deck's figures", ["second_read_output.json"]))
+    reconciliation = artifacts.get("reconciliation.json")
+    if isinstance(reconciliation, dict) and isinstance(artifacts.get("ledger.json"), dict):
+        requirements.append(("the check of how the deck's figures relate", ["relations_output.json"]))
+        if _as_dict(reconciliation.get("interpretation")).get("status") == "applied":
+            requirements.append(("the review of the figures that disagree", ["interpretation_output.json"]))
+    labels: list[str] = audit.bypassed(run_dir, requirements)
+    return labels
 
 
 def _founder_text_policy() -> Any:
@@ -639,7 +710,7 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
                 _warn(
                     "UNSUBSTANTIATED_AI_CLAIM",
                     (
-                        "Deck positions as AI but shows no AI-core evidence (ai_claimed_unverified) "
+                        "Deck positions as AI but shows no AI-core evidence "
                         "— substantiate the AI claim or reframe; investors will probe it."
                     ),
                 )
@@ -1624,6 +1695,10 @@ def compose(
 
     # Run validation
     warnings = validate_artifacts(artifacts)
+    _bypassed_steps = _handoff_bypassed(dir_path, artifacts)
+    if _bypassed_steps:
+        _ha = _handoff_audit()
+        warnings.append(_warn("HANDOFF_BYPASSED", _ha.founder_message(_bypassed_steps)))
 
     # RUN-ID PARITY ON THE GATE RECORD. A gate_state.json left by a prior run says nothing
     # about this one, and reading its source either way asserts something unfounded: disclose
@@ -1728,7 +1803,13 @@ def compose(
             if not isinstance(reason, str) or not reason.strip():
                 print(f"Warning: accepted_warnings entry for '{code}' missing 'reason' — skipped", file=sys.stderr)
                 continue
-            if code in WARNING_SEVERITY and WARNING_SEVERITY[code] in ACCEPTIBLE_SEVERITIES:
+            if code in _UNACCEPTABLE_MEDIUM:
+                print(
+                    f"Warning: cannot accept '{code}' -- it discloses how this run was carried out and "
+                    "stays in the report; ignored",
+                    file=sys.stderr,
+                )
+            elif code in WARNING_SEVERITY and WARNING_SEVERITY[code] in ACCEPTIBLE_SEVERITIES:
                 acceptances.append(
                     {
                         "code": code,
@@ -1843,19 +1924,8 @@ def compose(
         # Our own warning codes are kept: compose renders them in small print beside a humanized
         # label (the md_term convention), which is deliberate. A code leaking anywhere else is
         # caught by the skill's own gate, not by widening this scan into a false positive.
-        # SCAN WHAT A FOUNDER WILL READ, not the transient scaffold. `marker` is compose's own
-        # coaching insertion point, written here and replaced by insert_coaching.py one step
-        # later -- the delivered report.md contains none. Scanning it made the pipeline report
-        # its own marker as a leaked internal token, and NONDETERMINISTICALLY: the suffix is
-        # `uuid4().hex[:8]` and the enum rule matches ALLCAPS-with-underscore, so it fired only
-        # when the random hex happened to be all digits, about one run in forty-three. A
-        # spurious FOUNDER_TEXT_TOKEN is worse than no warning, because this class exists to
-        # catch real leaks and readers learn to discount it.
-        #
-        # This does NOT weaken the check for a STRAY marker: the guard above already refuses a
-        # second `COACHING_INSERTION_POINT_` anywhere in the body, using this same
-        # remove-the-known-one idiom.
-        _found = _ft.scan(report_markdown.replace(marker, ""), extra_keep=frozenset(WARNING_SEVERITY))
+        # The coaching insertion marker is exempted by the shared scanner, for every skill at once.
+        _found = _ft.scan(report_markdown, extra_keep=frozenset(WARNING_SEVERITY))
         for _tok in _found["enums"]:
             warnings.append(
                 _warn(

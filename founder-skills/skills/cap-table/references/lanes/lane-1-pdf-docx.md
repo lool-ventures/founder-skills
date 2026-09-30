@@ -8,7 +8,7 @@ The main thread reads the source document via the `Read` tool (native PDF suppor
 
 ## Dispatch Context A — `INSTRUMENT_EXTRACTION`
 
-Dispatch with the `Task` tool. `OUTPUT_PATH` is the relative `$HANDOFF_AGENT` namespace — never an absolute `/sessions/...` path (the host-loop path gate denies a file-tool write there). Copy the invocation below **whole** — the `subagent_type` is part of it:
+Dispatch with the `Task` tool. `OUTPUT_PATH` is the absolute `$HANDOFF_AGENT` file-tool path proven at Step 0 — never a relative path and never a `/sessions/...` path (the host-loop path gate denies a file-tool write there). Copy the invocation below **whole** — the `subagent_type` is part of it:
 
 ```
 Task(

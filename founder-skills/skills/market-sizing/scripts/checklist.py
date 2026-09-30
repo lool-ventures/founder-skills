@@ -16,6 +16,12 @@ Usage:
         | python checklist.py --pretty
 
 Output: JSON with validated items and summary.
+
+Optional ``--sizing PATH``: a v1-stamped ``sizing.json`` (``provenance_version == 1`` with a dict
+``input_provenance``). When given and valid, the output is stamped ``graded_against`` with the
+sizing's fingerprint (``_provenance.sizing_fingerprint``), so a checklist run against a since-changed
+sizing is detectable downstream. A ``--sizing`` path that is unreadable or not v1-stamped fails
+loudly (``E_SIZING_NOT_STAMPED: ...``) rather than silently omitting the stamp.
 """
 
 from __future__ import annotations
@@ -27,6 +33,7 @@ import sys
 from typing import Any, NoReturn
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _provenance  # noqa: E402
 import _thresholds  # noqa: E402
 
 
@@ -227,6 +234,13 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--pretty", action="store_true", help="Pretty-print JSON")
     p.add_argument("-o", "--output", help="Write JSON to file instead of stdout")
     p.add_argument("--run-id", help="Inject metadata.run_id into output (for stale-artifact detection)")
+    p.add_argument(
+        "--sizing",
+        help=(
+            "Path to a v1-stamped sizing.json. When given, the output is stamped with "
+            "graded_against so a checklist run against a since-changed sizing is detectable."
+        ),
+    )
     return p.parse_args()
 
 
@@ -253,6 +267,18 @@ def main() -> None:
 
     indent = 2 if args.pretty else None
 
+    # --- --sizing: loaded and validated up front, independent of the checklist items below. ---
+    sizing_fp: str | None = None
+    if args.sizing:
+        sizing, sizing_err = _provenance.load_stamped_sizing(args.sizing)
+        if sizing_err:
+            sizing_result: dict[str, Any] = {"validation": {"status": "invalid", "errors": [sizing_err]}}
+            if args.run_id:
+                sizing_result["metadata"] = {"run_id": args.run_id}
+            _fail_invalid(sizing_result, args.output, indent)
+        assert sizing is not None
+        sizing_fp = _provenance.sizing_fingerprint(sizing)
+
     # --- Validation (JSON error dict, exit 0) ---
     errors: list[str] = []
     if "items" not in data:
@@ -275,6 +301,11 @@ def main() -> None:
         _fail_invalid(result, args.output, indent)
 
     result["validation"] = {"status": "valid", "errors": []}
+
+    if args.sizing:
+        # MUTATION-CHECKED: the stamp is a fact about what this run was checked against, not a
+        # side effect of successful validation — omitting it here silently loses provenance.
+        result["graded_against"] = {"sizing.json": sizing_fp}
 
     if args.run_id:
         result["metadata"] = {"run_id": args.run_id}

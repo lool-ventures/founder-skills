@@ -1871,3 +1871,54 @@ def test_relation_proposal_names_the_market_slide_case() -> None:
         "the prompt must name the case where a deck states two dated magnitudes AND a growth "
         "multiple between them — it is an ordinary ratio the model was not told to look for"
     )
+
+
+# ---------------------------------------------------------------------------
+# purpose_clear / no_vague_purpose: where fail ends and warn begins
+# ---------------------------------------------------------------------------
+#
+# Read against real decks, the checklist failed `purpose_clear` on decks that DO say what the company
+# is and who it is for, because the cover tagline was not in the "[Category] for [ICP] that delivers
+# [outcome]" format. A purpose that is present but weak is a warn; only a missing or self-contradicting
+# one is a fail. A buzzword-only purpose is owned by `no_vague_purpose`, so one defect fails once.
+
+
+def _criterion(cid: str) -> dict[str, str]:
+    """The Pass/Warn/Fail lines of one criterion, bounded by its heading and the next heading."""
+    text = (REFS_DIR / "checklist-criteria.md").read_text()
+    m = re.search(rf"^### `{re.escape(cid)}`\n(.*?)(?=^#{{2,3}} )", text, re.S | re.M)
+    assert m, f"criterion {cid} not found under its own heading"
+    body = m.group(1)
+    out: dict[str, str] = {}
+    for key in ("Pass", "Warn", "Fail"):
+        line = re.search(rf"^\*\*{key}:\*\* (.+)$", body, re.M)
+        assert line, f"{cid} has no {key} line"
+        out[key] = line.group(1)
+    out["body"] = body
+    return out
+
+
+def test_purpose_clear_fails_only_when_missing_or_contradictory() -> None:
+    c = _criterion("purpose_clear")
+    fail = c["Fail"].lower()
+    assert "no slide" in fail and "contradict" in fail, c["Fail"]
+    assert "buzzword" not in fail, "buzzword-only purpose belongs to no_vague_purpose, not a second fail here"
+    assert "vague" not in fail, "'vague' made a present-but-weak purpose fail"
+
+
+def test_purpose_clear_warn_covers_present_but_weak() -> None:
+    warn = _criterion("purpose_clear")["Warn"].lower()
+    for cue in ("anywhere in the deck", "late", "outcome", "category label"):
+        assert cue in warn, f"warn must cover: {cue}"
+
+
+def test_purpose_clear_requires_a_deck_wide_search_and_a_cited_slide() -> None:
+    body = _criterion("purpose_clear")["body"].lower()
+    assert "search the whole deck" in body
+    assert "cite the slide" in body and "no slide has one" in body
+    assert "tagline" in body, "a tagline that is not in the format is not a missing purpose"
+
+
+def test_no_vague_purpose_fails_only_on_buzzword_only_purpose() -> None:
+    fail = _criterion("no_vague_purpose")["Fail"].lower()
+    assert "only" in fail and "buzzword" in fail and "no concrete" in fail, fail

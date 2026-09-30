@@ -6,10 +6,11 @@
 
 ### `purpose_clear`
 **Label:** Company purpose is clear and specific
-**Pass:** One declarative sentence that a smart investor can repeat after 10 seconds. Follows formats like "[Category] for [ICP] that delivers [quantified outcome]."
-**Fail:** Purpose is vague, buzzwordy, requires multiple readings, or is missing.
-**Warn:** Purpose exists but is two sentences or slightly unclear.
-**Basis:** Sequoia "Writing a Business Plan" — define the company in a single declarative sentence.
+**Pass:** One early sentence an investor can repeat: "[Category] for [ICP] that delivers [quantified outcome]."
+**Fail:** No slide says what the company does or for whom, or the statements contradict.
+**Warn:** Stated anywhere in the deck but late, split, without the outcome, or only a category label.
+Search the whole deck before failing; cite the slide, or say no slide has one. A tagline not in the format is not missing.
+**Basis:** Sequoia "Writing a Business Plan".
 
 ### `headlines_carry_story`
 **Label:** Slide headlines are conclusions, not topics
@@ -201,9 +202,9 @@ is not an error, because a judgement reached by real reasoning is still worth ha
 ### `no_vague_purpose`
 **Label:** No vague or buzzwordy purpose statement
 **Pass:** Purpose is specific, measurable, and immediately understandable.
-**Fail:** Purpose uses buzzwords ("leveraging synergies," "paradigm shift," "revolutionary platform").
-**Warn:** Purpose is clear but could be more specific.
-**Basis:** Common mistakes — "One declarative sentence + measurable outcome."
+**Fail:** Only buzzwords ("paradigm shift"), no concrete category or customer.
+**Warn:** Concrete but buzzwordy, or could be more specific.
+**Basis:** Common mistakes list.
 
 ### `no_nice_to_have_problem`
 **Label:** Problem shows urgency, not a nice-to-have

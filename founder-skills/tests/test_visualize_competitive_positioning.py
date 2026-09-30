@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import contextlib
 import copy
+import html
 import importlib.util
 import json
 import os
@@ -739,15 +740,18 @@ def test_view_label_preferred_over_titlecased_id() -> None:
         assert "Positioning Map: Primary" not in stdout
 
 
-def test_view_label_absent_falls_back_to_titlecased_id() -> None:
-    """Absence of `label` must be silent — every existing artifact lacks it,
-    so the title must keep falling back to the title-cased `id`, unchanged
-    from before Task 4."""
+def test_view_label_absent_falls_back_to_the_axis_names() -> None:
+    """With no `label`, the title names the two axes. It used to title-case the view id, which real
+    runs set to a slug and which then reached the founder ("Tco_Vs_Distribution")."""
     arts = _all_artifacts()
+    view = arts["positioning.json"]["views"][0]
     with _make_artifact_dir(arts) as d:
         rc, stdout, stderr = _run_visualize(d)
         assert rc == 0, f"exit {rc}, stderr={stderr}"
-        assert "Positioning Map: Primary" in stdout
+        assert (
+            f"Positioning Map: {html.escape(view['x_axis']['name'])} vs {html.escape(view['y_axis']['name'])}" in stdout
+        )
+        assert "Positioning Map: Primary" not in stdout
 
 
 # ---------------------------------------------------------------------------
@@ -1248,3 +1252,56 @@ class TestCpExploreColorCoverage:
                     f"Defensibility level {level!r} has hex {viz_color!r} in visualize._DEFENSIBILITY_COLORS "
                     f"but {exp_color!r} in explore._DEFENSIBILITY_COLORS. Keep them in sync."
                 )
+
+
+def test_competitor_table_reports_a_dropped_competitor_as_removed_not_retained() -> None:
+    """report.html said "Retained despite the challenge … scored and ranked" for every not_a_competitor
+    verdict, including one the founder dropped, and named it by slug. It now follows the final set."""
+    artifacts = copy.deepcopy(_all_artifacts())
+    slugs = [c["slug"] for c in artifacts["landscape.json"]["competitors"]]
+    names = {c["slug"]: c["name"] for c in artifacts["landscape.json"]["competitors"]}
+    _verification_for(artifacts, {slugs[0]: "not_a_competitor", "omega-co": "not_a_competitor"})
+    artifacts["landscape_draft.json"] = {
+        "competitors": [{"slug": "omega-co", "name": "Omega Systems"}],
+        "metadata": {"run_id": artifacts["landscape.json"]["metadata"]["run_id"]},
+    }
+
+    with _make_artifact_dir(artifacts) as d:
+        rc, stdout, stderr = _run_visualize(d)
+    assert rc == 0, f"exit {rc}, stderr={stderr}"
+    table = stdout.split("Competitor Comparison")[1].split("</div>")[0]
+    retained = table.split("Retained despite the challenge:")[1].split("</p>")[0]
+    removed = table.split("Removed after the challenge:")[1].split("</p>")[0]
+    # Positive control: a challenged competitor still in the set is still reported as retained.
+    assert names[slugs[0]] in retained
+    assert "Omega Systems" not in retained
+    assert "Omega Systems" in removed
+    assert "omega-co" not in table, "the dropped competitor reached the page as a slug"
+
+
+def test_the_startup_record_reaches_report_html_escaped() -> None:
+    artifacts = copy.deepcopy(_all_artifacts())
+    artifacts["startup_research.json"] = {
+        "legal_name": {"value": "Acme <b>Robotics</b>", "source": "https://registry.example/acme"},
+        "searched_none": [],
+        "publications": [
+            {
+                "number": "US1111111B1",
+                "office": "US",
+                "kind": "B1",
+                "read": "claims",
+                "source": "https://patents.example/US1111111B1",
+                "status": "granted",
+                "grant_event": False,
+                "events": [],
+            }
+        ],
+        "family_status": "granted",
+        "metadata": {"run_id": artifacts["landscape.json"]["metadata"]["run_id"]},
+    }
+    with _make_artifact_dir(artifacts) as d:
+        rc, stdout, stderr = _run_visualize(d)
+    assert rc == 0, stderr
+    section = stdout.split("What Public Records Show")[1].split("</div>")[0]
+    assert "US1111111B1" in section and "https://patents.example/US1111111B1" in section
+    assert "<b>Robotics</b>" not in section and "&lt;b&gt;Robotics&lt;/b&gt;" in section

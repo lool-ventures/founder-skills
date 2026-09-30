@@ -154,6 +154,7 @@ Every differentiation claim must be tested before it enters the report. The stre
 | `holds` | Claim is verifiable, sustainable, and buyer-relevant. Evidence supports it. | Strong — use in competitive narrative |
 | `partially_holds` | Claim has merit but needs qualification. Partially verifiable, or sustainable for limited time, or relevant to some buyers. | Moderate — use with honest qualification |
 | `does_not_hold` | Claim fails one or more tests. Not verifiable, not sustainable, or not buyer-relevant. | Weak — either reframe or drop from narrative |
+| `unproven` | The research could not settle the claim either way — nothing found for or against it, or only a summary or abstract was read where the claim turns on detail (a patent's claims, a spec sheet). Use it rather than stretching thin evidence into a verdict. | Open — say what evidence would settle it |
 
 ### Common Claim Failures
 

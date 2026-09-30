@@ -30,6 +30,18 @@ answers:
   # cannot un-benign it silently.
   - when_question: "IIA"
     choose: "No IIA grants"
+  # The intake and scenario gates can arrive batched with questions the Gate Catalog does not fix (company
+  # name, stage, engagement type, the SAFE's closing date). A batch is answered atomically: one unscripted
+  # question sends every question in it to the first option, which here is "Israeli company" and a
+  # snapshot-only scenario. Script them all; free text where the model words the options itself.
+  - when_question: "company's name"
+    answer: "Cadence"
+  - when_question: "What stage"
+    choose: "Seed"
+  - when_question: "flip-focused"
+    choose: "Standard cap-table modeling"
+  - when_question: "closing date"
+    answer: "I don't have the exact date to hand; proceed without it."
 prompt: |
   I'm raising a seed round for Cadence, a US Delaware C-corp (field-service scheduling SaaS), and I
   want the full cap-table review before I sign.
@@ -48,6 +60,9 @@ prompt: |
   resulting dilution for each holder — and build the interactive explorer.
 
 assert:
+  # A relative or /sessions/ file-tool path is refused at host-loop; the Step 0 proof exists so none is used.
+  # Content-class, so it covers sub-agent tool results too (checked by replay on a sub-agent-only string).
+  - tool_result_not_contains: "denied by your permission settings"
   # End-to-end: the full pipeline ran and produced its deliverables (manifest-backed → survives replay).
   - result: success
   # No `all_tasks_completed` here: nothing in this skill asks the agent for a task list, so the
@@ -118,6 +133,7 @@ assert:
   # Allowlist = artifact namespace (incl. handoff/**) + founder-context sidecar + promoted
   # deliverables. Pre-0.24 cassettes exclude loudly (no preRunPaths). tightened from discovery actuals (observed x1.5).
   - no_unexpected_files:
+      - 'outputs/artifacts/.host-outputs-*'  # Step 0's file-tool path proof (artifacts root)
       - 'outputs/artifacts/cap-table-cadence/**'
       - 'outputs/artifacts/founder-context-cadence.json'
       - 'outputs/Cadence_*'

@@ -710,6 +710,98 @@ def _run_compose(artifact_dir: str, extra_args: list[str] | None = None) -> tupl
     return run_script("compose_report.py", args)
 
 
+_V1_RECORD: dict[str, tuple[float, str, dict[str, Any]]] = {
+    # name: (value, unit, extra). The bottom-up figures are _VALID_SIZING's. The top-down ones are
+    # chosen so the two builds agree within a few percent without being identical: the calculator now
+    # computes the comparison, where _VALID_SIZING's hand-written block claimed an agreement its own
+    # figures (a $100B vs a $67.5B TAM) did not have. serviceable_pct is high confidence because the
+    # fixture's sensitivity never varies it.
+    "industry_total": (70000000000, "money_total_per_year", {"currency": "USD"}),
+    "segment_pct": (33, "percent_points", {}),
+    "share_pct": (0.52, "percent_points", {}),
+    "customer_count": (4500000, "count", {}),
+    "arpu": (15000, "money_per_customer", {"currency": "USD", "period": "year"}),
+    "serviceable_pct": (35, "percent_points", {"confidence": "high"}),
+    "target_pct": (0.5, "percent_points", {}),
+}
+
+
+def _v1_run(
+    assumptions: list[dict[str, Any]], refs: dict[str, Any], inputs: dict[str, Any] | None = None
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Run the calculator by reference against a research record. Returns (validation, sizing)."""
+    import tempfile
+
+    validation = {**_VALID_VALIDATION, "assumptions": assumptions}
+    with tempfile.TemporaryDirectory() as d:
+        vpath, ipath, out = (os.path.join(d, n) for n in ("validation.json", "inputs.json", "sizing.json"))
+        with open(vpath, "w") as fh:
+            json.dump(validation, fh)
+        with open(ipath, "w") as fh:
+            json.dump(inputs or _VALID_INPUTS, fh)
+        rc, stdout, err = run_script_raw(
+            "market_sizing.py",
+            ["--stdin", "--validation", vpath, "--inputs", ipath, "-o", out],
+            stdin_data=json.dumps(refs),
+        )
+        assert rc == 0, stdout + err
+        with open(out) as fh:
+            sizing: dict[str, Any] = json.load(fh)
+    return validation, sizing
+
+
+def _v1_entry(name: str, value: float, unit: str, category: str = "sourced", **more: Any) -> dict[str, Any]:
+    """A recorded figure citing the fixture's one listed source."""
+    return {
+        "name": name,
+        "value": value,
+        "unit": unit,
+        "category": category,
+        "source_title": "Gartner Report",
+        "source_url": "https://example.com",
+        **more,
+    }
+
+
+def _stamped(doc: dict[str, Any], sizing: dict[str, Any]) -> dict[str, Any]:
+    """A sensitivity or checklist artifact as --sizing stamps it."""
+    import importlib
+
+    sys.path.insert(0, MARKET_SIZING_DIR)
+    prov = importlib.import_module("_provenance")
+    return {**doc, "graded_against": {"sizing.json": prov.sizing_fingerprint(sizing)}}
+
+
+def _v1_artifacts(
+    categories: dict[str, str] | None = None, fields: dict[str, dict[str, Any]] | None = None, **extra: Any
+) -> dict[str, Any]:
+    """The _all_artifacts() run as the skill now produces it: a research record whose figures carry
+    their units, the sizing the calculator resolves from it by reference, and the sensitivity and
+    checklist stamped with the sizing they were built on.
+
+    The figures are _V1_RECORD's. `categories` sets each figure's grade (default: every figure
+    sourced from the fixture's one listed source); `fields` adds fields to a named figure.
+    """
+    grades = {name: "sourced" for name in _V1_RECORD}
+    grades.update(categories or {})
+    assumptions = [
+        _v1_entry(name, value, unit, grades[name], **{**more, **(fields or {}).get(name, {})})
+        for name, (value, unit, more) in _V1_RECORD.items()
+    ]
+    refs = {"approach": "both", **{name: {"assumption": name} for name in _V1_RECORD}}
+    validation, sizing = _v1_run(assumptions, refs)
+    arts = {
+        "inputs.json": _VALID_INPUTS,
+        "methodology.json": _VALID_METHODOLOGY,
+        "validation.json": validation,
+        "sizing.json": sizing,
+        "sensitivity.json": _stamped(_VALID_SENSITIVITY, sizing),
+        "checklist.json": _stamped(_VALID_CHECKLIST, sizing),
+    }
+    arts.update(extra)
+    return arts
+
+
 def _all_artifacts() -> dict[str, Any]:
     """The canonical complete artifact set, for tests that vary one artifact."""
     return {
@@ -1138,6 +1230,7 @@ def test_compose_severity_map_complete() -> None:
         "REFUTED_CLAIMS",
         "REFUTED_MISSING_REASON",
         "DECK_CLAIM_MISMATCH",
+        "DECK_CLAIMS_DISAGREE",
         "PROVENANCE_UNRESOLVED",
         "EXISTING_CLAIMS_SHAPE",
         "MARKER_COLLISION",
@@ -1185,7 +1278,31 @@ def test_compose_severity_map_complete() -> None:
     # RED_TEAM_RERUN_UNAPPROVED, REVIEW_COPY_MISSING, RED_TEAM_SKIP_CONTRADICTED); +1 for a review
     # from an earlier run of the same analysis (EARLIER_REVIEW_THIS_ANALYSIS); +1 for a founder figure
     # changed after the review without confirmation (FOUNDER_INPUT_REWRITTEN).
-    assert len(sev_map) == 51, f"expected 51 codes, got {len(sev_map)}"
+    # +5: the inputs-by-reference integrity codes, each high (none may be accepted away).
+    integrity = [
+        "SIZING_STALE",
+        "SIZING_UNRESOLVABLE",
+        "SIZING_ALTERED",
+        "RECORD_CHANGED_AFTER_REVIEW",
+        "UNIT_CHANGED_AFTER_REJECTION",
+        "SENSITIVITY_STALE",
+        "SIZING_NOT_CHECKED",
+    ]
+    for code in integrity:
+        assert sev_map.get(code) == "high", code
+    # Two medium, each for a stated reason: a self-check graded on another sizing can only be
+    # re-graded; pure calculation on the founder's own figures is a disclosure, not a defect.
+    assert sev_map.get("CHECKLIST_STALE") == "medium"
+    assert sev_map.get("INPUTS_USER_PROVIDED") == "medium"
+    # +1: a step whose results reached the report without passing the hand-off gate. Medium so it
+    # never blocks a run whose results are valid; test_handoff_bypass_cannot_be_accepted_away pins
+    # that accepted_warnings cannot clear it.
+    assert sev_map.get("HANDOFF_BYPASSED") == "medium"
+    assert sev_map.get("REVISION_NOT_OFFERED") == "medium"
+    # +1: the founder's materials state two figures for one metric. Medium (the run is valid) and not
+    # acceptable away; test_market_sizing_claim_alternatives pins that.
+    assert sev_map.get("DECK_CLAIMS_DISAGREE") == "medium"
+    assert len(sev_map) == 63, f"expected 63 codes, got {len(sev_map)}"
     for code in expected_codes:
         assert code in sev_map, f"{code} missing from severity map"
     # All values are "high", "medium", or "low"
@@ -1831,18 +1948,10 @@ def test_compose_accepted_warning_strict_passes() -> None:
     methodology["accepted_warnings"] = [
         {"code": "TAM_DISCREPANCY", "reason": "Expected", "match": "differ by"},
     ]
-    sizing = dict(_VALID_SIZING)
-    sizing["comparison"] = {"tam_delta_pct": 45, "warning": "Large discrepancy"}
-    d = _make_artifact_dir(
-        {
-            "inputs.json": _VALID_INPUTS,
-            "methodology.json": methodology,
-            "validation.json": _VALID_VALIDATION,
-            "sizing.json": sizing,
-            "sensitivity.json": _VALID_SENSITIVITY,
-            "checklist.json": _VALID_CHECKLIST,
-        }
-    )
+    arts = _v1_artifacts()
+    arts["methodology.json"] = methodology
+    arts["sizing.json"] = {**arts["sizing.json"], "comparison": {"tam_delta_pct": 45, "warning": "Large discrepancy"}}
+    d = _make_artifact_dir(arts)
     rc, data, _ = _run_compose(d, extra_args=["--strict"])
     assert rc == 0
     assert data is not None
@@ -2172,6 +2281,7 @@ def test_compose_assumptions_small_rate_is_not_shown_as_zero() -> None:
             "label": "Monthly inquiry rate",
             "value": 0.0002,
             "category": "sourced",
+            "source_title": "Gartner Report",
         },
         {"name": "response_share", "label": "Response share", "value": 0.0068, "category": "derived"},
         {"name": "avg_visits", "label": "Average visits", "value": 2.5, "category": "derived"},
@@ -2445,17 +2555,8 @@ def test_compose_corrupt_required_artifact() -> None:
 
 
 def test_compose_strict_mode_all_required_present() -> None:
-    """Strict mode succeeds when all required artifacts are present."""
-    d = _make_artifact_dir(
-        {
-            "inputs.json": _VALID_INPUTS,
-            "methodology.json": _VALID_METHODOLOGY,
-            "validation.json": _VALID_VALIDATION,
-            "sizing.json": _VALID_SIZING,
-            "checklist.json": _VALID_CHECKLIST,
-            "sensitivity.json": _VALID_SENSITIVITY,
-        }
-    )
+    """Strict mode succeeds when all required artifacts are present (as a run now produces them)."""
+    d = _make_artifact_dir(_v1_artifacts())
     rc, data, _ = _run_compose(d, extra_args=["--strict"])
     assert rc == 0
     assert data is not None
@@ -2848,7 +2949,7 @@ def test_compose_deck_claim_comparison() -> None:
     assert rc == 0
     assert data is not None
     md = data["report_markdown"]
-    assert "Deck Claims vs. Our Estimates" in md
+    assert "Your Figures vs. Our Estimates" in md
     assert "$50.0B" in md  # deck claim for TAM
 
 
@@ -2971,28 +3072,11 @@ def test_compose_provenance_intermediate_keys_skipped() -> None:
 
 
 def test_compose_provenance_classification_correctness() -> None:
-    """Known fixture: all-sourced → sourced; mixed with agent_estimate → agent_estimate."""
-    # Create validation with known categories
-    validation_all_sourced = {
-        "sources": [],
-        "figure_validations": [],
-        "assumptions": [
-            {"name": "industry_total", "value": 100000000000, "category": "sourced"},
-            {"name": "segment_pct", "value": 6, "category": "sourced"},
-            {"name": "share_pct", "value": 5, "category": "sourced"},
-            {"name": "customer_count", "value": 4500000, "category": "sourced"},
-            {"name": "arpu", "value": 15000, "category": "sourced"},
-        ],
-    }
-    arts = {
-        "inputs.json": _VALID_INPUTS,
-        "methodology.json": _VALID_METHODOLOGY,
-        "validation.json": validation_all_sourced,
-        "sizing.json": _VALID_SIZING,
-        "checklist.json": _VALID_CHECKLIST,
-        "sensitivity.json": _VALID_SENSITIVITY,
-    }
-    d = _make_artifact_dir(arts)
+    """Known fixture: all-sourced → sourced; mixed with agent_estimate → agent_estimate.
+
+    The grades are those of the recorded figures the sizing resolved each input to.
+    """
+    d = _make_artifact_dir(_v1_artifacts())
     rc, data, _stderr = run_script("compose_report.py", ["--dir", d])
     assert rc == 0
     assert data is not None
@@ -3006,19 +3090,7 @@ def test_compose_provenance_classification_correctness() -> None:
     assert bu.get("tam", {}).get("classification") == "sourced"
 
     # Now test with one agent_estimate
-    validation_mixed = {
-        "sources": [],
-        "figure_validations": [],
-        "assumptions": [
-            {"name": "industry_total", "value": 100000000000, "category": "sourced"},
-            {"name": "segment_pct", "value": 6, "category": "sourced"},
-            {"name": "share_pct", "value": 5, "category": "sourced"},
-            {"name": "customer_count", "value": 4500000, "category": "agent_estimate"},
-            {"name": "arpu", "value": 15000, "category": "sourced"},
-        ],
-    }
-    arts["validation.json"] = validation_mixed
-    d2 = _make_artifact_dir(arts)
+    d2 = _make_artifact_dir(_v1_artifacts(categories={"customer_count": "agent_estimate"}))
     rc2, data2, _stderr2 = run_script("compose_report.py", ["--dir", d2])
     assert rc2 == 0
     assert data2 is not None
@@ -3088,7 +3160,7 @@ def test_compose_deck_claim_partial() -> None:
     assert rc == 0
     assert data is not None
     md = data["report_markdown"]
-    if "Deck Claims" in md:
+    if "Your Figures vs. Our Estimates" in md:
         # Should have TAM but not SAM/SOM in comparison table
         assert "TAM" in md
 
@@ -3173,15 +3245,7 @@ def test_compose_deck_claim_mismatch_low_severity() -> None:
     """>50% delta → DECK_CLAIM_MISMATCH with severity 'low'; --strict does NOT exit 1."""
     inputs: dict[str, Any] = dict(_VALID_INPUTS)
     inputs["existing_claims"] = {"tam": 10000000000}
-    arts = {
-        "inputs.json": inputs,
-        "methodology.json": _VALID_METHODOLOGY,
-        "validation.json": _VALID_VALIDATION,
-        "sizing.json": _VALID_SIZING,
-        "checklist.json": _VALID_CHECKLIST,
-        "sensitivity.json": _VALID_SENSITIVITY,
-    }
-    d = _make_artifact_dir(arts)
+    d = _make_artifact_dir(_v1_artifacts(**{"inputs.json": inputs}))
     # First check severity is low
     rc, data, _stderr = run_script("compose_report.py", ["--dir", d])
     assert rc == 0
@@ -3785,9 +3849,17 @@ def test_deck_claims_narrative_rendered_when_detail_present() -> None:
     assert rc == 0
     assert data is not None
     md = data["report_markdown"]
-    assert "## Deck Claims (Narrative)" in md
-    assert "regional SAM north america" in md  # humanized by the shared founder-text policy (_founder_text.py)
-    assert "som_year_3_target" in md
+    assert "## Your Stated Figures (Narrative)" in md
+    # The section renders its OWN keys now, rather than leaving `str(key)` for the document-wide
+    # substitution to catch: every key reads as words with its acronyms kept, and a figure is printed by
+    # its unit. `som_year_3_target` used to reach the founder raw -- the substitution pass cannot see a
+    # token carrying a numeric segment, which is a detection limit, not a transformation one.
+    assert "**Regional SAM north america:** 4,500,000,000" in md
+    assert "**SOM year 3 target:** 350,000,000" in md
+    # And the raw keys are GONE, not merely accompanied: pinning the rendered form alone would pass a
+    # regression that printed both, which is what the assertion this replaced was guarding against.
+    assert "som_year_3_target" not in md
+    assert "regional_sam_north_america" not in md
 
 
 def test_claims_narrative_attributes_to_the_founder_when_no_deck() -> None:
@@ -3815,8 +3887,9 @@ def test_claims_narrative_attributes_to_the_founder_when_no_deck() -> None:
     assert "## Deck Claims (Narrative)" not in md
 
 
-def test_claims_narrative_still_says_deck_when_a_deck_was_provided() -> None:
-    """No false positive: a real deck keeps the deck-attributed wording."""
+def test_claims_narrative_does_not_say_deck_even_when_a_deck_was_provided() -> None:
+    """An uploaded deck used to make every claim the deck's, including a TAM the founder typed in
+    chat. Nothing records where each figure came from, so the heading is the founder's either way."""
     arts = _make_basic_arts(
         {
             "materials_provided": ["pitch deck"],
@@ -3828,8 +3901,8 @@ def test_claims_narrative_still_says_deck_when_a_deck_was_provided() -> None:
     assert rc == 0
     assert data is not None
     md = data["report_markdown"]
-    assert "## Deck Claims (Narrative)" in md
-    assert "The deck stated" in md
+    assert "## Your Stated Figures (Narrative)" in md
+    assert "The deck stated" not in md
 
 
 def test_deck_claims_narrative_omitted_when_detail_null() -> None:
@@ -3839,7 +3912,7 @@ def test_deck_claims_narrative_omitted_when_detail_null() -> None:
     rc, data, _ = _run_compose(d)
     assert rc == 0
     assert data is not None
-    assert "## Deck Claims (Narrative)" not in data["report_markdown"]
+    assert "(Narrative)" not in data["report_markdown"]
 
 
 def test_deck_claims_narrative_omitted_when_detail_empty() -> None:
@@ -3849,7 +3922,7 @@ def test_deck_claims_narrative_omitted_when_detail_empty() -> None:
     rc, data, _ = _run_compose(d)
     assert rc == 0
     assert data is not None
-    assert "## Deck Claims (Narrative)" not in data["report_markdown"]
+    assert "(Narrative)" not in data["report_markdown"]
 
 
 # ---------------------------------------------------------------------------
@@ -4872,17 +4945,17 @@ def test_no_subagent_dispatch_is_a_skip_reason_that_does_not_promise_a_re_run() 
 
 
 def test_founder_stated_monthly_figure_is_normalised_before_the_fidelity_check() -> None:
-    """MEASURED live: the founder stated $203 per patient-month, the sizing consumed the annual
-    $2,436, FOUNDER_VALUE_OVERRIDDEN called the correct x12 an override, and its remedy text told
+    """MEASURED live: the founder stated a price per month, the sizing consumed the annual
+    figure (x12), FOUNDER_VALUE_OVERRIDDEN called the correct x12 an override, and its remedy text told
     the constructor to "update inputs.founder_stated_inputs" -- which it did, with no founder in
     the loop. A stated period normalises the comparison; the figure is not the same as the value
     the math used, and the check has to know which period it was quoted per."""
-    arpu_sizing = _sizing_with_arpu(18000, 2436)
+    arpu_sizing = _sizing_with_arpu(18000, 1884)
     d = _make_artifact_dir(
         {
             "inputs.json": {
                 **_VALID_INPUTS,
-                "founder_stated_inputs": {"arpu": 203, "customer_count": 18000},
+                "founder_stated_inputs": {"arpu": 157, "customer_count": 18000},
                 "founder_stated_inputs_period": {"arpu": "month"},
             },
             "methodology.json": _VALID_METHODOLOGY,
@@ -4897,12 +4970,12 @@ def test_founder_stated_monthly_figure_is_normalised_before_the_fidelity_check()
 
 
 def test_founder_stated_figure_without_a_period_still_reports_but_never_tells_the_model_to_edit() -> None:
-    """Without a period the 203-vs-2436 case still reports (it cannot know), but the remedy no
+    """Without a period the 157-vs-1884 case still reports (it cannot know), but the remedy no
     longer says "update inputs.founder_stated_inputs": that sentence was followed literally."""
-    arpu_sizing = _sizing_with_arpu(18000, 2436)
+    arpu_sizing = _sizing_with_arpu(18000, 1884)
     d = _make_artifact_dir(
         {
-            "inputs.json": {**_VALID_INPUTS, "founder_stated_inputs": {"arpu": 203, "customer_count": 18000}},
+            "inputs.json": {**_VALID_INPUTS, "founder_stated_inputs": {"arpu": 157, "customer_count": 18000}},
             "methodology.json": _VALID_METHODOLOGY,
             "validation.json": _VALID_VALIDATION,
             "sizing.json": arpu_sizing,
@@ -4911,18 +4984,18 @@ def test_founder_stated_figure_without_a_period_still_reports_but_never_tells_th
     code, result, _ = _run_compose(d)
     assert code == 0 and result is not None
     msg = next(w["message"] for w in result["validation"]["warnings"] if w["code"] == "FOUNDER_VALUE_OVERRIDDEN")
-    assert "203" in msg and "2,436" in msg
+    assert "157" in msg and "1,884" in msg
     assert "update inputs.founder_stated_inputs" not in msg
     assert "Do not edit founder_stated_inputs" in msg and "founder_stated_inputs_period" in msg
 
 
 def test_founder_stated_period_unknown_is_named_and_compared_as_annual() -> None:
-    arpu_sizing = _sizing_with_arpu(18000, 2436)
+    arpu_sizing = _sizing_with_arpu(18000, 1884)
     d = _make_artifact_dir(
         {
             "inputs.json": {
                 **_VALID_INPUTS,
-                "founder_stated_inputs": {"arpu": 203, "customer_count": 18000},
+                "founder_stated_inputs": {"arpu": 157, "customer_count": 18000},
                 "founder_stated_inputs_period": {"arpu": "fortnight"},
             },
             "methodology.json": _VALID_METHODOLOGY,
@@ -4935,7 +5008,7 @@ def test_founder_stated_period_unknown_is_named_and_compared_as_annual() -> None
     codes = _codes(result)
     assert "FOUNDER_PERIOD_UNKNOWN" in codes and "FOUNDER_VALUE_OVERRIDDEN" in codes
     msg = next(w["message"] for w in result["validation"]["warnings"] if w["code"] == "FOUNDER_VALUE_OVERRIDDEN")
-    assert "203 per fortnight" in msg
+    assert "157 per fortnight" in msg
 
 
 def test_founder_value_check_is_opt_in_on_empty_object() -> None:
@@ -5699,18 +5772,23 @@ def test_fx_conversion_result_must_be_a_usable_figure() -> None:
     _assert_validation_errors(data, "E_FX_RESULT_INVALID")
 
 
-def test_fx_dispatch_templates_ask_for_the_currency_tag() -> None:
-    """The tag must be in the JSON SHAPE, not only in prose around it.
+def test_a_foreign_currency_figure_is_declared_where_the_research_is_recorded() -> None:
+    """A figure's currency, and the rate that converts it, live on the research record.
 
-    The sub-agent copies the shape. With the tag absent from it, a compliant run
-    emits no tag, so nothing converts AND nothing refuses — the pre-fix silent
-    mislabelling path stays live and the whole feature is unreachable.
+    The sub-agent used to tag each money figure's currency in its hand-off, and this pinned the tag in
+    the JSON shape, because a hand-off without it converted nothing and refused nothing. Inputs are
+    now references to recorded figures, so the declaration moves to where the figure is recorded: Step
+    4 must ask for a currency on every money figure and for a sourced exchange-rate entry, and the
+    sizing prompts must tell the sub-agent it converts nothing (a rate it applied could only come from
+    memory). The producer refuses a money figure with no currency, and a conversion with no recorded
+    rate (test_market_sizing_provenance.py).
     """
     skill = (Path(__file__).resolve().parents[1] / "skills" / "market-sizing" / "SKILL.md").read_text(encoding="utf-8")
     agent = (Path(__file__).resolve().parents[1] / "agents" / "market-sizing.md").read_text(encoding="utf-8")
+    step4 = skill[skill.index("### Step 4") : skill.index("### Context A hand-off protocol")]
+    assert "`currency`" in step4 and '"unit": "fx_rate"' in step4, "Step 4 must declare currency and record the rate"
     for name, text in (("SKILL.md", skill), ("agents/market-sizing.md", agent)):
-        assert "industry_total_currency" in text, f"{name}: TOP_DOWN shape must request the tag"
-        assert "arpu_currency" in text, f"{name}: BOTTOM_UP shape must request the tag"
+        assert "convert nothing" in text, f"{name}: the sizing prompts must say the sub-agent converts nothing"
 
 
 def test_compose_honours_a_declared_currency_for_an_unconverted_field(tmp_path: Path) -> None:
@@ -5993,6 +6071,10 @@ def test_close_agreement_row_is_footnoted(tmp_path: Path, delta: float) -> None:
     d = _claim_dir_for_delta(tmp_path, delta, f"ms-close-{abs(delta)}")
     md = _compose_md_text(d)
     assert "Agreement on a number is not independent confirmation" in md
+    # A TAM/SAM/SOM claim carries no source, so it is "the figure you gave", never "in your materials"
+    # (which names a document the figure may not have come from; it may have been typed in chat).
+    note = md[md.index("Agreement on a number") - 200 :][:600]
+    assert "the figure you gave" in note and "your materials" not in note, note
     # the marker must be on the TAM row itself, not just floating in the section
     tam_rows = [ln for ln in md.splitlines() if ln.startswith("| TAM (Top-down)")]
     assert tam_rows and "*" in tam_rows[0], tam_rows
@@ -6150,7 +6232,7 @@ def test_fx_table_delta_matches_the_warning_delta(tmp_path: Path) -> None:
     tam_row = next(ln for ln in md.splitlines() if ln.startswith("| TAM (Top-down)"))
     assert "-72.2%" in tam_row, tam_row
     assert "+11.1%" not in tam_row, "table still using the unconverted claim"
-    warn = next(ln for ln in md.splitlines() if "differs from deck claim" in ln)
+    warn = next(ln for ln in md.splitlines() if "differs from the figure you stated" in ln)
     assert "-72.2%" in warn, warn
     assert "Agreement on a number is not independent confirmation" not in md
 
@@ -6253,7 +6335,7 @@ def test_blocked_comparison_keeps_the_row_and_prints_no_delta(tmp_path: Path) ->
     """
     d = _fx_claim_dir(tmp_path, declared=False, name="ms-fx-blocked-row")
     md = _compose_md_text(d)
-    assert "### Deck Claims vs. Our Estimates" in md, "the blocked comparison deleted the whole section"
+    assert "### Your Figures vs. Our Estimates" in md, "the blocked comparison deleted the whole section"
     tam_row = next(ln for ln in md.splitlines() if ln.startswith("| TAM (Top-down)"))
     assert "+11.1%" not in tam_row, f"delta computed across a refused comparison: {tam_row}"
     assert "|" in tam_row and "—" in tam_row, f"blocked row has no em-dash delta cell: {tam_row}"
@@ -6278,7 +6360,7 @@ def test_every_surface_prints_one_figure_for_the_deck_claim(tmp_path: Path) -> N
     d = _fx_claim_dir(tmp_path, declared=True, name="ms-fx-one-figure")
     md = _compose_md_text(d)
     note = next(ln for ln in md.splitlines() if "differ significantly" in ln)
-    warn = next(ln for ln in md.splitlines() if "differs from deck claim" in ln)
+    warn = next(ln for ln in md.splitlines() if "differs from the figure you stated" in ln)
     tam_row = next(ln for ln in md.splitlines() if ln.startswith("| TAM (Top-down)"))
     for line, where in ((note, "note"), (warn, "warning"), (tam_row, "table")):
         assert "360.0B ILS" in line, f"{where} is not showing the converted claim: {line}"
@@ -6657,21 +6739,15 @@ def test_compose_exempts_only_a_high_confidence_sourced_omission() -> None:
         sensitivity = json.loads(json.dumps(_VALID_SENSITIVITY))
         sensitivity["approach"] = "bottom_up"
         sensitivity["scenarios"] = [s for s in sensitivity["scenarios"] if s["parameter"] != "arpu"]
-        assumption: dict[str, Any] = {"name": "arpu", "value": 15000, "category": "sourced"}
+        # The grade and confidence are those of the recorded figure the sizing's arpu resolved to. The
+        # calculator also consumes serviceable_pct, which this fixture's sensitivity never varies, so it
+        # is held at high confidence: arpu's confidence is the only thing this test moves.
+        fields: dict[str, dict[str, Any]] = {"serviceable_pct": {"confidence": "high"}}
         if confidence is not None:
-            assumption["confidence"] = confidence
-        validation = json.loads(json.dumps(_VALID_VALIDATION))
-        validation["assumptions"] = [assumption]
-        d = _make_artifact_dir(
-            {
-                "inputs.json": _VALID_INPUTS,
-                "methodology.json": _VALID_METHODOLOGY,
-                "validation.json": validation,
-                "sizing.json": _VALID_SIZING,
-                "checklist.json": _VALID_CHECKLIST,
-                "sensitivity.json": sensitivity,
-            }
-        )
+            fields["arpu"] = {"confidence": confidence}
+        arts = _v1_artifacts(fields=fields)
+        arts["sensitivity.json"] = _stamped(sensitivity, arts["sizing.json"])
+        d = _make_artifact_dir(arts)
         rc, data, _ = _run_compose(d)
         assert rc == 0 and data is not None
         fired = any(w["code"] == "SENSITIVITY_OMITS_PARAM" for w in data["validation"]["warnings"])
@@ -6944,8 +7020,8 @@ def _compose_with_sizing(
 
 
 def test_shared_tam_identity_fires_and_is_medium() -> None:
-    """industry_total == customer_count * arpu exactly — the real run's 42.4M x 2,436."""
-    rc, data, d = _compose_with_sizing(_both_sizing(103_286_400_000, 10.0, 0.3, 42_400_000, 2436, 9.1, 0.32))
+    """industry_total == customer_count * arpu exactly, the shape a real run produced."""
+    rc, data, d = _compose_with_sizing(_both_sizing(114_924_000_000, 10.0, 0.3, 61_000_000, 1884, 9.1, 0.32))
     assert rc == 0 and data is not None
     hits = [w for w in data["validation"]["warnings"] if w["code"] == "SHARED_TAM_IDENTITY"]
     assert len(hits) == 1, [w["code"] for w in data["validation"]["warnings"]]
@@ -6955,8 +7031,8 @@ def test_shared_tam_identity_fires_and_is_medium() -> None:
     assert "Customer Count" in hits[0]["message"] and "ARPU" in hits[0]["message"]
     md = _compose_md_text(Path(d))
     exec_block = md.split("## Executive Summary")[1].split("\n## ")[0]
-    assert "| TAM | $103.3B | Top-down † |" in exec_block, exec_block
-    assert "| TAM | $103.3B | Bottom-up † |" in exec_block, exec_block
+    assert "| TAM | $114.9B | Top-down † |" in exec_block, exec_block
+    assert "| TAM | $114.9B | Bottom-up † |" in exec_block, exec_block
     assert "one computation, shown two ways" in exec_block.lower(), exec_block
 
 
@@ -7008,12 +7084,12 @@ def _inputs_with_horizon(
 
 def test_horizon_mismatch_replaces_deck_claim_mismatch_for_som() -> None:
     """An 18-month plan SOM against a 60-month capture SOM is a different period, not the
-    +564.9% understatement the real run reported."""
+    several-hundred-percent understatement the real run reported."""
     inputs = _inputs_with_horizon(
-        {"tam": None, "sam": None, "som": 4_660_000}, {"tam": None, "sam": None, "som": 18}, 60
+        {"tam": None, "sam": None, "som": 3_920_000}, {"tam": None, "sam": None, "som": 18}, 60
     )
     rc, data, d = _compose_with_sizing(
-        _both_sizing(103_286_400_000, 10.0, 0.3, 42_400_000, 2436, 9.1, 0.32), inputs=inputs
+        _both_sizing(114_924_000_000, 10.0, 0.3, 61_000_000, 1884, 9.1, 0.32), inputs=inputs
     )
     assert rc == 0 and data is not None
     codes = [w["code"] for w in data["validation"]["warnings"]]
@@ -7022,10 +7098,12 @@ def test_horizon_mismatch_replaces_deck_claim_mismatch_for_som() -> None:
     hm = [w for w in data["validation"]["warnings"] if w["code"] == "HORIZON_MISMATCH"]
     # Block 15 loops both approaches; the founder must not read the same sentence twice.
     assert len(hm) == 1, hm
+    # The deck's SOM carries no source: "the SOM you gave", not "in your materials".
+    assert "you gave" in hm[0]["message"] and "your materials" not in hm[0]["message"], hm
     assert hm[0]["severity"] == "low"
     assert "18" in hm[0]["message"] and "60" in hm[0]["message"]
     md = _compose_md_text(Path(d))
-    assert "+564.9%" not in md and "+545.4%" not in md
+    assert "+779.5%" not in md and "+753.7%" not in md
     assert "different horizon" in md.lower(), md
 
 
@@ -7036,7 +7114,7 @@ def test_horizon_mismatch_does_not_suppress_a_real_sam_finding() -> None:
         {"tam": None, "sam": 37_300_000_000, "som": None}, {"tam": None, "sam": 12, "som": None}, 60
     )
     rc, data, _d = _compose_with_sizing(
-        _both_sizing(103_286_400_000, 10.0, 0.3, 42_400_000, 2436, 9.1, 0.32), inputs=inputs
+        _both_sizing(114_924_000_000, 10.0, 0.3, 61_000_000, 1884, 9.1, 0.32), inputs=inputs
     )
     assert rc == 0 and data is not None
     codes = [w["code"] for w in data["validation"]["warnings"]]
@@ -7047,9 +7125,9 @@ def test_horizon_mismatch_does_not_suppress_a_real_sam_finding() -> None:
 def test_horizon_mismatch_absent_when_horizons_agree_or_unstated() -> None:
     """Opt-in and symmetrical: same period, or no period stated, both leave behaviour unchanged."""
     for horizons, capture in (({"tam": None, "sam": None, "som": 60}, 60), (None, None)):
-        inputs = _inputs_with_horizon({"tam": None, "sam": None, "som": 4_660_000}, horizons, capture)
+        inputs = _inputs_with_horizon({"tam": None, "sam": None, "som": 3_920_000}, horizons, capture)
         rc, data, _d = _compose_with_sizing(
-            _both_sizing(103_286_400_000, 10.0, 0.3, 42_400_000, 2436, 9.1, 0.32), inputs=inputs
+            _both_sizing(114_924_000_000, 10.0, 0.3, 61_000_000, 1884, 9.1, 0.32), inputs=inputs
         )
         assert rc == 0 and data is not None
         codes = [w["code"] for w in data["validation"]["warnings"]]
@@ -7061,10 +7139,12 @@ def test_horizon_mismatch_absent_when_horizons_agree_or_unstated() -> None:
 
 
 def test_payload_approach_comparison_from_both_mode() -> None:
-    rc, data, _d = _compose_with_sizing(_both_sizing(103_286_400_000, 10.0, 0.3, 42_400_000, 2436, 9.1, 0.32))
+    rc, data, _d = _compose_with_sizing(_both_sizing(114_924_000_000, 10.0, 0.3, 61_000_000, 1884, 9.1, 0.32))
     assert rc == 0 and data is not None
     ac = data["coaching_payload"]["approach_comparison"]
-    assert ac["tam_delta_pct"] == 0.0
+    # This fixture records no top-down/bottom-up pair, so the gap is the producer's own note;
+    # the factor from a recorded pair is pinned in test_market_sizing_gap_factor.py.
+    assert ac["tam_gap"].startswith("TAM estimates differ by 0.0%."), ac
     assert ac["caveat"].startswith("Closeness is not confirmation")
     assert len(ac["shared_inputs"]) == 1, ac["shared_inputs"]
     item = ac["shared_inputs"][0]
@@ -7100,7 +7180,7 @@ def test_caveat_stops_saying_cannot_tell_once_a_shared_figure_was_seen() -> None
     followed by the thing it had seen. All three surfaces that render the caveat must agree:
     report.md, report.html, and the coach's `caveat`.
     """
-    rc, data, d = _compose_with_sizing(_both_sizing(103_286_400_000, 10.0, 0.3, 42_400_000, 2436, 9.1, 0.32))
+    rc, data, d = _compose_with_sizing(_both_sizing(114_924_000_000, 10.0, 0.3, 61_000_000, 1884, 9.1, 0.32))
     assert rc == 0 and data is not None
     md = _compose_md_text(Path(d))
     line = next(ln for ln in md.splitlines() if ln.startswith("**Top-down vs bottom-up:**"))
@@ -7120,7 +7200,7 @@ def test_caveat_stops_saying_cannot_tell_once_a_shared_figure_was_seen() -> None
 
 def test_caveat_still_says_cannot_tell_when_nothing_is_shared() -> None:
     """The untouched branch: with no identity and no factor overlap, the producer's own words stand."""
-    rc, data, d = _compose_with_sizing(_both_sizing(90_000_000_000, 10.0, 0.3, 42_400_000, 2436, 9.1, 0.32))
+    rc, data, d = _compose_with_sizing(_both_sizing(90_000_000_000, 10.0, 0.3, 61_000_000, 1884, 9.1, 0.32))
     assert rc == 0 and data is not None
     md = _compose_md_text(Path(d))
     line = next(ln for ln in md.splitlines() if ln.startswith("**Top-down vs bottom-up:**"))
@@ -7134,7 +7214,7 @@ def test_payload_carries_no_internal_field_names() -> None:
     The coach echoes this payload into commentary a founder reads, so `kind`, `code` and every
     snake_case parameter name are stripped on the way in — only the humanized sentence crosses.
     """
-    rc, data, _d = _compose_with_sizing(_both_sizing(103_286_400_000, 10.0, 0.3, 42_400_000, 2436, 9.1, 0.32))
+    rc, data, _d = _compose_with_sizing(_both_sizing(114_924_000_000, 10.0, 0.3, 61_000_000, 1884, 9.1, 0.32))
     assert rc == 0 and data is not None
     blob = json.dumps(data["coaching_payload"]["approach_comparison"])
     for token in ("industry_total", "customer_count", "segment_pct", "serviceable_pct", "identity", "code"):
@@ -7149,7 +7229,7 @@ _FACTORS_TD = [
     {"factor_id": "has_adult_child", "value": 0.61, "source_id": "company_stated"},
     {"factor_id": "caregiver_employed", "value": 0.60, "source_id": "caregiving_survey_2025"},
     {"factor_id": "worker_benefit_access", "value": 0.61, "source_id": "labour_stats_2024"},
-    {"factor_id": "fee_for_service_share", "value": 0.45, "source_id": "health_policy_2026"},
+    {"factor_id": "fee_for_service_share", "value": 0.45, "source_id": "market_report_2026"},
 ]
 
 
@@ -7203,11 +7283,11 @@ def test_factor_product_on_absolute_assumption_uses_raw_product() -> None:
             [
                 {
                     "name": "customer_count",
-                    "value": 42_372_000,
+                    "value": 34_848_000,
                     "category": "derived",
                     "factors": [
-                        {"factor_id": "enrollees", "value": 64_200_000, "source_id": "health_policy_2026"},
-                        {"factor_id": "two_plus_chronic", "value": 0.66, "source_id": "policy_paper_2023"},
+                        {"factor_id": "enrollees", "value": 52_800_000, "source_id": "market_report_2026"},
+                        {"factor_id": "qualifying_share", "value": 0.66, "source_id": "policy_paper_2023"},
                     ],
                 }
             ]
@@ -7241,9 +7321,9 @@ def test_unstructured_derivation_aggregates_to_one_warning_naming_every_figure()
             [
                 {"name": "industry_total", "value": 1.0e11, "category": "derived"},
                 {"name": "segment_pct", "value": 10.0, "category": "derived"},
-                {"name": "arpu", "value": 2436, "category": "derived"},
+                {"name": "arpu", "value": 1884, "category": "derived"},
                 {"name": "serviceable_pct", "value": 9.1, "category": "derived"},
-                {"name": "customer_count", "value": 42_400_000, "category": "sourced"},
+                {"name": "customer_count", "value": 61_000_000, "category": "sourced"},
             ]
         )
     )
@@ -7254,6 +7334,26 @@ def test_unstructured_derivation_aggregates_to_one_warning_naming_every_figure()
         assert label in hit[0]["message"], (label, hit[0]["message"])
     # The `sourced` assumption is not a derivation and must not be named.
     assert "Customer Count" not in hit[0]["message"]
+
+
+def test_listed_factors_without_sources_are_counted_by_their_own_list() -> None:
+    """The count in "N figures list the numbers they are built from" is the number of figures it names.
+
+    It printed the size of a different list -- the estimates missing from the sensitivity pass -- so a
+    founder read "0 figures list ..." beside two named figures."""
+    unsourced_factors = [{"factor_id": "a", "value": 0.5}, {"factor_id": "b", "value": 0.4}]
+    rc, data, _d = _compose_with_validation(
+        _validation_with(
+            [
+                {"name": "segment_pct", "value": 20.0, "category": "derived", "factors": unsourced_factors},
+                {"name": "serviceable_pct", "value": 20.0, "category": "derived", "factors": unsourced_factors},
+            ]
+        )
+    )
+    assert rc == 0 and data is not None
+    hit = [w for w in data["validation"]["warnings"] if w["code"] == "UNSTRUCTURED_DERIVATION"]
+    assert len(hit) == 1, [w["code"] for w in data["validation"]["warnings"]]
+    assert "2 figures list the numbers they are built from" in hit[0]["message"], hit[0]["message"]
 
 
 def test_malformed_factors_is_unstructured_not_a_crash() -> None:
@@ -7287,7 +7387,7 @@ _FACTORS_BU = [
     {"factor_id": "caregivers_per_recipient_composite", "value": 0.5513, "source_id": "caregiving_survey_2025"},
     {"factor_id": "caregiver_employed", "value": 0.60, "source_id": "caregiving_survey_2025"},
     {"factor_id": "worker_benefit_access", "value": 0.61, "source_id": "labour_stats_2024"},
-    {"factor_id": "fee_for_service_share", "value": 0.45, "source_id": "health_policy_2026"},
+    {"factor_id": "fee_for_service_share", "value": 0.45, "source_id": "market_report_2026"},
 ]
 
 
@@ -7297,19 +7397,41 @@ def _compose_both_with_factors(
     sp: float = 10.0,
     svc: float = 9.1,
 ) -> tuple[int, dict | None]:
-    v = _validation_with(
+    # The sizing is the calculator's, resolved from the record by reference: the chains compared are
+    # those of the figures each input actually used.
+    v, sizing = _v1_run(
         [
-            {"name": "segment_pct", "value": sp, "category": "derived", "factors": td_factors},
-            {"name": "serviceable_pct", "value": svc, "category": "derived", "factors": bu_factors},
-        ]
+            _v1_entry("segment_pct", sp, "percent_points", "derived", factors=td_factors),
+            _v1_entry("serviceable_pct", svc, "percent_points", "derived", factors=bu_factors),
+            _v1_entry("industry_total", 114_924_000_000, "money_total_per_year", currency="USD"),
+            _v1_entry("share_pct", 0.3, "percent_points"),
+            _v1_entry("customer_count", 61_000_000, "count"),
+            _v1_entry("arpu", 1884, "money_per_customer", currency="USD", period="year"),
+            _v1_entry("target_pct", 0.32, "percent_points"),
+        ],
+        {
+            "approach": "both",
+            **{
+                p: {"assumption": p}
+                for p in (
+                    "industry_total",
+                    "segment_pct",
+                    "share_pct",
+                    "customer_count",
+                    "arpu",
+                    "serviceable_pct",
+                    "target_pct",
+                )
+            },
+        },
     )
     arts = {
         "inputs.json": _VALID_INPUTS,
         "methodology.json": {**_VALID_METHODOLOGY, "approach_chosen": "both"},
         "validation.json": v,
-        "sizing.json": _both_sizing(103_286_400_000, sp, 0.3, 42_400_000, 2436, svc, 0.32),
-        "checklist.json": _VALID_CHECKLIST,
-        "sensitivity.json": _VALID_SENSITIVITY,
+        "sizing.json": sizing,
+        "checklist.json": _stamped(_VALID_CHECKLIST, sizing),
+        "sensitivity.json": _stamped(_VALID_SENSITIVITY, sizing),
     }
     rc, data, _err = run_script("compose_report.py", ["--dir", _make_artifact_dir(arts)])
     return rc, data
@@ -7385,7 +7507,7 @@ def test_shared_factor_overlap_needs_both_chains() -> None:
         "inputs.json": _VALID_INPUTS,
         "methodology.json": {**_VALID_METHODOLOGY, "approach_chosen": "both"},
         "validation.json": v,
-        "sizing.json": _both_sizing(103_286_400_000, 10.0, 0.3, 42_400_000, 2436, 9.1, 0.32),
+        "sizing.json": _both_sizing(114_924_000_000, 10.0, 0.3, 61_000_000, 1884, 9.1, 0.32),
         "checklist.json": _VALID_CHECKLIST,
         "sensitivity.json": _VALID_SENSITIVITY,
     }
@@ -7457,7 +7579,7 @@ def test_red_team_keeps_a_correction_that_states_a_number() -> None:
             "findings": [
                 {
                     **_GOOD_FINDING,
-                    "what_is_true": "The recurring rate is actually $203 on n=17, not $66.",
+                    "what_is_true": "The recurring rate is actually $157 on n=13, not $47.",
                 }
             ]
         }
@@ -7768,12 +7890,12 @@ def test_a_token_embedded_in_a_prose_claim_is_humanized_in_place() -> None:
     )
     assert rc == 0 and data is not None
     assert "existing_claims" not in data["verdict"], data["verdict"]
-    assert "the TAM your materials state = $3.2B" in data["verdict"], data["verdict"]
+    assert "the TAM you stated = $3.2B" in data["verdict"], data["verdict"]
     md = _compose_md_text(Path(d))
     assert "existing_claims" not in md.split("## Adversarial Findings")[1].split("\n## ")[0]
     rc_html, html_text, err = run_script_raw("visualize.py", ["--dir", d])
     assert rc_html == 0, err
-    assert "existing_claims" not in html_text and "the TAM your materials state" in html_text
+    assert "existing_claims" not in html_text and "the TAM you stated" in html_text
     # A filename inside a claim is left for the founder-text scan to name, not mangled into words.
     rc2, data2, _ = _compose_with_redteam(
         {**_REDTEAM_ARTIFACT, "findings": [{**_REDTEAM_ARTIFACT["findings"][0], "claim_attacked": "see notes_v2.json"}]}
@@ -7977,7 +8099,7 @@ def test_dispatch_prompt_lists_documents_before_artifacts_and_no_targets(tmp_pat
     (h / "docs" / "deck.pdf").write_bytes(b"%PDF-1.4\n%%EOF\n")
     (h / "docs" / "notes.md").write_text("# notes")
     (h / "docs" / ".DS_Store").write_bytes(b"\0")
-    (h / "ocr" / "deck.pdf.p2.txt").write_text("n=17")
+    (h / "ocr" / "deck.pdf.p2.txt").write_text("n=13")
     (h / "ocr" / "deck.pdf.p10.txt").write_text("page ten")
     rc, out, err = _dispatch(
         [
@@ -8077,7 +8199,7 @@ def test_ocr_uploads_writes_one_sidecar_per_scanned_page(tmp_path: Path) -> None
     rc, data, _ = run_script("ocr_uploads.py", ["--uploads-dir", str(u), "--out", str(tmp_path / "o")])
     assert rc == 0 and data is not None
     assert data["ocr_available"] and data["pages_written"] == 2, data
-    assert "n=17" in (tmp_path / "o" / "deck.pdf.p2.txt").read_text()
+    assert "n=13" in (tmp_path / "o" / "deck.pdf.p2.txt").read_text()
     receipt = json.loads((tmp_path / "o" / "receipt.json").read_text())
     assert receipt["complete"] is True and receipt["documents"] == {"deck.pdf": {"pages": 2, "written": 2}}
 
@@ -8110,7 +8232,7 @@ def test_ocr_uploads_resumes_from_its_receipt(tmp_path: Path) -> None:
     assert "a.pdf: already read" in err
     assert (o / "a.pdf.p1.txt").read_text() == "PRIOR"  # not re-OCR'd
     assert data["complete"] is True and set(data["documents"]) == {"a.pdf", "b.pdf"}
-    assert "n=17" in (o / "b.pdf.p2.txt").read_text()
+    assert "n=13" in (o / "b.pdf.p2.txt").read_text()
 
 
 def _scanned_handoff(tmp_path: Path) -> tuple[Path, Path]:
@@ -8176,8 +8298,8 @@ _RUN = "20260101T000000Z"
 def _doc_finding(**kw: Any) -> dict[str, Any]:
     base = {
         "claim_attacked": "arpu evidence base",
-        "what_is_true": "the recurring figure rests on n=17, not n=47",
-        "evidence_quote": "RECURRING (M2+) n=17 patient-months -- $203 per patient month",
+        "what_is_true": "the recurring figure rests on n=13, not n=37",
+        "evidence_quote": "RENEWAL (month 3 on) n=13 customer-months -- $157 per customer per month",
         "source_url": "document:notes.md#page=1",
         "source_title": "founder notes",
         "severity": "high",
@@ -8199,13 +8321,13 @@ def test_red_team_document_citation_is_checked_against_the_text_layer(tmp_path: 
     of slide 8 is forbidden from citing slide 8."""
     u = tmp_path / "u"
     u.mkdir()
-    (u / "notes.md").write_text("Slide 8. RECURRING (M2+) n=17 patient-months -- $203 per patient month\n")
+    (u / "notes.md").write_text("Slide 8. RENEWAL (month 3 on) n=13 customer-months -- $157 per customer per month\n")
     payload = {
         "findings": [
             _doc_finding(),
-            _doc_finding(evidence_quote="47 patient-months from 30 distinct patients here"),
+            _doc_finding(evidence_quote="37 customer-months from 24 distinct customers here"),
             _doc_finding(source_url="document:missing.pdf#page=8"),
-            _doc_finding(evidence_quote="n=17"),
+            _doc_finding(evidence_quote="n=13"),
             _doc_finding(source_url="document:notes.md#page=0"),
         ],
         "could_not_check": [],
@@ -8223,13 +8345,13 @@ def test_red_team_document_citation_is_checked_against_the_text_layer(tmp_path: 
 
 
 def test_red_team_document_citation_page_is_optional_for_a_file_with_no_pages(tmp_path: Path) -> None:
-    """Live: the red team cited `document:meeting-notes-2026-09-09.md` -- a markdown file has no
+    """Live: the red team cited `document:meeting-notes.md` -- a markdown file has no
     pages -- and the rule demanding `#page=<n>` set a real finding aside. A PDF still needs the page."""
     u = tmp_path / "u"
     u.mkdir()
-    (u / "notes.md").write_text("Total addressable channel: ~60 EAPs in the US, of which only a handful are large.\n")
+    (u / "notes.md").write_text("Reachable channel: about 40 regional brokers, and most of them are small.\n")
     (u / "deck.pdf").write_bytes(b"%PDF-1.4\n%%EOF\n")
-    q = "Total addressable channel: ~60 EAPs in the US, of which only a handful are large."
+    q = "Reachable channel: about 40 regional brokers, and most of them are small."
     payload = {
         "findings": [
             _doc_finding(source_url="document:notes.md", evidence_quote=q),  # no page: fine for .md
@@ -8260,7 +8382,7 @@ def test_red_team_document_citation_uses_the_ocr_sidecar_for_a_scanned_page(tmp_
     (u / "deck.pdf").write_bytes(b"%PDF-1.4\n%%EOF\n")
     o = tmp_path / "o"
     o.mkdir()
-    (o / "deck.pdf.p8.txt").write_text("RECURRING (M2+) n=17 patient-months -- $203 per patient month")
+    (o / "deck.pdf.p8.txt").write_text("RENEWAL (month 3 on) n=13 customer-months -- $157 per customer per month")
     payload = {
         "findings": [
             _doc_finding(source_url="document:deck.pdf#page=8"),
@@ -8383,7 +8505,7 @@ def test_equal_value_rows_are_marked_even_when_the_warning_is_accepted() -> None
     it away -- its own reason conceding "not fully independent corroboration ... which the report
     should say plainly" -- while the summary table said nothing. The mark comes from the detector, not
     the warning list, so acceptance explains and no longer hides."""
-    sizing = _both_sizing(90_000_000_000, 37.32, 0.3, 42_400_000, 2436, 37.32, 0.32)  # equal SAM slots, no TAM identity
+    sizing = _both_sizing(90_000_000_000, 37.32, 0.3, 61_000_000, 1884, 37.32, 0.32)  # equal SAM slots, no TAM identity
     meth = {
         **_VALID_METHODOLOGY,
         "approach_chosen": "both",
@@ -8402,7 +8524,7 @@ def test_equal_value_rows_are_marked_even_when_the_warning_is_accepted() -> None
     ]
     table = _compose_md_text(Path(d)).split("## Analysis Checklist")[0]
     assert "| SAM | $33.6B | Top-down ‡ |" in table, table
-    assert "| SAM | $38.5B | Bottom-up ‡ |" in table, table
+    assert "| SAM | $42.9B | Bottom-up ‡ |" in table, table
     assert "| TAM | $90.0B | Top-down |" in table, table
     assert "‡ Both builds narrow this figure by the same number" in table
     # ...and on the HTML surface, which nobody reads and where this class of defect survives.
@@ -8412,7 +8534,7 @@ def test_equal_value_rows_are_marked_even_when_the_warning_is_accepted() -> None
 
 
 def test_no_shared_figure_means_no_mark() -> None:
-    rc, data, d = _compose_with_sizing(_both_sizing(90_000_000_000, 10.0, 0.3, 42_400_000, 2436, 9.1, 0.32))
+    rc, data, d = _compose_with_sizing(_both_sizing(90_000_000_000, 10.0, 0.3, 61_000_000, 1884, 9.1, 0.32))
     assert rc == 0
     table = _compose_md_text(Path(d)).split("## Analysis Checklist")[0]
     assert "‡" not in table and "†" not in table
@@ -8533,7 +8655,7 @@ def test_closing_message_explains_each_mark_the_verdict_quotes() -> None:
     gets no legend line (the legend is derived from the text, not from the report's state)."""
     inputs = {
         **_VALID_INPUTS,
-        "founder_stated_inputs": {"arpu": 2436},
+        "founder_stated_inputs": {"arpu": 1884},
         "existing_claims": {"tam": 80_000_000_000},
         "existing_claims_currency": "USD",
     }
@@ -8542,7 +8664,7 @@ def test_closing_message_explains_each_mark_the_verdict_quotes() -> None:
         "findings": [{**_REDTEAM_ARTIFACT["findings"][0], "severity": "high", "parameter": "arpu"}],
     }
     rc, data, d = _compose_with_sizing(
-        _both_sizing(7e9, 37.32, 3, 41_000_000, 2436, 22.33, 0.268), inputs=inputs, redteam=rt
+        _both_sizing(7e9, 37.32, 3, 53_000_000, 1884, 22.33, 0.268), inputs=inputs, redteam=rt
     )
     assert rc == 0 and data is not None
     assert "$99.9B \u00a7 (bottom-up)" in data["verdict"], data["verdict"]
@@ -8622,23 +8744,23 @@ def test_closing_message_refuses_a_report_without_a_verdict(tmp_path: Path) -> N
 
 
 def test_contested_stated_input_marks_the_rows_built_on_it() -> None:
-    """The founder's $203 PMPM was the base case, an outside source said $66, and nothing in the
+    """The founder's $157 a month was the base case, an outside source said $47, and nothing in the
     summary table said which rows rested on the contested figure. No number field, no re-basing: the
     red team may not propose figures, and the live finding quoted a monthly rate against an annual
     ARPU -- a value field would launder that unit mismatch into a warning."""
-    inputs = {**_VALID_INPUTS, "founder_stated_inputs": {"arpu": 2436}}
+    inputs = {**_VALID_INPUTS, "founder_stated_inputs": {"arpu": 1884}}
     rt = {
         **_REDTEAM_ARTIFACT,
         "findings": [{**_REDTEAM_ARTIFACT["findings"][0], "severity": "high", "parameter": "arpu"}],
     }
     rc, data, d = _compose_with_sizing(
-        _both_sizing(7e9, 37.32, 3, 41_000_000, 2436, 22.33, 0.268), inputs=inputs, redteam=rt
+        _both_sizing(7e9, 37.32, 3, 53_000_000, 1884, 22.33, 0.268), inputs=inputs, redteam=rt
     )
     assert rc == 0 and data is not None
     table = _compose_md_text(Path(d)).split("## Analysis Checklist")[0]
     assert "| TAM | $99.9B | Bottom-up § |" in table, table
     assert "| SAM | $22.3B | Bottom-up § |" in table, table
-    assert "| SOM | $267.7M | Bottom-up § |" in table, table
+    assert "| SOM | $267.6M | Bottom-up § |" in table, table
     assert "| TAM | $7.0B | Top-down |" in table, table  # top-down did not consume arpu
     assert "§ Built on a figure you stated that a cited source contradicts" in table
     rc_html, html_text, err = run_script_raw("visualize.py", ["--dir", d])
@@ -8647,13 +8769,13 @@ def test_contested_stated_input_marks_the_rows_built_on_it() -> None:
 
 
 def test_contested_mark_needs_a_high_finding_on_a_stated_input() -> None:
-    inputs = {**_VALID_INPUTS, "founder_stated_inputs": {"arpu": 2436}}
+    inputs = {**_VALID_INPUTS, "founder_stated_inputs": {"arpu": 1884}}
     medium = {
         **_REDTEAM_ARTIFACT,
         "findings": [{**_REDTEAM_ARTIFACT["findings"][0], "severity": "medium", "parameter": "arpu"}],
     }
     _, _, d1 = _compose_with_sizing(
-        _both_sizing(7e9, 37.32, 3, 41_000_000, 2436, 37.32, 0.268), inputs=inputs, redteam=medium
+        _both_sizing(7e9, 37.32, 3, 53_000_000, 1884, 37.32, 0.268), inputs=inputs, redteam=medium
     )
     assert "§" not in _compose_md_text(Path(d1)).split("## Analysis Checklist")[0]
     not_stated = {
@@ -8661,7 +8783,7 @@ def test_contested_mark_needs_a_high_finding_on_a_stated_input() -> None:
         "findings": [{**_REDTEAM_ARTIFACT["findings"][0], "severity": "high", "parameter": "customer_count"}],
     }
     _, _, d2 = _compose_with_sizing(
-        _both_sizing(7e9, 37.32, 3, 41_000_000, 2436, 37.32, 0.268), inputs=inputs, redteam=not_stated
+        _both_sizing(7e9, 37.32, 3, 53_000_000, 1884, 37.32, 0.268), inputs=inputs, redteam=not_stated
     )
     assert "§" not in _compose_md_text(Path(d2)).split("## Analysis Checklist")[0]
 
@@ -8684,7 +8806,7 @@ def test_red_team_keeps_a_known_parameter_and_drops_an_unknown_one(tmp_path: Pat
 def _verdict_sizing() -> dict[str, Any]:
     """Top-down SOM $19.2M, bottom-up SOM $56.8M, deltas set as the producer would (the helper pins
     comparison to a 0.0 TAM delta; compose never recomputes)."""
-    s = _both_sizing(2e9, 8.0, 12.0, 233_000, 2436, 25.0, 10.0)
+    s = _both_sizing(2e9, 8.0, 12.0, 301_250, 1884, 25.0, 10.0)
     tail = "Review assumptions — one approach likely has a flawed input."
     s["comparison"] = {
         "tam_delta_pct": 111.6,
@@ -8713,9 +8835,7 @@ def test_summary_opens_with_the_verdict_from_fields() -> None:
     assert rc == 0 and data is not None
     md = _compose_md_text(Path(d))
     head = _summary_head(md)
-    assert "Your materials state SOM $100.0M; this analysis finds $19.2M (top-down) and $56.8M (bottom-up)." in head, (
-        head
-    )
+    assert "You stated SOM $100.0M; this analysis finds $19.2M (top-down) and $56.8M (bottom-up)." in head, head
     assert (
         "The two builds differ by 111.6% on TAM and 98.9% on SOM — one approach likely has a flawed input." in head
     ), head
@@ -8727,12 +8847,43 @@ def test_summary_opens_with_the_verdict_from_fields() -> None:
     assert md.index("| Metric | Value | Method |") - md.index("## Executive Summary") < 1400, head
 
 
+def test_the_verdict_answers_whether_the_stated_figures_hold_up_first() -> None:
+    """The founder asks "do my numbers hold up?", and the printed hand-over gave figures but no answer in
+    that form. On 3/3 live runs the model wrote its own answer in chat first ("neither of your headline
+    numbers holds up"), with reasons, and in 2/3 a figure the analysis never produced. The answer is now
+    the verdict's first sentence, from the same comparison the sentence after it states."""
+    inputs = {**_VALID_INPUTS, "existing_claims": {"tam": None, "sam": None, "som": 100_000_000}}
+    rc, data, d = _compose_with_sizing(_verdict_sizing(), inputs=inputs)
+    assert rc == 0 and data is not None
+    head = _summary_head(_compose_md_text(Path(d)))
+    first = "Short answer: the SOM you stated ($100.0M) does not hold up — both builds come in below it."
+    assert first in head, head
+    assert head.index(first) < head.index("You stated SOM"), head
+    assert data["verdict"].startswith("Short answer:")
+
+
+def test_the_short_answer_distinguishes_the_three_outcomes() -> None:
+    import importlib.util
+
+    sys.path.insert(0, MARKET_SIZING_DIR)
+    spec = importlib.util.spec_from_file_location("ms_view_answer", Path(MARKET_SIZING_DIR) / "_view.py")
+    assert spec is not None and spec.loader is not None
+    view = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(view)
+    assert view._holds_up(100.0, [110.0, 95.0]) == "holds up against both builds"
+    assert view._holds_up(100.0, [110.0, 40.0]) == "holds up against one build but not the other"
+    assert view._holds_up(100.0, [40.0, 30.0]) == "does not hold up — both builds come in below it"
+    assert view._holds_up(100.0, [240.0, 30.0]) == "does not hold up — neither build comes close to it"
+    assert view._holds_up(100.0, [90.0]) == "holds up against this analysis"
+    assert view._holds_up(100.0, [300.0]) == "does not hold up — this analysis comes in above it"
+
+
 def test_verdict_quotes_a_marked_figure_with_its_mark() -> None:
     """A figure the table marks § (built on a contested stated input) carries the mark in the sentence."""
     inputs = {
         **_VALID_INPUTS,
         "existing_claims": {"tam": None, "sam": None, "som": 100_000_000},
-        "founder_stated_inputs": {"arpu": 2436},
+        "founder_stated_inputs": {"arpu": 1884},
     }
     rt = {
         **_REDTEAM_ARTIFACT,
@@ -8756,11 +8907,11 @@ def test_verdict_single_approach_and_no_claims() -> None:
     )
     assert rc == 0
     head = _summary_head(_compose_md_text(Path(d)))
-    assert "Your materials state SOM $100.0M; this analysis finds" in head and "(bottom-up)." in head, head
+    assert "You stated SOM $100.0M; this analysis finds" in head and "(bottom-up)." in head, head
     assert "The two builds differ" not in head
     rc2, _, d2 = _compose_with_sizing(_verdict_sizing())  # _VALID_INPUTS states no claim
     head2 = _summary_head(_compose_md_text(Path(d2)))
-    assert "Your materials state" not in head2
+    assert "You stated" not in head2
     assert "The two builds differ by 111.6% on TAM and 98.9% on SOM" in head2
 
 
@@ -8835,7 +8986,7 @@ def test_verdict_paragraph_renders_in_the_html_hero() -> None:
     assert rc_html == 0, err
     hero = html_text[html_text.index("</h1>") : html_text.index("<main")]
     assert 'class="verdict"' in hero
-    assert "Your materials state SOM $100.0M; this analysis finds $19.2M (top-down) and $56.8M (bottom-up)." in hero
+    assert "You stated SOM $100.0M; this analysis finds $19.2M (top-down) and $56.8M (bottom-up)." in hero
     assert "The two builds differ by 111.6% on TAM and 98.9% on SOM" in hero
     # visualize escapes the apostrophe; assert the class phrase without it
     assert "An outside review raised 1 challenge: 1 from this analysis" in hero
@@ -8851,7 +9002,7 @@ def test_a_market_figure_in_founder_stated_inputs_is_flagged_high() -> None:
     arpu is a fact about the founder's own business; the rest are market figures."""
     inputs = {
         **_VALID_INPUTS,
-        "founder_stated_inputs": {"arpu": 2436, "customer_count": 64_000_000, "target_pct": 0.27},
+        "founder_stated_inputs": {"arpu": 1884, "customer_count": 64_000_000, "target_pct": 0.27},
     }
     rc, data, d = _compose_with_sizing(_verdict_sizing(), inputs=inputs)
     assert rc == 0 and data is not None
@@ -8866,7 +9017,7 @@ def test_a_market_figure_in_founder_stated_inputs_is_flagged_high() -> None:
 
 
 def test_arpu_alone_in_founder_stated_inputs_is_not_flagged() -> None:
-    inputs = {**_VALID_INPUTS, "founder_stated_inputs": {"arpu": 2436}}
+    inputs = {**_VALID_INPUTS, "founder_stated_inputs": {"arpu": 1884}}
     rc, data, _ = _compose_with_sizing(_verdict_sizing(), inputs=inputs)
     assert rc == 0 and data is not None
     assert not [x for x in data["validation"]["warnings"] if x["code"] == "FOUNDER_STATED_MARKET_FIGURE"]
@@ -8879,15 +9030,15 @@ def test_arpu_alone_in_founder_stated_inputs_is_not_flagged() -> None:
 # there is nothing left for the reviewed party to edit. The quote is never touched.
 
 _RUN_SHAPED_FINDING = {
-    "claim_attacked": "Bottom-up TAM/SAM/SOM are all built on arpu=$4,620 (the deck's $385 blended PPPM)",
+    "claim_attacked": "Bottom-up TAM/SAM/SOM are all built on arpu=$3,132 (the deck's $261 blended PPPM)",
     "what_is_true": (
-        "sizing.json's actual bottom_up.tam.value is $46.2B, not $33.7B, and validation.json's "
+        "sizing.json's actual bottom_up.tam.value is $31.3B, not $33.7B, and validation.json's "
         "'date_accessed' field is only when the page was retrieved. The checklist step (data_current) "
         "and existing_claims.tam disagree (14.5M vs. the prior 10.593M)."
     ),
-    "evidence_quote": "validation.json figure_validations lists arpu_founder_$385_pppm as refuted",
+    "evidence_quote": "validation.json figure_validations lists arpu_founder_$261_pppm as refuted",
     "source_url": "internal:analysis",
-    "source_title": "validation.json figure_validations (arpu_founder_$385_pppm, status: refuted) vs. sizing.json",
+    "source_title": "validation.json figure_validations (arpu_founder_$261_pppm, status: refuted) vs. sizing.json",
     "severity": "high",
     "parameter": "arpu",
 }
@@ -8910,8 +9061,8 @@ def test_red_team_words_our_files_and_identifiers_for_the_founder(tmp_path: Path
         "arpu=",
     ):
         assert leaked not in prose, f"{leaked!r} reached the founder: {prose}"
-    assert "The sizing calculation's actual bottom-up TAM is $46.2B" in f["what_is_true"]
-    assert "ARPU=$4,620" in f["claim_attacked"]
+    assert "The sizing calculation's actual bottom-up TAM is $31.3B" in f["what_is_true"]
+    assert "ARPU=$3,132" in f["claim_attacked"]
     # The author's own words are not re-cased: "vs. the prior" stays lower-case.
     assert "vs. the prior" in f["what_is_true"]
     # A quotation is never reworded: a reworded quote is a false one.
@@ -8939,7 +9090,7 @@ def test_red_team_wording_passes_the_fleet_founder_text_scan(tmp_path: Path) -> 
 def test_red_team_wording_leaves_the_founders_files_and_urls_alone(tmp_path: Path) -> None:
     uploads = tmp_path / "docs"
     uploads.mkdir()
-    (uploads / "notes.md").write_text("RECURRING (M2+) n=17 patient-months -- $203 per patient month\n")
+    (uploads / "notes.md").write_text("RENEWAL (month 3 on) n=13 customer-months -- $157 per customer per month\n")
     finding = _doc_finding(
         what_is_true="notes.md and founder-notes.md say otherwise; see https://kff.org/a_b/page.html e.g. here",
         source_title="notes.md, page 1",
@@ -8962,7 +9113,7 @@ def test_a_document_the_review_quoted_is_not_reported_as_unopened(tmp_path: Path
     """
     uploads = tmp_path / "docs"
     uploads.mkdir()
-    (uploads / "notes.md").write_text("RECURRING (M2+) n=17 patient-months -- $203 per patient month\n")
+    (uploads / "notes.md").write_text("RENEWAL (month 3 on) n=13 customer-months -- $157 per customer per month\n")
     (uploads / "other.pdf").write_bytes(b"%PDF-1.4\n")
     rc, stdout, data = _run_red_team(
         tmp_path,
@@ -8992,11 +9143,11 @@ def test_a_rejected_findings_citation_does_not_count_as_reading(tmp_path: Path) 
     """
     uploads = tmp_path / "docs"
     uploads.mkdir()
-    (uploads / "notes.md").write_text("RECURRING (M2+) n=17 patient-months -- $203 per patient month\n")
+    (uploads / "notes.md").write_text("RENEWAL (month 3 on) n=13 customer-months -- $157 per customer per month\n")
     rc, stdout, data = _run_red_team(
         tmp_path,
         # Too short a quote for a document citation: validation rejects it.
-        {"findings": [_doc_finding(evidence_quote="n=17")], "sources_read": []},
+        {"findings": [_doc_finding(evidence_quote="n=13")], "sources_read": []},
         ["--uploads-dir", str(uploads)],
     )
     assert rc == 0 and data is not None, stdout
@@ -9015,7 +9166,7 @@ def test_red_team_words_could_not_check_like_the_findings(tmp_path: Path) -> Non
     """
     uploads = tmp_path / "docs"
     uploads.mkdir()
-    (uploads / "notes.md").write_text("RECURRING (M2+) n=17 patient-months -- $203 per patient month\n")
+    (uploads / "notes.md").write_text("RENEWAL (month 3 on) n=13 customer-months -- $157 per customer per month\n")
     unchecked = [
         "ledger.pdf pages 2-4, because no figure from them is consumed by the assumptions in "
         "validation.json or sizing.json",
@@ -9085,11 +9236,14 @@ def test_red_team_quote_is_not_reworded_by_the_founder_text_pass() -> None:
 
 
 def test_red_team_multi_line_quote_stays_inside_the_blockquote() -> None:
-    quote = "INITIATION (M0-M1) n=30 patient-months -- $488 per patient month\nRECURRING (M2+) n=17 -- $203"
+    quote = "ONBOARDING (months 1-2) n=24 customer-months -- $317 per customer-month\nRENEWAL (month 3 on) n=13 -- $157"
     rc, data, _d = _compose_with_redteam(_redteam_quoting(quote))
     assert rc == 0 and data is not None
     md = data["report_markdown"]
-    assert "> INITIATION (M0-M1) n=30 patient-months -- $488 per patient month\n> RECURRING (M2+) n=17 -- $203" in md
+    expected = (
+        "> ONBOARDING (months 1-2) n=24 customer-months -- $317 per customer-month\n> RENEWAL (month 3 on) n=13 -- $157"
+    )
+    assert expected in md
     assert "" not in md and "" not in md
 
 
@@ -9106,7 +9260,7 @@ def test_red_team_rejects_a_json_shaped_quote_of_the_analysis_per_finding(tmp_pa
 
 
 def test_red_team_keeps_a_sentence_that_happens_to_quote_a_word_and_a_colon(tmp_path: Path) -> None:
-    finding = {**_RUN_SHAPED_FINDING, "evidence_quote": 'The deck labels it "blended": $385 per patient month.'}
+    finding = {**_RUN_SHAPED_FINDING, "evidence_quote": 'The deck labels it "blended": $261 per customer per month.'}
     rc, _stdout, data = _run_red_team(tmp_path, {"findings": [finding]}, [])
     assert rc == 0 and data is not None and data["summary"]["accepted"] == 1
 
@@ -9127,7 +9281,7 @@ def _gated_dir(methodology_extra: dict[str, Any] | None = None) -> Path:
     arts = {
         name: {**base, "metadata": {"run_id": _CRUN}}
         for name, base in (
-            ("inputs.json", {**_VALID_INPUTS, "founder_stated_inputs": {"arpu": 203}}),
+            ("inputs.json", {**_VALID_INPUTS, "founder_stated_inputs": {"arpu": 157}}),
             ("methodology.json", methodology),
             ("validation.json", _VALID_VALIDATION),
             ("sizing.json", _VALID_SIZING),
@@ -9160,6 +9314,26 @@ def _warning_codes(data: dict[str, Any]) -> list[str]:
     return [w["code"] for w in data["validation"]["warnings"]]
 
 
+def test_a_dropped_challenge_is_not_said_to_have_had_no_source() -> None:
+    """The dropped finding cited `internal:analysis` and lacked only a title; both pages told the
+    founder "no source was given". The rejection reasons are about a finding being incomplete or
+    uncheckable, so the disclosure says that and nothing more specific."""
+    d = _gated_dir()
+    untitled = {**_GOOD_FINDING, "source_url": "internal:analysis", "source_title": None}
+    rc, stdout, _err = run_script_raw(
+        "red_team.py",
+        ["--run-id", _CRUN, "-o", str(d / "redteam.json")],
+        stdin_data=json.dumps({"findings": [_GOOD_FINDING, untitled]}),
+    )
+    assert rc == 0 and json.loads(stdout)["rejected"] == 1, stdout
+    md = _compose_dir(d)["report_markdown"]
+    rc, html_page, err = run_script_raw("visualize.py", ["--dir", str(d)])
+    assert rc == 0, err
+    for page in (md, html_page):
+        assert "1 further challenge could not be shown here" in page
+        assert "no source was given" not in page
+
+
 _REVIEW_CODES = {"REDTEAM_ALTERED", "RED_TEAM_RERUN_UNAPPROVED", "REVIEW_COPY_MISSING", "RED_TEAM_SKIP_CONTRADICTED"}
 
 
@@ -9167,7 +9341,7 @@ def test_red_team_writes_a_copy_per_round_and_counts_rounds_by_hand_off(tmp_path
     d = _gated_dir()
     assert _pipe_review(d, "Round one says the share is 6.1%.")["round"] == 1
     copy1 = json.loads((d / "handoff" / _CRUN / "redteam.r1.json").read_text())
-    assert copy1["_review_copy"]["inputs_at_review"]["founder_stated_inputs"] == {"arpu": 203}
+    assert copy1["_review_copy"]["inputs_at_review"]["founder_stated_inputs"] == {"arpu": 157}
     # The same hand-off again (e.g. corrected documents dir) is the same round, not a new one.
     assert _pipe_review(d, "Round one says the share is 6.1%.")["round"] == 1
     assert _pipe_review(d, "Round two says something else.")["round"] == 2
@@ -9188,7 +9362,7 @@ def test_re_piping_the_same_review_cannot_move_its_baseline() -> None:
     (d / "inputs.json").write_text(json.dumps(inputs))
     assert _pipe_review(d, "The published share is 6.1%.")["round"] == 1
     copy1 = json.loads((d / "handoff" / _CRUN / "redteam.r1.json").read_text())
-    assert copy1["_review_copy"]["inputs_at_review"]["founder_stated_inputs"] == {"arpu": 203}
+    assert copy1["_review_copy"]["inputs_at_review"]["founder_stated_inputs"] == {"arpu": 157}
     assert "FOUNDER_INPUT_REWRITTEN" in _warning_codes(_compose_dir(d))
 
 
@@ -9233,15 +9407,21 @@ def test_a_deleted_review_is_reported_and_still_shown() -> None:
     assert "The published share is 6.1%." in data["report_markdown"]
 
 
-def test_an_unapproved_second_review_is_reported_and_the_first_is_shown() -> None:
+def test_a_second_review_of_the_same_analysis_is_listed_after_the_first() -> None:
+    """Was: an unapproved second review was hidden and warned. The first is still the one shown, so
+    re-running cannot soften it; the second is now listed beneath it, so re-running cannot hide a
+    harsher one either (test_market_sizing_review_rounds.py covers the rule)."""
     d = _gated_dir()
     _pipe_review(d, "The first review found the share is 6.1%.")
     _pipe_review(d, "A second review found nothing much.")
     data = _compose_dir(d)
-    assert "RED_TEAM_RERUN_UNAPPROVED" in _warning_codes(data)
     assert "REDTEAM_ALTERED" not in _warning_codes(data)
-    assert "The first review found" in data["report_markdown"]
-    assert "A second review found" not in data["report_markdown"]
+    md = data["report_markdown"]
+    assert (
+        md.index("The first review found")
+        < md.index("A later review of the same analysis")
+        < md.index("A second review found")
+    )
 
 
 def test_an_approved_second_review_is_shown_without_a_warning() -> None:
@@ -9253,13 +9433,13 @@ def test_an_approved_second_review_is_shown_without_a_warning() -> None:
     assert "still overstates" in data["report_markdown"]
 
 
-def test_a_third_review_is_reported_even_with_approval() -> None:
+def test_a_written_approval_does_not_change_which_of_three_reviews_is_shown() -> None:
     d = _gated_dir({"red_team_revision": {"approved_by_founder": True, "founder_words": "yes"}})
     for text in ("First review.", "Second review.", "Third review."):
         _pipe_review(d, text)
-    data = _compose_dir(d)
-    assert "RED_TEAM_RERUN_UNAPPROVED" in _warning_codes(data)
-    assert "First review." in data["report_markdown"]
+    md = _compose_dir(d)["report_markdown"]
+    assert md.index("First review.") < md.index("Second review.") < md.index("Third review.")
+    assert "ran 3 times" in md
 
 
 def test_a_review_with_a_hand_off_dir_but_no_copy_is_reported() -> None:
@@ -9362,13 +9542,13 @@ def _set_methodology(d: Path, **extra: Any) -> None:
 
 
 def test_a_founder_figure_changed_after_the_review_without_confirmation_is_high() -> None:
-    """The measured edit: a stated 203 rewritten to 385 on a red-team finding's say-so, no founder asked."""
+    """The measured edit: a stated figure rewritten to the deck's on a red-team finding's say-so, no founder asked."""
     d = _gated_dir()
-    _pipe_review(d, "The deck's blended figure is $385.")
-    _set_inputs(d, founder_stated_inputs={"arpu": 385})
+    _pipe_review(d, "The deck's blended figure is $261.")
+    _set_inputs(d, founder_stated_inputs={"arpu": 261})
     data = _compose_dir(d)
     w = next(w for w in data["validation"]["warnings"] if w["code"] == "FOUNDER_INPUT_REWRITTEN")
-    assert w["severity"] == "high" and "203" in w["message"] and "385" in w["message"]
+    assert w["severity"] == "high" and "157" in w["message"] and "261" in w["message"]
     assert "A Figure You Gave Was Changed Without Your Confirmation" in data["report_markdown"]
 
 
@@ -9379,39 +9559,67 @@ def test_a_changed_period_is_a_changed_figure() -> None:
     assert "FOUNDER_INPUT_REWRITTEN" in _warning_codes(_compose_dir(d))
 
 
-def test_a_change_the_founder_confirmed_in_the_revision_is_not_reported() -> None:
+def test_a_founder_figure_changed_since_the_first_review_is_stated_even_when_approved() -> None:
+    """Was: an approval in methodology.json silenced it. The approval is model-written, and a live
+    run recorded one from an answer to a different question. The change is now stated as a fact,
+    true whether or not the founder chose it, and no later review can clear it."""
     d = _gated_dir()
-    _pipe_review(d, "The deck's blended figure is $385.")
-    _set_inputs(d, founder_stated_inputs={"arpu": 385})
+    _pipe_review(d, "The deck's blended figure is $261.")
+    _set_inputs(d, founder_stated_inputs={"arpu": 261}, founder_stated_inputs_period={"arpu": "month"})
     _set_methodology(
         d,
         red_team_revision={
             "approved_by_founder": True,
-            "founder_words": "use the blended $385",
-            "changes": [{"field": "arpu", "from": 203, "to": 385}],
+            "founder_words": "use the blended $261",
+            "changes": [{"field": "arpu", "from": 157, "to": 261}],
         },
     )
     _pipe_review(d, "The revised analysis still overstates the share.")
     data = _compose_dir(d)
-    assert "FOUNDER_INPUT_REWRITTEN" not in _warning_codes(data)
-    assert "revised once, with your approval" in data["report_markdown"]
-    rc, html, err = run_script_raw("visualize.py", ["--dir", str(d)])
-    assert rc == 0 and "revised once, with your approval" in html, err
+    w = next(w for w in data["validation"]["warnings"] if w["code"] == "FOUNDER_INPUT_REWRITTEN")
+    assert "Your ARPU was $157 when the outside review first ran and is $261 per month now" in w["message"], w
+    assert "approval" not in data["report_markdown"].lower()
 
 
 def test_a_blanket_approval_does_not_cover_an_unlisted_change() -> None:
     d = _gated_dir()
     _pipe_review(d, "Something.")
-    _set_inputs(d, founder_stated_inputs={"arpu": 385})
+    _set_inputs(d, founder_stated_inputs={"arpu": 261})
     _set_methodology(d, red_team_revision={"approved_by_founder": True, "founder_words": "revise", "changes": []})
     assert "FOUNDER_INPUT_REWRITTEN" in _warning_codes(_compose_dir(d))
 
 
-def test_an_approved_revision_with_no_new_review_says_so() -> None:
-    d = _gated_dir({"red_team_revision": {"approved_by_founder": True, "founder_words": "revise", "changes": []}})
-    _pipe_review(d, "Only one review ran.")
-    md = _compose_dir(d)["report_markdown"]
-    assert "no new review of it completed" in md
+def test_the_approval_flag_alone_does_not_license_a_change() -> None:
+    """Measured live in 0.13.0: the flag cleared this warning, and the model writes the flag.
+
+    methodology.json is a file the model is instructed to write, and `approved_by_founder` plus a
+    `changes` entry naming the field was the whole test. So a model told "restore the figure or get
+    the founder to confirm it" could clear the high warning without asking anyone. What remained was
+    FOUNDER_VALUE_OVERRIDDEN at medium, whose message names the new figure and the computed one but
+    never says what the founder originally gave.
+    """
+    d = _gated_dir()
+    _pipe_review(d, "The deck's blended figure is $261.")
+    _set_inputs(d, founder_stated_inputs={"arpu": 261})
+    _set_methodology(
+        d,
+        red_team_revision={
+            "approved_by_founder": True,
+            "founder_words": "use the blended $261",
+            "changes": [{"field": "arpu", "from": 157, "to": 261}],
+        },
+    )
+    assert "FOUNDER_INPUT_REWRITTEN" in _warning_codes(_compose_dir(d))
+
+
+def test_no_review_licenses_a_founder_figure_change() -> None:
+    """Was: a second review licensed the value it saw. A check a re-dispatched review can clear is
+    cleared by re-dispatching it, so the founder-figure check is keyed on the first review only."""
+    d = _gated_dir()
+    _pipe_review(d, "The deck's blended figure is $261.")
+    _set_inputs(d, founder_stated_inputs={"arpu": 261})
+    _pipe_review(d, "The revised analysis still overstates the share.")
+    assert "FOUNDER_INPUT_REWRITTEN" in _warning_codes(_compose_dir(d))
 
 
 def test_answers_that_could_not_change_the_analysis_are_shown_not_restated_in_chat() -> None:
@@ -9445,7 +9653,7 @@ def test_a_revision_round_reads_the_founders_documents_from_the_first_round(tmp_
     d = _gated_dir()
     r1 = d / "handoff" / _CRUN
     (r1 / "docs").mkdir(parents=True)
-    (r1 / "docs" / "notes.md").write_text("Recurring $203 per patient month.\n")
+    (r1 / "docs" / "notes.md").write_text("Recurring $157 per customer per month.\n")
     r2 = r1 / "r2"
     r2.mkdir()
     base = [
@@ -9475,17 +9683,17 @@ def test_a_founder_figure_the_analysis_did_not_use_is_shown_beside_the_one_it_di
     d = _gated_dir()
     _set_inputs(
         d,
-        founder_stated_inputs={"arpu": 203},
+        founder_stated_inputs={"arpu": 157},
         founder_stated_inputs_period={"arpu": "month"},
         founder_stated_inputs_source={"arpu": "chat"},
-        founder_stated_choice={"arpu": "the $203 I gave you"},
+        founder_stated_choice={"arpu": "the $157 I gave you"},
         founder_stated_alternatives={
             "arpu": [
                 {
-                    "value": 385,
+                    "value": 261,
                     "period": "month",
                     "source": "document:deck.pdf#page=2",
-                    "label": "blended net collectible",
+                    "label": "blended average rate",
                 }
             ]
         },
@@ -9493,12 +9701,34 @@ def test_a_founder_figure_the_analysis_did_not_use_is_shown_beside_the_one_it_di
     _pipe_review(d, "Something.")
     data = _compose_dir(d)
     md = data["report_markdown"]
-    assert "You also gave ARPU $385.00 per month (from deck.pdf, page 2: blended net collectible)" in md
-    assert "this analysis uses ARPU $203.00 per month (you gave it in chat), the one you chose" in md
+    # Three words cannot be checked against a page, so the page is not named (see
+    # test_market_sizing_attribution.py for the verified case).
+    assert "You also gave ARPU $261.00 per month (in your materials: blended average rate)" in md
+    assert "this analysis uses ARPU $157.00 per month, the one you chose" in md
     codes = _warning_codes(data)
-    # FOUNDER_VALUE_OVERRIDDEN is not in the list: the fixture's sizing does not use $2,436/yr.
+    # FOUNDER_VALUE_OVERRIDDEN is not in the list: the fixture's sizing does not use $1,884/yr.
     for code in ("FOUNDER_STATED_MARKET_FIGURE", "EXISTING_CLAIMS_SHAPE", "FOUNDER_TEXT_TOKEN"):
         assert code not in codes, (code, codes)
+
+
+def test_the_unasked_disclosure_is_on_the_html_page_too() -> None:
+    """ "You were not asked which to use" reached report.md only; the HTML page said nothing."""
+    d = _gated_dir()
+    _set_inputs(
+        d,
+        founder_stated_inputs={"arpu": 157},
+        founder_stated_inputs_period={"arpu": "month"},
+        founder_stated_alternatives={"arpu": [{"value": 261, "period": "month", "label": "blended"}]},
+    )
+    _set_methodology(d, founder_notes=["The churn figure is from Q2."])
+    _pipe_review(d, "Something.")
+    md = _compose_dir(d)["report_markdown"]
+    rc, html_page, err = run_script_raw("visualize.py", ["--dir", str(d)])
+    assert rc == 0, err
+    for page in (md, html_page):
+        assert "Your Answers" in page
+        assert "and you were not asked which to use" in page
+        assert "The churn figure is from Q2." in page
 
 
 def test_the_two_figures_question_comes_before_step_a_in_the_skill_text() -> None:
@@ -9539,21 +9769,21 @@ def test_compose_own_warnings_never_name_an_internal_file() -> None:
 
 # --- Task 8: ratios in factors[] (role: divisor) -----------------------------------------------
 #
-# A real run needed a RATIO -- "share of X" = 15,000,000 / 64,200,000 x100 = 23.36 -- and had no
+# A real run needed a RATIO -- e.g. "share of X" = 15,000,000 / 52,800,000 x100 = 28.41 -- and had no
 # way to itemize it except as two multiplicands, so the reconciliation warning read as a
 # nonsensical product ("multiply to 96300000000000000.0"). `factors[]` entries now accept an
 # optional `"role": "divisor"`; the derived value is (product of non-divisor entries) / (product
 # of divisor entries).
 _RATIO_FACTORS = [
     {"factor_id": "target_segment", "value": 15_000_000, "source_id": "company_stated"},
-    {"factor_id": "total_market", "value": 64_200_000, "source_id": "health_policy_2026", "role": "divisor"},
+    {"factor_id": "total_market", "value": 52_800_000, "source_id": "market_report_2026", "role": "divisor"},
 ]
 
 
 def test_factor_ratio_reconciles_when_stated_value_matches_the_division() -> None:
-    """15,000,000 / 64,200,000 x100 = 23.36 -- a RATIO, not a product of the two raw counts."""
+    """15,000,000 / 52,800,000 x100 = 28.41 -- a RATIO, not a product of the two raw counts."""
     rc, data, _d = _compose_with_validation(
-        _validation_with([{"name": "segment_pct", "value": 23.36, "category": "derived", "factors": _RATIO_FACTORS}])
+        _validation_with([{"name": "segment_pct", "value": 28.41, "category": "derived", "factors": _RATIO_FACTORS}])
     )
     assert rc == 0 and data is not None
     assert not [w for w in data["validation"]["warnings"] if w["code"] == "FACTOR_PRODUCT_MISMATCH"], data[
@@ -9574,12 +9804,12 @@ def test_factor_ratio_mismatch_shows_division_and_formatted_numbers() -> None:
     msg = hit[0]["message"]
     assert "÷" in msg, msg
     assert "×" not in msg, msg  # two factors, one of them a divisor -- no multiplication sign
-    assert "15,000,000" in msg and "64,200,000" in msg, msg
-    # The division comes to 23.36..., formatted to two decimals -- not the raw 17-digit float and
-    # not the nonsensical "96300000000000000.0" a plain product of the two counts would print.
-    assert "23.36" in msg, msg
+    assert "15,000,000" in msg and "52,800,000" in msg, msg
+    # The division comes to 28.41..., formatted to two decimals -- not the raw 17-digit float and
+    # not the nonsensical "79200000000000000.0" a plain product of the two counts would print.
+    assert "28.41" in msg, msg
     assert "e+" not in msg.lower(), msg
-    assert "96300000000000000" not in msg, msg
+    assert "79200000000000000" not in msg, msg
 
 
 def test_factor_zero_divisor_does_not_crash_and_is_silently_skipped() -> None:
@@ -9594,7 +9824,7 @@ def test_factor_zero_divisor_does_not_crash_and_is_silently_skipped() -> None:
                     "category": "derived",
                     "factors": [
                         {"factor_id": "target_segment", "value": 15_000_000, "source_id": "company_stated"},
-                        {"factor_id": "total_market", "value": 0, "source_id": "health_policy_2026", "role": "divisor"},
+                        {"factor_id": "total_market", "value": 0, "source_id": "market_report_2026", "role": "divisor"},
                     ],
                 }
             ]
@@ -9640,7 +9870,7 @@ def test_report_md_shows_division_for_a_ratio_chain() -> None:
                         {
                             "factor_id": "wide_share",
                             "value": 2.0,
-                            "source_id": "health_policy_2026",
+                            "source_id": "market_report_2026",
                             "role": "divisor",
                         },
                     ],
@@ -9676,12 +9906,12 @@ def test_factor_chain_rejects_an_unrecognized_role() -> None:
 
 
 def test_a_ratio_is_shown_in_numbers_a_founder_can_check() -> None:
-    """The ratio case this change exists for: `:g` printed it as "1.5e+07 ÷ 6.42e+07" in the one line
+    """The ratio case this change exists for: `:g` printed it as "1.5e+07 ÷ 5.28e+07" in the one line
     meant to let a founder redo the arithmetic, and a two-place formatter rounded a 0.3732 share."""
     _rc, _data, d = _compose_with_validation(
         _validation_with(
             [
-                {"name": "segment_pct", "value": 23.36, "category": "derived", "factors": _RATIO_FACTORS},
+                {"name": "segment_pct", "value": 28.41, "category": "derived", "factors": _RATIO_FACTORS},
                 {
                     "name": "serviceable_pct",
                     "value": 99.0,
@@ -9695,20 +9925,20 @@ def test_a_ratio_is_shown_in_numbers_a_founder_can_check() -> None:
         )
     )
     md = _compose_md_text(Path(d))
-    assert "built from: 15,000,000 ÷ 64,200,000" in md, md
+    assert "built from: 15,000,000 ÷ 52,800,000" in md, md
     assert "e+0" not in md
     assert "0.3732 × 0.5" in md
 
 
 def test_the_report_never_claims_a_choice_the_founder_was_not_offered() -> None:
     """Measured live: the two-figures question was skipped, and the report still told the founder
-    "this analysis uses ARPU $203.00 per month, the one you chose". A choice is claimed only when the
+    "this analysis uses ARPU $157.00 per month, the one you chose". A choice is claimed only when the
     founder's answer is recorded; otherwise the report says they were not asked."""
     base = {
-        "founder_stated_inputs": {"arpu": 203},
+        "founder_stated_inputs": {"arpu": 157},
         "founder_stated_inputs_period": {"arpu": "month"},
         "founder_stated_alternatives": {
-            "arpu": [{"value": 385, "period": "month", "source": "document:deck.pdf#page=2", "label": "blended"}]
+            "arpu": [{"value": 261, "period": "month", "source": "document:deck.pdf#page=2", "label": "blended"}]
         },
     }
     d = _gated_dir()
@@ -9716,7 +9946,7 @@ def test_the_report_never_claims_a_choice_the_founder_was_not_offered() -> None:
     _pipe_review(d, "Something.")
     md = _compose_dir(d)["report_markdown"]
     assert "the one you chose" not in md
-    assert "You also gave ARPU $385.00 per month" in md
+    assert "You also gave ARPU $261.00 per month" in md
     assert "you were not asked which to use" in md
 
     d2 = _gated_dir()
@@ -9725,7 +9955,120 @@ def test_the_report_never_claims_a_choice_the_founder_was_not_offered() -> None:
     assert "the one you chose" not in _compose_dir(d2)["report_markdown"]
 
     d3 = _gated_dir()
-    _set_inputs(d3, **base, founder_stated_choice={"arpu": "Use the $203 recurring rate"})
+    _set_inputs(d3, **base, founder_stated_choice={"arpu": "Use the $157 recurring rate"})
     _pipe_review(d3, "Something.")
     md3 = _compose_dir(d3)["report_markdown"]
     assert "the one you chose" in md3 and "not asked" not in md3
+
+
+# ---------------------------------------------------------------------------
+# HANDOFF_BYPASSED: a step whose results reached the report without passing the hand-off gate.
+# check_handoff.py leaves `<file>.gate.json` on every pass; compose names each step its artifacts came
+# from that has no gated hand-off in this run. Evidence is the ABSENCE of a record.
+# ---------------------------------------------------------------------------
+
+_CHECK_HANDOFF = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "scripts", "check_handoff.py")
+_ALL_STEPS = [
+    "top_down_output.json",
+    "bottom_up_output.json",
+    "sensitivity_output.json",
+    "checklist_output.json",
+    "redteam_output.json",
+]
+
+
+def _seed_gated(d: Path, stems: list[str], sub: str = "") -> None:
+    """Write each hand-off and pass it through the real gate, exactly as a run does."""
+    run_dir = d / "handoff" / _CRUN / sub if sub else d / "handoff" / _CRUN
+    run_dir.mkdir(parents=True, exist_ok=True)
+    for stem in stems:
+        (run_dir / stem).write_text('{"from": "the sub-agent"}', encoding="utf-8")
+        result = subprocess.run([sys.executable, _CHECK_HANDOFF, str(run_dir / stem)], capture_output=True, text=True)
+        assert result.returncode == 0, result.stdout
+
+
+def _bypass_warning(data: dict[str, Any]) -> str | None:
+    hits = [w["message"] for w in data["validation"]["warnings"] if w["code"] == "HANDOFF_BYPASSED"]
+    assert len(hits) <= 1, hits
+    return hits[0] if hits else None
+
+
+def test_handoff_bypass_names_the_ungated_step_and_a_fully_gated_run_is_silent() -> None:
+    """Seeded bypass and gated control on the same fixture, so a silent result means the check ran."""
+    d = _gated_dir()
+    _pipe_review(d, "Round one.")  # creates redteam.json and handoff/<run_id>/, as a real run does
+
+    # Lever engaged: with nothing gated, every step the artifacts came from is named.
+    msg = _bypass_warning(_compose_dir(d))
+    assert msg is not None
+    for label in ("top-down sizing", "bottom-up sizing", "sensitivity test", "quality checklist", "outside review"):
+        assert label in msg, (label, msg)
+
+    _seed_gated(d, [s for s in _ALL_STEPS if s != "sensitivity_output.json"])
+    data = _compose_dir(d)
+    msg = _bypass_warning(data)
+    assert msg is not None and "the sensitivity test" in msg
+    assert "quality checklist" not in msg and "outside review" not in msg
+    assert "handoff" not in msg.lower() and ".json" not in msg, "the founder label must name no path"
+    assert "saved output" in data["verdict"], "the verdict carries the disclosure to the hand-over"
+    assert "saved output" in data["report_markdown"]
+
+    _seed_gated(d, ["sensitivity_output.json"])
+    data = _compose_dir(d)
+    assert _bypass_warning(data) is None
+    assert "saved output" not in data["verdict"]
+
+
+def test_handoff_bypass_is_silent_when_the_run_has_no_handoff_dir() -> None:
+    """Every real run creates handoff/<run_id>/ at Step 0; without it there is nothing to judge."""
+    d = _gated_dir({"red_team_skipped": "founder_declined"})
+    assert not (d / "handoff").exists()
+    assert "HANDOFF_BYPASSED" not in _warning_codes(_compose_dir(d))
+
+
+def test_handoff_bypass_a_revised_run_is_judged_on_its_second_round() -> None:
+    d = _gated_dir()
+    _pipe_review(d, "Round one.")
+    _seed_gated(d, _ALL_STEPS)
+    # Step 6d: the sensitivity test, checklist and review re-run into r2. The sizing re-runs by
+    # --replay (no dispatch), so round 1's sizing records still stand.
+    _seed_gated(d, ["sensitivity_output.json", "checklist_output.json", "redteam_output.json"], sub="r2")
+    assert _bypass_warning(_compose_dir(d)) is None
+
+    # Round 1's checklist record must not vouch for a round-2 checklist that never passed the gate.
+    d2 = _gated_dir()
+    _pipe_review(d2, "Round one.")
+    _seed_gated(d2, _ALL_STEPS)
+    _seed_gated(d2, ["sensitivity_output.json", "redteam_output.json"], sub="r2")
+    msg = _bypass_warning(_compose_dir(d2))
+    assert msg is not None and "the quality checklist" in msg and "sensitivity" not in msg
+
+
+def test_handoff_bypass_a_handoff_rewritten_after_its_gate_counts_as_bypassed() -> None:
+    d = _gated_dir()
+    _pipe_review(d, "Round one.")
+    _seed_gated(d, _ALL_STEPS)
+    assert _bypass_warning(_compose_dir(d)) is None
+    (d / "handoff" / _CRUN / "checklist_output.json").write_text('{"rewritten": true}', encoding="utf-8")
+    msg = _bypass_warning(_compose_dir(d))
+    assert msg is not None and "the quality checklist" in msg
+
+
+def test_handoff_bypass_cannot_be_accepted_away() -> None:
+    d = _gated_dir({"accepted_warnings": [{"code": "HANDOFF_BYPASSED", "match": "sensitivity", "reason": "we know"}]})
+    _pipe_review(d, "Round one.")
+    _seed_gated(d, [s for s in _ALL_STEPS if s != "sensitivity_output.json"])
+    data = _compose_dir(d)
+    hits = [w for w in data["validation"]["warnings"] if w["code"] == "HANDOFF_BYPASSED"]
+    assert hits and hits[0]["severity"] == "medium", hits
+
+
+def test_handoff_bypass_known_residual_gated_then_degraded_is_not_disclosed() -> None:
+    """KNOWN, NOT A GUARANTEE (see _handoff_audit.py). The record proves a gated hand-off exists and
+    matches -- not that the producer consumed it. A checklist gated on its first dispatch and then
+    re-dispatched through the message channel in the same round keeps its matching record."""
+    d = _gated_dir()
+    _pipe_review(d, "Round one.")
+    _seed_gated(d, _ALL_STEPS)
+    # ...the re-dispatch degrades: its JSON is staged in /tmp and piped straight to checklist.py.
+    assert _bypass_warning(_compose_dir(d)) is None

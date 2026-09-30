@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""deck-review's and market-sizing's copies of the quote matcher must not drift from cap-table's original.
+"""deck-review's, market-sizing's and competitive-positioning's copies of the quote matcher must not drift
+from cap-table's original.
 
 WHY A COPY EXISTS AT ALL: skill scripts are standalone, run by path with no package
 context, so deck-review cannot import cap-table's `evidence_verifier`. `_theme.py` is
@@ -29,7 +30,9 @@ DECK_COPY = REPO / "founder-skills" / "skills" / "deck-review" / "scripts" / "_q
 # market-sizing's red team verifies a quoted sentence against the founder's page the same way, and
 # for the same reason cannot import either sibling. Third copy, same guard.
 MS_COPY = REPO / "founder-skills" / "skills" / "market-sizing" / "scripts" / "_quote_match.py"
-COPIES = (DECK_COPY, MS_COPY)
+# competitive-positioning's red team, the same check for the same reason. Fourth copy, same guard.
+CP_COPY = REPO / "founder-skills" / "skills" / "competitive-positioning" / "scripts" / "_quote_match.py"
+COPIES = (DECK_COPY, MS_COPY, CP_COPY)
 CAP_NORMALIZE = REPO / "founder-skills" / "skills" / "cap-table" / "scripts" / "_normalize.py"
 CAP_VERIFIER = REPO / "founder-skills" / "skills" / "cap-table" / "scripts" / "evidence_verifier.py"
 

@@ -162,6 +162,9 @@ _AGENTS_REQUIRING_WEBSEARCH: frozenset[str] = frozenset(
         # because every finding is contractually required to carry a source_url it could not have
         # fetched.
         "market-sizing-redteam",
+        # Same job for competitive-positioning's review: a finding is a published statement that
+        # contradicts a placement, a rating or a claim, and it must carry the source it came from.
+        "competitive-positioning-redteam",
     }
 )
 
@@ -209,10 +212,12 @@ _AGENTS_REQUIRING_WRITE: frozenset[str] = frozenset(
     {
         "cap-table",
         "competitive-positioning",
+        "competitive-positioning-redteam",
         "deck-review",
         "financial-model-review",
         "ic-sim",
         "market-sizing",
+        "market-sizing-redteam",
     }
 )
 

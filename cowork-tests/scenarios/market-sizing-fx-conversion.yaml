@@ -8,19 +8,21 @@ skills: [market-sizing]
 #
 # WHY THIS LANE EXISTS. The FX fix is only half deterministic. The producer half is unit-tested
 # (conversion, refusal-without-a-rate, no inverse inference, post-conversion re-validation). The other
-# half is PROSE — the dispatch templates ask the sub-agent to report a figure in its source's currency
-# and tag it with `<field>_currency`, and SKILL.md asks the main thread to look a rate up and re-pipe.
+# half is PROSE — SKILL.md Step 4 asks the main thread to record each money figure with the currency
+# its source states, and to look the exchange rate up and record it (with source and date) as its own
+# figure; the sizing sub-agent then references figures and converts nothing.
 # Nothing in the unit suite can prove a model does either. This repo has measured prose guardrails
 # inert three times, so "landed + green" is not evidence here.
 #
 # THE SETUP. An Israeli company pricing in shekels, in a category whose market data is published in
 # USD — the common real case, and the one SKILL.md calls out ("industry totals are almost always
-# quoted in USD"). If the pipeline works, `inputs.currency` is ILS, the sub-agent hands back a
-# USD-tagged industry total, the sizing step stops for a rate, and the re-pipe lands an `fx` block.
+# quoted in USD"). If the pipeline works, `inputs.currency` is ILS, the research records a USD market
+# figure and a sourced USD->ILS rate, and the calculator converts through it and writes an `fx` block.
+# A missing rate stops the sizing step with a remedy of recording it, then the same pipe is re-run.
 #
 # READING A FAILURE. `fx.conversions` absent is NOT automatically a defect — a run that legitimately
 # found an ILS-denominated market figure needs no conversion. Check `sizing.json`'s currency and the
-# sub-agent's hand-off before concluding the tag was dropped. What WOULD be a defect: a USD-sourced
+# research record before concluding the currency was dropped. What WOULD be a defect: a USD-sourced
 # figure sitting unconverted under an ILS label, which is the exact pre-fix behaviour.
 prompt: |
   I'm the founder of Meridian, a seed-stage Israeli B2B SaaS company based in Tel Aviv. We sell
@@ -34,6 +36,9 @@ prompt: |
   would cite an external market source, label it clearly.
 
 assert:
+  # A relative or /sessions/ file-tool path is refused at host-loop; the Step 0 proof exists so none is used.
+  # Content-class, so it covers sub-agent tool results too (checked by replay on a sub-agent-only string).
+  - tool_result_not_contains: "denied by your permission settings"
   - result: success
   # No `all_tasks_completed` here: nothing in this skill asks the agent for a task list, so the
   # assert is satisfiable only by chance and a losing run blocks a paid record rather than
@@ -47,9 +52,9 @@ assert:
       artifact: outputs/artifacts/market-sizing-meridian/sizing.json
       path: currency
       equals: ILS
-  # A conversion actually happened and was recorded. This is the assert that fails if the sub-agent
-  # never emits `<field>_currency` (nothing to convert) or if the main thread never supplies a rate
-  # (the run stops instead) — i.e. it fails on exactly the two prose-dependent steps.
+  # A conversion actually happened and was recorded. This is the assert that fails if the research
+  # never records the figure's currency (nothing to convert) or never records a rate (the run stops
+  # instead) — i.e. it fails on exactly the two prose-dependent steps.
   - artifact_json:
       artifact: outputs/artifacts/market-sizing-meridian/sizing.json
       path: fx.conversions.0.rate
@@ -74,6 +79,7 @@ assert:
   - max_turns: 140
   - tool_calls_max: 130
   - no_unexpected_files:
+      - 'outputs/artifacts/.host-outputs-*'  # Step 0's file-tool path proof (artifacts root)
       - 'outputs/artifacts/market-sizing-meridian/**'
       - 'outputs/artifacts/founder-context-meridian.json'
       - 'outputs/Meridian_Market_Sizing.*'

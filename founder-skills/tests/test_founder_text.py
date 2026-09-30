@@ -421,3 +421,114 @@ def test_scan_moves_with_substitute_or_the_warning_cannot_be_cleared() -> None:
     assert ft.scan(kept, protect_code_spans=True) == {"enums": [], "filenames": []}
     # ... and without the flag the same text IS reported, so the pair is not vacuously silent.
     assert ft.scan(kept)["enums"], "scan reports nothing even with protection off — the test proves nothing"
+
+
+# --- the coaching insertion marker --------------------------------------------
+
+
+def test_the_coaching_insertion_marker_is_not_a_leak_whatever_its_hex() -> None:
+    """Every compose writes `<!-- COACHING_INSERTION_POINT_<8 hex> -->` for the coaching step to
+    replace. The ALLCAPS rule needs every part uppercase, so a suffix with a hex letter never matched,
+    and an all-digit one (about one run in forty-three) did: a spurious warning that the founder is
+    shown and nobody can clear."""
+    for marker in ("<!-- COACHING_INSERTION_POINT_12345678 -->", "<!-- COACHING_INSERTION_POINT_a1b2c3d4 -->"):
+        assert ft.scan(f"# Report\n\n{marker}\n\nBody.")["enums"] == [], marker
+
+
+def test_the_marker_exemption_is_the_marker_not_the_word() -> None:
+    """Outside its comment the same token is prose, and prose carrying it IS a leak."""
+    assert ft.scan("See COACHING_INSERTION_POINT_12345678 below.")["enums"] == ["COACHING_INSERTION_POINT_12345678"]
+
+
+def test_the_check_record_declaration_beside_the_marker_is_not_a_leak() -> None:
+    """cap-table's compose writes it beside the marker, and the same insert removes it; until then it is an HTML
+    comment a founder never sees. Outside its comment the token is still prose."""
+    decl = "<!-- COACHING_REQUIRES_CHECK_RECORD run_id=20260930T101500Z -->"
+    assert ft.scan(f"# Report\n\n{decl}\n<!-- COACHING_INSERTION_POINT_12345678 -->\n\nBody.")["enums"] == []
+    assert ft.scan("See COACHING_REQUIRES_CHECK_RECORD below.")["enums"] == ["COACHING_REQUIRES_CHECK_RECORD"]
+
+
+# --- a segment that begins with a digit ---------------------------------------
+#
+# `_CANDIDATE_RE` required every segment after an underscore to begin with a LETTER, so a token with a
+# numeric segment was never a candidate and reached founders raw. MEASURED on delivered pages: 49
+# occurrences across 37 distinct tokens in one skill, every one inside sub-agent-authored prose (a `why`
+# or a label). Widening detection alone would have broken tokens that are safe today, so the verbatim
+# guard widened in the same change; these tests pin both halves.
+#
+# Coverage, stated so a green is not over-read: live-prose evidence exists for market-sizing only
+# (41 delivered pages) plus competitive-positioning (6 pages, zero instances). deck-review, ic-sim,
+# financial-model-review and cap-table have no kept delivered pages, so their behaviour is inferred from
+# shape, not measured. Fixture-rendered pages for all six skills carry zero instances, which measures
+# our PRODUCERS (clean fleet-wide) and not sub-agent prose, where the class actually lives.
+
+# Minted ids, from the producers that mint them: `safe_{n:03d}`, `note_{n:03d}`, `warrant_{n:03d}`,
+# `founder_{i:03d}`, `common_{n:03d}`, `sweep_{i:02d}`. The digit run is two or three wide, never four --
+# which is exactly what separates an id from a year, and why the guard keys on WIDTH rather than on "a
+# digit run follows a word". A naive suffixed-id guard would also protect `fy_2025_plan`.
+_MUST_STAY_VERBATIM = {
+    "stable id": ["safe_001", "note_002", "holder_014", "warrant_007"],
+    "stable id with a suffix": ["safe_001_a", "note_002_mfn", "sweep_01_high"],
+    "diagnostic code": ["E_NO_EQUITY_BASE", "W_STALE_ARTIFACT", "UNVALIDATED_CLAIMS", "TAM_DISCREPANCY"],
+    "filename": ["inputs.json", "deck_v2.pdf", "model_2026.xlsx", "report_2026_09.html"],
+    "date": ["2026-09-27", "20260927"],
+    "version string": ["v0.13.0", "3.10.0", "v1_2_3"],
+    "run id": ["20260927T080504Z"],
+    "slide or page ref": ["slide_12", "page_7", "p_21"],
+}
+
+# A year inside a name does NOT make it a handle. A handle is recognised by an existing protection -- an
+# id form, a code, a filename, a URL, or the caller's `extra_keep` -- never by guessing from a year.
+_INTENDED_REPAIRS = [
+    "q1_2026_actuals",
+    "fy_2025_plan",
+    "cohort_2024_retention",
+    "total_beneficiaries_implied_2025",
+    "deck_headline_slide_12",
+    "active_buyers_april_2028",
+]
+
+
+def test_a_token_carrying_a_numeric_segment_is_humanized() -> None:
+    """The defect: none of these was a candidate, so each reached the founder raw."""
+    for token in _INTENDED_REPAIRS:
+        sentence = f"Derived against {token} rather than a sourced rate."
+        assert ft.substitute(sentence) != sentence, f"{token} was left raw"
+        assert token not in ft.substitute(sentence), token
+
+
+def test_widening_detection_did_not_break_what_must_stay_verbatim() -> None:
+    """Every class the policy promises to leave alone, byte-identical after the widening.
+
+    Each is safe TODAY; a detection-only widening broke the suffixed ids and the underscore version
+    string, which is why the guard widened with it.
+    """
+    for cls, tokens in _MUST_STAY_VERBATIM.items():
+        for token in tokens:
+            sentence = f"The record lists {token} beside the figure."
+            assert ft.substitute(sentence) == sentence, f"[{cls}] {token} was altered"
+
+
+def test_the_widened_guard_engages_rather_than_the_pattern_simply_missing_them() -> None:
+    """Positive control. A guard that protects by NOT MATCHING proves nothing about the guard.
+
+    With the guard disabled, the suffixed ids and the underscore version string must be rewritten --
+    i.e. the pattern really does reach them and the guard is what saves them. Without this, deleting the
+    guard would leave this file green.
+    """
+    at_risk = ["safe_001_a", "note_002_mfn", "sweep_01_high", "v1_2_3"]
+    original = ft.is_verbatim_token
+    try:
+        ft.is_verbatim_token = lambda token: token in ft.DIAGNOSTIC_CODES  # type: ignore[assignment]
+        for token in at_risk:
+            sentence = f"The record lists {token} beside the figure."
+            assert ft.substitute(sentence) != sentence, (
+                f"{token} is not reached by the pattern at all, so the guard is not what protects it "
+                "and this test is vacuous"
+            )
+    finally:
+        ft.is_verbatim_token = original  # type: ignore[assignment]
+    # And with the guard restored they are safe again.
+    for token in at_risk:
+        sentence = f"The record lists {token} beside the figure."
+        assert ft.substitute(sentence) == sentence, token

@@ -44,6 +44,9 @@ answers:
     choose: "No IIA grants"
 
 assert:
+  # A relative or /sessions/ file-tool path is refused at host-loop; the Step 0 proof exists so none is used.
+  # Content-class, so it covers sub-agent tool results too (checked by replay on a sub-agent-only string).
+  - tool_result_not_contains: "denied by your permission settings"
   - result: success
   - skill_triggered: '(founder-skills:)?cap-table$'
   # THE POINT OF THE LANE: the hand-roll disclosure exists and declares the manual route.

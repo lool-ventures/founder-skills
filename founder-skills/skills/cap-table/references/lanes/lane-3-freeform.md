@@ -36,7 +36,7 @@ If the workbook cannot be compacted under budget, `--mode=grid` returns `{"ok": 
 
 ## Dispatch Context A — `SPREADSHEET_STRUCTURE_DETECTION`
 
-The sub-agent identifies which blocks of cells encode founders / preferred / options / convertibles, since the structure is not deterministic. `OUTPUT_PATH` is the relative `$HANDOFF_AGENT` namespace — never an absolute `/sessions/...` path. Copy the invocation below **whole** — the `subagent_type` is part of it:
+The sub-agent identifies which blocks of cells encode founders / preferred / options / convertibles, since the structure is not deterministic. `OUTPUT_PATH` is the absolute `$HANDOFF_AGENT` file-tool path proven at Step 0 — never a relative path and never a `/sessions/...` path. Copy the invocation below **whole** — the `subagent_type` is part of it:
 
 ```
 Task(

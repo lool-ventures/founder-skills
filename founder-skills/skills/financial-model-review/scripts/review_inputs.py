@@ -1359,7 +1359,7 @@ function renderCompanyTab() {
     datalist: ["Israel", "US", "Europe", "UK", "APAC", "LATAM", "Global"]
   }));
   c.appendChild(createDropdown("company.stage", "Stage", ["pre-seed", "seed", "series-a", "series-b", "series-c", "series-d", "later"]));
-  c.appendChild(createDropdown("company.revenue_model_type", "Revenue Model Type", ["saas-plg", "saas-sales-led", "marketplace", "ai-native", "usage-based", "hardware", "hardware-subscription", "consumer-subscription", "transactional-fintech", "annual-contracts", "retail"]));
+  c.appendChild(createDropdown("company.revenue_model_type", "Revenue Model Type", ["saas-plg", "saas-sales-led", "marketplace", "ai-native", "usage-based", "hardware", "hardware-subscription", "consumer-subscription", "transactional-fintech", "annual-contracts", "retail", "unclassified"]));
   c.appendChild(createDropdown("company.model_format", "Model Format", ["spreadsheet", "deck", "conversational", "partial"]));
   c.appendChild(createDropdown("company.data_confidence", "Data Confidence", ["exact", "estimated", "mixed"]));
   c.appendChild(createTagChips("company.traits", "Traits", ["multi-currency", "multi-entity", "multi-market", "annual-contracts", "ai-powered"]));
