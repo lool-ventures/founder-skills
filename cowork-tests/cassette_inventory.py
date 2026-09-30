@@ -33,10 +33,15 @@ def main() -> int:
 
     harness: Counter[str] = Counter()
     fmt: Counter[str] = Counter()
+    model: Counter[str] = Counter()
+    baseline: Counter[str] = Counter()
     for path in cassettes:
         data = json.loads(path.read_text(encoding="utf-8"))
         harness[str((data.get("environment") or {}).get("harnessVersion", "MISSING"))] += 1
         fmt[str(data.get("cassetteVersion", "MISSING"))] += 1
+        env_model = (data.get("environment") or {}).get("model")
+        model[str(env_model.get("id", "MISSING") if isinstance(env_model, dict) else env_model or "MISSING")] += 1
+        baseline[str((data.get("fingerprint") or {}).get("baseline", "MISSING"))] += 1
 
     cassette_names = {p.name[: -len(".cassette.json")] for p in cassettes}
     uncassetted = sorted({p.stem for p in scenarios} - cassette_names)
@@ -46,6 +51,17 @@ def main() -> int:
     print("\nenvironment.harnessVersion:")
     for version, count in sorted(harness.items()):
         print(f"  {version:>10}  {count}")
+
+    # A corpus spanning two models is a real hazard (the model changes correctness), and no harness
+    # surface flags it: 4.2.0's `agent-version` note covers the AGENT only. More than one line here after
+    # a re-record means the batch was not uniform.
+    print("\nenvironment.model.id:")
+    for name, count in sorted(model.items()):
+        print(f"  {name:>10}  {count}")
+
+    print("\nfingerprint.baseline:")
+    for name, count in sorted(baseline.items()):
+        print(f"  {name:>10}  {count}")
 
     print("\ncassetteVersion:")
     for version, count in sorted(fmt.items()):

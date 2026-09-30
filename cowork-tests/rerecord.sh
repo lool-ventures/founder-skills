@@ -520,7 +520,19 @@ for t in "${targets[@]}"; do
   # Staleness is a HARD gate here: a just-recorded cassette passes its own staleness check, so a
   # [stale] here means real drift (fileSigs names the file); fail loud. (CI keeps staleness WARN
   # because CI can't re-record; here we just did, so green is the correct expectation.)
-  echo "=== staleness: $t ==="; cowork-harness verify-cassettes "$t" --skip-privacy
+  # 4.2.0 also prints an `agent-version:` [note] when a recording's agent differs from the one its
+  # baseline pins for that tier. It never fails verify-cassettes, so it is surfaced here, loudly: it
+  # replaces the manual "agent version uniform" check. None is expected after a clean re-record.
+  echo "=== staleness: $t ==="; st_tmp="$(mktemp)"; st_rc=0
+  cowork-harness verify-cassettes "$t" --skip-privacy 2>"$st_tmp" || st_rc=$?
+  cat "$st_tmp" >&2
+  if grep -q "agent-version" "$st_tmp"; then
+    echo "!!! AGENT-VERSION NOTE above: a recording's agent differs from its baseline's pin. Read its causes"
+    echo "!!! before committing (a hand re-stamp across an agent bump, an ALLOW_AGENT_FALLBACK recording, a"
+    echo "!!! binary override, or the accepted hostloop patch-bump substitution)."
+  fi
+  rm -f "$st_tmp"
+  [ "$st_rc" -eq 0 ] || exit "$st_rc"
   # Write replay JSON to a temp file, THEN parse. 0.28.0 FIXED the underlying bug (`replay
   # --output-format json` used to truncate its stdout at the 64KB pipe buffer via async process.stdout +
   # exit; now sync writeSync), so a direct pipe is safe on >=0.28.0 — but the file redirect is kept as
