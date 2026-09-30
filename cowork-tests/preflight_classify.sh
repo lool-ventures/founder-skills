@@ -7,7 +7,7 @@
 # could not load or refused is a line starting with "✗" (e.g. "✗ broken: <file>").
 #
 #   classify_preflight <exit code> <file holding the pre-flight's stderr>
-# prints one of: ok | cost | load | load_and_cost
+# prints one of: ok | cost | load | load_and_cost  ("⚠ input error:" lines count as load, even at exit 0)
 #   ok            exit 0
 #   cost          the budget gate refused and every scenario loaded: raising the cap is the remedy
 #   load          a scenario did not load or was refused, and no cost refusal: raising the cap cannot help
@@ -17,12 +17,23 @@
 classify_preflight() {
   _rc="$1"
   _err="$2"
+  # From 4.1.0 an input the real record would refuse (a bad path, or a negative tool assert the tier can
+  # never violate) is listed as "⚠ input error:" and the dry-run still exits 0. The real record then
+  # refuses it, so it is a load problem, never "ok" and never a cost problem.
+  _input=0
+  if grep -q "^⚠ input error:" "$_err" 2>/dev/null; then
+    _input=1
+  fi
   if [ "$_rc" -eq 0 ]; then
-    echo ok
+    if [ "$_input" -eq 1 ]; then
+      echo load
+    else
+      echo ok
+    fi
     return 0
   fi
   _cost=0
-  _other=0
+  _other="$_input"
   if grep -q "refused before spending" "$_err" 2>/dev/null; then
     _cost=1
   fi

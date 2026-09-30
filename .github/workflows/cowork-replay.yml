@@ -451,6 +451,24 @@ jobs:
       # >=1.16.0 to do anything.
       - name: Scenario load check (token-free — lint warns, the loader rejects)
         run: cowork-harness record cowork-tests/scenarios/ --dry-run --quiet
+      # From 4.1.0 the dry-run also lists, under `inputErrors[]`, an input the REAL record would refuse:
+      # a missing path, an unknown effort or baseline, or a negative tool assert the scenario's tier can
+      # never violate (`tool_not_called: Bash` at hostloop, which serves `mcp__workspace__bash`). It
+      # prints a `⚠ input error:` line and still EXITS 0, so the step above cannot see it. Gate on the
+      # JSON: `ok` true AND `inputErrors` empty. The key is REQUIRED (KeyError fails): a budget refusal's
+      # envelope replaces the payload and carries no `inputErrors`, and a missing list is not an empty one.
+      - name: Scenario input check (token-free — inputs a real record would refuse)
+        run: |
+          cowork-harness record cowork-tests/scenarios/ --dry-run --output-format json > dryrun.json || true
+          python3 - <<'PY'
+          import json, sys
+          d = json.load(open("dryrun.json"))
+          errs = d["inputErrors"]
+          for e in errs:
+              first = str(e.get("message", "")).splitlines()[0] if e.get("message") else "input error"
+              print(f"::error::{e.get('file', '?')}: {first}")
+          sys.exit(0 if d["ok"] is True and errs == [] else 1)
+          PY
       - name: analyze-skill --strict (whole plugin) + lint-skill (allowlist gate)
         run: |
           # `bash -eo pipefail`; the `|| fail=1` accumulator keeps one finding from aborting the run

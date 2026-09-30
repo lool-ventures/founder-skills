@@ -420,8 +420,8 @@ if [ "$BUDGET" != "0" ]; then
       ;;
     *)
       echo "FATAL: cost pre-flight exited $preflight_rc — a scenario did not LOAD or was refused."
-      echo "       THIS IS NOT A COST PROBLEM: raising COWORK_RERECORD_MAX_USD will not help. The '✗'"
-      echo "       line(s) above name the file and the reason. Fix the scenario, then re-run. To see it again:"
+      echo "       THIS IS NOT A COST PROBLEM: raising COWORK_RERECORD_MAX_USD will not help. The '✗' or"
+      echo "       '⚠ input error:' line(s) above name the file and the reason. Fix the scenario, then re-run. To see it again:"
       echo "       cowork-harness record scenarios/ --dry-run"
       exit 1
       ;;

@@ -27,6 +27,12 @@ _BROKEN = '✗ broken: scenarios/broken.yaml: Unrecognized key: "bogus_key" at (
 _POLICY = "✗ refused: scenarios/y.yaml: prompt policy"  # a non-"broken" ✗ line: still not a cost problem
 # The advisory lines a real dry-run prints beside a refusal; they are neither a cost nor a load failure.
 _ADVISORY = "⚠ would-refuse (advisory): scenarios/a.yaml: refusing to record into a repo-visible path at hostloop"
+# 4.1.0+: an input the real record would refuse (here a tier-vacuous negative tool assert) is listed with
+# EXIT 0. Captured from 4.2.0 on a scratch scenario asserting `tool_not_called: Bash` at fidelity cowork.
+_INPUT_ERROR = (
+    '⚠ input error: vacuous-probe.yaml: vacuous-probe: `tool_not_called: "Bash"` can never be violated at '
+    "fidelity `hostloop` — that tier does not serve `Bash` at all, so the assertion passes vacuously"
+)
 
 
 def _classify(rc: int, stderr: str, tmp_path: Path) -> str:
@@ -53,8 +59,24 @@ def _classify(rc: int, stderr: str, tmp_path: Path) -> str:
         (1, _BROKEN + "\n" + _COST, "load_and_cost"),  # 4.0.0: the same case
         (1, "", "load"),  # a failure with nothing recognisable is never called a cost problem
         (3, "unexpected", "load"),
+        (0, _INPUT_ERROR, "load"),  # exit 0 is not clean when an input error is listed (4.1.0+)
+        (0, _ADVISORY, "ok"),  # an advisory alone is not an input error
+        (1, _INPUT_ERROR + "\n" + _COST, "load_and_cost"),
     ],
-    ids=["ok", "cost-3.10", "cost-4.0", "broken", "policy", "both-3.10", "both-4.0", "silent-fail", "other-rc"],
+    ids=[
+        "ok",
+        "cost-3.10",
+        "cost-4.0",
+        "broken",
+        "policy",
+        "both-3.10",
+        "both-4.0",
+        "silent-fail",
+        "other-rc",
+        "input-error-rc0",
+        "advisory-only-rc0",
+        "input-error-and-cost",
+    ],
 )
 def test_the_classifier_keys_on_the_message_not_the_exit_code(rc: int, stderr: str, want: str, tmp_path: Path) -> None:
     assert _classify(rc, stderr, tmp_path) == want
