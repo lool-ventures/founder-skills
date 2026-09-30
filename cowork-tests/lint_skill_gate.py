@@ -5,7 +5,8 @@
 # ///
 """Gate `cowork-harness lint-skill --json` against a pinned, shrink-only allowlist.
 
-`lint-skill --strict` exits 1 on any WARN and has no per-rule suppression. Some of its warnings are ones this
+`lint-skill --strict` exits 1 on any WARN. Its per-rule suppression (4.1.0) cannot pin a COUNT, so a new site in an
+accepted file would pass silently. Some of its warnings are ones this
 repo accepts on purpose (see lint-skill-allowlist.json, each with its reason). Dropping `--strict` would stop
 gating every WARN rule, including ones the harness adds later; this keeps them all gated and names the accepted
 findings by (rule, file, count):

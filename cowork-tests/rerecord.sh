@@ -31,12 +31,18 @@ command -v cowork-harness >/dev/null || { echo "FATAL: cowork-harness not on PAT
 ver="$(cowork-harness --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
 [ -n "$ver" ] || { echo "FATAL: could not parse cowork-harness version"; exit 1; }
 echo "cowork-harness $ver"
-# FLOOR: >=4.0.0 with no upper bound. Recording is the one operation where the harness version is
+# FLOOR: >=4.2.0 with no upper bound. Recording is the one operation where the harness version is
 #   THIS HEADER WAS ONE MINOR BEHIND THE GATE when 2.3.0 was adopted (header said 2.1.0, gate required
 #   2.2) — the exact drift the next paragraph warns about, sitting unfixed in the file that warns about
 #   it. If you are here to change the floor, change all FOUR sites: this header, the numeric gate, its
 #   FATAL message, and `_RECORDING_FLOOR` in founder-skills/tests/test_cowork_harness_floors.py.
-#   * 4.0.0 is the current floor (2026-09-29), a reason-(3) raise plus the major-version trigger: 4.0.0's
+#   * 4.2.0 is the current floor (2026-10-01), and NOT a re-record trigger: 4.2.0 resolves `latest` to
+#     2.16120.0, so a cassette recorded under an older CLI resolves 2.9939.4 and is stale against the 4.2.0
+#     CI pin on the day it is recorded. Its one spawn-env change (PYTHONDONTWRITEBYTECODE=1) was assessed
+#     and the committed cassettes were RE-STAMPED instead: at hostloop it reaches only the host-side hooks,
+#     never the shell the skill scripts run in. Full analysis:
+#     docs/internal/2026-10-01-cowork-harness-4.2.0-adoption-plan.md.
+#   * 4.0.0 was the floor before (2026-09-29), a reason-(3) raise plus the major-version trigger: 4.0.0's
 #     pinned agent ELF matches the one Desktop stages (2.1.284 — `doctor --tier hostloop` reports a sha256
 #     match), where 3.10.0 reported a patch-tolerated mismatch a paid cassette would freeze. Baseline
 #     `latest` is 2.9939.4. A `record` budget refusal exits 1 (was 2) — the cost pre-flight below keys on
@@ -115,11 +121,11 @@ echo "cowork-harness $ver"
 #     so the run could never have called `Bash`. Below this floor a re-introduced `'Bash'` records
 #     SILENTLY and freezes a vacuous assert into a paid cassette that nothing will ever flag: 2.5.0's
 #     new cassette-satisfiability guard covers `tool_not_called` only and explicitly excludes
-#     `subagent_tool_absent`, and it lives in upstream's test suite, not in any CLI surface. Neither
-#     `lint`, nor the bundled `scenario.py lint`, nor `record --dry-run` catches the class for us — the
-#     linters' tier table has no `cowork` row (they are offline and cannot resolve the baseline gate),
-#     and the refusal lives in `executeScenario`, which `--dry-run` returns before reaching. This gate
-#     is therefore the only thing standing between us and a repeat. Full analysis:
+#     `subagent_tool_absent`, and it lives in upstream's test suite, not in any CLI surface. At the time
+#     neither `lint`, nor the bundled `scenario.py lint`, nor `record --dry-run` caught the class — the
+#     linters' tier table has no `cowork` row, and the refusal lived past the loader. (History: since
+#     4.1.0 `record --dry-run` lists such an assert under `inputErrors[]` on both arms, and CI and the
+#     cost pre-flight below gate on that list, so this floor is no longer the only guard.) Full analysis:
 #     docs/internal/2026-08-28-cowork-harness-2.5.0-adoption-plan.md.
 #   * 2.4.0 is required because it CHANGES WHAT A HOSTLOOP RECORDING RECORDS. The workspace bash
 #     tool's cwd moves from `<session>/mnt/<first-folder-else-outputs>` to the bare session root
@@ -269,14 +275,14 @@ echo "cowork-harness $ver"
 # replay now collapses it to one `N/M cassette(s) - <reason> [kind]` line. The `cassette stale:` lines
 # themselves are unchanged and still `::warning::`. Parse the JSON envelope instead.
 major="${ver%%.*}"; minor="$(echo "$ver" | cut -d. -f2)"
-# `-gt 3` first so a future 4.x passes — a bare minor check would FATAL on 4.0.0.
-# The `-ge 0` minor clause is VACUOUS at a .0 floor and is kept DELIBERATELY: the shape
+# `-gt 4` first so a future 5.x passes — a bare minor check would FATAL on 5.0.
+# The `-ge 2` minor clause is what refuses 4.0.x/4.1.x. Its SHAPE is kept deliberately: the shape
 # `[ "$major" -eq N ] && [ "$minor" -ge M ]` is what test_cowork_harness_floors.py's gate regex reads,
 # and that test asserts its own pattern matched — so collapsing this to `[ "$major" -ge 3 ]` does not
-# simplify the gate, it makes the guard that watches the gate match nothing. It re-earns its keep the
-# moment the floor moves off a .0 — as it did at 3.2.0.
-{ [ "$major" -gt 4 ] || { [ "$major" -eq 4 ] && [ "$minor" -ge 0 ]; }; } \
-  || { echo "FATAL: need >=4.0.0 (have $ver) — see the floor note above"; exit 1; }
+# simplify the gate, it makes the guard that watches the gate match nothing. (At a .0 floor, as at 4.0.0,
+# the minor clause is vacuous and is kept for the same reason.)
+{ [ "$major" -gt 4 ] || { [ "$major" -eq 4 ] && [ "$minor" -ge 2 ]; }; } \
+  || { echo "FATAL: need >=4.2.0 (have $ver) — see the floor note above"; exit 1; }
 if [ -n "${COWORK_AGENT_BINARY:-}" ]; then
   [ -x "$COWORK_AGENT_BINARY" ] || { echo "FATAL: agent binary not executable: $COWORK_AGENT_BINARY"; exit 1; }
 fi

@@ -1389,7 +1389,7 @@
   "preRunHashes": {},
   "scenarioSource": "../scenarios/competitive-positioning-smoke.yaml",
   "fingerprint": {
-    "baseline": "2.9939.4",
+    "baseline": "2.16120.0",
     "hashFormat": "jcs1",
     "skillHash": "1a3ea6e242a69397b3f257a67f9bc73e9fc4bb1d4f826eda579ac1c268695978",
     "promptAssetsHash": "267cb799c2e18b49",

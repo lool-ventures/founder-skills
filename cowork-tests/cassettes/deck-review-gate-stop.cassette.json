@@ -359,7 +359,7 @@
   "preRunHashes": {},
   "scenarioSource": "../scenarios/deck-review-gate-stop.yaml",
   "fingerprint": {
-    "baseline": "2.9939.4",
+    "baseline": "2.16120.0",
     "hashFormat": "jcs1",
     "skillHash": "fe23fa6cf40ab2f1484fe6ad45fc980c189d926536e4bdec4df384bd380ea2c2",
     "promptAssetsHash": "267cb799c2e18b49",

@@ -764,7 +764,7 @@
   },
   "scenarioSource": "../scenarios/cap-table-carta-folder.yaml",
   "fingerprint": {
-    "baseline": "2.9939.4",
+    "baseline": "2.16120.0",
     "hashFormat": "jcs1",
     "skillHash": "a830bca80294da406b002dcd9728b3946f64f690c942aea24afd783145f2329a",
     "promptAssetsHash": "267cb799c2e18b49",

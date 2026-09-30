@@ -601,7 +601,7 @@
   "preRunHashes": {},
   "scenarioSource": "../scenarios/cap-table-safe-full.yaml",
   "fingerprint": {
-    "baseline": "2.9939.4",
+    "baseline": "2.16120.0",
     "hashFormat": "jcs1",
     "skillHash": "e3118e6eaf719b2e83e92ef2e2f9e567865eb567ef338e7ffb1003ca27ced80c",
     "promptAssetsHash": "267cb799c2e18b49",

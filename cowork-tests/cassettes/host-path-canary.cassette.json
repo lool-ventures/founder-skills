@@ -290,7 +290,7 @@
   "preRunHashes": {},
   "scenarioSource": "../scenarios/host-path-canary.yaml",
   "fingerprint": {
-    "baseline": "2.9939.4",
+    "baseline": "2.16120.0",
     "hashFormat": "jcs1",
     "skillHash": "28eb2e7118642dd823e12bce886165fb99b90c27acb4c626dc0e76ca80596c7c",
     "promptAssetsHash": "267cb799c2e18b49",

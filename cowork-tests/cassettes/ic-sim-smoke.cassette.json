@@ -776,7 +776,7 @@
   "preRunHashes": {},
   "scenarioSource": "../scenarios/ic-sim-smoke.yaml",
   "fingerprint": {
-    "baseline": "2.9939.4",
+    "baseline": "2.16120.0",
     "hashFormat": "jcs1",
     "skillHash": "c657ccb1d7ea7da159687fad3d5e18533f2f7e2a5142cec88cb828b5851c1025",
     "promptAssetsHash": "267cb799c2e18b49",

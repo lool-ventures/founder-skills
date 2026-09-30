@@ -842,7 +842,7 @@
   "preRunHashes": {},
   "scenarioSource": "../scenarios/market-sizing-remote-lane.yaml",
   "fingerprint": {
-    "baseline": "2.9939.4",
+    "baseline": "2.16120.0",
     "hashFormat": "jcs1",
     "skillHash": "0292a4ffcba27cac748a5cc297bb3a626888318d8b6e48c1db0e97f11c7f980f",
     "promptAssetsHash": "267cb799c2e18b49",

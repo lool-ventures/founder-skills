@@ -674,7 +674,7 @@
   },
   "scenarioSource": "../scenarios/financial-model-review-smoke.yaml",
   "fingerprint": {
-    "baseline": "2.9939.4",
+    "baseline": "2.16120.0",
     "hashFormat": "jcs1",
     "skillHash": "e3fa27d46a866a1ccf94ed9de7a8a166587ec51f752c05d32cde06c0660473ba",
     "promptAssetsHash": "267cb799c2e18b49",
