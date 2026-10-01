@@ -283,8 +283,11 @@ _GM_SECTOR_TABLE: dict[str, str] = {
 # - unclassified: no revenue model we can benchmark is stated, so there is no table to
 #   grade against. Grading it on the SaaS table is the confidently-wrong answer
 #   this value exists to prevent.
+# - project-builder: public sector gross margins for what project builders make run from
+#   engineering/construction ~15% to machinery ~37%; any one tiered table puts a healthy builder
+#   at one end on the wrong grade. The device table would fail a healthy project margin outright.
 _GM_CONTEXTUAL_TYPES = frozenset(
-    {"marketplace", "transactional-fintech", "hardware-subscription", "usage-based", "unclassified"}
+    {"marketplace", "transactional-fintech", "hardware-subscription", "usage-based", "project-builder", "unclassified"}
 )
 
 _GM_CONTEXTUAL_SOURCES: dict[str, str] = {
@@ -292,8 +295,24 @@ _GM_CONTEXTUAL_SOURCES: dict[str, str] = {
     "transactional-fintech": "No benchmark: payment margins depend on whether revenue is booked net or gross",
     "hardware-subscription": "Hardware >=50% GM rule (Barros, Adafruit hardware-startup guide) — device-only scope",
     "usage-based": "FY2024 public comps (Twilio 10-K ~51% GAAP GM) vs KeyBanc SaaS Survey 2024 (median ~72%)",
+    "project-builder": (
+        "No single bar: NYU Stern Damodaran US sector gross margins (Jan 2026) run from "
+        "Engineering/Construction ~15% and Homebuilding ~23% to Machinery ~37%"
+    ),
     "unclassified": "No benchmark: no revenue model we have benchmarks for is stated",
     "unrecognized": "No benchmark: no revenue model we have benchmarks for is stated",
+}
+
+# When each contextual source was published, in a form compose's vintage check reads (`YYYY`,
+# `YYYY-MM`, `YYYY-Qn`), or "" when the source is no benchmark at all. A shared "FY2024" literal used to
+# be stamped on every one: unparseable, so it read as "publication date unknown" in the report.
+# `unclassified` is not here: its branch stamps "" itself.
+_GM_CONTEXTUAL_AS_OF: dict[str, str] = {
+    "marketplace": "2024",
+    "transactional-fintech": "",
+    "hardware-subscription": "2026-01",
+    "usage-based": "2024",
+    "project-builder": "2026-01",
 }
 
 _GM_CONTEXTUAL_EVIDENCE: dict[str, str] = {
@@ -312,6 +331,11 @@ _GM_CONTEXTUAL_EVIDENCE: dict[str, str] = {
     "usage-based": (
         "consumption models span passthrough-heavy infrastructure to software-margin platforms; "
         "a single benchmark would mis-rate one end"
+    ),
+    "project-builder": (
+        "public companies in the sectors project builders work in report gross margins from about 15% "
+        "(engineering and construction) to about 37% (machinery), so no single benchmark applies; read "
+        "this figure against the project cost base your model states"
     ),
     "unclassified": (
         "no revenue model we have benchmarks for is stated in your materials, so no gross-margin "
@@ -554,6 +578,57 @@ def _ai_gm_adjustment(stage: str) -> float:
 # Take-rate businesses: revenue booked gross (the whole transaction, including what passes through to
 # others) inflates net-new ARR and so flatters the burn multiple. Graded only on declared net revenue.
 _TAKE_RATE_TYPES = frozenset({"transactional-fintech", "marketplace"})
+
+# Every revenue_model_type sits in exactly one of three placements for the burn multiple and CAC payback,
+# whose bars are SaaS-sourced (stage tables; subscription contract-size tiers). A test requires the union
+# to equal the validator's enum, and runs the producer for every value to check it behaves as placed, so
+# a type added without a decision reds instead of silently taking the SaaS bars.
+# - graded on the stage / ACV-tier bars:
+_GROWTH_BARS_GRADED = frozenset(
+    {
+        "saas-plg",
+        "saas-sales-led",
+        "annual-contracts",
+        "ai-native",
+        "usage-based",
+        "hardware",
+        "hardware-subscription",
+        "consumer-subscription",
+        "retail",
+    }
+)
+# - _TAKE_RATE_TYPES: burn multiple graded only on declared net revenue; CAC payback never.
+# - withheld outright: no bar built for subscription software fits the business. An empty or off-enum
+#   type is NOT here: it never reached the validator's routing, so it keeps the stage bars.
+_NO_SAAS_BAR_TYPES = frozenset({"unclassified", "project-builder"})
+
+# LTV/CAC is graded on a 3x/2x/1x bar from a SaaS survey. LTV is gross profit per customer, so the revenue
+# basis cancels out and the bar holds for most types, `unclassified` included. A project builder wins
+# revenue contract by contract: there is no recurring customer for a lifetime value to measure.
+# Listed, not derived, so a new type needs a decision here too.
+_LTV_CAC_WITHHELD = frozenset({"project-builder"})
+_LTV_CAC_GRADED = frozenset(
+    {
+        "saas-plg",
+        "saas-sales-led",
+        "annual-contracts",
+        "ai-native",
+        "usage-based",
+        "hardware",
+        "hardware-subscription",
+        "consumer-subscription",
+        "retail",
+        "transactional-fintech",
+        "marketplace",
+        "unclassified",
+    }
+)
+
+# CAC and LTV have no bar of their own; for these types the review says why rather than "not rated".
+_CAC_CONTEXTUAL_TYPES = frozenset(
+    {"hardware", "hardware-subscription", "marketplace", "retail", "transactional-fintech", "project-builder"}
+)
+_LTV_CONTEXTUAL_TYPES = frozenset({"hardware", "hardware-subscription", "marketplace", "project-builder"})
 
 
 def _revenue_basis_reason(model_type: str, basis: str | None) -> str | None:
@@ -950,8 +1025,10 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
     # actual)" -- the explorer reads the method word from it) and its confidence qualifier.
     _graded = ("strong", "acceptable", "warning", "fail")
 
-    def _withhold_grade(entry: dict[str, Any], reason: str) -> None:
-        if entry.get("rating") not in _graded:
+    def _withhold_grade(entry: dict[str, Any], reason: str, *, also_contextual: bool = False) -> None:
+        # `also_contextual`: a figure already ungraded for another reason (assumed inputs) still names
+        # the bar it was set beside; for a type no such bar fits, that reason replaces it.
+        if entry.get("rating") not in _graded and not (also_contextual and entry.get("rating") == "contextual"):
             return
         ev = str(entry.get("evidence") or "")
         qualifier = _CONFIDENCE_QUALIFIERS.get(data_confidence, "")
@@ -971,17 +1048,30 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
     # say why they were not assessed, but the burn multiple and CAC payback keep their stage bars --
     # only `unclassified` records that the business is not one those bars fit.
     _unrecognized = gm_contextual_reason(model_type) == "unrecognized"
-    _no_saas_bar_reason: str | None = None
-    if model_type == "unclassified":
-        _case = unclassified_reason(company)
-        if _case == "no_fitting_type":
-            _no_saas_bar_reason = "the benchmark is set for subscription software, which your revenue model is not"
-        elif _case == "not_stated":
-            _no_saas_bar_reason = (
-                "no revenue model is stated in your materials, and the benchmark is set for subscription software"
+    # One sentence per metric: the burn multiple's bar and the payback's bar are different benchmarks,
+    # and a project builder's reason differs between them.
+    _no_saas_burn_reason: str | None = None
+    _no_saas_payback_reason: str | None = None
+    if model_type in _NO_SAAS_BAR_TYPES:
+        if model_type == "project-builder":
+            _no_saas_burn_reason = (
+                "it is not graded because this benchmark measures burn against new recurring revenue, and "
+                "project revenue is contracted and billed by milestone rather than recurring"
+            )
+            _no_saas_payback_reason = (
+                "it is not graded because the payback benchmark is set for subscription software contract sizes"
             )
         else:
-            _no_saas_bar_reason = "no revenue model we have benchmarks for is stated in your materials"
+            _case = unclassified_reason(company)
+            if _case == "no_fitting_type" or model_type != "unclassified":
+                _why = "the benchmark is set for subscription software, which your revenue model is not"
+            elif _case == "not_stated":
+                _why = (
+                    "no revenue model is stated in your materials, and the benchmark is set for subscription software"
+                )
+            else:
+                _why = "no revenue model we have benchmarks for is stated in your materials"
+            _no_saas_burn_reason = _no_saas_payback_reason = f"it is not graded because {_why}"
 
     # 1. CAC
     cac_total = _deep_get(unit_econ, "cac", "total")
@@ -989,13 +1079,7 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
     if cac_total is not None:
         loaded_note = "Fully loaded" if cac_fully_loaded else "Partial"
         # CAC doesn't have stage benchmarks; use contextual rating for non-SaaS
-        if not saas and model_type in (
-            "hardware",
-            "hardware-subscription",
-            "marketplace",
-            "retail",
-            "transactional-fintech",
-        ):
+        if not saas and model_type in _CAC_CONTEXTUAL_TYPES:
             rating = "contextual"
             evidence = (
                 f"{loaded_note} CAC of {_fmt_money(cac_total, currency_code)}; "
@@ -1107,7 +1191,7 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
         # LTV doesn't have standalone stage benchmarks; report as not_rated
         if ltv_unreliable:
             rating = "not_rated"
-        elif not saas and model_type in ("hardware", "hardware-subscription", "marketplace"):
+        elif not saas and model_type in _LTV_CONTEXTUAL_TYPES:
             rating = "contextual"
             evidence += "; LTV benchmarks vary too widely across businesses like yours to grade it"
         else:
@@ -1146,6 +1230,13 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
                 bench=ltv_cac_bench,
             )
         )
+        if model_type in _LTV_CAC_WITHHELD:
+            _withhold_grade(
+                metrics[-1],
+                "it is not graded because lifetime value assumes recurring revenue from a customer, and "
+                "project revenue is won contract by contract",
+                also_contextual=True,
+            )
     else:
         reason = "Insufficient data to compute LTV/CAC"
         metrics.append(_metric("ltv_cac_ratio", None, "not_rated", reason))
@@ -1162,13 +1253,13 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
         metrics.append(_metric("cac_payback", payback, rating, evidence, bench["source"], bench["as_of"], bench=bench))
         # The tiers are subscription-software contract sizes; payback measured on gross transaction
         # revenue also looks shorter than it is.
-        if model_type in ("transactional-fintech", "marketplace"):
+        if model_type in _TAKE_RATE_TYPES:
             _withhold_grade(
                 metrics[-1],
                 "it is not graded because the payback benchmark is set for subscription software contract sizes",
             )
-        elif _no_saas_bar_reason:
-            _withhold_grade(metrics[-1], f"it is not graded because {_no_saas_bar_reason}")
+        elif _no_saas_payback_reason:
+            _withhold_grade(metrics[-1], _no_saas_payback_reason)
     else:
         metrics.append(_metric("cac_payback", None, "not_rated", "Payback data not provided"))
 
@@ -1420,8 +1511,8 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
     # Before the non-USD caveat, which leaves an already-contextual metric alone: a reference grade on a
     # ratio inflated by gross revenue would be the misleading part.
     _bm_reason = _revenue_basis_reason(model_type, _revenue_basis)
-    if _bm_reason is None and _no_saas_bar_reason:
-        _bm_reason = f"it is not graded because {_no_saas_bar_reason}"
+    if _bm_reason is None and _no_saas_burn_reason:
+        _bm_reason = _no_saas_burn_reason
     if _bm_reason is not None:
         _withhold_grade(metrics[_bm_metric_start], _bm_reason)
 
@@ -1508,7 +1599,11 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
                 f"gross-margin tables{_why}"
             )
             sector_key = _GM_SECTOR_TABLE.get(model_type)
-            src = GM_BENCHMARKS_BY_SECTOR[sector_key]["source"] if sector_key else "declared gross_margin_basis"
+            src = (
+                GM_BENCHMARKS_BY_SECTOR[sector_key]["source"]
+                if sector_key
+                else "No benchmark: the margin is stated on a different basis from the benchmark tables"
+            )
             metrics.append(_metric("gross_margin", gm, "contextual", evidence, src, ""))
         elif contextual_reason in ("unclassified", "unrecognized"):
             # No type name in the sentence: the value is our word, not the founder's.
@@ -1522,7 +1617,14 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
             # not catch a hyphenated one.
             evidence = f"Gross margin of {gm:.0%}; {_GM_CONTEXTUAL_EVIDENCE[contextual_reason]}"
             metrics.append(
-                _metric("gross_margin", gm, "contextual", evidence, _GM_CONTEXTUAL_SOURCES[contextual_reason], "FY2024")
+                _metric(
+                    "gross_margin",
+                    gm,
+                    "contextual",
+                    evidence,
+                    _GM_CONTEXTUAL_SOURCES[contextual_reason],
+                    _GM_CONTEXTUAL_AS_OF.get(contextual_reason, ""),
+                )
             )
         else:
             bench = gm_benchmark_for(
@@ -1546,8 +1648,8 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
                     evidence = f"Gross margin of {gm:.0%}; {bar_kind} benchmark strong >= {bench['strong']:.0%}"
                 if model_type in _GM_SECTOR_TABLE and gm_basis is None:
                     evidence += (
-                        "; assumes product/merchandise gross margin (set gross_margin_basis "
-                        "if this is store-level contribution)"
+                        "; this assumes a margin on product or merchandise sales; if your figure is a "
+                        "store-level contribution margin, say so and it will be read on that basis"
                     )
                 _note = _implausibility_note("gross_margin", gm, pct=True)
                 if _note:

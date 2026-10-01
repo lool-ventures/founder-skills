@@ -86,7 +86,7 @@ The model's native currency, as an ISO 4217 code (`"USD"`, `"INR"`, `"ILS"`, `"E
 | `stage` | string | yes | One of: `"pre-seed"`, `"seed"`, `"series-a"`, `"series-b"`, `"later"` |
 | `sector` | string | yes | Normalized sector string |
 | `geography` | string | yes | Primary geography |
-| `revenue_model_type` | string | yes | One of: `"saas-plg"`, `"saas-sales-led"`, `"marketplace"`, `"usage-based"`, `"ai-native"`, `"hardware"`, `"hardware-subscription"`, `"consumer-subscription"`, `"transactional-fintech"`, `"annual-contracts"`, `"retail"`, `"unclassified"` |
+| `revenue_model_type` | string | yes | One of: `"saas-plg"`, `"saas-sales-led"`, `"marketplace"`, `"usage-based"`, `"ai-native"`, `"hardware"`, `"hardware-subscription"`, `"consumer-subscription"`, `"transactional-fintech"`, `"annual-contracts"`, `"retail"`, `"project-builder"`, `"unclassified"` |
 | `unclassified_reason` | string | no | With `"unclassified"` only: `"not_stated"`, or `"no_fitting_type"` (a model is stated; no type fits). |
 | `model_format` | string | no | One of: `"spreadsheet"`, `"deck"`, `"conversational"`, `"partial"`. Defaults to `"spreadsheet"`. Controls which checklist items are applicable. |
 | `data_confidence` | string | no | One of: `"exact"`, `"estimated"`, `"mixed"`. Indicates reliability of input values. |
@@ -110,9 +110,19 @@ prefer a NON-SaaS type that fits; otherwise use `unclassified` and set `unclassi
 the report then hedges. Telling a founder whose stated model fits no type to "state how the
 company makes money" is false.
 
-**A large-system or project OEM (buildings, vessels, industrial lines) is `unclassified` with
-`unclassified_reason: no_fitting_type`, not `hardware`.** The hardware gross-margin bar is for
-devices; it grades a healthy 15-25% project margin as a warning or a failure.
+**A business that builds large engineered systems to order is `project-builder`, not `hardware` and not
+`unclassified`.** Billing mechanics decide: pick it when revenue is recognised per contract by milestone
+or percentage of completion (rows like milestones, progress billing, % complete, retentions, contract
+assets or WIP, backlog, customer deposits). Pick `hardware` when units ship from a catalogue and are
+invoiced on delivery (units, ASP, BOM, inventory), whatever the volume; design-win or NRE milestones
+ahead of volume production are `hardware` too. The word "OEM" alone is not the signal. When the signals
+genuinely split, prefer `project-builder`: its failure mode is a figure shown without a grade, the
+device table's is a failed margin. For a project builder: leave `arr`, `mrr`, `customers` and
+`churn_monthly` null; set `revenue.monthly_total` to recognised revenue per month, preferring a stated
+annual total ÷ 12, and record the derivation in `metadata.extraction_notes`; set `growth_rate_monthly`
+to null; a margin stated "on cost" is a markup, convert it (extraction-pitfalls.md). The review shows
+gross margin, burn multiple, CAC payback and LTV/CAC without a grade for this type and assesses the
+hardware milestones-and-capex criterion.
 
 **Transactional fintech and marketplaces: record revenue NET.** Revenue is the take (fees, take rate
 times volume) after what passes through to others, not the volume itself; set
@@ -454,13 +464,14 @@ When top-level `currency` is present and not `"USD"`, `unit_economics.py` cannot
 | `transactional-fintech` | Payment/transaction-fee revenue | Stripe, Wise |
 | `annual-contracts` | Enterprise annual/multi-year | Workday, ServiceNow |
 | `retail` | Physical-store/franchise rollout or D2C physical goods | Sweetgreen, Warby Parker |
+| `project-builder` | Engineered systems built to order (plants, vessels, buildings, production lines); contract revenue billed by milestone or % complete, thin project margins | — |
 | `unclassified` | No model stated, or none fits: the review abstains | — |
 
 ### Sector Gate Mapping
 
 - `SECTOR_39` (marketplace): triggers for `marketplace`
 - `SECTOR_40` (AI inference): triggers for `ai-native`, `usage-based`, `ai-powered` (via `company.traits`), or when `expenses.cogs` contains AI cost keys (`inference_costs`, `ai_infrastructure`, `ai_compute`, `gpu_costs`, `model_inference`)
-- `SECTOR_41` (hardware): triggers for `hardware`, `hardware-subscription`
+- `SECTOR_41` (hardware): triggers for `hardware`, `hardware-subscription`, `project-builder`
 - `SECTOR_42` (usage-based margin): triggers for `usage-based`
 - `SECTOR_43` (consumer retention): triggers for `consumer-subscription`
 - `SECTOR_44` (deferred revenue): triggers for `annual-contracts`

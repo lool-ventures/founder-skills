@@ -130,6 +130,8 @@ def _stages_at_or_above(stage: str) -> frozenset[str]:
 
 _SEED_PLUS = _stages_at_or_above("seed")
 _SERIES_A_PLUS = _stages_at_or_above("series-a")
+# Revenue models with no recurring revenue base, so net and gross retention are not asked for.
+_NO_RETENTION_TYPES = frozenset({"project-builder"})
 
 
 def _stage_in(stage: str | None, group: frozenset[str]) -> bool:
@@ -394,6 +396,7 @@ def _validate_structural(
                 "transactional-fintech",
                 "annual-contracts",
                 "retail",
+                "project-builder",
                 "unclassified",
             ],
         ),
@@ -928,8 +931,10 @@ def _validate_completeness(inputs: dict[str, Any]) -> list[dict[str, Any]]:
             }
         )
 
-    # NRR or GRR at series-a+
-    if _stage_in(stage, _SERIES_A_PLUS):
+    # NRR or GRR at series-a+. Not asked of a project builder: it sells contract by contract, with no
+    # recurring revenue base for a retention rate to measure.
+    model_type = str(_deep_get(inputs, "company", "revenue_model_type") or "").strip().lower()
+    if _stage_in(stage, _SERIES_A_PLUS) and model_type not in _NO_RETENTION_TYPES:
         nrr = _deep_get(inputs, "revenue", "nrr")
         grr = _deep_get(inputs, "revenue", "grr")
         if nrr is None and grr is None:

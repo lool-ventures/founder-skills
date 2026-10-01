@@ -129,7 +129,7 @@ Thresholds: **strong** >= 85%, **solid** >= 70%, **needs_work** >= 50%, **major_
 ### `UNIT_14`
 **Label:** COGS/margin matches model type
 **Stage:** all | **Geography:** all | **Sector:** all | **Model format:** all
-**Pass:** SaaS: hosting/support; AI: inference; hardware: BOM; payments: interchange, network and processor fees, fraud and chargeback losses.
+**Pass:** SaaS: hosting/support; AI: inference; hardware: BOM; payments: interchange, network and processor fees, fraud and chargeback losses. Project builder: materials, subcontractors, site labour, warranty and rework provisions.
 **Warn:** Margin assumed flat without basis.
 **Fail:** Gross margin improves magically.
 
@@ -189,7 +189,7 @@ Thresholds: **strong** >= 85%, **solid** >= 70%, **needs_work** >= 50%, **major_
 ### `CASH_22`
 **Label:** Working capital modeled (where material)
 **Stage:** all | **Geography:** all | **Sector:** all | **Model format:** spreadsheet only
-**Pass:** AR/AP/inventory timing reflected in cash.
+**Pass:** AR/AP/inventory timing reflected in cash. Material by construction for a project builder: progress billings, retentions, supplier deposits and work in progress.
 **Warn:** Simplified but noted.
 **Fail:** Ignores working capital in cash-heavy models.
 
@@ -324,6 +324,8 @@ Rated contextual with no reference grade, it was left ungraded on purpose: warn 
 
 Note: `saas` and `retail` sector types match no item in this category by design — such companies get all six auto-gated `not_applicable`, not force-fitted into the nearest gate. For `retail` companies, cover the sector-specific ground manually: assess store-level contribution, buildout capex and payback, inventory/working capital, and same-store vs new-store growth in the `notes` fields of the relevant Revenue & Unit Economics and Expenses/Cash items — a store rollout without a dedicated gate still needs its store economics reviewed.
 
+For a project builder (sector `hardware`, so `SECTOR_41` applies), cover in `notes` what no criterion names: backlog and its conversion schedule, customer concentration (share of revenue from the largest one or two contracts), and milestone cash timing against payroll.
+
 ### `SECTOR_39`
 **Label:** Marketplace: two-sided mechanics
 **Stage:** all | **Geography:** all | **Sector:** ["marketplace"] | **Model format:** all
@@ -341,7 +343,7 @@ Note: `saas` and `retail` sector types match no item in this category by design 
 ### `SECTOR_41`
 **Label:** Hardware/deep-tech: milestones + capex
 **Stage:** all | **Geography:** all | **Sector:** ["hardware", "hardware-subscription"] | **Model format:** all
-**Pass:** Milestone plan + cash needs; working capital/capex considered.
+**Pass:** Milestone plan + cash needs; working capital/capex considered. For a project builder: progress billing, retentions and supplier deposits in the cash flow; backlog-to-revenue conversion by period.
 **Warn:** Some milestones.
 **Fail:** "SaaS-like" model applied to hardware.
 

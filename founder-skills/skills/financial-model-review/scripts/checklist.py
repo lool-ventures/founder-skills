@@ -599,6 +599,9 @@ _REVENUE_MODEL_TO_SECTOR: dict[str, str] = {
     # Like "saas", "retail" matches no sector-specific item today — the mapping
     # exists so retail companies stop mis-firing hardware gates or warnings.
     "retail": "retail",
+    # A project builder is judged on the hardware milestones-and-capex criterion (SECTOR_41). The device
+    # gross-margin table is NOT reached through this: unit_economics keys its tables by model type.
+    "project-builder": "hardware",
 }
 
 

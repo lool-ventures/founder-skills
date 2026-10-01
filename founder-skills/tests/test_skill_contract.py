@@ -1685,7 +1685,13 @@ REFERENCES_CEILING: dict[str, int] = {
     # a fintech data-sufficiency row; payments clauses in UNIT_14 / METRIC_33 / METRIC_34.
     # +159 B (76_405 -> 76_564): METRIC_34 says what a contextual burn multiple gets (warn, or its
     # reference grade for a non-USD model), now that the grader reads the computed figure.
-    "financial-model-review": 76_564,
+    # 76_564 -> 79_249: a project builder gets its own type. schema-inputs.md replaces the
+    # route-to-unclassified paragraph with a decision rule (billing mechanics decide, what to leave null,
+    # how to record recognised revenue) plus the enum row, table row and SECTOR_41 mapping;
+    # checklist-criteria.md adds project-builder clauses to UNIT_14 / CASH_22 / SECTOR_41 and a category-6
+    # note; data-sufficiency.md a row so a builder is not counted as missing MRR and growth;
+    # extraction-pitfalls.md milestone and no-growth-rate sentences and a markup-on-cost item.
+    "financial-model-review": 79_249,
     # ic-sim +1446 B: evaluation-criteria.md omitted `to_confirm` from the status table AND from the
     # scoring formula, which excluded only not_applicable. Following it changed the conviction
     # score, since score_dimensions.py excludes both. The >6 coverage cap was undocumented too.
@@ -3676,7 +3682,11 @@ def test_corpus_counts_every_agent_the_skill_pins_not_just_its_namesake() -> Non
 # refuses (exit 6) instead of printing a relative root; the reference says so and gains its symptom row.
 # Raised 2026-10-01 to 125,545 B (+195): benchmarks.md gives payments their own gross-margin row (no
 # published benchmark; the margin depends on net vs gross booking) instead of sharing the marketplace comps.
-ROOT_REFERENCES_CEILING = 125_545
+# Raised 2026-10-01 from 125,545 to 126,584 B: a project builder gets its own type, so benchmarks.md gains its
+# contextual gross-margin row (the public sector spread, no one bar) and revenue-model-types.md its section
+# (progress billing, retentions, backlog conversion, concentration). Without the row an agent reading the
+# shared table sees only the device bar under "Hardware", the bar the type exists to avoid.
+ROOT_REFERENCES_CEILING = 126_584
 
 
 def test_shared_reference_tree_does_not_grow() -> None:

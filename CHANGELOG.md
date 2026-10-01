@@ -48,13 +48,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
     and the review says why. CAC payback is now shown without a grade, because its benchmark is set
     for software contract sizes. CAC was never graded; for a payments business the review now says
     why.
-  - **A business whose revenue model fits none we benchmark** (a large-system or project manufacturer,
-    for example) is no longer graded on the software burn-multiple or payback bars either, and is not
-    put on the hardware gross-margin bar, which would mark a healthy project margin as a failure.
+  - **A business whose revenue model fits none we benchmark** is no longer graded on the software
+    burn-multiple or payback bars either.
   - **A review whose revenue model is missing or not recognised** no longer has its gross margin
     graded on the software table. It is shown without a grade and the review says why. Its burn
     multiple and payback are still graded on the stage bars.
   - The interactive explorer no longer re-grades a figure the review left ungraded.
+- **A business that builds large engineered systems to order now has its own revenue model in a
+  financial model review.** Plants, vessels, buildings and production lines, sold contract by contract
+  and billed by milestone or percentage of completion, used to be reviewed as a model we do not
+  benchmark. Such a business is now reviewed on the hardware milestones-and-capex check, which now
+  names progress billing, retentions, supplier deposits and backlog. No figure is graded on a bar built
+  for subscription software or for devices:
+  - gross margin is shown without a grade, because public companies in the sectors these businesses
+    work in report margins from about 15% to about 37%, and one bar would mis-grade one end;
+  - the burn multiple, CAC payback and LTV/CAC are shown without a grade, each with its own reason;
+  - net and gross revenue retention are not asked for.
+
+  Known limitation: a checklist item that turns on a figure the review leaves ungraded (gross margin,
+  CAC payback, LTV/CAC, the burn multiple) can reach only a warning for such a business. That warning
+  says the figure has no benchmark to be judged on, not that the model is weak.
+- **The interactive explorer no longer shows a benchmark beside a metric the review found not
+  applicable.** Net revenue retention, Rule of 40 and the other subscription metrics showed the
+  subscription bar beside a business they do not apply to, and Rule of 40 could be re-graded on it
+  with the what-if slider. This applies to every revenue model.
+- **The corrections page no longer colours a burn multiple the review left ungraded** as above or
+  below the 3x bar.
+- **Gross-margin notes are in plain words.** The hardware, consumer and retail margin note no longer
+  names an internal field, and the publication date of the comparison behind an ungraded margin is now
+  read as a date, so the report no longer says it is unknown.
 - **A financial model review's checklist now grades against the review's own computed figures.**
   The checklist used to be scored before the burn multiple, runway and payback were computed, so it
   estimated them itself. It could fail the burn-multiple check on its own estimate while the metrics

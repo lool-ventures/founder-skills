@@ -91,6 +91,7 @@ The SaaS gross-margin bars above (KeyBanc/Sapphire) apply only to software-margi
 | Transactional fintech / payments | contextual — no threshold | | | No published benchmark: the margin depends on whether revenue is booked net or gross (the whole transaction, including what passes through to others) |
 | Hardware-subscription | contextual — no threshold | | | The >=50% device rule explicitly excludes products with ongoing service revenue; a blend must be judged on its hardware vs service margin split |
 | Usage-based / consumption | contextual — no threshold | | | Healthy consumption models span passthrough-heavy CPaaS ~51% (Twilio FY2024 10-K, GAAP) to software-margin platforms (KeyBanc 2024 median ~72%) |
+| Project builder (engineered systems built to order) | contextual — no threshold | | | Public companies in the sectors project builders work in (NYU Stern Damodaran, Jan 2026): Engineering/Construction ~15%, Homebuilding ~23%, Machinery ~37%; one bar would mis-grade one end, and the device bar above would fail a healthy project margin |
 
 All threshold tables assume product/service gross margin. A declared non-product `gross_margin_basis` (store contribution, gross-revenue booking, blended) rates `contextual` — a restaurant's ~20% store-level margin and its ~72% product margin are different metrics, and neither should be judged on the other's bar. The tiers are derived target bands (source aggregates rounded to 5pts), not tiers the sources publish.
 

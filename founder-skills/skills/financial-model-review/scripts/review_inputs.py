@@ -469,6 +469,15 @@ function computeSanity() {
   var runway = (cash != null && burn > 0) ? Math.round(cash / burn * 10) / 10 : null;
   var monthlyNewArr = mrr * growthRate * 12;  // ΔMRR × 12 = monthly net-new ARR
   var burnMultiple = monthlyNewArr > 0 ? Math.round(burn / monthlyNewArr * 10) / 10 : null;
+  /* The review leaves the burn multiple ungraded for these revenue models (and, for the second list,
+     unless revenue is declared net), so this card must not colour it on the >3x bar either. Copies of
+     unit_economics.py's sets; a test holds them equal. */
+  var NO_BURN_BAR_TYPES = ["project-builder", "unclassified"];
+  var NET_ONLY_BURN_BAR_TYPES = ["marketplace", "transactional-fintech"];
+  var modelType = String(getByPath(state, "company.revenue_model_type") || "").trim().toLowerCase();
+  var revenueBasis = getByPath(state, "unit_economics.gross_margin_basis");
+  var burnGraded = NO_BURN_BAR_TYPES.indexOf(modelType) < 0
+    && (NET_ONLY_BURN_BAR_TYPES.indexOf(modelType) < 0 || revenueBasis === "net_revenue");
   var arpu = customers > 0 ? Math.round(mrr / customers * 100) / 100 : null;
 
   var hc = getByPath(state, "expenses.headcount") || [];
@@ -487,7 +496,7 @@ function computeSanity() {
 
   return {
     runway: { value: runway, warn: runway != null && runway < 6 },
-    burnMultiple: { value: burnMultiple, warn: burnMultiple != null && burnMultiple > 3 },
+    burnMultiple: { value: burnMultiple, warn: burnGraded ? (burnMultiple != null && burnMultiple > 3) : null },
     arpu: {
       value: arpu,
       warn: arpu != null && arpuInput != null && Math.abs(arpu - arpuInput) / arpuInput > 0.2
@@ -514,7 +523,8 @@ function updateMetricCard(id, value, unit, warn) {
   if (!card) return;
   var valEl = card.querySelector(".value");
   if (valEl) valEl.textContent = value != null ? String(value) + (unit || "") : "\u2014";
-  card.className = "sanity-card" + (value == null ? "" : (warn ? " warn" : " pass"));
+  /* warn === null: a figure shown without a grade, so neither colour. */
+  card.className = "sanity-card" + (value == null || warn === null ? "" : (warn ? " warn" : " pass"));
 }
 
 /* Runway is computed two different ways depending on where the number came
@@ -633,7 +643,10 @@ function updateSanityFromServer(sanity) {
     updateMetricLabel("runway", "Runway (" + conventionLabel + ")");
     updateMetricCard("runway", sanity.runway_months, " mo", sanity.runway_months < 6);
   }
-  if (sanity.burn_multiple != null) updateMetricCard("burn-multiple", sanity.burn_multiple, "x", sanity.burn_multiple > 3);
+  if (sanity.burn_multiple != null) {
+    var burnWarn = sanity.burn_multiple_graded === false ? null : sanity.burn_multiple > 3;
+    updateMetricCard("burn-multiple", sanity.burn_multiple, "x", burnWarn);
+  }
   if (sanity.arpu_computed != null) {
     var arpuWarn = false;
     if (sanity.arpu_input != null && sanity.arpu_input > 0) {
@@ -1359,7 +1372,7 @@ function renderCompanyTab() {
     datalist: ["Israel", "US", "Europe", "UK", "APAC", "LATAM", "Global"]
   }));
   c.appendChild(createDropdown("company.stage", "Stage", ["pre-seed", "seed", "series-a", "series-b", "series-c", "series-d", "later"]));
-  c.appendChild(createDropdown("company.revenue_model_type", "Revenue Model Type", ["saas-plg", "saas-sales-led", "marketplace", "ai-native", "usage-based", "hardware", "hardware-subscription", "consumer-subscription", "transactional-fintech", "annual-contracts", "retail", "unclassified"]));
+  c.appendChild(createDropdown("company.revenue_model_type", "Revenue Model Type", ["saas-plg", "saas-sales-led", "marketplace", "ai-native", "usage-based", "hardware", "hardware-subscription", "consumer-subscription", "transactional-fintech", "annual-contracts", "retail", "project-builder", "unclassified"]));
   c.appendChild(createDropdown("company.model_format", "Model Format", ["spreadsheet", "deck", "conversational", "partial"]));
   c.appendChild(createDropdown("company.data_confidence", "Data Confidence", ["exact", "estimated", "mixed"]));
   c.appendChild(createTagChips("company.traits", "Traits", ["multi-currency", "multi-entity", "multi-market", "annual-contracts", "ai-powered"]));
@@ -1585,6 +1598,20 @@ def _embed_json(data: Any, **dumps_kwargs: Any) -> str:
     '<' so an embedded closing-script-tag sequence cannot terminate the block
     early (XSS/breakage)."""
     return json.dumps(data, **dumps_kwargs).replace("<", "\\u003c")
+
+
+def _sanity_from_metrics(metrics: list[dict[str, Any]]) -> dict[str, Any]:
+    """The burn-multiple card's figure, and whether the review graded it.
+
+    A figure the review left ungraded (a revenue model the burn-multiple bar does not fit) is still
+    shown, but the card must not colour it on the >3x bar."""
+    for m in metrics:
+        if isinstance(m, dict) and m.get("id") == "burn_multiple" and m.get("value") is not None:
+            graded = m.get("rating") in ("strong", "acceptable", "warning", "fail") or bool(
+                m.get("benchmark_reference_rating")
+            )
+            return {"burn_multiple": m["value"], "burn_multiple_graded": graded}
+    return {}
 
 
 def _build_html(
@@ -2103,9 +2130,7 @@ class _Handler(BaseHTTPRequestHandler):
             import unit_economics  # type: ignore[import-not-found]
 
             ue_result = unit_economics._compute_metrics(state)
-            for m in ue_result.get("metrics", []):
-                if m.get("id") == "burn_multiple" and m.get("value") is not None:
-                    sanity["burn_multiple"] = m["value"]
+            sanity.update(_sanity_from_metrics(ue_result.get("metrics", [])))
         except Exception as exc:
             print(f"[review_inputs] /api/check unit_economics failed: {exc!r}", file=sys.stderr)
 

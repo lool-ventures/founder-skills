@@ -9,6 +9,7 @@ After extracting available data, count critical fields missing from source mater
 - Marketplace: `gmv` or `take_rate`, `growth_rate_monthly`
 - Transactional fintech (by `revenue_model_type`; its `sector_type` reads "saas"): `mrr` as the NET revenue run-rate, `growth_rate_monthly`, `cac`
 - Hardware / hardware-subscription: `unit_cost`, `asp`, `growth_rate_monthly`
+- Project builder (by `revenue_model_type`; its `sector_type` reads "hardware", whose row does NOT apply): `monthly_total` (recognised revenue per month), `gross_margin` on revenue, not markup on cost; `mrr`, `growth_rate_monthly` and `cac` are not expected
 - Consumer-subscription: `mrr` or `subscriber_count`, `growth_rate_monthly`, `cac`
 
 Count = missing core fields + missing model-specific fields (using `sector_type` to select the set).

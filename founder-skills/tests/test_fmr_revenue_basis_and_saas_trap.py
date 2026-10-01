@@ -6,9 +6,11 @@ Three rules, each a way a founder was graded against a benchmark built for someo
    or contextual). A value added without one used to fall through to the SaaS stage table silently, which
    grades worse than abstaining. The drift test reds the day that happens; the code abstains anyway
    (`"unrecognized"`) for an empty or off-enum type that skipped the validator.
-2. A business with no benchmarked model (`unclassified`, including a large-system OEM) is not graded on
-   the SaaS-calibrated burn multiple or CAC payback either. LTV/CAC is left alone: LTV is gross profit per
-   customer, so the revenue basis cancels out, and 3:1 is not a SaaS-only rule.
+2. A business with no benchmarked model (`unclassified`) or one that builds engineered systems to order
+   (`project-builder`) is not graded on the SaaS-calibrated burn multiple or CAC payback either. For
+   `unclassified`, LTV/CAC is left alone: LTV is gross profit per customer, so the revenue basis cancels
+   out. A project builder's observed LTV/CAC is withheld too: its revenue is won contract by contract, so
+   there is no recurring customer for a lifetime value to measure.
 3. Transactional fintech and marketplaces book revenue gross or net. Gross volume inflates net-new ARR and
    flatters the burn multiple, so it is graded only when the revenue basis is declared net.
 """
@@ -140,20 +142,47 @@ def test_the_fixture_grades_both_ratios_for_saas() -> None:
 # --- 2. OEM / unclassified ------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("reason", [None, "no_fitting_type", "not_stated"])
-def test_a_project_oem_is_not_graded_on_saas_bars(reason: str | None) -> None:
-    fields: dict[str, Any] = {"gross_margin": 0.25}
+_OBSERVED_LTV = {
+    "value": 6000,
+    "inputs": {"arpu_monthly": 500, "gross_margin": 0.75, "churn_monthly": 0.03},
+    "observed_vs_assumed": "observed",
+}
+
+
+@pytest.mark.parametrize(
+    ("model_type", "reason"),
+    [
+        ("unclassified", None),
+        ("unclassified", "no_fitting_type"),
+        ("unclassified", "not_stated"),
+        ("project-builder", None),
+    ],
+)
+def test_a_non_saas_business_is_not_graded_on_saas_bars(model_type: str, reason: str | None) -> None:
+    fields: dict[str, Any] = {"gross_margin": 0.25, "ltv": dict(_OBSERVED_LTV)}
     if reason:
         fields["unclassified_reason"] = reason
-    m = _metrics("unclassified", **fields)
+    m = _metrics(model_type, **fields)
     assert m["gross_margin"]["rating"] == "contextual", m["gross_margin"]
-    for name in ("burn_multiple", "cac_payback"):
+    withheld = ("burn_multiple", "cac_payback") + (("ltv_cac_ratio",) if model_type == "project-builder" else ())
+    for name in withheld:
         assert m[name]["rating"] not in _GRADED, (name, m[name])
         assert m[name]["rating"] == "contextual", (name, m[name])
         assert not m[name]["benchmark_source"], (name, m[name])
-        assert "unclassified" not in m[name]["evidence"], m[name]["evidence"]
+        assert model_type not in m[name]["evidence"], m[name]["evidence"]
+    if model_type == "project-builder":
+        assert "project" in m["gross_margin"]["evidence"], m["gross_margin"]["evidence"]
     for name in ("nrr", "grr", "magic_number", "rule_of_40", "arr_per_fte"):
         assert m[name]["rating"] not in _GRADED, name
+    for entry in m.values():
+        assert model_type not in entry["evidence"], entry
+
+
+def test_the_hardware_control_is_graded_where_a_project_builder_is_not() -> None:
+    """Control: the same fixture as hardware grades all four, so the type is what moved them."""
+    m = _metrics("hardware", gross_margin=0.25, ltv=dict(_OBSERVED_LTV))
+    for name in ("gross_margin", "burn_multiple", "cac_payback", "ltv_cac_ratio"):
+        assert m[name]["rating"] in _GRADED, (name, m[name])
 
 
 def test_the_oem_reason_states_the_case_it_knows() -> None:
@@ -163,10 +192,11 @@ def test_the_oem_reason_states_the_case_it_knows() -> None:
     assert "no revenue model is stated" in bm, bm
 
 
-def test_the_schema_routes_project_oem_to_unclassified_not_hardware() -> None:
+def test_the_schema_routes_a_project_builder_to_its_own_type_not_hardware() -> None:
     text = re.sub(r"\s+", " ", (REFS / "schema-inputs.md").read_text())
-    assert "A large-system or project OEM" in text
-    assert "is `unclassified` with `unclassified_reason: no_fitting_type`, not `hardware`" in text
+    assert "is `project-builder`, not `hardware` and not `unclassified`" in text
+    assert 'a margin stated "on cost" is a markup' in text
+    assert "A large-system or project OEM" not in text
 
 
 # --- 3. take-rate revenue basis --------------------------------------------------------------------
@@ -305,7 +335,7 @@ def test_an_empty_type_says_why_a_saas_only_metric_was_not_assessed() -> None:
     ), nrr["evidence"]
 
 
-@pytest.mark.parametrize("model_type", ["hardware", "hardware-subscription", "marketplace"])
+@pytest.mark.parametrize("model_type", ["hardware", "hardware-subscription", "marketplace", "project-builder"])
 def test_contextual_ltv_evidence_names_no_type_token(model_type: str) -> None:
     ltv = _metrics(model_type)["ltv"]
     assert ltv["rating"] == "contextual", ltv

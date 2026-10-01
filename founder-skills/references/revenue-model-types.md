@@ -78,6 +78,21 @@ Often zero revenue at pre-seed; milestone-based. At later stages, BOM/COGS + cap
 
 ---
 
+## Project Builder (Engineered Systems to Order)
+
+### Structure
+Each sale is a contract for a large engineered system (plant, vessel, building, production line), billed by milestone or percentage of completion; thin project margins; few contracts a year.
+
+### Checks by stage
+
+| Stage | What to check |
+| --- | --- |
+| Pre-Seed | First contract or letter of intent; milestone cash timing against payroll; supplier deposits |
+| Seed | Progress billing, retentions and customer deposits in the cash flow; margin on revenue, not markup on cost |
+| Series A | Backlog and its conversion to revenue by period; customer concentration; working capital per project; warranty and rework provisions |
+
+---
+
 ## Hardware + Subscription (IoT / Robotics)
 
 ### Structure

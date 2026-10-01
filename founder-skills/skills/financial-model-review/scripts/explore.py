@@ -269,7 +269,7 @@ def _build_metrics(inputs: dict[str, Any], ue_data: dict[str, Any]) -> list[dict
         # evidence today, only the rating. Thread the reason through; the explorer renders it where
         # the bar would be.
         if (
-            name in ("gross_margin", "burn_multiple", "cac_payback")
+            name in ("gross_margin", "burn_multiple", "cac_payback", "ltv_cac_ratio")
             and m.get("rating") == "contextual"
             and not m.get("benchmark_reference_rating")
         ):
@@ -404,13 +404,13 @@ def _build_data_payload(
         benchmarks.pop("gross_margin", None)
     else:
         benchmarks["gross_margin"] = gm_bench
-    # A metric the review rated contextual with no reference grade has no bar: the client-side
-    # what-if re-rating must not grade it against the stage bar (a contextual badge beside "2.0x").
+    # A metric the review did not grade has no bar here: one rated contextual with no reference grade
+    # (the what-if must not grade it against the stage bar -- a contextual badge beside "2.0x"), and one
+    # rated not applicable (NRR, Rule of 40 and the rest for a business that is not SaaS: the table
+    # printed the SaaS bar beside it, and the what-if re-rated it on that bar).
     for _m in metrics:
-        if (
-            _m.get("id") == "burn_multiple"
-            and _m.get("rating") == "contextual"
-            and not _m.get("benchmark_reference_rating")
+        if _m.get("rating") == "not_applicable" or (
+            _m.get("rating") == "contextual" and not _m.get("benchmark_reference_rating")
         ):
             benchmarks.pop(_m["id"], None)
     # CAC payback has no stage bar: the review grades it on its ACV tier's bar. The what-if rates a moved
@@ -1098,6 +1098,12 @@ var METRIC_FORMULAS = {{
   gross_margin: function(s) {{ return s.gross_margin; }}
 }};
 
+// A metric the review found not applicable to this business has no what-if: moving a slider would
+// produce a figure, and a figure invites a reading the review declined to give.
+function isExplorable(m) {{
+  return !!METRIC_FORMULAS[m.id] && m.rating !== 'not_applicable';
+}}
+
 // ---------------------------------------------------------------------------
 // Rating logic
 // ---------------------------------------------------------------------------
@@ -1742,7 +1748,7 @@ function renderUnitEconomics() {{
   // Metrics table
   var explorable = {{}};
   DATA.metrics.forEach(function(m) {{
-    explorable[m.id] = !!METRIC_FORMULAS[m.id];
+    explorable[m.id] = isExplorable(m);
   }});
 
   markup += '<p style="font-size:0.8rem;color:var(--lool-mute);margin-bottom:0.5rem">'
