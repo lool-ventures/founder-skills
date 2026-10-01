@@ -60,9 +60,8 @@ assert:
   # is an ask (warn), not a missing one (fail), and that a pass needs use of funds plus milestones, so
   # pass is wrong too. Measured on a real deck of this shape: fail in 4 of 4 runs before the rubric
   # sentence, warn in 4 of 4 after. The other three guard the other direction: a deck with no why-now
-  # slide fails (the rubric's Fail text), a deck with no market slide fails (observed in every run on
-  # this deck; the rubric's Fail text names only a top-down chart), and a quantified problem must not
-  # fail. None of the four has been run on this slide under the current rubric: record this lane
+  # slide fails, a deck with no market sizing fails (both are the rubric's Fail text), and a
+  # quantified problem must not fail. None of the four has been run on this slide under the current rubric: record this lane
   # alone first, so a refusal costs one run.
   # checklist.json runs 29-62 KB; rerecord.sh records this lane with a larger body cap, because an
   # artifact_json over a truncated body refuses the record AFTER the run is paid for.

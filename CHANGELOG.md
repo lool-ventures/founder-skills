@@ -23,6 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
   Each change was checked against real decks: the check moved to a warning where the slide was
   present but weak, and stayed a failure where the slide was missing.
+
+  The market-sizing check now says outright that a deck with no market sizing at all fails. Reviews
+  already graded it that way; the rule only named a top-down chart with no justification.
 - **A financial model review no longer tells you to state a revenue model you already stated.**
   A model whose revenue model fits none of the types we benchmark used to read the same as one that
   never says how the company makes money: both were told to "state how the company makes money and

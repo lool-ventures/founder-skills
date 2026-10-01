@@ -1922,3 +1922,14 @@ def test_purpose_clear_requires_a_deck_wide_search_and_a_cited_slide() -> None:
 def test_no_vague_purpose_fails_only_on_buzzword_only_purpose() -> None:
     fail = _criterion("no_vague_purpose")["Fail"].lower()
     assert "only" in fail and "buzzword" in fail and "no concrete" in fail, fail
+
+
+def test_market_bottom_up_fails_a_deck_with_no_market_sizing() -> None:
+    """Missing is the fail case. The text named only a top-down chart, so a deck with no market slide
+    failed by the grader's habit rather than the rule, and a scenario asserting that fail had no rule
+    behind it."""
+    text = (REFS_DIR / "checklist-criteria.md").read_text(encoding="utf-8")
+    section = text.split("### `market_bottom_up`", 1)[1].split("\n### ", 1)[0]
+    fail = next(line for line in section.splitlines() if line.startswith("**Fail:**"))
+    assert "No market sizing anywhere in the deck" in fail, fail
+    assert "top-down TAM chart" in fail, fail

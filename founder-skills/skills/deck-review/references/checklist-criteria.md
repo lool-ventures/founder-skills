@@ -67,7 +67,7 @@ Search the whole deck and cite the slide before failing; an unsourced argument i
 ### `market_bottom_up`
 **Label:** Market sizing uses bottom-up approach
 **Pass:** Shows bottom-up sizing: ICP count × willingness to pay × adoption rate. Expandability as second layer.
-**Fail:** Only shows inflated top-down TAM chart with no justification.
+**Fail:** No market sizing anywhere in the deck, or only an inflated top-down TAM chart with no justification.
 **Warn:** Has top-down with some bottom-up elements, but bottom-up not primary.
 **Basis:** Sequoia, multiple sources — bottom-up sizing beats generic TAM charts.
 
