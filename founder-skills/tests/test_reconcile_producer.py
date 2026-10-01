@@ -51,16 +51,16 @@ _LEDGER = {
         {
             "id": "stated_take_rate",
             "value": 6.2,
-            "raw": "6.2%",
+            "raw": "5.4%",
             "unit_kind": "percent",
             "label": "take rate",
             "slide": 6,
-            "quote": "our take rate is 6.2%",
+            "quote": "our take rate is 5.4%",
         },
     ]
 }
 
-_TRANSCRIPT = "Slide 6: GMV of $493K in 2024. We report net revenue of $9K, and our take rate is 6.2%."
+_TRANSCRIPT = "Slide 6: GMV of $493K in 2024. We report net revenue of $9K, and our take rate is 5.4%."
 
 _TAKE_RATE_RELATION = {
     "kind": "derived_ratio",
@@ -118,14 +118,14 @@ def test_a_computed_figure_disagreeing_with_a_stated_one_is_a_contradiction() ->
     kinds = [r["verdict"] for r in out["relations"]]
     assert "contradiction" in kinds
     rendered = out["relations"][0]["rendered"]
-    assert "6.2%" in rendered and "1.8%" in rendered
+    assert "5.4%" in rendered and "1.8%" in rendered
 
 
 def test_both_sides_of_a_finding_render_in_the_same_number_space() -> None:
     """A founder must never be shown two numbers that look 1000x apart and are not.
 
     A cashflow table denominated in thousands otherwise renders as
-    "= -19,393,000 — but the deck states (19,391)".
+    "= -19,341,000 — but the deck states (19,339)".
     """
     rc, out, err = _run([_TAKE_RATE_RELATION])
     assert rc == 0, err
@@ -610,15 +610,15 @@ def test_contradictions_are_ordered_most_wrong_first() -> None:
             {
                 "id": "far",
                 "value": 6.2,
-                "raw": "6.2%",
+                "raw": "5.4%",
                 "unit_kind": "percent",
                 "label": "take rate stated on slide four",
                 "slide": 1,
-                "quote": "a take rate of 6.2%",
+                "quote": "a take rate of 5.4%",
             },
         ]
     }
-    transcript = "Slide 1: net revenue of $9,000. volume of $493,000. a take rate of 1.9%. a take rate of 6.2%."
+    transcript = "Slide 1: net revenue of $9,000. volume of $493,000. a take rate of 1.9%. a take rate of 5.4%."
     with tempfile.TemporaryDirectory() as d:
         lp, sp = os.path.join(d, "l.json"), os.path.join(d, "s.json")
         with open(lp, "w", encoding="utf-8") as f:

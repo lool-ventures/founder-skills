@@ -9472,9 +9472,9 @@ def test_stated_totals_accepts_price_and_premoney() -> None:
         schema = json.load(f)
 
     st = {
-        "fully_diluted": 45_209_360,
-        "price_per_share": 23.2255,
-        "pre_money": 1_050_000_000,
+        "fully_diluted": 38_617_240,
+        "price_per_share": 19.8417,
+        "pre_money": 760_000_000,
         "source": "pro_forma_grid",
     }
     # Validates the stated_totals sub-schema directly
@@ -9485,10 +9485,10 @@ def test_freeform_stated_totals_catches_dropped_class() -> None:
     """Guard: a freeform stated_totals FD that diverges >0.1% from the computed FD fires W_FD_RECONCILE_DELTA.
 
     _BASIC_INPUTS computes to 11,500,000 FD (two founders × 5 M + 1.5 M authorized pool).
-    A stated total of 3,881,559 diverges by ~1,962,727 ppm — far above the 1000 ppm threshold —
+    A stated total of 3,874,212 diverges by ~1,968,346 ppm — far above the 1000 ppm threshold —
     simulating a dropped equity class in the freeform grid.
     """
-    inputs = {**_BASIC_INPUTS, "stated_totals": {"fully_diluted": 3_881_559, "source": "freeform_grid"}}
+    inputs = {**_BASIC_INPUTS, "stated_totals": {"fully_diluted": 3_874_212, "source": "freeform_grid"}}
     cs = cap_state_mod.build_cap_state(inputs, _BASIC_INSTRUMENTS)
     assert any(w.startswith("W_FD_RECONCILE_DELTA") for w in cs.get("warnings", []))
 
@@ -9514,21 +9514,21 @@ def test_reconciliation_section_renders_with_divergent_pps() -> None:
     scenario = {
         "type": "priced_round",
         "scenario_id": "s1",
-        "computed_outputs": {"equity_financing_price": 21.6565},
-        "parameters": {"pre_money": 1_050_000_000},
+        "computed_outputs": {"equity_financing_price": 18.4093},
+        "parameters": {"pre_money": 760_000_000},
     }
     inputs = {
         "stated_totals": {
-            "price_per_share": 23.2255,
-            "pre_money": 1_050_000_000,
-            "fully_diluted": 45_209_360,
+            "price_per_share": 19.8417,
+            "pre_money": 760_000_000,
+            "fully_diluted": 38_617_240,
             "source": "pro_forma_grid",
         }
     }
-    cap_state = {"as_converted_totals": {"fully_diluted_shares": 45_209_008}}
+    cap_state = {"as_converted_totals": {"fully_diluted_shares": 38_616_905}}
     out = "\n".join(compose_report.build_reconciliation_lines(scenario, inputs, cap_state))
     assert "Reconciliation vs your source documents" in out
-    assert "Price per share" in out and "23.2255" in out and "21.6565" in out
+    assert "Price per share" in out and "19.8417" in out and "18.4093" in out
     assert "coupled" in out.lower()  # the cause note fired (PPS diverged > 0.1%)
 
 
@@ -9575,8 +9575,8 @@ class TestReconciliationNonCircularityGuard:
         "copy-the-computed-value-back-in" pattern — must render CIRCULAR, not a clean match."""
         import compose_report  # type: ignore[import-not-found]
 
-        scenario = self._scenario(21.6565)
-        inputs = {"stated_totals": {"price_per_share": 21.6565}}  # no "source" key
+        scenario = self._scenario(18.4093)
+        inputs = {"stated_totals": {"price_per_share": 18.4093}}  # no "source" key
         out = "\n".join(compose_report.build_reconciliation_lines(scenario, inputs, {"as_converted_totals": {}}))
         assert "CIRCULAR" in out
         assert "Circular reconciliation detected" in out
@@ -9587,9 +9587,9 @@ class TestReconciliationNonCircularityGuard:
         naming the skill's own output — must still render CIRCULAR, not a clean match."""
         import compose_report  # type: ignore[import-not-found]
 
-        scenario = self._scenario(21.6565)
+        scenario = self._scenario(18.4093)
         for bad_source in ("scenarios.json", "computed", "this report", "cap_state.json"):
-            inputs = {"stated_totals": {"price_per_share": 21.6565, "source": bad_source}}
+            inputs = {"stated_totals": {"price_per_share": 18.4093, "source": bad_source}}
             out = "\n".join(compose_report.build_reconciliation_lines(scenario, inputs, {"as_converted_totals": {}}))
             assert "CIRCULAR" in out, f"source={bad_source!r} should have fired CIRCULAR; got:\n{out}"
 
@@ -9598,10 +9598,10 @@ class TestReconciliationNonCircularityGuard:
         provenance must report cleanly — exact-match alone must never be the trigger."""
         import compose_report  # type: ignore[import-not-found]
 
-        scenario = self._scenario(21.6565)
-        inputs = {"stated_totals": {"price_per_share": 21.6565, "source": "term_sheet"}}
+        scenario = self._scenario(18.4093)
+        inputs = {"stated_totals": {"price_per_share": 18.4093, "source": "term_sheet"}}
         out = "\n".join(compose_report.build_reconciliation_lines(scenario, inputs, {"as_converted_totals": {}}))
-        assert "Price per share" in out and "21.6565" in out
+        assert "Price per share" in out and "18.4093" in out
         assert "CIRCULAR" not in out
         assert "CANNOT VERIFY" not in out
         assert "+0.0%" in out  # clean match row, no ⚠ suffix
@@ -9611,9 +9611,9 @@ class TestReconciliationNonCircularityGuard:
         confirmed as independent — must degrade to CANNOT VERIFY, not report a match."""
         import compose_report  # type: ignore[import-not-found]
 
-        # 21.6565 vs 21.65 is well within the 0.1% tolerance but not bit-for-bit identical.
-        scenario = self._scenario(21.6565)
-        inputs = {"stated_totals": {"price_per_share": 21.65}}  # no "source" key
+        # 18.4093 vs 18.40 is well within the 0.1% tolerance but not bit-for-bit identical.
+        scenario = self._scenario(18.4093)
+        inputs = {"stated_totals": {"price_per_share": 18.40}}  # no "source" key
         out = "\n".join(compose_report.build_reconciliation_lines(scenario, inputs, {"as_converted_totals": {}}))
         assert "CANNOT VERIFY" in out
         assert "provenance missing" in out.lower()

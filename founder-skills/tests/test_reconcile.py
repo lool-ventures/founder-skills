@@ -107,7 +107,7 @@ def test_a_figure_can_always_contradict_something() -> None:
         ("200", 200, "count", 10.0),  # sig-figs say 50; the CAP binds
         ("20%", 20, "percent", 1.0),  # sig-figs say 5, which would be absurd
         ("$115k", 115_000, "money", 500.0),  # the flagship's yardstick
-        ("(856)", -856_000, "money", 500.0),  # value space, via a table scale never parsed
+        ("(742)", -742_000, "money", 500.0),  # value space, via a table scale never parsed
         ("$1,000,000", 1_000_000, "money", 50_000.0),  # CAP binds; sig-figs would say 500,000
         ("$8M", 8_000_000, "money", 500_000.0),  # the FLOOR binds; 5% would be 400,000
     ],
@@ -118,7 +118,7 @@ def test_figure_tolerance(raw: str, value: float, unit: str, expected: float) ->
 
 def test_tolerance_is_never_negative_and_zero_is_exact() -> None:
     # 32 corpus figures are negative; a negative tolerance inverts the acceptance window.
-    assert figure_tolerance(fig("(19,391)", -19_391_000)) > 0
+    assert figure_tolerance(fig("(19,339)", -19_339_000)) > 0
     # 18 are zero, and one is an operand of a live contradiction.
     assert figure_tolerance(fig("0", 0, "count")) == 0.0
 
@@ -163,19 +163,19 @@ def test_headcount_sum_survives_propagation() -> None:
 
 
 def test_sums_propagate_so_rounded_components_do_not_contradict() -> None:
-    """deck-D: eight cells each rounded to the nearest thousand, gap 2,000 on 19.4M."""
+    """deck-D: eight cells each rounded to the nearest thousand, gap 2,000 on 19.3M."""
     cells = [
-        (856, "f1"),
-        (1679, "f2"),
-        (1711, "f3"),
-        (2025, "f4"),
-        (2334, "f5"),
-        (2724, "f6"),
-        (3712, "f7"),
-        (4352, "f8"),
+        (742, "f1"),
+        (1583, "f2"),
+        (1846, "f3"),
+        (2117, "f4"),
+        (2459, "f5"),
+        (2861, "f6"),
+        (3604, "f7"),
+        (4129, "f8"),
     ]
     ops = [fig(f"({v:,})", -v * 1000, "money", id=i) for v, i in cells]
-    window = operand_tolerance("sum", ops) + figure_tolerance(fig("(19,391)", -19_391_000))
+    window = operand_tolerance("sum", ops) + figure_tolerance(fig("(19,339)", -19_339_000))
     assert window >= 2000.0
 
 
@@ -199,12 +199,12 @@ def test_multiplicative_relations_do_not_propagate() -> None:
     ("raw", "label", "expected"),
     [
         ("$200B+", "", "at_least"),
-        ("270+ sites", "", "at_least"),
+        ("180+ sites", "", "at_least"),
         ("100%+", "", "at_least"),
         ("+76%", "", None),  # a LEADING + is a delta sign, not a bound
         ("< 1-2%", "", "at_most"),
         ("> $40M", "", "at_least"),  # note the space after the operator
-        ("2,000", "tall buildings (>200m) existing worldwide (fewer than)", "at_most"),
+        ("2,000", "warehouses (large) existing worldwide (fewer than)", "at_most"),
         ("20+", "global patents targeted (minimum)", "at_least"),
         ("~3.5%", "", "approximate"),
         ("≈20", "", "approximate"),  # U+2248, same standing as the ASCII tilde
@@ -283,7 +283,7 @@ def test_a_bare_raw_and_label_still_read_no_bound_without_the_quote() -> None:
 def test_a_symbol_in_the_label_is_never_read_as_a_bound() -> None:
     """That label's ">200m" is a building-height threshold, not a bound on the count."""
     assert detect_bound("1,500", "buildings over 200m tall") == "at_least"  # the WORD does bind
-    assert detect_bound("1,500", "tall buildings (>200m) worldwide") is None
+    assert detect_bound("1,500", "warehouses (large) worldwide") is None
 
 
 def test_contradictory_signals_fall_back_to_the_two_sided_test() -> None:
@@ -310,15 +310,15 @@ def test_a_bounded_figure_never_produces_inf_or_nan() -> None:
 
 
 def test_stated_side_is_expanded_when_it_diverges_from_its_value() -> None:
-    assert _stated(fig("(19,391)", -19_391_000)) == "(19,391) (= -19,391,000)"
+    assert _stated(fig("(19,339)", -19_339_000)) == "(19,339) (= -19,339,000)"
     assert _stated(fig("$115k", 115_000)) == "$115k"  # no divergence, no noise
 
 
 @pytest.mark.parametrize(
     ("computed", "stated", "fires"),
     [
-        (19_393_000, 19_391, True),  # the class the guard exists for
-        (857_000, 856, True),
+        (19_341_000, 19_339, True),  # the class the guard exists for
+        (743_000, 742, True),
         (1.005, 1.0, False),  # a near-exact agreement must never be refused
         (10_000, 1_000, False),  # exactly 10x: a live true finding, must stay a contradiction
         (100, 1, False),  # 100x is more likely a real error than a units convention
@@ -338,8 +338,8 @@ def test_chart_series_data_is_not_visible() -> None:
     """Measured on the corpus .pptx: 351 of 477 figures are chart series with no data
     labels shown. The deck plots them; it does not state them."""
     assert not is_visible("series G&A: Q3 23=1370.1, Q4 23=1402.07")
-    assert is_visible("ARR at End of Period | 15,614 |  | 19,089")  # a table cell is on the slide
-    assert is_visible("Revenue grew to $17.8m in 2024")  # so is body text
+    assert is_visible("ARR at End of Period | 15,571 |  | 18,436")  # a table cell is on the slide
+    assert is_visible("Revenue grew to $16.9m in 2024")  # so is body text
     assert is_visible("")  # absent quote must not be treated as hidden
 
 
@@ -433,7 +433,7 @@ def test_growth_convention_is_not_a_contradiction() -> None:
     """A deck saying ARR "grew 22%" and a tool computing the multiple (122%) differ by
     exactly 100 points and by nothing else. Measured three times in one corpus."""
     a = fig("$19m", 19_000_000, "money", id="f1")
-    b = fig("15,614", 15_614_000, "money", id="f2")
+    b = fig("15,571", 15_571_000, "money", id="f2")
     e = fig("22%", 22, "percent", label="ARR growth rate", id="f3")
     r = _cmp("ratio", ["f1", "f2"], "f3", {"f1": a, "f2": b, "f3": e})
     assert r.verdict == "convention_differs", r.rendered
@@ -452,7 +452,7 @@ def test_the_operand_guard_keeps_a_real_finding_alive() -> None:
 
 
 def test_sign_convention_is_not_a_contradiction() -> None:
-    a, b = fig("4,770", 4_770_000, "money", id="f1"), fig("4,789", 4_789_000, "money", id="f2")
+    a, b = fig("4,812", 4_812_000, "money", id="f1"), fig("4,831", 4_831_000, "money", id="f2")
     e = fig("20", 20_000, "money", label="variance", id="f3")
     r = _cmp("difference", ["f1", "f2"], "f3", {"f1": a, "f2": b, "f3": e})
     assert r.verdict == "convention_differs" and "sign" in " ".join(r.reasons)
@@ -461,7 +461,7 @@ def test_sign_convention_is_not_a_contradiction() -> None:
 def test_sign_rule_does_not_fire_when_magnitudes_also_disagree() -> None:
     """The rule is magnitude-agrees-AND-sign-differs. A real sign error with a different
     magnitude must still surface."""
-    a, b = fig("4,770", 4_770_000, "money", id="f1"), fig("9,000", 9_000_000, "money", id="f2")
+    a, b = fig("4,812", 4_812_000, "money", id="f1"), fig("9,000", 9_000_000, "money", id="f2")
     e = fig("20", 20_000, "money", label="variance", id="f3")
     r = _cmp("difference", ["f1", "f2"], "f3", {"f1": a, "f2": b, "f3": e})
     assert r.verdict == "contradiction"
@@ -528,7 +528,7 @@ def test_words_that_really_do_mark_rounding_still_widen() -> None:
 
 def test_one_sided_bounds_are_untouched_by_the_change() -> None:
     assert detect_bound("$200B+", "market size") == "at_least"
-    assert detect_bound("2,000", "tall buildings (fewer than)") == "at_most"
+    assert detect_bound("2,000", "warehouses (fewer than)") == "at_most"
 
 
 # ---------------------------------------------------------------------------
@@ -554,11 +554,11 @@ def _ratio_case(num_raw: str, num: float, den_raw: str, den: float, stated: floa
 def test_the_live_false_finding_is_suppressed() -> None:
     """The defect this band was rebuilt for, from a real deck.
 
-    `$493k / $94k = 5.24x` against a stated `425%`. 425% growth IS 5.25x — the deck was
+    `$459k / $141k = 3.26x` against a stated `225%`. 225% growth IS 3.25x — the deck was
     right and the tool asserted it wrong. Offset 0.532 against the old band of 0.5: it
     missed by 0.032 of a percentage point.
     """
-    offset, band = _ratio_case("$493k", 493_000, "$94k", 94_000, 425, "425%")
+    offset, band = _ratio_case("$459k", 459_000, "$141k", 141_000, 225, "225%")
     assert offset == pytest.approx(0.532, abs=0.01)
     assert band > offset, "the live false finding is not suppressed"
 
@@ -740,10 +740,10 @@ def test_a_leading_bound_word_in_the_raw_string_is_read() -> None:
 
     `detect_bound` read symbols from `raw` and words from `label`, so a raw carrying the
     word fell through both. Anchored to the start deliberately — an unanchored match reads
-    "1103% over 6 mths" as a floor, where "over" is a time preposition.
+    "940% over 6 mths" as a floor, where "over" is a time preposition.
     """
     assert detect_bound("Over 30%", "time to market") == "at_least"
-    assert detect_bound("Less than 2,000", "tall buildings") == "at_most"
+    assert detect_bound("Less than 2,000", "warehouses") == "at_most"
     assert detect_bound("30%", "turnover 30%") is None
 
 
@@ -1046,7 +1046,7 @@ def test_a_quote_needs_a_word_that_says_what_the_number_is() -> None:
     while identifying nothing: a currency code, an article and a hedge say nothing about
     WHICH quantity the number is. The point of the check is that the quote names the thing.
     """
-    for quote in ("USD $493K", "the $80B", "about $80B", "$80B", "63.5% | $635K", "approx 12"):
+    for quote in ("USD $493K", "the $80B", "about $80B", "$80B", "58.5% | $585K", "approx 12"):
         assert not quote_is_identifying(quote), quote
     for quote in ("Net revenue $493K", "GMV of $493K in 2024", "ARR $2M", "customers 1,200"):
         assert quote_is_identifying(quote), quote

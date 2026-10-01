@@ -52,7 +52,7 @@ def _detector() -> Any:
 # The defect's own shape, rebuilt with invented figures: a stated multiple ~293x away from the
 # ratio of the two figures the same sentence cites.
 DEFECT = (
-    "Projected FY27 revenue is roughly 2,000x the FY23 actual of $123,485,311 against $843,000,000, "
+    "Projected FY27 revenue is roughly 2,000x the FY23 actual of $118,506,229 against $809,000,000, "
     "with no bridge between them."
 )
 

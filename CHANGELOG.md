@@ -1391,8 +1391,8 @@ Fleet-wide:
 
 **deck-review** — the numeric checks, all found by running real decks:
 
-- A correct deck was told it contradicted itself: `$493k ÷ $94k = 5.24x — but the deck states 425%`.
-  425% growth *is* 5.25x. The rule that recognises this convention was using a tolerance calibrated
+- A correct deck was told it contradicted itself: `$459k ÷ $141k = 3.26x — but the deck states 225%`.
+  225% growth *is* 3.25x. The rule that recognises this convention was using a tolerance calibrated
   for the opposite job, so it could only ever fail to suppress.
 - A range split across two rows was compared endpoint by endpoint as though each were a point, so a
   computed figure sitting comfortably inside the range your deck states was reported as a

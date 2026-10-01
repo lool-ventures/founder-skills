@@ -230,17 +230,17 @@ def test_warns_but_accepts_money_with_no_currency() -> None:
 
 
 def test_rejects_a_value_that_drops_precision_the_raw_string_carries() -> None:
-    """The deck-H defect: `raw: "16661.2"` recorded as `value: 16661`.
+    """The deck-H defect: `raw: "15873.2"` recorded as `value: 15873`.
 
     A 0.0012% discrepancy, invisible to any relative floor — and it does real damage
     downstream. That lost 0.2 moved a sum 0.54 off its stated total against a tolerance of
-    0.555, and a founder was told their revenue disagreed with itself by 1 part in 17,772.
+    0.555, and a founder was told their revenue disagreed with itself by 1 part in 16,904.
 
     A figure printed to six significant figures is a claim to six significant figures, so
     `value` must match `raw` to `raw`'s own precision and no looser.
     """
     rc, _, err = _run(
-        {"figures": [_fig(id="rev_mix", value=16661, raw="16661.2", quote="Subscription revenue 16661.2")]}
+        {"figures": [_fig(id="rev_mix", value=15873, raw="15873.2", quote="Subscription revenue 15873.2")]}
     )
     assert rc != 0
     assert "disagrees with raw" in err
@@ -249,7 +249,7 @@ def test_rejects_a_value_that_drops_precision_the_raw_string_carries() -> None:
 def test_an_exact_match_on_a_precise_raw_is_accepted() -> None:
     """The counter-test: the rule must be satisfiable, not merely strict."""
     rc, _, err = _run(
-        {"figures": [_fig(id="rev_mix", value=16661.2, raw="16661.2", quote="Subscription revenue 16661.2")]}
+        {"figures": [_fig(id="rev_mix", value=15873.2, raw="15873.2", quote="Subscription revenue 15873.2")]}
     )
     assert rc == 0, err
 
@@ -399,9 +399,9 @@ def test_a_single_token_quote_is_warned_about_but_accepted() -> None:
 
 
 def test_a_quote_with_no_real_word_is_warned_about() -> None:
-    """ "63.5% | $635K" is a table row with the row's own name stripped off — the part that
+    """ "58.5% | $585K" is a table row with the row's own name stripped off — the part that
     would have made it identifying."""
-    rc, out, err = _run({"figures": [_fig(quote="63.5% | $635K")]})
+    rc, out, err = _run({"figures": [_fig(quote="58.5% | $585K")]})
     assert rc == 0, err
     assert any("quote" in w for w in json.loads(out)["validation"]["warnings"])
 

@@ -1145,9 +1145,9 @@ def test_map_freeform_writes_stated_totals_when_provided() -> None:
         existing_inputs={},
         answers={},
         run_id="t",
-        stated_total=3_881_559,
+        stated_total=3_874_212,
     )
-    assert out["inputs"]["stated_totals"] == {"fully_diluted": 3_881_559, "source": "freeform_grid"}
+    assert out["inputs"]["stated_totals"] == {"fully_diluted": 3_874_212, "source": "freeform_grid"}
 
 
 def test_map_freeform_omits_stated_totals_when_absent() -> None:
@@ -1176,7 +1176,7 @@ def test_freeform_emit_threads_stated_total_to_inputs(tmp_path: Path) -> None:
                 "column_role_map": {"A": "holder_name", "B": "shares"},
             }
         ],
-        "stated_total": 3_881_559,
+        "stated_total": 3_874_212,
     }
     receipt = _emit_cli(
         tmp_path,
@@ -1185,7 +1185,7 @@ def test_freeform_emit_threads_stated_total_to_inputs(tmp_path: Path) -> None:
     )
     assert receipt["ok"] is True, receipt
     inputs = json.loads((tmp_path / "inputs.json").read_text())
-    assert inputs["stated_totals"] == {"fully_diluted": 3_881_559, "source": "freeform_grid"}
+    assert inputs["stated_totals"] == {"fully_diluted": 3_874_212, "source": "freeform_grid"}
 
 
 # ---------------------------------------------------------------------------

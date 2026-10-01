@@ -8501,18 +8501,18 @@ def test_compose_is_silent_when_every_document_was_opened() -> None:
 
 
 def test_equal_value_rows_are_marked_even_when_the_warning_is_accepted() -> None:
-    """Live: PAIRED_SLOT_SAME_VALUE fired on 37.32 used on both SAM sides and the constructor accepted
+    """Live: PAIRED_SLOT_SAME_VALUE fired on 30.62 used on both SAM sides and the constructor accepted
     it away -- its own reason conceding "not fully independent corroboration ... which the report
     should say plainly" -- while the summary table said nothing. The mark comes from the detector, not
     the warning list, so acceptance explains and no longer hides."""
-    sizing = _both_sizing(90_000_000_000, 37.32, 0.3, 61_000_000, 1884, 37.32, 0.32)  # equal SAM slots, no TAM identity
+    sizing = _both_sizing(90_000_000_000, 30.62, 0.3, 61_000_000, 1884, 30.62, 0.32)  # equal SAM slots, no TAM identity
     meth = {
         **_VALID_METHODOLOGY,
         "approach_chosen": "both",
         "accepted_warnings": [
             {
                 "code": "PAIRED_SLOT_SAME_VALUE",
-                "match": "37.32",
+                "match": "30.62",
                 "reason": "deliberate reuse of the deck's reach figure",
             }
         ],
@@ -8523,8 +8523,8 @@ def test_equal_value_rows_are_marked_even_when_the_warning_is_accepted() -> None
         "acknowledged"
     ]
     table = _compose_md_text(Path(d)).split("## Analysis Checklist")[0]
-    assert "| SAM | $33.6B | Top-down ‡ |" in table, table
-    assert "| SAM | $42.9B | Bottom-up ‡ |" in table, table
+    assert "| SAM | $27.6B | Top-down ‡ |" in table, table
+    assert "| SAM | $35.2B | Bottom-up ‡ |" in table, table
     assert "| TAM | $90.0B | Top-down |" in table, table
     assert "‡ Both builds narrow this figure by the same number" in table
     # ...and on the HTML surface, which nobody reads and where this class of defect survives.
@@ -8547,7 +8547,7 @@ def test_a_single_factor_is_unstructured_not_itemized() -> None:
     v["assumptions"].append(
         {
             "name": "segment_pct",
-            "value": 37.32,
+            "value": 30.62,
             "category": "derived",
             "label": "Reachable share",
             "factors": [{"factor_id": "same_number", "value": 0.3732, "source_id": "company_stated"}],
@@ -8664,7 +8664,7 @@ def test_closing_message_explains_each_mark_the_verdict_quotes() -> None:
         "findings": [{**_REDTEAM_ARTIFACT["findings"][0], "severity": "high", "parameter": "arpu"}],
     }
     rc, data, d = _compose_with_sizing(
-        _both_sizing(7e9, 37.32, 3, 53_000_000, 1884, 22.33, 0.268), inputs=inputs, redteam=rt
+        _both_sizing(7e9, 30.62, 3, 53_000_000, 1884, 22.33, 0.241), inputs=inputs, redteam=rt
     )
     assert rc == 0 and data is not None
     assert "$99.9B \u00a7 (bottom-up)" in data["verdict"], data["verdict"]
@@ -8754,13 +8754,13 @@ def test_contested_stated_input_marks_the_rows_built_on_it() -> None:
         "findings": [{**_REDTEAM_ARTIFACT["findings"][0], "severity": "high", "parameter": "arpu"}],
     }
     rc, data, d = _compose_with_sizing(
-        _both_sizing(7e9, 37.32, 3, 53_000_000, 1884, 22.33, 0.268), inputs=inputs, redteam=rt
+        _both_sizing(7e9, 30.62, 3, 53_000_000, 1884, 22.33, 0.241), inputs=inputs, redteam=rt
     )
     assert rc == 0 and data is not None
     table = _compose_md_text(Path(d)).split("## Analysis Checklist")[0]
     assert "| TAM | $99.9B | Bottom-up § |" in table, table
     assert "| SAM | $22.3B | Bottom-up § |" in table, table
-    assert "| SOM | $267.6M | Bottom-up § |" in table, table
+    assert "| SOM | $240.6M | Bottom-up § |" in table, table
     assert "| TAM | $7.0B | Top-down |" in table, table  # top-down did not consume arpu
     assert "§ Built on a figure you stated that a cited source contradicts" in table
     rc_html, html_text, err = run_script_raw("visualize.py", ["--dir", d])
@@ -8775,7 +8775,7 @@ def test_contested_mark_needs_a_high_finding_on_a_stated_input() -> None:
         "findings": [{**_REDTEAM_ARTIFACT["findings"][0], "severity": "medium", "parameter": "arpu"}],
     }
     _, _, d1 = _compose_with_sizing(
-        _both_sizing(7e9, 37.32, 3, 53_000_000, 1884, 37.32, 0.268), inputs=inputs, redteam=medium
+        _both_sizing(7e9, 30.62, 3, 53_000_000, 1884, 30.62, 0.241), inputs=inputs, redteam=medium
     )
     assert "§" not in _compose_md_text(Path(d1)).split("## Analysis Checklist")[0]
     not_stated = {
@@ -8783,7 +8783,7 @@ def test_contested_mark_needs_a_high_finding_on_a_stated_input() -> None:
         "findings": [{**_REDTEAM_ARTIFACT["findings"][0], "severity": "high", "parameter": "customer_count"}],
     }
     _, _, d2 = _compose_with_sizing(
-        _both_sizing(7e9, 37.32, 3, 53_000_000, 1884, 37.32, 0.268), inputs=inputs, redteam=not_stated
+        _both_sizing(7e9, 30.62, 3, 53_000_000, 1884, 30.62, 0.241), inputs=inputs, redteam=not_stated
     )
     assert "§" not in _compose_md_text(Path(d2)).split("## Analysis Checklist")[0]
 
@@ -8804,17 +8804,17 @@ def test_red_team_keeps_a_known_parameter_and_drops_an_unknown_one(tmp_path: Pat
 
 
 def _verdict_sizing() -> dict[str, Any]:
-    """Top-down SOM $19.2M, bottom-up SOM $56.8M, deltas set as the producer would (the helper pins
+    """Top-down SOM $20.7M, bottom-up SOM $54.1M, deltas set as the producer would (the helper pins
     comparison to a 0.0 TAM delta; compose never recomputes)."""
-    s = _both_sizing(2e9, 8.0, 12.0, 301_250, 1884, 25.0, 10.0)
+    s = _both_sizing(2.4e9, 7.5, 11.5, 287_400, 1884, 25.0, 10.0)
     tail = "Review assumptions — one approach likely has a flawed input."
     s["comparison"] = {
-        "tam_delta_pct": 111.6,
+        "tam_delta_pct": 131.4,
         "sam_delta_pct": 12.0,
-        "som_delta_pct": 98.9,
-        "warning": f"Top-down and bottom-up TAM differ by 111.6% (>30%). {tail}",
+        "som_delta_pct": 94.2,
+        "warning": f"Top-down and bottom-up TAM differ by 131.4% (>30%). {tail}",
         "sam_note": f"SAM estimates differ by 12.0%. {_CAVEAT}",
-        "som_warning": f"Top-down and bottom-up SOM differ by 98.9% (>30%). {tail}",
+        "som_warning": f"Top-down and bottom-up SOM differ by 94.2% (>30%). {tail}",
     }
     return s
 
@@ -8835,9 +8835,9 @@ def test_summary_opens_with_the_verdict_from_fields() -> None:
     assert rc == 0 and data is not None
     md = _compose_md_text(Path(d))
     head = _summary_head(md)
-    assert "You stated SOM $100.0M; this analysis finds $19.2M (top-down) and $56.8M (bottom-up)." in head, head
+    assert "You stated SOM $100.0M; this analysis finds $20.7M (top-down) and $54.1M (bottom-up)." in head, head
     assert (
-        "The two builds differ by 111.6% on TAM and 98.9% on SOM — one approach likely has a flawed input." in head
+        "The two builds differ by 131.4% on TAM and 94.2% on SOM — one approach likely has a flawed input." in head
     ), head
     assert "An outside review raised 1 challenge: 1 from this analysis's own output." in head, head
     assert "from published sources" not in head  # the finding is internal; the old wording said "published"
@@ -8892,8 +8892,8 @@ def test_verdict_quotes_a_marked_figure_with_its_mark() -> None:
     rc, data, d = _compose_with_sizing(_verdict_sizing(), inputs=inputs, redteam=rt)
     assert rc == 0
     head = _summary_head(_compose_md_text(Path(d)))
-    assert "$56.8M § (bottom-up)" in head, head
-    assert "$19.2M (top-down)" in head, head
+    assert "$54.1M § (bottom-up)" in head, head
+    assert "$20.7M (top-down)" in head, head
 
 
 def test_verdict_single_approach_and_no_claims() -> None:
@@ -8912,7 +8912,7 @@ def test_verdict_single_approach_and_no_claims() -> None:
     rc2, _, d2 = _compose_with_sizing(_verdict_sizing())  # _VALID_INPUTS states no claim
     head2 = _summary_head(_compose_md_text(Path(d2)))
     assert "You stated" not in head2
-    assert "The two builds differ by 111.6% on TAM and 98.9% on SOM" in head2
+    assert "The two builds differ by 131.4% on TAM and 94.2% on SOM" in head2
 
 
 def test_verdict_when_no_sizing_was_produced() -> None:
@@ -8986,8 +8986,8 @@ def test_verdict_paragraph_renders_in_the_html_hero() -> None:
     assert rc_html == 0, err
     hero = html_text[html_text.index("</h1>") : html_text.index("<main")]
     assert 'class="verdict"' in hero
-    assert "You stated SOM $100.0M; this analysis finds $19.2M (top-down) and $56.8M (bottom-up)." in hero
-    assert "The two builds differ by 111.6% on TAM and 98.9% on SOM" in hero
+    assert "You stated SOM $100.0M; this analysis finds $20.7M (top-down) and $54.1M (bottom-up)." in hero
+    assert "The two builds differ by 131.4% on TAM and 94.2% on SOM" in hero
     # visualize escapes the apostrophe; assert the class phrase without it
     assert "An outside review raised 1 challenge: 1 from this analysis" in hero
 

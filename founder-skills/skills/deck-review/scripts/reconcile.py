@@ -392,7 +392,7 @@ def implied_tolerance(raw: str) -> float:
     Retained as the FLOOR under `figure_tolerance` so that the relative rule below can
     only ever relax, never tighten. On its own it is not the comparison tolerance: it
     reads the raw string, and the comparison runs on values -- `implied_tolerance
-    ("(19,391)")` is 0.5 while the value being compared is 19,391,000.
+    ("(19,339)")` is 0.5 while the value being compared is 19,339,000.
     """
     raw = numeral_form(raw)
     m = _NUM_RE.search(raw)
@@ -464,13 +464,13 @@ def parse_range(raw: str) -> tuple[float, float] | None:
 
 # A trailing "+" is a floor; a LEADING "+" is a delta sign and not a bound at all. The
 # corpus carries "+76%" and "100%+" on the same deck as "$200B+", so requiring a digit
-# before the "+" is what separates them. Not end-anchored: "270+ sites" is a floor too.
+# before the "+" is what separates them. Not end-anchored: "180+ sites" is a floor too.
 _PLUS_RE = re.compile(rf"\d\s*(?:(?:{_SCALE_ALT})(?![a-zA-Z])|%)?\s*\+", re.I)
 _LEAD_AT_MOST = re.compile(r"^\s*[<≤]")
 _LEAD_AT_LEAST = re.compile(r"^\s*[>≥]")
 # A bound word LEADING the raw string qualifies the figure itself: "Over 30%", "at least
-# $2M". Anchored deliberately -- an unanchored word match reads "1103% over 6 mths" as a
-# floor on 1103%, where "over" is a time preposition. The label path stays word-based and
+# $2M". Anchored deliberately -- an unanchored word match reads "940% over 6 mths" as a
+# floor on 940%, where "over" is a time preposition. The label path stays word-based and
 # unanchored because a label is prose about the figure; the raw string is the figure.
 _LEAD_AT_LEAST_WORDS = re.compile(r"^\s*(over|above|at least|more than|minimum of|no less than)\s+\$?\d", re.I)
 _LEAD_AT_MOST_WORDS = re.compile(r"^\s*(under|below|fewer than|less than|at most|up to|no more than)\s+\$?\d", re.I)
@@ -640,7 +640,7 @@ def detect_bound(raw: str, label: str, quote: str = "") -> str | None:
     A quarter of the harm this module can do comes from reading "$200B+" as exactly
     $200B: a computed $212.3B then contradicts a figure it in fact satisfies. Bounds
     arrive two ways and BOTH are common -- as punctuation in the raw string, and as prose
-    in the label ("tall buildings existing worldwide (fewer than)").
+    in the label ("warehouses existing worldwide (fewer than)").
 
     Symbols are read from `raw` ONLY. A label may contain a symbol that qualifies
     something else entirely: one deck's label carries ">200m", which is a building-height
@@ -765,7 +765,7 @@ def quote_is_identifying(quote: str) -> bool:
 
     The test is the presence of a word, not a length. A short quote that keeps its row
     label -- "Net revenue $493K" -- is exactly what the schema asks for and is three words
-    long; a word-count floor would flag it. Conversely "63.5% | $635K" is two tokens and
+    long; a word-count floor would flag it. Conversely "58.5% | $585K" is two tokens and
     identifies nothing. What separates them is whether anything in the string says what
     the number IS.
 
@@ -885,8 +885,8 @@ def figure_tolerance(fig: Figure) -> float:
     """How far a value may differ from this figure before the gap is real -- IN VALUE SPACE.
 
     The comparison runs on values, so the tolerance must too. `implied_tolerance` alone
-    cannot do this: it sees "(19,391)" and returns 0.5 while the value being compared is
-    19,391,000. So take the figure's precision as a RATIO in its own space and apply that
+    cannot do this: it sees "(19,339)" and returns 0.5 while the value being compared is
+    19,339,000. So take the figure's precision as a RATIO in its own space and apply that
     ratio to its value.
 
     Floored at the written precision so this can only relax. That floor is not decorative:
@@ -915,7 +915,7 @@ def operand_tolerance(operator: str, figs: list[Figure]) -> float:
 
       sum / difference   absolute errors ADD, and the total stays small relative to the
                          result. A cashflow table of eight components each rounded to the
-                         nearest thousand carries +/-4,000 against a 19,391,000 total --
+                         nearest thousand carries +/-4,000 against a 19,339,000 total --
                          which is exactly the gap that was being reported as a
                          contradiction, and no per-figure tolerance can absorb it,
                          because the discrepancy is an accumulation across eight figures.
@@ -1256,9 +1256,9 @@ def _convention_tolerance(exp: Figure, mid: float, operator: str, operands: list
     one is silent, so the suppressor should err toward withdrawing. Handing the suppressor
     the assertion test's tolerance inverted that, and is what let a false finding through:
 
-        $493k / $94k = 5.24x  — but the deck states 425% (GP growth)
+        $459k / $141k = 3.26x  — but the deck states 225% (growth)
 
-    425% growth IS 5.25x. The offset was 0.532 percentage points against a band of 0.5 --
+    225% growth IS 3.25x. The offset was 0.532 percentage points against a band of 0.5 --
     it missed by 0.032. The band was the STATED figure's precision alone, because
     `operand_tolerance` contributes nothing for multiplicative operators (deliberately, and
     correctly, for disjointness -- see its docstring). But the computed side is built from
@@ -1377,7 +1377,7 @@ def _within_year_pair(figs: list[Figure]) -> bool:
     THE TRIGGER IS POSITIVE EVIDENCE, NOT ABSENCE, and that inversion was forced by a
     pre-existing test rather than foreseen. The first version of this guard refused any
     rate-over-time claim whose operands carried no date token -- but the census says 68% of
-    operands carry none, so it suppressed `$19m vs 15,614` against a stated "ARR growth
+    operands carry none, so it suppressed `$19m vs 15,571` against a stated "ARR growth
     rate", which is a GENUINE finding (`test_growth_convention_is_not_a_contradiction`).
     A guard that kills most real growth findings to stop one false one is a bad trade.
 
@@ -1412,7 +1412,7 @@ def _stated(exp: Figure) -> str:
     The computed side always prints fully expanded, while the stated side printed from
     `.raw`. On a cashflow table denominated in thousands that produced
 
-        (856) + (1,679) + ... = -19,393,000  — but the deck states (19,391)
+        (742) + (1,583) + ... = -19,341,000  — but the deck states (19,339)
 
     a founder-visible line that looks off by a factor of a thousand describing figures
     that disagree by 0.01%. It is also what made this look like a scale-extraction bug for

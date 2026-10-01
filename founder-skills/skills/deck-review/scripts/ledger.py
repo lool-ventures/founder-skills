@@ -53,16 +53,16 @@ SIGFIG_ONLY = True
 
 There used to be a 2% floor here, applied as a `max()` over the significant-figure
 tolerance, and it was the reason a real defect shipped. A live deck recorded
-`raw: "16661.2"` with `value: 16661` — extraction silently dropped a decimal — and the
+`raw: "15873.2"` with `value: 15873` — extraction silently dropped a decimal — and the
 0.0012% discrepancy vanished inside a 2% floor. Downstream that truncation moved a sum
 0.54 off its stated total against a tolerance of 0.555, and a founder was told their
-revenue disagreed with itself by 1 part in 17,772.
+revenue disagreed with itself by 1 part in 16,904.
 
 Significant figures alone discriminate correctly on every case the floor was meant to
 cover, which is why the floor is gone rather than tuned. Measured:
 
     raw          value      sigfig tol      gap      verdict
-    16661.2      16661        0.0003%   0.0012%     reject   <- the precision loss
+    15873.2      15873        0.0003%   0.0013%     reject   <- the precision loss
     $1.2M      1238400        4.1667%   3.2000%     accept   <- a genuinely rounded figure
     $493K            493      0.1014%  99.9000%     reject   <- the 1000x scale slip
     100               97     50.0000%   3.0000%     accept   <- one sig fig, loose by design
@@ -308,7 +308,7 @@ def validate_ledger(data: dict[str, Any], total_slides: int | None = None) -> tu
             errors.append(f"{where} has no quote; the verbatim quote is what the second read checks")
         elif not quote_is_identifying(quote):
             # The schema asks for "the verbatim sentence or table row"; this checked only
-            # non-empty. A quote of "$80B" or "63.5% | $635K" satisfies that and identifies
+            # non-empty. A quote of "$80B" or "58.5% | $585K" satisfies that and identifies
             # nothing — the gate it feeds matches TEXT against the second read, so a bare
             # token matches wherever that token happens to appear on any slide.
             #

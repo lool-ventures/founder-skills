@@ -11,7 +11,7 @@
       "required_fields_minus_metadata": [
         "figures"
       ],
-      "notes": "Agent writes {figures: [...]} to OUTPUT_PATH; each figure requires id, value, raw, unit_kind, label, quote. ledger.py validates and injects metadata.run_id. Two checks are the point of the producer and neither is expressible in the schema: `value` must agree with what `raw` parses to, within the precision `raw`'s own significant figures claim (SIGFIG_ONLY; the older flat 2% floor was removed because it hid a real one-part-in-17,772 precision loss) (the scale-slip class, where \"$493K\" is recorded as 493 and every later calculation is wrong by a thousand), and `slide` must be within the deck's slide count from --inventory. The agent never computes anything here and never relates figures to each other."
+      "notes": "Agent writes {figures: [...]} to OUTPUT_PATH; each figure requires id, value, raw, unit_kind, label, quote. ledger.py validates and injects metadata.run_id. Two checks are the point of the producer and neither is expressible in the schema: `value` must agree with what `raw` parses to, within the precision `raw`'s own significant figures claim (SIGFIG_ONLY; the older flat 2% floor was removed because it hid a one-part-in-16,904 precision loss) (the scale-slip class, where \"$493K\" is recorded as 493 and every later calculation is wrong by a thousand), and `slide` must be within the slide count --inventory gives. The agent never computes anything here and never relates figures to each other."
     },
     "SECOND_READ": {
       "schema": null,
