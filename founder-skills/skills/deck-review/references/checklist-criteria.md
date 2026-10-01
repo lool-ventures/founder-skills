@@ -45,8 +45,8 @@ Search the whole deck before failing; cite the slide, or say no slide has one. A
 ### `problem_quantified`
 **Label:** Problem slide quantifies pain
 **Pass:** Problem slide identifies the user/buyer, the moment of pain, and quantifies it (time, money, risk, regulatory exposure, missed revenue). Uses concrete examples or customer quotes.
-**Fail:** Problem is abstract, industry-level, or unquantified.
-**Warn:** Problem is identified but quantification is weak or generic.
+**Fail:** Abstract or industry-level: no specific buyer or moment of pain.
+**Warn:** A specific buyer and pain, but unquantified or weakly quantified.
 **Basis:** Sequoia framework — identify user/buyer, moment of pain, quantify cost of inaction.
 
 ### `solution_shows_workflow`
@@ -59,8 +59,9 @@ Search the whole deck before failing; cite the slide, or say no slide has one. A
 ### `why_now_has_catalyst`
 **Label:** Why-now has genuine macro catalyst
 **Pass:** Cites a genuine catalyst: regulatory shift, new platform primitive, behavioral change, cost curve collapse. Answers "Why wasn't this built before?"
-**Fail:** "Why now" is missing or says "AI is hot" / generic market timing.
-**Warn:** Catalyst is present but weak or not clearly differentiated from competitors' timing.
+**Fail:** No slide argues why now, or only "AI is hot" / generic market timing.
+**Warn:** A specific why-now argument with no external catalyst, or a weak or undifferentiated catalyst.
+Search the whole deck and cite the slide before failing; an unsourced argument is weak, not missing.
 **Basis:** Sequoia — "Why wasn't this built before?" Strongest at pre-seed/seed.
 
 ### `market_bottom_up`
@@ -124,8 +125,9 @@ Search the whole deck before failing; cite the slide, or say no slide has one. A
 ### `ask_ties_to_milestones`
 **Label:** Ask ties dollars to milestones to next round
 **Pass:** Explicit fundraising ask + use of funds tied to milestones + next round readiness (or default-alive path). Addresses what happens if next round takes longer.
-**Fail:** Ask is just "we need $X to grow" with no milestone plan.
-**Warn:** Milestones mentioned but not clearly tied to dollars or next financing.
+**Fail:** No ask at all, or just "we need $X to grow" with no milestone plan.
+**Warn:** Milestones not clearly tied to dollars or next financing, or dollars tied to milestones without one explicit ask.
+Several raise scenarios with dollar amounts are an ask, not a missing one: warn, not fail.
 **Basis:** 2026 standard — tie dollars → milestones → next round readiness (or default-alive path).
 
 ### `round_size_realistic`

@@ -1679,7 +1679,13 @@ REFERENCES_CEILING: dict[str, int] = {
     # deck-review raised 50,422 -> 51,459 (+1,037 B) so the criteria reference states the
     # two things the Design & Readability entries had stopped describing: the per-slide
     # render gate, and verified_by on the four measurement criteria.
-    "deck-review": 51_449,
+    # 51_449 -> 51_724 (+275 B): fail-vs-warn boundary for three criteria. problem_quantified
+    # fails only an abstract problem (a named buyer and pain with no number is warn);
+    # why_now_has_catalyst gains the purpose_clear rule (search the whole deck and cite the
+    # slide before failing; an unsourced argument is weak, not missing); ask_ties_to_milestones
+    # names "no ask at all" as a fail, and several dollar raise scenarios as an ask (warn), which
+    # the model otherwise failed consistently under the pass bar's "explicit ask" (+91 B).
+    "deck-review": 51_724,
     # competitive-positioning +474 B: artifact-schemas.md documented the `startup_rank` RENDERING
     # convention but not its SENTINEL. `score_moats.py` stamps {"rank": -1, "total": 0} when the
     # startup is not_applicable on a dimension, and compose_report.py rendered it verbatim —
