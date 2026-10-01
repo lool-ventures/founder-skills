@@ -15,10 +15,13 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
 from typing import Any
+
+import pytest
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 FMR_SCRIPTS_DIR = os.path.join(os.path.dirname(SCRIPT_DIR), "skills", "financial-model-review", "scripts")
@@ -1024,3 +1027,93 @@ def test_data_payload_gm_benchmark_removed_for_non_product_basis() -> None:
     assert rc == 0
     data = _extract_data_payload(stdout)
     assert "gross_margin" not in data["benchmarks"]
+
+
+# ---------------------------------------------------------------------------
+# CAC payback: the what-if rates against the bar the review graded with
+# ---------------------------------------------------------------------------
+
+
+def _payback_explorer(payback: float, acv_tier: str = "smb", model_type: str = "saas-sales-led") -> tuple[str, Any]:
+    """Run the real unit_economics.py, then the explorer over its output: (html, unit_economics)."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["company"]["acv_tier"] = acv_tier
+    inputs["company"]["revenue_model_type"] = model_type
+    inputs["unit_economics"]["payback_months"] = payback
+    rc, ue_raw, stderr = run_script_raw("unit_economics.py", [], stdin_data=json.dumps(inputs))
+    assert rc == 0, stderr
+    ue = json.loads(ue_raw)
+    d = _make_artifact_dir(overrides={"inputs.json": inputs, "unit_economics.json": ue})
+    rc, html, stderr = run_script_raw("explore.py", ["--dir", d])
+    assert rc == 0, stderr
+    return html, ue
+
+
+def _grab_js_function(html: str, name: str) -> str:
+    start = html.index(f"function {name}(")
+    depth, i = 0, html.index("{", start)
+    while True:
+        if html[i] == "{":
+            depth += 1
+        elif html[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return html[start : i + 1]
+        i += 1
+
+
+def _js_rate(html: str, metric_id: str, value: float) -> str:
+    """Rate *value* with the explorer's own rateMetric against the embedded DATA.benchmarks."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node not available")
+    benchmarks = _extract_data_payload(html)["benchmarks"]
+    script = (
+        f"{_grab_js_function(html, 'rateMetric')}\n"
+        f"console.log(rateMetric({json.dumps(metric_id)}, {json.dumps(value)}, {json.dumps(benchmarks)}));"
+    )
+    out = subprocess.run([node, "-e", script], capture_output=True, text=True, timeout=30)
+    assert out.returncode == 0, out.stderr
+    return out.stdout.strip()
+
+
+def test_a_graded_cac_payback_carries_the_review_bar() -> None:
+    """The what-if read benchmarks["cac_payback"], a key that never existed, so a moved payback slider
+    always showed 'not rated'. A graded payback now carries the ACV-tier bar the review used."""
+    html, ue = _payback_explorer(9)
+    pb = next(m for m in ue["metrics"] if m["name"] == "cac_payback")
+    assert pb["rating"] in ("strong", "acceptable", "warning", "fail"), pb
+    bar = _extract_data_payload(html)["benchmarks"].get("cac_payback")
+    assert bar is not None, "a graded payback must carry its bar into the explorer"
+    assert bar["strong"] == pb["benchmark"]["target"], (bar, pb["benchmark"])
+    assert (bar["strong"], bar["acceptable"], bar["warning"]) == (6, 9, 15)
+    assert _js_rate(html, "cac_payback", 20) == "fail"
+
+
+@pytest.mark.parametrize(("payback", "expected"), [(6, "strong"), (9, "acceptable"), (15, "warning"), (16, "fail")])
+def test_the_explorer_rates_cac_payback_as_the_review_did(payback: float, expected: str) -> None:
+    """Band edges, so one point cannot agree by accident."""
+    html, ue = _payback_explorer(payback)
+    pb = next(m for m in ue["metrics"] if m["name"] == "cac_payback")
+    assert pb["rating"] == expected, pb
+    assert _js_rate(html, "cac_payback", payback) == pb["rating"]
+
+
+@pytest.mark.parametrize("model_type", ["transactional-fintech", "marketplace"])
+def test_a_withheld_cac_payback_gets_no_bar(model_type: str) -> None:
+    """Control: a payback the review did not grade keeps no bar and keeps its reason."""
+    html, ue = _payback_explorer(9, model_type=model_type)
+    pb = next(m for m in ue["metrics"] if m["name"] == "cac_payback")
+    assert pb["rating"] == "contextual", pb
+    data = _extract_data_payload(html)
+    assert "cac_payback" not in data["benchmarks"]
+    shown = next(m for m in data["metrics"] if m["id"] == "cac_payback")
+    assert shown.get("contextual_note"), shown
+
+
+def test_an_implausible_cac_payback_gets_no_bar() -> None:
+    """Control: a payback the review refused to rate (at or below zero) keeps no bar."""
+    html, ue = _payback_explorer(0)
+    pb = next(m for m in ue["metrics"] if m["name"] == "cac_payback")
+    assert pb["rating"] == "not_rated", pb
+    assert "cac_payback" not in _extract_data_payload(html)["benchmarks"]

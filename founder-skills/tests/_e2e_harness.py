@@ -34,6 +34,12 @@ PLUGIN_PATH = REPO_ROOT / "founder-skills"
 FIXTURES = REPO_ROOT / "founder-skills" / "tests" / "fixtures"
 
 
+def dispatch_context(prompt: object) -> str:
+    """A dispatched prompt's first line ("CONTEXT: CHECKLIST"), leading whitespace dropped: a dispatched
+    prompt can open with a newline, as some in the committed hostloop cassettes do."""
+    return str(prompt).lstrip().split("\n", 1)[0]
+
+
 def detect_auth_kind() -> str:
     """Which credential the SDK will pick up, for the run preamble."""
     if os.environ.get("ANTHROPIC_API_KEY"):

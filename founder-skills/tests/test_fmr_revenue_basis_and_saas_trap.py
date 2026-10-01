@@ -347,3 +347,44 @@ def test_the_explorer_shows_why_a_withheld_cac_payback_has_no_bar(model_type: st
     pb = next(m for m in payload["metrics"] if m["id"] == "cac_payback")
     assert pb["rating"] == "contextual", pb
     assert "subscription software contract sizes" in (pb.get("contextual_note") or ""), pb
+
+
+# --- 4. A declared basis gets advice that fits it -------------------------------------------------
+
+_NON_PRODUCT_BASES = ("store_contribution", "net_revenue", "gross_revenue", "blended")
+
+
+@pytest.mark.parametrize("model_type", ["retail", "saas-sales-led"])
+@pytest.mark.parametrize("basis", _NON_PRODUCT_BASES)
+def test_a_declared_basis_gets_advice_that_fits_it(basis: str, model_type: str) -> None:
+    """Store advice ("store-level contribution, buildout payback, same-store trends") was given for
+    every declared basis, including revenue booked net or gross, where there are no stores."""
+    gm = _metrics(model_type, gross_margin_basis=basis)["gross_margin"]
+    assert gm["rating"] == "contextual", gm
+    ev = gm["evidence"]
+    assert f"{basis.replace('_', ' ')} basis" in ev, ev
+    assert ("store" in ev.lower()) == (basis == "store_contribution"), ev
+    # The multi-word values are the tokens; "blended" is its own plain word.
+    for raw in (b for b in _NON_PRODUCT_BASES + ("gross_margin_basis",) if "_" in b):
+        assert raw not in ev and raw.replace("_", "-") not in ev, ev
+
+
+def _benchmarks_row(label_start: str) -> str:
+    text = (SKILL.parents[1] / "references" / "benchmarks.md").read_text(encoding="utf-8")
+    rows = [ln for ln in text.splitlines() if ln.startswith(f"| {label_start}")]
+    assert len(rows) == 1, (label_start, rows)
+    return rows[0]
+
+
+def test_the_reference_agrees_that_payments_have_no_gross_margin_benchmark() -> None:
+    """The script says payments have no benchmark; the reference grouped them with marketplaces and
+    cited the marketplace comps for both."""
+    assert ue._GM_CONTEXTUAL_SOURCES["transactional-fintech"].startswith("No benchmark")
+    payments = _benchmarks_row("Transactional fintech")
+    assert "Marketplace" not in payments, payments
+    assert "no published benchmark" in payments.lower(), payments
+    assert "booked net or gross" in payments, payments
+    assert "Airbnb" not in payments and "DoorDash" not in payments, payments
+    marketplace = _benchmarks_row("Marketplace")
+    assert "fintech" not in marketplace.lower(), marketplace
+    assert "Airbnb" in marketplace and "DoorDash" in marketplace, marketplace

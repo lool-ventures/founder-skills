@@ -87,7 +87,8 @@ The SaaS gross-margin bars above (KeyBanc/Sapphire) apply only to software-margi
 | Hardware (pure device) | >=50% | >=40% | >=25% | Hardware >=50% GM rule (Barros, Adafruit hardware-startup guide — device-only scope); NYU Stern Damodaran sector margins Jan 2026: Electronics (Consumer & Office) 38.8%, Electronics (General) 26.8% |
 | Consumer subscription (digital) | >=65% | >=45% | >=30% | Damodaran Jan 2026 Software (Entertainment) 66.5%; FY2024 comps: Duolingo 72.8%, Netflix 46.1%, Spotify 30% consolidated |
 | Retail / D2C physical goods | >=50% | >=35% | >=25% | Damodaran Jan 2026: Apparel 56.9%, Household Products 51.0%, Retail (Special Lines) 35.3%, Retail (General) 33.2%, Grocery 26.3% |
-| Marketplace / transactional fintech | contextual — no threshold | | | GM depends on revenue-recognition basis (net take-rate vs gross GMV/GTV); healthy net-basis FY2024 comps span Airbnb ~83% to DoorDash ~46% |
+| Marketplace | contextual — no threshold | | | GM depends on revenue-recognition basis (net take-rate vs gross GMV); healthy net-basis FY2024 comps span Airbnb ~83% to DoorDash ~46% |
+| Transactional fintech / payments | contextual — no threshold | | | No published benchmark: the margin depends on whether revenue is booked net or gross (the whole transaction, including what passes through to others) |
 | Hardware-subscription | contextual — no threshold | | | The >=50% device rule explicitly excludes products with ongoing service revenue; a blend must be judged on its hardware vs service margin split |
 | Usage-based / consumption | contextual — no threshold | | | Healthy consumption models span passthrough-heavy CPaaS ~51% (Twilio FY2024 10-K, GAAP) to software-margin platforms (KeyBanc 2024 median ~72%) |
 

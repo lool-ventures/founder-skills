@@ -3674,7 +3674,9 @@ def test_corpus_counts_every_agent_the_skill_pins_not_just_its_namesake() -> Non
 # that $CLAUDE_CODE_IS_COWORK is positive-only and adds the $CLAUDE_CODE_REMOTE signal the code uses.
 # Raised 2026-09-28 to 125,350 B (+439): an agent-namespace resolver call with no proven host path now
 # refuses (exit 6) instead of printing a relative root; the reference says so and gains its symptom row.
-ROOT_REFERENCES_CEILING = 125_350
+# Raised 2026-10-01 to 125,545 B (+195): benchmarks.md gives payments their own gross-margin row (no
+# published benchmark; the margin depends on net vs gross booking) instead of sharing the marketplace comps.
+ROOT_REFERENCES_CEILING = 125_545
 
 
 def test_shared_reference_tree_does_not_grow() -> None:

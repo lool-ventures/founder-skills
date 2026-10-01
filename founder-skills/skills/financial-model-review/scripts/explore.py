@@ -32,7 +32,13 @@ from typing import Any, TypeGuard
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _evidence_multiple  # noqa: E402
-from unit_economics import CAC_PAYBACK_BY_ACV, STAGE_BENCHMARKS, gm_benchmark_for, has_ai_cogs  # noqa: E402, I001
+from unit_economics import (  # noqa: E402, I001
+    CAC_PAYBACK_BY_ACV,
+    STAGE_BENCHMARKS,
+    cac_payback_benchmark_for,
+    gm_benchmark_for,
+    has_ai_cogs,
+)
 
 # ---------------------------------------------------------------------------
 # Vendored assets (no CDN — Cowork's sandboxed iframe blocks external fetches)
@@ -407,8 +413,24 @@ def _build_data_payload(
             and not _m.get("benchmark_reference_rating")
         ):
             benchmarks.pop(_m["id"], None)
-    # CAC payback has no stage bar to drop: its tiers ride in cac_payback_by_acv, which the what-if
-    # does not read.
+    # CAC payback has no stage bar: the review grades it on its ACV tier's bar. The what-if rates a moved
+    # payback against benchmarks["cac_payback"], so a payback the review GRADED carries that same bar
+    # (one resolver, cross-checked against the target the review recorded). A payback the review did
+    # not grade (withheld, not rated) keeps none, and its contextual_note says why.
+    _pb_review = next(
+        (
+            _m
+            for _m in (_deep_get(ue, "metrics", default=[]) if _usable(ue) else [])
+            if isinstance(_m, dict) and _m.get("name") == "cac_payback"
+        ),
+        None,
+    )
+    if _pb_review is not None and _pb_review.get("rating") in ("strong", "acceptable", "warning", "fail"):
+        _company_for_tier = company_raw if isinstance(company_raw, dict) else {}
+        _pb_bench = cac_payback_benchmark_for(_company_for_tier)[1]
+        _pb_target = _deep_get(_pb_review, "benchmark", "target")
+        if _pb_target == _pb_bench["strong"]:
+            benchmarks["cac_payback"] = dict(_pb_bench)
     benchmarks["cac_payback_by_acv"] = dict(CAC_PAYBACK_BY_ACV)
 
     # Bridge

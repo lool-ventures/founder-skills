@@ -357,6 +357,21 @@ def unclassified_reason(company: dict[str, Any] | None) -> str | None:
 # booking, blends) is not comparable and rates contextual.
 _GM_BASIS_VALUES = ("product", "store_contribution", "net_revenue", "gross_revenue", "blended")
 
+# What a margin on each declared non-product basis is, and what to look at instead. Store advice fits a
+# store basis only: a margin on revenue booked net or gross has no stores behind it.
+_GM_BASIS_ADVICE: dict[str, str] = {
+    "store_contribution": " — assess store-level contribution, buildout payback, and same-store trends instead",
+    "net_revenue": (
+        ", which measure margin on product or service revenue rather than on revenue net of what passes "
+        "through to others"
+    ),
+    "gross_revenue": (
+        ": revenue booked gross includes what passes through to others, which makes the margin look lower "
+        "than a product margin"
+    ),
+    "blended": ": a blend of revenue streams is judged on each stream's own margin, not on one benchmark",
+}
+
 # AI cost keys in expenses.cogs — keep in sync with checklist.py's
 # _AI_COST_KEYS (SECTOR_40 gate uses the same set).
 _AI_COGS_KEYS = frozenset({"inference_costs", "ai_infrastructure", "ai_compute", "gpu_costs", "model_inference"})
@@ -557,6 +572,15 @@ def _revenue_basis_reason(model_type: str, basis: str | None) -> str | None:
         "does not say "
         "whether revenue is net of what passes through to others"
     )
+
+
+def cac_payback_benchmark_for(company: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
+    """The ACV tier a review grades CAC payback on, and that tier's bar.
+
+    One resolver for the review and the explorer's what-if, so a moved slider is rated on the bar
+    the review used rather than on a copy of it."""
+    acv_tier = _deep_get(company, "acv_tier", default="default")
+    return acv_tier, CAC_PAYBACK_BY_ACV.get(acv_tier, CAC_PAYBACK_BY_ACV["default"])
 
 
 def gm_contextual_reason(model_type: str, basis: str | None = None) -> str | None:
@@ -1129,8 +1153,7 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
     # 4. CAC payback
     payback = _deep_get(unit_econ, "payback_months")
     if payback is not None:
-        acv_tier = _deep_get(company, "acv_tier", default="default")
-        bench = CAC_PAYBACK_BY_ACV.get(acv_tier, CAC_PAYBACK_BY_ACV["default"])
+        acv_tier, bench = cac_payback_benchmark_for(company)
         rating = _rate_lower_is_better(payback, bench)
         _pb_note = _implausibility_note("cac_payback", payback, pct=False)
         evidence = f"CAC payback of {payback} months; {acv_tier} tier benchmark strong <= {bench['strong']} months"
@@ -1479,10 +1502,10 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
         if contextual_reason == "basis":
             # A declared non-product basis (store contribution, gross-revenue
             # booking, blends) is not comparable to any threshold table.
+            _why = _GM_BASIS_ADVICE.get(str(gm_basis), "")
             evidence = (
                 f"Gross margin of {gm:.0%} on a {str(gm_basis).replace('_', ' ')} basis; not comparable to the product "
-                f"gross-margin tables — assess store-level contribution, buildout payback, and "
-                f"same-store trends instead"
+                f"gross-margin tables{_why}"
             )
             sector_key = _GM_SECTOR_TABLE.get(model_type)
             src = GM_BENCHMARKS_BY_SECTOR[sector_key]["source"] if sector_key else "declared gross_margin_basis"

@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from _e2e_harness import dispatch_context
 
 _SCRIPTS = Path(__file__).resolve().parents[1] / "skills" / "market-sizing" / "scripts"
 _SKILL = _SCRIPTS.parent / "SKILL.md"
@@ -134,3 +135,10 @@ def test_the_red_team_redo_is_printed_too(tmp_path: Path) -> None:
 def test_the_redo_instructions_run_the_generator_for_the_generated_contexts() -> None:
     text = _SKILL.read_text(encoding="utf-8")
     assert "--correction missing-file" in text and "--correction receipt-only" in text
+
+
+def test_the_e2e_lane_finds_a_dispatch_that_opens_with_a_newline() -> None:
+    """A dispatched prompt can open with a newline (some in the committed hostloop cassettes do). Taking
+    the first line as-is read that as "", so the lane reported the checklist as never dispatched."""
+    assert dispatch_context("\nCONTEXT: CHECKLIST\nOUTPUT_PATH: a/checklist_output.json\n") == "CONTEXT: CHECKLIST"
+    assert dispatch_context("CONTEXT: RED_TEAM\nOUTPUT_PATH: a/redteam_output.json\n") == "CONTEXT: RED_TEAM"

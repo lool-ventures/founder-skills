@@ -35,6 +35,7 @@ from _e2e_harness import (
     PLUGIN_PATH,
     assert_coaching_commentary_landed,
     assert_run_id_parity,
+    dispatch_context,
     has_claude_auth,
     locate_review_dir,
     run_skill_capture,
@@ -113,9 +114,7 @@ def test_market_sizing_smoke(tmp_path: Path) -> None:
     # which no artifact can show (a hand-off file looks the same whoever wrote it). The checklist is
     # the one that matters: it is the skill's own self-assessment, so a self-graded one is a score
     # with no second party in it at all.
-    contexts = [
-        str(t["input"].get("prompt", "")).split("\n", 1)[0] for t in cap.tool_uses if t["name"] in ("Task", "Agent")
-    ]
+    contexts = [dispatch_context(t["input"].get("prompt", "")) for t in cap.tool_uses if t["name"] in ("Task", "Agent")]
     assert "CONTEXT: CHECKLIST" in contexts, (
         f"the checklist was not dispatched -- a self-graded score is not a score. Dispatched: {contexts}"
     )
@@ -132,7 +131,7 @@ def test_market_sizing_smoke(tmp_path: Path) -> None:
     assert len(dispatches) == 1, f"expected one red-team dispatch, saw {len(dispatches)}"
     rt_dispatch = dispatches[0]
     dispatched = str(rt_dispatch["input"].get("prompt", ""))
-    assert dispatched.startswith("CONTEXT: RED_TEAM\n"), dispatched[:200]
+    assert dispatch_context(dispatched) == "CONTEXT: RED_TEAM", dispatched[:200]
     # Regenerate from what the prompt itself declares plus the on-disk hand-off dir. The agent-
     # namespace forms are read back out of the prompt (OUTPUT_PATH, the inputs.json line), so the
     # comparison does not depend on how the skill derived them.
