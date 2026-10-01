@@ -340,7 +340,13 @@ def test_contextual_ltv_evidence_names_no_type_token(model_type: str) -> None:
     ltv = _metrics(model_type)["ltv"]
     assert ltv["rating"] == "contextual", ltv
     assert model_type not in ltv["evidence"], ltv["evidence"]
-    assert "LTV benchmarks vary too widely across businesses like yours to grade it" in ltv["evidence"]
+    # A project builder's LTV gives the LTV/CAC row's reason (no recurring customer), not this one.
+    reason = (
+        "lifetime value assumes recurring revenue from a customer"
+        if model_type == "project-builder"
+        else "LTV benchmarks vary too widely across businesses like yours to grade it"
+    )
+    assert reason in ltv["evidence"], ltv["evidence"]
 
 
 def test_a_padded_type_takes_its_own_gross_margin_bar() -> None:

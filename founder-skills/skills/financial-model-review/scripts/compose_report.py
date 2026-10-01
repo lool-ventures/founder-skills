@@ -162,6 +162,16 @@ WARNING_LABELS: dict[str, str] = {
     "HANDOFF_BYPASSED": "Some Steps Were Not Checked",
 }
 
+_GRADED_RATINGS = ("strong", "acceptable", "warning", "fail")
+
+
+# The rating word in the Key Metrics line, where the enum used to print raw ("(contextual)").
+_KEY_METRIC_RATING_WORDS: dict[str, str] = {
+    "contextual": "not graded",
+    "not_rated": "no benchmark",
+    "not_applicable": "not applicable",
+}
+
 # Rating display labels
 RATING_LABELS: dict[str, str] = {
     "strong": "Strong",
@@ -672,6 +682,12 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
         ages: list[int] = []
         unreadable: list[str] = []
         for metric in _as_list(_as_dict(unit_economics).get("metrics")):
+            # Only a bar something was judged against dates the review: a figure shown without a
+            # grade (and with no reference grade) was compared to nothing, whatever date it carries.
+            if _as_dict(metric).get("rating") not in _GRADED_RATINGS and not _as_dict(metric).get(
+                "benchmark_reference_rating"
+            ):
+                continue
             as_of = _as_dict(metric).get("benchmark_as_of")
             if as_of in (None, ""):
                 continue
@@ -1017,6 +1033,7 @@ def _section_executive_summary(
                 name = m["name"].upper().replace("_", " ")
                 val = m["value"]
                 rating = m.get("rating", "")
+                rating = _KEY_METRIC_RATING_WORDS.get(rating, rating)
                 if isinstance(val, float) and val < 10:
                     parts.append(f"{name}: {val:.2f} ({rating})")
                 else:
@@ -1287,14 +1304,31 @@ def _section_unit_economics(unit_economics: dict[str, Any] | None) -> str:
 
         lines.append(f"| {name} | {val_str} | {rating} | {evidence} |")
 
-    # Summary
+    # Summary: counts over GRADED figures only. A business no bar fits has nothing graded by design,
+    # and "0 strong, 0 acceptable, 0 warning, 0 fail" read as a failing score.
     ue_summary = _as_dict(unit_economics.get("summary"))
     if ue_summary:
-        strong = ue_summary.get("strong", 0)
-        acceptable = ue_summary.get("acceptable", 0)
-        warning = ue_summary.get("warning", 0)
-        fail = ue_summary.get("fail", 0)
-        lines.append(f"\n**Summary:** {strong} strong, {acceptable} acceptable, {warning} warning, {fail} fail")
+        strong = int(_numeric(ue_summary.get("strong")) or 0)
+        acceptable = int(_numeric(ue_summary.get("acceptable")) or 0)
+        warning = int(_numeric(ue_summary.get("warning")) or 0)
+        fail = int(_numeric(ue_summary.get("fail")) or 0)
+        graded = strong + acceptable + warning + fail
+        # `computed` counts every figure with a value; a graded figure always has one.
+        ungraded = max(int(_numeric(ue_summary.get("computed")) or 0) - graded, 0)
+        if graded:
+            line = (
+                f"**Summary:** {strong} strong, {acceptable} acceptable, {warning} warning, {fail} fail, "
+                f"of {graded} graded figure{'s' if graded != 1 else ''}"
+            )
+            line += f"; {ungraded} shown without a grade." if ungraded else "."
+        elif ungraded:
+            line = (
+                f"**Summary:** {ungraded} figure{'s' if ungraded != 1 else ''} shown; none graded for this "
+                "business, and each row says why."
+            )
+        else:
+            line = "**Summary:** no figure could be computed from the model."
+        lines.append(f"\n{line}")
 
     return "\n".join(lines) + "\n"
 

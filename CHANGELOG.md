@@ -60,23 +60,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   benchmark. Such a business is now reviewed on the hardware milestones-and-capex check, which now
   names progress billing, retentions, supplier deposits and backlog. No figure is graded on a bar built
   for subscription software or for devices:
-  - gross margin is shown without a grade, because public companies in the sectors these businesses
-    work in report margins from about 15% to about 37%, and one bar would mis-grade one end;
-  - the burn multiple, CAC payback and LTV/CAC are shown without a grade, each with its own reason;
+  - gross margin is shown without a grade, because average gross margins of public companies in the
+    sectors these businesses work in run from about 15% to about 37%, and one bar would mis-grade one
+    end;
+  - the burn multiple, CAC payback and LTV/CAC are shown without a grade, each with its own reason,
+    and lifetime value gives the same reason as LTV/CAC;
   - net and gross revenue retention are not asked for.
 
   Known limitation: a checklist item that turns on a figure the review leaves ungraded (gross margin,
   CAC payback, LTV/CAC, the burn multiple) can reach only a warning for such a business. That warning
   says the figure has no benchmark to be judged on, not that the model is weak.
 - **The interactive explorer no longer shows a benchmark beside a metric the review found not
-  applicable.** Net revenue retention, Rule of 40 and the other subscription metrics showed the
-  subscription bar beside a business they do not apply to, and Rule of 40 could be re-graded on it
-  with the what-if slider. This applies to every revenue model.
-- **The corrections page no longer colours a burn multiple the review left ungraded** as above or
-  below the 3x bar.
+  applicable, and prints the review's reason in its place.** Net revenue retention, Rule of 40 and the
+  other subscription metrics showed the subscription bar beside a business they do not apply to, and
+  Rule of 40 could be re-graded on it with the what-if slider. This applies to every revenue model,
+  subscription software included: below $500K ARR the burn multiple, and below $1M the Rule of 40, no
+  longer offer a what-if, since the review does not grade them at that size; the Benchmark column says
+  why instead. Where LTV is assumed, the Benchmark column for LTV/CAC now reads "treat as directional
+  until cohort data validates LTV".
+- **The corrections page no longer colours a burn multiple the review left ungraded because of the
+  business's revenue model** as above or below the 3x bar.
+- **The unit-economics headline counts graded figures only.** The HTML report's card read "0/6" for a
+  business no benchmark fits, which looked like a failing score; it now counts strong figures out of
+  those graded, says how many are shown without a grade, and reads "—" with "6 figures shown; none
+  graded for this business" when nothing is graded. The text report's summary line says the same.
+  Elsewhere in the same section, a metric found not applicable reads "Not applicable" rather than an
+  internal label, a metric with no value no longer shows "0.0", the text report's key metrics say "not
+  graded" rather than an internal rating word, and a lifetime value computed from your customer count
+  and churn says so in words.
 - **Gross-margin notes are in plain words.** The hardware, consumer and retail margin note no longer
-  names an internal field, and the publication date of the comparison behind an ungraded margin is now
-  read as a date, so the report no longer says it is unknown.
+  names an internal field, and only a retailer is offered a store-level reading. The publication date
+  of the comparison behind an ungraded margin is now read as a date.
+- **The benchmark-age note counts only benchmarks a figure was graded on.** A figure shown without a
+  grade no longer makes the report say its benchmarks are out of date or of unknown age.
 - **A financial model review's checklist now grades against the review's own computed figures.**
   The checklist used to be scored before the burn multiple, runway and payback were computed, so it
   estimated them itself. It could fail the burn-multiple check on its own estimate while the metrics

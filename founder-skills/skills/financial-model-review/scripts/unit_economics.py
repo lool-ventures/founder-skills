@@ -283,7 +283,7 @@ _GM_SECTOR_TABLE: dict[str, str] = {
 # - unclassified: no revenue model we can benchmark is stated, so there is no table to
 #   grade against. Grading it on the SaaS table is the confidently-wrong answer
 #   this value exists to prevent.
-# - project-builder: public sector gross margins for what project builders make run from
+# - project-builder: public sector average gross margins for what project builders make run from
 #   engineering/construction ~15% to machinery ~37%; any one tiered table puts a healthy builder
 #   at one end on the wrong grade. The device table would fail a healthy project margin outright.
 _GM_CONTEXTUAL_TYPES = frozenset(
@@ -296,7 +296,7 @@ _GM_CONTEXTUAL_SOURCES: dict[str, str] = {
     "hardware-subscription": "Hardware >=50% GM rule (Barros, Adafruit hardware-startup guide) — device-only scope",
     "usage-based": "FY2024 public comps (Twilio 10-K ~51% GAAP GM) vs KeyBanc SaaS Survey 2024 (median ~72%)",
     "project-builder": (
-        "No single bar: NYU Stern Damodaran US sector gross margins (Jan 2026) run from "
+        "No single bar: NYU Stern Damodaran US sector average gross margins (Jan 2026) run from "
         "Engineering/Construction ~15% and Homebuilding ~23% to Machinery ~37%"
     ),
     "unclassified": "No benchmark: no revenue model we have benchmarks for is stated",
@@ -333,8 +333,8 @@ _GM_CONTEXTUAL_EVIDENCE: dict[str, str] = {
         "a single benchmark would mis-rate one end"
     ),
     "project-builder": (
-        "public companies in the sectors project builders work in report gross margins from about 15% "
-        "(engineering and construction) to about 37% (machinery), so no single benchmark applies; read "
+        "average gross margins of public companies in the sectors project builders work in run from about "
+        "15% (engineering and construction) to about 37% (machinery), so no single benchmark applies; read "
         "this figure against the project cost base your model states"
     ),
     "unclassified": (
@@ -607,6 +607,11 @@ _NO_SAAS_BAR_TYPES = frozenset({"unclassified", "project-builder"})
 # revenue contract by contract: there is no recurring customer for a lifetime value to measure.
 # Listed, not derived, so a new type needs a decision here too.
 _LTV_CAC_WITHHELD = frozenset({"project-builder"})
+# Said on the LTV row and the LTV/CAC row alike: the same absence explains both.
+_LTV_WITHHELD_REASON = (
+    "it is not graded because lifetime value assumes recurring revenue from a customer, and project revenue "
+    "is won contract by contract"
+)
 _LTV_CAC_GRADED = frozenset(
     {
         "saas-plg",
@@ -1159,9 +1164,9 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
             gm_input = _deep_get(unit_econ, "ltv", "inputs", "gross_margin")
             obs_note = "observed" if ltv_observed == "observed" else "assumed"
             if _ltv_value_synthesized:
-                obs_note = "synthesized from revenue.customers and revenue.churn_monthly"
+                obs_note = "computed from your customer count and monthly churn"
             elif _ltv_inputs_synthesized:
-                obs_note += "; inputs synthesized from revenue fields"
+                obs_note += ", inputs computed from your revenue figures"
             if arpu is not None and gm_input is not None:
                 ltv_value = round(arpu * gm_input * 60, 2)
                 evidence = (
@@ -1184,13 +1189,16 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
         else:
             obs_note = "observed" if ltv_observed == "observed" else "assumed"
             if _ltv_value_synthesized:
-                obs_note = "synthesized from revenue.customers and revenue.churn_monthly"
+                obs_note = "computed from your customer count and monthly churn"
             elif _ltv_inputs_synthesized:
-                obs_note += "; inputs synthesized from revenue fields"
+                obs_note += ", inputs computed from your revenue figures"
             evidence = f"LTV of {_fmt_money(ltv_value, currency_code)} ({obs_note})"
         # LTV doesn't have standalone stage benchmarks; report as not_rated
         if ltv_unreliable:
             rating = "not_rated"
+        elif not saas and model_type in _LTV_CAC_WITHHELD:
+            rating = "contextual"
+            evidence += f"; {_LTV_WITHHELD_REASON}"
         elif not saas and model_type in _LTV_CONTEXTUAL_TYPES:
             rating = "contextual"
             evidence += "; LTV benchmarks vary too widely across businesses like yours to grade it"
@@ -1231,12 +1239,14 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
             )
         )
         if model_type in _LTV_CAC_WITHHELD:
-            _withhold_grade(
-                metrics[-1],
-                "it is not graded because lifetime value assumes recurring revenue from a customer, and "
-                "project revenue is won contract by contract",
-                also_contextual=True,
-            )
+            _withhold_grade(metrics[-1], _LTV_WITHHELD_REASON, also_contextual=True)
+            # A ratio too large to be real is not rated, and `_withhold_grade` leaves a not-rated figure
+            # alone. Nothing grades it on the SaaS survey either, so it keeps no survey, date or target
+            # (the date alone would put a benchmark-age note on a review that grades nothing).
+            if metrics[-1]["rating"] == "not_rated":
+                metrics[-1]["benchmark_source"] = ""
+                metrics[-1]["benchmark_as_of"] = ""
+                metrics[-1].pop("benchmark", None)
     else:
         reason = "Insufficient data to compute LTV/CAC"
         metrics.append(_metric("ltv_cac_ratio", None, "not_rated", reason))
@@ -1647,10 +1657,14 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
                 else:
                     evidence = f"Gross margin of {gm:.0%}; {bar_kind} benchmark strong >= {bench['strong']:.0%}"
                 if model_type in _GM_SECTOR_TABLE and gm_basis is None:
-                    evidence += (
-                        "; this assumes a margin on product or merchandise sales; if your figure is a "
-                        "store-level contribution margin, say so and it will be read on that basis"
-                    )
+                    # Store-level contribution is a retail measure; a device maker has no stores.
+                    if model_type == "retail":
+                        evidence += (
+                            "; this assumes a margin on product or merchandise sales; if your figure is a store-level "
+                            "contribution margin, the review can read it on that basis"
+                        )
+                    else:
+                        evidence += "; this assumes a margin on product sales"
                 _note = _implausibility_note("gross_margin", gm, pct=True)
                 if _note:
                     rating, evidence = "not_rated", _note

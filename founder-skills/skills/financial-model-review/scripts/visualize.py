@@ -645,6 +645,7 @@ _RATING_LABELS: dict[str, str] = {
     "warning": "Needs improvement",
     "fail": "Below target",
     "not_rated": "No benchmark available",
+    "not_applicable": "Not applicable",
 }
 
 
@@ -691,6 +692,8 @@ def _chart_unit_economics(unit_economics: dict[str, Any] | None) -> str:
 
     for m in valid_metrics:
         name = str(m.get("name", ""))
+        # A figure the review could not compute has no value: it printed as "0.0" with a value bar.
+        has_value = m.get("value") is not None
         value = _num(m.get("value", 0))
         rating = str(m.get("rating", ""))
         benchmark = _as_dict(m.get("benchmark"))
@@ -708,14 +711,14 @@ def _chart_unit_economics(unit_economics: dict[str, Any] | None) -> str:
         else:
             color = _RATING_COLORS.get(rating, _CLR_PRIMARY)
             rating_label = _RATING_LABELS.get(rating, rating.title())
-        val_str = _format_metric_value(name, value, currency_code)
+        val_str = _format_metric_value(name, value, currency_code) if has_value else ""
 
         # Determine scale for this metric's bullet chart
         target = _num(benchmark.get("target", 0))
         scale_max = max(abs(value) * 1.5, abs(target) * 1.5, 1.0)
 
         # Build tooltip text
-        tip_parts: list[str] = [f"{display_name}: {val_str}"]
+        tip_parts: list[str] = [f"{display_name}: {val_str}" if has_value else f"{display_name}: {rating_label}"]
         if target:
             tip_parts.append(f"Target: {_format_metric_value(name, target, currency_code)}")
         source = benchmark.get("source", "")
@@ -744,8 +747,9 @@ def _chart_unit_economics(unit_economics: dict[str, Any] | None) -> str:
             target_x = min(target / scale_max * bar_width, bar_width)
             svg += f'<rect x="0" y="2" width="{target_x:.1f}" height="{bar_height - 4}" fill="#D7DBE0" rx="2" />'
         # Value bar
-        bar_w = max(min(abs(value) / scale_max * bar_width, bar_width), 2.0)
-        svg += f'<rect x="0" y="3" width="{bar_w:.1f}" height="{bar_height - 6}" fill="{_esc(color)}" rx="2" />'
+        if has_value:
+            bar_w = max(min(abs(value) / scale_max * bar_width, bar_width), 2.0)
+            svg += f'<rect x="0" y="3" width="{bar_w:.1f}" height="{bar_height - 6}" fill="{_esc(color)}" rx="2" />'
         # Target marker line
         if target > 0:
             marker_x = min(target / scale_max * bar_width, bar_width - 1)
@@ -772,7 +776,7 @@ def _chart_unit_economics(unit_economics: dict[str, Any] | None) -> str:
             f'color:var(--lool-ink);">{_esc(display_name)}</span>'
             f"{svg}"
             f'<span style="min-width:120px;font-size:0.8rem;color:{_esc(color)};">'
-            f"{_esc(val_str)} — {_esc(rating_label)}</span>"
+            f"{_esc(f'{val_str} — {rating_label}' if has_value else rating_label)}</span>"
             f"</div>"
             + (
                 f'<div style="font-size:0.75rem;color:var(--lool-mute);margin:0.15rem 0 0 calc(140px + 0.75rem);">'
@@ -1211,10 +1215,16 @@ def _executive_summary(
 
     # Unit economics summary
     if _usable(unit_economics):
+        # The count is over GRADED figures only. A figure shown without a grade (contextual, not rated,
+        # or not applicable with a value) is stated apart: a business no bar fits has nothing graded by
+        # design, and "0/6" read as a failing score.
         ue_summary = _as_dict(unit_economics.get("summary"))
         strong = int(_num(ue_summary.get("strong", 0)))
-        computed = int(_num(ue_summary.get("computed", 0)))
-        if computed > 0:
+        graded_n = strong + sum(int(_num(ue_summary.get(k, 0))) for k in ("acceptable", "warning", "fail"))
+        # `computed` counts every figure with a value; a graded figure always has one.
+        ungraded_n = max(int(_num(ue_summary.get("computed", 0))) - graded_n, 0)
+        ungraded_label = f'<div class="label">{_esc(f"{ungraded_n} shown without a grade")}</div>'
+        if graded_n:
             # List strong metric names if 3 or fewer
             strong_names: list[str] = []
             for m in _as_list(unit_economics.get("metrics")):
@@ -1228,8 +1238,18 @@ def _executive_summary(
             cards.append(
                 f'<div class="summary-card">'
                 f'<div class="label">Unit Economics</div>'
-                f'<div class="value" style="color:{_CLR_PRIMARY}">{_esc(str(strong))}/{_esc(str(computed))}</div>'
+                f'<div class="value" style="color:{_CLR_PRIMARY}">{_esc(str(strong))}/{_esc(str(graded_n))}</div>'
                 f'<div class="label">{_esc(ue_label)}</div>'
+                f"{ungraded_label if ungraded_n else ''}"
+                f"</div>"
+            )
+        elif ungraded_n:
+            shown = f"{ungraded_n} figure{'s' if ungraded_n != 1 else ''} shown; none graded for this business"
+            cards.append(
+                f'<div class="summary-card">'
+                f'<div class="label">Unit Economics</div>'
+                f'<div class="value" style="color:{_CLR_PRIMARY}">—</div>'
+                f'<div class="label">{_esc(shown)}</div>'
                 f"</div>"
             )
 

@@ -5751,6 +5751,8 @@ class TestUnitEconomicsLtvSynthesis:
         assert ltv["value"] == 75000  # must NOT be overwritten by synthesis
         # Evidence should NOT claim value was synthesized — only inputs were filled
         assert "synthesized from revenue.customers" not in ltv["evidence"].lower()
+        assert "computed from your customer count" not in ltv["evidence"].lower()
+        assert "inputs computed from your revenue figures" in ltv["evidence"], ltv["evidence"]
 
     def test_no_synthesis_without_customers(self) -> None:
         """Can't compute ARPU without customer count."""

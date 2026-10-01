@@ -263,17 +263,16 @@ def _build_metrics(inputs: dict[str, Any], ue_data: dict[str, Any]) -> list[dict
             "benchmark_reference_as_of": m.get("benchmark_reference_as_of"),
             "inputs": {},
         }
-        # A gross margin rated contextual has NO bar, so the benchmark column showed a bare dash and
-        # the badge said "contextual" with no reason -- while report.md prints the producer's reason
-        # (why no benchmark applies, e.g. no revenue model stated). report.html does NOT render metric
-        # evidence today, only the rating. Thread the reason through; the explorer renders it where
-        # the bar would be.
-        if (
-            name in ("gross_margin", "burn_multiple", "cac_payback", "ltv_cac_ratio")
-            and m.get("rating") == "contextual"
-            and not m.get("benchmark_reference_rating")
-        ):
-            _ev = str(m.get("evidence") or "")
+        # A metric the review did not grade has NO bar here (see the benchmarks loop in
+        # _build_data_payload), so the benchmark column showed a bare dash with no reason -- while
+        # report.md and report.html print the producer's. Thread the reason through; the explorer
+        # renders it where the bar would be. Contextual evidence leads with the figure ("Gross margin
+        # of 55%; <reason>"), which the row already shows; not-applicable evidence is the reason whole
+        # ("Burn multiple not meaningful below $500K ARR ...").
+        _ev = str(m.get("evidence") or "")
+        if m.get("rating") == "not_applicable" and _ev:
+            metric["contextual_note"] = _ev
+        elif m.get("rating") == "contextual" and not m.get("benchmark_reference_rating") and _ev:
             metric["contextual_note"] = _ev.split("; ", 1)[1] if "; " in _ev else _ev
 
         # Per-metric input sourcing

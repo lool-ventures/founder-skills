@@ -3686,7 +3686,9 @@ def test_corpus_counts_every_agent_the_skill_pins_not_just_its_namesake() -> Non
 # contextual gross-margin row (the public sector spread, no one bar) and revenue-model-types.md its section
 # (progress billing, retentions, backlog conversion, concentration). Without the row an agent reading the
 # shared table sees only the device bar under "Hardware", the bar the type exists to avoid.
-ROOT_REFERENCES_CEILING = 126_584
+# Raised 2026-10-01 from 126,584 to 126,609 B: the project-builder row says the sector figures are
+# averages (individual companies spread wider), not a range of companies.
+ROOT_REFERENCES_CEILING = 126_609
 
 
 def test_shared_reference_tree_does_not_grow() -> None:

@@ -175,6 +175,9 @@ def test_gross_margin_is_reported_without_a_grade_and_says_why() -> None:
     assert "no single benchmark applies" in ev, ev
     assert "about 15%" in ev and "about 37%" in ev, ev
     assert "public companies" in ev, ev
+    # Sector AVERAGES, not a range of individual companies.
+    assert "average gross margins" in ev and "run from about 15%" in ev, ev
+    assert "average gross margins" in gm["benchmark_source"], gm
     assert gm["benchmark_as_of"] == "2026-01", gm
     assert "Damodaran" in gm["benchmark_source"], gm
 
@@ -207,6 +210,43 @@ def test_an_observed_ltv_cac_is_reported_without_a_grade() -> None:
     assert lc["evidence"].split("; ", 1)[1] == _LTV_CAC_REASON, lc["evidence"]
 
 
+def test_an_assumed_ltv_cac_says_why_and_carries_no_stamp() -> None:
+    """The fixture's LTV is assumed: the reason replaces "treat as directional until cohort data
+    validates LTV" (no cohort data fixes a type with no recurring customer), and no SaaS date remains."""
+    lc = _metrics(PB)["ltv_cac_ratio"]
+    assert lc["rating"] == "contextual", lc
+    assert "assumed" in lc["evidence"].split("; ", 1)[0], lc["evidence"]
+    assert lc["evidence"].split("; ", 1)[1] == _LTV_CAC_REASON, lc["evidence"]
+    assert lc["benchmark_source"] == "" and lc["benchmark_as_of"] == "", lc
+
+
+def test_an_implausible_ltv_cac_carries_no_saas_stamp() -> None:
+    """A ratio too large to be real is not rated; it must not keep the SaaS survey, its date or its 3x
+    target, which nothing grades it on and which dated the whole review."""
+    lc = _metrics(PB, ltv={**_OBSERVED_LTV, "value": 600_000})["ltv_cac_ratio"]
+    assert lc["rating"] == "not_rated", lc
+    assert "units or sign error" in lc["evidence"], lc
+    assert lc["benchmark_source"] == "" and lc["benchmark_as_of"] == "", lc
+    assert "benchmark" not in lc, lc
+
+
+def test_an_implausible_ltv_cac_does_not_date_the_review() -> None:
+    inputs = _inputs(PB, gross_margin=_THIN_GM, ltv={**_OBSERVED_LTV, "value": 600_000})
+    checklist, _ = _checklist(PB)
+    d = _make_fmr_artifact_dir(
+        {
+            "inputs.json": inputs,
+            "checklist.json": checklist,
+            "unit_economics.json": _ue(inputs),
+            "runway.json": _VALID_RUNWAY,
+        }
+    )
+    rc, data, stderr = _run_compose(d, ["--today", _TODAY])
+    assert rc == 0 and data is not None, stderr
+    codes = {w["code"] for w in data["validation"]["warnings"]}
+    assert "BENCHMARK_VINTAGE" not in codes, data["validation"]["warnings"]
+
+
 @pytest.mark.parametrize("model_type", ["hardware", "unclassified"])
 def test_ltv_cac_control_stays_graded(model_type: str) -> None:
     """Control: the fixture grades an observed LTV/CAC for hardware, and for `unclassified` (deliberately
@@ -221,7 +261,8 @@ def test_cac_and_ltv_are_contextual_with_plain_reasons() -> None:
     assert m["cac"]["rating"] == "contextual", m["cac"]
     assert "CAC benchmarks vary too widely across businesses like yours" in m["cac"]["evidence"]
     assert m["ltv"]["rating"] == "contextual", m["ltv"]
-    assert "LTV benchmarks vary too widely across businesses like yours" in m["ltv"]["evidence"]
+    # The same reason as LTV/CAC: there is no recurring customer for a lifetime value to measure.
+    assert m["ltv"]["evidence"].split("; ", 1)[1] == _LTV_CAC_REASON, m["ltv"]["evidence"]
 
 
 def test_saas_only_metrics_stay_not_applicable() -> None:
@@ -288,7 +329,8 @@ def test_report_md_assesses_the_sector_and_shows_the_margin_ungraded() -> None:
     codes = {w["code"] for w in data["validation"]["warnings"]}
     assert "CHECKLIST_PROFILE_UNRESOLVED" not in codes, codes
     assert "BENCHMARK_VINTAGE" not in codes, [w for w in data["validation"]["warnings"]]
-    assert f"GROSS MARGIN: {_THIN_GM:.2f} (contextual)" in md, md
+    assert f"GROSS MARGIN: {_THIN_GM:.2f} (not graded)" in md, md
+    assert "(contextual)" not in md, md
     assert "no single benchmark applies" in md
     assert "Not assessed" not in md
     assert PB not in md
@@ -528,12 +570,20 @@ def test_retention_is_asked_for_only_where_it_applies(model_type: str, asked: bo
 _FIELD_TOKEN = re.compile(r"\b[a-z]+_[a-z_]+\b")
 
 
-def test_the_sector_table_assumption_is_in_plain_words() -> None:
-    gm = _metrics("hardware", gross_margin=0.55)["gross_margin"]
+@pytest.mark.parametrize(
+    ("model_type", "stores"), [("hardware", False), ("consumer-subscription", False), ("retail", True)]
+)
+def test_the_sector_table_assumption_is_in_plain_words(model_type: str, stores: bool) -> None:
+    """Store-level contribution is offered to a retailer only, and the note asks nothing of the founder
+    the report cannot hear."""
+    gm = _metrics(model_type, gross_margin=0.55)["gross_margin"]
     assert gm["rating"] in _GRADED, gm
-    assert "gross_margin_basis" not in gm["evidence"], gm["evidence"]
-    assert not _FIELD_TOKEN.search(gm["evidence"]), gm["evidence"]
-    assert "store-level contribution" in gm["evidence"], gm["evidence"]
+    ev = gm["evidence"]
+    assert "gross_margin_basis" not in ev, ev
+    assert not _FIELD_TOKEN.search(ev), ev
+    assert "this assumes a margin on" in ev, ev
+    assert ("store-level contribution" in ev) is stores, ev
+    assert "say so" not in ev, ev
 
 
 def test_a_declared_basis_source_is_in_plain_words() -> None:
@@ -629,7 +679,7 @@ def test_the_pitfalls_cover_milestones_and_markup() -> None:
     assert "project builder" in items[8] and "growth rate" in items[8], items[8]
     markup = next(v for v in items.values() if "Margin on cost is a markup" in v)
     assert "markup ÷ (1 + markup)" in markup, markup
-    assert "25%" not in markup
+    assert "30% on cost is about 23% of revenue" in markup, markup
 
 
 def test_the_shared_references_carry_the_type() -> None:
@@ -637,6 +687,7 @@ def test_the_shared_references_carry_the_type() -> None:
     rows = [ln for ln in bench.splitlines() if ln.startswith("| Project builder")]
     assert len(rows) == 1 and "contextual — no threshold" in rows[0], rows
     assert "Vehicle" not in rows[0] and "Auto" not in rows[0], rows[0]
+    assert "Average gross margins of public companies" in rows[0], rows[0]
     types = (ROOT_REFS / "revenue-model-types.md").read_text(encoding="utf-8")
     sec = _section(types, "## Project Builder", deepest=2)
     assert "milestone" in sec and "retentions" in sec and "concentration" in sec, sec
