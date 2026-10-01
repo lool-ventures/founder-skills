@@ -118,6 +118,20 @@ criterion, whose pass/warn/fail bars are defined entirely on broken cells (`#REF
 criterion `not_applicable`. Do not score it from the surrounding numbers: a criterion whose
 bar you cannot see is not a criterion you passed.
 
+Also read unit_economics.json and runway.json in the same directory when they exist:
+this review's computed figures. When an item turns on a burn multiple, runway, CAC
+payback, LTV/CAC or gross margin, use these figures; do not compute your own. For
+runway use the planning number: today's-burn runway (static_runway_months) when it is
+shorter than the base scenario or the base never runs out, else the base scenario's
+months. A metric rated contextual WITH a benchmark_reference_rating is graded on that
+reference rating. One rated contextual WITHOUT it was deliberately left ungraded: give
+that criterion `warn` and say why in plain words -- never pass or fail it on the
+benchmark bar, and never not_applicable. not_rated means the inputs do not allow the
+figure, which supports a "not computable" fail. These figures are our computation, not
+the founder's model: they show a figure is computable from the model's inputs, never that
+the model itself shows, highlights, summarises or explains it. State figures in your own
+words; never copy our evidence text, our rating words, or a filename.
+
 Assess all 46 checklist items: STRUCT_01..09, UNIT_10..19, CASH_20..32,
 METRIC_33..35, BRIDGE_36..38, SECTOR_39..44, OVERALL_45..46.
 Profile-based auto-gating is applied BY THE PRODUCER SCRIPT after you return —

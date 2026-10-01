@@ -102,9 +102,9 @@ Every review deposits structured JSON artifacts into a working directory. The fi
 | 3 | `inputs.json` | Context A dispatch: INPUTS_REVIEW → `apply_corrections.py` |
 | 3.5 | `corrected_inputs.json` | `apply_corrections.py` (from INPUTS_REVIEW dispatch) |
 | 3.6 | `extraction_validation.json` | `validate_extraction.py` (when `model_data.json` exists) |
-| 4 | `checklist.json` | Context A dispatch: CHECKLIST → `checklist.py` |
-| 5 | `unit_economics.json` | direct pipe: `inputs.json` → `unit_economics.py` |
-| 6 | `runway.json` | direct pipe: `inputs.json` → `runway.py` |
+| 4 | `unit_economics.json` | direct pipe: `inputs.json` → `unit_economics.py` |
+| 4 | `runway.json` | direct pipe: `inputs.json` → `runway.py` |
+| 5 | `checklist.json` | Context A dispatch: CHECKLIST → `checklist.py` (grades against the two above) |
 | 7 | Report | `compose_report.py` (writes both `report.json` and `report.md`) |
 | 7.5 | `commentary.json` | agent-authored (main thread heredoc) — required by Gate 2 for quantitative reviews |
 | 8a | HTML report | `visualize.py` |
@@ -117,7 +117,7 @@ Every review deposits structured JSON artifacts into a working directory. The fi
 - If a step is not applicable, deposit a stub: `{"skipped": true, "reason": "..."}`
 - **Do NOT use `isolation: "worktree"`** for sub-agents — files written in a worktree won't appear in the main `$REVIEW_DIR`
 
-Keep the founder informed with brief, plain-language updates at each step. **Narrate the founder-visible OUTCOME, never the internal step.** That is the test to apply, and it catches more than a word list can: the forbidden thing is not a syntax, it is talking about the machinery. Bad — "Gating and piping the extraction through the producer, then staging the coaching hand-off"; good — "I've checked your numbers and I'm writing up what stood out." Bad — "schema-drift warning on `coaching_payload`"; good — nothing, because the founder has no stake in it. **Never name an internal artifact, field, or token** (a payload key, a marker name, an artifact filename, a hand-off dir) even in plain prose with no backticks — a detector keyed on syntax cannot see "gated", "hand-off" or "canonical artifacts", but the founder still reads them and they still mean nothing to them. **The between-step progress lines are the primary leak vector, not the final summary.** They feel internal — you are narrating what you are about to do — but the founder reads every one of them, and this is where the leaks actually appear: *"Now gating the hand-off before piping through the checklist producer"*, *"Gate 1 passes"*, *"Running the final verification gate"*. Rewrite each pipeline transition as the founder-visible outcome: *"Checking your numbers against the 46-point review"*, *"Your inputs look consistent — moving on to unit economics"*, *"Finishing up and putting the report together"*. If a progress line would mean nothing to someone who has never seen this skill's internals, it does not belong in the channel. Also excluded, as before: file/script names, paths, `*.py`, `--flags`, `$vars`, exit codes ("Exit N", "not found"), `W_`/`E_` codes, JSON, and step/route labels ("Lane N", "Context A/B", "Phase N", "structure detection", "the grid", any `ALL_CAPS_TOKEN`). After each analytical step (3–6), share a one-sentence finding before moving on. Track progress with at most one batched task tracker (a single `TaskCreate`), updating it only at phase boundaries — extraction, review gate, scoring, report — never per sub-step: the step narration above is the founder's progress channel, so per-substep `TaskCreate`/update churn only adds runtime. **The task tracker is founder-visible too — the same rule governs its labels.** "Gate the inputs review handoff", "Validate inputs.json", "resolve agent namespace paths", "Initialize founder context" are leaks even though each names a real step, and even when the prose around them is clean. Label each task by the founder-visible outcome — "Check your inputs", "Score against the review", "Write up what I found" — never by a file, directory, script, or pipeline stage.
+Keep the founder informed with brief, plain-language updates at each step. **Narrate the founder-visible OUTCOME, never the internal step.** That is the test to apply, and it catches more than a word list can: the forbidden thing is not a syntax, it is talking about the machinery. Bad — "Gating and piping the extraction through the producer, then staging the coaching hand-off"; good — "I've checked your numbers and I'm writing up what stood out." Bad — "schema-drift warning on `coaching_payload`"; good — nothing, because the founder has no stake in it. **Never name an internal artifact, field, or token** (a payload key, a marker name, an artifact filename, a hand-off dir) even in plain prose with no backticks — a detector keyed on syntax cannot see "gated", "hand-off" or "canonical artifacts", but the founder still reads them and they still mean nothing to them. **The between-step progress lines are the primary leak vector, not the final summary.** They feel internal — you are narrating what you are about to do — but the founder reads every one of them, and this is where the leaks actually appear: *"Now gating the hand-off before piping through the checklist producer"*, *"Gate 1 passes"*, *"Running the final verification gate"*. Rewrite each pipeline transition as the founder-visible outcome: *"Checking your numbers against the 46-point review"*, *"Your inputs look consistent — moving on to unit economics"*, *"Finishing up and putting the report together"*. If a progress line would mean nothing to someone who has never seen this skill's internals, it does not belong in the channel. Also excluded, as before: file/script names, paths, `*.py`, `--flags`, `$vars`, exit codes ("Exit N", "not found"), `W_`/`E_` codes, JSON, and step/route labels ("Lane N", "Context A/B", "Phase N", "structure detection", "the grid", any `ALL_CAPS_TOKEN`). After each analytical step (3–5), share a one-sentence finding before moving on. Track progress with at most one batched task tracker (a single `TaskCreate`), updating it only at phase boundaries — extraction, review gate, scoring, report — never per sub-step: the step narration above is the founder's progress channel, so per-substep `TaskCreate`/update churn only adds runtime. **The task tracker is founder-visible too — the same rule governs its labels.** "Gate the inputs review handoff", "Validate inputs.json", "resolve agent namespace paths", "Initialize founder context" are leaks even though each names a real step, and even when the prose around them is clean. Label each task by the founder-visible outcome — "Check your inputs", "Score against the review", "Write up what I found" — never by a file, directory, script, or pipeline stage.
 
 ## Workflow
 
@@ -649,7 +649,28 @@ figure typed in conversation or read off a deck slide may be a rounded estimate,
 annual figure the reader took as monthly. Presenting the table and moving on in the same turn defeats the
 gate exactly as it would on Path A.
 
-### Step 4: CHECKLIST Dispatch (Context A)
+### Step 4: Unit Economics and Runway (direct — no dispatch)
+
+These two producers consume `inputs.json` verbatim. Run them directly from the
+on-disk file — do NOT round-trip the JSON through a sub-agent (an LLM re-typing
+multi-KB financial JSON risks silently corrupting numbers, and it saves no
+context since the JSON would land in the main thread anyway):
+
+```bash
+# Step 0 already resolved PLUGIN_ROOT once, deterministically — reuse its printed
+# value here rather than re-running the self-heal search in this fresh shell.
+SCRIPTS="<printed PLUGIN_ROOT>/skills/financial-model-review/scripts"
+cat "$REVIEW_DIR/inputs.json" | python3 "$SCRIPTS/unit_economics.py" --pretty --run-id "$RUN_ID" -o "$REVIEW_DIR/unit_economics.json"
+cat "$REVIEW_DIR/inputs.json" | python3 "$SCRIPTS/runway.py" --pretty --run-id "$RUN_ID" -o "$REVIEW_DIR/runway.json"
+```
+
+Both scripts propagate `metadata.run_id` from `inputs.json` into their outputs
+(required by the Context B run_id-parity check). They run BEFORE the checklist because the
+checklist grades against their figures; both are pure functions of `inputs.json`, which is what
+keeps the checklist's inputs fingerprint a sufficient staleness check. All metric fields are optional —
+missing data yields `not_rated` / a partial-analysis stub, never a crash.
+
+### Step 5: CHECKLIST Dispatch (Context A)
 
 **Dispatch the financial-model-review sub-agent in Context A (CHECKLIST).** **Call the `Task` tool with `subagent_type: "founder-skills:financial-model-review"`** and the prompt below. Substitute `<HANDOFF_AGENT>` / `<REVIEW_DIR_AGENT>` with the agent-namespace values and `<RUN_ID>` with `$RUN_ID`; leave the `${CLAUDE_PLUGIN_ROOT}/...` reference path literal (same idiom as INPUTS_REVIEW).
 
@@ -668,6 +689,19 @@ pass/warn/fail bars are defined entirely on broken cells. An empty tally means n
 found; an ABSENT model_data.json (a conversational or deck-described model) means the
 evidence cannot exist, so mark that criterion not_applicable rather than guessing a pass.
 Also read ${CLAUDE_PLUGIN_ROOT}/skills/financial-model-review/references/checklist-criteria.md.
+Also read unit_economics.json and runway.json in the same directory when they exist:
+this review's computed figures. When an item turns on a burn multiple, runway, CAC
+payback, LTV/CAC or gross margin, use these figures; do not compute your own. For
+runway use the planning number: today's-burn runway (static_runway_months) when it is
+shorter than the base scenario or the base never runs out, else the base scenario's
+months. A metric rated contextual WITH a benchmark_reference_rating is graded on that
+reference rating. One rated contextual WITHOUT it was deliberately left ungraded: give
+that criterion `warn` and say why in plain words -- never pass or fail it on the
+benchmark bar, and never not_applicable. not_rated means the inputs do not allow the
+figure, which supports a "not computable" fail. These figures are our computation, not
+the founder's model: they show a figure is computable from the model's inputs, never that
+the model itself shows, highlights, summarises or explains it. State figures in your own
+words; never copy our evidence text, our rating words, or a filename.
 
 Assess all 46 checklist items (STRUCT_01..09, UNIT_10..19, CASH_20..32,
 METRIC_33..35, BRIDGE_36..38, SECTOR_39..44, OVERALL_45..46).
@@ -710,25 +744,6 @@ cat "$HANDOFF_DIR/checklist_output.json" | \
     --inputs "$REVIEW_DIR/inputs.json" -o "$REVIEW_DIR/checklist.json"
 ```
 <!-- skill-quality-ci: bash-after-subagent-ok -->
-
-### Steps 5-6: Unit Economics and Runway (direct — no dispatch)
-
-These two producers consume `inputs.json` verbatim. Run them directly from the
-on-disk file — do NOT round-trip the JSON through a sub-agent (an LLM re-typing
-multi-KB financial JSON risks silently corrupting numbers, and it saves no
-context since the JSON would land in the main thread anyway):
-
-```bash
-# Step 0 already resolved PLUGIN_ROOT once, deterministically — reuse its printed
-# value here rather than re-running the self-heal search in this fresh shell.
-SCRIPTS="<printed PLUGIN_ROOT>/skills/financial-model-review/scripts"
-cat "$REVIEW_DIR/inputs.json" | python3 "$SCRIPTS/unit_economics.py" --pretty --run-id "$RUN_ID" -o "$REVIEW_DIR/unit_economics.json"
-cat "$REVIEW_DIR/inputs.json" | python3 "$SCRIPTS/runway.py" --pretty --run-id "$RUN_ID" -o "$REVIEW_DIR/runway.json"
-```
-
-Both scripts propagate `metadata.run_id` from `inputs.json` into their outputs
-(required by the Context B run_id-parity check). All metric fields are optional —
-missing data yields `not_rated` / a partial-analysis stub, never a crash.
 
 ### Step 7: Compose and Validate Report
 

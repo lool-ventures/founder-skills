@@ -282,6 +282,7 @@ Thresholds: **strong** >= 85%, **solid** >= 70%, **needs_work** >= 50%, **major_
 `growth_rate_monthly` is already net of churn (see schema-inputs.md), so subtracting a churn figure
 double-counts it. **Read the burn multiple off `unit_economics.json` rather than recomputing it** —
 `unit_economics.py` is the single source for it, and a figure the founder reads twice must be derived once.
+Rated contextual with no reference grade, it was left ungraded on purpose: warn and say why. With a reference grade (a non-USD model), grade on the reference.
 **Warn:** High but improving.
 **Fail:** Worsening with scale; >3x.
 

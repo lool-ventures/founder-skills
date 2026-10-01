@@ -16,6 +16,8 @@ import sys
 import types
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FMR_DIR = REPO_ROOT / "founder-skills" / "skills" / "financial-model-review"
 SKILL_MD = FMR_DIR / "SKILL.md"
@@ -212,6 +214,18 @@ def test_askuserquestion_prescribes_two_option_construction() -> None:
     )
 
 
+def _checklist_section(text: str, start: int) -> str:
+    """The CHECKLIST template (to its closing fence) or the agent's CHECKLIST subtype (to the next
+    heading). Bounded by structure, not a character window: additions to the prose used to push the
+    pinned text past a fixed slice and fail on content that was still there."""
+    if text[start:].startswith("CONTEXT: CHECKLIST"):
+        end = text.index("\n```", start)
+    else:
+        nxt = re.search(r"\n#{2,4} ", text[start + 1 :])
+        end = start + 1 + nxt.start() if nxt else len(text)
+    return text[start:end]
+
+
 def test_checklist_dispatch_caps_pass_evidence() -> None:
     """CHECKLIST pass items only need a short 'checked X against Y' note;
     fail/warn items keep full evidence with specific values (they drive the
@@ -223,7 +237,7 @@ def test_checklist_dispatch_caps_pass_evidence() -> None:
         text = doc.read_text(encoding="utf-8")
         start = text.find(anchor)
         assert start != -1, f"{doc.name} has no {anchor!r} section"
-        section = text[start : start + 2500].lower()
+        section = _checklist_section(text, start).lower()
         assert "brief" in section, f"{doc.name} CHECKLIST guidance does not cap pass-item evidence to a brief note"
         assert "fail" in section and "warn" in section, (
             f"{doc.name} CHECKLIST guidance must still require full fail/warn evidence"
@@ -358,7 +372,7 @@ def test_checklist_dispatch_template_includes_run_id_and_company() -> None:
         text = doc.read_text(encoding="utf-8")
         start = text.find(anchor)
         assert start != -1, f"{doc.name} has no {anchor!r} section"
-        section = text[start : start + 4000]
+        section = _checklist_section(text, start)
         assert '"metadata"' in section and '"run_id"' in section, (
             f"{doc.name} CHECKLIST return shape is missing metadata.run_id"
         )
@@ -633,3 +647,43 @@ def test_score_coverage_is_emitted_top_level_and_flags_a_partial_score() -> None
 
     clean = mod._score_coverage({"score_pct": 80.0, "total": 46})
     assert clean["complete"] is True and clean["not_assessed_count"] == 0
+
+
+def test_unit_economics_and_runway_run_before_the_checklist() -> None:
+    """The checklist grades against the computed figures, so they must exist when it runs. It used to
+    run first, which made METRIC_34's "read the burn multiple off the computed figure" impossible and
+    left the grader estimating its own (measured: a computed 2.14x "acceptable" failed on an estimate)."""
+    text = SKILL_MD.read_text(encoding="utf-8")
+    ue_cmd = text.index('python3 "$SCRIPTS/unit_economics.py" --pretty --run-id')
+    rw_cmd = text.index('python3 "$SCRIPTS/runway.py" --pretty --run-id')
+    dispatch = text.index("CONTEXT: CHECKLIST")
+    assert ue_cmd < dispatch and rw_cmd < dispatch
+    assert text.index("### Step 4: Unit Economics and Runway") < text.index("### Step 5: CHECKLIST Dispatch")
+    table = text[text.index("## Artifact Pipeline") : text.index("**Rules:**")]
+    assert table.index("`unit_economics.json`") < table.index("`checklist.json`")
+
+
+@pytest.mark.parametrize("anchor_doc", ["skill", "agent"])
+def test_the_grader_reads_the_computed_figures_and_the_rules_for_them(anchor_doc: str) -> None:
+    doc, anchor = (SKILL_MD, "CONTEXT: CHECKLIST") if anchor_doc == "skill" else (AGENT_MD, "#### CHECKLIST subtype")
+    text = doc.read_text(encoding="utf-8")
+    section = re.sub(r"\s+", " ", _checklist_section(text, text.index(anchor)))
+    for phrase in (
+        "read unit_economics.json and runway.json",
+        "do not compute your own",
+        "today's-burn runway (static_runway_months)",
+        "graded on that reference rating",
+        "give that criterion `warn` and say why",
+        "never not_applicable",
+        "not_rated means the inputs do not allow the figure",
+        "never that the model itself shows, highlights, summarises or explains it",
+        "never copy our evidence text, our rating words, or a filename",
+    ):
+        assert phrase in section, (doc.name, phrase)
+
+
+def test_metric_34_says_what_a_contextual_burn_multiple_gets() -> None:
+    text = (FMR_DIR / "references" / "checklist-criteria.md").read_text(encoding="utf-8")
+    section = text.split("### `METRIC_34`", 1)[1].split("\n### ", 1)[0]
+    assert "Rated contextual with no reference grade, it was left ungraded on purpose: warn and say why." in section
+    assert "With a reference grade (a non-USD model), grade on the reference." in section

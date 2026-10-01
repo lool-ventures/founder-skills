@@ -112,6 +112,65 @@ def self_gated_ids(report_json: dict) -> list[str]:
 # golden carries its own calibration.
 DEFENSIBLE_SELF_GATED = frozenset({"CASH_29", "CASH_31", "CASH_32", "STRUCT_01", "STRUCT_02", "STRUCT_05", "STRUCT_09"})
 
+# The shell tool's name: `Bash` under the SDK this lane drives; `mcp__workspace__bash` at hostloop,
+# accepted so the helpers below read a cowork cassette's tool stream the same way.
+_SHELL_TOOLS = frozenset({"Bash", "mcp__workspace__bash"})
+
+
+def _is_checklist_dispatch(t: dict[str, Any]) -> bool:
+    return (
+        t["name"] in ("Task", "Agent")
+        and t["parent_tool_use_id"] is None
+        # lstrip: a dispatched prompt can open with a newline (every one in the hostloop cassette does).
+        and str(t["input"].get("prompt", "")).lstrip().startswith("CONTEXT: CHECKLIST")
+    )
+
+
+def checklist_dispatches(tool_uses: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Main-thread CHECKLIST dispatches, in stream order (a corrective redo is a second one)."""
+    return [t for t in tool_uses if _is_checklist_dispatch(t)]
+
+
+def unit_economics_before_checklist(tool_uses: list[dict[str, Any]]) -> tuple[bool, str]:
+    """Did the main thread run unit_economics.py before the FIRST CHECKLIST dispatch?
+
+    Positions are indexes into the captured tool stream, which is stream order. A re-run of the
+    producer after the dispatch (e.g. after a correction) is allowed; what is not is a checklist
+    that was dispatched before any computed figures existed for it to read.
+    """
+    ue = [
+        i
+        for i, t in enumerate(tool_uses)
+        if t["name"] in _SHELL_TOOLS
+        and t["parent_tool_use_id"] is None
+        and "unit_economics.py" in str(t["input"].get("command", ""))
+    ]
+    ck = [i for i, t in enumerate(tool_uses) if _is_checklist_dispatch(t)]
+    if not ue:
+        return False, "the main thread never ran unit_economics.py"
+    if not ck:
+        return False, "no CHECKLIST dispatch was made"
+    return ue[0] < ck[0], f"first unit_economics.py call at tool #{ue[0]}, first CHECKLIST dispatch at tool #{ck[0]}"
+
+
+def checklist_read_paths(tool_uses: list[dict[str, Any]]) -> list[str]:
+    """Every file the CHECKLIST sub-agent(s) opened with Read -- the tool stream, not its self-report."""
+    parents = {t["id"] for t in checklist_dispatches(tool_uses)}
+    return [
+        str(t["input"].get("file_path", ""))
+        for t in tool_uses
+        if t["name"] == "Read" and t["parent_tool_use_id"] in parents
+    ]
+
+
+def metric_self_contradictions(report_json: dict) -> list[dict]:
+    """METRIC_SELF_CONTRADICTION warnings on report.json's machine surface (under `validation`)."""
+    return [
+        w
+        for w in (report_json.get("validation") or {}).get("warnings") or []
+        if isinstance(w, dict) and w.get("code") == "METRIC_SELF_CONTRADICTION"
+    ]
+
 
 @pytest.mark.e2e
 @pytest.mark.skipif(
@@ -271,6 +330,39 @@ def test_financial_model_review_smoke(tmp_path: Path) -> None:
     assert_run_id_parity(
         review_dir,
         ["inputs.json", "checklist.json", "unit_economics.json", "runway.json", "report.json"],
+    )
+
+    # === The checklist grades against the computed figures (Step 4 before Step 5). ===
+    # Recorded before asserting, like the evidence above, so a red names what the stream showed.
+    ordered, order_why = unit_economics_before_checklist(cap.tool_uses)
+    ck_reads = checklist_read_paths(cap.tool_uses)
+    contradictions = metric_self_contradictions(report_json)
+    print(
+        f"[e2e:fmr] step order: {ordered} ({order_why}); checklist reads: {ck_reads}; "
+        f"METRIC_SELF_CONTRADICTION: {len(contradictions)}",
+        flush=True,
+    )
+    step_summary(
+        f"- unit_economics before CHECKLIST: {ordered} ({order_why})\n"
+        f"- METRIC_SELF_CONTRADICTION warnings: {len(contradictions)}\n"
+    )
+    # (a) ORDER. A CHECKLIST dispatched before unit_economics.py ran has no computed figures to
+    # read, so it computes its own burn multiple / payback / LTV:CAC -- the second number the
+    # founder then sees beside the computed one. Only the tool stream shows the order; the
+    # artifacts look the same either way.
+    assert ordered, f"Step 4 must run before the CHECKLIST dispatch: {order_why}. Inspect {review_dir}"
+    # (b) THE READ. The prompt TELLS the sub-agent to read unit_economics.json; that it did is a fact
+    # only the sub-agent's own Read calls (parent_tool_use_id = the dispatch) can establish.
+    assert any(p.endswith("unit_economics.json") for p in ck_reads), (
+        f"the CHECKLIST sub-agent never opened unit_economics.json, so its metric criteria were "
+        f"graded on figures it derived itself. It read: {ck_reads}"
+    )
+    # (c) THE OUTCOME. The defect the reorder exists to remove: a checklist figure that disagrees
+    # with the computed one. Order and Read can both hold while the evidence still restates its own
+    # number; this is the founder-visible consequence, judged by compose's own check.
+    assert not contradictions, (
+        "the checklist states a metric value that contradicts unit_economics.json: "
+        f"{[w.get('message') for w in contradictions]}. Inspect {review_dir}"
     )
 
     # The founder's message CONTAINS the printed hand-over, whole: the report's own verdict (rating and

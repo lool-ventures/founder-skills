@@ -52,6 +52,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   - **A review whose revenue model is missing or not recognised** no longer has its gross margin
     graded on the software table. It is shown without a grade and the review says why.
   - The interactive explorer no longer re-grades a figure the review left ungraded.
+- **A financial model review's checklist now grades against the review's own computed figures.**
+  The checklist used to be scored before the burn multiple, runway and payback were computed, so it
+  estimated them itself. It could fail the burn-multiple check on its own estimate while the metrics
+  table beside it rated the same ratio acceptable. The figures are now computed first and the
+  checklist uses them:
+  - runway is the planning number the report leads with;
+  - a figure the review deliberately left ungraded is a warning that says why, not a failure;
+  - a figure that is simply not shown in the model is still judged on the model.
 - **A market sizing is now told not to treat a market's size today and in a future year as two
   conflicting figures.** The figure for the year the sizing describes is the one compared; the other
   is shown with your deck's other claims. When a deck states two figures for the same market and

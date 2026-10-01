@@ -882,7 +882,11 @@ SKILL_MD_CEILING: dict[str, int] = {
     # -893 B (84_574 -> 83_681): the hand-over is printed by fmr_closing_message.py; Main-Thread Return no
     # longer walks the model through restating runway and status fields in chat, which is how a live run
     # computed figures in the hand-over.
-    "financial-model-review": 83_680,
+    # +1,332 B (83_680 -> 85_012): unit economics and runway now run BEFORE the checklist (Step 4), and
+    # the CHECKLIST template tells the grader to grade against their figures -- planning-number runway,
+    # a reference grade where one exists, warn (never not_applicable) on a deliberately withheld metric,
+    # and that our figures show a figure is computable, never that the model shows it.
+    "financial-model-review": 85_012,
     # ic-sim SHRANK: the REQUIRED ic-dynamics.md read at Step 7 is deleted. Step 7 is a pure producer
     # pipe — compose_discussion.py derives discussion.json from the partners' own files and nothing
     # is authored by the main thread — so the read informed no decision while pulling a whole
@@ -1679,7 +1683,9 @@ REFERENCES_CEILING: dict[str, int] = {
     # 75_096 -> 76_405 (+1,309 B): take-rate revenue is recorded net and the basis declared (the burn
     # multiple is graded only on net revenue); a project OEM is routed to unclassified, not hardware;
     # a fintech data-sufficiency row; payments clauses in UNIT_14 / METRIC_33 / METRIC_34.
-    "financial-model-review": 76_405,
+    # +159 B (76_405 -> 76_564): METRIC_34 says what a contextual burn multiple gets (warn, or its
+    # reference grade for a non-USD model), now that the grader reads the computed figure.
+    "financial-model-review": 76_564,
     # ic-sim +1446 B: evaluation-criteria.md omitted `to_confirm` from the status table AND from the
     # scoring formula, which excluded only not_applicable. Following it changed the conviction
     # score, since score_dimensions.py excludes both. The >6 coverage cap was undocumented too.
