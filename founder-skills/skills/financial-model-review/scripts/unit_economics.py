@@ -830,7 +830,8 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
 
     stage = company.get("stage", "seed").lower()
     sector = company.get("sector", "").lower()
-    model_type = company.get("revenue_model_type", "").lower()
+    # Trimmed as checklist.py and compose_report.py trim it: three readers of one field must agree.
+    model_type = str(company.get("revenue_model_type") or "").strip().lower()
     saas = _is_saas(model_type)
     traits = company.get("traits", []) or []
     data_confidence = company.get("data_confidence", "exact")
@@ -1685,6 +1686,19 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
             metrics.append(_metric("arr_per_fte", None, "not_rated", "Insufficient data for ARR per FTE"))
     else:
         metrics.append(_metric("arr_per_fte", None, "not_applicable", "ARR/FTE applies to SaaS models only"))
+
+    # "X applies to SaaS models only" implies the company is not SaaS. That is known only when a model
+    # is stated and fits no type; when none is stated (or the reason was not recorded) it may well be
+    # SaaS, so say why the metric was not assessed instead of implying it does not apply.
+    if model_type == "unclassified" and unclassified_reason(company) != "no_fitting_type":
+        why = (
+            "no revenue model is stated in your materials"
+            if unclassified_reason(company) == "not_stated"
+            else "no revenue model we have benchmarks for is stated in your materials"
+        )
+        for m in metrics:
+            if m["rating"] == "not_applicable" and str(m["evidence"]).endswith("models only"):
+                m["evidence"] = f"{m['evidence']}; it is not assessed because {why}"
 
     # --- Build summary ---
     computed = sum(1 for m in metrics if m["value"] is not None)

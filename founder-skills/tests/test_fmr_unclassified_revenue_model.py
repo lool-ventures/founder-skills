@@ -430,3 +430,55 @@ def test_a_typo_path_is_still_refused() -> None:
             check=False,
         )
         assert r.returncode != 0 and "PATH_ERROR" in (r.stdout + r.stderr)
+
+
+# --- report.html prints why an ungraded metric has no grade -------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("reason", "want", "absent"),
+    [
+        (None, "if your materials do not say how the company makes money", _REMEDY),
+        ("not_stated", _REMEDY, _CASE2_GM),
+        ("no_fitting_type", _CASE2_GM, "state how"),
+    ],
+)
+def test_report_html_prints_the_gross_margin_reason(reason: str | None, want: str, absent: str) -> None:
+    out = subprocess.run(
+        [sys.executable, str(SCRIPTS / "visualize.py"), "--dir", _reason_dir(reason)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert out.returncode == 0, out.stderr
+    text = " ".join(_visible_text(out.stdout).split()).lower()
+    assert want in text, want
+    assert absent not in text
+    assert "gross margin of 55%;" not in text, "the row already shows the figure; print only the reason"
+
+
+def test_stray_spaces_in_the_model_type_are_read_as_unclassified() -> None:
+    """unit_economics trims the type as checklist and compose do, so the three readers agree."""
+    inputs = _reason_inputs("no_fitting_type")
+    inputs["company"]["revenue_model_type"] = " Unclassified "
+    gm = {m["name"]: m for m in _unit_economics(inputs)["metrics"]}["gross_margin"]
+    assert gm["rating"] == "contextual", gm
+
+
+@pytest.mark.parametrize(
+    ("reason", "suffix"),
+    [
+        (None, "not assessed because no revenue model we have benchmarks for is stated"),
+        ("not_stated", "not assessed because no revenue model is stated"),
+        ("no_fitting_type", None),
+    ],
+)
+def test_saas_only_metrics_do_not_imply_the_company_is_not_saas(reason: str | None, suffix: str | None) -> None:
+    """'NRR applies to SaaS models only' implies 'you are not SaaS', known only when a stated model fits no type."""
+    saas_only = [m for m in _unit_economics(_reason_inputs(reason))["metrics"] if m["name"] in SAAS_ONLY]
+    assert saas_only
+    for m in saas_only:
+        if suffix:
+            assert suffix in m["evidence"], m
+        else:
+            assert "not assessed because" not in m["evidence"], m

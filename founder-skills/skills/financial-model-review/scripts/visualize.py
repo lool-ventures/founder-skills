@@ -660,6 +660,12 @@ def _format_metric_value(name: str, value: float, currency_code: str = "USD") ->
     return f"{value:,.1f}"
 
 
+# Ratings that carry no grade, so the reason has to be printed beside them.
+# `not_rated` is left out: its evidence is usually the value restated ("Fully loaded CAC of $1,500"),
+# which the row already shows.
+_UNGRADED_RATINGS = frozenset({"contextual", "not_applicable"})
+
+
 def _chart_unit_economics(unit_economics: dict[str, Any] | None) -> str:
     """Bullet charts showing unit economics metrics with per-metric scaling."""
     if unit_economics is None:
@@ -749,15 +755,32 @@ def _chart_unit_economics(unit_economics: dict[str, Any] | None) -> str:
             )
         svg += "</svg>"
 
+        # A metric with no grade said only "Contextual" / "Not rated" / "Not applicable" here, while
+        # report.md and the explorer print WHY (e.g. no gross-margin benchmark covers the stated
+        # revenue model). Print the producer's reason under it. A graded metric's bar and benchmark
+        # band already explain it. Contextual evidence leads with the figure ("Gross margin of 55%;
+        # <reason>"), which the row already shows, so keep only the reason -- as the explorer does.
+        reason = ""
+        if rating in _UNGRADED_RATINGS and not reference_rating:
+            ev = str(m.get("evidence") or "").strip()
+            reason = ev.split("; ", 1)[1] if rating == "contextual" and "; " in ev else ev
+            reason = reason[:1].upper() + reason[1:]
         parts.append(
-            f'<div style="display:flex;align-items:center;gap:0.75rem;'
-            f'padding:0.4rem 0;border-bottom:1px solid var(--lool-line-2);">'
+            f'<div style="padding:0.4rem 0;border-bottom:1px solid var(--lool-line-2);">'
+            f'<div style="display:flex;align-items:center;gap:0.75rem;">'
             f'<span style="min-width:140px;font-size:0.85rem;font-weight:600;'
             f'color:var(--lool-ink);">{_esc(display_name)}</span>'
             f"{svg}"
             f'<span style="min-width:120px;font-size:0.8rem;color:{_esc(color)};">'
             f"{_esc(val_str)} — {_esc(rating_label)}</span>"
             f"</div>"
+            + (
+                f'<div style="font-size:0.75rem;color:var(--lool-mute);margin:0.15rem 0 0 calc(140px + 0.75rem);">'
+                f"{_esc(reason)}</div>"
+                if reason
+                else ""
+            )
+            + "</div>"
         )
 
     # Legend

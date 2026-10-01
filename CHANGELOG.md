@@ -31,6 +31,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   specific revenue models are marked as not covering yours. When no model is stated, you are still
   asked for it. When the review cannot tell which, it says neither more than it knows. You can also
   correct which case applies in chat.
+- **The HTML report now says why a metric has no grade.** It showed a metric as "Contextual" or "Not
+  applicable" with no reason, while the text report and the explorer gave one. The reason is now
+  printed under the metric. A SaaS-only metric such as net revenue retention no longer reads as
+  though your company is not SaaS when your materials simply do not say how it makes money: it says
+  the metric was not assessed, and why.
 
 ### Development
 
