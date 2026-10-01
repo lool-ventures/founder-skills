@@ -312,9 +312,37 @@ _GM_CONTEXTUAL_EVIDENCE: dict[str, str] = {
     ),
     "unclassified": (
         "no revenue model we have benchmarks for is stated in your materials, so no gross-margin "
-        "benchmark applies; state how the company makes money and this can be graded"
+        "benchmark applies; if your materials do not say how the company makes money, stating it lets "
+        "this be graded"
     ),
 }
+
+# `unclassified` covers two cases, told apart by `company.unclassified_reason` when the extraction
+# recorded it. Absent, the wording above stays true in both, with a conditional remedy: telling a
+# founder who DID state an unbenchmarked model to "state how the company makes money" is false.
+_GM_UNCLASSIFIED_EVIDENCE: dict[str, str] = {
+    "not_stated": (
+        "no revenue model we have benchmarks for is stated in your materials, so no gross-margin "
+        "benchmark applies; state how the company makes money and this can be graded"
+    ),
+    "no_fitting_type": (
+        "your revenue model is not one we have gross-margin benchmarks for, so this figure is reported without a grade"
+    ),
+}
+_GM_UNCLASSIFIED_SOURCES: dict[str, str] = {
+    "no_fitting_type": "No benchmark: no gross-margin benchmark covers this revenue model",
+}
+
+
+def unclassified_reason(company: dict[str, Any] | None) -> str | None:
+    """`not_stated` / `no_fitting_type` when an `unclassified` model records why; else None."""
+    if not isinstance(company, dict):
+        return None
+    if str(company.get("revenue_model_type") or "").strip().lower() != "unclassified":
+        return None
+    reason = company.get("unclassified_reason")
+    return reason if reason in ("not_stated", "no_fitting_type") else None
+
 
 # Valid gross_margin_basis values. All threshold tables assume product/service
 # gross margin; any other declared basis (store contribution, gross-revenue
@@ -1362,11 +1390,12 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
             src = GM_BENCHMARKS_BY_SECTOR[sector_key]["source"] if sector_key else "declared gross_margin_basis"
             metrics.append(_metric("gross_margin", gm, "contextual", evidence, src, ""))
         elif contextual_reason == "unclassified":
-            # No type name in the sentence: the value is our word for "not stated", not the founder's.
-            evidence = f"Gross margin of {gm:.0%}; {_GM_CONTEXTUAL_EVIDENCE[contextual_reason]}"
-            metrics.append(
-                _metric("gross_margin", gm, "contextual", evidence, _GM_CONTEXTUAL_SOURCES[contextual_reason], "")
-            )
+            # No type name in the sentence: the value is our word, not the founder's.
+            case = unclassified_reason(company)
+            sentence = _GM_UNCLASSIFIED_EVIDENCE.get(case or "", _GM_CONTEXTUAL_EVIDENCE[contextual_reason])
+            source = _GM_UNCLASSIFIED_SOURCES.get(case or "", _GM_CONTEXTUAL_SOURCES[contextual_reason])
+            evidence = f"Gross margin of {gm:.0%}; {sentence}"
+            metrics.append(_metric("gross_margin", gm, "contextual", evidence, source, ""))
         elif contextual_reason is not None:
             evidence = f"Gross margin of {gm:.0%}; {model_type} {_GM_CONTEXTUAL_EVIDENCE[contextual_reason]}"
             metrics.append(

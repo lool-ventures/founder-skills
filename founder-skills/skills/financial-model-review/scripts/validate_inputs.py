@@ -402,6 +402,8 @@ def _validate_structural(
             ["spreadsheet", "deck", "conversational", "partial"],
         ),
         "data_confidence": (("company", "data_confidence"), ["exact", "estimated", "mixed"]),
+        # Optional; read only when revenue_model_type is "unclassified" (ignored otherwise).
+        "unclassified_reason": (("company", "unclassified_reason"), ["not_stated", "no_fitting_type"]),
         "gross_margin_basis": (
             ("unit_economics", "gross_margin_basis"),
             ["product", "store_contribution", "net_revenue", "gross_revenue", "blended"],

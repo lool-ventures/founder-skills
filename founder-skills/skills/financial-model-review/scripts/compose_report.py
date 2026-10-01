@@ -803,7 +803,8 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
             warnings.append(
                 _warn(
                     "CHECKLIST_PROFILE_UNRESOLVED",
-                    f"company {_profile_field_name(field)}: {_clause.removeprefix('your ')}, so {len(dropped)} "
+                    f"company {_profile_field_name(field)}: "
+                    f"{_technical_unresolved(str(field), inputs, _clause)}, so {len(dropped)} "
                     f"criteria keyed to it were excluded without being assessed: {dropped}",
                     founder_message=(
                         f"{_clause[0].upper()}{_clause[1:]}, so {len(dropped)} "
@@ -1059,11 +1060,32 @@ def _revenue_model_not_stated(inputs: dict[str, Any] | None) -> bool:
     return str(company.get("revenue_model_type") or "").strip().lower() == "unclassified"
 
 
+def _unclassified_reason(inputs: dict[str, Any] | None) -> str:
+    """Why the model is `unclassified`, when the extraction recorded it: `not_stated`, `no_fitting_type`, or ""."""
+    company = _as_dict(_as_dict(inputs).get("company"))
+    reason = company.get("unclassified_reason")
+    return reason if reason in ("not_stated", "no_fitting_type") else ""
+
+
 def _unresolved_clause(field: str, inputs: dict[str, Any] | None) -> str:
-    """Why a profile field dropped criteria, in founder words. "Not stated" is not a matching failure."""
+    """Why a profile field dropped criteria, in founder words. "Not stated" is not a matching failure.
+
+    `unclassified` is two cases -- no model stated, or one stated that fits no benchmarked type. When
+    the extraction did not record which, the hedged sentence is true in both.
+    """
     if field == "sector" and _revenue_model_not_stated(inputs):
-        return "no revenue model we have benchmarks for is stated in your materials"
+        return {
+            "not_stated": "no revenue model is stated in your materials",
+            "no_fitting_type": "your revenue model is not one our model-specific checks cover",
+        }.get(_unclassified_reason(inputs), "no revenue model we have benchmarks for is stated in your materials")
     return f"your {_profile_field_name(field)} could not be matched to a known value"
+
+
+def _technical_unresolved(field: str, inputs: dict[str, Any] | None, clause: str) -> str:
+    """The developer-facing `message` form of the clause (the founder reads `founder_message`)."""
+    if field == "sector" and _revenue_model_not_stated(inputs):
+        return f"unclassified ({_unclassified_reason(inputs) or 'reason not recorded'})"
+    return clause.removeprefix("your ")
 
 
 def _item_heading(item: dict[str, Any]) -> str:

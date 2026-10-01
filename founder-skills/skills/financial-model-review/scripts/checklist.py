@@ -645,8 +645,11 @@ def _normalize_profile(company: dict[str, Any]) -> tuple[dict[str, Any], set[str
         elif rmt == _NOT_STATED_MODEL:
             # Deliberately unmapped: no benchmarkable revenue model is stated, so no sector gate can
             # be decided. Recorded as unresolved so the dropped criteria are disclosed.
+            why = {"not_stated": "not stated", "no_fitting_type": "stated, but fits no benchmarked type"}.get(
+                str(result.get("unclassified_reason") or ""), "reason not recorded"
+            )
             print(
-                "Note: revenue model not stated (unclassified); sector-specific criteria are not assessed.",
+                f"Note: revenue model unclassified ({why}); sector-specific criteria are not assessed.",
                 file=sys.stderr,
             )
             unresolved.add("sector_gate")
@@ -732,10 +735,17 @@ def _unresolved_gate_reason(gate_type: str, company: dict[str, Any] | None) -> s
         source_key = "revenue_model_type" if gate_type == "sector_gate" else field
         raw = str(company.get(source_key, "") or "").strip()
     if gate_type == "sector_gate" and raw.lower() == _NOT_STATED_MODEL:
-        return (
-            "no revenue model we have benchmarks for is stated in your materials, "
-            "so we could not tell whether this applies to you"
-        )
+        # Which case `unclassified` is, when the extraction recorded it; absent, the hedged wording is
+        # true in both (no model stated, or one stated that fits no benchmarked type).
+        reason = str((company or {}).get("unclassified_reason") or "")
+        lead = {
+            "not_stated": "no revenue model is stated in your materials",
+            "no_fitting_type": "your revenue model is not one our model-specific checks cover",
+        }.get(reason, "no revenue model we have benchmarks for is stated in your materials")
+        if reason == "no_fitting_type":
+            # A stated model this check is not written for: there is nothing we "could not tell".
+            return lead
+        return f"{lead}, so we could not tell whether this applies to you"
     seen = f" ('{raw}')" if raw else ""
     return f"we could not match your {field}{seen}, so we could not tell whether this applies to you"
 

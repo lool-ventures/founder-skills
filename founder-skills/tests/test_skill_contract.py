@@ -1665,7 +1665,11 @@ REFERENCES_CEILING: dict[str, int] = {
     # entirely though compose emits it top-level and both prompts instruct the model to read it: the
     # one field that says how much of the review actually ran was undocumented where a producer
     # author looks.
-    "financial-model-review": 74_745,
+    # 74_745 -> 75_096 (+351 B): schema-inputs.md documents `company.unclassified_reason` and replaces
+    # an instruction to "describe the model in `agent_supplied`" -- a field that holds dotted paths, so
+    # the instruction could not be followed and the two `unclassified` cases were indistinguishable.
+    # It names both setters and says to leave the field out when unsure (the report then hedges).
+    "financial-model-review": 75_096,
     # ic-sim +1446 B: evaluation-criteria.md omitted `to_confirm` from the status table AND from the
     # scoring formula, which excluded only not_applicable. Following it changed the conviction
     # score, since score_dimensions.py excludes both. The >6 coverage cap was undocumented too.

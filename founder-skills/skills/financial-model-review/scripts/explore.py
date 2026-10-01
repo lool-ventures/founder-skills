@@ -258,9 +258,10 @@ def _build_metrics(inputs: dict[str, Any], ue_data: dict[str, Any]) -> list[dict
             "inputs": {},
         }
         # A gross margin rated contextual has NO bar, so the benchmark column showed a bare dash and
-        # the badge said "contextual" with no reason -- while report.md and report.html both print
-        # the producer's reason (why no benchmark applies, e.g. no revenue model stated). Thread
-        # that reason through; the explorer renders it where the bar would be.
+        # the badge said "contextual" with no reason -- while report.md prints the producer's reason
+        # (why no benchmark applies, e.g. no revenue model stated). report.html does NOT render metric
+        # evidence today, only the rating. Thread the reason through; the explorer renders it where
+        # the bar would be.
         if name == "gross_margin" and m.get("rating") == "contextual" and not m.get("benchmark_reference_rating"):
             _ev = str(m.get("evidence") or "")
             metric["contextual_note"] = _ev.split("; ", 1)[1] if "; " in _ev else _ev

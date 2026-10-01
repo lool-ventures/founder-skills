@@ -87,6 +87,7 @@ The model's native currency, as an ISO 4217 code (`"USD"`, `"INR"`, `"ILS"`, `"E
 | `sector` | string | yes | Normalized sector string |
 | `geography` | string | yes | Primary geography |
 | `revenue_model_type` | string | yes | One of: `"saas-plg"`, `"saas-sales-led"`, `"marketplace"`, `"usage-based"`, `"ai-native"`, `"hardware"`, `"hardware-subscription"`, `"consumer-subscription"`, `"transactional-fintech"`, `"annual-contracts"`, `"retail"`, `"unclassified"` |
+| `unclassified_reason` | string | no | With `"unclassified"` only: `"not_stated"`, or `"no_fitting_type"` (a model is stated; no type fits). |
 | `model_format` | string | no | One of: `"spreadsheet"`, `"deck"`, `"conversational"`, `"partial"`. Defaults to `"spreadsheet"`. Controls which checklist items are applicable. |
 | `data_confidence` | string | no | One of: `"exact"`, `"estimated"`, `"mixed"`. Indicates reliability of input values. |
 
@@ -104,8 +105,10 @@ a band it does not control, between two values no code tells apart.
 **No revenue model stated, or none fits → `unclassified`, not a guessed SaaS type.** A SaaS type
 switches on NRR, GRR, magic number, Rule of 40, ARR/FTE and the SaaS gross-margin table;
 `unclassified` makes the review abstain from those and say why. If a model is stated,
-prefer a NON-SaaS type that fits; otherwise use `unclassified` and describe the model in
-`agent_supplied`.
+prefer a NON-SaaS type that fits; otherwise use `unclassified` and set `unclassified_reason`
+(the INPUTS_REVIEW sub-agent or the main thread, whichever extracts). Unsure which? Leave it out;
+the report then hedges. Telling a founder whose stated model fits no type to "state how the
+company makes money" is false.
 
 **Choosing `data_confidence` for conversational input.** A figure the founder stated from memory in chat is
 `estimated`, not `exact`. Reserve `exact` for a value read off a document — a spreadsheet cell, a bank

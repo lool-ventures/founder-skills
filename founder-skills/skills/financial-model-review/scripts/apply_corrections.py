@@ -42,6 +42,13 @@ from typing import Any
 # ---------------------------------------------------------------------------
 
 
+# Optional fields a correction may ADD although the original never carried them. Everything else must
+# already exist, so a typo cannot silently create a key. `unclassified_reason` is optional by design
+# (an extraction may not record why the model is unclassified), and a founder's chat correction is
+# exactly how the unknown case gets resolved.
+_OPTIONAL_SET_PATHS = frozenset({"company.unclassified_reason"})
+
+
 def _navigate_part(obj: Any, part: str) -> Any:
     if obj is None or not isinstance(obj, dict):
         return None
@@ -435,7 +442,7 @@ def _apply_patches(
         leaf = parts[-1]
         parent_path = ".".join(parts[:-1])
         parent_obj = _deep_get(original, parent_path) if parent_path else original
-        if not isinstance(parent_obj, dict) or leaf not in parent_obj:
+        if not isinstance(parent_obj, dict) or (leaf not in parent_obj and path not in _OPTIONAL_SET_PATHS):
             errors.append(
                 {
                     "code": "PATH_ERROR",

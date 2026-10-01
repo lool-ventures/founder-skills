@@ -23,6 +23,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
   Each change was checked against real decks: the check moved to a warning where the slide was
   present but weak, and stayed a failure where the slide was missing.
+- **A financial model review no longer tells you to state a revenue model you already stated.**
+  A model whose revenue model fits none of the types we benchmark used to read the same as one that
+  never says how the company makes money: both were told to "state how the company makes money and
+  this can be graded". The review now records which case it is. When the model is stated but has no
+  benchmark, the gross margin is reported without a grade and says so, and the checks written for
+  specific revenue models are marked as not covering yours. When no model is stated, you are still
+  asked for it. When the review cannot tell which, it says neither more than it knows. You can also
+  correct which case applies in chat.
 
 ### Development
 

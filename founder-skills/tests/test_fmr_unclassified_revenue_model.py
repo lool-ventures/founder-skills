@@ -177,3 +177,256 @@ def test_explorer_says_no_revenue_model_stated() -> None:
     assert PHRASE in json.dumps(gm).lower(), f"the explorer's GM evidence must carry the reason: {gm}"
     assert "unclassified" not in _visible_text(html)
     assert "gross_margin" not in payload.get("benchmarks", {}), "no client-side re-rating without a model"
+
+
+# --- why it is unclassified: not stated, stated-but-none-fits, or not recorded ---------------------
+#
+# `unclassified` covers two cases a founder must be told apart: the materials never say how the company
+# makes money, or they do and no benchmarked type fits (licensing royalties, advertising, ...). Telling
+# the second founder to "state how the company makes money" is false. `company.unclassified_reason`
+# says which; when it is absent (old inputs, an extraction that skipped it, the corrections UI) the
+# wording stays hedged -- true in both cases -- and the remedy is conditional.
+
+import pytest  # noqa: E402
+
+_REMEDY = "state how the company makes money and this can be graded"
+_CASE2_GM = "not one we have gross-margin benchmarks for"
+_CASE2_CHECKS = "not one our model-specific checks cover"
+_NOT_STATED = "no revenue model is stated in your materials"
+_HEDGED = "no revenue model we have benchmarks for is stated"
+
+
+def _reason_inputs(reason: str | None, gm: float = 0.55) -> dict[str, Any]:
+    inputs = _unclassified_inputs(gm)
+    if reason is not None:
+        inputs["company"]["unclassified_reason"] = reason
+    return inputs
+
+
+def _reason_dir(reason: str | None) -> str:
+    inputs = _reason_inputs(reason)
+    checklist, _ = _checklist({**_PROFILE_SPREADSHEET, **inputs["company"]})
+    return _make_fmr_artifact_dir(
+        {
+            "inputs.json": inputs,
+            "checklist.json": checklist,
+            "unit_economics.json": _unit_economics(inputs),
+            "runway.json": _VALID_RUNWAY,
+        }
+    )
+
+
+def _gm(reason: str | None) -> dict[str, Any]:
+    gm: dict[str, Any] = {m["name"]: m for m in _unit_economics(_reason_inputs(reason))["metrics"]}["gross_margin"]
+    return gm
+
+
+def test_gm_unknown_reason_is_hedged_with_a_conditional_remedy() -> None:
+    ev = _gm(None)["evidence"]
+    assert _HEDGED in ev, ev
+    assert "if your materials do not say how the company makes money" in ev, ev
+    assert _REMEDY not in ev, "an unconditional remedy is false when a model WAS stated"
+
+
+def test_gm_not_stated_keeps_the_remedy() -> None:
+    ev = _gm("not_stated")["evidence"]
+    assert _REMEDY in ev, ev
+
+
+def test_gm_no_fitting_type_drops_the_remedy() -> None:
+    gm = _gm("no_fitting_type")
+    assert gm["rating"] == "contextual", gm
+    assert _CASE2_GM in gm["evidence"], gm["evidence"]
+    assert "state how" not in gm["evidence"] and PHRASE not in gm["evidence"].lower(), gm["evidence"]
+    assert "is stated" not in gm["benchmark_source"], gm["benchmark_source"]
+
+
+def test_reason_is_ignored_for_a_stated_benchmarked_type() -> None:
+    inputs = _reason_inputs("no_fitting_type")
+    inputs["company"]["revenue_model_type"] = "saas-sales-led"
+    gm = {m["name"]: m for m in _unit_economics(inputs)["metrics"]}["gross_margin"]
+    assert gm["rating"] != "contextual"
+
+
+@pytest.mark.parametrize(
+    ("reason", "want", "absent"),
+    [
+        (None, _HEDGED, None),
+        ("not_stated", _NOT_STATED, _CASE2_CHECKS),
+        ("no_fitting_type", _CASE2_CHECKS, PHRASE),
+    ],
+)
+def test_checklist_gated_evidence_names_the_case(reason: str | None, want: str, absent: str | None) -> None:
+    inputs = _reason_inputs(reason)
+    data, _ = _checklist({**_PROFILE_SPREADSHEET, **inputs["company"]})
+    dropped = data["summary"]["unresolved_profile_exclusions"].get("sector", [])
+    assert dropped
+    by_id = {i["id"]: i for i in data["items"]}
+    for crit in dropped:
+        ev = str(by_id[crit].get("evidence", ""))
+        assert want in ev, ev
+        if absent:
+            assert absent not in ev.lower(), ev
+        assert "unclassified" not in ev and "no_fitting_type" not in ev and "not_stated" not in ev, ev
+
+
+@pytest.mark.parametrize(
+    ("reason", "want", "absent"),
+    [
+        (None, _HEDGED, _REMEDY),
+        ("not_stated", _NOT_STATED, _CASE2_CHECKS),
+        ("no_fitting_type", _CASE2_CHECKS, "state how"),
+    ],
+)
+def test_report_md_names_the_case(reason: str | None, want: str, absent: str) -> None:
+    d = _reason_dir(reason)
+    md_path = Path(d) / "report.md"
+    rc, _data, stderr = _run_compose(d, ["--write-md", str(md_path)])
+    assert rc == 0, stderr
+    md = md_path.read_text()
+    assert want in md.lower(), md
+    assert absent not in md.lower()
+    assert "unclassified" not in md and "no_fitting_type" not in md and "not_stated" not in md
+
+
+@pytest.mark.parametrize(
+    ("reason", "want"),
+    [(None, _HEDGED), ("not_stated", _NOT_STATED), ("no_fitting_type", _CASE2_CHECKS)],
+)
+def test_report_html_names_the_case(reason: str | None, want: str) -> None:
+    d = _reason_dir(reason)
+    out = subprocess.run(
+        [sys.executable, str(SCRIPTS / "visualize.py"), "--dir", d], capture_output=True, text=True, check=False
+    )
+    assert out.returncode == 0, out.stderr
+    text = " ".join(_visible_text(out.stdout).split())
+    assert want in text.lower(), want
+    assert "unclassified" not in text and "no_fitting_type" not in text
+    if reason == "no_fitting_type":
+        assert "state how" not in text.lower()
+        assert "could not tell" not in text.lower(), "a stated model this check is not written for is not unknown"
+    else:
+        assert _REMEDY not in text.lower() or reason == "not_stated"
+
+
+def test_explorer_gm_names_case_two() -> None:
+    d = _reason_dir("no_fitting_type")
+    out = subprocess.run(
+        [sys.executable, str(SCRIPTS / "explore.py"), "--dir", d], capture_output=True, text=True, check=False
+    )
+    assert out.returncode == 0, out.stderr
+    payload = _extract_data_payload(out.stdout)
+    gm = [m for m in payload["metrics"] if m.get("name") == "gross_margin" or m.get("id") == "gross_margin"]
+    blob = json.dumps(gm)
+    assert _CASE2_GM in blob, blob
+    assert "state how" not in blob
+
+
+def test_coaching_payload_does_not_depend_on_the_reason() -> None:
+    """Forward guard, not a proof: the case only changes report wording, never the coach's payload.
+
+    If this starts failing, the reason reached the payload builder's call graph, and CLAUDE.md's
+    one-paid-lane-per-changed-payload-builder rule applies.
+    """
+    masked = ("insertion_marker", "review_dir", "report_path")
+    payloads = []
+    for reason in (None, "not_stated", "no_fitting_type"):
+        rc, data, stderr = _run_compose(_reason_dir(reason))
+        assert rc == 0 and data is not None, stderr
+        p = dict(data["coaching_payload"])
+        for k in masked:
+            p.pop(k, None)
+        payloads.append(json.dumps(p, sort_keys=True))
+    assert payloads[0] == payloads[1] == payloads[2]
+
+
+@pytest.mark.parametrize("reason", ["not_stated", "no_fitting_type"])
+def test_validator_accepts_each_reason(reason: str) -> None:
+    rc, data, stderr = run_script("validate_inputs.py", [], stdin_data=json.dumps(_reason_inputs(reason)))
+    assert data is not None, stderr
+    bad = [e for e in data.get("errors", []) + data.get("warnings", []) if "unclassified_reason" in json.dumps(e)]
+    assert bad == [], bad
+
+
+def test_validator_rejects_an_unknown_reason() -> None:
+    rc, data, stderr = run_script("validate_inputs.py", [], stdin_data=json.dumps(_reason_inputs("N/A")))
+    assert data is not None, stderr
+    assert any(e.get("code") == "ENUM_ERROR" and "unclassified_reason" in e.get("field", "") for e in data["errors"])
+
+
+def test_schema_doc_names_the_reason_field_not_agent_supplied() -> None:
+    doc = (SCRIPTS.parent / "references" / "schema-inputs.md").read_text()
+    assert "unclassified_reason" in doc
+    assert "describe the model in\n`agent_supplied`" not in doc and "describe the model in `agent_supplied`" not in doc
+
+
+def test_explorer_unknown_case_keeps_the_remedy_conditional() -> None:
+    payload = _extract_data_payload(
+        subprocess.run(
+            [sys.executable, str(SCRIPTS / "explore.py"), "--dir", _reason_dir(None)],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+    )
+    blob = json.dumps(
+        [m for m in payload["metrics"] if m.get("name") == "gross_margin" or m.get("id") == "gross_margin"]
+    )
+    assert "if your materials do not say how the company makes money" in blob, blob
+    assert _REMEDY not in blob
+
+
+def test_a_chat_correction_can_record_the_reason() -> None:
+    """The unknown case is resolved by a founder saying how they make money; the correction must land."""
+    import tempfile
+
+    inputs = _reason_inputs(None)
+    with tempfile.TemporaryDirectory() as td:
+        orig = Path(td) / "inputs.json"
+        orig.write_text(json.dumps(inputs))
+        out = Path(td) / "out"
+        out.mkdir()
+        r = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPTS / "apply_corrections.py"),
+                "--original",
+                str(orig),
+                "--set",
+                "company.unclassified_reason=no_fitting_type",
+                "--output-dir",
+                str(out),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert (
+            json.loads((out / "corrected_inputs.json").read_text())["company"]["unclassified_reason"]
+            == "no_fitting_type"
+        )
+
+
+def test_a_typo_path_is_still_refused() -> None:
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as td:
+        orig = Path(td) / "inputs.json"
+        orig.write_text(json.dumps(_reason_inputs(None)))
+        r = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPTS / "apply_corrections.py"),
+                "--original",
+                str(orig),
+                "--set",
+                "company.unclassified_reasn=no_fitting_type",
+                "--output-dir",
+                str(td),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert r.returncode != 0 and "PATH_ERROR" in (r.stdout + r.stderr)
