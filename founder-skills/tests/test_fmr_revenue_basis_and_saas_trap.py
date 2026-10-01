@@ -258,3 +258,92 @@ def test_the_explorer_does_not_regrade_a_withheld_burn_multiple(model_type: str,
     bm = next(m for m in payload["metrics"] if m["id"] == "burn_multiple")
     if not kept:
         assert "net revenue" in (bm.get("contextual_note") or ""), bm
+
+
+# --- an empty or off-enum type --------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("model_type", ["", "industrial-oem"])
+def test_an_unstated_or_unknown_type_keeps_its_growth_grades(model_type: str) -> None:
+    """Only `unclassified` withholds the burn multiple and CAC payback. An empty or off-enum type never
+    reached the validator's routing, so nothing says the business is not one the stage bars fit; the
+    gross margin abstains (its tables differ by model) and the two growth ratios stay graded."""
+    m = _metrics(model_type)
+    for name in ("burn_multiple", "cac_payback"):
+        assert m[name]["rating"] in _GRADED, (model_type, name, m[name])
+        assert m[name]["benchmark_source"], (model_type, name, m[name])
+    assert m["gross_margin"]["rating"] == "contextual", m["gross_margin"]
+
+
+def test_a_withheld_grade_keeps_the_estimate_qualifier_once() -> None:
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["company"]["revenue_model_type"] = "unclassified"
+    inputs["company"]["data_confidence"] = "estimated"
+    rc, data, err = run_script("unit_economics.py", [], stdin_data=json.dumps(inputs))
+    assert rc == 0, err
+    assert data is not None
+    m = {x["name"]: x for x in data["metrics"]}
+    for name in ("burn_multiple", "cac_payback"):
+        ev = m[name]["evidence"]
+        assert m[name]["rating"] == "contextual", (name, m[name])
+        assert ev.endswith(" (based on estimated inputs)"), (name, ev)
+        assert ev.count("(based on estimated inputs)") == 1, (name, ev)
+
+
+@pytest.mark.parametrize("model_type", sorted(ue._GM_CONTEXTUAL_TYPES - {"unclassified"}))
+def test_contextual_gross_margin_evidence_names_no_type_token(model_type: str) -> None:
+    gm = _metrics(model_type, gross_margin=0.55)["gross_margin"]
+    assert gm["rating"] == "contextual", gm
+    assert model_type not in gm["evidence"], gm["evidence"]
+
+
+def test_an_empty_type_says_why_a_saas_only_metric_was_not_assessed() -> None:
+    nrr = _metrics("")["nrr"]
+    assert nrr["rating"] == "not_applicable", nrr
+    assert nrr["evidence"].endswith(
+        "models only; it is not assessed because no revenue model we have benchmarks for is stated in your materials"
+    ), nrr["evidence"]
+
+
+@pytest.mark.parametrize("model_type", ["hardware", "hardware-subscription", "marketplace"])
+def test_contextual_ltv_evidence_names_no_type_token(model_type: str) -> None:
+    ltv = _metrics(model_type)["ltv"]
+    assert ltv["rating"] == "contextual", ltv
+    assert model_type not in ltv["evidence"], ltv["evidence"]
+    assert "LTV benchmarks vary too widely across businesses like yours to grade it" in ltv["evidence"]
+
+
+def test_a_padded_type_takes_its_own_gross_margin_bar() -> None:
+    assert ue.gm_benchmark_for(" hardware", "seed") == ue.GM_BENCHMARKS_BY_SECTOR["hardware"]
+    assert ue.gm_benchmark_for("Hardware ", "seed") == ue.GM_BENCHMARKS_BY_SECTOR["hardware"]
+
+
+def test_a_declared_basis_is_named_in_plain_words() -> None:
+    gm = _metrics("saas-sales-led", gross_margin_basis="net_revenue")["gross_margin"]
+    assert gm["rating"] == "contextual", gm
+    assert "net revenue basis" in gm["evidence"] and "net_revenue" not in gm["evidence"], gm["evidence"]
+
+
+def test_the_fintech_gross_margin_reason_agrees_with_its_source() -> None:
+    ev = ue._GM_CONTEXTUAL_EVIDENCE["transactional-fintech"]
+    assert ue._GM_CONTEXTUAL_SOURCES["transactional-fintech"].startswith("No benchmark")
+    assert "comps" not in ev and "40pts" not in ev, ev
+    assert "booked net or gross" in ev, ev
+
+
+def test_the_take_rate_burn_reason_names_its_metric() -> None:
+    bm = _metrics("marketplace")["burn_multiple"]
+    assert "the burn-multiple benchmark applies only to net revenue" in bm["evidence"], bm["evidence"]
+
+
+@pytest.mark.parametrize("model_type", ["transactional-fintech", "marketplace"])
+def test_the_explorer_shows_why_a_withheld_cac_payback_has_no_bar(model_type: str) -> None:
+    explore = _load("explore", "_fmr_trap_explore")
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["company"]["revenue_model_type"] = model_type
+    rc, ue_data, err = run_script("unit_economics.py", [], stdin_data=json.dumps(inputs))
+    assert rc == 0, err
+    payload = explore._build_data_payload(inputs, None, ue_data, None, None, stub_reasons={})
+    pb = next(m for m in payload["metrics"] if m["id"] == "cac_payback")
+    assert pb["rating"] == "contextual", pb
+    assert "subscription software contract sizes" in (pb.get("contextual_note") or ""), pb

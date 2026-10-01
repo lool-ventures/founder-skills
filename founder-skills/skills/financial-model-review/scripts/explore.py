@@ -402,11 +402,13 @@ def _build_data_payload(
     # what-if re-rating must not grade it against the stage bar (a contextual badge beside "2.0x").
     for _m in metrics:
         if (
-            _m.get("id") in ("burn_multiple", "cac_payback")
+            _m.get("id") == "burn_multiple"
             and _m.get("rating") == "contextual"
             and not _m.get("benchmark_reference_rating")
         ):
             benchmarks.pop(_m["id"], None)
+    # CAC payback has no stage bar to drop: its tiers ride in cac_payback_by_acv, which the what-if
+    # does not read.
     benchmarks["cac_payback_by_acv"] = dict(CAC_PAYBACK_BY_ACV)
 
     # Bridge

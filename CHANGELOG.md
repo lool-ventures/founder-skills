@@ -39,18 +39,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   printed under the metric. A SaaS-only metric such as net revenue retention no longer reads as
   though your company is not SaaS when your materials simply do not say how it makes money: it says
   the metric was not assessed, and why.
-- **A financial model review no longer grades a business on benchmarks built for subscription
-  software when it is not one.**
+- **A financial model review no longer grades payments businesses, marketplaces, or a business whose
+  revenue model we do not benchmark on bars built for subscription software.** Other businesses,
+  hardware included, are still graded on the stage burn-multiple bars.
   - **Payments and marketplace businesses:** the burn multiple is graded only when revenue is
     recorded net of what passes through to others. Gross transaction volume makes the ratio look
     better than it is, so until the model says revenue is net, the figure is shown without a grade
-    and the review says why. CAC payback and CAC are shown without a grade, because their benchmarks
-    are set for software contract sizes.
+    and the review says why. CAC payback is now shown without a grade, because its benchmark is set
+    for software contract sizes. CAC was never graded; for a payments business the review now says
+    why.
   - **A business whose revenue model fits none we benchmark** (a large-system or project manufacturer,
     for example) is no longer graded on the software burn-multiple or payback bars either, and is not
     put on the hardware gross-margin bar, which would mark a healthy project margin as a failure.
   - **A review whose revenue model is missing or not recognised** no longer has its gross margin
-    graded on the software table. It is shown without a grade and the review says why.
+    graded on the software table. It is shown without a grade and the review says why. Its burn
+    multiple and payback are still graded on the stage bars.
   - The interactive explorer no longer re-grades a figure the review left ungraded.
 - **A financial model review's checklist now grades against the review's own computed figures.**
   The checklist used to be scored before the burn multiple, runway and payback were computed, so it
