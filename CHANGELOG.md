@@ -5,6 +5,47 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- **A deck review fails three more checks only when something is missing, not when it is weak.** The
+  same rule "company purpose is clear" got in 0.14.0 now covers three more criteria:
+  - **The problem slide** fails only when the problem is abstract or industry-level, with no specific
+    buyer or moment of pain. A problem that names the buyer and the pain but gives no number is a
+    warning that asks for the one figure that would quantify it.
+  - **"Why now"** fails only when no slide argues why now, or the only argument is generic timing ("AI
+    is hot"). The check is told to look through the whole deck and name the slide before failing. A
+    specific argument with no outside catalyst, an unsourced one, or one placed late in the deck is a
+    warning.
+  - **The ask** fails when there is no ask at all. Dollars tied to milestones without a single
+    explicit ask, or several raise scenarios with their dollar amounts, are a warning.
+
+  Each change was checked against real decks: the check moved to a warning where the slide was
+  present but weak, and stayed a failure where the slide was missing.
+
+### Development
+
+Contributor-facing only; nothing here changes what a founder installs or runs.
+
+- `cowork-harness` is pinned exactly at 4.2.0 across CI and the contributor install line, up from
+  4.0.0. The GitHub Action stays on `@v4`. Recording now needs 4.2.0, because its default Claude
+  Desktop baseline moved and a recording made under an older version would be out of date the day it
+  was made. The committed recordings were re-stamped to the new baseline rather than re-recorded:
+  - the agent, system prompt and network rules are unchanged;
+  - the one change to the agent's environment does not reach the shell the skills' scripts run in.
+- Recording-time path redaction picks up the harness's newer rules. The macOS path the host agent
+  runs from is kept, and two more spellings of a home-directory name are hidden.
+- CI fails on a scenario input that a real recording would refuse, such as a missing path or a
+  negative tool check the scenario's tier can never violate. The dry-run reports these but still
+  exits 0. The re-record cost pre-flight now classifies the same lines as a load problem, not a cost
+  problem.
+- After a re-record batch, any mismatch between a recording's agent version and its baseline is
+  printed prominently. The cassette inventory also shows which models and baselines the recordings
+  span.
+- Contributor guidance covers the harness's new `eval` command: when an A/B comparison can answer a
+  question here, and when it cannot.
+
 ## [0.14.0] - 2026-09-30 — Market sizing built by reference, an outside review for competitive positioning, and an option pool modelled on what its percentage measures
 
 ### Highlights

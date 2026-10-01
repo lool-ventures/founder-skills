@@ -147,6 +147,9 @@ Docker); replay/verify are **token/agent-free** (stock CI).
 > --dry-run`) needs >=1.14.0 now that a `lane:` scenario exists, because an older **loader** exits 2 on
 > the whole directory; and its `--quiet` needs >=1.16.0 to do anything. The **`lint`** step's floor
 > stays documentary — it resolves no baseline and emits no staleness.
+> The **`Scenario input check`** step beside it (4.1.0+) re-runs the same dry-run with `--output-format json`
+> and fails unless `ok` is true and `inputErrors` is empty: an input a real record would refuse (a missing
+> path, a tier-vacuous negative tool assert) is listed there while the dry-run still exits 0.
 > Do not reason about them as a way to keep CI and local in sync — they are not. SPEC.md §12 freezes the
 > covered surfaces, so within a major, bumps are additive and the committed cassettes keep replaying —
 > `2.2.0` was measured as exactly that (every token-free surface byte-identical to `2.1.0` on this
