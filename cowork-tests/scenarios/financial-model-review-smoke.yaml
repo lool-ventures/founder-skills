@@ -58,6 +58,16 @@ assert:
       artifact: outputs/artifacts/financial-model-review-cadence/report.json
       path: coaching_payload.schema_version
       exists: true
+  # The prompt states cash and burn outright; the extracted inputs must carry them unchanged.
+  # inputs.json (the extraction), not runway.json (whose baseline nets out debt).
+  - artifact_json:
+      artifact: outputs/artifacts/financial-model-review-cadence/inputs.json
+      path: cash.current_balance
+      equals: 1500000
+  - artifact_json:
+      artifact: outputs/artifacts/financial-model-review-cadence/inputs.json
+      path: cash.monthly_net_burn
+      equals: 120000
   - subagent_dispatched: 'financial-model-review'
   # Context-B coaching hand-off: the coaching sub-agent WRITES its commentary to the
   # handoff file (file transport, not the message channel) with a paired non-error

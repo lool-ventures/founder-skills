@@ -31,7 +31,8 @@ prompt: |
   2 co-founders, ex-Stripe (eng) and ex-Notion (product).
 
   SLIDE 6: ASK
-  Raising $1.2M seed at $8M post.
+  We will raise one of three amounts: $1.0M (14 months of runway), $1.5M (20 months), or
+  $2.0M (26 months).
 
   Give me the full review with the scored checklist and the written report.
 
@@ -53,6 +54,31 @@ assert:
       artifact: outputs/artifacts/deck-review-acmecorp/stage_profile.json
       path: detected_stage
       exists: true
+  # CHECKLIST VERDICTS on criteria the rubric edit of this release moved. `summary.status_by_id` is
+  # the producer's by-id map (`items` is in the grader's order, and a dotted path takes indices only).
+  # Slide 6 states several amounts, each tied to runway and none to a milestone: the rubric says that
+  # is an ask (warn), not a missing one (fail), and that a pass needs use of funds plus milestones, so
+  # pass is wrong too. Measured on a real deck of this shape: fail in 4 of 4 runs before the rubric
+  # sentence, warn in 4 of 4 after. The other three guard the other direction -- a MISSING element
+  # (no why-now slide, no market slide) must stay fail, and a quantified problem must not fail.
+  # checklist.json runs 29-62 KB; rerecord.sh records this lane with a larger body cap, because an
+  # artifact_json over a truncated body refuses the record AFTER the run is paid for.
+  - artifact_json:
+      artifact: outputs/artifacts/deck-review-acmecorp/checklist.json
+      path: summary.status_by_id.ask_ties_to_milestones
+      equals: warn
+  - artifact_json:
+      artifact: outputs/artifacts/deck-review-acmecorp/checklist.json
+      path: summary.status_by_id.why_now_has_catalyst
+      equals: fail
+  - artifact_json:
+      artifact: outputs/artifacts/deck-review-acmecorp/checklist.json
+      path: summary.status_by_id.market_bottom_up
+      equals: fail
+  - artifact_json:
+      artifact: outputs/artifacts/deck-review-acmecorp/checklist.json
+      path: summary.status_by_id.problem_quantified
+      in: [pass, warn]
   - subagent_dispatched: 'deck-review'
   # Context-B coaching hand-off: the coaching sub-agent WRITES its commentary to the
   # handoff file (file transport, not the message channel) with a paired non-error

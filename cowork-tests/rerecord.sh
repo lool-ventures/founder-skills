@@ -472,7 +472,13 @@ record_one() {
   # The verify-time one was DELETED from ALLOW at 1.19.0 (see the floor note above); do NOT read that
   # deletion as a reason to drop this. Passing either where the other belongs fails as unknown-flag.
   [ -f "cassettes/$n.cassette.json" ] || new_fixture=(--allow-host-inventory-fixture)
-  cowork-harness record "scenarios/$n.yaml" --out "cassettes/$n.cassette.json" "${new_fixture[@]}" \
+  # A larger body cap for ONE lane. deck-review-smoke asserts verdicts inside checklist.json, which
+  # runs 29-62 KB against the default 64 KiB; an artifact_json over a truncated body refuses the record
+  # AFTER the run is paid for. Per lane, not global: a global raise would inline every lane's
+  # report bodies and widen what the privacy scan has to cover.
+  local cap=()
+  [ "$n" = deck-review-smoke ] && cap=(--max-artifact-bytes 131072)
+  cowork-harness record "scenarios/$n.yaml" --out "cassettes/$n.cassette.json" "${new_fixture[@]}" "${cap[@]}" \
     || { echo "RECORD FAILED: $n"; return 1; }
 }
 export -f record_one

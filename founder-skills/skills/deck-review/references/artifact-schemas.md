@@ -236,6 +236,7 @@ JSON schemas for all artifacts deposited during the deck review workflow. Each a
 | `by_category` | object | Per-category counts (pass, fail, warn, not_applicable) |
 | `failed_items` | object[] | List of failed items |
 | `warned_items` | object[] | List of warned items |
+| `status_by_id` | object | Each criterion's status, keyed by its ID |
 
 ### Canonical 35 checklist IDs
 

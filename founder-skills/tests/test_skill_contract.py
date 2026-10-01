@@ -1689,7 +1689,9 @@ REFERENCES_CEILING: dict[str, int] = {
     # slide before failing; an unsourced argument is weak, not missing); ask_ties_to_milestones
     # names "no ask at all" as a fail, and several dollar raise scenarios as an ask (warn), which
     # the model otherwise failed consistently under the pass bar's "explicit ask" (+91 B).
-    "deck-review": 51_724,
+    # 51_724 -> 51_795 (+71 B): artifact-schemas.md documents checklist.json's
+    # `summary.status_by_id`, the by-id map a scenario asserts a criterion's verdict through.
+    "deck-review": 51_795,
     # competitive-positioning +474 B: artifact-schemas.md documented the `startup_rank` RENDERING
     # convention but not its SENTINEL. `score_moats.py` stamps {"rank": -1, "total": 0} when the
     # startup is not_applicable on a dimension, and compose_report.py rendered it verbatim —

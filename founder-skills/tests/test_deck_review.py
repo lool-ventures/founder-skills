@@ -6010,3 +6010,66 @@ def test_unsubstantiated_ai_claim_warning_carries_no_internal_token() -> None:
     assert hits, "control: the AI-claim warning must fire for this inventory"
     assert not re.search(r"\b[a-z]+_[a-z_]+\b", hits[0]["message"]), hits[0]["message"]
     assert "ai_claimed_unverified" not in data["report_markdown"]
+
+
+# -- summary.status_by_id: a criterion's status addressable by id --
+#
+# A scenario asserts one criterion's status with `artifact_json`, whose path takes list indices
+# only. `items` is in the grader's order, so the map is what lets a check name a criterion.
+
+
+def test_status_by_id_matches_every_item() -> None:
+    items = _make_checklist_items(
+        overrides={
+            "ask_ties_to_milestones": {"status": "warn", "evidence": "e", "notes": "Tie each amount to a milestone."},
+            "why_now_has_catalyst": {"status": "fail", "evidence": "e", "notes": "Add a why-now slide."},
+        }
+    )
+    data = _run_checklist_items(list(reversed(items)))
+    by_id = data["summary"]["status_by_id"]
+    assert by_id == {i["id"]: i["status"] for i in data["items"]}
+    assert len(by_id) == 35
+    assert by_id["ask_ties_to_milestones"] == "warn"
+    assert by_id["why_now_has_catalyst"] == "fail"
+
+
+def test_status_by_id_reflects_auto_gating(tmp_path: Path) -> None:
+    """Gating rewrites statuses after the first tally; the map must show the gated status."""
+    inv = tmp_path / "deck_inventory.json"
+    inv.write_text(json.dumps({"ai_company_status": "not_ai", "input_format": "text"}))
+    code, out, err = run_script_raw(
+        "checklist.py",
+        ["--run-id", "T8", "--inventory", str(inv)],
+        stdin_data=json.dumps({"items": _make_checklist_items()}),
+    )
+    assert code == 0, err
+    data = json.loads(out)
+    by_id = data["summary"]["status_by_id"]
+    gated = {i["id"] for i in data["items"] if i["status"] == "not_applicable"}
+    assert {"ai_retention_rebased", "mobile_readable"} <= gated
+    assert all(by_id[g] == "not_applicable" for g in gated)
+    assert by_id == {i["id"]: i["status"] for i in data["items"]}
+
+
+def test_status_by_id_reaches_no_founder_surface_or_the_coaching_payload(tmp_path: Path) -> None:
+    """The payload copies named summary keys. Built from a LIVE checklist.py output (the
+    committed fixture predates the key, so a check over it would pass with the key leaking)."""
+    import shutil
+
+    review = tmp_path / "deck-review-acme"
+    shutil.copytree(Path(__file__).parent / "fixtures" / "deck-review", review)
+    fixture = json.loads((review / "checklist.json").read_text())
+    run_id = fixture["metadata"]["run_id"]
+    code, out, err = run_script_raw(
+        "checklist.py", ["--run-id", run_id], stdin_data=json.dumps({"items": fixture["items"]})
+    )
+    assert code == 0, err
+    live = json.loads(out)
+    assert "status_by_id" in live["summary"]
+    (review / "checklist.json").write_text(json.dumps(live))
+    rc, data, stderr = _run_compose(str(review))
+    assert rc == 0, stderr
+    assert data is not None
+    # The quoted key: pytest's tmp dir carries this test's name, and the payload carries that path.
+    assert '"status_by_id"' not in json.dumps(data["coaching_payload"])
+    assert "status_by_id" not in data["report_markdown"].replace(str(tmp_path), "")

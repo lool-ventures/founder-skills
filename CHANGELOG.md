@@ -58,6 +58,13 @@ Contributor-facing only; nothing here changes what a founder installs or runs.
   span.
 - Contributor guidance covers the harness's new `eval` command: when an A/B comparison can answer a
   question here, and when it cannot.
+- A deck review's checklist output carries each criterion's status keyed by its id, so a scenario can
+  check one criterion's verdict. The deck-review recording scenario now has an ask slide with several
+  amounts tied to runway, and checks four verdicts the checklist rules decide: the ask is a warning,
+  a missing why-now or market slide fails, and a quantified problem does not fail. It is recorded with
+  a larger cap on stored file contents, since the checklist output can exceed the default. The
+  financial-model-review scenario checks that the cash and burn stated in its prompt reach the
+  extracted inputs unchanged. Neither runs in CI until those lanes are re-recorded.
 
 ## [0.14.0] - 2026-09-30 — Market sizing built by reference, an outside review for competitive positioning, and an option pool modelled on what its percentage measures
 

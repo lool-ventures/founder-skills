@@ -291,6 +291,9 @@ def _recompute_summary(items: list[dict[str, Any]]) -> dict[str, Any]:
         "by_category": categories,
         "failed_items": failed_items,
         "warned_items": warned_items,
+        # Each criterion's status by id. `items` is in the order the grader wrote it, so a
+        # check that names a criterion (a scenario's artifact_json path) cannot index into it.
+        "status_by_id": {item["id"]: item["status"] for item in items},
     }
 
 

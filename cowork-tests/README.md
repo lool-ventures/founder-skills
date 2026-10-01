@@ -506,8 +506,8 @@ current matrix (8 cap-table cassettes + 5 smokes) doesn't justify the runner cos
 | `market-sizing-smoke` | conversational | resolver path + `report.json`; research-skill (cites sources, §6) |
 | `ic-sim-smoke` | conversational | resolver path + `report.json`; 3 parallel partner dispatches |
 | `competitive-positioning-smoke` | conversational (fixed competitors) | resolver path + `report.json`; 2 STOP gates + parallel ×2 dispatch |
-| `deck-review-smoke` | paste (synthetic deck) | resolver path + `report.json`; staging-in-/tmp fix |
-| `financial-model-review-smoke` | upload (Excel) | resolver path + `report.json`; 2 gates + `--static` review; staging-in-/tmp fix |
+| `deck-review-smoke` | paste (synthetic deck) | resolver path + `report.json`; staging-in-/tmp fix; checklist verdicts on four criteria (`summary.status_by_id`), recorded with a 128 KiB body cap (`rerecord.sh`) |
+| `financial-model-review-smoke` | upload (Excel) | resolver path + `report.json`; 2 gates + `--static` review; staging-in-/tmp fix; founder-stated cash and burn carried into `inputs.json` |
 
 ## Record (local / self-hosted only)
 ```bash
