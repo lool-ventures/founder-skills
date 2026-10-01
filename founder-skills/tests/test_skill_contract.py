@@ -801,7 +801,10 @@ SKILL_MD_CEILING: dict[str, int] = {
     # silently, and compose now discloses REVISION_NOT_OFFERED when no answer was recorded. Step 7 names it.
     # -17 B (103_062 -> 103_045): the Step-A gate example's ARPU is quoted from the deck, not "derived from
     # ARR/customers" in chat, which the Execution checkpoint forbids and a live run copied.
-    "market-sizing": 102_926,
+    # +386 B (102_926 -> 103_312): which deck figure is the one compared when a deck states several
+    # (the market-size slide's, else the first), and that a figure for another date is not a rival
+    # claim -- without it a today/2030 pair told the founder their materials disagree.
+    "market-sizing": 103_312,
     # fmr raised for two founder-facing-correctness items measured in a live run: the CHECKLIST
     # dispatch now forbids citing our artifact filenames in evidence (that run put `inputs.json` in 10
     # items' evidence, printed verbatim into the founder's report), and the producer pipe passes
@@ -1628,7 +1631,9 @@ REFERENCES_CEILING: dict[str, int] = {
     # +157 B (55_263 -> 55_420): the schema row for a founder figure's `label` states the rule SKILL.md does.
     # +99 B (55_420 -> 55_519): the red_team_revision row names the approved change's unrendered `reason`.
     # -184 B (55_519 -> 55_335), LOWERED: the red_team_revision row no longer documents an approval.
-    "market-sizing": 55_312,
+    # +90 B (55_312 -> 55_402): the existing_claims_alternatives row says an alternative is the same
+    # metric AND date, and where a figure for another date goes, as SKILL.md now does.
+    "market-sizing": 55_402,
     # fmr raised to document `graded_against` on the three producer outputs that stamp it — a new
     # artifact field is not discoverable from a schema doc that omits it, and the field exists to make
     # staleness detectable at all (run_id parity cannot see corrections applied within a run).

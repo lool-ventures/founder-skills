@@ -36,6 +36,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   printed under the metric. A SaaS-only metric such as net revenue retention no longer reads as
   though your company is not SaaS when your materials simply do not say how it makes money: it says
   the metric was not assessed, and why.
+- **A market sizing no longer says your deck disagrees with itself when it gives a market's size today
+  and in a future year.** A figure for another date is shown with your other claims rather than
+  reported as a second, conflicting figure. When a deck states two figures for the same market and
+  date, the one on its market-size slide is the one compared, and you are still told about both.
 
 ### Development
 

@@ -363,7 +363,7 @@ carried into this field, the checklist item scores blind to what the deck actual
 
 `existing_claims` is a flat object with lowercase keys `tam`, `sam`, `som` (`null` if not stated); a stated range puts its low end here and its high end in `existing_claims_high`. Custom keys (`SAM_Israel_only`) are ignored and raise `EXISTING_CLAIMS_SHAPE`.
 
-A second figure for the same metric goes in `existing_claims_alternatives` as `{value, slide, label}`; the founder is told both. Other figures outside the flat shape (regional sub-SAMs, dated SOMs) go in `existing_claims_detail` (any structure; shown as narrative, not reconciled).
+When the materials state more than one figure for a metric, `existing_claims` holds the one on the market-size slide (else the first stated). Another figure for the same metric and date goes in `existing_claims_alternatives` as `{value, slide, label}`; the founder is told both. A figure for another date (today's TAM beside a 2030 one) is not a rival: it goes in `existing_claims_detail`, unless it is the metric's only figure, which stays in `existing_claims` (a SOM with its period in `existing_claims_horizon_months`). Other figures outside the flat shape (regional sub-SAMs) go in `existing_claims_detail` too (any structure; shown as narrative, not reconciled).
 
 **Record the period each SOM covers.** `existing_claims_horizon_months.som` = the deck SOM's period in months (a plan-year run-rate is `12`; "by 2028" is months from `analysis_date`); `capture_horizon_months` = the period YOUR `share_pct`/`target_pct` describe (typically `36`/`60`). Differing periods are reported as such, not as a gap — an 18-month plan held against a 5-year figure once read as a 5.6x understatement.
 

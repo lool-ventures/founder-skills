@@ -122,3 +122,18 @@ def test_an_alternative_with_no_stated_figure_is_ignored_and_reported() -> None:
     assert _disagree(data) == []
     shape = [w["message"] for w in data["validation"]["warnings"] if w["code"] == "EXISTING_CLAIMS_SHAPE"]
     assert any("existing_claims_alternatives" in m and "sam" in m for m in shape), shape
+
+
+def test_the_skill_says_which_figure_is_compared_and_that_another_date_is_not_a_rival() -> None:
+    """Without a rule the model chooses which figure is compared, and a today/future pair lands in
+    alternatives and tells the founder their materials disagree when they do not. Pinned in SKILL.md
+    (what the model reads) and in the schema doc (what a reader of inputs.json reads)."""
+    skill = re.sub(r"\s+", " ", (SCRIPTS.parent / "SKILL.md").read_text())
+    schemas = re.sub(r"\s+", " ", (SCRIPTS.parent / "references" / "artifact-schemas.md").read_text())
+    assert "holds the one on the market-size slide (else the first stated)" in skill
+    assert "Another figure for the same metric and date goes in `existing_claims_alternatives`" in skill
+    assert "A figure for another date (today's TAM beside a 2030 one) is not a rival" in skill
+    assert "unless it is the metric's only figure, which stays in `existing_claims`" in skill
+    assert (
+        "other deck figures for the same metric and date (a figure for another date goes in `existing_claims_detail`)"
+    ) in schemas
