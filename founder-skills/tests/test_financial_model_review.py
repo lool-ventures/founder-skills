@@ -8111,12 +8111,15 @@ def test_unit_economics_gm_saas_table_unchanged() -> None:
     assert "KeyBanc" in gm["benchmark_source"]
 
 
-def test_unit_economics_gm_unknown_model_type_falls_back_to_saas() -> None:
-    """An empty/unknown revenue model type keeps the SaaS benchmark, with the assumption disclosed."""
-    gm = _gm_metric(_gm_payload("", 0.72))
-    assert gm["rating"] == "acceptable"
-    assert "KeyBanc" in gm["benchmark_source"]
-    assert "assumed" in gm["evidence"].lower(), f"fallback must disclose the SaaS assumption: {gm['evidence']!r}"
+def test_unit_economics_gm_unknown_model_type_abstains() -> None:
+    """An empty or off-enum revenue model type is not graded on the SaaS table. It used to be, with
+    the assumption disclosed -- grading an unknown business on SaaS margins, worse than abstaining."""
+    for mt in ("", "saas", "industrial-oem"):
+        gm = _gm_metric(_gm_payload(mt, 0.72))
+        assert gm["rating"] == "contextual", (mt, gm)
+        assert "KeyBanc" not in gm["benchmark_source"], (mt, gm)
+        assert "no revenue model we have benchmarks for is stated" in gm["evidence"], (mt, gm["evidence"])
+        assert mt == "" or mt not in gm["evidence"], (mt, gm["evidence"])
 
 
 def test_unit_economics_gm_non_product_basis_contextual() -> None:

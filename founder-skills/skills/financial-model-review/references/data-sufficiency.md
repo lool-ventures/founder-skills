@@ -7,6 +7,7 @@ After extracting available data, count critical fields missing from source mater
 **Model-specific fields:**
 - SaaS / AI-native / usage-based: `mrr`, `growth_rate_monthly`, `cac`
 - Marketplace: `gmv` or `take_rate`, `growth_rate_monthly`
+- Transactional fintech (by `revenue_model_type`; its `sector_type` reads "saas"): `mrr` as the NET revenue run-rate, `growth_rate_monthly`, `cac`
 - Hardware / hardware-subscription: `unit_cost`, `asp`, `growth_rate_monthly`
 - Consumer-subscription: `mrr` or `subscriber_count`, `growth_rate_monthly`, `cac`
 

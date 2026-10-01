@@ -1676,7 +1676,10 @@ REFERENCES_CEILING: dict[str, int] = {
     # an instruction to "describe the model in `agent_supplied`" -- a field that holds dotted paths, so
     # the instruction could not be followed and the two `unclassified` cases were indistinguishable.
     # It names both setters and says to leave the field out when unsure (the report then hedges).
-    "financial-model-review": 75_096,
+    # 75_096 -> 76_405 (+1,309 B): take-rate revenue is recorded net and the basis declared (the burn
+    # multiple is graded only on net revenue); a project OEM is routed to unclassified, not hardware;
+    # a fintech data-sufficiency row; payments clauses in UNIT_14 / METRIC_33 / METRIC_34.
+    "financial-model-review": 76_405,
     # ic-sim +1446 B: evaluation-criteria.md omitted `to_confirm` from the status table AND from the
     # scoring formula, which excluded only not_applicable. Following it changed the conviction
     # score, since score_dimensions.py excludes both. The >6 coverage cap was undocumented too.

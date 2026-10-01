@@ -129,7 +129,7 @@ Thresholds: **strong** >= 85%, **solid** >= 70%, **needs_work** >= 50%, **major_
 ### `UNIT_14`
 **Label:** COGS/margin matches model type
 **Stage:** all | **Geography:** all | **Sector:** all | **Model format:** all
-**Pass:** SaaS: hosting/support; AI: inference; hardware: BOM.
+**Pass:** SaaS: hosting/support; AI: inference; hardware: BOM; payments: interchange, network and processor fees, fraud and chargeback losses.
 **Warn:** Margin assumed flat without basis.
 **Fail:** Gross margin improves magically.
 
@@ -270,14 +270,14 @@ Thresholds: **strong** >= 85%, **solid** >= 70%, **needs_work** >= 50%, **major_
 ### `METRIC_33`
 **Label:** KPI summary visible
 **Stage:** all | **Geography:** all | **Sector:** all | **Model format:** all
-**Pass:** ARR/MRR, burn, runway, GM, retention, CAC/payback on summary.
+**Pass:** ARR/MRR, burn, runway, GM, retention, CAC/payback on summary. For transaction revenue, net revenue and volume (TPV) in place of ARR.
 **Warn:** KPIs scattered.
 **Fail:** No KPI view.
 
 ### `METRIC_34`
 **Label:** Burn multiple tracked
 **Stage:** seed+ | **Geography:** all | **Sector:** all | **Model format:** all
-**Pass:** Computed correctly (Net Burn / Net New ARR); improving.
+**Pass:** Computed correctly (Net Burn / Net New ARR); improving. For transaction revenue, on net revenue: when revenue is booked gross or its basis is unknown, warn at most and say why, never pass or fail on the 3x bar.
 **Net New ARR is `mrr × growth_rate_monthly × 12`. Do NOT re-derive it by subtracting churn** —
 `growth_rate_monthly` is already net of churn (see schema-inputs.md), so subtracting a churn figure
 double-counts it. **Read the burn multiple off `unit_economics.json` rather than recomputing it** —

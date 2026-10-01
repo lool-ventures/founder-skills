@@ -39,6 +39,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   printed under the metric. A SaaS-only metric such as net revenue retention no longer reads as
   though your company is not SaaS when your materials simply do not say how it makes money: it says
   the metric was not assessed, and why.
+- **A financial model review no longer grades a business on benchmarks built for subscription
+  software when it is not one.**
+  - **Payments and marketplace businesses:** the burn multiple is graded only when revenue is
+    recorded net of what passes through to others. Gross transaction volume makes the ratio look
+    better than it is, so until the model says revenue is net, the figure is shown without a grade
+    and the review says why. CAC payback and CAC are shown without a grade, because their benchmarks
+    are set for software contract sizes.
+  - **A business whose revenue model fits none we benchmark** (a large-system or project manufacturer,
+    for example) is no longer graded on the software burn-multiple or payback bars either, and is not
+    put on the hardware gross-margin bar, which would mark a healthy project margin as a failure.
+  - **A review whose revenue model is missing or not recognised** no longer has its gross margin
+    graded on the software table. It is shown without a grade and the review says why.
+  - The interactive explorer no longer re-grades a figure the review left ungraded.
 - **A market sizing is now told not to treat a market's size today and in a future year as two
   conflicting figures.** The figure for the year the sizing describes is the one compared; the other
   is shown with your deck's other claims. When a deck states two figures for the same market and

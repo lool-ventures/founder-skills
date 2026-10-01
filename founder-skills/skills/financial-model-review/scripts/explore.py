@@ -262,7 +262,11 @@ def _build_metrics(inputs: dict[str, Any], ue_data: dict[str, Any]) -> list[dict
         # (why no benchmark applies, e.g. no revenue model stated). report.html does NOT render metric
         # evidence today, only the rating. Thread the reason through; the explorer renders it where
         # the bar would be.
-        if name == "gross_margin" and m.get("rating") == "contextual" and not m.get("benchmark_reference_rating"):
+        if (
+            name in ("gross_margin", "burn_multiple", "cac_payback")
+            and m.get("rating") == "contextual"
+            and not m.get("benchmark_reference_rating")
+        ):
             _ev = str(m.get("evidence") or "")
             metric["contextual_note"] = _ev.split("; ", 1)[1] if "; " in _ev else _ev
 
@@ -394,6 +398,15 @@ def _build_data_payload(
         benchmarks.pop("gross_margin", None)
     else:
         benchmarks["gross_margin"] = gm_bench
+    # A metric the review rated contextual with no reference grade has no bar: the client-side
+    # what-if re-rating must not grade it against the stage bar (a contextual badge beside "2.0x").
+    for _m in metrics:
+        if (
+            _m.get("id") in ("burn_multiple", "cac_payback")
+            and _m.get("rating") == "contextual"
+            and not _m.get("benchmark_reference_rating")
+        ):
+            benchmarks.pop(_m["id"], None)
     benchmarks["cac_payback_by_acv"] = dict(CAC_PAYBACK_BY_ACV)
 
     # Bridge

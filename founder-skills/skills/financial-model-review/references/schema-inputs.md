@@ -110,6 +110,16 @@ prefer a NON-SaaS type that fits; otherwise use `unclassified` and set `unclassi
 the report then hedges. Telling a founder whose stated model fits no type to "state how the
 company makes money" is false.
 
+**A large-system or project OEM (buildings, vessels, industrial lines) is `unclassified` with
+`unclassified_reason: no_fitting_type`, not `hardware`.** The hardware gross-margin bar is for
+devices; it grades a healthy 15-25% project margin as a warning or a failure.
+
+**Transactional fintech and marketplaces: record revenue NET.** Revenue is the take (fees, take rate
+times volume) after what passes through to others, not the volume itself; set
+`unit_economics.gross_margin_basis` to `"net_revenue"`, or to `"gross_revenue"` when the model books
+the whole transaction. For these two types the field declares the REVENUE basis: the burn multiple is
+graded only on net revenue, because gross volume inflates it.
+
 **Choosing `data_confidence` for conversational input.** A figure the founder stated from memory in chat is
 `estimated`, not `exact`. Reserve `exact` for a value read off a document — a spreadsheet cell, a bank
 statement, a deck slide. If some figures came from a document and some from conversation, that is what
@@ -251,7 +261,7 @@ appear in the Step 3.6 Path B confirmation table before math runs on it. Current
 | `ltv` | object | no | Lifetime value |
 | `payback_months` | number | no | CAC payback period in months |
 | `gross_margin` | number | no | Gross margin (decimal) |
-| `gross_margin_basis` | string | no | What the `gross_margin` figure measures. One of: `"product"` (revenue minus cost of goods/service delivery — the default assumption), `"store_contribution"` (store/restaurant-level margin after location labor and occupancy), `"net_revenue"`, `"gross_revenue"`, `"blended"`. Benchmarks assume `product`; any other declared basis rates `contextual` because it is not comparable to the product-GM tables. Set this for store/franchise rollouts so a store-level margin is not judged against a merchandise-margin bar. |
+| `gross_margin_basis` | string | no | What the `gross_margin` figure measures. One of: `"product"` (revenue minus cost of goods/service delivery — the default assumption), `"store_contribution"` (store/restaurant-level margin after location labor and occupancy), `"net_revenue"`, `"gross_revenue"`, `"blended"`. Benchmarks assume `product`; any other declared basis rates `contextual` because it is not comparable to the product-GM tables. Set this for store/franchise rollouts so a store-level margin is not judged against a merchandise-margin bar. For `transactional-fintech` and `marketplace` it also declares the revenue basis: the burn multiple is graded only when it is `"net_revenue"`. |
 | `burn_multiple` | number | no | Optional; used as fallback when computation inputs (`monthly_net_burn`, `mrr`, `growth_rate_monthly`) are missing. When present alongside compute inputs, the computed value takes precedence |
 
 #### ARR Floor Behavior (currency-aware)
