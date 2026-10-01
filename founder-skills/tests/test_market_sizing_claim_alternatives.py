@@ -130,7 +130,8 @@ def test_the_skill_says_which_figure_is_compared_and_that_another_date_is_not_a_
     (what the model reads) and in the schema doc (what a reader of inputs.json reads)."""
     skill = re.sub(r"\s+", " ", (SCRIPTS.parent / "SKILL.md").read_text())
     schemas = re.sub(r"\s+", " ", (SCRIPTS.parent / "references" / "artifact-schemas.md").read_text())
-    assert "holds the one on the market-size slide (else the first stated)" in skill
+    assert "holds the one dated to the year your sizing describes" in skill
+    assert "and among those the one on the market-size slide (else the first stated)" in skill
     assert "Another figure for the same metric and date goes in `existing_claims_alternatives`" in skill
     assert "A figure for another date (today's TAM beside a 2030 one) is not a rival" in skill
     assert "unless it is the metric's only figure, which stays in `existing_claims`" in skill

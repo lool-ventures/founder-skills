@@ -804,7 +804,9 @@ SKILL_MD_CEILING: dict[str, int] = {
     # +386 B (102_926 -> 103_312): which deck figure is the one compared when a deck states several
     # (the market-size slide's, else the first), and that a figure for another date is not a rival
     # claim -- without it a today/2030 pair told the founder their materials disagree.
-    "market-sizing": 103_312,
+    # +111 B (103_312 -> 103_423): the compared figure is first the one dated to the sizing's year, so a
+    # market slide headlining a future TAM is not compared against a current-year sizing.
+    "market-sizing": 103_423,
     # fmr raised for two founder-facing-correctness items measured in a live run: the CHECKLIST
     # dispatch now forbids citing our artifact filenames in evidence (that run put `inputs.json` in 10
     # items' evidence, printed verbatim into the founder's report), and the producer pipe passes

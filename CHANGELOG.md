@@ -36,10 +36,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   printed under the metric. A SaaS-only metric such as net revenue retention no longer reads as
   though your company is not SaaS when your materials simply do not say how it makes money: it says
   the metric was not assessed, and why.
-- **A market sizing no longer says your deck disagrees with itself when it gives a market's size today
-  and in a future year.** A figure for another date is shown with your other claims rather than
-  reported as a second, conflicting figure. When a deck states two figures for the same market and
-  date, the one on its market-size slide is the one compared, and you are still told about both.
+- **A market sizing is now told not to treat a market's size today and in a future year as two
+  conflicting figures.** The figure for the year the sizing describes is the one compared; the other
+  is shown with your deck's other claims. When a deck states two figures for the same market and
+  year, the one on its market-size slide is compared, and you are still told about both.
 
 ### Development
 
@@ -63,10 +63,11 @@ Contributor-facing only; nothing here changes what a founder installs or runs.
 - Contributor guidance covers the harness's new `eval` command: when an A/B comparison can answer a
   question here, and when it cannot.
 - A deck review's checklist output carries each criterion's status keyed by its id, so a scenario can
-  check one criterion's verdict. The deck-review recording scenario now has an ask slide with several
-  amounts tied to runway, and checks four verdicts the checklist rules decide: the ask is a warning,
-  a missing why-now or market slide fails, and a quantified problem does not fail. It is recorded with
-  a larger cap on stored file contents, since the checklist output can exceed the default. The
+  check one criterion's verdict (the field is not shown to founders). The deck-review recording
+  scenario now has an ask slide with several amounts tied to runway, and checks four verdicts: the ask
+  is a warning, a missing why-now or market slide fails, and a quantified problem does not fail. It is
+  recorded with a larger cap on stored file contents, since the checklist output comes close to the
+  default. The
   financial-model-review scenario checks that the cash and burn stated in its prompt reach the
   extracted inputs unchanged. Neither runs in CI until those lanes are re-recorded.
 
