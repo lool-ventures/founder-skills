@@ -132,18 +132,22 @@ def test_frontmatter_listing_budget(skill_md: Path) -> None:
     )
 
 
-def test_total_listing_budget_under_default_floor() -> None:
-    """Sum of all skills' description+when_to_use must stay under the 8,000-char fallback.
+def test_total_listing_budget_under_the_cap() -> None:
+    """Sum of all skills' description+when_to_use must stay under a 6,000-char cap.
 
-    Two independent caps apply:
-      - per-skill: 1,536 chars (gist authority, enforced above)
-      - total: 1% of context window (dynamic) or 8,000 chars (fallback floor)
+    Two separate limits apply:
+      - per-skill: 1,536 chars (the default per-entry cap, enforced above)
+      - total: a listing budget every installed skill shares, sized as
+        context window x chars per token (~3; 4 on Haiku 4.5) x 1% -- about
+        6,000 chars at a 200K window, about 30,000 at 1M, 8,000 on Haiku 4.5.
+        On overflow, skills drop to name-only one at a time, least recently
+        used first. (Reported by skill-creator-plus, checked against CLI
+        2.1.280; not measured here.)
 
-    These are independent ceilings, not additive. With 5 skills × per-skill
-    1,536 = 7,680 chars worst case (still under the 8,000 floor by 320), but
-    that leaves no headroom for bundled/built-in skills that share the same
-    budget. We hold ourselves to a 6,000-char soft cap on the total to leave
-    headroom and stay well above the 20-char-per-skill collapse threshold.
+    6,000 is the smallest of those budgets for a current model, and our
+    skills share it with every other installed skill, so we hold our own
+    total to it. A skill that loses the overflow keeps only its name, and the
+    one most likely to lose is the one the founder has not used lately.
 
     If the total ever creeps near 6,000, trim description/when_to_use; do
     not raise the cap.
@@ -161,7 +165,7 @@ def test_total_listing_budget_under_default_floor() -> None:
     assert total <= soft_cap, (
         f"Total listing budget across {len(_skill_md_files())} skills is "
         f"{total} chars, exceeds {soft_cap}-char soft cap "
-        f"(8,000 absolute fallback). Trim description/when_to_use:\n" + "\n".join(breakdown)
+        f"(the listing budget at a 200K window). Trim description/when_to_use:\n" + "\n".join(breakdown)
     )
 
 
@@ -806,7 +810,12 @@ SKILL_MD_CEILING: dict[str, int] = {
     # claim -- without it a today/2030 pair told the founder their materials disagree.
     # +111 B (103_312 -> 103_423): the compared figure is first the one dated to the sizing's year, so a
     # market slide headlining a future TAM is not compared against a current-year sizing.
-    "market-sizing": 103_423,
+    # 103_423 -> 103_493 (+70 B), and the same +70 B in ic-sim, financial-model-review and
+    # competitive-positioning: Step 0's fallback search for earlier artifacts names its folder (`path` =
+    # the printed ARTIFACTS_ROOT). Without it a cloud session searches from the home directory. The
+    # pattern is also corrected to the file founder_context.py writes (founder-context-<slug>.json).
+    # Guarded by test_every_instructed_file_search_names_its_folder.
+    "market-sizing": 103_493,
     # fmr raised for two founder-facing-correctness items measured in a live run: the CHECKLIST
     # dispatch now forbids citing our artifact filenames in evidence (that run put `inputs.json` in 10
     # items' evidence, printed verbatim into the founder's report), and the producer pipe passes
@@ -886,7 +895,8 @@ SKILL_MD_CEILING: dict[str, int] = {
     # the CHECKLIST template tells the grader to grade against their figures -- planning-number runway,
     # a reference grade where one exists, warn (never not_applicable) on a deliberately withheld metric,
     # and that our figures show a figure is computable, never that the model shows it.
-    "financial-model-review": 85_012,
+    # 85_012 -> 85_082 (+70 B): the Step 0 search names its folder; see market-sizing above.
+    "financial-model-review": 85_082,
     # ic-sim SHRANK: the REQUIRED ic-dynamics.md read at Step 7 is deleted. Step 7 is a pure producer
     # pipe — compose_discussion.py derives discussion.json from the partners' own files and nothing
     # is authored by the main thread — so the read informed no decision while pulling a whole
@@ -930,7 +940,8 @@ SKILL_MD_CEILING: dict[str, int] = {
     # of the file-tool path of outputs (probe + --set-host-outputs-dir), the hand-off protocol gains
     # the `write_refused` branch (both contexts), and the degrade rule tells the founder instead of
     # noting it. The procedure itself lives once in skill-execution-model.md.
-    "ic-sim": 93_281,
+    # 93_281 -> 93_351 (+70 B): the Step 0 search names its folder; see market-sizing above.
+    "ic-sim": 93_351,
     # deck-review +1,165 B: Step 0 carried only a parenthetical fresh-shell mention buried in a code
     # comment, unlike the four skills that mint RUN_ID in a LATER block and so carry the shared banner.
     # deck-review mints RUN_ID INSIDE this re-runnable Step-0 block (like cap-table), so the shared
@@ -1332,7 +1343,8 @@ SKILL_MD_CEILING: dict[str, int] = {
     # nested as x_axis.polarity / y_axis.polarity -- a live run guessed the first and misplaced the second.
     # +104 B (competitive-positioning): Step 8's closer names both HTML pages -- the maps and the
     # interactive explorer -- where one "the interactive version" line could hand over only one of them.
-    "competitive-positioning": 126_099,
+    # 126_099 -> 126_169 (+70 B): the Step 0 search names its folder; see market-sizing above.
+    "competitive-positioning": 126_169,
     # cap-table, the largest raise (+2,383 B) and the one with the most founder-visible payoff:
     #   * Main-Thread Return named THREE of the four files Step 12 copies; a live run delivered exactly
     #     three and dropped `{Company}_Cap_Table.html`. All four are now named explicitly.
@@ -3748,3 +3760,48 @@ def test_the_printed_hand_over_names_each_html_page(skill: str) -> None:
     pages = set(re.findall(r'-o "\$[A-Z_]+/([a-z_]+\.html)"', text))
     html_entries = [p for _, p in pairs if ".html" in p]
     assert pages and len(html_entries) == len(pages), (pages, pairs)
+
+
+# --- a file search the skill instructs names the folder it searches -----------------------------------
+# `Glob` and `Grep` with no `path` search the session's working folder. On a cloud session that folder is
+# the home directory, so a pathless or `**/`-prefixed search walks everything under it. Every search a
+# skill body, agent body or reference file tells the model to run must name its folder with the tool's
+# `path` parameter. Prohibitions ("Do not Glob for it") and tool rosters ("Read/Write/Glob/Grep") are
+# not instructions and are not matched.
+
+_SEARCH_INSTRUCTION = re.compile(
+    r"(?<![Nn]ot )(?<!NOT )\b(?:[Uu]se|[Rr]un|[Cc]all)\s+`?(?:Glob|Grep)\b`?|`(?:Glob|Grep)`\s+(?:with|for)\b"
+)
+
+
+def _instruction_surfaces() -> list[Path]:
+    plugin = REPO_ROOT / "founder-skills"
+    return sorted(
+        [*_skill_md_files(), *(plugin / "agents").glob("*.md"), *SKILLS_ROOT.glob("*/references/**/*.md")]
+        + sorted((plugin / "references").glob("**/*.md"))
+    )
+
+
+def _pathless_search_instructions() -> list[str]:
+    hits: list[str] = []
+    for path in _instruction_surfaces():
+        for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if _SEARCH_INSTRUCTION.search(line) and "`path`" not in line:
+                hits.append(f"{path.relative_to(REPO_ROOT)}:{n}: {line.strip()[:160]}")
+    return hits
+
+
+def test_every_instructed_file_search_names_its_folder() -> None:
+    hits = _pathless_search_instructions()
+    assert not hits, "a Glob/Grep instruction with no `path` parameter:\n" + "\n".join(hits)
+
+
+def test_the_search_instruction_matcher_sees_both_forms() -> None:
+    """Positive and negative controls, so the test above cannot pass by matching nothing."""
+    assert _SEARCH_INSTRUCTION.search("Use `Glob` with pattern `x` to locate it")
+    assert _SEARCH_INSTRUCTION.search("Use Grep to find the row")
+    assert not _SEARCH_INSTRUCTION.search("Do not Glob for it, do not guess a different prefix")
+    assert not _SEARCH_INSTRUCTION.search("Do NOT Glob for the file")
+    assert not _SEARCH_INSTRUCTION.search('tools: ["Read", "Write", "Glob", "Grep"]')
+    assert not _SEARCH_INSTRUCTION.search("Read/Write/Glob/Grep only")
+    assert len(_instruction_surfaces()) > 20

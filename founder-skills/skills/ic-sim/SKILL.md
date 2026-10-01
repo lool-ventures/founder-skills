@@ -167,7 +167,7 @@ Reaching the self-heal branch is normal in Cowork — `${CLAUDE_PLUGIN_ROOT}` re
 
 **Outputs mount is append-only.** Everything under the promoted outputs mount (`.../mnt/outputs/`, not just `$SIM_DIR`) is write-allowed and delete-denied by the platform: never `rm`, move away, or empty anything under it — **including files you created yourself**. Never create ad-hoc scratch anywhere under the outputs mount (no `_src/` copies, no run-state note files); scratch belongs in `$STAGING_DIR` (a `/tmp` dir, defined below). Do not "clean up" the outputs folder before delivering — extra working files there are expected and harmless.
 
-**If `ARTIFACTS_ROOT` resolves to `$(pwd)/artifacts` but no `artifacts/` directory exists at `$(pwd)`:** Use `Glob` with pattern `**/artifacts/founder_context.json` to locate existing artifacts, and derive `ARTIFACTS_ROOT` from the result. If nothing is found, `mkdir -p "$ARTIFACTS_ROOT"` and proceed.
+**If `ARTIFACTS_ROOT` resolves to `$(pwd)/artifacts` but no `artifacts/` directory exists at `$(pwd)`:** Use `Glob` with `path` set to the printed `ARTIFACTS_ROOT` and pattern `founder-context-*.json` to find earlier artifacts (always pass `path`: on a cloud session the working folder is the home directory). If nothing is found, `mkdir -p "$ARTIFACTS_ROOT"` and proceed.
 
 **There is no quick-check lane here, and that is deliberate.** The verdict is the product of three partner analyses plus 28 scored dimensions; any subset fast enough to be a "quick check" would produce a verdict from a fraction of the evidence, and there is no honest way to label that. So when the founder asks a small
 conversational question, do not improvise an answer from your own reasoning under this skill's name —
