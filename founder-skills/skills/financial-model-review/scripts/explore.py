@@ -1733,7 +1733,7 @@ var metricFmt = {{
   cac: fmtCurrency, ltv: fmtCurrency, ltv_cac_ratio: fmtRatio,
   cac_payback: fmtMonths, gross_margin: function(v) {{ return fmtPct(v, 0); }},
   burn_multiple: fmtRatio, rule_of_40: function(v) {{ return v !== null ? v.toFixed(0) : 'N/A'; }},
-  magic_number: fmtRatio, nrr: fmtRatio,
+  magic_number: fmtRatio, nrr: function(v) {{ return fmtPct(v, 0); }},
   grr: function(v) {{ return fmtPct(v, 0); }}, arr_per_fte: fmtCurrency
 }};
 

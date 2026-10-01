@@ -151,10 +151,8 @@ def _resolve_currency(*artifacts: dict[str, Any] | None) -> str:
 
 
 def _fmt_pct(value: float | int) -> str:
-    """Format a value as a percentage string."""
-    if isinstance(value, float) and value <= 1.0:
-        return f"{value * 100:.0f}%"
-    return f"{value:.0f}%"
+    """Format a fraction (0.75, or 1.05 for retention above 100%) as a percentage string."""
+    return f"{value * 100:.0f}%"
 
 
 _RISK_LEVEL_PREFIXES: tuple[tuple[str, str], ...] = (
@@ -652,7 +650,7 @@ _RATING_LABELS: dict[str, str] = {
 def _format_metric_value(name: str, value: float, currency_code: str = "USD") -> str:
     """Format a metric value appropriately based on its type."""
     pct_metrics = {"gross_margin", "nrr", "grr"}
-    if name in pct_metrics and 0 < value <= 2.0:
+    if name in pct_metrics:
         return _fmt_pct(value)
     if name == "cac_payback":
         return f"{value:,.0f} mo"

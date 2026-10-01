@@ -222,10 +222,9 @@ def _fmt_usd(value: float | int, currency_code: str = "USD") -> str:
 
 
 def _fmt_pct(value: float | int) -> str:
-    """Format a value as a percentage string."""
-    if isinstance(value, float) and value <= 1.0:
-        return f"{value * 100:.1f}%"
-    return f"{value}%"
+    """Format a fraction (0.75, or 1.05 for retention above 100%) as a percentage string."""
+    text = f"{value * 100:.1f}"
+    return (text[:-2] if text.endswith(".0") else text) + "%"
 
 
 def _resolve_currency(*artifacts: dict[str, Any] | None) -> str:
@@ -1293,7 +1292,7 @@ def _section_unit_economics(unit_economics: dict[str, Any] | None) -> str:
 
         if val is None:
             val_str = "N/A"
-        elif isinstance(val, float) and val <= 1.0 and m.get("name") in ("gross_margin", "nrr", "grr"):
+        elif isinstance(val, (int, float)) and m.get("name") in ("gross_margin", "nrr", "grr"):
             val_str = _fmt_pct(val)
         elif isinstance(val, (int, float)) and m.get("name") in ("cac", "ltv"):
             val_str = _fmt_usd(val, currency_code)
