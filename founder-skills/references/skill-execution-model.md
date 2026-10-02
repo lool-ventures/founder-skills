@@ -439,12 +439,12 @@ internally — pass the final message verbatim.
   `--agent` root), which the sub-agent's host-native Read reaches. Only content OUTSIDE the outputs tree (uploads, raw document
   text) has no path form the sub-agent can reach — inline those bytes into the
   dispatch prompt. References are the third case: the literal
-  `${CLAUDE_PLUGIN_ROOT}/…` token (pre-resolved to a host-readable plugin path).
+  `${CLAUDE_PLUGIN_ROOT}/…` token (filled by the loader, or Step 0's `READ_ROOT=`).
   See the three-way rule in the Context A invariant above.
 - **`${CLAUDE_PLUGIN_ROOT}` is unset in VM bash, on EVERY tier — and the
-  plugin's mount path is not one fixed shape.** The token is substituted into
-  the skill body's TEXT when the definition loads, so a host-side `Read` of it
-  resolves; a VM `bash` step never inherits it, and a hardcoded expansion of it
+  plugin's mount path is not one fixed shape.** Where the loader fills the
+  token into the skill body's TEXT, a host-side `Read` of it resolves;
+  a VM `bash` step never inherits it, and a hardcoded expansion of it
   is a path the VM cannot see. The plugin's files ARE in the VM, bind-mounted
   under the session — but the mount path depends on how the plugin was
   installed:
@@ -456,7 +456,7 @@ internally — pass the final message verbatim.
   is what the `find /sessions/*/mnt/.*-plugins …` self-heal in Step 0 is for.
   Finding the plugin at `.remote-plugins/plugin_<id>` does NOT mean the "leave
   reference paths literal" instruction is wrong — that instruction governs the
-  sub-agent's host-side `Read`, which is correct on every tier. Conflating the two
+  sub-agent's host-side `Read`, correct wherever the token is filled. Conflating the two
   namespaces is the trap. Keep them separate: **host-side `Read` → use the token;
   VM `bash` → discover the mount.**
 - **Main-thread reference reads use the `${CLAUDE_PLUGIN_ROOT}` token with

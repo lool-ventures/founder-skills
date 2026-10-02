@@ -33,7 +33,8 @@ VERSION = json.loads((PLUGIN / ".claude-plugin" / "plugin.json").read_text())["v
 
 # The fallback sentence every sub-agent prompt that carries a bundled reference path must hold.
 SUBAGENT_FALLBACK = (
-    "If a reference path below is refused, read the same file under the plugin folder your own instructions name."
+    "If a reference path below cannot be read (refused or not found), read the same file under the plugin folder "
+    "your own instructions name."
 )
 
 
@@ -74,9 +75,10 @@ def _redirected(block: str) -> str:
     return block
 
 
-def _plugin_copy(root: Path, *, name: str = "founder-skills", version: str = VERSION) -> Path:
+def _plugin_copy(root: Path, *, name: str = "founder-skills", version: str = VERSION, manifest: bool = True) -> Path:
     (root / ".claude-plugin").mkdir(parents=True)
-    (root / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": name, "version": version}))
+    if manifest:
+        (root / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": name, "version": version}))
     (root / "scripts").mkdir()
     for f in (PLUGIN / "scripts").glob("*.py"):
         shutil.copy(f, root / "scripts" / f.name)
@@ -241,9 +243,43 @@ def test_another_plugin_where_ours_is_expected_does_not_end_the_search(skill: st
 
 @pytest.mark.parametrize("skill", SKILLS)
 def test_an_older_copy_outside_the_plugins_folder_is_never_reached(skill: str, tmp_path: Path) -> None:
+    """The plugins folder is searched before `/`. Which copy wins can depend on directory order, so the
+    proof is that the selector never saw the older copy at all: it names every copy it rejects."""
     fake = _fake(tmp_path)
     _plugin_copy(fake / "aaa-old-founder-skills", version="0.0.1")
     root = _synced(fake)
+    values, out, proc = _run(skill, fake, None)
+    _assert_literal(values, out, root)
+    assert "aaa-old" not in proc.stderr, f"the search reached past the plugins folder:\n{proc.stderr}"
+
+
+@pytest.mark.parametrize("skill", SKILLS)
+def test_another_plugin_in_the_session_mounts_does_not_end_the_search(skill: str, tmp_path: Path) -> None:
+    """A lookalike under /sessions is dropped before that step is judged empty, so the plugins folder is
+    still searched and the selector never sees the lookalike."""
+    fake = _fake(tmp_path)
+    _plugin_copy(fake / "sessions" / "x" / "mnt" / ".remote-plugins" / "plugin_9", name="other-plugin")
+    root = _synced(fake)
+    values, out, proc = _run(skill, fake, None)
+    _assert_literal(values, out, root)
+    assert "plugin_9" not in proc.stderr, proc.stderr
+
+
+@pytest.mark.parametrize("skill", SKILLS)
+def test_a_session_mount_without_a_manifest_is_kept(skill: str, tmp_path: Path) -> None:
+    """Only a readable manifest naming ANOTHER plugin drops a candidate. A mount with no manifest is kept,
+    as the selector keeps it: dropping it leaves a working mount unused and stops the run."""
+    fake = _fake(tmp_path)
+    mount = _plugin_copy(fake / "sessions" / "x" / "mnt" / ".remote-plugins" / "plugin_1", manifest=False)
+    values, out, _ = _run(skill, fake, "/nonexistent-host/claude-hostloop-plugins/h1/plugin_1")
+    _assert_filled(values, out, "local", mount)
+
+
+@pytest.mark.parametrize("skill", SKILLS)
+def test_unfilled_text_keeps_a_copy_without_a_manifest(skill: str, tmp_path: Path) -> None:
+    fake = _fake(tmp_path)
+    root = _plugin_copy(fake / "root" / ".claude" / "plugins" / "synced" / "o_a" / "founder-skills", manifest=False)
+    _plugin_copy(fake / "aa-other-plugin", name="other-plugin")
     values, out, _ = _run(skill, fake, None)
     _assert_literal(values, out, root)
 
@@ -307,12 +343,14 @@ STEP0_LINES = (
     """  ours() { python3 -c 'import json, sys
 for c in sys.stdin.read().splitlines():
     try: n = json.load(open(c.rsplit("/skills/", 1)[0] + "/.claude-plugin/plugin.json"))["name"]
-    except Exception: n = ""
+    except Exception: n = "founder-skills"
     if n == "founder-skills": print(c)'; }""",
     "  CANDIDATES=\"$(find /sessions -type d -path '*/skills/{skill}/scripts' 2>/dev/null | ours)\"\n"
     '  [ -n "$CANDIDATES" ] || '
     "CANDIDATES=\"$(find /root/.claude/plugins -type d -path '*/skills/{skill}/scripts' 2>/dev/null | ours)\"\n"
     '  [ -n "$CANDIDATES" ] || CANDIDATES="$(find / -type d -path \'*/skills/{skill}/scripts\' 2>/dev/null | ours)"\n',
+    'echo "PLUGIN_ROOT=$PLUGIN_ROOT"   # resolved ONCE, here — paste this literal into every later block; '
+    "never re-run this resolution. PLUGIN_ROOT is for shell commands; never Read from it.\n",
     """[ -f "$SHARED_SCRIPTS/check_handoff.py" ] && case "$TEXT_ROOT_RAW" in
   *'$'*|'') echo "PATH_STATE=literal"; echo "READ_ROOT=$PLUGIN_ROOT" ;;
   /sessions/*) echo "PATH_STATE=local" ;;
@@ -322,14 +360,16 @@ esac
 )
 
 STEP0_PROSE = (
-    "**Plugin paths.** If this run's Step 0 printed `READ_ROOT=`, this skill's text arrived with its "
-    "plugin folder unfilled: write that printed value wherever this skill shows `${CLAUDE_PLUGIN_ROOT}` "
-    "in a Read, a sub-agent prompt or a `--plugin-root-agent` argument, including where a later step "
-    "says to leave that path literal. Otherwise use those paths exactly as shown. Step 0 finds the "
-    "folder by searching the filesystem only; never recover it by reading a SKILL.md or the "
-    '"Base directory" line. **Say nothing about this step to the founder, including the version you '
-    "read and the paths it printed.**"
+    "**Plugin paths.** If Step 0 printed `READ_ROOT=`, this skill's text arrived without its plugin folder "
+    "filled in. Use that value in place of `${CLAUDE_PLUGIN_ROOT}` in every Read, sub-agent prompt and "
+    "`--plugin-root-agent` argument, including where a later step says to leave that path literal. If it did "
+    "not print `READ_ROOT=`, use the paths as shown. The folder comes from Step 0's filesystem search, not from "
+    'a skill file or the "Base directory" line, which can name a folder that does not exist. These are setup '
+    "details: updates to the founder are about their company, not file locations, printed paths or plugin versions."
 )
+
+# Said before the fence: a block whose token was hand-filled before it ran cannot tell the two lanes apart.
+STEP0_RUN_AS_SHOWN = "Run the block below with `${CLAUDE_PLUGIN_ROOT}` exactly as it appears.\n\n```bash\n"
 
 
 @pytest.mark.parametrize("skill", SKILLS)
@@ -340,6 +380,7 @@ def test_step0_bootstrap_lines_are_fleet_identical(skill: str) -> None:
         assert expected in fence, f"{skill}: Step 0 lost or changed:\n{expected}"
     section = _step0_section(skill)
     assert STEP0_PROSE in section, f"{skill}: Step 0 lost the plugin-paths paragraph"
+    assert STEP0_RUN_AS_SHOWN in section, f"{skill}: Step 0 no longer says to run the block as it appears"
     assert "self-heal branch is normal" not in section, f"{skill}: the stale self-heal note is back"
     assert "Skip it if that path still begins with `$`." in section, f"{skill}: best-effort Read lacks its skip"
 
@@ -432,6 +473,28 @@ def test_every_prompt_with_a_reference_path_names_the_fallback() -> None:
         assert SUBAGENT_FALLBACK in body, f"{src} {name} hands over a reference path with no fallback"
         first_path = min(i for i in (body.find("<PLUGIN_ROOT_AGENT>"), body.find(TOKEN)) if i >= 0)
         assert body.index(SUBAGENT_FALLBACK) < first_path, f"{src} {name}: the fallback must precede the paths"
+
+
+@pytest.mark.parametrize("skill", SKILLS)
+def test_reference_read_directives_name_an_absolute_path(skill: str) -> None:
+    """A bare relative path is refused by the Read tool, and the "Base directory" line it would be resolved
+    against can name a folder that does not exist. Every instruction to read a bundled reference names the
+    file under the plugin token, which Step 0's READ_ROOT= replaces when the text arrived unfilled."""
+    text = (PLUGIN / "skills" / skill / "SKILL.md").read_text(encoding="utf-8")
+    bare = re.findall(r"(?i)\bread (?:it )?`references/[^`]*`", text)
+    assert not bare, f"{skill}: a Read directive names a relative reference path: {bare}"
+
+
+def test_known_reference_read_directives_use_the_token() -> None:
+    """Positive control for the scan above: the directives it once caught now carry the token."""
+    for skill, ref in (
+        ("deck-review", "deck-best-practices.md"),
+        ("deck-review", "schemas/reconciliation.schema.json"),
+        ("market-sizing", "tam-sam-som-methodology.md"),
+        ("cap-table", "inputs-skeleton.md"),
+    ):
+        text = (PLUGIN / "skills" / skill / "SKILL.md").read_text(encoding="utf-8")
+        assert f"`{TOKEN}/skills/{skill}/references/{ref}`" in text, (skill, ref)
 
 
 def test_cap_table_lane_references_are_read_by_an_absolute_path() -> None:

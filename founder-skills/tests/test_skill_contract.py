@@ -874,7 +874,11 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 103,493 -> 104,745 on 2026-10-02: Step 0 tells whether this skill's text arrived with its plugin folder
     # filled in and, only when it did not (a skill started as the first message of a new conversation), finds
     # the plugin by a filesystem search and prints READ_ROOT= for the Reads and sub-agent prompts.
-    "market-sizing": 104_745,
+    # 104,745 -> 104,557 on 2026-10-03: Step 0's preflight comment is two lines, the plugin-paths paragraph is
+    # shorter and plainer, a manifest-less plugin copy is kept by the search, and the block says to run it
+    # with the token as shown and that PLUGIN_ROOT is for shell commands only. One reference Read directive
+    # names its file under the plugin token.
+    "market-sizing": 104_557,
     # fmr raised for two founder-facing-correctness items measured in a live run: the CHECKLIST
     # dispatch now forbids citing our artifact filenames in evidence (that run put `inputs.json` in 10
     # items' evidence, printed verbatim into the founder's report), and the producer pipe passes
@@ -959,7 +963,10 @@ SKILL_MD_CEILING: dict[str, int] = {
     # filled in and, only when it did not (a skill started as the first message of a new conversation), finds
     # the plugin by a filesystem search and prints READ_ROOT= for the Reads and sub-agent prompts. The
     # INPUTS_REVIEW and CHECKLIST prompts gain the sub-agent fallback for a refused reference path.
-    "financial-model-review": 86_561,
+    # 86,561 -> 86,384 on 2026-10-03: Step 0's preflight comment is two lines, the plugin-paths paragraph is
+    # shorter and plainer, a manifest-less plugin copy is kept by the search, and the block says to run it
+    # with the token as shown and that PLUGIN_ROOT is for shell commands only.
+    "financial-model-review": 86_384,
     # ic-sim SHRANK: the REQUIRED ic-dynamics.md read at Step 7 is deleted. Step 7 is a pure producer
     # pipe — compose_discussion.py derives discussion.json from the partners' own files and nothing
     # is authored by the main thread — so the read informed no decision while pulling a whole
@@ -1007,7 +1014,10 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 93,351 -> 94,596 on 2026-10-02: Step 0 tells whether this skill's text arrived with its plugin folder
     # filled in and, only when it did not (a skill started as the first message of a new conversation), finds
     # the plugin by a filesystem search and prints READ_ROOT= for the Reads and sub-agent prompts.
-    "ic-sim": 94_596,
+    # 94,596 -> 94,365 on 2026-10-03: Step 0's preflight comment is two lines, the plugin-paths paragraph is
+    # shorter and plainer, a manifest-less plugin copy is kept by the search, and the block says to run it
+    # with the token as shown and that PLUGIN_ROOT is for shell commands only.
+    "ic-sim": 94_365,
     # deck-review +1,165 B: Step 0 carried only a parenthetical fresh-shell mention buried in a code
     # comment, unlike the four skills that mint RUN_ID in a LATER block and so carry the shared banner.
     # deck-review mints RUN_ID INSIDE this re-runnable Step-0 block (like cap-table), so the shared
@@ -1291,7 +1301,11 @@ SKILL_MD_CEILING: dict[str, int] = {
     # filled in and, only when it did not (a skill started as the first message of a new conversation), finds
     # the plugin by a filesystem search and prints READ_ROOT= for the Reads and sub-agent prompts. The
     # SLIDE_REVIEWS and CHECKLIST prompts gain the sub-agent fallback for a refused reference path.
-    "deck-review": 111_001,
+    # 111,001 -> 110,906 on 2026-10-03: Step 0's preflight comment is two lines, the plugin-paths paragraph is
+    # shorter and plainer, a manifest-less plugin copy is kept by the search, and the block says to run it
+    # with the token as shown and that PLUGIN_ROOT is for shell commands only. Two reference Read
+    # directives name their file under the plugin token.
+    "deck-review": 110_906,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
@@ -1417,7 +1431,11 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 126,169 -> 127,330 on 2026-10-02: Step 0 tells whether this skill's text arrived with its plugin folder
     # filled in and, only when it did not (a skill started as the first message of a new conversation), finds
     # the plugin by a filesystem search and prints READ_ROOT= for the Reads and sub-agent prompts.
-    "competitive-positioning": 127_330,
+    # 127,330 -> 126,862 on 2026-10-03: Step 0's preflight comment is two lines, the plugin-paths paragraph is
+    # shorter and plainer, a manifest-less plugin copy is kept by the search, and the block says to run it
+    # with the token as shown and that PLUGIN_ROOT is for shell commands only. The paragraph's illustrative
+    # example sentence is gone.
+    "competitive-positioning": 126_862,
     # cap-table, the largest raise (+2,383 B) and the one with the most founder-visible payoff:
     #   * Main-Thread Return named THREE of the four files Step 12 copies; a live run delivered exactly
     #     three and dropped `{Company}_Cap_Table.html`. All four are now named explicitly.
@@ -1508,7 +1526,11 @@ SKILL_MD_CEILING: dict[str, int] = {
     # filled in and, only when it did not (a skill started as the first message of a new conversation), finds
     # the plugin by a filesystem search and prints READ_ROOT= for the Reads and sub-agent prompts. The Step 3
     # lane table names each lane reference by an absolute path, since it is a Read directive.
-    "cap-table": 158_887,
+    # 158,887 -> 158,695 on 2026-10-03: Step 0's preflight comment is two lines, the plugin-paths paragraph is
+    # shorter and plainer, a manifest-less plugin copy is kept by the search, and the block says to run it
+    # with the token as shown and that PLUGIN_ROOT is for shell commands only. One reference Read directive
+    # names its file under the plugin token.
+    "cap-table": 158_695,
 }
 
 
@@ -3781,7 +3803,9 @@ def test_corpus_counts_every_agent_the_skill_pins_not_just_its_namesake() -> Non
 # Lowered 2026-10-02 from 126,609 to 126,559 B: skill-execution-model.md no longer claims the main thread
 # reads references by the token on every tier; a skill started as a conversation's first message arrives
 # with the token unfilled, and Step 0's READ_ROOT= replaces it.
-ROOT_REFERENCES_CEILING = 126_559
+# Lowered 2026-10-03 from 126,559 to 126,547 B: skill-execution-model.md's remaining statements that the
+# token is filled on every tier now say where it is filled.
+ROOT_REFERENCES_CEILING = 126_547
 
 
 def test_shared_reference_tree_does_not_grow() -> None:

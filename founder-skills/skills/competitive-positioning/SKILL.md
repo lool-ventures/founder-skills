@@ -117,6 +117,8 @@ Keep the founder informed with brief, plain-language updates at each step. **Nar
 
 Optional, best-effort, and via the **Read tool** (not a shell command): before the block below, Read `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json` and note its `version` field as `EXPECT_VERSION`. Passing it to `select_plugin_root.py` below lets an exact version match win over an arbitrary first hit. If the Read fails, skip it and omit `--expect-version` — selection is still deterministic without it. Skip it if that path still begins with `$`.
 
+Run the block below with `${CLAUDE_PLUGIN_ROOT}` exactly as it appears.
+
 ```bash
 IFS= read -r TEXT_ROOT_RAW <<'EOF'
 ${CLAUDE_PLUGIN_ROOT}
@@ -134,7 +136,7 @@ if [ ! -d "$SCRIPTS" ]; then
   ours() { python3 -c 'import json, sys
 for c in sys.stdin.read().splitlines():
     try: n = json.load(open(c.rsplit("/skills/", 1)[0] + "/.claude-plugin/plugin.json"))["name"]
-    except Exception: n = ""
+    except Exception: n = "founder-skills"
     if n == "founder-skills": print(c)'; }
   CANDIDATES="$(find /sessions -type d -path '*/skills/competitive-positioning/scripts' 2>/dev/null | ours)"
   [ -n "$CANDIDATES" ] || CANDIDATES="$(find /root/.claude/plugins -type d -path '*/skills/competitive-positioning/scripts' 2>/dev/null | ours)"
@@ -157,16 +159,11 @@ for c in sys.stdin.read().splitlines():
   SCRIPTS="$PLUGIN_ROOT/skills/competitive-positioning/scripts"
 fi
 PLUGIN_ROOT="${SCRIPTS%/skills/*}"
-echo "PLUGIN_ROOT=$PLUGIN_ROOT"   # resolved ONCE, here — paste this literal into every later block; never re-run this resolution
+echo "PLUGIN_ROOT=$PLUGIN_ROOT"   # resolved ONCE, here — paste this literal into every later block; never re-run this resolution. PLUGIN_ROOT is for shell commands; never Read from it.
 REFS="$PLUGIN_ROOT/skills/competitive-positioning/references"
 SHARED_SCRIPTS="$PLUGIN_ROOT/scripts"
-# PREFLIGHT, one line, and the run STOPS if it prints. Some surfaces serve a skill WITHOUT its
-# plugin: the shared scripts are then absent and no sub-agent can be dispatched. Test for
-# check_handoff.py, never for a /mnt/skills path: a working session started by a skill's first
-# message shows that same base directory. MEASURED on such a surface 2026-09-22: the analysis
-# still ran, hand-wrote every hand-off file the file hand-off exists to replace, graded its own
-# checklist, and shipped a report with no adversarial review and no gates. Degrading silently is
-# worse than not running.
+# PREFLIGHT: the run STOPS if this prints (the skill was served without its plugin). Test for
+# check_handoff.py, never a /mnt/skills path: a working first-message session shows that path too.
 [ -f "$SHARED_SCRIPTS/check_handoff.py" ] || echo "UNSUPPORTED_ENVIRONMENT: the plugin's shared scripts are not reachable from here"
 [ -f "$SHARED_SCRIPTS/check_handoff.py" ] && case "$TEXT_ROOT_RAW" in
   *'$'*|'') echo "PATH_STATE=literal"; echo "READ_ROOT=$PLUGIN_ROOT" ;;
@@ -187,7 +184,7 @@ have not run it — then stop. Do not improvise the missing steps: an analysis t
 reviews itself reads exactly like one that was checked, which is the failure this stop exists to
 prevent.
 
-**Plugin paths.** If this run's Step 0 printed `READ_ROOT=`, this skill's text arrived with its plugin folder unfilled: write that printed value wherever this skill shows `${CLAUDE_PLUGIN_ROOT}` in a Read, a sub-agent prompt or a `--plugin-root-agent` argument, including where a later step says to leave that path literal. Otherwise use those paths exactly as shown. Step 0 finds the folder by searching the filesystem only; never recover it by reading a SKILL.md or the "Base directory" line. **Say nothing about this step to the founder, including the version you read and the paths it printed.** A live run announced *"EXPECT_VERSION = 0.6.0. Now running the Step 0 path resolution block"*: three internal tokens and a step label in one sentence, and the founder's first line should be about their company, not about locating files.
+**Plugin paths.** If Step 0 printed `READ_ROOT=`, this skill's text arrived without its plugin folder filled in. Use that value in place of `${CLAUDE_PLUGIN_ROOT}` in every Read, sub-agent prompt and `--plugin-root-agent` argument, including where a later step says to leave that path literal. If it did not print `READ_ROOT=`, use the paths as shown. The folder comes from Step 0's filesystem search, not from a skill file or the "Base directory" line, which can name a folder that does not exist. These are setup details: updates to the founder are about their company, not file locations, printed paths or plugin versions.
 
 **Outputs mount is append-only.** Everything under the promoted outputs mount (`.../mnt/outputs/`, not just `$ANALYSIS_DIR`) is write-allowed and delete-denied by the platform: never `rm`, move away, or empty anything under it — **including files you created yourself**. Never create ad-hoc scratch anywhere under the outputs mount (no `_src/` copies, no run-state note files); scratch belongs in `$STAGING_DIR` (a `/tmp` dir, defined below). Do not "clean up" the outputs folder before delivering — extra working files there are expected and harmless.
 
