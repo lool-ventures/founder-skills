@@ -81,6 +81,62 @@ def test_no_bare_plugin_root_in_body(skill_md: Path) -> None:
     )
 
 
+PLUGIN_ROOT_DIR = REPO_ROOT / "founder-skills"
+
+# The three forms a loader may expand in place: an inline shell command (!`cmd`), a fenced
+# block opened with ```! and the argument placeholder. The "!" of a spreadsheet error such as
+# `#REF!` or `#DIV/0!` is followed by a CLOSING backtick, never an opening one, so the inline
+# pattern requires the "!" not to end a word: `#REF!` stays legal.
+_LOADER_EXPANSION_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("inline shell command !`cmd`", re.compile(r"(?<![\w/])!`")),
+    ("fenced ```! block", re.compile(r"^\s*```!", re.MULTILINE)),
+    ("$ARGUMENTS placeholder", re.compile(r"\$\{?ARGUMENTS\b")),
+)
+
+
+def _loader_expanded_files() -> list[Path]:
+    return sorted(
+        [*SKILLS_ROOT.glob("*/SKILL.md"), *PLUGIN_ROOT_DIR.glob("commands/*.md"), *PLUGIN_ROOT_DIR.glob("agents/*.md")]
+    )
+
+
+def _loader_expansion_hits(text: str) -> list[str]:
+    hits = []
+    for label, pattern in _LOADER_EXPANSION_PATTERNS:
+        for m in pattern.finditer(text):
+            hits.append(f"line {text.count(chr(10), 0, m.start()) + 1}: {label}")
+    return hits
+
+
+def test_no_inline_shell_expansion_or_argument_placeholder_in_skill_files() -> None:
+    """No skill, command or agent file may carry !`cmd`, a ```! fence, or $ARGUMENTS.
+
+    On cloud Cowork a typed slash command whose allowed shell command fails hangs silently. And
+    when a skill is the first message of a conversation, its text is expanded outside Claude Code,
+    so both the inline command and the argument placeholder reach the model raw. Heavy work
+    belongs in a script the model runs through the Bash tool.
+    """
+    files = _loader_expanded_files()
+    assert len(files) >= 6 + 1 + 6, f"expected the six skills, the commands and the agents; found {len(files)}"
+    offenders = [f"{p.relative_to(REPO_ROOT)} {hit}" for p in files for hit in _loader_expansion_hits(p.read_text())]
+    assert not offenders, "loader-expanded forms found:\n" + "\n".join(offenders)
+
+
+def test_the_loader_expansion_matcher_sees_each_form_and_spares_spreadsheet_errors() -> None:
+    """Seeded control: each form is caught, and spreadsheet error strings are not."""
+    assert _loader_expansion_hits("Run !`git status` first.")
+    assert _loader_expansion_hits("!`date`")
+    assert _loader_expansion_hits("intro\n```!\nls\n```\n")
+    assert _loader_expansion_hits("  ```!\nls\n```")
+    assert _loader_expansion_hits("Topic: $ARGUMENTS")
+    assert _loader_expansion_hits("Topic: ${ARGUMENTS}")
+    assert not _loader_expansion_hits("broken cells (`#REF!`,\n`#DIV/0!`, and the rest)")
+    assert not _loader_expansion_hits("Stop! `x` is fine, and so is ```bash\nls\n```")
+    fmr_agent = (PLUGIN_ROOT_DIR / "agents" / "financial-model-review.md").read_text()
+    assert "`#REF!`" in fmr_agent, "the spreadsheet-error control text moved; re-point this control"
+    assert not _loader_expansion_hits(fmr_agent)
+
+
 @pytest.mark.parametrize("skill_md", _skill_md_files(), ids=lambda p: p.parent.name)
 def test_frontmatter_only_documented_keys(skill_md: Path) -> None:
     """Custom keys are silently dropped by the parser — keep them out."""
