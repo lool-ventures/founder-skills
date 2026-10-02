@@ -53,6 +53,7 @@ _MOAT_SCORING_TEMPLATE = (
     "pre-dispatch block carries placeholder evidence, so without it you would be scoring the startup\n"
     "from nothing.\n"
     "\n"
+    "If a reference path below is refused, read the same file under the plugin folder your own instructions name.\n"
     "Score every slug (including _startup) across the 6 canonical moat dimensions from\n"
     "<PLUGIN_ROOT_AGENT>/skills/competitive-positioning/references/moat-definitions.md:\n"
     "network_effects, data_advantages, switching_costs, regulatory_barriers,\n"
@@ -189,6 +190,7 @@ _CHECKLIST_TEMPLATE = (
     "RUN_ID: <RUN_ID>\n"
     "\n"
     "You are the competitive-positioning agent dispatched in Context A (CHECKLIST).\n"
+    "If a reference path below is refused, read the same file under the plugin folder your own instructions name.\n"
     "Read landscape.json, positioning.json, moat_scores.json, positioning_scores.json,\n"
     "product_profile.json, and landscape_draft.json from <ANALYSIS_DIR_AGENT>. Also read\n"
     "<PLUGIN_ROOT_AGENT>/skills/competitive-positioning/references/checklist-criteria.md.\n"
@@ -505,6 +507,29 @@ def red_team(
     return text
 
 
+def _plugin_root_refusal(root: str) -> str | None:
+    """Why a sub-agent could not read references under `root`, or None when it can.
+
+    A literal `${CLAUDE_PLUGIN_ROOT}` (skill text that arrived unfilled) or an empty or relative value
+    names nothing a file tool can open, and a root whose plugin.json names another plugin is a
+    different plugin's folder. Only a manifest this shell can see is checked: on a host-loop session
+    the root is a host path the shell cannot reach, and that is correct.
+    """
+    if not root.strip() or "$" in root:
+        return "is empty or an unfilled placeholder"
+    if not os.path.isabs(root):
+        return "is not an absolute path"
+    manifest = os.path.join(root, ".claude-plugin", "plugin.json")
+    try:
+        with open(manifest, encoding="utf-8") as fh:
+            name = json.load(fh).get("name")
+    except (OSError, ValueError, AttributeError):
+        return None
+    if name != "founder-skills":
+        return f"is the folder of another plugin ({name!r})"
+    return None
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description="Print a competitive-positioning dispatch prompt")
     p.add_argument("context", choices=sorted([*_TEMPLATES, "red_team"]))
@@ -520,6 +545,15 @@ def main() -> None:
     )
     p.add_argument("--handoff-dir", help="the hand-off dir in THIS shell's namespace (red_team lists its docs/)")
     a = p.parse_args()
+    if a.plugin_root_agent is not None:
+        why = _plugin_root_refusal(a.plugin_root_agent)
+        if why:
+            print(
+                f"Error: --plugin-root-agent {a.plugin_root_agent!r} {why}; pass the plugin folder this skill "
+                "shows, or the READ_ROOT= value Step 0 printed",
+                file=sys.stderr,
+            )
+            sys.exit(2)
     if a.context == "positioning_scoring" and not a.analysis_dir:
         print("Error: positioning_scoring needs --analysis-dir to read the job to be done", file=sys.stderr)
         sys.exit(2)

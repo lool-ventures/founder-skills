@@ -871,7 +871,10 @@ SKILL_MD_CEILING: dict[str, int] = {
     # the printed ARTIFACTS_ROOT). Without it a cloud session searches from the home directory. The
     # pattern is also corrected to the file founder_context.py writes (founder-context-<slug>.json).
     # Guarded by test_every_instructed_file_search_names_its_folder.
-    "market-sizing": 103_493,
+    # 103,493 -> 104,745 on 2026-10-02: Step 0 tells whether this skill's text arrived with its plugin folder
+    # filled in and, only when it did not (a skill started as the first message of a new conversation), finds
+    # the plugin by a filesystem search and prints READ_ROOT= for the Reads and sub-agent prompts.
+    "market-sizing": 104_745,
     # fmr raised for two founder-facing-correctness items measured in a live run: the CHECKLIST
     # dispatch now forbids citing our artifact filenames in evidence (that run put `inputs.json` in 10
     # items' evidence, printed verbatim into the founder's report), and the producer pipe passes
@@ -952,7 +955,11 @@ SKILL_MD_CEILING: dict[str, int] = {
     # a reference grade where one exists, warn (never not_applicable) on a deliberately withheld metric,
     # and that our figures show a figure is computable, never that the model shows it.
     # 85_012 -> 85_082 (+70 B): the Step 0 search names its folder; see market-sizing above.
-    "financial-model-review": 85_082,
+    # 85,082 -> 86,561 on 2026-10-02: Step 0 tells whether this skill's text arrived with its plugin folder
+    # filled in and, only when it did not (a skill started as the first message of a new conversation), finds
+    # the plugin by a filesystem search and prints READ_ROOT= for the Reads and sub-agent prompts. The
+    # INPUTS_REVIEW and CHECKLIST prompts gain the sub-agent fallback for a refused reference path.
+    "financial-model-review": 86_561,
     # ic-sim SHRANK: the REQUIRED ic-dynamics.md read at Step 7 is deleted. Step 7 is a pure producer
     # pipe — compose_discussion.py derives discussion.json from the partners' own files and nothing
     # is authored by the main thread — so the read informed no decision while pulling a whole
@@ -997,7 +1004,10 @@ SKILL_MD_CEILING: dict[str, int] = {
     # the `write_refused` branch (both contexts), and the degrade rule tells the founder instead of
     # noting it. The procedure itself lives once in skill-execution-model.md.
     # 93_281 -> 93_351 (+70 B): the Step 0 search names its folder; see market-sizing above.
-    "ic-sim": 93_351,
+    # 93,351 -> 94,596 on 2026-10-02: Step 0 tells whether this skill's text arrived with its plugin folder
+    # filled in and, only when it did not (a skill started as the first message of a new conversation), finds
+    # the plugin by a filesystem search and prints READ_ROOT= for the Reads and sub-agent prompts.
+    "ic-sim": 94_596,
     # deck-review +1,165 B: Step 0 carried only a parenthetical fresh-shell mention buried in a code
     # comment, unlike the four skills that mint RUN_ID in a LATER block and so carry the shared banner.
     # deck-review mints RUN_ID INSIDE this re-runnable Step-0 block (like cap-table), so the shared
@@ -1277,7 +1287,11 @@ SKILL_MD_CEILING: dict[str, int] = {
     # of the file-tool path of outputs (probe + --set-host-outputs-dir), the hand-off protocol gains
     # the `write_refused` branch (both contexts), and the degrade rule tells the founder instead of
     # noting it. The procedure itself lives once in skill-execution-model.md.
-    "deck-review": 109_512,
+    # 109,512 -> 111,001 on 2026-10-02: Step 0 tells whether this skill's text arrived with its plugin folder
+    # filled in and, only when it did not (a skill started as the first message of a new conversation), finds
+    # the plugin by a filesystem search and prints READ_ROOT= for the Reads and sub-agent prompts. The
+    # SLIDE_REVIEWS and CHECKLIST prompts gain the sub-agent fallback for a refused reference path.
+    "deck-review": 111_001,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
@@ -1400,7 +1414,10 @@ SKILL_MD_CEILING: dict[str, int] = {
     # +104 B (competitive-positioning): Step 8's closer names both HTML pages -- the maps and the
     # interactive explorer -- where one "the interactive version" line could hand over only one of them.
     # 126_099 -> 126_169 (+70 B): the Step 0 search names its folder; see market-sizing above.
-    "competitive-positioning": 126_169,
+    # 126,169 -> 127,330 on 2026-10-02: Step 0 tells whether this skill's text arrived with its plugin folder
+    # filled in and, only when it did not (a skill started as the first message of a new conversation), finds
+    # the plugin by a filesystem search and prints READ_ROOT= for the Reads and sub-agent prompts.
+    "competitive-positioning": 127_330,
     # cap-table, the largest raise (+2,383 B) and the one with the most founder-visible payoff:
     #   * Main-Thread Return named THREE of the four files Step 12 copies; a live run delivered exactly
     #     three and dropped `{Company}_Cap_Table.html`. All four are now named explicitly.
@@ -1487,7 +1504,11 @@ SKILL_MD_CEILING: dict[str, int] = {
     # delivered review dir.
     # +263 B (cap-table): Step 11 states the check's exit-2 branch (it could not read this run's scenarios.json: fix
     # the path, re-run). A new refusal, not prose: failing open there let a mistyped path skip the judge.
-    "cap-table": 157_645,
+    # 157,645 -> 158,887 on 2026-10-02: Step 0 tells whether this skill's text arrived with its plugin folder
+    # filled in and, only when it did not (a skill started as the first message of a new conversation), finds
+    # the plugin by a filesystem search and prints READ_ROOT= for the Reads and sub-agent prompts. The Step 3
+    # lane table names each lane reference by an absolute path, since it is a Read directive.
+    "cap-table": 158_887,
 }
 
 
@@ -2956,15 +2977,16 @@ def test_skill_without_a_checklist_never_points_at_one(skill: str) -> None:
 # substitute the printed literal thereafter.
 #
 # This test is the ratchet on that. It counts `find … -path '*/skills/…/scripts'`
-# occurrences and requires them all to sit in ONE resolution site. Two commands
-# per site is expected and correct — the `/sessions` fast path and the `/`
-# fallback are two branches of a single resolution, not two sites.
+# occurrences and requires them all to sit in ONE resolution site. Three commands
+# per site is expected and correct — the `/sessions` fast path, the cloud plugins
+# folder and the `/` fallback are three branches of a single resolution, not three sites.
 # ---------------------------------------------------------------------------
 
 _FIND_SCRIPTS_RE = re.compile(r"find\s+/\S*\s+-type\s+d\s+-path\s+'\*/skills/[^']+/scripts'")
 
-# Two = the /sessions fast path plus the / fallback, both inside Step 0.
-PLUGIN_ROOT_FIND_COMMANDS_PER_SKILL = 2
+# Three = the /sessions fast path, the /root/.claude/plugins cloud folder (searched before the whole
+# filesystem when the skill text arrived unfilled) and the / fallback, all inside Step 0.
+PLUGIN_ROOT_FIND_COMMANDS_PER_SKILL = 3
 
 
 @pytest.mark.parametrize("skill", sorted(SKILL_MD_CEILING))
@@ -2973,9 +2995,9 @@ def test_plugin_root_resolved_in_exactly_one_site(skill: str) -> None:
     matches = list(_FIND_SCRIPTS_RE.finditer(text))
     assert len(matches) == PLUGIN_ROOT_FIND_COMMANDS_PER_SKILL, (
         f"{skill}/SKILL.md has {len(matches)} plugin-root `find` command(s), expected "
-        f"{PLUGIN_ROOT_FIND_COMMANDS_PER_SKILL} (the /sessions fast path and the / fallback, both in "
-        "Step 0). A find outside Step 0 re-resolves the plugin root in a fresh shell and can land on "
-        "a different mount than Step 0 chose — measured, a single session had two plugin versions "
+        f"{PLUGIN_ROOT_FIND_COMMANDS_PER_SKILL} (the /sessions fast path, the cloud plugins folder and the "
+        "/ fallback, all in Step 0). A find outside Step 0 re-resolves the plugin root in a fresh shell and can "
+        "land on a different mount than Step 0 chose — measured, a single session had two plugin versions "
         "mounted at once. Resolve once, echo it, substitute the printed literal."
     )
     # All occurrences must be in one contiguous region: no later re-resolution.
@@ -3756,7 +3778,10 @@ def test_corpus_counts_every_agent_the_skill_pins_not_just_its_namesake() -> Non
 # shared table sees only the device bar under "Hardware", the bar the type exists to avoid.
 # Raised 2026-10-01 from 126,584 to 126,609 B: the project-builder row says the sector figures are
 # averages (individual companies spread wider), not a range of companies.
-ROOT_REFERENCES_CEILING = 126_609
+# Lowered 2026-10-02 from 126,609 to 126,559 B: skill-execution-model.md no longer claims the main thread
+# reads references by the token on every tier; a skill started as a conversation's first message arrives
+# with the token unfilled, and Step 0's READ_ROOT= replaces it.
+ROOT_REFERENCES_CEILING = 126_559
 
 
 def test_shared_reference_tree_does_not_grow() -> None:

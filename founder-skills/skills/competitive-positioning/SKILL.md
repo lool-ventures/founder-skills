@@ -115,10 +115,14 @@ Keep the founder informed with brief, plain-language updates at each step. **Nar
 
 **Every Bash tool call runs in a fresh shell — variables do not persist.** Run the block below exactly **once**: it resolves `$PLUGIN_ROOT` deterministically, and every later block must substitute the printed value as a literal rather than re-running the resolution — repeating the self-heal search can land on a different mount than Step 0 picked when more than one is present (see why in the block's comments).
 
-Optional, best-effort, and via the **Read tool** (not a shell command): before the block below, Read `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json` and note its `version` field as `EXPECT_VERSION`. Passing it to `select_plugin_root.py` below lets an exact version match win over an arbitrary first hit. If the Read fails, skip it and omit `--expect-version` — selection is still deterministic without it.
+Optional, best-effort, and via the **Read tool** (not a shell command): before the block below, Read `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json` and note its `version` field as `EXPECT_VERSION`. Passing it to `select_plugin_root.py` below lets an exact version match win over an arbitrary first hit. If the Read fails, skip it and omit `--expect-version` — selection is still deterministic without it. Skip it if that path still begins with `$`.
 
 ```bash
+IFS= read -r TEXT_ROOT_RAW <<'EOF'
+${CLAUDE_PLUGIN_ROOT}
+EOF
 SCRIPTS="${CLAUDE_PLUGIN_ROOT}/skills/competitive-positioning/scripts"
+case "$TEXT_ROOT_RAW" in *'$'*|'') SCRIPTS="" ;; esac   # text arrived unfilled: ignore any exported value
 if [ ! -d "$SCRIPTS" ]; then
   # In Cowork, CLAUDE_PLUGIN_ROOT substitutes to a host-side path absent inside
   # the session VM — self-heal by collecting EVERY candidate mount (a session can
@@ -127,8 +131,14 @@ if [ ! -d "$SCRIPTS" ]; then
   # select_plugin_root.py, which picks ONE deterministically and names the
   # rejects — never trust `find`'s arbitrary first hit, which can silently mix
   # scripts across plugin versions mid-pipeline.
-  CANDIDATES="$(find /sessions -type d -path '*/skills/competitive-positioning/scripts' 2>/dev/null)"
-  [ -n "$CANDIDATES" ] || CANDIDATES="$(find / -type d -path '*/skills/competitive-positioning/scripts' 2>/dev/null)"
+  ours() { python3 -c 'import json, sys
+for c in sys.stdin.read().splitlines():
+    try: n = json.load(open(c.rsplit("/skills/", 1)[0] + "/.claude-plugin/plugin.json"))["name"]
+    except Exception: n = ""
+    if n == "founder-skills": print(c)'; }
+  CANDIDATES="$(find /sessions -type d -path '*/skills/competitive-positioning/scripts' 2>/dev/null | ours)"
+  [ -n "$CANDIDATES" ] || CANDIDATES="$(find /root/.claude/plugins -type d -path '*/skills/competitive-positioning/scripts' 2>/dev/null | ours)"
+  [ -n "$CANDIDATES" ] || CANDIDATES="$(find / -type d -path '*/skills/competitive-positioning/scripts' 2>/dev/null | ours)"
   PROVISIONAL_ROOT="$(printf '%s\n' "$CANDIDATES" | head -1)"
   PROVISIONAL_ROOT="${PROVISIONAL_ROOT%/skills/*}"
   # Bootstrap order: $SHARED_SCRIPTS isn't known until a root is chosen, so use the
@@ -151,12 +161,18 @@ echo "PLUGIN_ROOT=$PLUGIN_ROOT"   # resolved ONCE, here — paste this literal i
 REFS="$PLUGIN_ROOT/skills/competitive-positioning/references"
 SHARED_SCRIPTS="$PLUGIN_ROOT/scripts"
 # PREFLIGHT, one line, and the run STOPS if it prints. Some surfaces serve a skill WITHOUT its
-# plugin -- claude.ai mounts skills flat at /mnt/skills/plugins/<plugin>:<skill>/, where this
-# resolution yields /mnt, the shared scripts do not exist, and no sub-agent can be dispatched.
-# MEASURED there 2026-09-22: the analysis still ran, hand-wrote every hand-off file the file
-# hand-off exists to replace, graded its own checklist, and shipped a report with no adversarial
-# review and no gates. Degrading silently is worse than not running.
+# plugin: the shared scripts are then absent and no sub-agent can be dispatched. Test for
+# check_handoff.py, never for a /mnt/skills path: a working session started by a skill's first
+# message shows that same base directory. MEASURED on such a surface 2026-09-22: the analysis
+# still ran, hand-wrote every hand-off file the file hand-off exists to replace, graded its own
+# checklist, and shipped a report with no adversarial review and no gates. Degrading silently is
+# worse than not running.
 [ -f "$SHARED_SCRIPTS/check_handoff.py" ] || echo "UNSUPPORTED_ENVIRONMENT: the plugin's shared scripts are not reachable from here"
+[ -f "$SHARED_SCRIPTS/check_handoff.py" ] && case "$TEXT_ROOT_RAW" in
+  *'$'*|'') echo "PATH_STATE=literal"; echo "READ_ROOT=$PLUGIN_ROOT" ;;
+  /sessions/*) echo "PATH_STATE=local" ;;
+  *) if [ -d "$TEXT_ROOT_RAW" ]; then echo "PATH_STATE=substituted"; else echo "PATH_STATE=local"; fi ;;
+esac
 SHARED_REFS="$PLUGIN_ROOT/references"
 # Resolve the canonical artifacts root via a SCRIPT, not inline bash (the agent paraphrases inline
 # path computations → outputs/ vs outputs/artifacts/ drift across runs). Deterministic + creates it.
@@ -171,7 +187,7 @@ have not run it — then stop. Do not improvise the missing steps: an analysis t
 reviews itself reads exactly like one that was checked, which is the failure this stop exists to
 prevent.
 
-Reaching the self-heal branch is normal in Cowork — `${CLAUDE_PLUGIN_ROOT}` resolves to a HOST path that does not exist inside the VM, so the `[ ! -d "$SCRIPTS" ]` test fails by design rather than by misconfiguration. It is not a sign anything is wrong, and it is not worth narrating to the founder — **say nothing about this step at all, including the version you read and the path you resolved.** A live run announced *"EXPECT_VERSION = 0.6.0. Now running the Step 0 path resolution block"*: three internal tokens and a step label in one sentence, and the founder's first line should be about their company, not about locating files.
+**Plugin paths.** If this run's Step 0 printed `READ_ROOT=`, this skill's text arrived with its plugin folder unfilled: write that printed value wherever this skill shows `${CLAUDE_PLUGIN_ROOT}` in a Read, a sub-agent prompt or a `--plugin-root-agent` argument, including where a later step says to leave that path literal. Otherwise use those paths exactly as shown. Step 0 finds the folder by searching the filesystem only; never recover it by reading a SKILL.md or the "Base directory" line. **Say nothing about this step to the founder, including the version you read and the paths it printed.** A live run announced *"EXPECT_VERSION = 0.6.0. Now running the Step 0 path resolution block"*: three internal tokens and a step label in one sentence, and the founder's first line should be about their company, not about locating files.
 
 **Outputs mount is append-only.** Everything under the promoted outputs mount (`.../mnt/outputs/`, not just `$ANALYSIS_DIR`) is write-allowed and delete-denied by the platform: never `rm`, move away, or empty anything under it — **including files you created yourself**. Never create ad-hoc scratch anywhere under the outputs mount (no `_src/` copies, no run-state note files); scratch belongs in `$STAGING_DIR` (a `/tmp` dir, defined below). Do not "clean up" the outputs folder before delivering — extra working files there are expected and harmless.
 

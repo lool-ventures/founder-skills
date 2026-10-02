@@ -120,9 +120,10 @@ def build_options(workdir: Path, env_extra: dict[str, str] | None = None) -> Any
     See `test_e2e_deck_review.py` for the full derivation of each field; the two that
     matter and are non-obvious:
 
-    * `CLAUDE_PLUGIN_ROOT` — SKILL.md bodies reference `${CLAUDE_PLUGIN_ROOT}`. In
-      production the plugin content expander substitutes it at load time; the SDK's
-      plugin loader does not run that expander, so this is the harness-side workaround.
+    * `CLAUDE_PLUGIN_ROOT` — SKILL.md bodies reference `${CLAUDE_PLUGIN_ROOT}`. The SDK
+      lane fills it into the skill text at load time, as production does (measured: the
+      token arrives substituted). The env var only lets bash see the value the text
+      already carries.
       The production invariant (no SKILL.md may depend on the SessionStart hook) is
       enforced separately by a contract test.
 

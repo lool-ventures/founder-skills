@@ -82,9 +82,9 @@ tool surface and different rules.
   prompt gives the sub-agent paths ONLY in forms it can reach host-native,
   chosen by where the target lives:
   - **A bundled `references/*.md`** → the literal `${CLAUDE_PLUGIN_ROOT}/skills/<skill>/references/<f>.md`
-    token. It is pre-resolved (at skill-body load) to a host-readable plugin
-    path — do NOT pass a `find /sessions`-discovered `$REFS` value (a VM path a
-    file tool can't read). This holds for MAIN-THREAD `Read` directives as well.
+    token, which the loader fills with a host-readable path (or Step 0's
+    `READ_ROOT=` value when it printed one) — never a `find`-discovered `$REFS`
+    (a VM path a file tool can't read). This holds for MAIN-THREAD Reads too.
   - **An artifact under `outputs/`** (a prior step's `*.json`) → an **absolute
     agent-namespace path** from `resolve_artifacts_root.py` (the same namespace
     as `OUTPUT_PATH`; build a `<WORKDIR>_AGENT` var beside `HANDOFF_AGENT`).
@@ -460,15 +460,14 @@ internally — pass the final message verbatim.
   namespaces is the trap. Keep them separate: **host-side `Read` → use the token;
   VM `bash` → discover the mount.**
 - **Main-thread reference reads use the `${CLAUDE_PLUGIN_ROOT}` token with
-  the Read tool — in EVERY fidelity tier, including Cowork hostloop.** In
-  hostloop the main thread is the native host process, and its
-  `CLAUDE_PLUGIN_ROOT` is a real host path to the staged plugin copy — the
-  host-side containment hook carries an explicit exemption for it. So
-  `Read ${CLAUDE_PLUGIN_ROOT}/skills/<skill>/references/…` from the main
-  thread is the endorsed idiom in all tiers; do not route it through
-  `mcp__workspace__bash`/`cat` as a workaround, and do not treat it as
-  needing the same fix as sub-agent VM-path reads (a different failure
-  class — see the Context A invariant above). Route through
+  the Read tool wherever the loader filled it** — the CLI, cloud sessions
+  and Cowork hostloop, where the value is a real host path to the staged
+  plugin copy that the host-side containment hook exempts. Do not route
+  those reads through `mcp__workspace__bash`/`cat`. The exception is a skill
+  started as the first message of a new conversation: its text arrives with
+  the token unfilled, so Step 0 finds the plugin by a filesystem search and
+  prints `READ_ROOT=`, and that value replaces the token in every Read,
+  sub-agent prompt and `--plugin-root-agent` argument. Route through
   `mcp__workspace__bash` only for paths that are genuinely VM-namespace:
   `/sessions/…/uploads/…` (uploaded documents) and
   `/sessions/…/mnt/outputs/…` (dynamic artifacts under `outputs/`).

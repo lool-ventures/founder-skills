@@ -15,7 +15,8 @@ they submit it themselves via their own browser or mail client.
   deck content, financials, valuations, or transcript excerpts.
 - NEVER include file paths — they leak company slugs (e.g. `artifacts/acme-corp/...`).
 - You MAY include, only after showing the user the exact final text: plugin version
-  (read `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json`), skill name, platform
+  (read `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json`; write "unknown" if that path
+  still begins with `$` or the Read fails), skill name, platform
   (Claude Code vs Cowork), and error class if it's a bug. Nothing else.
 - Show the complete payload and get an explicit "yes, send this" BEFORE producing any link.
 

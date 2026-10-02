@@ -1057,6 +1057,7 @@ def test_cleanup_names_cover_pipeline_artifacts() -> None:
         {
             "gate_state.json",  # cleaned on fresh runs by setup_run.py --clean
             # (run_id mismatch); left in place at end-of-run (no outputs/ delete)
+            "plugin.json",  # the plugin's own manifest, read by Step 0's search; never a run output
         }
     )
     mod = _load_setup_run_module()

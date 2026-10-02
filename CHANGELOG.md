@@ -106,6 +106,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   is shown with your deck's other claims. When a deck states two figures for the same market and
   year, the one on its market-size slide is compared, and you are still told about both.
 
+### Fixed
+
+- **Skills started as the first message of a new conversation now find their reference files.** On
+  that path the skill's text arrives without its plugin folder filled in, so every reference it reads
+  and every one it hands to a helper pointed nowhere. Each skill now notices this, finds its own
+  plugin folder, and uses that instead; a skill started any other way is unchanged. A helper whose
+  reference file cannot be opened at the path it was given now looks for the same file in its own
+  plugin folder.
+
 ### Development
 
 Contributor-facing only; nothing here changes what a founder installs or runs.

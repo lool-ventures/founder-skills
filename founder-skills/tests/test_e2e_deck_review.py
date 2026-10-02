@@ -270,11 +270,11 @@ def _drive_deck_review_lane(
         # Allow what the inline-skill model needs end-to-end:
         allowed_tools=["Bash", "Read", "Write", "Edit", "Glob", "Grep", "Task", "Skill"],
         # SKILL.md bodies reference ${CLAUDE_PLUGIN_ROOT} (v0.4.3 invariant).
-        # In production Claude Code/Cowork, the plugin content expander
-        # substitutes ${CLAUDE_PLUGIN_ROOT} at skill-load time — production
-        # doesn't depend on the SessionStart hook firing. The SDK's plugin
-        # loader does NOT run that expander, so we set the env var here as
-        # the SDK-harness-side workaround. The production-side invariant
+        # The SDK lane fills it into the skill text at load time, as
+        # production does (measured: the token arrives substituted), so
+        # production doesn't depend on the SessionStart hook firing. The env
+        # var set here only lets bash see the value the text already
+        # carries. The production-side invariant
         # (no SKILL.md may depend on the hook firing) is enforced by Task 3's
         # test_skill_md_does_not_depend_on_session_start_hook.
         # Also merge with parent env so PATH/HOME/etc. survive — without

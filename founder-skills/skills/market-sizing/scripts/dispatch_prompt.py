@@ -276,7 +276,9 @@ _CHECKLIST_TEMPLATE = (
     "OUTPUT_PATH: <HANDOFF_AGENT>/checklist_output.json\n"
     "RUN_ID: <RUN_ID>\n"
     "\n"
-    "You are the market-sizing agent dispatched in Context A (CHECKLIST). Read:\n"
+    "You are the market-sizing agent dispatched in Context A (CHECKLIST).\n"
+    "If a reference path below is refused, read the same file under the plugin folder your own instructions name.\n"
+    "Read:\n"
     "- <PLUGIN_ROOT_AGENT>/skills/market-sizing/references/pitfalls-checklist.md\n"
     "- <PLUGIN_ROOT_AGENT>/skills/market-sizing/references/artifact-schemas.md\n"
     '  (read the "Canonical 22 checklist IDs" section)\n'
@@ -393,6 +395,29 @@ def checklist(
     )
 
 
+def _plugin_root_refusal(root: str) -> str | None:
+    """Why a sub-agent could not read references under `root`, or None when it can.
+
+    A literal `${CLAUDE_PLUGIN_ROOT}` (skill text that arrived unfilled) or an empty or relative value
+    names nothing a file tool can open, and a root whose plugin.json names another plugin is a
+    different plugin's folder. Only a manifest this shell can see is checked: on a host-loop session
+    the root is a host path the shell cannot reach, and that is correct.
+    """
+    if not root.strip() or "$" in root:
+        return "is empty or an unfilled placeholder"
+    if not os.path.isabs(root):
+        return "is not an absolute path"
+    manifest = os.path.join(root, ".claude-plugin", "plugin.json")
+    try:
+        with open(manifest, encoding="utf-8") as fh:
+            name = json.load(fh).get("name")
+    except (OSError, ValueError, AttributeError):
+        return None
+    if name != "founder-skills":
+        return f"is the folder of another plugin ({name!r})"
+    return None
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description="Generate a sub-agent dispatch prompt from identifiers on disk")
     p.add_argument("context", choices=["red_team", "checklist"])
@@ -410,6 +435,15 @@ def main() -> None:
     p.add_argument("--plugin-root-agent", help="checklist: the plugin root as the sub-agent addresses it")
     p.add_argument("--correction", choices=sorted(CORRECTIONS), help="a corrective redo's one added line")
     a = p.parse_args()
+    if a.plugin_root_agent is not None:
+        why = _plugin_root_refusal(a.plugin_root_agent)
+        if why:
+            print(
+                f"Error: --plugin-root-agent {a.plugin_root_agent!r} {why}; pass the plugin folder this skill "
+                "shows, or the READ_ROOT= value Step 0 printed",
+                file=sys.stderr,
+            )
+            sys.exit(2)
     if a.context == "checklist":
         try:
             sys.stdout.write(
