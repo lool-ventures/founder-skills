@@ -533,7 +533,7 @@ def _generated_checklist_prompt() -> str:
         d = Path(tmp)
         for name in ("inputs.json", "validation.json", "sizing.json", "methodology.json"):
             (d / name).write_text("{}")
-        out: str = mod.checklist("R", str(d), str(d / "h"), "H", "A", "P")
+        out: str = mod.checklist("R", str(d), str(d / "h"), "H", "A")
     return out
 
 

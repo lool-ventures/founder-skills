@@ -361,8 +361,6 @@ def _cp_red_team_prompt(tmp_path: Path) -> str:
             "agent/competitive-positioning-acme/handoff/R",
             "--analysis-dir-agent",
             "agent/competitive-positioning-acme",
-            "--plugin-root-agent",
-            "/p",
             "--analysis-dir",
             str(analysis),
             "--handoff-dir",
@@ -451,8 +449,6 @@ def test_a_red_team_prompt_carrying_the_reports_positions_passes_and_a_changed_o
             "agent/competitive-positioning-acme/handoff/R",
             "--analysis-dir-agent",
             "agent/competitive-positioning-acme",
-            "--plugin-root-agent",
-            "/p",
             "--analysis-dir",
             str(analysis),
             "--handoff-dir",
@@ -471,3 +467,65 @@ def test_a_red_team_prompt_carrying_the_reports_positions_passes_and_a_changed_o
     reworded = ours.replace(line, line.replace("of ", "out of ", 1))
     assert reworded != ours
     _deny(_run(tmp_path, rows, reworded, agent=_CP_REDTEAM))
+
+
+# --- a prompt printed on a local Desktop session names no plugin folder ------------------------------
+
+
+def _session_prompt(tmp_path: Path, which: str) -> str:
+    """The real generator output on a /sessions tree: reference files are named by how their path ends."""
+    import importlib.util
+
+    skills = Path(__file__).resolve().parents[1] / "skills"
+    gen = (
+        skills / "market-sizing" / "scripts" / "dispatch_prompt.py"
+        if which == "market-sizing"
+        else skills / "competitive-positioning" / "scripts" / "cp_dispatch_prompt.py"
+    )
+    spec = importlib.util.spec_from_file_location(f"session_gen_{gen.stem}", gen)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    if which == "market-sizing":
+        analysis = tmp_path / "ms-analysis"
+        analysis.mkdir()
+        for f in ("inputs.json", "methodology.json", "validation.json", "sizing.json"):
+            (analysis / f).write_text("{}", encoding="utf-8")
+        text: str = mod.checklist(
+            "R", str(analysis), str(tmp_path / "ms-h"), "agent/handoff/R", "agent/analysis", session_tree=True
+        )
+    else:
+        text = mod.render(
+            "moat_scoring",
+            run_id="R",
+            handoff_agent="agent/cp/handoff/R",
+            analysis_dir_agent="agent/cp",
+            session_tree=True,
+        )
+    assert "/sessions" not in text and "the file ending skills/" in text
+    return text
+
+
+def test_a_session_lane_prompt_passes_verbatim_for_both_generators(tmp_path: Path) -> None:
+    ms = _session_prompt(tmp_path, "market-sizing")
+    _silent(_run(tmp_path, [_user("Size my market."), _printed(ms)], ms))
+    cp = _session_prompt(tmp_path, "competitive-positioning")
+    _silent(
+        _run(tmp_path, [_user("Map my competition."), _printed(cp)], cp, agent="founder-skills:competitive-positioning")
+    )
+
+
+def test_a_root_put_back_into_a_session_lane_prompt_is_held_twice_then_let_through(tmp_path: Path) -> None:
+    """A main thread that "repairs" the pointer with a folder of its own is sent the printed prompt back,
+    twice; the third attempt goes through with a line on stderr (MAX_HOLDS)."""
+    printed = _session_prompt(tmp_path, "market-sizing")
+    rooted = printed.replace("the file ending skills/", "/Users/x/plugin/skills/")
+    rows = [_user("Size my market."), _printed(printed)]
+    first = _deny(_run(tmp_path, rows, rooted))
+    assert "the file ending skills/market-sizing/references/pitfalls-checklist.md" in first
+    assert "/Users/x/plugin" not in first
+    rows.append(_held(first))
+    rows.append(_held(_deny(_run(tmp_path, rows, rooted))))
+    r = _run(tmp_path, rows, rooted)
+    _silent(r)
+    assert "dispatch_prompt_check" in r.stderr

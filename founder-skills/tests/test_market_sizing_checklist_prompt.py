@@ -54,7 +54,7 @@ def _analysis(tmp_path: Path, methodology: dict[str, Any]) -> tuple[Path, Path]:
 
 
 def _prompt(d: Path, h: Path) -> str:
-    out: str = dp.checklist("R", str(d), str(h), "AGENT/handoff/R/r2", "AGENT", "PLUGIN")
+    out: str = dp.checklist("R", str(d), str(h), "AGENT/handoff/R/r2", "AGENT", session_tree=False)
     return out
 
 
@@ -84,7 +84,9 @@ def test_the_prompt_carries_the_contract_checklist_py_reads(tmp_path: Path) -> N
         assert status in prompt
     assert set(re.findall(r'"id"\s*:\s*"([a-z][a-z0-9_]+)"', prompt)) == set(checklist_mod.VALID_IDS)
     assert prompt.rstrip().endswith("Do NOT write any file other than OUTPUT_PATH.")
-    assert "PLUGIN/skills/market-sizing/references/pitfalls-checklist.md" in prompt
+    # Off a /sessions tree the reference is named under the folder the generator runs from.
+    plugin = _SCRIPTS.parents[2]
+    assert f"{plugin}/skills/market-sizing/references/pitfalls-checklist.md" in prompt
     for word in ("round", "revision", "revised"):
         assert word not in prompt.lower(), word
 
@@ -116,7 +118,7 @@ def test_a_corrective_redo_is_printed_with_its_line_before_the_closing_one(tmp_p
     ("send the printed prompt unchanged") dropped the correction. The generator now prints the redo."""
     d, h = _analysis(tmp_path, _BASE)
     plain = _prompt(d, h)
-    redo: str = dp.checklist("R", str(d), str(h), "AGENT/handoff/R/r2", "AGENT", "PLUGIN", correction=kind)
+    redo: str = dp.checklist("R", str(d), str(h), "AGENT/handoff/R/r2", "AGENT", session_tree=False, correction=kind)
     assert redo.endswith(_END), redo[-200:]
     assert redo.replace(dp.CORRECTIONS[kind] + "\n", "", 1) == plain
     assert redo.index(dp.CORRECTIONS[kind]) < redo.index(_END)

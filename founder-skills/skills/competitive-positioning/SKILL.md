@@ -159,7 +159,7 @@ for c in sys.stdin.read().splitlines():
   SCRIPTS="$PLUGIN_ROOT/skills/competitive-positioning/scripts"
 fi
 PLUGIN_ROOT="${SCRIPTS%/skills/*}"
-echo "PLUGIN_ROOT=$PLUGIN_ROOT"   # resolved ONCE, here — paste this literal into every later block; never re-run this resolution. PLUGIN_ROOT is for shell commands; never Read from it.
+echo "PLUGIN_ROOT=$PLUGIN_ROOT"   # resolved ONCE, here — paste this literal into every later block; never re-run this resolution. PLUGIN_ROOT is for shell commands; never Read from it or put it in a sub-agent prompt.
 REFS="$PLUGIN_ROOT/skills/competitive-positioning/references"
 SHARED_SCRIPTS="$PLUGIN_ROOT/scripts"
 # PREFLIGHT: the run STOPS if this prints (the skill was served without its plugin). Test for
@@ -184,7 +184,7 @@ have not run it — then stop. Do not improvise the missing steps: an analysis t
 reviews itself reads exactly like one that was checked, which is the failure this stop exists to
 prevent.
 
-**Plugin paths.** If Step 0 printed `READ_ROOT=`, this skill's text arrived without its plugin folder filled in. Use that value in place of `${CLAUDE_PLUGIN_ROOT}` in every Read, sub-agent prompt and `--plugin-root-agent` argument, including where a later step says to leave that path literal. If it did not print `READ_ROOT=`, use the paths as shown. The folder comes from Step 0's filesystem search, not from a skill file or the "Base directory" line, which can name a folder that does not exist. These are setup details: updates to the founder are about their company, not file locations, printed paths or plugin versions.
+**Plugin paths.** If Step 0 printed `READ_ROOT=`, this skill's text arrived without its plugin folder filled in. Use that value in place of `${CLAUDE_PLUGIN_ROOT}` in every Read and sub-agent prompt, including where a later step says to leave that path literal. If it did not print `READ_ROOT=`, use the paths as shown. The folder comes from Step 0's filesystem search, not from a skill file or the "Base directory" line, which can name a folder that does not exist. These are setup details: updates to the founder are about their company, not file locations, printed paths or plugin versions.
 
 **Outputs mount is append-only.** Everything under the promoted outputs mount (`.../mnt/outputs/`, not just `$ANALYSIS_DIR`) is write-allowed and delete-denied by the platform: never `rm`, move away, or empty anything under it — **including files you created yourself**. Never create ad-hoc scratch anywhere under the outputs mount (no `_src/` copies, no run-state note files); scratch belongs in `$STAGING_DIR` (a `/tmp` dir, defined below). Do not "clean up" the outputs folder before delivering — extra working files there are expected and harmless.
 
@@ -822,8 +822,7 @@ unchanged:
 
 ```bash
 python3 "$SCRIPTS/cp_dispatch_prompt.py" startup_research --run-id "$RUN_ID" \
-  --handoff-agent "$HANDOFF_AGENT" --analysis-dir-agent "$ANALYSIS_DIR_AGENT" \
-  --plugin-root-agent "${CLAUDE_PLUGIN_ROOT}"
+  --handoff-agent "$HANDOFF_AGENT" --analysis-dir-agent "$ANALYSIS_DIR_AGENT"
 ```
 
 **After it returns:** gate the hand-off per the Context A hand-off protocol, then pipe it through the
@@ -859,11 +858,10 @@ never in the prompt.
 
 ```bash
 python3 "$SCRIPTS/cp_dispatch_prompt.py" moat_scoring --run-id "$RUN_ID" \
-  --handoff-agent "$HANDOFF_AGENT" --analysis-dir-agent "$ANALYSIS_DIR_AGENT" \
-  --plugin-root-agent "${CLAUDE_PLUGIN_ROOT}"
+  --handoff-agent "$HANDOFF_AGENT" --analysis-dir-agent "$ANALYSIS_DIR_AGENT"
 python3 "$SCRIPTS/cp_dispatch_prompt.py" positioning_scoring --run-id "$RUN_ID" \
   --handoff-agent "$HANDOFF_AGENT" --analysis-dir-agent "$ANALYSIS_DIR_AGENT" \
-  --plugin-root-agent "${CLAUDE_PLUGIN_ROOT}" --analysis-dir "$ANALYSIS_DIR" --scoring-basis shipped
+  --analysis-dir "$ANALYSIS_DIR" --scoring-basis shipped
 ```
 
 **After both sub-agents return:** gate EACH hand-off per the Context A hand-off protocol (run `check_handoff.py` per file, branch on exit codes). Then pipe each file through its producer:
@@ -964,8 +962,7 @@ unchanged — nothing added, removed or reworded, including on a re-run after a 
 
 ```bash
 python3 "$SCRIPTS/cp_dispatch_prompt.py" checklist --run-id "$RUN_ID" \
-  --handoff-agent "$HANDOFF_AGENT" --analysis-dir-agent "$ANALYSIS_DIR_AGENT" \
-  --plugin-root-agent "${CLAUDE_PLUGIN_ROOT}"
+  --handoff-agent "$HANDOFF_AGENT" --analysis-dir-agent "$ANALYSIS_DIR_AGENT"
 ```
 
 **After the sub-agent returns:** gate the hand-off per the Context A hand-off protocol, then pipe through the producer script. The sub-agent writes items only — pass the real input mode and run_id on the CLI so `checklist.py` gates the right items and stamps `metadata.run_id`:
@@ -1002,7 +999,7 @@ python3 "$SHARED_SCRIPTS/resolve_artifacts_root.py" --uploads   # prints UPLOADS
 mkdir -p "$HANDOFF_DIR/docs" && cp "<printed UPLOADS_DIR>"/* "$HANDOFF_DIR/docs/"
 python3 "$SCRIPTS/cp_dispatch_prompt.py" red_team --run-id "$RUN_ID" \
   --handoff-agent "$HANDOFF_AGENT" --analysis-dir-agent "$ANALYSIS_DIR_AGENT" \
-  --plugin-root-agent "${CLAUDE_PLUGIN_ROOT}" --analysis-dir "$ANALYSIS_DIR" --handoff-dir "$HANDOFF_DIR"
+  --analysis-dir "$ANALYSIS_DIR" --handoff-dir "$HANDOFF_DIR"
 ```
 
 **After it returns:** gate the hand-off per the Context A hand-off protocol, then pipe:

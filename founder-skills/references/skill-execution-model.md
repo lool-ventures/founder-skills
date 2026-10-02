@@ -85,6 +85,12 @@ tool surface and different rules.
     token, which the loader fills with a host-readable path (or Step 0's
     `READ_ROOT=` value when it printed one) — never a `find`-discovered `$REFS`
     (a VM path a file tool can't read). This holds for MAIN-THREAD Reads too.
+  - **A reference in a generator-printed prompt** → never a folder passed
+    through the shell: recent Claude Desktop versions rewrite the plugin's
+    (and a skill's) folder in a shell command to its VM path; other paths
+    are not rewritten. Off a `/sessions` tree the generator prints absolute
+    paths from where it runs; on one it names how each path ends, and the
+    agent body holds the full `${CLAUDE_PLUGIN_ROOT}/…` path.
   - **An artifact under `outputs/`** (a prior step's `*.json`) → an **absolute
     agent-namespace path** from `resolve_artifacts_root.py` (the same namespace
     as `OUTPUT_PATH`; build a `<WORKDIR>_AGENT` var beside `HANDOFF_AGENT`).
@@ -429,18 +435,10 @@ internally — pass the final message verbatim.
   `<host outputs>` and the same proof holds. Skip the whole step when the
   printed `ARTIFACTS_ROOT` does not start with `/sessions/` (CLI, remote
   lane) — `--set-host-outputs-dir` says `not_needed` there.
-  **The same asymmetry that makes `OUTPUT_PATH` need `--agent` makes any
-  VM-path handed to a sub-agent for READING fail identically** — a
-  host-side containment hook gates Read AND Write alike, so a
-  `/sessions/…`-style path denies whether the sub-agent tries to Read it
-  or Write to it. `--agent` resolves the outputs ROOT, not arbitrary paths —
-  but that root is exactly what an under-outputs artifact READ needs: build the
-  read path in the SAME agent namespace as `OUTPUT_PATH` (under the proven
-  `--agent` root), which the sub-agent's host-native Read reaches. Only content OUTSIDE the outputs tree (uploads, raw document
-  text) has no path form the sub-agent can reach — inline those bytes into the
-  dispatch prompt. References are the third case: the literal
-  `${CLAUDE_PLUGIN_ROOT}/…` token (filled by the loader, or Step 0's `READ_ROOT=`).
-  See the three-way rule in the Context A invariant above.
+  **The same asymmetry fails a VM path handed to a sub-agent for READING**:
+  the host-side hook gates Read and Write alike. Build an under-outputs read
+  path under the proven `--agent` root, as for `OUTPUT_PATH`; inline content
+  outside outputs; references follow the rule in the Context A invariant above.
 - **`${CLAUDE_PLUGIN_ROOT}` is unset in VM bash, on EVERY tier — and the
   plugin's mount path is not one fixed shape.** Where the loader fills the
   token into the skill body's TEXT, a host-side `Read` of it resolves;
@@ -466,8 +464,8 @@ internally — pass the final message verbatim.
   those reads through `mcp__workspace__bash`/`cat`. The exception is a skill
   started as the first message of a new conversation: its text arrives with
   the token unfilled, so Step 0 finds the plugin by a filesystem search and
-  prints `READ_ROOT=`, and that value replaces the token in every Read,
-  sub-agent prompt and `--plugin-root-agent` argument. Route through
+  prints `READ_ROOT=`, and that value replaces the token in every Read and
+  sub-agent prompt. Route through
   `mcp__workspace__bash` only for paths that are genuinely VM-namespace:
   `/sessions/…/uploads/…` (uploaded documents) and
   `/sessions/…/mnt/outputs/…` (dynamic artifacts under `outputs/`).

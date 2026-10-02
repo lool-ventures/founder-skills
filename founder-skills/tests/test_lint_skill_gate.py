@@ -1,11 +1,9 @@
 """cowork-tests/lint_skill_gate.py: `lint-skill` gated against a pinned, shrink-only allowlist.
 
-`lint-skill --strict` has no per-rule suppression, and it fires warnings this repo has decided to live with:
-`plugin-root-in-vm-bash` on a quoted `--plugin-root-agent "${CLAUDE_PLUGIN_ROOT}"` argument (a probable
-harness false positive, reported upstream), and -- from 4.0.0 -- size caps the repo's measured decision not to
-shrink SKILL.md bodies contradicts. Dropping `--strict` would lose every WARN rule; this keeps them all and
-names the accepted ones by (rule, file, count). A new rule, a new file, or one more site reds; an accepted
-entry that no longer fires reds too, so the list only shrinks.
+`lint-skill --strict` has no per-rule suppression, and from 4.0.0 it fires size-cap warnings that the repo's
+measured decision not to shrink SKILL.md bodies contradicts. Dropping `--strict` would lose every WARN rule;
+this keeps them all and names the accepted ones by (rule, file, count). A new rule, a new file, or one more
+site reds; an accepted entry that no longer fires reds too, so the list only shrinks.
 """
 
 from __future__ import annotations

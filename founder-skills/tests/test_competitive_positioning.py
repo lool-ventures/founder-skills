@@ -5215,7 +5215,7 @@ def test_skill_md_moat_scoring_dispatch_requires_source_citation() -> None:
     assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    block = mod.render("moat_scoring", run_id="R", handoff_agent="/h", analysis_dir_agent="/a", plugin_root_agent="/p")
+    block = mod.render("moat_scoring", run_id="R", handoff_agent="/h", analysis_dir_agent="/a")
     assert "source" in block.lower()
     assert '"source"' in block, "MOAT_SCORING template should show the 'source' field in its JSON example"
 
@@ -7032,14 +7032,15 @@ class TestCpDispatchPrompt:
         return self._load(os.path.join(self.SCRIPTS, "cp_dispatch_prompt.py"), "cp_dispatch_prompt_t")
 
     def _render(self, context: str, **kw: Any) -> str:
-        args = {"run_id": "R1", "handoff_agent": "/h/", "analysis_dir_agent": "/a", "plugin_root_agent": "/p"}
+        args = {"run_id": "R1", "handoff_agent": "/h/", "analysis_dir_agent": "/a"}
         args.update(kw)
         text: str = self._gen().render(context, **args)
         return text
 
+    @pytest.mark.parametrize("session_tree", [False, True])
     @pytest.mark.parametrize("context", ["moat_scoring", "positioning_scoring", "checklist", "startup_research"])
-    def test_every_placeholder_is_filled_and_the_hook_line_closes_it(self, context: str) -> None:
-        text = self._render(context)
+    def test_every_placeholder_is_filled_and_the_hook_line_closes_it(self, context: str, session_tree: bool) -> None:
+        text = self._render(context, session_tree=session_tree)
         leftovers = set(re.findall(r"<[A-Z_]+>", text))
         assert not leftovers, leftovers
         assert "${CLAUDE_PLUGIN_ROOT}" not in text
@@ -7078,8 +7079,6 @@ class TestCpDispatchPrompt:
                 "/h",
                 "--analysis-dir-agent",
                 "/a",
-                "--plugin-root-agent",
-                "/p",
             ],
             capture_output=True,
             text=True,
@@ -7475,9 +7474,7 @@ def test_the_positioning_prompt_asks_for_the_plan_apart_from_today() -> None:
     assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    text = mod.render(
-        "positioning_scoring", run_id="R", handoff_agent="/h", analysis_dir_agent="/a", plugin_root_agent="/p"
-    )
+    text = mod.render("positioning_scoring", run_id="R", handoff_agent="/h", analysis_dir_agent="/a")
     for field in ("planned_x", "planned_y", "x_proof", "y_proof", "x_proof_quote"):
         assert field in text, field
     assert "never put a planned value in them" in text
@@ -7806,8 +7803,6 @@ def test_red_team_prompt_is_refused_on_an_unfinished_analysis(tmp_path: pathlib.
             "/agent/h",
             "--analysis-dir-agent",
             "/agent/a",
-            "--plugin-root-agent",
-            "/p",
             "--analysis-dir",
             str(analysis),
             "--handoff-dir",

@@ -146,7 +146,7 @@ for c in sys.stdin.read().splitlines():
   SCRIPTS="$PLUGIN_ROOT/skills/market-sizing/scripts"
 fi
 PLUGIN_ROOT="${SCRIPTS%/skills/*}"
-echo "PLUGIN_ROOT=$PLUGIN_ROOT"   # resolved ONCE, here — paste this literal into every later block; never re-run this resolution. PLUGIN_ROOT is for shell commands; never Read from it.
+echo "PLUGIN_ROOT=$PLUGIN_ROOT"   # resolved ONCE, here — paste this literal into every later block; never re-run this resolution. PLUGIN_ROOT is for shell commands; never Read from it or put it in a sub-agent prompt.
 REFS="$PLUGIN_ROOT/skills/market-sizing/references"
 SHARED_SCRIPTS="$PLUGIN_ROOT/scripts"
 # PREFLIGHT: the run STOPS if this prints (the skill was served without its plugin). Test for
@@ -171,7 +171,7 @@ have not run it — then stop. Do not improvise the missing steps: an analysis t
 reviews itself reads exactly like one that was checked, which is the failure this stop exists to
 prevent.
 
-**Plugin paths.** If Step 0 printed `READ_ROOT=`, this skill's text arrived without its plugin folder filled in. Use that value in place of `${CLAUDE_PLUGIN_ROOT}` in every Read, sub-agent prompt and `--plugin-root-agent` argument, including where a later step says to leave that path literal. If it did not print `READ_ROOT=`, use the paths as shown. The folder comes from Step 0's filesystem search, not from a skill file or the "Base directory" line, which can name a folder that does not exist. These are setup details: updates to the founder are about their company, not file locations, printed paths or plugin versions.
+**Plugin paths.** If Step 0 printed `READ_ROOT=`, this skill's text arrived without its plugin folder filled in. Use that value in place of `${CLAUDE_PLUGIN_ROOT}` in every Read and sub-agent prompt, including where a later step says to leave that path literal. If it did not print `READ_ROOT=`, use the paths as shown. The folder comes from Step 0's filesystem search, not from a skill file or the "Base directory" line, which can name a folder that does not exist. These are setup details: updates to the founder are about their company, not file locations, printed paths or plugin versions.
 
 **Outputs mount is append-only.** Everything under the promoted outputs mount (`.../mnt/outputs/`, not just `$ANALYSIS_DIR`) is write-allowed and delete-denied by the platform: never `rm`, move away, or empty anything under it — **including files you created yourself**. Never create ad-hoc scratch anywhere under the outputs mount (no `_src/` copies, no run-state note files); scratch belongs in `$STAGING_DIR` (a `/tmp` dir, defined below). Do not "clean up" the outputs folder before delivering — extra working files there are expected and harmless.
 
@@ -916,8 +916,7 @@ copy of `methodology.json` the grader reads, which leaves out the revision recor
 ```bash
 python3 "$SCRIPTS/dispatch_prompt.py" checklist --run-id "$RUN_ID" \
   --analysis-dir "$ANALYSIS_DIR" --analysis-dir-agent "$ANALYSIS_DIR_AGENT" \
-  --handoff-dir "$HANDOFF_DIR" --handoff-agent "$HANDOFF_AGENT" \
-  --plugin-root-agent "${CLAUDE_PLUGIN_ROOT}"
+  --handoff-dir "$HANDOFF_DIR" --handoff-agent "$HANDOFF_AGENT"
 ```
 
 **After the sub-agent returns:** gate the hand-off per the Context A hand-off protocol, then pipe:

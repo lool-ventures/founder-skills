@@ -350,7 +350,8 @@ for c in sys.stdin.read().splitlines():
     "CANDIDATES=\"$(find /root/.claude/plugins -type d -path '*/skills/{skill}/scripts' 2>/dev/null | ours)\"\n"
     '  [ -n "$CANDIDATES" ] || CANDIDATES="$(find / -type d -path \'*/skills/{skill}/scripts\' 2>/dev/null | ours)"\n',
     'echo "PLUGIN_ROOT=$PLUGIN_ROOT"   # resolved ONCE, here — paste this literal into every later block; '
-    "never re-run this resolution. PLUGIN_ROOT is for shell commands; never Read from it.\n",
+    "never re-run this resolution. PLUGIN_ROOT is for shell commands; never Read from it or put it in a "
+    "sub-agent prompt.\n",
     """[ -f "$SHARED_SCRIPTS/check_handoff.py" ] && case "$TEXT_ROOT_RAW" in
   *'$'*|'') echo "PATH_STATE=literal"; echo "READ_ROOT=$PLUGIN_ROOT" ;;
   /sessions/*) echo "PATH_STATE=local" ;;
@@ -361,8 +362,8 @@ esac
 
 STEP0_PROSE = (
     "**Plugin paths.** If Step 0 printed `READ_ROOT=`, this skill's text arrived without its plugin folder "
-    "filled in. Use that value in place of `${CLAUDE_PLUGIN_ROOT}` in every Read, sub-agent prompt and "
-    "`--plugin-root-agent` argument, including where a later step says to leave that path literal. If it did "
+    "filled in. Use that value in place of `${CLAUDE_PLUGIN_ROOT}` in every Read and sub-agent prompt, "
+    "including where a later step says to leave that path literal. If it did "
     "not print `READ_ROOT=`, use the paths as shown. The folder comes from Step 0's filesystem search, not from "
     'a skill file or the "Base directory" line, which can name a folder that does not exist. These are setup '
     "details: updates to the founder are about their company, not file locations, printed paths or plugin versions."
@@ -394,46 +395,8 @@ def test_step0_never_keys_on_the_flat_skill_mount_or_reads_a_skill_file(skill: s
     assert "SKILL.md" not in code and "Base directory" not in code, f"{skill}: Step 0 reads the skill text"
 
 
-# --- generators refuse a root a sub-agent cannot use --------------------------------------------
-
 MS_GEN = PLUGIN / "skills" / "market-sizing" / "scripts" / "dispatch_prompt.py"
 CP_GEN = PLUGIN / "skills" / "competitive-positioning" / "scripts" / "cp_dispatch_prompt.py"
-
-
-def _ms_checklist(tmp_path: Path, root: str) -> subprocess.CompletedProcess[str]:
-    analysis = tmp_path / "analysis"
-    analysis.mkdir(exist_ok=True)
-    for f in ("inputs.json", "methodology.json", "validation.json", "sizing.json"):
-        (analysis / f).write_text("{}")
-    args = ["checklist", "--run-id", "R", "--analysis-dir", str(analysis), "--handoff-dir", str(tmp_path / "h")]
-    args += ["--handoff-agent", "/agent/h", "--plugin-root-agent", root]
-    return subprocess.run([sys.executable, str(MS_GEN), *args], capture_output=True, text=True)
-
-
-def _cp_moat(tmp_path: Path, root: str) -> subprocess.CompletedProcess[str]:
-    args = ["moat_scoring", "--run-id", "R", "--handoff-agent", "/agent/h", "--analysis-dir-agent", "/agent/a"]
-    return subprocess.run(
-        [sys.executable, str(CP_GEN), *args, "--plugin-root-agent", root], capture_output=True, text=True
-    )
-
-
-def _bad_roots(tmp_path: Path) -> list[str]:
-    other = tmp_path / "other"
-    (other / ".claude-plugin").mkdir(parents=True)
-    (other / ".claude-plugin" / "plugin.json").write_text('{"name": "other-plugin"}')
-    return ["", TOKEN, "rel/path", str(other)]
-
-
-@pytest.mark.parametrize("gen", [_ms_checklist, _cp_moat], ids=["market-sizing", "competitive-positioning"])
-def test_generators_refuse_a_root_a_sub_agent_cannot_read(gen: Callable, tmp_path: Path) -> None:
-    for root in _bad_roots(tmp_path):
-        proc = gen(tmp_path, root)
-        assert proc.returncode == 2 and proc.stdout == "", f"{root!r} accepted:\n{proc.stdout}{proc.stderr}"
-        assert "--plugin-root-agent" in proc.stderr and len(proc.stderr.strip().splitlines()) == 1, proc.stderr
-    ours = _plugin_copy(tmp_path / "ours")
-    for root in ("/p", str(ours)):
-        proc = gen(tmp_path, root)
-        assert proc.returncode == 0, f"{root!r} refused:\n{proc.stderr}"
 
 
 # --- every sub-agent prompt that carries a bundled reference path names the fallback -------------
@@ -465,14 +428,54 @@ def _prompts_with_reference_paths() -> list[tuple[str, str, str]]:
     return found
 
 
+# Hard-coded, never derived from the scan below: a scan that went blind would otherwise pass on nothing.
+# The three generator templates, and the four prompts a SKILL.md still writes out in a fence.
+EXPECTED_REFERENCE_PROMPTS = {
+    ("dispatch_prompt.py", "CONTEXT: CHECKLIST"),
+    ("cp_dispatch_prompt.py", "CONTEXT: MOAT_SCORING"),
+    ("cp_dispatch_prompt.py", "CONTEXT: CHECKLIST"),
+    ("deck-review", "CONTEXT: SLIDE_REVIEWS"),
+    ("deck-review", "CONTEXT: CHECKLIST"),
+    ("financial-model-review", "CONTEXT: INPUTS_REVIEW"),
+    ("financial-model-review", "CONTEXT: CHECKLIST"),
+}
+
+# What a generated prompt says instead, on a /sessions tree, where it names no path at all.
+SESSION_POINTER = (
+    "Each reference file below is in your plugin folder: open it at the full path your own instructions give "
+    "for it (below, each is named by how that path ends)."
+)
+
+
 def test_every_prompt_with_a_reference_path_names_the_fallback() -> None:
     prompts = _prompts_with_reference_paths()
-    names = {(src, name) for src, name, _ in prompts}
-    assert len(prompts) >= 6, f"the prompt scan went blind: {sorted(names)}"
+    assert {(src, body.split("\n", 1)[0]) for src, _, body in prompts} == EXPECTED_REFERENCE_PROMPTS
     for src, name, body in prompts:
         assert SUBAGENT_FALLBACK in body, f"{src} {name} hands over a reference path with no fallback"
         first_path = min(i for i in (body.find("<PLUGIN_ROOT_AGENT>"), body.find(TOKEN)) if i >= 0)
         assert body.index(SUBAGENT_FALLBACK) < first_path, f"{src} {name}: the fallback must precede the paths"
+
+
+def _session_renderings(tmp_path: Path) -> dict[str, str]:
+    analysis = tmp_path / "a"
+    analysis.mkdir()
+    for f in ("inputs.json", "methodology.json", "validation.json", "sizing.json"):
+        (analysis / f).write_text("{}")
+    ms, cp = _load(MS_GEN), _load(CP_GEN)
+    out = {"ms checklist": ms.checklist("R", str(analysis), str(tmp_path / "h"), "/h", "/a", session_tree=True)}
+    for context in ("moat_scoring", "checklist"):
+        out[f"cp {context}"] = cp.render(
+            context, run_id="R", handoff_agent="/h", analysis_dir_agent="/a", session_tree=True
+        )
+    return out
+
+
+def test_on_a_session_tree_a_generated_prompt_points_instead_of_naming_a_path(tmp_path: Path) -> None:
+    for name, body in _session_renderings(tmp_path).items():
+        assert SESSION_POINTER in body, name
+        assert body.index(SESSION_POINTER) < body.index("the file ending skills/"), name
+        assert SUBAGENT_FALLBACK not in body, name
+        assert not re.search(r"/skills/[a-z-]+/references/", body), f"{name} names an absolute reference path"
 
 
 @pytest.mark.parametrize("skill", SKILLS)

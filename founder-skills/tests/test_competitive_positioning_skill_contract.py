@@ -73,7 +73,7 @@ _GENERATED_CONTEXTS = {
 }
 
 
-def _dispatch_section(context_name: str) -> str:
+def _dispatch_section(context_name: str, session_tree: bool = False) -> str:
     """The dispatch prompt a sub-agent is sent for `context_name`.
 
     MOAT_SCORING, POSITIONING_SCORING and CHECKLIST are printed by cp_dispatch_prompt.py (SKILL.md now
@@ -93,8 +93,8 @@ def _dispatch_section(context_name: str) -> str:
             run_id="RUN",
             handoff_agent="/agent/handoff",
             analysis_dir_agent="/agent/analysis",
-            plugin_root_agent="${CLAUDE_PLUGIN_ROOT}",
             job="the job",
+            session_tree=session_tree,
         )
         return rendered
     skill_text = SKILL_MD.read_text(encoding="utf-8")
@@ -381,39 +381,39 @@ def test_moat_dimension_prose_mentions_in_skill_md_and_agent_body() -> None:
 
     assert len(canonical) == 6, f"CANONICAL_MOAT_IDS has {len(canonical)} entries (expected 6)"
 
-    section = _dispatch_section("MOAT_SCORING")
+    # Both renderings: absolute paths (CLI, cloud) and the pointer form (a local Desktop session).
+    for section in (_dispatch_section("MOAT_SCORING"), _dispatch_section("MOAT_SCORING", session_tree=True)):
+        # Extract the comma-or-space-separated moat ID list from the template.
+        # The list follows the moat-definitions.md citation and spans 1-2 lines of
+        # comma-separated snake_case tokens.  We isolate just that block (from the
+        # end of the 'moat-definitions.md:' line to the first blank line or 'Each'
+        # keyword) to avoid picking up other snake_case tokens in the template such
+        # as 'evidence_source' or 'run_id'.
+        enum_block_match = re.search(
+            r"moat-definitions\.md:[^\n]*\n((?:[^\n]+\n)*?)(?:\n|Each\b)",
+            section,
+            re.DOTALL,
+        )
+        assert enum_block_match is not None, (
+            f"{SKILL_MD.name} MOAT_SCORING template: cannot find the moat-ID block after "
+            f"the 'moat-definitions.md:' citation (expected comma-separated snake_case IDs)"
+        )
+        enum_block = enum_block_match.group(1)
+        # Extract every snake_case token that looks like a moat identifier (contains '_').
+        # This excludes generic one-word tokens that may appear in the block.
+        cited: set[str] = {t for t in re.findall(r"\b([a-z][a-z0-9_]+)\b", enum_block) if "_" in t}
 
-    # Extract the comma-or-space-separated moat ID list from the template.
-    # The list follows the moat-definitions.md citation and spans 1-2 lines of
-    # comma-separated snake_case tokens.  We isolate just that block (from the
-    # end of the 'moat-definitions.md:' line to the first blank line or 'Each'
-    # keyword) to avoid picking up other snake_case tokens in the template such
-    # as 'evidence_source' or 'run_id'.
-    enum_block_match = re.search(
-        r"moat-definitions\.md:[^\n]*\n((?:[^\n]+\n)*?)(?:\n|Each\b)",
-        section,
-        re.DOTALL,
-    )
-    assert enum_block_match is not None, (
-        f"{SKILL_MD.name} MOAT_SCORING template: cannot find the moat-ID block after "
-        f"the 'moat-definitions.md:' citation (expected comma-separated snake_case IDs)"
-    )
-    enum_block = enum_block_match.group(1)
-    # Extract every snake_case token that looks like a moat identifier (contains '_').
-    # This excludes generic one-word tokens that may appear in the block.
-    cited: set[str] = {t for t in re.findall(r"\b([a-z][a-z0-9_]+)\b", enum_block) if "_" in t}
+        assert len(cited) == 6, (
+            f"{SKILL_MD.name} MOAT_SCORING enumeration line has {len(cited)} moat-like tokens "
+            f"(expected 6); found: {sorted(cited)}"
+        )
 
-    assert len(cited) == 6, (
-        f"{SKILL_MD.name} MOAT_SCORING enumeration line has {len(cited)} moat-like tokens "
-        f"(expected 6); found: {sorted(cited)}"
-    )
-
-    missing = canonical - cited
-    phantom = cited - canonical
-    assert not missing, f"{SKILL_MD.name} MOAT_SCORING template is missing canonical moat IDs: {sorted(missing)}"
-    assert not phantom, (
-        f"{SKILL_MD.name} MOAT_SCORING template cites moat IDs not in CANONICAL_MOAT_IDS: {sorted(phantom)}"
-    )
+        missing = canonical - cited
+        phantom = cited - canonical
+        assert not missing, f"{SKILL_MD.name} MOAT_SCORING template is missing canonical moat IDs: {sorted(missing)}"
+        assert not phantom, (
+            f"{SKILL_MD.name} MOAT_SCORING template cites moat IDs not in CANONICAL_MOAT_IDS: {sorted(phantom)}"
+        )
 
     # Agent body MOAT_SCORING subtype enumerates the 6 canonical IDs as
     # backtick-quoted tokens on 1-2 comma-separated lines after "canonical moat

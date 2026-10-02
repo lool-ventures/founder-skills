@@ -17,9 +17,20 @@ the printed prompt for its OUTPUT_PATH; SKILL.md does not depend on it.
 Every prompt ends with the hook's closing line, "Do NOT write any file other than OUTPUT_PATH.",
 which is how the hook finds where a printed prompt ends.
 
+THE PLUGIN FOLDER NEVER COMES FROM THE SHELL. Recent Claude Desktop versions rewrite the plugin's folder
+(and a skill's folder) inside a shell command to its path inside the VM before the command runs; other
+paths are not rewritten. A plugin folder handed to this script as an argument therefore arrives as a VM
+path, which a sub-agent's file tools are refused. So the reference paths in the MOAT_SCORING and
+CHECKLIST prompts come from where this script runs. Off a `/sessions` tree (the CLI, cloud sessions)
+that folder is the one a sub-agent reads, and the absolute paths are printed. On a `/sessions` tree (a
+local Desktop session) it is a VM path, so the prompt names each reference by how its path ends and
+sends the sub-agent to the full path its own agent instructions give, which the loader fills in for that
+sub-agent. That is right on a VM-loop session too, where the filled path is the VM one and the file tools
+run in the VM. `--plugin-root-agent` is still accepted and ignored, so an older command line prints the
+same prompt.
+
 Usage:
-    python cp_dispatch_prompt.py moat_scoring --run-id R --handoff-agent H --analysis-dir-agent A \
-        --plugin-root-agent P
+    python cp_dispatch_prompt.py moat_scoring --run-id R --handoff-agent H --analysis-dir-agent A
     python cp_dispatch_prompt.py positioning_scoring ... --scoring-basis shipped --analysis-dir D
     python cp_dispatch_prompt.py checklist ...
     python cp_dispatch_prompt.py red_team ... --analysis-dir D --handoff-dir H_SHELL
@@ -32,8 +43,53 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from typing import Any
+
+# --- where the reference files are --------------------------------------------------------------------
+#
+# Copy of the session-tree detection in scripts/resolve_artifacts_root.py (a generator runs without the
+# plugin's shared scripts on its path); tests/test_plugin_root_not_through_bash.py pins the copy.
+_SESSION_TREE = re.compile(r"^(/sessions/[^/]+)/mnt(?:/|$)")
+_SESSION_ROOT = re.compile(r"^/sessions/[^/]+$")
+
+
+def on_session_tree(cwd: str) -> bool:
+    return bool(_SESSION_TREE.match(cwd) or _SESSION_ROOT.match(cwd))
+
+
+def _plugin_root() -> str:
+    """The plugin folder this script runs from (four levels up from this file)."""
+    return os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+
+def _on_session_lane() -> bool:
+    """A local Desktop session: this script or the shell sits on a `/sessions` tree, where the folder above
+    is a VM path a sub-agent's file tools are refused."""
+    return on_session_tree(os.getcwd()) or on_session_tree(_plugin_root())
+
+
+_FALLBACK = (
+    "If a reference path below cannot be read (refused or not found), read the same file under the plugin folder "
+    "your own instructions name.\n"
+)
+_POINTER = (
+    "Each reference file below is in your plugin folder: open it at the full path your own instructions give "
+    "for it (below, each is named by how that path ends).\n"
+)
+_REFERENCE = re.compile(r"<PLUGIN_ROOT_AGENT>/(skills/[a-z-]+/references/[\w./-]+?\.md)")
+
+
+def _references(text: str, session_tree: bool | None) -> str:
+    """Absolute reference paths off a `/sessions` tree; on one, a pointer to the agent body's full path."""
+    if not (_on_session_lane() if session_tree is None else session_tree):
+        return text.replace("<PLUGIN_ROOT_AGENT>", _plugin_root().rstrip("/"))
+    out = _REFERENCE.sub(r"the file ending \1", text.replace(_FALLBACK, _POINTER))
+    if "<PLUGIN_ROOT_AGENT>" in out:
+        raise ValueError("a plugin-root placeholder that names no reference file")
+    return out
+
 
 # The first line of each prompt, as its own literal: the hook and the dispatch-contract test read it.
 _MOAT_SCORING_CONTEXT = "CONTEXT: MOAT_SCORING"
@@ -52,10 +108,7 @@ _MOAT_SCORING_TEMPLATE = (
     "product_profile.json is the ONLY source for what the startup actually does — positioning.json's\n"
     "pre-dispatch block carries placeholder evidence, so without it you would be scoring the startup\n"
     "from nothing.\n"
-    "\n"
-    "If a reference path below cannot be read (refused or not found), read the same file under the plugin folder "
-    "your own instructions name.\n"
-    "Score every slug (including _startup) across the 6 canonical moat dimensions from\n"
+    "\n" + _FALLBACK + "Score every slug (including _startup) across the 6 canonical moat dimensions from\n"
     "<PLUGIN_ROOT_AGENT>/skills/competitive-positioning/references/moat-definitions.md:\n"
     "network_effects, data_advantages, switching_costs, regulatory_barriers,\n"
     "cost_structure, brand_reputation.\n"
@@ -191,9 +244,8 @@ _CHECKLIST_TEMPLATE = (
     "RUN_ID: <RUN_ID>\n"
     "\n"
     "You are the competitive-positioning agent dispatched in Context A (CHECKLIST).\n"
-    "If a reference path below cannot be read (refused or not found), read the same file under the plugin folder "
-    "your own instructions name.\n"
-    "Read landscape.json, positioning.json, moat_scores.json, positioning_scores.json,\n"
+    + _FALLBACK
+    + "Read landscape.json, positioning.json, moat_scores.json, positioning_scores.json,\n"
     "product_profile.json, and landscape_draft.json from <ANALYSIS_DIR_AGENT>. Also read\n"
     "<PLUGIN_ROOT_AGENT>/skills/competitive-positioning/references/checklist-criteria.md.\n"
     "product_profile.json's deck_competition_slide field (deck mode) and\n"
@@ -206,7 +258,7 @@ _CHECKLIST_TEMPLATE = (
     "score denominator, inflating the score while hiding the finding, and a deck that\n"
     "never engages competition is one of the strongest findings this review returns.\n"
     'Do not treat the field\'s absence as "nothing to grade" once a present:false\n'
-    "record with a reason exists. references/checklist-criteria.md's NARR_03 bands are\n"
+    "record with a reason exists. skills/competitive-positioning/references/checklist-criteria.md's NARR_03 bands are\n"
     "the authority.\n"
     "\n"
     "Assess all 25 checklist items (COVER_01..05, POS_01..05, MOAT_01..04,\n"
@@ -333,13 +385,15 @@ def render(
     run_id: str,
     handoff_agent: str,
     analysis_dir_agent: str,
-    plugin_root_agent: str,
     scoring_basis: str = "shipped",
     job: str | None = None,
     correction: str | None = None,
+    session_tree: bool | None = None,
 ) -> str:
-    """The prompt for `context`, placeholders filled. No free text reaches it but the recorded job."""
-    text = _TEMPLATES[context]
+    """The prompt for `context`, placeholders filled. No free text reaches it but the recorded job.
+
+    `session_tree` None detects the lane (see `_on_session_lane`); tests pass it to force one."""
+    text = _references(_TEMPLATES[context], session_tree)
     # The job is placed where the scorer decides how well each competitor serves the startup's buyer:
     # a run credited unrelated shipping products on readiness because scoring never saw the job.
     job_line = (
@@ -353,7 +407,6 @@ def render(
     return (
         text.replace("<HANDOFF_AGENT>", handoff_agent.rstrip("/"))
         .replace("<ANALYSIS_DIR_AGENT>", analysis_dir_agent.rstrip("/"))
-        .replace("<PLUGIN_ROOT_AGENT>", plugin_root_agent.rstrip("/"))
         .replace("<SCORING_BASIS>", scoring_basis)
         .replace("<JOB_TO_BE_DONE>", job_line)
         .replace("<RUN_ID>", run_id)
@@ -509,36 +562,15 @@ def red_team(
     return text
 
 
-def _plugin_root_refusal(root: str) -> str | None:
-    """Why a sub-agent could not read references under `root`, or None when it can.
-
-    A literal `${CLAUDE_PLUGIN_ROOT}` (skill text that arrived unfilled) or an empty or relative value
-    names nothing a file tool can open, and a root whose plugin.json names another plugin is a
-    different plugin's folder. Only a manifest this shell can see is checked: on a host-loop session
-    the root is a host path the shell cannot reach, and that is correct.
-    """
-    if not root.strip() or "$" in root:
-        return "is empty or an unfilled placeholder"
-    if not os.path.isabs(root):
-        return "is not an absolute path"
-    manifest = os.path.join(root, ".claude-plugin", "plugin.json")
-    try:
-        with open(manifest, encoding="utf-8") as fh:
-            name = json.load(fh).get("name")
-    except (OSError, ValueError, AttributeError):
-        return None
-    if name != "founder-skills":
-        return f"is the folder of another plugin ({name!r})"
-    return None
-
-
 def main() -> None:
     p = argparse.ArgumentParser(description="Print a competitive-positioning dispatch prompt")
     p.add_argument("context", choices=sorted([*_TEMPLATES, "red_team"]))
     p.add_argument("--run-id", required=True)
     p.add_argument("--handoff-agent", required=True, help="the hand-off dir as the sub-agent addresses it")
     p.add_argument("--analysis-dir-agent", required=True, help="the artifacts dir as the sub-agent addresses it")
-    p.add_argument("--plugin-root-agent", required=True, help="the plugin root as the sub-agent addresses it")
+    # Accepted and ignored for one release, so an older command line still prints the same prompt; the
+    # folder a prompt names comes from where this script runs (module docstring).
+    p.add_argument("--plugin-root-agent", help=argparse.SUPPRESS)
     p.add_argument("--scoring-basis", choices=SCORING_BASES, default="shipped")
     p.add_argument("--correction", choices=sorted(CORRECTIONS), help="a corrective redo's one added line")
     p.add_argument(
@@ -547,15 +579,6 @@ def main() -> None:
     )
     p.add_argument("--handoff-dir", help="the hand-off dir in THIS shell's namespace (red_team lists its docs/)")
     a = p.parse_args()
-    if a.plugin_root_agent is not None:
-        why = _plugin_root_refusal(a.plugin_root_agent)
-        if why:
-            print(
-                f"Error: --plugin-root-agent {a.plugin_root_agent!r} {why}; pass the plugin folder this skill "
-                "shows, or the READ_ROOT= value Step 0 printed",
-                file=sys.stderr,
-            )
-            sys.exit(2)
     if a.context == "positioning_scoring" and not a.analysis_dir:
         print("Error: positioning_scoring needs --analysis-dir to read the job to be done", file=sys.stderr)
         sys.exit(2)
@@ -583,7 +606,6 @@ def main() -> None:
             run_id=a.run_id,
             handoff_agent=a.handoff_agent,
             analysis_dir_agent=a.analysis_dir_agent,
-            plugin_root_agent=a.plugin_root_agent,
             scoring_basis=a.scoring_basis,
             job=job_to_be_done(a.analysis_dir) if a.context == "positioning_scoring" else None,
             correction=a.correction,

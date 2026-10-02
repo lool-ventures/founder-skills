@@ -28,6 +28,17 @@ says. The founder's documents live outside outputs and have no agent-namespace f
 them into `<handoff-dir>/docs/` first; OCR sidecars sit in `<handoff-dir>/ocr/`. Omit
 `--analysis-dir-agent` on a single-namespace host (the CLI) and the real path is rendered.
 
+THE PLUGIN FOLDER NEVER COMES FROM THE SHELL. Recent Claude Desktop versions rewrite the plugin's folder
+(and a skill's folder) inside a shell command to its path inside the VM before the command runs; other
+paths are not rewritten. A plugin folder handed to this script as an argument therefore arrives as a VM
+path, which a sub-agent's file tools are refused. So the CHECKLIST prompt's reference paths come from
+where this script runs. Off a `/sessions` tree (the CLI, cloud sessions) that folder is the one a
+sub-agent reads, and the absolute paths are printed. On a `/sessions` tree (a local Desktop session) it
+is a VM path, so the prompt names each reference by how its path ends and sends the sub-agent to the
+full path its own agent instructions give, which the loader fills in for that sub-agent. That is right on
+a VM-loop session too, where the filled path is the VM one and the file tools run in the VM.
+`--plugin-root-agent` is still accepted and ignored, so an older command line prints the same prompt.
+
 OCR MUST HAVE FINISHED. This script lists whatever sidecars exist when it runs, and on a live run
 that was a half-finished OCR: the shell tool timed out at 120 s, tesseract kept going orphaned, the
 prompt was generated twice before the last two documents' pages existed, and the red team was told
@@ -41,6 +52,8 @@ live. Output is deterministic for fixed inputs: sorted listings, no timestamps.
 Usage:
     dispatch_prompt.py red_team --run-id R --analysis-dir A --handoff-dir D --handoff-agent H
                       [--analysis-dir-agent A_AGENT]
+    dispatch_prompt.py checklist --run-id R --analysis-dir A --handoff-dir D --handoff-agent H
+                      [--analysis-dir-agent A_AGENT]
 
 Prints the prompt. Exit 2 on a missing artifact or an image-only PDF the OCR receipt does not cover.
 """
@@ -50,6 +63,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 from typing import Any
@@ -269,6 +283,50 @@ def _red_team(
 # identifiers alone -- no round, no free text -- and the grader reads a copy of methodology.json holding
 # only what an item grades; its revision record, notes and skipped questions are history.
 
+# --- where the reference files are --------------------------------------------------------------------
+#
+# Copy of the session-tree detection in scripts/resolve_artifacts_root.py (a generator runs without the
+# plugin's shared scripts on its path); tests/test_plugin_root_not_through_bash.py pins the copy.
+_SESSION_TREE = re.compile(r"^(/sessions/[^/]+)/mnt(?:/|$)")
+_SESSION_ROOT = re.compile(r"^/sessions/[^/]+$")
+
+
+def on_session_tree(cwd: str) -> bool:
+    return bool(_SESSION_TREE.match(cwd) or _SESSION_ROOT.match(cwd))
+
+
+def _plugin_root() -> str:
+    """The plugin folder this script runs from (four levels up from this file)."""
+    return os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+
+def _on_session_lane() -> bool:
+    """A local Desktop session: this script or the shell sits on a `/sessions` tree, where the folder above
+    is a VM path a sub-agent's file tools are refused."""
+    return on_session_tree(os.getcwd()) or on_session_tree(_plugin_root())
+
+
+_FALLBACK = (
+    "If a reference path below cannot be read (refused or not found), read the same file under the plugin folder "
+    "your own instructions name.\n"
+)
+_POINTER = (
+    "Each reference file below is in your plugin folder: open it at the full path your own instructions give "
+    "for it (below, each is named by how that path ends).\n"
+)
+_REFERENCE = re.compile(r"<PLUGIN_ROOT_AGENT>/(skills/[a-z-]+/references/[\w./-]+?\.md)")
+
+
+def _references(text: str, session_tree: bool | None) -> str:
+    """Absolute reference paths off a `/sessions` tree; on one, a pointer to the agent body's full path."""
+    if not (_on_session_lane() if session_tree is None else session_tree):
+        return text.replace("<PLUGIN_ROOT_AGENT>", _plugin_root().rstrip("/"))
+    out = _REFERENCE.sub(r"the file ending \1", text.replace(_FALLBACK, _POINTER))
+    if "<PLUGIN_ROOT_AGENT>" in out:
+        raise ValueError("a plugin-root placeholder that names no reference file")
+    return out
+
+
 _CHECKLIST_METHODOLOGY_KEYS = ("approach_chosen", "rationale", "metadata")
 _CHECKLIST_CONTEXT = "CONTEXT: CHECKLIST"
 _CHECKLIST_TEMPLATE = (
@@ -276,10 +334,7 @@ _CHECKLIST_TEMPLATE = (
     "OUTPUT_PATH: <HANDOFF_AGENT>/checklist_output.json\n"
     "RUN_ID: <RUN_ID>\n"
     "\n"
-    "You are the market-sizing agent dispatched in Context A (CHECKLIST).\n"
-    "If a reference path below cannot be read (refused or not found), read the same file under the plugin folder "
-    "your own instructions name.\n"
-    "Read:\n"
+    "You are the market-sizing agent dispatched in Context A (CHECKLIST).\n" + _FALLBACK + "Read:\n"
     "- <PLUGIN_ROOT_AGENT>/skills/market-sizing/references/pitfalls-checklist.md\n"
     "- <PLUGIN_ROOT_AGENT>/skills/market-sizing/references/artifact-schemas.md\n"
     '  (read the "Canonical 22 checklist IDs" section)\n'
@@ -371,10 +426,13 @@ def checklist(
     handoff_dir: str,
     handoff_agent: str,
     analysis_dir_agent: str,
-    plugin_root_agent: str,
+    *,
+    session_tree: bool | None = None,
     correction: str | None = None,
 ) -> str:
-    """The CHECKLIST prompt, after writing `<handoff_dir>/checklist_view/methodology.json`."""
+    """The CHECKLIST prompt, after writing `<handoff_dir>/checklist_view/methodology.json`.
+
+    `session_tree` None detects the lane (see `_on_session_lane`); tests pass it to force one."""
     needed = ("inputs.json", "methodology.json", "validation.json", "sizing.json")
     missing = [f for f in needed if not os.path.isfile(os.path.join(analysis_dir, f))]
     if missing:
@@ -388,35 +446,12 @@ def checklist(
     with open(os.path.join(handoff_dir, "checklist_view", "methodology.json"), "w", encoding="utf-8") as fh:
         json.dump(view, fh, indent=2)
     return _corrected(
-        _CHECKLIST_TEMPLATE.replace("<HANDOFF_AGENT>", handoff_agent.rstrip("/"))
+        _references(_CHECKLIST_TEMPLATE, session_tree)
+        .replace("<HANDOFF_AGENT>", handoff_agent.rstrip("/"))
         .replace("<ANALYSIS_DIR_AGENT>", analysis_dir_agent.rstrip("/"))
-        .replace("<PLUGIN_ROOT_AGENT>", plugin_root_agent.rstrip("/"))
         .replace("<RUN_ID>", run_id),
         correction,
     )
-
-
-def _plugin_root_refusal(root: str) -> str | None:
-    """Why a sub-agent could not read references under `root`, or None when it can.
-
-    A literal `${CLAUDE_PLUGIN_ROOT}` (skill text that arrived unfilled) or an empty or relative value
-    names nothing a file tool can open, and a root whose plugin.json names another plugin is a
-    different plugin's folder. Only a manifest this shell can see is checked: on a host-loop session
-    the root is a host path the shell cannot reach, and that is correct.
-    """
-    if not root.strip() or "$" in root:
-        return "is empty or an unfilled placeholder"
-    if not os.path.isabs(root):
-        return "is not an absolute path"
-    manifest = os.path.join(root, ".claude-plugin", "plugin.json")
-    try:
-        with open(manifest, encoding="utf-8") as fh:
-            name = json.load(fh).get("name")
-    except (OSError, ValueError, AttributeError):
-        return None
-    if name != "founder-skills":
-        return f"is the folder of another plugin ({name!r})"
-    return None
 
 
 def main() -> None:
@@ -433,18 +468,11 @@ def main() -> None:
     )
     p.add_argument("--review-docs-dir", help="revision round: the FIRST round's hand-off dir (docs/, ocr/ under it)")
     p.add_argument("--review-docs-agent", help="revision round: the same dir as the sub-agent addresses it")
-    p.add_argument("--plugin-root-agent", help="checklist: the plugin root as the sub-agent addresses it")
+    # Accepted and ignored for one release, so an older command line still prints the same prompt; the
+    # folder a prompt names comes from where this script runs (module docstring).
+    p.add_argument("--plugin-root-agent", help=argparse.SUPPRESS)
     p.add_argument("--correction", choices=sorted(CORRECTIONS), help="a corrective redo's one added line")
     a = p.parse_args()
-    if a.plugin_root_agent is not None:
-        why = _plugin_root_refusal(a.plugin_root_agent)
-        if why:
-            print(
-                f"Error: --plugin-root-agent {a.plugin_root_agent!r} {why}; pass the plugin folder this skill "
-                "shows, or the READ_ROOT= value Step 0 printed",
-                file=sys.stderr,
-            )
-            sys.exit(2)
     if a.context == "checklist":
         try:
             sys.stdout.write(
@@ -454,7 +482,6 @@ def main() -> None:
                     a.handoff_dir,
                     a.handoff_agent,
                     a.analysis_dir_agent or a.analysis_dir,
-                    a.plugin_root_agent or os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
                     correction=a.correction,
                 )
             )

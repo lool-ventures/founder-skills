@@ -878,7 +878,10 @@ SKILL_MD_CEILING: dict[str, int] = {
     # shorter and plainer, a manifest-less plugin copy is kept by the search, and the block says to run it
     # with the token as shown and that PLUGIN_ROOT is for shell commands only. One reference Read directive
     # names its file under the plugin token.
-    "market-sizing": 104_557,
+    # 104,557 -> 104,509 on 2026-10-03: the CHECKLIST prompt generator no longer takes the plugin folder as
+    # an argument, so its command line and the plugin-paths paragraph drop it; Step 0 says PLUGIN_ROOT never
+    # goes into a sub-agent prompt. (The other four skills' SKILL.mds took the last two edits at net 0 B.)
+    "market-sizing": 104_509,
     # fmr raised for two founder-facing-correctness items measured in a live run: the CHECKLIST
     # dispatch now forbids citing our artifact filenames in evidence (that run put `inputs.json` in 10
     # items' evidence, printed verbatim into the founder's report), and the producer pipe passes
@@ -1435,7 +1438,9 @@ SKILL_MD_CEILING: dict[str, int] = {
     # shorter and plainer, a manifest-less plugin copy is kept by the search, and the block says to run it
     # with the token as shown and that PLUGIN_ROOT is for shell commands only. The paragraph's illustrative
     # example sentence is gone.
-    "competitive-positioning": 126_862,
+    # 126,862 -> 126,630 on 2026-10-03: the five prompt-generator command lines no longer pass the plugin
+    # folder; see market-sizing above.
+    "competitive-positioning": 126_630,
     # cap-table, the largest raise (+2,383 B) and the one with the most founder-visible payoff:
     #   * Main-Thread Return named THREE of the four files Step 12 copies; a live run delivered exactly
     #     three and dropped `{Company}_Cap_Table.html`. All four are now named explicitly.
@@ -3805,7 +3810,10 @@ def test_corpus_counts_every_agent_the_skill_pins_not_just_its_namesake() -> Non
 # with the token unfilled, and Step 0's READ_ROOT= replaces it.
 # Lowered 2026-10-03 from 126,559 to 126,547 B: skill-execution-model.md's remaining statements that the
 # token is filled on every tier now say where it is filled.
-ROOT_REFERENCES_CEILING = 126_547
+# Lowered 2026-10-03 from 126,547 to 126,335 B: skill-execution-model.md states that a generator-printed prompt
+# never takes the plugin folder through the shell, and a paragraph restating the Context A path rule is cut
+# to a pointer at it.
+ROOT_REFERENCES_CEILING = 126_335
 
 
 def test_shared_reference_tree_does_not_grow() -> None:
