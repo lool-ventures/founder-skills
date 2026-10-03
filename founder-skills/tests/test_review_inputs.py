@@ -7,6 +7,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -1549,3 +1550,79 @@ var document = {
         assert rc == 0
         assert 'id="overlay-close"' in html and ">Close</button>" in html
         assert 'getElementById("overlay-close").addEventListener("click", closeOverlay)' in html
+
+
+# --- the static page never reaches for a server ---------------------------------------------------------
+# The static page has no backing server and can be served from an http origin, where a POST to /api/*
+# resolves to a stray response instead of failing fast (a 200 there once told a founder their
+# corrections were saved). Every `/api/` fetch must sit in the ELSE branch of an `if (IS_STATIC ...)`
+# test: an early-return guard works at run time, but it is the shape a change most easily breaks (code
+# added above the return, a return moved), and the harness analyzer reports the write-back advisory with
+# or without the guard, so nothing else would notice it going.
+
+_JS_STRIP = re.compile(r"""/\*.*?\*/|//[^\n]*|"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|`(?:\\.|[^`\\])*`""", re.S)
+
+
+def _blank(m: re.Match[str]) -> str:
+    """Keep a string literal's first 40 chars (so `fetch("/api/...")` stays findable); blank the rest,
+    comments included, keeping offsets."""
+    s = m.group(0)
+    if s[0] in "\"'`":
+        keep = s[:40].replace("{", " ").replace("}", " ")
+        return keep + " " * (len(s) - len(keep))
+    return " " * len(s)
+
+
+def _unguarded_api_fetches(js: str) -> list[str]:
+    """`/api/` fetches not inside the else branch of an `if (` test that names IS_STATIC (not negated)."""
+    code = _JS_STRIP.sub(_blank, js)
+    stack: list[str] = []  # per open brace: "if-static", "if-other", "static-else" or "block"
+    closed: str | None = None  # the kind of if-block just closed, while only whitespace/`else` follows
+    out: list[str] = []
+    i = 0
+    while i < len(code):
+        if code.startswith('fetch("/api/', i) and "static-else" not in stack:
+            out.append(code[i : i + 30])
+        c = code[i]
+        if c == "{":
+            before = code[max(0, i - 300) : i].rstrip()
+            cond = re.search(r"\bif\s*\(([^{}]*)\)\s*$", before)
+            if cond:
+                static = "IS_STATIC" in cond.group(1) and "!IS_STATIC" not in cond.group(1)
+                stack.append("if-static" if static else "if-other")
+            elif re.search(r"\belse$", before) and closed == "if-static":
+                stack.append("static-else")
+            else:
+                stack.append("block")
+            closed = None
+        elif c == "}":
+            closed = stack.pop() if stack else None
+        elif code.startswith("else", i) and closed is not None:
+            i += 4
+            continue
+        elif not c.isspace():
+            closed = None
+        i += 1
+    return out
+
+
+def test_every_api_fetch_in_the_static_page_is_in_an_is_static_else_branch() -> None:
+    rc, html, stderr = _generate_static(_FULL_INPUTS)
+    assert rc == 0, stderr
+    js = "\n".join(re.findall(r"<script>(.*?)</script>", html, re.S))
+    assert "const IS_STATIC = true;" in js, "control: the static build bakes the flag in"
+    fetches = re.findall(r'fetch\("/api/[a-z]+', js)
+    assert len(fetches) >= 2, f"control: expected the check and feedback fetches, found {fetches}"
+    assert _unguarded_api_fetches(js) == []
+
+
+def test_the_guard_check_catches_an_early_return_and_an_unguarded_fetch() -> None:
+    """Seeded negatives, and the guarded shape as the positive control."""
+    guarded = 'if (IS_STATIC || x) { a(); } else { fetch("/api/feedback", {method: "POST"}); }'
+    early = 'function f() { if (IS_STATIC) { a(); return; } fetch("/api/check", {}); }'
+    bare = 'function g() { fetch("/api/feedback", {}); }'
+    negated = 'if (!IS_STATIC) { a(); } else { fetch("/api/check", {}); }'
+    assert _unguarded_api_fetches(guarded) == []
+    assert len(_unguarded_api_fetches(early)) == 1
+    assert len(_unguarded_api_fetches(bare)) == 1
+    assert len(_unguarded_api_fetches(negated)) == 1

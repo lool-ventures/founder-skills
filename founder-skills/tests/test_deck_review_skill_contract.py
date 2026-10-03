@@ -39,6 +39,8 @@ import sys
 import types
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DR_DIR = REPO_ROOT / "founder-skills" / "skills" / "deck-review"
 SKILL_MD = DR_DIR / "SKILL.md"
@@ -1977,3 +1979,22 @@ def test_the_gate_resume_sentence_names_the_printed_run_id() -> None:
     assert section.count(RESUME_SENTENCE) == 1, section[:1200]
     assert "Step 1's `setup_run.py`" not in section
     assert "with the same `RUN_ID`" not in section
+
+
+@pytest.mark.parametrize(
+    "heading",
+    [
+        "### Step 3.5:",
+        "### Step 3.6:",
+        "### Step 3.7:",
+        "### Step 3.9:",
+    ],
+)
+def test_every_numeric_chain_dispatch_names_the_deck_review_agent(heading: str) -> None:
+    """A dispatch with no `subagent_type` falls back to the wildcard `general-purpose` agent: a shell,
+    and none of this agent's scoped tools or rules. Each numeric-chain step names the agent, bounded by
+    its own heading and the next one."""
+    text = SKILL_MD.read_text(encoding="utf-8")
+    start = text.index(heading)
+    end = text.index("\n### ", start + len(heading))
+    assert 'subagent_type: "founder-skills:deck-review"' in text[start:end], heading

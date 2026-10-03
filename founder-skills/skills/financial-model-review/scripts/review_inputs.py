@@ -593,26 +593,28 @@ var checkTimeout = null;
 function scheduleCheck() {
   clearTimeout(checkTimeout);
   /* Static mode has no backing server (and may be served from an http origin,
-     so a file:// check alone is not enough) — just refresh JS sanity. */
+     so a file:// check alone is not enough) — just refresh JS sanity. A lexical
+     if/else, not an early return: the fetch sits in the branch that cannot run
+     in a static build. */
   if (IS_STATIC || window.location.protocol === "file:") {
     refreshSanity();
-    return;
+  } else {
+    checkTimeout = setTimeout(function() {
+      fetch("/api/check", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ state: state, ils_fields: ilsFields })
+      }).then(function(resp) {
+        if (!resp.ok) throw new Error("Server error");
+        return resp.json();
+      }).then(function(result) {
+        updateWarnings(result.warnings || []);
+        if (result.sanity) updateSanityFromServer(result.sanity);
+      }).catch(function() {
+        refreshSanity();
+      });
+    }, 800);
   }
-  checkTimeout = setTimeout(function() {
-    fetch("/api/check", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ state: state, ils_fields: ilsFields })
-    }).then(function(resp) {
-      if (!resp.ok) throw new Error("Server error");
-      return resp.json();
-    }).then(function(result) {
-      updateWarnings(result.warnings || []);
-      if (result.sanity) updateSanityFromServer(result.sanity);
-    }).catch(function() {
-      refreshSanity();
-    });
-  }, 800);
 }
 
 function updateWarnings(warnings) {

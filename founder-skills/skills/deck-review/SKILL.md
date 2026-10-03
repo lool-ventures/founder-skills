@@ -806,7 +806,8 @@ the file.
 A quote is trusted when it is re-found by a second reader who never saw the ledger.
 Checking the ledger's quote against the ledger itself would prove nothing.
 
-**Dispatch a FRESH sub-agent in Context A (SECOND_READ).** Give it the slide numbers and
+**Dispatch a FRESH sub-agent in Context A (SECOND_READ)** — **call the `Task` tool with
+`subagent_type: "founder-skills:deck-review"`**. Give it the slide numbers and
 nothing else. **It must not receive the ledger, any figure from it, or any summary of it** —
 the independence is the whole value, and it is a property of this prompt.
 
@@ -863,7 +864,8 @@ down the numeric chain that `slide_reviews.py --reconciliation` gates on.
 
 ### Step 3.7: Propose Which Figures Relate (Context A dispatch)
 
-**Dispatch the deck-review sub-agent in Context A (RELATION_PROPOSAL).** Choosing which
+**Dispatch the deck-review sub-agent in Context A (RELATION_PROPOSAL)** — **call the `Task`
+tool with `subagent_type: "founder-skills:deck-review"`**. Choosing which
 figures belong together is judgment and stays with the model; the arithmetic is not, and
 does not.
 
@@ -986,6 +988,9 @@ python3 "$SCRIPTS/reconcile.py" --print-downgrade-stanza "$REVIEW_DIR/reconcilia
 
 Paste that output verbatim under `CONTRADICTIONS:` below. An empty array is printed when
 there is nothing to interpret, and that is a complete and correct answer.
+
+**Dispatch the deck-review sub-agent in Context A (INTERPRETATION)** — **call the `Task` tool
+with `subagent_type: "founder-skills:deck-review"`**.
 
 **Dispatch prompt template:**
 

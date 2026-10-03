@@ -72,7 +72,7 @@ def test_outputs_mount_append_only_guardrail(skill_md: Path) -> None:
 _PLATFORM_DELETE_DENIAL = re.compile(
     r"delete-denied|denies delet|denied post-write|delete-no\b|refuses the delete|Cowork refuses"
     r"|Cowork denies|denies deletion|delete is denied|deletion may be denied|can be DENIED"
-    r"|outputs mount denies",
+    r"|outputs mount denies|Cowork can deny",
     re.IGNORECASE,
 )
 
@@ -1030,3 +1030,38 @@ def test_unquoted_heredoc_bodies_escape_literal_dollars(skill: str) -> None:
         "eats it before the file is written. Escape as `\\$`, or move the figure into a numeric "
         "field.\n  " + "\n  ".join(offenders)
     )
+
+
+# Each Bash call starts a fresh shell, so a value a setup block computes reaches a later block only as
+# text the model copies. A block that mints RUN_ID and STAGING_DIR without printing them leaves the model
+# to guess, or to re-run the mint and split the run.
+_SETUP_ECHO_SKILLS = ("ic-sim", "market-sizing", "competitive-positioning")
+
+
+def _bash_blocks(text: str) -> list[str]:
+    return re.findall(r"```(?:bash|sh)\n(.*?)```", text, re.DOTALL)
+
+
+@pytest.mark.parametrize("skill", _SETUP_ECHO_SKILLS)
+def test_the_setup_block_ends_by_printing_its_values(skill: str) -> None:
+    text = (SKILLS_DIR / skill / "SKILL.md").read_text(encoding="utf-8")
+    blocks = [b for b in _bash_blocks(text) if 'STAGING_DIR="$(mktemp -d' in b]
+    assert len(blocks) == 1, f"{skill}: expected one setup block minting STAGING_DIR, found {len(blocks)}"
+    lines = [ln.strip() for ln in blocks[0].splitlines() if ln.strip() and not ln.strip().startswith("#")]
+    last = lines[-1]
+    assert last.startswith(("echo ", "printf ")), f"{skill}: the setup block ends with {last!r}, not a print"
+    for key in ("RUN_ID=", "STAGING_DIR=", "HANDOFF_DIR="):
+        assert key in last, f"{skill}: the setup block's last line does not print {key}"
+
+
+@pytest.mark.parametrize("skill_md", SKILL_MD_FILES, ids=lambda p: p.parent.name)
+def test_no_block_uses_a_value_no_block_defines(skill_md: Path) -> None:
+    """`$QUICK_JSON` was a placeholder no block ever assigned; `$INPUT_MODE` was assigned in one block and
+    read in another, a fresh shell later. Each must be assigned in the block that reads it."""
+    blocks = _bash_blocks(skill_md.read_text(encoding="utf-8"))
+    for var in ("QUICK_JSON", "INPUT_MODE"):
+        for block in blocks:
+            if re.search(r"\$\{?" + var + r"\b", block):
+                assert re.search(r"(?m)^\s*" + var + "=", block), (
+                    f"{skill_md.parent.name}: a block reads ${var} without assigning it"
+                )

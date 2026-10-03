@@ -217,8 +217,10 @@ Run only the producer the question needs, on a landscape you actually researched
 
 ```bash
 # "Who competes with us?" -> research the landscape, then validate it.
-printf '%s' "$QUICK_JSON" | python3 "$SCRIPTS/validate_landscape.py" --pretty \
-  --run-id "$RUN_ID" -o "$ANALYSIS_DIR/landscape.json"
+python3 "$SCRIPTS/validate_landscape.py" --pretty \
+  --run-id "$RUN_ID" -o "$ANALYSIS_DIR/landscape.json" <<'JSON'
+<the landscape you researched, as the JSON validate_landscape.py reads on stdin>
+JSON
 # "Is X a real moat?" -> score_moats.py on the single dimension in question.
 ```
 
@@ -271,12 +273,14 @@ ANALYSIS_DIR_AGENT="<printed value>"   # e.g. landscape_draft.json, positioning.
 # Ad-hoc scratch (NOT sub-agent hand-off) lives OUTSIDE the promoted outputs/ tree, in a temp dir
 # that is safe to both create and reclaim. Use the printed path verbatim in later steps.
 STAGING_DIR="$(mktemp -d "${TMPDIR:-/tmp}/competitive-positioning-${SLUG:-co}.staging.XXXXXX")"
+# Every later command runs in a fresh shell: copy these printed values verbatim into it.
+printf 'RUN_ID=%s\nSTAGING_DIR=%s\nHANDOFF_DIR=%s\n' "$RUN_ID" "$STAGING_DIR" "$HANDOFF_DIR"
 ```
 
 Pass `RUN_ID` to all sub-agents. Every artifact must include `"metadata": {"run_id": "$RUN_ID"}`. `compose_report.py` checks run_id consistency — a mismatch triggers `STALE_ARTIFACT`. Its sibling integrity checks emit `CORRUPT_ARTIFACT` (artifact file is not valid JSON) and `UNVALIDATED_ARTIFACT` (artifact exists but was written directly instead of through its producer script — the `_produced_by` stamp is missing or wrong). All three are high-severity: fix the artifact by re-running the producer; never hand-edit it to silence the warning.
 
 **Overwrite-in-place — do NOT delete prior artifacts under `$ANALYSIS_DIR`.** It is the promoted
-`outputs/` tree in Cowork, where deleting a user-visible path is unsafe (Cowork can deny it; the parity
+`outputs/` tree in Cowork, where deleting a user-visible path is unsafe (our rule forbids it, and older hosts refused it; the parity
 gate flags it). Each producer writes its artifact fresh via `-o` every run, and `RUN_ID` is minted fresh
 per run — so if a prior run left an artifact a later step doesn't regenerate, `compose_report.py`'s
 `STALE_ARTIFACT` check (run_ids must match) catches the mismatch. No bulk `rm` is needed or wanted.
@@ -366,11 +370,7 @@ cat "$STAGING_DIR/product_profile.json" | python3 "$SCRIPTS/persist_agent_artifa
   --artifact product_profile.json -o "$ANALYSIS_DIR/product_profile.json" --run-id "$RUN_ID" --pretty
 ```
 
-It checks the schema-required top-level keys, stamps `_produced_by`, and writes. **If it rejects, the pipe fails and `$ANALYSIS_DIR` is left untouched** — fix the staged JSON and re-run; never hand-write the destination to get past it. `compose_report.py` raises `UNVALIDATED_ARTIFACT` at high severity on an unstamped artifact, so a bare heredoc here surfaces as a high-severity warning in the delivered report, and fails the run outright on Step 7's `--strict` pass. Do not read it as an unconditional hard stop: Pass 1 runs without `--strict`. Consult `references/artifact-schemas.md` for the schema. Set `INPUT_MODE` to the chosen mode (`deck`, `conversation`, or `document`) — Step 6's checklist pipe passes it to `checklist.py --input-mode` so mode gating is applied correctly:
-
-```bash
-INPUT_MODE="deck"   # or "conversation" / "document"
-```
+It checks the schema-required top-level keys, stamps `_produced_by`, and writes. **If it rejects, the pipe fails and `$ANALYSIS_DIR` is left untouched** — fix the staged JSON and re-run; never hand-write the destination to get past it. `compose_report.py` raises `UNVALIDATED_ARTIFACT` at high severity on an unstamped artifact, so a bare heredoc here surfaces as a high-severity warning in the delivered report, and fails the run outright on Step 7's `--strict` pass. Do not read it as an unconditional hard stop: Pass 1 runs without `--strict`. Consult `references/artifact-schemas.md` for the schema. The chosen mode (`deck`, `conversation`, or `document`) is the profile's `input_mode`. Step 6 reads it back from `product_profile.json` for `checklist.py --input-mode`, so mode gating is applied correctly: a shell variable set here would not survive to that later command.
 
 If materials are sparse, use `AskUserQuestion` to gather missing fields. At minimum: product description, target customers, and what the founder believes differentiates them. All three are necessarily runtime-labelled — open-ended founder-specific answers, not a set of labels a fixed list could offer — so each question needs an affirmative option carrying any partial signal already derived, plus a free-text fallback (same shape as the founder-context basics above), not a literal bracket list.
 
@@ -968,13 +968,15 @@ python3 "$SCRIPTS/cp_dispatch_prompt.py" checklist --run-id "$RUN_ID" \
 **After the sub-agent returns:** gate the hand-off per the Context A hand-off protocol, then pipe through the producer script. The sub-agent writes items only — pass the real input mode and run_id on the CLI so `checklist.py` gates the right items and stamps `metadata.run_id`:
 
 ```bash
+python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["input_mode"])' "$ANALYSIS_DIR/product_profile.json"   # prints the input mode
+INPUT_MODE="<printed value>"
 cat "$HANDOFF_DIR/checklist_output.json" | python3 "$SCRIPTS/checklist.py" --pretty \
   --input-mode "$INPUT_MODE" --run-id "$RUN_ID" \
   --positioning-scores "$ANALYSIS_DIR/positioning_scores.json" -o "$ANALYSIS_DIR/checklist.json"
 ```
 <!-- skill-quality-ci: bash-after-subagent-ok -->
 
-`$INPUT_MODE` is the mode established in Steps 1-2 (`deck`, `conversation`, or `document`). Without `--input-mode`, deck/document runs silently default to `conversation` and mis-gate NARR_03/EVID_04; without `--run-id`, `checklist.json` carries no run_id and the Step 7c verifier blocks. `--positioning-scores` records which scored positioning map this checklist graded (a `views_fingerprint` copied verbatim from `positioning_scores.json`), so a later `compose_report.py` run can detect a checklist that was graded against a map that has since moved — this is the ONLY place `checklist.json` is produced on a normal run, so omitting the flag here means the whole staleness check can never fire.
+`$INPUT_MODE` is the mode established in Steps 1-2 (`deck`, `conversation`, or `document`), printed back from `product_profile.json` (Step 2 writes it there, and the producer requires it) in the same block as the pipe. Without `--input-mode`, deck/document runs silently default to `conversation` and mis-gate NARR_03/EVID_04; without `--run-id`, `checklist.json` carries no run_id and the Step 7c verifier blocks. `--positioning-scores` records which scored positioning map this checklist graded (a `views_fingerprint` copied verbatim from `positioning_scores.json`), so a later `compose_report.py` run can detect a checklist that was graded against a map that has since moved — this is the ONLY place `checklist.json` is produced on a normal run, so omitting the flag here means the whole staleness check can never fire.
 
 ### Step 6.5: Outside Review -> `redteam.json` (Context A: RED_TEAM dispatch)
 

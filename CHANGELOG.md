@@ -19,6 +19,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   message names each document without a path.** The documents arrive as file cards there, and the
   paths printed beside them could not be opened. In a terminal the paths stay, since there they are
   how you find the files.
+- **Competitive positioning: the quality checklist reads how the analysis started (from a deck, a
+  document or a conversation) from the saved profile.** It was told to use a value set several steps
+  earlier, which does not carry over, so a deck or document analysis could be graded as a
+  conversation.
+- **Deck review: the steps that check the deck's figures always run in the deck-review reviewer.**
+  Three of them did not say which reviewer to use, so they could run in a general-purpose one without
+  this skill's rules.
+- **Market sizing, competitive positioning and IC simulation print the run's identifiers when they
+  set up a run**, and the quick checks in market sizing, competitive positioning and financial model
+  review no longer refer to a value that was never set.
+- **Financial model review: the review page's live check is written in the branch a standalone page
+  never takes**, as its corrections upload already was. Nothing changes in how the page behaves.
 - **A missing working-records folder no longer hides unchecked steps.** Every skill's report says
   which steps were not put through the check on their saved output; when the run's folder of those
   records was missing, the report used to say nothing. It now names those steps. Competitive
@@ -35,6 +47,8 @@ Contributor-facing only; nothing here changes what a founder installs or runs.
 - The skills and their shared reference now state that nothing under the outputs folder is deleted
   as the skills' own rule, rather than saying the host refuses deletes there; newer hosts allow them.
   A test keeps any text from claiming the host refuses.
+- Tests check that every hook ships with the Python it runs, and that every server call on the
+  financial model review page sits in the branch a standalone page never takes.
 - The recorded-session delivery check now counts a write to a connected folder made from a cloud
   session, whose tool name carries a prefix the exact-name match missed.
 

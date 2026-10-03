@@ -886,7 +886,10 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 104,572 -> 104,703 on 2026-10-04: "never delete under outputs" is this skill's rule, not a platform
     # limit (newer hosts allow deletes). Step 0's append-only paragraph, the hand-off comment and the retry
     # line say so instead of claiming the host refuses.
-    "market-sizing": 104_703,
+    # 104,703 -> 104,968 on 2026-10-04: The setup block ends by printing RUN_ID, STAGING_DIR and HANDOFF_DIR (each later
+    # command runs in a fresh shell); the quick-check producer reads a fill-in heredoc instead of an undefined
+    # $QUICK_JSON; the overwrite note names the no-delete rule, not a host refusal.
+    "market-sizing": 104_968,
     # fmr raised for two founder-facing-correctness items measured in a live run: the CHECKLIST
     # dispatch now forbids citing our artifact filenames in evidence (that run put `inputs.json` in 10
     # items' evidence, printed verbatim into the founder's report), and the producer pipe passes
@@ -985,7 +988,9 @@ SKILL_MD_CEILING: dict[str, int] = {
     # limit (newer hosts allow deletes). Step 0's append-only paragraph, the hand-off comment and the retry
     # line say so instead of claiming the host refuses. Three more lines here blamed the host for a delete;
     # they now name the rule.
-    "financial-model-review": 86_996,
+    # 86,996 -> 87,076 on 2026-10-04: The quick-check producer reads a fill-in heredoc instead of an undefined
+    # $QUICK_JSON; the overwrite note names the no-delete rule, not a host refusal.
+    "financial-model-review": 87_076,
     # ic-sim SHRANK: the REQUIRED ic-dynamics.md read at Step 7 is deleted. Step 7 is a pure producer
     # pipe — compose_discussion.py derives discussion.json from the partners' own files and nothing
     # is authored by the main thread — so the read informed no decision while pulling a whole
@@ -1041,7 +1046,9 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 94,428 -> 94,559 on 2026-10-04: "never delete under outputs" is this skill's rule, not a platform
     # limit (newer hosts allow deletes). Step 0's append-only paragraph, the hand-off comment and the retry
     # line say so instead of claiming the host refuses.
-    "ic-sim": 94_559,
+    # 94,559 -> 94,770 on 2026-10-04: The setup block ends by printing RUN_ID, STAGING_DIR and HANDOFF_DIR (each later
+    # command runs in a fresh shell); the overwrite note names the no-delete rule, not a host refusal.
+    "ic-sim": 94_770,
     # deck-review +1,165 B: Step 0 carried only a parenthetical fresh-shell mention buried in a code
     # comment, unlike the four skills that mint RUN_ID in a LATER block and so carry the shared banner.
     # deck-review mints RUN_ID INSIDE this re-runnable Step-0 block (like cap-table), so the shared
@@ -1341,7 +1348,9 @@ SKILL_MD_CEILING: dict[str, int] = {
     # limit (newer hosts allow deletes). Step 0's append-only paragraph, the hand-off comment and the retry
     # line say so instead of claiming the host refuses. deck-review also names `setup_run.py --clean` as the
     # one script that removes its own earlier-run checkpoints.
-    "deck-review": 111_455,
+    # 111,455 -> 111,766 on 2026-10-04: Steps 3.6, 3.7 and 3.9 name `subagent_type: "founder-skills:deck-review"` (a
+    # type-less dispatch falls back to the wildcard general-purpose agent).
+    "deck-review": 111_766,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
@@ -1478,7 +1487,11 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 126,693 -> 126,824 on 2026-10-04: "never delete under outputs" is this skill's rule, not a platform
     # limit (newer hosts allow deletes). Step 0's append-only paragraph, the hand-off comment and the retry
     # line say so instead of claiming the host refuses.
-    "competitive-positioning": 126_824,
+    # 126,824 -> 127,426 on 2026-10-04: The setup block ends by printing RUN_ID, STAGING_DIR and HANDOFF_DIR; the quick-
+    # check producer reads a fill-in heredoc instead of an undefined $QUICK_JSON; Step 6 prints the input mode back from
+    # product_profile.json instead of reading a variable set in an earlier shell; the overwrite note names the no-delete
+    # rule, not a host refusal.
+    "competitive-positioning": 127_426,
     # cap-table, the largest raise (+2,383 B) and the one with the most founder-visible payoff:
     #   * Main-Thread Return named THREE of the four files Step 12 copies; a live run delivered exactly
     #     three and dropped `{Company}_Cap_Table.html`. All four are now named explicitly.

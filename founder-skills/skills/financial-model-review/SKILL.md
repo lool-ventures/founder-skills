@@ -227,8 +227,10 @@ Run only the producer(s) the question actually needs, with the inputs the founde
 
 ```bash
 # Runway question -> runway.py alone. Unit-economics question -> unit_economics.py alone.
-printf '%s' "$QUICK_JSON" | python3 "$SCRIPTS/runway.py" --stdin --pretty \
-  --run-id "$RUN_ID" -o "$REVIEW_DIR/runway.json"
+python3 "$SCRIPTS/runway.py" --stdin --pretty \
+  --run-id "$RUN_ID" -o "$REVIEW_DIR/runway.json" <<'JSON'
+<the founder's figures, as the JSON the producer reads on stdin>
+JSON
 ```
 
 **Producers deliberately NOT run:** `extract_model.py`, `validate_extraction.py`,
@@ -287,7 +289,7 @@ STAGING_DIR="$(mktemp -d "${TMPDIR:-/tmp}/financial-model-review-${SLUG:-fmr}.st
 Pass `RUN_ID` to all sub-agents. The four producer artifacts (`inputs.json`, `checklist.json`, `unit_economics.json`, `runway.json`) must carry `"metadata": {"run_id": "$RUN_ID"}` at the top level — including skipped stubs, whose stub heredoc carries the same `"metadata": {"run_id": "$RUN_ID"}` block. The producers propagate it from their stdin payloads; never hand-edit script outputs to add it. (`model_data.json` and `extraction_validation.json` have no run_id by design.) `compose_report.py` checks that all present run IDs match — a mismatch triggers a `STALE_ARTIFACT` high-severity warning, blocking under `--strict`. Stub artifacts are exempt from the value comparison but still carry the `run_id` key so the Context B parity grep finds it.
 
 **Overwrite-in-place — do NOT delete prior artifacts under `$REVIEW_DIR`.** It is the promoted
-`outputs/` tree in Cowork, where deleting a user-visible path is unsafe (Cowork can deny it; the parity
+`outputs/` tree in Cowork, where deleting a user-visible path is unsafe (our rule forbids it, and older hosts refused it; the parity
 gate flags it). Each producer writes its artifact fresh via `-o` every run, and `RUN_ID` is minted fresh
 per run — so if a prior run left an artifact a later step doesn't regenerate, `compose_report.py`'s
 `STALE_ARTIFACT` check (run_ids must match) catches the mismatch. No bulk `rm` is needed or wanted.

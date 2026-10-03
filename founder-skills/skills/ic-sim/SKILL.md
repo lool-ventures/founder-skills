@@ -220,12 +220,14 @@ HANDOFF_AGENT="<printed value>"   # use verbatim in OUTPUT_PATH lines
 # Ad-hoc scratch (NOT sub-agent hand-off) lives OUTSIDE the promoted outputs/ tree, in a temp dir
 # that is safe to both create and reclaim. Use the printed path verbatim in later steps.
 STAGING_DIR="$(mktemp -d "${TMPDIR:-/tmp}/ic-sim-${SLUG:-co}.staging.XXXXXX")"
+# Every later command runs in a fresh shell: copy these printed values verbatim into it.
+printf 'RUN_ID=%s\nSTAGING_DIR=%s\nHANDOFF_DIR=%s\n' "$RUN_ID" "$STAGING_DIR" "$HANDOFF_DIR"
 ```
 
 Pass `RUN_ID` to all sub-agents. Every artifact written to `$SIM_DIR` must include `"metadata": {"run_id": "$RUN_ID"}` at the top level. `compose_report.py` checks that all artifact run IDs match — a mismatch triggers a `STALE_ARTIFACT` high-severity warning, blocking under `--strict`.
 
 **Overwrite-in-place — do NOT delete prior artifacts under `$SIM_DIR`.** It is the promoted `outputs/`
-tree in Cowork, where deleting a user-visible path is unsafe (Cowork can deny it; the parity gate flags
+tree in Cowork, where deleting a user-visible path is unsafe (our rule forbids it, and older hosts refused it; the parity gate flags
 it). Each producer writes its artifact fresh via `-o` every run, and `RUN_ID` is minted fresh per run —
 so if a prior run left an artifact a later step doesn't regenerate, `compose_report.py`'s `STALE_ARTIFACT`
 check (run_ids must match) catches the mismatch. No bulk `rm` is needed or wanted.
