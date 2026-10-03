@@ -1318,7 +1318,9 @@ SKILL_MD_CEILING: dict[str, int] = {
     # directives name their file under the plugin token.
     # 110,906 -> 110,969 (+63 B) on 2026-10-03, the same +63 B in all six: Step 0's PLUGIN_ROOT comment names it
     # the shell's path and states the one exception, a printed READ_ROOT= used in Reads and prompts.
-    "deck-review": 110_969,
+    # 110,969 -> 111,125 on 2026-10-03: the stage gate's execution note says the skill runs inline and asks
+    # the founder itself, and that after the answer is written Step 1's setup_run.py is re-run to resume.
+    "deck-review": 111_125,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
@@ -1549,7 +1551,9 @@ SKILL_MD_CEILING: dict[str, int] = {
     # names its file under the plugin token.
     # 158,695 -> 158,758 (+63 B) on 2026-10-03, the same +63 B in all six: Step 0's PLUGIN_ROOT comment names it
     # the shell's path and states the one exception, a printed READ_ROOT= used in Reads and prompts.
-    "cap-table": 158_758,
+    # 158,758 -> 158,770 on 2026-10-03: the image-only PDF and tracked-changes DOCX guards run their helper
+    # scripts through "$SCRIPTS/…" instead of a relative scripts/ path.
+    "cap-table": 158_770,
 }
 
 
@@ -2716,9 +2720,12 @@ GATE_SITES: dict[str, dict[str, tuple[str, ...]]] = {
 #     built from this run's figures: `runtime-labelled`).
 #   market-sizing 11->12 (2026-09-24): ONE new gate SITE, the two-figures question before Step A --
 #     one option per founder figure, each naming its source: `runtime-labelled`.
+#   deck-review 7->6 (2026-10-03): a MENTION, not a site. The stage gate's execution note no longer says
+#     "sub-agents in Cowork cannot reliably call AskUserQuestion" -- the skill runs inline and asks
+#     itself. The gate site is unchanged; GATE_SITES is unchanged.
 ASKUSER_MENTIONS: dict[str, int] = {
     "market-sizing": 12,
-    "deck-review": 7,
+    "deck-review": 6,
     "ic-sim": 5,
     "financial-model-review": 9,
     "competitive-positioning": 10,
@@ -3830,7 +3837,9 @@ def test_corpus_counts_every_agent_the_skill_pins_not_just_its_namesake() -> Non
 # to a pointer at it.
 # Lowered 2026-10-03 from 126,335 to 126,315 B: skill-execution-model.md drops a stale name for the Context A
 # input rule.
-ROOT_REFERENCES_CEILING = 126_315
+# Raised 2026-10-03 from 126,315 to 126,333 B: skill-execution-model.md says a sub-agent gets the workspace
+# shell only when its tools: list names it, and names the real gap (a dispatch with no subagent_type).
+ROOT_REFERENCES_CEILING = 126_333
 
 
 def test_shared_reference_tree_does_not_grow() -> None:
@@ -3935,3 +3944,20 @@ def test_the_search_instruction_matcher_sees_both_forms() -> None:
     assert not _SEARCH_INSTRUCTION.search('tools: ["Read", "Write", "Glob", "Grep"]')
     assert not _SEARCH_INSTRUCTION.search("Read/Write/Glob/Grep only")
     assert len(_instruction_surfaces()) > 20
+
+
+@pytest.mark.parametrize("skill", sorted(SKILL_MD_CEILING))
+def test_no_script_is_run_by_a_relative_path(skill: str) -> None:
+    """A helper script is run as `python3 "$SCRIPTS/<name>.py"`, never `python3 scripts/<name>.py`.
+
+    The shell's working folder is never the skill's folder, so a relative path fails with "No such
+    file" and the guard the script implements is silently skipped.
+    """
+    files = [SKILLS_ROOT / skill / "SKILL.md", *sorted((SKILLS_ROOT / skill / "references").rglob("*.md"))]
+    offenders = [
+        f"{p.relative_to(SKILLS_ROOT)}:{n}"
+        for p in files
+        for n, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1)
+        if re.search(r"python3? scripts/", line)
+    ]
+    assert not offenders, offenders

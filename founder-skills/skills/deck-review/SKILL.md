@@ -510,7 +510,7 @@ PROFILE_EOF
 
 ### Gate: Confirm Stage and Scope
 
-**Sub-agent execution model:** sub-agents in Cowork cannot reliably call `AskUserQuestion`. The gate uses a checkpoint-and-resume pattern — the sub-agent writes a `gate_state.json` to disk and emits a structured `needs_input` payload as its final message. The parent (main thread or invoking agent) calls `AskUserQuestion` *if available* — **offering the `needs_input` options in the ORDER they appear, first to last, and adding no recommendation of your own** — or otherwise asks the founder via plain text — then writes the answer back into `gate_state.json` with `gate_state.py answer` (use exactly this flag shape):
+**Gate execution model:** this skill runs inline in the main thread, so you ask the founder yourself. The gate is still a checkpoint on disk, so that the answer survives a fresh shell or a resumed session: `gate_state.py emit` writes `gate_state.json` and prints a structured `needs_input` payload (below), which is what you ask from. Call `AskUserQuestion` *if available* — **offering the `needs_input` options in the ORDER they appear, first to last, and adding no recommendation of your own** — or otherwise ask the founder via plain text — then write the answer back into `gate_state.json` with `gate_state.py answer` (use exactly this flag shape):
 
 ```bash
 python3 "$SCRIPTS/gate_state.py" answer \
@@ -520,7 +520,7 @@ python3 "$SCRIPTS/gate_state.py" answer \
   --source founder
 ```
 
-then re-invokes this sub-agent. (`--file`, `--run-id`, `--answer`, `--source`; `-o`/`--output` are accepted as aliases for `--file`, and `--run-id` is checked for parity against the gate's `metadata.run_id`.) `--source` is required and says who produced the answer: `founder` here, because they were asked and replied. (The plain-text round-trip works correctly even without `AskUserQuestion`.)
+then re-run Step 1's `setup_run.py` with the same `RUN_ID`: it reports `resume: true` and the `gate_action` to branch on (see the resume note under Step 1). (`--file`, `--run-id`, `--answer`, `--source`; `-o`/`--output` are accepted as aliases for `--file`, and `--run-id` is checked for parity against the gate's `metadata.run_id`.) `--source` is required and says who produced the answer: `founder` here, because they were asked and replied. (The plain-text round-trip works correctly even without `AskUserQuestion`.)
 
 **How to detect re-invocation: you already did, in Step 1.** `setup_run.py` printed `resume`, `gate_action` and `gate_answer`. If `resume` was true, skip the gate-emit and jump to "After the gate" below, branching on **`gate_action`** (the answer string is context, not the decision). **Do not re-read `gate_state.json` to decide this** — resume detection lives in `setup_run.py` and nowhere else, because it weighs run_id parity *and* whether the answer records where it came from. This file used to carry a second copy that checked only the first two, so an answer `setup_run.py` had declined to resume on was acted on regardless.
 

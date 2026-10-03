@@ -360,13 +360,14 @@ internally — pass the final message verbatim.
 - **Literal `Bash` doesn't resolve in sub-agent declarations**: Cowork
   registers shell as `mcp__workspace__bash`; declared names that aren't
   registered silently don't bind. Our agents' `tools:` frontmatter
-  declares no shell — sub-agents *should not need* one — but this is
-  **not an enforced platform invariant**: in Cowork the workspace shell
-  (`mcp__workspace__bash`) is reachable to a sub-agent regardless of what
-  `tools:` declares (it is a live escape hatch the platform grants, not
-  something our allowlist gates). Do not rely on "sub-agents can't shell
-  out" as a hard guarantee when reasoning about failure modes — rely
-  instead on the Context A input rules above ("Three Dispatch Contexts"):
+  declares no shell — sub-agents *should not need* one. A sub-agent
+  gets the workspace shell (`mcp__workspace__bash`) only when its
+  `tools:` names it, so our agents have none. The gap is a dispatch that
+  names no `subagent_type`: it falls back to the general-purpose agent,
+  whose tool list is a wildcard that includes the shell. So do not rely
+  on "sub-agents can't shell out" as a hard guarantee when reasoning
+  about failure modes — rely instead on the Context A input rules above
+  ("Three Dispatch Contexts"):
   every input a sub-agent is given is either
   reachable by an agent-namespace `Read` or inlined into the dispatch prompt, so
   a shell buys it nothing — plus the orchestrator-side gate on the one

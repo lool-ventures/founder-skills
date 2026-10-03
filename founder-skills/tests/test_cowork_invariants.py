@@ -246,3 +246,25 @@ def test_handoff_agents_declare_write(agent_stem: str) -> None:
         f"or remove the OUTPUT_PATH/Write references from the dispatch "
         f"prompts."
     )
+
+
+SEARCH_PATH_RULE = (
+    "When you call `Glob` or `Grep`, always pass `path` set to the absolute folder you mean to search: "
+    "without it the search runs in the session's working folder, which is not where your files are."
+)
+
+
+@pytest.mark.parametrize("agent_path", AGENT_FILES, ids=lambda p: p.stem)
+def test_agents_with_search_tools_state_the_path_rule(agent_path: Path) -> None:
+    """An agent that can Glob or Grep is told to scope every search to a folder.
+
+    An unscoped search runs in the session's working folder; on a cloud session that is the home
+    directory, so a hand-off or reference file is never found there. One identical sentence in every
+    such agent, before its first section, so a reworded copy cannot drift.
+    """
+    tools = _parse_frontmatter(agent_path).get("tools") or []
+    if not ({"Glob", "Grep"} & set(tools)):
+        pytest.skip("declares neither Glob nor Grep")
+    text = agent_path.read_text(encoding="utf-8")
+    assert text.count(SEARCH_PATH_RULE) == 1, agent_path.name
+    assert text.index(SEARCH_PATH_RULE) < text.index("\n## "), agent_path.name

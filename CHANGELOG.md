@@ -22,6 +22,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **Financial model review: the page no longer says your corrections file was downloaded when it
   cannot know that.** It says the download started, and if no file appeared, to tell Claude the
   corrections in chat instead.
+- **Cap table: the checks for scanned PDFs and for documents with tracked changes now run.** They
+  could fail to start, so a scanned cap table could be read without its text check and a draft
+  with tracked changes could be read as final without the question about it.
+- **A missing part of the plugin no longer blocks your session.** If an installation is incomplete,
+  the automatic checks that run around each review step now step aside instead of stopping the
+  step.
+- **Reviewers search only in the folders they are given.** A search with no folder named could look
+  in the wrong place and miss a file it had been handed.
 
 ## [0.15.0] - 2026-10-03 — Financial model reviews graded only on bars that fit the business, deck reviews that fail only what is missing, and skills that work from a conversation's first message
 
