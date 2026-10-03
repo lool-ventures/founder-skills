@@ -346,6 +346,13 @@ checks locally.
    ```
    Then restart Claude Code and reinstall the plugin.
 
+**Two copies of Founder skills?** If your organization also installed Founder skills for you, you may
+see an organization-provided copy with the same name beside your own. Turn one of them off in
+**Customize** → **Plugins**, so only one copy runs.
+
+**Removed by your organization but still showing?** Organization changes can take up to about an hour
+to reach the app. Restarting Claude Desktop picks them up sooner.
+
 ## Privacy
 
 Your documents stay in your Claude session. **No data is collected, transmitted, or shared with lool ventures.**
@@ -355,7 +362,7 @@ Two things do reach the network, both worth knowing before you start on somethin
 - **Three skills search the web** as part of the work — market sizing validates your figures against external sources, IC simulation researches a named fund, competitive positioning researches competitors and your company's own public record (registered name, patent filings). Search queries derived from your materials therefore pass through Claude to a search provider. Cap-table, deck review and financial model review never touch the network.
 - **The competitive-positioning explorer's optional 3D view** loads a charting library from a public CDN the first time you open that tab. Every other generated file is fully self-contained and works offline.
 
-Feedback is opt-in and user-initiated: `/founder-skills:feedback` drafts a message and hands you a link to submit yourself — nothing is sent automatically.
+Feedback is opt-in and user-initiated: the `/founder-skills:feedback` command (type `/` and pick **founder-skills:feedback** from the menu) drafts a message and hands you a link to submit yourself — nothing is sent automatically.
 
 ## Contributing
 
@@ -363,7 +370,7 @@ We welcome contributions — new skills, improvements to existing ones, and bug 
 
 ## Contact
 
-- **In-session feedback** — run `/founder-skills:feedback` while using the plugin (report a bug, suggest an idea, ask for help, or share a win)
+- **In-session feedback** — type `/` and pick **founder-skills:feedback** from the menu while using the plugin (report a bug, suggest an idea, ask for help, or share a win)
 - **Bug reports and feature requests** — [GitHub Issues](https://github.com/lool-ventures/founder-skills/issues)
 - **Questions and discussion** — [GitHub Discussions](https://github.com/lool-ventures/founder-skills/discussions)
 - **Private feedback** — [founder-skills@lool.vc](mailto:founder-skills@lool.vc)

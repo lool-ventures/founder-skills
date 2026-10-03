@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **The README says how to open the feedback command:** type `/` and pick it from the menu. Its
+  troubleshooting section now covers a second, organization-provided copy of the plugin, and an
+  organization removal that takes up to about an hour to reach the app.
+
 ### Fixed
 
 - **A missing working-records folder no longer hides unchecked steps.** Every skill's report says
