@@ -734,9 +734,12 @@ function triggerDownload(payload) {
       URL.revokeObjectURL(url);
     }, 100);
   } catch (e) {
-    /* Fallback: data URI if Blob/ObjectURL not supported */
+    /* Fallback: a base64 data URI if Blob/ObjectURL is not supported. Base64, not
+       percent-encoding: not every browser this page opens in decodes a
+       percent-encoded data URI. The JSON is UTF-8 encoded before btoa, which
+       accepts only single-byte characters. */
     var a2 = document.createElement("a");
-    a2.href = "data:application/json;charset=utf-8," + encodeURIComponent(payload);
+    a2.href = "data:application/json;base64," + btoa(unescape(encodeURIComponent(payload)));
     a2.download = "corrections.json";
     document.body.appendChild(a2);
     a2.click();
@@ -856,9 +859,10 @@ function showOverlay(wasDownload) {
   var hint = document.getElementById("overlay-hint");
   if (wasDownload) {
     /* Download mode: nothing is persisted server-side until the founder
-       uploads the file \u2014 say "downloaded", not "saved". */
-    if (msg) msg.textContent = "Your corrections.json has been downloaded.";
-    hint.textContent = "Go back to your session and upload the corrections.json file.";
+       uploads the file, and the page cannot tell whether the browser saved it
+       \u2014 say the download started, and name the other route. */
+    if (msg) msg.textContent = "Your corrections.json download has started.";
+    hint.textContent = "Go back to your session and upload the corrections.json file. If no file appeared, tell Claude your corrections in chat instead.";
   } else {
     if (msg) msg.textContent = "Your corrections have been saved.";
     hint.textContent = "Go back to your session and tell Claude you\u2019re done.";

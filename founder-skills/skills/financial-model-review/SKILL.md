@@ -599,13 +599,13 @@ python3 "$SCRIPTS/validate_extraction.py" --inputs "$REVIEW_DIR/inputs.json" --m
 
 **Path A — File extraction** (`model_format` is `spreadsheet` or `partial`):
 
-Generate the HTML review page for the founder to inspect extracted values. In Cowork (VM, no display), use **static mode**:
+Generate the HTML review page for the founder to inspect extracted values. Always build the page in **static mode** — it works wherever the founder opens it, whereas a local server's address opens only on the machine running it:
 
 ```bash
 python3 "$SCRIPTS/review_inputs.py" "$REVIEW_DIR/inputs.json" --static "$REVIEW_DIR/review.html" --extraction-warnings "$REVIEW_DIR/extraction_validation.json"
 ```
 
-**This is a STOP point — do not proceed to Step 4 until the founder responds.** Present the `review.html` path to the founder, then ask via `AskUserQuestion`: "I reviewed the page — do the values look right?"
+**This is a STOP point — do not proceed to Step 4 until the founder responds.** Send `review.html` to the founder as a file, the same way Step 12 sends the finished documents — never a bare path — then ask via `AskUserQuestion`: "I reviewed the page — do the values look right?"
 Options: `I reviewed the page — the values look right, proceed` / `I edited values and will upload the corrections file` / `I'll tell you the corrections in chat`
 
 Generating the page and silently moving on defeats the human verification gate: the founder is the last check on extracted numbers before math runs on them. When they upload `corrections.json`:
@@ -624,7 +624,7 @@ A path that does not exist in `inputs.json` is refused rather than created, so a
 
 Either way, then promote `corrected_inputs.json` to `inputs.json` (same as Step 3) and re-run the Step 3.5 validation before proceeding.
 
-In Claude Code (local terminal), use **server mode**:
+Use **server mode** only when the founder asks for live validation while editing and the shell runs on the computer whose browser they use (a local terminal session):
 
 ```bash
 python3 "$SCRIPTS/review_inputs.py" "$REVIEW_DIR/inputs.json" --workspace "$REVIEW_DIR" --extraction-warnings "$REVIEW_DIR/extraction_validation.json" &

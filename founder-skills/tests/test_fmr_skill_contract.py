@@ -143,8 +143,8 @@ def test_overwrite_in_place_no_outputs_delete() -> None:
     `$STAGING_DIR`. Replaces the old `rm -f` cleanup-coverage test — deleting
     under outputs/ is the regression now, not an uncovered artifact.
 
-    (The Step-3.6 review page runs `review_inputs.py --static` in Cowork; the
-    `--workspace &` server branch is Claude-Code-only — neither is an rm.)
+    (The Step-3.6 review page runs `review_inputs.py --static`; the `--workspace &`
+    server branch runs only on request in a local terminal — neither is an rm.)
     """
     text = SKILL_MD.read_text(encoding="utf-8")
     assert not re.search(r"\brm\b[^\n`]*\$\{?REVIEW_DIR\b", text), (
@@ -687,3 +687,40 @@ def test_metric_34_says_what_a_contextual_burn_multiple_gets() -> None:
     section = text.split("### `METRIC_34`", 1)[1].split("\n### ", 1)[0]
     assert "Rated contextual with no reference grade, it was left ungraded on purpose: warn and say why." in section
     assert "With a reference grade (a non-USD model), grade on the reference." in section
+
+
+def _step_36_path_a() -> str:
+    text = SKILL_MD.read_text(encoding="utf-8")
+    start = text.index("**Path A — File extraction**")
+    end = text.index("**Path B — Conversational**", start)
+    return " ".join(text[start:end].split())
+
+
+def test_review_page_defaults_to_static_mode() -> None:
+    """The review page is built static unless the founder asks for live validation.
+
+    The choice used to be keyed on the product name ("In Cowork … static", "In Claude Code … server").
+    A session in a cloud container cannot tell it is not Claude Code, and its localhost URL is
+    unreachable from the founder's browser, so the page never opened. Static works everywhere.
+    """
+    block = _step_36_path_a()
+    assert "In Claude Code (local terminal), use **server mode**" not in block
+    assert "In Cowork (VM, no display)" not in block
+    assert "Always build the page in **static mode**" in block
+    static_at = block.index('--static "$REVIEW_DIR/review.html"')
+    server_at = block.index('--workspace "$REVIEW_DIR"')
+    assert static_at < server_at, "the static command must come first; server mode is the exception"
+    server_rule = block[block.rindex("server mode", 0, server_at) - 200 : server_at]
+    assert "live validation" in server_rule and "asks" in server_rule, (
+        "server mode must be gated on the founder asking for live validation, not on the product name"
+    )
+
+
+def test_review_page_is_sent_as_a_file_before_the_question() -> None:
+    """At the STOP gate the founder gets review.html as a file, not its path, and only then the question."""
+    block = _step_36_path_a()
+    assert "Present the `review.html` path" not in block
+    send = block.index("Send `review.html` to the founder as a file")
+    ask = block.index("then ask via `AskUserQuestion`")
+    assert send < ask
+    assert "never a bare path" in block[send:ask]

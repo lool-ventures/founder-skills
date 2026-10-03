@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- **Financial model review: the page for checking extracted values is now always a standalone file.**
+  It is sent to you as a file before you are asked whether the values look right, rather than named
+  by its location. A live-checking version that runs on your own computer is used only when you ask
+  for it in a local terminal session.
+
+### Fixed
+
+- **Financial model review: the corrections file downloads intact in more browsers.** When the
+  browser could not save it the usual way, the backup download could arrive garbled; it now carries
+  the corrections exactly as entered, including non-English text and symbols.
+- **Financial model review: the page no longer says your corrections file was downloaded when it
+  cannot know that.** It says the download started, and if no file appeared, to tell Claude the
+  corrections in chat instead.
+
 ## [0.15.0] - 2026-10-03 — Financial model reviews graded only on bars that fit the business, deck reviews that fail only what is missing, and skills that work from a conversation's first message
 
 ### Highlights

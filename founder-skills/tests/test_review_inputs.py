@@ -325,13 +325,14 @@ class TestStaticHTML:
         assert "/api/feedback" in html
         assert "download" in html.lower()
 
-    def test_download_overlay_says_downloaded_not_saved(self) -> None:
-        """In download mode the completion overlay must say the file was
-        downloaded (pending upload), not 'saved' — nothing is persisted
-        server-side until the founder uploads it back."""
+    def test_download_overlay_says_started_not_saved(self) -> None:
+        """In download mode the completion overlay must say the download started
+        (pending upload), not 'saved' — nothing is persisted server-side until the
+        founder uploads it back — and not that it finished, which the page cannot know."""
         rc, html, stderr = _generate_static(_FULL_INPUTS)
         assert rc == 0
-        assert "Your corrections.json has been downloaded." in html
+        assert "Your corrections.json download has started." in html
+        assert "has been downloaded" not in html
 
     def test_static_mode_sets_is_static_true(self) -> None:
         """Static HTML must declare IS_STATIC = true so the JS skips the /api/*
@@ -1286,3 +1287,123 @@ var document = {
             "a stale 'projected' label survived past refreshSanity(), which only ever computes the static figure"
         )
         assert r["value"] == "10 mo"
+
+
+def _grab_js_function(source: str, name: str) -> str:
+    """Brace-match the named function out of the embedded JS."""
+    start = source.index(f"function {name}(")
+    depth, i = 0, source.index("{", start)
+    while True:
+        if source[i] == "{":
+            depth += 1
+        elif source[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return source[start : i + 1]
+        i += 1
+
+
+def _run_node(script: str) -> dict[str, Any]:
+    import shutil
+
+    import pytest
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node not available")
+    out = subprocess.run([node, "-e", script], capture_output=True, text=True, timeout=30)
+    assert out.returncode == 0, f"node failed: {out.stderr}"
+    parsed: dict[str, Any] = json.loads(out.stdout)
+    return parsed
+
+
+class TestCorrectionsDownload:
+    """The corrections file the founder downloads must arrive intact, and the page must not claim it did.
+
+    Executes the page's own `triggerDownload` and `showOverlay` under node with a stub `document`.
+    """
+
+    # Non-ASCII on purpose: a currency sign, Hebrew text, and a character outside the
+    # Basic Multilingual Plane (a surrogate pair in JS strings).
+    _PAYLOAD = {
+        "base_hash": "abc123",
+        "changes": [{"path": "company.company_name", "expected_old": "Acme", "new": "אקמה בע״מ — €1.2M 🚀"}],
+        "warning_overrides": [],
+        "ils_fields": {},
+    }
+
+    _DOC_STUB = """
+var __anchors = [];
+var __els = {};
+function __el(id) {
+  if (!__els[id]) { __els[id] = { textContent: "", classList: { add: function () {} } }; }
+  return __els[id];
+}
+var document = {
+  createElement: function () {
+    var a = { href: "", download: "", click: function () {} };
+    __anchors.push(a);
+    return a;
+  },
+  body: { appendChild: function () {}, removeChild: function () {} },
+  getElementById: function (id) { return __el(id); }
+};
+"""
+
+    def test_fallback_download_decodes_to_the_exact_json(self) -> None:
+        import pathlib
+
+        source = pathlib.Path(_SCRIPT).read_text()
+        payload = json.dumps(self._PAYLOAD, ensure_ascii=False, indent=2)
+        script = (
+            self._DOC_STUB
+            # Force the fallback: this host has no usable Blob.
+            + "var Blob = function () { throw new Error('no Blob'); };\n"
+            + _grab_js_function(source, "triggerDownload")
+            + "\nvar payload = "
+            + json.dumps(payload)
+            + ";\ntriggerDownload(payload);\n"
+            + "console.log(JSON.stringify({href: __anchors[0].href, download: __anchors[0].download}));"
+        )
+        r = _run_node(script)
+        prefix = "data:application/json;base64,"
+        assert r["href"].startswith(prefix), (
+            f"the fallback download must be a base64 data URL, got {r['href'][:60]!r}: a percent-encoded "
+            "data URL is not decoded by every browser the page opens in"
+        )
+        assert r["download"] == "corrections.json"
+        import base64
+
+        decoded = base64.b64decode(r["href"][len(prefix) :]).decode("utf-8")
+        assert decoded == payload
+        assert json.loads(decoded) == self._PAYLOAD
+
+    def _overlay(self, was_download: bool) -> dict[str, Any]:
+        import pathlib
+
+        source = pathlib.Path(_SCRIPT).read_text()
+        script = (
+            self._DOC_STUB
+            + _grab_js_function(source, "showOverlay")
+            + f"\nshowOverlay({'true' if was_download else 'false'});\n"
+            + "console.log(JSON.stringify({"
+            + 'msg: __el("overlay-msg").textContent, hint: __el("overlay-hint").textContent}));'
+        )
+        return _run_node(script)
+
+    def test_download_overlay_does_not_claim_the_file_arrived(self) -> None:
+        """The page cannot know a download landed, so it must not say it did, and must name the other route."""
+        r = self._overlay(True)
+        text = (r["msg"] + " " + r["hint"]).lower()
+        assert "has been downloaded" not in text, r
+        assert "been saved" not in text, r
+        assert "started" in r["msg"].lower(), r
+        assert "corrections.json" in r["hint"], r
+        assert "if no file" in r["hint"].lower() and "in chat" in r["hint"].lower(), (
+            "the hint must offer telling the corrections in chat when no file appeared",
+            r,
+        )
+
+    def test_server_overlay_still_says_saved(self) -> None:
+        r = self._overlay(False)
+        assert r["msg"] == "Your corrections have been saved.", r

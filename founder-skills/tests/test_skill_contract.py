@@ -973,7 +973,9 @@ SKILL_MD_CEILING: dict[str, int] = {
     # with the token as shown and that PLUGIN_ROOT is for shell commands only.
     # 86,384 -> 86,447 (+63 B) on 2026-10-03, the same +63 B in all six: Step 0's PLUGIN_ROOT comment names it
     # the shell's path and states the one exception, a printed READ_ROOT= used in Reads and prompts.
-    "financial-model-review": 86_447,
+    # 86,447 -> 86,741 on 2026-10-03: Step 3.6 always builds the review page static (server mode only when
+    # the founder asks for live validation in a local terminal) and sends review.html as a file, not a path.
+    "financial-model-review": 86_741,
     # ic-sim SHRANK: the REQUIRED ic-dynamics.md read at Step 7 is deleted. Step 7 is a pure producer
     # pipe — compose_discussion.py derives discussion.json from the partners' own files and nothing
     # is authored by the main thread — so the read informed no decision while pulling a whole
