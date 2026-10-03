@@ -16,6 +16,7 @@ import copy
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -9424,7 +9425,11 @@ def test_handoff_bypass_requires_the_inputs_review_only_when_a_model_was_extract
     assert _fmr_bypass(d) is None
 
 
-def test_handoff_bypass_is_silent_without_a_handoff_dir() -> None:
+def test_a_missing_handoff_dir_names_every_step_unchecked() -> None:
+    """Deleting `handoff/<run_id>/` can only ADD this warning: no dir means no gate records."""
     d = _fmr_bypass_dir(with_corrections=True)
-    os.rmdir(os.path.join(d, "handoff", _FMR_RUN))
-    assert _fmr_bypass(d) is None
+    _fmr_seed_gated(d, ["checklist_output.json", "inputs_review_output.json"])
+    assert _fmr_bypass(d) is None  # control: fully gated, silent
+    shutil.rmtree(os.path.join(d, "handoff", _FMR_RUN))
+    hit = _fmr_bypass(d)
+    assert hit is not None and "extracted model" in hit["message"] and "scored checklist" in hit["message"]

@@ -5988,9 +5988,13 @@ def test_handoff_bypass_requires_the_interpretation_pass_only_when_it_was_applie
     assert _bypass_message(not_run) is None
 
 
-def test_handoff_bypass_is_silent_without_a_handoff_dir() -> None:
+def test_a_missing_handoff_dir_names_every_step_unchecked() -> None:
+    """Deleting `handoff/<run_id>/` can only ADD this warning: no dir means no gate records, so every
+    step the artifacts show ran is named. It used to read as "not a run" and stay silent."""
     d = _make_artifact_dir(_compose_artifacts(_VALID_INVENTORY))
-    assert _bypass_message(d) is None
+    assert not (Path(d) / "handoff").exists()
+    msg = _bypass_message(d)
+    assert msg is not None and "slide-by-slide review" in msg and "scored checklist" in msg
 
 
 def test_handoff_bypass_cannot_be_accepted_away() -> None:

@@ -2749,9 +2749,24 @@ def _make_artifact_dir(
     positioning_scores_overrides: dict[str, Any] | None = None,
     checklist_overrides: dict[str, Any] | None = None,
     product_profile_overrides: dict[str, Any] | None = None,
+    include_red_team_skip: bool = True,
 ) -> str:
-    """Write all required artifacts to a temp dir and return the path."""
+    """Write all required artifacts to a temp dir and return the path.
+
+    With a recorded decision not to run the outside review, as a real run without one has: compose
+    refuses a run with neither this run's review nor this run's skip record.
+    """
     os.makedirs(tmp_path, exist_ok=True)
+    if include_red_team_skip:
+        with open(os.path.join(tmp_path, "red_team_skip.json"), "w") as f:
+            json.dump(
+                {
+                    "reason": "no_subagent_dispatch",
+                    "_produced_by": "record_red_team_skip",
+                    "metadata": {"run_id": run_id},
+                },
+                f,
+            )
 
     if include_product_profile:
         pp = _make_product_profile(run_id=run_id)
@@ -7572,10 +7587,13 @@ def test_handoff_bypass_follows_the_optional_steps_that_actually_ran() -> None:
         assert _cp_bypass(tmp) is None
 
 
-def test_handoff_bypass_is_silent_without_a_handoff_dir() -> None:
+def test_a_missing_handoff_dir_names_every_step_unchecked() -> None:
+    """Deleting `handoff/<run_id>/` can only ADD this warning: no dir means no gate records."""
     with tempfile.TemporaryDirectory() as tmp:
         _make_artifact_dir(tmp)
-        assert _cp_bypass(tmp) is None
+        assert not os.path.exists(os.path.join(tmp, "handoff"))
+        msg = _cp_bypass(tmp)
+        assert msg is not None and "competitor research" in msg and "quality checklist" in msg
 
 
 def test_handoff_bypass_cannot_be_accepted_away() -> None:

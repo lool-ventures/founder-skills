@@ -43,6 +43,8 @@ def _analysis(tmp_path: Path) -> Path:
     d = tmp_path / "competitive-positioning-acme"
     d.mkdir(parents=True)
     for src in FIXTURES.glob("*.json"):
+        if src.name == "red_team_skip.json":  # each test here records (or withholds) its own decision
+            continue
         data = json.loads(src.read_text(encoding="utf-8"))
         if isinstance(data, dict):
             data.setdefault("metadata", {})["run_id"] = RUN
@@ -509,11 +511,28 @@ def test_another_runs_review_does_not_satisfy_the_gate(tmp_path: Path) -> None:
     assert r.returncode == 1, "a review from an earlier run let this run's report through"
 
 
-def test_a_directory_that_is_not_a_run_is_not_gated(tmp_path: Path) -> None:
-    """No `handoff/<run_id>/`: not a run whose steps can be judged (fixtures, older layouts)."""
+def test_deleting_the_handoff_dir_does_not_silence_the_gate(tmp_path: Path) -> None:
+    """The gate keys on the run's id, not on its hand-off dir: deleting the dir once read as "not a run"
+    and let a report through with neither a review nor a recorded skip."""
     d = _analysis(tmp_path)
     shutil.rmtree(d / "handoff")
-    assert _compose_run(d).returncode == 0
+    r = _compose_run(d)
+    assert r.returncode == 1 and "record_red_team_skip.py" in r.stdout
+    _skip(d, RUN)
+    assert _compose_run(d).returncode == 0  # control: a recorded skip still satisfies it
+
+
+def test_a_review_or_skip_of_any_run_in_a_mixed_set_leaves_the_finding_to_stale_artifact(tmp_path: Path) -> None:
+    """When the artifacts disagree on the run, the gate must not hide STALE_ARTIFACT behind a refusal
+    that names the wrong cause."""
+    d = _analysis(tmp_path)
+    _skip(d, RUN)
+    land = json.loads((d / "landscape.json").read_text(encoding="utf-8"))
+    land["metadata"]["run_id"] = "an-earlier-run"
+    (d / "landscape.json").write_text(json.dumps(land), encoding="utf-8")
+    r = _compose_run(d)
+    assert r.returncode == 0 and "record_red_team_skip.py" not in r.stdout, r.stdout[-600:]
+    assert "STALE_ARTIFACT" in (d / "report.json").read_text(encoding="utf-8")
 
 
 # --- what the founder reads ---------------------------------------------------------------------------------

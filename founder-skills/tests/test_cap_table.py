@@ -14456,10 +14456,28 @@ def test_handoff_bypass_an_aoa_reading_on_record_must_be_gated() -> None:
     assert hit is None
 
 
-def test_handoff_bypass_is_silent_without_a_handoff_dir() -> None:
+def test_handoff_bypass_a_run_with_no_sub_agent_step_and_no_handoff_dir_is_silent() -> None:
+    """The no-sub-agent case (a cap table described in chat, no document read): nothing the artifacts
+    show came from a sub-agent, so a missing hand-off dir requires nothing. Not keyed on the dir."""
     d = _make_cap_compose_dir()
+    assert not os.path.exists(os.path.join(d, "handoff"))
     hit, _ = _cap_bypass(d)
     assert hit is None
+
+
+def test_handoff_bypass_a_missing_handoff_dir_does_not_hide_an_aoa_reading() -> None:
+    """Deleting `handoff/<run_id>/` can only ADD this warning: the AoA findings on record still require
+    a gated hand-off, and with no dir there is none."""
+    d = _make_cap_compose_dir()
+    cs_path = os.path.join(d, "cap_state.json")
+    with open(cs_path, encoding="utf-8") as f:
+        cs = json.load(f)
+    cs["aoa_findings"] = {"liquidation_preference": "1x non-participating"}
+    with open(cs_path, "w", encoding="utf-8") as f:
+        json.dump(cs, f)
+    assert not os.path.exists(os.path.join(d, "handoff"))
+    hit, _ = _cap_bypass(d)
+    assert hit is not None and "articles of association" in hit["message"]
 
 
 def test_handoff_bypass_known_residual_a_fallback_extraction_leaves_nothing_to_see() -> None:

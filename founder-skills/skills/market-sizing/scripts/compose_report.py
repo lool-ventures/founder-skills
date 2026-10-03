@@ -520,13 +520,13 @@ def _revision_not_offered(dir_path: str, run_id: str | None, redteam: Any, *, ro
     nothing is owed.
 
     A second review round is the answer "revise" by construction: that round exists only because the
-    founder chose it. Silent when `handoff/<run_id>/` does not exist, for the reason `_handoff_bypassed`
-    gives: every real run creates it at Step 0.
+    founder chose it. A missing `handoff/<run_id>/` is not silence: the answer record lives there, so
+    deleting the dir can only add this warning, never remove it.
 
     RESIDUAL (pinned in tests): the record is written by a script the model runs, so a pass proves the
     question step ran the recorder, not that the question was put to the founder.
     """
-    if not run_id or rounds >= 2 or not os.path.isdir(os.path.join(dir_path, "handoff", run_id)):
+    if not run_id or rounds >= 2:
         return []
     parameters = _revision_answer.qualifying_parameters(redteam)
     if not parameters or _revision_answer.recorded(dir_path, run_id, parameters):
@@ -549,8 +549,9 @@ def _handoff_bypassed(dir_path: str, run_id: str | None, artifacts: dict[str, An
     would otherwise vouch for a round-2 step that degraded. A sizing is re-run with `--replay` (no
     dispatch) or re-dispatched into r2, so either round's record satisfies it.
 
-    Silent when `handoff/<run_id>/` does not exist: every real run creates it at Step 0, so its absence
-    means this is not a run whose transport can be judged, not that nothing was bypassed.
+    A missing `handoff/<run_id>/` is NOT silence: with no dir there are no gate records, so every step
+    the artifacts show ran is reported unchecked. Deleting the dir can only add this warning. A run
+    that dispatched no sub-agent has none of these artifacts, so nothing is required of it.
 
     RESIDUAL (pinned in tests): a pass proves a gated hand-off exists and still matches its record --
     not that the producer consumed it. A step gated once and then degraded on a re-dispatch within the
@@ -560,8 +561,6 @@ def _handoff_bypassed(dir_path: str, run_id: str | None, artifacts: dict[str, An
     if audit is None or not run_id:
         return []
     run_dir = os.path.join(dir_path, "handoff", run_id)
-    if not os.path.isdir(run_dir):
-        return []
     revised = os.path.isdir(os.path.join(run_dir, "r2"))
 
     def rerun(stem: str) -> list[str]:

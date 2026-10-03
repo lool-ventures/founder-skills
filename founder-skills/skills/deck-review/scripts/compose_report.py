@@ -322,8 +322,9 @@ def _handoff_bypassed(dir_path: str, artifacts: dict[str, Any]) -> list[str]:
     are required only when their artifacts exist; the interpretation pass only when the reconciliation
     records that it was applied.
 
-    Silent when `handoff/<run_id>/` does not exist: every real run creates it at Step 0, so its absence
-    means this is not a run whose transport can be judged, not that nothing was bypassed.
+    A missing `handoff/<run_id>/` is NOT silence: with no dir there are no gate records, so every step
+    the artifacts show ran is reported unchecked. Deleting the dir can only add this warning. A run
+    that dispatched no sub-agent has none of these artifacts, so nothing is required of it.
 
     RESIDUAL: a pass proves a gated hand-off exists and still matches its record -- not that the
     producer consumed it. A step gated once and then degraded on a re-dispatch passes. See
@@ -345,8 +346,6 @@ def _handoff_bypassed(dir_path: str, artifacts: dict[str, Any]) -> list[str]:
     if not run_id:
         return []
     run_dir = os.path.join(dir_path, "handoff", run_id)
-    if not os.path.isdir(run_dir):
-        return []
     requirements: list[tuple[str, list[str]]] = []
     if isinstance(artifacts.get("slide_reviews.json"), dict):
         requirements.append(("the slide-by-slide review", ["slide_reviews_output.json"]))

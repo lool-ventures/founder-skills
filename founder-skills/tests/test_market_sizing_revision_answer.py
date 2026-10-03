@@ -178,10 +178,10 @@ def test_accepted_warnings_cannot_clear_it() -> None:
     assert len(_codes(d)) == 1
 
 
-def test_silent_where_the_run_has_no_handoff_dir() -> None:
-    """Every real run creates `handoff/<run_id>/` at Step 0 (the HANDOFF_BYPASSED rule): its absence means
-    this is not a run whose steps can be judged, so the check stays out of fixtures and hand-assembled dirs."""
-    assert _codes(_dir(_redteam(_HIGH_ON_PARAMETER), handoff=False)) == []
+def test_a_missing_handoff_dir_still_raises_it() -> None:
+    """The answer record lives under `handoff/<run_id>/`, so deleting that dir can only ADD this warning.
+    It used to read as "not a run" and stay silent."""
+    assert [w["code"] for w in _codes(_dir(_redteam(_HIGH_ON_PARAMETER), handoff=False))] == [CODE]
 
 
 def test_the_recorder_refuses_loudly_and_writes_nothing() -> None:

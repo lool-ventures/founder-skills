@@ -24,6 +24,7 @@ import os
 import re
 import sys
 import uuid
+from collections.abc import Sequence
 from datetime import date
 from typing import Any, TypeGuard
 
@@ -267,9 +268,7 @@ _REVIEW_FOUNDER_MESSAGES = {
 }
 
 
-def _rt_refuse(
-    dir_path: str, run_id: str | None, review: dict[str, Any] | None, skip_record: Any, skip: str | None
-) -> None:
+def _rt_refuse(run_ids: set[str], reviews: Sequence[Any], skip_record: Any) -> None:
     """THE OUTSIDE-REVIEW GATE: a run's report is composed only when its review ran or the decision not to
     run one was recorded. Silence is not a third option.
 
@@ -277,19 +276,22 @@ def _rt_refuse(
     nothing, and a step whose only consumer is a warning gets skipped in silence (market-sizing's review
     was, on a live paid run). Only a non-zero exit reaches SKILL.md's stop-and-report branch.
 
-    Keyed on the run's hand-off dir, like `_handoff_bypassed`: Step 0 creates `handoff/<run_id>/` on every
-    run, so its absence means this is not a run whose steps can be judged (a fixture, an older layout).
-    RESIDUAL, stated: deleting that dir silences this gate and HANDOFF_BYPASSED together, on every lane:
-    newer Cowork hosts allow deletes under outputs.
+    Keyed on the run ids the required artifacts carry, never on the run's hand-off dir: a missing dir
+    once read as "not a run that can be judged", so deleting it silenced the gate. A run with no
+    sub-agents records `no_subagent_dispatch`. A review or skip of ANY of those ids satisfies it: when the
+    artifacts disagree on the run, STALE_ARTIFACT (high) is the finding, and this gate must not hide it
+    behind a refusal that names the wrong cause. RESIDUAL, stated: deleting the review and the skip
+    record trips this refusal rather than passing it; hand-writing a skip record is a named fabrication.
     """
-    if not run_id or not os.path.isdir(os.path.join(dir_path, "handoff", run_id)):
+    if not run_ids:
         return
-    if review is not None and _as_dict(review.get("metadata")).get("run_id") == run_id:
+    if any(_as_dict(_as_dict(r).get("metadata")).get("run_id") in run_ids for r in reviews):
         return
-    if skip is not None:
-        return
-    recorded = _as_dict(skip_record).get("reason")
-    if isinstance(recorded, str) and _as_dict(_as_dict(skip_record).get("metadata")).get("run_id") == run_id:
+    rec = _as_dict(skip_record)
+    recorded = rec.get("reason")
+    if _as_dict(rec.get("metadata")).get("run_id") in run_ids:
+        if recorded in _cp_redteam_copy.SKIP_REASONS:
+            return
         detail = f"red_team_skip.json records {recorded!r}, which is not a recognised reason"
     else:
         detail = "no outside review ran for this run and no decision to skip one was recorded"
@@ -374,8 +376,9 @@ def _handoff_bypassed(dir_path: str, artifacts: dict[str, Any]) -> list[str]:
     only when the verification recorded a non-empty blind set -- and the landscape enrichment
     re-dispatch only when its hand-off is on disk.
 
-    Silent when `handoff/<run_id>/` does not exist: every real run creates it at Step 0, so its absence
-    means this is not a run whose transport can be judged, not that nothing was bypassed.
+    A missing `handoff/<run_id>/` is NOT silence: with no dir there are no gate records, so every step
+    the artifacts show ran is reported unchecked. Deleting the dir can only add this warning. A run
+    that dispatched no sub-agent has none of these artifacts, so nothing is required of it.
 
     RESIDUAL: a pass proves a gated hand-off exists and still matches its record -- not that the
     producer consumed it. See `_handoff_audit.py`.
@@ -396,8 +399,6 @@ def _handoff_bypassed(dir_path: str, artifacts: dict[str, Any]) -> list[str]:
     if not run_id:
         return []
     run_dir = os.path.join(dir_path, "handoff", run_id)
-    if not os.path.isdir(run_dir):
-        return []
     requirements: list[tuple[str, list[str]]] = []
     verification = artifacts.get("competitor_verification.json")
     if isinstance(verification, dict):
@@ -2127,11 +2128,21 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
     # review, and every check below (the hand-off audit, provenance) must key on THIS run's review. The
     # analysis dir is per company, so a re-run that recorded a skip otherwise inherited the last run's
     # review and was told the review had bypassed a hand-off it never made.
+    _rt_refuse(
+        {
+            rid
+            for n in REQUIRED_ARTIFACTS
+            if isinstance(rid := _as_dict(_as_dict(artifacts.get(n)).get("metadata")).get("run_id"), str) and rid
+        },
+        # The review as it stands, and the one shown (from its append-only copy, which outlives an edit
+        # or a delete of redteam.json).
+        (artifacts.get("redteam.json"), _rt_shown),
+        artifacts.get("red_team_skip.json"),
+    )
     artifacts["redteam.json"] = _rt_shown
     _rt_run_id = _cp_redteam_copy.primary_run_id(artifacts.get(n) for n in REQUIRED_ARTIFACTS)
     _rt_skip = _cp_redteam_copy.skip_reason(artifacts.get("red_team_skip.json"), _rt_run_id)
     _rt_review = _rt_shown if isinstance(_rt_shown, dict) and _rt_shown is not _CORRUPT else None
-    _rt_refuse(dir_path, _rt_run_id, _rt_review, artifacts.get("red_team_skip.json"), _rt_skip)
 
     # Normalize positioning.json before validation (best-effort)
     positioning_raw = artifacts.get("positioning.json")

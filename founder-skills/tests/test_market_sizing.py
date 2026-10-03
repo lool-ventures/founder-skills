@@ -10019,11 +10019,12 @@ def test_handoff_bypass_names_the_ungated_step_and_a_fully_gated_run_is_silent()
     assert "saved output" not in data["verdict"]
 
 
-def test_handoff_bypass_is_silent_when_the_run_has_no_handoff_dir() -> None:
-    """Every real run creates handoff/<run_id>/ at Step 0; without it there is nothing to judge."""
+def test_a_missing_handoff_dir_names_every_step_unchecked() -> None:
+    """Deleting `handoff/<run_id>/` can only ADD this warning: no dir means no gate records, so every
+    step the artifacts show ran is named. It used to read as "not a run" and stay silent."""
     d = _gated_dir({"red_team_skipped": "founder_declined"})
     assert not (d / "handoff").exists()
-    assert "HANDOFF_BYPASSED" not in _warning_codes(_compose_dir(d))
+    assert "HANDOFF_BYPASSED" in _warning_codes(_compose_dir(d))
 
 
 def test_handoff_bypass_a_revised_run_is_judged_on_its_second_round() -> None:

@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -5092,10 +5093,12 @@ def test_handoff_bypass_follows_the_files_present_and_the_fund_mode() -> None:
     assert _ic_bypass(d) is None
 
 
-def test_handoff_bypass_is_silent_without_a_handoff_dir() -> None:
+def test_a_missing_handoff_dir_names_every_step_unchecked() -> None:
+    """Deleting `handoff/<run_id>/` can only ADD this warning: no dir means no gate records."""
     d = _ic_bypass_dir()
-    os.rmdir(os.path.join(d, "handoff", _IC_RUN))
-    assert _ic_bypass(d) is None
+    shutil.rmtree(os.path.join(d, "handoff", _IC_RUN))
+    msg = _ic_bypass(d)
+    assert msg is not None and "dimension scoring" in msg
 
 
 def test_handoff_bypass_cannot_be_accepted_away() -> None:

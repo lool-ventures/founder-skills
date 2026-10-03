@@ -11,8 +11,10 @@ discloses them to the founder (`HANDOFF_BYPASSED`).
 The evidence is the ABSENCE of a record, deliberately. Keying on something the fallback path writes
 would depend on the model following the fallback prose; an absent record survives the prose being
 skipped. The hand-off dir sits under the outputs mount. Newer hosts allow deletes there (we never delete
-by rule), so a record CAN be removed -- and deleting the run's hand-off dir silences each compose's
-check, the residual its callers state. The only way to manufacture a record is to hand-write a
+by rule), so a record CAN be removed -- and that can only ADD warnings: `gate_ok` reads a missing
+record (or a missing dir) as ungated, and no caller treats a missing dir as "not a run". A run that
+dispatched no sub-agent has no artifact that requires a record. Deleting a canonical artifact removes
+its step's requirement, the residual. The only way to manufacture a record is to hand-write a
 sub-agent's JSON into the hand-off path and gate it, which is the main thread re-emitting a payload --
 a named fabrication failure, not a paraphrase. The sha also catches a hand-off file rewritten after it was gated.
 

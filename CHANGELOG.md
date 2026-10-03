@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **A missing working-records folder no longer hides unchecked steps.** Every skill's report says
+  which steps were not put through the check on their saved output; when the run's folder of those
+  records was missing, the report used to say nothing. It now names those steps. Competitive
+  positioning likewise still refuses to build a report with neither an outside review nor a recorded
+  reason it did not run, and market sizing still notes when the offer to revise after a serious
+  challenge was not recorded.
+
 ### Development
 
 Contributor-facing only; nothing here changes what a founder installs or runs.
