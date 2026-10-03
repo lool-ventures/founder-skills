@@ -520,7 +520,7 @@ python3 "$SCRIPTS/gate_state.py" answer \
   --source founder
 ```
 
-then re-run Step 1's `setup_run.py` with the same `RUN_ID`: it reports `resume: true` and the `gate_action` to branch on (see the resume note under Step 1). (`--file`, `--run-id`, `--answer`, `--source`; `-o`/`--output` are accepted as aliases for `--file`, and `--run-id` is checked for parity against the gate's `metadata.run_id`.) `--source` is required and says who produced the answer: `founder` here, because they were asked and replied. (The plain-text round-trip works correctly even without `AskUserQuestion`.)
+then re-run `setup_run.py` (Step 0) with `--run-id` set to the RUN_ID literal printed earlier, never an empty or new one: it reports `resume: true` and the `gate_action` to branch on (see the resume note under Step 0). (`--file`, `--run-id`, `--answer`, `--source`; `-o`/`--output` are accepted as aliases for `--file`, and `--run-id` is checked for parity against the gate's `metadata.run_id`.) `--source` is required and says who produced the answer: `founder` here, because they were asked and replied. (The plain-text round-trip works correctly even without `AskUserQuestion`.)
 
 **How to detect re-invocation: you already did, in Step 1.** `setup_run.py` printed `resume`, `gate_action` and `gate_answer`. If `resume` was true, skip the gate-emit and jump to "After the gate" below, branching on **`gate_action`** (the answer string is context, not the decision). **Do not re-read `gate_state.json` to decide this** — resume detection lives in `setup_run.py` and nowhere else, because it weighs run_id parity *and* whether the answer records where it came from. This file used to carry a second copy that checked only the first two, so an answer `setup_run.py` had declined to resume on was acted on regardless.
 
@@ -574,7 +574,7 @@ The script schema-validates the body and injects `metadata.run_id`. **Never writ
 
 **`context_summary` must not name any stage other than `--stage`** — including quoting the deck's own claim. The producer refuses it, and states the disagreement itself: it reads `claimed_stage` from `deck_inventory.json` and appends `(The deck states: X. This review reads it as Y.)`. Write the evidence; let the producer name the stages.
 
-Then return — as your final assistant message — a JSON object the parent agent can act on. **Use the `needs_input` block `gate_state.py emit` printed, verbatim.** Do not retype the question or the options: the canonical options are enforced on the FILE, so a hand-written payload can show the founder a shorter list than the one that was recorded — including one with no way to decline. The shape it returns is:
+Then ask the founder with `AskUserQuestion`, using the printed `needs_input` question and its options verbatim and in the order printed, and do not end your turn on the JSON: it is the record, never a message to paste. **Use the `needs_input` block `gate_state.py emit` printed, verbatim.** Do not retype the question or the options: the canonical options are enforced on the FILE, so a hand-written payload can show the founder a shorter list than the one that was recorded — including one with no way to decline. The printed block's shape:
 
 ```json
 {
@@ -583,9 +583,7 @@ Then return — as your final assistant message — a JSON object the parent age
     "question": "Does this stage detection look right?",
     "options": ["Looks right", "Different stage", "Not sure — proceed anyway"],
     "context_summary": "..."
-  },
-  "review_dir": "<REVIEW_DIR>",
-  "run_id": "<RUN_ID>"
+  }
 }
 ```
 
@@ -610,7 +608,7 @@ The `needs_input` block `emit` prints carries `confirmed_stage` and a `context_s
 The per-answer detail, for the branch `gate_action` sent you to:
 
 - `Looks right` (`continue`): proceed to Step 4 with the detected stage.
-- `Different stage` (`rebuild`): emit a second gate (gate_id `stage_choice`) via `gate_state.py emit` to ask which stage. The candidates, each label with the `--rebuild-stage` token it maps to: Pre-seed (`pre_seed`), Seed (`seed`), Series A (`series_a`), Series B (`series_b`), Growth (`growth`) — that is the complete enum, and anything outside it fails argparse when the answer is rebuilt below. `AskUserQuestion` renders at most four options, so offer **exactly four: the enum minus the stage `stage_profile.json` currently holds.** Reaching this gate means the founder just rejected that stage, so it can never be the answer. **On a repeat pass, drop the stage the profile holds NOW**, not the one first detected — otherwise you re-offer what they just rejected and hide the one they now want. Never add an explicit `Other` — the tool supplies one. Treat this as a fresh gate — return a new `needs_input` payload and let the parent answer it the same way. When that one comes back answered, translate the founder's pick to its token and rebuild the profile for the chosen stage at **high** confidence (the founder explicitly picked it). **Then re-emit the gate the CHOSEN stage calls for, not always `stage_confirmation`:** picking `series_b` or `growth` puts the deck out of scope, and confirming it through `stage_confirmation` never offers `Stop review` — the founder would be told their deck is out of scope by a question that does not let them decline. For those two, emit `out_of_scope_choice`; for the in-scope three, `stage_confirmation`:
+- `Different stage` (`rebuild`): emit a second gate (gate_id `stage_choice`) via `gate_state.py emit` to ask which stage. The candidates, each label with the `--rebuild-stage` token it maps to: Pre-seed (`pre_seed`), Seed (`seed`), Series A (`series_a`), Series B (`series_b`), Growth (`growth`) — that is the complete enum, and anything outside it fails argparse when the answer is rebuilt below. `AskUserQuestion` renders at most four options, so offer **exactly four: the enum minus the stage `stage_profile.json` currently holds.** Reaching this gate means the founder just rejected that stage, so it can never be the answer. **On a repeat pass, drop the stage the profile holds NOW**, not the one first detected — otherwise you re-offer what they just rejected and hide the one they now want. Never add an explicit `Other` — the tool supplies one. Treat this as a fresh gate — ask from its printed `needs_input` the same way. When that one comes back answered, translate the founder's pick to its token and rebuild the profile for the chosen stage at **high** confidence (the founder explicitly picked it). **Then re-emit the gate the CHOSEN stage calls for, not always `stage_confirmation`:** picking `series_b` or `growth` puts the deck out of scope, and confirming it through `stage_confirmation` never offers `Stop review` — the founder would be told their deck is out of scope by a question that does not let them decline. For those two, emit `out_of_scope_choice`; for the in-scope three, `stage_confirmation`:
 
   ```bash
   cp "$REVIEW_DIR/stage_profile.json" "$STAGING_DIR/sp.json"

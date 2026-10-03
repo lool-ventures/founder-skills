@@ -16,20 +16,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
-- **Financial model review: the corrections file downloads intact in more browsers.** When the
-  browser could not save it the usual way, the backup download could arrive garbled; it now carries
-  the corrections exactly as entered, including non-English text and symbols.
+- **Financial model review: the corrections file now downloads in the form that works where the old
+  one failed.** The page saves it with the encoding that downloads from a page opened in the
+  conversation, and the file carries the corrections exactly as entered, including non-English text
+  and symbols.
 - **Financial model review: the page no longer says your corrections file was downloaded when it
-  cannot know that.** It says the download started, and if no file appeared, to tell Claude the
-  corrections in chat instead.
+  cannot know that.** Under a heading that claims nothing, it says the download started and, if no
+  file appeared, to tell Claude the corrections in chat instead. It lists your changes so you can
+  copy them into the chat rather than retype them, and it can be closed to get back to the page.
+- **Deck review: after you answer the stage question, the review picks up where it stopped.** A
+  missing reference to the run in progress is now refused instead of starting a new run, which could
+  discard the work done before the question.
 - **Cap table: the checks for scanned PDFs and for documents with tracked changes now run.** They
   could fail to start, so a scanned cap table could be read without its text check and a draft
   with tracked changes could be read as final without the question about it.
 - **A missing part of the plugin no longer blocks your session.** If an installation is incomplete,
   the automatic checks that run around each review step now step aside instead of stopping the
   step.
-- **Reviewers search only in the folders they are given.** A search with no folder named could look
-  in the wrong place and miss a file it had been handed.
+- **Reviewers are told to search only in the folders and files they are given.** A search with no
+  folder named could look in the wrong place and miss a file it had been handed.
 
 ## [0.15.0] - 2026-10-03 — Financial model reviews graded only on bars that fit the business, deck reviews that fail only what is missing, and skills that work from a conversation's first message
 

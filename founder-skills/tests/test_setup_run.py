@@ -592,3 +592,25 @@ def test_clean_refuses_to_delete_an_unreadable_gate() -> None:
         assert rc != 0, "setup_run deleted an unreadable gate that may have held a decline"
         assert os.path.exists(gate_path), "the unreadable gate was removed"
         assert "unreadable" in err.lower() or "corrupt" in err.lower(), err
+
+
+def test_an_empty_run_id_is_refused_and_nothing_is_cleaned() -> None:
+    """`--run-id ""` is what an unpasted `"$RUN_ID"` becomes in a fresh shell. Read as "mint a new id",
+    it makes a resume look like a different run, and `--clean` then deletes the answered gate and every
+    checkpoint. It is refused instead; leaving the flag out still mints an id."""
+    with tempfile.TemporaryDirectory() as d:
+        artifacts_root = os.path.join(d, "artifacts")
+        review_dir = os.path.join(artifacts_root, "deck-review-acme")
+        os.makedirs(review_dir)
+        kept = os.path.join(review_dir, "deck_inventory.json")
+        with open(kept, "w") as f:
+            f.write("{}")
+        for empty in ("", "   "):
+            rc, out, err = _run(
+                ["--artifacts-root", artifacts_root, "--slug", "acme", "--run-id", empty, "--clean"],
+                cwd=d,
+            )
+            assert rc == 2, (rc, out, err)
+            assert out is None, out
+            assert "--run-id" in err and "empty" in err, err
+            assert os.path.exists(kept), "a refused call must not clean anything"

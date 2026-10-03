@@ -111,6 +111,18 @@ def main() -> int:
     p.add_argument("--pretty", action="store_true")
     args = p.parse_args()
 
+    # An explicit but empty --run-id is what an unpasted "$RUN_ID" becomes in a fresh shell. Minting a
+    # new id for it would make a resume look like a different run, and --clean would then delete the
+    # answered gate and every checkpoint. Leaving the flag out still mints one.
+    if args.run_id is not None and not args.run_id.strip():
+        print(
+            "Error: --run-id is empty. Pass the RUN_ID literal printed earlier in this review (an empty "
+            "value usually means a shell variable did not survive into this call), or leave --run-id out "
+            "to start a new run. Nothing was changed.",
+            file=sys.stderr,
+        )
+        return 2
+
     artifacts_root = os.path.abspath(args.artifacts_root)
     review_dir = os.path.join(artifacts_root, f"deck-review-{args.slug}")
     os.makedirs(review_dir, exist_ok=True)

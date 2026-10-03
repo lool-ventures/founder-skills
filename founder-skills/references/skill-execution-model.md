@@ -363,8 +363,9 @@ internally — pass the final message verbatim.
   declares no shell — sub-agents *should not need* one. A sub-agent
   gets the workspace shell (`mcp__workspace__bash`) only when its
   `tools:` names it, so our agents have none. The gap is a dispatch that
-  names no `subagent_type`: it falls back to the general-purpose agent,
-  whose tool list is a wildcard that includes the shell. So do not rely
+  names no `subagent_type`, or one that names a wildcard built-in
+  (`general-purpose`, `claude`): it runs as that built-in agent, whose
+  tool list is a wildcard that includes the shell. So do not rely
   on "sub-agents can't shell out" as a hard guarantee when reasoning
   about failure modes — rely instead on the Context A input rules above
   ("Three Dispatch Contexts"):

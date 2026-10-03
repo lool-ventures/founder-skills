@@ -975,7 +975,10 @@ SKILL_MD_CEILING: dict[str, int] = {
     # the shell's path and states the one exception, a printed READ_ROOT= used in Reads and prompts.
     # 86,447 -> 86,741 on 2026-10-03: Step 3.6 always builds the review page static (server mode only when
     # the founder asks for live validation in a local terminal) and sends review.html as a file, not a path.
-    "financial-model-review": 86_741,
+    # 86,741 -> 86,851 on 2026-10-03: Step 3.6 sends review.html with the host's file-delivery tool where one
+    # is offered and gives its absolute path in a local terminal with none; the server-mode rule names the
+    # session (a local command-line terminal on the founder's own computer) rather than where the shell runs.
+    "financial-model-review": 86_851,
     # ic-sim SHRANK: the REQUIRED ic-dynamics.md read at Step 7 is deleted. Step 7 is a pure producer
     # pipe — compose_discussion.py derives discussion.json from the partners' own files and nothing
     # is authored by the main thread — so the read informed no decision while pulling a whole
@@ -1320,7 +1323,11 @@ SKILL_MD_CEILING: dict[str, int] = {
     # the shell's path and states the one exception, a printed READ_ROOT= used in Reads and prompts.
     # 110,969 -> 111,125 on 2026-10-03: the stage gate's execution note says the skill runs inline and asks
     # the founder itself, and that after the answer is written Step 1's setup_run.py is re-run to resume.
-    "deck-review": 111_125,
+    # 111,125 -> 111,228 on 2026-10-03: after emitting the stage gate the skill asks the founder with
+    # AskUserQuestion from the printed block, in order, instead of returning JSON to a parent agent (the
+    # shape example drops the two parent-only keys); the resume re-runs setup_run.py with the RUN_ID
+    # literal printed earlier and points at Step 0, where that call lives.
+    "deck-review": 111_228,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
@@ -2725,7 +2732,10 @@ GATE_SITES: dict[str, dict[str, tuple[str, ...]]] = {
 #     itself. The gate site is unchanged; GATE_SITES is unchanged.
 ASKUSER_MENTIONS: dict[str, int] = {
     "market-sizing": 12,
-    "deck-review": 6,
+    # deck-review 6 -> 7 on 2026-10-03: a MENTION, not a site. The stage gate's post-emit sentence now says to
+    # ask with AskUserQuestion instead of returning JSON to a parent; it is the stage_confirmation /
+    # out_of_scope_choice gate already counted in GATE_SITES, which is unchanged.
+    "deck-review": 7,
     "ic-sim": 5,
     "financial-model-review": 9,
     "competitive-positioning": 10,
@@ -3839,7 +3849,22 @@ def test_corpus_counts_every_agent_the_skill_pins_not_just_its_namesake() -> Non
 # input rule.
 # Raised 2026-10-03 from 126,315 to 126,333 B: skill-execution-model.md says a sub-agent gets the workspace
 # shell only when its tools: list names it, and names the real gap (a dispatch with no subagent_type).
-ROOT_REFERENCES_CEILING = 126_333
+# Raised 2026-10-03 from 126,333 to 126,392 B: skill-execution-model.md also names a dispatch to a wildcard
+# built-in (general-purpose, claude) as a way a sub-agent reaches the shell.
+ROOT_REFERENCES_CEILING = 126_392
+
+
+def test_execution_model_names_every_dispatch_that_can_reach_the_shell() -> None:
+    """A sub-agent has the workspace shell only when its tools list names it. The exceptions are a dispatch
+    that names no agent and one that names a built-in whose tool list is a wildcard."""
+    text = " ".join(
+        (REPO_ROOT / "founder-skills" / "references" / "skill-execution-model.md").read_text(encoding="utf-8").split()
+    )
+    assert "gets the workspace shell (`mcp__workspace__bash`) only when its `tools:` names it" in text
+    assert (
+        "The gap is a dispatch that names no `subagent_type`, or one that names a wildcard built-in "
+        "(`general-purpose`, `claude`):"
+    ) in text
 
 
 def test_shared_reference_tree_does_not_grow() -> None:
@@ -3954,10 +3979,74 @@ def test_no_script_is_run_by_a_relative_path(skill: str) -> None:
     file" and the guard the script implements is silently skipped.
     """
     files = [SKILLS_ROOT / skill / "SKILL.md", *sorted((SKILLS_ROOT / skill / "references").rglob("*.md"))]
-    offenders = [
-        f"{p.relative_to(SKILLS_ROOT)}:{n}"
+    offenders = _relative_script_offenders(files)
+    assert not offenders, offenders
+
+
+# A helper script reached through a path relative to the shell's working folder: `python3 scripts/x.py`,
+# quoted (`python3 "scripts/x.py"`), dotted (`./scripts/`, `../scripts/`), through `uv run`, or by
+# changing into the folder first (`cd scripts && python3 x.py`). Case-sensitive, so `"$SCRIPTS/x.py"`
+# and `"$PLUGIN_ROOT/scripts/x.py"` (the absolute forms) do not match.
+_RELATIVE_SCRIPT = re.compile(
+    r"(?:\bpython3?|\buv run)\s+[\"']?(?:\.{1,2}/)?scripts/" r"|\bcd\s+[\"']?(?:\.{1,2}/)?scripts\b"
+)
+
+
+def _relative_script_offenders(files: list[Path]) -> list[str]:
+    plugin = SKILLS_ROOT.parent
+    return [
+        f"{p.relative_to(plugin) if p.is_relative_to(plugin) else p.name}:{n}"
         for p in files
         for n, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1)
-        if re.search(r"python3? scripts/", line)
+        if _RELATIVE_SCRIPT.search(line)
     ]
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "python3 scripts/pdf_probe.py deck.pdf",
+        "python scripts/pdf_probe.py",
+        'python3 "scripts/pdf_probe.py" "$F"',
+        "python3 'scripts/pdf_probe.py'",
+        "python3 ./scripts/pdf_probe.py",
+        "python3 ../scripts/pdf_probe.py",
+        "uv run scripts/pdf_probe.py",
+        "cd scripts && python3 pdf_probe.py",
+        'cd "./scripts" && python3 pdf_probe.py',
+    ],
+)
+def test_the_relative_script_check_catches_each_form(line: str, tmp_path: Path) -> None:
+    """Seeded control: every way a relative script call can come back is caught by the scan."""
+    seeded = tmp_path / "seeded.md"
+    seeded.write_text(f"Run it first.\n\n```bash\n{line}\n```\n", encoding="utf-8")
+    assert _relative_script_offenders([seeded]) == ["seeded.md:4"], line
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        'python3 "$SCRIPTS/pdf_probe.py"',
+        'python3 "$SHARED_SCRIPTS/check_handoff.py"',
+        'python3 "$PROVISIONAL_ROOT/scripts/select_plugin_root.py"',
+        'python3 "${CLAUDE_PLUGIN_ROOT}/scripts/founder_context.py"',
+        "the helper scripts are in the skill's scripts/ folder",
+    ],
+)
+def test_the_relative_script_check_passes_absolute_forms(line: str) -> None:
+    """Negative control: the absolute forms the skills use, and prose, are not flagged."""
+    assert not _RELATIVE_SCRIPT.search(line), line
+
+
+def test_no_agent_command_or_shared_reference_runs_a_script_by_a_relative_path() -> None:
+    """The same rule outside the skill folders: agent bodies, commands and the shared references."""
+    plugin = SKILLS_ROOT.parent
+    files = [
+        *sorted((plugin / "agents").glob("*.md")),
+        *sorted((plugin / "commands").glob("*.md")),
+        *sorted((plugin / "references").rglob("*.md")),
+    ]
+    assert len(files) > 10, f"scan reaches too few files: {files}"
+    assert any(p.parent.name == "agents" for p in files) and any(p.parent.name == "commands" for p in files)
+    offenders = _relative_script_offenders(files)
     assert not offenders, offenders

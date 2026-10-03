@@ -724,3 +724,36 @@ def test_review_page_is_sent_as_a_file_before_the_question() -> None:
     ask = block.index("then ask via `AskUserQuestion`")
     assert send < ask
     assert "never a bare path" in block[send:ask]
+
+
+def test_review_page_delivery_names_the_tool_and_the_terminal_case() -> None:
+    """The page goes out through the host's file-delivery tool; a local terminal with none gets the
+    absolute path, which is what Main-Thread Return calls the deliverable there."""
+    block = _step_36_path_a()
+    send = block.index("Send `review.html` to the founder as a file")
+    ask = block.index("then ask via `AskUserQuestion`")
+    window = block[send:ask]
+    assert "with the host's file-delivery tool where one is offered" in window, window
+    assert "in a local terminal that offers none, give its absolute path" in window, window
+
+
+SERVER_MODE_RULE = (
+    "Use **server mode** only when the founder asks for live validation while editing and the session "
+    "is a local command-line terminal on the founder's own computer:"
+)
+
+
+def test_server_mode_rule_is_pinned_and_names_no_product() -> None:
+    """Server mode is keyed on the founder's request and on where the shell runs, never on a product.
+
+    A local desktop session can run its shell in a virtual machine, where the founder's browser cannot
+    reach the page's local address; a command-line terminal on their own computer is the case that works.
+    """
+    block = _step_36_path_a()
+    assert block.count(SERVER_MODE_RULE) == 1, "the server-mode sentence changed; re-read Step 3.6"
+    server_at = block.index('--workspace "$REVIEW_DIR"')
+    rule_at = block.rindex("server mode", 0, server_at)
+    # The block is whitespace-collapsed: the rule runs from the previous sentence's end to its command.
+    sentence = block[block.rindex(". ", 0, rule_at) + 2 : server_at]
+    for product in ("Claude Code", "Cowork"):
+        assert product not in sentence, f"the server-mode rule names {product!r}: {sentence!r}"

@@ -249,7 +249,7 @@ def test_handoff_agents_declare_write(agent_stem: str) -> None:
 
 
 SEARCH_PATH_RULE = (
-    "When you call `Glob` or `Grep`, always pass `path` set to the absolute folder you mean to search: "
+    "When you call `Glob` or `Grep`, always pass `path` set to the absolute folder or file you mean to search: "
     "without it the search runs in the session's working folder, which is not where your files are."
 )
 

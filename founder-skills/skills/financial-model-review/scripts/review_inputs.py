@@ -274,10 +274,25 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
   .overlay.show { display: flex; }
   .overlay-box {
     background: var(--lool-white); padding: 2rem; text-align: center;
-    max-width: 420px; box-shadow: var(--shadow-soft);
+    max-width: 520px; width: calc(100% - 32px); box-shadow: var(--shadow-soft);
+    max-height: calc(100vh - 32px); overflow-y: auto;
   }
-  .overlay-box h2 { color: var(--lool-success); font-weight: 500; margin-bottom: 0.75rem; }
+  .overlay-box h2 { color: var(--lool-ink); font-weight: 500; margin-bottom: 0.75rem; }
+  .overlay-box h2.ok { color: var(--lool-success); }
   .overlay-box p { color: var(--lool-mute); font-size: 0.9rem; }
+  .overlay-changes-wrap { margin-top: 1rem; text-align: left; }
+  .overlay-changes-wrap textarea {
+    width: 100%; min-height: 7rem; margin-top: 0.4rem; padding: 8px;
+    font-family: var(--font-mono, monospace); font-size: 0.8rem; color: var(--lool-ink);
+    border: 1px solid var(--lool-line-form); border-radius: var(--r-input); resize: vertical;
+  }
+  .overlay-actions { margin-top: 1rem; display: flex; gap: 8px; justify-content: center; }
+  .overlay-btn {
+    background: var(--lool-white); color: var(--lool-blue); border: 1px solid var(--lool-blue);
+    font-family: var(--font-body); border-radius: var(--r-input); padding: 6px 18px;
+    font-size: 0.85rem; cursor: pointer;
+  }
+  .overlay-btn:hover { background: var(--lool-paper-2); }
 
   /* Pct suffix */
   .pct-row { display: flex; align-items: center; gap: 6px; }
@@ -321,10 +336,18 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
 </div>
 
 <div class="overlay" id="overlay">
-  <div class="overlay-box">
-    <h2>Feedback Submitted</h2>
-    <p id="overlay-msg">Your corrections have been saved.</p>
+  <div class="overlay-box" role="dialog" aria-labelledby="overlay-title">
+    <h2 id="overlay-title">Corrections ready</h2>
+    <p id="overlay-msg"></p>
     <p id="overlay-hint" style="margin-top:1rem;color:var(--lool-faint);font-size:0.85rem;"></p>
+    <div class="overlay-changes-wrap" id="overlay-changes-wrap">
+      <p>Your changes, to paste into the chat if you need to:</p>
+      <textarea id="overlay-changes" readonly aria-label="Your changes"></textarea>
+    </div>
+    <div class="overlay-actions">
+      <button class="overlay-btn" id="overlay-copy" type="button">Copy changes</button>
+      <button class="overlay-btn" id="overlay-close" type="button">Close</button>
+    </div>
   </div>
 </div>
 
@@ -721,30 +744,45 @@ function toggleDrawer() {
 
 /* ===== Submit handler ===== */
 function triggerDownload(payload) {
-  try {
-    var blob = new Blob([payload], { type: "application/json" });
-    var url = URL.createObjectURL(blob);
-    var a = document.createElement("a");
-    a.href = url;
-    a.download = "corrections.json";
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(function() {
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    }, 100);
-  } catch (e) {
-    /* Fallback: a base64 data URI if Blob/ObjectURL is not supported. Base64, not
-       percent-encoding: not every browser this page opens in decodes a
-       percent-encoded data URI. The JSON is UTF-8 encoded before btoa, which
-       accepts only single-byte characters. */
-    var a2 = document.createElement("a");
-    a2.href = "data:application/json;base64," + btoa(unescape(encodeURIComponent(payload)));
-    a2.download = "corrections.json";
-    document.body.appendChild(a2);
-    a2.click();
-    document.body.removeChild(a2);
+  /* A base64 data link is THE download, not a fallback. A download the host
+     refuses does not throw, so a fallback behind a try/catch never runs where it
+     is needed; base64 is the form that downloads from a page opened in the
+     conversation, and percent-encoding is not decoded everywhere. The JSON is
+     UTF-8 encoded before btoa, which accepts only single-byte characters; a
+     JSON.stringify result never holds a lone surrogate, so this cannot throw.
+     A corrections file is kilobytes, far below any data-link length limit. */
+  var a = document.createElement("a");
+  a.href = "data:application/json;base64," + btoa(unescape(encodeURIComponent(payload)));
+  a.download = "corrections.json";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+/* The founder's changes as plain lines they can paste into the chat: the same
+   labels the changes table shows, never the file's field names. */
+function changesSummary(changes) {
+  function human(p) { return String(p).replace(/\./g, " \u203a ").replace(/_/g, " "); }
+  function val(v) {
+    if (v == null || v === "") return "\u2014";
+    if (typeof v === "object") return JSON.stringify(v);
+    return String(v);
   }
+  var lines = [];
+  (changes || []).forEach(function(ch) {
+    if (ch.type === "replace_array") {
+      var rows = ch["new"] || [];
+      lines.push(human(ch.path) + " (" + rows.length + (rows.length === 1 ? " row" : " rows") + "):");
+      rows.forEach(function(row) {
+        if (!row || typeof row !== "object") { lines.push("  " + val(row)); return; }
+        lines.push("  " + Object.keys(row).map(function(k) { return human(k) + ": " + val(row[k]); }).join(", "));
+      });
+      return;
+    }
+    var c = typeof corrections !== "undefined" ? corrections.get(ch.path) : null;
+    lines.push((c ? c.label : human(ch.path)) + ": " + val(ch.expected_old) + " \u2192 " + val(ch["new"]));
+  });
+  return lines.join("\n");
 }
 
 function submitFeedback() {
@@ -834,9 +872,10 @@ function submitFeedback() {
      POST resolves to a stray non-ok response instead of failing fast, and if
      that origin answers 200 the founder is falsely told the corrections were
      saved. The build-time IS_STATIC flag makes the mode unambiguous. */
+  var summary = changesSummary(changes);
   if (IS_STATIC || window.location.protocol === "file:") {
     triggerDownload(payload);
-    showOverlay(true);
+    showOverlay(true, summary);
   } else {
     fetch("/api/feedback", {
       method: "POST",
@@ -844,19 +883,27 @@ function submitFeedback() {
       body: payload
     }).then(function(resp) {
       if (!resp.ok) throw new Error("Server error");
-      showOverlay(false);
+      showOverlay(false, summary);
     }).catch(function() {
       triggerDownload(payload);
-      showOverlay(true);
+      showOverlay(true, summary);
     });
   }
 }
 
-function showOverlay(wasDownload) {
+function showOverlay(wasDownload, summary) {
   var btn = document.getElementById("submit-btn");
   btn.textContent = "Submitted";
+  var title = document.getElementById("overlay-title");
   var msg = document.getElementById("overlay-msg");
   var hint = document.getElementById("overlay-hint");
+  /* Neutral unless the server confirmed the save: the page cannot see a download land. */
+  title.textContent = wasDownload ? "Corrections ready" : "Corrections saved";
+  if (wasDownload) title.classList.remove("ok"); else title.classList.add("ok");
+  var box = document.getElementById("overlay-changes");
+  box.value = summary || "";
+  document.getElementById("overlay-changes-wrap").style.display = wasDownload && summary ? "block" : "none";
+  document.getElementById("overlay-copy").style.display = wasDownload && summary ? "" : "none";
   if (wasDownload) {
     /* Download mode: nothing is persisted server-side until the founder
        uploads the file, and the page cannot tell whether the browser saved it
@@ -868,6 +915,31 @@ function showOverlay(wasDownload) {
     hint.textContent = "Go back to your session and tell Claude you\u2019re done.";
   }
   document.getElementById("overlay").classList.add("show");
+}
+
+function closeOverlay() {
+  document.getElementById("overlay").classList.remove("show");
+  var btn = document.getElementById("submit-btn");
+  btn.disabled = false;
+  btn.textContent = "Submit Corrections";
+}
+
+function copyChanges() {
+  var box = document.getElementById("overlay-changes");
+  var btn = document.getElementById("overlay-copy");
+  box.select();
+  function done(ok) { btn.textContent = ok ? "Copied" : "Selected \u2014 copy it with your keyboard"; }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(box.value).then(function() { done(true); }, function() {
+      var ok = false;
+      try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+      done(ok);
+    });
+  } else {
+    var ok = false;
+    try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+    done(ok);
+  }
 }
 
 /* ===== Field builders ===== */
@@ -1581,6 +1653,8 @@ function init() {
   buildSanityStrip();
   buildTabs();
   document.getElementById("submit-btn").addEventListener("click", submitFeedback);
+  document.getElementById("overlay-close").addEventListener("click", closeOverlay);
+  document.getElementById("overlay-copy").addEventListener("click", copyChanges);
   document.getElementById("corrections-summary").addEventListener("click", toggleDrawer);
   refreshCorrectionsBar();
   scheduleCheck();

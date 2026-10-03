@@ -1934,3 +1934,46 @@ def test_market_bottom_up_fails_a_deck_with_no_market_sizing() -> None:
     fail = next(line for line in section.splitlines() if line.startswith("**Fail:**"))
     assert "No market sizing anywhere in the deck" in fail, fail
     assert "top-down TAM chart" in fail, fail
+
+
+def _stage_gate_section() -> str:
+    text = SKILL_MD.read_text(encoding="utf-8")
+    start = text.index("### Gate: Confirm Stage and Scope")
+    end = text.index("\n### ", start + 1)
+    return " ".join(text[start:end].split())
+
+
+def test_the_inline_gate_asks_the_founder_and_does_not_end_on_json() -> None:
+    """The skill runs inline: after `emit` it asks the founder itself, from the printed block.
+
+    The section used to end with "return — as your final assistant message — a JSON object the parent
+    agent can act on", which contradicts its own execution note and, followed literally, ends the turn
+    on raw JSON in front of the founder with no question asked.
+    """
+    section = _stage_gate_section()
+    assert "final assistant message" not in section
+    assert "parent agent" not in section
+    assert "let the parent answer it" not in section
+    assert (
+        "Then ask the founder with `AskUserQuestion`, using the printed `needs_input` question and its "
+        "options verbatim and in the order printed, and do not end your turn on the JSON"
+    ) in section, section[:400]
+    # The pinned rule that matters most stays: present the producer's block, never a retyped one.
+    assert "`needs_input` block `gate_state.py emit` printed, verbatim" in section
+
+
+RESUME_SENTENCE = (
+    "then re-run `setup_run.py` (Step 0) with `--run-id` set to the RUN_ID literal printed earlier, never "
+    "an empty or new one: it reports `resume: true` and the `gate_action` to branch on (see the resume "
+    "note under Step 0)."
+)
+
+
+def test_the_gate_resume_sentence_names_the_printed_run_id() -> None:
+    """After the answer is written, the resume re-runs setup_run.py with the RUN_ID literal printed
+    earlier. In a fresh shell an unpasted `$RUN_ID` is empty, and a new id reads as a different run, so
+    `--clean` deletes the answered gate and every checkpoint."""
+    section = _stage_gate_section()
+    assert section.count(RESUME_SENTENCE) == 1, section[:1200]
+    assert "Step 1's `setup_run.py`" not in section
+    assert "with the same `RUN_ID`" not in section

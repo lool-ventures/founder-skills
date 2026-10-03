@@ -605,7 +605,7 @@ Generate the HTML review page for the founder to inspect extracted values. Alway
 python3 "$SCRIPTS/review_inputs.py" "$REVIEW_DIR/inputs.json" --static "$REVIEW_DIR/review.html" --extraction-warnings "$REVIEW_DIR/extraction_validation.json"
 ```
 
-**This is a STOP point — do not proceed to Step 4 until the founder responds.** Send `review.html` to the founder as a file, the same way Step 12 sends the finished documents — never a bare path — then ask via `AskUserQuestion`: "I reviewed the page — do the values look right?"
+**This is a STOP point — do not proceed to Step 4 until the founder responds.** Send `review.html` to the founder as a file, with the host's file-delivery tool where one is offered (as Step 12 sends the finished documents) — never a bare path there; in a local terminal that offers none, give its absolute path — then ask via `AskUserQuestion`: "I reviewed the page — do the values look right?"
 Options: `I reviewed the page — the values look right, proceed` / `I edited values and will upload the corrections file` / `I'll tell you the corrections in chat`
 
 Generating the page and silently moving on defeats the human verification gate: the founder is the last check on extracted numbers before math runs on them. When they upload `corrections.json`:
@@ -624,7 +624,7 @@ A path that does not exist in `inputs.json` is refused rather than created, so a
 
 Either way, then promote `corrected_inputs.json` to `inputs.json` (same as Step 3) and re-run the Step 3.5 validation before proceeding.
 
-Use **server mode** only when the founder asks for live validation while editing and the shell runs on the computer whose browser they use (a local terminal session):
+Use **server mode** only when the founder asks for live validation while editing and the session is a local command-line terminal on the founder's own computer:
 
 ```bash
 python3 "$SCRIPTS/review_inputs.py" "$REVIEW_DIR/inputs.json" --workspace "$REVIEW_DIR" --extraction-warnings "$REVIEW_DIR/extraction_validation.json" &

@@ -1336,12 +1336,14 @@ class TestCorrectionsDownload:
 var __anchors = [];
 var __els = {};
 function __el(id) {
-  if (!__els[id]) { __els[id] = { textContent: "", classList: { add: function () {} } }; }
+  if (!__els[id]) {
+    __els[id] = { textContent: "", value: "", style: {}, classList: { add: function () {}, remove: function () {} } };
+  }
   return __els[id];
 }
 var document = {
   createElement: function () {
-    var a = { href: "", download: "", click: function () {} };
+    var a = { href: "", download: "", clicked: false, click: function () { this.clicked = true; } };
     __anchors.push(a);
     return a;
   },
@@ -1407,3 +1409,143 @@ var document = {
     def test_server_overlay_still_says_saved(self) -> None:
         r = self._overlay(False)
         assert r["msg"] == "Your corrections have been saved.", r
+
+    def test_primary_download_is_a_base64_data_link_even_where_blob_works(self) -> None:
+        """The base64 data link must be the download the page actually makes, not a fallback.
+
+        A refused download does not throw, so a Blob-first page never reaches a fallback in a host that
+        blocks the Blob download. The `Blob` and `URL` stubs here WORK; the page must still use base64.
+        """
+        import pathlib
+
+        source = pathlib.Path(_SCRIPT).read_text()
+        payload = json.dumps(self._PAYLOAD, ensure_ascii=False, indent=2)
+        script = (
+            self._DOC_STUB
+            + "var __blobs = 0;\n"
+            + "var Blob = function () { __blobs++; };\n"
+            + "var URL = { createObjectURL: function () { return 'blob:stub'; }, revokeObjectURL: function () {} };\n"
+            + _grab_js_function(source, "triggerDownload")
+            + "\nvar payload = "
+            + json.dumps(payload)
+            + ";\ntriggerDownload(payload);\n"
+            + "console.log(JSON.stringify({hrefs: __anchors.map(function (a) { return a.href; }), "
+            + "download: __anchors[0].download, clicked: __anchors[0].clicked, blobs: __blobs}));"
+        )
+        r = _run_node(script)
+        prefix = "data:application/json;base64,"
+        assert r["hrefs"] and r["hrefs"][0].startswith(prefix), (
+            f"the download the page makes must be a base64 data link, got {r['hrefs'][:1]!r}"
+        )
+        assert len(r["hrefs"]) == 1, f"exactly one download link, got {r['hrefs']!r}"
+        assert r["blobs"] == 0, "a Blob was built even though the base64 link was made"
+        assert r["clicked"], "the download link was made but never clicked"
+        assert r["download"] == "corrections.json"
+        import base64
+
+        assert base64.b64decode(r["hrefs"][0][len(prefix) :]).decode("utf-8") == payload
+
+    # A stub rich enough for the overlay: classes, values, display and the submit button's state.
+    _OVERLAY_STUB = """
+var __els = {};
+function __el(id) {
+  if (!__els[id]) {
+    var cls = {};
+    __els[id] = {
+      textContent: "", value: "", disabled: true, style: {}, selected: false,
+      classList: {
+        add: function (c) { cls[c] = true; },
+        remove: function (c) { delete cls[c]; },
+        contains: function (c) { return !!cls[c]; }
+      },
+      select: function () { this.selected = true; }
+    };
+  }
+  return __els[id];
+}
+var document = {
+  getElementById: function (id) { return __el(id); },
+  execCommand: function () { return true; }
+};
+"""
+
+    _CHANGES = [
+        {"path": "revenue.mrr", "expected_old": 45000, "new": 52000},
+        {"path": "company.company_name", "expected_old": "Acme", "new": "אקמה בע״מ"},
+        {
+            "path": "expenses.headcount",
+            "type": "replace_array",
+            "expected_old": 1,
+            "new": [{"role": "Engineer", "monthly_cost": 12000}, {"role": "Designer", "monthly_cost": None}],
+        },
+    ]
+
+    def _overlay_with_changes(self, was_download: bool, then: str = "") -> dict[str, Any]:
+        import pathlib
+
+        source = pathlib.Path(_SCRIPT).read_text()
+        script = (
+            self._OVERLAY_STUB
+            + "var corrections = new Map([['revenue.mrr', {path: 'revenue.mrr', label: 'revenue › mrr', "
+            + "was: 45000, now: 52000}]]);\n"
+            + _grab_js_function(source, "changesSummary")
+            + "\n"
+            + _grab_js_function(source, "showOverlay")
+            + "\n"
+            + _grab_js_function(source, "closeOverlay")
+            + f"\nshowOverlay({'true' if was_download else 'false'}, changesSummary({json.dumps(self._CHANGES)}));\n"
+            + then
+            + "console.log(JSON.stringify({"
+            + 'title: __el("overlay-title").textContent, '
+            + 'titleOk: __el("overlay-title").classList.contains("ok"), '
+            + 'changes: __el("overlay-changes").value, '
+            + 'changesShown: __el("overlay-changes-wrap").style.display, '
+            + 'shown: __el("overlay").classList.contains("show"), '
+            + 'submitDisabled: __el("submit-btn").disabled}));'
+        )
+        return _run_node(script)
+
+    def test_download_overlay_heading_claims_nothing(self) -> None:
+        """The heading over a download the page cannot confirm is neutral: it says what is ready, not
+        that anything was submitted or saved, and it is not drawn in the success colour."""
+        r = self._overlay_with_changes(True)
+        assert r["shown"], r
+        assert r["title"] == "Corrections ready", r
+        assert not r["titleOk"], "the download heading must not carry the success style"
+        rc, html, _ = _generate_static(_FULL_INPUTS)
+        assert rc == 0
+        assert "Feedback Submitted" not in html
+        assert ".overlay-box h2 { color: var(--lool-success)" not in html
+
+    def test_server_overlay_heading_says_saved(self) -> None:
+        """In server mode the save is confirmed by the server, so the heading may say so."""
+        r = self._overlay_with_changes(False)
+        assert r["title"] == "Corrections saved", r
+        assert r["titleOk"], r
+
+    def test_download_overlay_lists_the_changes_as_copyable_text(self) -> None:
+        """The founder may have to tell the corrections in chat; the overlay hands them the list to copy."""
+        r = self._overlay_with_changes(True)
+        assert r["changesShown"] != "none", r
+        text = r["changes"]
+        assert "revenue › mrr: 45000 → 52000" in text, text
+        assert "company › company name: Acme → אקמה בע״מ" in text, text
+        assert "expenses › headcount (2 rows):" in text, text
+        assert "role: Engineer, monthly cost: 12000" in text, text
+        assert "role: Designer, monthly cost: —" in text, text
+        for token in ("replace_array", "expected_old", "company_name", "monthly_cost", '{"'):
+            assert token not in text, f"internal token {token!r} in the founder's change list: {text!r}"
+        rc, html, _ = _generate_static(_FULL_INPUTS)
+        assert rc == 0
+        assert '<textarea id="overlay-changes" readonly' in html
+        assert 'id="overlay-copy"' in html and ">Copy changes</button>" in html
+
+    def test_overlay_can_be_dismissed(self) -> None:
+        """Once shown, the overlay can be closed, and the founder can submit again."""
+        r = self._overlay_with_changes(True, then="closeOverlay();\n")
+        assert not r["shown"], "the overlay is still showing after it was closed"
+        assert r["submitDisabled"] is False, "the submit button stays disabled after the overlay is closed"
+        rc, html, _ = _generate_static(_FULL_INPUTS)
+        assert rc == 0
+        assert 'id="overlay-close"' in html and ">Close</button>" in html
+        assert 'getElementById("overlay-close").addEventListener("click", closeOverlay)' in html
