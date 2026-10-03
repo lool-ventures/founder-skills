@@ -7666,6 +7666,28 @@ class TestVerdictAndClosingMessage:
             "Here's your finished competitive positioning analysis: [the written report](/out/Acme.md)"
         )
 
+    def test_the_closing_message_names_each_document_by_label_alone_on_the_cloud_lane(self) -> None:
+        """`none` (the cloud lane): the label alone, since a path there is dead text beside the file card
+        the delivery tool shows. The terminal lane (`path`) keeps the path, which is its delivery."""
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "_cp_closer", os.path.join(CP_SCRIPTS_DIR, "cp_closing_message.py")
+        )
+        assert spec and spec.loader
+        closer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(closer)
+        specs = ["the written report=/out/Acme.md", "the interactive explorer=/out/Acme.html"]
+        first = closer.build({"verdict": "V."}, closer._deliverables(specs, "none")).split("\n")[0]
+        assert first.startswith("Here's your finished competitive positioning analysis: the written report — ")
+        assert "the interactive explorer" in first
+        assert "/out/" not in first and "`" not in first and "](" not in first, first
+        path_text = closer.build({"verdict": "V."}, closer._deliverables(specs, "path"))
+        assert (
+            "[the written report](/out/Acme.md)" in path_text
+            and "[the interactive explorer](/out/Acme.html)" in path_text
+        )
+
     # The verdict is the report's own first paragraph, and both pages open with the same words. It is
     # built once, by `_cp_view.verdict` inside compose; report.md, report.html, explorer.html and the
     # printed hand-over all carry that one string.

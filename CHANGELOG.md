@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Market sizing, competitive positioning and financial model review: on a cloud session the closing
+  message names each document without a path.** The documents arrive as file cards there, and the
+  paths printed beside them could not be opened. In a terminal the paths stay, since there they are
+  how you find the files.
 - **A missing working-records folder no longer hides unchecked steps.** Every skill's report says
   which steps were not put through the check on their saved output; when the run's folder of those
   records was missing, the report used to say nothing. It now names those steps. Competitive
@@ -31,6 +35,8 @@ Contributor-facing only; nothing here changes what a founder installs or runs.
 - The skills and their shared reference now state that nothing under the outputs folder is deleted
   as the skills' own rule, rather than saying the host refuses deletes there; newer hosts allow them.
   A test keeps any text from claiming the host refuses.
+- The recorded-session delivery check now counts a write to a connected folder made from a cloud
+  session, whose tool name carries a prefix the exact-name match missed.
 
 ## [0.15.1] - 2026-10-03 — Financial model corrections that download from the review page, and deck review and cap table fixes
 

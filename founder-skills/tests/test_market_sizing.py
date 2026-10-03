@@ -8681,8 +8681,13 @@ def test_closing_message_link_form_follows_the_lane() -> None:
     rc, data, d = _compose_with_sizing(_verdict_sizing(), redteam=_REDTEAM_ARTIFACT)
     assert rc == 0 and data is not None
     rp = _write_report(d, data)
+    # `none` (the cloud lane): the label alone. A path there is dead text beside the file card the
+    # delivery tool shows, and the terminal lane (`path`) keeps the path, below.
     _, none_out, _ = _closing(rp, "--link", "none", "--deliverable", "the written report=/abs/r.md")
-    assert "the written report (`/abs/r.md`) — it opens with the verdict" in none_out and "](" not in none_out, none_out
+    assert "the written report — it opens with the verdict" in none_out, none_out
+    assert "/abs/" not in none_out and "](" not in none_out and "`" not in none_out.split("\n", 1)[0], none_out
+    _, path_out, _ = _closing(rp, "--link", "path", "--deliverable", "the written report=/abs/r.md")
+    assert "[the written report](/abs/r.md)" in path_out, path_out
     _, computer_out, _ = _closing(rp, "--deliverable", "the written report=/abs/r.md", "--link", "computer")
     assert "[the written report](computer:///abs/r.md)" in computer_out
     # `auto` from the env markers, no flag on the command line:

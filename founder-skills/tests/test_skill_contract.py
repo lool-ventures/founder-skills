@@ -2969,9 +2969,9 @@ def test_delivery_block_names_no_delivery_tool(skill: str) -> None:
     is correct.
 
     Desktop-local Cowork serves `mcp__cowork__present_files`; remote/cloud Cowork
-    serves the agent-native `SendUserFile` and cannot see an `mcp__` tool at all.
-    A skill naming one is wrong on the other surface, so the instruction describes
-    the OUTCOME and lets the agent use whatever it has.
+    serves the agent-native `SendUserFile`, plus an `mcp__remote-devices__` tool for
+    a connected folder. A skill naming one is wrong on another surface, so the
+    instruction describes the OUTCOME and lets the agent use whatever it has.
     """
     text = (SKILLS_ROOT / skill / "SKILL.md").read_text(encoding="utf-8")
     for tool in ("SendUserFile", "present_files", "device_commit_files"):

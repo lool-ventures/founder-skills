@@ -178,6 +178,11 @@ def test_link_forms_per_surface() -> None:
     assert closer.detect_link_form("/Users/x/work", {}) == "path"
     text = closer.build({"verdict": "V."}, closer._deliverables(["the written report=/o/R.md"], "computer"))
     assert "[the written report](computer:///o/R.md)" in text
+    # Cloud (`none`): the label alone, no dead path beside the file card. Terminal (`path`): the path.
+    first = closer.build({"verdict": "V."}, closer._deliverables(["the written report=/o/R.md"], "none")).split("\n")[0]
+    assert "the written report" in first and "/o/" not in first and "`" not in first and "](" not in first
+    text = closer.build({"verdict": "V."}, closer._deliverables(["the written report=/o/R.md"], "path"))
+    assert "[the written report](/o/R.md)" in text
 
 
 # --- Step 12: the hand-over is the closer's, and each HTML page is named for what it is ------------

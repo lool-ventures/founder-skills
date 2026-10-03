@@ -160,6 +160,17 @@ def test_the_agent_native_tool_name_is_also_recognized(tmp_path: pathlib.Path) -
     assert calls == 1 and presented == {"A.md"}
 
 
+def test_the_cloud_connected_folder_write_is_recognized_by_name_suffix(tmp_path: pathlib.Path) -> None:
+    """From a cloud session the connected-folder write is served under an MCP prefix
+    (`mcp__remote-devices__device_commit_files`), so an exact-name match missed it. Matched by its
+    `__`-delimited suffix; a name that merely contains the words is not."""
+    run = _write_run(tmp_path, [_present(["A.md"], name="mcp__remote-devices__device_commit_files")], ["A.md", "B.md"])
+    presented, calls, _err = dc.collect_presented(run)
+    assert calls == 1 and presented == {"A.md"}
+    run2 = _write_run(tmp_path / "x", [_present(["A.md"], name="mcp__other__device_commit_files_preview")], ["A.md"])
+    assert dc.collect_presented(run2)[1] == 0
+
+
 def test_delivery_across_multiple_calls_is_unioned(tmp_path: pathlib.Path) -> None:
     """Delivering in two batches is still a complete delivery."""
     run = _write_run(tmp_path, [_present(["A.md"]), _present(["A.html"])], ["A.md", "A.html"])

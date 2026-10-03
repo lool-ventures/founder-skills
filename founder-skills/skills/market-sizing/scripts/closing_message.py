@@ -25,9 +25,10 @@ sessions): `computer://` links render as PLAIN TEXT, and a bare path becomes a b
 `https://claude.ai/<path>` URL -- no link form opens a file there; the share card is the only
 delivery. On the desktop-local lane (`/sessions/<id>` tree) `computer://` links open. On the CLI a
 bare path is right. So `--link auto` (the default) decides from the shell's cwd and the lane's env
-markers, and `none` prints each label with its path in a code span rather than three dead links
-above a working card -- the path is still stated, since a stated path is the one thing that survives
-every surface.
+markers. `none` prints each label alone: on the cloud lane the file is delivered as a card by the
+delivery tool, and a path stated beside it is dead text (measured on a cloud run, 2026-10-03, where
+the message listed `/home/claude` paths under working cards). On the terminal (`path`) the path stays,
+because there it is the delivery.
 
 Usage:
     closing_message.py --report R --deliverable "LABEL=PATH" [--deliverable ...]
@@ -64,10 +65,10 @@ def _deliverables(specs: list[str], link: str) -> list[tuple[str, str | None]]:
         if link == "computer":
             href = f"computer://{path.strip()}"
         elif link == "none":
-            href = None  # rendered as "label (`path`)": the path is still stated, just not linked
+            href = None  # the label alone: the cloud lane delivers a card, and a path beside it is dead
         else:
             href = path.strip()
-        out.append((label.strip(), href if href else f"`{path.strip()}`"))
+        out.append((label.strip(), href))
     return out
 
 
@@ -108,10 +109,8 @@ def build(report: dict[str, Any], deliverables: list[tuple[str, str | None]]) ->
                 " \u2014 it opens with the verdict: what you stated, what each build found, "
                 "and the strongest challenge to it"
             )
-        # `none` arrives as a backticked path: state the path even when no link form opens it,
-        # because the stated path is the one thing that survives every surface (ccinternals.dev/
-        # cowork, "delivery.name-the-path-anyway").
-        parts.append((f"{label} ({href})" if href and href.startswith("`") else f"[{label}]({href})") + tail)
+        # `none` (the cloud lane) arrives with no href: the label alone, beside the delivered card.
+        parts.append((f"[{label}]({href})" if href else label) + tail)
     lines = [
         f"Here's your finished market sizing: {'; '.join(parts)}.",
         "",

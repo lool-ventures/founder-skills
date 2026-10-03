@@ -85,11 +85,18 @@ from collections.abc import Iterator
 from typing import Any
 
 # Both surfaces' delivery tools. Desktop-local Cowork serves the `mcp__cowork__`
-# SDK-MCP tool; remote/cloud serves the agent-native one and cannot see an
-# `mcp__` tool at all. A skill naming either would strand the other lane (which
-# is why no SKILL.md names one) — but the CHECKER has to know both, because it
-# reads what the agent actually reached for.
+# SDK-MCP tool; remote/cloud serves the agent-native `SendUserFile`, and its
+# connected-folder write arrives under an MCP prefix
+# (`mcp__remote-devices__device_commit_files`), so a name counts when it equals
+# one of these or ends with `__` + one of them. A skill naming any would strand
+# another lane (which is why no SKILL.md names one) — but the CHECKER has to know
+# them all, because it reads what the agent actually reached for.
 DELIVERY_TOOLS = ("mcp__cowork__present_files", "SendUserFile", "device_commit_files")
+
+
+def is_delivery_tool(name: object) -> bool:
+    return isinstance(name, str) and any(name == t or name.endswith("__" + t) for t in DELIVERY_TOOLS)
+
 
 # Files at the outputs root that are not founder deliverables. Deliberately tiny:
 # the skills' own contract is that the root IS the deliverable level, so anything
@@ -210,7 +217,7 @@ def collect_presented(run_dir: pathlib.Path) -> tuple[set[str], int, int]:
                 if block.get("is_error") and isinstance(block.get("tool_use_id"), str):
                     errored_ids.add(block["tool_use_id"])
                 continue
-            if block.get("name") not in DELIVERY_TOOLS:
+            if not is_delivery_tool(block.get("name")):
                 continue
             calls += 1
             raw = block.get("input")

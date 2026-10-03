@@ -48,30 +48,31 @@ def detect_link_form(cwd: str, env: dict[str, str]) -> str:
     return "path"
 
 
-def _deliverables(specs: list[str], link: str) -> list[tuple[str, str]]:
-    out: list[tuple[str, str]] = []
+def _deliverables(specs: list[str], link: str) -> list[tuple[str, str | None]]:
+    out: list[tuple[str, str | None]] = []
     for spec in specs:
         label, sep, path = spec.partition("=")
         if not sep or not label.strip() or not path.strip():
             raise ValueError(f"--deliverable must be LABEL=PATH, got {spec!r}")
+        href: str | None
         if link == "computer":
             href = f"computer://{path.strip()}"
         elif link == "none":
-            href = f"`{path.strip()}`"  # stated, not linked: a stated path survives every surface
+            href = None  # the label alone: the cloud lane delivers a card, and a path beside it is dead
         else:
             href = path.strip()
         out.append((label.strip(), href))
     return out
 
 
-def build(report: dict[str, Any], deliverables: list[tuple[str, str]]) -> str:
+def build(report: dict[str, Any], deliverables: list[tuple[str, str | None]]) -> str:
     verdict = report.get("verdict")
     if not isinstance(verdict, str) or not verdict.strip():
         raise ValueError("report.json carries no verdict")
     parts: list[str] = []
     for i, (label, href) in enumerate(deliverables):
         tail = " — every check scored, with the evidence behind it" if i == 0 else ""
-        parts.append((f"{label} ({href})" if href.startswith("`") else f"[{label}]({href})") + tail)
+        parts.append((f"[{label}]({href})" if href else label) + tail)
     lines = [
         f"Here's your finished financial model review: {'; '.join(parts)}.",
         "",
