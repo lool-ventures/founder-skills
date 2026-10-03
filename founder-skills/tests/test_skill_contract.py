@@ -1920,7 +1920,8 @@ REFERENCES_CEILING: dict[str, int] = {
     # three solver sites read it), named by no authoring surface. Its absence made
     # W_STALE_CCP_SUSPECTED unfirable — the skill could not be told a conversion price was stale
     # because it could not be told the earlier adjustment happened.
-    "cap-table": 48_448,
+    # cap-table lowered to the measured size: a local-only document pointer removed from the source list.
+    "cap-table": 48_355,
 }
 
 

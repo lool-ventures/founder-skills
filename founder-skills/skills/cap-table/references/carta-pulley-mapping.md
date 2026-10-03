@@ -233,4 +233,3 @@ The synthetic Carta fixture (`tests/fixtures/cap-table-corpus/synthetic_carta.xl
 - [Carta cap-table reports docs](https://support.carta.com/kb/guide/en/how-to-build-and-export-cap-table-reports-Yg9DZXSLBl/Steps/3760770)
 - [Pulley cap-table basics](https://help.pulley.com/en/articles/13676392-cap-table-basics)
 - [Pulley cap-table upload docs](https://help.pulley.com/en/articles/13639714-uploading-your-cap-table)
-- `docs/internal/captable-corpus2-test-findings.md` (local-only) — corpus-2 testing report
