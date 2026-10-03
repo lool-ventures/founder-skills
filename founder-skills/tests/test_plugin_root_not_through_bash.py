@@ -19,7 +19,7 @@ shell at all (a token put back into a fence fails here), and no absolute referen
 
 from __future__ import annotations
 
-import hashlib
+import difflib
 import importlib.util
 import re
 import shlex
@@ -37,16 +37,15 @@ TOKEN = "${CLAUDE_PLUGIN_ROOT}"
 MS_GEN = PLUGIN / "skills" / "market-sizing" / "scripts" / "dispatch_prompt.py"
 CP_GEN = PLUGIN / "skills" / "competitive-positioning" / "scripts" / "cp_dispatch_prompt.py"
 RESOLVER = PLUGIN / "scripts" / "resolve_artifacts_root.py"
-# sha256 of each prompt as the previous generator printed it off a /sessions tree when handed the plugin
-# folder, with that folder written as @PLUGIN_ROOT@ and the agent paths of `_workspace` below. The one
-# deliberate change since: competitive positioning's CHECKLIST names its NARR_03 guide skill-qualified
-# (`skills/competitive-positioning/references/checklist-criteria.md's NARR_03 bands`). A hash, not a copy:
-# the text is already in the generator. A prompt change is a deliberate re-pin.
-GOLDEN_SHA256 = {
-    ("market-sizing", "checklist"): "2a7e52eabc94c76f55e2dcc7fe88c5ca8f6672b4440f51a22cb20e9c895aa780",
-    ("competitive-positioning", "moat_scoring"): "8a0112b39c01bcfbad7d14a4c459769ea101f91f4f2f109bc53a4cc7f43195f9",
-    ("competitive-positioning", "checklist"): "da812de5ef8312d1f92b85e6fb1e7bd3a865ca10fe9740523e1042690b585e87",
-}
+# Off a /sessions tree each reference-naming prompt is pinned as readable text, one file per prompt, with the
+# generator's plugin folder written as @PLUGIN_ROOT@. The files began as the previous generator's output when
+# handed that folder; the one deliberate change since is competitive positioning's CHECKLIST naming its
+# NARR_03 guide skill-qualified. A prompt change is a deliberate re-copy, and the failure shows the diff.
+GOLDEN_DIR = PLUGIN / "tests" / "fixtures" / "dispatch_prompts"
+ROOT_MARK = "@PLUGIN_ROOT@"
+# A second off-session folder: rendering under it may change only the places the root placeholder sits.
+OTHER_ROOT = "/opt/elsewhere/founder-skills"
+HOOK = PLUGIN / "scripts" / "dispatch_prompt_check.py"
 
 # The loader's value for the plugin folder on a local session (a host path), and the same folder as the
 # VM shell sees it after the rewrite.
@@ -157,11 +156,21 @@ def _argv(skill: str, command: str, env: dict[str, str], plugin_value: str, *, l
     return shlex.split(cmd)
 
 
-def _run(argv: list[str], monkeypatch: pytest.MonkeyPatch, capsys: Any, patches: dict[str, Any]) -> tuple[int, str]:
+def _run(
+    argv: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: Any,
+    patches: dict[str, Any],
+    *,
+    cwd: str | None = None,
+) -> tuple[int, str]:
+    """Run a generator's main(). `cwd` is the working directory as the generator reads it (os.getcwd)."""
     script = Path(argv[1])
     mod = _load(script, f"sim_{script.stem}")
     for name, value in patches.items():
         monkeypatch.setattr(mod, name, value, raising=False)
+    if cwd is not None:
+        monkeypatch.setattr(mod.os, "getcwd", lambda: cwd)
     monkeypatch.setattr(sys, "argv", [str(script), *argv[2:]])
     code = 0
     try:
@@ -187,18 +196,30 @@ def _on_a_session_tree() -> dict[str, Any]:
     return {"_plugin_root": lambda: SESSION_ROOT}
 
 
+# How a local session can show itself to a generator: (plugin folder it runs from, cwd it reads).
+# None keeps the real value (this checkout; a temp dir). Either half on a /sessions tree selects the pointer.
+SESSION_LANES = {
+    "folder-under-mnt": (SESSION_ROOT, None),
+    "cwd-on-sessions": (None, "/sessions/quiet-bold-otter"),
+    "folder-outside-mnt": ("/sessions/s/plugins/founder-skills", "/tmp"),
+}
+
+
+@pytest.mark.parametrize("lane", sorted(SESSION_LANES))
 @pytest.mark.parametrize("skill,context,command", generator_commands(), ids=lambda v: str(v)[:24])
 def test_rewrite_simulation_prints_no_absolute_reference_path(
-    skill: str, context: str, command: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: Any
+    skill: str, context: str, command: str, lane: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: Any
 ) -> None:
+    folder, cwd = SESSION_LANES[lane]
     monkeypatch.chdir(tmp_path)
     argv = _argv(skill, command, _workspace(tmp_path), HOST_ROOT, lane_rewrite=True)
-    code, out = _run(argv, monkeypatch, capsys, _on_a_session_tree())
+    patches = {"_plugin_root": lambda: folder} if folder is not None else {}
+    code, out = _run(argv, monkeypatch, capsys, patches, cwd=cwd)
     assert code == 0, f"{skill} {context} exited {code}"
     assert out.startswith("CONTEXT: "), out[:200]
-    assert violations(argv, out) == [], f"{skill} {context}"
+    assert violations(argv, out) == [], f"{skill} {context} ({lane})"
     for tail in EXPECTED_TAILS.get((skill, context), set()):
-        assert f"ending {tail}" in out, f"{skill} {context}: the pointer does not name {tail}"
+        assert f"ending {tail}" in out, f"{skill} {context} ({lane}): the pointer does not name {tail}"
 
 
 def test_control_a_token_put_back_into_a_fence_is_caught(
@@ -229,22 +250,68 @@ def test_control_the_own_folder_default_on_a_session_tree_is_caught(
 # --- off a /sessions tree: the same text as before -----------------------------------------------
 
 
+def _hook_squash() -> Any:
+    """The dispatch hook's own whitespace normaliser, loaded from the hook, so the two cannot drift."""
+    return _load(HOOK, "hook_dispatch_prompt_check")._squash
+
+
+def text_mismatch(label: str, expected: str, actual: str) -> str:
+    """'' when equal; otherwise a unified diff, and a whitespace-only change named as one."""
+    if expected == actual:
+        return ""
+    diff = difflib.unified_diff(
+        expected.splitlines(keepends=True), actual.splitlines(keepends=True), "golden", "printed", n=1
+    )
+    msg = f"{label}: the printed prompt is not the golden text.\n" + "".join(diff)
+    if _hook_squash()(expected) == _hook_squash()(actual):
+        changed = [ln for ln in difflib.ndiff(expected.splitlines(), actual.splitlines()) if ln[:2] in ("- ", "+ ")]
+        msg += (
+            "\nWHITESPACE ONLY. The dispatch hook squashes whitespace, so it would accept either prompt; this "
+            "test still fails, because the printed text changed. If the change is intended, copy the new "
+            "output into the golden file. Changed lines, exactly:\n" + "\n".join(repr(ln) for ln in changed)
+        )
+    return msg
+
+
+def _template(skill: str, context: str) -> str:
+    gen = MS_GEN if skill == "market-sizing" else CP_GEN
+    mod = _load(gen, f"tpl_{gen.stem}")
+    return str(mod._CHECKLIST_TEMPLATE if skill == "market-sizing" else mod._TEMPLATES[context])
+
+
 @pytest.mark.parametrize("pair", sorted(EXPECTED_TAILS))
-def test_off_a_session_tree_the_prompt_is_unchanged(
+def test_off_a_session_tree_the_prompt_is_the_golden_text(
     pair: tuple[str, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: Any
 ) -> None:
-    """CLI and cloud: absolute paths from the generator's own folder, byte-identical (GOLDEN_SHA256) to
-    what the previous generator printed when handed that folder. The loader value is set to a different
-    folder, so a path that came through the shell would show."""
+    """CLI and cloud: the golden text with the root placeholder set to the generator's own folder, and
+    nothing else in it depends on the root. The loader value is set to a different folder, so a path that
+    came through the shell would show."""
     skill, context, command = next(c for c in generator_commands() if c[:2] == pair)
+    golden = (GOLDEN_DIR / f"{skill}.{context}.txt").read_text(encoding="utf-8")
+    # The root sits exactly where the template puts its placeholder, no more, no fewer.
+    assert golden.count(ROOT_MARK) == _template(skill, context).count("<PLUGIN_ROOT_AGENT>") > 0
     monkeypatch.chdir(tmp_path)
     argv = _argv(skill, command, _workspace(tmp_path), HOST_ROOT, lane_rewrite=False)
     code, out = _run(argv, monkeypatch, capsys, {})
     assert code == 0
     assert HOST_ROOT not in out
-    assert f"{PLUGIN}/skills/" in out  # positive control: the generator's own folder is what is printed
-    normalised = out.replace(str(PLUGIN), "@PLUGIN_ROOT@").encode("utf-8")
-    assert hashlib.sha256(normalised).hexdigest() == GOLDEN_SHA256[pair], f"{skill} {context} changed:\n{out}"
+    assert not (m := text_mismatch(f"{skill} {context}", golden.replace(ROOT_MARK, str(PLUGIN)), out)), m
+    # Root independence: under another off-session folder only the placeholder sites change.
+    code, out = _run(argv, monkeypatch, capsys, {"_plugin_root": lambda: OTHER_ROOT})
+    assert code == 0
+    assert not (m := text_mismatch(f"{skill} {context} at {OTHER_ROOT}", golden.replace(ROOT_MARK, OTHER_ROOT), out)), m
+
+
+def test_the_mismatch_message_shows_a_diff_and_names_a_whitespace_only_change() -> None:
+    golden = (GOLDEN_DIR / "market-sizing.checklist.txt").read_text(encoding="utf-8")
+    assert "not `fail`. There was nothing" in golden
+    spaced = golden.replace("not `fail`. There was nothing", "not `fail`.  There was nothing")
+    msg = text_mismatch("ms", golden, spaced)
+    assert "+not `fail`.  There was nothing" in msg and "WHITESPACE ONLY" in msg
+    worded = golden.replace("not `fail`. There was nothing", "not `fail`. There is nothing")
+    msg = text_mismatch("ms", golden, worded)
+    assert "+not `fail`. There is nothing" in msg and "WHITESPACE ONLY" not in msg
+    assert text_mismatch("ms", golden, golden) == ""
 
 
 # --- the old flag: accepted, ignored, unlisted ---------------------------------------------------
@@ -320,6 +387,8 @@ def test_the_lane_is_read_from_the_folder_and_the_cwd(
     assert mod._on_session_lane() is False  # this checkout, run from a temp dir
     monkeypatch.setattr(mod, "_plugin_root", lambda: SESSION_ROOT)
     assert mod._on_session_lane() is True
+    monkeypatch.setattr(mod, "_plugin_root", lambda: "/sessions/s/plugins/founder-skills")
+    assert mod._on_session_lane() is True  # any plugin folder under /sessions, not only under mnt/
     monkeypatch.setattr(mod, "_plugin_root", lambda: "/root/.claude/plugins/synced/o_a/founder-skills")
     assert mod._on_session_lane() is False
     monkeypatch.setattr(mod.os, "getcwd", lambda: "/sessions/quiet-bold-otter")

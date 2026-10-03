@@ -1,0 +1,89 @@
+CONTEXT: CHECKLIST
+OUTPUT_PATH: /agent/handoff/R/checklist_output.json
+RUN_ID: R
+
+You are the market-sizing agent dispatched in Context A (CHECKLIST).
+If a reference path below cannot be read (refused or not found), read the same file under the plugin folder your own instructions name.
+Read:
+- @PLUGIN_ROOT@/skills/market-sizing/references/pitfalls-checklist.md
+- @PLUGIN_ROOT@/skills/market-sizing/references/artifact-schemas.md
+  (read the "Canonical 22 checklist IDs" section)
+- /agent/analysis/inputs.json
+- /agent/handoff/R/checklist_view/methodology.json
+- /agent/analysis/validation.json
+- /agent/analysis/sizing.json
+
+**Materials-dependent items on a run with no materials.** If `inputs.materials_provided` is empty —
+a conversational run, no deck, no model — then an item that can only be evidenced BY a deck or
+financial model (competitive content, GTM evidence, hiring/burn alignment) scores `not_applicable`,
+not `fail`. There was nothing to acknowledge competition, GTM, or projections alignment *in*. Scoring
+it `fail` penalises the founder for a document they were never asked for and moves the headline
+percentage, which is the number they quote. `not_applicable` is excluded from the denominator, so the
+score reflects what was actually assessable. Say in the item's notes that it was skipped for want of
+materials.
+
+You do NOT see the original deck — score `competitive_landscape_acknowledged` from
+`inputs.json`'s `competitive_landscape_notes` field only (present or `null`), not from
+inference about what the deck "probably" said. Score `som_backed_by_gtm` from
+`inputs.json`'s `gtm_evidence_notes` field only, and `som_consistent_with_projections` from
+`inputs.json`'s `projections_alignment_notes` field only — same rule, two different fields, because
+GTM/customer-acquisition evidence and hiring-plan/burn-rate evidence are different things and one
+field cannot stand in for both.
+
+Assess all 22 items with status (pass/fail/not_applicable) and notes.
+
+`notes` prints VERBATIM in the founder's report, so name the source the way the
+founder knows it — never by our filename. They never saw `inputs.json` or
+`sizing.json`; they saw their deck and the figures they gave you.
+  Instead of: "sizing.json records formula strings for every figure"
+  Write:      "every figure shows the formula behind it"
+  Instead of: "inputs.json gtm_evidence_notes is null"
+  Write:      "the deck states no go-to-market plan"
+State what is true of the MARKET or the founder's own materials.
+
+Use your Write tool to write to OUTPUT_PATH the items array without a summary
+(the producer script computes the summary). Each item has this shape:
+{
+  "items": [
+    {"id": "structural_tam_gt_sam_gt_som", "status": "pass", "notes": null}
+  ]
+}
+status is one of: pass, fail, not_applicable.
+
+Assess every one of these 22 items — one item per id, no omissions, no invented
+ids. The 22 ids, grouped by category:
+Structural Checks:
+    {"id": "structural_tam_gt_sam_gt_som"}
+    {"id": "structural_definitions_correct"}
+TAM Scoping:
+    {"id": "tam_matches_product_scope"}
+    {"id": "source_segments_match"}
+SOM Realism:
+    {"id": "som_share_defensible"}
+    {"id": "som_backed_by_gtm"}
+    {"id": "som_consistent_with_projections"}
+Data Quality:
+    {"id": "data_current"}
+    {"id": "sources_reputable"}
+    {"id": "figures_triangulated"}
+    {"id": "unsupported_figures_flagged"}
+    {"id": "validated_used_precisely"}
+    {"id": "assumptions_categorized"}
+Methodology:
+    {"id": "both_approaches_used"}
+    {"id": "approaches_reconciled"}
+    {"id": "growth_dynamics_considered"}
+Market Understanding:
+    {"id": "market_properly_segmented"}
+    {"id": "competitive_landscape_acknowledged"}
+    {"id": "sam_expansion_path_noted"}
+Presentation:
+    {"id": "assumptions_explicit"}
+    {"id": "formulas_shown"}
+    {"id": "sources_cited"}
+
+Then return ONLY the receipt JSON in your final assistant message:
+{"status": "complete", "output_path": "<echo of OUTPUT_PATH>"}
+You never write a canonical artifact; anything else you write bypasses schema validation and run_id
+stamping.
+Do NOT write any file other than OUTPUT_PATH.

@@ -1,0 +1,55 @@
+CONTEXT: CHECKLIST
+OUTPUT_PATH: /agent/handoff/R/checklist_output.json
+RUN_ID: R
+
+You are the competitive-positioning agent dispatched in Context A (CHECKLIST).
+If a reference path below cannot be read (refused or not found), read the same file under the plugin folder your own instructions name.
+Read landscape.json, positioning.json, moat_scores.json, positioning_scores.json,
+product_profile.json, and landscape_draft.json from /agent/analysis. Also read
+@PLUGIN_ROOT@/skills/competitive-positioning/references/checklist-criteria.md.
+product_profile.json's deck_competition_slide field (deck mode) and
+landscape_draft.json's deck_competitors_excluded field are what the
+competition-slide cross-check item (NARR_03) needs — without them it has
+nothing to grade. When deck_competition_slide.present is false (the deck had
+no competition slide at all), that IS a concrete answer — grade NARR_03 **warn**,
+never not_applicable, using the stated reason as your evidence and saying plainly
+that the deck names no competitor. not_applicable would drop the item out of the
+score denominator, inflating the score while hiding the finding, and a deck that
+never engages competition is one of the strongest findings this review returns.
+Do not treat the field's absence as "nothing to grade" once a present:false
+record with a reason exists. skills/competitive-positioning/references/checklist-criteria.md's NARR_03 bands are
+the authority.
+
+Assess all 25 checklist items (COVER_01..05, POS_01..05, MOAT_01..04,
+EVID_01..04, NARR_01..04, MISS_01..03). Mode-based gating applies: when
+input_mode is conversation, research-dependent items auto-gate to not_applicable.
+
+Evidence is MANDATORY for every item: every fail and warn MUST have a non-empty
+evidence string citing specific findings. Every pass MUST have evidence noting
+what was checked.
+
+Evidence prints VERBATIM in the founder's report, so name the source the way the
+founder knows it — never by our filename. They never saw `landscape.json` or
+`moat_scores.json`; they saw their deck and the competitors in it.
+  Instead of: "landscape.json reports input_mode: deck"
+  Write:      "the deck names three competitors and no others"
+  Instead of: "moat_scores.json shows switching_costs weak"
+  Write:      "switching costs are weak — customers can leave in a day"
+State what is true of the COMPANY or its competitive set. The delivery gate
+flags an internal filename in evidence, so this is checked.
+
+**Copy each criterion's label verbatim into `criterion`.** It is a cross-check, not decoration:
+the label you are shown and the evidence you write are joined by `id` downstream, so if the id
+and the criterion you actually graded drift apart, a founder reads a real criterion above a
+justification for a different one — measured on real runs, e.g. "Do-nothing / status quo
+included" carrying evidence about how many direct competitors were named. Echoing the label is
+what makes that detectable. Grade the criterion you name.
+
+Use your Write tool to write to OUTPUT_PATH — the items array without a
+summary (the producer script computes the summary):
+{"items": [{"id": "COVER_01", "criterion": "<the criterion label, copied verbatim>", "status": "pass", "evidence": "...", "notes": "..."}, ...all 25 items...]}
+Then return ONLY the receipt JSON in your final assistant message:
+{"status": "complete", "output_path": "<echo of OUTPUT_PATH>"}
+You never write a canonical artifact; anything else you write bypasses schema
+validation and run_id stamping.
+Do NOT write any file other than OUTPUT_PATH.

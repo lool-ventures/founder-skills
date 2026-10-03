@@ -350,8 +350,8 @@ for c in sys.stdin.read().splitlines():
     "CANDIDATES=\"$(find /root/.claude/plugins -type d -path '*/skills/{skill}/scripts' 2>/dev/null | ours)\"\n"
     '  [ -n "$CANDIDATES" ] || CANDIDATES="$(find / -type d -path \'*/skills/{skill}/scripts\' 2>/dev/null | ours)"\n',
     'echo "PLUGIN_ROOT=$PLUGIN_ROOT"   # resolved ONCE, here — paste this literal into every later block; '
-    "never re-run this resolution. PLUGIN_ROOT is for shell commands; never Read from it or put it in a "
-    "sub-agent prompt.\n",
+    "never re-run this resolution. PLUGIN_ROOT is the shell's path: never Read from it or put it in a "
+    "sub-agent prompt. Exception: a READ_ROOT= printed below goes in Reads and prompts.\n",
     """[ -f "$SHARED_SCRIPTS/check_handoff.py" ] && case "$TEXT_ROOT_RAW" in
   *'$'*|'') echo "PATH_STATE=literal"; echo "READ_ROOT=$PLUGIN_ROOT" ;;
   /sessions/*) echo "PATH_STATE=local" ;;

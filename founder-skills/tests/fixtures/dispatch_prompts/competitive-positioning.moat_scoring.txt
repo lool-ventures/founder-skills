@@ -1,0 +1,64 @@
+CONTEXT: MOAT_SCORING
+OUTPUT_PATH: /agent/handoff/R/moat_scoring_output.json
+RUN_ID: R
+
+You are the competitive-positioning agent dispatched in Context A (MOAT_SCORING).
+Read positioning.json at /agent/analysis/positioning.json, landscape.json at
+/agent/analysis/landscape.json, and product_profile.json at
+/agent/analysis/product_profile.json. You are scoring _startup among the others, and
+product_profile.json is the ONLY source for what the startup actually does — positioning.json's
+pre-dispatch block carries placeholder evidence, so without it you would be scoring the startup
+from nothing.
+
+If a reference path below cannot be read (refused or not found), read the same file under the plugin folder your own instructions name.
+Score every slug (including _startup) across the 6 canonical moat dimensions from
+@PLUGIN_ROOT@/skills/competitive-positioning/references/moat-definitions.md:
+network_effects, data_advantages, switching_costs, regulatory_barriers,
+cost_structure, brand_reputation.
+
+Each moat: status (strong/moderate/weak/absent/not_applicable), evidence (required),
+evidence_source (researched/agent_estimate/founder_provided), trajectory
+(building/stable/eroding).
+
+Those six are the comparison grid, not the whole vocabulary. You may ALSO add a
+`custom_{slug}` moat when a real, evidenced form of defensibility does not fit any of them —
+see the Custom Moat Types table in moat-definitions.md. Distribution is the case that keeps
+arising: a named partner or reseller covering a large share of the addressable market is
+defensibility, and it is NOT a network effect. Recording it as `network_effects: absent`
+because channel leverage does not make the product better with scale is correct reasoning
+that throws the finding away; use `custom_distribution_channel` instead. A custom moat needs
+the same evidence quality as a canonical one, and it reaches the founder's report — it does
+not appear on the six-axis radar, which stays canonical so companies remain comparable.
+
+trajectory is a DIFFERENT enum from status — it is one of building/stable/eroding only. Never write
+a status value (strong/moderate/weak/absent/not_applicable) into trajectory: the producer rejects it
+and the whole file comes back for repair, costing a round-trip.
+
+For trajectory and any moat where landscape.json evidence is thin, use WebSearch
+to find recent (last 12 months) signals — funding rounds, M&A, hiring, executive
+changes, patent filings, product launches. Stamp evidence_source: "researched"
+only when the signal came from a WebSearch result. Whenever you stamp
+evidence_source: "researched", also add a "source" field on that same moat
+entry — the URL or the exact search query that produced the signal. The main
+thread never sees your WebSearch results, only this artifact, so an unsourced
+"researched" claim (e.g. a dated funding/M&A event) can't be spot-checked
+later. score_moats.py warns (does not fail) on a "researched" moat with no
+"source".
+
+Use your Write tool to write to OUTPUT_PATH — exactly the shape expected by
+score_moats.py:
+{
+  "moat_assessments": {
+    "_startup": {"moats": [{"id": "...", "status": "...", "evidence": "...",
+      "evidence_source": "researched", "source": "https://... OR the exact search query used",
+      "trajectory": "..."}]},
+    "<slug>": {"moats": [...]},
+    ...
+  },
+  "metadata": {"run_id": "R"}
+}
+Then return ONLY the receipt JSON in your final assistant message:
+{"status": "complete", "output_path": "<echo of OUTPUT_PATH>"}
+You never write a canonical artifact; anything else you write bypasses schema
+validation and run_id stamping.
+Do NOT write any file other than OUTPUT_PATH.

@@ -881,7 +881,9 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 104,557 -> 104,509 on 2026-10-03: the CHECKLIST prompt generator no longer takes the plugin folder as
     # an argument, so its command line and the plugin-paths paragraph drop it; Step 0 says PLUGIN_ROOT never
     # goes into a sub-agent prompt. (The other four skills' SKILL.mds took the last two edits at net 0 B.)
-    "market-sizing": 104_509,
+    # 104,509 -> 104,572 (+63 B) on 2026-10-03, the same +63 B in all six: Step 0's PLUGIN_ROOT comment names it
+    # the shell's path and states the one exception, a printed READ_ROOT= used in Reads and prompts.
+    "market-sizing": 104_572,
     # fmr raised for two founder-facing-correctness items measured in a live run: the CHECKLIST
     # dispatch now forbids citing our artifact filenames in evidence (that run put `inputs.json` in 10
     # items' evidence, printed verbatim into the founder's report), and the producer pipe passes
@@ -969,7 +971,9 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 86,561 -> 86,384 on 2026-10-03: Step 0's preflight comment is two lines, the plugin-paths paragraph is
     # shorter and plainer, a manifest-less plugin copy is kept by the search, and the block says to run it
     # with the token as shown and that PLUGIN_ROOT is for shell commands only.
-    "financial-model-review": 86_384,
+    # 86,384 -> 86,447 (+63 B) on 2026-10-03, the same +63 B in all six: Step 0's PLUGIN_ROOT comment names it
+    # the shell's path and states the one exception, a printed READ_ROOT= used in Reads and prompts.
+    "financial-model-review": 86_447,
     # ic-sim SHRANK: the REQUIRED ic-dynamics.md read at Step 7 is deleted. Step 7 is a pure producer
     # pipe — compose_discussion.py derives discussion.json from the partners' own files and nothing
     # is authored by the main thread — so the read informed no decision while pulling a whole
@@ -1020,7 +1024,9 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 94,596 -> 94,365 on 2026-10-03: Step 0's preflight comment is two lines, the plugin-paths paragraph is
     # shorter and plainer, a manifest-less plugin copy is kept by the search, and the block says to run it
     # with the token as shown and that PLUGIN_ROOT is for shell commands only.
-    "ic-sim": 94_365,
+    # 94,365 -> 94,428 (+63 B) on 2026-10-03, the same +63 B in all six: Step 0's PLUGIN_ROOT comment names it
+    # the shell's path and states the one exception, a printed READ_ROOT= used in Reads and prompts.
+    "ic-sim": 94_428,
     # deck-review +1,165 B: Step 0 carried only a parenthetical fresh-shell mention buried in a code
     # comment, unlike the four skills that mint RUN_ID in a LATER block and so carry the shared banner.
     # deck-review mints RUN_ID INSIDE this re-runnable Step-0 block (like cap-table), so the shared
@@ -1308,7 +1314,9 @@ SKILL_MD_CEILING: dict[str, int] = {
     # shorter and plainer, a manifest-less plugin copy is kept by the search, and the block says to run it
     # with the token as shown and that PLUGIN_ROOT is for shell commands only. Two reference Read
     # directives name their file under the plugin token.
-    "deck-review": 110_906,
+    # 110,906 -> 110,969 (+63 B) on 2026-10-03, the same +63 B in all six: Step 0's PLUGIN_ROOT comment names it
+    # the shell's path and states the one exception, a printed READ_ROOT= used in Reads and prompts.
+    "deck-review": 110_969,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
@@ -1440,7 +1448,9 @@ SKILL_MD_CEILING: dict[str, int] = {
     # example sentence is gone.
     # 126,862 -> 126,630 on 2026-10-03: the five prompt-generator command lines no longer pass the plugin
     # folder; see market-sizing above.
-    "competitive-positioning": 126_630,
+    # 126,630 -> 126,693 (+63 B) on 2026-10-03, the same +63 B in all six: Step 0's PLUGIN_ROOT comment names it
+    # the shell's path and states the one exception, a printed READ_ROOT= used in Reads and prompts.
+    "competitive-positioning": 126_693,
     # cap-table, the largest raise (+2,383 B) and the one with the most founder-visible payoff:
     #   * Main-Thread Return named THREE of the four files Step 12 copies; a live run delivered exactly
     #     three and dropped `{Company}_Cap_Table.html`. All four are now named explicitly.
@@ -1535,7 +1545,9 @@ SKILL_MD_CEILING: dict[str, int] = {
     # shorter and plainer, a manifest-less plugin copy is kept by the search, and the block says to run it
     # with the token as shown and that PLUGIN_ROOT is for shell commands only. One reference Read directive
     # names its file under the plugin token.
-    "cap-table": 158_695,
+    # 158,695 -> 158,758 (+63 B) on 2026-10-03, the same +63 B in all six: Step 0's PLUGIN_ROOT comment names it
+    # the shell's path and states the one exception, a printed READ_ROOT= used in Reads and prompts.
+    "cap-table": 158_758,
 }
 
 
@@ -3813,7 +3825,9 @@ def test_corpus_counts_every_agent_the_skill_pins_not_just_its_namesake() -> Non
 # Lowered 2026-10-03 from 126,547 to 126,335 B: skill-execution-model.md states that a generator-printed prompt
 # never takes the plugin folder through the shell, and a paragraph restating the Context A path rule is cut
 # to a pointer at it.
-ROOT_REFERENCES_CEILING = 126_335
+# Lowered 2026-10-03 from 126,335 to 126,315 B: skill-execution-model.md drops a stale name for the Context A
+# input rule.
+ROOT_REFERENCES_CEILING = 126_315
 
 
 def test_shared_reference_tree_does_not_grow() -> None:

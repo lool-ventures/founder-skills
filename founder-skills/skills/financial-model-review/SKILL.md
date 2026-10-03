@@ -169,7 +169,7 @@ for c in sys.stdin.read().splitlines():
   SCRIPTS="$PLUGIN_ROOT/skills/financial-model-review/scripts"
 fi
 PLUGIN_ROOT="${SCRIPTS%/skills/*}"
-echo "PLUGIN_ROOT=$PLUGIN_ROOT"   # resolved ONCE, here — paste this literal into every later block; never re-run this resolution. PLUGIN_ROOT is for shell commands; never Read from it or put it in a sub-agent prompt.
+echo "PLUGIN_ROOT=$PLUGIN_ROOT"   # resolved ONCE, here — paste this literal into every later block; never re-run this resolution. PLUGIN_ROOT is the shell's path: never Read from it or put it in a sub-agent prompt. Exception: a READ_ROOT= printed below goes in Reads and prompts.
 REFS="$PLUGIN_ROOT/skills/financial-model-review/references"
 SHARED_SCRIPTS="$PLUGIN_ROOT/scripts"
 # PREFLIGHT: the run STOPS if this prints (the skill was served without its plugin). Test for

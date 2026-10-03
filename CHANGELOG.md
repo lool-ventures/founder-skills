@@ -116,7 +116,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   plugin folder.
 - **On Claude Desktop local sessions, the reviewers in market sizing and competitive positioning can
   now open their reference files.** The market sizing checklist and the competitive positioning
-  scoring and checklist reviewers were pointed at a copy of their guide they were not allowed to
+  moat-scoring and checklist reviewers were pointed at a copy of their guide they were not allowed to
   open. Each is now sent to a copy it can open; on the command line and in cloud sessions nothing
   changes.
 

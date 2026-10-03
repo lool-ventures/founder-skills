@@ -285,8 +285,9 @@ def _red_team(
 
 # --- where the reference files are --------------------------------------------------------------------
 #
-# Copy of the session-tree detection in scripts/resolve_artifacts_root.py (a generator runs without the
-# plugin's shared scripts on its path); tests/test_plugin_root_not_through_bash.py pins the copy.
+# The cwd half is a copy of the session-tree detection in scripts/resolve_artifacts_root.py (a generator runs
+# without the plugin's shared scripts on its path); tests/test_plugin_root_not_through_bash.py pins the copy.
+# The folder half is a plain prefix: a plugin mounted anywhere under /sessions is on a local session.
 _SESSION_TREE = re.compile(r"^(/sessions/[^/]+)/mnt(?:/|$)")
 _SESSION_ROOT = re.compile(r"^/sessions/[^/]+$")
 
@@ -303,7 +304,7 @@ def _plugin_root() -> str:
 def _on_session_lane() -> bool:
     """A local Desktop session: this script or the shell sits on a `/sessions` tree, where the folder above
     is a VM path a sub-agent's file tools are refused."""
-    return on_session_tree(os.getcwd()) or on_session_tree(_plugin_root())
+    return on_session_tree(os.getcwd()) or _plugin_root().startswith("/sessions/")
 
 
 _FALLBACK = (

@@ -149,7 +149,7 @@ def test_canonical_writer_claim_is_scoped_to_sub_agents() -> None:
 def test_no_zero_reads_inputs_inlined_invariant() -> None:
     """There is no "zero reads, inputs inlined" Context A invariant.
 
-    The three-way input rule says the opposite for under-`outputs/` artifacts
+    The Context A input rule says the opposite for under-`outputs/` artifacts
     ("Reads are preferred over inlining these"), and names ic-sim's
     all-inline variant as one skill's OPT-IN. The stale parenthetical was cited
     as THE mitigation for the un-gated workspace-shell escape hatch, so it
@@ -158,7 +158,7 @@ def test_no_zero_reads_inputs_inlined_invariant() -> None:
     flat = _body()
     assert "zero reads, inputs inlined" not in flat, (
         "skill-execution-model.md cites a 'zero reads, inputs inlined' Context A invariant. "
-        "No such invariant exists — the three-way rule PREFERS agent-namespace reads for "
+        "No such invariant exists — the Context A input rule PREFERS agent-namespace reads for "
         "under-outputs artifacts. Cite the input rules instead."
     )
     # "agent-namespace", not "relative": a relative file-tool path is refused,

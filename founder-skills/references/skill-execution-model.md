@@ -366,8 +366,8 @@ internally — pass the final message verbatim.
   `tools:` declares (it is a live escape hatch the platform grants, not
   something our allowlist gates). Do not rely on "sub-agents can't shell
   out" as a hard guarantee when reasoning about failure modes — rely
-  instead on the Context A input rules above ("Three Dispatch Contexts",
-  the three-way rule): every input a sub-agent is given is either
+  instead on the Context A input rules above ("Three Dispatch Contexts"):
+  every input a sub-agent is given is either
   reachable by an agent-namespace `Read` or inlined into the dispatch prompt, so
   a shell buys it nothing — plus the orchestrator-side gate on the one
   file it writes. Orchestrate from the main thread either way.

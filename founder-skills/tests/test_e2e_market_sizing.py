@@ -118,6 +118,18 @@ def test_market_sizing_smoke(tmp_path: Path) -> None:
     assert "CONTEXT: CHECKLIST" in contexts, (
         f"the checklist was not dispatched -- a self-graded score is not a score. Dispatched: {contexts}"
     )
+    # (a0') The grader opened its rubric at the path this lane gives it. A REGRESSION GUARD, not evidence
+    # for the session-tree pointer form (this lane is never on /sessions). It sees only that the Read was
+    # CALLED: RunCapture records tool_use blocks, never their results, so it cannot see `is_error`.
+    checklist_ids = [
+        t["id"]
+        for t in cap.tool_uses
+        if t["name"] in ("Task", "Agent") and dispatch_context(t["input"].get("prompt", "")) == "CONTEXT: CHECKLIST"
+    ]
+    # PLUGIN_PATH is _e2e_harness.PLUGIN_PATH, the folder this run sets CLAUDE_PLUGIN_ROOT to.
+    rubric = f"{PLUGIN_PATH}/skills/market-sizing/references/pitfalls-checklist.md"
+    checklist_reads = [str(t["input"].get("file_path", "")) for i in checklist_ids for t in cap.calls("Read", parent=i)]
+    assert rubric in checklist_reads, f"the CHECKLIST grader never Read {rubric}; it read {checklist_reads}"
 
     # (a) The red-team prompt is the GENERATED one, byte for byte. On the live run that motivated
     # this, the main thread hand-filled the template and added a "Key things worth attacking"
