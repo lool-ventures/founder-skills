@@ -5,7 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.15.0] - 2026-10-03 — Financial model reviews graded only on bars that fit the business, deck reviews that fail only what is missing, and skills that work from a conversation's first message
+
+### Highlights
+
+**A financial model review now grades a figure only against a benchmark built for your kind of
+business.** Payments businesses, marketplaces, businesses that build large systems to order, and
+businesses whose revenue model we do not benchmark were graded on bars set for subscription
+software. Those figures are now shown without a grade, each with the reason, and the headline counts
+only the figures that were graded. The review also says whether your revenue model is missing or
+simply has no benchmark, so you are no longer asked to state a revenue model you already stated. The
+checklist now grades against the review's own computed burn multiple, runway and payback, so it can
+no longer fail a figure the metrics table beside it rates acceptable.
+
+**A deck review fails a slide when it is missing, and warns when it is weak.** The problem slide,
+"why now" and the ask now follow the rule "company purpose is clear" already followed: a slide that
+is present but thin gets a warning, and a slide that is missing still fails. A deck with no market sizing at all fails by rule.
+
+**Skills started as the first message of a new conversation now find their own files.** On that
+path a skill's text arrives without its plugin folder filled in, so the references it reads, and the
+ones it hands to its reviewers, pointed nowhere. Each skill now finds its own plugin folder and
+uses it.
+
+### Added
+
+- **A business that builds large engineered systems to order now has its own revenue model in a
+  financial model review.** Plants, vessels, buildings and production lines, sold contract by contract
+  and billed by milestone or percentage of completion, used to be reviewed as a model we do not
+  benchmark. Such a business is now reviewed on the hardware milestones-and-capex check, which now
+  names progress billing, retentions, supplier deposits and backlog. No figure is graded on a bar built
+  for subscription software or for devices:
+  - gross margin is shown without a grade, because average gross margins of public companies in the
+    sectors these businesses work in run from about 15% to about 37%, and one bar would mis-grade one
+    end;
+  - the burn multiple, CAC payback and LTV/CAC are shown without a grade, each with its own reason,
+    and lifetime value gives the same reason as LTV/CAC;
+  - net and gross revenue retention are not asked for.
+
+  Known limitation: a checklist item that turns on a figure the review leaves ungraded (gross margin,
+  CAC payback, LTV/CAC, the burn multiple) can reach only a warning for such a business. That warning
+  says the figure has no benchmark to be judged on, not that the model is weak.
 
 ### Changed
 
@@ -20,9 +59,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
     warning.
   - **The ask** fails when there is no ask at all. Dollars tied to milestones without a single
     explicit ask, or several raise scenarios with their dollar amounts, are a warning.
-
-  Each change was checked against real decks: the check moved to a warning where the slide was
-  present but weak, and stayed a failure where the slide was missing.
 
   The market-sizing check now says outright that a deck with no market sizing at all fails. Reviews
   already graded it that way; the rule only named a top-down chart with no justification.
@@ -47,50 +83,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
     better than it is, so until the model says revenue is net, the figure is shown without a grade
     and the review says why. CAC payback is now shown without a grade, because its benchmark is set
     for software contract sizes. CAC was never graded; for a payments business the review now says
-    why.
+    why. Payments also have their own gross-margin entry in the benchmarks rather than sharing the
+    marketplace one: there is no published benchmark, because the margin depends on whether revenue
+    is booked net or gross.
   - **A business whose revenue model fits none we benchmark** is no longer graded on the software
     burn-multiple or payback bars either.
   - **A review whose revenue model is missing or not recognised** no longer has its gross margin
     graded on the software table. It is shown without a grade and the review says why. Its burn
     multiple and payback are still graded on the stage bars.
-  - The interactive explorer no longer re-grades a figure the review left ungraded.
-- **A business that builds large engineered systems to order now has its own revenue model in a
-  financial model review.** Plants, vessels, buildings and production lines, sold contract by contract
-  and billed by milestone or percentage of completion, used to be reviewed as a model we do not
-  benchmark. Such a business is now reviewed on the hardware milestones-and-capex check, which now
-  names progress billing, retentions, supplier deposits and backlog. No figure is graded on a bar built
-  for subscription software or for devices:
-  - gross margin is shown without a grade, because average gross margins of public companies in the
-    sectors these businesses work in run from about 15% to about 37%, and one bar would mis-grade one
-    end;
-  - the burn multiple, CAC payback and LTV/CAC are shown without a grade, each with its own reason,
-    and lifetime value gives the same reason as LTV/CAC;
-  - net and gross revenue retention are not asked for.
-
-  Known limitation: a checklist item that turns on a figure the review leaves ungraded (gross margin,
-  CAC payback, LTV/CAC, the burn multiple) can reach only a warning for such a business. That warning
-  says the figure has no benchmark to be judged on, not that the model is weak.
-- **The interactive explorer no longer shows a benchmark beside a metric the review found not
-  applicable, and prints the review's reason in its place.** Net revenue retention, Rule of 40 and the
-  other subscription metrics showed the subscription bar beside a business they do not apply to, and
-  Rule of 40 could be re-graded on it with the what-if slider. This applies to every revenue model,
-  subscription software included: below $500K ARR the burn multiple, and below $1M the Rule of 40, no
-  longer offer a what-if, since the review does not grade them at that size; the Benchmark column says
-  why instead. Where LTV is assumed, the Benchmark column for LTV/CAC now reads "treat as directional
-  until cohort data validates LTV".
+- **The interactive explorer no longer re-grades a figure the review left ungraded, and no longer
+  shows a benchmark beside a metric the review found not applicable; it prints the review's reason in
+  its place.** Net revenue retention, Rule of 40 and the other subscription metrics showed the
+  subscription bar beside a business they do not apply to, and Rule of 40 could be re-graded on it
+  with the what-if slider. This applies to every revenue model, subscription software included: below
+  $500K ARR the burn multiple, and below $1M the Rule of 40, no longer offer a what-if, since the
+  review does not grade them at that size; the Benchmark column says why instead. Where LTV is
+  assumed, the Benchmark column for LTV/CAC now reads "treat as directional until cohort data
+  validates LTV".
 - **The corrections page no longer colours a burn multiple the review left ungraded because of the
   business's revenue model** as above or below the 3x bar.
-- **The unit-economics headline counts graded figures only.** The HTML report's card read "0/6" for a
-  business no benchmark fits, which looked like a failing score; it now counts strong figures out of
-  those graded, says how many are shown without a grade, and reads "—" with "6 figures shown; none
-  graded for this business" when nothing is graded. The text report's summary line says the same.
-  Elsewhere in the same section, a metric found not applicable reads "Not applicable" rather than an
-  internal label, a metric with no value no longer shows "0.0", the text report's key metrics say "not
-  graded" rather than an internal rating word, and a lifetime value computed from your customer count
-  and churn says so in words.
-- **Gross-margin notes are in plain words.** The hardware, consumer and retail margin note no longer
-  names an internal field, and only a retailer is offered a store-level reading. The publication date
-  of the comparison behind an ungraded margin is now read as a date.
+- **The unit-economics headline counts graded figures only.** The HTML report's card counted every
+  figure, so a business no benchmark fits read as though it had scored nothing; it now counts strong
+  figures out of those graded, says how many are shown without a grade, and reads "—" with "6
+  figures shown; none graded for this business" when nothing is graded. The text report's summary
+  line says the same. Elsewhere in the same section, a metric found not applicable reads "Not
+  applicable" rather than an internal label, a metric with no value no longer shows "0.0", the text
+  report's key metrics say "not graded" rather than an internal rating word, and a lifetime value
+  computed from your customer count and churn says so in words.
+- **Gross-margin notes are in plain words, and fit the basis your model states.** The hardware,
+  consumer and retail margin note no longer names an internal field. Only a margin stated on store
+  contribution is offered a store-level reading; a margin on revenue booked net, on revenue booked
+  gross, or blended across revenue streams each gets a note that fits it. The publication date of
+  the comparison behind an ungraded margin is now read as a date.
 - **The benchmark-age note counts only benchmarks a figure was graded on.** A figure shown without a
   grade no longer makes the report say its benchmarks are out of date or of unknown age.
 - **A financial model review's checklist now grades against the review's own computed figures.**
@@ -108,12 +132,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Net revenue retention above 100% now prints as a percent.** It printed as a fraction of a
+  percent on the HTML report, as a bare decimal in the text report, and as a multiple in the
+  explorer. All three pages now print gross margin and net and gross revenue retention as percents
+  at any value, and a negative margin as a negative percent.
+- **The explorer's what-if now rates a moved CAC payback.** It always showed "not rated". A payback
+  the review graded is now rated on the same bar the review used, set by your contract size; a
+  payback the review left ungraded keeps its reason and no bar.
 - **Skills started as the first message of a new conversation now find their reference files.** On
   that path the skill's text arrives without its plugin folder filled in, so every reference it reads
   and every one it hands to a helper pointed nowhere. Each skill now notices this, finds its own
-  plugin folder, and uses that instead; a skill started any other way is unchanged. A helper whose
-  reference file cannot be opened at the path it was given now looks for the same file in its own
-  plugin folder.
+  plugin folder, and uses that instead; a skill started any other way is unchanged. A copy of the
+  plugin whose manifest cannot be read is no longer passed over in that search, which had stopped
+  the run. A helper whose reference file cannot be opened, or is not found, at the path it was given
+  now looks for the same file in its own plugin folder. The feedback command reports the plugin
+  version as "unknown" when it cannot read it.
+- **Looking for your earlier analyses of the same company now searches the analysis folder.** In
+  market sizing, IC simulation, competitive positioning and financial model review, the search for
+  earlier work named no folder, and in a cloud session it started from the home folder instead.
 - **On Claude Desktop local sessions, the reviewers in market sizing and competitive positioning can
   now open their reference files.** The market sizing checklist and the competitive positioning
   moat-scoring and checklist reviewers were pointed at a copy of their guide they were not allowed to
@@ -130,12 +166,12 @@ Contributor-facing only; nothing here changes what a founder installs or runs.
   was made. The committed recordings were re-stamped to the new baseline rather than re-recorded:
   - the agent, system prompt and network rules are unchanged;
   - the one change to the agent's environment does not reach the shell the skills' scripts run in.
-- Recording-time path redaction picks up the harness's newer rules. The macOS path the host agent
-  runs from is kept, and two more spellings of a home-directory name are hidden.
-- CI fails on a scenario input that a real recording would refuse, such as a missing path or a
-  negative tool check the scenario's tier can never violate. The dry-run reports these but still
-  exits 0. The re-record cost pre-flight now classifies the same lines as a load problem, not a cost
-  problem.
+- The recorded test sessions were not refreshed for this release, so they do not yet exercise this
+  release's skill changes.
+- Recording-time path handling follows the harness's newer rules.
+- CI fails on a scenario input that a recording would refuse, such as a missing path or a negative
+  tool check the scenario's tier can never violate. The dry-run reports these but still exits 0. The
+  re-record cost pre-flight now classifies the same lines as a load problem, not a cost problem.
 - After a re-record batch, any mismatch between a recording's agent version and its baseline is
   printed prominently. The cassette inventory also shows which models and baselines the recordings
   span.
@@ -146,9 +182,10 @@ Contributor-facing only; nothing here changes what a founder installs or runs.
   scenario now has an ask slide with several amounts tied to runway, and checks four verdicts: the ask
   is a warning, a missing why-now or market slide fails, and a quantified problem does not fail. It is
   recorded with a larger cap on stored file contents, since the checklist output comes close to the
-  default. The
-  financial-model-review scenario checks that the cash and burn stated in its prompt reach the
-  extracted inputs unchanged. Neither runs in CI until those lanes are re-recorded.
+  default. The financial-model-review scenario checks that the cash and burn stated in its prompt
+  reach the extracted inputs unchanged. Neither runs in CI until those lanes are re-recorded.
+- Skill files may not use inline shell expansion or argument placeholders, and every file search a
+  skill asks for must name its folder; contract tests enforce both.
 
 ## [0.14.0] - 2026-09-30 — Market sizing built by reference, an outside review for competitive positioning, and an option pool modelled on what its percentage measures
 
