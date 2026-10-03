@@ -51,8 +51,13 @@ import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
+
+# The one piece this lane takes from the shared harness: account connectors off, and the post-run
+# check that they were. A safety control is not a place for a second copy that can drift.
+from _e2e_harness import CONNECTOR_ISOLATION_ENV, assert_no_account_connectors, connector_isolation_options
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = REPO_ROOT / "founder-skills" / "tests" / "fixtures"
@@ -227,36 +232,11 @@ def _contradiction_lane_authorized() -> bool:
     }
 
 
-def _drive_deck_review_lane(
-    tmp_path: Path,
-    *,
-    deck_fixture: Path,
-    golden_path: Path,
-    company: str,
-    slug: str,
-    extra_checks: Callable[..., None] | None = None,
-) -> None:
-    """Drive deck-review against one deck fixture and check it against one golden file.
+def _deck_review_options(workdir: Path, plugin_path: Path) -> Any:
+    """The SDK options this lane runs with. A function so a free test can check what they contain."""
+    from claude_agent_sdk import ClaudeAgentOptions
 
-    EXTRACTED so a second deck does not mean a second copy of the SDK setup. This file
-    already carries one deliberate duplication (the auth gate, noted above as "the failure
-    point to watch"); a third copy of 200 lines of options, streaming and assertions would be
-    the same mistake at ten times the size. The release gate's test function keeps its exact
-    name -- CI matches paid lanes BY NAME -- and becomes a two-line caller.
-    """
-    # Imports are inside the test so test collection works without the SDK
-    # installed (CI install handles it via the dev extras).
-    from claude_agent_sdk import ClaudeAgentOptions, query
-
-    # Stage a workspace; the skill creates artifacts/ under cwd.
-    workdir = tmp_path / "workspace"
-    workdir.mkdir()
-    deck_dst = workdir / deck_fixture.name
-    shutil.copy(deck_fixture, deck_dst)
-
-    plugin_path = REPO_ROOT / "founder-skills"
-
-    options = ClaudeAgentOptions(  # type: ignore[call-arg]
+    return ClaudeAgentOptions(  # type: ignore[call-arg]
         cwd=str(workdir),
         # Plugin discovery: `plugins=[{type, path}]` is the SDK's plugin loader.
         # `setting_sources` is for filesystem-based Skill discovery (~/.claude/
@@ -313,8 +293,43 @@ def _drive_deck_review_lane(
             # override a caller who set this deliberately. Read through instead: this is a
             # default, not a pin.
             "CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS": os.environ.get("CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS", "600000"),
+            # Account connectors off; written last, so a caller's environment cannot turn them back on.
+            **CONNECTOR_ISOLATION_ENV,
         },
+        **connector_isolation_options(),
     )
+
+
+def _drive_deck_review_lane(
+    tmp_path: Path,
+    *,
+    deck_fixture: Path,
+    golden_path: Path,
+    company: str,
+    slug: str,
+    extra_checks: Callable[..., None] | None = None,
+) -> None:
+    """Drive deck-review against one deck fixture and check it against one golden file.
+
+    EXTRACTED so a second deck does not mean a second copy of the SDK setup. This file
+    already carries one deliberate duplication (the auth gate, noted above as "the failure
+    point to watch"); a third copy of 200 lines of options, streaming and assertions would be
+    the same mistake at ten times the size. The release gate's test function keeps its exact
+    name -- CI matches paid lanes BY NAME -- and becomes a two-line caller.
+    """
+    # Imports are inside the test so test collection works without the SDK
+    # installed (CI install handles it via the dev extras).
+    from claude_agent_sdk import SystemMessage, query
+
+    # Stage a workspace; the skill creates artifacts/ under cwd.
+    workdir = tmp_path / "workspace"
+    workdir.mkdir()
+    deck_dst = workdir / deck_fixture.name
+    shutil.copy(deck_fixture, deck_dst)
+
+    plugin_path = REPO_ROOT / "founder-skills"
+
+    options = _deck_review_options(workdir, plugin_path)
 
     # The stage is stated as MY answer, not as background colour. The gate's documented
     # auto-satisfy branch fires only when Step 1 captured a stage from the founder and the
@@ -343,15 +358,26 @@ def _drive_deck_review_lane(
     print(f"[e2e] Prompt:        {prompt[:140]}{'...' if len(prompt) > 140 else ''}", flush=True)
     print("[e2e] --- starting SDK query (60-180s typical) ---", flush=True)
 
+    session_tools: list[str] = []
+    mcp_servers: list[Any] = []
+    tool_call_names: list[str] = []
+
     async def run() -> None:
         msg_count = 0
         async for msg in query(prompt=prompt, options=options):
             msg_count += 1
             captured_messages.append(str(msg))
+            if isinstance(msg, SystemMessage) and msg.subtype == "init":
+                session_tools.extend(str(t) for t in msg.data.get("tools") or [])
+                mcp_servers.extend(msg.data.get("mcp_servers") or [])
+            for block in getattr(msg, "content", None) or []:
+                if type(block).__name__ == "ToolUseBlock":
+                    tool_call_names.append(str(getattr(block, "name", "")))
             print(f"[e2e #{msg_count:03d}] {_summarize_sdk_message(msg)}", flush=True)
         print(f"[e2e] --- SDK loop complete ({msg_count} messages) ---", flush=True)
 
     asyncio.run(run())
+    assert_no_account_connectors(session_tools, tool_call_names, mcp_servers)
 
     # Locate the review directory the skill produced.
     artifacts_root = workdir / "artifacts"

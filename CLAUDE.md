@@ -90,7 +90,9 @@
   carry the `e2e` marker. Derive the list with `ls founder-skills/tests/test_e2e_*.py`; a hand-list
   here has gone stale before.
   Shared plumbing in `tests/_e2e_harness.py` — deck-review deliberately does NOT use it (it is the
-  lane the release tag gates on; fold it in when a failure costs a re-run rather than a re-tag).
+  lane the release tag gates on; fold it in when a failure costs a re-run rather than a re-tag),
+  except for the account-connector switch (`ENABLE_CLAUDEAI_MCP_SERVERS=false`) and its post-run
+  check, which every lane runs; `test_lane_connector_isolation.py` holds both, free.
   **One lane per changed coaching-payload builder is the rule**: contract tests pin that a payload
   key is emitted and named on both prompts, and structurally cannot show a sub-agent reading it.
 - `founder-skills/tests/fixtures/` — Synthetic test inputs (deck-review compose-invariant fixtures + synthetic deck for e2e + golden expected file)

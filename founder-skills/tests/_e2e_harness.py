@@ -1,7 +1,8 @@
 """Shared plumbing for the LLM-driven end-to-end lanes.
 
 Extracted when the second and third lanes were added. `test_e2e_deck_review.py` is
-deliberately NOT refactored onto this module: it is the lane the release tag gates on,
+deliberately NOT refactored onto this module (it imports only the account-connector
+switch and its check, below): it is the lane the release tag gates on,
 it is the only one with a validated green run behind it, and a mechanical refactor of a
 paid lane on the eve of a tag trades a real risk for a cosmetic gain. Fold it in after
 the release, when a failure costs a re-run rather than a re-tag.
@@ -114,6 +115,52 @@ def summarize_sdk_message(msg: object) -> str:
         return f"<unsummarizable message: {exc}>"
 
 
+# Account connectors OFF in every lane. The CLI the SDK spawns runs as the signed-in user, and
+# `setting_sources=[]` does not stop it loading that account's claude.ai connectors (mail, drive, chat
+# and the like): a recorded lane session listed them in its tool list. A catch-all sub-agent there
+# could call them. `ENABLE_CLAUDEAI_MCP_SERVERS` is the CLI's own switch; its predicate reads
+# `0/false/no/off` as disabled. It is written AFTER the parent environment, so it is a pin, not a
+# default. `--strict-mcp-config` with no servers keeps any other MCP config out as well (the plugin
+# declares none). `assert_no_account_connectors` checks the outcome after every run.
+CONNECTOR_ISOLATION_ENV = {"ENABLE_CLAUDEAI_MCP_SERVERS": "false"}
+ACCOUNT_CONNECTOR_TOOL_PREFIX = "mcp__claude_ai_"
+
+
+def connector_isolation_options() -> dict[str, Any]:
+    """The `ClaudeAgentOptions` fields that keep MCP servers out, besides the env switch."""
+    return {"mcp_servers": {}, "strict_mcp_config": True}
+
+
+def _is_account_connector_server(server: Any) -> bool:
+    name = server.get("name") if isinstance(server, dict) else server
+    return isinstance(name, str) and re.sub(r"[^A-Za-z0-9_-]", "_", name).startswith("claude_ai_")
+
+
+def assert_no_account_connectors(
+    session_tools: Sequence[str] | None, tool_call_names: Sequence[str], mcp_servers: Sequence[Any] = ()
+) -> None:
+    """Fail the lane if any account connector reached the session.
+
+    Three places one can show: the session's tool list (the init message), a tool the run called (main
+    thread or sub-agent), and the init message's MCP server list. A run with no recorded tool list fails
+    too: the check would otherwise pass without having looked.
+    """
+    if not session_tools:
+        raise AssertionError(
+            "no session tool list was recorded (no init message), so the run cannot be shown to have "
+            "had account connectors switched off"
+        )
+    found = sorted(
+        {n for n in [*session_tools, *tool_call_names] if str(n).startswith(ACCOUNT_CONNECTOR_TOOL_PREFIX)}
+        | {str(s.get("name") if isinstance(s, dict) else s) for s in mcp_servers if _is_account_connector_server(s)}
+    )
+    if found:
+        raise AssertionError(
+            f"account connector(s) present in an end-to-end session: {found[:8]}"
+            f"{' ...' if len(found) > 8 else ''}. The lane must run with ENABLE_CLAUDEAI_MCP_SERVERS=false."
+        )
+
+
 def build_options(workdir: Path, env_extra: dict[str, str] | None = None) -> Any:
     """SDK options shared by every lane.
 
@@ -159,7 +206,9 @@ def build_options(workdir: Path, env_extra: dict[str, str] | None = None) -> Any
             "CLAUDE_PLUGIN_ROOT": str(PLUGIN_PATH),
             "CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS": os.environ.get("CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS", "600000"),
             **(env_extra or {}),
+            **CONNECTOR_ISOLATION_ENV,
         },
+        **connector_isolation_options(),
     )
 
 
@@ -185,6 +234,9 @@ class RunCapture:
         # `final_text` is the LAST message only; a block-then-rewrite from a Stop hook leaves the
         # first message on screen, so the lane judges everything the founder saw after a point.
         self.events: list[dict[str, Any]] = []
+        # The session's tool list and MCP servers, from the init message: what the connector check reads.
+        self.session_tools: list[str] | None = None
+        self.mcp_servers: list[Any] = []
 
     def calls(self, name: str, *, parent: str | None = None) -> list[dict[str, Any]]:
         """Tool calls by name; with `parent`, only those made inside that dispatch."""
@@ -237,7 +289,15 @@ def run_skill_capture(prompt: str, workdir: Path, label: str, uploads: Sequence[
     Without it the skill's document-reading steps run against nothing, and a lane that cannot
     attach a document cannot exercise the branch that failed live.
     """
-    from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock, ToolUseBlock, UserMessage, query
+    from claude_agent_sdk import (
+        AssistantMessage,
+        ResultMessage,
+        SystemMessage,
+        TextBlock,
+        ToolUseBlock,
+        UserMessage,
+        query,
+    )
 
     env_extra: dict[str, str] = {}
     if uploads:
@@ -288,10 +348,18 @@ def run_skill_capture(prompt: str, workdir: Path, label: str, uploads: Sequence[
                 cap.events.append({"kind": "user", "text": text, "parent_tool_use_id": msg.parent_tool_use_id})
             elif isinstance(msg, ResultMessage) and isinstance(msg.result, str):
                 cap.final_text = msg.result
+            elif isinstance(msg, SystemMessage) and msg.subtype == "init":
+                tools = msg.data.get("tools")
+                if isinstance(tools, list):
+                    cap.session_tools = [*(cap.session_tools or []), *(str(t) for t in tools)]
+                servers = msg.data.get("mcp_servers")
+                if isinstance(servers, list):
+                    cap.mcp_servers.extend(servers)
             print(f"[e2e:{label} #{count:03d}] {summarize_sdk_message(msg)}", flush=True)
         print(f"[e2e:{label}] --- SDK loop complete ({count} messages) ---", flush=True)
 
     asyncio.run(_run())
+    assert_no_account_connectors(cap.session_tools, [t["name"] for t in cap.tool_uses], cap.mcp_servers)
     return cap
 
 

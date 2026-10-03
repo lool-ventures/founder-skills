@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Development
+
+Contributor-facing only; nothing here changes what a founder installs or runs.
+
+- End-to-end test sessions no longer load account connectors, and each lane fails if one appears in
+  the session's tools or in any tool call.
+
 ## [0.15.1] - 2026-10-03 — Financial model corrections that download from the review page, and deck review and cap table fixes
 
 ### Highlights
