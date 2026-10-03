@@ -13,6 +13,9 @@ Contributor-facing only; nothing here changes what a founder installs or runs.
 
 - End-to-end test sessions no longer load account connectors, and each lane fails if one appears in
   the session's tools or in any tool call.
+- The skills and their shared reference now state that nothing under the outputs folder is deleted
+  as the skills' own rule, rather than saying the host refuses deletes there; newer hosts allow them.
+  A test keeps any text from claiming the host refuses.
 
 ## [0.15.1] - 2026-10-03 — Financial model corrections that download from the review page, and deck review and cap table fixes
 

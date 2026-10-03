@@ -10,10 +10,11 @@ discloses them to the founder (`HANDOFF_BYPASSED`).
 
 The evidence is the ABSENCE of a record, deliberately. Keying on something the fallback path writes
 would depend on the model following the fallback prose; an absent record survives the prose being
-skipped. The hand-off dir sits under the outputs mount, which is delete-denied in Cowork, so a record
-cannot be removed; the only way to manufacture one is to hand-write a sub-agent's JSON into the hand-off
-path and gate it, which is the main thread re-emitting a payload -- a named fabrication failure, not a
-paraphrase. The sha also catches a hand-off file rewritten after it was gated.
+skipped. The hand-off dir sits under the outputs mount. Newer hosts allow deletes there (we never delete
+by rule), so a record CAN be removed -- and deleting the run's hand-off dir silences each compose's
+check, the residual its callers state. The only way to manufacture a record is to hand-write a
+sub-agent's JSON into the hand-off path and gate it, which is the main thread re-emitting a payload --
+a named fabrication failure, not a paraphrase. The sha also catches a hand-off file rewritten after it was gated.
 
 WHAT A PASS DOES NOT PROVE: that the producer consumed the gated file. A step that was gated once and
 then degraded on a re-dispatch within the same run still has a matching record, and passes. Proving

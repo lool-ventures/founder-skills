@@ -163,7 +163,7 @@ def test_model_derived_company_name_routes_through_staging() -> None:
     file, Step-1 Exit-1 must route through a /tmp `$STAGING_DIR` — extract
     FIRST, derive the name, init context + create `$REVIEW_DIR`, then `cp` the
     staged file in — never improvise a provisional dir/temp under the
-    append-only outputs mount and later rm/mv it (the observed delete trigger).
+    outputs mount (append-only by our rule) and later rm/mv it (the observed delete trigger).
     Without a sanctioned pre-slug extraction target the agent deadlocks and
     improvises, producing an outputs-mount delete."""
     text = SKILL_MD.read_text(encoding="utf-8")

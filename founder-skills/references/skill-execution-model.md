@@ -31,9 +31,9 @@ tool surface and different rules.
 - Each skill resolves its own per-engagement working directory under
   `outputs/artifacts/` at Step 0. Each skill names this variable
   differently (`REVIEW_DIR` for deck-review/financial-model-review/cap-table, `ANALYSIS_DIR` for market-sizing/competitive-positioning, `SIM_DIR` for ic-sim) — same role, different name per skill's convention.
-- Cowork-specific: files under `$OUTPUTS_ROOT/` are write-yes,
-  delete-no by default (overwrite in place works; `rm` is denied until
-  the user approves a delete). Use a `/tmp` `$STAGING_DIR` (`mktemp -d`)
+- Files under `$OUTPUTS_ROOT/` are never deleted, by our rule: newer
+  Cowork hosts allow the delete (older ones refused it until the user
+  approved), and overwrite in place always works. Use a `/tmp` `$STAGING_DIR` (`mktemp -d`)
   for ad-hoc files — see Cowork-Specific Quirks below for the full
   pattern.
 
@@ -384,9 +384,10 @@ internally — pass the final message verbatim.
   the VM shell. See the Host-Capability Matrix.) A script must never
   infer "not Cowork" from the absence of `$CLAUDE_CODE_IS_COWORK` — see
   "Runtime Detection" below.
-- **`$OUTPUTS_ROOT/` is write-yes, delete-no by default**: files
-  written there can be overwritten in place, but a plain `rm` is
-  denied (`Operation not permitted`) until the user approves a delete.
+- **`$OUTPUTS_ROOT/` is write-yes, and we never delete there**: files
+  written there can be overwritten in place. Older hosts refused a plain
+  `rm` (`Operation not permitted`) until the user approved a delete; newer
+  ones allow it, so the rule is ours, not the platform's.
   Design consequence: never plan a cleanup step under `outputs/`; use
   a `/tmp` `$STAGING_DIR` (writable, sandbox-reclaimed) for anything
   disposable.
@@ -464,9 +465,9 @@ internally — pass the final message verbatim.
   and Cowork hostloop, where the value is a real host path to the staged
   plugin copy that the host-side containment hook exempts. Do not route
   those reads through `mcp__workspace__bash`/`cat`. The exception is a skill
-  started as the first message of a new conversation: its text arrives with
-  the token unfilled, so Step 0 finds the plugin by a filesystem search and
-  prints `READ_ROOT=`, and that value replaces the token in every Read and
+  invoked on a cloud session before the conversation's first turn that
+  needs a shell or file tool: its text arrives with the token unfilled,
+  so Step 0 finds the plugin by a filesystem search and prints `READ_ROOT=`, and that value replaces the token in every Read and
   sub-agent prompt. Route through
   `mcp__workspace__bash` only for paths that are genuinely VM-namespace:
   `/sessions/…/uploads/…` (uploaded documents) and
@@ -517,7 +518,7 @@ unscoped — see "Context A" above for what that costs.
 | Background tasks | disabled (`CLAUDE_CODE_DISABLE_BACKGROUND_TASKS`) | available | varies | varies |
 | Stop hooks fire | yes, on desktop-local and on cloud | yes | varies | varies |
 | PreToolUse hooks fire | yes on desktop-local; not observed on cloud | yes | varies | varies |
-| `outputs/` delete/overwrite-by-delete | denied post-write (in-place edit works) | normal filesystem | varies | normal filesystem |
+| `outputs/` delete/overwrite-by-delete | allowed on newer hosts, refused on older ones; our rule: never (in-place edit works) | normal filesystem | varies | normal filesystem |
 
 **Hooks.** Plugin-declared `SessionStart` hooks run on the desktop-local
 lane — sessions carry `<session>/.claude/session-env/<uuid>/sessionstart-hook-N.sh`,
@@ -609,7 +610,7 @@ helper implementing the order above rather than ad-hoc env checks.
 | Producer script schema rejection | Hand-off file (or fallback JSON) shape doesn't match schema | Repair-dispatch with the producer's stderr verbatim; check schema in references/schemas/. |
 | `metadata.run_id` mismatch | `setup_run.py` invocation order issue | Check that all producer scripts use the same `RUN_ID` (set once at Step 0, threaded through). |
 | Coaching commentary missing | Compose didn't emit insertion marker | Check `report.md` for `<!-- COACHING_INSERTION_POINT_<8-hex> -->`. If absent, the compose script does not implement the coaching-payload contract. |
-| `Operation not permitted` on `rm` | File written to `$OUTPUTS_ROOT/` (write-yes, delete-no by default) | Don't delete — overwrite in place, or put disposable files in a `/tmp` `$STAGING_DIR` instead. Hand-off files are intentionally permanent (audit trail). |
+| `Operation not permitted` on `rm` | File written to `$OUTPUTS_ROOT/` on an older host, which refused deletes there | Don't delete — overwrite in place, or put disposable files in a `/tmp` `$STAGING_DIR` instead. Hand-off files are intentionally permanent (audit trail). |
 | `insert_coaching.py` exits 1 (blocked) | Marker missing/duplicated, or `run_id` parity failure across `--verify-artifact` paths | Read the JSON diagnostic on stdout — it names the failing state. Marker issues: re-run `compose_report.py --write-md` and retry. Never hand-edit `report.md`. |
 | Sub-agent can't reach network | The agent's `tools:` allowlist doesn't declare `WebSearch` (strict allowlist mode — undeclared names don't bind); also note literal `WebFetch` doesn't exist in Cowork at all | Either the sub-agent's frontmatter declares `WebSearch` (competitive-positioning's Context A is the documented case), or move research to the main thread before dispatch and pass data inline in the prompt. |
 

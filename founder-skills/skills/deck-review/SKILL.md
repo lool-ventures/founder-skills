@@ -178,7 +178,7 @@ prevent.
 
 **Plugin paths.** If Step 0 printed `READ_ROOT=`, this skill's text arrived without its plugin folder filled in. Use that value in place of `${CLAUDE_PLUGIN_ROOT}` in every Read and sub-agent prompt, including where a later step says to leave that path literal. If it did not print `READ_ROOT=`, use the paths as shown. The folder comes from Step 0's filesystem search, not from a skill file or the "Base directory" line, which can name a folder that does not exist. These are setup details: updates to the founder are about their company, not file locations, printed paths or plugin versions.
 
-**Outputs mount is append-only.** Everything under the promoted outputs mount (`.../mnt/outputs/`, not just `$REVIEW_DIR`) is write-allowed and delete-denied by the platform: never `rm`, move away, or empty anything under it — **including files you created yourself**. Never create ad-hoc scratch anywhere under the outputs mount (no `_src/` copies, no run-state note files); scratch belongs in `$STAGING_DIR` (a `/tmp` dir, defined below). Do not "clean up" the outputs folder before delivering — extra working files there are expected and harmless. The uploaded deck is already readable in place from the uploads mount; never copy it under outputs to make it readable.
+**Outputs mount is append-only.** Everything under the promoted outputs mount (`.../mnt/outputs/`, not just `$REVIEW_DIR`) is write-allowed; by this skill's rule, not a platform limit, nothing there is deleted, since a removed file may be one the founder or a later step still needs: never `rm`, move away, or empty anything under it — **including files you created yourself** (the one exception is `setup_run.py --clean` removing this skill's own earlier-run checkpoints). Never create ad-hoc scratch anywhere under the outputs mount (no `_src/` copies, no run-state note files); scratch belongs in `$STAGING_DIR` (a `/tmp` dir, defined below). Do not "clean up" the outputs folder before delivering — extra working files there are expected and harmless. The uploaded deck is already readable in place from the uploads mount; never copy it under outputs to make it readable.
 
 **There is no quick-check lane here, and that is deliberate.** The 35 criteria are scored from per-slide sub-agent reviews — those reviews ARE the work, so dropping them leaves only the checklist scaffolding. So when the founder asks a small
 conversational question, do not improvise an answer from your own reasoning under this skill's name —
@@ -710,7 +710,7 @@ stage to `$STAGING_DIR/<step>_input.json`; same producer pipe), and tell the fou
 directly instead of through `outputs/`, so its audit trail is incomplete (the results are unaffected).
 A refused write is NOT this case: it returns `write_refused` (above).
 
-Retries overwrite the same OUTPUT_PATH (the mount is write-allowed / delete-denied — never `rm`
+Retries overwrite the same OUTPUT_PATH (nothing under the outputs mount is deleted, by this skill's rule — never `rm`
 under `$REVIEW_DIR`). Hand-off files are not canonical artifacts: producers consume them only via
 the explicit pipe, and `compose_report.py` never reads `handoff/`.
 

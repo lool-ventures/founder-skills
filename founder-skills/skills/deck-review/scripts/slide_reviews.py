@@ -30,9 +30,9 @@ def _check_reconciliation(path: str, run_id: str) -> str | None:
     do, the same shape as `checklist.py --inventory`.
 
     Parity, not mere presence: a stale reconciliation from a previous review of the same
-    company satisfies an absence check while the whole chain was skipped this run, and in
-    Cowork the cleanup delete that would prevent that is denied and deliberately
-    tolerated.
+    company satisfies an absence check while the whole chain was skipped this run, and the
+    cleanup delete that would prevent that can be refused (older Cowork hosts did) and is
+    deliberately tolerated.
     """
     if not os.path.exists(path):
         return f"reconciliation artifact not found at {path} — run the ledger chain (Steps 3.5-3.8) before this step"

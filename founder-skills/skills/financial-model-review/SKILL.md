@@ -196,7 +196,7 @@ prevent.
 
 **Plugin paths.** If Step 0 printed `READ_ROOT=`, this skill's text arrived without its plugin folder filled in. Use that value in place of `${CLAUDE_PLUGIN_ROOT}` in every Read and sub-agent prompt, including where a later step says to leave that path literal. If it did not print `READ_ROOT=`, use the paths as shown. The folder comes from Step 0's filesystem search, not from a skill file or the "Base directory" line, which can name a folder that does not exist. These are setup details: updates to the founder are about their company, not file locations, printed paths or plugin versions.
 
-**Outputs mount is append-only.** Everything under the promoted outputs mount (`.../mnt/outputs/`, not just `$REVIEW_DIR`) is write-allowed and delete-denied by the platform: never `rm`, move away, or empty anything under it — **including files you created yourself**. Never create ad-hoc scratch anywhere under the outputs mount (no `_src/` copies, no run-state note files); scratch belongs in `$STAGING_DIR` (a `/tmp` dir, defined below). Do not "clean up" the outputs folder before delivering — extra working files there are expected and harmless. The uploaded document is already readable in place from the uploads mount; never copy it under outputs to make it readable.
+**Outputs mount is append-only.** Everything under the promoted outputs mount (`.../mnt/outputs/`, not just `$REVIEW_DIR`) is write-allowed; by this skill's rule, not a platform limit, nothing there is deleted, since a removed file may be one the founder or a later step still needs: never `rm`, move away, or empty anything under it — **including files you created yourself**. Never create ad-hoc scratch anywhere under the outputs mount (no `_src/` copies, no run-state note files); scratch belongs in `$STAGING_DIR` (a `/tmp` dir, defined below). Do not "clean up" the outputs folder before delivering — extra working files there are expected and harmless. The uploaded document is already readable in place from the uploads mount; never copy it under outputs to make it readable.
 
 **If `ARTIFACTS_ROOT` resolves to `$(pwd)/artifacts` but no `artifacts/` directory exists at `$(pwd)`:** The workspace may not be mounted yet. Use `Glob` with `path` set to the printed `ARTIFACTS_ROOT` and pattern `founder-context-*.json` to find earlier artifacts (always pass `path`: on a cloud session the working folder is the home directory). If nothing is found, `mkdir -p "$ARTIFACTS_ROOT"` and proceed — never a relative `./artifacts`, which resolves against the shell's cwd (the session root) and lands outside the outputs mount, undelivered.
 
@@ -254,8 +254,8 @@ REVIEW_DIR="${REVIEW_DIR:-$ARTIFACTS_ROOT/financial-model-review-${SLUG}}"      
 mkdir -p "$REVIEW_DIR"
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
 # Context A hand-off dir — PER RUN: sub-agents WRITE their raw output JSON here (the audit trail —
-# raw sub-agent output as returned, before producer validation). Permanent by platform design
-# (outputs/ mounts are write-allowed / delete-denied); nothing in it is ever a canonical artifact.
+# raw sub-agent output as returned, before producer validation). Permanent by rule
+# (nothing under outputs/ is ever deleted, by this skill's rule); nothing in it is ever a canonical artifact.
 # The $RUN_ID segment is load-bearing: it prevents a stale prior-run file from silently passing
 # the hand-off gate when a dispatch fails to write.
 HANDOFF_DIR="$REVIEW_DIR/handoff/$RUN_ID"
@@ -319,7 +319,7 @@ Options: `Pre-seed` / `Seed` / `Series A` / `Series B+`
 
 If the founder provides files (Excel/CSV), still ask about cash balance — extraction may miss or misinterpret values, and having the founder's stated number lets the agent cross-check later.
 
-**Company name deferred to the model file — stage the extraction FIRST (avoids the slug-ordering deadlock):** If the founder does not give a company name and defers it to the uploaded model (e.g. answers the name question with "use the model file"), the name requires the extraction, which normally targets `$REVIEW_DIR`, which requires the slug, which requires the name — a deadlock. Do **not** resolve it by improvising a temp file or a provisional review dir under the outputs mount: that mount is append-only (Step 0) and the later `rm`/`mv` of the provisional path is delete-denied by the platform. Instead, stage the extraction to `$STAGING_DIR` (the `/tmp` dir from Step 0 — safe to both create and reclaim; its `${SLUG:-fmr}` default already tolerates being created before the slug is known), derive the name from the staged output, run `init` below, then `cp` the staged file into `$REVIEW_DIR`:
+**Company name deferred to the model file — stage the extraction FIRST (avoids the slug-ordering deadlock):** If the founder does not give a company name and defers it to the uploaded model (e.g. answers the name question with "use the model file"), the name requires the extraction, which normally targets `$REVIEW_DIR`, which requires the slug, which requires the name — a deadlock. Do **not** resolve it by improvising a temp file or a provisional review dir under the outputs mount: that mount is append-only (Step 0) and the later `rm`/`mv` of the provisional path is a delete that rule forbids. Instead, stage the extraction to `$STAGING_DIR` (the `/tmp` dir from Step 0 — safe to both create and reclaim; its `${SLUG:-fmr}` default already tolerates being created before the slug is known), derive the name from the staged output, run `init` below, then `cp` the staged file into `$REVIEW_DIR`:
 
 ```bash
 # 1. Stage the extraction OUTSIDE the outputs mount (pre-slug):
@@ -459,7 +459,7 @@ stage to `$STAGING_DIR/<step>_input.json`; same producer pipe), and tell the fou
 directly instead of through `outputs/`, so its audit trail is incomplete (the results are unaffected).
 A refused write is NOT this case: it returns `write_refused` (above).
 
-Retries overwrite the same OUTPUT_PATH (the mount is write-allowed / delete-denied — never `rm`
+Retries overwrite the same OUTPUT_PATH (nothing under the outputs mount is deleted, by this skill's rule — never `rm`
 under `$REVIEW_DIR`). Hand-off files are not canonical artifacts: producers consume them only via
 the explicit pipe, and `compose_report.py` never reads `handoff/`.
 
@@ -558,7 +558,7 @@ run_id stamping.
    stderr for `corrected`-shaped payloads — that is expected, not an error.
    Read the stdout JSON:
    - If `status == "completed"`: promote `corrected_inputs.json` to `inputs.json`. Use `cp`, not
-     `mv` — `mv` deletes the outputs-side source and Cowork denies deletes under `outputs/`; `cp`
+     `mv` — `mv` deletes the outputs-side source, which the append-only rule (Step 0) forbids; `cp`
      overwrites `inputs.json` in place and leaves `corrected_inputs.json` (an allowlisted artifact):
      ```bash
      cp "$REVIEW_DIR/corrected_inputs.json" "$REVIEW_DIR/inputs.json"
@@ -581,7 +581,7 @@ If `valid == false` (errors present), run with `--fix` to auto-correct fixable i
 
 ```bash
 # validate_inputs.py consumes stdin fully BEFORE writing -o, so read-from and write-to the same file is
-# race-free — writes inputs.json in place, no temp/mv (mv would delete an outputs file, which Cowork denies).
+# race-free — writes inputs.json in place, no temp/mv (mv would delete an outputs file, which the append-only rule forbids).
 python3 "$SCRIPTS/validate_inputs.py" --fix < "$REVIEW_DIR/inputs.json" -o "$REVIEW_DIR/inputs.json"
 ```
 

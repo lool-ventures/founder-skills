@@ -1074,7 +1074,7 @@ def test_cleanup_names_cover_pipeline_artifacts() -> None:
     # (the sandbox reclaims it, no rm needed); the legacy `$REVIEW_DIR/.staging`
     # form is still excluded for safety. Also exclude Context A hand-off files
     # ($HANDOFF_DIR): they are per-run audit-trail files under handoff/<run_id>/,
-    # never cleaned (the outputs mount is delete-denied) and never canonical.
+    # never cleaned (nothing under outputs is deleted, by our rule) and never canonical.
     bash_blocks = re.findall(r"```bash\n(.*?)```", skill_text, re.DOTALL)
     for block in bash_blocks:
         for m in re.finditer(r'([\$/"][^\s"]*?)/([a-z_]+\.(?:json|html|md))', block):

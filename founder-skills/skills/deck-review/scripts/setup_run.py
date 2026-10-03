@@ -176,13 +176,14 @@ def main() -> int:
         # Fresh run: remove all cleanable pipeline artifacts so no stale
         # content from a prior run contaminates this invocation.
         #
-        # In Cowork the review dir is the promoted outputs/ tree, where a delete
-        # can be DENIED ("Operation not permitted").  A denied delete must not be
-        # fatal: tolerate it and fall back to compose_report.py's run_id parity
-        # check (STALE_ARTIFACT) — the same backstop the other skills rely on for
-        # overwrite-in-place.  (Each pipeline step overwrites its artifact via -o
-        # with the fresh run_id, so a surviving prior-run artifact that a later
-        # step does not regenerate is caught as a run_id mismatch.)
+        # The one deliberate delete under the outputs tree, of this script's own
+        # checkpoints. Older Cowork hosts refused it ("Operation not permitted");
+        # newer ones allow it.  A refused delete must not be fatal: tolerate it
+        # and fall back to compose_report.py's run_id parity check (STALE_ARTIFACT)
+        # — the same backstop the other skills rely on for overwrite-in-place.
+        # (Each pipeline step overwrites its artifact via -o with the fresh
+        # run_id, so a surviving prior-run artifact that a later step does not
+        # regenerate is caught as a run_id mismatch.)
         for name in _CLEANABLE_NAMES:
             path = os.path.join(review_dir, name)
             if os.path.isfile(path):

@@ -279,8 +279,8 @@ def _rt_refuse(
 
     Keyed on the run's hand-off dir, like `_handoff_bypassed`: Step 0 creates `handoff/<run_id>/` on every
     run, so its absence means this is not a run whose steps can be judged (a fixture, an older layout).
-    RESIDUAL, stated: on the CLI lane, deleting that dir silences this gate and HANDOFF_BYPASSED together;
-    Cowork refuses the delete.
+    RESIDUAL, stated: deleting that dir silences this gate and HANDOFF_BYPASSED together, on every lane:
+    newer Cowork hosts allow deletes under outputs.
     """
     if not run_id or not os.path.isdir(os.path.join(dir_path, "handoff", run_id)):
         return
@@ -907,7 +907,7 @@ def validate_artifacts(
     # 2. STALE_ARTIFACT — run_id consistency
     #
     # Not the review or its skip record: a run writes one of the two, so the other is routinely an
-    # earlier run's, left in place because Cowork refuses the delete. Flagged here it would be high
+    # earlier run's, left in place because we never delete under outputs (our rule). Flagged here it would be high
     # with a remedy ("re-run") that never rewrites it, stopping Step 7's --strict pass on a file the
     # run had no reason to touch. Their parity is decided where the review is resolved: an earlier
     # run's review or skip is simply not this run's (`_cp_redteam_copy.resolve` / `skip_reason`).

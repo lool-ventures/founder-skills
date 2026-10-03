@@ -54,7 +54,7 @@ git config core.hooksPath scripts/hooks
 
 ## Testing under Claude Cowork
 
-Most of these skills are run by founders inside **Claude Cowork**, whose runtime differs from the Claude Code CLI in ways ordinary unit tests cannot see: an append-only `outputs/` mount, a host/VM split that changes which paths a sub-agent can reach, its own serving origin for generated HTML artifacts, and a plugin-root namespace that differs between the agent loop and in-VM bash. Bugs in that class are invisible to `pytest` and only appear in front of a founder.
+Most of these skills are run by founders inside **Claude Cowork**, whose runtime differs from the Claude Code CLI in ways ordinary unit tests cannot see: an `outputs/` mount the skills treat as append-only, a host/VM split that changes which paths a sub-agent can reach, its own serving origin for generated HTML artifacts, and a plugin-root namespace that differs between the agent loop and in-VM bash. Bugs in that class are invisible to `pytest` and only appear in front of a founder.
 
 Two CI jobs cover it, both token-free, both runnable locally. They use [`cowork-harness`](https://github.com/yaniv-golan/cowork-harness) (MIT), a Cowork-runtime emulator installed as a dev-time CLI — it is **not** part of the distributed plugin and is not a runtime dependency:
 

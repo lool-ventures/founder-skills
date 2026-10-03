@@ -1924,7 +1924,7 @@ def main() -> int:
     # continues: "key it on absence alone and a prior run's file silences it, so compare
     # run_ids." Without it a stale disclosure pins every later compose to the hand-roll claim
     # FOREVER -- self-sustaining, because the file compose writes re-triggers it next run, and
-    # unrecoverable, because the outputs mount denies delete.
+    # unrecoverable, because nothing deletes under the outputs mount (our rule; older hosts refused it).
     def _read_run_scoped(path: str, label: str) -> dict[str, Any] | None:
         """Load a sibling artifact, ignoring one left behind by a DIFFERENT run."""
         if not os.path.exists(path):

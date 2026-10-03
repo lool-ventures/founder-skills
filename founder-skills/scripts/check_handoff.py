@@ -97,8 +97,8 @@ def _namespace_mismatch_candidate(expected: str, agent_path: str | None) -> str 
     invariant "it is safe to `cat $HANDOFF_DIR/<file>`", and every downstream producer pipe in every
     SKILL.md addresses `$HANDOFF_DIR`. Honouring a found-elsewhere file would silently void that
     invariant across ~50 bash references, and would be incoherent with EXIT_PATH_MISMATCH, which exists
-    precisely to punish "the agent wrote somewhere else". It would also leave permanent litter: the
-    outputs mount is write-allowed / delete-DENIED, so the stray tree is user-visible forever.
+    precisely to punish "the agent wrote somewhere else". It would also leave permanent litter: we never
+    delete under the outputs mount (our rule), so the stray tree stays user-visible.
 
     The failure this detects: a relative agent-namespace prefix resolved against the outputs mount
     instead of the session root, yielding `<outputs>/<agent_prefix>/...` — a doubled segment. The

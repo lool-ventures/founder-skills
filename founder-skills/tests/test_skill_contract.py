@@ -883,7 +883,10 @@ SKILL_MD_CEILING: dict[str, int] = {
     # goes into a sub-agent prompt. (The other four skills' SKILL.mds took the last two edits at net 0 B.)
     # 104,509 -> 104,572 (+63 B) on 2026-10-03, the same +63 B in all six: Step 0's PLUGIN_ROOT comment names it
     # the shell's path and states the one exception, a printed READ_ROOT= used in Reads and prompts.
-    "market-sizing": 104_572,
+    # 104,572 -> 104,703 on 2026-10-04: "never delete under outputs" is this skill's rule, not a platform
+    # limit (newer hosts allow deletes). Step 0's append-only paragraph, the hand-off comment and the retry
+    # line say so instead of claiming the host refuses.
+    "market-sizing": 104_703,
     # fmr raised for two founder-facing-correctness items measured in a live run: the CHECKLIST
     # dispatch now forbids citing our artifact filenames in evidence (that run put `inputs.json` in 10
     # items' evidence, printed verbatim into the founder's report), and the producer pipe passes
@@ -978,7 +981,11 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 86,741 -> 86,851 on 2026-10-03: Step 3.6 sends review.html with the host's file-delivery tool where one
     # is offered and gives its absolute path in a local terminal with none; the server-mode rule names the
     # session (a local command-line terminal on the founder's own computer) rather than where the shell runs.
-    "financial-model-review": 86_851,
+    # 86,851 -> 86,996 on 2026-10-04: "never delete under outputs" is this skill's rule, not a platform
+    # limit (newer hosts allow deletes). Step 0's append-only paragraph, the hand-off comment and the retry
+    # line say so instead of claiming the host refuses. Three more lines here blamed the host for a delete;
+    # they now name the rule.
+    "financial-model-review": 86_996,
     # ic-sim SHRANK: the REQUIRED ic-dynamics.md read at Step 7 is deleted. Step 7 is a pure producer
     # pipe — compose_discussion.py derives discussion.json from the partners' own files and nothing
     # is authored by the main thread — so the read informed no decision while pulling a whole
@@ -1031,7 +1038,10 @@ SKILL_MD_CEILING: dict[str, int] = {
     # with the token as shown and that PLUGIN_ROOT is for shell commands only.
     # 94,365 -> 94,428 (+63 B) on 2026-10-03, the same +63 B in all six: Step 0's PLUGIN_ROOT comment names it
     # the shell's path and states the one exception, a printed READ_ROOT= used in Reads and prompts.
-    "ic-sim": 94_428,
+    # 94,428 -> 94,559 on 2026-10-04: "never delete under outputs" is this skill's rule, not a platform
+    # limit (newer hosts allow deletes). Step 0's append-only paragraph, the hand-off comment and the retry
+    # line say so instead of claiming the host refuses.
+    "ic-sim": 94_559,
     # deck-review +1,165 B: Step 0 carried only a parenthetical fresh-shell mention buried in a code
     # comment, unlike the four skills that mint RUN_ID in a LATER block and so carry the shared banner.
     # deck-review mints RUN_ID INSIDE this re-runnable Step-0 block (like cap-table), so the shared
@@ -1327,7 +1337,11 @@ SKILL_MD_CEILING: dict[str, int] = {
     # AskUserQuestion from the printed block, in order, instead of returning JSON to a parent agent (the
     # shape example drops the two parent-only keys); the resume re-runs setup_run.py with the RUN_ID
     # literal printed earlier and points at Step 0, where that call lives.
-    "deck-review": 111_228,
+    # 111,228 -> 111,455 on 2026-10-04: "never delete under outputs" is this skill's rule, not a platform
+    # limit (newer hosts allow deletes). Step 0's append-only paragraph, the hand-off comment and the retry
+    # line say so instead of claiming the host refuses. deck-review also names `setup_run.py --clean` as the
+    # one script that removes its own earlier-run checkpoints.
+    "deck-review": 111_455,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
@@ -1461,7 +1475,10 @@ SKILL_MD_CEILING: dict[str, int] = {
     # folder; see market-sizing above.
     # 126,630 -> 126,693 (+63 B) on 2026-10-03, the same +63 B in all six: Step 0's PLUGIN_ROOT comment names it
     # the shell's path and states the one exception, a printed READ_ROOT= used in Reads and prompts.
-    "competitive-positioning": 126_693,
+    # 126,693 -> 126,824 on 2026-10-04: "never delete under outputs" is this skill's rule, not a platform
+    # limit (newer hosts allow deletes). Step 0's append-only paragraph, the hand-off comment and the retry
+    # line say so instead of claiming the host refuses.
+    "competitive-positioning": 126_824,
     # cap-table, the largest raise (+2,383 B) and the one with the most founder-visible payoff:
     #   * Main-Thread Return named THREE of the four files Step 12 copies; a live run delivered exactly
     #     three and dropped `{Company}_Cap_Table.html`. All four are now named explicitly.
@@ -1560,7 +1577,11 @@ SKILL_MD_CEILING: dict[str, int] = {
     # the shell's path and states the one exception, a printed READ_ROOT= used in Reads and prompts.
     # 158,758 -> 158,770 on 2026-10-03: the image-only PDF and tracked-changes DOCX guards run their helper
     # scripts through "$SCRIPTS/…" instead of a relative scripts/ path.
-    "cap-table": 158_770,
+    # 158,770 -> 158,958 on 2026-10-04: "never delete under outputs" is this skill's rule, not a platform
+    # limit (newer hosts allow deletes). Step 0's append-only paragraph, the hand-off comment and the retry
+    # line say so instead of claiming the host refuses. The fixing-a-bad-artifact line names the rule, not a
+    # host refusal.
+    "cap-table": 158_958,
 }
 
 
@@ -3851,7 +3872,10 @@ def test_corpus_counts_every_agent_the_skill_pins_not_just_its_namesake() -> Non
 # shell only when its tools: list names it, and names the real gap (a dispatch with no subagent_type).
 # Raised 2026-10-03 from 126,333 to 126,392 B: skill-execution-model.md also names a dispatch to a wildcard
 # built-in (general-purpose, claude) as a way a sub-agent reaches the shell.
-ROOT_REFERENCES_CEILING = 126_392
+# Raised 2026-10-04 from 126,392 to 126,593 B: skill-execution-model.md says the outputs no-delete rule is
+# ours (older hosts refused deletes, newer ones allow them), and that the unfilled-token exception is a skill
+# invoked on cloud before the conversation's first turn that needs a shell or file tool.
+ROOT_REFERENCES_CEILING = 126_593
 
 
 def test_execution_model_names_every_dispatch_that_can_reach_the_shell() -> None:

@@ -36,7 +36,10 @@ leaves report.md untouched.
 
 Write strategy: the new content is built fully in memory, then written in
 a single in-place pass (open "w" on the same path). Never delete/recreate
-and never os.replace -- Cowork's outputs/ denies deletion and rename.
+and never os.replace: we write report.md in place by rule. (Older Cowork
+hosts refused a delete or a rename over a file under outputs/; newer ones
+allow it, and other scripts do rename there, so this is a choice, not a
+platform limit.)
 
 Output: JSON receipt to stdout (--pretty for indented output; -o writes
 the receipt to a file and emits a confirmation receipt to stdout).
@@ -279,8 +282,8 @@ def _sync_report_json(path: str, markdown: str) -> str | None:
     report content. So it cannot simply be dropped from the serialized artifact; it has to be
     kept true. Everything else in the file is preserved byte-for-byte except this one key.
 
-    Rewritten in place with no delete/rename: Cowork's outputs mount is write-allowed and
-    delete-denied, so `os.replace` fails there — the same constraint the markdown write obeys.
+    Rewritten in place with no delete/rename, by rule, the same way the markdown write is (see the
+    module docstring).
     """
     try:
         with open(path, encoding="utf-8") as f:
@@ -383,7 +386,7 @@ def main() -> None:
         )
 
     # Single in-place write pass (no delete/recreate, no os.replace —
-    # Cowork's outputs/ denies deletion and rename).
+    # we write in place by rule; see the module docstring).
     try:
         with open(args.report, "w", encoding="utf-8") as f:
             f.write(new_text)

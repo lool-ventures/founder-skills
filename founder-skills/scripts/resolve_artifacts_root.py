@@ -139,8 +139,8 @@ def _agent_override(env: dict[str, str], default: str) -> str:
 
 
 # The proof and the persisted value live in the canonical artifacts root (shell namespace), so any later
-# fresh shell finds them. Dot-files: never artifacts, never read by a producer. The outputs mount is
-# delete-denied, so they persist -- harmless, and a later run in the same session re-proves over them.
+# fresh shell finds them. Dot-files: never artifacts, never read by a producer. We never delete under
+# the outputs mount (our rule), so they persist -- harmless, and a later run in the same session re-proves over them.
 PROBE_NAME = ".host-outputs-probe"
 PERSIST_NAME = ".host-outputs-dir.json"
 

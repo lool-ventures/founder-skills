@@ -14247,8 +14247,8 @@ class TestCoverageDisclosureReflectsDetection:
         Without run_id parity the precedence rule is self-sustaining: the file compose writes
         carries `manual_outside_pipeline`, so the next compose re-triggers it, and a clean
         fully-covered engagement is permanently labelled hand-rolled — with no way out, because
-        the outputs mount denies delete. CLAUDE.md states the rule this missed: "key it on
-        absence alone and a prior run's file silences it, so compare run_ids."
+        nothing deletes under the outputs mount (our rule; older hosts refused it). CLAUDE.md
+        states the rule this missed: "key it on absence alone and a prior run's file silences it, so compare run_ids."
         """
         with tempfile.TemporaryDirectory() as tmp:
             rid = self._compose_dir(tmp, covered=True)

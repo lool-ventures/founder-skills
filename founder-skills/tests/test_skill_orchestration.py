@@ -45,7 +45,7 @@ def test_outputs_mount_append_only_guardrail(skill_md: Path) -> None:
     including files the agent created itself — and never stage scratch under it.
 
     A sub-agent once created a VM->host scratch copy at the outputs-mount ROOT and
-    rm'd it as delivery hygiene, tripping the platform's mount-wide delete-deny,
+    rm'd it as delivery hygiene, tripping the mount-wide delete-deny older hosts enforced,
     because each skill's 'never delete' rule was scoped one directory too narrow
     (the per-skill artifacts dir, not the mount).
     """
@@ -64,6 +64,46 @@ def test_outputs_mount_append_only_guardrail(skill_md: Path) -> None:
     assert "scratch anywhere under the outputs mount" in step0, (
         f"{skill_md.parent.name} append-only rule must forbid staging scratch under the outputs mount"
     )
+
+
+# "Never delete under outputs" is this plugin's rule. The platform used to refuse those deletes; newer
+# Desktop hosts mount outputs read-write-delete, so no text may claim the host refuses them. Each
+# pattern is one phrasing that once said so.
+_PLATFORM_DELETE_DENIAL = re.compile(
+    r"delete-denied|denies delet|denied post-write|delete-no\b|refuses the delete|Cowork refuses"
+    r"|Cowork denies|denies deletion|delete is denied|deletion may be denied|can be DENIED"
+    r"|outputs mount denies",
+    re.IGNORECASE,
+)
+
+
+def _delete_rule_texts() -> list[Path]:
+    root = REPO_ROOT / "founder-skills"
+    files = [
+        *SKILL_MD_FILES,
+        *sorted((root / "agents").glob("*.md")),
+        *sorted((root / "references").glob("*.md")),
+        *sorted(SKILLS_DIR.glob("*/references/*.md")),
+        *sorted((root / "scripts").glob("*.py")),
+        *sorted(SKILLS_DIR.glob("*/scripts/*.py")),
+        REPO_ROOT / "CLAUDE.md",
+        REPO_ROOT / "CONTRIBUTING.md",
+    ]
+    return [p for p in files if p.is_file()]
+
+
+def test_no_text_claims_the_platform_refuses_deletes_under_outputs() -> None:
+    """The append-only rule is ours. Text that blames the platform is false on current hosts, and it
+    invites the reading that a delete which happens to succeed is allowed."""
+    assert _PLATFORM_DELETE_DENIAL.search("is write-allowed and delete-denied by the platform")  # seeded
+    assert not _PLATFORM_DELETE_DENIAL.search("never delete there, by this skill's rule")
+    hits = [
+        f"{p.relative_to(REPO_ROOT)}:{n}: {line.strip()[:120]}"
+        for p in _delete_rule_texts()
+        for n, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1)
+        if _PLATFORM_DELETE_DENIAL.search(line)
+    ]
+    assert not hits, "text claims the platform refuses deletes under outputs:\n" + "\n".join(hits)
 
 
 @pytest.mark.parametrize("skill_md", SKILL_MD_FILES, ids=lambda p: p.parent.name)
@@ -297,8 +337,8 @@ _RUN_ID_EXEMPT_SCRIPTS = (
 
 
 # Cowork-parity regression (fleet-wide): the promoted outputs/ tree is
-# user-visible AND read-only-after-write in Cowork — staging scratch there or
-# deleting anything there is a parity violation (Cowork can deny the delete,
+# user-visible in Cowork, and append-only by our rule — staging scratch there or
+# deleting anything there is a violation (older hosts refused the delete,
 # and the harness verdict flags it; crucially the harness text-scan can't
 # resolve a shell `$VAR` to an outputs/ path — limitation H-A — so THIS pytest
 # is the real guard, not the verdict). Every skill resolves its work dir into a
@@ -318,9 +358,9 @@ _RUN_ID_EXEMPT_SCRIPTS = (
 _OUTPUTS_DIR_VARS = r"(?:ANALYSIS_DIR|SIM_DIR|REVIEW_DIR)"
 _STAGING_UNDER_OUTPUTS = re.compile(r"\$\{?" + _OUTPUTS_DIR_VARS + r"\}?/\.staging")
 _BASH_RM_OF_OUTPUTS = re.compile(r"\brm\b[^\n`]*\$\{?" + _OUTPUTS_DIR_VARS + r"\b")
-# A `mv` whose SOURCE (first path arg) is an outputs var DELETES that outputs file — Cowork denies
-# deletes under outputs/, and the live fmr sweep failed `no_delete_in_outputs` on exactly this
-# (`mv "$REVIEW_DIR/corrected_inputs.json" "$REVIEW_DIR/inputs.json"`). `mv <tmp> <outputs>` (creating
+# A `mv` whose SOURCE (first path arg) is an outputs var DELETES that outputs file — our rule forbids
+# deletes under outputs/ (older hosts refused them), and the live fmr sweep failed `no_delete_in_outputs`
+# on exactly this (`mv "$REVIEW_DIR/corrected_inputs.json" "$REVIEW_DIR/inputs.json"`). `mv <tmp> <outputs>` (creating
 # IN outputs) is fine and not matched; the safe move into outputs is `cp` (overwrite-in-place). The
 # the outputs var must be the FIRST path arg (the source), so `mv <tmp> <outputs>` (a create IN outputs)
 # is NOT flagged, and a backtick-wrapped prose "use `mv`" is excluded (backtick breaks the `\s+`).
@@ -332,8 +372,8 @@ def test_skill_md_stages_scratch_outside_outputs(skill_md: Path) -> None:
     """No SKILL.md may stage scratch under, `rm`, or `mv`-from, the promoted
     outputs/ work dir (`$ANALYSIS_DIR` / `$SIM_DIR` / `$REVIEW_DIR`).
 
-    All are Cowork-parity violations (outputs/ is user-visible; a delete there is
-    denied and trips `no_delete_in_outputs`). Stage scratch under a `/tmp`
+    All break the append-only rule (outputs/ is user-visible; a delete there
+    trips `no_delete_in_outputs`, and older hosts refused it). Stage scratch under a `/tmp`
     `$STAGING_DIR`; overwrite-in-place with `cp` (never `mv`-from-outputs, which
     deletes the source) instead of bulk-deleting. NOTE: the harness delete scan
     also flags an `rm` token co-occurring with a literal `outputs` path in ONE

@@ -178,7 +178,7 @@ prevent.
 
 **Plugin paths.** If Step 0 printed `READ_ROOT=`, this skill's text arrived without its plugin folder filled in. Use that value in place of `${CLAUDE_PLUGIN_ROOT}` in every Read and sub-agent prompt, including where a later step says to leave that path literal. If it did not print `READ_ROOT=`, use the paths as shown. The folder comes from Step 0's filesystem search, not from a skill file or the "Base directory" line, which can name a folder that does not exist. These are setup details: updates to the founder are about their company, not file locations, printed paths or plugin versions.
 
-**Outputs mount is append-only.** Everything under the promoted outputs mount (`.../mnt/outputs/`, not just `$SIM_DIR`) is write-allowed and delete-denied by the platform: never `rm`, move away, or empty anything under it — **including files you created yourself**. Never create ad-hoc scratch anywhere under the outputs mount (no `_src/` copies, no run-state note files); scratch belongs in `$STAGING_DIR` (a `/tmp` dir, defined below). Do not "clean up" the outputs folder before delivering — extra working files there are expected and harmless.
+**Outputs mount is append-only.** Everything under the promoted outputs mount (`.../mnt/outputs/`, not just `$SIM_DIR`) is write-allowed; by this skill's rule, not a platform limit, nothing there is deleted, since a removed file may be one the founder or a later step still needs: never `rm`, move away, or empty anything under it — **including files you created yourself**. Never create ad-hoc scratch anywhere under the outputs mount (no `_src/` copies, no run-state note files); scratch belongs in `$STAGING_DIR` (a `/tmp` dir, defined below). Do not "clean up" the outputs folder before delivering — extra working files there are expected and harmless.
 
 **If `ARTIFACTS_ROOT` resolves to `$(pwd)/artifacts` but no `artifacts/` directory exists at `$(pwd)`:** Use `Glob` with `path` set to the printed `ARTIFACTS_ROOT` and pattern `founder-context-*.json` to find earlier artifacts (always pass `path`: on a cloud session the working folder is the home directory). If nothing is found, `mkdir -p "$ARTIFACTS_ROOT"` and proceed.
 
@@ -197,8 +197,8 @@ SIM_DIR="$ARTIFACTS_ROOT/ic-sim-${SLUG}"
 mkdir -p "$SIM_DIR"
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
 # Context A hand-off dir — PER RUN: sub-agents WRITE their raw output JSON here (the audit trail —
-# raw sub-agent output as returned, before producer validation). Permanent by platform design
-# (outputs/ mounts are write-allowed / delete-denied); nothing in it is ever a canonical artifact.
+# raw sub-agent output as returned, before producer validation). Permanent by rule
+# (nothing under outputs/ is ever deleted, by this skill's rule); nothing in it is ever a canonical artifact.
 # The $RUN_ID segment is load-bearing: it prevents a stale prior-run file from silently passing
 # the hand-off gate when a dispatch fails to write.
 HANDOFF_DIR="$SIM_DIR/handoff/$RUN_ID"
@@ -464,7 +464,7 @@ stage to `$STAGING_DIR/<step>_input.json`; same producer pipe), and tell the fou
 directly instead of through `outputs/`, so its audit trail is incomplete (the results are unaffected).
 A refused write is NOT this case: it returns `write_refused` (above).
 
-Retries overwrite the same OUTPUT_PATH (the mount is write-allowed / delete-denied — never `rm`
+Retries overwrite the same OUTPUT_PATH (nothing under the outputs mount is deleted, by this skill's rule — never `rm`
 under `$SIM_DIR`). Hand-off files are not canonical artifacts: producers consume them only via the
 explicit pipe, and `compose_report.py` never reads `handoff/`.
 
