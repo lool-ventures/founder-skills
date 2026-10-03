@@ -1352,14 +1352,14 @@ var document = {
 };
 """
 
-    def test_fallback_download_decodes_to_the_exact_json(self) -> None:
+    def test_download_decodes_to_the_exact_json(self) -> None:
         import pathlib
 
         source = pathlib.Path(_SCRIPT).read_text()
         payload = json.dumps(self._PAYLOAD, ensure_ascii=False, indent=2)
         script = (
             self._DOC_STUB
-            # Force the fallback: this host has no usable Blob.
+            # A Blob that throws: the download must not depend on Blob at all.
             + "var Blob = function () { throw new Error('no Blob'); };\n"
             + _grab_js_function(source, "triggerDownload")
             + "\nvar payload = "
@@ -1370,7 +1370,7 @@ var document = {
         r = _run_node(script)
         prefix = "data:application/json;base64,"
         assert r["href"].startswith(prefix), (
-            f"the fallback download must be a base64 data URL, got {r['href'][:60]!r}: a percent-encoded "
+            f"the download must be a base64 data URL, got {r['href'][:60]!r}: a percent-encoded "
             "data URL is not decoded by every browser the page opens in"
         )
         assert r["download"] == "corrections.json"

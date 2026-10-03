@@ -5,7 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.15.1] - 2026-10-03 — Financial model corrections that download from the review page, and deck review and cap table fixes
+
+### Highlights
+
+**Your corrections to a financial model review now reach the review.** The page for checking
+extracted values is sent to you as a file, the corrections file it saves downloads where the page is
+opened from the conversation, and if no file appears the page hands you your changes to paste into
+the chat.
 
 ### Changed
 
@@ -24,7 +31,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   cannot know that.** Under a heading that claims nothing, it says the download started and, if no
   file appeared, to tell Claude the corrections in chat instead. It lists your changes so you can
   copy them into the chat rather than retype them, and it can be closed to get back to the page.
-- **Deck review: after you answer the stage question, the review picks up where it stopped.** A
+- **Deck review: the stage question is asked of you directly, and after you answer it the review
+  picks up where it stopped.** The question could arrive as raw data rather than as a question. A
   missing reference to the run in progress is now refused instead of starting a new run, which could
   discard the work done before the question.
 - **Cap table: the checks for scanned PDFs and for documents with tracked changes now run.** They
@@ -35,6 +43,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   step.
 - **Reviewers are told to search only in the folders and files they are given.** A search with no
   folder named could look in the wrong place and miss a file it had been handed.
+
+### Development
+
+Contributor-facing only; nothing here changes what a founder installs or runs.
+
+- The recorded test sessions were not refreshed for this release, so they do not yet exercise this
+  release's skill changes.
+- Contract tests now check that every helper script a skill, agent, command or shared reference runs
+  is called through the skill's script folder, never by a relative path, and that every reviewer
+  that can search is told to name the folder it searches.
+- The hook wrappers are tested to step aside, under `sh` and under `dash`, when the script they run
+  is missing.
+- The guidance on which sub-agents can reach a shell now names the cases that can: a dispatch with no
+  agent named, or one naming a built-in agent with an open tool list.
 
 ## [0.15.0] - 2026-10-03 — Financial model reviews graded only on bars that fit the business, deck reviews that fail only what is missing, and skills that work from a conversation's first message
 
