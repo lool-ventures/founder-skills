@@ -320,23 +320,25 @@ weakens the check silently instead of failing it.
 already on disk under the uploads mount; nothing tells you its name up front, so list it:
 
 ```bash
-python3 "<printed PLUGIN_ROOT>/scripts/resolve_artifacts_root.py" --uploads   # prints UPLOADS_DIR
+python3 "<printed PLUGIN_ROOT>/scripts/resolve_artifacts_root.py" --uploads   # prints UPLOADS_DIR, or exits 3
 ```
 
-Then `ls -la <printed UPLOADS_DIR>`. Measured: on one run the agent never looked, replied "I don't
+On exit 0, `ls -la <printed UPLOADS_DIR>`. Measured: on one run the agent never looked, replied "I don't
 see a pitch deck attached", and stopped — with the deck sitting in the uploads mount the whole
 time. Only ask the founder to upload after that listing actually comes back empty. Set `DECK_SRC`
-to the file you find.
+to the file you find. On exit 3 nothing was printed, so there is nothing to list: no uploads folder
+was found for this session (nothing has been attached yet, or this host keeps uploads elsewhere).
+Ask the founder to attach the deck or give its path, rather than reporting it missing. Never
+hand-build this path — a relative `./mnt/uploads` resolves against the shell's cwd, which has
+already moved once underneath us.
 
 **A link is not a dead end, and it is not a licence to scrape.** When the listing comes back empty
-and the founder gave a link instead, fetch it ONCE. A public export returns the slides and the
+(or the resolver exited 3) and the founder gave a link instead, fetch it ONCE. A public export returns the slides and the
 review proceeds normally from there. What comes back is often a login, consent or password page
 instead — that is where this stops: say BLOCKED, name the link as gated, and ask for a PDF export or
 the slides as text. Do not try to authenticate, and do not fetch twice. The condition is what the
 fetch RETURNED, never that the input was a link: refusing every link would refuse the public ones
-that work. Exit 3 means there is no uploads mount at all (not an empty one): ask for a
-path rather than reporting the deck missing. Never hand-build this path — a relative `./mnt/uploads`
-resolves against the shell's cwd, which has already moved once underneath us.
+that work.
 
 **Convert a PowerPoint deck to PDF before reading it.** Design & Readability are scored from
 what a reader SEES, and only a rendered page gives you that. The block tries LibreOffice, then

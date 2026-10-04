@@ -928,7 +928,11 @@ SKILL_MD_CEILING: dict[str, int] = {
     # shell prints for Reads.
     # 105,949 -> 106,045 (+96 B) on 2026-10-05: the conversion block makes its own LibreOffice profile folder (a later
     # block's shell has no setup variables).
-    "market-sizing": 105_857,
+    # 105,857 -> 105,980 (+123 B) on 2026-10-05: the resolver's exit 3 (no uploads
+    # folder found) no longer reads as "no session tree": on the cloud lane the per-session uploads folder
+    # exists only once something is attached, so the reason names both causes (nothing attached, or a host
+    # that keeps uploads elsewhere) and asks for a path when documents were attached.
+    "market-sizing": 105_980,
     # fmr raised for two founder-facing-correctness items measured in a live run: the CHECKLIST
     # dispatch now forbids citing our artifact filenames in evidence (that run put `inputs.json` in 10
     # items' evidence, printed verbatim into the founder's report), and the producer pipe passes
@@ -1424,7 +1428,12 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 112,469 -> 113,327 on 2026-10-05: the conversion block makes its own LibreOffice profile folder (a later
     # block's shell has no setup variables), Keynote exports to a temp folder, a failed copy prints copy-failed
     # with its own branch, and Step 1 skims a PowerPoint deck through the text reader and a PDF by its file-tool path.
-    "deck-review": 113_159,
+    # 113,159 -> 113,346 (+187 B) on 2026-10-05: the resolver's exit 3 (no uploads
+    # folder found) no longer reads as "no session tree": on the cloud lane the per-session uploads folder
+    # exists only once something is attached, so the reason names both causes (nothing attached, or a host
+    # that keeps uploads elsewhere) and asks for a path when documents were attached.
+    # The deck search gains the exit-3 branch it lacked: it listed a folder the resolver never printed.
+    "deck-review": 113_346,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
@@ -1578,7 +1587,11 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 127,995 -> 128,008 (+13 B) on 2026-10-05: the read-directive clauses say "never the shell's path to the
     # plugin folder" instead of "never a path the shell printed", which also covered the hand-off paths the
     # shell prints for Reads.
-    "competitive-positioning": 127_826,
+    # 127,826 -> 127,949 (+123 B) on 2026-10-05: the resolver's exit 3 (no uploads
+    # folder found) no longer reads as "no session tree": on the cloud lane the per-session uploads folder
+    # exists only once something is attached, so the reason names both causes (nothing attached, or a host
+    # that keeps uploads elsewhere) and asks for a path when documents were attached.
+    "competitive-positioning": 127_949,
     # cap-table, the largest raise (+2,383 B) and the one with the most founder-visible payoff:
     #   * Main-Thread Return named THREE of the four files Step 12 copies; a live run delivered exactly
     #     three and dropped `{Company}_Cap_Table.html`. All four are now named explicitly.

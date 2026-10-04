@@ -471,6 +471,77 @@ def test_cli_uploads_flag_on_the_remote_lane(tmp_path: Path) -> None:
     assert out.strip() == str(up)
 
 
+# The exit-3 note must be true on BOTH hosts that reach it. The cloud lane creates
+# `~/.claude/uploads/<session>` only once something is attached, so before that it answers exactly as
+# the plain CLI does; the old note ("this is not a Cowork session tree") was false there, and told the
+# model the founder was on the wrong host when they had simply attached nothing yet.
+_FALSE_ON_CLOUD = ("session tree", "not a cowork", "plain cli")
+
+
+def _assert_exit_3_note_true_on_both_hosts(err: str) -> None:
+    low = err.lower()
+    for phrase in _FALSE_ON_CLOUD:
+        assert phrase not in low, f"exit-3 note claims a host it cannot know ({phrase!r}): {err!r}"
+    assert "nothing has been attached" in low and "somewhere this script does not look" in low, err
+    assert "attach" in low and "path" in low, f"the note must say what to ask the user for: {err!r}"
+    assert "$COWORK_UPLOADS_DIR" in err, "the declared override is a real escape hatch; keep it named"
+
+
+def test_cli_uploads_exit_3_note_on_the_remote_lane_with_nothing_attached(tmp_path: Path) -> None:
+    env = {**_REMOTE_ENV, "HOME": str(tmp_path), "COWORK_UPLOADS_DIR": ""}
+    rc, out, err = _run_cli(["--uploads"], env)
+    assert rc == 3, (rc, out, err)
+    assert out.strip() == ""
+    _assert_exit_3_note_true_on_both_hosts(err)
+
+
+def test_cli_uploads_exit_3_note_on_the_plain_cli(tmp_path: Path) -> None:
+    env = {"HOME": str(tmp_path), "COWORK_UPLOADS_DIR": "", "CLAUDE_CODE_SESSION_ID": ""}
+    rc, out, err = _run_cli(["--uploads"], env)
+    assert rc == 3, (rc, out, err)
+    _assert_exit_3_note_true_on_both_hosts(err)
+
+
+_SKILLS_DIR = _SCRIPT.parent.parent / "skills"
+_UPLOADS_CALL = 'resolve_artifacts_root.py" --uploads   # prints UPLOADS_DIR, or exits 3'
+
+
+def _uploads_step(skill: str) -> str:
+    """The paragraph before the `--uploads` block, the block, and the paragraph after it.
+
+    Bounded on structure (blank lines and fences), not a character window, so an edit nearby cannot
+    push the stated reason out of view while it is still there."""
+    text = (_SKILLS_DIR / skill / "SKILL.md").read_text(encoding="utf-8")
+    assert text.count(_UPLOADS_CALL) == 1, f"{skill}: the --uploads call must say it exits 3, once"
+    at = text.index(_UPLOADS_CALL)
+    fence_open = text.rindex("```bash", 0, at)
+    start = text.rindex("\n\n", 0, fence_open - 1)
+    fence_close = text.index("```", at)
+    after = text.index("\n\n", fence_close + 3)
+    end = text.find("\n\n", after + 2)
+    return text[start : end if end != -1 else len(text)]
+
+
+@pytest.mark.parametrize("skill", ["market-sizing", "competitive-positioning", "deck-review"])
+def test_each_uploads_caller_states_a_reason_true_on_every_host(skill: str) -> None:
+    """Each caller branches on exit 3 and states why it happens in words true on both hosts that reach it:
+    the plain CLI, and the cloud lane before anything is attached (where "no session tree" was false)."""
+    step = _uploads_step(skill)
+    flat = " ".join(step.split()).lower()
+    assert "exit 3" in flat, f"{skill}: no exit-3 branch beside the --uploads call"
+    assert "session tree" not in flat, f"{skill}: the exit-3 reason still says 'no session tree'"
+    assert "nothing was attached" in flat or "nothing has been attached" in flat, skill
+    assert "keeps uploads elsewhere" in flat, skill
+    assert "path" in flat, f"{skill}: exit 3 must say to ask for a path"
+
+
+def test_deck_review_lists_the_uploads_folder_only_when_one_was_printed() -> None:
+    """deck-review listed `<printed UPLOADS_DIR>` unconditionally, a path never printed on exit 3."""
+    flat = " ".join(_uploads_step("deck-review").split())
+    assert "On exit 0, `ls -la <printed UPLOADS_DIR>`" in flat
+    assert "On exit 3 nothing was printed" in flat
+
+
 def test_uploads_is_not_derived_from_the_artifacts_root_override() -> None:
     """$COWORK_ARTIFACTS_ROOT may point anywhere; uploads must not follow it."""
     env = {"COWORK_ARTIFACTS_ROOT": "/tmp/elsewhere/artifacts"}

@@ -989,8 +989,9 @@ to run one), `dispatch_failed` (it returned BLOCKED, or the producer below rejec
 `no_network_available`, `no_subagent_dispatch` (this environment cannot dispatch a reviewer). Each is a
 different sentence the founder reads; there is no reason meaning "it did not seem necessary".
 
-Mirror the founder's uploads into the hand-off dir (exit 3 from the resolver = no session tree: skip the
-`cp`), then print the prompt and send it unchanged:
+Mirror the founder's uploads into the hand-off dir (exit 3 from the resolver = no uploads folder: nothing
+was attached, or this host keeps uploads elsewhere; skip the `cp`, and if the founder did attach documents,
+ask for their path), then print the prompt and send it unchanged:
 
 ```bash
 python3 "$SHARED_SCRIPTS/resolve_artifacts_root.py" --uploads   # prints UPLOADS_DIR, or exits 3

@@ -978,9 +978,10 @@ that a step whose only consumer is a warning gets skipped in silence. Severity c
 either: Step 7 runs compose without `--strict`, so even a high warning halts nothing.)*
 
 The founder's uploads live outside `outputs/`, where a sub-agent cannot reach them, so mirror them
-into the hand-off dir first (exit 3 from the resolver = no session tree: skip the `cp`), machine-read
-every scanned page so a citation to one can be checked, then generate the dispatch prompt and pass it
-unchanged — the lane that tests this regenerates it and compares the two:
+into the hand-off dir first (exit 3 from the resolver = no uploads folder: nothing was attached, or this
+host keeps uploads elsewhere; skip the `cp`, and if the founder did attach documents, ask for their
+path), machine-read every scanned page so a citation to one can be checked, then generate the dispatch
+prompt and pass it unchanged — the lane that tests this regenerates it and compares the two:
 
 ```bash
 python3 "$SHARED_SCRIPTS/resolve_artifacts_root.py" --uploads   # prints UPLOADS_DIR, or exits 3

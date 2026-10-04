@@ -49,8 +49,8 @@ host path in main()):
 
 Prints the absolute artifacts root on stdout (one line). With --json, prints
 {"artifacts_root": ..., "agent_artifacts_root": ..., "uploads_dir": ...}. Creates the dir unless
---no-create. `--uploads` prints the uploads mount alone (exit 3 when there is no session tree) --
-see `resolve_uploads_dir`.
+--no-create. `--uploads` prints the uploads folder alone (exit 3 when no uploads folder is found for
+this session) -- see `resolve_uploads_dir`.
 
 THREE CONSUMERS READ THE SHELL cwd, NOT ONE. Beyond this module, `find_artifact.py` and
 `founder_context.py` both default `--artifacts-root` to `os.path.join(os.getcwd(), "artifacts")`.
@@ -267,7 +267,11 @@ def resolve_artifacts_root(cwd: str, env: dict[str, str]) -> str:
 
 
 def resolve_uploads_dir(cwd: str, env: dict[str, str]) -> str | None:
-    """Return the absolute uploads mount, or None when there is no session tree (plain CLI).
+    """Return the absolute uploads folder, or None when none is found for this session.
+
+    None covers two cases this function cannot tell apart, so nothing it prints may claim either:
+    the plain CLI, which has no uploads folder at all, and Cowork's cloud lane with nothing attached
+    yet, where the per-session folder is created only by the first attachment.
 
     WHY THIS IS A SCRIPT FLAG AND NOT SHELL IN A SKILL.md: an attached file lands under
     `<session>/mnt/uploads`, and a skill that cannot list that dir tells the founder their upload is
@@ -293,8 +297,9 @@ def resolve_uploads_dir(cwd: str, env: dict[str, str]) -> str | None:
     remote = _remote_uploads_dir(env)
     if remote is not None:
         return remote
-    # Plain CLI: no session tree, so no uploads mount. None, never a fabricated path — a guessed
-    # `./uploads` would `ls` clean-empty and read as "the founder attached nothing".
+    # Plain CLI, or the cloud lane before anything is attached: no uploads folder. None, never a
+    # fabricated path — a guessed `./uploads` would `ls` clean-empty and read as "the founder attached
+    # nothing".
     return None
 
 
@@ -358,9 +363,9 @@ def main() -> int:
     p.add_argument(
         "--uploads",
         action="store_true",
-        help="Print the absolute uploads mount (where attached files land). Exits 3 with a stderr "
-        "note when there is no session tree (plain CLI), so an absent mount is distinguishable "
-        "from an empty one",
+        help="Print the absolute uploads folder (where attached files land). Exits 3 with a stderr "
+        "note when no uploads folder is found for this session (nothing attached yet, or a host that "
+        "keeps uploads elsewhere), so an absent folder is distinguishable from an empty one",
     )
     p.add_argument("--no-create", action="store_true", help="Do not mkdir the resolved root")
     p.add_argument(
@@ -397,7 +402,7 @@ def main() -> int:
     # about the SESSION TREE: it needs no artifacts root, no --dir-name mirror, and no filesystem
     # access at all. Answering it after `os.makedirs(root)` meant a question about the uploads mount
     # CREATED the artifacts dir as a side effect (measured: an empty cwd gained `artifacts/` even on
-    # the exit-3 "there is no session tree" path), and made the flag die with an uncaught
+    # the exit-3 "no uploads folder" path), and made the flag die with an uncaught
     # PermissionError in a read-only cwd — a third exit state the callers' prose does not document.
     if args.uploads:
         # A caller who typed `--uploads --json | jq` used to get a bare path and
@@ -412,10 +417,14 @@ def main() -> int:
             p.error("--uploads cannot be combined with " + ", ".join(conflicting))
         uploads_dir = resolve_uploads_dir(cwd, env)
         if uploads_dir is None:
+            # TRUE ON EVERY HOST THAT REACHES IT. The cloud lane creates its per-session uploads
+            # folder only when something is attached, so "not a Cowork session" was false there; this
+            # branch cannot tell that case from the plain CLI, so it names both and claims neither.
             sys.stderr.write(
-                "No uploads mount: this is not a Cowork session tree, so nothing was attached "
-                "through one. Ask the founder for a path instead of reporting the file missing. "
-                "Set $COWORK_UPLOADS_DIR to override.\n"
+                "No uploads folder found for this session (the uploads mount is absent): either nothing "
+                "has been attached yet, or this host keeps uploads somewhere this script does not look. "
+                "Ask the user to attach the file, or to give its path, instead of reporting it missing. "
+                "Set $COWORK_UPLOADS_DIR to declare the folder.\n"
             )
             return 3
         sys.stdout.write(uploads_dir + "\n")
