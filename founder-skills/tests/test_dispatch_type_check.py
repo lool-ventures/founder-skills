@@ -258,3 +258,9 @@ def test_every_skill_started_in_the_session_counts(tmp_path: Path) -> None:
     assert "goes to its own agent" not in _deny(_run(tmp_path, rows, checklist, "founder-skills:market-sizing"))
     reason = _deny(_run(tmp_path, rows, checklist, "founder-skills:competitive-positioning"))
     assert '"founder-skills:deck-review"' in reason and '"founder-skills:market-sizing"' in reason
+
+
+def test_an_invisible_character_does_not_hide_the_context(tmp_path: Path) -> None:
+    for line in ("CONTEXT: RED_TEAM\u200b", "\ufeffCONTEXT: RED_TEAM", "CONTEXT:\u200b RED_TEAM"):
+        prompt = f"{line}\nOUTPUT_PATH: agent/handoff/R/redteam_output.json\n"
+        _deny(_run(tmp_path, [_user("Size my market.")], prompt, "general-purpose"))

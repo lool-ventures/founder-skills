@@ -693,14 +693,27 @@ def test_an_oversized_result_saved_to_a_file_counts_when_read(tmp_path: Path) ->
 # --- the context line is matched whole -----------------------------------------------------------------
 
 
-def test_a_repair_prompt_with_its_own_context_line_is_not_compared(tmp_path: Path) -> None:
-    """A KNOWN LIMIT, pinned so it is not mistaken for a guarantee. `CONTEXT: CHECKLIST (repair)` is a
-    hand-written repair, not the printed prompt, and is not compared: matched by prefix it was held for
-    a prompt it never claimed to be. It still has to go to the right agent (dispatch_type_check.py)."""
-    rows = [_user("Size my market."), *_printed(_CHECKLIST_PRINTED)]
-    repair = _CHECKLIST_PRINTED.replace("CONTEXT: CHECKLIST\n", "CONTEXT: CHECKLIST (repair)\n")
-    _silent(_run(tmp_path, rows, repair, agent="founder-skills:market-sizing"))
-    _deny(_run(tmp_path, rows, repair, agent="general-purpose"))
+@pytest.mark.parametrize("suffix", [" (repair)", " (round 2)", " repair", "\u200b", " \u200b(r2)"])
+def test_a_suffix_on_a_generated_context_line_is_held_with_the_printed_prompt(tmp_path: Path, suffix: str) -> None:
+    """A first line that opens with a generated prompt's context line but carries more (a word, a zero-width
+    character) is not a different prompt: matched whole, it skipped the comparison, and framing rode
+    through with it. It is held with the printed prompt; a redo is printed by the generator instead."""
+    rows = [_user("Size my market."), *_printed(_GENERATED)]
+    steered = _STEERED.replace("CONTEXT: RED_TEAM\n", f"CONTEXT: RED_TEAM{suffix}\n")
+    reason = _deny(_run(tmp_path, rows, steered))
+    assert "Send this as the prompt, unchanged" in reason and "round-2 review" not in reason
+
+
+def test_a_suffix_on_a_context_line_with_no_generator_is_not_compared(tmp_path: Path) -> None:
+    """deck-review's checklist has no generator: its hand-written repair is not compared."""
+    repair = "CONTEXT: CHECKLIST (repair)\nOUTPUT_PATH: agent/handoff/R/checklist_output.json\n\nFix it.\n"
+    _silent(_run(tmp_path, [_user("Review my deck.")], repair, agent="founder-skills:deck-review"))
+
+
+def test_a_longer_context_name_is_not_the_same_context(tmp_path: Path) -> None:
+    """`CONTEXT: RED_TEAMS` is not `CONTEXT: RED_TEAM`: the prefix ends at a word boundary."""
+    prompt = "CONTEXT: RED_TEAMS\nOUTPUT_PATH: x\n"
+    _silent(_run(tmp_path, [_user("x")], prompt, agent="founder-skills:market-sizing-redteam"))
 
 
 def test_a_context_line_inside_another_line_is_not_the_comparand(tmp_path: Path) -> None:

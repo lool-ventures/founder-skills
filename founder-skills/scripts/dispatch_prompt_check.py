@@ -31,10 +31,11 @@ A Read of any other file, a sub-agent's reply, or a block that also prints text 
 comparand. Residual: the generator's arguments are typed by the model, and a script the model wrote
 itself and runs as `python3 <file>` is not recognised as printing text.
 
-THE CONTEXT LINE. A dispatch is compared only when its first non-blank line IS a registered context
-line, and the comparand's context must be a line of its own. A hand-written repair
-("CONTEXT: CHECKLIST (repair)") is not the printed prompt and is not compared; `dispatch_type_check.py`,
-which runs first, still holds it to its own agent.
+THE CONTEXT LINE. A dispatch is compared when its first non-blank line, invisible characters removed,
+opens with a registered context line at a word boundary: "CONTEXT: RED_TEAM (round 2)" is RED_TEAM's
+dispatch and is held like any other edit, since a redo is printed by the generator (`--correction`).
+The comparand's context must be a line of its own. A context with no generator (deck-review's
+CHECKLIST) is not registered here and is never compared.
 
 THE BUDGET. A round is held at most twice, then let through with one stderr line: a hook that holds
 forever can wedge a run on its own bug. Counted per OUTPUT_PATH, i.e. per round -- the only real user
@@ -112,6 +113,24 @@ MAX_HOLDS = 2
 # and a `\S+` capture stopped at the first one, so every round and context shared one key.
 # Leading whitespace allowed: a model that re-indents the prompt is still sending the same prompt.
 _OUTPUT_RE = re.compile(r"^[ \t]*OUTPUT_PATH:[ \t]*(.+?)[ \t]*$", re.MULTILINE)
+
+
+# Characters that render as nothing: removed before the first line is read, so "CONTEXT: RED_TEAM" with
+# a zero-width space after it is still the RED_TEAM line.
+INVISIBLE = dict.fromkeys(map(ord, "\u200b\u200c\u200d\u2060\ufeff\u00ad"))
+
+
+def first_line(prompt: str) -> str:
+    """The prompt's first non-blank line, invisible characters removed, trimmed."""
+    return next((s for s in (line.translate(INVISIBLE).strip() for line in prompt.splitlines()) if s), "")
+
+
+def context_prefix(line: str) -> str | None:
+    """The registered context `line` opens with, ending at a word boundary, or None."""
+    for context in CONTEXTS:
+        if line == context or (line.startswith(context) and not re.match(r"[A-Za-z0-9_]", line[len(context)])):
+            return context
+    return None
 
 
 def _squash(text: str) -> str:
@@ -661,10 +680,9 @@ def decide(payload: dict[str, Any]) -> dict[str, Any] | None:
     prompt = tool_input.get("prompt") if isinstance(tool_input, dict) else None
     if not isinstance(prompt, str):
         return None
-    # The whole first line: "CONTEXT: CHECKLIST (repair)" is a hand-written repair prompt, not the printed
-    # one, and is not compared (dispatch_type_check.py still holds it to its own agent).
-    first = next((line.strip() for line in prompt.splitlines() if line.strip()), "")
-    context = first if first in CONTEXTS else None
+    # A first line that opens with a generated context and carries more ("CONTEXT: RED_TEAM (round 2)") is
+    # that context's dispatch, compared like any other: a redo is printed by the generator (--correction).
+    context = context_prefix(first_line(prompt))
     if context is None:
         return None
     agent = tool_input.get("subagent_type") if isinstance(tool_input, dict) else None

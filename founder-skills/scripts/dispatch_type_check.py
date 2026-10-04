@@ -80,6 +80,8 @@ CONTEXT_AGENTS: dict[str, tuple[str, ...]] = {
     "RED_TEAM": ("competitive-positioning-redteam", "market-sizing-redteam"),
     "POST_COMPOSE_COACHING": _COACH,
 }
+# Characters that render as nothing, removed before the first line is read.
+_INVISIBLE = dict.fromkeys(map(ord, "\u200b\u200c\u200d\u2060\ufeff\u00ad"))
 _CONTEXT_RE = re.compile(r"^CONTEXT:[ \t]*([A-Z][A-Z0-9_]*)(?![A-Za-z0-9_])")
 _OUTPUT_RE = re.compile(r"^[ \t]*OUTPUT_PATH:[ \t]*(.+?)[ \t]*$", re.MULTILINE)
 _COMMAND_RE = re.compile(r"<command-name>/?([^<]*)</command-name>")
@@ -97,7 +99,7 @@ def _transcript_tools() -> Any:
 
 def context_of(prompt: str) -> str | None:
     """The context name on the prompt's first non-blank line, or None."""
-    first = next((line.strip() for line in prompt.splitlines() if line.strip()), "")
+    first = next((s for s in (line.translate(_INVISIBLE).strip() for line in prompt.splitlines()) if s), "")
     m = _CONTEXT_RE.match(first)
     return m.group(1) if m else None
 
