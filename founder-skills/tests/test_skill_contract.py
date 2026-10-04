@@ -906,7 +906,9 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 105,936 -> 105,949 (+13 B) on 2026-10-05: the read-directive clauses say "never the shell's path to the
     # plugin folder" instead of "never a path the shell printed", which also covered the hand-off paths the
     # shell prints for Reads.
-    "market-sizing": 105_949,
+    # 105,949 -> 106,045 (+96 B) on 2026-10-05: the conversion block makes its own LibreOffice profile folder (a later
+    # block's shell has no setup variables).
+    "market-sizing": 106_045,
     # fmr raised for two founder-facing-correctness items measured in a live run: the CHECKLIST
     # dispatch now forbids citing our artifact filenames in evidence (that run put `inputs.json` in 10
     # items' evidence, printed verbatim into the founder's report), and the producer pipe passes
@@ -1399,7 +1401,10 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 112,456 -> 112,469 (+13 B) on 2026-10-05: the read-directive clauses say "never the shell's path to the
     # plugin folder" instead of "never a path the shell printed", which also covered the hand-off paths the
     # shell prints for Reads.
-    "deck-review": 112_469,
+    # 112,469 -> 113,327 on 2026-10-05: the conversion block makes its own LibreOffice profile folder (a later
+    # block's shell has no setup variables), Keynote exports to a temp folder, a failed copy prints copy-failed
+    # with its own branch, and Step 1 skims a PowerPoint deck through the text reader and a PDF by its file-tool path.
+    "deck-review": 113_327,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.

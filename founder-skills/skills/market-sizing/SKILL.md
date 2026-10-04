@@ -361,11 +361,12 @@ for c in libreoffice soffice /Applications/LibreOffice.app/Contents/MacOS/soffic
   # $HOME, which is read-only in the sandbox, and otherwise exits 77 having converted
   # nothing. Errors are shown, not suppressed — a silent failure looks exactly like
   # having no converter and sends you down the wrong branch.
-  "$c" --headless -env:UserInstallation="file://$STAGING_DIR/.lo" \
+  LO_PROFILE="$(mktemp -d "${TMPDIR:-/tmp}/lo-profile.XXXXXX")"   # this block's own: a fresh shell
+  "$c" --headless -env:UserInstallation="file://$LO_PROFILE" \
     --convert-to pdf --outdir "$HANDOFF_DIR" "$DECK_SRC" 2>&1 | tail -3
   break
 done
-# Printed as the Read tool's path: the hand-off folder is the one it reaches ($STAGING_DIR is not, on a local session).
+# Printed as the Read tool's path: the hand-off folder is the one it reaches (a temp folder is not, on a local session).
 if [ -s "$HANDOFF_DIR/${B%.*}.pdf" ]; then echo "$HANDOFF_AGENT/${B%.*}.pdf"; else echo "no pdf — use the text fallback below"; fi
 ```
 

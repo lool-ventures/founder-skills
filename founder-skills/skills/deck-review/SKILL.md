@@ -257,7 +257,7 @@ python3 "$SHARED_SCRIPTS/founder_context.py" read --artifacts-root "$ARTIFACTS_R
 
 **Exit 0 (found):** Use the company slug and pre-filled fields. Proceed to Step 2.
 
-**Exit 1 (not found):** Expected on a first run — do NOT mention this check or its exit status to the founder; if you narrate anything first, say only "Let me grab a few basics about the company." First **skim the attached deck** (title slide, footer, contact block — a Read of the file is available now; do NOT write any artifact yet) to derive candidate values. Then use `AskUserQuestion` (NOT plain chat) to ask for company name, stage, sector, and geography, pre-filling each question's first option with the deck-derived value (company name from the title slide; sector/geography from deck signals such as customer names, currency, phone country codes), labeled as read from the deck; keep free-form options for correction. **If `AskUserQuestion` is genuinely unavailable in the host, do NOT skip the ask and do NOT assume the answer:** ask the same question in plain chat, state the options explicitly, and wait for an answer before continuing. The ban above is on asking casually WHILE the tool is available — it is not a reason to stall a host that lacks it. If the deck yields no signal for a field, ask as normal. **Deriving some of the four does not license skipping the ask.** Treat them independently: a deck that evidences company, stage and sector but says nothing about geography leaves you asking for geography — not filling it in and moving on. Never record a value the materials do not evidence, and in particular **never read geography off a currency symbol** (`$` is also CAD, AUD and SGD, and founders everywhere price in USD) or off where the team used to work (an ex-Stripe engineer is not a US company). Geography selects which regulatory and benchmark guidance the whole review is graded against, so a silent guess there is not a small one.
+**Exit 1 (not found):** Expected on a first run — do NOT mention this check or its exit status to the founder; if you narrate anything first, say only "Let me grab a few basics about the company." First **skim the attached deck** (title slide, footer, contact block; do NOT write any artifact yet): a PDF with the Read tool at the attachment's file-tool path, never the shell's; a PowerPoint deck from `python3 "$SHARED_SCRIPTS/pptx_to_text.py" "<deck path>"`'s printed output, since Read refuses PowerPoint to derive candidate values. Then use `AskUserQuestion` (NOT plain chat) to ask for company name, stage, sector, and geography, pre-filling each question's first option with the deck-derived value (company name from the title slide; sector/geography from deck signals such as customer names, currency, phone country codes), labeled as read from the deck; keep free-form options for correction. **If `AskUserQuestion` is genuinely unavailable in the host, do NOT skip the ask and do NOT assume the answer:** ask the same question in plain chat, state the options explicitly, and wait for an answer before continuing. The ban above is on asking casually WHILE the tool is available — it is not a reason to stall a host that lacks it. If the deck yields no signal for a field, ask as normal. **Deriving some of the four does not license skipping the ask.** Treat them independently: a deck that evidences company, stage and sector but says nothing about geography leaves you asking for geography — not filling it in and moving on. Never record a value the materials do not evidence, and in particular **never read geography off a currency symbol** (`$` is also CAD, AUD and SGD, and founders everywhere price in USD) or off where the team used to work (an ex-Stripe engineer is not a US company). Geography selects which regulatory and benchmark guidance the whole review is graded against, so a silent guess there is not a small one.
 
 **Stage is the exception to deck-derived pre-filling — it has a real fixed label set, not a value to read off a slide.**
 Options: `Pre-seed` / `Seed` / `Series A` / `Series B+`
@@ -357,7 +357,7 @@ DECK_READ="$DECK_SRC"; CONVERTER=""; SOFFICE=""; B="$(basename "$DECK_SRC")"
 case "$DECK_SRC" in
   *.pptx|*.PPTX|*.ppt|*.PPT)
     DECK_READ="no-converter"
-    # Into the hand-off folder, which Read reaches; never $STAGING_DIR (refused on a local session).
+    # Into the hand-off folder, which Read reaches; never a temp folder (refused on a local session).
     PDF_OUT="$HANDOFF_DIR/${B%.*}.pdf"
     # Two converters, tried in this order and each ONLY when it is installed: LibreOffice
     # on any OS, then Keynote on macOS. A host with neither takes the text-only path below
@@ -372,7 +372,8 @@ case "$DECK_SRC" in
         # -env:UserInstallation is REQUIRED: $HOME is read-only, so profile creation
         # dies (exit 77) having converted nothing. Do not suppress errors — a silent
         # failure is indistinguishable from having no converter, and misreports why.
-        "$SOFFICE" --headless -env:UserInstallation="file://$STAGING_DIR/.lo" \
+        LO_PROFILE="$(mktemp -d "${TMPDIR:-/tmp}/lo-profile.XXXXXX")"   # this block's own: a fresh shell
+        "$SOFFICE" --headless -env:UserInstallation="file://$LO_PROFILE" \
           --convert-to pdf --outdir "$HANDOFF_DIR" "$DECK_SRC" 2>&1 | tail -3
         ;;
       keynote)
@@ -382,6 +383,9 @@ case "$DECK_SRC" in
         # So this block QUITS on both exits. Without that, the first conversion leaves the
         # exact headless Keynote behind that breaks the second, and the founder is told a
         # converter failed.
+        # Keynote runs only in a Mac's own shell, where Read takes the shell's paths: export to a
+        # temp folder, so it is never asked to write into a user folder (a macOS access prompt).
+        PDF_OUT="$(mktemp -d "${TMPDIR:-/tmp}/keynote.XXXXXX")/${B%.*}.pdf"
         osascript - "$DECK_SRC" "$PDF_OUT" <<'KEYNOTE_EOF' 2>&1 | tail -3
 on run argv
   tell application "Keynote"
@@ -401,15 +405,15 @@ KEYNOTE_EOF
         ;;
     esac
     if [ -s "$PDF_OUT" ]; then
-      DECK_READ="$HANDOFF_AGENT/${B%.*}.pdf"
+      case "$PDF_OUT" in "$HANDOFF_DIR"/*) DECK_READ="$HANDOFF_AGENT/${B%.*}.pdf" ;; *) DECK_READ="$PDF_OUT" ;; esac
     elif [ -n "$CONVERTER" ]; then
       DECK_READ="convert-failed"
     fi
     ;;
   *)
     # A local session's Read tool is refused the shell's path to the upload: Read a copy instead.
-    if [ "$HANDOFF_AGENT" != "$HANDOFF_DIR" ] && cp "$DECK_SRC" "$HANDOFF_DIR/"; then
-      DECK_READ="$HANDOFF_AGENT/$B"
+    if [ "$HANDOFF_AGENT" != "$HANDOFF_DIR" ]; then
+      if cp "$DECK_SRC" "$HANDOFF_DIR/"; then DECK_READ="$HANDOFF_AGENT/$B"; else DECK_READ="copy-failed"; fi
     fi
     ;;
 esac
@@ -421,6 +425,8 @@ Then branch on what it printed:
 - **A path** — read THAT path with the Read tool's `pages` parameter, exactly as for any PDF
   (it is the Read tool's path, not the shell's), and for a PowerPoint deck set `input_format` to `"pptx"`. The slides are now genuinely visible, so the Design &
   Readability criteria are scored normally.
+- **`copy-failed`** — the deck could not be put where the Read tool reaches it; the error printed
+  above. Never Read the shell's path instead: say BLOCKED, name the error, and ask for the deck again.
 - **`convert-failed`** — a converter exists and broke; its error printed just above. Report
   that error verbatim when you tell the founder what happened, then take the same fallback
   as `no-converter` below. Do not retry blindly.
