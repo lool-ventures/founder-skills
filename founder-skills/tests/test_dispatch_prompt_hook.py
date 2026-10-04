@@ -745,3 +745,124 @@ def test_every_prescribed_generator_block_is_accepted() -> None:
     cp = (SCRIPTS.parent / "skills" / "competitive-positioning" / "SKILL.md").read_text(encoding="utf-8")
     assert "python3 -c" in cp
     assert not any("python3 -c" in block for _, block in fences)
+
+
+# --- sending the printed prompt in place of an edited one (dormant behind REWRITE_FLOOR) ----------------
+
+
+def _hook() -> Any:
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("dpc_rewrite", SCRIPTS / "dispatch_prompt_check.py")
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _versioned(rows: list[dict[str, Any]], version: str) -> list[dict[str, Any]]:
+    return [{**r, "version": version} for r in rows]
+
+
+def _decide(mod: Any, tmp_path: Path, rows: list[dict[str, Any]], tool_input: Any) -> Any:
+    path = tmp_path / "t.jsonl"
+    path.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+    return mod.decide(
+        {"hook_event_name": "PreToolUse", "tool_name": "Agent", "transcript_path": str(path), "tool_input": tool_input}
+    )
+
+
+_INPUT = {"subagent_type": "founder-skills:market-sizing-redteam", "description": "Outside review", "prompt": _STEERED}
+
+
+def test_the_rewrite_is_dormant_at_the_shipped_floor(tmp_path: Path) -> None:
+    """No CLI reaches the shipped floor, so a steered dispatch is held exactly as before."""
+    mod = _hook()
+    assert mod.REWRITE_FLOOR >= (999, 0, 0)
+    rows = _versioned([_user("Size my market."), *_printed(_GENERATED)], "2.1.300")
+    out = _decide(mod, tmp_path, rows, dict(_INPUT))["hookSpecificOutput"]
+    assert out["permissionDecision"] == "deny" and "updatedInput" not in out
+
+
+def test_at_the_floor_the_printed_prompt_replaces_only_the_prompt(tmp_path: Path, monkeypatch: Any) -> None:
+    mod = _hook()
+    monkeypatch.setattr(mod, "REWRITE_FLOOR", (2, 1, 290))
+    rows = _versioned([_user("Size my market."), *_printed(_GENERATED)], "2.1.290")
+    tool_input = {**_INPUT, "isolation": "worktree", "model": "x"}
+    out = _decide(mod, tmp_path, rows, tool_input)["hookSpecificOutput"]
+    assert out["permissionDecision"] == "allow"
+    assert out["updatedInput"] == {**tool_input, "prompt": _GENERATED}
+    assert tool_input["prompt"] == _STEERED, "the payload is not mutated"
+    notice = out["additionalContext"]
+    assert notice.startswith("[dispatch-rewrite][agent/handoff/R/r2/redteam_output.json]")
+    assert "Do not send this dispatch again" in notice and "--correction" in notice
+
+
+def test_below_the_floor_or_with_no_version_it_is_held(tmp_path: Path, monkeypatch: Any) -> None:
+    mod = _hook()
+    monkeypatch.setattr(mod, "REWRITE_FLOOR", (2, 1, 290))
+    for rows in (
+        _versioned([_user("Size my market."), *_printed(_GENERATED)], "2.1.289"),
+        [_user("Size my market."), *_printed(_GENERATED)],
+    ):
+        out = _decide(mod, tmp_path, rows, dict(_INPUT))["hookSpecificOutput"]
+        assert out["permissionDecision"] == "deny", rows[0].get("version")
+
+
+@pytest.mark.parametrize("drop", ["subagent_type", "description"])
+def test_a_partial_input_is_held_not_rewritten(tmp_path: Path, monkeypatch: Any, drop: str) -> None:
+    mod = _hook()
+    monkeypatch.setattr(mod, "REWRITE_FLOOR", (2, 1, 290))
+    rows = _versioned([_user("Size my market."), *_printed(_GENERATED)], "2.1.290")
+    tool_input = {k: v for k, v in _INPUT.items() if k != drop}
+    if drop == "subagent_type":
+        assert _decide(mod, tmp_path, rows, tool_input) is None  # not a registered pair at all
+    else:
+        assert _decide(mod, tmp_path, rows, tool_input)["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_no_printed_prompt_is_held_even_at_the_floor(tmp_path: Path, monkeypatch: Any) -> None:
+    mod = _hook()
+    monkeypatch.setattr(mod, "REWRITE_FLOOR", (2, 1, 290))
+    rows = _versioned([_user("Size my market.")], "2.1.290")
+    out = _decide(mod, tmp_path, rows, dict(_INPUT))["hookSpecificOutput"]
+    assert out["permissionDecision"] == "deny" and "no printed prompt" in out["permissionDecisionReason"]
+
+
+def test_the_rewrite_has_no_hold_budget(tmp_path: Path, monkeypatch: Any) -> None:
+    """Past two holds a steered dispatch used to be let through as sent; at the floor it is rewritten."""
+    mod = _hook()
+    monkeypatch.setattr(mod, "REWRITE_FLOOR", (2, 1, 290))
+    held = f"{MARKER}[agent/handoff/R/r2/redteam_output.json] x"
+    rows = _versioned([_user("Size my market."), *_printed(_GENERATED), _held(held), _held(held)], "2.1.290")
+    out = _decide(mod, tmp_path, rows, dict(_INPUT))["hookSpecificOutput"]
+    assert out["permissionDecision"] == "allow" and out["updatedInput"]["prompt"] == _GENERATED
+
+
+# The self-check's rows are SYNTHETIC until a live probe records the real shapes: a non-model row the
+# runtime writes carrying the hook's notice, and the dispatch's result row with `toolUseResult.prompt`.
+def _rewritten_rows(sent: str) -> list[dict[str, Any]]:
+    mod = _hook()
+    uid, use = _call("Agent", dict(_INPUT))
+    notice = {"type": "attachment", "attachment": {"content": mod._notice("agent/handoff/R/r2/redteam_output.json")}}
+    result = _result(uid, "done")
+    result["toolUseResult"] = {"prompt": sent, "status": "completed"}
+    return [_user("Size my market."), *_printed(_GENERATED), use, notice, result]
+
+
+def test_a_rewrite_that_did_not_take_stops_every_later_rewrite(tmp_path: Path, monkeypatch: Any) -> None:
+    mod = _hook()
+    monkeypatch.setattr(mod, "REWRITE_FLOOR", (2, 1, 290))
+    taken = _versioned(_rewritten_rows(_GENERATED), "2.1.290")
+    assert _decide(mod, tmp_path, taken, dict(_INPUT))["hookSpecificOutput"]["permissionDecision"] == "allow"
+    ignored = _versioned(_rewritten_rows(_STEERED), "2.1.290")
+    out = _decide(mod, tmp_path, ignored, dict(_INPUT))["hookSpecificOutput"]
+    assert out["permissionDecision"] == "deny"
+
+
+def test_a_notice_the_model_printed_is_not_a_rewrite_record() -> None:
+    """Only rows the runtime writes count; a tool result or a model turn carrying the text does not."""
+    mod = _hook()
+    rows = _rewritten_rows(_STEERED)
+    forged = [r if r.get("type") != "attachment" else _result("toolu_x", json.dumps(r)) for r in rows]
+    assert mod.rewrite_failed(rows) and not mod.rewrite_failed(forged)

@@ -45,6 +45,21 @@ the marker, so its holds and these count against one budget per OUTPUT_PATH.
 
 NO PRINTED PROMPT. Held, with "run the prompt generator": the only way to satisfy it puts the
 comparand in the transcript.
+
+SENDING THE PRINTED PROMPT INSTEAD (DORMANT). Where a printed prompt exists and the dispatch differs,
+the hook can allow the dispatch with `updatedInput` -- the dispatch's own input with only `prompt`
+replaced by the printed one -- and an `additionalContext` notice, instead of holding it. That path has
+no hold budget (an allow cannot wedge a run). It runs only when all of these hold, and otherwise the
+dispatch is held as above:
+  * the transcript's CLI `version` is at least REWRITE_FLOOR. A runtime that ignored `updatedInput`
+    on an allow would turn a visible hold into a silent pass, so the floor is the lowest version a
+    live probe showed honouring it. Until that probe, REWRITE_FLOOR is a sentinel no CLI reaches;
+  * the input is an object carrying `subagent_type` and `description` (a partial input is not sent);
+  * no earlier rewrite in the session was found not to have taken: for each OUTPUT_PATH the runtime
+    recorded this hook's notice against, the dispatch's result row (`toolUseResult.prompt`) must equal
+    the printed prompt. One mismatch and every later dispatch is held, with a stderr line. This runs
+    only after a rewritten dispatch's result exists, so the floor alone covers the first rewrite and
+    any sibling dispatched beside it.
 """
 
 from __future__ import annotations
@@ -58,6 +73,10 @@ import sys
 from typing import Any
 
 MARKER = "[dispatch-check]"
+REWRITE_MARKER = "[dispatch-rewrite]"
+# The lowest CLI version measured honouring `updatedInput` on a PreToolUse allow. A sentinel until a
+# live probe sets it: below it the dispatch is held, never rewritten.
+REWRITE_FLOOR: tuple[int, ...] = (9999, 0, 0)
 # The dispatches whose prompt a generator prints (market-sizing's dispatch_prompt.py, competitive-
 # positioning's cp_dispatch_prompt.py). Every such prompt ends with END.
 # CHECKLIST: in round 2 the grader was told "round 2 after a revision … down from N% in round 1"
@@ -555,6 +574,82 @@ def _holds(rows: list[dict[str, Any]], output_path: str) -> int:
     return sum(1 for row in rows if row.get("type") == "user" and mark in json.dumps(row.get("message")))
 
 
+def cli_version(rows: list[dict[str, Any]]) -> tuple[int, ...] | None:
+    """The CLI version the runtime stamps on transcript rows (the latest one), or None."""
+    for row in reversed(rows):
+        version = row.get("version")
+        if isinstance(version, str):
+            m = re.match(r"^(\d+)\.(\d+)\.(\d+)", version.strip())
+            return tuple(int(x) for x in m.groups()) if m else None
+    return None
+
+
+def _notice(output_path: str) -> str:
+    return (
+        f"{REWRITE_MARKER}[{output_path}] This dispatch was sent with the prompt the generator printed; "
+        "the changes in your version were dropped. Do not send this dispatch again. To add a correction, "
+        "re-run the generator with --correction and dispatch its output."
+    )
+
+
+def rewrite_failed(rows: list[dict[str, Any]]) -> bool:
+    """Whether a dispatch this hook rewrote reached its sub-agent with a prompt other than the printed one.
+
+    Which OUTPUT_PATHs were rewritten is read from rows the runtime writes for a hook's context (any row
+    but the model's own and a tool result, which the model can fill), never from a file."""
+    rewritten = set()
+    for row in rows:
+        if row.get("isSidechain") or row.get("type") in ("assistant", "user"):
+            continue
+        text = json.dumps(row)
+        for m in re.finditer(re.escape(REWRITE_MARKER) + r"\[(.+?)\] This dispatch was sent", text):
+            rewritten.add(m.group(1))
+    if not rewritten:
+        return False
+    for i, row in enumerate(rows):
+        result = row.get("toolUseResult")
+        if row.get("type") != "user" or row.get("isSidechain") or not isinstance(result, dict):
+            continue
+        sent = result.get("prompt")
+        if not isinstance(sent, str) or _output_path(sent) not in rewritten:
+            continue
+        first = next((line.strip() for line in sent.splitlines() if line.strip()), "")
+        if first not in CONTEXTS:
+            return True
+        printed = latest_printed(rows[:i], first, _output_path(sent))
+        if printed is None or _squash(printed) != _squash(sent):
+            return True
+    return False
+
+
+def _rewrite(tool_input: dict[str, Any], printed: str, output_path: str) -> dict[str, Any]:
+    updated = dict(tool_input)
+    updated["prompt"] = printed
+    return {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "allow",
+            "permissionDecisionReason": f"{REWRITE_MARKER}[{output_path}] sent as the prompt generator printed it",
+            "updatedInput": updated,
+            "additionalContext": _notice(output_path),
+        }
+    }
+
+
+def _may_rewrite(tool_input: Any, rows: list[dict[str, Any]]) -> bool:
+    if not isinstance(tool_input, dict) or not all(
+        isinstance(tool_input.get(k), str) for k in ("subagent_type", "description")
+    ):
+        return False
+    version = cli_version(rows)
+    if version is None or version < REWRITE_FLOOR:
+        return False
+    if rewrite_failed(rows):
+        print("dispatch_prompt_check: an earlier rewritten dispatch did not carry the printed prompt", file=sys.stderr)
+        return False
+    return True
+
+
 def decide(payload: dict[str, Any]) -> dict[str, Any] | None:
     if payload.get("hook_event_name") != "PreToolUse" or payload.get("tool_name") not in DISPATCH_TOOLS:
         return None
@@ -580,6 +675,8 @@ def decide(payload: dict[str, Any]) -> dict[str, Any] | None:
     printed = latest_printed(rows, context, output_path)
     if printed is not None and _squash(printed) == _squash(prompt):
         return None
+    if printed is not None and isinstance(tool_input, dict) and _may_rewrite(tool_input, rows):
+        return _rewrite(tool_input, printed + "\n", output_path)
     if _holds(rows, output_path) >= MAX_HOLDS:
         print(
             f"dispatch_prompt_check: {output_path} sent unlike the printed prompt after {MAX_HOLDS} holds",
