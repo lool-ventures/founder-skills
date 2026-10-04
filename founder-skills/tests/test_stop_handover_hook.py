@@ -756,3 +756,202 @@ def test_a_cloud_closing_message_without_the_hand_over_is_not_asked_to_attach(tm
     rows = _cloud_closer_rows(_assistant_text("The coaching step failed, so I stopped before delivering."))
     out = json.loads(_run(tmp_path, rows).stdout)
     assert "attach" not in out["reason"]
+
+
+# --- the review page: a turn that ended waiting at financial-model-review's values check ---------------
+# The question normally goes through AskUserQuestion, which keeps the turn open (the PreToolUse check
+# covers that path). This ask covers the turn that ENDS at the gate -- the question asked in chat, or a
+# host with no question tool -- with the page unsent. The fixtures key on the static build and on how the
+# turn ended, never on the question's wording or options.
+
+REVIEW_CMD = (
+    'python3 "$SCRIPTS/review_inputs.py" "$REVIEW_DIR/inputs.json" --static "$REVIEW_DIR/review.html" '
+    '--extraction-warnings "$REVIEW_DIR/extraction_validation.json"'
+)
+GATE_OPEN_CMD = 'python3 "$SCRIPTS/record_gate_answer.py" open --gate values_check --dir "$REVIEW_DIR"'
+REVIEW_PAGE = "/sessions/x/mnt/outputs/artifacts/financial-model-review-acme/review.html"
+WAITING = "I've built the review page. Please check the values and tell me whether they look right."
+
+
+def _deliver_files(call_id: str, *paths: str, tool: str = "mcp__cowork__present_files") -> list[dict[str, Any]]:
+    call = {
+        "type": "assistant",
+        "message": {
+            "role": "assistant",
+            "content": [
+                {"type": "tool_use", "id": call_id, "name": tool, "input": {"files": [{"file_path": p} for p in paths]}}
+            ],
+        },
+    }
+    return [call, _result_for(call_id, "ok")]
+
+
+def _asked(call_id: str, *, is_error: bool = False, answer: str = "ok") -> list[dict[str, Any]]:
+    call = {
+        "type": "assistant",
+        "message": {
+            "role": "assistant",
+            "content": [{"type": "tool_use", "id": call_id, "name": "AskUserQuestion", "input": {"questions": []}}],
+        },
+    }
+    return [call, _result_for(call_id, answer, is_error=is_error)]
+
+
+def _review_rows(
+    *after: dict[str, Any], offered: tuple[str, ...] = ("mcp__cowork__present_files",), cmd: str = REVIEW_CMD
+) -> list[dict[str, Any]]:
+    return [
+        _snapshot("mcp__workspace__bash", *offered),
+        _user("Review this financial model."),
+        _call_with_id("mcp__workspace__bash", cmd, "toolu_review"),
+        _result_for("toolu_review", '{"ok": true, "mode": "static"}'),
+        *after,
+    ]
+
+
+def _review_ask(tmp_path: Path, rows: list[dict[str, Any]], **extra: Any) -> str | None:
+    r = _run(tmp_path, rows, extra or None)
+    assert r.returncode == 0, r
+    if not r.stdout:
+        return None
+    out = json.loads(r.stdout)
+    assert out["decision"] == "block"
+    return str(out["reason"]) if "review page" in out["reason"] else None
+
+
+def test_review_built_gate_opened_turn_ends_waiting_page_unsent_asks_for_the_page_naming_the_question(
+    tmp_path: Path,
+) -> None:
+    rows = _review_rows(
+        _call_with_id("mcp__workspace__bash", GATE_OPEN_CMD, "toolu_gate"),
+        _result_for("toolu_gate", '{"ok": true}'),
+        _assistant_text(WAITING),
+    )
+    reason = _review_ask(tmp_path, rows)
+    assert reason is not None
+    assert "review.html" in reason and "mcp__cowork__present_files" in reason
+    assert "whether those values look right" in reason and "repeat that question" in reason
+    for word in ("finished", "complete", "done", "deliverable"):
+        assert word not in reason.lower(), word
+
+
+def test_a_page_built_and_left_unsent_with_no_gate_record_is_asked_for_too(tmp_path: Path) -> None:
+    assert _review_ask(tmp_path, _review_rows(_assistant_text(WAITING))) is not None
+
+
+def test_a_message_that_links_nothing_is_still_asked_for_the_page(tmp_path: Path) -> None:
+    """The report's message-shape condition is not part of this ask: the turn waiting at the gate links
+    no file and names no deliverable."""
+    assert not _load_hook()._load_delivery()._DELIVERABLE.search(WAITING), "control: the message links nothing"
+    assert _review_ask(tmp_path, _review_rows(_assistant_text(WAITING))) is not None
+
+
+def test_a_page_sent_before_the_turn_ended_is_silent(tmp_path: Path) -> None:
+    r = _run(tmp_path, _review_rows(*_deliver_files("toolu_d", REVIEW_PAGE), _assistant_text(WAITING)))
+    assert r.returncode == 0 and r.stdout == "" and r.stderr == "", r
+
+
+def test_a_delivery_of_another_file_does_not_send_the_page(tmp_path: Path) -> None:
+    rows = _review_rows(*_deliver_files("toolu_d", "/sessions/x/mnt/outputs/Acme_Report.md"), _assistant_text(WAITING))
+    assert _review_ask(tmp_path, rows) is not None
+
+
+def test_a_question_put_through_the_question_tool_is_silent(tmp_path: Path) -> None:
+    assert _run(tmp_path, _review_rows(*_asked("toolu_q"), _assistant_text("Thanks."))).stdout == ""
+
+
+def test_a_question_the_question_check_held_is_not_a_question_asked(tmp_path: Path) -> None:
+    rows = _review_rows(
+        *_asked("toolu_q", is_error=True, answer="PreToolUse:AskUserQuestion hook error: [review-page-check] Held"),
+        _assistant_text(WAITING),
+    )
+    assert _review_ask(tmp_path, rows) is not None
+
+
+def test_review_built_question_answered_report_delivered_at_end_is_silent(tmp_path: Path) -> None:
+    rows = _review_rows(
+        *_deliver_files("toolu_d0", REVIEW_PAGE),
+        *_asked("toolu_q"),
+        _call_with_id("mcp__workspace__bash", COMPOSE_CMD, "toolu_compose"),
+        _result_for("toolu_compose", "{}"),
+        *_deliver_files("toolu_d", "/sessions/x/mnt/outputs/Acme_Report.md"),
+        _assistant_text(LINKED),
+    )
+    r = _run(tmp_path, rows)
+    assert r.returncode == 0 and r.stdout == "" and r.stderr == "", r
+
+
+def test_review_built_question_answered_page_never_sent_report_delivered_at_end_is_silent(tmp_path: Path) -> None:
+    """Past the values check the page no longer matters: a report build after it ends this ask."""
+    rows = _review_rows(
+        *_asked("toolu_q"),
+        _call_with_id("mcp__workspace__bash", COMPOSE_CMD, "toolu_compose"),
+        _result_for("toolu_compose", "{}"),
+        *_deliver_files("toolu_d", "/sessions/x/mnt/outputs/Acme_Report.md"),
+        _assistant_text(LINKED),
+    )
+    assert _run(tmp_path, rows).stdout == ""
+
+
+def test_a_sent_review_page_does_not_satisfy_the_report_check(tmp_path: Path) -> None:
+    rows = _review_rows(
+        *_deliver_files("toolu_d0", REVIEW_PAGE),
+        *_asked("toolu_q"),
+        _call_with_id("mcp__workspace__bash", COMPOSE_CMD, "toolu_compose"),
+        _result_for("toolu_compose", "{}"),
+        _assistant_text(LINKED),
+    )
+    out = json.loads(_run(tmp_path, rows).stdout)
+    assert out["decision"] == "block" and "attach" in out["reason"] and "review page" not in out["reason"]
+
+
+def test_a_sent_report_does_not_send_the_review_page(tmp_path: Path) -> None:
+    """A delivery of an earlier report, after the page was built, is not the page's delivery."""
+    rows = _review_rows(*_deliver_files("toolu_d", "/sessions/x/mnt/outputs/Acme_Report.md"), _assistant_text(WAITING))
+    assert _review_ask(tmp_path, rows) is not None
+
+
+def test_server_mode_is_never_asked_for_a_page(tmp_path: Path) -> None:
+    server = REVIEW_CMD.replace('--static "$REVIEW_DIR/review.html"', '--workspace "$REVIEW_DIR"')
+    assert _run(tmp_path, _review_rows(_assistant_text(WAITING), cmd=server)).stdout == ""
+
+
+def test_no_delivery_tool_offered_is_never_asked_for_a_page(tmp_path: Path) -> None:
+    assert _run(tmp_path, _review_rows(_assistant_text(WAITING), offered=())).stdout == ""
+
+
+def test_the_plain_cli_is_never_asked_for_a_page(tmp_path: Path) -> None:
+    rows = _review_rows(_assistant_text(WAITING))
+    rows[0]["entrypoint"] = "cli"
+    assert _run(tmp_path, rows).stdout == ""
+
+
+def test_the_page_is_asked_for_once(tmp_path: Path) -> None:
+    assert _run(tmp_path, _review_rows(_assistant_text(WAITING)), {"stop_hook_active": True}).stdout == ""
+
+
+def test_a_gate_record_is_not_a_report_build() -> None:
+    delivery = _load_hook()._load_delivery()
+    assert delivery._BUILD.search(GATE_OPEN_CMD) is None
+    assert delivery._BUILD.search('python3 "$SCRIPTS/record_gate_answer.py" answer --gate values_check') is None
+
+
+def test_a_gate_record_alone_never_triggers_the_report_check(tmp_path: Path) -> None:
+    rows = [
+        _snapshot("mcp__workspace__bash", "mcp__cowork__present_files"),
+        _user("Review this financial model."),
+        _call_with_id("mcp__workspace__bash", GATE_OPEN_CMD, "toolu_gate"),
+        _result_for("toolu_gate", '{"ok": true}'),
+        _assistant_text(LINKED),
+    ]
+    assert _run(tmp_path, rows).stdout == ""
+
+
+def test_a_report_build_after_the_page_ends_the_ask_even_with_no_question(tmp_path: Path) -> None:
+    rows = _review_rows(
+        _call_with_id("mcp__workspace__bash", COMPOSE_CMD, "toolu_compose"),
+        _result_for("toolu_compose", "{}"),
+        *_deliver_files("toolu_d", "/sessions/x/mnt/outputs/Acme_Report.md"),
+        _assistant_text(LINKED),
+    )
+    assert _run(tmp_path, rows).stdout == ""

@@ -19,13 +19,25 @@ WHEN IT ASKS -- all of these, read from the session transcript:
    carrying the printed hand-over whole also counts (`_handover_check.carries`): on a cloud session
    those scripts name each document by its label alone, so the message links nothing. RESIDUAL: a
    cloud closing message rewritten without the hand-over and without a path is not asked to attach.
-4. No delivery call after the build succeeded. A delivery before it (an inputs viewer) does not count.
+4. No delivery call after the build succeeded. A delivery before it does not count: financial-model-
+   review's review page, sent at its values check, is not the report's delivery (and the report's is
+   not the page's -- see REVIEW PAGE below). Each is judged on deliveries after its own build.
 5. The host OFFERED a delivery tool: a name containing `present_files`, or `SendUserFile`, in the
    tool list the transcript records (a `prompt_snapshot` attachment's `tools`, or
    `deferred_tools_delta.addedNames`). A failed call to a guessed name is not evidence the tool
    exists. No such record, or no delivery tool in it: no block -- a host without one delivers some
    other way. The cloud lane's transcript shape is unmeasured, so there this may never fire.
 6. Not the plain Claude Code CLI (`entrypoint == "cli"`), where a path on disk is a delivery.
+
+REVIEW PAGE (`missing_review_delivery`), a separate ask with its own conditions -- not a branch of the
+report's, whose message-shape condition (3) has no part in it: financial-model-review's values check
+built its static review page (`review_inputs.py … --static`) in the current prompt, no successful
+delivery naming the page followed, no report build followed (past the gate the page no longer
+matters), no question was put through AskUserQuestion after it (the PreToolUse check,
+review_page_check.py, owns that path; a question it held does not count as asked), and conditions 5
+and 6 hold. That is a turn that ended WAITING at the gate -- the question asked in chat, or on a host
+with no question tool -- with the page unsent. The ask names the pending question and never calls the
+run finished. A shell call between the build and the end (a gate record) changes nothing.
 """
 
 from __future__ import annotations
@@ -228,3 +240,27 @@ def unsent_review_page(rows: list[dict[str, Any]], start: int) -> tuple[int, str
                 if any(s.strip() == page or s.strip().endswith("/" + page) for s in _strings(b.get("input"))):
                     found = None
     return found
+
+
+def missing_review_delivery(rows: list[dict[str, Any]], start: int) -> tuple[str, str] | None:
+    """(delivery tool, page name) when a turn ended waiting at the values check with its review page
+    unsent, else None (see REVIEW PAGE in the module docstring)."""
+    if any(r.get("entrypoint") == "cli" for r in rows):
+        return None
+    pending = unsent_review_page(rows, start)
+    if pending is None:
+        return None
+    at, page = pending
+    results = tool_outcomes(rows, start)
+    for row in rows[at + 1 :]:
+        if row.get("type") != "assistant" or row.get("isSidechain"):
+            continue
+        for b in _content(row):
+            if isinstance(b, dict) and b.get("type") == "tool_use" and b.get("name") == "AskUserQuestion":
+                cid = b.get("id")
+                if not (isinstance(cid, str) and results.get(cid) is True):
+                    return None
+    seen, tool = offered_tool(rows)
+    if not seen or tool is None:
+        return None
+    return tool, page

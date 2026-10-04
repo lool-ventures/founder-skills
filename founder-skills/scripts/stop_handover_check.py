@@ -364,6 +364,11 @@ def decide(payload: dict[str, Any]) -> dict[str, str] | None:
     hand-over (the closing message carries the printed text) and delivery (finished files were
     attached, not only linked -- `_delivery_check.py`). When both fail, the delivery comes first and
     the printed hand-over is the last thing sent, since nothing after the rewrite is checked.
+
+    Only when neither fires: financial-model-review's review page, built and left unsent by a turn that
+    ended waiting at its values check (`_delivery_check.missing_review_delivery`). The two cannot both
+    apply in one prompt's tail -- a report build after the page ends the page's ask -- and the ask names
+    the pending question, never a finished run.
     """
     if payload.get("hook_event_name") != "Stop" or payload.get("stop_hook_active"):
         return None
@@ -379,7 +384,24 @@ def decide(payload: dict[str, Any]) -> dict[str, str] | None:
         except Exception as e:  # noqa: BLE001 - the delivery check must never cost the hand-over check
             _log(f"delivery check: {type(e).__name__}: {e}")
     if handover is None and tool is None:
-        return None
+        review = None
+        if rows is not None:
+            try:
+                review = _load_delivery().missing_review_delivery(rows, _current_prompt_start(rows))
+            except Exception as e:  # noqa: BLE001 - fail open, as the report check does
+                _log(f"review-page check: {type(e).__name__}: {e}")
+        if review is None:
+            return None
+        review_tool, page = review
+        return {
+            "decision": "block",
+            "reason": (
+                f"The review page ({page}) was built so the founder can check the extracted values, but it "
+                "was not sent, and your question to them -- whether those values look right -- is still "
+                f"waiting on it. Send {page} now with {review_tool}, then repeat that question in one line. "
+                "If the page is not ready to show, say so in one line instead. Add nothing else."
+            ),
+        }
     attach = (
         f"If the files your message points to are the finished deliverables, attach them now with {tool}; "
         "if they are not finished, say so in one line instead."
