@@ -119,10 +119,11 @@ exists. Also read
 criterion, whose pass/warn/fail bars are defined entirely on broken cells (`#REF!`,
 `#DIV/0!`, and the rest). An empty tally means none were found. An ABSENT `model_data.json`
 — a conversational or deck-described model — means that evidence cannot exist, so mark the
-criterion `not_applicable`. Do not score it from the surrounding numbers: a criterion whose
+criterion `not_applicable`. Your prompt says which case applies to this review; follow it, even if a
+`model_data.json` is on disk. Do not score it from the surrounding numbers: a criterion whose
 bar you cannot see is not a criterion you passed.
 
-Also read unit_economics.json and runway.json in the same directory when they exist:
+Also read unit_economics.json and runway.json in REVIEW_DIR when they exist:
 this review's computed figures. When an item turns on a burn multiple, runway, CAC
 payback, LTV/CAC or gross margin, use these figures; do not compute your own. For
 runway use the planning number: today's-burn runway (static_runway_months) when it is

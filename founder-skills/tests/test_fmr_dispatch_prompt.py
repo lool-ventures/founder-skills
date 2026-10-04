@@ -215,3 +215,15 @@ def test_an_unreadable_inputs_json_is_refused(tmp_path: Path) -> None:
     (review / "inputs.json").write_text("{not json", encoding="utf-8")
     r = _gen(review, cwd=tmp_path)
     assert r.returncode == 2 and r.stdout == "" and "inputs.json" in r.stderr
+
+
+def test_the_agent_body_names_the_computed_figures_in_the_review_folder() -> None:
+    """In the agent's CHECKLIST subtype the line before them names the plugin's reference file too, so
+    "in the same directory" pointed there; it names REVIEW_DIR, as the printed prompt names it."""
+    text = (PLUGIN / "agents" / "financial-model-review.md").read_text(encoding="utf-8")
+    start = text.index("#### CHECKLIST subtype")
+    section = " ".join(text[start : text.index("\n#### ", start + 1)].split())
+    assert "Also read unit_economics.json and runway.json in REVIEW_DIR when they exist" in section
+    assert "in the same directory" not in section
+    # The prompt decides whether this run has an extraction; a file left by an earlier review does not.
+    assert "Your prompt says which case applies" in section
