@@ -11,6 +11,7 @@ import ast
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 CORE = ROOT / "scripts" / "_redteam_core.py"
@@ -101,3 +102,52 @@ def test_a_missing_core_is_refused_loudly_even_when_the_text_policy_is_present(t
     assert proc.returncode != 0
     assert json.loads(out.read_text()) == {"sentinel": True}, "-o must be left untouched"
     assert "shared scripts" in proc.stdout and "_redteam_core.py" in proc.stdout, proc.stdout
+
+
+def _core() -> Any:
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("_redteam_core_under_test", CORE)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _art(run_id: Any, **extra: Any) -> dict[str, Any]:
+    return {"metadata": {"run_id": run_id}, **extra}
+
+
+R1, R2, R3 = "20260101T000000Z", "20260102T000000Z", "20260103T000000Z"
+
+
+def test_primary_run_id_on_a_consistent_set_is_its_one_id() -> None:
+    """Today's behaviour is kept wherever the artifacts agree."""
+    assert _core().primary_run_id([_art(R1)] * 5) == R1
+
+
+def test_primary_run_id_is_not_moved_by_one_leftover_in_any_slot() -> None:
+    """A first-artifact rule took a leftover in slot 0 for the run; a last-artifact rule would take one in
+    the last slot. The id most artifacts carry is the answer wherever the leftover sits."""
+    core = _core()
+    for slot in range(5):
+        docs = [_art(R2) for _ in range(5)]
+        docs[slot] = _art(R1)
+        assert core.primary_run_id(docs) == R2, slot
+
+
+def test_primary_run_id_breaks_a_tie_toward_the_newest_id_in_any_order() -> None:
+    core = _core()
+    assert core.primary_run_id([_art(R1), _art(R1), _art(R2), _art(R2)]) == R2
+    assert core.primary_run_id([_art(R2), _art(R2), _art(R1), _art(R1)]) == R2
+    assert core.primary_run_id([_art(R3), _art(R1), _art(R2)]) == R3
+
+
+def test_primary_run_id_ignores_stubs_and_unusable_ids() -> None:
+    """A stub is a step deliberately not run: no analysis, so no vote. Nor does a missing or odd id."""
+    core = _core()
+    stub = _art(R1, skipped=True)
+    assert core.primary_run_id([stub, stub, stub, _art(R2)]) == R2
+    assert core.primary_run_id([_art(None), _art(""), _art(7), None, "x", {}, _art(R2)]) == R2
+    assert core.primary_run_id([stub, _art(None), None]) is None
+    assert core.primary_run_id([]) is None

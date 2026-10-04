@@ -398,12 +398,37 @@ def write_copy(
 
 
 def primary_run_id(docs: Iterable[Any]) -> str | None:
-    """This run's id, from the required artifacts -- never from the review itself."""
+    """This run's id, from the required artifacts -- never from the review itself.
+
+    THE ID MOST OF THEM CARRY, ties going to the newest. An analysis dir is per company, so a re-run
+    writes over an earlier run's files, and one the re-run did not regenerate keeps the earlier id. The
+    rule this replaces took the FIRST artifact's id, so a leftover in the first slot (competitive-
+    positioning lists `landscape.json` first, market-sizing `inputs.json`) made the earlier run "this
+    run": its review was accepted as this run's, and this run's own skip record was refused. A majority
+    cannot be moved by one leftover file in a set of three or more, and a consistent set (one id) gets
+    exactly the id it always got.
+
+    A tie (an even split) goes to the newest id. Every skill mints its run id as a UTC timestamp
+    (`date -u +%Y%m%dT%H%M%SZ`), so the greatest string is the latest mint, and a leftover is older by
+    definition. The last-produced artifact was rejected as the tie-break: a single leftover in the last
+    slot (a checklist not regenerated) would decide it. The result does not depend on the order the
+    artifacts are passed in.
+
+    A stub (`"skipped": true`, a step deliberately not run, the fleet's one stub shape) is no analysis,
+    so its id does not vote; nor does a missing, empty or non-string id. None when no artifact carries one.
+    STALE_ARTIFACT still names every leftover; this only decides whose review the report is resolved for.
+    """
+    counts: dict[str, int] = {}
     for doc in docs:
-        rid = as_dict(as_dict(doc).get("metadata")).get("run_id")
+        d = as_dict(doc)
+        if d.get("skipped") is True:
+            continue
+        rid = as_dict(d.get("metadata")).get("run_id")
         if isinstance(rid, str) and rid:
-            return rid
-    return None
+            counts[rid] = counts.get(rid, 0) + 1
+    if not counts:
+        return None
+    return max(counts, key=lambda rid: (counts[rid], rid))
 
 
 # Each message carries its own remedy. It is printed at the moment of action, which a rule

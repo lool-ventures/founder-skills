@@ -276,8 +276,9 @@ def _rt_refuse(run_id: str | None, all_run_ids: set[str], reviews: Sequence[Any]
     nothing, and a step whose only consumer is a warning gets skipped in silence (market-sizing's review
     was, on a live paid run). Only a non-zero exit reaches SKILL.md's stop-and-report branch.
 
-    Keyed on `run_id`, the run the report is resolved for -- the first usable required artifact's id,
-    the same id `_cp_redteam_copy.resolve` and `skip_reason` use -- never on the run's hand-off dir: a
+    Keyed on `run_id`, the run the report is resolved for -- the id most usable required artifacts carry
+    (`_redteam_core.primary_run_id`, ties to the newest), the same id `_cp_redteam_copy.resolve` and
+    `skip_reason` use, so one leftover from an earlier run cannot decide it -- never on the run's hand-off dir: a
     missing dir once read as "not a run that can be judged", so deleting it silenced the gate. A stub
     carries no analysis, so its id is not a run's (the caller drops stubs). Accepting a review of ANY id
     the artifacts carry let an earlier run's review pass a set with one artifact left from that run,
@@ -2130,6 +2131,8 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
     # (`_cp_redteam_copy`, rules in the shared `_redteam_core`).
     # This run's id, from the usable required artifacts only (a stub is no analysis), as visualize.py
     # reads it -- ONE id for the resolver, the gate and the skip reason, so they agree on whose review it is.
+    # The id most of them carry, not the first one's: landscape.json is listed first, and a leftover there
+    # once made an earlier run's review count as this run's.
     _rt_required = [a for a in (artifacts.get(n) for n in REQUIRED_ARTIFACTS) if _usable(a)]
     _rt_run_id = _cp_redteam_copy.primary_run_id(_rt_required)
     _rt_shown, _rt_codes, _rt_facts = _cp_redteam_copy.resolve(

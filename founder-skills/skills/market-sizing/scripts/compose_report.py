@@ -2351,7 +2351,7 @@ def _section_assumptions(validation: dict[str, Any] | None, sizing: dict[str, An
 
 
 def _red_team_state(
-    artifacts: dict[str, dict[str, Any] | None], methodology: dict[str, Any] | None
+    artifacts: dict[str, dict[str, Any] | None], methodology: dict[str, Any] | None, primary: str | None
 ) -> tuple[str, str | None]:
     """("ran" | "skipped" | "ungated", <skip reason enum or None>).
 
@@ -2364,16 +2364,10 @@ def _red_team_state(
         # PARITY, not mere presence. A redteam.json left by an earlier analysis of the same
         # company satisfies an existence check while describing different figures entirely --
         # deck-review's reconciliation gate carries the same rule for the same reason.
+        # `primary` is this run's id, the one every other reader resolves the review for
+        # (`_redteam_copy.primary_run_id`): the id most required artifacts carry, so one leftover from an
+        # earlier run cannot make that run's review count as this one's.
         rid = _as_dict(art.get("metadata")).get("run_id")
-        primary = None
-        for name in REQUIRED_ARTIFACTS:
-            other = artifacts.get(name)
-            if _usable(other):
-                assert other is not None
-                candidate = _as_dict(other.get("metadata")).get("run_id")
-                if isinstance(candidate, str) and candidate:
-                    primary = candidate
-                    break
         if primary is None or (isinstance(rid, str) and rid == primary):
             return ("ran", None)
 
@@ -3121,11 +3115,15 @@ def _compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
     for name in all_names:
         artifacts[name] = _load_artifact(dir_path, name)
 
+    # This run's id, ONE value for the resolver, the sizing check, the gate, the hand-off audit and the
+    # revision check, so they agree on whose review it is (rule in `_redteam_core.primary_run_id`).
+    _rt_run_id = _redteam_copy.primary_run_id(a for a in (artifacts.get(n) for n in REQUIRED_ARTIFACTS) if _usable(a))
+
     # The review every reader below sees -- the report, the verdict, the gate, the coaching payload
     # -- is its append-only copy, never `redteam.json` as it now stands (see _redteam_copy).
     _rt_shown, _rt_codes, _rt_facts = _redteam_copy.resolve(
         dir_path,
-        _redteam_copy.primary_run_id(artifacts.get(n) for n in REQUIRED_ARTIFACTS),
+        _rt_run_id,
         artifacts.get("redteam.json"),
         artifacts.get("methodology.json"),
         same_as_now=_view.review_matcher(
@@ -3142,7 +3140,7 @@ def _compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
     # section, verdict or payload can render a figure the inputs do not give.
     _sz_render, _sz_codes = _view.sizing_integrity(
         dir_path,
-        _redteam_copy.primary_run_id(artifacts.get(n) for n in REQUIRED_ARTIFACTS),
+        _rt_run_id,
         artifacts.get("sizing.json"),
         artifacts.get("validation.json"),
         artifacts.get("inputs.json"),
@@ -3171,7 +3169,7 @@ def _compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
     #
     # Severity could not do this job: Step 7 runs compose without --strict, so even `high` halts
     # nothing. Only a non-zero exit reaches SKILL.md's documented stop-and-report branch.
-    _rt_state, _rt_reason = _red_team_state(artifacts, artifacts.get("methodology.json"))
+    _rt_state, _rt_reason = _red_team_state(artifacts, artifacts.get("methodology.json"), _rt_run_id)
     if _rt_state == "ungated":
         if _rt_reason is None:
             _detail = (
@@ -3197,14 +3195,12 @@ def _compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
 
     # Run validation
     warnings = validate_artifacts(artifacts)
-    _bypassed_steps = _handoff_bypassed(
-        dir_path, _redteam_copy.primary_run_id(artifacts.get(n) for n in REQUIRED_ARTIFACTS), artifacts
-    )
+    _bypassed_steps = _handoff_bypassed(dir_path, _rt_run_id, artifacts)
     if _bypassed_steps:
         warnings.append(_warn("HANDOFF_BYPASSED", _handoff_audit().founder_message(_bypassed_steps)))
     _unoffered = _revision_not_offered(
         dir_path,
-        _redteam_copy.primary_run_id(artifacts.get(n) for n in REQUIRED_ARTIFACTS),
+        _rt_run_id,
         artifacts.get("redteam.json"),
         rounds=int(_rt_facts.get("rounds") or 0),
     )

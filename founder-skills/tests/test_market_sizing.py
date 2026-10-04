@@ -9519,6 +9519,21 @@ def test_a_review_from_an_earlier_run_today_is_disclosed(tmp_path: Path) -> None
     assert w["severity"] == "medium" and "20251231T000000Z" in w["message"]
 
 
+def test_an_earlier_runs_review_does_not_pass_a_set_with_one_leftover_artifact() -> None:
+    """Run 1 reviewed; run 2 regenerated every required artifact but inputs.json, the first one listed, and
+    recorded no review or skip. One leftover file must not make run 1's review count as run 2's: the gate
+    refuses, as it does for a set with no leftover."""
+    d = _gated_dir()
+    _pipe_review(d, "The published share is 6.1%.")
+    for name in ("methodology.json", "validation.json", "sizing.json", "checklist.json", "sensitivity.json"):
+        data = json.loads((d / name).read_text())
+        data["metadata"]["run_id"] = "20260102T000000Z"
+        (d / name).write_text(json.dumps(data))
+    rc, stdout, _err = run_script_raw("compose_report.py", ["--dir", str(d)])
+    assert rc == 1, f"run 1's review passed run 2's gate: {stdout[-400:]}"
+    assert "no adversarial review was run" in stdout
+
+
 def test_a_review_from_an_earlier_run_days_ago_is_not_disclosed(tmp_path: Path) -> None:
     d = _gated_dir()
     other = d / "handoff" / "20251231T000000Z"

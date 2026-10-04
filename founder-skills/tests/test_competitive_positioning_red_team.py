@@ -528,18 +528,44 @@ def _refused(d: Path, r: subprocess.CompletedProcess[str]) -> None:
     assert not (d / "report.json").exists(), "a refusal must write nothing"
 
 
+def _stamp(d: Path, name: str, run_id: str) -> None:
+    data = json.loads((d / name).read_text(encoding="utf-8"))
+    data.setdefault("metadata", {})["run_id"] = run_id
+    (d / name).write_text(json.dumps(data), encoding="utf-8")
+
+
 def test_a_review_or_skip_of_another_run_in_a_mixed_set_is_refused(tmp_path: Path) -> None:
-    """The gate keys on the run id the report is resolved for (the first usable required artifact's),
-    the same id `resolve` and `skip_reason` use. A skip of some other id the set carries is not this
-    run's decision, and the refusal names the mixed set."""
+    """The gate keys on the run id the report is resolved for (the id most required artifacts carry), the
+    same id `resolve` and `skip_reason` use. A skip of the id only a leftover carries is not this run's
+    decision, and the refusal names the mixed set. The leftover is listed FIRST (landscape.json), where a
+    first-artifact rule would have taken its id for the run's and accepted the skip."""
     d = _analysis(tmp_path)
-    _skip(d, RUN)
-    land = json.loads((d / "landscape.json").read_text(encoding="utf-8"))
-    land["metadata"]["run_id"] = "an-earlier-run"
-    (d / "landscape.json").write_text(json.dumps(land), encoding="utf-8")
+    _stamp(d, "landscape.json", RUN_2)
+    _skip(d, RUN_2)
     r = _compose_run(d)
     _refused(d, r)
-    assert "more than one run" in r.stdout
+    assert "more than one run" in r.stdout and RUN in r.stdout and RUN_2 in r.stdout
+
+
+def test_a_skip_of_this_run_passes_a_set_with_one_leftover_to_stale_artifact(tmp_path: Path) -> None:
+    """Control for the case above: the skip IS this run's (the id four of five artifacts carry), so the gate
+    passes and STALE_ARTIFACT names the leftover. A first-artifact rule refused this run for its own skip."""
+    d = _analysis(tmp_path)
+    _stamp(d, "landscape.json", "an-earlier-run")
+    _skip(d, RUN)
+    r = _compose_run(d)
+    assert r.returncode == 0, r.stdout[-600:]
+    assert "STALE_ARTIFACT" in (d / "report.json").read_text(encoding="utf-8")
+
+
+def test_an_earlier_runs_review_does_not_pass_a_set_with_a_leftover_landscape(tmp_path: Path) -> None:
+    """Run 1 reviewed; run 2 regenerated every artifact but landscape.json, the first one listed, and recorded
+    no review or skip. One leftover file must not make run 1's review stand in for run 2's."""
+    d = _analysis(tmp_path)
+    assert _pipe(d, {"findings": []}).returncode == 0
+    _restamp(d, RUN_2)
+    _stamp(d, "landscape.json", RUN)
+    _refused(d, _compose_run(d))
 
 
 def _second_run_with_a_stale_checklist(tmp_path: Path, checklist: dict[str, Any] | None = None) -> Path:
