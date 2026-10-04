@@ -397,6 +397,7 @@ def test_step0_never_keys_on_the_flat_skill_mount_or_reads_a_skill_file(skill: s
 
 MS_GEN = PLUGIN / "skills" / "market-sizing" / "scripts" / "dispatch_prompt.py"
 CP_GEN = PLUGIN / "skills" / "competitive-positioning" / "scripts" / "cp_dispatch_prompt.py"
+FMR_GEN = PLUGIN / "skills" / "financial-model-review" / "scripts" / "fmr_dispatch_prompt.py"
 
 
 # --- every sub-agent prompt that carries a bundled reference path names the fallback -------------
@@ -414,7 +415,7 @@ def _load(path: Path):  # type: ignore[no-untyped-def]
 
 def _prompts_with_reference_paths() -> list[tuple[str, str, str]]:
     found: list[tuple[str, str, str]] = []
-    for gen in (MS_GEN, CP_GEN):
+    for gen in (MS_GEN, CP_GEN, FMR_GEN):
         mod = _load(gen)
         for name, value in vars(mod).items():
             if isinstance(value, str) and "<PLUGIN_ROOT_AGENT>" in value:
@@ -429,11 +430,12 @@ def _prompts_with_reference_paths() -> list[tuple[str, str, str]]:
 
 
 # Hard-coded, never derived from the scan below: a scan that went blind would otherwise pass on nothing.
-# The three generator templates, and the four prompts a SKILL.md still writes out in a fence.
+# The four generator templates, and the four prompts a SKILL.md still writes out in a fence.
 EXPECTED_REFERENCE_PROMPTS = {
     ("dispatch_prompt.py", "CONTEXT: CHECKLIST"),
     ("cp_dispatch_prompt.py", "CONTEXT: MOAT_SCORING"),
     ("cp_dispatch_prompt.py", "CONTEXT: CHECKLIST"),
+    ("fmr_dispatch_prompt.py", "CONTEXT: CHECKLIST"),
     ("deck-review", "CONTEXT: SLIDE_REVIEWS"),
     ("deck-review", "CONTEXT: CHECKLIST"),
     ("financial-model-review", "CONTEXT: INPUTS_REVIEW"),
@@ -467,6 +469,10 @@ def _session_renderings(tmp_path: Path) -> dict[str, str]:
         out[f"cp {context}"] = cp.render(
             context, run_id="R", handoff_agent="/h", analysis_dir_agent="/a", session_tree=True
         )
+    fmr = _load(FMR_GEN)
+    out["fmr checklist"] = fmr.checklist(
+        run_id="R", handoff_agent="/h", review_dir_agent="/a", has_model_data=True, session_tree=True
+    )
     return out
 
 

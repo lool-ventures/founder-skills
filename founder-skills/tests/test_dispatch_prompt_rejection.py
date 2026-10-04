@@ -2,7 +2,7 @@
 
 A generated prompt's hand-off that the producer rejects needs a repair dispatch carrying the producer's
 message. Typed onto the prompt, that message makes it differ from the printed one, and the dispatch hook
-holds it. Both generators therefore print the redo themselves (`--correction producer-rejected
+holds it. Each generator therefore prints the redo itself (`--correction producer-rejected
 --detail-file F`), reading the message from the file the producer's stderr was saved to: a fixed lead,
 the message quoted line by line, capped, before the closing line.
 """
@@ -21,6 +21,7 @@ import pytest
 PLUGIN = Path(__file__).resolve().parents[1]
 MS_GEN = PLUGIN / "skills" / "market-sizing" / "scripts" / "dispatch_prompt.py"
 CP_GEN = PLUGIN / "skills" / "competitive-positioning" / "scripts" / "cp_dispatch_prompt.py"
+FMR_GEN = PLUGIN / "skills" / "financial-model-review" / "scripts" / "fmr_dispatch_prompt.py"
 HOOK = PLUGIN / "scripts" / "dispatch_prompt_check.py"
 END = "Do NOT write any file other than OUTPUT_PATH.\n"
 MESSAGE = "Error: items[3].status must be one of pass, fail, warn\nError: 2 items missing evidence\n"
@@ -57,7 +58,25 @@ def _cp_args(tmp_path: Path) -> list[str]:
     return [str(CP_GEN), "moat_scoring", "--run-id", "R", "--handoff-agent", "a/h/R", "--analysis-dir-agent", "a"]
 
 
-GENERATORS = {"market-sizing": _ms_args, "competitive-positioning": _cp_args}
+def _fmr_args(tmp_path: Path) -> list[str]:
+    review = tmp_path / "fmr"
+    review.mkdir(exist_ok=True)
+    (review / "inputs.json").write_text("{}", encoding="utf-8")
+    return [
+        str(FMR_GEN),
+        "checklist",
+        "--run-id",
+        "R",
+        "--handoff-agent",
+        "a/h/R",
+        "--review-dir-agent",
+        "a",
+        "--review-dir",
+        str(review),
+    ]
+
+
+GENERATORS = {"market-sizing": _ms_args, "competitive-positioning": _cp_args, "financial-model-review": _fmr_args}
 
 
 def _gen(args: list[str], *extra: str) -> subprocess.CompletedProcess[str]:
@@ -82,11 +101,12 @@ def test_the_redo_carries_the_message_quoted_before_the_closing_line(tmp_path: P
     assert redo.stdout == plain.stdout[: -len(END)] + added + END
 
 
-def test_both_generators_word_the_redo_alike() -> None:
-    ms, cp = _load(MS_GEN, "ms_gen_rej"), _load(CP_GEN, "cp_gen_rej")
-    for name in ("PRODUCER_REJECTED", "REJECTION_LEAD", "REJECTION_TAIL", "DETAIL_CAP"):
-        assert getattr(ms, name) == getattr(cp, name), name
-    assert ms.rejection_text(MESSAGE) == cp.rejection_text(MESSAGE)
+def test_every_generator_words_the_redo_alike() -> None:
+    ms = _load(MS_GEN, "ms_gen_rej")
+    for other in (_load(CP_GEN, "cp_gen_rej"), _load(FMR_GEN, "fmr_gen_rej")):
+        for name in ("PRODUCER_REJECTED", "REJECTION_LEAD", "REJECTION_TAIL", "DETAIL_CAP", "CORRECTIONS"):
+            assert getattr(ms, name) == getattr(other, name), name
+        assert ms.rejection_text(MESSAGE) == other.rejection_text(MESSAGE)
 
 
 @pytest.mark.parametrize("skill", sorted(GENERATORS))

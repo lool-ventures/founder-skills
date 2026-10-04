@@ -5,7 +5,7 @@ path inside the VM before the command runs; other paths are left alone. A genera
 folder as a command-line argument printed that VM path into the CHECKLIST / MOAT_SCORING reference
 lines, and a sub-agent's file tools are refused a VM path on a local session.
 
-So the two prompt generators no longer take the folder from the shell. Each one decides from where it
+So the prompt generators do not take the folder from the shell. Each one decides from where it
 runs: off a `/sessions` tree (CLI, cloud) it prints the absolute reference paths from its own location,
 the same text as before; on a `/sessions` tree (local Desktop) it points the sub-agent at the full path
 its own instructions give, naming only how that path ends. The agent body carries that full path,
@@ -36,6 +36,7 @@ SKILLS = sorted(p.parent.name for p in (PLUGIN / "skills").glob("*/SKILL.md"))
 TOKEN = "${CLAUDE_PLUGIN_ROOT}"
 MS_GEN = PLUGIN / "skills" / "market-sizing" / "scripts" / "dispatch_prompt.py"
 CP_GEN = PLUGIN / "skills" / "competitive-positioning" / "scripts" / "cp_dispatch_prompt.py"
+FMR_GEN = PLUGIN / "skills" / "financial-model-review" / "scripts" / "fmr_dispatch_prompt.py"
 RESOLVER = PLUGIN / "scripts" / "resolve_artifacts_root.py"
 # Off a /sessions tree each reference-naming prompt is pinned as readable text, one file per prompt, with the
 # generator's plugin folder written as @PLUGIN_ROOT@. The files began as the previous generator's output when
@@ -89,7 +90,7 @@ def generator_commands() -> list[tuple[str, str, str]]:
             i = 0
             while i < len(lines):
                 line = lines[i]
-                if re.match(r'^python3 "\$SCRIPTS/(cp_)?dispatch_prompt\.py" ', line):
+                if re.match(r'^python3 "\$SCRIPTS/(cp_|fmr_)?dispatch_prompt\.py" ', line):
                     cmd = line
                     while cmd.endswith("\\"):
                         i += 1
@@ -274,9 +275,9 @@ def text_mismatch(label: str, expected: str, actual: str) -> str:
 
 
 def _template(skill: str, context: str) -> str:
-    gen = MS_GEN if skill == "market-sizing" else CP_GEN
+    gen = {"market-sizing": MS_GEN, "competitive-positioning": CP_GEN, "financial-model-review": FMR_GEN}[skill]
     mod = _load(gen, f"tpl_{gen.stem}")
-    return str(mod._CHECKLIST_TEMPLATE if skill == "market-sizing" else mod._TEMPLATES[context])
+    return str(mod._TEMPLATES[context] if skill == "competitive-positioning" else mod._CHECKLIST_TEMPLATE)
 
 
 @pytest.mark.parametrize("pair", sorted(EXPECTED_TAILS))
@@ -317,6 +318,8 @@ def test_the_mismatch_message_shows_a_diff_and_names_a_whitespace_only_change() 
 # --- the old flag: accepted, ignored, unlisted ---------------------------------------------------
 
 
+# financial-model-review's generator is not here: it never took the folder flag, so it has no older
+# command line to stay compatible with.
 _CLI_CASES = [
     (MS_GEN, "checklist"),
     (CP_GEN, "moat_scoring"),
@@ -348,7 +351,7 @@ def test_the_old_flag_changes_nothing(gen: Path, context: str, tmp_path: Path) -
         assert (r.returncode, r.stdout, r.stderr) == (0, plain.stdout, ""), (value, r.stderr)
 
 
-@pytest.mark.parametrize("gen", [MS_GEN, CP_GEN], ids=lambda p: p.stem)
+@pytest.mark.parametrize("gen", [MS_GEN, CP_GEN, FMR_GEN], ids=lambda p: p.stem)
 def test_help_does_not_offer_the_old_flag(gen: Path) -> None:
     r = subprocess.run([sys.executable, str(gen), "--help"], capture_output=True, text=True, timeout=30)
     assert r.returncode == 0
@@ -358,7 +361,7 @@ def test_help_does_not_offer_the_old_flag(gen: Path) -> None:
 # --- lane detection is the resolver's ----------------------------------------------------------
 
 
-@pytest.mark.parametrize("gen", [MS_GEN, CP_GEN], ids=lambda p: p.stem)
+@pytest.mark.parametrize("gen", [MS_GEN, CP_GEN, FMR_GEN], ids=lambda p: p.stem)
 def test_lane_detection_is_a_copy_of_the_resolvers(gen: Path) -> None:
     mod = _load(gen, f"lane_{gen.stem}")
     res = _load(RESOLVER, "lane_resolver")
@@ -378,7 +381,7 @@ def test_lane_detection_is_a_copy_of_the_resolvers(gen: Path) -> None:
         assert mod.on_session_tree(path) == res.on_session_tree(path), path
 
 
-@pytest.mark.parametrize("gen", [MS_GEN, CP_GEN], ids=lambda p: p.stem)
+@pytest.mark.parametrize("gen", [MS_GEN, CP_GEN, FMR_GEN], ids=lambda p: p.stem)
 def test_the_lane_is_read_from_the_folder_and_the_cwd(
     gen: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -447,7 +450,7 @@ def test_the_token_guard_sees_an_argument_and_spares_a_script_path() -> None:
 # --- the agent bodies carry the full paths the pointer sends the sub-agent to -------------------
 
 
-_GEN_AGENT = {MS_GEN: "market-sizing", CP_GEN: "competitive-positioning"}
+_GEN_AGENT = {MS_GEN: "market-sizing", CP_GEN: "competitive-positioning", FMR_GEN: "financial-model-review"}
 
 
 def _template_tails() -> dict[tuple[str, str], set[str]]:
@@ -473,6 +476,7 @@ def test_template_tails_match_the_expected_references() -> None:
         ("market-sizing", "CHECKLIST"): EXPECTED_TAILS[("market-sizing", "checklist")],
         ("competitive-positioning", "MOAT_SCORING"): EXPECTED_TAILS[("competitive-positioning", "moat_scoring")],
         ("competitive-positioning", "CHECKLIST"): EXPECTED_TAILS[("competitive-positioning", "checklist")],
+        ("financial-model-review", "CHECKLIST"): {"skills/financial-model-review/references/checklist-criteria.md"},
     }
     assert _template_tails() == expected
 
