@@ -22,13 +22,18 @@ tool result counts only when the call that produced it is paired by tool id and 
     `$SCRIPTS/<generator>`, the form SKILL.md writes; never a copy elsewhere, and never once any call in
     the session (a sub-agent's included) wrote into the plugin's scripts or over a generator, with names
     read through the block's own assignments -- whose output reaches the result, and in which EVERY
-    other command is known to be quiet: assignments, `cd`, `mkdir`, `ls`, `wc`, `test`, `true`,
-    `set -e`, `cp`/`mv` with no device or /proc argument, the plugin's `resolve_artifacts_root.py` and
-    `ocr_uploads.py` (piped at most into `head`/`tail`/`wc`), and `echo` of literals and of `$?` or the
-    block's own variables that, run together, name no context line, no OUTPUT_PATH and no closing line.
-    Anything else -- an unknown command, a shell keyword or function, a subshell, a heredoc, an input
-    redirect -- and the block is not a comparand. The search takes the LAST context line in a result, so
-    this is what keeps a trailing `cat forged.txt` out;
+    other command is known to be quiet: assignments, `cd`, `mkdir`, `ls` (before the generator only),
+    `wc`, `test`, `true`, `set -e`, `cp`/`mv` with no device or /proc argument, the plugin's
+    `resolve_artifacts_root.py` and `ocr_uploads.py` (piped at most into `head`/`tail`/`wc`), and `echo`
+    of literals and of `$?` or the block's own variables that, run together, name no context line, no
+    OUTPUT_PATH and no closing line. Anything else -- an unknown command, a shell keyword or function, a
+    subshell, a heredoc, an input redirect -- and the block is not a comparand. The search takes the
+    LAST context line in a result, so this is what keeps a trailing `cat forged.txt` out. Or the
+    generator is the block's LAST command (after `;`, a newline or `&&`), and what runs before it may
+    print -- the steps a model folds into the same block (a producer pipe, its exit-code echo, a `cat`)
+    -- so long as each is a plugin script or a known command that cannot leave anything running that
+    prints later (no other interpreter, no exec, trap, sed, awk or find). A block that sets PATH,
+    PYTHONPATH and the like is never a comparand;
   * a Read, or a quiet block's `cat`/`head`/`tail`, of the file a generator's stdout was redirected
     into (`> "$HANDOFF_DIR/prompt.txt"`, the block's own `NAME="..."` assignments expanded), or of the
     file the runtime saved an oversized generator result to ("Full output saved to: ..."), while no
@@ -202,7 +207,21 @@ GENERATORS: dict[str, str] = {
 # Plugin scripts a generator block may also run: they print only paths and receipts of their own.
 _QUIET_SCRIPTS = frozenset({"resolve_artifacts_root.py", "ocr_uploads.py"})
 # Commands that print nothing a model chooses (cp/mv only when no argument is a device).
-_QUIET = frozenset({"cd", "mkdir", "ls", "wc", "test", "[", "true", ":", "cp", "mv"})
+_QUIET = frozenset({"cd", "mkdir", "wc", "test", "[", "true", ":", "cp", "mv"})
+# Quiet only BEFORE the generator: a listing after it prints names whoever made the files chose, one per
+# line, which could stand in for a prompt's lines.
+_QUIET_BEFORE = frozenset({"ls"})
+# What may run, and print, before the generator when the generator is the block's last command: none of
+# these can leave anything running that prints after it (no interpreter of unknown code, no background
+# job, no exec, no trap, no sed/awk/find that can run commands).
+_MAY_PRECEDE = frozenset({"cat", "echo", "printf", "grep", "egrep", "fgrep", "rg", "ls", "wc", "head", "tail",
+                          "sort", "uniq", "cut", "tr", "jq", "test", "[", "true", "false", ":", "cd", "mkdir",
+                          "cp", "mv", "touch", "date", "pwd", "basename", "dirname", "stat", "file", "du", "df",
+                          "diff", "cmp", "md5", "md5sum", "shasum", "sha256sum", "nl", "column", "set"})  # fmt: skip
+# Variables that change which program runs or what it loads: set anywhere in the block, no comparand.
+_HIJACK_VARS = frozenset({"PATH", "PYTHONPATH", "PYTHONSTARTUP", "PYTHONHOME", "PYTHONINSPECT", "PYTHONUSERBASE",
+                          "PYTHONSAFEPATH", "BASH_ENV", "ENV", "LD_PRELOAD", "LD_LIBRARY_PATH", "IFS", "PS4",
+                          "SHELLOPTS", "BASHOPTS", "PROMPT_COMMAND"})  # fmt: skip
 # What a pipe from ocr_uploads.py may feed: counts and the tail of its receipt.
 _PIPE_FILTERS = frozenset({"head", "tail", "wc"})
 # Commands that may name a redirected prompt file without changing it.
@@ -239,6 +258,7 @@ class _Cmd:
         self.redirects: list[tuple[str, str | None, str]] = []
         self.reads_input = False
         self.substituted = False
+        self.sep_before: str | None = None
         self.upstream: _Cmd | None = None
 
 
@@ -328,6 +348,7 @@ def _parse_block(command: str, _depth: int = 0) -> list[_Cmd] | None:
                 cur.piped = tok == "|"
                 nxt = _Cmd()
                 nxt.upstream = cur if tok == "|" else None
+                nxt.sep_before = tok
                 cur = nxt
             elif tok == "|":
                 return None
@@ -593,13 +614,28 @@ def _writes_file(
     return False
 
 
+def _hijacked(cmds: list[_Cmd]) -> bool:
+    """A block that sets a variable deciding which program runs or what it loads (PATH, PYTHONPATH...)."""
+    for c in cmds:
+        for name, _value in _assignments(c):
+            if name in _HIJACK_VARS or name.startswith("DYLD_"):
+                return True
+    return False
+
+
 def generator_block(command: str, distrusted: frozenset[str] | set[str] = frozenset()) -> tuple[bool, list[str]]:
     """(prints, files) for one shell block: whether a trusted generator's output reaches the result
-    with every other command in the block known to be quiet, and the files a generator's stdout was
+    with nothing after it able to print text of its own choosing, and the files a generator's stdout was
     redirected into (expanded with the block's own literal assignments) that nothing else in the block
-    writes."""
+    writes.
+
+    Two shapes count. Every other command known to be quiet, the generator anywhere; or the generator
+    the block's LAST command, after `;`, a newline or `&&`, with what runs before it free to print (its
+    output comes first, and the search takes the last context line) so long as it cannot leave anything
+    running that prints later. The second needs the generator last: if it failed after a printing step,
+    the call's exit code says so, where a quiet command after it would hide the failure."""
     cmds = _parse_block(command)
-    if cmds is None:
+    if cmds is None or _hijacked(cmds):
         return False, []
     env, raw, assigned = _env(cmds)
     kinds = [_kind(c, raw, assigned, set(distrusted)) for c in cmds]
@@ -616,18 +652,52 @@ def generator_block(command: str, distrusted: frozenset[str] | set[str] = frozen
             later = [c for c in cmds[cmds.index(gen) + 1 :] if c is not gen] + [c for c in cmds if c.substituted]
             if not _writes_file(later, path, env, raw, assigned, trust):
                 kept.append(path)
-    prints = all(not c.piped for c in gens) and any(c.stdout_file is None for c in gens)
-    quiet, shown = _block_quiet(cmds, kinds, env, assigned, set(kept))
-    return (prints or shown) and quiet, kept
+    printing = [c for c in gens if c.stdout_file is None and not c.piped]
+    prints = bool(printing) and all(not c.piped for c in gens)
+    top = [c for c in cmds if not c.substituted]
+    last = printing[-1] if printing else None
+    split = top.index(last) if last is not None else len(top)
+    quiet, shown = _block_quiet(cmds, kinds, env, assigned, set(kept), set(map(id, top[:split])))
+    if quiet:
+        return (prints or shown), kept
+    if last is not None and top[-1] is last and last.sep_before != "||" and prints:
+        before = [(c, k) for c, k in zip(cmds, kinds) if not c.substituted and top.index(c) < split]
+        subs = [(c, k) for c, k in zip(cmds, kinds) if c.substituted]
+        if all(_may_precede(c, k, raw) for c, k in before):
+            sub_quiet, _ = _block_quiet([c for c, _ in subs], [k for _, k in subs], env, assigned, set(), set())
+            return sub_quiet, kept
+    return False, kept
+
+
+def _may_precede(c: _Cmd, kind: str, raw: dict[str, str]) -> bool:
+    """A command that may run, and print, before the generator: a known command that cannot leave
+    anything running that prints later, a plugin script, another trusted generator, an assignment."""
+    if kind in ("generator", "assign", "quiet"):
+        return True
+    words = _words(c.argv)
+    name = os.path.basename(words[0]) if words else ""
+    script = _script(words)
+    if script is not None:
+        return _plugin_script(script, raw) and os.path.basename(script) not in GENERATORS
+    if name in ("cp", "mv"):
+        return False  # a device or /proc argument (quiet otherwise)
+    return name in _MAY_PRECEDE and not _INTERPRETERS_RE.match(name)
 
 
 def _block_quiet(
-    cmds: list[_Cmd], kinds: list[str], env: dict[str, str], assigned: set[str], files: set[str]
+    cmds: list[_Cmd],
+    kinds: list[str],
+    env: dict[str, str],
+    assigned: set[str],
+    files: set[str],
+    before: set[int] | None = None,
 ) -> tuple[bool, bool]:
     """(quiet, shown): whether every command is a generator or known to be quiet, and whether a
-    `cat`/`head`/`tail` in the block prints one of `files` (a file a generator wrote)."""
+    `cat`/`head`/`tail` in the block prints one of `files` (a file a generator wrote). `before` holds
+    the commands that run before the generator, where a listing is quiet too."""
     shown = False
     echoes = []
+    before = before or set()
     for c, kind in zip(cmds, kinds):
         if c.reads_input or (c.piped and kind not in ("quiet", "generator")):
             return False, False
@@ -642,6 +712,8 @@ def _block_quiet(
             continue
         words = _words(c.argv)
         name = os.path.basename(words[0]) if words else ""
+        if name in _QUIET_BEFORE and id(c) in before:
+            continue
         flags = [w for w in words[1:] if w.startswith("-") or w.isdigit()]
         operands = [w for w in words[1:] if w not in flags]
         if kind == "filter" and c.upstream is not None and not operands and not c.substituted:

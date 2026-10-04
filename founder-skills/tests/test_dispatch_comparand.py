@@ -334,3 +334,54 @@ def test_the_folder_the_runtime_loaded_our_skill_from_is_trusted() -> None:
 def test_a_block_the_parser_cannot_read_that_writes_into_the_plugin_distrusts(block: str) -> None:
     rows = _rows(("Bash", {"command": block}, ""), ("Bash", {"command": GEN}, PRINTED))
     assert DPC.comparands(rows) == [], block
+
+
+# --- the steps before the generator in its block may print; the generator must be the block's last word --
+
+_FMR = "skills/" + "financial-model-review/scripts"
+_FOLDED = (
+    f'SC="{INSTALLED}/{_FMR}"\n'
+    'R="/w/artifacts/financial-model-review-acme"\nRUN_ID=R1\n'
+    'python3 $SC/review_inputs.py "$R/inputs.json" --static "$R/review.html" >/dev/null; echo review=$?\n'
+    'cat "$R/inputs.json" | python3 $SC/unit_economics.py --pretty --run-id "$RUN_ID" -o "$R/ue.json"; echo ue=$?\n'
+    'cat "$R/inputs.json" | python3 $SC/runway.py --pretty --run-id "$RUN_ID" -o "$R/runway.json"; echo rw=$?\n'
+    'python3 $SC/fmr_dispatch_prompt.py checklist --run-id "$RUN_ID" --handoff-agent "$R/handoff/R1" --review-dir "$R"'
+)
+
+
+def test_a_generator_folded_into_the_previous_steps_block_is_the_comparand() -> None:
+    """Models run the generator at the end of the block that ran the step before it: the producers' JSON
+    and exit codes print first, then the prompt. Nothing can print after it, so it is the comparand."""
+    assert DPC.generator_block(_FOLDED)[0] is True
+    noisy = 'cat "$R/x.json"; grep -c ok "$R/y.txt"; echo "CONTEXT: CHECKLIST"\n' + GEN
+    assert DPC.generator_block(noisy)[0] is True  # what printed before the generator is not the last context line
+
+
+@pytest.mark.parametrize(
+    "block",
+    [
+        _FOLDED + '\necho "done"',  # something after the generator: back to the quiet rule, and cat is not quiet
+        _FOLDED.replace("\npython3 $SC/fmr_dispatch_prompt.py", "\ntrue || python3 $SC/fmr_dispatch_prompt.py"),
+        "exec >/tmp/out\n" + GEN,
+        "exec 1>/tmp/out; cat /tmp/x\n" + GEN,
+        "trap 'cat /tmp/forged' EXIT\ncat /tmp/x\n" + GEN,
+        'PATH="/tmp/evil:$PATH"\ncat /tmp/x\n' + GEN,
+        "export PYTHONPATH=/tmp/evil; cat /tmp/x\n" + GEN,
+        'PATH="/tmp/evil:$PATH"\n' + GEN,  # where python3 is found, even with no printing step
+        "PYTHONSTARTUP=/tmp/s.py " + GEN,
+        "python3 -c 'print(1)'\n" + GEN,
+        "python3 /tmp/forge.py\n" + GEN,
+        "nohup python3 /tmp/forge.py\n" + GEN,
+        "bash /tmp/forge.sh\n" + GEN,
+        "cat /tmp/x\n" + GEN + " | tee /tmp/copy",
+    ],
+)
+def test_a_printing_step_before_the_generator_needs_the_generator_last_and_nothing_that_outlives_it(block: str) -> None:
+    assert DPC.generator_block(block)[0] is False, block
+
+
+def test_ls_after_the_generator_is_not_quiet() -> None:
+    """File names are chosen by whoever made the files; listed after the generator, one per line, they
+    could stand in for a prompt's lines."""
+    assert DPC.generator_block(GEN + "\nls -t /tmp/made")[0] is False
+    assert DPC.generator_block("ls -t /tmp/made\n" + GEN)[0] is True
