@@ -439,7 +439,7 @@ agent-namespace path for any other under-outputs artifact a dispatch prompt read
 sub-agent an absolute `/sessions/...` path for a file-tool Read/Write — the host-loop path gate denies
 it (steering shell work to the `bash` tool instead). Bundled `references/*.md` are the one exception:
 pass them as the literal `${CLAUDE_PLUGIN_ROOT}/skills/cap-table/references/...` token (it is
-pre-resolved to a host-readable path), never a path the shell printed.
+pre-resolved to a host-readable path), never the shell's path to the plugin folder.
 
 After EVERY Context A dispatch, gate before piping (`<step>` = the dispatch's file stem):
 

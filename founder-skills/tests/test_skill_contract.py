@@ -903,7 +903,10 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 105,431 -> 105,936 (+505 B) on 2026-10-05: a PowerPoint deck converts into the run's hand-off folder,
     # not $STAGING_DIR (refused to the Read tool on a local session), and the block prints the Read tool's
     # path to the PDF. The append-only paragraph names the exception.
-    "market-sizing": 105_936,
+    # 105,936 -> 105,949 (+13 B) on 2026-10-05: the read-directive clauses say "never the shell's path to the
+    # plugin folder" instead of "never a path the shell printed", which also covered the hand-off paths the
+    # shell prints for Reads.
+    "market-sizing": 105_949,
     # fmr raised for two founder-facing-correctness items measured in a live run: the CHECKLIST
     # dispatch now forbids citing our artifact filenames in evidence (that run put `inputs.json` in 10
     # items' evidence, printed verbatim into the founder's report), and the producer pipe passes
@@ -1013,7 +1016,10 @@ SKILL_MD_CEILING: dict[str, int] = {
     # folder for the shell (REFS=/SHARED_REFS=, a VM path the Read tool is refused) and names the folder
     # for Reads in prose, as loaded; every read directive names its file under the plugin token, never a
     # bare relative references/ path or a printed shell value.
-    "financial-model-review": 84_316,
+    # 84,316 -> 84,329 (+13 B) on 2026-10-05: the read-directive clauses say "never the shell's path to the
+    # plugin folder" instead of "never a path the shell printed", which also covered the hand-off paths the
+    # shell prints for Reads.
+    "financial-model-review": 84_329,
     # ic-sim SHRANK: the REQUIRED ic-dynamics.md read at Step 7 is deleted. Step 7 is a pure producer
     # pipe — compose_discussion.py derives discussion.json from the partners' own files and nothing
     # is authored by the main thread — so the read informed no decision while pulling a whole
@@ -1075,7 +1081,10 @@ SKILL_MD_CEILING: dict[str, int] = {
     # folder for the shell (REFS=/SHARED_REFS=, a VM path the Read tool is refused) and names the folder
     # for Reads in prose, as loaded; every read directive names its file under the plugin token, never a
     # bare relative references/ path or a printed shell value.
-    "ic-sim": 94_940,
+    # 94,940 -> 94,979 (+39 B) on 2026-10-05: the read-directive clauses say "never the shell's path to the
+    # plugin folder" instead of "never a path the shell printed", which also covered the hand-off paths the
+    # shell prints for Reads.
+    "ic-sim": 94_979,
     # deck-review +1,165 B: Step 0 carried only a parenthetical fresh-shell mention buried in a code
     # comment, unlike the four skills that mint RUN_ID in a LATER block and so carry the shared banner.
     # deck-review mints RUN_ID INSIDE this re-runnable Step-0 block (like cap-table), so the shared
@@ -1387,7 +1396,10 @@ SKILL_MD_CEILING: dict[str, int] = {
     # not $STAGING_DIR (refused to the Read tool on a local session), and the block prints the Read tool's
     # path to the PDF. A deck the Read tool cannot reach in place is copied there; the append-only
     # paragraph names the exception.
-    "deck-review": 112_456,
+    # 112,456 -> 112,469 (+13 B) on 2026-10-05: the read-directive clauses say "never the shell's path to the
+    # plugin folder" instead of "never a path the shell printed", which also covered the hand-off paths the
+    # shell prints for Reads.
+    "deck-review": 112_469,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
@@ -1538,7 +1550,10 @@ SKILL_MD_CEILING: dict[str, int] = {
     # folder for the shell (REFS=/SHARED_REFS=, a VM path the Read tool is refused) and names the folder
     # for Reads in prose, as loaded; every read directive names its file under the plugin token, never a
     # bare relative references/ path or a printed shell value.
-    "competitive-positioning": 127_995,
+    # 127,995 -> 128,008 (+13 B) on 2026-10-05: the read-directive clauses say "never the shell's path to the
+    # plugin folder" instead of "never a path the shell printed", which also covered the hand-off paths the
+    # shell prints for Reads.
+    "competitive-positioning": 128_008,
     # cap-table, the largest raise (+2,383 B) and the one with the most founder-visible payoff:
     #   * Main-Thread Return named THREE of the four files Step 12 copies; a live run delivered exactly
     #     three and dropped `{Company}_Cap_Table.html`. All four are now named explicitly.
@@ -1645,7 +1660,10 @@ SKILL_MD_CEILING: dict[str, int] = {
     # folder for the shell (REFS=/SHARED_REFS=, a VM path the Read tool is refused) and names the folder
     # for Reads in prose, as loaded; every read directive names its file under the plugin token, never a
     # bare relative references/ path or a printed shell value.
-    "cap-table": 159_356,
+    # 159,356 -> 159,369 (+13 B) on 2026-10-05: the read-directive clauses say "never the shell's path to the
+    # plugin folder" instead of "never a path the shell printed", which also covered the hand-off paths the
+    # shell prints for Reads.
+    "cap-table": 159_369,
 }
 
 
@@ -3942,7 +3960,9 @@ def test_corpus_counts_every_agent_the_skill_pins_not_just_its_namesake() -> Non
 # ours (older hosts refused deletes, newer ones allow them), and that the unfilled-token exception is a skill
 # invoked on cloud before the conversation's first turn that needs a shell or file tool.
 # Lowered 2026-10-05 from 126,593 to 126,590 B: skill-execution-model.md no longer names a shell reference folder.
-ROOT_REFERENCES_CEILING = 126_590
+# Raised 2026-10-05 from 126,590 to 126,603 B: skill-execution-model.md says never the shell's path to the plugin
+# folder, rather than any path the shell printed.
+ROOT_REFERENCES_CEILING = 126_603
 
 
 def test_execution_model_names_every_dispatch_that_can_reach_the_shell() -> None:

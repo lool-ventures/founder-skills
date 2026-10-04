@@ -139,7 +139,7 @@ the right one — a disagreement left in gets reviewed by the founder, who knows
 own deck; one withdrawn here is seen by nobody.
 
 For `CHECKLIST`: evaluate all 35 criteria from
-`references/checklist-criteria.md`. **Score the AI-category items too — do
+`${CLAUDE_PLUGIN_ROOT}/skills/deck-review/references/checklist-criteria.md`. **Score the AI-category items too — do
 NOT mark them `not_applicable` yourself for a non-AI company.** Gating is
 the producer's job and it is deterministic: `checklist.py` forces those
 four to `not_applicable` from `ai_company_status` after you return, and a

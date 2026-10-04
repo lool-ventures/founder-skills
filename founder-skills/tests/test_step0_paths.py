@@ -534,7 +534,7 @@ def test_cap_table_lane_references_are_read_by_an_absolute_path() -> None:
 
 SEM = PLUGIN / "references" / "skill-execution-model.md"
 
-_READ_VERB = re.compile(r"\b(?:[Rr]ead|[Cc]onsult|[Ss]ee|[Oo]pen)\b")
+_READ_VERB = re.compile(r"\b(?:[Rr]ead|[Cc]onsult|[Ss]ee|[Oo]pen|[Ee]valuate|[Ff]ollow)\b")
 # A bundled file named relative to the skill folder. `references/*.md` (a glob naming the class) is not a file.
 _BARE_REFERENCE = re.compile(r"(?<![\w/}.$-])references/[\w./-]+\.(?:md|json)\b")
 # A file path built on a value Step 0 or a later block printed for the shell.
@@ -586,11 +586,25 @@ def test_no_instruction_reads_through_a_printed_shell_value(skill: str) -> None:
     assert not found, f"{skill}: a read directive names a path the Read tool is refused:\n" + "\n".join(found)
 
 
+AGENTS = sorted(p.stem for p in (PLUGIN / "agents").glob("*.md"))
+
+
+@pytest.mark.parametrize("agent", AGENTS)
+def test_no_agent_instruction_reads_through_a_printed_shell_value(agent: str) -> None:
+    """The same rule for the agent bodies: a sub-agent's Read tool is refused a bare relative path too."""
+    text = (PLUGIN / "agents" / f"{agent}.md").read_text(encoding="utf-8")
+    found = reads_through_a_shell_value(text)
+    assert not found, f"agents/{agent}.md: a read directive names a path the Read tool is refused:\n" + "\n".join(found)
+
+
 def test_the_read_directive_scan_catches_both_forms() -> None:
     """Positive control: one sentence of each shape is caught, and the token form is not."""
     assert reads_through_a_shell_value("For the schema, consult `references/artifact-schemas.md` first.")
     assert reads_through_a_shell_value("Read `$PLUGIN_ROOT/skills/x/references/a.md` before writing.")
     assert reads_through_a_shell_value("See `<printed PLUGIN_ROOT>/references/benchmarks.md` for targets.")
+    assert reads_through_a_shell_value(
+        "For CHECKLIST: evaluate all 35 criteria from `references/checklist-criteria.md`."
+    )
     assert not reads_through_a_shell_value(f"Consult `{TOKEN}/skills/x/references/artifact-schemas.md` first.")
     assert not reads_through_a_shell_value("Bundled `references/*.md` are the one exception: read them by token.")
 
@@ -686,3 +700,10 @@ def test_a_pdf_deck_on_a_shared_filesystem_is_read_in_place(tmp_path: Path) -> N
     printed, handoff, _ = _run_deck_block("deck-review", tmp_path, "acme.pdf", agent_differs=False)
     assert not (handoff / "acme.pdf").exists()
     assert printed == str(tmp_path / "uploads" / "acme.pdf")
+
+
+def test_the_read_rule_names_the_plugin_folder_not_every_printed_path() -> None:
+    """The shell prints paths that ARE for Reads (the hand-off folder's file-tool name, a deck's PDF), so the
+    rule names what it forbids: the shell's path to the plugin folder."""
+    for path in [*(PLUGIN / "skills").glob("*/SKILL.md"), SEM]:
+        assert "path the shell printed" not in path.read_text(encoding="utf-8"), path.parent.name

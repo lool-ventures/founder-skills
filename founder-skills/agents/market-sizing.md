@@ -97,7 +97,7 @@ and a price, not the head-count relabelled as money), never a change to the reco
 Read `<ANALYSIS_DIR>/inputs.json` (company, segments, geography) and `<ANALYSIS_DIR>/validation.json`
 (the recorded research). segment_pct and share_pct are percentage POINTS (35 means 35%, not 0.35).
 segment_pct narrows TAM to SAM; share_pct narrows SAM to SOM; do not swap them. **SIZING_BASIS** in your prompt names the analysis' convention (`current_year` |
-`forecast_year` | `mixed`, see `references/tam-sam-som-methodology.md` §5): when both a current- and a
+`forecast_year` | `mixed`, see `${CLAUDE_PLUGIN_ROOT}/skills/market-sizing/references/tam-sam-som-methodology.md` §5): when both a current- and a
 forecast-year figure are recorded, reference the one that matches, and say which in `why` if you
 estimate.
 

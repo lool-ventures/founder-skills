@@ -366,7 +366,7 @@ competition slide at all), that IS a concrete answer — but it is **`warn`, nev
 that the deck names no competitor. `not_applicable` would drop the item out of
 the score denominator, inflating the score while hiding the finding — and a deck
 that never engages competition is itself one of the strongest findings a
-competitive review can return. See `references/checklist-criteria.md`'s NARR_03
+competitive review can return. See `${CLAUDE_PLUGIN_ROOT}/skills/competitive-positioning/references/checklist-criteria.md`'s NARR_03
 bands, which are the authority here.
 
 Assess all 25 checklist items: COVER_01..05, POS_01..05, MOAT_01..04,

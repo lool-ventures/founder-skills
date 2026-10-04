@@ -321,7 +321,7 @@ Ask the user (or infer from context):
 
 Read the provided materials and extract the startup profile directly. Import any prior market-sizing or deck-review artifacts from `$ARTIFACTS_ROOT`. Deposit both artifacts to `$SIM_DIR`.
 
-**Read `${CLAUDE_PLUGIN_ROOT}/skills/ic-sim/references/artifact-schemas.md` before writing artifacts** to ensure JSON schema compliance. (Use the literal `${CLAUDE_PLUGIN_ROOT}` token for a file-tool Read — it is pre-resolved to a host-readable path; never a path the shell printed, which a host-native file tool cannot reach.)
+**Read `${CLAUDE_PLUGIN_ROOT}/skills/ic-sim/references/artifact-schemas.md` before writing artifacts** to ensure JSON schema compliance. (Use the literal `${CLAUDE_PLUGIN_ROOT}` token for a file-tool Read — it is pre-resolved to a host-readable path; never the shell's path to the plugin folder, which a host-native file tool cannot reach.)
 
 **Stage-token reconciliation (do not copy Step 1's stage token verbatim):** `founder_context.py`'s
 `--stage` enum is hyphenated (`pre-seed`, `seed`, `series-a`, `series-b`, `series-c`, `series-d`,
@@ -364,7 +364,7 @@ PRIOR_EOF
 
 ### Step 4: Build Fund Profile -> `fund_profile.json`
 
-**Fund-specific mode only — read `${CLAUDE_PLUGIN_ROOT}/skills/ic-sim/references/partner-archetypes.md` now.** You need it to map a real fund's partners to the three archetype roles. **In generic mode, skip this read** — generic mode uses the three canonical archetypes (visionary, operator, analyst) verbatim and does no real-partner mapping, so the file adds nothing. (Literal token, not a path the shell printed — a file-tool Read of a `/sessions` path is denied on host-loop.)
+**Fund-specific mode only — read `${CLAUDE_PLUGIN_ROOT}/skills/ic-sim/references/partner-archetypes.md` now.** You need it to map a real fund's partners to the three archetype roles. **In generic mode, skip this read** — generic mode uses the three canonical archetypes (visionary, operator, analyst) verbatim and does no real-partner mapping, so the file adds nothing. (Literal token, not the shell's path to the plugin folder — a file-tool Read of a `/sessions` path is denied on host-loop.)
 
 **Generic mode:** Build a standard early-stage fund profile with the three canonical archetypes (visionary, operator, analyst). **OMIT the `portfolio` field entirely — do not fabricate holdings.** A generic fund is a synthesized/illustrative persona with no real portfolio; inventing companies here manufactures fictional conflicts against them downstream (Step 5), and those fabricated conflicts can distort the verdict. `portfolio` is optional in generic mode precisely so it can be left out. Use the example below verbatim as the shape, adapting only thesis/stage/check-size to the startup's sector — but keep `portfolio` absent.
 
@@ -428,7 +428,7 @@ the host-loop path gate denies it. ic-sim sub-agents perform **zero file reads**
 into the prompt; the archetype/28-dimension rubric lives in `agents/ic-sim.md`), so only `OUTPUT_PATH`
 (a write) needs the agent namespace. A bundled `references/*.md` a MAIN-THREAD step reads is passed as the
 literal `${CLAUDE_PLUGIN_ROOT}/skills/ic-sim/references/...` token (pre-resolved to a host-readable path);
-never a path the shell printed (a file tool can't read it).
+never the shell's path to the plugin folder (a file tool can't read it).
 
 **After EVERY Context A dispatch, gate before piping** (`<step>` = the dispatch's file stem):
 

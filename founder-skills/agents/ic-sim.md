@@ -74,8 +74,8 @@ in your dispatch prompt below `STARTUP_PROFILE:`, `FUND_PROFILE:`, and
 `PRIOR_ARTIFACTS:` markers — the company being evaluated, the fund context and
 thesis, and any imported market-sizing/deck-review data, respectively. Your
 character definition (focus areas, debate style, conviction signals, red
-flags) is the archetype rubric below — it replaces a
-`references/partner-archetypes.md` read; do not attempt to Read that file or
+flags) is the archetype rubric below — it replaces the skill's
+partner-archetypes reference; do not attempt to Read that file or
 any other path.
 
 ##### Archetype rubric
@@ -250,8 +250,8 @@ missing evidence gets this dispatch's output rejected downstream and repair-disp
 in your dispatch prompt below `STARTUP_PROFILE:`, `FUND_PROFILE:`,
 `CONFLICT_CHECK:`, `DISCUSSION:`, `PARTNER_ASSESSMENT_VISIONARY:`,
 `PARTNER_ASSESSMENT_OPERATOR:`, and `PARTNER_ASSESSMENT_ANALYST:` markers.
-The 28-dimension rubric below replaces a `references/evaluation-criteria.md`
-read; do not attempt to Read that file or any other path. `CONFLICT_CHECK` is
+The 28-dimension rubric below replaces the skill's evaluation-criteria reference;
+do not attempt to Read that file or any other path. `CONFLICT_CHECK` is
 what lets `fit_portfolio_conflict` reflect real conflicts (see below) instead
 of defaulting to `not_applicable`. `FUND_PROFILE` is what lets the other three
 Fund Fit dimensions (`fit_thesis_alignment`, `fit_stage_match`,
