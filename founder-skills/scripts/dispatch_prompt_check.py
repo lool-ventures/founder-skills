@@ -13,23 +13,28 @@ both times. SKILL.md says to paste the printed text unchanged; that held 0/2 in 
 exists to look at the analysis without the constructor's framing, and this is the framing.
 
 THE COMPARAND. The generator's output as the transcript recorded it (a tool result), against the
-prompt the Agent call carries. Compared with whitespace squashed, as the e2e lane does. A tool result
-counts only when the call that produced it is paired by tool id and is one of:
-  * a shell call running a prompt generator (`dispatch_prompt.py`, `cp_dispatch_prompt.py`,
-    `fmr_dispatch_prompt.py`) whose output reaches the result, in a block with no command that prints
-    text of its own (`cat`, `echo`, `printf`, `tee`, `sed`, `head`, `python3 -c`, a heredoc, ...). The
-    search takes the LAST context line in a result, so a trailing `cat forged.txt` would otherwise win.
-    Allowed beside it: an `echo`/`printf` whose variables are `$?` or set in the same block and which
-    names no context or closing line ("EXIT=$?"), and a `head`/`tail` reading another command's pipe
-    (`ocr_uploads.py ... | tail -5`). The kept runs use all three;
-  * a Read, or a `cat`/`head`/`tail`, of the file a generator's stdout was redirected into
-    (`> "$HANDOFF_DIR/prompt.txt"`, the block's own `NAME="..."` assignments expanded), or of the file
-    the runtime saved an oversized generator result to ("Full output saved to: ..."), while no later
-    call could have changed it (a Write or Edit of it, or a shell command naming it that is not
-    read-only).
+prompt the Agent call carries. Compared with whitespace squashed, as the e2e lane does. A main-thread
+tool result counts only when the call that produced it is paired by tool id and is one of:
+  * a shell block running a TRUSTED generator -- `dispatch_prompt.py`, `cp_dispatch_prompt.py` or
+    `fmr_dispatch_prompt.py` from its own skill's `skills/<skill>/scripts/` folder (or as
+    `$SCRIPTS/<generator>`, the form SKILL.md writes), never one any call in the session (a sub-agent's
+    included) wrote over -- whose output reaches the result, and in which EVERY other command is known
+    to be quiet: assignments, `cd`, `mkdir`, `ls`, `wc`, `test`, `true`, `set -e`, `cp`/`mv` with no
+    device argument, the plugin's `resolve_artifacts_root.py` and `ocr_uploads.py` (piped at most into
+    `head`/`tail`/`wc`), and `echo` of literals and of `$?` or the block's own variables that, run
+    together, name no context line, no OUTPUT_PATH and no closing line. Anything else -- an unknown
+    command, a shell keyword or function, a subshell, a heredoc, an input redirect -- and the block is
+    not a comparand. The search takes the LAST context line in a result, so this is what keeps a
+    trailing `cat forged.txt` out;
+  * a Read, or a quiet block's `cat`/`head`/`tail`, of the file a generator's stdout was redirected
+    into (`> "$HANDOFF_DIR/prompt.txt"`, the block's own `NAME="..."` assignments expanded), or of the
+    file the runtime saved an oversized generator result to ("Full output saved to: ..."), while no
+    later call could have changed it: a Write or Edit of it (a sub-agent's too), a shell block that
+    cannot be read, runs an interpreter other than the plugin's own scripts, or writes or names a path
+    it cannot resolve. `/private/tmp` and `/tmp` are the same file.
 A Read of any other file, a sub-agent's reply, or a block that also prints text is never the
-comparand. Residual: the generator's arguments are typed by the model, and a script the model wrote
-itself and runs as `python3 <file>` is not recognised as printing text.
+comparand. Residual: the generator's arguments are typed by the model, and `$SCRIPTS` set in an
+earlier shell is trusted as the skill's own folder.
 
 THE CONTEXT LINE. A dispatch is compared when its first non-blank line, invisible characters removed,
 opens with a registered context line at a word boundary: "CONTEXT: RED_TEAM (round 2)" is RED_TEAM's
@@ -175,30 +180,37 @@ def _output_path(text: str) -> str | None:
 
 # --- which tool results may be the comparand ---------------------------------------------------------
 
-GENERATORS = frozenset({"dispatch_prompt.py", "cp_dispatch_prompt.py", "fmr_dispatch_prompt.py"})
-# Commands that print text of their own choosing into the shell result. Matched on the command's name.
-EMITTERS = frozenset(
-    {
-        "cat", "echo", "printf", "tee", "sed", "head", "tail", "awk", "gawk", "grep", "egrep", "fgrep",
-        "rg", "jq", "less", "more", "nl", "tac", "rev", "od", "xxd", "hexdump", "strings", "cut", "sort",
-        "uniq", "paste", "column", "fold", "fmt", "pr", "base64", "envsubst", "perl", "ruby", "node",
-        "eval", "source", ".", "bash", "sh", "zsh", "dash", "ksh", "yes", "diff", "find", "xargs",
-    }
-)  # fmt: skip
-# Commands that may name a redirected prompt file in the same block without changing it.
+# Each generator, by the skill whose scripts folder it must be run from.
+GENERATORS: dict[str, str] = {
+    "dispatch_prompt.py": "market-sizing",
+    "cp_dispatch_prompt.py": "competitive-positioning",
+    "fmr_dispatch_prompt.py": "financial-model-review",
+}
+# Plugin scripts a generator block may also run: they print only paths and receipts of their own.
+_QUIET_SCRIPTS = frozenset({"resolve_artifacts_root.py", "ocr_uploads.py"})
+# Commands that print nothing a model chooses (cp/mv only when no argument is a device).
+_QUIET = frozenset({"cd", "mkdir", "ls", "wc", "test", "[", "true", ":", "cp", "mv"})
+# What a pipe from ocr_uploads.py may feed: counts and the tail of its receipt.
+_PIPE_FILTERS = frozenset({"head", "tail", "wc"})
+# Commands that may name a redirected prompt file without changing it.
 _READ_ONLY = frozenset({"wc", "cat", "head", "tail", "ls", "stat", "file", "test", "[", "md5", "md5sum",
-                        "shasum", "sha256sum", "du", "echo", "printf"})  # fmt: skip
-_PREFIXES = frozenset({"env", "command", "exec", "time", "nohup", "builtin"})
-_SEPARATORS = frozenset({";", "&&", "||", "|", "|&", "&", "(", ")", ";;", "\n", "}"})
+                        "shasum", "sha256sum", "du", "echo", "printf", "grep", "rg", "diff", "cd", "mkdir",
+                        "true", ":"})  # fmt: skip
+_INTERPRETERS_RE = re.compile(
+    r"^(python[0-9.]*|uv|uvx|node|deno|bun|perl|ruby|php|osascript|bash|sh|zsh|dash|ksh|awk|gawk|lua|tclsh)$"
+)
+_KEYWORDS = frozenset({"if", "then", "else", "elif", "fi", "while", "until", "do", "done", "for", "case",
+                       "esac", "function", "select", "time", "!", "{", "}", "[[", "]]", "coproc", "eval",
+                       "source", "."})  # fmt: skip
+_SEPARATORS = frozenset({";", "&&", "||", "|", "\n"})
 _WRITE_REDIRECTS = frozenset({">", ">>", ">|", "&>", "&>>", ">&"})
-_READ_REDIRECTS = frozenset({"<", "<&", "<>"})
 _ASSIGN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 _VAR_RE = re.compile(r"\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))")
+_SUBST_RE = re.compile(r"__SUBST(\d+)__")
 # An oversized result is saved to a file and the result carries only this header and a preview.
 _PERSISTED_RE = re.compile(
     r"^<persisted-output>\s*\n.*?Full output saved to: (\S[^\n]*?)\s*$", re.MULTILINE | re.DOTALL
 )
-_PYTHON_FLAGS_WITH_ARG = frozenset({"-X", "-W", "-Q"})
 _UV_FLAGS_WITH_ARG = frozenset({"--with", "--python", "-p", "--project", "--directory", "--from", "--env-file"})
 
 
@@ -211,38 +223,76 @@ class _Cmd:
         self.stdout_file: str | None = None
         self.piped = False
         self.writes: list[str] = []
+        self.reads_input = False
         self.substituted = False
-        self.fed = False
+        self.upstream: _Cmd | None = None
 
 
-def _substitutions(word: str) -> list[str] | None:
-    """The bodies of every `$(...)` in a word; None when one is unbalanced."""
-    out = []
-    i = word.find("$(")
-    while i >= 0:
-        depth, j = 0, i + 1
-        while j < len(word):
-            if word[j] == "(":
-                depth += 1
-            elif word[j] == ")":
-                depth -= 1
-                if depth == 0:
-                    break
-            j += 1
-        if depth != 0:
-            return None
-        out.append(word[i + 2 : j])
-        i = word.find("$(", j)
-    return out
+def _lift_substitutions(text: str) -> tuple[str, list[str]] | None:
+    """Replace each `$(...)` outside single quotes with a placeholder word; None when one is unbalanced
+    or arithmetic (`$((`)."""
+    out: list[str] = []
+    bodies: list[str] = []
+    i, quote = 0, ""
+    while i < len(text):
+        ch = text[i]
+        if quote == "'":
+            quote = "" if ch == "'" else quote
+            out.append(ch)
+            i += 1
+            continue
+        if ch == "\\" and i + 1 < len(text):
+            out.append(text[i : i + 2])
+            i += 2
+            continue
+        if ch in "'\"" and (not quote or quote == ch):
+            quote = "" if quote == ch else ch
+            out.append(ch)
+            i += 1
+            continue
+        if text.startswith("$(", i):
+            if text.startswith("$((", i):
+                return None
+            depth, j = 0, i + 1
+            while j < len(text):
+                if text[j] == "(":
+                    depth += 1
+                elif text[j] == ")":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                j += 1
+            if depth != 0:
+                return None
+            out.append(f"__SUBST{len(bodies)}__")
+            bodies.append(text[i + 2 : j])
+            i = j + 1
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out), bodies
 
 
 def _parse_block(command: str, _depth: int = 0) -> list[_Cmd] | None:
-    """The simple commands of a shell block, or None when it cannot be read with confidence (a
-    backtick, a heredoc or herestring, an unbalanced quote): such a block is never a comparand."""
+    """The simple commands of a shell block, or None when it cannot be read with confidence: a
+    backtick, a heredoc or herestring, an unbalanced quote, a shell keyword or function, a subshell,
+    a background job. Such a block is never a comparand."""
     if "`" in command or _depth > 3:
         return None
+    lifted = _lift_substitutions(re.sub(r"\\\n", " ", command))
+    if lifted is None:
+        return None
+    text, bodies = lifted
+    inner: list[_Cmd] = []
+    for body in bodies:
+        parsed = _parse_block(body, _depth + 1)
+        if parsed is None:
+            return None
+        for c in parsed:
+            c.substituted = True
+        inner.extend(parsed)
     tokens: list[str] = []
-    for line in re.sub(r"\\\n", " ", command).split("\n"):
+    for line in text.split("\n"):
         lex = shlex.shlex(line, posix=True, punctuation_chars=True)
         lex.whitespace_split = True
         lex.commenters = "#"
@@ -256,18 +306,20 @@ def _parse_block(command: str, _depth: int = 0) -> list[_Cmd] | None:
     i = 0
     while i < len(tokens):
         tok = tokens[i]
-        if tok in ("<<", "<<-", "<<<"):
+        if tok in ("<<", "<<-", "<<<", "(", ")", "&", ";;", "|&", "()"):
             return None
         if tok in _SEPARATORS:
-            piped = tok in ("|", "|&")
-            cur.piped = piped
             if cur.argv or cur.assigns:
                 cmds.append(cur)
-            cur = _Cmd()
-            cur.fed = piped
+                cur.piped = tok == "|"
+                nxt = _Cmd()
+                nxt.upstream = cur if tok == "|" else None
+                cur = nxt
+            elif tok == "|":
+                return None
             i += 1
             continue
-        if tok in _WRITE_REDIRECTS or tok in _READ_REDIRECTS:
+        if tok in _WRITE_REDIRECTS or tok in ("<", "<&", "<>"):
             if i + 1 >= len(tokens) or tokens[i + 1] in _SEPARATORS:
                 return None
             target = tokens[i + 1]
@@ -276,83 +328,46 @@ def _parse_block(command: str, _depth: int = 0) -> list[_Cmd] | None:
                 cur.writes.append(target)
                 if fd in (None, "1") or tok in ("&>", "&>>", ">&"):
                     cur.stdout_file = target
+            elif tok in ("<", "<>") or (tok == "<&" and not target.isdigit()):
+                cur.reads_input = True
             i += 2
             continue
-        if "$(" in tok:
-            bodies = _substitutions(tok)
-            if bodies is None:
-                return None
-            for body in bodies:
-                inner = _parse_block(body, _depth + 1)
-                if inner is None:
-                    return None
-                for c in inner:
-                    c.substituted = True
-                cmds.extend(inner)
         if not cur.argv and _ASSIGN_RE.match(tok):
             name, _, value = tok.partition("=")
             cur.assigns.append((name, value))
-        elif tok == "{" and not cur.argv:
-            pass
         else:
+            if not cur.argv and (tok in _KEYWORDS or tok.endswith("()")):
+                return None
             cur.argv.append(tok)
         i += 1
     if cur.argv or cur.assigns:
         cmds.append(cur)
-    return cmds
+    return cmds + inner
 
 
 def _words(argv: list[str]) -> list[str]:
-    """argv with leading wrappers (`env`, `exec`, `export`, ...) and their assignments removed."""
-    i = 0
-    while i < len(argv):
-        name = os.path.basename(argv[i])
-        if name in _PREFIXES or name in ("export", "local", "declare", "readonly"):
-            i += 1
-            while i < len(argv) and (argv[i].startswith("-") or _ASSIGN_RE.match(argv[i])):
-                i += 1
-            continue
-        break
-    return argv[i:]
+    """argv with a leading `export`/`local`/`declare`/`readonly` and its assignments removed."""
+    if argv and argv[0] in ("export", "local", "declare", "readonly"):
+        rest = argv[1:]
+        return [] if all(_ASSIGN_RE.match(w) for w in rest) else argv
+    return argv
 
 
-def _kind(argv: list[str]) -> str:
-    """'generator', 'emitter', 'echo' (judged with the block's assignments), 'assign' (no command), or
-    'other'."""
-    words = _words(argv)
-    if not words:
-        return "assign"
-    name = os.path.basename(words[0])
-    if name in GENERATORS:
-        return "generator"
-    if name == "uv":
-        rest = words[1:]
-        if not rest or rest[0] != "run":
-            return "other"
-        j = 1
-        while j < len(rest) and rest[j].startswith("-"):
-            j += 2 if rest[j] in _UV_FLAGS_WITH_ARG else 1
-        if j >= len(rest):
-            return "other"
-        if os.path.basename(rest[j]) in GENERATORS:
-            return "generator"
-        return _kind(rest[j:]) if os.path.basename(rest[j]).startswith("python") else "other"
-    if re.fullmatch(r"python[0-9.]*", name):
-        j = 1
-        while j < len(words):
-            w = words[j]
-            if w in ("-c", "-m", "-"):
-                return "emitter"
-            if w.startswith("-"):
-                j += 2 if w in _PYTHON_FLAGS_WITH_ARG else 1
-                continue
-            return "generator" if os.path.basename(w) in GENERATORS else "other"
-        return "emitter"  # a bare interpreter reads its program from stdin
-    if name in ("echo", "printf"):
-        return "echo"
-    if name in EMITTERS:
-        return "emitter"
-    return "other"
+def _assignments(c: _Cmd) -> list[tuple[str, str]]:
+    pairs = list(c.assigns)
+    if c.argv and c.argv[0] in ("export", "local", "declare", "readonly"):
+        pairs += [(w.partition("=")[0], w.partition("=")[2]) for w in c.argv[1:] if _ASSIGN_RE.match(w)]
+    return pairs
+
+
+def _partial(word: str, raw: dict[str, str]) -> str:
+    """`$NAME` / `${NAME}` filled from the block's own assignments as written, unknown names left as is."""
+    for _ in range(4):
+        new = _VAR_RE.sub(lambda m: raw.get(m.group(1) or m.group(2), m.group(0)), word)
+        if new == word:
+            break
+        word = new
+    return word
 
 
 def _expand(word: str, env: dict[str, str]) -> str | None:
@@ -368,145 +383,289 @@ def _expand(word: str, env: dict[str, str]) -> str | None:
         return env[key]
 
     out = _VAR_RE.sub(sub, word)
-    return None if unknown or "$" in out else out
+    return None if unknown or "$" in out or _SUBST_RE.search(out) else out
 
 
-_FILTERS = frozenset({"head", "tail", "sort", "uniq", "wc", "cat"})
-_FILE_PRINTERS = frozenset({"cat", "head", "tail"})
-
-
-def _operands(c: _Cmd) -> list[str]:
-    """The arguments that are neither flags nor counts (`head -n 20 FILE` -> [FILE])."""
-    return [w for w in _words(c.argv)[1:] if not w.startswith("-") and not w.isdigit()]
-
-
-def _quiet_echo(c: _Cmd, env: dict[str, str], assigned: set[str]) -> bool:
-    """An echo/printf that cannot print a prompt: every variable it names is `$?` or set in this block,
-    and with the block's literal values filled in it names no context line and no closing line."""
-    for word in _words(c.argv)[1:]:
-        bare = word.replace("$?", "")
-        names = [m.group(1) or m.group(2) for m in _VAR_RE.finditer(bare)]
-        if any(n not in assigned for n in names) or "$" in _VAR_RE.sub("", bare):
-            return False
-        filled = _VAR_RE.sub(lambda m: env.get(m.group(1) or m.group(2), ""), bare)
-        if "CONTEXT" in filled or END in filled:
-            return False
-    return True
-
-
-def _env(cmds: list[_Cmd]) -> tuple[dict[str, str], set[str]]:
-    """The block's own assignments, in order: literal values (expanded), and every name assigned."""
+def _env(cmds: list[_Cmd]) -> tuple[dict[str, str], dict[str, str], set[str]]:
+    """The block's own assignments, in order: literal values (expanded), values as written, and names."""
     env: dict[str, str] = {}
+    raw: dict[str, str] = {}
     assigned: set[str] = set()
     for c in cmds:
         if c.substituted:
             continue
-        pairs = list(c.assigns)
-        if c.argv and os.path.basename(c.argv[0]) in ("export", "local", "declare", "readonly"):
-            for w in c.argv[1:]:
-                if _ASSIGN_RE.match(w):
-                    name, _, value = w.partition("=")
-                    pairs.append((name, value))
-        for name, value in pairs:
+        for name, value in _assignments(c):
             assigned.add(name)
+            raw[name] = _partial(value, raw)
             expanded = _expand(value, env)
             if expanded is None:
                 env.pop(name, None)
             else:
                 env[name] = expanded
-    return env, assigned
+    return env, raw, assigned
 
 
-def _printing(cmds: list[_Cmd], env: dict[str, str], assigned: set[str], files: set[str]) -> tuple[bool, bool]:
-    """(foreign, shown): whether any command prints text of its own, and whether one prints one of
-    `files` (`cat`/`head`/`tail` of a file a generator wrote shows the generator's output)."""
-    foreign = shown = False
-    for c in cmds:
-        kind = _kind(c.argv)
-        words = _words(c.argv)
-        name = os.path.basename(words[0]) if words else ""
-        if kind == "echo":
-            foreign = foreign or not _quiet_echo(c, env, assigned)
-        elif kind == "emitter":
-            operands = _operands(c)
-            if name in _FILTERS and c.fed and not operands and not c.substituted:
-                continue  # `ocr_uploads.py ... | tail -5` prints the piped command's output, not its own
-            expanded = [_expand(w, env) for w in operands]
-            paths = {os.path.normpath(w) for w in expanded if w is not None}
-            if name in _FILE_PRINTERS and operands and None not in expanded and paths <= files and not c.writes:
-                shown = shown or not c.substituted
-                continue
-            foreign = True
-    return foreign, shown
+def norm_path(path: str) -> str:
+    """A path as compared: normalised, and macOS's `/private/tmp` and `/private/var` read as `/tmp`, `/var`."""
+    p = os.path.normpath(path)
+    for top in ("/private/tmp", "/private/var", "/private/etc"):
+        if p == top or p.startswith(top + "/"):
+            return p[len("/private") :]
+    return p
 
 
-def _writes_file(cmds: list[_Cmd], path: str, skip: _Cmd | None = None) -> bool:
-    """Whether any command (but `skip`) could change `path`: it is named by a redirect, or by a command
-    that is not read-only. Matched on the file name, so a mention through a variable still counts."""
+def _script(words: list[str]) -> str | None:
+    """The script a python / uv command runs, or None (inline code, a module, stdin, flags)."""
+    if not words:
+        return None
+    name = os.path.basename(words[0])
+    if name == "uv":
+        rest = words[1:]
+        if not rest or rest[0] != "run":
+            return None
+        j = 1
+        while j < len(rest) and rest[j].startswith("-"):
+            j += 2 if rest[j] in _UV_FLAGS_WITH_ARG else 1
+        if j >= len(rest):
+            return None
+        if re.fullmatch(r"python[0-9.]*", os.path.basename(rest[j])):
+            return _script(rest[j:])
+        return rest[j]
+    if re.fullmatch(r"python[0-9.]*", name):
+        return words[1] if len(words) > 1 and not words[1].startswith("-") else None
+    return None
+
+
+def _trusted_generator(path: str, raw: dict[str, str], assigned: set[str], distrusted: set[str]) -> bool:
+    """A generator run from its own skill's scripts folder: the path, filled from the block's own
+    assignments, names `/skills/<skill>/scripts/<generator>`, or is `$SCRIPTS/<generator>` with SCRIPTS
+    set in an earlier block (the form every SKILL.md writes)."""
+    base = os.path.basename(path)
+    skill = GENERATORS.get(base)
+    if skill is None or base in distrusted:
+        return False
+    filled = _partial(path, raw)
+    if f"/skills/{skill}/scripts/{base}" in filled:
+        return True
+    return filled in (f"$SCRIPTS/{base}", f"${{SCRIPTS}}/{base}") and "SCRIPTS" not in assigned
+
+
+def _plugin_script(path: str, raw: dict[str, str]) -> bool:
+    """A plugin script by its path: under a `scripts/` folder, or `$SCRIPTS/` / `$SHARED_SCRIPTS/` as the
+    SKILL.mds write it."""
+    filled = _partial(path, raw)
+    heads = ("$SCRIPTS/", "${SCRIPTS}/", "$SHARED_SCRIPTS/", "${SHARED_SCRIPTS}/")
+    return "/scripts/" in filled or filled.startswith(heads)
+
+
+def _kind(c: _Cmd, raw: dict[str, str], assigned: set[str], distrusted: set[str]) -> str:
+    """'generator', 'assign', 'quiet', 'echo', 'filter' (head/tail/wc fed by a pipe) or 'other'."""
+    words = _words(c.argv)
+    if not words:
+        return "assign"
+    name = os.path.basename(words[0])
+    target = _script(words)
+    path = target if target is not None else (words[0] if name in GENERATORS else None)
+    if path is not None and os.path.basename(path) in GENERATORS:
+        return "generator" if _trusted_generator(path, raw, assigned, distrusted) else "other"
+    if target is not None and os.path.basename(target) in _QUIET_SCRIPTS and _plugin_script(target, raw):
+        return "quiet"
+    if name in ("echo",):
+        return "echo"
+    if name == "set":
+        return "quiet" if all(w[:1] in "-+" for w in words[1:]) else "other"
+    if name in ("cp", "mv"):
+        return "quiet" if not any("/dev/" in w or w == "/dev" or w == "-" for w in words[1:]) else "other"
+    if name in _QUIET:
+        return "quiet"
+    if name in _PIPE_FILTERS:
+        return "filter"
+    return "other"
+
+
+def _quiet_echoes(echoes: list[_Cmd], env: dict[str, str], assigned: set[str]) -> bool:
+    """Echoes that cannot print a prompt: no flags, no backslash, every variable `$?` or set in this
+    block, and all of them together, literal values filled in and run together, naming no context line,
+    no OUTPUT_PATH and no closing line (so a context line split across two echoes is still seen)."""
+    joined = ""
+    for c in echoes:
+        args = _words(c.argv)[1:]
+        if args and re.fullmatch(r"-[neE]+", args[0]):
+            return False  # echo's own options: -n joins, -e reads escapes
+        for word in args:
+            bare = word.replace("$?", "")
+            if "\\" in word or _SUBST_RE.search(bare):
+                return False
+            names = [m.group(1) or m.group(2) for m in _VAR_RE.finditer(bare)]
+            if any(n not in assigned for n in names) or "$" in _VAR_RE.sub("", bare):
+                return False
+        joined += "".join(_VAR_RE.sub(lambda m: env.get(m.group(1) or m.group(2), ""), w) for w in args)
+    flat = re.sub(r"\s+", "", joined)
+    return not any(s in flat for s in ("CONTEXT", "OUTPUT_PATH", "DoNOTwrite"))
+
+
+def _writes_file(
+    cmds: list[_Cmd], path: str, env: dict[str, str], raw: dict[str, str], assigned: set[str], distrusted: set[str]
+) -> bool:
+    """Whether any of `cmds` could change `path`: it runs an interpreter other than the plugin's own
+    scripts, writes a redirect that is `path` or cannot be resolved, or is not read-only and names
+    `path`'s file or a path that cannot be resolved."""
     base = os.path.basename(path)
     for c in cmds:
-        if c is skip or not any(base in w for w in c.argv + c.writes):
-            continue
         words = _words(c.argv)
-        if any(base in w for w in c.writes) or not words or os.path.basename(words[0]) not in _READ_ONLY:
+        name = os.path.basename(words[0]) if words else ""
+        kind = _kind(c, raw, assigned, distrusted)
+        for target in c.writes:
+            expanded = _expand(target, env)
+            if expanded == "/dev/null":
+                continue
+            if expanded is None or base in target or norm_path(expanded) == path:
+                return True
+        if not words or name in _READ_ONLY:
+            continue
+        own_script = kind in ("generator", "quiet") and _script(words) is not None
+        if _INTERPRETERS_RE.match(name) and not own_script:
             return True
+        for w in words[1:]:
+            expanded = _expand(w, env)
+            if base in w or (expanded is not None and base in expanded):
+                return True
+            if not own_script and expanded is None:
+                return True
     return False
 
 
-def generator_block(command: str) -> tuple[bool, list[str]]:
-    """(prints, files) for one shell block: whether a generator's output reaches the result with nothing
-    else in the block printing text of its own, and the files a generator's stdout was redirected into
-    (expanded with the block's own literal assignments) that nothing else in the block writes."""
+def generator_block(command: str, distrusted: frozenset[str] | set[str] = frozenset()) -> tuple[bool, list[str]]:
+    """(prints, files) for one shell block: whether a trusted generator's output reaches the result
+    with every other command in the block known to be quiet, and the files a generator's stdout was
+    redirected into (expanded with the block's own literal assignments) that nothing else in the block
+    writes."""
     cmds = _parse_block(command)
     if cmds is None:
         return False, []
-    gens = [c for c in cmds if not c.substituted and _kind(c.argv) == "generator"]
+    env, raw, assigned = _env(cmds)
+    kinds = [_kind(c, raw, assigned, set(distrusted)) for c in cmds]
+    gens = [c for c, k in zip(cmds, kinds, strict=True) if k == "generator" and not c.substituted]
     if not gens:
         return False, []
-    env, assigned = _env(cmds)
     kept = []
+    trust = set(distrusted)
     for gen in gens:
         target = _expand(gen.stdout_file, env) if gen.stdout_file is not None and not gen.piped else None
         if target is not None and target.startswith("/"):
-            path = os.path.normpath(target)
-            if not _writes_file(cmds, path, skip=gen):
+            path = norm_path(target)
+            # Only what runs after the generator (or inside a substitution) can change its file.
+            later = [c for c in cmds[cmds.index(gen) + 1 :] if c is not gen] + [c for c in cmds if c.substituted]
+            if not _writes_file(later, path, env, raw, assigned, trust):
                 kept.append(path)
-    prints = any(c.stdout_file is None and not c.piped for c in gens) and not any(c.piped for c in gens)
-    foreign, shown = _printing(cmds, env, assigned, set(kept))
-    return (prints or shown) and not foreign, kept
+    prints = all(not c.piped for c in gens) and any(c.stdout_file is None for c in gens)
+    quiet, shown = _block_quiet(cmds, kinds, env, assigned, set(kept))
+    return (prints or shown) and quiet, kept
 
 
-def shows_file(command: str, files: set[str]) -> bool:
+def _block_quiet(
+    cmds: list[_Cmd], kinds: list[str], env: dict[str, str], assigned: set[str], files: set[str]
+) -> tuple[bool, bool]:
+    """(quiet, shown): whether every command is a generator or known to be quiet, and whether a
+    `cat`/`head`/`tail` in the block prints one of `files` (a file a generator wrote)."""
+    shown = False
+    echoes = []
+    for c, kind in zip(cmds, kinds, strict=True):
+        if c.reads_input or (c.piped and kind not in ("quiet", "generator")):
+            return False, False
+        if kind in ("generator", "assign"):
+            if kind == "generator" and c.piped:
+                return False, False
+            continue
+        if kind == "quiet":
+            continue
+        if kind == "echo":
+            echoes.append(c)
+            continue
+        words = _words(c.argv)
+        name = os.path.basename(words[0]) if words else ""
+        flags = [w for w in words[1:] if w.startswith("-") or w.isdigit()]
+        operands = [w for w in words[1:] if w not in flags]
+        if kind == "filter" and c.upstream is not None and not operands and not c.substituted:
+            up = _script(_words(c.upstream.argv))
+            if up is not None and os.path.basename(up) == "ocr_uploads.py":
+                continue
+        if name in ("cat", "head", "tail") and operands and not c.substituted and not c.writes and files:
+            paths = [_expand(w, env) for w in operands]
+            if None not in paths and {norm_path(p) for p in paths if p is not None} <= files:
+                shown = True
+                continue
+        return False, False
+    return (not echoes or _quiet_echoes(echoes, env, assigned)), shown
+
+
+def shows_file(command: str, files: set[str], distrusted: frozenset[str] | set[str] = frozenset()) -> bool:
     """A shell block that prints one of `files` (`cat "$H/prompt.txt"`) and nothing of its own."""
     cmds = _parse_block(command)
     if cmds is None or not files:
         return False
-    env, assigned = _env(cmds)
-    foreign, shown = _printing(cmds, env, assigned, files)
-    return shown and not foreign
-
-
-def touches_file(command: str, path: str) -> bool:
-    """Whether a later shell block could change `path` (an unreadable block that names it could)."""
-    if os.path.basename(path) not in command:
+    env, raw, assigned = _env(cmds)
+    kinds = [_kind(c, raw, assigned, set(distrusted)) for c in cmds]
+    if "generator" in kinds:
         return False
+    quiet, shown = _block_quiet(cmds, kinds, env, assigned, files)
+    return quiet and shown
+
+
+def touches_file(command: str, path: str, distrusted: frozenset[str] | set[str] = frozenset()) -> bool:
+    """Whether a later shell block could change `path`. A block that cannot be read, or runs an
+    interpreter other than the plugin's own scripts, could change anything."""
     cmds = _parse_block(command)
-    return cmds is None or _writes_file(cmds, path)
+    if cmds is None:
+        return True
+    env, raw, assigned = _env(cmds)
+    return _writes_file(cmds, path, env, raw, assigned, set(distrusted))
+
+
+def _distrusts(command: str) -> set[str]:
+    """Generator file names a shell block could have rewritten: named by anything but a run of it or a
+    read-only command, or named in a block that cannot be read."""
+    named = {g for g in GENERATORS if g in command}
+    if not named:
+        return set()
+    cmds = _parse_block(command)
+    if cmds is None:
+        return named
+    out = set()
+    for c in cmds:
+        words = _words(c.argv)
+        name = os.path.basename(words[0]) if words else ""
+        script = _script(words)
+        for g in named:
+            in_args = [w for w in words[1:] if g in w]
+            if any(g in t for t in c.writes):
+                out.add(g)
+            elif in_args and name not in _READ_ONLY:
+                if script is not None and os.path.basename(script) == g and not any(g in w for w in words[2:]):
+                    continue  # running it
+                out.add(g)
+    return out
 
 
 def _is_shell(name: Any) -> bool:
     return isinstance(name, str) and (name == "Bash" or name.endswith("__bash"))
 
 
+_FILE_TOOL_KEYS = ("file_path", "notebook_path", "path")
+
+
 def comparands(rows: list[dict[str, Any]]) -> list[str]:
-    """The main-thread tool results that may be the comparand, in transcript order (module docstring)."""
+    """The main-thread tool results that may be the comparand, in transcript order (module docstring).
+
+    Writes anywhere in the transcript, a sub-agent's included, can drop a file read back or make a
+    generator untrusted; only the main thread's own results are ever the comparand."""
     uses: dict[str, dict[str, Any]] = {}
     pending: dict[str, tuple[bool, list[str]]] = {}
     readable: set[str] = set()
+    distrusted: set[str] = set()
     out: list[str] = []
     for row in rows:
-        if row.get("isSidechain"):
-            continue
+        side = bool(row.get("isSidechain"))
         content = (row.get("message") or {}).get("content")
         if not isinstance(content, list):
             continue
@@ -514,25 +673,29 @@ def comparands(rows: list[dict[str, Any]]) -> list[str]:
             for b in content:
                 if not isinstance(b, dict) or b.get("type") != "tool_use":
                     continue
-                uses[str(b.get("id"))] = b
                 inp: dict[str, Any] = b["input"] if isinstance(b.get("input"), dict) else {}
                 name = b.get("name")
                 if _is_shell(name):
                     cmd = inp.get("command")
                     if not isinstance(cmd, str):
                         continue
-                    verdict = generator_block(cmd)
-                    if not verdict[0] and shows_file(cmd, readable):
+                    distrusted |= _distrusts(cmd)
+                    verdict = (False, []) if side else generator_block(cmd, distrusted)
+                    if not side and not verdict[0] and shows_file(cmd, readable, distrusted):
                         verdict = (True, [])
-                    readable = {path for path in readable if not touches_file(cmd, path)}
+                    readable = {path for path in readable if not touches_file(cmd, path, distrusted)}
                     if verdict[0] or verdict[1]:
                         pending[str(b.get("id"))] = verdict
                 elif name != "Read":
-                    for key in ("file_path", "notebook_path", "path"):
+                    for key in _FILE_TOOL_KEYS:
                         target = inp.get(key)
                         if isinstance(target, str):
-                            readable.discard(os.path.normpath(target))
-        elif row.get("type") == "user":
+                            readable.discard(norm_path(target))
+                            if os.path.basename(target) in GENERATORS:
+                                distrusted.add(os.path.basename(target))
+                if not side:
+                    uses[str(b.get("id"))] = b
+        elif row.get("type") == "user" and not side:
             for b in content:
                 if not isinstance(b, dict) or b.get("type") != "tool_result" or b.get("is_error"):
                     continue
@@ -549,13 +712,13 @@ def comparands(rows: list[dict[str, Any]]) -> list[str]:
                     if prints:
                         saved = _PERSISTED_RE.match(text)
                         if saved:
-                            readable.add(os.path.normpath(saved.group(1)))
+                            readable.add(norm_path(saved.group(1)))
                         else:
                             out.append(text)
                 elif use.get("name") == "Read":
                     read_input: dict[str, Any] = use["input"] if isinstance(use.get("input"), dict) else {}
                     target = read_input.get("file_path")
-                    if isinstance(target, str) and os.path.normpath(target) in readable:
+                    if isinstance(target, str) and norm_path(target) in readable:
                         out.append(_unnumbered(text))
     return out
 

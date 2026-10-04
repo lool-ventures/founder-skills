@@ -635,13 +635,16 @@ def test_a_sub_agents_reply_is_not_the_comparand(tmp_path: Path) -> None:
     assert "no printed prompt" in reason
 
 
+_RESOLVER = '"${SHARED_SCRIPTS}/' + 'resolve_artifacts_root.py"'
+
+
 @pytest.mark.parametrize(
     "command",
     [
         GEN_CMD,
         'RUN_ID="R"\n' + GEN_CMD + '\necho "EXIT=$?"',
         'python3 "$SCRIPTS/ocr_uploads.py" --uploads-dir d --out o 2>&1 | tail -5\n' + GEN_CMD,
-        'U=$(python3 /p/resolve_artifacts_root.py --uploads)\necho "mirror: $U"\n' + GEN_CMD + " 2>&1",
+        "U=$(python3 " + _RESOLVER + ' --uploads)\necho "u: $U"\n' + GEN_CMD + " 2>&1",
         'mkdir -p "$HANDOFF_DIR/docs" && cp "/u"/* "$HANDOFF_DIR/docs/"\n' + GEN_CMD,
         "cd /w && " + GEN_CMD.replace("dispatch_prompt.py", "cp_dispatch_prompt.py"),
         GEN_CMD.replace("dispatch_prompt.py", "fmr_dispatch_prompt.py"),
