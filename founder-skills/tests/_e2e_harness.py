@@ -462,11 +462,12 @@ def same_prompt(a: str, b: str) -> bool:
 
 
 # How a hold by the plugin's PreToolUse hooks reads in a dispatch's error result. Each check opens its
-# deny reason with its marker (dispatch_prompt_check / dispatch_type_check / two_figures_check); CLI
+# deny reason with its marker (dispatch_prompt_check / dispatch_type_check / two_figures_check, and
+# review_page_check on a question); CLI
 # 2.1.286 delivers it as "PreToolUse:Agent hook error: <reason>", and a hook that exits 2 arrives in the
 # same form with its stderr. Either counts as a hold. Any other error result is a failure.
-HOOK_HOLD_MARKERS = ("[dispatch-check][", "[dispatch-type][", "[two-figures-check][")
-_HOOK_ERROR_RE = re.compile(r"PreToolUse:(?:Agent|Task) hook error: ")
+HOOK_HOLD_MARKERS = ("[dispatch-check][", "[dispatch-type][", "[two-figures-check][", "[review-page-check]")
+_HOOK_ERROR_RE = re.compile(r"PreToolUse:(?:Agent|Task|AskUserQuestion) hook error: ")
 
 
 def _text_of(content: Any) -> str:

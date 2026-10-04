@@ -43,6 +43,12 @@ _DELIVERABLE = re.compile(
     re.IGNORECASE | re.MULTILINE,
 )
 STOP_FEEDBACK_PREFIX = "Stop hook feedback:"
+# financial-model-review's values-check page, built for the founder to look at before the review goes
+# on. Only that skill ships `review_inputs.py`; its server mode (no --static) serves a local address
+# and writes no page to send.
+_REVIEW_BUILD = re.compile(r"(?<![\w-])review_inputs\.py\b(?P<args>[^\n;&|]*)")
+_STATIC_ARG = re.compile(r"(?:^|\s)--static(?:=|\s+|$)(?P<path>\"[^\"]*\"|'[^']*'|[^\s\"']*)")
+REVIEW_PAGE = "review.html"
 
 
 def is_delivery_tool(name: Any) -> bool:
@@ -150,3 +156,75 @@ def missing_delivery(rows: list[dict[str, Any]], start: int, printed: str | None
     if not seen or tool is None:
         return None
     return tool
+
+
+def _strings(obj: Any) -> Any:
+    """Every string inside a decoded JSON value."""
+    if isinstance(obj, str):
+        yield obj
+    elif isinstance(obj, dict):
+        for value in obj.values():
+            yield from _strings(value)
+    elif isinstance(obj, list):
+        for value in obj:
+            yield from _strings(value)
+
+
+def static_review_page(command: str) -> str | None:
+    """The file name of the page a `review_inputs.py … --static <page>` command writes, or None when the
+    command is not a static review build. A name the shell has yet to expand falls back to the page
+    SKILL.md names."""
+    m = _REVIEW_BUILD.search(command)
+    if m is None:
+        return None
+    arg = _STATIC_ARG.search(m.group("args"))
+    if arg is None:
+        return None
+    name = arg.group("path").strip("\"'").rstrip("/").rsplit("/", 1)[-1]
+    return name if name and "$" not in name and "." in name else REVIEW_PAGE
+
+
+def tool_outcomes(rows: list[dict[str, Any]], start: int) -> dict[str, bool]:
+    """Each top-level tool result since `start`, keyed by its id: True when it is an error."""
+    results: dict[str, bool] = {}
+    for row in rows[start:]:
+        if row.get("isSidechain"):
+            continue
+        for b in _content(row):
+            if isinstance(b, dict) and b.get("type") == "tool_result" and isinstance(b.get("tool_use_id"), str):
+                results[b["tool_use_id"]] = bool(b.get("is_error"))
+    return results
+
+
+def unsent_review_page(rows: list[dict[str, Any]], start: int) -> tuple[int, str] | None:
+    """(row index, page name) of the current prompt's latest successful static review build, when no
+    successful delivery naming that page and no report build has followed it; else None.
+
+    A delivery counts for the page only when its input names the page's file: a report's delivery is
+    not the page's, and the page's is not the report's (`missing_delivery` judges deliveries only after
+    its own build). A report build after the page means the run is past the values check, where the page
+    no longer matters. Any other shell call (a gate record, a validation) is neither."""
+    results = tool_outcomes(rows, start)
+    found: tuple[int, str] | None = None
+    for i in range(start, len(rows)):
+        row = rows[i]
+        if row.get("type") != "assistant" or row.get("isSidechain"):
+            continue
+        for b in _content(row):
+            if not (isinstance(b, dict) and b.get("type") == "tool_use"):
+                continue
+            cid = b.get("id")
+            outcome = results.get(cid) if isinstance(cid, str) and cid else None
+            name = b.get("name")
+            if name in SHELL_TOOLS:
+                command = str((b.get("input") or {}).get("command", ""))
+                page = static_review_page(command)
+                if page is not None and outcome is False:
+                    found = (i, page)
+                elif found is not None and _BUILD.search(command):
+                    found = None
+            elif found is not None and is_delivery_tool(name) and outcome is False:
+                page = found[1]
+                if any(s.strip() == page or s.strip().endswith("/" + page) for s in _strings(b.get("input"))):
+                    found = None
+    return found

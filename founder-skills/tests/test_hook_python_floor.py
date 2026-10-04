@@ -38,6 +38,7 @@ def test_the_hook_module_list_is_complete() -> None:
         "stop_handover_check.py",
         "_handover_check.py",
         "_delivery_check.py",
+        "review_page_check.py",
     }
     assert expected <= names, names
 
@@ -255,3 +256,14 @@ def test_every_hook_module_is_linted_as_3_9() -> None:
     section = text.split("[tool.ruff.per-file-target-version]", 1)[1].split("\n[", 1)[0]
     listed = set(re.findall(r'^"founder-skills/scripts/([A-Za-z0-9_]+\.py)" = "py39"$', section, re.MULTILINE))
     assert listed == {p.name for p in HOOK_MODULES}
+
+
+@needs_old
+@pytest.mark.parametrize("sent", [False, True])
+def test_the_question_check_decides_the_same_under_the_system_python(tmp_path: Path, sent: bool) -> None:
+    from test_review_page_hook import PAGE, _built, _deliver, _payload
+
+    rows = _built(*_deliver("toolu_d", PAGE)) if sent else _built()
+    dev, system = _both(SCRIPTS / "pretooluse_dispatch.py", _payload(tmp_path, rows))
+    assert dev == system
+    assert bool(dev) is not sent

@@ -3,10 +3,11 @@
 # requires-python = ">=3.10"
 # dependencies = []
 # ///
-"""PreToolUse on Agent/Task: one process runs every dispatch check, the first hold wins.
+"""PreToolUse on Agent/Task/AskUserQuestion: one process runs every check, the first hold wins.
 
-Every dispatch in every session with the plugin starts this, so the checks share one python start
-rather than one each, and each returns at its own prefix test before reading anything. Fails open:
+Every dispatch and every question in every session with the plugin starts this, so the checks share one
+python start rather than one each, and each returns at its own tool-name and prefix tests before
+reading anything. Fails open:
 any error, any unexpected shape, exit 0 with no stdout and one stderr line.
 """
 
@@ -20,7 +21,9 @@ from typing import Any
 
 # The agent check runs first: a dispatch addressed to the wrong agent is answered with the agent to
 # name before anything is compared against its prompt.
-CHECKS = ("dispatch_type_check", "two_figures_check", "dispatch_prompt_check")
+# The question check answers only AskUserQuestion, and every dispatch check only Agent/Task: each returns
+# at its own tool-name test, so the order between the two groups decides nothing.
+CHECKS = ("dispatch_type_check", "two_figures_check", "dispatch_prompt_check", "review_page_check")
 
 
 def _load(name: str) -> Any:
