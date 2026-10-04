@@ -355,6 +355,7 @@ def test_a_generator_folded_into_the_previous_steps_block_is_the_comparand() -> 
     assert DPC.generator_block(_FOLDED)[0] is True
     noisy = 'cat "$R/x.json"; grep -c ok "$R/y.txt"; echo "CONTEXT: CHECKLIST"\n' + GEN
     assert DPC.generator_block(noisy)[0] is True  # what printed before the generator is not the last context line
+    assert DPC.generator_block("cat /tmp/x\ncp /tmp/y /dev/stdout\n" + GEN)[0] is True  # it prints before, too
 
 
 @pytest.mark.parametrize(
@@ -374,6 +375,7 @@ def test_a_generator_folded_into_the_previous_steps_block_is_the_comparand() -> 
         "nohup python3 /tmp/forge.py\n" + GEN,
         "bash /tmp/forge.sh\n" + GEN,
         "cat /tmp/x\n" + GEN + " | tee /tmp/copy",
+        'cat /tmp/x\nX="$(python3 /tmp/forge.py)"\n' + GEN,  # a substitution runs code that could outlive it
     ],
 )
 def test_a_printing_step_before_the_generator_needs_the_generator_last_and_nothing_that_outlives_it(block: str) -> None:

@@ -679,8 +679,6 @@ def _may_precede(c: _Cmd, kind: str, raw: dict[str, str]) -> bool:
     script = _script(words)
     if script is not None:
         return _plugin_script(script, raw) and os.path.basename(script) not in GENERATORS
-    if name in ("cp", "mv"):
-        return False  # a device or /proc argument (quiet otherwise)
     return name in _MAY_PRECEDE and not _INTERPRETERS_RE.match(name)
 
 
