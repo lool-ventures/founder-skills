@@ -7103,8 +7103,17 @@ class TestCpDispatchPrompt:
     @pytest.mark.parametrize("context", ["moat_scoring", "positioning_scoring", "checklist", "startup_research"])
     def test_the_hook_passes_the_printed_prompt_and_holds_a_steered_one(self, context: str, tmp_path: Any) -> None:
         printed = self._render(context)
+        # The comparand is a result paired by tool id with the generator call that printed it.
+        command = f'python3 "$SCRIPTS/cp_dispatch_prompt.py" {context} --run-id R1 --handoff-agent /h/'
         rows = [
             {"type": "user", "message": {"role": "user", "content": "Map my competitors."}},
+            {
+                "type": "assistant",
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "tool_use", "id": "t", "name": "Bash", "input": {"command": command}}],
+                },
+            },
             {
                 "type": "user",
                 "message": {

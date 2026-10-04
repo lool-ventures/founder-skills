@@ -127,6 +127,7 @@ def test_every_hook_and_the_python_it_runs_ships_in_the_plugin() -> None:
         "scripts/pretooluse-dispatch.sh",
         "scripts/pretooluse_dispatch.py",
         "scripts/dispatch_prompt_check.py",
+        "scripts/dispatch_type_check.py",
         "scripts/two_figures_check.py",
         "scripts/session-setup.sh",
     ):

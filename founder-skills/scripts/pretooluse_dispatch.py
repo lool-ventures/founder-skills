@@ -18,7 +18,9 @@ import os
 import sys
 from typing import Any
 
-CHECKS = ("two_figures_check", "dispatch_prompt_check")
+# The agent check runs first: a dispatch addressed to the wrong agent is answered with the agent to
+# name before anything is compared against its prompt.
+CHECKS = ("dispatch_type_check", "two_figures_check", "dispatch_prompt_check")
 
 
 def _load(name: str) -> Any:
