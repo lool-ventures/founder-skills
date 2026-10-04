@@ -166,7 +166,8 @@ def _step5_generator_block() -> str:
 
     text = (PLUGIN / "skills" / "financial-model-review" / "SKILL.md").read_text(encoding="utf-8")
     step = text[text.index("### Step 5: CHECKLIST Dispatch") : text.index("### Step 7:")]
-    return next(b for b in re.findall(r"^```bash\n(.*?)^```", step, re.MULTILINE | re.DOTALL) if GEN.name in b)
+    blocks: list[str] = re.findall(r"^```bash\n(.*?)^```", step, re.MULTILINE | re.DOTALL)
+    return next(b for b in blocks if GEN.name in b)
 
 
 def test_step_5_sets_every_variable_the_generator_call_uses() -> None:
