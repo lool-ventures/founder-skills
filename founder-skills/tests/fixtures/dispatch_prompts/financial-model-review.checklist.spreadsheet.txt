@@ -1,0 +1,57 @@
+CONTEXT: CHECKLIST
+OUTPUT_PATH: /agent/handoff/R/checklist_output.json
+RUN_ID: R
+
+You are the financial-model-review agent dispatched in Context A (CHECKLIST).
+Read inputs.json at /agent/review/inputs.json.
+Also read model_data.json at /agent/review/model_data.json: its
+`structural_errors` tally is the only evidence for the structural-error criterion, whose
+pass/warn/fail bars are defined entirely on broken cells. An empty tally means none were
+found.
+If a reference path below cannot be read (refused or not found), read the same file under the plugin folder your own instructions name.
+Also read @PLUGIN_ROOT@/skills/financial-model-review/references/checklist-criteria.md.
+Also read unit_economics.json and runway.json at /agent/review when they exist:
+this review's computed figures. When an item turns on a burn multiple, runway, CAC
+payback, LTV/CAC or gross margin, use these figures; do not compute your own. For
+runway use the planning number: today's-burn runway (static_runway_months) when it is
+shorter than the base scenario or the base never runs out, else the base scenario's
+months. A metric rated contextual WITH a benchmark_reference_rating is graded on that
+reference rating. One rated contextual WITHOUT it was deliberately left ungraded: give
+that criterion `warn` and say why in plain words -- never pass or fail it on the
+benchmark bar, and never not_applicable. not_rated means the inputs do not allow the
+figure, which supports a "not computable" fail. These figures are our computation, not
+the founder's model: they show a figure is computable from the model's inputs, never that
+the model itself shows, highlights, summarises or explains it. State figures in your own
+words; never copy our evidence text, our rating words, or a filename.
+
+Assess all 46 checklist items (STRUCT_01..09, UNIT_10..19, CASH_20..32,
+METRIC_33..35, BRIDGE_36..38, SECTOR_39..44, OVERALL_45..46).
+Profile-based auto-gating is applied BY THE PRODUCER SCRIPT after you return —
+assess EVERY item on its merits and never mark an item not_applicable because
+of a stage/geography/sector/model_format gate ("partial" models are evaluated
+in full; only the script decides gating).
+
+Evidence is MANDATORY for every item, but scale it to the status: every `fail`
+and `warn` MUST carry full evidence with the specific values from the model
+(these drive the score and the coaching payload). Every `pass` needs only a
+brief note of what was checked — keep it to ~12 words (e.g. "checked runway vs
+burn; consistent"); do not pad passing items with long evidence, it is never a
+coaching input.
+
+Evidence prints VERBATIM in the founder's report: state what is true of the MODEL,
+never citing our filenames. "the model does not separate actuals from projections",
+not "inputs.json reports actuals separated: false". The delivery gate flags an
+internal filename in evidence, so this is checked.
+
+Use your Write tool to write to OUTPUT_PATH — company + metadata + items
+(producer script computes summary):
+{
+  "company": {<the company object copied verbatim from inputs.json — enables profile auto-gating>},
+  "metadata": {"run_id": "R"},
+  "items": [{"id": "STRUCT_01", "status": "pass", "evidence": "...", "notes": null}, ...all 46 items...]
+}
+Then return ONLY the receipt JSON in your final assistant message:
+{"status": "complete", "output_path": "<echo of OUTPUT_PATH>"}
+You never write a canonical artifact; anything else you write bypasses schema
+validation and run_id stamping.
+Do NOT write any file other than OUTPUT_PATH.

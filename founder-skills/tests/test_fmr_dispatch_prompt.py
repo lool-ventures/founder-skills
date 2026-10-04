@@ -20,6 +20,10 @@ PLUGIN = Path(__file__).resolve().parents[1]
 GEN = PLUGIN / "skills" / "financial-model-review" / "scripts" / "fmr_dispatch_prompt.py"
 HOOK = PLUGIN / "scripts" / "dispatch_prompt_check.py"
 GOLDEN = PLUGIN / "tests" / "fixtures" / "dispatch_prompts" / "financial-model-review.checklist.txt"
+# The same prompt for a spreadsheet review, whose extraction exists: the other arm, pinned the same way.
+GOLDEN_SPREADSHEET = (
+    PLUGIN / "tests" / "fixtures" / "dispatch_prompts" / "financial-model-review.checklist.spreadsheet.txt"
+)
 ROOT_MARK = "@PLUGIN_ROOT@"
 END = "Do NOT write any file other than OUTPUT_PATH.\n"
 PRESENT = "Also read model_data.json at /agent/review/model_data.json: its"
@@ -61,6 +65,14 @@ def test_the_prompt_is_the_golden_text(tmp_path: Path) -> None:
     assert r.returncode == 0 and r.stderr == "", r.stderr
     golden = GOLDEN.read_text(encoding="utf-8")
     assert golden.count(ROOT_MARK) == 1
+    assert r.stdout == golden.replace(ROOT_MARK, str(PLUGIN))
+
+
+def test_the_spreadsheet_prompt_is_its_golden_text(tmp_path: Path) -> None:
+    r = _gen(_review(tmp_path, model_data=True), cwd=tmp_path)
+    assert r.returncode == 0 and r.stderr == "", r.stderr
+    golden = GOLDEN_SPREADSHEET.read_text(encoding="utf-8")
+    assert golden.count(ROOT_MARK) == 1 and PRESENT in golden
     assert r.stdout == golden.replace(ROOT_MARK, str(PLUGIN))
 
 
