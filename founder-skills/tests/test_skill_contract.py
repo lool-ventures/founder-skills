@@ -1495,7 +1495,10 @@ SKILL_MD_CEILING: dict[str, int] = {
     # check producer reads a fill-in heredoc instead of an undefined $QUICK_JSON; Step 6 prints the input mode back from
     # product_profile.json instead of reading a variable set in an earlier shell; the overwrite note names the no-delete
     # rule, not a host refusal.
-    "competitive-positioning": 127_426,
+    # 127,426 -> 127,516 on 2026-10-04: Step 3.6's recall dispatch names `subagent_type:
+    # "founder-skills:competitive-positioning"` (a type-less dispatch falls back to the wildcard general-purpose
+    # agent); the sentence a removed reminder had cut in half is whole again.
+    "competitive-positioning": 127_516,
     # cap-table, the largest raise (+2,383 B) and the one with the most founder-visible payoff:
     #   * Main-Thread Return named THREE of the four files Step 12 copies; a live run delivered exactly
     #     three and dropped `{Company}_Cap_Table.html`. All four are now named explicitly.

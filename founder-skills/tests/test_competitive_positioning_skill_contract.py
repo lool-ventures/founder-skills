@@ -49,6 +49,8 @@ import sys
 import types
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CP_DIR = REPO_ROOT / "founder-skills" / "skills" / "competitive-positioning"
 SKILL_MD = CP_DIR / "SKILL.md"
@@ -1828,3 +1830,23 @@ def test_step5_says_polarity_stays_nested_in_the_axis_object() -> None:
     step5 = " ".join(_step(SKILL_MD.read_text(encoding="utf-8"), "### Step 5: Positioning & Moat Assessment").split())
     assert "`x_axis.polarity`" in step5 and "`y_axis.polarity`" in step5
     assert "never as top-level view fields" in step5
+
+
+@pytest.mark.parametrize(
+    ("heading", "agent"),
+    [
+        ("### Step 3.5:", "competitive-positioning"),
+        ("### Step 3.6:", "competitive-positioning"),
+        ("### Step 4:", "competitive-positioning"),
+        ("### Step 4b:", "competitive-positioning"),
+        ("### Step 5:", "competitive-positioning"),
+        ("### Step 6:", "competitive-positioning"),
+        ("### Step 6.5:", "competitive-positioning-redteam"),
+    ],
+)
+def test_every_context_a_dispatch_step_names_its_agent(heading: str, agent: str) -> None:
+    """A dispatch with no `subagent_type` falls back to the wildcard `general-purpose` agent: a shell,
+    and none of this agent's scoped tools or rules. Each Context A step names the agent, bounded by its
+    own heading and the next one."""
+    section = _step(SKILL_MD.read_text(encoding="utf-8"), heading)
+    assert f'subagent_type: "founder-skills:{agent}"' in section, heading

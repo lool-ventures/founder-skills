@@ -443,8 +443,8 @@ If the producer exits 1 on a show-your-work violation (a flag with no reasoning 
 
 Step 3.5 challenges the competitors that ARE on the list. This is its mirror: it asks who is
 **missing**. Both run against the same draft, so **dispatch them in parallel — two `Task` calls in
-one message**, exactly as Step 5 does for MOAT_SCORING + POSITIONING_SCORING.
-consumed after both return.
+one message, both with `subagent_type: "founder-skills:competitive-positioning"`**, exactly as Step 5
+does for MOAT_SCORING + POSITIONING_SCORING. The recall result is consumed after both return.
 
 **Why a separate dispatch rather than one more instruction to an existing one.** Step 4's Phase B
 also looks for missing competitors, but it runs inside the dispatch that just spent its whole context
