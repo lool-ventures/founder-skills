@@ -103,7 +103,7 @@ Every analysis deposits structured JSON artifacts into a working directory. The 
 
 **Rules:**
 - Deposit each artifact before proceeding to the next step
-- For agent-authored artifacts, consult `references/artifact-schemas.md` for the JSON schema, and write them through `persist_agent_artifact.py` (stage in `$STAGING_DIR`, pipe to `$ANALYSIS_DIR`) rather than by heredoc. It checks required keys and stamps `_produced_by`; without the stamp `compose_report.py` raises `UNVALIDATED_ARTIFACT` at **high** severity. **What that buys is presence-of-keys and provenance, not shape** — the model still authors the content
+- For agent-authored artifacts, consult `${CLAUDE_PLUGIN_ROOT}/skills/competitive-positioning/references/artifact-schemas.md` for the JSON schema, and write them through `persist_agent_artifact.py` (stage in `$STAGING_DIR`, pipe to `$ANALYSIS_DIR`) rather than by heredoc. It checks required keys and stamps `_produced_by`; without the stamp `compose_report.py` raises `UNVALIDATED_ARTIFACT` at **high** severity. **What that buys is presence-of-keys and provenance, not shape** — the model still authors the content
 - If a step is not applicable, deposit a stub: `{"skipped": true, "reason": "..."}`
 - **Do NOT use `isolation: "worktree"`** for sub-agents — files written in a worktree won't appear in the main `$ANALYSIS_DIR`
 
@@ -160,7 +160,6 @@ for c in sys.stdin.read().splitlines():
 fi
 PLUGIN_ROOT="${SCRIPTS%/skills/*}"
 echo "PLUGIN_ROOT=$PLUGIN_ROOT"   # resolved ONCE, here — paste this literal into every later block; never re-run this resolution. PLUGIN_ROOT is the shell's path: never Read from it or put it in a sub-agent prompt. Exception: a READ_ROOT= printed below goes in Reads and prompts.
-REFS="$PLUGIN_ROOT/skills/competitive-positioning/references"
 SHARED_SCRIPTS="$PLUGIN_ROOT/scripts"
 # PREFLIGHT: the run STOPS if this prints (the skill was served without its plugin). Test for
 # check_handoff.py, never a /mnt/skills path: a working first-message session shows that path too.
@@ -170,7 +169,6 @@ SHARED_SCRIPTS="$PLUGIN_ROOT/scripts"
   /sessions/*) echo "PATH_STATE=local" ;;
   *) if [ -d "$TEXT_ROOT_RAW" ]; then echo "PATH_STATE=substituted"; else echo "PATH_STATE=local"; fi ;;
 esac
-SHARED_REFS="$PLUGIN_ROOT/references"
 # Resolve the canonical artifacts root via a SCRIPT, not inline bash (the agent paraphrases inline
 # path computations → outputs/ vs outputs/artifacts/ drift across runs). Deterministic + creates it.
 python3 "$SHARED_SCRIPTS/resolve_artifacts_root.py"   # prints ARTIFACTS_ROOT — use the printed path verbatim as ARTIFACTS_ROOT in every later block (a captured var dies in the next fresh shell)
@@ -183,6 +181,8 @@ Tell the founder, in one sentence, that this skill needs Claude Cowork or Claude
 have not run it — then stop. Do not improvise the missing steps: an analysis that grades itself and
 reviews itself reads exactly like one that was checked, which is the failure this stop exists to
 prevent.
+
+Plugin folder for Reads and prompts (as loaded): `${CLAUDE_PLUGIN_ROOT}` — this skill's references are in `${CLAUDE_PLUGIN_ROOT}/skills/competitive-positioning/references/`. If Step 0 printed `READ_ROOT=`, use that value instead.
 
 **Plugin paths.** If Step 0 printed `READ_ROOT=`, this skill's text arrived without its plugin folder filled in. Use that value in place of `${CLAUDE_PLUGIN_ROOT}` in every Read and sub-agent prompt, including where a later step says to leave that path literal. If it did not print `READ_ROOT=`, use the paths as shown. The folder comes from Step 0's filesystem search, not from a skill file or the "Base directory" line, which can name a folder that does not exist. These are setup details: updates to the founder are about their company, not file locations, printed paths or plugin versions.
 
@@ -370,7 +370,7 @@ cat "$STAGING_DIR/product_profile.json" | python3 "$SCRIPTS/persist_agent_artifa
   --artifact product_profile.json -o "$ANALYSIS_DIR/product_profile.json" --run-id "$RUN_ID" --pretty
 ```
 
-It checks the schema-required top-level keys, stamps `_produced_by`, and writes. **If it rejects, the pipe fails and `$ANALYSIS_DIR` is left untouched** — fix the staged JSON and re-run; never hand-write the destination to get past it. `compose_report.py` raises `UNVALIDATED_ARTIFACT` at high severity on an unstamped artifact, so a bare heredoc here surfaces as a high-severity warning in the delivered report, and fails the run outright on Step 7's `--strict` pass. Do not read it as an unconditional hard stop: Pass 1 runs without `--strict`. Consult `references/artifact-schemas.md` for the schema. The chosen mode (`deck`, `conversation`, or `document`) is the profile's `input_mode`. Step 6 reads it back from `product_profile.json` for `checklist.py --input-mode`, so mode gating is applied correctly: a shell variable set here would not survive to that later command.
+It checks the schema-required top-level keys, stamps `_produced_by`, and writes. **If it rejects, the pipe fails and `$ANALYSIS_DIR` is left untouched** — fix the staged JSON and re-run; never hand-write the destination to get past it. `compose_report.py` raises `UNVALIDATED_ARTIFACT` at high severity on an unstamped artifact, so a bare heredoc here surfaces as a high-severity warning in the delivered report, and fails the run outright on Step 7's `--strict` pass. Do not read it as an unconditional hard stop: Pass 1 runs without `--strict`. Consult `${CLAUDE_PLUGIN_ROOT}/skills/competitive-positioning/references/artifact-schemas.md` for the schema. The chosen mode (`deck`, `conversation`, or `document`) is the profile's `input_mode`. Step 6 reads it back from `product_profile.json` for `checklist.py --input-mode`, so mode gating is applied correctly: a shell variable set here would not survive to that later command.
 
 If materials are sparse, use `AskUserQuestion` to gather missing fields. At minimum: product description, target customers, and what the founder believes differentiates them. All three are necessarily runtime-labelled — open-ended founder-specific answers, not a set of labels a fixed list could offer — so each question needs an affirmative option carrying any partial signal already derived, plus a free-text fallback (same shape as the founder-context basics above), not a literal bracket list.
 
@@ -583,8 +583,7 @@ built from the `resolve_artifacts_root.py --agent` namespace (`$HANDOFF_AGENT` /
 Never hand a sub-agent an absolute `/sessions/...` path for a file-tool Read/Write — the host-loop path
 gate denies it (steering shell work to the `bash` tool instead). Bundled `references/*.md` are the one
 exception: pass them as the literal `${CLAUDE_PLUGIN_ROOT}/skills/competitive-positioning/references/...` token (it is
-pre-resolved to a host-readable path); do NOT substitute a `find /sessions`-discovered `$REFS` (a shell
-path a file tool can't read).
+pre-resolved to a host-readable path), never a path the shell printed.
 
 **After EVERY Context A dispatch, gate before piping** (`<step>` = the dispatch's file stem):
 
@@ -840,7 +839,7 @@ The report and the coaching read it; never state a patent status yourself.
 
 **REQUIRED — read `${CLAUDE_PLUGIN_ROOT}/skills/competitive-positioning/references/moat-definitions.md` now.**
 
-Write `positioning.json` to `$ANALYSIS_DIR` (consult `references/artifact-schemas.md` for the schema).
+Write `positioning.json` to `$ANALYSIS_DIR` (consult `${CLAUDE_PLUGIN_ROOT}/skills/competitive-positioning/references/artifact-schemas.md` for the schema).
 
 **Write it through the producer, not by a bare heredoc into `$ANALYSIS_DIR`.** Stage the JSON in `$STAGING_DIR` (the `/tmp` scratch dir from Step 0 — never the promoted outputs mount) and pipe it:
 

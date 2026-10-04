@@ -83,7 +83,7 @@ tool surface and different rules.
   chosen by where the target lives:
   - **A bundled `references/*.md`** → the literal `${CLAUDE_PLUGIN_ROOT}/skills/<skill>/references/<f>.md`
     token, which the loader fills with a host-readable path (or Step 0's
-    `READ_ROOT=` value when it printed one) — never a `find`-discovered `$REFS`
+    `READ_ROOT=` value when it printed one) — never a path the shell printed
     (a VM path a file tool can't read). This holds for MAIN-THREAD Reads too.
   - **A reference in a generator-printed prompt** → never a folder passed
     through the shell: recent Claude Desktop versions rewrite the plugin's

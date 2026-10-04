@@ -360,6 +360,15 @@ esac
 """,
 )
 
+# The folder for Reads is named in prose, outside the fence, so the loader fills it on the lanes where it fills
+# anything. The condition is Step 0's output, never the token: a token inside "if these still show ..." is
+# filled too, which turns the condition into "if these still show /real/path" -- always true.
+STEP0_READS_LINE = (
+    "Plugin folder for Reads and prompts (as loaded): `${CLAUDE_PLUGIN_ROOT}` — this skill's references are in "
+    "`${CLAUDE_PLUGIN_ROOT}/skills/{skill}/references/`. If Step 0 printed `READ_ROOT=`, use that value instead.\n\n"
+)
+
+# STEP0_READS_LINE is pinned to sit immediately before this paragraph.
 STEP0_PROSE = (
     "**Plugin paths.** If Step 0 printed `READ_ROOT=`, this skill's text arrived without its plugin folder "
     "filled in. Use that value in place of `${CLAUDE_PLUGIN_ROOT}` in every Read and sub-agent prompt, "
@@ -381,6 +390,8 @@ def test_step0_bootstrap_lines_are_fleet_identical(skill: str) -> None:
         assert expected in fence, f"{skill}: Step 0 lost or changed:\n{expected}"
     section = _step0_section(skill)
     assert STEP0_PROSE in section, f"{skill}: Step 0 lost the plugin-paths paragraph"
+    reads = STEP0_READS_LINE.replace("{skill}", skill)
+    assert reads + STEP0_PROSE in section, f"{skill}: the folder-for-Reads line is not right before the paragraph"
     assert STEP0_RUN_AS_SHOWN in section, f"{skill}: Step 0 no longer says to run the block as it appears"
     assert "self-heal branch is normal" not in section, f"{skill}: the stale self-heal note is back"
     assert "Skip it if that path still begins with `$`." in section, f"{skill}: best-effort Read lacks its skip"
@@ -512,3 +523,85 @@ def test_cap_table_lane_references_are_read_by_an_absolute_path() -> None:
     assert "](references/lanes/" not in text, "a lane row still links a relative path"
     for lane in ("lane-1-pdf-docx", "lane-2-carta-pulley", "lane-3-freeform", "lane-4-structured"):
         assert f"`{TOKEN}/skills/cap-table/references/lanes/{lane}.md`" in text, lane
+
+
+# --- nothing tells the model to Read through a value the shell printed ---------------------------
+#
+# The shell's paths are not the file tools' paths on a local session: the plugin folder the shell sees is
+# a VM path, refused by the Read tool. So Step 0 defines no reference folder for the shell at all, and no
+# instruction reads a reference through a shell value or through a bare relative path (which Read refuses,
+# and which the "Base directory" line would resolve against a folder that may not exist).
+
+SEM = PLUGIN / "references" / "skill-execution-model.md"
+
+_READ_VERB = re.compile(r"\b(?:[Rr]ead|[Cc]onsult|[Ss]ee|[Oo]pen)\b")
+# A bundled file named relative to the skill folder. `references/*.md` (a glob naming the class) is not a file.
+_BARE_REFERENCE = re.compile(r"(?<![\w/}.$-])references/[\w./-]+\.(?:md|json)\b")
+# A file path built on a value Step 0 or a later block printed for the shell.
+_SHELL_VALUE_PATH = re.compile(
+    r"(?:\$\{?(?:PLUGIN_ROOT|SCRIPTS|SHARED_SCRIPTS|REFS|SHARED_REFS)\}?|<printed PLUGIN_ROOT>)/[\w./-]*\.(?:md|json)\b"
+)
+
+
+def _prose_sentences(text: str) -> list[str]:
+    """Every sentence outside a ```bash fence, whitespace squashed. Dispatch templates are kept: a sub-agent
+    reads them, so a read directive there counts."""
+    prose = re.sub(r"^```bash\n.*?^```", "", text, flags=re.MULTILINE | re.DOTALL)
+    return re.split(r"(?<=[.!?])\s+", " ".join(prose.split()))
+
+
+def reads_through_a_shell_value(text: str) -> list[str]:
+    found: list[str] = []
+    for sentence in _prose_sentences(text):
+        if not _READ_VERB.search(sentence):
+            continue
+        hits = _BARE_REFERENCE.findall(sentence) + _SHELL_VALUE_PATH.findall(sentence)
+        found.extend(f"{h}  <-  {sentence[:160]}" for h in hits)
+    return found
+
+
+@pytest.mark.parametrize("skill", SKILLS)
+def test_no_dead_reference_root_in_step0(skill: str) -> None:
+    """Step 0 prints nothing named for reading references. A shell-side reference folder was rebuilt into
+    Read and `cat` calls from the printed root and refused; the folder for Reads is the loaded token."""
+    text = (PLUGIN / "skills" / skill / "SKILL.md").read_text(encoding="utf-8")
+    assert not re.search(r"^\s*(?:SHARED_)?REFS=", text, re.MULTILINE), f"{skill}: Step 0 defines a reference root"
+    assert not re.search(r"\$\{?(?:SHARED_)?REFS\b", text), f"{skill}: the text names a shell reference root"
+
+
+def test_execution_model_names_no_shell_reference_root() -> None:
+    text = SEM.read_text(encoding="utf-8")
+    assert not re.search(r"\$\{?(?:SHARED_)?REFS\b", text), "skill-execution-model.md names a shell reference root"
+
+
+@pytest.mark.parametrize("skill", SKILLS)
+def test_no_instruction_reads_through_a_printed_shell_value(skill: str) -> None:
+    """No sentence that tells the model to read, consult, see or open a bundled file names it by a bare
+    relative `references/` path or by a path built on a shell value (`$PLUGIN_ROOT`, `$SCRIPTS`, ...).
+
+    The limit: this reads the text, not what the model does with it. A correct directive whose path the
+    model rebuilds from the printed root anyway passes here, and only a live run shows that."""
+    text = (PLUGIN / "skills" / skill / "SKILL.md").read_text(encoding="utf-8")
+    found = reads_through_a_shell_value(text)
+    assert not found, f"{skill}: a read directive names a path the Read tool is refused:\n" + "\n".join(found)
+
+
+def test_the_read_directive_scan_catches_both_forms() -> None:
+    """Positive control: one sentence of each shape is caught, and the token form is not."""
+    assert reads_through_a_shell_value("For the schema, consult `references/artifact-schemas.md` first.")
+    assert reads_through_a_shell_value("Read `$PLUGIN_ROOT/skills/x/references/a.md` before writing.")
+    assert reads_through_a_shell_value("See `<printed PLUGIN_ROOT>/references/benchmarks.md` for targets.")
+    assert not reads_through_a_shell_value(f"Consult `{TOKEN}/skills/x/references/artifact-schemas.md` first.")
+    assert not reads_through_a_shell_value("Bundled `references/*.md` are the one exception: read them by token.")
+
+
+@pytest.mark.parametrize("skill", SKILLS)
+def test_no_condition_is_keyed_on_the_token_showing(skill: str) -> None:
+    """The loader fills every `${CLAUDE_PLUGIN_ROOT}`, including one inside "if this still shows ...", so
+    such a condition reads as "if this still shows /real/path" and is always true. Conditions key on what
+    Step 0 printed instead."""
+    text = (PLUGIN / "skills" / skill / "SKILL.md").read_text(encoding="utf-8")
+    bad = [
+        ln for ln in text.splitlines() if re.search(r"(?i)\bif\b[^.\n]*\bshows?\b[^.\n]*\$\{CLAUDE_PLUGIN_ROOT\}", ln)
+    ]
+    assert not bad, f"{skill}: a condition is keyed on the token itself: {bad}"

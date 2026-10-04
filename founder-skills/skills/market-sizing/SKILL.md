@@ -90,7 +90,7 @@ Every analysis deposits structured JSON artifacts into a working directory. The 
 
 **Rules:**
 - Deposit each artifact before proceeding to the next step
-- For agent-written artifacts (Steps 2-4), consult `references/artifact-schemas.md` for the JSON schema
+- For agent-written artifacts (Steps 2-4), consult `${CLAUDE_PLUGIN_ROOT}/skills/market-sizing/references/artifact-schemas.md` for the JSON schema
 - If a step is not applicable, deposit a stub: `{"skipped": true, "reason": "..."}`
 - **Do NOT use `isolation: "worktree"`** for sub-agents — files written in a worktree won't appear in the main `$ANALYSIS_DIR`
 
@@ -147,7 +147,6 @@ for c in sys.stdin.read().splitlines():
 fi
 PLUGIN_ROOT="${SCRIPTS%/skills/*}"
 echo "PLUGIN_ROOT=$PLUGIN_ROOT"   # resolved ONCE, here — paste this literal into every later block; never re-run this resolution. PLUGIN_ROOT is the shell's path: never Read from it or put it in a sub-agent prompt. Exception: a READ_ROOT= printed below goes in Reads and prompts.
-REFS="$PLUGIN_ROOT/skills/market-sizing/references"
 SHARED_SCRIPTS="$PLUGIN_ROOT/scripts"
 # PREFLIGHT: the run STOPS if this prints (the skill was served without its plugin). Test for
 # check_handoff.py, never a /mnt/skills path: a working first-message session shows that path too.
@@ -157,7 +156,6 @@ SHARED_SCRIPTS="$PLUGIN_ROOT/scripts"
   /sessions/*) echo "PATH_STATE=local" ;;
   *) if [ -d "$TEXT_ROOT_RAW" ]; then echo "PATH_STATE=substituted"; else echo "PATH_STATE=local"; fi ;;
 esac
-SHARED_REFS="$PLUGIN_ROOT/references"
 # Resolve the canonical artifacts root via a SCRIPT, not inline bash (the agent paraphrases inline
 # path computations → outputs/ vs outputs/artifacts/ drift across runs). Deterministic + creates it.
 python3 "$SHARED_SCRIPTS/resolve_artifacts_root.py"   # prints ARTIFACTS_ROOT — use the printed path verbatim as ARTIFACTS_ROOT in every later block (a captured var dies in the next fresh shell)
@@ -170,6 +168,8 @@ Tell the founder, in one sentence, that this skill needs Claude Cowork or Claude
 have not run it — then stop. Do not improvise the missing steps: an analysis that grades itself and
 reviews itself reads exactly like one that was checked, which is the failure this stop exists to
 prevent.
+
+Plugin folder for Reads and prompts (as loaded): `${CLAUDE_PLUGIN_ROOT}` — this skill's references are in `${CLAUDE_PLUGIN_ROOT}/skills/market-sizing/references/`. If Step 0 printed `READ_ROOT=`, use that value instead.
 
 **Plugin paths.** If Step 0 printed `READ_ROOT=`, this skill's text arrived without its plugin folder filled in. Use that value in place of `${CLAUDE_PLUGIN_ROOT}` in every Read and sub-agent prompt, including where a later step says to leave that path literal. If it did not print `READ_ROOT=`, use the paths as shown. The folder comes from Step 0's filesystem search, not from a skill file or the "Base directory" line, which can name a folder that does not exist. These are setup details: updates to the founder are about their company, not file locations, printed paths or plugin versions.
 
@@ -437,7 +437,7 @@ unless there's a specific reason to size the market as a report projects it will
 today), `"forecast_year"` (every headline figure is a stated future-year projection — use only when
 the founder's materials or chosen sources are themselves forecast-anchored), or `"mixed"` (inputs
 knowingly combine both horizons — state which input uses which in `methodology.json`'s `rationale`
-when you pick this). See `references/tam-sam-som-methodology.md` §5 for the full rationale. Set it
+when you pick this). See `${CLAUDE_PLUGIN_ROOT}/skills/market-sizing/references/tam-sam-som-methodology.md` §5 for the full rationale. Set it
 explicitly in `inputs.json` on every run — an unset `sizing_basis` renders as "not declared" in the
 report rather than silently defaulting, so leaving it out is a visible gap, not a safe skip.
 
@@ -638,8 +638,7 @@ built from the `resolve_artifacts_root.py --agent` namespace (`$HANDOFF_AGENT` /
 Never hand a sub-agent an absolute `/sessions/...` path for a file-tool Read/Write — the host-loop path
 gate denies it (steering shell work to the `bash` tool instead). Bundled `references/*.md` are the one
 exception: pass them as the literal `${CLAUDE_PLUGIN_ROOT}/skills/market-sizing/references/...` token (it is
-pre-resolved to a host-readable path); do NOT substitute a `find /sessions`-discovered `$REFS` (a shell
-path a file tool can't read).
+pre-resolved to a host-readable path), never a path the shell printed.
 
 **After EVERY Context A dispatch, gate before piping** (`<step>` = the dispatch's file stem):
 
@@ -1159,7 +1158,7 @@ ANALYSIS_DIR_AGENT: <ANALYSIS_DIR_AGENT — the agent-namespace value from Step 
 # Context only. A Context-B sub-agent opens neither report.md nor any artifact here; it Reads
 # only the staged coaching_payload.json. Handing it a VM-absolute /sessions/... path would be an
 # invariant break (the host-side containment hook denies gated file ops on that namespace) and a
-# live invitation to try one — see references/skill-execution-model.md.
+# live invitation to try one.
 RUN_ID: <RUN_ID>
 
 You are the market-sizing agent dispatched in Context B (POST_COMPOSE_COACHING).

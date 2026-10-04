@@ -896,7 +896,11 @@ SKILL_MD_CEILING: dict[str, int] = {
     # compares, instead of a typed repair the hook would hold.
     # 105,301 -> 105,319 on 2026-10-04: the producer's rejection is saved under the run's hand-off dir
     # (`$HANDOFF_DIR/producer_rejected.txt`), the file the dispatch hook checks the redo against.
-    "market-sizing": 105_319,
+    # 105,319 -> 105,431 (+112 B) on 2026-10-05: Step 0 no longer defines a reference
+    # folder for the shell (REFS=/SHARED_REFS=, a VM path the Read tool is refused) and names the folder
+    # for Reads in prose, as loaded; every read directive names its file under the plugin token, never a
+    # bare relative references/ path or a printed shell value.
+    "market-sizing": 105_431,
     # fmr raised for two founder-facing-correctness items measured in a live run: the CHECKLIST
     # dispatch now forbids citing our artifact filenames in evidence (that run put `inputs.json` in 10
     # items' evidence, printed verbatim into the founder's report), and the producer pipe passes
@@ -1002,7 +1006,11 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 83,909 -> 84,142 on 2026-10-04: Step 5's block sets RUN_ID, HANDOFF_AGENT, REVIEW_DIR_AGENT and
     # REVIEW_DIR again before the generator call. Each shell starts fresh, and an unset one rendered
     # `OUTPUT_PATH: /checklist_output.json`; the generator now refuses an empty value.
-    "financial-model-review": 84_142,
+    # 84,142 -> 84,316 (+174 B) on 2026-10-05: Step 0 no longer defines a reference
+    # folder for the shell (REFS=/SHARED_REFS=, a VM path the Read tool is refused) and names the folder
+    # for Reads in prose, as loaded; every read directive names its file under the plugin token, never a
+    # bare relative references/ path or a printed shell value.
+    "financial-model-review": 84_316,
     # ic-sim SHRANK: the REQUIRED ic-dynamics.md read at Step 7 is deleted. Step 7 is a pure producer
     # pipe — compose_discussion.py derives discussion.json from the partners' own files and nothing
     # is authored by the main thread — so the read informed no decision while pulling a whole
@@ -1060,7 +1068,11 @@ SKILL_MD_CEILING: dict[str, int] = {
     # line say so instead of claiming the host refuses.
     # 94,559 -> 94,770 on 2026-10-04: The setup block ends by printing RUN_ID, STAGING_DIR and HANDOFF_DIR (each later
     # command runs in a fresh shell); the overwrite note names the no-delete rule, not a host refusal.
-    "ic-sim": 94_770,
+    # 94,770 -> 94,940 (+170 B) on 2026-10-05: Step 0 no longer defines a reference
+    # folder for the shell (REFS=/SHARED_REFS=, a VM path the Read tool is refused) and names the folder
+    # for Reads in prose, as loaded; every read directive names its file under the plugin token, never a
+    # bare relative references/ path or a printed shell value.
+    "ic-sim": 94_940,
     # deck-review +1,165 B: Step 0 carried only a parenthetical fresh-shell mention buried in a code
     # comment, unlike the four skills that mint RUN_ID in a LATER block and so carry the shared banner.
     # deck-review mints RUN_ID INSIDE this re-runnable Step-0 block (like cap-table), so the shared
@@ -1364,7 +1376,11 @@ SKILL_MD_CEILING: dict[str, int] = {
     # type-less dispatch falls back to the wildcard general-purpose agent).
     # 111,766 -> 111,765 on 2026-10-04: Step 0's append-only exception says scripts remove only their own
     # files (`setup_run.py --clean` is one; a failed atomic write removes its temp file too).
-    "deck-review": 111_765,
+    # 111,765 -> 111,873 (+108 B) on 2026-10-05: Step 0 no longer defines a reference
+    # folder for the shell (REFS=/SHARED_REFS=, a VM path the Read tool is refused) and names the folder
+    # for Reads in prose, as loaded; every read directive names its file under the plugin token, never a
+    # bare relative references/ path or a printed shell value.
+    "deck-review": 111_873,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
@@ -1511,7 +1527,11 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 127,516 -> 127,748 on 2026-10-04: a producer rejection of a generated prompt's hand-off is sent back
     # through its generator (`--correction producer-rejected --detail-file`); see market-sizing above.
     # 127,748 -> 127,766 on 2026-10-04: the rejection file moves under the hand-off dir; see market-sizing.
-    "competitive-positioning": 127_766,
+    # 127,766 -> 127,995 (+229 B) on 2026-10-05: Step 0 no longer defines a reference
+    # folder for the shell (REFS=/SHARED_REFS=, a VM path the Read tool is refused) and names the folder
+    # for Reads in prose, as loaded; every read directive names its file under the plugin token, never a
+    # bare relative references/ path or a printed shell value.
+    "competitive-positioning": 127_995,
     # cap-table, the largest raise (+2,383 B) and the one with the most founder-visible payoff:
     #   * Main-Thread Return named THREE of the four files Step 12 copies; a live run delivered exactly
     #     three and dropped `{Company}_Cap_Table.html`. All four are now named explicitly.
@@ -1614,7 +1634,11 @@ SKILL_MD_CEILING: dict[str, int] = {
     # limit (newer hosts allow deletes). Step 0's append-only paragraph, the hand-off comment and the retry
     # line say so instead of claiming the host refuses. The fixing-a-bad-artifact line names the rule, not a
     # host refusal.
-    "cap-table": 158_958,
+    # 158,958 -> 159,356 (+398 B) on 2026-10-05: Step 0 no longer defines a reference
+    # folder for the shell (REFS=/SHARED_REFS=, a VM path the Read tool is refused) and names the folder
+    # for Reads in prose, as loaded; every read directive names its file under the plugin token, never a
+    # bare relative references/ path or a printed shell value.
+    "cap-table": 159_356,
 }
 
 
@@ -3910,7 +3934,8 @@ def test_corpus_counts_every_agent_the_skill_pins_not_just_its_namesake() -> Non
 # Raised 2026-10-04 from 126,392 to 126,593 B: skill-execution-model.md says the outputs no-delete rule is
 # ours (older hosts refused deletes, newer ones allow them), and that the unfilled-token exception is a skill
 # invoked on cloud before the conversation's first turn that needs a shell or file tool.
-ROOT_REFERENCES_CEILING = 126_593
+# Lowered 2026-10-05 from 126,593 to 126,590 B: skill-execution-model.md no longer names a shell reference folder.
+ROOT_REFERENCES_CEILING = 126_590
 
 
 def test_execution_model_names_every_dispatch_that_can_reach_the_shell() -> None:
