@@ -1886,7 +1886,9 @@ REFERENCES_CEILING: dict[str, int] = {
     # checklist-criteria.md adds project-builder clauses to UNIT_14 / CASH_22 / SECTOR_41 and a category-6
     # note; data-sufficiency.md a row so a builder is not counted as missing MRR and growth;
     # extraction-pitfalls.md milestone and no-growth-rate sentences and a markup-on-cost item.
-    "financial-model-review": 79_249,
+    # +205 B (79_249 -> 79_454): METRIC_35 had pass/warn/fail only for a model that uses benchmarks, so
+    # an assessor set a model citing none aside as not_applicable. It now grades that case warn.
+    "financial-model-review": 79_454,
     # ic-sim +1446 B: evaluation-criteria.md omitted `to_confirm` from the status table AND from the
     # scoring formula, which excluded only not_applicable. Following it changed the conviction
     # score, since score_dimensions.py excludes both. The >6 coverage cap was undocumented too.

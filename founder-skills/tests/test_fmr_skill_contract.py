@@ -766,3 +766,13 @@ def test_server_mode_rule_is_pinned_and_names_no_product() -> None:
     sentence = block[block.rindex(". ", 0, rule_at) + 2 : server_at]
     for product in ("Claude Code", "Cowork"):
         assert product not in sentence, f"the server-mode rule names {product!r}: {sentence!r}"
+
+
+def test_benchmark_awareness_grades_a_model_citing_no_benchmarks_as_warn() -> None:
+    """The criterion's rubric covered only a model that uses benchmarks, so an assessor set one citing
+    none aside as not_applicable. That case is graded warn, and the rubric says not_applicable is wrong."""
+    text = (FMR_DIR / "references" / "checklist-criteria.md").read_text(encoding="utf-8")
+    block = text.split("### `METRIC_35`", 1)[1].split("\n### ", 1)[0].split("\n---", 1)[0]
+    branch = next(line for line in block.splitlines() if line.startswith("**No benchmarks cited:**"))
+    assert "warn" in branch
+    assert "Never `not_applicable`" in branch

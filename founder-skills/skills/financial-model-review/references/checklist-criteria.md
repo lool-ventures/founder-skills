@@ -292,6 +292,7 @@ Rated contextual with no reference grade, it was left ungraded on purpose: warn 
 **Pass:** Uses benchmarks as context, not proof.
 **Warn:** Cherry-picking.
 **Fail:** Benchmarks justify fantasy outcomes.
+**No benchmarks cited:** warn, and say which comparison is missing — investors expect founders to know where they stand. Never `not_applicable`: a model without benchmarks is what this criterion grades.
 
 ---
 
