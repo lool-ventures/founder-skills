@@ -305,3 +305,23 @@ def test_each_check_has_its_own_hold_budget(tmp_path: Path) -> None:
         rows.append(_held(_deny(_run(tmp_path, rows, steered, "general-purpose"))))
     reason = _deny(_run(tmp_path, rows, steered, "founder-skills:market-sizing-redteam"))
     assert "Send this as the prompt, unchanged" in reason
+
+
+def test_another_plugins_agent_of_the_same_name_is_not_ours(tmp_path: Path) -> None:
+    """Only `founder-skills:<agent>` or the bare name is our agent; `other-plugin:market-sizing-redteam`
+    is another plugin's."""
+    reason = _deny(_run(tmp_path, [_user("Size my market.")], _RED_TEAM, "other-plugin:market-sizing-redteam"))
+    assert '"founder-skills:market-sizing-redteam"' in reason
+    # The bare name passes this check (the prompt check then holds it for its unprinted prompt).
+    assert "goes to its own agent" not in _deny(
+        _run(tmp_path, [_user("Size my market.")], _RED_TEAM, "market-sizing-redteam")
+    )
+
+
+def test_no_founder_skill_and_no_output_path_is_not_ours(tmp_path: Path) -> None:
+    """A dispatch from another plugin can open with a context line too. With no founder-skills skill
+    started in the session and no OUTPUT_PATH line, it is not one of ours and is not held."""
+    _silent(_run(tmp_path, [_user("Help me plan.")], "CONTEXT: CHECKLIST\nGo through the list.\n", "general-purpose"))
+    # Either signal is enough to hold it.
+    _deny(_run(tmp_path, [_user("x"), _skill("founder-skills:deck-review")], "CONTEXT: CHECKLIST\nGo.\n", "claude"))
+    _deny(_run(tmp_path, [_user("x")], "CONTEXT: CHECKLIST\nOUTPUT_PATH: /h/c.json\n", "claude"))

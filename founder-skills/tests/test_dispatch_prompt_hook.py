@@ -916,3 +916,20 @@ def test_prompt_check_holds_are_counted_for_any_output_path(tmp_path: Path, path
     rows.append(_held(_deny(_run(tmp_path, rows, steered))))
     rows.append(_held(_deny(_run(tmp_path, rows, steered))))
     _silent(_run(tmp_path, rows, steered))
+
+
+def test_a_dispatch_reusing_a_rewritten_path_with_another_first_line_is_not_a_failed_rewrite() -> None:
+    """The self-check compares only a dispatch that opens with a generated context line; another
+    dispatch naming the same OUTPUT_PATH says nothing about whether the rewrite took."""
+    mod = _hook()
+    path = "agent/handoff/R/r2/redteam_output.json"
+    notice = {"type": "attachment", "attachment": {"type": "hook_additional_context", "content": [mod._notice(path)]}}
+    other = {"type": "user", "toolUseResult": {"prompt": f"Summarise the review.\nOUTPUT_PATH: {path}\n"}}
+    assert not mod.rewrite_failed([notice, other])
+
+
+def test_another_plugins_agent_is_not_a_registered_pair(tmp_path: Path) -> None:
+    mod = _hook()
+    assert mod.agent_name("other-plugin:market-sizing-redteam") is None
+    assert mod.agent_name("founder-skills:market-sizing-redteam") == "market-sizing-redteam"
+    assert mod.agent_name("market-sizing-redteam") == "market-sizing-redteam"

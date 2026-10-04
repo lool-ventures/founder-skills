@@ -895,9 +895,9 @@ def rewrite_failed(rows: list[dict[str, Any]]) -> bool:
         sent = result.get("prompt")
         if not isinstance(sent, str) or _output_path(sent) not in rewritten:
             continue
-        first = next((line.strip() for line in sent.splitlines() if line.strip()), "")
+        first = first_line(sent)
         if first not in CONTEXTS:
-            return True
+            continue  # not a generated dispatch: it says nothing about whether the rewrite took
         printed = latest_printed(rows[:i], first, _output_path(sent))
         if printed is None or _squash(printed) != _squash(sent):
             return True
@@ -932,6 +932,14 @@ def _may_rewrite(tool_input: Any, rows: list[dict[str, Any]]) -> bool:
     return True
 
 
+def agent_name(agent: str) -> str | None:
+    """The agent after our plugin's prefix, or the bare name; another plugin's `x:<name>` is None."""
+    agent = agent.strip()
+    if agent.startswith("founder-skills:"):
+        return agent[len("founder-skills:") :]
+    return None if ":" in agent else agent
+
+
 def decide(payload: dict[str, Any]) -> dict[str, Any] | None:
     if payload.get("hook_event_name") != "PreToolUse" or payload.get("tool_name") not in DISPATCH_TOOLS:
         return None
@@ -945,7 +953,8 @@ def decide(payload: dict[str, Any]) -> dict[str, Any] | None:
     if context is None:
         return None
     agent = tool_input.get("subagent_type") if isinstance(tool_input, dict) else None
-    reason_text = PAIRS.get((context, agent.rsplit(":", 1)[-1])) if isinstance(agent, str) else None
+    name = agent_name(agent) if isinstance(agent, str) else None
+    reason_text = PAIRS.get((context, name)) if name is not None else None
     if reason_text is None:
         return None
     transcript = payload.get("transcript_path")

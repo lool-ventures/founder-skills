@@ -24,6 +24,10 @@ can run several (a deck review and a market sizing, side by side), and narrowing
 held the earlier skill's own dispatches in kept runs. The first line is matched by prefix with a word boundary, so
 `CONTEXT: CHECKLIST (repair)` still needs the right agent.
 
+NOT OURS. An agent named with another plugin's prefix (`other:market-sizing`) is not ours. A dispatch
+in a session that started no founder-skills skill, whose prompt has no OUTPUT_PATH line, is taken to be
+another plugin's and passes.
+
 THE BUDGET. Its own: the `[dispatch-type][<OUTPUT_PATH>]` marker, at most two holds per OUTPUT_PATH,
 then let through with one stderr line. Separate from the prompt check's, so holds for the wrong agent
 never spend the holds a steered prompt to the right agent gets. With no
@@ -105,7 +109,11 @@ def context_of(prompt: str) -> str | None:
 
 
 def _bare(name: str) -> str:
-    return name.strip().rsplit(":", 1)[-1]
+    """The name after our plugin's prefix, or the bare name; another plugin's `x:<name>` is not ours."""
+    name = name.strip()
+    if name.startswith(f"{PLUGIN}:"):
+        return name[len(PLUGIN) + 1 :]
+    return "" if ":" in name else name
 
 
 def started_skills(rows: list[dict[str, Any]]) -> set[str]:
@@ -165,14 +173,17 @@ def decide(payload: dict[str, Any]) -> dict[str, Any] | None:
     if context is None or context not in CONTEXT_AGENTS:
         return None
     agent = tool_input.get("subagent_type")
-    sent = _bare(agent) if isinstance(agent, str) and agent.strip() else None
+    sent = (_bare(agent) or "another plugin's agent") if isinstance(agent, str) and agent.strip() else None
     transcript = payload.get("transcript_path")
     if not isinstance(transcript, str) or not os.path.isfile(transcript):
         if sent not in CONTEXT_AGENTS[context]:
             print(f"dispatch_type_check: {context} sent to {agent!r}; no transcript, not held", file=sys.stderr)
         return None
     rows = _transcript_tools().read_transcript(transcript)
-    want = expected_agents(context, started_skills(rows))
+    started = started_skills(rows)
+    if not started and not _OUTPUT_RE.search(prompt):
+        return None  # no founder-skills skill started and no hand-off path: another plugin's dispatch
+    want = expected_agents(context, started)
     if sent in want:
         return None
     m = _OUTPUT_RE.search(prompt)
