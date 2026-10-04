@@ -214,6 +214,9 @@ def build_options(workdir: Path, env_extra: dict[str, str] | None = None) -> Any
         # there, so only the red-team agent receives it.
         allowed_tools=["Bash", "Read", "Write", "Edit", "Glob", "Grep", "Task", "Skill", "WebSearch"],
         disallowed_tools=list(CATCH_ALL_AGENT_DENY),
+        # Hook lifecycle events in the stream: the Stop hook's own responses are the second count of its
+        # blocks, checked against the "Stop hook feedback:" turns the hand-over assertions key on.
+        include_hook_events=True,
         env={
             **os.environ,
             "CLAUDE_PLUGIN_ROOT": str(PLUGIN_PATH),
@@ -261,6 +264,8 @@ class RunCapture:
         # From the init message: which CLI and model the run was on, reported beside each other.
         self.cli_version: str | None = None
         self.model: str | None = None
+        # Hook lifecycle events (`include_hook_events`): {"event", "subtype", "stdout", "exit_code", "outcome"}.
+        self.hook_events: list[dict[str, Any]] = []
 
     def calls(self, name: str, *, parent: str | None = None) -> list[dict[str, Any]]:
         """Tool calls by name; with `parent`, only those made inside that dispatch."""
@@ -299,6 +304,41 @@ class RunCapture:
     def result(self, tool_use_id: str) -> dict[str, Any] | None:
         """The recorded result of one call, or None when the stream carried none."""
         return self.tool_results.get(tool_use_id)
+
+    def stop_hook_blocks_from_events(self) -> int:
+        """Stop hook responses that blocked: a `{"decision": "block"}` reply on stdout, or exit code 2."""
+        count = 0
+        for ev in self.hook_events:
+            if ev["event"] != "Stop" or ev["subtype"] != "hook_response":
+                continue
+            if ev["exit_code"] == 2:
+                count += 1
+                continue
+            try:
+                reply = json.loads(ev["stdout"].strip() or "null")
+            except ValueError:
+                continue
+            if isinstance(reply, dict) and reply.get("decision") == "block":
+                count += 1
+        return count
+
+
+def assert_stop_block_evidence_agrees(cap: RunCapture) -> None:
+    """The Stop hook's blocks, counted from its own responses, equal the "Stop hook feedback:" turns.
+
+    The hand-over assertions read the feedback turns (`stop_hook_blocks`, `text_after`). If the stream
+    stopped carrying them, those assertions would pass having seen nothing, so the hook's responses are
+    the independent count. A run with no Stop hook response recorded has not been checked, so it fails."""
+    stops = [e for e in cap.hook_events if e["event"] == "Stop" and e["subtype"] == "hook_response"]
+    assert stops, (
+        "no Stop hook event was recorded (the lanes ask for hook events), so the count of Stop hook blocks "
+        "the hand-over checks rely on cannot be confirmed"
+    )
+    from_events, from_turns = cap.stop_hook_blocks_from_events(), cap.stop_hook_blocks()
+    assert from_events == from_turns, (
+        f"the Stop hook blocked {from_events} time(s) by its own responses, but the stream carries "
+        f"{from_turns} 'Stop hook feedback:' turn(s); the hand-over checks count the turns"
+    )
 
 
 def record_message(cap: RunCapture, msg: object) -> None:
@@ -351,6 +391,18 @@ def record_message(cap: RunCapture, msg: object) -> None:
             )
     elif isinstance(msg, ResultMessage) and isinstance(msg.result, str):
         cap.final_text = msg.result
+    elif isinstance(msg, SystemMessage) and msg.subtype in ("hook_started", "hook_response"):
+        data = msg.data
+        stdout = data.get("stdout")
+        cap.hook_events.append(
+            {
+                "event": getattr(msg, "hook_event_name", "") or data.get("hook_event") or "",
+                "subtype": msg.subtype,
+                "stdout": stdout if isinstance(stdout, str) else str(data.get("output") or ""),
+                "exit_code": data.get("exit_code"),
+                "outcome": data.get("outcome"),
+            }
+        )
     elif isinstance(msg, SystemMessage) and msg.subtype == "init":
         tools = msg.data.get("tools")
         if isinstance(tools, list):

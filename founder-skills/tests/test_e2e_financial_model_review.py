@@ -35,6 +35,7 @@ from _e2e_harness import (
     assert_dispatch_outcomes,
     assert_received_prompt,
     assert_run_id_parity,
+    assert_stop_block_evidence_agrees,
     dispatch_report,
     format_dispatch_report,
     has_claude_auth,
@@ -411,6 +412,8 @@ def test_financial_model_review_smoke(tmp_path: Path) -> None:
     ok_before, why_before = _handover.contained(printed, before)
     ok_after, why_after = _handover.contained(printed, after)
     blocks = cap.stop_hook_blocks()
+    # The count above reads the stream's feedback turns; the hook's own responses must agree with it.
+    assert_stop_block_evidence_agrees(cap)
     print(
         f"[e2e:fmr] hand-over containment: before any Stop-hook block={ok_before} ({why_before or 'clean'}); "
         f"stop-hook blocks={blocks}; on screen at the end={ok_after} ({why_after or 'clean'})",

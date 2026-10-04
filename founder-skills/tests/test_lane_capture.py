@@ -329,3 +329,79 @@ def test_the_gate_judges_what_was_received(harness: Any, tmp_path: Path, monkeyp
     unprinted = [_init(), _dispatch("np", PRINTED), _result("np", structured={"prompt": PRINTED})]
     with pytest.raises(AssertionError, match="no successful dispatch_prompt.py call"):
         harness.assert_received_prompt(_report(harness, tmp_path, monkeypatch, unprinted), "PROBE", enabled=True)
+
+
+# --- the Stop hook's blocks, counted two independent ways ---------------------------------------------
+
+
+def test_shared_options_ask_the_cli_for_hook_events(harness: Any, tmp_path: Path) -> None:
+    assert harness.build_options(tmp_path).include_hook_events is True
+
+
+def _hook_event(phase: str, **fields: Any) -> Any:
+    from claude_agent_sdk.types import HookEventMessage
+
+    data: dict[str, Any] = {"type": "system", "subtype": phase, "hook_event": "Stop", **fields}
+    return HookEventMessage(subtype=phase, hook_event_name="Stop", data=data)
+
+
+def _stop_response(stdout: str, exit_code: int = 0) -> Any:
+    outcome = "success" if exit_code == 0 else "error"
+    return _hook_event("hook_response", stdout=stdout, output=stdout, exit_code=exit_code, outcome=outcome)
+
+
+def _stop_started() -> Any:
+    return _hook_event("hook_started")
+
+
+BLOCK = '{"decision": "block", "reason": "Your last message did not carry the hand-over."}\n'
+
+
+def test_hook_events_are_recorded(harness: Any, tmp_path: Path, monkeypatch: Any) -> None:
+    cap = _run(harness, tmp_path, monkeypatch, [_init(), _stop_started(), _stop_response(BLOCK), _stop_response("")])
+    assert [(e["event"], e["subtype"]) for e in cap.hook_events] == [
+        ("Stop", "hook_started"),
+        ("Stop", "hook_response"),
+        ("Stop", "hook_response"),
+    ]
+    assert cap.stop_hook_blocks_from_events() == 1
+
+
+@pytest.mark.parametrize(
+    ("stream_tail", "agrees"),
+    [
+        # One block, its feedback turn, then a clean final Stop: both counts are 1.
+        (["block", "feedback", "clean"], True),
+        # No block at all: both 0.
+        (["clean"], True),
+        # A block exiting 2 instead of printing a decision counts as a block too.
+        (["exit2", "feedback", "clean"], True),
+        # The hook blocked but no feedback turn reached the stream: the stream count would read 0.
+        (["block", "clean"], False),
+        # A feedback-looking user turn with no block behind it.
+        (["feedback", "clean"], False),
+    ],
+)
+def test_the_stop_block_counts_must_agree(
+    harness: Any, tmp_path: Path, monkeypatch: Any, stream_tail: list[str], agrees: bool
+) -> None:
+    from claude_agent_sdk import UserMessage
+
+    parts = {
+        "block": lambda: _stop_response(BLOCK),
+        "exit2": lambda: _stop_response("", exit_code=2),
+        "clean": lambda: _stop_response(""),
+        "feedback": lambda: UserMessage("Stop hook feedback:\nreason"),
+    }
+    cap = _run(harness, tmp_path, monkeypatch, [_init(), *(parts[k]() for k in stream_tail)])
+    if agrees:
+        harness.assert_stop_block_evidence_agrees(cap)
+    else:
+        with pytest.raises(AssertionError, match="Stop hook"):
+            harness.assert_stop_block_evidence_agrees(cap)
+
+
+def test_no_stop_hook_event_means_the_count_was_not_checked(harness: Any, tmp_path: Path, monkeypatch: Any) -> None:
+    cap = _run(harness, tmp_path, monkeypatch, [_init()])
+    with pytest.raises(AssertionError, match="no Stop hook event"):
+        harness.assert_stop_block_evidence_agrees(cap)
