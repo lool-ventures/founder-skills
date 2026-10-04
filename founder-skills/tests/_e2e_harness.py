@@ -375,12 +375,12 @@ def same_prompt(a: str, b: str) -> bool:
 
 
 def dispatch_report(
-    cap: RunCapture, dispatches: Sequence[dict[str, Any]], regenerate: Callable[[str], str]
+    cap: RunCapture, dispatches: Sequence[dict[str, Any]], regenerate: Callable[[dict[str, Any]], str]
 ) -> dict[str, Any]:
     """What happened to each of a step's dispatches, judged against the printed prompt.
 
-    `regenerate` takes a dispatch's sent prompt and returns the prompt the generator prints for it (or
-    raises). Per dispatch: held (an error result: the hook's deny, or any refusal), succeeded, or no
+    `regenerate` takes a dispatch (the recorded tool call) and returns the prompt the generator prints
+    for it (or raises). Per dispatch: held (an error result: the hook's deny, or any refusal), succeeded, or no
     result at all; whether the prompt SENT (the tool call's input) equals the regeneration, and for a
     success whether the prompt the sub-agent RECEIVED (the result's `prompt`) does. A rewrite is a
     success whose sent prompt differs while the received one matches.
@@ -391,7 +391,7 @@ def dispatch_report(
         res = cap.result(str(d["id"]))
         row: dict[str, Any] = {"id": d["id"], "status": "no_result", "sent_matches": None, "received": None}
         try:
-            expected: str | None = regenerate(sent)
+            expected: str | None = regenerate(d)
         except Exception as exc:  # reported, never raised: this is the report, not the gate
             expected = None
             row["regenerate_error"] = f"{type(exc).__name__}: {exc}"
@@ -416,6 +416,30 @@ def dispatch_report(
         "succeeded_without_received_prompt": [r["id"] for r in succeeded if r["received"] is None],
         "rewrites": sum(1 for r in succeeded if r["sent_matches"] is False and r.get("received_matches") is True),
     }
+
+
+# Off until the dispatch hook may rewrite a prompt on the CLI version these lanes run. Below that version
+# the hook only holds, so what a sub-agent received always equals what was sent and this gate would add
+# nothing to the sent-prompt check it replaces.
+RECEIVED_PROMPT_GATE_ENABLED = False
+
+
+def assert_received_prompt(report: dict[str, Any], step: str, *, enabled: bool | None = None) -> None:
+    """The outcome gate: every dispatch that went through delivered the printed prompt to its sub-agent.
+
+    Judged on the prompt the CLI recorded as received, so a dispatch the hook rewrote to the printed
+    prompt passes and one whose record carries no prompt fails. A no-op unless `enabled` (default: the
+    module switch above)."""
+    if not (RECEIVED_PROMPT_GATE_ENABLED if enabled is None else enabled):
+        return
+    text = format_dispatch_report(step, report)
+    succeeded = [r for r in report["dispatches"] if r["status"] == "succeeded"]
+    assert succeeded, f"no {step} dispatch went through:\n{text}"
+    for row in succeeded:
+        assert row["received"] is not None, f"{step} dispatch {row['id']} has no received prompt on record:\n{text}"
+        assert row.get("received_matches") is True, (
+            f"the {step} sub-agent of dispatch {row['id']} did not receive the printed prompt:\n{text}"
+        )
 
 
 def format_dispatch_report(step: str, report: dict[str, Any]) -> str:

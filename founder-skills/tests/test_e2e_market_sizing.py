@@ -33,7 +33,9 @@ from typing import Any
 import pytest
 from _e2e_harness import (
     PLUGIN_PATH,
+    RECEIVED_PROMPT_GATE_ENABLED,
     assert_coaching_commentary_landed,
+    assert_received_prompt,
     assert_run_id_parity,
     dispatch_context,
     dispatch_report,
@@ -170,7 +172,9 @@ def test_market_sizing_smoke(tmp_path: Path) -> None:
     # were held, which went through, and whether what was sent -- and what the reviewer received --
     # is the printed prompt. A held dispatch is not a failure: the dispatch hook holds a rewritten
     # prompt and the model re-sends the printed one.
-    report = dispatch_report(cap, dispatches, lambda sent: regenerate_red_team(sent, review_dir))
+    report = dispatch_report(
+        cap, dispatches, lambda d: regenerate_red_team(str(d["input"].get("prompt", "")), review_dir)
+    )
     report_text = format_dispatch_report("RED_TEAM", report)
     print(f"[e2e:market-sizing] dispatch report:\n{report_text}", flush=True)
     step_summary(f"### market-sizing e2e\n\n{report_text}\n")
@@ -182,11 +186,15 @@ def test_market_sizing_smoke(tmp_path: Path) -> None:
     rt_dispatch = succeeded[0]
     dispatched = str(rt_dispatch["input"].get("prompt", ""))
     assert dispatch_context(dispatched) == "CONTEXT: RED_TEAM", dispatched[:200]
-    regenerated = regenerate_red_team(dispatched, review_dir)
-    assert same_prompt(dispatched, regenerated), (
-        "the dispatched red-team prompt is not the generated one -- something was added, removed or "
-        "rewritten between the script and the Task call"
-    )
+    # With the outcome gate on, what the reviewer RECEIVED is the gate and the sent prompt is reported
+    # only: a dispatch the hook rewrote to the printed prompt sent one thing and delivered another.
+    assert_received_prompt(report, "RED_TEAM")
+    if not RECEIVED_PROMPT_GATE_ENABLED:
+        regenerated = regenerate_red_team(dispatched, review_dir)
+        assert same_prompt(dispatched, regenerated), (
+            "the dispatched red-team prompt is not the generated one -- something was added, removed or "
+            "rewritten between the script and the Task call"
+        )
 
     # (b) The red team actually OPENED the deck, and opened it BEFORE the artifacts -- SDK evidence,
     # not the self-report. "Documents first" is a sentence in the prompt; the tool stream is the fact.

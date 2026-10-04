@@ -145,7 +145,7 @@ def test_the_cli_version_is_read_in_either_shape(
 def test_the_dispatch_report_sorts_held_from_succeeded(harness: Any, tmp_path: Path, monkeypatch: Any) -> None:
     cap = _run(harness, tmp_path, monkeypatch, _stream())
     dispatches = [t for t in cap.tool_uses if t["name"] == "Agent"]
-    report = harness.dispatch_report(cap, dispatches, lambda sent: PRINTED)
+    report = harness.dispatch_report(cap, dispatches, lambda d: PRINTED)
     by_id = {r["id"]: r for r in report["dispatches"]}
     assert (report["held"], report["succeeded"], report["no_result"]) == (1, 2, 1)
     assert by_id["held"]["status"] == "held" and by_id["held"]["sent_matches"] is False
@@ -165,7 +165,7 @@ def test_a_rewritten_dispatch_is_counted_as_one(harness: Any, tmp_path: Path, mo
         _result("rw", structured={"prompt": PRINTED}),
     ]
     cap = _run(harness, tmp_path, monkeypatch, stream)
-    report = harness.dispatch_report(cap, cap.tool_uses, lambda sent: PRINTED)
+    report = harness.dispatch_report(cap, cap.tool_uses, lambda d: PRINTED)
     assert report["rewrites"] == 1
     assert report["dispatches"][0]["sent_matches"] is False
     assert report["dispatches"][0]["received_matches"] is True
@@ -174,7 +174,7 @@ def test_a_rewritten_dispatch_is_counted_as_one(harness: Any, tmp_path: Path, mo
 def test_a_failed_regeneration_is_reported_not_raised(harness: Any, tmp_path: Path, monkeypatch: Any) -> None:
     cap = _run(harness, tmp_path, monkeypatch, _stream())
 
-    def broken(sent: str) -> str:
+    def broken(dispatch: dict[str, Any]) -> str:
         raise ValueError("no RUN_ID line")
 
     report = harness.dispatch_report(cap, [t for t in cap.tool_uses if t["name"] == "Agent"], broken)
@@ -186,3 +186,115 @@ def test_a_failed_regeneration_is_reported_not_raised(harness: Any, tmp_path: Pa
 def test_prompts_compare_with_whitespace_squashed(harness: Any) -> None:
     assert harness.same_prompt("a  b\n", "a b")
     assert not harness.same_prompt("a b", "a b c")
+
+
+def test_the_received_prompt_gate_ships_off(harness: Any) -> None:
+    assert harness.RECEIVED_PROMPT_GATE_ENABLED is False
+
+
+def _report(harness: Any, tmp_path: Path, monkeypatch: Any, stream: list[Any]) -> dict[str, Any]:
+    cap = _run(harness, tmp_path, monkeypatch, [_init(), *stream])
+    report: dict[str, Any] = harness.dispatch_report(
+        cap, [t for t in cap.tool_uses if t["name"] == "Agent"], lambda d: PRINTED
+    )
+    return report
+
+
+def test_the_gate_does_nothing_while_off(harness: Any, tmp_path: Path, monkeypatch: Any) -> None:
+    report = _report(harness, tmp_path, monkeypatch, [_dispatch("x", "other"), _result("x", structured={})])
+    harness.assert_received_prompt(report, "PROBE")
+    harness.assert_received_prompt(report, "PROBE", enabled=False)
+
+
+def test_the_gate_judges_what_was_received(harness: Any, tmp_path: Path, monkeypatch: Any) -> None:
+    rewritten = [_dispatch("rw", PRINTED + "added\n"), _result("rw", structured={"prompt": PRINTED})]
+    harness.assert_received_prompt(_report(harness, tmp_path, monkeypatch, rewritten), "PROBE", enabled=True)
+
+    altered = [_dispatch("al", PRINTED), _result("al", structured={"prompt": PRINTED + "added\n"})]
+    with pytest.raises(AssertionError, match="did not receive the printed prompt"):
+        harness.assert_received_prompt(_report(harness, tmp_path, monkeypatch, altered), "PROBE", enabled=True)
+
+    unrecorded = [_dispatch("un", PRINTED), _result("un", structured={"status": "completed"})]
+    with pytest.raises(AssertionError, match="no received prompt"):
+        harness.assert_received_prompt(_report(harness, tmp_path, monkeypatch, unrecorded), "PROBE", enabled=True)
+
+    held_only = [_dispatch("h", PRINTED), _result("h", is_error=True)]
+    with pytest.raises(AssertionError, match="went through"):
+        harness.assert_received_prompt(_report(harness, tmp_path, monkeypatch, held_only), "PROBE", enabled=True)
+
+
+# --- the financial-model-review lane's regeneration of its CHECKLIST prompt ---------------------------
+
+FMR_SCRIPTS = TESTS.parent / "skills" / "financial-model-review" / "scripts"
+
+
+@pytest.fixture
+def fmr_lane(harness: Any) -> Any:
+    if str(TESTS) not in sys.path:
+        sys.path.insert(0, str(TESTS))
+    spec = importlib.util.spec_from_file_location("_capture_fmr_lane", TESTS / "test_e2e_financial_model_review.py")
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _printed_checklist(review_dir: Path, *extra: str) -> str:
+    import subprocess
+
+    return subprocess.run(
+        [
+            sys.executable,
+            str(FMR_SCRIPTS / "fmr_dispatch_prompt.py"),
+            "checklist",
+            "--run-id",
+            "run-1",
+            "--handoff-agent",
+            "/agent/review/handoff/run-1",
+            "--review-dir-agent",
+            "/agent/review",
+            "--review-dir",
+            str(review_dir),
+            *extra,
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+
+
+def _generator_call(call_id: str, tail: str) -> dict[str, Any]:
+    command = (
+        'python3 "$SCRIPTS/fmr_dispatch_prompt.py" checklist --run-id "$RUN_ID" --handoff-agent "$HANDOFF_AGENT" '
+        f'--review-dir-agent "$REVIEW_DIR_AGENT" --review-dir "$REVIEW_DIR"{tail}'
+    )
+    return {"id": call_id, "name": "Bash", "input": {"command": command}, "parent_tool_use_id": None}
+
+
+def _checklist_dispatch(call_id: str, prompt: str) -> dict[str, Any]:
+    return {"id": call_id, "name": "Task", "input": {"prompt": prompt}, "parent_tool_use_id": None}
+
+
+def test_the_fmr_lane_regenerates_the_prompt_the_run_was_printed(fmr_lane: Any, tmp_path: Path) -> None:
+    review = tmp_path / "review"
+    (review / "handoff" / "run-1").mkdir(parents=True)
+    (review / "inputs.json").write_text("{}", encoding="utf-8")
+    (review / "handoff" / "run-1" / "producer_rejected.txt").write_text("field x is missing\n", encoding="utf-8")
+
+    base = _printed_checklist(review)
+    redo = _printed_checklist(review, "--correction", "missing-file")
+    detail = str(review / "handoff" / "run-1" / "producer_rejected.txt")
+    rejected = _printed_checklist(review, "--correction", "producer-rejected", "--detail-file", detail)
+    assert len({base, redo, rejected}) == 3
+    tool_uses = [
+        _generator_call("g1", ""),
+        _checklist_dispatch("d1", base),
+        _generator_call("g2", " --correction missing-file"),
+        _checklist_dispatch("d2", redo),
+        _generator_call("g3", ' --correction producer-rejected --detail-file "$HANDOFF_DIR/producer_rejected.txt"'),
+        _checklist_dispatch("d3", rejected),
+    ]
+    for call_id, printed in (("d1", base), ("d2", redo), ("d3", rejected)):
+        assert fmr_lane.regenerate_checklist(printed, review, tool_uses, call_id) == printed
+    # A prompt with a line added does not match its regeneration.
+    assert fmr_lane.regenerate_checklist(base + "extra\n", review, tool_uses, "d1") == base

@@ -32,7 +32,10 @@ from _e2e_harness import (
     FIXTURES,
     PLUGIN_PATH,
     assert_coaching_commentary_landed,
+    assert_received_prompt,
     assert_run_id_parity,
+    dispatch_report,
+    format_dispatch_report,
     has_claude_auth,
     locate_review_dir,
     model_from_capture,
@@ -153,6 +156,56 @@ def unit_economics_before_checklist(tool_uses: list[dict[str, Any]]) -> tuple[bo
     return ue[0] < ck[0], f"first unit_economics.py call at tool #{ue[0]}, first CHECKLIST dispatch at tool #{ck[0]}"
 
 
+def regenerate_checklist(sent: str, review_dir: Path, tool_uses: list[dict[str, Any]], dispatch_id: str) -> str:
+    """The CHECKLIST prompt fmr_dispatch_prompt.py prints for one dispatch, with the arguments that run used.
+
+    The identifiers come out of the sent prompt (RUN_ID, OUTPUT_PATH, the inputs.json line), so the
+    comparison does not depend on how the skill derived them. A corrective redo's `--correction` (and a
+    producer-rejected redo's `--detail-file`) come from the model's last generator call before the
+    dispatch; the skill writes that call with shell variables, so the two this needs are resolved here.
+    """
+    run_id = sent.split("RUN_ID: ", 1)[1].split("\n", 1)[0].strip()
+    handoff_agent = sent.split("OUTPUT_PATH: ", 1)[1].split("/checklist_output.json", 1)[0].strip()
+    review_dir_agent = sent.split("Read inputs.json at ", 1)[1].split("/inputs.json", 1)[0].strip()
+    handoff_dir = review_dir / "handoff" / run_id
+    position = next(i for i, t in enumerate(tool_uses) if t["id"] == dispatch_id)
+    calls = [
+        str(t["input"].get("command", ""))
+        for t in tool_uses[:position]
+        if t["name"] in _SHELL_TOOLS
+        and t["parent_tool_use_id"] is None
+        and "fmr_dispatch_prompt.py" in str(t["input"].get("command", ""))
+    ]
+    extra: list[str] = []
+    if calls:
+        argv = shlex.split(calls[-1])
+        for flag in ("--correction", "--detail-file"):
+            if flag in argv and argv.index(flag) + 1 < len(argv):
+                value = argv[argv.index(flag) + 1]
+                for var, local in (("HANDOFF_DIR", handoff_dir), ("REVIEW_DIR", review_dir)):
+                    value = value.replace("${" + var + "}", str(local)).replace("$" + var, str(local))
+                extra += [flag, value]
+    return subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPTS / "fmr_dispatch_prompt.py"),
+            "checklist",
+            "--run-id",
+            run_id,
+            "--handoff-agent",
+            handoff_agent,
+            "--review-dir-agent",
+            review_dir_agent,
+            "--review-dir",
+            str(review_dir),
+            *extra,
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+
+
 def checklist_read_paths(tool_uses: list[dict[str, Any]]) -> list[str]:
     """Every file the CHECKLIST sub-agent(s) opened with Read -- the tool stream, not its self-report."""
     parents = {t["id"] for t in checklist_dispatches(tool_uses)}
@@ -198,6 +251,19 @@ def test_financial_model_review_smoke(tmp_path: Path) -> None:
     cap = run_skill_capture(prompt, workdir, label="fmr")
     captured = cap.messages
     review_dir = locate_review_dir(workdir, "financial-model-review-*", captured, "financial-model-review")
+
+    # The CHECKLIST prompt against what fmr_dispatch_prompt.py prints: recorded before any assert, so a
+    # red leaves the same evidence a green does. Report only, besides the outcome gate (off by default).
+    ck_dispatches = checklist_dispatches(cap.tool_uses)
+    ck_report = dispatch_report(
+        cap,
+        ck_dispatches,
+        lambda d: regenerate_checklist(str(d["input"].get("prompt", "")), review_dir, cap.tool_uses, str(d["id"])),
+    )
+    ck_report_text = format_dispatch_report("CHECKLIST", ck_report)
+    print(f"[e2e:fmr] dispatch report:\n{ck_report_text}", flush=True)
+    step_summary(f"### financial-model-review e2e: dispatches\n\n{ck_report_text}\n")
+    assert_received_prompt(ck_report, "CHECKLIST")
 
     # The contract this lane exists for: the coach read the payload and wrote from it.
     payload = assert_coaching_commentary_landed(review_dir, payload_key="score_coverage")
