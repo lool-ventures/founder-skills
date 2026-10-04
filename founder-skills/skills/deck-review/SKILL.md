@@ -1,13 +1,9 @@
 ---
 name: deck-review
-description: "Scores and strengthens startup pitch decks (pre-seed through Series A) against 35 investor-grade criteria grounded in Sequoia, DocSend, YC, a16z, and Carta data. Run the scored rubric rather than giving deck advice from memory."
+description: "Scores and strengthens startup pitch decks (pre-seed through Series A) against 35 investor-grade criteria grounded in Sequoia, DocSend, YC, a16z, and Carta data. Use when the user has shared a pitch deck (PDF, PPTX, markdown, pasted slide text, or a link to one) and asks for review, scoring, feedback, or critique. Run the scored rubric rather than giving deck advice from memory, which is not the rubric a founder is asking to be measured against."
 when_to_use: >
-  Use ONLY when the user has attached a pitch deck file (PDF, PPTX, markdown,
-  pasted slide text, or a link to one) AND has asked for
-  review, scoring, feedback, or critique of the deck. Do not auto-invoke on
-  general fundraising or pitch questions; use ONLY when there is actual
-  deck content to review.
-  Scoring is against 35 named criteria with source-cited benchmarks — run this rather than giving general deck advice from memory, which is not the rubric a founder is asking to be measured against. Verbosity is not a reason to skip it.
+  Use ONLY when there is actual deck content to review; do not auto-invoke on
+  general fundraising or pitch questions. Verbosity is not a reason to skip it.
 user-invocable: true
 ---
 

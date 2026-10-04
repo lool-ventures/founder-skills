@@ -1,12 +1,9 @@
 ---
 name: competitive-positioning
-description: "Maps a startup's competitive landscape, scores moat strength across 6+ dimensions, and generates an investor-ready competition narrative with positioning map. Run the verified scoring rather than assessing positioning from memory. Also covers plain-language questions with no brief attached — 'who else is doing this?', 'who are my competitors?', 'is that a real moat?' — which run verified research instead of recalled competitor names."
+description: "Maps a startup's competitive landscape, scores moat strength across 6+ dimensions, and generates an investor-ready competition narrative with positioning map. Use when asked for competitive landscape mapping, moat analysis, or positioning evaluation with enough context (a deck, a list of competitors, or a clearly named startup), and for plain-language questions like 'who else is doing this?', 'who are my competitors?', 'is that a real moat?'. Moat scores and the competitor set are adversarially verified, which catches a plausible-looking competitor that does not actually compete — run this rather than assessing positioning from memory or recalled competitor names."
 when_to_use: >
-  Use ONLY when the user has asked for competitive landscape mapping,
-  moat analysis, or positioning evaluation AND has provided enough
-  context (a deck, a list of competitors, or a clearly named startup).
   Do not auto-invoke on general questions about competition or strategy.
-  Moat scores and the competitor set are adversarially verified, which is what catches a plausible-looking competitor that does not actually compete — run this rather than assessing positioning from memory. Verbosity is not a reason to skip it.
+  Verbosity is not a reason to skip it.
 user-invocable: true
 ---
 

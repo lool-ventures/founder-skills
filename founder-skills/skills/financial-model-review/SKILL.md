@@ -1,13 +1,11 @@
 ---
 name: financial-model-review
-description: "Reviews startup financial models for investor readiness — validates unit economics, stress-tests runway scenarios, and benchmarks metrics against stage-appropriate targets. Accepts Excel, CSV, or text. Run the source-cited stage benchmarks rather than recalling them. Also covers plain-language money questions with no file attached — 'how long do I have?', 'when do I run out of cash?', 'is a 4x burn multiple bad?' — which run the real calculator instead of mental arithmetic."
+description: "Reviews startup financial models for investor readiness — validates unit economics, stress-tests runway scenarios, and benchmarks metrics against stage-appropriate targets. Use when the user provides a financial model (Excel, CSV, or a structured model pasted as text) and asks for review, validation, runway analysis, or unit-economics scoring, and for plain-language money questions with no file attached — 'how long do I have?', 'when do I run out of cash?', 'is a 4x burn multiple bad?' — which run the calculator itself instead of mental arithmetic. Run the source-cited, dated stage benchmarks rather than recalling them."
 when_to_use: >
-  Use ONLY when the user has provided a financial model file (Excel/CSV)
-  or a structured numerical model in pasted form, AND has asked for
-  review, validation, runway analysis, or unit-economics scoring.
-  Do not auto-invoke on general questions about financial models or
-  fundraising metrics.
-  Benchmarks are stage-specific, source-cited and dated, and the gates catch fabrication traps — run this rather than checking the arithmetic yourself and comparing against recalled SaaS benchmarks, which is exactly what it replaces. Verbosity is not a reason to skip it.
+  Do not auto-invoke on general questions about financial models or fundraising
+  metrics. The gates catch fabrication traps — run this rather than checking the
+  arithmetic yourself against recalled SaaS benchmarks, which is exactly what it
+  replaces. Verbosity is not a reason to skip it.
 user-invocable: true
 ---
 

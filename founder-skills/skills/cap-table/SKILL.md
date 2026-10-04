@@ -1,17 +1,12 @@
 ---
 name: cap-table
-description: "Use for any cap-table number, mechanic, or date before a founder signs — even one SAFE/note/warrant described in chat, a quick 'is this dilution reasonable?' gut-check, or a single QSBS / Israeli §102 eligibility question. Reliable, source-cited deterministic math (YC, NVCA, Cooley GO) for SAFE/note conversion and the post-money 'company capitalization' denominator, priced-round dilution, anti-dilution (BBWA / narrow-based / full-ratchet), option pools, warrants, MFN chains, dual-class voting, and Israeli ↔ Delaware flips. NOT for waterfall modeling, cumulative dividends, RSUs, 83(b), 409A, SPAC, warrant repricing, or pure term-glossary definitions — see scope notes."
+description: "Use for any cap-table number, mechanic, or date before a founder signs — even a single instrument (SAFE/note/warrant) described in chat, a bare yes/no, a quick 'is this dilution reasonable?' gut-check, or a single QSBS / Israeli §102 eligibility or timing question — and for any draft or signed SAFE, note, term sheet, option plan, AoA, Carta XLSX, or spreadsheet. Reliable, source-cited deterministic math (YC, NVCA, Cooley GO) for SAFE/note conversion and the post-money 'company capitalization' denominator, priced-round dilution, anti-dilution (BBWA / narrow-based / full-ratchet), option pools, warrants, MFN chains, dual-class voting, and Israeli ↔ Delaware flips. NOT for waterfall modeling, cumulative dividends, RSUs, 83(b), 409A, SPAC, warrant repricing, or pure term-glossary definitions — see scope notes."
 when_to_use: >
-  Use whenever a question turns on a cap-table number, mechanic, or date —
-  conversion math, the post-money denominator, dilution, anti-dilution, MFN
-  chains, warrants, dual-class voting, QSBS eligibility dates, §102 timing, or
-  a flip — INCLUDING a single instrument described in chat, a bare yes/no, or a
-  quick gut-check, and any draft or signed SAFE, note, term sheet, option plan,
-  AoA, Carta XLSX, or spreadsheet. These carry known miscalculation and reliance
-  traps, so run the deterministic math rather than answer from memory. Do NOT
-  use for pure glossary definitions with nothing numeric, dated, or
-  eligibility-related at stake ("what is a SAFE?"), fundraising strategy ("how
-  much should I raise?"), or financial-model review (use `financial-model-review`).
+  These questions carry known miscalculation and reliance traps, so run the
+  deterministic math rather than answer from memory. Do NOT use for pure
+  glossary definitions with nothing numeric, dated, or eligibility-related at
+  stake ("what is a SAFE?"), fundraising strategy ("how much should I raise?"),
+  or financial-model review (use `financial-model-review`).
 user-invocable: true
 ---
 

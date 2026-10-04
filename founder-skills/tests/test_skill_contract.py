@@ -908,7 +908,7 @@ SKILL_MD_CEILING: dict[str, int] = {
     # shell prints for Reads.
     # 105,949 -> 106,045 (+96 B) on 2026-10-05: the conversion block makes its own LibreOffice profile folder (a later
     # block's shell has no setup variables).
-    "market-sizing": 106_045,
+    "market-sizing": 105_857,
     # fmr raised for two founder-facing-correctness items measured in a live run: the CHECKLIST
     # dispatch now forbids citing our artifact filenames in evidence (that run put `inputs.json` in 10
     # items' evidence, printed verbatim into the founder's report), and the producer pipe passes
@@ -1021,7 +1021,7 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 84,316 -> 84,329 (+13 B) on 2026-10-05: the read-directive clauses say "never the shell's path to the
     # plugin folder" instead of "never a path the shell printed", which also covered the hand-off paths the
     # shell prints for Reads.
-    "financial-model-review": 84_329,
+    "financial-model-review": 84_200,
     # ic-sim SHRANK: the REQUIRED ic-dynamics.md read at Step 7 is deleted. Step 7 is a pure producer
     # pipe — compose_discussion.py derives discussion.json from the partners' own files and nothing
     # is authored by the main thread — so the read informed no decision while pulling a whole
@@ -1086,7 +1086,7 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 94,940 -> 94,979 (+39 B) on 2026-10-05: the read-directive clauses say "never the shell's path to the
     # plugin folder" instead of "never a path the shell printed", which also covered the hand-off paths the
     # shell prints for Reads.
-    "ic-sim": 94_979,
+    "ic-sim": 94_675,
     # deck-review +1,165 B: Step 0 carried only a parenthetical fresh-shell mention buried in a code
     # comment, unlike the four skills that mint RUN_ID in a LATER block and so carry the shared banner.
     # deck-review mints RUN_ID INSIDE this re-runnable Step-0 block (like cap-table), so the shared
@@ -1404,7 +1404,7 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 112,469 -> 113,327 on 2026-10-05: the conversion block makes its own LibreOffice profile folder (a later
     # block's shell has no setup variables), Keynote exports to a temp folder, a failed copy prints copy-failed
     # with its own branch, and Step 1 skims a PowerPoint deck through the text reader and a PDF by its file-tool path.
-    "deck-review": 113_327,
+    "deck-review": 113_159,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
@@ -1558,7 +1558,7 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 127,995 -> 128,008 (+13 B) on 2026-10-05: the read-directive clauses say "never the shell's path to the
     # plugin folder" instead of "never a path the shell printed", which also covered the hand-off paths the
     # shell prints for Reads.
-    "competitive-positioning": 128_008,
+    "competitive-positioning": 127_826,
     # cap-table, the largest raise (+2,383 B) and the one with the most founder-visible payoff:
     #   * Main-Thread Return named THREE of the four files Step 12 copies; a live run delivered exactly
     #     three and dropped `{Company}_Cap_Table.html`. All four are now named explicitly.
@@ -1668,7 +1668,10 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 159,356 -> 159,369 (+13 B) on 2026-10-05: the read-directive clauses say "never the shell's path to the
     # plugin folder" instead of "never a path the shell printed", which also covered the hand-off paths the
     # shell prints for Reads.
-    "cap-table": 159_369,
+    # All six lowered for the trigger-phrase move: the conditions that decide when a skill applies now sit
+    # in `description`, which Desktop's discovery scanner reads, and `when_to_use` keeps only what the
+    # description does not already say, so the frontmatter shrank in every skill.
+    "cap-table": 159_095,
 }
 
 

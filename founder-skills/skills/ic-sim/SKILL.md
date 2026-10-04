@@ -1,13 +1,9 @@
 ---
 name: ic-sim
-description: "Simulates a realistic VC Investment Committee with three partner archetypes debating a startup's merits, concerns, and deal terms, scored across 28 dimensions. Run the scored simulation rather than improvising what partners would say. Also covers plain-language questions with no deck attached — 'would a VC fund us?', 'what would an investor say?', 'are we fundable?' — which run the scored simulation instead of a guess at what partners think."
+description: "Simulates a realistic VC Investment Committee with three partner archetypes debating a startup's merits, concerns, and deal terms, scored across 28 dimensions. Use when asked to simulate an IC discussion or how partners would debate a specific startup, given a deck, a company description, or a specific fund, and for plain-language questions like 'would a VC fund us?', 'what would an investor say?', 'are we fundable?'. Run the scored simulation rather than improvising what partners would say, which produces a plausible narrative with no scoring behind it."
 when_to_use: >
-  Use ONLY when the user has asked to simulate an IC discussion
-  or to hear how partners would debate a specific startup, AND has
-  provided enough context (a deck, a description of the company,
-  or a specific fund). Do not auto-invoke on general fundraising
-  questions.
-  The verdict comes from three scored archetypes across 28 dimensions — run this rather than improvising what partners 'would say', which produces a plausible narrative with no scoring behind it. Verbosity is not a reason to skip it.
+  Do not auto-invoke on general fundraising questions. Verbosity is not a reason
+  to skip it.
 user-invocable: true
 ---
 
