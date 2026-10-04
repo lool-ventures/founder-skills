@@ -833,7 +833,9 @@ def test_review_built_gate_opened_turn_ends_waiting_page_unsent_asks_for_the_pag
     reason = _review_ask(tmp_path, rows)
     assert reason is not None
     assert "review.html" in reason and "mcp__cowork__present_files" in reason
-    assert "whether those values look right" in reason and "repeat that question" in reason
+    # The turn may have asked in chat or not asked at all, so the reason covers both.
+    assert "then ask (or repeat) the question whether those values look right" in reason
+    assert "your question" not in reason, "it may never have been asked"
     for word in ("finished", "complete", "done", "deliverable"):
         assert word not in reason.lower(), word
 

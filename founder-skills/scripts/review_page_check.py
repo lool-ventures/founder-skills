@@ -21,6 +21,10 @@ WHEN IT HOLDS -- all of these, read from the transcript since the current prompt
 4. This check has not held a question in the current prompt yet: its marker is looked for in the
    decoded text of every user row, so one hold is the budget and the next question goes through.
 
+"The current prompt" starts at the latest real user turn. If a compaction or anything else moves that
+boundary past the build, the build is no longer seen and the check stays silent: it fails toward letting
+the question through, never toward a hold.
+
 Nothing here reads the question's wording or its options: the build, not a label, says which gate this
 is. Any other question, in this skill or any other, with no unsent page behind it, is let through.
 

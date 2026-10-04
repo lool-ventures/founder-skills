@@ -397,9 +397,10 @@ def decide(payload: dict[str, Any]) -> dict[str, str] | None:
             "decision": "block",
             "reason": (
                 f"The review page ({page}) was built so the founder can check the extracted values, but it "
-                "was not sent, and your question to them -- whether those values look right -- is still "
-                f"waiting on it. Send {page} now with {review_tool}, then repeat that question in one line. "
-                "If the page is not ready to show, say so in one line instead. Add nothing else."
+                "was not sent, and the question whether those values look right waits on it. "
+                f"Send {page} now with {review_tool}, then ask (or repeat) the question whether those "
+                "values look right, in one line. If the page is not ready to show, say so in one line "
+                "instead. Add nothing else."
             ),
         }
     attach = (
