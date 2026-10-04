@@ -237,3 +237,72 @@ def test_the_rejection_step_runs_the_generator(skill: str) -> None:
     line = next(ln for ln in text.splitlines() if ln.startswith("- **Producer schema rejection**"))
     assert '2> "$HANDOFF_DIR/producer_rejected.txt"' in line
     assert '--correction producer-rejected --detail-file "$HANDOFF_DIR/producer_rejected.txt"' in line
+
+
+# --- shapes a real redo takes ----------------------------------------------------------------------------
+
+_P = (
+    'cat "$HANDOFF_DIR/checklist_output.json" | python3 "$SCRIPTS/checklist.py" --pretty --run-id R '
+    '-o "$ANALYSIS_DIR/checklist.json" 2> "$HANDOFF_DIR/producer_rejected.txt"'
+)
+_R = (
+    'python3 "$SCRIPTS/dispatch_prompt.py" checklist --run-id R --correction producer-rejected '
+    '--detail-file "$HANDOFF_DIR/producer_rejected.txt"'
+)
+_REDO = (
+    "CONTEXT: CHECKLIST\nOUTPUT_PATH: /h/o.json\nThe producer rejected...\n"
+    "Do NOT write any file other than OUTPUT_PATH.\n"
+)
+
+
+def _shell_rows(calls: list[tuple[str, str, bool]]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for i, (cmd, result, is_error) in enumerate(calls):
+        use = {"type": "tool_use", "id": f"t{i}", "name": "Bash", "input": {"command": cmd}}
+        rows.append({"type": "assistant", "message": {"content": [use]}})
+        block = {"type": "tool_result", "tool_use_id": f"t{i}", "content": result, "is_error": is_error}
+        rows.append({"type": "user", "message": {"content": [block]}})
+    return rows
+
+
+@pytest.mark.parametrize(
+    ("calls", "accepted"),
+    [
+        ([(_P, "Exit code 1", True), (_R, _REDO, False)], True),
+        # The exit code printed by the block's own echo, right after the producer.
+        ([(_P + '; echo "EXIT=$?"', "EXIT=1", False), (_R, _REDO, False)], True),
+        ([(_P + '; echo "EXIT=$?"', "EXIT=0", False), (_R, _REDO, False)], False),
+        ([(_P + '; true; echo "EXIT=$?"', "EXIT=1", False), (_R, _REDO, False)], False),
+        # Reading the saved message before the redo leaves it the producer's.
+        (
+            [(_P, "Exit code 1", True), ('cat "$HANDOFF_DIR/producer_rejected.txt"', "x", False), (_R, _REDO, False)],
+            True,
+        ),
+        (
+            [
+                (_P, "Exit code 1", True),
+                ('head -5 "$HANDOFF_DIR/producer_rejected.txt"', "x", False),
+                (_R, _REDO, False),
+            ],
+            True,
+        ),
+        # The hand-off dir assigned in the redo's block only.
+        ([(_P, "Exit code 1", True), ("HANDOFF_DIR=/h; " + _R, _REDO, False)], True),
+        ([("HANDOFF_DIR=/h; " + _P, "Exit code 1", True), (_R, _REDO, False)], True),
+        # Still held: a write between, or a different file.
+        (
+            [
+                (_P, "Exit code 1", True),
+                ('echo x >> "$HANDOFF_DIR/producer_rejected.txt"', "", False),
+                (_R, _REDO, False),
+            ],
+            False,
+        ),
+        ([(_P, "Exit code 1", True), (_R.replace("producer_rejected", "other"), _REDO, False)], False),
+    ],
+)
+def test_a_redo_after_a_real_rejection_is_accepted_in_the_shapes_runs_use(
+    calls: list[tuple[str, str, bool]], accepted: bool
+) -> None:
+    hook = _load(HOOK, "hook_shapes")
+    assert (hook.latest_printed(_shell_rows(calls), "CONTEXT: CHECKLIST", "/h/o.json") is not None) is accepted

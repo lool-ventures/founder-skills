@@ -34,8 +34,12 @@ tool result counts only when the call that produced it is paired by tool id and 
     it cannot resolve. `/private/tmp` and `/tmp` are the same file.
 A redo printed with `--correction producer-rejected --detail-file F` quotes F inside the prompt, so it
 counts only when the transcript shows F written by a plugin producer run in the main thread (a
-truncating `2> F`, no other command in that block naming F) that exited non-zero, and nothing has
-written or named F since. A Read of any other file, a sub-agent's reply, or a block that also prints
+truncating `2> F`, no other command in that block naming F) that failed -- the call exited non-zero,
+or the block's own `echo "EXIT=$?"` straight after the producer printed a non-zero code -- and nothing
+has written F since (reading it is fine). The two blocks name the same F when they spell it the same
+way or resolve it to the same path. Residual: a producer echoes parts of its input in its message, so
+a hand-off crafted to fail can carry text into the redo; the cap and the quoting bound it.
+A Read of any other file, a sub-agent's reply, or a block that also prints
 text is never the comparand. Residual: the generator's arguments are typed by the model, and `$SCRIPTS` set in an
 earlier shell is trusted as the skill's own folder.
 
@@ -653,30 +657,41 @@ def _distrusts(command: str) -> set[str]:
     return out
 
 
-def _file_key(word: str, env: dict[str, str], raw: dict[str, str]) -> str:
-    """How a file named in a block is compared across blocks: its normalised path when the block's own
-    assignments resolve it, else the words as written (`$HANDOFF_DIR/producer_rejected.txt`)."""
+def _file_keys(word: str, env: dict[str, str]) -> frozenset[str]:
+    """How a file named in a block is matched across blocks: the words as written
+    (`$HANDOFF_DIR/producer_rejected.txt`), and its normalised path when the block's own assignments
+    resolve it. Two blocks name the same file when any key is shared."""
+    keys = {"as-written:" + word}
     expanded = _expand(word, env)
     if expanded is not None and expanded.startswith("/"):
-        return norm_path(expanded)
-    return "as-written:" + _partial(word, raw)
+        keys.add(norm_path(expanded))
+    return frozenset(keys)
 
 
-def producer_outputs(command: str) -> list[str]:
+def producer_outputs(command: str) -> list[tuple[frozenset[str], re.Pattern[str] | None]]:
     """Files a plugin producer's output was saved to in this block (`... checklist.py ... 2> F`, a
-    truncating redirect), where no other command in the block names the file. A redo's message must
-    come from one of these, written by a run that failed."""
+    truncating redirect), where no other command in the block names the file; each with the pattern of
+    the block's own `echo "EXIT=$?"` run straight after the producer, if there is one. A redo's message
+    must come from one of these files, written by a run that failed: the call exited non-zero, or that
+    echo printed a non-zero code."""
     cmds = _parse_block(command)
     if cmds is None:
         return []
     env, raw, _assigned = _env(cmds)
     out = []
-    for c in cmds:
+    for i, c in enumerate(cmds):
         script = _script(_words(c.argv))
         if c.substituted or script is None or not _plugin_script(script, raw):
             continue
         if os.path.basename(script) in GENERATORS or os.path.basename(script) in _QUIET_SCRIPTS:
             continue
+        exit_echo = None
+        nxt = cmds[i + 1] if i + 1 < len(cmds) else None
+        if not c.piped and nxt is not None and not nxt.substituted and _words(nxt.argv)[:1] == ["echo"]:
+            args = _words(nxt.argv)[1:]
+            if len(args) == 1 and args[0].count("$?") == 1 and "$" not in args[0].replace("$?", ""):
+                head, _, tail = args[0].partition("$?")
+                exit_echo = re.compile(rf"^{re.escape(head)}(\d+){re.escape(tail)}$", re.MULTILINE)
         for op, _fd, target in c.redirects:
             if op not in (">", ">|", "&>"):
                 continue
@@ -685,18 +700,18 @@ def producer_outputs(command: str) -> list[str]:
                 continue
             if sum(base in t for t in c.writes) > 1:
                 continue
-            out.append(_file_key(target, env, raw))
+            out.append((_file_keys(target, env), exit_echo))
     return out
 
 
-def redo_details(command: str) -> list[str] | None:
+def redo_details(command: str) -> list[frozenset[str]] | None:
     """The --detail-file of each `--correction producer-rejected` generator run in this block (as file
     keys), or None when the block runs no such redo."""
     cmds = _parse_block(command)
     if cmds is None:
         return None
-    env, raw, _assigned = _env(cmds)
-    found: list[str] | None = None
+    env, _raw, _assigned = _env(cmds)
+    found: list[frozenset[str]] | None = None
     for c in cmds:
         words = _words(c.argv)
         if "producer-rejected" not in words and "--correction=producer-rejected" not in words:
@@ -704,10 +719,18 @@ def redo_details(command: str) -> list[str] | None:
         found = found if found is not None else []
         for i, w in enumerate(words):
             if w == "--detail-file" and i + 1 < len(words):
-                found.append(_file_key(words[i + 1], env, raw))
+                found.append(_file_keys(words[i + 1], env))
             elif w.startswith("--detail-file="):
-                found.append(_file_key(w.partition("=")[2], env, raw))
+                found.append(_file_keys(w.partition("=")[2], env))
     return found
+
+
+def _failed(result: dict[str, Any], exit_echo: re.Pattern[str] | None) -> bool:
+    """The producer's run failed: its call exited non-zero, or the block's own exit-code echo says so."""
+    if result.get("is_error"):
+        return True
+    m = exit_echo.search(_result_text(result)) if exit_echo is not None else None
+    return m is not None and m.group(1) != "0"
 
 
 def _is_shell(name: Any) -> bool:
@@ -717,10 +740,9 @@ def _is_shell(name: Any) -> bool:
 _FILE_TOOL_KEYS = ("file_path", "notebook_path", "path")
 
 
-def _key_touched(command: str, key: str, distrusted: set[str]) -> bool:
-    if key.startswith("as-written:"):
-        return os.path.basename(key) in command
-    return touches_file(command, key, distrusted)
+def _entry_touched(command: str, keys: frozenset[str], distrusted: set[str]) -> bool:
+    """Whether a later shell block could change a saved rejection named by `keys`; reading it does not."""
+    return any(touches_file(command, k.removeprefix("as-written:"), distrusted) for k in keys)
 
 
 def comparands(rows: list[dict[str, Any]]) -> list[str]:
@@ -730,8 +752,8 @@ def comparands(rows: list[dict[str, Any]]) -> list[str]:
     generator untrusted; only the main thread's own results are ever the comparand."""
     uses: dict[str, dict[str, Any]] = {}
     pending: dict[str, tuple[bool, list[str]]] = {}
-    producing: dict[str, list[str]] = {}
-    rejected: set[str] = set()
+    producing: dict[str, list[tuple[frozenset[str], re.Pattern[str] | None]]] = {}
+    rejected: list[frozenset[str]] = []
     readable: set[str] = set()
     distrusted: set[str] = set()
     out: list[str] = []
@@ -753,12 +775,12 @@ def comparands(rows: list[dict[str, Any]]) -> list[str]:
                     distrusted |= _distrusts(cmd)
                     verdict = (False, []) if side else generator_block(cmd, distrusted)
                     details = redo_details(cmd)
-                    if details is not None and not (details and set(details) <= rejected):
+                    if details is not None and not (details and all(any(d & r for r in rejected) for d in details)):
                         verdict = (False, [])  # a redo whose message is not a failed producer's own output
                     if not side and not verdict[0] and shows_file(cmd, readable, distrusted):
                         verdict = (True, [])
                     readable = {path for path in readable if not touches_file(cmd, path, distrusted)}
-                    rejected = {k for k in rejected if not _key_touched(cmd, k, distrusted)}
+                    rejected = [r for r in rejected if not _entry_touched(cmd, r, distrusted)]
                     if not side and producer_outputs(cmd):
                         producing[str(b.get("id"))] = producer_outputs(cmd)
                     if verdict[0] or verdict[1]:
@@ -768,8 +790,8 @@ def comparands(rows: list[dict[str, Any]]) -> list[str]:
                         target = inp.get(key)
                         if isinstance(target, str):
                             readable.discard(norm_path(target))
-                            rejected.discard(norm_path(target))
-                            rejected = {k for k in rejected if os.path.basename(k) != os.path.basename(target)}
+                            base = os.path.basename(target)
+                            rejected = [r for r in rejected if not any(os.path.basename(k) == base for k in r)]
                             if os.path.basename(target) in GENERATORS:
                                 distrusted.add(os.path.basename(target))
                 if not side:
@@ -778,9 +800,9 @@ def comparands(rows: list[dict[str, Any]]) -> list[str]:
             for b in content:
                 if not isinstance(b, dict) or b.get("type") != "tool_result":
                     continue
-                saved_to = producing.pop(str(b.get("tool_use_id")), None)
-                if saved_to is not None and b.get("is_error"):
-                    rejected.update(saved_to)  # the producer exited non-zero: its message is in the file
+                for keys, exit_echo in producing.pop(str(b.get("tool_use_id")), []):
+                    if _failed(b, exit_echo):
+                        rejected.append(keys)  # the producer failed: its message is in the file
                 if b.get("is_error"):
                     continue
                 use = uses.get(str(b.get("tool_use_id")))
