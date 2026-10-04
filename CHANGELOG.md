@@ -10,33 +10,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - **The README says how to open the feedback command:** type `/` and pick it from the menu. Its
-  troubleshooting section now covers a second, organization-provided copy of the plugin, and an
-  organization removal that takes up to about an hour to reach the app.
+  troubleshooting section now covers a second, organization-provided copy of the plugin (turn your
+  own copy off), and an organization removal that takes up to about an hour to reach the app.
+- **The skills state that nothing under the outputs folder is deleted as their own rule**, rather than
+  saying the host refuses deletes there; newer hosts allow them.
 
 ### Fixed
 
 - **Market sizing, competitive positioning and financial model review: on a cloud session the closing
   message names each document without a path.** The documents arrive as file cards there, and the
   paths printed beside them could not be opened. In a terminal the paths stay, since there they are
-  how you find the files.
+  how you find the files. Until a later release, a cloud run of these three that ends without
+  attaching its documents can be reminded to attach them only when its closing message carries the
+  summary as printed.
 - **Competitive positioning: the quality checklist reads how the analysis started (from a deck, a
   document or a conversation) from the saved profile.** It was told to use a value set several steps
   earlier, which does not carry over, so a deck or document analysis could be graded as a
   conversation.
-- **Deck review: the steps that check the deck's figures always run in the deck-review reviewer.**
-  Three of them did not say which reviewer to use, so they could run in a general-purpose one without
-  this skill's rules.
+- **Competitive positioning: an outside review, or a recorded reason for skipping one, counts only for
+  the run the report is built for.** When part of the analysis was left over from an earlier run, that
+  run's review could let a report through that showed no review and did not say none ran. The report
+  is now refused until this run's review runs or the reason it did not is recorded.
+- **Deck review: the steps that check the deck's figures now name the deck-review reviewer.** Three of
+  them did not say which reviewer to use, so they could run in a general-purpose one without this
+  skill's rules.
 - **Market sizing, competitive positioning and IC simulation print the run's identifiers when they
   set up a run**, and the quick checks in market sizing, competitive positioning and financial model
   review no longer refer to a value that was never set.
-- **Financial model review: the review page's live check is written in the branch a standalone page
-  never takes**, as its corrections upload already was. Nothing changes in how the page behaves.
-- **A missing working-records folder no longer hides unchecked steps.** Every skill's report says
+- **A missing working-records folder no longer hides most unchecked steps.** Every skill's report says
   which steps were not put through the check on their saved output; when the run's folder of those
-  records was missing, the report used to say nothing. It now names those steps. Competitive
-  positioning likewise still refuses to build a report with neither an outside review nor a recorded
-  reason it did not run, and market sizing still notes when the offer to revise after a serious
-  challenge was not recorded.
+  records was missing, the report used to say nothing. It now names those steps, except a cap table's
+  readings of individual documents and competitive positioning's research on competitors you added,
+  which are found from that folder itself. Market sizing still notes when the offer to revise after a
+  serious challenge was not recorded. The note no longer says the results are unaffected, which it
+  cannot know; it says the missing record alone does not mean they are wrong.
 
 ### Development
 
@@ -44,11 +51,12 @@ Contributor-facing only; nothing here changes what a founder installs or runs.
 
 - End-to-end test sessions no longer load account connectors, and each lane fails if one appears in
   the session's tools or in any tool call.
-- The skills and their shared reference now state that nothing under the outputs folder is deleted
-  as the skills' own rule, rather than saying the host refuses deletes there; newer hosts allow them.
-  A test keeps any text from claiming the host refuses.
+- A test keeps any text, both READMEs included, from claiming the host refuses deletes under the
+  outputs folder.
+- The financial model review page's live check is written in the branch a standalone page never
+  takes, as its corrections upload already was. Nothing changes in how the page behaves.
 - Tests check that every hook ships with the Python it runs, and that every server call on the
-  financial model review page sits in the branch a standalone page never takes.
+  financial model review page, in any quoting, sits in the branch a standalone page never takes.
 - The recorded-session delivery check now counts a write to a connected folder made from a cloud
   session, whose tool name carries a prefix the exact-name match missed.
 

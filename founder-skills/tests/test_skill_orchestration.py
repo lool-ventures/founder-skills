@@ -72,7 +72,7 @@ def test_outputs_mount_append_only_guardrail(skill_md: Path) -> None:
 _PLATFORM_DELETE_DENIAL = re.compile(
     r"delete-denied|denies delet|denied post-write|delete-no\b|refuses the delete|Cowork refuses"
     r"|Cowork denies|denies deletion|delete is denied|deletion may be denied|can be DENIED"
-    r"|outputs mount denies|Cowork can deny",
+    r"|outputs mount denies|Cowork can deny|refuses deletes|deletes are refused|host refuses",
     re.IGNORECASE,
 )
 
@@ -88,6 +88,8 @@ def _delete_rule_texts() -> list[Path]:
         *sorted(SKILLS_DIR.glob("*/scripts/*.py")),
         REPO_ROOT / "CLAUDE.md",
         REPO_ROOT / "CONTRIBUTING.md",
+        REPO_ROOT / "README.md",
+        REPO_ROOT / "cowork-tests" / "README.md",
     ]
     return [p for p in files if p.is_file()]
 
@@ -96,6 +98,8 @@ def test_no_text_claims_the_platform_refuses_deletes_under_outputs() -> None:
     """The append-only rule is ours. Text that blames the platform is false on current hosts, and it
     invites the reading that a delete which happens to succeed is allowed."""
     assert _PLATFORM_DELETE_DENIAL.search("is write-allowed and delete-denied by the platform")  # seeded
+    assert _PLATFORM_DELETE_DENIAL.search("The host refuses deletes there.")
+    assert _PLATFORM_DELETE_DENIAL.search("The outputs mount is append-only — deletes are refused")
     assert not _PLATFORM_DELETE_DENIAL.search("never delete there, by this skill's rule")
     hits = [
         f"{p.relative_to(REPO_ROOT)}:{n}: {line.strip()[:120]}"
@@ -1052,6 +1056,53 @@ def test_the_setup_block_ends_by_printing_its_values(skill: str) -> None:
     assert last.startswith(("echo ", "printf ")), f"{skill}: the setup block ends with {last!r}, not a print"
     for key in ("RUN_ID=", "STAGING_DIR=", "HANDOFF_DIR="):
         assert key in last, f"{skill}: the setup block's last line does not print {key}"
+
+
+# What each setup print names, in order. market-sizing also prints the hand-off dir's file-tool path,
+# labelled, beside the shell one: its PDF read is the step where a shell path reaches a file tool.
+_SETUP_ECHO_VARS = {
+    "ic-sim": ["RUN_ID", "STAGING_DIR", "HANDOFF_DIR"],
+    "market-sizing": ["RUN_ID", "STAGING_DIR", "HANDOFF_DIR", "HANDOFF_AGENT"],
+    "competitive-positioning": ["RUN_ID", "STAGING_DIR", "HANDOFF_DIR"],
+}
+
+
+@pytest.mark.parametrize("skill", _SETUP_ECHO_SKILLS)
+def test_the_setup_print_pairs_each_label_with_its_own_variable(skill: str) -> None:
+    """A key printed beside another variable's value is worse than no print: the model copies it."""
+    import shlex
+
+    text = (SKILLS_DIR / skill / "SKILL.md").read_text(encoding="utf-8")
+    block = next(b for b in _bash_blocks(text) if 'STAGING_DIR="$(mktemp -d' in b)
+    last = [ln.strip() for ln in block.splitlines() if ln.strip() and not ln.strip().startswith("#")][-1]
+    words = shlex.split(last, posix=False)
+    assert words[0] == "printf", last
+    fmt, args = words[1], words[2:]
+    keys = re.findall(r"([A-Z][A-Z_]*)=%s", fmt)
+    assert keys == _SETUP_ECHO_VARS[skill], f"{skill}: prints {keys}"
+    assert fmt.count("%s") == len(args), f"{skill}: {fmt.count('%s')} slots, {len(args)} values"
+    assert args == [f'"${k}"' for k in keys], f"{skill}: labels {keys} carry values {args}"
+
+
+def test_the_checklist_mode_is_read_from_the_profiles_input_mode(tmp_path: Path) -> None:
+    """The printed mode is what `checklist.py --input-mode` gates on; reading any other field prints
+    nothing usable and a deck run is graded as a conversation."""
+    import subprocess
+    import sys
+
+    text = (SKILLS_DIR / "competitive-positioning" / "SKILL.md").read_text(encoding="utf-8")
+    block = next(b for b in _bash_blocks(text) if re.search(r"(?m)^INPUT_MODE=", b))
+    line = next(ln for ln in block.splitlines() if ln.startswith("python3 -c ") and "product_profile.json" in ln)
+    (tmp_path / "product_profile.json").write_text('{"input_mode": "deck", "mode": "conversation"}')
+    r = subprocess.run(
+        ["sh", "-c", line.split("#", 1)[0].replace("python3", sys.executable, 1)],
+        env={"ANALYSIS_DIR": str(tmp_path), "PATH": "/usr/bin:/bin"},
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.strip() == "deck"
 
 
 @pytest.mark.parametrize("skill_md", SKILL_MD_FILES, ids=lambda p: p.parent.name)

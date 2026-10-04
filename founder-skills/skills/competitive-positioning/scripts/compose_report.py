@@ -268,7 +268,7 @@ _REVIEW_FOUNDER_MESSAGES = {
 }
 
 
-def _rt_refuse(run_ids: set[str], reviews: Sequence[Any], skip_record: Any) -> None:
+def _rt_refuse(run_id: str | None, all_run_ids: set[str], reviews: Sequence[Any], skip_record: Any) -> None:
     """THE OUTSIDE-REVIEW GATE: a run's report is composed only when its review ran or the decision not to
     run one was recorded. Silence is not a third option.
 
@@ -276,25 +276,33 @@ def _rt_refuse(run_ids: set[str], reviews: Sequence[Any], skip_record: Any) -> N
     nothing, and a step whose only consumer is a warning gets skipped in silence (market-sizing's review
     was, on a live paid run). Only a non-zero exit reaches SKILL.md's stop-and-report branch.
 
-    Keyed on the run ids the required artifacts carry, never on the run's hand-off dir: a missing dir
-    once read as "not a run that can be judged", so deleting it silenced the gate. A run with no
-    sub-agents records `no_subagent_dispatch`. A review or skip of ANY of those ids satisfies it: when the
-    artifacts disagree on the run, STALE_ARTIFACT (high) is the finding, and this gate must not hide it
-    behind a refusal that names the wrong cause. RESIDUAL, stated: deleting the review and the skip
+    Keyed on `run_id`, the run the report is resolved for -- the first usable required artifact's id,
+    the same id `_cp_redteam_copy.resolve` and `skip_reason` use -- never on the run's hand-off dir: a
+    missing dir once read as "not a run that can be judged", so deleting it silenced the gate. A stub
+    carries no analysis, so its id is not a run's (the caller drops stubs). Accepting a review of ANY id
+    the artifacts carry let an earlier run's review pass a set with one artifact left from that run,
+    while the report showed no review; `all_run_ids` only names that mixed set in the refusal. A run with
+    no sub-agents records `no_subagent_dispatch`. RESIDUAL, stated: deleting the review and the skip
     record trips this refusal rather than passing it; hand-writing a skip record is a named fabrication.
     """
-    if not run_ids:
+    if not run_id:
         return
-    if any(_as_dict(_as_dict(r).get("metadata")).get("run_id") in run_ids for r in reviews):
+    if any(_as_dict(_as_dict(r).get("metadata")).get("run_id") == run_id for r in reviews):
         return
     rec = _as_dict(skip_record)
     recorded = rec.get("reason")
-    if _as_dict(rec.get("metadata")).get("run_id") in run_ids:
+    if _as_dict(rec.get("metadata")).get("run_id") == run_id:
         if recorded in _cp_redteam_copy.SKIP_REASONS:
             return
         detail = f"red_team_skip.json records {recorded!r}, which is not a recognised reason"
     else:
         detail = "no outside review ran for this run and no decision to skip one was recorded"
+        if len(all_run_ids) > 1:
+            detail += (
+                f" (STALE_ARTIFACT: the analysis files carry more than one run id, "
+                f"{', '.join(sorted(all_run_ids))}; this run is {run_id}, and a review or skip of another "
+                "run does not count)"
+            )
     known = ", ".join(_cp_redteam_copy.SKIP_REASONS)
     errors = [
         f"{detail}. Run Step 6.5, or record why it did not run with record_red_team_skip.py --reason <one of: {known}>."
@@ -377,8 +385,10 @@ def _handoff_bypassed(dir_path: str, artifacts: dict[str, Any]) -> list[str]:
     re-dispatch only when its hand-off is on disk.
 
     A missing `handoff/<run_id>/` is NOT silence: with no dir there are no gate records, so every step
-    the artifacts show ran is reported unchecked. Deleting the dir can only add this warning. A run
-    that dispatched no sub-agent has none of these artifacts, so nothing is required of it.
+    the artifacts show ran is reported unchecked. RESIDUAL: the enrichment re-dispatch is required
+    only when its hand-off is on disk, so deleting the dir removes that one step's warning (the others
+    still fire). A run that dispatched no sub-agent has none of these artifacts, so nothing is required
+    of it.
 
     RESIDUAL: a pass proves a gated hand-off exists and still matches its record -- not that the
     producer consumed it. See `_handoff_audit.py`.
@@ -2118,9 +2128,13 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
 
     # The review every reader below sees is its append-only copy, never `redteam.json` as it now stands
     # (`_cp_redteam_copy`, rules in the shared `_redteam_core`).
+    # This run's id, from the usable required artifacts only (a stub is no analysis), as visualize.py
+    # reads it -- ONE id for the resolver, the gate and the skip reason, so they agree on whose review it is.
+    _rt_required = [a for a in (artifacts.get(n) for n in REQUIRED_ARTIFACTS) if _usable(a)]
+    _rt_run_id = _cp_redteam_copy.primary_run_id(_rt_required)
     _rt_shown, _rt_codes, _rt_facts = _cp_redteam_copy.resolve(
         dir_path,
-        _cp_redteam_copy.primary_run_id(artifacts.get(n) for n in REQUIRED_ARTIFACTS),
+        _rt_run_id,
         artifacts.get("redteam.json"),
         artifacts.get("red_team_skip.json"),
     )
@@ -2129,18 +2143,14 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
     # analysis dir is per company, so a re-run that recorded a skip otherwise inherited the last run's
     # review and was told the review had bypassed a hand-off it never made.
     _rt_refuse(
-        {
-            rid
-            for n in REQUIRED_ARTIFACTS
-            if isinstance(rid := _as_dict(_as_dict(artifacts.get(n)).get("metadata")).get("run_id"), str) and rid
-        },
+        _rt_run_id,
+        {rid for a in _rt_required if isinstance(rid := _as_dict(a.get("metadata")).get("run_id"), str) and rid},
         # The review as it stands, and the one shown (from its append-only copy, which outlives an edit
         # or a delete of redteam.json).
         (artifacts.get("redteam.json"), _rt_shown),
         artifacts.get("red_team_skip.json"),
     )
     artifacts["redteam.json"] = _rt_shown
-    _rt_run_id = _cp_redteam_copy.primary_run_id(artifacts.get(n) for n in REQUIRED_ARTIFACTS)
     _rt_skip = _cp_redteam_copy.skip_reason(artifacts.get("red_team_skip.json"), _rt_run_id)
     _rt_review = _rt_shown if isinstance(_rt_shown, dict) and _rt_shown is not _CORRUPT else None
 

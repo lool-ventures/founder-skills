@@ -11,12 +11,16 @@ discloses them to the founder (`HANDOFF_BYPASSED`).
 The evidence is the ABSENCE of a record, deliberately. Keying on something the fallback path writes
 would depend on the model following the fallback prose; an absent record survives the prose being
 skipped. The hand-off dir sits under the outputs mount. Newer hosts allow deletes there (we never delete
-by rule), so a record CAN be removed -- and that can only ADD warnings: `gate_ok` reads a missing
-record (or a missing dir) as ungated, and no caller treats a missing dir as "not a run". A run that
-dispatched no sub-agent has no artifact that requires a record. Deleting a canonical artifact removes
-its step's requirement, the residual. The only way to manufacture a record is to hand-write a
-sub-agent's JSON into the hand-off path and gate it, which is the main thread re-emitting a payload --
-a named fabrication failure, not a paraphrase. The sha also catches a hand-off file rewritten after it was gated.
+by rule), so a record CAN be removed. For a step the artifacts identify, that only adds the warning:
+`gate_ok` reads a missing record (or a missing dir) as ungated, and no caller treats a missing dir as
+"not a run". A run that dispatched no sub-agent has no artifact that requires a record. RESIDUALS:
+deleting a canonical artifact removes its step's requirement; and a step required only because its
+hand-off file is in the dir -- cap-table's per-document extractions, competitive-positioning's
+enrichment re-dispatch -- is no longer required once the dir is deleted, so deleting it removes that
+warning. Closing those needs each producer to record which hand-off it consumed. The only way to
+manufacture a record is to hand-write a sub-agent's JSON into the hand-off path and gate it, which is
+the main thread re-emitting a payload -- a named fabrication failure, not a paraphrase. The sha also
+catches a hand-off file rewritten after it was gated.
 
 WHAT A PASS DOES NOT PROVE: that the producer consumed the gated file. A step that was gated once and
 then degraded on a re-dispatch within the same run still has a matching record, and passes. Proving
@@ -79,7 +83,7 @@ WARNING_CODE = "HANDOFF_BYPASSED"
 WARNING_LABEL = "Some Steps Were Not Checked"
 VERDICT_SENTENCE = (
     "Some steps were not put through the check that confirms each step's saved output, so the record "
-    "of those steps is incomplete; the results themselves are unaffected."
+    "of those steps is incomplete; that alone does not mean the results are wrong."
 )
 
 
@@ -88,5 +92,5 @@ def founder_message(labels: Sequence[str]) -> str:
     steps = labels[0] if len(labels) == 1 else ", ".join(labels[:-1]) + " and " + labels[-1]
     return (
         f"The results of {steps} were not put through the check that confirms each step's saved "
-        "output, so the record of those steps is incomplete. The results themselves are unaffected."
+        "output, so the record of those steps is incomplete. That alone does not mean the results are wrong."
     )

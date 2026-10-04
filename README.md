@@ -347,7 +347,7 @@ checks locally.
    Then restart Claude Code and reinstall the plugin.
 
 **Two copies of Founder skills?** If your organization also installed Founder skills for you, you may
-see an organization-provided copy with the same name beside your own. Turn one of them off in
+see an organization-provided copy with the same name beside your own. Turn your own copy off in
 **Customize** → **Plugins**, so only one copy runs.
 
 **Removed by your organization but still showing?** Organization changes can take up to about an hour

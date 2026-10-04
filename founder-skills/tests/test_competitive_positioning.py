@@ -7588,7 +7588,8 @@ def test_handoff_bypass_follows_the_optional_steps_that_actually_ran() -> None:
 
 
 def test_a_missing_handoff_dir_names_every_step_unchecked() -> None:
-    """Deleting `handoff/<run_id>/` can only ADD this warning: no dir means no gate records."""
+    """Deleting `handoff/<run_id>/` still names every step the artifacts show ran: no dir means no gate
+    records. (The enrichment re-dispatch, keyed on its file in the dir, is the residual.)"""
     with tempfile.TemporaryDirectory() as tmp:
         _make_artifact_dir(tmp)
         assert not os.path.exists(os.path.join(tmp, "handoff"))

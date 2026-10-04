@@ -11,6 +11,7 @@ import json
 import math
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -14466,8 +14467,8 @@ def test_handoff_bypass_a_run_with_no_sub_agent_step_and_no_handoff_dir_is_silen
 
 
 def test_handoff_bypass_a_missing_handoff_dir_does_not_hide_an_aoa_reading() -> None:
-    """Deleting `handoff/<run_id>/` can only ADD this warning: the AoA findings on record still require
-    a gated hand-off, and with no dir there is none."""
+    """Deleting `handoff/<run_id>/` cannot hide the AoA reading: the AoA findings on record still require
+    a gated hand-off, and with no dir there is none. (Per-document extractions are the residual.)"""
     d = _make_cap_compose_dir()
     cs_path = os.path.join(d, "cap_state.json")
     with open(cs_path, encoding="utf-8") as f:
@@ -14487,6 +14488,19 @@ def test_handoff_bypass_known_residual_a_fallback_extraction_leaves_nothing_to_s
     stdin stamp in the two extraction validators is what would close it."""
     d = _make_cap_compose_dir()
     _cap_run_dir(d)
+    hit, _ = _cap_bypass(d)
+    assert hit is None
+
+
+def test_handoff_bypass_known_residual_deleting_the_dir_removes_an_extractions_warning() -> None:
+    """KNOWN, NOT A GUARANTEE, and stated wherever the hand-off audit is described: per-document
+    extractions are enumerated from the run's hand-off dir, so deleting the dir removes the warning an
+    ungated one raised. The same stdin stamp would close it."""
+    d = _make_cap_compose_dir()
+    _cap_write_handoff(d, _DOC_HANDOFFS[0], gate=False)
+    hit, _ = _cap_bypass(d)
+    assert hit is not None and "one of your documents" in hit["message"]
+    shutil.rmtree(os.path.join(d, "handoff"))
     hit, _ = _cap_bypass(d)
     assert hit is None
 

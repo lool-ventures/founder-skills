@@ -142,9 +142,9 @@ def _handoff_bypassed(dir_path: str, run_id: str, cap_state: dict[str, Any]) -> 
     proves a gated hand-off exists and matches, not that the producer consumed it.
 
     Labels never name a document: a doc_slug is the model's choice of filename, not founder text.
-    Several unchecked documents are counted, not listed. A missing `handoff/<run_id>/` is not silence:
-    (a) then has nothing to see, and (b) still requires the AoA record, so deleting the dir can only add
-    this warning.
+    Several unchecked documents are counted, not listed. A missing `handoff/<run_id>/` is not silence
+    for (b), which still requires the AoA record. It IS for (a): with no dir there is nothing to
+    enumerate, so deleting the dir removes an ungated extraction's warning -- the residual above.
     """
     audit = _handoff_audit()
     if audit is None or not run_id:

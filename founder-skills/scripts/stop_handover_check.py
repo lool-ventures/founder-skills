@@ -309,6 +309,16 @@ def find_handover(cwd: str, globs: tuple[str, ...] = HANDOVER_GLOBS) -> str | No
     return max(candidates, key=os.path.getmtime)
 
 
+def _printed(skill: str, cwd: Any, from_transcript: str | None) -> str | None:
+    """The skill's printed hand-over: its handover.txt under `cwd`, else the transcript's slice."""
+    globs = next(g for name, _t, g, _o in SKILLS if name == skill)
+    handover = find_handover(cwd, globs) if isinstance(cwd, str) else None
+    if handover is not None:
+        with open(handover, encoding="utf-8") as fh:
+            return fh.read()
+    return from_transcript
+
+
 def _handover_problem(payload: dict[str, Any], rows: list[dict[str, Any]] | None) -> tuple[str, str] | None:
     """(why, printed hand-over) when the closing message did not carry the printed hand-over, else None."""
     final: str | None = None
@@ -336,14 +346,8 @@ def _handover_problem(payload: dict[str, Any], rows: list[dict[str, Any]] | None
     if final is None or skill is None:
         return None
     cwd = payload.get("cwd")
-    globs = next(g for name, _t, g, _o in SKILLS if name == skill)
-    handover = find_handover(cwd, globs) if isinstance(cwd, str) else None
-    if handover is not None:
-        with open(handover, encoding="utf-8") as fh:
-            printed = fh.read()
-    elif from_transcript is not None:
-        printed = from_transcript
-    else:
+    printed = _printed(skill, cwd, from_transcript)
+    if printed is None:
         _log(
             f"{skill}'s closing message ran but no handover.txt under {cwd}, "
             "and the transcript holds no whole printed hand-over"
@@ -369,7 +373,9 @@ def decide(payload: dict[str, Any]) -> dict[str, str] | None:
     tool: str | None = None
     if rows is not None:
         try:
-            tool = _load_delivery().missing_delivery(rows, _current_prompt_start(rows))
+            found = closing_call(rows)
+            printed = _printed(found[0], payload.get("cwd"), found[2]) if found is not None else None
+            tool = _load_delivery().missing_delivery(rows, _current_prompt_start(rows), printed)
         except Exception as e:  # noqa: BLE001 - the delivery check must never cost the hand-over check
             _log(f"delivery check: {type(e).__name__}: {e}")
     if handover is None and tool is None:

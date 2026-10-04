@@ -15,6 +15,10 @@ WHEN IT ASKS -- all of these, read from the session transcript:
    is not asked to deliver what it chose to withhold.
 3. The final message points at a deliverable (a `computer://` link, or an absolute path or link
    target ending .md/.html/.pdf/.xlsx). A model that withheld delivery does not link the files.
+   For a closing script's build (`closing_message` / `cp_closing_message` / `fmr_closing_message`),
+   carrying the printed hand-over whole also counts (`_handover_check.carries`): on a cloud session
+   those scripts name each document by its label alone, so the message links nothing. RESIDUAL: a
+   cloud closing message rewritten without the hand-over and without a path is not asked to attach.
 4. No delivery call after the build succeeded. A delivery before it (an inputs viewer) does not count.
 5. The host OFFERED a delivery tool: a name containing `present_files`, or `SendUserFile`, in the
    tool list the transcript records (a `prompt_snapshot` attachment's `tools`, or
@@ -26,11 +30,14 @@ WHEN IT ASKS -- all of these, read from the session transcript:
 
 from __future__ import annotations
 
+import importlib.util
+import os
 import re
 from typing import Any
 
 SHELL_TOOLS = ("Bash", "mcp__workspace__bash")
 _BUILD = re.compile(r"(?<![\w-])(?:compose_report|closing_message|cp_closing_message|fmr_closing_message)\.py\b")
+_CLOSER = re.compile(r"(?<![\w-])(?:closing_message|cp_closing_message|fmr_closing_message)\.py\b")
 _DELIVERABLE = re.compile(
     r"computer://\S+|(?:^|[\s(`\"'])/[^\s)`\"']+\.(?:md|html|pdf|xlsx)\b|\]\([^)]+\.(?:md|html|pdf|xlsx)\)",
     re.IGNORECASE | re.MULTILINE,
@@ -76,8 +83,20 @@ def offered_tool(rows: list[dict[str, Any]]) -> tuple[bool, str | None]:
     return seen, found
 
 
-def missing_delivery(rows: list[dict[str, Any]], start: int) -> str | None:
-    """The delivery tool to ask for, or None when nothing should be asked (see the module docstring)."""
+def _carries(printed: str, final: str) -> bool:
+    """`_handover_check.carries`, loaded by path: one owner of the containment rule."""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_handover_check.py")
+    spec = importlib.util.spec_from_file_location("_handover_check", path)
+    if spec is None or spec.loader is None:
+        raise ImportError(path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return bool(mod.carries(printed, final))
+
+
+def missing_delivery(rows: list[dict[str, Any]], start: int, printed: str | None = None) -> str | None:
+    """The delivery tool to ask for, or None when nothing should be asked (see the module docstring).
+    `printed` is the closing script's printed hand-over, when the caller found one."""
     if any(r.get("entrypoint") == "cli" for r in rows):
         return None
     results: dict[str, bool] = {}
@@ -88,6 +107,7 @@ def missing_delivery(rows: list[dict[str, Any]], start: int) -> str | None:
             if isinstance(b, dict) and b.get("type") == "tool_result" and isinstance(b.get("tool_use_id"), str):
                 results[b["tool_use_id"]] = bool(b.get("is_error"))
     build_at: int | None = None
+    closer = False
     for i in range(start, len(rows)):
         row = rows[i]
         if row.get("type") != "assistant" or row.get("isSidechain"):
@@ -99,6 +119,7 @@ def missing_delivery(rows: list[dict[str, Any]], start: int) -> str | None:
             command = str((b.get("input") or {}).get("command", ""))
             if isinstance(cid, str) and cid and _BUILD.search(command) and results.get(cid) is False:
                 build_at = i
+                closer = bool(_CLOSER.search(command))
     if build_at is None:
         return None
     texts: list[str] = []
@@ -122,7 +143,8 @@ def missing_delivery(rows: list[dict[str, Any]], start: int) -> str | None:
         t = _text(row)
         if t.strip():
             texts.append(t)
-    if not _DELIVERABLE.search("\n".join(texts)):
+    final = "\n".join(texts)
+    if not _DELIVERABLE.search(final) and not (closer and printed and _carries(printed, final)):
         return None
     seen, tool = offered_tool(rows)
     if not seen or tool is None:

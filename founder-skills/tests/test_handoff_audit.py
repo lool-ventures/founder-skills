@@ -155,3 +155,11 @@ def test_the_founder_wording_is_one_text_across_the_fleet() -> None:
             assert "HANDOFF_BYPASSED" in mod._UNACCEPTABLE_MEDIUM, skill
         # One copy of the text: no compose may keep its own.
         assert not hasattr(mod, "_bypass_message") and not hasattr(mod, "_BYPASS_SENTENCE"), skill
+
+
+def test_the_founder_wording_does_not_vouch_for_results_it_cannot_see() -> None:
+    """With the records folder gone, nothing shows how those steps ran, so the text may not claim the
+    results are unaffected; it says only that the missing record is not itself a sign of error."""
+    for text in (audit.VERDICT_SENTENCE, audit.founder_message(["the moat scoring"])):
+        assert "unaffected" not in text
+        assert "does not mean the results are wrong" in text

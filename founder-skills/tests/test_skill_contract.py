@@ -889,7 +889,9 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 104,703 -> 104,968 on 2026-10-04: The setup block ends by printing RUN_ID, STAGING_DIR and HANDOFF_DIR (each later
     # command runs in a fresh shell); the quick-check producer reads a fill-in heredoc instead of an undefined
     # $QUICK_JSON; the overwrite note names the no-delete rule, not a host refusal.
-    "market-sizing": 104_968,
+    # 104,968 -> 105,040 on 2026-10-04: the setup print also gives the hand-off dir's file-tool path, and
+    # labels the two: the shell path is for shell commands, the other for Read/Write.
+    "market-sizing": 105_040,
     # fmr raised for two founder-facing-correctness items measured in a live run: the CHECKLIST
     # dispatch now forbids citing our artifact filenames in evidence (that run put `inputs.json` in 10
     # items' evidence, printed verbatim into the founder's report), and the producer pipe passes
@@ -1350,7 +1352,9 @@ SKILL_MD_CEILING: dict[str, int] = {
     # one script that removes its own earlier-run checkpoints.
     # 111,455 -> 111,766 on 2026-10-04: Steps 3.6, 3.7 and 3.9 name `subagent_type: "founder-skills:deck-review"` (a
     # type-less dispatch falls back to the wildcard general-purpose agent).
-    "deck-review": 111_766,
+    # 111,766 -> 111,765 on 2026-10-04: Step 0's append-only exception says scripts remove only their own
+    # files (`setup_run.py --clean` is one; a failed atomic write removes its temp file too).
+    "deck-review": 111_765,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.

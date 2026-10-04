@@ -16,6 +16,8 @@ import urllib.error
 import urllib.request
 from typing import Any
 
+import pytest
+
 _SCRIPTS = os.path.join(
     os.path.dirname(__file__),
     "..",
@@ -1574,21 +1576,22 @@ def _blank(m: re.Match[str]) -> str:
 
 
 def _unguarded_api_fetches(js: str) -> list[str]:
-    """`/api/` fetches not inside the else branch of an `if (` test that names IS_STATIC (not negated)."""
+    """`/api/` fetches not inside the else branch of an `if (IS_STATIC)` or `if (IS_STATIC || ...)` test --
+    the two tests a static build always passes. A fetch in any quote counts."""
     code = _JS_STRIP.sub(_blank, js)
     stack: list[str] = []  # per open brace: "if-static", "if-other", "static-else" or "block"
     closed: str | None = None  # the kind of if-block just closed, while only whitespace/`else` follows
     out: list[str] = []
     i = 0
     while i < len(code):
-        if code.startswith('fetch("/api/', i) and "static-else" not in stack:
+        if re.match(r"fetch\(\s*[\"'`]/api/", code[i : i + 20]) and "static-else" not in stack:
             out.append(code[i : i + 30])
         c = code[i]
         if c == "{":
             before = code[max(0, i - 300) : i].rstrip()
             cond = re.search(r"\bif\s*\(([^{}]*)\)\s*$", before)
             if cond:
-                static = "IS_STATIC" in cond.group(1) and "!IS_STATIC" not in cond.group(1)
+                static = re.fullmatch(r"\s*IS_STATIC\s*(?:\|\|.*)?", cond.group(1), re.S) is not None
                 stack.append("if-static" if static else "if-other")
             elif re.search(r"\belse$", before) and closed == "if-static":
                 stack.append("static-else")
@@ -1611,7 +1614,7 @@ def test_every_api_fetch_in_the_static_page_is_in_an_is_static_else_branch() -> 
     assert rc == 0, stderr
     js = "\n".join(re.findall(r"<script>(.*?)</script>", html, re.S))
     assert "const IS_STATIC = true;" in js, "control: the static build bakes the flag in"
-    fetches = re.findall(r'fetch\("/api/[a-z]+', js)
+    fetches = re.findall(r"fetch\(\s*[\"'`]/api/[a-z]+", js)
     assert len(fetches) >= 2, f"control: expected the check and feedback fetches, found {fetches}"
     assert _unguarded_api_fetches(js) == []
 
@@ -1626,3 +1629,22 @@ def test_the_guard_check_catches_an_early_return_and_an_unguarded_fetch() -> Non
     assert len(_unguarded_api_fetches(early)) == 1
     assert len(_unguarded_api_fetches(bare)) == 1
     assert len(_unguarded_api_fetches(negated)) == 1
+
+
+def test_the_guard_check_takes_only_a_test_a_static_build_always_passes() -> None:
+    """`IS_STATIC && x` can be false in a static build, so its else branch runs there: not a guard. Only
+    `IS_STATIC` alone, or `IS_STATIC || ...`, is true whenever the page is static."""
+    conjunct = 'if (IS_STATIC && x) { a(); } else { fetch("/api/check", {}); }'
+    either = 'if (IS_STATIC || window.location.protocol === "file:") { a(); } else { fetch("/api/check", {}); }'
+    alone = 'if (IS_STATIC) { a(); } else { fetch("/api/check", {}); }'
+    assert len(_unguarded_api_fetches(conjunct)) == 1
+    assert _unguarded_api_fetches(either) == []
+    assert _unguarded_api_fetches(alone) == []
+
+
+@pytest.mark.parametrize("quote", ["'", "`"])
+def test_the_guard_check_sees_a_fetch_whatever_its_quote(quote: str) -> None:
+    bare = f"function g() {{ fetch({quote}/api/feedback{quote}, {{}}); }}"
+    guarded = f"if (IS_STATIC) {{ a(); }} else {{ fetch({quote}/api/check{quote}, {{}}); }}"
+    assert len(_unguarded_api_fetches(bare)) == 1
+    assert _unguarded_api_fetches(guarded) == []

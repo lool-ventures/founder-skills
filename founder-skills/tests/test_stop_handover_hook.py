@@ -688,3 +688,71 @@ def test_hand_over_and_delivery_failing_together_make_one_block_delivery_first(t
     reason = out["reason"]
     assert out["decision"] == "block"
     assert reason.index("mcp__cowork__present_files") < reason.index(LEAD) < reason.index(PRINTED.splitlines()[0])
+
+
+# On a cloud session the three closing scripts name each document by its label alone (the files arrive as
+# cards there, and a printed path could not be opened), so the final message links no file. For a closing
+# script's build the printed hand-over sent whole is what names the deliverables.
+CLOUD_PRINTED = (
+    "Here's your finished market sizing: the written report and the interactive page — the report opens "
+    "with the verdict.\n"
+    "\n"
+    "Your materials state TAM $80.0B; this analysis finds $7.0B (top-down) and $99.9B (bottom-up).\n"
+    "\n"
+    "If you want to keep the working data behind this — say so and I'll send it as a single archive.\n"
+)
+
+
+def _cloud_closer_rows(*after: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        _snapshot("mcp__workspace__bash", "mcp__cowork__present_files"),
+        _user("Size this market."),
+        _call_with_id("mcp__workspace__bash", CLOSING_CMD, "toolu_close"),
+        _result_for("toolu_close", CLOUD_PRINTED),
+        *after,
+    ]
+
+
+def test_a_cloud_closing_message_carrying_the_hand_over_is_asked_to_attach(tmp_path: Path) -> None:
+    assert not _load_hook()._load_delivery()._DELIVERABLE.search(CLOUD_PRINTED), "control: no link or path in it"
+    r = _run(tmp_path, _cloud_closer_rows(_assistant_text(CLOUD_PRINTED)))
+    out = json.loads(r.stdout)
+    assert out["decision"] == "block"
+    assert "mcp__cowork__present_files" in out["reason"] and "attach" in out["reason"]
+    assert LEAD not in out["reason"], "the hand-over itself was sent whole; only the delivery is asked for"
+
+
+def test_a_cloud_closing_message_after_a_delivery_call_passes(tmp_path: Path) -> None:
+    rows = _cloud_closer_rows(*_deliver("toolu_d"), _assistant_text(CLOUD_PRINTED))
+    r = _run(tmp_path, rows)
+    assert r.returncode == 0 and r.stdout == "" and r.stderr == "", r
+
+
+def test_a_report_built_after_the_closing_script_is_judged_on_its_own_links(tmp_path: Path) -> None:
+    """The hand-over counts for a closing script's build only: a report composed after it is the build
+    the message must point at."""
+    rows = _cloud_closer_rows(
+        _call_with_id("mcp__workspace__bash", COMPOSE_CMD, "toolu_compose"),
+        _result_for("toolu_compose", "{}"),
+        _assistant_text(CLOUD_PRINTED),
+    )
+    assert _run(tmp_path, rows).stdout == ""
+
+
+def test_a_closing_message_on_the_plain_cli_is_never_asked_to_attach(tmp_path: Path) -> None:
+    rows = _cloud_closer_rows(_assistant_text(CLOUD_PRINTED))
+    rows[0]["entrypoint"] = "cli"
+    assert _run(tmp_path, rows).stdout == ""
+
+
+def test_a_cloud_closing_message_is_not_asked_twice(tmp_path: Path) -> None:
+    rows = _cloud_closer_rows(_assistant_text(CLOUD_PRINTED))
+    assert _run(tmp_path, rows, {"stop_hook_active": True}).stdout == ""
+
+
+def test_a_cloud_closing_message_without_the_hand_over_is_not_asked_to_attach(tmp_path: Path) -> None:
+    """A message that neither links a file nor carries the printed hand-over names no deliverable (the
+    hand-over check speaks to it instead)."""
+    rows = _cloud_closer_rows(_assistant_text("The coaching step failed, so I stopped before delivering."))
+    out = json.loads(_run(tmp_path, rows).stdout)
+    assert "attach" not in out["reason"]

@@ -522,17 +522,93 @@ def test_deleting_the_handoff_dir_does_not_silence_the_gate(tmp_path: Path) -> N
     assert _compose_run(d).returncode == 0  # control: a recorded skip still satisfies it
 
 
-def test_a_review_or_skip_of_any_run_in_a_mixed_set_leaves_the_finding_to_stale_artifact(tmp_path: Path) -> None:
-    """When the artifacts disagree on the run, the gate must not hide STALE_ARTIFACT behind a refusal
-    that names the wrong cause."""
+def _refused(d: Path, r: subprocess.CompletedProcess[str]) -> None:
+    assert r.returncode == 1, f"composed (rc {r.returncode}) with no review or skip of this run: {r.stdout[-400:]}"
+    assert "record_red_team_skip.py" in r.stdout
+    assert not (d / "report.json").exists(), "a refusal must write nothing"
+
+
+def test_a_review_or_skip_of_another_run_in_a_mixed_set_is_refused(tmp_path: Path) -> None:
+    """The gate keys on the run id the report is resolved for (the first usable required artifact's),
+    the same id `resolve` and `skip_reason` use. A skip of some other id the set carries is not this
+    run's decision, and the refusal names the mixed set."""
     d = _analysis(tmp_path)
     _skip(d, RUN)
     land = json.loads((d / "landscape.json").read_text(encoding="utf-8"))
     land["metadata"]["run_id"] = "an-earlier-run"
     (d / "landscape.json").write_text(json.dumps(land), encoding="utf-8")
     r = _compose_run(d)
-    assert r.returncode == 0 and "record_red_team_skip.py" not in r.stdout, r.stdout[-600:]
+    _refused(d, r)
+    assert "more than one run" in r.stdout
+
+
+def _second_run_with_a_stale_checklist(tmp_path: Path, checklist: dict[str, Any] | None = None) -> Path:
+    """Run 1 reviewed; run 2 regenerated every artifact but the checklist and recorded no review or skip."""
+    d = _analysis(tmp_path)
+    assert _pipe(d, {"findings": []}).returncode == 0
+    _restamp(d, RUN_2)
+    ck = checklist if checklist is not None else json.loads((d / "checklist.json").read_text(encoding="utf-8"))
+    ck.setdefault("metadata", {})["run_id"] = RUN
+    (d / "checklist.json").write_text(json.dumps(ck), encoding="utf-8")
+    return d
+
+
+def test_an_earlier_runs_review_does_not_pass_a_set_with_one_artifact_left_from_it(tmp_path: Path) -> None:
+    """One required artifact still carrying run 1's id must not let run 1's review stand in for run 2's,
+    while the report shows no review and says none ran."""
+    d = _second_run_with_a_stale_checklist(tmp_path)
+    _refused(d, _compose_run(d))
+
+
+def test_an_earlier_runs_stub_does_not_pass_the_gate(tmp_path: Path) -> None:
+    """A stub (a step deliberately skipped) is no artifact: its run id must not satisfy the gate. Before
+    this, a stale stub let an earlier review through with no high warning, so --strict passed too."""
+    d = _second_run_with_a_stale_checklist(tmp_path, {"skipped": True, "reason": "not run"})
+    r = _compose_run(d)
+    _refused(d, r)
+    assert "more than one run id" not in r.stdout, "a stub's id was counted as a run's"
+    strict = subprocess.run(
+        [sys.executable, str(SCRIPTS / "compose_report.py"), "--dir", str(d), "--strict"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert strict.returncode == 1
+
+
+def test_a_mixed_set_reviewed_for_its_own_run_still_reaches_stale_artifact(tmp_path: Path) -> None:
+    """Control: when the review IS the run's, the gate passes and STALE_ARTIFACT names the leftover."""
+    d = _analysis(tmp_path)
+    assert _pipe(d, {"findings": []}).returncode == 0
+    ck = json.loads((d / "checklist.json").read_text(encoding="utf-8"))
+    ck["metadata"]["run_id"] = "an-earlier-run"
+    (d / "checklist.json").write_text(json.dumps(ck), encoding="utf-8")
+    r = _compose_run(d)
+    assert r.returncode == 0, r.stdout[-600:]
     assert "STALE_ARTIFACT" in (d / "report.json").read_text(encoding="utf-8")
+
+
+def test_the_review_shown_from_its_copy_satisfies_the_gate_after_redteam_json_is_deleted(tmp_path: Path) -> None:
+    """The review is kept in an append-only copy that outlives a delete of redteam.json; the gate reads
+    the shown review, so the run is not refused for a review it has."""
+    d = _analysis(tmp_path)
+    assert _pipe(d, {"findings": []}).returncode == 0
+    (d / "redteam.json").unlink()
+    r = _compose_run(d)
+    assert r.returncode == 0, r.stdout[-600:]
+
+
+def test_a_skip_record_off_the_closed_list_is_refused(tmp_path: Path) -> None:
+    """A recorded reason must be one of the closed list; any other string is not a decision."""
+    d = _analysis(tmp_path)
+    (d / "red_team_skip.json").write_text(
+        json.dumps({"reason": "felt_like_it", "_produced_by": "record_red_team_skip", "metadata": {"run_id": RUN}}),
+        encoding="utf-8",
+    )
+    r = _compose_run(d)
+    assert r.returncode == 1
+    assert "'felt_like_it', which is not a recognised reason" in r.stdout
+    assert not (d / "report.json").exists()
 
 
 # --- what the founder reads ---------------------------------------------------------------------------------

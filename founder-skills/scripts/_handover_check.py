@@ -34,13 +34,20 @@ def squash(text: str) -> str:
     return " ".join(_LINK_TARGET.sub("]()", text).split())
 
 
+def carries(printed: str, final: str) -> bool:
+    """Rule (1) alone: the printed text appears in the message as one contiguous run. The delivery
+    check reads this as "the message names the deliverables" (`_delivery_check.py`)."""
+    want = squash(printed)
+    return bool(want) and want in squash(final)
+
+
 def contained(printed: str, final: str) -> tuple[bool, str]:
     """(ok, reason). `reason` is empty when ok, otherwise one line naming which rule failed."""
     want = squash(printed)
     got = squash(final)
     if not want:
         return False, "the printed hand-over is empty"
-    if want not in got:
+    if not carries(printed, final):
         return False, "the printed hand-over was not sent whole"
     remainder = got.replace(want, "", 1)
     m = _DIGIT.search(remainder)

@@ -268,7 +268,7 @@ ANALYSIS_DIR_AGENT="<printed value>"   # e.g. inputs.json, validation.json, sizi
 # that is safe to both create and reclaim. Use the printed path verbatim in later steps.
 STAGING_DIR="$(mktemp -d "${TMPDIR:-/tmp}/market-sizing-${SLUG:-co}.staging.XXXXXX")"
 # Every later command runs in a fresh shell: copy these printed values verbatim into it.
-printf 'RUN_ID=%s\nSTAGING_DIR=%s\nHANDOFF_DIR=%s\n' "$RUN_ID" "$STAGING_DIR" "$HANDOFF_DIR"
+printf 'RUN_ID=%s\nSTAGING_DIR=%s\nHANDOFF_DIR=%s  # shell\nHANDOFF_AGENT=%s  # same dir, for Read/Write\n' "$RUN_ID" "$STAGING_DIR" "$HANDOFF_DIR" "$HANDOFF_AGENT"
 ```
 
 Pass `RUN_ID` to all sub-agents. Every artifact written to `$ANALYSIS_DIR` must include `"metadata": {"run_id": "$RUN_ID"}` at the top level. `compose_report.py` checks that all artifact run IDs match — a mismatch triggers a `STALE_ARTIFACT` high-severity warning, blocking under `--strict`.
