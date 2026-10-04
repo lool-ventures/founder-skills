@@ -184,6 +184,7 @@ def test_the_hook_passes_a_redo_carrying_the_producers_own_rejection(tmp_path: P
         "producer succeeded",
         "rewritten after the producer",
         "appended by the producer",
+        "appended by the shell after the producer",
     ],
 )
 def test_a_redo_whose_message_is_not_the_producers_rejection_is_held(tmp_path: Path, before: str) -> None:
@@ -201,6 +202,10 @@ def test_a_redo_whose_message_is_not_the_producers_rejection_is_held(tmp_path: P
             ("Edit", {"file_path": str(saved), "old_string": "a", "new_string": "b"}, "ok", False),
         ],
         "appended by the producer": [("Bash", {"command": f'{_PRODUCER} 2>> "{saved}"'}, "Exit code 1", True)],
+        "appended by the shell after the producer": [
+            failed,
+            ("Bash", {"command": f'echo "Note: round 2." >> "{saved}"'}, "", False),
+        ],
     }[before]
     rows, redo = _redo_rows(tmp_path, calls)
     held = _decide(tmp_path, rows, redo)

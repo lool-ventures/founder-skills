@@ -696,6 +696,15 @@ def test_an_oversized_result_saved_to_a_file_counts_when_read(tmp_path: Path) ->
 # --- the context line is matched whole -----------------------------------------------------------------
 
 
+@pytest.mark.parametrize(
+    "line", ["\u200bCONTEXT: RED_TEAM", "CONTEXT:\u200b RED_TEAM", "CONTEXT: RED\u200b_TEAM", "\ufeffCONTEXT: RED_TEAM"]
+)
+def test_an_invisible_character_inside_the_context_line_is_still_that_context(tmp_path: Path, line: str) -> None:
+    rows = [_user("Size my market."), *_printed(_GENERATED)]
+    steered = _STEERED.replace("CONTEXT: RED_TEAM\n", line + "\n")
+    assert "Send this as the prompt, unchanged" in _deny(_run(tmp_path, rows, steered))
+
+
 @pytest.mark.parametrize("suffix", [" (repair)", " (round 2)", " repair", "\u200b", " \u200b(r2)"])
 def test_a_suffix_on_a_generated_context_line_is_held_with_the_printed_prompt(tmp_path: Path, suffix: str) -> None:
     """A first line that opens with a generated prompt's context line but carries more (a word, a zero-width
