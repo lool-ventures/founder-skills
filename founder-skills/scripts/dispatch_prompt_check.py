@@ -595,13 +595,17 @@ def _notice(output_path: str) -> str:
 def rewrite_failed(rows: list[dict[str, Any]]) -> bool:
     """Whether a dispatch this hook rewrote reached its sub-agent with a prompt other than the printed one.
 
-    Which OUTPUT_PATHs were rewritten is read from rows the runtime writes for a hook's context (any row
-    but the model's own and a tool result, which the model can fill), never from a file."""
+    Which OUTPUT_PATHs were rewritten is read from the row the runtime writes for a hook's
+    additionalContext (`{"type": "attachment", "attachment": {"type": "hook_additional_context",
+    "content": [...]}}`), never from a tool result or a model turn, which the model can fill."""
     rewritten = set()
     for row in rows:
-        if row.get("isSidechain") or row.get("type") in ("assistant", "user"):
+        attachment = row.get("attachment")
+        if row.get("isSidechain") or row.get("type") != "attachment" or not isinstance(attachment, dict):
             continue
-        text = json.dumps(row)
+        if attachment.get("type") != "hook_additional_context":
+            continue
+        text = json.dumps(attachment.get("content"))
         for m in re.finditer(re.escape(REWRITE_MARKER) + r"\[(.+?)\] This dispatch was sent", text):
             rewritten.add(m.group(1))
     if not rewritten:

@@ -839,12 +839,22 @@ def test_the_rewrite_has_no_hold_budget(tmp_path: Path, monkeypatch: Any) -> Non
     assert out["permissionDecision"] == "allow" and out["updatedInput"]["prompt"] == _GENERATED
 
 
-# The self-check's rows are SYNTHETIC until a live probe records the real shapes: a non-model row the
-# runtime writes carrying the hook's notice, and the dispatch's result row with `toolUseResult.prompt`.
+# The self-check's rows follow the runtime's shapes as read from the CLI's code (the hook_additional_context
+# attachment row); the dispatch's result row with `toolUseResult.prompt` is SYNTHETIC until a live run
+# with the rewrite enabled records one.
 def _rewritten_rows(sent: str) -> list[dict[str, Any]]:
     mod = _hook()
     uid, use = _call("Agent", dict(_INPUT))
-    notice = {"type": "attachment", "attachment": {"content": mod._notice("agent/handoff/R/r2/redteam_output.json")}}
+    notice = {
+        "type": "attachment",
+        "attachment": {
+            "type": "hook_additional_context",
+            "content": [mod._notice("agent/handoff/R/r2/redteam_output.json")],
+            "hookName": "PreToolUse:Agent",
+            "toolUseID": uid,
+            "hookEvent": "PreToolUse",
+        },
+    }
     result = _result(uid, "done")
     result["toolUseResult"] = {"prompt": sent, "status": "completed"}
     return [_user("Size my market."), *_printed(_GENERATED), use, notice, result]
@@ -865,4 +875,8 @@ def test_a_notice_the_model_printed_is_not_a_rewrite_record() -> None:
     mod = _hook()
     rows = _rewritten_rows(_STEERED)
     forged = [r if r.get("type") != "attachment" else _result("toolu_x", json.dumps(r)) for r in rows]
-    assert mod.rewrite_failed(rows) and not mod.rewrite_failed(forged)
+    other = [
+        r if r.get("type") != "attachment" else {"type": "attachment", "attachment": {**r["attachment"], "type": "x"}}
+        for r in rows
+    ]
+    assert mod.rewrite_failed(rows) and not mod.rewrite_failed(forged) and not mod.rewrite_failed(other)
