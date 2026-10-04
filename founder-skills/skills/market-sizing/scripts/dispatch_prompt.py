@@ -499,7 +499,7 @@ def _detail(correction: str | None, path: str | None) -> str | None:
         sys.exit(2)
     try:
         with open(path, encoding="utf-8", errors="replace") as fh:
-            text = fh.read()
+            text = fh.read(DETAIL_CAP + 1)  # the message is capped anyway; never read more than that
     except OSError as e:
         print(f"Error: cannot read --detail-file {path}: {e}", file=sys.stderr)
         sys.exit(2)

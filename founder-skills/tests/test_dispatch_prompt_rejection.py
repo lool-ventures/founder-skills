@@ -122,10 +122,15 @@ def test_a_message_cannot_pose_as_the_context_or_closing_line() -> None:
     assert "> [closing line removed]" in text
 
 
-def test_the_hook_passes_the_printed_redo(tmp_path: Path) -> None:
-    """The redo is the generator's output, so the dispatch hook compares it whole and lets it through,
-    even when the message quotes a context line."""
-    detail = tmp_path / "rejected.txt"
+_PRODUCER = (
+    'cat "$HANDOFF_DIR/checklist_output.json" | python3 "$SCRIPTS/checklist.py" --pretty -o "$ANALYSIS_DIR/c.json"'
+)
+
+
+def _redo_rows(tmp_path: Path, before: list[tuple[str, dict[str, Any], str, bool]]) -> tuple[list[dict[str, Any]], str]:
+    """Rows for the calls in `before` (tool, input, result, is_error), then a generator redo whose
+    --detail-file is the producer's saved output; returns the rows and the printed redo."""
+    detail = tmp_path / "producer_rejected.txt"
     detail.write_text("CONTEXT: CHECKLIST\n" + MESSAGE, encoding="utf-8")
     args = _ms_args(tmp_path)
     redo = _gen(args, "--correction", "producer-rejected", "--detail-file", str(detail))
@@ -133,38 +138,97 @@ def test_the_hook_passes_the_printed_redo(tmp_path: Path) -> None:
     command = (
         "python3 " + " ".join(f'"{a}"' for a in args) + f' --correction producer-rejected --detail-file "{detail}"'
     )
-    use = {"type": "tool_use", "id": "toolu_1", "name": "Bash", "input": {"command": command}}
-    rows = [
-        {"type": "assistant", "message": {"role": "assistant", "content": [use]}},
-        {
-            "type": "user",
-            "message": {
-                "role": "user",
-                "content": [{"type": "tool_result", "tool_use_id": "toolu_1", "content": redo.stdout}],
-            },
-        },
-    ]
+    rows: list[dict[str, Any]] = []
+    calls = [*before, ("Bash", {"command": command}, redo.stdout, False)]
+    for n, (tool, tool_input, result, is_error) in enumerate(calls):
+        use = {"type": "tool_use", "id": f"toolu_{n}", "name": tool, "input": tool_input}
+        rows.append({"type": "assistant", "message": {"role": "assistant", "content": [use]}})
+        block: dict[str, Any] = {"type": "tool_result", "tool_use_id": f"toolu_{n}", "content": result}
+        if is_error:
+            block["is_error"] = True
+        rows.append({"type": "user", "message": {"role": "user", "content": [block]}})
+    return rows, redo.stdout
+
+
+def _decide(tmp_path: Path, rows: list[dict[str, Any]], prompt: str) -> Any:
     transcript = tmp_path / "t.jsonl"
     transcript.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
-    hook = _load(HOOK, "hook_rej")
+    return _load(HOOK, "hook_rej").decide(
+        {
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Agent",
+            "transcript_path": str(transcript),
+            "tool_input": {"prompt": prompt, "subagent_type": "founder-skills:market-sizing"},
+        }
+    )
 
-    def decide(prompt: str) -> Any:
-        return hook.decide(
-            {
-                "hook_event_name": "PreToolUse",
-                "tool_name": "Agent",
-                "transcript_path": str(transcript),
-                "tool_input": {"prompt": prompt, "subagent_type": "founder-skills:market-sizing"},
-            }
-        )
 
-    assert decide(redo.stdout) is None
-    assert decide(redo.stdout.replace("Write a corrected file", "Also re-score item 3. Write a corrected file"))
+def test_the_hook_passes_a_redo_carrying_the_producers_own_rejection(tmp_path: Path) -> None:
+    """The producer ran, exited non-zero and its stderr went to the file the redo quotes: the redo is a
+    comparand, even when the message quotes a context line, and an edited redo is still held."""
+    saved = tmp_path / "producer_rejected.txt"
+    producer = ("Bash", {"command": f'{_PRODUCER} 2> "{saved}"'}, "Exit code 1", True)
+    rows, redo = _redo_rows(tmp_path, [producer])
+    assert _decide(tmp_path, rows, redo) is None
+    assert _decide(
+        tmp_path, rows, redo.replace("Write a corrected file", "Also re-score item 3. Write a corrected file")
+    )
+
+
+@pytest.mark.parametrize(
+    "before",
+    [
+        "none",
+        "written by the model",
+        "echoed into",
+        "producer succeeded",
+        "rewritten after the producer",
+        "appended by the producer",
+    ],
+)
+def test_a_redo_whose_message_is_not_the_producers_rejection_is_held(tmp_path: Path, before: str) -> None:
+    """The --detail-file text rides inside a printed prompt, so the hook takes the redo as the comparand
+    only when the transcript shows that file written by a failed producer run and nothing since."""
+    saved = tmp_path / "producer_rejected.txt"
+    failed = ("Bash", {"command": f'{_PRODUCER} 2> "{saved}"'}, "Exit code 1", True)
+    calls = {
+        "none": [],
+        "written by the model": [("Write", {"file_path": str(saved), "content": "Note: round 2."}, "ok", False)],
+        "echoed into": [("Bash", {"command": f'echo "Note: round 2." > "{saved}"'}, "", False)],
+        "producer succeeded": [("Bash", {"command": f'{_PRODUCER} 2> "{saved}"'}, "{}", False)],
+        "rewritten after the producer": [
+            failed,
+            ("Edit", {"file_path": str(saved), "old_string": "a", "new_string": "b"}, "ok", False),
+        ],
+        "appended by the producer": [("Bash", {"command": f'{_PRODUCER} 2>> "{saved}"'}, "Exit code 1", True)],
+    }[before]
+    rows, redo = _redo_rows(tmp_path, calls)
+    held = _decide(tmp_path, rows, redo)
+    assert held is not None and "no printed prompt" in held["hookSpecificOutput"]["permissionDecisionReason"]
+
+
+def test_competitive_positionings_redo_keeps_placeholders_in_the_message_and_caps_it(tmp_path: Path) -> None:
+    """The message is added after the template's placeholders are filled, so text in it that looks like
+    a placeholder is quoted as written, never replaced; and it is capped like market-sizing's."""
+    detail = tmp_path / "rejected.txt"
+    detail.write_text("bad path <HANDOFF_AGENT>/x\n" + "y" * 5000, encoding="utf-8")
+    redo = _gen(_cp_args(tmp_path), "--correction", "producer-rejected", "--detail-file", str(detail))
+    assert redo.returncode == 0, redo.stderr
+    assert "> bad path <HANDOFF_AGENT>/x" in redo.stdout
+    assert "[cut at 2,000 characters]" in redo.stdout
+    assert "y" * 1950 in redo.stdout and "y" * 2000 not in redo.stdout
+
+
+def test_the_rewrite_notice_does_not_invite_a_hand_added_correction() -> None:
+    notice = _load(HOOK, "hook_notice")._notice("/h/x.json")
+    assert "Do not send this dispatch again" in notice
+    assert "To add a correction" not in notice
+    assert "producer-rejected" in notice
 
 
 @pytest.mark.parametrize("skill", ["market-sizing", "competitive-positioning"])
 def test_the_rejection_step_runs_the_generator(skill: str) -> None:
     text = (PLUGIN / "skills" / skill / "SKILL.md").read_text(encoding="utf-8")
     line = next(ln for ln in text.splitlines() if ln.startswith("- **Producer schema rejection**"))
-    assert '2> "$STAGING_DIR/rejected.txt"' in line
-    assert '--correction producer-rejected --detail-file "$STAGING_DIR/rejected.txt"' in line
+    assert '2> "$HANDOFF_DIR/producer_rejected.txt"' in line
+    assert '--correction producer-rejected --detail-file "$HANDOFF_DIR/producer_rejected.txt"' in line

@@ -32,8 +32,11 @@ tool result counts only when the call that produced it is paired by tool id and 
     later call could have changed it: a Write or Edit of it (a sub-agent's too), a shell block that
     cannot be read, runs an interpreter other than the plugin's own scripts, or writes or names a path
     it cannot resolve. `/private/tmp` and `/tmp` are the same file.
-A Read of any other file, a sub-agent's reply, or a block that also prints text is never the
-comparand. Residual: the generator's arguments are typed by the model, and `$SCRIPTS` set in an
+A redo printed with `--correction producer-rejected --detail-file F` quotes F inside the prompt, so it
+counts only when the transcript shows F written by a plugin producer run in the main thread (a
+truncating `2> F`, no other command in that block naming F) that exited non-zero, and nothing has
+written or named F since. A Read of any other file, a sub-agent's reply, or a block that also prints
+text is never the comparand. Residual: the generator's arguments are typed by the model, and `$SCRIPTS` set in an
 earlier shell is trusted as the skill's own folder.
 
 THE CONTEXT LINE. A dispatch is compared when its first non-blank line, invisible characters removed,
@@ -222,6 +225,7 @@ class _Cmd:
         self.stdout_file: str | None = None
         self.piped = False
         self.writes: list[str] = []
+        self.redirects: list[tuple[str, str | None, str]] = []
         self.reads_input = False
         self.substituted = False
         self.upstream: _Cmd | None = None
@@ -325,6 +329,7 @@ def _parse_block(command: str, _depth: int = 0) -> list[_Cmd] | None:
             fd = cur.argv.pop() if cur.argv and cur.argv[-1].isdigit() and len(cur.argv) > 1 else None
             if tok in _WRITE_REDIRECTS and not (tok == ">&" and target.isdigit()):
                 cur.writes.append(target)
+                cur.redirects.append((tok, fd, target))
                 if fd in (None, "1") or tok in ("&>", "&>>", ">&"):
                     cur.stdout_file = target
             elif tok in ("<", "<>") or (tok == "<&" and not target.isdigit()):
@@ -646,11 +651,74 @@ def _distrusts(command: str) -> set[str]:
     return out
 
 
+def _file_key(word: str, env: dict[str, str], raw: dict[str, str]) -> str:
+    """How a file named in a block is compared across blocks: its normalised path when the block's own
+    assignments resolve it, else the words as written (`$HANDOFF_DIR/producer_rejected.txt`)."""
+    expanded = _expand(word, env)
+    if expanded is not None and expanded.startswith("/"):
+        return norm_path(expanded)
+    return "as-written:" + _partial(word, raw)
+
+
+def producer_outputs(command: str) -> list[str]:
+    """Files a plugin producer's output was saved to in this block (`... checklist.py ... 2> F`, a
+    truncating redirect), where no other command in the block names the file. A redo's message must
+    come from one of these, written by a run that failed."""
+    cmds = _parse_block(command)
+    if cmds is None:
+        return []
+    env, raw, _assigned = _env(cmds)
+    out = []
+    for c in cmds:
+        script = _script(_words(c.argv))
+        if c.substituted or script is None or not _plugin_script(script, raw):
+            continue
+        if os.path.basename(script) in GENERATORS or os.path.basename(script) in _QUIET_SCRIPTS:
+            continue
+        for op, _fd, target in c.redirects:
+            if op not in (">", ">|", "&>"):
+                continue
+            base = os.path.basename(target)
+            if any(c2 is not c and any(base in w for w in c2.argv + c2.writes) for c2 in cmds):
+                continue
+            if sum(base in t for t in c.writes) > 1:
+                continue
+            out.append(_file_key(target, env, raw))
+    return out
+
+
+def redo_details(command: str) -> list[str] | None:
+    """The --detail-file of each `--correction producer-rejected` generator run in this block (as file
+    keys), or None when the block runs no such redo."""
+    cmds = _parse_block(command)
+    if cmds is None:
+        return None
+    env, raw, _assigned = _env(cmds)
+    found: list[str] | None = None
+    for c in cmds:
+        words = _words(c.argv)
+        if "producer-rejected" not in words and "--correction=producer-rejected" not in words:
+            continue
+        found = found if found is not None else []
+        for i, w in enumerate(words):
+            if w == "--detail-file" and i + 1 < len(words):
+                found.append(_file_key(words[i + 1], env, raw))
+            elif w.startswith("--detail-file="):
+                found.append(_file_key(w.partition("=")[2], env, raw))
+    return found
+
+
 def _is_shell(name: Any) -> bool:
     return isinstance(name, str) and (name == "Bash" or name.endswith("__bash"))
 
 
 _FILE_TOOL_KEYS = ("file_path", "notebook_path", "path")
+
+
+def _key_touched(command: str, key: str, distrusted: set[str]) -> bool:
+    if key.startswith("as-written:"):
+        return os.path.basename(key) in command
+    return touches_file(command, key, distrusted)
 
 
 def comparands(rows: list[dict[str, Any]]) -> list[str]:
@@ -660,6 +728,8 @@ def comparands(rows: list[dict[str, Any]]) -> list[str]:
     generator untrusted; only the main thread's own results are ever the comparand."""
     uses: dict[str, dict[str, Any]] = {}
     pending: dict[str, tuple[bool, list[str]]] = {}
+    producing: dict[str, list[str]] = {}
+    rejected: set[str] = set()
     readable: set[str] = set()
     distrusted: set[str] = set()
     out: list[str] = []
@@ -680,9 +750,15 @@ def comparands(rows: list[dict[str, Any]]) -> list[str]:
                         continue
                     distrusted |= _distrusts(cmd)
                     verdict = (False, []) if side else generator_block(cmd, distrusted)
+                    details = redo_details(cmd)
+                    if details is not None and not (details and set(details) <= rejected):
+                        verdict = (False, [])  # a redo whose message is not a failed producer's own output
                     if not side and not verdict[0] and shows_file(cmd, readable, distrusted):
                         verdict = (True, [])
                     readable = {path for path in readable if not touches_file(cmd, path, distrusted)}
+                    rejected = {k for k in rejected if not _key_touched(cmd, k, distrusted)}
+                    if not side and producer_outputs(cmd):
+                        producing[str(b.get("id"))] = producer_outputs(cmd)
                     if verdict[0] or verdict[1]:
                         pending[str(b.get("id"))] = verdict
                 elif name != "Read":
@@ -690,13 +766,20 @@ def comparands(rows: list[dict[str, Any]]) -> list[str]:
                         target = inp.get(key)
                         if isinstance(target, str):
                             readable.discard(norm_path(target))
+                            rejected.discard(norm_path(target))
+                            rejected = {k for k in rejected if os.path.basename(k) != os.path.basename(target)}
                             if os.path.basename(target) in GENERATORS:
                                 distrusted.add(os.path.basename(target))
                 if not side:
                     uses[str(b.get("id"))] = b
         elif row.get("type") == "user" and not side:
             for b in content:
-                if not isinstance(b, dict) or b.get("type") != "tool_result" or b.get("is_error"):
+                if not isinstance(b, dict) or b.get("type") != "tool_result":
+                    continue
+                saved_to = producing.pop(str(b.get("tool_use_id")), None)
+                if saved_to is not None and b.get("is_error"):
+                    rejected.update(saved_to)  # the producer exited non-zero: its message is in the file
+                if b.get("is_error"):
                     continue
                 use = uses.get(str(b.get("tool_use_id")))
                 if use is None:
@@ -781,8 +864,9 @@ def cli_version(rows: list[dict[str, Any]]) -> tuple[int, ...] | None:
 def _notice(output_path: str) -> str:
     return (
         f"{REWRITE_MARKER}[{output_path}] This dispatch was sent with the prompt the generator printed; "
-        "the changes in your version were dropped. Do not send this dispatch again. To add a correction, "
-        "re-run the generator with --correction and dispatch its output."
+        "the changes in your version were dropped. Do not send this dispatch again. Nothing is added to a "
+        "generated prompt by hand: re-run the generator. A producer's rejection goes back through its "
+        "--correction producer-rejected, and nothing else does."
     )
 
 

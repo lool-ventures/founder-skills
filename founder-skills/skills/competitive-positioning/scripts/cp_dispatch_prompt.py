@@ -430,15 +430,17 @@ def render(
         if job
         else ""
     )
-    if correction is not None:
-        text = text.replace(_END, f"{_correction_line(correction, detail)}\n{_END}")
-    return (
+    text = (
         text.replace("<HANDOFF_AGENT>", handoff_agent.rstrip("/"))
         .replace("<ANALYSIS_DIR_AGENT>", analysis_dir_agent.rstrip("/"))
         .replace("<SCORING_BASIS>", scoring_basis)
         .replace("<JOB_TO_BE_DONE>", job_line)
         .replace("<RUN_ID>", run_id)
     )
+    # Added last, as market-sizing does: text in the message is quoted as written, never filled in.
+    if correction is not None:
+        text = text.replace(_END, f"{_correction_line(correction, detail)}\n{_END}")
+    return text
 
 
 # --- RED_TEAM ------------------------------------------------------------------------------------------
@@ -606,7 +608,7 @@ def _detail(correction: str | None, path: str | None) -> str | None:
         sys.exit(2)
     try:
         with open(path, encoding="utf-8", errors="replace") as fh:
-            text = fh.read()
+            text = fh.read(DETAIL_CAP + 1)  # the message is capped anyway; never read more than that
     except OSError as e:
         print(f"Error: cannot read --detail-file {path}: {e}", file=sys.stderr)
         sys.exit(2)

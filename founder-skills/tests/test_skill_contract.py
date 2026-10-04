@@ -894,7 +894,9 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 105,040 -> 105,301 on 2026-10-04: a producer rejection of a generated prompt's hand-off is sent back
     # through the generator (`--correction producer-rejected --detail-file`), whose output the dispatch hook
     # compares, instead of a typed repair the hook would hold.
-    "market-sizing": 105_301,
+    # 105,301 -> 105,319 on 2026-10-04: the producer's rejection is saved under the run's hand-off dir
+    # (`$HANDOFF_DIR/producer_rejected.txt`), the file the dispatch hook checks the redo against.
+    "market-sizing": 105_319,
     # fmr raised for two founder-facing-correctness items measured in a live run: the CHECKLIST
     # dispatch now forbids citing our artifact filenames in evidence (that run put `inputs.json` in 10
     # items' evidence, printed verbatim into the founder's report), and the producer pipe passes
@@ -1503,7 +1505,8 @@ SKILL_MD_CEILING: dict[str, int] = {
     # agent); the sentence a removed reminder had cut in half is whole again.
     # 127,516 -> 127,748 on 2026-10-04: a producer rejection of a generated prompt's hand-off is sent back
     # through its generator (`--correction producer-rejected --detail-file`); see market-sizing above.
-    "competitive-positioning": 127_748,
+    # 127,748 -> 127,766 on 2026-10-04: the rejection file moves under the hand-off dir; see market-sizing.
+    "competitive-positioning": 127_766,
     # cap-table, the largest raise (+2,383 B) and the one with the most founder-visible payoff:
     #   * Main-Thread Return named THREE of the four files Step 12 copies; a live run delivered exactly
     #     three and dropped `{Company}_Cap_Table.html`. All four are now named explicitly.
