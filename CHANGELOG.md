@@ -5,7 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.15.2] - 2026-10-04 — Cloud closing messages without dead paths, and reports that say which steps went unchecked
+
+### Highlights
+
+**On a cloud session, the closing message no longer lists file paths you cannot open.** Market
+sizing, competitive positioning and financial model review now name each document beside the file
+card it arrives as. In a terminal the paths stay, since there they are how you find the files.
+
+**A report now says most of the steps that were not checked even when the run's working records are
+missing.** Every skill used to fall silent in that case. Competitive positioning also refuses a report
+with neither an outside review nor a recorded reason for skipping one, even when that folder is
+missing.
 
 ### Changed
 
@@ -20,43 +31,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **Market sizing, competitive positioning and financial model review: on a cloud session the closing
   message names each document without a path.** The documents arrive as file cards there, and the
   paths printed beside them could not be opened. In a terminal the paths stay, since there they are
-  how you find the files. Until a later release, a cloud run of these three that ends without
-  attaching its documents can be reminded to attach them only when its closing message carries the
-  summary as printed.
+  how you find the files. A cloud closing message that drops part of the printed summary and names no
+  file is not yet reminded to attach documents it did not send.
 - **Competitive positioning: the quality checklist reads how the analysis started (from a deck, a
   document or a conversation) from the saved profile.** It was told to use a value set several steps
   earlier, which does not carry over, so a deck or document analysis could be graded as a
   conversation.
-- **Competitive positioning: an outside review, or a recorded reason for skipping one, counts only for
-  the run the report is built for.** When part of the analysis was left over from an earlier run, that
-  run's review could let a report through that showed no review and did not say none ran. The report
-  is now refused until this run's review runs or the reason it did not is recorded.
+- **Competitive positioning: a report with no outside review and no recorded reason for skipping one
+  is refused even when the run's working-records folder is missing.** Without that folder, the report
+  could go out showing no review and without saying none ran.
 - **Deck review: the steps that check the deck's figures now name the deck-review reviewer.** Three of
   them did not say which reviewer to use, so they could run in a general-purpose one without this
   skill's rules.
-- **Market sizing, competitive positioning and IC simulation print the run's identifiers when they
-  set up a run**, and the quick checks in market sizing, competitive positioning and financial model
+- **Market sizing, competitive positioning and IC simulation print the run's ID and working folders
+  when they set up a run**, and the quick checks in market sizing, competitive positioning and financial model
   review no longer refer to a value that was never set.
 - **A missing working-records folder no longer hides most unchecked steps.** Every skill's report says
   which steps were not put through the check on their saved output; when the run's folder of those
   records was missing, the report used to say nothing. It now names those steps, except a cap table's
   readings of individual documents and competitive positioning's research on competitors you added,
-  which are found from that folder itself. Market sizing still notes when the offer to revise after a
-  serious challenge was not recorded. The note no longer says the results are unaffected, which it
+  which are found from that folder itself. Market sizing also now notes, even without the folder, when
+  the offer to revise after a serious challenge was not recorded. The note no longer says the results are unaffected, which it
   cannot know; it says the missing record alone does not mean they are wrong.
 
 ### Development
 
 Contributor-facing only; nothing here changes what a founder installs or runs.
 
+- The recorded test sessions were not refreshed for this release, so they do not yet exercise this
+  release's skill changes.
 - End-to-end test sessions no longer load account connectors, and each lane fails if one appears in
   the session's tools or in any tool call.
 - A test keeps any text, both READMEs included, from claiming the host refuses deletes under the
   outputs folder.
 - The financial model review page's live check is written in the branch a standalone page never
-  takes, as its corrections upload already was. Nothing changes in how the page behaves.
-- Tests check that every hook ships with the Python it runs, and that every server call on the
-  financial model review page, in any quoting, sits in the branch a standalone page never takes.
+  takes, as its corrections upload already was; nothing changes in how the page behaves. A test checks
+  that every server call on that page, in any quoting, sits in that branch.
+- Tests check that every hook ships with the Python it runs, that no skill step uses a value no step
+  sets, and that each setup step ends by printing the values later steps need.
 - The recorded-session delivery check now counts a write to a connected folder made from a cloud
   session, whose tool name carries a prefix the exact-name match missed.
 
