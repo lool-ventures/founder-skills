@@ -995,3 +995,14 @@ def test_another_plugins_agent_is_not_a_registered_pair(tmp_path: Path) -> None:
     assert mod.agent_name("other-plugin:market-sizing-redteam") is None
     assert mod.agent_name("founder-skills:market-sizing-redteam") == "market-sizing-redteam"
     assert mod.agent_name("market-sizing-redteam") == "market-sizing-redteam"
+
+
+def test_the_no_printed_prompt_hold_says_how_to_print_it(tmp_path: Path) -> None:
+    """The hold names the shape that counts: the generator in a call of its own or last in its block,
+    nothing printing after it, its output sent unchanged and not redirected away (a run redirected it to
+    /dev/null after the first hold and was held again)."""
+    reason = _deny(_run(tmp_path, [_user("Size my market.")], _GENERATED))
+    assert "no printed prompt" in reason
+    assert "shell call of its own" in reason and "last command of its block" in reason
+    assert "nothing after it" in reason
+    assert "do not redirect" in reason.lower()

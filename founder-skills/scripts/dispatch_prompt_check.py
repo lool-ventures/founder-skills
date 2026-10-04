@@ -1168,8 +1168,10 @@ def decide(payload: dict[str, Any]) -> dict[str, Any] | None:
         return None
     if printed is None:
         reason = (
-            f"{MARKER}[{output_path}] Held: this review round has no printed prompt yet. Run the prompt "
-            "generator for this round and send its output as the prompt, unchanged."
+            f"{MARKER}[{output_path}] Held: no printed prompt for this OUTPUT_PATH yet. Run the prompt "
+            "generator in a shell call of its own, or as the last command of its block, with nothing after it "
+            "that prints, and send the text it prints as the prompt, unchanged. Do not redirect its output "
+            "away: the printed text is what the dispatch is compared with."
         )
     else:
         reason = f"{MARKER}[{output_path}] Held: {reason_text}. Send this as the prompt, unchanged:\n\n{printed}"
