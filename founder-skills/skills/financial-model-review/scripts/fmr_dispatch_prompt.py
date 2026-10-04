@@ -262,6 +262,20 @@ def _detail(correction: str | None, path: str | None) -> str | None:
     return text
 
 
+def _refuse_empty(args: argparse.Namespace, flags: tuple[str, ...]) -> None:
+    """Exit 2 when a flag below was given an empty value. A shell that did not re-assign the variable a
+    flag is built from passes "", and the prompt then named a path such as `/checklist_output.json`."""
+    for flag in flags:
+        value = getattr(args, flag.lstrip("-").replace("-", "_"))
+        if value is not None and not value.strip():
+            print(
+                f"Error: {flag} is empty. Each shell starts fresh: set the variable it is built from in this "
+                "block, then run again.",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description="Print a financial-model-review dispatch prompt")
     p.add_argument("context", choices=["checklist"])
@@ -274,6 +288,7 @@ def main() -> None:
     )
     p.add_argument("--detail-file", help="producer-rejected: the file the producer's stderr was saved to")
     a = p.parse_args()
+    _refuse_empty(a, ("--run-id", "--handoff-agent", "--review-dir-agent", "--review-dir"))
     detail = _detail(a.correction, a.detail_file)
     if not os.path.isfile(os.path.join(a.review_dir, "inputs.json")):
         print(f"Error: no inputs.json in --review-dir {a.review_dir}; the checklist grades it", file=sys.stderr)

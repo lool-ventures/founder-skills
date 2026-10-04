@@ -79,8 +79,8 @@ def _fmr_args(tmp_path: Path) -> list[str]:
 GENERATORS = {"market-sizing": _ms_args, "competitive-positioning": _cp_args, "financial-model-review": _fmr_args}
 
 
-def _gen(args: list[str], *extra: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run([sys.executable, *args, *extra], capture_output=True, text=True, timeout=30)
+def _gen(args: list[str], *extra: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
+    return subprocess.run([sys.executable, *args, *extra], capture_output=True, text=True, timeout=30, cwd=cwd)
 
 
 @pytest.mark.parametrize("skill", sorted(GENERATORS))
@@ -326,3 +326,39 @@ def test_a_redo_after_a_real_rejection_is_accepted_in_the_shapes_runs_use(
 ) -> None:
     hook = _load(HOOK, "hook_shapes")
     assert (hook.latest_printed(_shell_rows(calls), "CONTEXT: CHECKLIST", "/h/o.json") is not None) is accepted
+
+
+# --- an empty identifier is refused, never printed ------------------------------------------------------
+
+# The flags each generator renders into the prompt or reads from disk. A shell that did not re-assign a
+# variable passes "" for it, and the prompt then said `OUTPUT_PATH: /checklist_output.json`.
+_RENDERED_FLAGS = {
+    "market-sizing": ("--run-id", "--analysis-dir", "--handoff-dir", "--handoff-agent"),
+    "competitive-positioning": ("--run-id", "--handoff-agent", "--analysis-dir-agent"),
+    "financial-model-review": ("--run-id", "--handoff-agent", "--review-dir-agent", "--review-dir"),
+}
+
+
+@pytest.mark.parametrize(("skill", "flag"), [(s, f) for s, flags in sorted(_RENDERED_FLAGS.items()) for f in flags])
+@pytest.mark.parametrize("value", ["", "  "])
+def test_an_empty_identifier_is_refused(tmp_path: Path, skill: str, flag: str, value: str) -> None:
+    args = GENERATORS[skill](tmp_path)
+    assert flag in args, (skill, flag)
+    args[args.index(flag) + 1] = value
+    r = _gen(args, cwd=tmp_path)  # a generator that does not refuse writes relative to its cwd
+    assert r.returncode == 2 and r.stdout == "", (skill, flag, r.returncode, r.stdout[:200])
+    assert flag in r.stderr and "empty" in r.stderr, r.stderr
+
+
+@pytest.mark.parametrize("flag", ["--analysis-dir-agent", "--review-docs-dir", "--review-docs-agent"])
+def test_market_sizing_refuses_an_optional_path_given_empty(tmp_path: Path, flag: str) -> None:
+    """Given and empty, --analysis-dir-agent fell back to the shell's own path, which a sub-agent's file
+    tools are refused on a local session."""
+    r = _gen(_ms_args(tmp_path), flag, "", cwd=tmp_path)
+    assert r.returncode == 2 and r.stdout == "" and flag in r.stderr, r.stderr
+
+
+def test_competitive_positioning_refuses_its_shell_paths_given_empty(tmp_path: Path) -> None:
+    for flag in ("--analysis-dir", "--handoff-dir"):
+        r = _gen(_cp_args(tmp_path), flag, "", cwd=tmp_path)
+        assert r.returncode == 2 and r.stdout == "" and flag in r.stderr, (flag, r.stderr)

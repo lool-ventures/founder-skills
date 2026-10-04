@@ -999,7 +999,10 @@ SKILL_MD_CEILING: dict[str, int] = {
     # $QUICK_JSON; the overwrite note names the no-delete rule, not a host refusal.
     # 87,076 -> 83,909 on 2026-10-04: the CHECKLIST prompt template moved into fmr_dispatch_prompt.py; Step 5
     # runs the generator and sends its output unchanged. The redo bullets name its --correction forms.
-    "financial-model-review": 83_909,
+    # 83,909 -> 84,142 on 2026-10-04: Step 5's block sets RUN_ID, HANDOFF_AGENT, REVIEW_DIR_AGENT and
+    # REVIEW_DIR again before the generator call. Each shell starts fresh, and an unset one rendered
+    # `OUTPUT_PATH: /checklist_output.json`; the generator now refuses an empty value.
+    "financial-model-review": 84_142,
     # ic-sim SHRANK: the REQUIRED ic-dynamics.md read at Step 7 is deleted. Step 7 is a pure producer
     # pipe — compose_discussion.py derives discussion.json from the partners' own files and nothing
     # is authored by the main thread — so the read informed no decision while pulling a whole

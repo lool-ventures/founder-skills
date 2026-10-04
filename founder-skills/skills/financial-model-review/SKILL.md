@@ -694,6 +694,11 @@ missing data yields `not_rated` / a partial-analysis stub, never a crash.
 unchanged — nothing added, removed or reworded, including on a re-run.
 
 ```bash
+# A fresh shell: set each value again from Step 0's printed output (an empty one is refused).
+RUN_ID="<Step 0 run id>"
+HANDOFF_AGENT="<Step 0 printed value>"
+REVIEW_DIR_AGENT="<Step 0 printed value>"
+REVIEW_DIR="<Step 0 review dir>"
 python3 "$SCRIPTS/fmr_dispatch_prompt.py" checklist --run-id "$RUN_ID" \
   --handoff-agent "$HANDOFF_AGENT" --review-dir-agent "$REVIEW_DIR_AGENT" --review-dir "$REVIEW_DIR"
 ```

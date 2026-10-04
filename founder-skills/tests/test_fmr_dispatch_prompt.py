@@ -147,3 +147,32 @@ def test_the_agent_body_carries_the_full_reference_path() -> None:
     text = (PLUGIN / "agents" / "financial-model-review.md").read_text(encoding="utf-8")
     section = text[text.index("#### CHECKLIST subtype") :]
     assert "`${CLAUDE_PLUGIN_ROOT}/skills/financial-model-review/references/checklist-criteria.md`" in section
+
+
+def _step5_generator_block() -> str:
+    import re
+
+    text = (PLUGIN / "skills" / "financial-model-review" / "SKILL.md").read_text(encoding="utf-8")
+    step = text[text.index("### Step 5: CHECKLIST Dispatch") : text.index("### Step 7:")]
+    return next(b for b in re.findall(r"^```bash\n(.*?)^```", step, re.MULTILINE | re.DOTALL) if GEN.name in b)
+
+
+def test_step_5_sets_every_variable_the_generator_call_uses() -> None:
+    """Each shell starts fresh: a variable Step 0 set is empty here unless this block sets it again, and
+    the generator refuses an empty one. SCRIPTS is the exception the dispatch hook needs: it trusts
+    `$SCRIPTS/<generator>` only when SCRIPTS was set in an earlier block."""
+    import re
+
+    block = _step5_generator_block()
+    call = block[block.index("python3 ") :]
+    used = set(re.findall(r'"\$([A-Z_]+)', call)) - {"SCRIPTS"}
+    assert used == {"RUN_ID", "HANDOFF_AGENT", "REVIEW_DIR_AGENT", "REVIEW_DIR"}, used
+    for name in used:
+        assert re.search(rf"^{name}=\"", block[: block.index("python3 ")], re.MULTILINE), name
+
+
+def test_step_5s_block_stays_the_hooks_comparand() -> None:
+    """The assignments are on the hook's allow-list, so the generator's output is still the comparand."""
+    hook = _load(HOOK, "hook_step5_fmr")
+    prints, _files = hook.generator_block(_step5_generator_block())
+    assert prints

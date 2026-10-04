@@ -618,6 +618,20 @@ def _detail(correction: str | None, path: str | None) -> str | None:
     return text
 
 
+def _refuse_empty(args: argparse.Namespace, flags: tuple[str, ...]) -> None:
+    """Exit 2 when a flag below was given an empty value. A shell that did not re-assign the variable a
+    flag is built from passes "", and the prompt then named a path such as `/checklist_output.json`."""
+    for flag in flags:
+        value = getattr(args, flag.lstrip("-").replace("-", "_"))
+        if value is not None and not value.strip():
+            print(
+                f"Error: {flag} is empty. Each shell starts fresh: set the variable it is built from in this "
+                "block, then run again.",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description="Print a competitive-positioning dispatch prompt")
     p.add_argument("context", choices=sorted([*_TEMPLATES, "red_team"]))
@@ -638,6 +652,7 @@ def main() -> None:
     )
     p.add_argument("--handoff-dir", help="the hand-off dir in THIS shell's namespace (red_team lists its docs/)")
     a = p.parse_args()
+    _refuse_empty(a, ("--run-id", "--handoff-agent", "--analysis-dir-agent", "--analysis-dir", "--handoff-dir"))
     detail = _detail(a.correction, a.detail_file)
     if a.context == "positioning_scoring" and not a.analysis_dir:
         print("Error: positioning_scoring needs --analysis-dir to read the job to be done", file=sys.stderr)

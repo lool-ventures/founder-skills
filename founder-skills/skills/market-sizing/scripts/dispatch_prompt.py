@@ -509,6 +509,20 @@ def _detail(correction: str | None, path: str | None) -> str | None:
     return text
 
 
+def _refuse_empty(args: argparse.Namespace, flags: tuple[str, ...]) -> None:
+    """Exit 2 when a flag below was given an empty value. A shell that did not re-assign the variable a
+    flag is built from passes "", and the prompt then named a path such as `/checklist_output.json`."""
+    for flag in flags:
+        value = getattr(args, flag.lstrip("-").replace("-", "_"))
+        if value is not None and not value.strip():
+            print(
+                f"Error: {flag} is empty. Each shell starts fresh: set the variable it is built from in this "
+                "block, then run again.",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description="Generate a sub-agent dispatch prompt from identifiers on disk")
     p.add_argument("context", choices=["red_team", "checklist"])
@@ -531,6 +545,18 @@ def main() -> None:
     )
     p.add_argument("--detail-file", help="producer-rejected: the file the producer's stderr was saved to")
     a = p.parse_args()
+    _refuse_empty(
+        a,
+        (
+            "--run-id",
+            "--analysis-dir",
+            "--handoff-dir",
+            "--handoff-agent",
+            "--analysis-dir-agent",
+            "--review-docs-dir",
+            "--review-docs-agent",
+        ),
+    )
     detail = _detail(a.correction, a.detail_file)
     if a.context == "checklist":
         try:
