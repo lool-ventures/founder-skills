@@ -287,3 +287,50 @@ def test_no_prescribed_shell_block_distrusts_a_generator() -> None:
     assert len(blocks) > 50, len(blocks)
     for skill, block in blocks:
         assert DPC._distrusts(block) == set(), (skill, block[:400])
+
+
+@pytest.mark.parametrize(
+    ("hook_root", "shell_root"),
+    [
+        ("/private/tmp/p/founder-skills", "/tmp/p/founder-skills"),
+        ("/tmp/p/founder-skills", "/private/tmp/p/founder-skills"),
+    ],
+)
+def test_the_hooks_own_folder_matches_under_either_spelling_of_tmp(
+    monkeypatch: Any, hook_root: str, shell_root: str
+) -> None:
+    """macOS spells one folder /tmp and /private/tmp; the hook's own folder is compared the same way."""
+    monkeypatch.setattr(DPC, "HOOK_PLUGIN_ROOT", hook_root)
+    assert DPC._installed_root(shell_root)
+    assert DPC._into_plugin(shell_root + "/skills/x.txt")
+
+
+def test_the_folder_the_runtime_loaded_our_skill_from_is_trusted() -> None:
+    """The runtime's own skill-load row names where it loaded the skill from; a generator there counts."""
+    root = "/opt/elsewhere/founder-skills"
+    meta = {
+        "type": "user",
+        "isMeta": True,
+        "message": {
+            "content": [{"type": "text", "text": f"Base directory for this skill: {root}/skills/market-sizing\n"}]
+        },
+    }
+    cmd = f"python3 {root}/{MS_SCRIPTS}/dispatch_prompt.py red_team"
+    assert DPC.comparands([meta, *_rows(("Bash", {"command": cmd}, PRINTED))]) == [PRINTED]
+    assert DPC.comparands(_rows(("Bash", {"command": cmd}, PRINTED))) == []
+    # Only a row the runtime marks as its own, and only for one of our skills.
+    typed = {**meta, "isMeta": False}
+    assert DPC.comparands([typed, *_rows(("Bash", {"command": cmd}, PRINTED))]) == []
+
+
+@pytest.mark.parametrize(
+    "block",
+    [
+        "cat > \"$SCRIPTS/dispatch_prompt.py\" <<'EOF'\nprint('x')\nEOF",
+        "python3 - <<'PY'\nopen('/x/skills/market-sizing/scripts/dispatch_prompt.py', 'w').write('x')\nPY",
+        'for f in a; do cp /tmp/a.py "$SCRIPTS/$f.py"; done',
+    ],
+)
+def test_a_block_the_parser_cannot_read_that_writes_into_the_plugin_distrusts(block: str) -> None:
+    rows = _rows(("Bash", {"command": block}, ""), ("Bash", {"command": GEN}, PRINTED))
+    assert DPC.comparands(rows) == [], block

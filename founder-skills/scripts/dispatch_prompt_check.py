@@ -483,7 +483,7 @@ def _installed_root(root: str) -> bool:
     if not root.startswith("/"):
         return False
     r = norm_path(root)
-    return r == HOOK_PLUGIN_ROOT or r in _SESSION_ROOTS or any(m in r + "/" for m in _INSTALL_MARKERS)
+    return r == norm_path(HOOK_PLUGIN_ROOT) or r in _SESSION_ROOTS or any(m in r + "/" for m in _INSTALL_MARKERS)
 
 
 def _trusted_generator(path: str, raw: dict[str, str], assigned: set[str], distrusted: set[str]) -> bool:
@@ -687,7 +687,7 @@ _WRITERS = frozenset({"cp", "mv", "ln", "install", "rsync", "tee", "dd", "trunca
 def _into_plugin(text: str) -> bool:
     if any(g in text for g in GENERATORS) or any(h in text for h in _PLUGIN_HINTS):
         return True
-    return text.startswith("/") and (norm_path(text) + "/").startswith(HOOK_PLUGIN_ROOT + "/")
+    return text.startswith("/") and (norm_path(text) + "/").startswith(norm_path(HOOK_PLUGIN_ROOT) + "/")
 
 
 def _distrusts(command: str) -> set[str]:
