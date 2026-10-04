@@ -21,7 +21,7 @@ dependencies = [
 # fixes the seed, but the GENERATOR is the library's -- a minor bump can change which examples are
 # drawn, so an unpinned hypothesis turns "this property held" into "this property held on whatever
 # examples CI happened to draw today", and a red would land on a commit that changed nothing.
-dev = ["ruff", "mypy==2.3.0", "pytest", "pyyaml", "types-openpyxl", "types-PyYAML", "claude-agent-sdk==0.1.80", "hypothesis==6.165.10"]
+dev = ["ruff", "mypy==2.3.0", "pytest", "pyyaml", "types-openpyxl", "types-PyYAML", "claude-agent-sdk==0.2.163", "hypothesis==6.165.10"]
 
 [tool.ruff]
 target-version = "py310"

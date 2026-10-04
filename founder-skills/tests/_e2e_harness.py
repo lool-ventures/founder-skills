@@ -131,6 +131,13 @@ def connector_isolation_options() -> dict[str, Any]:
     return {"mcp_servers": {}, "strict_mcp_config": True}
 
 
+# The CLI's built-in catch-all agent type `claude` carries every tool (`*`), so a dispatch that lands on
+# it reaches whatever the session can reach. No skill here dispatches it. The CLI reads `Task` as the old
+# name of `Agent` when it parses a rule, so the two entries name one rule; both are listed so the rule
+# holds whichever name a CLI version expects.
+CATCH_ALL_AGENT_DENY = ["Agent(claude)", "Task(claude)"]
+
+
 def _is_account_connector_server(server: Any) -> bool:
     name = server.get("name") if isinstance(server, dict) else server
     return isinstance(name, str) and re.sub(r"[^A-Za-z0-9_-]", "_", name).startswith("claude_ai_")
@@ -181,6 +188,11 @@ def build_options(workdir: Path, env_extra: dict[str, str] | None = None) -> Any
       `Exception: Claude Code returned an error result: success` — a contradiction that
       says nothing about the cause and costs ~8 minutes to reach. Read through
       `os.environ` rather than pinning, so a caller who sets it deliberately wins.
+
+    * Sub-agent text is not in the stream. From SDK 0.2 a sub-agent's tool calls and tool results arrive
+      (with `parent_tool_use_id` set to the dispatch), but its text and thinking blocks arrive only with
+      `forward_subagent_text=True`, which is left off. Nothing here reads sub-agent text: `text_after`
+      reads the main thread only.
     """
     from claude_agent_sdk import ClaudeAgentOptions
 
@@ -201,6 +213,7 @@ def build_options(workdir: Path, env_extra: dict[str, str] | None = None) -> Any
         # never touches -- and because production DOES offer it: tool allowlists are per-agent
         # there, so only the red-team agent receives it.
         allowed_tools=["Bash", "Read", "Write", "Edit", "Glob", "Grep", "Task", "Skill", "WebSearch"],
+        disallowed_tools=list(CATCH_ALL_AGENT_DENY),
         env={
             **os.environ,
             "CLAUDE_PLUGIN_ROOT": str(PLUGIN_PATH),
