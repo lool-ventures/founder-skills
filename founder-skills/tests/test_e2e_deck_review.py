@@ -34,11 +34,8 @@ available):
 
 This test skips only when NONE of the three are available.
 
-NOTE: as of v0.4.4 + claude-agent-sdk==0.1.80, the SDK invocation pattern
-below is documented but has NOT been empirically verified end-to-end. The
-test author should run Task 9 Step 1 (manual SDK verification) before
-treating this test as load-bearing CI signal. See the plan at
-docs/plans/2026-05-09-skill-quality-ci.md Task 9.
+The SDK version is pinned in pyproject.toml's dev extra; this lane builds its own
+options and message loop rather than using `_e2e_harness.py`.
 """
 
 from __future__ import annotations
@@ -131,10 +128,10 @@ def _summarize_sdk_message(msg: object) -> str:
                 elif tool_name == "Edit":
                     path = (tool_input or {}).get("file_path", "")
                     block_summaries.append(f"→ Edit: {path}")
-                elif tool_name == "Task":
+                elif tool_name in ("Task", "Agent"):
                     desc = (tool_input or {}).get("description", "")[:60]
                     sub = (tool_input or {}).get("subagent_type", "?")
-                    block_summaries.append(f"→ Task[{sub}]: {desc}")
+                    block_summaries.append(f"→ {tool_name}[{sub}]: {desc}")
                 elif tool_name == "Skill":
                     skill_name = (tool_input or {}).get("name", "?")
                     block_summaries.append(f"→ Skill: {skill_name}")

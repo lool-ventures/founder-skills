@@ -131,10 +131,10 @@ def connector_isolation_options() -> dict[str, Any]:
     return {"mcp_servers": {}, "strict_mcp_config": True}
 
 
-# The CLI's built-in catch-all agent type `claude` carries every tool (`*`), so a dispatch that lands on
-# it reaches whatever the session can reach. No skill here dispatches it. The CLI reads `Task` as the old
-# name of `Agent` when it parses a rule, so the two entries name one rule; both are listed so the rule
-# holds whichever name a CLI version expects.
+# Denies the CLI's built-in agent type named `claude`, which carries every tool (`*`); no skill here
+# dispatches it. Only that type: a dispatch that names no type falls back to `general-purpose`, which this
+# leaves open. The CLI reads `Task` as the old name of `Agent` when it parses a rule, so the two entries
+# name one rule; both are listed so the rule holds whichever name a CLI version expects.
 CATCH_ALL_AGENT_DENY = ["Agent(claude)", "Task(claude)"]
 
 

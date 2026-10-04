@@ -405,3 +405,18 @@ def test_no_stop_hook_event_means_the_count_was_not_checked(harness: Any, tmp_pa
     cap = _run(harness, tmp_path, monkeypatch, [_init()])
     with pytest.raises(AssertionError, match="no Stop hook event"):
         harness.assert_stop_block_evidence_agrees(cap)
+
+
+def test_the_deck_review_progress_line_names_a_dispatch_under_either_tool_name() -> None:
+    from claude_agent_sdk import AssistantMessage, ToolUseBlock
+
+    if str(TESTS) not in sys.path:
+        sys.path.insert(0, str(TESTS))
+    spec = importlib.util.spec_from_file_location("_capture_deck_lane", TESTS / "test_e2e_deck_review.py")
+    assert spec and spec.loader
+    lane = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(lane)
+    for name in ("Task", "Agent"):
+        block = ToolUseBlock(id="d", name=name, input={"description": "score slides", "subagent_type": "probe"})
+        line = lane._summarize_sdk_message(AssistantMessage(content=[block], model="m"))
+        assert f"→ {name}[probe]: score slides" in line, line
