@@ -22,6 +22,7 @@ run only from `skill-quality.yml` (tag push or manual dispatch).
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import json
 import os
 import re
@@ -266,6 +267,9 @@ class RunCapture:
         self.model: str | None = None
         # Hook lifecycle events (`include_hook_events`): {"event", "subtype", "stdout", "exit_code", "outcome"}.
         self.hook_events: list[dict[str, Any]] = []
+        # The stream as transcript-shaped rows (the shape the plugin's hooks read), in stream order: an
+        # assistant row per tool call or text, a user row per result. `isSidechain` marks a sub-agent's.
+        self.rows: list[dict[str, Any]] = []
 
     def calls(self, name: str, *, parent: str | None = None) -> list[dict[str, Any]]:
         """Tool calls by name; with `parent`, only those made inside that dispatch."""
@@ -341,6 +345,36 @@ def assert_stop_block_evidence_agrees(cap: RunCapture) -> None:
     )
 
 
+def _record_row(cap: RunCapture, msg: object) -> None:
+    """Append the transcript-shaped row for one assistant or user message."""
+    from claude_agent_sdk import AssistantMessage, TextBlock, ToolResultBlock, ToolUseBlock, UserMessage
+
+    if isinstance(msg, AssistantMessage):
+        blocks: list[dict[str, Any]] = []
+        for block in msg.content:
+            if isinstance(block, ToolUseBlock):
+                blocks.append({"type": "tool_use", "id": block.id, "name": block.name, "input": block.input})
+            elif isinstance(block, TextBlock):
+                blocks.append({"type": "text", "text": block.text})
+        row: dict[str, Any] = {"type": "assistant", "message": {"role": "assistant", "content": blocks}}
+    elif isinstance(msg, UserMessage):
+        content: Any = msg.content
+        if not isinstance(content, str):
+            content = [
+                {"type": "tool_result", "tool_use_id": b.tool_use_id, "content": b.content, "is_error": b.is_error}
+                if isinstance(b, ToolResultBlock)
+                else {"type": "text", "text": getattr(b, "text", "")}
+                for b in content
+            ]
+        row = {"type": "user", "message": {"role": "user", "content": content}}
+        if msg.tool_use_result is not None:
+            row["toolUseResult"] = msg.tool_use_result
+    else:
+        return
+    row["isSidechain"] = msg.parent_tool_use_id is not None
+    cap.rows.append(row)
+
+
 def record_message(cap: RunCapture, msg: object) -> None:
     """Fold one SDK message into the capture."""
     from claude_agent_sdk import (
@@ -354,6 +388,7 @@ def record_message(cap: RunCapture, msg: object) -> None:
     )
 
     cap.messages.append(str(msg))
+    _record_row(cap, msg)
     if isinstance(msg, AssistantMessage):
         for block in msg.content:
             if isinstance(block, ToolUseBlock):
@@ -427,14 +462,11 @@ def same_prompt(a: str, b: str) -> bool:
 
 
 # How a hold by the plugin's PreToolUse hooks reads in a dispatch's error result. Each check opens its
-# deny reason with its marker (dispatch_prompt_check / dispatch_type_check / two_figures_check), and the
-# CLI hands a deny reason through as written; a hook that exits 2 instead arrives as
-# "PreToolUse:<tool> hook error: <stderr>" (CLI 2.1.286). Any other error result is a failure.
+# deny reason with its marker (dispatch_prompt_check / dispatch_type_check / two_figures_check); CLI
+# 2.1.286 delivers it as "PreToolUse:Agent hook error: <reason>", and a hook that exits 2 arrives in the
+# same form with its stderr. Either counts as a hold. Any other error result is a failure.
 HOOK_HOLD_MARKERS = ("[dispatch-check][", "[dispatch-type][", "[two-figures-check][")
 _HOOK_ERROR_RE = re.compile(r"PreToolUse:(?:Agent|Task) hook error: ")
-PROMPT_END = "Do NOT write any file other than OUTPUT_PATH."
-_OUTPUT_PATH_RE = re.compile(r"^[ \t]*OUTPUT_PATH:[ \t]*(.+?)[ \t]*$", re.MULTILINE)
-_SHELL_TOOLS = frozenset({"Bash", "mcp__workspace__bash"})
 
 
 def _text_of(content: Any) -> str:
@@ -453,65 +485,65 @@ def is_hook_hold(result: dict[str, Any]) -> bool:
     )
 
 
-def output_path_of(prompt: str) -> str | None:
-    match = _OUTPUT_PATH_RE.search(prompt)
-    return match.group(1) if match else None
+_DISPATCH_HOOK = PLUGIN_PATH / "scripts" / "dispatch_prompt_check.py"
 
 
-def printed_prompts(stdout: str) -> list[str]:
-    """Every prompt in one generator call's output: from a `CONTEXT:` line through the closing line. A
-    compound block can print another script's output first."""
-    out: list[str] = []
-    for m in re.finditer(r"^CONTEXT:", stdout, re.MULTILINE):
-        end = stdout.find(PROMPT_END, m.start())
-        if end >= 0:
-            out.append(stdout[m.start() : end + len(PROMPT_END)] + "\n")
-    return out
+def dispatch_hook() -> Any:
+    """The plugin's dispatch-prompt check, loaded by path (plugin-root scripts are not a package)."""
+    spec = importlib.util.spec_from_file_location("_e2e_dispatch_prompt_check", _DISPATCH_HOOK)
+    assert spec is not None and spec.loader is not None, _DISPATCH_HOOK
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
 
-def printed_prompt_for(cap: RunCapture, dispatch: dict[str, Any], generator: str) -> str:
-    """The prompt the run's own generator call printed for this dispatch: the latest SUCCESSFUL main-thread
-    shell call naming `generator` before the dispatch whose printed OUTPUT_PATH is the dispatch's own.
-    Taken from the call's output as recorded, so nothing is re-run after the run. LookupError when none."""
-    path = output_path_of(str(dispatch["input"].get("prompt", "")))
-    position = next(i for i, t in enumerate(cap.tool_uses) if t["id"] == dispatch["id"])
-    found: str | None = None
-    for t in cap.tool_uses[:position]:
-        if t["name"] not in _SHELL_TOOLS or t["parent_tool_use_id"] is not None:
-            continue
-        if not re.search(rf"(?<![\w-]){re.escape(generator)}", str(t["input"].get("command", ""))):
-            continue
-        res = cap.result(str(t["id"]))
-        if res is None or res["is_error"]:
-            continue
-        structured = res.get("tool_use_result")
-        stdout = structured.get("stdout") if isinstance(structured, dict) else None
-        text = stdout if isinstance(stdout, str) and stdout.strip() else _text_of(res.get("content"))
-        for printed in printed_prompts(text):
-            if path is not None and output_path_of(printed) == path:
-                found = printed
-    if found is None:
-        raise LookupError(
-            f"no successful {generator} call before this dispatch printed a prompt for OUTPUT_PATH {path}"
+def printed_prompt_for(cap: RunCapture, dispatch: dict[str, Any], hook: Any = None) -> str:
+    """The comparand the dispatch hook would have held this dispatch to, by the hook's own rules.
+
+    The capture's rows up to (not including) the dispatch are handed to the hook's `latest_printed` for
+    the dispatch's context and OUTPUT_PATH, so which generator output counts (a block's shape, a file
+    read back, a failed run) is decided by the same code that decided the hold. The rows come from the
+    SDK stream, not the session file: the hook also reads skill-load rows to trust an installed plugin
+    folder, but here the plugin is this checkout, the folder the hook trusts as its own, so nothing it
+    needs is missing. LookupError when the hook would find no comparand."""
+    hook = hook or dispatch_hook()
+    prompt = str(dispatch["input"].get("prompt", ""))
+    context = hook.context_prefix(hook.first_line(prompt))
+    if context is None:
+        raise LookupError("the dispatch's first line is not a context the dispatch hook checks")
+    path = hook._output_path(prompt) or "?"
+    cut = len(cap.rows)
+    for index, row in enumerate(cap.rows):
+        ids = (
+            {b.get("id") for b in row["message"]["content"] if isinstance(b, dict)}
+            if row["type"] == "assistant"
+            else set()
         )
-    return found
+        if dispatch["id"] in ids:
+            cut = index
+            break
+    printed = hook.latest_printed(cap.rows[:cut], context, path)
+    if printed is None:
+        raise LookupError(f"the dispatch hook finds no printed prompt for {context} at OUTPUT_PATH {path}")
+    return str(printed)
 
 
-def dispatch_report(cap: RunCapture, dispatches: Sequence[dict[str, Any]], generator: str) -> dict[str, Any]:
-    """What happened to each of a step's dispatches, judged against the prompt the run's generator printed.
+def dispatch_report(cap: RunCapture, dispatches: Sequence[dict[str, Any]]) -> dict[str, Any]:
+    """What happened to each of a step's dispatches, judged against the comparand the dispatch hook uses.
 
     Per dispatch: held (a PreToolUse hold by the plugin's hooks), failed (any other error result),
-    succeeded, or no result at all; whether the prompt SENT (the tool call's input) equals the printed
-    one (`printed_prompt_for`), and for a success whether the prompt the sub-agent RECEIVED (the result's
+    succeeded, or no result at all; whether the prompt SENT (the tool call's input) equals the hook's
+    comparand (`printed_prompt_for`), and for a success whether the prompt the sub-agent RECEIVED (the result's
     `prompt`) does. A rewrite is a success whose sent prompt differs while the received one matches.
     """
     rows: list[dict[str, Any]] = []
+    hook = dispatch_hook()
     for d in dispatches:
         sent = str(d["input"].get("prompt", ""))
         res = cap.result(str(d["id"]))
         row: dict[str, Any] = {"id": d["id"], "status": "no_result", "sent_matches": None, "received": None}
         try:
-            expected: str | None = printed_prompt_for(cap, d, generator)
+            expected: str | None = printed_prompt_for(cap, d, hook)
         except LookupError as exc:  # reported, never raised: this is the report, not the gate
             expected = None
             row["regenerate_error"] = str(exc)

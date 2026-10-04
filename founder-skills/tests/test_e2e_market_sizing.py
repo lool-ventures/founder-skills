@@ -145,9 +145,9 @@ def test_market_sizing_smoke(tmp_path: Path) -> None:
     ]
     # Recorded before any assert, so a red leaves the same evidence a green does: how many dispatches
     # were held, which went through, and whether what was sent -- and what the reviewer received --
-    # is the prompt the run's own dispatch_prompt.py call printed for that hand-off path. A dispatch the
-    # hook held is not a failure (the model re-sends the printed prompt); any other error is.
-    report = dispatch_report(cap, dispatches, "dispatch_prompt.py")
+    # is the printed prompt the dispatch hook holds that hand-off path to, found by the hook's own rules.
+    # A dispatch the hook held is not a failure (the model re-sends the printed prompt); any other error is.
+    report = dispatch_report(cap, dispatches)
     report_text = format_dispatch_report("RED_TEAM", report)
     print(f"[e2e:market-sizing] dispatch report:\n{report_text}", flush=True)
     step_summary(f"### market-sizing e2e\n\n{report_text}\n")

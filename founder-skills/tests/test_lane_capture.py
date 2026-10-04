@@ -90,18 +90,41 @@ def _run(harness: Any, tmp_path: Path, monkeypatch: Any, stream: list[Any]) -> A
     return harness.run_skill_capture("probe", tmp_path, label="probe")
 
 
-PRINTED = "CONTEXT: PROBE\nOUTPUT_PATH: /x/out.json\nDo NOT write any file other than OUTPUT_PATH.\n"
-OTHER_PATH = PRINTED.replace("/x/out.json", "/y/out.json")
-HOLD = "[dispatch-check][/x/out.json] Held: the prompt differs. Send this as the prompt, unchanged:\n\n" + PRINTED
+# A registered context and a generator path under this plugin, so the dispatch hook's own rules (which
+# the report now uses) accept the generator's output as a comparand.
+SKILLS = TESTS.parent / "skills"
+MS_GENERATOR = "dispatch_prompt.py"
+GEN = str(SKILLS.joinpath("market-sizing", "scripts", MS_GENERATOR))
+FMR_SCRIPTS = str(SKILLS.joinpath("financial-model-review", "scripts"))
+PRINTED = (
+    "CONTEXT: RED_TEAM\nOUTPUT_PATH: /x/handoff/r1/redteam_output.json\nRUN_ID: r1\n"
+    "Do NOT write any file other than OUTPUT_PATH.\n"
+)
+OTHER_PATH = PRINTED.replace("/x/handoff/", "/y/handoff/")
+HOLD = (
+    "PreToolUse:Agent hook error: [dispatch-check][/x/handoff/r1/redteam_output.json] Held: the prompt differs. "
+    "Send this as the prompt, unchanged:\n\n" + PRINTED
+)
 
 
-def _generator(call: str, stdout: str, *, script: str = "dispatch_prompt.py", is_error: bool = False) -> list[Any]:
-    """A main-thread shell call to a prompt generator and its result."""
+def _shell(call: str, command: str, output: str, *, is_error: bool = False) -> list[Any]:
+    """A main-thread shell call and its result."""
     from claude_agent_sdk import AssistantMessage, ToolUseBlock
 
-    command = f'python3 "$SCRIPTS/{script}" probe --run-id "$RUN_ID"'
     use = AssistantMessage(content=[ToolUseBlock(id=call, name="Bash", input={"command": command})], model="m")
-    return [use, _result(call, is_error=is_error, content=stdout)]
+    return [use, _result(call, is_error=is_error, content=output)]
+
+
+def _generator(call: str, stdout: str, *, is_error: bool = False) -> list[Any]:
+    return _shell(call, f"python3 {GEN} red_team --run-id r1", stdout, is_error=is_error)
+
+
+def _read(call: str, path: str, text: str) -> list[Any]:
+    from claude_agent_sdk import AssistantMessage, ToolUseBlock
+
+    use = AssistantMessage(content=[ToolUseBlock(id=call, name="Read", input={"file_path": path})], model="m")
+    numbered = "".join(f"{n}\t{line}\n" for n, line in enumerate(text.splitlines(), 1))
+    return [use, _result(call, content=numbered)]
 
 
 def _stream() -> list[Any]:
@@ -152,6 +175,19 @@ def test_the_capture_records_each_result_by_its_call(harness: Any, tmp_path: Pat
     assert cap.unattributed_results == [{"tool_use_ids": ["a", "b"], "tool_use_result": {"prompt": "?"}}]
 
 
+def test_the_capture_keeps_transcript_shaped_rows_in_stream_order(
+    harness: Any, tmp_path: Path, monkeypatch: Any
+) -> None:
+    cap = _run(harness, tmp_path, monkeypatch, _stream())
+    kinds = [(r["type"], r["isSidechain"]) for r in cap.rows]
+    assert kinds[:4] == [("assistant", False), ("user", False), ("assistant", False), ("user", False)]
+    use = cap.rows[0]["message"]["content"][0]
+    assert (use["type"], use["id"], use["name"]) == ("tool_use", "gen", "Bash")
+    held = cap.rows[3]["message"]["content"][0]
+    assert (held["type"], held["tool_use_id"], held["is_error"]) == ("tool_result", "held", True)
+    assert ("assistant", True) in kinds and ("user", True) in kinds  # the sub-agent's call and result
+
+
 @pytest.mark.parametrize(("version", "expected"), [({"VERSION": "2.1.290"}, "2.1.290"), (None, None)])
 def test_the_cli_version_is_read_in_either_shape(
     harness: Any, tmp_path: Path, monkeypatch: Any, version: Any, expected: str | None
@@ -161,9 +197,7 @@ def test_the_cli_version_is_read_in_either_shape(
 
 def _report(harness: Any, tmp_path: Path, monkeypatch: Any, stream: list[Any]) -> dict[str, Any]:
     cap = _run(harness, tmp_path, monkeypatch, stream)
-    report: dict[str, Any] = harness.dispatch_report(
-        cap, [t for t in cap.tool_uses if t["name"] == "Agent"], "dispatch_prompt.py"
-    )
+    report: dict[str, Any] = harness.dispatch_report(cap, [t for t in cap.tool_uses if t["name"] == "Agent"])
     return report
 
 
@@ -181,7 +215,7 @@ def test_the_dispatch_report_tells_a_hold_from_a_failure(harness: Any, tmp_path:
     assert rows["lost"]["status"] == "no_result"
     assert report["succeeded_without_received_prompt"] == ["bare"]
     assert report["rewrites"] == 0
-    text = harness.format_dispatch_report("PROBE", report)
+    text = harness.format_dispatch_report("RED_TEAM", report)
     assert "NO RECEIVED PROMPT" in text and "bare" in text
     assert "1 failed" in text
     assert "CLI `2.1.286`" in text and "model `probe-model`" in text
@@ -190,67 +224,93 @@ def test_the_dispatch_report_tells_a_hold_from_a_failure(harness: Any, tmp_path:
 @pytest.mark.parametrize(
     "content",
     [
-        "[dispatch-type][/x/out.json] Held: a CONTEXT: PROBE dispatch goes to its own agent",
-        "[two-figures-check][TOP_DOWN] Before sizing, ask which figure to use",
-        "PreToolUse:Agent hook error: the hook exited 2",
+        HOLD,
+        "[dispatch-check][/x/handoff/r1/redteam_output.json] Held: no printed prompt for this OUTPUT_PATH yet.",
+        "[dispatch-type][/x/handoff/r1/redteam_output.json] Held: a CONTEXT: RED_TEAM dispatch goes to its own agent",
+        "PreToolUse:Agent hook error: [two-figures-check][TOP_DOWN] Before sizing, ask which figure to use",
+        "PreToolUse:Task hook error: the hook exited 2",
         [{"type": "text", "text": HOLD}],
     ],
 )
 def test_every_hook_hold_shape_reads_as_held(harness: Any, tmp_path: Path, monkeypatch: Any, content: Any) -> None:
-    stream = [
-        _init(),
-        *_generator("gen", PRINTED),
-        _dispatch("h", PRINTED + "x\n"),
-        _result("h", is_error=True, content=content),
-    ]
+    stream = [_init(), _dispatch("h", PRINTED + "x\n"), _result("h", is_error=True, content=content)]
     assert _rows(_report(harness, tmp_path, monkeypatch, stream))["h"]["status"] == "held"
 
 
-def test_the_printed_prompt_is_the_generator_calls_own_output(harness: Any, tmp_path: Path, monkeypatch: Any) -> None:
-    corrected = PRINTED.replace("Do NOT", "Your previous receipt was wrong.\nDo NOT")
+def test_the_comparand_is_read_back_from_a_redirected_generator(harness: Any, tmp_path: Path, monkeypatch: Any) -> None:
+    # The generator's output saved to a file in a block that prints other things, then read back.
     stream = [
         _init(),
-        # A compound block: another script's receipt is printed before the prompt.
-        *_generator("g1", '{"ocr_available": false}\n' + PRINTED),
-        # A later call for another hand-off path does not replace it.
+        *_shell("g", f"echo gate=0\npython3 {GEN} red_team --run-id r1 > /tmp/rt_prompt.txt", "gate=0\n"),
+        *_read("r", "/tmp/rt_prompt.txt", PRINTED),
+        _dispatch("d", PRINTED),
+        _result("d", structured={"prompt": PRINTED}),
+    ]
+    row = _rows(_report(harness, tmp_path, monkeypatch, stream))["d"]
+    assert row["sent_matches"] is True and row["received_matches"] is True
+
+
+def test_a_generator_folded_last_into_a_producer_block_is_a_comparand(
+    harness: Any, tmp_path: Path, monkeypatch: Any
+) -> None:
+    printed = PRINTED.replace("CONTEXT: RED_TEAM", "CONTEXT: CHECKLIST").replace("redteam_output", "checklist_output")
+    command = (
+        f"python3 {FMR_SCRIPTS}/unit_economics.py --run-id r1 -o /x/unit_economics.json\n"
+        f"python3 {FMR_SCRIPTS}/fmr_dispatch_prompt.py checklist --run-id r1 --handoff-agent /x/handoff/r1 "
+        "--review-dir-agent /x --review-dir /x"
+    )
+    stream = [
+        _init(),
+        *_shell("g", command, '{"ok": true, "path": "/x/unit_economics.json"}\n' + printed),
+        _dispatch("d", printed),
+        _result("d", structured={"prompt": printed}),
+    ]
+    assert _rows(_report(harness, tmp_path, monkeypatch, stream))["d"]["sent_matches"] is True
+
+
+def test_a_generator_followed_by_a_printing_step_gives_no_comparand(
+    harness: Any, tmp_path: Path, monkeypatch: Any
+) -> None:
+    # Not the last command: the hook does not accept the block, so the hold it makes is not a false hold.
+    stream = [
+        _init(),
+        *_shell("g", f"python3 {GEN} red_team --run-id r1\ncat /tmp/notes.txt", PRINTED + "notes\n"),
+        _dispatch("h", PRINTED),
+        _result("h", is_error=True, content=HOLD),
+    ]
+    report = _report(harness, tmp_path, monkeypatch, stream)
+    assert _rows(report)["h"]["sent_matches"] is None
+    assert "finds no printed prompt" in _rows(report)["h"]["regenerate_error"]
+    harness.assert_dispatch_outcomes(report, "RED_TEAM")
+
+
+def test_the_comparand_is_the_latest_accepted_output_before_the_dispatch(
+    harness: Any, tmp_path: Path, monkeypatch: Any
+) -> None:
+    corrected = PRINTED.replace("Do NOT", "Your previous receipt was wrong.\nDo NOT")
+    later = PRINTED.replace("/x/handoff/", "/z/handoff/")
+    stream = [
+        _init(),
+        *_generator("g1", PRINTED),
+        # A later call for another hand-off path does not replace it, nor does a failed call.
         *_generator("g2", OTHER_PATH),
-        # Nor does a failed call, nor another script's output.
         *_generator("g3", corrected, is_error=True),
-        *_generator("g4", corrected, script="closing_message.py"),
-        # A name that merely ends in the generator's is another generator.
-        *_generator("g4b", corrected, script="fmr_dispatch_prompt.py"),
         _dispatch("d1", PRINTED),
         _result("d1", structured={"prompt": PRINTED}),
-        # A redo: the latest successful call before the dispatch is what it is judged against.
+        # A redo: the latest accepted output before the dispatch is what it is judged against.
         *_generator("g5", corrected),
         _dispatch("d2", corrected),
         _result("d2", structured={"prompt": corrected}),
-        # A call after the dispatch is never used for it.
-        _dispatch("d3", PRINTED.replace("/x/", "/z/")),
-        _result("d3", structured={"prompt": "?"}),
-        *_generator("g6", PRINTED.replace("/x/", "/z/")),
+        # Output that only arrives after the dispatch is never used for it.
+        _dispatch("d3", later),
+        _result("d3", structured={"prompt": later}),
+        *_generator("g6", later),
     ]
     rows = _rows(_report(harness, tmp_path, monkeypatch, stream))
     assert rows["d1"]["sent_matches"] is True
     assert rows["d2"]["sent_matches"] is True and rows["d2"]["received_matches"] is True
     assert rows["d3"]["sent_matches"] is None
-    assert "/z/out.json" in rows["d3"]["regenerate_error"]
-
-
-def test_the_structured_stdout_is_preferred_over_the_rendered_result(
-    harness: Any, tmp_path: Path, monkeypatch: Any
-) -> None:
-    from claude_agent_sdk import AssistantMessage, ToolUseBlock
-
-    command = 'python3 "$SCRIPTS/dispatch_prompt.py" red_team'
-    stream = [
-        _init(),
-        AssistantMessage(content=[ToolUseBlock(id="g", name="Bash", input={"command": command})], model="m"),
-        _result("g", content="(output persisted to a file)", structured={"stdout": PRINTED, "stderr": ""}),
-        _dispatch("d", PRINTED),
-        _result("d", structured={"prompt": PRINTED}),
-    ]
-    assert _rows(_report(harness, tmp_path, monkeypatch, stream))["d"]["sent_matches"] is True
+    assert "/z/handoff/r1/redteam_output.json" in rows["d3"]["regenerate_error"]
 
 
 def test_a_rewritten_dispatch_is_counted_as_one(harness: Any, tmp_path: Path, monkeypatch: Any) -> None:
@@ -277,19 +337,19 @@ def test_dispatch_outcomes_fail_on_a_failure_or_a_held_printed_prompt(
         _dispatch("ok", PRINTED),
         _result("ok", structured={"prompt": PRINTED}),
     ]
-    harness.assert_dispatch_outcomes(_report(harness, tmp_path, monkeypatch, clean), "PROBE")
+    harness.assert_dispatch_outcomes(_report(harness, tmp_path, monkeypatch, clean), "RED_TEAM")
 
     # Held before any prompt was printed: a legitimate hold ("run the generator").
     early = [_init(), _dispatch("h", PRINTED), _result("h", is_error=True, content=HOLD)]
-    harness.assert_dispatch_outcomes(_report(harness, tmp_path, monkeypatch, early), "PROBE")
+    harness.assert_dispatch_outcomes(_report(harness, tmp_path, monkeypatch, early), "RED_TEAM")
 
     failed = [*clean, _dispatch("f", PRINTED), _result("f", is_error=True, content="API Error: overloaded")]
     with pytest.raises(AssertionError, match="failed"):
-        harness.assert_dispatch_outcomes(_report(harness, tmp_path, monkeypatch, failed), "PROBE")
+        harness.assert_dispatch_outcomes(_report(harness, tmp_path, monkeypatch, failed), "RED_TEAM")
 
     false_hold = [*clean, _dispatch("fh", PRINTED), _result("fh", is_error=True, content=HOLD)]
     with pytest.raises(AssertionError, match="held a dispatch that sent the printed prompt"):
-        harness.assert_dispatch_outcomes(_report(harness, tmp_path, monkeypatch, false_hold), "PROBE")
+        harness.assert_dispatch_outcomes(_report(harness, tmp_path, monkeypatch, false_hold), "RED_TEAM")
 
 
 def test_prompts_compare_with_whitespace_squashed(harness: Any) -> None:
@@ -303,32 +363,33 @@ def test_the_received_prompt_gate_ships_off(harness: Any) -> None:
 
 def test_the_gate_does_nothing_while_off(harness: Any, tmp_path: Path, monkeypatch: Any) -> None:
     report = _report(harness, tmp_path, monkeypatch, [_init(), _dispatch("x", "other"), _result("x", structured={})])
-    harness.assert_received_prompt(report, "PROBE")
-    harness.assert_received_prompt(report, "PROBE", enabled=False)
+    harness.assert_received_prompt(report, "RED_TEAM")
+    harness.assert_received_prompt(report, "RED_TEAM", enabled=False)
 
 
 def test_the_gate_judges_what_was_received(harness: Any, tmp_path: Path, monkeypatch: Any) -> None:
     gen = [_init(), *_generator("gen", PRINTED)]
+    gate = harness.assert_received_prompt
 
     rewritten = [*gen, _dispatch("rw", PRINTED + "added\n"), _result("rw", structured={"prompt": PRINTED})]
-    harness.assert_received_prompt(_report(harness, tmp_path, monkeypatch, rewritten), "PROBE", enabled=True)
+    gate(_report(harness, tmp_path, monkeypatch, rewritten), "RED_TEAM", enabled=True)
 
     altered = [*gen, _dispatch("al", PRINTED), _result("al", structured={"prompt": PRINTED + "added\n"})]
     with pytest.raises(AssertionError, match="did not receive the printed prompt"):
-        harness.assert_received_prompt(_report(harness, tmp_path, monkeypatch, altered), "PROBE", enabled=True)
+        gate(_report(harness, tmp_path, monkeypatch, altered), "RED_TEAM", enabled=True)
 
     unrecorded = [*gen, _dispatch("un", PRINTED), _result("un", structured={"status": "completed"})]
     with pytest.raises(AssertionError, match="no received prompt"):
-        harness.assert_received_prompt(_report(harness, tmp_path, monkeypatch, unrecorded), "PROBE", enabled=True)
+        gate(_report(harness, tmp_path, monkeypatch, unrecorded), "RED_TEAM", enabled=True)
 
     held_only = [*gen, _dispatch("h", PRINTED), _result("h", is_error=True, content=HOLD)]
     with pytest.raises(AssertionError, match="went through"):
-        harness.assert_received_prompt(_report(harness, tmp_path, monkeypatch, held_only), "PROBE", enabled=True)
+        gate(_report(harness, tmp_path, monkeypatch, held_only), "RED_TEAM", enabled=True)
 
     # No printed prompt to judge against: the failure names why.
     unprinted = [_init(), _dispatch("np", PRINTED), _result("np", structured={"prompt": PRINTED})]
-    with pytest.raises(AssertionError, match="no successful dispatch_prompt.py call"):
-        harness.assert_received_prompt(_report(harness, tmp_path, monkeypatch, unprinted), "PROBE", enabled=True)
+    with pytest.raises(AssertionError, match="finds no printed prompt"):
+        gate(_report(harness, tmp_path, monkeypatch, unprinted), "RED_TEAM", enabled=True)
 
 
 # --- the Stop hook's blocks, counted two independent ways ---------------------------------------------

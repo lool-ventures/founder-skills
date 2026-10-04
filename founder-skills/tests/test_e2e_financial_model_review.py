@@ -204,12 +204,12 @@ def test_financial_model_review_smoke(tmp_path: Path) -> None:
     captured = cap.messages
     review_dir = locate_review_dir(workdir, "financial-model-review-*", captured, "financial-model-review")
 
-    # The CHECKLIST dispatches against what the run's own fmr_dispatch_prompt.py call printed: recorded
+    # The CHECKLIST dispatches against the printed prompt the dispatch hook holds them to: recorded
     # before any assert, so a red leaves the same evidence a green does. Gated: no dispatch failed with
     # an error that is not a hook hold, and no hold caught the printed prompt; the outcome gate is off
     # by default. Whether the sent prompt matched is reported only.
     ck_dispatches = checklist_dispatches(cap.tool_uses)
-    ck_report = dispatch_report(cap, ck_dispatches, "fmr_dispatch_prompt.py")
+    ck_report = dispatch_report(cap, ck_dispatches)
     ck_report_text = format_dispatch_report("CHECKLIST", ck_report)
     print(f"[e2e:fmr] dispatch report:\n{ck_report_text}", flush=True)
     step_summary(f"### financial-model-review e2e: dispatches\n\n{ck_report_text}\n")
