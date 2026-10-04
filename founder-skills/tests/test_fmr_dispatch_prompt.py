@@ -176,3 +176,30 @@ def test_step_5s_block_stays_the_hooks_comparand() -> None:
     hook = _load(HOOK, "hook_step5_fmr")
     prints, _files = hook.generator_block(_step5_generator_block())
     assert prints
+
+
+@pytest.mark.parametrize(
+    ("model_format", "present"),
+    [("deck", False), ("conversational", False), ("spreadsheet", True), ("partial", True), (None, True)],
+)
+def test_the_arm_follows_this_runs_model_format_not_a_leftover_file(
+    tmp_path: Path, model_format: str | None, present: bool
+) -> None:
+    """The review folder is per company and reused, and model_data.json carries no run id: a spreadsheet
+    review's extraction is still there when the same company is reviewed again from a deck. inputs.json is
+    this run's, so a deck or conversational model gets the no-extraction sentence whatever is on disk.
+    A missing model_format is a spreadsheet, as the producers read it."""
+    import json
+
+    review = _review(tmp_path, model_data=True)
+    company = {"company_name": "Acme"} if model_format is None else {"model_format": model_format}
+    (review / "inputs.json").write_text(json.dumps({"company": company}), encoding="utf-8")
+    out = _gen(review, cwd=tmp_path).stdout
+    assert (PRESENT in out, ABSENT in out) == (present, not present), out[:600]
+
+
+def test_an_unreadable_inputs_json_is_refused(tmp_path: Path) -> None:
+    review = _review(tmp_path, model_data=True)
+    (review / "inputs.json").write_text("{not json", encoding="utf-8")
+    r = _gen(review, cwd=tmp_path)
+    assert r.returncode == 2 and r.stdout == "" and "inputs.json" in r.stderr

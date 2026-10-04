@@ -12,9 +12,10 @@ template's sentences. Printing from identifiers alone -- paths and the run id --
 write in. The shared PreToolUse hook (founder-skills/scripts/dispatch_prompt_check.py) holds a dispatch
 that differs from the printed prompt for its OUTPUT_PATH; SKILL.md does not depend on it.
 
-The template's one condition is decided here, not by the reader: whether the review has a
-model_data.json (a spreadsheet extraction) decides what the structural-error criterion rests on, so
-only the sentence that applies is printed.
+The template's one condition is decided here, not by the reader: whether this run's model came with a
+spreadsheet extraction (inputs.json's model_format is not deck or conversational, and model_data.json
+exists) decides what the structural-error criterion rests on, so only the sentence that applies is
+printed.
 
 Every prompt ends with the hook's closing line, "Do NOT write any file other than OUTPUT_PATH.",
 which is how the hook finds where a printed prompt ends.
@@ -40,6 +41,7 @@ invalid, or when the review folder holds no inputs.json.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import sys
@@ -210,6 +212,23 @@ def _correction_line(correction: str, detail: str | None) -> str:
     return CORRECTIONS[correction]
 
 
+# The formats with no spreadsheet extraction (schema-inputs.md `model_format`); a missing value is a
+# spreadsheet, as checklist.py and compose_report.py read it.
+NO_EXTRACTION_FORMATS = ("deck", "conversational")
+
+
+def has_extraction(inputs: object, review_dir: str) -> bool:
+    """Whether this run's model came with a spreadsheet extraction. The review folder is per company and
+    reused, and model_data.json carries no run id, so a file left by an earlier spreadsheet review of the
+    same company is still there when it is reviewed again from a deck. inputs.json is this run's: its
+    model_format decides first, and the file must also exist."""
+    company = inputs.get("company") if isinstance(inputs, dict) else None
+    model_format = company.get("model_format") if isinstance(company, dict) else None
+    if model_format in NO_EXTRACTION_FORMATS:
+        return False
+    return os.path.isfile(os.path.join(review_dir, "model_data.json"))
+
+
 def checklist(
     *,
     run_id: str,
@@ -290,15 +309,22 @@ def main() -> None:
     a = p.parse_args()
     _refuse_empty(a, ("--run-id", "--handoff-agent", "--review-dir-agent", "--review-dir"))
     detail = _detail(a.correction, a.detail_file)
-    if not os.path.isfile(os.path.join(a.review_dir, "inputs.json")):
+    inputs_path = os.path.join(a.review_dir, "inputs.json")
+    if not os.path.isfile(inputs_path):
         print(f"Error: no inputs.json in --review-dir {a.review_dir}; the checklist grades it", file=sys.stderr)
+        sys.exit(2)
+    try:
+        with open(inputs_path, encoding="utf-8") as fh:
+            inputs = json.load(fh)
+    except (OSError, ValueError) as e:
+        print(f"Error: cannot read inputs.json in --review-dir {a.review_dir}: {e}", file=sys.stderr)
         sys.exit(2)
     sys.stdout.write(
         checklist(
             run_id=a.run_id,
             handoff_agent=a.handoff_agent,
             review_dir_agent=a.review_dir_agent,
-            has_model_data=os.path.isfile(os.path.join(a.review_dir, "model_data.json")),
+            has_model_data=has_extraction(inputs, a.review_dir),
             correction=a.correction,
             detail=detail,
         )
