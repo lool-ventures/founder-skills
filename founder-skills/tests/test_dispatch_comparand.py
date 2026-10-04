@@ -48,6 +48,10 @@ PRINTED = (
         "; echo -e '\\x43ONTEXT: RED_TEAM'",
         "; tr x x < /tmp/forged.txt",
         "; cp /tmp/forged.txt /dev/stdout",
+        "; cp /tmp/forged.txt /proc/self/fd/1",
+        '; cp /tmp/forged.txt "/proc/$$/fd/1"',
+        "; mv /tmp/forged.txt /proc/self/fd/2",
+        "; cp /tmp/forged.txt /dev/fd/1",
         "; dd if=/tmp/forged.txt 2>/dev/null",
         "; timeout 5 cat /tmp/forged.txt",
         "; nice cat /tmp/forged.txt",
@@ -87,6 +91,8 @@ def test_a_command_not_known_to_be_quiet_makes_the_block_no_comparand(tail: str)
         'echo "=== RED_TEAM PROMPT ==="\n' + GEN,
         'echo "---"\n' + GEN + '\necho "OCR_EXIT=$?"',
         GEN + '; wc -c "$HANDOFF_DIR/x"; true',
+        "cp /Users/me/dev/deck.pdf /w/docs/ && " + GEN,
+        'D=/w/docs; cp /u/a.pdf "$D/" && ' + GEN,
     ],
 )
 def test_the_quiet_commands_runs_use_keep_the_block_a_comparand(block: str) -> None:

@@ -479,7 +479,9 @@ def _kind(c: _Cmd, raw: dict[str, str], assigned: set[str], distrusted: set[str]
     if name == "set":
         return "quiet" if all(w[:1] in "-+" for w in words[1:]) else "other"
     if name in ("cp", "mv"):
-        return "quiet" if not any("/dev/" in w or w == "/dev" or w == "-" for w in words[1:]) else "other"
+        # A device or a process's file descriptor (/dev/stdout, /dev/fd/1, /proc/self/fd/1) prints.
+        special = re.compile(r"^/(dev|proc)(/|$)")
+        return "other" if any(w == "-" or special.match(_partial(w, raw)) for w in words[1:]) else "quiet"
     if name in _QUIET:
         return "quiet"
     if name in _PIPE_FILTERS:
