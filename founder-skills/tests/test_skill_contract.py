@@ -997,7 +997,9 @@ SKILL_MD_CEILING: dict[str, int] = {
     # they now name the rule.
     # 86,996 -> 87,076 on 2026-10-04: The quick-check producer reads a fill-in heredoc instead of an undefined
     # $QUICK_JSON; the overwrite note names the no-delete rule, not a host refusal.
-    "financial-model-review": 87_076,
+    # 87,076 -> 83,909 on 2026-10-04: the CHECKLIST prompt template moved into fmr_dispatch_prompt.py; Step 5
+    # runs the generator and sends its output unchanged. The redo bullets name its --correction forms.
+    "financial-model-review": 83_909,
     # ic-sim SHRANK: the REQUIRED ic-dynamics.md read at Step 7 is deleted. Step 7 is a pure producer
     # pipe — compose_discussion.py derives discussion.json from the partners' own files and nothing
     # is authored by the main thread — so the read informed no decision while pulling a whole

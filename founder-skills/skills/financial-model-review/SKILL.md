@@ -436,11 +436,11 @@ printf '%s' '<agent final message verbatim>' | \
 Branch on the exit code (complete state machine — do not improvise):
 
 - **Exit 0** → pipe the file through the producer: `cat "$HANDOFF_DIR/<step>_output.json" | python3 "$SCRIPTS/<producer>.py" ...`
-- **Exit 3** (missing/empty file — receipt may be fabricated) → **redo-dispatch**: fresh Task, same prompt plus one line: "your receipt claimed a file at `<path>` but none exists; use Write to create exactly that path."
+- **Exit 3** (missing/empty file — receipt may be fabricated) → **redo-dispatch**: fresh Task, same prompt plus one line: "your receipt claimed a file at `<path>` but none exists; use Write to create exactly that path." For the generated CHECKLIST prompt, re-run `fmr_dispatch_prompt.py` with the same arguments plus `--correction missing-file` and send that output instead.
 - **Exit 4** (file exists, invalid JSON) → **repair-dispatch**: fresh Task: "Read `<OUTPUT_PATH>`; it fails JSON parsing with `<verbatim detail from the diagnostic>`; fix and rewrite it; return the receipt."
 - **Exit 5** (receipt echoes a different path) → **repair-dispatch** telling the agent the exact expected OUTPUT_PATH (it wrote somewhere else).
-- **Exit 6** (receipt unparseable / no `output_path` key) → **redo-dispatch** with "return ONLY the receipt JSON — no fences, no prose."
-- **Producer schema rejection** (the pipe fails next) → **repair-dispatch** with the producer's stderr verbatim.
+- **Exit 6** (receipt unparseable / no `output_path` key) → **redo-dispatch** with "return ONLY the receipt JSON — no fences, no prose." For the generated CHECKLIST prompt, use `--correction receipt-only`.
+- **Producer schema rejection** (the pipe fails next) → **repair-dispatch** with the producer's stderr verbatim. For the generated CHECKLIST prompt, re-run the failed pipe with `2> "$HANDOFF_DIR/producer_rejected.txt"`, then `fmr_dispatch_prompt.py` with the same arguments plus `--correction producer-rejected --detail-file "$HANDOFF_DIR/producer_rejected.txt"`, and send that output.
 - **Exit 8** (`path_namespace_mismatch`) → the sub-agent **complied**; the agent-namespace prefix was wrong. Its relative `OUTPUT_PATH` resolved against the outputs mount instead of the session root, so the file landed at the doubled path reported in `found_at`. Only a RELATIVE agent path can do this, so the Step 0 proof did not run: run it. Do NOT treat this as a fabricated receipt (that is exit 3), and do NOT read the hand-off from `found_at` — it is diagnostic only. Re-run `resolve_artifacts_root.py --agent`, rebuild the agent-namespace prefix from the printed value, and re-dispatch. Counts against the same 2-dispatch retry budget.
 - **Blocked `write_refused`** (the sub-agent's Write was refused — its path was relative or a `/sessions/...` path) → run the Step 0 proof if it did not run, rebuild the agent-namespace paths from the resolver, re-dispatch ONCE. A second `write_refused` STOPs with both details quoted.
 - **Any other exit** (script crash etc.) → STOP with the stderr.
@@ -688,69 +688,14 @@ missing data yields `not_rated` / a partial-analysis stub, never a crash.
 
 ### Step 5: CHECKLIST Dispatch (Context A)
 
-**Dispatch the financial-model-review sub-agent in Context A (CHECKLIST).** **Call the `Task` tool with `subagent_type: "founder-skills:financial-model-review"`** and the prompt below. Substitute `<HANDOFF_AGENT>` / `<REVIEW_DIR_AGENT>` with the agent-namespace values and `<RUN_ID>` with `$RUN_ID`; leave the `${CLAUDE_PLUGIN_ROOT}/...` reference path literal (same idiom as INPUTS_REVIEW).
+**Dispatch the financial-model-review sub-agent in Context A (CHECKLIST).** **Call the `Task` tool with `subagent_type: "founder-skills:financial-model-review"`.**
 
-**Dispatch prompt template:**
+**The prompt is printed, not written.** Run the generator and send the printed text as the prompt,
+unchanged — nothing added, removed or reworded, including on a re-run.
 
-```
-CONTEXT: CHECKLIST
-OUTPUT_PATH: <HANDOFF_AGENT>/checklist_output.json
-RUN_ID: <RUN_ID>
-
-You are the financial-model-review agent dispatched in Context A (CHECKLIST).
-Read inputs.json at <REVIEW_DIR_AGENT>/inputs.json.
-Also read model_data.json at <REVIEW_DIR_AGENT>/model_data.json when it exists — its
-`structural_errors` tally is the only evidence for the structural-error criterion, whose
-pass/warn/fail bars are defined entirely on broken cells. An empty tally means none were
-found; an ABSENT model_data.json (a conversational or deck-described model) means the
-evidence cannot exist, so mark that criterion not_applicable rather than guessing a pass.
-If a reference path below cannot be read (refused or not found), read the same file under the plugin folder your own instructions name.
-Also read ${CLAUDE_PLUGIN_ROOT}/skills/financial-model-review/references/checklist-criteria.md.
-Also read unit_economics.json and runway.json in the same directory when they exist:
-this review's computed figures. When an item turns on a burn multiple, runway, CAC
-payback, LTV/CAC or gross margin, use these figures; do not compute your own. For
-runway use the planning number: today's-burn runway (static_runway_months) when it is
-shorter than the base scenario or the base never runs out, else the base scenario's
-months. A metric rated contextual WITH a benchmark_reference_rating is graded on that
-reference rating. One rated contextual WITHOUT it was deliberately left ungraded: give
-that criterion `warn` and say why in plain words -- never pass or fail it on the
-benchmark bar, and never not_applicable. not_rated means the inputs do not allow the
-figure, which supports a "not computable" fail. These figures are our computation, not
-the founder's model: they show a figure is computable from the model's inputs, never that
-the model itself shows, highlights, summarises or explains it. State figures in your own
-words; never copy our evidence text, our rating words, or a filename.
-
-Assess all 46 checklist items (STRUCT_01..09, UNIT_10..19, CASH_20..32,
-METRIC_33..35, BRIDGE_36..38, SECTOR_39..44, OVERALL_45..46).
-Profile-based auto-gating is applied BY THE PRODUCER SCRIPT after you return —
-assess EVERY item on its merits and never mark an item not_applicable because
-of a stage/geography/sector/model_format gate ("partial" models are evaluated
-in full; only the script decides gating).
-
-Evidence is MANDATORY for every item, but scale it to the status: every `fail`
-and `warn` MUST carry full evidence with the specific values from the model
-(these drive the score and the coaching payload). Every `pass` needs only a
-brief note of what was checked — keep it to ~12 words (e.g. "checked runway vs
-burn; consistent"); do not pad passing items with long evidence, it is never a
-coaching input.
-
-Evidence prints VERBATIM in the founder's report: state what is true of the MODEL,
-never citing our filenames. "the model does not separate actuals from projections",
-not "inputs.json reports actuals separated: false". The delivery gate flags an
-internal filename in evidence, so this is checked.
-
-Use your Write tool to write to OUTPUT_PATH — company + metadata + items
-(producer script computes summary):
-{
-  "company": {<the company object copied verbatim from inputs.json — enables profile auto-gating>},
-  "metadata": {"run_id": "<RUN_ID>"},
-  "items": [{"id": "STRUCT_01", "status": "pass", "evidence": "...", "notes": null}, ...all 46 items...]
-}
-Then return ONLY the receipt JSON in your final assistant message:
-{"status": "complete", "output_path": "<echo of OUTPUT_PATH>"}
-Do NOT write any file other than OUTPUT_PATH — you never write a canonical
-artifact; anything else you write bypasses schema validation and
-run_id stamping.
+```bash
+python3 "$SCRIPTS/fmr_dispatch_prompt.py" checklist --run-id "$RUN_ID" \
+  --handoff-agent "$HANDOFF_AGENT" --review-dir-agent "$REVIEW_DIR_AGENT" --review-dir "$REVIEW_DIR"
 ```
 
 **After the sub-agent returns:** gate the hand-off per the Context A hand-off protocol, then pipe:

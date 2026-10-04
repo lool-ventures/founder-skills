@@ -251,7 +251,7 @@ def test_the_rewrite_notice_does_not_invite_a_hand_added_correction() -> None:
     assert "producer-rejected" in notice
 
 
-@pytest.mark.parametrize("skill", ["market-sizing", "competitive-positioning"])
+@pytest.mark.parametrize("skill", ["market-sizing", "competitive-positioning", "financial-model-review"])
 def test_the_rejection_step_runs_the_generator(skill: str) -> None:
     text = (PLUGIN / "skills" / skill / "SKILL.md").read_text(encoding="utf-8")
     line = next(ln for ln in text.splitlines() if ln.startswith("- **Producer schema rejection**"))

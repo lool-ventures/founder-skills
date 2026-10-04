@@ -4659,15 +4659,26 @@ class TestStructuralErrorEvidenceExists:
         assert mod._count_structural_errors([{"rows": [["ok", 1]]}]) == {}
 
     def test_the_assessor_is_told_where_the_evidence_is(self) -> None:
-        base = os.path.dirname(FMR_SCRIPTS_DIR)
-        with open(os.path.join(base, "SKILL.md"), encoding="utf-8") as f:
-            skill = f.read()
+        import importlib.util
+
+        # The CHECKLIST prompt is printed by fmr_dispatch_prompt.py, which picks the sentence for the case
+        # at hand: with model_data.json it names the tally; without it, it says what to do instead.
+        spec = importlib.util.spec_from_file_location(
+            "fmr_dispatch_prompt_evidence", os.path.join(FMR_SCRIPTS_DIR, "fmr_dispatch_prompt.py")
+        )
+        assert spec is not None and spec.loader is not None
+        gen = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gen)
+        args = {"run_id": "R", "handoff_agent": "/h", "review_dir_agent": "/a", "session_tree": False}
+        present = gen.checklist(has_model_data=True, **args)
+        absent = gen.checklist(has_model_data=False, **args)
+        assert "model_data.json" in present and "structural_errors" in present, "the prompt never names the tally"
+        assert "not_applicable" in absent, "the prompt does not say what to do when it is absent"
         agent_path = os.path.join(os.path.dirname(SCRIPT_DIR), "agents", "financial-model-review.md")
         with open(agent_path, encoding="utf-8") as f:
             agent = f.read()
-        for doc, name in ((skill, "SKILL.md"), (agent, "agent body")):
-            assert "structural_errors" in doc, f"{name} never names the tally"
-            assert "not_applicable" in doc, f"{name} does not say what to do when it is absent"
+        assert "structural_errors" in agent, "agent body never names the tally"
+        assert "not_applicable" in agent, "agent body does not say what to do when it is absent"
 
 
 class TestCurrencyRuleIsNotContradicted:

@@ -110,6 +110,7 @@ EXPECTED_COMMANDS = {
     ("competitive-positioning", "positioning_scoring"),
     ("competitive-positioning", "checklist"),
     ("competitive-positioning", "red_team"),
+    ("financial-model-review", "checklist"),
 }
 # The prompts that name a bundled reference, and the references each names.
 EXPECTED_TAILS = {
@@ -119,6 +120,7 @@ EXPECTED_TAILS = {
     },
     ("competitive-positioning", "moat_scoring"): {"skills/competitive-positioning/references/moat-definitions.md"},
     ("competitive-positioning", "checklist"): {"skills/competitive-positioning/references/checklist-criteria.md"},
+    ("financial-model-review", "checklist"): {"skills/financial-model-review/references/checklist-criteria.md"},
 }
 
 
@@ -135,12 +137,18 @@ def _workspace(tmp_path: Path) -> dict[str, str]:
     for name in ("product_profile", "landscape", "positioning_scores", "moat_scores"):
         (analysis / f"{name}.json").write_text("{}", encoding="utf-8")
     (handoff / "docs" / "deck.md").write_text("deck", encoding="utf-8")
+    # financial-model-review's review folder: inputs.json and no model_data.json, the golden text's arm.
+    review = tmp_path / "review"
+    review.mkdir(exist_ok=True)
+    (review / "inputs.json").write_text("{}", encoding="utf-8")
     return {
         "RUN_ID": "R",
         "ANALYSIS_DIR": str(analysis),
         "HANDOFF_DIR": str(handoff),
         "ANALYSIS_DIR_AGENT": "/agent/analysis",
         "HANDOFF_AGENT": "/agent/handoff/R",
+        "REVIEW_DIR": str(review),
+        "REVIEW_DIR_AGENT": "/agent/review",
     }
 
 
@@ -476,7 +484,7 @@ def test_template_tails_match_the_expected_references() -> None:
         ("market-sizing", "CHECKLIST"): EXPECTED_TAILS[("market-sizing", "checklist")],
         ("competitive-positioning", "MOAT_SCORING"): EXPECTED_TAILS[("competitive-positioning", "moat_scoring")],
         ("competitive-positioning", "CHECKLIST"): EXPECTED_TAILS[("competitive-positioning", "checklist")],
-        ("financial-model-review", "CHECKLIST"): {"skills/financial-model-review/references/checklist-criteria.md"},
+        ("financial-model-review", "CHECKLIST"): EXPECTED_TAILS[("financial-model-review", "checklist")],
     }
     assert _template_tails() == expected
 

@@ -23,6 +23,8 @@ FMR_DIR = REPO_ROOT / "founder-skills" / "skills" / "financial-model-review"
 SKILL_MD = FMR_DIR / "SKILL.md"
 AGENT_MD = REPO_ROOT / "founder-skills" / "agents" / "financial-model-review.md"
 DISPATCH_CONTRACTS = REPO_ROOT / "founder-skills" / "tests" / "fixtures" / "dispatch_contracts.json"
+# The CHECKLIST prompt is printed by this script; its template lives there, not in SKILL.md.
+FMR_GEN = FMR_DIR / "scripts" / "fmr_dispatch_prompt.py"
 
 _RANGE_TOKEN = re.compile(r"\b([A-Z]+)_(\d+)\.\.(\d+)\b")
 
@@ -62,7 +64,8 @@ def test_checklist_id_enumeration_matches_script() -> None:
     to exactly checklist.py's VALID_IDS — no phantom prefixes, no gaps."""
     mod = _load_checklist_module()
     valid_ids = set(mod.VALID_IDS)
-    for doc in (SKILL_MD, AGENT_MD):
+    assert _expand_ranges(FMR_GEN.read_text(encoding="utf-8")), "the CHECKLIST prompt lost its ID enumeration"
+    for doc in (SKILL_MD, AGENT_MD, FMR_GEN):
         text = doc.read_text(encoding="utf-8")
         expanded = _expand_ranges(text)
         if not expanded:
@@ -76,7 +79,7 @@ def test_checklist_id_enumeration_matches_script() -> None:
 
 def test_no_phantom_scenario_prefix() -> None:
     """SCENARIO_* checklist IDs do not exist (the canonical set uses BRIDGE_36..38)."""
-    for doc in (SKILL_MD, AGENT_MD, DISPATCH_CONTRACTS):
+    for doc in (SKILL_MD, AGENT_MD, DISPATCH_CONTRACTS, FMR_GEN):
         assert "SCENARIO_" not in doc.read_text(encoding="utf-8"), (
             f"{doc.name} references nonexistent SCENARIO_* checklist IDs"
         )
@@ -86,7 +89,7 @@ def test_no_base_hash_in_dispatch_prompts() -> None:
     """The sub-agent has no Bash and cannot compute the canonical sha256 —
     base_hash must never appear in a dispatch prompt (regression: the patch
     protocol was dead on arrival and silently bypassed coercion)."""
-    for doc in (SKILL_MD, AGENT_MD):
+    for doc in (SKILL_MD, AGENT_MD, FMR_GEN):
         lines = doc.read_text(encoding="utf-8").splitlines()
         for i, line in enumerate(lines, 1):
             if "base_hash" not in line:
@@ -103,7 +106,7 @@ def test_no_passthrough_dispatches() -> None:
     """unit_economics.py and runway.py consume inputs.json verbatim — routing
     that JSON through a sub-agent risks silent number corruption (regression:
     the UNIT_ECONOMICS / RUNWAY_SCENARIOS pass-through dispatches)."""
-    for doc in (SKILL_MD, AGENT_MD):
+    for doc in (SKILL_MD, AGENT_MD, FMR_GEN):
         text = doc.read_text(encoding="utf-8")
         assert "UNIT_ECONOMICS" not in text and "RUNWAY_SCENARIOS" not in text, (
             f"{doc.name} still contains a pass-through dispatch"
@@ -215,15 +218,33 @@ def test_askuserquestion_prescribes_two_option_construction() -> None:
 
 
 def _checklist_section(text: str, start: int) -> str:
-    """The CHECKLIST template (to its closing fence) or the agent's CHECKLIST subtype (to the next
-    heading). Bounded by structure, not a character window: additions to the prose used to push the
-    pinned text past a fixed slice and fail on content that was still there."""
-    if text[start:].startswith("CONTEXT: CHECKLIST"):
-        end = text.index("\n```", start)
-    else:
-        nxt = re.search(r"\n#{2,4} ", text[start + 1 :])
-        end = start + 1 + nxt.start() if nxt else len(text)
+    """The agent's CHECKLIST subtype, to the next heading. Bounded by structure, not a character window:
+    additions to the prose used to push the pinned text past a fixed slice and fail on content that was
+    still there."""
+    nxt = re.search(r"\n#{2,4} ", text[start + 1 :])
+    end = start + 1 + nxt.start() if nxt else len(text)
     return text[start:end]
+
+
+def _generated_checklist_prompt(*, has_model_data: bool = True) -> str:
+    """The CHECKLIST prompt as `fmr_dispatch_prompt.py` prints it (off a /sessions tree)."""
+    spec = importlib.util.spec_from_file_location("fmr_dispatch_prompt_contract", FMR_GEN)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    out: str = mod.checklist(
+        run_id="R", handoff_agent="/h", review_dir_agent="/a", has_model_data=has_model_data, session_tree=False
+    )
+    return out
+
+
+def _checklist_guidance() -> dict[str, str]:
+    """The two places the grader's CHECKLIST rules live: the printed prompt and the agent's subtype."""
+    agent = AGENT_MD.read_text(encoding="utf-8")
+    return {
+        FMR_GEN.name: _generated_checklist_prompt(),
+        AGENT_MD.name: _checklist_section(agent, agent.index("#### CHECKLIST subtype")),
+    }
 
 
 def test_checklist_dispatch_caps_pass_evidence() -> None:
@@ -232,15 +253,11 @@ def test_checklist_dispatch_caps_pass_evidence() -> None:
     score and coaching). Both the dispatch template and the agent CHECKLIST
     subtype must carry the pass-brevity cap, so passing items don't bloat the
     return with evidence that is never a coaching input."""
-    checks = {SKILL_MD: "CONTEXT: CHECKLIST", AGENT_MD: "#### CHECKLIST subtype"}
-    for doc, anchor in checks.items():
-        text = doc.read_text(encoding="utf-8")
-        start = text.find(anchor)
-        assert start != -1, f"{doc.name} has no {anchor!r} section"
-        section = _checklist_section(text, start).lower()
-        assert "brief" in section, f"{doc.name} CHECKLIST guidance does not cap pass-item evidence to a brief note"
+    for name, guidance in _checklist_guidance().items():
+        section = guidance.lower()
+        assert "brief" in section, f"{name} CHECKLIST guidance does not cap pass-item evidence to a brief note"
         assert "fail" in section and "warn" in section, (
-            f"{doc.name} CHECKLIST guidance must still require full fail/warn evidence"
+            f"{name} CHECKLIST guidance must still require full fail/warn evidence"
         )
 
 
@@ -364,19 +381,13 @@ def test_checklist_dispatch_template_includes_run_id_and_company() -> None:
     """The CHECKLIST dispatch return shape must carry metadata.run_id (else
     Context B blocks on parity) and the company block (else auto-gating
     never engages)."""
-    # Anchor on the actual template/section headers — a bare "CHECKLIST"
-    # search hits the Context A overview (SKILL.md line 36) and the agent
-    # frontmatter, whose windows miss the template or match the wrong payload.
-    anchors = {SKILL_MD: "CONTEXT: CHECKLIST", AGENT_MD: "#### CHECKLIST subtype"}
-    for doc, anchor in anchors.items():
-        text = doc.read_text(encoding="utf-8")
-        start = text.find(anchor)
-        assert start != -1, f"{doc.name} has no {anchor!r} section"
-        section = _checklist_section(text, start)
+    # The printed prompt, and the agent's subtype anchored on its heading — a bare "CHECKLIST" search
+    # hits the Context A overview and the agent frontmatter, which miss the return shape.
+    for name, section in _checklist_guidance().items():
         assert '"metadata"' in section and '"run_id"' in section, (
-            f"{doc.name} CHECKLIST return shape is missing metadata.run_id"
+            f"{name} CHECKLIST return shape is missing metadata.run_id"
         )
-        assert '"company"' in section, f"{doc.name} CHECKLIST return shape is missing the company block"
+        assert '"company"' in section, f"{name} CHECKLIST return shape is missing the company block"
 
 
 def test_vendored_chartjs_in_sync_with_competitive_positioning() -> None:
@@ -656,18 +667,16 @@ def test_unit_economics_and_runway_run_before_the_checklist() -> None:
     text = SKILL_MD.read_text(encoding="utf-8")
     ue_cmd = text.index('python3 "$SCRIPTS/unit_economics.py" --pretty --run-id')
     rw_cmd = text.index('python3 "$SCRIPTS/runway.py" --pretty --run-id')
-    dispatch = text.index("CONTEXT: CHECKLIST")
+    dispatch = text.index('python3 "$SCRIPTS/fmr_dispatch_prompt.py" checklist')
     assert ue_cmd < dispatch and rw_cmd < dispatch
     assert text.index("### Step 4: Unit Economics and Runway") < text.index("### Step 5: CHECKLIST Dispatch")
     table = text[text.index("## Artifact Pipeline") : text.index("**Rules:**")]
     assert table.index("`unit_economics.json`") < table.index("`checklist.json`")
 
 
-@pytest.mark.parametrize("anchor_doc", ["skill", "agent"])
-def test_the_grader_reads_the_computed_figures_and_the_rules_for_them(anchor_doc: str) -> None:
-    doc, anchor = (SKILL_MD, "CONTEXT: CHECKLIST") if anchor_doc == "skill" else (AGENT_MD, "#### CHECKLIST subtype")
-    text = doc.read_text(encoding="utf-8")
-    section = re.sub(r"\s+", " ", _checklist_section(text, text.index(anchor)))
+@pytest.mark.parametrize("source", [FMR_GEN.name, AGENT_MD.name])
+def test_the_grader_reads_the_computed_figures_and_the_rules_for_them(source: str) -> None:
+    section = re.sub(r"\s+", " ", _checklist_guidance()[source])
     for phrase in (
         "read unit_economics.json and runway.json",
         "do not compute your own",
@@ -679,7 +688,7 @@ def test_the_grader_reads_the_computed_figures_and_the_rules_for_them(anchor_doc
         "never that the model itself shows, highlights, summarises or explains it",
         "never copy our evidence text, our rating words, or a filename",
     ):
-        assert phrase in section, (doc.name, phrase)
+        assert phrase in section, (source, phrase)
 
 
 def test_metric_34_says_what_a_contextual_burn_multiple_gets() -> None:

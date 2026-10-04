@@ -430,7 +430,7 @@ def _prompts_with_reference_paths() -> list[tuple[str, str, str]]:
 
 
 # Hard-coded, never derived from the scan below: a scan that went blind would otherwise pass on nothing.
-# The four generator templates, and the four prompts a SKILL.md still writes out in a fence.
+# The four generator templates, and the three prompts a SKILL.md still writes out in a fence.
 EXPECTED_REFERENCE_PROMPTS = {
     ("dispatch_prompt.py", "CONTEXT: CHECKLIST"),
     ("cp_dispatch_prompt.py", "CONTEXT: MOAT_SCORING"),
@@ -439,7 +439,6 @@ EXPECTED_REFERENCE_PROMPTS = {
     ("deck-review", "CONTEXT: SLIDE_REVIEWS"),
     ("deck-review", "CONTEXT: CHECKLIST"),
     ("financial-model-review", "CONTEXT: INPUTS_REVIEW"),
-    ("financial-model-review", "CONTEXT: CHECKLIST"),
 }
 
 # What a generated prompt says instead, on a /sessions tree, where it names no path at all.
