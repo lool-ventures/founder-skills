@@ -16,16 +16,19 @@ THE COMPARAND. The generator's output as the transcript recorded it (a tool resu
 prompt the Agent call carries. Compared with whitespace squashed, as the e2e lane does. A main-thread
 tool result counts only when the call that produced it is paired by tool id and is one of:
   * a shell block running a TRUSTED generator -- `dispatch_prompt.py`, `cp_dispatch_prompt.py` or
-    `fmr_dispatch_prompt.py` from its own skill's `skills/<skill>/scripts/` folder (or as
-    `$SCRIPTS/<generator>`, the form SKILL.md writes), never one any call in the session (a sub-agent's
-    included) wrote over -- whose output reaches the result, and in which EVERY other command is known
-    to be quiet: assignments, `cd`, `mkdir`, `ls`, `wc`, `test`, `true`, `set -e`, `cp`/`mv` with no
-    device argument, the plugin's `resolve_artifacts_root.py` and `ocr_uploads.py` (piped at most into
-    `head`/`tail`/`wc`), and `echo` of literals and of `$?` or the block's own variables that, run
-    together, name no context line, no OUTPUT_PATH and no closing line. Anything else -- an unknown
-    command, a shell keyword or function, a subshell, a heredoc, an input redirect -- and the block is
-    not a comparand. The search takes the LAST context line in a result, so this is what keeps a
-    trailing `cat forged.txt` out;
+    `fmr_dispatch_prompt.py` from its own skill's `skills/<skill>/scripts/` folder of an INSTALLED
+    plugin (a Cowork or Desktop plugin mount or cache, the CLI's plugin cache, the cloud skills mount,
+    the folder the runtime says it loaded our skill from, or the one this hook runs from) or as
+    `$SCRIPTS/<generator>`, the form SKILL.md writes; never a copy elsewhere, and never once any call in
+    the session (a sub-agent's included) wrote into the plugin's scripts or over a generator, with names
+    read through the block's own assignments -- whose output reaches the result, and in which EVERY
+    other command is known to be quiet: assignments, `cd`, `mkdir`, `ls`, `wc`, `test`, `true`,
+    `set -e`, `cp`/`mv` with no device or /proc argument, the plugin's `resolve_artifacts_root.py` and
+    `ocr_uploads.py` (piped at most into `head`/`tail`/`wc`), and `echo` of literals and of `$?` or the
+    block's own variables that, run together, name no context line, no OUTPUT_PATH and no closing line.
+    Anything else -- an unknown command, a shell keyword or function, a subshell, a heredoc, an input
+    redirect -- and the block is not a comparand. The search takes the LAST context line in a result, so
+    this is what keeps a trailing `cat forged.txt` out;
   * a Read, or a quiet block's `cat`/`head`/`tail`, of the file a generator's stdout was redirected
     into (`> "$HANDOFF_DIR/prompt.txt"`, the block's own `NAME="..."` assignments expanded), or of the
     file the runtime saved an oversized generator result to ("Full output saved to: ..."), while no
@@ -444,17 +447,58 @@ def _script(words: list[str]) -> str | None:
     return None
 
 
+# Where a plugin is installed, by lane: Cowork's local and remote plugin mounts, Desktop's plugin cache, the
+# CLI's plugin cache, the cloud container's skills mount. Also trusted: the folder the runtime says it
+# loaded our skill from, and the folder this hook runs from (the hook runs host-native at the host loop
+# while the shell runs in the VM, so that one counts only where the two agree: the CLI, the e2e lanes).
+_INSTALL_MARKERS = ("/.local-plugins/", "/.remote-plugins/", "/cowork_plugins/", "/.claude/plugins/",
+                    "/mnt/skills/plugins/")  # fmt: skip
+HOOK_PLUGIN_ROOT = os.path.normpath(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# The plugin folders this session's runtime loaded our skills from ("Base directory for this skill: ..."),
+# as the shell names them. Set by comparands() from the transcript's own rows.
+_SESSION_ROOTS: set[str] = set()
+_BASE_DIR_RE = re.compile(r"^Base directory for this skill: (/\S[^\n]*?)/skills/([a-z-]+)\s*$", re.MULTILINE)
+_OUR_SKILLS = ("cap-table", "competitive-positioning", "deck-review", "financial-model-review", "ic-sim",
+               "market-sizing")  # fmt: skip
+
+
+def session_roots(rows: list[dict[str, Any]]) -> set[str]:
+    """Plugin roots from the runtime's skill-load rows (isMeta), for our skills only."""
+    out = set()
+    for row in rows:
+        if row.get("type") != "user" or not row.get("isMeta") or row.get("isSidechain"):
+            continue
+        for text in strings((row.get("message") or {}).get("content")):
+            for m in _BASE_DIR_RE.finditer(text):
+                if m.group(2) in _OUR_SKILLS:
+                    out.add(norm_path(m.group(1)))
+    return out
+
+
+def _installed_root(root: str) -> bool:
+    """A plugin root as a generator path names it: an installed plugin, the plugin this hook runs from,
+    or a variable set in an earlier shell (unknown here; unset at run time, the call fails)."""
+    if root.startswith("$"):
+        return True
+    if not root.startswith("/"):
+        return False
+    r = norm_path(root)
+    return r == HOOK_PLUGIN_ROOT or r in _SESSION_ROOTS or any(m in r + "/" for m in _INSTALL_MARKERS)
+
+
 def _trusted_generator(path: str, raw: dict[str, str], assigned: set[str], distrusted: set[str]) -> bool:
-    """A generator run from its own skill's scripts folder: the path, filled from the block's own
-    assignments, names `/skills/<skill>/scripts/<generator>`, or is `$SCRIPTS/<generator>` with SCRIPTS
-    set in an earlier block (the form every SKILL.md writes)."""
+    """A generator run from its own skill's scripts folder of an installed plugin: the path, filled from
+    the block's own assignments, ends `/skills/<skill>/scripts/<generator>` under such a root, or is
+    `$SCRIPTS/<generator>` with SCRIPTS set in an earlier block (the form every SKILL.md writes). A copy
+    of the plugin anywhere else, or a relative path, is not trusted."""
     base = os.path.basename(path)
     skill = GENERATORS.get(base)
     if skill is None or base in distrusted:
         return False
     filled = _partial(path, raw)
-    if f"/skills/{skill}/scripts/{base}" in filled:
-        return True
+    suffix = f"/skills/{skill}/scripts/{base}"
+    if filled.endswith(suffix):
+        return _installed_root(filled[: -len(suffix)])
     return filled in (f"$SCRIPTS/{base}", f"${{SCRIPTS}}/{base}") and "SCRIPTS" not in assigned
 
 
@@ -632,29 +676,76 @@ def touches_file(command: str, path: str, distrusted: frozenset[str] | set[str] 
     return _writes_file(cmds, path, env, raw, assigned, set(distrusted))
 
 
+# What in a written path points into the plugin: the script folders as SKILL.md names them, a skills tree,
+# an install root.
+_PLUGIN_HINTS = ("$SCRIPTS", "${SCRIPTS}", "$SHARED_SCRIPTS", "${SHARED_SCRIPTS}", "PLUGIN_ROOT", "/skills/",
+                 *_INSTALL_MARKERS)  # fmt: skip
+_WRITERS = frozenset({"cp", "mv", "ln", "install", "rsync", "tee", "dd", "truncate", "patch", "tar", "unzip",
+                      "touch", "chmod", "curl", "wget", "git"})  # fmt: skip
+
+
+def _into_plugin(text: str) -> bool:
+    if any(g in text for g in GENERATORS) or any(h in text for h in _PLUGIN_HINTS):
+        return True
+    return text.startswith("/") and (norm_path(text) + "/").startswith(HOOK_PLUGIN_ROOT + "/")
+
+
 def _distrusts(command: str) -> set[str]:
-    """Generator file names a shell block could have rewritten: named by anything but a run of it or a
-    read-only command, or named in a block that cannot be read."""
-    named = {g for g in GENERATORS if g in command}
-    if not named:
-        return set()
+    """Generators a shell block could have rewritten. A generator named by anything but a run of it or a
+    read-only command; and every generator when the block writes into the plugin (a redirect, an
+    in-place edit, a copy, link or extraction whose target points there), runs inline code that names
+    it, or cannot be read and mentions it. Names are read with the block's own assignments filled in,
+    so a name spelt apart (`G=dispatch_prompt; ... "$G.py"`) is still seen."""
     cmds = _parse_block(command)
     if cmds is None:
-        return named
-    out = set()
+        return set(GENERATORS) if _raw_writes_into_plugin(command) else set()
+    _env_values, raw, _assigned = _env(cmds)
+    out: set[str] = set()
     for c in cmds:
         words = _words(c.argv)
         name = os.path.basename(words[0]) if words else ""
+        filled = [_partial(w, raw) for w in words[1:]]
+        if any(_into_plugin(_partial(t, raw)) for t in c.writes):
+            return set(GENERATORS)
+        if name in _WRITERS:
+            targets = filled[-1:] if name in ("cp", "ln", "install", "rsync") else filled
+            if any(_into_plugin(t) for t in targets):
+                return set(GENERATORS)
+        if name == "sed" and any(w == "-i" or w.startswith("-i") for w in filled) and any(map(_into_plugin, filled)):
+            return set(GENERATORS)
+        inline = _INTERPRETERS_RE.match(name) and any(w in ("-c", "-e") for w in words[1:])
+        if inline and any(_into_plugin(w) or "dispatch_" in w or "prompt.py" in w for w in filled):
+            return set(GENERATORS)
         script = _script(words)
-        for g in named:
-            in_args = [w for w in words[1:] if g in w]
-            if any(g in t for t in c.writes):
+        for g in GENERATORS:
+            if any(os.path.basename(_partial(t, raw)) == g for t in c.writes):
                 out.add(g)
-            elif in_args and name not in _READ_ONLY:
-                if script is not None and os.path.basename(script) == g and not any(g in w for w in words[2:]):
-                    continue  # running it
+            elif any(os.path.basename(w) == g for w in filled) and name not in _READ_ONLY:
+                running = script is not None and os.path.basename(script) == g
+                if running and not any(os.path.basename(w) == g for w in filled[1:]):
+                    continue
                 out.add(g)
     return out
+
+
+# A write in a line the parser could not read: a redirect (a `>` after a space, so `<path>` is not one),
+# a copy or in-place edit, a file opened for writing by inline code.
+_RAW_WRITE_RE = re.compile(
+    r"(?:(?:^|\s)[0-9&]?>>?\s*[^\s&]|\b(?:cp|mv|ln|tee|install|rsync|dd|truncate|patch)\s|sed\s+-i"
+    r"|open\([^)]*,\s*['\"][wax+]|write_text\(|write_bytes\()"
+)
+
+
+def _raw_writes_into_plugin(command: str) -> bool:
+    """For a block the parser cannot read (a heredoc, a loop): whether any line both writes (a redirect,
+    a copy, an in-place edit, a file opened by inline code) and names the plugin or a generator. Read
+    line by line, so a heredoc's body is checked too."""
+    for line in command.splitlines():
+        if not _RAW_WRITE_RE.search(line.replace("2>&1", "").replace(">/dev/null", "")):
+            continue
+        if _into_plugin(line) or "dispatch_" in line or "prompt.py" in line:
+            return True
+    return False
 
 
 def _file_keys(word: str, env: dict[str, str]) -> frozenset[str]:
@@ -757,6 +848,8 @@ def comparands(rows: list[dict[str, Any]]) -> list[str]:
     readable: set[str] = set()
     distrusted: set[str] = set()
     out: list[str] = []
+    _SESSION_ROOTS.clear()
+    _SESSION_ROOTS.update(session_roots(rows))
     for row in rows:
         side = bool(row.get("isSidechain"))
         content = (row.get("message") or {}).get("content")
