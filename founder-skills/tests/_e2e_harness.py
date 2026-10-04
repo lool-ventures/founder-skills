@@ -26,7 +26,7 @@ import json
 import os
 import re
 import shutil
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -374,16 +374,84 @@ def same_prompt(a: str, b: str) -> bool:
     return " ".join(a.split()) == " ".join(b.split())
 
 
-def dispatch_report(
-    cap: RunCapture, dispatches: Sequence[dict[str, Any]], regenerate: Callable[[dict[str, Any]], str]
-) -> dict[str, Any]:
-    """What happened to each of a step's dispatches, judged against the printed prompt.
+# How a hold by the plugin's PreToolUse hooks reads in a dispatch's error result. Each check opens its
+# deny reason with its marker (dispatch_prompt_check / dispatch_type_check / two_figures_check), and the
+# CLI hands a deny reason through as written; a hook that exits 2 instead arrives as
+# "PreToolUse:<tool> hook error: <stderr>" (CLI 2.1.286). Any other error result is a failure.
+HOOK_HOLD_MARKERS = ("[dispatch-check][", "[dispatch-type][", "[two-figures-check][")
+_HOOK_ERROR_RE = re.compile(r"PreToolUse:(?:Agent|Task) hook error: ")
+PROMPT_END = "Do NOT write any file other than OUTPUT_PATH."
+_OUTPUT_PATH_RE = re.compile(r"^[ \t]*OUTPUT_PATH:[ \t]*(.+?)[ \t]*$", re.MULTILINE)
+_SHELL_TOOLS = frozenset({"Bash", "mcp__workspace__bash"})
 
-    `regenerate` takes a dispatch (the recorded tool call) and returns the prompt the generator prints
-    for it (or raises). Per dispatch: held (an error result: the hook's deny, or any refusal), succeeded, or no
-    result at all; whether the prompt SENT (the tool call's input) equals the regeneration, and for a
-    success whether the prompt the sub-agent RECEIVED (the result's `prompt`) does. A rewrite is a
-    success whose sent prompt differs while the received one matches.
+
+def _text_of(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(str(b.get("text", "")) for b in content if isinstance(b, dict))
+    return ""
+
+
+def is_hook_hold(result: dict[str, Any]) -> bool:
+    """An error result whose text is a hold by one of the plugin's PreToolUse hooks."""
+    text = _text_of(result.get("content"))
+    return bool(result.get("is_error")) and (
+        any(m in text for m in HOOK_HOLD_MARKERS) or bool(_HOOK_ERROR_RE.search(text))
+    )
+
+
+def output_path_of(prompt: str) -> str | None:
+    match = _OUTPUT_PATH_RE.search(prompt)
+    return match.group(1) if match else None
+
+
+def printed_prompts(stdout: str) -> list[str]:
+    """Every prompt in one generator call's output: from a `CONTEXT:` line through the closing line. A
+    compound block can print another script's output first."""
+    out: list[str] = []
+    for m in re.finditer(r"^CONTEXT:", stdout, re.MULTILINE):
+        end = stdout.find(PROMPT_END, m.start())
+        if end >= 0:
+            out.append(stdout[m.start() : end + len(PROMPT_END)] + "\n")
+    return out
+
+
+def printed_prompt_for(cap: RunCapture, dispatch: dict[str, Any], generator: str) -> str:
+    """The prompt the run's own generator call printed for this dispatch: the latest SUCCESSFUL main-thread
+    shell call naming `generator` before the dispatch whose printed OUTPUT_PATH is the dispatch's own.
+    Taken from the call's output as recorded, so nothing is re-run after the run. LookupError when none."""
+    path = output_path_of(str(dispatch["input"].get("prompt", "")))
+    position = next(i for i, t in enumerate(cap.tool_uses) if t["id"] == dispatch["id"])
+    found: str | None = None
+    for t in cap.tool_uses[:position]:
+        if t["name"] not in _SHELL_TOOLS or t["parent_tool_use_id"] is not None:
+            continue
+        if not re.search(rf"(?<![\w-]){re.escape(generator)}", str(t["input"].get("command", ""))):
+            continue
+        res = cap.result(str(t["id"]))
+        if res is None or res["is_error"]:
+            continue
+        structured = res.get("tool_use_result")
+        stdout = structured.get("stdout") if isinstance(structured, dict) else None
+        text = stdout if isinstance(stdout, str) and stdout.strip() else _text_of(res.get("content"))
+        for printed in printed_prompts(text):
+            if path is not None and output_path_of(printed) == path:
+                found = printed
+    if found is None:
+        raise LookupError(
+            f"no successful {generator} call before this dispatch printed a prompt for OUTPUT_PATH {path}"
+        )
+    return found
+
+
+def dispatch_report(cap: RunCapture, dispatches: Sequence[dict[str, Any]], generator: str) -> dict[str, Any]:
+    """What happened to each of a step's dispatches, judged against the prompt the run's generator printed.
+
+    Per dispatch: held (a PreToolUse hold by the plugin's hooks), failed (any other error result),
+    succeeded, or no result at all; whether the prompt SENT (the tool call's input) equals the printed
+    one (`printed_prompt_for`), and for a success whether the prompt the sub-agent RECEIVED (the result's
+    `prompt`) does. A rewrite is a success whose sent prompt differs while the received one matches.
     """
     rows: list[dict[str, Any]] = []
     for d in dispatches:
@@ -391,14 +459,14 @@ def dispatch_report(
         res = cap.result(str(d["id"]))
         row: dict[str, Any] = {"id": d["id"], "status": "no_result", "sent_matches": None, "received": None}
         try:
-            expected: str | None = regenerate(d)
-        except Exception as exc:  # reported, never raised: this is the report, not the gate
+            expected: str | None = printed_prompt_for(cap, d, generator)
+        except LookupError as exc:  # reported, never raised: this is the report, not the gate
             expected = None
-            row["regenerate_error"] = f"{type(exc).__name__}: {exc}"
+            row["regenerate_error"] = str(exc)
         if expected is not None:
             row["sent_matches"] = same_prompt(sent, expected)
         if res is not None:
-            row["status"] = "held" if res["is_error"] else "succeeded"
+            row["status"] = ("held" if is_hook_hold(res) else "failed") if res["is_error"] else "succeeded"
             structured = res.get("tool_use_result") or {}
             received = structured.get("prompt") if isinstance(structured, dict) else None
             if row["status"] == "succeeded" and isinstance(received, str):
@@ -411,11 +479,24 @@ def dispatch_report(
         "model": cap.model,
         "dispatches": rows,
         "held": sum(1 for r in rows if r["status"] == "held"),
+        "failed": sum(1 for r in rows if r["status"] == "failed"),
         "no_result": sum(1 for r in rows if r["status"] == "no_result"),
         "succeeded": len(succeeded),
         "succeeded_without_received_prompt": [r["id"] for r in succeeded if r["received"] is None],
         "rewrites": sum(1 for r in succeeded if r["sent_matches"] is False and r.get("received_matches") is True),
     }
+
+
+def assert_dispatch_outcomes(report: dict[str, Any], step: str) -> None:
+    """No checked dispatch failed (an error that is not a hold), and no hold caught the printed prompt.
+
+    A hold of a dispatch that sent exactly what the generator printed is the hook misfiring; a failure
+    followed by a retry would otherwise read as one clean dispatch."""
+    text = format_dispatch_report(step, report)
+    failed = [r["id"] for r in report["dispatches"] if r["status"] == "failed"]
+    assert not failed, f"{step} dispatch(es) {failed} failed with an error that is not a hook hold:\n{text}"
+    false_holds = [r["id"] for r in report["dispatches"] if r["status"] == "held" and r["sent_matches"] is True]
+    assert not false_holds, f"the hook held a dispatch that sent the printed prompt: {false_holds}\n{text}"
 
 
 # Off until the dispatch hook may rewrite a prompt on the CLI version these lanes run. Below that version
@@ -437,6 +518,7 @@ def assert_received_prompt(report: dict[str, Any], step: str, *, enabled: bool |
     assert succeeded, f"no {step} dispatch went through:\n{text}"
     for row in succeeded:
         assert row["received"] is not None, f"{step} dispatch {row['id']} has no received prompt on record:\n{text}"
+        assert "regenerate_error" not in row, f"{step} dispatch {row['id']}: {row['regenerate_error']}\n{text}"
         assert row.get("received_matches") is True, (
             f"the {step} sub-agent of dispatch {row['id']} did not receive the printed prompt:\n{text}"
         )
@@ -447,14 +529,14 @@ def format_dispatch_report(step: str, report: dict[str, Any]) -> str:
     prompt is shouted: without it the outcome cannot be judged at all."""
     lines = [
         f"- {step} dispatches on CLI `{report['cli_version'] or 'unknown'}`, model `{report['model'] or 'unknown'}`: "
-        f"{len(report['dispatches'])} sent, {report['held']} held, {report['succeeded']} succeeded, "
-        f"{report['no_result']} with no result, {report['rewrites']} rewritten"
+        f"{len(report['dispatches'])} sent, {report['held']} held, {report['failed']} failed, "
+        f"{report['succeeded']} succeeded, {report['no_result']} with no result, {report['rewrites']} rewritten"
     ]
     for r in report["dispatches"]:
         lines.append(
             f"  - `{r['id']}` {r['status']}: sent prompt equals the printed one: {r['sent_matches']}; "
             f"received prompt equals it: {r.get('received_matches') if r['received'] is not None else 'n/a'}"
-            + (f"; regeneration failed: {r['regenerate_error']}" if "regenerate_error" in r else "")
+            + (f"; no printed prompt: {r['regenerate_error']}" if "regenerate_error" in r else "")
         )
     missing = report["succeeded_without_received_prompt"]
     if missing:

@@ -64,8 +64,10 @@ def _user(blocks: list[Any], **fields: Any) -> Any:
     return UserMessage(blocks, **fields)
 
 
-def _result(call: str, *, is_error: bool = False, structured: dict[str, Any] | None = None) -> Any:
-    return _user([_block(call, content="text", is_error=is_error)], tool_use_result=structured)
+def _result(
+    call: str, *, is_error: bool = False, structured: dict[str, Any] | None = None, content: Any = "text"
+) -> Any:
+    return _user([_block(call, content=content, is_error=is_error)], tool_use_result=structured)
 
 
 def _init(version: Any = "2.1.286") -> Any:
@@ -89,6 +91,17 @@ def _run(harness: Any, tmp_path: Path, monkeypatch: Any, stream: list[Any]) -> A
 
 
 PRINTED = "CONTEXT: PROBE\nOUTPUT_PATH: /x/out.json\nDo NOT write any file other than OUTPUT_PATH.\n"
+OTHER_PATH = PRINTED.replace("/x/out.json", "/y/out.json")
+HOLD = "[dispatch-check][/x/out.json] Held: the prompt differs. Send this as the prompt, unchanged:\n\n" + PRINTED
+
+
+def _generator(call: str, stdout: str, *, script: str = "dispatch_prompt.py", is_error: bool = False) -> list[Any]:
+    """A main-thread shell call to a prompt generator and its result."""
+    from claude_agent_sdk import AssistantMessage, ToolUseBlock
+
+    command = f'python3 "$SCRIPTS/{script}" probe --run-id "$RUN_ID"'
+    use = AssistantMessage(content=[ToolUseBlock(id=call, name="Bash", input={"command": command})], model="m")
+    return [use, _result(call, is_error=is_error, content=stdout)]
 
 
 def _stream() -> list[Any]:
@@ -96,9 +109,10 @@ def _stream() -> list[Any]:
 
     return [
         _init(),
-        # Held by the hook: an error result, no structured record.
+        *_generator("gen", PRINTED),
+        # Held by the hook: an error result carrying the hook's reason, no structured record.
         _dispatch("held", PRINTED + "Key things worth attacking: ...\n"),
-        _result("held", is_error=True),
+        _result("held", is_error=True, content=HOLD),
         # Went through, with the CLI's record of what the sub-agent was sent.
         _dispatch("ok", PRINTED),
         _result("ok", structured={"status": "completed", "prompt": PRINTED}),
@@ -112,6 +126,9 @@ def _stream() -> list[Any]:
         # Went through with no prompt in its record.
         _dispatch("bare", PRINTED),
         _result("bare", structured={"status": "completed"}),
+        # An error that is not a hold: the sub-agent itself failed.
+        _dispatch("broke", PRINTED),
+        _result("broke", is_error=True, content="Agent stopped: API Error: overloaded"),
         # Two results in one message: the structured record belongs to neither for certain.
         _user([_block("a"), _block("b", is_error=True)], tool_use_result={"prompt": "?"}),
         # Sent, never answered.
@@ -142,45 +159,137 @@ def test_the_cli_version_is_read_in_either_shape(
     assert _run(harness, tmp_path, monkeypatch, [_init(version)]).cli_version == expected
 
 
-def test_the_dispatch_report_sorts_held_from_succeeded(harness: Any, tmp_path: Path, monkeypatch: Any) -> None:
-    cap = _run(harness, tmp_path, monkeypatch, _stream())
-    dispatches = [t for t in cap.tool_uses if t["name"] == "Agent"]
-    report = harness.dispatch_report(cap, dispatches, lambda d: PRINTED)
-    by_id = {r["id"]: r for r in report["dispatches"]}
-    assert (report["held"], report["succeeded"], report["no_result"]) == (1, 2, 1)
-    assert by_id["held"]["status"] == "held" and by_id["held"]["sent_matches"] is False
-    assert by_id["ok"]["sent_matches"] is True and by_id["ok"]["received_matches"] is True
-    assert by_id["lost"]["status"] == "no_result"
+def _report(harness: Any, tmp_path: Path, monkeypatch: Any, stream: list[Any]) -> dict[str, Any]:
+    cap = _run(harness, tmp_path, monkeypatch, stream)
+    report: dict[str, Any] = harness.dispatch_report(
+        cap, [t for t in cap.tool_uses if t["name"] == "Agent"], "dispatch_prompt.py"
+    )
+    return report
+
+
+def _rows(report: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {r["id"]: r for r in report["dispatches"]}
+
+
+def test_the_dispatch_report_tells_a_hold_from_a_failure(harness: Any, tmp_path: Path, monkeypatch: Any) -> None:
+    report = _report(harness, tmp_path, monkeypatch, _stream())
+    rows = _rows(report)
+    assert (report["held"], report["failed"], report["succeeded"], report["no_result"]) == (1, 1, 2, 1)
+    assert rows["held"]["status"] == "held" and rows["held"]["sent_matches"] is False
+    assert rows["broke"]["status"] == "failed"
+    assert rows["ok"]["sent_matches"] is True and rows["ok"]["received_matches"] is True
+    assert rows["lost"]["status"] == "no_result"
     assert report["succeeded_without_received_prompt"] == ["bare"]
     assert report["rewrites"] == 0
     text = harness.format_dispatch_report("PROBE", report)
     assert "NO RECEIVED PROMPT" in text and "bare" in text
+    assert "1 failed" in text
     assert "CLI `2.1.286`" in text and "model `probe-model`" in text
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "[dispatch-type][/x/out.json] Held: a CONTEXT: PROBE dispatch goes to its own agent",
+        "[two-figures-check][TOP_DOWN] Before sizing, ask which figure to use",
+        "PreToolUse:Agent hook error: the hook exited 2",
+        [{"type": "text", "text": HOLD}],
+    ],
+)
+def test_every_hook_hold_shape_reads_as_held(harness: Any, tmp_path: Path, monkeypatch: Any, content: Any) -> None:
+    stream = [
+        _init(),
+        *_generator("gen", PRINTED),
+        _dispatch("h", PRINTED + "x\n"),
+        _result("h", is_error=True, content=content),
+    ]
+    assert _rows(_report(harness, tmp_path, monkeypatch, stream))["h"]["status"] == "held"
+
+
+def test_the_printed_prompt_is_the_generator_calls_own_output(harness: Any, tmp_path: Path, monkeypatch: Any) -> None:
+    corrected = PRINTED.replace("Do NOT", "Your previous receipt was wrong.\nDo NOT")
+    stream = [
+        _init(),
+        # A compound block: another script's receipt is printed before the prompt.
+        *_generator("g1", '{"ocr_available": false}\n' + PRINTED),
+        # A later call for another hand-off path does not replace it.
+        *_generator("g2", OTHER_PATH),
+        # Nor does a failed call, nor another script's output.
+        *_generator("g3", corrected, is_error=True),
+        *_generator("g4", corrected, script="closing_message.py"),
+        # A name that merely ends in the generator's is another generator.
+        *_generator("g4b", corrected, script="fmr_dispatch_prompt.py"),
+        _dispatch("d1", PRINTED),
+        _result("d1", structured={"prompt": PRINTED}),
+        # A redo: the latest successful call before the dispatch is what it is judged against.
+        *_generator("g5", corrected),
+        _dispatch("d2", corrected),
+        _result("d2", structured={"prompt": corrected}),
+        # A call after the dispatch is never used for it.
+        _dispatch("d3", PRINTED.replace("/x/", "/z/")),
+        _result("d3", structured={"prompt": "?"}),
+        *_generator("g6", PRINTED.replace("/x/", "/z/")),
+    ]
+    rows = _rows(_report(harness, tmp_path, monkeypatch, stream))
+    assert rows["d1"]["sent_matches"] is True
+    assert rows["d2"]["sent_matches"] is True and rows["d2"]["received_matches"] is True
+    assert rows["d3"]["sent_matches"] is None
+    assert "/z/out.json" in rows["d3"]["regenerate_error"]
+
+
+def test_the_structured_stdout_is_preferred_over_the_rendered_result(
+    harness: Any, tmp_path: Path, monkeypatch: Any
+) -> None:
+    from claude_agent_sdk import AssistantMessage, ToolUseBlock
+
+    command = 'python3 "$SCRIPTS/dispatch_prompt.py" red_team'
+    stream = [
+        _init(),
+        AssistantMessage(content=[ToolUseBlock(id="g", name="Bash", input={"command": command})], model="m"),
+        _result("g", content="(output persisted to a file)", structured={"stdout": PRINTED, "stderr": ""}),
+        _dispatch("d", PRINTED),
+        _result("d", structured={"prompt": PRINTED}),
+    ]
+    assert _rows(_report(harness, tmp_path, monkeypatch, stream))["d"]["sent_matches"] is True
 
 
 def test_a_rewritten_dispatch_is_counted_as_one(harness: Any, tmp_path: Path, monkeypatch: Any) -> None:
     stream = [
         _init(),
+        *_generator("gen", PRINTED),
         _dispatch("rw", PRINTED + "an added line\n"),
         _result("rw", structured={"prompt": PRINTED}),
     ]
-    cap = _run(harness, tmp_path, monkeypatch, stream)
-    report = harness.dispatch_report(cap, cap.tool_uses, lambda d: PRINTED)
+    report = _report(harness, tmp_path, monkeypatch, stream)
     assert report["rewrites"] == 1
     assert report["dispatches"][0]["sent_matches"] is False
     assert report["dispatches"][0]["received_matches"] is True
 
 
-def test_a_failed_regeneration_is_reported_not_raised(harness: Any, tmp_path: Path, monkeypatch: Any) -> None:
-    cap = _run(harness, tmp_path, monkeypatch, _stream())
+def test_dispatch_outcomes_fail_on_a_failure_or_a_held_printed_prompt(
+    harness: Any, tmp_path: Path, monkeypatch: Any
+) -> None:
+    clean = [
+        _init(),
+        *_generator("gen", PRINTED),
+        _dispatch("h", PRINTED + "x\n"),
+        _result("h", is_error=True, content=HOLD),
+        _dispatch("ok", PRINTED),
+        _result("ok", structured={"prompt": PRINTED}),
+    ]
+    harness.assert_dispatch_outcomes(_report(harness, tmp_path, monkeypatch, clean), "PROBE")
 
-    def broken(dispatch: dict[str, Any]) -> str:
-        raise ValueError("no RUN_ID line")
+    # Held before any prompt was printed: a legitimate hold ("run the generator").
+    early = [_init(), _dispatch("h", PRINTED), _result("h", is_error=True, content=HOLD)]
+    harness.assert_dispatch_outcomes(_report(harness, tmp_path, monkeypatch, early), "PROBE")
 
-    report = harness.dispatch_report(cap, [t for t in cap.tool_uses if t["name"] == "Agent"], broken)
-    assert all("no RUN_ID line" in r["regenerate_error"] for r in report["dispatches"])
-    assert all(r["sent_matches"] is None for r in report["dispatches"])
-    assert "regeneration failed" in harness.format_dispatch_report("PROBE", report)
+    failed = [*clean, _dispatch("f", PRINTED), _result("f", is_error=True, content="API Error: overloaded")]
+    with pytest.raises(AssertionError, match="failed"):
+        harness.assert_dispatch_outcomes(_report(harness, tmp_path, monkeypatch, failed), "PROBE")
+
+    false_hold = [*clean, _dispatch("fh", PRINTED), _result("fh", is_error=True, content=HOLD)]
+    with pytest.raises(AssertionError, match="held a dispatch that sent the printed prompt"):
+        harness.assert_dispatch_outcomes(_report(harness, tmp_path, monkeypatch, false_hold), "PROBE")
 
 
 def test_prompts_compare_with_whitespace_squashed(harness: Any) -> None:
@@ -192,109 +301,31 @@ def test_the_received_prompt_gate_ships_off(harness: Any) -> None:
     assert harness.RECEIVED_PROMPT_GATE_ENABLED is False
 
 
-def _report(harness: Any, tmp_path: Path, monkeypatch: Any, stream: list[Any]) -> dict[str, Any]:
-    cap = _run(harness, tmp_path, monkeypatch, [_init(), *stream])
-    report: dict[str, Any] = harness.dispatch_report(
-        cap, [t for t in cap.tool_uses if t["name"] == "Agent"], lambda d: PRINTED
-    )
-    return report
-
-
 def test_the_gate_does_nothing_while_off(harness: Any, tmp_path: Path, monkeypatch: Any) -> None:
-    report = _report(harness, tmp_path, monkeypatch, [_dispatch("x", "other"), _result("x", structured={})])
+    report = _report(harness, tmp_path, monkeypatch, [_init(), _dispatch("x", "other"), _result("x", structured={})])
     harness.assert_received_prompt(report, "PROBE")
     harness.assert_received_prompt(report, "PROBE", enabled=False)
 
 
 def test_the_gate_judges_what_was_received(harness: Any, tmp_path: Path, monkeypatch: Any) -> None:
-    rewritten = [_dispatch("rw", PRINTED + "added\n"), _result("rw", structured={"prompt": PRINTED})]
+    gen = [_init(), *_generator("gen", PRINTED)]
+
+    rewritten = [*gen, _dispatch("rw", PRINTED + "added\n"), _result("rw", structured={"prompt": PRINTED})]
     harness.assert_received_prompt(_report(harness, tmp_path, monkeypatch, rewritten), "PROBE", enabled=True)
 
-    altered = [_dispatch("al", PRINTED), _result("al", structured={"prompt": PRINTED + "added\n"})]
+    altered = [*gen, _dispatch("al", PRINTED), _result("al", structured={"prompt": PRINTED + "added\n"})]
     with pytest.raises(AssertionError, match="did not receive the printed prompt"):
         harness.assert_received_prompt(_report(harness, tmp_path, monkeypatch, altered), "PROBE", enabled=True)
 
-    unrecorded = [_dispatch("un", PRINTED), _result("un", structured={"status": "completed"})]
+    unrecorded = [*gen, _dispatch("un", PRINTED), _result("un", structured={"status": "completed"})]
     with pytest.raises(AssertionError, match="no received prompt"):
         harness.assert_received_prompt(_report(harness, tmp_path, monkeypatch, unrecorded), "PROBE", enabled=True)
 
-    held_only = [_dispatch("h", PRINTED), _result("h", is_error=True)]
+    held_only = [*gen, _dispatch("h", PRINTED), _result("h", is_error=True, content=HOLD)]
     with pytest.raises(AssertionError, match="went through"):
         harness.assert_received_prompt(_report(harness, tmp_path, monkeypatch, held_only), "PROBE", enabled=True)
 
-
-# --- the financial-model-review lane's regeneration of its CHECKLIST prompt ---------------------------
-
-FMR_SCRIPTS = TESTS.parent / "skills" / "financial-model-review" / "scripts"
-
-
-@pytest.fixture
-def fmr_lane(harness: Any) -> Any:
-    if str(TESTS) not in sys.path:
-        sys.path.insert(0, str(TESTS))
-    spec = importlib.util.spec_from_file_location("_capture_fmr_lane", TESTS / "test_e2e_financial_model_review.py")
-    assert spec and spec.loader
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
-
-
-def _printed_checklist(review_dir: Path, *extra: str) -> str:
-    import subprocess
-
-    return subprocess.run(
-        [
-            sys.executable,
-            str(FMR_SCRIPTS / "fmr_dispatch_prompt.py"),
-            "checklist",
-            "--run-id",
-            "run-1",
-            "--handoff-agent",
-            "/agent/review/handoff/run-1",
-            "--review-dir-agent",
-            "/agent/review",
-            "--review-dir",
-            str(review_dir),
-            *extra,
-        ],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout
-
-
-def _generator_call(call_id: str, tail: str) -> dict[str, Any]:
-    command = (
-        'python3 "$SCRIPTS/fmr_dispatch_prompt.py" checklist --run-id "$RUN_ID" --handoff-agent "$HANDOFF_AGENT" '
-        f'--review-dir-agent "$REVIEW_DIR_AGENT" --review-dir "$REVIEW_DIR"{tail}'
-    )
-    return {"id": call_id, "name": "Bash", "input": {"command": command}, "parent_tool_use_id": None}
-
-
-def _checklist_dispatch(call_id: str, prompt: str) -> dict[str, Any]:
-    return {"id": call_id, "name": "Task", "input": {"prompt": prompt}, "parent_tool_use_id": None}
-
-
-def test_the_fmr_lane_regenerates_the_prompt_the_run_was_printed(fmr_lane: Any, tmp_path: Path) -> None:
-    review = tmp_path / "review"
-    (review / "handoff" / "run-1").mkdir(parents=True)
-    (review / "inputs.json").write_text("{}", encoding="utf-8")
-    (review / "handoff" / "run-1" / "producer_rejected.txt").write_text("field x is missing\n", encoding="utf-8")
-
-    base = _printed_checklist(review)
-    redo = _printed_checklist(review, "--correction", "missing-file")
-    detail = str(review / "handoff" / "run-1" / "producer_rejected.txt")
-    rejected = _printed_checklist(review, "--correction", "producer-rejected", "--detail-file", detail)
-    assert len({base, redo, rejected}) == 3
-    tool_uses = [
-        _generator_call("g1", ""),
-        _checklist_dispatch("d1", base),
-        _generator_call("g2", " --correction missing-file"),
-        _checklist_dispatch("d2", redo),
-        _generator_call("g3", ' --correction producer-rejected --detail-file "$HANDOFF_DIR/producer_rejected.txt"'),
-        _checklist_dispatch("d3", rejected),
-    ]
-    for call_id, printed in (("d1", base), ("d2", redo), ("d3", rejected)):
-        assert fmr_lane.regenerate_checklist(printed, review, tool_uses, call_id) == printed
-    # A prompt with a line added does not match its regeneration.
-    assert fmr_lane.regenerate_checklist(base + "extra\n", review, tool_uses, "d1") == base
+    # No printed prompt to judge against: the failure names why.
+    unprinted = [_init(), _dispatch("np", PRINTED), _result("np", structured={"prompt": PRINTED})]
+    with pytest.raises(AssertionError, match="no successful dispatch_prompt.py call"):
+        harness.assert_received_prompt(_report(harness, tmp_path, monkeypatch, unprinted), "PROBE", enabled=True)

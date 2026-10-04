@@ -30,11 +30,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import _e2e_harness
 import pytest
 from _e2e_harness import (
     PLUGIN_PATH,
-    RECEIVED_PROMPT_GATE_ENABLED,
     assert_coaching_commentary_landed,
+    assert_dispatch_outcomes,
     assert_received_prompt,
     assert_run_id_parity,
     dispatch_context,
@@ -43,7 +44,6 @@ from _e2e_harness import (
     has_claude_auth,
     locate_review_dir,
     run_skill_capture,
-    same_prompt,
     step_summary,
 )
 
@@ -70,32 +70,6 @@ _handover = _load_handover_check()
 def _script(name: str, args: list[str]) -> str:
     r = subprocess.run([sys.executable, str(SCRIPTS / name), *args], capture_output=True, text=True, check=True)
     return r.stdout
-
-
-def regenerate_red_team(dispatched: str, review_dir: Path) -> str:
-    """The RED_TEAM prompt the generator prints for a dispatch, from what the prompt itself declares plus
-    the on-disk hand-off dir. The agent-namespace forms are read back out of the prompt (OUTPUT_PATH, the
-    inputs.json line), so the comparison does not depend on how the skill derived them."""
-    run_id = dispatched.split("RUN_ID: ", 1)[1].split("\n", 1)[0]
-    handoff_agent = dispatched.split("OUTPUT_PATH: ", 1)[1].split("/redteam_output.json", 1)[0]
-    inputs_line = next(ln.strip() for ln in dispatched.splitlines() if ln.strip().endswith("/inputs.json"))
-    analysis_dir_agent = inputs_line[: -len("/inputs.json")]
-    return _script(
-        "dispatch_prompt.py",
-        [
-            "red_team",
-            "--run-id",
-            run_id,
-            "--analysis-dir",
-            str(review_dir),
-            "--handoff-dir",
-            str(review_dir / "handoff" / run_id),
-            "--analysis-dir-agent",
-            analysis_dir_agent,
-            "--handoff-agent",
-            handoff_agent,
-        ],
-    )
 
 
 @pytest.mark.e2e
@@ -170,14 +144,13 @@ def test_market_sizing_smoke(tmp_path: Path) -> None:
     ]
     # Recorded before any assert, so a red leaves the same evidence a green does: how many dispatches
     # were held, which went through, and whether what was sent -- and what the reviewer received --
-    # is the printed prompt. A held dispatch is not a failure: the dispatch hook holds a rewritten
-    # prompt and the model re-sends the printed one.
-    report = dispatch_report(
-        cap, dispatches, lambda d: regenerate_red_team(str(d["input"].get("prompt", "")), review_dir)
-    )
+    # is the prompt the run's own dispatch_prompt.py call printed for that hand-off path. A dispatch the
+    # hook held is not a failure (the model re-sends the printed prompt); any other error is.
+    report = dispatch_report(cap, dispatches, "dispatch_prompt.py")
     report_text = format_dispatch_report("RED_TEAM", report)
     print(f"[e2e:market-sizing] dispatch report:\n{report_text}", flush=True)
     step_summary(f"### market-sizing e2e\n\n{report_text}\n")
+    assert_dispatch_outcomes(report, "RED_TEAM")
     succeeded = [d for d, row in zip(dispatches, report["dispatches"], strict=True) if row["status"] == "succeeded"]
     assert len(succeeded) == 1, (
         f"expected exactly one red-team dispatch that went through, saw {len(succeeded)} "
@@ -189,11 +162,11 @@ def test_market_sizing_smoke(tmp_path: Path) -> None:
     # With the outcome gate on, what the reviewer RECEIVED is the gate and the sent prompt is reported
     # only: a dispatch the hook rewrote to the printed prompt sent one thing and delivered another.
     assert_received_prompt(report, "RED_TEAM")
-    if not RECEIVED_PROMPT_GATE_ENABLED:
-        regenerated = regenerate_red_team(dispatched, review_dir)
-        assert same_prompt(dispatched, regenerated), (
-            "the dispatched red-team prompt is not the generated one -- something was added, removed or "
-            "rewritten between the script and the Task call"
+    if not _e2e_harness.RECEIVED_PROMPT_GATE_ENABLED:
+        row = next(r for r in report["dispatches"] if r["id"] == rt_dispatch["id"])
+        assert row["sent_matches"] is True, (
+            "the dispatched red-team prompt is not the one dispatch_prompt.py printed -- something was added, "
+            f"removed or rewritten between the script and the Task call:\n{report_text}"
         )
 
     # (b) The red team actually OPENED the deck, and opened it BEFORE the artifacts -- SDK evidence,
