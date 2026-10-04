@@ -26,7 +26,7 @@ import json
 import os
 import re
 import shutil
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -234,6 +234,12 @@ class RunCapture:
     made, which is the only way to know what the red team actually opened rather than what it
     says it opened. `final_text` is the ResultMessage's `result`: the text the user received.
 
+    `tool_results` is the other half, keyed by the call's id: the result block's `is_error` and
+    `content`, and the message's structured `tool_use_result` (for a dispatch, the CLI's record of
+    what the sub-agent was sent, under `prompt`). A PreToolUse hold arrives as an error result. The
+    structured record is message-level, so it is attached only when the message carries exactly one
+    result block; otherwise it goes to `unattributed_results`, never guessed onto a call.
+
     A plain class, not a dataclass: test_skill_contract.py loads this module by file path
     without registering it in sys.modules, and a dataclass under postponed annotations cannot
     resolve its field types there.
@@ -250,6 +256,11 @@ class RunCapture:
         # The session's tool list and MCP servers, from the init message: what the connector check reads.
         self.session_tools: list[str] | None = None
         self.mcp_servers: list[Any] = []
+        self.tool_results: dict[str, dict[str, Any]] = {}
+        self.unattributed_results: list[dict[str, Any]] = []
+        # From the init message: which CLI and model the run was on, reported beside each other.
+        self.cli_version: str | None = None
+        self.model: str | None = None
 
     def calls(self, name: str, *, parent: str | None = None) -> list[dict[str, Any]]:
         """Tool calls by name; with `parent`, only those made inside that dispatch."""
@@ -285,6 +296,150 @@ class RunCapture:
     def stop_hook_blocks(self) -> int:
         return sum(1 for ev in self.events if ev["kind"] == "user" and ev["text"].startswith("Stop hook feedback:"))
 
+    def result(self, tool_use_id: str) -> dict[str, Any] | None:
+        """The recorded result of one call, or None when the stream carried none."""
+        return self.tool_results.get(tool_use_id)
+
+
+def record_message(cap: RunCapture, msg: object) -> None:
+    """Fold one SDK message into the capture."""
+    from claude_agent_sdk import (
+        AssistantMessage,
+        ResultMessage,
+        SystemMessage,
+        TextBlock,
+        ToolResultBlock,
+        ToolUseBlock,
+        UserMessage,
+    )
+
+    cap.messages.append(str(msg))
+    if isinstance(msg, AssistantMessage):
+        for block in msg.content:
+            if isinstance(block, ToolUseBlock):
+                call = {
+                    "id": block.id,
+                    "name": block.name,
+                    "input": block.input,
+                    "parent_tool_use_id": msg.parent_tool_use_id,
+                }
+                cap.tool_uses.append(call)
+                cap.events.append({"kind": "tool_use", **call})
+            elif isinstance(block, TextBlock):
+                cap.events.append({"kind": "text", "text": block.text, "parent_tool_use_id": msg.parent_tool_use_id})
+    elif isinstance(msg, UserMessage):
+        # A Stop hook's block arrives as a user turn "Stop hook feedback:\n<reason>".
+        content = msg.content
+        text = (
+            content
+            if isinstance(content, str)
+            else " ".join(getattr(b, "text", "") for b in content if isinstance(getattr(b, "text", None), str))
+        )
+        cap.events.append({"kind": "user", "text": text, "parent_tool_use_id": msg.parent_tool_use_id})
+        blocks = [] if isinstance(content, str) else [b for b in content if isinstance(b, ToolResultBlock)]
+        structured = msg.tool_use_result if isinstance(msg.tool_use_result, dict) else None
+        for block in blocks:
+            cap.tool_results[block.tool_use_id] = {
+                "is_error": bool(block.is_error),
+                "content": block.content,
+                "tool_use_result": structured if len(blocks) == 1 else None,
+                "parent_tool_use_id": msg.parent_tool_use_id,
+            }
+        if structured is not None and len(blocks) != 1:
+            cap.unattributed_results.append(
+                {"tool_use_ids": [b.tool_use_id for b in blocks], "tool_use_result": structured}
+            )
+    elif isinstance(msg, ResultMessage) and isinstance(msg.result, str):
+        cap.final_text = msg.result
+    elif isinstance(msg, SystemMessage) and msg.subtype == "init":
+        tools = msg.data.get("tools")
+        if isinstance(tools, list):
+            cap.session_tools = [*(cap.session_tools or []), *(str(t) for t in tools)]
+        servers = msg.data.get("mcp_servers")
+        if isinstance(servers, list):
+            cap.mcp_servers.extend(servers)
+        version = msg.data.get("claude_code_version")
+        if isinstance(version, dict):
+            version = version.get("VERSION")
+        if isinstance(version, str) and version:
+            cap.cli_version = version
+        model = msg.data.get("model")
+        if isinstance(model, str) and model:
+            cap.model = model
+
+
+def same_prompt(a: str, b: str) -> bool:
+    """Whitespace-squashed equality, the comparison the dispatch hook makes: an added sentence or a
+    dropped line still differs; a re-typed indent or a trailing newline does not."""
+    return " ".join(a.split()) == " ".join(b.split())
+
+
+def dispatch_report(
+    cap: RunCapture, dispatches: Sequence[dict[str, Any]], regenerate: Callable[[str], str]
+) -> dict[str, Any]:
+    """What happened to each of a step's dispatches, judged against the printed prompt.
+
+    `regenerate` takes a dispatch's sent prompt and returns the prompt the generator prints for it (or
+    raises). Per dispatch: held (an error result: the hook's deny, or any refusal), succeeded, or no
+    result at all; whether the prompt SENT (the tool call's input) equals the regeneration, and for a
+    success whether the prompt the sub-agent RECEIVED (the result's `prompt`) does. A rewrite is a
+    success whose sent prompt differs while the received one matches.
+    """
+    rows: list[dict[str, Any]] = []
+    for d in dispatches:
+        sent = str(d["input"].get("prompt", ""))
+        res = cap.result(str(d["id"]))
+        row: dict[str, Any] = {"id": d["id"], "status": "no_result", "sent_matches": None, "received": None}
+        try:
+            expected: str | None = regenerate(sent)
+        except Exception as exc:  # reported, never raised: this is the report, not the gate
+            expected = None
+            row["regenerate_error"] = f"{type(exc).__name__}: {exc}"
+        if expected is not None:
+            row["sent_matches"] = same_prompt(sent, expected)
+        if res is not None:
+            row["status"] = "held" if res["is_error"] else "succeeded"
+            structured = res.get("tool_use_result") or {}
+            received = structured.get("prompt") if isinstance(structured, dict) else None
+            if row["status"] == "succeeded" and isinstance(received, str):
+                row["received"] = received
+                row["received_matches"] = None if expected is None else same_prompt(received, expected)
+        rows.append(row)
+    succeeded = [r for r in rows if r["status"] == "succeeded"]
+    return {
+        "cli_version": cap.cli_version,
+        "model": cap.model,
+        "dispatches": rows,
+        "held": sum(1 for r in rows if r["status"] == "held"),
+        "no_result": sum(1 for r in rows if r["status"] == "no_result"),
+        "succeeded": len(succeeded),
+        "succeeded_without_received_prompt": [r["id"] for r in succeeded if r["received"] is None],
+        "rewrites": sum(1 for r in succeeded if r["sent_matches"] is False and r.get("received_matches") is True),
+    }
+
+
+def format_dispatch_report(step: str, report: dict[str, Any]) -> str:
+    """The report as markdown lines, for the run log and the job summary. A success with no received
+    prompt is shouted: without it the outcome cannot be judged at all."""
+    lines = [
+        f"- {step} dispatches on CLI `{report['cli_version'] or 'unknown'}`, model `{report['model'] or 'unknown'}`: "
+        f"{len(report['dispatches'])} sent, {report['held']} held, {report['succeeded']} succeeded, "
+        f"{report['no_result']} with no result, {report['rewrites']} rewritten"
+    ]
+    for r in report["dispatches"]:
+        lines.append(
+            f"  - `{r['id']}` {r['status']}: sent prompt equals the printed one: {r['sent_matches']}; "
+            f"received prompt equals it: {r.get('received_matches') if r['received'] is not None else 'n/a'}"
+            + (f"; regeneration failed: {r['regenerate_error']}" if "regenerate_error" in r else "")
+        )
+    missing = report["succeeded_without_received_prompt"]
+    if missing:
+        lines.append(
+            f"- **NO RECEIVED PROMPT** on {len(missing)} successful {step} dispatch result(s) {missing}: "
+            "the CLI's result record carries no `prompt`, so what the sub-agent received cannot be checked"
+        )
+    return "\n".join(lines)
+
 
 def run_skill(prompt: str, workdir: Path, label: str, uploads: Sequence[Path] = ()) -> list[str]:
     """Drive one skill run to completion. Returns the captured message stream.
@@ -302,15 +457,7 @@ def run_skill_capture(prompt: str, workdir: Path, label: str, uploads: Sequence[
     Without it the skill's document-reading steps run against nothing, and a lane that cannot
     attach a document cannot exercise the branch that failed live.
     """
-    from claude_agent_sdk import (
-        AssistantMessage,
-        ResultMessage,
-        SystemMessage,
-        TextBlock,
-        ToolUseBlock,
-        UserMessage,
-        query,
-    )
+    from claude_agent_sdk import query
 
     env_extra: dict[str, str] = {}
     if uploads:
@@ -334,40 +481,7 @@ def run_skill_capture(prompt: str, workdir: Path, label: str, uploads: Sequence[
         count = 0
         async for msg in query(prompt=prompt, options=options):
             count += 1
-            cap.messages.append(str(msg))
-            if isinstance(msg, AssistantMessage):
-                for block in msg.content:
-                    if isinstance(block, ToolUseBlock):
-                        call = {
-                            "id": block.id,
-                            "name": block.name,
-                            "input": block.input,
-                            "parent_tool_use_id": msg.parent_tool_use_id,
-                        }
-                        cap.tool_uses.append(call)
-                        cap.events.append({"kind": "tool_use", **call})
-                    elif isinstance(block, TextBlock):
-                        cap.events.append(
-                            {"kind": "text", "text": block.text, "parent_tool_use_id": msg.parent_tool_use_id}
-                        )
-            elif isinstance(msg, UserMessage):
-                # A Stop hook's block arrives as a user turn "Stop hook feedback:\n<reason>".
-                content = msg.content
-                text = (
-                    content
-                    if isinstance(content, str)
-                    else " ".join(getattr(b, "text", "") for b in content if isinstance(getattr(b, "text", None), str))
-                )
-                cap.events.append({"kind": "user", "text": text, "parent_tool_use_id": msg.parent_tool_use_id})
-            elif isinstance(msg, ResultMessage) and isinstance(msg.result, str):
-                cap.final_text = msg.result
-            elif isinstance(msg, SystemMessage) and msg.subtype == "init":
-                tools = msg.data.get("tools")
-                if isinstance(tools, list):
-                    cap.session_tools = [*(cap.session_tools or []), *(str(t) for t in tools)]
-                servers = msg.data.get("mcp_servers")
-                if isinstance(servers, list):
-                    cap.mcp_servers.extend(servers)
+            record_message(cap, msg)
             print(f"[e2e:{label} #{count:03d}] {summarize_sdk_message(msg)}", flush=True)
         print(f"[e2e:{label}] --- SDK loop complete ({count} messages) ---", flush=True)
 

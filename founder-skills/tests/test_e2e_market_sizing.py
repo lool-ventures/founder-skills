@@ -36,9 +36,13 @@ from _e2e_harness import (
     assert_coaching_commentary_landed,
     assert_run_id_parity,
     dispatch_context,
+    dispatch_report,
+    format_dispatch_report,
     has_claude_auth,
     locate_review_dir,
     run_skill_capture,
+    same_prompt,
+    step_summary,
 )
 
 # A two-page IMAGE-ONLY synthetic deck. Attached so the run exercises the branch that failed live:
@@ -61,15 +65,35 @@ def _load_handover_check() -> Any:
 _handover = _load_handover_check()
 
 
-def _squash(text: str) -> str:
-    """Whitespace-normalised: an added sentence or a dropped line still differs; a re-typed
-    indent or a trailing newline does not."""
-    return " ".join(text.split())
-
-
 def _script(name: str, args: list[str]) -> str:
     r = subprocess.run([sys.executable, str(SCRIPTS / name), *args], capture_output=True, text=True, check=True)
     return r.stdout
+
+
+def regenerate_red_team(dispatched: str, review_dir: Path) -> str:
+    """The RED_TEAM prompt the generator prints for a dispatch, from what the prompt itself declares plus
+    the on-disk hand-off dir. The agent-namespace forms are read back out of the prompt (OUTPUT_PATH, the
+    inputs.json line), so the comparison does not depend on how the skill derived them."""
+    run_id = dispatched.split("RUN_ID: ", 1)[1].split("\n", 1)[0]
+    handoff_agent = dispatched.split("OUTPUT_PATH: ", 1)[1].split("/redteam_output.json", 1)[0]
+    inputs_line = next(ln.strip() for ln in dispatched.splitlines() if ln.strip().endswith("/inputs.json"))
+    analysis_dir_agent = inputs_line[: -len("/inputs.json")]
+    return _script(
+        "dispatch_prompt.py",
+        [
+            "red_team",
+            "--run-id",
+            run_id,
+            "--analysis-dir",
+            str(review_dir),
+            "--handoff-dir",
+            str(review_dir / "handoff" / run_id),
+            "--analysis-dir-agent",
+            analysis_dir_agent,
+            "--handoff-agent",
+            handoff_agent,
+        ],
+    )
 
 
 @pytest.mark.e2e
@@ -120,7 +144,7 @@ def test_market_sizing_smoke(tmp_path: Path) -> None:
     )
     # (a0') The grader opened its rubric at the path this lane gives it. A REGRESSION GUARD, not evidence
     # for the session-tree pointer form (this lane is never on /sessions). It sees only that the Read was
-    # CALLED: RunCapture records tool_use blocks, never their results, so it cannot see `is_error`.
+    # CALLED, not that it succeeded.
     checklist_ids = [
         t["id"]
         for t in cap.tool_uses
@@ -138,37 +162,28 @@ def test_market_sizing_smoke(tmp_path: Path) -> None:
     dispatches = [
         t
         for t in cap.tool_uses
-        if t["name"] in ("Task", "Agent") and t["input"].get("subagent_type") == "founder-skills:market-sizing-redteam"
+        if t["name"] in ("Task", "Agent")
+        and t["parent_tool_use_id"] is None
+        and t["input"].get("subagent_type") == "founder-skills:market-sizing-redteam"
     ]
-    assert len(dispatches) == 1, f"expected one red-team dispatch, saw {len(dispatches)}"
-    rt_dispatch = dispatches[0]
+    # Recorded before any assert, so a red leaves the same evidence a green does: how many dispatches
+    # were held, which went through, and whether what was sent -- and what the reviewer received --
+    # is the printed prompt. A held dispatch is not a failure: the dispatch hook holds a rewritten
+    # prompt and the model re-sends the printed one.
+    report = dispatch_report(cap, dispatches, lambda sent: regenerate_red_team(sent, review_dir))
+    report_text = format_dispatch_report("RED_TEAM", report)
+    print(f"[e2e:market-sizing] dispatch report:\n{report_text}", flush=True)
+    step_summary(f"### market-sizing e2e\n\n{report_text}\n")
+    succeeded = [d for d, row in zip(dispatches, report["dispatches"], strict=True) if row["status"] == "succeeded"]
+    assert len(succeeded) == 1, (
+        f"expected exactly one red-team dispatch that went through, saw {len(succeeded)} "
+        f"(of {len(dispatches)} sent):\n{report_text}"
+    )
+    rt_dispatch = succeeded[0]
     dispatched = str(rt_dispatch["input"].get("prompt", ""))
     assert dispatch_context(dispatched) == "CONTEXT: RED_TEAM", dispatched[:200]
-    # Regenerate from what the prompt itself declares plus the on-disk hand-off dir. The agent-
-    # namespace forms are read back out of the prompt (OUTPUT_PATH, the inputs.json line), so the
-    # comparison does not depend on how the skill derived them.
-    run_id = dispatched.split("RUN_ID: ", 1)[1].split("\n", 1)[0]
-    handoff_agent = dispatched.split("OUTPUT_PATH: ", 1)[1].split("/redteam_output.json", 1)[0]
-    inputs_line = next(ln.strip() for ln in dispatched.splitlines() if ln.strip().endswith("/inputs.json"))
-    analysis_dir_agent = inputs_line[: -len("/inputs.json")]
-    handoff_dir = review_dir / "handoff" / run_id
-    regenerated = _script(
-        "dispatch_prompt.py",
-        [
-            "red_team",
-            "--run-id",
-            run_id,
-            "--analysis-dir",
-            str(review_dir),
-            "--handoff-dir",
-            str(handoff_dir),
-            "--analysis-dir-agent",
-            analysis_dir_agent,
-            "--handoff-agent",
-            handoff_agent,
-        ],
-    )
-    assert _squash(dispatched) == _squash(regenerated), (
+    regenerated = regenerate_red_team(dispatched, review_dir)
+    assert same_prompt(dispatched, regenerated), (
         "the dispatched red-team prompt is not the generated one -- something was added, removed or "
         "rewritten between the script and the Task call"
     )
