@@ -720,6 +720,9 @@ def test_a_cloud_closing_message_carrying_the_hand_over_is_asked_to_attach(tmp_p
     assert out["decision"] == "block"
     assert "mcp__cowork__present_files" in out["reason"] and "attach" in out["reason"]
     assert LEAD not in out["reason"], "the hand-over itself was sent whole; only the delivery is asked for"
+    # The message names its documents by label and links nothing, so the reason may not say it links them.
+    assert "links" not in out["reason"]
+    assert "points the founder to the finished files" in out["reason"]
 
 
 def test_a_cloud_closing_message_after_a_delivery_call_passes(tmp_path: Path) -> None:

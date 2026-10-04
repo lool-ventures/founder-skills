@@ -408,8 +408,10 @@ def decide(payload: dict[str, Any]) -> dict[str, str] | None:
     )
     if handover is None:
         reason = (
-            "Your last message links the finished files but did not attach them, and a link alone does "
-            f"not reach the founder on every host. {attach} Add nothing else."
+            # True on both shapes the check fires on: a message that links the files, and a cloud closing
+            # message that names each document by its label with no link.
+            "Your last message points the founder to the finished files but did not attach them, and a "
+            f"link or a name alone does not reach the founder on every host. {attach} Add nothing else."
         )
     else:
         why, printed = handover
