@@ -31,6 +31,12 @@ SERVER_CMD = (
 GATE_OPEN_CMD = 'python3 "$SCRIPTS/record_gate_answer.py" open --gate values_check --dir "$REVIEW_DIR"'
 COMPOSE_CMD = 'python3 "$SCRIPTS/compose_report.py" --dir "$REVIEW_DIR" -o "$REVIEW_DIR/report.json"'
 PAGE = "/sessions/x/mnt/outputs/artifacts/financial-model-review-acme/review.html"
+# The same build written across lines with shell continuations, as many real runs write it.
+CONTINUED_CMD = (
+    'python3 "$SCRIPTS/review_inputs.py" "$REVIEW_DIR/inputs.json" \\\n'
+    '  --static "$REVIEW_DIR/review.html" \\\n'
+    '  --extraction-warnings "$REVIEW_DIR/extraction_validation.json"'
+)
 
 
 def _load(name: str) -> Any:
@@ -323,6 +329,9 @@ def test_the_runner_lists_the_question_check() -> None:
     ("command", "page"),
     [
         (STATIC_CMD, "review.html"),
+        (CONTINUED_CMD, "review.html"),
+        ("python3 review_inputs.py in.json \\\r\n  --static /out/p.html", "p.html"),
+        ("python3 review_inputs.py in.json\n--static /out/p.html", None),
         ('python3 review_inputs.py in.json --static "/a b/out/page.html"', "page.html"),
         ("python3 review_inputs.py in.json --static=/out/p.html", "p.html"),
         ('python3 review_inputs.py in.json --static "$OUT"', "review.html"),
@@ -334,3 +343,17 @@ def test_the_runner_lists_the_question_check() -> None:
 )
 def test_the_page_a_command_writes(command: str, page: str | None) -> None:
     assert _load("_delivery_check").static_review_page(command) == page
+
+
+def test_a_build_written_across_lines_is_held_like_one_on_a_single_line(tmp_path: Path) -> None:
+    rows = _built()
+    rows[3] = _call("mcp__workspace__bash", {"command": CONTINUED_CMD}, "toolu_build")
+    reason = _held(_run(tmp_path, rows))
+    assert reason is not None and "review.html" in reason
+
+
+@pytest.mark.parametrize("tool", ["mcp__remote-devices__device_commit_files", "device_commit_files"])
+def test_a_connected_folder_write_of_the_page_sends_it(tmp_path: Path, tool: str) -> None:
+    assert _held(_run(tmp_path, _built(*_deliver("toolu_d", PAGE, tool=tool)))) is None
+    rows = _built(*_deliver("toolu_d", "/out/Acme_Inputs.md", tool=tool))
+    assert _held(_run(tmp_path, rows)) is not None, "control: a write of another file does not send the page"

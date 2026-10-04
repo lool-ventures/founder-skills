@@ -37,7 +37,9 @@ matters), no question was put through AskUserQuestion after it (the PreToolUse c
 review_page_check.py, owns that path; a question it held does not count as asked), and conditions 5
 and 6 hold. That is a turn that ended WAITING at the gate -- the question asked in chat, or on a host
 with no question tool -- with the page unsent. The ask names the pending question and never calls the
-run finished. A shell call between the build and the end (a gate record) changes nothing.
+run finished. A shell call between the build and the end (a gate record) changes nothing. A build
+written across lines (shell line continuations) is read as one line, and a connected-folder write carrying
+the page counts as sending it.
 """
 
 from __future__ import annotations
@@ -61,6 +63,13 @@ STOP_FEEDBACK_PREFIX = "Stop hook feedback:"
 _REVIEW_BUILD = re.compile(r"(?<![\w-])review_inputs\.py\b(?P<args>[^\n;&|]*)")
 _STATIC_ARG = re.compile(r"(?:^|\s)--static(?:=|\s+|$)(?P<path>\"[^\"]*\"|'[^']*'|[^\s\"']*)")
 REVIEW_PAGE = "review.html"
+# A shell line continuation: many runs write the build across lines. `_BUILD` and `_CLOSER` search the
+# whole command and need no joining; the page's arguments are read up to the end of the line.
+_CONTINUATION = re.compile(r"\\\r?\n")
+# A connected-folder write (served on cloud as `mcp__remote-devices__device_commit_files`) that carries
+# the page puts it in front of the founder too. It counts for the page only: it is not a tool the host
+# offers for delivery, so it never stands in for `offered_tool`, and the report check is unchanged.
+_FOLDER_WRITE = "device_commit_files"
 
 
 def is_delivery_tool(name: Any) -> bool:
@@ -186,7 +195,7 @@ def static_review_page(command: str) -> str | None:
     """The file name of the page a `review_inputs.py … --static <page>` command writes, or None when the
     command is not a static review build. A name the shell has yet to expand falls back to the page
     SKILL.md names."""
-    m = _REVIEW_BUILD.search(command)
+    m = _REVIEW_BUILD.search(_CONTINUATION.sub(" ", command))
     if m is None:
         return None
     arg = _STATIC_ARG.search(m.group("args"))
@@ -194,6 +203,12 @@ def static_review_page(command: str) -> str | None:
         return None
     name = arg.group("path").strip("\"'").rstrip("/").rsplit("/", 1)[-1]
     return name if name and "$" not in name and "." in name else REVIEW_PAGE
+
+
+def _sends_page(name: Any) -> bool:
+    return is_delivery_tool(name) or (
+        isinstance(name, str) and (name == _FOLDER_WRITE or name.endswith("__" + _FOLDER_WRITE))
+    )
 
 
 def tool_outcomes(rows: list[dict[str, Any]], start: int) -> dict[str, bool]:
@@ -235,7 +250,7 @@ def unsent_review_page(rows: list[dict[str, Any]], start: int) -> tuple[int, str
                     found = (i, page)
                 elif found is not None and _BUILD.search(command):
                     found = None
-            elif found is not None and is_delivery_tool(name) and outcome is False:
+            elif found is not None and _sends_page(name) and outcome is False:
                 page = found[1]
                 if any(s.strip() == page or s.strip().endswith("/" + page) for s in _strings(b.get("input"))):
                     found = None

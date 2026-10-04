@@ -958,3 +958,28 @@ def test_a_report_build_after_the_page_ends_the_ask_even_with_no_question(tmp_pa
         _assistant_text(LINKED),
     )
     assert _run(tmp_path, rows).stdout == ""
+
+
+def test_a_page_built_across_lines_and_left_unsent_is_asked_for(tmp_path: Path) -> None:
+    continued = REVIEW_CMD.replace(" --static", " \\\n  --static").replace(" --extraction", " \\\n  --extraction")
+    assert "\\\n" in continued, "control: the command is written across lines"
+    assert _review_ask(tmp_path, _review_rows(_assistant_text(WAITING), cmd=continued)) is not None
+
+
+def test_a_connected_folder_write_of_the_page_sends_it(tmp_path: Path) -> None:
+    rows = _review_rows(
+        *_deliver_files("toolu_d", REVIEW_PAGE, tool="mcp__remote-devices__device_commit_files"),
+        _assistant_text(WAITING),
+    )
+    assert _run(tmp_path, rows).stdout == ""
+
+
+def test_a_report_build_written_across_lines_still_triggers_the_report_check(tmp_path: Path) -> None:
+    rows = [
+        _snapshot("mcp__workspace__bash", "mcp__cowork__present_files"),
+        _user("Review this deck."),
+        _call_with_id("mcp__workspace__bash", COMPOSE_CMD.replace(" -o", " \\\n  -o"), "toolu_compose"),
+        _result_for("toolu_compose", "{}"),
+        _assistant_text(LINKED),
+    ]
+    assert json.loads(_run(tmp_path, rows).stdout)["decision"] == "block"
