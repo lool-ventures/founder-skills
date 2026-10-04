@@ -202,7 +202,7 @@ def test_a_skill_never_started_is_not_the_agent(tmp_path: Path) -> None:
     ("prompt", "agent"),
     [
         ("CONTEXT: CHECKLIST\nOUTPUT_PATH: x\n", "founder-skills:deck-review"),
-        ("CONTEXT: CHECKLIST\nOUTPUT_PATH: x\n", "financial-model-review"),
+        ("CONTEXT: CHECKLIST\nOUTPUT_PATH: x\n", "deck-review"),
         ("CONTEXT: SECOND_READ\nOUTPUT_PATH: x\n", "founder-skills:deck-review"),
         ("CONTEXT: POST_COMPOSE_COACHING\nOUTPUT_PATH: x\n", "founder-skills:ic-sim"),
         ("CONTEXT: INSTRUMENT_EXTRACTION\nOUTPUT_PATH: x\n", "founder-skills:cap-table"),

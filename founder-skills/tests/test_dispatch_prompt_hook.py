@@ -245,8 +245,9 @@ def test_a_checklist_dispatch_is_held_to_its_printed_prompt(tmp_path: Path) -> N
 
 
 # Skills whose CHECKLIST prompt opens with the same line and has NO generator. competitive-positioning
-# left this list when cp_dispatch_prompt.py began printing its CHECKLIST prompt; its own pair is below.
-_OTHER_SKILLS = ("deck-review", "financial-model-review")
+# left this list when cp_dispatch_prompt.py began printing its CHECKLIST prompt, and financial-model-review
+# when fmr_dispatch_prompt.py did; their own pairs are below.
+_OTHER_SKILLS = ("deck-review",)
 _THEIR_CHECKLIST = "CONTEXT: CHECKLIST\nOUTPUT_PATH: agent/handoff/R/checklist_output.json\n\nScore the criteria.\n"
 
 
@@ -271,6 +272,58 @@ def test_another_skill_is_never_handed_market_sizings_prompt(tmp_path: Path) -> 
     reason = _deny(_run(tmp_path, rows, cp_checklist, agent="founder-skills:competitive-positioning"))
     assert "no printed prompt" in reason
     assert "checklist_view/methodology.json" not in reason and "Assess all 22 items" not in reason
+    fmr_checklist = _THEIR_CHECKLIST.replace("agent/handoff/R/", "agent/financial-model-review-acme/handoff/R/")
+    reason = _deny(_run(tmp_path, rows, fmr_checklist, agent="founder-skills:financial-model-review"))
+    assert "no printed prompt" in reason
+    assert "checklist_view/methodology.json" not in reason and "Assess all 22 items" not in reason
+
+
+# --- financial-model-review's CHECKLIST is printed by its own generator ----------------------------------
+
+_FMR_CMD = (
+    'python3 "$SCRIPTS/fmr_dispatch_prompt.py" checklist --run-id "$RUN_ID" \\\n'
+    '  --handoff-agent "$HANDOFF_AGENT" --review-dir-agent "$REVIEW_DIR_AGENT" --review-dir "$REVIEW_DIR"'
+)
+_FMR_AGENT = "founder-skills:financial-model-review"
+
+
+def _fmr_printed() -> str:
+    """The CHECKLIST prompt exactly as fmr_dispatch_prompt.py prints it."""
+    import importlib.util
+
+    gen = SCRIPTS.parent / "skills" / "financial-model-review" / "scripts" / "fmr_dispatch_prompt.py"
+    spec = importlib.util.spec_from_file_location("fmr_gen_hook", gen)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    out: str = mod.checklist(
+        run_id="R",
+        handoff_agent="agent/financial-model-review-acme/handoff/R",
+        review_dir_agent="agent/financial-model-review-acme",
+        has_model_data=True,
+        session_tree=False,
+    )
+    return out
+
+
+def test_a_financial_model_review_checklist_paraphrase_is_held(tmp_path: Path) -> None:
+    """The grader's prompt went out with most of its sentences missing in kept runs. Sent as printed it
+    passes; with a rule dropped or a line added it is held, and the reason carries the printed prompt."""
+    printed = _fmr_printed()
+    rows = [_user("Review my model."), *_printed(printed, command=_FMR_CMD)]
+    _silent(_run(tmp_path, rows, printed, agent=_FMR_AGENT))
+    dropped = printed.replace("never not_applicable. ", "")
+    assert dropped != printed
+    reason = _deny(_run(tmp_path, rows, dropped, agent=_FMR_AGENT))
+    assert "never not_applicable." in reason and "Assess all 46 checklist items" in reason
+    added = printed.replace("RUN_ID: R\n", "RUN_ID: R\nThis is a re-run; the burn multiple was fixed.\n")
+    reason = _deny(_run(tmp_path, rows, added, agent=_FMR_AGENT))
+    assert "re-run" not in reason
+
+
+def test_an_unprinted_financial_model_review_checklist_is_told_to_run_the_generator(tmp_path: Path) -> None:
+    reason = _deny(_run(tmp_path, [_user("Review my model.")], _fmr_printed(), agent=_FMR_AGENT))
+    assert "no printed prompt" in reason
 
 
 def test_market_sizings_checklist_is_still_held_under_another_namespace(tmp_path: Path) -> None:

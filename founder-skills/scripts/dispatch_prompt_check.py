@@ -93,13 +93,14 @@ REWRITE_MARKER = "[dispatch-rewrite]"
 # live probe sets it: below it the dispatch is held, never rewritten.
 REWRITE_FLOOR: tuple[int, ...] = (9999, 0, 0)
 # The dispatches whose prompt a generator prints (market-sizing's dispatch_prompt.py, competitive-
-# positioning's cp_dispatch_prompt.py). Every such prompt ends with END.
+# positioning's cp_dispatch_prompt.py, financial-model-review's fmr_dispatch_prompt.py). Every such prompt
+# ends with END.
 # CHECKLIST: in round 2 the grader was told "round 2 after a revision … down from N% in round 1"
 # and wrote it to the founder; round 1's prompt had a verdict inserted.
 # (context line, agent name after the plugin prefix) -> the reason a held dispatch is given. A dispatch
-# is checked only when BOTH match: deck-review's and financial-model-review's CHECKLIST templates open
-# with the same context line and have no generator; matched on the prefix alone, they were held for a
-# prompt that cannot exist, or handed market-sizing's. One context line can belong to two skills' pairs.
+# is checked only when BOTH match: deck-review's CHECKLIST template opens with the same context line and
+# has no generator; matched on the prefix alone, it was held for a prompt that cannot exist, or handed
+# market-sizing's. One context line can belong to several skills' pairs.
 _REVIEW_REASON = (
     "the review's instructions go out exactly as the prompt generator printed them, with nothing "
     "added, removed or reworded -- the review looks at the analysis without its constructor's framing"
@@ -118,6 +119,9 @@ PAIRS: dict[tuple[str, str], str] = {
     ("CONTEXT: CHECKLIST", "competitive-positioning"): _SCORING_REASON,
     ("CONTEXT: STARTUP_RESEARCH", "competitive-positioning"): _SCORING_REASON,
     ("CONTEXT: RED_TEAM", "competitive-positioning-redteam"): _REVIEW_REASON,
+    # financial-model-review's grader (fmr_dispatch_prompt.py): kept runs sent it a prompt missing most of
+    # the template's sentences.
+    ("CONTEXT: CHECKLIST", "financial-model-review"): _REVIEW_REASON,
 }
 CONTEXTS = tuple(dict.fromkeys(context for context, _ in PAIRS))
 END = "Do NOT write any file other than OUTPUT_PATH."
