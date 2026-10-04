@@ -215,6 +215,25 @@ def test_the_right_agent_or_an_unknown_context_passes(tmp_path: Path, prompt: st
     _silent(_run(tmp_path, [_user("Review my deck.")], prompt, agent))
 
 
+def test_the_bare_financial_model_review_name_passes_the_type_check(tmp_path: Path) -> None:
+    """Run through the type check alone: through the dispatcher, financial-model-review's CHECKLIST now also
+    meets the prompt check, which holds it for having no printed prompt."""
+    path = tmp_path / "t.jsonl"
+    path.write_text(json.dumps(_user("Review my model.")) + "\n", encoding="utf-8")
+    tool_input = {"prompt": "CONTEXT: CHECKLIST\nOUTPUT_PATH: x\n", "description": "d"}
+    for agent in ("financial-model-review", "founder-skills:financial-model-review"):
+        payload = {
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Agent",
+            "transcript_path": str(path),
+            "tool_input": {**tool_input, "subagent_type": agent},
+        }
+        assert TYPE.decide(payload) is None, agent
+    held = {"hook_event_name": "PreToolUse", "tool_name": "Agent", "transcript_path": str(path),
+            "tool_input": {**tool_input, "subagent_type": "general-purpose"}}  # fmt: skip
+    assert TYPE.decide(held) is not None
+
+
 def test_a_repair_line_still_needs_the_right_agent(tmp_path: Path) -> None:
     """The first line is matched by prefix here, so a hand-written repair is still held to its agent."""
     repair = "CONTEXT: CHECKLIST (repair)\nOUTPUT_PATH: x\n"
