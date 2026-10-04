@@ -32,7 +32,9 @@ from typing import Any
 import pytest
 
 PLUGIN = Path(__file__).resolve().parents[1]
-SKILLS = sorted(p.parent.name for p in (PLUGIN / "skills").glob("*/SKILL.md"))
+# `feedback` is a user-invoked skill that runs no shell and dispatches nothing, so it has no Step 0,
+# hand-offs or report pipeline for these contracts to check.
+SKILLS = sorted(p.parent.name for p in (PLUGIN / "skills").glob("*/SKILL.md") if p.parent.name != "feedback")
 TOKEN = "${CLAUDE_PLUGIN_ROOT}"
 MS_GEN = PLUGIN / "skills" / "market-sizing" / "scripts" / "dispatch_prompt.py"
 CP_GEN = PLUGIN / "skills" / "competitive-positioning" / "scripts" / "cp_dispatch_prompt.py"

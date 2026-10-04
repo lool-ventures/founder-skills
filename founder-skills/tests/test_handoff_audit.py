@@ -126,7 +126,10 @@ def _load_compose(skill: str) -> types.ModuleType:
 
 
 # Every skill's compose reports HANDOFF_BYPASSED; the list is derived, so a new skill joins the check.
-_BYPASS_SKILLS = sorted(p.name for p in (_SCRIPTS.parent / "skills").iterdir() if (p / "SKILL.md").is_file())
+# `feedback` runs no shell and dispatches nothing, so it has no compose to report from.
+_BYPASS_SKILLS = sorted(
+    p.name for p in (_SCRIPTS.parent / "skills").iterdir() if (p / "SKILL.md").is_file() and p.name != "feedback"
+)
 
 
 def test_every_skill_reports_bypassed_hand_offs() -> None:

@@ -1,6 +1,9 @@
 ---
-description: Send feedback about founder-skills — report a bug, suggest an idea, ask for help, or share a win. Drafts your message and gives you a link to submit; nothing is sent automatically.
+name: feedback
+description: "Send feedback about founder-skills — report a bug, suggest an idea, ask for help, or share a win. Drafts your message and gives you a link to submit; nothing is sent automatically."
 argument-hint: "[what you want to say]"
+user-invocable: true
+disable-model-invocation: true
 ---
 
 # Send founder-skills feedback

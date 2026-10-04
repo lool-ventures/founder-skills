@@ -264,15 +264,16 @@ def test_the_published_command_keep_set_is_narrow() -> None:
     This test exists because a keep-set is exactly the shape that quietly becomes a hole. It
     pins all four properties: the exemption fires for a published command, does NOT fire for an
     unpublished one, leaves every other leak class untouched, and is load-bearing (emptying it
-    restores the finding). The members are derived from `founder-skills/commands/`, so the set
-    cannot drift from what the plugin actually ships.
+    restores the finding). The members are derived from the plugin's founder-only commands (a
+    skill with `disable-model-invocation: true`, or a file under `commands/`), so the set cannot
+    drift from what the plugin actually ships.
     """
     import leak_scan
 
     published = "/founder-skills:feedback"
     assert published in leak_scan.PUBLISHED_COMMANDS, (
-        f"{published} is no longer derived from commands/; the keep-set reads that directory, so "
-        "either the command was renamed or the derivation broke"
+        f"{published} is no longer derived from the founder-only skills; either the skill was renamed "
+        "or the derivation broke"
     )
     assert not leak_scan.scan_text(f"you can run `{published}` any time"), "a published command was flagged"
 
@@ -280,6 +281,8 @@ def test_the_published_command_keep_set_is_narrow() -> None:
     assert leak_scan.scan_text("run `/founder-skills:not-a-real-command`"), (
         "an UNPUBLISHED command-shaped token was exempted — the keep-set has become a pattern"
     )
+    # Nor for a skill the model may start on its own: only founder-only commands are members.
+    assert "/founder-skills:cap-table" not in leak_scan.PUBLISHED_COMMANDS, "the keep-set took in an analysis skill"
 
     # Every other class is untouched, including a code span that is genuine plumbing.
     for plumbing in ("I ran `compose_report.py`", "hit `W_THIN_QUOTES`", "see `--gate-state`"):

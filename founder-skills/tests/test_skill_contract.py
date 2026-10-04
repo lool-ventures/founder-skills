@@ -58,6 +58,22 @@ def _skill_md_files() -> list[Path]:
     return sorted(SKILLS_ROOT.glob("*/SKILL.md"))
 
 
+def _model_listed_skill_md_files() -> list[Path]:
+    """The skills the model is shown in its skill listing.
+
+    A skill whose frontmatter sets `disable-model-invocation: true` is filtered out of that listing
+    before the character budget is applied, and the Skill tool refuses it unless the user typed it
+    (read from the Claude Code 2.1.289 binary). It still appears in the `/` menu. `feedback` is the
+    one such skill: a founder starts it, the model never does.
+    """
+    out = []
+    for p in _skill_md_files():
+        fm, _ = _split_frontmatter(p.read_text())
+        if fm.get("disable-model-invocation") is not True:
+            out.append(p)
+    return out
+
+
 def _split_frontmatter(text: str) -> tuple[dict, str]:
     """Return (frontmatter_dict, body_text). Raises on missing frontmatter."""
     match = re.match(r"^---\n(.*?)\n---\n(.*)$", text, re.DOTALL)
@@ -117,7 +133,7 @@ def test_no_inline_shell_expansion_or_argument_placeholder_in_skill_files() -> N
     belongs in a script the model runs through the Bash tool.
     """
     files = _loader_expanded_files()
-    assert len(files) >= 6 + 1 + 6, f"expected the six skills, the commands and the agents; found {len(files)}"
+    assert len(files) >= 7 + 6, f"expected the seven skills and the agents; found {len(files)}"
     offenders = [f"{p.relative_to(REPO_ROOT)} {hit}" for p in files for hit in _loader_expansion_hits(p.read_text())]
     assert not offenders, "loader-expanded forms found:\n" + "\n".join(offenders)
 
@@ -151,7 +167,7 @@ def test_frontmatter_only_documented_keys(skill_md: Path) -> None:
     )
 
 
-@pytest.mark.parametrize("skill_md", _skill_md_files(), ids=lambda p: p.parent.name)
+@pytest.mark.parametrize("skill_md", _model_listed_skill_md_files(), ids=lambda p: p.parent.name)
 def test_frontmatter_has_when_to_use(skill_md: Path) -> None:
     """Regression lock: every skill must declare when_to_use.
 
@@ -207,11 +223,15 @@ def test_total_listing_budget_under_the_cap() -> None:
 
     If the total ever creeps near 6,000, trim description/when_to_use; do
     not raise the cap.
+
+    Only model-listed skills count: a `disable-model-invocation` skill is not in the listing.
     """
     soft_cap = 6000
     total = 0
     breakdown: list[str] = []
-    for skill_md in _skill_md_files():
+    listed = _model_listed_skill_md_files()
+    assert len(listed) >= 6 and "feedback" not in {p.parent.name for p in listed}, [p.parent.name for p in listed]
+    for skill_md in listed:
         fm, _ = _split_frontmatter(skill_md.read_text())
         desc = fm.get("description", "") or ""
         wtu = fm.get("when_to_use", "") or ""
@@ -219,7 +239,7 @@ def test_total_listing_budget_under_the_cap() -> None:
         total += n
         breakdown.append(f"  {skill_md.parent.name}: {n}")
     assert total <= soft_cap, (
-        f"Total listing budget across {len(_skill_md_files())} skills is "
+        f"Total listing budget across {len(listed)} skills is "
         f"{total} chars, exceeds {soft_cap}-char soft cap "
         f"(the listing budget at a 200K window). Trim description/when_to_use:\n" + "\n".join(breakdown)
     )
@@ -2255,7 +2275,7 @@ def test_cap_table_corpus_headroom_is_tracked() -> None:
     )
 
 
-@pytest.mark.parametrize("skill", sorted(SKILL_MD_CEILING))
+@pytest.mark.parametrize("skill", sorted(p.parent.name for p in _skill_md_files()))
 def test_description_is_regex_scanner_safe(skill: str) -> None:
     """`description` must read identically under a YAML parser and a naive regex.
 
@@ -4158,14 +4178,16 @@ def test_the_relative_script_check_passes_absolute_forms(line: str) -> None:
 
 
 def test_no_agent_command_or_shared_reference_runs_a_script_by_a_relative_path() -> None:
-    """The same rule outside the skill folders: agent bodies, commands and the shared references."""
+    """The same rule outside the six analysis skills: agent bodies, commands, the skills the per-skill
+    check does not reach (`feedback`), and the shared references."""
     plugin = SKILLS_ROOT.parent
     files = [
         *sorted((plugin / "agents").glob("*.md")),
         *sorted((plugin / "commands").glob("*.md")),
+        *[p for p in _skill_md_files() if p.parent.name not in SKILL_MD_CEILING],
         *sorted((plugin / "references").rglob("*.md")),
     ]
     assert len(files) > 10, f"scan reaches too few files: {files}"
-    assert any(p.parent.name == "agents" for p in files) and any(p.parent.name == "commands" for p in files)
+    assert any(p.parent.name == "agents" for p in files) and any(p.parent.name == "feedback" for p in files)
     offenders = _relative_script_offenders(files)
     assert not offenders, offenders

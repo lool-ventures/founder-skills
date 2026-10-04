@@ -27,7 +27,9 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PLUGIN = REPO_ROOT / "founder-skills"
-SKILLS = sorted(p.parent.name for p in (PLUGIN / "skills").glob("*/SKILL.md"))
+# `feedback` is a user-invoked skill that runs no shell and dispatches nothing, so it has no Step 0,
+# hand-offs or report pipeline for these contracts to check.
+SKILLS = sorted(p.parent.name for p in (PLUGIN / "skills").glob("*/SKILL.md") if p.parent.name != "feedback")
 TOKEN = "${CLAUDE_PLUGIN_ROOT}"
 VERSION = json.loads((PLUGIN / ".claude-plugin" / "plugin.json").read_text())["version"]
 

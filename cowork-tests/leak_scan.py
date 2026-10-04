@@ -139,15 +139,23 @@ def founder_text_blocks(cassette: dict, *, turn: int | None = None) -> list[str]
 # — it inflates the number a ratchet is supposed to drive down.
 #
 # This is a KEEP-SET, not a blocklist, which is why it does not contradict this file's design
-# note. It is bounded and self-maintaining: the members are read off `founder-skills/commands/`,
-# so publishing a command exempts it and deleting one un-exempts it, with no list to update.
+# note. It is bounded and self-maintaining: the members are read off the plugin's founder-only
+# commands (a skill whose frontmatter sets `disable-model-invocation: true`, or a file under
+# `commands/`), so publishing one exempts it and deleting one un-exempts it, with no list to update.
+# A skill the model may start is not a member: naming it in narration is not a command to type.
 _PLUGIN_ROOT = Path(__file__).resolve().parent.parent / "founder-skills"
 _PLUGIN_NAME = "founder-skills"
+_FOUNDER_ONLY = re.compile(r"\A---\n(?:(?!---\n).*\n)*?disable-model-invocation:\s*true\s*\n")
 
 
 def _published_commands() -> frozenset[str]:
     """Slash commands this plugin ships, in the forms a founder could be shown."""
     names = {p.stem for p in (_PLUGIN_ROOT / "commands").glob("*.md")}
+    names |= {
+        p.parent.name
+        for p in (_PLUGIN_ROOT / "skills").glob("*/SKILL.md")
+        if _FOUNDER_ONLY.match(p.read_text(encoding="utf-8"))
+    }
     forms: set[str] = set()
     for n in names:
         forms |= {f"/{n}", f"/{_PLUGIN_NAME}:{n}", f"{_PLUGIN_NAME}:{n}"}

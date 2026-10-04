@@ -27,7 +27,9 @@ _SKILLS_DIR = Path(__file__).resolve().parent.parent / "skills"
 _AGENTS_DIR = Path(__file__).resolve().parent.parent / "agents"
 _SHARED_REFS_DIR = Path(__file__).resolve().parent.parent / "references"
 
-SKILLS = sorted(p.name for p in _SKILLS_DIR.iterdir() if (p / "SKILL.md").is_file())
+# `feedback` is a user-invoked skill that runs no shell and dispatches nothing, so it has no Step 0,
+# hand-offs or report pipeline for these contracts to check.
+SKILLS = sorted(p.name for p in _SKILLS_DIR.iterdir() if (p / "SKILL.md").is_file() and p.name != "feedback")
 AGENTS = sorted(p.name for p in _AGENTS_DIR.glob("*.md"))
 
 # Documents that must never INSTRUCT a sub-agent to return the old JSON commentary envelope.

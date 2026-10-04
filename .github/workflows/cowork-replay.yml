@@ -406,7 +406,7 @@ jobs:
   # Token-free static gate (latest 1.x analyzers) for the Cowork host-loop /sessions path-fidelity class
   # — the failure mode the Context A/B file-hand-off work fixed — plus skill-body footguns and a
   # self-heal `find` that targets the wrong skill. The single plugin-root scan covers every
-  # contract-bearing file (all SKILL.md, agents/*, references/*, commands/*) — the OUTPUT_PATH /
+  # contract-bearing file (all SKILL.md, agents/*, references/*; the plugin ships no commands/) — the OUTPUT_PATH /
   # file-write contracts live across all of them. No model, no Docker, no cassettes.
   #
   # analyze-skill's /sessions→file-tool heuristic can over-flag a *teaching* example. As of 0.32.0 a
@@ -476,7 +476,7 @@ jobs:
           # analyze-skill --strict / lint-skill --strict → exit 1 on a finding. A plugin-root target
           # (0.32.0+) unions every contract-bearing file in one pass — no per-skill/per-agent loop.
           fail=0
-          echo "::group::analyze-skill founder-skills/ (all SKILL.md + agents + references + commands)"
+          echo "::group::analyze-skill founder-skills/ (all SKILL.md + agents + references)"
           cowork-harness analyze-skill founder-skills/ --strict || fail=1
           echo "::endgroup::"
           # lint-skill through a pinned, shrink-only allowlist (cowork-tests/lint-skill-allowlist.json):

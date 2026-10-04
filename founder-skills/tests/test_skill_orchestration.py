@@ -27,6 +27,11 @@ SKILLS_DIR = REPO_ROOT / "founder-skills" / "skills"
 
 SKILL_MD_FILES = sorted(SKILLS_DIR.glob("*/SKILL.md"))
 
+# Skills a founder invokes by name only. `feedback` drafts a message and hands back a link: it runs no
+# shell, writes no file and dispatches nothing, so the outputs-mount rules below have nothing to bind.
+USER_ONLY_SKILLS = frozenset({"feedback"})
+ANALYSIS_SKILL_MD_FILES = [p for p in SKILL_MD_FILES if p.parent.name not in USER_ONLY_SKILLS]
+
 
 def _parse_frontmatter(path: Path) -> dict[str, Any]:
     """Return the YAML-parsed frontmatter as a dict, or {} if missing."""
@@ -38,7 +43,7 @@ def _parse_frontmatter(path: Path) -> dict[str, Any]:
     return parsed if isinstance(parsed, dict) else {}
 
 
-@pytest.mark.parametrize("skill_md", SKILL_MD_FILES, ids=lambda p: p.parent.name)
+@pytest.mark.parametrize("skill_md", ANALYSIS_SKILL_MD_FILES, ids=lambda p: p.parent.name)
 def test_outputs_mount_append_only_guardrail(skill_md: Path) -> None:
     """Every skill must carry an append-only guardrail for the WHOLE outputs mount
     in Step 0 (before any file work): never delete anything under the mount —
@@ -129,8 +134,17 @@ def test_skill_md_does_not_disable_model_invocation(skill_md: Path) -> None:
     the skill onto the Cowork sub-agent dispatch path (where the literal
     `Bash` name doesn't resolve in the tool registry), reproducing the
     v0.4.0 failure mode.
+
+    `feedback` is exempt: it sets the flag so only a founder can start it, and it runs no shell, so the
+    tool-resolution failure above cannot reach it. The exemption holds only while that stays true.
     """
     fm = _parse_frontmatter(skill_md)
+    if skill_md.parent.name in USER_ONLY_SKILLS:
+        body = skill_md.read_text(encoding="utf-8")
+        assert not re.search(r"^\s*```(?:bash|sh|shell)\b", body, re.M) and "Bash" not in body, (
+            f"{skill_md.parent.name} now runs a shell; it can no longer be exempt from this invariant"
+        )
+        return
     assert fm.get("disable-model-invocation") is not True, (
         f"{skill_md.relative_to(REPO_ROOT)} sets disable-model-invocation:"
         " true — this puts the skill on the Cowork sub-agent dispatch path"

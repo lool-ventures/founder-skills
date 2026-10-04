@@ -20,7 +20,8 @@ def _theme_copies() -> list[Path]:
 
 
 def test_every_skill_has_a_theme_copy() -> None:
-    skills = sorted(p.name for p in _SKILLS_DIR.iterdir() if p.is_dir())
+    # `feedback` renders no page, so it carries no scripts at all.
+    skills = sorted(p.name for p in _SKILLS_DIR.iterdir() if p.is_dir() and p.name != "feedback")
     skills_with_theme = sorted(p.parent.parent.name for p in _theme_copies())
     assert skills_with_theme == skills, (
         f"skills missing scripts/_theme.py: {sorted(set(skills) - set(skills_with_theme))}"

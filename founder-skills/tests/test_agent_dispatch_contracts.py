@@ -742,12 +742,15 @@ def test_all_skills_have_disable_flag_removed() -> None:
     """Sanity check that the v0.4.1 inline-skill pivot landed in every
     SKILL.md frontmatter (disable-model-invocation: true must be absent).
     Currently 6 skills (deck-review, market-sizing, ic-sim,
-    financial-model-review, competitive-positioning, cap-table)."""
+    financial-model-review, competitive-positioning, cap-table).
+
+    `feedback` is skipped: it sets the flag so only a founder can start it, and
+    it runs no shell (test_skill_orchestration.py holds it to that)."""
     skills_dir = REPO_ROOT / "skills"
     checked = 0
     for skill_dir in sorted(skills_dir.iterdir()):
         skill_md = skill_dir / "SKILL.md"
-        if not skill_md.exists():
+        if not skill_md.exists() or skill_dir.name == "feedback":
             continue
         body = skill_md.read_text()
         # Frontmatter is between the first two `---` lines
