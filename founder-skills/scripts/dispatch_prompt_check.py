@@ -46,8 +46,8 @@ THE BUDGET. A round is held at most twice, then let through with one stderr line
 forever can wedge a run on its own bug. Counted per OUTPUT_PATH, i.e. per round -- the only real user
 prompts in a run are its first and its last, so a count per prompt would let round 1's holds spend
 round 2's. No disclosure code is written from here: compose reading a marker the hook wrote would
-make the report depend on the hook, and a missing marker would read as clean. The agent check shares
-the marker, so its holds and these count against one budget per OUTPUT_PATH.
+make the report depend on the hook, and a missing marker would read as clean. The agent check keeps its
+own marker and budget.
 
 NO PRINTED PROMPT. Held, with "run the prompt generator": the only way to satisfy it puts the
 comparand in the transcript.
@@ -71,7 +71,6 @@ dispatch is held as above:
 from __future__ import annotations
 
 import importlib.util
-import json
 import os
 import re
 import shlex
@@ -751,9 +750,22 @@ def latest_printed(rows: list[dict[str, Any]], context: str, output_path: str | 
     return found
 
 
+def strings(obj: Any) -> Any:
+    """Every string inside a decoded JSON value, so a marker is found in the text the runtime wrote and
+    not in an encoding that escapes non-ASCII characters, quotes and backslashes."""
+    if isinstance(obj, str):
+        yield obj
+    elif isinstance(obj, dict):
+        for value in obj.values():
+            yield from strings(value)
+    elif isinstance(obj, list):
+        for value in obj:
+            yield from strings(value)
+
+
 def _holds(rows: list[dict[str, Any]], output_path: str) -> int:
     mark = f"{MARKER}[{output_path}]"
-    return sum(1 for row in rows if row.get("type") == "user" and mark in json.dumps(row.get("message")))
+    return sum(1 for row in rows if row.get("type") == "user" and any(mark in t for t in strings(row.get("message"))))
 
 
 def cli_version(rows: list[dict[str, Any]]) -> tuple[int, ...] | None:
@@ -787,7 +799,7 @@ def rewrite_failed(rows: list[dict[str, Any]]) -> bool:
             continue
         if attachment.get("type") != "hook_additional_context":
             continue
-        text = json.dumps(attachment.get("content"))
+        text = "\n".join(strings(attachment.get("content")))
         for m in re.finditer(re.escape(REWRITE_MARKER) + r"\[(.+?)\] This dispatch was sent", text):
             rewritten.add(m.group(1))
     if not rewritten:

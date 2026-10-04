@@ -24,8 +24,9 @@ can run several (a deck review and a market sizing, side by side), and narrowing
 held the earlier skill's own dispatches in kept runs. The first line is matched by prefix with a word boundary, so
 `CONTEXT: CHECKLIST (repair)` still needs the right agent.
 
-THE BUDGET. Shared with the prompt-equality check: the same `[dispatch-check][<OUTPUT_PATH>]` marker,
-at most two holds per OUTPUT_PATH between them, then let through with one stderr line. With no
+THE BUDGET. Its own: the `[dispatch-type][<OUTPUT_PATH>]` marker, at most two holds per OUTPUT_PATH,
+then let through with one stderr line. Separate from the prompt check's, so holds for the wrong agent
+never spend the holds a steered prompt to the right agent gets. With no
 transcript the holds cannot be counted, so the dispatch passes rather than risk a hold that never
 ends.
 """
@@ -33,13 +34,12 @@ ends.
 from __future__ import annotations
 
 import importlib.util
-import json
 import os
 import re
 import sys
 from typing import Any
 
-MARKER = "[dispatch-check]"
+MARKER = "[dispatch-type]"
 MAX_HOLDS = 2
 DISPATCH_TOOLS = ("Agent", "Task")
 PLUGIN = "founder-skills"
@@ -123,7 +123,7 @@ def started_skills(rows: list[dict[str, Any]]) -> set[str]:
                     if isinstance(skill, str) and _bare(skill) in SKILLS:
                         found.add(_bare(skill))
         elif row.get("type") == "user":
-            for name in _COMMAND_RE.findall(json.dumps(message)):
+            for name in (n for t in strings(message) for n in _COMMAND_RE.findall(t)):
                 if _bare(name) in SKILLS:
                     found.add(_bare(name))
     return found
@@ -136,9 +136,22 @@ def expected_agents(context: str, skills: set[str]) -> tuple[str, ...]:
     return own or allowed
 
 
+def strings(obj: Any) -> Any:
+    """Every string inside a decoded JSON value, so a marker is found in the text the runtime wrote and
+    not in an encoding that escapes non-ASCII characters, quotes and backslashes."""
+    if isinstance(obj, str):
+        yield obj
+    elif isinstance(obj, dict):
+        for value in obj.values():
+            yield from strings(value)
+    elif isinstance(obj, list):
+        for value in obj:
+            yield from strings(value)
+
+
 def _holds(rows: list[dict[str, Any]], output_path: str) -> int:
     mark = f"{MARKER}[{output_path}]"
-    return sum(1 for row in rows if row.get("type") == "user" and mark in json.dumps(row.get("message")))
+    return sum(1 for row in rows if row.get("type") == "user" and any(mark in t for t in strings(row.get("message"))))
 
 
 def decide(payload: dict[str, Any]) -> dict[str, Any] | None:

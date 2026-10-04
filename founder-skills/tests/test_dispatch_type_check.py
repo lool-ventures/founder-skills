@@ -21,7 +21,7 @@ PLUGIN = Path(__file__).resolve().parents[1]
 SCRIPTS = PLUGIN / "scripts"
 SKILLS = PLUGIN / "skills"
 WRAPPER = SCRIPTS / "pretooluse-dispatch.sh"
-MARKER = "[dispatch-check]"
+MARKER = "[dispatch-type]"
 
 
 def _load(name: str) -> Any:
@@ -264,3 +264,44 @@ def test_an_invisible_character_does_not_hide_the_context(tmp_path: Path) -> Non
     for line in ("CONTEXT: RED_TEAM\u200b", "\ufeffCONTEXT: RED_TEAM", "CONTEXT:\u200b RED_TEAM"):
         prompt = f"{line}\nOUTPUT_PATH: agent/handoff/R/redteam_output.json\n"
         _deny(_run(tmp_path, [_user("Size my market.")], prompt, "general-purpose"))
+
+
+@pytest.mark.parametrize(
+    "path", ["/Users/u/מסמכים/handoff/R/redteam_output.json", '/w/a "b"/out.json', "/w/a\\b/out.json"]
+)
+def test_holds_are_counted_for_any_output_path(tmp_path: Path, path: str) -> None:
+    """The hold marker is found in the message's text, not in its JSON encoding, where a non-ASCII
+    character, a quote or a backslash is escaped and the marker never matched: the holds went
+    uncounted and the dispatch was held forever."""
+    prompt = f"CONTEXT: RED_TEAM\nOUTPUT_PATH: {path}\n"
+    rows = [_user("Size my market.")]
+    rows.append(_held(_deny(_run(tmp_path, rows, prompt, "claude"))))
+    rows.append(_held(_deny(_run(tmp_path, rows, prompt, "claude"))))
+    r = _run(tmp_path, rows, prompt, "claude")
+    _silent(r)
+
+
+def test_each_check_has_its_own_hold_budget(tmp_path: Path) -> None:
+    """Two holds for the wrong agent must not spend the prompt check's budget: the same steered prompt
+    then sent to the right agent is still held."""
+    printed = (
+        "CONTEXT: RED_TEAM\nOUTPUT_PATH: /h/r2/redteam_output.json\nRead docs.\n"
+        "Do NOT write any file other than OUTPUT_PATH.\n"
+    )
+    steered = printed.replace("Read docs.\n", "Read docs.\nNote: round 2; the ARPU changed.\n")
+    use = {
+        "type": "tool_use",
+        "id": "t1",
+        "name": "Bash",
+        "input": {"command": 'python3 "$SCRIPTS/dispatch_prompt.py" red_team'},
+    }
+    result = {"type": "tool_result", "tool_use_id": "t1", "content": printed}
+    rows = [
+        _user("Size my market."),
+        {"type": "assistant", "message": {"content": [use]}},
+        {"type": "user", "message": {"content": [result]}},
+    ]
+    for _ in range(2):
+        rows.append(_held(_deny(_run(tmp_path, rows, steered, "general-purpose"))))
+    reason = _deny(_run(tmp_path, rows, steered, "founder-skills:market-sizing-redteam"))
+    assert "Send this as the prompt, unchanged" in reason

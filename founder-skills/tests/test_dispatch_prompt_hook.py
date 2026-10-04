@@ -896,3 +896,23 @@ def test_a_notice_the_model_printed_is_not_a_rewrite_record() -> None:
         for r in rows
     ]
     assert mod.rewrite_failed(rows) and not mod.rewrite_failed(forged) and not mod.rewrite_failed(other)
+
+
+def test_a_rewrite_that_did_not_take_is_seen_for_a_non_ascii_path() -> None:
+    """The runtime's hook-context row is read as text; its JSON encoding escapes a non-ASCII path."""
+    mod = _hook()
+    path = "/Users/u/מסמכים/r2/redteam_output.json"
+    notice = {"type": "attachment", "attachment": {"type": "hook_additional_context", "content": [mod._notice(path)]}}
+    sent = f"CONTEXT: RED_TEAM\nOUTPUT_PATH: {path}\nSTEERED\nDo NOT write any file other than OUTPUT_PATH."
+    result = {"type": "user", "toolUseResult": {"prompt": sent}, "message": {"content": []}}
+    assert mod.rewrite_failed([notice, result])
+
+
+@pytest.mark.parametrize("path", ["/Users/u/מסמכים/handoff/R/r2/redteam_output.json", '/w/a "b"/redteam_output.json'])
+def test_prompt_check_holds_are_counted_for_any_output_path(tmp_path: Path, path: str) -> None:
+    printed = _GENERATED.replace("agent/handoff/R/r2/redteam_output.json", path)
+    steered = _STEERED.replace("agent/handoff/R/r2/redteam_output.json", path)
+    rows = [_user("Size my market."), *_printed(printed)]
+    rows.append(_held(_deny(_run(tmp_path, rows, steered))))
+    rows.append(_held(_deny(_run(tmp_path, rows, steered))))
+    _silent(_run(tmp_path, rows, steered))
