@@ -343,15 +343,41 @@ _STARTUP_RESEARCH_TEMPLATE = (
 )
 
 # A corrective redo re-sends the same prompt with one line added. The lines are a closed set, printed
-# here, so a redo is also a printed prompt and nothing is typed into it. (A repair dispatch -- a bad file,
-# a wrong path, a producer rejection -- is a different prompt that does not open with a context line, and
-# is not generated.) The line is placed before the closing line, which must stay last.
+# here, so a redo is also a printed prompt and nothing is typed into it. A producer's rejection goes back
+# the same way: read from the file its stderr was saved to, never typed, behind a fixed lead, quoted line
+# by line so no line of it reads as the prompt's context or closing line, and capped. Same text in
+# market-sizing's dispatch_prompt.py. The added lines go before the closing line, which must stay last.
 CORRECTIONS = {
     "missing-file": (
         "Your previous receipt claimed a file at OUTPUT_PATH but none exists; use Write to create exactly that path."
     ),
     "receipt-only": "Return ONLY the receipt JSON -- no fences, no prose.",
 }
+PRODUCER_REJECTED = "producer-rejected"
+REJECTION_LEAD = "The producer rejected your previous file. Its message, quoted:"
+REJECTION_TAIL = "Write a corrected file to OUTPUT_PATH."
+DETAIL_CAP = 2000
+
+
+def rejection_text(detail: str) -> str:
+    """The lines a producer-rejected redo adds. ValueError on an empty message."""
+    body = detail.strip()
+    if not body:
+        raise ValueError("the producer's message is empty")
+    if len(body) > DETAIL_CAP:
+        body = body[:DETAIL_CAP].rstrip() + " [cut at 2,000 characters]"
+    body = body.replace(_END.rstrip("\n"), "[closing line removed]")
+    quoted = "\n".join(f"> {line}".rstrip() for line in body.splitlines())
+    return f"{REJECTION_LEAD}\n{quoted}\n{REJECTION_TAIL}"
+
+
+def _correction_line(correction: str, detail: str | None) -> str:
+    if correction == PRODUCER_REJECTED:
+        if detail is None:
+            raise ValueError("producer-rejected needs the producer's message")
+        return rejection_text(detail)
+    return CORRECTIONS[correction]
+
 
 _TEMPLATES = {
     "moat_scoring": _MOAT_SCORING_TEMPLATE,
@@ -390,6 +416,7 @@ def render(
     job: str | None = None,
     correction: str | None = None,
     session_tree: bool | None = None,
+    detail: str | None = None,
 ) -> str:
     """The prompt for `context`, placeholders filled. No free text reaches it but the recorded job.
 
@@ -404,7 +431,7 @@ def render(
         else ""
     )
     if correction is not None:
-        text = text.replace(_END, f"{CORRECTIONS[correction]}\n{_END}")
+        text = text.replace(_END, f"{_correction_line(correction, detail)}\n{_END}")
     return (
         text.replace("<HANDOFF_AGENT>", handoff_agent.rstrip("/"))
         .replace("<ANALYSIS_DIR_AGENT>", analysis_dir_agent.rstrip("/"))
@@ -499,6 +526,7 @@ def red_team(
     handoff_agent: str,
     analysis_dir_agent: str,
     correction: str | None = None,
+    detail: str | None = None,
 ) -> str:
     """The RED_TEAM prompt. Raises FileNotFoundError naming any required artifact that is missing."""
     missing = [f for f in RED_TEAM_ARTIFACTS if not os.path.isfile(os.path.join(analysis_dir, f))]
@@ -559,7 +587,32 @@ def red_team(
     ]
     text = "\n".join(lines) + "\n"
     if correction is not None:
-        text = text.replace(_END, f"{CORRECTIONS[correction]}\n{_END}")
+        text = text.replace(_END, f"{_correction_line(correction, detail)}\n{_END}")
+    return text
+
+
+def _detail(correction: str | None, path: str | None) -> str | None:
+    """The producer's message for a producer-rejected redo, read from its file; exits 2 when it is
+    missing, unreadable or empty, or when a file is given for any other correction."""
+    if correction != PRODUCER_REJECTED:
+        if path is not None:
+            print("Error: --detail-file is read only with --correction producer-rejected", file=sys.stderr)
+            sys.exit(2)
+        return None
+    if path is None:
+        print(
+            "Error: --correction producer-rejected needs --detail-file <the producer's saved stderr>", file=sys.stderr
+        )
+        sys.exit(2)
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            text = fh.read()
+    except OSError as e:
+        print(f"Error: cannot read --detail-file {path}: {e}", file=sys.stderr)
+        sys.exit(2)
+    if not text.strip():
+        print(f"Error: --detail-file {path} is empty; save the producer's stderr to it first", file=sys.stderr)
+        sys.exit(2)
     return text
 
 
@@ -573,13 +626,17 @@ def main() -> None:
     # folder a prompt names comes from where this script runs (module docstring).
     p.add_argument("--plugin-root-agent", help=argparse.SUPPRESS)
     p.add_argument("--scoring-basis", choices=SCORING_BASES, default="shipped")
-    p.add_argument("--correction", choices=sorted(CORRECTIONS), help="a corrective redo's one added line")
+    p.add_argument(
+        "--correction", choices=sorted([*CORRECTIONS, PRODUCER_REJECTED]), help="a corrective redo's added line"
+    )
+    p.add_argument("--detail-file", help="producer-rejected: the file the producer's stderr was saved to")
     p.add_argument(
         "--analysis-dir",
         help="the artifacts dir in THIS shell's namespace (positioning_scoring reads the job; red_team checks it)",
     )
     p.add_argument("--handoff-dir", help="the hand-off dir in THIS shell's namespace (red_team lists its docs/)")
     a = p.parse_args()
+    detail = _detail(a.correction, a.detail_file)
     if a.context == "positioning_scoring" and not a.analysis_dir:
         print("Error: positioning_scoring needs --analysis-dir to read the job to be done", file=sys.stderr)
         sys.exit(2)
@@ -595,6 +652,7 @@ def main() -> None:
                 handoff_agent=a.handoff_agent,
                 analysis_dir_agent=a.analysis_dir_agent,
                 correction=a.correction,
+                detail=detail,
             )
         except FileNotFoundError as exc:
             print(f"Error: the analysis is not finished -- missing {exc}", file=sys.stderr)
@@ -610,6 +668,7 @@ def main() -> None:
             scoring_basis=a.scoring_basis,
             job=job_to_be_done(a.analysis_dir) if a.context == "positioning_scoring" else None,
             correction=a.correction,
+            detail=detail,
         )
     )
 
