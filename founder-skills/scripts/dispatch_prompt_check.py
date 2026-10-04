@@ -549,7 +549,7 @@ def generator_block(command: str, distrusted: frozenset[str] | set[str] = frozen
         return False, []
     env, raw, assigned = _env(cmds)
     kinds = [_kind(c, raw, assigned, set(distrusted)) for c in cmds]
-    gens = [c for c, k in zip(cmds, kinds, strict=True) if k == "generator" and not c.substituted]
+    gens = [c for c, k in zip(cmds, kinds) if k == "generator" and not c.substituted]
     if not gens:
         return False, []
     kept = []
@@ -574,7 +574,7 @@ def _block_quiet(
     `cat`/`head`/`tail` in the block prints one of `files` (a file a generator wrote)."""
     shown = False
     echoes = []
-    for c, kind in zip(cmds, kinds, strict=True):
+    for c, kind in zip(cmds, kinds):
         if c.reads_input or (c.piped and kind not in ("quiet", "generator")):
             return False, False
         if kind in ("generator", "assign"):

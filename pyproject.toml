@@ -29,6 +29,16 @@ line-length = 120
 # docs/internal/ is gitignored; eval-set scripts embed long HTML/JS templates
 # we don't want to lint. Excluding the whole tree.
 extend-exclude = ["docs/internal/"]
+# The hook modules run host-native under macOS's system python3 (3.9) at the host loop: lint them as
+# 3.9 so no 3.10 construct is suggested there (tests/test_hook_python_floor.py checks the same set).
+[tool.ruff.per-file-target-version]
+"founder-skills/scripts/pretooluse_dispatch.py" = "py39"
+"founder-skills/scripts/dispatch_prompt_check.py" = "py39"
+"founder-skills/scripts/dispatch_type_check.py" = "py39"
+"founder-skills/scripts/two_figures_check.py" = "py39"
+"founder-skills/scripts/stop_handover_check.py" = "py39"
+"founder-skills/scripts/_handover_check.py" = "py39"
+"founder-skills/scripts/_delivery_check.py" = "py39"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM"]
