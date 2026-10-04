@@ -605,3 +605,84 @@ def test_no_condition_is_keyed_on_the_token_showing(skill: str) -> None:
         ln for ln in text.splitlines() if re.search(r"(?i)\bif\b[^.\n]*\bshows?\b[^.\n]*\$\{CLAUDE_PLUGIN_ROOT\}", ln)
     ]
     assert not bad, f"{skill}: a condition is keyed on the token itself: {bad}"
+
+
+# --- a deck rendered or copied for the Read tool lands where the Read tool reaches ---------------
+#
+# On a local session the Read tool reaches the outputs folder by its own (host) name and is refused both
+# `$STAGING_DIR` (a /tmp path in the VM) and the uploads mount's shell path. So a PowerPoint deck is
+# converted into this run's hand-off folder and the block prints the Read tool's path to it; a deck the
+# Read tool cannot reach in place is copied there. The hand-off folder is working data, never delivered.
+
+FAKE_SOFFICE = """#!/bin/sh
+out=""; prev=""; for a in "$@"; do [ "$prev" = "--outdir" ] && out="$a"; prev="$a"; last="$a"; done
+b="$(basename "$last")"; printf '%%PDF-1.4 fake' > "$out/${b%.*}.pdf"
+"""
+
+
+def _fence_with(skill: str, marker: str) -> str:
+    text = (PLUGIN / "skills" / skill / "SKILL.md").read_text(encoding="utf-8")
+    blocks: list[str] = [b for b in re.findall(r"^```bash\n(.*?)^```", text, re.MULTILINE | re.DOTALL) if marker in b]
+    assert len(blocks) == 1, f"{skill}: expected one block containing {marker!r}, found {len(blocks)}"
+    return blocks[0]
+
+
+def _run_deck_block(skill: str, tmp_path: Path, deck_name: str, *, agent_differs: bool) -> tuple[str, Path, Path]:
+    """Run the skill's conversion block with a stand-in converter. Returns (printed, hand-off, staging)."""
+    marker = "DECK_READ=" if skill == "deck-review" else "--convert-to pdf"
+    block = _fence_with(skill, marker)
+    handoff, staging, uploads, bin_dir = (tmp_path / d for d in ("handoff", "staging", "uploads", "bin"))
+    for d in (handoff, staging, uploads, bin_dir):
+        d.mkdir()
+    (uploads / deck_name).write_bytes(b"deck")
+    soffice = bin_dir / "soffice"
+    soffice.write_text(FAKE_SOFFICE)
+    soffice.chmod(0o755)
+    agent = "/Users/me/Library/outputs/artifacts/deck-review-acme/handoff/r1" if agent_differs else str(handoff)
+    fills = {
+        "<deck path>": str(uploads / deck_name),
+        "<REVIEW_DIR>/handoff/<RUN_ID>": str(handoff),
+        "<printed HANDOFF_DIR>": str(handoff),
+        "<printed HANDOFF_AGENT>": agent,
+    }
+    for placeholder, value in fills.items():
+        block = block.replace(placeholder, value)
+    assert "<" not in re.sub(r"<<'?\w+'?|2>&1|</?\w+>", "", block.split("osascript")[0]), "an unfilled placeholder"
+    script = tmp_path / "convert.sh"
+    script.write_text(block + "\n", encoding="utf-8")
+    proc = subprocess.run(
+        ["/usr/bin/env", "-i", f"PATH={bin_dir}:/usr/bin:/bin", f"STAGING_DIR={staging}", "sh", str(script)],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert proc.returncode == 0, proc.stderr
+    return proc.stdout.strip().splitlines()[-1], handoff, staging
+
+
+@pytest.mark.parametrize("skill", ["deck-review", "market-sizing"])
+@pytest.mark.parametrize("agent_differs", [True, False], ids=["local-session", "shared-filesystem"])
+def test_staged_pdf_is_read_from_a_readable_folder(skill: str, agent_differs: bool, tmp_path: Path) -> None:
+    """A converted PowerPoint deck is written to the hand-off folder (never $STAGING_DIR), and what the
+    block prints for the Read tool is that file under the hand-off folder's Read-tool name."""
+    printed, handoff, staging = _run_deck_block(skill, tmp_path, "Acme Deck.pptx", agent_differs=agent_differs)
+    assert (handoff / "Acme Deck.pdf").is_file(), f"{skill}: the PDF did not land in the hand-off folder"
+    assert not list(staging.glob("*.pdf")), f"{skill}: a PDF landed in $STAGING_DIR, which Read cannot reach"
+    agent = "/Users/me/Library/outputs/artifacts/deck-review-acme/handoff/r1" if agent_differs else str(handoff)
+    assert printed == f"{agent}/Acme Deck.pdf", f"{skill}: printed {printed!r}, not the Read tool's path"
+    text = (PLUGIN / "skills" / skill / "SKILL.md").read_text(encoding="utf-8")
+    assert '-env:UserInstallation="file://$STAGING_DIR/.lo"' in text, f"{skill}: the profile left $STAGING_DIR"
+    assert not re.search(r"(?i)\bread\b[^.\n]*from `\$STAGING_DIR`", text), f"{skill}: a Read from $STAGING_DIR"
+
+
+def test_a_pdf_deck_the_read_tool_cannot_reach_is_copied_to_the_handoff_folder(tmp_path: Path) -> None:
+    printed, handoff, _ = _run_deck_block("deck-review", tmp_path, "acme.pdf", agent_differs=True)
+    assert (handoff / "acme.pdf").is_file()
+    assert printed == "/Users/me/Library/outputs/artifacts/deck-review-acme/handoff/r1/acme.pdf"
+
+
+def test_a_pdf_deck_on_a_shared_filesystem_is_read_in_place(tmp_path: Path) -> None:
+    """CLI and cloud: the Read tool takes the shell's path, so nothing is copied."""
+    printed, handoff, _ = _run_deck_block("deck-review", tmp_path, "acme.pdf", agent_differs=False)
+    assert not (handoff / "acme.pdf").exists()
+    assert printed == str(tmp_path / "uploads" / "acme.pdf")

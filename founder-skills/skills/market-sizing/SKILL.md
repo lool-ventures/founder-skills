@@ -173,7 +173,7 @@ Plugin folder for Reads and prompts (as loaded): `${CLAUDE_PLUGIN_ROOT}` — thi
 
 **Plugin paths.** If Step 0 printed `READ_ROOT=`, this skill's text arrived without its plugin folder filled in. Use that value in place of `${CLAUDE_PLUGIN_ROOT}` in every Read and sub-agent prompt, including where a later step says to leave that path literal. If it did not print `READ_ROOT=`, use the paths as shown. The folder comes from Step 0's filesystem search, not from a skill file or the "Base directory" line, which can name a folder that does not exist. These are setup details: updates to the founder are about their company, not file locations, printed paths or plugin versions.
 
-**Outputs mount is append-only.** Everything under the promoted outputs mount (`.../mnt/outputs/`, not just `$ANALYSIS_DIR`) is write-allowed; by this skill's rule, not a platform limit, nothing there is deleted, since a removed file may be one the founder or a later step still needs: never `rm`, move away, or empty anything under it — **including files you created yourself**. Never create ad-hoc scratch anywhere under the outputs mount (no `_src/` copies, no run-state note files); scratch belongs in `$STAGING_DIR` (a `/tmp` dir, defined below). Do not "clean up" the outputs folder before delivering — extra working files there are expected and harmless.
+**Outputs mount is append-only.** Everything under the promoted outputs mount (`.../mnt/outputs/`, not just `$ANALYSIS_DIR`) is write-allowed; by this skill's rule, not a platform limit, nothing there is deleted, since a removed file may be one the founder or a later step still needs: never `rm`, move away, or empty anything under it — **including files you created yourself**. Never create ad-hoc scratch anywhere under the outputs mount (no `_src/` copies, no run-state note files); scratch belongs in `$STAGING_DIR` (a `/tmp` dir, defined below). One exception: a PowerPoint deck's PDF rendering goes in the run's hand-off folder, because on a local session the Read tool cannot reach `$STAGING_DIR`. Do not "clean up" the outputs folder before delivering — extra working files there are expected and harmless.
 
 **If `ARTIFACTS_ROOT` resolves to `$(pwd)/artifacts` but no `artifacts/` directory exists at `$(pwd)`:** Use `Glob` with `path` set to the printed `ARTIFACTS_ROOT` and pattern `founder-context-*.json` to find earlier artifacts (always pass `path`: on a cloud session the working folder is the home directory). If nothing is found, `mkdir -p "$ARTIFACTS_ROOT"` and proceed.
 
@@ -352,6 +352,9 @@ run, whatever the transcript says.
 **A `.pptx`/`.ppt` deck cannot be read directly** — it is binary and Read refuses it, so the market figures inside it are invisible unless you do one of these first. Prefer rendering, since TAM/SAM/SOM claims frequently live in a chart rather than in a sentence:
 
 ```bash
+DECK_SRC="<deck path>"
+HANDOFF_DIR="<printed HANDOFF_DIR>"; HANDOFF_AGENT="<printed HANDOFF_AGENT>"
+B="$(basename "$DECK_SRC")"
 for c in libreoffice soffice /Applications/LibreOffice.app/Contents/MacOS/soffice; do
   command -v "$c" >/dev/null 2>&1 || continue
   # -env:UserInstallation is required: LibreOffice writes a first-run profile under
@@ -359,13 +362,14 @@ for c in libreoffice soffice /Applications/LibreOffice.app/Contents/MacOS/soffic
   # nothing. Errors are shown, not suppressed — a silent failure looks exactly like
   # having no converter and sends you down the wrong branch.
   "$c" --headless -env:UserInstallation="file://$STAGING_DIR/.lo" \
-    --convert-to pdf --outdir "$STAGING_DIR" "$DECK_SRC" 2>&1 | tail -3
+    --convert-to pdf --outdir "$HANDOFF_DIR" "$DECK_SRC" 2>&1 | tail -3
   break
 done
-ls -1 "$STAGING_DIR"/*.pdf 2>/dev/null || echo "no pdf — use the text fallback below"
+# Printed as the Read tool's path: the hand-off folder is the one it reaches ($STAGING_DIR is not, on a local session).
+if [ -s "$HANDOFF_DIR/${B%.*}.pdf" ]; then echo "$HANDOFF_AGENT/${B%.*}.pdf"; else echo "no pdf — use the text fallback below"; fi
 ```
 
-Read the resulting PDF from `$STAGING_DIR`. If no converter is available, fall back to
+Read the PDF at the path it printed (in this run's hand-off folder: working data, not a deliverable). If no converter is available, fall back to
 `python3 "$SHARED_SCRIPTS/pptx_to_text.py" "$DECK_SRC" --pretty`, which recovers slide text, table cells and speaker notes — enough for stated market claims, though any figure that exists only inside a chart image is lost. Say so rather than treating the extraction as complete: a market claim you could not read is not a market claim the deck failed to make.
 
 Extract all market-relevant data. If the deck includes explicit TAM/SAM/SOM claims, record them in `inputs.json` under `existing_claims`.

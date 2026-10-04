@@ -179,7 +179,7 @@ Plugin folder for Reads and prompts (as loaded): `${CLAUDE_PLUGIN_ROOT}` — thi
 
 **Plugin paths.** If Step 0 printed `READ_ROOT=`, this skill's text arrived without its plugin folder filled in. Use that value in place of `${CLAUDE_PLUGIN_ROOT}` in every Read and sub-agent prompt, including where a later step says to leave that path literal. If it did not print `READ_ROOT=`, use the paths as shown. The folder comes from Step 0's filesystem search, not from a skill file or the "Base directory" line, which can name a folder that does not exist. These are setup details: updates to the founder are about their company, not file locations, printed paths or plugin versions.
 
-**Outputs mount is append-only.** Everything under the promoted outputs mount (`.../mnt/outputs/`, not just `$REVIEW_DIR`) is write-allowed; by this skill's rule, not a platform limit, nothing there is deleted, since a removed file may be one the founder or a later step still needs: never `rm`, move away, or empty anything under it — **including files you created yourself** (scripts remove only their own files, e.g. `setup_run.py --clean` its earlier-run checkpoints). Never create ad-hoc scratch anywhere under the outputs mount (no `_src/` copies, no run-state note files); scratch belongs in `$STAGING_DIR` (a `/tmp` dir, defined below). Do not "clean up" the outputs folder before delivering — extra working files there are expected and harmless. The uploaded deck is already readable in place from the uploads mount; never copy it under outputs to make it readable.
+**Outputs mount is append-only.** Everything under the promoted outputs mount (`.../mnt/outputs/`, not just `$REVIEW_DIR`) is write-allowed; by this skill's rule, not a platform limit, nothing there is deleted, since a removed file may be one the founder or a later step still needs: never `rm`, move away, or empty anything under it — **including files you created yourself** (scripts remove only their own files, e.g. `setup_run.py --clean` its earlier-run checkpoints). Never create ad-hoc scratch anywhere under the outputs mount (no `_src/` copies, no run-state note files); scratch belongs in `$STAGING_DIR` (a `/tmp` dir, defined below). Do not "clean up" the outputs folder before delivering — extra working files there are expected and harmless. One exception: Step 2's block may put the deck (its PDF rendering, or a copy) in this run's hand-off folder, the one place the Read tool reaches it; that is working data, never a deliverable.
 
 **There is no quick-check lane here, and that is deliberate.** The 35 criteria are scored from per-slide sub-agent reviews — those reviews ARE the work, so dropping them leaves only the checklist scaffolding. So when the founder asks a small
 conversational question, do not improvise an answer from your own reasoning under this skill's name —
@@ -352,11 +352,13 @@ Do this FIRST, before reading anything. Substitute the uploaded deck's path for 
 
 ```bash
 DECK_SRC="<deck path>"
-DECK_READ="$DECK_SRC"; CONVERTER=""; SOFFICE=""
+HANDOFF_DIR="<REVIEW_DIR>/handoff/<RUN_ID>"; HANDOFF_AGENT="<printed HANDOFF_AGENT>"
+DECK_READ="$DECK_SRC"; CONVERTER=""; SOFFICE=""; B="$(basename "$DECK_SRC")"
 case "$DECK_SRC" in
   *.pptx|*.PPTX|*.ppt|*.PPT)
     DECK_READ="no-converter"
-    B="$(basename "$DECK_SRC")"; PDF_OUT="$STAGING_DIR/${B%.*}.pdf"
+    # Into the hand-off folder, which Read reaches; never $STAGING_DIR (refused on a local session).
+    PDF_OUT="$HANDOFF_DIR/${B%.*}.pdf"
     # Two converters, tried in this order and each ONLY when it is installed: LibreOffice
     # on any OS, then Keynote on macOS. A host with neither takes the text-only path below
     # unchanged.
@@ -371,7 +373,7 @@ case "$DECK_SRC" in
         # dies (exit 77) having converted nothing. Do not suppress errors — a silent
         # failure is indistinguishable from having no converter, and misreports why.
         "$SOFFICE" --headless -env:UserInstallation="file://$STAGING_DIR/.lo" \
-          --convert-to pdf --outdir "$STAGING_DIR" "$DECK_SRC" 2>&1 | tail -3
+          --convert-to pdf --outdir "$HANDOFF_DIR" "$DECK_SRC" 2>&1 | tail -3
         ;;
       keynote)
         # Keynote imports PowerPoint and exports PDF. `launch` first: a Keynote left running
@@ -399,9 +401,15 @@ KEYNOTE_EOF
         ;;
     esac
     if [ -s "$PDF_OUT" ]; then
-      DECK_READ="$PDF_OUT"
+      DECK_READ="$HANDOFF_AGENT/${B%.*}.pdf"
     elif [ -n "$CONVERTER" ]; then
       DECK_READ="convert-failed"
+    fi
+    ;;
+  *)
+    # A local session's Read tool is refused the shell's path to the upload: Read a copy instead.
+    if [ "$HANDOFF_AGENT" != "$HANDOFF_DIR" ] && cp "$DECK_SRC" "$HANDOFF_DIR/"; then
+      DECK_READ="$HANDOFF_AGENT/$B"
     fi
     ;;
 esac
@@ -410,8 +418,8 @@ echo "$DECK_READ"
 
 Then branch on what it printed:
 
-- **A path** — read THAT file with the Read tool's `pages` parameter, exactly as for any PDF,
-  and set `input_format` to `"pptx"`. The slides are now genuinely visible, so the Design &
+- **A path** — read THAT path with the Read tool's `pages` parameter, exactly as for any PDF
+  (it is the Read tool's path, not the shell's), and for a PowerPoint deck set `input_format` to `"pptx"`. The slides are now genuinely visible, so the Design &
   Readability criteria are scored normally.
 - **`convert-failed`** — a converter exists and broke; its error printed just above. Report
   that error verbatim when you tell the founder what happened, then take the same fallback

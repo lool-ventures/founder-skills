@@ -900,7 +900,10 @@ SKILL_MD_CEILING: dict[str, int] = {
     # folder for the shell (REFS=/SHARED_REFS=, a VM path the Read tool is refused) and names the folder
     # for Reads in prose, as loaded; every read directive names its file under the plugin token, never a
     # bare relative references/ path or a printed shell value.
-    "market-sizing": 105_431,
+    # 105,431 -> 105,936 (+505 B) on 2026-10-05: a PowerPoint deck converts into the run's hand-off folder,
+    # not $STAGING_DIR (refused to the Read tool on a local session), and the block prints the Read tool's
+    # path to the PDF. The append-only paragraph names the exception.
+    "market-sizing": 105_936,
     # fmr raised for two founder-facing-correctness items measured in a live run: the CHECKLIST
     # dispatch now forbids citing our artifact filenames in evidence (that run put `inputs.json` in 10
     # items' evidence, printed verbatim into the founder's report), and the producer pipe passes
@@ -1380,7 +1383,11 @@ SKILL_MD_CEILING: dict[str, int] = {
     # folder for the shell (REFS=/SHARED_REFS=, a VM path the Read tool is refused) and names the folder
     # for Reads in prose, as loaded; every read directive names its file under the plugin token, never a
     # bare relative references/ path or a printed shell value.
-    "deck-review": 111_873,
+    # 111,873 -> 112,456 (+583 B) on 2026-10-05: a PowerPoint deck converts into the run's hand-off folder,
+    # not $STAGING_DIR (refused to the Read tool on a local session), and the block prints the Read tool's
+    # path to the PDF. A deck the Read tool cannot reach in place is copied there; the append-only
+    # paragraph names the exception.
+    "deck-review": 112_456,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
