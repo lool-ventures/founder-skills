@@ -768,8 +768,9 @@ def _distrusts(command: str) -> set[str]:
     """Generators a shell block could have rewritten. A generator named by anything but a run of it or a
     read-only command; and every generator when the block writes into the plugin (a redirect, an
     in-place edit, a copy, link or extraction whose target points there), runs inline code that names
-    it, or cannot be read and mentions it. Names are read with the block's own assignments filled in,
-    so a name spelt apart (`G=dispatch_prompt; ... "$G.py"`) is still seen."""
+    it, or cannot be read and mentions it in a line that writes (`_raw_writes_into_plugin`). Names are
+    read with the block's own assignments filled in, so a name spelt apart (`G=dispatch_prompt; ...
+    "$G.py"`) is still seen."""
     cmds = _parse_block(command)
     if cmds is None:
         return set(GENERATORS) if _raw_writes_into_plugin(command) else set()
@@ -810,11 +811,140 @@ _RAW_WRITE_RE = re.compile(
 )
 
 
+# Commands a line may run beside a generator that saves its output: they print, and write nothing.
+_RAW_READERS = frozenset({"echo", "printf", "wc", "ls", "test", "[", "true", "cat", "head", "tail"})
+_RAW_SEGMENT_SEPS = frozenset({";", "&&", "||", "|"})
+_RAW_QUIET_REDIRECTS = (("2", ">", "/dev/null"), ("2", ">&", "1"))
+
+
+def _raw_tokens(line: str) -> list[str] | None:
+    lex = shlex.shlex(line, posix=True, punctuation_chars=True)
+    lex.whitespace_split = True
+    lex.commenters = ""
+    try:
+        return list(lex)
+    except ValueError:
+        return None
+
+
+_RAW_OPENERS = frozenset({"for", "while", "until", "if", "case", "select", "{", "("})
+_RAW_CLOSERS = frozenset({"done", "fi", "esac", "}", ")"})
+
+
+def _raw_env(lines: list[str], names: set[str]) -> dict[str, str] | None:
+    """The literal assignments of `lines` (a raw block's lines before the one judged) that bash certainly
+    ran: a command of assignments only, outside any loop, test or group, to a name the whole block
+    assigns once (`names`). None when the nesting cannot be followed."""
+    env: dict[str, str] = {}
+    depth = 0
+    for line in lines:
+        tokens = _raw_tokens(line) or []
+        segment: list[str] = []
+        for tok in [*tokens, ";"]:
+            if tok not in _RAW_SEGMENT_SEPS:
+                segment.append(tok)
+                continue
+            head = segment[0] if segment else ""
+            if head in _RAW_OPENERS:
+                depth += 1
+            elif head in _RAW_CLOSERS:
+                depth -= 1
+            elif depth == 0 and segment and all(_ASSIGN_RE.match(w) for w in segment):
+                for word in segment:
+                    name, _, value = word.partition("=")
+                    expanded = _expand(value, env)
+                    if name in names and expanded is not None:
+                        env[name] = expanded
+            segment = []
+        if depth < 0:
+            return None
+    return env
+
+
+def _saves_generator_output_elsewhere(line: str, env: dict[str, str], assigned: set[str]) -> bool:
+    """A raw line that only runs a generator and saves its output outside the plugin, all or nothing: as
+    in the parsed branch, a generator named as the script being run is not a mention of it. Exactly one
+    command is `python<N> <generator> ...` with no assignment before it, the generator a trusted one
+    (`_trusted_generator`), every argument resolved by `env` and none in the plugin or naming a
+    generator, and its only write its stdout to an absolute path that is neither; every other command is
+    a reader with no write. No substitution, no in-place flag, no `tee`; any doubt and
+    the line is not exempt."""
+    if "`" in line or "$(" in line:
+        return False
+    tokens = _raw_tokens(line)
+    if not tokens:
+        return False
+    segments: list[list[str]] = [[]]
+    for tok in tokens:
+        if tok in _RAW_SEGMENT_SEPS:
+            segments.append([])
+        else:
+            segments[-1].append(tok)
+    runs = 0
+    for seg in segments:
+        words: list[str] = []
+        redirects: list[tuple[str, str, str]] = []
+        i = 0
+        while i < len(seg):
+            tok = seg[i]
+            if tok and tok[0] in "<>&" or tok.endswith((">", "<")):
+                if i + 1 >= len(seg):
+                    return False
+                fd = words.pop() if words and words[-1].isdigit() else ""
+                redirects.append((fd, tok, seg[i + 1]))
+                i += 2
+                continue
+            words.append(tok)
+            i += 1
+        names = words
+        if not names or _ASSIGN_RE.match(names[0]) or "-i" in words or "tee" in words:
+            return False
+        quiet = all(r in _RAW_QUIET_REDIRECTS for r in redirects)
+        if names[0] in _RAW_READERS:
+            if not quiet or (names[0] == "printf" and "-v" in names):
+                return False
+            if any(_into_plugin(w) or "dispatch_" in w or "prompt.py" in w for w in names):
+                return False
+            continue
+        if not (re.fullmatch(r"python[0-9.]*", names[0]) and len(names) > 1):
+            return False
+        if not _trusted_generator(names[1], env, assigned, set()):
+            return False
+        for arg in names[2:]:
+            value = _expand(arg, env)
+            if value is None or _into_plugin(value) or os.path.basename(value) in GENERATORS:
+                return False
+        runs += 1
+        out = [r for r in redirects if r not in _RAW_QUIET_REDIRECTS]
+        if len(out) > 1 or (out and (out[0][0] not in ("", "1") or out[0][1] not in (">", ">|"))):
+            return False
+        if out:
+            target = _expand(out[0][2], env)
+            if target is None or not target.startswith("/") or _into_plugin(target):
+                return False
+            if os.path.basename(target) in GENERATORS:
+                return False
+    return runs == 1
+
+
 def _raw_writes_into_plugin(command: str) -> bool:
     """For a block the parser cannot read (a heredoc, a loop): whether any line both writes (a redirect,
     a copy, an in-place edit, a file opened by inline code) and names the plugin or a generator. Read
-    line by line, so a heredoc's body is checked too."""
-    for line in command.splitlines():
+    line by line, so a heredoc's body is checked too. A line that only runs a generator and saves its
+    output outside the plugin is not such a line, unless the block changes folder (a relative path
+    elsewhere in it could then land in the plugin) or has a heredoc (whose body is not commands)."""
+    lines = command.splitlines()
+    off = "<<" in command or re.search(r"(?<![\w.-])(?:cd|pushd|popd)(?![\w.-])", command) is not None
+    # Every name the block assigns anywhere (a loop or heredoc body, a command's prefix, `export`): one
+    # assigned twice is never resolved.
+    counts: dict[str, int] = {}
+    for name in re.findall(r"(?<![\w$./-])([A-Za-z_][A-Za-z0-9_]*)=", command):
+        counts[name] = counts.get(name, 0) + 1
+    once = {name for name, n in counts.items() if n == 1}
+    for i, line in enumerate(lines):
+        env = None if off else _raw_env(lines[:i], once)
+        if env is not None and _saves_generator_output_elsewhere(line, env, set(counts)):
+            continue
         if not _RAW_WRITE_RE.search(line.replace("2>&1", "").replace(">/dev/null", "")):
             continue
         if _into_plugin(line) or "dispatch_" in line or "prompt.py" in line:

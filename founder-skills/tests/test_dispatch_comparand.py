@@ -336,6 +336,175 @@ def test_a_block_the_parser_cannot_read_that_writes_into_the_plugin_distrusts(bl
     assert DPC.comparands(rows) == [], block
 
 
+# A block the parser cannot read (a loop, multi-line inline code) that runs the generator and saves its
+# output OUTSIDE the plugin. Such a block writes nothing into the plugin, so a later print still counts.
+_SYNCED = "/root/.claude/plugins/synced/plug0001/founder-skills"
+_MS_A = "/home/claude/artifacts/market-sizing-acme"
+_RT_ARGS = '--run-id "$RUN_ID" --analysis-dir "$A" --handoff-dir "$H" --analysis-dir-agent "$A" --handoff-agent "$H"'
+_LOOPED = (
+    f"P={_SYNCED}; SH=$P/scripts; SC=$P/{MS_SCRIPTS}\n"
+    f"A={_MS_A}; RUN_ID=20990101T000000Z; H=$A/handoff/$RUN_ID\n"
+    "for s in sensitivity checklist; do\n"
+    'printf \'%s\' "{\\"status\\": \\"complete\\", \\"output_path\\": \\"$H/${s}_output.json\\"}" | '
+    'python3 $SH/check_handoff.py "$H/${s}_output.json" --agent-path "$H/${s}_output.json" --receipt-json - '
+    '>/dev/null; echo "gate_$s=$?"; done\n'
+    'cat $H/sensitivity_output.json | python3 $SC/sensitivity.py --pretty --run-id "$RUN_ID" '
+    '--sizing "$A/sizing.json" --inputs "$A/inputs.json" -o "$A/sensitivity.json"; echo "sens=$?"\n'
+    'cat $H/checklist_output.json | python3 $SC/checklist.py --pretty --run-id "$RUN_ID" '
+    '--sizing "$A/sizing.json" -o "$A/checklist.json"; echo "chk=$?"\n'
+    'python3 -c "\n'
+    "import json\n"
+    "s=json.load(open('$A/sensitivity.json')); print('most_sensitive',s.get('most_sensitive'))\n"
+    "c=json.load(open('$A/checklist.json')); print({k:v for k,v in c['summary'].items() if k!='failed_items'})\n"
+    "for i in c['summary']['failed_items']: print('-',i['id'],':',i['notes'])\"\n"
+    "# docs mirror + OCR + red-team prompt\n"
+    "mkdir -p $H/docs && cp /root/.claude/uploads/up0001/0000abcd-synthetic-deck-scanned.pdf $H/docs/\n"
+    'python3 $SC/ocr_uploads.py --uploads-dir "$H/docs" --out "$H/ocr"; echo "ocr=$?"\n'
+    f"python3 $SC/dispatch_prompt.py red_team {_RT_ARGS} > /tmp/market-sizing-acme.staging.AAAA01/redteam_prompt.txt; "
+    'echo "rt_prompt=$?"; wc -c /tmp/market-sizing-acme.staging.AAAA01/redteam_prompt.txt'
+)
+_STANDALONE = (
+    f"P={_SYNCED}; SC=$P/{MS_SCRIPTS}\n"
+    f"A={_MS_A}; RUN_ID=20990101T000000Z; H=$A/handoff/$RUN_ID\n"
+    f"python3 $SC/dispatch_prompt.py red_team {_RT_ARGS}"
+)
+_RT_OUTPUT = f"{_MS_A}/handoff/20990101T000000Z/redteam_output.json"
+_RT_PRINTED = (
+    f"CONTEXT: RED_TEAM\nOUTPUT_PATH: {_RT_OUTPUT}\nRUN_ID: 20990101T000000Z\n\nRead the documents.\n"
+    "Do NOT write any file other than OUTPUT_PATH.\n"
+)
+
+
+def test_an_unreadable_block_that_saves_the_generators_output_elsewhere_keeps_it_trusted(tmp_path: Path) -> None:
+    assert DPC._parse_block(_LOOPED) is None  # the raw fallback is what decides this block
+    assert DPC._distrusts(_LOOPED) == set()
+    rows = _rows(
+        ("Bash", {"command": _LOOPED}, "gate_sensitivity=0\n"), ("Bash", {"command": _STANDALONE}, _RT_PRINTED)
+    )
+    assert DPC.latest_printed(rows, "CONTEXT: RED_TEAM", _RT_OUTPUT) == _RT_PRINTED.rstrip("\n")
+    transcript = tmp_path / "t.jsonl"
+    transcript.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+    tool_input = {"subagent_type": "founder-skills:market-sizing-redteam", "description": "d", "prompt": _RT_PRINTED}
+    payload = {"hook_event_name": "PreToolUse", "tool_name": "Agent", "transcript_path": str(transcript)}
+    assert DPC.decide({**payload, "tool_input": tool_input}) is None
+
+
+# Writes the raw check misses: the target names the plugin only through a variable it does not resolve.
+def _missed(write: str) -> Any:
+    return pytest.param(write, marks=pytest.mark.xfail(strict=True, reason="target named only via a variable"))
+
+
+_RAW_WRITES = [
+    "cat x > $SC/dispatch_prompt.py",
+    'cp /tmp/evil.py "$P/skills/market-sizing/scripts/dispatch_prompt.py"',
+    "sed -i 's/a/b/' $SC/dispatch_prompt.py",
+    "python3 -c \"open('$SC/dispatch_prompt.py','w')\"",
+    "echo x | tee $SC/dispatch_prompt.py",
+    "python3 - <<'PY'\nopen('" + _SYNCED + "/" + MS_SCRIPTS + "/x.py', 'w').write('x')\nPY",
+    "dd if=/tmp/evil.py of=$SC/dispatch_prompt.py",
+    "python3 $SC/dispatch_prompt.py red_team > $SC/dispatch_prompt.py",
+    'python3 "$SC/dispatch_prompt.py" x; cp /tmp/e $SC/cp_dispatch_prompt.py',
+    "python3 $SC/dispatch_prompt.py x > /tmp/y; cp /tmp/e " + _SYNCED + "/" + MS_SCRIPTS + "/checklist.py",
+    'python3 -c "print(1)" $SC/dispatch_prompt.py > /tmp/y',
+]
+_RAW_MISSED = [
+    "cat <<'EOF' > $SC/x.py\nprint('x')\nEOF",
+    "echo x > $P/scripts/x.py",
+    "cp /tmp/evil.py $SC/",
+    'bash -c "cp /tmp/evil.py $SC/x.py"',
+    'echo "# not a comment" > $SC/x.py',
+]
+
+
+def _unreadable(write: str) -> str:
+    return f"P={_SYNCED}; SC=$P/{MS_SCRIPTS}\nfor s in a; do echo $s; done\n{write}"
+
+
+@pytest.mark.parametrize("write", [*_RAW_WRITES, *map(_missed, _RAW_MISSED)])
+def test_an_unreadable_block_that_writes_into_the_plugin_still_distrusts(write: str) -> None:
+    block = _unreadable(write)
+    assert DPC._parse_block(block) is None, write
+    assert DPC._distrusts(block) == set(DPC.GENERATORS), write
+
+
+_ATTACK_HEAD = f"P={_SYNCED}; SCRIPTS=$P/{MS_SCRIPTS}\n"
+_LOOP = "for s in a; do echo $s; done\n"
+_RUN = "python3 $SCRIPTS/dispatch_prompt.py red_team"
+_ATTACKS = [
+    _ATTACK_HEAD + _LOOP + f'O=$SCRIPTS/_params.py\n{_RUN} > "$O"\nO=/tmp/o',
+    _ATTACK_HEAD + _LOOP + f'O=$SCRIPTS/_params.py\nO=/tmp/x {_RUN} > "$O"',
+    _ATTACK_HEAD + _LOOP + f'O=$SCRIPTS/_params.py\n{_RUN} > "$O"\ncat > /tmp/n <<EOF\nO=/tmp/o\nEOF',
+    _ATTACK_HEAD + f'O=$SCRIPTS/_params.py\nfor i in 1 2; do\n{_RUN} > "$O"\nO=/tmp/o; done',
+    _ATTACK_HEAD + _LOOP + f"PYTHONPATH=/tmp/evil {_RUN} > /tmp/o",
+    _ATTACK_HEAD + _LOOP + f"PATH=/tmp/evil:$PATH {_RUN} > /tmp/o",
+    _ATTACK_HEAD + _LOOP + "python3 /tmp/evil/dispatch_prompt.py red_team > /tmp/o",
+    _ATTACK_HEAD + _LOOP + "python3 ./dispatch_prompt.py red_team > /tmp/o",
+    _ATTACK_HEAD + _LOOP + f"{_RUN} --handoff-dir $SCRIPTS > /tmp/o",
+    _ATTACK_HEAD + _LOOP + f"{_RUN} > /tmp/o; cat /tmp/e $SCRIPTS/dispatch_prompt.py",
+    _ATTACK_HEAD + "cd /tmp\n" + _LOOP + f"{_RUN} > /tmp/x/redteam_prompt.txt",
+    _ATTACK_HEAD + f'if false; then\nO=/tmp/o\nfi\n{_RUN} > "$O"',
+]
+
+
+@pytest.mark.parametrize("block", _ATTACKS)
+def test_a_generator_run_whose_write_cannot_be_settled_still_distrusts(block: str) -> None:
+    assert DPC._parse_block(block) is None, block
+    assert DPC._distrusts(block) == set(DPC.GENERATORS), block
+
+
+def test_a_trusted_generator_run_saved_to_tmp_is_no_write() -> None:
+    block = _ATTACK_HEAD + _LOOP + f"{_RUN} > /tmp/x/redteam_prompt.txt"
+    assert DPC._parse_block(block) is None
+    assert DPC._distrusts(block) == set()
+
+
+def _raw_writes_as_before(command: str) -> bool:
+    """The raw check before a generator's own run was set aside."""
+    for line in command.splitlines():
+        if not DPC._RAW_WRITE_RE.search(line.replace("2>&1", "").replace(">/dev/null", "")):
+            continue
+        if DPC._into_plugin(line) or "dispatch_" in line or "prompt.py" in line:
+            return True
+    return False
+
+
+# The only lines decided differently: a generator run, its output saved outside the plugin.
+_SAVED = 'python3 "$SC/dispatch_prompt.py" x > "$H/p.txt"; echo "EXIT=$?"; wc -c "$H/p.txt"'
+_RUN_SAVED_ELSEWHERE = {
+    _LOOPED.splitlines()[-1],
+    _SAVED,
+    "python3 $SCRIPTS/dispatch_prompt.py red_team > /tmp/x/redteam_prompt.txt",
+}
+_SAVED_BLOCK = f"P={_SYNCED}; SC=$P/{MS_SCRIPTS}; H={_MS_A}/handoff/R1\nfor s in a; do :; done\n{_SAVED}"
+
+
+def test_a_generator_run_saved_elsewhere_is_no_write() -> None:
+    assert DPC._parse_block(_SAVED_BLOCK) is None
+    assert DPC._distrusts(_SAVED_BLOCK) == set()
+
+
+@pytest.mark.parametrize(
+    "block",
+    [
+        *map(_unreadable, _RAW_WRITES + _RAW_MISSED),
+        *_ATTACKS,
+        _SAVED_BLOCK,
+        "cat > \"$SCRIPTS/dispatch_prompt.py\" <<'EOF'\nprint('x')\nEOF",
+        'for f in a; do cp /tmp/a.py "$SCRIPTS/$f.py"; done',
+        "for f in a; do :; done\npython3 $SC/checklist.py > /tmp/y",
+        _LOOPED,
+    ],
+)
+def test_the_raw_check_changes_only_on_a_generator_run_saved_elsewhere(block: str) -> None:
+    """Line by line, the raw check decides as before except where a generator is run and its output is
+    saved outside the plugin."""
+    exempt = set() if block in _ATTACKS else _RUN_SAVED_ELSEWHERE  # an attack is decided as before
+    kept = [line for line in block.splitlines() if line not in exempt]
+    assert DPC._raw_writes_into_plugin(block) is _raw_writes_as_before("\n".join(kept)), block
+    if len(kept) < len(block.splitlines()):  # the exemption engaged: before, this block distrusted
+        assert _raw_writes_as_before(block) is True, block
+
+
 # --- the steps before the generator in its block may print; the generator must be the block's last word --
 
 _FMR = "skills/" + "financial-model-review/scripts"
