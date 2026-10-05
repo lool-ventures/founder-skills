@@ -288,11 +288,11 @@ In **Cowork** the skill writes them into the task's workspace under `artifacts/<
 `npx skills add` copies each skill's `SKILL.md`, `scripts/` and `references/` into `.agents/skills/<name>/` in your project — that directory is where you'd look to see what it copied. But that layout cannot run these skills, in **any** host — Claude Code, Cursor, Copilot, Windsurf or otherwise:
 
 - every skill resolves its scripts through the plugin root, which that layout doesn't create;
-- the shared helper scripts all six skills call live outside any single skill folder, so a per-skill copy can't contain them;
+- the shared helper scripts all six analysis skills call live outside any single skill folder, so a per-skill copy can't contain them;
 - the sub-agent definitions the skills dispatch to aren't skills and don't come along;
-- neither does the `/founder-skills:feedback` command or the plugin's hooks.
+- neither do the plugin's hooks. (The `/founder-skills:feedback` skill is copied like the others; it runs no scripts.)
 
-A skill installed that way fails on its first step. This isn't a bug at either end: the standard assumes self-contained skills, and this is a plugin — six skills over a shared script library, a shared agent pool and hooks. Use the Cowork or Claude Code sections above.
+An analysis skill installed that way fails on its first step. This isn't a bug at either end: the standard assumes self-contained skills, and this is a plugin — six analysis skills and a feedback skill over a shared script library, a shared agent pool and hooks. Use the Cowork or Claude Code sections above.
 
 ### Other platforms (roadmap)
 
@@ -362,7 +362,7 @@ Two things do reach the network, both worth knowing before you start on somethin
 - **Three skills search the web** as part of the work — market sizing validates your figures against external sources, IC simulation researches a named fund, competitive positioning researches competitors and your company's own public record (registered name, patent filings). Search queries derived from your materials therefore pass through Claude to a search provider. Cap-table, deck review and financial model review never touch the network.
 - **The competitive-positioning explorer's optional 3D view** loads a charting library from a public CDN the first time you open that tab. Every other generated file is fully self-contained and works offline.
 
-Feedback is opt-in and user-initiated: the `/founder-skills:feedback` command (type `/` and pick **founder-skills:feedback** from the menu) drafts a message and hands you a link to submit yourself — nothing is sent automatically.
+Feedback is opt-in and user-initiated: the `/founder-skills:feedback` skill (type `/` and pick **founder-skills:feedback** from the menu) drafts a message and hands you a link to submit yourself — nothing is sent automatically.
 
 ## Contributing
 

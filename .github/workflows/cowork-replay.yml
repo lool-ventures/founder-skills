@@ -411,7 +411,7 @@ jobs:
   #
   # analyze-skill's /sessions→file-tool heuristic can over-flag a *teaching* example. As of 0.32.0 a
   # directory/plugin-root target scans the UNION of contract-bearing markdown (references/, agents/,
-  # commands/ INCLUDED — the old "references not scanned" carve-out is gone). Silence a genuine
+  # and commands/ when present -- this plugin ships none; the old "references not scanned" carve-out is gone). Silence a genuine
   # teaching example with a SCOPED marker on the exact line/range — `analyze-skill: ignore-next-line`
   # or an `analyze-skill: ignore-start` / `ignore-end` fence — and reserve the file-wide
   # `analyze-skill: ignore` (silences the WHOLE file, blinding it to any other finding) as a last resort.

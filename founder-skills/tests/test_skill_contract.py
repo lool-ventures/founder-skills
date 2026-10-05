@@ -940,7 +940,9 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 106,386 -> 106,463 (+77 B) on 2026-10-05: on exit 3 the review step copies the founder documents
     # read earlier, from the path they were read at, into the hand-off docs folder, and asks for a path only
     # with none, so the review still sees them and an unattended host does not stall.
-    "market-sizing": 106_463,
+    # 106,463 -> 106,491 (+28 B) on 2026-10-05: the feedback lines tell the founder to type
+    # `/founder-skills:feedback`; it is a user-started skill now, which the model cannot start.
+    "market-sizing": 106_491,
     # fmr raised for two founder-facing-correctness items measured in a live run: the CHECKLIST
     # dispatch now forbids citing our artifact filenames in evidence (that run put `inputs.json` in 10
     # items' evidence, printed verbatim into the founder's report), and the producer pipe passes
@@ -1055,7 +1057,9 @@ SKILL_MD_CEILING: dict[str, int] = {
     # shell prints for Reads.
     # 84,200 -> 84,022 on 2026-10-05: the description says the skill starts on its own only on a clear request,
     # and that a passing question gets a short answer and an offer naming how long the run takes.
-    "financial-model-review": 84_022,
+    # 84,022 -> 84,050 (+28 B) on 2026-10-05: the feedback lines tell the founder to type
+    # `/founder-skills:feedback`; it is a user-started skill now, which the model cannot start.
+    "financial-model-review": 84_050,
     # ic-sim SHRANK: the REQUIRED ic-dynamics.md read at Step 7 is deleted. Step 7 is a pure producer
     # pipe — compose_discussion.py derives discussion.json from the partners' own files and nothing
     # is authored by the main thread — so the read informed no decision while pulling a whole
@@ -1123,7 +1127,9 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 94,675 -> 94,687 on 2026-10-05: the description says the skill starts on its own only on a clear request,
     # and that a passing question gets a short answer and an offer naming how long the run takes.
     # The in-skill offer names the run's duration in place of 'several minutes'.
-    "ic-sim": 94_687,
+    # 94,687 -> 94,715 (+28 B) on 2026-10-05: the feedback lines tell the founder to type
+    # `/founder-skills:feedback`; it is a user-started skill now, which the model cannot start.
+    "ic-sim": 94_715,
     # deck-review +1,165 B: Step 0 carried only a parenthetical fresh-shell mention buried in a code
     # comment, unlike the four skills that mint RUN_ID in a LATER block and so carry the shared banner.
     # deck-review mints RUN_ID INSIDE this re-runnable Step-0 block (like cap-table), so the shared
@@ -1451,7 +1457,9 @@ SKILL_MD_CEILING: dict[str, int] = {
     # The in-skill offer names the run's duration in place of 'several minutes'.
     # 113,479 -> 113,543 (+64 B) on 2026-10-05: on exit 3 the deck search uses a deck path the request already
     # names before asking for one.
-    "deck-review": 113_543,
+    # 113,543 -> 113,571 (+28 B) on 2026-10-05: the feedback lines tell the founder to type
+    # `/founder-skills:feedback`; it is a user-started skill now, which the model cannot start.
+    "deck-review": 113_571,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
@@ -1614,7 +1622,9 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 127,927 -> 128,004 (+77 B) on 2026-10-05: on exit 3 the review step copies the founder documents
     # read earlier, from the path they were read at, into the hand-off docs folder, and asks for a path only
     # with none, so the review still sees them and an unattended host does not stall.
-    "competitive-positioning": 128_004,
+    # 128,004 -> 128,032 (+28 B) on 2026-10-05: the feedback lines tell the founder to type
+    # `/founder-skills:feedback`; it is a user-started skill now, which the model cannot start.
+    "competitive-positioning": 128_032,
     # cap-table, the largest raise (+2,383 B) and the one with the most founder-visible payoff:
     #   * Main-Thread Return named THREE of the four files Step 12 copies; a live run delivered exactly
     #     three and dropped `{Company}_Cap_Table.html`. All four are now named explicitly.
@@ -1730,7 +1740,9 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 159,095 -> 159,024 on 2026-10-05: the description says the skill starts on its own only on a clear request,
     # and that a passing question gets a short answer and an offer naming how long the run takes.
     # Fast-assess states its usual time in place of 'under 60 seconds'.
-    "cap-table": 159_024,
+    # 159_024 -> 159_052 (+28 B) on 2026-10-05: the feedback lines tell the founder to type
+    # `/founder-skills:feedback`; it is a user-started skill now, which the model cannot start.
+    "cap-table": 159_052,
 }
 
 
@@ -2127,6 +2139,52 @@ def test_skill_md_does_not_grow(skill: str) -> None:
             f"{skill}/SKILL.md shrank to {size:,} B — good. Lower SKILL_MD_CEILING['{skill}'] to "
             f"{size:,} to lock the win in."
         )
+
+
+# The feedback skill's size ratchet lives apart from SKILL_MD_CEILING because that dict's keys are the
+# fleet of ANALYSIS skills: a dozen tests parametrize over them (delivery, preflight, plugin-root
+# resolution, option lists), none of which a no-shell feedback skill has.
+# 2,891 B on 2026-10-05: measured when the command became a skill.
+FEEDBACK_SKILL_MD_CEILING = 2_891
+
+# Skill re-attachment after compaction stores `Base directory for this skill: <abs path>` (101-240 chars,
+# install-dependent) plus the body with frontmatter stripped, and truncates at >= 20,002 chars. Kept under
+# 20,001 chars with the longest prefix, the feedback skill survives a compaction whole.
+_REATTACH_LAST_SAFE_CHARS = 20_001
+_REATTACH_PREFIX_MAX_CHARS = 240
+
+
+def test_feedback_skill_md_does_not_grow() -> None:
+    size = len((SKILLS_ROOT / "feedback" / "SKILL.md").read_bytes())
+    assert size <= FEEDBACK_SKILL_MD_CEILING, (
+        f"feedback/SKILL.md grew to {size:,} B (ceiling {FEEDBACK_SKILL_MD_CEILING:,}). Shrink something, or "
+        "raise the ceiling deliberately with the reason recorded."
+    )
+    if size < FEEDBACK_SKILL_MD_CEILING:
+        pytest.fail(f"feedback/SKILL.md shrank to {size:,} B — lower FEEDBACK_SKILL_MD_CEILING to lock it in.")
+
+
+@pytest.mark.parametrize("skill", sorted(SKILL_MD_CEILING))
+def test_feedback_offer_tells_the_founder_to_type_the_command(skill: str) -> None:
+    """The feedback skill is user-started only (`disable-model-invocation`), so an offer the model reads as
+    "start it" cannot be carried out; each offer tells the founder to type it."""
+    text = (SKILLS_ROOT / skill / "SKILL.md").read_text(encoding="utf-8")
+    if "/founder-skills:feedback" not in text:
+        return
+    offers = [line for line in text.splitlines() if "/founder-skills:feedback" in line]
+    for line in offers:
+        assert "type `/founder-skills:feedback`" in line, f"{skill}: an offer that does not say to type it: {line}"
+
+
+def test_feedback_skill_survives_compaction_whole() -> None:
+    text = (SKILLS_ROOT / "feedback" / "SKILL.md").read_text(encoding="utf-8")
+    assert text.startswith("---\n")
+    body = text[text.index("\n---\n", 4) + len("\n---\n") :]
+    stored = _REATTACH_PREFIX_MAX_CHARS + len(body)
+    assert stored <= _REATTACH_LAST_SAFE_CHARS, (
+        f"feedback's re-attached content would be {stored:,} chars (body {len(body):,} + a {_REATTACH_PREFIX_MAX_CHARS}"
+        f"-char base-directory prefix), past the {_REATTACH_LAST_SAFE_CHARS:,} that survive a compaction whole."
+    )
 
 
 @pytest.mark.parametrize("skill", sorted(REFERENCES_CEILING))

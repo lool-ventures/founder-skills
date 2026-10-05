@@ -1279,6 +1279,6 @@ This skill imports artifacts from prior market-sizing and deck-review analyses. 
 ## Feedback
 
 If a run ends **blocked or failed**, after you report the reason to the founder, add one line:
-> _If this looks wrong or didn't finish, you can flag it: `/founder-skills:feedback`._
+> _If this looks wrong or didn't finish, you can flag it: type `/founder-skills:feedback`._
 
-On **unsolicited** praise or frustration, you may mention `/founder-skills:feedback` once — never routinely, never mid-workflow, never more than once per session.
+On **unsolicited** praise or frustration, you may tell the founder they can type `/founder-skills:feedback` once — never routinely, never mid-workflow, never more than once per session.
