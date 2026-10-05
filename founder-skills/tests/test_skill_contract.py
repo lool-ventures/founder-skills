@@ -4289,3 +4289,30 @@ def test_no_agent_command_or_shared_reference_runs_a_script_by_a_relative_path()
     assert any(p.parent.name == "agents" for p in files) and any(p.parent.name == "feedback" for p in files)
     offenders = _relative_script_offenders(files)
     assert not offenders, offenders
+
+
+_FIXED_TMP = re.compile(r"/tmp/[A-Za-z0-9_][\w.-]*")
+
+
+def test_no_shipped_text_names_a_fixed_tmp_path() -> None:
+    """The Cowork VM shares one /tmp across sessions, each its own Unix user, and files outlive the
+    session: a fixed name an earlier session created cannot be overwritten, and reading it back reads
+    THAT session's file. Scratch files go in the run's `mktemp -d` staging dir. `${TMPDIR:-/tmp}/...`
+    inside a mktemp template is fine; a literal `/tmp/<name>` is not."""
+    plugin = SKILLS_ROOT.parent
+    files = sorted(plugin.rglob("*.md"))
+    files = [p for p in files if "tests" not in p.relative_to(plugin).parts]
+    assert any("lanes" in p.parts for p in files), "scan must reach nested reference dirs"
+    offenders = [
+        f"{p.relative_to(plugin)}:{n}: {m.group(0)}"
+        for p in files
+        for n, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1)
+        for m in _FIXED_TMP.finditer(line)
+    ]
+    assert not offenders, offenders
+
+
+def test_the_fixed_tmp_check_catches_a_fixed_name() -> None:
+    """Negative control: the pattern the cap-table lane used to ship is flagged; a mktemp template is not."""
+    assert _FIXED_TMP.search('cat /tmp/bv_responses.json | python3 "$SCRIPTS/x.py"')
+    assert not _FIXED_TMP.search('mktemp -d "${TMPDIR:-/tmp}/cap-table-${SLUG}.staging.XXXXXX"')

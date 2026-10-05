@@ -183,18 +183,18 @@ cat <<'BV_DOC_TEXT_EOF' > "$STAGING_DIR/bv_doc_text.txt"
 <paste the same document text used for the INSTRUMENT_EXTRACTION dispatch above>
 BV_DOC_TEXT_EOF
 python3 "$SCRIPTS/backward_verifier.py" --phase=prompt \
-  --extraction "$EXTRACTION_JSON" --doc-text "$STAGING_DIR/bv_doc_text.txt" > /tmp/bv_prompts.json
+  --extraction "$EXTRACTION_JSON" --doc-text "$STAGING_DIR/bv_doc_text.txt" > "$STAGING_DIR/bv_prompts.json"
 
 # Step 2 — for each prompt, spawn an independent Task sub-agent:
 #   Task(subagent_type="founder-skills:cap-table", prompt=<the per-field prompt>)
 #   subagent_type is REQUIRED — a type-less dispatch silently downgrades to the
 #   shell-capable general-purpose agent. Repeat it on every per-field dispatch.
-# Collect their {field, value, evidence_quote} responses into /tmp/bv_responses.json
+# Collect their {field, value, evidence_quote} responses into "$STAGING_DIR/bv_responses.json"
 # (wrap as {"responses": [...]}).
 
 # Step 3 — score responses against the original extraction
-cat /tmp/bv_responses.json | python3 "$SCRIPTS/backward_verifier.py" --phase=score \
-  --extraction "$EXTRACTION_JSON" -o /tmp/bv_report.json --pretty
+cat "$STAGING_DIR/bv_responses.json" | python3 "$SCRIPTS/backward_verifier.py" --phase=score \
+  --extraction "$EXTRACTION_JSON" -o "$STAGING_DIR/bv_report.json" --pretty
 ```
 
 Backward verification is **informational (WARN-mode)** by default — disagreements between original and re-extracted values surface in the report but do NOT block. Present disagreements to the founder via `AskUserQuestion`. Calibration found ~7% disagreement rate on the canonical eval set, dominated by genuinely ambiguous form-classification cases (pre-money vs post-money) — too noisy for auto-rejection but valuable as a confirmation prompt.
