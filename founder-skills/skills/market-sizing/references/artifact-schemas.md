@@ -81,6 +81,7 @@ JSON schemas for all analysis artifacts deposited during the market sizing workf
 | `founder_notes` | string[] | no | Founder answers given after the revision round was used; rendered under "Your Answers" instead of restated in chat. |
 | `gate_defaults` | string[] | no | Questions not asked because the founder asked not to be asked; the default (option 1) was taken. Rendered under "Your Answers". |
 | `red_team_skipped` | string | no | Why no adversarial review ran (Step 6c). One of exactly `founder_declined`, `dispatch_failed`, `no_network_available`, `no_subagent_dispatch` — a closed enum, because this value selects the sentence the founder reads and free text would be an un-reviewed founder-facing string. `compose_report.py` REFUSES to compose when there is neither a fresh `redteam.json` for this run nor a recognised value here; an unrecognised value is refused too. There is deliberately no value meaning "not necessary". |
+| `red_team_skipped_run_id` | string | with `red_team_skipped` | The run the skip was decided in: this run's `RUN_ID`. compose accepts a skip only for the run it resolves (the id most required artifacts carry); without this field it falls back to `metadata.run_id` of this file, and a skip with neither is refused. |
 | `metadata` | object | yes | `{"run_id": "<RUN_ID>"}` — stamped on every artifact (see inputs.json) |
 
 ### accepted_warnings[] entry

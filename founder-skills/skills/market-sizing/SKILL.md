@@ -559,10 +559,12 @@ Then ask why (plain text — the reason isn't a fixed choice). Update `methodolo
 `inputs.json` alone does NOT retroactively update them. If you edit `inputs.json` after CHECKLIST
 has already been dispatched (e.g. adding `competitive_landscape_notes` found later in the deck),
 you must re-dispatch the CHECKLIST step (and any other downstream step whose scoring depends on
-the changed field) with a fresh `RUN_ID`, then re-run `compose_report.py` to recompose the report.
+the changed field) with the same `RUN_ID`, then re-run `compose_report.py` to recompose the report.
+Never mint a fresh id for a partial refresh: the run is the id most of its files carry, so the
+refreshed files and the review after them would belong to another run, and compose refuses it.
 Do not hand-patch `checklist.json` or `report.md` directly — that bypasses the sub-agent scoring
-this architecture exists to preserve, and `compose_report.py`'s `STALE_ARTIFACT` check exists
-precisely to catch a skipped re-dispatch (mismatched `run_id` across artifacts).
+this architecture exists to preserve, and under one run id nothing downstream can tell a skipped
+re-dispatch from a done one.
 
 ### Step 4: External Validation -> `validation.json`
 
@@ -957,8 +959,9 @@ the founder not to.
 
 **You cannot silently skip it.** `compose_report.py` in Step 7 REFUSES to produce a report unless
 one of two things is true: a fresh `redteam.json` exists for this run, or the decision not to run
-one is recorded in `methodology.json` as `red_team_skipped`, whose value must be one of exactly
-three:
+one is recorded in `methodology.json` as `red_team_skipped`, with `red_team_skipped_run_id` set to
+this run's `RUN_ID` (compose accepts only a skip of the run it composes), whose value must be one of
+exactly three:
 
 | Value | When |
 |---|---|

@@ -9531,7 +9531,66 @@ def test_an_earlier_runs_review_does_not_pass_a_set_with_one_leftover_artifact()
         (d / name).write_text(json.dumps(data))
     rc, stdout, _err = run_script_raw("compose_report.py", ["--dir", str(d)])
     assert rc == 1, f"run 1's review passed run 2's gate: {stdout[-400:]}"
-    assert "no adversarial review was run" in stdout
+    assert f"a review exists for run {_CRUN}, not this run 20260102T000000Z" in stdout
+
+
+def _gate_refusal(d: Path) -> str:
+    rc, stdout, _err = run_script_raw("compose_report.py", ["--dir", str(d)])
+    assert rc == 1, f"composed with no review or skip of this run: {stdout[-400:]}"
+    return stdout
+
+
+def test_a_late_refresh_under_a_fresh_run_id_is_refused_without_inviting_a_skip() -> None:
+    """A late edit re-dispatched two steps under a fresh run id, and Step 6c then reviewed under it. Those
+    two files are the minority, so the run is still the old id, and the review is another run's. The refusal
+    says whose review it is, and must not offer recording a skip, which would hide the review it has."""
+    d = _gated_dir()
+    fresh = "20260102T000000Z"
+    for name in ("checklist.json", "sensitivity.json"):
+        data = json.loads((d / name).read_text())
+        data["metadata"]["run_id"] = fresh
+        (d / name).write_text(json.dumps(data))
+    rc, out, _e = run_script_raw(
+        "red_team.py",
+        ["--run-id", fresh, "-o", str(d / "redteam.json")],
+        stdin_data=json.dumps({"findings": [_GOOD_FINDING]}),
+    )
+    assert rc == 0, out
+    stdout = _gate_refusal(d)
+    assert f"a review exists for run {fresh}, not this run {_CRUN}" in stdout
+    assert "red_team_skipped" not in stdout and "founder_declined" not in stdout
+
+
+def test_a_late_refresh_under_the_same_run_id_composes() -> None:
+    """Control: the same refresh under the run's own id (what Step 1's late-edit rule says) passes the gate."""
+    d = _gated_dir()
+    _pipe_review(d, "The published share is 6.1%.")
+    _compose_dir(d)
+
+
+def test_a_skip_left_in_an_earlier_runs_methodology_does_not_pass_this_runs_gate() -> None:
+    d = _gated_dir({"red_team_skipped": "founder_declined"})
+    meth = json.loads((d / "methodology.json").read_text())
+    meth["metadata"]["run_id"] = "20251231T000000Z"
+    (d / "methodology.json").write_text(json.dumps(meth))
+    stdout = _gate_refusal(d)
+    assert f"recorded for run 20251231T000000Z, not this run {_CRUN}" in stdout
+
+
+def test_a_skip_stamped_for_this_run_passes_and_its_stamp_outranks_the_file_id() -> None:
+    ok = _gated_dir({"red_team_skipped": "founder_declined", "red_team_skipped_run_id": _CRUN})
+    _compose_dir(ok)
+    other = _gated_dir({"red_team_skipped": "founder_declined", "red_team_skipped_run_id": "20251231T000000Z"})
+    assert "recorded for run 20251231T000000Z" in _gate_refusal(other)
+
+
+def test_a_skip_with_no_run_id_at_all_is_not_this_runs() -> None:
+    d = _gated_dir({"red_team_skipped": "founder_declined"})
+    meth = json.loads((d / "methodology.json").read_text())
+    meth.pop("metadata")
+    (d / "methodology.json").write_text(json.dumps(meth))
+    stdout = _gate_refusal(d)
+    assert "carries no run id" in stdout and f"set red_team_skipped_run_id to {_CRUN}" in stdout
 
 
 def test_stale_artifact_names_the_leftover_and_agrees_with_the_gate() -> None:

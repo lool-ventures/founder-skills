@@ -1747,3 +1747,22 @@ def test_no_reference_presents_the_fx_rate_flag_as_how_a_sizing_converts() -> No
             if "--fx-rate" in line and "refused" not in line:
                 offenders.append(f"{path.name}:{n}")
     assert not offenders, offenders
+
+
+def _paragraph_starting(text: str, anchor: str) -> str:
+    start = text.index(anchor)
+    end = text.find("\n\n", start)
+    return " ".join(text[start : end if end != -1 else len(text)].split())
+
+
+def test_a_late_edit_keeps_the_run_id() -> None:
+    """compose resolves the run as the id most of its files carry, so a fresh id on a partial refresh makes
+    the refreshed files, and the review after them, another run's -- and compose refuses that review."""
+    para = _paragraph_starting(SKILL_MD.read_text(encoding="utf-8"), "**Late edits to `inputs.json`")
+    assert "with the same `RUN_ID`" in para
+    assert "fresh `RUN_ID`" not in para
+
+
+def test_a_recorded_skip_carries_this_runs_id() -> None:
+    para = _paragraph_starting(SKILL_MD.read_text(encoding="utf-8"), "**You cannot silently skip it.**")
+    assert "`red_team_skipped_run_id` set to this run's `RUN_ID`" in para

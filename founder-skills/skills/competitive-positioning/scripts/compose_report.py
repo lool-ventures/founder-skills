@@ -297,6 +297,26 @@ def _rt_refuse(run_id: str | None, all_run_ids: set[str], reviews: Sequence[Any]
             return
         detail = f"red_team_skip.json records {recorded!r}, which is not a recognised reason"
     else:
+        others = sorted(
+            {
+                rid
+                for r in reviews
+                if isinstance(rid := _as_dict(_as_dict(r).get("metadata")).get("run_id"), str) and rid
+            }
+        )
+        if others:
+            # A review exists, for another run. Recording a skip would hide the review this analysis has;
+            # the remedy is a review of this run, under this run's id.
+            detail = (
+                f"a review exists for run {', '.join(others)}, not this run {run_id}. Re-run Step 6.5 with "
+                f"RUN_ID {run_id} (the prompt generator and cp_red_team.py both take it); do not record a "
+                "skip to get past this"
+            )
+            sys.stdout.write(
+                json.dumps({"validation": {"status": "invalid", "errors": [detail + "."]}}, indent=2) + "\n"
+            )
+            print(f"Error: report not composed: {detail}.", file=sys.stderr)
+            sys.exit(1)
         detail = "no outside review ran for this run and no decision to skip one was recorded"
         if len(all_run_ids) > 1:
             detail += (

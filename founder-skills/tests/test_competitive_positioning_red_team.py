@@ -522,9 +522,15 @@ def test_deleting_the_handoff_dir_does_not_silence_the_gate(tmp_path: Path) -> N
     assert _compose_run(d).returncode == 0  # control: a recorded skip still satisfies it
 
 
-def _refused(d: Path, r: subprocess.CompletedProcess[str]) -> None:
+def _refused(d: Path, r: subprocess.CompletedProcess[str], other_review: str | None = None) -> None:
+    """Refused, writing nothing. With `other_review`, the refusal names that run's review and offers no skip:
+    recording one would hide the review the analysis has."""
     assert r.returncode == 1, f"composed (rc {r.returncode}) with no review or skip of this run: {r.stdout[-400:]}"
-    assert "record_red_team_skip.py" in r.stdout
+    if other_review is None:
+        assert "record_red_team_skip.py" in r.stdout
+    else:
+        assert f"a review exists for run {other_review}, not this run" in r.stdout, r.stdout[-400:]
+        assert "record_red_team_skip.py" not in r.stdout and "founder_declined" not in r.stdout
     assert not (d / "report.json").exists(), "a refusal must write nothing"
 
 
@@ -579,7 +585,7 @@ def test_an_earlier_runs_review_does_not_pass_a_set_with_a_leftover_landscape(tm
     assert _pipe(d, {"findings": []}).returncode == 0
     _restamp(d, RUN_2)
     _stamp(d, "landscape.json", RUN)
-    _refused(d, _compose_run(d))
+    _refused(d, _compose_run(d), other_review=RUN)
 
 
 def _second_run_with_a_stale_checklist(tmp_path: Path, checklist: dict[str, Any] | None = None) -> Path:
@@ -597,7 +603,7 @@ def test_an_earlier_runs_review_does_not_pass_a_set_with_one_artifact_left_from_
     """One required artifact still carrying run 1's id must not let run 1's review stand in for run 2's,
     while the report shows no review and says none ran."""
     d = _second_run_with_a_stale_checklist(tmp_path)
-    _refused(d, _compose_run(d))
+    _refused(d, _compose_run(d), other_review=RUN)
 
 
 def test_an_earlier_runs_stub_does_not_pass_the_gate(tmp_path: Path) -> None:
@@ -605,7 +611,7 @@ def test_an_earlier_runs_stub_does_not_pass_the_gate(tmp_path: Path) -> None:
     this, a stale stub let an earlier review through with no high warning, so --strict passed too."""
     d = _second_run_with_a_stale_checklist(tmp_path, {"skipped": True, "reason": "not run"})
     r = _compose_run(d)
-    _refused(d, r)
+    _refused(d, r, other_review=RUN)
     assert "more than one run id" not in r.stdout, "a stub's id was counted as a run's"
     strict = subprocess.run(
         [sys.executable, str(SCRIPTS / "compose_report.py"), "--dir", str(d), "--strict"],

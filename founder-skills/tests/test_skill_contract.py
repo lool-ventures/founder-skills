@@ -934,7 +934,10 @@ SKILL_MD_CEILING: dict[str, int] = {
     # that keeps uploads elsewhere) and asks for a path when documents were attached.
     # 105,980 -> 106,132 on 2026-10-05: the description says the skill starts on its own only on a clear request,
     # and that a passing question gets a short answer and an offer naming how long the run takes.
-    "market-sizing": 106_132,
+    # 106,132 -> 106,386 (+254 B) on 2026-10-05: a late edit before Step 6c re-dispatches under the same
+    # RUN_ID (a fresh id on a few files leaves them the minority, so compose refuses the review after them),
+    # and a recorded skip carries red_team_skipped_run_id, since compose accepts only this run's skip.
+    "market-sizing": 106_386,
     # fmr raised for two founder-facing-correctness items measured in a live run: the CHECKLIST
     # dispatch now forbids citing our artifact filenames in evidence (that run put `inputs.json` in 10
     # items' evidence, printed verbatim into the founder's report), and the producer pipe passes
@@ -1939,7 +1942,8 @@ REFERENCES_CEILING: dict[str, int] = {
     # -184 B (55_519 -> 55_335), LOWERED: the red_team_revision row no longer documents an approval.
     # +90 B (55_312 -> 55_402): the existing_claims_alternatives row says an alternative is the same
     # metric AND date, and where a figure for another date goes, as SKILL.md now does.
-    "market-sizing": 55_402,
+    # 55,402 -> 55,719 (+317 B) on 2026-10-05: methodology.json's `red_team_skipped_run_id` row.
+    "market-sizing": 55_719,
     # fmr raised to document `graded_against` on the three producer outputs that stamp it — a new
     # artifact field is not discoverable from a schema doc that omits it, and the field exists to make
     # staleness detectable at all (run_id parity cannot see corrections applied within a run).

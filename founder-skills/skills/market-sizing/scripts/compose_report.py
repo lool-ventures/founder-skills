@@ -2361,13 +2361,15 @@ def _section_assumptions(validation: dict[str, Any] | None, sizing: dict[str, An
 
 def _red_team_state(
     artifacts: dict[str, dict[str, Any] | None], methodology: dict[str, Any] | None, primary: str | None
-) -> tuple[str, str | None]:
-    """("ran" | "skipped" | "ungated", <skip reason enum or None>).
+) -> tuple[str, str | None, str | None]:
+    """("ran" | "skipped" | "ungated", <skip reason enum or None>, <refusal detail or None>).
 
-    "ungated" is the refusal case: no fresh findings artifact AND no recorded decision. It is not
-    a state the report can render, because the whole point is that nobody decided anything.
+    "ungated" is the refusal case: no review for this run AND no decision of this run's recorded. It
+    is not a state the report can render, because the whole point is that nobody decided anything. The
+    detail is the sentence the refusal prints, and it carries the remedy that fits the case.
     """
     art = artifacts.get("redteam.json")
+    review_rid: str | None = None
     if _usable(art):
         assert art is not None
         # PARITY, not mere presence. A redteam.json left by an earlier analysis of the same
@@ -2378,12 +2380,58 @@ def _red_team_state(
         # earlier run cannot make that run's review count as this one's.
         rid = _as_dict(art.get("metadata")).get("run_id")
         if primary is None or (isinstance(rid, str) and rid == primary):
-            return ("ran", None)
+            return ("ran", None, None)
+        review_rid = rid if isinstance(rid, str) and rid else None
 
-    reason = _as_dict(methodology).get("red_team_skipped") if isinstance(methodology, dict) else None
+    meth = _as_dict(methodology) if isinstance(methodology, dict) else {}
+    reason = meth.get("red_team_skipped")
+    # The skip's run id: its own stamp, else the id of the methodology.json it is recorded in (written with
+    # the run's id by Step 1). A skip with neither is not attributable to any run.
+    stamp = meth.get("red_team_skipped_run_id")
+    if not (isinstance(stamp, str) and stamp):
+        stamp = _as_dict(meth.get("metadata")).get("run_id")
     if isinstance(reason, str) and reason in _RED_TEAM_SKIP_REASONS:
-        return ("skipped", reason)
-    return ("ungated", reason if isinstance(reason, str) else None)
+        # A skip is a decision of ONE run. Unstamped, or stamped for another run, it is not this run's:
+        # a leftover methodology.json carrying an earlier run's skip otherwise passed a later run's gate.
+        # Only a set that carries no run id at all has nothing to compare the stamp with.
+        if primary is None or stamp == primary:
+            return ("skipped", reason, None)
+        if isinstance(stamp, str) and stamp:
+            detail = (
+                f"methodology.red_team_skipped was recorded for run {stamp}, not this run {primary}. Run "
+                f"Step 6c for this run; only if this run decided not to, set red_team_skipped_run_id to {primary}"
+            )
+        else:
+            detail = (
+                "methodology.red_team_skipped carries no run id (no red_team_skipped_run_id, and "
+                "methodology.json has none), so it cannot be shown to be this run's decision. If this run "
+                f"({primary}) decided not to run the review, set red_team_skipped_run_id to {primary}; "
+                "otherwise run Step 6c"
+            )
+        return ("ungated", reason, detail)
+    if review_rid is not None:
+        # A review exists, for another run. Recording a skip would hide the review this analysis has;
+        # the remedy is a review of this run, with this run's id on the generator and the producer.
+        return (
+            "ungated",
+            None,
+            f"a review exists for run {review_rid}, not this run {primary}. Re-run Step 6c with RUN_ID "
+            f"{primary} (the dispatch-prompt generator and red_team.py both take it); do not record a skip "
+            "to get past this",
+        )
+    if isinstance(reason, str):
+        return (
+            "ungated",
+            reason,
+            f"methodology.red_team_skipped is {reason!r}, which is not a recognised reason. A skip must name "
+            "one of the recorded reasons",
+        )
+    return (
+        "ungated",
+        None,
+        "no adversarial review was run and no decision to skip one was recorded. Run Step 6c, or record the "
+        "decision as methodology.red_team_skipped with red_team_skipped_run_id set to this run's id",
+    )
 
 
 _SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2}
@@ -3178,24 +3226,18 @@ def _compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
     #
     # Severity could not do this job: Step 7 runs compose without --strict, so even `high` halts
     # nothing. Only a non-zero exit reaches SKILL.md's documented stop-and-report branch.
-    _rt_state, _rt_reason = _red_team_state(artifacts, artifacts.get("methodology.json"), _rt_run_id)
+    _rt_state, _rt_reason, _rt_detail = _red_team_state(artifacts, artifacts.get("methodology.json"), _rt_run_id)
     if _rt_state == "ungated":
-        if _rt_reason is None:
-            _detail = (
-                "no adversarial review was run and no decision to skip one was recorded. Run "
-                "Step 6c, or record the decision as methodology.red_team_skipped"
-            )
-        else:
-            _detail = (
-                f"methodology.red_team_skipped is {_rt_reason!r}, which is not a recognised "
-                "reason. A skip must name one of the recorded reasons"
-            )
+        _detail = _rt_detail or "no adversarial review was run for this run"
+        # The closed list of skip reasons is printed only where a skip is a remedy on offer; a review of
+        # another run is answered with a review of this one, never with a skip.
         _known = ", ".join(sorted(_RED_TEAM_SKIP_REASONS))
+        _suffix = f" (one of: {_known})" if "red_team_skipped" in _detail else ""
         _fail_compose(
             {
                 "validation": {
                     "status": "invalid",
-                    "errors": [f"{_detail} (one of: {_known})."],
+                    "errors": [f"{_detail}{_suffix}."],
                 },
                 "report_markdown": "",
             },
