@@ -103,6 +103,17 @@ else
   printf '\n\033[33m▶ version parity — SKIPPED (pass a tag: ./scripts/pre-tag.sh v0.7.1)\033[0m\n'
 fi
 
+# --- scoring changes (release-only; a downstream contract) ---------------------------------
+# The newest CHANGELOG section must carry `### Scoring changes`, naming each skill whose pinned
+# scoring files changed since the previous tag ("None." when none did). With a tag, the newest
+# section must also BE that version. skill-quality.yml runs it on tag push; deliberately not in
+# ci.yml, since it is about a release, not a PR.
+if [ -n "$TAG" ]; then
+  run_gate "scoring changes"   python3 .github/scripts/scoring_changes_check.py --tag "$TAG"
+else
+  run_gate "scoring changes"   python3 .github/scripts/scoring_changes_check.py
+fi
+
 # --- summary ------------------------------------------------------------------------------
 printf '\n%s\n' "────────────────────────────────────────────────"
 if [ ${#FAILED[@]} -eq 0 ]; then

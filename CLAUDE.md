@@ -500,6 +500,8 @@ Tag-push triggers `deck-review-e2e-smoke` in `.github/workflows/skill-quality.ym
    duplicated entry, four script filenames in user-facing text (0.6.0 names zero `.py` to users), and
    three internal war stories. Match the format the previous release established (titled release +
    `### Highlights`, then Added / Changed / Fixed) rather than dumping bullets under `Fixed`.
+   Every release section has `### Scoring changes` ("None." when nothing changed): it is a downstream
+   contract, checked at tag time against the scoring-file registry in `.github/scripts/scoring_changes_check.py`.
 3. `git commit -m "release: vX.Y.Z"`
 4. `git push`
 5. `git tag vX.Y.Z && git push --tags`

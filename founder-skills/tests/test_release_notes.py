@@ -144,3 +144,17 @@ def test_a_truncated_section_is_refused_rather_than_published(tmp_path: pathlib.
     r = _run("v1.0.0", "--changelog", str(cl))
     assert r.returncode == 1, f"published a truncated note: rc={r.returncode}, out={r.stdout!r}"
     assert "truncated" in r.stderr or "unclosed" in r.stderr
+
+
+def test_a_scoring_changes_heading_reaches_the_notes_unchanged(tmp_path: pathlib.Path) -> None:
+    """`### Scoring changes` is a downstream contract (see `scoring_changes_check.py`): a consumer reads
+    it from the published notes, so the extractor must carry the heading and its body verbatim, and a
+    following `###` must not end the section early."""
+    cl = tmp_path / "CHANGELOG.md"
+    section = (
+        "### Highlights\n\nh\n\n### Scoring changes\n\n- **Deck review:** a criterion now warns.\n\n### Fixed\n\n- f"
+    )
+    cl.write_text(f"# Changelog\n\n## [9.9.9] - 2026-01-01 — T\n\n{section}\n\n## [9.9.8] - x\n\nold\n")
+    p = _run("v9.9.9", "--changelog", str(cl))
+    assert p.returncode == 0, p.stderr
+    assert p.stdout == section + "\n"

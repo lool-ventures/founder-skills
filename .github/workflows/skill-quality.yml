@@ -125,6 +125,12 @@ jobs:
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The Scoring changes check below diffs from the previous release tag, and the default
+          # shallow checkout fetches neither history nor tags. Without both it would fail (by design:
+          # it never skips) on every tag push.
+          fetch-depth: 0
+          fetch-tags: true
 
       # Preflight: on tag push, fail in <5s if the tag does not match
       # both plugin.json and pyproject.toml versions. Catches forgot-bump
@@ -145,6 +151,15 @@ jobs:
             echo "::error::Tag $TAG does not match plugin.json ($PJ) or pyproject.toml ($PY). Bump both manifests, recommit, delete the tag, and retag."
             exit 1
           fi
+
+      # A DOWNSTREAM CONTRACT. A consumer reads every `### Scoring changes` section between two
+      # versions to explain score changes, so the newest section must carry one, and must name each
+      # skill whose pinned scoring files changed since the previous tag. Here, in the job that gates
+      # `publish-release`, and before the paid run, so a missing entry costs seconds, not a smoke.
+      # Tag pushes only; never per PR. scripts/pre-tag.sh runs the same check before the tag exists.
+      - name: Verify the CHANGELOG's Scoring changes section
+        if: github.event_name == 'push'
+        run: python3 .github/scripts/scoring_changes_check.py --tag "$GITHUB_REF_NAME"
 
       - name: Step summary
         run: |
