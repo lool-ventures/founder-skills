@@ -5,6 +5,129 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.16.0] - 2026-10-05 — Skills that say how long they take, decks that open in a local session, and outside reviews kept to their own run
+
+### Highlights
+
+**Each analysis skill now says how long a full run takes.** For deck review, market sizing, IC
+simulation and competitive positioning, a passing question ("who are my competitors?", "would a VC fund
+us?") gets a short answer in chat and an offer to run the full analysis, with its usual duration;
+financial model review answers a single money question with its quick check, and cap table gives a
+short cited answer. Typical durations: about 15–25 minutes for a deck review (40 or more for a long
+investor deck), 15–20 for market sizing (30 or more with a large data room or a revision round) or an
+IC simulation, 10–15 for a financial model review, 30–40 for competitive positioning, and 2–3 minutes
+for a single cap-table question.
+
+**A PowerPoint deck, and in deck review a PDF deck, now opens in a local Cowork session.** Deck
+review and market sizing used to convert or read the deck in a place the file reader is refused on a
+local session. The rendered PDF, or in deck review a copy of the PDF, now goes to the run's own
+working folder, where it can be read.
+
+**Re-running market sizing or competitive positioning for the same company no longer mixes up the two
+runs.** One file left from an earlier run could make the report treat that run's outside review as
+this one's, or refuse this run's own decision to skip the review. The report now belongs to the run
+most of its files come from, in market sizing a decision to skip the review counts only for the run
+that made it (as it already did in competitive positioning), and
+the warning about leftover files names the leftover rather than the fresh files.
+
+**Financial model review sends you the page for checking extracted values before asking whether they
+look right.** Where the host can send files (Claude Desktop and the cloud, not the plain CLI), a
+question that comes first is held once with a request to send the page, and a turn that ends waiting
+on the question with the page unsent is asked to send it.
+
+### Added
+
+- **Financial model review: the quality checklist's instructions are printed by the plugin, not
+  copied by hand.** They are written for this review's model: a review from a deck or a conversation
+  no longer grades the broken-cells criterion on a spreadsheet left from an earlier review of the same
+  company.
+- **A reviewer sent to the wrong agent is held and told which one to use.** A step that names no agent,
+  or a general-purpose one, ran without the skill's own rules and tool limits. The check knows every
+  step's agent, applies only to the skills started in the session, and lets other plugins' steps
+  through.
+- **When a check rejects a reviewer's output, the redo can carry the rejection message.** In market
+  sizing, competitive positioning and financial model review, the redo's instructions are still
+  printed by the plugin, with the message quoted inside them and capped in length, so the redo is
+  checked like any other.
+
+### Changed
+
+- **The feedback command is now a skill you start from the `/` menu**, under the same name,
+  `/founder-skills:feedback`. Only you can start it; the skills now tell you to type it rather than
+  offering to run it. It still drafts your message and sends nothing.
+- **Each skill's description now says when it applies** (what you have shared and what you asked
+  for). Claude Desktop reads only the description, so those conditions were invisible there for most
+  skills. The combined description and usage text is about a fifth shorter.
+- **On Claude Code 2.1.286 or later, a reviewer's instructions that were edited before sending are
+  replaced with the printed ones** and the step goes ahead, instead of being held and resent. On older
+  versions the step is still held.
+- **The check on reviewer instructions compares them only with what the plugin itself printed**, from
+  an installed copy of the plugin. Text written to a file and read back, a reviewer's reply, or extra
+  output in the same command no longer counts as the printed instructions, and nothing counts once the
+  plugin's own files have been written to in the session. Running the generator and saving its output
+  to a file outside the plugin keeps it trusted. A suffix such as "(round 2)" or an invisible
+  character on the first line no longer skips the comparison, and the wrong-agent check and this one
+  each have their own limit of two holds per step.
+- **Financial model review: a model that cites no benchmarks is graded warn on benchmark awareness**,
+  with the comparison that is missing, rather than being set aside as not applicable.
+- **Market sizing: a late edit before the outside review keeps the run's ID.** The skill used to say
+  to start a fresh one, which made the review that followed belong to another run.
+
+### Fixed
+
+- **Market sizing and competitive positioning: when the outside review exists only for another run,
+  the refusal says so** and asks for a review of this run. It no longer suggests recording a skip,
+  which would hide the review the analysis has.
+- **Market sizing: a decision to skip the outside review left in an earlier run's files no longer
+  passes a later run.** The skip now records which run made it.
+- **Market sizing and competitive positioning: when no uploads folder is found, your documents stay
+  in the outside review.** That step used to drop documents already read from a path; it now copies
+  them from that path and asks only when it never had one. Deck review uses a deck path named in your
+  request before asking for the deck. On a cloud session with nothing attached yet, the skills are no
+  longer told this is not a Cowork session (the uploads folder appears only with the first
+  attachment), and when several sessions' upload folders exist and nothing says which is this one's,
+  they ask for the file rather than pick one.
+- **Deck review: a PowerPoint deck's first skim reads its text**, and a PDF is read by the path the
+  file reader takes. When the deck cannot be put where the reader reaches it, the review stops and
+  names the error instead of trying a path that is refused.
+- **Deck review and market sizing: PowerPoint conversion no longer fails for a missing setting from an
+  earlier step.** Each conversion makes its own LibreOffice profile folder.
+- **Skills and their reviewers read the plugin's reference files from the plugin folder as loaded**,
+  never from the shell's path to it, which a local session's file reader is refused.
+- **Competitive positioning: the step that looks for missing competitors names its agent.** It ran in
+  a general-purpose agent without the skill's rules.
+- **Competitive positioning: the report's run ID is the one the outside review was matched to**, so
+  the report and its warnings name the same run.
+- **Financial model review: the checklist reviewer reads the review's computed figures from the review
+  folder.** Its instructions said "the same directory", right after naming a plugin file.
+- **Cap table: the second-read check on an extracted document keeps its files in the run's own
+  temporary folder.** Fixed shared paths could collide with another session's files, so the check
+  could read that session's results.
+- **The plugin's instruction printers refuse a missing value** (a run ID or a folder) instead of
+  printing instructions that point at the wrong place.
+- **The end-of-turn reminder to attach files no longer says the message linked them** when a cloud
+  closing message only named them.
+
+### Development
+
+Contributor-facing only; nothing here changes what a founder installs or runs.
+
+- The recorded test sessions were not refreshed for this release, so they do not yet exercise this
+  release's skill changes.
+- The end-to-end lanes run on the agent SDK 0.2.163 (Claude Code 2.1.286), deny the catch-all agent
+  type, and now check the instructions each reviewer received, not only what was sent. A test keeps
+  that check on only while the bundled Claude Code is new enough for the replacement above.
+  Financial model review's lane reports its checklist step against the printed instructions too.
+- The hook modules are linted and tested against Python 3.9, the version macOS ships, where they run
+  on a local Desktop session. On a machine with that Python, a test checks the dispatch and end-of-turn
+  hooks decide the same under it.
+- New contract tests: no shipped text names a fixed temporary path; no skill defines a shell path to
+  its references or reads through one; every competitive positioning dispatch step names its agent;
+  the feedback skill stays small enough to survive a compaction whole, and every offer tells the
+  founder to type it.
+- The leak scan's list of commands a founder may be shown is read from skills only a founder can
+  start.
+
 ## [0.15.2] - 2026-10-04 — Cloud closing messages without dead paths, and reports that say which steps went unchecked
 
 ### Highlights
