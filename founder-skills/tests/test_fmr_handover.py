@@ -265,13 +265,13 @@ def _no_cash_inputs() -> dict[str, Any]:
     return inputs
 
 
-def _closer_output(tmp_path: Path, data: dict[str, Any]) -> str:
+def _closer_output(tmp_path: Path, data: dict[str, Any], *extra: str) -> str:
     report = tmp_path / "financial-model-review-testco" / "report.json"
     report.parent.mkdir(exist_ok=True)
     report.write_text(json.dumps(data), encoding="utf-8")
     r = subprocess.run(
         [sys.executable, str(_CLOSER), "--report", str(report), "--deliverable", "the written report=/o/R.md"]
-        + ["--link", "path"],
+        + ["--link", "path", *extra],
         capture_output=True,
         text=True,
     )
@@ -374,6 +374,35 @@ def test_the_founders_reply_recomputes_runway_by_the_skill_md_commands(tmp_path:
     runway = _runway_from(corrected)
     assert not runway.get("insufficient_data"), runway.get("warnings")
     assert "runway_status" not in _compose(**{"inputs.json": corrected, "runway.json": runway})
+
+
+def test_the_re_run_after_the_cash_reply_prints_its_own_update_line(tmp_path: Path) -> None:
+    """On the re-run turn the model announced the update in its own words around the hand-over, and the
+    Stop hook then added a second message. The closer prints that sentence itself, after the opener and
+    before the verdict, so the printed text is still the whole final message and the hook still finds it."""
+    data = _compose(**{"runway.json": _runway_from(copy.deepcopy(_VALID_INPUTS))})
+    update = _load_closer().CASH_UPDATE
+    plain = _closer_output(tmp_path, data)
+    printed = _closer_output(tmp_path, data, "--cash-update")
+    assert update not in plain
+    lines = printed.rstrip("\n").splitlines()
+    assert lines[0].startswith("Here's your finished financial model review:")
+    assert lines.index(update) < lines.index(data["verdict"].strip().splitlines()[0])
+    assert lines[-1].startswith("If you want to keep the working data behind this")
+    assert (tmp_path / "financial-model-review-testco" / "handover.txt").read_text(encoding="utf-8") == printed
+    assert _founder_text().scan(update) == {"enums": [], "filenames": []}
+    assert not re.search(r"\d", update)
+    hook_dir = _REPO / "founder-skills" / "scripts"
+    hook = _load_by_path("fmr_stop_hook_u", hook_dir / "stop_handover_check.py")
+    sliced = hook.printed_from_result("noise\n" + printed + "noise\n", "finished financial model review")
+    assert sliced is not None and update in sliced
+
+
+def test_step_12_closes_the_cash_re_run_with_the_update_flag() -> None:
+    skill = (_REPO / "founder-skills" / "skills" / "financial-model-review" / "SKILL.md").read_text(encoding="utf-8")
+    follow_up = skill[skill.index("**When the hand-over asked for the cash balance") :]
+    follow_up = follow_up[: follow_up.index("**Do not `rm`")]
+    assert "--cash-update" in follow_up
 
 
 def test_a_misspelt_cash_path_is_still_refused(tmp_path: Path) -> None:

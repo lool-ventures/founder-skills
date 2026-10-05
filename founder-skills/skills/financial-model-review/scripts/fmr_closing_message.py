@@ -23,7 +23,7 @@ the newest handover.txt, which is the run just closed.
 
 Usage:
     fmr_closing_message.py --report R --deliverable "LABEL=PATH" [--deliverable ...]
-                           [--link auto|computer|path|none]
+                           [--link auto|computer|path|none] [--cash-update]
 
 Exit 2 if the report cannot be read or carries no verdict; a failed handover.txt write is a stderr line.
 """
@@ -47,6 +47,10 @@ ASK_FOR_CASH_BALANCE = (
     "The figures you shared don't include your cash balance today, so I couldn't work out your runway; "
     "tell me your current cash balance and the date it's as of, and I'll recompute it."
 )
+# Printed with --cash-update, on the re-run after the founder answers that request. Without it the model
+# announced the update in its own words around the hand-over on the re-run turn, which the Stop hook then
+# corrected with a second message; the sentence it wanted to write is printed here instead.
+CASH_UPDATE = "I've added the cash balance you gave me and recomputed your runway; the files above are updated."
 
 
 def detect_link_form(cwd: str, env: dict[str, str]) -> str:
@@ -75,7 +79,7 @@ def _deliverables(specs: list[str], link: str) -> list[tuple[str, str | None]]:
     return out
 
 
-def build(report: dict[str, Any], deliverables: list[tuple[str, str | None]]) -> str:
+def build(report: dict[str, Any], deliverables: list[tuple[str, str | None]], cash_update: bool = False) -> str:
     verdict = report.get("verdict")
     if not isinstance(verdict, str) or not verdict.strip():
         raise ValueError("report.json carries no verdict")
@@ -86,8 +90,10 @@ def build(report: dict[str, Any], deliverables: list[tuple[str, str | None]]) ->
     lines = [
         f"Here's your finished financial model review: {'; '.join(parts)}.",
         "",
-        verdict.strip(),
     ]
+    if cash_update:
+        lines += [CASH_UPDATE, ""]
+    lines.append(verdict.strip())
     # Optional sentences go here, after the verdict and BEFORE the offer: the Stop hook's fallback takes
     # this message from the transcript as the slice from the opener line to the offer's end, so anything
     # printed after the offer is invisible to it, and the offer must stay the last line.
@@ -108,6 +114,9 @@ def main() -> None:
         "--deliverable", action="append", default=[], help="LABEL=PATH, repeatable, in the order to list them"
     )
     p.add_argument("--link", choices=["auto", "computer", "path", "none"], default="auto")
+    p.add_argument(
+        "--cash-update", action="store_true", help="the re-run after the founder gave the cash balance it asked for"
+    )
     a = p.parse_args()
     link = detect_link_form(os.getcwd(), dict(os.environ)) if a.link == "auto" else a.link
     try:
@@ -115,7 +124,7 @@ def main() -> None:
             report = json.load(fh)
         if not isinstance(report, dict):
             raise ValueError("report.json is not an object")
-        text = build(report, _deliverables(a.deliverable, link))
+        text = build(report, _deliverables(a.deliverable, link), cash_update=a.cash_update)
     except (OSError, ValueError) as e:
         print(f"Error: cannot build the hand-over from report {a.report}: {e}", file=sys.stderr)
         sys.exit(2)

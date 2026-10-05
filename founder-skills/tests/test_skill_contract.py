@@ -1080,7 +1080,7 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 84_789 -> 85_546 on 2026-10-05: the hand-over asks for the cash balance when runway could
     # not be computed without one, so Step 12 says what to do with the reply: record it with
     # apply_corrections.py --set, promote, re-run runway and the steps after it, the closer last.
-    "financial-model-review": 85_546,
+    "financial-model-review": 85_544,
     # ic-sim SHRANK: the REQUIRED ic-dynamics.md read at Step 7 is deleted. Step 7 is a pure producer
     # pipe — compose_discussion.py derives discussion.json from the partners' own files and nothing
     # is authored by the main thread — so the read informed no decision while pulling a whole

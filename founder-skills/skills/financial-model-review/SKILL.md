@@ -980,7 +980,7 @@ Here the printed hand-over replaces the named entries and the offer described ab
 is the only offer made, and a connected folder is written to only if the founder asks.
 
 **When the hand-over asked for the cash balance and the founder replies with it**, keep this run's
-`RUN_ID` and `$REVIEW_DIR`. Record the balance as a plain number and its month as `YYYY-MM`, promote, re-run runway:
+`RUN_ID` and `$REVIEW_DIR`. Record the balance as a plain number, its month as `YYYY-MM`; promote; re-run runway:
 
 ```bash
 python3 "$SCRIPTS/apply_corrections.py" --set cash.current_balance=<amount> --set cash.balance_date=<YYYY-MM> \
@@ -989,8 +989,8 @@ cp "$REVIEW_DIR/corrected_inputs.json" "$REVIEW_DIR/inputs.json"
 cat "$REVIEW_DIR/inputs.json" | python3 "$SCRIPTS/runway.py" --pretty --run-id "$RUN_ID" -o "$REVIEW_DIR/runway.json"
 ```
 
-Then Step 7 and Gate 1, the runway lens of `commentary.json` (Step 7.5), Steps 8a-8c, Gate 2, and this
-step again: send the files, then the closer as the last call.
+Then Steps 7, 7.5 (runway lens), 8a-8c, Gates 1-2, this step, with `--cash-update` on the
+closer, which states the update; its output stays your whole final message.
 
 **Do not `rm` anything under `$REVIEW_DIR`** — it is the promoted `outputs/` tree in Cowork, where
 deleting a user-visible path is unsafe. Scratch lives in `$STAGING_DIR` (`/tmp`), which the sandbox
