@@ -475,7 +475,9 @@ internally — pass the final message verbatim.
 - **`STAGING_DIR` pattern for ad-hoc/scratch files**: each skill's
   SKILL.md Step 0 creates `STAGING_DIR="$(mktemp -d ...)"` — a `/tmp`
   scratch dir outside the promoted `outputs/` tree, reclaimed by the
-  sandbox (never `rm` it). Used for ad-hoc scratch and for the Context
+  sandbox (never `rm` it). Scratch output (a redirect or a temp file)
+  goes in `$STAGING_DIR`, never a fixed `/tmp/<name>`, because `/tmp` is
+  shared across sessions. Used for ad-hoc scratch and for the Context
   A message-channel fallback (stage the returned JSON, then
   `cat "$STAGING_DIR/<step>_input.json" | python3 "$SCRIPTS/<producer>.py" ...`).
   Sub-agent hand-off files do NOT go here — they go to

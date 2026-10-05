@@ -942,7 +942,17 @@ SKILL_MD_CEILING: dict[str, int] = {
     # with none, so the review still sees them and an unattended host does not stall.
     # 106,463 -> 106,491 (+28 B) on 2026-10-05: the feedback lines tell the founder to type
     # `/founder-skills:feedback`; it is a user-started skill now, which the model cannot start.
-    "market-sizing": 106_491,
+    # 106,491 -> 107,276 (+785 B) on 2026-10-05: the Step 0 STAGING_DIR block says
+    # scratch output (a redirect or a temp file) goes in $STAGING_DIR, never a fixed /tmp/<name>, because
+    # /tmp is shared across sessions (+126 B). Each generator call says to run it
+    # in a shell call of its own, nothing before it but assignments (a command run before it in the same
+    # call leaves the dispatch hook no printed prompt to match), and the red-team generator moves out of
+    # the OCR call's block. Step 10 sends the files first and runs the closer as the last tool call, its
+    # printed output the entire final message, character for character: a closer run before the
+    # delivery left the host's own after-delivery summary rule as the last word, and the model rewrote
+    # the hand-over. Beside the closer, its printed archive offer is the only offer made, and a connected
+    # folder is written to only if the founder asks.
+    "market-sizing": 107_276,
     # fmr raised for two founder-facing-correctness items measured in a live run: the CHECKLIST
     # dispatch now forbids citing our artifact filenames in evidence (that run put `inputs.json` in 10
     # items' evidence, printed verbatim into the founder's report), and the producer pipe passes
@@ -1059,7 +1069,15 @@ SKILL_MD_CEILING: dict[str, int] = {
     # and that a passing question gets a short answer and an offer naming how long the run takes.
     # 84,022 -> 84,050 (+28 B) on 2026-10-05: the feedback lines tell the founder to type
     # `/founder-skills:feedback`; it is a user-started skill now, which the model cannot start.
-    "financial-model-review": 84_050,
+    # 84,050 -> 84,789 (+739 B) on 2026-10-05: the Step 0 STAGING_DIR block says
+    # scratch output (a redirect or a temp file) goes in $STAGING_DIR, never a fixed /tmp/<name>, because
+    # /tmp is shared across sessions (+126 B). The CHECKLIST generator call says to run
+    # it in a shell call of its own (see market-sizing). Step 5-quick shows the minimal runway input
+    # (cash and net burn, no company block) and drops a --stdin flag runway.py does not accept, which
+    # failed every quick check's first call. Step 12 sends the files first and runs the closer last,
+    # its output the whole final message (see market-sizing); Verification Gate 2 no longer lists file
+    # paths to present, and Main-Thread Return no longer offers the HTML paths beside the hand-over.
+    "financial-model-review": 84_789,
     # ic-sim SHRANK: the REQUIRED ic-dynamics.md read at Step 7 is deleted. Step 7 is a pure producer
     # pipe — compose_discussion.py derives discussion.json from the partners' own files and nothing
     # is authored by the main thread — so the read informed no decision while pulling a whole
@@ -1129,7 +1147,10 @@ SKILL_MD_CEILING: dict[str, int] = {
     # The in-skill offer names the run's duration in place of 'several minutes'.
     # 94,687 -> 94,715 (+28 B) on 2026-10-05: the feedback lines tell the founder to type
     # `/founder-skills:feedback`; it is a user-started skill now, which the model cannot start.
-    "ic-sim": 94_715,
+    # 94,715 -> 94,841 (+126 B) on 2026-10-05: the Step 0 STAGING_DIR block says
+    # scratch output (a redirect or a temp file) goes in $STAGING_DIR, never a fixed /tmp/<name>, because
+    # /tmp is shared across sessions.
+    "ic-sim": 94_841,
     # deck-review +1,165 B: Step 0 carried only a parenthetical fresh-shell mention buried in a code
     # comment, unlike the four skills that mint RUN_ID in a LATER block and so carry the shared banner.
     # deck-review mints RUN_ID INSIDE this re-runnable Step-0 block (like cap-table), so the shared
@@ -1459,7 +1480,10 @@ SKILL_MD_CEILING: dict[str, int] = {
     # names before asking for one.
     # 113,543 -> 113,571 (+28 B) on 2026-10-05: the feedback lines tell the founder to type
     # `/founder-skills:feedback`; it is a user-started skill now, which the model cannot start.
-    "deck-review": 113_571,
+    # 113,571 -> 113,697 (+126 B) on 2026-10-05: the Step 0 STAGING_DIR block says
+    # scratch output (a redirect or a temp file) goes in $STAGING_DIR, never a fixed /tmp/<name>, because
+    # /tmp is shared across sessions.
+    "deck-review": 113_697,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
@@ -1624,7 +1648,18 @@ SKILL_MD_CEILING: dict[str, int] = {
     # with none, so the review still sees them and an unattended host does not stall.
     # 128,004 -> 128,032 (+28 B) on 2026-10-05: the feedback lines tell the founder to type
     # `/founder-skills:feedback`; it is a user-started skill now, which the model cannot start.
-    "competitive-positioning": 128_032,
+    # 128,032 -> 129,648 (+1,616 B) on 2026-10-05: the Step 0 STAGING_DIR block says
+    # scratch output (a redirect or a temp file) goes in $STAGING_DIR, never a fixed /tmp/<name>, because
+    # /tmp is shared across sessions (+126 B). Each of the five generator calls
+    # says to run it in a shell call of its own (see market-sizing), which splits moat/positioning into
+    # two blocks and the red-team generator out of the uploads-mirror block. A declined recall candidate
+    # is recorded through record_deferred_recall.py instead of a hand edit of landscape_draft.json,
+    # which would lose its producer stamp. Step 8 sends the files first and runs the closer last, its
+    # output the whole final message (see market-sizing); the trailing "Present the file paths"
+    # instruction after the closer is gone and COMPANY_NAME is defined beside the copies that use it.
+    # Main-Thread Return names the printed hand-over as the founder's message and keeps the headline
+    # fields for the model's own checks, no longer offering the HTML paths beside it.
+    "competitive-positioning": 129_648,
     # cap-table, the largest raise (+2,383 B) and the one with the most founder-visible payoff:
     #   * Main-Thread Return named THREE of the four files Step 12 copies; a live run delivered exactly
     #     three and dropped `{Company}_Cap_Table.html`. All four are now named explicitly.
@@ -1742,7 +1777,10 @@ SKILL_MD_CEILING: dict[str, int] = {
     # Fast-assess states its usual time in place of 'under 60 seconds'.
     # 159_024 -> 159_052 (+28 B) on 2026-10-05: the feedback lines tell the founder to type
     # `/founder-skills:feedback`; it is a user-started skill now, which the model cannot start.
-    "cap-table": 159_052,
+    # 159_052 -> 159_178 (+126 B) on 2026-10-05: the Step 0 STAGING_DIR block says
+    # scratch output (a redirect or a temp file) goes in $STAGING_DIR, never a fixed /tmp/<name>, because
+    # /tmp is shared across sessions.
+    "cap-table": 159_178,
 }
 
 
@@ -2145,7 +2183,10 @@ def test_skill_md_does_not_grow(skill: str) -> None:
 # fleet of ANALYSIS skills: a dozen tests parametrize over them (delivery, preflight, plugin-root
 # resolution, option lists), none of which a no-shell feedback skill has.
 # 2,891 B on 2026-10-05: measured when the command became a skill.
-FEEDBACK_SKILL_MD_CEILING = 2_891
+# 2,891 -> 3,049 B (+158) on 2026-10-05: where the plugin token arrives unfilled, the version comes from a Glob
+# for the plugin's manifest under the cloud plugins folder (exactly one match, else "unknown"), with no
+# shell, so the exemption holds.
+FEEDBACK_SKILL_MD_CEILING = 3_049
 
 # Skill re-attachment after compaction stores `Base directory for this skill: <abs path>` (101-240 chars,
 # install-dependent) plus the body with frontmatter stripped, and truncates at >= 20,002 chars. Kept under
@@ -2162,6 +2203,16 @@ def test_feedback_skill_md_does_not_grow() -> None:
     )
     if size < FEEDBACK_SKILL_MD_CEILING:
         pytest.fail(f"feedback/SKILL.md shrank to {size:,} B — lower FEEDBACK_SKILL_MD_CEILING to lock it in.")
+
+
+def test_feedback_finds_its_version_without_a_shell() -> None:
+    """Where the plugin token arrives unfilled, the version comes from a Glob for the manifest, never a
+    shell: the skill is exempt from the no-disable rule only because it runs none."""
+    text = (SKILLS_ROOT / "feedback" / "SKILL.md").read_text(encoding="utf-8")
+    assert "use `Glob` with pattern `**/founder-skills/.claude-plugin/plugin.json`" in text
+    assert '"unknown"' in text
+    for shell in ("Bash", "bash", "mcp__workspace__", "allowed-tools", "```sh"):
+        assert shell not in text, f"feedback/SKILL.md names {shell!r}; it must stay shell-free"
 
 
 @pytest.mark.parametrize("skill", sorted(SKILL_MD_CEILING))
@@ -3458,6 +3509,8 @@ _REJECTING_PAYLOADS: list[tuple[str, str, list[str], str] | tuple[str, str, list
         ["--artifact", "positioning.json"],
         '{"not_the_required_key": 1}',
     ),
+    # The draft is the canonical artifact (updated in place), so it is the file that must survive.
+    ("competitive-positioning", "record_deferred_recall.py", [], '[{"name":"x"}]', "--draft"),
     ("market-sizing", "market_sizing.py", ["--stdin"], '{"approach":"top_down","industry_total":-5}'),
     ("market-sizing", "sensitivity.py", [], '{"approach":"bottom_up","base":{},"ranges":{}}'),
     ("market-sizing", "checklist.py", [], '{"notitems":1}'),
@@ -3465,7 +3518,9 @@ _REJECTING_PAYLOADS: list[tuple[str, str, list[str], str] | tuple[str, str, list
     ("deck-review", "checklist.py", ["--run-id", "RID"], '{"items":[{"id":"bogus","status":"pass"}]}'),
     ("financial-model-review", "checklist.py", [], '{"notitems":1}'),
     ("financial-model-review", "unit_economics.py", [], '{"nocompany":1}'),
-    ("financial-model-review", "runway.py", [], '{"nocompany":1}'),
+    # runway.py does not require `company` (a quick check states only cash and burn), so a payload
+    # without it is valid; a `company` that is present and not an object is not.
+    ("financial-model-review", "runway.py", [], '{"company":"x"}'),
     ("ic-sim", "score_dimensions.py", ["--run-id", "RID"], '{"items":[{"id":"bogus","status":"concern"}]}'),
     # A figure recorded at 1/1000 of what its own `raw` string says. This is THE ledger
     # failure mode: the arithmetic downstream is then flawless and wrong by a thousand.
@@ -4088,7 +4143,9 @@ def test_corpus_counts_every_agent_the_skill_pins_not_just_its_namesake() -> Non
 # Lowered 2026-10-05 from 126,593 to 126,590 B: skill-execution-model.md no longer names a shell reference folder.
 # Raised 2026-10-05 from 126,590 to 126,603 B: skill-execution-model.md says never the shell's path to the plugin
 # folder, rather than any path the shell printed.
-ROOT_REFERENCES_CEILING = 126_603
+# Raised 2026-10-05 from 126,603 to 126,745 B: skill-execution-model.md says scratch output goes in
+# $STAGING_DIR, never a fixed /tmp/<name>, because /tmp is shared across sessions.
+ROOT_REFERENCES_CEILING = 126_745
 
 
 def test_execution_model_names_every_dispatch_that_can_reach_the_shell() -> None:

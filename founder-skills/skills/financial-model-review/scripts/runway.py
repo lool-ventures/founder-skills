@@ -570,7 +570,12 @@ def _assess_risk(scenario_results: list[dict[str, Any]]) -> str:
 
 def _compute_runway(inputs: dict[str, Any]) -> dict[str, Any]:
     """Compute multi-scenario runway analysis from structured inputs."""
-    company = inputs.get("company", {})
+    # `company` is optional: a quick runway check gives only cash and burn, and nothing below needs
+    # a company to compute months of runway (unlike unit_economics.py, which grades against a stage).
+    # `null` reads as absent; main() refuses any other non-object before this is reached.
+    company = inputs.get("company")
+    if not isinstance(company, dict):
+        company = {}
     data_confidence = company.get("data_confidence", "exact")
     cash_data = inputs.get("cash", {})
     revenue_data = inputs.get("revenue", {})
@@ -904,8 +909,16 @@ def main() -> None:
 
     indent = 2 if args.pretty else None
 
-    if "company" not in data:
-        result: dict[str, Any] = {"validation": {"status": "invalid", "errors": ["Missing required key: 'company'"]}}
+    # `company` may be absent or null (a quick runway check states only cash and burn). Present
+    # and not an object is a malformed input, refused loudly rather than read as "no company".
+    company = data.get("company")
+    if company is not None and not isinstance(company, dict):
+        result: dict[str, Any] = {
+            "validation": {
+                "status": "invalid",
+                "errors": [f"'company' must be an object or null, got {type(company).__name__}"],
+            }
+        }
         _fail_invalid(result, args.output, indent)
 
     result = _compute_runway(data)

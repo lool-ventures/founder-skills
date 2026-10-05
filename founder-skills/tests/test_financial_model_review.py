@@ -2221,6 +2221,29 @@ def test_runway_iia_grant_disbursement() -> None:
     assert any("IIA" in lim for lim in data["limitations"])
 
 
+def test_runway_quick_check_needs_only_cash_and_burn() -> None:
+    """A quick runway question states cash and burn, nothing else. runway.py used to refuse that
+    payload for a missing `company` key it never needs, so the quick check failed and was retried.
+    `company: null` reads as absent too; any other non-object `company` is still refused loudly."""
+    cash_only = {"cash": {"current_balance": 1_200_000, "monthly_net_burn": 100_000}}
+    rc, data, stderr = run_script("runway.py", ["--pretty"], stdin_data=json.dumps(cash_only))
+    assert rc == 0, stderr
+    assert data is not None
+    base = next(s for s in data["scenarios"] if s["name"] == "base")
+    assert base["runway_months"] == 12, base
+    assert base["static_runway_months"] == 12.0, base
+
+    rc, data, stderr = run_script("runway.py", ["--pretty"], stdin_data=json.dumps({**cash_only, "company": None}))
+    assert rc == 0, stderr
+    assert data is not None
+    assert next(s for s in data["scenarios"] if s["name"] == "base")["runway_months"] == 12
+
+    rc, data, stderr = run_script("runway.py", ["--pretty"], stdin_data=json.dumps({**cash_only, "company": "x"}))
+    assert rc == 1, (rc, data)
+    assert data is not None and data["validation"]["status"] == "invalid"
+    assert "'company' must be an object" in stderr, stderr
+
+
 def test_runway_fx_adjustment() -> None:
     """FX adjustment affects ILS-denominated expenses in scenarios."""
     inputs_with_fx = {
@@ -9068,7 +9091,8 @@ def test_fmr_producers_refuse_loudly_instead_of_clobbering() -> None:
     cases = [
         ("checklist.py", "checklist.json", json.dumps({"notitems": 1})),
         ("unit_economics.py", "unit_economics.json", json.dumps({"nocompany": 1})),
-        ("runway.py", "runway.json", json.dumps({"nocompany": 1})),
+        # runway.py needs no `company` (a quick check states only cash and burn); a non-object one is invalid.
+        ("runway.py", "runway.json", json.dumps({"company": "x"})),
     ]
     for script, artifact, payload in cases:
         with tempfile.TemporaryDirectory() as d:

@@ -400,6 +400,7 @@ python3 "$SHARED_SCRIPTS/resolve_artifacts_root.py" --handoff-dir-agent \
 HANDOFF_AGENT="<printed value>"   # use verbatim in OUTPUT_PATH lines
 # Ad-hoc scratch (NOT sub-agent hand-off) lives OUTSIDE the promoted outputs/ tree, in a temp dir
 # that is safe to both create and clean up.
+# Scratch output (a redirect or a temp file) goes in $STAGING_DIR, never a fixed /tmp/<name>: /tmp is shared across sessions.
 STAGING_DIR="$(mktemp -d "${TMPDIR:-/tmp}/cap-table-${SLUG}.staging.XXXXXX")"
 ```
 

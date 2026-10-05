@@ -234,6 +234,7 @@ python3 "$SHARED_SCRIPTS/resolve_artifacts_root.py" --analysis-dir-agent \
 REVIEW_DIR_AGENT="<printed value>"   # e.g. stage_profile.json, deck_inventory.json reads
 # Ad-hoc scratch (NOT hand-off) lives OUTSIDE the outputs/ tree, where it is safe to create and
 # reclaim. Use the printed path verbatim in later steps.
+# Scratch output (a redirect or a temp file) goes in $STAGING_DIR, never a fixed /tmp/<name>: /tmp is shared across sessions.
 STAGING_DIR="$(mktemp -d "${TMPDIR:-/tmp}/deck-review-${SLUG:-deck}.staging.XXXXXX")"
 ```
 

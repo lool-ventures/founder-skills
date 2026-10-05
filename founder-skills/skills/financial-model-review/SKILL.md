@@ -223,11 +223,15 @@ Run only the producer(s) the question actually needs, with the inputs the founde
 
 ```bash
 # Runway question -> runway.py alone. Unit-economics question -> unit_economics.py alone.
-python3 "$SCRIPTS/runway.py" --stdin --pretty \
+python3 "$SCRIPTS/runway.py" --pretty \
   --run-id "$RUN_ID" -o "$REVIEW_DIR/runway.json" <<'JSON'
-<the founder's figures, as the JSON the producer reads on stdin>
+{"cash": {"current_balance": <cash on hand>, "monthly_net_burn": <monthly net burn>}}
 JSON
 ```
+
+That is the whole input a runway question needs: cash in the bank and net burn per month, each a plain
+number (burn positive while burning), no `company` block. Add `"revenue": {"monthly_total": <monthly revenue>}` only when the
+founder gave it. `unit_economics.py` still needs `company` with the stage it grades against.
 
 **Producers deliberately NOT run:** `extract_model.py`, `validate_extraction.py`,
 `validate_inputs.py`, `checklist.py`, the producer the question didn't need, `compose_report.py`,
@@ -279,6 +283,7 @@ python3 "$SHARED_SCRIPTS/resolve_artifacts_root.py" --analysis-dir-agent \
 REVIEW_DIR_AGENT="<printed value>"   # e.g. model_data.json, inputs.json reads
 # Ad-hoc scratch (NOT sub-agent hand-off) lives OUTSIDE the promoted outputs/ tree, in a temp dir
 # that is safe to both create and reclaim. Use the printed path verbatim in later steps.
+# Scratch output (a redirect or a temp file) goes in $STAGING_DIR, never a fixed /tmp/<name>: /tmp is shared across sessions.
 STAGING_DIR="$(mktemp -d "${TMPDIR:-/tmp}/financial-model-review-${SLUG:-fmr}.staging.XXXXXX")"
 ```
 
@@ -688,6 +693,8 @@ missing data yields `not_rated` / a partial-analysis stub, never a crash.
 **The prompt is printed, not written.** Run the generator and send the printed text as the prompt,
 unchanged — nothing added, removed or reworded, including on a re-run.
 
+Run the generator in a shell call of its own — nothing before it but variable assignments, nothing after it — and send what it prints unchanged.
+
 ```bash
 # A fresh shell: set each value again from Step 0's printed output (an empty one is refused).
 RUN_ID="<Step 0 run id>"
@@ -912,13 +919,9 @@ user-visible path is unsafe (and the parity gate flags it).
 python3 "$SCRIPTS/verify_review.py" --dir "$REVIEW_DIR" --pretty
 ```
 
-**This is the final quality gate.** If it exits non-zero, fix the issues before presenting anything to the founder. Once it passes, present everything to the founder:
+**This is the final quality gate.** If it exits non-zero, fix the issues before presenting anything to the founder. Once it passes, Step 12 delivers `report.md`, `report.html` and `explore.html` and prints the hand-over.
 
-1. Present `$REVIEW_DIR/report.md` — the primary deliverable (do NOT inline the markdown in the assistant message; present the file path)
-2. Present the `report.html` file path
-3. Present the `explore.html` file path
-
-**Do NOT inline `report_markdown` in the assistant message.** The founder reads the file via the path. (Closing the ~80-130K context accumulation issue.)
+**Do NOT inline `report_markdown` in the assistant message.** The founder reads the file. (Closing the ~80-130K context accumulation issue.)
 
 **Presenting numbers to the founder:**
 - Present the numbers from `report.md` **verbatim** — do not re-derive or restate them from memory or from intermediate context.
@@ -960,7 +963,7 @@ nothing outside the run that made them.
 
 **In this skill the hand-over message is printed, not written.** It is the links, the report's own
 verdict paragraph (the model's rating and its runway, with runway at today's burn when that is shorter),
-and the offer:
+and the offer. Send the files first; then run this as your LAST tool call:
 
 ```bash
 python3 "$SCRIPTS/fmr_closing_message.py" --report "$REVIEW_DIR/report.json" \
@@ -969,8 +972,12 @@ python3 "$SCRIPTS/fmr_closing_message.py" --report "$REVIEW_DIR/report.json" \
   --deliverable "the what-if explorer=<absolute path of explore.html>"
 ```
 
-Send its output as your message: the printed text is the message. Never compute or restate a figure
-around it — runway, burn and scores come from the report, in the report's words.
+Its printed output is your entire final message, character for character — every dash, line and link
+as printed — with no summary, sources or note before or after it. Never compute or restate a figure around
+it — runway, burn and scores come from the report, in the report's words.
+
+Here the printed hand-over replaces the named entries and the offer described above: its archive offer
+is the only offer made, and a connected folder is written to only if the founder asks.
 
 **Do not `rm` anything under `$REVIEW_DIR`** — it is the promoted `outputs/` tree in Cowork, where
 deleting a user-visible path is unsafe. Scratch lives in `$STAGING_DIR` (`/tmp`), which the sandbox
@@ -988,7 +995,6 @@ This skill runs inline in the main thread (not as a sub-agent). The final outcom
   "Infinite"). The headline fields in `coaching_payload` (`runway_months`, `static_runway_months`,
   `summary.overall_status`, `high_severity_warnings`) are for the coaching sub-agent; do not restate them
   in chat.
-- Optionally: the HTML report and explorer paths.
 
 ## Scoring
 

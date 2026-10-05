@@ -269,6 +269,7 @@ python3 "$SHARED_SCRIPTS/resolve_artifacts_root.py" --analysis-dir-agent \
 ANALYSIS_DIR_AGENT="<printed value>"   # e.g. landscape_draft.json, positioning.json reads
 # Ad-hoc scratch (NOT sub-agent hand-off) lives OUTSIDE the promoted outputs/ tree, in a temp dir
 # that is safe to both create and reclaim. Use the printed path verbatim in later steps.
+# Scratch output (a redirect or a temp file) goes in $STAGING_DIR, never a fixed /tmp/<name>: /tmp is shared across sessions.
 STAGING_DIR="$(mktemp -d "${TMPDIR:-/tmp}/competitive-positioning-${SLUG:-co}.staging.XXXXXX")"
 # Every later command runs in a fresh shell: copy these printed values verbatim into it.
 printf 'RUN_ID=%s\nSTAGING_DIR=%s\nHANDOFF_DIR=%s\n' "$RUN_ID" "$STAGING_DIR" "$HANDOFF_DIR"
@@ -548,7 +549,15 @@ Apply all corrections to `landscape_draft.json` before proceeding. **This is als
 
 **Preserve `_produced_by` when you edit these files.** `landscape_draft.json` and `positioning.json` are provenance-checked at Step 7: `compose_report.py` raises `UNVALIDATED_ARTIFACT` at **high** severity when the `_produced_by` stamp is missing or wrong. A correction here is an **in-place `Edit` that leaves `_produced_by` untouched** — do NOT rewrite the whole file (that drops the stamp and reds a run that did everything right). If you do need to regenerate the file wholesale, re-stage it and re-pipe it through `persist_agent_artifact.py` exactly as the step that first wrote it did.
 
-**A recall candidate the founder does NOT approve is not simply dropped.** Write it into `landscape_draft.json`'s top-level `deferred_recall_candidates[]` array — `{name, slug, category, why_considered, sources}`, copied from how the recall dispatch returned it — rather than discarding it. Step 4's additions gate below draws candidates from this array too, so a declined recall candidate stays reachable if the analysis later needs it, instead of becoming permanently unaddable the moment Step 4's own `suggested_additions` fill the remaining slots.
+**A recall candidate the founder does NOT approve is not simply dropped.** Record it in `landscape_draft.json`'s top-level `deferred_recall_candidates[]` array through its writer — one `{name, slug, category, why_considered, sources}` entry per candidate, copied from how the recall dispatch returned it — rather than discarding it or editing the draft yourself (`category` may be left out; the recall gaps do not carry it):
+
+```bash
+python3 "$SCRIPTS/record_deferred_recall.py" --draft "$ANALYSIS_DIR/landscape_draft.json" <<'JSON'
+[{"name": "<name>", "slug": "<slug>", "category": "<category>", "why_considered": "<as returned>", "sources": ["https://..."]}]
+JSON
+```
+
+Step 4's additions gate below draws candidates from this array too, so a declined recall candidate stays reachable if the analysis later needs it, instead of becoming permanently unaddable the moment Step 4's own `suggested_additions` fill the remaining slots.
 
 **Preserve `_produced_by` when you edit this file** — see the note at Gate 1: an in-place `Edit` keeps the stamp, a whole-file rewrite drops it and reds a compliant run at high severity. Regenerating the file wholesale means re-staging and re-piping it through `persist_agent_artifact.py`.
 
@@ -813,8 +822,9 @@ If the founder changes an axis pair or the competitor set, apply the change befo
 **Dispatch this in the same message as Step 4's LANDSCAPE_RESEARCH, so the two run in parallel** (two
 Task calls, both `subagent_type: "founder-skills:competitive-positioning"`). It researches the
 startup's own record — its registered legal name, its founders as inventors, its patent publications
-and their legal events — which nothing else in the run looks up. The prompt is printed; send it
-unchanged:
+and their legal events — which nothing else in the run looks up. The prompt is printed.
+
+Run the generator in a shell call of its own — nothing before it but variable assignments, nothing after it — and send what it prints unchanged.
 
 ```bash
 python3 "$SCRIPTS/cp_dispatch_prompt.py" startup_research --run-id "$RUN_ID" \
@@ -852,9 +862,14 @@ text as that dispatch's prompt, unchanged — nothing added, removed or reworded
 basis Gate 2 recorded (default `shipped`). Anything the scorers should know goes in the files they read,
 never in the prompt.
 
+Run each generator in a shell call of its own — nothing before it but variable assignments, nothing after it — and send what it prints unchanged.
+
 ```bash
 python3 "$SCRIPTS/cp_dispatch_prompt.py" moat_scoring --run-id "$RUN_ID" \
   --handoff-agent "$HANDOFF_AGENT" --analysis-dir-agent "$ANALYSIS_DIR_AGENT"
+```
+
+```bash
 python3 "$SCRIPTS/cp_dispatch_prompt.py" positioning_scoring --run-id "$RUN_ID" \
   --handoff-agent "$HANDOFF_AGENT" --analysis-dir-agent "$ANALYSIS_DIR_AGENT" \
   --analysis-dir "$ANALYSIS_DIR" --scoring-basis shipped
@@ -956,6 +971,8 @@ If the founder picks `Re-score with founder facts`, gather the additional detail
 **The prompt is printed, not written.** Run the generator and send the printed text as the prompt,
 unchanged — nothing added, removed or reworded, including on a re-run after a re-score.
 
+Run the generator in a shell call of its own — nothing before it but variable assignments, nothing after it — and send what it prints unchanged.
+
 ```bash
 python3 "$SCRIPTS/cp_dispatch_prompt.py" checklist --run-id "$RUN_ID" \
   --handoff-agent "$HANDOFF_AGENT" --analysis-dir-agent "$ANALYSIS_DIR_AGENT"
@@ -997,6 +1014,11 @@ the prompt and send it unchanged:
 ```bash
 python3 "$SHARED_SCRIPTS/resolve_artifacts_root.py" --uploads   # prints UPLOADS_DIR, or exits 3
 mkdir -p "$HANDOFF_DIR/docs" && cp "<printed UPLOADS_DIR>"/* "$HANDOFF_DIR/docs/"
+```
+
+Run the generator in a shell call of its own — nothing before it but variable assignments, nothing after it — and send what it prints unchanged.
+
+```bash
 python3 "$SCRIPTS/cp_dispatch_prompt.py" red_team --run-id "$RUN_ID" \
   --handoff-agent "$HANDOFF_AGENT" --analysis-dir-agent "$ANALYSIS_DIR_AGENT" \
   --analysis-dir "$ANALYSIS_DIR" --handoff-dir "$HANDOFF_DIR"
@@ -1260,6 +1282,8 @@ cp "$ANALYSIS_DIR/report.html" "$OUT/${COMPANY_NAME}_Competitive_Positioning.htm
 cp "$ANALYSIS_DIR/explore.html" "$OUT/${COMPANY_NAME}_Competitive_Explorer.html" 2>/dev/null
 ```
 
+Where `COMPANY_NAME` is the company name with spaces replaced by underscores (e.g., "Acme Corp" -> "Acme_Corp").
+
 **Send the finished work to the founder — the complete set, as files.** Not a path, and not a subset.
 A path is not a deliverable in Cowork — whether the workspace it names outlives the task depends on how
 that task was started, so a founder who was handed only a path may end up with nothing. (That is your
@@ -1293,7 +1317,7 @@ nothing outside the run that made them.
 
 **In this skill the hand-over message is printed, not written.** It is the links, the report's own
 verdict paragraph (where you stand on each map, the pitch claims that do not hold, defensibility and
-the patent record), and the offer:
+the patent record), and the offer. Send the files first; then run this as your LAST tool call:
 
 ```bash
 python3 "$SCRIPTS/cp_closing_message.py" --report "$ANALYSIS_DIR/report.json" \
@@ -1302,16 +1326,18 @@ python3 "$SCRIPTS/cp_closing_message.py" --report "$ANALYSIS_DIR/report.json" \
   --deliverable "the interactive explorer=<absolute path of the copied _Competitive_Explorer.html>"
 ```
 
-Send its output as your message: the printed text is the message. It already states where the founder
-stands, so there is nothing to add before it.
+Its printed output is your entire final message, character for character — every dash, line and link
+as printed — with no summary, sources or note before or after it. It already states where the founder
+stands, so there is nothing to add.
+
+Here the printed hand-over replaces the named entries and the offer described above: its archive offer
+is the only offer made, and a connected folder is written to only if the founder asks.
 
 Scratch lives in `$STAGING_DIR` (`/tmp`, reclaimed by the sandbox) — no cleanup needed. **Do not `rm`
 anything under `$ANALYSIS_DIR`** — it is the promoted `outputs/` tree in Cowork, where deleting a
 user-visible path is unsafe (and the parity gate flags it).
 
-Where `COMPANY_NAME` is the company name with spaces replaced by underscores (e.g., "Acme Corp" -> "Acme_Corp"). Present the file paths to the user.
-
-**Presenting the report to the founder:**
+**When the founder asks about the report afterwards:**
 - Answer placement and moat questions **from the points/evidence tables in report.md** — never re-derive or restate coordinates from memory.
 - If the founder disputes a coordinate (e.g., "we're faster than you placed us"), use the **founder coordinate-override flow** (Step 5): update the specific point in `positioning.json` with `x_evidence_source: "founder_override"` and re-run `score_positioning.py` to refresh `positioning_scores.json`, then re-run the Step 6 checklist pipe (so `checklist.json`'s recorded fingerprint matches the changed map) and `compose_report.py`. Do NOT re-explain a placement from chat context.
 - For what-if competitive scenarios (e.g., "what if we added this moat?"), note the gap and invite the founder to re-run the full skill after updating the relevant data.
@@ -1349,10 +1375,11 @@ This skill runs inline in the main thread (not as a sub-agent). The final outcom
 - **In Claude Code:** the path to `$ANALYSIS_DIR/report.md` — there the path *is* the deliverable, because
   `./artifacts/` is durable. **In Cowork:** the delivered files are the deliverable; a path
   names a workspace that may not outlive the task.
-- The headline outcome fields, sourced from the `coaching_payload` staged in Step 7c (`summary.overall_status`, `high_severity_warnings`) and the producer artifacts (`moat_scores.json` for top moats), plus the `insert_coaching.py` receipt (`status`, `report_path`, `run_id`). The Context B sub-agent no longer echoes these — do not source them from its return.
+- The printed hand-over from Step 8, unchanged: it is the founder's message, and its verdict already
+  states where the founder stands. Do not restate the headline fields below in chat.
+- The headline outcome fields are for your own checks, not the founder's message: sourced from the `coaching_payload` staged in Step 7c (`summary.overall_status`, `high_severity_warnings`) and the producer artifacts (`moat_scores.json` for top moats), plus the `insert_coaching.py` receipt (`status`, `report_path`, `run_id`). The Context B sub-agent no longer echoes these — do not source them from its return.
 
   **Nesting matters here, and it is mixed — read the path, not the pattern:** `overall_status` sits under `coaching_payload.summary` (which also carries `score_pct`); reading `coaching_payload.score_pct` returns null while the real number sits one level down, and a live run did exactly that. But `high_severity_warnings` is **top level** — reaching under `summary` for it returns null too, in the opposite direction.
-- Optionally: the HTML report paths from Steps 7d and 7e.
 
 **Do NOT inline `report_markdown` in the assistant message.** The founder reads the file via the path.
 

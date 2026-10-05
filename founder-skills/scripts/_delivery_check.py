@@ -19,9 +19,11 @@ WHEN IT ASKS -- all of these, read from the session transcript:
    carrying the printed hand-over whole also counts (`_handover_check.carries`): on a cloud session
    those scripts name each document by its label alone, so the message links nothing. RESIDUAL: a
    cloud closing message rewritten without the hand-over and without a path is not asked to attach.
-4. No delivery call after the build succeeded. A delivery before it does not count: financial-model-
-   review's review page, sent at its values check, is not the report's delivery (and the report's is
-   not the page's -- see REVIEW PAGE below). Each is judged on deliveries after its own build.
+4. No delivery call after the build succeeded. When the prompt ran a compose script, the build is the
+   last compose, so a delivery between it and a closing script that follows counts. A delivery before
+   the build does not count: financial-model-review's review page, sent at its values check, is not
+   the report's delivery (and the report's is not the page's -- see REVIEW PAGE below). Each is
+   judged on deliveries after its own build.
 5. The host OFFERED a delivery tool: a name containing `present_files`, or `SendUserFile`, in the
    tool list the transcript records (a `prompt_snapshot` attachment's `tools`, or
    `deferred_tools_delta.addedNames`). A failed call to a guessed name is not evidence the tool
@@ -52,6 +54,7 @@ from typing import Any
 SHELL_TOOLS = ("Bash", "mcp__workspace__bash")
 _BUILD = re.compile(r"(?<![\w-])(?:compose_report|closing_message|cp_closing_message|fmr_closing_message)\.py\b")
 _CLOSER = re.compile(r"(?<![\w-])(?:closing_message|cp_closing_message|fmr_closing_message)\.py\b")
+_COMPOSE = re.compile(r"(?<![\w-])compose_report\.py\b")
 _DELIVERABLE = re.compile(
     r"computer://\S+|(?:^|[\s(`\"'])/[^\s)`\"']+\.(?:md|html|pdf|xlsx)\b|\]\([^)]+\.(?:md|html|pdf|xlsx)\)",
     re.IGNORECASE | re.MULTILINE,
@@ -134,7 +137,8 @@ def missing_delivery(rows: list[dict[str, Any]], start: int, printed: str | None
             if isinstance(b, dict) and b.get("type") == "tool_result" and isinstance(b.get("tool_use_id"), str):
                 results[b["tool_use_id"]] = bool(b.get("is_error"))
     build_at: int | None = None
-    closer = False
+    compose_at: int | None = None
+    closer_at: int | None = None
     for i in range(start, len(rows)):
         row = rows[i]
         if row.get("type") != "assistant" or row.get("isSidechain"):
@@ -146,14 +150,37 @@ def missing_delivery(rows: list[dict[str, Any]], start: int, printed: str | None
             command = str((b.get("input") or {}).get("command", ""))
             if isinstance(cid, str) and cid and _BUILD.search(command) and results.get(cid) is False:
                 build_at = i
-                closer = bool(_CLOSER.search(command))
+                if _CLOSER.search(command):
+                    closer_at = i
+                if _COMPOSE.search(command):
+                    compose_at = i
     if build_at is None:
         return None
+    # The report is built by its compose script; a closing script only prints the hand-over, and the
+    # skills deliver first and run the closer last, so its printed text is the final message. Three
+    # windows follow from that. Deliveries count from the prompt's last compose (from the prompt's
+    # start when it ran no compose: a resumed run re-sends files it built earlier). A failed shell call
+    # stops the ask only after the closer that follows that compose: the coaching chain between them
+    # retries by design. The final message is read after the last build.
+    text_from = build_at
+    closer = closer_at is not None and (compose_at is None or closer_at > compose_at)
+    if compose_at is not None:
+        deliver_from = compose_at
+        fail_from = closer_at if closer else compose_at
+    else:
+        deliver_from = start - 1
+        fail_from = build_at
     texts: list[str] = []
-    for row in rows[build_at + 1 :]:
+    for i in range(min(deliver_from, fail_from, text_from) + 1, len(rows)):
+        row = rows[i]
         if row.get("isSidechain"):
             continue
-        if row.get("type") == "user" and row.get("isMeta") and _text(row).startswith(STOP_FEEDBACK_PREFIX):
+        if (
+            i > text_from
+            and row.get("type") == "user"
+            and row.get("isMeta")
+            and _text(row).startswith(STOP_FEEDBACK_PREFIX)
+        ):
             texts = []  # judge the latest attempt's words; deliveries still accumulate
             continue
         if row.get("type") != "assistant":
@@ -163,11 +190,11 @@ def missing_delivery(rows: list[dict[str, Any]], start: int, printed: str | None
                 continue
             cid = b.get("id")
             outcome = results.get(cid) if isinstance(cid, str) else None
-            if b.get("name") in SHELL_TOOLS and outcome is True:
+            if i > fail_from and b.get("name") in SHELL_TOOLS and outcome is True:
                 return None
-            if is_delivery_tool(b.get("name")) and outcome is False:
+            if i > deliver_from and is_delivery_tool(b.get("name")) and outcome is False:
                 return None
-        t = _text(row)
+        t = _text(row) if i > text_from else ""
         if t.strip():
             texts.append(t)
     final = "\n".join(texts)

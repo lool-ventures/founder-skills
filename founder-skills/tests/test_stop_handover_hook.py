@@ -731,6 +731,67 @@ def test_a_cloud_closing_message_after_a_delivery_call_passes(tmp_path: Path) ->
     assert r.returncode == 0 and r.stdout == "" and r.stderr == "", r
 
 
+def _compose_deliver_close_rows(*between: dict[str, Any]) -> list[dict[str, Any]]:
+    """The order the skills ask for: compose the report, deliver its files, then the closing script last,
+    whose printed text is the final message."""
+    return [
+        _snapshot("mcp__workspace__bash", "mcp__cowork__present_files"),
+        _user("Size this market."),
+        _call_with_id("mcp__workspace__bash", COMPOSE_CMD, "toolu_compose"),
+        _result_for("toolu_compose", "{}"),
+        *between,
+        _call_with_id("mcp__workspace__bash", CLOSING_CMD, "toolu_close"),
+        _result_for("toolu_close", CLOUD_PRINTED),
+        _assistant_text(CLOUD_PRINTED),
+    ]
+
+
+def test_a_delivery_before_the_closing_script_counts_for_the_report(tmp_path: Path) -> None:
+    r = _run(tmp_path, _compose_deliver_close_rows(*_deliver("toolu_d")))
+    assert r.returncode == 0 and r.stdout == "" and r.stderr == "", r
+
+
+def test_with_no_delivery_before_or_after_the_closing_script_it_is_asked_to_attach(tmp_path: Path) -> None:
+    out = json.loads(_run(tmp_path, _compose_deliver_close_rows()).stdout)
+    assert out["decision"] == "block" and "attach" in out["reason"]
+
+
+def test_a_delivery_before_the_compose_does_not_count(tmp_path: Path) -> None:
+    rows = _compose_deliver_close_rows()
+    rows[2:2] = _deliver("toolu_early")
+    out = json.loads(_run(tmp_path, rows).stdout)
+    assert out["decision"] == "block" and "attach" in out["reason"]
+
+
+def test_a_retried_step_between_compose_and_closing_script_still_asks_to_attach(tmp_path: Path) -> None:
+    """The coaching chain between compose and the closer retries by design (a hand-off gate's exit 3,
+    a verification re-run); a failure there that the run recovered from does not excuse delivery."""
+    failed = [
+        _call_with_id("mcp__workspace__bash", 'python3 "$SHARED_SCRIPTS/check_handoff.py" x', "toolu_gate"),
+        _result_for("toolu_gate", "exit 3", is_error=True),
+    ]
+    out = json.loads(_run(tmp_path, _compose_deliver_close_rows(*failed)).stdout)
+    assert out["decision"] == "block" and "attach" in out["reason"]
+
+
+def test_a_failure_after_the_closing_script_stops_the_ask(tmp_path: Path) -> None:
+    rows = _compose_deliver_close_rows()
+    rows[-1:-1] = [
+        _call_with_id("mcp__workspace__bash", "ls /nonexistent", "toolu_late"),
+        _result_for("toolu_late", "No such file", is_error=True),
+    ]
+    assert _run(tmp_path, rows).stdout == ""
+
+
+def test_a_resumed_run_that_delivers_then_closes_passes(tmp_path: Path) -> None:
+    """A prompt that only re-sends a report built earlier runs no compose: its delivery counts from the
+    prompt's start."""
+    rows = _cloud_closer_rows(_assistant_text(CLOUD_PRINTED))
+    rows[2:2] = _deliver("toolu_d")
+    r = _run(tmp_path, rows)
+    assert r.returncode == 0 and r.stdout == "" and r.stderr == "", r
+
+
 def test_a_report_built_after_the_closing_script_is_judged_on_its_own_links(tmp_path: Path) -> None:
     """The hand-over counts for a closing script's build only: a report composed after it is the build
     the message must point at."""

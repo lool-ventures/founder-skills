@@ -264,6 +264,7 @@ python3 "$SHARED_SCRIPTS/resolve_artifacts_root.py" --analysis-dir-agent \
 ANALYSIS_DIR_AGENT="<printed value>"   # e.g. inputs.json, validation.json, sizing.json reads
 # Ad-hoc scratch (NOT sub-agent hand-off) lives OUTSIDE the promoted outputs/ tree, in a temp dir
 # that is safe to both create and reclaim. Use the printed path verbatim in later steps.
+# Scratch output (a redirect or a temp file) goes in $STAGING_DIR, never a fixed /tmp/<name>: /tmp is shared across sessions.
 STAGING_DIR="$(mktemp -d "${TMPDIR:-/tmp}/market-sizing-${SLUG:-co}.staging.XXXXXX")"
 # Every later command runs in a fresh shell: copy these printed values verbatim into it.
 printf 'RUN_ID=%s\nSTAGING_DIR=%s\nHANDOFF_DIR=%s  # shell\nHANDOFF_AGENT=%s  # same dir, for Read/Write\n' "$RUN_ID" "$STAGING_DIR" "$HANDOFF_DIR" "$HANDOFF_AGENT"
@@ -921,6 +922,8 @@ The prompt is printed, not written: run this, then dispatch the CHECKLIST sub-ag
 text as its prompt, unchanged — nothing added, removed or reworded, in either round. It also writes the
 copy of `methodology.json` the grader reads, which leaves out the revision record.
 
+Run the generator in a shell call of its own — nothing before it but variable assignments, nothing after it — and send what it prints unchanged.
+
 ```bash
 python3 "$SCRIPTS/dispatch_prompt.py" checklist --run-id "$RUN_ID" \
   --analysis-dir "$ANALYSIS_DIR" --analysis-dir-agent "$ANALYSIS_DIR_AGENT" \
@@ -997,6 +1000,11 @@ scanned PDF:
 
 ```bash
 python3 "$SCRIPTS/ocr_uploads.py" --uploads-dir "$HANDOFF_DIR/docs" --out "$HANDOFF_DIR/ocr"   # exit 0 always
+```
+
+Run the generator in a shell call of its own — nothing before it but variable assignments, nothing after it — and send what it prints unchanged.
+
+```bash
 python3 "$SCRIPTS/dispatch_prompt.py" red_team --run-id "$RUN_ID" \
   --analysis-dir "$ANALYSIS_DIR" --handoff-dir "$HANDOFF_DIR" \
   --analysis-dir-agent "<ANALYSIS_DIR_AGENT>" --handoff-agent "<HANDOFF_AGENT>"
@@ -1323,7 +1331,7 @@ data. Never include pipeline hand-off files, receipts, coaching payloads, or gat
 nothing outside the run that made them.
 
 **In this skill the hand-over message is printed, not written.** It is the links, the report's
-opening verdict paragraph (the same words, its marks explained), and the offer:
+opening verdict paragraph (the same words, its marks explained), and the offer. Send the files first; then run this as your LAST tool call:
 
 ```bash
 python3 "$SCRIPTS/closing_message.py" --report "$ANALYSIS_DIR/report.json" \
@@ -1331,8 +1339,12 @@ python3 "$SCRIPTS/closing_message.py" --report "$ANALYSIS_DIR/report.json" \
   --deliverable "the charts=<absolute path you copied the .html to, if generated>"
 ```
 
-Send its output as your message: the printed text is the message. It already answers whether the
-founder's figures hold up, so there is nothing to add before it.
+Its printed output is your entire final message, character for character — every dash, line and link
+as printed — with no summary, sources or note before or after it. It already answers whether the founder's
+figures hold up, so there is nothing to add.
+
+Here the printed hand-over replaces the named entries and the offer described above: its archive offer
+is the only offer made, and a connected folder is written to only if the founder asks.
 
 No cleanup needed: scratch lives in `$STAGING_DIR` (`/tmp`, reclaimed by the sandbox). **Do not `rm`
 anything under `$ANALYSIS_DIR`** — it is the promoted `outputs/` tree in Cowork, where deleting a
