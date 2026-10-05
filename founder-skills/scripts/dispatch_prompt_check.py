@@ -1588,7 +1588,10 @@ def _unprinted_reason(rows: list[dict[str, Any]], context: str, agent: str, outp
     what = (
         f"`{loud}`"
         if loud is not None
-        else "shell syntax the check cannot follow (an `if`, a loop, a heredoc or a subshell)"
+        else (
+            "shell syntax the check cannot follow, such as an `if`, a loop, a heredoc, a subshell, a "
+            "backtick, a background `&`, or a quoted argument that spans lines (a multi-line `python3 -c`)"
+        )
     )
     return (
         f"{head}. The prompt generator ran, but its block also ran {what}, so its output cannot be vouched "

@@ -267,3 +267,18 @@ def test_the_question_check_decides_the_same_under_the_system_python(tmp_path: P
     dev, system = _both(SCRIPTS / "pretooluse_dispatch.py", _payload(tmp_path, rows))
     assert dev == system
     assert bool(dev) is not sent
+
+
+@needs_old
+@pytest.mark.parametrize("answered", [False, True])
+def test_the_two_figures_check_reads_a_question_form_the_same_under_the_system_python(
+    tmp_path: Path, answered: bool
+) -> None:
+    """The form is parsed with `html.parser`; the hold and its release must not depend on the interpreter."""
+    from test_two_figures_hook import _ALL_PILLS, _SHOWN, _answer, _asked, _form_outputs, _payload, _widget
+
+    _form_outputs(tmp_path)
+    rows = _asked(_widget(*_ALL_PILLS), _SHOWN, *([_answer()] if answered else []))
+    dev, system = _both(SCRIPTS / "pretooluse_dispatch.py", _payload(tmp_path, rows))
+    assert dev == system
+    assert bool(dev) is not answered

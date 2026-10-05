@@ -75,6 +75,18 @@ def _run(
     cwd: str | None = "",
 ) -> subprocess.CompletedProcess[str]:
     """`cwd` defaults to the outputs dir; None leaves it out of the payload."""
+    payload = _payload(tmp_path, rows, prompt, tool, transcript, cwd)
+    return subprocess.run(["sh", str(WRAPPER)], input=json.dumps(payload), capture_output=True, text=True, timeout=30)
+
+
+def _payload(
+    tmp_path: Path,
+    rows: list[dict[str, Any]],
+    prompt: str = "CONTEXT: BOTTOM_UP_METHODOLOGY\nOUTPUT_PATH: x",
+    tool: str = "Agent",
+    transcript: bool = True,
+    cwd: str | None = "",
+) -> dict[str, Any]:
     path = tmp_path / "t.jsonl"
     if transcript:
         path.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
@@ -88,7 +100,7 @@ def _run(
     }
     if cwd is None:
         del payload["cwd"]
-    return subprocess.run(["sh", str(WRAPPER)], input=json.dumps(payload), capture_output=True, text=True, timeout=30)
+    return payload
 
 
 def _decision(r: subprocess.CompletedProcess[str]) -> dict[str, Any]:
@@ -318,3 +330,238 @@ def test_a_non_sizing_dispatch_writes_nothing_to_stderr(tmp_path: Path) -> None:
     r = _run(tmp_path, [_user("x")], prompt="CONTEXT: SENSITIVITY_TEST\nOUTPUT_PATH: x", cwd=_EMPTY_CWD)
     _silent(r)
     assert r.stderr == ""
+
+
+# --- Desktop's question form (2026-10-06) ------------------------------------------------------------
+# On Desktop the first question is steered to a `show_widget` elicit form, not `AskUserQuestion`, and
+# its answer arrives as a plain user message: "<header> — Label: value · …". The hook counted only
+# `AskUserQuestion`, and the answer started a new request, so a founder who had chosen from all the
+# figures saw both sizing dispatches held and the question asked again. Synthetic shapes below; the
+# figures are invented.
+
+_FORM_ALTERNATIVES = {
+    "arpu": [
+        {"value": 295, "period": "month", "label": "launch rate"},
+        {"value": 233, "period": "month", "label": "averaged rate"},
+    ]
+}
+_HEADER = "Market sizing details"
+_DASH = "\u2014"
+_ICON = '<svg viewBox="0 0 24 24"><path d="M3 12h18M12 3v18 L140 295 233 18.5"/></svg>'
+
+
+def _pill(amount: str, note: str, value: str | None = None, attrs: str = "") -> str:
+    return (
+        f'<button type="button" class="elicit-pill" data-value="{value or amount}"{attrs} style="display:flex">'
+        f'<i class="ti ti-tag" aria-hidden="true"></i><span><span>{amount}</span><br>'
+        f'<span style="color:var(--text-muted)">{note}</span></span></button>'
+    )
+
+
+def _widget(*pills: str, header: str = f"<span>{_HEADER}</span>", extra: str = "", tool: str = "") -> dict[str, Any]:
+    code = (
+        '<h2 class="sr-only">Two questions before sizing.</h2>\n<form class="elicit">'
+        f'<div class="elicit-header">{_ICON}{header}</div><div class="elicit-body">'
+        '<div class="elicit-group"><label class="elicit-question">Which market should I size?</label>'
+        '<div class="elicit-pills" data-name="geography" data-multi="false">'
+        '<button type="button" class="elicit-pill" data-value="US">US</button>'
+        '<button type="button" class="elicit-pill" data-value="Other" data-other>Other</button></div>'
+        '<input type="text" class="elicit-other" data-for="geography" placeholder="Which region?" hidden></div>'
+        '<div class="elicit-group"><label class="elicit-question">Which price should the sizing use?</label>'
+        f'<div class="elicit-pills" data-name="price" data-multi="false">{"".join(pills)}</div></div>{extra}</div>'
+        '<div class="elicit-footer"><button type="button" class="elicit-skip">Skip</button>'
+        '<button type="button" class="elicit-submit">Continue</button></div></form>'
+    )
+    return _show(code, tool or "mcp__visualize__show_widget")
+
+
+def _show(code: str, tool: str = "mcp__visualize__show_widget") -> dict[str, Any]:
+    use = {
+        "type": "tool_use",
+        "id": "toolu_w",
+        "name": tool,
+        "input": {"title": "market_sizing_details", "loading_messages": ["Building"], "widget_code": code},
+    }
+    return {"type": "assistant", "message": {"role": "assistant", "content": [use]}}
+
+
+_SHOWN = {
+    "type": "user",
+    "message": {
+        "role": "user",
+        "content": [
+            {
+                "type": "tool_result",
+                "tool_use_id": "toolu_w",
+                "content": [{"type": "text", "text": "Content rendered and shown to the user."}],
+            }
+        ],
+    },
+}
+_ALL_PILLS = (
+    _pill("$140 / month", "Typed in chat", "$140/month typed"),
+    _pill("$295 / month", "Launch, months 1-3", "$295/month launch"),
+    _pill("$233 / month", "Averaged", "$233/month averaged"),
+)
+
+
+def _answer(text: str = f"{_HEADER} {_DASH} Geography: US · Price: $233/month averaged") -> dict[str, Any]:
+    """The answer as Desktop delivers it: a plain string, not a list of blocks."""
+    return {"type": "user", "message": {"role": "user", "content": text}}
+
+
+def _form_outputs(tmp_path: Path) -> Path:
+    return _outputs(tmp_path, alternatives=_FORM_ALTERNATIVES, stated=140)
+
+
+def _asked(*rows: dict[str, Any]) -> list[dict[str, Any]]:
+    return [_user("Size my market."), *rows]
+
+
+def test_an_answered_form_offering_every_figure_lets_the_dispatch_through(tmp_path: Path) -> None:
+    _form_outputs(tmp_path)
+    _silent(_run(tmp_path, _asked(_widget(*_ALL_PILLS), _SHOWN, _answer())))
+    _silent(_run(tmp_path, _asked(_widget(*_ALL_PILLS), _SHOWN, _answer()), prompt="CONTEXT: TOP_DOWN_METHODOLOGY\nx"))
+
+
+def test_the_same_form_without_its_answer_is_held(tmp_path: Path) -> None:
+    """The widget's result says "rendered and shown" at once; a dispatch in the same turn is before
+    anyone chose."""
+    _form_outputs(tmp_path)
+    assert _decision(_run(tmp_path, _asked(_widget(*_ALL_PILLS), _SHOWN)))["permissionDecision"] == "deny"
+
+
+def test_a_form_offering_only_some_figures_is_held_naming_the_missing(tmp_path: Path) -> None:
+    _form_outputs(tmp_path)
+    rows = _asked(_widget(*_ALL_PILLS[:2]), _SHOWN, _answer())
+    reason = _decision(_run(tmp_path, rows))["permissionDecisionReason"]
+    assert "never offered: $233" in reason and "already offered: $140" in reason
+
+
+def test_figures_only_in_attributes_or_svg_are_not_offered(tmp_path: Path) -> None:
+    """Every figure is in the SVG path data and in a data-value; the visible text names one."""
+    _form_outputs(tmp_path)
+    pills = [_pill("$140 / month", "Typed"), _pill("The launch rate", "Early months", "$295/month")]
+    pills.append(_pill("The averaged rate", "Blended", "$233/month"))
+    assert _decision(_run(tmp_path, _asked(_widget(*pills), _SHOWN, _answer())))["permissionDecision"] == "deny"
+
+
+def test_hidden_pills_and_comments_are_not_offered(tmp_path: Path) -> None:
+    _form_outputs(tmp_path)
+    for pills in (
+        _ALL_PILLS[:2] + (_pill("$233 / month", "Averaged", attrs=" hidden"),),
+        _ALL_PILLS[:2]
+        + (_pill("$233 / month", "Averaged", attrs=' data-x="1"').replace("display:flex", "display: none"),),
+        _ALL_PILLS[:2] + (_pill("<!-- $233 / month -->", "Averaged"), _pill("<template>$233</template>", "Blended")),
+        _ALL_PILLS[:2] + (_pill("<style>i::after{content:'$233'}</style>Averaged", "Blended"),),
+    ):
+        rows = _asked(_widget(*pills), _SHOWN, _answer())
+        assert _decision(_run(tmp_path, rows))["permissionDecision"] == "deny", pills
+
+
+def test_figures_drawn_as_svg_text_are_not_offered(tmp_path: Path) -> None:
+    """SVG text nodes reach the parser as data, unlike path attributes: only the svg rule keeps the
+    third figure out."""
+    _form_outputs(tmp_path)
+    pills = _ALL_PILLS[:2] + (_pill("<svg><text>$233</text></svg>", "Averaged"),)
+    assert _decision(_run(tmp_path, _asked(_widget(*pills), _SHOWN, _answer())))["permissionDecision"] == "deny"
+
+
+def test_text_the_founder_cannot_see_is_not_offered(tmp_path: Path) -> None:
+    _form_outputs(tmp_path)
+    for third in (
+        _pill("<details><summary>More</summary>$233 / month</details>", "Averaged", "averaged"),
+        _pill("<textarea>$233 / month</textarea>", "Averaged", "averaged"),
+        _pill("<noscript>$233 / month</noscript>", "Averaged", "averaged"),
+        _pill('<span class="sr-only">$233 / month</span>', "Averaged", "averaged"),
+        _pill('<span style="visibility: hidden">$233 / month</span>', "Averaged", "averaged"),
+        _pill('<span aria-hidden="true">$233 / month</span>', "Averaged", "averaged"),
+        _pill("<div hidden/>$233 / month", "Averaged", "averaged"),
+    ):
+        rows = _asked(_widget(*(_ALL_PILLS[:2] + (third,))), _SHOWN, _answer())
+        assert _decision(_run(tmp_path, rows))["permissionDecision"] == "deny", third
+
+
+def test_a_form_from_an_earlier_request_cannot_be_answered_later(tmp_path: Path) -> None:
+    """Form offering every figure, then an unrelated request, then a message that happens to start
+    with the form's header: the old form is not in the new request's window."""
+    _form_outputs(tmp_path)
+    rows = _asked(_widget(*_ALL_PILLS), _SHOWN, _user("Actually, start over with the deck."), _answer())
+    assert _decision(_run(tmp_path, rows))["permissionDecision"] == "deny"
+
+
+def test_the_answer_may_match_an_earlier_form_of_the_same_turn(tmp_path: Path) -> None:
+    _form_outputs(tmp_path)
+    other = _widget(_pill("Yes", "Go"), header="<span>Timing details</span>")
+    _silent(_run(tmp_path, _asked(_widget(*_ALL_PILLS), _SHOWN, other, _SHOWN, _answer())))
+
+
+def test_an_answer_after_an_attached_file_block_is_still_the_answer(tmp_path: Path) -> None:
+    _form_outputs(tmp_path)
+    text = f"<uploaded_files>\n<file>deck.pdf</file>\n</uploaded_files>\n{_HEADER} {_DASH} Price: $233"
+    _silent(_run(tmp_path, _asked(_widget(*_ALL_PILLS), _SHOWN, _answer(text))))
+
+
+def test_an_answer_whose_header_differs_is_a_new_request(tmp_path: Path) -> None:
+    _form_outputs(tmp_path)
+    rows = _asked(_widget(*_ALL_PILLS), _SHOWN, _answer(f"Pricing details {_DASH} Price: $233"))
+    assert _decision(_run(tmp_path, rows))["permissionDecision"] == "deny"
+
+
+def test_an_en_dash_answer_is_a_new_request(tmp_path: Path) -> None:
+    _form_outputs(tmp_path)
+    rows = _asked(_widget(*_ALL_PILLS), _SHOWN, _answer(f"{_HEADER} \u2013 Price: $233"))
+    assert _decision(_run(tmp_path, rows))["permissionDecision"] == "deny"
+
+
+def test_the_skip_line_answers_the_form(tmp_path: Path) -> None:
+    _form_outputs(tmp_path)
+    skip = f"(Skipped the form {_DASH} proceed with defaults or ask me in plain text)"
+    _silent(_run(tmp_path, _asked(_widget(*_ALL_PILLS), _SHOWN, _answer(skip))))
+
+
+def test_an_answer_as_a_list_of_blocks_counts(tmp_path: Path) -> None:
+    _form_outputs(tmp_path)
+    _silent(_run(tmp_path, _asked(_widget(*_ALL_PILLS), _SHOWN, _user(f"{_HEADER} {_DASH} Price: $233\nmore"))))
+
+
+def test_a_header_with_an_entity_and_spacing_is_matched_as_rendered(tmp_path: Path) -> None:
+    _form_outputs(tmp_path)
+    header = "<span>\n  Market &amp; pricing\n   details </span>"
+    rows = _asked(_widget(*_ALL_PILLS, header=header), _SHOWN, _answer(f"Market & pricing details {_DASH} Price: $233"))
+    _silent(_run(tmp_path, rows))
+
+
+def test_a_later_prompt_after_the_answer_still_starts_a_new_request(tmp_path: Path) -> None:
+    _form_outputs(tmp_path)
+    rows = _asked(_widget(*_ALL_PILLS), _SHOWN, _answer(), _user("Actually, size Europe instead."))
+    assert _decision(_run(tmp_path, rows))["permissionDecision"] == "deny"
+
+
+def test_the_retry_marker_is_found_across_a_form_answer(tmp_path: Path) -> None:
+    """dispatch → hold → form → answer → re-dispatch: the answer does not hide the hold."""
+    _form_outputs(tmp_path)
+    held = _denied(f"{MARKER}[BOTTOM_UP_METHODOLOGY] Held once: …")
+    _silent(_run(tmp_path, _asked(held, _widget(*_ALL_PILLS[:1]), _SHOWN, _answer())))
+    _silent(_run(tmp_path, _asked(held, _widget(*_ALL_PILLS), _SHOWN, _answer())))
+
+
+def test_a_scripted_form_is_not_an_offer(tmp_path: Path) -> None:
+    _form_outputs(tmp_path)
+    for extra in ("<script>void 0</script>", '<div onmouseover="x()"></div>'):
+        rows = _asked(_widget(*_ALL_PILLS, extra=extra), _SHOWN, _answer())
+        assert _decision(_run(tmp_path, rows))["permissionDecision"] == "deny", extra
+
+
+def test_a_widget_that_is_not_an_elicit_form_is_not_an_offer(tmp_path: Path) -> None:
+    _form_outputs(tmp_path)
+    chart = f'<div class="chart"><span>{_HEADER}</span><p>$140, $295 and $233 per month</p>{_ICON}</div>'
+    rows = _asked(_show(chart), _SHOWN, _answer())
+    assert _decision(_run(tmp_path, rows))["permissionDecision"] == "deny"
+
+
+def test_another_servers_show_widget_counts_only_as_an_elicit_form(tmp_path: Path) -> None:
+    _form_outputs(tmp_path)
+    _silent(_run(tmp_path, _asked(_widget(*_ALL_PILLS, tool="mcp__other__show_widget"), _SHOWN, _answer())))
+    rows = _asked(_widget(*_ALL_PILLS, tool="mcp__other__render"), _SHOWN, _answer())
+    assert _decision(_run(tmp_path, rows))["permissionDecision"] == "deny"

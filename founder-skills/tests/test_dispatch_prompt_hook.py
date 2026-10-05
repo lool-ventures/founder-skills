@@ -1076,7 +1076,15 @@ def test_a_generator_that_is_not_the_plugins_own_is_named_as_such(tmp_path: Path
 def test_a_generator_block_the_check_cannot_follow_says_so(tmp_path: Path) -> None:
     rows = [_user("Size my market."), *_printed(_GENERATED, command="if true; then\n" + GEN_CMD + "\nfi")]
     reason = _deny(_run(tmp_path, rows, _GENERATED))
-    assert "an `if`, a loop, a heredoc or a subshell" in reason
+    assert "an `if`, a loop, a heredoc, a subshell" in reason
+
+
+def test_a_multi_line_quoted_argument_before_the_generator_is_named(tmp_path: Path) -> None:
+    """A `python3 -c` whose quoted code spans lines cannot be parsed, so no single command can be named;
+    the reason must still describe what the block has, or the model cannot map it to what it wrote."""
+    command = 'python3 -c "\nimport json\nprint(1)" > out.json\n' + GEN_CMD
+    reason = _deny(_run(tmp_path, [_user("Size my market."), *_printed(_GENERATED, command=command)], _GENERATED))
+    assert "a quoted argument that spans lines" in reason and "python3 -c" in reason
 
 
 def test_after_the_plugins_scripts_were_changed_the_hold_says_it_will_let_through(tmp_path: Path) -> None:

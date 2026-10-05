@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # /// script
-# requires-python = ">=3.10"
+# requires-python = ">=3.9"
 # dependencies = []
 # ///
 """PreToolUse hook: hold market-sizing's sizing dispatch once when the founder was never asked which
@@ -16,6 +16,19 @@ the model; a check they satisfy is satisfied by writing them, which is the defec
 finding in checks whose remedy can change their own comparand. The transcript is written by the
 runtime: an `AskUserQuestion` whose question or options name every figure is the evidence, read
 there.
+
+THE DESKTOP QUESTION FORM. Desktop steers a first question to a form instead: a `show_widget` call
+whose HTML is a `<form class="elicit">`, answered by the founder's next message on one line, the
+form's header, a space, an em dash, a space, then the choices (or a fixed Skip line). Two things
+follow. A form counts only once ANSWERED: the widget's tool result says "rendered and shown" at once,
+so a model could show the form and dispatch in the same turn before anyone chose. And the answer,
+being a plain user message, would otherwise start a new request and drop the form out of the
+window; here, and only here, the answer to the latest form shown in the window is not a boundary
+(the Stop, dispatch-prompt and review-page checks keep their windows). The figures are read from the
+form's rendered text only, the option buttons and question labels; never attributes, SVG path data,
+comments, `<template>`/`<style>`/`<script>`, or hidden elements. A form with a script or an inline
+event handler is not an offer. The risk accepted: the answer is recognised by its text, so a founder
+who types the header followed by an em dash extends the window over an unanswered form.
 
 WHY THE DISPATCH. A hook on the question tool cannot make a question happen, and on both runs none
 did. The thing that must not happen before the question is the sizing, so the hook sits on the
@@ -48,6 +61,7 @@ not depend on this hook (test_skill_orchestration.py).
 from __future__ import annotations
 
 import glob
+import html.parser
 import importlib.util
 import json
 import os
@@ -64,6 +78,14 @@ _NUMBER_RE = re.compile(r"(?<![\d.,])(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d+))?(?!\d|,
 _FIELD_NAMES = {"arpu": "ARPU"}
 # The whole line, trimmed, as dispatch_prompt_check reads it: local-lane paths contain spaces.
 _OUTPUT_RE = re.compile(r"^[ \t]*OUTPUT_PATH:[ \t]*(.+?)[ \t]*$", re.MULTILINE)
+# Desktop's question form, as its elicitation module describes it to the model.
+FORM_TOOL = "mcp__visualize__show_widget"
+SKIP_LINE = "(Skipped the form \u2014 proceed with defaults or ask me in plain text)"
+_ANSWER_DASH = " \u2014 "
+_VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"}
+# Elements whose text the founder does not see as an option: drawn, inert, collapsed, or read only by
+# a screen reader. A model that puts a figure there has not offered it.
+_UNSEEN = {"svg", "template", "style", "script", "details", "textarea", "noscript"}
 
 
 def _log(msg: str) -> None:
@@ -115,6 +137,154 @@ def find_inputs(cwd: str) -> str | None:
     return max(found, key=os.path.getmtime) if found else None
 
 
+def _squash(text: str) -> str:
+    return " ".join(text.split())
+
+
+class _FormText(html.parser.HTMLParser):
+    """The text a founder sees in an elicit form: the header's span, and each option button's and
+    question label's text. Character references are unescaped by the parser (convert_charrefs)."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.stack: list[tuple[str, str]] = []  # (tag, role)
+        self.scripted = False
+        self.forms = 0
+        self.header: list[str] = []
+        self.options: list[str] = []
+
+    def _open(self, tag: str, attrs: list[tuple[str, str | None]], push: bool) -> None:
+        names = {k for k, _ in attrs}
+        values = {k: v or "" for k, v in attrs}
+        if tag == "script" or any(k.startswith("on") for k in names):
+            self.scripted = True
+        classes = set(values.get("class", "").split())
+        roles = {r for _, r in self.stack}
+        style = "".join(values.get("style", "").lower().split())
+        if (
+            tag in _UNSEEN
+            or "hidden" in names
+            or "sr-only" in classes
+            or values.get("aria-hidden", "").lower() == "true"
+            or "display:none" in style
+            or "visibility:hidden" in style
+        ):
+            role = "unseen"
+        elif tag == "form" and "elicit" in classes:
+            role = "form"
+            self.forms += 1
+        elif "elicit-header" in classes:
+            role = "header"
+        elif tag == "span" and "header" in roles:
+            role = "title"
+        elif "elicit-pill" in classes or "elicit-question" in classes:
+            role = "option"
+        else:
+            role = ""
+        if push and tag not in _VOID:
+            self.stack.append((tag, role))
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self._open(tag, attrs, push=True)
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        # HTML ignores a self-closing slash on a non-void element: `<div hidden/>` stays open in a
+        # browser, so it stays open here.
+        self._open(tag, attrs, push=True)
+
+    def handle_endtag(self, tag: str) -> None:
+        if any(t == tag for t, _ in self.stack):
+            while self.stack and self.stack.pop()[0] != tag:
+                pass
+
+    def handle_data(self, data: str) -> None:
+        roles = {r for _, r in self.stack}
+        if "unseen" in roles or "form" not in roles:
+            return
+        if "title" in roles:
+            self.header.append(data)
+        elif "option" in roles:
+            self.options.append(data)
+
+
+def elicit_form(block: Any) -> tuple[str, set[float]] | None:
+    """(header, figures offered) for a `show_widget` call that shows an elicit form, else None. A
+    scripted form, an empty header, or anything that does not parse is not an offer."""
+    if not isinstance(block, dict) or block.get("type") != "tool_use":
+        return None
+    name = block.get("name")
+    if not isinstance(name, str) or not (name == FORM_TOOL or name.endswith("__show_widget")):
+        return None
+    code = (block.get("input") or {}).get("widget_code") if isinstance(block.get("input"), dict) else None
+    if not isinstance(code, str) or "<script" in code.lower():
+        return None
+    try:
+        parser = _FormText()
+        parser.feed(code)
+        parser.close()
+    except Exception:  # noqa: BLE001 - a form that does not parse offered nothing
+        return None
+    header = _squash(" ".join(parser.header))
+    if parser.scripted or not parser.forms or not header:
+        return None
+    return header, _numbers(" ".join(parser.options))
+
+
+def _forms_in(row: dict[str, Any]) -> list[tuple[str, set[float]]]:
+    if row.get("type") != "assistant" or row.get("isSidechain"):
+        return []
+    content = (row.get("message") or {}).get("content")
+    found = [elicit_form(b) for b in (content if isinstance(content, list) else [])]
+    return [f for f in found if f is not None]
+
+
+_UPLOADS_RE = re.compile(r"\A\s*<uploaded_files>.*?</uploaded_files>\s*", re.DOTALL)
+
+
+def _first_line(row: dict[str, Any]) -> str:
+    """The message's first line, after any leading `<uploaded_files>` block the host adds when the
+    founder attaches a file."""
+    message = row.get("message") or {}
+    content = message.get("content")
+    if isinstance(content, list):
+        content = next((b.get("text") for b in content if isinstance(b, dict) and b.get("type") == "text"), "")
+    if not isinstance(content, str):
+        return ""
+    return _squash(_UPLOADS_RE.sub("", content, count=1).split("\n", 1)[0])
+
+
+def _answers(row: dict[str, Any], header: str) -> bool:
+    """The founder's reply to the form: its header, a spaced em dash, the choices; or the Skip line."""
+    line = _first_line(row)
+    return line.startswith(header + _ANSWER_DASH) or line == SKIP_LINE
+
+
+def _scan(rows: list[dict[str, Any]], is_prompt: Any) -> tuple[int, dict[int, set[float]]]:
+    """Where the current request starts, and the figures of each form answered after a prompt: {row
+    of the answer: figures}. A real prompt that answers a form shown since the previous prompt is
+    that form's answer, not a new request; when several forms share the header, the latest one is
+    the one answered. Any prompt clears the forms shown before it, so an old form cannot be answered
+    from a later request."""
+    start = 0
+    pending: list[tuple[str, set[float]]] = []
+    answered: dict[int, set[float]] = {}
+    for i, row in enumerate(rows):
+        if is_prompt(row):
+            match = next((f for f in reversed(pending) if _answers(row, f[0])), None)
+            if match is not None:
+                answered[i] = match[1]
+            else:
+                start = i
+            pending = []
+            continue
+        pending.extend(_forms_in(row))
+    return start, answered
+
+
+def _window_start(rows: list[dict[str, Any]], is_prompt: Any) -> int:
+    return _scan(rows, is_prompt)[0]
+
+
 def unasked(
     inputs: dict[str, Any], rows: list[dict[str, Any]], is_prompt: Any
 ) -> list[tuple[str, list[tuple[float, str, bool]]]]:
@@ -126,11 +296,8 @@ def unasked(
     alternatives = inputs.get("founder_stated_alternatives")
     if not isinstance(alternatives, dict):
         return []
-    start = 0
-    for i, row in enumerate(rows):
-        if is_prompt(row):
-            start = i
-    offered: list[set[float]] = []
+    start, answered = _scan(rows, is_prompt)
+    offered: list[set[float]] = [nums for at, nums in answered.items() if at > start]
     for row in rows[start:]:
         if row.get("type") != "assistant" or row.get("isSidechain"):
             continue
@@ -172,10 +339,7 @@ def _marker(context: str) -> str:
 
 
 def _retried(rows: list[dict[str, Any]], is_prompt: Any, context: str) -> bool:
-    start = 0
-    for i, row in enumerate(rows):
-        if is_prompt(row):
-            start = i
+    start = _window_start(rows, is_prompt)
     mark = _marker(context)
     return any(row.get("type") == "user" and mark in json.dumps(row.get("message")) for row in rows[start:])
 
