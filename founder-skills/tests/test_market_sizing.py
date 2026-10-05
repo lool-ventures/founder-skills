@@ -9534,6 +9534,21 @@ def test_an_earlier_runs_review_does_not_pass_a_set_with_one_leftover_artifact()
     assert "no adversarial review was run" in stdout
 
 
+def test_an_even_split_goes_to_the_run_whose_files_were_produced_last() -> None:
+    """Three required artifacts per run: the tie goes to the run produced last, not to the greater id
+    string. The earlier run's id here is a host-style id that sorts after this run's timestamp."""
+    d = _gated_dir()
+    _pipe_review(d, "The published share is 6.1%.")
+    for name in ("inputs.json", "methodology.json", "validation.json"):
+        data = json.loads((d / name).read_text())
+        data["metadata"]["run_id"] = "zz-earlier-run"
+        (d / name).write_text(json.dumps(data))
+        old = (d / name).stat().st_mtime - 3600
+        os.utime(d / name, (old, old))
+    rc, stdout, _err = run_script_raw("compose_report.py", ["--dir", str(d)])
+    assert rc == 0, f"this run's review was refused on an even split: {stdout[-400:]}"
+
+
 def test_a_review_from_an_earlier_run_days_ago_is_not_disclosed(tmp_path: Path) -> None:
     d = _gated_dir()
     other = d / "handoff" / "20251231T000000Z"

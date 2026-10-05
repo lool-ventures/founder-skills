@@ -1005,8 +1005,7 @@ def _section_outside_review(dir_path: str, artifacts: dict[str, Any]) -> str:
     import _cp_redteam_copy
     import _cp_view
 
-    required = [artifacts.get(n) for n in REQUIRED_ARTIFACTS]
-    run_id = _cp_redteam_copy.primary_run_id(a for a in required if _usable(a))
+    run_id = _cp_redteam_copy.primary_run_id_in(dir_path, artifacts, REQUIRED_ARTIFACTS)
     redteam = _load_artifact(dir_path, "redteam.json")
     skip_record = _load_artifact(dir_path, "red_team_skip.json")
     shown, _codes, facts = _cp_redteam_copy.resolve(

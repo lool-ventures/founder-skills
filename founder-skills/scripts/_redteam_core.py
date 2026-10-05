@@ -397,38 +397,65 @@ def write_copy(
         return n
 
 
-def primary_run_id(docs: Iterable[Any]) -> str | None:
+def primary_run_id(docs: Iterable[Any], produced: Iterable[float | None] | None = None) -> str | None:
     """This run's id, from the required artifacts -- never from the review itself.
 
-    THE ID MOST OF THEM CARRY, ties going to the newest. An analysis dir is per company, so a re-run
-    writes over an earlier run's files, and one the re-run did not regenerate keeps the earlier id. The
-    rule this replaces took the FIRST artifact's id, so a leftover in the first slot (competitive-
-    positioning lists `landscape.json` first, market-sizing `inputs.json`) made the earlier run "this
-    run": its review was accepted as this run's, and this run's own skip record was refused. A majority
-    cannot be moved by one leftover file in a set of three or more, and a consistent set (one id) gets
-    exactly the id it always got.
+    THE ID MOST OF THEM CARRY. An analysis dir is per company, so a re-run writes over an earlier run's
+    files, and one the re-run did not regenerate keeps the earlier id. The rule this replaces took the
+    FIRST artifact's id, so a leftover in the first slot (competitive-positioning lists `landscape.json`
+    first, market-sizing `inputs.json`) made the earlier run "this run": its review was accepted as this
+    run's, and this run's own skip record was refused. A majority cannot be moved by one leftover file in
+    a set of three or more, and a consistent set (one id) gets exactly the id it always got.
 
-    A tie (an even split) goes to the newest id. Every skill mints its run id as a UTC timestamp
-    (`date -u +%Y%m%dT%H%M%SZ`), so the greatest string is the latest mint, and a leftover is older by
-    definition. The last-produced artifact was rejected as the tie-break: a single leftover in the last
-    slot (a checklist not regenerated) would decide it. The result does not depend on the order the
-    artifacts are passed in.
+    A TIE (an even split) goes to the id whose newest artifact was produced last. `produced` runs parallel
+    to `docs` and gives each artifact's production time (its file's mtime: no producer stamps a time in
+    the artifact itself); a re-run's files are newer than the ones it left behind. Not the greatest id
+    string: a run id is whatever the caller passes, and a host-supplied id need not sort by time. Not the
+    last-listed artifact: one leftover in the last slot (a checklist not regenerated) would decide it.
+    With no production times (or equal ones), the tied id met first in `docs` wins, so callers pass the
+    required artifacts in a fixed order.
 
     A stub (`"skipped": true`, a step deliberately not run, the fleet's one stub shape) is no analysis,
     so its id does not vote; nor does a missing, empty or non-string id. None when no artifact carries one.
-    STALE_ARTIFACT still names every leftover; this only decides whose review the report is resolved for.
+    STALE_ARTIFACT names every artifact off this id; this decides whose review the report is resolved for.
     """
+    times = list(produced) if produced is not None else None
     counts: dict[str, int] = {}
-    for doc in docs:
+    newest: dict[str, float] = {}
+    order: dict[str, int] = {}
+    for i, doc in enumerate(docs):
         d = as_dict(doc)
         if d.get("skipped") is True:
             continue
         rid = as_dict(d.get("metadata")).get("run_id")
-        if isinstance(rid, str) and rid:
-            counts[rid] = counts.get(rid, 0) + 1
+        if not (isinstance(rid, str) and rid):
+            continue
+        counts[rid] = counts.get(rid, 0) + 1
+        order.setdefault(rid, i)
+        t = times[i] if times is not None and i < len(times) else None
+        if isinstance(t, (int, float)):
+            newest[rid] = max(newest.get(rid, float("-inf")), float(t))
     if not counts:
         return None
-    return max(counts, key=lambda rid: (counts[rid], rid))
+    return max(counts, key=lambda rid: (counts[rid], newest.get(rid, float("-inf")), -order[rid]))
+
+
+def produced_at(dir_path: str, names: Iterable[str]) -> list[float | None]:
+    """Each named artifact's production time (file mtime), None when it cannot be read."""
+    out: list[float | None] = []
+    for name in names:
+        try:
+            out.append(os.path.getmtime(os.path.join(dir_path, name)))
+        except OSError:
+            out.append(None)
+    return out
+
+
+def primary_run_id_in(dir_path: str, artifacts: Any, names: Iterable[str]) -> str | None:
+    """`primary_run_id` over the named artifacts as loaded, with their files' production times."""
+    names = list(names)
+    loaded = as_dict(artifacts)
+    return primary_run_id([loaded.get(n) for n in names], produced_at(dir_path, names))
 
 
 # Each message carries its own remedy. It is printed at the moment of action, which a rule

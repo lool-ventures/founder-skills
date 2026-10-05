@@ -3117,7 +3117,7 @@ def _compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
 
     # This run's id, ONE value for the resolver, the sizing check, the gate, the hand-off audit and the
     # revision check, so they agree on whose review it is (rule in `_redteam_core.primary_run_id`).
-    _rt_run_id = _redteam_copy.primary_run_id(a for a in (artifacts.get(n) for n in REQUIRED_ARTIFACTS) if _usable(a))
+    _rt_run_id = _redteam_copy.primary_run_id_in(dir_path, artifacts, REQUIRED_ARTIFACTS)
 
     # The review every reader below sees -- the report, the verdict, the gate, the coaching payload
     # -- is its append-only copy, never `redteam.json` as it now stands (see _redteam_copy).

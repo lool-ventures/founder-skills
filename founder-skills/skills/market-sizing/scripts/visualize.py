@@ -1628,7 +1628,7 @@ def _compose_html(dir_path: str) -> str:
         artifacts[name] = _load_artifact(dir_path, name)
 
     # This run's id, as compose_report.py reads it (stubs carry no analysis, so they do not vote).
-    _rt_run_id = _redteam_copy.primary_run_id(artifacts.get(n) for n in REQUIRED_ARTIFACTS)
+    _rt_run_id = _redteam_copy.primary_run_id_in(dir_path, artifacts, REQUIRED_ARTIFACTS)
     # The same review report.md shows: its append-only copy, never `redteam.json` as it now stands.
     _rt_shown, _rt_codes, _rt_facts = _redteam_copy.resolve(
         dir_path,

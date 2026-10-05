@@ -2134,7 +2134,7 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
     # The id most of them carry, not the first one's: landscape.json is listed first, and a leftover there
     # once made an earlier run's review count as this run's.
     _rt_required = [a for a in (artifacts.get(n) for n in REQUIRED_ARTIFACTS) if _usable(a)]
-    _rt_run_id = _cp_redteam_copy.primary_run_id(_rt_required)
+    _rt_run_id = _cp_redteam_copy.primary_run_id_in(dir_path, artifacts, REQUIRED_ARTIFACTS)
     _rt_shown, _rt_codes, _rt_facts = _cp_redteam_copy.resolve(
         dir_path,
         _rt_run_id,

@@ -138,6 +138,12 @@ def primary_run_id(docs: Iterable[Any]) -> str | None:
     return rid if isinstance(rid, str) else None
 
 
+def primary_run_id_in(dir_path: str, artifacts: Any, names: Iterable[str]) -> str | None:
+    """This run's id from the named artifacts as loaded, ties to the one produced last (rule in the core)."""
+    rid = core().primary_run_id_in(dir_path, artifacts, names)
+    return rid if isinstance(rid, str) else None
+
+
 def earlier_reviews(analysis_dir: str, run_id: str, now: float | None = None) -> list[str]:
     return list(core().earlier_reviews(analysis_dir, run_id, now))
 

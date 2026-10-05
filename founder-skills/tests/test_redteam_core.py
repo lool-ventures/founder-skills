@@ -136,11 +136,40 @@ def test_primary_run_id_is_not_moved_by_one_leftover_in_any_slot() -> None:
         assert core.primary_run_id(docs) == R2, slot
 
 
-def test_primary_run_id_breaks_a_tie_toward_the_newest_id_in_any_order() -> None:
+def test_primary_run_id_breaks_a_tie_toward_the_artifacts_produced_last() -> None:
+    """An even split goes to the id whose newest artifact was produced last, in any order."""
     core = _core()
-    assert core.primary_run_id([_art(R1), _art(R1), _art(R2), _art(R2)]) == R2
-    assert core.primary_run_id([_art(R2), _art(R2), _art(R1), _art(R1)]) == R2
-    assert core.primary_run_id([_art(R3), _art(R1), _art(R2)]) == R3
+    docs = [_art(R1), _art(R1), _art(R2), _art(R2)]
+    assert core.primary_run_id(docs, [1.0, 2.0, 3.0, 4.0]) == R2
+    assert core.primary_run_id(docs, [3.0, 4.0, 1.0, 2.0]) == R1
+    assert core.primary_run_id(list(reversed(docs)), [4.0, 3.0, 2.0, 1.0]) == R2
+
+
+def test_primary_run_id_does_not_break_a_tie_by_the_id_string() -> None:
+    """A host-supplied id need not sort by time: here the earlier run's id is the greater string."""
+    core = _core()
+    docs = [_art("zz-earlier"), _art("zz-earlier"), _art("aa-later"), _art("aa-later")]
+    assert core.primary_run_id(docs, [1.0, 1.0, 9.0, 9.0]) == "aa-later"
+
+
+def test_primary_run_id_with_no_production_times_takes_the_tied_id_met_first() -> None:
+    core = _core()
+    assert core.primary_run_id([_art(R2), _art(R1), _art(R1), _art(R2)]) == R2
+    assert core.primary_run_id([_art(R1), _art(R2)], [None, None]) == R1
+
+
+def test_primary_run_id_in_reads_production_times_from_the_files(tmp_path: Path) -> None:
+    import os
+
+    core = _core()
+    names = ["a.json", "b.json", "c.json", "d.json"]
+    loaded = {"a.json": _art(R1), "b.json": _art(R1), "c.json": _art(R2), "d.json": _art(R2)}
+    for i, n in enumerate(names):
+        (tmp_path / n).write_text("{}", encoding="utf-8")
+        t = 1_000_000.0 + (100 if loaded[n]["metadata"]["run_id"] == R1 else 0) + i
+        os.utime(tmp_path / n, (t, t))
+    assert core.primary_run_id_in(str(tmp_path), loaded, names) == R1
+    assert core.produced_at(str(tmp_path), ["missing.json"]) == [None]
 
 
 def test_primary_run_id_ignores_stubs_and_unusable_ids() -> None:

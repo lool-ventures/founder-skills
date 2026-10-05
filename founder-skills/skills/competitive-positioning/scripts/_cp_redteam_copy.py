@@ -123,6 +123,12 @@ def primary_run_id(docs: Iterable[Any]) -> str | None:
     return rid if isinstance(rid, str) else None
 
 
+def primary_run_id_in(dir_path: str, artifacts: Any, names: Iterable[str]) -> str | None:
+    """This run's id from the named artifacts as loaded, ties to the one produced last (rule in the core)."""
+    rid = core().primary_run_id_in(dir_path, artifacts, names)
+    return rid if isinstance(rid, str) else None
+
+
 def skip_reason(skip_record: Any, run_id: str | None) -> str | None:
     """This run's recorded reason for not running a review, or None. A record from another run, or a
     reason off the closed list, is not this run's decision."""
