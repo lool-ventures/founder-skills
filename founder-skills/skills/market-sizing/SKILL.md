@@ -982,8 +982,8 @@ either: Step 7 runs compose without `--strict`, so even a high warning halts not
 
 The founder's uploads live outside `outputs/`, where a sub-agent cannot reach them, so mirror them
 into the hand-off dir first (exit 3 from the resolver = no uploads folder: nothing was attached, or this
-host keeps uploads elsewhere; skip the `cp`, and if the founder did attach documents, ask for their
-path), machine-read every scanned page so a citation to one can be checked, then generate the dispatch
+host keeps uploads elsewhere; then copy into `$HANDOFF_DIR/docs` the founder documents you read earlier,
+from the path you read them at, and ask for a path only if you never had one), machine-read every scanned page so a citation to one can be checked, then generate the dispatch
 prompt and pass it unchanged — the lane that tests this regenerates it and compares the two:
 
 ```bash

@@ -990,8 +990,9 @@ to run one), `dispatch_failed` (it returned BLOCKED, or the producer below rejec
 different sentence the founder reads; there is no reason meaning "it did not seem necessary".
 
 Mirror the founder's uploads into the hand-off dir (exit 3 from the resolver = no uploads folder: nothing
-was attached, or this host keeps uploads elsewhere; skip the `cp`, and if the founder did attach documents,
-ask for their path), then print the prompt and send it unchanged:
+was attached, or this host keeps uploads elsewhere; then copy into `$HANDOFF_DIR/docs` the founder documents
+you read earlier, from the path you read them at, and ask for a path only if you never had one), then print
+the prompt and send it unchanged:
 
 ```bash
 python3 "$SHARED_SCRIPTS/resolve_artifacts_root.py" --uploads   # prints UPLOADS_DIR, or exits 3

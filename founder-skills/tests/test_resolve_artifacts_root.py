@@ -495,6 +495,21 @@ def test_cli_uploads_exit_3_note_on_the_remote_lane_with_nothing_attached(tmp_pa
     _assert_exit_3_note_true_on_both_hosts(err)
 
 
+def test_cli_uploads_exit_3_note_when_several_session_folders_exist_and_no_id_picks_one(tmp_path: Path) -> None:
+    """No session id and two session folders: the script cannot tell which is this session's, and says so.
+    It does not pick the newest-modified one, which could be another session's."""
+    for name in ("aaaa1111", "bbbb2222"):
+        (tmp_path / ".claude" / "uploads" / name).mkdir(parents=True)
+    env = {"HOME": str(tmp_path), "COWORK_UPLOADS_DIR": "", "CLAUDE_CODE_SESSION_ID": "", "CLAUDE_CODE_REMOTE": "true"}
+    rc, out, err = _run_cli(["--uploads"], env)
+    assert rc == 3, (rc, out, err)
+    assert out.strip() == ""
+    low = err.lower()
+    assert "could not tell which session's uploads folder is this one's" in low, err
+    assert "2 session folders" in low and "path" in low and "$COWORK_UPLOADS_DIR" in err
+    assert "session tree" not in low and "nothing has been attached" not in low
+
+
 def test_cli_uploads_exit_3_note_on_the_plain_cli(tmp_path: Path) -> None:
     env = {"HOME": str(tmp_path), "COWORK_UPLOADS_DIR": "", "CLAUDE_CODE_SESSION_ID": ""}
     rc, out, err = _run_cli(["--uploads"], env)
@@ -533,6 +548,13 @@ def test_each_uploads_caller_states_a_reason_true_on_every_host(skill: str) -> N
     assert "nothing was attached" in flat or "nothing has been attached" in flat, skill
     assert "keeps uploads elsewhere" in flat, skill
     assert "path" in flat, f"{skill}: exit 3 must say to ask for a path"
+    if skill == "deck-review":
+        assert "if the request already names the deck's path, use it" in flat, skill
+    else:
+        # The review must still see the founder's documents, and an unattended host must not stall on a
+        # question it can answer itself: copy what was read earlier, ask only with no path at all.
+        assert "copy into `$handoff_dir/docs` the founder documents you read earlier" in flat, skill
+        assert "ask for a path only if you never had one" in flat, skill
 
 
 def test_deck_review_lists_the_uploads_folder_only_when_one_was_printed() -> None:

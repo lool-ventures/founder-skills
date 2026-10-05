@@ -328,7 +328,8 @@ see a pitch deck attached", and stopped — with the deck sitting in the uploads
 time. Only ask the founder to upload after that listing actually comes back empty. Set `DECK_SRC`
 to the file you find. On exit 3 nothing was printed, so there is nothing to list: no uploads folder
 was found for this session (nothing has been attached yet, or this host keeps uploads elsewhere).
-Ask the founder to attach the deck or give its path, rather than reporting it missing. Never
+If the request already names the deck's path, use it; otherwise ask the founder to attach the deck
+or give its path, rather than reporting it missing. Never
 hand-build this path — a relative `./mnt/uploads` resolves against the shell's cwd, which has
 already moved once underneath us.
 

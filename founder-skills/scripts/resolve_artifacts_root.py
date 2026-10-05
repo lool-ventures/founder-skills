@@ -328,8 +328,25 @@ def _remote_uploads_dir(env: dict[str, str]) -> str | None:
         return candidate if os.path.isdir(candidate) else None
     if not os.path.isdir(base):
         return None
-    dirs = [d for d in sorted(os.listdir(base)) if os.path.isdir(os.path.join(base, d))]
-    return os.path.join(base, dirs[0]) if len(dirs) == 1 else None
+    dirs = _remote_session_dirs(env)
+    return dirs[0] if len(dirs) == 1 else None
+
+
+def _remote_session_dirs(env: dict[str, str]) -> list[str]:
+    """Every session folder under `$HOME/.claude/uploads/`, for the case with no session id to pick one.
+
+    Several folders and no id is ANSWERED WITH NONE, never with the newest-modified one: nothing ties
+    modification time to this session (another session's folder changes whenever something lands in it),
+    and a wrong pick would show the founder another session's files as their own. The caller says it
+    could not tell which folder is this session's, and asks for a path.
+    """
+    home = env.get("HOME") or os.path.expanduser("~")
+    base = os.path.join(home, ".claude", "uploads")
+    try:
+        names = sorted(os.listdir(base))
+    except OSError:
+        return []
+    return [os.path.join(base, d) for d in names if os.path.isdir(os.path.join(base, d))]
 
 
 def build_agent_paths(agent_root: str, dir_name: str, run_id: str | None = None) -> dict[str, str]:
@@ -420,6 +437,16 @@ def main() -> int:
             # TRUE ON EVERY HOST THAT REACHES IT. The cloud lane creates its per-session uploads
             # folder only when something is attached, so "not a Cowork session" was false there; this
             # branch cannot tell that case from the plain CLI, so it names both and claims neither.
+            ambiguous = [] if env.get("CLAUDE_CODE_SESSION_ID") else _remote_session_dirs(env)
+            if len(ambiguous) > 1:
+                sys.stderr.write(
+                    f"No uploads folder could be chosen for this session (the uploads mount is ambiguous): "
+                    f"{len(ambiguous)} session folders exist under ~/.claude/uploads and no session id says "
+                    "which is this one's, so this script could not tell which session's uploads folder is "
+                    "this one's. Ask the user to give the file's path, or to attach it again, instead of "
+                    "reporting it missing. Set $COWORK_UPLOADS_DIR to declare the folder.\n"
+                )
+                return 3
             sys.stderr.write(
                 "No uploads folder found for this session (the uploads mount is absent): either nothing "
                 "has been attached yet, or this host keeps uploads somewhere this script does not look. "

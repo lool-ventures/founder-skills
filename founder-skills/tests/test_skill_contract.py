@@ -937,7 +937,10 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 106,132 -> 106,386 (+254 B) on 2026-10-05: a late edit before Step 6c re-dispatches under the same
     # RUN_ID (a fresh id on a few files leaves them the minority, so compose refuses the review after them),
     # and a recorded skip carries red_team_skipped_run_id, since compose accepts only this run's skip.
-    "market-sizing": 106_386,
+    # 106,386 -> 106,463 (+77 B) on 2026-10-05: on exit 3 the review step copies the founder documents
+    # read earlier, from the path they were read at, into the hand-off docs folder, and asks for a path only
+    # with none, so the review still sees them and an unattended host does not stall.
+    "market-sizing": 106_463,
     # fmr raised for two founder-facing-correctness items measured in a live run: the CHECKLIST
     # dispatch now forbids citing our artifact filenames in evidence (that run put `inputs.json` in 10
     # items' evidence, printed verbatim into the founder's report), and the producer pipe passes
@@ -1446,7 +1449,9 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 113,346 -> 113,479 on 2026-10-05: the description says the skill starts on its own only on a clear request,
     # and that a passing question gets a short answer and an offer naming how long the run takes.
     # The in-skill offer names the run's duration in place of 'several minutes'.
-    "deck-review": 113_479,
+    # 113,479 -> 113,543 (+64 B) on 2026-10-05: on exit 3 the deck search uses a deck path the request already
+    # names before asking for one.
+    "deck-review": 113_543,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
@@ -1606,7 +1611,10 @@ SKILL_MD_CEILING: dict[str, int] = {
     # that keeps uploads elsewhere) and asks for a path when documents were attached.
     # 127,949 -> 127,927 on 2026-10-05: the description says the skill starts on its own only on a clear request,
     # and that a passing question gets a short answer and an offer naming how long the run takes.
-    "competitive-positioning": 127_927,
+    # 127,927 -> 128,004 (+77 B) on 2026-10-05: on exit 3 the review step copies the founder documents
+    # read earlier, from the path they were read at, into the hand-off docs folder, and asks for a path only
+    # with none, so the review still sees them and an unattended host does not stall.
+    "competitive-positioning": 128_004,
     # cap-table, the largest raise (+2,383 B) and the one with the most founder-visible payoff:
     #   * Main-Thread Return named THREE of the four files Step 12 copies; a live run delivered exactly
     #     three and dropped `{Company}_Cap_Table.html`. All four are now named explicitly.
