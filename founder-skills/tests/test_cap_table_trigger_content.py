@@ -44,17 +44,22 @@ def _trigger_text() -> str:
 # Each entry: (concept_label, substring_that_must_be_present).
 # Substrings were verified present in the current SKILL.md frontmatter; they
 # are the stable cues that broaden the trigger beyond document-modeling.
+# The cues pin CONCEPTS, not wording: when the owner rewrote the description so a
+# single question gets a short cited answer, "denominator" (the post-money
+# capitalization term, still modelled in the body), "gut-check" and "single
+# instrument" left the text while the concepts stayed, as SAFE/note conversion,
+# a quick dilution check, and an instrument described in chat.
 _TRAP_TOPIC_CUES = [
     ("QSBS eligibility", "qsbs"),
     ("Israeli §102 timing", "§102"),
-    ("post-money denominator", "denominator"),
+    ("SAFE/note conversion", "safe/note conversion"),
     ("anti-dilution", "anti-dilution"),
     ("MFN chains", "mfn"),
 ]
 
 _CONVERSATIONAL_CUES = [
-    ("quick gut-check", "gut-check"),
-    ("single instrument in chat", "single instrument"),
+    ("quick dilution check", "is this dilution reasonable"),
+    ("single instrument in chat", "described in chat"),
 ]
 
 

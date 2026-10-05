@@ -1,9 +1,9 @@
 ---
 name: market-sizing
-description: "Builds credible TAM/SAM/SOM analysis with external validation and sensitivity testing for startup fundraising — top-down, bottom-up, or both. Use when asked to size a market or validate market claims, given a product or service description, a market segment, or a deck with TAM/SAM/SOM claims. Every figure is externally sourced and stress-tested: run this rather than estimating a market from memory, since recalled market data cannot be cited and is the first thing an investor probes."
+description: "Builds credible TAM/SAM/SOM analysis with external validation and sensitivity testing for startup fundraising: top-down, bottom-up, or both. Use when the user asks to size a market or check market claims and gives something to size: a product or service description, a market segment, or a deck with TAM/SAM/SOM claims. A full run takes about 15–20 minutes and searches the web, 30 or more with a large data room or a revision round, so for a passing question about market size, answer briefly in chat and offer the analysis instead of starting it. When it runs, every figure is externally sourced and stress-tested, never estimated from memory."
 when_to_use: >
-  Do not auto-invoke on general fundraising or strategy questions. Verbosity is
-  not a reason to skip it.
+  Do not start on general fundraising or strategy questions. Verbosity is not a
+  reason to skip it.
 user-invocable: true
 ---
 

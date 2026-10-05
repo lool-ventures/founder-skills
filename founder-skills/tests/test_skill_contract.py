@@ -932,7 +932,9 @@ SKILL_MD_CEILING: dict[str, int] = {
     # folder found) no longer reads as "no session tree": on the cloud lane the per-session uploads folder
     # exists only once something is attached, so the reason names both causes (nothing attached, or a host
     # that keeps uploads elsewhere) and asks for a path when documents were attached.
-    "market-sizing": 105_980,
+    # 105,980 -> 106,132 on 2026-10-05: the description says the skill starts on its own only on a clear request,
+    # and that a passing question gets a short answer and an offer naming how long the run takes.
+    "market-sizing": 106_132,
     # fmr raised for two founder-facing-correctness items measured in a live run: the CHECKLIST
     # dispatch now forbids citing our artifact filenames in evidence (that run put `inputs.json` in 10
     # items' evidence, printed verbatim into the founder's report), and the producer pipe passes
@@ -1045,7 +1047,9 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 84,316 -> 84,329 (+13 B) on 2026-10-05: the read-directive clauses say "never the shell's path to the
     # plugin folder" instead of "never a path the shell printed", which also covered the hand-off paths the
     # shell prints for Reads.
-    "financial-model-review": 84_200,
+    # 84,200 -> 84,022 on 2026-10-05: the description says the skill starts on its own only on a clear request,
+    # and that a passing question gets a short answer and an offer naming how long the run takes.
+    "financial-model-review": 84_022,
     # ic-sim SHRANK: the REQUIRED ic-dynamics.md read at Step 7 is deleted. Step 7 is a pure producer
     # pipe — compose_discussion.py derives discussion.json from the partners' own files and nothing
     # is authored by the main thread — so the read informed no decision while pulling a whole
@@ -1110,7 +1114,10 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 94,940 -> 94,979 (+39 B) on 2026-10-05: the read-directive clauses say "never the shell's path to the
     # plugin folder" instead of "never a path the shell printed", which also covered the hand-off paths the
     # shell prints for Reads.
-    "ic-sim": 94_675,
+    # 94,675 -> 94,687 on 2026-10-05: the description says the skill starts on its own only on a clear request,
+    # and that a passing question gets a short answer and an offer naming how long the run takes.
+    # The in-skill offer names the run's duration in place of 'several minutes'.
+    "ic-sim": 94_687,
     # deck-review +1,165 B: Step 0 carried only a parenthetical fresh-shell mention buried in a code
     # comment, unlike the four skills that mint RUN_ID in a LATER block and so carry the shared banner.
     # deck-review mints RUN_ID INSIDE this re-runnable Step-0 block (like cap-table), so the shared
@@ -1433,7 +1440,10 @@ SKILL_MD_CEILING: dict[str, int] = {
     # exists only once something is attached, so the reason names both causes (nothing attached, or a host
     # that keeps uploads elsewhere) and asks for a path when documents were attached.
     # The deck search gains the exit-3 branch it lacked: it listed a folder the resolver never printed.
-    "deck-review": 113_346,
+    # 113,346 -> 113,479 on 2026-10-05: the description says the skill starts on its own only on a clear request,
+    # and that a passing question gets a short answer and an offer naming how long the run takes.
+    # The in-skill offer names the run's duration in place of 'several minutes'.
+    "deck-review": 113_479,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
@@ -1591,7 +1601,9 @@ SKILL_MD_CEILING: dict[str, int] = {
     # folder found) no longer reads as "no session tree": on the cloud lane the per-session uploads folder
     # exists only once something is attached, so the reason names both causes (nothing attached, or a host
     # that keeps uploads elsewhere) and asks for a path when documents were attached.
-    "competitive-positioning": 127_949,
+    # 127,949 -> 127,927 on 2026-10-05: the description says the skill starts on its own only on a clear request,
+    # and that a passing question gets a short answer and an offer naming how long the run takes.
+    "competitive-positioning": 127_927,
     # cap-table, the largest raise (+2,383 B) and the one with the most founder-visible payoff:
     #   * Main-Thread Return named THREE of the four files Step 12 copies; a live run delivered exactly
     #     three and dropped `{Company}_Cap_Table.html`. All four are now named explicitly.
@@ -1704,7 +1716,10 @@ SKILL_MD_CEILING: dict[str, int] = {
     # All six lowered for the trigger-phrase move: the conditions that decide when a skill applies now sit
     # in `description`, which Desktop's discovery scanner reads, and `when_to_use` keeps only what the
     # description does not already say, so the frontmatter shrank in every skill.
-    "cap-table": 159_095,
+    # 159,095 -> 159,024 on 2026-10-05: the description says the skill starts on its own only on a clear request,
+    # and that a passing question gets a short answer and an offer naming how long the run takes.
+    # Fast-assess states its usual time in place of 'under 60 seconds'.
+    "cap-table": 159_024,
 }
 
 

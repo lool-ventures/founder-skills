@@ -1,12 +1,12 @@
 ---
 name: cap-table
-description: "Use for any cap-table number, mechanic, or date before a founder signs — even a single instrument (SAFE/note/warrant) described in chat, a bare yes/no, a quick 'is this dilution reasonable?' gut-check, or a single QSBS / Israeli §102 eligibility or timing question — and for any draft or signed SAFE, note, term sheet, option plan, AoA, Carta XLSX, or spreadsheet. Reliable, source-cited deterministic math (YC, NVCA, Cooley GO) for SAFE/note conversion and the post-money 'company capitalization' denominator, priced-round dilution, anti-dilution (BBWA / narrow-based / full-ratchet), option pools, warrants, MFN chains, dual-class voting, and Israeli ↔ Delaware flips. NOT for waterfall modeling, cumulative dividends, RSUs, 83(b), 409A, SPAC, warrant repricing, or pure term-glossary definitions — see scope notes."
+description: "Use for any cap-table number, mechanic, or date before a founder signs, from a single SAFE, note or warrant described in chat or a quick 'is this dilution reasonable?' check to any draft or signed SAFE, note, term sheet, option plan, AoA, Carta XLSX, or spreadsheet. A single question gets a short cited answer in about 2–3 minutes; the full report, about 5–10 minutes, runs only when the founder shares documents or asks for it. Source-cited deterministic math (YC, NVCA, Cooley GO) for SAFE/note conversion, priced-round dilution, anti-dilution, option pools, warrants, MFN chains, dual-class voting, QSBS and Israeli §102 dates, and Israeli ↔ Delaware flips. NOT for waterfall modeling, cumulative dividends, RSUs, 83(b), 409A, SPAC, warrant repricing, or pure term definitions."
 when_to_use: >
-  These questions carry known miscalculation and reliance traps, so run the
-  deterministic math rather than answer from memory. Do NOT use for pure
-  glossary definitions with nothing numeric, dated, or eligibility-related at
-  stake ("what is a SAFE?"), fundraising strategy ("how much should I raise?"),
-  or financial-model review (use `financial-model-review`).
+  Cap-table questions carry known miscalculation and reliance traps, so run the
+  math rather than answer from memory. Do NOT use for a pure definition with
+  nothing numeric, dated, or eligibility-related at stake ('what is a SAFE?'),
+  fundraising strategy ('how much should I raise?'), or financial-model review
+  (use financial-model-review).
 user-invocable: true
 ---
 
@@ -362,7 +362,7 @@ Plugin folder for Reads and prompts (as loaded): `${CLAUDE_PLUGIN_ROOT}` — thi
 After Step 1 (when the company slug is known), derive `REVIEW_DIR`. **Four modes** — pick exactly one:
 
 - **Full pipeline** (default — when the founder shared a document, asked for the full review, counsel packet, or interactive explorer, OR when there's no existing full review for this slug): `REVIEW_DIR="$ARTIFACTS_ROOT/cap-table-$SLUG"`.
-- **Fast-assess mode** (Phase O — short directional answer to a conversational question, no document attached, no explicit "full review" request): `REVIEW_DIR="$ARTIFACTS_ROOT/cap-table-$SLUG-fastassess"`. Run `quick_assess.py` (Step 5-fast) instead of Steps 2–11. Total wall-clock under 60 seconds.
+- **Fast-assess mode** (Phase O — short directional answer to a conversational question, no document attached, no explicit "full review" request): `REVIEW_DIR="$ARTIFACTS_ROOT/cap-table-$SLUG-fastassess"`. Run `quick_assess.py` (Step 5-fast) instead of Steps 2–11. Usually about 2–3 minutes.
 - **Rule-lookup mode** (a bare eligibility/date question — QSBS, Israeli §102, IIA — with **no instruments to model and no document**): answer straight from the rule pack — no `REVIEW_DIR`, no pipeline. Run `verify_one.py --rule-lookup <rule_id>` (Step 5-lookup) and present its cited constant + the reliance boundary (state the date/threshold; never conclude eligibility — emit a counsel item). If it returns `lookup_status: "escalate"` (the rule carries no stored constant — e.g. the §102 capital-gains clock, which runs from a plan/trustee-specific date the pack does not hold), ask the founder for the specific fact it names (e.g. the trustee-deposit date) and treat as a counsel determination — never state a default like `grant_date`.
 - **Concise mode** (a single quick **math** question that `quick_assess` can't shape and that isn't a pure eligibility lookup — a fully-diluted warrant count, an as-converted snapshot, a standalone anti-dilution adjustment, one note/SAFE outside a priced round): run the deterministic math, then render a short cited answer with `concise_report.py` (Step 5-concise) — **skip** `visualize`, `explore`, `counsel_packet`, the full `compose_report`, and the Context-B coaching sub-agent. The numbers are identical to the full pipeline's (it reads the same `run_scenario` output); only the production weight is dropped. Offer the full review as a follow-up. `REVIEW_DIR="$ARTIFACTS_ROOT/cap-table-$SLUG-concise"`.
 
@@ -829,7 +829,7 @@ If the founder's message already supplied everything, ask nothing and run. When 
 3. Present the updated `report.md` numbers verbatim
 Never hand-estimate a new scenario in chat.
 
-Total wall-clock: under 60 seconds. Then jump to **Step 12: Deliver Artifacts** with the fast-assess deliverable. Close with a STATEMENT offering the next step, not a trailing question (a final turn ending in a bare "?" with no tool call is a stall) — e.g. "That's the directional answer. If you'd like the full cap-table review — saved artifacts, dilution scenarios, and a counsel packet — just say 'review my cap table' or 'model the round'."
+Usually about 2–3 minutes. Then jump to **Step 12: Deliver Artifacts** with the fast-assess deliverable. Close with a STATEMENT offering the next step, not a trailing question (a final turn ending in a bare "?" with no tool call is a stall) — e.g. "That's the directional answer. If you'd like the full cap-table review — saved artifacts, dilution scenarios, and a counsel packet — just say 'review my cap table' or 'model the round'."
 
 ### Step 5-lookup (RULE-LOOKUP MODE ONLY): Run `verify_one.py` and exit
 

@@ -334,7 +334,13 @@ def test_agent_namespace_path_is_script_resolved(skill: str) -> None:
 # Guards against: the observed decline, where the model agreed the trigger matched
 # and answered from recollection anyway. cap-table was the only skill that framed
 # this, and the only one that routed correctly.
+#
+# The family pins the CONCEPT, not one wording: the owner's trigger rewrite says
+# "never improvised" (ic-sim) and "not mental arithmetic" (financial-model-review),
+# which make the same claim as "from memory" for a simulation and a calculation.
 # ---------------------------------------------------------------------------
+
+_ANTI_SUBSTITUTION_FAMILY = ("memory", "recalling", "improvis", "deterministic math", "mental arithmetic")
 
 
 def _frontmatter(skill: str) -> str:
@@ -344,8 +350,7 @@ def _frontmatter(skill: str) -> str:
 @pytest.mark.parametrize("skill", SKILLS)
 def test_skill_counters_answering_from_memory(skill: str) -> None:
     fm = _flat(_frontmatter(skill))
-    family = ("from memory", "recalling", "improvising", "deterministic math")
-    assert any(t in fm for t in family), (
+    assert any(t in fm for t in _ANTI_SUBSTITUTION_FAMILY), (
         f"{skill}: frontmatter must assert why running the skill beats answering from memory — "
         "restrictive framing alone did not prevent a decline on the canonical use case"
     )
@@ -370,8 +375,7 @@ def test_anti_substitution_framing_is_in_description_too(skill: str) -> None:
     m = re.search(r'^description:\s*"(.*?)"\s*$', fm, re.M | re.S)
     assert m, f"{skill}: description is not a single-line quoted scalar"
     desc = _flat(m.group(1))
-    family = ("memory", "recalling", "improvising", "deterministic math")
-    assert any(t in desc for t in family), (
+    assert any(t in desc for t in _ANTI_SUBSTITUTION_FAMILY), (
         f"{skill}: the anti-substitution framing must appear in `description`, not only in "
         "`when_to_use` — Desktop's discovery scanner never reads when_to_use"
     )

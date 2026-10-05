@@ -1,9 +1,9 @@
 ---
 name: deck-review
-description: "Scores and strengthens startup pitch decks (pre-seed through Series A) against 35 investor-grade criteria grounded in Sequoia, DocSend, YC, a16z, and Carta data. Use when the user has shared a pitch deck (PDF, PPTX, markdown, pasted slide text, or a link to one) and asks for review, scoring, feedback, or critique. Run the scored rubric rather than giving deck advice from memory, which is not the rubric a founder is asking to be measured against."
+description: "Scores and strengthens startup pitch decks (pre-seed through Series A) against 35 investor-grade criteria grounded in Sequoia, DocSend, YC, a16z, and Carta data. Use when the user has shared a pitch deck (PDF, PPTX, markdown, pasted slide text, or a link to one) and asks for a review, score, feedback, or critique. A full review takes about 15–25 minutes, 40 or more for a long investor deck, so for a general pitch question with no deck, answer briefly in chat and offer the review instead of starting it. When it runs, score with the rubric, never with deck advice from memory."
 when_to_use: >
-  Use ONLY when there is actual deck content to review; do not auto-invoke on
-  general fundraising or pitch questions. Verbosity is not a reason to skip it.
+  Use ONLY when there is actual deck content to review; do not start on general
+  fundraising or pitch questions. Verbosity is not a reason to skip it.
 user-invocable: true
 ---
 
@@ -181,7 +181,7 @@ Plugin folder for Reads and prompts (as loaded): `${CLAUDE_PLUGIN_ROOT}` — thi
 conversational question, do not improvise an answer from your own reasoning under this skill's name —
 an unproduced score is exactly the output a founder over-trusts. Instead, say up front what the
 full run costs and let them choose: "Answering that properly means running the full deck review — it takes
-several minutes and produces a scored report across all 35 criteria. I can run it now, or if you just want my read without the
+about 15–25 minutes and produces a scored report across all 35 criteria. I can run it now, or if you just want my read without the
 scoring, say so and I'll answer outside the deck review." Naming the trade-off is honest; quietly
 substituting the cheap version is not.
 

@@ -1,9 +1,9 @@
 ---
 name: ic-sim
-description: "Simulates a realistic VC Investment Committee with three partner archetypes debating a startup's merits, concerns, and deal terms, scored across 28 dimensions. Use when asked to simulate an IC discussion or how partners would debate a specific startup, given a deck, a company description, or a specific fund, and for plain-language questions like 'would a VC fund us?', 'what would an investor say?', 'are we fundable?'. Run the scored simulation rather than improvising what partners would say, which produces a plausible narrative with no scoring behind it."
+description: "Simulates a realistic VC Investment Committee: three partner archetypes debate a startup's merits, concerns, and deal terms, scored across 28 dimensions. Use when the user asks to simulate an IC, or how partners would debate their startup, and gives a deck, a company description, or a specific fund. A full run takes about 15–20 minutes, so for a passing question such as 'would a VC fund us?' or 'are we fundable?', answer briefly in chat and offer the simulation instead of starting it. When it runs, partners' views come from the scored simulation, never improvised."
 when_to_use: >
-  Do not auto-invoke on general fundraising questions. Verbosity is not a reason
-  to skip it.
+  Do not start on general fundraising questions. Verbosity is not a reason to
+  skip it.
 user-invocable: true
 ---
 
@@ -183,7 +183,7 @@ Plugin folder for Reads and prompts (as loaded): `${CLAUDE_PLUGIN_ROOT}` — thi
 conversational question, do not improvise an answer from your own reasoning under this skill's name —
 an unproduced verdict is exactly the output a founder over-trusts. Instead, say up front what the
 full run costs and let them choose: "Answering that properly means running the full IC simulation — it takes
-several minutes and produces a scored report with the partner debate and the conflict check. I can run it now, or if you just want my read without the
+about 15–20 minutes and produces a scored report with the partner debate and the conflict check. I can run it now, or if you just want my read without the
 scoring, say so and I'll answer outside the IC simulation." Naming the trade-off is honest; quietly
 substituting the cheap version is not.
 
