@@ -243,8 +243,8 @@ def test_the_comparand_is_read_back_from_a_redirected_generator(harness: Any, tm
     # The generator's output saved to a file in a block that prints other things, then read back.
     stream = [
         _init(),
-        *_shell("g", f"echo gate=0\npython3 {GEN} red_team --run-id r1 > /tmp/rt_prompt.txt", "gate=0\n"),
-        *_read("r", "/tmp/rt_prompt.txt", PRINTED),
+        *_shell("g", f"echo gate=0\npython3 {GEN} red_team --run-id r1 > /tmp/ms.AbC123/rt_prompt.txt", "gate=0\n"),
+        *_read("r", "/tmp/ms.AbC123/rt_prompt.txt", PRINTED),
         _dispatch("d", PRINTED),
         _result("d", structured={"prompt": PRINTED}),
     ]

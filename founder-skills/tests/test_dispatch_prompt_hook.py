@@ -1014,3 +1014,85 @@ def test_the_no_printed_prompt_hold_says_how_to_print_it(tmp_path: Path) -> None
     assert "shell call of its own" in reason and "last command of its block" in reason
     assert "nothing after it" in reason
     assert "do not redirect" in reason.lower()
+
+
+# --- the hold says why there is no printed prompt ---------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("command", "named"),
+    [
+        (GEN_CMD + "\ncat /w/notes.txt", "cat /w/notes.txt"),
+        ("python3 -c 'print(1)'\n" + GEN_CMD, "python3 -c print(1)"),
+        (GEN_CMD + " | tee /w/copy.txt", "tee /w/copy.txt"),
+    ],
+)
+def test_a_generator_block_that_could_not_be_vouched_for_is_named(tmp_path: Path, command: str, named: str) -> None:
+    """This context's generator ran and printed, but beside a command whose output could stand in for
+    it: the hold names that command and says to run the generator alone."""
+    rows = [_user("Size my market."), *_printed(_GENERATED, command=command)]
+    reason = _deny(_run(tmp_path, rows, _GENERATED))
+    assert reason.startswith(f"{MARKER}[agent/handoff/R/r2/redteam_output.json] Held: ")
+    assert f"`{named}`" in reason
+    assert "shell call of its own" in reason and "nothing before it but assignments" in reason
+
+
+@pytest.mark.parametrize("target", ["/tmp/rt.txt", "/dev/null", "/w/h/rt.txt"])
+def test_a_generator_whose_output_was_redirected_away_is_told_not_to(tmp_path: Path, target: str) -> None:
+    """Including a redirect into a shared temp folder, which never pairs."""
+    rows = [_user("Size my market."), *_printed("", command=f"{GEN_CMD} > {target}")]
+    reason = _deny(_run(tmp_path, rows, _GENERATED))
+    assert "do not redirect" in reason.lower()
+    assert "with NO redirect" in reason and "shell call of its own" in reason
+    assert "went to a file instead of the result" in reason and "another session's" in reason
+    assert "vouched" not in reason
+    assert "own folder" not in reason
+
+
+_NO_PROMPT_YET = (
+    f"{MARKER}[agent/handoff/R/r2/redteam_output.json] Held: no printed prompt for this OUTPUT_PATH yet. Run the "
+    "prompt generator in a shell call of its own, or as the last command of its block, with nothing after it "
+    "that prints, and send the text it prints as the prompt, unchanged. Do not redirect its output away: the "
+    "printed text is what the dispatch is compared with."
+)
+
+
+def test_only_another_contexts_generator_ran_or_none_did(tmp_path: Path) -> None:
+    """Another context's generator printed (its block is not this context's) or no generator ran: the
+    hold says there is no printed prompt for this OUTPUT_PATH and how to print one."""
+    checklist = _GENERATED.replace("CONTEXT: RED_TEAM", "CONTEXT: CHECKLIST")
+    other = [_user("Size my market."), *_printed(checklist, command=GEN_CMD.replace("red_team", "checklist"))]
+    assert _deny(_run(tmp_path, other, _GENERATED)) == _NO_PROMPT_YET
+    assert _deny(_run(tmp_path, [_user("Size my market.")], _GENERATED)) == _NO_PROMPT_YET
+
+
+def test_a_generator_that_is_not_the_plugins_own_is_named_as_such(tmp_path: Path) -> None:
+    """A copy run from elsewhere printed: the hold says to run the skill's own, not to run "it" again."""
+    command = GEN_CMD.replace('"$SCRIPTS/dispatch_prompt.py"', "/tmp/copy/dispatch_prompt.py")
+    reason = _deny(_run(tmp_path, [_user("Size my market."), *_printed(_GENERATED, command=command)], _GENERATED))
+    assert "not the plugin's own" in reason and "$SCRIPTS/dispatch_prompt.py" in reason
+
+
+def test_a_generator_block_the_check_cannot_follow_says_so(tmp_path: Path) -> None:
+    rows = [_user("Size my market."), *_printed(_GENERATED, command="if true; then\n" + GEN_CMD + "\nfi")]
+    reason = _deny(_run(tmp_path, rows, _GENERATED))
+    assert "an `if`, a loop, a heredoc or a subshell" in reason
+
+
+def test_after_the_plugins_scripts_were_changed_the_hold_says_it_will_let_through(tmp_path: Path) -> None:
+    """No re-run can help once the session wrote into the plugin's scripts: the hold says so, and that the
+    dispatch goes through after the hold limit, rather than asking for a generator run."""
+    rows = [
+        _user("Size my market."),
+        *_printed("", command='echo x > "$SCRIPTS/_params.py"'),
+        *_printed(_GENERATED, command=GEN_CMD),
+    ]
+    reason = _deny(_run(tmp_path, rows, _GENERATED))
+    assert "were changed in this session" in reason and "after 2 holds" in reason
+    assert "$SCRIPTS/" not in reason
+
+
+def test_a_setting_that_changes_what_the_generator_runs_is_named(tmp_path: Path) -> None:
+    rows = [_user("Size my market."), *_printed(_GENERATED, command="PYTHONPATH=/tmp/e " + GEN_CMD)]
+    reason = _deny(_run(tmp_path, rows, _GENERATED))
+    assert "`PYTHONPATH=/tmp/e`" in reason and "changes what it runs" in reason and "no such setting" in reason

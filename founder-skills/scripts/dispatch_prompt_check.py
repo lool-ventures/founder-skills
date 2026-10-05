@@ -32,14 +32,17 @@ tool result counts only when the call that produced it is paired by tool id and 
     generator is the block's LAST command (after `;`, a newline or `&&`), and what runs before it may
     print -- the steps a model folds into the same block (a producer pipe, its exit-code echo, a `cat`)
     -- so long as each is a plugin script or a known command that cannot leave anything running that
-    prints later (no other interpreter, no exec, trap, sed, awk or find). A block that sets PATH,
+    prints later (no other interpreter, no exec, trap, awk or find, and no sed but `sed -n 'N,Mp' FILE`,
+    which only prints lines of one file). A block that sets PATH,
     PYTHONPATH and the like is never a comparand;
   * a Read, or a quiet block's `cat`/`head`/`tail`, of the file a generator's stdout was redirected
     into (`> "$HANDOFF_DIR/prompt.txt"`, the block's own `NAME="..."` assignments expanded), or of the
     file the runtime saved an oversized generator result to ("Full output saved to: ..."), while no
     later call could have changed it: a Write or Edit of it (a sub-agent's too), a shell block that
     cannot be read, runs an interpreter other than the plugin's own scripts, or writes or names a path
-    it cannot resolve. `/private/tmp` and `/tmp` are the same file.
+    it cannot resolve. `/private/tmp` and `/tmp` are the same file. A file directly in `/tmp`,
+    `/private/tmp` or `/var/tmp` never counts, in its own block or later: every session writes there, so
+    a failed redirect leaves another session's prompt under the same name.
 A redo printed with `--correction producer-rejected --detail-file F` quotes F inside the prompt, so it
 counts only when the transcript shows F written by a plugin producer run in the main thread (a
 truncating `2> F`, no other command in that block naming F) that failed -- the call exited non-zero,
@@ -213,7 +216,8 @@ _QUIET = frozenset({"cd", "mkdir", "wc", "test", "[", "true", ":", "cp", "mv"})
 _QUIET_BEFORE = frozenset({"ls"})
 # What may run, and print, before the generator when the generator is the block's last command: none of
 # these can leave anything running that prints after it (no interpreter of unknown code, no background
-# job, no exec, no trap, no sed/awk/find that can run commands).
+# job, no exec, no trap, no sed/awk/find that can run commands). One sed form is allowed by
+# `_sed_print_range`, not here.
 _MAY_PRECEDE = frozenset({"cat", "echo", "printf", "grep", "egrep", "fgrep", "rg", "ls", "wc", "head", "tail",
                           "sort", "uniq", "cut", "tr", "jq", "test", "[", "true", "false", ":", "cd", "mkdir",
                           "cp", "mv", "touch", "date", "pwd", "basename", "dirname", "stat", "file", "du", "df",
@@ -444,10 +448,23 @@ def _env(cmds: list[_Cmd]) -> tuple[dict[str, str], dict[str, str], set[str]]:
 def norm_path(path: str) -> str:
     """A path as compared: normalised, and macOS's `/private/tmp` and `/private/var` read as `/tmp`, `/var`."""
     p = os.path.normpath(path)
+    if p.startswith("//"):
+        p = "/" + p.lstrip("/")  # POSIX normpath keeps a leading `//`; the kernel reads it as `/`
     for top in ("/private/tmp", "/private/var", "/private/etc"):
         if p == top or p.startswith(top + "/"):
             return p[len("/private") :]
     return p
+
+
+# Folders every session on the machine writes to. A file directly in one may be another session's: when
+# the generator's redirect into it fails ("cannot create ...: Permission denied"), a `cat` of the same name
+# prints that session's prompt, and the error text differs across bash, dash and zsh. A redirect there is
+# never paired; a folder made for the run (mktemp's /tmp/x.AbC123, the hand-off dir) is.
+_SHARED_TMP = ("/tmp", "/var/tmp")
+
+
+def _shared_tmp(path: str) -> bool:
+    return os.path.dirname(norm_path(path)) in _SHARED_TMP
 
 
 def _script(words: list[str]) -> str | None:
@@ -624,7 +641,46 @@ def _hijacked(cmds: list[_Cmd]) -> bool:
 
 
 def generator_block(command: str, distrusted: frozenset[str] | set[str] = frozenset()) -> tuple[bool, list[str]]:
-    """(prints, files) for one shell block: whether a trusted generator's output reaches the result
+    """(prints, files) for one shell block; see `_generator_block`."""
+    prints, files, _contexts = _generator_block(command, distrusted)
+    return prints, files
+
+
+def _subcommand(c: _Cmd, env: dict[str, str]) -> str | None:
+    """A generator call's subcommand (`red_team`, `checklist`): its first positional argument after the
+    script path. Every option the three generators define takes a value (`--run-id R`, `--x=v`), so an
+    option's value is never read as the subcommand. A variable is filled from the block's own literal
+    assignments; one that stays unresolved gives None, and the call then counts for no context."""
+    words = _words(c.argv)
+    path = _script(words)
+    if path is None and words and os.path.basename(words[0]) in GENERATORS:
+        path = words[0]
+    if path is None or path not in words:
+        return None
+    rest = words[words.index(path) + 1 :]
+    i = 0
+    while i < len(rest):
+        w = rest[i]
+        if w == "--":
+            return _expand(rest[i + 1], env) if i + 1 < len(rest) else None
+        if w.startswith("-"):
+            i += 1 if "=" in w else 2
+            continue
+        return _expand(w, env)
+    return None
+
+
+def _generator_contexts(c: _Cmd, env: dict[str, str]) -> set[str]:
+    """The context a generator call prints: its subcommand (`red_team`) as a context line."""
+    sub = _subcommand(c, env)
+    context = f"CONTEXT: {sub.upper()}" if sub else ""
+    return {context} if context in CONTEXTS else set()
+
+
+def _generator_block(
+    command: str, distrusted: frozenset[str] | set[str] = frozenset()
+) -> tuple[bool, list[str], frozenset[str] | None]:
+    """(prints, files, contexts) for one shell block: whether a trusted generator's output reaches the result
     with nothing after it able to print text of its own choosing, and the files a generator's stdout was
     redirected into (expanded with the block's own literal assignments) that nothing else in the block
     writes.
@@ -633,20 +689,22 @@ def generator_block(command: str, distrusted: frozenset[str] | set[str] = frozen
     the block's LAST command, after `;`, a newline or `&&`, with what runs before it free to print (its
     output comes first, and the search takes the last context line) so long as it cannot leave anything
     running that prints later. The second needs the generator last: if it failed after a printing step,
-    the call's exit code says so, where a quiet command after it would hide the failure."""
+    the call's exit code says so, where a quiet command after it would hide the failure. In the second
+    shape what printed first can carry any context line, so the result is the comparand only for the
+    contexts its printing generators were run for (`contexts`); None in the first shape (any context)."""
     cmds = _parse_block(command)
     if cmds is None or _hijacked(cmds):
-        return False, []
+        return False, [], None
     env, raw, assigned = _env(cmds)
     kinds = [_kind(c, raw, assigned, set(distrusted)) for c in cmds]
     gens = [c for c, k in zip(cmds, kinds) if k == "generator" and not c.substituted]
     if not gens:
-        return False, []
+        return False, [], None
     kept = []
     trust = set(distrusted)
     for gen in gens:
         target = _expand(gen.stdout_file, env) if gen.stdout_file is not None and not gen.piped else None
-        if target is not None and target.startswith("/"):
+        if target is not None and target.startswith("/") and not _shared_tmp(target):
             path = norm_path(target)
             # Only what runs after the generator (or inside a substitution) can change its file.
             later = [c for c in cmds[cmds.index(gen) + 1 :] if c is not gen] + [c for c in cmds if c.substituted]
@@ -659,14 +717,17 @@ def generator_block(command: str, distrusted: frozenset[str] | set[str] = frozen
     split = top.index(last) if last is not None else len(top)
     quiet, shown = _block_quiet(cmds, kinds, env, assigned, set(kept), set(map(id, top[:split])))
     if quiet:
-        return (prints or shown), kept
+        return (prints or shown), kept, None
     if last is not None and top[-1] is last and last.sep_before != "||" and prints:
         before = [(c, k) for c, k in zip(cmds, kinds) if not c.substituted and top.index(c) < split]
         subs = [(c, k) for c, k in zip(cmds, kinds) if c.substituted]
         if all(_may_precede(c, k, raw) for c, k in before):
             sub_quiet, _ = _block_quiet([c for c, _ in subs], [k for _, k in subs], env, assigned, set(), set())
-            return sub_quiet, kept
-    return False, kept
+            contexts: set[str] = set()
+            for c in printing:
+                contexts |= _generator_contexts(c, env)
+            return sub_quiet, kept, frozenset(contexts)
+    return False, kept, None
 
 
 def _may_precede(c: _Cmd, kind: str, raw: dict[str, str]) -> bool:
@@ -679,7 +740,24 @@ def _may_precede(c: _Cmd, kind: str, raw: dict[str, str]) -> bool:
     script = _script(words)
     if script is not None:
         return _plugin_script(script, raw) and os.path.basename(script) not in GENERATORS
+    if name == "sed":
+        return _sed_print_range(words)
     return name in _MAY_PRECEDE and not _INTERPRETERS_RE.match(name)
+
+
+_SED_RANGE_RE = re.compile(r"^[0-9]+(,[0-9]+)?p$")
+
+
+def _sed_print_range(words: list[str]) -> bool:
+    """`sed -n 'N,Mp' FILE` or `sed -n 'Np' FILE` exactly: it prints lines of one file and runs nothing.
+    Any other sed (a `w`, `e` or `r` command, `-e`, `-i`, a substitution) is not this form. Allowed only
+    before the generator, never as a quiet command: after it, it could print forged text last."""
+    return (
+        len(words) == 4
+        and words[1] == "-n"
+        and _SED_RANGE_RE.match(words[2]) is not None
+        and not words[3].startswith("-")
+    )
 
 
 def _block_quiet(
@@ -758,6 +836,31 @@ _WRITERS = frozenset({"cp", "mv", "ln", "install", "rsync", "tee", "dd", "trunca
                       "touch", "chmod", "curl", "wget", "git"})  # fmt: skip
 
 
+def _unwrapped(words: list[str]) -> list[str]:
+    """`words` without a leading `command` or `env` (and env's options and assignments)."""
+    while words and os.path.basename(words[0]) in ("command", "env"):
+        words = words[1:]
+        while words and (words[0].startswith("-") or _ASSIGN_RE.match(words[0])):
+            words = words[1:]
+    return words
+
+
+def _links(name: str, args: list[str]) -> bool:
+    """A command that makes a link: `ln` in any form, or `cp` with `-l`, `-s`, `--link` or
+    `--symbolic-link` (alone or in a cluster such as `-al`)."""
+    if name == "ln":
+        return True
+    if name != "cp":
+        return False
+    for a in args:
+        if a == "--":
+            break
+        if a in ("--link", "--symbolic-link") or (a.startswith("-") and not a.startswith("--") and
+                                                   re.search(r"[ls]", a[1:])):  # fmt: skip
+            return True
+    return False
+
+
 def _into_plugin(text: str) -> bool:
     if any(g in text for g in GENERATORS) or any(h in text for h in _PLUGIN_HINTS):
         return True
@@ -767,7 +870,8 @@ def _into_plugin(text: str) -> bool:
 def _distrusts(command: str) -> set[str]:
     """Generators a shell block could have rewritten. A generator named by anything but a run of it or a
     read-only command; and every generator when the block writes into the plugin (a redirect, an
-    in-place edit, a copy, link or extraction whose target points there), runs inline code that names
+    in-place edit, a copy, link or extraction whose target points there), makes a link to it (`ln`,
+    `cp -l`/`-s`, from its scripts, a generator or an install root), runs inline code that names
     it, or cannot be read and mentions it in a line that writes (`_raw_writes_into_plugin`). Names are
     read with the block's own assignments filled in, so a name spelt apart (`G=dispatch_prompt; ...
     "$G.py"`) is still seen."""
@@ -788,6 +892,14 @@ def _distrusts(command: str) -> set[str]:
                 return set(GENERATORS)
         if name == "sed" and any(w == "-i" or w.startswith("-i") for w in filled) and any(map(_into_plugin, filled)):
             return set(GENERATORS)
+        # A link to the plugin's scripts or a generator, wherever it is made, is a path a later write
+        # reaches the plugin through (`ln -s $SCRIPTS /tmp/L`, then `> /tmp/L/x.py`). A plain copy out of
+        # the plugin cannot change it, so only the link forms count.
+        link_words = _unwrapped(words)
+        link_name = os.path.basename(link_words[0]) if link_words else ""
+        link_args = [_partial(w, raw) for w in link_words[1:]]
+        if _links(link_name, link_words[1:]) and any(_into_plugin(w) for w in link_args if not w.startswith("-")):
+            return set(GENERATORS)
         inline = _INTERPRETERS_RE.match(name) and any(w in ("-c", "-e") for w in words[1:])
         if inline and any(_into_plugin(w) or "dispatch_" in w or "prompt.py" in w for w in filled):
             return set(GENERATORS)
@@ -805,10 +917,37 @@ def _distrusts(command: str) -> set[str]:
 
 # A write in a line the parser could not read: a redirect (a `>` after a space, so `<path>` is not one),
 # a copy or in-place edit, a file opened for writing by inline code.
+# `>&` to a file (`>& F`, `1>&F`) is a write; `>&2` and `>&-` are not.
 _RAW_WRITE_RE = re.compile(
-    r"(?:(?:^|\s)[0-9&]?>>?\s*[^\s&]|\b(?:cp|mv|ln|tee|install|rsync|dd|truncate|patch)\s|sed\s+-i"
+    r"(?:(?:^|\s)[0-9&]?>>?\s*[^\s&]|(?:^|\s)[0-9]?>&\s*[^\s0-9&-]"
+    r"|\b(?:cp|mv|ln|tee|install|rsync|dd|truncate|patch)\s|sed\s+-i"
     r"|open\([^)]*,\s*['\"][wax+]|write_text\(|write_bytes\()"
 )
+# A line that makes a link (`_links`), for the raw check.
+_RAW_LINK_RE = re.compile(
+    r"(?:^|[\s;&|(])(?:\S*/)?(?:ln\s|cp\s+(?:[^;&|]*\s)?(?:-[A-Za-z]*[ls][A-Za-z]*|--link|--symbolic-link)(?:\s|$))"
+)
+_RAW_ASSIGN_RE = re.compile(r"(?<![\w$./-])([A-Za-z_][A-Za-z0-9_]*)=(\"[^\"]*\"|'[^']*'|[^\s;&|]*)")
+
+
+def _raw_filled(line: str, values: dict[str, list[str]]) -> str:
+    """`line` followed by every value the block assigns anywhere to each variable it names, filled in the
+    same way a few levels deep: what a link's operands could be, whichever assignment ran."""
+    seen: set[str] = set()
+    out = [line]
+    frontier = [line]
+    for _ in range(4):
+        nxt = []
+        for text in frontier:
+            for m in _VAR_RE.finditer(text):
+                key = m.group(1) or m.group(2)
+                if key in seen:
+                    continue
+                seen.add(key)
+                nxt += values.get(key, [])
+        out += nxt
+        frontier = nxt
+    return " ".join(out)
 
 
 # Commands a line may run beside a generator that saves its output: they print, and write nothing.
@@ -941,11 +1080,17 @@ def _raw_writes_into_plugin(command: str) -> bool:
     for name in re.findall(r"(?<![\w$./-])([A-Za-z_][A-Za-z0-9_]*)=", command):
         counts[name] = counts.get(name, 0) + 1
     once = {name for name, n in counts.items() if n == 1}
+    values: dict[str, list[str]] = {}
+    for name, value in _RAW_ASSIGN_RE.findall(command):
+        values.setdefault(name, []).append(value.strip("\"'"))
     for i, line in enumerate(lines):
         env = None if off else _raw_env(lines[:i], once)
         if env is not None and _saves_generator_output_elsewhere(line, env, set(counts)):
             continue
-        if not _RAW_WRITE_RE.search(line.replace("2>&1", "").replace(">/dev/null", "")):
+        # A link whose operand reaches the plugin only through a variable (`ln -s "$S" /tmp/L`).
+        if _RAW_LINK_RE.search(line) and _into_plugin(_raw_filled(line, values)):
+            return True
+        if not _RAW_WRITE_RE.search(line.replace("2>&1", "").replace(">/dev/null", "").replace(">&/dev/null", "")):
             continue
         if _into_plugin(line) or "dispatch_" in line or "prompt.py" in line:
             return True
@@ -1045,13 +1190,24 @@ def comparands(rows: list[dict[str, Any]]) -> list[str]:
 
     Writes anywhere in the transcript, a sub-agent's included, can drop a file read back or make a
     generator untrusted; only the main thread's own results are ever the comparand."""
+    return [text for text, _contexts in _comparands(rows)]
+
+
+Verdict = tuple[bool, list[str], "frozenset[str] | None"]
+
+
+def _comparands(rows: list[dict[str, Any]]) -> list[tuple[str, frozenset[str] | None]]:
+    """`comparands()`, each with the contexts it may be the comparand for (None: any). A result of the
+    generator-last shape counts only for the contexts its generator was run for, and so does an oversized
+    one saved to a file and read back."""
     uses: dict[str, dict[str, Any]] = {}
-    pending: dict[str, tuple[bool, list[str]]] = {}
+    pending: dict[str, Verdict] = {}
+    only: dict[str, frozenset[str]] = {}  # a saved result's file -> the contexts it may stand for
     producing: dict[str, list[tuple[frozenset[str], re.Pattern[str] | None]]] = {}
     rejected: list[frozenset[str]] = []
     readable: set[str] = set()
     distrusted: set[str] = set()
-    out: list[str] = []
+    out: list[tuple[str, frozenset[str] | None]] = []
     _SESSION_ROOTS.clear()
     _SESSION_ROOTS.update(session_roots(rows))
     for row in rows:
@@ -1070,12 +1226,12 @@ def comparands(rows: list[dict[str, Any]]) -> list[str]:
                     if not isinstance(cmd, str):
                         continue
                     distrusted |= _distrusts(cmd)
-                    verdict = (False, []) if side else generator_block(cmd, distrusted)
+                    verdict: Verdict = (False, [], None) if side else _generator_block(cmd, distrusted)
                     details = redo_details(cmd)
                     if details is not None and not (details and all(any(d & r for r in rejected) for d in details)):
-                        verdict = (False, [])  # a redo whose message is not a failed producer's own output
+                        verdict = (False, [], None)  # a redo whose message is not a failed producer's own output
                     if not side and not verdict[0] and shows_file(cmd, readable, distrusted):
-                        verdict = (True, [])
+                        verdict = (True, [], _shown_contexts(cmd, readable, only))
                     readable = {path for path in readable if not touches_file(cmd, path, distrusted)}
                     rejected = [r for r in rejected if not _entry_touched(cmd, r, distrusted)]
                     if not side and producer_outputs(cmd):
@@ -1110,19 +1266,36 @@ def comparands(rows: list[dict[str, Any]]) -> list[str]:
                     key = str(b.get("tool_use_id"))
                     if key not in pending:
                         continue
-                    prints, files = pending.pop(key)
+                    prints, files, contexts = pending.pop(key)
                     readable.update(files)
+                    for path in files:
+                        only.pop(path, None)  # the generator's own file
                     if prints:
                         saved = _PERSISTED_RE.match(text)
                         if saved:
-                            readable.add(norm_path(saved.group(1)))
+                            path = norm_path(saved.group(1))
+                            readable.add(path)
+                            if contexts is None:
+                                only.pop(path, None)
+                            else:
+                                only[path] = contexts
                         else:
-                            out.append(text)
+                            out.append((text, contexts))
                 elif use.get("name") == "Read":
                     read_input: dict[str, Any] = use["input"] if isinstance(use.get("input"), dict) else {}
                     target = read_input.get("file_path")
                     if isinstance(target, str) and norm_path(target) in readable:
-                        out.append(_unnumbered(text))
+                        out.append((_unnumbered(text), only.get(norm_path(target))))
+    return out
+
+
+def _shown_contexts(command: str, readable: set[str], only: dict[str, frozenset[str]]) -> frozenset[str] | None:
+    """The contexts a block printing saved results may stand for: those every restricted file it names
+    allows (None when it names none)."""
+    out: frozenset[str] | None = None
+    for path in readable:
+        if path in only and os.path.basename(path) in command:
+            out = only[path] if out is None else out & only[path]
     return out
 
 
@@ -1141,7 +1314,9 @@ def latest_printed(rows: list[dict[str, Any]], context: str, output_path: str | 
     """
     found = None
     line_re = _context_line_re(context)
-    for text in comparands(rows):
+    for text, contexts in _comparands(rows):
+        if contexts is not None and context not in contexts:
+            continue  # what printed before the generator, not the generator's own output
         starts = [m.start() for m in line_re.finditer(text)]
         if not starts:
             continue
@@ -1261,6 +1436,168 @@ def agent_name(agent: str) -> str | None:
     return None if ":" in agent else agent
 
 
+# --- why there is no printed prompt (the hold's reason; model-facing only) --------------------------------
+
+_HOW_TO_PRINT = (
+    "Run the prompt generator in a shell call of its own, or as the last command of its block, with nothing "
+    "after it that prints, and send the text it prints as the prompt, unchanged. Do not redirect its output "
+    "away: the printed text is what the dispatch is compared with."
+)
+
+
+def _generator_for(agent: str) -> str | None:
+    skill = agent[: -len("-redteam")] if agent.endswith("-redteam") else agent
+    return next((g for g, s in GENERATORS.items() if s == skill), None)
+
+
+def _cmd_text(c: _Cmd) -> str:
+    text = " ".join([f"{n}={v}" for n, v in c.assigns] + c.argv)
+    return text if len(text) <= 80 else text[:77] + "..."
+
+
+def _runs_context(c: _Cmd, generator: str, sub: str, env: dict[str, str]) -> bool:
+    """`c` runs `generator` for the context whose subcommand is `sub` (`red_team`, `checklist`, ...)."""
+    words = _words(c.argv)
+    path = _script(words)
+    if path is None and words and os.path.basename(words[0]) == generator:
+        path = words[0]
+    if path is None or os.path.basename(path) != generator:
+        return False
+    return _subcommand(c, env) == sub
+
+
+_SETTING = "setting:"  # `_loud_command`'s prefix for a variable that changes which program runs
+
+
+def _loud_command(command: str, distrusted: set[str]) -> str | None:
+    """The first command in a block that ran the generator and printed, that kept the block from being
+    vouched for as the generator's own output; None when no single command can be named."""
+    cmds = _parse_block(command)
+    if cmds is None:
+        return None
+    for c in cmds:
+        for name, value in _assignments(c):
+            if name in _HIJACK_VARS or name.startswith("DYLD_"):
+                return f"{_SETTING}{name}={value}"
+    env, raw, assigned = _env(cmds)
+    kinds = [_kind(c, raw, assigned, distrusted) for c in cmds]
+    top = [c for c in cmds if not c.substituted]
+    gens = [c for c, k in zip(cmds, kinds) if k == "generator" and not c.substituted]
+    if not gens:
+        # The generator itself was not one the check trusts (a copy, a relative path, rewritten).
+        named = [c for c in top if any(os.path.basename(w) in GENERATORS for w in _words(c.argv)[:4])]
+        return _cmd_text(named[0]) if named else None
+    last = gens[-1]
+    for c in gens:
+        if c.piped:
+            nxt = top[top.index(c) + 1] if top.index(c) + 1 < len(top) else None
+            return _cmd_text(nxt) if nxt is not None else None
+    if top[-1] is last:
+        for c, k in zip(cmds, kinds):
+            if c.substituted or top.index(c) >= top.index(last):
+                continue
+            if not _may_precede(c, k, raw):
+                return _cmd_text(c)
+        subs = [c for c, k in zip(cmds, kinds) if c.substituted]
+        return _cmd_text(subs[0]) if subs else None
+    split = top.index(last)
+    for c, k in zip(cmds, kinds):
+        if k in ("generator", "assign", "quiet"):
+            continue
+        if k == "echo" and _quiet_echoes([c], env, assigned):
+            continue
+        if c.argv and os.path.basename(c.argv[0]) in _QUIET_BEFORE and c in top and top.index(c) < split:
+            continue
+        return _cmd_text(c)
+    return None
+
+
+def _unprinted_reason(rows: list[dict[str, Any]], context: str, agent: str, output_path: str) -> str:
+    """The hold's reason when no printed prompt exists for this OUTPUT_PATH, by what the transcript shows:
+    this context's generator ran in a block that could not be vouched for (named); its output was
+    redirected away; or it never ran (whether or not another context's did)."""
+    head = f"{MARKER}[{output_path}] Held: no printed prompt for this OUTPUT_PATH yet"
+    generator = _generator_for(agent)
+    sub = context.split(":", 1)[1].strip().lower()
+    latest: str | None = None
+    distrusted: set[str] = set()
+    latest_distrusted: set[str] = set()
+    for row in rows:
+        content = (row.get("message") or {}).get("content")
+        if row.get("type") != "assistant" or not isinstance(content, list):
+            continue
+        for b in content:
+            if not isinstance(b, dict) or b.get("type") != "tool_use" or not isinstance(b.get("input"), dict):
+                continue
+            if not _is_shell(b.get("name")):
+                target = next((b["input"].get(k) for k in _FILE_TOOL_KEYS if isinstance(b["input"].get(k), str)), "")
+                if b.get("name") != "Read" and os.path.basename(target) in GENERATORS:
+                    distrusted.add(os.path.basename(target))
+                continue
+            cmd = b["input"].get("command")
+            if not isinstance(cmd, str):
+                continue
+            distrusted |= _distrusts(cmd)
+            if not row.get("isSidechain") and generator is not None:
+                cmds = _parse_block(cmd)
+                runs = (
+                    re.search(rf"(?:^|[\s/\"']){re.escape(generator)}[\"']?\s+(?:\S+\s+)*?{sub}\b", cmd) is not None
+                    if cmds is None
+                    else any(_runs_context(c, generator, sub, _env(cmds)[0]) for c in cmds if not c.substituted)
+                )
+                if runs:
+                    latest = cmd
+                    latest_distrusted = set(distrusted)
+    if generator is not None and generator in distrusted:
+        return (
+            f"{head}. The plugin's scripts were changed in this session, so no prompt printed since can be "
+            "trusted as the generator's own, and running it again will not change that. This dispatch goes "
+            f"through after {MAX_HOLDS} holds."
+        )
+    if latest is None or generator is None:
+        return f"{head}. {_HOW_TO_PRINT}"
+    cmds = _parse_block(latest)
+    latest_env = _env(cmds)[0] if cmds is not None else {}
+    gens = [c for c in cmds or [] if not c.substituted and _runs_context(c, generator, sub, latest_env)]
+    if gens and all(c.stdout_file is not None for c in gens):
+        return (
+            f"{head}: the prompt generator's output went to a file instead of the result, and a file directly "
+            "in /tmp, /private/tmp or /var/tmp may be another session's. Run the prompt generator again with "
+            "NO redirect, in a shell call of its own, so the text it prints is in the result, and send that "
+            "text as the prompt, unchanged. Do not redirect its output away: the printed text is what the "
+            "dispatch is compared with."
+        )
+    if generator_block(latest, latest_distrusted)[0]:
+        return f"{head}. {_HOW_TO_PRINT}"  # it printed, for another OUTPUT_PATH
+    if cmds is not None:
+        _env_values, raw, assigned = _env(cmds)
+        if not any(_kind(c, raw, assigned, latest_distrusted) == "generator" for c in gens):
+            return (
+                f"{head}. The prompt generator that ran is not the plugin's own: it was run from another folder, "
+                "or by a path the check does not recognise. Run it from the skill's own scripts "
+                f"folder (`$SCRIPTS/{generator}`) in a shell call of its own, and send the text it prints as the "
+                "prompt, unchanged."
+            )
+    loud = _loud_command(latest, latest_distrusted)
+    if loud is not None and loud.startswith(_SETTING):
+        return (
+            f"{head}. The block set `{loud[len(_SETTING) :]}` before the prompt generator, and a setting like "
+            "PYTHONPATH or PATH changes what it runs. Run the prompt generator with no such setting, in a shell "
+            "call of its own, and send the text it prints as the prompt, unchanged."
+        )
+    what = (
+        f"`{loud}`"
+        if loud is not None
+        else "shell syntax the check cannot follow (an `if`, a loop, a heredoc or a subshell)"
+    )
+    return (
+        f"{head}. The prompt generator ran, but its block also ran {what}, so its output cannot be vouched "
+        "for as the generator's own. Run the prompt generator in a shell call of its own -- "
+        "nothing before it but assignments, nothing after it -- and send the text it prints as the prompt, "
+        "unchanged."
+    )
+
+
 def decide(payload: dict[str, Any]) -> dict[str, Any] | None:
     if payload.get("hook_event_name") != "PreToolUse" or payload.get("tool_name") not in DISPATCH_TOOLS:
         return None
@@ -1295,12 +1632,7 @@ def decide(payload: dict[str, Any]) -> dict[str, Any] | None:
         )
         return None
     if printed is None:
-        reason = (
-            f"{MARKER}[{output_path}] Held: no printed prompt for this OUTPUT_PATH yet. Run the prompt "
-            "generator in a shell call of its own, or as the last command of its block, with nothing after it "
-            "that prints, and send the text it prints as the prompt, unchanged. Do not redirect its output "
-            "away: the printed text is what the dispatch is compared with."
-        )
+        reason = _unprinted_reason(rows, context, name or "", output_path)
     else:
         reason = f"{MARKER}[{output_path}] Held: {reason_text}. Send this as the prompt, unchanged:\n\n{printed}"
     return {
