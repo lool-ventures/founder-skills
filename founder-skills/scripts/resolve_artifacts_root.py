@@ -303,14 +303,51 @@ def resolve_uploads_dir(cwd: str, env: dict[str, str]) -> str | None:
     return None
 
 
+# The folder some cloud sessions also attach files to. See `_user_data_uploads_dir`.
+USER_DATA_UPLOADS = "/mnt/user-data/uploads"
+
+
+def _has_file(path: str) -> bool:
+    """True when `path` is a readable folder holding at least one file (a subfolder does not count)."""
+    try:
+        with os.scandir(path) as entries:
+            return any(e.is_file() for e in entries)
+    except OSError:
+        return False
+
+
+def _user_data_uploads_dir(env: dict[str, str]) -> str | None:
+    """`/mnt/user-data/uploads`, only when it exists AND holds at least one file.
+
+    Present on some cloud sessions, sometimes beside the `~/.claude/uploads/<session>` folder and
+    sometimes alone. An EMPTY folder is answered with None, not with the path: the folder can exist
+    before anything is attached, and a path that lists clean-empty reads as "the founder attached
+    nothing", which is the misreport this module exists to prevent.
+    """
+    # `$FS_USER_DATA_UPLOADS` exists FOR TESTS: /mnt cannot be written on a macOS dev machine or a CI
+    # runner, so the suite points this at a tmp folder. No skill or host sets it.
+    root = env.get("FS_USER_DATA_UPLOADS") or USER_DATA_UPLOADS
+    return os.path.abspath(root) if _has_file(root) else None
+
+
 def _remote_uploads_dir(env: dict[str, str]) -> str | None:
     """Cowork's REMOTE (cloud) lane: the agent runs in a Linux VM with no `/sessions` tree at all.
 
     On this lane (the default for new sessions) the shell cwd is `/home/claude`,
     `CLAUDE_CODE_REMOTE=true`, and an attached file sits at
-    `$HOME/.claude/uploads/<session id>/<8-hex>-<original name>` -- NOT at `/mnt/user-data/uploads`,
-    which the lane's own environment description names and which does not exist. Answering "no session
-    tree" here would make a skill tell the founder they supplied no documents.
+    `$HOME/.claude/uploads/<session id>/<8-hex>-<original name>`. Some cloud sessions ALSO have
+    `/mnt/user-data/uploads` (the folder the lane's own environment description names), sometimes
+    beside the `~/.claude` one and sometimes in its place; it was absent on the session first
+    measured, which is why this module once said it does not exist. Answering "no session tree" here
+    would make a skill tell the founder they supplied no documents.
+
+    ORDER: the `~/.claude/uploads/<session>` folder wins whenever one resolves and holds a file;
+    `/mnt/user-data/uploads` is the fallback, used only when it holds a file. The fallback applies when
+    the session folder is EMPTY, when a session id is set but its folder is absent (that folder is
+    created only once something is attached there, so its absence says nothing about the other one),
+    and when there is no id and no session folder. It does NOT apply
+    when there is no id and SEVERAL session folders: that is an ambiguity the caller reports as such,
+    and answering it with a third folder would hide it.
 
     THE DIRECTORY IS THE SIGNAL, NOT THE ENV. Runtime markers are served per session and have been
     added and removed across releases (ccinternals.dev/cowork, "detect.markers-come-and-go"), so this
@@ -318,18 +355,26 @@ def _remote_uploads_dir(env: dict[str, str]) -> str | None:
     else the single session dir under `$HOME/.claude/uploads/` (one session per remote VM). With
     nothing attached there is no dir, and None is the honest answer, never a fabricated path. Never
     reached on a `/sessions` tree (the branches above answer first) and never on a CLI host unless a
-    `~/.claude/uploads/<session>` dir actually exists there, which nothing on the CLI creates.
+    `~/.claude/uploads/<session>` dir, or a non-empty `/mnt/user-data/uploads`, actually exists there,
+    which nothing on the CLI creates.
     """
     home = env.get("HOME") or os.path.expanduser("~")
     base = os.path.join(home, ".claude", "uploads")
     session = env.get("CLAUDE_CODE_SESSION_ID")
     if session:
         candidate = os.path.join(base, session)
-        return candidate if os.path.isdir(candidate) else None
-    if not os.path.isdir(base):
-        return None
-    dirs = _remote_session_dirs(env)
-    return dirs[0] if len(dirs) == 1 else None
+        chosen: str | None = candidate if os.path.isdir(candidate) else None
+    else:
+        dirs = _remote_session_dirs(env) if os.path.isdir(base) else []
+        if len(dirs) > 1:
+            return None  # ambiguous: main() says so; never masked by the fallback
+        chosen = dirs[0] if dirs else None
+    # An EMPTY session folder counts as absent for the fallback: it must not hide a
+    # `/mnt/user-data/uploads` that holds the attached file. With no file in either, the session
+    # folder is still the answer (it is this session's, and listing it empty is the truth).
+    if chosen is not None and _has_file(chosen):
+        return chosen
+    return _user_data_uploads_dir(env) or chosen
 
 
 def _remote_session_dirs(env: dict[str, str]) -> list[str]:

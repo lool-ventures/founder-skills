@@ -432,9 +432,9 @@ _REMOTE_ENV = {
 
 def test_uploads_on_the_remote_lane_is_the_per_session_uploads_dir(tmp_path: Path) -> None:
     """Measured in a real cloud session 2026-09-22: no `/sessions` tree, shell cwd /home/claude,
-    an attached PDF at `$HOME/.claude/uploads/<CLAUDE_CODE_SESSION_ID>/<8-hex>-<name>.pdf` — and NOT
-    at `/mnt/user-data/uploads`, which the lane's own environment text names and which does not
-    exist. The live report came from this lane; before this branch its red team was told the
+    an attached PDF at `$HOME/.claude/uploads/<CLAUDE_CODE_SESSION_ID>/<8-hex>-<name>.pdf`, with no
+    `/mnt/user-data/uploads` on that session (some later sessions have it; see the fallback tests
+    below). The live report came from this lane; before this branch its red team was told the
     founder supplied no documents."""
     up = tmp_path / ".claude" / "uploads" / "117a27ba"
     up.mkdir(parents=True)
@@ -515,6 +515,141 @@ def test_cli_uploads_exit_3_note_on_the_plain_cli(tmp_path: Path) -> None:
     rc, out, err = _run_cli(["--uploads"], env)
     assert rc == 3, (rc, out, err)
     _assert_exit_3_note_true_on_both_hosts(err)
+
+
+# ---------------------------------------------------------------------------
+# `/mnt/user-data/uploads` fallback. Some cloud sessions attach files there, sometimes beside the
+# `~/.claude/uploads/<session>` folder and sometimes alone. `$FS_USER_DATA_UPLOADS` points the module
+# at a tmp folder; every test sets it, so none depends on what this machine has at /mnt.
+# ---------------------------------------------------------------------------
+
+
+_SESSION = "0f0f0f0f"  # synthetic session id
+_FALLBACK_ENV = {**_REMOTE_ENV, "CLAUDE_CODE_SESSION_ID": _SESSION}
+
+
+def _user_data(tmp_path: Path, *, files: bool) -> Path:
+    ud = tmp_path / "mnt-user-data" / "uploads"
+    ud.mkdir(parents=True)
+    if files:
+        (ud / "deck.pdf").write_bytes(b"%PDF")
+    return ud
+
+
+def test_user_data_constant_names_the_cloud_folder() -> None:
+    assert _mod.USER_DATA_UPLOADS == "/mnt/user-data/uploads"
+
+
+def test_only_claude_uploads_is_unchanged(tmp_path: Path) -> None:
+    up = tmp_path / ".claude" / "uploads" / _SESSION
+    up.mkdir(parents=True)
+    env = {**_FALLBACK_ENV, "HOME": str(tmp_path), "FS_USER_DATA_UPLOADS": str(tmp_path / "absent")}
+    assert resolve_uploads_dir("/home/claude", env) == str(up)
+
+
+def test_both_folders_prefer_the_claude_uploads_one(tmp_path: Path) -> None:
+    """Both hold a file, so the fallback COULD win; the session folder still does."""
+    up = tmp_path / ".claude" / "uploads" / _SESSION
+    up.mkdir(parents=True)
+    (up / "85451e6d-deck.pdf").write_bytes(b"%PDF")
+    ud = _user_data(tmp_path, files=True)
+    env = {**_FALLBACK_ENV, "HOME": str(tmp_path), "FS_USER_DATA_UPLOADS": str(ud)}
+    assert resolve_uploads_dir("/home/claude", env) == str(up)
+    # Same with no session id and the single session folder.
+    env_no_id = {"HOME": str(tmp_path), "FS_USER_DATA_UPLOADS": str(ud)}
+    assert resolve_uploads_dir("/home/claude", env_no_id) == str(up)
+
+
+def test_an_empty_session_folder_does_not_hide_a_full_user_data_folder(tmp_path: Path) -> None:
+    """The session folder exists but holds nothing; the attached file is in /mnt/user-data/uploads."""
+    (tmp_path / ".claude" / "uploads" / _SESSION).mkdir(parents=True)
+    ud = _user_data(tmp_path, files=True)
+    assert resolve_uploads_dir(
+        "/home/claude", {**_FALLBACK_ENV, "HOME": str(tmp_path), "FS_USER_DATA_UPLOADS": str(ud)}
+    ) == str(ud)
+    # Same with no session id and that single (empty) session folder.
+    assert resolve_uploads_dir("/home/claude", {"HOME": str(tmp_path), "FS_USER_DATA_UPLOADS": str(ud)}) == str(ud)
+    # With no file in the fallback either, the session folder is still the answer, as before.
+    empty_ud = tmp_path / "empty-ud"
+    empty_ud.mkdir()
+    env = {**_FALLBACK_ENV, "HOME": str(tmp_path), "FS_USER_DATA_UPLOADS": str(empty_ud)}
+    assert resolve_uploads_dir("/home/claude", env) == str(tmp_path / ".claude" / "uploads" / _SESSION)
+
+
+def test_only_user_data_with_a_file_is_the_uploads_folder(tmp_path: Path) -> None:
+    ud = _user_data(tmp_path, files=True)
+    env = {"HOME": str(tmp_path), "FS_USER_DATA_UPLOADS": str(ud)}
+    assert resolve_uploads_dir("/home/claude", env) == str(ud)
+
+
+def test_cli_uploads_flag_prints_the_user_data_folder(tmp_path: Path) -> None:
+    ud = _user_data(tmp_path, files=True)
+    env = {
+        "HOME": str(tmp_path),
+        "COWORK_UPLOADS_DIR": "",
+        "CLAUDE_CODE_SESSION_ID": "",
+        "FS_USER_DATA_UPLOADS": str(ud),
+    }
+    rc, out, err = _run_cli(["--uploads"], env)
+    assert rc == 0, err
+    assert out.strip() == str(ud)
+
+
+def test_session_id_whose_folder_is_absent_falls_back_to_user_data(tmp_path: Path) -> None:
+    """DECIDED: the fallback applies. `~/.claude/uploads/<session>` is created only once something is
+    attached THERE, so its absence says nothing about `/mnt/user-data/uploads`; a file in the latter
+    is this session's (the folder is per-VM), and refusing it would report an attached file missing."""
+    ud = _user_data(tmp_path, files=True)
+    env = {**_FALLBACK_ENV, "HOME": str(tmp_path), "FS_USER_DATA_UPLOADS": str(ud)}
+    assert resolve_uploads_dir("/home/claude", env) == str(ud)
+
+
+def test_empty_user_data_folder_is_not_an_uploads_folder(tmp_path: Path) -> None:
+    """Exists, holds nothing: exit 3, never a path that lists clean-empty."""
+    ud = _user_data(tmp_path, files=False)
+    (ud / "subdir").mkdir()  # a directory is not a file
+    env = {**_FALLBACK_ENV, "HOME": str(tmp_path), "COWORK_UPLOADS_DIR": "", "FS_USER_DATA_UPLOADS": str(ud)}
+    assert resolve_uploads_dir("/home/claude", env) is None
+    rc, out, err = _run_cli(["--uploads"], env)
+    assert rc == 3, (rc, out, err)
+    assert out.strip() == ""
+    _assert_exit_3_note_true_on_both_hosts(err)
+
+
+def test_neither_folder_exits_3_with_the_unchanged_note(tmp_path: Path) -> None:
+    env = {
+        **_REMOTE_ENV,
+        "HOME": str(tmp_path),
+        "COWORK_UPLOADS_DIR": "",
+        "FS_USER_DATA_UPLOADS": str(tmp_path / "absent"),
+    }
+    rc, out, err = _run_cli(["--uploads"], env)
+    assert rc == 3, (rc, out, err)
+    assert err == (
+        "No uploads folder found for this session (the uploads mount is absent): either nothing "
+        "has been attached yet, or this host keeps uploads somewhere this script does not look. "
+        "Ask the user to attach the file, or to give its path, instead of reporting it missing. "
+        "Set $COWORK_UPLOADS_DIR to declare the folder.\n"
+    )
+
+
+def test_ambiguous_session_folders_are_not_masked_by_the_fallback(tmp_path: Path) -> None:
+    """No id, two session folders, AND a populated fallback: still the ambiguity exit, never the
+    fallback, which would hide that the script could not tell which session is this one."""
+    for name in ("aaaa1111", "bbbb2222"):
+        (tmp_path / ".claude" / "uploads" / name).mkdir(parents=True)
+    ud = _user_data(tmp_path, files=True)
+    env = {
+        "HOME": str(tmp_path),
+        "COWORK_UPLOADS_DIR": "",
+        "CLAUDE_CODE_SESSION_ID": "",
+        "FS_USER_DATA_UPLOADS": str(ud),
+    }
+    assert resolve_uploads_dir("/home/claude", env) is None
+    rc, out, err = _run_cli(["--uploads"], env)
+    assert rc == 3, (rc, out, err)
+    assert out.strip() == ""
+    assert "could not tell which session's uploads folder is this one's" in err.lower(), err
 
 
 _SKILLS_DIR = _SCRIPT.parent.parent / "skills"
