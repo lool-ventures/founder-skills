@@ -37,6 +37,16 @@ import sys
 from typing import Any
 
 HANDOVER_FILENAME = "handover.txt"
+# report.json's `runway_status` when runway was not computed only for want of the cash balance
+# (compose_report.py `_runway_status`). Kept out of the verdict: the verdict also opens the report, a
+# document read later, where a request for the balance would point at nobody. Worded for any input --
+# a spreadsheet, a deck or figures given in chat. SKILL.md Step 12 says how the balance is recorded and
+# the review re-run when the founder replies.
+NO_CASH_BALANCE = "no_cash_balance"
+ASK_FOR_CASH_BALANCE = (
+    "The figures you shared don't include your cash balance today, so I couldn't work out your runway; "
+    "tell me your current cash balance and the date it's as of, and I'll recompute it."
+)
 
 
 def detect_link_form(cwd: str, env: dict[str, str]) -> str:
@@ -77,6 +87,13 @@ def build(report: dict[str, Any], deliverables: list[tuple[str, str | None]]) ->
         f"Here's your finished financial model review: {'; '.join(parts)}.",
         "",
         verdict.strip(),
+    ]
+    # Optional sentences go here, after the verdict and BEFORE the offer: the Stop hook's fallback takes
+    # this message from the transcript as the slice from the opener line to the offer's end, so anything
+    # printed after the offer is invisible to it, and the offer must stay the last line.
+    if report.get("runway_status") == NO_CASH_BALANCE:
+        lines += ["", ASK_FOR_CASH_BALANCE]
+    lines += [
         "",
         "If you want to keep the working data behind this — to pick it up later, or feed it into "
         "another analysis — say so and I'll send it as a single archive.",

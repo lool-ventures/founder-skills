@@ -992,6 +992,24 @@ def _verdict(inputs: dict[str, Any] | None, checklist: dict[str, Any] | None, ru
     return " ".join(parts)
 
 
+RUNWAY_STATUS_NO_CASH_BALANCE = "no_cash_balance"
+
+
+def _runway_status(runway: dict[str, Any] | None) -> str | None:
+    """report.json's `runway_status`: `no_cash_balance` when runway was not computed only because the cash
+    balance is missing (burn is known, so the balance alone lets it be recomputed); absent otherwise, a
+    computed runway included. Read from runway.json's structure, never from its warning text. The closer
+    (fmr_closing_message.py) keys its request for the balance on it."""
+    if not _usable(runway) or runway.get("insufficient_data") is not True:
+        return None
+    baseline = runway.get("baseline")
+    if not isinstance(baseline, dict):
+        return None  # cash and burn both missing: the balance alone would not let runway be recomputed
+    if baseline.get("net_cash") is None and baseline.get("monthly_burn") is not None:
+        return RUNWAY_STATUS_NO_CASH_BALANCE
+    return None
+
+
 def _section_executive_summary(
     inputs: dict[str, Any] | None,
     checklist: dict[str, Any] | None,
@@ -1994,7 +2012,7 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
     if _usable(inputs):
         model_format = _as_dict(inputs.get("company")).get("model_format", "spreadsheet")
 
-    return {
+    result: dict[str, Any] = {
         "report_markdown": report_markdown,
         "verdict": verdict_raw or None,
         "validation": {
@@ -2006,6 +2024,10 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
         },
         "coaching_payload": coaching_payload,
     }
+    runway_status = _runway_status(runway)
+    if runway_status is not None:
+        result["runway_status"] = runway_status
+    return result
 
 
 def parse_args() -> argparse.Namespace:

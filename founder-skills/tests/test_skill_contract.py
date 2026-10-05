@@ -1077,7 +1077,10 @@ SKILL_MD_CEILING: dict[str, int] = {
     # failed every quick check's first call. Step 12 sends the files first and runs the closer last,
     # its output the whole final message (see market-sizing); Verification Gate 2 no longer lists file
     # paths to present, and Main-Thread Return no longer offers the HTML paths beside the hand-over.
-    "financial-model-review": 84_789,
+    # 84_789 -> 85_546 on 2026-10-05: the hand-over asks for the cash balance when runway could
+    # not be computed without one, so Step 12 says what to do with the reply: record it with
+    # apply_corrections.py --set, promote, re-run runway and the steps after it, the closer last.
+    "financial-model-review": 85_546,
     # ic-sim SHRANK: the REQUIRED ic-dynamics.md read at Step 7 is deleted. Step 7 is a pure producer
     # pipe — compose_discussion.py derives discussion.json from the partners' own files and nothing
     # is authored by the main thread — so the read informed no decision while pulling a whole

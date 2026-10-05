@@ -46,7 +46,9 @@ from typing import Any
 # already exist, so a typo cannot silently create a key. `unclassified_reason` is optional by design
 # (an extraction may not record why the model is unclassified), and a founder's chat correction is
 # exactly how the unknown case gets resolved.
-_OPTIONAL_SET_PATHS = frozenset({"company.unclassified_reason"})
+# Paths a correction may add when the extraction left them out. The cash pair is what the hand-over
+# asks for when runway could not be computed without a balance, and an absent key is the usual shape.
+_OPTIONAL_SET_PATHS = frozenset({"company.unclassified_reason", "cash.current_balance", "cash.balance_date"})
 
 
 def _navigate_part(obj: Any, part: str) -> Any:

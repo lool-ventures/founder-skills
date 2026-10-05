@@ -19,6 +19,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from test_financial_model_review import (  # noqa: E402
     _VALID_CHECKLIST,
@@ -240,3 +242,148 @@ def test_each_paid_lane_holds_the_founders_message_to_the_printed_hand_over() ->
         assert f'"{closer}" in str(' in source, f"{lane} does not find the model's own {closer} call"
         assert "_handover.contained(" in source, f"{lane} does not apply the Stop hook's containment rule"
         assert "stop_hook_blocks()" in source, f"{lane} does not report whether the Stop hook had to block"
+
+
+# --- runway not computed for want of the cash balance: the hand-over asks for it --------------------
+
+
+def _runway_from(inputs: dict[str, Any]) -> dict[str, Any]:
+    r = subprocess.run(
+        [sys.executable, str(_SCRIPTS / "runway.py")], input=json.dumps(inputs), capture_output=True, text=True
+    )
+    assert r.returncode == 0, r.stderr
+    out = json.loads(r.stdout)
+    assert isinstance(out, dict)
+    return out
+
+
+def _no_cash_inputs() -> dict[str, Any]:
+    """A model that states its burn but not its cash balance (the sample_model.xlsx fixture's shape)."""
+    inputs = copy.deepcopy(_VALID_INPUTS)
+    inputs["cash"].pop("current_balance", None)
+    assert inputs["cash"].get("monthly_net_burn") is not None  # burn known: the balance alone recomputes it
+    return inputs
+
+
+def _closer_output(tmp_path: Path, data: dict[str, Any]) -> str:
+    report = tmp_path / "financial-model-review-testco" / "report.json"
+    report.parent.mkdir(exist_ok=True)
+    report.write_text(json.dumps(data), encoding="utf-8")
+    r = subprocess.run(
+        [sys.executable, str(_CLOSER), "--report", str(report), "--deliverable", "the written report=/o/R.md"]
+        + ["--link", "path"],
+        capture_output=True,
+        text=True,
+    )
+    assert r.returncode == 0, r.stderr
+    return r.stdout
+
+
+def _load_by_path(name: str, path: Path) -> Any:
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_a_missing_cash_balance_is_a_structured_field_in_report_json() -> None:
+    inputs = _no_cash_inputs()
+    runway = _runway_from(inputs)
+    assert runway.get("insufficient_data") is True  # the case under test, as runway.py writes it
+    data = _compose(**{"inputs.json": inputs, "runway.json": runway})
+    assert data.get("runway_status") == "no_cash_balance"
+    # A computed runway carries no field at all.
+    computed = _runway_from(copy.deepcopy(_VALID_INPUTS))
+    assert not computed.get("insufficient_data")  # positive control: this one is computed
+    full = _compose(**{"runway.json": computed})
+    assert "runway_status" not in full
+    # Cash and burn both missing: the balance alone would not recompute it, so no request is keyed.
+    neither = copy.deepcopy(inputs)
+    neither["cash"].pop("monthly_net_burn", None)
+    assert "runway_status" not in _compose(**{"inputs.json": neither, "runway.json": _runway_from(neither)})
+
+
+def test_the_hand_over_asks_for_the_cash_balance_before_the_offer(tmp_path: Path) -> None:
+    inputs = _no_cash_inputs()
+    data = _compose(**{"inputs.json": inputs, "runway.json": _runway_from(inputs)})
+    printed = _closer_output(tmp_path, data)
+    closer = _load_closer()
+    ask = closer.ASK_FOR_CASH_BALANCE
+    lines = printed.rstrip("\n").splitlines()
+    assert ask in lines, printed
+    assert lines[-1].startswith("If you want to keep the working data behind this"), lines[-1]
+    assert lines.index(ask) < len(lines) - 1
+    assert ask not in data["verdict"] and ask not in data["report_markdown"]  # the chat's, not the report's
+    # Founder-facing: no field name, no code, no internal token.
+    ft = _founder_text()
+    assert ft.scan(ask) == {"enums": [], "filenames": []}, ask
+    assert "_" not in ask and not re.search(r"\d", ask), ask
+    leak_scan = _load_by_path("fmr_leak_scan_t", _REPO / "cowork-tests" / "leak_scan.py")
+    assert leak_scan.scan_text(printed) == [], printed
+    # The Stop hook accepts a final message equal to the printed text, both from handover.txt and from
+    # the transcript slice it falls back to (opener line to the offer's end).
+    hook_dir = _REPO / "founder-skills" / "scripts"
+    contained = _load_by_path("fmr_handover_contained_t", hook_dir / "_handover_check.py").contained
+    assert contained(printed, printed)[0]
+    hook = _load_by_path("fmr_stop_hook_t", hook_dir / "stop_handover_check.py")
+    sliced = hook.printed_from_result("noise before\n" + printed + "noise after\n", "finished financial model review")
+    assert sliced is not None and ask in sliced
+    assert contained(sliced, printed)[0]
+    # A final message that drops the request is not the printed hand-over.
+    assert not contained(printed, printed.replace(ask + "\n\n", ""))[0]
+
+
+def test_with_a_cash_balance_the_hand_over_asks_for_nothing(tmp_path: Path) -> None:
+    data = _compose(**{"runway.json": _runway_from(copy.deepcopy(_VALID_INPUTS))})
+    printed = _closer_output(tmp_path, data)
+    assert _load_closer().ASK_FOR_CASH_BALANCE not in printed
+    assert "cash balance" not in printed
+
+
+@pytest.mark.parametrize("model_format", ["spreadsheet", "deck", "conversational"])
+def test_the_request_for_the_balance_is_true_for_every_input_kind(model_format: str, tmp_path: Path) -> None:
+    """A deck is the input most likely to lack the balance, so the request fires there too, in words
+    that do not call the input a model."""
+    inputs = _no_cash_inputs()
+    inputs["company"]["model_format"] = model_format
+    data = _compose(**{"inputs.json": inputs, "runway.json": _runway_from(inputs)})
+    assert data.get("runway_status") == "no_cash_balance"
+    ask = _load_closer().ASK_FOR_CASH_BALANCE
+    assert ask in _closer_output(tmp_path, data)
+    assert "model" not in ask.lower()
+
+
+def test_the_founders_reply_recomputes_runway_by_the_skill_md_commands(tmp_path: Path) -> None:
+    """Step 12's follow-up: --set adds the balance and its date even when the extraction left both keys
+    out, and runway re-run on the promoted inputs is computed, so the request is not printed again."""
+    inputs = _no_cash_inputs()
+    inputs["cash"].pop("balance_date", None)
+    assert "current_balance" not in inputs["cash"] and "balance_date" not in inputs["cash"]
+    (tmp_path / "inputs.json").write_text(json.dumps(inputs), encoding="utf-8")
+    r = subprocess.run(
+        [sys.executable, str(_SCRIPTS / "apply_corrections.py")]
+        + ["--set", "cash.current_balance=1500000", "--set", "cash.balance_date=2026-09"]
+        + ["--original", str(tmp_path / "inputs.json"), "--output-dir", str(tmp_path)],
+        capture_output=True,
+        text=True,
+    )
+    assert r.returncode == 0, r.stdout + r.stderr
+    corrected = json.loads((tmp_path / "corrected_inputs.json").read_text(encoding="utf-8"))
+    assert corrected["cash"]["current_balance"] == 1500000 and corrected["cash"]["balance_date"] == "2026-09"
+    runway = _runway_from(corrected)
+    assert not runway.get("insufficient_data"), runway.get("warnings")
+    assert "runway_status" not in _compose(**{"inputs.json": corrected, "runway.json": runway})
+
+
+def test_a_misspelt_cash_path_is_still_refused(tmp_path: Path) -> None:
+    """Only the two named cash paths may be added; a typo beside them is refused as before."""
+    (tmp_path / "inputs.json").write_text(json.dumps(_no_cash_inputs()), encoding="utf-8")
+    r = subprocess.run(
+        [sys.executable, str(_SCRIPTS / "apply_corrections.py"), "--set", "cash.current_balanse=1"]
+        + ["--original", str(tmp_path / "inputs.json"), "--output-dir", str(tmp_path)],
+        capture_output=True,
+        text=True,
+    )
+    assert r.returncode != 0 and "PATH_ERROR" in r.stdout
+    assert not (tmp_path / "corrected_inputs.json").exists()
