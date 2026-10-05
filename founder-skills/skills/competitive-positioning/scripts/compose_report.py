@@ -933,7 +933,14 @@ def validate_artifacts(
             if isinstance(rid, str) and rid:
                 run_ids[name] = rid
     if run_ids:
-        primary_rid = next(iter(run_ids.values()))
+        # "Expected" is the id the review gate resolves for (`_redteam_core.primary_run_id`), so the
+        # leftover is what gets named. Taking the first artifact's id named the fresh files as stale
+        # whenever the leftover was listed first, and re-running them could never clear it.
+        primary_rid = (
+            _cp_redteam_copy.primary_run_id_in(artifacts_dir, artifacts, REQUIRED_ARTIFACTS)
+            if artifacts_dir
+            else _cp_redteam_copy.primary_run_id(artifacts.get(n) for n in REQUIRED_ARTIFACTS)
+        ) or next(iter(run_ids.values()))
         for name, rid in run_ids.items():
             if rid != primary_rid:
                 warnings.append(
@@ -2386,9 +2393,11 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
 
     founder_override_count = _confirmed_override_count(artifacts)
 
-    # Extract run_id from first usable artifact
-    run_id = ""
-    for name in REQUIRED_ARTIFACTS + OPTIONAL_ARTIFACTS:
+    # The report carries the run id the review was resolved for (`_rt_run_id`), so report.json, the gate
+    # and STALE_ARTIFACT name one run. Only a set whose required artifacts carry no id falls back to the
+    # first optional artifact that does.
+    run_id = _rt_run_id or ""
+    for name in [] if run_id else OPTIONAL_ARTIFACTS:
         data = artifacts.get(name)
         if _usable(data):
             rid = _as_dict(data.get("metadata")).get("run_id")

@@ -558,6 +558,20 @@ def test_a_skip_of_this_run_passes_a_set_with_one_leftover_to_stale_artifact(tmp
     assert "STALE_ARTIFACT" in (d / "report.json").read_text(encoding="utf-8")
 
 
+def test_stale_artifact_names_the_leftover_and_agrees_with_the_gate(tmp_path: Path) -> None:
+    """The leftover is listed first. STALE_ARTIFACT must name it -- not the four fresh files -- and the
+    report must carry the run id the review was resolved for."""
+    d = _analysis(tmp_path)
+    assert _pipe(d, {"findings": []}).returncode == 0
+    _stamp(d, "landscape.json", "an-earlier-run")
+    r = _compose_run(d)
+    assert r.returncode == 0, r.stdout[-600:]
+    report = json.loads((d / "report.json").read_text(encoding="utf-8"))
+    stale = [w["message"] for w in report["warnings"] if w["code"] == "STALE_ARTIFACT"]
+    assert stale == [f"landscape.json has run_id 'an-earlier-run' but expected '{RUN}'"], stale
+    assert report["metadata"]["run_id"] == RUN
+
+
 def test_an_earlier_runs_review_does_not_pass_a_set_with_a_leftover_landscape(tmp_path: Path) -> None:
     """Run 1 reviewed; run 2 regenerated every artifact but landscape.json, the first one listed, and recorded
     no review or skip. One leftover file must not make run 1's review stand in for run 2's."""

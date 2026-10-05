@@ -9534,6 +9534,17 @@ def test_an_earlier_runs_review_does_not_pass_a_set_with_one_leftover_artifact()
     assert "no adversarial review was run" in stdout
 
 
+def test_stale_artifact_names_the_leftover_and_agrees_with_the_gate() -> None:
+    """The leftover is listed first (inputs.json). STALE_ARTIFACT must name it, not the five fresh files."""
+    d = _gated_dir()
+    _pipe_review(d, "The published share is 6.1%.")
+    data = json.loads((d / "inputs.json").read_text())
+    data["metadata"]["run_id"] = "20251231T000000Z"
+    (d / "inputs.json").write_text(json.dumps(data))
+    stale = [w["message"] for w in _compose_dir(d)["validation"]["warnings"] if w["code"] == "STALE_ARTIFACT"]
+    assert stale == [f"inputs.json has run_id '20251231T000000Z' but expected '{_CRUN}'"], stale
+
+
 def test_an_even_split_goes_to_the_run_whose_files_were_produced_last() -> None:
     """Three required artifacts per run: the tie goes to the run produced last, not to the greater id
     string. The earlier run's id here is a host-style id that sorts after this run's timestamp."""

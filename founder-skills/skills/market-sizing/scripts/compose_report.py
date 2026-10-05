@@ -770,7 +770,9 @@ def _check_founder_value_fidelity(
     return warnings
 
 
-def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict[str, str]]:
+def validate_artifacts(
+    artifacts: dict[str, dict[str, Any] | None], dir_path: str | None = None
+) -> list[dict[str, str]]:
     """Run all 17 validation checks across artifacts. Returns list of warnings."""
     warnings: list[dict[str, str]] = []
 
@@ -897,7 +899,14 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
             if isinstance(rid, str) and rid:
                 run_ids[name] = rid
     if run_ids:
-        primary_rid = next(iter(run_ids.values()))
+        # "Expected" is the id the review gate resolves for (`_redteam_core.primary_run_id`), so the
+        # leftover is what gets named. Taking the first artifact's id named the fresh files as stale
+        # whenever the leftover was listed first, and re-running them could never clear it.
+        primary_rid = (
+            _redteam_copy.primary_run_id_in(dir_path, artifacts, REQUIRED_ARTIFACTS)
+            if dir_path
+            else _redteam_copy.primary_run_id(artifacts.get(n) for n in REQUIRED_ARTIFACTS)
+        ) or next(iter(run_ids.values()))
         for name, rid in run_ids.items():
             if rid != primary_rid:
                 warnings.append(
@@ -3194,7 +3203,7 @@ def _compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
         )
 
     # Run validation
-    warnings = validate_artifacts(artifacts)
+    warnings = validate_artifacts(artifacts, dir_path)
     _bypassed_steps = _handoff_bypassed(dir_path, _rt_run_id, artifacts)
     if _bypassed_steps:
         warnings.append(_warn("HANDOFF_BYPASSED", _handoff_audit().founder_message(_bypassed_steps)))
