@@ -854,13 +854,20 @@ def _decide(mod: Any, tmp_path: Path, rows: list[dict[str, Any]], tool_input: An
 _INPUT = {"subagent_type": "founder-skills:market-sizing-redteam", "description": "Outside review", "prompt": _STEERED}
 
 
-def test_the_rewrite_is_dormant_at_the_shipped_floor(tmp_path: Path) -> None:
-    """No CLI reaches the shipped floor, so a steered dispatch is held exactly as before."""
+def test_below_the_shipped_floor_a_steered_dispatch_is_held(tmp_path: Path) -> None:
+    """The floor is the lowest CLI measured honouring a rewrite; one release below it is held as before."""
     mod = _hook()
-    assert mod.REWRITE_FLOOR >= (999, 0, 0)
-    rows = _versioned([_user("Size my market."), *_printed(_GENERATED)], "2.1.300")
+    assert mod.REWRITE_FLOOR == (2, 1, 286)
+    rows = _versioned([_user("Size my market."), *_printed(_GENERATED)], "2.1.285")
     out = _decide(mod, tmp_path, rows, dict(_INPUT))["hookSpecificOutput"]
     assert out["permissionDecision"] == "deny" and "updatedInput" not in out
+
+
+def test_at_the_shipped_floor_a_steered_dispatch_is_sent_as_printed(tmp_path: Path) -> None:
+    mod = _hook()
+    rows = _versioned([_user("Size my market."), *_printed(_GENERATED)], "2.1.286")
+    out = _decide(mod, tmp_path, rows, dict(_INPUT))["hookSpecificOutput"]
+    assert out["permissionDecision"] == "allow" and out["updatedInput"]["prompt"].strip() == _GENERATED.strip()
 
 
 def test_at_the_floor_the_printed_prompt_replaces_only_the_prompt(tmp_path: Path, monkeypatch: Any) -> None:

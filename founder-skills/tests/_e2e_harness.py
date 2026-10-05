@@ -584,10 +584,10 @@ def assert_dispatch_outcomes(report: dict[str, Any], step: str) -> None:
     assert not false_holds, f"the hook held a dispatch that sent the printed prompt: {false_holds}\n{text}"
 
 
-# Off until the dispatch hook may rewrite a prompt on the CLI version these lanes run. Below that version
-# the hook only holds, so what a sub-agent received always equals what was sent and this gate would add
-# nothing to the sent-prompt check it replaces.
-RECEIVED_PROMPT_GATE_ENABLED = False
+# On while the CLI these lanes run is at or above the dispatch hook's REWRITE_FLOOR. Below it the hook only
+# holds, so what a sub-agent received always equals what was sent and this gate would add nothing to the
+# sent-prompt check it replaces.
+RECEIVED_PROMPT_GATE_ENABLED = True
 
 
 def assert_received_prompt(report: dict[str, Any], step: str, *, enabled: bool | None = None) -> None:

@@ -7,6 +7,8 @@ stream of the SDK's own message objects, so the harness's real loop is exercised
 from __future__ import annotations
 
 import importlib.util
+import re
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -357,13 +359,31 @@ def test_prompts_compare_with_whitespace_squashed(harness: Any) -> None:
     assert not harness.same_prompt("a b", "a b c")
 
 
-def test_the_received_prompt_gate_ships_off(harness: Any) -> None:
-    assert harness.RECEIVED_PROMPT_GATE_ENABLED is False
+def test_the_received_prompt_gate_ships_on(harness: Any) -> None:
+    assert harness.RECEIVED_PROMPT_GATE_ENABLED is True
+
+
+def test_the_gate_is_on_only_where_the_lanes_cli_can_be_rewritten(harness: Any) -> None:
+    """The gate judges what a sub-agent received, which differs from what was sent only when the hook may
+    rewrite; the lanes run the SDK's bundled CLI, so it must be at or above the hook's floor."""
+    sdk = pytest.importorskip("claude_agent_sdk")
+    cli = Path(sdk.__file__).parent / "_bundled" / "claude"
+    if not cli.is_file():
+        pytest.skip("no bundled CLI in this SDK install")
+    out = subprocess.run([str(cli), "--version"], capture_output=True, text=True, timeout=60).stdout
+    m = re.match(r"(\d+)\.(\d+)\.(\d+)", out.strip())
+    assert m, out
+    spec = importlib.util.spec_from_file_location(
+        "_capture_hook", TESTS.parent / "scripts" / "dispatch_prompt_check.py"
+    )
+    assert spec and spec.loader
+    hook = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(hook)
+    assert tuple(int(x) for x in m.groups()) >= hook.REWRITE_FLOOR or not harness.RECEIVED_PROMPT_GATE_ENABLED
 
 
 def test_the_gate_does_nothing_while_off(harness: Any, tmp_path: Path, monkeypatch: Any) -> None:
     report = _report(harness, tmp_path, monkeypatch, [_init(), _dispatch("x", "other"), _result("x", structured={})])
-    harness.assert_received_prompt(report, "RED_TEAM")
     harness.assert_received_prompt(report, "RED_TEAM", enabled=False)
 
 

@@ -67,14 +67,14 @@ own marker and budget.
 NO PRINTED PROMPT. Held, with "run the prompt generator": the only way to satisfy it puts the
 comparand in the transcript.
 
-SENDING THE PRINTED PROMPT INSTEAD (DORMANT). Where a printed prompt exists and the dispatch differs,
+SENDING THE PRINTED PROMPT INSTEAD. Where a printed prompt exists and the dispatch differs,
 the hook can allow the dispatch with `updatedInput` -- the dispatch's own input with only `prompt`
 replaced by the printed one -- and an `additionalContext` notice, instead of holding it. That path has
 no hold budget (an allow cannot wedge a run). It runs only when all of these hold, and otherwise the
 dispatch is held as above:
   * the transcript's CLI `version` is at least REWRITE_FLOOR. A runtime that ignored `updatedInput`
     on an allow would turn a visible hold into a silent pass, so the floor is the lowest version a
-    live probe showed honouring it. Until that probe, REWRITE_FLOOR is a sentinel no CLI reaches;
+    live probe showed honouring it (the replaced text is what the sub-agent's result row records);
   * the input is an object carrying `subagent_type` and `description` (a partial input is not sent);
   * no earlier rewrite in the session was found not to have taken: for each OUTPUT_PATH the runtime
     recorded this hook's notice against, the dispatch's result row (`toolUseResult.prompt`) must equal
@@ -94,9 +94,9 @@ from typing import Any
 
 MARKER = "[dispatch-check]"
 REWRITE_MARKER = "[dispatch-rewrite]"
-# The lowest CLI version measured honouring `updatedInput` on a PreToolUse allow. A sentinel until a
-# live probe sets it: below it the dispatch is held, never rewritten.
-REWRITE_FLOOR: tuple[int, ...] = (9999, 0, 0)
+# The lowest CLI version measured honouring `updatedInput` on a PreToolUse allow: below it the dispatch
+# is held, never rewritten.
+REWRITE_FLOOR: tuple[int, ...] = (2, 1, 286)
 # The dispatches whose prompt a generator prints (market-sizing's dispatch_prompt.py, competitive-
 # positioning's cp_dispatch_prompt.py, financial-model-review's fmr_dispatch_prompt.py). Every such prompt
 # ends with END.
