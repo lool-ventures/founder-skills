@@ -5,6 +5,69 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.16.1] - 2026-10-06 — Files first and the closing message last, a runway check that works first time, and a request for your cash balance
+
+### Highlights
+
+**Market sizing, competitive positioning and financial model review now send the report files first
+and end on the closing message the plugin prints.** Before, the closing message came before the files
+went out and was often rewritten into a summary afterwards. The model can still rewrite it on some
+runs; when it does, an end-of-turn check adds the printed version beneath it, so the last message you
+see carries the report's own figures.
+The archive offer in that message is the only offer made, and a connected folder is written to only
+if you ask.
+
+**Financial model review's quick runway check works on the first try.** A question such as "how long
+do I have?" used to fail on its first attempt. It now needs only cash on hand and
+monthly net burn; no company details are required for a runway figure.
+
+**When your figures include burn but no cash balance, financial model review asks for it.** The
+closing message says runway could not be worked out without today's cash balance and asks for the
+amount and the date it is as of. When you reply, the review records it, recomputes runway and updates
+the report within the same run.
+
+### Scoring changes
+
+None.
+
+### Changed
+
+- **Competitive positioning: recall candidates you decline at the competitor-set check are recorded
+  by the plugin**, rather than by editing the draft by hand. They are checked, duplicates and
+  companies already on your list are skipped, and the step is no longer held partway through.
+- **Fewer steps are held and shown as failed.** The skills run the commands that print a reviewer's
+  instructions on their own, where combining them with other commands caused the step to be held, and
+  a held step now says what to fix.
+
+### Fixed
+
+- **Uploads on a cloud session are found when they sit only in the host's own uploads folder**, or
+  when the session's folder exists but is empty. When several sessions' folders exist and nothing says
+  which is this one's, the skills still ask for the file rather than pick one.
+- **A reviewer's instructions are never taken from a file in the shared temporary folder**, which other
+  sessions on the same machine can write to, so another session's instructions cannot be read back as
+  this run's. Temporary output from the skills goes in the run's own folder.
+- **The feedback skill finds the plugin's version on a cloud session**, where it used to write
+  "unknown".
+- **Market sizing no longer re-asks which price to use after you answered Desktop's question form.**
+  When your materials state more than one figure for the same input, a form that offered every figure
+  and that you answered now counts as the question, so the sizing steps are no longer held and shown as
+  failed, and the question is not asked twice.
+
+### Development
+
+Contributor-facing only; nothing here changes what a founder installs or runs.
+
+- A new contract test checks that every script call written in the skills, references and agent
+  instructions passes only options that script accepts; the quick runway check's failing call was this
+  kind of error.
+- Every release section from this one on carries a `### Scoring changes` heading, checked at tag time
+  (in the pre-tag script and before the paid release check) against a pinned list of the files that set
+  each skill's grades: it must name each skill whose grading files changed since the previous release.
+- The end-of-turn delivery check counts files sent after the report was built and before the closing
+  message, matching the new order; a resumed run that only re-sends files also passes.
+- The recorded test sessions were not refreshed for this release.
+
 ## [0.16.0] - 2026-10-05 — Skills that say how long they take, decks that open in a local session, and outside reviews kept to their own run
 
 ### Highlights
