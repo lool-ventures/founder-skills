@@ -20,10 +20,18 @@ import sys
 from typing import Any
 
 # The agent check runs first: a dispatch addressed to the wrong agent is answered with the agent to
-# name before anything is compared against its prompt.
+# name before anything is compared against its prompt. The asked-gate check comes next and before the
+# figures check: on a market-sizing sizing dispatch it decides both questions in one hold. The holds come
+# before the prompt check, so a step that must wait for a question is held rather than rewritten.
 # The question check answers only AskUserQuestion, and every dispatch check only Agent/Task: each returns
 # at its own tool-name test, so the order between the two groups decides nothing.
-CHECKS = ("dispatch_type_check", "two_figures_check", "dispatch_prompt_check", "review_page_check")
+CHECKS = (
+    "dispatch_type_check",
+    "asked_gate_check",
+    "two_figures_check",
+    "dispatch_prompt_check",
+    "review_page_check",
+)
 
 
 def _load(name: str) -> Any:

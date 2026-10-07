@@ -832,7 +832,10 @@ REVIEW_CMD = (
     'python3 "$SCRIPTS/review_inputs.py" "$REVIEW_DIR/inputs.json" --static "$REVIEW_DIR/review.html" '
     '--extraction-warnings "$REVIEW_DIR/extraction_validation.json"'
 )
-GATE_OPEN_CMD = 'python3 "$SCRIPTS/record_gate_answer.py" open --gate values_check --dir "$REVIEW_DIR"'
+GATE_OPEN_CMD = (
+    'python3 "$SHARED/record_gate_answer.py" open --run-id r-acme --artifacts-root "$ARTIFACTS_ROOT" '
+    "--gate fmr_extracted_values"
+)
 REVIEW_PAGE = "/sessions/x/mnt/outputs/artifacts/financial-model-review-acme/review.html"
 WAITING = "I've built the review page. Please check the values and tell me whether they look right."
 
@@ -996,10 +999,104 @@ def test_the_page_is_asked_for_once(tmp_path: Path) -> None:
     assert _run(tmp_path, _review_rows(_assistant_text(WAITING)), {"stop_hook_active": True}).stdout == ""
 
 
+def _form(call_id: str) -> list[dict[str, Any]]:
+    """The values question put as Desktop's question form: a widget whose result says it was shown at
+    once, and no question tool call. The turn ends waiting for the founder's reply."""
+    code = (
+        '<form class="elicit"><div class="elicit-header"><span>Review details</span></div>'
+        '<label class="elicit-question">Do the extracted values look right?</label>'
+        '<button type="button" class="elicit-pill">The values look right, proceed</button>'
+        '<button type="button" class="elicit-pill">I have corrections</button></form>'
+    )
+    call = {
+        "type": "assistant",
+        "message": {
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "tool_use",
+                    "id": call_id,
+                    "name": "mcp__visualize__show_widget",
+                    "input": {"widget_code": code},
+                }
+            ],
+        },
+    }
+    return [call, _result_for(call_id, "Content rendered and shown to the user.")]
+
+
+def test_a_values_question_put_as_a_form_with_the_page_unsent_is_asked_for_the_page(tmp_path: Path) -> None:
+    reason = _review_ask(tmp_path, _review_rows(*_form("toolu_w"), _assistant_text(WAITING)))
+    assert reason is not None
+    assert "review.html" in reason and "mcp__cowork__present_files" in reason
+    assert "then ask (or repeat) the question whether those values look right" in reason
+
+
+def test_a_form_after_the_page_was_sent_is_silent(tmp_path: Path) -> None:
+    rows = _review_rows(*_deliver_files("toolu_d", REVIEW_PAGE), *_form("toolu_w"), _assistant_text(WAITING))
+    r = _run(tmp_path, rows)
+    assert r.returncode == 0 and r.stdout == "" and r.stderr == "", r
+
+
+def test_the_question_tool_in_place_of_the_form_is_not_the_stop_hooks_ask(tmp_path: Path) -> None:
+    assert _run(tmp_path, _review_rows(*_asked("toolu_q"), _assistant_text(WAITING))).stdout == ""
+
+
 def test_a_gate_record_is_not_a_report_build() -> None:
     delivery = _load_hook()._load_delivery()
     assert delivery._BUILD.search(GATE_OPEN_CMD) is None
     assert delivery._BUILD.search('python3 "$SCRIPTS/record_gate_answer.py" answer --gate values_check') is None
+
+
+# Every shape the gate recorder and the run status script are called in. None of them builds a report,
+# closes a run's hand-over or builds the review page, so none opens or closes a delivery window.
+_RECORD = 'python3 "$SHARED/record_gate_answer.py"'
+_STATUS = 'python3 "$SHARED/run_status.py"'
+_WHERE = '--run-id r-acme --run-dir "$ARTIFACTS_ROOT/financial-model-review-acme"'
+_ROOT = '--run-id r-acme --artifacts-root "$ARTIFACTS_ROOT"'
+GATE_AND_STATUS_CMDS = (
+    GATE_OPEN_CMD,
+    f"{_RECORD} answer {_WHERE} --gate fmr_extracted_values --answer-id values_ok",
+    f"{_RECORD} answer {_WHERE} --gate fmr_extracted_values --answer-id proceed_unreviewed --after-hold",
+    f"{_RECORD} answer {_WHERE} --form-reply <<'FS_FORM_EOF'\nReview details \u2014 Values: look right\nFS_FORM_EOF",
+    f"{_RECORD} default {_WHERE} --gate fmr_extracted_values --reason asked_not_to_be_asked",
+    f"{_RECORD} not-applicable {_WHERE} --gate fmr_cash_followup --reason cash_stated_in_model",
+    f"{_RECORD} require {_WHERE} --gate fmr_extracted_values",
+    f"{_RECORD} list --skill financial-model-review",
+    f"{_RECORD} show {_ROOT}",
+    f"{_STATUS} start --skill financial-model-review --artifacts-root \"$ARTIFACTS_ROOT\" <<'FS_HOST_EOF'\n"
+    "Review the attached model.\nFS_HOST_RUN_ID=r-acme\nFS_HOST_EOF",
+    f'{_STATUS} bind {_ROOT} --run-dir "$ARTIFACTS_ROOT/financial-model-review-acme" --slug acme',
+    f'{_STATUS} finish --mode quick_check {_ROOT} --output "$ARTIFACTS_ROOT/quick_check.json"',
+    f"{_STATUS} deliverables {_ROOT} --final",
+    f"{_STATUS} show {_ROOT}",
+)
+
+
+@pytest.mark.parametrize("command", GATE_AND_STATUS_CMDS)
+@pytest.mark.parametrize("pattern", ["_BUILD", "_CLOSER", "_COMPOSE", "_REVIEW_BUILD"])
+def test_no_gate_or_status_call_is_a_build_or_a_closer(command: str, pattern: str) -> None:
+    delivery = _load_hook()._load_delivery()
+    assert getattr(delivery, pattern).search(command) is None, (pattern, command)
+
+
+def test_a_failed_shell_call_after_compose_silences_the_delivery_ask(tmp_path: Path) -> None:
+    """Pinned as it stands: a failed call after the report build, with no closer after it, ends the
+    delivery ask. A run status call that fails after compose (`deliverables --final`) would silence it,
+    so those calls must not fail there."""
+    built = [
+        _snapshot("mcp__workspace__bash", "mcp__cowork__present_files"),
+        _user("Review this deck."),
+        _call_with_id("mcp__workspace__bash", COMPOSE_CMD, "toolu_compose"),
+        _result_for("toolu_compose", "{}"),
+    ]
+    asked = json.loads(_run(tmp_path, [*built, _assistant_text(LINKED)]).stdout)
+    assert asked["decision"] == "block" and "attach" in asked["reason"], "control: the unsent report is asked for"
+    failed = [
+        _call_with_id("mcp__workspace__bash", GATE_AND_STATUS_CMDS[12], "toolu_final"),
+        _result_for("toolu_final", '{"code": "RUN_NOT_COMPLETE"}', is_error=True),
+    ]
+    assert _run(tmp_path, [*built, *failed, _assistant_text(LINKED)]).stdout == ""
 
 
 def test_a_gate_record_alone_never_triggers_the_report_check(tmp_path: Path) -> None:

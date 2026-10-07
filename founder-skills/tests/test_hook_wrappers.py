@@ -130,6 +130,8 @@ def test_every_hook_and_the_python_it_runs_ships_in_the_plugin() -> None:
         "scripts/dispatch_type_check.py",
         "scripts/two_figures_check.py",
         "scripts/review_page_check.py",
+        "scripts/asked_gate_check.py",
+        "scripts/_form_reply.py",
         "scripts/session-setup.sh",
     ):
         assert expected in files, (expected, files)

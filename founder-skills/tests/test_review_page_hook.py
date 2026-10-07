@@ -28,7 +28,10 @@ SERVER_CMD = (
     'python3 "$SCRIPTS/review_inputs.py" "$REVIEW_DIR/inputs.json" --workspace "$REVIEW_DIR" '
     '--extraction-warnings "$REVIEW_DIR/extraction_validation.json" &'
 )
-GATE_OPEN_CMD = 'python3 "$SCRIPTS/record_gate_answer.py" open --gate values_check --dir "$REVIEW_DIR"'
+GATE_OPEN_CMD = (
+    'python3 "$SHARED/record_gate_answer.py" open --run-id r-acme --artifacts-root "$ARTIFACTS_ROOT" '
+    "--gate fmr_extracted_values"
+)
 COMPOSE_CMD = 'python3 "$SCRIPTS/compose_report.py" --dir "$REVIEW_DIR" -o "$REVIEW_DIR/report.json"'
 PAGE = "/sessions/x/mnt/outputs/artifacts/financial-model-review-acme/review.html"
 # The same build written across lines with shell continuations, as many real runs write it.
@@ -303,12 +306,21 @@ def test_the_manifest_sends_dispatches_and_questions_to_the_hook() -> None:
     assert entries[0]["hooks"][0]["command"] == "${CLAUDE_PLUGIN_ROOT}/scripts/pretooluse-dispatch.sh"
 
 
-@pytest.mark.parametrize("name", ["dispatch_type_check", "two_figures_check", "dispatch_prompt_check"])
+@pytest.mark.parametrize(
+    "name", ["dispatch_type_check", "asked_gate_check", "two_figures_check", "dispatch_prompt_check"]
+)
 def test_each_dispatch_check_returns_at_once_on_a_question(tmp_path: Path, name: str) -> None:
     """A question whose text looks exactly like a dispatch prompt is still not a dispatch."""
     prompt = "CONTEXT: RED_TEAM\nOUTPUT_PATH: /h/r2/redteam_output.json\nRead docs.\n"
     payload = _payload(tmp_path, _built(), tool_input={"prompt": prompt, "subagent_type": "general-purpose"})
-    assert _load(name).decide(payload) is None
+    check = _load(name)
+    if name == "asked_gate_check":
+        # Its shipped table is empty; with every planned row enabled, a question that reads like one of
+        # their dispatches is still not one.
+        check.ROWS = dict(check.PLANNED_ROWS)
+        planned = "CONTEXT: CHECKLIST\nOUTPUT_PATH: /h/handoff/r1/checklist.json\n"
+        assert check.decide(_payload(tmp_path, _built(), tool_input={"prompt": planned})) is None
+    assert check.decide(payload) is None
 
 
 def test_the_question_check_returns_at_once_on_a_dispatch(tmp_path: Path) -> None:

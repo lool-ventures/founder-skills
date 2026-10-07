@@ -102,6 +102,7 @@ def test_every_compared_pair_is_allowed_by_the_table() -> None:
 
 def test_the_agent_check_runs_first() -> None:
     assert _load("pretooluse_dispatch").CHECKS[0] == "dispatch_type_check"
+    assert _load("pretooluse_dispatch").CHECKS.index("asked_gate_check") == 1
 
 
 def test_a_section_with_no_agent_is_reported() -> None:
@@ -344,3 +345,39 @@ def test_no_founder_skill_and_no_output_path_is_not_ours(tmp_path: Path) -> None
     # Either signal is enough to hold it.
     _deny(_run(tmp_path, [_user("x"), _skill("founder-skills:deck-review")], "CONTEXT: CHECKLIST\nGo.\n", "claude"))
     _deny(_run(tmp_path, [_user("x")], "CONTEXT: CHECKLIST\nOUTPUT_PATH: /h/c.json\n", "claude"))
+
+
+# --- each start of a skill, in order ------------------------------------------------------------------
+
+
+def _skill_call(skill: str, **extra: Any) -> dict[str, Any]:
+    use = {"type": "tool_use", "id": "toolu_s", "name": "Skill", "input": {"skill": skill}}
+    return {"type": "assistant", "message": {"role": "assistant", "content": [use]}, **extra}
+
+
+def _command(name: str, *, in_result: bool = False) -> dict[str, Any]:
+    text = f"<command-message>x</command-message>\n<command-name>/{name}</command-name>"
+    if in_result:
+        block = {"type": "tool_result", "tool_use_id": "toolu_r", "content": text}
+        return {"type": "user", "message": {"role": "user", "content": [block]}}
+    return {"type": "user", "message": {"role": "user", "content": text}}
+
+
+def test_invocations_are_listed_in_order_on_the_main_thread_only() -> None:
+    rows = [
+        _command("founder-skills:deck-review"),
+        _skill_call("founder-skills:market-sizing"),
+        _skill_call("founder-skills:ic-sim", isSidechain=True),
+        _skill_call("other:market-sizing"),
+        _skill_call("market-sizing"),
+        _command("founder-skills:cap-table", in_result=True),
+        _command("help"),
+    ]
+    assert TYPE.invocations(rows) == [(0, "deck-review"), (1, "market-sizing"), (4, "market-sizing")]
+
+
+def test_started_skills_is_unchanged_by_the_invocation_list() -> None:
+    """It keeps counting a `<command-name>` a tool returned: that only widens the agents allowed."""
+    rows = [_skill_call("founder-skills:market-sizing"), _command("founder-skills:cap-table", in_result=True)]
+    assert TYPE.started_skills(rows) == {"market-sizing", "cap-table"}
+    assert [s for _i, s in TYPE.invocations(rows)] == ["market-sizing"]

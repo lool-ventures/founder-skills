@@ -429,6 +429,8 @@ def cmd_show(args: argparse.Namespace) -> int:
     _require_gates(args.pretty)
     paths = _paths(args.artifacts_root, args.run_id, args.pretty)
     status = _load_or_unreachable(paths, args.pretty)
+    # The hook's record may have a line newer than the last status write: folded for printing only.
+    rs.fold_asked_evidence(status)
     _out(status, args.pretty, args.output)
     return 0
 

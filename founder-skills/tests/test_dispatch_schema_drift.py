@@ -82,10 +82,10 @@ _PROTOCOL = frozenset(
 _COMPAT_MODULES = frozenset({"_axis_compat.py"})
 
 # Shared modules whose string literals are contract vocabulary (gate ids, option ids and labels, status
-# codes, run-status field names), not reads of any artifact a sub-agent writes. Their ~2,000 literals
-# would make almost any name look consumed, so they never count as a consumer.
+# codes, run-status field names, the asked-gate hook's record), not reads of any artifact a sub-agent
+# writes. Their ~2,000 literals would make almost any name look consumed, so they never count as a consumer.
 _NON_CONSUMER_MODULES = frozenset(
-    {"_gates.py", "_run_status.py", "run_status.py", "record_gate_answer.py", "_form_reply.py"}
+    {"_gates.py", "_run_status.py", "run_status.py", "record_gate_answer.py", "_form_reply.py", "asked_gate_check.py"}
 )
 
 # Fields a template asks for that exist to shape the SUB-AGENT's reasoning, not to be rendered or

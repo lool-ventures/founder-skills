@@ -9,7 +9,8 @@ been captured. So the reader ships switched off (`FORM_REPLY_ENABLED = False`) a
 Matching is against the labels the form was built from, never a blind split: a value may itself contain
 `·` or `:`. All or nothing: an unmatched key or value refuses with the allowed labels.
 
-Pure: no I/O. Python 3.9-clean (a hook may load it later): no `match`, no runtime `X | Y`.
+Pure: no I/O. Loaded by a hook (`asked_gate_check.py`), so Python 3.9-clean: no `match`, no runtime
+`X | Y`.
 """
 
 from __future__ import annotations
@@ -81,6 +82,10 @@ def _strip_header(line: str, header: str) -> str | None:
             if m:
                 return rest[m.end() :]
     return None
+
+
+# The reply's header test, for a check that only asks whether a message answers a form.
+strip_header = _strip_header
 
 
 def _split_by_labels(body: str, labels: Sequence[str], *, line_start_only: bool) -> list[tuple[str, str]]:

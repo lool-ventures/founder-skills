@@ -86,7 +86,10 @@ GATE_STATES = ("open", "answered", "not_owed")
 NOT_REACHED = "not_reached"
 KINDS = ("fixed", "templated", "script_built")
 ASKED_CHECKS = ("none", "since_invocation", "current_prompt")
-ASKED_EVIDENCE = ("host_line", "form", "after_hold")
+ASKED_EVIDENCE = ("host_line", "form", "after_hold", "ask_user_question", "plain_chat")
+# The values a script records; the others come only from the asked-gate hook's record, folded into the
+# status by `_run_status.fold_asked_evidence`.
+SCRIPT_ASKED_EVIDENCE = ASKED_EVIDENCE[:3]
 WRITERS = (RECORDER, "gate_state.py", "record_revision_answer.py", "extract_cap_table.py")
 # The gates a hook holds the next dispatch for; `--after-hold` may replace their answer once per run.
 HELD_GATES = ("ms_two_figures", "ms_methodology", "fmr_extracted_values", "ic_decline_confirmation")
@@ -155,6 +158,10 @@ CONTRACT_NOTES = (
     "`bind` completes the list for the run's mode.",
     "`RUN_ID_IN_USE`, `RUN_ID_FINISHED` and `RUN_ID_MALFORMED` are printed only; they never change a run's "
     "run_status.json.",
+    "`current.asked_evidence` may also be `ask_user_question`, `plain_chat`, `host_line` or `form` from the "
+    "plugin's transcript check. It stays null when that check did not run (hooks are optional) or when the step "
+    "went through on its one retry with no question. It is a measurement of how the question was put, not an "
+    "attestation that a person answered it.",
 )
 
 
@@ -2435,6 +2442,8 @@ def record(
     in the caller's on-disk files; the caller writes only when every segment passed. `bound` is a binding
     the writer computed itself, for a gate whose confirmed content only it can see; otherwise the
     registry's binder is used."""
+    if asked_evidence is not None and asked_evidence not in SCRIPT_ASKED_EVIDENCE:
+        raise ValueError(f"asked_evidence {asked_evidence!r} is not a value a script records")
     gate_id, instance, g = check_key(key, ctx.skill)
     if g["writer"] != writer:
         raise GateRejection(

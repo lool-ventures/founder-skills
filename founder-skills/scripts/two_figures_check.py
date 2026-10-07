@@ -71,6 +71,8 @@ from typing import Any
 
 MARKER = "[two-figures-check]"
 SIZING_CONTEXTS = ("CONTEXT: TOP_DOWN_METHODOLOGY", "CONTEXT: BOTTOM_UP_METHODOLOGY")
+SIZING_NAMES = ("TOP_DOWN_METHODOLOGY", "BOTTOM_UP_METHODOLOGY")
+GATE = "ms_two_figures"
 DISPATCH_TOOLS = ("Agent", "Task")
 INPUTS_GLOBS = ("artifacts/market-sizing-*/inputs.json", "mnt/outputs/artifacts/market-sizing-*/inputs.json")
 # A figure is matched whole: "1,261.00" is 1261, never 261.
@@ -102,6 +104,26 @@ def _transcript_tools() -> Any:
     return mod
 
 
+def _dispatch_tools() -> Any:
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dispatch_type_check.py")
+    spec = importlib.util.spec_from_file_location("dispatch_type_check", path)
+    if spec is None or spec.loader is None:
+        raise ImportError(path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def sizing_context(prompt: str) -> str | None:
+    """The sizing context this prompt is a dispatch of, read as every dispatch check reads a first line
+    (`dispatch_type_check.context_of`: invisible characters removed, a suffix allowed), or None. The
+    name is also the key of this check's marker, so the hold and its retry agree on it."""
+    if "METHODOLOGY" not in prompt:
+        return None
+    context = _dispatch_tools().context_of(prompt)
+    return context if context in SIZING_NAMES else None
+
+
 def _numbers(text: str) -> set[float]:
     return {
         float(m.group(1).replace(",", "") + ("." + m.group(2) if m.group(2) else "")) for m in _NUMBER_RE.finditer(text)
@@ -112,10 +134,10 @@ def _figure(value: float) -> str:
     return f"${value:,.0f}" if float(value).is_integer() else f"${value:,.2f}"
 
 
-def inputs_from_output_path(prompt: str, cwd: str | None) -> str | None:
-    """This run's inputs.json, from the dispatch's own OUTPUT_PATH. It walks up to the last `handoff`
-    segment rather than a fixed depth, because a later round writes one level further down. A relative
-    path is resolved against cwd."""
+def run_dir_from_output_path(prompt: str, cwd: str | None) -> tuple[str, str | None] | None:
+    """(this run's analysis dir, the segment after `handoff` or None), from the dispatch's own
+    OUTPUT_PATH. It walks up to the last `handoff` segment rather than a fixed depth, because a later
+    round writes one level further down. A relative path is resolved against cwd."""
     m = _OUTPUT_RE.search(prompt)
     if m is None:
         return None
@@ -128,7 +150,16 @@ def inputs_from_output_path(prompt: str, cwd: str | None) -> str | None:
     if "handoff" not in dirs:
         return None
     at = len(dirs) - 1 - dirs[::-1].index("handoff")
-    candidate = os.path.join(os.sep.join(dirs[:at]) or os.sep, "inputs.json")
+    run_id = dirs[at + 1] if at + 1 < len(dirs) else None
+    return os.sep.join(dirs[:at]) or os.sep, run_id
+
+
+def inputs_from_output_path(prompt: str, cwd: str | None) -> str | None:
+    """This run's inputs.json, beside the `handoff` dir its OUTPUT_PATH names."""
+    found = run_dir_from_output_path(prompt, cwd)
+    if found is None:
+        return None
+    candidate = os.path.join(found[0], "inputs.json")
     return candidate if os.path.isfile(candidate) else None
 
 
@@ -143,15 +174,21 @@ def _squash(text: str) -> str:
 
 class _FormText(html.parser.HTMLParser):
     """The text a founder sees in an elicit form: the header's span, and each option button's and
-    question label's text. Character references are unescaped by the parser (convert_charrefs)."""
+    question label's text. Character references are unescaped by the parser (convert_charrefs).
+
+    `options` is every visible chunk of either, in order, as the figures are read from it. `pills` and
+    `questions` hold the same chunks grouped by the element they sit in (the innermost pill or question
+    label), for a check that compares whole option labels."""
 
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
-        self.stack: list[tuple[str, str]] = []  # (tag, role)
+        self.stack: list[tuple[str, str, list[str] | None]] = []  # (tag, role, the group its text joins)
         self.scripted = False
         self.forms = 0
         self.header: list[str] = []
         self.options: list[str] = []
+        self.pills: list[list[str]] = []
+        self.questions: list[list[str]] = []
 
     def _open(self, tag: str, attrs: list[tuple[str, str | None]], push: bool) -> None:
         names = {k for k, _ in attrs}
@@ -159,7 +196,7 @@ class _FormText(html.parser.HTMLParser):
         if tag == "script" or any(k.startswith("on") for k in names):
             self.scripted = True
         classes = set(values.get("class", "").split())
-        roles = {r for _, r in self.stack}
+        roles = {r for _, r, _g in self.stack}
         style = "".join(values.get("style", "").lower().split())
         if (
             tag in _UNSEEN
@@ -177,12 +214,18 @@ class _FormText(html.parser.HTMLParser):
             role = "header"
         elif tag == "span" and "header" in roles:
             role = "title"
-        elif "elicit-pill" in classes or "elicit-question" in classes:
-            role = "option"
+        elif "elicit-pill" in classes:
+            role = "pill"
+        elif "elicit-question" in classes:
+            role = "question"
         else:
             role = ""
         if push and tag not in _VOID:
-            self.stack.append((tag, role))
+            group: list[str] | None = None
+            if role in ("pill", "question"):
+                group = []
+                (self.pills if role == "pill" else self.questions).append(group)
+            self.stack.append((tag, role, group))
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         self._open(tag, attrs, push=True)
@@ -193,23 +236,25 @@ class _FormText(html.parser.HTMLParser):
         self._open(tag, attrs, push=True)
 
     def handle_endtag(self, tag: str) -> None:
-        if any(t == tag for t, _ in self.stack):
+        if any(t == tag for t, _r, _g in self.stack):
             while self.stack and self.stack.pop()[0] != tag:
                 pass
 
     def handle_data(self, data: str) -> None:
-        roles = {r for _, r in self.stack}
+        roles = {r for _, r, _g in self.stack}
         if "unseen" in roles or "form" not in roles:
             return
         if "title" in roles:
             self.header.append(data)
-        elif "option" in roles:
+        elif "pill" in roles or "question" in roles:
             self.options.append(data)
+            group = next(g for _t, _r, g in reversed(self.stack) if g is not None)
+            group.append(data)
 
 
-def elicit_form(block: Any) -> tuple[str, set[float]] | None:
-    """(header, figures offered) for a `show_widget` call that shows an elicit form, else None. A
-    scripted form, an empty header, or anything that does not parse is not an offer."""
+def _parsed_form(block: Any) -> tuple[str, _FormText] | None:
+    """(header, parsed text) for a `show_widget` call that shows an elicit form, else None. A scripted
+    form, an empty header, or anything that does not parse is not an offer."""
     if not isinstance(block, dict) or block.get("type") != "tool_use":
         return None
     name = block.get("name")
@@ -227,7 +272,26 @@ def elicit_form(block: Any) -> tuple[str, set[float]] | None:
     header = _squash(" ".join(parser.header))
     if parser.scripted or not parser.forms or not header:
         return None
+    return header, parser
+
+
+def elicit_form(block: Any) -> tuple[str, set[float]] | None:
+    """(header, figures offered) for a `show_widget` call that shows an elicit form, else None."""
+    parsed = _parsed_form(block)
+    if parsed is None:
+        return None
+    header, parser = parsed
     return header, _numbers(" ".join(parser.options))
+
+
+def elicit_form_parts(block: Any) -> tuple[str, list[tuple[str, ...]], list[str]] | None:
+    """(header, each option button's visible text chunks, each question label's text) for an elicit
+    form, else None: the same form, read as labels rather than figures."""
+    parsed = _parsed_form(block)
+    if parsed is None:
+        return None
+    header, parser = parsed
+    return header, [tuple(p) for p in parser.pills], [_squash(" ".join(q)) for q in parser.questions]
 
 
 def _forms_in(row: dict[str, Any]) -> list[tuple[str, set[float]]]:
@@ -332,6 +396,55 @@ def unasked(
     return out
 
 
+_HOST_KINDS = ("ANSWER", "VALUE")
+_NOTIFICATION = "<task-notification>"
+
+
+def from_founder(row: dict[str, Any]) -> bool:
+    """Whether a user row is the founder's own text rather than one the runtime delivers in a user row: a
+    background agent's result (`origin.kind` other than human; on older CLIs, text opening with the
+    notification tag) is that agent's words, which the model can steer."""
+    origin = row.get("origin")
+    if isinstance(origin, dict) and origin.get("kind") != "human":
+        return False
+    body = (row.get("message") or {}).get("content")
+    if isinstance(body, list):
+        body = next((b.get("text") for b in body if isinstance(b, dict) and b.get("type") == "text"), "")
+    return not (isinstance(body, str) and body.lstrip().startswith(_NOTIFICATION))
+
+
+def founders_message(row: dict[str, Any], is_prompt: Any) -> bool:
+    """A real prompt the founder wrote: not a compaction summary, not a delivered notification."""
+    return not row.get("isCompactSummary") and bool(is_prompt(row)) and from_founder(row)
+
+
+def host_line_in(
+    rows: list[dict[str, Any]], start: int, gate: str, kinds: tuple[str, ...], is_prompt: Any = None
+) -> bool:
+    """Whether a founder's own message since `start` carries an `FS_HOST_<kind> <gate>=` line. Only a
+    real prompt's text counts: never a tool call's input or result, a skill's expanded text (isMeta), a
+    sub-agent's rows or its delivered result, or a compaction summary, which restates earlier messages in
+    the model's words."""
+    if is_prompt is None:
+        is_prompt = _transcript_tools()._is_real_user_prompt
+    names = "|".join(k for k in kinds if k in _HOST_KINDS)
+    if not names:
+        return False
+    line = re.compile(
+        r"(?m)^[ \t]*FS_HOST_(?:" + names + r")[ \t]+" + re.escape(gate) + r"(?:\.[A-Za-z0-9][A-Za-z0-9_.+-]*)?[ \t]*="
+    )
+    for row in rows[start:]:
+        if not founders_message(row, is_prompt):
+            continue
+        content = (row.get("message") or {}).get("content")
+        texts = [content] if isinstance(content, str) else []
+        if isinstance(content, list):
+            texts = [b["text"] for b in content if isinstance(b, dict) and isinstance(b.get("text"), str)]
+        if any(line.search(t) for t in texts):
+            return True
+    return False
+
+
 def _marker(context: str) -> str:
     """One hold per sizing dispatch. On the first live firing TOP_DOWN was held and BOTTOM_UP,
     dispatched beside it, went through on TOP_DOWN's marker -- the one retry spent by a sibling."""
@@ -341,7 +454,15 @@ def _marker(context: str) -> str:
 def _retried(rows: list[dict[str, Any]], is_prompt: Any, context: str) -> bool:
     start = _window_start(rows, is_prompt)
     mark = _marker(context)
-    return any(row.get("type") == "user" and mark in json.dumps(row.get("message")) for row in rows[start:])
+    # Only a tool result can carry this check's hold: a skill's expanded text or a delivered notification
+    # that quotes the marker does not spend the retry.
+    return any(
+        row.get("type") == "user"
+        and not row.get("isMeta")
+        and from_founder(row)
+        and mark in json.dumps(row.get("message"))
+        for row in rows[start:]
+    )
 
 
 def reason_for(context: str, missing: list[tuple[str, list[tuple[float, str, bool]]]]) -> str:
@@ -366,12 +487,16 @@ def reason_for(context: str, missing: list[tuple[str, list[tuple[float, str, boo
     )
 
 
-def decide(payload: dict[str, Any]) -> dict[str, Any] | None:
+def decide(payload: dict[str, Any], rows: list[dict[str, Any]] | None = None) -> dict[str, Any] | None:
+    """The hold, or None. `rows` is the transcript already read by a caller that has it."""
     if payload.get("hook_event_name") != "PreToolUse" or payload.get("tool_name") not in DISPATCH_TOOLS:
         return None
     tool_input = payload.get("tool_input")
     prompt = tool_input.get("prompt") if isinstance(tool_input, dict) else None
-    if not isinstance(prompt, str) or not prompt.lstrip().startswith(SIZING_CONTEXTS):
+    if not isinstance(prompt, str):
+        return None
+    context = sizing_context(prompt)
+    if context is None:
         return None
     transcript, raw_cwd = payload.get("transcript_path"), payload.get("cwd")
     if not isinstance(transcript, str) or not os.path.isfile(transcript):
@@ -385,10 +510,15 @@ def decide(payload: dict[str, Any]) -> dict[str, Any] | None:
         inputs = json.load(fh)
     if not isinstance(inputs, dict):
         return None
-    context = prompt.lstrip().split("\n", 1)[0].removeprefix("CONTEXT: ").strip()
     tools = _transcript_tools()
-    rows = tools.read_transcript(transcript)
+    if rows is None:
+        rows = tools.read_transcript(transcript)
     if _retried(rows, tools._is_real_user_prompt, context):
+        return None
+    # The founder's own request answered it: a host line in a real prompt of this request.
+    if host_line_in(
+        rows, _window_start(rows, tools._is_real_user_prompt), GATE, ("ANSWER",), tools._is_real_user_prompt
+    ):
         return None
     missing = unasked(inputs, rows, tools._is_real_user_prompt)
     if not missing:

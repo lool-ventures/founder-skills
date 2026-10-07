@@ -107,6 +107,16 @@ PAGES_AFTER_COACHING: dict[str, tuple[str, ...]] = {
 
 DELIVERABLE_KEYS = ("report_md", "report_json", "report_html", "explorer_html")
 
+# The record the asked-gate hook (`asked_gate_check.py`) appends beside a run's `run_ref.json`, one line
+# per decision on a held step. Held equal to the hook's own constants by a test: the hook does not
+# import this module, so that it keeps its own Python floor.
+ASKED_EVIDENCE_FILE = "asked_evidence.jsonl"
+ASKED_EVIDENCE_SCHEMA = "founder-skills/asked_evidence"
+ASKED_EVIDENCE_SCHEMA_VERSION = 1
+# The `asked_evidence` values only that record supplies; a script records the others itself.
+HOOK_ASKED_EVIDENCE = ("ask_user_question", "plain_chat", "host_line", "form")
+_ASKED_EVIDENCE_MAX = 1 << 20
+
 # Every key of run_status.json, in order. Every one is always present; null when unset.
 FIELDS: tuple[str, ...] = (
     "schema",
@@ -506,8 +516,79 @@ def load_status(paths: RunPaths) -> dict[str, Any] | None:
     return data
 
 
+def _asked_evidence_lines(run_dir: str, run_id: str) -> list[dict[str, Any]]:
+    """The hook's record for this run, oldest first: at most its last MiB, torn or foreign lines skipped."""
+    path = os.path.join(run_dir, "handoff", run_id, ASKED_EVIDENCE_FILE)
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            f.seek(max(0, size - _ASKED_EVIDENCE_MAX))
+            data = f.read(_ASKED_EVIDENCE_MAX)
+    except OSError:
+        return []
+    out = []
+    for raw in data.decode("utf-8", "replace").splitlines():
+        try:
+            line = json.loads(raw)
+        except ValueError:
+            continue
+        if (
+            isinstance(line, dict)
+            and line.get("schema") == ASKED_EVIDENCE_SCHEMA
+            and line.get("schema_version") == ASKED_EVIDENCE_SCHEMA_VERSION
+            and line.get("run_id") == run_id
+        ):
+            out.append(line)
+    return out
+
+
+def fold_asked_evidence(status: dict[str, Any]) -> None:
+    """Fill a held gate's `asked_evidence` from the hook's record, when no script recorded one.
+
+    A gate qualifies when its question is checked since the skill was started, it has an answer of
+    `resolution: answered`, and its `asked_evidence` is null (a script's value always wins). The last
+    line of the record for that gate that passed on evidence, of a kind only the hook supplies, and that
+    names this answer's `answered_at` exactly, gives the value. A pass on the hook's retry alone leaves
+    it null. Never raises: the record is a measurement, and a status write must not depend on it.
+    """
+    try:
+        run_dir, run_id = status.get("run_dir_shell"), status.get("run_id")
+        gates = status.get("gates")
+        if not isinstance(run_dir, str) or not valid_run_id(run_id) or not isinstance(gates, list):
+            return
+        lines: list[dict[str, Any]] | None = None
+        for i, entry in enumerate(gates):
+            if not isinstance(entry, dict) or entry.get("asked_check") != "since_invocation":
+                continue
+            current = entry.get("current")
+            if not isinstance(current, dict) or current.get("asked_evidence") is not None:
+                continue
+            if current.get("resolution") != "answered" or not isinstance(current.get("answered_at"), str):
+                continue
+            if lines is None:
+                lines = _asked_evidence_lines(run_dir, str(run_id))
+            found = None
+            for line in lines:
+                if (
+                    line.get("gate") == entry.get("id")
+                    and entry.get("instance") is None
+                    and line.get("decision") == "pass"
+                    and line.get("passed_on") == "evidence"
+                    and line.get("evidence") in HOOK_ASKED_EVIDENCE
+                    and line.get("answered_at") == current["answered_at"]
+                ):
+                    found = line["evidence"]
+            if found is not None:
+                # A copy: the status view shares the ledger's own dict, which only `_gates` writes.
+                gates[i] = {**entry, "current": {**current, "asked_evidence": found}}
+    except Exception:  # noqa: BLE001 - the record is a measurement; a status write never fails on it
+        return
+
+
 def write_status(paths: RunPaths, status: dict[str, Any]) -> None:
     status["updated_at"] = now_iso()
+    fold_asked_evidence(status)
     atomic_write_json(paths.status, normalise(status))
 
 

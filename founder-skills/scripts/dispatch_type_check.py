@@ -116,10 +116,13 @@ def _bare(name: str) -> str:
     return "" if ":" in name else name
 
 
-def started_skills(rows: list[dict[str, Any]]) -> set[str]:
-    """The founder-skills skills started on the main thread so far (empty when none shows)."""
-    found: set[str] = set()
-    for row in rows:
+def _has_tool_result(content: Any) -> bool:
+    return isinstance(content, list) and any(isinstance(b, dict) and b.get("type") == "tool_result" for b in content)
+
+
+def _invocations(rows: list[dict[str, Any]], *, in_results: bool) -> list[tuple[int, str]]:
+    found: list[tuple[int, str]] = []
+    for i, row in enumerate(rows):
         if row.get("isSidechain"):
             continue
         message = row.get("message") or {}
@@ -129,12 +132,26 @@ def started_skills(rows: list[dict[str, Any]]) -> set[str]:
                 if isinstance(b, dict) and b.get("type") == "tool_use" and b.get("name") == "Skill":
                     skill = (b.get("input") or {}).get("skill")
                     if isinstance(skill, str) and _bare(skill) in SKILLS:
-                        found.add(_bare(skill))
-        elif row.get("type") == "user":
+                        found.append((i, _bare(skill)))
+        elif row.get("type") == "user" and (in_results or not _has_tool_result(content)):
             for name in (n for t in strings(message) for n in _COMMAND_RE.findall(t)):
                 if _bare(name) in SKILLS:
-                    found.add(_bare(name))
+                    found.append((i, _bare(name)))
     return found
+
+
+def invocations(rows: list[dict[str, Any]]) -> list[tuple[int, str]]:
+    """(row index, skill) for each time the main thread started a founder-skills skill, in order: a
+    `Skill` call, or a slash command's `<command-name>` in a user row. A `<command-name>` inside a tool
+    result is text a tool returned, not a command the founder ran."""
+    return _invocations(rows, in_results=False)
+
+
+def started_skills(rows: list[dict[str, Any]]) -> set[str]:
+    """The founder-skills skills started on the main thread so far (empty when none shows). Wider than
+    `invocations`: a `<command-name>` a tool returned counts here, which only widens the agents a
+    dispatch may name."""
+    return {skill for _i, skill in _invocations(rows, in_results=True)}
 
 
 def expected_agents(context: str, skills: set[str]) -> tuple[str, ...]:

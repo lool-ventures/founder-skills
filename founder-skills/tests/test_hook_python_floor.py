@@ -27,7 +27,7 @@ PLUGIN = Path(__file__).resolve().parents[1]
 SCRIPTS = PLUGIN / "scripts"
 HOOK_MODULES = sorted(PLUGIN / rel for rel in _hook_files(PLUGIN) if rel.endswith(".py"))
 # Modules no hook loads yet that are kept 3.9-clean so one can: held to the same checks.
-_PY39_READY = {"_form_reply.py"}
+_PY39_READY: set[str] = set()
 FLOOR_MODULES = sorted({*HOOK_MODULES, *(SCRIPTS / name for name in _PY39_READY)})
 
 
@@ -42,13 +42,16 @@ def test_the_hook_module_list_is_complete() -> None:
         "_handover_check.py",
         "_delivery_check.py",
         "review_page_check.py",
+        "asked_gate_check.py",
+        "_form_reply.py",
     }
     assert expected <= names, names
 
 
 # Calls and keywords that exist only from 3.10.
 _NEW_KEYWORDS = {("zip", "strict"), ("dataclass", "slots"), ("dataclass", "kw_only"), ("field", "kw_only")}
-_NEW_ATTRIBUTES = {"pairwise", "bit_count", "aiter", "anext"}
+# `UTC` is `datetime.UTC`, 3.11; the hooks write `timezone.utc`.
+_NEW_ATTRIBUTES = {"pairwise", "bit_count", "aiter", "anext", "UTC"}
 _TYPE_NAMES = {"str", "int", "float", "bool", "bytes", "dict", "list", "set", "tuple", "type", "Any"}
 
 
@@ -283,5 +286,50 @@ def test_the_two_figures_check_reads_a_question_form_the_same_under_the_system_p
     _form_outputs(tmp_path)
     rows = _asked(_widget(*_ALL_PILLS), _SHOWN, *([_answer()] if answered else []))
     dev, system = _both(SCRIPTS / "pretooluse_dispatch.py", _payload(tmp_path, rows))
+    assert dev == system
+    assert bool(dev) is not answered
+
+
+# The asked-gate check ships with no rows enabled, so the shipped wrapper never holds. A shim beside the
+# test loads it by path, enables its planned rows and decides, the way the runner would once they are on.
+_SHIM = """
+import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location("asked_gate_check", sys.argv[1])
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+mod.ROWS = dict(mod.PLANNED_ROWS)
+decision = mod.decide(json.load(sys.stdin))
+sys.stdout.write(json.dumps(decision) if decision is not None else "")
+"""
+
+
+@needs_old
+@pytest.mark.parametrize("asked", [False, True])
+def test_the_asked_gate_check_decides_the_same_under_the_system_python(tmp_path: Path, asked: bool) -> None:
+    from test_asked_gate_hook import _asked, _labels, _payload, _start
+
+    rows = [*_start("market-sizing"), *(_asked(_labels("ms_methodology")) if asked else [])]
+    payload = _payload(tmp_path, rows, "TOP_DOWN_METHODOLOGY", "market-sizing")
+    shim = tmp_path / "shim.py"
+    shim.write_text(_SHIM, encoding="utf-8")
+    outs = []
+    for py in (sys.executable, _SYSTEM):
+        assert py is not None
+        r = subprocess.run([py, str(shim), str(SCRIPTS / "asked_gate_check.py")], input=json.dumps(payload),
+                           capture_output=True, text=True, timeout=30)  # fmt: skip
+        assert r.returncode == 0 and "Traceback" not in r.stderr, (py, r.stderr)
+        outs.append(r.stdout)
+    assert outs[0] == outs[1]
+    assert bool(outs[0]) is not asked
+
+
+@needs_old
+@pytest.mark.parametrize("answered", [False, True])
+def test_the_two_figures_host_line_decides_the_same_under_the_system_python(tmp_path: Path, answered: bool) -> None:
+    from test_two_figures_hook import _outputs, _payload, _user
+
+    _outputs(tmp_path)
+    line = "\nFS_HOST_ANSWER ms_two_figures=typed\n" if answered else ""
+    dev, system = _both(SCRIPTS / "pretooluse_dispatch.py", _payload(tmp_path, [_user("Size my market." + line)]))
     assert dev == system
     assert bool(dev) is not answered

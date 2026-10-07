@@ -4441,3 +4441,24 @@ def test_the_fixed_tmp_check_catches_a_fixed_name() -> None:
     """Negative control: the pattern the cap-table lane used to ship is flagged; a mktemp template is not."""
     assert _FIXED_TMP.search('cat /tmp/bv_responses.json | python3 "$SCRIPTS/x.py"')
     assert not _FIXED_TMP.search('mktemp -d "${TMPDIR:-/tmp}/cap-table-${SLUG}.staging.XXXXXX"')
+
+
+def test_no_shipped_text_carries_a_host_answer_line_for_a_gate_a_hook_reads() -> None:
+    """The dispatch hooks take an `FS_HOST_ANSWER <gate>=` or `FS_HOST_VALUE <gate>=` line in a founder's
+    own message as the question answered. Where a skill's text arrives as the conversation's first message,
+    an example line written in it would answer the question for the founder, so no shipped markdown may
+    carry one at a line start for a gate a hook holds."""
+    sys.path.insert(0, str(REPO_ROOT / "founder-skills" / "scripts"))
+    import _gates  # type: ignore[import-not-found]
+
+    names = "|".join(re.escape(g) for g in _gates.HELD_GATES)
+    line = re.compile(
+        r"(?m)^[ \t]*FS_HOST_(?:ANSWER|VALUE)[ \t]+(?:" + names + r")(?:\.[A-Za-z0-9][A-Za-z0-9_.+-]*)?[ \t]*="
+    )
+    assert line.search("Size it.\n  FS_HOST_VALUE ms_two_figures.arpu = typed | 9\n"), "control: the pattern bites"
+    found = [
+        str(p.relative_to(REPO_ROOT))
+        for p in sorted((REPO_ROOT / "founder-skills").rglob("*.md"))
+        if line.search(p.read_text(encoding="utf-8"))
+    ]
+    assert found == []
