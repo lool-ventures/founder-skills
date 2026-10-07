@@ -166,7 +166,7 @@ def missing_delivery(rows: list[dict[str, Any]], start: int, printed: str | None
     closer = closer_at is not None and (compose_at is None or closer_at > compose_at)
     if compose_at is not None:
         deliver_from = compose_at
-        fail_from = closer_at if closer else compose_at
+        fail_from = closer_at if closer and closer_at is not None else compose_at
     else:
         deliver_from = start - 1
         fail_from = build_at
