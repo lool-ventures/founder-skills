@@ -28,6 +28,8 @@ and the added token only, never which private file matched or any of its text.
                   local private sources. Whole-token: 385 never matches inside 1385 or $3,850.
   5. verbatim   — LOCAL ONLY. A 6-word run of added text that also occurs in the private sources and
                   not in our own tracked code.
+                  Layers 4-5 skip a file listed in GENERATED_FILES (generated from a scanned source and
+                  held equal to it by a test).
   6. figure-provenance — everywhere. A figure token on a line that also says where real data came
                   from ("a live run", "the founder's", …). Blocking locally, warning-only in CI. A
                   reviewed line is accepted with the inline marker `privacy-guard: synthetic`.
@@ -212,6 +214,17 @@ INDEX_VERSION = "2"
 # private figures by chance, and they narrate those runs in the skills' own words ("the founder's",
 # "the deck's"), so the figure and figure-provenance layers skip them. Verbatim and names still scan them.
 FIGURE_LAYER_SKIP_PREFIXES = ("cowork-tests/cassettes/",)
+# Files generated from a tracked source, each held equal to it by a test. Their figures and text come
+# only from that source, which every layer scans, so the figure and verbatim layers skip the generated
+# copy: its layout puts our own words beside key names ("label", "question") in runs a founder's form
+# reply also produced, which the verbatim layer cannot tell from a leak. Every other layer still scans it.
+# Each entry: generated file -> (its source, the test that fails when they differ).
+GENERATED_FILES = {
+    "founder-skills/data/host-contract.json": (
+        "founder-skills/scripts/_gates.py",
+        "founder-skills/tests/test_gate_registry.py",
+    ),
+}
 
 # A figure token. The look-arounds make it WHOLE-TOKEN: no digit, letter, `.`, `,` or `$` may touch
 # either side, so 385 is not found inside 1385, $3,850, 2.1.385 or 0x385.
@@ -504,7 +517,7 @@ def scan_added(
     """Layers 3-6 over added text (files, or a commit message under a pseudo-path)."""
     findings: list[Finding] = []
     for path, lines in added.items():
-        if idx is not None and path not in _SELF_EXEMPT:
+        if idx is not None and path not in _SELF_EXEMPT and path not in GENERATED_FILES:
             if not path.startswith(FIGURE_LAYER_SKIP_PREFIXES):
                 findings.extend(find_figure_leaks(path, lines, idx))
             findings.extend(find_verbatim_leaks(path, lines, idx))
@@ -568,7 +581,11 @@ def _verbatim_report(added: dict[str, list[tuple[int, str]]], idx: PrivateIndex 
     if idx is None:
         print("privacy-guard: no local private-sources file; nothing to report", file=sys.stderr)
         return 0
-    counts = {p: len(find_verbatim_leaks(p, lines, idx)) for p, lines in added.items() if p not in _SELF_EXEMPT}
+    counts = {
+        p: len(find_verbatim_leaks(p, lines, idx))
+        for p, lines in added.items()
+        if p not in _SELF_EXEMPT and p not in GENERATED_FILES
+    }
     rows = sorted(((n, p) for p, n in counts.items() if n), key=lambda r: (-r[0], r[1]))
     for n, p in rows:
         print(f"{n:6d}  {p}")

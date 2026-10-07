@@ -347,3 +347,26 @@ def test_verbatim_report_prints_per_file_counts_only(tmp_path, capsys):
     assert ["2", "b.md"] in rows and ["1", "a.md"] in rows, out.stdout
     assert "total 3" in out.stdout
     assert "zebra" not in (out.stdout + out.stderr).lower() and "vault-alpha" not in out.stdout + out.stderr
+
+
+def test_a_generated_file_skips_the_figure_and_verbatim_layers_but_not_provenance(tmp_path):
+    idx = _index(tmp_path)
+    gen = next(iter(pg.GENERATED_FILES))
+    line = f"a live run printed $1,111 {FAKE_QUOTE}"
+    layers = {f.layer for f in pg.scan_added({gen: [(1, line)]}, idx, [])}
+    assert "figure" not in layers and "verbatim" not in layers
+    assert "figure-provenance" in layers
+    # control: the same text in an unlisted JSON file is still caught by both layers
+    other = {f.layer for f in pg.scan_added({"founder-skills/data/other.json": [(1, line)]}, idx, [])}
+    assert {"figure", "verbatim"} <= other
+
+
+def test_every_generated_file_names_a_source_and_a_sync_test_that_exist():
+    """An exemption is only safe while its source is scanned and a test holds the copy equal to it."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    for gen, (source, sync_test) in pg.GENERATED_FILES.items():
+        if not os.path.exists(os.path.join(root, gen)):
+            continue
+        assert os.path.isfile(os.path.join(root, source)), source
+        with open(os.path.join(root, sync_test), encoding="utf-8") as fh:
+            assert os.path.basename(gen) in fh.read(), f"{sync_test} does not check {gen}"
