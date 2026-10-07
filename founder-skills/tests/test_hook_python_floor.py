@@ -26,6 +26,9 @@ from test_hook_wrappers import _hook_files
 PLUGIN = Path(__file__).resolve().parents[1]
 SCRIPTS = PLUGIN / "scripts"
 HOOK_MODULES = sorted(PLUGIN / rel for rel in _hook_files(PLUGIN) if rel.endswith(".py"))
+# Modules no hook loads yet that are kept 3.9-clean so one can: held to the same checks.
+_PY39_READY = {"_form_reply.py"}
+FLOOR_MODULES = sorted({*HOOK_MODULES, *(SCRIPTS / name for name in _PY39_READY)})
 
 
 def test_the_hook_module_list_is_complete() -> None:
@@ -118,7 +121,7 @@ def problems(source: str) -> list[str]:
     return found
 
 
-@pytest.mark.parametrize("module", HOOK_MODULES, ids=lambda p: p.name)
+@pytest.mark.parametrize("module", FLOOR_MODULES, ids=lambda p: p.name)
 def test_a_hook_module_uses_nothing_newer_than_3_9(module: Path) -> None:
     assert problems(module.read_text(encoding="utf-8")) == [], module.name
 
@@ -248,14 +251,14 @@ def test_the_stop_hook_decides_the_same_under_the_system_python(tmp_path: Path) 
 
 
 def test_every_hook_module_is_linted_as_3_9() -> None:
-    """pyproject.toml's per-file target lists exactly the hook modules, so ruff never suggests a 3.10
-    construct in one of them."""
+    """pyproject.toml's per-file target lists exactly the hook modules and the modules kept ready for one,
+    so ruff never suggests a 3.10 construct in one of them."""
     import re
 
     text = (PLUGIN.parent / "pyproject.toml").read_text(encoding="utf-8")
     section = text.split("[tool.ruff.per-file-target-version]", 1)[1].split("\n[", 1)[0]
     listed = set(re.findall(r'^"founder-skills/scripts/([A-Za-z0-9_]+\.py)" = "py39"$', section, re.MULTILINE))
-    assert listed == {p.name for p in HOOK_MODULES}
+    assert listed == {p.name for p in HOOK_MODULES} | _PY39_READY
 
 
 @needs_old

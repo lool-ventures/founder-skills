@@ -39,6 +39,7 @@ jobs:
       - run: uv run mypy founder-skills/skills/competitive-positioning/scripts/
       - run: uv run mypy founder-skills/skills/cap-table/scripts/
       - run: uv run mypy founder-skills/tests/
+      - run: uv run mypy founder-skills/scripts/
 
   test:
     runs-on: ubuntu-latest

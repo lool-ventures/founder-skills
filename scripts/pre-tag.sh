@@ -57,6 +57,7 @@ run_gate "mypy financial-model-review"  uv run mypy founder-skills/skills/financ
 run_gate "mypy competitive-positioning" uv run mypy founder-skills/skills/competitive-positioning/scripts/
 run_gate "mypy cap-table"               uv run mypy founder-skills/skills/cap-table/scripts/
 run_gate "mypy tests"                   uv run mypy founder-skills/tests/
+run_gate "mypy shared scripts"          uv run mypy founder-skills/scripts/
 
 # --- tests --------------------------------------------------------------------------------
 run_gate "pytest"            uv run pytest founder-skills/tests/ -q -m "not e2e and not mutation"

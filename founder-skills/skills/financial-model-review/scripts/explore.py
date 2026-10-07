@@ -23,6 +23,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from types import ModuleType
 from typing import Any, TypeGuard
 
 # ---------------------------------------------------------------------------
@@ -2159,10 +2160,32 @@ def _write_output(data_str: str, output_path: str | None, *, summary: dict[str, 
 # ---------------------------------------------------------------------------
 
 
+def _run_ref_module() -> ModuleType:
+    """The sibling `_run_ref`, loaded only when `--run-id` is given."""
+    scripts_dir = os.path.dirname(os.path.abspath(__file__))
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    import _run_ref
+
+    return _run_ref
+
+
+def _own_run_id(dir_path: str) -> str | None:
+    """This page's run id: inputs.json's."""
+    rid: str | None = _run_ref_module().json_run_id(os.path.join(dir_path, "inputs.json"))
+    return rid
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="FMR Interactive Explorer")
     parser.add_argument("--dir", required=True, help="Directory with FMR artifacts")
     parser.add_argument("-o", "--output", default=None, help="Write HTML to file")
+    parser.add_argument(
+        "--run-id",
+        default=None,
+        help="Stamp the page with this run id (it must be the run id its artifacts carry) and, when the run "
+        "has a gate ledger, list the page among the run's deliverables",
+    )
     parser.add_argument("--pretty", action="store_true", help="Pretty-print JSON receipt")
     args = parser.parse_args()
 
@@ -2212,11 +2235,15 @@ def main() -> None:
     enabled_count = sum(1 for v in lens_status.values() if v)
     disabled_names = [lens for lens in _LENSES if not lens_status[lens]]
 
+    if args.run_id is not None:
+        html_str = _run_ref_module().page_for_run(html_str, args.run_id, _own_run_id(dir_path))
     _write_output(
         html_str,
         args.output,
         summary={"lenses_enabled": enabled_count, "lenses_disabled": disabled_names},
     )
+    if args.run_id is not None and args.output:
+        _run_ref_module().list_page(dir_path, args.run_id, "explorer_html", args.output, "explore.py")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,2723 @@
+{
+  "asked_evidence": [
+    "host_line",
+    "form",
+    "after_hold"
+  ],
+  "cli_codes": {
+    "bind": [
+      "RUN_ALREADY_BOUND"
+    ],
+    "deliverables": [
+      "RUN_NOT_COMPLETE"
+    ],
+    "finish": [
+      "FINISH_REFUSED",
+      "MODE_MISMATCH",
+      "MODE_NOT_OFFERED"
+    ],
+    "html_writers": [
+      "RUN_ID_MISMATCH"
+    ],
+    "notices": [
+      "PRE_ANSWER_IGNORED",
+      "PRE_ANSWER_INVALID"
+    ],
+    "start_payload": [],
+    "usage": [
+      "USAGE"
+    ]
+  },
+  "default_reasons": [
+    "stated_in_request",
+    "derived_from_materials",
+    "inferred",
+    "asked_not_to_be_asked",
+    "stage_stated_and_detected_agree",
+    "no_signal_marked_to_confirm",
+    "producer_default_disclosed",
+    "start_fresh_by_default",
+    "asked_unanswered"
+  ],
+  "exit_codes": {
+    "not_owed": 11,
+    "ok": 0,
+    "rejected": 1,
+    "usage_or_unreachable": 2,
+    "waiting": 10
+  },
+  "form_reply_enabled": false,
+  "gate_states": [
+    "open",
+    "answered",
+    "not_owed",
+    "not_reached"
+  ],
+  "gates": {
+    "cp_consolidation_merge": {
+      "asked_check": "none",
+      "id": "cp_consolidation_merge",
+      "instances": null,
+      "kind": "templated",
+      "mandatory": false,
+      "modes": [
+        "full"
+      ],
+      "multi": false,
+      "no_ask_default": null,
+      "options": [
+        {
+          "hidden": false,
+          "id": "combine",
+          "label": "Combine them",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "keep_separate",
+          "label": "Keep them separate",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        }
+      ],
+      "question": "My research also found that <A> and <B> are now one company as of <date>, per <source> — want me to combine them?",
+      "skill": "competitive-positioning",
+      "step": "4a"
+    },
+    "cp_gate1_landscape": {
+      "asked_check": "none",
+      "id": "cp_gate1_landscape",
+      "instances": null,
+      "kind": "templated",
+      "mandatory": false,
+      "modes": [
+        "full"
+      ],
+      "multi": false,
+      "no_ask_default": "no_changes",
+      "options": [
+        {
+          "hidden": false,
+          "id": "no_changes",
+          "label": "No changes — looks good as drafted",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "missing",
+          "label": "Missing competitors",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": true,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "remove",
+          "label": "Remove some",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": true,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "change_axes",
+          "label": "Change axes",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": true,
+          "terminal": true
+        }
+      ],
+      "question": "Found <N> competitors (I'd challenge: <names>) (stronger than drafted: <upgraded names>) — does this set look right?",
+      "skill": "competitive-positioning",
+      "step": "3"
+    },
+    "cp_gate2_axes": {
+      "asked_check": "none",
+      "id": "cp_gate2_axes",
+      "instances": null,
+      "kind": "templated",
+      "mandatory": false,
+      "modes": [
+        "full"
+      ],
+      "multi": false,
+      "no_ask_default": "no_changes",
+      "options": [
+        {
+          "hidden": false,
+          "id": "no_changes",
+          "label": "No changes — proceed to scoring",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "change_axes",
+          "label": "Change axes",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": true,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "adjust_set",
+          "label": "Adjust competitor set",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": true,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "change_scoring_basis",
+          "label": "Change scoring basis",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        }
+      ],
+      "question": "I'll plot competitors on <axis-X> × <axis-Y> — do these axes look right?",
+      "skill": "competitive-positioning",
+      "step": "4c"
+    },
+    "cp_gate3_position": {
+      "asked_check": "none",
+      "id": "cp_gate3_position",
+      "instances": null,
+      "kind": "templated",
+      "mandatory": false,
+      "modes": [
+        "full"
+      ],
+      "multi": false,
+      "no_ask_default": "no_changes",
+      "options": [
+        {
+          "hidden": false,
+          "id": "no_changes",
+          "label": "No changes — keep the scoring",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "rescore_founder_facts",
+          "label": "Re-score with founder facts",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": true,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "change_scoring_basis",
+          "label": "Change scoring basis",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "show_both",
+          "label": "Show both positions",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        }
+      ],
+      "question": "The scored position <plain-language description of the trigger> — keep it, dig deeper, or reconsider how it's scored?",
+      "skill": "competitive-positioning",
+      "step": "6"
+    },
+    "cp_merge_pick": {
+      "asked_check": "none",
+      "id": "cp_merge_pick",
+      "instances": null,
+      "kind": "script_built",
+      "mandatory": false,
+      "modes": [
+        "full"
+      ],
+      "multi": false,
+      "no_ask_default": null,
+      "options": [],
+      "question": "Which two should I merge to free a slot?",
+      "skill": "competitive-positioning",
+      "step": "4a"
+    },
+    "cp_product_profile": {
+      "asked_check": "none",
+      "id": "cp_product_profile",
+      "instances": {
+        "static": [
+          "product",
+          "customers",
+          "differentiation"
+        ]
+      },
+      "kind": "templated",
+      "mandatory": false,
+      "modes": [
+        "full"
+      ],
+      "multi": false,
+      "no_ask_default": null,
+      "options": [
+        {
+          "hidden": false,
+          "id": "use_derived",
+          "label": "Use \"<derived>\"",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": true,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "describe_in_chat",
+          "label": "I'll describe it in chat",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": true,
+          "terminal": true
+        }
+      ],
+      "question": {
+        "customers": "Who are the target customers?",
+        "differentiation": "What do you believe differentiates you?",
+        "product": "What does the product do?"
+      },
+      "skill": "competitive-positioning",
+      "step": "2"
+    },
+    "cp_research_additions": {
+      "asked_check": "none",
+      "id": "cp_research_additions",
+      "instances": null,
+      "kind": "templated",
+      "mandatory": false,
+      "modes": [
+        "full"
+      ],
+      "multi": false,
+      "no_ask_default": "skip",
+      "options": [
+        {
+          "hidden": false,
+          "id": "include_all",
+          "label": "Include all",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "include_top",
+          "label": "Include top <slots>",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "include_some",
+          "label": "Include some",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "skip",
+          "label": "No changes — skip these",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "free_slot_by_merging",
+          "label": "Free a slot by merging",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        }
+      ],
+      "question": "Found <N> more competitors during research — include any?",
+      "skill": "competitive-positioning",
+      "step": "4a"
+    },
+    "cp_research_pick": {
+      "asked_check": "none",
+      "id": "cp_research_pick",
+      "instances": null,
+      "kind": "script_built",
+      "mandatory": false,
+      "modes": [
+        "full"
+      ],
+      "multi": false,
+      "no_ask_default": null,
+      "options": [
+        {
+          "hidden": false,
+          "id": "none_of_these",
+          "label": "None of these",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        }
+      ],
+      "question": "Which ones should I include?",
+      "skill": "competitive-positioning",
+      "step": "4a"
+    },
+    "cp_scoring_basis": {
+      "asked_check": "none",
+      "id": "cp_scoring_basis",
+      "instances": null,
+      "kind": "fixed",
+      "mandatory": false,
+      "modes": [
+        "full"
+      ],
+      "multi": false,
+      "no_ask_default": null,
+      "options": [
+        {
+          "hidden": false,
+          "id": "shipped",
+          "label": "Shipped",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "roadmap_12mo",
+          "label": "12-month roadmap",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "mixed",
+          "label": "Mixed",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        }
+      ],
+      "question": "Which basis should the scoring use?",
+      "skill": "competitive-positioning",
+      "step": "4c"
+    },
+    "cp_upload_path": {
+      "asked_check": "none",
+      "id": "cp_upload_path",
+      "instances": null,
+      "kind": "fixed",
+      "mandatory": false,
+      "modes": [
+        "full"
+      ],
+      "multi": false,
+      "no_ask_default": null,
+      "options": [
+        {
+          "hidden": false,
+          "id": "provide",
+          "label": "I'll give the path",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": true,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "review_without_documents",
+          "label": "Review without the documents",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        }
+      ],
+      "question": "Where are the documents you shared? The review reads them first.",
+      "skill": "competitive-positioning",
+      "step": "6c"
+    },
+    "ct_cap_base_confirmation": {
+      "asked_check": "none",
+      "id": "ct_cap_base_confirmation",
+      "instances": null,
+      "kind": "templated",
+      "mandatory": true,
+      "modes": [
+        "full"
+      ],
+      "multi": false,
+      "no_ask_default": null,
+      "options": [
+        {
+          "hidden": false,
+          "id": "confirmed",
+          "label": "Confirmed",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "different",
+          "label": "Different — I'll correct it in chat",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": true,
+          "terminal": true
+        }
+      ],
+      "question": "Please confirm [Company]'s cap-table base — I'll use exactly these numbers for all the math:",
+      "skill": "cap-table",
+      "step": "2"
+    },
+    "ct_docx_tracked_changes": {
+      "asked_check": "none",
+      "id": "ct_docx_tracked_changes",
+      "instances": null,
+      "kind": "fixed",
+      "mandatory": false,
+      "modes": [
+        "full",
+        "fast_assess",
+        "concise",
+        "extraction_only"
+      ],
+      "multi": false,
+      "no_ask_default": null,
+      "options": [
+        {
+          "hidden": false,
+          "id": "upload_clean",
+          "label": "Upload the clean / final executed version",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "proceed_accepted",
+          "label": "Proceed on the accepted (final-proposed) terms — I understand it's a draft",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        }
+      ],
+      "question": "This document has tracked changes — it's a redline / unsigned draft, not a final executed version. How should I proceed?",
+      "skill": "cap-table",
+      "step": "3"
+    },
+    "ct_engagement_mode": {
+      "asked_check": "none",
+      "id": "ct_engagement_mode",
+      "instances": null,
+      "kind": "fixed",
+      "mandatory": false,
+      "modes": [
+        "full",
+        "concise"
+      ],
+      "multi": false,
+      "no_ask_default": null,
+      "options": [
+        {
+          "hidden": false,
+          "id": "standard",
+          "label": "Standard cap-table modeling",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "flip_focused",
+          "label": "Flip-focused (Israeli → Delaware)",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        }
+      ],
+      "question": "Is this a flip-focused engagement (Israeli → Delaware), or a standard cap-table modeling engagement?",
+      "skill": "cap-table",
+      "step": "2"
+    },
+    "ct_existing_review": {
+      "asked_check": "none",
+      "id": "ct_existing_review",
+      "instances": null,
+      "kind": "templated",
+      "mandatory": false,
+      "modes": [
+        "full"
+      ],
+      "multi": false,
+      "no_ask_default": "start_fresh",
+      "options": [
+        {
+          "hidden": false,
+          "id": "use_existing",
+          "label": "Use existing review",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "start_fresh",
+          "label": "Start fresh",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        }
+      ],
+      "question": "I found an existing cap-table review for [Company]. Use it, or start fresh?",
+      "skill": "cap-table",
+      "step": "0"
+    },
+    "ct_extraction_confirmation": {
+      "asked_check": "none",
+      "id": "ct_extraction_confirmation",
+      "instances": {
+        "static": [
+          "flagged_fields",
+          "unverifiable_doc",
+          "ambiguities",
+          "aoa_fields"
+        ]
+      },
+      "kind": "templated",
+      "mandatory": false,
+      "modes": [
+        "full",
+        "extraction_only"
+      ],
+      "multi": false,
+      "no_ask_default": null,
+      "options": [
+        {
+          "hidden": false,
+          "id": "values_ok",
+          "label": "Confirmed as extracted",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "has_corrections",
+          "label": "I have corrections",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": true,
+          "terminal": true
+        }
+      ],
+      "question": "Do these extracted values look right?",
+      "skill": "cap-table",
+      "step": "3"
+    },
+    "ct_founder_fact": {
+      "asked_check": "none",
+      "id": "ct_founder_fact",
+      "instances": {
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.+-]{0,127}$"
+      },
+      "kind": "templated",
+      "mandatory": false,
+      "modes": [
+        "full",
+        "fast_assess",
+        "concise",
+        "extraction_only"
+      ],
+      "multi": false,
+      "no_ask_default": null,
+      "options": [
+        {
+          "hidden": false,
+          "id": "stated",
+          "label": "<the stated value>",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": true,
+          "terminal": true
+        }
+      ],
+      "question": "What is the value of <field>?",
+      "skill": "cap-table",
+      "step": "3"
+    },
+    "ct_iia_grants": {
+      "asked_check": "none",
+      "id": "ct_iia_grants",
+      "instances": null,
+      "kind": "templated",
+      "mandatory": false,
+      "modes": [
+        "full",
+        "fast_assess",
+        "concise"
+      ],
+      "multi": false,
+      "no_ask_default": null,
+      "options": [
+        {
+          "hidden": false,
+          "id": "none",
+          "label": "No IIA grants",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "yes",
+          "label": "Yes, has IIA grants",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "not_sure",
+          "label": "Not sure",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        }
+      ],
+      "question": "Has [Company] received any IIA (Israel Innovation Authority / OCS) grants?",
+      "skill": "cap-table",
+      "step": "2"
+    },
+    "ct_jurisdiction": {
+      "asked_check": "none",
+      "id": "ct_jurisdiction",
+      "instances": null,
+      "kind": "templated",
+      "mandatory": false,
+      "modes": [
+        "full",
+        "fast_assess",
+        "concise"
+      ],
+      "multi": false,
+      "no_ask_default": null,
+      "options": [
+        {
+          "hidden": false,
+          "id": "israeli",
+          "label": "Israeli company",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "delaware",
+          "label": "Delaware (already flipped)",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "mid_flip",
+          "label": "Mid-flip",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "delaware_with_israeli_sub",
+          "label": "Delaware with Israeli subsidiary",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        }
+      ],
+      "question": "What is [Company]'s jurisdiction structure?",
+      "skill": "cap-table",
+      "step": "2"
+    },
+    "ct_lane1_counsel_review": {
+      "asked_check": "none",
+      "id": "ct_lane1_counsel_review",
+      "instances": {
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.+-]{0,127}$"
+      },
+      "kind": "templated",
+      "mandatory": false,
+      "modes": [
+        "full",
+        "extraction_only"
+      ],
+      "multi": false,
+      "no_ask_default": null,
+      "options": [
+        {
+          "hidden": false,
+          "id": "stated",
+          "label": "<the stated value>",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": true,
+          "terminal": true
+        }
+      ],
+      "question": "This term needs your confirmation before it is used. What does the document say?",
+      "skill": "cap-table",
+      "step": "3"
+    },
+    "ct_lane2_column_mapping": {
+      "asked_check": "none",
+      "id": "ct_lane2_column_mapping",
+      "instances": {
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.+-]{0,127}$"
+      },
+      "kind": "templated",
+      "mandatory": false,
+      "modes": [
+        "full"
+      ],
+      "multi": false,
+      "no_ask_default": null,
+      "options": [
+        {
+          "hidden": false,
+          "id": "stated",
+          "label": "<the stated column>",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": true,
+          "terminal": true
+        }
+      ],
+      "question": "Which column holds this field in your export?",
+      "skill": "cap-table",
+      "step": "3"
+    },
+    "ct_lane3_blocker": {
+      "asked_check": "none",
+      "id": "ct_lane3_blocker",
+      "instances": {
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.+-]{0,127}$"
+      },
+      "kind": "script_built",
+      "mandatory": false,
+      "modes": [
+        "full"
+      ],
+      "multi": false,
+      "no_ask_default": null,
+      "options": [
+        {
+          "hidden": false,
+          "id": "stated",
+          "label": "<the stated value>",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": true,
+          "terminal": true
+        }
+      ],
+      "question": "What is the value of <field> for this block of the spreadsheet?",
+      "skill": "cap-table",
+      "step": "3"
+    },
+    "ct_no_cap_base_fork": {
+      "asked_check": "none",
+      "id": "ct_no_cap_base_fork",
+      "instances": null,
+      "kind": "fixed",
+      "mandatory": true,
+      "modes": [
+        "full"
+      ],
+      "multi": false,
+      "no_ask_default": null,
+      "options": [
+        {
+          "hidden": false,
+          "id": "provide_cap_base",
+          "label": "Provide the cap base — full review",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "terms_only",
+          "label": "Instrument terms only",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        }
+      ],
+      "question": "No cap base found in your document(s). How should I proceed?",
+      "skill": "cap-table",
+      "step": "2"
+    },
+    "ct_note_cap_denominator": {
+      "asked_check": "none",
+      "id": "ct_note_cap_denominator",
+      "instances": null,
+      "kind": "fixed",
+      "mandatory": false,
+      "modes": [
+        "full"
+      ],
+      "multi": false,
+      "no_ask_default": null,
+      "options": [
+        {
+          "hidden": false,
+          "id": "fully_diluted_pre",
+          "label": "Fully-diluted pre-financing (common + options + as-converted SAFEs/notes, before new money)",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "issued_outstanding",
+          "label": "Issued-and-outstanding only (common + issued options, no unallocated pool)",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "check_note_text",
+          "label": "I'd need to check the note text",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        }
+      ],
+      "question": "What does the note's 'Company Capitalization' clause define as the conversion denominator?",
+      "skill": "cap-table",
+      "step": "3"
+    },
+    "ct_note_interest_converts": {
+      "asked_check": "none",
+      "id": "ct_note_interest_converts",
+      "instances": null,
+      "kind": "fixed",
+      "mandatory": false,
+      "modes": [
+        "full"
+      ],
+      "multi": false,
+      "no_ask_default": "yes",
+      "options": [
+        {
+          "hidden": false,
+          "id": "yes",
+          "label": "Yes — interest converts too",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "no",
+          "label": "No — interest is paid in cash / forgiven",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        }
+      ],
+      "question": "Does accrued interest on the note convert into shares along with principal?",
+      "skill": "cap-table",
+      "step": "3"
+    },
+    "ct_note_interest_type": {
+      "asked_check": "none",
+      "id": "ct_note_interest_type",
+      "instances": null,
+      "kind": "fixed",
+      "mandatory": false,
+      "modes": [
+        "full"
+      ],
+      "multi": false,
+      "no_ask_default": "fixed_numeric",
+      "options": [
+        {
+          "hidden": false,
+          "id": "fixed_numeric",
+          "label": "Fixed rate (a stated numeric %)",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "fixed_numeric_simple",
+          "label": "Fixed rate, simple interest only",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "statutory_ita_section_3j",
+          "label": "Israeli statutory rate (ITA §3(j))",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "none",
+          "label": "No interest",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        }
+      ],
+      "question": "What kind of interest does the note carry?",
+      "skill": "cap-table",
+      "step": "3"
+    },
+    "ct_note_maturity_default": {
+      "asked_check": "none",
+      "id": "ct_note_maturity_default",
+      "instances": null,
+      "kind": "fixed",
+      "mandatory": false,
+      "modes": [
+        "full"
+      ],
+      "multi": false,
+      "no_ask_default": "convert_at_cap",
+      "options": [
+        {
+          "hidden": false,
+          "id": "convert_at_cap",
+          "label": "Convert at cap",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "repay",
+          "label": "Repay principal",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "extend",
+          "label": "Extend maturity",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "counsel",
+          "label": "Counsel review / unclear",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        }
+      ],
+      "question": "If the note reaches maturity before a qualified financing, what happens?",
+      "skill": "cap-table",
+      "step": "3"
+    },
+    "ct_note_qualified_threshold": {
+      "asked_check": "none",
+      "id": "ct_note_qualified_threshold",
+      "instances": null,
+      "kind": "fixed",
+      "mandatory": false,
+      "modes": [
+        "full"
+      ],
+      "multi": false,
+      "no_ask_default": "same_as_round",
+      "options": [
+        {
+          "hidden": false,
+          "id": "same_as_round",
+          "label": "Same as this round's total new money",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "different_amount",
+          "label": "A different specific amount — I'll state it",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": true,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "check_note_text",
+          "label": "I'd need to check the note text",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        }
+      ],
+      "question": "What dollar amount triggers the note's automatic conversion (its 'qualified financing' threshold)?",
+      "skill": "cap-table",
+      "step": "3"
+    },
+    "ct_option_pool": {
+      "asked_check": "none",
+      "id": "ct_option_pool",
+      "instances": null,
+      "kind": "fixed",
+      "mandatory": false,
+      "modes": [
+        "full"
+      ],
+      "multi": false,
+      "no_ask_default": null,
+      "options": [
+        {
+          "hidden": false,
+          "id": "no_pool",
+          "label": "No option pool",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "provide",
+          "label": "Yes — I'll provide authorized / issued / unallocated",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": true,
+          "terminal": true
+        }
+      ],
+      "question": "Does the company have an employee option pool?",
+      "skill": "cap-table",
+      "step": "3"
+    },
+    "ct_pool_basis": {
+      "asked_check": "none",
+      "id": "ct_pool_basis",
+      "instances": null,
+      "kind": "fixed",
+      "mandatory": false,
+      "modes": [
+        "full",
+        "fast_assess"
+      ],
+      "multi": false,
+      "no_ask_default": "pre_money",
+      "options": [
+        {
+          "hidden": false,
+          "id": "post_money",
+          "label": "The pool available for new grants after the round",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "post_money_increase",
+          "label": "Only the new options added in this round",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "pre_money",
+          "label": "Measured against the share count before the round",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "counsel",
+          "label": "Something else / not sure — ask counsel",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        }
+      ],
+      "question": "What does your pool target percentage measure?",
+      "skill": "cap-table",
+      "step": "5"
+    },
+    "ct_pool_basis_remedy": {
+      "asked_check": "none",
+      "id": "ct_pool_basis_remedy",
+      "instances": {
+        "static": [
+          "custom",
+          "excluding"
+        ]
+      },
+      "kind": "templated",
+      "mandatory": false,
+      "modes": [
+        "full",
+        "fast_assess"
+      ],
+      "multi": false,
+      "no_ask_default": null,
+      "options": {
+        "custom": [
+          {
+            "hidden": false,
+            "id": "state_measure",
+            "label": "I'll state the measure",
+            "only_skills": null,
+            "pre_answerable": true,
+            "takes_value": true,
+            "terminal": true
+          }
+        ],
+        "excluding": [
+          {
+            "hidden": false,
+            "id": "show_post_money",
+            "label": "Show it on the plain post-money basis",
+            "only_skills": null,
+            "pre_answerable": true,
+            "takes_value": false,
+            "terminal": true
+          },
+          {
+            "hidden": false,
+            "id": "keep_refused",
+            "label": "Leave the pool unmodelled",
+            "only_skills": null,
+            "pre_answerable": true,
+            "takes_value": false,
+            "terminal": true
+          }
+        ]
+      },
+      "question": {
+        "custom": "Which computed measure does your document's pool basis match?",
+        "excluding": "Your pool basis excludes converting securities, which is not modelled. How should I proceed?"
+      },
+      "skill": "cap-table",
+      "step": "5"
+    },
+    "ct_pool_topup_intent": {
+      "asked_check": "none",
+      "id": "ct_pool_topup_intent",
+      "instances": null,
+      "kind": "fixed",
+      "mandatory": false,
+      "modes": [
+        "full",
+        "fast_assess"
+      ],
+      "multi": false,
+      "no_ask_default": null,
+      "options": [
+        {
+          "hidden": false,
+          "id": "none",
+          "label": "No top-up planned",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "top_up_10",
+          "label": "Top up to 10%",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "top_up_15",
+          "label": "Top up to 15%",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "not_sure",
+          "label": "Not sure yet",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        }
+      ],
+      "question": "Are you planning to top up your option pool as part of this round?",
+      "skill": "cap-table",
+      "step": "5"
+    },
+    "ct_rule_lookup_fact": {
+      "asked_check": "none",
+      "id": "ct_rule_lookup_fact",
+      "instances": null,
+      "kind": "templated",
+      "mandatory": false,
+      "modes": [
+        "rule_lookup"
+      ],
+      "multi": false,
+      "no_ask_default": null,
+      "options": [
+        {
+          "hidden": false,
+          "id": "provide",
+          "label": "I'll provide it",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": true,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "unknown",
+          "label": "I don't know",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        }
+      ],
+      "question": "I need one fact to answer this. Can you provide it?",
+      "skill": "cap-table",
+      "step": "5-lookup"
+    },
+    "ct_s102_grant_route": {
+      "asked_check": "none",
+      "id": "ct_s102_grant_route",
+      "instances": null,
+      "kind": "fixed",
+      "mandatory": false,
+      "modes": [
+        "full"
+      ],
+      "multi": false,
+      "no_ask_default": "proceed_without",
+      "options": [
+        {
+          "hidden": false,
+          "id": "share",
+          "label": "Yes — I'll share plan type + grant date per holder",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": true,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "partial",
+          "label": "Some, not all — I'll share what I have",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": true,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "proceed_without",
+          "label": "Don't have this — proceed without §102 detail",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        }
+      ],
+      "question": "I need per-grant tax-route data to model §102 exposure on the flip — do you have plan type and grant date for each holder's options?",
+      "skill": "cap-table",
+      "step": "5"
+    },
+    "ct_safe_terms": {
+      "asked_check": "none",
+      "id": "ct_safe_terms",
+      "instances": null,
+      "kind": "fixed",
+      "mandatory": false,
+      "modes": [
+        "full"
+      ],
+      "multi": false,
+      "no_ask_default": null,
+      "options": [
+        {
+          "hidden": false,
+          "id": "share_terms",
+          "label": "Yes — I'll share the terms in chat",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": true,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "uncapped_mfn",
+          "label": "Uncapped MFN SAFEs",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "dont_have",
+          "label": "Don't have the terms handy",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        }
+      ],
+      "question": "Do you know the valuation cap and/or discount on the SAFEs? The spreadsheet shows amounts but not the terms.",
+      "skill": "cap-table",
+      "step": "3"
+    },
+    "ct_scenario_selection": {
+      "asked_check": "none",
+      "id": "ct_scenario_selection",
+      "instances": null,
+      "kind": "script_built",
+      "mandatory": false,
+      "modes": [
+        "full"
+      ],
+      "multi": true,
+      "no_ask_default": null,
+      "options": [
+        {
+          "hidden": false,
+          "id": "cap_implied_safe",
+          "label": "Cap-implied SAFE snapshot",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "priced_round",
+          "label": "Series A priced round",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "note_conversion",
+          "label": "Convertible note conversion at financing",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "flip",
+          "label": "Israeli ↔ Delaware flip",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        }
+      ],
+      "question": "Which scenarios should I model? (select all that apply)",
+      "skill": "cap-table",
+      "step": "5"
+    },
+    "ctx_basics": {
+      "asked_check": "none",
+      "id": "ctx_basics",
+      "instances": {
+        "static": [
+          "company_name",
+          "stage",
+          "sector",
+          "geography"
+        ]
+      },
+      "kind": "templated",
+      "mandatory": false,
+      "modes": [
+        "full",
+        "quick_check",
+        "fast_assess",
+        "concise",
+        "extraction_only"
+      ],
+      "multi": false,
+      "no_ask_default": null,
+      "options": {
+        "company_name": [
+          {
+            "hidden": false,
+            "id": "use_derived",
+            "label": "Use \"<name>\" — as it appeared in the conversation / on the deck",
+            "only_skills": null,
+            "pre_answerable": true,
+            "takes_value": true,
+            "terminal": true
+          },
+          {
+            "hidden": false,
+            "id": "different",
+            "label": "A different name — I'll state it",
+            "only_skills": null,
+            "pre_answerable": true,
+            "takes_value": true,
+            "terminal": true
+          },
+          {
+            "hidden": false,
+            "id": "working_title",
+            "label": "No name yet — use a working title I can rename later",
+            "only_skills": null,
+            "pre_answerable": true,
+            "takes_value": false,
+            "terminal": true
+          },
+          {
+            "hidden": false,
+            "id": "use_model_file",
+            "label": "Use what the model file states",
+            "only_skills": [
+              "financial-model-review"
+            ],
+            "pre_answerable": true,
+            "takes_value": false,
+            "terminal": true
+          }
+        ],
+        "geography": [
+          {
+            "hidden": false,
+            "id": "use_derived",
+            "label": "Use \"<geography>\" — as derived from the materials",
+            "only_skills": null,
+            "pre_answerable": true,
+            "takes_value": true,
+            "terminal": true
+          },
+          {
+            "hidden": false,
+            "id": "different",
+            "label": "A different location — I'll state it",
+            "only_skills": null,
+            "pre_answerable": true,
+            "takes_value": true,
+            "terminal": true
+          },
+          {
+            "hidden": false,
+            "id": "not_sure",
+            "label": "Not sure",
+            "only_skills": null,
+            "pre_answerable": true,
+            "takes_value": false,
+            "terminal": true
+          }
+        ],
+        "sector": [
+          {
+            "hidden": false,
+            "id": "use_derived",
+            "label": "Use \"<sector>\" — as derived from the materials",
+            "only_skills": null,
+            "pre_answerable": true,
+            "takes_value": true,
+            "terminal": true
+          },
+          {
+            "hidden": false,
+            "id": "different",
+            "label": "A different sector — I'll state it",
+            "only_skills": null,
+            "pre_answerable": true,
+            "takes_value": true,
+            "terminal": true
+          },
+          {
+            "hidden": false,
+            "id": "not_sure",
+            "label": "Not sure",
+            "only_skills": null,
+            "pre_answerable": true,
+            "takes_value": false,
+            "terminal": true
+          }
+        ],
+        "stage": [
+          {
+            "hidden": false,
+            "id": "pre_seed",
+            "label": "Pre-seed",
+            "only_skills": null,
+            "pre_answerable": true,
+            "takes_value": false,
+            "terminal": true
+          },
+          {
+            "hidden": false,
+            "id": "seed",
+            "label": "Seed",
+            "only_skills": null,
+            "pre_answerable": true,
+            "takes_value": false,
+            "terminal": true
+          },
+          {
+            "hidden": false,
+            "id": "series_a",
+            "label": "Series A",
+            "only_skills": null,
+            "pre_answerable": true,
+            "takes_value": false,
+            "terminal": true
+          },
+          {
+            "hidden": false,
+            "id": "series_b_plus",
+            "label": "Series B+",
+            "only_skills": null,
+            "pre_answerable": true,
+            "takes_value": false,
+            "terminal": true
+          }
+        ]
+      },
+      "question": {
+        "company_name": "What's the company's name?",
+        "geography": "Where is [Company] based?",
+        "sector": "What sector best describes [Company]?",
+        "stage": "What stage is [Company] at?"
+      },
+      "skill": "shared",
+      "step": "1"
+    },
+    "ctx_select_company": {
+      "asked_check": "none",
+      "id": "ctx_select_company",
+      "instances": null,
+      "kind": "script_built",
+      "mandatory": false,
+      "modes": [
+        "full",
+        "quick_check",
+        "fast_assess",
+        "concise",
+        "extraction_only"
+      ],
+      "multi": false,
+      "no_ask_default": null,
+      "options": [
+        {
+          "hidden": false,
+          "id": "different_company",
+          "label": "A different company",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        }
+      ],
+      "question": "Which company is this for?",
+      "skill": "shared",
+      "step": "1"
+    },
+    "ctx_stage_detail": {
+      "asked_check": "none",
+      "id": "ctx_stage_detail",
+      "instances": null,
+      "kind": "fixed",
+      "mandatory": false,
+      "modes": [
+        "full",
+        "quick_check",
+        "fast_assess",
+        "concise",
+        "extraction_only"
+      ],
+      "multi": false,
+      "no_ask_default": null,
+      "options": [
+        {
+          "hidden": false,
+          "id": "series_b",
+          "label": "Series B",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "series_c",
+          "label": "Series C",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "series_d",
+          "label": "Series D",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "later",
+          "label": "Later",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        }
+      ],
+      "question": "Which stage exactly?",
+      "skill": "shared",
+      "step": "1"
+    },
+    "dr_input_request": {
+      "asked_check": "none",
+      "id": "dr_input_request",
+      "instances": {
+        "static": [
+          "wrong_file_type",
+          "gated_link",
+          "no_uploads_mount",
+          "pdf_unreadable",
+          "copy_failed"
+        ]
+      },
+      "kind": "templated",
+      "mandatory": false,
+      "modes": [
+        "full"
+      ],
+      "multi": false,
+      "no_ask_default": null,
+      "options": [
+        {
+          "hidden": false,
+          "id": "provide",
+          "label": "I'll provide it",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": true,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "stop",
+          "label": "Stop the review",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        }
+      ],
+      "question": {
+        "copy_failed": "The deck could not be opened here. Can you send it again?",
+        "gated_link": "That link asks for a login. Can you send a PDF export or the slides as text?",
+        "no_uploads_mount": "I can't see an attached deck. Can you attach it or give its path?",
+        "pdf_unreadable": "This PDF could not be read. Can you send another export?",
+        "wrong_file_type": "This file could not be read as a deck. Can you send it again?"
+      },
+      "skill": "deck-review",
+      "step": "2"
+    },
+    "dr_primary_deck": {
+      "asked_check": "none",
+      "id": "dr_primary_deck",
+      "instances": null,
+      "kind": "templated",
+      "mandatory": false,
+      "modes": [
+        "full"
+      ],
+      "multi": false,
+      "no_ask_default": null,
+      "options": [
+        {
+          "hidden": false,
+          "id": "named",
+          "label": "This file is the primary deck",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": true,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "none_of_these",
+          "label": "None of these",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        }
+      ],
+      "question": "Which file is the primary deck?",
+      "skill": "deck-review",
+      "step": "2"
+    },
+    "fmr_cash_basics": {
+      "asked_check": "none",
+      "id": "fmr_cash_basics",
+      "instances": {
+        "static": [
+          "current_balance",
+          "balance_date",
+          "monthly_burn"
+        ]
+      },
+      "kind": "templated",
+      "mandatory": false,
+      "modes": [
+        "full"
+      ],
+      "multi": false,
+      "no_ask_default": "not_stated",
+      "options": [
+        {
+          "hidden": false,
+          "id": "stated",
+          "label": "<the stated value>",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": true,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "not_stated",
+          "label": "Not stated — proceed and flag to confirm",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        }
+      ],
+      "question": {
+        "balance_date": "What date is that balance from?",
+        "current_balance": "What is the current cash balance?",
+        "monthly_burn": "What is the monthly burn rate?"
+      },
+      "skill": "financial-model-review",
+      "step": "1"
+    },
+    "fmr_cash_followup": {
+      "asked_check": "none",
+      "id": "fmr_cash_followup",
+      "instances": null,
+      "kind": "fixed",
+      "mandatory": false,
+      "modes": [
+        "full"
+      ],
+      "multi": false,
+      "no_ask_default": null,
+      "options": [
+        {
+          "hidden": false,
+          "id": "provided",
+          "label": "Cash balance provided",
+          "only_skills": null,
+          "pre_answerable": false,
+          "takes_value": false,
+          "terminal": true
+        }
+      ],
+      "question": "How much cash is in the bank now, and as of which date?",
+      "skill": "financial-model-review",
+      "step": "12"
+    },
+    "fmr_extracted_values": {
+      "asked_check": "since_invocation",
+      "id": "fmr_extracted_values",
+      "instances": null,
+      "kind": "fixed",
+      "mandatory": false,
+      "modes": [
+        "full"
+      ],
+      "multi": false,
+      "no_ask_default": "proceed_unreviewed",
+      "options": [
+        {
+          "hidden": false,
+          "id": "values_ok",
+          "label": "The values look right, proceed",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "has_corrections",
+          "label": "I have corrections",
+          "only_skills": null,
+          "pre_answerable": false,
+          "takes_value": true,
+          "terminal": false
+        },
+        {
+          "hidden": false,
+          "id": "proceed_unreviewed",
+          "label": "Proceed without reviewing the extracted values",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": true,
+          "id": "corrections_applied",
+          "label": "Corrections applied, proceed",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        }
+      ],
+      "question": "Do the extracted values look right?",
+      "skill": "financial-model-review",
+      "step": "3.6"
+    },
+    "ic_decline_confirmation": {
+      "asked_check": "since_invocation",
+      "id": "ic_decline_confirmation",
+      "instances": null,
+      "kind": "fixed",
+      "mandatory": false,
+      "modes": [
+        "full"
+      ],
+      "multi": false,
+      "no_ask_default": "finish",
+      "options": [
+        {
+          "hidden": false,
+          "id": "finish",
+          "label": "Yes, finish the write-up",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "hold_off",
+          "label": "Hold off — let me add more context first",
+          "only_skills": null,
+          "pre_answerable": false,
+          "takes_value": false,
+          "terminal": false
+        }
+      ],
+      "question": "The scored result comes out to a Decline — want me to go ahead and finish the full write-up?",
+      "skill": "ic-sim",
+      "step": "8.5"
+    },
+    "ic_fund_mode": {
+      "asked_check": "none",
+      "id": "ic_fund_mode",
+      "instances": null,
+      "kind": "fixed",
+      "mandatory": false,
+      "modes": [
+        "full"
+      ],
+      "multi": false,
+      "no_ask_default": "generic",
+      "options": [
+        {
+          "hidden": false,
+          "id": "generic",
+          "label": "Generic fund",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "specific",
+          "label": "A specific fund — I'll name it",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": true,
+          "terminal": true
+        }
+      ],
+      "question": "Should I simulate a generic fund, or research a real one?",
+      "skill": "ic-sim",
+      "step": "1"
+    },
+    "ic_mode": {
+      "asked_check": "none",
+      "id": "ic_mode",
+      "instances": null,
+      "kind": "fixed",
+      "mandatory": false,
+      "modes": [
+        "full"
+      ],
+      "multi": false,
+      "no_ask_default": "auto_pilot",
+      "options": [
+        {
+          "hidden": false,
+          "id": "interactive",
+          "label": "Interactive",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "auto_pilot",
+          "label": "Auto-pilot",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        }
+      ],
+      "question": "Which mode should I run?",
+      "skill": "ic-sim",
+      "step": "1"
+    },
+    "ms_correct_data": {
+      "asked_check": "none",
+      "id": "ms_correct_data",
+      "instances": {
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.+-]{0,127}$"
+      },
+      "kind": "templated",
+      "mandatory": false,
+      "modes": [
+        "full"
+      ],
+      "multi": false,
+      "no_ask_default": null,
+      "options": [
+        {
+          "hidden": false,
+          "id": "set",
+          "label": "<input>: <current value>",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": true,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "something_else",
+          "label": "Something else — I'll say which in chat",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        }
+      ],
+      "question": "Which value is wrong or missing?",
+      "skill": "market-sizing",
+      "step": "3"
+    },
+    "ms_fx_rate": {
+      "asked_check": "none",
+      "id": "ms_fx_rate",
+      "instances": null,
+      "kind": "templated",
+      "mandatory": false,
+      "modes": [
+        "full"
+      ],
+      "multi": false,
+      "no_ask_default": null,
+      "options": [
+        {
+          "hidden": false,
+          "id": "give_rate",
+          "label": "I'll give the rate",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": true,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "size_in_source_currency",
+          "label": "Size it in the source currency",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        }
+      ],
+      "question": "What exchange rate should the sizing use, and from what source?",
+      "skill": "market-sizing",
+      "step": "3"
+    },
+    "ms_input_period": {
+      "asked_check": "none",
+      "id": "ms_input_period",
+      "instances": {
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.+-]{0,127}$"
+      },
+      "kind": "templated",
+      "mandatory": false,
+      "modes": [
+        "full"
+      ],
+      "multi": false,
+      "no_ask_default": null,
+      "options": [
+        {
+          "hidden": false,
+          "id": "per_month",
+          "label": "Per month",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "per_quarter",
+          "label": "Per quarter",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "per_year",
+          "label": "Per year",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        }
+      ],
+      "question": "Is this figure per month, per quarter or per year?",
+      "skill": "market-sizing",
+      "step": "5"
+    },
+    "ms_methodology": {
+      "asked_check": "since_invocation",
+      "id": "ms_methodology",
+      "instances": null,
+      "kind": "templated",
+      "mandatory": false,
+      "modes": [
+        "full"
+      ],
+      "multi": false,
+      "no_ask_default": "looks_good",
+      "options": [
+        {
+          "hidden": false,
+          "id": "looks_good",
+          "label": "Looks good",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "change_methodology",
+          "label": "Change methodology",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "correct_data",
+          "label": "Correct or add data",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        }
+      ],
+      "question": "I'll size this <top-down / bottom-up / both top-down and bottom-up> — does this approach look right?",
+      "skill": "market-sizing",
+      "step": "3"
+    },
+    "ms_methodology_change": {
+      "asked_check": "none",
+      "id": "ms_methodology_change",
+      "instances": null,
+      "kind": "fixed",
+      "mandatory": false,
+      "modes": [
+        "full"
+      ],
+      "multi": false,
+      "no_ask_default": null,
+      "options": [
+        {
+          "hidden": false,
+          "id": "top_down",
+          "label": "Top-down",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "bottom_up",
+          "label": "Bottom-up",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "both",
+          "label": "Both top-down and bottom-up",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        }
+      ],
+      "question": "Which approach do you prefer?",
+      "skill": "market-sizing",
+      "step": "3"
+    },
+    "ms_pct_scale": {
+      "asked_check": "none",
+      "id": "ms_pct_scale",
+      "instances": {
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.+-]{0,127}$"
+      },
+      "kind": "templated",
+      "mandatory": false,
+      "modes": [
+        "full"
+      ],
+      "multi": false,
+      "no_ask_default": "as_given",
+      "options": [
+        {
+          "hidden": false,
+          "id": "as_given",
+          "label": "As given",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "percent",
+          "label": "That many percent",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        }
+      ],
+      "question": "Did you mean this value as given, or as that many percent?",
+      "skill": "market-sizing",
+      "step": "5.5"
+    },
+    "ms_revision": {
+      "asked_check": "none",
+      "id": "ms_revision",
+      "instances": null,
+      "kind": "fixed",
+      "mandatory": false,
+      "modes": [
+        "full"
+      ],
+      "multi": false,
+      "no_ask_default": "deliver",
+      "options": [
+        {
+          "hidden": false,
+          "id": "deliver",
+          "label": "Deliver with the challenges shown",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "revise",
+          "label": "Revise the challenged inputs and have it reviewed once more (about 10 minutes)",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        }
+      ],
+      "question": "Deliver with the challenges shown, or revise?",
+      "skill": "market-sizing",
+      "step": "6d"
+    },
+    "ms_revision_changes": {
+      "asked_check": "none",
+      "id": "ms_revision_changes",
+      "instances": null,
+      "kind": "script_built",
+      "mandatory": false,
+      "modes": [
+        "full"
+      ],
+      "multi": false,
+      "no_ask_default": null,
+      "options": [
+        {
+          "hidden": false,
+          "id": "none_of_these",
+          "label": "None of these",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        }
+      ],
+      "question": "Which changes should I make?",
+      "skill": "market-sizing",
+      "step": "6d"
+    },
+    "ms_two_figures": {
+      "asked_check": "current_prompt",
+      "id": "ms_two_figures",
+      "instances": null,
+      "kind": "script_built",
+      "mandatory": false,
+      "modes": [
+        "full"
+      ],
+      "multi": false,
+      "no_ask_default": "typed",
+      "options": [
+        {
+          "hidden": false,
+          "id": "typed",
+          "label": "The figure you typed",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        }
+      ],
+      "question": "Your materials state more than one figure for this input. Which one should the sizing use?",
+      "skill": "market-sizing",
+      "step": "3"
+    },
+    "ms_upload_path": {
+      "asked_check": "none",
+      "id": "ms_upload_path",
+      "instances": null,
+      "kind": "fixed",
+      "mandatory": false,
+      "modes": [
+        "full"
+      ],
+      "multi": false,
+      "no_ask_default": null,
+      "options": [
+        {
+          "hidden": false,
+          "id": "provide",
+          "label": "I'll give the path",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": true,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "review_without_documents",
+          "label": "Review without the documents",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        }
+      ],
+      "question": "Where are the documents you shared? The review reads them first.",
+      "skill": "market-sizing",
+      "step": "6c"
+    },
+    "out_of_scope_choice": {
+      "asked_check": "none",
+      "id": "out_of_scope_choice",
+      "instances": null,
+      "kind": "fixed",
+      "mandatory": false,
+      "modes": [
+        "full"
+      ],
+      "multi": false,
+      "no_ask_default": null,
+      "options": [
+        {
+          "hidden": false,
+          "id": "stop_review",
+          "label": "Stop review",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "different_stage",
+          "label": "Different stage",
+          "only_skills": null,
+          "pre_answerable": false,
+          "takes_value": false,
+          "terminal": false
+        },
+        {
+          "hidden": false,
+          "id": "proceed_anyway",
+          "label": "Proceed anyway (best-effort)",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        }
+      ],
+      "question": "This looks out of scope. What should I do?",
+      "skill": "deck-review",
+      "step": "3"
+    },
+    "stage_choice": {
+      "asked_check": "none",
+      "id": "stage_choice",
+      "instances": null,
+      "kind": "script_built",
+      "mandatory": false,
+      "modes": [
+        "full"
+      ],
+      "multi": false,
+      "no_ask_default": null,
+      "options": [],
+      "question": "Which stage is this deck?",
+      "skill": "deck-review",
+      "step": "3"
+    },
+    "stage_confirmation": {
+      "asked_check": "none",
+      "id": "stage_confirmation",
+      "instances": null,
+      "kind": "fixed",
+      "mandatory": false,
+      "modes": [
+        "full"
+      ],
+      "multi": false,
+      "no_ask_default": null,
+      "options": [
+        {
+          "hidden": false,
+          "id": "looks_right",
+          "label": "Looks right",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "different_stage",
+          "label": "Different stage",
+          "only_skills": null,
+          "pre_answerable": false,
+          "takes_value": false,
+          "terminal": false
+        },
+        {
+          "hidden": false,
+          "id": "not_sure_proceed",
+          "label": "Not sure — proceed anyway",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        }
+      ],
+      "question": "Does this stage detection look right?",
+      "skill": "deck-review",
+      "step": "3"
+    }
+  },
+  "last_error_codes": [
+    "GATE_INVALID",
+    "GATE_OTHER_RUN",
+    "PROFILE_MISMATCH",
+    "GATE_UNRESOLVED",
+    "COACHING_BLOCKED"
+  ],
+  "notes": [
+    "`complete` means the markdown and JSON reports are final; HTML pages may appear in `deliverables` after `complete`, and an HTML file not listed there is not this run's.",
+    "`complete` with `deliverables_status: pending` after the skill has returned means no more pages will be listed.",
+    "A resume request repeats every FS_HOST_ line of the original request, plus the answer for the waiting gate.",
+    "Before `bind`, `gates[]` holds the gates already reached plus those common to every mode of the skill; `bind` completes the list for the run's mode.",
+    "`RUN_ID_IN_USE`, `RUN_ID_FINISHED` and `RUN_ID_MALFORMED` are printed only; they never change a run's run_status.json."
+  ],
+  "pages_after_coaching": {
+    "cap-table": [],
+    "competitive-positioning": [
+      "report_html",
+      "explorer_html"
+    ],
+    "deck-review": [
+      "report_html"
+    ],
+    "financial-model-review": [],
+    "ic-sim": [
+      "report_html"
+    ],
+    "market-sizing": [
+      "report_html"
+    ]
+  },
+  "print_only_codes": [
+    "RUN_ID_IN_USE",
+    "RUN_ID_FINISHED",
+    "RUN_ID_MALFORMED"
+  ],
+  "registry_version": 1,
+  "rejection_codes": [
+    "GATE_UNKNOWN",
+    "GATE_FOREIGN",
+    "OPTION_UNLISTED",
+    "VALUE_REQUIRED",
+    "VALUE_NOT_ALLOWED",
+    "OPTION_SKILL",
+    "ID_MALFORMED",
+    "ANSWER_STANDS",
+    "AFTER_HOLD_USED",
+    "AFTER_HOLD_NOT_HELD",
+    "AFTER_HOLD_NO_ANSWER",
+    "REQUIRES_UNMET",
+    "GATE_NOT_OWED",
+    "NOTE_INVALID",
+    "CLOSE_SCRIPT_OWED",
+    "WRITER_IS_OTHER_SCRIPT",
+    "DEFAULT_REASON_INVALID",
+    "RUN_FINISHED",
+    "FORM_REPLY_DISABLED",
+    "FORM_REPLY_UNMATCHED",
+    "GATE_RECORD_MISMATCH"
+  ],
+  "request_tokens": {
+    "answer": "FS_HOST_ANSWER <gate>[.<instance>]=<option_id>",
+    "note": "FS_HOST_NOTE <gate>[.<instance>]=<text>",
+    "run_id": "FS_HOST_RUN_ID=<run_id>",
+    "value": "FS_HOST_VALUE <gate>[.<instance>]=<option_id> | <value>"
+  },
+  "resolutions": [
+    "answered",
+    "default_taken",
+    "not_applicable"
+  ],
+  "resumable": {
+    "cli": "same_session",
+    "cli_artifacts_root": "same_session",
+    "cowork_cloud": "same_session",
+    "cowork_local": "same_session"
+  },
+  "run_id_grammar": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+  "run_status_fields": [
+    "schema",
+    "schema_version",
+    "skill",
+    "run_id",
+    "slug",
+    "mode",
+    "revision",
+    "status",
+    "code",
+    "last_error_code",
+    "message",
+    "updated_at",
+    "plugin_version",
+    "scripts_dir_shell",
+    "shared_scripts_dir_shell",
+    "artifacts_root_shell",
+    "run_dir_shell",
+    "run_status_path_host",
+    "waiting_on",
+    "resumable",
+    "resume_prompt",
+    "gates",
+    "coaching",
+    "deliverables",
+    "deliverables_status",
+    "handed_over_at",
+    "disclosures",
+    "notices"
+  ],
+  "schema": "founder-skills/host-contract",
+  "schema_version": 1,
+  "shapes": {
+    "blocked_by_gate": "the gate key a refused step waits on (exit 10); answer it, then run the step again",
+    "needs_input": {
+      "answer_command": "the exact recording command, or null when another script records it",
+      "form_header": "the header a question form for this skill uses",
+      "form_label": "the short label a question form uses",
+      "gate": "the gate key, `<gate>` or `<gate>.<instance>`",
+      "multi": "true when several options may be chosen (comma-joined ids)",
+      "options": "[{id, label, takes_value}] of the shown options",
+      "question": "the question, with every slot filled or replaced by a plain request",
+      "question_template": "present only when it differs: the question with the slots the asking step fills",
+      "recorded_by": "the script that records the answer",
+      "step": "the skill step that asks it"
+    }
+  },
+  "status_codes": {
+    "complete": [
+      "COMPLETE"
+    ],
+    "refused": [
+      "FOUNDER_DECLINED",
+      "INPUT_MISSING",
+      "PRE_ANSWER_INVALID"
+    ],
+    "running": [
+      "RUNNING"
+    ],
+    "waiting": [
+      "GATE_WAITING",
+      "GATE_UNANSWERED",
+      "GATE_INTERMEDIATE",
+      "OUT_OF_SCOPE_UNANSWERED",
+      "AUTO_SATISFY_NOT_ALLOWED",
+      "PRE_ANSWER_UNLISTED"
+    ]
+  },
+  "statuses": [
+    "running",
+    "waiting",
+    "complete",
+    "refused"
+  ],
+  "unreachable_codes": [
+    "RUN_NOT_FOUND",
+    "LEDGER_MISSING",
+    "REGISTRY_UNREACHABLE",
+    "GATE_NOT_WIRED",
+    "LOCK_UNAVAILABLE",
+    "RUN_DIR_OUTSIDE_ROOT",
+    "SKILL_UNKNOWN"
+  ]
+}

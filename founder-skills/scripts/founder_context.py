@@ -37,7 +37,7 @@ import os
 import re
 import sys
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, NoReturn
 
 # --- Constants ---
 
@@ -364,8 +364,125 @@ def _stamp_key_metrics_source(km: dict[str, Any], source: str) -> dict[str, Any]
 # --- Subcommands ---
 
 
+# The stage a `ctx_basics.stage` record names, as the context file spells it. `series_b_plus` takes its
+# specific stage from `ctx_stage_detail`.
+_RECORDED_STAGE = {"pre_seed": "pre-seed", "seed": "seed", "series_a": "series-a"}
+_RECORDED_STAGE_DETAIL = {"series_b": "series-b", "series_c": "series-c", "series_d": "series-d", "later": "later"}
+_CTX_FIELDS = ("company_name", "stage", "sector", "geography")
+
+
+def _init_refusal(code: int, payload: dict[str, Any], line: str) -> NoReturn:
+    sys.stdout.write(json.dumps(payload, indent=2) + "\n")
+    print(line, file=sys.stderr)
+    sys.exit(code)
+
+
+def _check_gate_records(args: argparse.Namespace) -> None:
+    """With a gate ledger for this run, `init` writes a context only from recorded answers.
+
+    Keyed on the ledger existing, never on `--run-id` alone: skills pass `--run-id` today with no ledger,
+    and must behave exactly as before. Each Step-1 field needs a record (exit 10 opens the missing ones
+    and prints what to ask), and every typed value must be the one recorded (exit 1 otherwise).
+    """
+    run_id = args.run_id
+    root = os.path.abspath(args.artifacts_root)
+    if not run_id or not os.path.isfile(os.path.join(root, "runs", str(run_id), "gates.json")):
+        return
+    try:
+        import _gates
+        import _run_status
+    except Exception as e:  # the registry fails closed
+        _init_refusal(
+            2,
+            {"status": "error", "code": "REGISTRY_UNREACHABLE", "message": str(e)},
+            f"Error: the plugin's gate registry is not reachable: {e}",
+        )
+    if args.skill is None:
+        _init_refusal(
+            2,
+            {"status": "error", "code": "USAGE", "message": "this run has a gate ledger, so init needs --skill"},
+            f"Error: run {run_id} has a gate ledger; pass --skill so init can check the run is this skill's",
+        )
+    paths = _run_status.run_paths(root, run_id)
+    status = _run_status.load_status(paths) or {}
+    if status.get("status") in _run_status.FINAL_STATUSES or status.get("skill") != args.skill:
+        _init_refusal(
+            1,
+            {
+                "status": "rejected",
+                "code": "GATE_RECORD_MISMATCH",
+                "run_id": run_id,
+                "run_status": status.get("status"),
+            },
+            f"Rejected: run {run_id} is {status.get('status')} for {status.get('skill')}; no context was written",
+        )
+
+    def fn(ctx: Any, ledger: dict[str, Any], st: dict[str, Any]) -> dict[str, Any]:
+        keys = [f"ctx_basics.{f}" for f in _CTX_FIELDS]
+        results = {k: _gates.require_terminal(ctx, ledger, k, by="founder_context.py") for k in keys}
+        stage = (ledger["gates"].get("ctx_basics.stage") or {}).get("current") or {}
+        if results["ctx_basics.stage"] == "ok" and stage.get("answer_id") == "series_b_plus":
+            results["ctx_stage_detail"] = _gates.require_terminal(
+                ctx, ledger, "ctx_stage_detail", by="founder_context.py"
+            )
+        waiting = [k for k, v in results.items() if v == "waiting"]
+        return {
+            "waiting": waiting,
+            "needs_input": [_gates.needs_input(ctx, ledger, k) for k in waiting],
+            "records": {k: (ledger["gates"].get(k) or {}).get("current") for k in results},
+        }
+
+    try:
+        out = _gates.transact(paths, fn)
+    except _gates.GateRejection as e:
+        _init_refusal(1, e.payload(), f"Rejected ({e.code}): {e}; no context was written")
+    except (_run_status.RunStatusError, _gates.Unimplemented) as e:
+        _init_refusal(
+            2, {"status": "error", "code": getattr(e, "code", "GATE_NOT_WIRED"), "message": str(e)}, f"Error: {e}"
+        )
+    if out["waiting"]:
+        _init_refusal(
+            10,
+            {"status": "waiting", "blocked_by_gate": out["waiting"][0], "needs_input": out["needs_input"]},
+            f"Waiting: {', '.join(out['waiting'])} not yet answered; ask, record the answers, then run init again",
+        )
+    mismatches = _typed_mismatches(args, out["records"])
+    if mismatches:
+        _init_refusal(
+            1,
+            {"status": "rejected", "code": "GATE_RECORD_MISMATCH", "run_id": run_id, "mismatches": mismatches},
+            f"Rejected: {mismatches[0]['field']} was typed {mismatches[0]['typed']!r} but recorded "
+            f"{mismatches[0]['recorded']!r}; no context was written",
+        )
+
+
+def _typed_mismatches(args: argparse.Namespace, records: dict[str, Any]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for field in _CTX_FIELDS:
+        cur = records.get(f"ctx_basics.{field}") or {}
+        if cur.get("resolution") == "not_applicable":
+            continue
+        typed = getattr(args, field)
+        answer_id = cur.get("answer_id")
+        if field == "stage":
+            recorded = _RECORDED_STAGE.get(str(answer_id))
+            if answer_id == "series_b_plus":
+                detail = (records.get("ctx_stage_detail") or {}).get("answer_id")
+                recorded = _RECORDED_STAGE_DETAIL.get(str(detail))
+        elif answer_id == "not_sure":
+            recorded = ""
+        elif cur.get("value") is not None:
+            recorded = cur["value"]
+        else:
+            continue  # a working title or the model file's name: the typed value is what was chosen
+        if typed != recorded:
+            out.append({"field": field, "typed": typed, "recorded": recorded})
+    return out
+
+
 def cmd_init(args: argparse.Namespace) -> None:
     """Create a new founder context file."""
+    _check_gate_records(args)
     slug = args.slug if args.slug else _slugify(args.company_name)
     artifacts_root: str = args.artifacts_root
     os.makedirs(artifacts_root, exist_ok=True)
@@ -696,6 +813,11 @@ def parse_args() -> argparse.Namespace:
     sp_init.add_argument(
         "--run-id",
         help="Override generated run_id (default: ISO timestamp)",
+    )
+    sp_init.add_argument(
+        "--skill",
+        default=None,
+        help="Required when --run-id has a gate ledger: the skill whose run this is (refused if it is another's)",
     )
     _add_common(sp_init)
 

@@ -24,7 +24,9 @@ import json
 import os
 import re
 import sys
+from typing import Any
 
+import _run_ref
 from _artifact_writer import ArtifactValidationError, load_schema, write_artifact
 
 FOUNDER, AUTO_SATISFIED = "founder", "auto_satisfied"
@@ -802,6 +804,47 @@ def cmd_emit(args: argparse.Namespace) -> int:
             )
             return 1
 
+    # THE RUN'S GATE LEDGER, when it has one, records the open question first; this file is its mirror.
+    # With no `run_ref.json` nothing here runs and the emit is exactly what it always was. Stored
+    # pre-answers are not applied by an emit: the answer path records them.
+    try:
+        ledger = _run_ref.open_ledger(os.path.dirname(os.path.abspath(args.output)), args.run_id)
+    except Exception as e:
+        return _run_ref.report_failure(e)
+    if ledger is not None:
+        # The body is checked first, so a gate the file write would refuse is never opened in the ledger.
+        from _schema_validator import validate
+
+        errors = validate({**data, "metadata": {"run_id": args.run_id}}, load_schema(_schema_path()))
+        if errors:
+            print(f"Error: gate_state validation failed: {'; '.join(errors)}", file=sys.stderr)
+            return 1
+        try:
+            gates, paths = ledger
+            opened = gates.open_from_writer(paths, [gate_id], "gate_state.py")
+            recorded = (gates.load_ledger(paths)["gates"].get(gate_id) or {}).get("current") or {}
+        except Exception as e:
+            return _run_ref.report_failure(e)
+        if gate_id in opened["answered"]:
+            # The ledger already holds this gate's answer: the mirror is written FROM it, and nothing is
+            # asked. An emit can no longer make the file read as unanswered beside an answered ledger.
+            data["answer"] = recorded.get("answer")
+            data["answer_source"] = AUTO_SATISFIED if recorded.get("resolution") == "default_taken" else FOUNDER
+            try:
+                receipt = write_artifact(
+                    data=data,
+                    schema=load_schema(_schema_path()),
+                    run_id=args.run_id,
+                    output_path=args.output,
+                    pretty=args.pretty,
+                )
+            except ArtifactValidationError as e:
+                print(f"Error: gate_state validation failed: {e}", file=sys.stderr)
+                return 1
+            receipt["answered"] = {"gate_id": gate_id, "answer": data["answer"], "answer_source": data["answer_source"]}
+            sys.stdout.write(json.dumps(receipt, separators=(",", ":")) + "\n")
+            return 0
+
     schema = load_schema(_schema_path())
     try:
         receipt = write_artifact(
@@ -1010,6 +1053,15 @@ def _answer_locked(args: argparse.Namespace, gate_path: str) -> int:
             )
             return 1
 
+    # THE LEDGER FIRST, under this file's lock and then the run's (always in that order), when the run
+    # has one; this file stays its mirror. A rejection there leaves both untouched.
+    try:
+        ledger = _run_ref.open_ledger(os.path.dirname(os.path.abspath(gate_path)), str(_as_run_id(gate) or ""))
+        if ledger is not None:
+            _record_in_ledger(ledger, gate, args)
+    except Exception as e:
+        return _run_ref.report_failure(e)
+
     gate["answer"] = args.answer
     gate["answer_source"] = args.source
 
@@ -1028,6 +1080,29 @@ def _answer_locked(args: argparse.Namespace, gate_path: str) -> int:
         return 1
     sys.stdout.write(json.dumps(receipt, separators=(",", ":")) + "\n")
     return 0
+
+
+def _record_in_ledger(ledger: tuple[Any, Any], gate: dict[str, Any], args: argparse.Namespace) -> None:
+    """The answer as a gate record: the label as the registry's option id, `auto_satisfied` as the one
+    default it has a rationale for."""
+    gates, paths = ledger
+    gate_id = str(gate.get("gate_id") or "")
+    if gate_id == "stage_choice":
+        by_label = {label: token for token, label in STAGE_LABELS.items()}
+    else:
+        by_label = {o["label"]: o["id"] for o in gates.GATES[gate_id]["options"]}
+    option_id = by_label.get(args.answer, args.answer)
+    if args.source == AUTO_SATISFIED:
+        gates.record_from_writer(
+            paths,
+            gate_id,
+            option_id,
+            "gate_state.py",
+            resolution="default_taken",
+            default_reason="stage_stated_and_detected_agree",
+        )
+    else:
+        gates.record_from_writer(paths, gate_id, option_id, "gate_state.py")
 
 
 def main() -> int:

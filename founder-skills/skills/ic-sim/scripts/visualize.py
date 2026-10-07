@@ -23,6 +23,7 @@ import json
 import math
 import os
 import sys
+from types import ModuleType
 from typing import Any, TypeGuard
 
 # ---------------------------------------------------------------------------
@@ -1150,6 +1151,22 @@ def _write_output(data: str, output_path: str | None, *, summary: dict[str, Any]
 # ---------------------------------------------------------------------------
 
 
+def _run_ref_module() -> ModuleType:
+    """The sibling `_run_ref`, loaded only when `--run-id` is given."""
+    scripts_dir = os.path.dirname(os.path.abspath(__file__))
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    import _run_ref
+
+    return _run_ref
+
+
+def _own_run_id(dir_path: str) -> str | None:
+    """This page's run id: startup_profile.json's."""
+    rid: str | None = _run_ref_module().json_run_id(os.path.join(dir_path, "startup_profile.json"))
+    return rid
+
+
 def parse_args() -> argparse.Namespace:
     """Parse command-line arguments."""
     p = argparse.ArgumentParser(description="Generate HTML visualization from IC simulation artifacts")
@@ -1169,6 +1186,12 @@ def parse_args() -> argparse.Namespace:
         "--output",
         help="Write HTML to file instead of stdout",
     )
+    p.add_argument(
+        "--run-id",
+        default=None,
+        help="Stamp the page with this run id (it must be the run id its artifacts carry) and, when the run "
+        "has a gate ledger, list the page among the run's deliverables",
+    )
     return p.parse_args()
 
 
@@ -1181,7 +1204,11 @@ def main() -> None:
         sys.exit(1)
 
     html_out = compose_html(args.dir)
+    if args.run_id is not None:
+        html_out = _run_ref_module().page_for_run(html_out, args.run_id, _own_run_id(args.dir))
     _write_output(html_out, args.output)
+    if args.run_id is not None and args.output:
+        _run_ref_module().list_page(args.dir, args.run_id, "report_html", args.output, "visualize.py")
 
 
 if __name__ == "__main__":

@@ -81,6 +81,13 @@ _PROTOCOL = frozenset(
 # module docstring on shape-level drift.
 _COMPAT_MODULES = frozenset({"_axis_compat.py"})
 
+# Shared modules whose string literals are contract vocabulary (gate ids, option ids and labels, status
+# codes, run-status field names), not reads of any artifact a sub-agent writes. Their ~2,000 literals
+# would make almost any name look consumed, so they never count as a consumer.
+_NON_CONSUMER_MODULES = frozenset(
+    {"_gates.py", "_run_status.py", "run_status.py", "record_gate_answer.py", "_form_reply.py"}
+)
+
 # Fields a template asks for that exist to shape the SUB-AGENT's reasoning, not to be rendered or
 # validated. Each needs a reason. Adding a key here is a decision, not a formality: the alternative is
 # to render it or to stop asking for it.
@@ -186,7 +193,9 @@ def _consumer_names(skill: str) -> set[str]:
     generator = _generator_path(skill)
     for scripts in script_dirs:
         for py in scripts.glob("*.py"):
-            if py.name in _COMPAT_MODULES or (generator is not None and py == generator):
+            if py.name in _COMPAT_MODULES or py.name in _NON_CONSUMER_MODULES:
+                continue
+            if generator is not None and py == generator:
                 continue
             text = py.read_text(encoding="utf-8")
             names |= set(re.findall(r'"([a-z][a-z0-9_]*)"', text))

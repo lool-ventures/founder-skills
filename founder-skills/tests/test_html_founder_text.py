@@ -178,6 +178,14 @@ def test_generated_html_carries_no_internal_tokens(skill: str, generator: str) -
     )
 
 
+def test_the_generator_list_is_the_deliverable_writers_plus_the_review_page() -> None:
+    """The deliverable writers are listed once (`html_writer_invocations`); this list adds only the
+    mid-run review page, so a new writer cannot be scanned here and missed there, or the reverse."""
+    from html_writer_invocations import WRITERS
+
+    assert set(GENERATORS) - {("financial-model-review", "review_inputs.py")} == {(w[0], w[1]) for w in WRITERS}
+
+
 def test_the_scanner_would_catch_a_token_in_a_text_node() -> None:
     """Guard the stripper: if it over-stripped, every page above would pass vacuously."""
     ft = _founder_text()

@@ -20,6 +20,7 @@ import os
 import re
 import sys
 from collections.abc import Callable
+from types import ModuleType
 from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -880,10 +881,32 @@ def render_report_html(
 """
 
 
+def _run_ref_module() -> ModuleType:
+    """The sibling `_run_ref`, loaded only when `--run-id` is given."""
+    scripts_dir = os.path.dirname(os.path.abspath(__file__))
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    import _run_ref
+
+    return _run_ref
+
+
+def _own_run_id(dir_path: str) -> str | None:
+    """This page's run id: inputs.json's."""
+    rid: str | None = _run_ref_module().json_run_id(os.path.join(dir_path, "inputs.json"))
+    return rid
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--dir", required=True)
     p.add_argument("-o", "--output", required=True)
+    p.add_argument(
+        "--run-id",
+        default=None,
+        help="Stamp the page with this run id (it must be the run id its artifacts carry) and, when the run "
+        "has a gate ledger, list the page among the run's deliverables",
+    )
     p.add_argument("--pretty", action="store_true", help="Indent the JSON receipt printed to stdout")
     args = p.parse_args()
 
@@ -918,6 +941,8 @@ def main() -> int:
         disclosure_banner=disclosure_banner,
     )
 
+    if args.run_id is not None:
+        html_out = _run_ref_module().page_for_run(html_out, args.run_id, _own_run_id(args.dir))
     out = os.path.abspath(args.output)
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
     with open(out, "w", encoding="utf-8") as f:
@@ -928,6 +953,8 @@ def main() -> int:
             indent=2 if args.pretty else None,
         )
     )
+    if args.run_id is not None:
+        _run_ref_module().list_page(args.dir, args.run_id, "report_html", out, "visualize.py")
     return 0
 
 

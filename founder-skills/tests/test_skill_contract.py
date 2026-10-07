@@ -3631,6 +3631,71 @@ def test_producer_rejects_loudly_without_clobbering(entry: tuple, tmp_path: Path
     )
 
 
+# `_REJECTING_PAYLOADS` cannot hold these: they live outside a skill's scripts dir, or guard a file that
+# is not their `-o`. Each entry builds its own fixture and returns (argv, stdin, files that must survive).
+def _reject_unlisted_option(tmp: Path) -> tuple[list[str], str, list[Path]]:
+    import gate_run_helpers as h
+
+    root, run_id, _run_dir = h.start_bound(tmp, "market-sizing")
+    argv = [str(h.RECORD), "answer", "--run-id", run_id, "--artifacts-root", str(root)]
+    argv += ["--gate", "ctx_basics.stage", "--answer-id", "series_q"]
+    return argv, "", [h.status_path(root, run_id), h.ledger_path(root, run_id)]
+
+
+def _reject_bad_line_on_a_waiting_run(tmp: Path) -> tuple[list[str], str, list[Path]]:
+    import gate_run_helpers as h
+
+    root, run_id, _run_dir = h.start_bound(tmp, "market-sizing")
+    opened = h.record(root, run_id, "open", "--gate", "ctx_basics.stage")
+    assert opened.returncode == 0, opened.stderr
+    argv = [str(h.RUN_STATUS), "start", "--skill", "market-sizing", "--artifacts-root", str(root)]
+    stdin = f"FS_HOST_RUN_ID={run_id}\nFS_HOST_ANSWER ctx_basics.stage=series_q\n"
+    return argv, stdin, [h.status_path(root, run_id), h.ledger_path(root, run_id)]
+
+
+def _reject_final_deliverables_on_a_running_run(tmp: Path) -> tuple[list[str], str, list[Path]]:
+    import gate_run_helpers as h
+
+    root, run_id, _run_dir = h.start_bound(tmp, "deck-review")
+    argv = [str(h.RUN_STATUS), "deliverables", "--run-id", run_id, "--artifacts-root", str(root), "--final"]
+    return argv, "", [h.status_path(root, run_id), h.ledger_path(root, run_id)]
+
+
+def _reject_unknown_origin(tmp: Path) -> tuple[list[str], str, list[Path]]:
+    original = tmp / "inputs.json"
+    original.write_text('{"company": {"name": "Example Co"}}', encoding="utf-8")
+    out_dir = tmp / "out"
+    out_dir.mkdir()
+    sentinel = out_dir / "corrected_inputs.json"
+    sentinel.write_text('{"sentinel": true}', encoding="utf-8")
+    script = SKILLS_ROOT / "financial-model-review" / "scripts" / "apply_corrections.py"
+    argv = [str(script), "--set", "company.name=Example", "--original", str(original), "--output-dir", str(out_dir)]
+    argv += ["--run-id", "20261007T090000Z-4c4c4c", "--origin", "bogus"]
+    return argv, "", [sentinel, original]
+
+
+_REJECTING_CALLS = [
+    ("record_gate_answer.py answer, an unlisted option", _reject_unlisted_option),
+    ("run_status.py start, a bad line resuming a waiting run", _reject_bad_line_on_a_waiting_run),
+    ("run_status.py deliverables --final on a run that is not complete", _reject_final_deliverables_on_a_running_run),
+    ("apply_corrections.py --run-id with an unknown --origin", _reject_unknown_origin),
+]
+
+
+@pytest.mark.parametrize("entry", _REJECTING_CALLS, ids=lambda e: e[0])
+def test_gate_scripts_reject_loudly_without_clobbering(entry: tuple, tmp_path: Path) -> None:
+    """A refused call exits non-zero, says why on stdout and stderr, and leaves every file it guards as it was."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    argv, stdin, guarded = entry[1](tmp_path)
+    before = {p: p.read_bytes() for p in guarded}
+    proc = subprocess.run([sys.executable, *argv], input=stdin, capture_output=True, text=True)
+    assert proc.returncode == 1, (entry[0], proc.returncode, proc.stdout[:300], proc.stderr[:300])
+    assert proc.stderr.strip(), f"{entry[0]}: refused silently, nothing on stderr"
+    assert json.loads(proc.stdout), f"{entry[0]}: no diagnostic on stdout"
+    for p in guarded:
+        assert p.read_bytes() == before[p], f"{entry[0]} changed {p.name}"
+
+
 def test_paid_lanes_require_explicit_opt_in_not_merely_credentials() -> None:
     """A credential is a capability, not permission to spend.
 

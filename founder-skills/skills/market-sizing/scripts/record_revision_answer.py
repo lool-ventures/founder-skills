@@ -32,6 +32,7 @@ import sys
 from typing import NoReturn
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _run_ref  # noqa: E402
 from _revision_answer import ANSWERS, SOURCES, qualifying_parameters, record_path  # noqa: E402
 
 
@@ -66,6 +67,25 @@ def main() -> None:
     path = record_path(a.dir, run_id)
     if not os.path.isdir(os.path.dirname(path)):
         _fail_invalid([f"no hand-off dir for this run at {os.path.dirname(path)} (Step 0 creates it)"])
+    # The run's gate ledger, when it has one, records the answer first; the file below is its mirror.
+    # `no_questions` is the default a founder who asked not to be asked gets, recorded as that default.
+    try:
+        ledger = _run_ref.open_ledger(a.dir, run_id)
+        if ledger is not None:
+            gates, paths = ledger
+            if a.source == "no_questions":
+                gates.record_from_writer(
+                    paths,
+                    "ms_revision",
+                    a.answer,
+                    "record_revision_answer.py",
+                    resolution="default_taken",
+                    default_reason="asked_not_to_be_asked",
+                )
+            else:
+                gates.record_from_writer(paths, "ms_revision", a.answer, "record_revision_answer.py")
+    except Exception as e:
+        sys.exit(_run_ref.report_failure(e))
     record = {
         "answer": a.answer,
         "source": a.source,

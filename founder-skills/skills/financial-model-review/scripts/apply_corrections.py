@@ -46,6 +46,9 @@ import sys
 from datetime import datetime, timezone
 from typing import Any, NoReturn
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _run_ref import RUN_ID_RE  # noqa: E402
+
 # ---------------------------------------------------------------------------
 # Path navigation (shared with review_inputs.py)
 # ---------------------------------------------------------------------------
@@ -59,8 +62,9 @@ from typing import Any, NoReturn
 # asks for when runway could not be computed without a balance, and an absent key is the usual shape.
 _OPTIONAL_SET_PATHS = frozenset({"company.unclassified_reason", "cash.current_balance", "cash.balance_date"})
 
-# A run id names a directory, so a sub-path (`<id>/r2`) or anything shell-hostile is refused.
-_RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+# A run id names a directory, so a sub-path (`<id>/r2`) or anything shell-hostile is refused. The grammar
+# is the plugin's one, from the sibling copy every skill carries.
+_RUN_ID_RE = RUN_ID_RE
 
 # Who supplied the corrections. Recorded, and checked only for `upload` (see main()).
 _ORIGINS = ("external", "upload", "chat", "inputs_review")

@@ -20,6 +20,7 @@ import json
 import math
 import os
 import sys
+from types import ModuleType
 from typing import Any, TypeGuard
 
 # Shared with compose_report.py so both renderers suppress the same bad `notes`.
@@ -1415,12 +1416,38 @@ def compose_html(dir_path: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _run_ref_module() -> ModuleType:
+    """The sibling `_run_ref`, loaded only when `--run-id` is given."""
+    scripts_dir = os.path.dirname(os.path.abspath(__file__))
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    import _run_ref
+
+    return _run_ref
+
+
+def _own_run_id(dir_path: str) -> str | None:
+    """This page's run id: the first required artifact's, as the gate check above reads it."""
+    for name in REQUIRED_ARTIFACTS:
+        art = _load_artifact(dir_path, name)
+        rid = _as_dict(_as_dict(art).get("metadata")).get("run_id") if _usable(art) else None
+        if isinstance(rid, str) and rid:
+            return rid
+    return None
+
+
 def parse_args() -> argparse.Namespace:
     """Parse command-line arguments."""
     p = argparse.ArgumentParser(description="Generate HTML visualization from deck review artifacts")
     p.add_argument("-d", "--dir", required=True, help="Directory containing JSON artifacts")
     p.add_argument("--pretty", action="store_true", help="Accepted for compatibility (no-op)")
     p.add_argument("-o", "--output", help="Write HTML to file instead of stdout")
+    p.add_argument(
+        "--run-id",
+        default=None,
+        help="Stamp the page with this run id (it must be the run id its artifacts carry) and, when the run "
+        "has a gate ledger, list the page among the run's deliverables",
+    )
     # THE SAME TWO FLAGS AS compose_report.py, deliberately. `report.html` is the surface a
     # founder is most likely to open -- this file's own comments say so twice -- and the
     # authorization boundary sat only on compose. Measured: an artifact dir with NO
@@ -1491,7 +1518,11 @@ def main() -> None:
                 sys.exit(1)
 
     html_output = compose_html(args.dir)
+    if args.run_id is not None:
+        html_output = _run_ref_module().page_for_run(html_output, args.run_id, _own_run_id(args.dir))
     _write_output(html_output, args.output)
+    if args.run_id is not None and args.output:
+        _run_ref_module().list_page(args.dir, args.run_id, "report_html", args.output, "visualize.py")
 
 
 if __name__ == "__main__":

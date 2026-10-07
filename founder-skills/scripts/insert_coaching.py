@@ -90,10 +90,50 @@ def _drop_duplicate_footer(commentary: str, report_after_marker: str) -> tuple[s
     return trimmed.lstrip("\n"), True
 
 
+# This run's id once run_id parity has passed, and the report it is about. Only then does the run's
+# status file hear about the outcome: a block before parity is not known to be this run's.
+_STATUS_RUN: dict[str, str] = {}
+
+
+def _status_write(outcome: str) -> None:
+    """Tell the run's status file what happened, when the run has a gate ledger. Never changes stdout or
+    the exit code: a failure is one stderr line. With no `run_ref.json` beside the report, nothing runs.
+    """
+    run_id = _STATUS_RUN.get("run_id")
+    report = _STATUS_RUN.get("report")
+    if not run_id or not report:
+        return
+    run_dir = os.path.dirname(report)
+    if not os.path.isfile(os.path.join(run_dir, "handoff", run_id, "run_ref.json")):
+        return
+    try:
+        here = os.path.dirname(os.path.abspath(__file__))
+        if here not in sys.path:
+            sys.path.append(here)
+        import _run_status
+
+        paths = _run_status.locate_from_run_dir(run_dir, run_id)
+        if paths is None:
+            return
+        if outcome == "blocked":
+            _run_status.coaching_blocked(paths)
+            return
+        status = _run_status.complete_after_coaching(paths, report, _STATUS_RUN.get("report_json") or None)
+        if status.get("status") != "complete" and status.get("status") not in _run_status.FINAL_STATUSES:
+            print(
+                f"note: the coaching is in, but the run is {status.get('status')} on {status.get('waiting_on')}; "
+                "it completes once that gate is answered",
+                file=sys.stderr,
+            )
+    except Exception as e:
+        print(f"warning: the run status was not updated: {e}", file=sys.stderr)
+
+
 def _blocked(reason: str, pretty: bool, output: str | None) -> int:
     payload: dict[str, object] = {"status": "blocked", "reason": reason}
     _emit(payload, pretty, output)
     print(f"BLOCKED: {reason}", file=sys.stderr)
+    _status_write("blocked")
     return 1
 
 
@@ -332,6 +372,12 @@ def main() -> None:
     run_id, parity_error = _verify_run_id_parity(args.verify_artifact)
     if parity_error is not None:
         sys.exit(_blocked(parity_error, pretty, output))
+    if run_id:
+        _STATUS_RUN.update(
+            run_id=run_id,
+            report=os.path.abspath(args.report),
+            report_json=os.path.abspath(args.report_json) if args.report_json else "",
+        )
 
     already_inserted = commentary_count == 1 and marker_count == 0
     if already_inserted:
@@ -351,6 +397,7 @@ def main() -> None:
             pretty,
             output,
         )
+        _status_write("inserted")
         sys.exit(0)
 
     # State (0, 1): insert.
@@ -411,6 +458,7 @@ def main() -> None:
         pretty,
         output,
     )
+    _status_write("inserted")
     sys.exit(0)
 
 

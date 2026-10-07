@@ -33,6 +33,7 @@ Carta extractor implementation notes (per real-world corpus):
 from __future__ import annotations
 
 import argparse
+import hashlib
 import io
 import json
 import math
@@ -43,6 +44,7 @@ import warnings
 from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _run_ref  # noqa: E402
 from _artifact_writer import load_schema  # noqa: E402
 from _cap_table_schema_validator import (  # noqa: E402
     check_misplaced_top_level_keys,
@@ -1083,6 +1085,15 @@ def _mode_freeform_emit(args: argparse.Namespace) -> int:
             )
         answers[k] = v.strip()
 
+    # The run's gate ledger, when it has one, holds answers recorded on earlier passes. One is reused only
+    # for a field that is still a blocker on THIS pass and only while its block's content is unchanged;
+    # an answer to a block that changed is superseded, so the founder is asked again.
+    try:
+        reused = _reusable_blocker_answers(args, blocks, grid, existing_inputs, answers, stated_total)
+    except Exception as e:
+        return _run_ref.report_failure(e)
+    answers.update(reused)
+
     result = freeform_mapper.map_freeform(
         blocks,
         grid,
@@ -1125,18 +1136,22 @@ def _mode_freeform_emit(args: argparse.Namespace) -> int:
                 "Resolve each blocker with the founder via AskUserQuestion, then re-run with "
                 "--answer <block_index>.<field>=<value> for the answerable fields."
             )
-        print(
-            json.dumps(
-                {
-                    "ok": False,
-                    "mode": "freeform-emit",
-                    "blockers": result["blockers"],
-                    "warnings": result["warnings"],
-                    "next_action": next_action,
-                },
-                indent=2 if args.pretty else None,
+        receipt = {
+            "ok": False,
+            "mode": "freeform-emit",
+            "blockers": result["blockers"],
+            "warnings": result["warnings"],
+            "next_action": next_action,
+        }
+        try:
+            gates_out = _freeform_gates(
+                args, blocks, grid, answers, result["blockers"], _answerable_fields, open_remaining=True
             )
-        )
+        except Exception as e:
+            return _run_ref.report_failure(e)
+        if gates_out is not None:
+            receipt["gates"] = gates_out
+        print(json.dumps(receipt, indent=2 if args.pretty else None))
         return 0  # a gate, not an error
 
     errs: dict[str, Any] = {}
@@ -1151,23 +1166,134 @@ def _mode_freeform_emit(args: argparse.Namespace) -> int:
         print(json.dumps({"ok": False, "mode": "freeform-emit", "errors": errs}, indent=2 if args.pretty else None))
         return 1
 
+    try:
+        gates_out = _freeform_gates(args, blocks, grid, answers, [], _answerable_fields, open_remaining=False)
+    except Exception as e:
+        return _run_ref.report_failure(e)
     os.makedirs(args.dir, exist_ok=True)
     for fname, data in (("inputs.json", result["inputs"]), ("instruments.json", result["instruments"])):
         with open(os.path.join(args.dir, fname), "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
-    print(
-        json.dumps(
-            {
-                "ok": True,
-                "mode": "freeform-emit",
-                "written": ["inputs.json", "instruments.json"],
-                "dir": os.path.abspath(args.dir),
-                "warnings": result["warnings"],
-            },
-            indent=2 if args.pretty else None,
-        )
-    )
+    receipt = {
+        "ok": True,
+        "mode": "freeform-emit",
+        "written": ["inputs.json", "instruments.json"],
+        "dir": os.path.abspath(args.dir),
+        "warnings": result["warnings"],
+    }
+    if gates_out is not None:
+        receipt["gates"] = gates_out
+    print(json.dumps(receipt, indent=2 if args.pretty else None))
     return 0
+
+
+def _block_fingerprint(blocks: list[dict[str, Any]], grid: dict[str, Any], index: int) -> dict[str, Any] | None:
+    """What a blocker answer confirmed: its block's type and the values it reads, by role. Not its
+    position: a block moved elsewhere on the sheet keeps its fingerprint, and one whose cells changed
+    does not."""
+    import freeform_mapper
+
+    if not (0 <= index < len(blocks)) or not isinstance(blocks[index], dict):
+        return None
+    block = blocks[index]
+    try:
+        rows: Any = freeform_mapper._block_rows(block, grid)
+    except Exception:
+        rows = "unreadable"
+    canon = json.dumps({"block_type": block.get("block_type"), "rows": rows}, sort_keys=True, default=str)
+    return {"binder": "ct_lane3_block", "fingerprint": hashlib.sha256(canon.encode("utf-8")).hexdigest()}
+
+
+def _reusable_blocker_answers(
+    args: argparse.Namespace,
+    blocks: list[dict[str, Any]],
+    grid: dict[str, Any],
+    existing_inputs: dict[str, Any],
+    answers: dict[str, Any],
+    stated_total: Any,
+) -> dict[str, str]:
+    """`BLOCK.FIELD` → recorded value, for the blockers this pass still has whose block is unchanged."""
+    import freeform_mapper
+
+    ledger = _run_ref.open_ledger(args.dir, args.run_id or "")
+    if ledger is None:
+        return {}
+    gates, paths = ledger
+    entries = gates.load_ledger(paths).get("gates") or {}
+    first = freeform_mapper.map_freeform(
+        blocks,
+        grid,
+        existing_inputs=existing_inputs,
+        answers=answers,
+        run_id=args.run_id or "",
+        stated_total=stated_total,
+    )
+    out: dict[str, str] = {}
+    for b in first["blockers"]:
+        index, field = b.get("block_index"), b.get("field")
+        if not isinstance(index, int) or f"{index}.{field}" in answers:
+            continue
+        key = f"ct_lane3_blocker.{index}.{field}"
+        entry = entries.get(key)
+        current = (entry or {}).get("current") or {}
+        if not entry or entry.get("state") != "answered" or not isinstance(current.get("value"), str):
+            continue
+        if current.get("binding") == _block_fingerprint(blocks, grid, index):
+            out[f"{index}.{field}"] = current["value"]
+        else:
+            gates.supersede_from_writer(paths, key, "extract_cap_table.py", "block_changed")
+    return out
+
+
+def _freeform_gates(
+    args: argparse.Namespace,
+    blocks: list[dict[str, Any]],
+    grid: dict[str, Any],
+    answers: dict[str, Any],
+    blockers: list[dict[str, Any]],
+    answerable: set[str],
+    *,
+    open_remaining: bool,
+) -> dict[str, Any] | None:
+    """Record the founder's blocker answers in the run's gate ledger, and open the blockers still owed.
+
+    None (and nothing touched) when the run has no ledger. An answer is recorded only once the mapper
+    accepted it, i.e. no blocker remains for its field; a remaining blocker a founder can answer (its
+    field is in `answerable_blocker_fields`) is opened, so the run reads `waiting` on it.
+    """
+    ledger = _run_ref.open_ledger(args.dir, args.run_id or "")
+    if ledger is None:
+        return None
+    gates, paths = ledger
+    remaining = {f"{b.get('block_index')}.{b.get('field')}" for b in blockers}
+    recorded = []
+    for key, value in sorted(answers.items()):
+        field = key.split(".", 1)[1] if "." in key else key
+        if key in remaining or field not in answerable:
+            continue
+        index = int(key.split(".", 1)[0]) if key.split(".", 1)[0].isdigit() else -1
+        gates.record_from_writer(
+            paths,
+            f"ct_lane3_blocker.{key}",
+            "stated",
+            "extract_cap_table.py",
+            value=str(value),
+            bound=_block_fingerprint(blocks, grid, index),
+        )
+        recorded.append(f"ct_lane3_blocker.{key}")
+    to_open = (
+        sorted(
+            f"ct_lane3_blocker.{b.get('block_index')}.{b.get('field')}"
+            for b in blockers
+            if b.get("field") in answerable and isinstance(b.get("block_index"), int)
+        )
+        if open_remaining
+        else []
+    )
+    opened: list[str] = []
+    if to_open:
+        opened = gates.open_from_writer(paths, to_open, "extract_cap_table.py")["opened"]
+    return {"recorded": recorded, "opened": opened}
 
 
 def main() -> int:
