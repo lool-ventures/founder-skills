@@ -11,15 +11,6 @@ user-invocable: true
 
 Help startup founders build credible, defensible TAM/SAM/SOM analysis — the kind that earns investor trust rather than raising eyebrows. Produce a structured, validated market sizing with external sources, sensitivity testing, and a self-check against common pitfalls. The tone is founder-first: a rigorous but supportive coaching session.
 
-## Skill Metadata
-
-- **Author:** lool-ventures
-- **Version:** managed in `founder-skills/.claude-plugin/plugin.json`
-- **Compatibility:** Python 3.10+ and `uv` for script execution.
-- **Exports:**
-  - `sizing.json` → `financial-model-review`, `ic-sim`, `fundraise-readiness`
-  - `sensitivity.json` → `financial-model-review`
-
 ## Skill Execution Model (READ FIRST)
 
 > See `founder-skills/references/skill-execution-model.md` for the full inline-skill execution model (3 dispatch contexts, Mitigation 1+2, producer contract, Cowork quirks, per-symptom triage).
@@ -45,30 +36,6 @@ Context A **receipts** don't need this protocol by hand — `check_handoff.py --
 ## Input Formats
 
 Accept any format: pitch deck (PDF, PPTX, markdown), financial model, market data, text descriptions, or verbal description of the business.
-
-## Available Scripts
-
-All scripts are at `${CLAUDE_PLUGIN_ROOT}/skills/market-sizing/scripts/`:
-
-- **`market_sizing.py`** — TAM/SAM/SOM calculator (top-down, bottom-up, or both); accepts `--stdin` for JSON piping
-- **`sensitivity.py`** — Stress-test assumptions with low/base/high ranges and confidence-based auto-widening
-- **`checklist.py`** — Validates 22-item self-check with pass/fail per item
-- **`compose_report.py`** — Assembles report with cross-artifact validation; `--write-md` writes report.md; `--strict` exits 1 on high/medium warnings
-- **`visualize.py`** — Generates self-contained HTML with SVG charts (not JSON)
-
-Also available from `${CLAUDE_PLUGIN_ROOT}/scripts/` (shared):
-
-- **`founder_context.py`** — Per-company context management (init/read/merge/validate)
-
-Run with: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/market-sizing/scripts/<script>.py --pretty [args]`
-
-## Available References
-
-Read as needed from `${CLAUDE_PLUGIN_ROOT}/skills/market-sizing/references/`:
-
-- **`tam-sam-som-methodology.md`** — Definitions, calculation methods, industry examples, best practices
-- **`pitfalls-checklist.md`** — Self-review checklist for common mistakes
-- **`artifact-schemas.md`** — JSON schemas for all analysis artifacts
 
 ## Artifact Pipeline
 
@@ -167,6 +134,14 @@ have not run it — then stop. Do not improvise the missing steps: an analysis t
 reviews itself reads exactly like one that was checked, which is the failure this stop exists to
 prevent.
 
+**Then start the run's record, once**, with every request line that starts `FS_HOST_` copied between the markers (none: leave the placeholder, which is ignored). `RUN_ID` is the `run_id` it prints. Any non-zero exit here or from `bind` below: say in one sentence that the analysis could not start, and stop.
+
+```bash
+python3 "<printed PLUGIN_ROOT>/scripts/run_status.py" start --skill market-sizing --artifacts-root "<printed ARTIFACTS_ROOT>" <<'FS_HOST_EOF'
+<each FS_HOST_ line of the request>
+FS_HOST_EOF
+```
+
 Plugin folder for Reads and prompts (as loaded): `${CLAUDE_PLUGIN_ROOT}` — this skill's references are in `${CLAUDE_PLUGIN_ROOT}/skills/market-sizing/references/`. If Step 0 printed `READ_ROOT=`, use that value instead.
 
 **Plugin paths.** If Step 0 printed `READ_ROOT=`, this skill's text arrived without its plugin folder filled in. Use that value in place of `${CLAUDE_PLUGIN_ROOT}` in every Read and sub-agent prompt, including where a later step says to leave that path literal. If it did not print `READ_ROOT=`, use the paths as shown. The folder comes from Step 0's filesystem search, not from a skill file or the "Base directory" line, which can name a folder that does not exist. These are setup details: updates to the founder are about their company, not file locations, printed paths or plugin versions.
@@ -208,7 +183,7 @@ skill's name. Running fewer producers is fine; running none is not.
 
 #### Step 5-quick: the quick-check path
 
-Run the **same producer** the full pipeline uses, with only the inputs the founder gave you:
+Run it after the slug block below has created `ANALYSIS_DIR` and bound the run. Run the **same producer** the full pipeline uses, with only the inputs the founder gave you:
 
 ```bash
 python3 "$SCRIPTS/market_sizing.py" --stdin --pretty \
@@ -225,6 +200,8 @@ compute from the same inputs — it is the same script reading the same shape. O
 weight is dropped. What you do *not* get is what those skipped producers add: sourced assumptions, a
 low/base/high range, the 22-item quality check, and the deck-claim reconciliation.
 
+Then close the run's record: `python3 "$SHARED_SCRIPTS/run_status.py" finish --mode quick_check --run-id "$RUN_ID" --artifacts-root "$ARTIFACTS_ROOT" --output "$ANALYSIS_DIR/sizing.json"`.
+
 **Presenting it.** Label it a quick check, not an analysis. State the figures, name the inputs they
 came from, and say plainly that the assumptions are unsourced and unstressed. Then close with a
 **statement**, never a question: "The full analysis sources each assumption, stress-tests the range,
@@ -234,8 +211,9 @@ invites a "no" to something the founder would have wanted.
 ```bash
 ANALYSIS_DIR="${ANALYSIS_DIR:-$ARTIFACTS_ROOT/market-sizing-${SLUG}}"            # full analysis
 # ANALYSIS_DIR="${ANALYSIS_DIR:-$ARTIFACTS_ROOT/market-sizing-${SLUG}-quickcheck}"  # quick check
-mkdir -p "$ANALYSIS_DIR"
-RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
+RUN_ID="<the run_id start printed>"
+mkdir -p "$ANALYSIS_DIR" && python3 "$SHARED_SCRIPTS/run_status.py" bind --run-id "$RUN_ID" \
+  --artifacts-root "$ARTIFACTS_ROOT" --run-dir "$ANALYSIS_DIR" --slug "$SLUG"
 # Context A hand-off dir — PER RUN: sub-agents WRITE their raw output JSON here (the audit trail —
 # raw sub-agent output as returned, before producer validation). Permanent by rule
 # (nothing under outputs/ is ever deleted, by this skill's rule); nothing in it is ever a canonical artifact.
@@ -270,27 +248,39 @@ STAGING_DIR="$(mktemp -d "${TMPDIR:-/tmp}/market-sizing-${SLUG:-co}.staging.XXXX
 printf 'RUN_ID=%s\nSTAGING_DIR=%s\nHANDOFF_DIR=%s  # shell\nHANDOFF_AGENT=%s  # same dir, for Read/Write\n' "$RUN_ID" "$STAGING_DIR" "$HANDOFF_DIR" "$HANDOFF_AGENT"
 ```
 
+**A resumed run** (`start` printed `resume: 1`) runs Step 1 and this block again, then continues at the question `waiting_on` names; the files before it are this run's and stay. For `ms_methodology` that is the Gate after Steps 2-3: do not redo Steps 2-3 or rewrite `inputs.json` or `methodology.json`.
+
 Pass `RUN_ID` to all sub-agents. Every artifact written to `$ANALYSIS_DIR` must include `"metadata": {"run_id": "$RUN_ID"}` at the top level. `compose_report.py` checks that all artifact run IDs match — a mismatch triggers a `STALE_ARTIFACT` high-severity warning, blocking under `--strict`.
 
 **Overwrite-in-place — do NOT delete prior artifacts under `$ANALYSIS_DIR`.** It is the promoted `outputs/`
 tree in Cowork, where deleting a user-visible path is unsafe (our rule forbids it, and older hosts refused it; the parity gate flags
-it). Each producer writes its artifact fresh via `-o` every run, and `RUN_ID` is minted fresh per run —
+it). Each producer writes its artifact fresh via `-o` every run, and every run has its own `RUN_ID` —
 so if a prior run left an artifact a later step doesn't regenerate, `compose_report.py`'s `STALE_ARTIFACT`
 check (run_ids must match) catches the mismatch. No bulk `rm` is needed or wanted.
 
 ### Step 1: Read or Create Founder Context
 
 ```bash
-python3 "$SHARED_SCRIPTS/founder_context.py" read --artifacts-root "$ARTIFACTS_ROOT" --pretty
+python3 "$SHARED_SCRIPTS/founder_context.py" read --artifacts-root "$ARTIFACTS_ROOT" --run-id "$RUN_ID" \
+  --skill market-sizing --pretty
 ```
 
 **Exit 0 (found):** Use the company slug and pre-filled fields. Proceed to Step 2.
 
-**Exit 1 (not found):** Expected on a first run — do NOT mention this check or its exit status to the founder; if you narrate anything first, say only "Let me grab a few basics about the company." **Deck/materials carve-out — derive field-by-field, never all-or-nothing (do not ask for what you were already given):** if the founder provided materials (a deck, financial model, or a sufficiently detailed description), derive each of the four basics — company name, stage, sector, geography — that the materials state, and skip the gate entirely when all four are in hand. Treat the four **independently**: deriving three and missing one does NOT send you back to asking for all four. Before gating on a still-missing field, try to **infer** it from a clear signal in the materials and proceed (noting it as inferred, not founder-stated, so it isn't presented as confirmed): geography from a phone country code or an office address (e.g. a `+972` number → Israel), but **never from currency alone** — `$` is also CAD, AUD and SGD, and founders everywhere price in USD, so a currency symbol is not a country; stage from an ambiguous fundraise signal (a named round, round size, or "raising our seed" language → the matching `--stage` value); sector from the product category and ICP. Use `AskUserQuestion` (NOT plain chat) **only for** the specific field(s) that genuinely have no derivable or inferable signal — and ask for only those, stating the values you already derived so the founder confirms or corrects rather than re-supplying everything. **If `AskUserQuestion` is genuinely unavailable in the host, do NOT skip the ask and do NOT assume the answer:** ask the same question in plain chat, state the options explicitly, and wait for an answer before continuing. The ban above is on asking casually WHILE the tool is available — it is not a reason to stall a host that lacks it. (If none of the four can be derived at all, that reduces to asking for all four.)
+**Exit 1 (not found: no `code`, or `CONTEXT_NOT_FOUND`):** Open the four questions (the block below) first. Expected on a first run — do NOT mention this check or its exit status to the founder; if you narrate anything first, say only "Let me grab a few basics about the company." **Deck/materials carve-out — derive field-by-field, never all-or-nothing (do not ask for what you were already given):** if the founder provided materials (a deck, financial model, or a sufficiently detailed description), derive each of the four basics — company name, stage, sector, geography — that the materials state, and skip the gate entirely when all four are in hand. Treat the four **independently**: deriving three and missing one does NOT send you back to asking for all four. Before gating on a still-missing field, try to **infer** it from a clear signal in the materials and proceed (noting it as inferred, not founder-stated, so it isn't presented as confirmed): geography from a phone country code or an office address (e.g. a `+972` number → Israel), but **never from currency alone** — `$` is also CAD, AUD and SGD, and founders everywhere price in USD, so a currency symbol is not a country; stage from an ambiguous fundraise signal (a named round, round size, or "raising our seed" language → the matching `--stage` value); sector from the product category and ICP. Use `AskUserQuestion` (NOT plain chat) **only for** the specific field(s) that genuinely have no derivable or inferable signal — and ask for only those, stating the values you already derived so the founder confirms or corrects rather than re-supplying everything. **If `AskUserQuestion` is genuinely unavailable in the host, do NOT skip the ask and do NOT assume the answer:** ask the same question in plain chat, state the options explicitly, and wait for an answer before continuing. The ban above is on asking casually WHILE the tool is available — it is not a reason to stall a host that lacks it. (If none of the four can be derived at all, that reduces to asking for all four.)
 
 **Stage is the one field with a real fixed label set — use it verbatim if asking.**
 Options: `Pre-seed` / `Seed` / `Series A` / `Series B+`
-→ `pre-seed | seed | series-a | series-b` (`founder_context.py`'s `VALID_STAGES` has 7 values including `series-c`/`series-d`/`later`; on a `Series B+` pick, ask a plain-text follow-up for the specific stage rather than defaulting to `series-b`). Company name, sector and geography cannot take fixed labels — shape each as an affirmative option carrying the inferred/derived value plus a stated-value fallback. Provide at least 2 options. Then create:
+→ `pre-seed | seed | series-a | series-b` (`founder_context.py`'s `VALID_STAGES` has 7 values including `series-c`/`series-d`/`later`; on a `Series B+` pick, ask a plain-text follow-up for the specific stage rather than defaulting to `series-b`). Company name, sector and geography cannot take fixed labels — shape each as an affirmative option carrying the inferred/derived value plus a stated-value fallback. Provide at least 2 options.
+
+**Each question is a recorded gate: open, ask, answer.** Ask from the printed `needs_input` and record each reply with its `answer_command`. A field derived or inferred from the materials is recorded, not asked: `record_gate_answer.py default --gate ctx_basics.<field> --reason derived_from_materials` (or `inferred`) `--answer-id use_derived --value "<value>"`. A `Series B+` reply opens `ctx_stage_detail`: ask and record it the same way. <!-- gate: ctx_stage_detail -->
+
+```bash
+python3 "$SHARED_SCRIPTS/record_gate_answer.py" open --run-id "$RUN_ID" --artifacts-root "$ARTIFACTS_ROOT" --gate ctx_basics.company_name \
+  --gate ctx_basics.stage --gate ctx_basics.sector --gate ctx_basics.geography
+```
+
+Then create (exit 10 names a question not yet recorded: ask it, record it, run `init` again):
 
 `--stage` is enum-validated (hyphenated, lowercase) — one of: `pre-seed`, `seed`, `series-a`,
 `series-b`, `series-c`, `series-d`, `later`. Passing a non-canonical token (e.g. `seriesa`,
@@ -307,12 +297,12 @@ pick the closest value from the enum above rather than waiting for that warning.
 ```bash
 python3 "$SHARED_SCRIPTS/founder_context.py" init \
   --company-name "Acme Corp" --stage seed --sector "B2B SaaS" \
-  --geography "US" --artifacts-root "$ARTIFACTS_ROOT"
+  --geography "US" --artifacts-root "$ARTIFACTS_ROOT" --run-id "$RUN_ID" --skill market-sizing
   # Add --sector-type <value> if the auto-derivation warning fires or the sector
   # doesn't map cleanly to one of the 9 canonical sector-type values above.
 ```
 
-**Exit 2 (multiple):** Present the list, ask which company, re-read with `--slug`.
+**Exit 10 (several companies):** ask which from the printed `needs_input`, record it with its `answer_command`, then re-read with `--slug`; `A different company` → as Exit 1. <!-- gate: ctx_select_company --> Exit 1 with another `code`: report it and stop.
 
 #### Execution checkpoint — END OF STEP 1, READ BEFORE CONTINUING
 
@@ -408,8 +398,7 @@ $1,884 is agreement, not an override.
 
 **Two figures for one input.** When the founder's materials state more than one figure for the same
 input (a rate typed in chat and a blended rate in the deck, or two rates in the deck), ask before
-Step A via `AskUserQuestion` which one the sizing uses: one option per figure naming its source,
-the typed one first. Record the chosen figure in `founder_stated_inputs` with
+Step A via `AskUserQuestion` which one the sizing uses: write the figures as below, `open --gate ms_two_figures.<input>` (e.g. `ms_two_figures.arpu`), ask from its `needs_input` (one option per figure, the typed one first) and record the reply before changing which figure `founder_stated_inputs` holds. Record the chosen figure in `founder_stated_inputs` with
 `founder_stated_inputs_source` (`{"arpu": "chat"}` or `"document:<file>#page=<n>"`), their answer in
 `founder_stated_choice` (`{"arpu": "<their words>"}`; unasked, the report says so), and every other
 one in `founder_stated_alternatives` (`{"arpu": [{"value": 261, "period": "month", "source":
@@ -431,7 +420,7 @@ and do **not** do the arithmetic in your head. Set `currency` to the one currenc
 denominated in, then let the sizing step convert: it takes a rate you supply and records it in the
 report, so the founder can see what was converted and at what rate. **You** are the one who looks the
 rate up — you have web access and the sizing sub-agent does not. If you cannot establish a rate from a
-real source, ask the founder rather than guessing; a rate you half-remember is the one failure mode
+real source, ask the founder rather than guessing (`open --gate ms_fx_rate` first, then record the reply) <!-- gate: ms_fx_rate -->; a rate you half-remember is the one failure mode
 nothing downstream can catch.
 
 **Sizing basis — declare current-year vs. forecast-year, don't leave it implicit.** Industry reports
@@ -508,7 +497,11 @@ After writing, verify that `$ANALYSIS_DIR` contains both `inputs.json` and `meth
 
 ### Gate: Confirm Methodology and Inputs
 
-**MANDATORY STOP — TWO SEPARATE STEPS. DO NOT COMBINE THEM.**
+**MANDATORY STOP — TWO SEPARATE STEPS. DO NOT COMBINE THEM.** It is a recorded gate: open it first. If it printed `"applied": "pre_answer"`, the request answered it: post Step A, skip Step B, go to Step 4.
+
+```bash
+python3 "$SHARED_SCRIPTS/record_gate_answer.py" open --run-id "$RUN_ID" --artifacts-root "$ARTIFACTS_ROOT" --gate ms_methodology
+```
 
 **Step A: Output a chat message** with the methodology choice and key inputs. Use a formatted summary. This is a normal assistant message — NOT an AskUserQuestion call. Example:
 
@@ -543,6 +536,8 @@ If `existing_claims` were found in the deck, include them: "Your deck claims TAM
 Question (substitute the chosen approach): `I'll size this <top-down / bottom-up / both top-down and bottom-up> — does this approach look right?`
 Options: `Looks good` / `Change methodology` / `Correct or add data`
 
+Record the reply with the `answer_command` `open` printed.
+
 **CRITICAL: the question must name the methodology as ONE plain-text sentence. The full inputs/rationale stay in the Step-A chat message — do NOT put a table or markdown in the question.**
 
 This two-step pattern (chat message then AskUserQuestion) is required because AskUserQuestion renders as plain text. Detailed content goes in the chat message; only the gate question goes in AskUserQuestion.
@@ -551,9 +546,9 @@ This two-step pattern (chat message then AskUserQuestion) is required because As
 
 **If "Change methodology":** Ask which approach they prefer, via `AskUserQuestion`:
 Options: `Top-down` / `Bottom-up` / `Both top-down and bottom-up`
-Then ask why (plain text — the reason isn't a fixed choice). Update `methodology.json` and repeat Steps A+B.
+Record it (`--gate ms_methodology_change`), then ask why (plain text — the reason isn't a fixed choice). Update `methodology.json` and repeat Steps A+B.
 
-**If "Correct or add data":** Ask which values are wrong or missing via `AskUserQuestion`. The labels are runtime data — the specific inputs at stake differ every run — so build them from what is actually on screen: **one option per input you just showed in the Step-A message, each naming that input and its current value** (e.g. `Paying accounts: 4,200` — so the founder is correcting a number they can see, not recalling one), capped at three, plus a final `Something else — I'll say which in chat` so nothing is unreachable. Never emit a bare free-text prompt with no options. Then correct/patch `inputs.json`, and check whether the updated inputs change what methodology is viable. If so, update `methodology.json` too. Repeat Steps A+B.
+**If "Correct or add data":** Ask which values are wrong or missing via `AskUserQuestion`. The labels are runtime data — the specific inputs at stake differ every run — so build them from what is actually on screen: **one option per input you just showed in the Step-A message, each naming that input and its current value** (e.g. `Paying accounts: 4,200` — so the founder is correcting a number they can see, not recalling one), capped at three, plus a final `Something else — I'll say which in chat` so nothing is unreachable. Never emit a bare free-text prompt with no options. Once they pick a field, `open --gate ms_correct_data.<field>` (`.other` for `Something else`), then record the reply there (`--answer-id set --value "<new value>"`, or `something_else`). Then correct/patch `inputs.json`, and check whether the updated inputs change what methodology is viable. If so, update `methodology.json` too. Repeat Steps A+B.
 
 **Late edits to `inputs.json` (after Step 6b has run, and before the adversarial review in Step 6c):** `checklist.json` and
 `report.md` are snapshots of `inputs.json` at the time their producing step ran — patching
@@ -700,102 +695,16 @@ append-only rule in Step 0.
 
 Dispatch the market-sizing agent **TWICE in parallel** via the Task tool — one for top-down, one for bottom-up. **Call the `Task` tool with `subagent_type: "founder-skills:market-sizing"`** for both calls, so the analysis runs in the scoped agent (its `tools:` allowlist binds; a type-less dispatch falls back to the wildcard `general-purpose` agent). Use a **SINGLE assistant turn** with 2 Task tool calls (NOT two sequential turns). The Claude Code harness runs both Task calls in parallel when they appear in the same assistant response.
 
-Pseudocode for the dispatch (executed as 2 parallel Task tool_use blocks):
+Each prompt is printed, not written: run the generator once per approach, each in a shell call of its own — nothing before it but variable assignments, nothing after it — and send what it prints unchanged:
+<!-- skill-quality-ci: bash-after-subagent-ok -->
 
-```
-[
-  Task(subagent_type="founder-skills:market-sizing",   # REQUIRED — omitting it silently downgrades the dispatch to the wildcard, shell-capable general-purpose agent
-       description="Market sizing: top-down methodology",
-       prompt="CONTEXT: TOP_DOWN_METHODOLOGY\nOUTPUT_PATH: <HANDOFF_AGENT>/top_down_output.json\nRUN_ID: <id>\n<research data from validation.json>"),
-  Task(subagent_type="founder-skills:market-sizing",   # REQUIRED — same on the second call
-       description="Market sizing: bottom-up methodology",
-       prompt="CONTEXT: BOTTOM_UP_METHODOLOGY\nOUTPUT_PATH: <HANDOFF_AGENT>/bottom_up_output.json\nRUN_ID: <id>\n<research data from validation.json>"),
-]
+```bash
+python3 "$SCRIPTS/dispatch_prompt.py" top_down_methodology --run-id "$RUN_ID" \
+  --analysis-dir "$ANALYSIS_DIR" --analysis-dir-agent "$ANALYSIS_DIR_AGENT" \
+  --handoff-dir "$HANDOFF_DIR" --handoff-agent "$HANDOFF_AGENT"
 ```
 
-**Full dispatch prompt template (TOP_DOWN_METHODOLOGY):**
-
-```
-CONTEXT: TOP_DOWN_METHODOLOGY
-OUTPUT_PATH: <HANDOFF_AGENT>/top_down_output.json
-RUN_ID: <RUN_ID>
-
-You are the market-sizing agent dispatched in Context A (TOP_DOWN_METHODOLOGY).
-Read inputs.json at <ANALYSIS_DIR_AGENT>/inputs.json and validation.json at
-<ANALYSIS_DIR_AGENT>/validation.json.
-
-Using the top-down approach, size TAM/SAM/SOM from the research in validation.json.
-
-REFERENCES, NOT NUMBERS: each input names where its value comes from, and the calculator reads the
-value from there, so a figure is never retyped. For each input write ONE of:
-  {"assumption": "<the name of a figure in validation.json>"}
-  {"derived": {"op": "multiply"|"divide"|"to_percent", "factors": [<reference>, ...]}}  (e.g. a head-count
-    times a price per customer is a money total; a ratio of two counts becomes a percentage via to_percent)
-  {"estimate": <number>, "unit": "<unit>", "why": "<one sentence: why no recorded figure fits>"}
-industry_total must resolve to money per year, segment_pct and share_pct to percentage points (35 means
-35%, not 0.35). segment_pct narrows TAM to SAM; share_pct narrows SAM to SOM — do not swap them. A
-recorded figure keeps the currency and period it was recorded with; you convert nothing.
-
-SIZING_BASIS: this analysis' declared basis is inputs.json's `sizing_basis`. When the research quotes
-both a current-year and a forecast-year figure, reference the one matching it, not whichever the
-source headlines.
-
-Use your Write tool to write to OUTPUT_PATH exactly this JSON:
-{
-  "approach": "top_down",
-  "industry_total": <reference>,
-  "segment_pct": <reference>,
-  "share_pct": <reference>
-}
-Then return ONLY the receipt JSON in your final assistant message:
-{"status": "complete", "output_path": "<echo of OUTPUT_PATH>"}
-Do NOT write any file other than OUTPUT_PATH — you never write a canonical
-artifact; anything else you write bypasses schema validation and
-run_id stamping.
-```
-
-**Full dispatch prompt template (BOTTOM_UP_METHODOLOGY):**
-
-```
-CONTEXT: BOTTOM_UP_METHODOLOGY
-OUTPUT_PATH: <HANDOFF_AGENT>/bottom_up_output.json
-RUN_ID: <RUN_ID>
-
-You are the market-sizing agent dispatched in Context A (BOTTOM_UP_METHODOLOGY).
-Read inputs.json at <ANALYSIS_DIR_AGENT>/inputs.json and validation.json at
-<ANALYSIS_DIR_AGENT>/validation.json.
-
-Using the bottom-up approach, size TAM/SAM/SOM from the research in validation.json.
-
-REFERENCES, NOT NUMBERS: each input names where its value comes from, and the calculator reads the
-value from there, so a figure is never retyped. For each input write ONE of:
-  {"assumption": "<the name of a figure in validation.json>"}
-  {"derived": {"op": "multiply"|"divide"|"to_percent", "factors": [<reference>, ...]}}  (e.g. accounts
-    times seats per account is a count; revenue divided by customers is a price per customer)
-  {"estimate": <number>, "unit": "<unit>", "why": "<one sentence: why no recorded figure fits>"}
-  {"founder_stated": "arpu"}  (arpu only: the founder's own figure)
-customer_count must resolve to a count, arpu to money per customer (a recorded price keeps its period;
-the calculator makes it annual), serviceable_pct and target_pct to percentage points (35 means 35%,
-not 0.35).
-You convert nothing.
-
-SIZING_BASIS: if a customer_count or arpu figure exists both as a current and a forecast-year value,
-reference the one matching inputs.json's `sizing_basis`.
-
-Use your Write tool to write to OUTPUT_PATH exactly this JSON:
-{
-  "approach": "bottom_up",
-  "customer_count": <reference>,
-  "arpu": <reference>,
-  "serviceable_pct": <reference>,
-  "target_pct": <reference>
-}
-Then return ONLY the receipt JSON in your final assistant message:
-{"status": "complete", "output_path": "<echo of OUTPUT_PATH>"}
-Do NOT write any file other than OUTPUT_PATH — you never write a canonical
-artifact; anything else you write bypasses schema validation and
-run_id stamping.
-```
+`dispatch_prompt.py bottom_up_methodology` takes the same arguments. Exit 10 is a question with no record for this run (`blocked_by_gate`): for `ms_methodology` ask the Gate's own question above; otherwise ask from the printed `needs_input`. Record it, run the generator again. Then `Task(subagent_type="founder-skills:market-sizing", description="Market sizing: top-down methodology", prompt=<the printed text, whole>)` and the same for bottom-up, in one turn.
 
 **After both sub-agents return:** gate EACH hand-off per the Context A hand-off protocol (run
 `check_handoff.py` per file, branch on exit codes). Then merge the two files deterministically and
@@ -823,14 +732,14 @@ the total from the head-count and a price, never by relabelling the figure). `(r
 the record lacks something only you can look up (a currency, a period, an exchange rate with its source
 and date); record it in `validation.json` and re-run the SAME pipe; this is not a sub-agent fault, so do
 not re-dispatch. `(remedy: founder_question)`: ask the founder (e.g. whether their price is per month or
-per year). Tell the founder what you are doing in their terms, never the code.
+per year); it exits 10 with that question's `needs_input` (`ms_input_period.<input>`): record the reply and the period, then re-run the same pipe. Tell the founder what you are doing in their terms, never the code.
 
 If the founder's own figures or the deck's claims are in another currency, record which in `inputs.json`
 (`founder_stated_inputs_currency`, `existing_claims_currency`).
 
 #### Single methodology dispatch
 
-When methodology is "top_down" only: dispatch one TOP_DOWN_METHODOLOGY task, gate the hand-off, then
+When methodology is "top_down" only: print and dispatch one TOP_DOWN_METHODOLOGY task, gate the hand-off, then
 `cat "$HANDOFF_DIR/top_down_output.json" | python3 "$SCRIPTS/market_sizing.py" --stdin --pretty --run-id "$RUN_ID" --validation "$ANALYSIS_DIR/validation.json" --inputs "$ANALYSIS_DIR/inputs.json" --currency "$CURRENCY" --sizing-basis "$SIZING_BASIS" -o "$ANALYSIS_DIR/sizing.json"`
 (deriving `$CURRENCY` and `$SIZING_BASIS` from `inputs.json` exactly as above).
 When methodology is "bottom_up" only: same with `bottom_up_output.json`.
@@ -859,7 +768,7 @@ Before proceeding, answer:
 2. **Scope match:** Does TAM cover all `commercial` and `r_and_d` verticals from `inputs.json`?
 3. **Customer count sanity:** Can you name a representative sample of the customers in your count?
 4. **Convergence integrity:** Were top-down and bottom-up parameters set independently? If you adjusted one after seeing the other, revert and accept the delta. Check TAM, SAM, and SOM delta separately — a converged TAM does not guarantee converged SAM/SOM.
-5. **Percent scale:** if `market_sizing.py` printed `IMPLAUSIBLE_PCT_SCALE`, ask the founder now, via `AskUserQuestion`, whether they meant the value as given (option 1) or that many percent — the review in Step 6c must see the answer.
+5. **Percent scale:** if `market_sizing.py` printed `IMPLAUSIBLE_PCT_SCALE`, ask the founder now, via `AskUserQuestion`, whether they meant the value as given (option 1) or that many percent (`open --gate ms_pct_scale.<input>` first; record the reply) — the review in Step 6c must see the answer, and its prompt is not printed without it.
 
 This step produces no artifact. If it reveals problems, fix them before proceeding.
 
@@ -935,7 +844,7 @@ python3 "$SCRIPTS/dispatch_prompt.py" checklist --run-id "$RUN_ID" \
 ```bash
 cat "$HANDOFF_DIR/checklist_output.json" | \
   python3 "$SCRIPTS/checklist.py" --pretty --run-id "$RUN_ID" --sizing "$ANALYSIS_DIR/sizing.json" \
-    -o "$ANALYSIS_DIR/checklist.json"
+    --inputs "$ANALYSIS_DIR/inputs.json" -o "$ANALYSIS_DIR/checklist.json"
 ```
 <!-- skill-quality-ci: bash-after-subagent-ok -->
 
@@ -986,7 +895,7 @@ either: Step 7 runs compose without `--strict`, so even a high warning halts not
 The founder's uploads live outside `outputs/`, where a sub-agent cannot reach them, so mirror them
 into the hand-off dir first (exit 3 from the resolver = no uploads folder: nothing was attached, or this
 host keeps uploads elsewhere; then copy into `$HANDOFF_DIR/docs` the founder documents you read earlier,
-from the path you read them at, and ask for a path only if you never had one), machine-read every scanned page so a citation to one can be checked, then generate the dispatch
+from the path you read them at, and ask for a path only if you never had one: `open --gate ms_upload_path` first) <!-- gate: ms_upload_path -->, machine-read every scanned page so a citation to one can be checked, then generate the dispatch
 prompt and pass it unchanged — the lane that tests this regenerates it and compares the two:
 
 ```bash
@@ -1028,13 +937,14 @@ and found nothing", never as a failure.
 
 ### Step 6d: One Revision, Only If the Founder Asks for It
 
-A review is final. Only if an accepted finding in `redteam.json` is `high` and names a `parameter`,
-ask via `AskUserQuestion`: option 1 "Deliver with the challenges shown", option 2 "Revise the
-challenged inputs and have it reviewed once more (about 10 minutes)". Otherwise go to Step 7. Record
-the answer (without it, compose discloses `REVISION_NOT_OFFERED`):
+A review is final. Only if an accepted finding in `redteam.json` is `high` and names a `parameter`:
+open the question first, `record_revision_answer.py --dir "$ANALYSIS_DIR" --from-pre-answer` (`applied`:
+the request answered it, ask nothing), then ask via `AskUserQuestion`: option 1 "Deliver with the challenges
+shown", option 2 "Revise the challenged inputs and have it reviewed once more (about 10 minutes)". Otherwise
+go to Step 7. Record the answer (without it, compose refuses):
 `python3 "$SCRIPTS/record_revision_answer.py" --dir "$ANALYSIS_DIR" --answer deliver|revise --source founder`
 
-On "Revise", ask which changes to make: one option per change you propose, written
+On "Revise", ask which changes to make (`ms_revision_changes`, opened by that answer; record the reply with `--answer-id`, one id per challenged input, comma-joined): one option per change you propose, written
 `<input>: <from> → <to> (<its source>)`, plus "None of these". A figure the founder stated changes
 only to one of their own figures or one they type. Make exactly the edits they confirmed; if a
 change's reason needs recording, it goes in `methodology.json`
@@ -1065,8 +975,8 @@ record the answer in `methodology.json` `founder_notes` and deliver.
 
 **If the founder asked you not to ask questions**, take option 1 here (recorded with
 `--source no_questions`), at Step 5.5's
-percent-scale question and at the two-figures question (Steps 2–3), list each in
-`methodology.json` `gate_defaults`, and continue. For these
+percent-scale question and at the two-figures question (Steps 2–3): record each with
+`record_gate_answer.py default --gate <gate> --reason asked_not_to_be_asked`, and continue. For these
 questions only, this overrides the plain-chat fallback: do not wait.
 
 ### Step 7: Compose and Validate Report
@@ -1118,7 +1028,7 @@ for the founder in plain language. A `FOUNDER_TEXT_TOKEN` message says where the
 is and what to do about it.
 
 
-**Post-write verification:** `compose_report.py` exits non-zero (code 2) if the declared output files don't exist or are empty after writing. If compose exits non-zero, stop and report the exact stderr — do not proceed to Step 8.
+**Post-write verification:** `compose_report.py` exits non-zero (code 2) if the declared output files don't exist or are empty after writing. Exit 10 is a question, not a failure: ask the gate its JSON names (`blocked_by_gate`; `ms_revision` is Step 6d; `ms_methodology` is the Gate, then Steps 5–6 again), record it, compose again; never re-run compose without the answer. Any other non-zero exit: stop and report the exact stderr — do not proceed to Step 8.
 
 ### Step 8: Post-Compose Coaching Commentary (Context B dispatch, POST_COMPOSE_COACHING)
 
@@ -1290,7 +1200,7 @@ The gate (`check_handoff.py --format=markdown`) verifies the sub-agent's hand-of
 ### Step 9 (Optional): Generate Visual Report
 
 ```bash
-python3 "$SCRIPTS/visualize.py" --dir "$ANALYSIS_DIR" -o "$ANALYSIS_DIR/report.html"
+python3 "$SCRIPTS/visualize.py" --dir "$ANALYSIS_DIR" --run-id "$RUN_ID" -o "$ANALYSIS_DIR/report.html"
 ```
 
 **Do not hand this over here** — the Deliver step below is the only place work reaches the founder, and it sends the complete set as files. A path presented here is the partial-delivery bug.
@@ -1298,6 +1208,12 @@ python3 "$SCRIPTS/visualize.py" --dir "$ANALYSIS_DIR" -o "$ANALYSIS_DIR/report.h
 ### Step 10: Deliver Artifacts
 
 Copy final deliverables to the **workspace root — `$ARTIFACTS_ROOT/..`, i.e. the promoted outputs mount itself, NOT `$ARTIFACTS_ROOT` and NOT `$ANALYSIS_DIR`**: `{Company}_Market_Sizing.md`, `.html` (if generated), `.json` (optional). Concretely, if `$ARTIFACTS_ROOT` is `<mount>/artifacts` then these go to `<mount>/`. That is the level the founder sees as deliverable cards; `artifacts/` below it is working state. Do not infer the level by elimination — `dirname "$ARTIFACTS_ROOT"` is the answer.
+
+Then close the run's file list (for a host; nothing to tell the founder):
+
+```bash
+python3 "<printed PLUGIN_ROOT>/scripts/run_status.py" deliverables --run-id "$RUN_ID" --artifacts-root "$ARTIFACTS_ROOT" --final || :
+```
 
 **Send the finished work to the founder — the complete set, as files.** Not a path, and not a subset.
 A path is not a deliverable in Cowork — whether the workspace it names outlives the task depends on how

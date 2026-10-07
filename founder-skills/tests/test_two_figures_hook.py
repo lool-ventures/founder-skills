@@ -88,6 +88,10 @@ def _payload(
     cwd: str | None = "",
 ) -> dict[str, Any]:
     path = tmp_path / "t.jsonl"
+    if prompt.lstrip().startswith(_SIZING):
+        if not prompt.rstrip().endswith(_END):
+            prompt = prompt.rstrip("\n") + "\n" + _END + "\n"
+        rows = [*rows, *_chain(prompt)]
     if transcript:
         path.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
     payload: dict[str, Any] = {
@@ -101,6 +105,86 @@ def _payload(
     if cwd is None:
         del payload["cwd"]
     return payload
+
+
+# The rest of the PreToolUse chain, as a market-sizing run leaves it before a sizing dispatch: the Gate's
+# question asked with the registry's labels (the asked-gate check holds the sizing otherwise), and the
+# prompt printed by the generator (the dispatch-prompt check holds any other prompt). Every sizing dispatch
+# below is sent exactly as printed, so neither check decides anything and the figures check is measured
+# alone, in the real chain.
+_END = "Do NOT write any file other than OUTPUT_PATH."
+_METHODOLOGY_LABELS = ["Looks good", "Change methodology", "Correct or add data"]
+_SIZING = ("CONTEXT: TOP_DOWN_METHODOLOGY", "CONTEXT: BOTTOM_UP_METHODOLOGY")
+
+
+def _chain(prompt: str) -> list[dict[str, Any]]:
+    sub = "top_down_methodology" if "TOP_DOWN" in prompt.split("\n", 1)[0] else "bottom_up_methodology"
+    command = f'python3 "$SCRIPTS/dispatch_prompt.py" {sub} --run-id "$RUN_ID" --analysis-dir "$ANALYSIS_DIR"'
+    asked = {
+        "type": "assistant",
+        "message": {
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "tool_use",
+                    "id": "toolu_gate",
+                    "name": "AskUserQuestion",
+                    "input": {
+                        "questions": [
+                            {
+                                "question": (
+                                    "I'll size this both top-down and bottom-up — does this approach look right?"
+                                ),
+                                "options": [{"label": x} for x in _METHODOLOGY_LABELS],
+                            }
+                        ]
+                    },
+                }
+            ],
+        },
+    }
+    answered = {
+        "type": "user",
+        "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_gate", "content": "ok"}]},
+    }
+    gen = {
+        "type": "assistant",
+        "message": {
+            "role": "assistant",
+            "content": [{"type": "tool_use", "id": f"toolu_gen_{sub}", "name": "Bash", "input": {"command": command}}],
+        },
+    }
+    printed = {
+        "type": "user",
+        "message": {
+            "role": "user",
+            "content": [{"type": "tool_result", "tool_use_id": f"toolu_gen_{sub}", "content": prompt}],
+        },
+    }
+    return [asked, answered, gen, printed]
+
+
+def _alone(tmp_path: Path, rows: list[dict[str, Any]], prompt: str) -> dict[str, Any] | None:
+    """The figures check by itself, for a dispatch the rest of the chain cannot pair with a printed prompt
+    (no OUTPUT_PATH, or a context line that is not a line of its own): those checks would hold it first."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("two_figures_alone", SCRIPTS / "two_figures_check.py")
+    assert spec is not None and spec.loader is not None
+    mod: Any = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    path = tmp_path / "t.jsonl"
+    path.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+    payload = {
+        "session_id": "s",
+        "transcript_path": str(path),
+        "cwd": str(tmp_path / "outputs"),
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Agent",
+        "tool_input": {"prompt": prompt, "subagent_type": "founder-skills:market-sizing"},
+    }
+    out: dict[str, Any] | None = mod.decide(payload)
+    return out
 
 
 def _decision(r: subprocess.CompletedProcess[str]) -> dict[str, Any]:
@@ -231,9 +315,10 @@ def test_one_dispatchs_hold_does_not_spend_the_others_retry(tmp_path: Path) -> N
     model re-sent TOP_DOWN without asking. Each sizing dispatch has its own retry."""
     _outputs(tmp_path)
     held_top_down = _denied(f"{MARKER}[TOP_DOWN_METHODOLOGY] Held once: …")
-    r = _run(tmp_path, [_user("Size my market."), held_top_down], prompt="CONTEXT: BOTTOM_UP_METHODOLOGY\nx")
-    assert _decision(r)["permissionDecision"] == "deny"
-    _silent(_run(tmp_path, [_user("Size my market."), held_top_down], prompt="CONTEXT: TOP_DOWN_METHODOLOGY\nx"))
+    rows = [_user("Size my market."), held_top_down]
+    held = _alone(tmp_path, rows, "CONTEXT: BOTTOM_UP_METHODOLOGY\nx")
+    assert held is not None and held["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert _alone(tmp_path, rows, "CONTEXT: TOP_DOWN_METHODOLOGY\nx") is None
 
 
 def test_the_reason_names_only_the_figures_not_yet_offered(tmp_path: Path) -> None:
@@ -421,7 +506,7 @@ def _asked(*rows: dict[str, Any]) -> list[dict[str, Any]]:
 def test_an_answered_form_offering_every_figure_lets_the_dispatch_through(tmp_path: Path) -> None:
     _form_outputs(tmp_path)
     _silent(_run(tmp_path, _asked(_widget(*_ALL_PILLS), _SHOWN, _answer())))
-    _silent(_run(tmp_path, _asked(_widget(*_ALL_PILLS), _SHOWN, _answer()), prompt="CONTEXT: TOP_DOWN_METHODOLOGY\nx"))
+    assert _alone(tmp_path, _asked(_widget(*_ALL_PILLS), _SHOWN, _answer()), "CONTEXT: TOP_DOWN_METHODOLOGY\nx") is None
 
 
 def test_the_same_form_without_its_answer_is_held(tmp_path: Path) -> None:
@@ -716,16 +801,19 @@ def test_a_sizing_line_with_an_invisible_prefix_or_a_suffix_is_still_a_sizing_di
         "\n  CONTEXT: TOP_DOWN_METHODOLOGY (round 2)\nOUTPUT_PATH: x",
         "CONTEXT:BOTTOM_UP_METHODOLOGY\nOUTPUT_PATH: x",
     ):
-        reason = _decision(_run(tmp_path, [_user("Size my market.")], prompt=prompt))["permissionDecisionReason"]
+        got = _alone(tmp_path, [_user("Size my market.")], prompt)
+        assert got is not None, prompt
+        reason = got["hookSpecificOutput"]["permissionDecisionReason"]
         assert reason.startswith(f"{MARKER}[") and "METHODOLOGY]" in reason, prompt
-    _silent(_run(tmp_path, [_user("Size my market.")], prompt="CONTEXT: BOTTOM_UP_METHODOLOGYX\nOUTPUT_PATH: x"))
+    assert _alone(tmp_path, [_user("Size my market.")], "CONTEXT: BOTTOM_UP_METHODOLOGYX\nOUTPUT_PATH: x") is None
 
 
 def test_the_retry_of_a_suffixed_dispatch_finds_its_marker(tmp_path: Path) -> None:
     _outputs(tmp_path)
     held = _denied(f"{MARKER}[BOTTOM_UP_METHODOLOGY] Held once: …")
-    _silent(
-        _run(tmp_path, [_user("Size my market."), held], prompt="CONTEXT: BOTTOM_UP_METHODOLOGY (r2)\nOUTPUT_PATH: x")
+    assert (
+        _alone(tmp_path, [_user("Size my market."), held], "CONTEXT: BOTTOM_UP_METHODOLOGY (r2)\nOUTPUT_PATH: x")
+        is None
     )
 
 

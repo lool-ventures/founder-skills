@@ -369,28 +369,18 @@ def test_checklist_count_and_categories() -> None:
 
 
 def test_top_down_dispatch_return_shape_keys() -> None:
-    """The TOP_DOWN_METHODOLOGY dispatch template in SKILL.md must include the keys
+    """The TOP_DOWN_METHODOLOGY prompt dispatch_prompt.py prints must include the keys
     market_sizing.py reads from --stdin for approach 'top_down':
     approach, industry_total, segment_pct, share_pct.
 
     The agent body's TOP_DOWN_METHODOLOGY subtype must also show the same keys.
-
-    Anchor on '**Full dispatch prompt template (TOP_DOWN_METHODOLOGY):**' in SKILL.md
-    (not 'CONTEXT: TOP_DOWN_METHODOLOGY' — that string first appears in a compact
-    dispatch-list example, before the actual full template section)
-    and on '#### TOP_DOWN_METHODOLOGY subtype' in the agent body.
     """
     required_keys = {"approach", "industry_total", "segment_pct", "share_pct"}
 
-    # SKILL.md — anchor on the bold full-template label, not the CONTEXT: line,
-    # because the compact dispatch-list example contains the same CONTEXT: text first.
-    skill_text = SKILL_MD.read_text(encoding="utf-8")
-    anchor = "**Full dispatch prompt template (TOP_DOWN_METHODOLOGY):**"
-    assert anchor in skill_text, f"{SKILL_MD.name} has no '{anchor}' label"
-    section = _fenced_block_after(skill_text, anchor)
+    section = _generated_sizing_prompt("top_down_methodology")
     for key in required_keys:
         assert f'"{key}"' in section, (
-            f"{SKILL_MD.name} TOP_DOWN_METHODOLOGY return shape missing key '{key}' (market_sizing.py --stdin reads it)"
+            f"the TOP_DOWN_METHODOLOGY prompt's return shape is missing key '{key}' (market_sizing.py --stdin reads it)"
         )
 
     # Agent body subtype section
@@ -414,27 +404,19 @@ def test_top_down_dispatch_return_shape_keys() -> None:
 
 
 def test_bottom_up_dispatch_return_shape_keys() -> None:
-    """The BOTTOM_UP_METHODOLOGY dispatch template in SKILL.md must include the keys
+    """The BOTTOM_UP_METHODOLOGY prompt dispatch_prompt.py prints must include the keys
     market_sizing.py reads from --stdin for approach 'bottom_up':
     approach, customer_count, arpu, serviceable_pct, target_pct.
 
     The agent body's BOTTOM_UP_METHODOLOGY subtype must also show the same keys.
-
-    Anchor on '**Full dispatch prompt template (BOTTOM_UP_METHODOLOGY):**' (same
-    reason as TOP_DOWN — 'CONTEXT: BOTTOM_UP_METHODOLOGY' appears in the compact
-    dispatch-list example before the actual full template).
     """
     required_keys = {"approach", "customer_count", "arpu", "serviceable_pct", "target_pct"}
 
-    # SKILL.md — anchor on the bold full-template label.
-    skill_text = SKILL_MD.read_text(encoding="utf-8")
-    anchor = "**Full dispatch prompt template (BOTTOM_UP_METHODOLOGY):**"
-    assert anchor in skill_text, f"{SKILL_MD.name} has no '{anchor}' label"
-    section = _fenced_block_after(skill_text, anchor)
+    section = _generated_sizing_prompt("bottom_up_methodology")
     for key in required_keys:
         assert f'"{key}"' in section, (
-            f"{SKILL_MD.name} BOTTOM_UP_METHODOLOGY return shape missing key '{key}' "
-            f"(market_sizing.py --stdin reads it)"
+            f"the BOTTOM_UP_METHODOLOGY prompt's return shape is missing key '{key}' "
+            "(market_sizing.py --stdin reads it)"
         )
 
     # Agent body subtype section
@@ -534,6 +516,26 @@ def _generated_checklist_prompt() -> str:
         for name in ("inputs.json", "validation.json", "sizing.json", "methodology.json"):
             (d / name).write_text("{}")
         out: str = mod.checklist("R", str(d), str(d / "h"), "H", "A")
+    return out
+
+
+def _generated_sizing_prompt(context: str) -> str:
+    """A sizing prompt as dispatch_prompt.py prints it (`top_down_methodology` / `bottom_up_methodology`): the
+    templates moved out of SKILL.md so the dispatch can be compared with the printed text and refused until
+    the approach is recorded."""
+    import importlib.util
+    import tempfile
+
+    scripts = SKILL_MD.parent / "scripts"
+    spec = importlib.util.spec_from_file_location("ms_dp_sizing_contract", scripts / "dispatch_prompt.py")
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    with tempfile.TemporaryDirectory() as tmp:
+        d = Path(tmp)
+        for name in ("inputs.json", "validation.json", "methodology.json"):
+            (d / name).write_text("{}")
+        out: str = mod.sizing(context, "R", str(d), "H", "A")
     return out
 
 
@@ -648,12 +650,13 @@ def test_context_a_dispatch_templates_contain_no_write_instruction() -> None:
     # TOP_DOWN and BOTTOM_UP use bold full-template labels; SENSITIVITY_TEST and CHECKLIST
     # use section heading labels that appear only once in SKILL.md.
     contexts = [
-        ("TOP_DOWN_METHODOLOGY", "**Full dispatch prompt template (TOP_DOWN_METHODOLOGY):**"),
-        ("BOTTOM_UP_METHODOLOGY", "**Full dispatch prompt template (BOTTOM_UP_METHODOLOGY):**"),
         ("SENSITIVITY_TEST", "#### SENSITIVITY_TEST dispatch prompt template"),
     ]
-    # CHECKLIST's prompt is generated; its no-write instruction is asserted on the printed text.
+    # CHECKLIST's and the sizing prompts are generated; their no-write instruction is asserted on the printed
+    # text, as the closing line the dispatch hook requires last.
     assert "Do NOT write any file other than OUTPUT_PATH." in _generated_checklist_prompt()
+    for sizing_context in ("top_down_methodology", "bottom_up_methodology"):
+        assert _generated_sizing_prompt(sizing_context).endswith("Do NOT write any file other than OUTPUT_PATH.\n")
 
     for context_name, anchor in contexts:
         start = skill_text.find(anchor)
@@ -1696,7 +1699,10 @@ def test_step_6d_gives_the_revision_its_route_and_its_bounds() -> None:
         '--uploads-dir "$ANALYSIS_DIR/handoff/$RUN_ID/docs"',
         "the first one of the analysis as delivered",
         "`founder_notes`",
-        "`gate_defaults`",
+        # A question not asked is recorded as its default in the run's ledger (`gate_defaults` is read only
+        # for a run without one), and the request's own answer is applied before the question is asked.
+        "--reason asked_not_to_be_asked",
+        "--from-pre-answer",
         "do not wait",
     ):
         assert needle in step, needle
@@ -1766,3 +1772,49 @@ def test_a_late_edit_keeps_the_run_id() -> None:
 def test_a_recorded_skip_carries_this_runs_id() -> None:
     para = _paragraph_starting(SKILL_MD.read_text(encoding="utf-8"), "**You cannot silently skip it.**")
     assert "`red_team_skipped_run_id` set to this run's `RUN_ID`" in para
+
+
+# ---------------------------------------------------------------------------
+# Recorded gates: each question is opened before it is asked, and the sizing prompts are printed
+# ---------------------------------------------------------------------------
+
+
+def _between(text: str, start: str, end: str) -> str:
+    i = text.index(start)
+    return text[i : text.index(end, i)]
+
+
+def test_each_question_is_opened_before_it_is_asked() -> None:
+    text = SKILL_MD.read_text(encoding="utf-8")
+    step1 = _between(text, "### Step 1:", "#### Execution checkpoint")
+    assert step1.index("Open the four questions") < step1.index("`AskUserQuestion`")
+    gate = _between(text, "### Gate: Confirm Methodology and Inputs", "### Step 4:")
+    assert gate.index("--gate ms_methodology") < gate.index("**Step B:")
+    assert gate.index("open --gate ms_correct_data") < gate.index("record the reply there")
+    step6d = _between(text, "### Step 6d:", "### Step 7:")
+    assert step6d.index("--from-pre-answer") < step6d.index("ask via `AskUserQuestion`")
+    figures = _between(text, "**Two figures for one input.**", "\n\n")
+    assert figures.index("open --gate") < figures.index("ask from its `needs_input`")
+
+
+def test_the_sizing_prompts_are_printed_and_never_templated() -> None:
+    text = SKILL_MD.read_text(encoding="utf-8")
+    step5 = _between(text, "### Step 5:", "### Step 5.5")
+    assert 'dispatch_prompt.py" top_down_methodology' in step5
+    assert "dispatch_prompt.py bottom_up_methodology" in step5
+    assert "CONTEXT: TOP_DOWN_METHODOLOGY" not in text and "CONTEXT: BOTTOM_UP_METHODOLOGY" not in text
+    assert "Exit 10" in step5
+
+
+def test_the_file_list_is_closed_before_the_hand_over_is_printed() -> None:
+    text = SKILL_MD.read_text(encoding="utf-8")
+    step10 = _between(text, "### Step 10:", "## Edge Cases")
+    final = step10.index('deliverables --run-id "$RUN_ID" --artifacts-root "$ARTIFACTS_ROOT" --final || :')
+    assert final < step10.index('closing_message.py" --report')
+    assert '--run-id "$RUN_ID"' in _between(text, "### Step 9", "### Step 10:")
+
+
+def test_compose_exit_10_is_a_question_and_never_a_loop() -> None:
+    step7 = _between(SKILL_MD.read_text(encoding="utf-8"), "### Step 7:", "### Step 8:")
+    assert "Exit 10 is a question" in step7 and "never re-run compose without the answer" in step7
+    assert "`ms_methodology` is the Gate" in step7

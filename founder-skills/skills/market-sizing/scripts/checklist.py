@@ -241,11 +241,22 @@ def parse_args() -> argparse.Namespace:
             "graded_against so a checklist run against a since-changed sizing is detectable."
         ),
     )
+    p.add_argument(
+        "--inputs",
+        help=(
+            "Path to the inputs.json the grader read. When given, graded_against also records it, so a "
+            "checklist graded before a later edit to the inputs is named stale."
+        ),
+    )
     return p.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+    if args.output:
+        import _ms_gates  # noqa: PLC0415
+
+        _ms_gates.refuse_without_run_id(args.output, args.run_id)
 
     if sys.stdin.isatty():
         print("Error: pipe JSON input via stdin", file=sys.stderr)
@@ -279,6 +290,20 @@ def main() -> None:
         assert sizing is not None
         sizing_fp = _provenance.sizing_fingerprint(sizing)
 
+    inputs_fp: str | None = None
+    if args.inputs:
+        try:
+            with open(args.inputs, encoding="utf-8") as fh:
+                inputs_doc = json.load(fh)
+        except (OSError, ValueError) as e:
+            inputs_result: dict[str, Any] = {
+                "validation": {"status": "invalid", "errors": [f"--inputs {args.inputs} is not readable JSON: {e}"]}
+            }
+            if args.run_id:
+                inputs_result["metadata"] = {"run_id": args.run_id}
+            _fail_invalid(inputs_result, args.output, indent)
+        inputs_fp = _provenance.inputs_fingerprint(inputs_doc)
+
     # --- Validation (JSON error dict, exit 0) ---
     errors: list[str] = []
     if "items" not in data:
@@ -306,6 +331,8 @@ def main() -> None:
         # MUTATION-CHECKED: the stamp is a fact about what this run was checked against, not a
         # side effect of successful validation — omitting it here silently loses provenance.
         result["graded_against"] = {"sizing.json": sizing_fp}
+    if args.inputs:
+        result.setdefault("graded_against", {})["inputs.json"] = inputs_fp
 
     if args.run_id:
         result["metadata"] = {"run_id": args.run_id}

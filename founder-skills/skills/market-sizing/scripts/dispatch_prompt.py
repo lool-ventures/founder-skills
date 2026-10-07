@@ -46,16 +46,29 @@ those documents had "no machine-read copy". `ocr_uploads.py` now writes `<ocr-di
 per document; an image-only PDF the receipt does not cover is a refusal here (exit 2, naming it),
 never a prompt that silently offers less.
 
-Only `red_team` today; the generic shape is for the other dispatches once this one has proven itself
-live. Output is deterministic for fixed inputs: sorted listings, no timestamps.
+THE SIZING PROMPTS (`top_down_methodology`, `bottom_up_methodology`) were templates in SKILL.md, filled by
+hand. Printed here, the dispatch hook compares the dispatched prompt with this one; and this is the one
+script that runs before the sizing, so it is the one that can refuse it. With a gate ledger for the run it
+prints nothing (exit 10, naming the question) until the approach is recorded (`ms_methodology`) and, for each
+input the founder's materials state two figures for, which one to use (`ms_two_figures.<input>`), and while a
+question those depend on is still open. It proves a record exists, not that anyone was asked: the asked-gate
+hook reads the transcript for that. The subcommand is the context's name in lower case because the hook names
+a generator call's context from it. `red_team` likewise waits for the percent-scale question
+(`ms_pct_scale.<input>`), which the review must see answered.
+
+Output is deterministic for fixed inputs: sorted listings, no timestamps.
 
 Usage:
     dispatch_prompt.py red_team --run-id R --analysis-dir A --handoff-dir D --handoff-agent H
                       [--analysis-dir-agent A_AGENT]
     dispatch_prompt.py checklist --run-id R --analysis-dir A --handoff-dir D --handoff-agent H
                       [--analysis-dir-agent A_AGENT]
+    dispatch_prompt.py top_down_methodology|bottom_up_methodology --run-id R --analysis-dir A
+                      --handoff-dir D --handoff-agent H [--analysis-dir-agent A_AGENT]
 
-Prints the prompt. Exit 2 on a missing artifact or an image-only PDF the OCR receipt does not cover.
+Prints the prompt. Exit 2 on a missing artifact or an image-only PDF the OCR receipt does not cover; exit 10
+(nothing printed that carries a context line) while a question the prompt depends on has no answer; exit 1
+`RUN_FINISHED` on a finished run whose answer has changed.
 """
 
 from __future__ import annotations
@@ -484,6 +497,123 @@ def checklist(
     )
 
 
+# --- TOP_DOWN / BOTTOM_UP -----------------------------------------------------------------------------
+#
+# The two sizing prompts, as SKILL.md's templates had them, except the closing line: like every printed
+# prompt they end with _END, which the dispatch hook requires last and a correction goes before.
+
+_REFERENCES_NOT_NUMBERS = [
+    "REFERENCES, NOT NUMBERS: each input names where its value comes from, and the calculator reads the",
+    "value from there, so a figure is never retyped. For each input write ONE of:",
+    '  {"assumption": "<the name of a figure in validation.json>"}',
+]
+_SIZING_LINES = {
+    "top_down_methodology": [
+        "CONTEXT: TOP_DOWN_METHODOLOGY",
+        "OUTPUT_PATH: <HANDOFF_AGENT>/top_down_output.json",
+        "RUN_ID: <RUN_ID>",
+        "",
+        "You are the market-sizing agent dispatched in Context A (TOP_DOWN_METHODOLOGY).",
+        "Read inputs.json at <ANALYSIS_DIR_AGENT>/inputs.json and validation.json at",
+        "<ANALYSIS_DIR_AGENT>/validation.json.",
+        "",
+        "Using the top-down approach, size TAM/SAM/SOM from the research in validation.json.",
+        "",
+        *_REFERENCES_NOT_NUMBERS,
+        '  {"derived": {"op": "multiply"|"divide"|"to_percent", "factors": [<reference>, ...]}}  (e.g. a head-count',
+        "    times a price per customer is a money total; a ratio of two counts becomes a percentage via to_percent)",
+        '  {"estimate": <number>, "unit": "<unit>", "why": "<one sentence: why no recorded figure fits>"}',
+        "industry_total must resolve to money per year, segment_pct and share_pct to percentage points (35 means",
+        "35%, not 0.35). segment_pct narrows TAM to SAM; share_pct narrows SAM to SOM — do not swap them. A",
+        "recorded figure keeps the currency and period it was recorded with; you convert nothing.",
+        "",
+        "SIZING_BASIS: this analysis' declared basis is inputs.json's `sizing_basis`. When the research quotes",
+        "both a current-year and a forecast-year figure, reference the one matching it, not whichever the",
+        "source headlines.",
+        "",
+        "Use your Write tool to write to OUTPUT_PATH exactly this JSON:",
+        "{",
+        '  "approach": "top_down",',
+        '  "industry_total": <reference>,',
+        '  "segment_pct": <reference>,',
+        '  "share_pct": <reference>',
+        "}",
+    ],
+    # The bottom-up prompt: the same shape, with its own four inputs and the founder's own figure.
+    "bottom_up_methodology": [
+        "CONTEXT: BOTTOM_UP_METHODOLOGY",
+        "OUTPUT_PATH: <HANDOFF_AGENT>/bottom_up_output.json",
+        "RUN_ID: <RUN_ID>",
+        "",
+        "You are the market-sizing agent dispatched in Context A (BOTTOM_UP_METHODOLOGY).",
+        "Read inputs.json at <ANALYSIS_DIR_AGENT>/inputs.json and validation.json at",
+        "<ANALYSIS_DIR_AGENT>/validation.json.",
+        "",
+        "Using the bottom-up approach, size TAM/SAM/SOM from the research in validation.json.",
+        "",
+        *_REFERENCES_NOT_NUMBERS,
+        '  {"derived": {"op": "multiply"|"divide"|"to_percent", "factors": [<reference>, ...]}}  (e.g. accounts',
+        "    times seats per account is a count; revenue divided by customers is a price per customer)",
+        '  {"estimate": <number>, "unit": "<unit>", "why": "<one sentence: why no recorded figure fits>"}',
+        '  {"founder_stated": "arpu"}  (arpu only: the founder\'s own figure)',
+        "customer_count must resolve to a count, arpu to money per customer (a recorded price keeps its period;",
+        "the calculator makes it annual), serviceable_pct and target_pct to percentage points (35 means 35%,",
+        "not 0.35).",
+        "You convert nothing.",
+        "",
+        "SIZING_BASIS: if a customer_count or arpu figure exists both as a current and a forecast-year value,",
+        "reference the one matching inputs.json's `sizing_basis`.",
+        "",
+        "Use your Write tool to write to OUTPUT_PATH exactly this JSON:",
+        "{",
+        '  "approach": "bottom_up",',
+        '  "customer_count": <reference>,',
+        '  "arpu": <reference>,',
+        '  "serviceable_pct": <reference>,',
+        '  "target_pct": <reference>',
+        "}",
+    ],
+}
+_SIZING_TAIL = [
+    "Then return ONLY the receipt JSON in your final assistant message:",
+    '{"status": "complete", "output_path": "<echo of OUTPUT_PATH>"}',
+    "You never write a canonical artifact; anything else you write bypasses schema validation and run_id",
+    "stamping.",
+]
+SIZING_CONTEXTS = tuple(_SIZING_LINES)
+SIZING_NEEDS = ("inputs.json", "methodology.json", "validation.json")
+
+
+def sizing(
+    context: str,
+    run_id: str,
+    analysis_dir: str,
+    handoff_agent: str,
+    analysis_dir_agent: str,
+    *,
+    correction: str | None = None,
+    detail: str | None = None,
+) -> str:
+    """The TOP_DOWN or BOTTOM_UP prompt. FileNotFoundError names a missing artifact."""
+    missing = [f for f in SIZING_NEEDS if not os.path.isfile(os.path.join(analysis_dir, f))]
+    if missing:
+        raise FileNotFoundError(", ".join(missing))
+    text = "\n".join([*_SIZING_LINES[context], *_SIZING_TAIL]) + "\n" + _END
+    text = (
+        text.replace("<HANDOFF_AGENT>", handoff_agent.rstrip("/"))
+        .replace("<ANALYSIS_DIR_AGENT>", analysis_dir_agent.rstrip("/"))
+        .replace("<RUN_ID>", run_id)
+    )
+    return _corrected(text, correction, detail)
+
+
+def _gates_module() -> Any:
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import _ms_gates  # noqa: PLC0415
+
+    return _ms_gates
+
+
 def _detail(correction: str | None, path: str | None) -> str | None:
     """The producer's message for a producer-rejected redo, read from its file; exits 2 when it is
     missing, unreadable or empty, or when a file is given for any other correction."""
@@ -525,7 +655,7 @@ def _refuse_empty(args: argparse.Namespace, flags: tuple[str, ...]) -> None:
 
 def main() -> None:
     p = argparse.ArgumentParser(description="Generate a sub-agent dispatch prompt from identifiers on disk")
-    p.add_argument("context", choices=["red_team", "checklist"])
+    p.add_argument("context", choices=["red_team", "checklist", *SIZING_CONTEXTS])
     p.add_argument("--run-id", required=True)
     p.add_argument("--analysis-dir", required=True, help="the artifacts dir in THIS shell's namespace")
     p.add_argument(
@@ -558,6 +688,36 @@ def main() -> None:
         ),
     )
     detail = _detail(a.correction, a.detail_file)
+    if a.context in SIZING_CONTEXTS:
+        missing = [f for f in SIZING_NEEDS if not os.path.isfile(os.path.join(a.analysis_dir, f))]
+        if missing:
+            # Before the gate check: an answer the request carried is never applied to a methodology
+            # file that does not exist yet.
+            print(f"Error: required artifact missing under {a.analysis_dir}: {', '.join(missing)}", file=sys.stderr)
+            sys.exit(2)
+        g = _gates_module()
+        g.require_or_exit(
+            a.analysis_dir,
+            a.run_id,
+            [*g.two_figure_keys(a.analysis_dir), g.METHODOLOGY_GATE],
+            open_follow_ups=g.SIZING_FOLLOW_UPS,
+            by="dispatch_prompt.py",
+        )
+        sys.stdout.write(
+            sizing(
+                a.context,
+                a.run_id,
+                a.analysis_dir,
+                a.handoff_agent,
+                a.analysis_dir_agent or a.analysis_dir,
+                correction=a.correction,
+                detail=detail,
+            )
+        )
+        return
+    if a.context == "red_team":
+        g = _gates_module()
+        g.require_or_exit(a.analysis_dir, a.run_id, g.pct_scale_keys(a.analysis_dir), by="dispatch_prompt.py")
     if a.context == "checklist":
         try:
             sys.stdout.write(

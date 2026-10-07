@@ -2458,7 +2458,10 @@ _QUOTE_SLOT_RE = re.compile("\ue002(\\d+)\ue003")
 
 
 def _section_your_answers(
-    methodology: dict[str, Any] | None, inputs: dict[str, Any] | None = None, analysis_dir: str | None = None
+    methodology: dict[str, Any] | None,
+    inputs: dict[str, Any] | None = None,
+    analysis_dir: str | None = None,
+    gate_view: dict[str, Any] | None = None,
 ) -> str:
     """What the founder said after the analysis could still change, and which questions were not asked.
 
@@ -2467,7 +2470,7 @@ def _section_your_answers(
     check would block a figure outside the printed hand-over. `gate_defaults`: questions the founder
     asked not to be asked, and whose first option was taken.
     """
-    lines = _your_answers_lines(methodology, inputs, analysis_dir)
+    lines = _your_answers_lines(methodology, inputs, analysis_dir, gate_view)
     if not lines:
         return ""
     return "\n".join(["## Your Answers\n"] + [f"- {line}" for line in lines]) + "\n"
@@ -3158,13 +3161,24 @@ def _emit_coaching_payload(
     }
 
 
-def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
-    """Render inside one currency scope: the default is back to USD when this returns or raises."""
+class RevisionOwed(Exception):
+    """With a run ledger, Step 6d's unasked question is a question to ask, not a disclosure."""
+
+    def __init__(self, parameters: list[str]) -> None:
+        super().__init__(", ".join(parameters))
+        self.parameters = parameters
+
+
+def compose(dir_path: str, report_path: str | None = None, gate_view: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Render inside one currency scope: the default is back to USD when this returns or raises.
+
+    `gate_view` is the run ledger's answers (`_ms_gates.answers_view`), None for a run without one: with it,
+    "Your Answers" is read from the ledger, and an unasked revision question raises RevisionOwed."""
     with _view.render_scope():
-        return _compose(dir_path, report_path)
+        return _compose(dir_path, report_path, gate_view)
 
 
-def _compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
+def _compose(dir_path: str, report_path: str | None = None, gate_view: dict[str, Any] | None = None) -> dict[str, Any]:
     """Main composition: load artifacts, validate, assemble report."""
     # Load all artifacts
     all_names = REQUIRED_ARTIFACTS + OPTIONAL_ARTIFACTS
@@ -3255,6 +3269,8 @@ def _compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
         artifacts.get("redteam.json"),
         rounds=int(_rt_facts.get("rounds") or 0),
     )
+    if _unoffered and gate_view is not None:
+        raise RevisionOwed(_unoffered)
     if _unoffered:
         _named = ", ".join(_humanize_param(p) for p in _unoffered)
         warnings.append(
@@ -3279,7 +3295,10 @@ def _compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
     warnings.extend(
         _warn(code, message)
         for code, message in _view.downstream_staleness(
-            artifacts.get("sizing.json"), artifacts.get("sensitivity.json"), artifacts.get("checklist.json")
+            artifacts.get("sizing.json"),
+            artifacts.get("sensitivity.json"),
+            artifacts.get("checklist.json"),
+            artifacts.get("inputs.json"),
         )
     )
     if "inputs_at_review" in _rt_facts:
@@ -3402,7 +3421,7 @@ def _compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
             inputs,
             _rt_facts.get("later"),
         ),
-        _section_your_answers(methodology, inputs, dir_path),
+        _section_your_answers(methodology, inputs, dir_path, gate_view),
         _section_validation(validation_data),
         _section_sensitivity(sensitivity),
         _WARNINGS_PLACEHOLDER,
@@ -3591,7 +3610,36 @@ def main() -> None:
         sys.exit(1)
 
     report_path = os.path.abspath(args.write_md) if args.write_md else None
-    result = compose(args.dir, report_path=report_path)
+    # THE RUN'S GATE LEDGER, when it has one: the questions the analysis rests on must be recorded, an open
+    # question refuses the report, and "Your Answers" is read from the ledger. With no `run_ref.json` none of
+    # this runs.
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import _ms_gates  # noqa: PLC0415
+
+    run_id = _ms_gates.run_id_of(args.dir)
+    ledger = _ms_gates.open_ledger_or_exit(args.dir, run_id)
+    gate_view = None
+    if ledger is not None:
+        _ms_gates.require_or_exit(
+            args.dir,
+            run_id,
+            [
+                *_ms_gates.two_figure_keys(args.dir),
+                _ms_gates.METHODOLOGY_GATE,
+                *_ms_gates.pct_scale_keys(args.dir),
+            ],
+            by="compose_report.py",
+        )
+        gate_view = _ms_gates.answers_view(args.dir) or {}
+    try:
+        result = compose(args.dir, report_path=report_path, gate_view=gate_view)
+    except RevisionOwed as e:
+        _ms_gates.revision_owed(args.dir, run_id, e.parameters)
+        raise
+    if ledger is not None:
+        _ms_gates.refuse_open_gates(ledger)
+        status = sys.modules["_run_status"].load_status(ledger[1]) or {}
+        result["disclosures"] = list(status.get("disclosures") or [])
 
     if args.write_md:
         report_markdown = result.get("report_markdown", "")
@@ -3636,6 +3684,9 @@ def main() -> None:
                 file=sys.stderr,
             )
             sys.exit(2)
+
+    if ledger is not None:
+        _ms_gates.coaching_pending(ledger)
 
     if args.strict:
         blocking = [w for w in result["validation"]["warnings"] if w["severity"] in ("high", "medium")]

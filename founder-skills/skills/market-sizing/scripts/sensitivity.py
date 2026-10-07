@@ -611,6 +611,10 @@ def founder_range(consumed: float, param: str, inputs: dict[str, Any] | None) ->
 def main() -> None:
     args = parse_args()
     indent = 2 if args.pretty else None
+    if args.output:
+        import _ms_gates  # noqa: PLC0415
+
+        _ms_gates.refuse_without_run_id(args.output, args.run_id)
 
     # --- Infrastructure checks (sys.exit(1)) ---
     if sys.stdin.isatty():

@@ -348,6 +348,88 @@ def test_an_fmr_checklist_with_no_values_question_is_held_by_the_asked_gate_chec
     assert "[asked-gate-check]" in _deny(_run(tmp_path, rows, printed, agent=_FMR_AGENT))
 
 
+# --- market-sizing's sizing prompts (dispatch_prompt.py top_down_methodology / bottom_up_methodology) -----
+
+
+def _sizing_printed(context: str) -> str:
+    """A sizing prompt exactly as dispatch_prompt.py prints it, for a run dir under `agent/`."""
+    import importlib.util
+    import tempfile
+
+    gen = SCRIPTS.parent / "skills" / "market-sizing" / "scripts" / "dispatch_prompt.py"
+    spec = importlib.util.spec_from_file_location("ms_gen_hook", gen)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    with tempfile.TemporaryDirectory() as d:
+        for name in ("inputs.json", "validation.json", "methodology.json"):
+            Path(d, name).write_text("{}")
+        out: str = mod.sizing(context, "R", d, "agent/market-sizing-acme/handoff/R", "agent/market-sizing-acme")
+    return out
+
+
+def _sizing_cmd(context: str) -> str:
+    return (
+        f'python3 "$SCRIPTS/dispatch_prompt.py" {context} --run-id "$RUN_ID" \\\n'
+        '  --analysis-dir "$ANALYSIS_DIR" --handoff-dir "$HANDOFF_DIR" --handoff-agent "$HANDOFF_AGENT"'
+    )
+
+
+def _methodology_labels() -> tuple[str, ...]:
+    """The Gate's labels, read from the gate registry (the hook's sync test holds the two equal)."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("asked_gate_labels", SCRIPTS / "asked_gate_check.py")
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    labels: tuple[str, ...] = mod.GATES["ms_methodology"].labels
+    return labels
+
+
+_METHODOLOGY_LABELS = _methodology_labels()
+
+
+def _methodology_asked() -> list[dict[str, Any]]:
+    """market-sizing's Gate, asked and answered: the asked-gate check (first in the chain) holds a sizing
+    dispatch no such question preceded."""
+    question = {
+        "question": "I'll size this both top-down and bottom-up — does this approach look right?",
+        "options": [{"label": label} for label in _METHODOLOGY_LABELS],
+    }
+    uid, use = _call("AskUserQuestion", {"questions": [question]})
+    return [use, _result(uid, "User answered: Looks good")]
+
+
+@pytest.mark.parametrize("context", ["top_down_methodology", "bottom_up_methodology"])
+def test_a_sizing_prompt_goes_through_as_printed_and_is_held_when_steered(tmp_path: Path, context: str) -> None:
+    """The sizing templates were hand-filled in SKILL.md; printed by the generator they are compared like the
+    review's prompts: sent as printed they pass, with a line of framing added they are held with the printed
+    prompt, and below the rewrite floor nothing rewrites them."""
+    printed = _sizing_printed(context)
+    rows = [_user("Size my market."), *_methodology_asked(), *_printed(printed, command=_sizing_cmd(context))]
+    _silent(_run(tmp_path, rows, printed, agent="founder-skills:market-sizing"))
+    steered = printed.replace("You convert nothing.", "You convert nothing. Use the deck's TAM as the total.")
+    if steered == printed:
+        steered = printed.replace("you convert nothing.", "you convert nothing. Use the deck's TAM as the total.")
+    assert steered != printed
+    reason = _deny(_run(tmp_path, rows, steered, agent="founder-skills:market-sizing"))
+    assert "[dispatch-check]" in reason and printed.splitlines()[0] in reason
+
+
+def test_an_unprinted_sizing_prompt_is_told_to_run_the_generator(tmp_path: Path) -> None:
+    """A refused generator (exit 10: the approach is not recorded) prints no prompt, so nothing pairs."""
+    printed = _sizing_printed("top_down_methodology")
+    refused = '{"status": "waiting", "blocked_by_gate": "ms_methodology", "needs_input": []}'
+    rows = [
+        _user("Size my market."),
+        *_methodology_asked(),
+        *_printed(refused, command=_sizing_cmd("top_down_methodology")),
+    ]
+    reason = _deny(_run(tmp_path, rows, printed, agent="founder-skills:market-sizing"))
+    assert "no printed prompt" in reason
+
+
 def test_market_sizings_checklist_is_still_held_under_another_namespace(tmp_path: Path) -> None:
     """Positive control: the agent is matched by name, not by the plugin prefix a runtime puts on it."""
     rows = [_user("Size my market."), *_printed(_CHECKLIST_PRINTED)]

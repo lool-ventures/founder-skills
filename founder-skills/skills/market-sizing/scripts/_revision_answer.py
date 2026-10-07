@@ -15,7 +15,9 @@ FILENAME = "revision_answer.json"
 ANSWERS = ("deliver", "revise")
 # `founder`: the question was put to the founder. `no_questions`: the founder asked not to be asked, so
 # option 1 was taken (Step 6d); the answer is still recorded, or that run would read as "never offered".
-SOURCES = ("founder", "no_questions")
+# `host`: the request that started the run answered it (`FS_HOST_ANSWER ms_revision=deliver`), applied by
+# `record_revision_answer.py --from-pre-answer` from the run's ledger.
+SOURCES = ("founder", "no_questions", "host")
 
 
 def qualifying_parameters(redteam: Any) -> list[str]:

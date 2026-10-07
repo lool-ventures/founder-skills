@@ -28,6 +28,10 @@
     "html_writers": [
       "RUN_ID_MISMATCH"
     ],
+    "ms_producers": [
+      "RUN_ID_REQUIRED",
+      "PERIOD_NOT_WRITTEN"
+    ],
     "notices": [
       "PRE_ANSWER_IGNORED",
       "PRE_ANSWER_INVALID",
@@ -2243,18 +2247,18 @@
           "id": "change_methodology",
           "label": "Change methodology",
           "only_skills": null,
-          "pre_answerable": true,
+          "pre_answerable": false,
           "takes_value": false,
-          "terminal": true
+          "terminal": false
         },
         {
           "hidden": false,
           "id": "correct_data",
           "label": "Correct or add data",
           "only_skills": null,
-          "pre_answerable": true,
+          "pre_answerable": false,
           "takes_value": false,
-          "terminal": true
+          "terminal": false
         }
       ],
       "question": "I'll size this <top-down / bottom-up / both top-down and bottom-up> — does this approach look right?",
@@ -2368,7 +2372,7 @@
           "id": "revise",
           "label": "Revise the challenged inputs and have it reviewed once more (about 10 minutes)",
           "only_skills": null,
-          "pre_answerable": true,
+          "pre_answerable": false,
           "takes_value": false,
           "terminal": true
         }
@@ -2386,7 +2390,7 @@
       "modes": [
         "full"
       ],
-      "multi": false,
+      "multi": true,
       "no_ask_default": null,
       "options": [
         {
@@ -2406,7 +2410,9 @@
     "ms_two_figures": {
       "asked_check": "current_prompt",
       "id": "ms_two_figures",
-      "instances": null,
+      "instances": {
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.+-]{0,127}$"
+      },
       "kind": "script_built",
       "mandatory": false,
       "modes": [
@@ -2588,7 +2594,9 @@
     "`disclosures` lists `DEFAULT_TAKEN:<gate>` for an answer recorded as a default and `PRE_ANSWERED:<gate>` for one applied from a request line instead of being asked. `PRE_ANSWERED:out_of_scope_choice` means the request chose to review a deck outside the skill's stage scope, best-effort; the report and page tell the founder so.",
     "`disclosures` also lists `EXTRACTION_UNREVIEWED` when financial-model-review's extracted values went on without being reviewed, and `CORRECTIONS_SOURCE:<origin>` (`external`, `upload` or `chat`) when corrections to them were applied, naming who supplied them.",
     "A `complete` financial-model-review run returns to `running`, with `revision` + 1 and `handed_over_at` cleared, when the founder answers the cash follow-up; it completes again at the next coaching insert.",
-    "An enforcer never re-opens a finished run's answer: on a `complete` or `refused` run whose confirmed input changed, it refuses `RUN_FINISHED` and writes nothing; a changed figure after `complete` needs a new run."
+    "An enforcer never re-opens a finished run's answer: on a `complete` or `refused` run whose confirmed input changed, it refuses `RUN_FINISHED` and writes nothing; a changed figure after `complete` needs a new run.",
+    "`ms_two_figures` has one instance per input the founder stated two figures for (`FS_HOST_ANSWER ms_two_figures.arpu=typed`). The bare `FS_HOST_ANSWER ms_two_figures=<option>` answers every instance; a line naming an instance wins for that instance. Its alternatives' ids are keyed on the figure (`alt_<value>[_<period>]`), so only `typed` is known before the run.",
+    "A question the run no longer owes (its parent was answered otherwise, its condition no longer holds, or the run's mode does not ask it) is closed `not_applicable` by script; if the run owes it again it is re-opened and asked, never read as answered."
   ],
   "pages_after_coaching": {
     "cap-table": [],

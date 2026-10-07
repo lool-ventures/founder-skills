@@ -1496,15 +1496,16 @@ def assumption_rows(validation: Any, sizing: Any) -> list[dict[str, Any]]:
     return rows
 
 
-def downstream_staleness(sizing: Any, sensitivity: Any, checklist: Any) -> list[tuple[str, str]]:
+def downstream_staleness(sizing: Any, sensitivity: Any, checklist: Any, inputs: Any = None) -> list[tuple[str, str]]:
     """The steps built on the sizing must say which sizing they were built on, and it must be this one.
 
-    Only for a stamped sizing. A missing stamp is not "current": absence never upgrades.
+    Only for a stamped sizing. A missing stamp is not "current": absence never upgrades. A checklist also
+    stamped with the inputs it read (`checklist.py --inputs`) is stale when they have changed since.
     """
+    codes: list[tuple[str, str]] = _inputs_staleness(checklist, inputs)
     current = _provenance.sizing_fingerprint(sizing)
     if current is None:
-        return []
-    codes: list[tuple[str, str]] = []
+        return codes
 
     def built_on(doc: Any) -> Any:
         return _as_dict(_as_dict(doc).get("graded_against")).get("sizing.json")
@@ -1518,7 +1519,12 @@ def downstream_staleness(sizing: Any, sensitivity: Any, checklist: Any) -> list[
                 "step on the current sizing.",
             )
         )
-    if isinstance(checklist, dict) and not _is_stub(checklist) and built_on(checklist) != current:
+    if (
+        isinstance(checklist, dict)
+        and not _is_stub(checklist)
+        and built_on(checklist) != current
+        and not any(c == "CHECKLIST_STALE" for c, _ in codes)
+    ):
         codes.append(
             (
                 "CHECKLIST_STALE",
@@ -1526,6 +1532,15 @@ def downstream_staleness(sizing: Any, sensitivity: Any, checklist: Any) -> list[
             )
         )
     return codes
+
+
+def _inputs_staleness(checklist: Any, inputs: Any) -> list[tuple[str, str]]:
+    stamped = _as_dict(_as_dict(checklist).get("graded_against")).get("inputs.json")
+    if not isinstance(checklist, dict) or _is_stub(checklist) or not stamped or not isinstance(inputs, dict):
+        return []
+    if stamped == _provenance.inputs_fingerprint(inputs):
+        return []
+    return [("CHECKLIST_STALE", "This self-check was graded against an earlier version of your inputs.")]
 
 
 def _ref_name(sizing: Any, param: str) -> str | None:
@@ -1730,7 +1745,9 @@ def _stated_figure(
     return f"{_humanize_param(field)} {amount}{per}{tail}"
 
 
-def _stated_alternatives(inputs: dict[str, Any] | None, analysis_dir: str | None = None) -> list[str]:
+def _stated_alternatives(
+    inputs: dict[str, Any] | None, analysis_dir: str | None = None, gate_view: dict[str, Any] | None = None
+) -> list[str]:
     """One line per founder-stated figure the analysis did NOT use, beside the one it did.
 
     A founder whose materials state two figures for one input (a recurring rate in chat, a blended
@@ -1754,7 +1771,15 @@ def _stated_alternatives(inputs: dict[str, Any] | None, analysis_dir: str | None
             )
             if field in stated:
                 used = _stated_figure(field, stated[field], periods.get(field), sources.get(field), None, analysis_dir)
-                if str(chosen.get(field) or "").strip():
+                rec = _as_dict((gate_view or {}).get(f"ms_two_figures.{field}")) if gate_view is not None else None
+                if rec is not None and rec.get("by_request"):
+                    lines.append(
+                        f"You also gave {other}; this analysis uses {used}, the one the request that started "
+                        "this analysis named."
+                    )
+                elif (rec is not None and rec.get("resolution") == "answered") or (
+                    gate_view is None and str(chosen.get(field) or "").strip()
+                ):
                     lines.append(f"You also gave {other}; this analysis uses {used}, the one you chose.")
                 else:
                     lines.append(
@@ -1765,8 +1790,55 @@ def _stated_alternatives(inputs: dict[str, Any] | None, analysis_dir: str | None
     return lines
 
 
+# How "Your Answers" names a question the run's ledger shows was not put to the founder.
+_GATE_NAMES = {
+    "ms_methodology": "the sizing approach",
+    "ms_pct_scale": "whether a share was meant as a percent",
+    "ms_revision": "whether to revise the challenged inputs",
+    "ms_fx_rate": "the exchange rate",
+    "ms_upload_path": "where your documents are",
+}
+
+
+def _gate_name(key: str, rec: dict[str, Any]) -> str:
+    return _GATE_NAMES.get(key.partition(".")[0]) or str(rec.get("form_label") or "a question").lower()
+
+
+def _ledger_answer_lines(gate_view: dict[str, Any]) -> list[str]:
+    """With a run ledger: the questions the request answered (its instruction, never the founder's
+    confirmation) and those not asked because the founder asked not to be asked. The two-figures question
+    is stated beside its figures instead."""
+    asked_for: list[str] = []
+    defaults: list[str] = []
+    for key in sorted(gate_view):
+        rec = _as_dict(gate_view[key])
+        if key.startswith("ms_two_figures."):
+            continue
+        if rec.get("by_request"):
+            if key == "ms_methodology":
+                asked_for.append(
+                    "The sizing approach was not put to you as a question: the request that started this "
+                    "analysis accepted it."
+                )
+            elif key == "ms_revision" and rec.get("answer_id") == "deliver":
+                asked_for.append(
+                    "The request that started this analysis chose to deliver it with the outside review's "
+                    "challenges shown, instead of a revision round."
+                )
+            else:
+                asked_for.append(f"The request that started this analysis answered {_gate_name(key, rec)} for you.")
+        elif rec.get("resolution") == "default_taken" and rec.get("default_reason") == "asked_not_to_be_asked":
+            defaults.append(_gate_name(key, rec))
+    if defaults:
+        asked_for.append(f"No question was asked for these; the default was taken: {', '.join(defaults)}.")
+    return asked_for
+
+
 def _your_answers_lines(
-    methodology: dict[str, Any] | None, inputs: dict[str, Any] | None, analysis_dir: str | None = None
+    methodology: dict[str, Any] | None,
+    inputs: dict[str, Any] | None,
+    analysis_dir: str | None = None,
+    gate_view: dict[str, Any] | None = None,
 ) -> list[str]:
     """The "Your Answers" lines, for report.md and report.html alike.
 
@@ -1780,6 +1852,10 @@ def _your_answers_lines(
     raw_defaults = _as_list(m.get("gate_defaults"))
     defaults = [g.strip() for g in raw_defaults if isinstance(g, str) and g.strip()]
     unnamed = sum(1 for g in raw_defaults if not isinstance(g, str))
+    if gate_view is not None:
+        # The run's ledger is the record of what was asked: `gate_defaults` and `founder_stated_choice`, which
+        # the model writes, are not read.
+        return _stated_alternatives(inputs, analysis_dir, gate_view) + notes + _ledger_answer_lines(gate_view)
     lines = _stated_alternatives(inputs, analysis_dir) + notes
     if defaults or unnamed:
         named = ", ".join(defaults)

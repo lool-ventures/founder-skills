@@ -97,7 +97,11 @@ HELD_GATES = ("ms_two_figures", "ms_methodology", "fmr_extracted_values", "ic_de
 # Gates whose site can be asked again in one run: the founder resends a file and it fails the same way.
 # `open` on one that already has an answer supersedes that answer (reason `asked_again`), so the new
 # reply, `Stop the review` included, can be recorded. Every other recorded answer stands.
-REASK_SUPERSEDES = ("dr_input_request",)
+REASK_SUPERSEDES = ("dr_input_request", "ms_correct_data")
+# Gates whose instances are made at run time and whose bare key a request may answer for every instance at
+# once: `FS_HOST_ANSWER ms_two_figures=typed` chooses the typed figure for each input that has two. A line
+# naming an instance wins over the bare line for that instance.
+BARE_PRE_ANSWER_GATES = ("ms_two_figures",)
 
 # Rejections: exit 1, ledger and status untouched.
 REJECTION_CODES = (
@@ -188,6 +192,13 @@ CONTRACT_NOTES = (
     "cleared, when the founder answers the cash follow-up; it completes again at the next coaching insert.",
     "An enforcer never re-opens a finished run's answer: on a `complete` or `refused` run whose confirmed input "
     "changed, it refuses `RUN_FINISHED` and writes nothing; a changed figure after `complete` needs a new run.",
+    "`ms_two_figures` has one instance per input the founder stated two figures for "
+    "(`FS_HOST_ANSWER ms_two_figures.arpu=typed`). The bare `FS_HOST_ANSWER ms_two_figures=<option>` answers every "
+    "instance; a line naming an instance wins for that instance. Its alternatives' ids are keyed on the figure "
+    "(`alt_<value>[_<period>]`), so only `typed` is known before the run.",
+    "A question the run no longer owes (its parent was answered otherwise, its condition no longer holds, or the "
+    "run's mode does not ask it) is closed `not_applicable` by script; if the run owes it again it is re-opened and "
+    "asked, never read as answered.",
 )
 
 
@@ -517,7 +528,7 @@ GATES: dict[str, dict[str, Any]] = {
         "kind": "script_built",
         "question": "Your materials state more than one figure for this input. Which one should the sizing use?",
         "form_label": "Figure",
-        "instances": None,
+        "instances": {"dynamic": "input"},
         "multi": False,
         "options": (_o("typed", "The figure you typed"),),
         "option_source": "ms_alternatives",
@@ -545,8 +556,14 @@ GATES: dict[str, dict[str, Any]] = {
         "multi": False,
         "options": (
             _o("looks_good", "Looks good"),
-            _o("change_methodology", "Change methodology", effects={"opens": ("ms_methodology_change",)}),
-            _o("correct_data", "Correct or add data"),
+            # Neither closes the question: it is asked again once the approach or the data has changed.
+            _o(
+                "change_methodology",
+                "Change methodology",
+                terminal=False,
+                effects={"reopens": ("ms_methodology_change",)},
+            ),
+            _o("correct_data", "Correct or add data", terminal=False),
         ),
         "option_source": None,
         "option_variants": None,
@@ -698,9 +715,11 @@ GATES: dict[str, dict[str, Any]] = {
         "multi": False,
         "options": (
             _o("deliver", "Deliver with the challenges shown"),
+            # Not answerable ahead: the changes it opens are named by the review, which no request has seen.
             _o(
                 "revise",
                 "Revise the challenged inputs and have it reviewed once more (about 10 minutes)",
+                pre=False,
                 effects={"opens": ("ms_revision_changes",)},
             ),
         ),
@@ -724,7 +743,7 @@ GATES: dict[str, dict[str, Any]] = {
         "question": "Which changes should I make?",
         "form_label": "Changes",
         "instances": None,
-        "multi": False,
+        "multi": True,
         "options": (_o("none_of_these", "None of these"),),
         "option_source": "ms_proposed_changes",
         "option_variants": None,
@@ -2021,6 +2040,9 @@ class Ctx:
         self.paths = paths
         self.status = status or {}
         self.skill = skill
+        # The ledger as it stands in memory, inside a transaction: a predicate that reads another gate's
+        # answer reads it here, never from the status, which is re-derived only after the write.
+        self.ledger: dict[str, Any] | None = None
 
     @property
     def run_dir(self) -> str | None:
@@ -2058,7 +2080,7 @@ def _src_ctx_company_slugs(ctx: Ctx, instance: str | None) -> list[dict[str, Any
 OPTION_SOURCES: dict[str, Callable[[Ctx, str | None], list[dict[str, Any]]] | None] = {
     "dr_stage_tokens": _src_dr_stage_tokens,
     "ctx_company_slugs": _src_ctx_company_slugs,
-    "ms_alternatives": None,
+    "ms_alternatives": None,  # set below, after the run-file readers
     "ms_proposed_changes": None,
     "cp_competitor_slugs": None,
     "cp_merge_pairs": None,
@@ -2077,6 +2099,9 @@ def options_for(g: dict[str, Any], instance: str | None, ctx: Ctx) -> list[dict[
     if fn is None:
         raise Unimplemented(f"option source {source!r} is not implemented yet")
     built = fn(ctx, instance)
+    if source == "ms_alternatives":
+        # The typed figure stays first (it is the no-ask default), shown with its amount.
+        return [*(_ms_typed(ctx, instance, o) for o in opts), *built]
     if source == "ct_applicable_scenarios":
         ids = {o["id"] for o in built}
         return [o for o in opts if o["id"] in ids]
@@ -2141,6 +2166,153 @@ def _fmr_no_cash_balance(ctx: Ctx) -> bool:
     return fmr_runway_has_no_cash(runway)
 
 
+# --- market-sizing ---------------------------------------------------------------------------------
+
+_MS_SCRIPTS = os.path.join(os.path.dirname(_HERE), "skills", "market-sizing", "scripts")
+
+
+def _run_json(ctx: Ctx, name: str) -> Any:
+    """A JSON file in the run dir, or None."""
+    if ctx.run_dir is None:
+        return None
+    try:
+        return _run_status.read_json(os.path.join(ctx.run_dir, name))
+    except ValueError:
+        return None
+
+
+def _answer_id(ctx: Ctx, key: str) -> str | None:
+    """`key`'s current answer: from the in-memory ledger inside a transaction, else from the status."""
+    if ctx.ledger is not None:
+        entry = (ctx.ledger.get("gates") or {}).get(key)
+        cur = (entry or {}).get("current") if isinstance(entry, dict) else None
+        if isinstance(entry, dict) and entry.get("state") in ("answered", "open") and isinstance(cur, dict):
+            return cur.get("answer_id")
+        return None
+    gate_id, instance = parse_key(key)
+    for view in ctx.status.get("gates") or []:
+        if isinstance(view, dict) and view.get("id") == gate_id and view.get("instance") == instance:
+            cur = view.get("current")
+            if view.get("state") in ("answered", "open") and isinstance(cur, dict):
+                return cur.get("answer_id")
+    return None
+
+
+def _pred_parent_answered(parent: str, option: str) -> Callable[[Ctx, dict[str, Any], str | None], bool]:
+    """Owed while the parent's current answer is `option`."""
+
+    def fn(ctx: Ctx, g: dict[str, Any], instance: str | None) -> bool:
+        return option in str(_answer_id(ctx, parent) or "").split(",")
+
+    return fn
+
+
+def _ms_alternatives(ctx: Ctx, instance: str | None) -> list[dict[str, Any]]:
+    inputs = _run_json(ctx, "inputs.json")
+    alts = inputs.get("founder_stated_alternatives") if isinstance(inputs, dict) else None
+    got = alts.get(instance) if isinstance(alts, dict) and instance else None
+    return (
+        [a for a in got if isinstance(a, dict) and isinstance(a.get("value"), (int, float))]
+        if isinstance(got, list)
+        else []
+    )
+
+
+def _pred_ms_alternatives(ctx: Ctx, g: dict[str, Any], instance: str | None) -> bool:
+    return bool(_ms_alternatives(ctx, instance))
+
+
+def _ms_figure(value: Any, period: Any) -> str:
+    """A figure as a question shows it: plain digits (no separator, no dash a reader takes for a number)."""
+    number = int(value) if isinstance(value, float) and value.is_integer() else value
+    return f"{number} per {period}" if isinstance(period, str) and period else str(number)
+
+
+def _ms_alt_id(value: Any, period: Any) -> str:
+    """An alternative's id, keyed on the figure itself: it survives the list being rewritten after the
+    answer (the chosen figure moves into `founder_stated_inputs`, the typed one into the list)."""
+    number = int(value) if isinstance(value, float) and value.is_integer() else value
+    tail = f"_{period}" if isinstance(period, str) and re.fullmatch(r"[a-z]+", period) else ""
+    return f"alt_{number}{tail}".lower()
+
+
+def _src_ms_alternatives(ctx: Ctx, instance: str | None) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for alt in _ms_alternatives(ctx, instance):
+        oid = _ms_alt_id(alt["value"], alt.get("period"))
+        if not OPTION_ID_RE.match(oid) or any(o["id"] == oid for o in out):
+            continue
+        said = str(alt.get("label") or "").strip()
+        label = _ms_figure(alt["value"], alt.get("period")) + (f" ({said})" if said else "")
+        out.append(_o(oid, label))
+    # The question tool shows at most four options: the typed figure and three alternatives. The report
+    # still names every figure the materials stated.
+    return out[:3]
+
+
+def _ms_typed(ctx: Ctx, instance: str | None, option: dict[str, Any]) -> dict[str, Any]:
+    """The `typed` option, labelled with the figure it stands for."""
+    if option["id"] != "typed":
+        return option
+    inputs = _run_json(ctx, "inputs.json")
+    stated = inputs.get("founder_stated_inputs") if isinstance(inputs, dict) else None
+    periods = inputs.get("founder_stated_inputs_period") if isinstance(inputs, dict) else None
+    value = stated.get(instance) if isinstance(stated, dict) and instance else None
+    if not isinstance(value, (int, float)):
+        return option
+    period = periods.get(instance) if isinstance(periods, dict) else None
+    return {**option, "label": f"{option['label']}: {_ms_figure(value, period)}"}
+
+
+def _ms_qualifying_parameters(redteam: Any) -> list[str]:
+    """market-sizing's own rule for the findings that ask the revision question (`_revision_answer.py`),
+    loaded by path: the writer, compose and this list cannot disagree."""
+    path = os.path.join(_MS_SCRIPTS, "_revision_answer.py")
+    mod = sys.modules.get("_ms_revision_answer")
+    if mod is None:
+        if not os.path.isfile(path):
+            raise Unimplemented(f"market-sizing's revision rule is not reachable at {path}")
+        spec = importlib.util.spec_from_file_location("_ms_revision_answer", path)
+        if spec is None or spec.loader is None:
+            raise Unimplemented(f"cannot load {path}")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        sys.modules["_ms_revision_answer"] = mod
+    out: list[str] = mod.qualifying_parameters(redteam)
+    return out
+
+
+def _src_ms_proposed_changes(ctx: Ctx, instance: str | None) -> list[dict[str, Any]]:
+    params = _ms_qualifying_parameters(_run_json(ctx, "redteam.json"))
+    return [_o(p, str(_founder_text.humanize_token(p))) for p in params if OPTION_ID_RE.match(p)]
+
+
+def _pred_ms_pct_scale(ctx: Ctx, g: dict[str, Any], instance: str | None) -> bool:
+    sizing = _run_json(ctx, "sizing.json")
+    warnings = ((sizing.get("validation") or {}).get("warnings") if isinstance(sizing, dict) else None) or []
+    return any(
+        isinstance(w, dict) and w.get("code") == "IMPLAUSIBLE_PCT_SCALE" and w.get("field") == instance
+        for w in warnings
+    )
+
+
+OPTION_SOURCES["ms_alternatives"] = _src_ms_alternatives
+OPTION_SOURCES["ms_proposed_changes"] = _src_ms_proposed_changes
+PREDICATES.update(
+    {
+        # Only a full analysis sizes from the research; the gate's modes keep it out of a quick check.
+        "ms_full_sizing": _pred_always,
+        "ms_founder_alternatives": _pred_ms_alternatives,
+        "ms_methodology_changed": _pred_parent_answered("ms_methodology", "change_methodology"),
+        "ms_correction_requested": _pred_parent_answered("ms_methodology", "correct_data"),
+        "ms_implausible_pct_scale": _pred_ms_pct_scale,
+        # Opened by market_sizing.py when it needs the period of a founder's figure (or by the model).
+        "ms_period_unknown": _pred_always,
+        "ms_revise_chosen": _pred_parent_answered("ms_revision", "revise"),
+    }
+)
+
+
 def owed(ctx: Ctx, g: dict[str, Any], instance: str | None) -> bool:
     if ctx.mode is not None and ctx.mode not in g["modes"]:
         return False
@@ -2152,7 +2324,15 @@ def owed(ctx: Ctx, g: dict[str, Any], instance: str | None) -> bool:
 
 # Declarative binders: the files a bound answer confirmed, fingerprinted as canonical JSON.
 BINDERS: dict[str, dict[str, Any]] = {
-    "ms_methodology_files": {"kind": "json_fingerprint", "files": ("methodology.json",), "exclude": ("metadata",)},
+    # The approach the question names, and nothing else: methodology.json later takes the review's skip
+    # record, the revision record, founder notes and accepted warnings, and Step 5 may write a scope note
+    # into its rationale. None of those is a different approach.
+    "ms_methodology_files": {
+        "kind": "json_fingerprint",
+        "files": ("methodology.json",),
+        "exclude": ("metadata",),
+        "include": ("approach_chosen",),
+    },
     "ic_score_dimensions": {"kind": "json_fingerprint", "files": ("score_dimensions.json",), "exclude": ("metadata",)},
     "ct_cap_base_fields": {"kind": "json_fingerprint", "files": ("inputs.json",), "exclude": ("metadata",)},
     "cp_landscape_draft": {"kind": "json_fingerprint", "files": ("landscape_draft.json",), "exclude": ("metadata",)},
@@ -2186,6 +2366,8 @@ def binding(ctx: Ctx, name: str | None) -> dict[str, Any] | None:
             doc = {"unreadable": True}
         if isinstance(doc, dict):
             doc = {k: v for k, v in doc.items() if k not in spec["exclude"]}
+            if "include" in spec:
+                doc = {k: v for k, v in doc.items() if k in spec["include"]}
         docs.append(doc)
     canon = json.dumps(docs, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return {"binder": name, "fingerprint": hashlib.sha256(canon.encode("utf-8")).hexdigest()}
@@ -2491,7 +2673,10 @@ def _supersede(ledger: dict[str, Any], entry: dict[str, Any], by: str, reason: s
     """The one route that re-asks an answered gate: the answer is kept in history as `superseded`, and the
     gate re-opens with a fresh `opened_at`. Reached by a changed binding (`binding_changed`), a registered
     `reopens`, a re-asked site (`asked_again`, REASK_SUPERSEDES), a dedicated writer putting a closed question
-    again (`emitted_again`), and a refused compose re-opening a stage question (`compose_refused:<code>`)."""
+    again (`emitted_again`), a refused compose re-opening a stage question (`compose_refused:<code>`), and
+    market-sizing's compose finding the review now names more than the revision answer covered
+    (`review_names_more`); and a gate `settle_owed` had closed as no longer owed that the run owes again
+    (`owed_again`)."""
     _event(ledger, entry, "superseded", by, reason=reason, previous=entry["current"])
     entry["current"] = None
     entry["supersessions"] = int(entry.get("supersessions") or 0) + 1
@@ -2535,6 +2720,9 @@ def check_note(note: str | None) -> None:
         raise GateRejection("NOTE_INVALID", f"a note must be at most {NOTE_MAX} characters with no NUL")
 
 
+NONE_OF_THESE = "none_of_these"
+
+
 def _resolve_options(
     ctx: Ctx, g: dict[str, Any], key: str, instance: str | None, answer_ids: list[str] | None, label: str | None
 ) -> list[dict[str, Any]]:
@@ -2542,6 +2730,8 @@ def _resolve_options(
     every = list(_pick(g["options"], instance) or ())
     if answer_ids and len(answer_ids) > 1 and not g["multi"]:
         raise GateRejection("OPTION_UNLISTED", f"{key} takes one option, not {len(answer_ids)}")
+    if answer_ids and len(answer_ids) > 1 and NONE_OF_THESE in answer_ids:
+        raise GateRejection("OPTION_UNLISTED", f"{key}: {NONE_OF_THESE!r} is answered alone")
     if answer_ids:
         picked = []
         for aid in answer_ids:
@@ -2552,7 +2742,10 @@ def _resolve_options(
             picked.append(_match_option(options, aid, None, key))
         return picked
     if g["multi"] and label and ", " in label:
-        return [_match_option(options, None, part, key) for part in label.split(", ")]
+        picked = [_match_option(options, None, part, key) for part in label.split(", ")]
+        if any(o["id"] == NONE_OF_THESE for o in picked):
+            raise GateRejection("OPTION_UNLISTED", f"{key}: {NONE_OF_THESE!r} is answered alone")
+        return picked
     return [_match_option(options, None, label, key)]
 
 
@@ -2820,8 +3013,14 @@ def parse_request(text: str, skill: str) -> tuple[str | None, dict[str, dict[str
             if kw not in ("ANSWER", "VALUE", "NOTE") or not rest.startswith(" ") or "=" not in rest:
                 raise ValueError("not a recognised FS_HOST_ line")
             key, _, payload = rest[1:].partition("=")
-            gate_id, instance, g = check_key(key.strip(), skill)
             key = key.strip()
+            if key in BARE_PRE_ANSWER_GATES:
+                # The bare key answers every instance of the gate (BARE_PRE_ANSWER_GATES).
+                gate_id, instance, g = key, None, gate_def(key)
+                if g["skill"] not in (skill, SHARED):
+                    raise GateRejection("GATE_FOREIGN", f"{key!r} belongs to {g['skill']}, not {skill}")
+            else:
+                gate_id, instance, g = check_key(key, skill)
             if kw == "NOTE":
                 check_note(payload)
                 notes[key] = (payload, line)
@@ -2873,6 +3072,10 @@ def store_pre_answers(ledger: dict[str, Any], pre: dict[str, dict[str, Any]], by
         )
         if same:
             continue
+        if key in BARE_PRE_ANSWER_GATES:
+            # No entry of its own: each instance takes it when it is opened (`pending_pre_answer`).
+            stored[key] = {**new, "stored_at": _run_status.now_iso(), "applied_at": None}
+            continue
         entry = _entry(ledger, key)
         if entry["state"] is not None and _terminal(entry):
             _event(ledger, entry, "pre_answer_ignored", by, raw=new["raw"])
@@ -2883,8 +3086,18 @@ def store_pre_answers(ledger: dict[str, Any], pre: dict[str, dict[str, Any]], by
 
 
 def pending_pre_answer(ledger: dict[str, Any], key: str) -> dict[str, Any] | None:
-    """A stored, not yet applied pre-answer for `key`. A gate's own writer applies it."""
-    pa = (ledger.get("pre_answers") or {}).get(key)
+    """A stored, not yet applied pre-answer for `key`. A gate's own writer applies it.
+
+    For an instance of a BARE_PRE_ANSWER_GATES gate with no line of its own, the bare line is copied to
+    the instance's key the first time it is asked for, so each instance applies (and records) it once."""
+    stored = ledger.get("pre_answers") or {}
+    pa = stored.get(key)
+    gate_id, _, instance = key.partition(".")
+    if pa is None and instance and gate_id in BARE_PRE_ANSWER_GATES:
+        bare = stored.get(gate_id)
+        if isinstance(bare, dict):
+            pa = {**bare, "applied_at": None, "from": gate_id}
+            ledger.setdefault("pre_answers", {})[key] = pa
     if isinstance(pa, dict) and pa.get("applied_at") is None:
         return pa
     return None
@@ -3079,6 +3292,8 @@ def option_disclosures(entry: dict[str, Any]) -> list[str]:
 def resume_prompt(ledger: dict[str, Any]) -> str:
     lines = [f"Resume the {ledger['skill']} run.", f"FS_HOST_RUN_ID={ledger['run_id']}"]
     for pa in (ledger.get("pre_answers") or {}).values():
+        if pa.get("from"):
+            continue  # an instance's copy of a bare line, which is listed once, as it was sent
         lines.extend(pa.get("raw") or [])
     return "\n".join(lines) + "\n"
 
@@ -3097,10 +3312,15 @@ def transact(
             raise _run_status.RunStatusError("RUN_NOT_FOUND", f"no run status at {paths.status}")
         ledger = load_ledger(paths)
         ctx = Ctx(paths, status, skill or str(ledger.get("skill")))
+        ctx.ledger = ledger
         before_ledger = copy.deepcopy(ledger)
         before_status = copy.deepcopy(status)
+        # Before and after every transaction, read-only ones included: a gate the run stopped owing since the
+        # last write is closed, and one it owes again is re-opened, before anything reads or records it.
+        settle_owed(ctx, ledger, "script")
         out = fn(ctx, ledger, status)
         declined = bool(out.get("declined")) if isinstance(out, dict) else False
+        settle_owed(ctx, ledger, "script")
         if ledger != before_ledger:
             _run_status.atomic_write_json(paths.ledger, ledger)
             derive_status(ctx, ledger, status, declined=declined)
@@ -3199,6 +3419,57 @@ def open_gates(ctx: Ctx, ledger: dict[str, Any], keys: list[str], *, by: str = R
     if pending_other:
         out["pre_answer_applied_by"] = {k: GATES[parse_key(k)[0]]["writer"] for k in pending_other}
     return out
+
+
+CLOSED_NOT_OWED = "not_owed"
+
+
+def _closed_by_settle(entry: dict[str, Any]) -> bool:
+    """The entry's last event is `settle_owed` closing it: it was never answered, only stopped being owed."""
+    history = entry.get("history") or []
+    last = history[-1] if history else {}
+    return entry.get("state") == "not_owed" and last.get("event") == "closed" and last.get("reason") == CLOSED_NOT_OWED
+
+
+def settle_owed(ctx: Ctx, ledger: dict[str, Any], by: str) -> dict[str, list[str]]:
+    """Keep the ledger's open gates the ones this run owes, in memory.
+
+    An open gate the run no longer owes is closed (`not_applicable / script`, reason `not_owed`): a follow-up
+    whose parent was answered otherwise, a held decline the scores no longer make, a figure choice once the
+    materials state one figure. Left open it could never be answered (refused as not owed) and would hold the
+    run open. A gate closed that way that the run owes again is re-opened, so it is asked: it was never
+    answered, and an enforcer must never read its closure as an answer. A predicate that cannot be evaluated
+    leaves its gate as it is. Writes nothing itself; the caller writes when the ledger changed.
+
+    A finished run (`complete` or `refused`) is left exactly as it is: its answers never move (RUN_FINISHED),
+    and a gate re-opened there could never be answered. A run that reopens (financial-model-review's cash
+    reply) is `running` again before the next transaction settles it."""
+    closed: list[str] = []
+    reopened: list[str] = []
+    if ctx.status.get("status") in _run_status.FINAL_STATUSES:
+        return {"closed": closed, "reopened": reopened}
+    for key, entry in (ledger.get("gates") or {}).items():
+        if not isinstance(entry, dict) or entry.get("gate") not in GATES:
+            continue
+        state = entry.get("state")
+        if state != "open" and not _closed_by_settle(entry):
+            continue
+        g = GATES[entry["gate"]]
+        if g["skill"] not in (ctx.skill, SHARED):
+            continue
+        try:
+            owes = owed(ctx, g, entry.get("instance"))
+        except Unimplemented:
+            continue
+        if state == "open" and not owes:
+            entry["state"] = "not_owed"
+            entry["current"] = _current([], None, None, resolution="not_applicable", basis="script")
+            _event(ledger, entry, "closed", by, reason=CLOSED_NOT_OWED)
+            closed.append(key)
+        elif state == "not_owed" and owes:
+            _supersede(ledger, entry, by, "owed_again")
+            reopened.append(key)
+    return {"closed": closed, "reopened": reopened}
 
 
 def close_unowed_for_mode(ledger: dict[str, Any], mode: str, by: str) -> list[str]:
@@ -3433,6 +3704,9 @@ CLI_CODES = {
     "html_writers": ["RUN_ID_MISMATCH"],
     # financial-model-review's producers: a call into a bound review dir that names no run.
     "fmr_producers": ["RUN_ID_REQUIRED"],
+    # market-sizing's producers and prompt generator: a call into a bound analysis dir that names no run.
+    # PERIOD_NOT_WRITTEN: the period of a founder's figure was answered but never written into inputs.json.
+    "ms_producers": ["RUN_ID_REQUIRED", "PERIOD_NOT_WRITTEN"],
     "usage": ["USAGE"],
     "notices": ["PRE_ANSWER_IGNORED", "PRE_ANSWER_INVALID", "PRE_ANSWER_NOT_APPLIED"],
 }

@@ -952,7 +952,12 @@ SKILL_MD_CEILING: dict[str, int] = {
     # delivery left the host's own after-delivery summary rule as the last word, and the model rewrote
     # the hand-over. Beside the closer, its printed archive offer is the only offer made, and a connected
     # folder is written to only if the founder asks.
-    "market-sizing": 107_276,
+    # 107,276 -> 106,282 (-994), LOWERED, commit 6 (gates): the three catalog sections out (-1,585); the
+    # TOP_DOWN/BOTTOM_UP templates out, printed by dispatch_prompt.py (-3,779); Step 0 starts the run's
+    # record, the slug block binds it, Step 1 and every question site open, ask and record, exit 10 is a
+    # question at Steps 5 and 7, the quick check finishes, Step 9's page carries the run id and Step 10
+    # closes the file list (+4,370).
+    "market-sizing": 106_282,
     # fmr raised for two founder-facing-correctness items measured in a live run: the CHECKLIST
     # dispatch now forbids citing our artifact filenames in evidence (that run put `inputs.json` in 10
     # items' evidence, printed verbatim into the founder's report), and the producer pipe passes
@@ -4513,12 +4518,12 @@ def test_no_shipped_text_carries_a_host_answer_line_for_a_gate_a_hook_reads() ->
 # --- recorded gates ----------------------------------------------------------------------------------------
 
 # The skills whose Step 0 starts the run's record; each skill's wiring commit adds itself.
-WIRED = ("deck-review", "financial-model-review")
+WIRED = ("deck-review", "financial-model-review", "market-sizing")
 # `record_gate_answer.py open` lines per SKILL.md, the companion to ASKUSER_MENTIONS: an open site added or
 # removed changes this count, and the gate-site test in the skill's own contract file says which.
 OPEN_LINES: dict[str, int] = {
     "deck-review": 2,
-    "market-sizing": 0,
+    "market-sizing": 2,
     "financial-model-review": 2,
     "ic-sim": 0,
     "competitive-positioning": 0,

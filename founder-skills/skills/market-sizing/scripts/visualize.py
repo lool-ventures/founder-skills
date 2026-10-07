@@ -1702,7 +1702,7 @@ def _compose_html(dir_path: str) -> str:
         inputs,
         _rt_facts.get("later"),
     )
-    _answers = _view._your_answers_lines(artifacts.get("methodology.json"), inputs, dir_path)
+    _answers = _view._your_answers_lines(artifacts.get("methodology.json"), inputs, dir_path, _gate_view(dir_path))
     answers_html = (
         "<section>\n            <h2>Your Answers</h2>\n            <ul>"
         + "".join(f"<li>{_esc(line)}</li>" for line in _answers)
@@ -1837,6 +1837,14 @@ def _compose_html(dir_path: str) -> str:
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
+
+
+def _gate_view(dir_path: str) -> dict[str, Any] | None:
+    """The run ledger's answers, as compose reads them for "Your Answers"; None for a run without one."""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import _ms_gates
+
+    return _ms_gates.answers_view(dir_path)
 
 
 def _run_ref_module() -> ModuleType:

@@ -119,6 +119,10 @@ _SCORING_REASON = (
     "the scoring instructions go out exactly as the prompt generator printed them, with nothing added, "
     "removed or reworded -- anything the scorer should know belongs in the files it reads, not the prompt"
 )
+_SIZING_REASON = (
+    "the sizing instructions go out exactly as the prompt generator printed them, with nothing added, removed "
+    "or reworded -- anything the sizing should know belongs in the research it reads, not the prompt"
+)
 PAIRS: dict[tuple[str, str], str] = {
     ("CONTEXT: RED_TEAM", "market-sizing-redteam"): _REVIEW_REASON,
     ("CONTEXT: CHECKLIST", "market-sizing"): _REVIEW_REASON,
@@ -130,6 +134,10 @@ PAIRS: dict[tuple[str, str], str] = {
     # financial-model-review's grader (fmr_dispatch_prompt.py): kept runs sent it a prompt missing most of
     # the template's sentences.
     ("CONTEXT: CHECKLIST", "financial-model-review"): _REVIEW_REASON,
+    # market-sizing's sizing prompts (dispatch_prompt.py top_down_methodology / bottom_up_methodology): they
+    # were hand-filled templates, and the generator is what refuses them until the approach is recorded.
+    ("CONTEXT: TOP_DOWN_METHODOLOGY", "market-sizing"): _SIZING_REASON,
+    ("CONTEXT: BOTTOM_UP_METHODOLOGY", "market-sizing"): _SIZING_REASON,
 }
 CONTEXTS = tuple(dict.fromkeys(context for context, _ in PAIRS))
 END = "Do NOT write any file other than OUTPUT_PATH."

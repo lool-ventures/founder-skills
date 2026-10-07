@@ -1019,3 +1019,165 @@ def test_a_financial_model_review_resume_whose_host_skipped_the_run_id_asks_the_
     st = h.status(root, run_id)
     assert (st["status"], st["code"]) == ("waiting", "PRE_ANSWER_UNLISTED")
     assert any(n["code"] == "PRE_ANSWER_NOT_APPLIED" for n in st["notices"])
+
+
+# --- market-sizing: a resume at the approach question ------------------------------------------------------
+
+MS_SCRIPTS = h.SKILLS / "market-sizing" / "scripts"
+# What Steps 2-3 wrote before the approach question: a resume at the Gate never rewrites them.
+MS_KEPT_ON_RESUME = frozenset(("inputs_json", "methodology_json"))
+
+
+def _ms_first_invocation(tmp: Path) -> tuple[Path, str, Path]:
+    root, run_id, run_dir = h.start_bound(tmp, "market-sizing")
+    rec = lambda *a: _fmr_ok(h.record(root, run_id, *a))  # noqa: E731
+    keys = ("ctx_basics.company_name", "ctx_basics.stage", "ctx_basics.sector", "ctx_basics.geography")
+    rec("open", *[a for k in keys for a in ("--gate", k)])
+    rec(
+        "answer",
+        "--gate",
+        "ctx_basics.company_name",
+        "--answer-id",
+        "use_derived",
+        "--value",
+        "Example Co",
+        "--gate",
+        "ctx_basics.stage",
+        "--answer-id",
+        "seed",
+        "--gate",
+        "ctx_basics.sector",
+        "--answer-id",
+        "use_derived",
+        "--value",
+        "B2B SaaS",
+        "--gate",
+        "ctx_basics.geography",
+        "--answer-id",
+        "use_derived",
+        "--value",
+        "US",
+    )
+    _fmr_ok(
+        h.run(
+            h.SHARED / "founder_context.py",
+            "init",
+            "--company-name",
+            "Example Co",
+            "--stage",
+            "seed",
+            "--sector",
+            "B2B SaaS",
+            "--geography",
+            "US",
+            "--artifacts-root",
+            str(root),
+            "--run-id",
+            run_id,
+            "--skill",
+            "market-sizing",
+        )
+    )
+    inputs = {
+        "company_name": "Example Co",
+        "currency": "USD",
+        "founder_stated_inputs": {"arpu": 90},
+        "founder_stated_inputs_period": {"arpu": "month"},
+        "founder_stated_alternatives": {"arpu": [{"value": 110, "period": "month", "source": "chat"}]},
+        "metadata": {"run_id": run_id},
+    }
+    (run_dir / "inputs.json").write_text(json.dumps(inputs), encoding="utf-8")
+    methodology = {"approach_chosen": "bottom_up", "rationale": "x", "metadata": {"run_id": run_id}}
+    (run_dir / "methodology.json").write_text(json.dumps(methodology), encoding="utf-8")
+    rec("open", "--gate", "ms_two_figures.arpu")
+    rec("answer", "--gate", "ms_two_figures.arpu", "--answer-id", "typed")
+    _wait(root, run_id, "ms_methodology")
+    return root, run_id, run_dir
+
+
+def test_a_market_sizing_resume_at_the_approach_question_rewrites_only_what_follows_it(tmp_path: Path) -> None:
+    root, run_id, run_dir = _ms_first_invocation(tmp_path)
+    for f in run_dir.glob("*.json"):
+        _age(f)
+    out = _out(
+        _fmr_ok(h.start(root, "market-sizing", f"FS_HOST_RUN_ID={run_id}\nFS_HOST_ANSWER ms_methodology=looks_good\n"))
+    )
+    assert (out["resume"], out["resume_step"]) == (1, "3")
+    _fmr_ok(
+        h.run(
+            h.SHARED / "founder_context.py",
+            "read",
+            "--artifacts-root",
+            str(root),
+            "--run-id",
+            run_id,
+            "--skill",
+            "market-sizing",
+        )
+    )
+    _fmr_ok(h.bind(root, run_id, run_dir, "example-co"))
+    opened = json.loads(_fmr_ok(h.record(root, run_id, "open", "--gate", "ms_methodology")).stdout)
+    assert opened["applied"] == "pre_answer"
+    # Step 4, then the sizing: the real generator prints, the real calculator sizes by reference.
+    validation = {
+        "sources": [{"title": "Example Report", "url": "https://example.org/r"}],
+        "assumptions": [
+            {
+                "name": "accounts",
+                "value": 42000,
+                "unit": "count",
+                "category": "sourced",
+                "source_title": "Example Report",
+                "source_url": "https://example.org/r",
+            },
+            {"name": "reachable", "value": 30, "unit": "percent_points", "category": "derived"},
+            {"name": "capture", "value": 4, "unit": "percent_points", "category": "agent_estimate"},
+        ],
+        "metadata": {"run_id": run_id},
+    }
+    (run_dir / "validation.json").write_text(json.dumps(validation), encoding="utf-8")
+    hand = run_dir / "handoff" / run_id
+    _fmr_ok(
+        h.run(
+            MS_SCRIPTS / "dispatch_prompt.py",
+            "bottom_up_methodology",
+            "--run-id",
+            run_id,
+            "--analysis-dir",
+            str(run_dir),
+            "--handoff-dir",
+            str(hand),
+            "--handoff-agent",
+            str(hand),
+        )
+    )
+    refs = {
+        "approach": "bottom_up",
+        "customer_count": {"assumption": "accounts"},
+        "serviceable_pct": {"assumption": "reachable"},
+        "arpu": {"founder_stated": "arpu"},
+        "target_pct": {"assumption": "capture"},
+    }
+    _fmr_ok(
+        h.run(
+            MS_SCRIPTS / "market_sizing.py",
+            "--stdin",
+            "--run-id",
+            run_id,
+            "--validation",
+            str(run_dir / "validation.json"),
+            "--inputs",
+            str(run_dir / "inputs.json"),
+            "-o",
+            str(run_dir / "sizing.json"),
+            stdin=json.dumps(refs),
+        )
+    )
+    (run_dir / "report.md").write_text("# Report\n", encoding="utf-8")
+    st = _complete(root, run_id)
+
+    entry = st["invocations"][1]
+    untouched = {k for k in entry["untouched_since_resume"] if not k.startswith("handoff_")}
+    assert untouched == MS_KEPT_ON_RESUME
+    touched = entry["touched_since_resume"]
+    assert {"validation_json", "sizing_json", "report_md"} <= set(touched)

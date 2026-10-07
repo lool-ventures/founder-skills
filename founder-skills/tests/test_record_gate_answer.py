@@ -190,21 +190,22 @@ def test_the_same_answer_is_unchanged_and_a_different_one_stands_refused(tmp_pat
     _rejected(root, run_id, other, "ANSWER_STANDS", before)
 
 
-def test_after_hold_replaces_a_held_answer_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _owed(monkeypatch, "ms_full_sizing")
-    root, run_id, _rd = h.start_bound(tmp_path, "market-sizing")
-    _rec(root, run_id, "ms_methodology", answer_ids=["looks_good"])
+def test_after_hold_replaces_a_held_answer_once(tmp_path: Path) -> None:
+    # A held gate with two terminal options (market-sizing's methodology has one since its other two
+    # options ask the question again).
+    root, run_id, _rd = h.start_bound(tmp_path, "financial-model-review")
+    _rec(root, run_id, "fmr_extracted_values", answer_ids=["values_ok"])
     with pytest.raises(g.GateRejection) as e:
-        _rec(root, run_id, "ms_methodology", answer_ids=["correct_data"])
+        _rec(root, run_id, "fmr_extracted_values", answer_ids=["proceed_unreviewed"])
     assert e.value.code == "ANSWER_STANDS"
-    _rec(root, run_id, "ms_methodology", answer_ids=["correct_data"], after_hold=True)
-    entry = h.ledger(root, run_id)["gates"]["ms_methodology"]
+    _rec(root, run_id, "fmr_extracted_values", answer_ids=["proceed_unreviewed"], after_hold=True)
+    entry = h.ledger(root, run_id)["gates"]["fmr_extracted_values"]
     assert entry["replaced_after_hold"] is True
     assert entry["current"]["asked_evidence"] == "after_hold"
     assert "replaced_after_hold" in [ev["event"] for ev in entry["history"]]
     before = h.snapshot(root, run_id)
     with pytest.raises(g.GateRejection) as e:
-        _rec(root, run_id, "ms_methodology", answer_ids=["looks_good"], after_hold=True)
+        _rec(root, run_id, "fmr_extracted_values", answer_ids=["values_ok"], after_hold=True)
     assert e.value.code == "AFTER_HOLD_USED"
     assert h.snapshot(root, run_id) == before
 
@@ -375,9 +376,9 @@ def test_require_is_ok_waiting_or_not_owed(tmp_path: Path) -> None:
 
 
 def test_an_unwired_gate_exits_2(tmp_path: Path) -> None:
-    root, run_id, _rd = h.start_bound(tmp_path, "market-sizing")
+    root, run_id, _rd = h.start_bound(tmp_path, "ic-sim")
     before = h.snapshot(root, run_id)
-    proc = h.record(root, run_id, "open", "--gate", "ms_methodology")
+    proc = h.record(root, run_id, "open", "--gate", "ic_decline_confirmation")
     assert proc.returncode == 2 and _out(proc)["code"] == "GATE_NOT_WIRED"
     assert h.snapshot(root, run_id) == before
 
@@ -578,3 +579,86 @@ def test_an_unanswered_pool_basis_question_takes_the_first_option(tmp_path: Path
         g.resolve_default("ct_pool_basis", gate, "asked_unanswered", "pre_money")
     with pytest.raises(g.GateRejection):
         g.resolve_default("ct_option_pool", g.GATES["ct_option_pool"], "asked_unanswered", None)
+
+
+# --- settle_owed: an open gate the run no longer owes is closed; owed again, it is asked again --------------
+
+
+def _pct_warning(run_dir: Path, run_id: str, *, on: bool) -> None:
+    warnings = [{"field": "target_pct", "code": "IMPLAUSIBLE_PCT_SCALE", "message": "x"}] if on else []
+    body = {"validation": {"status": "valid", "errors": [], "warnings": warnings}, "metadata": {"run_id": run_id}}
+    (run_dir / "sizing.json").write_text(json.dumps(body), encoding="utf-8")
+
+
+def test_a_gate_the_run_stops_owing_is_closed_by_a_read_only_transaction(tmp_path: Path) -> None:
+    """The strand: a gate open, then not owed, and every call that could clear it either writes nothing (an
+    enforcer's require returns not owed) or is refused as not owed. The pass runs on every transaction."""
+    root, run_id, run_dir = h.start_bound(tmp_path, "market-sizing")
+    key = "ms_pct_scale.target_pct"
+    _pct_warning(run_dir, run_id, on=True)
+    _tx(root, run_id, lambda ctx, ledger, st: g.open_gates(ctx, ledger, [key]))
+    assert h.status(root, run_id)["waiting_on"] == key
+    _pct_warning(run_dir, run_id, on=False)
+    _tx(root, run_id, lambda ctx, ledger, st: None)
+    entry = h.ledger(root, run_id)["gates"][key]
+    assert entry["state"] == "not_owed" and entry["current"]["resolution_basis"] == "script"
+    assert h.status(root, run_id)["status"] == "running"
+
+
+def test_a_transaction_with_nothing_to_settle_writes_nothing(tmp_path: Path) -> None:
+    root, run_id, _rd = h.start_bound(tmp_path, "market-sizing")
+    before = h.snapshot(root, run_id)
+    _tx(root, run_id, lambda ctx, ledger, st: None)
+    assert h.snapshot(root, run_id) == before
+
+
+def test_a_gate_closed_as_not_owed_is_asked_again_once_owed_and_never_read_as_answered(tmp_path: Path) -> None:
+    root, run_id, run_dir = h.start_bound(tmp_path, "market-sizing")
+    key = "ms_pct_scale.target_pct"
+    _pct_warning(run_dir, run_id, on=True)
+    _tx(root, run_id, lambda ctx, ledger, st: g.open_gates(ctx, ledger, [key]))
+    _pct_warning(run_dir, run_id, on=False)
+    _tx(root, run_id, lambda ctx, ledger, st: None)
+    _pct_warning(run_dir, run_id, on=True)
+    got = _tx(root, run_id, lambda ctx, ledger, st: g.require_terminal(ctx, ledger, key))
+    assert got == "waiting", "an enforcer must not read the closure as an answer"
+    entry = h.ledger(root, run_id)["gates"][key]
+    assert entry["state"] == "open" and entry["current"] is None
+    assert [e["reason"] for e in entry["history"] if e["event"] == "superseded"] == ["owed_again"]
+    assert h.status(root, run_id)["waiting_on"] == key
+
+
+def test_a_gate_answered_and_then_not_owed_keeps_its_answer(tmp_path: Path) -> None:
+    """Only an OPEN gate is closed, and only one the pass closed is re-opened: an answer stands."""
+    root, run_id, run_dir = h.start_bound(tmp_path, "market-sizing")
+    key = "ms_pct_scale.target_pct"
+    _pct_warning(run_dir, run_id, on=True)
+    _rec(root, run_id, key, answer_ids=["as_given"])
+    _pct_warning(run_dir, run_id, on=False)
+    _tx(root, run_id, lambda ctx, ledger, st: None)
+    _pct_warning(run_dir, run_id, on=True)
+    _tx(root, run_id, lambda ctx, ledger, st: None)
+    entry = h.ledger(root, run_id)["gates"][key]
+    assert entry["state"] == "answered" and entry["current"]["answer_id"] == "as_given"
+
+
+def test_a_finished_run_is_never_settled(tmp_path: Path) -> None:
+    """A gate the pass closed, owed again only after the run completed: a read-only `require` on the complete
+    run changes nothing (no re-open the run could never answer) and the run stays complete."""
+    root, run_id, run_dir = h.start_bound(tmp_path, "market-sizing")
+    key = "ms_pct_scale.target_pct"
+    _pct_warning(run_dir, run_id, on=True)
+    _tx(root, run_id, lambda ctx, ledger, st: g.open_gates(ctx, ledger, [key]))
+    _pct_warning(run_dir, run_id, on=False)
+    _tx(root, run_id, lambda ctx, ledger, st: None)
+    assert h.ledger(root, run_id)["gates"][key]["state"] == "not_owed"
+    rs.update(rs.run_paths(str(root), run_id), lambda s: (s.update(coaching="inserted"), rs.mark_complete(s)))
+    _pct_warning(run_dir, run_id, on=True)
+    before = h.snapshot(root, run_id)
+    _tx(root, run_id, lambda ctx, ledger, st: None)
+    # The run's one unanswered question is refused, not asked: nothing loops on a delivered run.
+    proc = h.record(root, run_id, "require", "--gate", "ms_methodology")
+    assert proc.returncode == 1 and json.loads(proc.stdout)["code"] == "RUN_FINISHED", proc.stdout
+    assert h.snapshot(root, run_id) == before
+    assert h.status(root, run_id)["status"] == "complete"
+    assert h.ledger(root, run_id)["gates"][key]["state"] == "not_owed"

@@ -14,8 +14,9 @@ dispatch, as `two_figures_check.py` does for market-sizing's figures.
 
 WHICH DISPATCH. `ROWS` maps (context, agent) to the gate it follows. A row is enabled only once its skill
 asks the question with the labels below, so that an older wording is never held; financial-model-review's
-is. A dispatch no row names returns before anything is loaded or read. The context is read as every dispatch
-check reads a first line (`dispatch_type_check.context_of`), the agent after our plugin's prefix.
+and market-sizing's are. A dispatch no row names returns before anything is loaded or read. The context is
+read as every dispatch check reads a first line (`dispatch_type_check.context_of`), the agent after our
+plugin's prefix.
 
 THE WINDOW. From the founder's message that started this run to the dispatch, across later messages:
 a question asked in an earlier message of the same run counts (corrections typed in a new message, a
@@ -147,8 +148,13 @@ PLANNED_ROWS: dict[tuple[str, str], str] = {
     ("CHECKLIST", "financial-model-review"): "fmr_extracted_values",
     ("POST_COMPOSE_COACHING", "ic-sim"): "ic_decline_confirmation",
 }
-# Enabled when the skill asks with the registry's labels: financial-model-review's values check (Step 3.6).
-ROWS: dict[tuple[str, str], str] = {("CHECKLIST", "financial-model-review"): "fmr_extracted_values"}
+# Enabled when the skill asks with the registry's labels: financial-model-review's values check (Step 3.6)
+# and market-sizing's approach (its Gate, before the two sizing dispatches).
+ROWS: dict[tuple[str, str], str] = {
+    ("CHECKLIST", "financial-model-review"): "fmr_extracted_values",
+    ("TOP_DOWN_METHODOLOGY", "market-sizing"): "ms_methodology",
+    ("BOTTOM_UP_METHODOLOGY", "market-sizing"): "ms_methodology",
+}
 
 _SLOT_RE = re.compile(r"<[^<>]*>")
 _START_RE = re.compile(r"(?<![\w-])run_status\.py\b[^\n]*\sstart\b")

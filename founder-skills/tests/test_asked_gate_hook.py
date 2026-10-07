@@ -155,13 +155,17 @@ def _start(skill: str) -> list[dict[str, Any]]:
 # --- the shipped table -------------------------------------------------------------------------------
 
 
-SHIPPED_ROWS = {("CHECKLIST", "financial-model-review"): "fmr_extracted_values"}
+SHIPPED_ROWS = {
+    ("CHECKLIST", "financial-model-review"): "fmr_extracted_values",
+    ("TOP_DOWN_METHODOLOGY", "market-sizing"): "ms_methodology",
+    ("BOTTOM_UP_METHODOLOGY", "market-sizing"): "ms_methodology",
+}
 _NOT_SHIPPED = [c for c in ROW_CASES if (c[0], c[1]) not in SHIPPED_ROWS]
 
 
 def test_the_shipped_table_is_exactly_the_rows_whose_skills_ask_with_the_registry_labels() -> None:
-    """financial-model-review's Step 3.6 asks the registry's question and labels; market-sizing and ic-sim
-    enable theirs when they are wired."""
+    """financial-model-review's Step 3.6 and market-sizing's Gate ask the registry's question and labels; ic-sim
+    enables its row when it is wired."""
     assert SHIPPED.ROWS == SHIPPED_ROWS
 
 
@@ -170,6 +174,44 @@ def test_the_shipped_hook_holds_an_fmr_checklist_with_nothing_asked_once(tmp_pat
     r = subprocess.run(["sh", str(WRAPPER)], input=json.dumps(payload), capture_output=True, text=True, timeout=30)
     assert r.returncode == 0 and MARKER in r.stdout, r
     assert SHIPPED.decide(payload) is not None
+
+
+@pytest.mark.parametrize("context", ["TOP_DOWN_METHODOLOGY", "BOTTOM_UP_METHODOLOGY"])
+def test_the_shipped_hook_holds_a_sizing_dispatch_with_nothing_asked_once(tmp_path: Path, context: str) -> None:
+    payload = _payload(tmp_path, _start("market-sizing"), context, "market-sizing")
+    r = subprocess.run(["sh", str(WRAPPER)], input=json.dumps(payload), capture_output=True, text=True, timeout=30)
+    assert r.returncode == 0 and f"{MARKER}[market-sizing:{context}]" in r.stdout, r
+    reason = _reason(SHIPPED.decide(payload))
+    retry = [*_start("market-sizing"), _result("toolu_x", reason, is_error=True)]
+    assert SHIPPED.decide(_payload(tmp_path, retry, context, "market-sizing")) is None, "one hold, one retry"
+
+
+def test_the_shipped_hook_passes_a_sizing_dispatch_the_request_answered(tmp_path: Path) -> None:
+    rows = [_user("Please size this.\nFS_HOST_ANSWER ms_methodology=looks_good"), _skill("market-sizing")]
+    assert SHIPPED.decide(_payload(tmp_path, rows, "TOP_DOWN_METHODOLOGY", "market-sizing")) is None
+
+
+def test_the_shipped_hook_holds_both_market_sizing_questions_in_one_deny(tmp_path: Path) -> None:
+    _figures(tmp_path)
+    reason = _wrapper(tmp_path, _start("market-sizing"), mod=SHIPPED)
+    assert reason is not None
+    assert reason.startswith(f"{MARKER}[market-sizing:TOP_DOWN_METHODOLOGY]")
+    assert "[two-figures-check][TOP_DOWN_METHODOLOGY]" in reason
+    retry = [*_start("market-sizing"), _result("toolu_x", reason, is_error=True)]
+    assert _wrapper(tmp_path, retry, mod=SHIPPED) is None
+
+
+def test_the_shipped_hook_passes_a_question_asked_word_for_word_from_needs_input(tmp_path: Path) -> None:
+    """market-sizing asks the Gate with the registry's labels, and the figures from what `open` prints: the
+    typed option carries its figure, so a question built verbatim from it offers every figure."""
+    _figures(tmp_path)
+    figures = ["The figure you typed: 157 per month", "311 per month (list rate)"]
+    rows = [
+        *_start("market-sizing"),
+        *_asked(_labels("ms_methodology")),
+        *_asked(figures, call_id="toolu_f", question=_gates.GATES["ms_two_figures"]["question"]),
+    ]
+    assert _wrapper(tmp_path, rows, mod=SHIPPED) is None
 
 
 @pytest.mark.parametrize(("context", "agent", "gate"), _NOT_SHIPPED, ids=[c[1] for c in _NOT_SHIPPED])
@@ -640,11 +682,11 @@ def _figures_asked() -> list[dict[str, Any]]:
     return _asked(["$157 per month", "$311 per month"], call_id="toolu_f", question="Which ARPU should I use?")
 
 
-def _wrapper(tmp_path: Path, rows: list[dict[str, Any]], mod_rows: bool = True) -> str | None:
-    """Both checks as the runner runs them: the asked-gate check with its rows enabled, then the figures
-    check, first hold wins."""
+def _wrapper(tmp_path: Path, rows: list[dict[str, Any]], mod: Any = None) -> str | None:
+    """Both checks as the runner runs them: the asked-gate check (every row enabled, or `mod`), then the
+    figures check, first hold wins."""
     payload = _payload(tmp_path, rows, "TOP_DOWN_METHODOLOGY", "market-sizing")
-    asked = _load()
+    asked = mod or _load()
     decision = asked.decide(payload)
     if decision is None:
         decision = _load("two_figures_check").decide(payload)

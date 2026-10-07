@@ -648,6 +648,228 @@ def fmr_closer_scenarios() -> dict[str, dict[str, Any]]:
     return out
 
 
+# --- market-sizing ---------------------------------------------------------------------------------
+
+MS_SCRIPTS = SKILLS / "market-sizing" / "scripts"
+MS_SOURCE = {"title": "Example Industry Report", "url": "https://example.org/report", "quality_tier": "analyst_firm"}
+MS_VALIDATION = {
+    "sources": [MS_SOURCE],
+    "assumptions": [
+        {
+            "name": "accounts",
+            "value": 42000,
+            "unit": "count",
+            "category": "sourced",
+            "source_title": MS_SOURCE["title"],
+            "source_url": MS_SOURCE["url"],
+        },
+        {"name": "reachable", "value": 30, "unit": "percent_points", "category": "derived"},
+        {"name": "capture", "value": 4, "unit": "percent_points", "category": "agent_estimate"},
+    ],
+    "figure_validations": [],
+    "metadata": {"run_id": GATE_RUN},
+}
+MS_REFS = {
+    "approach": "bottom_up",
+    "customer_count": {"assumption": "accounts"},
+    "serviceable_pct": {"assumption": "reachable"},
+    "arpu": {"founder_stated": "arpu"},
+    "target_pct": {"assumption": "capture"},
+}
+
+
+def _ms_inputs(*, period: bool = True, **extra: Any) -> dict[str, Any]:
+    data: dict[str, Any] = json.loads((FIXTURES / "market-sizing" / "inputs.json").read_text(encoding="utf-8"))
+    data["founder_stated_inputs"] = {"arpu": 90}
+    if period:
+        data["founder_stated_inputs_period"] = {"arpu": "month"}
+    data.update(extra)
+    return data
+
+
+def _ms_ref_dir(root: Path, *, period: bool = True) -> subprocess.CompletedProcess[str]:
+    """A by-reference sizing, as Step 5 writes one."""
+    (root / "inputs.json").write_text(json.dumps(_ms_inputs(period=period)), encoding="utf-8")
+    (root / "validation.json").write_text(json.dumps(MS_VALIDATION), encoding="utf-8")
+    argv = [
+        str(MS_SCRIPTS / "market_sizing.py"),
+        "--stdin",
+        "--run-id",
+        GATE_RUN,
+        "--validation",
+        str(root / "validation.json"),
+        "--inputs",
+        str(root / "inputs.json"),
+        "-o",
+        str(root / "sizing.json"),
+    ]
+    return run(argv, stdin=json.dumps(MS_REFS))
+
+
+def ms_market_sizing_scenarios() -> dict[str, dict[str, Any]]:
+    """market_sizing.py: the numeric path, the by-reference path, a period the founder must give, a replay."""
+    out: dict[str, dict[str, Any]] = {}
+    numeric = {
+        "approach": "both",
+        "industry_total": 5000000000,
+        "segment_pct": 20,
+        "share_pct": 2,
+        "customer_count": 42000,
+        "arpu": 1260,
+        "serviceable_pct": 30,
+        "target_pct": 4,
+    }
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        argv = [str(MS_SCRIPTS / "market_sizing.py"), "--stdin", "--run-id", GATE_RUN, "-o", str(root / "s.json")]
+        out["numeric"] = result(run(argv, stdin=json.dumps(numeric)), td, root)
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        out["by_reference"] = result(_ms_ref_dir(root), td, root)
+        replay = [
+            str(MS_SCRIPTS / "market_sizing.py"),
+            "--replay",
+            str(root / "sizing.json"),
+            "--validation",
+            str(root / "validation.json"),
+            "--inputs",
+            str(root / "inputs.json"),
+            "-o",
+            str(root / "sizing.json"),
+        ]
+        out["replay"] = result(run(replay), td, root)
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        out["period_unknown"] = result(_ms_ref_dir(root, period=False), td, root)
+    return out
+
+
+def _ms_dir(root: Path) -> None:
+    import shutil
+
+    for f in (FIXTURES / "market-sizing").iterdir():
+        if f.is_file() and f.suffix == ".json":
+            shutil.copy(f, root / f.name)
+
+
+def ms_dispatch_prompt_scenarios() -> dict[str, dict[str, Any]]:
+    """dispatch_prompt.py's existing contexts, as Steps 6b and 6c run them."""
+    out: dict[str, dict[str, Any]] = {}
+    for name, ctx, extra in (
+        ("checklist", "checklist", []),
+        ("checklist_missing_file", "checklist", ["--correction", "missing-file"]),
+        ("red_team", "red_team", []),
+    ):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            _ms_dir(root)
+            hand = root / "handoff" / GATE_RUN
+            hand.mkdir(parents=True)
+            argv = [
+                str(MS_SCRIPTS / "dispatch_prompt.py"),
+                ctx,
+                "--run-id",
+                GATE_RUN,
+                "--analysis-dir",
+                str(root),
+                "--analysis-dir-agent",
+                str(root),
+                "--handoff-dir",
+                str(hand),
+                "--handoff-agent",
+                str(hand),
+                *extra,
+            ]
+            proc = run(argv)
+            res = result(proc, td, root)
+            # The checklist prompt names the reference files under the plugin it runs from.
+            res["stdout"] = _sha(normalise(proc.stdout.replace(str(PLUGIN.resolve()), "<PLUGIN>"), td))
+            out[name] = res
+    return out
+
+
+def ms_checklist_scenarios() -> dict[str, dict[str, Any]]:
+    out: dict[str, dict[str, Any]] = {}
+    items = json.loads((FIXTURES / "market-sizing" / "checklist.json").read_text(encoding="utf-8"))["items"]
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        _ms_ref_dir(root)
+        argv = [
+            str(MS_SCRIPTS / "checklist.py"),
+            "--run-id",
+            GATE_RUN,
+            "--sizing",
+            str(root / "sizing.json"),
+            "-o",
+            str(root / "checklist.json"),
+        ]
+        out["sizing_stamp"] = result(run(argv, stdin=json.dumps({"items": items})), td, root)
+    return out
+
+
+def _ms_compose(root: Path) -> subprocess.CompletedProcess[str]:
+    return run(
+        [
+            str(MS_SCRIPTS / "compose_report.py"),
+            "--dir",
+            str(root),
+            "-o",
+            str(root / "report.json"),
+            "--write-md",
+            str(root / "report.md"),
+        ]
+    )
+
+
+def _ms_variant(root: Path, name: str) -> None:
+    """The answers a report states, as a run without a ledger records them."""
+    _ms_dir(root)
+    inputs = json.loads((root / "inputs.json").read_text(encoding="utf-8"))
+    meth = json.loads((root / "methodology.json").read_text(encoding="utf-8"))
+    alts = {"arpu": [{"value": 140, "period": "month", "source": "chat", "label": "the blended rate"}]}
+    if name == "gate_defaults":
+        meth["gate_defaults"] = ["the percent-scale question", "the two-figures question"]
+    if name in ("figures_unchosen", "figures_chosen"):
+        inputs.update(founder_stated_inputs={"arpu": 150}, founder_stated_alternatives=alts)
+        inputs["founder_stated_inputs_period"] = {"arpu": "month"}
+    if name == "figures_chosen":
+        inputs["founder_stated_choice"] = {"arpu": "the one I typed"}
+    (root / "inputs.json").write_text(json.dumps(inputs), encoding="utf-8")
+    (root / "methodology.json").write_text(json.dumps(meth), encoding="utf-8")
+
+
+def ms_compose_scenarios() -> dict[str, dict[str, Any]]:
+    out: dict[str, dict[str, Any]] = {}
+    for name in ("plain", "gate_defaults", "figures_unchosen", "figures_chosen"):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            _ms_variant(root, name)
+            proc = _ms_compose(root)
+            res = result(proc, td, root)
+            res["stdout"] = _sha(re.sub(r'"bytes": ?\d+', '"bytes":<N>', normalise(proc.stdout, td)))
+            out[name] = res
+    return out
+
+
+def ms_closer_scenarios() -> dict[str, dict[str, Any]]:
+    out: dict[str, dict[str, Any]] = {}
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        _ms_variant(root, "plain")
+        _ms_compose(root)
+        argv = [
+            str(MS_SCRIPTS / "closing_message.py"),
+            "--report",
+            str(root / "report.json"),
+            "--link",
+            "path",
+            "--deliverable",
+            f"the written report={root}/report.md",
+        ]
+        out["plain"] = result(run(argv), td, root)
+    return out
+
+
 GROUPS: dict[str, Callable[[], dict[str, dict[str, Any]]]] = {
     "html": lambda: {f"{s}/{w}": html_scenario(s, w) for s, w, _k in HTML_WRITERS},
     "insert_coaching": coaching_scenarios,
@@ -665,6 +887,11 @@ GROUPS: dict[str, Callable[[], dict[str, dict[str, Any]]]] = {
     "fmr_compose": fmr_compose_scenarios,
     "fmr_verify": fmr_verify_scenarios,
     "fmr_closer": fmr_closer_scenarios,
+    "ms_market_sizing": ms_market_sizing_scenarios,
+    "ms_dispatch_prompt": ms_dispatch_prompt_scenarios,
+    "ms_checklist": ms_checklist_scenarios,
+    "ms_compose": ms_compose_scenarios,
+    "ms_closer": ms_closer_scenarios,
 }
 
 

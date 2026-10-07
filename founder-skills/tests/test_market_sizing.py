@@ -4515,16 +4515,26 @@ def test_compose_analysis_checklist_appendix_table_present() -> None:
 # under test is a prose instruction consumed by an LLM, not executable code.
 
 
+def _sizing_prompt(context: str) -> str:
+    """A sizing prompt as `dispatch_prompt.py` prints it: the templates moved out of SKILL.md."""
+    import tempfile
+
+    sys.path.insert(0, MARKET_SIZING_DIR)
+    import dispatch_prompt  # type: ignore[import-not-found]
+
+    with tempfile.TemporaryDirectory() as d:
+        for name in ("inputs.json", "validation.json", "methodology.json"):
+            Path(d, name).write_text("{}")
+        out: str = dispatch_prompt.sizing(context, "R", d, "H", "A")
+    return out
+
+
 def test_skill_md_topdown_template_states_percentage_points_convention() -> None:
     """The TOP_DOWN_METHODOLOGY dispatch template must state that segment_pct/share_pct
     are percentage POINTS (35 means 35%), not fractions — a fractional input (0.35) was
     silently accepted and computed ~100x low before the market_sizing.py plausibility
     warning existed, and the dispatch template is the agent's only spec for the field."""
-    skill_md = _read(MARKET_SIZING_SKILL_MD)
-    # Isolate the TOP_DOWN_METHODOLOGY dispatch prompt template block
-    start = skill_md.index("Full dispatch prompt template (TOP_DOWN_METHODOLOGY)")
-    end = skill_md.index("Full dispatch prompt template (BOTTOM_UP_METHODOLOGY)")
-    block = skill_md[start:end]
+    block = _sizing_prompt("top_down_methodology")
     assert "segment_pct" in block and "share_pct" in block
     assert "points" in block.lower(), "expected the percentage-POINTS convention spelled out inline"
     assert "0.35" in block or "not 0.35" in block.lower() or "not a fraction" in block.lower()
@@ -4533,10 +4543,7 @@ def test_skill_md_topdown_template_states_percentage_points_convention() -> None
 def test_skill_md_bottomup_template_states_percentage_points_convention() -> None:
     """Same convention must be inlined in the BOTTOM_UP_METHODOLOGY template
     (serviceable_pct/target_pct)."""
-    skill_md = _read(MARKET_SIZING_SKILL_MD)
-    start = skill_md.index("Full dispatch prompt template (BOTTOM_UP_METHODOLOGY)")
-    end = skill_md.index("After both sub-agents return")
-    block = skill_md[start:end]
+    block = _sizing_prompt("bottom_up_methodology")
     assert "serviceable_pct" in block and "target_pct" in block
     assert "points" in block.lower()
 
@@ -4680,10 +4687,7 @@ def test_skill_md_topdown_template_states_funnel_narrowing_semantics() -> None:
     """segment_pct narrows TAM->SAM and share_pct narrows SAM->SOM — an agent inverted this
     (applied share_pct at TAM->SAM) producing a $1B SOM that forced a corrective re-dispatch.
     The authoritative narrowing order lives only in market_sizing.py; inline it in the template."""
-    skill_md = _read(MARKET_SIZING_SKILL_MD)
-    start = skill_md.index("Full dispatch prompt template (TOP_DOWN_METHODOLOGY)")
-    end = skill_md.index("Full dispatch prompt template (BOTTOM_UP_METHODOLOGY)")
-    block = skill_md[start:end].lower()
+    block = _sizing_prompt("top_down_methodology").lower()
     assert "segment_pct narrows tam" in block or "segment_pct narrows tam to sam" in block
     assert "share_pct narrows sam" in block or "share_pct narrows sam to som" in block
 
@@ -5787,8 +5791,9 @@ def test_a_foreign_currency_figure_is_declared_where_the_research_is_recorded() 
     agent = (Path(__file__).resolve().parents[1] / "agents" / "market-sizing.md").read_text(encoding="utf-8")
     step4 = skill[skill.index("### Step 4") : skill.index("### Context A hand-off protocol")]
     assert "`currency`" in step4 and '"unit": "fx_rate"' in step4, "Step 4 must declare currency and record the rate"
-    for name, text in (("SKILL.md", skill), ("agents/market-sizing.md", agent)):
-        assert "convert nothing" in text, f"{name}: the sizing prompts must say the sub-agent converts nothing"
+    for context in ("top_down_methodology", "bottom_up_methodology"):
+        assert "convert nothing" in _sizing_prompt(context), f"{context}: the prompt must say it converts nothing"
+    assert "convert nothing" in agent, "agents/market-sizing.md: the sizing subtypes must say it converts nothing"
 
 
 def test_compose_honours_a_declared_currency_for_an_unconverted_field(tmp_path: Path) -> None:

@@ -1014,6 +1014,9 @@ def _resolve_references(
     return numeric, refs, resolved, conversions, errors
 
 
+_FOUNDER_QUESTION_RE = re.compile(r"^E_[A-Z_]+: (\w+): .*\(remedy: founder_question\)$", re.DOTALL)
+
+
 def main() -> None:
     args = parse_args()
     indent = 2 if args.pretty else None
@@ -1081,6 +1084,21 @@ def main() -> None:
         }
         _fail_invalid(_stamp_run_id(result, args.run_id), args.output, indent)
 
+    # THE RUN'S GATES, when the output goes into a dir that has a ledger for this run: the sizing waits for
+    # the approach and, where the materials state two figures for one input, the choice. A what-if written
+    # to a scratch dir, a quick check and any run without a ledger skip this.
+    if args.output:
+        import _ms_gates  # noqa: PLC0415
+
+        _ms_gates.refuse_without_run_id(args.output, args.run_id)
+        _out_dir = os.path.dirname(os.path.abspath(args.output))
+        _ms_gates.require_or_exit(
+            _out_dir,
+            args.run_id,
+            [*_ms_gates.two_figure_keys(_out_dir), _ms_gates.METHODOLOGY_GATE],
+            by="market_sizing.py",
+        )
+
     # Resolve the currency label. An explicit --currency always wins; otherwise a
     # `currency` key in the piped JSON is honoured, so a sub-agent's hand-off (or a
     # merge_json.py --set) can carry the analysis currency through without the
@@ -1113,6 +1131,12 @@ def main() -> None:
     if ref_mode:
         assert isinstance(data, dict)
         data, refs, resolved, ref_conversions, ref_errors = _resolve_references(data, args, approach)
+        if ref_errors and args.output:
+            # A period only the founder can give: with a ledger it is a recorded question.
+            import _ms_gates  # noqa: PLC0415
+
+            _asked = [m.group(1) for e in ref_errors if (m := _FOUNDER_QUESTION_RE.match(e))]
+            _ms_gates.period_question(os.path.dirname(os.path.abspath(args.output)), args.run_id, _asked)
         if ref_errors:
             result = {"validation": {"status": "invalid", "errors": ref_errors, "warnings": []}}
             _fail_invalid(_stamp_run_id(result, args.run_id), args.output, indent)

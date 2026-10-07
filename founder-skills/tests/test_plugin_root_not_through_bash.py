@@ -107,6 +107,8 @@ def generator_commands() -> list[tuple[str, str, str]]:
 EXPECTED_COMMANDS = {
     ("market-sizing", "checklist"),
     ("market-sizing", "red_team"),
+    # The sizing prompts: SKILL.md runs the top-down call in a fence and names the bottom-up one beside it.
+    ("market-sizing", "top_down_methodology"),
     ("competitive-positioning", "startup_research"),
     ("competitive-positioning", "moat_scoring"),
     ("competitive-positioning", "positioning_scoring"),

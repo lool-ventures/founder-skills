@@ -653,6 +653,13 @@ def fx_steps(prov: dict[str, Any]) -> list[dict[str, Any]]:
     return steps
 
 
+def inputs_fingerprint(inputs: Any) -> str:
+    """What a grader read from inputs.json: the whole document but its metadata. A checklist graded before a
+    later edit to the inputs (a field added from the deck) is then named stale, though the sizing never moved."""
+    doc = {k: v for k, v in inputs.items() if k != "metadata"} if isinstance(inputs, dict) else inputs
+    return _fingerprint(doc)
+
+
 def sizing_fingerprint(sizing: Any) -> str | None:
     """What a downstream producer was graded against: the sizing's references and consumed values.
 
