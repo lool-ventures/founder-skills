@@ -80,6 +80,17 @@ def _printed(text: str, command: str = GEN_CMD, tool: str = "Bash") -> list[dict
     return [use, _result(uid, text)]
 
 
+def _values_asked() -> list[dict[str, Any]]:
+    """financial-model-review's values question, asked and answered: the asked-gate check (which runs first
+    and holds an FMR CHECKLIST no question preceded) lets the dispatch through to this check."""
+    question = {
+        "question": "Do the extracted values look right?",
+        "options": [{"label": "Looks right, proceed"}, {"label": "I have corrections"}],
+    }
+    uid, use = _call("AskUserQuestion", {"questions": [question]})
+    return [use, _result(uid, "User answered: Looks right, proceed")]
+
+
 def _read(path: str, text: str) -> list[dict[str, Any]]:
     """A Read of `path`, and its result as the Read tool numbers it."""
     uid, use = _call("Read", {"file_path": path})
@@ -274,7 +285,9 @@ def test_another_skill_is_never_handed_market_sizings_prompt(tmp_path: Path) -> 
     assert "no printed prompt" in reason
     assert "checklist_view/methodology.json" not in reason and "Assess all 22 items" not in reason
     fmr_checklist = _THEIR_CHECKLIST.replace("agent/handoff/R/", "agent/financial-model-review-acme/handoff/R/")
-    reason = _deny(_run(tmp_path, rows, fmr_checklist, agent="founder-skills:financial-model-review"))
+    reason = _deny(
+        _run(tmp_path, [*rows, *_values_asked()], fmr_checklist, agent="founder-skills:financial-model-review")
+    )
     assert "no printed prompt" in reason
     assert "checklist_view/methodology.json" not in reason and "Assess all 22 items" not in reason
 
@@ -311,7 +324,7 @@ def test_a_financial_model_review_checklist_paraphrase_is_held(tmp_path: Path) -
     """The grader's prompt went out with most of its sentences missing in kept runs. Sent as printed it
     passes; with a rule dropped or a line added it is held, and the reason carries the printed prompt."""
     printed = _fmr_printed()
-    rows = [_user("Review my model."), *_printed(printed, command=_FMR_CMD)]
+    rows = [_user("Review my model."), *_values_asked(), *_printed(printed, command=_FMR_CMD)]
     _silent(_run(tmp_path, rows, printed, agent=_FMR_AGENT))
     dropped = printed.replace("never not_applicable. ", "")
     assert dropped != printed
@@ -323,8 +336,16 @@ def test_a_financial_model_review_checklist_paraphrase_is_held(tmp_path: Path) -
 
 
 def test_an_unprinted_financial_model_review_checklist_is_told_to_run_the_generator(tmp_path: Path) -> None:
-    reason = _deny(_run(tmp_path, [_user("Review my model.")], _fmr_printed(), agent=_FMR_AGENT))
+    reason = _deny(_run(tmp_path, [_user("Review my model."), *_values_asked()], _fmr_printed(), agent=_FMR_AGENT))
     assert "no printed prompt" in reason
+
+
+def test_an_fmr_checklist_with_no_values_question_is_held_by_the_asked_gate_check_first(tmp_path: Path) -> None:
+    """The two checks compose: with no values question in the window the asked-gate hold wins (it runs
+    first); once asked, the dispatch-prompt check judges the prompt."""
+    printed = _fmr_printed()
+    rows = [_user("Review my model."), *_printed(printed, command=_FMR_CMD)]
+    assert "[asked-gate-check]" in _deny(_run(tmp_path, rows, printed, agent=_FMR_AGENT))
 
 
 def test_market_sizings_checklist_is_still_held_under_another_namespace(tmp_path: Path) -> None:

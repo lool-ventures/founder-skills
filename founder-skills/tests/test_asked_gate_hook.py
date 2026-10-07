@@ -155,11 +155,24 @@ def _start(skill: str) -> list[dict[str, Any]]:
 # --- the shipped table -------------------------------------------------------------------------------
 
 
-def test_the_shipped_table_is_empty_and_holds_nothing() -> None:
-    assert SHIPPED.ROWS == {}
+SHIPPED_ROWS = {("CHECKLIST", "financial-model-review"): "fmr_extracted_values"}
+_NOT_SHIPPED = [c for c in ROW_CASES if (c[0], c[1]) not in SHIPPED_ROWS]
 
 
-@pytest.mark.parametrize(("context", "agent", "gate"), ROW_CASES, ids=_IDS)
+def test_the_shipped_table_is_exactly_the_rows_whose_skills_ask_with_the_registry_labels() -> None:
+    """financial-model-review's Step 3.6 asks the registry's question and labels; market-sizing and ic-sim
+    enable theirs when they are wired."""
+    assert SHIPPED.ROWS == SHIPPED_ROWS
+
+
+def test_the_shipped_hook_holds_an_fmr_checklist_with_nothing_asked_once(tmp_path: Path) -> None:
+    payload = _payload(tmp_path, _start("financial-model-review"), "CHECKLIST", "financial-model-review")
+    r = subprocess.run(["sh", str(WRAPPER)], input=json.dumps(payload), capture_output=True, text=True, timeout=30)
+    assert r.returncode == 0 and MARKER in r.stdout, r
+    assert SHIPPED.decide(payload) is not None
+
+
+@pytest.mark.parametrize(("context", "agent", "gate"), _NOT_SHIPPED, ids=[c[1] for c in _NOT_SHIPPED])
 def test_the_shipped_hook_holds_no_planned_dispatch_with_nothing_asked(
     tmp_path: Path, context: str, agent: str, gate: str
 ) -> None:
@@ -341,9 +354,9 @@ def test_another_agent_is_not_this_row(tmp_path: Path, context: str, agent: str,
 def test_the_labels_are_matched_tolerantly() -> None:
     mod, form = _load(), _load("_form_reply")
     labels = _labels("fmr_extracted_values")
-    assert mod.labels_matched(form, ["The values look right — proceed", "I have corrections."], labels) == 2
-    assert mod.labels_matched(form, ["THE VALUES LOOK RIGHT, PROCEED"], labels) == 1
-    assert mod.labels_matched(form, ["Looks right, proceed", "I need to correct something"], labels) == 0
+    assert mod.labels_matched(form, ["Looks right — proceed", "I have corrections."], labels) == 2
+    assert mod.labels_matched(form, ["LOOKS RIGHT, PROCEED"], labels) == 1
+    assert mod.labels_matched(form, ["Looks wrong, stop", "I need to correct something"], labels) == 0
     assert mod.labels_matched(form, ["Looks good"], _labels("ms_methodology")) == 1
     assert mod.labels_matched(form, ["Good"], _labels("ms_methodology")) == 0
 
@@ -360,7 +373,7 @@ def test_the_gates_question_counts_with_labels_in_the_skills_own_words(tmp_path:
     fmr_q = _gates.GATES["fmr_extracted_values"]["question"]
     assert mod.question_matches(form, "Do the extracted values look right?", fmr_q)
     # The gate's question with one of its labels passes; the question alone, with generic options, does not.
-    one = [*_start("financial-model-review"), *_asked(["The values look right, proceed", "No"], question=fmr_q)]
+    one = [*_start("financial-model-review"), *_asked(["Looks right, proceed", "No"], question=fmr_q)]
     assert _decide(tmp_path, one, "CHECKLIST", "financial-model-review", mod) is None
     bare = [*_start("financial-model-review"), *_asked(["Yes", "No"], question=fmr_q)]
     assert _decide(tmp_path, bare, "CHECKLIST", "financial-model-review", mod) is not None
@@ -868,3 +881,36 @@ def test_deck_review_has_no_held_step() -> None:
     rows = {**SHIPPED.PLANNED_ROWS, **SHIPPED.ROWS}
     assert all(_gates.GATES[gate]["skill"] != "deck-review" for gate in rows.values())
     assert all(agent != "deck-review" for (_context, agent) in rows)
+
+
+# --- the question's last sentence ------------------------------------------------------------------------
+
+_PREAMBLE = "I pulled the figures from your model into a page, and assumed the amounts are in dollars."
+
+
+@pytest.mark.parametrize(
+    ("asked", "labels", "passes"),
+    [
+        # A lead before the question no longer hides it; one of the gate's labels is still required.
+        (f"{_PREAMBLE} Do the extracted values look right?", ["Looks right — proceed", "I'll fix it in chat"], True),
+        (f"{_PREAMBLE} Do the values look right?", ["Looks right, proceed", "I'll upload a file"], True),
+        (f"{_PREAMBLE}\nDo the extracted values look right?", ["Looks right, proceed", "Other"], True),
+        # The question alone, with none of the labels, still never passes.
+        (f"{_PREAMBLE} Do the extracted values look right?", ["Yes", "No"], False),
+        # A last sentence that is not the gate's question does not count.
+        (f"{_PREAMBLE} Should I go ahead?", ["Looks right, proceed", "No"], False),
+    ],
+)
+def test_the_question_is_also_read_from_its_last_sentence(
+    tmp_path: Path, asked: str, labels: list[str], passes: bool
+) -> None:
+    rows = [*_start("financial-model-review"), *_asked(labels, question=asked)]
+    held = _decide(tmp_path, rows, "CHECKLIST", "financial-model-review")
+    assert (held is None) is passes
+
+
+def test_a_slotted_question_is_matched_as_before() -> None:
+    """market-sizing's question has a slot; its match is the words around the slot, not the last sentence."""
+    mod, form = _load(), _load("_form_reply")
+    q = _gates.GATES["ms_methodology"]["question"]
+    assert not mod.question_matches(form, f"{_PREAMBLE} Does this approach look right?", q)

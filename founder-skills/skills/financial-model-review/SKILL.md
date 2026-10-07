@@ -11,19 +11,6 @@ user-invocable: true
 
 Help startup founders understand how investors will evaluate their financial model — validating structure, unit economics, runway, and metrics against stage-appropriate standards. Produce a thorough review with actionable improvements. The tone is founder-first: a rigorous but supportive coaching session.
 
-## Skill Metadata
-
-- **Author:** lool-ventures
-- **Version:** managed in `founder-skills/.claude-plugin/plugin.json`
-- **Compatibility:** Python 3.10+ and `uv` for script execution. `openpyxl` required for Excel parsing.
-- **Imports (optional):**
-  - `market-sizing:sizing.json` — validate revenue-to-SOM consistency
-  - `deck-review:checklist.json` — cross-check model-to-deck number alignment
-- **Exports:**
-  - `report.json` → `ic-sim`, `fundraise-readiness`, `dd-readiness`
-  - `unit_economics.json` → `metrics-benchmarker`, `ic-sim`
-  - `runway.json` → `fundraise-readiness`
-
 ## Skill Execution Model (READ FIRST)
 
 > See `founder-skills/references/skill-execution-model.md` for the full inline-skill execution model (3 dispatch contexts, Mitigation 1+2, producer contract, Cowork quirks, per-symptom triage).
@@ -46,46 +33,13 @@ Context A **receipts** don't need this protocol by hand — `check_handoff.py --
 
 **If a sub-agent wrote CANONICAL artifact files directly anyway** (anything outside its `handoff/` OUTPUT_PATH): do not trust them — take its gated hand-off file (or extract the JSON from its final message on the fallback path), then re-pipe through the producer script as specified; the producer overwrites the file with the validated, run_id-stamped version. For INPUTS_REVIEW specifically: if `inputs.json` contains the `{"corrected": ..., "corrections": ...}` wrapper, the sub-agent wrote its reply to disk — feed that wrapper through `apply_corrections.py` as usual.
 
-**Context-pressure note:** This skill has the highest context budget of the 5 skills. The win from Mitigation 1 is excluding sub-agent reasoning and the raw `extract_model.py` output (which can run to megabytes on real models) — which flows *through* the INPUTS_REVIEW dispatch: the sub-agent reads it in its own context window, returns only the corrected `inputs.json`. The artifacts themselves still accumulate in the main thread (~80-130K total), but that is manageable.
+**Context-pressure note:** The win from Mitigation 1 is excluding sub-agent reasoning and the raw `extract_model.py` output (which can run to megabytes on real models) — which flows *through* the INPUTS_REVIEW dispatch: the sub-agent reads it in its own context window, returns only the corrected `inputs.json`. The artifacts themselves still accumulate in the main thread (~80-130K total), but that is manageable.
 
 ## Input Formats
 
 Accept any format: Excel (.xlsx), CSV, Google Sheets exports, financial documents, or conversational input. For Excel files, use `extract_model.py` to parse. For other formats, extract data manually into the `inputs.json` schema. If multiple copies of the same file exist (e.g., `Financials.xlsx` and `Financials (1).xlsx`), use the most recently modified version and note the duplication to the founder. If timestamps are identical, ask the founder which file to use. If the founder cannot be queried, prefer the file without parenthetical suffixes (e.g., `(1)`, `(2)`) — these typically indicate browser re-download duplicates.
 
-## Available Scripts
-
-All scripts are at `${CLAUDE_PLUGIN_ROOT}/skills/financial-model-review/scripts/`:
-
-- **`extract_model.py`** — Extracts structured data from Excel (.xlsx) and CSV files
-- **`validate_extraction.py`** — Anti-hallucination gate: cross-references `model_data.json` against `inputs.json` to catch mismatches (company name, salary, revenue, cash traceability); run after extraction, before review
-- **`validate_inputs.py`** — Four-layer validation of `inputs.json` (structural, consistency, sanity, completeness); supports `--fix` to auto-correct sign errors
-- **`checklist.py`** — Scores 46 criteria across 7 categories with profile-based auto-gating
-- **`unit_economics.py`** — Computes and benchmarks 11 unit economics metrics
-- **`runway.py`** — Multi-scenario runway stress-test with decision points
-- **`compose_report.py`** — Assembles report with cross-artifact validation; `--strict` exits 1 on high-severity warnings (corrupt/missing artifacts)
-- **`apply_corrections.py`** — Processes founder's downloaded corrections file: coerces types, normalizes ILS→USD, merges overrides, writes `corrected_inputs.json` and `extraction_corrections.json`
-- **`verify_review.py`** — Review completeness gate: checks artifact existence, content quality, and cross-artifact consistency; `--gate 1` for after-compose, `--gate 2` (default) for final; exit 0 = publishable, exit 1 = gaps remain
-- **`visualize.py`** — Generates self-contained HTML with SVG charts (not JSON)
-- **`explore.py`** — Generates self-contained interactive HTML explorer from review artifacts; outputs HTML (not JSON)
-- **`review_inputs.py`** — Dual-mode review viewer: HTTP server with live validation (Claude Code) or self-contained static HTML with JS sanity metrics (Cowork); outputs HTML
-
-Also available from `${CLAUDE_PLUGIN_ROOT}/scripts/` (shared):
-
-- **`find_artifact.py`** — Resolves artifact paths by skill name and filename (used for cross-skill lookups)
-
-Run with: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/financial-model-review/scripts/<script>.py --pretty [args]`
-
-## Available References
-
-Read as needed from `${CLAUDE_PLUGIN_ROOT}/skills/financial-model-review/references/`:
-
-- **`checklist-criteria.md`** — All 46 checklist criteria with gate definitions
-- **`schema-inputs.md`** — JSON schema for `inputs.json` (the artifact the agent writes)
-- **`artifact-schemas.md`** — JSON schemas for script-produced output artifacts
-- **`data-sufficiency.md`** — Data sufficiency gate and qualitative path
-- **`extraction-pitfalls.md`** — 8 common extraction errors (scale denomination, payroll aggregation, collections vs revenue, etc.)
-
-From `${CLAUDE_PLUGIN_ROOT}/references/` (shared): `stage-expectations.md`, `benchmarks.md`, `israel-guidance.md`, `revenue-model-types.md`, `common-mistakes.md`
+Shared references, read as needed from `${CLAUDE_PLUGIN_ROOT}/references/` (shared): `stage-expectations.md`, `benchmarks.md`, `israel-guidance.md`, `revenue-model-types.md`, `common-mistakes.md`
 
 ## Artifact Pipeline
 
@@ -188,6 +142,14 @@ have not run it — then stop. Do not improvise the missing steps: an analysis t
 reviews itself reads exactly like one that was checked, which is the failure this stop exists to
 prevent.
 
+**Then start the run's record, once**, with every request line that starts `FS_HOST_` copied between the markers (none: leave the placeholder, which is ignored). `RUN_ID` is the `run_id` it prints. Any non-zero exit here or from `bind` below: say in one sentence that the review could not start, and stop.
+
+```bash
+python3 "<printed PLUGIN_ROOT>/scripts/run_status.py" start --skill financial-model-review --artifacts-root "<printed ARTIFACTS_ROOT>" <<'FS_HOST_EOF'
+<each FS_HOST_ line of the request>
+FS_HOST_EOF
+```
+
 Plugin folder for Reads and prompts (as loaded): `${CLAUDE_PLUGIN_ROOT}` — this skill's references are in `${CLAUDE_PLUGIN_ROOT}/skills/financial-model-review/references/`. If Step 0 printed `READ_ROOT=`, use that value instead.
 
 **Plugin paths.** If Step 0 printed `READ_ROOT=`, this skill's text arrived without its plugin folder filled in. Use that value in place of `${CLAUDE_PLUGIN_ROOT}` in every Read and sub-agent prompt, including where a later step says to leave that path literal. If it did not print `READ_ROOT=`, use the paths as shown. The folder comes from Step 0's filesystem search, not from a skill file or the "Base directory" line, which can name a folder that does not exist. These are setup details: updates to the founder are about their company, not file locations, printed paths or plugin versions.
@@ -219,7 +181,7 @@ fewer producers is fine; running none is not.
 
 #### Step 5-quick: the quick-check path
 
-Run only the producer(s) the question actually needs, with the inputs the founder gave you:
+Run it after the slug block below has created `REVIEW_DIR` and bound the run. Run only the producer(s) the question actually needs, with the inputs the founder gave you:
 
 ```bash
 # Runway question -> runway.py alone. Unit-economics question -> unit_economics.py alone.
@@ -228,6 +190,8 @@ python3 "$SCRIPTS/runway.py" --pretty \
 {"cash": {"current_balance": <cash on hand>, "monthly_net_burn": <monthly net burn>}}
 JSON
 ```
+
+Then close the run's record: `python3 "$SHARED_SCRIPTS/run_status.py" finish --mode quick_check --run-id "$RUN_ID" --artifacts-root "$ARTIFACTS_ROOT" --output "$REVIEW_DIR/runway.json"` (the artifact you wrote).
 
 That is the whole input a runway question needs: cash in the bank and net burn per month, each a plain
 number (burn positive while burning), no `company` block. Add `"revenue": {"monthly_total": <monthly revenue>}` only when the
@@ -253,8 +217,9 @@ the founder would have wanted.
 ```bash
 REVIEW_DIR="${REVIEW_DIR:-$ARTIFACTS_ROOT/financial-model-review-${SLUG}}"              # full review
 # REVIEW_DIR="${REVIEW_DIR:-$ARTIFACTS_ROOT/financial-model-review-${SLUG}-quickcheck}"  # quick check
-mkdir -p "$REVIEW_DIR"
-RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
+RUN_ID="<the run_id start printed>"
+mkdir -p "$REVIEW_DIR" && python3 "$SHARED_SCRIPTS/run_status.py" bind --run-id "$RUN_ID" \
+  --artifacts-root "$ARTIFACTS_ROOT" --run-dir "$REVIEW_DIR" --slug "$SLUG" || exit 1
 # Context A hand-off dir — PER RUN: sub-agents WRITE their raw output JSON here (the audit trail —
 # raw sub-agent output as returned, before producer validation). Permanent by rule
 # (nothing under outputs/ is ever deleted, by this skill's rule); nothing in it is ever a canonical artifact.
@@ -287,38 +252,49 @@ REVIEW_DIR_AGENT="<printed value>"   # e.g. model_data.json, inputs.json reads
 STAGING_DIR="$(mktemp -d "${TMPDIR:-/tmp}/financial-model-review-${SLUG:-fmr}.staging.XXXXXX")"
 ```
 
+**A resumed run** (`start` printed `resume: 1`) runs Step 1 and this block again, then continues at its `resume_step`; the work before it is this run's and stays.
+
 Pass `RUN_ID` to all sub-agents. The four producer artifacts (`inputs.json`, `checklist.json`, `unit_economics.json`, `runway.json`) must carry `"metadata": {"run_id": "$RUN_ID"}` at the top level — including skipped stubs, whose stub heredoc carries the same `"metadata": {"run_id": "$RUN_ID"}` block. The producers propagate it from their stdin payloads; never hand-edit script outputs to add it. (`model_data.json` and `extraction_validation.json` have no run_id by design.) `compose_report.py` checks that all present run IDs match — a mismatch triggers a `STALE_ARTIFACT` high-severity warning, blocking under `--strict`. Stub artifacts are exempt from the value comparison but still carry the `run_id` key so the Context B parity grep finds it.
 
 **Overwrite-in-place — do NOT delete prior artifacts under `$REVIEW_DIR`.** It is the promoted
 `outputs/` tree in Cowork, where deleting a user-visible path is unsafe (our rule forbids it, and older hosts refused it; the parity
-gate flags it). Each producer writes its artifact fresh via `-o` every run, and `RUN_ID` is minted fresh
-per run — so if a prior run left an artifact a later step doesn't regenerate, `compose_report.py`'s
+gate flags it). Each producer writes its artifact fresh via `-o` every run, and every run has its own
+`RUN_ID` — so if a prior run left an artifact a later step doesn't regenerate, `compose_report.py`'s
 `STALE_ARTIFACT` check (run_ids must match) catches the mismatch. No bulk `rm` is needed or wanted.
 
 ### Step 1: Read or Create Founder Context
 
 ```bash
-python3 "$SHARED_SCRIPTS/founder_context.py" read --artifacts-root "$ARTIFACTS_ROOT" --pretty
+python3 "$SHARED_SCRIPTS/founder_context.py" read --artifacts-root "$ARTIFACTS_ROOT" --run-id "$RUN_ID" \
+  --skill financial-model-review --pretty
 ```
 
 Three cases based on exit code:
 
-**Exit 0 (found, single context):** Use the company slug and pre-filled fields. Before proceeding to extraction, use `AskUserQuestion` to ask the founder for current cash balance and date if not already stated in the conversation — this is the #1 cause of incomplete runway analysis. If files are attached, also ask about monthly burn rate unless the conversation already contains it. Same runtime-labelled shape as the cash/date/burn questions below (an affirmative carrying any already-stated value, plus a "Not stated" fallback) — these are dollar amounts and dates, not a fixed label set. Batch all questions into a **single `AskUserQuestion` call**.
+**Exit 0 (found, single context):** Open the questions (the block below) first. Use the company slug and pre-filled fields. Before proceeding to extraction, use `AskUserQuestion` to ask the founder for current cash balance and date if not already stated in the conversation — this is the #1 cause of incomplete runway analysis. If files are attached, also ask about monthly burn rate unless the conversation already contains it. Same runtime-labelled shape as the cash/date/burn questions below (an affirmative carrying any already-stated value, plus a "Not stated" fallback) — these are dollar amounts and dates, not a fixed label set. Batch all questions into a **single `AskUserQuestion` call**.
 
-**Exit 1 (not found):** Use `AskUserQuestion` (NOT plain chat) to ask the founder for company details AND key financial context. **You MUST use the `AskUserQuestion` tool** — do not just list questions in the chat. Gather everything in a **single call** (one interaction = one chance for the UI to render correctly):
+**Exit 1 (not found: no `code`, or `CONTEXT_NOT_FOUND`):** Open the questions (the block below) first. Use `AskUserQuestion` (NOT plain chat) to ask the founder for company details AND key financial context. **You MUST use the `AskUserQuestion` tool** — do not just list questions in the chat. Gather everything in a **single call** (one interaction = one chance for the UI to render correctly):
 - Company name, stage, sector, geography (required for context creation)
 - Current cash balance and date (critical for runway — the #1 cause of incomplete reports)
-- Monthly burn rate if not obvious from the provided files
+- Monthly burn rate, unless the conversation already states it
 
 **Stage is the one field of the four with a real fixed label set — use it verbatim, do not improvise.**
 Options: `Pre-seed` / `Seed` / `Series A` / `Series B+`
 → `pre-seed | seed | series-a | series-b` (four options is the tool's max; the shared context script's `VALID_STAGES` enum has 7 values including `series-c`/`series-d`/`later`, so on a `Series B+` pick, ask a plain-text follow-up for the specific stage — do not default to `series-b`). Company name, sector and geography cannot take fixed labels (a proper noun, an open sector taxonomy, an open location) — shape them per the next paragraph instead.
 
-**IMPORTANT:** Always use the `AskUserQuestion` tool for founder questions — never ask as plain chat text. **If `AskUserQuestion` is genuinely unavailable in the host, do NOT skip the ask and do NOT assume the answer:** ask the same question in plain chat, state the options explicitly, and wait for an answer before continuing. The ban above is on asking casually WHILE the tool is available — it is not a reason to stall a host that lacks it. The tool provides a structured UI that renders correctly in Cowork. Always provide at least 2 options (the tool requires a minimum of 2). **Construct those two options concretely so every question is answerable** — never emit a single-option question or a bare free-text prompt (a free-text answer that matches no option dead-ends the run). For each founder question give: (1) an affirmative option carrying the likely value — for the company name that includes **"Use what the model file states"** (the Step-1 staging branch above resolves that answer safely, so it is a valid choice, not a trap); and (2) a **"Not stated — proceed and flag to confirm"** fallback so the founder can always move forward. Cash balance, date and burn rate follow the same two-option shape — an affirmative carrying whatever value was already stated in the conversation or files, plus the "Not stated" fallback; these are runtime-labelled (dollar amounts and dates), not a fixed label set.
+**IMPORTANT:** Always use the `AskUserQuestion` tool for founder questions — never ask as plain chat text. **If `AskUserQuestion` is genuinely unavailable in the host, do NOT skip the ask and do NOT assume the answer:** ask the same question in plain chat, state the options explicitly, and wait for an answer before continuing. The tool provides a structured UI that renders correctly in Cowork. Always provide at least 2 options (the tool requires a minimum of 2). **Construct those two options concretely so every question is answerable** — never emit a single-option question or a bare free-text prompt (a free-text answer that matches no option dead-ends the run). For each founder question give: (1) an affirmative option carrying the likely value — for the company name that includes **"Use what the model file states"** (the Step-1 staging branch above resolves that answer safely, so it is a valid choice, not a trap); and (2) a **"Not stated — proceed and flag to confirm"** fallback so the founder can always move forward. Cash balance, date and burn rate follow the same two-option shape — an affirmative carrying whatever value was already stated in the conversation or files, plus the "Not stated" fallback; these are runtime-labelled (dollar amounts and dates), not a fixed label set.
 
-**When there is NO file, "Use what the model file states" is not an answerable option** — there is no file to read it from, so offering it costs a round-trip and then a second question. On a conversational or deck-only run, build the company-name question from what you actually have instead: an affirmative option carrying the name **as it appeared in the conversation or on the deck's title slide** (say where you got it, so the founder is confirming rather than re-supplying), plus the "Not stated" fallback. One question, one answer. The same principle applies to sector and geography: an option the founder cannot possibly choose is a wasted turn.
+**When there is NO file, "Use what the model file states" is not an answerable option** — there is no file to read it from, so offering it costs a round-trip and then a second question. On a conversational or deck-only run, build the company-name question from what you actually have instead: an affirmative option carrying the name **as it appeared in the conversation or on the deck's title slide** (say where you got it, so the founder is confirming rather than re-supplying), plus the "Not stated" fallback. The same holds for sector and geography.
 
 **Why everything upfront:** Extraction sub-agents run in parallel and cannot pause to ask questions. Asking early prevents pipeline stalls.
+
+**Each question is a recorded gate: open, ask, answer.** Open them in one call before asking (on a quick check drop the three `fmr_cash_basics` gates; after Exit 0 the company questions are already settled, which `open` reports). Ask from the printed `needs_input`, then record each reply with the `answer_command` it printed (`stated` takes the figure as `--value`). A figure the conversation already gave is recorded, not asked: `python3 "$SHARED_SCRIPTS/record_gate_answer.py" default --run-id "$RUN_ID" --artifacts-root "$ARTIFACTS_ROOT" --gate <gate> --reason stated_in_request --answer-id stated --value "<figure>"`. A `Series B+` reply opens the follow-up (`ctx_stage_detail`): ask and record it the same way. <!-- gate: ctx_stage_detail -->
+
+```bash
+python3 "$SHARED_SCRIPTS/record_gate_answer.py" open --run-id "$RUN_ID" --artifacts-root "$ARTIFACTS_ROOT" \
+  --gate ctx_basics.company_name --gate ctx_basics.stage --gate ctx_basics.sector --gate ctx_basics.geography \
+  --gate fmr_cash_basics.current_balance --gate fmr_cash_basics.balance_date --gate fmr_cash_basics.monthly_burn
+```
 
 If the founder provides files (Excel/CSV), still ask about cash balance — extraction may miss or misinterpret values, and having the founder's stated number lets the agent cross-check later.
 
@@ -338,17 +314,18 @@ cp "$STAGING_DIR/model_data.json" "$REVIEW_DIR/model_data.json"
 
 Then continue from Step 2's periodicity check as normal (the staged extraction already ran). **Never** create a provisional review dir or temp file anywhere under the outputs mount, and **never** rename or move a review dir. Extraction runs ONLY via the documented invocations — Step 2's `$REVIEW_DIR` target or this Exit-1 `$STAGING_DIR` staging block — never an ad-hoc `extract_model.py` call with improvised flags or targets.
 
-Then create:
+Then create (exit 10 names a question not yet recorded: ask it, record it, run `init` again):
 
 ```bash
 python3 "$SHARED_SCRIPTS/founder_context.py" init \
   --company-name "Acme Corp" --stage seed --sector "B2B SaaS" \
-  --geography "US" --artifacts-root "$ARTIFACTS_ROOT"
+  --geography "US" --artifacts-root "$ARTIFACTS_ROOT" \
+  --run-id "$RUN_ID" --skill financial-model-review
 ```
 
 If the script prints a `sector_type` warning but exits 0, that's non-fatal — proceed without retrying. However, a null `sector_type` may suppress sector-specific checklist gating downstream. If you know the correct type, re-run with `--sector-type` (valid values: `saas`, `ai-native`, `marketplace`, `hardware`, `hardware-subscription`, `consumer-subscription`, `usage-based`, `transactional-fintech`, `retail`).
 
-**Exit 2 (multiple context files):** Present the list to the founder and ask which company via `AskUserQuestion` (labels are the runtime company names found on disk — necessarily runtime-labelled, no fixed set can exist here), then re-read with `--slug`.
+**Exit 10 (several companies):** ask which company via `AskUserQuestion` from the printed `needs_input` (its labels are the company names found on disk), record it with its `answer_command`, then re-read with `--slug`; `A different company` → as Exit 1. <!-- gate: ctx_select_company --> Exit 1 with another `code`: report it and stop.
 
 #### Execution checkpoint — END OF STEP 1, READ BEFORE CONTINUING
 
@@ -553,7 +530,7 @@ run_id stamping.
    ```bash
    python3 "$SCRIPTS/apply_corrections.py" "$HANDOFF_DIR/inputs_review_output.json" \
      --original "$REVIEW_DIR/inputs.json" \
-     --output-dir "$REVIEW_DIR"
+     --output-dir "$REVIEW_DIR" --run-id "$RUN_ID" --origin inputs_review
    ```
    <!-- skill-quality-ci: bash-after-subagent-ok -->
 3. `apply_corrections.py` prints an `Info: corrected-object payload (dispatch shape)` line to
@@ -599,32 +576,21 @@ python3 "$SCRIPTS/validate_extraction.py" --inputs "$REVIEW_DIR/inputs.json" --m
 
 ### Step 3.6: Review Extracted Values
 
-**Path A — File extraction** (`model_format` is `spreadsheet` or `partial`):
+A recorded gate: open it first, show the values (Path A or B), ask the question below, record the reply.
 
-Generate the HTML review page for the founder to inspect extracted values. Always build the page in **static mode** — it works wherever the founder opens it, whereas a local server's address opens only on the machine running it:
+```bash
+python3 "$SHARED_SCRIPTS/record_gate_answer.py" open --run-id "$RUN_ID" --artifacts-root "$ARTIFACTS_ROOT" --gate fmr_extracted_values
+```
+
+If it printed `"applied": "pre_answer"`, the request already answered it: build no page, ask nothing, go to Step 4. (Resumed here with `corrections_applied` in the request: promote `corrected_inputs.json` and re-run Step 3.5 before this `open`.)
+
+**Path A — File extraction** (`model_format` is `spreadsheet` or `partial`): build the HTML review page for the founder to inspect the extracted values. Always build the page in **static mode** — it works wherever the founder opens it, whereas a local server's address opens only on the machine running it:
 
 ```bash
 python3 "$SCRIPTS/review_inputs.py" "$REVIEW_DIR/inputs.json" --static "$REVIEW_DIR/review.html" --extraction-warnings "$REVIEW_DIR/extraction_validation.json"
 ```
 
-**This is a STOP point — do not proceed to Step 4 until the founder responds.** Send `review.html` to the founder as a file, with the host's file-delivery tool where one is offered (as Step 12 sends the finished documents) — never a bare path there; in a local terminal that offers none, give its absolute path — then ask via `AskUserQuestion`: "I reviewed the page — do the values look right?"
-Options: `I reviewed the page — the values look right, proceed` / `I edited values and will upload the corrections file` / `I'll tell you the corrections in chat`
-
-Generating the page and silently moving on defeats the human verification gate: the founder is the last check on extracted numbers before math runs on them. When they upload `corrections.json`:
-
-```bash
-python3 "$SCRIPTS/apply_corrections.py" <uploaded-file> --original "$REVIEW_DIR/inputs.json" --output-dir "$REVIEW_DIR"
-```
-
-When they state corrections in chat instead, run the same script with one `--set` per field — never edit `inputs.json` by hand, so the same coercion, path check and audit record apply whichever way they corrected. A value is read as a number, boolean or null where it parses as one and as text otherwise:
-
-```bash
-python3 "$SCRIPTS/apply_corrections.py" --set revenue.mrr=45000 --set cash.current_balance=1200000 --original "$REVIEW_DIR/inputs.json" --output-dir "$REVIEW_DIR"
-```
-
-A path that does not exist in `inputs.json` is refused rather than created, so a misheard field name stops here instead of becoming a new key.
-
-Either way, then promote `corrected_inputs.json` to `inputs.json` (same as Step 3) and re-run the Step 3.5 validation before proceeding.
+Send `review.html` to the founder as a file, with the host's file-delivery tool where one is offered (as Step 12 sends the finished documents) — never a bare path there; in a local terminal that offers none, give its absolute path — then ask via `AskUserQuestion` (the question below).
 
 Use **server mode** only when the founder asks for live validation while editing and the session is a local command-line terminal on the founder's own computer:
 
@@ -634,8 +600,7 @@ python3 "$SCRIPTS/review_inputs.py" "$REVIEW_DIR/inputs.json" --workspace "$REVI
 
 Wait for the founder to say done, then kill the server and apply corrections.
 
-**Path B — Conversational** (`model_format` is `conversational` or `deck`): present a confirmation table, then ask via `AskUserQuestion`: "Do these values look right?"
-Options: `Looks right, proceed` / `I need to correct something — I'll say what in chat`
+**Path B — Conversational** (`model_format` is `conversational` or `deck`): present a confirmation table, then ask the same question with `AskUserQuestion`.
 
 **The table is not a fixed list of eight fields.** Start from stage, MRR, growth rate, burn, cash,
 customers, CAC and target raise — then add **every other field you are about to write that the founder did
@@ -652,18 +617,23 @@ Use `[]` when the founder stated everything — an empty list is a declaration, 
 `validate_inputs.py` raises `UNDECLARED_AGENT_VALUE` on a conversational run that carries a
 computation-feeding field with no declaration.
 
-Why this matters more than it looks: a live run wrote `bridge.runway_target_months: 24` for a founder who
-never mentioned a runway target. The *value* was harmless — `runway.py` defaults to 24 anyway — but
-`inputs.json` recorded it indistinguishably from a stated input, so nothing downstream (the checklist, a
-sub-agent, or the founder re-reading their own file) could tell the difference. Same defect market-sizing
-fixed with `founder_stated_inputs`, from the other direction.
+Why: without it a value you supplied is recorded indistinguishably from a stated one, so nothing downstream
+(the checklist, a sub-agent, the founder re-reading their file) can tell the difference.
 
-**This is a STOP point — do not proceed to Step 4 until the founder responds.** The reason is identical
-to Path A's, and so is the requirement: the founder is the last check on the numbers before math runs on
-them. It matters *more* here, not less — a spreadsheet cell has a provenance you can point at, whereas a
-figure typed in conversation or read off a deck slide may be a rounded estimate, a stale number, or an
-annual figure the reader took as monthly. Presenting the table and moving on in the same turn defeats the
-gate exactly as it would on Path A.
+**This is a STOP point — do not proceed to Step 4 until the founder responds.** Step 4 refuses until the reply is recorded. The founder is the last check on the numbers before math runs on them. It matters *more* here, not less: a figure typed in conversation or read off a deck slide may be a
+rounded estimate, a stale number, or an annual figure the reader took as monthly.
+
+**The question, on either path:** "Do the extracted values look right?"
+Options: `Looks right, proceed` / `I have corrections` / `Proceed without reviewing the extracted values`
+
+Record the reply with the printed `answer_command` (`I have corrections` takes `--value`: how they will send them). Corrections go through `apply_corrections.py` whichever way they arrive — never edit `inputs.json` by hand, so the same coercion, path check and audit record apply. An uploaded corrections file, or one `--set` per field stated in chat (a value is read as a number, boolean or null where it parses as one and as text otherwise):
+
+```bash
+python3 "$SCRIPTS/apply_corrections.py" <uploaded-file> --original "$REVIEW_DIR/inputs.json" --output-dir "$REVIEW_DIR" --run-id "$RUN_ID" --origin upload
+python3 "$SCRIPTS/apply_corrections.py" --set revenue.mrr=45000 --set cash.current_balance=1200000 --original "$REVIEW_DIR/inputs.json" --output-dir "$REVIEW_DIR" --run-id "$RUN_ID" --origin chat
+```
+
+A path that does not exist in `inputs.json` is refused rather than created, so a misheard field name stops here instead of becoming a new key. Then promote `corrected_inputs.json` to `inputs.json` (as in Step 3), re-run Step 3.5, and record `--answer-id corrections_applied` with the same command (refused unless this run's corrections call is on record).
 
 ### Step 4: Unit Economics and Runway (direct — no dispatch)
 
@@ -679,6 +649,8 @@ SCRIPTS="<printed PLUGIN_ROOT>/skills/financial-model-review/scripts"
 cat "$REVIEW_DIR/inputs.json" | python3 "$SCRIPTS/unit_economics.py" --pretty --run-id "$RUN_ID" -o "$REVIEW_DIR/unit_economics.json"
 cat "$REVIEW_DIR/inputs.json" | python3 "$SCRIPTS/runway.py" --pretty --run-id "$RUN_ID" -o "$REVIEW_DIR/runway.json"
 ```
+
+Exit 10 from either is a question, not a failure (`-o` is left as it was): the values review (Step 3.6) or a cash question (Step 1) has no record for this run, or `inputs.json` changed after it was confirmed. Ask the gate its JSON names (`blocked_by_gate`), record it, run the step again.
 
 Both scripts propagate `metadata.run_id` from `inputs.json` into their outputs
 (required by the Context B run_id-parity check). They run BEFORE the checklist because the
@@ -726,7 +698,7 @@ python3 "$SCRIPTS/compose_report.py" --dir "$REVIEW_DIR" --pretty \
 
 Check `validation.warnings`: fix high-severity (corrupt/missing artifacts), present medium-severity (checklist failures, runway inconsistencies, metrics gaps, unsupported comparisons) in the report, note low/info. `--strict` only blocks on high-severity warnings. Fix high-severity warnings, re-deposit, re-compose.
 
-**Post-write verification:** `compose_report.py` exits non-zero (code 2) if the declared output files don't exist or are empty after writing. If compose exits non-zero, stop and report the exact stderr — do not proceed.
+**Post-write verification:** `compose_report.py` exits non-zero (code 2) if the declared output files don't exist or are empty after writing. Exit 10 is a question, not a failure: ask the gate its JSON names (`blocked_by_gate`) — for `fmr_extracted_values` that is Step 3.6 again, then Steps 4–5 — record it, and compose again; never re-run compose without the answer. Any other non-zero exit: stop and report the exact stderr — do not proceed.
 
 ### Verification Gate 1 (after compose)
 
@@ -770,8 +742,8 @@ skip this step; Gate 2 will not require the file.
 ### Steps 8a-8b: Visualize and Generate Explorer (Optional)
 
 ```bash
-python3 "$SCRIPTS/visualize.py" --dir "$REVIEW_DIR" -o "$REVIEW_DIR/report.html"
-python3 "$SCRIPTS/explore.py" --dir "$REVIEW_DIR" -o "$REVIEW_DIR/explore.html"
+python3 "$SCRIPTS/visualize.py" --dir "$REVIEW_DIR" -o "$REVIEW_DIR/report.html" --run-id "$RUN_ID"
+python3 "$SCRIPTS/explore.py" --dir "$REVIEW_DIR" -o "$REVIEW_DIR/explore.html" --run-id "$RUN_ID"
 ```
 
 Generate files silently — present paths after Gate 2 passes.
@@ -905,7 +877,7 @@ The gate (`check_handoff.py --format=markdown`) verifies the sub-agent's hand-of
 - **`insert_coaching.py` exit 1** (blocked; stdout carries `{"status": "blocked", "reason": ...}`) → stop and report the exact reason. Do NOT hand-edit `report.md` — if the reason mentions a truncated report or a missing marker, re-run `compose_report.py --write-md` and retry the chain. If the reason is `commentary_markdown missing or empty`, treat as a malformed hand-off: repair-dispatch quoting the reason.
 - **After ANY corrective dispatch, resume from the gate chain** — never feed the transform+insert pipe an ungated file.
 
-**Retry budget:** max 2 corrective dispatches (same rule as Context A). **Graceful degrade:** if the FIRST corrective dispatch also exits 3 while the receipt claims `complete` with the correctly echoed path, treat the host topology as hand-off-incompatible and fall back to message-channel transport, and tell the founder in one plain sentence (see Context A's degrade rule). **The corrective dispatch MUST ask for the commentary inline for this to be reachable** — add: "the file hand-off is not working in this environment; return the coaching commentary itself as your final message, as raw markdown, with no receipt JSON and no fences." Without that line the fallback is unreachable: the normal Context B prompt instructs the agent to return ONLY the receipt and not to narrate, so its final message contains no markdown to stage. Then stage that returned markdown to `$STAGING_DIR/coaching.md` via a **single-quoted** `<<'COACHING_EOF'` heredoc (apostrophe-safe; NEVER `python -c`, NEVER the `outputs/` root — `$STAGING_DIR` is the `/tmp` scratch dir from Step 0, never the promoted outputs mount), and run the same `md_to_commentary.py "$STAGING_DIR/coaching.md" | insert_coaching.py` chain against that staged file.
+**Retry budget:** max 2 corrective dispatches (same rule as Context A). **Graceful degrade:** if the FIRST corrective dispatch also exits 3 while the receipt claims `complete` with the correctly echoed path, treat the host topology as hand-off-incompatible and fall back to message-channel transport, and tell the founder in one plain sentence (see Context A's degrade rule). **The corrective dispatch MUST ask for the commentary inline for this to be reachable** — add: "the file hand-off is not working in this environment; return the coaching commentary itself as your final message, as raw markdown, with no receipt JSON and no fences." Without that line the fallback is unreachable: the normal Context B prompt instructs the agent to return ONLY the receipt and not to narrate, so its final message contains no markdown to stage. Then stage that returned markdown to `$STAGING_DIR/coaching.md` via a **single-quoted** `<<'COACHING_EOF'` heredoc (apostrophe-safe), and run the same `md_to_commentary.py "$STAGING_DIR/coaching.md" | insert_coaching.py` chain against that staged file.
 
 ### Step 8d: Cleanup
 
@@ -961,6 +933,12 @@ inputs — the validated figures and extractions this analysis was built from, p
 data. Never include pipeline hand-off files, receipts, coaching payloads, or gate state: they mean
 nothing outside the run that made them.
 
+Before sending them, close the run's file list (for a host; nothing to tell the founder):
+
+```bash
+python3 "<printed PLUGIN_ROOT>/scripts/run_status.py" deliverables --run-id "$RUN_ID" --artifacts-root "$ARTIFACTS_ROOT" --final || :
+```
+
 **In this skill the hand-over message is printed, not written.** It is the links, the report's own
 verdict paragraph (the model's rating and its runway, with runway at today's burn when that is shorter),
 and the offer. Send the files first; then run this as your LAST tool call:
@@ -980,21 +958,21 @@ Here the printed hand-over replaces the named entries and the offer described ab
 is the only offer made, and a connected folder is written to only if the founder asks.
 
 **When the hand-over asked for the cash balance and the founder replies with it**, keep this run's
-`RUN_ID` and `$REVIEW_DIR`. Record the balance as a plain number, its month as `YYYY-MM`; promote; re-run runway:
+`RUN_ID` and `$REVIEW_DIR`. Record the balance as a plain number, its month as `YYYY-MM`, and the answer; promote; re-run runway: <!-- gate: fmr_cash_followup -->
 
 ```bash
 python3 "$SCRIPTS/apply_corrections.py" --set cash.current_balance=<amount> --set cash.balance_date=<YYYY-MM> \
-  --original "$REVIEW_DIR/inputs.json" --output-dir "$REVIEW_DIR"
+  --original "$REVIEW_DIR/inputs.json" --output-dir "$REVIEW_DIR" --run-id "$RUN_ID" --origin chat
+python3 "$SHARED_SCRIPTS/record_gate_answer.py" answer --run-id "$RUN_ID" --run-dir "$REVIEW_DIR" \
+  --gate fmr_cash_followup --answer-id provided --gate fmr_cash_basics.current_balance --answer-id stated \
+  --value "<amount>" --gate fmr_cash_basics.balance_date --answer-id stated --value "<YYYY-MM>"
 cp "$REVIEW_DIR/corrected_inputs.json" "$REVIEW_DIR/inputs.json"
 cat "$REVIEW_DIR/inputs.json" | python3 "$SCRIPTS/runway.py" --pretty --run-id "$RUN_ID" -o "$REVIEW_DIR/runway.json"
 ```
 
 Then Steps 7, 7.5 (runway lens), 8a-8c, Gates 1-2, this step, with `--cash-update` on the
-closer, which states the update; its output stays your whole final message.
-
-**Do not `rm` anything under `$REVIEW_DIR`** — it is the promoted `outputs/` tree in Cowork, where
-deleting a user-visible path is unsafe. Scratch lives in `$STAGING_DIR` (`/tmp`), which the sandbox
-reclaims on its own.
+closer, which states the update; its output stays your whole final message. Any other changed figure after
+delivery needs a new review: this run's steps refuse it.
 
 ## Main-Thread Return
 

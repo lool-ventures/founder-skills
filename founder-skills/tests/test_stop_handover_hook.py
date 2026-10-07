@@ -1145,7 +1145,8 @@ def test_a_report_build_written_across_lines_still_triggers_the_report_check(tmp
     assert json.loads(_run(tmp_path, rows).stdout)["decision"] == "block"
 
 
-def test_deck_reviews_page_list_close_cannot_silence_the_delivery_ask(tmp_path: Path) -> None:
+@pytest.mark.parametrize("skill_name", ["deck-review", "financial-model-review"])
+def test_a_skills_page_list_close_cannot_silence_the_delivery_ask(tmp_path: Path, skill_name: str) -> None:
     """deck-review closes its page list after compose with `deliverables --final`, which refuses a run that
     is not `complete`. Run as SKILL.md writes it (`|| :`), the call succeeds even then, so the hook still
     sees no failure after the build and still asks for the unsent report."""
@@ -1154,10 +1155,10 @@ def test_deck_reviews_page_list_close_cannot_silence_the_delivery_ask(tmp_path: 
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     import gate_run_helpers as h
 
-    skill = (SCRIPTS.parent / "skills" / "deck-review" / "SKILL.md").read_text(encoding="utf-8")
+    skill = (SCRIPTS.parent / "skills" / skill_name / "SKILL.md").read_text(encoding="utf-8")
     [line] = [ln for ln in skill.splitlines() if 'run_status.py" deliverables' in ln]
     assert line.rstrip().endswith("|| :"), line
-    root, run_id, _run_dir = h.start_bound(tmp_path / "run", "deck-review")
+    root, run_id, _run_dir = h.start_bound(tmp_path / "run", skill_name)
     command = (
         line.replace("<printed PLUGIN_ROOT>", str(SCRIPTS.parent))
         .replace('"$RUN_ID"', run_id)

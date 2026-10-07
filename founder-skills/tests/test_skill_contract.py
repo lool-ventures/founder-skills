@@ -1080,7 +1080,14 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 84_789 -> 85_546 on 2026-10-05: the hand-over asks for the cash balance when runway could
     # not be computed without one, so Step 12 says what to do with the reply: record it with
     # apply_corrections.py --set, promote, re-run runway and the steps after it, the closer last.
-    "financial-model-review": 85_544,
+    # 85,544 -> 85,520 (-24 B) on 2026-10-07: gates wired. The catalog sections are out (the one plugin-root
+    # references pointer kept); Step 0 starts the run's record, the slug block binds it, Step 1 opens its
+    # questions before asking and records each, Step 3.6 is one recorded question for both input paths (open
+    # before the page), exit 10 is a question at Steps 4 and 7, the pages carry the run id, Step 12 closes the
+    # file list and records the cash reply. Five restatements trimmed to fit (the AskUserQuestion-fallback aside,
+    # the coaching heredoc parenthetical, Step 12's repeated no-rm paragraph, a stale five-skills sentence, the
+    # Path B anecdote).
+    "financial-model-review": 85_520,
     # ic-sim SHRANK: the REQUIRED ic-dynamics.md read at Step 7 is deleted. Step 7 is a pure producer
     # pipe — compose_discussion.py derives discussion.json from the partners' own files and nothing
     # is authored by the main thread — so the read informed no decision while pulling a whole
@@ -2896,16 +2903,18 @@ GATE_SITES: dict[str, dict[str, tuple[str, ...]]] = {
         "unspecified": (),
     },
     "financial-model-review": {
+        # 2026-10-07: the review-page STOP and the Path B confirmation are one recorded gate; the cash and
+        # company questions are recorded gates too, asked from the `needs_input` a script prints.
         "declared": (
-            "review-page STOP gate",
-            "Path B conversational confirmation",
+            "extracted-values review (fmr_extracted_values)",
             "founder-context init — stage",
         ),
         "prose": (),
         "runtime-labelled": (
             "founder-context init — name/sector/geography",
-            "cash balance / date / burn (exit 0)",
-            "Exit-2 company picker",
+            "cash balance / date / burn (fmr_cash_basics)",
+            "company picker (ctx_select_company)",
+            "cash follow-up (fmr_cash_followup)",
         ),
         "exempt": (),
         "unspecified": (),
@@ -3053,7 +3062,9 @@ SPECS_VISIBLE_FLOOR: dict[str, int] = {
     "market-sizing": 3,
     "deck-review": 4,
     "ic-sim": 2,
-    "financial-model-review": 3,
+    # 3 -> 2 (2026-10-07): Step 3.6's two sites (the review-page STOP, the Path B confirmation) are one recorded
+    # gate, fmr_extracted_values, asked with one Options: line on either path.
+    "financial-model-review": 2,
     "competitive-positioning": 7,
     "cap-table": 23,
 }
@@ -4502,13 +4513,13 @@ def test_no_shipped_text_carries_a_host_answer_line_for_a_gate_a_hook_reads() ->
 # --- recorded gates ----------------------------------------------------------------------------------------
 
 # The skills whose Step 0 starts the run's record; each skill's wiring commit adds itself.
-WIRED = ("deck-review",)
+WIRED = ("deck-review", "financial-model-review")
 # `record_gate_answer.py open` lines per SKILL.md, the companion to ASKUSER_MENTIONS: an open site added or
 # removed changes this count, and the gate-site test in the skill's own contract file says which.
 OPEN_LINES: dict[str, int] = {
     "deck-review": 2,
     "market-sizing": 0,
-    "financial-model-review": 0,
+    "financial-model-review": 2,
     "ic-sim": 0,
     "competitive-positioning": 0,
     "cap-table": 0,
@@ -4529,7 +4540,9 @@ def test_step0_starts_the_run_record_inside_the_reattached_window(skill: str) ->
     assert "<<'FS_HOST_EOF'" in body[start : start + 300]
     assert body.index('resolve_artifacts_root.py"   # prints ARTIFACTS_ROOT') < start
     assert body.index("`UNSUPPORTED_ENVIRONMENT`, stop here") < start
-    assert body.index("I can run it now") < start < body.index("### Step 1:")
+    if "I can run it now" in body:
+        assert body.index("I can run it now") < start
+    assert start < body.index("### Step 1:")
     fence_end = body.index("```", start) + 3
     assert fence_end <= _REATTACH_LAST_SAFE_CHARS - _REATTACH_PREFIX_MAX_CHARS, fence_end
     text = (SKILLS_ROOT / skill / "SKILL.md").read_text(encoding="utf-8")

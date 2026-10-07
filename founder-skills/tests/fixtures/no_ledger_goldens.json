@@ -166,6 +166,168 @@
       "stdout": "5cfbfe5553c0db86f8d62b5449e65ef27308245e8845f16e99525962500a4819"
     }
   },
+  "fmr_closer": {
+    "cash_update": {
+      "exit": 0,
+      "files": {
+        "checklist.json": "bb90b847ae7a061cb446fecb49c2b260ed5e6c97f1a43388a7d7d0341548c4dd",
+        "handover.txt": "08575a78cf5a8321b3f6fe3519b3da75436194a794b2aa3bbca5492860079d94",
+        "inputs.json": "ed0bb8241c468220a17e1bbecc79243ec6e3de4fa92b8dcec0c3f18a7da14306",
+        "report.json": "f038c195f23dcd7ad4b770986f1e8127c76ebc5b6b4733e45151ebf753588c39",
+        "report.md": "423bd30f802a19dd4ab875c23ea62295331e978079e22bb8604bcd055d5110d3",
+        "runway.json": "6c7e4c29634d48e80543dc6efb03a70b84730d800e9f5fe3ada0787f6803061a",
+        "unit_economics.json": "f8a9df4cbf19b4d066e6121af6ed42a6b9a1e530e126c180b05b537a17774396"
+      },
+      "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout": "08575a78cf5a8321b3f6fe3519b3da75436194a794b2aa3bbca5492860079d94"
+    },
+    "no_cash": {
+      "exit": 0,
+      "files": {
+        "checklist.json": "bb90b847ae7a061cb446fecb49c2b260ed5e6c97f1a43388a7d7d0341548c4dd",
+        "handover.txt": "ce98e2a7dfd35dbee9fd309e8ee9456ad1541f83c981cc4a921039c4f7ccaa35",
+        "inputs.json": "f6bb53d5b1f395e8fd1d255f9061274a217226443a6c54b56dabd30cdf2f2d09",
+        "report.json": "ebfb09ddd3865d3d1af300d72e8dc2700f58c00343f3391b5b5ea3588b573034",
+        "report.md": "8970bf2f51762303a958b1431e55912efad260a261c19c9657bb64050bc25f27",
+        "runway.json": "64eeaff3ff590146bbc25afbf36d640e5add067577dc7eb0d624d26807919753",
+        "unit_economics.json": "f8a9df4cbf19b4d066e6121af6ed42a6b9a1e530e126c180b05b537a17774396"
+      },
+      "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout": "ce98e2a7dfd35dbee9fd309e8ee9456ad1541f83c981cc4a921039c4f7ccaa35"
+    },
+    "plain": {
+      "exit": 0,
+      "files": {
+        "checklist.json": "bb90b847ae7a061cb446fecb49c2b260ed5e6c97f1a43388a7d7d0341548c4dd",
+        "handover.txt": "f8361363cbf29fe16446d1b5dc905bf78fbe1dd58c7ae5ee4cbf0f30c668da02",
+        "inputs.json": "ed0bb8241c468220a17e1bbecc79243ec6e3de4fa92b8dcec0c3f18a7da14306",
+        "report.json": "f038c195f23dcd7ad4b770986f1e8127c76ebc5b6b4733e45151ebf753588c39",
+        "report.md": "423bd30f802a19dd4ab875c23ea62295331e978079e22bb8604bcd055d5110d3",
+        "runway.json": "6c7e4c29634d48e80543dc6efb03a70b84730d800e9f5fe3ada0787f6803061a",
+        "unit_economics.json": "f8a9df4cbf19b4d066e6121af6ed42a6b9a1e530e126c180b05b537a17774396"
+      },
+      "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout": "f8361363cbf29fe16446d1b5dc905bf78fbe1dd58c7ae5ee4cbf0f30c668da02"
+    }
+  },
+  "fmr_compose": {
+    "full": {
+      "exit": 0,
+      "files": {
+        "checklist.json": "bb90b847ae7a061cb446fecb49c2b260ed5e6c97f1a43388a7d7d0341548c4dd",
+        "inputs.json": "ed0bb8241c468220a17e1bbecc79243ec6e3de4fa92b8dcec0c3f18a7da14306",
+        "report.json": "f038c195f23dcd7ad4b770986f1e8127c76ebc5b6b4733e45151ebf753588c39",
+        "report.md": "423bd30f802a19dd4ab875c23ea62295331e978079e22bb8604bcd055d5110d3",
+        "runway.json": "6c7e4c29634d48e80543dc6efb03a70b84730d800e9f5fe3ada0787f6803061a",
+        "unit_economics.json": "f8a9df4cbf19b4d066e6121af6ed42a6b9a1e530e126c180b05b537a17774396"
+      },
+      "stderr": "b2263869fc5a557f8136bfb44363e159ff6a9c95162d3f4a7eba7ef10eb21402",
+      "stdout": "7e0cfaa911929d6fc4d96e88f7855f68c55d48b71713e1701a75c03ee76cf90b"
+    },
+    "no_cash": {
+      "exit": 0,
+      "files": {
+        "checklist.json": "bb90b847ae7a061cb446fecb49c2b260ed5e6c97f1a43388a7d7d0341548c4dd",
+        "inputs.json": "f6bb53d5b1f395e8fd1d255f9061274a217226443a6c54b56dabd30cdf2f2d09",
+        "report.json": "ebfb09ddd3865d3d1af300d72e8dc2700f58c00343f3391b5b5ea3588b573034",
+        "report.md": "8970bf2f51762303a958b1431e55912efad260a261c19c9657bb64050bc25f27",
+        "runway.json": "64eeaff3ff590146bbc25afbf36d640e5add067577dc7eb0d624d26807919753",
+        "unit_economics.json": "f8a9df4cbf19b4d066e6121af6ed42a6b9a1e530e126c180b05b537a17774396"
+      },
+      "stderr": "0b8d94b87008a317ee36b1d0c5bfed895d34099fd28dded8eb21ca2779ed3822",
+      "stdout": "2af515fa8634e19c678fd83617e235da54149d788b4e9455a454f2a8b8b801d0"
+    }
+  },
+  "fmr_producers": {
+    "runway.py/no_cash_run_id": {
+      "exit": 0,
+      "files": {
+        "out.json": "90252e829ae166dc9c200a91a41355cfcc93f9c4c3630576ab131194fe09a5eb"
+      },
+      "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout": "08b73d3f340aab81cb1002dcb834f0fc41583e1b5d576127d7602af3b914bf98"
+    },
+    "runway.py/stdout": {
+      "exit": 0,
+      "files": {},
+      "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout": "69f5abe50aa868cce68b17398719064aa141c8c89f09574517723cba9d654048"
+    },
+    "runway.py/to_file": {
+      "exit": 0,
+      "files": {
+        "out.json": "69f5abe50aa868cce68b17398719064aa141c8c89f09574517723cba9d654048"
+      },
+      "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout": "00a1160354abb440f41a3fd7f9f37a3430b390cfdd1ce0013a7c8fe9eadde2f8"
+    },
+    "runway.py/to_file_run_id": {
+      "exit": 0,
+      "files": {
+        "out.json": "eafe417b606e8438b4b673e16c4f7c6e424613a98d0230d17c7b41dcc44510ff"
+      },
+      "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout": "9a0f23b1a244965ecd9b8ec4fbeb30f6c24911d3654940f55c0a0d6169235062"
+    },
+    "unit_economics.py/no_cash_run_id": {
+      "exit": 0,
+      "files": {
+        "out.json": "d1474eb7049bba31dcbb3e4f550133f302d8900aa570f5c69872220e5d249cbb"
+      },
+      "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout": "f0d7058f247bfbe10c81e303ca2c895111d2234939b9a7c255f88be1e0ba5a23"
+    },
+    "unit_economics.py/stdout": {
+      "exit": 0,
+      "files": {},
+      "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout": "989e00775287bff450c3d7b45d42e76a54d64c1ce190df67d8425a82d2d60e28"
+    },
+    "unit_economics.py/to_file": {
+      "exit": 0,
+      "files": {
+        "out.json": "989e00775287bff450c3d7b45d42e76a54d64c1ce190df67d8425a82d2d60e28"
+      },
+      "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout": "7dcb1fc2a981437e31e537a4b483a74c4af650a12b36594e74544afce72fe4e8"
+    },
+    "unit_economics.py/to_file_run_id": {
+      "exit": 0,
+      "files": {
+        "out.json": "d1474eb7049bba31dcbb3e4f550133f302d8900aa570f5c69872220e5d249cbb"
+      },
+      "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout": "f0d7058f247bfbe10c81e303ca2c895111d2234939b9a7c255f88be1e0ba5a23"
+    }
+  },
+  "fmr_verify": {
+    "gate_1": {
+      "exit": 1,
+      "files": {
+        "checklist.json": "bb90b847ae7a061cb446fecb49c2b260ed5e6c97f1a43388a7d7d0341548c4dd",
+        "inputs.json": "ed0bb8241c468220a17e1bbecc79243ec6e3de4fa92b8dcec0c3f18a7da14306",
+        "report.json": "f038c195f23dcd7ad4b770986f1e8127c76ebc5b6b4733e45151ebf753588c39",
+        "report.md": "423bd30f802a19dd4ab875c23ea62295331e978079e22bb8604bcd055d5110d3",
+        "runway.json": "6c7e4c29634d48e80543dc6efb03a70b84730d800e9f5fe3ada0787f6803061a",
+        "unit_economics.json": "f8a9df4cbf19b4d066e6121af6ed42a6b9a1e530e126c180b05b537a17774396"
+      },
+      "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout": "7bcc9a58b8cfaca93bb63ea65fa168a99aad5c8dd9decea526ad669ea0ca069a"
+    },
+    "gate_2": {
+      "exit": 1,
+      "files": {
+        "checklist.json": "bb90b847ae7a061cb446fecb49c2b260ed5e6c97f1a43388a7d7d0341548c4dd",
+        "inputs.json": "ed0bb8241c468220a17e1bbecc79243ec6e3de4fa92b8dcec0c3f18a7da14306",
+        "report.json": "f038c195f23dcd7ad4b770986f1e8127c76ebc5b6b4733e45151ebf753588c39",
+        "report.md": "423bd30f802a19dd4ab875c23ea62295331e978079e22bb8604bcd055d5110d3",
+        "runway.json": "6c7e4c29634d48e80543dc6efb03a70b84730d800e9f5fe3ada0787f6803061a",
+        "unit_economics.json": "f8a9df4cbf19b4d066e6121af6ed42a6b9a1e530e126c180b05b537a17774396"
+      },
+      "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout": "f045778353de4730f8bf85c4e61b3f9897651e84103fc6fcb7e147b3b9b179f5"
+    }
+  },
   "founder_context": {
     "init_with_run_id": {
       "exit": 0,

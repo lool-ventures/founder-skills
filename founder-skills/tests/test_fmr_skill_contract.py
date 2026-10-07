@@ -170,10 +170,10 @@ def test_model_derived_company_name_routes_through_staging() -> None:
     Without a sanctioned pre-slug extraction target the agent deadlocks and
     improvises, producing an outputs-mount delete."""
     text = SKILL_MD.read_text(encoding="utf-8")
-    start = text.find("**Exit 1 (not found):**")
+    start = text.find("**Exit 1 (not found")
     assert start != -1, f"{SKILL_MD.name} has no Exit 1 branch"
-    end = text.find("**Exit 2", start)
-    assert end != -1, f"{SKILL_MD.name} Exit 1 branch has no Exit 2 terminator"
+    end = text.find("**Exit 10 (several companies)", start)
+    assert end != -1, f"{SKILL_MD.name} Exit 1 branch has no Exit 10 terminator"
     section = text[start:end]
 
     # A model-file-name branch that stages the extraction to /tmp first.

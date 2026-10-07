@@ -401,7 +401,7 @@ def test_the_re_run_after_the_cash_reply_prints_its_own_update_line(tmp_path: Pa
 def test_step_12_closes_the_cash_re_run_with_the_update_flag() -> None:
     skill = (_REPO / "founder-skills" / "skills" / "financial-model-review" / "SKILL.md").read_text(encoding="utf-8")
     follow_up = skill[skill.index("**When the hand-over asked for the cash balance") :]
-    follow_up = follow_up[: follow_up.index("**Do not `rm`")]
+    follow_up = follow_up[: follow_up.index("\n## ")]
     assert "--cash-update" in follow_up
 
 

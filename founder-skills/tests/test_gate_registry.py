@@ -156,7 +156,11 @@ def test_effect_targets_exist() -> None:
         for opts in _options(g):
             for o in opts:
                 for targets in (o["effects"] or {}).values():
-                    assert set(targets) <= set(GATES), (gid, o["id"], targets)
+                    for t in targets:
+                        base, _, inst = t.partition(".")
+                        assert base in GATES, (gid, o["id"], t)
+                        if inst:
+                            assert inst in (GATES[base]["instances"] or {}).get("static", ()), (gid, o["id"], t)
 
 
 def test_gates_recorded_by_their_own_script() -> None:
@@ -203,8 +207,6 @@ UNIMPLEMENTED = {
         "ct_producer_reports_null",
         "ct_safe_terms_missing",
         "ct_scenarios_owed",
-        "fmr_full_review",
-        "fmr_no_cash_balance",
         "ic_verdict_decline",
         "ms_correction_requested",
         "ms_founder_alternatives",
@@ -221,8 +223,8 @@ UNIMPLEMENTED = {
         "ms_alternatives",
         "ms_proposed_changes",
     ],
-    "binders": ["fmr_inputs_minus_cash"],
-    "requires": ["fmr_cash_audit", "fmr_corrections_audit"],
+    "binders": [],
+    "requires": [],
 }
 
 
@@ -375,13 +377,21 @@ def test_a_missing_registry_is_unreachable(tmp_path: Path) -> None:
 # --- effects, defaults and the published contract -------------------------------------------------
 
 
-def test_an_effect_never_targets_a_gate_with_instances() -> None:
-    """A gate with instances is opened per instance by its own site; an effect could only open it bare."""
+def test_an_effect_names_a_gate_with_instances_only_by_one_static_instance() -> None:
+    """A gate with instances is opened per instance by its own site; an effect could only open it bare, so
+    it names one static instance (`gate.instance`) or none of that gate."""
     for gid, g in GATES.items():
         for opts in _options(g):
             for o in opts:
                 for targets in (o["effects"] or {}).values():
-                    assert all(GATES[t]["instances"] is None for t in targets), (gid, o["id"], targets)
+                    for t in targets:
+                        assert t in GATES and GATES[t]["instances"] is None or "." in t, (gid, o["id"], t)
+    for target in ("fmr_cash_basics", "fmr_cash_basics.not_an_instance"):
+        bad_gates = dict(GATES)
+        bad_gates["fmr_cash_followup"] = dict(GATES["fmr_cash_followup"])
+        opt = dict(GATES["fmr_cash_followup"]["options"][0], effects={"reopens": (target,)})
+        bad_gates["fmr_cash_followup"]["options"] = (opt,)
+        assert _gates.validate_registry(bad_gates), target
     bad = dict(GATES)
     bad["ms_methodology"] = dict(GATES["ms_methodology"])
     looks = dict(GATES["ms_methodology"]["options"][0], effects={"opens": ("ms_correct_data",)})
@@ -458,6 +468,8 @@ _CODE_SOURCES = [
     SCRIPTS / "insert_coaching.py",
     SKILLS / "deck-review" / "scripts" / "gate_state.py",
     SKILLS / "deck-review" / "scripts" / "compose_report.py",
+    SKILLS / "financial-model-review" / "scripts" / "_fmr_gates.py",
+    SKILLS / "financial-model-review" / "scripts" / "compose_report.py",
     SKILLS / "market-sizing" / "scripts" / "record_revision_answer.py",
     SKILLS / "cap-table" / "scripts" / "extract_cap_table.py",
     *_HTML_WRITERS,
@@ -548,6 +560,10 @@ def test_an_option_offered_by_some_skills_says_which() -> None:
 
 # Wording no skill's own text carries yet: questions the skill asks in prose, and labels marked new. Each
 # skill's wiring commit either matches an entry to its SKILL.md or keeps it here deliberately.
+# financial-model-review (wired): Step 3.6 asks the registry's question with its three shown labels, so those
+# left the list. Kept deliberately: `corrections_applied` (hidden; a host's or the recorder's word), the cash
+# questions and `stated` (asked from the printed `needs_input`), and the cash follow-up (the closer's own
+# sentence asks for the balance; the reply is recorded as `provided`).
 # deck-review (wired): its text names `A different company` and `Stop the review`, so those two left the
 # list. The rest of its entries and the shared ones stay deliberately: the model asks those questions from
 # the `needs_input` block a script prints, so SKILL.md need not carry their words.
@@ -582,9 +598,6 @@ NEW_WORDING = {
     ("fmr_cash_basics", "question.balance_date"),
     ("fmr_cash_basics", "question.monthly_burn"),
     ("fmr_cash_basics", "stated"),
-    ("fmr_extracted_values", "question"),
-    ("fmr_extracted_values", "has_corrections"),
-    ("fmr_extracted_values", "proceed_unreviewed"),
     ("fmr_extracted_values", "corrections_applied"),
     ("fmr_cash_followup", "question"),
     ("fmr_cash_followup", "provided"),

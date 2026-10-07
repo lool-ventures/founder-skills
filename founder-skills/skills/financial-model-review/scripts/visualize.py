@@ -1438,7 +1438,19 @@ def _key_findings(
 # ---------------------------------------------------------------------------
 
 
-def compose_html(dir_path: str) -> str:
+# The values-check notes, compose_report.py's text word for word (a test holds them equal); shown only on a
+# run whose ledger records the values went on unreviewed, or were taken as checked without asking.
+EXTRACTION_UNREVIEWED_NOTE = (
+    "The figures this review used were not checked with you before the analysis ran, so check them against "
+    "your model before relying on these numbers."
+)
+VALUES_BY_REQUEST_NOTE = (
+    "The extracted values were not put to you as a question: the request that started this review said they "
+    "had been checked."
+)
+
+
+def compose_html(dir_path: str, review_note: str = "") -> str:
     """Load artifacts and compose full HTML report."""
     scripts_dir = os.path.dirname(os.path.abspath(__file__))
     if scripts_dir not in sys.path:
@@ -1493,6 +1505,7 @@ def compose_html(dir_path: str) -> str:
         </section>"""
 
     brand_css = _theme.brand_css()
+    note_html = f'<p class="review-note"><em>{_esc(review_note)}</em></p>' if review_note else ""
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -1511,7 +1524,7 @@ def compose_html(dir_path: str) -> str:
     <main>
         <section>
             <h2>Executive Summary</h2>
-            {summary_html}
+            {note_html}{summary_html}
         </section>{findings_section}
         <section>
             <h2>Checklist</h2>
@@ -1553,6 +1566,23 @@ def _run_ref_module() -> ModuleType:
     return _run_ref
 
 
+def _review_note(dir_path: str) -> str:
+    """The values-check note for a run with a gate ledger; empty with none (nothing shared is loaded)."""
+    scripts_dir = os.path.dirname(os.path.abspath(__file__))
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    import _fmr_gates
+
+    rec = _fmr_gates.values_record(dir_path)
+    if rec is None:
+        return ""
+    if rec.get("answer_id") == "proceed_unreviewed":
+        return EXTRACTION_UNREVIEWED_NOTE
+    if rec.get("answer_id") == "values_ok" and (rec.get("by_request") or rec.get("resolution") == "default_taken"):
+        return VALUES_BY_REQUEST_NOTE
+    return ""
+
+
 def _own_run_id(dir_path: str) -> str | None:
     """This page's run id: inputs.json's."""
     rid: str | None = _run_ref_module().json_run_id(os.path.join(dir_path, "inputs.json"))
@@ -1582,7 +1612,7 @@ def main() -> None:
         print(f"Error: directory not found: {args.dir}", file=sys.stderr)
         sys.exit(1)
 
-    html_output = compose_html(args.dir)
+    html_output = compose_html(args.dir, _review_note(args.dir))
     if args.run_id is not None:
         html_output = _run_ref_module().page_for_run(html_output, args.run_id, _own_run_id(args.dir))
     _write_output(html_output, args.output)

@@ -19,6 +19,9 @@
       "MODE_MISMATCH",
       "MODE_NOT_OFFERED"
     ],
+    "fmr_producers": [
+      "RUN_ID_REQUIRED"
+    ],
     "founder_context": [
       "CONTEXT_NOT_FOUND"
     ],
@@ -1953,7 +1956,7 @@
         {
           "hidden": false,
           "id": "values_ok",
-          "label": "The values look right, proceed",
+          "label": "Looks right, proceed",
           "only_skills": null,
           "pre_answerable": true,
           "takes_value": false,
@@ -2582,7 +2585,10 @@
     "`current.asked_evidence` may also be `ask_user_question`, `plain_chat`, `host_line` or `form` from the plugin's transcript check. It stays null when that check did not run (hooks are optional) or when the step went through on its one retry with no question. It is a measurement of how the question was put, not an attestation that a person answered it.",
     "`untouched_since_resume` lists the run-dir files no writer rewrote after this invocation began; `touched_since_resume` lists those a writer did, and how. It records file writes measured by script, not steps: which files a correct resume rewrites depends on the skill and the gate (reports, coaching and pages are rewritten every invocation; a corrections resume rewrites inputs.json), and it cannot see work written outside the run dir or work that wrote nothing. `null` means no manifest could be taken, never that nothing ran.",
     "Exit 10 means a question is owed and its gate is named in `blocked_by_gate`. The status is then `waiting`, except for `GATE_UNRESOLVED`: a question that was opened and never recorded leaves the run `running` with `last_error_code: GATE_UNRESOLVED`. Like every `last_error_code` (`GATE_INVALID`, `GATE_OTHER_RUN`, `PROFILE_MISMATCH`, `COACHING_BLOCKED`), it records the last error seen and is cleared only when the run completes.",
-    "`disclosures` lists `DEFAULT_TAKEN:<gate>` for an answer recorded as a default and `PRE_ANSWERED:<gate>` for one applied from a request line instead of being asked. `PRE_ANSWERED:out_of_scope_choice` means the request chose to review a deck outside the skill's stage scope, best-effort; the report and page tell the founder so."
+    "`disclosures` lists `DEFAULT_TAKEN:<gate>` for an answer recorded as a default and `PRE_ANSWERED:<gate>` for one applied from a request line instead of being asked. `PRE_ANSWERED:out_of_scope_choice` means the request chose to review a deck outside the skill's stage scope, best-effort; the report and page tell the founder so.",
+    "`disclosures` also lists `EXTRACTION_UNREVIEWED` when financial-model-review's extracted values went on without being reviewed, and `CORRECTIONS_SOURCE:<origin>` (`external`, `upload` or `chat`) when corrections to them were applied, naming who supplied them.",
+    "A `complete` financial-model-review run returns to `running`, with `revision` + 1 and `handed_over_at` cleared, when the founder answers the cash follow-up; it completes again at the next coaching insert.",
+    "An enforcer never re-opens a finished run's answer: on a `complete` or `refused` run whose confirmed input changed, it refuses `RUN_FINISHED` and writes nothing; a changed figure after `complete` needs a new run."
   ],
   "pages_after_coaching": {
     "cap-table": [],

@@ -47,6 +47,13 @@ ASK_FOR_CASH_BALANCE = (
     "The figures you shared don't include your cash balance today, so I couldn't work out your runway; "
     "tell me your current cash balance and the date it's as of, and I'll recompute it."
 )
+# Printed when report.json's `disclosures` (a run with a gate ledger) says the extracted values went on
+# unreviewed: compose_report.py's EXTRACTION_UNREVIEWED_TEXT, word for word (a test holds them equal). After
+# the verdict, never in it: the verdict is also the report's opening paragraph.
+EXTRACTION_UNREVIEWED = (
+    "The figures this review used were not checked with you before the analysis ran, so check them against "
+    "your model before relying on these numbers."
+)
 # Printed with --cash-update, on the re-run after the founder answers that request. Without it the model
 # announced the update in its own words around the hand-over on the re-run turn, which the Stop hook then
 # corrected with a second message; the sentence it wanted to write is printed here instead.
@@ -97,6 +104,8 @@ def build(report: dict[str, Any], deliverables: list[tuple[str, str | None]], ca
     # Optional sentences go here, after the verdict and BEFORE the offer: the Stop hook's fallback takes
     # this message from the transcript as the slice from the opener line to the offer's end, so anything
     # printed after the offer is invisible to it, and the offer must stay the last line.
+    if "EXTRACTION_UNREVIEWED" in (report.get("disclosures") or []):
+        lines += ["", EXTRACTION_UNREVIEWED]
     if report.get("runway_status") == NO_CASH_BALANCE:
         lines += ["", ASK_FOR_CASH_BALANCE]
     lines += [
@@ -134,6 +143,11 @@ def main() -> None:
             fh.write(text)
     except OSError as e:
         print(f"Warning: could not write {handover}: {e}", file=sys.stderr)
+    # A run with a gate ledger records when its hand-over was printed; nothing here changes stdout.
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import _fmr_gates  # noqa: PLC0415
+
+    _fmr_gates.stamp_handed_over(a.report)
     sys.stdout.write(text)
 
 

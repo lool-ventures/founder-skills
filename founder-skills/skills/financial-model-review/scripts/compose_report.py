@@ -89,6 +89,9 @@ WARNING_SEVERITY: dict[str, str] = {
     # `_handoff_bypassed`). Medium: the results are valid and must not block. Nothing here can
     # clear it -- this skill has no post-compose acceptance mechanism (see above).
     "HANDOFF_BYPASSED": "medium",
+    # The extracted values went on unreviewed (the founder's choice, the request's, or nobody there to ask).
+    # Medium: the figures may be right; nothing here can clear it.
+    "EXTRACTION_UNREVIEWED": "medium",
 }
 
 # How old a benchmark may be before the founder is told. 18 months is a judgement, not a
@@ -160,6 +163,7 @@ WARNING_LABELS: dict[str, str] = {
     "METRIC_SELF_CONTRADICTION": "Contradictory Metric Figures",
     "MARKER_COLLISION": "Marker Collision",
     "HANDOFF_BYPASSED": "Some Steps Were Not Checked",
+    "EXTRACTION_UNREVIEWED": "Figures Not Reviewed",
 }
 
 _GRADED_RATINGS = ("strong", "acceptable", "warning", "fail")
@@ -359,7 +363,15 @@ def _handoff_bypassed(dir_path: str, artifacts: dict[str, Any]) -> list[str]:
         return []
     run_dir = os.path.join(dir_path, "handoff", run_id)
     requirements: list[tuple[str, list[str]]] = []
-    if isinstance(artifacts.get("extraction_corrections.json"), dict):
+    # The history says which call each corrections came from; without lines for this run (an older run, no
+    # ledger), the single audit file is the evidence the inputs review ran.
+    calls = _history_calls(dir_path, run_id)
+    ran_inputs_review = (
+        any(c.get("origin") == "inputs_review" for c in calls)
+        if calls
+        else isinstance(artifacts.get("extraction_corrections.json"), dict)
+    )
+    if ran_inputs_review:
         requirements.append(("the review of the extracted model", ["inputs_review_output.json"]))
     if isinstance(artifacts.get("checklist.json"), dict):
         requirements.append(("the scored checklist", ["checklist_output.json"]))
@@ -1583,6 +1595,70 @@ def _section_overrides(inputs: dict[str, Any] | None) -> str:
     return "\n".join(lines) + "\n" if lines else ""
 
 
+# Founder-facing lines that depend on the run's gate record (a run with a ledger only). The one sentence
+# about unreviewed figures is shared with the closer (fmr_closing_message.py), word for word.
+EXTRACTION_UNREVIEWED_TEXT = (
+    "The figures this review used were not checked with you before the analysis ran, so check them against "
+    "your model before relying on these numbers."
+)
+VALUES_BY_REQUEST_TEXT = (
+    "The extracted values were not put to you as a question: the request that started this review said they "
+    "had been checked."
+)
+# Who supplied a call's corrections, one line per call, by the origin the call recorded.
+CORRECTIONS_ORIGIN_TEXT: dict[str, str] = {
+    "external": "Corrections to the extracted values were supplied by the service that ran this review.",
+    "upload": "Corrections to the extracted values were supplied by you, in the corrections file you uploaded.",
+    "chat": "Corrections to the extracted values were supplied by you in chat, and entered by the assistant.",
+    "inputs_review": "The following extracted values were corrected during the review.",
+    "cash": "The cash balance you gave after the review, entered by the assistant.",
+}
+_CASH_PATHS = frozenset({"cash.current_balance", "cash.balance_date"})
+
+
+def _history_calls(dir_path: str, run_id: str | None) -> list[dict[str, Any]]:
+    """This run's corrections calls, oldest first (a torn line is skipped)."""
+    if not run_id:
+        return []
+    out = []
+    try:
+        with open(os.path.join(dir_path, "extraction_corrections.history.jsonl"), encoding="utf-8") as f:
+            for line in f:
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(rec, dict) and rec.get("run_id") == run_id:
+                    out.append(rec)
+    except OSError:
+        return []
+    return out
+
+
+def _call_label(call: dict[str, Any]) -> str:
+    paths = {c.get("path") for c in _as_list(call.get("corrections")) if isinstance(c, dict)}
+    if call.get("origin") == "chat" and paths and paths <= _CASH_PATHS:
+        return CORRECTIONS_ORIGIN_TEXT["cash"]
+    return CORRECTIONS_ORIGIN_TEXT.get(str(call.get("origin")), CORRECTIONS_ORIGIN_TEXT["inputs_review"])
+
+
+def _section_corrections_by_call(calls: list[dict[str, Any]]) -> str:
+    """With a ledger, every corrections call this run made, one block per call with who supplied it -- so a
+    later call (the cash follow-up) never replaces an earlier one's corrections in the report."""
+    blocks: list[str] = []
+    for call in calls:
+        if not _as_list(call.get("corrections")):
+            continue
+        body = _section_corrections({"corrections": call.get("corrections"), "timestamp": call.get("timestamp")})
+        if body:
+            blocks.append(
+                body.replace(
+                    "_The following extracted values were corrected during the review._", f"_{_call_label(call)}_"
+                ).replace("## Corrections Applied\n\n", "", 1 if blocks else 0)
+            )
+    return "\n".join(blocks)
+
+
 def _section_corrections(extraction_corrections: dict[str, Any] | None) -> str:
     """Optional 'Corrections Applied' subsection from extraction_corrections.json.
 
@@ -1860,7 +1936,7 @@ def _emit_coaching_payload(
     }
 
 
-def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
+def compose(dir_path: str, report_path: str | None = None, gate_record: dict[str, Any] | None = None) -> dict[str, Any]:
     """Main composition: load artifacts, validate, assemble report."""
     # Load all artifacts
     all_names = REQUIRED_ARTIFACTS + OPTIONAL_ARTIFACTS
@@ -1888,6 +1964,27 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
     runway = _render_safe(artifacts.get("runway.json"))
     extraction_corrections = _render_safe(artifacts.get("extraction_corrections.json"))
 
+    # The values check, as this run's ledger recorded it (a run with a ledger only; None leaves the report as it
+    # always was). Not reviewed: disclosed. Taken as checked without asking the founder (a request line, or
+    # recorded as stated): said so, never as the founder's confirmation.
+    disclosures: list[str] = []
+    values_note = ""
+    corrections_section = _section_corrections(extraction_corrections)
+    if gate_record is not None:
+        answer = gate_record.get("answer_id")
+        if answer == "proceed_unreviewed":
+            disclosures.append("EXTRACTION_UNREVIEWED")
+            warnings.append(_warn("EXTRACTION_UNREVIEWED", EXTRACTION_UNREVIEWED_TEXT, EXTRACTION_UNREVIEWED_TEXT))
+        elif answer == "values_ok" and (
+            gate_record.get("by_request") or gate_record.get("resolution") == "default_taken"
+        ):
+            values_note = f"*{VALUES_BY_REQUEST_TEXT}*\n"
+        elif answer == "corrections_applied" and gate_record.get("origin"):
+            disclosures.append(f"CORRECTIONS_SOURCE:{gate_record['origin']}")
+        calls = _history_calls(dir_path, gate_record.get("run_id"))
+        if calls:
+            corrections_section = _section_corrections_by_call(calls)
+
     # Render every section EXCEPT the Warnings section first; the Warnings
     # section is spliced in after the marker pre-scan so MARKER_COLLISION (which
     # is itself a warning) is reflected in both the status and the report body.
@@ -1902,7 +1999,8 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
         _section_model_completeness(inputs, checklist),
         _section_unit_economics(unit_economics),
         _section_runway(runway),
-        _section_corrections(extraction_corrections),
+        *([values_note] if values_note else []),
+        corrections_section,
         _section_overrides(inputs),
         _section_agent_supplied(inputs),
     ]
@@ -2024,6 +2122,8 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
         },
         "coaching_payload": coaching_payload,
     }
+    if gate_record is not None:
+        result["disclosures"] = disclosures
     runway_status = _runway_status(runway)
     if runway_status is not None:
         result["runway_status"] = runway_status
@@ -2065,7 +2165,21 @@ def main() -> None:
             sys.exit(1)
 
     report_path = os.path.abspath(args.write_md) if args.write_md else None
-    result = compose(args.dir, report_path=report_path)
+    # THE RUN'S GATE LEDGER, when the dir carries this run's ref: the values check must be recorded (and still
+    # match what it confirmed) before anything is written; an open question refuses; the cash follow-up is
+    # settled; the coaching state is written. With no ref none of this runs.
+    import _fmr_gates  # noqa: PLC0415
+
+    run_id = _fmr_gates.run_id_of(args.dir)
+    ledger = _fmr_gates.open_ledger_or_exit(args.dir, run_id)
+    gate_record = None
+    if ledger is not None:
+        _fmr_gates.require_or_exit(args.dir, run_id, (_fmr_gates.VALUES_GATE,))
+        gate_record = _fmr_gates.values_record(args.dir)
+    result = compose(args.dir, report_path=report_path, gate_record=gate_record)
+    if ledger is not None:
+        _fmr_gates.refuse_open_gates(ledger)
+        _fmr_gates.settle_cash_followup(ledger, result.get("runway_status") == RUNWAY_STATUS_NO_CASH_BALANCE)
 
     if args.write_md:
         report_markdown = result.get("report_markdown", "")
@@ -2110,6 +2224,9 @@ def main() -> None:
                 file=sys.stderr,
             )
             sys.exit(2)
+
+    if ledger is not None:
+        _fmr_gates.coaching_pending(ledger)
 
     # Exit 1 if any required artifacts are missing (regardless of strict mode)
     missing_required = [w for w in result["validation"]["warnings"] if w["code"] == "MISSING_ARTIFACT"]

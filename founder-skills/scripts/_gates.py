@@ -26,6 +26,7 @@ from __future__ import annotations
 import copy
 import glob
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -180,6 +181,13 @@ CONTRACT_NOTES = (
     "`disclosures` lists `DEFAULT_TAKEN:<gate>` for an answer recorded as a default and `PRE_ANSWERED:<gate>` for "
     "one applied from a request line instead of being asked. `PRE_ANSWERED:out_of_scope_choice` means the request "
     "chose to review a deck outside the skill's stage scope, best-effort; the report and page tell the founder so.",
+    "`disclosures` also lists `EXTRACTION_UNREVIEWED` when financial-model-review's extracted values went on "
+    "without being reviewed, and `CORRECTIONS_SOURCE:<origin>` (`external`, `upload` or `chat`) when corrections "
+    "to them were applied, naming who supplied them.",
+    "A `complete` financial-model-review run returns to `running`, with `revision` + 1 and `handed_over_at` "
+    "cleared, when the founder answers the cash follow-up; it completes again at the next coaching insert.",
+    "An enforcer never re-opens a finished run's answer: on a `complete` or `refused` run whose confirmed input "
+    "changed, it refuses `RUN_FINISHED` and writes nothing; a changed figure after `complete` needs a new run.",
 )
 
 
@@ -795,14 +803,19 @@ GATES: dict[str, dict[str, Any]] = {
         "instances": None,
         "multi": False,
         "options": (
-            _o("values_ok", "The values look right, proceed"),
+            _o("values_ok", "Looks right, proceed"),
             _o("has_corrections", "I have corrections", value=True, terminal=False),
-            _o("proceed_unreviewed", "Proceed without reviewing the extracted values"),
+            _o(
+                "proceed_unreviewed",
+                "Proceed without reviewing the extracted values",
+                discloses="EXTRACTION_UNREVIEWED",
+            ),
             _o(
                 "corrections_applied",
                 "Corrections applied, proceed",
                 shown=False,
                 requires="fmr_corrections_audit",
+                discloses="CORRECTIONS_SOURCE",
             ),
         ),
         "option_source": None,
@@ -826,7 +839,17 @@ GATES: dict[str, dict[str, Any]] = {
         "form_label": "Cash",
         "instances": None,
         "multi": False,
-        "options": (_o("provided", "Cash balance provided", pre=False, requires="fmr_cash_audit"),),
+        "options": (
+            # The reply re-states the two cash basics it answers, so a `Not stated` from Step 1 does not stand
+            # beside the balance the founder has now given.
+            _o(
+                "provided",
+                "Cash balance provided",
+                pre=False,
+                requires="fmr_cash_audit",
+                effects={"reopens": ("fmr_cash_basics.current_balance", "fmr_cash_basics.balance_date")},
+            ),
+        ),
         "option_source": None,
         "option_variants": None,
         "owed": "fmr_no_cash_balance",
@@ -2080,7 +2103,42 @@ PREDICATES: dict[str, Callable[[Ctx, dict[str, Any], str | None], bool] | None] 
     # Owed only on a rule lookup that escalated: `run_status.py finish --lookup-status escalate` is the one
     # caller, and the gate's mode list keeps it out of every other run.
     "ct_lookup_escalated": _pred_always,
+    # financial-model-review asks its cash questions in Step 1, before `bind` sets the mode; `modes` drops them
+    # from a quick check once it is bound.
+    "fmr_full_review": _pred_always,
+    "fmr_no_cash_balance": lambda ctx, g, instance: _fmr_no_cash_balance(ctx),
 }
+
+
+_FMR_SCRIPTS = os.path.join(os.path.dirname(_HERE), "skills", "financial-model-review", "scripts")
+
+
+def fmr_runway_has_no_cash(runway: Any) -> bool:
+    """financial-model-review's runway.json when runway was not computed only for want of the cash balance:
+    compose_report.py's `_runway_status` test, read structurally (held equal to it by a test)."""
+    if not isinstance(runway, dict) or runway.get("skipped") or runway.get("insufficient_data") is not True:
+        return False
+    baseline = runway.get("baseline")
+    return isinstance(baseline, dict) and baseline.get("net_cash") is None and baseline.get("monthly_burn") is not None
+
+
+def _fmr_no_cash_balance(ctx: Ctx) -> bool:
+    """Owed while this run's runway.json lacks the balance, and once reached: the founder's reply is then
+    recordable whether or not runway was already re-run with it."""
+    for view in ctx.status.get("gates") or []:
+        if isinstance(view, dict) and view.get("id") == "fmr_cash_followup" and view.get("state") in GATE_STATES:
+            return True
+    if ctx.run_dir is None:
+        return False
+    try:
+        runway = _run_status.read_json(os.path.join(ctx.run_dir, "runway.json"))
+    except ValueError:
+        return False
+    # Only this run's runway: an earlier run's file left in the same dir says nothing about this one.
+    meta = runway.get("metadata") if isinstance(runway, dict) else None
+    if not isinstance(meta, dict) or meta.get("run_id") != ctx.paths.run_id:
+        return False
+    return fmr_runway_has_no_cash(runway)
 
 
 def owed(ctx: Ctx, g: dict[str, Any], instance: str | None) -> bool:
@@ -2098,7 +2156,14 @@ BINDERS: dict[str, dict[str, Any]] = {
     "ic_score_dimensions": {"kind": "json_fingerprint", "files": ("score_dimensions.json",), "exclude": ("metadata",)},
     "ct_cap_base_fields": {"kind": "json_fingerprint", "files": ("inputs.json",), "exclude": ("metadata",)},
     "cp_landscape_draft": {"kind": "json_fingerprint", "files": ("landscape_draft.json",), "exclude": ("metadata",)},
-    "fmr_inputs_minus_cash": {"kind": "unimplemented"},
+    # inputs.json as apply_corrections.py normalises it, minus the two cash paths: a cash follow-up changes
+    # only those, so it never re-asks the values review.
+    "fmr_inputs_minus_cash": {
+        "kind": "fmr_normalised_inputs",
+        "files": ("inputs.json",),
+        "exclude": ("metadata",),
+        "drop": ("cash.current_balance", "cash.balance_date"),
+    },
 }
 
 
@@ -2106,6 +2171,8 @@ def binding(ctx: Ctx, name: str | None) -> dict[str, Any] | None:
     if name is None:
         return None
     spec = BINDERS.get(name)
+    if spec is not None and spec["kind"] == "fmr_normalised_inputs":
+        return _fmr_binding(ctx, name, spec)
     if spec is None or spec["kind"] != "json_fingerprint":
         raise Unimplemented(f"binder {name!r} is not implemented yet")
     run_dir = ctx.run_dir
@@ -2124,22 +2191,138 @@ def binding(ctx: Ctx, name: str | None) -> dict[str, Any] | None:
     return {"binder": name, "fingerprint": hashlib.sha256(canon.encode("utf-8")).hexdigest()}
 
 
-# `requires` checks on an option. Each reads evidence a script wrote; none is wired in this module yet.
-REQUIRES: dict[str, Callable[[Ctx, dict[str, Any]], bool] | None] = {
-    "fmr_corrections_audit": None,
-    "fmr_cash_audit": None,
+def _fmr_pipeline() -> Any:
+    """apply_corrections.py, loaded by path: the binder normalises with the producer's own steps, never a copy.
+    Its import puts its own dir first on `sys.path` and caches its sibling `_run_ref`; both are put back, so a
+    same-named module of another skill still resolves to its own."""
+    mod = sys.modules.get("_fmr_apply_corrections")
+    if mod is not None:
+        return mod
+    path = os.path.join(_FMR_SCRIPTS, "apply_corrections.py")
+    if not os.path.isfile(path):
+        raise Unimplemented(f"the financial-model-review normaliser is not reachable at {path}")
+    saved_path, saved_ref = list(sys.path), sys.modules.get("_run_ref")
+    try:
+        spec = importlib.util.spec_from_file_location("_fmr_apply_corrections", path)
+        if spec is None or spec.loader is None:
+            raise Unimplemented(f"cannot load {path}")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+    finally:
+        sys.path[:] = saved_path
+        if saved_ref is None:
+            sys.modules.pop("_run_ref", None)
+        else:
+            sys.modules["_run_ref"] = saved_ref
+    sys.modules["_fmr_apply_corrections"] = mod
+    return mod
+
+
+def _fmr_binding(ctx: Ctx, name: str, spec: dict[str, Any]) -> dict[str, Any] | None:
+    run_dir = ctx.run_dir
+    if run_dir is None:
+        return None
+    ac = _fmr_pipeline()
+    try:
+        doc = _run_status.read_json(os.path.join(run_dir, "inputs.json"))
+    except ValueError:
+        doc = {"unreadable": True}
+    if isinstance(doc, dict):
+        doc = copy.deepcopy({k: v for k, v in doc.items() if k not in spec["exclude"]})
+        # Not `_normalize_to_usd`: it converts only the fields a call names in `ils_fields`, which the
+        # document does not record, so the binder cannot repeat it; every --set call passes none.
+        ac._coerce_state(doc)
+        ac._canonicalize_time_series(doc)
+        ac._strip_row_ids(doc)
+        for dotted in spec["drop"]:
+            head, _, leaf = dotted.rpartition(".")
+            parent = ac._deep_get(doc, head) if head else doc
+            if isinstance(parent, dict):
+                parent.pop(leaf, None)
+    canon = json.dumps([doc], sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return {"binder": name, "fingerprint": hashlib.sha256(canon.encode("utf-8")).hexdigest()}
+
+
+FMR_HISTORY = "extraction_corrections.history.jsonl"
+_HISTORY_TS = "%Y-%m-%dT%H:%M:%S.%fZ"
+
+
+def _fmr_history(ctx: Ctx) -> list[dict[str, Any]]:
+    """This run's lines of the corrections history, oldest first. A torn line is skipped, never refused."""
+    if ctx.run_dir is None:
+        return []
+    out = []
+    try:
+        with open(os.path.join(ctx.run_dir, FMR_HISTORY), encoding="utf-8") as f:
+            for line in f:
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(rec, dict) and rec.get("run_id") == ctx.paths.run_id:
+                    out.append(rec)
+    except OSError:
+        return []
+    return out
+
+
+def _after_open(rec: dict[str, Any], entry: dict[str, Any]) -> bool:
+    """The call was made after the question was opened. Times are parsed, never compared as strings."""
+    from datetime import datetime  # noqa: PLC0415
+
+    try:
+        made = datetime.strptime(str(rec.get("timestamp")), _HISTORY_TS)
+        opened = datetime.strptime(str(entry.get("opened_at")), _HISTORY_TS)
+    except ValueError:
+        return False
+    return made > opened
+
+
+def _req_fmr_corrections(ctx: Ctx, entry: dict[str, Any]) -> dict[str, Any] | None:
+    """A corrections call for this run, by the founder or the host (never the inputs-review sub-agent), that
+    changed something, made after the question was opened."""
+    for rec in reversed(_fmr_history(ctx)):
+        if (
+            rec.get("origin") in ("external", "upload", "chat")
+            and (rec.get("changed_count") or 0) >= 1
+            and _after_open(rec, entry)
+        ):
+            return {"origin": rec["origin"], "history_seq": rec.get("seq")}
+    return None
+
+
+def _req_fmr_cash(ctx: Ctx, entry: dict[str, Any]) -> dict[str, Any] | None:
+    """A call for this run, in chat or by the host, that set both cash paths after the follow-up was opened."""
+    for rec in reversed(_fmr_history(ctx)):
+        paths = {c.get("path") for c in rec.get("corrections") or [] if isinstance(c, dict)}
+        if (
+            rec.get("origin") in ("chat", "external")
+            and {"cash.current_balance", "cash.balance_date"} <= paths
+            and _after_open(rec, entry)
+        ):
+            return {"origin": rec["origin"], "history_seq": rec.get("seq")}
+    return None
+
+
+# `requires` checks on an option. Each reads evidence a script wrote and returns what it found (stored on the
+# answer as `current.evidence`), or nothing when the evidence is missing.
+REQUIRES: dict[str, Callable[[Ctx, dict[str, Any]], dict[str, Any] | bool | None] | None] = {
+    "fmr_corrections_audit": _req_fmr_corrections,
+    "fmr_cash_audit": _req_fmr_cash,
 }
 
 
-def _requires_met(ctx: Ctx, option: dict[str, Any], entry: dict[str, Any]) -> None:
+def _requires_met(ctx: Ctx, option: dict[str, Any], entry: dict[str, Any]) -> dict[str, Any] | None:
     name = option["requires"]
     if name is None:
-        return
+        return None
     fn = REQUIRES.get(name)
     if fn is None:
         raise Unimplemented(f"requires check {name!r} is not implemented yet")
-    if not fn(ctx, entry):
+    got = fn(ctx, entry)
+    if not got:
         raise GateRejection("REQUIRES_UNMET", f"{option['id']!r} needs evidence this run does not have ({name})")
+    return got if isinstance(got, dict) else None
 
 
 def unimplemented() -> dict[str, list[str]]:
@@ -2201,9 +2384,11 @@ def validate_registry(gates: dict[str, dict[str, Any]]) -> list[str]:
                 for kind, targets in (o["effects"] or {}).items():
                     if kind not in ("opens", "reopens", "closes"):
                         problems.append(f"{gid}: unknown effect {kind!r}")
-                    problems.extend(f"{gid}: effect target {t!r} unknown" for t in targets if t not in gates)
+                    problems.extend(
+                        f"{gid}: effect target {t!r} unknown" for t in targets if not _effect_target_ok(gates, t)
+                    )
                     # A gate with instances is opened per instance by its own site; an effect could only
-                    # open it bare, as a key nothing can answer.
+                    # open it bare, as a key nothing can answer. It may name one static instance instead.
                     problems.extend(
                         f"{gid}: effect target {t!r} has instances"
                         for t in targets
@@ -2218,6 +2403,15 @@ def validate_registry(gates: dict[str, dict[str, Any]]) -> list[str]:
             if oid is not None and oid not in all_ids:
                 problems.append(f"{gid}: default {reason} names no option")
     return problems
+
+
+def _effect_target_ok(gates: dict[str, dict[str, Any]], target: str) -> bool:
+    """A gate id, or `gate.instance` naming one of that gate's static instances."""
+    if target in gates:
+        return True
+    gid, _, inst = target.partition(".")
+    instances = (gates.get(gid) or {}).get("instances") or {}
+    return bool(inst) and inst in (instances.get("static") or ())
 
 
 def _load_checked() -> None:
@@ -2529,15 +2723,21 @@ def record(
         elif replacing_after_hold or (cur.get("resolution") == "default_taken" and resolution == "answered"):
             pass
         else:
+            hint = ""
+            if gate_id in HELD_GATES and not answered_by_request(ledger, key):
+                # The one way a held step's answer is replaced: the founder answered the question the hold
+                # put. Never offered over an answer the request carried.
+                hint = "; if this step was just held for this question, record the founder's answer with --after-hold"
             raise GateRejection(
                 "ANSWER_STANDS",
-                f"{key} was already answered {cur.get('answer_id')!r}; a recorded answer stands",
+                f"{key} was already answered {cur.get('answer_id')!r}; a recorded answer stands{hint}",
                 current=cur.get("answer_id"),
             )
     elif after_hold:
         raise GateRejection("AFTER_HOLD_NO_ANSWER", f"{key} has no recorded answer for --after-hold to replace")
+    evidence = None
     for o in options:
-        _requires_met(ctx, o, entry)
+        evidence = _requires_met(ctx, o, entry) or evidence
     if entry["state"] is None:
         _open_entry(ledger, key, by, reason="implicit")
     if replacing_after_hold:
@@ -2556,6 +2756,8 @@ def record(
         asked_evidence=asked_evidence,
         held=g["asked_check"] == "since_invocation",
     )
+    if evidence is not None:
+        entry["current"]["evidence"] = evidence
     if resolution == "not_applicable":
         entry["state"] = "not_owed"
         _event(ledger, entry, "not_applicable", by, basis=basis, reason=note)
@@ -2582,6 +2784,8 @@ def _reopen_complete(status: dict[str, Any], key: str, g: dict[str, Any]) -> Non
     status["coaching"] = None
     status["deliverables"] = None
     status["deliverables_status"] = None
+    # The hand-over belongs to the revision it handed over; the closer stamps the new one.
+    status["handed_over_at"] = None
     _run_status.set_state(status, "running", "RUNNING")
     _run_status.open_invocation(status, "reopen", {"gate": key, "step": g["step"], "reason": "reopened"})
 
@@ -2700,16 +2904,29 @@ def _apply_pre_answer(ctx: Ctx, ledger: dict[str, Any], key: str, by: str) -> st
             entry["flags"].append("pre_answer_unlisted")
             _event(ledger, entry, "pre_answer_unlisted", by, raw=pa["raw"])
         return "unlisted"
-    record(
-        ctx,
-        ledger,
-        key,
-        answer_ids=ids,
-        value=pa["value"],
-        note=pa["note"],
-        by=by,
-        asked_evidence="host_line",
-    )
+    try:
+        record(
+            ctx,
+            ledger,
+            key,
+            answer_ids=ids,
+            value=pa["value"],
+            note=pa["note"],
+            by=by,
+            asked_evidence="host_line",
+        )
+    except GateRejection as e:
+        # The line names an option whose evidence this run does not have (financial-model-review's
+        # `corrections_applied` with no corrections call on record): the gate stays open and is asked.
+        if e.code != "REQUIRES_UNMET":
+            raise
+        if "pre_answer_unlisted" not in entry["flags"]:
+            entry["flags"].append("pre_answer_unlisted")
+            _event(ledger, entry, "pre_answer_unlisted", by, raw=pa["raw"], reason="requires_unmet")
+            ledger.setdefault("notices", []).append(
+                {"code": "PRE_ANSWER_NOT_APPLIED", "gate": key, "lines": pa["raw"], "reason": str(e)}
+            )
+        return "unlisted"
     _mark_applied(ledger, entry, pa, by)
     return "applied"
 
@@ -2801,12 +3018,13 @@ def derive_status(ctx: Ctx, ledger: dict[str, Any], status: dict[str, Any], *, d
         for gid, inst in _registered_keys(ctx, ledger)
     ]
     status["disclosures"] = [
-        d for d in (status.get("disclosures") or []) if not str(d).startswith(("DEFAULT_TAKEN:", "PRE_ANSWERED:"))
+        d for d in (status.get("disclosures") or []) if not str(d).startswith(_DERIVED_DISCLOSURES)
     ]
     status["disclosures"] += [
         f"DEFAULT_TAKEN:{k}" for k, e in entries if (e.get("current") or {}).get("resolution") == "default_taken"
     ]
     status["disclosures"] += [f"PRE_ANSWERED:{k}" for k, _e in entries if answered_by_request(ledger, k)]
+    status["disclosures"] += [d for _k, e in entries for d in option_disclosures(e)]
     status["notices"] = list(ledger.get("notices") or [])
     if status.get("status") in _run_status.FINAL_STATUSES:
         return
@@ -2835,6 +3053,27 @@ def derive_status(ctx: Ctx, ledger: dict[str, Any], status: dict[str, Any], *, d
         _run_status.mark_complete(status)
     else:
         _run_status.set_state(status, "running", "RUNNING")
+
+
+# Every disclosure derived from the ledger, stripped before each re-derivation so none is listed twice.
+_DERIVED_DISCLOSURES = ("DEFAULT_TAKEN:", "PRE_ANSWERED:", "EXTRACTION_UNREVIEWED", "CORRECTIONS_SOURCE")
+
+
+def option_disclosures(entry: dict[str, Any]) -> list[str]:
+    """The disclosures the current answer's options carry (`discloses`); `CORRECTIONS_SOURCE` names who
+    supplied the corrections, from the evidence its `requires` check found."""
+    if entry.get("state") not in ("answered", "open"):
+        return []
+    cur = entry.get("current") or {}
+    ids = str(cur.get("answer_id") or "").split(",")
+    out = []
+    for o in _all_options(GATES[entry["gate"]]):
+        if o["id"] in ids and o["discloses"]:
+            origin = (cur.get("evidence") or {}).get("origin")
+            out.append(
+                f"{o['discloses']}:{origin}" if o["discloses"] == "CORRECTIONS_SOURCE" and origin else o["discloses"]
+            )
+    return out
 
 
 def resume_prompt(ledger: dict[str, Any]) -> str:
@@ -2962,6 +3201,26 @@ def open_gates(ctx: Ctx, ledger: dict[str, Any], keys: list[str], *, by: str = R
     return out
 
 
+def close_unowed_for_mode(ledger: dict[str, Any], mode: str, by: str) -> list[str]:
+    """Close every open gate the run's mode does not owe (`not_applicable / script`), in memory. A question
+    opened before `bind` set the mode (financial-model-review's cash questions on what became a quick check)
+    can then no longer hold the run open. A request line still waiting for such a gate is noted as ignored."""
+    closed = []
+    for key, entry in (ledger.get("gates") or {}).items():
+        if not isinstance(entry, dict) or entry.get("state") != "open":
+            continue
+        if mode in GATES[entry["gate"]]["modes"]:
+            continue
+        entry["state"] = "not_owed"
+        entry["current"] = _current([], None, None, resolution="not_applicable", basis="script")
+        _event(ledger, entry, "closed", by, reason=f"not_owed_in_mode:{mode}")
+        pa = pending_pre_answer(ledger, key)
+        if pa is not None:
+            ledger.setdefault("notices", []).append({"code": "PRE_ANSWER_IGNORED", "gate": key, "lines": pa["raw"]})
+        closed.append(key)
+    return closed
+
+
 def require_terminal(ctx: Ctx, ledger: dict[str, Any], key: str, *, by: str = RECORDER) -> str:
     """`ok`, `waiting` (auto-opened, binding re-checked) or `not_owed`. In memory; call inside transact."""
     gate_id, instance, g = check_key(key, ctx.skill)
@@ -2971,6 +3230,8 @@ def require_terminal(ctx: Ctx, ledger: dict[str, Any], key: str, *, by: str = RE
     if entry["state"] is not None and _terminal(entry):
         cur = entry["current"] or {}
         if g["binds"] and cur.get("binding") is not None and binding(ctx, g["binds"]) != cur.get("binding"):
+            # A finished run's answers never move through an enforcer: RUN_FINISHED, nothing written.
+            _guard_finished(ctx.status, g)
             _supersede(ledger, entry, by, "binding_changed")
             return "waiting"
         return "ok"
@@ -3170,6 +3431,8 @@ CLI_CODES = {
     "bind": ["RUN_ALREADY_BOUND", "RUN_REFUSED"],
     "founder_context": ["CONTEXT_NOT_FOUND"],
     "html_writers": ["RUN_ID_MISMATCH"],
+    # financial-model-review's producers: a call into a bound review dir that names no run.
+    "fmr_producers": ["RUN_ID_REQUIRED"],
     "usage": ["USAGE"],
     "notices": ["PRE_ANSWER_IGNORED", "PRE_ANSWER_INVALID", "PRE_ANSWER_NOT_APPLIED"],
 }

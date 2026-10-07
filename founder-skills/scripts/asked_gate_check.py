@@ -12,9 +12,9 @@ asked: the model can record an answer it made up. What the model cannot write is
 evidence that the question was asked is read there, and the step that must not run first is the
 dispatch, as `two_figures_check.py` does for market-sizing's figures.
 
-WHICH DISPATCH. `ROWS` maps (context, agent) to the gate it follows. It ships empty: a row is enabled
-when its skill asks the question with the labels below, so that an older wording is never held. With
-`ROWS` empty every call returns before anything is loaded or read. The context is read as every dispatch
+WHICH DISPATCH. `ROWS` maps (context, agent) to the gate it follows. A row is enabled only once its skill
+asks the question with the labels below, so that an older wording is never held; financial-model-review's
+is. A dispatch no row names returns before anything is loaded or read. The context is read as every dispatch
 check reads a first line (`dispatch_type_check.context_of`), the agent after our plugin's prefix.
 
 THE WINDOW. From the founder's message that started this run to the dispatch, across later messages:
@@ -55,6 +55,11 @@ in the run's dir, when that dir already holds the run's `run_ref.json`; nothing 
 the hook never makes a directory. The run status folds a pass on evidence into the gate's
 `asked_evidence`, bound to the answer it followed by that answer's `answered_at`, read from the ledger.
 It is a measurement of which evidence carried each step, not an attestation: the file is a plain file.
+
+LAST SENTENCE. A question with no slot also matches the asked text's last sentence, still with at least one
+of the gate's labels. A near question ending a lead ("Do the cash values look right?") can therefore pass when
+it also offers a matching label: a Step-1 cash confirmation offering `Looks right, proceed` would let a skipped
+values check through. Accepted; the record (`asked_evidence`) measures it.
 
 FAIL OPEN. Any error, any unexpected shape: exit 0, no stdout, one stderr line at most (the runner in
 `pretooluse_dispatch.py`). No transcript: no hold. An ic-sim verdict that cannot be read: no hold, one
@@ -116,7 +121,7 @@ GATES: dict[str, GateSpec] = {
         skill="financial-model-review",
         question="Do the extracted values look right?",
         labels=(
-            "The values look right, proceed",
+            "Looks right, proceed",
             "I have corrections",
             "Proceed without reviewing the extracted values",
         ),
@@ -142,7 +147,8 @@ PLANNED_ROWS: dict[tuple[str, str], str] = {
     ("CHECKLIST", "financial-model-review"): "fmr_extracted_values",
     ("POST_COMPOSE_COACHING", "ic-sim"): "ic_decline_confirmation",
 }
-ROWS: dict[tuple[str, str], str] = {}
+# Enabled when the skill asks with the registry's labels: financial-model-review's values check (Step 3.6).
+ROWS: dict[tuple[str, str], str] = {("CHECKLIST", "financial-model-review"): "fmr_extracted_values"}
 
 _SLOT_RE = re.compile(r"<[^<>]*>")
 _START_RE = re.compile(r"(?<![\w-])run_status\.py\b[^\n]*\sstart\b")
@@ -231,13 +237,20 @@ def labels_matched(form: Any, texts: list[str], labels: tuple[str, ...]) -> int:
     return sum(1 for label in labels if any(_close(_letters(form, label), o) for o in offered))
 
 
+_SENTENCE_END = re.compile(r"(?<=[.?!:])\s+")
+
+
 def question_matches(form: Any, text: str, question: str) -> bool:
     """The gate's question, as asked. A registry question with a `<…>` slot matches on the words around
-    the slot, whatever fills it."""
+    the slot, whatever fills it. One with no slot also matches the asked text's last sentence: a model
+    usually leads the question with what it found ("I pulled these figures from your model. Do the values
+    look right?"), and that lead must not hide the question it ends with."""
     asked = _letters(form, text)
     parts = _SLOT_RE.split(question)
     if len(parts) == 1:
-        return _close(asked, _letters(form, question))
+        want = _letters(form, question)
+        last = _letters(form, _SENTENCE_END.split(text.strip())[-1])
+        return _close(asked, want) or _close(last, want)
     head, tail = _letters(form, parts[0]), _letters(form, parts[-1])
     if len(asked) < len(head) + len(tail):
         return False

@@ -312,6 +312,10 @@ def cmd_bind(args: argparse.Namespace) -> int:
             ledger = _require_gates(args.pretty).load_ledger(paths)
         except rs.RunStatusError as e:
             _unreachable(e.code, str(e), args.pretty)
+        # A gate opened before the mode was known that this mode does not owe could never be answered (it
+        # is refused as not owed) and would hold the run open: it is closed as not applicable, by script.
+        if _gates.close_unowed_for_mode(ledger, status["mode"], "run_status.py"):
+            rs.atomic_write_json(paths.ledger, ledger)
         # The mode decides which gates the run lists, so the list is re-derived with it.
         _gates.derive_status(_gates.Ctx(paths, status, str(status.get("skill"))), ledger, status)
         rs.write_status(paths, status)

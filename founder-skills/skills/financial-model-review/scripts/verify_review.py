@@ -699,6 +699,45 @@ def _check_stray_files(dir_path: str) -> list[dict[str, str]]:
 
 
 # ---------------------------------------------------------------------------
+# Tier 5 — the values check (a run with a gate ledger only; read only)
+# ---------------------------------------------------------------------------
+
+
+def _check_values_record(dir_path: str) -> list[dict[str, str]]:
+    """The extracted values must be recorded as reviewed (or knowingly not) for this run, and `inputs.json`
+    must still be what was confirmed. Read only: compose already re-opened a stale answer before this gate
+    runs, and Step 3.6 asks it again. No ref, no check."""
+    import _fmr_gates  # noqa: PLC0415
+
+    run_id = _fmr_gates.run_id_of(dir_path)
+    ledger = _fmr_gates.open_ledger_or_exit(dir_path, run_id)
+    if ledger is None:
+        return []
+    gates, paths = ledger
+    status = sys.modules["_run_status"].load_status(paths) or {}
+    ctx = gates.Ctx(paths, status, "financial-model-review")
+    g = gates.GATES[_fmr_gates.VALUES_GATE]
+    if not gates.owed(ctx, g, None):
+        return []
+    entry = (gates.load_ledger(paths).get("gates") or {}).get(_fmr_gates.VALUES_GATE) or {}
+    cur = entry.get("current") or {}
+    stale = (
+        entry.get("state") == "answered"
+        and cur.get("binding") is not None
+        and gates.binding(ctx, g["binds"]) != cur.get("binding")
+    )
+    if entry.get("state") == "answered" and not stale:
+        return []
+    return [
+        _issue(
+            "error",
+            "the extracted values were never confirmed for this run, or inputs.json changed after they were: "
+            "ask Step 3.6's question again, record the answer, then re-run Steps 4-7",
+        )
+    ]
+
+
+# ---------------------------------------------------------------------------
 # Main verification
 # ---------------------------------------------------------------------------
 
@@ -721,6 +760,7 @@ def verify(dir_path: str, gate: int = 2) -> dict[str, Any]:
 
     # Tier 3: cross-artifact consistency
     cross_checks = _check_cross_consistency(artifacts)
+    cross_checks.extend(_check_values_record(dir_path))
 
     # Tier 4: stray-file allowlist (end-of-run gate only — mid-pipeline the
     # work dir legitimately lacks the later deliverables and this check

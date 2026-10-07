@@ -546,6 +546,108 @@ def dr_compose_scenarios() -> dict[str, dict[str, Any]]:
     return out
 
 
+FMR_SCRIPTS = SKILLS / "financial-model-review" / "scripts"
+FMR_TODAY = "2026-10-07"
+
+
+def _fmr_inputs(*, cash: bool = True) -> str:
+    data = json.loads((FIXTURES / "financial-model-review" / "inputs.json").read_text(encoding="utf-8"))
+    if not cash:
+        data["cash"].pop("current_balance", None)
+        data["cash"].pop("balance_date", None)
+    return json.dumps(data)
+
+
+def fmr_producer_scenarios() -> dict[str, dict[str, Any]]:
+    """unit_economics.py and runway.py, as Step 4 and the quick check call them, in a dir with no run ref."""
+    out: dict[str, dict[str, Any]] = {}
+    for script in ("unit_economics.py", "runway.py"):
+        for name, extra, cash in (
+            ("stdout", [], True),
+            ("to_file", ["-o", "{dir}/out.json"], True),
+            ("to_file_run_id", ["--run-id", GATE_RUN, "-o", "{dir}/out.json"], True),
+            ("no_cash_run_id", ["--run-id", GATE_RUN, "-o", "{dir}/out.json"], False),
+        ):
+            with tempfile.TemporaryDirectory() as td:
+                root = Path(td)
+                argv = [str(FMR_SCRIPTS / script), "--pretty", *[a.replace("{dir}", td) for a in extra]]
+                out[f"{script}/{name}"] = result(run(argv, stdin=_fmr_inputs(cash=cash)), td, root)
+    return out
+
+
+def _fmr_review_dir(root: Path, *, cash: bool = True) -> None:
+    import shutil
+
+    for f in (FIXTURES / "financial-model-review").iterdir():
+        if f.is_file():
+            shutil.copy(f, root / f.name)
+    if not cash:
+        (root / "inputs.json").write_text(_fmr_inputs(cash=False), encoding="utf-8")
+        proc = run([str(FMR_SCRIPTS / "runway.py"), "-o", str(root / "runway.json")], stdin=_fmr_inputs(cash=False))
+        assert proc.returncode == 0, proc.stderr
+
+
+def _fmr_compose(root: Path) -> subprocess.CompletedProcess[str]:
+    return run(
+        [
+            str(FMR_SCRIPTS / "compose_report.py"),
+            "--dir",
+            str(root),
+            "--today",
+            FMR_TODAY,
+            "-o",
+            str(root / "report.json"),
+            "--write-md",
+            str(root / "report.md"),
+        ]
+    )
+
+
+def fmr_compose_scenarios() -> dict[str, dict[str, Any]]:
+    out: dict[str, dict[str, Any]] = {}
+    for name, cash in (("full", True), ("no_cash", False)):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            _fmr_review_dir(root, cash=cash)
+            proc = _fmr_compose(root)
+            res = result(proc, td, root)
+            # The receipt's byte count varies with the temp path's length (the report names its dir).
+            res["stdout"] = _sha(re.sub(r'"bytes": ?\d+', '"bytes":<N>', normalise(proc.stdout, td)))
+            out[name] = res
+    return out
+
+
+def fmr_verify_scenarios() -> dict[str, dict[str, Any]]:
+    out: dict[str, dict[str, Any]] = {}
+    for gate in ("1", "2"):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            _fmr_review_dir(root)
+            _fmr_compose(root)
+            proc = run([str(FMR_SCRIPTS / "verify_review.py"), "--dir", str(root), "--gate", gate])
+            out[f"gate_{gate}"] = result(proc, td, root)
+    return out
+
+
+def fmr_closer_scenarios() -> dict[str, dict[str, Any]]:
+    out: dict[str, dict[str, Any]] = {}
+    for name, cash, extra in (("plain", True, []), ("cash_update", True, ["--cash-update"]), ("no_cash", False, [])):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            _fmr_review_dir(root, cash=cash)
+            _fmr_compose(root)
+            argv = [
+                str(FMR_SCRIPTS / "fmr_closing_message.py"),
+                "--report",
+                str(root / "report.json"),
+                "--link",
+                "path",
+            ]
+            argv += ["--deliverable", f"the written report={root}/report.md", *extra]
+            out[name] = result(run(argv), td, root)
+    return out
+
+
 GROUPS: dict[str, Callable[[], dict[str, dict[str, Any]]]] = {
     "html": lambda: {f"{s}/{w}": html_scenario(s, w) for s, w, _k in HTML_WRITERS},
     "insert_coaching": coaching_scenarios,
@@ -559,6 +661,10 @@ GROUPS: dict[str, Callable[[], dict[str, dict[str, Any]]]] = {
     "founder_context_read": founder_context_read_scenarios,
     "setup_run": setup_run_scenarios,
     "deck_review_compose": dr_compose_scenarios,
+    "fmr_producers": fmr_producer_scenarios,
+    "fmr_compose": fmr_compose_scenarios,
+    "fmr_verify": fmr_verify_scenarios,
+    "fmr_closer": fmr_closer_scenarios,
 }
 
 

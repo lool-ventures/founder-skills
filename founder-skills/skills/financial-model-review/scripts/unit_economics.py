@@ -24,6 +24,7 @@ from typing import Any, NoReturn
 # inputs.json within a single run).
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _fingerprint  # noqa: E402
+import _fmr_gates  # noqa: E402
 
 
 def _write_output(data: str, output_path: str | None, *, summary: dict[str, Any] | None = None) -> None:
@@ -2004,6 +2005,14 @@ def main() -> None:
     if not isinstance(data, dict):
         print("Error: JSON input must be an object", file=sys.stderr)
         sys.exit(1)
+
+    # The run's checks, when the review dir carries this run's ref: the extracted values (and, for runway, the
+    # cash questions) must be recorded for this run first -- exit 10, nothing written. No ref: no change.
+    _meta = data.get("metadata")
+    _run_id = args.run_id or (_meta.get("run_id") if isinstance(_meta, dict) else None)
+    _fmr_gates.refuse_without_run_id(args.output, _run_id)
+    if args.output:
+        _fmr_gates.require_or_exit(os.path.dirname(os.path.abspath(args.output)), _run_id, (_fmr_gates.VALUES_GATE,))
 
     # Fingerprint the inputs AS RECEIVED. Taken here, not at stamp time, because the compute step
     # below mutates `data` and the verifier hashes the file on disk.

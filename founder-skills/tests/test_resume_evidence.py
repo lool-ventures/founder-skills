@@ -12,6 +12,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -198,6 +199,13 @@ def test_a_reopen_of_a_complete_run_is_a_new_invocation_with_a_snapshot(
     st = rs.update(paths, lambda s: (s.update(coaching="inserted"), rs.mark_complete(s)))
     assert st["status"] == "complete" and st["invocations"][0]["ended_at"] is not None
     rec(answer_ids=["provided"])
+    for basic, value in (("current_balance", "250000"), ("balance_date", "2026-09")):
+        g.transact(
+            paths,
+            lambda ctx, ledger, st, b=basic, v=value: g.record(
+                ctx, ledger, f"fmr_cash_basics.{b}", answer_ids=["stated"], value=v
+            ),
+        )
     st = h.status(root, run_id)
     assert (st["status"], st["invocation"]) == ("running", 2)
     step = g.GATES["fmr_cash_followup"]["step"]
@@ -765,3 +773,249 @@ def test_a_fresh_deck_review_run_still_cleans_a_prior_runs_files(tmp_path: Path)
     out = _dr_setup(root, new_id)
     assert (out["cleaned"], out["reuse_checkpoints"]) == (True, False)
     assert not (run_dir / "deck_inventory.json").exists()
+
+
+# --- financial-model-review: a host's corrections resume at the values check -------------------------------
+
+FMR_SCRIPTS = h.SKILLS / "financial-model-review" / "scripts"
+FMR_FIXTURE = h.REPO_ROOT / "founder-skills" / "tests" / "fixtures" / "financial-model-review" / "inputs.json"
+# What the waiting run already holds and the resumed invocation must not rewrite: the extraction, the inputs
+# review's hand-off, and the host's corrections call (made while the run waited, before the resume began).
+FMR_KEPT_ON_RESUME = frozenset(
+    (
+        "model_data_json",
+        "corrected_inputs_json",
+        "extraction_corrections_json",
+        "extraction_corrections_history_jsonl",
+    )
+)
+
+
+def _fmr_ok(proc: subprocess.CompletedProcess[str]) -> subprocess.CompletedProcess[str]:
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    return proc
+
+
+def _fmr_first_invocation(tmp: Path) -> tuple[Path, str, Path]:
+    root, run_id, run_dir = h.start_bound(tmp, "financial-model-review")
+    rec = lambda *a: _fmr_ok(h.record(root, run_id, *a))  # noqa: E731
+    rec(
+        "open",
+        "--gate",
+        "ctx_basics.company_name",
+        "--gate",
+        "ctx_basics.stage",
+        "--gate",
+        "ctx_basics.sector",
+        "--gate",
+        "ctx_basics.geography",
+        "--gate",
+        "fmr_cash_basics.current_balance",
+        "--gate",
+        "fmr_cash_basics.balance_date",
+        "--gate",
+        "fmr_cash_basics.monthly_burn",
+    )
+    rec(
+        "answer",
+        "--gate",
+        "ctx_basics.company_name",
+        "--answer-id",
+        "use_derived",
+        "--value",
+        "Example Co",
+        "--gate",
+        "ctx_basics.stage",
+        "--answer-id",
+        "seed",
+        "--gate",
+        "ctx_basics.sector",
+        "--answer-id",
+        "use_derived",
+        "--value",
+        "B2B SaaS",
+        "--gate",
+        "ctx_basics.geography",
+        "--answer-id",
+        "use_derived",
+        "--value",
+        "US",
+        "--gate",
+        "fmr_cash_basics.current_balance",
+        "--answer-id",
+        "stated",
+        "--value",
+        "1500000",
+        "--gate",
+        "fmr_cash_basics.balance_date",
+        "--answer-id",
+        "stated",
+        "--value",
+        "2026-05",
+        "--gate",
+        "fmr_cash_basics.monthly_burn",
+        "--answer-id",
+        "stated",
+        "--value",
+        "120000",
+    )
+    _fmr_ok(
+        h.run(
+            h.SHARED / "founder_context.py",
+            "init",
+            "--company-name",
+            "Example Co",
+            "--stage",
+            "seed",
+            "--sector",
+            "B2B SaaS",
+            "--geography",
+            "US",
+            "--artifacts-root",
+            str(root),
+            "--run-id",
+            run_id,
+            "--skill",
+            "financial-model-review",
+        )
+    )
+    (run_dir / "model_data.json").write_text('{"sheets": []}\n', encoding="utf-8")
+    inputs = json.loads(FMR_FIXTURE.read_text(encoding="utf-8"))
+    inputs["metadata"]["run_id"] = run_id
+    handoff = run_dir / "handoff" / run_id / "inputs_review_output.json"
+    handoff.write_text(json.dumps({"corrected": inputs, "corrections": []}), encoding="utf-8")
+    (run_dir / "inputs.json").write_text("{}\n", encoding="utf-8")
+    _fmr_ok(
+        h.run(
+            FMR_SCRIPTS / "apply_corrections.py",
+            str(handoff),
+            "--original",
+            str(run_dir / "inputs.json"),
+            "--output-dir",
+            str(run_dir),
+            "--run-id",
+            run_id,
+            "--origin",
+            "inputs_review",
+        )
+    )
+    shutil.copy(run_dir / "corrected_inputs.json", run_dir / "inputs.json")
+    (run_dir / "extraction_validation.json").write_text('{"status": "pass"}\n', encoding="utf-8")
+    _wait(root, run_id, "fmr_extracted_values")
+    time.sleep(0.002)
+    # The host corrects the values itself while the run waits.
+    _fmr_ok(
+        h.run(
+            FMR_SCRIPTS / "apply_corrections.py",
+            "--set",
+            "cash.monthly_net_burn=110000",
+            "--original",
+            str(run_dir / "inputs.json"),
+            "--output-dir",
+            str(run_dir),
+            "--run-id",
+            run_id,
+            "--origin",
+            "external",
+        )
+    )
+    for f in run_dir.rglob("*"):
+        if f.is_file():
+            _age(f)
+    return root, run_id, run_dir
+
+
+def test_a_financial_model_review_resume_with_host_corrections_rewrites_only_what_the_values_check_owns(
+    tmp_path: Path,
+) -> None:
+    root, run_id, run_dir = _fmr_first_invocation(tmp_path)
+    proc = h.start(
+        root,
+        "financial-model-review",
+        f"FS_HOST_RUN_ID={run_id}\nFS_HOST_ANSWER fmr_extracted_values=corrections_applied\n",
+    )
+    out = _out(_fmr_ok(proc))
+    assert (out["resume"], out["resume_step"]) == (1, "3.6")
+    _fmr_ok(
+        h.run(
+            h.SHARED / "founder_context.py",
+            "read",
+            "--artifacts-root",
+            str(root),
+            "--run-id",
+            run_id,
+            "--skill",
+            "financial-model-review",
+        )
+    )
+    _fmr_ok(h.bind(root, run_id, run_dir, "example-co"))
+    # SKILL.md: promote and re-run Step 3.5 before Step 3.6's open.
+    shutil.copy(run_dir / "corrected_inputs.json", run_dir / "inputs.json")
+    _fmr_ok(
+        h.run(
+            FMR_SCRIPTS / "validate_inputs.py",
+            "--fix",
+            "-o",
+            str(run_dir / "inputs.json"),
+            stdin=(run_dir / "inputs.json").read_text(encoding="utf-8"),
+        )
+    )
+    (run_dir / "extraction_validation.json").write_text('{"status": "pass", "rerun": true}\n', encoding="utf-8")
+    opened = _out(_fmr_ok(h.record(root, run_id, "open", "--gate", "fmr_extracted_values")))
+    assert opened["applied"] == "pre_answer"
+    cur = h.ledger(root, run_id)["gates"]["fmr_extracted_values"]["current"]
+    assert (cur["answer_id"], cur["evidence"]["origin"]) == ("corrections_applied", "external")
+    for script in ("unit_economics.py", "runway.py"):
+        _fmr_ok(
+            h.run(
+                FMR_SCRIPTS / script,
+                "--run-id",
+                run_id,
+                "-o",
+                str(run_dir / script.replace(".py", ".json")),
+                stdin=(run_dir / "inputs.json").read_text(encoding="utf-8"),
+            )
+        )
+    (run_dir / "report.md").write_text("# Report\n", encoding="utf-8")
+    st = _complete(root, run_id)
+
+    entry = st["invocations"][1]
+    untouched = {k for k in entry["untouched_since_resume"] if not k.startswith("handoff_")}
+    assert untouched == FMR_KEPT_ON_RESUME
+    assert all(entry["untouched_since_resume"].values())
+    touched = entry["touched_since_resume"]
+    assert touched["inputs_json"]["kind"] in ("changed", "rewritten_identical")
+    assert touched["extraction_validation_json"]["kind"] == "changed"
+    assert {"unit_economics_json", "runway_json", "report_md"} <= set(touched)
+
+
+def test_a_financial_model_review_resume_whose_host_skipped_the_run_id_asks_the_founder(tmp_path: Path) -> None:
+    root, run_id, run_dir = h.start_bound(tmp_path, "financial-model-review")
+    inputs = json.loads(FMR_FIXTURE.read_text(encoding="utf-8"))
+    inputs["metadata"]["run_id"] = run_id
+    (run_dir / "inputs.json").write_text(json.dumps(inputs), encoding="utf-8")
+    _wait(root, run_id, "fmr_extracted_values")
+    time.sleep(0.002)
+    _fmr_ok(
+        h.run(
+            FMR_SCRIPTS / "apply_corrections.py",
+            "--set",
+            "cash.monthly_net_burn=110000",
+            "--original",
+            str(run_dir / "inputs.json"),
+            "--output-dir",
+            str(run_dir),
+        )
+    )
+    _fmr_ok(
+        h.start(
+            root,
+            "financial-model-review",
+            f"FS_HOST_RUN_ID={run_id}\nFS_HOST_ANSWER fmr_extracted_values=corrections_applied\n",
+        )
+    )
+    opened = _out(_fmr_ok(h.record(root, run_id, "open", "--gate", "fmr_extracted_values")))
+    assert "applied" not in opened and opened["needs_input"]
+    st = h.status(root, run_id)
+    assert (st["status"], st["code"]) == ("waiting", "PRE_ANSWER_UNLISTED")
+    assert any(n["code"] == "PRE_ANSWER_NOT_APPLIED" for n in st["notices"])

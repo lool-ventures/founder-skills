@@ -486,6 +486,10 @@ def test_a_reopening_answer_starts_a_new_revision(tmp_path: Path, monkeypatch: p
     rs.update(paths, lambda st: (st.update(coaching="inserted", deliverables={"report_md": {}}), rs.mark_complete(st)))
     assert h.status(root, run_id)["status"] == "complete"
     _rec(root, run_id, "fmr_cash_followup", answer_ids=["provided"])
+    # `provided` re-opens the two cash basics it answers; the same call records them (SKILL.md Step 12).
+    assert h.status(root, run_id)["status"] == "waiting"
+    _rec(root, run_id, "fmr_cash_basics.current_balance", answer_ids=["stated"], value="250000")
+    _rec(root, run_id, "fmr_cash_basics.balance_date", answer_ids=["stated"], value="2026-09")
     st = h.status(root, run_id)
     assert (st["status"], st["revision"], st["coaching"]) == ("running", 1, None)
     assert st["deliverables"] is None and st["deliverables_status"] is None

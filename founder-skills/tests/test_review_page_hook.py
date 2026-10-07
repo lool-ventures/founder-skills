@@ -369,3 +369,26 @@ def test_a_connected_folder_write_of_the_page_sends_it(tmp_path: Path, tool: str
     assert _held(_run(tmp_path, _built(*_deliver("toolu_d", PAGE, tool=tool)))) is None
     rows = _built(*_deliver("toolu_d", "/out/Acme_Inputs.md", tool=tool))
     assert _held(_run(tmp_path, rows)) is not None, "control: a write of another file does not send the page"
+
+
+# --- Step 3.6's own order: open, build, send, ask ---------------------------------------------------------
+
+
+def test_the_open_before_the_build_changes_nothing(tmp_path: Path) -> None:
+    """SKILL.md opens the values gate BEFORE building the page; the build after it is what the hold reads."""
+    rows = [
+        _snapshot("mcp__workspace__bash", TOOL),
+        _user("Review this financial model."),
+        *_shell(GATE_OPEN_CMD, "toolu_gate", out='{"ok": true, "needs_input": []}'),
+        *_shell(STATIC_CMD, "toolu_build"),
+    ]
+    assert _held(_run(tmp_path, rows)) is not None
+
+
+def test_an_open_that_applied_a_request_answer_builds_no_page_and_nothing_is_held(tmp_path: Path) -> None:
+    rows = [
+        _snapshot("mcp__workspace__bash", TOOL),
+        _user("Review this financial model."),
+        *_shell(GATE_OPEN_CMD, "toolu_gate", out='{"ok": true, "applied": "pre_answer"}'),
+    ]
+    assert _held(_run(tmp_path, rows)) is None
