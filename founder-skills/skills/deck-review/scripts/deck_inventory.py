@@ -17,6 +17,7 @@ import argparse
 import json
 import os
 import sys
+from datetime import datetime, timezone
 from typing import Any
 
 from _artifact_writer import ArtifactValidationError, load_schema, write_artifact
@@ -31,7 +32,7 @@ from _artifact_writer import ArtifactValidationError, load_schema, write_artifac
 # reader, and no downstream consumer has to learn null-vs-absent. Note the same shape exists in
 # cap-table (`jurisdiction.incorporated_date`, `common_batches[].issuance_date` are optional and
 # bare `"string"`), so this is a class, not a one-off -- survey before calling it settled.
-_NULLABLE_AS_ABSENT = ("claimed_raise", "ai_evidence")
+_NULLABLE_AS_ABSENT = ("claimed_raise", "ai_evidence", "prior_rounds")
 _NULLABLE_AS_ABSENT_PER_SLIDE = ("visuals", "word_count_estimate", "visual_evidence_captured")
 
 
@@ -40,6 +41,22 @@ def _drop_nulls_from_optional_fields(data: dict[str, Any]) -> None:
     for field in _NULLABLE_AS_ABSENT:
         if data.get(field, "") is None:
             del data[field]
+    # `prior_rounds`: an empty list is absence too; a round keeps only `stage` and `year` (nothing else is
+    # shown, and an amount or a note stored here would read as checked); a year written as a string ("2023")
+    # is the same fact, normalised like a null rather than loosened in the schema.
+    rounds = data.get("prior_rounds")
+    if rounds == []:
+        del data["prior_rounds"]
+    elif isinstance(rounds, list):
+        for r in rounds:
+            if isinstance(r, dict):
+                for key in [k for k in r if k not in ("stage", "year")]:
+                    del r[key]
+                year = r.get("year", 0)
+                if year is None:
+                    del r["year"]
+                elif isinstance(year, str) and year.strip().isdigit() and len(year.strip()) == 4:
+                    r["year"] = int(year.strip())
     slides = data.get("slides")
     if isinstance(slides, list):
         for slide in slides:
@@ -48,6 +65,25 @@ def _drop_nulls_from_optional_fields(data: dict[str, Any]) -> None:
             for field in _NULLABLE_AS_ABSENT_PER_SLIDE:
                 if slide.get(field, "") is None:
                     del slide[field]
+
+
+PRIOR_ROUND_FIRST_YEAR = 1990
+
+
+def _prior_round_year_errors(data: dict[str, Any]) -> list[str]:
+    """A round's year must be one the founder could have closed: 1990 through next year. The schema validator
+    ignores `minimum`/`maximum`, so the bound lives here, checked before anything is written."""
+    last = datetime.now(timezone.utc).year + 1
+    errors = []
+    rounds = data.get("prior_rounds")
+    for i, r in enumerate(rounds if isinstance(rounds, list) else []):
+        year = r.get("year") if isinstance(r, dict) else None
+        if isinstance(year, int) and not isinstance(year, bool) and not PRIOR_ROUND_FIRST_YEAR <= year <= last:
+            errors.append(
+                f"prior_rounds[{i}].year: {year} is not a year a round closed in "
+                f"({PRIOR_ROUND_FIRST_YEAR}-{last}); omit it when the deck does not say"
+            )
+    return errors
 
 
 def main() -> int:
@@ -77,6 +113,11 @@ def main() -> int:
         "deck_inventory.schema.json",
     )
     schema = load_schema(schema_path)
+
+    year_errors = _prior_round_year_errors(data)
+    if year_errors:
+        print(f"Error: deck_inventory validation failed: {'; '.join(year_errors)}", file=sys.stderr)
+        return 1
 
     try:
         receipt = write_artifact(

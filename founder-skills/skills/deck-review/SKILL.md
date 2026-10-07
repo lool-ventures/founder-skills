@@ -210,9 +210,9 @@ A run resumed through `FS_HOST_RUN_ID` is already bound, so `setup_run.py` keeps
 
 Pass `RUN_ID` to every producer script via `--run-id`. Producer scripts inject it into `metadata.run_id` automatically. `compose_report.py` enforces that all required artifacts share the same `run_id` and emits a `MISSING_METADATA` (high) warning for any artifact without one. Keeping `RUN_ID` stable across the gate is what prevents a `STALE_ARTIFACT` mismatch with the pre-gate artifacts.
 
-**When `reuse_checkpoints` is true:** `gate_state.json`, `deck_inventory.json`, and `stage_profile.json` survived `--clean` because they belong to THIS run. Skip Steps 2 and 3 if both `deck_inventory.json` and `stage_profile.json` exist and their `metadata.run_id` matches `$RUN_ID`; otherwise re-run them with the same `RUN_ID`.
+**When `reuse_checkpoints` is true:** `--clean` kept this run's checkpoints. Skip Steps 2 and 3 if both `deck_inventory.json` and `stage_profile.json` exist and their `metadata.run_id` matches `$RUN_ID`; otherwise re-run them with the same `RUN_ID`.
 
-**Read `reuse_checkpoints`, not `resume`, for this decision — they are different questions and they do come apart.** `resume` says the gate may be skipped; `reuse_checkpoints` says the artifacts on disk are this run's. A same-run gate answered without a recorded source yields `resume: false` with `reuse_checkpoints: true`: ask the founder again, but keep what Steps 2-3 already produced. Keying the skip on `resume` re-runs and overwrites them, spending the three dispatches the preservation exists to protect. Apply the same rule to Steps 3.5-3.8: skip them when `reconciliation.json` exists with a matching `metadata.run_id`. It is the most expensive stretch of the pipeline — three dispatches, two of which read the deck — and re-running it on a gate round-trip spends that twice for an identical result.
+**Read `reuse_checkpoints`, not `resume`, for this decision — they are different questions and they do come apart.** `resume` says the gate may be skipped; `reuse_checkpoints` says the artifacts on disk are this run's. A same-run gate answered without a recorded source yields `resume: false` with `reuse_checkpoints: true`: ask the founder again, but keep what Steps 2-3 already produced. Apply the same rule to Steps 3.5-3.8: skip them when `reconciliation.json` exists with a matching `metadata.run_id`. It is the most expensive stretch of the pipeline — three dispatches, two of which read the deck — and re-running it on a gate round-trip spends that twice for an identical result.
 
 ### Step 1: Read or Create Founder Context
 
@@ -452,7 +452,7 @@ Map to `ai_company_status`:
 
 Record what evidence or claim was found in `ai_evidence` (required for `ai_core` and `ai_claimed_unverified`; brief for `not_ai`).
 
-`claimed_stage` holds the stage token the deck itself states (`pre_seed`, `seed`, `series_a`, `series_b`, `growth`). If the deck never states a stage, **omit the field or set it to `null` — never invent a descriptive placeholder** (a made-up value misfires the stage cross-checks downstream).
+`claimed_stage` holds the stage token the deck itself states (`pre_seed`, `seed`, `series_a`, `series_b`, `growth`); optional `prior_rounds` lists rounds it says were already closed (`stage`, optional `year`). If the deck never states a stage, **omit the field or set it to `null` — never invent a descriptive placeholder** (a made-up value misfires the stage cross-checks downstream).
 
 **`claimed_raise`, `ai_evidence` and `slides[].visuals` are optional: `null` and omission mean the same thing** — the producer normalises an explicit `null` away before validating, so either spelling is accepted. Prefer omission. A deck that states no ask is a real and notable finding, so say so in the review rather than treating the empty field as the whole story.
 
@@ -516,7 +516,7 @@ python3 "$SCRIPTS/gate_state.py" answer \
 
 then re-run `setup_run.py` (Step 0) with `--run-id` set to the RUN_ID literal printed earlier, never an empty or new one: it reports `resume: true` and the `gate_action` to branch on (see the resume note under Step 0). (`--file`, `--run-id`, `--answer`, `--source`; `-o`/`--output` are accepted as aliases for `--file`, and `--run-id` is checked for parity against the gate's `metadata.run_id`.) `--source` is required and says who produced the answer: `founder` here, because they were asked and replied. (The plain-text round-trip works correctly even without `AskUserQuestion`.)
 
-**How to detect re-invocation: you already did, in Step 1.** `setup_run.py` printed `resume`, `gate_action` and `gate_answer`. If `resume` was true, skip the gate-emit and jump to "After the gate" below, branching on **`gate_action`** (the answer string is context, not the decision). **Do not re-read `gate_state.json` to decide this** — resume detection lives in `setup_run.py` and nowhere else, because it weighs run_id parity *and* whether the answer records where it came from. This file used to carry a second copy that checked only the first two, so an answer `setup_run.py` had declined to resume on was acted on regardless.
+**How to detect re-invocation: you already did, in Step 1.** `setup_run.py` printed `resume`, `gate_action` and `gate_answer`. If `resume` was true, skip the gate-emit and jump to "After the gate" below, branching on **`gate_action`** (the answer string is context, not the decision). **Do not re-read `gate_state.json` to decide this** — resume detection lives in `setup_run.py` and nowhere else, because it weighs run_id parity *and* whether the answer records where it came from.
 
 **Auto-satisfy branch — the founder already told you the stage in Step 1.** If Step 1's `AskUserQuestion`
 captured a stage and the detected stage MATCHES it, do not ask again: write that answer straight through —
@@ -566,7 +566,7 @@ GATE_EOF
 
 The script schema-validates the body and injects `metadata.run_id`. **Never write `gate_state.json` directly via heredoc.** A refused emit writes nothing: on a non-zero exit, fix the body and re-emit. If it printed `answered` instead (an answer this run already holds, such as one sent with the request), do not ask and do not answer it: re-run `setup_run.py` and branch on `gate_action`.
 
-**`context_summary` must not name any stage other than `--stage`** — including quoting the deck's own claim. The producer refuses it, and states the disagreement itself: it reads `claimed_stage` from `deck_inventory.json` and appends `(The deck states: X. This review reads it as Y.)`. Write the evidence; let the producer name the stages.
+**`context_summary` must not name any stage other than `--stage`** — including quoting the deck's own claim. The producer refuses it, and states the disagreement itself: it reads `claimed_stage` from `deck_inventory.json` and appends `(The deck states: X. This review reads it as Y.)`. A round the deck says was already closed goes in Step 2's `prior_rounds`, which the producer prints on its own line; a round it is raising now is `claimed_stage`, never `prior_rounds`. Write the evidence; let the producer name the stages.
 
 Then ask the founder with `AskUserQuestion`, using the printed `needs_input` question and its options verbatim and in the order printed, and do not end your turn on the JSON: it is the record, never a message to paste. **Use the `needs_input` block `gate_state.py emit` printed, verbatim.** Do not retype the question or the options: the canonical options are enforced on the FILE, so a hand-written payload can show the founder a shorter list than the one that was recorded — including one with no way to decline. The printed block's shape:
 

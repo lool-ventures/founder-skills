@@ -2132,3 +2132,191 @@ def test_auto_satisfy_fails_OPEN_on_absent_or_stale_evidence(tmp_path: Any) -> N
         _emit_then(out, stage="pre_seed")
         rc, _, err = _run(["answer", "--file", out, "--answer", "Looks right", "--source", "auto_satisfied"], "")
         assert rc == 0, f"claimed={claimed!r} run_id={run_id!r} must not block auto-satisfy: {err}"
+
+
+# --- Funding history is the producer's line, not the summary's (commit 4b) ---------------------------------
+#
+# A summary may not name a stage the gate is not confirming, so "raised a pre-seed, now raising a seed" was
+# unsayable. The fix is structural: `deck_inventory.prior_rounds` (stage tokens, optional year) is printed by
+# `emit` on its own labelled line AFTER the prose check, which is not loosened. Synthetic throughout: an
+# invented veterinary-records company; years and counts are made up.
+
+_ROUNDS_INVENTORY_SCRIPT = os.path.join(os.path.dirname(SCRIPT), "deck_inventory.py")
+_ROUNDS_RID = "20261007T150000Z-ve7000"
+_OTHER_ROUNDS_RID = "20261002T090000Z-0th3r0"
+
+
+def _rounds_inventory(
+    d: str, rounds: object, run_id: str = _ROUNDS_RID, **extra: Any
+) -> subprocess.CompletedProcess[str]:
+    body = {
+        "prior_rounds": rounds,
+        "company_name": "Pawprint Records",
+        "total_slides": 9,
+        "ai_company_status": "not_ai",
+        "review_date": "2026-10-07",
+        "claimed_stage": "seed",
+        "input_quality": "good",
+        "input_format": "pptx",
+        "slides": [{"number": 1, "headline": "Clinics lose charts", "content_summary": "Paper records at vets."}],
+        **extra,
+    }
+    return subprocess.run(
+        [sys.executable, _ROUNDS_INVENTORY_SCRIPT, "--run-id", run_id, "-o", os.path.join(d, "deck_inventory.json")],
+        input=json.dumps(body),
+        capture_output=True,
+        text=True,
+    )
+
+
+def _emit_rounds(d: str, summary: str, stage: str = "seed") -> tuple[int, str, str]:
+    body = {
+        "gate_id": "stage_confirmation",
+        "question": "Does this look right?",
+        "options": _CANONICAL_OPTIONS["stage_confirmation"],
+        "context_summary": summary,
+    }
+    return _run(
+        ["emit", "--run-id", _ROUNDS_RID, "--stage", stage, "-o", os.path.join(d, "gate_state.json")], json.dumps(body)
+    )
+
+
+def _rounds_payload(stdout: str) -> dict[str, Any]:
+    payload: dict[str, Any] = json.loads(stdout)["needs_input"]
+    return payload
+
+
+def test_the_gate_prints_the_decks_earlier_rounds_on_their_own_line(tmp_path: Any) -> None:
+    d = str(tmp_path)
+    assert _rounds_inventory(d, [{"stage": "pre_seed", "year": 2022}]).returncode == 0
+    rc, out, err = _emit_rounds(d, "Detected stage: Seed (high confidence). 140 clinics onboarded.")
+    assert rc == 0, err
+    assert "(Earlier rounds the deck reports: Pre-seed (2022).)" in _rounds_payload(out)["context_summary"].splitlines()
+    with open(os.path.join(d, "gate_state.json"), encoding="utf-8") as f:
+        assert "Earlier rounds" not in json.load(f)["context_summary"], "the producer line must not reach the file"
+
+
+def test_earlier_rounds_print_in_stage_order_whatever_order_they_were_listed(tmp_path: Any) -> None:
+    d = str(tmp_path)
+    assert _rounds_inventory(d, [{"stage": "seed", "year": 2024}, {"stage": "pre_seed"}]).returncode == 0
+    rc, out, err = _emit_rounds(d, "Detected stage: Seed. 140 clinics onboarded.")
+    assert rc == 0, err
+    assert "(Earlier rounds the deck reports: Pre-seed, Seed (2024).)" in _rounds_payload(out)["context_summary"]
+
+
+def test_a_round_already_raised_past_the_confirmed_stage_also_rides_on_the_question(tmp_path: Any) -> None:
+    """The same kind of disagreement as the deck's claimed stage, so it goes where that one goes."""
+    d = str(tmp_path)
+    assert _rounds_inventory(d, [{"stage": "series_a", "year": 2021}]).returncode == 0
+    rc, out, err = _emit_rounds(d, "Detected stage: Seed. 140 clinics onboarded.")
+    assert rc == 0, err
+    asked = _rounds_payload(out)["question"]
+    assert "The deck reports a round already raised: Series A (2021). This review reads it as Seed." in asked
+
+
+def test_an_earlier_round_does_not_touch_the_question(tmp_path: Any) -> None:
+    d = str(tmp_path)
+    assert _rounds_inventory(d, [{"stage": "pre_seed"}]).returncode == 0
+    rc, out, err = _emit_rounds(d, "Detected stage: Seed. 140 clinics onboarded.")
+    assert rc == 0, err
+    assert _rounds_payload(out)["question"] == "Does this look right?"
+
+
+def test_another_runs_inventory_prints_no_history(tmp_path: Any) -> None:
+    d = str(tmp_path)
+    assert _rounds_inventory(d, [{"stage": "pre_seed"}], run_id=_OTHER_ROUNDS_RID).returncode == 0
+    rc, out, err = _emit_rounds(d, "Detected stage: Seed. 140 clinics onboarded.")
+    assert rc == 0, err
+    assert "Earlier rounds" not in _rounds_payload(out)["context_summary"]
+
+
+def test_nothing_but_the_stage_and_year_of_a_round_is_kept_or_shown(tmp_path: Any) -> None:
+    d = str(tmp_path)
+    rounds = [{"stage": "pre_seed", "year": 2022, "amount": "a large sum from a named fund", "note": "a pre seed co"}]
+    assert _rounds_inventory(d, rounds).returncode == 0
+    with open(os.path.join(d, "deck_inventory.json"), encoding="utf-8") as f:
+        assert json.load(f)["prior_rounds"] == [{"stage": "pre_seed", "year": 2022}]
+    rc, out, err = _emit_rounds(d, "Detected stage: Seed. 140 clinics onboarded.")
+    assert rc == 0, err
+    shown = json.dumps(_rounds_payload(out))
+    assert "named fund" not in shown and "pre seed co" not in shown
+
+
+def test_a_string_year_is_normalised_and_an_empty_list_is_absent(tmp_path: Any) -> None:
+    d = str(tmp_path)
+    assert _rounds_inventory(d, [{"stage": "pre_seed", "year": "2022"}]).returncode == 0
+    with open(os.path.join(d, "deck_inventory.json"), encoding="utf-8") as f:
+        assert json.load(f)["prior_rounds"] == [{"stage": "pre_seed", "year": 2022}]
+    assert _rounds_inventory(d, []).returncode == 0
+    with open(os.path.join(d, "deck_inventory.json"), encoding="utf-8") as f:
+        assert "prior_rounds" not in json.load(f)
+
+
+@pytest.mark.parametrize(
+    "round_,field",
+    [
+        ({"stage": "Pre-seed"}, "prior_rounds[0].stage"),  # a label, not a token
+        ({"stage": "pre_seed", "year": 0}, "prior_rounds[0].year"),
+        ({"stage": "pre_seed", "year": -3}, "prior_rounds[0].year"),
+        ({"stage": "pre_seed", "year": 99999}, "prior_rounds[0].year"),
+        ({"stage": "pre_seed", "year": 1989}, "prior_rounds[0].year"),
+    ],
+)
+def test_a_malformed_round_is_refused_and_nothing_is_written(tmp_path: Any, round_: dict, field: str) -> None:
+    d = str(tmp_path)
+    res = _rounds_inventory(d, [round_])
+    assert res.returncode != 0 and field in res.stdout + res.stderr
+    assert not os.path.exists(os.path.join(d, "deck_inventory.json"))
+
+
+def test_an_inventory_written_around_the_producer_shows_no_bad_year_and_no_extra_key(tmp_path: Any) -> None:
+    d = str(tmp_path)
+    inv = {
+        "metadata": {"run_id": _ROUNDS_RID},
+        "prior_rounds": [{"stage": "pre_seed", "year": 99999, "amount": "a large sum from a named fund"}],
+    }
+    with open(os.path.join(d, "deck_inventory.json"), "w", encoding="utf-8") as f:
+        json.dump(inv, f)
+    rc, out, err = _emit_rounds(d, "Detected stage: Seed. 140 clinics onboarded.")
+    assert rc == 0, err
+    assert "(Earlier rounds the deck reports: Pre-seed.)" in _rounds_payload(out)["context_summary"]
+    assert "named fund" not in json.dumps(_rounds_payload(out)), "only the stage and year may reach the founder"
+
+
+@pytest.mark.parametrize(
+    "summary",
+    [
+        "Closed a pre-seed last spring; the current round is larger.",
+        "Detected stage: Seed. Two years after its pre-seed round, the team is back for more.",
+        "This is a pre seed company.",
+    ],
+)
+def test_the_check_is_not_loosened_on_a_seed_gate(tmp_path: Any, summary: str) -> None:
+    """The structural fix adds a field; it must not let prose naming an earlier stage through."""
+    d = str(tmp_path)
+    assert _rounds_inventory(d, [{"stage": "pre_seed", "year": 2022}]).returncode == 0
+    rc, _, err = _emit_rounds(d, summary)
+    assert rc != 0 and "Pre-seed" in err
+    assert not os.path.exists(os.path.join(d, "gate_state.json"))
+
+
+def test_the_refusal_names_both_homes_for_an_earlier_stage(tmp_path: Any) -> None:
+    """A deck raising that stage NOW belongs in `claimed_stage`; pointing only at `prior_rounds` would relabel
+    a current claim as history, and the disagreement line would never render."""
+    rc, _, err = _emit_rounds(str(tmp_path), "This is a pre seed company.")
+    assert rc != 0
+    assert "`claimed_stage`" in err and "`prior_rounds`" in err
+    assert err.index("`claimed_stage`") < err.index("`prior_rounds`")
+
+
+def test_a_later_stage_in_prose_gets_no_history_hint(tmp_path: Any) -> None:
+    rc, _, err = _emit_rounds(str(tmp_path), "Detected stage: Series A. 140 clinics onboarded.")
+    assert rc != 0 and "Series A" in err
+    assert "prior_rounds" not in err
+
+
+def test_an_unknown_stage_is_refused_cleanly_even_when_the_prose_names_a_stage(tmp_path: Any) -> None:
+    rc, _, err = _emit_rounds(str(tmp_path), "This is a pre seed company.", stage="bogus")
+    assert rc == 1
+    assert "Traceback" not in err
+    assert "confirmed_stage: value 'bogus' not in enum" in err

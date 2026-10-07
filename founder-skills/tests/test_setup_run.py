@@ -614,3 +614,94 @@ def test_an_empty_run_id_is_refused_and_nothing_is_cleaned() -> None:
             assert out is None, out
             assert "--run-id" in err and "empty" in err, err
             assert os.path.exists(kept), "a refused call must not clean anything"
+
+
+# --- A clean that is not a resume keeps what THIS run stamped (commit 4b) -------------------------------
+#
+# Before this, a second `--clean` with the same --run-id on a run with no ledger and no answered gate deleted
+# the run's own Step 2-3 checkpoints. A bound run already kept everything; this covers the unbound driver.
+# Synthetic: an invented courier-routing company.
+
+_OWN_RUN = "20261007T140000Z-c0ur1e"
+_PRIOR_RUN = "20261001T080000Z-0ld000"
+
+
+def _clean(root: str, run_id: str = _OWN_RUN) -> dict:
+    rc, out, err = _run(["--artifacts-root", root, "--slug", "courier-co", "--run-id", run_id, "--clean"], root)
+    assert rc == 0 and out is not None, err
+    return out
+
+
+def _stamp(review_dir: str, name: str, run_id: str) -> None:
+    with open(os.path.join(review_dir, name), "w", encoding="utf-8") as f:
+        json.dump({"metadata": {"run_id": run_id}}, f)
+
+
+def test_a_second_clean_of_an_unbound_run_keeps_this_runs_checkpoints() -> None:
+    with tempfile.TemporaryDirectory() as root:
+        d = _clean(root)["review_dir"]
+        _stamp(d, "deck_inventory.json", _OWN_RUN)
+        _stamp(d, "stage_profile.json", _OWN_RUN)
+        out = _clean(root)
+        assert os.path.isfile(os.path.join(d, "deck_inventory.json"))
+        assert os.path.isfile(os.path.join(d, "stage_profile.json"))
+        assert out["reuse_checkpoints"] is True
+        assert out["cleaned"] is True  # the clean pass ran; it kept only this run's stamped work
+        assert out["resume"] is False and out["gate_action"] == "reask"
+
+
+def test_the_same_clean_still_removes_what_this_run_did_not_stamp() -> None:
+    with tempfile.TemporaryDirectory() as root:
+        d = _clean(root)["review_dir"]
+        _stamp(d, "deck_inventory.json", _OWN_RUN)
+        _stamp(d, "stage_profile.json", _PRIOR_RUN)  # another run's
+        with open(os.path.join(d, "slide_reviews.json"), "w", encoding="utf-8") as f:
+            f.write("{not json")  # unreadable: not provably this run's
+        _stamp(d, "report.json", _OWN_RUN)  # a deliverable: compose rebuilds it whole, with report.md
+        with open(os.path.join(d, "report.md"), "w", encoding="utf-8") as f:
+            f.write("# report\n")
+        _clean(root)
+        assert sorted(os.listdir(d)) == ["deck_inventory.json"]
+
+
+def test_a_new_run_id_still_cleans_a_prior_runs_checkpoints() -> None:
+    with tempfile.TemporaryDirectory() as root:
+        d = _clean(root)["review_dir"]
+        _stamp(d, "deck_inventory.json", _PRIOR_RUN)
+        _stamp(d, "stage_profile.json", _PRIOR_RUN)
+        out = _clean(root)
+        assert os.listdir(d) == []
+        assert out["cleaned"] is True and out["reuse_checkpoints"] is False
+
+
+def test_a_kept_rebuilt_profile_keeps_the_gate_history_that_explains_it() -> None:
+    """The founder said "Different stage", the profile was rebuilt and the gate re-emitted; then Step 0 ran again.
+
+    Keeping the rebuilt profile while deleting the gate would drop the founder's answer that justifies it, and
+    the next emit could no longer carry it forward. A pending this-run gate WITHOUT history is still removed.
+    """
+    gate_script = os.path.join(os.path.dirname(SCRIPT), "gate_state.py")
+    body = {
+        "gate_id": "stage_confirmation",
+        "question": "Does this stage detection look right?",
+        "options": ["Looks right", "Different stage", "Not sure — proceed anyway"],
+    }
+
+    def gate(*args: str, summary: str | None = None) -> None:
+        stdin = json.dumps({**body, "context_summary": summary}) if summary is not None else None
+        res = subprocess.run([sys.executable, gate_script, *args], input=stdin, capture_output=True, text=True)
+        assert res.returncode == 0, res.stderr
+
+    with tempfile.TemporaryDirectory() as root:
+        d = _clean(root)["review_dir"]
+        g = os.path.join(d, "gate_state.json")
+        gate("emit", "--run-id", _OWN_RUN, "--stage", "seed", "-o", g, summary="Detected stage: Seed. 30 depots live.")
+        gate("answer", "--file", g, "--run-id", _OWN_RUN, "--answer", "Different stage", "--source", "founder")
+        _stamp(d, "stage_profile.json", _OWN_RUN)  # the rebuilt profile
+        gate("emit", "--run-id", _OWN_RUN, "--stage", "series_a", "-o", g, summary="Detected stage: Series A.")
+        out = _clean(root)
+        assert os.path.isfile(g), "the gate holding the founder's 'Different stage' was removed"
+        with open(g, encoding="utf-8") as f:
+            history = json.load(f)["history"]
+        assert [h["answer"] for h in history] == ["Different stage"]
+        assert out["gate_action"] == "reask" and out["resume"] is False and out["reuse_checkpoints"] is True

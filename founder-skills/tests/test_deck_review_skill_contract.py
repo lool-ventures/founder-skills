@@ -2091,3 +2091,26 @@ def test_the_catalog_sections_are_gone() -> None:
     text = SKILL_MD.read_text(encoding="utf-8")
     for heading in ("## Skill Metadata", "## Available Scripts", "## Available References"):
         assert heading not in text
+
+
+def test_funding_history_has_its_own_field_and_the_template_invents_none() -> None:
+    """The gate prints earlier rounds from `deck_inventory.prior_rounds`; the summary may not name them.
+
+    The gate-step rule must say where a closed round goes AND that a round being raised now is
+    `claimed_stage`, or a current claim gets relabelled as history. The Step 2 heredoc must not carry a
+    concrete `prior_rounds` value: the model copies the template, and a copied example would put an invented
+    round in front of the founder.
+    """
+    text = SKILL_MD.read_text(encoding="utf-8")
+    rule = text.index("**`context_summary` must not name any stage other than `--stage`**")
+    para = text[rule : text.index("\n\n", rule)]
+    # The SAME sentence that sends a closed round to `prior_rounds` must send a current one to `claimed_stage`;
+    # the paragraph names `claimed_stage` elsewhere for the disagreement line, which is not this rule.
+    history = [s for s in para.split(". ") if "`prior_rounds`" in s]
+    assert history and any("`claimed_stage`" in s for s in history), history
+    step2 = text.index("### Step 2:")
+    step3 = text.index("### Step 3:")
+    assert "`prior_rounds`" in text[step2:step3], "Step 2 never tells the extractor about prior_rounds"
+    fence = text.index("INVENTORY_EOF", step2)
+    heredoc = text[fence : text.index("INVENTORY_EOF", fence + 1)]
+    assert "prior_rounds" not in heredoc

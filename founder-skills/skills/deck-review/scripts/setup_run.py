@@ -43,6 +43,25 @@ _CLEANABLE_NAMES = {
 }
 _GATE_STATE_NAME = "gate_state.json"
 
+# THE PIPELINE'S OWN CHECKPOINTS, each stamped `metadata.run_id` by its producer. On a `--clean` that is not
+# already keeping everything (no answered gate of this run, no ledger), one of these stamped with THIS run's
+# id is still this run's work and is kept; anything unstamped, unreadable or another run's is removed as
+# before. This trusts run-id equality, as the answered-gate path does: a driver that reuses one `--run-id`
+# for a different deck inherits the earlier deck's checkpoints, so every review needs a fresh id. The
+# deliverables and the coaching scratch are not here: compose rebuilds them whole, and keeping a report.json
+# beside a removed report.md would leave a half pair.
+_CHECKPOINT_NAMES = frozenset(
+    {
+        "deck_inventory.json",
+        "stage_profile.json",
+        "slide_reviews.json",
+        "checklist.json",
+        "ledger.json",
+        "second_read.json",
+        "reconciliation.json",
+    }
+)
+
 
 _AUDITABLE_SOURCES = ("founder", "auto_satisfied", "host")
 
@@ -152,6 +171,27 @@ def _mirror_stage(review_dir: str, gate_id: str) -> str | None:
     return None
 
 
+def _stamped_with(path: str, run_id: str) -> bool:
+    """True only when `path` parses as a JSON object whose `metadata.run_id` is `run_id`. Fails toward removal."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return False
+    meta = data.get("metadata") if isinstance(data, dict) else None
+    return isinstance(meta, dict) and meta.get("run_id") == run_id
+
+
+def _carries_history(path: str) -> bool:
+    """True when the gate file records at least one answer this question superseded (`history`)."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            gate = json.load(f)
+    except (OSError, ValueError):
+        return False
+    return isinstance(gate, dict) and bool(gate.get("history"))
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description="Resolve REVIEW_DIR and run_id.")
     p.add_argument("--artifacts-root", required=True, help="Path to artifacts root directory")
@@ -191,8 +231,8 @@ def main() -> int:
     # must NOT delete them — skipping re-runs avoids redundant LLM calls on gate
     # round-trips.  compose_report.py's run_id parity check is the safety net
     # against stale content from a different run.  On a fresh (non-resume) run
-    # _CLEANABLE_NAMES are deleted unconditionally so no prior run's artifacts
-    # pollute the new run.
+    # _CLEANABLE_NAMES are deleted so no prior run's artifacts pollute the new
+    # run, except a _CHECKPOINT_NAMES file stamped with THIS run's id.
     #
     # RESUME ELIGIBILITY AND CHECKPOINT PRESERVATION ARE SEPARATE DECISIONS, and were one
     # variable until an answer arrived that was same-run but unauditable. The skill always
@@ -227,6 +267,7 @@ def main() -> int:
     # a fresh run still cleans a prior run's files. Without a ref nothing here changes.
     same_run = same_run_answered or _run_ref.has_ledger(review_dir, run_id)
 
+    kept_own = False
     if args.clean and not same_run:
         # Fresh run: remove all cleanable pipeline artifacts so no stale
         # content from a prior run contaminates this invocation.
@@ -239,11 +280,15 @@ def main() -> int:
         # (Each pipeline step overwrites its artifact via -o with the fresh
         # run_id, so a surviving prior-run artifact that a later step does not
         # regenerate is caught as a run_id mismatch.)
-        for name in _CLEANABLE_NAMES:
+        for name in sorted(_CLEANABLE_NAMES):
             path = os.path.join(review_dir, name)
-            if os.path.isfile(path):
-                with contextlib.suppress(OSError):
-                    os.remove(path)
+            if not os.path.isfile(path):
+                continue
+            if name in _CHECKPOINT_NAMES and _stamped_with(path, run_id):
+                kept_own = True
+                continue
+            with contextlib.suppress(OSError):
+                os.remove(path)
         # Also remove a stale answered gate_state.json so it cannot be
         # misread as a resume signal on a later invocation.
         #
@@ -257,7 +302,12 @@ def main() -> int:
         # declined gate is internally consistent and would be preserved too. It must also
         # be THIS run's, or a fresh review of the same company inherits a refusal that was
         # never given to it.
-        if os.path.isfile(gate_path) and action == "stop" and gate_run_id == run_id:
+        #
+        # AND when it is THIS run's and carries answers it superseded. A pending re-ask whose history holds the
+        # founder's "Different stage" explains the rebuilt profile the loop above just kept; removing it kept the
+        # profile and dropped the reason, and the re-emit could no longer carry that answer forward. An
+        # unanswered this-run gate with no history is still removed: the next emit rewrites it whole.
+        if os.path.isfile(gate_path) and gate_run_id == run_id and (action == "stop" or _carries_history(gate_path)):
             pass
         elif os.path.isfile(gate_path):
             with contextlib.suppress(OSError):
@@ -293,8 +343,9 @@ def main() -> int:
         "gate_id": gate_id,
         "gate_action": action,
         "resume": resume,
-        # Whether this invocation removed the cleanable artifacts. Reported rather than
-        # inferred from `resume`: the two diverge exactly in the case this split exists
+        # Whether this invocation ran the clean pass. It may still have kept checkpoints stamped with
+        # this run's id, so `cleaned: true` beside `reuse_checkpoints: true` is a legal pair. Reported
+        # rather than inferred from `resume`: the two diverge exactly in the case this split exists
         # for — an unauditable same-run answer keeps its checkpoints and is not resumed.
         "cleaned": bool(args.clean and not same_run),
         # MAY STEPS 2-3 BE SKIPPED? Reported by name because the consumer needs it by name.
@@ -303,7 +354,7 @@ def main() -> int:
         # and then re-ran them anyway, spending the exact three dispatches the preservation
         # exists to protect. `resume` answers "may the gate be skipped"; this answers "are
         # the artifacts on disk this run's".
-        "reuse_checkpoints": same_run,
+        "reuse_checkpoints": same_run or kept_own,
     }
     if gate_stage is not None:
         # Only on a run whose ledger holds the question open: the stage to emit it about.

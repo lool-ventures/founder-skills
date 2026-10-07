@@ -67,6 +67,32 @@
     "claimed_raise": {
       "type": "string"
     },
+    "prior_rounds": {
+      "type": "array",
+      "description": "Rounds the deck says the company ALREADY raised (closed), as stage tokens; printed in stage order. Not the round being raised now (that is `claimed_stage`/`claimed_raise`). The stage gate prints these on their own labelled line, so the gate summary never has to name an earlier stage. Omit when the deck states none.",
+      "items": {
+        "type": "object",
+        "required": [
+          "stage"
+        ],
+        "properties": {
+          "stage": {
+            "type": "string",
+            "enum": [
+              "pre_seed",
+              "seed",
+              "series_a",
+              "series_b",
+              "growth"
+            ]
+          },
+          "year": {
+            "type": "integer",
+            "description": "Year the round closed; omit when the deck does not say."
+          }
+        }
+      }
+    },
     "ai_company_status": {
       "type": "string",
       "enum": [

@@ -1493,7 +1493,11 @@ SKILL_MD_CEILING: dict[str, int] = {
     # and Step 9 closes the page list. Restatements trimmed to fit (the AskUserQuestion-fallback aside, the
     # coaching heredoc's parenthetical, Step 9's now-untrue non-zero-exit clause); after review, the not-found
     # and decline exits of Step 1 and the slug block are named.
-    "deck-review": 113_688,
+    # 113,688 -> 113,613 (-75 B) on 2026-10-07: Step 2 and the gate step document `prior_rounds` (a round
+    # already closed is the producer's line, a round raised now is `claimed_stage`); the `reuse_checkpoints`
+    # paragraph no longer names gate_state.json, which `--clean` can now remove while keeping this run's
+    # checkpoints; two justification/history sentences removed to pay for it.
+    "deck-review": 113_613,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
@@ -2089,7 +2093,9 @@ REFERENCES_CEILING: dict[str, int] = {
     # `summary.status_by_id`, the by-id map a scenario asserts a criterion's verdict through.
     # 51_795 -> 51_834 (+39 B): market_bottom_up's Fail names a deck with no market sizing at all,
     # which every run already failed by habit while the text named only a top-down chart.
-    "deck-review": 51_834,
+    # 51_834 -> 51_791 (-43 B): deck_inventory's `prior_rounds` row added; the `claimed_stage` and
+    # `detected_stage` rows and the example's ai_evidence shortened to pay for it.
+    "deck-review": 51_791,
     # competitive-positioning +474 B: artifact-schemas.md documented the `startup_rank` RENDERING
     # convention but not its SENTINEL. `score_moats.py` stamps {"rank": -1, "total": 0} when the
     # startup is not_applicable on a dimension, and compose_report.py rendered it verbatim —

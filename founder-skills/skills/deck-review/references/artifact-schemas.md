@@ -20,8 +20,9 @@ JSON schemas for all artifacts deposited during the deck review workflow. Each a
 | `review_date` | string | yes | ISO date (YYYY-MM-DD) |
 | `input_format` | string | yes | One of: `"pdf"`, `"pptx"`, `"markdown"`, `"text"` |
 | `total_slides` | integer | yes | Total number of slides |
-| `claimed_stage` | string or null | no | Stage token the deck states (`pre_seed`, `seed`, `series_a`, `series_b`, `growth`); omit or set null when the deck does not state a stage — do not invent a descriptive value |
+| `claimed_stage` | string or null | no | Stage token the deck states (`pre_seed` … `growth`); omit or null when it states none — never invent one |
 | `claimed_raise` | string | no | Fundraising amount claimed (if any) |
+| `prior_rounds` | object[] | no | Rounds already closed: `stage` token, optional `year` (1990 to next year); the stage gate prints them. A round raised now is `claimed_stage` |
 | `ai_company_status` | string | **yes** | One of: `"ai_core"`, `"ai_claimed_unverified"`, `"not_ai"` |
 | `ai_evidence` | string | no | Evidence or claim found; recommended when status is not `not_ai` |
 | `slides` | object[] | yes | Per-slide extraction |
@@ -31,8 +32,8 @@ JSON schemas for all artifacts deposited during the deck review workflow. Each a
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `number` | integer | yes | Slide number (1-indexed) |
-| `headline` | string | yes | Slide headline/title as written |
-| `content_summary` | string | yes | Brief summary of slide content (2-3 sentences) |
+| `headline` | string | yes | Headline as written |
+| `content_summary` | string | yes | Slide content in 2-3 sentences |
 | `visuals` | string | no | Description of charts, screenshots, diagrams |
 | `word_count_estimate` | integer | no | Approximate word count on the slide |
 
@@ -46,7 +47,7 @@ JSON schemas for all artifacts deposited during the deck review workflow. Each a
   "claimed_stage": "seed",
   "claimed_raise": "$4M",
   "ai_company_status": "ai_claimed_unverified",
-  "ai_evidence": "Deck says 'AI-powered bookkeeping' but no ML model, inference costs, or AI-specific retention metrics are present.",
+  "ai_evidence": "Deck says 'AI-powered bookkeeping'; no model or inference costs shown.",
   "slides": [
     {
       "number": 1,
@@ -68,7 +69,7 @@ JSON schemas for all artifacts deposited during the deck review workflow. Each a
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `detected_stage` | string | yes | String. Expected values: `"pre_seed"`, `"seed"`, `"series_a"` (calibrated). For later-stage companies use `"series_b"` or `"growth"` — the compose report will flag these as out of calibrated scope. |
+| `detected_stage` | string | yes | `"pre_seed"`, `"seed"`, `"series_a"` (calibrated); `"series_b"` or `"growth"` are flagged as out of calibrated scope. |
 | `confidence` | string | yes | One of: `"high"`, `"medium"`, `"low"` |
 | `evidence` | string[] | yes | List of signals used to determine stage |
 | `is_ai_company` | boolean | yes | Whether the company is AI-first |

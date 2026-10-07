@@ -24,6 +24,7 @@ import json
 import os
 import re
 import sys
+from datetime import datetime, timezone
 from typing import Any
 
 import _run_ref
@@ -647,6 +648,51 @@ def _deck_claimed_stage(output_path: str, run_id: str) -> str | None:
     return claimed if claimed in STAGE_LABELS else None
 
 
+_STAGE_ORDER = {token: i for i, token in enumerate(STAGE_LABELS)}
+# A year outside this window is not a fact the founder should be shown (the producer refuses it; this
+# reader drops it as well, in case the inventory was written some other way).
+PRIOR_ROUND_FIRST_YEAR = 1990
+
+
+def _plausible_year(year: object) -> bool:
+    return (
+        isinstance(year, int)
+        and not isinstance(year, bool)
+        and PRIOR_ROUND_FIRST_YEAR <= year <= datetime.now(timezone.utc).year + 1
+    )
+
+
+def _deck_prior_rounds(output_path: str, run_id: str) -> list[tuple[str, int | None]]:
+    """The rounds the deck says were already raised, as (stage token, year or None), in stage order.
+
+    Read from the inventory beside the gate file under the same fail-closed rules as `_deck_claimed_stage`
+    (missing, unreadable, another run's, or any malformed round: nothing is rendered). Only the stage token and
+    a plausible integer year are used, so nothing the caller wrote as prose reaches the founder this way."""
+    path = os.path.join(os.path.dirname(os.path.abspath(output_path)), "deck_inventory.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            inventory = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return []
+    if not isinstance(inventory, dict) or _as_run_id(inventory) != run_id:
+        return []
+    rounds = inventory.get("prior_rounds")
+    if not isinstance(rounds, list):
+        return []
+    out: list[tuple[str, int | None]] = []
+    for r in rounds:
+        stage = r.get("stage") if isinstance(r, dict) else None
+        if not isinstance(stage, str) or stage not in STAGE_LABELS:
+            return []
+        year = r.get("year")
+        out.append((stage, year if isinstance(year, int) and _plausible_year(year) else None))
+    return sorted(out, key=lambda x: (_STAGE_ORDER[x[0]], x[1] or 0))
+
+
+def _round_label(stage: str, year: int | None) -> str:
+    return f"{STAGE_LABELS[stage]} ({year})" if year is not None else STAGE_LABELS[stage]
+
+
 def cmd_emit(args: argparse.Namespace) -> int:
     raw = sys.stdin.read()
     try:
@@ -814,14 +860,32 @@ def cmd_emit(args: argparse.Namespace) -> int:
     # the payload — "Detected stage: Seed" beside "(Confirming stage: series_a.)" — with the
     # hidden token deciding. A founder reading the first sentence has been told something
     # the record contradicts.
+    if args.stage not in STAGE_LABELS:
+        # Refused here, with the message the schema check further down gives, so the stage-order lookups
+        # below never see a token they do not know.
+        print(
+            f"Error: gate_state validation failed: confirmed_stage: value {args.stage!r} not in enum "
+            f"{list(STAGE_LABELS)}",
+            file=sys.stderr,
+        )
+        return 1
     prose = f"{data.get('question') or ''} {data.get('context_summary') or ''}".lower()
     for token, label in STAGE_LABELS.items():
         if token == args.stage:
             continue
         if prose_names_stage(prose, token):
+            # An EARLIER stage is either the deck's own current claim or funding history, and the two have different
+            # homes. Name both and which is which: pointing at `prior_rounds` alone would turn a deck that is
+            # raising that stage NOW into "earlier rounds", and the disagreement line would never render.
+            hint = (
+                " If the deck says it is raising that stage now, set deck_inventory's `claimed_stage` (the gate "
+                "states the disagreement); only a round the deck says was already closed goes in `prior_rounds`."
+                if _STAGE_ORDER[token] < _STAGE_ORDER[args.stage]
+                else ""
+            )
             print(
                 f"Error: this gate confirms {args.stage!r} but its question or summary names "
-                f"{label!r} — a founder cannot be shown one stage and asked to authorize another",
+                f"{label!r} — a founder cannot be shown one stage and asked to authorize another{hint}",
                 file=sys.stderr,
             )
             return 1
@@ -917,6 +981,13 @@ def cmd_emit(args: argparse.Namespace) -> int:
     parts = [summary] if summary else []
     if claimed and claimed != args.stage:
         parts.append(f"(The deck states: {STAGE_LABELS[claimed]}. This review reads it as {STAGE_LABELS[args.stage]}.)")
+    # FUNDING HISTORY IS THE PRODUCER'S LINE TOO, for the same reason as the deck's claim: "raised a pre-seed,
+    # now raising a seed" names a stage the gate is not confirming, so the summary could not say it. It is
+    # rendered from `deck_inventory.prior_rounds` (closed stage tokens, never prose) and appended after the
+    # check, so `prose_names_stage` never sees it and is not loosened.
+    rounds = _deck_prior_rounds(args.output, args.run_id)
+    if rounds:
+        parts.append(f"(Earlier rounds the deck reports: {', '.join(_round_label(*r) for r in rounds)}.)")
     parts.append(f"(Confirming stage: {args.stage}.)")
     stated = "\n".join(parts)
     # THE DISAGREEMENT RIDES ON `question`, NOT ONLY `context_summary`, because only one of
@@ -935,6 +1006,13 @@ def cmd_emit(args: argparse.Namespace) -> int:
     if claimed and claimed != args.stage:
         disagreement = f"The deck states: {STAGE_LABELS[claimed]}. This review reads it as {STAGE_LABELS[args.stage]}."
         asked = f"{asked} {disagreement}".strip()
+    # A round ALREADY RAISED at a later stage than the one being confirmed is a disagreement of the same kind,
+    # so it rides on `question` too, for the same reason.
+    later = [r for r in rounds if _STAGE_ORDER[r[0]] > _STAGE_ORDER[args.stage]]
+    if later:
+        named = ", ".join(_round_label(*r) for r in later)
+        reads = STAGE_LABELS[args.stage]
+        asked = f"{asked} The deck reports a round already raised: {named}. This review reads it as {reads}.".strip()
     receipt["needs_input"] = {
         "gate_state_path": os.path.abspath(args.output),
         "gate_id": data.get("gate_id"),
