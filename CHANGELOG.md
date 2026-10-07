@@ -32,8 +32,8 @@ None.
 
 ### Changed
 
-- **Competitive positioning: recall candidates you decline at the competitor-set check are recorded
-  by the plugin**, rather than by editing the draft by hand. They are checked, duplicates and
+- **Competitive positioning**: recall candidates you decline at the competitor-set check are recorded
+  by the plugin, rather than by editing the draft by hand. They are checked, duplicates and
   companies already on your list are skipped, and the step is no longer held partway through.
 - **Fewer steps are held and shown as failed.** The skills run the commands that print a reviewer's
   instructions on their own, where combining them with other commands caused the step to be held, and
