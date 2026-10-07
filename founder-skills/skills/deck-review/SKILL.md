@@ -11,14 +11,6 @@ user-invocable: true
 
 Help startup founders strengthen their pitch decks before sending them to investors. Produce a structured, scored review with specific, actionable recommendations grounded in current best practices from Sequoia, DocSend, YC, a16z, and Carta data. The tone is founder-first: a candid coaching session, not a VC evaluation.
 
-## Skill Metadata
-
-- **Author:** lool-ventures
-- **Version:** managed in `founder-skills/.claude-plugin/plugin.json`
-- **Compatibility:** Python 3.10+ and `uv` for script execution.
-- **Exports:**
-  - `checklist.json` → `financial-model-review`, `ic-sim`, `fundraise-readiness` (future)
-
 ## Skill Execution Model (READ FIRST)
 
 > See `founder-skills/references/skill-execution-model.md` for the full inline-skill execution model (3 dispatch contexts, Mitigation 1+2, producer contract, Cowork quirks, per-symptom triage).
@@ -44,35 +36,6 @@ Context A **receipts** don't need this protocol by hand — `check_handoff.py --
 Accept any format: PDF, PowerPoint (PPTX/PPT), markdown, or text descriptions of slides.
 PowerPoint is converted to PDF at ingestion (Step 2) so the slides can actually be seen;
 without a converter the review degrades to text-only and says so.
-
-## Available Scripts
-
-All scripts are at `${CLAUDE_PLUGIN_ROOT}/skills/deck-review/scripts/`:
-
-- **`setup_run.py`** — Resolves `REVIEW_DIR`, detects resume vs. fresh run, cleans stale artifacts (`--clean`)
-- **`deck_inventory.py`** — Producer for `deck_inventory.json` (agent provides JSON via stdin; schema-validated)
-- **`stage_profile.py`** — Producer for `stage_profile.json`; `--rebuild-stage` + `--confidence {high,low}` for founder-corrected stages
-- **`gate_state.py`** — Producer (`emit`) + answer-writer (`answer`) for the stage-confirmation gate
-- **`ledger.py`** — Producer for `ledger.json`; refuses a figure whose `value` disagrees with its own `raw` string
-- **`reconcile.py`** — Producer for `reconciliation.json`; corroborates each figure's quote against the second read, computes the proposed relations, and decides which reach the founder
-- **`slide_reviews.py`** — Producer for `slide_reviews.json` (agent provides JSON via stdin; schema-validated). `--reconciliation` is required: the numeric chain must have run for this run_id
-- **`checklist.py`** — Scores 35 criteria across 7 categories (pass/fail/warn/not_applicable)
-- **`compose_report.py`** — Assembles artifacts into final report with cross-artifact validation; `--strict` exits 1 on high/medium warnings
-- **`visualize.py`** — Generates self-contained HTML with SVG charts (not JSON)
-
-Also available from `${CLAUDE_PLUGIN_ROOT}/scripts/` (shared):
-
-- **`founder_context.py`** — Per-company context management (init/read/merge/validate)
-
-Run with: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/deck-review/scripts/<script>.py --pretty [args]`
-
-## Available References
-
-Read as needed from `${CLAUDE_PLUGIN_ROOT}/skills/deck-review/references/`:
-
-- **`deck-best-practices.md`** — Full best practices: slide frameworks, stage-specific guidelines, design rules, AI-company requirements
-- **`checklist-criteria.md`** — Definitions for all 35 criteria with pass/fail/warn thresholds
-- **`artifact-schemas.md`** — JSON schemas for all artifacts
 
 ## Artifact Pipeline
 
@@ -101,7 +64,7 @@ Keep the founder informed with brief, plain-language updates at each step. **Nar
 
 ### Step 0: Path Setup
 
-**Every Bash tool call runs in a fresh shell — variables do not persist.** A stale reference does not error, it silently expands to empty (a path quietly becomes `/inputs.json`). Run the block below exactly **once**: it resolves `$PLUGIN_ROOT` deterministically, and every later block must substitute the printed value as a literal rather than re-running the resolution — repeating the self-heal search can land on a different mount than Step 0 picked when more than one is present (see why in the block's comments). `$RUN_ID` is minted once below, then re-established authoritatively by `setup_run.py`'s printed `run_id` (Step 1, which decides resume-vs-fresh) — never re-run the mint line below in a later block. Read the printed values out of each Bash call's output (`PLUGIN_ROOT` and `ARTIFACTS_ROOT` here, then `review_dir`/`run_id`/`resume`/`gate_answer` after Step 1) and paste them as literals into every subsequent block; do not carry a variable forward and assume it survived.
+**Every Bash tool call runs in a fresh shell — variables do not persist.** A stale reference does not error, it silently expands to empty (a path quietly becomes `/inputs.json`). Run the block below exactly **once**: it resolves `$PLUGIN_ROOT` deterministically, and every later block must substitute the printed value as a literal rather than re-running the resolution — repeating the self-heal search can land on a different mount than Step 0 picked when more than one is present (see why in the block's comments). `RUN_ID` is the `run_id` the `start` call below prints, and nothing else. Read the printed values out of each Bash call's output (`PLUGIN_ROOT` and `ARTIFACTS_ROOT` here, `run_id` from `start`, then `review_dir`/`resume`/`gate_action` after Step 1) and paste them as literals into every subsequent block; do not carry a variable forward and assume it survived.
 
 Optional, best-effort, and via the **Read tool** (not a shell command): before the block below, Read `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json` and note its `version` field as `EXPECT_VERSION`. Passing it to `select_plugin_root.py` below lets an exact version match win over an arbitrary first hit. If the Read fails, skip it and omit `--expect-version` — selection is still deterministic without it. Skip it if that path still begins with `$`.
 
@@ -156,11 +119,6 @@ esac
 # Resolve the artifacts root via the SCRIPT, never inline bash: an inline computation gets
 # paraphrased into outputs/ one run and outputs/artifacts/ the next, desyncing find_artifact.py.
 python3 "$SHARED_SCRIPTS/resolve_artifacts_root.py"   # prints ARTIFACTS_ROOT — use the printed path verbatim as ARTIFACTS_ROOT in every later block (a captured var dies in the next fresh shell)
-
-# RUN_ID — used by Step 1 (founder_context init) before slug-aware setup_run.py
-# runs, then passed to setup_run via --run-id. If the caller's task prompt
-# supplied a RUN_ID (resume), keep it; otherwise mint a fresh one.
-RUN_ID="${RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)}"
 ```
 
 **If the preflight line printed `UNSUPPORTED_ENVIRONMENT`, stop here.** This environment serves the
@@ -185,6 +143,14 @@ about 15–25 minutes and produces a scored report across all 35 criteria. I can
 scoring, say so and I'll answer outside the deck review." Naming the trade-off is honest; quietly
 substituting the cheap version is not.
 
+**Then start the run's record, once**, with every request line that starts `FS_HOST_` copied between the markers (none: leave the placeholder, which is ignored). `RUN_ID` is the `run_id` it prints; `resume: 1` needs nothing special. Any non-zero exit here or from `setup_run`/`bind` below: say in one sentence that the review could not start, and stop. (`bind` printing `RUN_REFUSED` is the founder's decline: follow `gate_action` `stop`.)
+
+```bash
+python3 "<printed PLUGIN_ROOT>/scripts/run_status.py" start --skill deck-review --artifacts-root "<printed ARTIFACTS_ROOT>" <<'FS_HOST_EOF'
+<each FS_HOST_ line of the request>
+FS_HOST_EOF
+```
+
 After Step 1 (when the slug is known) — substitute `$SLUG` below with the company slug from Step 1's printed JSON, then call `setup_run.py` to resolve `REVIEW_DIR`, detect whether this is a resume, and clean stale state in one atomic step. **Always** call `setup_run.py` with `--clean` and `--run-id "$RUN_ID"`; do not pre-read `gate_state.json` yourself. `setup_run.py` decides resume vs. fresh by comparing the answered `gate_state.json`'s `run_id` against `--run-id`, and on a fresh (non-resume) run it deletes a stale answered `gate_state.json` so a prior completed run cannot be misread as a resume:
 
 ```bash
@@ -193,7 +159,9 @@ python3 "$SCRIPTS/setup_run.py" \
   --slug "$SLUG" \
   --run-id "$RUN_ID" \
   --clean \
-  --pretty
+  --pretty &&
+python3 "$SHARED_SCRIPTS/run_status.py" bind --run-id "$RUN_ID" --artifacts-root "$ARTIFACTS_ROOT" \
+  --run-dir "$ARTIFACTS_ROOT/deck-review-$SLUG" --slug "$SLUG"
 ```
 
 Read `review_dir`, `run_id`, `resume`, `reuse_checkpoints`, `gate_id`, `gate_action`, and `gate_answer` from the JSON printed by the previous Bash command. **`gate_action` is what to do next — branch on it, not on the answer string.** It is one of:
@@ -204,7 +172,7 @@ Read `review_dir`, `run_id`, `resume`, `reuse_checkpoints`, `gate_id`, `gate_act
 | `continue_if_rebuilt` | they said "proceed anyway"; rebuild the profile at **low** confidence FIRST, then proceed |
 | `rebuild` | an intermediate answer (`Different stage`, or a `stage_choice` pick): rebuild and re-emit the confirmation gate — this run is not finished asking |
 | `stop` | the founder declined the review. Stop. Produce nothing. |
-| `reask` | no usable answer; emit the gate |
+| `reask` | no usable answer; emit the gate `gate_id` names (about `gate_stage`, when printed) |
 
 Read `gate_id` too when you act on the answer: `"Seed"` means one thing on `stage_choice` and nothing at all on the others, and the answer string alone cannot tell you which gate you are resuming. Substitute `REVIEW_DIR` with the `review_dir` value, `RUN_ID` with the `run_id` value, and `IS_RESUMING` with `1` if `resume` is true, else empty, in every subsequent bash block. Then:
 
@@ -238,7 +206,7 @@ REVIEW_DIR_AGENT="<printed value>"   # e.g. stage_profile.json, deck_inventory.j
 STAGING_DIR="$(mktemp -d "${TMPDIR:-/tmp}/deck-review-${SLUG:-deck}.staging.XXXXXX")"
 ```
 
-To resume across a gate round-trip, the caller's task prompt must supply the prior `RUN_ID` (so `RUN_ID` above is set before this block runs). Then `setup_run.py` sees the answered `gate_state.json` whose `run_id` matches and returns `resume: true` — and because resume is true, `--clean` leaves `gate_state.json`, `deck_inventory.json`, and `stage_profile.json` in place (they are same-run checkpoints for this `RUN_ID`).
+A run resumed through `FS_HOST_RUN_ID` is already bound, so `setup_run.py` keeps `gate_state.json`, `deck_inventory.json` and `stage_profile.json` (same-run checkpoints); an answer the request carried is applied when the gate is emitted.
 
 Pass `RUN_ID` to every producer script via `--run-id`. Producer scripts inject it into `metadata.run_id` automatically. `compose_report.py` enforces that all required artifacts share the same `run_id` and emits a `MISSING_METADATA` (high) warning for any artifact without one. Keeping `RUN_ID` stable across the gate is what prevents a `STALE_ARTIFACT` mismatch with the pre-gate artifacts.
 
@@ -249,25 +217,34 @@ Pass `RUN_ID` to every producer script via `--run-id`. Producer scripts inject i
 ### Step 1: Read or Create Founder Context
 
 ```bash
-python3 "$SHARED_SCRIPTS/founder_context.py" read --artifacts-root "$ARTIFACTS_ROOT" --pretty
+python3 "$SHARED_SCRIPTS/founder_context.py" read --artifacts-root "$ARTIFACTS_ROOT" --run-id "$RUN_ID" --skill deck-review --pretty
 ```
 
 **Exit 0 (found):** Use the company slug and pre-filled fields. Proceed to Step 2.
 
-**Exit 1 (not found):** Expected on a first run — do NOT mention this check or its exit status to the founder; if you narrate anything first, say only "Let me grab a few basics about the company." First **skim the attached deck** (title slide, footer, contact block; do NOT write any artifact yet): a PDF with the Read tool at the attachment's file-tool path, never the shell's; a PowerPoint deck from `python3 "$SHARED_SCRIPTS/pptx_to_text.py" "<deck path>"`'s printed output, since Read refuses PowerPoint to derive candidate values. Then use `AskUserQuestion` (NOT plain chat) to ask for company name, stage, sector, and geography, pre-filling each question's first option with the deck-derived value (company name from the title slide; sector/geography from deck signals such as customer names, currency, phone country codes), labeled as read from the deck; keep free-form options for correction. **If `AskUserQuestion` is genuinely unavailable in the host, do NOT skip the ask and do NOT assume the answer:** ask the same question in plain chat, state the options explicitly, and wait for an answer before continuing. The ban above is on asking casually WHILE the tool is available — it is not a reason to stall a host that lacks it. If the deck yields no signal for a field, ask as normal. **Deriving some of the four does not license skipping the ask.** Treat them independently: a deck that evidences company, stage and sector but says nothing about geography leaves you asking for geography — not filling it in and moving on. Never record a value the materials do not evidence, and in particular **never read geography off a currency symbol** (`$` is also CAD, AUD and SGD, and founders everywhere price in USD) or off where the team used to work (an ex-Stripe engineer is not a US company). Geography selects which regulatory and benchmark guidance the whole review is graded against, so a silent guess there is not a small one.
+**Exit 1 (not found: no `code`, or `CONTEXT_NOT_FOUND`):** Open the four questions (the block below) first. Expected on a first run — do NOT mention this check or its exit status to the founder; if you narrate anything first, say only "Let me grab a few basics about the company." Then **skim the attached deck** (title slide, footer, contact block; do NOT write any artifact yet): a PDF with the Read tool at the attachment's file-tool path, never the shell's; a PowerPoint deck from `python3 "$SHARED_SCRIPTS/pptx_to_text.py" "<deck path>"`'s printed output, since Read refuses PowerPoint to derive candidate values. Then use `AskUserQuestion` (NOT plain chat) to ask for company name, stage, sector, and geography, pre-filling each question's first option with the deck-derived value (company name from the title slide; sector/geography from deck signals such as customer names, currency, phone country codes), labeled as read from the deck; keep free-form options for correction. **If `AskUserQuestion` is genuinely unavailable in the host, do NOT skip the ask and do NOT assume the answer:** ask the same question in plain chat, state the options explicitly, and wait for an answer before continuing. If the deck yields no signal for a field, ask as normal. **Deriving some of the four does not license skipping the ask.** Treat them independently: a deck that evidences company, stage and sector but says nothing about geography leaves you asking for geography — not filling it in and moving on. Never record a value the materials do not evidence, and in particular **never read geography off a currency symbol** (`$` is also CAD, AUD and SGD, and founders everywhere price in USD) or off where the team used to work (an ex-Stripe engineer is not a US company). Geography selects which regulatory and benchmark guidance the whole review is graded against, so a silent guess there is not a small one.
 
 **Stage is the exception to deck-derived pre-filling — it has a real fixed label set, not a value to read off a slide.**
 Options: `Pre-seed` / `Seed` / `Series A` / `Series B+`
-→ `pre-seed | seed | series-a | series-b` (`founder_context.py`'s `VALID_STAGES` has 7 values including `series-c`/`series-d`/`later`; on a `Series B+` pick, ask a plain-text follow-up rather than defaulting to `series-b`). This is `founder_context.py`'s company-stage field, distinct from the deck-scope `--rebuild-stage` enum the later Gate uses (`pre_seed`/`seed`/`series_a`/`series_b`/`growth`, at `:377` below) — the two do not share a value set. Provide at least 2 options. Stage is re-confirmed later by the Gate, so Step 1's stage answer is a prior, not a commitment. Then create:
+→ `pre-seed | seed | series-a | series-b` (`founder_context.py`'s `VALID_STAGES` has 7 values including `series-c`/`series-d`/`later`; on a `Series B+` pick, ask a plain-text follow-up rather than defaulting to `series-b`). This is `founder_context.py`'s company-stage field, distinct from the deck-scope `--rebuild-stage` enum the later Gate uses (`pre_seed`/`seed`/`series_a`/`series_b`/`growth`, at `:377` below) — the two do not share a value set. Provide at least 2 options. Stage is re-confirmed later by the Gate, so Step 1's stage answer is a prior, not a commitment.
+
+**Each question is a recorded gate: open, ask, answer.** Open the four before asking; ask from the printed `needs_input` (fill a `label_template` slot such as `<name>` from the deck); record each reply by running the `answer_command` it printed. A `Series B+` reply opens the follow-up (`ctx_stage_detail`): ask and record it the same way. <!-- gate: ctx_stage_detail -->
+
+```bash
+python3 "$SHARED_SCRIPTS/record_gate_answer.py" open --run-id "$RUN_ID" --artifacts-root "$ARTIFACTS_ROOT" --gate ctx_basics.company_name \
+  --gate ctx_basics.stage --gate ctx_basics.sector --gate ctx_basics.geography
+```
+
+Then create (exit 10 names a question not yet recorded: ask it, record it, run `init` again):
 
 ```bash
 python3 "$SHARED_SCRIPTS/founder_context.py" init \
   --company-name "Acme Corp" --stage seed --sector "B2B SaaS" \
   --geography "US" --artifacts-root "$ARTIFACTS_ROOT" \
-  --run-id "$RUN_ID"
+  --run-id "$RUN_ID" --skill deck-review
 ```
 
-**Exit 2 (multiple):** Present the list, ask which company, re-read with `--slug`.
+**Exit 10 (several companies):** ask which from the printed `needs_input`, record it with its `answer_command`, then re-read with `--slug`; `A different company` → as Exit 1. <!-- gate: ctx_select_company --> Exit 1 with another `code`: report it and stop.
 
 #### Execution checkpoint — END OF STEP 1, READ BEFORE CONTINUING
 
@@ -301,13 +278,15 @@ run, whatever the transcript says.
 
 ### Step 2: Ingest Deck -> `deck_inventory.json`
 
+**A question in this step is a recorded gate, named at its site:** open it first (`record_gate_answer.py open --run-id "$RUN_ID" --artifacts-root "$ARTIFACTS_ROOT" --gate <gate>`), ask from its `needs_input`, and record the reply with its `answer_command`. `Stop the review` ends the run: stop and say so.
+
 **Ingestion pitfalls — common issues that degrade review quality:**
 
 1. **PDF image-only slides:** Some PDFs embed slides as images with no extractable text. If Read returns blank or garbled content, note `input_quality: "image_only"` in `deck_inventory.json` and base the review on visual description + OCR-level best effort. Flag reduced confidence in coaching commentary.
 2. **PPTX speaker notes vs. slide content:** Speaker notes often contain the real narrative; slide text is abbreviated. Extract both — notes go into `content_summary`, slide text into `headline`. Do not discard notes.
-3. **Multi-file submissions:** Founder sends v1 + v2, or deck + appendix as separate files. Ask which is the primary deck before proceeding. Do not merge or review both simultaneously.
+3. **Multi-file submissions:** Founder sends v1 + v2, or deck + appendix as separate files. Ask which is the primary deck before proceeding. <!-- gate: dr_primary_deck --> Do not merge or review both simultaneously.
 4. **Partial decks:** Deck has fewer than 5 slides or is clearly a subset. Proceed but set `confidence: "low"` in stage_profile and note the limitation. Missing-slides detection still runs normally.
-5. **Wrong file type:** File named `.pdf` but is actually a Word doc or image. If Read fails, try alternate format before asking the founder for a re-upload.
+5. **Wrong file type:** File named `.pdf` but is actually a Word doc or image. If Read fails, try alternate format before asking the founder for a re-upload. <!-- gate: dr_input_request.wrong_file_type -->
 
 **When the deck is image-rendered, `deck_inventory` IS the canonical text.** For a PDF whose
 slides are images, Read returns page images and there is no extracted text to inline — so build
@@ -330,7 +309,7 @@ time. Only ask the founder to upload after that listing actually comes back empt
 to the file you find. On exit 3 nothing was printed, so there is nothing to list: no uploads folder
 was found for this session (nothing has been attached yet, or this host keeps uploads elsewhere).
 If the request already names the deck's path, use it; otherwise ask the founder to attach the deck
-or give its path, rather than reporting it missing. Never
+or give its path, rather than reporting it missing. <!-- gate: dr_input_request.no_uploads_mount --> Never
 hand-build this path — a relative `./mnt/uploads` resolves against the shell's cwd, which has
 already moved once underneath us.
 
@@ -338,7 +317,7 @@ already moved once underneath us.
 (or the resolver exited 3) and the founder gave a link instead, fetch it ONCE. A public export returns the slides and the
 review proceeds normally from there. What comes back is often a login, consent or password page
 instead — that is where this stops: say BLOCKED, name the link as gated, and ask for a PDF export or
-the slides as text. Do not try to authenticate, and do not fetch twice. The condition is what the
+the slides as text. <!-- gate: dr_input_request.gated_link --> Do not try to authenticate, and do not fetch twice. The condition is what the
 fetch RETURNED, never that the input was a link: refusing every link would refuse the public ones
 that work.
 
@@ -426,7 +405,7 @@ Then branch on what it printed:
   (it is the Read tool's path, not the shell's), and for a PowerPoint deck set `input_format` to `"pptx"`. The slides are now genuinely visible, so the Design &
   Readability criteria are scored normally.
 - **`copy-failed`** — the deck could not be put where the Read tool reaches it; the error printed
-  above. Never Read the shell's path instead: say BLOCKED, name the error, and ask for the deck again.
+  above. Never Read the shell's path instead: say BLOCKED, name the error, and ask for the deck again. <!-- gate: dr_input_request.copy_failed -->
 - **`convert-failed`** — a converter exists and broke; its error printed just above. Report
   that error verbatim when you tell the founder what happened, then take the same fallback
   as `no-converter` below. Do not retry blindly.
@@ -439,7 +418,7 @@ Then branch on what it printed:
   criteria to `not_applicable`. Scoring a deck's layout without having seen it is a confident
   review of something you never looked at. Tell the founder you read the content but could
   not see the design, mention `images_not_read` if non-zero, and that a PDF gets the full
-  review. If the script also fails, ask for a PDF re-export and do not proceed.
+  review. If the script also fails, ask for a PDF re-export and do not proceed. <!-- gate: dr_input_request.pdf_unreadable -->
 
 **Read EVERY page, and record whether you actually saw it.** `Read` takes at most 20 pages
 per call, so a deck longer than that needs several calls — read pages 1-20, then 21-40, and
@@ -585,7 +564,7 @@ cat <<'GATE_EOF' | python3 "$SCRIPTS/gate_state.py" emit --run-id "$RUN_ID" --st
 GATE_EOF
 ```
 
-The script schema-validates the body and injects `metadata.run_id`. **Never write `gate_state.json` directly via heredoc.** A refused emit writes nothing: on a non-zero exit, fix the body and re-emit.
+The script schema-validates the body and injects `metadata.run_id`. **Never write `gate_state.json` directly via heredoc.** A refused emit writes nothing: on a non-zero exit, fix the body and re-emit. If it printed `answered` instead (an answer this run already holds, such as one sent with the request), do not ask and do not answer it: re-run `setup_run.py` and branch on `gate_action`.
 
 **`context_summary` must not name any stage other than `--stage`** — including quoting the deck's own claim. The producer refuses it, and states the disagreement itself: it reads `claimed_stage` from `deck_inventory.json` and appends `(The deck states: X. This review reads it as Y.)`. Write the evidence; let the producer name the stages.
 
@@ -1292,7 +1271,7 @@ same 13 occurrences in `report.json`. The token almost always enters in a sub-ag
 
 `--strict` counts content findings too, so use it as a pipeline gate only when the checklist outcome is already known-clean.
 
-**Post-write verification:** `compose_report.py` exits non-zero (code 2) if the declared output files don't exist or are empty after writing. If compose exits non-zero, stop and report the exact stderr — do not proceed to Step 7.
+**Post-write verification:** `compose_report.py` exits non-zero (code 2) if the declared output files don't exist or are empty after writing. Exit 10 is a question, not a failure: for the gate its JSON names (`blocked_by_gate`), a stage gate follows the `gate_action` table (`rebuild` first, then emit); any other is recorded with its `answer_command`, or `not-applicable` if moot. Then re-run `setup_run.py` and compose again. Any other non-zero exit: stop and report the exact stderr — do not proceed to Step 7.
 
 ### Step 7: Post-Compose Coaching Commentary (Context B dispatch — POST_COMPOSE_COACHING)
 
@@ -1413,13 +1392,13 @@ The gate (`check_handoff.py --format=markdown`) verifies the sub-agent's hand-of
 - **`insert_coaching.py` exit 1** (blocked; stdout carries `{"status": "blocked", "reason": ...}`) → stop and report the exact reason. Do NOT hand-edit `report.md` — if the reason mentions a truncated report or a missing marker, re-run `compose_report.py --write-md` and retry the chain. If the reason is `commentary_markdown missing or empty`, treat as a malformed hand-off: repair-dispatch quoting the reason.
 - **After ANY corrective dispatch, resume from the gate chain** — never feed the transform+insert pipe an ungated file.
 
-**Retry budget:** max 2 corrective dispatches (same rule as Context A). **Graceful degrade:** if the FIRST corrective dispatch also exits 3 while the receipt claims `complete` with the correctly echoed path, treat the host topology as hand-off-incompatible and fall back to message-channel transport, and tell the founder in one plain sentence (see Context A's degrade rule). **The corrective dispatch MUST ask for the commentary inline for this to be reachable** — add: "the file hand-off is not working in this environment; return the coaching commentary itself as your final message, as raw markdown, with no receipt JSON and no fences." Without that line the fallback is unreachable: the normal Context B prompt instructs the agent to return ONLY the receipt and not to narrate, so its final message contains no markdown to stage. Then stage that returned markdown to `$STAGING_DIR/coaching.md` via a **single-quoted** `<<'COACHING_EOF'` heredoc (apostrophe-safe; NEVER `python -c`, NEVER the `outputs/` root — `$STAGING_DIR` is the `/tmp` scratch dir from Step 0, never the promoted outputs mount), and run the same `md_to_commentary.py "$STAGING_DIR/coaching.md" | insert_coaching.py` chain against that staged file.
+**Retry budget:** max 2 corrective dispatches (same rule as Context A). **Graceful degrade:** if the FIRST corrective dispatch also exits 3 while the receipt claims `complete` with the correctly echoed path, treat the host topology as hand-off-incompatible and fall back to message-channel transport, and tell the founder in one plain sentence (see Context A's degrade rule). **The corrective dispatch MUST ask for the commentary inline for this to be reachable** — add: "the file hand-off is not working in this environment; return the coaching commentary itself as your final message, as raw markdown, with no receipt JSON and no fences." Without that line the fallback is unreachable: the normal Context B prompt instructs the agent to return ONLY the receipt and not to narrate, so its final message contains no markdown to stage. Then stage that returned markdown to `$STAGING_DIR/coaching.md` via a **single-quoted** `<<'COACHING_EOF'` heredoc (apostrophe-safe), and run the same `md_to_commentary.py "$STAGING_DIR/coaching.md" | insert_coaching.py` chain against that staged file.
 
 ### Step 8 (Optional): Generate Visual Report
 
 ```bash
 python3 "$SCRIPTS/visualize.py" --dir "$REVIEW_DIR" -o "$REVIEW_DIR/report.html" \
-  --gate-state "$REVIEW_DIR/gate_state.json"
+  --gate-state "$REVIEW_DIR/gate_state.json" --run-id "$RUN_ID"
 ```
 
 **`--gate-state` is required here, as in Step 6.** The gate once sat only on compose, so a declined review still produced a complete `report.html` — the file a founder opens. `--ungated` is for fixtures.
@@ -1429,6 +1408,12 @@ python3 "$SCRIPTS/visualize.py" --dir "$REVIEW_DIR" -o "$REVIEW_DIR/report.html"
 ### Step 9: Deliver Artifacts
 
 Copy final deliverables to the **workspace root — `$ARTIFACTS_ROOT/..`, i.e. the promoted outputs mount itself, NOT `$ARTIFACTS_ROOT` and NOT `$REVIEW_DIR`**: `{Company}_Deck_Review.md`, `.html` (if generated), `.json` (optional). Concretely, if `$ARTIFACTS_ROOT` is `<mount>/artifacts` then these go to `<mount>/`. That is the level the founder sees as deliverable cards; `artifacts/` below it is working state. Do not infer the level by elimination — `dirname "$ARTIFACTS_ROOT"` is the answer.
+
+Then close the run's file list (for a host; nothing to tell the founder):
+
+```bash
+python3 "<printed PLUGIN_ROOT>/scripts/run_status.py" deliverables --run-id "$RUN_ID" --artifacts-root "$ARTIFACTS_ROOT" --final || :
+```
 
 **Send the finished work to the founder — the complete set, as files.** Not a path, and not a subset.
 A path is not a deliverable in Cowork — whether the workspace it names outlives the task depends on how

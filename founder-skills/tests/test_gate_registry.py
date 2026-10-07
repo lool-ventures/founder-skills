@@ -457,6 +457,7 @@ _CODE_SOURCES = [
     SCRIPTS / "founder_context.py",
     SCRIPTS / "insert_coaching.py",
     SKILLS / "deck-review" / "scripts" / "gate_state.py",
+    SKILLS / "deck-review" / "scripts" / "compose_report.py",
     SKILLS / "market-sizing" / "scripts" / "record_revision_answer.py",
     SKILLS / "cap-table" / "scripts" / "extract_cap_table.py",
     *_HTML_WRITERS,
@@ -470,6 +471,8 @@ _EMITTERS = [
     ),
     re.compile(_Q + r"code" + _Q + r"\s*:\s*" + _Q + r"([A-Z][A-Z0-9_]+)" + _Q),
     re.compile(r"\bset_state\(\s*\w+,\s*" + _Q + r"\w+" + _Q + r",\s*" + _Q + r"([A-Z][A-Z0-9_]+)" + _Q),
+    # deck-review's `Authorization(..., code="...")`: the stable code each stage-gate refusal carries.
+    re.compile(r"\bcode\s*=\s*" + _Q + r"([A-Z][A-Z0-9_]+)" + _Q),
 ]
 
 
@@ -519,11 +522,21 @@ def test_the_code_scan_sees_either_quote(tmp_path: Path) -> None:
     text = (SCRIPTS / "record_gate_answer.py").read_text(encoding="utf-8")
     text += "\n\ndef _x():\n    raise _gates.GateRejection('FAKE_SINGLE_QUOTED', 'x')\n"
     text += "\n\nY = {'code': 'FAKE_FIELD_CODE'}\n"
+    text += "\n\nZ = Authorization(False, 'x', code='FAKE_KEYWORD_CODE')\n"
     copy.write_text(text, encoding="utf-8")
     found = emitted_codes(copy.read_text(encoding="utf-8"))
-    assert {"FAKE_SINGLE_QUOTED", "FAKE_FIELD_CODE"} <= found
+    assert {"FAKE_SINGLE_QUOTED", "FAKE_FIELD_CODE", "FAKE_KEYWORD_CODE"} <= found
     published = _contract_codes(json.loads(CONTRACT.read_text(encoding="utf-8")))
-    assert {"FAKE_SINGLE_QUOTED", "FAKE_FIELD_CODE"} & published == set()
+    assert {"FAKE_SINGLE_QUOTED", "FAKE_FIELD_CODE", "FAKE_KEYWORD_CODE"} & published == set()
+
+
+def test_every_stage_gate_refusal_code_is_seen_by_the_scan() -> None:
+    """Each of `authorize()`'s fifteen refusals carries a code the scan reads, so a new one cannot ship
+    outside the contract."""
+    text = (SKILLS / "deck-review" / "scripts" / "gate_state.py").read_text(encoding="utf-8")
+    sites = re.findall(r"\bcode=\"([A-Z_]+)\"", text)
+    assert len(sites) == 15, sites
+    assert set(sites) <= emitted_codes(text)
 
 
 def test_an_option_offered_by_some_skills_says_which() -> None:
@@ -535,9 +548,11 @@ def test_an_option_offered_by_some_skills_says_which() -> None:
 
 # Wording no skill's own text carries yet: questions the skill asks in prose, and labels marked new. Each
 # skill's wiring commit either matches an entry to its SKILL.md or keeps it here deliberately.
+# deck-review (wired): its text names `A different company` and `Stop the review`, so those two left the
+# list. The rest of its entries and the shared ones stay deliberately: the model asks those questions from
+# the `needs_input` block a script prints, so SKILL.md need not carry their words.
 NEW_WORDING = {
     ("ctx_select_company", "question"),
-    ("ctx_select_company", "different_company"),
     ("ctx_stage_detail", "question"),
     ("dr_primary_deck", "question"),
     ("dr_primary_deck", "named"),
@@ -548,7 +563,6 @@ NEW_WORDING = {
     ("dr_input_request", "question.pdf_unreadable"),
     ("dr_input_request", "question.copy_failed"),
     ("dr_input_request", "provide"),
-    ("dr_input_request", "stop"),
     ("ms_two_figures", "question"),
     ("ms_two_figures", "typed"),
     ("ms_methodology_change", "question"),

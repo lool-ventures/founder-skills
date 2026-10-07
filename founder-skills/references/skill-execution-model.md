@@ -123,8 +123,8 @@ tool surface and different rules.
   under-outputs artifacts.)
   cap-table is the exemplar this generalizes from: its Context A extraction
   dispatch already passes document text inline and reads nothing (see
-  "Cowork-Specific Quirks" below, and the per-skill "Available References"
-  sections in each SKILL.md for the main-thread-vs-agent-def split).
+  "Cowork-Specific Quirks" below; each agent definition holds the rubric its
+  sub-agent needs, so the main thread reads only what it uses itself).
 - **Transport is file hand-off, not the message channel**: the dispatch
   prompt carries an `OUTPUT_PATH:` line (built from the skill's
   `$HANDOFF_AGENT` — the agent-namespace view of
@@ -594,6 +594,59 @@ filesystem signature (`outputs/`, `mnt/outputs/`,
 `sessions/*/mnt/outputs`), not env vars — follow that pattern. If a
 future script needs a runtime branch, add a shared `detect_runtime()`
 helper implementing the order above rather than ad-hoc env checks.
+
+## Gates and run status
+
+Every question a skill asks once its run has started is a **gate**: registered by id in
+`scripts/_gates.py`, recorded in the run's ledger `runs/<RUN_ID>/gates.json`, and summarised for a host
+in `runs/<RUN_ID>/run_status.json` beside it (`record_gate_answer.py list` prints the host contract).
+Ids are the contract; labels are presentation. A skill that records its gates does five things.
+
+1. **Start.** Step 0 runs `run_status.py start` once, after the `ARTIFACTS_ROOT` line and before
+   Step 1, with every `FS_HOST_` line of the request copied between its heredoc markers. It takes the
+   run id from an `FS_HOST_RUN_ID=` line or mints one, checks every pre-answer against the registry
+   before writing anything, and creates the status and the ledger. Any non-zero exit means the run did
+   not start, and there is no run id to go on: `RUN_ID_IN_USE`, `RUN_ID_FINISHED` and `RUN_ID_MALFORMED`
+   are printed only and never change that run's status; `PRE_ANSWER_INVALID` names the line it could
+   not use; exit 2 means the registry or the run could not be reached.
+2. **Bind.** Once the run dir exists, `run_status.py bind` records it and writes
+   `<run dir>/handoff/<RUN_ID>/run_ref.json`. That file is how a skill's own scripts know the run has a
+   ledger; without one they behave exactly as they always did. A gate a skill script records itself
+   (deck-review's stage gates) is asked only after `bind`.
+3. **Ask.** At each gate site: `record_gate_answer.py open --gate <id>` first, which marks the run
+   `waiting` and prints the question and its options as `needs_input`; ask from that block; then run
+   the `answer_command` it printed (its `--value "<text>"` is filled for an option that takes a value
+   and dropped for the others). When the request already carried the answer, `open` records it
+   instead (`"applied": "pre_answer"`) and nothing is asked. A value the request states only in prose
+   is not a pre-answer: ask, or record it with `record_gate_answer.py default --reason
+   stated_in_request`. A site asked in plain chat carries a `<!-- gate: <id> -->` marker. A recorded
+   answer stands: a different one is refused (`ANSWER_STANDS`).
+4. **Exit 10** from any of these scripts, a producer or a compose step is a question, not a failure: its
+   JSON names the gate (`blocked_by_gate`). For a gate the recorder owns it carries `needs_input`: ask it,
+   record the answer, run the step again. A gate a skill script records (deck-review's stage gates) is
+   asked by re-running that script, as the skill's own branch table says. Exit 11 means the gate does not
+   apply to this run.
+5. **Finish.** Inserting the coaching marks the run `complete` (a mode with no coaching ends with
+   `run_status.py finish`). A page built after the coaching is listed by its writer's `--run-id`, and the
+   last step runs `run_status.py deliverables --final`. `complete` means the markdown and JSON reports
+   are final; HTML pages may appear in `deliverables` after `complete`, and an HTML file not listed
+   there is not this run's. `complete` with `deliverables_status: pending` after the skill has returned
+   means no more pages will be listed.
+
+**Resume.** A host resumes a `waiting` run with `FS_HOST_RUN_ID=<id>`, every `FS_HOST_` line of the
+first request, and the answer to the waiting gate (`resume_prompt` in the status carries the lines).
+`start` prints `resume: 1`; each step then reuses what this run already wrote, and
+`invocations[]` in the status records which run-dir files the resumed invocation rewrote.
+
+**What a record proves.** That an answer exists, names a listed option and belongs to this run, and
+still matches what it confirmed where the gate is bound. Not that a person chose it: the ledger is a
+plain file, and the record is written by the same model that asks. That includes an answer applied
+from the request: the model copies the `FS_HOST_` lines into `start`, so a line it wrote itself would be
+recorded the same way, and the status lists it as `PRE_ANSWERED:<gate>`. deck-review holds a request's
+`stage_confirmation` line to auto-satisfy's checks; its `stage_choice` and `out_of_scope_choice` lines are
+applied as sent, and a best-effort review of an out-of-scope deck says so to the founder. For the steps a hook checks
+(`asked_check` other than `none`), the transcript is read as well, and the step is held once when no
+question for it is found.
 
 ## Per-Symptom Triage
 

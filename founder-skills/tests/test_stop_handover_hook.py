@@ -1143,3 +1143,37 @@ def test_a_report_build_written_across_lines_still_triggers_the_report_check(tmp
         _assistant_text(LINKED),
     ]
     assert json.loads(_run(tmp_path, rows).stdout)["decision"] == "block"
+
+
+def test_deck_reviews_page_list_close_cannot_silence_the_delivery_ask(tmp_path: Path) -> None:
+    """deck-review closes its page list after compose with `deliverables --final`, which refuses a run that
+    is not `complete`. Run as SKILL.md writes it (`|| :`), the call succeeds even then, so the hook still
+    sees no failure after the build and still asks for the unsent report."""
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import gate_run_helpers as h
+
+    skill = (SCRIPTS.parent / "skills" / "deck-review" / "SKILL.md").read_text(encoding="utf-8")
+    [line] = [ln for ln in skill.splitlines() if 'run_status.py" deliverables' in ln]
+    assert line.rstrip().endswith("|| :"), line
+    root, run_id, _run_dir = h.start_bound(tmp_path / "run", "deck-review")
+    command = (
+        line.replace("<printed PLUGIN_ROOT>", str(SCRIPTS.parent))
+        .replace('"$RUN_ID"', run_id)
+        .replace('"$ARTIFACTS_ROOT"', f'"{root}"')
+    )
+    proc = subprocess.run(["sh", "-c", command], capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
+    assert json.loads(proc.stdout)["code"] == "RUN_NOT_COMPLETE", "control: the run was not complete"
+    rows = [
+        _snapshot("mcp__workspace__bash", "mcp__cowork__present_files"),
+        _user("Review this deck."),
+        _call_with_id("mcp__workspace__bash", COMPOSE_CMD, "toolu_compose"),
+        _result_for("toolu_compose", "{}"),
+        _call_with_id("mcp__workspace__bash", command, "toolu_final"),
+        _result_for("toolu_final", proc.stdout, is_error=proc.returncode != 0),
+        _assistant_text(LINKED),
+    ]
+    asked = json.loads(_run(tmp_path, rows).stdout)
+    assert asked["decision"] == "block" and "attach" in asked["reason"]

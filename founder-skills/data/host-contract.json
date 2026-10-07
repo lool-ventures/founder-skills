@@ -8,7 +8,8 @@
   ],
   "cli_codes": {
     "bind": [
-      "RUN_ALREADY_BOUND"
+      "RUN_ALREADY_BOUND",
+      "RUN_REFUSED"
     ],
     "deliverables": [
       "RUN_NOT_COMPLETE"
@@ -18,12 +19,16 @@
       "MODE_MISMATCH",
       "MODE_NOT_OFFERED"
     ],
+    "founder_context": [
+      "CONTEXT_NOT_FOUND"
+    ],
     "html_writers": [
       "RUN_ID_MISMATCH"
     ],
     "notices": [
       "PRE_ANSWER_IGNORED",
-      "PRE_ANSWER_INVALID"
+      "PRE_ANSWER_INVALID",
+      "PRE_ANSWER_NOT_APPLIED"
     ],
     "start_payload": [],
     "usage": [
@@ -2575,7 +2580,9 @@
     "Before `bind`, `gates[]` holds the gates already reached plus those common to every mode of the skill; `bind` completes the list for the run's mode.",
     "`RUN_ID_IN_USE`, `RUN_ID_FINISHED` and `RUN_ID_MALFORMED` are printed only; they never change a run's run_status.json.",
     "`current.asked_evidence` may also be `ask_user_question`, `plain_chat`, `host_line` or `form` from the plugin's transcript check. It stays null when that check did not run (hooks are optional) or when the step went through on its one retry with no question. It is a measurement of how the question was put, not an attestation that a person answered it.",
-    "`untouched_since_resume` lists the run-dir files no writer rewrote after this invocation began; `touched_since_resume` lists those a writer did, and how. It records file writes measured by script, not steps: which files a correct resume rewrites depends on the skill and the gate (reports, coaching and pages are rewritten every invocation; a corrections resume rewrites inputs.json), and it cannot see work written outside the run dir or work that wrote nothing. `null` means no manifest could be taken, never that nothing ran."
+    "`untouched_since_resume` lists the run-dir files no writer rewrote after this invocation began; `touched_since_resume` lists those a writer did, and how. It records file writes measured by script, not steps: which files a correct resume rewrites depends on the skill and the gate (reports, coaching and pages are rewritten every invocation; a corrections resume rewrites inputs.json), and it cannot see work written outside the run dir or work that wrote nothing. `null` means no manifest could be taken, never that nothing ran.",
+    "Exit 10 means a question is owed and its gate is named in `blocked_by_gate`. The status is then `waiting`, except for `GATE_UNRESOLVED`: a question that was opened and never recorded leaves the run `running` with `last_error_code: GATE_UNRESOLVED`. Like every `last_error_code` (`GATE_INVALID`, `GATE_OTHER_RUN`, `PROFILE_MISMATCH`, `COACHING_BLOCKED`), it records the last error seen and is cleared only when the run completes.",
+    "`disclosures` lists `DEFAULT_TAKEN:<gate>` for an answer recorded as a default and `PRE_ANSWERED:<gate>` for one applied from a request line instead of being asked. `PRE_ANSWERED:out_of_scope_choice` means the request chose to review a deck outside the skill's stage scope, best-effort; the report and page tell the founder so."
   ],
   "pages_after_coaching": {
     "cap-table": [],
@@ -2682,7 +2689,7 @@
     "invocation": "1 at a fresh start; +1 at every resume and every reopen of a complete run; never reset",
     "invocations": "append-only [{n, kind, started_at, ended_at, resumed_from, reuse, manifest, manifest_incomplete, untouched_since_resume, touched_since_resume, counts, maps_dropped}]; `kind` is `start`, `resume` or `reopen`; `manifest` is the snapshot's path relative to the artifacts root, null before `bind`. An invocation ends at the next start or reopen; at the coaching insert, unless the skill lists pages after its coaching, in which case when `deliverables_status` turns `final`; and when the run completes with no page still to come or is refused. Until then, and whenever no complete manifest and walk exist, both partitions and `counts` are null. At the end every file up to 8 MiB is hashed again: different bytes are `changed`, the same bytes with another mtime are `rewritten_identical`, and the same bytes with the same mtime count as untouched, so an identical copy that kept its mtime (`cp -p`, `copy2`, `rsync -t`) or a permission change is untouched. `counts` is {untouched, changed, rewritten_identical, added, removed}. Only the 2 most recent ended invocations keep their key maps; an older one has both partitions null, `maps_dropped: true` and its `counts`",
     "needs_input": {
-      "answer_command": "the exact recording command, or null when another script records it",
+      "answer_command": "the exact recording command, or null when another script records it; when a shown option takes a value it ends `--value \"<text>\"`, filled for that option and dropped for the others",
       "form_header": "the header a question form for this skill uses",
       "form_label": "the short label a question form uses",
       "gate": "the gate key, `<gate>` or `<gate>.<instance>`",

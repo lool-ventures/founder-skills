@@ -59,9 +59,10 @@
       "type": "string",
       "enum": [
         "founder",
-        "auto_satisfied"
+        "auto_satisfied",
+        "host"
       ],
-      "description": "Who produced `answer`. Optional here because a gate that has not been answered has no source, and because an artifact written before this field existed is readable rather than invalid. `gate_state.py answer` requires it, and setup_run.py treats an answered gate without it as unauditable and re-asks. Observability, not provenance: the value is supplied by the same model that would self-answer."
+      "description": "Who produced `answer`. Optional here because a gate that has not been answered has no source, and because an artifact written before this field existed is readable rather than invalid. `gate_state.py answer` requires it, and setup_run.py treats an answered gate without it as unauditable and re-asks. `host`: applied by `emit` from an answer the request carried. Observability, not provenance: the value is supplied by the same model that would self-answer."
     },
     "history": {
       "description": "Answered gates that were superseded within this run, oldest first. Append-only: `emit` carries the prior answered state forward so a decision cannot be erased by asking a different question. A `Stop review` anywhere in this run's history stays decisive.",

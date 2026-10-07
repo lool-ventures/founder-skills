@@ -93,6 +93,10 @@ SCRIPT_ASKED_EVIDENCE = ASKED_EVIDENCE[:3]
 WRITERS = (RECORDER, "gate_state.py", "record_revision_answer.py", "extract_cap_table.py")
 # The gates a hook holds the next dispatch for; `--after-hold` may replace their answer once per run.
 HELD_GATES = ("ms_two_figures", "ms_methodology", "fmr_extracted_values", "ic_decline_confirmation")
+# Gates whose site can be asked again in one run: the founder resends a file and it fails the same way.
+# `open` on one that already has an answer supersedes that answer (reason `asked_again`), so the new
+# reply, `Stop the review` included, can be recorded. Every other recorded answer stands.
+REASK_SUPERSEDES = ("dr_input_request",)
 
 # Rejections: exit 1, ledger and status untouched.
 REJECTION_CODES = (
@@ -168,6 +172,14 @@ CONTRACT_NOTES = (
     "are rewritten every invocation; a corrections resume rewrites inputs.json), and it cannot see work written "
     "outside the run dir or work that wrote nothing. `null` means no manifest could be taken, never that nothing "
     "ran.",
+    "Exit 10 means a question is owed and its gate is named in `blocked_by_gate`. The status is then `waiting`, "
+    "except for `GATE_UNRESOLVED`: a question that was opened and never recorded leaves the run `running` with "
+    "`last_error_code: GATE_UNRESOLVED`. Like every `last_error_code` (`GATE_INVALID`, `GATE_OTHER_RUN`, "
+    "`PROFILE_MISMATCH`, `COACHING_BLOCKED`), it records the last error seen and is cleared only when the run "
+    "completes.",
+    "`disclosures` lists `DEFAULT_TAKEN:<gate>` for an answer recorded as a default and `PRE_ANSWERED:<gate>` for "
+    "one applied from a request line instead of being asked. `PRE_ANSWERED:out_of_scope_choice` means the request "
+    "chose to review a deck outside the skill's stage scope, best-effort; the report and page tell the founder so.",
 )
 
 
@@ -408,9 +420,21 @@ GATES: dict[str, dict[str, Any]] = {
         "instances": None,
         "multi": False,
         "options": (
-            _o("stop_review", "Stop review", declines=True),
+            # Both terminal answers settle the whole stage question: a `Different stage` reply left on
+            # `stage_confirmation` earlier in the chain would otherwise stay open, and a run whose questions
+            # were all answered could never complete.
+            _o(
+                "stop_review",
+                "Stop review",
+                declines=True,
+                effects={"closes": ("stage_choice", "stage_confirmation")},
+            ),
             _o("different_stage", "Different stage", terminal=False, effects={"reopens": ("stage_choice",)}),
-            _o("proceed_anyway", "Proceed anyway (best-effort)", effects={"closes": ("stage_choice",)}),
+            _o(
+                "proceed_anyway",
+                "Proceed anyway (best-effort)",
+                effects={"closes": ("stage_choice", "stage_confirmation")},
+            ),
         ),
         "option_source": None,
         "option_variants": None,
@@ -1922,6 +1946,8 @@ def form_label_for(g: dict[str, Any], instance: str | None) -> str:
 
 
 _SLOT = re.compile(r"<[^<>\n]+>|\[[^\[\]\n]+\]")
+# The value slot a printed `answer_command` ends with.
+VALUE_SLOT = "<text>"
 
 
 def render_question(g: dict[str, Any], instance: str | None, ctx: Ctx | None) -> str:
@@ -2269,7 +2295,9 @@ def _open_entry(ledger: dict[str, Any], key: str, by: str, **extra: Any) -> tupl
 
 def _supersede(ledger: dict[str, Any], entry: dict[str, Any], by: str, reason: str) -> None:
     """The one route that re-asks an answered gate: the answer is kept in history as `superseded`, and the
-    gate re-opens with a fresh `opened_at`. Reached only by a changed binding or a registered `reopens`."""
+    gate re-opens with a fresh `opened_at`. Reached by a changed binding (`binding_changed`), a registered
+    `reopens`, a re-asked site (`asked_again`, REASK_SUPERSEDES), a dedicated writer putting a closed question
+    again (`emitted_again`), and a refused compose re-opening a stage question (`compose_refused:<code>`)."""
     _event(ledger, entry, "superseded", by, reason=reason, previous=entry["current"])
     entry["current"] = None
     entry["supersessions"] = int(entry.get("supersessions") or 0) + 1
@@ -2467,6 +2495,10 @@ def record(
     if resolution == "answered" and not options:
         raise GateRejection("OPTION_UNLISTED", f"{key} needs an option")
     takes_value = any(o["takes_value"] for o in options)
+    if value is not None and value.strip() == VALUE_SLOT:
+        # The `<text>` slot of a printed `answer_command`, copied as it stands, is no value. Only that exact
+        # token: a real value may look like `<5` or `<n/a>`.
+        value = None
     if takes_value and (value is None or value == ""):
         raise GateRejection("VALUE_REQUIRED", f"{key}: {options[0]['id']!r} takes a value (--value)")
     if not takes_value and value is not None and options:
@@ -2678,10 +2710,27 @@ def _apply_pre_answer(ctx: Ctx, ledger: dict[str, Any], key: str, by: str) -> st
         by=by,
         asked_evidence="host_line",
     )
-    pa["applied_at"] = _run_status.now_iso()
+    _mark_applied(ledger, entry, pa, by)
+    return "applied"
+
+
+def _mark_applied(ledger: dict[str, Any], entry: dict[str, Any], pa: dict[str, Any], by: str) -> None:
+    """Stamp a stored pre-answer as applied, at the very time its record carries: `answered_at` equal to
+    `applied_at` is how the ledger shows the current answer came from the request (`answered_by_request`)."""
+    pa["applied_at"] = (entry.get("current") or {}).get("answered_at") or _run_status.now_iso()
+    _event(ledger, entry, "pre_answer_applied", by, raw=pa["raw"])
     if "pre_answer_unlisted" in entry["flags"]:
         entry["flags"].remove("pre_answer_unlisted")
-    return "applied"
+
+
+def answered_by_request(ledger: dict[str, Any], key: str) -> bool:
+    """Was this gate's current answer applied from a line the request carried, rather than asked?"""
+    entry = (ledger.get("gates") or {}).get(key)
+    pa = (ledger.get("pre_answers") or {}).get(key)
+    cur = (entry or {}).get("current") or {}
+    if not isinstance(pa, dict) or entry is None or entry.get("state") != "answered":
+        return False
+    return bool(pa.get("applied_at")) and pa.get("applied_at") == cur.get("answered_at")
 
 
 # --- the status view ------------------------------------------------------------------------------
@@ -2751,10 +2800,13 @@ def derive_status(ctx: Ctx, ledger: dict[str, Any], status: dict[str, Any], *, d
         _gate_view(ctx, gid, inst, gates.get(gid if inst is None else f"{gid}.{inst}"))
         for gid, inst in _registered_keys(ctx, ledger)
     ]
-    status["disclosures"] = [d for d in (status.get("disclosures") or []) if not str(d).startswith("DEFAULT_TAKEN:")]
+    status["disclosures"] = [
+        d for d in (status.get("disclosures") or []) if not str(d).startswith(("DEFAULT_TAKEN:", "PRE_ANSWERED:"))
+    ]
     status["disclosures"] += [
         f"DEFAULT_TAKEN:{k}" for k, e in entries if (e.get("current") or {}).get("resolution") == "default_taken"
     ]
+    status["disclosures"] += [f"PRE_ANSWERED:{k}" for k, _e in entries if answered_by_request(ledger, k)]
     status["notices"] = list(ledger.get("notices") or [])
     if status.get("status") in _run_status.FINAL_STATUSES:
         return
@@ -2850,6 +2902,9 @@ def needs_input(ctx: Ctx, ledger: dict[str, Any], key: str) -> dict[str, Any]:
             f'python3 "{_run_status.shared_scripts_dir()}/{RECORDER}" answer --run-id {ctx.paths.run_id} '
             f"{locator} --gate {key} --answer-id <option_id>"
         )
+        if any(o["takes_value"] for o in out["options"]):
+            # Filled for an option whose `takes_value` is true, dropped for the others (VALUE_NOT_ALLOWED).
+            out["answer_command"] += f' --value "{VALUE_SLOT}"'
     else:
         out["answer_command"] = None
     return out
@@ -2867,8 +2922,13 @@ def open_gates(ctx: Ctx, ledger: dict[str, Any], keys: list[str], *, by: str = R
         return {"opened": [], "answered": [], "not_owed": [k for k, _g, _o in checked]}
     opened, applied, unlisted, waiting, answered = [], [], [], [], []
     for key, g in owed_keys:
+        prior = (ledger.get("gates") or {}).get(key)
+        reasked = parse_key(key)[0] in REASK_SUPERSEDES and prior is not None and _terminal(prior)
+        if reasked:
+            assert prior is not None
+            _supersede(ledger, prior, by, "asked_again")
         entry, new = _open_entry(ledger, key, by)
-        if new:
+        if new or reasked:
             opened.append(key)
         if entry["state"] != "open":
             answered.append(key)
@@ -2972,6 +3032,58 @@ def record_from_writer(
     return out
 
 
+def apply_writer_pre_answer(
+    paths: _run_status.RunPaths,
+    key: str,
+    writer: str,
+    offered: list[str],
+    *,
+    withheld: str | None = None,
+    bound: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """A dedicated writer applies the answer the request carried for its open gate, against the options
+    it is about to offer (`offered`, option ids), through the normal record path.
+
+    None when there is no pending pre-answer or the gate is not open. `{"unlisted": raw}` when the line
+    names an option not offered, or when the writer withholds it (`withheld`, the reason, added to the
+    run's notices): the gate stays open, flagged, and is asked. Else `record()`'s result."""
+
+    def fn(ctx: Ctx, ledger: dict[str, Any], status: dict[str, Any]) -> dict[str, Any] | None:
+        gate_id, _instance, g = check_key(key, ctx.skill)
+        if g["writer"] != writer:
+            raise GateRejection("WRITER_IS_OTHER_SCRIPT", f"{gate_id} is recorded by {g['writer']}")
+        entry = (ledger.get("gates") or {}).get(key)
+        pa = pending_pre_answer(ledger, key)
+        if pa is None or entry is None or entry["state"] != "open":
+            return None
+        ids = pa["option_id"].split(",")
+        if withheld is not None or any(i not in offered for i in ids):
+            if "pre_answer_unlisted" not in entry["flags"]:
+                entry["flags"].append("pre_answer_unlisted")
+                _event(ledger, entry, "pre_answer_unlisted", writer, raw=pa["raw"], reason=withheld)
+                if withheld is not None:
+                    ledger.setdefault("notices", []).append(
+                        {"code": "PRE_ANSWER_NOT_APPLIED", "gate": key, "lines": pa["raw"], "reason": withheld}
+                    )
+            return {"unlisted": pa["raw"]}
+        out = record(
+            ctx,
+            ledger,
+            key,
+            answer_ids=ids,
+            value=pa["value"],
+            note=pa["note"],
+            by=writer,
+            writer=writer,
+            bound=bound,
+        )
+        _mark_applied(ledger, entry, pa, writer)
+        return out
+
+    result: dict[str, Any] | None = transact(paths, fn)
+    return result
+
+
 def supersede_from_writer(paths: _run_status.RunPaths, key: str, writer: str, reason: str) -> bool:
     """A dedicated writer found that what an answer confirmed has changed: the answer is superseded and
     the gate re-opens, so it is asked again. False when there is no recorded answer to supersede."""
@@ -3055,10 +3167,11 @@ CLI_CODES = {
     "start_payload": [],
     "finish": ["FINISH_REFUSED", "MODE_MISMATCH", "MODE_NOT_OFFERED"],
     "deliverables": ["RUN_NOT_COMPLETE"],
-    "bind": ["RUN_ALREADY_BOUND"],
+    "bind": ["RUN_ALREADY_BOUND", "RUN_REFUSED"],
+    "founder_context": ["CONTEXT_NOT_FOUND"],
     "html_writers": ["RUN_ID_MISMATCH"],
     "usage": ["USAGE"],
-    "notices": ["PRE_ANSWER_IGNORED", "PRE_ANSWER_INVALID"],
+    "notices": ["PRE_ANSWER_IGNORED", "PRE_ANSWER_INVALID", "PRE_ANSWER_NOT_APPLIED"],
 }
 
 SHAPES = {
@@ -3072,7 +3185,8 @@ SHAPES = {
         "form_label": "the short label a question form uses",
         "form_header": "the header a question form for this skill uses",
         "recorded_by": "the script that records the answer",
-        "answer_command": "the exact recording command, or null when another script records it",
+        "answer_command": "the exact recording command, or null when another script records it; when a shown "
+        'option takes a value it ends `--value "<text>"`, filled for that option and dropped for the others',
     },
     "blocked_by_gate": "the gate key a refused step waits on (exit 10); answer it, then run the step again",
     "invocation": "1 at a fresh start; +1 at every resume and every reopen of a complete run; never reset",

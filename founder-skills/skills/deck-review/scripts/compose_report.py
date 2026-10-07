@@ -1114,7 +1114,27 @@ AUTO_SATISFY_DISCLOSURE = (
 )
 
 
-def _section_stage_context(profile: dict[str, Any] | None, gate_auto_satisfied: bool = False) -> str:
+HOST_ANSWER_DISCLOSURE = (
+    "*The stage above was not put to you as a question: the request that started this review answered it, "
+    "so it was taken as confirmed. If that is wrong, say so — everything below is graded against it.*"
+)
+# When the request answered the OUT-OF-SCOPE question instead, nothing was confirmed: the deck is outside the
+# stages this review grades, and it was reviewed anyway because the request said to.
+HOST_OUT_OF_SCOPE_DISCLOSURE = (
+    "*This deck looks outside the stages this review covers (pre-seed to Series A). You were not asked whether "
+    "to go ahead: the request that started this review chose to proceed anyway, so it is graded as a best-effort "
+    "Series A review at low confidence. If you would rather not have it reviewed this way, say so.*"
+)
+
+
+def host_answer_disclosure(gate_id: str) -> str:
+    """The sentence for a stage question the request answered, by which question it was."""
+    return HOST_OUT_OF_SCOPE_DISCLOSURE if gate_id == "out_of_scope_choice" else HOST_ANSWER_DISCLOSURE
+
+
+def _section_stage_context(
+    profile: dict[str, Any] | None, gate_auto_satisfied: bool = False, gate_by_request: str = ""
+) -> str:
     """Stage-specific context for what investors expect."""
     if profile is None or _is_stub(profile):
         return "## Stage Context\n\n*No stage profile available.*\n"
@@ -1151,6 +1171,9 @@ def _section_stage_context(profile: dict[str, Any] | None, gate_auto_satisfied: 
         # Only the exception is disclosed. Telling a founder who answered the gate that they
         # answered it is noise, and noise is what makes a disclosure stop being read.
         lines.append("\n" + AUTO_SATISFY_DISCLOSURE)
+    elif gate_by_request:
+        # The same entitlement when a host's request line answered it: the founder never saw the question.
+        lines.append("\n" + host_answer_disclosure(gate_by_request))
 
     lines.append(
         "\n*Stage benchmarks are reference data from industry standards "
@@ -1622,8 +1645,162 @@ class GateNotAuthorized(ValueError):
 
     A distinct type because it is raised from inside `compose()`, after artifacts are
     loaded, while the read-time failures are raised before — `main` has to turn both into
-    the same clean non-zero exit rather than a traceback.
+    the same clean non-zero exit rather than a traceback. Carries the refusal's stable code
+    and the run id it was checked against, for the run status.
     """
+
+    def __init__(self, reason: str, code: str = "", run_id: str = "") -> None:
+        super().__init__(reason)
+        self.code = code
+        self.run_id = run_id
+
+
+# How a refusal leaves a run that has a gate ledger. A question to put again: `waiting`, exit 10. The
+# founder's decline: `refused`. Anything else is a record the run itself must repair: `running`, with the
+# code as `last_error_code`, exit 1. With no ledger every refusal is exit 1 and nothing else, as before.
+_WAITING_CODES = ("GATE_UNANSWERED", "GATE_INTERMEDIATE", "OUT_OF_SCOPE_UNANSWERED", "AUTO_SATISFY_NOT_ALLOWED")
+
+
+def _artifacts_run_id(dir_path: str) -> str:
+    """The run id the composed artifacts carry: the first required artifact's, as `authorize` reads it."""
+    import _run_ref  # noqa: PLC0415
+
+    for name in REQUIRED_ARTIFACTS:
+        rid = _run_ref.json_run_id(os.path.join(dir_path, name))
+        if rid:
+            return rid
+    return ""
+
+
+def _open_run_ledger(dir_path: str) -> Any:
+    """(the shared `_gates`, the run's paths) when the artifacts' run has a ledger, else None. A run with a
+    `run_ref.json` whose ledger cannot be reached exits 2 here, before anything is written: nothing falls
+    back to the no-ledger path."""
+    import _run_ref  # noqa: PLC0415
+
+    try:
+        return _run_ref.open_ledger(os.path.abspath(dir_path), _artifacts_run_id(dir_path))
+    except _run_ref.LedgerUnavailable as e:
+        sys.exit(_run_ref.report_failure(e))
+
+
+def _next_stage_gate(gate: dict[str, Any], code: str) -> str:
+    """The stage question a refused compose waits on. An intermediate answer leads to the gate the rebuild
+    calls for (SKILL.md's `rebuild` row), never back to the answered one."""
+    gate_id, answer = str(gate.get("gate_id") or ""), str(gate.get("answer") or "")
+    if code == "OUT_OF_SCOPE_UNANSWERED":
+        return "out_of_scope_choice"
+    if code != "GATE_INTERMEDIATE":
+        return gate_id
+    from gate_state import OUT_OF_SCOPE_STAGES  # noqa: PLC0415
+
+    if answer == "Different stage":
+        return "stage_choice"
+    if gate_id == "stage_choice":
+        return "out_of_scope_choice" if answer in OUT_OF_SCOPE_STAGES else "stage_confirmation"
+    return "out_of_scope_choice"
+
+
+def _record_refusal(ledger: Any, gate: dict[str, Any], e: GateNotAuthorized) -> int:
+    """The run status for a refused compose, and the exit code: 10 when it is a question to ask again.
+
+    The ledger is changed only to make the owed question answerable: a gate never reached is opened, a
+    gate another answer closed is re-opened, and an auto-satisfied answer the profile does not support is
+    superseded. A founder's own answer is never thrown away here."""
+    gates, paths = ledger
+    rs = sys.modules["_run_status"]
+    if e.code not in _WAITING_CODES:
+
+        def other(st: dict[str, Any]) -> None:
+            if st.get("status") in rs.FINAL_STATUSES:
+                return
+            if e.code == "FOUNDER_DECLINED":
+                rs.set_state(st, "refused", "FOUNDER_DECLINED")
+            else:
+                rs.set_state(st, "running", "RUNNING")
+                st["last_error_code"] = e.code if e.code in rs.LAST_ERROR_CODES else "GATE_INVALID"
+
+        try:
+            rs.update(paths, other)
+        except Exception as exc:
+            print(f"warning: the run status was not updated: {exc}", file=sys.stderr)
+        return 1
+    key = _next_stage_gate(gate, e.code)
+    try:
+        entry = (gates.load_ledger(paths).get("gates") or {}).get(key) or {}
+        state = entry.get("state")
+        resolution = (entry.get("current") or {}).get("resolution")
+        auto_default = e.code == "AUTO_SATISFY_NOT_ALLOWED" and state == "answered" and resolution == "default_taken"
+        if auto_default or state == "not_owed":
+            gates.supersede_from_writer(paths, key, "gate_state.py", f"compose_refused:{e.code}")
+        elif state is None:
+            gates.open_from_writer(paths, [key], "gate_state.py")
+        question = gates.render_question(gates.GATES[key], None, None)
+
+        def waiting(st: dict[str, Any]) -> None:
+            if key in rs.open_gate_ids(paths) and st.get("status") not in rs.FINAL_STATUSES:
+                rs.set_state(st, "waiting", e.code, question=question)
+                st["waiting_on"] = key
+
+        rs.update(paths, waiting)
+    except Exception as exc:
+        print(f"warning: the run status was not updated: {exc}", file=sys.stderr)
+    sys.stdout.write(
+        json.dumps({"status": "waiting", "code": e.code, "blocked_by_gate": key, "message": str(e)}) + "\n"
+    )
+    return 10
+
+
+def _refuse_open_gates(ledger: Any) -> None:
+    """A question the run opened and never settled leaves it unable to complete, so compose refuses before
+    writing anything and names it (exit 10). The run reads `running` with `GATE_UNRESOLVED`: never a
+    `waiting` no host answer could clear."""
+    gates, paths = ledger
+    rs = sys.modules["_run_status"]
+    open_now = rs.open_gate_ids(paths)
+    if not open_now:
+        return
+    key = open_now[0]
+    needs = gates.transact(paths, lambda ctx, led, st: gates.needs_input(ctx, led, key))
+
+    def unresolved(st: dict[str, Any]) -> None:
+        if st.get("status") in rs.FINAL_STATUSES:
+            return
+        rs.set_state(st, "running", "RUNNING")
+        st["last_error_code"] = "GATE_UNRESOLVED"
+
+    try:
+        rs.update(paths, unresolved)
+    except Exception as exc:
+        print(f"warning: the run status was not updated: {exc}", file=sys.stderr)
+    sys.stdout.write(
+        json.dumps({"status": "running", "code": "GATE_UNRESOLVED", "blocked_by_gate": key, "needs_input": [needs]})
+        + "\n"
+    )
+    how = (
+        "record the reply with its printed answer_command, or, if it no longer applies, with "
+        "`record_gate_answer.py not-applicable`"
+        if needs.get("answer_command")
+        else "it is a stage question: re-emit it with gate_state.py and record the reply"
+    )
+    print(
+        f"Error: {key} was asked and never recorded; {how}, then compose again. Nothing was written.", file=sys.stderr
+    )
+    sys.exit(10)
+
+
+def _coaching_pending(ledger: Any) -> None:
+    _gates, paths = ledger
+    rs = sys.modules["_run_status"]
+
+    def pending(st: dict[str, Any]) -> None:
+        if st.get("status") not in rs.FINAL_STATUSES:
+            st["coaching"] = "pending"
+
+    try:
+        rs.update(paths, pending)
+    except Exception as exc:
+        print(f"warning: the run status was not updated: {exc}", file=sys.stderr)
 
 
 def read_gate_state(path: str | None) -> dict[str, Any] | None:
@@ -1708,6 +1885,7 @@ def compose(
     # to state how one question was answered. `setup_run.py --clean` removes a prior run's gate,
     # so reaching this means something upstream did not run or could not delete.
     gate_auto_satisfied = False
+    gate_by_request = ""  # the gate id a request line answered, when one did
     if gate_state is None:
         warnings.append(
             _warn(
@@ -1738,8 +1916,10 @@ def compose(
         ]
         verdict = authorize(gate_state, gate_profile, run_ids[0] if run_ids else "")
         if not verdict.permitted:
-            raise GateNotAuthorized(verdict.reason)
+            raise GateNotAuthorized(verdict.reason, verdict.code, run_ids[0] if run_ids else "")
         gate_auto_satisfied = gate_state.get("answer_source") == "auto_satisfied"
+        if gate_state.get("answer_source") == "host":
+            gate_by_request = str(gate_state.get("gate_id") or "")
 
     # THIN QUOTES — emitted HERE, before acceptances, and the position is the point.
     # This was appended near the end of compose, after `accepted_warnings` had already been
@@ -1871,7 +2051,7 @@ def compose(
         _section_title(inventory),
         _section_executive_summary(stage_profile, checklist_data, inventory),
         marker,
-        _section_stage_context(stage_profile, gate_auto_satisfied),
+        _section_stage_context(stage_profile, gate_auto_satisfied, gate_by_request),
         _section_slide_feedback(slide_reviews, inventory),
         _section_numbers(reconciliation, checklist_data),
         _section_checklist(checklist_data),
@@ -2039,11 +2219,26 @@ def main() -> None:
     except ValueError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
+    # THE RUN'S GATE LEDGER, when it has one: the refusal classes, the open-question check and the
+    # coaching state are written to its status. With no `run_ref.json` none of this runs.
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    ledger = _open_run_ledger(args.dir)
+    if ledger is not None and gate_state is None:
+        # A run with a ledger records its stage gate, so composing it ungated would skip `authorize()`.
+        print(
+            "Error: this run has a gate ledger, so its report is composed with --gate-state, never --ungated. "
+            "Nothing was written.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
     try:
         result = compose(args.dir, report_path=report_path, gate_state=gate_state)
     except GateNotAuthorized as e:
+        rc = _record_refusal(ledger, gate_state or {}, e) if ledger is not None else 1
         print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
+        sys.exit(rc)
+    if ledger is not None:
+        _refuse_open_gates(ledger)
 
     if args.write_md:
         report_markdown = result.get("report_markdown", "")
@@ -2088,6 +2283,9 @@ def main() -> None:
                 file=sys.stderr,
             )
             sys.exit(2)
+
+    if ledger is not None:
+        _coaching_pending(ledger)
 
     if args.strict:
         blocking = [w for w in result["validation"]["warnings"] if w["severity"] in ("high", "medium")]

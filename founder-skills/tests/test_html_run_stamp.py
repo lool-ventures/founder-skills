@@ -117,14 +117,23 @@ def test_a_run_id_the_artifacts_do_not_carry_is_refused(
     assert out.read_bytes() == b"sentinel"
 
 
+def _composed_before_bind(tmp_path: Path, skill: str) -> Path:
+    """The fixture reports, composed in the run dir before the run is bound. These tests are about the page
+    writers; deck-review's compose refuses `--ungated` once a run has a gate ledger."""
+    run_dir = tmp_path / "artifacts" / f"{h.RUN_DIR_PREFIX[skill]}-example-co"
+    run_dir.mkdir(parents=True)
+    drive_compose(skill, FIXTURES / skill, run_dir)
+    return run_dir
+
+
 @pytest.mark.parametrize(("skill", "script", "out_name", "key", "flags"), WRITERS, ids=IDS)
 def test_with_a_ledger_the_page_is_listed(
     tmp_path: Path, skill: str, script: str, out_name: str, key: str, flags: Any
 ) -> None:
     rid = _fixture_run_id(skill)
-    root, run_id, run_dir = h.start_bound(tmp_path, skill, lines=f"FS_HOST_RUN_ID={rid}\n")
-    assert run_id == rid
-    drive_compose(skill, FIXTURES / skill, run_dir)
+    run_dir = _composed_before_bind(tmp_path, skill)
+    root, run_id, bound_dir = h.start_bound(tmp_path, skill, lines=f"FS_HOST_RUN_ID={rid}\n")
+    assert (run_id, bound_dir) == (rid, run_dir)
     before = h.status(root, rid)
     out = run_dir / out_name
     proc = _write(skill, script, run_dir, out, rid)
@@ -166,8 +175,8 @@ def test_without_a_ledger_the_flag_writes_no_run_files(
 def test_the_last_expected_page_makes_a_pending_run_final(tmp_path: Path) -> None:
     skill, script = "deck-review", "visualize.py"
     rid = _fixture_run_id(skill)
-    root, _rid, run_dir = h.start_bound(tmp_path, skill, lines=f"FS_HOST_RUN_ID={rid}\n")
-    drive_compose(skill, FIXTURES / skill, run_dir)
+    run_dir = _composed_before_bind(tmp_path, skill)
+    root, _rid, _dir = h.start_bound(tmp_path, skill, lines=f"FS_HOST_RUN_ID={rid}\n")
     rs = _run_status()
     paths = rs.run_paths(str(root), rid)
     rs.update(paths, rs.mark_complete)

@@ -1486,7 +1486,14 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 113,571 -> 113,697 (+126 B) on 2026-10-05: the Step 0 STAGING_DIR block says
     # scratch output (a redirect or a temp file) goes in $STAGING_DIR, never a fixed /tmp/<name>, because
     # /tmp is shared across sessions.
-    "deck-review": 113_697,
+    # 113,697 -> 113,688 (-9 B) on 2026-10-07: gates wired. The catalog sections (Skill Metadata, Available
+    # Scripts, Available References) and the RUN_ID mint line are out; Step 0 starts the run's record, the slug
+    # block binds it, Steps 1-2 open each question before asking and record it with the printed command, the
+    # stage gate takes an answer the request carried, compose's exit 10 is a question, Step 8 lists the page
+    # and Step 9 closes the page list. Restatements trimmed to fit (the AskUserQuestion-fallback aside, the
+    # coaching heredoc's parenthetical, Step 9's now-untrue non-zero-exit clause); after review, the not-found
+    # and decline exits of Step 1 and the slug block are named.
+    "deck-review": 113_688,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
@@ -2864,6 +2871,11 @@ GATE_SITES: dict[str, dict[str, tuple[str, ...]]] = {
             "stage_confirmation",
             "out_of_scope_choice",
             "founder-context init — stage",
+            # Recorded gates whose words are the registry's, asked from the `needs_input` a script prints.
+            "company picker (ctx_select_company)",
+            "stage follow-up (ctx_stage_detail)",
+            "primary deck (dr_primary_deck)",
+            "deck re-request (dr_input_request x5)",
         ),
         "prose": ("stage_choice",),  # STAYS prose — runtime-selected, no static array; see §3(c-bis).
         "runtime-labelled": ("founder-context init — name/sector/geography",),
@@ -3674,8 +3686,21 @@ def _reject_unknown_origin(tmp: Path) -> tuple[list[str], str, list[Path]]:
     return argv, "", [sentinel, original]
 
 
+def _reject_read_on_another_skills_run(tmp: Path) -> tuple[list[str], str, list[Path]]:
+    import gate_run_helpers as h
+
+    root = tmp / "artifacts"
+    root.mkdir()
+    run_id = h.start_ok(root, "deck-review")
+    (root / "founder-context-example-co.json").write_text('{"slug": "example-co"}', encoding="utf-8")
+    argv = [str(h.SHARED / "founder_context.py"), "read", "--artifacts-root", str(root)]
+    argv += ["--run-id", run_id, "--skill", "market-sizing"]
+    return argv, "", [h.status_path(root, run_id), h.ledger_path(root, run_id)]
+
+
 _REJECTING_CALLS = [
     ("record_gate_answer.py answer, an unlisted option", _reject_unlisted_option),
+    ("founder_context.py read --run-id on another skill's run", _reject_read_on_another_skills_run),
     ("run_status.py start, a bad line resuming a waiting run", _reject_bad_line_on_a_waiting_run),
     ("run_status.py deliverables --final on a run that is not complete", _reject_final_deliverables_on_a_running_run),
     ("apply_corrections.py --run-id with an unknown --origin", _reject_unknown_origin),
@@ -4213,7 +4238,11 @@ def test_corpus_counts_every_agent_the_skill_pins_not_just_its_namesake() -> Non
 # folder, rather than any path the shell printed.
 # Raised 2026-10-05 from 126,603 to 126,745 B: skill-execution-model.md says scratch output goes in
 # $STAGING_DIR, never a fixed /tmp/<name>, because /tmp is shared across sessions.
-ROOT_REFERENCES_CEILING = 126_745
+# Raised 2026-10-07 from 126,745 to 131,169 B: skill-execution-model.md gains the shared "Gates and run status"
+# section every wired skill points at (start, bind, ask, exit 10, finish, resume, what a record proves). Not a
+# SKILL.md ceiling: the section is the release's shared contract, written once instead of in six SKILL.mds,
+# and every skill's critique corpus keeps at least 60 KB of headroom with it.
+ROOT_REFERENCES_CEILING = 131_169
 
 
 def test_execution_model_names_every_dispatch_that_can_reach_the_shell() -> None:
@@ -4462,3 +4491,47 @@ def test_no_shipped_text_carries_a_host_answer_line_for_a_gate_a_hook_reads() ->
         if line.search(p.read_text(encoding="utf-8"))
     ]
     assert found == []
+
+
+# --- recorded gates ----------------------------------------------------------------------------------------
+
+# The skills whose Step 0 starts the run's record; each skill's wiring commit adds itself.
+WIRED = ("deck-review",)
+# `record_gate_answer.py open` lines per SKILL.md, the companion to ASKUSER_MENTIONS: an open site added or
+# removed changes this count, and the gate-site test in the skill's own contract file says which.
+OPEN_LINES: dict[str, int] = {
+    "deck-review": 2,
+    "market-sizing": 0,
+    "financial-model-review": 0,
+    "ic-sim": 0,
+    "competitive-positioning": 0,
+    "cap-table": 0,
+}
+
+
+def _body_without_frontmatter(skill: str) -> str:
+    text = (SKILLS_ROOT / skill / "SKILL.md").read_text(encoding="utf-8")
+    return text[text.index("\n---\n", 4) + len("\n---\n") :]
+
+
+@pytest.mark.parametrize("skill", WIRED)
+def test_step0_starts_the_run_record_inside_the_reattached_window(skill: str) -> None:
+    """`run_status.py start` sits after the artifacts-root line, the unsupported-environment stop and the
+    "I can run it now" offer, and before Step 1, ending where a compaction keeps it; the old mint line is gone."""
+    body = _body_without_frontmatter(skill)
+    start = body.index(f'run_status.py" start --skill {skill}')
+    assert "<<'FS_HOST_EOF'" in body[start : start + 300]
+    assert body.index('resolve_artifacts_root.py"   # prints ARTIFACTS_ROOT') < start
+    assert body.index("`UNSUPPORTED_ENVIRONMENT`, stop here") < start
+    assert body.index("I can run it now") < start < body.index("### Step 1:")
+    fence_end = body.index("```", start) + 3
+    assert fence_end <= _REATTACH_LAST_SAFE_CHARS - _REATTACH_PREFIX_MAX_CHARS, fence_end
+    text = (SKILLS_ROOT / skill / "SKILL.md").read_text(encoding="utf-8")
+    assert 'RUN_ID="${RUN_ID:-' not in text and "date -u +%Y%m%dT%H%M%SZ" not in text
+
+
+@pytest.mark.parametrize("skill", sorted(SKILL_MD_CEILING))
+def test_each_skill_opens_its_recorded_gates_a_counted_number_of_times(skill: str) -> None:
+    text = (SKILLS_ROOT / skill / "SKILL.md").read_text(encoding="utf-8")
+    n = text.count('record_gate_answer.py" open') + text.count("record_gate_answer.py open")
+    assert n == OPEN_LINES[skill], f"{skill}: {n} open lines, expected {OPEN_LINES[skill]}"

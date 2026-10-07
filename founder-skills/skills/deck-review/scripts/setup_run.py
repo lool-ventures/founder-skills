@@ -44,7 +44,7 @@ _CLEANABLE_NAMES = {
 _GATE_STATE_NAME = "gate_state.json"
 
 
-_AUDITABLE_SOURCES = ("founder", "auto_satisfied")
+_AUDITABLE_SOURCES = ("founder", "auto_satisfied", "host")
 
 
 class UnreadableGate(Exception):
@@ -56,6 +56,7 @@ class UnreadableGate(Exception):
 # decision should not rest on a single choke point. IMPORTED rather than restated — a
 # hand-copied pair here is a fourth copy waiting to drift from the other three.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _run_ref  # noqa: E402
 from gate_state import gate_action, validate_answered_gate  # noqa: E402
 
 
@@ -100,6 +101,55 @@ def _read_gate_state(review_dir: str) -> tuple[str, str, str, str, str]:
     if answer and validate_answered_gate(gate):
         source = ""
     return answer, str(run_id), source, str(gate.get("gate_id") or ""), gate_action(gate)
+
+
+_STAGE_GATES = ("stage_confirmation", "out_of_scope_choice", "stage_choice")
+
+
+def _open_stage_gate(review_dir: str, run_id: str) -> str | None:
+    """The id of a stage question this run's LEDGER holds open, or None.
+
+    THE LEDGER DECIDES WHETHER A QUESTION IS OWED, NOT THE MIRROR. A refused compose re-opens a question in the
+    ledger (it supersedes an auto-satisfied answer the profile does not support, or re-opens an out-of-scope
+    question a later answer closed) and leaves `gate_state.json` as it was, which still reads as answered. Read
+    from the mirror alone, the run would be told to continue, and compose would refuse again: a loop. A fresh
+    open question (no answer on it yet) is named first, the latest opened. With no ledger this returns None.
+    Which stage to ask it about comes from the mirror (`_mirror_stage`), never from a superseded answer."""
+    ledger = _run_ref.open_ledger(review_dir, run_id)
+    if ledger is None:
+        return None
+    gates, paths = ledger
+    entries = gates.load_ledger(paths).get("gates") or {}
+    open_now = [
+        (int(e.get("opened_seq") or 0), k, e)
+        for k, e in entries.items()
+        if k in _STAGE_GATES and isinstance(e, dict) and e.get("state") == "open"
+    ]
+    if not open_now:
+        return None
+    fresh = [x for x in open_now if x[2].get("current") is None]
+    key: str = sorted(fresh or open_now, key=lambda x: (x[0], x[1]))[-1][1]
+    return key
+
+
+def _mirror_stage(review_dir: str, gate_id: str) -> str | None:
+    """The stage to ask `gate_id` about: the one the mirror last recorded asking it about -- the file itself when
+    it is that gate, else the latest history entry for it. The mirror is what the last `emit` wrote, so it
+    follows a rebuilt profile; a superseded answer's binding names the stage it confirmed BEFORE the rebuild
+    (asking about that one again sent compose to PROFILE_MISMATCH)."""
+    try:
+        with open(os.path.join(review_dir, _GATE_STATE_NAME), encoding="utf-8") as f:
+            gate = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(gate, dict):
+        return None
+    if gate.get("gate_id") == gate_id and gate.get("confirmed_stage"):
+        return str(gate["confirmed_stage"])
+    for entry in reversed(gate.get("history") or []):
+        if isinstance(entry, dict) and entry.get("gate_id") == gate_id and entry.get("confirmed_stage"):
+            return str(entry["confirmed_stage"])
+    return None
 
 
 def main() -> int:
@@ -171,8 +221,13 @@ def main() -> int:
         return 1
     same_run_answered = bool(gate_answer) and gate_run_id == run_id
     resume = same_run_answered and answer_source in _AUDITABLE_SOURCES
+    # A RUN THAT IS ALREADY BOUND IS THIS RUN. Its `run_ref.json` exists only once `run_status.py bind` ran
+    # for this id, so the checkpoints beside it are this run's -- including on a host's resume, where the
+    # gate the run stopped at is still unanswered on disk. The skill binds AFTER its first `setup_run`, so
+    # a fresh run still cleans a prior run's files. Without a ref nothing here changes.
+    same_run = same_run_answered or _run_ref.has_ledger(review_dir, run_id)
 
-    if args.clean and not same_run_answered:
+    if args.clean and not same_run:
         # Fresh run: remove all cleanable pipeline artifacts so no stale
         # content from a prior run contaminates this invocation.
         #
@@ -208,6 +263,17 @@ def main() -> int:
             with contextlib.suppress(OSError):
                 os.remove(gate_path)
             gate_answer, gate_run_id, answer_source, gate_id, action, resume = "", "", "", "", "reask", False
+    # A question the ledger holds open outranks what the mirror says it settled (see `_open_stage_gate`). An
+    # intermediate answer (`rebuild`) and a decline (`stop`) already name their next step and are kept.
+    gate_stage = None
+    if action in ("continue", "continue_if_rebuilt", "reask"):
+        try:
+            owed = _open_stage_gate(review_dir, run_id)
+        except Exception as e:
+            return _run_ref.report_failure(e)
+        if owed is not None:
+            gate_id, action, resume = owed, "reask", False
+            gate_stage = _mirror_stage(review_dir, gate_id)
     # same_run_answered is true: _CLEANABLE_NAMES artifacts are same-run checkpoints —
     # leave them intact, whether or not the answer beside them can be resumed on.
     # gate_state.json is also preserved (an unauditable answer is re-asked, and
@@ -230,15 +296,18 @@ def main() -> int:
         # Whether this invocation removed the cleanable artifacts. Reported rather than
         # inferred from `resume`: the two diverge exactly in the case this split exists
         # for — an unauditable same-run answer keeps its checkpoints and is not resumed.
-        "cleaned": bool(args.clean and not same_run_answered),
+        "cleaned": bool(args.clean and not same_run),
         # MAY STEPS 2-3 BE SKIPPED? Reported by name because the consumer needs it by name.
         # Splitting the decision inside this script bought nothing while SKILL.md still
         # keyed its skip on `resume`: the unauditable-answer case preserved the checkpoints
         # and then re-ran them anyway, spending the exact three dispatches the preservation
         # exists to protect. `resume` answers "may the gate be skipped"; this answers "are
         # the artifacts on disk this run's".
-        "reuse_checkpoints": same_run_answered,
+        "reuse_checkpoints": same_run,
     }
+    if gate_stage is not None:
+        # Only on a run whose ledger holds the question open: the stage to emit it about.
+        out["gate_stage"] = gate_stage
     indent = 2 if args.pretty else None
     sys.stdout.write(json.dumps(out, indent=indent) + "\n")
     return 0

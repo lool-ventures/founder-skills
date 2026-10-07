@@ -1311,8 +1311,20 @@ def _numbers_section(reconciliation: dict[str, Any] | None) -> str:
     return '<div class="chart-section"><h2>What Your Numbers Say About Each Other</h2>' + "".join(parts) + "</div>"
 
 
-def compose_html(dir_path: str) -> str:
-    """Load artifacts and compose complete HTML report."""
+# Shown under the header when a host's request line answered the stage question: the founder never saw it.
+HOST_ANSWER_NOTE = (
+    "The stage was not put to you as a question: the request that started this review answered it, so it "
+    "was taken as confirmed. If that is wrong, say so — everything below is graded against it."
+)
+HOST_OUT_OF_SCOPE_NOTE = (
+    "This deck looks outside the stages this review covers (pre-seed to Series A). You were not asked whether to "
+    "go ahead: the request that started this review chose to proceed anyway, so it is graded as a best-effort "
+    "Series A review at low confidence. If you would rather not have it reviewed this way, say so."
+)
+
+
+def compose_html(dir_path: str, stage_note: str = "") -> str:
+    """Load artifacts and compose complete HTML report. `stage_note`, when given, is shown under the header."""
     scripts_dir = os.path.dirname(os.path.abspath(__file__))
     if scripts_dir not in sys.path:
         sys.path.insert(0, scripts_dir)
@@ -1353,6 +1365,8 @@ def compose_html(dir_path: str) -> str:
     )
 
     header = "<header>" + "".join(header_parts) + "</header>"
+    if stage_note:
+        header += f'<p class="note">{html.escape(stage_note)}</p>'
 
     # Build chart sections
     gauge_section = f'<div class="chart-section"><h2>Deck-craft score</h2>{_chart_score_gauge(checklist)}</div>'
@@ -1491,6 +1505,7 @@ def main() -> None:
     # reader and gate_state's `authorize` rather than restating either: `read_gate_state`
     # owns the three-way absent/missing/unreadable distinction, and `authorize` is the one
     # place a gate becomes permission.
+    stage_note = ""
     if args.gate_state:
         scripts_dir = os.path.dirname(os.path.abspath(__file__))
         if scripts_dir not in sys.path:
@@ -1516,8 +1531,12 @@ def main() -> None:
             if not verdict.permitted:
                 print(f"Error: the gate does not authorize this report: {verdict.reason}", file=sys.stderr)
                 sys.exit(1)
+            if gate_state.get("answer_source") == "host":
+                stage_note = (
+                    HOST_OUT_OF_SCOPE_NOTE if gate_state.get("gate_id") == "out_of_scope_choice" else HOST_ANSWER_NOTE
+                )
 
-    html_output = compose_html(args.dir)
+    html_output = compose_html(args.dir, stage_note)
     if args.run_id is not None:
         html_output = _run_ref_module().page_for_run(html_output, args.run_id, _own_run_id(args.dir))
     _write_output(html_output, args.output)

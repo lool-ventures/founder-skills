@@ -524,10 +524,144 @@ def cmd_init(args: argparse.Namespace) -> None:
     _write_output(output, args.output)
 
 
+def _read_with_ledger(args: argparse.Namespace) -> str | None:
+    """With a gate ledger for this run, `read` settles the Step-1 gates a read decides.
+
+    Keyed on the ledger existing, as `init` is: with no `--run-id`, or no `runs/<id>/gates.json`, this
+    returns None and `read` is exactly what it always was. Otherwise:
+
+      * a run already bound to a company reads that company's context (a resume never re-asks which);
+      * several contexts make `ctx_select_company` owed: with no record the read stops at exit 10 and
+        prints the question; a recorded company is read; `different_company` reads as "not found" (exit
+        1, so the skill creates a new context); a `--slug` other than the record is refused;
+      * a context that is read records the Step-1 basics as not applicable ("context existed"), once, and
+        a request line for one of them is listed in the run's notices as not used.
+
+    Returns the slug to read, or None when nothing here applies."""
+    run_id = getattr(args, "run_id", None)
+    root = os.path.abspath(args.artifacts_root)
+    if not run_id or not os.path.isfile(os.path.join(root, "runs", str(run_id), "gates.json")):
+        return None
+    try:
+        import _gates
+        import _run_status
+    except Exception as e:  # the registry fails closed
+        _init_refusal(
+            2,
+            {"status": "error", "code": "REGISTRY_UNREACHABLE", "message": str(e)},
+            f"Error: the plugin's gate registry is not reachable: {e}",
+        )
+    if args.skill is None:
+        _init_refusal(
+            2,
+            {"status": "error", "code": "USAGE", "message": "this run has a gate ledger, so read needs --skill"},
+            f"Error: run {run_id} has a gate ledger; pass --skill so read can check the run is this skill's",
+        )
+    paths = _run_status.run_paths(root, run_id)
+    status = _run_status.load_status(paths) or {}
+    if status.get("status") in _run_status.FINAL_STATUSES or status.get("skill") != args.skill:
+        _init_refusal(
+            1,
+            {
+                "status": "rejected",
+                "code": "GATE_RECORD_MISMATCH",
+                "run_id": run_id,
+                "run_status": status.get("status"),
+            },
+            f"Rejected: run {run_id} is {status.get('status')} for {status.get('skill')}; nothing was read",
+        )
+    files = _find_context_files(root)
+    bound = status.get("slug") if isinstance(status.get("slug"), str) else None
+    if bound and not os.path.isfile(_context_path(root, bound)):
+        bound = None
+
+    def fn(ctx: Any, ledger: dict[str, Any], st: dict[str, Any]) -> dict[str, Any]:
+        out: dict[str, Any] = {"slug": args.slug}
+        gates = ledger.get("gates") or {}
+        if bound:
+            if args.slug and args.slug != bound:
+                return {"mismatch": bound}
+            out["slug"] = bound
+            entry = gates.get("ctx_select_company") or {}
+            owed = _gates.owed(ctx, _gates.GATES["ctx_select_company"], None)
+            if owed and entry.get("state") not in ("answered", "not_owed"):
+                _gates.record(
+                    ctx,
+                    ledger,
+                    "ctx_select_company",
+                    resolution="not_applicable",
+                    basis="script",
+                    note="the run is bound to its company",
+                    by="founder_context.py",
+                )
+        elif len(files) >= 2:
+            got = _gates.require_terminal(ctx, ledger, "ctx_select_company", by="founder_context.py")
+            if got == "waiting":
+                return {"waiting": True, "needs_input": _gates.needs_input(ctx, ledger, "ctx_select_company")}
+            picked = ((ledger["gates"].get("ctx_select_company") or {}).get("current") or {}).get("answer_id")
+            if picked == "different_company":
+                return {"not_found": True}
+            if args.slug and args.slug != picked:
+                return {"mismatch": picked}
+            out["slug"] = picked
+        elif not files:
+            return {"not_found": True}
+        for key in [f"ctx_basics.{f}" for f in _CTX_FIELDS] + ["ctx_stage_detail"]:
+            entry = (ledger.get("gates") or {}).get(key) or {}
+            if entry.get("state") in ("answered", "not_owed"):
+                continue
+            pending = _gates.pending_pre_answer(ledger, key)
+            _gates.record(
+                ctx,
+                ledger,
+                key,
+                resolution="not_applicable",
+                basis="script",
+                note="context existed",
+                by="founder_context.py",
+            )
+            if pending is not None:
+                ledger.setdefault("notices", []).append(
+                    {"code": "PRE_ANSWER_IGNORED", "gate": key, "lines": pending["raw"]}
+                )
+        return out
+
+    try:
+        out = _gates.transact(paths, fn)
+    except _gates.GateRejection as e:
+        _init_refusal(1, e.payload(), f"Rejected ({e.code}): {e}; nothing was read")
+    except (_run_status.RunStatusError, _gates.Unimplemented) as e:
+        _init_refusal(
+            2, {"status": "error", "code": getattr(e, "code", "GATE_NOT_WIRED"), "message": str(e)}, f"Error: {e}"
+        )
+    if out.get("waiting"):
+        _init_refusal(
+            10,
+            {"status": "waiting", "blocked_by_gate": "ctx_select_company", "needs_input": [out["needs_input"]]},
+            "Waiting: several companies have a context; ask which one, record it, then read again",
+        )
+    if out.get("not_found"):
+        # Its own code, so a caller can tell "create the context" from a refusal (GATE_RECORD_MISMATCH and the
+        # other rejections are exit 1 too).
+        _init_refusal(
+            1,
+            {"status": "not_found", "code": "CONTEXT_NOT_FOUND", "run_id": run_id},
+            "No founder context for this company",
+        )
+    if "mismatch" in out:
+        _init_refusal(
+            1,
+            {"status": "rejected", "code": "GATE_RECORD_MISMATCH", "run_id": run_id, "recorded": out["mismatch"]},
+            f"Rejected: --slug {args.slug!r} is not the company recorded for this run ({out['mismatch']!r})",
+        )
+    slug = out.get("slug")
+    return slug if isinstance(slug, str) and slug else None
+
+
 def cmd_read(args: argparse.Namespace) -> None:
     """Read and output an existing founder context file."""
     artifacts_root: str = args.artifacts_root
-    rc, slug = _resolve_slug(artifacts_root, args.slug)
+    rc, slug = _resolve_slug(artifacts_root, _read_with_ledger(args) or args.slug)
     if rc != 0:
         if slug:
             print(slug, file=sys.stderr)
@@ -824,6 +958,12 @@ def parse_args() -> argparse.Namespace:
     # read
     sp_read = sub.add_parser("read", help="Read existing founder context")
     sp_read.add_argument("--slug", help="Company slug (auto-detects if single file)")
+    sp_read.add_argument(
+        "--run-id",
+        default=None,
+        help="With a gate ledger for this run, the read records the Step-1 questions it settles",
+    )
+    sp_read.add_argument("--skill", default=None, help="Required when --run-id has a gate ledger")
     _add_common(sp_read)
 
     # merge

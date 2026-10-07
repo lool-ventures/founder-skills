@@ -29,8 +29,14 @@ from typing import Any
 import _run_ref
 from _artifact_writer import ArtifactValidationError, load_schema, write_artifact
 
-FOUNDER, AUTO_SATISFIED = "founder", "auto_satisfied"
-ANSWER_SOURCES = (FOUNDER, AUTO_SATISFIED)
+FOUNDER, AUTO_SATISFIED, HOST = "founder", "auto_satisfied", "host"
+# Valid on the file. `host` is written only by `emit`, applying an answer the request that started the run
+# carried (an `FS_HOST_ANSWER` line); `answer --source` offers the other two.
+ANSWER_SOURCES = (FOUNDER, AUTO_SATISFIED, HOST)
+CLI_SOURCES = (FOUNDER, AUTO_SATISFIED)
+# A recorded stage answer is bound to the stage it confirmed: re-emitting the gate about another stage
+# asks it again rather than mirroring the old answer.
+STAGE_BINDER = "dr_confirmed_stage"
 
 # Auto-satisfy is scoped to the one gate and the one answer it has a rationale for; see
 # the enforcement in `cmd_answer` for why the other two gate_ids are excluded.
@@ -416,11 +422,14 @@ def _reduce_history(gate: dict[str, object], run_id: str) -> str | None:
 class Authorization:
     """Whether this gate permits a report, and if not, why not in one sentence."""
 
-    __slots__ = ("permitted", "reason")
+    __slots__ = ("code", "permitted", "reason")
 
-    def __init__(self, permitted: bool, reason: str = "") -> None:
+    def __init__(self, permitted: bool, reason: str = "", code: str = "") -> None:
         self.permitted = permitted
         self.reason = reason
+        # The refusal's stable code, for the run status: one of `_run_status`'s waiting, refused or
+        # last-error codes. Empty on a permit.
+        self.code = code
 
     def __bool__(self) -> bool:  # pragma: no cover - convenience only
         return self.permitted
@@ -451,33 +460,39 @@ def authorize(gate: object, stage_profile: object, run_id: str) -> Authorization
     the record is internally coherent and consistent with the artifacts being composed.
     """
     if not isinstance(gate, dict):
-        return Authorization(False, "gate_state is not a JSON object")
+        return Authorization(False, "gate_state is not a JSON object", code="GATE_INVALID")
     profile = stage_profile if isinstance(stage_profile, dict) else {}
 
     # --- the record and the profile must both belong to this run
     gate_run = _as_run_id(gate)
     if gate_run != run_id:
-        return Authorization(False, f"the gate is from run {gate_run!r} but this report is run {run_id!r}")
+        return Authorization(
+            False, f"the gate is from run {gate_run!r} but this report is run {run_id!r}", code="GATE_OTHER_RUN"
+        )
     prof_run = _as_run_id(profile)
     if prof_run != run_id:
         return Authorization(
             False,
             f"the stage profile is from run {prof_run!r}, not this run {run_id!r} — the gate confirms "
             "a stage this report is not being graded against",
+            code="GATE_OTHER_RUN",
         )
 
     # --- the record must be coherent, and its answer must be one the run can act on
     action = gate_action(gate)
     if action == "stop":
-        return Authorization(False, "the founder declined the review, so no report is to be produced")
+        return Authorization(
+            False, "the founder declined the review, so no report is to be produced", code="FOUNDER_DECLINED"
+        )
     if action == "reask":
         problems = validate_answered_gate(gate) if is_answered(gate) else ["it was never answered"]
-        return Authorization(False, "the gate carries no usable answer: " + "; ".join(problems))
+        return Authorization(False, "the gate carries no usable answer: " + "; ".join(problems), code="GATE_UNANSWERED")
     if action == "rebuild":
         return Authorization(
             False,
             f"{gate.get('answer')!r} on the {gate.get('gate_id')!r} gate is an intermediate answer — "
             "the profile is rebuilt and the gate re-asked before a report is composed",
+            code="GATE_INTERMEDIATE",
         )
 
     if action not in ("continue", "continue_if_rebuilt"):
@@ -485,7 +500,7 @@ def authorize(gate: object, stage_profile: object, run_id: str) -> Authorization
         # keys on (gate_id, answer), so an unrecognised ACTION falls straight through to a
         # matching row. The table constrains what the answer is; this constrains what the
         # run may do with it. Both are needed.
-        return Authorization(False, f"unrecognised gate action {action!r}")
+        return Authorization(False, f"unrecognised gate action {action!r}", code="GATE_INVALID")
 
     # --- the transition. One row must match, or nothing authorizes this.
     asked = str(gate.get("confirmed_stage") or "").lower()
@@ -494,10 +509,11 @@ def authorize(gate: object, stage_profile: object, run_id: str) -> Authorization
             False,
             "the gate does not record which stage it asked about, so its answer cannot be checked "
             "against the profile this report is graded on",
+            code="GATE_INVALID",
         )
     asked_class = _asked_class(asked)
     if asked_class is None:
-        return Authorization(False, f"the gate records an unrecognised stage {asked!r}")
+        return Authorization(False, f"the gate records an unrecognised stage {asked!r}", code="GATE_INVALID")
 
     stage = str(profile.get("detected_stage") or "").lower()
     row = TRANSITIONS.get((asked_class, str(gate.get("gate_id")), str(gate.get("answer"))))
@@ -506,6 +522,7 @@ def authorize(gate: object, stage_profile: object, run_id: str) -> Authorization
             False,
             f"{gate.get('answer')!r} on the {gate.get('gate_id')!r} gate, asked about {asked!r}, is not "
             "a transition that authorizes a report",
+            code="GATE_INVALID",
         )
 
     expected_stage = row["resulting_stage"] or asked
@@ -514,6 +531,7 @@ def authorize(gate: object, stage_profile: object, run_id: str) -> Authorization
             False,
             f"{gate.get('answer')!r} resolves to a {expected_stage!r} profile — the one being composed "
             f"holds {profile.get('detected_stage')!r}",
+            code="PROFILE_MISMATCH",
         )
     # The resulting stage must itself be reviewable. Every row lands in scope, so this is a
     # backstop against a future row that does not.
@@ -521,6 +539,7 @@ def authorize(gate: object, stage_profile: object, run_id: str) -> Authorization
         return Authorization(
             False,
             f"the profile being composed is {stage!r}, which is not a stage this review covers",
+            code="PROFILE_MISMATCH",
         )
     # REACHING series_a/low FROM OUT OF SCOPE REQUIRES THE FOUNDER TO HAVE SAID SO. The
     # transition above verifies the profile is what the answer resolves to, and that is not
@@ -561,6 +580,7 @@ def authorize(gate: object, stage_profile: object, run_id: str) -> Authorization
                 f"an out-of-scope question about {named} was put to "
                 "the founder in this run and never answered — answering a different one does not "
                 "settle it",
+                code="OUT_OF_SCOPE_UNANSWERED",
             )
 
     required_confidence = row["confidence"]
@@ -569,6 +589,7 @@ def authorize(gate: object, stage_profile: object, run_id: str) -> Authorization
             False,
             f"{gate.get('answer')!r} continues only against a profile rebuilt at {required_confidence} "
             f"confidence — this one has {profile.get('confidence')!r}",
+            code="PROFILE_MISMATCH",
         )
 
     # --- auto-satisfy: the checkable half of its documented precondition
@@ -577,6 +598,7 @@ def authorize(gate: object, stage_profile: object, run_id: str) -> Authorization
             False,
             "auto-satisfy claims the detected stage agrees with what the founder said, but the "
             "detection is low confidence — ask them",
+            code="AUTO_SATISFY_NOT_ALLOWED",
         )
 
     return Authorization(True)
@@ -805,8 +827,8 @@ def cmd_emit(args: argparse.Namespace) -> int:
             return 1
 
     # THE RUN'S GATE LEDGER, when it has one, records the open question first; this file is its mirror.
-    # With no `run_ref.json` nothing here runs and the emit is exactly what it always was. Stored
-    # pre-answers are not applied by an emit: the answer path records them.
+    # With no `run_ref.json` nothing here runs and the emit is exactly what it always was. An answer the
+    # request carried for this gate is applied here, against the options this emit offers.
     try:
         ledger = _run_ref.open_ledger(os.path.dirname(os.path.abspath(args.output)), args.run_id)
     except Exception as e:
@@ -821,15 +843,28 @@ def cmd_emit(args: argparse.Namespace) -> int:
             return 1
         try:
             gates, paths = ledger
+            _reask_if_moved(gates, paths, gate_id, args.stage)
             opened = gates.open_from_writer(paths, [gate_id], "gate_state.py")
-            recorded = (gates.load_ledger(paths)["gates"].get(gate_id) or {}).get("current") or {}
+            if gate_id not in opened["answered"]:
+                applied = _apply_request_answer(gates, paths, gate_id, data, args)
+                if applied is not None and "answer_id" in applied:
+                    opened["answered"].append(gate_id)
+            led = gates.load_ledger(paths)
+            recorded = (led["gates"].get(gate_id) or {}).get("current") or {}
+            by_request = gates.answered_by_request(led, gate_id)
+        except ArtifactValidationError as e:
+            print(f"Error: gate_state validation failed for the answer the request carried: {e}", file=sys.stderr)
+            return 1
         except Exception as e:
             return _run_ref.report_failure(e)
         if gate_id in opened["answered"]:
             # The ledger already holds this gate's answer: the mirror is written FROM it, and nothing is
             # asked. An emit can no longer make the file read as unanswered beside an answered ledger.
             data["answer"] = recorded.get("answer")
-            data["answer_source"] = AUTO_SATISFIED if recorded.get("resolution") == "default_taken" else FOUNDER
+            if recorded.get("resolution") == "default_taken":
+                data["answer_source"] = AUTO_SATISFIED
+            else:
+                data["answer_source"] = HOST if by_request else FOUNDER
             try:
                 receipt = write_artifact(
                     data=data,
@@ -915,6 +950,82 @@ def cmd_emit(args: argparse.Namespace) -> int:
     }
     sys.stdout.write(json.dumps(receipt, separators=(",", ":")) + "\n")
     return 0
+
+
+def _stage_binding(stage: object) -> dict[str, Any]:
+    return {"binder": STAGE_BINDER, "fingerprint": str(stage or "")}
+
+
+def _reask_if_moved(gates: Any, paths: Any, gate_id: str, stage: str) -> None:
+    """Put a recorded question again when what it settled no longer holds: an answer bound to another
+    stage than the one this emit asks about, or a gate another answer closed (`not_owed`), which a re-emit
+    is asking afresh. Either way the old record stays in the ledger's history."""
+    entry = (gates.load_ledger(paths).get("gates") or {}).get(gate_id) or {}
+    cur = entry.get("current") or {}
+    bound = cur.get("binding") if isinstance(cur.get("binding"), dict) else None
+    if entry.get("state") == "answered" and bound and bound.get("binder") == STAGE_BINDER:
+        if bound.get("fingerprint") != stage:
+            gates.supersede_from_writer(paths, gate_id, "gate_state.py", "binding_changed")
+    elif entry.get("state") == "not_owed":
+        gates.supersede_from_writer(paths, gate_id, "gate_state.py", "emitted_again")
+
+
+def _option_id(gates: Any, gate_id: str, label: str) -> str:
+    if gate_id == "stage_choice":
+        return {lab: tok for tok, lab in STAGE_LABELS.items()}.get(label, label)
+    ids: dict[str, str] = {str(o["label"]): str(o["id"]) for o in gates.GATES[gate_id]["options"]}
+    return ids.get(label, label)
+
+
+def _profile_confidence(output_path: str, run_id: str) -> str | None:
+    """This run's `stage_profile.json` confidence beside the gate file, or None (fails closed like
+    `_deck_claimed_stage`)."""
+    path = os.path.join(os.path.dirname(os.path.abspath(output_path)), "stage_profile.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            profile = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(profile, dict) or _as_run_id(profile) != run_id:
+        return None
+    conf = profile.get("confidence")
+    return conf if isinstance(conf, str) else None
+
+
+def _apply_request_answer(gates: Any, paths: Any, gate_id: str, data: dict[str, Any], args: argparse.Namespace) -> Any:
+    """Apply the answer the request carried for this gate, if any, through the ledger.
+
+    A REQUEST LINE IS HELD TO WHAT AUTO-SATISFY IS HELD TO, because it is no more evidence that a founder
+    looked: the line is copied into the run by the same model that asks. Where the deck states another stage
+    than this gate confirms, or a `Looks right` would confirm a low-confidence detection, it is not applied
+    and the founder is asked. The would-be mirror is validated first, so a line the file write would refuse
+    is never recorded in the ledger."""
+    pending = gates.pending_pre_answer(gates.load_ledger(paths), gate_id)
+    if pending is None:
+        return None
+    offered = [_option_id(gates, gate_id, str(label)) for label in data.get("options") or []]
+    withheld = None
+    if gate_id == AUTO_SATISFIABLE_GATE:
+        claimed = _deck_claimed_stage(args.output, args.run_id)
+        if claimed and claimed != args.stage:
+            withheld = (
+                f"the deck states {STAGE_LABELS[claimed]} and this question confirms {STAGE_LABELS.get(args.stage)}: "
+                "the founder is asked"
+            )
+        elif pending["option_id"] == "looks_right" and _profile_confidence(args.output, args.run_id) == "low":
+            withheld = "the stage was detected at low confidence: the founder is asked"
+    labels = {_option_id(gates, gate_id, str(lab)): lab for lab in data.get("options") or []}
+    label = labels.get(pending["option_id"])
+    if withheld is None and label is not None:
+        from _schema_validator import validate
+
+        body = {**data, "answer": label, "answer_source": HOST, "metadata": {"run_id": args.run_id}}
+        errors = validate(body, load_schema(_schema_path()))
+        if errors:
+            raise ArtifactValidationError("; ".join(errors))
+    return gates.apply_writer_pre_answer(
+        paths, gate_id, "gate_state.py", offered, withheld=withheld, bound=_stage_binding(args.stage)
+    )
 
 
 def cmd_answer(args: argparse.Namespace) -> int:
@@ -1092,6 +1203,7 @@ def _record_in_ledger(ledger: tuple[Any, Any], gate: dict[str, Any], args: argpa
     else:
         by_label = {o["label"]: o["id"] for o in gates.GATES[gate_id]["options"]}
     option_id = by_label.get(args.answer, args.answer)
+    bound = _stage_binding(gate.get("confirmed_stage"))
     if args.source == AUTO_SATISFIED:
         gates.record_from_writer(
             paths,
@@ -1100,9 +1212,10 @@ def _record_in_ledger(ledger: tuple[Any, Any], gate: dict[str, Any], args: argpa
             "gate_state.py",
             resolution="default_taken",
             default_reason="stage_stated_and_detected_agree",
+            bound=bound,
         )
     else:
-        gates.record_from_writer(paths, gate_id, option_id, "gate_state.py")
+        gates.record_from_writer(paths, gate_id, option_id, "gate_state.py", bound=bound)
 
 
 def main() -> int:
@@ -1133,7 +1246,7 @@ def main() -> int:
     sp_ans.add_argument(
         "--source",
         required=True,
-        choices=ANSWER_SOURCES,
+        choices=CLI_SOURCES,
         help="Who produced this answer: 'founder' (they were asked and replied) or "
         "'auto_satisfied' (Step 1 already captured a matching stage, so the gate was not put to them)",
     )

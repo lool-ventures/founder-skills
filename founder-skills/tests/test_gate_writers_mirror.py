@@ -49,6 +49,9 @@ def _out(proc: subprocess.CompletedProcess[str]) -> dict[str, Any]:
         "founder_context",
         "apply_corrections",
         "html_stdout",
+        "founder_context_read",
+        "setup_run",
+        "deck_review_compose",
     ],
 )
 def test_with_no_ledger_each_writer_matches_its_golden(group: str) -> None:

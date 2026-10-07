@@ -860,3 +860,11 @@ def test_a_failed_start_call_does_not_anchor_the_run(tmp_path: Path) -> None:
         ]
         held = _decide(tmp_path, rows, "TOP_DOWN_METHODOLOGY", "market-sizing") is not None
         assert held is is_error
+
+
+def test_deck_review_has_no_held_step() -> None:
+    """Every deck-review gate is recorded by a script the skill runs (`gate_state.py`, `record_gate_answer.py`
+    and `founder_context.py`), so no deck-review dispatch is held on the transcript."""
+    rows = {**SHIPPED.PLANNED_ROWS, **SHIPPED.ROWS}
+    assert all(_gates.GATES[gate]["skill"] != "deck-review" for gate in rows.values())
+    assert all(agent != "deck-review" for (_context, agent) in rows)

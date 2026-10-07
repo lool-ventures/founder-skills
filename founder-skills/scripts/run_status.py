@@ -265,6 +265,24 @@ def cmd_bind(args: argparse.Namespace) -> int:
         )
     with rs.run_lock(paths):
         status = _load_or_unreachable(paths, args.pretty)
+        if (
+            status.get("status") == "refused"
+            and status.get("run_dir_shell") == run_dir
+            and status.get("slug") == args.slug
+        ):
+            # A run the founder declined, re-bound by the skill's own slug block on its way to the stop: nothing
+            # to do and nothing failed, so it is not an exit that reads as "the run could not start".
+            _out(
+                {
+                    "ok": True,
+                    "run_id": paths.run_id,
+                    "status": "refused",
+                    "code": "RUN_REFUSED",
+                    "message": "the run was declined; it stays bound and nothing was written",
+                },
+                args.pretty,
+            )
+            return 0
         if status.get("status") in rs.FINAL_STATUSES:
             _print_only(paths, "RUN_ID_FINISHED", f"run {paths.run_id} is already {status.get('status')}", args.pretty)
         bound = status.get("slug")

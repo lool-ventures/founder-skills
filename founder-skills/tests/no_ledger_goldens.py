@@ -382,6 +382,170 @@ def founder_context_scenarios() -> dict[str, dict[str, Any]]:
     return out
 
 
+def _context_init(root: Path, name: str, slug: str) -> None:
+    run(
+        [
+            str(SHARED / "founder_context.py"),
+            "init",
+            "--company-name",
+            name,
+            "--slug",
+            slug,
+            "--stage",
+            "seed",
+            "--sector",
+            "fintech",
+            "--geography",
+            "US",
+            "--artifacts-root",
+            str(root),
+            "--run-id",
+            GATE_RUN,
+        ]
+    )
+
+
+def founder_context_read_scenarios() -> dict[str, dict[str, Any]]:
+    """`read` with one context, several (exit 2), none, and a named slug."""
+    script = str(SHARED / "founder_context.py")
+    out: dict[str, dict[str, Any]] = {}
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        out["none"] = result(run([script, "read", "--artifacts-root", str(root)]), td, root)
+        _context_init(root, "Example Co", "example-co")
+        out["single"] = result(run([script, "read", "--artifacts-root", str(root), "--pretty"]), td, root)
+        _context_init(root, "Sample Labs", "sample-labs")
+        out["multiple"] = result(run([script, "read", "--artifacts-root", str(root)]), td, root)
+        named = [script, "read", "--artifacts-root", str(root), "--slug", "sample-labs"]
+        out["named"] = result(run(named), td, root)
+        missing = [script, "read", "--artifacts-root", str(root), "--slug", "nobody"]
+        out["named_missing"] = result(run(missing), td, root)
+    return out
+
+
+def _dr_gate(path: Path, run_id: str, gate_id: str, stage: str, answer: str | None, source: str | None) -> None:
+    """A gate file as `gate_state.py` writes one, written by hand so the scenario needs no ledger."""
+    options = {
+        "stage_confirmation": ["Looks right", "Different stage", "Not sure — proceed anyway"],
+        "out_of_scope_choice": ["Stop review", "Different stage", "Proceed anyway (best-effort)"],
+    }[gate_id]
+    body: dict[str, Any] = {
+        "metadata": {"run_id": run_id},
+        "gate_id": gate_id,
+        "question": "Does this stage detection look right?",
+        "options": options,
+        "context_summary": "Detected stage from the deck",
+        "confirmed_stage": stage,
+    }
+    if answer is not None:
+        body["answer"] = answer
+    if source is not None:
+        body["answer_source"] = source
+    path.write_text(json.dumps(body, indent=2), encoding="utf-8")
+
+
+def setup_run_scenarios() -> dict[str, dict[str, Any]]:
+    """`setup_run.py`: a fresh run cleans a prior run's files; a same-run answer keeps them."""
+    script = str(SKILLS / "deck-review" / "scripts" / "setup_run.py")
+    gate_script = str(SKILLS / "deck-review" / "scripts" / "gate_state.py")
+    out: dict[str, dict[str, Any]] = {}
+    base = ["--slug", "example-co", "--run-id", GATE_RUN, "--clean"]
+
+    def review_dir(root: Path) -> Path:
+        d = root / "deck-review-example-co"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "deck_inventory.json").write_text(json.dumps({"metadata": {"run_id": "20261001T000000Z-prior1"}}))
+        (d / "stage_profile.json").write_text(json.dumps({"metadata": {"run_id": "20261001T000000Z-prior1"}}))
+        (d / "notes.txt").write_text("kept: not a pipeline artifact\n")
+        return d
+
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        d = review_dir(root)
+        _dr_gate(
+            d / "gate_state.json", "20261001T000000Z-prior1", "stage_confirmation", "seed", "Looks right", "founder"
+        )
+        out["fresh_clean"] = result(run([script, "--artifacts-root", str(root), *base, "--pretty"]), td, root)
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        d = review_dir(root)
+        gate = d / "gate_state.json"
+        run(
+            [gate_script, "emit", "--run-id", GATE_RUN, "--stage", "seed", "-o", str(gate)],
+            stdin=json.dumps(STAGE_BODY),
+        )
+        out["unanswered_same_run"] = result(run([script, "--artifacts-root", str(root), *base]), td, root)
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        d = review_dir(root)
+        gate = d / "gate_state.json"
+        run(
+            [gate_script, "emit", "--run-id", GATE_RUN, "--stage", "seed", "-o", str(gate)],
+            stdin=json.dumps(STAGE_BODY),
+        )
+        run([gate_script, "answer", "--file", str(gate), "--answer", "Looks right", "--source", "founder"])
+        out["gate_round_trip"] = result(run([script, "--artifacts-root", str(root), *base]), td, root)
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        d = review_dir(root)
+        _dr_gate(d / "gate_state.json", GATE_RUN, "out_of_scope_choice", "growth", "Stop review", "founder")
+        out["declined_same_run"] = result(run([script, "--artifacts-root", str(root), *base]), td, root)
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        d = review_dir(root)
+        _dr_gate(d / "gate_state.json", GATE_RUN, "stage_confirmation", "seed", "Looks right", None)
+        out["unauditable_same_run"] = result(run([script, "--artifacts-root", str(root), *base]), td, root)
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        d = review_dir(root)
+        (d / "gate_state.json").write_text("{not json")
+        out["unreadable_gate"] = result(run([script, "--artifacts-root", str(root), *base]), td, root)
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        empty = ["--artifacts-root", str(root), "--slug", "example-co", "--run-id", "", "--clean"]
+        out["empty_run_id"] = result(run([script, *empty]), td, root)
+    return out
+
+
+DR_FIXTURE_RUN = "fixture-deck-review-001"
+
+
+def dr_compose_scenarios() -> dict[str, dict[str, Any]]:
+    """deck-review's compose over the fixture artifacts, through each kind of gate it reads."""
+    import shutil
+
+    script = str(SKILLS / "deck-review" / "scripts" / "compose_report.py")
+    cases: dict[str, tuple[str, str, str | None, str | None] | None] = {
+        "authorised": ("stage_confirmation", "seed", "Looks right", "founder"),
+        "auto_satisfied": ("stage_confirmation", "seed", "Looks right", "auto_satisfied"),
+        "unanswered": ("stage_confirmation", "seed", None, None),
+        "intermediate": ("stage_confirmation", "seed", "Different stage", "founder"),
+        "declined": ("out_of_scope_choice", "growth", "Stop review", "founder"),
+        "ungated": None,
+    }
+    out: dict[str, dict[str, Any]] = {}
+    for name, case in cases.items():
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            for f in (FIXTURES / "deck-review").iterdir():
+                if f.is_file():
+                    shutil.copy(f, root / f.name)
+            argv = [script, "--dir", str(root), "-o", str(root / "report.json"), "--write-md", str(root / "report.md")]
+            if case is None:
+                argv.append("--ungated")
+            else:
+                gate_id, stage, answer, source = case
+                _dr_gate(root / "gate_state.json", DR_FIXTURE_RUN, gate_id, stage, answer, source)
+                argv += ["--gate-state", str(root / "gate_state.json")]
+            proc = run(argv)
+            res = result(proc, td, root)
+            # The receipt's byte count is the report's, and the report names its own directory, so the
+            # count varies with the temp path's length: it is the one field taken out of the hash.
+            res["stdout"] = _sha(re.sub(r'"bytes": ?\d+', '"bytes":<N>', normalise(proc.stdout, td)))
+            out[name] = res
+    return out
+
+
 GROUPS: dict[str, Callable[[], dict[str, dict[str, Any]]]] = {
     "html": lambda: {f"{s}/{w}": html_scenario(s, w) for s, w, _k in HTML_WRITERS},
     "insert_coaching": coaching_scenarios,
@@ -392,6 +556,9 @@ GROUPS: dict[str, Callable[[], dict[str, dict[str, Any]]]] = {
     "html_stdout": lambda: {"market-sizing/visualize.py": html_stdout_scenario("market-sizing", "visualize.py")},
     "extract_cap_table_flat": freeform_flat_scenarios,
     "apply_corrections": apply_corrections_scenarios,
+    "founder_context_read": founder_context_read_scenarios,
+    "setup_run": setup_run_scenarios,
+    "deck_review_compose": dr_compose_scenarios,
 }
 
 

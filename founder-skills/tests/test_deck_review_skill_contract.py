@@ -1998,3 +1998,96 @@ def test_every_numeric_chain_dispatch_names_the_deck_review_agent(heading: str) 
     start = text.index(heading)
     end = text.index("\n### ", start + len(heading))
     assert 'subagent_type: "founder-skills:deck-review"' in text[start:end], heading
+
+
+# --- recorded gates -----------------------------------------------------------------------------------------
+
+_MARKER = re.compile(r"<!-- gate: ([a-z][a-z0-9_]*(?:\.[A-Za-z0-9_.+-]+)?) -->")
+
+
+def _section(text: str, start: str, end: str) -> str:
+    i = text.index(start)
+    return text[i : text.index(end, i)]
+
+
+def _gates_module() -> types.ModuleType:
+    shared = str(REPO_ROOT / "founder-skills" / "scripts")
+    if shared not in sys.path:
+        sys.path.append(shared)
+    import _gates  # type: ignore[import-not-found]
+
+    mod: types.ModuleType = _gates
+    return mod
+
+
+def test_the_run_is_bound_before_the_first_gate_a_script_records() -> None:
+    text = SKILL_MD.read_text(encoding="utf-8")
+    bind = text.index('run_status.py" bind --run-id "$RUN_ID"')
+    assert bind < text.index('gate_state.py" emit')
+    bind = text.rindex("python3", 0, bind)
+    assert '--run-dir "$ARTIFACTS_ROOT/deck-review-$SLUG" --slug "$SLUG"' in text[bind : bind + 200]
+    # A refused setup_run never binds: the bind is chained on its success.
+    assert text[:bind].rstrip().endswith("--pretty &&")
+
+
+def test_every_gate_site_is_a_registry_gate_and_every_gate_has_a_site() -> None:
+    g = _gates_module()
+    text = SKILL_MD.read_text(encoding="utf-8")
+    sites = set(re.findall(r"--gate ([a-z][a-z0-9_.]*)", text)) - {"<gate>"}
+    sites |= set(_MARKER.findall(text))
+    sites |= set(re.findall(r'"gate_id": "([a-z_]+)"', text))
+    sites |= set(re.findall(r'gate_id: "([a-z_]+)"', text))
+    sites |= set(re.findall(r"gate_id `([a-z_]+)`", text))
+    keys = set()
+    for gid, gdef in g.GATES.items():
+        if gdef["skill"] not in ("deck-review", "shared"):
+            continue
+        static = (gdef["instances"] or {}).get("static")
+        keys |= {f"{gid}.{i}" for i in static} if static else {gid}
+    for site in sites:
+        gate_id, instance = g.parse_key(site)
+        assert g.GATES[gate_id]["skill"] in ("deck-review", "shared"), site
+    assert sites == keys, (sorted(keys - sites), sorted(sites - keys))
+
+
+def test_questions_are_opened_before_they_are_asked() -> None:
+    text = SKILL_MD.read_text(encoding="utf-8")
+    step1 = _section(text, "### Step 1:", "### Step 2:")
+    assert step1.index("Open the four questions (the block below) first") < step1.index(
+        "Then **skim the attached deck**"
+    )
+    assert step1.index("Then **skim the attached deck**") < step1.index("use `AskUserQuestion`")
+    assert step1.index('record_gate_answer.py" open') < step1.index("Then create (exit 10")
+    step2 = _section(text, "### Step 2:", "### Step 3:")
+    rule = step2.index("**A question in this step is a recorded gate, named at its site:** open it first")
+    markers = [m.start() for m in _MARKER.finditer(step2)]
+    assert markers and rule < min(markers)
+
+
+def test_the_gate_steps_name_their_exits() -> None:
+    text = SKILL_MD.read_text(encoding="utf-8")
+    assert '--run-id "$RUN_ID" --skill deck-review --pretty' in text  # the read
+    init = text.index('founder_context.py" init')
+    assert '--run-id "$RUN_ID" --skill deck-review' in text[init : init + 300]
+    assert "**Exit 10 (several companies):**" in text and "**Exit 2 (multiple):**" not in text
+    gate = _section(text, "### Gate: Confirm Stage and Scope", "### Context A hand-off protocol")
+    assert "If it printed `answered` instead" in gate and "do not ask and do not answer it" in gate
+    step6 = _section(text, "### Step 6: Compose Report", "### Step 7:")
+    assert "Exit 10 is a question, not a failure" in step6 and "`gate_action` table" in step6
+    step8 = _section(text, "### Step 8", "### Step 9:")
+    assert '--gate-state "$REVIEW_DIR/gate_state.json" --run-id "$RUN_ID"' in step8
+    step9 = _section(text, "### Step 9:", "## Gotchas")
+    close = step9.index('run_status.py" deliverables --run-id "$RUN_ID"')
+    assert close < step9.index("**Send the finished work to the founder")
+    assert "--final || :" in step9[close : close + 200]
+    assert "Any non-zero exit here or from `setup_run`/`bind` below" in text
+    assert "(`bind` printing `RUN_REFUSED` is the founder's decline: follow `gate_action` `stop`.)" in text
+    assert "**Exit 1 (not found: no `code`, or `CONTEXT_NOT_FOUND`):**" in text
+    assert "Exit 1 with another `code`: report it and stop." in text
+    assert "emit the gate `gate_id` names (about `gate_stage`, when printed)" in text
+
+
+def test_the_catalog_sections_are_gone() -> None:
+    text = SKILL_MD.read_text(encoding="utf-8")
+    for heading in ("## Skill Metadata", "## Available Scripts", "## Available References"):
+        assert heading not in text

@@ -569,3 +569,199 @@ def test_a_comparison_out_of_budget_does_not_leave_the_next_invocation_without_e
     entry = _complete_in_process(root, run_id)["invocations"][2]
     assert entry["untouched_since_resume"] == {"a_json": True, "b_json": True}
     assert entry["touched_since_resume"] == {}
+
+
+# --- deck-review: a resume at the stage question -----------------------------------------------------------
+
+DR_SCRIPTS = h.SKILLS / "deck-review" / "scripts"
+DR_PROFILE_BODY = {
+    k: v
+    for k, v in json.loads(
+        (h.REPO_ROOT / "founder-skills/tests/fixtures/deck-review/stage_profile.json").read_text(encoding="utf-8")
+    ).items()
+    if k != "metadata"
+}
+DR_STAGE_BODY = {
+    "gate_id": "stage_confirmation",
+    "question": "Does this stage detection look right?",
+    "options": ["Looks right", "Different stage", "Not sure — proceed anyway"],
+    "context_summary": "Detected from the deck's slides and its stated raise.",
+}
+# The files a resume at deck-review's stage question must leave as they were: Steps 2-3's checkpoints. The
+# gate file is rewritten by design (the emit that applies the answer), and the report is new.
+DR_KEPT_ON_RESUME = frozenset(("stage_profile_json", "deck_inventory_json"))
+
+
+def _dr(script: str, *args: str, stdin: str | None = None) -> dict[str, Any]:
+    proc = h.run(DR_SCRIPTS / script, *args, stdin=stdin)
+    assert proc.returncode == 0, (script, proc.stdout, proc.stderr)
+    return _out(proc)
+
+
+def _dr_setup(root: Path, run_id: str) -> dict[str, Any]:
+    return _dr("setup_run.py", "--artifacts-root", str(root), "--slug", "example-co", "--run-id", run_id, "--clean")
+
+
+def _dr_emit(run_dir: Path, run_id: str, stage: str, body: dict[str, Any] = DR_STAGE_BODY) -> dict[str, Any]:
+    out = run_dir / "gate_state.json"
+    return _dr("gate_state.py", "emit", "--run-id", run_id, "--stage", stage, "-o", str(out), stdin=json.dumps(body))
+
+
+def _dr_first_invocation(tmp: Path) -> tuple[Path, str, Path]:
+    """Step 0 to the stage question, in the skill's order: start, Step 1's questions and `init`,
+    `setup_run --clean`, `bind`, Steps 2-3's producers, then the emit that waits."""
+    root = tmp / "artifacts"
+    root.mkdir()
+    run_id = h.start_ok(root, "deck-review")
+    keys = ["ctx_basics.company_name", "ctx_basics.stage", "ctx_basics.sector", "ctx_basics.geography"]
+    assert h.record(root, run_id, "open", *[a for k in keys for a in ("--gate", k)]).returncode == 0
+    answers = [
+        ("ctx_basics.company_name", "use_derived", "Example Co"),
+        ("ctx_basics.stage", "seed", None),
+        ("ctx_basics.sector", "use_derived", "fintech"),
+        ("ctx_basics.geography", "use_derived", "US"),
+    ]
+    segs: list[str] = []
+    for key, oid, value in answers:
+        segs += ["--gate", key, "--answer-id", oid] + (["--value", value] if value else [])
+    assert h.record(root, run_id, "answer", *segs).returncode == 0
+    init = h.run(
+        h.SHARED / "founder_context.py",
+        "init",
+        "--company-name",
+        "Example Co",
+        "--stage",
+        "seed",
+        "--sector",
+        "fintech",
+        "--geography",
+        "US",
+        "--artifacts-root",
+        str(root),
+        "--run-id",
+        run_id,
+        "--skill",
+        "deck-review",
+    )
+    assert init.returncode == 0, init.stdout + init.stderr
+    assert _dr_setup(root, run_id)["cleaned"] is True
+    run_dir = root / "deck-review-example-co"
+    assert h.bind(root, run_id, run_dir, "example-co").returncode == 0
+    inventory = _produce_inventory(run_dir, run_id)
+    profile = run_dir / "stage_profile.json"
+    _dr("stage_profile.py", "--run-id", run_id, "-o", str(profile), stdin=json.dumps(DR_PROFILE_BODY))
+    _age(inventory)
+    _age(profile)
+    assert "needs_input" in _dr_emit(run_dir, run_id, "seed")
+    st = h.status(root, run_id)
+    assert (st["status"], st["waiting_on"]) == ("waiting", "stage_confirmation")
+    return root, run_id, run_dir
+
+
+def _dr_resume(root: Path, run_id: str, answer: str) -> dict[str, Any]:
+    proc = h.start(root, "deck-review", f"FS_HOST_RUN_ID={run_id}\nFS_HOST_ANSWER {answer}\n")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    out = _out(proc)
+    assert (out["resume"], out["resume_step"]) == (1, "3")
+    read = h.run(
+        h.SHARED / "founder_context.py",
+        "read",
+        "--artifacts-root",
+        str(root),
+        "--run-id",
+        run_id,
+        "--skill",
+        "deck-review",
+    )
+    assert read.returncode == 0, read.stderr
+    return out
+
+
+def test_a_deck_review_resume_at_the_stage_gate_rewrites_only_the_gate(tmp_path: Path) -> None:
+    root, run_id, run_dir = _dr_first_invocation(tmp_path)
+    kept = {n: (run_dir / n).read_bytes() for n in ("deck_inventory.json", "stage_profile.json")}
+
+    _dr_resume(root, run_id, "stage_confirmation=looks_right")
+    setup = _dr_setup(root, run_id)
+    assert (setup["cleaned"], setup["reuse_checkpoints"], setup["gate_action"]) == (False, True, "reask")
+    assert {n: (run_dir / n).read_bytes() for n in kept} == kept
+    assert h.bind(root, run_id, run_dir, "example-co").returncode == 0
+    emitted = _dr_emit(run_dir, run_id, "seed")
+    assert "needs_input" not in emitted and emitted["answered"]["answer_source"] == "host"
+    after = _dr_setup(root, run_id)
+    assert (after["resume"], after["gate_action"]) == (True, "continue")
+    (run_dir / "report.md").write_text("# Report\n", encoding="utf-8")
+    st = _complete(root, run_id)
+
+    entry = st["invocations"][1]
+    assert set(entry["untouched_since_resume"]) == DR_KEPT_ON_RESUME
+    assert all(entry["untouched_since_resume"].values())
+    assert entry["touched_since_resume"] == {"gate_state_json": {"kind": "changed"}, "report_md": {"kind": "added"}}
+
+
+def test_a_deck_review_resume_at_the_stage_pick_keeps_the_pick_and_settles_every_gate(tmp_path: Path) -> None:
+    root, run_id, run_dir = _dr_first_invocation(tmp_path)
+    ans = h.run(
+        DR_SCRIPTS / "gate_state.py",
+        "answer",
+        "--file",
+        str(run_dir / "gate_state.json"),
+        "--answer",
+        "Different stage",
+        "--source",
+        "founder",
+    )
+    assert ans.returncode == 0, ans.stderr
+    pick_body = {
+        "gate_id": "stage_choice",
+        "question": "Which stage is this deck?",
+        "options": ["Pre-seed", "Series A", "Series B", "Growth"],
+        "context_summary": "Detected from the deck's slides and its stated raise.",
+    }
+    assert "needs_input" in _dr_emit(run_dir, run_id, "seed", pick_body)
+    assert h.status(root, run_id)["waiting_on"] == "stage_choice"
+
+    _dr_resume(root, run_id, "stage_choice=series_a")
+    assert _dr_setup(root, run_id)["reuse_checkpoints"] is True
+    picked = _dr_emit(run_dir, run_id, "seed", pick_body)
+    assert picked["answered"] == {"gate_id": "stage_choice", "answer": "Series A", "answer_source": "host"}
+    assert _dr_setup(root, run_id)["gate_action"] == "rebuild"
+    current = (run_dir / "stage_profile.json").read_text(encoding="utf-8")
+    _dr(
+        "stage_profile.py",
+        "--rebuild-stage",
+        "series_a",
+        "--confidence",
+        "high",
+        "--run-id",
+        run_id,
+        "-o",
+        str(run_dir / "stage_profile.json"),
+        stdin=current,
+    )
+    assert "needs_input" in _dr_emit(run_dir, run_id, "series_a")
+    ans = h.run(
+        DR_SCRIPTS / "gate_state.py",
+        "answer",
+        "--file",
+        str(run_dir / "gate_state.json"),
+        "--answer",
+        "Looks right",
+        "--source",
+        "founder",
+    )
+    assert ans.returncode == 0, ans.stderr
+    led = h.ledger(root, run_id)["gates"]
+    assert (led["stage_choice"]["current"]["answer_id"], led["stage_choice"]["supersessions"]) == ("series_a", 0)
+    assert sorted(k for k, e in led.items() if e["state"] == "open") == []
+    assert h.status(root, run_id)["status"] == "running"
+    assert _dr_setup(root, run_id)["gate_action"] == "continue"
+
+
+def test_a_fresh_deck_review_run_still_cleans_a_prior_runs_files(tmp_path: Path) -> None:
+    root, old_id, run_dir = h.start_bound(tmp_path, "deck-review")
+    _produce_inventory(run_dir, old_id)
+    new_id = h.start_ok(root, "deck-review")
+    out = _dr_setup(root, new_id)
+    assert (out["cleaned"], out["reuse_checkpoints"]) == (True, False)
+    assert not (run_dir / "deck_inventory.json").exists()
