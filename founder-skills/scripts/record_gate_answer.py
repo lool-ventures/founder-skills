@@ -366,6 +366,8 @@ def main(argv: list[str] | None = None) -> int:
         if g is not None and isinstance(e, g.GateRejection):
             _exit(1, e.payload(), f"Rejected ({e.code}): {e}; nothing was written", pretty)
         if g is not None and isinstance(e, g.Unimplemented):
+            if getattr(e, "code", None) == "GATE_UNDECIDABLE":
+                _unreachable("GATE_UNDECIDABLE", f"{e}; nothing was written", pretty)
             _unreachable("GATE_NOT_WIRED", f"{e}; this gate's skill does not record it yet", pretty)
         raise
 

@@ -133,6 +133,7 @@ UNREACHABLE_CODES = (
     "LEDGER_MISSING",
     "REGISTRY_UNREACHABLE",
     "GATE_NOT_WIRED",
+    "GATE_UNDECIDABLE",
     "LOCK_UNAVAILABLE",
     "RUN_DIR_OUTSIDE_ROOT",
     "SKILL_UNKNOWN",
@@ -199,6 +200,12 @@ CONTRACT_NOTES = (
     "A question the run no longer owes (its parent was answered otherwise, its condition no longer holds, or the "
     "run's mode does not ask it) is closed `not_applicable` by script; if the run owes it again it is re-opened and "
     "asked, never read as answered.",
+    "`ic_decline_confirmation` is owed only while this run's scored verdict is a Decline (`pass` or `hard_pass`); "
+    "a request line for it applies only then. `hold_off` cannot be sent ahead: recorded, it leaves the run "
+    "`waiting` until `finish` is. A scores file that cannot be read or carries another run's id makes the gate "
+    "`GATE_UNDECIDABLE` (exit 2) rather than not owed.",
+    "ic-sim refuses `RUN_FINISHED` (exit 1, nothing written) when its fund profile or report is built again for a "
+    "`complete` run: new materials after delivery are a new simulation, under a new run id.",
 )
 
 
@@ -216,7 +223,13 @@ class GateRejection(Exception):
 
 
 class Unimplemented(Exception):
-    """A predicate, option source, binder or requires check whose skill is not wired yet. Exit 2."""
+    """A predicate, option source, binder or requires check whose skill is not wired yet (`GATE_NOT_WIRED`),
+    or one that cannot be decided from what is on disk (`GATE_UNDECIDABLE`). Exit 2. The settle pass leaves a
+    gate whose predicate raises it as it is."""
+
+    def __init__(self, message: str, code: str = "GATE_NOT_WIRED") -> None:
+        super().__init__(message)
+        self.code = code
 
 
 class RegistryError(Exception):
@@ -2313,6 +2326,40 @@ PREDICATES.update(
 )
 
 
+# --- ic-sim -----------------------------------------------------------------------------------------
+
+# The scored verdicts ic-sim confirms before writing up (`asked_gate_check.DECLINES`, held equal by a test).
+IC_DECLINES = ("pass", "hard_pass")
+
+
+def _pred_ic_verdict_decline(ctx: Ctx, g: dict[str, Any], instance: str | None) -> bool:
+    """Owed while this run's `score_dimensions.json` scores a decline. No file yet: not owed. A file that
+    cannot be read, or that carries another run's id, cannot decide it: raised, so the settle pass leaves an
+    open question open (a held decline is never closed on a file it could not read) and `open` refuses loudly
+    rather than answering "not owed"."""
+    if ctx.run_dir is None:
+        return False
+    path = os.path.join(ctx.run_dir, "score_dimensions.json")
+    try:
+        scores = _run_status.read_json(path)
+    except ValueError as e:
+        raise Unimplemented(f"this run's scores cannot be read ({e})", code="GATE_UNDECIDABLE") from e
+    if scores is None:
+        return False
+    meta = scores.get("metadata") if isinstance(scores, dict) else None
+    rid = meta.get("run_id") if isinstance(meta, dict) else None
+    if rid != ctx.paths.run_id:
+        raise Unimplemented(
+            f"{path} carries run id {rid!r}, not this run's {ctx.paths.run_id!r}; score this run first",
+            code="GATE_UNDECIDABLE",
+        )
+    summary = scores.get("summary")
+    return isinstance(summary, dict) and summary.get("verdict") in IC_DECLINES
+
+
+PREDICATES["ic_verdict_decline"] = _pred_ic_verdict_decline
+
+
 def owed(ctx: Ctx, g: dict[str, Any], instance: str | None) -> bool:
     if ctx.mode is not None and ctx.mode not in g["modes"]:
         return False
@@ -3707,6 +3754,8 @@ CLI_CODES = {
     # market-sizing's producers and prompt generator: a call into a bound analysis dir that names no run.
     # PERIOD_NOT_WRITTEN: the period of a founder's figure was answered but never written into inputs.json.
     "ms_producers": ["RUN_ID_REQUIRED", "PERIOD_NOT_WRITTEN"],
+    # ic-sim's compose: a simulation dir that belongs to a run, whose files do not agree on which.
+    "ic_producers": ["RUN_ID_REQUIRED"],
     "usage": ["USAGE"],
     "notices": ["PRE_ANSWER_IGNORED", "PRE_ANSWER_INVALID", "PRE_ANSWER_NOT_APPLIED"],
 }

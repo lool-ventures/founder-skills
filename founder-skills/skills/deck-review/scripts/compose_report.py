@@ -1754,9 +1754,12 @@ def _record_refusal(ledger: Any, gate: dict[str, Any], e: GateNotAuthorized) -> 
 def _refuse_open_gates(ledger: Any) -> None:
     """A question the run opened and never settled leaves it unable to complete, so compose refuses before
     writing anything and names it (exit 10). The run reads `running` with `GATE_UNRESOLVED`: never a
-    `waiting` no host answer could clear."""
+    `waiting` no host answer could clear. The status is settled first (one transaction that changes nothing
+    else): no other transaction runs in this compose, and a question the run stopped owing since the last one
+    would otherwise be named here and could never be answered."""
     gates, paths = ledger
     rs = sys.modules["_run_status"]
+    gates.transact(paths, lambda ctx, led, st: None)
     open_now = rs.open_gate_ids(paths)
     if not open_now:
         return

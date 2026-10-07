@@ -1,5 +1,7 @@
 # Partner Archetypes
 
+> Read by the main thread in fund-specific mode only (Step 4), to map real partners to roles. The partner sub-agents never read this file: their copy of the rubric is in `agents/ic-sim.md`, so an edit here must be made there too.
+
 Three canonical partner archetypes for the IC simulation. Each archetype represents a real lens that VC partners bring to investment decisions. In a real fund, partners naturally gravitate toward one of these perspectives based on their background and experience.
 
 When running in **fund-specific mode**, map real partners to these archetypes based on their known focus areas and backgrounds. When running in **generic mode**, use the archetypes directly.

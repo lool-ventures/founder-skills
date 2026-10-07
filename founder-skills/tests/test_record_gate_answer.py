@@ -376,9 +376,9 @@ def test_require_is_ok_waiting_or_not_owed(tmp_path: Path) -> None:
 
 
 def test_an_unwired_gate_exits_2(tmp_path: Path) -> None:
-    root, run_id, _rd = h.start_bound(tmp_path, "ic-sim")
+    root, run_id, _rd = h.start_bound(tmp_path, "competitive-positioning")
     before = h.snapshot(root, run_id)
-    proc = h.record(root, run_id, "open", "--gate", "ic_decline_confirmation")
+    proc = h.record(root, run_id, "open", "--gate", "cp_gate3_position")
     assert proc.returncode == 2 and _out(proc)["code"] == "GATE_NOT_WIRED"
     assert h.snapshot(root, run_id) == before
 

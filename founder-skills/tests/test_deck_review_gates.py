@@ -1013,3 +1013,18 @@ def test_a_re_emitted_question_is_asked_about_the_stage_it_was_re_emitted_for(tm
     assert (told["gate_action"], told["gate_id"], told["gate_stage"]) == ("reask", "stage_confirmation", "series_a")
     _settle(run_dir, "stage_confirmation", told["gate_stage"], "Looks right")
     assert _compose(run_dir).returncode == 0
+
+
+def test_compose_settles_the_run_before_naming_an_unrecorded_question(tmp_path: Path) -> None:
+    """The open-question check reads the run status, which is refreshed only by a ledger transaction. A
+    question the run stopped owing since the last one (the company picker, once only one company's context
+    is left) must be closed before compose reads it, or compose names a question no answer can clear."""
+    root, run_dir = _run(tmp_path)
+    _settle(run_dir, "stage_confirmation", "seed", "Looks right")
+    _context(root, "Example Co", "example-co")
+    _context(root, "Second Example", "second-example")
+    assert h.record(root, RID, "open", "--gate", "ctx_select_company").returncode == 0
+    (root / "founder-context-second-example.json").unlink()
+    proc = _compose(run_dir)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert h.ledger(root, RID)["gates"]["ctx_select_company"]["state"] == "not_owed"

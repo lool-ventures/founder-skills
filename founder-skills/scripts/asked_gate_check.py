@@ -13,8 +13,8 @@ evidence that the question was asked is read there, and the step that must not r
 dispatch, as `two_figures_check.py` does for market-sizing's figures.
 
 WHICH DISPATCH. `ROWS` maps (context, agent) to the gate it follows. A row is enabled only once its skill
-asks the question with the labels below, so that an older wording is never held; financial-model-review's
-and market-sizing's are. A dispatch no row names returns before anything is loaded or read. The context is
+asks the question with the labels below, so that an older wording is never held; financial-model-review's,
+market-sizing's and ic-sim's are. A dispatch no row names returns before anything is loaded or read. The context is
 read as every dispatch check reads a first line (`dispatch_type_check.context_of`), the agent after our
 plugin's prefix.
 
@@ -137,7 +137,7 @@ GATES: dict[str, GateSpec] = {
         topic="finishing the write-up after a Decline",
         ask="The scored result comes out to a Decline — want me to go ahead and finish the full write-up?",
         owed="ic_decline",
-        extra=" If they choose to hold off, do not dispatch; pause until they are ready.",
+        extra=" If they choose to hold off, do not dispatch and do not send the report; pause until they are ready.",
     ),
 }
 HELD_GATE_IDS = tuple(GATES)
@@ -148,12 +148,14 @@ PLANNED_ROWS: dict[tuple[str, str], str] = {
     ("CHECKLIST", "financial-model-review"): "fmr_extracted_values",
     ("POST_COMPOSE_COACHING", "ic-sim"): "ic_decline_confirmation",
 }
-# Enabled when the skill asks with the registry's labels: financial-model-review's values check (Step 3.6)
-# and market-sizing's approach (its Gate, before the two sizing dispatches).
+# Enabled when the skill asks with the registry's labels: financial-model-review's values check (Step 3.6),
+# market-sizing's approach (its Gate, before the two sizing dispatches) and ic-sim's decline (Step 8.5,
+# before the write-up's coaching): every planned row.
 ROWS: dict[tuple[str, str], str] = {
     ("CHECKLIST", "financial-model-review"): "fmr_extracted_values",
     ("TOP_DOWN_METHODOLOGY", "market-sizing"): "ms_methodology",
     ("BOTTOM_UP_METHODOLOGY", "market-sizing"): "ms_methodology",
+    ("POST_COMPOSE_COACHING", "ic-sim"): "ic_decline_confirmation",
 }
 
 _SLOT_RE = re.compile(r"<[^<>]*>")

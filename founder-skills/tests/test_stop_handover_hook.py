@@ -1145,7 +1145,7 @@ def test_a_report_build_written_across_lines_still_triggers_the_report_check(tmp
     assert json.loads(_run(tmp_path, rows).stdout)["decision"] == "block"
 
 
-@pytest.mark.parametrize("skill_name", ["deck-review", "financial-model-review"])
+@pytest.mark.parametrize("skill_name", ["deck-review", "financial-model-review", "market-sizing", "ic-sim"])
 def test_a_skills_page_list_close_cannot_silence_the_delivery_ask(tmp_path: Path, skill_name: str) -> None:
     """deck-review closes its page list after compose with `deliverables --final`, which refuses a run that
     is not `complete`. Run as SKILL.md writes it (`|| :`), the call succeeds even then, so the hook still

@@ -505,6 +505,100 @@
       "stdout": "727f6ea7ff9360512e7a022458fe7a41765837b2bc5558c825ea530cc3356130"
     }
   },
+  "ic_compose": {
+    "decline": {
+      "exit": 0,
+      "files": {
+        "conflict_check.json": "6ff83b4ae658601d702f15a7218c59778caf602463ecb1b866a68f492cc48fc3",
+        "discussion.json": "925129077f59a307aadccbb3dfbf507b7f0d9eb40d586c3711cf426638b56a84",
+        "fund_profile.json": "81600822caa69351833c5aa3c107ecceb41875d643b243cd59c5ca4ff5a6f107",
+        "partner_assessment_analyst.json": "44c048560370e1e233c55ef1ae2a3297134ad729089066518f51784f856cd0a2",
+        "partner_assessment_operator.json": "df56304f83e5442bf75f21ecaaf731584ee08adf920d8c8fb50689f9f84dc7de",
+        "partner_assessment_visionary.json": "492cad09e74775f0bd2f45caf1dac437d069f2e29d23fe908d8f47092cddd5cc",
+        "partner_rebuttal_analyst.json": "675d883c4794a3fdc4a2e395801998b9da40e44b611a76fd0bb0e89eed2a7552",
+        "partner_rebuttal_operator.json": "4c151f6fce6ff59dc20318a1e99d22de0e380e73c8a3585587744fd5f35c324e",
+        "partner_rebuttal_visionary.json": "f9ab6d585cf7328e7c1f057ea196d178ff74a121f211b774c3ac1bc6df6e04aa",
+        "report.json": "8d2b0e6b1880eea0bd3467db72555dfe3725fab68aeee9c68a28dba76ecda3c0",
+        "report.md": "78884f00e63f6ff725507e777b43b9cd04e125072cdc31eb07bd5e7d913febab",
+        "score_dimensions.json": "22ad5f0cc59045cb9861cdac7a9ec5ad5ec618a1070dc4001dcd15a009dd2f18",
+        "startup_profile.json": "58d58aca268e5b9c70c27ab57489986f0e1d1582f139a5c1774a99dd7a08a7db"
+      },
+      "stderr": "6f9ae91be68440670f729747629bc8cb5e07c6433677c8cb0ed57bddedbda098",
+      "stdout": "f060d6330a132eb2cffc19c079f1376e4ffb70290639cc835c2669ffa043eb9c"
+    },
+    "plain": {
+      "exit": 0,
+      "files": {
+        "conflict_check.json": "6ff83b4ae658601d702f15a7218c59778caf602463ecb1b866a68f492cc48fc3",
+        "discussion.json": "925129077f59a307aadccbb3dfbf507b7f0d9eb40d586c3711cf426638b56a84",
+        "fund_profile.json": "81600822caa69351833c5aa3c107ecceb41875d643b243cd59c5ca4ff5a6f107",
+        "partner_assessment_analyst.json": "44c048560370e1e233c55ef1ae2a3297134ad729089066518f51784f856cd0a2",
+        "partner_assessment_operator.json": "df56304f83e5442bf75f21ecaaf731584ee08adf920d8c8fb50689f9f84dc7de",
+        "partner_assessment_visionary.json": "492cad09e74775f0bd2f45caf1dac437d069f2e29d23fe908d8f47092cddd5cc",
+        "partner_rebuttal_analyst.json": "675d883c4794a3fdc4a2e395801998b9da40e44b611a76fd0bb0e89eed2a7552",
+        "partner_rebuttal_operator.json": "4c151f6fce6ff59dc20318a1e99d22de0e380e73c8a3585587744fd5f35c324e",
+        "partner_rebuttal_visionary.json": "f9ab6d585cf7328e7c1f057ea196d178ff74a121f211b774c3ac1bc6df6e04aa",
+        "report.json": "4d405e3e9f5829f1fb3122bc6f73c4943d6706988f3d27ec772340b1d9141ca0",
+        "report.md": "af2bbf8363b97dd2459751913571640e9005795b105c77b75eee14c4c57771cb",
+        "score_dimensions.json": "25f80efe0ba0da7ef65f5fced690ad858d0a28ada72317100efeb0f80f5d50a6",
+        "startup_profile.json": "58d58aca268e5b9c70c27ab57489986f0e1d1582f139a5c1774a99dd7a08a7db"
+      },
+      "stderr": "240b22db92a7840b39c33464efdb63a9a07a49e56b92f3eeeb7846328cbfae9d",
+      "stdout": "5ef5afe4b2fdcf3009cbc9ea8392c0b8bc1c684430a96730a2cda29697452fe0"
+    },
+    "strict": {
+      "exit": 1,
+      "files": {
+        "conflict_check.json": "6ff83b4ae658601d702f15a7218c59778caf602463ecb1b866a68f492cc48fc3",
+        "discussion.json": "925129077f59a307aadccbb3dfbf507b7f0d9eb40d586c3711cf426638b56a84",
+        "fund_profile.json": "81600822caa69351833c5aa3c107ecceb41875d643b243cd59c5ca4ff5a6f107",
+        "partner_assessment_analyst.json": "44c048560370e1e233c55ef1ae2a3297134ad729089066518f51784f856cd0a2",
+        "partner_assessment_operator.json": "df56304f83e5442bf75f21ecaaf731584ee08adf920d8c8fb50689f9f84dc7de",
+        "partner_assessment_visionary.json": "492cad09e74775f0bd2f45caf1dac437d069f2e29d23fe908d8f47092cddd5cc",
+        "partner_rebuttal_analyst.json": "675d883c4794a3fdc4a2e395801998b9da40e44b611a76fd0bb0e89eed2a7552",
+        "partner_rebuttal_operator.json": "4c151f6fce6ff59dc20318a1e99d22de0e380e73c8a3585587744fd5f35c324e",
+        "partner_rebuttal_visionary.json": "f9ab6d585cf7328e7c1f057ea196d178ff74a121f211b774c3ac1bc6df6e04aa",
+        "report.json": "4d405e3e9f5829f1fb3122bc6f73c4943d6706988f3d27ec772340b1d9141ca0",
+        "report.md": "af2bbf8363b97dd2459751913571640e9005795b105c77b75eee14c4c57771cb",
+        "score_dimensions.json": "25f80efe0ba0da7ef65f5fced690ad858d0a28ada72317100efeb0f80f5d50a6",
+        "startup_profile.json": "58d58aca268e5b9c70c27ab57489986f0e1d1582f139a5c1774a99dd7a08a7db"
+      },
+      "stderr": "18cf83207b285cdb188118b2aaf2daa28680d7cb9fd7bc911e5d1135d1224cdf",
+      "stdout": "5ef5afe4b2fdcf3009cbc9ea8392c0b8bc1c684430a96730a2cda29697452fe0"
+    }
+  },
+  "ic_fund_profile": {
+    "fund_specific": {
+      "exit": 0,
+      "files": {
+        "fund_profile.json": "47d1df12a05ff3a335be66fc62efbbd62bf6bf1af873981d99258a0e3ff64e67"
+      },
+      "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout": "4e2db7e48a5bd4c3efe3e5939922809dac686c94cc082a85b7289b60becf141c"
+    },
+    "generic": {
+      "exit": 0,
+      "files": {
+        "fund_profile.json": "a105229fbe41a357267fed467f155f218ebd2f183d6491cb1936f686cf7d56b6"
+      },
+      "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout": "2a6d231de62443fe1ed8a70e739f6303c1e2de52a665320602d85c2c38ff04af"
+    },
+    "generic_stdout": {
+      "exit": 0,
+      "files": {},
+      "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout": "a105229fbe41a357267fed467f155f218ebd2f183d6491cb1936f686cf7d56b6"
+    },
+    "rejected": {
+      "exit": 0,
+      "files": {
+        "fund_profile.json": "903eaa3263febc93597f8c0c64ef89d60d4632749061e885e0089c8565b005fd"
+      },
+      "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout": "2c7bb769e779276ca951acb0f9fa2f1ba620e2585955419630648498a832a70c"
+    }
+  },
   "insert_coaching": {
     "already_inserted": {
       "exit": 0,

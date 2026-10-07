@@ -11,17 +11,6 @@ user-invocable: true
 
 Help startup founders prepare for the conversation that happens behind closed doors — the one where VC partners debate whether to invest. Produce a realistic IC simulation with three distinct partner perspectives, scored across 28 dimensions, with specific coaching on what to prepare. The tone is founder-first: a coaching tool for preparation, not a judgment.
 
-## Skill Metadata
-
-- **Author:** lool-ventures
-- **Version:** managed in `founder-skills/.claude-plugin/plugin.json`
-- **Compatibility:** Python 3.10+ and `uv` for script execution.
-- **Imports (recommended):**
-  - `market-sizing:sizing.json` — fund alignment and market validation
-  - `deck-review:checklist.json` — deck quality assessment
-- **Exports:**
-  - `report.json` → `fundraise-readiness`, `dd-readiness`
-
 ## Skill Execution Model (READ FIRST)
 
 > See `founder-skills/references/skill-execution-model.md` for the full inline-skill execution model (3 dispatch contexts, Mitigation 1+2, producer contract, Cowork quirks, per-symptom triage).
@@ -45,32 +34,6 @@ Context A **receipts** don't need this protocol by hand — `check_handoff.py --
 ## Input Formats
 
 Accept any combination: pitch deck, financial model, data room contents, text descriptions, prior market-sizing or deck-review artifacts, or just a verbal description of the business.
-
-## Available Scripts
-
-All scripts are at `${CLAUDE_PLUGIN_ROOT}/skills/ic-sim/scripts/`:
-
-- **`fund_profile.py`** — Validates fund profile structure (archetypes, check size, thesis, portfolio)
-- **`detect_conflicts.py`** — Validates conflict assessments and computes summary stats
-- **`compose_discussion.py`** — Derives `discussion.json` from the 3 round-1 assessments + 3 round-2 rebuttals (majority-vote consensus, debate sections from partners' own responses); rejects (exit 1, no file written) on a structurally invalid rebuttal round
-- **`score_dimensions.py`** — Scores 28 dimensions across 7 categories with conviction-based scoring
-- **`compose_report.py`** — Assembles report with cross-artifact validation; `--strict` exits 1 on high/medium warnings
-- **`visualize.py`** — Generates self-contained HTML with SVG charts (not JSON)
-
-Also available from `${CLAUDE_PLUGIN_ROOT}/scripts/` (shared):
-
-- **`founder_context.py`** — Per-company context management (init/read/merge/validate)
-
-Run with: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/ic-sim/scripts/<script>.py --pretty [args]`
-
-## Available References
-
-Read each when first needed — do NOT load all upfront. At `${CLAUDE_PLUGIN_ROOT}/skills/ic-sim/references/`:
-
-- **`partner-archetypes.md`** — Read before Step 4 (main-thread use ONLY: mapping real partners to archetypes in fund-specific mode). The operative archetype rubric the PARTNER_ANALYSIS sub-agent needs is duplicated in `agents/ic-sim.md` — the sub-agent never reads this file (see "Context A hand-off protocol" below); this is a documented split, not an oversight.
-- **`evaluation-criteria.md`** — No longer read by any workflow step. The operative 28-dimension rubric (status values, categories, stage calibration, dealbreaker thresholds, SaaS metrics) now lives in `agents/ic-sim.md`, inlined into the SCORE_DIMENSIONS sub-agent's system prompt. This file is kept as human-readable documentation only; edits to it do NOT propagate to sub-agent behavior — edit `agents/ic-sim.md` directly.
-- **`ic-dynamics.md`** — Background on how real VC ICs work: formats, decisions, what kills deals. Not read on a normal run — `discussion.json` is derived by `compose_discussion.py` from the partners' own assessments and rebuttals, with nothing authored by the main thread.
-- **`artifact-schemas.md`** — Consult as needed when depositing agent-written artifacts
 
 ## Artifact Pipeline
 
@@ -187,12 +150,21 @@ about 15–20 minutes and produces a scored report with the partner debate and t
 scoring, say so and I'll answer outside the IC simulation." Naming the trade-off is honest; quietly
 substituting the cheap version is not.
 
+**Then start the run's record, once**, with every request line that starts `FS_HOST_` copied between the markers (none: leave the placeholder, which is ignored). `RUN_ID` is the `run_id` it prints. Any non-zero exit here or from `bind` below: say in one sentence that the simulation could not start, and stop.
+
+```bash
+python3 "<printed PLUGIN_ROOT>/scripts/run_status.py" start --skill ic-sim --artifacts-root "<printed ARTIFACTS_ROOT>" <<'FS_HOST_EOF'
+<each FS_HOST_ line of the request>
+FS_HOST_EOF
+```
+
 After Step 1 (when the slug is known):
 
 ```bash
 SIM_DIR="$ARTIFACTS_ROOT/ic-sim-${SLUG}"
-mkdir -p "$SIM_DIR"
-RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
+RUN_ID="<the run_id start printed>"
+mkdir -p "$SIM_DIR" && python3 "$SHARED_SCRIPTS/run_status.py" bind --run-id "$RUN_ID" \
+  --artifacts-root "$ARTIFACTS_ROOT" --run-dir "$SIM_DIR" --slug "$SLUG" || exit 1
 # Context A hand-off dir — PER RUN: sub-agents WRITE their raw output JSON here (the audit trail —
 # raw sub-agent output as returned, before producer validation). Permanent by rule
 # (nothing under outputs/ is ever deleted, by this skill's rule); nothing in it is ever a canonical artifact.
@@ -222,29 +194,30 @@ STAGING_DIR="$(mktemp -d "${TMPDIR:-/tmp}/ic-sim-${SLUG:-co}.staging.XXXXXX")"
 printf 'RUN_ID=%s\nSTAGING_DIR=%s\nHANDOFF_DIR=%s\n' "$RUN_ID" "$STAGING_DIR" "$HANDOFF_DIR"
 ```
 
+**A resumed run** (`start` printed `resume: 1`) runs Step 1 and this block again, then continues at its `resume_step` (`8.5`: the decline question). What Steps 2-8 wrote is this run's: never re-run them on a resume, unless the founder brings new context at 8.5 (then as Step 8.5 says).
+
 Pass `RUN_ID` to all sub-agents. Every artifact written to `$SIM_DIR` must include `"metadata": {"run_id": "$RUN_ID"}` at the top level. `compose_report.py` checks that all artifact run IDs match — a mismatch triggers a `STALE_ARTIFACT` high-severity warning, blocking under `--strict`.
 
-**Overwrite-in-place — do NOT delete prior artifacts under `$SIM_DIR`.** It is the promoted `outputs/`
-tree in Cowork, where deleting a user-visible path is unsafe (our rule forbids it, and older hosts refused it; the parity gate flags
-it). Each producer writes its artifact fresh via `-o` every run, and `RUN_ID` is minted fresh per run —
+**Overwrite-in-place — do NOT delete prior artifacts under `$SIM_DIR`** (Step 0's append-only rule). Each producer writes its artifact fresh via `-o` every run, and every run has its own `RUN_ID` —
 so if a prior run left an artifact a later step doesn't regenerate, `compose_report.py`'s `STALE_ARTIFACT`
 check (run_ids must match) catches the mismatch. No bulk `rm` is needed or wanted.
 
 ### Step 1: Read or Create Founder Context
 
 ```bash
-python3 "$SHARED_SCRIPTS/founder_context.py" read --artifacts-root "$ARTIFACTS_ROOT" --pretty
+python3 "$SHARED_SCRIPTS/founder_context.py" read --artifacts-root "$ARTIFACTS_ROOT" --run-id "$RUN_ID" \
+  --skill ic-sim --pretty
 ```
 
-**Exit 0 (found):** Use the company slug and pre-filled fields. Proceed to Step 2.
+**Exit 0 (found):** Open the questions (the block below) first: only the mode and the fund are left to ask. Use the company slug and pre-filled fields. Proceed to Step 2.
 
-**Exit 1 (not found):** Expected on a first run — do NOT mention this check or its exit status to the founder; if you narrate anything first, say only "Let me grab a few basics about the company." Use `AskUserQuestion` (NOT plain chat) to ask for company name, stage, sector, and geography. **If `AskUserQuestion` is genuinely unavailable in the host, do NOT skip the ask and do NOT assume the answer:** ask the same question in plain chat, state the options explicitly, and wait for an answer before continuing. The ban above is on asking casually WHILE the tool is available — it is not a reason to stall a host that lacks it.
+**Exit 1 (not found: no `code`, or `CONTEXT_NOT_FOUND`):** Open the questions (the block below) first. Expected on a first run — do NOT mention this check or its exit status to the founder; if you narrate anything first, say only "Let me grab a few basics about the company." Use `AskUserQuestion` (NOT plain chat) to ask for company name, stage, sector, and geography. **If `AskUserQuestion` is genuinely unavailable in the host, do NOT skip the ask and do NOT assume the answer:** ask the same question in plain chat, state the options explicitly, and wait for an answer before continuing.
 
 **Stage is the one field with a real fixed label set — use it verbatim if asking.**
 Options: `Pre-seed` / `Seed` / `Series A` / `Series B+`
-→ `pre-seed | seed | series-a | series-b` (`founder_context.py`'s `VALID_STAGES` has 7 values including `series-c`/`series-d`/`later`; on a `Series B+` pick, ask a plain-text follow-up for the specific stage rather than defaulting to `series-b`). Company name, sector and geography cannot take fixed labels — shape each as an affirmative option carrying any derived value plus a stated-value fallback. Provide at least 2 options. Then create:
+→ `pre-seed | seed | series-a | series-b` (`founder_context.py`'s `VALID_STAGES` has 7 values including `series-c`/`series-d`/`later`; on a `Series B+` pick, ask a plain-text follow-up for the specific stage rather than defaulting to `series-b`). Company name, sector and geography cannot take fixed labels — shape each as an affirmative option carrying any derived value plus a stated-value fallback. Provide at least 2 options.
 
-**Auto-pilot cross-reference — derive field-by-field, never all-or-nothing (do not stall an unattended run on a question the materials already answer):** if the founder has selected Auto-pilot (see Mode Selection below) and provided materials (a deck, financial model, data room, or a sufficiently detailed description), derive each of the four basics — company name, stage, sector, geography — that the materials state, instead of gating on `AskUserQuestion`; a true unattended run should not stop and wait on a prompt whose answer is already in hand. Treat the four **independently**: deriving three and missing one does NOT re-gate all four. Before treating a field as missing, try to **infer** it from a clear signal in the materials (noting it as inferred, not founder-stated): geography from a phone country code, office address, or currency (e.g. a `+972` number → Israel); stage from an ambiguous fundraise signal (a named round, round size, or "raising our seed" language → the matching stage value); sector from the product category and ICP. When running interactively, fall back to `AskUserQuestion` for **only** the specific field(s) with no derivable or inferable signal (stating what you already derived). Under Auto-pilot — where you cannot ask — mark any field that still has no signal as `to_confirm` and proceed rather than stalling.
+**Auto-pilot cross-reference — derive field-by-field, never all-or-nothing (do not stall an unattended run on a question the materials already answer):** if the founder has selected Auto-pilot (see Mode Selection below) and provided materials (a deck, financial model, data room, or a sufficiently detailed description), derive each of the four basics — company name, stage, sector, geography — that the materials state, instead of gating on `AskUserQuestion`. Treat the four **independently**: deriving three and missing one does NOT re-gate all four. Before treating a field as missing, try to **infer** it from a clear signal in the materials (noting it as inferred, not founder-stated): geography from a phone country code, office address, or currency (e.g. a `+972` number → Israel); stage from an ambiguous fundraise signal (a named round, round size, or "raising our seed" language → the matching stage value); sector from the product category and ICP. When running interactively, fall back to `AskUserQuestion` for **only** the specific field(s) with no derivable or inferable signal (stating what you already derived). Under Auto-pilot, mark any field but the stage that still has no signal as `to_confirm` and proceed; a stage with no signal is asked.
 
 `--stage` is enum-validated (hyphenated, lowercase) — one of: `pre-seed`, `seed`, `series-a`,
 `series-b`, `series-c`, `series-d`, `later`. Passing a non-canonical token (e.g. `seriesa`,
@@ -263,18 +236,28 @@ the enum above rather than waiting for that warning.
 economics are not AI-native, and nothing downstream flags it. Pick the value matching the **revenue
 mechanics** (a logistics marketplace ⇒ `marketplace`; a freight SaaS ⇒ `saas`), state in the run that the
 sector has no exact enum value and which one you substituted, and treat the resulting benchmark comparisons
-as directional. If nothing matches on mechanics either, say so rather than choosing the least-wrong label
-silently.
+as directional.
+
+**Each question is a recorded gate: open, ask, answer.** Open them in one call before asking (with the mode and fund, Mode Selection below); ask from the printed `needs_input`, then record each reply with the `answer_command` it printed: the mode and fund first, then only the basics the mode and materials leave. A value the request or the materials give is recorded, not asked: `python3 "$SHARED_SCRIPTS/record_gate_answer.py" default --run-id "$RUN_ID" --artifacts-root "$ARTIFACTS_ROOT" --gate <gate> --reason stated_in_request --answer-id <option>` (or `derived_from_materials` / `inferred` with `--answer-id use_derived --value "<value>"`; under Auto-pilot a name, sector or geography with no signal takes `no_signal_marked_to_confirm` with `not_sure`, or `working_title` for the name; a stage with no signal is asked, under Auto-pilot too). A `Series B+` reply opens the follow-up (`ctx_stage_detail`): ask and record it the same way. <!-- gate: ctx_stage_detail -->
+
+```bash
+python3 "$SHARED_SCRIPTS/record_gate_answer.py" open --run-id "$RUN_ID" --artifacts-root "$ARTIFACTS_ROOT" \
+  --gate ctx_basics.company_name --gate ctx_basics.stage --gate ctx_basics.sector --gate ctx_basics.geography \
+  --gate ic_mode --gate ic_fund_mode
+```
+
+Then create (exit 10 names a question not yet recorded: ask it, record it, run `init` again):
 
 ```bash
 python3 "$SHARED_SCRIPTS/founder_context.py" init \
   --company-name "Acme Corp" --stage seed --sector "B2B SaaS" \
-  --geography "US" --artifacts-root "$ARTIFACTS_ROOT"
+  --geography "US" --artifacts-root "$ARTIFACTS_ROOT" \
+  --run-id "$RUN_ID" --skill ic-sim
   # Add --sector-type <value> if the auto-derivation warning fires or the sector
   # doesn't map cleanly to one of the 9 canonical sector-type values above.
 ```
 
-**Exit 2 (multiple):** Present the list, ask which company, re-read with `--slug`.
+**Exit 10 (several companies):** ask which from the printed `needs_input`, record it with its `answer_command`, then re-read with `--slug`; `A different company` → as Exit 1. <!-- gate: ctx_select_company --> Exit 1 with another `code`: report it and stop.
 
 #### Execution checkpoint — END OF STEP 1, READ BEFORE CONTINUING
 
@@ -308,11 +291,7 @@ run, whatever the transcript says.
 
 ### Mode Selection
 
-Ask the user (or infer from context):
-
-1. **Interactive** — Pause between partner positions for founder input
-2. **Auto-pilot** — Run all sections without pausing
-3. **Fund-specific** — Research a real fund first. Combines with either mode.
+Opened in Step 1's block. "Which mode should I run?" Options: `Interactive` / `Auto-pilot` (Auto-pilot fills Step 1 from the materials; neither pauses between partners or skips Step 8.5). "Should I simulate a generic fund, or research a real one?" Options: `Generic fund` / `A specific fund — I'll name it` (the name is its `--value`). A choice the request states is recorded `--reason stated_in_request`, not asked.
 
 ### Steps 2-3: Extract Startup Profile and Import Prior Artifacts
 
@@ -366,6 +345,8 @@ PRIOR_EOF
 **Generic mode:** Build a standard early-stage fund profile with the three canonical archetypes (visionary, operator, analyst). **OMIT the `portfolio` field entirely — do not fabricate holdings.** A generic fund is a synthesized/illustrative persona with no real portfolio; inventing companies here manufactures fictional conflicts against them downstream (Step 5), and those fabricated conflicts can distort the verdict. `portfolio` is optional in generic mode precisely so it can be left out. Use the example below verbatim as the shape, adapting only thesis/stage/check-size to the startup's sector — but keep `portfolio` absent.
 
 **Fund-specific mode:** Use WebSearch to research fund thesis, portfolio, partner backgrounds, check size range, and stage preference. Map real partners to archetype roles. Include the researched `portfolio` array and a `sources` array (each source needs `url` or `title`).
+
+`fund_profile.py` exits 10 while the mode or fund question is unrecorded (ask, record, re-run), and refuses a `mode` that is not the recorded fund choice (`generic` / `fund_specific`).
 
 **Validation constraints:** `check_size_range` must be a dict (not a string), `stage_focus` must be a non-empty array, each source must have `url` or `title`.
 
@@ -980,15 +961,13 @@ computed verdict is a decline/fatal-flaw outcome** (`pass` or `hard_pass`) — s
 when the verdict is `invest` or `more_diligence`; a stop on every run is a tax the founder
 shouldn't pay on a run that doesn't need one.
 
-Read the verdict from the producer's output — **trigger from this producer data, never from your
-own prose read of the discussion or partner assessments**:
+Open the question; the script reads `score_dimensions.json`'s `["summary"]["verdict"]` — **trigger from this producer data, never from your own prose read of the discussion or partner assessments**:
 
 ```bash
-python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["summary"]["verdict"])' "$SIM_DIR/score_dimensions.json"
+python3 "$SHARED_SCRIPTS/record_gate_answer.py" open --run-id "$RUN_ID" --artifacts-root "$ARTIFACTS_ROOT" --gate ic_decline_confirmation
 ```
 
-If the printed value is `invest` or `more_diligence`, skip the rest of this step and go straight
-to Step 9.
+Exit 11 (not owed: `invest` or `more_diligence`): skip the rest of this step and go straight to Step 9. `"applied": "pre_answer"`: the request answered it; go to Step 9 without asking. `RUN_FINISHED`: this simulation was already delivered; new materials start a new simulation (Step 0, without its `FS_HOST_RUN_ID`).
 
 If it is `pass` or `hard_pass`, **STOP before composing the report** and confirm with the founder.
 **Two separate steps — do not combine them** (same shape as every other two-step gate in this
@@ -1006,7 +985,7 @@ in."
 **Step B: AFTER the chat message, call `AskUserQuestion`** with a one-sentence, plain-text
 question — no markdown, no tables: `The scored result comes out to a Decline — want me to go ahead
 and finish the full write-up?` Options: `Yes, finish the write-up` / `Hold off — let me add more
-context first`.
+context first`. Record the reply with the printed `answer_command`.
 
 **If "Yes, finish the write-up"** (or any clear affirmative): proceed to Step 9 as normal. This is
 not a re-run and does not touch `score_dimensions.json` or any other artifact — the gate only
@@ -1016,14 +995,10 @@ confirms delivery, it never recomputes anything.
 scored artifacts already on disk aren't going anywhere (the append-only rule from Step 0 covers
 them) — and that you'll finish the write-up whenever they're ready, whether that means new
 materials or simply telling you to go ahead anyway. Do not proceed to Step 9, 10, 11, or 12 until
-a fresh founder response resumes the gate.
+a fresh founder response resumes the gate. The run now waits; do not send or name the report. To go ahead: record `finish`, then Step 9. New context while it waits: Steps 2-3 and 5-8 again (same `RUN_ID`), then this step; a changed score asks again, a non-decline skips it.
 
-**What this gate is NOT.** It does not replace, weaken, or duplicate the CONSENSUS_SCORE_MISMATCH
-disposition rule in Step 9 below — that rule governs how a qualitative/quantitative *mismatch* is
-presented once the report exists and is unchanged: present the mechanical verdict, note the
-divergence, never re-run to force agreement. This gate is upstream of that: it decides whether the
-report gets composed and shown at all when the mechanical verdict itself is already a decline. The
-two rules are independent and both stay in force.
+**What this gate is NOT.** It does not replace or weaken Step 9's CONSENSUS_SCORE_MISMATCH rule; it only
+decides whether a Decline's report is composed at all. Both stay in force.
 
 ### Step 9: Compose and Validate Report
 
@@ -1045,7 +1020,7 @@ Return (Decline / Invest / More Diligence), never the bare `pass`/`hard_pass` en
 mismatch as a noted caveat (the report already renders this as an executive-summary note); mention in your own summary
 that qualitative debate and the quantitative score diverged, without treating it as an error to fix.
 
-**Post-write verification:** `compose_report.py` exits non-zero (code 2) if the declared output files don't exist or are empty after writing. If compose exits non-zero, stop and report the exact stderr — do not proceed to Step 10.
+**Post-write verification:** `compose_report.py` exits non-zero (code 2) if the declared output files don't exist or are empty after writing. Exit 10 is a question, not a failure: ask the gate its JSON names (`blocked_by_gate`; `ic_decline_confirmation` is Step 8.5), record it, and compose again; never re-run compose without the answer. `RUN_FINISHED`: the simulation is complete and its score changed; that needs a new simulation (Step 0). Any other non-zero exit: stop and report the exact stderr — do not proceed to Step 10.
 
 ### Step 10: Post-Compose Coaching Commentary (Context B dispatch — POST_COMPOSE_COACHING)
 
@@ -1166,12 +1141,12 @@ The gate (`check_handoff.py --format=markdown`) verifies the sub-agent's hand-of
 - **`insert_coaching.py` exit 1** (blocked; stdout carries `{"status": "blocked", "reason": ...}`) → stop and report the exact reason. Do NOT hand-edit `report.md` — if the reason mentions a truncated report or a missing marker, re-run `compose_report.py --write-md` and retry the chain. If the reason is `commentary_markdown missing or empty`, treat as a malformed hand-off: repair-dispatch quoting the reason.
 - **After ANY corrective dispatch, resume from the gate chain** — never feed the transform+insert pipe an ungated file.
 
-**Retry budget:** max 2 corrective dispatches (same rule as Context A). **Graceful degrade:** if the FIRST corrective dispatch also exits 3 while the receipt claims `complete` with the correctly echoed path, treat the host topology as hand-off-incompatible and fall back to message-channel transport, and tell the founder in one plain sentence (see Context A's degrade rule). **The corrective dispatch MUST ask for the commentary inline for this to be reachable** — add: "the file hand-off is not working in this environment; return the coaching commentary itself as your final message, as raw markdown, with no receipt JSON and no fences." Without that line the fallback is unreachable: the normal Context B prompt instructs the agent to return ONLY the receipt and not to narrate, so its final message contains no markdown to stage. Then stage that returned markdown to `$STAGING_DIR/coaching.md` via a **single-quoted** `<<'COACHING_EOF'` heredoc (apostrophe-safe; NEVER `python -c`, NEVER the `outputs/` root — `$STAGING_DIR` is the `/tmp` scratch dir from Step 0, never the promoted outputs mount), and run the same `md_to_commentary.py "$STAGING_DIR/coaching.md" | insert_coaching.py` chain against that staged file.
+**Retry budget:** max 2 corrective dispatches (same rule as Context A). **Graceful degrade:** if the FIRST corrective dispatch also exits 3 while the receipt claims `complete` with the correctly echoed path, treat the host topology as hand-off-incompatible and fall back to message-channel transport, and tell the founder in one plain sentence (see Context A's degrade rule). **The corrective dispatch MUST ask for the commentary inline for this to be reachable** — add: "the file hand-off is not working in this environment; return the coaching commentary itself as your final message, as raw markdown, with no receipt JSON and no fences." Without that line the fallback is unreachable: the normal Context B prompt instructs the agent to return ONLY the receipt and not to narrate, so its final message contains no markdown to stage. Then stage that returned markdown to `$STAGING_DIR/coaching.md` via a **single-quoted** `<<'COACHING_EOF'` heredoc (apostrophe-safe), and run the same `md_to_commentary.py "$STAGING_DIR/coaching.md" | insert_coaching.py` chain against that staged file.
 
 ### Step 11 (Optional): Generate Visual Report
 
 ```bash
-python3 "$SCRIPTS/visualize.py" --dir "$SIM_DIR" -o "$SIM_DIR/report.html"
+python3 "$SCRIPTS/visualize.py" --dir "$SIM_DIR" --run-id "$RUN_ID" -o "$SIM_DIR/report.html"
 ```
 
 **Do not hand this over here** — the Deliver step below is the only place work reaches the founder, and it sends the complete set as files. A path presented here is the partial-delivery bug.
@@ -1179,6 +1154,12 @@ python3 "$SCRIPTS/visualize.py" --dir "$SIM_DIR" -o "$SIM_DIR/report.html"
 ### Step 12: Deliver Artifacts
 
 Copy final deliverables to the **workspace root — `$ARTIFACTS_ROOT/..`, i.e. the promoted outputs mount itself, NOT `$ARTIFACTS_ROOT` and NOT `$REVIEW_DIR`**: `{Company}_IC_Simulation.md`, `.html` (if generated), `.json` (optional). Concretely, if `$ARTIFACTS_ROOT` is `<mount>/artifacts` then these go to `<mount>/`. That is the level the founder sees as deliverable cards; `artifacts/` below it is working state. Do not infer the level by elimination — `dirname "$ARTIFACTS_ROOT"` is the answer.
+
+Before sending them, close the run's file list (for a host; nothing to tell the founder):
+
+```bash
+python3 "<printed PLUGIN_ROOT>/scripts/run_status.py" deliverables --run-id "$RUN_ID" --artifacts-root "$ARTIFACTS_ROOT" --final || :
+```
 
 **Send the finished work to the founder — the complete set, as files.** Not a path, and not a subset.
 A path is not a deliverable in Cowork — whether the workspace it names outlives the task depends on how
@@ -1211,10 +1192,6 @@ inputs — the validated figures and extractions this analysis was built from, p
 data. Never include pipeline hand-off files, receipts, coaching payloads, or gate state: they mean
 nothing outside the run that made them.
 
-No cleanup needed: scratch lives in `$STAGING_DIR` (`/tmp`, reclaimed by the sandbox). **Do not `rm`
-anything under `$SIM_DIR`** — it is the promoted `outputs/` tree in Cowork, where deleting a
-user-visible path is unsafe (and the parity gate flags it).
-
 ## Main-Thread Return
 
 This skill runs inline in the main thread (not as a sub-agent). The final outcome the main thread delivers to the founder is:
@@ -1236,9 +1213,7 @@ This skill runs inline in the main thread (not as a sub-agent). The final outcom
   - neither set (earned on the merits) → "More Diligence — promising but needs more evidence"
   - `coverage_held` → "More Diligence — too little disclosed to reach a verdict". Same wording as
     `coverage_floored`: nothing moved the verdict, but coverage was too thin for "promising" to describe
-    anything that was actually assessed. **This is the case that used to slip through** — the verdict lands
-    in the band on its own, so neither the cap nor the floor fires, and the merits wording appeared on a
-    scorecard where almost nothing was scoreable.
+    anything that was actually assessed.
   - `coverage_floored` → "More Diligence — too little disclosed to reach a verdict (not a negative
     signal)". Do NOT say "promising": nothing was assessed, so nothing has been found promising.
   - `coverage_capped` → "More Diligence — the confirmed dimensions score well, but too much is
@@ -1271,7 +1246,7 @@ much is unconfirmed to say so.
 
 ## What-If Recomputation Rule
 
-If the founder asks "what if [dimension] changed to [status]": re-run `score_dimensions.py` with the updated item statuses and present the script's output. Never recompute the conviction score by hand — the formula (strong×1.0 + moderate×0.5) ÷ applicable × 100 interacts with dealbreaker override logic in non-obvious ways, and the script is the authoritative source.
+If the founder asks "what if [dimension] changed to [status]": re-run `score_dimensions.py` with the updated item statuses, `-o` under `$STAGING_DIR` (never this run's `score_dimensions.json`), and present the script's output. Never recompute the conviction score by hand — the formula (strong×1.0 + moderate×0.5) ÷ applicable × 100 interacts with dealbreaker override logic in non-obvious ways, and the script is the authoritative source.
 
 ## Cross-Agent Integration
 

@@ -345,6 +345,16 @@ def _handoff_audit() -> Any:
 _ARCHETYPES = ("visionary", "operator", "analyst")
 
 
+def _ic_gates() -> Any:
+    """The sibling `_ic_gates` (it loads nothing shared until a run has a ledger)."""
+    scripts_dir = os.path.dirname(os.path.abspath(__file__))
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    import _ic_gates
+
+    return _ic_gates
+
+
 def _handoff_bypassed(dir_path: str, artifacts: dict[str, Any]) -> list[str]:
     """Which sub-agent steps this report's artifacts came from have no gated hand-off in this run.
 
@@ -363,7 +373,9 @@ def _handoff_bypassed(dir_path: str, artifacts: dict[str, Any]) -> list[str]:
     audit = _handoff_audit()
     if audit is None:
         return []
-    run_id = next(
+    # The run id the files agree on (`_ic_gates.run_id_of`, the one compose's gate checks read), else, as
+    # before, the first one found.
+    run_id = _ic_gates().run_id_of(dir_path) or next(
         (
             rid
             for name in REQUIRED_ARTIFACTS
@@ -1833,6 +1845,16 @@ def main() -> None:
         print(f"Error: directory not found: {args.dir}", file=sys.stderr)
         sys.exit(1)
 
+    # THE RUN'S GATE LEDGER, when it has one: a delivered simulation is never composed again, a Decline is
+    # written up only once its question is recorded, and a question opened and never recorded refuses the
+    # report. With no `run_ref.json` none of this runs.
+    gates = _ic_gates()
+    run_id = gates.run_id_of(args.dir)
+    gates.refuse_without_run_id(args.dir, run_id)
+    ledger = gates.require_or_exit(args.dir, run_id, [gates.DECLINE_GATE], by="compose_report.py")
+    if ledger is not None:
+        gates.refuse_open_gates(ledger)
+
     report_path = os.path.abspath(args.write_md) if args.write_md else None
     result = compose(args.dir, report_path=report_path)
 
@@ -1879,6 +1901,9 @@ def main() -> None:
                 file=sys.stderr,
             )
             sys.exit(2)
+
+    if ledger is not None:
+        gates.coaching_pending(ledger)
 
     if args.strict:
         blocking = [w for w in result["validation"]["warnings"] if w["severity"] in ("high", "medium")]

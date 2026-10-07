@@ -197,6 +197,20 @@ def main() -> None:
         print("Error: JSON must be an object", file=sys.stderr)
         sys.exit(1)
 
+    # THE RUN'S GATE LEDGER, when the profile is written into a run's dir: the mode and fund questions are
+    # recorded before the profile is built, and the profile is the fund the founder chose. With no
+    # `run_ref.json` none of this runs.
+    if args.output:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import _ic_gates
+
+        run_dir = os.path.dirname(os.path.abspath(args.output))
+        ledger = _ic_gates.require_or_exit(
+            run_dir, args.run_id, [_ic_gates.MODE_GATE, _ic_gates.FUND_GATE], by="fund_profile.py"
+        )
+        if ledger is not None:
+            _ic_gates.fund_choice_or_exit(ledger, data.get("mode"))
+
     result = validate_fund_profile(data)
 
     # Inject metadata.run_id as the last step before serialization (overrides any stdin metadata).

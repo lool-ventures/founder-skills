@@ -1181,3 +1181,124 @@ def test_a_market_sizing_resume_at_the_approach_question_rewrites_only_what_foll
     assert untouched == MS_KEPT_ON_RESUME
     touched = entry["touched_since_resume"]
     assert {"validation_json", "sizing_json", "report_md"} <= set(touched)
+
+
+# --- ic-sim: a resume at the decline question --------------------------------------------------------------
+
+IC_SCRIPTS = h.SKILLS / "ic-sim" / "scripts"
+IC_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "ic-sim"
+# Steps 2-8's files: a resume at 8.5 writes none of them again.
+IC_KEPT_ON_RESUME = frozenset(
+    (
+        "startup_profile_json",
+        "prior_artifacts_json",
+        "fund_profile_json",
+        "conflict_check_json",
+        "partner_assessment_visionary_json",
+        "partner_assessment_operator_json",
+        "partner_assessment_analyst_json",
+        "partner_rebuttal_visionary_json",
+        "partner_rebuttal_operator_json",
+        "partner_rebuttal_analyst_json",
+        "discussion_json",
+        "score_dimensions_json",
+    )
+)
+
+
+def _ic_fixture(name: str, run_id: str) -> dict[str, Any]:
+    data: dict[str, Any] = json.loads((IC_FIXTURES / name).read_text(encoding="utf-8"))
+    data["metadata"] = {"run_id": run_id}
+    return data
+
+
+def _ic_first_invocation(tmp: Path) -> tuple[Path, str, Path]:
+    """Steps 1-8 of a simulation that scores a Decline, ending with the founder's hold-off."""
+    root, run_id, run_dir = h.start_bound(tmp, "ic-sim")
+    rec = lambda *a: _fmr_ok(h.record(root, run_id, *a))  # noqa: E731
+    keys = ("ctx_basics.company_name", "ctx_basics.stage", "ctx_basics.sector", "ctx_basics.geography")
+    rec("open", *[a for k in (*keys, "ic_mode", "ic_fund_mode") for a in ("--gate", k)])
+    rec(
+        "answer",
+        *("--gate", "ctx_basics.company_name", "--answer-id", "use_derived", "--value", "Example Co"),
+        *("--gate", "ctx_basics.stage", "--answer-id", "seed"),
+        *("--gate", "ctx_basics.sector", "--answer-id", "use_derived", "--value", "B2B SaaS"),
+        *("--gate", "ctx_basics.geography", "--answer-id", "use_derived", "--value", "US"),
+        *("--gate", "ic_mode", "--answer-id", "interactive"),
+        *("--gate", "ic_fund_mode", "--answer-id", "generic"),
+    )
+    init = ("init", "--company-name", "Example Co", "--stage", "seed", "--sector", "B2B SaaS", "--geography", "US")
+    _fmr_ok(
+        h.run(
+            h.SHARED / "founder_context.py",
+            *init,
+            "--artifacts-root",
+            str(root),
+            "--run-id",
+            run_id,
+            "--skill",
+            "ic-sim",
+        )
+    )
+    for name in ("startup_profile.json",):
+        (run_dir / name).write_text(json.dumps(_ic_fixture(name, run_id)), encoding="utf-8")
+    prior = {"imported": [], "skipped": True, "reason": "none", "metadata": {"run_id": run_id}}
+    (run_dir / "prior_artifacts.json").write_text(json.dumps(prior), encoding="utf-8")
+    fund = {k: v for k, v in _ic_fixture("fund_profile.json", run_id).items() if k not in ("validation", "metadata")}
+    out = str(run_dir / "fund_profile.json")
+    _fmr_ok(h.run(IC_SCRIPTS / "fund_profile.py", "--run-id", run_id, "-o", out, stdin=json.dumps(fund)))
+    stub = ("--generic-stub", "--run-id", run_id, "-o", str(run_dir / "conflict_check.json"))
+    _fmr_ok(h.run(IC_SCRIPTS / "detect_conflicts.py", *stub))
+    for role in ("visionary", "operator", "analyst"):
+        for kind in ("assessment", "rebuttal"):
+            name = f"partner_{kind}_{role}.json"
+            (run_dir / name).write_text(json.dumps(_ic_fixture(name, run_id)), encoding="utf-8")
+    disc = ("--dir", str(run_dir), "--run-id", run_id, "-o", str(run_dir / "discussion.json"))
+    _fmr_ok(h.run(IC_SCRIPTS / "compose_discussion.py", *disc))
+    items = _ic_fixture("score_dimensions.json", run_id)["items"]
+    for item in items:
+        if item.get("status") in ("strong_conviction", "moderate_conviction"):
+            item["status"] = "concern"
+    scored = ("--run-id", run_id, "--fund-mode", "generic", "-o", str(run_dir / "score_dimensions.json"))
+    _fmr_ok(h.run(IC_SCRIPTS / "score_dimensions.py", *scored, stdin=json.dumps({"items": items})))
+    verdict = json.loads((run_dir / "score_dimensions.json").read_text(encoding="utf-8"))["summary"]["verdict"]
+    assert verdict in ("pass", "hard_pass"), f"the lever: the scores must make a Decline, got {verdict!r}"
+    _wait(root, run_id, "ic_decline_confirmation")
+    rec("answer", "--gate", "ic_decline_confirmation", "--answer-id", "hold_off")
+    assert h.status(root, run_id)["code"] == "GATE_INTERMEDIATE"
+    return root, run_id, run_dir
+
+
+def test_an_ic_sim_resume_at_the_decline_question_rewrites_only_what_follows_it(tmp_path: Path) -> None:
+    root, run_id, run_dir = _ic_first_invocation(tmp_path)
+    for f in run_dir.glob("*.json"):
+        _age(f)
+    lines = f"FS_HOST_RUN_ID={run_id}\nFS_HOST_ANSWER ic_decline_confirmation=finish\n"
+    out = _out(_fmr_ok(h.start(root, "ic-sim", lines)))
+    assert (out["resume"], out["resume_step"]) == (1, "8.5")
+    read = ("read", "--artifacts-root", str(root), "--run-id", run_id, "--skill", "ic-sim")
+    _fmr_ok(h.run(h.SHARED / "founder_context.py", *read))
+    _fmr_ok(h.bind(root, run_id, run_dir, "example-co"))
+    opened = json.loads(_fmr_ok(h.record(root, run_id, "open", "--gate", "ic_decline_confirmation")).stdout)
+    assert opened["applied"] == "pre_answer"
+    entry = h.ledger(root, run_id)["gates"]["ic_decline_confirmation"]
+    assert (entry["current"]["answer_id"], entry["current"]["asked_evidence"]) == ("finish", "host_line")
+    compose = ("--dir", str(run_dir), "-o", str(run_dir / "report.json"), "--write-md", str(run_dir / "report.md"))
+    _fmr_ok(h.run(IC_SCRIPTS / "compose_report.py", *compose))
+    page = ("--dir", str(run_dir), "--run-id", run_id, "-o", str(run_dir / "report.html"))
+    _fmr_ok(h.run(IC_SCRIPTS / "visualize.py", *page))
+    st = _complete(root, run_id)
+
+    entry = st["invocations"][1]
+    untouched = {k for k in entry["untouched_since_resume"] if not k.startswith("handoff_")}
+    assert untouched == IC_KEPT_ON_RESUME
+    assert {"report_json", "report_md", "report_html"} <= set(entry["touched_since_resume"])
+
+
+def test_an_ic_sim_resume_without_the_answer_asks_again(tmp_path: Path) -> None:
+    root, run_id, run_dir = _ic_first_invocation(tmp_path)
+    _resume(root, "ic-sim", run_id)
+    _fmr_ok(h.bind(root, run_id, run_dir, "example-co"))
+    opened = json.loads(_fmr_ok(h.record(root, run_id, "open", "--gate", "ic_decline_confirmation")).stdout)
+    assert opened.get("applied") is None and len(opened["needs_input"]) == 1
+    assert h.status(root, run_id)["status"] == "waiting"

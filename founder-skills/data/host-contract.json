@@ -28,6 +28,9 @@
     "html_writers": [
       "RUN_ID_MISMATCH"
     ],
+    "ic_producers": [
+      "RUN_ID_REQUIRED"
+    ],
     "ms_producers": [
       "RUN_ID_REQUIRED",
       "PERIOD_NOT_WRITTEN"
@@ -2596,7 +2599,9 @@
     "A `complete` financial-model-review run returns to `running`, with `revision` + 1 and `handed_over_at` cleared, when the founder answers the cash follow-up; it completes again at the next coaching insert.",
     "An enforcer never re-opens a finished run's answer: on a `complete` or `refused` run whose confirmed input changed, it refuses `RUN_FINISHED` and writes nothing; a changed figure after `complete` needs a new run.",
     "`ms_two_figures` has one instance per input the founder stated two figures for (`FS_HOST_ANSWER ms_two_figures.arpu=typed`). The bare `FS_HOST_ANSWER ms_two_figures=<option>` answers every instance; a line naming an instance wins for that instance. Its alternatives' ids are keyed on the figure (`alt_<value>[_<period>]`), so only `typed` is known before the run.",
-    "A question the run no longer owes (its parent was answered otherwise, its condition no longer holds, or the run's mode does not ask it) is closed `not_applicable` by script; if the run owes it again it is re-opened and asked, never read as answered."
+    "A question the run no longer owes (its parent was answered otherwise, its condition no longer holds, or the run's mode does not ask it) is closed `not_applicable` by script; if the run owes it again it is re-opened and asked, never read as answered.",
+    "`ic_decline_confirmation` is owed only while this run's scored verdict is a Decline (`pass` or `hard_pass`); a request line for it applies only then. `hold_off` cannot be sent ahead: recorded, it leaves the run `waiting` until `finish` is. A scores file that cannot be read or carries another run's id makes the gate `GATE_UNDECIDABLE` (exit 2) rather than not owed.",
+    "ic-sim refuses `RUN_FINISHED` (exit 1, nothing written) when its fund profile or report is built again for a `complete` run: new materials after delivery are a new simulation, under a new run id."
   ],
   "pages_after_coaching": {
     "cap-table": [],
@@ -2754,6 +2759,7 @@
     "LEDGER_MISSING",
     "REGISTRY_UNREACHABLE",
     "GATE_NOT_WIRED",
+    "GATE_UNDECIDABLE",
     "LOCK_UNAVAILABLE",
     "RUN_DIR_OUTSIDE_ROOT",
     "SKILL_UNKNOWN"

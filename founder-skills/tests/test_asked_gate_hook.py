@@ -159,14 +159,50 @@ SHIPPED_ROWS = {
     ("CHECKLIST", "financial-model-review"): "fmr_extracted_values",
     ("TOP_DOWN_METHODOLOGY", "market-sizing"): "ms_methodology",
     ("BOTTOM_UP_METHODOLOGY", "market-sizing"): "ms_methodology",
+    ("POST_COMPOSE_COACHING", "ic-sim"): "ic_decline_confirmation",
 }
-_NOT_SHIPPED = [c for c in ROW_CASES if (c[0], c[1]) not in SHIPPED_ROWS]
 
 
 def test_the_shipped_table_is_exactly_the_rows_whose_skills_ask_with_the_registry_labels() -> None:
-    """financial-model-review's Step 3.6 and market-sizing's Gate ask the registry's question and labels; ic-sim
-    enables its row when it is wired."""
-    assert SHIPPED.ROWS == SHIPPED_ROWS
+    """financial-model-review's Step 3.6, market-sizing's Gate and ic-sim's Step 8.5 ask the registry's question
+    and labels, so every planned row is enabled."""
+    assert SHIPPED.ROWS == SHIPPED_ROWS == SHIPPED.PLANNED_ROWS
+
+
+def test_the_shipped_hook_holds_an_ic_coaching_dispatch_on_a_decline_once(tmp_path: Path) -> None:
+    payload = _payload(tmp_path, _start("ic-sim"), "POST_COMPOSE_COACHING", "ic-sim")
+    r = subprocess.run(["sh", str(WRAPPER)], input=json.dumps(payload), capture_output=True, text=True, timeout=30)
+    assert r.returncode == 0 and f"{MARKER}[ic-sim:POST_COMPOSE_COACHING]" in r.stdout, r
+    reason = _reason(SHIPPED.decide(payload))
+    assert "do not send the report" in reason
+    retry = [*_start("ic-sim"), _result("toolu_x", reason, is_error=True)]
+    assert SHIPPED.decide(_payload(tmp_path, retry, "POST_COMPOSE_COACHING", "ic-sim")) is None, "one retry"
+
+
+@pytest.mark.parametrize("verdict", ["invest", "more_diligence"])
+def test_the_shipped_hook_passes_an_ic_coaching_dispatch_that_is_no_decline(tmp_path: Path, verdict: str) -> None:
+    """Paired with its control: the same readable file scoring a decline is held, so the pass is the verdict's,
+    not a file the hook failed to read (which also passes, failing open)."""
+    payload = _payload(tmp_path, _start("ic-sim"), "POST_COMPOSE_COACHING", "ic-sim")
+    scores = tmp_path / "artifacts" / "ic-sim-acme" / "score_dimensions.json"
+    scores.write_text(json.dumps({"summary": {"verdict": verdict}}), encoding="utf-8")
+    assert SHIPPED.decide(payload) is None
+    scores.write_text(json.dumps({"summary": {"verdict": "pass"}}), encoding="utf-8")
+    assert SHIPPED.decide(payload) is not None, "control: a decline in the same file is held"
+
+
+def test_the_shipped_hook_passes_ic_after_hold_off_then_finish_and_on_a_host_resume(tmp_path: Path) -> None:
+    labels = _labels("ic_decline_confirmation")
+    rows = [*_start("ic-sim"), *_asked(labels), _text("Pausing here."), _user("OK, finish it."), _text("Composing.")]
+    assert _decide(tmp_path, rows, "POST_COMPOSE_COACHING", "ic-sim", mod=SHIPPED) is None
+    resume = f"Resume the ic-sim run.\nFS_HOST_RUN_ID={RUN_ID}\nFS_HOST_ANSWER ic_decline_confirmation=finish\n"
+    assert _decide(tmp_path, [_user(resume), _skill("ic-sim")], "POST_COMPOSE_COACHING", "ic-sim", mod=SHIPPED) is None
+
+
+def test_the_hooks_declines_are_the_registrys() -> None:
+    """The hook cannot load `_gates`, so it carries the decline verdicts itself. It does not check the scores
+    file's run id as the registry's predicate does: at worst it holds once more than needed, never less."""
+    assert tuple(SHIPPED.DECLINES) == tuple(_gates.IC_DECLINES)
 
 
 def test_the_shipped_hook_holds_an_fmr_checklist_with_nothing_asked_once(tmp_path: Path) -> None:
@@ -212,18 +248,6 @@ def test_the_shipped_hook_passes_a_question_asked_word_for_word_from_needs_input
         *_asked(figures, call_id="toolu_f", question=_gates.GATES["ms_two_figures"]["question"]),
     ]
     assert _wrapper(tmp_path, rows, mod=SHIPPED) is None
-
-
-@pytest.mark.parametrize(("context", "agent", "gate"), _NOT_SHIPPED, ids=[c[1] for c in _NOT_SHIPPED])
-def test_the_shipped_hook_holds_no_planned_dispatch_with_nothing_asked(
-    tmp_path: Path, context: str, agent: str, gate: str
-) -> None:
-    payload = _payload(tmp_path, _start(agent), context, agent)
-    r = subprocess.run(["sh", str(WRAPPER)], input=json.dumps(payload), capture_output=True, text=True, timeout=30)
-    assert r.returncode == 0, r
-    assert MARKER not in r.stdout and "asked_gate_check" not in r.stderr, r
-    assert SHIPPED.decide(payload) is None
-    assert _load().decide(payload) is not None, "control: the same dispatch is held once the row is enabled"
 
 
 def test_the_labels_and_questions_are_the_registrys() -> None:
@@ -749,7 +773,7 @@ def test_the_reason_reads_as_plain_words(tmp_path: Path, context: str, agent: st
     for token in (".py", ".json", "FS_HOST", "--", gate, "asked_evidence", "hook"):
         assert token not in text, token
     if gate == "ic_decline_confirmation":
-        assert "do not dispatch; pause until they are ready" in text
+        assert "do not dispatch and do not send the report; pause until they are ready" in text
 
 
 # --- the record --------------------------------------------------------------------------------------

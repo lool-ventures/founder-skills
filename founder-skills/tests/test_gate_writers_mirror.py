@@ -61,6 +61,8 @@ def _out(proc: subprocess.CompletedProcess[str]) -> dict[str, Any]:
         "ms_checklist",
         "ms_compose",
         "ms_closer",
+        "ic_fund_profile",
+        "ic_compose",
     ],
 )
 def test_with_no_ledger_each_writer_matches_its_golden(group: str) -> None:

@@ -207,7 +207,6 @@ UNIMPLEMENTED = {
         "ct_producer_reports_null",
         "ct_safe_terms_missing",
         "ct_scenarios_owed",
-        "ic_verdict_decline",
     ],
     "option_sources": [
         "cp_competitor_slugs",
@@ -463,6 +462,9 @@ _CODE_SOURCES = [
     SKILLS / "financial-model-review" / "scripts" / "compose_report.py",
     SKILLS / "market-sizing" / "scripts" / "record_revision_answer.py",
     SKILLS / "market-sizing" / "scripts" / "_ms_gates.py",
+    SKILLS / "ic-sim" / "scripts" / "_ic_gates.py",
+    SKILLS / "ic-sim" / "scripts" / "compose_report.py",
+    SKILLS / "ic-sim" / "scripts" / "fund_profile.py",
     SKILLS / "cap-table" / "scripts" / "extract_cap_table.py",
     *_HTML_WRITERS,
 ]
@@ -556,6 +558,8 @@ def test_an_option_offered_by_some_skills_says_which() -> None:
 # left the list. Kept deliberately: `corrections_applied` (hidden; a host's or the recorder's word), the cash
 # questions and `stated` (asked from the printed `needs_input`), and the cash follow-up (the closer's own
 # sentence asks for the balance; the reply is recorded as `provided`).
+# ic-sim (wired): Mode Selection asks the registry's mode and fund questions with their labels, so those three
+# left the list; the decline question and its labels were already in its text.
 # deck-review (wired): its text names `A different company` and `Stop the review`, so those two left the
 # list. The rest of its entries and the shared ones stay deliberately: the model asks those questions from
 # the `needs_input` block a script prints, so SKILL.md need not carry their words.
@@ -593,9 +597,6 @@ NEW_WORDING = {
     ("fmr_extracted_values", "corrections_applied"),
     ("fmr_cash_followup", "question"),
     ("fmr_cash_followup", "provided"),
-    ("ic_mode", "question"),
-    ("ic_fund_mode", "question"),
-    ("ic_fund_mode", "specific"),
     ("cp_product_profile", "question.product"),
     ("cp_product_profile", "question.customers"),
     ("cp_product_profile", "question.differentiation"),

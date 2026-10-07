@@ -870,6 +870,69 @@ def ms_closer_scenarios() -> dict[str, dict[str, Any]]:
     return out
 
 
+# --- ic-sim -----------------------------------------------------------------------------------
+
+IC_SCRIPTS = SKILLS / "ic-sim" / "scripts"
+
+
+def ic_fund_profile_scenarios() -> dict[str, dict[str, Any]]:
+    """fund_profile.py as Step 4 calls it, in a dir with no run ref: a generic profile, a fund-specific one,
+    and a profile it rejects (which it writes through `-o` and exits 0, as it always has)."""
+    generic = json.loads((FIXTURES / "ic-sim" / "fund_profile.json").read_text(encoding="utf-8"))
+    for key in ("validation", "metadata"):
+        generic.pop(key, None)
+    specific = {**generic, "mode": "fund_specific", "portfolio": [{"name": "Example Portfolio Co"}]}
+    out: dict[str, dict[str, Any]] = {}
+    for name, body, to_file in (
+        ("generic_stdout", generic, False),
+        ("generic", generic, True),
+        ("fund_specific", specific, True),
+        ("rejected", {"fund_name": "Example Fund"}, True),
+    ):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            argv = [str(IC_SCRIPTS / "fund_profile.py"), "--pretty", "--run-id", GATE_RUN]
+            if to_file:
+                argv += ["-o", str(root / "fund_profile.json")]
+            out[name] = result(run(argv, stdin=json.dumps(body)), td, root)
+    return out
+
+
+def _ic_dir(root: Path, verdict: str | None = None) -> None:
+    import shutil
+
+    for f in (FIXTURES / "ic-sim").iterdir():
+        if f.is_file():
+            shutil.copy(f, root / f.name)
+    if verdict is not None:
+        scores = json.loads((root / "score_dimensions.json").read_text(encoding="utf-8"))
+        scores["summary"]["verdict"] = verdict
+        (root / "score_dimensions.json").write_text(json.dumps(scores), encoding="utf-8")
+
+
+def ic_compose_scenarios() -> dict[str, dict[str, Any]]:
+    out: dict[str, dict[str, Any]] = {}
+    for name, verdict, extra in (("plain", None, []), ("decline", "pass", []), ("strict", None, ["--strict"])):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            _ic_dir(root, verdict)
+            argv = [
+                str(IC_SCRIPTS / "compose_report.py"),
+                "--dir",
+                str(root),
+                "-o",
+                str(root / "report.json"),
+                "--write-md",
+                str(root / "report.md"),
+                *extra,
+            ]
+            proc = run(argv)
+            res = result(proc, td, root)
+            res["stdout"] = _sha(re.sub(r'"bytes": ?\d+', '"bytes":<N>', normalise(proc.stdout, td)))
+            out[name] = res
+    return out
+
+
 GROUPS: dict[str, Callable[[], dict[str, dict[str, Any]]]] = {
     "html": lambda: {f"{s}/{w}": html_scenario(s, w) for s, w, _k in HTML_WRITERS},
     "insert_coaching": coaching_scenarios,
@@ -892,6 +955,8 @@ GROUPS: dict[str, Callable[[], dict[str, dict[str, Any]]]] = {
     "ms_checklist": ms_checklist_scenarios,
     "ms_compose": ms_compose_scenarios,
     "ms_closer": ms_closer_scenarios,
+    "ic_fund_profile": ic_fund_profile_scenarios,
+    "ic_compose": ic_compose_scenarios,
 }
 
 

@@ -1,5 +1,7 @@
 # Evaluation Criteria
 
+> Documentation only: no workflow step reads this file. The scoring rubric the scoring sub-agent uses is inlined in `agents/ic-sim.md`; an edit here changes nothing it does.
+
 28 dimensions across 7 categories for scoring a startup's IC readiness. Each dimension is evaluated by the agent (LLM) based on available evidence, then scored computationally by `score_dimensions.py`.
 
 ## Status Values

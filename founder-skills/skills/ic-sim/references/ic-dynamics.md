@@ -1,5 +1,7 @@
 # VC Investment Committee Dynamics
 
+> Background only: a normal run does not read it. `discussion.json` is derived by `compose_discussion.py` from the partners' own assessments.
+
 How real VC Investment Committees work — structure, decision models, and what kills deals. This reference grounds the IC simulation in actual fund mechanics so the simulation produces realistic, useful feedback.
 
 ## What Is an Investment Committee?

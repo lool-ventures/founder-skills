@@ -1165,7 +1165,12 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 94,715 -> 94,841 (+126 B) on 2026-10-05: the Step 0 STAGING_DIR block says
     # scratch output (a redirect or a temp file) goes in $STAGING_DIR, never a fixed /tmp/<name>, because
     # /tmp is shared across sessions.
-    "ic-sim": 94_841,
+    # 94,841 -> 94,814 (-27 B) on 2026-10-08: gates wired. The catalog sections (Skill Metadata, Available
+    # Scripts, Available References) are out, their maintainer notes moved to the three reference headers; Step 0
+    # starts the run's record after the run-it-now offer, the slug block binds it, Step 1 opens the shared
+    # questions with the mode and fund, Step 8.5 opens the decline question by script, compose and the page
+    # carry exit-10 / finished-run sentences, Step 12 closes the deliverables list. Eight restatements trimmed.
+    "ic-sim": 94_814,
     # deck-review +1,165 B: Step 0 carried only a parenthetical fresh-shell mention buried in a code
     # comment, unlike the four skills that mint RUN_ID in a LATER block and so carry the shared banner.
     # deck-review mints RUN_ID INSIDE this re-runnable Step-0 block (like cap-table), so the shared
@@ -2085,7 +2090,10 @@ REFERENCES_CEILING: dict[str, int] = {
     # ic-sim +1446 B: evaluation-criteria.md omitted `to_confirm` from the status table AND from the
     # scoring formula, which excluded only not_applicable. Following it changed the conviction
     # score, since score_dimensions.py excludes both. The >6 coverage cap was undocumented too.
-    "ic-sim": 55_805,
+    # ic-sim 55,805 -> 56,354 (+549 B) on 2026-10-08: the maintainer notes SKILL.md's Available References
+    # carried (which file a step reads, which is documentation only, where the sub-agents' copy lives) moved
+    # into the three references' headers when the catalog left SKILL.md.
+    "ic-sim": 56_354,
     # 49_039 -> 50_080 (R1): artifact-schemas.md now documents the evidence/notes
     # contract and its JSON example demonstrates a fail item carrying both.
     # 50_080 -> 50_124 (R2): artifact-schemas.md documents the half-credit formula.
@@ -2901,9 +2909,20 @@ GATE_SITES: dict[str, dict[str, tuple[str, ...]]] = {
         "unspecified": (),
     },
     "ic-sim": {
-        "declared": ("decline-delivery confirmation", "founder-context init — stage"),
+        # 2026-10-08: the mode and fund questions (Mode Selection, opened in Step 1's block) are recorded gates
+        # with Options: lines; the picker and the stage follow-up are asked from the `needs_input` a script prints.
+        "declared": (
+            "decline-delivery confirmation",
+            "founder-context init — stage",
+            "mode (ic_mode)",
+            "fund (ic_fund_mode)",
+        ),
         "prose": (),
-        "runtime-labelled": ("founder-context init — name/sector/geography",),
+        "runtime-labelled": (
+            "founder-context init — name/sector/geography",
+            "company picker (ctx_select_company)",
+            "stage follow-up (ctx_stage_detail)",
+        ),
         "exempt": (),
         "unspecified": (),
     },
@@ -3066,7 +3085,9 @@ ASKUSER_MENTIONS: dict[str, int] = {
 SPECS_VISIBLE_FLOOR: dict[str, int] = {
     "market-sizing": 3,
     "deck-review": 4,
-    "ic-sim": 2,
+    # 2 -> 3 (2026-10-08): Mode Selection's recorded gates (ic_mode, ic_fund_mode) carry Options: lists; the two
+    # share one line, which the parser reads as one spec.
+    "ic-sim": 3,
     # 3 -> 2 (2026-10-07): Step 3.6's two sites (the review-page STOP, the Path B confirmation) are one recorded
     # gate, fmr_extracted_values, asked with one Options: line on either path.
     "financial-model-review": 2,
@@ -4518,14 +4539,14 @@ def test_no_shipped_text_carries_a_host_answer_line_for_a_gate_a_hook_reads() ->
 # --- recorded gates ----------------------------------------------------------------------------------------
 
 # The skills whose Step 0 starts the run's record; each skill's wiring commit adds itself.
-WIRED = ("deck-review", "financial-model-review", "market-sizing")
+WIRED = ("deck-review", "financial-model-review", "market-sizing", "ic-sim")
 # `record_gate_answer.py open` lines per SKILL.md, the companion to ASKUSER_MENTIONS: an open site added or
 # removed changes this count, and the gate-site test in the skill's own contract file says which.
 OPEN_LINES: dict[str, int] = {
     "deck-review": 2,
     "market-sizing": 2,
     "financial-model-review": 2,
-    "ic-sim": 0,
+    "ic-sim": 2,
     "competitive-positioning": 0,
     "cap-table": 0,
 }

@@ -1162,8 +1162,12 @@ def _run_ref_module() -> ModuleType:
 
 
 def _own_run_id(dir_path: str) -> str | None:
-    """This page's run id: startup_profile.json's."""
-    rid: str | None = _run_ref_module().json_run_id(os.path.join(dir_path, "startup_profile.json"))
+    """This page's run id: the one the simulation's files agree on, read as compose reads it
+    (`_ic_gates.run_id_of`), so a model-written profile alone never decides it."""
+    _run_ref_module()
+    import _ic_gates
+
+    rid: str | None = _ic_gates.run_id_of(dir_path)
     return rid
 
 
