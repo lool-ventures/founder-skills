@@ -206,6 +206,19 @@ CONTRACT_NOTES = (
     "`GATE_UNDECIDABLE` (exit 2) rather than not owed.",
     "ic-sim refuses `RUN_FINISHED` (exit 1, nothing written) when its fund profile or report is built again for a "
     "`complete` run: new materials after delivery are a new simulation, under a new run id.",
+    "competitive-positioning: `open --gate cp_gate1_landscape` prints the question naming every competitor the "
+    "independent search found that the set lacks, and `context_lines`, one per candidate; when it applies a request "
+    "line (or the gate is already answered) the same lines are under `context.<gate>`. `missing`, `remove` and "
+    "`change_axes` leave the question open (asked again after the change) and cannot be sent ahead.",
+    "competitive-positioning's Step 4 additions question offers only the form the open slots allow (all / top <n> / "
+    "free a slot by merging) and is not owed when nothing can be added; an option of another form is "
+    "`OPTION_UNLISTED`. `include_top` takes research's first <n>; only `include_some` asks `cp_research_pick`, which "
+    "records any candidate (comma-joined ids, at most the open slots) though it shows four. "
+    "`cp_consolidation_merge` has one instance per merger research found (`<slug_a>+<slug_b>`); an answered pair is "
+    "never offered again.",
+    "A competitive-positioning report composed again after `complete` (the delivery check's fix, or a coordinate the "
+    "founder disputes) starts a new revision: `running`, `revision` + 1, deliverables and `handed_over_at` cleared, "
+    "until the coaching is inserted again.",
 )
 
 
@@ -1002,21 +1015,21 @@ GATES: dict[str, dict[str, Any]] = {
     },
     "cp_gate1_landscape": {
         "skill": "competitive-positioning",
-        "step": "3",
+        "step": "gate1",
         "modes": _FULL,
         "kind": "templated",
         "question": (
             "Found <N> competitors (I'd challenge: <names>) (stronger than drafted: "
-            "<upgraded names>) — does this set look right?"
+            "<upgraded names>) (you may be missing: <recall names>) — does this set look right?"
         ),
         "form_label": "Competitors",
         "instances": None,
         "multi": False,
         "options": (
             _o("no_changes", "No changes — looks good as drafted"),
-            _o("missing", "Missing competitors", value=True),
-            _o("remove", "Remove some", value=True),
-            _o("change_axes", "Change axes", value=True),
+            _o("missing", "Missing competitors", value=True, terminal=False),
+            _o("remove", "Remove some", value=True, terminal=False),
+            _o("change_axes", "Change axes", value=True, terminal=False),
         ),
         "option_source": None,
         "option_variants": None,
@@ -1032,7 +1045,7 @@ GATES: dict[str, dict[str, Any]] = {
     },
     "cp_research_additions": {
         "skill": "competitive-positioning",
-        "step": "4a",
+        "step": "4",
         "modes": _FULL,
         "kind": "templated",
         "question": "Found <N> more competitors during research — include any?",
@@ -1064,13 +1077,13 @@ GATES: dict[str, dict[str, Any]] = {
     },
     "cp_research_pick": {
         "skill": "competitive-positioning",
-        "step": "4a",
+        "step": "4",
         "modes": _FULL,
         "kind": "script_built",
         "question": "Which ones should I include?",
         "form_label": "Include",
         "instances": None,
-        "multi": False,
+        "multi": True,
         "options": (_o("none_of_these", "None of these"),),
         "option_source": "cp_competitor_slugs",
         "option_variants": None,
@@ -1086,7 +1099,7 @@ GATES: dict[str, dict[str, Any]] = {
     },
     "cp_gate2_axes": {
         "skill": "competitive-positioning",
-        "step": "4c",
+        "step": "gate2",
         "modes": _FULL,
         "kind": "templated",
         "question": "I'll plot competitors on <axis-X> × <axis-Y> — do these axes look right?",
@@ -1117,7 +1130,7 @@ GATES: dict[str, dict[str, Any]] = {
     },
     "cp_scoring_basis": {
         "skill": "competitive-positioning",
-        "step": "4c",
+        "step": "gate2",
         "modes": _FULL,
         "kind": "fixed",
         "question": "Which basis should the scoring use?",
@@ -1143,7 +1156,7 @@ GATES: dict[str, dict[str, Any]] = {
     },
     "cp_gate3_position": {
         "skill": "competitive-positioning",
-        "step": "6",
+        "step": "gate3",
         "modes": _FULL,
         "kind": "templated",
         "question": (
@@ -1159,7 +1172,7 @@ GATES: dict[str, dict[str, Any]] = {
             _o(
                 "change_scoring_basis",
                 "Change scoring basis",
-                effects={"opens": ("cp_scoring_basis",)},
+                effects={"reopens": ("cp_scoring_basis",)},
             ),
             _o("show_both", "Show both positions"),
         ),
@@ -1177,7 +1190,7 @@ GATES: dict[str, dict[str, Any]] = {
     },
     "cp_consolidation_merge": {
         "skill": "competitive-positioning",
-        "step": "4a",
+        "step": "4",
         "modes": _FULL,
         "kind": "templated",
         "question": (
@@ -1185,7 +1198,7 @@ GATES: dict[str, dict[str, Any]] = {
             "to combine them?"
         ),
         "form_label": "Merge",
-        "instances": None,
+        "instances": {"dynamic": "pair"},
         "multi": False,
         "options": (
             _o("combine", "Combine them"),
@@ -1205,7 +1218,7 @@ GATES: dict[str, dict[str, Any]] = {
     },
     "cp_merge_pick": {
         "skill": "competitive-positioning",
-        "step": "4a",
+        "step": "4",
         "modes": _FULL,
         "kind": "script_built",
         "question": "Which two should I merge to free a slot?",
@@ -1227,7 +1240,7 @@ GATES: dict[str, dict[str, Any]] = {
     },
     "cp_upload_path": {
         "skill": "competitive-positioning",
-        "step": "6c",
+        "step": "6.5",
         "modes": _FULL,
         "kind": "fixed",
         "question": "Where are the documents you shared? The review reads them first.",
@@ -2105,6 +2118,9 @@ def options_for(g: dict[str, Any], instance: str | None, ctx: Ctx) -> list[dict[
     """Every option this gate offers in this run: its fixed ones plus, for a script-built gate, the ones
     its source finds on disk. A source not wired yet raises Unimplemented."""
     opts = fixed_options(g, instance, ctx.skill)
+    chooser = VARIANT_CHOOSERS.get(_GATE_IDS.get(id(g), ""))
+    if chooser is not None:
+        opts = chooser(ctx, opts)
     source = g["option_source"]
     if source is None:
         return opts
@@ -2115,6 +2131,12 @@ def options_for(g: dict[str, Any], instance: str | None, ctx: Ctx) -> list[dict[
     if source == "ms_alternatives":
         # The typed figure stays first (it is the no-ask default), shown with its amount.
         return [*(_ms_typed(ctx, instance, o) for o in opts), *built]
+    if source == "cp_competitor_slugs":
+        # `None of these` is shown only while the four shown leave room for it (SKILL.md, Step 4); it stays
+        # recordable either way.
+        if sum(1 for o in built if o["shown"]) >= _SHOWN_MAX:
+            opts = [{**o, "shown": False} for o in opts]
+        return [*built, *opts]
     if source == "ct_applicable_scenarios":
         ids = {o["id"] for o in built}
         return [o for o in opts if o["id"] in ids]
@@ -2360,6 +2382,367 @@ def _pred_ic_verdict_decline(ctx: Ctx, g: dict[str, Any], instance: str | None) 
 PREDICATES["ic_verdict_decline"] = _pred_ic_verdict_decline
 
 
+# --- competitive-positioning ----------------------------------------------------------------------------
+
+_CP_SCRIPTS = os.path.join(os.path.dirname(_HERE), "skills", "competitive-positioning", "scripts")
+# validate_landscape.MAX_COMPETITORS and _cp_view.MAX_COMPETITORS, held equal by a test.
+CP_MAX_COMPETITORS = 10
+# The most options the question tool shows; the rest of a script-built list is still recordable.
+_SHOWN_MAX = 4
+
+
+def _cp_module(alias: str, filename: str) -> Any:
+    """A competitive-positioning script, loaded by path (skill scripts are not a package), cached."""
+    mod = sys.modules.get(alias)
+    if mod is not None:
+        return mod
+    path = os.path.join(_CP_SCRIPTS, filename)
+    spec = importlib.util.spec_from_file_location(alias, path)
+    if spec is None or spec.loader is None or not os.path.isfile(path):
+        raise Unimplemented(f"{filename} is not reachable at {path}")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    sys.modules[alias] = mod
+    return mod
+
+
+def cp_slug(value: Any) -> str:
+    """The one slug rule competitive-positioning compares by: `verify_competitors.normalize_competitor_slug`
+    (corporate suffixes dropped), the rule its recall diff and deferral writer use."""
+    norm: str = _cp_module("_cp_verify_competitors", "verify_competitors.py").normalize_competitor_slug(
+        str(value or "")
+    )
+    return norm
+
+
+def _cp_names(comps: list[dict[str, Any]]) -> dict[str, str]:
+    """{key: display name} for a competitor set, keyed by both its slug and its name under `cp_slug`, so a
+    company added as "Newco Inc" is the recall candidate "Newco, Inc." whatever slug it was given."""
+    out: dict[str, str] = {}
+    for c in comps:
+        name = str(c.get("name") or c.get("slug") or "")
+        for raw in (c.get("slug"), c.get("name")):
+            key = cp_slug(raw)
+            if key:
+                out.setdefault(key, name)
+    return out
+
+
+def _cp_this_run(ctx: Ctx, name: str, *, optional: bool = False) -> dict[str, Any] | None:
+    """`name` in the run dir when it is this run's; None when absent. Unreadable or another run's: undecidable
+    (raised), so a question is never closed, answered or worded on a file nobody could read. An `optional` input
+    is then treated as absent, with one stderr line."""
+    if ctx.run_dir is None:
+        return None
+    path = os.path.join(ctx.run_dir, name)
+    try:
+        doc = _run_status.read_json(path)
+        if doc is None:
+            return None
+        meta = doc.get("metadata") if isinstance(doc, dict) else None
+        rid = meta.get("run_id") if isinstance(meta, dict) else None
+        if rid != ctx.paths.run_id:
+            raise ValueError(f"it carries run id {rid!r}, not this run's {ctx.paths.run_id!r}")
+    except ValueError as e:
+        if optional:
+            print(f"note: {name} is not this run's or cannot be read; read as absent ({e})", file=sys.stderr)
+            return None
+        raise Unimplemented(f"{name} cannot be used ({e})", code="GATE_UNDECIDABLE") from e
+    return doc if isinstance(doc, dict) else None
+
+
+def _cp_research(ctx: Ctx) -> dict[str, Any] | None:
+    """The research hand-off Step 4's additions question reads: the gated sub-agent file in this run's own
+    hand-off dir (the question comes before its producer runs)."""
+    if ctx.run_dir is None:
+        return None
+    path = os.path.join(ctx.run_dir, "handoff", ctx.paths.run_id, "landscape_research_output.json")
+    try:
+        doc = _run_status.read_json(path)
+    except ValueError as e:
+        raise Unimplemented(f"the research hand-off cannot be read ({e})", code="GATE_UNDECIDABLE") from e
+    return doc if isinstance(doc, dict) else None
+
+
+def _cp_pool(ctx: Ctx) -> tuple[list[dict[str, str]], int, dict[str, str]] | None:
+    """(candidates, open slots, {slug: name} of the set) for Step 4's additions; None before the research
+    returned. Candidates: research's suggestions, then the draft's deferred recall candidates, by slug, never one
+    already in the set."""
+    research = _cp_research(ctx)
+    if research is None:
+        return None
+    comps = [c for c in research.get("competitors") or [] if isinstance(c, dict)]
+    names = _cp_names(comps)
+    draft = _cp_this_run(ctx, "landscape_draft.json") or {}
+    pool: list[dict[str, str]] = []
+    seen = set(names)
+    raw = [
+        *(s for s in research.get("suggested_additions") or [] if isinstance(s, dict) and not s.get("merged")),
+        *(d for d in draft.get("deferred_recall_candidates") or [] if isinstance(d, dict)),
+    ]
+    for cand in raw:
+        slug = cp_slug(cand.get("slug") or cand.get("name"))
+        if not slug or slug in seen or not OPTION_ID_RE.match(slug):
+            continue
+        seen.add(slug)
+        pool.append({"slug": slug, "name": str(cand.get("name") or slug)})
+    return pool, max(0, CP_MAX_COMPETITORS - len(comps)), names
+
+
+def _cp_entries(ctx: Ctx, gate_id: str) -> list[tuple[str, dict[str, Any]]]:
+    gates = ctx.ledger.get("gates") if ctx.ledger is not None else None
+    if gates is None:
+        # Outside a transaction: the status's per-gate views, keyed as the ledger keys them.
+        listed = ctx.status.get("gates")
+        out = []
+        for view in listed if isinstance(listed, list) else []:
+            if not isinstance(view, dict) or view.get("id") != gate_id:
+                continue
+            inst = view.get("instance")
+            out.append((f"{gate_id}.{inst}" if inst else gate_id, view))
+        return out
+    found = []
+    for key, entry in gates.items():
+        if isinstance(entry, dict) and entry.get("gate") == gate_id:
+            found.append((key, entry))
+    return found
+
+
+def _cp_pairs(ctx: Ctx, names: dict[str, str]) -> list[tuple[str, str]]:
+    """Mergers research found that are still undecided: the OPEN consolidation questions whose two companies
+    are both in the set, as (`<a>+<b>`, "<A> and <B>"). A pair already answered (`combine` or `keep_separate`)
+    is never offered again."""
+    out = []
+    for key, entry in _cp_entries(ctx, "cp_consolidation_merge"):
+        if entry.get("state") != "open":
+            continue
+        _, instance = parse_key(key)
+        a, sep, b = str(instance or "").partition("+")
+        ka, kb = cp_slug(a), cp_slug(b)
+        if sep and ka in names and kb in names and ka != kb:
+            out.append((str(instance), f"{names[ka]} and {names[kb]}"))
+    return sorted(set(out))
+
+
+_CP_ADDITIONS_QUESTIONS = (
+    "Found {n} more competitors during research — include any?",
+    "Found {n} more competitors during research, but only {slots} more fit — include any?",
+    "Found {n} more competitors during research, but the set is already full — want to free up a slot?",
+)
+
+
+def _cp_additions_variant(ctx: Ctx) -> int | None:
+    """Which of the additions question's three forms applies (SKILL.md Step 4), or None when none can be asked:
+    nothing to add, or a full set with no undecided merger to free a slot."""
+    pooled = _cp_pool(ctx)
+    if pooled is None or not pooled[0]:
+        return None
+    pool, slots, names = pooled
+    if slots >= len(pool):
+        return 0
+    if slots > 0:
+        return 1
+    return 2 if _cp_pairs(ctx, names) else None
+
+
+def _cp_additions_options(ctx: Ctx, opts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    variant = _cp_additions_variant(ctx)
+    if variant is None:
+        return opts
+    by_id = {o["id"]: o for o in opts}
+    pooled = _cp_pool(ctx)
+    slots = pooled[1] if pooled else 0
+    out = []
+    for oid in GATES["cp_research_additions"]["option_variants"][variant]:
+        o = dict(by_id[oid])
+        o["label"] = o["label"].replace("<slots>", str(slots))
+        out.append(o)
+    return out
+
+
+def _cp_open_slots(ctx: Ctx) -> int | None:
+    pooled = _cp_pool(ctx)
+    return pooled[1] if pooled else None
+
+
+def _pred_cp_research_suggestions(ctx: Ctx, g: dict[str, Any], instance: str | None) -> bool:
+    return _cp_additions_variant(ctx) is not None
+
+
+def _pred_cp_include_some(ctx: Ctx, g: dict[str, Any], instance: str | None) -> bool:
+    """Only "Include some" asks which; "Include top <n>" takes research's first <n>."""
+    return _answer_id(ctx, "cp_research_additions") == "include_some"
+
+
+def _pred_cp_free_slot_chosen(ctx: Ctx, g: dict[str, Any], instance: str | None) -> bool:
+    """A merge is picked only when research found more than one undecided merger; one is the merge."""
+    if _answer_id(ctx, "cp_research_additions") != "free_slot_by_merging":
+        return False
+    pooled = _cp_pool(ctx)
+    return pooled is not None and len(_cp_pairs(ctx, pooled[2])) >= 2
+
+
+def _pred_cp_basis_change(ctx: Ctx, g: dict[str, Any], instance: str | None) -> bool:
+    """Owed when either gate chose a basis change. Both parents are terminal and unbound, so neither answer
+    moves once recorded: the OR is the whole rule."""
+    return "change_scoring_basis" in (_answer_id(ctx, "cp_gate2_axes"), _answer_id(ctx, "cp_gate3_position"))
+
+
+def _pred_cp_gate3_triggered(ctx: Ctx, g: dict[str, Any], instance: str | None) -> bool:
+    scores = _cp_this_run(ctx, "positioning_scores.json")
+    if scores is None:
+        return False
+    return bool(_cp_module("_cp_gate3_triggers", "gate3_triggers.py").evaluate(scores).get("fired"))
+
+
+def _src_cp_competitor_slugs(ctx: Ctx, instance: str | None) -> list[dict[str, Any]]:
+    """Every candidate is recordable (a name typed as the tool's Other is a valid pick); the question shows four."""
+    pooled = _cp_pool(ctx)
+    if pooled is None:
+        return []
+    return [_o(c["slug"], c["name"], shown=i < _SHOWN_MAX) for i, c in enumerate(pooled[0])]
+
+
+def _src_cp_merge_pairs(ctx: Ctx, instance: str | None) -> list[dict[str, Any]]:
+    pooled = _cp_pool(ctx)
+    if pooled is None:
+        return []
+    return [_o(key, label, shown=i < _SHOWN_MAX) for i, (key, label) in enumerate(_cp_pairs(ctx, pooled[2]))]
+
+
+def _fill_cp_gate1(ctx: Ctx, instance: str | None) -> tuple[str, list[str]] | None:
+    """Gate 1's question from this run's draft and verification, and one line per recall candidate the set
+    lacks: every one, so the question cannot name fewer than the search found. Only companies still in the set
+    are named as challenged, upgraded or overlapping; a name is never a slug."""
+    draft = _cp_this_run(ctx, "landscape_draft.json")
+    if draft is None:
+        return None
+    comps = [c for c in draft.get("competitors") or [] if isinstance(c, dict)]
+    names = _cp_names(comps)
+    ver = _cp_this_run(ctx, "competitor_verification.json", optional=True) or {}
+    summary: dict[str, Any] = ver["summary"] if isinstance(ver.get("summary"), dict) else {}
+
+    def named(slugs: Any) -> list[str]:
+        keys = [cp_slug(s) for s in slugs or [] if isinstance(s, str)]
+        return list(dict.fromkeys(names[k] for k in keys if k in names))
+
+    challenge = named(summary.get("challenge_slugs"))
+    upgraded = named(
+        d.get("slug")
+        for d in summary.get("category_disagreements") or []
+        if isinstance(d, dict) and d.get("direction") == "upgrade"
+    )
+    gaps: dict[str, Any] = ver["recall_gaps"] if isinstance(ver.get("recall_gaps"), dict) else {}
+    unmatched = [
+        u
+        for u in gaps.get("unmatched") or []
+        if isinstance(u, dict)
+        and isinstance(u.get("name"), str)
+        and u["name"].strip()
+        and cp_slug(u.get("slug") or u.get("name")) not in names
+    ]
+    q = f"Found {len(comps)} competitors"
+    if challenge:
+        q += f" (I'd challenge: {', '.join(challenge)})"
+    if upgraded:
+        q += f" (stronger than drafted: {', '.join(upgraded)})"
+    if unmatched:
+        q += f" (you may be missing: {', '.join(u['name'].strip() for u in unmatched)})"
+    q += " — does this set look right?"
+    lines = []
+    for u in unmatched:
+        line = f"• {u['name'].strip()}"
+        why = str(u.get("why_considered") or "").strip()
+        if why:
+            line += f" — {why}"
+        sources = [x for x in u.get("sources") or [] if isinstance(x, str) and x.strip()]
+        if sources:
+            line += f" ({sources[0].strip()})"
+        overlap = cp_slug(u.get("possible_overlap_with"))
+        if overlap in names:
+            line += f" (may already be covered by {names[overlap]})"
+        lines.append(line)
+    if unmatched and len(comps) + len(unmatched) > CP_MAX_COMPETITORS:
+        slots = max(0, CP_MAX_COMPETITORS - len(comps))
+        if slots == 0:
+            lines.append(
+                f"I found {len(unmatched)} more, but the set is full at {CP_MAX_COMPETITORS} — which matter most?"
+            )
+        else:
+            lines.append(
+                f"I found {len(unmatched)} more, but at most {slots} more fit (the set holds {CP_MAX_COMPETITORS}) "
+                "— which matter most?"
+            )
+    return q, lines
+
+
+def _fill_cp_additions(ctx: Ctx, instance: str | None) -> tuple[str, list[str]] | None:
+    variant = _cp_additions_variant(ctx)
+    if variant is None:
+        return None
+    pool, slots, _ = _cp_pool(ctx) or ([], 0, {})
+    return _CP_ADDITIONS_QUESTIONS[variant].format(n=len(pool), slots=slots), []
+
+
+def _fill_cp_pick(ctx: Ctx, instance: str | None) -> tuple[str, list[str]] | None:
+    """The pick shows four; when research found more, the lines name every candidate for the founder (names,
+    never ids). The ids a typed name records under are in `needs_input.recordable`."""
+    pooled = _cp_pool(ctx)
+    if pooled is None or len(pooled[0]) <= _SHOWN_MAX:
+        return None
+    pool, slots, _ = pooled
+    lines = [f"At most {slots} more fit. Every company research found: {', '.join(c['name'] for c in pool)}."]
+    return str(GATES["cp_research_pick"]["question"]), lines
+
+
+OPTION_SOURCES["cp_competitor_slugs"] = _src_cp_competitor_slugs
+OPTION_SOURCES["cp_merge_pairs"] = _src_cp_merge_pairs
+PREDICATES.update(
+    {
+        # Only a full analysis asks these; the gates' modes keep them out of a quick check.
+        "cp_full_mode": _pred_always,
+        "cp_basis_change_chosen": _pred_cp_basis_change,
+        "cp_gate3_triggered": _pred_cp_gate3_triggered,
+        "cp_research_suggestions": _pred_cp_research_suggestions,
+        "cp_include_some_chosen": _pred_cp_include_some,
+        "cp_free_slot_chosen": _pred_cp_free_slot_chosen,
+    }
+)
+# A question whose words come from the run's files, and the lines to show beside it.
+QUESTION_FILLERS: dict[str, Callable[[Ctx, str | None], tuple[str, list[str]] | None]] = {
+    "cp_gate1_landscape": _fill_cp_gate1,
+    "cp_research_additions": _fill_cp_additions,
+    "cp_research_pick": _fill_cp_pick,
+}
+# A gate whose `option_variants` the run decides: the options of the one form that applies.
+VARIANT_CHOOSERS: dict[str, Callable[[Ctx, list[dict[str, Any]]], list[dict[str, Any]]]] = {
+    "cp_research_additions": _cp_additions_options,
+}
+# Why a variant gate's form is the one it is, appended to the refusal of an option another form offers.
+VARIANT_NOTES: dict[str, Callable[[Ctx], str]] = {
+    "cp_research_additions": lambda ctx: f" (open slots: {_cp_open_slots(ctx)})",
+}
+# A multi gate whose picks are capped by the run: the most it may record (None: no cap known).
+PICK_LIMITS: dict[str, Callable[[Ctx], int | None]] = {
+    "cp_research_pick": _cp_open_slots,
+}
+_GATE_IDS = {id(g): gid for gid, g in GATES.items()}
+
+
+def _fill_question(gate_id: str, instance: str | None, ctx: Ctx) -> tuple[str, list[str]] | None:
+    """The filled question, or None for a gate with no filler (or nothing to fill from yet). Fails closed: a file
+    it cannot use is undecidable, never a question with the slots left blank."""
+    fn = QUESTION_FILLERS.get(gate_id)
+    if fn is None:
+        return None
+    try:
+        return fn(ctx, instance)
+    except Unimplemented:
+        raise
+    except Exception as e:  # noqa: BLE001 -- a malformed file is undecidable, never a crash in a status write
+        raise Unimplemented(f"the {gate_id} question cannot be worded ({e})", code="GATE_UNDECIDABLE") from e
+
+
 def owed(ctx: Ctx, g: dict[str, Any], instance: str | None) -> bool:
     if ctx.mode is not None and ctx.mode not in g["modes"]:
         return False
@@ -2382,7 +2765,14 @@ BINDERS: dict[str, dict[str, Any]] = {
     },
     "ic_score_dimensions": {"kind": "json_fingerprint", "files": ("score_dimensions.json",), "exclude": ("metadata",)},
     "ct_cap_base_fields": {"kind": "json_fingerprint", "files": ("inputs.json",), "exclude": ("metadata",)},
-    "cp_landscape_draft": {"kind": "json_fingerprint", "files": ("landscape_draft.json",), "exclude": ("metadata",)},
+    # The competitor set Gate 1 confirmed. The draft later takes the deferred recall candidates (Gate 1's own
+    # writer, then Step 4's promotions) and its candidate axes may change at Gate 2: neither is the set.
+    "cp_landscape_draft": {
+        "kind": "json_fingerprint",
+        "files": ("landscape_draft.json",),
+        "exclude": ("metadata",),
+        "include": ("competitors",),
+    },
     # inputs.json as apply_corrections.py normalises it, minus the two cash paths: a cash follow-up changes
     # only those, so it never re-asks the values review.
     "fmr_inputs_minus_cash": {
@@ -2775,6 +3165,8 @@ def _resolve_options(
 ) -> list[dict[str, Any]]:
     options = options_for(g, instance, ctx)
     every = list(_pick(g["options"], instance) or ())
+    # Another skill's option, as opposed to one this run's form of the question does not offer.
+    other_skill = {o["id"] for o in every} - {o["id"] for o in fixed_options(g, instance, ctx.skill)}
     if answer_ids and len(answer_ids) > 1 and not g["multi"]:
         raise GateRejection("OPTION_UNLISTED", f"{key} takes one option, not {len(answer_ids)}")
     if answer_ids and len(answer_ids) > 1 and NONE_OF_THESE in answer_ids:
@@ -2784,16 +3176,34 @@ def _resolve_options(
         for aid in answer_ids:
             if not OPTION_ID_RE.match(aid):
                 raise GateRejection("ID_MALFORMED", f"{aid!r} is not an option id")
-            if aid not in {o["id"] for o in options} and aid in {o["id"] for o in every}:
+            if aid not in {o["id"] for o in options} and aid in other_skill:
                 raise GateRejection("OPTION_SKILL", f"{aid!r} is not offered by {ctx.skill}")
+            chosen_by = _GATE_IDS.get(id(g), "")
+            if aid not in {o["id"] for o in options} and chosen_by in VARIANT_CHOOSERS:
+                why = VARIANT_NOTES[chosen_by](ctx) if chosen_by in VARIANT_NOTES else ""
+                raise GateRejection(
+                    "OPTION_UNLISTED",
+                    f"{aid!r} is not offered by this run's form of {key}{why}",
+                    allowed=[o["id"] for o in options],
+                )
             picked.append(_match_option(options, aid, None, key))
+        _check_pick_limit(ctx, key, picked)
         return picked
     if g["multi"] and label and ", " in label:
         picked = [_match_option(options, None, part, key) for part in label.split(", ")]
         if any(o["id"] == NONE_OF_THESE for o in picked):
             raise GateRejection("OPTION_UNLISTED", f"{key}: {NONE_OF_THESE!r} is answered alone")
+        _check_pick_limit(ctx, key, picked)
         return picked
     return [_match_option(options, None, label, key)]
+
+
+def _check_pick_limit(ctx: Ctx, key: str, picked: list[dict[str, Any]]) -> None:
+    limit_fn = PICK_LIMITS.get(parse_key(key)[0])
+    limit = limit_fn(ctx) if limit_fn is not None else None
+    real = [o for o in picked if o["id"] != NONE_OF_THESE]
+    if limit is not None and len(real) > limit:
+        raise GateRejection("OPTION_UNLISTED", f"{key}: only {limit} more fit; pick at most {limit}", limit=limit)
 
 
 def _current(
@@ -3017,9 +3427,11 @@ def _binding_now(ctx: Ctx, g: dict[str, Any], given: dict[str, Any] | None) -> d
     return given if given is not None else binding(ctx, g["binds"])
 
 
-def _reopen_complete(status: dict[str, Any], key: str, g: dict[str, Any]) -> None:
-    """A `reopens_complete` answer on a complete run: a new revision, whose reports are not yet final,
-    and a new invocation that starts at the reopening gate."""
+def _reopen_complete(
+    status: dict[str, Any], key: str | None, g: dict[str, Any] | None, *, step: str | None = None
+) -> None:
+    """A `reopens_complete` answer on a complete run, or a delivered report composed again: a new revision,
+    whose reports are not yet final, and a new invocation that starts at the reopening gate or step."""
     status["revision"] = int(status.get("revision") or 0) + 1
     status["coaching"] = None
     status["deliverables"] = None
@@ -3027,7 +3439,25 @@ def _reopen_complete(status: dict[str, Any], key: str, g: dict[str, Any]) -> Non
     # The hand-over belongs to the revision it handed over; the closer stamps the new one.
     status["handed_over_at"] = None
     _run_status.set_state(status, "running", "RUNNING")
-    _run_status.open_invocation(status, "reopen", {"gate": key, "step": g["step"], "reason": "reopened"})
+    _run_status.open_invocation(
+        status, "reopen", {"gate": key, "step": g["step"] if g is not None else step, "reason": "reopened"}
+    )
+
+
+def reopen_for_recompose(paths: _run_status.RunPaths, step: str) -> bool:
+    """A compose that rewrites a delivered (`complete`) run's report reopens it as a new revision first: the
+    report it writes lacks the coaching, and its listed deliverables no longer match, so the run is `running`
+    until the coaching is inserted again. A question the new report now owes is then asked, never refused as a
+    finished run's. Returns whether it reopened; any other status is left as it is."""
+
+    def fn(ctx: Ctx, ledger: dict[str, Any], status: dict[str, Any]) -> bool:
+        if status.get("status") != "complete":
+            return False
+        _reopen_complete(status, None, None, step=step)
+        return True
+
+    reopened: bool = transact(paths, fn)
+    return reopened
 
 
 # --- pre-answers ------------------------------------------------------------------------------------
@@ -3398,6 +3828,14 @@ def needs_input(ctx: Ctx, ledger: dict[str, Any], key: str) -> dict[str, Any]:
         "form_header": FORM_HEADERS.get(ctx.skill, ""),
         "recorded_by": g["writer"],
     }
+    if g["option_source"] is not None and any(not o["shown"] for o in opts):
+        # Options the question does not show are still recordable: the founder may name one in free text.
+        out["recordable"] = [{"id": o["id"], "label": render_label(o, ctx)} for o in opts]
+    filled = _fill_question(gate_id, instance, ctx)
+    if filled is not None:
+        out["question"] = filled[0]
+        if filled[1]:
+            out["context_lines"] = filled[1]
     template = question_for(g, instance)
     if template != out["question"]:
         # The asking step fills the slots from what it has on screen; the template says where they go.
@@ -3406,7 +3844,7 @@ def needs_input(ctx: Ctx, ledger: dict[str, Any], key: str) -> dict[str, Any]:
         locator = f'--run-dir "{ctx.run_dir}"' if ctx.run_dir else f'--artifacts-root "{ctx.paths.artifacts_root}"'
         out["answer_command"] = (
             f'python3 "{_run_status.shared_scripts_dir()}/{RECORDER}" answer --run-id {ctx.paths.run_id} '
-            f"{locator} --gate {key} --answer-id <option_id>"
+            f"{locator} --gate {key} --answer-id {'<option_id>[,<option_id>…]' if g['multi'] else '<option_id>'}"
         )
         if any(o["takes_value"] for o in out["options"]):
             # Filled for an option whose `takes_value` is true, dropped for the others (VALUE_NOT_ALLOWED).
@@ -3460,6 +3898,15 @@ def open_gates(ctx: Ctx, ledger: dict[str, Any], keys: list[str], *, by: str = R
     if applied:
         out["applied"] = "pre_answer"
         out["applied_gates"] = applied
+    shown: dict[str, Any] = {}
+    for key in [*applied, *answered]:
+        gid, inst = parse_key(key)
+        filled = _fill_question(gid, inst, ctx)
+        if filled is not None and filled[1]:
+            # Asked nothing, but the lines a step shows beside the question still belong in its message.
+            shown[key] = {"question": filled[0], "context_lines": filled[1]}
+    if shown:
+        out["context"] = shown
     if unlisted:
         out["pre_answer_unlisted"] = unlisted
     pending_other = [k for k, g in owed_keys if g["writer"] != RECORDER and pending_pre_answer(ledger, k)]
@@ -3754,6 +4201,9 @@ CLI_CODES = {
     # market-sizing's producers and prompt generator: a call into a bound analysis dir that names no run.
     # PERIOD_NOT_WRITTEN: the period of a founder's figure was answered but never written into inputs.json.
     "ms_producers": ["RUN_ID_REQUIRED", "PERIOD_NOT_WRITTEN"],
+    # competitive-positioning's producers, prompt generator and compose: a call into a bound analysis dir that
+    # names no run.
+    "cp_producers": ["RUN_ID_REQUIRED"],
     # ic-sim's compose: a simulation dir that belongs to a run, whose files do not agree on which.
     "ic_producers": ["RUN_ID_REQUIRED"],
     "usage": ["USAGE"],
@@ -3777,7 +4227,8 @@ SHAPES = {
     "blocked_by_gate": "the gate key a refused step waits on (exit 10); answer it, then run the step again",
     "invocation": "1 at a fresh start; +1 at every resume and every reopen of a complete run; never reset",
     "resumed_from": "{gate, step, reason} of the current invocation: the gate key it started at, that gate's "
-    "step, and `resume` or `reopened`; null on invocation 1",
+    "step, and `resume` or `reopened`; null on invocation 1. A competitive-positioning report composed again "
+    'after `complete` reopens with `gate` null and `step` "7" (no gate started it)',
     "invocations": "append-only [{n, kind, started_at, ended_at, resumed_from, reuse, manifest, "
     "manifest_incomplete, untouched_since_resume, touched_since_resume, counts, maps_dropped}]; `kind` is `start`, "
     "`resume` or `reopen`; `manifest` is the snapshot's path relative to the artifacts root, null before `bind`. "

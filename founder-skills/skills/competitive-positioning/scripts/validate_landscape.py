@@ -727,6 +727,21 @@ def main() -> None:
         sys.exit(1)
 
     assert result is not None
+    if args.output:
+        # With the run's ledger: Gate 1 and Step 4's questions are recorded before the set is written.
+        scripts_dir = os.path.dirname(os.path.abspath(__file__))
+        if scripts_dir not in sys.path:
+            sys.path.insert(0, scripts_dir)
+        import _cp_gates
+
+        _cp_gates.refuse_without_run_id(args.output, args.run_id)
+        _cp_gates.require_or_exit(
+            os.path.dirname(os.path.abspath(args.output)),
+            args.run_id,
+            [_cp_gates.GATE1, *_cp_gates.STEP4_GATES],
+            open_follow_ups=_cp_gates.OPEN_FOLLOW_UPS,
+            by="validate_landscape.py",
+        )
     # Precedence: stdin (the sub-agent may have enriched it) > the draft > derived from the diff.
     if args.carry_deferred:
         _carry_deferred_recall_candidates(result, args.carry_deferred)

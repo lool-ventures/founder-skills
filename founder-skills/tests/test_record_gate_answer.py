@@ -375,11 +375,15 @@ def test_require_is_ok_waiting_or_not_owed(tmp_path: Path) -> None:
     assert h.record(root, run_id, "open", "--gate", "ctx_select_company").returncode == 11
 
 
-def test_an_unwired_gate_exits_2(tmp_path: Path) -> None:
+def test_an_unwired_gate_exits_2(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A gate whose predicate is not written yet refuses to open and writes nothing. Made unwired here, so the
+    test does not move each time a skill is wired."""
     root, run_id, _rd = h.start_bound(tmp_path, "competitive-positioning")
+    monkeypatch.setitem(g.PREDICATES, "cp_gate3_triggered", None)
     before = h.snapshot(root, run_id)
-    proc = h.record(root, run_id, "open", "--gate", "cp_gate3_position")
-    assert proc.returncode == 2 and _out(proc)["code"] == "GATE_NOT_WIRED"
+    with pytest.raises(g.Unimplemented) as exc:
+        _tx(root, run_id, lambda ctx, ledger, st: g.open_gates(ctx, ledger, ["cp_gate3_position"]))
+    assert exc.value.code == "GATE_NOT_WIRED"
     assert h.snapshot(root, run_id) == before
 
 
@@ -662,3 +666,15 @@ def test_a_finished_run_is_never_settled(tmp_path: Path) -> None:
     assert h.snapshot(root, run_id) == before
     assert h.status(root, run_id)["status"] == "complete"
     assert h.ledger(root, run_id)["gates"][key]["state"] == "not_owed"
+
+
+def test_not_applicable_takes_several_gates_all_or_none(tmp_path: Path) -> None:
+    root, run_id, _rd = h.start_bound(tmp_path, "competitive-positioning")
+    before = h.snapshot(root, run_id)
+    args = ("--gate", "cp_product_profile.product", "--gate", "cp_gate1_landscape", "--reason", "stated")
+    mixed = h.record(root, run_id, "not-applicable", *args)
+    _rejected(root, run_id, mixed, "CLOSE_SCRIPT_OWED", before)
+    keys = [f"cp_product_profile.{f}" for f in ("product", "customers", "differentiation")]
+    proc = h.record(root, run_id, "not-applicable", *[a for k in keys for a in ("--gate", k)], "--reason", "stated")
+    assert proc.returncode == 0 and len(_out(proc)["gates"]) == 3
+    assert all(h.ledger(root, run_id)["gates"][k]["state"] == "not_owed" for k in keys)

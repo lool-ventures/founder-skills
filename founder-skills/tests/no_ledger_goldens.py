@@ -933,6 +933,222 @@ def ic_compose_scenarios() -> dict[str, dict[str, Any]]:
     return out
 
 
+# --- competitive-positioning --------------------------------------------------------------------------
+
+CP_SCRIPTS = SKILLS / "competitive-positioning" / "scripts"
+CP_FIXTURES = FIXTURES / "competitive-positioning"
+CP_RUN = "fixture-competitive-positioning-001"
+
+
+def _cp_dir(root: Path) -> None:
+    import shutil
+
+    for f in CP_FIXTURES.iterdir():
+        if f.is_file() and f.suffix == ".json":
+            shutil.copy(f, root / f.name)
+
+
+def _cp_fixture(name: str) -> Any:
+    return json.loads((CP_FIXTURES / name).read_text(encoding="utf-8"))
+
+
+def _cp_plugin_free(proc: subprocess.CompletedProcess[str], td: str) -> str:
+    return _sha(normalise(proc.stdout.replace(str(PLUGIN.resolve()), "<PLUGIN>"), td))
+
+
+def cp_record_deferred_recall_scenarios() -> dict[str, dict[str, Any]]:
+    """record_deferred_recall.py's stdin form, as Gate 1 used it: one new candidate, one already in the set."""
+    adopted = _cp_fixture("landscape_draft.json")["competitors"][0]
+    entries = [
+        {
+            "name": "Example Newco",
+            "slug": "example-newco",
+            "why_considered": "same buyer",
+            "sources": ["https://example.org/a"],
+        },
+        {"name": adopted["name"], "slug": adopted["slug"], "why_considered": "x", "sources": ["https://example.org/b"]},
+    ]
+    out: dict[str, dict[str, Any]] = {}
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        _cp_dir(root)
+        argv = [str(CP_SCRIPTS / "record_deferred_recall.py"), "--draft", str(root / "landscape_draft.json")]
+        out["stdin"] = result(run(argv, stdin=json.dumps(entries)), td, root)
+    return out
+
+
+def cp_validate_landscape_scenarios() -> dict[str, dict[str, Any]]:
+    body = _cp_fixture("landscape.json")
+    for key in ("metadata", "_produced_by", "warnings"):
+        body.pop(key, None)
+    out: dict[str, dict[str, Any]] = {}
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        _cp_dir(root)
+        argv = [
+            str(CP_SCRIPTS / "validate_landscape.py"),
+            "--pretty",
+            "--run-id",
+            CP_RUN,
+            "--carry-deferred",
+            str(root / "landscape_draft.json"),
+            "-o",
+            str(root / "landscape.json"),
+        ]
+        out["carry"] = result(run(argv, stdin=json.dumps(body)), td, root)
+    return out
+
+
+def cp_dispatch_prompt_scenarios() -> dict[str, dict[str, Any]]:
+    """cp_dispatch_prompt.py's five contexts; the three that ignore the analysis dir, with and without it."""
+    out: dict[str, dict[str, Any]] = {}
+    cases: list[tuple[str, str, list[str], bool]] = [
+        ("moat_scoring", "moat_scoring", [], False),
+        ("moat_scoring_dir", "moat_scoring", [], True),
+        ("checklist", "checklist", [], False),
+        ("checklist_dir", "checklist", [], True),
+        ("checklist_missing_file", "checklist", ["--correction", "missing-file"], True),
+        ("startup_research", "startup_research", [], False),
+        ("startup_research_dir", "startup_research", [], True),
+        ("positioning_scoring", "positioning_scoring", ["--scoring-basis", "shipped"], True),
+        ("positioning_scoring_mixed", "positioning_scoring", ["--scoring-basis", "mixed"], True),
+        ("red_team", "red_team", [], True),
+    ]
+    for name, ctx, extra, with_dir in cases:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            _cp_dir(root)
+            hand = root / "handoff" / CP_RUN
+            hand.mkdir(parents=True)
+            argv = [
+                str(CP_SCRIPTS / "cp_dispatch_prompt.py"),
+                ctx,
+                "--run-id",
+                CP_RUN,
+                "--analysis-dir-agent",
+                str(root),
+                "--handoff-agent",
+                str(hand),
+                *extra,
+            ]
+            if with_dir:
+                argv += ["--analysis-dir", str(root)]
+            if ctx == "red_team":
+                argv += ["--handoff-dir", str(hand)]
+            proc = run(argv)
+            res = result(proc, td, root)
+            res["stdout"] = _cp_plugin_free(proc, td)
+            out[name] = res
+    return out
+
+
+def cp_persist_scenarios() -> dict[str, dict[str, Any]]:
+    out: dict[str, dict[str, Any]] = {}
+    for artifact in ("product_profile.json", "landscape_draft.json", "positioning.json"):
+        body = _cp_fixture(artifact)
+        body.pop("_produced_by", None)
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            argv = [
+                str(CP_SCRIPTS / "persist_agent_artifact.py"),
+                "--artifact",
+                artifact,
+                "-o",
+                str(root / artifact),
+                "--run-id",
+                CP_RUN,
+                "--pretty",
+            ]
+            out[artifact] = result(run(argv, stdin=json.dumps(body)), td, root)
+    return out
+
+
+def cp_scorers_scenarios() -> dict[str, dict[str, Any]]:
+    out: dict[str, dict[str, Any]] = {}
+    moats = {
+        "moat_assessments": {k: {"moats": v["moats"]} for k, v in _cp_fixture("moat_scores.json")["companies"].items()}
+    }
+    positioning = _cp_fixture("positioning.json")
+    items = {"items": _cp_fixture("checklist.json")["items"]}
+    for name, script, body, extra in (
+        ("score_moats", "score_moats.py", moats, []),
+        ("score_positioning", "score_positioning.py", positioning, ["--product-profile", "PP"]),
+        ("checklist", "checklist.py", items, ["--input-mode", "deck", "--positioning-scores", "PS"]),
+    ):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            _cp_dir(root)
+            args = [
+                str(root / "product_profile.json")
+                if a == "PP"
+                else str(root / "positioning_scores.json")
+                if a == "PS"
+                else a
+                for a in extra
+            ]
+            argv = [
+                str(CP_SCRIPTS / script),
+                "--pretty",
+                "--run-id",
+                CP_RUN,
+                *args,
+                "-o",
+                str(root / f"{name}_out.json"),
+            ]
+            out[name] = result(run(argv, stdin=json.dumps(body)), td, root)
+    return out
+
+
+def _cp_compose(root: Path, *extra: str) -> subprocess.CompletedProcess[str]:
+    return run(
+        [
+            str(CP_SCRIPTS / "compose_report.py"),
+            "--dir",
+            str(root),
+            "-o",
+            str(root / "report.json"),
+            "--write-md",
+            str(root / "report.md"),
+            *extra,
+        ]
+    )
+
+
+def cp_compose_scenarios() -> dict[str, dict[str, Any]]:
+    out: dict[str, dict[str, Any]] = {}
+    for name, extra in (("plain", []), ("strict", ["--strict"])):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            _cp_dir(root)
+            proc = _cp_compose(root, *extra)
+            res = result(proc, td, root)
+            res["stdout"] = _sha(re.sub(r'"bytes": ?\d+', '"bytes":<N>', normalise(proc.stdout, td)))
+            out[name] = res
+    return out
+
+
+def cp_closer_scenarios() -> dict[str, dict[str, Any]]:
+    out: dict[str, dict[str, Any]] = {}
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        _cp_dir(root)
+        _cp_compose(root)
+        report = json.loads((root / "report.json").read_text(encoding="utf-8"))
+        report["verdict"] = "Example Co leads its map on one axis of two."
+        (root / "report.json").write_text(json.dumps(report), encoding="utf-8")
+        argv = [
+            str(CP_SCRIPTS / "cp_closing_message.py"),
+            "--report",
+            str(root / "report.json"),
+            "--link",
+            "path",
+            "--deliverable",
+            f"the written report={root}/report.md",
+        ]
+        out["plain"] = result(run(argv), td, root)
+    return out
+
+
 GROUPS: dict[str, Callable[[], dict[str, dict[str, Any]]]] = {
     "html": lambda: {f"{s}/{w}": html_scenario(s, w) for s, w, _k in HTML_WRITERS},
     "insert_coaching": coaching_scenarios,
@@ -957,6 +1173,13 @@ GROUPS: dict[str, Callable[[], dict[str, dict[str, Any]]]] = {
     "ms_closer": ms_closer_scenarios,
     "ic_fund_profile": ic_fund_profile_scenarios,
     "ic_compose": ic_compose_scenarios,
+    "cp_record_deferred_recall": cp_record_deferred_recall_scenarios,
+    "cp_validate_landscape": cp_validate_landscape_scenarios,
+    "cp_dispatch_prompt": cp_dispatch_prompt_scenarios,
+    "cp_persist": cp_persist_scenarios,
+    "cp_scorers": cp_scorers_scenarios,
+    "cp_compose": cp_compose_scenarios,
+    "cp_closer": cp_closer_scenarios,
 }
 
 

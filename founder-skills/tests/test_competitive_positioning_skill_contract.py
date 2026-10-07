@@ -1784,11 +1784,11 @@ def test_gate1_renders_the_possible_overlap_annotation() -> None:
     block were competitors already in the draft.
     """
     text = SKILL_MD.read_text(encoding="utf-8")
-    assert "possible_overlap_with" in text, (
-        "Gate 1's recall-gap block must render possible_overlap_with — it is computed, and the "
-        "gate is the one place it changes a decision"
-    )
-    assert "may already be covered by" in text
+    # The lines are printed by `open` (the registry's Gate 1 filler renders `possible_overlap_with`;
+    # test_cp_gates.py holds the printed line); SKILL.md must relay every one of them, the hint included.
+    gate1 = text[text.index("### Gate 1:") : text.index("### Context A hand-off protocol")]
+    assert "context_lines" in gate1 and "every one" in gate1
+    assert "may already be covered by" in gate1
 
 
 def test_step7_never_names_a_reviewed_file_as_editable() -> None:
@@ -1850,3 +1850,83 @@ def test_every_context_a_dispatch_step_names_its_agent(heading: str, agent: str)
     own heading and the next one."""
     section = _step(SKILL_MD.read_text(encoding="utf-8"), heading)
     assert f'subagent_type: "founder-skills:{agent}"' in section, heading
+
+
+# --- recorded gates (commit 8) --------------------------------------------------------------------------------
+
+
+def _between(text: str, start: str, end: str) -> str:
+    i = text.index(start)
+    return text[i : text.index(end, i)]
+
+
+def test_the_catalog_sections_are_gone_and_the_shared_references_line_stays() -> None:
+    text = SKILL_MD.read_text(encoding="utf-8")
+    for heading in ("## Skill Metadata", "## Available Scripts", "## Available References"):
+        assert heading not in text
+    assert "(shared): `stage-expectations.md`, `benchmarks.md`, `israel-guidance.md`" in text
+
+
+def test_each_question_is_opened_before_it_is_asked() -> None:
+    text = SKILL_MD.read_text(encoding="utf-8")
+    step1 = _between(text, "### Step 1:", "#### Execution checkpoint")
+    assert step1.index("Open the four questions") < step1.index("AskUserQuestion")
+    step2 = _between(text, "### Step 2:", "### Step 3:")
+    assert step2.index("--gate cp_product_profile.product") < step2.index("persist_agent_artifact.py")
+    gate1 = _between(text, "### Gate 1:", "### Context A hand-off protocol")
+    assert gate1.index("--gate cp_gate1_landscape") < gate1.index("**Step A:")
+    step4 = _between(text, "### Step 4:", "### Gate 2:")
+    assert step4.index("--gate cp_research_additions") < step4.index("**Step B: AFTER the chat message")
+    gate2 = _between(text, "### Gate 2:", "### Step 4b:")
+    assert gate2.index("--gate cp_gate2_axes") < gate2.index("**Step A:")
+    gate3 = _between(text, "### Gate 3:", "### Step 6:")
+    assert gate3.index("--gate cp_gate3_position") < gate3.index("**Step A:")
+    review = _between(text, "### Step 6.5:", "### Step 7:")
+    assert "`open --gate cp_upload_path` first" in review
+
+
+def test_gate1_asks_the_printed_question_and_defers_by_script_after_every_answer() -> None:
+    gate1 = _between(SKILL_MD.read_text(encoding="utf-8"), "### Gate 1:", "### Context A hand-off protocol")
+    assert "the one `open` printed, word for word" in gate1
+    assert "(you may be missing: <recall names>)" in gate1
+    assert "After every Gate 1 answer, even with no candidates" in gate1
+    assert "--from-verification" in gate1 and "<<'JSON'" not in gate1
+
+
+def test_every_generator_call_names_the_analysis_dir_and_no_basis_is_typed() -> None:
+    text = SKILL_MD.read_text(encoding="utf-8")
+    calls = re.findall(r'cp_dispatch_prompt\.py" (\w+) [^`]*?(?=\n```)', text, re.S)
+    assert sorted(set(calls)) == ["checklist", "moat_scoring", "positioning_scoring", "red_team", "startup_research"]
+    for block in re.findall(r'cp_dispatch_prompt\.py" \w+ [^`]*?\n```', text, re.S):
+        assert '--analysis-dir "$ANALYSIS_DIR"' in block, block
+        assert "--scoring-basis" not in block, block
+
+
+def test_exit_10_a_new_revision_and_the_close_are_stated() -> None:
+    text = SKILL_MD.read_text(encoding="utf-8")
+    assert "Exit 10 is a question, not a failure" in text and "`RUN_FINISHED`" in text
+    assert "A re-compose of a delivered report starts a new revision" in text
+    # Fresh coaching for the new revision, under a file name the earlier commentary cannot pass the gate as.
+    assert "its hand-off file `coaching-r<revision>.md` in place of `coaching.md` everywhere" in text
+    assert "If that compose is refused and you deliver unchanged, run 7c's insert again." in text
+    assert "then as after 7f's re-compose" in text
+    step8 = _between(text, "### Step 8:", "## Scoring")
+    assert step8.index("deliverables --run-id") < step8.index("**Send the finished work")
+    assert step8.index("--final || :") < step8.index("cp_closing_message.py")
+    for page in ("visualize.py", "explore.py"):
+        assert re.search(rf'{page}" --dir "\$ANALYSIS_DIR" --run-id "\$RUN_ID"', text), page
+
+
+def test_the_resume_and_quick_check_sentences_stand() -> None:
+    text = SKILL_MD.read_text(encoding="utf-8")
+    assert "continues at the question `waiting_on` names" in text
+    assert "For `cp_gate1_landscape` that is Gate 1: do not redo Steps 2-3.6." in text
+    assert "Run it after the slug block below has created `ANALYSIS_DIR` and bound the run." in text
+    assert "finish --mode quick_check" in text
+
+
+def test_step4_states_the_merge_and_pick_order() -> None:
+    step4 = _between(SKILL_MD.read_text(encoding="utf-8"), "### Step 4:", "### Gate 2:")
+    assert "`Free a slot by merging` IS the merge question" in step4
+    assert "`Include top <slots>` takes the first <slots> in the pool" in step4
+    assert "capped at the open slots" not in step4

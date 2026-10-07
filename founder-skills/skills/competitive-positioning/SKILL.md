@@ -11,18 +11,6 @@ user-invocable: true
 
 Help startup founders see their competitive landscape clearly — who the real competitors are, where they're differentiated, how defensible that differentiation is, and how to present it to investors. Produce a competitive analysis with positioning maps, moat scorecards, and an investor-ready narrative. The tone is founder-first: a coaching tool for preparation, not a judgment.
 
-## Skill Metadata
-
-- **Author:** lool-ventures
-- **Version:** managed in `founder-skills/.claude-plugin/plugin.json`
-- **Compatibility:** Python 3.10+ and `uv` for script execution.
-- **Imports (optional):**
-  - `deck-review:checklist.json` — competition slide claims for cross-validation
-  - `market-sizing:sizing.json` — validate market claims in positioning
-- **Exports:**
-  - `landscape.json` → `deck-review`, `fundraise-readiness`
-  - `report.json` → `ic-sim`, `fundraise-readiness`, `cross-document-consistency`
-
 ## Skill Execution Model (READ FIRST)
 
 > See `founder-skills/references/skill-execution-model.md` for the full inline-skill execution model (3 dispatch contexts, Mitigation 1+2, producer contract, Cowork quirks, per-symptom triage).
@@ -47,38 +35,7 @@ Context A **receipts** don't need this protocol by hand — `check_handoff.py --
 
 Accept any combination: pitch deck (PDF), competitive analysis document, text description of the product and market, prior deck-review or market-sizing artifacts, or conversational input. If a pitch deck is provided, extract competitor claims from the competition slide for validation.
 
-## Available Scripts
-
-All scripts are at `${CLAUDE_PLUGIN_ROOT}/skills/competitive-positioning/scripts/`:
-
-- **`validate_landscape.py`** — Validates and normalizes competitor landscape; checks slug uniqueness, category distribution, research depth; emits warnings for quality issues
-- **`verify_competitors.py`** — Validates the COMPETITOR_VERIFICATION sub-agent's per-competitor verdicts (genuine/adjacent/not_a_competitor); enforces the show-your-work gate (a flag must carry reasoning + independent buyer/job characterization), cross-checks landscape slug coverage, computes summary. Validator, not detector. `--blind-set` additionally diffs the COMPETITOR_RECALL agent's independently-derived set against the draft and emits `recall_gaps` (deterministic slug comparison; unsourced candidates dropped)
-- **`score_moats.py`** — Validates per-company moat assessments, computes aggregates (moat_count, strongest_moat, overall_defensibility), produces cross-company comparison by moat dimension
-- **`score_positioning.py`** — Scores positioning views with rank-based differentiation, detects vanity axes, passes through stress-test results
-- **`checklist.py`** — Scores 25 criteria across 6 categories (pass/fail/warn/not_applicable) with mode-based gating by input_mode
-- **`compose_report.py`** — Assembles report with cross-artifact validation; `--strict` exits 1 on high-severity warnings
-- **`visualize.py`** — Generates self-contained HTML with SVG charts (not JSON)
-- **`explore.py`** — Generates interactive HTML explorer with Chart.js scatter plot, view switching, bubble encoding controls, and company detail panels (not JSON)
-- **`gate3_triggers.py`** — Evaluates the Gate 3 positioning-reality-check triggers from `positioning_scores.json` and returns founder-ready descriptions. Thresholds pinned and exhaustively tested; reports `not_evaluated` separately from "did not fire". Reports only — Gate 3 is a founder decision, so it never exits non-zero
-- **`verify_positioning.py`** — Delivery gate (Step 7f). Checks that the deliverable SHOWS what the artifacts contain (axis rationales, claim verdicts, the adversarial competitor verdicts, the explorer's scored layer) and that no internal token reached the founder (raw enums, field names, slugs, criterion IDs in the coaching commentary), plus cross-artifact consistency. `--gate 1` mid-pipeline, `--gate 2` pre-delivery. Exit 0 = publishable, exit 1 = gaps
-
-Also available from `${CLAUDE_PLUGIN_ROOT}/scripts/` (shared):
-
-- **`founder_context.py`** — Per-company context management (init/read/merge/validate)
-- **`find_artifact.py`** — Resolves artifact paths by skill name and filename (for cross-skill lookups)
-
-Run with: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/competitive-positioning/scripts/<script>.py --pretty [args]`
-
-## Available References
-
-Read each when first needed — do NOT load all upfront. At `${CLAUDE_PLUGIN_ROOT}/skills/competitive-positioning/references/`:
-
-- **`competitive-analysis-methodology.md`** — Read before Step 3. Axis selection, competitor categorization, stress-testing, investor expectations
-- **`moat-definitions.md`** — Read before Step 5. Six canonical moat dimensions with scoring rubrics and stage-calibrated expectations
-- **`checklist-criteria.md`** — Read before Step 6. All 25 checklist criteria with category definitions and mode-based gating rules
-- **`artifact-schemas.md`** — Consult as needed when depositing agent-written artifacts
-
-From `${CLAUDE_PLUGIN_ROOT}/references/` (shared): `stage-expectations.md`, `benchmarks.md`, `israel-guidance.md`
+Shared references, read as needed from `${CLAUDE_PLUGIN_ROOT}/references/` (shared): `stage-expectations.md`, `benchmarks.md`, `israel-guidance.md`
 
 ## Artifact Pipeline
 
@@ -112,7 +69,7 @@ Keep the founder informed with brief, plain-language updates at each step. **Nar
 
 **Every Bash tool call runs in a fresh shell — variables do not persist.** Run the block below exactly **once**: it resolves `$PLUGIN_ROOT` deterministically, and every later block must substitute the printed value as a literal rather than re-running the resolution — repeating the self-heal search can land on a different mount than Step 0 picked when more than one is present (see why in the block's comments).
 
-Optional, best-effort, and via the **Read tool** (not a shell command): before the block below, Read `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json` and note its `version` field as `EXPECT_VERSION`. Passing it to `select_plugin_root.py` below lets an exact version match win over an arbitrary first hit. If the Read fails, skip it and omit `--expect-version` — selection is still deterministic without it. Skip it if that path still begins with `$`.
+Optional, best-effort, and via the **Read tool** (not a shell command): before the block below, Read `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json` and note its `version` field as `EXPECT_VERSION`. It lets an exact version match win. If the Read fails, skip it and omit `--expect-version` — selection is still deterministic without it. Skip it if that path still begins with `$`.
 
 Run the block below with `${CLAUDE_PLUGIN_ROOT}` exactly as it appears.
 
@@ -179,6 +136,14 @@ have not run it — then stop. Do not improvise the missing steps: an analysis t
 reviews itself reads exactly like one that was checked, which is the failure this stop exists to
 prevent.
 
+**Then start the run's record, once**, with every request line that starts `FS_HOST_` copied between the markers (none: leave the placeholder, which is ignored). `RUN_ID` is the `run_id` it prints. Any non-zero exit here or from `bind` below: say in one sentence that the analysis could not start, and stop.
+
+```bash
+python3 "<printed PLUGIN_ROOT>/scripts/run_status.py" start --skill competitive-positioning --artifacts-root "<printed ARTIFACTS_ROOT>" <<'FS_HOST_EOF'
+<each FS_HOST_ line of the request>
+FS_HOST_EOF
+```
+
 Plugin folder for Reads and prompts (as loaded): `${CLAUDE_PLUGIN_ROOT}` — this skill's references are in `${CLAUDE_PLUGIN_ROOT}/skills/competitive-positioning/references/`. If Step 0 printed `READ_ROOT=`, use that value instead.
 
 **Plugin paths.** If Step 0 printed `READ_ROOT=`, this skill's text arrived without its plugin folder filled in. Use that value in place of `${CLAUDE_PLUGIN_ROOT}` in every Read and sub-agent prompt, including where a later step says to leave that path literal. If it did not print `READ_ROOT=`, use the paths as shown. The folder comes from Step 0's filesystem search, not from a skill file or the "Base directory" line, which can name a folder that does not exist. These are setup details: updates to the founder are about their company, not file locations, printed paths or plugin versions.
@@ -210,7 +175,7 @@ error this skill exists to prevent. Running fewer producers is fine; running non
 
 #### Step 5-quick: the quick-check path
 
-Run only the producer the question needs, on a landscape you actually researched:
+Run it after the slug block below has created `ANALYSIS_DIR` and bound the run. Run only the producer the question needs, on a landscape you actually researched:
 
 ```bash
 # "Who competes with us?" -> research the landscape, then validate it.
@@ -223,7 +188,7 @@ JSON
 
 **Producers deliberately NOT run:** `verify_competitors.py` (both the adversarial competitor-set check and the blind recall diff),
 `score_positioning.py`, `checklist.py`, `compose_report.py`, `visualize.py`, `explore.py`, and the
-Context-B coaching dispatch. No `report.md` is written.
+Context-B coaching dispatch. No `report.md` is written. Then close the run's record: `python3 "$SHARED_SCRIPTS/run_status.py" finish --mode quick_check --run-id "$RUN_ID" --artifacts-root "$ARTIFACTS_ROOT" --output "$ANALYSIS_DIR/<the file the producer wrote>"`.
 
 **Same-numbers guarantee.** Whatever is scored is scored by the same producer the full analysis uses,
 so the grades match — only the production weight is dropped, never the accuracy. What you do *not*
@@ -239,8 +204,9 @@ founder would have wanted.
 ```bash
 ANALYSIS_DIR="${ANALYSIS_DIR:-$ARTIFACTS_ROOT/competitive-positioning-${SLUG}}"              # full analysis
 # ANALYSIS_DIR="${ANALYSIS_DIR:-$ARTIFACTS_ROOT/competitive-positioning-${SLUG}-quickcheck}"  # quick check
-mkdir -p "$ANALYSIS_DIR"
-RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
+RUN_ID="<the run_id start printed>"
+mkdir -p "$ANALYSIS_DIR" && python3 "$SHARED_SCRIPTS/run_status.py" bind --run-id "$RUN_ID" \
+  --artifacts-root "$ARTIFACTS_ROOT" --run-dir "$ANALYSIS_DIR" --slug "$SLUG"
 # Context A hand-off dir — PER RUN: sub-agents WRITE their raw output JSON here (the audit trail —
 # raw sub-agent output as returned, before producer validation). Permanent by rule
 # (nothing under outputs/ is ever deleted, by this skill's rule); nothing in it is ever a canonical artifact.
@@ -275,27 +241,39 @@ STAGING_DIR="$(mktemp -d "${TMPDIR:-/tmp}/competitive-positioning-${SLUG:-co}.st
 printf 'RUN_ID=%s\nSTAGING_DIR=%s\nHANDOFF_DIR=%s\n' "$RUN_ID" "$STAGING_DIR" "$HANDOFF_DIR"
 ```
 
+**A resumed run** (`start` printed `resume: 1`) runs Step 1 and this block again, then continues at the question `waiting_on` names; the files before it are this run's and stay. For `cp_gate1_landscape` that is Gate 1: do not redo Steps 2-3.6.
+
 Pass `RUN_ID` to all sub-agents. Every artifact must include `"metadata": {"run_id": "$RUN_ID"}`. `compose_report.py` checks run_id consistency — a mismatch triggers `STALE_ARTIFACT`. Its sibling integrity checks emit `CORRUPT_ARTIFACT` (artifact file is not valid JSON) and `UNVALIDATED_ARTIFACT` (artifact exists but was written directly instead of through its producer script — the `_produced_by` stamp is missing or wrong). All three are high-severity: fix the artifact by re-running the producer; never hand-edit it to silence the warning.
 
 **Overwrite-in-place — do NOT delete prior artifacts under `$ANALYSIS_DIR`.** It is the promoted
 `outputs/` tree in Cowork, where deleting a user-visible path is unsafe (our rule forbids it, and older hosts refused it; the parity
-gate flags it). Each producer writes its artifact fresh via `-o` every run, and `RUN_ID` is minted fresh
-per run — so if a prior run left an artifact a later step doesn't regenerate, `compose_report.py`'s
+gate flags it). Each producer writes its artifact fresh via `-o` every run, and every run has its own
+`RUN_ID` — so if a prior run left an artifact a later step doesn't regenerate, `compose_report.py`'s
 `STALE_ARTIFACT` check (run_ids must match) catches the mismatch. No bulk `rm` is needed or wanted.
 
 ### Step 1: Read or Create Founder Context
 
 ```bash
-python3 "$SHARED_SCRIPTS/founder_context.py" read --artifacts-root "$ARTIFACTS_ROOT" --pretty
+python3 "$SHARED_SCRIPTS/founder_context.py" read --artifacts-root "$ARTIFACTS_ROOT" --run-id "$RUN_ID" \
+  --skill competitive-positioning --pretty
 ```
 
 **Exit 0 (found):** Use the company slug and pre-filled fields. Proceed to Step 2.
 
-**Exit 1 (not found):** Expected on a first run — do NOT mention this check or its exit status to the founder; if you narrate anything first, say only "Let me grab a few basics about the company." **Deck/materials carve-out — derive field-by-field, never all-or-nothing (do not ask for what you were already given):** if the founder provided materials (a deck, or a sufficiently detailed description), derive each of the four basics — company name, stage, sector, geography — that the materials state, and skip the gate entirely when all four are in hand. Treat the four **independently**: deriving three and missing one does NOT send you back to asking for all four. Before gating on a still-missing field, try to **infer** it from a clear signal in the materials and proceed (noting it as inferred, not founder-stated, so it isn't presented as confirmed): geography from a phone country code, office address, or currency (e.g. a `+972` number → Israel); stage from an ambiguous fundraise signal (a named round, round size, or "raising our seed" language → the matching `--stage` value); sector from the product category and ICP. Use `AskUserQuestion` (NOT plain chat) **only for** the specific field(s) that genuinely have no derivable or inferable signal — and ask for only those, stating the values you already derived so the founder confirms or corrects rather than re-supplying everything. **If `AskUserQuestion` is genuinely unavailable in the host, do NOT skip the ask and do NOT assume the answer:** ask the same question in plain chat, state the options explicitly, and wait for an answer before continuing. The ban above is on asking casually WHILE the tool is available — it is not a reason to stall a host that lacks it. (If none of the four can be derived at all, that reduces to asking for all four.)
+**Exit 1 (not found: no `code`, or `CONTEXT_NOT_FOUND`):** Open the four questions (the block below) first. Expected on a first run — do NOT mention this check or its exit status to the founder; if you narrate anything first, say only "Let me grab a few basics about the company." **Deck/materials carve-out — derive field-by-field, never all-or-nothing (do not ask for what you were already given):** if the founder provided materials (a deck, or a sufficiently detailed description), derive each of the four basics — company name, stage, sector, geography — that the materials state, and skip the gate entirely when all four are in hand. Treat the four **independently**: deriving three and missing one does NOT send you back to asking for all four. Before gating on a still-missing field, try to **infer** it from a clear signal in the materials and proceed (noting it as inferred, not founder-stated, so it isn't presented as confirmed): geography from a phone country code, office address, or currency (e.g. a `+972` number → Israel); stage from an ambiguous fundraise signal (a named round, round size, or "raising our seed" language → the matching `--stage` value); sector from the product category and ICP. Use `AskUserQuestion` (NOT plain chat) **only for** the specific field(s) that genuinely have no derivable or inferable signal — and ask for only those, stating the values you already derived so the founder confirms or corrects rather than re-supplying everything. **If `AskUserQuestion` is genuinely unavailable in the host, do NOT skip the ask and do NOT assume the answer:** ask the same question in plain chat, state the options explicitly, and wait for an answer before continuing. (If none of the four can be derived at all, that reduces to asking for all four.)
 
 **Stage is the one field with a real fixed label set — use it verbatim if asking.**
 Options: `Pre-seed` / `Seed` / `Series A` / `Series B+`
-→ `pre-seed | seed | series-a | series-b` (`founder_context.py`'s `VALID_STAGES` has 7 values including `series-c`/`series-d`/`later`; on a `Series B+` pick, ask a plain-text follow-up for the specific stage rather than defaulting to `series-b`). Company name, sector and geography cannot take fixed labels — shape each as an affirmative option carrying the derived value plus a stated-value fallback. Provide at least 2 options. Note in the report metadata that no cross-skill validation was performed. Then create:
+→ `pre-seed | seed | series-a | series-b` (`founder_context.py`'s `VALID_STAGES` has 7 values including `series-c`/`series-d`/`later`; on a `Series B+` pick, ask a plain-text follow-up for the specific stage rather than defaulting to `series-b`). Company name, sector and geography cannot take fixed labels — shape each as an affirmative option carrying the derived value plus a stated-value fallback. Provide at least 2 options. Note in the report metadata that no cross-skill validation was performed.
+
+**Each question is a recorded gate: open, ask, answer.** Ask from the printed `needs_input` and record each reply with its `answer_command`. A field derived or inferred from the materials is recorded, not asked: `record_gate_answer.py default --gate ctx_basics.<field> --reason derived_from_materials` (or `inferred`) `--answer-id use_derived --value "<value>"`. A `Series B+` reply opens `ctx_stage_detail`: ask and record it the same way. <!-- gate: ctx_stage_detail -->
+
+```bash
+python3 "$SHARED_SCRIPTS/record_gate_answer.py" open --run-id "$RUN_ID" --artifacts-root "$ARTIFACTS_ROOT" --gate ctx_basics.company_name \
+  --gate ctx_basics.stage --gate ctx_basics.sector --gate ctx_basics.geography
+```
+
+Then create (exit 10 names a question not yet recorded: ask it, record it, run `init` again):
 
 `--stage` is enum-validated (hyphenated, lowercase) — one of: `pre-seed`, `seed`, `series-a`,
 `series-b`, `series-c`, `series-d`, `later`. Passing a non-canonical token (e.g. `seriesa`,
@@ -312,12 +290,12 @@ pick the closest value from the enum above rather than waiting for that warning.
 ```bash
 python3 "$SHARED_SCRIPTS/founder_context.py" init \
   --company-name "Acme Corp" --stage seed --sector "B2B SaaS" \
-  --geography "US" --artifacts-root "$ARTIFACTS_ROOT"
+  --geography "US" --artifacts-root "$ARTIFACTS_ROOT" --run-id "$RUN_ID" --skill competitive-positioning
   # Add --sector-type <value> if the auto-derivation warning fires or the sector
   # doesn't map cleanly to one of the 9 canonical sector-type values above.
 ```
 
-**Exit 2 (multiple):** Present the list, ask which company, re-read with `--slug`.
+**Exit 10 (several companies):** ask which from the printed `needs_input`, record it with its `answer_command`, then re-read with `--slug`; `A different company` → as Exit 1. <!-- gate: ctx_select_company --> Exit 1 with another `code`: report it and stop.
 
 #### Execution checkpoint — END OF STEP 1, READ BEFORE CONTINUING
 
@@ -359,6 +337,13 @@ Extract from the founder's materials or conversation: company name, product desc
 
 Record `product_availability` — `concept`, `poc`, `pilot` or `shipping` — with `availability_quote`, the words in the materials that show it. It decides only whether today's position is ranked beside a planned one.
 
+**The three product questions are a recorded gate.** Open them first. A field the materials state is recorded, not asked: `record_gate_answer.py not-applicable --gate cp_product_profile.<field> --reason "<where the materials state it>"`. Ask only the rest, from the printed `needs_input` (`AskUserQuestion`: an affirmative option carrying any partial signal, and the free-text fallback), and record each reply with its `answer_command`. The write below refuses (exit 10) until all three are recorded.
+
+```bash
+python3 "$SHARED_SCRIPTS/record_gate_answer.py" open --run-id "$RUN_ID" --run-dir "$ANALYSIS_DIR" --gate cp_product_profile.product \
+  --gate cp_product_profile.customers --gate cp_product_profile.differentiation
+```
+
 Write `product_profile.json` to `$ANALYSIS_DIR`.
 
 **Write it through the producer, not by a bare heredoc into `$ANALYSIS_DIR`.** Stage the JSON in `$STAGING_DIR` (the `/tmp` scratch dir from Step 0 — never the promoted outputs mount) and pipe it:
@@ -369,8 +354,6 @@ cat "$STAGING_DIR/product_profile.json" | python3 "$SCRIPTS/persist_agent_artifa
 ```
 
 It checks the schema-required top-level keys, stamps `_produced_by`, and writes. **If it rejects, the pipe fails and `$ANALYSIS_DIR` is left untouched** — fix the staged JSON and re-run; never hand-write the destination to get past it. `compose_report.py` raises `UNVALIDATED_ARTIFACT` at high severity on an unstamped artifact, so a bare heredoc here surfaces as a high-severity warning in the delivered report, and fails the run outright on Step 7's `--strict` pass. Do not read it as an unconditional hard stop: Pass 1 runs without `--strict`. Consult `${CLAUDE_PLUGIN_ROOT}/skills/competitive-positioning/references/artifact-schemas.md` for the schema. The chosen mode (`deck`, `conversation`, or `document`) is the profile's `input_mode`. Step 6 reads it back from `product_profile.json` for `checklist.py --input-mode`, so mode gating is applied correctly: a shell variable set here would not survive to that later command.
-
-If materials are sparse, use `AskUserQuestion` to gather missing fields. At minimum: product description, target customers, and what the founder believes differentiates them. All three are necessarily runtime-labelled — open-ended founder-specific answers, not a set of labels a fixed list could offer — so each question needs an affirmative option carrying any partial signal already derived, plus a free-text fallback (same shape as the founder-context basics above), not a literal bracket list.
 
 ### Step 3: Identify Competitors -> `landscape_draft.json`
 
@@ -444,11 +427,9 @@ Step 3.5 challenges the competitors that ARE on the list. This is its mirror: it
 one message, both with `subagent_type: "founder-skills:competitive-positioning"`**, exactly as Step 5
 does for MOAT_SCORING + POSITIONING_SCORING. The recall result is consumed after both return.
 
-**Why a separate dispatch rather than one more instruction to an existing one.** Step 4's Phase B
-also looks for missing competitors, but it runs inside the dispatch that just spent its whole context
-enriching the draft, and it fires *after* Gate 1 — so it is anchored by construction and arrives
-after the founder has already validated the set. This dispatch is unanchored and lands before the
-decision.
+**Why a separate dispatch.** Step 4's Phase B also looks for missing competitors, but inside the
+dispatch that enriched the draft and *after* Gate 1, so it is anchored by construction and too late.
+This one is unanchored and lands before the decision.
 
 **The blind is enforced by what the agent is given, not by asking it not to look.** Stage a
 **redacted** product summary and pass that path — never `$ANALYSIS_DIR`:
@@ -522,7 +503,11 @@ block a run that is otherwise complete.
 
 ### Gate 1: Founder Validation of Competitor Set
 
-**MANDATORY STOP — TWO SEPARATE STEPS. DO NOT COMBINE THEM.**
+**MANDATORY STOP — TWO SEPARATE STEPS. DO NOT COMBINE THEM.** It is a recorded gate: open it first. It prints the question, and one line per competitor the independent search found that the draft lacks. If it printed `"applied": "pre_answer"`, the request answered it: post Step A, skip Step B.
+
+```bash
+python3 "$SHARED_SCRIPTS/record_gate_answer.py" open --run-id "$RUN_ID" --run-dir "$ANALYSIS_DIR" --gate cp_gate1_landscape
+```
 
 **Step A: Output a chat message** with the competitor list and candidate axes. Use a markdown table or formatted list. This is a normal assistant message — NOT an AskUserQuestion call.
 
@@ -530,31 +515,30 @@ block a run that is otherwise complete.
 
 **Include re-categorizations, in both directions.** Read `summary.category_disagreements`. Each entry pairs a competitor's drafted category against what independent research found, tagged `upgrade` (research says it's a stronger, more genuine competitor than drafted) or `downgrade` (research says it's weaker or less relevant than drafted). If any exist, add a **"Companies I'd re-categorise"** block under the challenges — one line per entry: for an upgrade, `• <name> — I drafted this as <drafted category>, but research says it's a more direct competitor than that.`; for a downgrade, the mirror: `• <name> — I drafted this as <drafted category>, but research says the overlap is weaker than that.` **An upgrade cuts against the startup — a competitor turning out stronger than drafted — so it must never be presented more quietly than a downgrade;** give both the same visibility and phrasing weight.
 
-**Include the Step 3.6 recall gaps.** Read `recall_gaps` from the same file. If `unmatched` is non-empty, add a **"Companies you may be missing"** block — one line per entry: `• <name> — <why_considered> (<first source>)`, **and when the entry carries `possible_overlap_with`, append ` (may already be covered by <that competitor's name>)`**. Gate 1 is where the founder decides whether to add a candidate, and an undifferentiated list hides which entries likely duplicate competitors they already have. Never drop an annotated entry — it is a hint, not a verdict. Frame these as candidates found by an independent search that never saw your list, not as omissions the founder got wrong.
+**Include the Step 3.6 recall gaps.** If `open` printed `context_lines` (under `needs_input`, or under `context` when it applied a pre-answer), add a **"Companies you may be missing"** block: those lines, unchanged and every one (a line that ends `may already be covered by …` is a hint, not a verdict). Frame them as candidates an independent search found without seeing your list, not as omissions the founder got wrong.
 
-Two rules on this block. **Never present `draft_only` as a challenge** — the blind agent failing to surface a competitor is weak evidence of nothing, and Step 3.5's verdicts are the instrument for that question. And **respect the cap**: the set may hold at most 10 competitors (`validate_landscape.py`'s `MAX_COMPETITORS`). Count the current draft; if adding every candidate would exceed 10, say so plainly in this block — `I found <N> more, but the set is full at 10 — which matter most?` — rather than offering additions that cannot be applied.
+Two rules on this block. **Never present `draft_only` as a challenge** — the blind agent failing to surface a competitor is weak evidence of nothing, and Step 3.5's verdicts are the instrument for that question. And **respect the cap** of 10 competitors: when the candidates would not all fit, the printed lines end with the sentence saying so.
 
 **Step B: AFTER the chat message, call `AskUserQuestion`** with a short question that **names what's being confirmed** so the founder isn't confirming blind. The question is plain text — still ONE SENTENCE, NO markdown/tables/bullets — but it MUST carry the key facts: the competitor **count**, any names you'd **challenge**, and any **upgrades** from the re-categorization check (downgrades stay in the Step-A message only — they don't change the risk picture the way an upgrade does).
 
-Question (substitute `<N>`, the flagged names, and any upgraded names; drop each parenthetical that has nothing to report): `Found <N> competitors (I'd challenge: <names>) (stronger than drafted: <upgraded names>) — does this set look right?`
+Question: the one `open` printed, word for word (its template: `Found <N> competitors (I'd challenge: <names>) (stronger than drafted: <upgraded names>) (you may be missing: <recall names>) — does this set look right?`, each empty parenthetical dropped).
 Options: `No changes — looks good as drafted` / `Missing competitors` / `Remove some` / `Change axes`
 
 **The no-change option carries the reserved prefix `No changes — `, and exactly one option may.** Whichever slot it lands in, that is the branch a founder picks to leave things as they are, and it must be identifiable without counting positions. Any option that adds, removes, or re-categorises a competitor, changes an axis, or changes the scoring basis is FORBIDDEN from using the prefix. The tail after the dash is yours — name the actual candidates, that is what makes these gates good. Measured across live runs, slot 1 was the accept branch on some runs and an *adds-two-competitors* branch on others while every option still opened "Looks good": position is not a safe handle and neither is a shared prefix that mutating options also carry. This one is safe because it is reserved.
 
 **CRITICAL: the question must be self-contained on the decision (count + flagged names + upgrades), as ONE plain-text sentence. The full table/rationale stays in the Step-A chat message — do NOT put a table or markdown in the question.**
 
-If founder requests changes, apply corrections and repeat Steps A+B.
+Record the reply with the `answer_command` `open` printed; `Missing competitors`, `Remove some` and `Change axes` take the founder's words as the value and leave the question open. Apply the change, then Steps A+B again (`open` re-prints the question).
 
 Apply all corrections to `landscape_draft.json` before proceeding. **This is also how an approved recall candidate enters the set** — add it to `landscape_draft.json` as a draft entry (name, slug, category, description, `key_differentiators`, plus `why_included` citing the recall check), and Step 4 then enriches it like any other draft entry. Do not route it through Step 4's `suggested_additions` promotion path: that path operates on the *Step 4 output's* additions and does not exist yet at this point in the run. Never exceed `MAX_COMPETITORS` (10) — if the founder approves more than the remaining slots, ask which to keep rather than silently truncating.
 
 **Preserve `_produced_by` when you edit these files.** `landscape_draft.json` and `positioning.json` are provenance-checked at Step 7: `compose_report.py` raises `UNVALIDATED_ARTIFACT` at **high** severity when the `_produced_by` stamp is missing or wrong. A correction here is an **in-place `Edit` that leaves `_produced_by` untouched** — do NOT rewrite the whole file (that drops the stamp and reds a run that did everything right). If you do need to regenerate the file wholesale, re-stage it and re-pipe it through `persist_agent_artifact.py` exactly as the step that first wrote it did.
 
-**A recall candidate the founder does NOT approve is not simply dropped.** Record it in `landscape_draft.json`'s top-level `deferred_recall_candidates[]` array through its writer — one `{name, slug, category, why_considered, sources}` entry per candidate, copied from how the recall dispatch returned it — rather than discarding it or editing the draft yourself (`category` may be left out; the recall gaps do not carry it):
+**A recall candidate the founder does NOT approve is not simply dropped.** After every Gate 1 answer, even with no candidates, run this in a shell call of its own: it defers each candidate the founder did not add (skipping any now in `competitors[]`), and it is the check before Step 4 (exit 10 while Gate 1 has no final answer):
 
 ```bash
-python3 "$SCRIPTS/record_deferred_recall.py" --draft "$ANALYSIS_DIR/landscape_draft.json" <<'JSON'
-[{"name": "<name>", "slug": "<slug>", "category": "<category>", "why_considered": "<as returned>", "sources": ["https://..."]}]
-JSON
+python3 "$SCRIPTS/record_deferred_recall.py" --draft "$ANALYSIS_DIR/landscape_draft.json" \
+  --from-verification "$ANALYSIS_DIR/competitor_verification.json" --run-id "$RUN_ID"
 ```
 
 Step 4's additions gate below draws candidates from this array too, so a declined recall candidate stays reachable if the analysis later needs it, instead of becoming permanently unaddable the moment Step 4's own `suggested_additions` fill the remaining slots.
@@ -652,7 +636,7 @@ sub-agent artifact, that is content authoring and is forbidden — repair-dispat
 agent's receipt claims `complete` with the correctly echoed path, treat the host's filesystem
 topology as hand-off-incompatible: fall back to message-channel transport for the REST of this run
 (sub-agent returns full JSON in its final message; stage to `$STAGING_DIR/<step>_input.json`; same
-producer pipe), and tell the founder in one plain sentence that this run's working files were passed
+producer pipe; the research's copy also goes to `$HANDOFF_DIR/landscape_research_output.json`, which Step 4's question reads), and tell the founder in one plain sentence that this run's working files were passed
 directly instead of through `outputs/`, so its audit trail is incomplete (the results are unaffected).
 A refused write is NOT this case: it returns `write_refused` (above).
 
@@ -752,11 +736,15 @@ run_id stamping.
 
 **Before the gate, compute the open slots:** `slots = 10 (the landscape maximum from the methodology reference) - len(competitors)`, counting only entries already in `competitors[]`. This is what makes the gate's options runnable — an option that cannot execute must never be offered.
 
-**MANDATORY STOP — TWO SEPARATE STEPS, same pattern as Gates 1 and 2.** This is a real decision point, not a formality — do not conflate the two steps or skip either one.
+**MANDATORY STOP — TWO SEPARATE STEPS, same pattern as Gates 1 and 2.** This is a real decision point, not a formality — do not conflate the two steps or skip either one. It is a recorded gate: open it first; it picks the question and options below from the open slots (exit 11: the set is full and research found no merger, so do not ask).
+
+```bash
+python3 "$SHARED_SCRIPTS/record_gate_answer.py" open --run-id "$RUN_ID" --run-dir "$ANALYSIS_DIR" --gate cp_research_additions
+```
 
 **Step A: Output a chat message** listing each candidate in the pool — a `suggested_additions[]` entry with its name, category, and gap-detection rationale, or a `deferred_recall_candidates[]` entry with its name, category, and `why_considered`. **If the number of candidates exceeds the open slots, say so plainly** — e.g. "You're already at <len(competitors)> of the 10 I can track, so at most <slots> of these can be added" — so the founder understands the constraint before choosing. **Also note that including any of these means another research pass, a couple of minutes** — so the choice is informed on cost as well as value.
 
-**Consolidation merges — when research shows two already-confirmed competitors are now one company.** Research sometimes finds that two entries already in `competitors[]` have become a single corporate entity (an acquisition or merger, not a new competitor). This is report-only by default — never merge automatically. If it comes up, add a line to the Step-A chat message naming both entries, the finding, and its citation (e.g. "My research also found that <A> and <B> are now one company as of <date>, per <source> — want me to combine them?"). Only on founder approval, execute the merge by **re-dispatching `LANDSCAPE_RESEARCH`** with an instruction to combine the two named competitors into one sourced, cited entry — never by hand-editing either entry's fields in the main thread, which is content authoring, not the mechanical relocation the carve-out above permits. This is also the mechanism behind the `Free a slot by merging` option below.
+**Consolidation merges — when research shows two already-confirmed competitors are now one company.** Research sometimes finds that two entries already in `competitors[]` have become a single corporate entity (an acquisition or merger, not a new competitor). This is report-only by default — never merge automatically. If it comes up, open `cp_consolidation_merge.<slug_a>+<slug_b>` for each pair before the additions question <!-- gate: cp_consolidation_merge -->. With the set full, `Free a slot by merging` IS the merge question: one pair, record it `combine`; several, `cp_merge_pick`, then `combine` for the chosen pair and `keep_separate` for the rest. Otherwise (slots open, or `skip`) ask each pair alone and record `combine` / `keep_separate`. Add a line to the Step-A chat message naming both entries, the finding, and its citation (e.g. "My research also found that <A> and <B> are now one company as of <date>, per <source> — want me to combine them?"). Only on founder approval, execute the merge by **re-dispatching `LANDSCAPE_RESEARCH`** with an instruction to combine the two named competitors into one sourced, cited entry — never by hand-editing either entry's fields in the main thread, which is content authoring, not the mechanical relocation the carve-out above permits. This is also the mechanism behind the `Free a slot by merging` option below.
 
 **Step B: AFTER the chat message, call `AskUserQuestion`** — plain text, one sentence, no markdown/tables. Pick the question and options by comparing the number of suggested additions to the open slots:
 - **suggestions fit within the open slots:** `Found <N> more competitors during research — include any?` Options: `Include all` / `Include some` / `No changes — skip these`.
@@ -764,7 +752,7 @@ run_id stamping.
 - **no slots are open, and a consolidation candidate exists:** `Found <N> more competitors during research, but the set is already full — want to free up a slot?` Options: `No changes — skip these` / `Free a slot by merging`. Offer this **only** when a consolidation candidate exists (see "Consolidation merges" above).
 - **no slots are open and there is no consolidation candidate: do NOT ask.** Every branch would land on the same outcome, and `AskUserQuestion` cannot render a one-option gate — it requires at least two. Instead say it plainly in the Step-A message, exactly as Gate 1 does when additions would exceed the cap: name the competitors research found, state that the set is full at 10 and nothing can be added without removing something, and continue. **Naming them is not optional** — dropping the gate is fine, dropping the finding is not, and a founder who is never told what research surfaced is worse off than one asked a broken question.
 
-`Include all` must never appear when it cannot execute (suggestions exceed the open slots), and never render `Include top 0` — that case collapses into the no-slots-open row above. If "Include some" or "Include top <slots>," follow up asking which by name. The labels are runtime data — the candidates are whatever research surfaced or the founder previously declined — so build them from the pool (`suggested_additions[]` ∪ `deferred_recall_candidates[]`): **one option per candidate, labelled with that competitor's name**, capped at the open slots (never offer more than can be added), plus a final `None of these` when fewer than four candidates fill the list. Never ask this as bare free text: a name typed from memory can miss the slug the enrichment re-dispatch needs.
+`Include all` must never appear when it cannot execute (suggestions exceed the open slots), and never render `Include top 0` — that case collapses into the no-slots-open row above. `Include top <slots>` takes the first <slots> in the pool. "Include some" opens `cp_research_pick`: ask from its printed `needs_input` (any candidate it lists is recordable, by id, comma-joined, at most the open slots). The labels are runtime data — the candidates are whatever research surfaced or the founder previously declined — so build them from the pool (`suggested_additions[]` ∪ `deferred_recall_candidates[]`): **one option per candidate, labelled with that competitor's name**, plus a final `None of these` when fewer than four candidates fill the list. Never ask this as bare free text: a name typed from memory can miss the slug the enrichment re-dispatch needs.
 
 **A raw `suggested_additions` entry cannot be piped into `competitors[]` as-is.** It has no `key_differentiators`, no `research_depth`, and its `description` sits inside `partial_profile` — piping it verbatim hits `validate_landscape.py`'s required-field check and fails. If the founder approves additions, promote them via the enrichment path (see "Promoting an approved `suggested_addition` into `competitors[]`" in the Context A hand-off protocol above), in this order:
 
@@ -802,7 +790,7 @@ Fix any errors (exit 1) and re-run. Warnings are acceptable — address medium-s
 
 ### Gate 2: Founder Validation of Axis Selection
 
-**MANDATORY STOP — TWO SEPARATE STEPS, same pattern as Gate 1.**
+**MANDATORY STOP — TWO SEPARATE STEPS, same pattern as Gate 1.** Open it first (`record_gate_answer.py open … --gate cp_gate2_axes`); `"applied": "pre_answer"`: post Step A, skip Step B.
 
 At this point no competitor coordinates exist yet — those are produced in Step 5 (POSITIONING_SCORING) and written to `positioning.json`. Gate 2 validates **which axis pair(s)** to plot on and **which competitors** belong on the map, NOT coordinate positions.
 
@@ -813,9 +801,9 @@ At this point no competitor coordinates exist yet — those are produced in Step
 Question (substitute the two chosen axis names): `I'll plot competitors on <axis-X> × <axis-Y> — do these axes look right?`
 Options: `No changes — proceed to scoring` / `Change axes` / `Adjust competitor set` / `Change scoring basis`
 
-**Four options, never five — `AskUserQuestion` accepts at most four.** A fifth cannot be rendered, so specifying one does not add a choice; it silently forfeits whichever the model drops. There is also no need for an `Other changes` catch-all: the tool always offers the founder a free-text **Other** of its own, so spending a slot on one buys nothing and costs a real option.
+**Four options, never five — `AskUserQuestion` accepts at most four.** A fifth cannot be rendered, so specifying one does not add a choice; it silently forfeits whichever the model drops. The tool adds its own free-text **Other**, so never spend a slot on an `Other changes` catch-all.
 
-If the founder changes an axis pair or the competitor set, apply the change before proceeding to Step 5. If the founder picks `Change scoring basis`, ask a short follow-up for which basis (shipped / 12-month roadmap / mixed) and carry the answer into the POSITIONING_SCORING dispatch below as `SCORING_BASIS`. **Deliberately left as prose, not declared:** this follow-up has no legitimate no-change branch (the founder just chose to change the basis), so declaring it would either fail this skill's exactly-one reserved-prefix rule or force a fabricated no-change option onto a gate that shouldn't have one — the same class of case §4.1's split exists to prevent, one level down. Converting it needs the confirm-gate marker Phase 2 deferred until a real non-confirm case arrived within an adopted skill; this is that case, parked rather than improvised. Founder adjustments to individual coordinates happen later — at the Step 5 founder-override flow, after coordinates have been assigned.
+Record the reply with its `answer_command`. If the founder changes an axis pair or the competitor set, apply it before Step 5: the set in `landscape.json` (never the draft's `competitors[]`, which Gate 1 confirmed), axes where Step 5 reads them. `Change scoring basis` opens `cp_scoring_basis`: ask it from its printed `needs_input` and record it; the recorded basis is the one the scoring prompts take. Founder adjustments to individual coordinates happen later — at the Step 5 founder-override flow, after coordinates have been assigned.
 
 ### Step 4b: The Startup's Public Record -> `startup_research.json` (Context A: STARTUP_RESEARCH dispatch)
 
@@ -827,7 +815,7 @@ and their legal events — which nothing else in the run looks up. The prompt is
 Run the generator in a shell call of its own — nothing before it but variable assignments, nothing after it — and send what it prints unchanged.
 
 ```bash
-python3 "$SCRIPTS/cp_dispatch_prompt.py" startup_research --run-id "$RUN_ID" \
+python3 "$SCRIPTS/cp_dispatch_prompt.py" startup_research --run-id "$RUN_ID" --analysis-dir "$ANALYSIS_DIR" \
   --handoff-agent "$HANDOFF_AGENT" --analysis-dir-agent "$ANALYSIS_DIR_AGENT"
 ```
 
@@ -858,21 +846,21 @@ cat "$STAGING_DIR/positioning.json" | python3 "$SCRIPTS/persist_agent_artifact.p
 It checks the schema-required top-level keys, stamps `_produced_by`, and writes. **If it rejects, the pipe fails and `$ANALYSIS_DIR` is left untouched** — fix the staged JSON and re-run; never hand-write the destination to get past it. `compose_report.py` raises `UNVALIDATED_ARTIFACT` at high severity on an unstamped artifact, so a bare heredoc here surfaces as a high-severity warning in the delivered report, and fails the run outright on Step 7's `--strict` pass. Do not read it as an unconditional hard stop: Pass 1 runs without `--strict`. **`moat_assessments` in this draft is optional — write `{}` or omit the key rather than authoring a full per-competitor draft.** It is superseded by `moat_scores.json` once MOAT_SCORING returns below, and nothing reads the draft block for scoring, so drafting one for every slug is effort with no consumer. Then dispatch the sub-agent **twice in parallel** (two Task calls in one message, both with `subagent_type: "founder-skills:competitive-positioning"`) — once for MOAT_SCORING and once for POSITIONING_SCORING.
 
 **The two prompts are printed, not written.** Run the generator once per context and send each printed
-text as that dispatch's prompt, unchanged — nothing added, removed or reworded. `--scoring-basis` is the
-basis Gate 2 recorded (default `shipped`). Anything the scorers should know goes in the files they read,
+text as that dispatch's prompt, unchanged — nothing added, removed or reworded. The scoring
+basis is the recorded `cp_scoring_basis` (none: `shipped`), which the generator applies; exit 10 is a question to ask and record before running it again. Anything the scorers should know goes in the files they read,
 never in the prompt.
 
 Run each generator in a shell call of its own — nothing before it but variable assignments, nothing after it — and send what it prints unchanged.
 
 ```bash
-python3 "$SCRIPTS/cp_dispatch_prompt.py" moat_scoring --run-id "$RUN_ID" \
+python3 "$SCRIPTS/cp_dispatch_prompt.py" moat_scoring --run-id "$RUN_ID" --analysis-dir "$ANALYSIS_DIR" \
   --handoff-agent "$HANDOFF_AGENT" --analysis-dir-agent "$ANALYSIS_DIR_AGENT"
 ```
 
 ```bash
 python3 "$SCRIPTS/cp_dispatch_prompt.py" positioning_scoring --run-id "$RUN_ID" \
   --handoff-agent "$HANDOFF_AGENT" --analysis-dir-agent "$ANALYSIS_DIR_AGENT" \
-  --analysis-dir "$ANALYSIS_DIR" --scoring-basis shipped
+  --analysis-dir "$ANALYSIS_DIR"
 ```
 
 **After both sub-agents return:** gate EACH hand-off per the Context A hand-off protocol (run `check_handoff.py` per file, branch on exit codes). Then pipe each file through its producer:
@@ -954,9 +942,9 @@ script had already corrected. The triggers it evaluates — check **every view**
 
 If none fire on any view, skip this gate silently and continue.
 
-If one fires: **Step A: Output a chat message** naming which pattern triggered, in plain language, alongside the scored position and — when available — the position the deck's own competition slide claimed, for comparison.
+Then open it (`record_gate_answer.py open … --gate cp_gate3_position`): exit 11 = no trigger, skip silently; `"applied": "pre_answer"`: skip Step B <!-- gate: cp_gate3_position -->. Otherwise **Step A: Output a chat message** naming which pattern triggered, in plain language, alongside the scored position and — when available — the position the deck's own competition slide claimed, for comparison.
 
-**Step B: AFTER the chat message, call `AskUserQuestion`**, plain text, one sentence, no markdown/tables: `The scored position <plain-language description of the trigger> — keep it, dig deeper, or reconsider how it's scored?` Options: `No changes — keep the scoring` / `Re-score with founder facts` / `Change scoring basis` / `Show both positions`.
+**Step B: AFTER the chat message, call `AskUserQuestion`**, plain text, one sentence, no markdown/tables: `The scored position <plain-language description of the trigger> — keep it, dig deeper, or reconsider how it's scored?` Options: `No changes — keep the scoring` / `Re-score with founder facts` / `Change scoring basis` / `Show both positions`. Record the reply with its `answer_command`.
 
 If the founder picks `Re-score with founder facts`, gather the additional detail, record it in `product_profile.json` (the scorers' source for what the startup does; re-stage and re-pipe it through `persist_agent_artifact.py`), then re-run the generator and re-dispatch POSITIONING_SCORING (and MOAT_SCORING if the new facts bear on a moat) before re-merging into `positioning.json`. The facts travel in the file, never in the prompt. **Then re-run Step 6's checklist pipe too** (with `--positioning-scores` pointed at the refreshed `positioning_scores.json`) — `score_positioning.py`'s rank and differentiation numbers just moved, and POS_04 reads that data directly, so a checklist graded before this re-score no longer matches the map it is grading. If `Change scoring basis`, follow the same basis-change mechanism as Gate 2. If `Show both positions`, note both the scored map and the deck's claimed position in the report rather than picking one.
 
@@ -974,7 +962,7 @@ unchanged — nothing added, removed or reworded, including on a re-run after a 
 Run the generator in a shell call of its own — nothing before it but variable assignments, nothing after it — and send what it prints unchanged.
 
 ```bash
-python3 "$SCRIPTS/cp_dispatch_prompt.py" checklist --run-id "$RUN_ID" \
+python3 "$SCRIPTS/cp_dispatch_prompt.py" checklist --run-id "$RUN_ID" --analysis-dir "$ANALYSIS_DIR" \
   --handoff-agent "$HANDOFF_AGENT" --analysis-dir-agent "$ANALYSIS_DIR_AGENT"
 ```
 
@@ -1008,7 +996,7 @@ different sentence the founder reads; there is no reason meaning "it did not see
 
 Mirror the founder's uploads into the hand-off dir (exit 3 from the resolver = no uploads folder: nothing
 was attached, or this host keeps uploads elsewhere; then copy into `$HANDOFF_DIR/docs` the founder documents
-you read earlier, from the path you read them at, and ask for a path only if you never had one), then print
+you read earlier, from the path you read them at, and ask for a path only if you never had one: `open --gate cp_upload_path` first, record the reply), <!-- gate: cp_upload_path --> then print
 the prompt and send it unchanged:
 
 ```bash
@@ -1089,7 +1077,7 @@ python3 "$SCRIPTS/compose_report.py" --dir "$ANALYSIS_DIR" --strict --pretty \
   --write-md "$ANALYSIS_DIR/report.md"
 ```
 
-**Post-write verification:** `compose_report.py` exits non-zero (code 2) if the declared output files don't exist or are empty after writing. If compose exits non-zero, stop and report the exact stderr — do not proceed.
+**Post-write verification:** `compose_report.py` exits non-zero (code 2) if the declared output files don't exist or are empty after writing. Exit 10 is a question, not a failure: ask the gate its JSON names (`blocked_by_gate`), record it, compose again; never re-run compose without the answer. `RUN_FINISHED`: an answer this delivered analysis rests on has changed, which starts a new analysis (Step 0). Any other non-zero exit: stop and report the exact stderr — do not proceed.
 
 **7b — Cross-skill lookups:** Use `find_artifact.py` to locate prior deck-review and market-sizing artifacts. If found, note findings for inclusion in coaching commentary. Example (resolve the market-sizing sizing artifact for this company):
 
@@ -1222,12 +1210,12 @@ The gate (`check_handoff.py --format=markdown`) verifies the sub-agent's hand-of
 - **`insert_coaching.py` exit 1** (blocked; stdout carries `{"status": "blocked", "reason": ...}`) → stop and report the exact reason. Do NOT hand-edit `report.md` — if the reason mentions a truncated report or a missing marker, re-run `compose_report.py --write-md` and retry the chain. If the reason is `commentary_markdown missing or empty`, treat as a malformed hand-off: repair-dispatch quoting the reason.
 - **After ANY corrective dispatch, resume from the gate chain** — never feed the transform+insert pipe an ungated file.
 
-**Retry budget:** max 2 corrective dispatches (same rule as Context A). **Graceful degrade:** if the FIRST corrective dispatch also exits 3 while the receipt claims `complete` with the correctly echoed path, treat the host topology as hand-off-incompatible and fall back to message-channel transport, and tell the founder in one plain sentence (see Context A's degrade rule). **The corrective dispatch MUST ask for the commentary inline for this to be reachable** — add: "the file hand-off is not working in this environment; return the coaching commentary itself as your final message, as raw markdown, with no receipt JSON and no fences." Without that line the fallback is unreachable: the normal Context B prompt instructs the agent to return ONLY the receipt and not to narrate, so its final message contains no markdown to stage. Then stage that returned markdown to `$STAGING_DIR/coaching.md` via a **single-quoted** `<<'COACHING_EOF'` heredoc (apostrophe-safe; NEVER `python -c`, NEVER the `outputs/` root — `$STAGING_DIR` is the `/tmp` scratch dir from Step 0, never the promoted outputs mount), and run the same `md_to_commentary.py "$STAGING_DIR/coaching.md" | insert_coaching.py` chain against that staged file.
+**Retry budget:** max 2 corrective dispatches (same rule as Context A). **Graceful degrade:** if the FIRST corrective dispatch also exits 3 while the receipt claims `complete` with the correctly echoed path, treat the host topology as hand-off-incompatible and fall back to message-channel transport, and tell the founder in one plain sentence (see Context A's degrade rule). **The corrective dispatch MUST ask for the commentary inline for this to be reachable** — add: "the file hand-off is not working in this environment; return the coaching commentary itself as your final message, as raw markdown, with no receipt JSON and no fences." Without that line the fallback is unreachable: the normal Context B prompt instructs the agent to return ONLY the receipt and not to narrate, so its final message contains no markdown to stage. Then stage that returned markdown to `$STAGING_DIR/coaching.md` via a **single-quoted** `<<'COACHING_EOF'` heredoc (apostrophe-safe), and run the same `md_to_commentary.py "$STAGING_DIR/coaching.md" | insert_coaching.py` chain against that staged file.
 
 **7d — Visualize (optional):**
 
 ```bash
-python3 "$SCRIPTS/visualize.py" --dir "$ANALYSIS_DIR" -o "$ANALYSIS_DIR/report.html"
+python3 "$SCRIPTS/visualize.py" --dir "$ANALYSIS_DIR" --run-id "$RUN_ID" -o "$ANALYSIS_DIR/report.html"
 ```
 
 **Do not hand this over here** — the Deliver step below is the only place work reaches the founder, and it sends the complete set as files. A path presented here is the partial-delivery bug.
@@ -1235,7 +1223,7 @@ python3 "$SCRIPTS/visualize.py" --dir "$ANALYSIS_DIR" -o "$ANALYSIS_DIR/report.h
 **7e — Explorer (optional):**
 
 ```bash
-python3 "$SCRIPTS/explore.py" --dir "$ANALYSIS_DIR" -o "$ANALYSIS_DIR/explore.html"
+python3 "$SCRIPTS/explore.py" --dir "$ANALYSIS_DIR" --run-id "$RUN_ID" -o "$ANALYSIS_DIR/explore.html"
 ```
 
 **Do not hand this over here** — the Deliver step below is the only place work reaches the founder, and it sends the complete set as files. A path presented here is the partial-delivery bug.
@@ -1254,7 +1242,7 @@ fact, by a test or by a reader of the artifacts, instead of something the transc
 
 **Exit 1** — the deliverable is missing something the artifacts already contain, or contains
 something the founder cannot use. Each gap names the artifact and the defect. **Fix the cause and
-re-run the affected producer, then re-run this gate.** Do NOT hand over a report the gate rejected,
+re-run the affected producer, then re-run this gate.** A re-compose of a delivered report starts a new revision (compose prints its number): then 7c with fresh coaching, its hand-off file `coaching-r<revision>.md` in place of `coaching.md` everywhere, then 7d, 7e, Step 8's copies, `deliverables --final` and the closer. If that compose is refused and you deliver unchanged, run 7c's insert again. Do NOT hand over a report the gate rejected,
 and do NOT hand-edit `report.md` to satisfy it — the gate checks the rendered surface precisely
 because hand-editing it is how a defect gets hidden rather than fixed. If a gap is genuinely a false
 positive, say so to the founder in plain language and deliver anyway; that is a judgement you state,
@@ -1283,6 +1271,12 @@ cp "$ANALYSIS_DIR/explore.html" "$OUT/${COMPANY_NAME}_Competitive_Explorer.html"
 ```
 
 Where `COMPANY_NAME` is the company name with spaces replaced by underscores (e.g., "Acme Corp" -> "Acme_Corp").
+
+Then close the run's file list (for a host; nothing to tell the founder):
+
+```bash
+python3 "<printed PLUGIN_ROOT>/scripts/run_status.py" deliverables --run-id "$RUN_ID" --artifacts-root "$ARTIFACTS_ROOT" --final || :
+```
 
 **Send the finished work to the founder — the complete set, as files.** Not a path, and not a subset.
 A path is not a deliverable in Cowork — whether the workspace it names outlives the task depends on how
@@ -1339,7 +1333,7 @@ user-visible path is unsafe (and the parity gate flags it).
 
 **When the founder asks about the report afterwards:**
 - Answer placement and moat questions **from the points/evidence tables in report.md** — never re-derive or restate coordinates from memory.
-- If the founder disputes a coordinate (e.g., "we're faster than you placed us"), use the **founder coordinate-override flow** (Step 5): update the specific point in `positioning.json` with `x_evidence_source: "founder_override"` and re-run `score_positioning.py` to refresh `positioning_scores.json`, then re-run the Step 6 checklist pipe (so `checklist.json`'s recorded fingerprint matches the changed map) and `compose_report.py`. Do NOT re-explain a placement from chat context.
+- If the founder disputes a coordinate (e.g., "we're faster than you placed us"), use the **founder coordinate-override flow** (Step 5): update the specific point in `positioning.json` with `x_evidence_source: "founder_override"` and re-run `score_positioning.py` to refresh `positioning_scores.json`, then re-run the Step 6 checklist pipe (so `checklist.json`'s recorded fingerprint matches the changed map) and `compose_report.py`, then as after 7f's re-compose. Do NOT re-explain a placement from chat context.
 - For what-if competitive scenarios (e.g., "what if we added this moat?"), note the gap and invite the founder to re-run the full skill after updating the relevant data.
 - **If the scoring basis diverges from the deck's own competition slide, say so explicitly rather than letting the scored map silently contradict it** — follow the delta rule in `competitive-analysis-methodology.md` §7 ("When the basis diverges from the founder's deck").
 

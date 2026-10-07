@@ -11,7 +11,7 @@
                     [--gate ...]                                   (one segment per gate)
     answer          --run-id R (--run-dir D | --artifacts-root A) --form-reply   (reply on stdin)
     default         --run-id R (...) --gate G[.I] --reason REASON [--answer-id X] [--value V] [--note N]
-    not-applicable  --run-id R (...) --gate G[.I] --reason TEXT
+    not-applicable  --run-id R (...) --gate G[.I] [--gate ...] --reason TEXT   (all or none)
     require         --run-id R (...) --gate G[.I]
     list            [--skill S]
     show            --run-id R (...)
@@ -229,21 +229,23 @@ def cmd_not_applicable(args: argparse.Namespace) -> int:
     g = _gates_or_exit(args.pretty)
     paths = _locate(args)
 
-    def fn(ctx: Any, ledger: dict[str, Any], status: dict[str, Any]) -> dict[str, Any]:
-        gid, _inst, gdef = g.check_key(args.gate, ctx.skill)
-        if gdef["writer"] != g.RECORDER:
-            raise g.GateRejection("WRITER_IS_OTHER_SCRIPT", f"{gid} is recorded by {gdef['writer']}")
-        if gdef["owed"] != "model":
-            raise g.GateRejection(
-                "CLOSE_SCRIPT_OWED", f"{gid} is decided by a script, so only that script can find it does not apply"
-            )
-        out: dict[str, Any] = g.record(
-            ctx, ledger, args.gate, note=args.reason, resolution="not_applicable", basis="model", by=BY
-        )
-        return out
+    def fn(ctx: Any, ledger: dict[str, Any], status: dict[str, Any]) -> list[dict[str, Any]]:
+        # Every gate is checked before any is recorded: one refusal writes nothing for the others either.
+        for key in args.gate:
+            gid, _inst, gdef = g.check_key(key, ctx.skill)
+            if gdef["writer"] != g.RECORDER:
+                raise g.GateRejection("WRITER_IS_OTHER_SCRIPT", f"{gid} is recorded by {gdef['writer']}")
+            if gdef["owed"] != "model":
+                raise g.GateRejection(
+                    "CLOSE_SCRIPT_OWED", f"{gid} is decided by a script, so only that script can find it does not apply"
+                )
+        return [
+            g.record(ctx, ledger, key, note=args.reason, resolution="not_applicable", basis="model", by=BY)
+            for key in args.gate
+        ]
 
-    out = g.transact(paths, fn)
-    _emit({"ok": True, **out}, args.pretty)
+    outs = g.transact(paths, fn)
+    _emit({"ok": True, **outs[0]} if len(outs) == 1 else {"ok": True, "gates": outs}, args.pretty)
     return 0
 
 
@@ -324,9 +326,9 @@ def _parser() -> argparse.ArgumentParser:
     sp.add_argument("--note", default=None)
     sp.set_defaults(func=cmd_default)
 
-    sp = sub.add_parser("not-applicable", help="record that a model-owed gate does not apply")
+    sp = sub.add_parser("not-applicable", help="record that model-owed gates do not apply (one reason, all or none)")
     locator(sp)
-    sp.add_argument("--gate", required=True)
+    sp.add_argument("--gate", action="append", required=True)
     sp.add_argument("--reason", required=True)
     sp.set_defaults(func=cmd_not_applicable)
 

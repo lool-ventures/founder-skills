@@ -417,6 +417,11 @@ def _read_views_fingerprint(path: str) -> str | None:
 
 def main() -> None:
     args = parse_args()
+    # A call into a run's analysis dir names its run (RUN_ID_REQUIRED); outside a run, nothing changes.
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import _cp_gates
+
+    _cp_gates.refuse_without_run_id(args.output, args.run_id)
 
     if sys.stdin.isatty():
         print("Error: pipe JSON input via stdin", file=sys.stderr)

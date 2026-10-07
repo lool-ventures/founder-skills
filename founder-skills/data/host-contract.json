@@ -11,6 +11,9 @@
       "RUN_ALREADY_BOUND",
       "RUN_REFUSED"
     ],
+    "cp_producers": [
+      "RUN_ID_REQUIRED"
+    ],
     "deliverables": [
       "RUN_NOT_COMPLETE"
     ],
@@ -74,7 +77,9 @@
     "cp_consolidation_merge": {
       "asked_check": "none",
       "id": "cp_consolidation_merge",
-      "instances": null,
+      "instances": {
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.+-]{0,127}$"
+      },
       "kind": "templated",
       "mandatory": false,
       "modes": [
@@ -104,7 +109,7 @@
       ],
       "question": "My research also found that <A> and <B> are now one company as of <date>, per <source> — want me to combine them?",
       "skill": "competitive-positioning",
-      "step": "4a"
+      "step": "4"
     },
     "cp_gate1_landscape": {
       "asked_check": "none",
@@ -132,32 +137,32 @@
           "id": "missing",
           "label": "Missing competitors",
           "only_skills": null,
-          "pre_answerable": true,
+          "pre_answerable": false,
           "takes_value": true,
-          "terminal": true
+          "terminal": false
         },
         {
           "hidden": false,
           "id": "remove",
           "label": "Remove some",
           "only_skills": null,
-          "pre_answerable": true,
+          "pre_answerable": false,
           "takes_value": true,
-          "terminal": true
+          "terminal": false
         },
         {
           "hidden": false,
           "id": "change_axes",
           "label": "Change axes",
           "only_skills": null,
-          "pre_answerable": true,
+          "pre_answerable": false,
           "takes_value": true,
-          "terminal": true
+          "terminal": false
         }
       ],
-      "question": "Found <N> competitors (I'd challenge: <names>) (stronger than drafted: <upgraded names>) — does this set look right?",
+      "question": "Found <N> competitors (I'd challenge: <names>) (stronger than drafted: <upgraded names>) (you may be missing: <recall names>) — does this set look right?",
       "skill": "competitive-positioning",
-      "step": "3"
+      "step": "gate1"
     },
     "cp_gate2_axes": {
       "asked_check": "none",
@@ -210,7 +215,7 @@
       ],
       "question": "I'll plot competitors on <axis-X> × <axis-Y> — do these axes look right?",
       "skill": "competitive-positioning",
-      "step": "4c"
+      "step": "gate2"
     },
     "cp_gate3_position": {
       "asked_check": "none",
@@ -263,7 +268,7 @@
       ],
       "question": "The scored position <plain-language description of the trigger> — keep it, dig deeper, or reconsider how it's scored?",
       "skill": "competitive-positioning",
-      "step": "6"
+      "step": "gate3"
     },
     "cp_merge_pick": {
       "asked_check": "none",
@@ -279,7 +284,7 @@
       "options": [],
       "question": "Which two should I merge to free a slot?",
       "skill": "competitive-positioning",
-      "step": "4a"
+      "step": "4"
     },
     "cp_product_profile": {
       "asked_check": "none",
@@ -386,7 +391,7 @@
       ],
       "question": "Found <N> more competitors during research — include any?",
       "skill": "competitive-positioning",
-      "step": "4a"
+      "step": "4"
     },
     "cp_research_pick": {
       "asked_check": "none",
@@ -397,7 +402,7 @@
       "modes": [
         "full"
       ],
-      "multi": false,
+      "multi": true,
       "no_ask_default": null,
       "options": [
         {
@@ -412,7 +417,7 @@
       ],
       "question": "Which ones should I include?",
       "skill": "competitive-positioning",
-      "step": "4a"
+      "step": "4"
     },
     "cp_scoring_basis": {
       "asked_check": "none",
@@ -456,7 +461,7 @@
       ],
       "question": "Which basis should the scoring use?",
       "skill": "competitive-positioning",
-      "step": "4c"
+      "step": "gate2"
     },
     "cp_upload_path": {
       "asked_check": "none",
@@ -491,7 +496,7 @@
       ],
       "question": "Where are the documents you shared? The review reads them first.",
       "skill": "competitive-positioning",
-      "step": "6c"
+      "step": "6.5"
     },
     "ct_cap_base_confirmation": {
       "asked_check": "none",
@@ -2601,7 +2606,10 @@
     "`ms_two_figures` has one instance per input the founder stated two figures for (`FS_HOST_ANSWER ms_two_figures.arpu=typed`). The bare `FS_HOST_ANSWER ms_two_figures=<option>` answers every instance; a line naming an instance wins for that instance. Its alternatives' ids are keyed on the figure (`alt_<value>[_<period>]`), so only `typed` is known before the run.",
     "A question the run no longer owes (its parent was answered otherwise, its condition no longer holds, or the run's mode does not ask it) is closed `not_applicable` by script; if the run owes it again it is re-opened and asked, never read as answered.",
     "`ic_decline_confirmation` is owed only while this run's scored verdict is a Decline (`pass` or `hard_pass`); a request line for it applies only then. `hold_off` cannot be sent ahead: recorded, it leaves the run `waiting` until `finish` is. A scores file that cannot be read or carries another run's id makes the gate `GATE_UNDECIDABLE` (exit 2) rather than not owed.",
-    "ic-sim refuses `RUN_FINISHED` (exit 1, nothing written) when its fund profile or report is built again for a `complete` run: new materials after delivery are a new simulation, under a new run id."
+    "ic-sim refuses `RUN_FINISHED` (exit 1, nothing written) when its fund profile or report is built again for a `complete` run: new materials after delivery are a new simulation, under a new run id.",
+    "competitive-positioning: `open --gate cp_gate1_landscape` prints the question naming every competitor the independent search found that the set lacks, and `context_lines`, one per candidate; when it applies a request line (or the gate is already answered) the same lines are under `context.<gate>`. `missing`, `remove` and `change_axes` leave the question open (asked again after the change) and cannot be sent ahead.",
+    "competitive-positioning's Step 4 additions question offers only the form the open slots allow (all / top <n> / free a slot by merging) and is not owed when nothing can be added; an option of another form is `OPTION_UNLISTED`. `include_top` takes research's first <n>; only `include_some` asks `cp_research_pick`, which records any candidate (comma-joined ids, at most the open slots) though it shows four. `cp_consolidation_merge` has one instance per merger research found (`<slug_a>+<slug_b>`); an answered pair is never offered again.",
+    "A competitive-positioning report composed again after `complete` (the delivery check's fix, or a coordinate the founder disputes) starts a new revision: `running`, `revision` + 1, deliverables and `handed_over_at` cleared, until the coaching is inserted again."
   ],
   "pages_after_coaching": {
     "cap-table": [],
@@ -2719,7 +2727,7 @@
       "recorded_by": "the script that records the answer",
       "step": "the skill step that asks it"
     },
-    "resumed_from": "{gate, step, reason} of the current invocation: the gate key it started at, that gate's step, and `resume` or `reopened`; null on invocation 1",
+    "resumed_from": "{gate, step, reason} of the current invocation: the gate key it started at, that gate's step, and `resume` or `reopened`; null on invocation 1. A competitive-positioning report composed again after `complete` reopens with `gate` null and `step` \"7\" (no gate started it)",
     "touched_kinds": [
       "changed",
       "rewritten_identical",

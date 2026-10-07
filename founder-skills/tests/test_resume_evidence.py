@@ -1302,3 +1302,133 @@ def test_an_ic_sim_resume_without_the_answer_asks_again(tmp_path: Path) -> None:
     opened = json.loads(_fmr_ok(h.record(root, run_id, "open", "--gate", "ic_decline_confirmation")).stdout)
     assert opened.get("applied") is None and len(opened["needs_input"]) == 1
     assert h.status(root, run_id)["status"] == "waiting"
+
+
+# --- competitive-positioning: a resume at Gate 1 ---------------------------------------------------------------
+
+CP_SCRIPTS = h.SKILLS / "competitive-positioning" / "scripts"
+CP_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "competitive-positioning"
+# What Steps 2-3.6 wrote before the Gate 1 question: a resume answered there keeps them. The draft is NOT kept:
+# the deferral writes the recall candidates the founder did not add into it, after the answer.
+CP_KEPT_ON_RESUME = frozenset(("product_profile_json", "competitor_verification_json"))
+
+
+def _cp_first_invocation(tmp: Path) -> tuple[Path, str, Path]:
+    root, run_id, run_dir = h.start_bound(tmp, "competitive-positioning")
+    rec = lambda *a: _fmr_ok(h.record(root, run_id, *a))  # noqa: E731
+    keys = ("ctx_basics.company_name", "ctx_basics.stage", "ctx_basics.sector", "ctx_basics.geography")
+    rec("open", *[a for k in keys for a in ("--gate", k)])
+    for key, value in (("company_name", "Example Co"), ("sector", "B2B SaaS"), ("geography", "US")):
+        rec(
+            "default",
+            "--gate",
+            f"ctx_basics.{key}",
+            "--reason",
+            "derived_from_materials",
+            "--answer-id",
+            "use_derived",
+            "--value",
+            value,
+        )
+    rec("answer", "--gate", "ctx_basics.stage", "--answer-id", "seed")
+    init = ("init", "--company-name", "Example Co", "--stage", "seed", "--sector", "B2B SaaS", "--geography", "US")
+    _fmr_ok(
+        h.run(
+            h.SHARED / "founder_context.py",
+            *init,
+            "--artifacts-root",
+            str(root),
+            "--run-id",
+            run_id,
+            "--skill",
+            "competitive-positioning",
+        )
+    )
+    product = [a for f in ("product", "customers", "differentiation") for a in ("--gate", f"cp_product_profile.{f}")]
+    rec("not-applicable", *product, "--reason", "the deck states it")
+    for artifact in ("product_profile.json", "landscape_draft.json"):
+        body = json.loads((CP_FIXTURES / artifact).read_text(encoding="utf-8"))
+        body.pop("_produced_by", None)
+        argv = ("--artifact", artifact, "-o", str(run_dir / artifact), "--run-id", run_id)
+        _fmr_ok(h.run(CP_SCRIPTS / "persist_agent_artifact.py", *argv, stdin=json.dumps(body)))
+    draft = json.loads((run_dir / "landscape_draft.json").read_text(encoding="utf-8"))
+    verdicts = [
+        {
+            "slug": c["slug"],
+            "verdict": "genuine",
+            "independent_characterization": {"buyer": "b", "job_to_be_done": "j", "evidence_source": "researched"},
+            "overlap": {},
+            "reasoning": "r",
+            "confidence": "high",
+            "recommended_action": "keep",
+        }
+        for c in draft["competitors"]
+    ]
+    payload = {
+        "startup_characterization": {"buyer": "b", "job_to_be_done": "j", "evidence_source": "founder_provided"},
+        "verdicts": verdicts,
+        "metadata": {"run_id": run_id},
+    }
+    hand = run_dir / "handoff" / run_id
+    blind = {
+        "candidates": [
+            {
+                "name": f"Newco {i}",
+                "slug": f"newco-{i}",
+                "category": "direct",
+                "why_considered": "same job",
+                "sources": [f"https://example.org/{i}"],
+            }
+            for i in range(2)
+        ]
+    }
+    (hand / "competitor_recall_output.json").write_text(json.dumps(blind), encoding="utf-8")
+    verify = ["--run-id", run_id, "--landscape", str(run_dir / "landscape_draft.json")]
+    verify += [
+        "--blind-set",
+        str(hand / "competitor_recall_output.json"),
+        "-o",
+        str(run_dir / "competitor_verification.json"),
+    ]
+    _fmr_ok(h.run(CP_SCRIPTS / "verify_competitors.py", *verify, stdin=json.dumps(payload)))
+    _wait(root, run_id, "cp_gate1_landscape")
+    return root, run_id, run_dir
+
+
+def test_a_competitive_positioning_resume_at_gate_1_rewrites_only_what_follows_it(tmp_path: Path) -> None:
+    root, run_id, run_dir = _cp_first_invocation(tmp_path)
+    for f in run_dir.glob("*.json"):
+        _age(f)
+    lines = f"FS_HOST_RUN_ID={run_id}\nFS_HOST_ANSWER cp_gate1_landscape=no_changes\n"
+    out = _out(_fmr_ok(h.start(root, "competitive-positioning", lines)))
+    assert (out["resume"], out["resume_step"]) == (1, "gate1")
+    read = ("read", "--artifacts-root", str(root), "--run-id", run_id, "--skill", "competitive-positioning")
+    _fmr_ok(h.run(h.SHARED / "founder_context.py", *read))
+    _fmr_ok(h.bind(root, run_id, run_dir, "example-co"))
+    opened = json.loads(_fmr_ok(h.record(root, run_id, "open", "--gate", "cp_gate1_landscape")).stdout)
+    assert opened["applied"] == "pre_answer" and len(opened["context"]["cp_gate1_landscape"]["context_lines"]) == 2
+    deferral = ["--draft", str(run_dir / "landscape_draft.json"), "--run-id", run_id]
+    deferral += ["--from-verification", str(run_dir / "competitor_verification.json")]
+    assert json.loads(_fmr_ok(h.run(CP_SCRIPTS / "record_deferred_recall.py", *deferral)).stdout)["added"] == [
+        "newco-0",
+        "newco-1",
+    ]
+    landscape = json.loads((CP_FIXTURES / "landscape.json").read_text(encoding="utf-8"))
+    for key in ("metadata", "_produced_by", "warnings"):
+        landscape.pop(key, None)
+    argv = ("--run-id", run_id, "-o", str(run_dir / "landscape.json"))
+    _fmr_ok(h.run(CP_SCRIPTS / "validate_landscape.py", *argv, stdin=json.dumps(landscape)))
+    (run_dir / "report.md").write_text("# Report\n", encoding="utf-8")
+    st = _complete(root, run_id)
+
+    entry = st["invocations"][1]
+    untouched = {k for k in entry["untouched_since_resume"] if not k.startswith("handoff_")}
+    assert untouched == CP_KEPT_ON_RESUME
+    assert {"landscape_draft_json", "landscape_json", "report_md"} <= set(entry["touched_since_resume"])
+
+
+def test_a_competitive_positioning_resume_cannot_send_a_change_ahead(tmp_path: Path) -> None:
+    root, run_id, _run_dir = _cp_first_invocation(tmp_path)
+    lines = f"FS_HOST_RUN_ID={run_id}\nFS_HOST_ANSWER cp_gate1_landscape=missing\n"
+    proc = h.start(root, "competitive-positioning", lines)
+    assert proc.returncode == 1 and "PRE_ANSWER_INVALID" in proc.stdout

@@ -1690,7 +1690,14 @@ SKILL_MD_CEILING: dict[str, int] = {
     # instruction after the closer is gone and COMPANY_NAME is defined beside the copies that use it.
     # Main-Thread Return names the printed hand-over as the founder's message and keeps the headline
     # fields for the model's own checks, no longer offering the HTML paths beside it.
-    "competitive-positioning": 129_648,
+    # 129,648 -> 129,608 (-40), LOWERED, commit 8 (gates): the three catalog sections out (one shared-references
+    # line kept); Step 0 starts the run's record and the slug block binds it; every question is opened, asked
+    # and recorded; Gate 1 asks the question its open prints and the deferral is a script call; the scoring
+    # basis is the recorded one (the parked follow-up paragraph out); exit-10 carve-outs, a re-compose after
+    # delivery as a new revision, the pages' run id and the deliverables close; two restatements trimmed.
+    # 129,608 -> 129,580: after a re-compose, fresh coaching under the revision's own hand-off file and the way
+    # back when that compose is refused; the recall-dispatch rationale and the version-match sentence shortened.
+    "competitive-positioning": 129_580,
     # cap-table, the largest raise (+2,383 B) and the one with the most founder-visible payoff:
     #   * Main-Thread Return named THREE of the four files Step 12 copies; a live run delivered exactly
     #     three and dropped `{Company}_Cap_Table.html`. All four are now named explicitly.
@@ -2953,15 +2960,20 @@ GATE_SITES: dict[str, dict[str, tuple[str, ...]]] = {
             "Gate 3 positioning reality check",
             "founder-context init — stage",
         ),
-        # Tried as declared, REVERTED: no legitimate no-change branch (the founder just chose to
-        # change the basis), so a declared form collided with this skill's exactly-one rule. Parked
-        # for the confirm-gate marker rather than fabricating a no-change option — see the
-        # SKILL_MD_CEILING comment above and `NO_CHANGE_PREFIX_EXEMPT`.
-        "prose": ("scoring-basis follow-up (Gate 2)",),
+        # 2026-10-08: the scoring-basis follow-up (once parked as prose: a declared Options: line has no
+        # no-change branch) and the documents question are recorded gates whose words are the registry's,
+        # asked from the `needs_input` a script prints, as are the company and stage follow-ups.
+        "prose": (),
         "runtime-labelled": (
             "founder-context init — name/sector/geography",
-            "sparse-materials gather",
-            "which-additions-by-name follow-up",
+            "product questions (cp_product_profile x3)",
+            "which-additions-by-name follow-up (cp_research_pick)",
+            "consolidation merge (cp_consolidation_merge)",
+            "merge pick (cp_merge_pick)",
+            "scoring basis (cp_scoring_basis)",
+            "outside-review documents (cp_upload_path)",
+            "company picker (ctx_select_company)",
+            "stage follow-up (ctx_stage_detail)",
         ),
         "exempt": (),
         "unspecified": (),
@@ -3741,7 +3753,23 @@ def _reject_read_on_another_skills_run(tmp: Path) -> tuple[list[str], str, list[
     return argv, "", [h.status_path(root, run_id), h.ledger_path(root, run_id)]
 
 
+def _reject_another_runs_verification(tmp: Path) -> tuple[list[str], str, list[Path]]:
+    draft = tmp / "landscape_draft.json"
+    draft.write_text('{"competitors": [], "metadata": {"run_id": "20261008T090000Z-1a1a1a"}}', encoding="utf-8")
+    ver = tmp / "competitor_verification.json"
+    ver.write_text(
+        '{"recall_gaps": {"unmatched": [{"name": "Example Newco", "slug": "example-newco", '
+        '"why_considered": "x", "sources": ["https://example.org/a"]}]}, '
+        '"metadata": {"run_id": "20260101T000000Z-2b2b2b"}}',
+        encoding="utf-8",
+    )
+    script = SKILLS_ROOT / "competitive-positioning" / "scripts" / "record_deferred_recall.py"
+    argv = [str(script), "--draft", str(draft), "--from-verification", str(ver), "--run-id", "20261008T090000Z-1a1a1a"]
+    return argv, "", [draft, ver]
+
+
 _REJECTING_CALLS = [
+    ("record_deferred_recall.py --from-verification, another run's file", _reject_another_runs_verification),
     ("record_gate_answer.py answer, an unlisted option", _reject_unlisted_option),
     ("founder_context.py read --run-id on another skill's run", _reject_read_on_another_skills_run),
     ("run_status.py start, a bad line resuming a waiting run", _reject_bad_line_on_a_waiting_run),
@@ -4539,7 +4567,7 @@ def test_no_shipped_text_carries_a_host_answer_line_for_a_gate_a_hook_reads() ->
 # --- recorded gates ----------------------------------------------------------------------------------------
 
 # The skills whose Step 0 starts the run's record; each skill's wiring commit adds itself.
-WIRED = ("deck-review", "financial-model-review", "market-sizing", "ic-sim")
+WIRED = ("deck-review", "financial-model-review", "market-sizing", "ic-sim", "competitive-positioning")
 # `record_gate_answer.py open` lines per SKILL.md, the companion to ASKUSER_MENTIONS: an open site added or
 # removed changes this count, and the gate-site test in the skill's own contract file says which.
 OPEN_LINES: dict[str, int] = {
@@ -4547,7 +4575,7 @@ OPEN_LINES: dict[str, int] = {
     "market-sizing": 2,
     "financial-model-review": 2,
     "ic-sim": 2,
-    "competitive-positioning": 0,
+    "competitive-positioning": 6,
     "cap-table": 0,
 }
 

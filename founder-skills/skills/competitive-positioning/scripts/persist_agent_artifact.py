@@ -157,6 +157,19 @@ def main() -> None:
         )
 
     assert isinstance(data, dict)
+    if args.output:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import _cp_gates
+
+        run_dir = os.path.dirname(os.path.abspath(args.output))
+        _cp_gates.refuse_without_run_id(args.output, args.run_id)
+        if args.artifact in _cp_gates.FIRST_WRITES:
+            # A delivered analysis is not started again in place.
+            _cp_gates.refuse_if_finished(run_dir, args.run_id)
+        if args.artifact == "product_profile.json":
+            _cp_gates.require_or_exit(
+                run_dir, args.run_id, list(_cp_gates.PRODUCT_GATES), by="persist_agent_artifact.py"
+            )
     data["_produced_by"] = STAMP
     if args.run_id:
         meta = data.setdefault("metadata", {})

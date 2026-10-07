@@ -36,6 +36,10 @@ Usage:
     python cp_dispatch_prompt.py red_team ... --analysis-dir D --handoff-dir H_SHELL
 
 Exit 2 when a required argument is missing, or (red_team) when the analysis is not finished.
+
+With the run's gate ledger (`--analysis-dir` names a run dir carrying this run's ref) nothing is printed while
+a question the prompt rests on is unanswered or open: exit 10, JSON naming it on stdout. `--scoring-basis`
+defaults to the basis the run recorded, and another one is refused (exit 1, `GATE_RECORD_MISMATCH`).
 """
 
 from __future__ import annotations
@@ -632,6 +636,36 @@ def _refuse_empty(args: argparse.Namespace, flags: tuple[str, ...]) -> None:
             sys.exit(2)
 
 
+# What each prompt waits for, with the run's gate ledger (`_cp_gates`): the gates it rests on must be recorded,
+# and these questions must not be open. Nothing is printed while one is missing, so no prompt carries an
+# answer the founder has not given.
+def _gate_check(a: argparse.Namespace) -> str:
+    """The scoring basis to print. With a ledger, exit 10 (JSON only, no prompt line) while a gate the prompt
+    depends on has no record, and exit 1 when `--scoring-basis` is not the basis this run recorded."""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import _cp_gates
+
+    if not a.analysis_dir:
+        return str(a.scoring_basis or _cp_gates.DEFAULT_BASIS)
+    keys: dict[str, tuple[str, ...]] = {
+        "startup_research": (_cp_gates.GATE1,),
+        "moat_scoring": _cp_gates.SCORING_GATES,
+        "positioning_scoring": _cp_gates.SCORING_GATES,
+        "checklist": _cp_gates.ALL_KEYS,
+        "red_team": _cp_gates.ALL_KEYS,
+    }
+    follow_ups = _cp_gates.OPEN_FOLLOW_UPS + (("cp_upload_path",) if a.context == "red_team" else ())
+    _cp_gates.require_or_exit(
+        a.analysis_dir, a.run_id, list(keys[a.context]), open_follow_ups=follow_ups, by="cp_dispatch_prompt.py"
+    )
+    recorded = _cp_gates.recorded_basis(a.analysis_dir, a.run_id)
+    if recorded is None:
+        return str(a.scoring_basis or _cp_gates.DEFAULT_BASIS)
+    if a.context == "positioning_scoring" and a.scoring_basis is not None and a.scoring_basis != recorded:
+        _cp_gates.basis_mismatch(recorded, a.scoring_basis, "--scoring-basis")
+    return recorded
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description="Print a competitive-positioning dispatch prompt")
     p.add_argument("context", choices=sorted([*_TEMPLATES, "red_team"]))
@@ -641,7 +675,8 @@ def main() -> None:
     # Accepted and ignored for one release, so an older command line still prints the same prompt; the
     # folder a prompt names comes from where this script runs (module docstring).
     p.add_argument("--plugin-root-agent", help=argparse.SUPPRESS)
-    p.add_argument("--scoring-basis", choices=SCORING_BASES, default="shipped")
+    # Default: the basis this run recorded (`cp_scoring_basis`), else `shipped`.
+    p.add_argument("--scoring-basis", choices=SCORING_BASES, default=None)
     p.add_argument(
         "--correction", choices=sorted([*CORRECTIONS, PRODUCER_REJECTED]), help="a corrective redo's added line"
     )
@@ -657,6 +692,7 @@ def main() -> None:
     if a.context == "positioning_scoring" and not a.analysis_dir:
         print("Error: positioning_scoring needs --analysis-dir to read the job to be done", file=sys.stderr)
         sys.exit(2)
+    basis = _gate_check(a)
     if a.context == "red_team":
         if not a.analysis_dir or not a.handoff_dir:
             print("Error: red_team needs --analysis-dir and --handoff-dir", file=sys.stderr)
@@ -682,7 +718,7 @@ def main() -> None:
             run_id=a.run_id,
             handoff_agent=a.handoff_agent,
             analysis_dir_agent=a.analysis_dir_agent,
-            scoring_basis=a.scoring_basis,
+            scoring_basis=basis,
             job=job_to_be_done(a.analysis_dir) if a.context == "positioning_scoring" else None,
             correction=a.correction,
             detail=detail,

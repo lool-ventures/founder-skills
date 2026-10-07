@@ -31,6 +31,7 @@ from typing import Any, TypeGuard
 _SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 if _SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, _SCRIPTS_DIR)
+import _cp_gates  # noqa: E402
 import _cp_redteam_copy  # noqa: E402
 import _cp_view as _view  # noqa: E402
 
@@ -2533,6 +2534,28 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
+def _gate_check(dir_path: str) -> Any:
+    """With the run's gate ledger, before anything is written: a delivered report composed again starts a new
+    revision; every question the analysis rests on must be recorded (exit 10 names one), nothing asked may be
+    left open (`GATE_UNRESOLVED`), and the map must be scored on the basis the run recorded. Returns the ledger,
+    or None for a run without one (today's path, unchanged)."""
+    run_id = _cp_gates.run_id_of(dir_path)
+    _cp_gates.refuse_without_run_id(os.path.join(dir_path, "report.json"), run_id)
+    ledger = _cp_gates.open_ledger_or_exit(dir_path, run_id)
+    if ledger is None:
+        return None
+    _cp_gates.reopen_if_complete(dir_path, run_id, step="7")
+    _cp_gates.require_or_exit(dir_path, run_id, list(_cp_gates.ALL_KEYS), by="compose_report.py")
+    _cp_gates.refuse_open_gates(ledger)
+    recorded = _cp_gates.recorded_basis(dir_path, run_id)
+    for name in ("positioning.json", "positioning_scores.json"):
+        doc = _load_artifact(dir_path, name)
+        used = doc.get("scoring_basis") if isinstance(doc, dict) else None
+        if recorded is not None and isinstance(used, str) and used != recorded:
+            _cp_gates.basis_mismatch(recorded, used, name)
+    return ledger
+
+
 def main() -> None:
     args = parse_args()
 
@@ -2540,6 +2563,7 @@ def main() -> None:
         print(f"Error: directory not found: {args.dir}", file=sys.stderr)
         sys.exit(1)
 
+    ledger = _gate_check(args.dir)
     report_path = os.path.abspath(args.write_md) if args.write_md else None
     result = compose(args.dir, report_path=report_path)
 
@@ -2589,6 +2613,9 @@ def main() -> None:
                 file=sys.stderr,
             )
             sys.exit(2)
+
+    if ledger is not None:
+        _cp_gates.coaching_pending(ledger)
 
     if args.strict:
         blocking = [w for w in result["warnings"] if w["severity"] == "high"]

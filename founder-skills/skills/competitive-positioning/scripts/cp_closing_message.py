@@ -105,6 +105,14 @@ def main() -> None:
             fh.write(text)
     except OSError as e:
         print(f"Warning: could not write {handover}: {e}", file=sys.stderr)
+    try:
+        # With a run ledger, the status records when the hand-over was printed; nothing here changes stdout.
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import _cp_gates
+
+        _cp_gates.stamp_handed_over(a.report)
+    except Exception as e:  # noqa: BLE001 -- the hand-over is printed whatever happens here
+        print(f"warning: the hand-over time was not recorded in the run status: {e}", file=sys.stderr)
     sys.stdout.write(text)
 
 

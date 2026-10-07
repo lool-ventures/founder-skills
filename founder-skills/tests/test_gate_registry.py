@@ -180,12 +180,6 @@ def test_gates_recorded_by_their_own_script() -> None:
 # this; growing it means a new gate whose check nobody wrote.
 UNIMPLEMENTED = {
     "predicates": [
-        "cp_basis_change_chosen",
-        "cp_free_slot_chosen",
-        "cp_full_mode",
-        "cp_gate3_triggered",
-        "cp_include_some_chosen",
-        "cp_research_suggestions",
         "ct_cap_base_built",
         "ct_docx_has_tracked_changes",
         "ct_engagement_unknown",
@@ -209,8 +203,6 @@ UNIMPLEMENTED = {
         "ct_scenarios_owed",
     ],
     "option_sources": [
-        "cp_competitor_slugs",
-        "cp_merge_pairs",
         "ct_applicable_scenarios",
     ],
     "binders": [],
@@ -466,6 +458,9 @@ _CODE_SOURCES = [
     SKILLS / "ic-sim" / "scripts" / "compose_report.py",
     SKILLS / "ic-sim" / "scripts" / "fund_profile.py",
     SKILLS / "cap-table" / "scripts" / "extract_cap_table.py",
+    SKILLS / "competitive-positioning" / "scripts" / "_cp_gates.py",
+    SKILLS / "competitive-positioning" / "scripts" / "compose_report.py",
+    SKILLS / "competitive-positioning" / "scripts" / "cp_dispatch_prompt.py",
     *_HTML_WRITERS,
 ]
 _Q = r"""['"]"""

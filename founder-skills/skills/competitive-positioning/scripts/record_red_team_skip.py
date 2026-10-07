@@ -55,6 +55,11 @@ def main() -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as fh:
         fh.write(json.dumps(record, indent=2 if a.pretty else None) + "\n")
+    # The review will not run: a documents question it opened no longer applies (with the run's ledger).
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import _cp_gates
+
+    _cp_gates.close_upload_question(os.path.dirname(path), a.run_id, a.reason)
     print(json.dumps({"ok": True, "path": path, "reason": a.reason}))
 
 
