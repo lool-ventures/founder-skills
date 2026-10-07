@@ -276,6 +276,11 @@ class TestStrayFiles:
         rc, out, _ = _run(arts)
         assert not any("extraction_validation.json" in cc["message"] for cc in out["cross_checks"])
 
+    def test_corrections_history_not_flagged_stray(self) -> None:
+        arts = {**_full_artifacts(), "extraction_corrections.history.jsonl": '{"seq": 1}\n'}
+        rc, out, _ = _run(arts)
+        assert not any("extraction_corrections.history.jsonl" in cc["message"] for cc in out["cross_checks"])
+
     def test_unknown_file_still_flagged_stray(self) -> None:
         arts = {**_full_artifacts(), "scratch_notes.txt": "tmp"}
         rc, out, _ = _run(arts)

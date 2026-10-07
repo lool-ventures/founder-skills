@@ -12,6 +12,8 @@ import sys
 import tempfile
 from typing import Any
 
+import pytest
+
 _SCRIPTS = os.path.join(
     os.path.dirname(__file__),
     "..",
@@ -838,3 +840,355 @@ class TestOutputConvention:
         assert out["status"] == "error"
         assert out["errors"][0]["code"] == "INVALID_PAYLOAD"
         assert "Traceback" not in result.stderr
+
+
+class TestRunIdOriginAndHistory:
+    """`--run-id` / `--origin` stamp the audit, and every call is kept in an append-only history."""
+
+    _RUN = "20260310T090000Z-a1b2c3"
+    _HISTORY = "extraction_corrections.history.jsonl"
+    _OUTPUTS = ("corrected_inputs.json", "extraction_corrections.json", _HISTORY)
+
+    def _setup(self, tmp_path: Any) -> tuple[Any, Any]:
+        original = tmp_path / "inputs.json"
+        original.write_text(json.dumps(_ORIGINAL))
+        out_dir = tmp_path / "out"
+        return original, out_dir
+
+    def _call(self, original: Any, out_dir: Any, args: list[str]) -> subprocess.CompletedProcess[str]:
+        cmd = [sys.executable, _SCRIPT, *args, "--original", str(original), "--output-dir", str(out_dir)]
+        return subprocess.run(cmd, capture_output=True, text=True)
+
+    def _write(self, tmp_path: Any, name: str, payload: Any) -> Any:
+        path = tmp_path / name
+        path.write_text(json.dumps(payload))
+        return path
+
+    def _changes_file(self, tmp_path: Any) -> Any:
+        return self._write(
+            tmp_path,
+            "corrections.json",
+            {
+                "base_hash": _compute_hash(_ORIGINAL),
+                "changes": [{"path": "revenue.customers", "type": "scalar", "expected_old": 100, "new": 120}],
+                "warning_overrides": [],
+                "ils_fields": {},
+            },
+        )
+
+    def _wrapper_file(self, tmp_path: Any, corrections: Any = None) -> Any:
+        corrected = json.loads(json.dumps(_ORIGINAL))
+        corrected["revenue"]["customers"] = 120
+        if corrections is None:
+            corrections = [{"path": "revenue.customers", "old": 100, "new": 120, "reason": "deck says 120"}]
+        return self._write(tmp_path, "inputs_review_output.json", {"corrected": corrected, "corrections": corrections})
+
+    def _history(self, out_dir: Any) -> list[dict[str, Any]]:
+        text = (out_dir / self._HISTORY).read_text()
+        entries = []
+        for line in text.splitlines():
+            with contextlib.suppress(json.JSONDecodeError):
+                entries.append(json.loads(line))
+        return entries
+
+    def _seed(self, out_dir: Any) -> dict[str, tuple[bytes, int]]:
+        """Pre-existing outputs from an earlier call, so a refusal can be shown to leave them alone."""
+        out_dir.mkdir(exist_ok=True)
+        (out_dir / "corrected_inputs.json").write_text(json.dumps(_ORIGINAL))
+        (out_dir / "extraction_corrections.json").write_text(json.dumps({"channel": "chat", "corrections": []}))
+        (out_dir / self._HISTORY).write_text(json.dumps({"seq": 1, "run_id": None}) + "\n")
+        old = 1_600_000_000_000_000_000
+        for name in self._OUTPUTS:
+            os.utime(out_dir / name, ns=(old, old))
+        return self._snapshot(out_dir)
+
+    def _snapshot(self, out_dir: Any) -> dict[str, tuple[bytes, int]]:
+        return {name: ((out_dir / name).read_bytes(), (out_dir / name).stat().st_mtime_ns) for name in self._OUTPUTS}
+
+    def _assert_refused(self, tmp_path: Any, args: list[str], code: str) -> None:
+        original, out_dir = self._setup(tmp_path)
+        before = self._seed(out_dir)
+        result = self._call(original, out_dir, args)
+        assert result.returncode == 1, result.stdout + result.stderr
+        out = json.loads(result.stdout)
+        assert out["status"] == "error"
+        assert out["errors"][0]["code"] == code
+        assert result.stderr.strip(), "a refusal must also say so on stderr"
+        assert "Traceback" not in result.stderr
+        assert self._snapshot(out_dir) == before, "a refusal leaves every output byte- and mtime-identical"
+        assert sorted(p.name for p in out_dir.iterdir()) == sorted(self._OUTPUTS)
+
+    # -- refusals ---------------------------------------------------------------------------------
+
+    def test_run_id_without_origin_is_refused(self, tmp_path: Any) -> None:
+        corr = self._changes_file(tmp_path)
+        self._assert_refused(tmp_path, [str(corr), "--run-id", self._RUN], "ORIGIN_REQUIRED")
+
+    def test_malformed_run_id_is_refused(self, tmp_path: Any) -> None:
+        corr = self._changes_file(tmp_path)
+        for bad in (f"{self._RUN}/r2", ".hidden", "_lead", "", "x" * 65, "has space"):
+            self._assert_refused(tmp_path, [str(corr), "--run-id", bad, "--origin", "upload"], "INVALID_RUN_ID")
+
+    def test_unknown_origin_is_refused(self, tmp_path: Any) -> None:
+        corr = self._changes_file(tmp_path)
+        self._assert_refused(tmp_path, [str(corr), "--run-id", self._RUN, "--origin", "founder"], "INVALID_ORIGIN")
+
+    def test_upload_origin_with_set_is_refused(self, tmp_path: Any) -> None:
+        args = ["--set", "revenue.customers=120", "--run-id", self._RUN, "--origin", "upload"]
+        self._assert_refused(tmp_path, args, "ORIGIN_CHANNEL_MISMATCH")
+
+    def test_chat_origin_with_a_file_is_refused(self, tmp_path: Any) -> None:
+        corr = self._changes_file(tmp_path)
+        self._assert_refused(
+            tmp_path, [str(corr), "--run-id", self._RUN, "--origin", "chat"], "ORIGIN_CHANNEL_MISMATCH"
+        )
+
+    def test_upload_origin_with_the_inputs_review_wrapper_is_refused(self, tmp_path: Any) -> None:
+        wrapper = self._wrapper_file(tmp_path)
+        self._assert_refused(
+            tmp_path, [str(wrapper), "--run-id", self._RUN, "--origin", "upload"], "ORIGIN_PAYLOAD_MISMATCH"
+        )
+
+    def test_external_origin_with_the_inputs_review_wrapper_is_refused(self, tmp_path: Any) -> None:
+        wrapper = self._wrapper_file(tmp_path)
+        self._assert_refused(
+            tmp_path, [str(wrapper), "--run-id", self._RUN, "--origin", "external"], "ORIGIN_PAYLOAD_MISMATCH"
+        )
+
+    def test_corrections_that_are_not_a_list_are_refused_whatever_the_origin(self, tmp_path: Any) -> None:
+        wrapper = self._wrapper_file(tmp_path, corrections={"revenue.customers": 120})
+        self._assert_refused(tmp_path, [str(wrapper)], "INVALID_CORRECTIONS")
+        self._assert_refused(
+            tmp_path, [str(wrapper), "--run-id", self._RUN, "--origin", "inputs_review"], "INVALID_CORRECTIONS"
+        )
+
+    def test_a_history_that_cannot_be_appended_to_refuses_and_writes_nothing(self, tmp_path: Any) -> None:
+        if hasattr(os, "geteuid") and os.geteuid() == 0:
+            pytest.skip("root ignores file permissions")
+        original, out_dir = self._setup(tmp_path)
+        before = self._seed(out_dir)
+        os.chmod(out_dir / self._HISTORY, 0o444)
+        try:
+            corr = self._changes_file(tmp_path)
+            result = self._call(original, out_dir, [str(corr), "--run-id", self._RUN, "--origin", "upload"])
+        finally:
+            os.chmod(out_dir / self._HISTORY, 0o644)
+        assert result.returncode == 1
+        assert json.loads(result.stdout)["errors"][0]["code"] == "HISTORY_UNAVAILABLE"
+        assert result.stderr.strip()
+        assert self._snapshot(out_dir) == before
+        assert sorted(p.name for p in out_dir.iterdir()) == sorted(self._OUTPUTS), "no temporary file is left"
+
+    # -- allowed pairings -------------------------------------------------------------------------
+
+    def test_each_allowed_origin_and_payload_pairing_is_accepted(self, tmp_path: Any) -> None:
+        changes = self._changes_file(tmp_path)
+        wrapper = self._wrapper_file(tmp_path)
+        set_args = ["--set", "revenue.customers=120"]
+        pairings = [
+            ([str(changes)], "upload"),
+            ([str(changes)], "external"),
+            (set_args, "external"),
+            (set_args, "chat"),
+            ([str(wrapper)], "inputs_review"),
+            ([str(wrapper)], None),
+            ([str(changes)], None),
+            (set_args, None),
+        ]
+        for n, (source, origin) in enumerate(pairings):
+            original, _ = self._setup(tmp_path)
+            out_dir = tmp_path / f"out{n}"
+            args = [*source] + (["--run-id", self._RUN, "--origin", origin] if origin else [])
+            result = self._call(original, out_dir, args)
+            assert result.returncode == 0, (source, origin, result.stdout, result.stderr)
+            [entry] = self._history(out_dir)
+            assert entry["origin"] == origin
+            assert entry["correction_count"] == 1 and entry["changed_count"] == 1
+
+    # -- the history ------------------------------------------------------------------------------
+
+    def test_a_corrections_call_then_a_cash_call_keeps_both_in_the_history(self, tmp_path: Any) -> None:
+        original, out_dir = self._setup(tmp_path)
+        corr = self._changes_file(tmp_path)
+        first = self._call(original, out_dir, [str(corr), "--run-id", self._RUN, "--origin", "upload"])
+        assert first.returncode == 0, first.stdout + first.stderr
+
+        # The second call runs against the promoted output, as the cash follow-up does.
+        promoted = tmp_path / "promoted.json"
+        promoted.write_text((out_dir / "corrected_inputs.json").read_text())
+        second = self._call(
+            promoted,
+            out_dir,
+            [
+                "--set",
+                "cash.current_balance=730000",
+                "--set",
+                "cash.balance_date=2026-02",
+                "--run-id",
+                self._RUN,
+                "--origin",
+                "chat",
+            ],
+        )
+        assert second.returncode == 0, second.stdout + second.stderr
+        assert json.loads(second.stdout)["history_seq"] == 2
+
+        history = self._history(out_dir)
+        assert [h["seq"] for h in history] == [1, 2]
+        assert [h["origin"] for h in history] == ["upload", "chat"]
+        assert [h["channel"] for h in history] == ["review_page", "chat"]
+        assert [h["correction_count"] for h in history] == [1, 2]
+        assert [h["changed_count"] for h in history] == [1, 2]
+        on_disk = hashlib.sha256((out_dir / "corrected_inputs.json").read_bytes()).hexdigest()
+        assert history[1]["corrected_sha256"] == on_disk, "the last line names the corrected file it wrote"
+        assert history[0]["corrected_sha256"] != on_disk
+        assert all(h["run_id"] == self._RUN for h in history)
+        assert history[0]["corrections"][0]["path"] == "revenue.customers"
+        assert {c["path"] for c in history[1]["corrections"]} == {"cash.current_balance", "cash.balance_date"}
+        for h in history:
+            assert set(h) >= {
+                "seq",
+                "changed_count",
+                "unchanged_count",
+                "corrected_sha256",
+                "timestamp",
+                "run_id",
+                "origin",
+                "channel",
+                "correction_count",
+                "corrections",
+                "overrides_added",
+            }
+            assert h["timestamp"].endswith("Z") and "+" not in h["timestamp"]
+
+        audit = json.loads((out_dir / "extraction_corrections.json").read_text())
+        assert audit["origin"] == "chat" and audit["run_id"] == self._RUN and audit["channel"] == "chat"
+        assert audit["timestamp"] == history[1]["timestamp"]
+        assert {c["path"] for c in audit["corrections"]} == {"cash.current_balance", "cash.balance_date"}
+        # The single file keeps every key it carried before.
+        assert set(audit) >= {
+            "timestamp",
+            "source_file",
+            "channel",
+            "correction_count",
+            "corrections",
+            "override_count",
+            "overrides_added",
+        }
+
+        corrected = json.loads((out_dir / "corrected_inputs.json").read_text())
+        assert corrected["metadata"]["run_id"] == self._RUN
+        assert corrected["cash"]["current_balance"] == 730000
+        assert corrected["revenue"]["customers"] == 120
+        assert sorted(p.name for p in out_dir.iterdir()) == sorted(self._OUTPUTS), "no temporary file is left"
+
+    def test_a_correction_to_the_same_value_does_not_count(self, tmp_path: Any) -> None:
+        original, out_dir = self._setup(tmp_path)
+        result = self._call(
+            original,
+            out_dir,
+            ["--set", "revenue.customers=100", "--run-id", self._RUN, "--origin", "chat"],
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        [entry] = self._history(out_dir)
+        assert (entry["correction_count"], entry["changed_count"], entry["unchanged_count"]) == (1, 0, 1)
+        audit = json.loads((out_dir / "extraction_corrections.json").read_text())
+        # The single file's list and count stay as they always were; the no-op is named beside them.
+        assert (audit["correction_count"], audit["changed_count"], audit["unchanged_count"]) == (1, 0, 1)
+        assert audit["corrections"] == [{"path": "revenue.customers", "was": 100, "now": 100}]
+
+    def test_history_lines_are_never_rewritten(self, tmp_path: Any) -> None:
+        original, out_dir = self._setup(tmp_path)
+        corr = self._changes_file(tmp_path)
+        assert self._call(original, out_dir, [str(corr), "--run-id", self._RUN, "--origin", "upload"]).returncode == 0
+        first_bytes = (out_dir / self._HISTORY).read_bytes()
+        assert self._call(original, out_dir, [str(corr), "--run-id", self._RUN, "--origin", "external"]).returncode == 0
+        assert (out_dir / self._HISTORY).read_bytes().startswith(first_bytes)
+
+    def test_a_torn_last_line_is_kept_and_the_call_succeeds(self, tmp_path: Any) -> None:
+        original, out_dir = self._setup(tmp_path)
+        out_dir.mkdir()
+        history = out_dir / self._HISTORY
+        torn = '{"seq": 1, "run_id": null}\n{"seq": 2, "run_'
+        history.write_text(torn)
+        corr = self._changes_file(tmp_path)
+        result = self._call(original, out_dir, [str(corr), "--run-id", self._RUN, "--origin", "upload"])
+        assert result.returncode == 0, result.stdout + result.stderr
+        text = history.read_text()
+        assert text.startswith(torn + "\n"), "the torn text stays, and the new entry starts on its own line"
+        lines = text.splitlines()
+        assert len(lines) == 3
+        new = json.loads(lines[2])
+        assert new["seq"] == 2 and new["run_id"] == self._RUN
+
+    def test_a_torn_earlier_line_is_skipped_and_the_call_succeeds(self, tmp_path: Any) -> None:
+        original, out_dir = self._setup(tmp_path)
+        out_dir.mkdir()
+        history = out_dir / self._HISTORY
+        seeded = '{"seq": 1}\n{"seq": 2, "ru\n{"seq": 3}\n'
+        history.write_text(seeded)
+        corr = self._changes_file(tmp_path)
+        result = self._call(original, out_dir, [str(corr), "--run-id", self._RUN, "--origin", "upload"])
+        assert result.returncode == 0, result.stdout + result.stderr
+        text = history.read_text()
+        assert text.startswith(seeded)
+        assert json.loads(text.splitlines()[-1])["seq"] == 4
+
+    def test_a_blank_history_starts_at_one_with_no_blank_line_added(self, tmp_path: Any) -> None:
+        original, out_dir = self._setup(tmp_path)
+        out_dir.mkdir()
+        history = out_dir / self._HISTORY
+        history.write_text("\n\n")
+        corr = self._changes_file(tmp_path)
+        result = self._call(original, out_dir, [str(corr)])
+        assert result.returncode == 0, result.stdout + result.stderr
+        text = history.read_text()
+        assert text.startswith("\n\n{") and text.count("\n") == 3
+        assert json.loads(text.strip())["seq"] == 1
+
+    def test_a_call_without_run_id_still_appends_with_null_run_id(self, tmp_path: Any) -> None:
+        original, out_dir = self._setup(tmp_path)
+        corr = self._changes_file(tmp_path)
+        result = self._call(original, out_dir, [str(corr)])
+        assert result.returncode == 0, result.stdout + result.stderr
+        [entry] = self._history(out_dir)
+        assert entry["seq"] == 1 and entry["run_id"] is None and entry["origin"] is None
+        audit = json.loads((out_dir / "extraction_corrections.json").read_text())
+        assert audit["run_id"] is None and audit["origin"] is None
+        # Without --run-id the original's run id is preserved, as before.
+        corrected = json.loads((out_dir / "corrected_inputs.json").read_text())
+        assert corrected["metadata"]["run_id"] == _ORIGINAL["metadata"]["run_id"]
+
+    def test_origin_without_run_id_is_accepted_and_recorded(self, tmp_path: Any) -> None:
+        original, out_dir = self._setup(tmp_path)
+        result = self._call(original, out_dir, ["--set", "revenue.customers=120", "--origin", "chat"])
+        assert result.returncode == 0, result.stdout + result.stderr
+        [entry] = self._history(out_dir)
+        assert entry["origin"] == "chat" and entry["run_id"] is None
+
+    def test_a_corrected_file_that_cannot_be_replaced_refuses_loudly_and_leaves_no_tmp(self, tmp_path: Any) -> None:
+        original, out_dir = self._setup(tmp_path)
+        out_dir.mkdir()
+        (out_dir / "corrected_inputs.json").mkdir()
+        corr = self._changes_file(tmp_path)
+        result = self._call(original, out_dir, [str(corr), "--run-id", self._RUN, "--origin", "upload"])
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert json.loads(result.stdout)["errors"][0]["code"] == "WRITE_FAILED"
+        assert result.stderr.strip() and "Traceback" not in result.stderr
+        assert not [p.name for p in out_dir.iterdir() if ".tmp-" in p.name]
+        assert (out_dir / "corrected_inputs.json").is_dir()
+        assert not (out_dir / "extraction_corrections.json").exists()
+
+    def test_stale_tmp_files_of_this_script_are_removed_and_others_kept(self, tmp_path: Any) -> None:
+        original, out_dir = self._setup(tmp_path)
+        out_dir.mkdir()
+        stale = ["corrected_inputs.json.tmp-4242", "extraction_corrections.json.tmp-17"]
+        kept = ["corrected_inputs.json.tmp-notapid", "notes.json.tmp-4242", "founder_extra.txt"]
+        for name in stale + kept:
+            (out_dir / name).write_text("x")
+        corr = self._changes_file(tmp_path)
+        result = self._call(original, out_dir, [str(corr)])
+        assert result.returncode == 0, result.stdout + result.stderr
+        names = {p.name for p in out_dir.iterdir()}
+        assert not names & set(stale)
+        assert set(kept) <= names

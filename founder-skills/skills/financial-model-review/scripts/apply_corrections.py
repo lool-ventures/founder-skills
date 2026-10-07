@@ -20,14 +20,23 @@ previously had no route through this script), and then runs the unchanged pipeli
 coercion, path validation and the audit record are identical whichever way the founder
 corrected. A value is read as JSON first (45000, true, null) and as text otherwise (series_a).
 
+`--run-id R --origin O` ties the call to a run and says who supplied the corrections: `external`
+(the service that ran the review), `upload` (the founder's corrections file from the review page),
+`chat` (the founder, in conversation) or `inputs_review` (the inputs-review sub-agent). The origin is
+required whenever a run id is given; only `upload` can be checked here (it must arrive as a file, not
+as `--set`). Every call appends one line to extraction_corrections.history.jsonl, so a later call
+cannot erase an earlier one; extraction_corrections.json holds only the last call.
+
 Output:
     stdout: {"status": "completed"|"error", "correction_count": N, ...}
-    files:  corrected_inputs.json, extraction_corrections.json (in output-dir)
+    files:  corrected_inputs.json, extraction_corrections.history.jsonl (appended),
+            extraction_corrections.json (in output-dir)
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
 import copy
 import hashlib
 import json
@@ -35,7 +44,7 @@ import os
 import re
 import sys
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, NoReturn
 
 # ---------------------------------------------------------------------------
 # Path navigation (shared with review_inputs.py)
@@ -49,6 +58,14 @@ from typing import Any
 # Paths a correction may add when the extraction left them out. The cash pair is what the hand-over
 # asks for when runway could not be computed without a balance, and an absent key is the usual shape.
 _OPTIONAL_SET_PATHS = frozenset({"company.unclassified_reason", "cash.current_balance", "cash.balance_date"})
+
+# A run id names a directory, so a sub-path (`<id>/r2`) or anything shell-hostile is refused.
+_RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+
+# Who supplied the corrections. Recorded, and checked only for `upload` (see main()).
+_ORIGINS = ("external", "upload", "chat", "inputs_review")
+
+_HISTORY_NAME = "extraction_corrections.history.jsonl"
 
 
 def _navigate_part(obj: Any, part: str) -> Any:
@@ -566,6 +583,89 @@ def _payload_from_chat(sets: list[str], original: dict[str, Any]) -> dict[str, A
     }
 
 
+# extraction_corrections.history.jsonl: one JSON object per line, appended and never rewritten. A
+# crashed append can leave a torn line; this script skips such a line when numbering the next one and
+# every reader must skip it too, never refuse on it, because the file outlives any one run.
+# `correction_count` is the number of entries recorded, as in extraction_corrections.json;
+# `changed_count` is how many of them changed a value, and is the count a gate reads.
+# `corrected_sha256` is the sha256 of the corrected_inputs.json this call wrote. The line is
+# synced before that file is moved into place, so a crash between the two leaves a line whose
+# `corrected_sha256` does not match the file on disk: a reader must compare it before trusting the
+# line's corrections to be in effect. Each call overwrites that file, so only the newest line can
+# match it; an earlier line is checked against the inputs.json promoted right after its call.
+# Calls are sequential on the main thread and take no lock, so seq can collide only under concurrent
+# callers.
+
+
+def _history_state(history_path: str) -> tuple[int, bool]:
+    """(next seq, whether the next write must start a new line) for the history at `history_path`.
+
+    The next seq is one past the highest seq among the lines that parse, or 1. A file whose last line
+    has no line ending (an interrupted write) needs a leading newline so the new entry stands alone;
+    the torn text itself is left where it is. An unreadable file raises OSError for the caller.
+    """
+    if not os.path.exists(history_path):
+        return 1, False
+    with open(history_path, encoding="utf-8", errors="replace") as f:
+        text = f.read()
+    if not text.strip():
+        return 1, False
+    highest = 0
+    for line in text.splitlines():
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        seq = entry.get("seq") if isinstance(entry, dict) else None
+        if isinstance(seq, int) and not isinstance(seq, bool) and seq > highest:
+            highest = seq
+    return highest + 1, not text.endswith("\n")
+
+
+def _is_change(correction: Any) -> bool:
+    """Whether a recorded correction changed anything. An array replacement always counts."""
+    if not isinstance(correction, dict):
+        return True
+    for before, after in (("was", "now"), ("old", "new")):
+        if before in correction and after in correction:
+            return bool(correction[before] != correction[after])
+    return True
+
+
+# corrected_inputs.json and extraction_corrections.json are each written to `<name>.tmp-<pid>` beside
+# them and moved into place, so a tmp file of exactly that shape is this script's own and may be removed.
+_TMP_RE = re.compile(r"^(?:corrected_inputs|extraction_corrections)\.json\.tmp-[0-9]+$")
+
+
+def _remove_stale_tmps(output_dir: str) -> None:
+    """Remove temporary files an interrupted earlier call of this script left in `output_dir`."""
+    try:
+        names = os.listdir(output_dir)
+    except OSError:
+        return
+    for name in names:
+        if _TMP_RE.match(name):
+            with contextlib.suppress(OSError):
+                os.remove(os.path.join(output_dir, name))
+
+
+def _write_tmp(path: str, data: Any) -> tuple[str, str]:
+    """Write `data` as JSON beside `path` under a temporary name; the caller moves it into place.
+
+    Returns (tmp path, sha256 hex of the bytes written).
+    """
+    tmp = f"{path}.tmp-{os.getpid()}"
+    body = json.dumps(data, indent=2).encode("utf-8")
+    try:
+        with open(tmp, "wb") as f:
+            f.write(body)
+    except OSError:
+        with contextlib.suppress(OSError):
+            os.remove(tmp)
+        raise
+    return tmp, hashlib.sha256(body).hexdigest()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Apply founder corrections")
     parser.add_argument("corrections", nargs="?", help="Path to corrections JSON file (omit when using --set)")
@@ -579,6 +679,14 @@ def main() -> None:
     )
     parser.add_argument("--original", required=True, help="Path to original inputs.json")
     parser.add_argument("--output-dir", required=True, help="Directory for output files")
+    parser.add_argument(
+        "--run-id",
+        help="The run these corrections belong to: stamped on corrected_inputs.json and the audit. Requires --origin.",
+    )
+    parser.add_argument(
+        "--origin",
+        help=f"Who supplied the corrections: one of {', '.join(_ORIGINS)}. Required with --run-id.",
+    )
     parser.add_argument("--pretty", action="store_true", help="Pretty-print stdout JSON")
     parser.add_argument(
         "-o",
@@ -635,6 +743,34 @@ def main() -> None:
             )
             sys.exit(1)
         return loaded
+
+    def _refuse(code: str, message: str, field: str) -> NoReturn:
+        """Refuse before anything is written: diagnostic on stdout, one line on stderr, exit 1."""
+        print(f"Error: {message}", file=sys.stderr)
+        _emit({"status": "error", "errors": [{"code": code, "message": message, "field": field, "layer": 0}]}, args)
+        sys.exit(1)
+
+    if args.origin is not None and args.origin not in _ORIGINS:
+        _refuse("INVALID_ORIGIN", f"--origin must be one of {', '.join(_ORIGINS)}, got {args.origin!r}", "origin")
+    if args.run_id is not None:
+        if not _RUN_ID_RE.match(args.run_id):
+            _refuse(
+                "INVALID_RUN_ID",
+                f"--run-id must match {_RUN_ID_RE.pattern} (a single name, no path), got {args.run_id!r}",
+                "run_id",
+            )
+        if args.origin is None:
+            _refuse(
+                "ORIGIN_REQUIRED",
+                f"--run-id needs --origin ({', '.join(_ORIGINS)}): the audit must say who supplied the corrections",
+                "origin",
+            )
+    if args.origin == "upload" and args.sets:
+        _refuse(
+            "ORIGIN_CHANNEL_MISMATCH",
+            "--origin upload means the founder's corrections file; give that file, not --set",
+            "origin",
+        )
 
     if bool(args.corrections) == bool(args.sets):
         _emit(
@@ -705,6 +841,33 @@ def main() -> None:
         _emit(err, args)
         sys.exit(1)
 
+    # The origin must fit how the corrections arrived. `upload` is the review page's patch file,
+    # `chat` is --set, and the inputs-review wrapper ({"corrected": ...}) comes only from that
+    # sub-agent. `inputs_review` is recorded as given.
+    shape = "changes" if "changes" in payload else "corrected"
+    if args.origin == "chat" and not args.sets:
+        _refuse(
+            "ORIGIN_CHANNEL_MISMATCH", "--origin chat means corrections stated in chat; give them as --set", "origin"
+        )
+    if args.origin == "upload" and shape != "changes":
+        _refuse(
+            "ORIGIN_PAYLOAD_MISMATCH",
+            "--origin upload needs the review page's corrections file (a 'changes' list with its base_hash)",
+            "origin",
+        )
+    if shape == "corrected" and args.origin not in (None, "inputs_review"):
+        _refuse(
+            "ORIGIN_PAYLOAD_MISMATCH",
+            f"a {{'corrected': ...}} payload comes from the inputs review; --origin {args.origin} cannot carry it",
+            "origin",
+        )
+    if not isinstance(corrections, list):
+        _refuse(
+            "INVALID_CORRECTIONS",
+            f"'corrections' must be a JSON array, got {type(corrections).__name__}",
+            "corrections",
+        )
+
     overrides = payload.get("warning_overrides", [])
     ils_fields = payload.get("ils_fields", {})
 
@@ -725,13 +888,18 @@ def main() -> None:
     # 4. Canonicalize time-series
     _canonicalize_time_series(corrected)
 
-    # 5. Preserve run_id
+    # 5. Preserve run_id, or stamp the one the caller named
     orig_metadata = original.get("metadata", {})
     corrected_metadata = corrected.get("metadata", {})
     if not isinstance(corrected_metadata, dict):
         corrected_metadata = {}
     if "run_id" in orig_metadata and "run_id" not in corrected_metadata:
         corrected_metadata["run_id"] = orig_metadata["run_id"]
+    if args.run_id is not None:
+        prior = corrected_metadata.get("run_id")
+        if prior is not None and prior != args.run_id:
+            print(f"Info: metadata.run_id {prior!r} replaced by --run-id {args.run_id!r}.", file=sys.stderr)
+        corrected_metadata["run_id"] = args.run_id
 
     # 6. Merge overrides
     existing_overrides = orig_metadata.get("warning_overrides", [])
@@ -742,26 +910,92 @@ def main() -> None:
     # 7. Strip _row_ids
     _strip_row_ids(corrected)
 
-    # 8. Write files
-    os.makedirs(args.output_dir, exist_ok=True)
-
-    corrected_path = os.path.join(args.output_dir, "corrected_inputs.json")
-    with open(corrected_path, "w", encoding="utf-8") as f:
-        json.dump(corrected, f, indent=2)
+    # 8. Write files. The history is opened for append before anything is written, so a history that
+    # cannot take the entry refuses the call with every output as it was. The corrected inputs go to
+    # a temporary file and move into place only after the history line is down, so they are never
+    # left without their audit.
+    history_path = os.path.join(args.output_dir, _HISTORY_NAME)
+    _remove_stale_tmps(args.output_dir)
+    try:
+        os.makedirs(args.output_dir, exist_ok=True)
+        seq, needs_newline = _history_state(history_path)
+        history_fd = os.open(history_path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
+    except OSError as e:
+        _refuse(
+            "HISTORY_UNAVAILABLE",
+            f"{_HISTORY_NAME} cannot be appended to ({e}); nothing was written",
+            "history",
+        )
 
     overrides_added = [{"code": o.get("code"), "field": o.get("field"), "reason": o.get("reason")} for o in overrides]
-    audit = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "source_file": "inputs.json",
+    changed = sum(1 for c in corrections if _is_change(c))
+    unchanged = len(corrections) - changed
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    history_entry = {
+        "seq": seq,
+        "timestamp": timestamp,
+        "run_id": args.run_id,
+        "origin": args.origin,
         "channel": channel,
         "correction_count": len(corrections),
+        "changed_count": changed,
+        "unchanged_count": unchanged,
+        "corrected_sha256": "",
+        "corrections": corrections,
+        "overrides_added": overrides_added,
+    }
+    audit = {
+        "timestamp": timestamp,
+        "source_file": "inputs.json",
+        "channel": channel,
+        "run_id": args.run_id,
+        "origin": args.origin,
+        "correction_count": len(corrections),
+        "changed_count": changed,
+        "unchanged_count": unchanged,
         "corrections": corrections,
         "override_count": len(overrides_added),
         "overrides_added": overrides_added,
     }
+
+    corrected_path = os.path.join(args.output_dir, "corrected_inputs.json")
     audit_path = os.path.join(args.output_dir, "extraction_corrections.json")
-    with open(audit_path, "w", encoding="utf-8") as f:
-        json.dump(audit, f, indent=2)
+    corrected_tmp = ""
+    try:
+        corrected_tmp, history_entry["corrected_sha256"] = _write_tmp(corrected_path, corrected)
+        line = ("\n" if needs_newline else "") + json.dumps(history_entry, separators=(",", ":")) + "\n"
+        data = line.encode("utf-8")
+        while data:
+            written = os.write(history_fd, data)
+            data = data[written:]
+        os.fsync(history_fd)
+    except OSError as e:
+        if corrected_tmp:
+            with contextlib.suppress(OSError):
+                os.remove(corrected_tmp)
+        _refuse(
+            "HISTORY_UNAVAILABLE",
+            f"the corrections could not be recorded ({e}); nothing was moved into place",
+            "history",
+        )
+    finally:
+        os.close(history_fd)
+    audit_tmp = ""
+    try:
+        os.replace(corrected_tmp, corrected_path)
+        audit_tmp, _ = _write_tmp(audit_path, audit)
+        os.replace(audit_tmp, audit_path)
+    except OSError as e:
+        for tmp in (corrected_tmp, audit_tmp):
+            if tmp:
+                with contextlib.suppress(OSError):
+                    os.remove(tmp)
+        _refuse(
+            "WRITE_FAILED",
+            f"the corrected files could not be moved into place ({e}); this call's history line may name a "
+            "corrected_sha256 the file on disk does not have",
+            "output",
+        )
 
     # 9. Stdout result
     result = {
@@ -769,6 +1003,8 @@ def main() -> None:
         "correction_count": len(corrections),
         "corrected_inputs": corrected_path,
         "extraction_corrections": audit_path,
+        "extraction_corrections_history": history_path,
+        "history_seq": seq,
     }
     _emit(result, args)
 
