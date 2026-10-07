@@ -121,24 +121,6 @@ def _host_run_id(text: str) -> str | None:
     return None
 
 
-def _reuse(status: dict[str, Any], run_id: str) -> list[str]:
-    run_dir = status.get("run_dir_shell")
-    if not isinstance(run_dir, str) or not os.path.isdir(run_dir):
-        return []
-    out = []
-    for name in sorted(os.listdir(run_dir)):
-        if not name.endswith(".json"):
-            continue
-        try:
-            data = rs.read_json(os.path.join(run_dir, name))
-        except ValueError:
-            continue
-        meta = data.get("metadata") if isinstance(data, dict) else None
-        if isinstance(meta, dict) and meta.get("run_id") == run_id:
-            out.append(name)
-    return out
-
-
 def cmd_start(args: argparse.Namespace) -> int:
     gates = _require_gates(args.pretty)
     if args.skill not in gates.SKILLS:
@@ -232,11 +214,17 @@ def _resume(
             resume_step = None
     gates.store_pre_answers(ledger, pre, "run_status.py")
     rs.atomic_write_json(paths.ledger, ledger)
+    resumed_from = {
+        "gate": waiting_on if isinstance(waiting_on, str) else None,
+        "step": resume_step,
+        "reason": "resume",
+    }
+    entry = rs.open_invocation(status, "resume", resumed_from)
     ctx = gates.Ctx(paths, status, args.skill)
     gates.derive_status(ctx, ledger, status)
     rs.set_state(status, "running", "RUNNING")
     rs.write_status(paths, status)
-    payload = _start_payload(paths, status, resume=True, resume_step=resume_step, reuse=_reuse(status, paths.run_id))
+    payload = _start_payload(paths, status, resume=True, resume_step=resume_step, reuse=entry["reuse"])
     _out(payload, args.pretty, args.output)
     return 0
 
@@ -249,6 +237,7 @@ def _start_payload(
         "resume": 1 if resume else 0,
         "resume_step": resume_step,
         "reuse": reuse,
+        "invocation": status.get("invocation"),
         "ledger_path_shell": paths.ledger,
         "status": status.get("status"),
         "status_path": paths.status,

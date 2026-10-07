@@ -162,6 +162,12 @@ CONTRACT_NOTES = (
     "plugin's transcript check. It stays null when that check did not run (hooks are optional) or when the step "
     "went through on its one retry with no question. It is a measurement of how the question was put, not an "
     "attestation that a person answered it.",
+    "`untouched_since_resume` lists the run-dir files no writer rewrote after this invocation began; "
+    "`touched_since_resume` lists those a writer did, and how. It records file writes measured by script, not "
+    "steps: which files a correct resume rewrites depends on the skill and the gate (reports, coaching and pages "
+    "are rewritten every invocation; a corrections resume rewrites inputs.json), and it cannot see work written "
+    "outside the run dir or work that wrote nothing. `null` means no manifest could be taken, never that nothing "
+    "ran.",
 )
 
 
@@ -2528,7 +2534,7 @@ def record(
     for o in options:
         _apply_effects(ctx, ledger, o, key, by)
     if reopening:
-        _reopen_complete(ctx.status)
+        _reopen_complete(ctx.status, key, g)
     declined = any(o["declines"] for o in options)
     return {"key": key, "state": entry["state"], "answer_id": entry["current"]["answer_id"], "declined": declined}
 
@@ -2537,13 +2543,15 @@ def _binding_now(ctx: Ctx, g: dict[str, Any], given: dict[str, Any] | None) -> d
     return given if given is not None else binding(ctx, g["binds"])
 
 
-def _reopen_complete(status: dict[str, Any]) -> None:
-    """A `reopens_complete` answer on a complete run: a new revision, whose reports are not yet final."""
+def _reopen_complete(status: dict[str, Any], key: str, g: dict[str, Any]) -> None:
+    """A `reopens_complete` answer on a complete run: a new revision, whose reports are not yet final,
+    and a new invocation that starts at the reopening gate."""
     status["revision"] = int(status.get("revision") or 0) + 1
     status["coaching"] = None
     status["deliverables"] = None
     status["deliverables_status"] = None
     _run_status.set_state(status, "running", "RUNNING")
+    _run_status.open_invocation(status, "reopen", {"gate": key, "step": g["step"], "reason": "reopened"})
 
 
 # --- pre-answers ------------------------------------------------------------------------------------
@@ -3067,6 +3075,26 @@ SHAPES = {
         "answer_command": "the exact recording command, or null when another script records it",
     },
     "blocked_by_gate": "the gate key a refused step waits on (exit 10); answer it, then run the step again",
+    "invocation": "1 at a fresh start; +1 at every resume and every reopen of a complete run; never reset",
+    "resumed_from": "{gate, step, reason} of the current invocation: the gate key it started at, that gate's "
+    "step, and `resume` or `reopened`; null on invocation 1",
+    "invocations": "append-only [{n, kind, started_at, ended_at, resumed_from, reuse, manifest, "
+    "manifest_incomplete, untouched_since_resume, touched_since_resume, counts, maps_dropped}]; `kind` is `start`, "
+    "`resume` or `reopen`; `manifest` is the snapshot's path relative to the artifacts root, null before `bind`. "
+    "An invocation ends at the next start or reopen; at the coaching insert, unless the skill lists pages after "
+    "its coaching, in which case when `deliverables_status` turns `final`; and when the run completes with no "
+    "page still to come or is refused. Until then, and whenever no complete manifest and walk exist, both "
+    "partitions and `counts` are null. At the end every file up to 8 MiB is hashed again: different bytes are "
+    "`changed`, the same bytes with another mtime are `rewritten_identical`, and the same bytes with the same "
+    "mtime count as untouched, so an identical copy that kept its mtime (`cp -p`, `copy2`, `rsync -t`) or a "
+    "permission change is untouched. `counts` is {untouched, changed, rewritten_identical, added, removed}. Only "
+    f"the {_run_status.KEEP_MAPS} most recent ended invocations keep their key maps; an older one has both "
+    "partitions null, `maps_dropped: true` and its `counts`",
+    "evidence_key": "a run-dir-relative path with every `.` and `/` replaced by `_`; paths whose keys collide take "
+    "`__2`, `__3`, ... in sorted path order, skipping any key already taken (so `a_b.json`, `a/b.json`, "
+    "`a.b/json` and a file named `a_b_json__2` take `a_b_json__3`, `a_b_json__2`, `a_b_json` and "
+    "`a_b_json__2__2`)",
+    "touched_kinds": list(_run_status.TOUCHED_KINDS),
 }
 
 

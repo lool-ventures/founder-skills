@@ -26,6 +26,7 @@ import json
 import os
 import re
 import secrets
+import stat
 import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
@@ -147,7 +148,46 @@ FIELDS: tuple[str, ...] = (
     "handed_over_at",
     "disclosures",
     "notices",
+    "invocation",
+    "resumed_from",
+    "invocations",
 )
+
+# --- resume evidence ---------------------------------------------------------------------------------
+#
+# Each invocation of a run (the fresh start, every resume, every reopen of a complete run) snapshots the
+# run dir into `runs/<id>/manifest-<n>.json`; when the invocation ends the run dir is compared with it,
+# by stat and sha256 equality only, never by comparing times with a clock.
+
+INVOCATION_KINDS = ("start", "resume", "reopen")
+RESUMED_FROM_REASONS = ("resume", "reopened")
+MANIFEST_SCHEMA = "founder-skills/run_manifest"
+# Every file of the run dir the manifest leaves out, by basename (full match): the run's own bookkeeping
+# (its ref, the hook's record, the status, ledger, refusals and manifests, should a run dir hold them),
+# locks, and the temporary files of atomic writes. The run's own `runs/<id>/` is also left out whole.
+MANIFEST_EXCLUDED = (
+    r"run_ref\.json",
+    r"asked_evidence\.jsonl",
+    r"run_status\.json(?:\.replaced-\d+)?",
+    r"gates\.json",
+    r"start_refusals\.jsonl",
+    r"manifest-\d+\.json",
+    r".+\.lock",
+    r".+\.lock\.excl",
+    r".+\.tmp",
+    r".+\.tmp[-.]\d+",
+)
+_MANIFEST_EXCLUDED_RE = re.compile("|".join(f"(?:{p})" for p in MANIFEST_EXCLUDED))
+# A file larger than this is recorded by stat alone; so is every file once a walk has hashed this many
+# bytes. A walk that meets more than MANIFEST_MAX_FILES files stops and is incomplete.
+MANIFEST_SHA_MAX_FILE = 8 << 20
+MANIFEST_SHA_BUDGET = 256 << 20
+MANIFEST_MAX_FILES = 20_000
+TOUCHED_KINDS = ("changed", "rewritten_identical", "added", "removed")
+# Closed invocations older than the last KEEP_MAPS keep their per-kind `counts`, not their key maps.
+KEEP_MAPS = 2
+# Where a manifest waits, inside the status being built, for the write that carries it. Never on disk.
+_PENDING_MANIFESTS = "_pending_manifests"
 
 # Mode from the run dir's suffix. The suffix is chosen by the skill's own routing, never typed here.
 MODE_SUFFIXES: tuple[tuple[str, str], ...] = (
@@ -469,6 +509,9 @@ def blank_status(skill: str, paths: RunPaths) -> dict[str, Any]:
             "gates": [],
             "disclosures": [],
             "notices": [],
+            "invocation": 1,
+            "resumed_from": None,
+            "invocations": [_invocation_entry(1, "start", None, [])],
         }
     )
     set_state(status, "running", "RUNNING")
@@ -589,6 +632,8 @@ def fold_asked_evidence(status: dict[str, Any]) -> None:
 def write_status(paths: RunPaths, status: dict[str, Any]) -> None:
     status["updated_at"] = now_iso()
     fold_asked_evidence(status)
+    close_if_finished(status)
+    _flush_manifests(status)
     atomic_write_json(paths.status, normalise(status))
 
 
@@ -600,6 +645,8 @@ def create_status_exclusive(paths: RunPaths, status: dict[str, Any]) -> bool:
     except FileExistsError:
         return False
     status["updated_at"] = now_iso()
+    close_if_finished(status)
+    _flush_manifests(status)
     text = json.dumps(normalise(status), indent=2, ensure_ascii=False) + "\n"
     try:
         os.write(fd, text.encode("utf-8"))
@@ -630,6 +677,325 @@ def open_gate_ids(paths: RunPaths) -> list[str]:
     if not isinstance(gates, dict):
         return []
     return sorted(k for k, g in gates.items() if isinstance(g, dict) and g.get("state") == "open")
+
+
+# --- resume evidence ----------------------------------------------------------------------------------
+
+
+def _invocation_entry(n: int, kind: str, resumed_from: dict[str, Any] | None, reuse: list[str]) -> dict[str, Any]:
+    return {
+        "n": n,
+        "kind": kind,
+        "started_at": now_iso(),
+        "ended_at": None,
+        "resumed_from": resumed_from,
+        "reuse": reuse,
+        "manifest": None,
+        "manifest_incomplete": None,
+        "untouched_since_resume": None,
+        "touched_since_resume": None,
+        "counts": None,
+        "maps_dropped": False,
+    }
+
+
+def reuse_names(status: dict[str, Any]) -> list[str]:
+    """The run dir's top-level JSON artifacts already stamped with this run's id, sorted."""
+    run_dir, run_id = status.get("run_dir_shell"), status.get("run_id")
+    if not isinstance(run_dir, str) or not os.path.isdir(run_dir):
+        return []
+    out = []
+    try:
+        names = sorted(os.listdir(run_dir))
+    except OSError:
+        return []
+    for name in names:
+        if not name.endswith(".json"):
+            continue
+        try:
+            data = read_json(os.path.join(run_dir, name))
+        except ValueError:
+            continue
+        meta = data.get("metadata") if isinstance(data, dict) else None
+        if isinstance(meta, dict) and meta.get("run_id") == run_id:
+            out.append(name)
+    return out
+
+
+def _stat_key(entry: dict[str, Any]) -> tuple[Any, ...]:
+    return entry.get("size"), entry.get("mtime_ns"), entry.get("ctime_ns"), entry.get("ino")
+
+
+def snapshot_run_dir(
+    run_dir: str, skip_dir: str | None = None, prior: dict[str, Any] | None = None, *, rehash: bool = False
+) -> tuple[dict[str, dict[str, Any]], bool]:
+    """`({rel_path: {sha256, mtime_ns, ctime_ns, ino, size}}, complete)` for every regular file under
+    `run_dir`. Symlinks are not followed and not recorded.
+
+    Building a manifest (`rehash=False`): a file whose size, mtime_ns, ctime_ns and inode all equal its
+    `prior` entry keeps that entry's sha256 unread; any other file up to MANIFEST_SHA_MAX_FILE is hashed
+    while the walk's MANIFEST_SHA_BUDGET lasts, and recorded by stat alone after that.
+    Comparing at the end of an invocation (`rehash=True`): every file up to MANIFEST_SHA_MAX_FILE is
+    hashed, never taken from a stat match (a same-size rewrite inside one coarse clock tick keeps its
+    stat), and running out of budget makes the walk incomplete.
+    `complete` is False when a directory or file could not be read, the walk met more than
+    MANIFEST_MAX_FILES files, or (with `rehash`) the budget ran out.
+    """
+    prior = prior or {}
+    files: dict[str, dict[str, Any]] = {}
+    complete = True
+    budget = MANIFEST_SHA_BUDGET
+    skip = os.path.abspath(skip_dir) if skip_dir else None
+
+    def failed(_e: OSError) -> None:
+        nonlocal complete
+        complete = False
+
+    for dirpath, dirnames, filenames in os.walk(run_dir, onerror=failed):
+        dirnames.sort()
+        if skip is not None:
+            dirnames[:] = [d for d in dirnames if os.path.abspath(os.path.join(dirpath, d)) != skip]
+        for name in sorted(filenames):
+            if _MANIFEST_EXCLUDED_RE.fullmatch(name):
+                continue
+            path = os.path.join(dirpath, name)
+            rel = os.path.relpath(path, run_dir).replace(os.sep, "/")
+            try:
+                st = os.lstat(path)
+            except OSError:
+                complete = False
+                continue
+            if not stat.S_ISREG(st.st_mode):
+                continue
+            if len(files) >= MANIFEST_MAX_FILES:
+                return files, False
+            entry: dict[str, Any] = {
+                "sha256": None,
+                "mtime_ns": st.st_mtime_ns,
+                "ctime_ns": st.st_ctime_ns,
+                "ino": st.st_ino,
+                "size": st.st_size,
+            }
+            before = prior.get(rel)
+            if not rehash and isinstance(before, dict) and _stat_key(before) == _stat_key(entry):
+                entry["sha256"] = before.get("sha256")
+            elif st.st_size <= MANIFEST_SHA_MAX_FILE:
+                if st.st_size > budget:
+                    if rehash:
+                        return files, False
+                else:
+                    try:
+                        entry["sha256"] = file_sha256(path)
+                    except OSError:
+                        complete = False
+                        continue
+                    budget -= st.st_size
+            files[rel] = entry
+    return files, complete
+
+
+def evidence_keys(rel_paths: Any) -> dict[str, str]:
+    """`{rel_path: key}`: `.` and `/` become `_`, so a host can name the key in a dot-path. Paths whose
+    keys collide take `__2`, `__3`, … in sorted path order, skipping any key already taken."""
+    out: dict[str, str] = {}
+    used: set[str] = set()
+    for rel in sorted(set(rel_paths)):
+        base = rel.replace(".", "_").replace("/", "_")
+        key, n = base, 1
+        while key in used:
+            n += 1
+            key = f"{base}__{n}"
+        used.add(key)
+        out[rel] = key
+    return out
+
+
+def diff_manifest(
+    before: dict[str, dict[str, Any]], after: dict[str, dict[str, Any]]
+) -> tuple[dict[str, bool], dict[str, dict[str, str]]]:
+    """(untouched, touched) between two snapshots, keyed by `evidence_keys` over both.
+
+    Where both sides carry a sha256 the bytes decide: different bytes are `changed`, the same bytes with
+    another mtime_ns are `rewritten_identical`, the same bytes and mtime_ns are untouched (an identical
+    copy that kept its mtime, or a permission change). A file recorded by stat alone is untouched only
+    when its whole stat is unchanged."""
+    keys = evidence_keys([*before, *after])
+    untouched: dict[str, bool] = {}
+    touched: dict[str, dict[str, str]] = {}
+    for rel in sorted(keys):
+        b, a = before.get(rel), after.get(rel)
+        key = keys[rel]
+        if b is None:
+            touched[key] = {"kind": "added"}
+        elif a is None:
+            touched[key] = {"kind": "removed"}
+        elif b.get("sha256") is not None and a.get("sha256") is not None:
+            if b["sha256"] != a["sha256"]:
+                touched[key] = {"kind": "changed"}
+            elif b.get("mtime_ns") != a.get("mtime_ns"):
+                touched[key] = {"kind": "rewritten_identical"}
+            else:
+                untouched[key] = True
+        elif _stat_key(b) == _stat_key(a):
+            untouched[key] = True
+        else:
+            touched[key] = {"kind": "changed"}
+    return untouched, touched
+
+
+def _manifest_rel(run_id: str, n: int) -> str:
+    return f"runs/{run_id}/manifest-{n}.json"
+
+
+def _own_run_root(status: dict[str, Any]) -> str | None:
+    root, run_id = status.get("artifacts_root_shell"), status.get("run_id")
+    if isinstance(root, str) and valid_run_id(run_id):
+        return os.path.join(root, "runs", str(run_id))
+    return None
+
+
+def _counts(untouched: dict[str, bool], touched: dict[str, dict[str, str]]) -> dict[str, int]:
+    out = {"untouched": len(untouched), **dict.fromkeys(TOUCHED_KINDS, 0)}
+    for v in touched.values():
+        out[v["kind"]] += 1
+    return out
+
+
+def _drop_old_maps(entries: list[Any]) -> None:
+    """Keep the key maps of the KEEP_MAPS most recent closed invocations; older ones keep `counts`."""
+    closed = [e for e in entries if isinstance(e, dict) and e.get("ended_at") is not None]
+    for e in closed[:-KEEP_MAPS]:
+        if e.get("untouched_since_resume") is not None or e.get("touched_since_resume") is not None:
+            e["untouched_since_resume"] = None
+            e["touched_since_resume"] = None
+            e["maps_dropped"] = True
+
+
+def _manifest_files(status: dict[str, Any], rel: str) -> dict[str, Any] | None:
+    for pending in status.get(_PENDING_MANIFESTS) or []:
+        if pending.get("rel") == rel:
+            doc = pending.get("doc")
+            break
+    else:
+        root = status.get("artifacts_root_shell")
+        if not isinstance(root, str):
+            return None
+        try:
+            doc = read_json(os.path.join(root, rel))
+        except ValueError:
+            return None
+    files = doc.get("files") if isinstance(doc, dict) else None
+    if not isinstance(files, dict) or doc.get("complete") is not True:
+        return None
+    return files
+
+
+def close_invocation(status: dict[str, Any]) -> tuple[dict[str, dict[str, Any]], bool] | None:
+    """End the current invocation, if it is still open: stamp `ended_at` and fill both partitions from a
+    fresh, fully hashed walk compared with its manifest. With no manifest, an incomplete one, an
+    unreadable one or an incomplete walk, both stay null. Returns the walk it took, so a following
+    invocation can reuse it. Never raises: the evidence is a measurement, and a status write must not
+    depend on it. A second call on a closed invocation changes nothing."""
+    try:
+        entries = status.get("invocations")
+        if not isinstance(entries, list) or not entries or not isinstance(entries[-1], dict):
+            return None
+        cur = entries[-1]
+        if cur.get("ended_at") is not None:
+            return None
+        cur["ended_at"] = now_iso()
+        cur["untouched_since_resume"] = None
+        cur["touched_since_resume"] = None
+        rel, run_dir = cur.get("manifest"), status.get("run_dir_shell")
+        if not isinstance(rel, str) or cur.get("manifest_incomplete") is not False:
+            return None
+        if not isinstance(run_dir, str) or not os.path.isdir(run_dir):
+            return None
+        before = _manifest_files(status, rel)
+        if before is None:
+            return None
+        after, complete = snapshot_run_dir(run_dir, _own_run_root(status), before, rehash=True)
+        if complete:
+            untouched, touched = diff_manifest(before, after)
+            cur["untouched_since_resume"], cur["touched_since_resume"] = untouched, touched
+            cur["counts"] = _counts(untouched, touched)
+            _drop_old_maps(entries)
+        return after, complete
+    except Exception:  # noqa: BLE001 - the evidence is a measurement; a status write never fails on it
+        return None
+
+
+def close_if_finished(status: dict[str, Any]) -> None:
+    """Close the current invocation of a run that is refused, or complete with no page still to come."""
+    state = status.get("status")
+    if state == "refused" or (state == "complete" and status.get("deliverables_status") != "pending"):
+        close_invocation(status)
+
+
+def open_invocation(status: dict[str, Any], kind: str, resumed_from: dict[str, Any] | None) -> dict[str, Any]:
+    """Begin the next invocation: close the current one, bump `invocation`, set `resumed_from`, and
+    snapshot the run dir. The manifest is staged in the status and written to
+    `runs/<id>/manifest-<n>.json` by the status write that carries it, so a write that never happens
+    leaves no file; it is null when the run is not bound yet. Call it under the run lock.
+
+    A status from before invocations were recorded has no `invocation`: its first one is 1, a `start`."""
+    if kind not in INVOCATION_KINDS:
+        raise ValueError(f"unknown invocation kind {kind!r}")
+    if resumed_from is not None and resumed_from.get("reason") not in RESUMED_FROM_REASONS:
+        raise ValueError(f"unknown resume reason {resumed_from.get('reason')!r}")
+    walked = close_invocation(status)
+    prior_n = status.get("invocation")
+    if not isinstance(prior_n, int):
+        prior_n, kind, resumed_from = 0, "start", None
+    n = prior_n + 1
+    entry = _invocation_entry(n, kind, resumed_from, reuse_names(status))
+    entries = status.get("invocations")
+    status["invocations"] = [*(entries if isinstance(entries, list) else []), entry]
+    status["invocation"] = n
+    status["resumed_from"] = resumed_from
+    root, run_dir, run_id = status.get("artifacts_root_shell"), status.get("run_dir_shell"), status.get("run_id")
+    if not isinstance(root, str) or not isinstance(run_dir, str) or not valid_run_id(run_id):
+        return entry
+    if not os.path.isdir(run_dir):
+        return entry
+    if walked is not None and walked[1]:
+        files, complete = walked
+    else:
+        # The closing walk is not reused when it is incomplete (it may have run out of hash budget, which a
+        # manifest does not need): a fresh walk reuses its hashes where the stat still matches.
+        files, complete = snapshot_run_dir(run_dir, _own_run_root(status), walked[0] if walked else None)
+    rel = _manifest_rel(str(run_id), n)
+    doc = {
+        "schema": MANIFEST_SCHEMA,
+        "schema_version": 1,
+        "run_id": run_id,
+        "invocation": n,
+        "taken_at": now_iso(),
+        "run_dir_shell": run_dir,
+        "complete": complete,
+        "files": files,
+    }
+    status[_PENDING_MANIFESTS] = [*(status.get(_PENDING_MANIFESTS) or []), {"rel": rel, "n": n, "doc": doc}]
+    entry["manifest"] = rel
+    entry["manifest_incomplete"] = not complete
+    return entry
+
+
+def _flush_manifests(status: dict[str, Any]) -> None:
+    """Write the manifests staged in `status`, before the status that names them. A manifest that cannot
+    be written is not named: its invocation's `manifest` is null."""
+    pending = status.pop(_PENDING_MANIFESTS, None) or []
+    root = status.get("artifacts_root_shell")
+    for item in pending:
+        try:
+            if not isinstance(root, str):
+                raise OSError("no artifacts root")
+            atomic_write_json(os.path.join(root, item["rel"]), item["doc"])
+        except OSError:
+            for e in status.get("invocations") or []:
+                if isinstance(e, dict) and e.get("n") == item["n"] and e.get("manifest") == item["rel"]:
+                    e["manifest"] = None
+                    e["manifest_incomplete"] = None
 
 
 # --- completion and deliverables ---------------------------------------------------------------------
@@ -710,6 +1076,10 @@ def complete_after_coaching(paths: RunPaths, report_md: str, report_json: str | 
             )
         status["deliverables"] = deliverables
         status["coaching"] = "inserted"
+        # The coaching insert ends this invocation, whether or not the run completes with it, unless the
+        # skill builds pages after its coaching: then the last of those pages ends it (`add_deliverable`).
+        if status.get("mode") not in (None, "full") or deliverables_status_for(status) == "final":
+            close_invocation(status)
         if status.get("status") in FINAL_STATUSES or open_now:
             return
         mark_complete(status)
