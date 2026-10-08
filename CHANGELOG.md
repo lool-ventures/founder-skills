@@ -148,6 +148,9 @@ No grade, score or verdict changed for the same inputs. What moved, per skill wh
 - **Market sizing: the check that the founder was asked which figure to use no longer counts a background
   task's result as the founder's reply**, and reads each option of a question form on its own.
 - **Cap table: coaching checked against earlier scenarios is not inserted after a what-if** changes them.
+- **A folder holding one company's context no longer reads it for a request about another company.** When the
+  request names a different company, or answers which company the run is for, the run asks (or waits, when the
+  request said not to ask) instead of reusing that context.
 
 ### Development
 

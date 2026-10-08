@@ -172,7 +172,7 @@ def test_model_derived_company_name_routes_through_staging() -> None:
     text = SKILL_MD.read_text(encoding="utf-8")
     start = text.find("**Exit 1 (not found")
     assert start != -1, f"{SKILL_MD.name} has no Exit 1 branch"
-    end = text.find("**Exit 10 (several companies)", start)
+    end = text.find("**Exit 10 (which company)", start)
     assert end != -1, f"{SKILL_MD.name} Exit 1 branch has no Exit 10 terminator"
     section = text[start:end]
 

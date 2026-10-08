@@ -244,7 +244,7 @@ python3 "$SHARED_SCRIPTS/founder_context.py" init \
   --run-id "$RUN_ID" --skill deck-review
 ```
 
-**Exit 10 (several companies):** ask which from the printed `needs_input`, record it with its `answer_command`, then re-read with `--slug`; `A different company` → as Exit 1. <!-- gate: ctx_select_company --> Exit 1 with another `code`: report it and stop.
+**Exit 10 (which company):** ask which from the printed `needs_input`, record it with its `answer_command`, then re-read with `--slug`; `A different company` → as Exit 1. <!-- gate: ctx_select_company --> Exit 1 with another `code`: report it and stop.
 
 #### Execution checkpoint — END OF STEP 1, READ BEFORE CONTINUING
 

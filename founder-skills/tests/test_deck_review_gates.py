@@ -758,6 +758,213 @@ def test_a_bound_run_reads_its_own_company(tmp_path: Path) -> None:
     assert _out(proc)["slug"] == "third-corp"
 
 
+# --- one stored context: the picker is owed when the request is about another company --------------------
+
+_NAMED = "FS_HOST_VALUE ctx_basics.company_name=different | {}\n"
+_NO_ASK_RID = "20261008T090000Z-0c0d0e"
+
+
+def test_one_context_and_a_request_for_another_company_asks_which(tmp_path: Path) -> None:
+    root, rid = _started(tmp_path, _NAMED.format("Sample Labs"))
+    _context(root, "Example Co", "example-co")
+    proc = _read(root, rid)
+    assert proc.returncode == 10, proc.stdout + proc.stderr
+    needs = _out(proc)["needs_input"][0]
+    assert needs["gate"] == "ctx_select_company"
+    assert {o["id"] for o in needs["options"]} == {"example-co", "different_company"}
+    assert "names a company other than the one" in proc.stderr
+    st = h.status(root, rid)
+    assert (st["status"], st["waiting_on"]) == ("waiting", "ctx_select_company")
+    basics = h.ledger(root, rid)["gates"].get("ctx_basics.company_name") or {}
+    assert basics.get("state") != "not_owed", "the basics were settled from the other company's context"
+
+
+def test_one_context_and_another_company_under_no_ask_waits_and_reads_nothing(tmp_path: Path) -> None:
+    lines = f"FS_HOST_RUN_ID={_NO_ASK_RID}\nFS_HOST_NO_ASK\n" + _NAMED.format("Sample Labs")
+    root, rid = _started(tmp_path, lines)
+    assert rid == _NO_ASK_RID
+    _context(root, "Example Co", "example-co")
+    proc = _read(root, rid)
+    assert proc.returncode == 12, proc.stdout + proc.stderr
+    out = _out(proc)
+    assert out["blocked_by_gate"] == "ctx_select_company"
+    assert "sector" not in out and "slug" not in out, "a context was printed"
+    st = h.status(root, rid)
+    assert (st["status"], st["waiting_on"]) == ("waiting", "ctx_select_company")
+
+
+def test_one_context_and_a_different_company_answer_is_not_found_then_the_new_company_is_read(
+    tmp_path: Path,
+) -> None:
+    lines = (
+        "FS_HOST_ANSWER ctx_select_company=different_company\n"
+        + _NAMED.format("Sample Labs")
+        + "FS_HOST_ANSWER ctx_basics.stage=seed\n"
+        "FS_HOST_VALUE ctx_basics.sector=different | fintech\n"
+        "FS_HOST_VALUE ctx_basics.geography=different | US\n"
+    )
+    root, rid = _started(tmp_path, lines)
+    _context(root, "Example Co", "example-co")
+    proc = _read(root, rid)
+    assert proc.returncode == 1 and _out(proc)["code"] == "CONTEXT_NOT_FOUND", proc.stdout + proc.stderr
+    init = h.run(
+        FOUNDER_CONTEXT,
+        "init",
+        "--company-name",
+        "Sample Labs",
+        "--stage",
+        "seed",
+        "--sector",
+        "fintech",
+        "--geography",
+        "US",
+        "--artifacts-root",
+        str(root),
+        "--run-id",
+        rid,
+        "--skill",
+        "deck-review",
+    )
+    assert init.returncode == 0, init.stdout + init.stderr
+    assert (root / "founder-context-example-co.json").is_file(), "the other company's context was replaced"
+    assert h.bind(root, rid, root / "deck-review-sample-labs", "sample-labs").returncode == 0
+    again = _read(root, rid)
+    assert again.returncode == 0, again.stderr
+    assert _out(again)["company_name"] == "Sample Labs"
+
+
+def test_one_context_and_an_answer_naming_it_reads_it(tmp_path: Path) -> None:
+    root, rid = _started(tmp_path, "FS_HOST_ANSWER ctx_select_company=example-co\n" + _NAMED.format("Sample Labs"))
+    _context(root, "Example Co", "example-co")
+    proc = _read(root, rid)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert _out(proc)["slug"] == "example-co"
+    entry = h.ledger(root, rid)["gates"]["ctx_select_company"]
+    assert (entry["state"], entry["current"]["answer_id"]) == ("answered", "example-co")
+    before = h.snapshot(root, rid)
+    assert _read(root, rid).returncode == 0
+    assert h.snapshot(root, rid) == before, "a second read changed the record"
+
+
+@pytest.mark.parametrize(
+    ("name", "stored", "slug"),
+    [
+        ("Example Co", "Example Co", "example-co"),
+        ("example co.", "Example Co", "example-co"),
+        ("EXAMPLE  Co", "Example Co", "example-co"),
+        ("Example_Co", "Example Co", "example-co"),
+        (" Example-Co ", "Example Co", "example-co"),
+        ("Acme Inc.", "Acme", "acme"),
+        ("Acme", "Acme Inc.", "acme-inc"),
+        ("Acme Pty Ltd", "Acme, LLC", "acme-llc"),
+        ("Acme S.A.", "ACME GmbH", "acme-gmbh"),
+        ("Cafe Noir", "Café Noir", "cafe-noir"),
+        ("Café Noir", "Cafe Noir", "cafe-noir"),
+        ("Company", "company", "company"),
+    ],
+)
+def test_one_context_and_a_request_naming_it_reads_it_without_asking(
+    tmp_path: Path, name: str, stored: str, slug: str
+) -> None:
+    root, rid = _started(tmp_path, _NAMED.format(name))
+    _context(root, stored, slug)
+    proc = _read(root, rid)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert _out(proc)["slug"] == slug
+    assert "ctx_select_company" not in h.ledger(root, rid)["gates"]
+
+
+@pytest.mark.parametrize(
+    ("name", "stored"),
+    [("Acme Inc.", "Acme Labs"), ("Acme Labs", "Acme"), ("Tech עולם", "Tech ישראל"), ("Ölkraft", "Ålkraft")],
+)
+def test_one_context_and_a_similar_but_different_name_asks(tmp_path: Path, name: str, stored: str) -> None:
+    """A legal form or an accent is not a different company; another word, or another non-Latin letter, is."""
+    root, rid = _started(tmp_path, _NAMED.format(name))
+    _context(root, stored, "stored-co")
+    proc = _read(root, rid)
+    assert proc.returncode == 10, proc.stdout + proc.stderr
+
+
+def test_a_context_with_no_stored_name_matches_by_its_file_name(tmp_path: Path) -> None:
+    root, rid = _started(tmp_path, _NAMED.format("Nova Co"))
+    _context(root, "Placeholder", "nova-co")
+    path = root / "founder-context-nova-co.json"
+    path.write_text(json.dumps({**json.loads(path.read_text()), "company_name": None}))
+    proc = _read(root, rid)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "ctx_select_company" not in h.ledger(root, rid)["gates"]
+
+
+def test_a_recorded_name_asks_when_another_run_wrote_the_only_context_since(tmp_path: Path) -> None:
+    """A run that recorded the company's name and stopped before writing its context, resumed after another run
+    in the same folder wrote a context for another company, asks rather than reading that one."""
+    root, rid = _started(tmp_path)
+    assert _read(root, rid).returncode == 1
+    ans = h.record(
+        root, rid, "answer", "--gate", "ctx_basics.company_name", "--answer-id", "different", "--value", "Sample Labs"
+    )
+    assert ans.returncode == 0, ans.stdout
+    _context(root, "Example Co", "example-co")
+    proc = _read(root, rid)
+    assert proc.returncode == 10, proc.stdout + proc.stderr
+    assert _out(proc)["needs_input"][0]["gate"] == "ctx_select_company"
+
+
+def test_a_name_with_no_latin_letters_matches_only_the_same_name(tmp_path: Path) -> None:
+    root, rid = _started(tmp_path, _NAMED.format("Άλφα"))
+    _context(root, "Άλφα", "alpha-co")
+    assert _read(root, rid).returncode == 0
+    other = tmp_path / "other"
+    other_root, other_rid = _started(other, _NAMED.format("Βήτα"))
+    _context(other_root, "Άλφα", "alpha-co")
+    assert _read(other_root, other_rid).returncode == 10
+
+
+def test_one_context_and_a_request_that_names_no_company_reads_it(tmp_path: Path) -> None:
+    """A working title says the request names no company yet: no evidence of another company, so no question
+    (a known limit, kept deliberate)."""
+    root, rid = _started(tmp_path, "FS_HOST_ANSWER ctx_basics.company_name=working_title\n")
+    _context(root, "Example Co", "example-co")
+    proc = _read(root, rid)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "ctx_select_company" not in h.ledger(root, rid)["gates"]
+
+
+def test_no_context_and_a_company_answer_is_still_not_found(tmp_path: Path) -> None:
+    root, rid = _started(tmp_path, "FS_HOST_ANSWER ctx_select_company=different_company\n")
+    proc = _read(root, rid)
+    assert proc.returncode == 1 and _out(proc)["code"] == "CONTEXT_NOT_FOUND"
+    assert "ctx_select_company" not in h.ledger(root, rid)["gates"]
+    assert h.record(root, rid, "open", "--gate", "ctx_select_company").returncode == 11, "owed with nothing to pick"
+
+
+@pytest.mark.parametrize(("answer", "code"), [("different_company", 1), ("example-co", 0)])
+def test_one_context_and_only_an_answer_for_the_company_question_is_honoured(
+    tmp_path: Path, answer: str, code: int
+) -> None:
+    """The answer alone, with no company name in the request, is applied rather than ignored as not asked."""
+    root, rid = _started(tmp_path, f"FS_HOST_ANSWER ctx_select_company={answer}\n")
+    _context(root, "Example Co", "example-co")
+    proc = _read(root, rid)
+    assert proc.returncode == code, proc.stdout + proc.stderr
+    if code:
+        assert _out(proc)["code"] == "CONTEXT_NOT_FOUND"
+    entry = h.ledger(root, rid)["gates"]["ctx_select_company"]
+    assert (entry["state"], entry["current"]["answer_id"]) == ("answered", answer)
+
+
+def test_a_bound_run_reads_its_company_whatever_the_request_names(tmp_path: Path) -> None:
+    root, rid = _started(tmp_path, _NAMED.format("Sample Labs"))
+    _context(root, "Example Co", "example-co")
+    assert h.bind(root, rid, root / "deck-review-example-co", "example-co").returncode == 0
+    proc = _read(root, rid)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert _out(proc)["slug"] == "example-co"
+    entry = h.ledger(root, rid)["gates"]["ctx_select_company"]
+    assert (entry["state"], entry["current"]["resolution"]) == ("not_owed", "not_applicable")
+
+
 # --- setup_run on a bound run -------------------------------------------------------------------------
 
 

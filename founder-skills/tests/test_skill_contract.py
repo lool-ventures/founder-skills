@@ -641,6 +641,8 @@ LEGACY_REFERENCES_CAP = 8 * 1024  # historical; references now ship whole
 # rather than done here, because "do four routes need four names" is a design question.
 #    See docs/internal/2026-08-26-cap-table-deliverable-naming.md.
 SKILL_MD_CEILING: dict[str, int] = {
+    # All six lowered 2026-10-08 by 4 B: Step 1's exit-10 label reads "(which company)", since the company
+    # question is now also asked with one stored context when the request names another company.
     # All six lowered 2026-10-08, each to its new size: Step 0's start paragraph gains the one sentence routing
     # exit 12 (a request that said not to ask) to a stop, paid for by trimming that paragraph and a Step 1 aside;
     # deck review also names who declined.
@@ -963,7 +965,7 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 106,282 -> 106,256 (-26), LOWERED, commit 10 (O3): the compose step says to read compose_result.json on a
     # non-zero exit, paid for in the same step; "Two codes sit in neither class" loses its aside.
     # -1 B, LOWERED, commit 13: a derived stage takes its option id and no value; the sentence is shortened to pay.
-    "market-sizing": 106_251,
+    "market-sizing": 106_247,
     # fmr raised for two founder-facing-correctness items measured in a live run: the CHECKLIST
     # dispatch now forbids citing our artifact filenames in evidence (that run put `inputs.json` in 10
     # items' evidence, printed verbatim into the founder's report), and the producer pipe passes
@@ -1100,7 +1102,7 @@ SKILL_MD_CEILING: dict[str, int] = {
     # Path B anecdote).
     # 85,520 -> 85,517 (-3), LOWERED, commit 10 (O3): the compose step says to read compose_result.json on a non-
     # zero exit, paid for in the same step; the heredoc warning shortened, its reason kept.
-    "financial-model-review": 85_479,
+    "financial-model-review": 85_475,
     # ic-sim SHRANK: the REQUIRED ic-dynamics.md read at Step 7 is deleted. Step 7 is a pure producer
     # pipe — compose_discussion.py derives discussion.json from the partners' own files and nothing
     # is authored by the main thread — so the read informed no decision while pulling a whole
@@ -1182,7 +1184,7 @@ SKILL_MD_CEILING: dict[str, int] = {
     # zero exit, paid for in the same step; the heredoc warning shortened, its reason kept.
     # -5 B, LOWERED, commit 13: Step 8.5 names the GATE_UNDECIDABLE remedy (re-run Step 8, same RUN_ID), paid for
     # by two rationale clauses in the same step; a derived stage takes its option id and no value.
-    "ic-sim": 94_802,
+    "ic-sim": 94_798,
     # deck-review +1,165 B: Step 0 carried only a parenthetical fresh-shell mention buried in a code
     # comment, unlike the four skills that mint RUN_ID in a LATER block and so carry the shared banner.
     # deck-review mints RUN_ID INSIDE this re-runnable Step-0 block (like cap-table), so the shared
@@ -1528,7 +1530,7 @@ SKILL_MD_CEILING: dict[str, int] = {
     # checkpoints; two justification/history sentences removed to pay for it.
     # 113,613 -> 113,610 (-3), LOWERED, commit 10 (O3): the compose step says to read compose_result.json on a
     # non-zero exit, paid for in the same step; the heredoc warning shortened, its reason kept.
-    "deck-review": 113_609,
+    "deck-review": 113_605,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
@@ -1714,7 +1716,7 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 129,580 -> 129,577 (-3), LOWERED, commit 10 (O3): the compose step says to read compose_result.json on a
     # non-zero exit, paid for in the same step; the heredoc warning shortened, its reason kept.
     # -1 B, LOWERED, commit 13: a derived stage takes its option id and no value; the sentence is shortened to pay.
-    "competitive-positioning": 129_572,
+    "competitive-positioning": 129_568,
     # cap-table, the largest raise (+2,383 B) and the one with the most founder-visible payoff:
     #   * Main-Thread Return named THREE of the four files Step 12 copies; a live run delivered exactly
     #     three and dropped `{Company}_Cap_Table.html`. All four are now named explicitly.
@@ -1845,7 +1847,7 @@ SKILL_MD_CEILING: dict[str, int] = {
     # paid for in the same step (the Step 8 parity sentence shortened).
     # -8 B, LOWERED, commit 13: a derived stage takes its option id and no value; two clauses of the same
     # paragraph shortened.
-    "cap-table": 156_613,
+    "cap-table": 156_609,
 }
 
 

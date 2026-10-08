@@ -2069,7 +2069,7 @@ def test_the_gate_steps_name_their_exits() -> None:
     assert '--run-id "$RUN_ID" --skill deck-review --pretty' in text  # the read
     init = text.index('founder_context.py" init')
     assert '--run-id "$RUN_ID" --skill deck-review' in text[init : init + 300]
-    assert "**Exit 10 (several companies):**" in text and "**Exit 2 (multiple):**" not in text
+    assert "**Exit 10 (which company):**" in text and "**Exit 2 (multiple):**" not in text
     gate = _section(text, "### Gate: Confirm Stage and Scope", "### Context A hand-off protocol")
     assert "If it printed `answered` instead" in gate and "do not ask and do not answer it" in gate
     step6 = _section(text, "### Step 6: Compose Report", "### Step 7:")

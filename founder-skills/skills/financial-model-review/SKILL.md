@@ -325,7 +325,7 @@ python3 "$SHARED_SCRIPTS/founder_context.py" init \
 
 If the script prints a `sector_type` warning but exits 0, that's non-fatal — proceed without retrying. However, a null `sector_type` may suppress sector-specific checklist gating downstream. If you know the correct type, re-run with `--sector-type` (valid values: `saas`, `ai-native`, `marketplace`, `hardware`, `hardware-subscription`, `consumer-subscription`, `usage-based`, `transactional-fintech`, `retail`).
 
-**Exit 10 (several companies):** ask which company via `AskUserQuestion` from the printed `needs_input` (its labels are the company names found on disk), record it with its `answer_command`, then re-read with `--slug`; `A different company` → as Exit 1. <!-- gate: ctx_select_company --> Exit 1 with another `code`: report it and stop.
+**Exit 10 (which company):** ask which company via `AskUserQuestion` from the printed `needs_input` (its labels are the company names found on disk), record it with its `answer_command`, then re-read with `--slug`; `A different company` → as Exit 1. <!-- gate: ctx_select_company --> Exit 1 with another `code`: report it and stop.
 
 #### Execution checkpoint — END OF STEP 1, READ BEFORE CONTINUING
 

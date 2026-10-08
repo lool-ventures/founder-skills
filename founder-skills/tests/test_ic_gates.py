@@ -439,7 +439,7 @@ def test_step_1_opens_its_questions_before_it_asks_and_asks_a_stage_it_cannot_de
     # A stage has no "not sure" option: under Auto-pilot too, a stage with no signal is asked.
     assert "a stage with no signal is asked, under Auto-pilot too" in step1
     assert "mark any field but the stage that still has no signal" in step1
-    assert "**Exit 10 (several companies):**" in step1 and "Exit 2" not in step1
+    assert "**Exit 10 (which company):**" in step1 and "Exit 2" not in step1
     assert not any("not_sure" in s and "stage" in s.split("not_sure")[0][-40:] for s in step1.split(". "))
 
 

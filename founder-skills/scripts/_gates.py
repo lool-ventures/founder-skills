@@ -32,6 +32,7 @@ import os
 import re
 import sys
 import time
+import unicodedata
 from collections.abc import Callable
 from typing import Any, NoReturn
 
@@ -283,6 +284,14 @@ CONTRACT_NOTES = (
     "(`FS_HOST_ANSWER ms_two_figures.arpu=typed`). The bare `FS_HOST_ANSWER ms_two_figures=<option>` answers every "
     "instance; a line naming an instance wins for that instance. Its alternatives' ids are keyed on the figure "
     "(`alt_<value>[_<period>]`), so only `typed` is known before the run.",
+    "`ctx_select_company` is owed when the artifacts folder holds two or more companies' contexts. With exactly "
+    "one, it is owed when the request answers it (`<slug>` reads that context, `different_company` starts a new "
+    "one) or when the request's `ctx_basics.company_name` value names another company (compared word for word, "
+    "with case, accents, punctuation and a trailing legal form such as Inc or Ltd aside); a request that names no "
+    "company (a working title, the model file's name, `FS_HOST_DERIVE`) reads the one context. Under "
+    "`FS_HOST_NO_ASK` it waits (exit 12) without an answer line. A resume whose corrected name now matches is "
+    "reported `waiting` by `start` (no answer line for the open question), and its next read closes the "
+    "question and goes on.",
     "A question the run no longer owes (its parent was answered otherwise, its condition no longer holds, or the "
     "run's mode does not ask it) is closed `not_applicable` by script; if the run owes it again it is re-opened and "
     "asked, never read as answered.",
@@ -430,7 +439,7 @@ GATES: dict[str, dict[str, Any]] = {
         "options": (_o("different_company", "A different company"),),
         "option_source": "ctx_company_slugs",
         "option_variants": None,
-        "owed": "ctx_many_contexts",
+        "owed": "ctx_select_company_owed",
         "asked_check": "none",
         "writer": "record_gate_answer.py",
         "binds": None,
@@ -2274,8 +2283,105 @@ def _pred_always(ctx: Ctx, g: dict[str, Any], instance: str | None) -> bool:
     return True
 
 
-def _pred_many_contexts(ctx: Ctx, g: dict[str, Any], instance: str | None) -> bool:
-    return len(_context_files(ctx.paths.artifacts_root)) >= 2
+# Legal-form words a company name may end with; one name with or without them is the same company.
+_LEGAL_FORMS = frozenset(
+    {
+        "inc",
+        "incorporated",
+        "corp",
+        "corporation",
+        "co",
+        "company",
+        "ltd",
+        "limited",
+        "llc",
+        "llp",
+        "lp",
+        "plc",
+        "gmbh",
+        "ag",
+        "sa",
+        "sas",
+        "sarl",
+        "srl",
+        "spa",
+        "bv",
+        "nv",
+        "oy",
+        "ab",
+        "as",
+        "pte",
+        "pty",
+        "kk",
+        "\u05d1\u05e2\u05de",  # the Hebrew Ltd., its quote mark dropped
+    }
+)
+
+
+def _name_key(name: str) -> list[str]:
+    """A company name's identity: accents folded, case aside, letters and digits only (dots and quote marks
+    inside a word dropped, so `S.A.` is `sa`), and trailing legal-form words removed while a word is left.
+    Letters with no Latin form are kept, so two names differing only there differ."""
+    folded = "".join(c for c in unicodedata.normalize("NFKD", name) if unicodedata.category(c) != "Mn")
+    words = re.findall(r"[^\W_]+", re.sub(r"[.'\"\u05f3\u05f4\u2019]", "", folded.casefold()))
+    while len(words) > 1 and words[-1] in _LEGAL_FORMS:
+        words.pop()
+    return words
+
+
+# The company-name options that carry the company's name as their value.
+_NAMED_COMPANY_OPTIONS = ("use_derived", "different")
+
+
+def _requested_company_name(ledger: dict[str, Any]) -> str | None:
+    """The company this run's request (or a recorded answer) names, or None when it names none. A working title,
+    the model file's name and a name still to be derived name no company yet. The recorded answer comes first:
+    a run that recorded the name and stopped before writing its context is resumed after another run wrote one."""
+    key = "ctx_basics.company_name"
+    entry = (ledger.get("gates") or {}).get(key)
+    cur = entry.get("current") if isinstance(entry, dict) and entry.get("state") == "answered" else None
+    if isinstance(cur, dict) and cur.get("answer_id") in _NAMED_COMPANY_OPTIONS:
+        value = cur.get("value")
+        if isinstance(value, str) and value.strip():
+            return value
+    pa = (ledger.get("pre_answers") or {}).get(key)
+    if isinstance(pa, dict) and pa.get("option_id") in _NAMED_COMPANY_OPTIONS:
+        value = pa.get("value")
+        if isinstance(value, str) and value.strip():
+            return value
+    return None
+
+
+def _same_company(requested: str, path: str) -> bool:
+    """Whether the request's company is the one this context file holds: the same name key (`_name_key`) as its
+    stored name, or as its file slug read as words (a context with no stored name). Never decided by a slug of the
+    requested name: slugging drops every non-ASCII letter, so it would join different companies."""
+    file_slug = os.path.basename(path)[len("founder-context-") : -len(".json")]
+    try:
+        stored = (_run_status.read_json(path) or {}).get("company_name")
+    except (ValueError, AttributeError):
+        stored = None
+    want = _name_key(requested)
+    if not want:
+        return False
+    return want == _name_key(stored if isinstance(stored, str) else "") or want == _name_key(
+        file_slug.replace("-", " ")
+    )
+
+
+def _pred_select_company(ctx: Ctx, g: dict[str, Any], instance: str | None) -> bool:
+    """Owed with two or more contexts in the artifacts root; with exactly one, when the request answered the
+    question itself (applied or not, so an answer it gave keeps it owed) or names a company that context is not.
+    Never with none: there is nothing to pick. Outside a transaction only the count is known."""
+    files = _context_files(ctx.paths.artifacts_root)
+    if len(files) >= 2:
+        return True
+    if len(files) != 1 or ctx.ledger is None:
+        return False
+    if isinstance((ctx.ledger.get("pre_answers") or {}).get("ctx_select_company"), dict):
+        return True
+    requested = _requested_company_name(ctx.ledger)
+    return requested is not None and not _same_company(requested, files[0])
 
 
 # `model`: the model decides the gate applies (and may record it not applicable). `by_writer`: the
@@ -2286,7 +2392,7 @@ PREDICATES: dict[str, Callable[[Ctx, dict[str, Any], str | None], bool] | None] 
     "model": _pred_always,
     "by_writer": _pred_always,
     "ctx_needs_init": _pred_always,
-    "ctx_many_contexts": _pred_many_contexts,
+    "ctx_select_company_owed": _pred_select_company,
     # Owed only on a rule lookup that escalated: `run_status.py finish --lookup-status escalate` is the one
     # caller, and the gate's mode list keeps it out of every other run.
     "ct_lookup_escalated": _pred_always,

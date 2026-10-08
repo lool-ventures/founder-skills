@@ -551,9 +551,10 @@ def _read_with_ledger(args: argparse.Namespace) -> str | None:
     returns None and `read` is exactly what it always was. Otherwise:
 
       * a run already bound to a company reads that company's context (a resume never re-asks which);
-      * several contexts make `ctx_select_company` owed: with no record the read stops at exit 10 and
-        prints the question; a recorded company is read; `different_company` reads as "not found" (exit
-        1, so the skill creates a new context); a `--slug` other than the record is refused;
+      * `ctx_select_company` is owed with several contexts, and with one when the request answered it or names
+        another company (`_gates._pred_select_company`): with no record the read stops at exit 10 and prints the
+        question; a recorded company is read; `different_company` reads as "not found" (exit 1, so the skill
+        creates a new context); a `--slug` other than the record is refused;
       * a context that is read records the Step-1 basics as not applicable ("context existed"), once, and
         a request line for one of them is listed in the run's notices as not used.
 
@@ -614,8 +615,10 @@ def _read_with_ledger(args: argparse.Namespace) -> str | None:
                     note="the run is bound to its company",
                     by="founder_context.py",
                 )
-        elif len(files) >= 2:
-            got = _gates.require_terminal(ctx, ledger, "ctx_select_company", by="founder_context.py")
+        elif not files:
+            return {"not_found": True}
+        elif (got := _gates.require_terminal(ctx, ledger, "ctx_select_company", by="founder_context.py")) != "not_owed":
+            # Owed with several contexts, and with one when the request answered it or names another company.
             if got == "waiting":
                 if _gates.no_ask(ledger):
                     return {"waiting": True, "stop": _gates.no_ask_payload(ctx, ledger, ["ctx_select_company"])}
@@ -626,8 +629,6 @@ def _read_with_ledger(args: argparse.Namespace) -> str | None:
             if args.slug and args.slug != picked:
                 return {"mismatch": picked}
             out["slug"] = picked
-        elif not files:
-            return {"not_found": True}
         for key in [f"ctx_basics.{f}" for f in _CTX_FIELDS] + ["ctx_stage_detail"]:
             entry = (ledger.get("gates") or {}).get(key) or {}
             if entry.get("state") in ("answered", "not_owed"):
@@ -668,7 +669,10 @@ def _read_with_ledger(args: argparse.Namespace) -> str | None:
         _init_refusal(
             _gates.EXIT_CODES["waiting"],
             {"status": "waiting", "blocked_by_gate": "ctx_select_company", "needs_input": [out["needs_input"]]},
-            "Waiting: several companies have a context; ask which one, record it, then read again",
+            "Waiting: several companies have a context; ask which one, record it, then read again"
+            if len(files) >= 2
+            else "Waiting: the request names a company other than the one this folder's context holds, or answers "
+            "which company this is; ask which one, record it, then read again",
         )
     if out.get("not_found"):
         # Its own code, so a caller can tell "create the context" from a refusal (GATE_RECORD_MISMATCH and the

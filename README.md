@@ -322,11 +322,14 @@ company's context. A request with nobody to answer should carry them; otherwise 
 step. Under `FS_HOST_NO_ASK` the run cannot answer a question itself (it may only mark a name, sector or
 geography as unknown), so a value stated only in the request's prose is not used: send it as a line.
 `FS_HOST_NO_ASK` stays in force on every resume of the run, and `run_status.json` says so (`no_ask: true`).
-The company's context stays in the artifacts folder and later runs read it again. When the folder holds exactly
-one company's context, a run there reads it without asking, whichever company the request is about; with two or
-more, the run asks `ctx_select_company`, which a request answers with `FS_HOST_ANSWER ctx_select_company=<slug>`
-(a company already in the folder) or `FS_HOST_ANSWER ctx_select_company=different_company`. Use one artifacts
-folder per company unless every run there is for a company the folder already knows.
+The company's context stays in the artifacts folder and later runs read it again. With two or more companies'
+contexts in the folder, the run asks `ctx_select_company`, which a request answers with
+`FS_HOST_ANSWER ctx_select_company=<slug>` (a company already in the folder) or
+`FS_HOST_ANSWER ctx_select_company=different_company`. With exactly one, the run reads it without asking unless
+the request answers that question or its `ctx_basics.company_name` line names another company (case, accents,
+punctuation and a trailing legal form such as Inc or Ltd aside); then it asks (or,
+under `FS_HOST_NO_ASK`, waits). A request that names no company (a working title, the model file's name, or
+`FS_HOST_DERIVE`) reads the one context, so send the company's name, or use one artifacts folder per company.
 
 **Where the status is.** Each run writes `runs/<run id>/run_status.json` under the skills' artifacts
 folder, beside the run's record of answers:
