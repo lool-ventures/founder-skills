@@ -915,7 +915,7 @@ def _fmr_first_invocation(tmp: Path) -> tuple[Path, str, Path]:
         h.run(
             FMR_SCRIPTS / "apply_corrections.py",
             "--set",
-            "cash.monthly_net_burn=110000",
+            "cash.monthly_net_burn=96400",
             "--original",
             str(run_dir / "inputs.json"),
             "--output-dir",
@@ -1007,7 +1007,7 @@ def test_a_financial_model_review_resume_whose_host_skipped_the_run_id_asks_the_
         h.run(
             FMR_SCRIPTS / "apply_corrections.py",
             "--set",
-            "cash.monthly_net_burn=110000",
+            "cash.monthly_net_burn=96400",
             "--original",
             str(run_dir / "inputs.json"),
             "--output-dir",

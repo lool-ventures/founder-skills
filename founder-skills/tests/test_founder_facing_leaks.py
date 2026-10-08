@@ -139,6 +139,15 @@ sys.path.insert(0, str(_REPO_ROOT / "cowork-tests"))
 # safe-full 1, 1, 1, 2, 3, 4 and antihallucination 1, 1, 2, 2, 3, 4, the new recordings included. Both sit inside
 # their lane's own spread. All six are chat progress narration (plumbing verbs, two code spans); the
 # delivered files are clean.
+#
+# DEMOTED FROM A GATE TO A REPORT (2026-10-08, the owner's decision). The deck-review-smoke re-record
+# under cowork-harness 4.5.0 took the total from 21 to 23 (two chat progress lines: one naming
+# `plugin.json`, one echoing the run id), both classes already present in other cassettes. The
+# measurements above show the count varies about 5x on identical input and the class set varies too,
+# so a red here cannot tell a regression from another draw; it had been raised twice already.
+# `test_founder_facing_leak_report` now prints the per-file counts and examples and never fails on
+# the number. What still fails: the detector losing a known class (the tests below), and a scan that
+# finds no cassette to read. BASELINE stays as the last gated value, for reference only.
 BASELINE = 21
 
 
@@ -157,15 +166,20 @@ def _total_leaks() -> tuple[int, dict[str, int]]:
     return sum(per_file.values()), per_file
 
 
-def test_no_new_founder_facing_leaks() -> None:
+def test_founder_facing_leak_report(capsys: pytest.CaptureFixture[str]) -> None:
+    """A report, not a gate: the total is printed with every leak, so a reader can judge it.
+
+    It fails only when the scan read nothing, which would make the report silently empty."""
+    import leak_scan
+
     total, per_file = _total_leaks()
-    assert total <= BASELINE, (
-        f"Founder-facing plumbing leaks rose to {total} (baseline {BASELINE}). "
-        f"A skill change surfaced new internal tokens to the founder. Run "
-        f"`python3 cowork-tests/leak_scan.py cowork-tests/cassettes/ --show` to see them, "
-        f"and fix the SKILL.md narration (class-based rule at each file's ~line 100-166). "
-        f"Per-file: { {k: v for k, v in sorted(per_file.items(), key=lambda kv: -kv[1]) if v} }"
-    )
+    assert per_file, "no cassette was scanned"
+    lines = [f"founder-facing plumbing leaks: {total} across {len(per_file)} cassettes (last gated value {BASELINE})"]
+    for cass in sorted(_CASSETTES.glob("*.cassette.json")):
+        for cls, token, *_rest in leak_scan.scan_cassette(cass):
+            lines.append(f"  {cass.name}: [{cls}] {token!r}")
+    with capsys.disabled():
+        print("\n" + "\n".join(lines))
 
 
 def test_detector_finds_the_known_leak_classes() -> None:

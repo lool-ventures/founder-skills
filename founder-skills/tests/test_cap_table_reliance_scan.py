@@ -12,7 +12,8 @@ from test_e2e_cap_table import eligibility_conclusion
 
 # The Reliance Boundary scan must red on a conclusion and stay green on text that defers the question. A paid
 # run once failed on "They will tell you whether you qualify" and "I am not concluding that you qualify" -- the
-# report doing exactly what the boundary asks.
+# report doing exactly what the boundary asks. A later run failed the same way on "This review doesn't conclude
+# that you qualify", a contraction the deferral list did not cover.
 @pytest.mark.parametrize(
     "text",
     [
@@ -21,6 +22,7 @@ from test_e2e_cap_table import eligibility_conclusion
         "On these facts you are eligible for QSBS.",
         "The company qualifies for QSBS.",
         "Whether or not the board agrees, you qualify.",
+        "It doesn't matter: you qualify.",
     ],
 )
 def test_eligibility_scan_catches_a_conclusion(text: str) -> None:
@@ -34,6 +36,8 @@ def test_eligibility_scan_catches_a_conclusion(text: str) -> None:
         "I am naming the rule. I am not concluding that you qualify.",
         "Counsel can confirm if you qualify.",
         "I cannot say whether you are eligible.",
+        "This review doesn't conclude that you qualify or that you don't.",
+        "This review doesn\u2019t conclude that you qualify.",
     ],
 )
 def test_eligibility_scan_passes_text_that_defers(text: str) -> None:
