@@ -31,12 +31,25 @@ command -v cowork-harness >/dev/null || { echo "FATAL: cowork-harness not on PAT
 ver="$(cowork-harness --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
 [ -n "$ver" ] || { echo "FATAL: could not parse cowork-harness version"; exit 1; }
 echo "cowork-harness $ver"
-# FLOOR: >=4.2.0 with no upper bound. Recording is the one operation where the harness version is
+# FLOOR: >=4.5.0 with no upper bound. Recording is the one operation where the harness version is
 #   THIS HEADER WAS ONE MINOR BEHIND THE GATE when 2.3.0 was adopted (header said 2.1.0, gate required
 #   2.2) — the exact drift the next paragraph warns about, sitting unfixed in the file that warns about
 #   it. If you are here to change the floor, change all FOUR sites: this header, the numeric gate, its
 #   FATAL message, and `_RECORDING_FLOOR` in founder-skills/tests/test_cowork_harness_floors.py.
-#   * 4.2.0 is the current floor (2026-10-01), and NOT a re-record trigger: 4.2.0 resolves `latest` to
+#   * 4.5.0 is the current floor (2026-10-08), a reason-(1) raise and a RE-RECORD trigger: all three
+#     fidelity inputs moved between 4.2.0 and 4.5.0. Agent 2.1.284 -> 2.1.289 (`latest` = 2.26454.0);
+#     spawn env: auto-memory OFF at every tier (CLAUDE_CODE_DISABLE_AUTO_MEMORY=1, 4.3.0), plus
+#     CLAUDE_CODE_SIMPLE / CLAUDE_AGENT_SDK_MCP_NO_PREFIX pinned "0"; tool surface: hostloop bash runs
+#     `bash -c` (was `sh -c`) and rewrites a plugin's host path to its VM mount. Upstream forbids
+#     re-stamping across the auto-memory change, so the 4.2.0 re-stamp is NOT a precedent here: the
+#     committed cassettes read `[stale] baseline moved` (WARN in CI) until the release re-records them.
+#     Desktop 2.26454.2 stages agent 2.1.293, which 4.5.0 runs by patch tolerance, so each recording
+#     made on it carries an `agent-version:` note naming 2.1.293 vs the pinned 2.1.289 — EXPECTED for
+#     this batch (see the staleness step below). CASSETTE_VERSION is 14 but only v14 keys stamp it;
+#     ours stamp v12. 4.2.0 can no longer record at hostloop at all on such a Mac: its `doctor` does
+#     not read Desktop's nested `claude-code/<ver>/<build>/` layout. Full analysis:
+#     docs/internal/2026-10-08-cowork-harness-4.5.0-adoption-plan.md.
+#   * 4.2.0 was the floor before (2026-10-01), and NOT a re-record trigger: 4.2.0 resolves `latest` to
 #     2.16120.0, so a cassette recorded under an older CLI resolves 2.9939.4 and is stale against the 4.2.0
 #     CI pin on the day it is recorded. Its one spawn-env change (PYTHONDONTWRITEBYTECODE=1) was assessed
 #     and the committed cassettes were RE-STAMPED instead: at hostloop it reaches only the host-side hooks,
@@ -276,13 +289,13 @@ echo "cowork-harness $ver"
 # themselves are unchanged and still `::warning::`. Parse the JSON envelope instead.
 major="${ver%%.*}"; minor="$(echo "$ver" | cut -d. -f2)"
 # `-gt 4` first so a future 5.x passes — a bare minor check would FATAL on 5.0.
-# The `-ge 2` minor clause is what refuses 4.0.x/4.1.x. Its SHAPE is kept deliberately: the shape
+# The `-ge 5` minor clause is what refuses 4.0.x-4.4.x. Its SHAPE is kept deliberately: the shape
 # `[ "$major" -eq N ] && [ "$minor" -ge M ]` is what test_cowork_harness_floors.py's gate regex reads,
 # and that test asserts its own pattern matched — so collapsing this to `[ "$major" -ge 3 ]` does not
 # simplify the gate, it makes the guard that watches the gate match nothing. (At a .0 floor, as at 4.0.0,
 # the minor clause is vacuous and is kept for the same reason.)
-{ [ "$major" -gt 4 ] || { [ "$major" -eq 4 ] && [ "$minor" -ge 2 ]; }; } \
-  || { echo "FATAL: need >=4.2.0 (have $ver) — see the floor note above"; exit 1; }
+{ [ "$major" -gt 4 ] || { [ "$major" -eq 4 ] && [ "$minor" -ge 5 ]; }; } \
+  || { echo "FATAL: need >=4.5.0 (have $ver) — see the floor note above"; exit 1; }
 if [ -n "${COWORK_AGENT_BINARY:-}" ]; then
   [ -x "$COWORK_AGENT_BINARY" ] || { echo "FATAL: agent binary not executable: $COWORK_AGENT_BINARY"; exit 1; }
 fi
@@ -529,7 +542,10 @@ for t in "${targets[@]}"; do
   # because CI can't re-record; here we just did, so green is the correct expectation.)
   # 4.2.0 also prints an `agent-version:` [note] when a recording's agent differs from the one its
   # baseline pins for that tier. It never fails verify-cassettes, so it is surfaced here, loudly: it
-  # replaces the manual "agent version uniform" check. None is expected after a clean re-record.
+  # replaces the manual "agent version uniform" check. Under the 4.5.0 floor a recording made on a
+  # Desktop that stages agent 2.1.293 carries one EXPECTED note (2.1.293 vs the pinned 2.1.289, the
+  # accepted hostloop patch substitution); any other agent version, or a note on only some cassettes,
+  # is not expected.
   echo "=== staleness: $t ==="; st_tmp="$(mktemp)"; st_rc=0
   cowork-harness verify-cassettes "$t" --skip-privacy 2>"$st_tmp" || st_rc=$?
   cat "$st_tmp" >&2

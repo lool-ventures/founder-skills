@@ -13,12 +13,11 @@ prompt: |
   term sheet I received. Please review the uploaded term sheet — extract its terms and tell me what to
   watch out for.
 
-# Scripted answers are LIMITED to jurisdiction + IIA (below), which are pinned because
-# `on_unanswered: first` no longer resolves to this prompt's jurisdiction. Otherwise this
-# scenario's asserts (the exclusivity-blank flag) do NOT depend on the cap-base /
-# option-pool / pool-top-up gate choices, so on_unanswered:first (option 1 each) is the robust choice — it
-# survives label paraphrase that brittle full-label anchors don't (the gates' option-1 = Confirmed / No
-# pool / No top-up, none of which affect the anti-hallucination assert).
+# Every question this lane has been seen to ask is scripted (below), because a batch is answered
+# ATOMICALLY: one unscripted sub-question sends the whole batch, scripted rules included, to
+# `on_unanswered: first`. `first` stays as the backstop for a gate no recording has shown yet; this
+# scenario's asserts (the exclusivity-blank flag) do not depend on the cap-base / option-pool /
+# pool-top-up choices (option 1 = Confirmed / No pool / No top-up).
 
 answers:
   # Jurisdiction + IIA pinned by LABEL, not position. `b752162` reordered the Gate Catalog's
@@ -32,6 +31,17 @@ answers:
   # cannot un-benign it silently.
   - when_question: "IIA"
     choose: "No IIA grants"
+  # The engagement-mode gate is asked in ONE batch with jurisdiction. A batch is answered atomically: with
+  # this rule missing, the last recording's jurisdiction answer above was matched and then DISCARDED, and
+  # the whole batch went to `on_unanswered: first` (4.3.0+ reports it as `partly_scripted_gate`). The
+  # choice is the one `first` made.
+  - when_question: "flip-focused"
+    choose: "Standard cap-table modeling"
+  # Extracted values are confirmed before they are saved (the extraction-confirmation gate). Confirming
+  # is what this lane needs: the anti-hallucination property is that the blank exclusivity term is
+  # FLAGGED as blank, which the assert below checks in the transcript, not that the founder corrects it.
+  - when_question: "extracted values"
+    choose: "Confirmed as extracted"
 
   # The no-cap-base FORK (Gate Catalog "No-cap-base fork", SKILL.md:809). This lane exists to exercise
   # the extraction-only branch, but never scripted the gate that chooses it — so `on_unanswered: first`

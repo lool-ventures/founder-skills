@@ -17,12 +17,13 @@ prompt: |
   cap-table export of the convertible instruments. Please review it (map the Carta sheets to
   instruments) and give me the full cap-table review.
 
-# Scripted answers are LIMITED to jurisdiction + IIA (below), which are pinned because
-# `on_unanswered: first` no longer resolves to this prompt's jurisdiction. Otherwise this
-# scenario's asserts (run succeeds + instruments.json produced from the Carta
-# sheet mapping) do NOT depend on the note-conversion gate choices (denominator / maturity / qualified
-# financing), so on_unanswered:first (option 1 each) is the robust choice — it survives the label
-# paraphrase that brittle full-label anchors don't.
+# Every question this lane has been seen to ask is scripted (below), because a batch is answered
+# ATOMICALLY: one unscripted sub-question sends the whole batch, scripted rules included, to
+# `on_unanswered: first` (4.3.0+ reports it as `partly_scripted_gate`; the last recording had two such
+# batches). The note-conversion answers are the ones `first` delivered then, so the math is unchanged;
+# the asserts (run succeeds + instruments.json produced from the Carta sheet mapping) do not depend on
+# them. `first` stays as the backstop for a gate no recording has shown yet. Rules are tried in order and
+# the first match wins, so the narrow anchors come before the broad ones.
 
 answers:
   # Jurisdiction + IIA pinned by LABEL, not position. `b752162` reordered the Gate Catalog's
@@ -48,7 +49,40 @@ answers:
   - when_question: "cap-table base"
     choose: "Confirmed"
   - when_question: "accrued interest"
-    choose: "Yes"
+    # The full label: `choose` tolerates only a "(Recommended)" suffix, and "Yes" was never validated,
+    # because the batch it sat in always fell through to `first` (see the header).
+    choose: "Yes — interest converts too"
+  # The note's terms, asked by their registry questions (the note's name may be interpolated). The
+  # maturity question also contains "qualified financing", so the threshold rule anchors on its own
+  # wording instead.
+  - when_question: "kind of interest"
+    choose: "Fixed rate (a stated numeric %)"
+  - when_question: "reaches maturity"
+    choose: "Convert at cap"
+  - when_question: "Company Capitalization"
+    choose: "Fully-diluted pre-financing (common + options + as-converted SAFEs/notes, before new money)"
+  - when_question: "dollar amount triggers"
+    choose: "Same as this round's total new money"
+  # The ledger holds a SAFE and a convertible note; the note's conversion is modelled inside a priced
+  # round, which converts the SAFE too. NOT what the last recording delivered: `first` picked "Cap-implied
+  # SAFE snapshot", which leaves the note out, and the gate wiring now holds each scenario to the selection
+  # it was answered with (a selection allows only its own scenario types).
+  - when_question: "scenarios? should I model"
+    choose: ["Convertible note conversion at financing"]
+  - when_question: "top.?up"
+    choose: "No top-up planned"
+  # Model-authored questions (their wording and labels are the model's, not the catalog's), so they are
+  # answered in free text, which no label rename can refuse.
+  - when_question: "pre-money valuation"
+    answer: "$8M pre-money, $2M of new money."
+  - when_question: "round to close"
+    answer: "Model it as closing today."
+  # The pool is stated in the prompt, so this gate is pre-answerable and usually not asked.
+  - when_question: "employee option pool"
+    choose: "Yes — I'll provide authorized / issued / unallocated"
+  # The Carta export's extracted values are confirmed before they are saved.
+  - when_question: "extracted values"
+    choose: "Confirmed as extracted"
 
 assert:
   # A relative or /sessions/ file-tool path is refused at host-loop; the Step 0 proof exists so none is used.

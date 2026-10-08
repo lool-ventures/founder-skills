@@ -12,8 +12,17 @@ skills: [cap-table]                # 0.5.0: scope the staleness hash to this ski
 answers:
   - when_question: "cap-table base"
     choose: "Confirmed"
-  - when_question: "top up your option pool"
+  # `top.?up`, not the catalog's "top up your option pool": the last recording asked it as "Is there an
+  # option-pool top-up planned as part of this Series A?", batched with the cap base, so the literal
+  # anchor missed and the WHOLE batch (cap base included) went to `on_unanswered: first`
+  # (4.3.0+ `partly_scripted_gate`). Same choice `first` made; now it is the scripted one.
+  - when_question: "top.?up"
     choose: "No top-up planned"
+  # The pool is stated in the prompt, so the gate is pre-answerable and usually not asked; scripted in
+  # case it is batched with the cap base. Its "Yes" label asks for the three counts, which the prompt
+  # already gives.
+  - when_question: "employee option pool"
+    choose: "Yes — I'll provide authorized / issued / unallocated"
   - when_question: "scenarios? should I model"   # optional s: a single-scenario run phrases this in the singular (A-05: a count-dependent anchor cost a full paid recording)
     choose: ["Series A priced round"]   # exact multiSelect label — selects the priced-round scenario
 

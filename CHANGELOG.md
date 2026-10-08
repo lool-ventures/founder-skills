@@ -142,7 +142,9 @@ Contributor-facing only; nothing here changes what a founder installs or runs.
 - A reader for Desktop's question-form replies is included but ships switched off: no live reply has been
   captured to prove its shape.
 - CI type-checks the shared scripts folder.
-- <<14a>>
+- The Cowork test harness is pinned exactly at 4.5.0, and recording now needs at least 4.5.0: its agent,
+  shell and memory settings match current Desktop, so the recorded scenarios are re-recorded under it rather
+  than re-stamped. Three cap-table scenarios now script every question in their question batches.
 - The paid end-to-end lanes answer their questions up front with request lines, as an unattended host does,
   and check the run's status file. A free test runs each lane's lines through the real run start, so a renamed
   question or option fails there instead of in a paid run. The recorded Cowork scenarios gain run-status
