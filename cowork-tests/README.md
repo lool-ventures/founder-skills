@@ -22,7 +22,6 @@ Docker); replay/verify are **token/agent-free** (stock CI).
 >   2.1.293, so `doctor --tier hostloop` reports a sha256 match and recordings carry no `agent-version:`
 >   note. 2.26454.2 differs from 2.26454.0 only in the agent, so `deck-review-smoke` (recorded under
 >   4.5.0 on 2.1.293) was RE-STAMPED to 2.26454.2; the older cassettes stay under 4.5.0's ban below.
->   See docs/internal/2026-10-08-cowork-harness-4.6.0-adoption-plan.md.
 >   **4.5.0 raised it (history) as a RE-RECORD trigger (reason 1: a fidelity input moved).** Between 4.2.0 and
 >   4.5.0 the agent moved 2.1.284 -> 2.1.289 (`latest` = `desktop-2.26454.0`), the spawn env turned
 >   auto-memory OFF at every tier, and the hostloop bash tool moved to `bash -c` and now rewrites a
@@ -30,7 +29,6 @@ Docker); replay/verify are **token/agent-free** (stock CI).
 >   the committed cassettes stay `[stale] baseline moved` (WARN in CI) until the release re-records
 >   them. (Under 4.5.0, a recording on a Desktop staging agent 2.1.293 carried an expected `agent-version:` note;
 >   under 4.6.0 none is expected.)
->   See docs/internal/2026-10-08-cowork-harness-4.5.0-adoption-plan.md.
 >   **4.2.0 raised it (history) because `latest` MOVED, not as a re-record trigger.** 4.2.0 resolves `latest` to
 >   `desktop-2.16120.0`; a cassette recorded under an older CLI resolves 2.9939.4 and is stale against
 >   the 4.2.0 CI pin the day it is recorded. Its one spawn-env change (`PYTHONDONTWRITEBYTECODE=1`) was
@@ -369,14 +367,13 @@ here, and is now held by an assertion in this directory:
 | Nothing under `outputs/` is deleted — the skills' own rule; older hosts also rejected the delete there, newer ones allow it | Steps that promoted a file with `mv` failed mid-pipeline | `no_delete_in_outputs` on every scenario; the skills use `cp` |
 | **Host/VM split**: the agent loop and in-VM bash see different filesystems, and `${CLAUDE_PLUGIN_ROOT}` is host-side | Script paths resolved in the CLI and not in Cowork; sub-agent hand-off files landed where the orchestrator couldn't read them | `lint-skill`'s plugin-root linter, `analyze-skill`'s `/sessions` path scan, and the path-gate asserts |
 | Real host paths are visible to the agent | Host paths leaked into founder-visible text | the `host-path-canary` scenario (container tier) |
-| Skills narrate to a founder, not a developer | Script names, `--flags`, exit codes, `W_`/`E_` codes and step labels appeared in chat | `leak_scan.py` + `tests/test_founder_facing_leaks.py`, a **ratchet** (`BASELINE = 144`) measured against these cassettes |
+| Skills narrate to a founder, not a developer | Script names, `--flags`, exit codes, `W_`/`E_` codes and step labels appeared in chat | `leak_scan.py` + `tests/test_founder_facing_leaks.py`, a **report** over these cassettes: it prints every leak and does not fail on the count, which varies about fivefold on identical input |
 
 The economics: replay is free and runs on every PR; recording is local, paid, and needed only at the
 release cadence. What you buy with a re-record is coverage of the *current* skills — an un-refreshed
 cassette still catches regressions against its own baseline, which is why the staleness gate is WARN and
-not a hard failure. The leak ratchet is the clearest illustration: its baseline was measured against
-cassettes recorded *before* the narration rule existed, so it can only gate "no new leaks" until a
-re-record lets the number ratchet down.
+not a hard failure. The leak report shows the other limit: a re-record is one draw of how the agent
+narrates, so read the report after one as a prompt to look, not a verdict.
 
 ## Test strategy — what cassettes are for (and aren't)
 

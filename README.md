@@ -310,9 +310,9 @@ starts the skill:
 `ctx_basics.stage`). A question that allows several options takes them comma-joined. Send each skill only its
 own questions' lines. The lines are checked when the run starts, before any answer is recorded: a line the
 skill cannot use (an unknown question, an option it does not list, an option that cannot be sent ahead,
-another skill's question) refuses the run with `PRE_ANSWER_INVALID`, naming the line. Fix the line and start again under the same
-id. An answer written only
-in prose is not an answer; use the lines. A line for a question the run's mode does not ask, or one already answered, is ignored and listed in the
+another skill's question) refuses the run with `PRE_ANSWER_INVALID`, naming the line. Fix the line and
+start again under the same id. An answer written only in prose is not an answer; use the lines. A line for
+a question the run's mode does not ask, or one already answered, is ignored and listed in the
 status's `notices`. A line naming an option the skill builds from the materials that turns out not to exist
 leaves the run `waiting` with `PRE_ANSWER_UNLISTED`.
 
@@ -320,7 +320,7 @@ Every skill first settles four basics about the company (`ctx_basics.company_nam
 `.geography`, and `ctx_stage_detail` after `Series B+`) unless the artifacts folder already holds that
 company's context. A request with nobody to answer should carry them; otherwise the run waits at its first
 step. Under `FS_HOST_NO_ASK` the run cannot answer a question itself (it may only mark a name, sector or
-geography as unknown), so a value stated only in the request's prose is not used: send it as a line.
+geography as unknown, and competitive positioning may record the product's availability where the materials state it), so a value stated only in the request's prose is not used: send it as a line.
 `FS_HOST_NO_ASK` stays in force on every resume of the run, and `run_status.json` says so (`no_ask: true`).
 It governs only the skills' own questions, never the host's permission prompts: run an unattended skill in a
 permission mode that does not prompt, or a skill that researches the web stops at its first fetch until
@@ -394,8 +394,9 @@ of the same skill resumes (a waiting run of another skill is also `RUN_ID_IN_USE
 `PRE_ANSWER_INVALID` starts afresh under the same id.
 
 **What a record proves.** That an answer exists, names a listed option and belongs to this run, not that a
-person chose it. Where the skills check that a confirmation was really asked (the market-sizing approach,
-financial model review's extracted values, an IC simulation's Decline), an `FS_HOST_ANSWER` line in the
+person chose it. Where the skills check that a confirmation was really asked (the market-sizing approach and,
+where the founder stated two figures for one input, which to use; financial model review's extracted values; an IC
+simulation's Decline), an `FS_HOST_ANSWER` line in the
 request counts as the answer, and the status lists it as `PRE_ANSWERED:<question>`; market sizing's and
 financial model review's reports say the request answered it rather than the founder.
 

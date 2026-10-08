@@ -39,6 +39,7 @@ git config core.hooksPath scripts/hooks
    uv run mypy founder-skills/skills/competitive-positioning/scripts/
    uv run mypy founder-skills/skills/cap-table/scripts/
    uv run mypy founder-skills/tests/
+   uv run mypy founder-skills/scripts/
    uv run pytest                                               # tests (e2e auto-skips without auth)
    ```
 
@@ -74,7 +75,7 @@ The `cowork` lane **auto-skips** when the CLI is absent, so you are not required
 
 **Recording new cassettes is local and paid, and is not expected of contributors.** Replay uses cassettes committed to `cowork-tests/cassettes/`; re-recording needs Docker, staged Cowork agent binaries and a model token. See [`cowork-tests/README.md`](cowork-tests/README.md) if you need to understand or refresh them — otherwise a maintainer will handle it.
 
-**Privacy guard.** The pre-commit hook you enabled above also scans for confidential data. It checks file *paths* as well as content, so naming a fixture after a real company will block the commit even if the file's contents are synthetic. The commit-msg and pre-push hooks run it over your commit messages and over what you push. A figure on the same line as a phrase like "a live run" or "the founder's" is flagged; if the line is synthetic, append `privacy-guard: synthetic` to it. Real founder documents belong outside the repo entirely; synthetic fixtures go under `tests/fixtures/`.
+**Privacy guard.** The pre-commit hook you enabled above also scans for confidential data. It checks file *paths* as well as content, so naming a fixture after a real company will block the commit even if the file's contents are synthetic. The commit-msg and pre-push hooks run it over your commit messages and over what you push. A figure on the same line as a phrase like "a live run" or "the founder's" is flagged; if the line is synthetic, append `privacy-guard: synthetic` to it. Real founder documents belong outside the repo entirely; synthetic fixtures go under `tests/fixtures/`. Store a large, repetitive fixture (a recorded transcript) gzipped: Claude Desktop will not install the plugin if any file in it compresses better than 50:1, and `tests/test_plugin_payload.py` holds every shipped file of 1 KiB or more under 30:1.
 
 ## DCO Sign-Off
 
@@ -126,6 +127,7 @@ Use the existing skills (`market-sizing`, `deck-review`, `ic-sim`, `financial-mo
 - **Scripts** support `--pretty` for human-readable output and `-o <file>` to write to file
 - **Scripts** use PEP 723 inline metadata for dependencies
 - **Agent definitions** go in `founder-skills/agents/<name>.md`
+- **Questions** a skill asks once its run has started are registered in `founder-skills/scripts/_gates.py` and recorded through it (see "Gates and run status" in `founder-skills/references/skill-execution-model.md`). After changing the registry, regenerate the host contract with `python3 founder-skills/scripts/_gates.py --dump-contract`; never edit `founder-skills/data/host-contract.json` by hand
 
 ## Improving Existing Skills
 

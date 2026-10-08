@@ -1,4 +1,4 @@
-"""Regression ratchet for founder-facing "internal plumbing" leaks.
+"""Report of founder-facing "internal plumbing" leaks across the committed cassettes.
 
 "LEAK" HERE IS A WORDING DEFECT, NOT A CONFIDENTIALITY BREACH -- founder-visible
 text showing internal vocabulary (a script name, a payload key, a pipeline step)
@@ -13,11 +13,10 @@ or step/route labels — narrate in the founder's own words"). This test measure
 whether the recorded cassettes actually keep those tokens out of the founder-
 visible assistant narration, using the shared detector (`cowork-tests/leak_scan.py`).
 
-It is a RATCHET, not a pass/fail on zero: the committed cassettes were recorded
-against the pre-rule skills and carry a base rate of leaks, and a re-record is
-currently held (baseline skew). So the gate is "no NEW leaks beyond the recorded
-baseline". When cassettes are re-recorded against the fixed skills the count drops
-— lower `BASELINE` to the new total at that time (ratchet down, never up).
+It is a REPORT, not a gate: it prints every leak it finds and never fails on the count,
+because the count varies about 5x on identical input (the measurements are in the comments further down). It still
+fails if the detector loses a known class or no cassette is scanned. Read the report after a
+re-record; a rise is a prompt to look, not a verdict.
 """
 
 from __future__ import annotations

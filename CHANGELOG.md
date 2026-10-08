@@ -11,16 +11,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 **Every question the analysis skills ask is now recorded for the run.** Your company details, the stage, the
 sizing approach, the values pulled from your model, the mode and fund of an IC simulation, the competitor set,
-the cap-table terms: your answer is written to the run's own record with the option you picked. An answer you gave stands for the run: a different one later is refused rather
-than silently swapped in, unless the skill asks the question again. When you have not answered yet, the run waits at that question, and continuing in the
-same conversation picks up where it stopped.
+the cap-table terms: your answer is written to the run's own record with the option you picked. An answer
+you gave stands for the run: a different one later is refused rather than silently swapped in, unless the
+skill asks the question again. When you have not answered yet, the run waits at that question, and
+continuing in the same conversation picks up where it stopped.
 
 **Programs that run the skills unattended can answer up front and see where a run stands.** A request can
 carry `FS_HOST_` lines that answer a question before it is asked, name the run, or attach a note. Each run
 writes `run_status.json` beside its record: running, waiting (and on which question), complete or refused,
 with a stable code, every question of the skill for the run's mode, and the lines to resend when you answer
-it. The full contract
-is published in the plugin at `founder-skills/data/host-contract.json`.
+it. The full contract is published in the plugin at `founder-skills/data/host-contract.json`.
 
 **Three confirmations are now checked before the next step goes ahead.** In market sizing (the approach,
 before the top-down and bottom-up sizing), financial model review (the extracted values, before the quality
@@ -62,12 +62,16 @@ No grade, score or verdict changed for the same inputs. What moved, per skill wh
     otherwise stops `waiting` for a line on resume (the skill's scripts exit 12). It cannot silence the host's own
     permission prompts: run the skill in a permission mode that does not prompt, or a skill that researches the
     web waits at its first fetch. Under it the run cannot answer a question itself; it may only mark a
-    company's name, sector or geography as unknown. `FS_HOST_WAIT
-    <question>` stops at a question that has a default; `FS_HOST_DERIVE <question>` lets the run take the
-    company's name, sector or geography, or competitive positioning's product answers, from the materials,
-    saying where (listed as `DERIVED:<question>`; never the stage). A failure the run cannot recover from ends
+    company's name, sector or geography as unknown. Where the plugin's hooks run, the question tool is
+    refused, and the end-of-turn check skips its asks to attach files and to send the values-review page: it
+    still checks that the closing message carries the printed hand-over, and otherwise asks only when a turn
+    leaves the run `running`.
+    `FS_HOST_WAIT <question>` stops at a question that has a default; `FS_HOST_DERIVE <question>` lets the
+    run take the company's name, sector or geography, or competitive positioning's product answers, from the
+    materials, saying where (listed as `DERIVED:<question>`; never the stage). A failure the run cannot recover from ends
     it `refused` with a code naming it, never left `running`; a question asking for a file waits with
-    `INPUT_NEEDED`. Deck review lists `DECK_READ_AS_TEXT` when it read the slides as text.
+    `INPUT_NEEDED`. Deck review lists `DECK_READ_AS_TEXT` when it read the slides as text. A request line
+    the run never used is listed in `notices` as `PRE_ANSWER_IGNORED`, at the latest once the run ends.
   - **`REQUEST_DECLINED`.** A stop the request's own answer line asked for is coded `REQUEST_DECLINED`, not
     `FOUNDER_DECLINED`, and the run ends `refused` at once.
   - **`run_status.json`**, one per run, beside the run's record of answers: `status` (`running`, `waiting`,
@@ -80,7 +84,10 @@ No grade, score or verdict changed for the same inputs. What moved, per skill wh
     `final`. An HTML file not listed there is not this run's. When a later run of the same skill for the same
     company takes over the folder (by starting there, resuming, or reopening a finished run), the earlier run's
     status turns `superseded` (`superseded_by`, `superseded_at`), so it no longer promises files that were removed
-    or replaced.
+    or replaced; if that mark cannot be written in time, the later run carries a `SUPERSEDE_NOT_RECORDED`
+    notice and retries. Each report page built for a run carries its run id in a `founder-skills-run-id`
+    meta tag, and a page whose files belong to another run is refused with `RUN_ID_MISMATCH`, nothing
+    written. Financial model review's values-review page carries none.
   - **Resume.** A waiting run continues with `FS_HOST_RUN_ID=<id>`, every `FS_HOST_` line of the first
     request, and the answer to the waiting question; `resume_prompt` carries every line but the new answer. A run
     started with `COWORK_ARTIFACTS_ROOT` set can be resumed by a later, separate invocation over the same root,
@@ -96,15 +103,19 @@ No grade, score or verdict changed for the same inputs. What moved, per skill wh
   - **A delivered competitive positioning or cap-table review reopens as a new revision** when it is composed
     again or a what-if is run; any other change to a finished run's confirmed input is refused, and needs a new
     run.
+  - **The README has a section on running a skill unattended**, covering the request lines, where each
+    run's status is written, and resuming.
 - **Financial model review: going on without reviewing the extracted values is said in the report, the charts
-  page and the closing message**, and corrections applied to them say who supplied them. The corrections table
-  lists every correction made in the run.
+  page and the closing message**, and corrections applied to them say who supplied them. When the request
+  said the values were already checked, the report and charts page say they were not put to you as a
+  question. The corrections table lists every correction made in the run.
 - **Competitive positioning: the competitor-set question names each company the independent search found that
   your set lacks** ("you may be missing: …"), with one line on each.
 - **Cap table: extracted terms are confirmed before they are saved**, and a `.docx` with tracked changes is
-  asked about (upload the clean version, or proceed on the accepted terms) before its terms are saved. Several
-  questions gain a "Not sure" option. When a note's qualified-financing threshold is not stated, the scenarios
-  it affects say it was treated as met by this round.
+  asked about (upload the clean version, or proceed on the accepted terms) before its terms are saved. A
+  question asking for a value only the document or you can give now offers "Not sure". When a note's
+  qualified-financing threshold is not stated, the scenarios it affects say it was treated as met by this
+  round.
 - **Market sizing: "Your Answers" says when the request that started the analysis answered a question** and
   lists the questions not asked because you asked not to be asked.
 
@@ -147,8 +158,11 @@ No grade, score or verdict changed for the same inputs. What moved, per skill wh
   that run's checkpoints along with earlier runs'.
 - **Deck review: a deck that reports a round already closed is no longer refused at the stage check.** Earlier
   rounds are recorded apart from the round being raised.
-- **Market sizing: the check that the founder was asked which figure to use no longer counts a background
-  task's result as the founder's reply**, and reads each option of a question form on its own.
+- **Market sizing: in the check that you were asked which figure to use, a background task's result no
+  longer counts as your message.**
+- **Fewer steps are held and shown as failed.** A shell call that held a heredoc and saved the plugin's
+  printed instructions to a file no longer causes every later step whose instructions the plugin prints to
+  be held twice.
 - **Cap table: coaching checked against earlier scenarios is not inserted after a what-if** changes them.
 - **A folder holding one company's context no longer reads it for a request about another company.** When the
   request names a different company, or answers which company the run is for, the run asks (or waits, when the
@@ -169,16 +183,21 @@ Contributor-facing only; nothing here changes what a founder installs or runs.
   captured to prove its shape.
 - CI type-checks the shared scripts folder.
 - The Cowork test harness is pinned exactly at 4.6.0, and recording now needs at least 4.6.0, whose agent
-  matches the one current Desktop runs. The deck-review scenario already recorded on that agent keeps its
-  recording, now named against the matching platform version. The other recorded scenarios were made before
-  the agent, shell and memory settings changed, so they cannot be re-stamped and read as out of date until
-  they are re-recorded. Three
-  cap-table scenarios now script every question in their question batches. The cloud-lane market-sizing
-  scenario checks that its run-status files are written, since that lane's files cannot be read from outside it.
+  matches the one current Desktop runs. The deck-review smoke scenario was re-recorded on that agent, with
+  its run-status checks, and its recording was then re-stamped to the Desktop version 4.6.0 pins, without a
+  second recording. The other recorded scenarios were not refreshed: they were made before the agent, shell
+  and memory settings changed, so they read as out of date until they are re-recorded. Three cap-table
+  scenarios now script every question in their question batches. The cloud-lane market-sizing scenario
+  checks that its run-status files are written, since that lane's files cannot be read from outside it.
 - The paid end-to-end lanes answer their questions up front with request lines, as an unattended host does,
   and check the run's status file. A free test runs each lane's lines through the real run start, so a renamed
-  question or option fails there instead of in a paid run. The recorded Cowork scenarios gain run-status
-  checks, which take effect when they are re-recorded.
+  question or option fails there instead of in a paid run. The other recorded Cowork scenarios gain
+  run-status checks, which take effect when they are re-recorded.
+- A test keeps every file the plugin ships under a compression ratio Desktop's plugin download accepts.
+- The privacy guard checks a recorded session only against the founder documents among its private
+  sources, and reads Word, PowerPoint and Excel files; a generated file is checked through its source.
+- The founder-facing leak test now prints a report instead of failing on a count, which varied too much
+  between runs on the same input to tell a regression apart.
 
 ## [0.16.1] - 2026-10-06 — Files first and the closing message last, a runway check that works first time, and a request for your cash balance
 

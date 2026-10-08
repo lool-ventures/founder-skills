@@ -21,7 +21,7 @@ and internal step/route labels ("Lane N", "Context A/B", "the grid", …).
 The class-based patterns double as the SKILL.md rule's enforcement instrument:
 the rule bans exactly these classes, and this scanner measures whether the skills
 actually keep them out of the chat. Run it over the committed cassettes for a
-base rate; the ratchet test (`test_founder_facing_leaks.py`) prevents regressions.
+base rate; `test_founder_facing_leaks.py` prints that report after a re-record.
 
 Usage:
     python3 cowork-tests/leak_scan.py cowork-tests/cassettes/            # scan a dir

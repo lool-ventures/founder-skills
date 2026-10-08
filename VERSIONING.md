@@ -98,11 +98,11 @@ The "No Version Bump Needed" cases above (CI workflow changes, test-only changes
 
 ## How to Release
 
-Releases are manual. On version bump:
+Releases are manual up to the tag push; CI then creates the GitHub Release. On version bump:
 
 1. Update `version` in `founder-skills/.claude-plugin/plugin.json`
 2. Update `version` in `pyproject.toml` to match
-3. Update `CHANGELOG.md` — move items from `[Unreleased]` to the new version, add `### Highlights`
+3. Update `CHANGELOG.md` — move items from `[Unreleased]` to the new version, add `### Highlights`, and add a `### Scoring changes` section ("None." when nothing changed), which is checked at tag time
 4. Commit, push to `main` (this should be the **last** commit of the release; if more fixes follow, bump the patch version again)
 5. Tag and push:
 
@@ -112,13 +112,7 @@ git push origin v0.2.0
 ```
 
 6. **Wait for `deck-review-e2e-smoke` to go green** in the GitHub Actions UI (the tag push triggers it; its preflight fails fast if the tag doesn't match `pyproject.toml` and `plugin.json`). Only after green do consumers get a build that passed the release gate.
-7. Create the GitHub Release once the gate is green:
-
-```bash
-gh release create v0.2.0 --title "v0.2.0" --notes-file <(sed -n '/^## \[0.2.0\]/,/^## \[/p' CHANGELOG.md | sed '$d')
-```
-
-The `gh release create` command extracts the changelog entry for the release notes. `sed '$d'` drops the trailing line (the start of the next entry); it is portable, unlike GNU-only `head -n -1`, which errors on the BSD `head` shipped with macOS.
+7. The GitHub Release is created for you: the `publish-release` job in `.github/workflows/skill-quality.yml` runs on the tag push once both release gates are green (`deck-review-e2e-smoke` and `mutation-corpus`), and takes the notes and title from that version's `CHANGELOG.md` section. Do not also run `gh release create` by hand — whichever runs second fails on "release already exists". To check the notes before tagging, without publishing anything: `gh workflow run skill-quality.yml -f verify_release_notes_for=vX.Y.Z`. If the job fails and you must publish by hand, use the command in the Release Process section of CLAUDE.md.
 
 ## Tag Naming
 

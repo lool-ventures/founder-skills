@@ -250,7 +250,9 @@ CONTRACT_NOTES = (
     "`FS_HOST_NO_ASK` (only beside `FS_HOST_RUN_ID`) marks a run that asks nothing: each question takes the answer "
     "a request line gives, else its no-ask default where it has one (`DEFAULT_TAKEN:<gate>`, `resolution_basis: "
     "host_no_ask`); any other question leaves the run `waiting` and the script exits 12. The run cannot answer a "
-    "question itself under it; it may only mark a company's name, sector or geography as unknown. The flag stays "
+    "question itself under it; it may only mark a company's name, sector or geography as unknown, and record "
+    "`cp_product_availability` not applicable, with the words, where the materials state it (that record replaces "
+    "its no-ask default). The flag stays "
     "set for every later resume of the run, and `run_status.json` carries `no_ask`. A no-ask default is replaced "
     "by an answer line a later resume sends.",
     '`open` prints `"applied": "pre_answer"` for a question the request resolved, whether by an answer line or '
@@ -269,7 +271,7 @@ CONTRACT_NOTES = (
     "request's own answer line asked to stop; `FOUNDER_DECLINED` means a person chose it.",
     "A request line the run never used (its question was not reached or no longer applied, its mode does not ask "
     "it, it was already answered, or an FS_HOST_WAIT / FS_HOST_DERIVE line found nothing to act on) is listed in "
-    "`notices` as `PRE_ANSWER_IGNORED` with a `reason` once the run is `complete` or `refused`.",
+    "`notices` as `PRE_ANSWER_IGNORED` with a `reason`, at the latest once the run is `complete` or `refused`.",
     "`run_dir_shell` is null until the run is bound at the end of its first step, so a run waiting there has none. "
     "`run_status_path_host` is set only on Cowork on your computer once the outputs folder's path is known; "
     "elsewhere read `<artifacts root>/runs/<id>/run_status.json`.",
