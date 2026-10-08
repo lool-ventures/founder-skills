@@ -11,6 +11,7 @@ and dispatched the sizing at L122-123).
 
 from __future__ import annotations
 
+import gzip
 import json
 import os
 import subprocess
@@ -695,7 +696,9 @@ def test_the_form_parts_leave_out_what_the_founder_cannot_see() -> None:
     assert tf.elicit_form_parts(_block(_widget(*pills, extra="<script>x</script>"))) is None
 
 
-_HEAD_CAPTURE = Path(__file__).resolve().parent / "fixtures" / "two_figures_head_capture.json"
+# Stored gzipped: as plain JSON it compresses about 70:1, and Desktop's plugin download refuses any entry
+# above 50:1 (see test_plugin_payload.py).
+_HEAD_CAPTURE = Path(__file__).resolve().parent / "fixtures" / "two_figures_head_capture.json.gz"
 
 
 def test_the_figures_are_read_as_before_the_label_grouping(tmp_path: Path) -> None:
@@ -703,7 +706,7 @@ def test_the_figures_are_read_as_before_the_label_grouping(tmp_path: Path) -> No
     construct the parser treats specially, and every OUTPUT_PATH shape gives what the module gave before
     that change (recorded from it, in the fixture)."""
     tf = _load_tf(SCRIPTS / "two_figures_check.py")
-    capture = json.loads(_HEAD_CAPTURE.read_text(encoding="utf-8"))
+    capture = json.loads(gzip.decompress(_HEAD_CAPTURE.read_bytes()).decode("utf-8"))
     forms = capture["forms"]
     assert len(forms) > 150 and sum(f["expected"] is None for f in forms) >= 10, "control: both kinds"
     for case in forms:
