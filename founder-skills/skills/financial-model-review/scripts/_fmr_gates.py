@@ -54,7 +54,7 @@ def require_or_exit(run_dir: str, run_id: str | None, keys: tuple[str, ...]) -> 
     def fn(ctx: Any, led: dict[str, Any], st: dict[str, Any]) -> dict[str, Any]:
         for key in keys:
             if gates.require_terminal(ctx, led, key, by="financial-model-review") == "waiting":
-                return {"key": key, "needs": gates.needs_input(ctx, led, key)}
+                return {"key": key, "exit": gates.waiting_exit(ctx, led, key)}
         return {}
 
     try:
@@ -70,15 +70,11 @@ def require_or_exit(run_dir: str, run_id: str | None, keys: tuple[str, ...]) -> 
     except Exception as e:  # noqa: BLE001 -- unreachable registry, unwired predicate: exit 2, nothing written
         sys.exit(_run_ref.report_failure(e))
     if out.get("key"):
-        sys.stdout.write(
-            json.dumps({"status": "waiting", "blocked_by_gate": out["key"], "needs_input": [out["needs"]]}) + "\n"
-        )
-        print(
+        gates.print_waiting_and_exit(
+            out["exit"],
             f"Waiting: {out['key']} has no answer for this run yet; ask it, record the answer, then run this "
             "again. Nothing was written.",
-            file=sys.stderr,
         )
-        sys.exit(10)
 
 
 def refuse_without_run_id(output: str | None, run_id: str | None) -> None:
@@ -123,6 +119,15 @@ def refuse_open_gates(ledger: Any) -> None:
     open_now = rs.open_gate_ids(paths)
     if not open_now:
         return
+    if gates.no_ask(gates.load_ledger(paths)):
+        # The request said not to ask: what it carried is applied; anything still open leaves the run waiting.
+        try:
+            stop = gates.settle_open_for_no_ask(paths)
+        except Exception as e:  # noqa: BLE001 -- a request stop still pending (REQUEST_DECLINED): exit 1, no trace
+            sys.exit(_run_ref.report_failure(e))
+        if stop is None:
+            return
+        gates.print_waiting_and_exit(stop)
     key = open_now[0]
     needs = gates.transact(paths, lambda ctx, led, st: gates.needs_input(ctx, led, key))
 
@@ -145,7 +150,7 @@ def refuse_open_gates(ledger: Any) -> None:
         "compose again. Nothing was written.",
         file=sys.stderr,
     )
-    sys.exit(10)
+    sys.exit(gates.EXIT_CODES["waiting"])
 
 
 def settle_cash_followup(ledger: Any, no_cash_balance: bool) -> None:
@@ -189,7 +194,7 @@ def settle_cash_followup(ledger: Any, no_cash_balance: bool) -> None:
             + "\n"
         )
         print(f"Error: {message}. Nothing was written.", file=sys.stderr)
-        sys.exit(10)
+        sys.exit(gates.EXIT_CODES["waiting"])
 
 
 def coaching_pending(ledger: Any) -> None:

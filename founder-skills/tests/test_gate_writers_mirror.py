@@ -222,7 +222,11 @@ def test_a_ledger_refusal_leaves_the_mirror_untouched(tmp_path: Path) -> None:
     import _run_status  # type: ignore[import-not-found]
 
     _gates.record_from_writer(
-        _run_status.run_paths(str(root), run_id), "stage_confirmation", "not_sure_proceed", "gate_state.py"
+        _run_status.run_paths(str(root), run_id),
+        "stage_confirmation",
+        "not_sure_proceed",
+        "gate_state.py",
+        by_model=True,
     )
     mirror_before = (run_dir / "gate_state.json").read_bytes()
     before = h.snapshot(root, run_id)

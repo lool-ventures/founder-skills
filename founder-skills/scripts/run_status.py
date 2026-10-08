@@ -10,6 +10,7 @@
     finish        --mode M --run-id R --artifacts-root A [--output P] [--lookup-status S]
     show          --run-id R --artifacts-root A
     deliverables  --run-id R --artifacts-root A --final
+    fail          --run-id R --artifacts-root A --code C --reason TEXT
 
 `start` takes a run id from an `FS_HOST_RUN_ID=` line or mints one, validates every `FS_HOST_` line
 against the gate registry before writing anything, and creates `runs/<id>/run_status.json` and the gate
@@ -22,7 +23,11 @@ which is what tells the skill's own scripts that this run has a ledger.
 
 Exit codes: 0 ok; 1 refused (JSON on stdout, a line on stderr, nothing written beyond what the refusal
 says); 2 usage, IO, an unreachable registry or no status for the id (stdout carries `code`); 10 a gate
-is still open (`blocked_by_gate`).
+is still open (`blocked_by_gate`); 12 the same, on a request that said not to ask (FS_HOST_NO_ASK).
+
+`fail` ends a run that stopped on a failure it cannot recover from (`refused`, with a code from a closed list);
+it is named only by the rule for a request that says not to ask (FS_HOST_NO_ASK).
+It is refused (`RUN_WAITING`) while a question is open: a run waiting for an answer is never ended by it.
 """
 
 from __future__ import annotations
@@ -114,8 +119,8 @@ def _host_status_path(paths: rs.RunPaths) -> str | None:
 
 
 def _host_run_id(text: str) -> str | None:
-    for raw in text.splitlines():
-        line = raw.strip()
+    lines = _gates.request_lines(text) if _gates is not None else [raw.strip() for raw in text.splitlines()]
+    for line in lines:
         if line.startswith("FS_HOST_RUN_ID="):
             return line[len("FS_HOST_RUN_ID=") :]
     return None
@@ -129,7 +134,7 @@ def cmd_start(args: argparse.Namespace) -> int:
     host_id = _host_run_id(text)
     run_id = host_id if host_id is not None else rs.mint_run_id()
     paths = _paths(args.artifacts_root, run_id, args.pretty)
-    _rid, pre, bad = gates.parse_request(text, args.skill)
+    _rid, pre, bad, flags = gates.parse_request(text, args.skill)
     surface = rs.surface(os.getcwd(), dict(os.environ))
 
     with rs.run_lock(paths, create=True):
@@ -142,10 +147,10 @@ def cmd_start(args: argparse.Namespace) -> int:
             os.replace(paths.status, f"{paths.status}.replaced-{n}")
             status = None
         if status is None:
-            return _start_fresh(gates, args, paths, pre, bad, surface)
+            return _start_fresh(gates, args, paths, pre, bad, surface, flags)
         state, skill = status.get("status"), status.get("skill")
         if state == "waiting" and skill == args.skill:
-            return _resume(gates, args, paths, status, pre, bad)
+            return _resume(gates, args, paths, status, pre, bad, flags)
         if state in rs.FINAL_STATUSES:
             _print_only(paths, "RUN_ID_FINISHED", f"run {run_id} is already {state}; start a new run", args.pretty)
         _print_only(
@@ -163,6 +168,7 @@ def _start_fresh(
     pre: dict[str, Any],
     bad: list[dict[str, str]],
     surface: str,
+    flags: dict[str, Any],
 ) -> int:
     status = rs.blank_status(args.skill, paths)
     status["artifacts_root_shell"] = paths.artifacts_root
@@ -179,12 +185,15 @@ def _start_fresh(
             args.pretty,
         )
     ledger = gates.new_ledger(paths.run_id, args.skill, surface)
+    gates.store_request_flags(ledger, flags, "run_status.py")
     gates.store_pre_answers(ledger, pre, "run_status.py")
     gates.derive_status(gates.Ctx(paths, status, args.skill), ledger, status)
     if not rs.create_status_exclusive(paths, status):
         _print_only(paths, "RUN_ID_IN_USE", f"run {paths.run_id} was created concurrently", args.pretty)
     rs.atomic_write_json(paths.ledger, ledger)
-    _out(_start_payload(paths, status, resume=False, resume_step=None, reuse=[]), args.pretty, args.output)
+    _out(
+        _start_payload(paths, status, resume=False, resume_step=None, reuse=[], ledger=ledger), args.pretty, args.output
+    )
     return 0
 
 
@@ -195,6 +204,7 @@ def _resume(
     status: dict[str, Any],
     pre: dict[str, Any],
     bad: list[dict[str, str]],
+    flags: dict[str, Any],
 ) -> int:
     if bad:
         _print_only(
@@ -212,6 +222,7 @@ def _resume(
             resume_step = gates.GATES[gates.parse_key(waiting_on)[0]]["step"]
         except (KeyError, gates.GateRejection):
             resume_step = None
+    gates.store_request_flags(ledger, flags, "run_status.py")
     gates.store_pre_answers(ledger, pre, "run_status.py")
     rs.atomic_write_json(paths.ledger, ledger)
     resumed_from = {
@@ -222,17 +233,40 @@ def _resume(
     entry = rs.open_invocation(status, "resume", resumed_from)
     ctx = gates.Ctx(paths, status, args.skill)
     gates.derive_status(ctx, ledger, status)
-    rs.set_state(status, "running", "RUNNING")
+    # The run is `running` again only when this request carried something the open question can take: an answer
+    # line for it, or (under FS_HOST_NO_ASK) a derive line. Otherwise it stays `waiting`, so a resume that brought
+    # nothing new (a retried prompt, a line for another question, a crash after this call) can be sent again.
+    if _resume_can_progress(gates, ledger):
+        rs.set_state(status, "running", "RUNNING")
     rs.write_status(paths, status)
-    payload = _start_payload(paths, status, resume=True, resume_step=resume_step, reuse=entry["reuse"])
+    payload = _start_payload(paths, status, resume=True, resume_step=resume_step, reuse=entry["reuse"], ledger=ledger)
     _out(payload, args.pretty, args.output)
     return 0
 
 
+def _resume_can_progress(gates: Any, ledger: dict[str, Any]) -> bool:
+    open_keys = [k for k, e in (ledger.get("gates") or {}).items() if isinstance(e, dict) and e.get("state") == "open"]
+    if not open_keys:
+        return True
+    for key in open_keys:
+        if gates.pending_pre_answer(ledger, key) is not None or gates.derive_authorized(ledger, key):
+            return True
+    return False
+
+
 def _start_payload(
-    paths: rs.RunPaths, status: dict[str, Any], *, resume: bool, resume_step: str | None, reuse: list[str]
+    paths: rs.RunPaths,
+    status: dict[str, Any],
+    *,
+    resume: bool,
+    resume_step: str | None,
+    reuse: list[str],
+    ledger: dict[str, Any],
 ) -> dict[str, Any]:
+    quiet = _gates is not None and _gates.no_ask(ledger)
+    extra: dict[str, Any] = {"no_ask": 1, "rule": _gates.NO_ASK_RULE} if quiet else {"no_ask": 0}
     return {
+        **extra,
         "run_id": paths.run_id,
         "resume": 1 if resume else 0,
         "resume_step": resume_step,
@@ -438,15 +472,14 @@ def _blocked(
         gates.derive_status(ctx, ledger, status)
         rs.write_status(paths, status)
     try:
-        needs = gates.needs_input(ctx, ledger, key)
+        code, payload, line = gates.waiting_exit(ctx, ledger, key)
     except gates.Unimplemented:
-        needs = {"gate": key}
-    _exit(
-        10,
-        {"status": "waiting", "blocked_by_gate": key, "needs_input": [needs]},
-        f"Waiting: {key} has no answer yet; ask it, record the answer, then run this again",
-        pretty,
-    )
+        code, payload, line = (
+            gates.EXIT_CODES["waiting"],
+            {"status": "waiting", "blocked_by_gate": key, "needs_input": [{"gate": key}]},
+            f"Waiting: {key} has no answer yet; ask it, record the answer, then run this again",
+        )
+    _exit(code, payload, line, pretty)
 
 
 def cmd_show(args: argparse.Namespace) -> int:
@@ -478,8 +511,44 @@ def cmd_deliverables(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_fail(args: argparse.Namespace) -> int:
+    gates = _require_gates(args.pretty)
+    paths = _paths(args.artifacts_root, args.run_id, args.pretty)
+    if args.code not in rs.FAIL_CODES:
+        _unreachable("USAGE", f"--code must be one of {', '.join(rs.FAIL_CODES)}", args.pretty)
+    with rs.run_lock(paths):
+        status = _load_or_unreachable(paths, args.pretty)
+        if status.get("status") in rs.FINAL_STATUSES:
+            _print_only(paths, "RUN_ID_FINISHED", f"run {paths.run_id} is already {status.get('status')}", args.pretty)
+        try:
+            ledger = gates.load_ledger(paths)
+        except rs.RunStatusError as e:
+            _unreachable(e.code, str(e), args.pretty)
+        open_now = [
+            k for k, e in (ledger.get("gates") or {}).items() if isinstance(e, dict) and e.get("state") == "open"
+        ]
+        if open_now:
+            _exit(
+                1,
+                {
+                    "status": "rejected",
+                    "code": "RUN_WAITING",
+                    "waiting_on": open_now[0],
+                    "message": "the run is waiting for an answer, not stopped by a failure",
+                },
+                f"Refused (RUN_WAITING): {open_now[0]} is open; the run waits for an answer. Nothing was written",
+                args.pretty,
+            )
+        rs.set_state(status, "refused", args.code)
+        status["last_error_code"] = None
+        status["failure"] = {"code": args.code, "reason": args.reason[:2000], "at": rs.now_iso()}
+        rs.write_status(paths, status)
+    _out({"ok": True, "run_id": paths.run_id, "status": "refused", "code": args.code}, args.pretty)
+    return 0
+
+
 def main() -> int:
-    p = argparse.ArgumentParser(description="A run's status file: start, bind, finish, show, deliverables")
+    p = argparse.ArgumentParser(description="A run's status file: start, bind, finish, show, deliverables, fail")
     sub = p.add_subparsers(dest="command", required=True)
 
     def common(sp: argparse.ArgumentParser, *, run_id: bool = True) -> None:
@@ -520,6 +589,12 @@ def main() -> int:
     sp.add_argument("--final", action="store_true", required=True)
     sp.set_defaults(func=cmd_deliverables)
 
+    sp = sub.add_parser("fail", help="end a run that stopped on a failure it cannot recover from")
+    common(sp)
+    sp.add_argument("--code", required=True)
+    sp.add_argument("--reason", required=True)
+    sp.set_defaults(func=cmd_fail)
+
     args = p.parse_args()
     pretty = getattr(args, "pretty", False)
     try:
@@ -527,6 +602,8 @@ def main() -> int:
     except rs.RunStatusError as e:
         _unreachable(e.code, str(e), pretty)
     except Exception as e:
+        if _gates is not None and isinstance(e, _gates.Declined):
+            _exit(1, e.payload(), f"Refused ({e.code}): {e}; stop here and produce nothing", pretty)
         if _gates is not None and isinstance(e, _gates.GateRejection):
             _exit(1, e.payload(), f"Rejected ({e.code}): {e}; nothing was written", pretty)
         if _gates is not None and isinstance(e, _gates.Unimplemented):

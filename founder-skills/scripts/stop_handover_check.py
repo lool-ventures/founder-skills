@@ -357,6 +357,58 @@ def _handover_problem(payload: dict[str, Any], rows: list[dict[str, Any]] | None
     return None if ok else (why, printed)
 
 
+NO_ASK_END_MARKER = "[no-ask-end]"
+NO_ASK_END_REASON = (
+    f"{NO_ASK_END_MARKER} The run is still marked running. If it stopped on a failure, record it with "
+    "run_status.py fail and the code that names it; if it is waiting, its question's open records that; "
+    "otherwise continue."
+)
+_STATUS_PATH = re.compile(r'"status_path"\s*:\s*"([^"]+)"')
+
+
+def _load_figures() -> Any:
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "two_figures_check.py")
+    spec = importlib.util.spec_from_file_location("two_figures_check", path)
+    if spec is None or spec.loader is None:
+        raise ImportError(path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _strings_of(obj: Any) -> Any:
+    if isinstance(obj, str):
+        yield obj
+    elif isinstance(obj, dict):
+        for v in obj.values():
+            yield from _strings_of(v)
+    elif isinstance(obj, list):
+        for v in obj:
+            yield from _strings_of(v)
+
+
+def no_ask_still_running(rows: list[dict[str, Any]], start: int) -> bool:
+    """A turn of a run whose request said not to ask that ends with the run still `running`: it neither waits
+    on a question nor finished, so a host would see a stall. Read from the status file the run's `start` result
+    named in this prompt; where that path cannot be opened (the host loop runs this hook outside the session's
+    shell) nothing is asked. Once per prompt: the block's own marker stops a second."""
+    found = None
+    main_user_rows = [r for r in rows[start:] if r.get("type") == "user" and not r.get("isSidechain")]
+    for row in main_user_rows:
+        message = row.get("message") or {}
+        for piece in _strings_of(message.get("content")):
+            if NO_ASK_END_MARKER in piece:
+                return False
+            m = _STATUS_PATH.search(piece)
+            if m:
+                found = m.group(1)
+    if not found or not os.path.isfile(found):
+        return False
+    with open(found, encoding="utf-8") as fh:
+        status = json.load(fh)
+    return isinstance(status, dict) and status.get("status") == "running" and bool(status.get("no_ask"))
+
+
 def decide(payload: dict[str, Any]) -> dict[str, str] | None:
     """The block to emit, or None to let the stop through. Raises on nothing; callers fail open.
 
@@ -376,16 +428,37 @@ def decide(payload: dict[str, Any]) -> dict[str, str] | None:
     rows = read_transcript(transcript) if isinstance(transcript, str) and os.path.isfile(transcript) else None
     handover = _handover_problem(payload, rows)
     tool: str | None = None
+    quiet = False
     if rows is not None:
         try:
-            found = closing_call(rows)
+            quiet = bool(_load_figures().no_ask_in(rows, _current_prompt_start(rows), _is_real_user_prompt))
+        except Exception as e:  # noqa: BLE001 - fail open
+            _log(f"no-ask check: {type(e).__name__}: {e}")
+    if quiet and rows is not None:
+        # A request that said not to ask: no delivery or review-page ask (the host reads `deliverables`); only a
+        # run left `running` is asked to record why.
+        if handover is None:
+            try:
+                if no_ask_still_running(rows, _current_prompt_start(rows)):
+                    return {"decision": "block", "reason": NO_ASK_END_REASON}
+            except Exception as e:  # noqa: BLE001 - fail open
+                _log(f"no-ask end check: {type(e).__name__}: {e}")
+            return None
+        rows_for_delivery = None
+    else:
+        rows_for_delivery = rows
+    if rows_for_delivery is not None:
+        try:
+            found = closing_call(rows_for_delivery)
             printed = _printed(found[0], payload.get("cwd"), found[2]) if found is not None else None
-            tool = _load_delivery().missing_delivery(rows, _current_prompt_start(rows), printed)
+            tool = _load_delivery().missing_delivery(
+                rows_for_delivery, _current_prompt_start(rows_for_delivery), printed
+            )
         except Exception as e:  # noqa: BLE001 - the delivery check must never cost the hand-over check
             _log(f"delivery check: {type(e).__name__}: {e}")
     if handover is None and tool is None:
         review = None
-        if rows is not None:
+        if rows is not None and not quiet:
             try:
                 review = _load_delivery().missing_review_delivery(rows, _current_prompt_start(rows))
             except Exception as e:  # noqa: BLE001 - fail open, as the report check does

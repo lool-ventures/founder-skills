@@ -357,6 +357,10 @@ def main() -> int:
         # the artifacts on disk this run's".
         "reuse_checkpoints": same_run or kept_own,
     }
+    if action == "stop" and answer_source == "host":
+        # The request's own answer line stopped the review (only a run with a gate ledger has one). Absent, the
+        # founder did.
+        out["declined_by"] = "request"
     if gate_stage is not None:
         # Only on a run whose ledger holds the question open: the stage to emit it about.
         out["gate_stage"] = gate_stage

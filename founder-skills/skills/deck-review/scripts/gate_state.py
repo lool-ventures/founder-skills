@@ -482,6 +482,10 @@ def authorize(gate: object, stage_profile: object, run_id: str) -> Authorization
     # --- the record must be coherent, and its answer must be one the run can act on
     action = gate_action(gate)
     if action == "stop":
+        if gate.get("answer_source") == HOST:
+            return Authorization(
+                False, "the request asked to stop the review, so no report is to be produced", code="REQUEST_DECLINED"
+            )
         return Authorization(
             False, "the founder declined the review, so no report is to be produced", code="FOUNDER_DECLINED"
         )
@@ -893,6 +897,7 @@ def cmd_emit(args: argparse.Namespace) -> int:
     # THE RUN'S GATE LEDGER, when it has one, records the open question first; this file is its mirror.
     # With no `run_ref.json` nothing here runs and the emit is exactly what it always was. An answer the
     # request carried for this gate is applied here, against the options this emit offers.
+    quiet = False
     try:
         ledger = _run_ref.open_ledger(os.path.dirname(os.path.abspath(args.output)), args.run_id)
     except Exception as e:
@@ -913,7 +918,10 @@ def cmd_emit(args: argparse.Namespace) -> int:
                 applied = _apply_request_answer(gates, paths, gate_id, data, args)
                 if applied is not None and "answer_id" in applied:
                     opened["answered"].append(gate_id)
+            if gate_id not in opened["answered"] and _no_ask_auto_satisfy(gates, paths, gate_id, args):
+                opened["answered"].append(gate_id)
             led = gates.load_ledger(paths)
+            quiet = gates.no_ask(led)
             recorded = (led["gates"].get(gate_id) or {}).get("current") or {}
             by_request = gates.answered_by_request(led, gate_id)
         except ArtifactValidationError as e:
@@ -1026,8 +1034,53 @@ def cmd_emit(args: argparse.Namespace) -> int:
         "confirmed_stage": args.stage,
         "deck_claimed_stage": claimed,
     }
+    if ledger is not None and quiet:
+        # The request said not to ask: the question is recorded as open and the run waits for a request line.
+        gates, paths = ledger
+        payload = gates.transact(paths, lambda ctx, led, st: gates.no_ask_payload(ctx, led, [gate_id]))
+        receipt.pop("needs_input", None)
+        receipt.update({**payload, "blocked_by_gate": gate_id})
+        sys.stdout.write(json.dumps(receipt, separators=(",", ":")) + "\n")
+        print(f"Waiting (the request said not to ask): {gate_id}. {gates.NO_ASK_STOP}", file=sys.stderr)
+        return int(gates.NO_ASK_EXIT)
     sys.stdout.write(json.dumps(receipt, separators=(",", ":")) + "\n")
     return 0
+
+
+# The founder-context stage options that name a stage this gate can confirm, as its stage tokens.
+_CTX_STAGE_TOKENS = {"pre_seed": "pre_seed", "seed": "seed", "series_a": "series_a"}
+
+
+def _no_ask_auto_satisfy(gates: Any, paths: Any, gate_id: str, args: argparse.Namespace) -> bool:
+    """Under FS_HOST_NO_ASK, auto-satisfy the stage confirmation here, by this script, on the same checks
+    `answer --source auto_satisfied` applies: the stage came from the request's own line (never a value the run
+    took from the materials), it is the stage this emit confirms, the deck's own claim does not disagree, and
+    the profile is not at low confidence. Anything else leaves the question open and the run waiting."""
+    if gate_id != AUTO_SATISFIABLE_GATE:
+        return False
+    led = gates.load_ledger(paths)
+    if not gates.no_ask(led) or not gates.answered_by_request(led, "ctx_basics.stage"):
+        return False
+    stage = ((led.get("gates") or {}).get("ctx_basics.stage") or {}).get("current") or {}
+    if _CTX_STAGE_TOKENS.get(str(stage.get("answer_id"))) != args.stage:
+        return False
+    claimed = _deck_claimed_stage(args.output, args.run_id)
+    if claimed and claimed != args.stage:
+        return False
+    if _profile_confidence(args.output, args.run_id) == "low":
+        return False
+    option_id = _option_id(gates, gate_id, AUTO_SATISFIABLE_ANSWER)
+    gates.record_from_writer(
+        paths,
+        gate_id,
+        option_id,
+        "gate_state.py",
+        by_model=False,
+        resolution="default_taken",
+        default_reason="stage_stated_and_detected_agree",
+        bound=_stage_binding(args.stage),
+    )
+    return True
 
 
 def _stage_binding(stage: object) -> dict[str, Any]:
@@ -1247,7 +1300,7 @@ def _answer_locked(args: argparse.Namespace, gate_path: str) -> int:
     try:
         ledger = _run_ref.open_ledger(os.path.dirname(os.path.abspath(gate_path)), str(_as_run_id(gate) or ""))
         if ledger is not None:
-            _record_in_ledger(ledger, gate, args)
+            _record_in_ledger(ledger, gate, args, by_model=True)
     except Exception as e:
         return _run_ref.report_failure(e)
 
@@ -1271,7 +1324,9 @@ def _answer_locked(args: argparse.Namespace, gate_path: str) -> int:
     return 0
 
 
-def _record_in_ledger(ledger: tuple[Any, Any], gate: dict[str, Any], args: argparse.Namespace) -> None:
+def _record_in_ledger(
+    ledger: tuple[Any, Any], gate: dict[str, Any], args: argparse.Namespace, *, by_model: bool
+) -> None:
     """The answer as a gate record: the label as the registry's option id, `auto_satisfied` as the one
     default it has a rationale for."""
     gates, paths = ledger
@@ -1288,12 +1343,13 @@ def _record_in_ledger(ledger: tuple[Any, Any], gate: dict[str, Any], args: argpa
             gate_id,
             option_id,
             "gate_state.py",
+            by_model=by_model,
             resolution="default_taken",
             default_reason="stage_stated_and_detected_agree",
             bound=bound,
         )
     else:
-        gates.record_from_writer(paths, gate_id, option_id, "gate_state.py", bound=bound)
+        gates.record_from_writer(paths, gate_id, option_id, "gate_state.py", by_model=by_model, bound=bound)
 
 
 def main() -> int:

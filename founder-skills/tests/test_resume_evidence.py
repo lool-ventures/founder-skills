@@ -176,6 +176,11 @@ def test_the_counter_counts_each_resume_and_names_the_gate_it_started_at(tmp_pat
             assert answered.returncode == 0, answered.stdout + answered.stderr
 
     assert [e["n"] for e in h.status(root, run_id)["invocations"]] == [1, 2, 3]
+    # The third resume carried no answer, so the run still waits; answering the question makes it run again.
+    assert h.status(root, run_id)["status"] == "waiting"
+    answered = h.record(root, run_id, "answer", "--gate", "ctx_basics.sector", "--answer-id", "not_sure")
+    assert answered.returncode == 0, answered.stdout + answered.stderr
+    assert h.status(root, run_id)["status"] == "running"
     before = h.status_path(root, run_id).read_bytes()
     proc = h.start(root, "deck-review", f"FS_HOST_RUN_ID={run_id}\n")
     assert proc.returncode == 1 and _out(proc)["code"] == "RUN_ID_IN_USE"

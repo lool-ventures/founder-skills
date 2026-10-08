@@ -381,8 +381,10 @@ def test_a_request_decline_refuses_the_run(tmp_path: Path) -> None:
     out = _out(_emit(run_dir, "out_of_scope_choice", "growth"))
     assert out["answered"]["answer"] == "Stop review"
     st = h.status(root, RID)
-    assert (st["status"], st["code"]) == ("refused", "FOUNDER_DECLINED")
-    assert _setup(root)["gate_action"] == "stop"
+    # The request's own line stopped it: coded as the request's decision, never the founder's.
+    assert (st["status"], st["code"]) == ("refused", "REQUEST_DECLINED")
+    setup = _setup(root)
+    assert (setup["gate_action"], setup["declined_by"]) == ("stop", "request")
 
 
 def test_the_cli_cannot_write_the_host_source(tmp_path: Path) -> None:

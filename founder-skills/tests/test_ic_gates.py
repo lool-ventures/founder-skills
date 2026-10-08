@@ -430,7 +430,7 @@ def test_step_1_opens_its_questions_before_it_asks_and_asks_a_stage_it_cannot_de
     step1 = _section("### Step 1:", "#### Execution checkpoint")
     for case in (
         "**Exit 0 (found):** Open the questions (the block below) first",
-        "Open the questions (the block below) first. Expected",
+        "Open the questions (the block below) first. Do NOT mention this check",
     ):
         assert case in step1
     assert "--gate ic_mode --gate ic_fund_mode" in step1

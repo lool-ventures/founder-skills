@@ -32,7 +32,7 @@ import os
 import re
 import sys
 from collections.abc import Callable
-from typing import Any
+from typing import Any, NoReturn
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
@@ -81,7 +81,10 @@ DEFAULT_REASONS = (
     "asked_unanswered",
 )
 RESOLUTIONS = ("answered", "default_taken", "not_applicable")
-RESOLUTION_BASES = ("script", "model")
+# `host_no_ask`: a no-ask default the script took on a request carrying FS_HOST_NO_ASK; `model_no_ask`: a
+# value marked unknown by the model under it (NO_ASK_MODEL_DEFAULTS); `host_authorized`: an answer taken from
+# the materials for a key the request named in FS_HOST_DERIVE.
+RESOLUTION_BASES = ("script", "model", "host_no_ask", "model_no_ask", "host_authorized")
 GATE_STATES = ("open", "answered", "not_owed")
 # How the status lists a registered gate of the run's skill and mode that the run has not reached.
 NOT_REACHED = "not_reached"
@@ -126,6 +129,9 @@ REJECTION_CODES = (
     "FORM_REPLY_DISABLED",
     "FORM_REPLY_UNMATCHED",
     "GATE_RECORD_MISMATCH",
+    "NO_ASK_ANSWER",
+    "NO_ASK_DEFAULT",
+    "DERIVE_NOT_AUTHORIZED",
 )
 # Exit 2: the run or the registry cannot be reached.
 UNREACHABLE_CODES = (
@@ -144,7 +150,9 @@ EXIT_CODES = {
     "usage_or_unreachable": 2,
     "waiting": 10,
     "not_owed": 11,
+    "waiting_no_ask": 12,
 }
+NO_ASK_EXIT = 12
 
 GATE_ID_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 INSTANCE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.+-]{0,127}$")
@@ -156,7 +164,54 @@ REQUEST_TOKENS = {
     "answer": "FS_HOST_ANSWER <gate>[.<instance>]=<option_id>",
     "value": "FS_HOST_VALUE <gate>[.<instance>]=<option_id> | <value>",
     "note": "FS_HOST_NOTE <gate>[.<instance>]=<text>",
+    "no_ask": "FS_HOST_NO_ASK",
+    "wait": "FS_HOST_WAIT <gate>[.<instance>]",
+    "derive": "FS_HOST_DERIVE <gate>[.<instance>]",
 }
+
+# --- a request that says not to ask (FS_HOST_NO_ASK) -------------------------------------------------
+#
+# Under it no question is put. A gate the request answered takes that answer; a gate with a no-ask default
+# takes it (unless the request named the gate in FS_HOST_WAIT); a key named in FS_HOST_DERIVE may be taken
+# from the materials with its source (`derive`); every other gate leaves the run `waiting` and the script
+# exits 12. The model cannot answer: the recorder refuses `answer`, and `default` only for the triples below.
+
+NO_ASK_STOP = (
+    "The request said not to ask, so this run stops here, waiting for an answer from the request. Ask nothing "
+    "\u2014 not with the question tool, not in chat \u2014 and record no answer yourself. Say in one sentence what "
+    "the run is waiting for, without asking it, and end the turn."
+)
+NO_ASK_RULE = (
+    "The request said not to ask. Put no question to anyone in this run, with the question tool or in chat, even "
+    "where a step says to ask: where a step would ask, run its open (it exits 12) and end the turn. Only when no "
+    "question is open and a step has failed for good, record that with run_status.py fail."
+)
+NO_ASK_LEAVE = "; leave it: the run waits for a request line"
+# The defaults the model may record under FS_HOST_NO_ASK: (gate id, instance or None for any, reason, option).
+# Each marks a value unknown or takes a producer's disclosed default; none states a fact. Nothing else.
+NO_ASK_MODEL_DEFAULTS: tuple[tuple[str, str | None, str, str], ...] = (
+    ("ctx_basics", "sector", "no_signal_marked_to_confirm", "not_sure"),
+    ("ctx_basics", "geography", "no_signal_marked_to_confirm", "not_sure"),
+    ("ctx_basics", "company_name", "no_signal_marked_to_confirm", "working_title"),
+    ("ct_existing_review", None, "start_fresh_by_default", "start_fresh"),
+    ("ct_note_maturity_default", None, "producer_default_disclosed", "convert_at_cap"),
+    ("ct_note_qualified_threshold", None, "producer_default_disclosed", "same_as_round"),
+    ("ct_note_interest_type", None, "producer_default_disclosed", "fixed_numeric"),
+    ("ct_note_interest_converts", None, "producer_default_disclosed", "yes"),
+    ("ct_pool_basis", None, "producer_default_disclosed", "pre_money"),
+)
+# The keys FS_HOST_DERIVE may name, and the option a derived answer takes. Never the stage.
+DERIVE_SCOPE: dict[str, str] = {
+    "ctx_basics.company_name": "use_derived",
+    "ctx_basics.sector": "use_derived",
+    "ctx_basics.geography": "use_derived",
+    "cp_product_profile.product": "use_derived",
+    "cp_product_profile.customers": "use_derived",
+    "cp_product_profile.differentiation": "use_derived",
+}
+# Gates whose question asks for a file or a path: under FS_HOST_NO_ASK the waiting status names the input.
+INPUT_GATES = ("dr_input_request", "dr_primary_deck", "ms_upload_path", "cp_upload_path", "ct_docx_tracked_changes")
+_NO_ASK_BASES = ("host_no_ask", "host_authorized")
 
 # Sentences a host relies on, carried in the contract file.
 CONTRACT_NOTES = (
@@ -182,7 +237,33 @@ CONTRACT_NOTES = (
     "except for `GATE_UNRESOLVED`: a question that was opened and never recorded leaves the run `running` with "
     "`last_error_code: GATE_UNRESOLVED`. Like every `last_error_code` (`GATE_INVALID`, `GATE_OTHER_RUN`, "
     "`PROFILE_MISMATCH`, `COACHING_BLOCKED`), it records the last error seen and is cleared only when the run "
-    "completes.",
+    "completes. Under `FS_HOST_NO_ASK` the run is `waiting` instead, and the exit is 12.",
+    "`FS_HOST_NO_ASK` (only beside `FS_HOST_RUN_ID`) marks a run that asks nothing: each question takes the answer "
+    "a request line gives, else its no-ask default where it has one (`DEFAULT_TAKEN:<gate>`, `resolution_basis: "
+    "host_no_ask`); any other question leaves the run `waiting` and the script exits 12. The run cannot answer a "
+    "question itself under it; it may only mark a company's name, sector or geography as unknown. The flag stays "
+    "set for every later resume of the run, and `run_status.json` carries `no_ask`. A no-ask default is replaced "
+    "by an answer line a later resume sends.",
+    '`open` prints `"applied": "pre_answer"` for a question the request resolved, whether by an answer line or '
+    "by a no-ask default; `applied_by` says which and `applied_answers` gives the answer.",
+    "`FS_HOST_WAIT <gate>` (only with `FS_HOST_NO_ASK`) stops the run `waiting` at that question even though it has "
+    "a default; an answer line for the same question wins. It is refused on a question asked once per item found "
+    "at run time.",
+    "`FS_HOST_DERIVE <gate>` (only with `FS_HOST_NO_ASK`) lets the run take that answer from the materials and say "
+    "where it found it: the answer is listed as `DERIVED:<gate>` with its value and source in `gates[].current`. "
+    "It covers the company's name, sector and geography and competitive-positioning's product questions; never the "
+    "stage. The source is the run's own statement; it is not checked against the materials. A later resume's answer "
+    "line replaces a derived answer, except a company basic once the company's context has been written.",
+    "Under `FS_HOST_NO_ASK` a question asking for a file or a path waits with `INPUT_NEEDED`; a run stopped by a "
+    "failure it cannot recover from is `refused` with a code naming it (`HANDOFF_FAILED`, `PRODUCER_FAILED`, "
+    "`COACHING_FAILED`, `CONTEXT_FAILED`, `INPUT_UNREADABLE`), never left `running`. `REQUEST_DECLINED` means the "
+    "request's own answer line asked to stop; `FOUNDER_DECLINED` means a person chose it.",
+    "A request line the run never used (its question was not reached or no longer applied, its mode does not ask "
+    "it, it was already answered, or an FS_HOST_WAIT / FS_HOST_DERIVE line found nothing to act on) is listed in "
+    "`notices` as `PRE_ANSWER_IGNORED` with a `reason` once the run is `complete` or `refused`.",
+    "`run_dir_shell` is null until the run is bound at the end of its first step, so a run waiting there has none. "
+    "`run_status_path_host` is set only on Cowork on your computer once the outputs folder's path is known; "
+    "elsewhere read `<artifacts root>/runs/<id>/run_status.json`.",
     "`disclosures` lists `DEFAULT_TAKEN:<gate>` for an answer recorded as a default and `PRE_ANSWERED:<gate>` for "
     "one applied from a request line instead of being asked. `PRE_ANSWERED:out_of_scope_choice` means the request "
     "chose to review a deck outside the skill's stage scope, best-effort; the report and page tell the founder so.",
@@ -265,6 +346,25 @@ class Unimplemented(Exception):
     def __init__(self, message: str, code: str = "GATE_NOT_WIRED") -> None:
         super().__init__(message)
         self.code = code
+
+
+class Declined(Exception):
+    """The run must stop for good while a gate was opened or required: a declining answer the request carried
+    was applied (`REQUEST_DECLINED`), or, under FS_HOST_NO_ASK, an input the request supplied failed again at
+    the same step (`INPUT_UNREADABLE`). `transact` has already recorded it and written the run `refused` when
+    this reaches a caller, which must stop with exit 1: no later step may run."""
+
+    def __init__(self, key: str, code: str = "REQUEST_DECLINED") -> None:
+        reason = {
+            "REQUEST_DECLINED": "the request asked to stop",
+            "INPUT_UNREADABLE": "the input the request supplied could not be used either",
+        }.get(code, code)
+        super().__init__(f"{key}: {reason}")
+        self.key = key
+        self.code = code
+
+    def payload(self) -> dict[str, Any]:
+        return {"status": "refused", "code": self.code, "gate": self.key, "message": str(self)}
 
 
 class RegistryError(Exception):
@@ -3648,8 +3748,10 @@ def record(
     asked_evidence: str | None = None,
     writer: str = RECORDER,
     bound: dict[str, Any] | None = None,
+    derived: bool = False,
 ) -> dict[str, Any]:
-    """Validate and record one answer into `ledger` (in memory). Raises GateRejection with nothing changed
+    """Validate and record one answer into `ledger` (in memory). `derived` (only `record_derived`) takes a value
+    from the materials past the registry's default reasons. Raises GateRejection with nothing changed
     in the caller's on-disk files; the caller writes only when every segment passed. `bound` is a binding
     the writer computed itself, for a gate whose confirmed content only it can see; otherwise the
     registry's binder is used."""
@@ -3665,7 +3767,7 @@ def record(
     reopening = ctx.status.get("status") == "complete" and g["reopens_complete"]
     if not owed(ctx, g, instance):
         raise GateRejection("GATE_NOT_OWED", f"{key} does not apply to this run")
-    if resolution == "default_taken":
+    if resolution == "default_taken" and not derived:
         picked = resolve_default(gate_id, g, default_reason, answer_ids[0] if answer_ids else None)
         answer_ids = [picked] if picked else None
     options = _resolve_options(ctx, g, key, instance, answer_ids, label) if (answer_ids or label) else []
@@ -3803,16 +3905,58 @@ def reopen_for_recompose(paths: _run_status.RunPaths, step: str) -> bool:
 _LINE_RE = re.compile(r"^FS_HOST_(?P<kw>[A-Z_]+)(?P<rest>.*)$")
 
 
-def parse_request(text: str, skill: str) -> tuple[str | None, dict[str, dict[str, Any]], list[dict[str, str]]]:
-    """(host run id or None, pre-answers by gate key, invalid lines). Lines not starting `FS_HOST_` are
-    ignored. Within one request the last line for a key wins (an answer and a note separately). Checked
-    against the registry only: whether a script-built option exists is `open`'s check."""
+_COMMAND_ARGS = re.compile(r"</?command-args>")
+
+
+def request_lines(text: str) -> list[str]:
+    """The request's lines, with a slash command's `<command-args>` wrapper removed so a line first or last in
+    the arguments still stands alone."""
+    return [raw.strip() for raw in _COMMAND_ARGS.sub("\n", text.replace("\r", "")).splitlines()]
+
+
+def _flag_key(kw: str, rest: str, skill: str) -> tuple[str, str, dict[str, Any]]:
+    """The key an FS_HOST_WAIT / FS_HOST_DERIVE line names, checked against the registry."""
+    if not rest.startswith(" ") or "=" in rest:
+        raise ValueError(f"FS_HOST_{kw} takes one question id: FS_HOST_{kw} <gate>[.<instance>]")
+    key = rest.strip()
+    gate_id, instance = parse_key(key)
+    g = gate_def(gate_id)
+    if g["skill"] not in (skill, SHARED):
+        raise GateRejection("GATE_FOREIGN", f"{gate_id!r} belongs to {g['skill']}, not {skill}")
+    if kw == "DERIVE":
+        if gate_id == "ctx_basics" and instance == "stage":
+            raise ValueError("FS_HOST_DERIVE cannot name a stage; send it with FS_HOST_ANSWER")
+        if key not in DERIVE_SCOPE:
+            raise ValueError(f"FS_HOST_DERIVE does not cover {key}")
+        return key, gate_id, g
+    if g["writer"] != RECORDER:
+        raise ValueError(f"FS_HOST_WAIT cannot name {gate_id}: its own script records it")
+    inst = g["instances"]
+    if inst is not None and inst.get("static") is None:
+        raise ValueError(
+            "FS_HOST_WAIT names a question asked once per item found at run time; it is not supported there yet"
+        )
+    if instance is not None:
+        check_key(key, skill)
+    return key, gate_id, g
+
+
+def parse_request(
+    text: str, skill: str
+) -> tuple[str | None, dict[str, dict[str, Any]], list[dict[str, str]], dict[str, Any]]:
+    """(host run id or None, pre-answers by gate key, invalid lines, request flags). Lines not starting
+    `FS_HOST_` are ignored. Within one request the last line for a key wins (an answer and a note separately).
+    Checked against the registry only: whether a script-built option exists is `open`'s check.
+
+    The flags are `{"no_ask": [raw] , "wait": {key: raw}, "derive": {key: raw}}`: FS_HOST_NO_ASK, and the
+    FS_HOST_WAIT / FS_HOST_DERIVE lines, which are valid only beside FS_HOST_NO_ASK, as FS_HOST_NO_ASK is only
+    beside FS_HOST_RUN_ID."""
     run_id: str | None = None
     pre: dict[str, dict[str, Any]] = {}
     notes: dict[str, tuple[str, str]] = {}
     bad: list[dict[str, str]] = []
-    for raw in text.splitlines():
-        line = raw.strip()
+    flags: dict[str, Any] = {"no_ask": [], "wait": {}, "derive": {}}
+    for line in request_lines(text):
         if not line.startswith("FS_HOST_"):
             continue
         m = _LINE_RE.match(line)
@@ -3824,6 +3968,15 @@ def parse_request(text: str, skill: str) -> tuple[str | None, dict[str, dict[str
                 run_id = rest[1:]
                 if not _run_status.valid_run_id(run_id):
                     raise ValueError("the run id does not match the run-id grammar")
+                continue
+            if kw == "NO_ASK":
+                if rest.strip():
+                    raise ValueError("FS_HOST_NO_ASK takes nothing after it")
+                flags["no_ask"] = [line]
+                continue
+            if kw in ("WAIT", "DERIVE"):
+                key, _gid, _g = _flag_key(kw, rest, skill)
+                flags[kw.lower()][key] = line
                 continue
             if kw not in ("ANSWER", "VALUE", "NOTE") or not rest.startswith(" ") or "=" not in rest:
                 raise ValueError("not a recognised FS_HOST_ line")
@@ -3871,33 +4024,134 @@ def parse_request(text: str, skill: str) -> tuple[str | None, dict[str, dict[str
             continue
         pre[key]["note"] = note
         pre[key]["raw"].append(line)
-    return run_id, pre, bad
+    if not flags["no_ask"]:
+        for kw in ("wait", "derive"):
+            for line in flags[kw].values():
+                bad.append({"line": line, "reason": f"FS_HOST_{kw.upper()} needs FS_HOST_NO_ASK"})
+        flags["wait"], flags["derive"] = {}, {}
+    elif run_id is None:
+        bad.append(
+            {
+                "line": flags["no_ask"][0],
+                "reason": "FS_HOST_NO_ASK needs FS_HOST_RUN_ID, so the run can be found and resumed",
+            }
+        )
+    return run_id, pre, bad, flags
+
+
+def store_request_flags(ledger: dict[str, Any], flags: dict[str, Any], by: str) -> None:
+    """Record a request's FS_HOST_NO_ASK / WAIT / DERIVE lines. Sticky: once a run is no-ask it stays so, and
+    WAIT / DERIVE keys only accumulate; a later request that omits the lines changes nothing."""
+    if not flags.get("no_ask"):
+        return
+    cur = ledger.get("no_ask")
+    if not isinstance(cur, dict):
+        cur = {"raw": list(flags["no_ask"]), "wait": {}, "derive": {}, "set_at": _run_status.now_iso(), "by": by}
+        ledger["no_ask"] = cur
+    for kw in ("wait", "derive"):
+        for key, line in (flags.get(kw) or {}).items():
+            cur.setdefault(kw, {}).setdefault(key, {"raw": line, "used_at": None})
+
+
+def no_ask(ledger: dict[str, Any] | None) -> bool:
+    return isinstance(ledger, dict) and isinstance(ledger.get("no_ask"), dict)
+
+
+def waits_on(ledger: dict[str, Any], key: str) -> bool:
+    wait = (ledger.get("no_ask") or {}).get("wait") or {}
+    return key in wait or parse_key(key)[0] in wait
+
+
+def derive_authorized(ledger: dict[str, Any], key: str) -> bool:
+    return key in ((ledger.get("no_ask") or {}).get("derive") or {})
+
+
+def flag_lines(ledger: dict[str, Any]) -> list[str]:
+    """The no-ask lines a resume repeats, in the order the request may send them."""
+    na = ledger.get("no_ask")
+    if not isinstance(na, dict):
+        return []
+    lines = list(na.get("raw") or [])
+    for kw in ("wait", "derive"):
+        lines += [v["raw"] for v in (na.get(kw) or {}).values()]
+    return lines
+
+
+def _pre_event(ledger: dict[str, Any], key: str, record: dict[str, Any], event: str, by: str, **extra: Any) -> None:
+    """Log a request line's event on its gate's entry, or on the line's own record while the gate has none:
+    a gate the run never opened gets no entry (and so never a `state: null` one)."""
+    entry = (ledger.get("gates") or {}).get(key)
+    if isinstance(entry, dict):
+        _event(ledger, entry, event, by, **extra)
+        return
+    ledger["seq"] = int(ledger.get("seq") or 0) + 1
+    record.setdefault("events", []).append(
+        {"seq": ledger["seq"], "at": _run_status.now_iso(), "event": event, "by": by, **extra}
+    )
+
+
+def _last_seq(entry: dict[str, Any], event: str) -> int:
+    seqs = [int(h.get("seq") or 0) for h in entry.get("history") or [] if h.get("event") == event]
+    return max(seqs) if seqs else 0
+
+
+def replaceable_by_request(ledger: dict[str, Any], entry: dict[str, Any] | None) -> bool:
+    """A terminal answer a later request line may replace: a no-ask default the script took, or an answer
+    taken from the materials under FS_HOST_DERIVE (a company basic only until the company's context is written,
+    since that file is not rewritten in the run)."""
+    if not isinstance(entry, dict) or entry.get("state") != "answered":
+        return False
+    basis = (entry.get("current") or {}).get("resolution_basis")
+    if basis == "host_no_ask":
+        return True
+    if basis == "host_authorized":
+        return not (entry.get("gate") == "ctx_basics" and ledger.get("context_written_at"))
+    return False
 
 
 def store_pre_answers(ledger: dict[str, Any], pre: dict[str, dict[str, Any]], by: str) -> None:
     """Merge validated pre-answers: added, identical no-op, replaced while the gate is open, ignored once
-    the gate has an answer (the recorded answer stands; the line is listed in `notices`)."""
+    the gate has an answer (the recorded answer stands; the line is listed in `notices`), except an answer a
+    request may replace (`replaceable_by_request`). An identical line already applied to a gate that has since
+    been superseded and re-opened is armed again, so repeating the request's lines on a resume clears it."""
     stored = ledger.setdefault("pre_answers", {})
     for key, new in pre.items():
         old = stored.get(key)
+        entry = (ledger.get("gates") or {}).get(key)
         same = old is not None and (old["option_id"], old["value"], old["note"]) == (
             new["option_id"],
             new["value"],
             new["note"],
         )
         if same:
+            assert old is not None
+            if (
+                old.get("applied_at")
+                and isinstance(entry, dict)
+                and entry.get("state") == "open"
+                and _last_seq(entry, "superseded") > _last_seq(entry, "pre_answer_applied")
+            ):
+                old["applied_at"] = None
+                _pre_event(ledger, key, old, "pre_answer_rearmed", by, raw=new["raw"])
             continue
         if key in BARE_PRE_ANSWER_GATES:
             # No entry of its own: each instance takes it when it is opened (`pending_pre_answer`).
             stored[key] = {**new, "stored_at": _run_status.now_iso(), "applied_at": None}
             continue
-        entry = _entry(ledger, key)
-        if entry["state"] is not None and _terminal(entry):
+        terminal = isinstance(entry, dict) and entry.get("state") is not None and _terminal(entry)
+        if terminal and not replaceable_by_request(ledger, entry):
+            assert isinstance(entry, dict)
             _event(ledger, entry, "pre_answer_ignored", by, raw=new["raw"])
-            ledger.setdefault("notices", []).append({"code": "PRE_ANSWER_IGNORED", "gate": key, "lines": new["raw"]})
+            ledger.setdefault("notices", []).append(
+                {"code": "PRE_ANSWER_IGNORED", "gate": key, "lines": new["raw"], "reason": "already_answered"}
+            )
             continue
         stored[key] = {**new, "stored_at": _run_status.now_iso(), "applied_at": None}
-        _event(ledger, entry, "pre_answer_superseded" if old else "pre_answer_stored", by, raw=new["raw"])
+        if isinstance(old, dict) and old.get("events"):
+            stored[key]["events"] = list(old["events"])
+        _pre_event(
+            ledger, key, stored[key], "pre_answer_superseded" if old else "pre_answer_stored", by, raw=new["raw"]
+        )
 
 
 def pending_pre_answer(ledger: dict[str, Any], key: str) -> dict[str, Any] | None:
@@ -3933,7 +4187,7 @@ def _apply_pre_answer(ctx: Ctx, ledger: dict[str, Any], key: str, by: str) -> st
             _event(ledger, entry, "pre_answer_unlisted", by, raw=pa["raw"])
         return "unlisted"
     try:
-        record(
+        result = record(
             ctx,
             ledger,
             key,
@@ -3956,7 +4210,52 @@ def _apply_pre_answer(ctx: Ctx, ledger: dict[str, Any], key: str, by: str) -> st
             )
         return "unlisted"
     _mark_applied(ledger, entry, pa, by)
+    if result.get("declined"):
+        # The request asked to stop: recorded, and the caller must stop too (`transact` writes `refused`).
+        raise Declined(key)
     return "applied"
+
+
+def _take_no_ask_default(ctx: Ctx, ledger: dict[str, Any], key: str, by: str) -> bool:
+    """Under FS_HOST_NO_ASK, record an open recorder gate's no-ask default: only when the request carried no
+    answer line for it (one that could not apply leaves the gate waiting) and did not name it in FS_HOST_WAIT."""
+    if not no_ask(ledger):
+        return False
+    gate_id, instance, g = check_key(key, ctx.skill)
+    entry = (ledger.get("gates") or {}).get(key)
+    if g["no_ask_default"] is None or g["writer"] != RECORDER or waits_on(ledger, key):
+        return False
+    if not isinstance(entry, dict) or entry.get("state") != "open" or entry.get("current") is not None:
+        return False
+    if "pre_answer_unlisted" in entry.get("flags", []) or (ledger.get("pre_answers") or {}).get(key):
+        return False
+    if gate_id in BARE_PRE_ANSWER_GATES and (ledger.get("pre_answers") or {}).get(gate_id):
+        return False
+    try:
+        record(
+            ctx,
+            ledger,
+            key,
+            resolution="default_taken",
+            default_reason="asked_not_to_be_asked",
+            basis="host_no_ask",
+            by=by,
+        )
+    except GateRejection:
+        return False
+    _event(ledger, entry, "no_ask_default_taken", by, raw=(ledger.get("no_ask") or {}).get("raw"))
+    return True
+
+
+def _reopen_for_request(ledger: dict[str, Any], key: str, by: str) -> bool:
+    """A terminal answer a later request line replaces (`replaceable_by_request`) is superseded so the line can
+    be applied. Only while that line is pending."""
+    entry = (ledger.get("gates") or {}).get(key)
+    if not replaceable_by_request(ledger, entry) or pending_pre_answer(ledger, key) is None:
+        return False
+    assert isinstance(entry, dict)
+    _supersede(ledger, entry, by, "request_answer")
+    return True
 
 
 def _mark_applied(ledger: dict[str, Any], entry: dict[str, Any], pa: dict[str, Any], by: str) -> None:
@@ -4033,7 +4332,9 @@ def _registered_keys(ctx: Ctx, ledger: dict[str, Any]) -> list[tuple[str, str | 
     return out
 
 
-def derive_status(ctx: Ctx, ledger: dict[str, Any], status: dict[str, Any], *, declined: bool = False) -> None:
+def derive_status(
+    ctx: Ctx, ledger: dict[str, Any], status: dict[str, Any], *, declined: bool = False, refused_code: str | None = None
+) -> None:
     """Re-derive every gate-dependent status field from the ledger. Final states move only by the
     explicit reopen path, never here."""
     entries = [
@@ -4049,12 +4350,20 @@ def derive_status(ctx: Ctx, ledger: dict[str, Any], status: dict[str, Any], *, d
         d for d in (status.get("disclosures") or []) if not str(d).startswith(_DERIVED_DISCLOSURES)
     ]
     status["disclosures"] += [
-        f"DEFAULT_TAKEN:{k}" for k, e in entries if (e.get("current") or {}).get("resolution") == "default_taken"
+        f"DERIVED:{k}"
+        if (e.get("current") or {}).get("resolution_basis") == "host_authorized"
+        else f"DEFAULT_TAKEN:{k}"
+        for k, e in entries
+        if (e.get("current") or {}).get("resolution") == "default_taken"
     ]
     status["disclosures"] += [f"PRE_ANSWERED:{k}" for k, _e in entries if answered_by_request(ledger, k)]
     status["disclosures"] += [d for _k, e in entries for d in option_disclosures(e)]
     status["notices"] = list(ledger.get("notices") or [])
+    status["no_ask"] = no_ask(ledger)
     if status.get("status") in _run_status.FINAL_STATUSES:
+        return
+    if refused_code is not None:
+        _run_status.set_state(status, "refused", refused_code)
         return
     if declined:
         _run_status.set_state(status, "refused", "FOUNDER_DECLINED")
@@ -4070,6 +4379,8 @@ def derive_status(ctx: Ctx, ledger: dict[str, Any], status: dict[str, Any], *, d
             code = "PRE_ANSWER_UNLISTED"
         elif entry["current"] is not None:
             code = "GATE_INTERMEDIATE"
+        elif no_ask(ledger) and entry["gate"] in INPUT_GATES:
+            code = "INPUT_NEEDED"
         else:
             code = "GATE_WAITING"
         _run_status.set_state(status, "waiting", code, question=question)
@@ -4084,7 +4395,7 @@ def derive_status(ctx: Ctx, ledger: dict[str, Any], status: dict[str, Any], *, d
 
 
 # Every disclosure derived from the ledger, stripped before each re-derivation so none is listed twice.
-_DERIVED_DISCLOSURES = ("DEFAULT_TAKEN:", "PRE_ANSWERED:", "EXTRACTION_UNREVIEWED", "CORRECTIONS_SOURCE")
+_DERIVED_DISCLOSURES = ("DEFAULT_TAKEN:", "DERIVED:", "PRE_ANSWERED:", "EXTRACTION_UNREVIEWED", "CORRECTIONS_SOURCE")
 
 
 def option_disclosures(entry: dict[str, Any]) -> list[str]:
@@ -4105,7 +4416,7 @@ def option_disclosures(entry: dict[str, Any]) -> list[str]:
 
 
 def resume_prompt(ledger: dict[str, Any]) -> str:
-    lines = [f"Resume the {ledger['skill']} run.", f"FS_HOST_RUN_ID={ledger['run_id']}"]
+    lines = [f"Resume the {ledger['skill']} run.", f"FS_HOST_RUN_ID={ledger['run_id']}", *flag_lines(ledger)]
     for pa in (ledger.get("pre_answers") or {}).values():
         if pa.get("from"):
             continue  # an instance's copy of a bare line, which is listed once, as it was sent
@@ -4120,7 +4431,12 @@ def transact(
     paths: _run_status.RunPaths, fn: Callable[[Ctx, dict[str, Any], dict[str, Any]], Any], *, skill: str | None = None
 ) -> Any:
     """Run `fn(ctx, ledger, status)` under the run lock. Ledger first, then status; a rejection writes
-    nothing. `fn` may return (result, declined) or a plain result."""
+    nothing. `fn` may return (result, declined) or a plain result; a dict result may carry `refused_code`.
+
+    A `Declined` raised by `fn` is committed (ledger, then the status written `refused` with its code) and
+    raised again. The status is also re-derived when it reads `running` while the ledger holds an open gate
+    (a resume that carried no usable answer, then the gate opened again), so it says `waiting` and the run can
+    be resumed; an attended compose's `GATE_UNRESOLVED` is the one `running` with an open gate left as written."""
     with _run_status.run_lock(paths):
         status = _run_status.load_status(paths)
         if status is None:
@@ -4133,15 +4449,37 @@ def transact(
         # Before and after every transaction, read-only ones included: a gate the run stopped owing since the
         # last write is closed, and one it owes again is re-opened, before anything reads or records it.
         settle_owed(ctx, ledger, "script")
-        out = fn(ctx, ledger, status)
+        stopped: Declined | None = None
+        try:
+            out = fn(ctx, ledger, status)
+        except Declined as d:
+            stopped, out = d, None
         declined = bool(out.get("declined")) if isinstance(out, dict) else False
+        refused_code = stopped.code if stopped is not None else None
+        if refused_code is None and isinstance(out, dict) and out.get("refused_code"):
+            refused_code = str(out["refused_code"])
         settle_owed(ctx, ledger, "script")
-        if ledger != before_ledger:
+        changed = ledger != before_ledger
+        if changed:
             _run_status.atomic_write_json(paths.ledger, ledger)
-            derive_status(ctx, ledger, status, declined=declined)
+        if changed or refused_code is not None or _status_stale(status, ledger):
+            derive_status(ctx, ledger, status, declined=declined, refused_code=refused_code)
         if status != before_status:
             _run_status.write_status(paths, status)
+        if stopped is not None:
+            raise stopped
         return out
+
+
+def _status_stale(status: dict[str, Any], ledger: dict[str, Any]) -> bool:
+    """`running` while the ledger holds an open gate: the status no longer says what the run waits on. Only a
+    plain `running` (a resume that left it so) or a run whose request said not to ask: an attended run a script
+    left `running` with an error code (`GATE_UNRESOLVED`, `GATE_INVALID`, ...) keeps exactly what it wrote."""
+    if status.get("status") != "running":
+        return False
+    if status.get("last_error_code") is not None and not no_ask(ledger):
+        return False
+    return any(isinstance(e, dict) and e.get("state") == "open" for e in (ledger.get("gates") or {}).values())
 
 
 def _shown_option(o: dict[str, Any], ctx: Ctx) -> dict[str, Any]:
@@ -4166,6 +4504,8 @@ def needs_input(ctx: Ctx, ledger: dict[str, Any], key: str) -> dict[str, Any]:
         "form_header": FORM_HEADERS.get(ctx.skill, ""),
         "recorded_by": g["writer"],
     }
+    if no_ask(ledger):
+        out["no_ask"] = True
     if g["option_source"] is not None and any(not o["shown"] for o in opts):
         # Options the question does not show are still recordable: the founder may name one in free text.
         out["recordable"] = [{"id": o["id"], "label": render_label(o, ctx)} for o in opts]
@@ -4203,12 +4543,21 @@ def open_gates(ctx: Ctx, ledger: dict[str, Any], keys: list[str], *, by: str = R
     if not owed_keys:
         return {"opened": [], "answered": [], "not_owed": [k for k, _g, _o in checked]}
     opened, applied, unlisted, waiting, answered = [], [], [], [], []
+    applied_by: dict[str, str] = {}
+    quiet = no_ask(ledger)
     for key, g in owed_keys:
         prior = (ledger.get("gates") or {}).get(key)
         reasked = parse_key(key)[0] in REASK_SUPERSEDES and prior is not None and _terminal(prior)
         if reasked:
             assert prior is not None
+            if quiet and parse_key(key)[0] in INPUT_GATES and answered_by_request(ledger, key):
+                # Under FS_HOST_NO_ASK the same step failed again on the input the request supplied: asking
+                # again cannot help, so the run stops for good.
+                _event(ledger, prior, "input_failed_again", by)
+                raise Declined(key, code="INPUT_UNREADABLE")
             _supersede(ledger, prior, by, "asked_again")
+        elif _reopen_for_request(ledger, key, by):
+            reasked = True
         entry, new = _open_entry(ledger, key, by)
         if new or reasked:
             opened.append(key)
@@ -4219,23 +4568,43 @@ def open_gates(ctx: Ctx, ledger: dict[str, Any], keys: list[str], *, by: str = R
             got = _apply_pre_answer(ctx, ledger, key, by)
             if got == "applied":
                 applied.append(key)
+                applied_by[key] = "request"
                 continue
             if got == "unlisted":
                 unlisted.append(key)
+            elif _take_no_ask_default(ctx, ledger, key, by):
+                applied.append(key)
+                applied_by[key] = "no_ask_default"
+                continue
         if entry["state"] == "open":
             waiting.append(key)
     header = FORM_HEADERS.get(ctx.skill, "")
-    if waiting and (not ledger["form_batches"] or ledger["form_batches"][-1]["gates"] != waiting):
+    if not quiet and waiting and (not ledger["form_batches"] or ledger["form_batches"][-1]["gates"] != waiting):
         ledger["form_batches"].append({"header": header, "gates": waiting, "opened_at": _run_status.now_iso()})
     out: dict[str, Any] = {
         "opened": opened,
         "answered": answered,
         "not_owed": [k for k, _g, is_owed in checked if not is_owed],
-        "needs_input": [needs_input(ctx, ledger, k) for k in waiting],
     }
+    if quiet:
+        derivable = [k for k in waiting if derive_authorized(ledger, k)]
+        stop = [k for k in waiting if k not in derivable]
+        out.update(no_ask_payload(ctx, ledger, stop))
+        if derivable:
+            out["derive"] = [derive_instruction(ctx, k) for k in derivable]
+    else:
+        out["needs_input"] = [needs_input(ctx, ledger, k) for k in waiting]
     if applied:
         out["applied"] = "pre_answer"
         out["applied_gates"] = applied
+        out["applied_by"] = applied_by
+        out["applied_answers"] = {
+            k: {
+                "answer_id": (ledger["gates"][k].get("current") or {}).get("answer_id"),
+                "value": (ledger["gates"][k].get("current") or {}).get("value"),
+            }
+            for k in applied
+        }
     shown: dict[str, Any] = {}
     for key in [*applied, *answered]:
         gid, inst = parse_key(key)
@@ -4319,30 +4688,199 @@ def close_unowed_for_mode(ledger: dict[str, Any], mode: str, by: str) -> list[st
         _event(ledger, entry, "closed", by, reason=f"not_owed_in_mode:{mode}")
         pa = pending_pre_answer(ledger, key)
         if pa is not None:
-            ledger.setdefault("notices", []).append({"code": "PRE_ANSWER_IGNORED", "gate": key, "lines": pa["raw"]})
+            ledger.setdefault("notices", []).append(
+                {"code": "PRE_ANSWER_IGNORED", "gate": key, "lines": pa["raw"], "reason": "not_asked_in_mode"}
+            )
         closed.append(key)
     return closed
 
 
 def require_terminal(ctx: Ctx, ledger: dict[str, Any], key: str, *, by: str = RECORDER) -> str:
-    """`ok`, `waiting` (auto-opened, binding re-checked) or `not_owed`. In memory; call inside transact."""
+    """`ok`, `waiting` (auto-opened, binding re-checked) or `not_owed`. In memory; call inside transact.
+
+    Under FS_HOST_NO_ASK the gate's no-ask default is taken (again, after a changed binding superseded it) and a
+    no-ask default a pending request line replaces is superseded first. Raises `Declined` when a declining
+    request answer is applied."""
     gate_id, instance, g = check_key(key, ctx.skill)
     if not owed(ctx, g, instance):
         return "not_owed"
-    entry = _entry(ledger, key)
-    if entry["state"] is not None and _terminal(entry):
+    entry = (ledger.get("gates") or {}).get(key)
+    if isinstance(entry, dict) and entry.get("state") is not None and _terminal(entry):
         cur = entry["current"] or {}
         if g["binds"] and cur.get("binding") is not None and binding(ctx, g["binds"], instance) != cur.get("binding"):
             # A finished run's answers never move through an enforcer: RUN_FINISHED, nothing written.
             _guard_finished(ctx.status, g)
             _supersede(ledger, entry, by, "binding_changed")
+            if g["writer"] == RECORDER and (
+                _apply_pre_answer(ctx, ledger, key, by) == "applied" or _take_no_ask_default(ctx, ledger, key, by)
+            ):
+                return "ok"
             return "waiting"
-        return "ok"
+        if not _reopen_for_request(ledger, key, by):
+            return "ok"
     _guard_finished(ctx.status, g)
     _open_entry(ledger, key, by)
-    if g["writer"] == RECORDER and _apply_pre_answer(ctx, ledger, key, by) == "applied":
-        return "ok"
+    if g["writer"] == RECORDER:
+        got = _apply_pre_answer(ctx, ledger, key, by)
+        if got == "applied" or (got is None and _take_no_ask_default(ctx, ledger, key, by)):
+            return "ok"
     return "waiting"
+
+
+def check_model_default(
+    ledger: dict[str, Any], key: str, reason: str, answer_id: str | None, value: str | None
+) -> str | None:
+    """Under FS_HOST_NO_ASK, whether the model may record this default; raises NO_ASK_DEFAULT otherwise. Returns
+    the resolution basis to record (`model_no_ask`, or `host_no_ask` for the no-ask default the script would take
+    itself), or None when the run is not no-ask. The check lives here for the recorder's `default` command only:
+    a script recording its own default goes through `record` and is never subject to it."""
+    if not no_ask(ledger):
+        return None
+    gate_id, instance = parse_key(key)
+    g = gate_def(gate_id)
+    refuse = GateRejection(
+        "NO_ASK_DEFAULT",
+        "the request said not to ask; under it a default may only mark a value as unknown, and only on a question "
+        "the request did not ask to wait on" + NO_ASK_LEAVE,
+    )
+    if value is not None or waits_on(ledger, key) or g["mandatory"]:
+        raise refuse
+    if reason == "asked_not_to_be_asked":
+        pending = (ledger.get("pre_answers") or {}).get(key)
+        if g["no_ask_default"] is None or g["writer"] != RECORDER or pending:
+            raise refuse
+        if answer_id not in (None, g["no_ask_default"]):
+            raise refuse
+        return "host_no_ask"
+    if gate_id in HELD_GATES:
+        raise refuse
+    for gid, inst, why, option in NO_ASK_MODEL_DEFAULTS:
+        if gid == gate_id and inst in (None, instance) and why == reason and answer_id == option:
+            return "model_no_ask"
+    raise refuse
+
+
+def record_derived(
+    ctx: Ctx, ledger: dict[str, Any], key: str, answer_id: str, value: str, source: str, *, by: str
+) -> dict[str, Any]:
+    """Record an answer taken from the materials, for a key the request named in FS_HOST_DERIVE, with where
+    the run says it found it. Disclosed `DERIVED:<key>`; the source is the run's own statement, unchecked."""
+    if not no_ask(ledger) or not derive_authorized(ledger, key):
+        raise GateRejection("DERIVE_NOT_AUTHORIZED", f"the request did not name {key} in FS_HOST_DERIVE")
+    if DERIVE_SCOPE.get(key) != answer_id:
+        raise GateRejection("DERIVE_NOT_AUTHORIZED", f"{key} may be derived only as {DERIVE_SCOPE.get(key)!r}")
+    if not (value or "").strip() or not (source or "").strip():
+        raise GateRejection("VALUE_REQUIRED", f"{key}: a derived answer needs --value and --source")
+    check_note(source)
+    out = record(
+        ctx,
+        ledger,
+        key,
+        answer_ids=[answer_id],
+        value=value,
+        resolution="default_taken",
+        default_reason="derived_from_materials",
+        basis="host_authorized",
+        by=by,
+        derived=True,
+    )
+    entry = ledger["gates"][key]
+    entry["current"]["source"] = source
+    ledger["no_ask"]["derive"][key]["used_at"] = entry["current"]["answered_at"]
+    return out
+
+
+def print_waiting_and_exit(exit_: tuple[int, dict[str, Any], str], attended_line: str | None = None) -> NoReturn:
+    """Print a `waiting_exit` result and exit with its code. `attended_line` replaces the stderr line of an
+    attended (exit 10) stop, so each script keeps its own wording there; the no-ask line is never replaced."""
+    code, payload, line = exit_
+    if code == EXIT_CODES["waiting"] and attended_line is not None:
+        line = attended_line
+    sys.stdout.write(json.dumps(payload) + "\n")
+    print(line, file=sys.stderr)
+    sys.exit(code)
+
+
+def settle_open_for_no_ask(paths: _run_status.RunPaths) -> tuple[int, dict[str, Any], str] | None:
+    """Compose, under FS_HOST_NO_ASK, with questions still open: apply what the request carried for each (its
+    answer line, else its no-ask default), and return the stop (`waiting_exit`) for the first still open, or
+    None when nothing is left open. The run then reads `waiting` (or carries on), never `running` with an
+    unsettled question: a resume carrying the answer can always clear it."""
+
+    def fn(ctx: Ctx, ledger: dict[str, Any], status: dict[str, Any]) -> tuple[int, dict[str, Any], str] | None:
+        for key, entry in sorted(
+            (ledger.get("gates") or {}).items(), key=lambda ke: (ke[1].get("opened_seq") or 0, ke[0])
+        ):
+            if not isinstance(entry, dict) or entry.get("state") != "open" or entry.get("current") is not None:
+                continue
+            if (
+                GATES[entry["gate"]]["writer"] == RECORDER
+                and _apply_pre_answer(ctx, ledger, key, "compose_report.py") is None
+            ):
+                _take_no_ask_default(ctx, ledger, key, "compose_report.py")
+        still = [k for k, e in (ledger.get("gates") or {}).items() if isinstance(e, dict) and e.get("state") == "open"]
+        return waiting_exit(ctx, ledger, still[0]) if still else None
+
+    result: tuple[int, dict[str, Any], str] | None = transact(paths, fn)
+    return result
+
+
+def mark_context_written(paths: _run_status.RunPaths) -> None:
+    """The company's context file was written for this run (`founder_context.py init`): from now on a company
+    basic the run took from the materials is not replaced by a later request line (the file would disagree)."""
+
+    def fn(ctx: Ctx, ledger: dict[str, Any], status: dict[str, Any]) -> None:
+        if no_ask(ledger):
+            ledger.setdefault("context_written_at", _run_status.now_iso())
+
+    transact(paths, fn)
+
+
+def no_ask_payload(ctx: Ctx, ledger: dict[str, Any], keys: list[str]) -> dict[str, Any]:
+    """What a script prints in place of `needs_input` when the request said not to ask: the questions the run
+    waits on (for the record, never to be put) and the stop. Empty when nothing waits."""
+    if not keys:
+        return {}
+    waiting = []
+    for k in keys:
+        gate_id, instance = parse_key(k)
+        g = GATES[gate_id]
+        try:
+            opts = options_for(g, instance, ctx)
+        except Unimplemented:
+            opts = fixed_options(g, instance, ctx.skill)
+        waiting.append({"gate": k, "question": render_question(g, instance, ctx), "options": [o["id"] for o in opts]})
+    return {"status": "waiting", "no_ask": True, "waiting": waiting, "stop": NO_ASK_STOP}
+
+
+def derive_instruction(ctx: Ctx, key: str) -> dict[str, Any]:
+    """How to record a key the request named in FS_HOST_DERIVE: from the materials, saying where."""
+    locator = f'--run-dir "{ctx.run_dir}"' if ctx.run_dir else f'--artifacts-root "{ctx.paths.artifacts_root}"'
+    gate_id, instance = parse_key(key)
+    return {
+        "gate": key,
+        "question": render_question(GATES[gate_id], instance, ctx),
+        "record_with": (
+            f'python3 "{_run_status.shared_scripts_dir()}/{RECORDER}" derive --run-id {ctx.paths.run_id} {locator} '
+            f'--gate {key} --answer-id {DERIVE_SCOPE[key]} --value "<the value>" '
+            '--source "<where the materials state it>"'
+        ),
+    }
+
+
+def waiting_exit(ctx: Ctx, ledger: dict[str, Any], key: str) -> tuple[int, dict[str, Any], str]:
+    """(exit code, stdout JSON, stderr line) for a step that cannot run until `key` is answered: 10 with
+    `needs_input`, or under FS_HOST_NO_ASK 12 with the stop and nothing to ask from. Every script that stops
+    on an unanswered gate builds its exit here."""
+    if no_ask(ledger):
+        payload = {**no_ask_payload(ctx, ledger, [key]), "blocked_by_gate": key}
+        return NO_ASK_EXIT, payload, f"Waiting (the request said not to ask): {key}. {NO_ASK_STOP}"
+    return (
+        EXIT_CODES["waiting"],
+        {"status": "waiting", "blocked_by_gate": key, "needs_input": [needs_input(ctx, ledger, key)]},
+        f"Waiting: {key} has no answer for this run yet; ask it, record the answer, then run this again. "
+        "Nothing was written.",
+    )
 
 
 # --- the dedicated writers ---------------------------------------------------------------------------
@@ -4373,12 +4911,24 @@ def record_from_writer(
     option_id: str,
     writer: str,
     *,
+    by_model: bool,
     resolution: str = "answered",
     default_reason: str | None = None,
     value: str | None = None,
     bound: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """`by_model` (required, no default): whether the answer comes from the model's own command line (refused
+    under FS_HOST_NO_ASK, NO_ASK_ANSWER) or from the writer's own logic (its no-ask default, an auto-satisfy it
+    checked itself)."""
+
     def fn(ctx: Ctx, ledger: dict[str, Any], status: dict[str, Any]) -> dict[str, Any]:
+        if by_model and no_ask(ledger):
+            raise GateRejection(
+                "NO_ASK_ANSWER",
+                "the request said not to ask; an answer can only come from a request line "
+                "(FS_HOST_ANSWER / FS_HOST_VALUE)" + NO_ASK_LEAVE,
+            )
+        basis = "host_no_ask" if not by_model and no_ask(ledger) and default_reason == "asked_not_to_be_asked" else None
         return record(
             ctx,
             ledger,
@@ -4387,6 +4937,7 @@ def record_from_writer(
             value=value,
             resolution=resolution,
             default_reason=default_reason,
+            basis=basis,
             by=writer,
             writer=writer,
             bound=bound,
@@ -4442,6 +4993,8 @@ def apply_writer_pre_answer(
             bound=bound,
         )
         _mark_applied(ledger, entry, pa, writer)
+        if out.get("declined"):
+            return {**out, "refused_code": "REQUEST_DECLINED"}
         return out
 
     result: dict[str, Any] | None = transact(paths, fn)
@@ -4592,6 +5145,8 @@ CLI_CODES = {
     # cap-table's producers: a call into a bound review dir with no (or an empty) --run-id.
     "ct_producers": ["RUN_ID_REQUIRED"],
     "usage": ["USAGE"],
+    # `run_status.py fail` on a run still waiting for an answer.
+    "fail": ["RUN_WAITING"],
     "notices": ["PRE_ANSWER_IGNORED", "PRE_ANSWER_INVALID", "PRE_ANSWER_NOT_APPLIED"],
 }
 

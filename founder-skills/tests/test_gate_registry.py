@@ -506,11 +506,11 @@ def test_the_code_scan_sees_either_quote(tmp_path: Path) -> None:
 
 
 def test_every_stage_gate_refusal_code_is_seen_by_the_scan() -> None:
-    """Each of `authorize()`'s fifteen refusals carries a code the scan reads, so a new one cannot ship
+    """Each of `authorize()`'s sixteen refusals carries a code the scan reads, so a new one cannot ship
     outside the contract."""
     text = (SKILLS / "deck-review" / "scripts" / "gate_state.py").read_text(encoding="utf-8")
     sites = re.findall(r"\bcode=\"([A-Z_]+)\"", text)
-    assert len(sites) == 15, sites
+    assert len(sites) == 16, sites
     assert set(sites) <= emitted_codes(text)
 
 

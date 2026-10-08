@@ -57,6 +57,17 @@ No grade, score or verdict changed for the same inputs. What moved, per skill wh
     checked when the run starts: a line the skill cannot use refuses the run with `PRE_ANSWER_INVALID`, naming
     the line, before any answer is recorded. Fix the line and start again; the same run id can be reused. A
     value written only in prose is not an answer.
+  - **A request that says not to ask.** `FS_HOST_NO_ASK` (with `FS_HOST_RUN_ID`) is for a host that runs a
+    skill with nobody to answer: the run asks nothing, takes each question's default where one exists, and
+    otherwise stops `waiting` for a line on resume (the skill's scripts exit 12). Under it the run cannot answer
+    a question itself; it may only mark a company's name, sector or geography as unknown. `FS_HOST_WAIT
+    <question>` stops at a question that has a default; `FS_HOST_DERIVE <question>` lets the run take the
+    company's name, sector or geography, or competitive positioning's product answers, from the materials,
+    saying where (listed as `DERIVED:<question>`; never the stage). A failure the run cannot recover from ends
+    it `refused` with a code naming it, never left `running`; a question asking for a file waits with
+    `INPUT_NEEDED`. Deck review lists `DECK_READ_AS_TEXT` when it read the slides as text.
+  - **`REQUEST_DECLINED`.** A stop the request's own answer line asked for is coded `REQUEST_DECLINED`, not
+    `FOUNDER_DECLINED`, and the run ends `refused` at once.
   - **`run_status.json`**, one per run, beside the run's record of answers: `status` (`running`, `waiting`,
     `complete`, `refused`), a stable `code`, `waiting_on`, every question of the skill for the run's mode with
     its options and state, `resume_prompt`, `disclosures` (answers taken as defaults or from the request, unreviewed values),

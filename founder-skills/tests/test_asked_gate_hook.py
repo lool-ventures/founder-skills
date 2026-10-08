@@ -349,6 +349,20 @@ def test_a_host_line_in_the_founders_message_lets_it_through(
 
 
 @pytest.mark.parametrize(("context", "agent", "gate"), ROW_CASES, ids=_IDS)
+def test_a_request_that_said_not_to_ask_is_never_held_and_leaves_no_record(
+    tmp_path: Path, context: str, agent: str, gate: str
+) -> None:
+    """Under `FS_HOST_NO_ASK` the gate's default is taken by script and nothing may be asked: no hold (its
+    reason would tell the model to ask), and no evidence line, since nobody was asked."""
+    run, _paths = _bound(tmp_path, agent)
+    rows = [_user("Please run this for Acme.\nFS_HOST_RUN_ID=r-acme-1\nFS_HOST_NO_ASK\n"), _skill(agent)]
+    assert _decide(tmp_path, rows, context, agent) is None
+    assert _lines(run) == []
+    # The same request without the line is held.
+    assert _decide(tmp_path, [_user("Please run this for Acme."), _skill(agent)], context, agent) is not None
+
+
+@pytest.mark.parametrize(("context", "agent", "gate"), ROW_CASES, ids=_IDS)
 def test_a_host_line_anywhere_else_does_not_count(tmp_path: Path, context: str, agent: str, gate: str) -> None:
     line = f"FS_HOST_ANSWER {gate}=x"
     use = {"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": f"echo '{line}'"}}

@@ -198,11 +198,46 @@ def _waiting_run(tmp: Path, lines: str = "") -> tuple[Path, str]:
 
 def test_a_waiting_run_of_the_same_skill_resumes(tmp_path: Path) -> None:
     root, run_id = _waiting_run(tmp_path)
-    proc = h.start(root, "market-sizing", f"FS_HOST_RUN_ID={run_id}\n")
+    proc = h.start(
+        root, "market-sizing", f"FS_HOST_RUN_ID={run_id}\nFS_HOST_VALUE ctx_basics.sector=different | fintech\n"
+    )
     assert proc.returncode == 0, proc.stderr
     out = _out(proc)
     assert out["resume"] == 1 and out["resume_step"] == "1"
     assert h.status(root, run_id)["status"] == "running"
+
+
+def test_a_resume_that_brings_no_answer_stays_waiting_and_can_be_sent_again(tmp_path: Path) -> None:
+    """A retried resume, a line for another question or a crash after `start` must never lock the id: the run
+    stays `waiting`, opening its question again keeps it so, and the same resume is accepted again."""
+    root, run_id = _waiting_run(tmp_path)
+    for n in (1, 2):
+        proc = h.start(root, "market-sizing", f"FS_HOST_RUN_ID={run_id}\n")
+        assert proc.returncode == 0 and _out(proc)["resume"] == 1, proc.stdout + proc.stderr
+        assert h.status(root, run_id)["status"] == "waiting", n
+        opened = h.record(root, run_id, "open", "--gate", "ctx_basics.sector")
+        assert opened.returncode == 0, opened.stderr
+        assert h.status(root, run_id)["status"] == "waiting", n
+    proc = h.start(
+        root, "market-sizing", f"FS_HOST_RUN_ID={run_id}\nFS_HOST_VALUE ctx_basics.sector=different | fintech\n"
+    )
+    assert proc.returncode == 0 and h.status(root, run_id)["status"] == "running"
+    opened = h.record(root, run_id, "open", "--gate", "ctx_basics.sector")
+    assert opened.returncode == 0 and _out(opened)["applied"] == "pre_answer"
+
+
+def test_a_running_status_with_an_open_question_is_derived_waiting_on_the_next_transaction(tmp_path: Path) -> None:
+    """The status a crash or an older resume left `running` beside an open question is corrected by the next
+    script that reads the ledger, so the run can be resumed."""
+    root, run_id = _waiting_run(tmp_path)
+    _set_state(root, run_id, "running", "RUNNING")
+    before = h.ledger_path(root, run_id).read_bytes()
+    # The same questions as before: the ledger does not change, so only the status re-derivation can fix it.
+    opened = h.record(root, run_id, "open", "--gate", "ctx_basics.sector", "--gate", "ctx_basics.geography")
+    assert h.ledger_path(root, run_id).read_bytes() == before
+    assert opened.returncode == 0, opened.stderr
+    assert h.status(root, run_id)["status"] == "waiting"
+    assert h.start(root, "market-sizing", f"FS_HOST_RUN_ID={run_id}\n").returncode == 0
 
 
 def test_a_bad_line_on_resume_is_print_only(tmp_path: Path) -> None:
@@ -230,7 +265,10 @@ def test_resume_merges_pre_answers_per_gate(tmp_path: Path) -> None:
     assert led["pre_answers"]["ctx_basics.stage"]["option_id"] == "series_a"
     assert led["pre_answers"]["ctx_basics.sector"]["value"] == "fintech"
     assert led["pre_answers"]["ctx_basics.geography"]["value"] == "EU"
-    events = [e["event"] for e in led["gates"]["ctx_basics.stage"]["history"]]
+    # The stage question was never opened: its lines' events are on the line's own record, and no gate entry
+    # (never a `state: null` one) exists for it.
+    assert "ctx_basics.stage" not in led["gates"]
+    events = [e["event"] for e in led["pre_answers"]["ctx_basics.stage"]["events"]]
     assert events == ["pre_answer_stored", "pre_answer_superseded"]
     notices = h.status(root, run_id)["notices"]
     assert [n["gate"] for n in notices] == ["ctx_basics.sector"]
@@ -267,7 +305,9 @@ def test_two_starts_on_a_fresh_id_create_it_once(tmp_path: Path) -> None:
 
 def test_two_starts_on_a_waiting_id_resume_it_once(tmp_path: Path) -> None:
     root, run_id = _waiting_run(tmp_path)
-    results = _concurrent_starts(root, f"FS_HOST_RUN_ID={run_id}\n", "market-sizing")
+    results = _concurrent_starts(
+        root, f"FS_HOST_RUN_ID={run_id}\nFS_HOST_VALUE ctx_basics.sector=different | fintech\n", "market-sizing"
+    )
     assert sorted(r.returncode for r in results) == [0, 1]
     assert _out(next(r for r in results if r.returncode == 0))["resume"] == 1
     assert _out(next(r for r in results if r.returncode == 1))["code"] == "RUN_ID_IN_USE"

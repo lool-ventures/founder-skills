@@ -117,6 +117,10 @@ def report_failure(exc: BaseException) -> int:
     else:
         raise exc
     sys.stdout.write(json.dumps(body) + "\n")
+    if type(exc).__name__ == "Declined":
+        # The run was stopped for good (recorded `refused`): no later step may run.
+        print(f"Refused ({body['code']}): {exc}; stop here and produce nothing", file=sys.stderr)
+        return code
     print(f"Error ({body['code']}): {exc}; nothing was written", file=sys.stderr)
     return code
 

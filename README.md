@@ -302,6 +302,9 @@ starts the skill:
 | `FS_HOST_ANSWER <question>=<option>` | Answers a question before it is asked. |
 | `FS_HOST_VALUE <question>=<option> \| <value>` | The same, for an option that takes a value (a figure, a name, a path). |
 | `FS_HOST_NOTE <question>=<text>` | A note for a question this request also answers. |
+| `FS_HOST_NO_ASK` | With `FS_HOST_RUN_ID`: the run asks nothing. A question with a default takes it (listed as `DEFAULT_TAKEN:<question>`); any other leaves the run `waiting` for an answer you send on resume. |
+| `FS_HOST_WAIT <question>` | With `FS_HOST_NO_ASK`: stop `waiting` at this question even though it has a default, so someone can answer it later. |
+| `FS_HOST_DERIVE <question>` | With `FS_HOST_NO_ASK`: the run may take this answer from the materials, recording where it says it found it (`DERIVED:<question>`). Company name, sector, geography and competitive positioning's product questions only; never the stage. |
 
 `<question>` is a question id, or `<id>.<instance>` for a question asked once per item (for example
 `ctx_basics.stage`). A question that allows several options takes them comma-joined. Send each skill only its
@@ -312,6 +315,13 @@ id. An answer written only
 in prose is not an answer; use the lines. A line for a question the run's mode does not ask, or one already answered, is ignored and listed in the
 status's `notices`. A line naming an option the skill builds from the materials that turns out not to exist
 leaves the run `waiting` with `PRE_ANSWER_UNLISTED`.
+
+Every skill first settles four basics about the company (`ctx_basics.company_name`, `.stage`, `.sector`,
+`.geography`, and `ctx_stage_detail` after `Series B+`) unless the artifacts folder already holds that
+company's context. A request with nobody to answer should carry them; otherwise the run waits at its first
+step. Under `FS_HOST_NO_ASK` the run cannot answer a question itself (it may only mark a name, sector or
+geography as unknown), so a value stated only in the request's prose is not used: send it as a line.
+`FS_HOST_NO_ASK` stays in force on every resume of the run, and `run_status.json` says so (`no_ask: true`).
 
 **Where the status is.** Each run writes `runs/<run id>/run_status.json` under the skills' artifacts
 folder, beside the run's record of answers:
@@ -327,15 +337,17 @@ folder, beside the run's record of answers:
 | status | codes |
 |---|---|
 | `running` | `RUNNING` (`last_error_code` names the last error seen, if any) |
-| `waiting` | `GATE_WAITING`, `GATE_UNANSWERED`, `GATE_INTERMEDIATE`, `OUT_OF_SCOPE_UNANSWERED`, `AUTO_SATISFY_NOT_ALLOWED`, `PRE_ANSWER_UNLISTED` |
+| `waiting` | `GATE_WAITING`, `GATE_UNANSWERED`, `GATE_INTERMEDIATE`, `OUT_OF_SCOPE_UNANSWERED`, `AUTO_SATISFY_NOT_ALLOWED`, `PRE_ANSWER_UNLISTED`, `INPUT_NEEDED` (under `FS_HOST_NO_ASK`, a question asking for a file or a path) |
 | `complete` | `COMPLETE` |
-| `refused` | `FOUNDER_DECLINED`, `INPUT_MISSING`, `PRE_ANSWER_INVALID` |
+| `refused` | `FOUNDER_DECLINED`, `REQUEST_DECLINED` (the request's own line asked to stop), `INPUT_MISSING`, `PRE_ANSWER_INVALID`; under `FS_HOST_NO_ASK` also `HANDOFF_FAILED`, `PRODUCER_FAILED`, `COACHING_FAILED`, `CONTEXT_FAILED`, `INPUT_UNREADABLE` (a failure the run could not recover from) |
 
 A `waiting` run names the question in `waiting_on`; `gates` lists every question of the skill for the
 run's mode (complete once the run is bound) with its options, its state (`open`, `answered`,
 `not_owed`, `not_reached`) and the recorded answer.
 `disclosures` lists answers taken as defaults (`DEFAULT_TAKEN:<question>`) or from the request
-(`PRE_ANSWERED:<question>`), and anything the report discloses about them.
+(`PRE_ANSWERED:<question>`) or the materials (`DERIVED:<question>`), and anything the report discloses about
+them; deck review adds `DECK_READ_AS_TEXT` when it read the slides as text (its four design criteria are not
+scored). A request line the run never used is listed in `notices` with a `reason` once the run is final.
 
 Three refusals are printed and never written to a status file, because the id they name belongs to
 another run or to none: `RUN_ID_IN_USE`, `RUN_ID_FINISHED`, `RUN_ID_MALFORMED`. `RUN_ID_IN_USE` and
@@ -347,7 +359,8 @@ replaces it.
 coaching (deck review, market sizing, IC simulation, competitive positioning) are added to `deliverables`
 as they are written, and `deliverables_status` turns from `pending` to `final`. Read only the files
 `deliverables` lists for the run; an HTML file not listed there is not this run's. `complete` with
-`deliverables_status: pending` after the skill has returned means no more pages will come.
+`deliverables_status: pending` after the skill has returned means no more pages will come. Deliverables are final only
+at `complete`: a run may list `report_md` and still be `waiting`.
 
 **Waiting and resuming.** A run that needs an answer stops at `waiting`. To continue it, send
 

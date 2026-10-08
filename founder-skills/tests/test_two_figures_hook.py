@@ -755,6 +755,23 @@ def test_a_host_answer_in_the_request_lets_the_dispatch_through(tmp_path: Path) 
     _silent(_run(tmp_path, [{"type": "user", "message": {"role": "user", "content": _HOST}}]))
 
 
+def test_a_request_that_said_not_to_ask_is_never_held(tmp_path: Path) -> None:
+    """Under `FS_HOST_NO_ASK` the figure takes its no-ask default by script and nothing may be asked, so the
+    sizing dispatch is never held to ask it -- the line as the last of a slash command's arguments included."""
+    _outputs(tmp_path)
+    _silent(_run(tmp_path, [_user("Size my market.\nFS_HOST_RUN_ID=r-1\nFS_HOST_NO_ASK\n")]))
+    _silent(_run(tmp_path, [_user("<command-args>Size my market.\nFS_HOST_NO_ASK</command-args>")]))
+    # The line anywhere but a founder's own message does not count.
+    tool_result = {
+        "type": "user",
+        "message": {
+            "role": "user",
+            "content": [{"type": "tool_result", "tool_use_id": "t1", "content": "FS_HOST_NO_ASK"}],
+        },
+    }
+    assert _decision(_run(tmp_path, [_user("Size my market."), tool_result]))["permissionDecision"] == "deny"
+
+
 def test_a_host_value_line_is_not_an_answer_to_this_gate(tmp_path: Path) -> None:
     _outputs(tmp_path)
     rows = [_user("Size my market.\nFS_HOST_VALUE ms_two_figures=typed | 317\n")]

@@ -13,6 +13,7 @@
     default         --run-id R (...) --gate G[.I] --reason REASON [--answer-id X] [--value V] [--note N]
     not-applicable  --run-id R (...) --gate G[.I] [--gate ...] --reason TEXT   (all or none)
     require         --run-id R (...) --gate G[.I]
+    derive          --run-id R (...) --gate G[.I] --answer-id X --value V --source S   (FS_HOST_DERIVE keys only)
     list            [--skill S]
     show            --run-id R (...)
 
@@ -25,7 +26,12 @@ once per run on a gate a hook holds.
 
 Exit codes: 0 ok; 1 rejected (JSON with `code` on stdout, one line on stderr, ledger and status
 untouched); 2 usage, IO, an unreachable registry, or a gate whose skill is not wired yet; 10 waiting
-(`require`: the gate was opened, `needs_input` printed); 11 not owed.
+(`require`: the gate was opened, `needs_input` printed); 11 not owed; 12 waiting, and the request said not to
+ask (FS_HOST_NO_ASK): nothing is asked and nothing is recorded by hand; the run waits for a request line.
+
+Under FS_HOST_NO_ASK `answer` is refused (NO_ASK_ANSWER) and `default` only marks a company's name, sector or
+geography as unknown or takes a producer's disclosed default (NO_ASK_DEFAULT otherwise). `open` that applies a
+request's declining answer exits 1 (REQUEST_DECLINED): the run is `refused`.
 """
 
 from __future__ import annotations
@@ -98,8 +104,30 @@ def cmd_open(args: argparse.Namespace) -> int:
     out = g.transact(paths, lambda ctx, ledger, status: g.open_gates(ctx, ledger, args.gate, by=BY))
     if len(out["not_owed"]) == len(args.gate):
         _exit(11, {"status": "not_owed", **out}, "Not owed: none of the listed gates applies to this run", args.pretty)
+    if out.get("no_ask") and out.get("waiting"):
+        keys = ", ".join(w["gate"] for w in out["waiting"])
+        _exit(
+            g.NO_ASK_EXIT,
+            {"ok": True, **out},
+            f"Waiting (the request said not to ask): {keys}. {g.NO_ASK_STOP}",
+            args.pretty,
+        )
     _emit({"ok": True, **out}, args.pretty)
     return 0
+
+
+def _refuse_no_ask_answer(g: Any, paths: rs.RunPaths) -> None:
+    """Under FS_HOST_NO_ASK only a request line answers: nothing the model types is recorded."""
+    try:
+        ledger = g.load_ledger(paths)
+    except rs.RunStatusError:
+        return
+    if g.no_ask(ledger):
+        raise g.GateRejection(
+            "NO_ASK_ANSWER",
+            "the request said not to ask; an answer can only come from a request line (FS_HOST_ANSWER / "
+            "FS_HOST_VALUE)" + g.NO_ASK_LEAVE,
+        )
 
 
 def _segments(rest: list[str]) -> list[list[str]]:
@@ -141,6 +169,7 @@ def cmd_answer(args: argparse.Namespace, rest: list[str]) -> int:
             _unreachable("USAGE", f"{a.gate}: give exactly one of --answer-id and --answer", args.pretty)
         parsed.append(a)
     paths = _locate(args)
+    _refuse_no_ask_answer(g, paths)
 
     def fn(ctx: Any, ledger: dict[str, Any], status: dict[str, Any]) -> dict[str, Any]:
         results = []
@@ -174,6 +203,7 @@ def _form_reply(g: Any, args: argparse.Namespace) -> int:
         )
     reply = sys.stdin.read()
     paths = _locate(args)
+    _refuse_no_ask_answer(g, paths)
 
     def fn(ctx: Any, ledger: dict[str, Any], status: dict[str, Any]) -> dict[str, Any]:
         batches = ledger.get("form_batches") or []
@@ -208,6 +238,7 @@ def cmd_default(args: argparse.Namespace) -> int:
     paths = _locate(args)
 
     def fn(ctx: Any, ledger: dict[str, Any], status: dict[str, Any]) -> Any:
+        basis = g.check_model_default(ledger, args.gate, args.reason, args.answer_id, args.value)
         return g.record(
             ctx,
             ledger,
@@ -217,6 +248,7 @@ def cmd_default(args: argparse.Namespace) -> int:
             note=args.note,
             resolution="default_taken",
             default_reason=args.reason,
+            basis=basis,
             by=BY,
         )
 
@@ -256,20 +288,29 @@ def cmd_require(args: argparse.Namespace) -> int:
 
     def fn(ctx: Any, ledger: dict[str, Any], status: dict[str, Any]) -> dict[str, Any]:
         got = g.require_terminal(ctx, ledger, args.gate, by=BY)
-        holder["needs"] = g.needs_input(ctx, ledger, args.gate) if got == "waiting" else None
+        holder["exit"] = g.waiting_exit(ctx, ledger, args.gate) if got == "waiting" else None
         return {"result": got}
 
     out = g.transact(paths, fn)
     if out["result"] == "not_owed":
         _exit(11, {"status": "not_owed", "gate": args.gate}, f"Not owed: {args.gate} does not apply", args.pretty)
     if out["result"] == "waiting":
-        _exit(
-            10,
-            {"status": "waiting", "blocked_by_gate": args.gate, "needs_input": [holder["needs"]]},
-            f"Waiting: {args.gate} has no answer yet; ask it and record the answer",
-            args.pretty,
-        )
+        code, payload, line = holder["exit"]
+        _exit(code, payload, line, args.pretty)
     _emit({"ok": True, "gate": args.gate, "result": "ok"}, args.pretty)
+    return 0
+
+
+def cmd_derive(args: argparse.Namespace) -> int:
+    g = _gates_or_exit(args.pretty)
+    paths = _locate(args)
+    out = g.transact(
+        paths,
+        lambda ctx, ledger, status: g.record_derived(
+            ctx, ledger, args.gate, args.answer_id, args.value, args.source, by=BY
+        ),
+    )
+    _emit({"ok": True, **out}, args.pretty)
     return 0
 
 
@@ -337,6 +378,14 @@ def _parser() -> argparse.ArgumentParser:
     sp.add_argument("--gate", required=True)
     sp.set_defaults(func=cmd_require)
 
+    sp = sub.add_parser("derive", help="record an answer the request let the run take from the materials")
+    locator(sp)
+    sp.add_argument("--gate", required=True)
+    sp.add_argument("--answer-id", dest="answer_id", required=True)
+    sp.add_argument("--value", required=True)
+    sp.add_argument("--source", required=True)
+    sp.set_defaults(func=cmd_derive)
+
     sp = sub.add_parser("list", help="print the host contract")
     sp.add_argument("--skill", default=None)
     sp.add_argument("--pretty", action="store_true")
@@ -365,6 +414,8 @@ def main(argv: list[str] | None = None) -> int:
         _unreachable(e.code, str(e), pretty)
     except Exception as e:
         g = _gates
+        if g is not None and isinstance(e, g.Declined):
+            _exit(1, e.payload(), f"Refused ({e.code}): {e}; stop here and produce nothing", pretty)
         if g is not None and isinstance(e, g.GateRejection):
             _exit(1, e.payload(), f"Rejected ({e.code}): {e}; nothing was written", pretty)
         if g is not None and isinstance(e, g.Unimplemented):

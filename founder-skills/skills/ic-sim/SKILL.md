@@ -150,7 +150,7 @@ about 15–20 minutes and produces a scored report with the partner debate and t
 scoring, say so and I'll answer outside the IC simulation." Naming the trade-off is honest; quietly
 substituting the cheap version is not.
 
-**Then start the run's record, once**, with every request line that starts `FS_HOST_` copied between the markers (none: leave the placeholder, which is ignored). `RUN_ID` is the `run_id` it prints. Any non-zero exit here or from `bind` below: say in one sentence that the simulation could not start, and stop.
+**Then start the run's record, once**, copying every `FS_HOST_` line of the request between the markers. `RUN_ID` is the `run_id` it prints. Any non-zero exit here or from `bind` below: say in one sentence that the simulation could not start, and stop. Exit 12 from any script: ask nothing; say what the run is waiting for, and stop.
 
 ```bash
 python3 "<printed PLUGIN_ROOT>/scripts/run_status.py" start --skill ic-sim --artifacts-root "<printed ARTIFACTS_ROOT>" <<'FS_HOST_EOF'
@@ -211,7 +211,7 @@ python3 "$SHARED_SCRIPTS/founder_context.py" read --artifacts-root "$ARTIFACTS_R
 
 **Exit 0 (found):** Open the questions (the block below) first: only the mode and the fund are left to ask. Use the company slug and pre-filled fields. Proceed to Step 2.
 
-**Exit 1 (not found: no `code`, or `CONTEXT_NOT_FOUND`):** Open the questions (the block below) first. Expected on a first run — do NOT mention this check or its exit status to the founder; if you narrate anything first, say only "Let me grab a few basics about the company." Use `AskUserQuestion` (NOT plain chat) to ask for company name, stage, sector, and geography. **If `AskUserQuestion` is genuinely unavailable in the host, do NOT skip the ask and do NOT assume the answer:** ask the same question in plain chat, state the options explicitly, and wait for an answer before continuing.
+**Exit 1 (not found: no `code`, or `CONTEXT_NOT_FOUND`):** Open the questions (the block below) first. Do NOT mention this check or its exit status to the founder; if you narrate anything first, say only "Let me grab a few basics about the company." Use `AskUserQuestion` (NOT plain chat) to ask for company name, stage, sector, and geography. **If `AskUserQuestion` is genuinely unavailable in the host, do NOT skip the ask and do NOT assume the answer:** ask the same question in plain chat, state the options explicitly, and wait for an answer before continuing.
 
 **Stage is the one field with a real fixed label set — use it verbatim if asking.**
 Options: `Pre-seed` / `Seed` / `Series A` / `Series B+`

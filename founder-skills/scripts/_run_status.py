@@ -56,10 +56,23 @@ STATUS_CODES: dict[str, tuple[str, ...]] = {
         "OUT_OF_SCOPE_UNANSWERED",
         "AUTO_SATISFY_NOT_ALLOWED",
         "PRE_ANSWER_UNLISTED",
+        "INPUT_NEEDED",
     ),
     "complete": ("COMPLETE",),
-    "refused": ("FOUNDER_DECLINED", "INPUT_MISSING", "PRE_ANSWER_INVALID"),
+    "refused": (
+        "FOUNDER_DECLINED",
+        "INPUT_MISSING",
+        "PRE_ANSWER_INVALID",
+        "REQUEST_DECLINED",
+        "HANDOFF_FAILED",
+        "PRODUCER_FAILED",
+        "COACHING_FAILED",
+        "CONTEXT_FAILED",
+        "INPUT_UNREADABLE",
+    ),
 }
+# The codes `run_status.py fail` writes: a run that stopped on a failure it cannot recover from.
+FAIL_CODES = ("HANDOFF_FAILED", "PRODUCER_FAILED", "COACHING_FAILED", "CONTEXT_FAILED", "INPUT_UNREADABLE")
 LAST_ERROR_CODES = ("GATE_INVALID", "GATE_OTHER_RUN", "PROFILE_MISMATCH", "GATE_UNRESOLVED", "COACHING_BLOCKED")
 PRINT_ONLY_CODES = ("RUN_ID_IN_USE", "RUN_ID_FINISHED", "RUN_ID_MALFORMED")
 
@@ -82,6 +95,13 @@ MESSAGES: dict[str, str] = {
     "FOUNDER_DECLINED": "The founder chose not to continue.",
     "PRE_ANSWER_INVALID": "An answer sent with the request could not be used, so the review did not start.",
     "COACHING_BLOCKED": "The review is in progress; the coaching commentary could not be added yet.",
+    "INPUT_NEEDED": "Waiting for a file or a path: {question}",
+    "REQUEST_DECLINED": "The request asked to stop, so the run did not continue.",
+    "HANDOFF_FAILED": "A step's output never arrived, so the run stopped.",
+    "PRODUCER_FAILED": "A step rejected its input, so the run stopped.",
+    "COACHING_FAILED": "The coaching commentary could not be added, so the run stopped.",
+    "CONTEXT_FAILED": "The company's context could not be read, so the run stopped.",
+    "INPUT_UNREADABLE": "A document could not be read, so the run stopped.",
 }
 
 # Whether a `waiting` run can be resumed, per surface. Conservative: until a new session has been shown
@@ -141,6 +161,7 @@ FIELDS: tuple[str, ...] = (
     "waiting_on",
     "resumable",
     "resume_prompt",
+    "no_ask",
     "gates",
     "coaching",
     "deliverables",
@@ -148,6 +169,7 @@ FIELDS: tuple[str, ...] = (
     "handed_over_at",
     "disclosures",
     "notices",
+    "failure",
     "invocation",
     "resumed_from",
     "invocations",
@@ -506,6 +528,7 @@ def blank_status(skill: str, paths: RunPaths) -> dict[str, Any]:
             "plugin_version": plugin_version(),
             "shared_scripts_dir_shell": _SHARED_DIR,
             "artifacts_root_shell": paths.artifacts_root,
+            "no_ask": False,
             "gates": [],
             "disclosures": [],
             "notices": [],
@@ -629,8 +652,55 @@ def fold_asked_evidence(status: dict[str, Any]) -> None:
         return
 
 
+def _unused_request_notices(paths: RunPaths, status: dict[str, Any]) -> None:
+    """At a final status, list every request line the run never used. Never raises: a notice is a report."""
+    try:
+        ledger = read_json(paths.ledger)
+        if not isinstance(ledger, dict):
+            return
+        notices = list(status.get("notices") or [])
+        seen = {(n.get("gate"), n.get("reason")) for n in notices if isinstance(n, dict)}
+        gates = ledger.get("gates") or {}
+        pre = ledger.get("pre_answers") or {}
+        instance_used = {str(pa.get("from")) for pa in pre.values() if isinstance(pa, dict) and pa.get("from")}
+        out: list[dict[str, Any]] = []
+        for key, pa in pre.items():
+            if not isinstance(pa, dict) or pa.get("applied_at") or pa.get("from") or key in instance_used:
+                continue
+            entry = gates.get(key)
+            history = (entry or {}).get("history") or []
+            if isinstance(entry, dict) and entry.get("state") == "answered":
+                reason = "already_answered"
+            elif isinstance(entry, dict) and history and history[-1].get("event") == "closed":
+                reason = "not_owed"
+            else:
+                reason = "not_reached"
+            out.append({"code": "PRE_ANSWER_IGNORED", "gate": key, "lines": pa.get("raw") or [], "reason": reason})
+        na = ledger.get("no_ask")
+        if isinstance(na, dict):
+            for kw, reason in (("wait", "wait_not_reached"), ("derive", "derive_not_used")):
+                for key, rec in (na.get(kw) or {}).items():
+                    entry = gates.get(key)
+                    used = bool(rec.get("used_at")) if kw == "derive" else isinstance(entry, dict)
+                    if kw == "wait" and not used:
+                        gid = key.split(".", 1)[0]
+                        used = any(isinstance(e, dict) and e.get("gate") == gid for e in gates.values())
+                    if not used:
+                        out.append(
+                            {"code": "PRE_ANSWER_IGNORED", "gate": key, "lines": [rec.get("raw")], "reason": reason}
+                        )
+        for n in out:
+            if (n["gate"], n["reason"]) not in seen:
+                notices.append(n)
+        status["notices"] = notices
+    except Exception:  # noqa: BLE001 - a notice never fails a status write
+        return
+
+
 def write_status(paths: RunPaths, status: dict[str, Any]) -> None:
     status["updated_at"] = now_iso()
+    if status.get("status") in FINAL_STATUSES:
+        _unused_request_notices(paths, status)
     fold_asked_evidence(status)
     close_if_finished(status)
     _flush_manifests(status)

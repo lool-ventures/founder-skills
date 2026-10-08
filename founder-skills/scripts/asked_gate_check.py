@@ -41,6 +41,10 @@ THE EVIDENCE, any one of, strongest first:
 4. `plain_chat`: assistant text naming at least two labels, followed by a founder's message. The
    weakest: any reply passes it. Kept, and measured through the record below.
 
+A REQUEST THAT SAYS NOT TO ASK. A request carrying `FS_HOST_NO_ASK` is not held: nothing is asked in it, and
+its scripts stop the run instead. No evidence line is written for it (it is not evidence that anyone was
+asked), so nothing is folded into the status.
+
 ONE HOLD, ONE RETRY. The hold's reason is the question and its options, and the way out for a founder
 who asked not to be asked. The second dispatch goes through on the hold's own marker,
 `[asked-gate-check][<agent>:<CONTEXT>]`, found in the window: no model-written field is trusted to say
@@ -569,6 +573,8 @@ def decide(payload: dict[str, Any]) -> dict[str, Any] | None:
     tools = _transcript_tools()
     ctx = _Ctx(tools.read_transcript(transcript), tools._is_real_user_prompt, _form_reply(), figures)
     start, window = window_start(ctx, spec.skill, run_id, dispatch)
+    if figures.no_ask_in(ctx.rows, start, ctx.is_prompt):
+        return None
     strongest, kinds = evidence(ctx, start, gate, spec)
     mark = marker(agent, str(context))
 

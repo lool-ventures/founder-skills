@@ -43,6 +43,7 @@ def test_the_hook_module_list_is_complete() -> None:
         "_delivery_check.py",
         "review_page_check.py",
         "asked_gate_check.py",
+        "no_ask_check.py",
         "_form_reply.py",
     }
     assert expected <= names, names

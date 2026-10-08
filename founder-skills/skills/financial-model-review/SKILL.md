@@ -142,7 +142,7 @@ have not run it — then stop. Do not improvise the missing steps: an analysis t
 reviews itself reads exactly like one that was checked, which is the failure this stop exists to
 prevent.
 
-**Then start the run's record, once**, with every request line that starts `FS_HOST_` copied between the markers (none: leave the placeholder, which is ignored). `RUN_ID` is the `run_id` it prints. Any non-zero exit here or from `bind` below: say in one sentence that the review could not start, and stop.
+**Then start the run's record, once**, copying every `FS_HOST_` line of the request between the markers. `RUN_ID` is the `run_id` it prints. Any non-zero exit here or from `bind` below: say in one sentence that the review could not start, and stop. Exit 12 from any script: ask nothing; say what the run is waiting for, and stop.
 
 ```bash
 python3 "<printed PLUGIN_ROOT>/scripts/run_status.py" start --skill financial-model-review --artifacts-root "<printed ARTIFACTS_ROOT>" <<'FS_HOST_EOF'
@@ -273,7 +273,7 @@ Three cases based on exit code:
 
 **Exit 0 (found, single context):** Open the questions (the block below) first. Use the company slug and pre-filled fields. Before proceeding to extraction, use `AskUserQuestion` to ask the founder for current cash balance and date if not already stated in the conversation — this is the #1 cause of incomplete runway analysis. If files are attached, also ask about monthly burn rate unless the conversation already contains it. Same runtime-labelled shape as the cash/date/burn questions below (an affirmative carrying any already-stated value, plus a "Not stated" fallback) — these are dollar amounts and dates, not a fixed label set. Batch all questions into a **single `AskUserQuestion` call**.
 
-**Exit 1 (not found: no `code`, or `CONTEXT_NOT_FOUND`):** Open the questions (the block below) first. Use `AskUserQuestion` (NOT plain chat) to ask the founder for company details AND key financial context. **You MUST use the `AskUserQuestion` tool** — do not just list questions in the chat. Gather everything in a **single call** (one interaction = one chance for the UI to render correctly):
+**Exit 1 (not found: no `code`, or `CONTEXT_NOT_FOUND`):** Open the questions (the block below) first. Use `AskUserQuestion` (NOT plain chat) to ask the founder for company details AND key financial context. **You MUST use the `AskUserQuestion` tool** — do not just list questions in the chat. Gather everything in a **single call**:
 - Company name, stage, sector, geography (required for context creation)
 - Current cash balance and date (critical for runway — the #1 cause of incomplete reports)
 - Monthly burn rate, unless the conversation already states it

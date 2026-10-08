@@ -600,7 +600,7 @@ helper implementing the order above rather than ad-hoc env checks.
 Every question a skill asks once its run has started is a **gate**: registered by id in
 `scripts/_gates.py`, recorded in the run's ledger `runs/<RUN_ID>/gates.json`, and summarised for a host
 in `runs/<RUN_ID>/run_status.json` beside it (`record_gate_answer.py list` prints the host contract).
-Ids are the contract; labels are presentation. A skill that records its gates does five things.
+Ids are the contract; labels are presentation. A skill that records its gates does six things.
 
 1. **Start.** Step 0 runs `run_status.py start` once, after the `ARTIFACTS_ROOT` line and before
    Step 1, with every `FS_HOST_` line of the request copied between its heredoc markers. It takes the
@@ -626,7 +626,21 @@ Ids are the contract; labels are presentation. A skill that records its gates do
    record the answer, run the step again. A gate a skill script records (deck-review's stage gates) is
    asked by re-running that script, as the skill's own branch table says. Exit 11 means the gate does not
    apply to this run.
-5. **Finish.** Inserting the coaching marks the run `complete` (a mode with no coaching ends with
+5. **A request that says not to ask.** A request may carry `FS_HOST_NO_ASK` (for a host that runs a skill
+   with nobody to answer). Then no question is put in that run, by any means: no `AskUserQuestion`, no
+   question in chat. `start` prints this rule as `rule`. Scripts apply what the request answered, take each
+   question's no-ask default where it has one (listed as `DEFAULT_TAKEN:<gate>`), and otherwise stop with
+   **exit 12**: the run is `waiting` and the printed `stop` line says so. On exit 12 record nothing yourself
+   (the recorder refuses an answer under the token): say in one sentence what the run is waiting for,
+   without asking it, and end the turn, presenting nothing as final. Where a step would ask and no script
+   has stopped the run, run that question's `open` first. A key the request names in `FS_HOST_DERIVE` is not
+   a stop: `open` prints how to record it from the materials, with where it was found
+   (`record_gate_answer.py derive`). `FS_HOST_WAIT <gate>` makes a question with a default wait as well. Only
+   when no question is open and a step has failed for good (a hand-off that never arrived, a producer that
+   still rejects after its retries, coaching that cannot be inserted), record it with `run_status.py fail
+   --code <code> --reason "<what failed>"`. `open` exiting 1 with `REQUEST_DECLINED` means the request asked
+   to stop: stop and produce nothing.
+6. **Finish.** Inserting the coaching marks the run `complete` (a mode with no coaching ends with
    `run_status.py finish`). A page built after the coaching is listed by its writer's `--run-id`, and the
    last step runs `run_status.py deliverables --final`. `complete` means the markdown and JSON reports
    are final; HTML pages may appear in `deliverables` after `complete`, and an HTML file not listed
@@ -634,7 +648,8 @@ Ids are the contract; labels are presentation. A skill that records its gates do
    means no more pages will be listed.
 
 **Resume.** A host resumes a `waiting` run with `FS_HOST_RUN_ID=<id>`, every `FS_HOST_` line of the
-first request, and the answer to the waiting gate (`resume_prompt` in the status carries the lines).
+first request, and the answer to the waiting gate (`resume_prompt` in the status carries the lines,
+`FS_HOST_NO_ASK` included).
 `start` prints `resume: 1`; each step then reuses what this run already wrote, and
 `invocations[]` in the status records which run-dir files the resumed invocation rewrote.
 

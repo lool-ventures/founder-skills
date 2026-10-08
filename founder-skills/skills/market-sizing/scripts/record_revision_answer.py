@@ -101,11 +101,12 @@ def main() -> None:
                     "ms_revision",
                     a.answer,
                     "record_revision_answer.py",
+                    by_model=False,
                     resolution="default_taken",
                     default_reason="asked_not_to_be_asked",
                 )
             else:
-                gates.record_from_writer(paths, "ms_revision", a.answer, "record_revision_answer.py")
+                gates.record_from_writer(paths, "ms_revision", a.answer, "record_revision_answer.py", by_model=True)
     except Exception as e:  # noqa: BLE001 -- RUN_FINISHED or an unreachable ledger: printed, nothing written
         sys.exit(_rejected(e))
     _write_mirror(path, a.answer, a.source, parameters, run_id, a.pretty)
@@ -156,12 +157,25 @@ def _from_pre_answer(analysis_dir: str, pretty: bool) -> None:
         gates, paths = ledger
         gates.open_from_writer(paths, ["ms_revision"], "record_revision_answer.py")
         got = gates.apply_writer_pre_answer(paths, "ms_revision", "record_revision_answer.py", list(ANSWERS))
+        source = "host"
+        if got is None and gates.no_ask(gates.load_ledger(paths)):
+            # The request said not to ask: the question's no-ask default (deliver) is taken here, by this script.
+            got = gates.record_from_writer(
+                paths,
+                "ms_revision",
+                "deliver",
+                "record_revision_answer.py",
+                by_model=False,
+                resolution="default_taken",
+                default_reason="asked_not_to_be_asked",
+            )
+            source = "no_questions"
     except Exception as e:  # noqa: BLE001
         sys.exit(_rejected(e))
     if isinstance(got, dict) and got.get("answer_id") in ANSWERS:
         path = record_path(analysis_dir, run_id)
         if os.path.isdir(os.path.dirname(path)):
-            _write_mirror(path, str(got["answer_id"]), "host", parameters, run_id, pretty)
+            _write_mirror(path, str(got["answer_id"]), source, parameters, run_id, pretty)
         print(json.dumps({"applied": True, "answer": got["answer_id"], "parameters": parameters}))
         return
     print(json.dumps({"applied": False, "owed": True, "parameters": parameters}))

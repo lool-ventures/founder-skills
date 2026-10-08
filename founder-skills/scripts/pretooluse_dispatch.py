@@ -23,6 +23,8 @@ from typing import Any
 # name before anything is compared against its prompt. The asked-gate check comes next and before the
 # figures check: on a market-sizing sizing dispatch it decides both questions in one hold. The holds come
 # before the prompt check, so a step that must wait for a question is held rather than rewritten.
+# The no-ask check comes before the review-page check: in a run whose request said not to ask, no question
+# is put at all, so the review page's "send it first, then ask again" never applies there.
 # The question check answers only AskUserQuestion, and every dispatch check only Agent/Task: each returns
 # at its own tool-name test, so the order between the two groups decides nothing.
 CHECKS = (
@@ -30,6 +32,7 @@ CHECKS = (
     "asked_gate_check",
     "two_figures_check",
     "dispatch_prompt_check",
+    "no_ask_check",
     "review_page_check",
 )
 

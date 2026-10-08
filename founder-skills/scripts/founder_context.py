@@ -377,17 +377,18 @@ def _init_refusal(code: int, payload: dict[str, Any], line: str) -> NoReturn:
     sys.exit(code)
 
 
-def _check_gate_records(args: argparse.Namespace) -> None:
+def _check_gate_records(args: argparse.Namespace) -> Any:
     """With a gate ledger for this run, `init` writes a context only from recorded answers.
 
     Keyed on the ledger existing, never on `--run-id` alone: skills pass `--run-id` today with no ledger,
     and must behave exactly as before. Each Step-1 field needs a record (exit 10 opens the missing ones
-    and prints what to ask), and every typed value must be the one recorded (exit 1 otherwise).
+    and prints what to ask; under FS_HOST_NO_ASK exit 12, nothing to ask), and every typed value must be the one
+    recorded (exit 1 otherwise). Returns (the registry module, the run's paths) with a ledger, else None.
     """
     run_id = args.run_id
     root = os.path.abspath(args.artifacts_root)
     if not run_id or not os.path.isfile(os.path.join(root, "runs", str(run_id), "gates.json")):
-        return
+        return None
     try:
         import _gates
         import _run_status
@@ -426,23 +427,33 @@ def _check_gate_records(args: argparse.Namespace) -> None:
                 ctx, ledger, "ctx_stage_detail", by="founder_context.py"
             )
         waiting = [k for k, v in results.items() if v == "waiting"]
+        quiet = _gates.no_ask(ledger)
         return {
             "waiting": waiting,
-            "needs_input": [_gates.needs_input(ctx, ledger, k) for k in waiting],
+            "needs_input": [] if quiet else [_gates.needs_input(ctx, ledger, k) for k in waiting],
+            "stop": _gates.no_ask_payload(ctx, ledger, waiting) if quiet else None,
             "records": {k: (ledger["gates"].get(k) or {}).get("current") for k in results},
         }
 
     try:
         out = _gates.transact(paths, fn)
+    except _gates.Declined as e:
+        _init_refusal(1, e.payload(), f"Refused ({e.code}): {e}; stop here and produce nothing")
     except _gates.GateRejection as e:
         _init_refusal(1, e.payload(), f"Rejected ({e.code}): {e}; no context was written")
     except (_run_status.RunStatusError, _gates.Unimplemented) as e:
         _init_refusal(
             2, {"status": "error", "code": getattr(e, "code", "GATE_NOT_WIRED"), "message": str(e)}, f"Error: {e}"
         )
+    if out["waiting"] and out.get("stop"):
+        _init_refusal(
+            _gates.NO_ASK_EXIT,
+            {**out["stop"], "blocked_by_gate": out["waiting"][0]},
+            f"Waiting (the request said not to ask): {', '.join(out['waiting'])}. {_gates.NO_ASK_STOP}",
+        )
     if out["waiting"]:
         _init_refusal(
-            10,
+            _gates.EXIT_CODES["waiting"],
             {"status": "waiting", "blocked_by_gate": out["waiting"][0], "needs_input": out["needs_input"]},
             f"Waiting: {', '.join(out['waiting'])} not yet answered; ask, record the answers, then run init again",
         )
@@ -454,6 +465,7 @@ def _check_gate_records(args: argparse.Namespace) -> None:
             f"Rejected: {mismatches[0]['field']} was typed {mismatches[0]['typed']!r} but recorded "
             f"{mismatches[0]['recorded']!r}; no context was written",
         )
+    return _gates, paths
 
 
 def _typed_mismatches(args: argparse.Namespace, records: dict[str, Any]) -> list[dict[str, Any]]:
@@ -471,6 +483,10 @@ def _typed_mismatches(args: argparse.Namespace, records: dict[str, Any]) -> list
                 recorded = _RECORDED_STAGE_DETAIL.get(str(detail))
         elif answer_id == "not_sure":
             recorded = ""
+            # "Not sure" is recorded as an empty value; the option's label or id typed for it means the same.
+            if str(typed or "").strip().casefold().replace("_", " ") in ("", "not sure"):
+                setattr(args, field, "")
+                continue
         elif cur.get("value") is not None:
             recorded = cur["value"]
         else:
@@ -482,7 +498,7 @@ def _typed_mismatches(args: argparse.Namespace, records: dict[str, Any]) -> list
 
 def cmd_init(args: argparse.Namespace) -> None:
     """Create a new founder context file."""
-    _check_gate_records(args)
+    checked = _check_gate_records(args)
     slug = args.slug if args.slug else _slugify(args.company_name)
     artifacts_root: str = args.artifacts_root
     os.makedirs(artifacts_root, exist_ok=True)
@@ -519,6 +535,10 @@ def cmd_init(args: argparse.Namespace) -> None:
     path = _context_path(artifacts_root, slug)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(context, f, indent=2)
+    if checked is not None:
+        # From here a company basic taken from the materials stands for the run: the file above is not rewritten.
+        gates_mod, run_paths = checked
+        gates_mod.mark_context_written(run_paths)
 
     output = _format_json(context, args.pretty)
     _write_output(output, args.output)
@@ -597,6 +617,8 @@ def _read_with_ledger(args: argparse.Namespace) -> str | None:
         elif len(files) >= 2:
             got = _gates.require_terminal(ctx, ledger, "ctx_select_company", by="founder_context.py")
             if got == "waiting":
+                if _gates.no_ask(ledger):
+                    return {"waiting": True, "stop": _gates.no_ask_payload(ctx, ledger, ["ctx_select_company"])}
                 return {"waiting": True, "needs_input": _gates.needs_input(ctx, ledger, "ctx_select_company")}
             picked = ((ledger["gates"].get("ctx_select_company") or {}).get("current") or {}).get("answer_id")
             if picked == "different_company":
@@ -622,21 +644,29 @@ def _read_with_ledger(args: argparse.Namespace) -> str | None:
             )
             if pending is not None:
                 ledger.setdefault("notices", []).append(
-                    {"code": "PRE_ANSWER_IGNORED", "gate": key, "lines": pending["raw"]}
+                    {"code": "PRE_ANSWER_IGNORED", "gate": key, "lines": pending["raw"], "reason": "not_owed"}
                 )
         return out
 
     try:
         out = _gates.transact(paths, fn)
+    except _gates.Declined as e:
+        _init_refusal(1, e.payload(), f"Refused ({e.code}): {e}; stop here and produce nothing")
     except _gates.GateRejection as e:
         _init_refusal(1, e.payload(), f"Rejected ({e.code}): {e}; nothing was read")
     except (_run_status.RunStatusError, _gates.Unimplemented) as e:
         _init_refusal(
             2, {"status": "error", "code": getattr(e, "code", "GATE_NOT_WIRED"), "message": str(e)}, f"Error: {e}"
         )
+    if out.get("waiting") and out.get("stop"):
+        _init_refusal(
+            _gates.NO_ASK_EXIT,
+            {**out["stop"], "blocked_by_gate": "ctx_select_company"},
+            f"Waiting (the request said not to ask): ctx_select_company. {_gates.NO_ASK_STOP}",
+        )
     if out.get("waiting"):
         _init_refusal(
-            10,
+            _gates.EXIT_CODES["waiting"],
             {"status": "waiting", "blocked_by_gate": "ctx_select_company", "needs_input": [out["needs_input"]]},
             "Waiting: several companies have a context; ask which one, record it, then read again",
         )

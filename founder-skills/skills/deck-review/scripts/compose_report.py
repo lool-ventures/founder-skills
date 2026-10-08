@@ -1714,8 +1714,8 @@ def _record_refusal(ledger: Any, gate: dict[str, Any], e: GateNotAuthorized) -> 
         def other(st: dict[str, Any]) -> None:
             if st.get("status") in rs.FINAL_STATUSES:
                 return
-            if e.code == "FOUNDER_DECLINED":
-                rs.set_state(st, "refused", "FOUNDER_DECLINED")
+            if e.code in ("FOUNDER_DECLINED", "REQUEST_DECLINED"):
+                rs.set_state(st, "refused", e.code)
             else:
                 rs.set_state(st, "running", "RUNNING")
                 st["last_error_code"] = e.code if e.code in rs.LAST_ERROR_CODES else "GATE_INVALID"
@@ -1745,10 +1745,26 @@ def _record_refusal(ledger: Any, gate: dict[str, Any], e: GateNotAuthorized) -> 
         rs.update(paths, waiting)
     except Exception as exc:
         print(f"warning: the run status was not updated: {exc}", file=sys.stderr)
+    if gates.no_ask(gates.load_ledger(paths)):
+        # The request said not to ask: nothing to put to anyone; the run waits for a request line.
+        payload = gates.transact(paths, lambda ctx, led, st: gates.no_ask_payload(ctx, led, [key]))
+        sys.stdout.write(json.dumps({**payload, "code": e.code, "blocked_by_gate": key, "message": str(e)}) + "\n")
+        print(f"Waiting (the request said not to ask): {key}. {gates.NO_ASK_STOP}", file=sys.stderr)
+        return int(gates.NO_ASK_EXIT)
     sys.stdout.write(
         json.dumps({"status": "waiting", "code": e.code, "blocked_by_gate": key, "message": str(e)}) + "\n"
     )
-    return 10
+    return int(gates.EXIT_CODES["waiting"])
+
+
+def _deck_read_as_text(dir_path: str) -> bool:
+    """The inventory says the deck's slides were read as text (`input_format: text`): no rendered page was seen."""
+    try:
+        with open(os.path.join(dir_path, "deck_inventory.json"), encoding="utf-8") as f:
+            inventory = json.load(f)
+    except (OSError, ValueError):
+        return False
+    return isinstance(inventory, dict) and inventory.get("input_format") == "text"
 
 
 def _refuse_open_gates(ledger: Any) -> None:
@@ -1763,6 +1779,17 @@ def _refuse_open_gates(ledger: Any) -> None:
     open_now = rs.open_gate_ids(paths)
     if not open_now:
         return
+    if gates.no_ask(gates.load_ledger(paths)):
+        # The request said not to ask: what it carried is applied; anything still open leaves the run waiting.
+        import _run_ref  # noqa: PLC0415
+
+        try:
+            stop = gates.settle_open_for_no_ask(paths)
+        except Exception as e:  # noqa: BLE001 -- a request stop still pending (REQUEST_DECLINED): exit 1, no trace
+            sys.exit(_run_ref.report_failure(e))
+        if stop is None:
+            return
+        gates.print_waiting_and_exit(stop)
     key = open_now[0]
     needs = gates.transact(paths, lambda ctx, led, st: gates.needs_input(ctx, led, key))
 
@@ -1789,16 +1816,22 @@ def _refuse_open_gates(ledger: Any) -> None:
     print(
         f"Error: {key} was asked and never recorded; {how}, then compose again. Nothing was written.", file=sys.stderr
     )
-    sys.exit(10)
+    sys.exit(gates.EXIT_CODES["waiting"])
 
 
-def _coaching_pending(ledger: Any) -> None:
+# A deck read as text because it could not be rendered: its four design criteria were not scored.
+DECK_READ_AS_TEXT = "DECK_READ_AS_TEXT"
+
+
+def _coaching_pending(ledger: Any, read_as_text: bool = False) -> None:
     _gates, paths = ledger
     rs = sys.modules["_run_status"]
 
     def pending(st: dict[str, Any]) -> None:
         if st.get("status") not in rs.FINAL_STATUSES:
             st["coaching"] = "pending"
+            disclosures = [d for d in (st.get("disclosures") or []) if d != DECK_READ_AS_TEXT]
+            st["disclosures"] = disclosures + ([DECK_READ_AS_TEXT] if read_as_text else [])
 
     try:
         rs.update(paths, pending)
@@ -2288,7 +2321,7 @@ def main() -> None:
             sys.exit(2)
 
     if ledger is not None:
-        _coaching_pending(ledger)
+        _coaching_pending(ledger, _deck_read_as_text(args.dir))
 
     if args.strict:
         blocking = [w for w in result["validation"]["warnings"] if w["severity"] in ("high", "medium")]

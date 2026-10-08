@@ -313,7 +313,7 @@ def test_none_of_these_is_answered_alone(tmp_path: Path) -> None:
     ctx_ledger = h.ledger(root, run_id)
     assert "ms_revision_changes" not in ctx_ledger.get("gates", {})
     paths = rs.run_paths(str(root), run_id)
-    g.record_from_writer(paths, "ms_revision", "revise", "record_revision_answer.py")
+    g.record_from_writer(paths, "ms_revision", "revise", "record_revision_answer.py", by_model=True)
     proc = _answer(root, run_id, "ms_revision_changes", "none_of_these,segment_pct")
     assert proc.returncode == 1 and _out(proc)["code"] == "OPTION_UNLISTED"
     _ok(_answer(root, run_id, "ms_revision_changes", "segment_pct"))

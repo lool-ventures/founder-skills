@@ -1384,6 +1384,7 @@ def _freeform_gates(
             f"ct_lane3_blocker.{key}",
             "stated",
             "extract_cap_table.py",
+            by_model=True,
             value=str(value),
             bound=_block_fingerprint(blocks, grid, index),
         )

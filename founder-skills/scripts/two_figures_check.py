@@ -418,6 +418,32 @@ def founders_message(row: dict[str, Any], is_prompt: Any) -> bool:
     return not row.get("isCompactSummary") and bool(is_prompt(row)) and from_founder(row)
 
 
+_COMMAND_ARGS = re.compile(r"</?command-args>")
+NO_ASK_LINE = re.compile(r"(?m)^[ \t]*FS_HOST_NO_ASK[ \t]*$")
+
+
+def _founder_texts(row: dict[str, Any]) -> list[str]:
+    """A founder message's text blocks, with a slash command's `<command-args>` wrapper removed so a request
+    line first or last in the arguments still stands on a line of its own."""
+    content = (row.get("message") or {}).get("content")
+    texts = [content] if isinstance(content, str) else []
+    if isinstance(content, list):
+        texts = [b["text"] for b in content if isinstance(b, dict) and isinstance(b.get("text"), str)]
+    return [_COMMAND_ARGS.sub("\n", t.replace("\r", "")) for t in texts]
+
+
+def no_ask_in(rows: list[dict[str, Any]], start: int, is_prompt: Any = None) -> bool:
+    """Whether a founder's own message since `start` carries an `FS_HOST_NO_ASK` line: the request said not to
+    ask. Same exclusions as `host_line_in` (never a tool's text, a skill's expanded text, a sub-agent or a
+    compaction summary)."""
+    if is_prompt is None:
+        is_prompt = _transcript_tools()._is_real_user_prompt
+    for row in rows[start:]:
+        if founders_message(row, is_prompt) and any(NO_ASK_LINE.search(t) for t in _founder_texts(row)):
+            return True
+    return False
+
+
 def host_line_in(
     rows: list[dict[str, Any]], start: int, gate: str, kinds: tuple[str, ...], is_prompt: Any = None
 ) -> bool:
@@ -436,11 +462,7 @@ def host_line_in(
     for row in rows[start:]:
         if not founders_message(row, is_prompt):
             continue
-        content = (row.get("message") or {}).get("content")
-        texts = [content] if isinstance(content, str) else []
-        if isinstance(content, list):
-            texts = [b["text"] for b in content if isinstance(b, dict) and isinstance(b.get("text"), str)]
-        if any(line.search(t) for t in texts):
+        if any(line.search(t) for t in _founder_texts(row)):
             return True
     return False
 
@@ -514,6 +536,9 @@ def decide(payload: dict[str, Any], rows: list[dict[str, Any]] | None = None) ->
     if rows is None:
         rows = tools.read_transcript(transcript)
     if _retried(rows, tools._is_real_user_prompt, context):
+        return None
+    # The request said not to ask: nothing is put, and the figure's no-ask default is taken by the scripts.
+    if no_ask_in(rows, _window_start(rows, tools._is_real_user_prompt), tools._is_real_user_prompt):
         return None
     # The founder's own request answered it: a host line in a real prompt of this request.
     if host_line_in(

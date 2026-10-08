@@ -111,10 +111,10 @@ def require_or_exit(
     def fn(ctx: Any, led: dict[str, Any], st: dict[str, Any]) -> dict[str, Any]:
         for key in keys:
             if gates.require_terminal(ctx, led, key, by=by) == "waiting":
-                return {"key": key, "needs": gates.needs_input(ctx, led, key)}
+                return {"key": key, "exit": gates.waiting_exit(ctx, led, key)}
         for key, entry in sorted((led.get("gates") or {}).items()):
             if isinstance(entry, dict) and entry.get("state") == "open" and entry.get("gate") in open_follow_ups:
-                return {"key": key, "needs": gates.needs_input(ctx, led, key)}
+                return {"key": key, "exit": gates.waiting_exit(ctx, led, key)}
         return {}
 
     try:
@@ -123,15 +123,11 @@ def require_or_exit(
         exit_on_rejection(gates, e)
     if out.get("key"):
         entry = (gates.load_ledger(paths).get("gates") or {}).get(out["key"])
-        sys.stdout.write(
-            json.dumps({"status": "waiting", "blocked_by_gate": out["key"], "needs_input": [out["needs"]]}) + "\n"
-        )
-        print(
+        gates.print_waiting_and_exit(
+            out["exit"],
             f"Waiting: {out['key']} {_why(entry)}; ask it, record the answer, then run this again. Nothing was "
             "written.",
-            file=sys.stderr,
         )
-        sys.exit(10)
 
 
 def refuse_without_run_id(output: str | None, run_id: str | None) -> None:
@@ -179,6 +175,20 @@ def period_question(run_dir: str, run_id: str | None, params: list[str]) -> None
         out = gates.transact(paths, fn)
     except Exception as e:  # noqa: BLE001
         exit_on_rejection(gates, e)
+    if out.get("no_ask"):
+        waiting = [w["gate"] for w in out.get("waiting") or []]
+        if not waiting:
+            # The request answered every period: name the field to write (PERIOD_NOT_WRITTEN), as on a re-run.
+            period_question(run_dir, run_id, params)
+            return
+        payload = {k: out[k] for k in ("status", "no_ask", "waiting", "stop")}
+        gates.print_waiting_and_exit(
+            (
+                gates.NO_ASK_EXIT,
+                {**payload, "blocked_by_gate": waiting[0]},
+                f"Waiting (the request said not to ask): {', '.join(waiting)}. {gates.NO_ASK_STOP}",
+            )
+        )
     sys.stdout.write(
         json.dumps({"status": "waiting", "blocked_by_gate": keys[0], "needs_input": out.get("needs_input") or []})
         + "\n"
@@ -188,7 +198,7 @@ def period_question(run_dir: str, run_id: str | None, params: list[str]) -> None
         "into inputs.json (founder_stated_inputs_period), then run this again. Nothing was written.",
         file=sys.stderr,
     )
-    sys.exit(10)
+    sys.exit(gates.EXIT_CODES["waiting"])
 
 
 def revision_owed(run_dir: str, run_id: str | None, unoffered: list[str]) -> None:
@@ -208,6 +218,9 @@ def revision_owed(run_dir: str, run_id: str | None, unoffered: list[str]) -> Non
             gates.open_from_writer(paths, [REVISION_GATE], "record_revision_answer.py")
     except Exception as e:  # noqa: BLE001
         exit_on_rejection(gates, e)
+    if gates.no_ask(gates.load_ledger(paths)):
+        stop = gates.transact(paths, lambda ctx, led, st: gates.waiting_exit(ctx, led, REVISION_GATE))
+        gates.print_waiting_and_exit(stop)
     message = (
         "the outside review raised a high-severity challenge and the founder's answer to Step 6d's question "
         "(deliver, or revise once) is not recorded for it; ask it and record it with record_revision_answer.py, "
@@ -218,7 +231,7 @@ def revision_owed(run_dir: str, run_id: str | None, unoffered: list[str]) -> Non
         + "\n"
     )
     print(f"Waiting: {message}. Nothing was written.", file=sys.stderr)
-    sys.exit(10)
+    sys.exit(gates.EXIT_CODES["waiting"])
 
 
 def answers_view(run_dir: str) -> dict[str, Any] | None:
@@ -258,6 +271,15 @@ def refuse_open_gates(ledger: Any) -> None:
     open_now = rs.open_gate_ids(paths)
     if not open_now:
         return
+    if gates.no_ask(gates.load_ledger(paths)):
+        # The request said not to ask: what it carried is applied; anything still open leaves the run waiting.
+        try:
+            stop = gates.settle_open_for_no_ask(paths)
+        except Exception as e:  # noqa: BLE001 -- a request stop still pending (REQUEST_DECLINED): exit 1, no trace
+            sys.exit(_run_ref.report_failure(e))
+        if stop is None:
+            return
+        gates.print_waiting_and_exit(stop)
     key = open_now[0]
     needs = gates.transact(paths, lambda ctx, led, st: gates.needs_input(ctx, led, key))
 
@@ -283,7 +305,7 @@ def refuse_open_gates(ledger: Any) -> None:
     print(
         f"Error: {key} was asked and never recorded; {how}, then compose again. Nothing was written.", file=sys.stderr
     )
-    sys.exit(10)
+    sys.exit(gates.EXIT_CODES["waiting"])
 
 
 def coaching_pending(ledger: Any) -> None:
