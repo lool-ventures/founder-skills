@@ -27,7 +27,10 @@ and the added token only, never which private file matched or any of its text.
                   decimals, percentages, multiples, integers of 3+ digits) that also occurs in the
                   local private sources. Whole-token: 385 never matches inside 1385 or $3,850.
   5. verbatim   — LOCAL ONLY. A 6-word run of added text that also occurs in the private sources and
-                  not in our own tracked code.
+                  not in our own tracked code. A machine recording (RECORDING_PREFIXES) is matched
+                  only against the founder-supplied DOCUMENTS among the sources (INPUT_DOC_EXTS, and
+                  .md/.txt beside one): kept run transcripts and reports share the skills' own prose
+                  with every recording, while a document quoted into a recording is the leak.
                   Layers 4-5 skip a file listed in GENERATED_FILES (generated from a scanned source and
                   held equal to it by a test).
   6. figure-provenance — everywhere. A figure token on a line that also says where real data came
@@ -64,6 +67,8 @@ import re
 import shutil
 import subprocess
 import sys
+import xml.etree.ElementTree as ET
+import zipfile
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 
@@ -209,11 +214,30 @@ DEFAULT_CACHE_DIR = os.path.join(os.path.expanduser("~"), ".cache", "founder-ski
 SYNTHETIC_MARKER = "privacy-guard: synthetic"
 NGRAM = 6
 # Bump when what the index holds changes, so a cached index built by older logic is never reused.
-INDEX_VERSION = "2"
+INDEX_VERSION = "3"
 # Machine-generated recordings of synthetic runs: their timings, byte and token counts collide with
 # private figures by chance, and they narrate those runs in the skills' own words ("the founder's",
-# "the deck's"), so the figure and figure-provenance layers skip them. Verbatim and names still scan them.
-FIGURE_LAYER_SKIP_PREFIXES = ("cowork-tests/cassettes/",)
+# "the deck's"), so the figure and figure-provenance layers skip them. Verbatim and names still scan
+# them; verbatim against the documents-only gram set (see INPUT_DOC_EXTS), because the same skill
+# prose sits in every kept run transcript and report, while a founder document quoted into a
+# recording is the leak the layer exists for there.
+RECORDING_PREFIXES = ("cowork-tests/cassettes/",)
+# Founder-supplied documents among the private sources: their grams form `grams_inputs`. Kept apart
+# from layer 1's DOC_EXTS (which governs files tracked in the repo, and has no .csv).
+INPUT_DOC_EXTS = frozenset({".pdf", ".csv", ".docx", ".pptx", ".xlsx"})
+# A .md/.txt is an input only when its OWN directory holds an INPUT_DOC_EXTS file and its lowercased
+# basename carries none of these: they are our skills' own output names (reports, hand-offs, run
+# records), which a run writes beside the founder's document.
+OUTPUT_NAME_MARKERS = (
+    "report", "coaching", "checklist", "slide_review", "compose", "handoff", "sizing", "validation",
+    "ledger", "reconcil", "stage_profile", "explorer", "events", "transcript", "result", "session",
+    "run_status", "gates", "prompt", "dispatch", "redteam", "receipt", "inputs", "instruments",
+    "scenario", "sweep", "counsel", "cap_state", "model_data", "runway", "unit_economics", "landscape",
+    "moat", "positioning", "verification", "research", "sensitivity", "fund_profile", "conflicts",
+    "score_dimensions",
+)  # fmt: skip
+_OOXML_EXTS = frozenset({".docx", ".pptx", ".xlsx"})
+_LEGACY_OFFICE_EXTS = frozenset({".xls", ".doc", ".ppt"})
 # Files generated from a tracked source, each held equal to it by a test. Their figures and text come
 # only from that source, which every layer scans, so the figure and verbatim layers skip the generated
 # copy: its layout puts our own words beside key names ("label", "question") in runs a founder's form
@@ -270,6 +294,26 @@ def _words(text: str) -> list[str]:
     return [t.strip(".'-") for t in toks if t.strip(".'-")]
 
 
+_JSON_U_ESCAPE = re.compile(r"\\u([0-9a-fA-F]{4})")
+_JSON_WS_ESCAPE = re.compile(r"\\[nrtbf]")
+_JSON_CHAR_ESCAPE = re.compile(r'\\(["\\/])')
+
+
+def _unescape_json(text: str, passes: int = 3) -> str:
+    """Decode JSON string escapes in a recording line, to a fixed point (at most `passes`: a cassette's
+    events are JSON strings inside JSON, so a line break can arrive escaped twice). A document carries no
+    escapes, so without this a line break it had becomes `\\n` + word, one token, and the 6-word run the
+    document holds across that break is never seen. Whitespace escapes become a space."""
+    for _ in range(passes):
+        nxt = _JSON_U_ESCAPE.sub(lambda m: chr(int(m.group(1), 16)), text)
+        nxt = _JSON_WS_ESCAPE.sub(" ", nxt)
+        nxt = _JSON_CHAR_ESCAPE.sub(r"\1", nxt)
+        if nxt == text:
+            break
+        text = nxt
+    return text
+
+
 def _h(value: str) -> str:
     return hashlib.blake2b(value.encode("utf-8"), digest_size=10).hexdigest()
 
@@ -290,6 +334,7 @@ class SourcesSpec:
 class PrivateIndex:
     figures: set[str] = field(default_factory=set)  # hashes of normalised figures
     grams: set[str] = field(default_factory=set)  # hashes of 6-word runs, our own code's removed
+    grams_inputs: set[str] = field(default_factory=set)  # the same, from founder documents only
     allow: set[str] = field(default_factory=set)  # normalised figures accepted locally
 
 
@@ -312,24 +357,151 @@ def load_sources(path: str) -> SourcesSpec | None:
     return SourcesSpec(roots, excludes, text)
 
 
-_BINARY_EXTS = _TEXT_SKIP_EXTS - {".pdf"}
+_BINARY_EXTS = _TEXT_SKIP_EXTS - {".pdf"} - _OOXML_EXTS
 
 
-def _source_files(spec: SourcesSpec) -> list[str]:
+def _walk_sources(spec: SourcesSpec) -> list[str]:
     files: list[str] = []
     for root in spec.roots:
         for dirpath, _dirs, names in os.walk(root):
             for n in names:
                 fp = os.path.join(dirpath, n)
-                if any(ex in fp for ex in spec.excludes):
-                    continue
-                if _ext(fp) in _BINARY_EXTS or _ext(fp) in {".xlsx", ".xls", ".docx", ".doc", ".pptx", ".ppt"}:
-                    continue
-                files.append(fp)
+                if not any(ex in fp for ex in spec.excludes):
+                    files.append(fp)
     return sorted(files)
 
 
-def _source_text(fp: str, notes: list[str]) -> str:
+def _source_files(spec: SourcesSpec, notes: list[str] | None = None) -> list[str]:
+    """Every readable source file (text, PDF, .docx/.pptx/.xlsx). Binary office formats with no stdlib
+    reader are dropped, and counted into `notes` (never named: a note prints, a path could disclose)."""
+    files: list[str] = []
+    legacy: dict[str, int] = {}
+    for fp in _walk_sources(spec):
+        e = _ext(fp)
+        if e in _LEGACY_OFFICE_EXTS:
+            legacy[e] = legacy.get(e, 0) + 1
+            continue
+        if e in _BINARY_EXTS:
+            continue
+        files.append(fp)
+    if legacy and notes is not None:
+        counts = ", ".join(f"{n} {e}" for e, n in sorted(legacy.items()))
+        notes.append(f"privacy-guard: {counts} source file(s) skipped (binary office format, no stdlib reader)")
+    return files
+
+
+def _input_files(files: list[str]) -> set[str]:
+    """The founder-supplied documents among `files`: INPUT_DOC_EXTS anywhere, and a .md/.txt whose own
+    directory holds one and whose name carries no OUTPUT_NAME_MARKERS."""
+    doc_dirs = {os.path.dirname(fp) for fp in files if _ext(fp) in INPUT_DOC_EXTS}
+    out: set[str] = set()
+    for fp in files:
+        e, base = _ext(fp), os.path.basename(fp).lower()
+        if e in INPUT_DOC_EXTS or (
+            e in {".md", ".txt"} and os.path.dirname(fp) in doc_dirs and not any(m in base for m in OUTPUT_NAME_MARKERS)
+        ):
+            out.add(fp)
+    return out
+
+
+_OOXML_MAX_PART = 50_000_000
+
+
+def _local(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1]
+
+
+def _paragraph_texts(root: ET.Element) -> list[str]:
+    """docx/pptx: each paragraph's runs joined with no separator (a word can be split across runs)."""
+    out = []
+    for el in root.iter():
+        if _local(el.tag) == "p":
+            out.append("".join(t.text or "" for t in el.iter() if _local(t.tag) == "t"))
+    return out
+
+
+def _xlsx_texts(zf: zipfile.ZipFile, parts: list[str]) -> list[str]:
+    """Cells in sheet and row order. A shared-string cell's `v` is an index into the string table, so it
+    is resolved, never read as a value (it would add a spurious number to the index)."""
+    shared: list[str] = []
+    if "xl/sharedStrings.xml" in parts:
+        sst = ET.fromstring(zf.read("xl/sharedStrings.xml"))
+        shared = [
+            "".join(t.text or "" for t in si.iter() if _local(t.tag) == "t") for si in sst if _local(si.tag) == "si"
+        ]
+    out: list[str] = []
+    for part in parts:
+        if not (part.startswith("xl/worksheets/") and part.endswith(".xml")):
+            continue
+        for row in ET.fromstring(zf.read(part)).iter():
+            if _local(row.tag) != "row":
+                continue
+            cells = []
+            for c in row:
+                if _local(c.tag) != "c":
+                    continue
+                kind = c.get("t")
+                if kind == "inlineStr":
+                    cells.append("".join(t.text or "" for t in c.iter() if _local(t.tag) == "t"))
+                    continue
+                v = next((x.text for x in c if _local(x.tag) == "v"), None)
+                if v is None:
+                    continue
+                if kind == "s":
+                    i = int(v) if v.strip().isdigit() else -1
+                    cells.append(shared[i] if 0 <= i < len(shared) else "")
+                else:
+                    cells.append(v)
+            out.append(" ".join(cells))
+    return out
+
+
+_OLE_MAGIC = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+
+
+def _ooxml_text(fp: str) -> str | None:
+    """Text of a .docx/.pptx/.xlsx with the stdlib only; None when it cannot be read (encrypted: a
+    password-protected OOXML file is an OLE container; corrupt; truncated). These are untrusted bytes, so
+    any exception means "unreadable" and is counted by the caller, never raised and never silent."""
+
+    def order(name: str) -> tuple[str, int]:
+        m = re.search(r"(\d+)\.xml$", name)
+        return (re.sub(r"\d+\.xml$", "", name), int(m.group(1)) if m else 0)
+
+    try:
+        with open(fp, "rb") as fh:
+            if fh.read(8) == _OLE_MAGIC:
+                return None
+        with zipfile.ZipFile(fp) as zf:
+            infos = [i for i in zf.infolist() if i.file_size <= _OOXML_MAX_PART]
+            parts = sorted((i.filename for i in infos), key=order)
+            e = _ext(fp)
+            if e == ".xlsx":
+                return "\n".join(_xlsx_texts(zf, parts))
+            if e == ".docx":
+                wanted = [
+                    p
+                    for p in parts
+                    if re.match(r"word/(document|header\d*|footer\d*|footnotes|endnotes|comments)\.xml$", p)
+                ]
+            else:
+                wanted = [p for p in parts if re.match(r"ppt/(slides/slide|notesSlides/notesSlide)\d+\.xml$", p)]
+            out: list[str] = []
+            for part in wanted:
+                out.extend(_paragraph_texts(ET.fromstring(zf.read(part))))
+            return "\n".join(out)
+    except Exception:  # zlib.error, RuntimeError (encrypted entry), BadZipFile, ParseError, EOFError, ...
+        return None
+
+
+def _source_text(fp: str, notes: list[str], unreadable: dict[str, int] | None = None) -> str:
+    if _ext(fp) in _OOXML_EXTS:
+        text = _ooxml_text(fp)
+        if text is None:
+            if unreadable is not None:
+                unreadable[_ext(fp)] = unreadable.get(_ext(fp), 0) + 1
+            return ""
+        return text
     if _ext(fp) == ".pdf":
         if not shutil.which("pdftotext"):
             if "pdftotext" not in " ".join(notes):
@@ -379,6 +551,19 @@ def _own_code_texts() -> Iterable[str]:
             continue
 
 
+def _pdftotext_id() -> str:
+    """Absent, or its path and version banner: part of the index cache key."""
+    path = shutil.which("pdftotext")
+    if not path:
+        return "absent"
+    try:
+        r = subprocess.run([path, "-v"], capture_output=True, text=True, timeout=10)
+        banner = (r.stderr or r.stdout).strip().splitlines()[:1]
+    except (OSError, subprocess.SubprocessError):
+        banner = []
+    return path + "|" + (banner[0] if banner else "")
+
+
 def _own_tree_id() -> str:
     r = subprocess.run(["git", "rev-parse", "-q", "origin/main^{tree}"], capture_output=True, text=True)
     return r.stdout.strip() if r.returncode == 0 else "none"
@@ -390,14 +575,23 @@ def build_private_index(
     cache_dir: str = DEFAULT_CACHE_DIR,
     allowlist_path: str = DEFAULT_ALLOWLIST_FILE,
 ) -> PrivateIndex:
-    """Hashes of every figure and 6-word run in the private sources, minus our own code's runs.
+    """Hashes of every figure and 6-word run in the private sources, minus our own code's runs, and the
+    6-word runs of the founder documents among them (`grams_inputs`, see INPUT_DOC_EXTS).
 
-    Cached (hashes only) outside the repo; the key covers the sources config, every source file's
-    path/size/mtime and, when our own code is read from git, the tree it came from."""
-    files = _source_files(spec)
+    One walk, one read per file, one cache file holding both gram sets (hashes only) outside the repo;
+    the key covers the sources config, every source file's path/size/mtime (which also fixes which files
+    are documents) and, when our own code is read from git, the tree it came from."""
+    notes: list[str] = []
+    files = _source_files(spec, notes)
+    inputs = _input_files(files)
     sig = hashlib.sha256()
     sig.update(INDEX_VERSION.encode())
     sig.update(spec.config_text.encode())
+    # What can be read, and which files are documents, both change the gram sets without touching a file:
+    # a PDF-less index built without pdftotext must not be reused once it is installed, and an edit to
+    # INPUT_DOC_EXTS / OUTPUT_NAME_MARKERS must not reuse a cache split under the old rule.
+    sig.update(f"pdftotext={_pdftotext_id()}\0".encode())
+    sig.update(("inputs:" + "\0".join(sorted(inputs)) + "\0").encode())
     for fp in files:
         st = os.stat(fp)
         sig.update(f"{fp}\0{st.st_size}\0{st.st_mtime_ns}\0".encode())
@@ -410,27 +604,39 @@ def build_private_index(
         with open(cache, encoding="utf-8") as fh:
             data = json.load(fh)
         idx.figures, idx.grams = set(data["figures"]), set(data["grams"])
+        idx.grams_inputs = set(data["grams_inputs"])
     else:
-        notes: list[str] = []
+        unreadable: dict[str, int] = {}
         for fp in files:
-            text = _source_text(fp, notes)
+            text = _source_text(fp, notes, unreadable)
             if not text:
                 continue
             for norm, _raw in extract_figures(text):
                 idx.figures.add(_h(norm))
-            idx.grams.update(_h(g) for g in _grams(_words(text)))
-        for note in notes:
-            print(note, file=sys.stderr)
+            hashed = {_h(g) for g in _grams(_words(text))}
+            idx.grams.update(hashed)
+            if fp in inputs:
+                idx.grams_inputs.update(hashed)
+        if unreadable:
+            counts = ", ".join(f"{n} {e}" for e, n in sorted(unreadable.items()))
+            notes.append(f"privacy-guard: {counts} source file(s) unreadable (encrypted or corrupt); not indexed")
         # Our own code is public: a figure or a 6-word run that also occurs there is not a leak signal.
         own_texts: Iterable[str] = own_code_texts if own_code_texts is not None else _own_code_texts()
         for own in own_texts:
             if idx.grams:
-                idx.grams.difference_update(_h(g) for g in _grams(_words(own or "")))
+                own_grams = {_h(g) for g in _grams(_words(own or ""))}
+                idx.grams.difference_update(own_grams)
+                idx.grams_inputs.difference_update(own_grams)
             if idx.figures:
                 idx.figures.difference_update(_h(n) for n, _ in extract_figures(own or ""))
         os.makedirs(cache_dir, exist_ok=True)
         with open(cache, "w", encoding="utf-8") as f:
-            json.dump({"figures": sorted(idx.figures), "grams": sorted(idx.grams)}, f)
+            json.dump(
+                {"figures": sorted(idx.figures), "grams": sorted(idx.grams), "grams_inputs": sorted(idx.grams_inputs)},
+                f,
+            )
+    for note in notes:
+        print(note, file=sys.stderr)
     if os.path.isfile(allowlist_path):
         with open(allowlist_path, encoding="utf-8") as fh:
             for line in fh:
@@ -449,15 +655,43 @@ def find_figure_leaks(path: str, lines: list[tuple[int, str]], idx: PrivateIndex
     return out
 
 
-def find_verbatim_leaks(path: str, lines: list[tuple[int, str]], idx: PrivateIndex) -> list[Finding]:
-    """A 6-word run of the added text found in the private sources. Runs may span added lines of one file."""
+def _is_line_numbering(words: list[str]) -> bool:
+    """Six 1-2 digit integers each one more than the last: the `cat -n` / line-number shape a recording's
+    tool results carry once its `\\n` escapes are decoded, and a numbered column in a spreadsheet. It is
+    the only all-integer shape that collided (2 grams, one staged cassette line); any other run of small
+    integers still matches."""
+    if not all(w.isdigit() and len(w) <= 2 for w in words):
+        return False
+    nums = [int(w) for w in words]
+    return all(nums[i + 1] == nums[i] + 1 for i in range(len(nums) - 1))
+
+
+def is_recording(path: str) -> bool:
+    """A cassette file under RECORDING_PREFIXES. Any other file placed there is hand-written: every
+    consumer globs `*.cassette.json`, so the suffix is what makes a file a recording."""
+    return path.startswith(RECORDING_PREFIXES) and path.endswith(".cassette.json")
+
+
+def find_verbatim_leaks(
+    path: str, lines: list[tuple[int, str]], idx: PrivateIndex, all_sources: bool = False
+) -> list[Finding]:
+    """A 6-word run of the added text found in the private sources. Runs may span added lines of one file.
+
+    A recording is matched against the founder documents only (`grams_inputs`), its JSON escapes decoded
+    first; `all_sources=True` matches it against every source instead (the triage count, never a gate)."""
     out = []
-    flat: list[tuple[int, str]] = [(n, w) for n, text in lines for w in _words(text)]
+    recording = is_recording(path) and not all_sources
+    grams = idx.grams_inputs if recording else idx.grams
+    flat: list[tuple[int, str]] = [
+        (n, w) for n, text in lines for w in _words(_unescape_json(text) if recording else text)
+    ]
     seen_lines: set[int] = set()
     for i in range(len(flat) - NGRAM + 1):
         gram = " ".join(w for _, w in flat[i : i + NGRAM])
         lineno = flat[i][0]
-        if lineno not in seen_lines and _h(gram) in idx.grams:
+        if recording and _is_line_numbering([w for _, w in flat[i : i + NGRAM]]):
+            continue  # line numbering: no text to leak
+        if lineno not in seen_lines and _h(gram) in grams:
             seen_lines.add(lineno)
             out.append(Finding(f"{path}:{lineno}", "verbatim", "a 6-word run matches text in local private sources"))
     return out
@@ -471,7 +705,7 @@ _PROVENANCE_PHRASES = re.compile(
 
 
 def find_figure_provenance(path: str, lines: list[tuple[int, str]]) -> list[Finding]:
-    if path in _SELF_EXEMPT or path.startswith(FIGURE_LAYER_SKIP_PREFIXES):
+    if path in _SELF_EXEMPT or is_recording(path):
         return []
     out = []
     for lineno, text in lines:
@@ -518,7 +752,7 @@ def scan_added(
     findings: list[Finding] = []
     for path, lines in added.items():
         if idx is not None and path not in _SELF_EXEMPT and path not in GENERATED_FILES:
-            if not path.startswith(FIGURE_LAYER_SKIP_PREFIXES):
+            if not is_recording(path):
                 findings.extend(find_figure_leaks(path, lines, idx))
             findings.extend(find_verbatim_leaks(path, lines, idx))
         findings.extend(find_figure_provenance(path, lines))
@@ -577,19 +811,25 @@ def _report(findings: list[Finding], warn_layers: set[str]) -> int:
 
 
 def _verbatim_report(added: dict[str, list[tuple[int, str]]], idx: PrivateIndex | None) -> int:
-    """Verbatim finding COUNTS per file, largest first, for triage. Never prints text."""
+    """Verbatim finding COUNTS per file, largest first, for triage. Never prints text.
+
+    A recording's row is `<blocking count>  <path>  (all sources: <count>)`: the first number is what
+    the gate sees (founder documents only), the second keeps the collision with kept runs measured."""
     if idx is None:
         print("privacy-guard: no local private-sources file; nothing to report", file=sys.stderr)
         return 0
-    counts = {
-        p: len(find_verbatim_leaks(p, lines, idx))
-        for p, lines in added.items()
-        if p not in _SELF_EXEMPT and p not in GENERATED_FILES
-    }
-    rows = sorted(((n, p) for p, n in counts.items() if n), key=lambda r: (-r[0], r[1]))
-    for n, p in rows:
-        print(f"{n:6d}  {p}")
-    print(f"total {sum(n for n, _ in rows)} in {len(rows)} file(s)")
+    rows: list[tuple[int, str, int | None]] = []
+    for p, lines in added.items():
+        if p in _SELF_EXEMPT or p in GENERATED_FILES:
+            continue
+        n = len(find_verbatim_leaks(p, lines, idx))
+        n_all = len(find_verbatim_leaks(p, lines, idx, all_sources=True)) if is_recording(p) else None
+        if n or n_all:
+            rows.append((n, p, n_all))
+    rows.sort(key=lambda r: (-r[0], -(r[2] or 0), r[1]))
+    for n, p, n_all in rows:
+        print(f"{n:6d}  {p}" + (f"  (all sources: {n_all})" if n_all is not None else ""))
+    print(f"total {sum(n for n, _, _ in rows)} in {sum(1 for r in rows if r[0])} file(s)")
     return 0
 
 
