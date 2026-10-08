@@ -509,14 +509,41 @@ def test_a_page_from_an_earlier_revision_does_not_count(tmp_path: Path) -> None:
 # --- fixed tables and the write path -----------------------------------------------------------------
 
 
-def test_resumable_is_conservative_on_every_surface() -> None:
+def test_resumable_is_true_only_where_a_separate_process_resumed() -> None:
+    # Only `cli_artifacts_root` was shown to resume from a new process over the same root; every other
+    # surface stays conservative until it is measured.
     assert rs.RESUMABLE_BY_SURFACE == {
         "cli": "same_session",
-        "cli_artifacts_root": "same_session",
+        "cli_artifacts_root": True,
         "cowork_local": "same_session",
         "cowork_cloud": "same_session",
     }
-    assert True not in rs.RESUMABLE_BY_SURFACE.values()
+    assert [k for k, v in rs.RESUMABLE_BY_SURFACE.items() if v is True] == ["cli_artifacts_root"]
+
+
+@pytest.mark.parametrize(
+    ("env", "surface", "expected"),
+    [
+        ({}, "cli", "same_session"),
+        ({"COWORK_ARTIFACTS_ROOT": "<root>"}, "cli_artifacts_root", True),
+        ({"CLAUDE_CODE_REMOTE": "true"}, "cowork_cloud", "same_session"),
+    ],
+)
+def test_waiting_status_says_resumable_per_surface(
+    tmp_path: Path, env: dict[str, str], surface: str, expected: bool | str
+) -> None:
+    root = tmp_path / "artifacts"
+    root.mkdir()
+    env = {k: (str(root) if v == "<root>" else v) for k, v in env.items()}
+    proc = h.run(h.RUN_STATUS, "start", "--skill", "deck-review", "--artifacts-root", str(root), env=env)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    run_id = json.loads(proc.stdout)["run_id"]
+    assert h.ledger(root, run_id)["surface"] == surface
+    assert h.bind(root, run_id, root / "deck-review-example-co", "example-co").returncode == 0
+    assert h.record(root, run_id, "open", "--gate", "ctx_basics.stage").returncode == 0
+    st = h.status(root, run_id)
+    assert st["status"] == "waiting"
+    assert st["resumable"] == expected
 
 
 @pytest.mark.parametrize(

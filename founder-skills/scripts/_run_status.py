@@ -106,10 +106,12 @@ MESSAGES: dict[str, str] = {
 
 # Whether a `waiting` run can be resumed, per surface. Conservative: until a new session has been shown
 # to see an earlier session's outputs on a surface, a waiting run there resumes only in the session
-# that started it. An entry moves to `true` only by a deliberate edit.
+# that started it. An entry moves to `true` only by a deliberate edit. `cli_artifacts_root` is `true`:
+# a run started with COWORK_ARTIFACTS_ROOT set was resumed by later, separate CLI processes over the
+# same root (deck review, an IC simulation's Decline, financial model review's extracted values).
 RESUMABLE_BY_SURFACE: dict[str, bool | str] = {
     "cli": "same_session",
-    "cli_artifacts_root": "same_session",
+    "cli_artifacts_root": True,
     "cowork_local": "same_session",
     "cowork_cloud": "same_session",
 }

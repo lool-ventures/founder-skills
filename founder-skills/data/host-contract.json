@@ -2730,7 +2730,7 @@
   ],
   "resumable": {
     "cli": "same_session",
-    "cli_artifacts_root": "same_session",
+    "cli_artifacts_root": true,
     "cowork_cloud": "same_session",
     "cowork_local": "same_session"
   },

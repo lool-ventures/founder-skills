@@ -79,10 +79,12 @@ No grade, score or verdict changed for the same inputs. What moved, per skill wh
     company takes over the folder (by starting there, resuming, or reopening a finished run), the earlier run's
     status turns `superseded` (`superseded_by`, `superseded_at`), so it no longer promises files that were removed
     or replaced.
-  - **Resume, in the same session only.** A waiting run continues with `FS_HOST_RUN_ID=<id>`, every
-    `FS_HOST_` line of the first request, and the answer to the waiting question; `resume_prompt` carries every
-    line but the new answer. Whether a new session can see an earlier session's files has not been established on any surface,
-    so the status says `resumable: "same_session"` everywhere. An unattended host should answer up front.
+  - **Resume.** A waiting run continues with `FS_HOST_RUN_ID=<id>`, every `FS_HOST_` line of the first
+    request, and the answer to the waiting question; `resume_prompt` carries every line but the new answer. A run
+    started with `COWORK_ARTIFACTS_ROOT` set can be resumed by a later, separate invocation over the same root,
+    and its status says `resumable: true`. Everywhere else resume works in the same session only
+    (`resumable: "same_session"`), since whether a new session can see an earlier session's files has not been
+    established there; an unattended host there should answer up front.
   - **Each resumed invocation is recorded,** with the files in the run folder it left untouched and the ones it
     rewrote, and how.
   - **`compose_result.json`** beside the report, once compose has run on a run with a record: compose's exit

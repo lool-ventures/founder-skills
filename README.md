@@ -378,9 +378,11 @@ company there.
     <every FS_HOST_ line of the first request>
     FS_HOST_ANSWER <the waiting question>=<option>
 
-`resume_prompt` in the status carries the first three parts. **Resume works in the same session only**
-(`resumable: "same_session"` on every surface): whether a new session can see an earlier session's files
-has not been established. An unattended host should therefore answer up front. Only a `waiting` run
+`resume_prompt` in the status carries the first three parts. **A run started with `COWORK_ARTIFACTS_ROOT` set
+can be resumed by a later, separate invocation over the same root** (`resumable: true` on that surface).
+**Everywhere else, resume works in the same session only** (`resumable: "same_session"`): whether a new
+session there can see an earlier session's files has not been established, so an unattended host there
+should answer up front. Only a `waiting` run
 of the same skill resumes (a waiting run of another skill is also `RUN_ID_IN_USE`); a `running` one is refused
 `RUN_ID_IN_USE` (start a fresh run), a finished one `RUN_ID_FINISHED`, and a run refused
 `PRE_ANSWER_INVALID` starts afresh under the same id.
