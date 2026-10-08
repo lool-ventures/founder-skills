@@ -238,7 +238,7 @@ mechanics** (a logistics marketplace ⇒ `marketplace`; a freight SaaS ⇒ `saas
 sector has no exact enum value and which one you substituted, and treat the resulting benchmark comparisons
 as directional.
 
-**Each question is a recorded gate: open, ask, answer.** Open them in one call before asking (with the mode and fund, Mode Selection below); ask from the printed `needs_input`, then record each reply with the `answer_command` it printed: the mode and fund first, then only the basics the mode and materials leave. A value the request or the materials give is recorded, not asked: `python3 "$SHARED_SCRIPTS/record_gate_answer.py" default --run-id "$RUN_ID" --artifacts-root "$ARTIFACTS_ROOT" --gate <gate> --reason stated_in_request --answer-id <option>` (or `derived_from_materials` / `inferred` with `--answer-id use_derived --value "<value>"`; under Auto-pilot a name, sector or geography with no signal takes `no_signal_marked_to_confirm` with `not_sure`, or `working_title` for the name; a stage with no signal is asked, under Auto-pilot too). A `Series B+` reply opens the follow-up (`ctx_stage_detail`): ask and record it the same way. <!-- gate: ctx_stage_detail -->
+**Each question is a recorded gate: open, ask, answer.** Open them in one call before asking (with the mode and fund, Mode Selection below); ask from the printed `needs_input`, then record each reply with the `answer_command` it printed: the mode and fund first, then only the basics the mode and materials leave. A value the request or the materials give is recorded, not asked: `python3 "$SHARED_SCRIPTS/record_gate_answer.py" default --run-id "$RUN_ID" --artifacts-root "$ARTIFACTS_ROOT" --gate <gate> --reason stated_in_request --answer-id <option>` (or `derived_from_materials` / `inferred` with `--answer-id use_derived --value "<value>"`, a stage its id, no `--value`; under Auto-pilot a name, sector or geography with no signal takes `no_signal_marked_to_confirm` with `not_sure`, or `working_title` for the name; a stage with no signal is asked, under Auto-pilot too). A `Series B+` reply opens `ctx_stage_detail`, recorded the same way. <!-- gate: ctx_stage_detail -->
 
 ```bash
 python3 "$SHARED_SCRIPTS/record_gate_answer.py" open --run-id "$RUN_ID" --artifacts-root "$ARTIFACTS_ROOT" \
@@ -958,8 +958,7 @@ cat "$HANDOFF_DIR/score_dimensions_output.json" | \
 
 `score_dimensions.json` now carries the computed verdict. **This gate fires ONLY when that
 computed verdict is a decline/fatal-flaw outcome** (`pass` or `hard_pass`) — skip it entirely
-when the verdict is `invest` or `more_diligence`; a stop on every run is a tax the founder
-shouldn't pay on a run that doesn't need one.
+when the verdict is `invest` or `more_diligence`.
 
 Open the question; the script reads `score_dimensions.json`'s `["summary"]["verdict"]` — **trigger from this producer data, never from your own prose read of the discussion or partner assessments**:
 
@@ -967,11 +966,10 @@ Open the question; the script reads `score_dimensions.json`'s `["summary"]["verd
 python3 "$SHARED_SCRIPTS/record_gate_answer.py" open --run-id "$RUN_ID" --artifacts-root "$ARTIFACTS_ROOT" --gate ic_decline_confirmation
 ```
 
-Exit 11 (not owed: `invest` or `more_diligence`): skip the rest of this step and go straight to Step 9. `"applied": "pre_answer"`: the request answered it; go to Step 9 without asking. `RUN_FINISHED`: this simulation was already delivered; new materials start a new simulation (Step 0, without its `FS_HOST_RUN_ID`).
+Exit 11 (not owed: `invest` or `more_diligence`): skip the rest of this step and go straight to Step 9. `"applied": "pre_answer"`: the request answered it; go to Step 9 without asking. `RUN_FINISHED`: this simulation was already delivered; new materials start a new simulation (Step 0, without its `FS_HOST_RUN_ID`). Exit 2 `GATE_UNDECIDABLE`: the scores are unreadable or another run's; re-run Step 8 (same `RUN_ID`, resume or not), then this step.
 
 If it is `pass` or `hard_pass`, **STOP before composing the report** and confirm with the founder.
-**Two separate steps — do not combine them** (same shape as every other two-step gate in this
-fleet):
+**Two separate steps — do not combine them:**
 
 **Step A: Output a chat message** stating, in plain language and rendered in words — **never the
 bare `pass`/`hard_pass` token**, per the verdict-in-words rule in the workflow preamble and

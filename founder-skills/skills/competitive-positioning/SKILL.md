@@ -266,7 +266,7 @@ python3 "$SHARED_SCRIPTS/founder_context.py" read --artifacts-root "$ARTIFACTS_R
 Options: `Pre-seed` / `Seed` / `Series A` / `Series B+`
 → `pre-seed | seed | series-a | series-b` (`founder_context.py`'s `VALID_STAGES` has 7 values including `series-c`/`series-d`/`later`; on a `Series B+` pick, ask a plain-text follow-up for the specific stage rather than defaulting to `series-b`). Company name, sector and geography cannot take fixed labels — shape each as an affirmative option carrying the derived value plus a stated-value fallback. Provide at least 2 options. Note in the report metadata that no cross-skill validation was performed.
 
-**Each question is a recorded gate: open, ask, answer.** Ask from the printed `needs_input` and record each reply with its `answer_command`. A field derived or inferred from the materials is recorded, not asked: `record_gate_answer.py default --gate ctx_basics.<field> --reason derived_from_materials` (or `inferred`) `--answer-id use_derived --value "<value>"`. A `Series B+` reply opens `ctx_stage_detail`: ask and record it the same way. <!-- gate: ctx_stage_detail -->
+**Each question is a recorded gate: open, ask, answer.** Ask from the printed `needs_input` and record each reply with its `answer_command`. A field the materials give is recorded unasked: `record_gate_answer.py default --gate ctx_basics.<field> --reason derived_from_materials` (or `inferred`) `--answer-id use_derived --value "<value>"`; a stage: its id, no `--value`. A `Series B+` reply opens `ctx_stage_detail`, recorded the same way. <!-- gate: ctx_stage_detail -->
 
 ```bash
 python3 "$SHARED_SCRIPTS/record_gate_answer.py" open --run-id "$RUN_ID" --artifacts-root "$ARTIFACTS_ROOT" --gate ctx_basics.company_name \

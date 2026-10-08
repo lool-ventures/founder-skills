@@ -28,6 +28,7 @@ A [Claude Cowork](https://claude.com/blog/cowork-plugins) plugin that gives foun
   - [Claude Cowork](#claude-cowork)
   - [Claude Code](#claude-code)
   - [What to expect on your first run](#what-to-expect-on-your-first-run)
+  - [Running a skill unattended (for hosts)](#running-a-skill-unattended-for-hosts)
   - [Other platforms](#other-platforms-roadmap)
 - [Development](#development)
 - [Troubleshooting](#troubleshooting)
@@ -282,6 +283,91 @@ You get a written report plus, for most skills, an HTML version and an interacti
 In **Claude Code** they land in `artifacts/<skill>-<company>/`, in whatever directory you started from, and they stay there.
 
 In **Cowork** the skill writes them into the task's workspace under `artifacts/<skill>-<company>/`, and usually attaches the main ones to the conversation as well. **Download anything you want to keep.** Where that workspace lives — and whether it outlives the task — depends on whether the task is running in the cloud or on your computer. Cloud is the default for a new task, and a cloud workspace is temporary: when the task ends, whatever you did not download or save elsewhere is gone. If you want the full set on disk, connect a folder to the task and ask for the files to be written there.
+
+### Running a skill unattended (for hosts)
+
+A program that drives these skills without a founder at the keyboard (a scheduler, a chat bot, another
+agent) can answer the skills' questions up front and read where each run stands. Everything below is
+specified in one machine-readable file shipped with the plugin,
+[`founder-skills/data/host-contract.json`](founder-skills/data/host-contract.json): every question's id,
+its options and which of them may be sent ahead, the status fields, and every code. Read ids from it;
+labels are presentation and may change, ids change only by addition.
+
+**Answering in the request.** Put any of these lines, each on its own line, anywhere in the request that
+starts the skill:
+
+| Line | Use |
+|---|---|
+| `FS_HOST_RUN_ID=<id>` | Names the run (starts with a letter or digit, then letters, digits, `.`, `_`, `-`; up to 64 characters). Without it the skill makes one up. |
+| `FS_HOST_ANSWER <question>=<option>` | Answers a question before it is asked. |
+| `FS_HOST_VALUE <question>=<option> \| <value>` | The same, for an option that takes a value (a figure, a name, a path). |
+| `FS_HOST_NOTE <question>=<text>` | A note for a question this request also answers. |
+
+`<question>` is a question id, or `<id>.<instance>` for a question asked once per item (for example
+`ctx_basics.stage`). A question that allows several options takes them comma-joined. Send each skill only its
+own questions' lines. The lines are checked when the run starts, before any answer is recorded: a line the
+skill cannot use (an unknown question, an option it does not list, an option that cannot be sent ahead,
+another skill's question) refuses the run with `PRE_ANSWER_INVALID`, naming the line. Fix the line and start again under the same
+id. An answer written only
+in prose is not an answer; use the lines. A line for a question the run's mode does not ask, or one already answered, is ignored and listed in the
+status's `notices`. A line naming an option the skill builds from the materials that turns out not to exist
+leaves the run `waiting` with `PRE_ANSWER_UNLISTED`.
+
+**Where the status is.** Each run writes `runs/<run id>/run_status.json` under the skills' artifacts
+folder, beside the run's record of answers:
+
+- Claude Code: `./artifacts/` in the directory the session started in, or the folder
+  `$COWORK_ARTIFACTS_ROOT` names (set it to keep runs outside the session's directory).
+- Cowork on your computer: the `artifacts/` folder inside the task's outputs folder. The status carries
+  `run_status_path_host` when the plugin knows that folder's path on your machine.
+- Cowork in the cloud: inside the session only; nothing outside it can read the file.
+
+**What it says.** `status` is `running`, `waiting`, `complete` or `refused`, with a stable `code`:
+
+| status | codes |
+|---|---|
+| `running` | `RUNNING` (`last_error_code` names the last error seen, if any) |
+| `waiting` | `GATE_WAITING`, `GATE_UNANSWERED`, `GATE_INTERMEDIATE`, `OUT_OF_SCOPE_UNANSWERED`, `AUTO_SATISFY_NOT_ALLOWED`, `PRE_ANSWER_UNLISTED` |
+| `complete` | `COMPLETE` |
+| `refused` | `FOUNDER_DECLINED`, `INPUT_MISSING`, `PRE_ANSWER_INVALID` |
+
+A `waiting` run names the question in `waiting_on`; `gates` lists every question of the skill for the
+run's mode (complete once the run is bound) with its options, its state (`open`, `answered`,
+`not_owed`, `not_reached`) and the recorded answer.
+`disclosures` lists answers taken as defaults (`DEFAULT_TAKEN:<question>`) or from the request
+(`PRE_ANSWERED:<question>`), and anything the report discloses about them.
+
+Three refusals are printed and never written to a status file, because the id they name belongs to
+another run or to none: `RUN_ID_IN_USE`, `RUN_ID_FINISHED`, `RUN_ID_MALFORMED`. `RUN_ID_IN_USE` and
+`RUN_ID_FINISHED` are also appended to `runs/<id>/start_refusals.jsonl`; `RUN_ID_MALFORMED` writes nothing.
+`PRE_ANSWER_INVALID` is different: it is written to that id's status, and starting again under the same id
+replaces it.
+
+**When it is done.** `complete` means the markdown and JSON reports are final. Pages built after the
+coaching (deck review, market sizing, IC simulation, competitive positioning) are added to `deliverables`
+as they are written, and `deliverables_status` turns from `pending` to `final`. Read only the files
+`deliverables` lists for the run; an HTML file not listed there is not this run's. `complete` with
+`deliverables_status: pending` after the skill has returned means no more pages will come.
+
+**Waiting and resuming.** A run that needs an answer stops at `waiting`. To continue it, send
+
+    Resume the <skill> run.
+    FS_HOST_RUN_ID=<id>
+    <every FS_HOST_ line of the first request>
+    FS_HOST_ANSWER <the waiting question>=<option>
+
+`resume_prompt` in the status carries the first three parts. **Resume works in the same session only**
+(`resumable: "same_session"` on every surface): whether a new session can see an earlier session's files
+has not been established. An unattended host should therefore answer up front. Only a `waiting` run
+of the same skill resumes (a waiting run of another skill is also `RUN_ID_IN_USE`); a `running` one is refused
+`RUN_ID_IN_USE` (start a fresh run), a finished one `RUN_ID_FINISHED`, and a run refused
+`PRE_ANSWER_INVALID` starts afresh under the same id.
+
+**What a record proves.** That an answer exists, names a listed option and belongs to this run, not that a
+person chose it. Where the skills check that a confirmation was really asked (the market-sizing approach,
+financial model review's extracted values, an IC simulation's Decline), an `FS_HOST_ANSWER` line in the
+request counts as the answer, and the status lists it as `PRE_ANSWERED:<question>`; market sizing's and
+financial model review's reports say the request answered it rather than the founder.
 
 ### Other agents (Agent Skills standard) — not supported for this plugin
 

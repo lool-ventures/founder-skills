@@ -246,6 +246,7 @@ Assembled report from all artifacts with cross-artifact validation.
 | `report_markdown` | string | yes | Complete review report in markdown format |
 | `validation` | object | yes | Cross-artifact validation results |
 | `coaching_payload` | object | yes | Structured payload the Context B coaching dispatch consumes (Step 8c reads `data["coaching_payload"]`). See below. |
+| `disclosures` | string[] | with a run ledger | What the report discloses about the values check: `EXTRACTION_UNREVIEWED` when the run went on without the extracted values being reviewed, `CORRECTIONS_SOURCE:<external\|upload\|chat>` when corrections were applied, naming who supplied them. Absent on a run with no ledger. |
 
 ### coaching_payload
 

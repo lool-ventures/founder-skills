@@ -5,6 +5,149 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.17.0] - 2026-10-08 — Every question recorded, a run status a host can read, and checks that the key questions were asked
+
+### Highlights
+
+**Every question the analysis skills ask is now recorded for the run.** Your company details, the stage, the
+sizing approach, the values pulled from your model, the mode and fund of an IC simulation, the competitor set,
+the cap-table terms: your answer is written to the run's own record with the option you picked. An answer you gave stands for the run: a different one later is refused rather
+than silently swapped in, unless the skill asks the question again. When you have not answered yet, the run waits at that question, and continuing in the
+same conversation picks up where it stopped.
+
+**Programs that run the skills unattended can answer up front and see where a run stands.** A request can
+carry `FS_HOST_` lines that answer a question before it is asked, name the run, or attach a note. Each run
+writes `run_status.json` beside its record: running, waiting (and on which question), complete or refused,
+with a stable code, every question of the skill for the run's mode, and the lines to resend when you answer
+it. The full contract
+is published in the plugin at `founder-skills/data/host-contract.json`.
+
+**Three confirmations are now checked before the next step goes ahead.** In market sizing (the approach,
+before the top-down and bottom-up sizing), financial model review (the extracted values, before the quality
+checklist) and IC simulation (a Decline, before the write-up's coaching), the step that follows is held once
+when the conversation shows the question was never put: no question offering its options, no answer line in
+the request, and no reply to it in chat. The second attempt goes through. The check runs where the plugin's
+hooks run; elsewhere nothing is held.
+
+**Deck review no longer loses a restarted run's work, and a deck that mentions a round you already closed is
+no longer refused at the stage check.** The stage question can now show the earlier rounds the deck reports.
+
+### Scoring changes
+
+No grade, score or verdict changed for the same inputs. What moved, per skill whose scoring files changed:
+
+- **Market sizing**: the top-down and bottom-up sizing instructions are now printed by the plugin rather than
+  copied from the skill's text, and only once the approach is recorded (and, where your materials state two
+  figures for one input, which one to use). The self-check now also records the inputs it was graded
+  against, so a self-check graded before a later edit to your inputs is flagged as out of date. The
+  self-check and the stress test refuse a call into a run's folder that does not name the run.
+- **Financial model review**: the unit-economics scoring waits until the extracted values have been reviewed,
+  or you chose to go on without reviewing them, and refuses a call into a run's folder that does not name the
+  run.
+- **Competitive positioning**: the scoring and checklist instructions are printed only once the answers they
+  depend on are recorded, and the positioning instructions take the scoring basis you chose. The scorers
+  refuse a call into a run's folder that does not name the run.
+
+### Added
+
+- **For programs that run the skills unattended:**
+  - **Request lines.** `FS_HOST_RUN_ID=<id>` names the run; `FS_HOST_ANSWER <question>=<option>` answers a
+    question ahead; `FS_HOST_VALUE <question>=<option> | <value>` answers one that takes a value;
+    `FS_HOST_NOTE <question>=<text>` adds a note. Each line goes on its own line of the request. They are
+    checked when the run starts: a line the skill cannot use refuses the run with `PRE_ANSWER_INVALID`, naming
+    the line, before any answer is recorded. Fix the line and start again; the same run id can be reused. A
+    value written only in prose is not an answer.
+  - **`run_status.json`**, one per run, beside the run's record of answers: `status` (`running`, `waiting`,
+    `complete`, `refused`), a stable `code`, `waiting_on`, every question of the skill for the run's mode with
+    its options and state, `resume_prompt`, `disclosures` (answers taken as defaults or from the request, unreviewed values),
+    and `deliverables`.
+  - **`deliverables_status`.** `complete` means the markdown and JSON reports are final. Where a skill builds
+    its pages after the coaching (deck review, market sizing, IC simulation, competitive positioning), they
+    are listed in `deliverables` as they are written, and `deliverables_status` turns from `pending` to
+    `final`. An HTML file not listed there is not this run's.
+  - **Resume, in the same session only.** A waiting run continues with `FS_HOST_RUN_ID=<id>`, every
+    `FS_HOST_` line of the first request, and the answer to the waiting question; `resume_prompt` carries every
+    line but the new answer. Whether a new session can see an earlier session's files has not been established on any surface,
+    so the status says `resumable: "same_session"` everywhere. An unattended host should answer up front.
+  - **Each resumed invocation is recorded,** with the files in the run folder it left untouched and the ones it
+    rewrote, and how.
+  - **`compose_result.json`** beside the report, once compose has run on a run with a record: compose's exit
+    code, codes and the end of its output. It is a diagnostic, never listed in `deliverables`.
+  - **The cash follow-up reopens a finished financial model review**: answering it returns the run from
+    `complete` to `running` with `revision` + 1 until the updated report is final.
+  - **A delivered competitive positioning or cap-table review reopens as a new revision** when it is composed
+    again or a what-if is run; any other change to a finished run's confirmed input is refused, and needs a new
+    run.
+- **Financial model review: going on without reviewing the extracted values is said in the report, the charts
+  page and the closing message**, and corrections applied to them say who supplied them. The corrections table
+  lists every correction made in the run.
+- **Competitive positioning: the competitor-set question names each company the independent search found that
+  your set lacks** ("you may be missing: …"), with one line on each.
+- **Cap table: extracted terms are confirmed before they are saved**, and a `.docx` with tracked changes is
+  asked about (upload the clean version, or proceed on the accepted terms) before its terms are saved. Several
+  questions gain a "Not sure" option. When a note's qualified-financing threshold is not stated, the scenarios
+  it affects say it was treated as met by this round.
+- **Market sizing: "Your Answers" says when the request that started the analysis answered a question** and
+  lists the questions not asked because you asked not to be asked.
+
+### Changed
+
+- **Financial model review asks one values question for both input paths**: "Do the extracted values look
+  right?", with `Looks right, proceed` / `I have corrections` / `Proceed without reviewing the extracted
+  values`. Before, the page path asked "I reviewed the page — do the values look right?" with three options and
+  the other path asked with two; the two ways of sending corrections are now one option, and going on without
+  reviewing is a new, explicit option. On a full review the cash balance, its date and monthly burn are each
+  asked, or recorded from what you already said, on every path; before, burn was asked only on some.
+- **IC simulation asks for the mode and the fund on every run**, also when the company is already known.
+  `Interactive` no longer promises pauses between partners. Under Auto-pilot, a stage your materials do not
+  state is asked, and a Decline stops at its confirmation unless the request said to finish. A delivered
+  simulation is not rebuilt: new materials start a new simulation.
+- **Market sizing**: "Change methodology" and "Correct or add data" leave the approach question open, so it is
+  asked again after the change. Each input your materials state two figures for is its own question. When the
+  outside review challenges an input and you were not asked whether to deliver or revise, the report now waits
+  for that question instead of going out with a note that it was never asked; if a later review names more
+  inputs than your answer covered, it is asked again. Whether a figure you gave is per month, per quarter or per
+  year is asked with those three choices and recorded.
+- **Competitive positioning**: the additions question offers only what the open slots allow, and "top n" takes
+  research's first n without asking which. The scoring basis you choose is recorded and used. Composing a
+  delivered report again starts a new revision.
+- **Cap table**: a what-if after delivery reopens the review as a new revision, and one that a recorded answer
+  rules out asks that question again. Answering that the cap base is different leaves the question open until
+  the corrected base is confirmed.
+- **Deck review**: questions about a deck that cannot be opened offer `I'll provide it` or `Stop the review`
+  (which ends the review), and a request that says to review a deck outside the stage range is reported as
+  reviewed best-effort at the request's instruction, not as a confirmed stage.
+- **A follow-up question the run no longer owes is closed, and asked again if it becomes owed**, in every skill.
+- **For hosts (breaking):** in deck review and cap table, a run id passed any other way than
+  `FS_HOST_RUN_ID=<id>` no longer resumes a run. A `running` run cannot be resumed; start a fresh one. In
+  financial model review, corrections applied from outside the skill must name the run to count as the
+  values review.
+
+### Fixed
+
+- **Deck review: a restarted run keeps its own work.** Starting again under the same run id used to delete
+  that run's checkpoints along with earlier runs'.
+- **Deck review: a deck that reports a round already closed is no longer refused at the stage check.** Earlier
+  rounds are recorded apart from the round being raised.
+- **Market sizing: the check that the founder was asked which figure to use no longer counts a background
+  task's result as the founder's reply**, and reads each option of a question form on its own.
+- **Cap table: coaching checked against earlier scenarios is not inserted after a what-if** changes them.
+
+### Development
+
+Contributor-facing only; nothing here changes what a founder installs or runs.
+
+- Questions are registered once, with stable ids, and the contract file is generated from that registry; a
+  test holds the two equal. A run with no record behaves exactly as before, pinned by recorded outputs.
+- A reader for Desktop's question-form replies is included but ships switched off: no live reply has been
+  captured to prove its shape.
+- CI type-checks the shared scripts folder.
+- <<14a>>
+- The paid end-to-end lanes answer their questions up front with request lines, as an unattended host does,
+  and check the run's status file. A free test runs each lane's lines through the real run start, so a renamed
+  question or option fails there instead of in a paid run. The recorded Cowork scenarios gain run-status
+  checks, which take effect when they are re-recorded.
+
 ## [0.16.1] - 2026-10-06 — Files first and the closing message last, a runway check that works first time, and a request for your cash balance
 
 ### Highlights

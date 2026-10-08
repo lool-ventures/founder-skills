@@ -959,7 +959,8 @@ SKILL_MD_CEILING: dict[str, int] = {
     # closes the file list (+4,370).
     # 106,282 -> 106,256 (-26), LOWERED, commit 10 (O3): the compose step says to read compose_result.json on a
     # non-zero exit, paid for in the same step; "Two codes sit in neither class" loses its aside.
-    "market-sizing": 106_256,
+    # -1 B, LOWERED, commit 13: a derived stage takes its option id and no value; the sentence is shortened to pay.
+    "market-sizing": 106_255,
     # fmr raised for two founder-facing-correctness items measured in a live run: the CHECKLIST
     # dispatch now forbids citing our artifact filenames in evidence (that run put `inputs.json` in 10
     # items' evidence, printed verbatim into the founder's report), and the producer pipe passes
@@ -1176,7 +1177,9 @@ SKILL_MD_CEILING: dict[str, int] = {
     # carry exit-10 / finished-run sentences, Step 12 closes the deliverables list. Eight restatements trimmed.
     # 94,814 -> 94,811 (-3), LOWERED, commit 10 (O3): the compose step says to read compose_result.json on a non-
     # zero exit, paid for in the same step; the heredoc warning shortened, its reason kept.
-    "ic-sim": 94_811,
+    # -5 B, LOWERED, commit 13: Step 8.5 names the GATE_UNDECIDABLE remedy (re-run Step 8, same RUN_ID), paid for
+    # by two rationale clauses in the same step; a derived stage takes its option id and no value.
+    "ic-sim": 94_806,
     # deck-review +1,165 B: Step 0 carried only a parenthetical fresh-shell mention buried in a code
     # comment, unlike the four skills that mint RUN_ID in a LATER block and so carry the shared banner.
     # deck-review mints RUN_ID INSIDE this re-runnable Step-0 block (like cap-table), so the shared
@@ -1707,7 +1710,8 @@ SKILL_MD_CEILING: dict[str, int] = {
     # back when that compose is refused; the recall-dispatch rationale and the version-match sentence shortened.
     # 129,580 -> 129,577 (-3), LOWERED, commit 10 (O3): the compose step says to read compose_result.json on a
     # non-zero exit, paid for in the same step; the heredoc warning shortened, its reason kept.
-    "competitive-positioning": 129_577,
+    # -1 B, LOWERED, commit 13: a derived stage takes its option id and no value; the sentence is shortened to pay.
+    "competitive-positioning": 129_576,
     # cap-table, the largest raise (+2,383 B) and the one with the most founder-visible payoff:
     #   * Main-Thread Return named THREE of the four files Step 12 copies; a live run delivered exactly
     #     three and dropped `{Company}_Cap_Table.html`. All four are now named explicitly.
@@ -1836,7 +1840,9 @@ SKILL_MD_CEILING: dict[str, int] = {
     # exit-10 carve-outs; the pages take --run-id and Step 12 closes the run's file list.
     # 156,625 unchanged, commit 10 (O3): the compose step says to read compose_result.json on a non-zero exit,
     # paid for in the same step (the Step 8 parity sentence shortened).
-    "cap-table": 156_625,
+    # -8 B, LOWERED, commit 13: a derived stage takes its option id and no value; two clauses of the same
+    # paragraph shortened.
+    "cap-table": 156_617,
 }
 
 
@@ -2056,7 +2062,9 @@ REFERENCES_CEILING: dict[str, int] = {
     # +90 B (55_312 -> 55_402): the existing_claims_alternatives row says an alternative is the same
     # metric AND date, and where a figure for another date goes, as SKILL.md now does.
     # 55,402 -> 55,719 (+317 B) on 2026-10-05: methodology.json's `red_team_skipped_run_id` row.
-    "market-sizing": 55_719,
+    # +395 B on 2026-10-08 (commit 13): artifact-schemas.md says the report reads the run ledger instead of
+    # `founder_stated_choice` / `gate_defaults` when one exists, and documents the checklist's `inputs.json` stamp.
+    "market-sizing": 56_114,
     # fmr raised to document `graded_against` on the three producer outputs that stamp it — a new
     # artifact field is not discoverable from a schema doc that omits it, and the field exists to make
     # staleness detectable at all (run_id parity cannot see corrections applied within a run).
@@ -2110,7 +2118,8 @@ REFERENCES_CEILING: dict[str, int] = {
     # extraction-pitfalls.md milestone and no-growth-rate sentences and a markup-on-cost item.
     # +205 B (79_249 -> 79_454): METRIC_35 had pass/warn/fail only for a model that uses benchmarks, so
     # an assessor set a model citing none aside as not_applicable. It now grades that case warn.
-    "financial-model-review": 79_454,
+    # +326 B on 2026-10-08 (commit 13): report.json's ledger-only `disclosures` key is documented.
+    "financial-model-review": 79_780,
     # ic-sim +1446 B: evaluation-criteria.md omitted `to_confirm` from the status table AND from the
     # scoring formula, which excluded only not_applicable. Following it changed the conviction
     # score, since score_dimensions.py excludes both. The >6 coverage cap was undocumented too.
@@ -2186,7 +2195,9 @@ REFERENCES_CEILING: dict[str, int] = {
     # and the scored view's scored_point and today block.
     # +165 B (competitive-positioning): artifact-schemas.md documents the coaching payload's
     # outside_review (the review's outcome and one sentence per finding).
-    "competitive-positioning": 145_229,
+    # +176 B on 2026-10-08 (commit 13): who writes `deferred_recall_candidates` (the deferral script after Gate 1),
+    # and that it waits for Gate 1's final answer.
+    "competitive-positioning": 145_405,
     # cap-table +422 B: inputs-skeleton.md promised "no warning, and downstream artifacts that look
     # right but contain zeros" — the PRE-FIX world. cap_state.py hard-errors E_NO_EQUITY_BASE now,
     # and prose telling a model that a missing base yields plausible zeros invites it to invent one.
@@ -2253,6 +2264,9 @@ FEEDBACK_SKILL_MD_CEILING = 3_049
 # 20,001 chars with the longest prefix, the feedback skill survives a compaction whole.
 _REATTACH_LAST_SAFE_CHARS = 20_001
 _REATTACH_PREFIX_MAX_CHARS = 240
+# A skill over the cap is truncated: the entry keeps `slice(0, 19,900)` of prefix + body plus a 100-char marker.
+# Every WIRED skill is over it, so its run-start block must end by 19,900 - 240 body chars, not 20,001 - 240.
+_REATTACH_RETAINED_CHARS = 19_900
 
 
 def test_feedback_skill_md_does_not_grow() -> None:
@@ -4622,11 +4636,11 @@ def test_step0_starts_the_run_record_inside_the_reattached_window(skill: str) ->
     assert start < body.index("### Step 1:")
     fence_end = body.index("```", start) + 3
     if skill in WINDOW_EXEMPT:
-        assert fence_end > _REATTACH_LAST_SAFE_CHARS - _REATTACH_PREFIX_MAX_CHARS, (
+        assert fence_end > _REATTACH_RETAINED_CHARS - _REATTACH_PREFIX_MAX_CHARS, (
             f"{skill}'s start block now ends inside the window ({fence_end}); drop it from WINDOW_EXEMPT"
         )
     else:
-        assert fence_end <= _REATTACH_LAST_SAFE_CHARS - _REATTACH_PREFIX_MAX_CHARS, fence_end
+        assert fence_end <= _REATTACH_RETAINED_CHARS - _REATTACH_PREFIX_MAX_CHARS, fence_end
     text = (SKILLS_ROOT / skill / "SKILL.md").read_text(encoding="utf-8")
     assert 'RUN_ID="${RUN_ID:-' not in text and "date -u +%Y%m%dT%H%M%SZ" not in text
 
