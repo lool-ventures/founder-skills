@@ -11,8 +11,9 @@ code reached the founder's report (2 leaks in 16).
 Two tests, deliberately:
 
 1. `test_humanize_warning_never_returns_an_internal_code` runs the humanizer over EVERY `E_`/`W_`
-   code literal in the skill's scripts. A per-code COVERAGE test ("every code has a dict entry")
-   would red on the many codes that never reach a founder and would be deleted or suppressed --
+   code literal, and every snake_case `"code":` literal, in the skill's scripts. A per-code COVERAGE
+   test ("every code has a dict entry") would red on the many codes that never reach a founder and
+   would be deleted or suppressed --
    measured, financial-model-review carries 11 labels against 39 emitted codes. An OUTPUT-SHAPE
    test cannot rot: adding a code without an entry is fine, because the burden sits on the
    fallback, which is the thing that has to be right.
@@ -38,9 +39,12 @@ import pytest
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 SCRIPTS = REPO_ROOT / "founder-skills" / "skills" / "cap-table" / "scripts"
 
-# An internal code as a founder would see it: ALLCAPS run with at least one underscore.
-INTERNAL_CODE = re.compile(r"\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b")
+# An internal code as a founder would see it: an ALLCAPS or snake_case run with at least one underscore.
+INTERNAL_CODE = re.compile(r"\b(?:[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+|[a-z][a-z0-9]*(?:_[a-z0-9]+)+)\b")
 CODE_LITERAL = re.compile(r"[\"']([EW]_[A-Z0-9_]{3,})[\"']")
+# The solver's lowercase codes, emitted as `"code": "<snake_case>"` (note_conversion, option_pool, ...).
+SNAKE_CODE_LITERAL = re.compile(r"[\"']code[\"']\s*:\s*[\"']([a-z][a-z0-9]*(?:_[a-z0-9]+)+)[\"']")
+THRESHOLD_CODE = "qualified_financing_threshold_defaulted"
 
 
 def _load(name: str) -> Any:
@@ -58,7 +62,9 @@ def _load(name: str) -> Any:
 def _every_code_literal() -> set[str]:
     codes: set[str] = set()
     for p in SCRIPTS.glob("*.py"):
-        codes.update(CODE_LITERAL.findall(p.read_text(encoding="utf-8")))
+        text = p.read_text(encoding="utf-8")
+        codes.update(CODE_LITERAL.findall(text))
+        codes.update(SNAKE_CODE_LITERAL.findall(text))
     return codes
 
 
@@ -66,6 +72,15 @@ def test_the_corpus_of_codes_is_not_empty() -> None:
     """Guard the guard: a broken regex would make the next test vacuous."""
     codes = _every_code_literal()
     assert len(codes) >= 40, f"only {len(codes)} code literals found -- the scraper is broken"
+    assert THRESHOLD_CODE in codes, "the snake_case scraper missed a code note_conversion emits"
+
+
+def test_every_code_with_callout_prose_has_a_short_label() -> None:
+    """A code with bespoke callout prose reaches the founder, so the coach must get its name, not the
+    unsnaked fallback. The two tables are keyed alike; a code in one and not the other is the drift."""
+    wc = _load("_warning_callouts")
+    missing = sorted(set(wc._SOLVER_WARNING_PROSE) - set(wc._SOLVER_WARNING_LABELS))
+    assert not missing, f"callout prose with no label (the coach gets a generic name): {missing}"
 
 
 def test_humanize_warning_never_returns_an_internal_code() -> None:
@@ -132,6 +147,49 @@ def test_payload_warnings_carry_a_label_not_a_code() -> None:
 
     for item in payload["failed_items"]:
         assert not INTERNAL_CODE.search(item["label"]), f"failed_items label is a code: {item['label']!r}"
+
+
+def test_the_threshold_disclosure_reaches_the_coach_under_its_label() -> None:
+    """note_conversion's threshold disclosure, lifted into a scenario, reaches the coaching payload with its
+    own label rather than the generic unsnaked code."""
+    compose = _load("compose_report")
+    wc = _load("_warning_callouts")
+    scenarios_doc = {
+        "scenarios": [
+            {
+                "scenario_id": "s1",
+                "label": "Priced round",
+                "type": "priced_round",
+                "computed_outputs": {
+                    "completeness": "full",
+                    "blockers": [],
+                    "warnings": [
+                        {
+                            "code": THRESHOLD_CODE,
+                            "severity": "medium",
+                            "note_id": "note_1",
+                            "message": "The note's qualified-financing threshold was not stated.",
+                        }
+                    ],
+                },
+            }
+        ]
+    }
+    payload = compose.build_coaching_payload(
+        artifacts={
+            "inputs.json": {"company_name": "Test Co", "mode": "standard"},
+            "instruments.json": {},
+            "scenarios.json": scenarios_doc,
+            "rule_audit.json": {},
+            "counsel_packet.json": {"items": []},
+        },
+        review_dir="/tmp/review",
+        report_path="/tmp/review/report.md",
+        insertion_marker="<!-- COACHING_INSERTION_POINT_test -->",
+    )
+    labels = [w["label"] for w in payload["high_severity_warnings"] if w.get("code") == THRESHOLD_CODE]
+    assert labels == [wc._SOLVER_WARNING_LABELS[THRESHOLD_CODE]]
+    assert labels[0] != THRESHOLD_CODE.replace("_", " ").capitalize()
 
 
 @pytest.mark.parametrize("code", ["E_CAP_IMPLIED_NOTES_PRESENT", "W_MFN_NOT_MOST_FAVORABLE"])

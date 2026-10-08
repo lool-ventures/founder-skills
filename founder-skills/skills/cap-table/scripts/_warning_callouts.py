@@ -242,6 +242,7 @@ _SOLVER_WARNING_PROSE: dict[str, str] = {
 # `_labels.MAPS` LIVE and passes it as `extra_keep` to the report scan, so putting codes there would
 # make every one of them a KEEP token and silently disarm the leak scan for the whole class.
 _SOLVER_WARNING_LABELS: dict[str, str] = {
+    "qualified_financing_threshold_defaulted": "Note's unstated qualified-financing threshold treated as met",
     "W_MFN_NOT_MOST_FAVORABLE": "MFN election modelled as a counterfactual",
     "W_MFN_ELECTION_OVERRIDES_INSTRUMENT": "Scenario setting overrode the instrument's terms",
     "W_CP2_FLOOR_APPLIED": "Anti-dilution conversion price hit its charter floor",
