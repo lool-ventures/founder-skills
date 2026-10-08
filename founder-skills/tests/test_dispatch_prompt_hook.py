@@ -1203,6 +1203,22 @@ def test_after_the_plugins_scripts_were_changed_the_hold_says_it_will_let_throug
     assert "$SCRIPTS/" not in reason
 
 
+def test_a_heredoc_beside_a_redirected_generator_is_not_read_as_a_plugin_write(tmp_path: Path) -> None:
+    """A heredoc that writes a stub elsewhere, then the generator saved to a staging file: nothing wrote
+    into the plugin, so the hold asks for the generator alone with its output not redirected, never that
+    the plugin's scripts were changed."""
+    command = (
+        "P=/root/.claude/plugins/synced/plug0001/founder-skills; SC=$P/skills/market-sizing/scripts; "
+        "S=/tmp/ms-acme.staging.X1\n"
+        "python3 - \"$S\" <<'PY'\nimport json,sys\njson.dump({}, open(sys.argv[1] + '/stub.json', 'w'))\nPY\n"
+        'python3 "$SC/dispatch_prompt.py" red_team --run-id R > $S/rt.txt; echo "rt=$?"'
+    )
+    reason = _deny(_run(tmp_path, [_user("Size my market."), *_printed("rt=0\n", command=command)], _GENERATED))
+    assert "were changed in this session" not in reason
+    assert "cannot follow" in reason and "a heredoc" in reason
+    assert "not redirected to a file" in reason and "shell call of its own" in reason
+
+
 def test_a_setting_that_changes_what_the_generator_runs_is_named(tmp_path: Path) -> None:
     rows = [_user("Size my market."), *_printed(_GENERATED, command="PYTHONPATH=/tmp/e " + GEN_CMD)]
     reason = _deny(_run(tmp_path, rows, _GENERATED))

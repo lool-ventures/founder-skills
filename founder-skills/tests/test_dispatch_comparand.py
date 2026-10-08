@@ -389,11 +389,6 @@ def test_an_unreadable_block_that_saves_the_generators_output_elsewhere_keeps_it
     assert DPC.decide({**payload, "tool_input": tool_input}) is None
 
 
-# Writes the raw check misses: the target names the plugin only through a variable it does not resolve.
-def _missed(write: str) -> Any:
-    return pytest.param(write, marks=pytest.mark.xfail(strict=True, reason="target named only via a variable"))
-
-
 _RAW_WRITES = [
     "cat x > $SC/dispatch_prompt.py",
     'cp /tmp/evil.py "$P/skills/market-sizing/scripts/dispatch_prompt.py"',
@@ -407,12 +402,16 @@ _RAW_WRITES = [
     "python3 $SC/dispatch_prompt.py x > /tmp/y; cp /tmp/e " + _SYNCED + "/" + MS_SCRIPTS + "/checklist.py",
     'python3 -c "print(1)" $SC/dispatch_prompt.py > /tmp/y',
 ]
-_RAW_MISSED = [
+# Writes whose target names the plugin only through a variable the block assigns: caught once the write's
+# words are read with the block's own values filled in.
+_RAW_FILLED = [
     "cat <<'EOF' > $SC/x.py\nprint('x')\nEOF",
     "echo x > $P/scripts/x.py",
     "cp /tmp/evil.py $SC/",
     'bash -c "cp /tmp/evil.py $SC/x.py"',
     'echo "# not a comment" > $SC/x.py',
+    'G=cp_dispatch_prompt.py; D=$SCRIPTS\ncat > "$D/$G" <<EOF\nprint(1)\nEOF',
+    "D=$SCRIPTS\npython3 -c \"open('$D/x.py','w')\"",
 ]
 
 
@@ -420,7 +419,7 @@ def _unreadable(write: str) -> str:
     return f"P={_SYNCED}; SC=$P/{MS_SCRIPTS}\nfor s in a; do echo $s; done\n{write}"
 
 
-@pytest.mark.parametrize("write", [*_RAW_WRITES, *map(_missed, _RAW_MISSED)])
+@pytest.mark.parametrize("write", [*_RAW_WRITES, *_RAW_FILLED])
 def test_an_unreadable_block_that_writes_into_the_plugin_still_distrusts(write: str) -> None:
     block = _unreadable(write)
     assert DPC._parse_block(block) is None, write
@@ -500,7 +499,7 @@ def test_a_generator_run_saved_elsewhere_is_no_write() -> None:
 @pytest.mark.parametrize(
     "block",
     [
-        *map(_unreadable, _RAW_WRITES + _RAW_MISSED),
+        *map(_unreadable, _RAW_WRITES + _RAW_FILLED),
         *_ATTACKS,
         _SAVED_BLOCK,
         "cat > \"$SCRIPTS/dispatch_prompt.py\" <<'EOF'\nprint('x')\nEOF",
@@ -511,12 +510,368 @@ def test_a_generator_run_saved_elsewhere_is_no_write() -> None:
 )
 def test_the_raw_check_changes_only_on_a_generator_run_saved_elsewhere(block: str) -> None:
     """Line by line, the raw check decides as before except where a generator is run and its output is
-    saved outside the plugin."""
+    saved outside the plugin, and where a write names the plugin through the block's own variables
+    (which it now catches)."""
     exempt = set() if block in _ATTACKS else _RUN_SAVED_ELSEWHERE  # an attack is decided as before
     kept = [line for line in block.splitlines() if line not in exempt]
-    assert DPC._raw_writes_into_plugin(block) is _raw_writes_as_before("\n".join(kept)), block
+    caught = block in {_unreadable(w) for w in _RAW_FILLED}
+    assert DPC._raw_writes_into_plugin(block) is (caught or _raw_writes_as_before("\n".join(kept))), block
     if len(kept) < len(block.splitlines()):  # the exemption engaged: before, this block distrusted
         assert _raw_writes_as_before(block) is True, block
+
+
+# A heredoc beside the generator: the block cannot be parsed, but its body is not commands of this shell.
+_CP = "skills/" + "competitive-positioning/scripts"
+_CP_HEAD = f"P={_SYNCED}; R=R1; AD=/home/claude/artifacts/cp-acme; SC=$P/{_CP}; S=/tmp/cp-acme.staging.X1\n"
+_STUB = (
+    'python3 - "$AD" "$S" <<\'PY\'\nimport json,sys\nad,s=sys.argv[1:]\ndoc={\n "views":[\n'
+    '  {"id":"a","points":[]}\n ],\n "metadata":{"run_id":"R1"}\n}\n'
+    'json.dump(doc,open(f"{s}/positioning.json","w"),indent=2)\nPY\n'
+)
+_CP_GENS = (
+    'HAG="/home/claude/artifacts/cp-acme/handoff/$R"\n'
+    'python3 "$SC/cp_dispatch_prompt.py" moat_scoring --run-id "$R" --analysis-dir "$AD" --handoff-agent "$HAG"'
+    ' > $S/moat_prompt.txt; echo "m=$?"\n'
+    'python3 "$SC/cp_dispatch_prompt.py" positioning_scoring --run-id "$R" --handoff-agent "$HAG"'
+    ' --analysis-dir "$AD" > $S/pos_prompt.txt; echo "p=$?"\n'
+    "wc -c $S/*_prompt.txt"
+)
+# A stub written by a heredoc, persisted, then both scoring prompts saved under the staging folder.
+_HEREDOC_BLOCK = (
+    _CP_HEAD
+    + _STUB
+    + "cat $S/positioning.json | python3 $SC/persist_agent_artifact.py --artifact positioning.json"
+    + ' -o $AD/positioning.json --run-id $R --pretty | tail -1; echo "exit=${PIPESTATUS[1]}"\n'
+    + _CP_GENS
+)
+
+
+def test_a_heredoc_beside_a_generator_saving_elsewhere_is_no_write() -> None:
+    """Every `<<` used to switch the exemption off, so a block that wrote a stub with a heredoc and saved
+    the prompts outside the plugin distrusted every generator for the rest of the session."""
+    assert DPC._parse_block(_HEREDOC_BLOCK) is None
+    assert DPC._distrusts(_HEREDOC_BLOCK) == set()
+
+
+_GEN_TO_S = 'python3 "$SC/cp_dispatch_prompt.py" moat_scoring --run-id "$R" > $S/moat_prompt.txt'
+_HEREDOC_ATTACKS = [
+    # The body names the target's folder as an assignment: S is assigned twice, so it is never resolved.
+    _CP_HEAD + f"cat > /tmp/n <<EOF\nS=$P/{_CP}\nEOF\n" + _GEN_TO_S,
+    # Assigned only in a body: the body supplies no assignment.
+    f"P={_SYNCED}; R=R1; SC=$P/{_CP}\ncat > /tmp/n <<EOF\nS=/tmp/x\nEOF\n" + _GEN_TO_S,
+    # A body this shell runs, and text this shell runs: S stays assigned outside, so only these decide.
+    _CP_HEAD + ". /dev/stdin <<EOF\necho hi\nEOF\n" + _GEN_TO_S,
+    _CP_HEAD + "for s in a; do :; done\nsource /tmp/s.sh\n" + _GEN_TO_S,
+    _CP_HEAD + 'for s in a; do :; done\neval "echo hi"\n' + _GEN_TO_S,
+    # The body writes into the plugin.
+    _CP_HEAD + "python3 - <<'PY'\nopen('" + _SYNCED + "/" + _CP + "/x.py', 'w').write('x')\nPY\n" + _GEN_TO_S,
+    # The generator run is itself inside a body: never exempt.
+    _CP_HEAD + "bash <<EOF\n" + _GEN_TO_S + "\nEOF",
+    # A heredoc opened on the generator's own line.
+    _CP_HEAD + _GEN_TO_S + "; cat <<E > /tmp/n\nx\nE",
+    # A `<<` the pattern does not read, or a body never closed.
+    _CP_HEAD + "echo $((1<<2))\n" + _GEN_TO_S,
+    _CP_HEAD + _GEN_TO_S + "\ncat <<EOF > /tmp/n\nx",
+    # The folder changes.
+    _CP_HEAD + "cat > /tmp/n <<EOF\nx\nEOF\ncd /tmp\n" + _GEN_TO_S,
+]
+
+
+@pytest.mark.parametrize("block", _HEREDOC_ATTACKS)
+def test_a_heredoc_that_could_change_the_generators_write_still_distrusts(block: str) -> None:
+    assert DPC._parse_block(block) is None, block
+    assert DPC._distrusts(block) == set(DPC.GENERATORS), block
+
+
+# Where the hook could end a body before the shell does, a line of the body would read as an assignment.
+# In each, bash and dash leave T holding the generator's own path: the generator would overwrite itself.
+_SAFE = "T=/tmp/safe/out"
+_FORGED_BODIES = {
+    "a word the shell reads past (`EOF:x`)": f"cat > /tmp/n <<EOF:x\nEOF\n{_SAFE}\nEOF:x",
+    'mixed quoting (`"E"OF`)': f'cat > /tmp/n <<"E"OF\nE\n{_SAFE}\nEOF',
+    "mixed quoting (`E'OF'`)": f"cat > /tmp/n <<E'OF'\nE\n{_SAFE}\nEOF",
+    "a backslash inside the word": f"cat > /tmp/n <<E\\OF\nE\n{_SAFE}\nEOF",
+    "a body line ending in a backslash": f"cat > /tmp/n <<EOF\nx \\\nEOF\n{_SAFE}\nEOF",
+    "a carriage return inside a body line": f"cat > /tmp/n <<EOF\nx\rEOF\n{_SAFE}\nEOF",
+    "a vertical tab inside a body line": f"cat > /tmp/n <<EOF\nx\vEOF\n{_SAFE}\nEOF",
+}
+_GEN_TO_T = 'python3 "$SCRIPTS/cp_dispatch_prompt.py" checklist --run-id r1 > "$T"'
+_PRESET_T = ': "${T:=$SCRIPTS/cp_dispatch_prompt.py}"\n'
+
+
+@pytest.mark.parametrize("preset", [_PRESET_T, ""], ids=["T preset in the block", "T set in an earlier block"])
+@pytest.mark.parametrize("body", list(_FORGED_BODIES.values()), ids=list(_FORGED_BODIES))
+def test_a_body_the_hook_could_close_early_still_distrusts(preset: str, body: str) -> None:
+    block = f"{preset}{body}\n{_GEN_TO_T}"
+    assert DPC._parse_block(block) is None, block
+    assert DPC._distrusts(block) == set(DPC.GENERATORS), block
+
+
+# An assignment the shell may not run, or runs in a subshell, is no assignment.
+_UNCERTAIN = {
+    "after &&": f"false && {_SAFE}",
+    "after && at the end of the line before": f"false &&\n{_SAFE}",
+    "after ||": f"true || {_SAFE}",
+    "before a pipe": f"{_SAFE} | cat",
+    "in the background": f"{_SAFE} &",
+    "inside a string": f'echo "\n{_SAFE}\n"',
+    "continued from the line before": f"echo \\\n{_SAFE}",
+}
+
+
+@pytest.mark.parametrize("preset", [_PRESET_T, ""], ids=["T preset in the block", "T set in an earlier block"])
+@pytest.mark.parametrize("assignment", list(_UNCERTAIN.values()), ids=list(_UNCERTAIN))
+def test_an_assignment_that_may_not_run_does_not_settle_a_write(preset: str, assignment: str) -> None:
+    block = f"{preset}for s in a; do :; done\n{assignment}\n{_GEN_TO_T}"
+    assert DPC._parse_block(block) is None, block
+    assert DPC._distrusts(block) == set(DPC.GENERATORS), block
+
+
+def test_a_plugin_script_run_by_a_variable_is_not_its_write_target() -> None:
+    """Filling a write's words leaves out the script a `python` runs: a producer named through `$SC`
+    whose output goes to the staging folder is no write into the plugin (a live block of this shape,
+    beside a heredoc, would otherwise distrust every generator), while its target still is filled."""
+    head = _CP_HEAD + "python3 - <<'PY'\nprint(1)\nPY\n"
+    run = 'cat $S/in.json | python3 "$SC/validate_landscape.py" --pretty -o "$AD/landscape.json"'
+    assert DPC._distrusts(head + run + " > $S/vl.txt; echo vl=$?") == set()
+    assert DPC._distrusts(head + run + " > $SC/vl.txt") == set(DPC.GENERATORS)
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "cp $SC/checklist.py /tmp/x/checklist.py",  # a copy out of the plugin
+        "export D=/tmp/w\ncat > \"$D/a.json\" <<'E'\n{}\nE",  # a declaration's value is read like any other
+        'python3 "$SC/validate_landscape.py" -o "$AD/l.json" > /tmp/x/vl.txt',  # the script run is no target
+    ],
+)
+def test_only_what_a_line_writes_to_is_filled(line: str) -> None:
+    block = f"P={_SYNCED}; SC=$P/{_CP}; AD=/home/claude/artifacts/cp-acme\nfor s in a; do :; done\n{line}"
+    assert DPC._distrusts(block) == set(), block
+
+
+def test_a_declaration_that_makes_a_name_refer_to_another_is_not_read() -> None:
+    assert DPC._raw_dynamic_names(["declare -n T=S"], ["declare -n T=S"])[0] == {"T"}
+    assert DPC._raw_dynamic_names(["export T=/tmp/x"], ["export T=/tmp/x"])[0] == set()
+
+
+# A redirect with no space before it is a write all the same (`echo x>"$F"`); the pattern alone missed it.
+_NO_SPACE = [">", ">>", ">|", "&>", "2>"]
+
+
+@pytest.mark.parametrize("op", _NO_SPACE)
+@pytest.mark.parametrize("loop", ["for s in a; do :; done\n", ""], ids=["raw", "parsed"])
+def test_a_redirect_with_no_space_into_the_plugin_distrusts(op: str, loop: str) -> None:
+    block = f'{loop}echo hi{op}"$SCRIPTS/_params.py"'
+    assert (DPC._parse_block(block) is None) is bool(loop), block
+    assert DPC._distrusts(block) == set(DPC.GENERATORS), block
+
+
+def test_a_heredoc_redirected_with_no_space_over_a_generator_distrusts() -> None:
+    """The heredoc itself overwrites the generator; the generator's own run beside it must not be what
+    decides the block."""
+    block = f"T=/tmp/o/p\ncat <<'EOF'>\"$SCRIPTS/cp_dispatch_prompt.py\"\nprint(1)\nEOF\n{_GEN_TO_T}"
+    assert DPC._distrusts(block) == set(DPC.GENERATORS)
+
+
+def test_a_redirect_with_no_space_on_a_line_that_cannot_be_read_distrusts() -> None:
+    """The line closes a string opened on the line before, so it does not tokenize alone; its `>` still
+    writes into the plugin."""
+    block = 'for s in a; do :; done\necho "a\nb">"$SCRIPTS/_params.py"'
+    assert DPC._raw_write_targets(block.splitlines()[-1]) is None
+    assert DPC._distrusts(block) == set(DPC.GENERATORS)
+
+
+def test_a_redirect_to_the_null_device_is_no_write() -> None:
+    assert DPC._distrusts("for s in a; do :; done\npython3 $SCRIPTS/checklist.py>/dev/null") == set()
+
+
+# A name rebound in a way the check does not read: an array element (`$T` reads `T[0]`), a command
+# substitution. In either branch a write through it could land in the plugin.
+_REBOUND = {
+    "an array element": ("T=/tmp/a\nT[0]=$SCRIPTS/cp_dispatch_prompt.py\n", _GEN_TO_T),
+    "an array element appended": ("T=/tmp/a\nT[0]+=x\n", _GEN_TO_T),
+    "a command substitution": ("D=$(ls -d /root/plugins/*/scripts)\n", 'cp /tmp/e "$D/x.py"'),
+    "a backtick substitution": ("D=`ls -d /root/plugins/*/scripts`\n", 'cp /tmp/e "$D/x.py"'),
+    "a substitution into a redirect": ("D=$(ls -d /root/plugins/*/scripts)\n", 'echo x > "$D/x.py"'),
+}
+
+
+@pytest.mark.parametrize("loop", ["for s in a; do :; done\n", ""], ids=["raw", "parsed"])
+@pytest.mark.parametrize(("head", "write"), list(_REBOUND.values()), ids=list(_REBOUND))
+def test_a_write_through_a_name_rebound_unseen_distrusts(loop: str, head: str, write: str) -> None:
+    block = f"{loop}{head}{write}"
+    assert DPC._distrusts(block) == set(DPC.GENERATORS), block
+
+
+@pytest.mark.parametrize("loop", ["for s in a; do :; done\n", ""], ids=["raw", "parsed"])
+def test_a_substitution_that_names_no_plugin_folder_settles_nothing_either_way(loop: str) -> None:
+    """The delivery step every skill prescribes copies into `$(dirname "$ARTIFACTS_ROOT")`: a
+    substitution that names no plugin, skills or scripts folder is not taken to print one."""
+    block = f'{loop}OUT="$(dirname "$ARTIFACTS_ROOT")"\ncp "$R/report.md" "$OUT/Acme_Report.md"'
+    assert DPC._distrusts(block) == set(), block
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "cat > /tmp/n <<'E'\nit's in $SC\nE",  # body prose that cannot be read and writes nothing
+        'X="$(find $SC -name a.py 2>/dev/null)" > /tmp/x/o.txt',  # a quiet redirect inside a quoted argument
+    ],
+)
+def test_a_line_that_writes_nothing_into_the_plugin_is_not_read_whole(line: str) -> None:
+    block = f"P={_SYNCED}; SC=$P/{_CP}\nfor s in a; do :; done\n{line}"
+    assert DPC._distrusts(block) == set(), block
+
+
+@pytest.mark.parametrize(
+    "inner",
+    [
+        'const f = (a) => a + "$SC/x"',  # an arrow function in inline code: no redirect
+        'if (n < 0) { x = "$SC" }',
+    ],
+)
+def test_the_inside_of_a_string_is_not_read_as_commands(inner: str) -> None:
+    """A quote left open joins the lines that follow it into one command; their text is no redirect."""
+    block = f"P={_SYNCED}; SC=$P/{_CP}\nfor s in a; do :; done\nnode -e '\n{inner}\n' $SC/x.js"
+    assert DPC._distrusts(block) == set(), block
+
+
+def test_a_continued_line_is_read_with_the_line_it_continues() -> None:
+    """A `>` inside a quoted argument of a continued command is no redirect."""
+    block = (
+        f"P={_SYNCED}; SC=$P/{_CP}\nfor s in a; do :; done\n"
+        "python3 \"$SC/insert.py\" --marker '<!-- POINT -->' \\\n  --report /tmp/x/report.md"
+    )
+    assert DPC._distrusts(block) == set(), block
+
+
+def test_a_substitution_is_read_to_its_closing_parenthesis() -> None:
+    """What follows the substitution on its line is not what it prints; nor is a word that merely
+    contains `skills` (a folder named `founderskills`) a skills folder."""
+    assert DPC._subst_assignments('D=$(mktemp -d) && cp x "$SC/skills/y"') == [("D", "$(mktemp -d)")]
+    assert not DPC._may_name_plugin("$(mktemp /tmp/founderskills/x.md)")
+    assert DPC._may_name_plugin("$(ls -d /root/plugins/*/scripts)")
+
+
+@pytest.mark.parametrize("loop", ["for s in a; do :; done\n", ""], ids=["raw", "parsed"])
+@pytest.mark.parametrize("target", ['"$S"ts/x.py', '$S"ts/x.py"', "$S'ts/x.py'"])
+def test_a_quote_ends_a_name(loop: str, target: str) -> None:
+    """`"$S"ts` is `${S}ts`: the folder `S` names, completed by the text after the quote."""
+    block = f"S={_SYNCED}/skills/x/scrip\n{loop}echo x >{target}"
+    assert DPC._distrusts(block) == set(DPC.GENERATORS), block
+    assert DPC._distrusts(block.replace(f"{_SYNCED}/skills/x/scrip", "/tmp/a")) == set(), block
+
+
+def test_a_loop_variable_holds_its_loop_words() -> None:
+    """A `for` loop's name is filled with its own words: a write under one of them outside the plugin is
+    no write into it, and a loop over the plugin's folder is."""
+    assert DPC._distrusts('for f in a b; do :; done\necho x > "/tmp/h/$f.json"') == set()
+    assert DPC._distrusts('for f in $SCRIPTS; do :; done\necho x > "$f/x.py"') == set(DPC.GENERATORS)
+
+
+@pytest.mark.parametrize("assigner", ["read D < /tmp/d", ': "${D:=$SCRIPTS}"', "for D in $SCRIPTS; do :; done"])
+def test_a_write_to_a_name_assigned_in_a_form_the_check_cannot_read_distrusts(assigner: str) -> None:
+    """Where the target's folder comes from a name the check cannot resolve, it could be the plugin."""
+    block = f'{assigner}\nfor s in a; do :; done\necho x > "$D/x.py"'
+    assert DPC._distrusts(block) == set(DPC.GENERATORS), block
+    assert DPC._distrusts(block.replace("$D/", "/tmp/d/")) == set()
+
+
+@pytest.mark.parametrize(
+    "assigner",
+    ["read T < /tmp/t", "printf -v T %s /tmp/x", "declare T=/tmp/x", "for T in /tmp/x; do :; done", "T+=x"],
+)
+def test_a_name_assigned_in_a_form_the_check_cannot_read_is_not_resolved(assigner: str) -> None:
+    block = f"for s in a; do :; done\n{_SAFE}\n{assigner}\n{_GEN_TO_T}"
+    assert DPC._distrusts(block) == set(DPC.GENERATORS), block
+    plain = f"for s in a; do :; done\n{_SAFE}\n{_GEN_TO_T}"
+    assert DPC._distrusts(plain) == set()  # the same block without it is settled
+
+
+@pytest.mark.parametrize(
+    ("text", "bodies"),
+    [
+        ("cat <<'E'\nx\nE\ny", {1, 2}),
+        ('cat <<"E"\nx\nE', {1, 2}),
+        ("cat <<\\E\nx\nE", {1, 2}),
+        ("cat <<-E\n\tx\n\tE\ny", {1, 2}),
+        ("cat <<A <<B\na\nA\nb\nB", {1, 2, 3, 4}),
+        ("cat <<< x\ny", set()),
+        ("cat <<E\nx", None),
+        ("cat << $V\nx\n$V", None),
+        ("echo $((1<<2))", None),
+        ("source /dev/stdin <<E\nE", None),
+        ('eval "$(cat <<E\nx\nE\n)"', None),
+        ("cat <<EOF:x\nEOF\nEOF:x", None),
+        ('cat <<"E"OF\nE\nEOF', None),
+        ("cat <<E'OF'\nE\nEOF", None),
+        ("cat <<E\\OF\nE\nEOF", None),
+        ("cat <<EOF\nx \\\nEOF\nEOF", None),
+        ("cat <<EOF>/tmp/n\nx\nEOF", {1, 2}),
+    ],
+)
+def test_heredoc_bodies_are_found_or_refused(text: str, bodies: set[int] | None) -> None:
+    assert DPC._heredoc_bodies(text.splitlines()) == bodies
+
+
+# Another plugin script run beside a loop or heredoc, its output saved elsewhere: running it is no write.
+_PRODUCER = "python3 $SCRIPTS/checklist.py --run-id R > /tmp/x/checklist.json"
+
+
+def test_a_plugin_script_run_saved_elsewhere_is_no_write() -> None:
+    """The line names the plugin only as the script it runs; its one write lands outside the plugin."""
+    block = _LOOP + _PRODUCER
+    assert DPC._parse_block(block) is None
+    assert DPC._distrusts(block) == set()
+    assert _raw_writes_as_before(block) is True  # before, this block distrusted every generator
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "python3 $SCRIPTS/checklist.py --run-id R > $SCRIPTS/_params.py",
+        "python3 $SCRIPTS/checklist.py --out $SCRIPTS/_params.py > /tmp/x/c.json",
+        "python3 $SCRIPTS/checklist.py --prompt $SCRIPTS/dispatch_prompt.py > /tmp/x/c.json",
+        "python3 $P/skills/../../evil/scripts/x.py > /tmp/x/c.json; cp /tmp/e $SCRIPTS/x.py",
+        "python3 $P/skills/../scripts/x.py > /tmp/x/c.json",
+        "python3 $SCRIPTS/checklist.py > /tmp/x/c.json 2> $SCRIPTS/_params.py",
+        "python3 $SCRIPTS/checklist.py | tee $SCRIPTS/_params.py",
+        "python3 -i $SCRIPTS/checklist.py > /tmp/x/c.json",
+        # Only the plugin this hook runs from, or one the session loaded our skills from, is a root.
+        "python3 /tmp/.claude/plugins/scripts/evil.py > /tmp/x/c.json",
+        f"python3 {_SYNCED}/scripts/x.py > /tmp/x/c.json",
+    ],
+)
+def test_a_plugin_script_run_that_could_write_into_the_plugin_still_distrusts(line: str) -> None:
+    block = _LOOP + line
+    assert DPC._parse_block(block) is None, block
+    assert DPC._distrusts(block) == set(DPC.GENERATORS), block
+
+
+@pytest.mark.parametrize(
+    ("path", "env", "assigned", "trusted"),
+    [
+        ("$SCRIPTS/checklist.py", {}, set(), True),
+        ("${SHARED_SCRIPTS}/merge_json.py", {}, set(), True),
+        ("$SCRIPTS/checklist.py", {}, {"SCRIPTS"}, False),  # set in this block and not resolved
+        ("$S/scripts/checklist.py", {"S": _SYNCED}, set(), True),
+        ("$S/skills/market-sizing/scripts/checklist.py", {"S": _SYNCED}, set(), True),
+        ("$S/scripts/checklist.py", {"S": "/root/.claude/plugins/synced/other"}, set(), False),
+        ("/tmp/.claude/plugins/scripts/evil.py", {}, set(), False),
+        ("$S/skills/market-sizing/scripts/checklist.py", {"S": "/tmp/copy"}, set(), False),
+        ("$S/skills/../scripts/checklist.py", {"S": _SYNCED}, set(), False),
+        ("$SCRIPTS/dispatch_prompt.py", {}, set(), False),  # a generator is judged as one
+        ("./scripts/checklist.py", {}, set(), False),
+    ],
+)
+def test_which_plugin_scripts_count_as_installed(
+    path: str, env: dict[str, str], assigned: set[str], trusted: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A root is the plugin this hook runs from or one the session loaded our skills from (here
+    `_SYNCED`), never a path that merely contains an install marker."""
+    monkeypatch.setattr(DPC, "_SESSION_ROOTS", {_SYNCED})
+    assert DPC._installed_script(path, env, assigned) is trusted
 
 
 # --- the steps before the generator in its block may print; the generator must be the block's last word --
