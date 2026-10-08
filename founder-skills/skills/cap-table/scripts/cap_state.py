@@ -47,6 +47,7 @@ from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _artifact_io  # type: ignore[import-not-found]  # noqa: E402
+import _ct_gates  # noqa: E402
 from _artifact_writer import ArtifactValidationError, load_schema, write_artifact  # noqa: E402
 
 _SCHEMA_DIR = os.path.join(
@@ -1055,6 +1056,45 @@ def _print_pretty(receipt: dict[str, Any], data: dict[str, Any]) -> None:
     sys.stderr.write(f"  pre-financing fully-diluted shares: {fd:,}\n")
 
 
+# What inputs.json writes for each recorded IIA answer (`not_sure`: the key is left out).
+_IIA_HAS_GRANTS = {"yes": True, "none": False, "not_sure": None}
+
+
+def _gate_checks(run_dir: str, run_id: str, inputs: dict[str, Any]) -> None:
+    """With a ledger: the questions the cap state rests on are recorded (exit 10 names the first that is not, or
+    a base that changed since it was confirmed), and inputs.json carries the recorded answers (exit 1
+    `GATE_RECORD_MISMATCH`). Nothing is written either way."""
+    ledger = _ct_gates.require_or_exit(run_dir, run_id, _ct_gates.BASE_KEYS, by="cap_state.py")
+    if ledger is None:
+        return
+    rec = _ct_gates.answers(ledger)
+
+    def answer(key: str) -> Any:
+        r = rec.get(key) or {}
+        return r.get("answer_id") if r.get("state") == "answered" else None
+
+    mode = answer(_ct_gates.ENGAGEMENT)
+    if mode is not None and inputs.get("mode") != mode:
+        _ct_gates.mismatch(f"inputs.json's mode is {inputs.get('mode')!r}, but the founder's answer was {mode!r}")
+    jurisdiction: dict[str, Any] = inputs["jurisdiction"] if isinstance(inputs.get("jurisdiction"), dict) else {}
+    structure = answer(_ct_gates.JURISDICTION)
+    if structure is not None and jurisdiction.get("structure") != structure:
+        _ct_gates.mismatch(
+            f"inputs.json's jurisdiction structure is {jurisdiction.get('structure')!r}, but the founder's answer "
+            f"was {structure!r}"
+        )
+    iia = answer(_ct_gates.IIA)
+    if iia in _IIA_HAS_GRANTS:
+        history: dict[str, Any] = (
+            jurisdiction["iia_grants_history"] if isinstance(jurisdiction.get("iia_grants_history"), dict) else {}
+        )
+        if history.get("has_grants") != _IIA_HAS_GRANTS[iia]:
+            _ct_gates.mismatch(
+                f"inputs.json's IIA grant history says has_grants={history.get('has_grants')!r}, but the founder's "
+                f"answer was {iia!r} (yes: true, none: false, not sure: leave it out)"
+            )
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--inputs", required=True, help="Path to inputs.json")
@@ -1064,11 +1104,14 @@ def main() -> int:
     p.add_argument("--currency", default="USD", help="Currency code (default USD)")
     p.add_argument("--pretty", action="store_true", help="Pretty-print JSON + stderr summary")
     args = p.parse_args()
+    run_dir = _ct_gates.run_dir_of(args.inputs)
+    _ct_gates.refuse_without_run_id(run_dir, args.run_id)
 
     with open(args.inputs, encoding="utf-8") as f:
         inputs = json.load(f)
     with open(args.instruments, encoding="utf-8") as f:
         instruments = json.load(f)
+    _gate_checks(run_dir, args.run_id, inputs)
 
     try:
         cap_state = build_cap_state(inputs, instruments, currency=args.currency)

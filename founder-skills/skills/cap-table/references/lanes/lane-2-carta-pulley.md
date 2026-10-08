@@ -19,7 +19,7 @@ If the fingerprint doesn't match Carta, the script routes to Lane 3 (freeform) a
 
 ## Confirming ambiguous mappings
 
-When the script flags a column it can't confidently map (e.g., a custom Stakeholder-class column outside the default Carta export), it returns the candidates in `extraction_audit.json.ambiguous_columns`. Present these via `AskUserQuestion` and re-run the script with `--column-overrides` (one per `sheet:column → canonical_field` pair) until the audit is clean.
+When the script flags a column it can't confidently map (e.g., a custom Stakeholder-class column outside the default Carta export), it returns the candidates in `extraction_audit.json.ambiguous_columns`. Present these via `AskUserQuestion` (each a recorded `ct_lane2_column_mapping.<field>`) and re-run the script with `--column-overrides` (one per `sheet:column → canonical_field` pair) until the audit is clean.
 
 ## Don't assume — verify the fingerprint
 

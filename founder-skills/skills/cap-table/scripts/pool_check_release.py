@@ -76,6 +76,8 @@ def release(coaching_md: str, checked: str, scenarios: str) -> tuple[dict[str, A
         return None, "cannot read this run's scenarios.json to match the record's run"
     if not run_id or record.get("run_id") != run_id:
         return None, "the pool-check record is from another run: run pool_claims_check.py again"
+    if record.get("scenarios_sha256") != _sha256(scenarios):
+        return None, "the scenarios changed after the pool check (a what-if): run pool_claims_check.py again"
     return {"commentary_markdown": text, "check_record": os.path.abspath(record_path)}, ""
 
 

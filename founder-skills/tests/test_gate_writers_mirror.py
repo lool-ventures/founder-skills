@@ -70,6 +70,13 @@ def _out(proc: subprocess.CompletedProcess[str]) -> dict[str, Any]:
         "cp_scorers",
         "cp_compose",
         "cp_closer",
+        "ct_cap_state",
+        "ct_run_scenario",
+        "ct_extract_instrument",
+        "ct_quick_assess",
+        "ct_compose",
+        "ct_concise",
+        "ct_compose_extraction",
     ],
 )
 def test_with_no_ledger_each_writer_matches_its_golden(group: str) -> None:

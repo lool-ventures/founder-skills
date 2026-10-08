@@ -1432,3 +1432,78 @@ def test_a_competitive_positioning_resume_cannot_send_a_change_ahead(tmp_path: P
     lines = f"FS_HOST_RUN_ID={run_id}\nFS_HOST_ANSWER cp_gate1_landscape=missing\n"
     proc = h.start(root, "competitive-positioning", lines)
     assert proc.returncode == 1 and "PRE_ANSWER_INVALID" in proc.stdout
+
+
+# --- cap-table: a resume at the cap-base question ----------------------------------------------------------------
+
+CT_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "cap-table"
+CT_SCRIPTS = h.SKILLS / "cap-table" / "scripts"
+# Fixed from the skill's order, before measuring: the base and the instruments are read and written before the
+# question; everything the cap state, the scenarios and the report produce comes after it, on the resume.
+CT_KEPT_ON_RESUME = frozenset(("inputs_json", "instruments_json"))
+
+
+def _ct_first_invocation(tmp: Path) -> tuple[Path, str, Path]:
+    root, run_id, run_dir = h.start_bound(tmp, "cap-table")
+    rec = lambda *a: _fmr_ok(h.record(root, run_id, *a))  # noqa: E731
+    keys = ("ctx_basics.company_name", "ctx_basics.stage", "ctx_basics.sector", "ctx_basics.geography")
+    rec("open", *[a for k in keys for a in ("--gate", k)])
+    for key, value in (("company_name", "Example Co"), ("sector", "B2B SaaS"), ("geography", "US")):
+        rec("default", "--gate", f"ctx_basics.{key}", "--reason", "stated_in_request", "--answer-id", "different",
+            "--value", value)  # fmt: skip
+    rec("answer", "--gate", "ctx_basics.stage", "--answer-id", "seed")
+    init = ("init", "--company-name", "Example Co", "--stage", "seed", "--sector", "B2B SaaS", "--geography", "US")
+    _fmr_ok(h.run(h.SHARED / "founder_context.py", *init, "--artifacts-root", str(root), "--run-id", run_id,
+                  "--skill", "cap-table"))  # fmt: skip
+    rec("open", "--gate", "ct_engagement_mode", "--gate", "ct_jurisdiction", "--gate", "ct_iia_grants")
+    rec("answer", "--gate", "ct_engagement_mode", "--answer-id", "standard")
+    rec("answer", "--gate", "ct_jurisdiction", "--answer-id", "delaware")
+    for name in ("inputs.json", "instruments.json"):
+        doc = json.loads((CT_FIXTURES / name).read_text(encoding="utf-8"))
+        doc["metadata"]["run_id"] = run_id
+        if name == "inputs.json":
+            doc["jurisdiction"] = {"structure": "delaware"}
+        (run_dir / name).write_text(json.dumps(doc), encoding="utf-8")
+    _fmr_ok(h.run(CT_SCRIPTS / "extract_cap_table.py", "--mode=validate", "--dir", str(run_dir)))
+    h.record(root, run_id, "open", "--gate", "ct_option_pool")  # the fixture states its pool: not owed (exit 11)
+    rec("open", "--gate", "ct_cap_base_confirmation")
+    _wait(root, run_id, "ct_cap_base_confirmation")
+    return root, run_id, run_dir
+
+
+def test_a_cap_table_resume_at_the_cap_base_question_rewrites_only_what_follows_it(tmp_path: Path) -> None:
+    root, run_id, run_dir = _ct_first_invocation(tmp_path)
+    for f in run_dir.glob("*.json"):
+        _age(f)
+    lines = f"FS_HOST_RUN_ID={run_id}\nFS_HOST_ANSWER ct_cap_base_confirmation=confirmed\n"
+    out = _out(_fmr_ok(h.start(root, "cap-table", lines)))
+    assert (out["resume"], out["resume_step"]) == (1, "4")
+    read = ("read", "--artifacts-root", str(root), "--run-id", run_id, "--skill", "cap-table")
+    _fmr_ok(h.run(h.SHARED / "founder_context.py", *read))
+    _fmr_ok(h.bind(root, run_id, run_dir, "example-co"))
+    opened = json.loads(_fmr_ok(h.record(root, run_id, "open", "--gate", "ct_cap_base_confirmation")).stdout)
+    assert opened["applied"] == "pre_answer"
+    i, n, cs = (str(run_dir / f) for f in ("inputs.json", "instruments.json", "cap_state.json"))
+    _fmr_ok(h.run(CT_SCRIPTS / "cap_state.py", "--inputs", i, "--instruments", n, "--run-id", run_id, "-o", cs))
+    _fmr_ok(h.run(CT_SCRIPTS / "rule_audit.py", "--phase=pre_math", "--inputs", i, "--instruments", n, "--cap-state",
+                  cs, "--run-id", run_id, "-o", str(run_dir / "rule_audit.json")))  # fmt: skip
+    _fmr_ok(h.record(root, run_id, "answer", "--gate", "ct_scenario_selection", "--answer-id", "cap_implied_safe"))
+    req = [{"scenario_id": "base", "label": "Base", "type": "safe_conversion", "parameters": {}}]
+    (run_dir / "scenario_requests.json").write_text(json.dumps(req), encoding="utf-8")
+    _fmr_ok(h.run(CT_SCRIPTS / "run_scenario.py", "--inputs", i, "--instruments", n, "--cap-state", cs,
+                  "--scenarios-input", str(run_dir / "scenario_requests.json"), "--run-id", run_id, "-o",
+                  str(run_dir / "scenarios.json")))  # fmt: skip
+    (run_dir / "report.md").write_text("# Report\n", encoding="utf-8")
+    st = _complete(root, run_id)
+
+    entry = st["invocations"][1]
+    untouched = {k for k in entry["untouched_since_resume"] if not k.startswith("handoff_")}
+    assert untouched == CT_KEPT_ON_RESUME
+    assert {"cap_state_json", "scenarios_json", "report_md"} <= set(entry["touched_since_resume"])
+
+
+def test_a_cap_table_resume_cannot_send_a_correction_ahead(tmp_path: Path) -> None:
+    root, run_id, _run_dir = _ct_first_invocation(tmp_path)
+    lines = f"FS_HOST_RUN_ID={run_id}\nFS_HOST_VALUE ct_cap_base_confirmation=different | pool is larger\n"
+    proc = h.start(root, "cap-table", lines)
+    assert proc.returncode == 1 and "PRE_ANSWER_INVALID" in proc.stdout

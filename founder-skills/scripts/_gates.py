@@ -97,7 +97,7 @@ HELD_GATES = ("ms_two_figures", "ms_methodology", "fmr_extracted_values", "ic_de
 # Gates whose site can be asked again in one run: the founder resends a file and it fails the same way.
 # `open` on one that already has an answer supersedes that answer (reason `asked_again`), so the new
 # reply, `Stop the review` included, can be recorded. Every other recorded answer stands.
-REASK_SUPERSEDES = ("dr_input_request", "ms_correct_data")
+REASK_SUPERSEDES = ("dr_input_request", "ms_correct_data", "ct_founder_fact")
 # Gates whose instances are made at run time and whose bare key a request may answer for every instance at
 # once: `FS_HOST_ANSWER ms_two_figures=typed` chooses the typed figure for each input that has two. A line
 # naming an instance wins over the bare line for that instance.
@@ -219,6 +219,28 @@ CONTRACT_NOTES = (
     "A competitive-positioning report composed again after `complete` (the delivery check's fix, or a coordinate the "
     "founder disputes) starts a new revision: `running`, `revision` + 1, deliverables and `handed_over_at` cleared, "
     "until the coaching is inserted again.",
+    "A cap-table what-if after `complete` (a new scenario or pool, re-run through the scenario solver or the fast "
+    "assessment) reopens the run the same way. A what-if that asks for something a recorded answer rules out "
+    "supersedes that answer (`what_if:<reason>`) and the question is asked again (exit 10); on the first revision "
+    "the same disagreement is `GATE_RECORD_MISMATCH` (exit 1). A fast assessment or concise answer finishes again.",
+    "cap-table's no-cap-base fork ends with `run_status.py finish --mode extraction_only`, allowed on a full run "
+    "only once `ct_no_cap_base_fork` is answered `terms_only`; finishing closes the questions that mode does not "
+    "ask. A rule lookup's finish closes Step 1's unanswered questions the same way.",
+    "`ct_cap_base_confirmation` is asked after the documents are read, before the cap state is built. "
+    "`different` leaves it open until the corrected base is confirmed. A base the freeform mapper built wholly from "
+    "the founder's spreadsheet is recorded not applicable by that script, bound to that base: any later change to "
+    "the base asks it again. No field in inputs.json clears it.",
+    "`ct_extraction_confirmation.{flagged_fields,unverifiable_doc,ambiguities}` are decided by extract_instrument.py "
+    "from the extraction it is about to save and bound to it; `has_corrections` leaves the question open until the "
+    "corrected extraction is confirmed. `aoa_fields` is opened by the skill for an AoA's batch. A founder's later "
+    "answer written back into the note never asks it again.",
+    "`ct_lane3_blocker.<BLOCK.FIELD>` pre-answers (`FS_HOST_VALUE ct_lane3_blocker.0.<field>=stated | <value>`) are "
+    "applied by the freeform emit, and recorded only when the mapper accepts the value; the block index is the "
+    "detection's own order, so a host cannot know it in advance on a sheet with several blocks of one kind.",
+    "`ct_iia_grants` closes itself (not applicable, by script) once `ct_jurisdiction` is outside Israel. "
+    "`ct_existing_review` is owed only when the review dir holds another run's report. `ct_founder_fact`, "
+    "`ct_lane1_counsel_review` and `ct_lane2_column_mapping` take `not_sure`; a founder fact asked again replaces "
+    "its earlier answer.",
 )
 
 
@@ -1293,7 +1315,7 @@ GATES: dict[str, dict[str, Any]] = {
     },
     "ct_option_pool": {
         "skill": "cap-table",
-        "step": "3",
+        "step": "4",
         "modes": _FULL,
         "kind": "fixed",
         "question": "Does the company have an employee option pool?",
@@ -1318,7 +1340,7 @@ GATES: dict[str, dict[str, Any]] = {
     },
     "ct_cap_base_confirmation": {
         "skill": "cap-table",
-        "step": "2",
+        "step": "4",
         "modes": _FULL,
         "kind": "templated",
         "question": "Please confirm [Company]'s cap-table base — I'll use exactly these numbers for all the math:",
@@ -1327,7 +1349,7 @@ GATES: dict[str, dict[str, Any]] = {
         "multi": False,
         "options": (
             _o("confirmed", "Confirmed"),
-            _o("different", "Different — I'll correct it in chat", value=True),
+            _o("different", "Different — I'll correct it in chat", value=True, terminal=False),
         ),
         "option_source": None,
         "option_variants": None,
@@ -1597,7 +1619,7 @@ GATES: dict[str, dict[str, Any]] = {
         ),
         "option_source": None,
         "option_variants": None,
-        "owed": "ct_engagement_unknown",
+        "owed": "ct_asked_in_mode",
         "asked_check": "none",
         "writer": "record_gate_answer.py",
         "binds": None,
@@ -1624,7 +1646,7 @@ GATES: dict[str, dict[str, Any]] = {
         ),
         "option_source": None,
         "option_variants": None,
-        "owed": "ct_jurisdiction_unknown",
+        "owed": "ct_asked_in_mode",
         "asked_check": "none",
         "writer": "record_gate_answer.py",
         "binds": None,
@@ -1820,14 +1842,14 @@ GATES: dict[str, dict[str, Any]] = {
         "multi": False,
         "options": (
             _o("values_ok", "Confirmed as extracted"),
-            _o("has_corrections", "I have corrections", value=True),
+            _o("has_corrections", "I have corrections", value=True, terminal=False),
         ),
         "option_source": None,
         "option_variants": None,
         "owed": "ct_extraction_needs_confirmation",
         "asked_check": "none",
         "writer": "record_gate_answer.py",
-        "binds": None,
+        "binds": "ct_extraction_pending",
         "no_ask_default": None,
         "defaults": _STATED,
         "reopens_complete": False,
@@ -1843,7 +1865,7 @@ GATES: dict[str, dict[str, Any]] = {
         "form_label": "Fact",
         "instances": {"dynamic": "field_path"},
         "multi": False,
-        "options": (_o("stated", "<the stated value>", value=True),),
+        "options": (_o("stated", "<the stated value>", value=True), _o("not_sure", "Not sure")),
         "option_source": None,
         "option_variants": None,
         "owed": "ct_producer_reports_null",
@@ -1865,7 +1887,7 @@ GATES: dict[str, dict[str, Any]] = {
         "form_label": "Counsel item",
         "instances": {"dynamic": "field_path"},
         "multi": False,
-        "options": (_o("stated", "<the stated value>", value=True),),
+        "options": (_o("stated", "<the stated value>", value=True), _o("not_sure", "Not sure")),
         "option_source": None,
         "option_variants": None,
         "owed": "model",
@@ -1887,7 +1909,7 @@ GATES: dict[str, dict[str, Any]] = {
         "form_label": "Column",
         "instances": {"dynamic": "field_path"},
         "multi": False,
-        "options": (_o("stated", "<the stated column>", value=True),),
+        "options": (_o("stated", "<the stated column>", value=True), _o("not_sure", "Not sure")),
         "option_source": None,
         "option_variants": None,
         "owed": "model",
@@ -2729,6 +2751,302 @@ PICK_LIMITS: dict[str, Callable[[Ctx], int | None]] = {
 _GATE_IDS = {id(g): gid for gid, g in GATES.items()}
 
 
+# --- cap-table --------------------------------------------------------------------------------------
+
+# The structures the IIA question applies to (Israeli-context answers to `ct_jurisdiction`).
+CT_ISRAELI = ("israeli", "mid_flip", "delaware_with_israeli_sub")
+# The cap base: what `ct_cap_base_confirmation` shows and binds (an empty one counts as absent).
+CT_EQUITY_KEYS = ("founders", "option_pool", "preferred_series", "common_batches")
+# The extraction extract_instrument.py is about to save, written before it asks (`ct_extraction_confirmation`).
+CT_PENDING = "extraction_pending.json"
+# The note field each note question settles.
+CT_NOTE_FIELDS = {
+    "ct_note_cap_denominator": "capitalization_denominator",
+    "ct_note_maturity_default": "maturity_default_treatment",
+    "ct_note_qualified_threshold": "qualified_financing_threshold",
+    "ct_note_interest_type": "interest_rate_type",
+    "ct_note_interest_converts": "interest_converts_to_shares",
+}
+# Fields the founder supplies after the extraction (the note questions, and values only the founder has):
+# writing their answers back into the extraction is not a different extraction, so they never re-ask it.
+CT_FOUNDER_SUPPLIED_FIELDS = (
+    *CT_NOTE_FIELDS.values(),
+    "purchase_amount",
+    "principal",
+    "issuance_date",
+    "investor_name",
+    "maturity_date",
+)
+# The writers that may record a cap-table question not applicable on the run's behalf: the freeform mapper
+# built the base from the founder's own spreadsheet, so the base question is not asked (bound to that base).
+SCRIPT_EXEMPTIONS: dict[str, tuple[str, ...]] = {"ct_cap_base_confirmation": ("extract_cap_table.py",)}
+
+
+def _ct_run_doc(ctx: Ctx, name: str) -> Any:
+    """This run's `name` in the run dir, or None when it is not there yet. A file that cannot be read, or that
+    carries another run's id, cannot decide a question: GATE_UNDECIDABLE, never "not owed"."""
+    if ctx.run_dir is None:
+        return None
+    path = os.path.join(ctx.run_dir, name)
+    try:
+        doc = _run_status.read_json(path)
+    except ValueError as e:
+        raise Unimplemented(f"{path} cannot be read ({e})", code="GATE_UNDECIDABLE") from e
+    if doc is None:
+        return None
+    meta = doc.get("metadata") if isinstance(doc, dict) else None
+    rid = meta.get("run_id") if isinstance(meta, dict) else None
+    if rid is None and isinstance(doc, dict):
+        rid = doc.get("run_id")
+    if rid != ctx.paths.run_id:
+        raise Unimplemented(
+            f"{path} carries run id {rid!r}, not this run's {ctx.paths.run_id!r}; run its producer again with "
+            "this run's id",
+            code="GATE_UNDECIDABLE",
+        )
+    return doc
+
+
+def _ct_has(value: Any) -> bool:
+    return isinstance(value, (list, dict)) and bool(value)
+
+
+def ct_equity_base(inputs: Any) -> bool:
+    return isinstance(inputs, dict) and any(_ct_has(inputs.get(k)) for k in CT_EQUITY_KEYS)
+
+
+def _ct_state(ctx: Ctx, key: str) -> str | None:
+    """`key`'s state: the in-memory ledger inside a transaction, the status view otherwise."""
+    if ctx.ledger is not None:
+        entry = (ctx.ledger.get("gates") or {}).get(key)
+        return entry.get("state") if isinstance(entry, dict) else None
+    gate_id, instance = parse_key(key)
+    for view in ctx.status.get("gates") or []:
+        if isinstance(view, dict) and view.get("id") == gate_id and view.get("instance") == instance:
+            state = view.get("state")
+            return state if isinstance(state, str) else None
+    return None
+
+
+def _ct_inst(ctx: Ctx) -> dict[str, Any]:
+    inst = _ct_run_doc(ctx, "instruments.json")
+    return inst if isinstance(inst, dict) else {}
+
+
+def _ct_items(ctx: Ctx, array: str) -> list[dict[str, Any]]:
+    items = _ct_inst(ctx).get(array)
+    return [i for i in items if isinstance(i, dict)] if isinstance(items, list) else []
+
+
+def _pred_ct_note_field(gate_id: str) -> Callable[[Ctx, dict[str, Any], str | None], bool]:
+    """Owed while a note leaves the field unset; once asked, owed until answered (writing the field while the
+    question is open does not close it), but only while a note exists."""
+    field = CT_NOTE_FIELDS[gate_id]
+
+    def fn(ctx: Ctx, g: dict[str, Any], instance: str | None) -> bool:
+        notes = _ct_items(ctx, "convertible_notes")
+        if gate_id == "ct_note_cap_denominator":
+            notes = [n for n in notes if n.get("valuation_cap") is not None]
+        if not notes:
+            return False
+        return any(n.get(field) is None for n in notes) or _ct_state(ctx, gate_id) == "open"
+
+    return fn
+
+
+def _pred_ct_cap_base(ctx: Ctx, g: dict[str, Any], instance: str | None) -> bool:
+    """Owed whenever the run has a cap base. Never cleared by a field in inputs.json: the freeform mapper's
+    exemption is a ledger record bound to the base it built (`exempt_from_writer`)."""
+    return ct_equity_base(_ct_run_doc(ctx, "inputs.json"))
+
+
+def _pred_ct_no_cap_base(ctx: Ctx, g: dict[str, Any], instance: str | None) -> bool:
+    inputs = _ct_run_doc(ctx, "inputs.json")
+    if inputs is None or ct_equity_base(inputs):
+        return False
+    if any(_ct_items(ctx, a) for a in ("safes", "convertible_notes", "warrants", "option_grants")):
+        return True
+    # extraction_audit.json is a receipt: it names its run only when written on a ledger run.
+    if ctx.run_dir is None:
+        return False
+    try:
+        audit = _run_status.read_json(os.path.join(ctx.run_dir, "extraction_audit.json"))
+    except ValueError:
+        return False
+    return isinstance(audit, dict) and audit.get("run_id") == ctx.paths.run_id
+
+
+def _pred_ct_existing_review(ctx: Ctx, g: dict[str, Any], instance: str | None) -> bool:
+    """Another run's report in this run's dir (unreadable: asked). This run's own report is not one."""
+    if ctx.run_dir is None:
+        return False
+    try:
+        doc = _run_status.read_json(os.path.join(ctx.run_dir, "report.json"))
+    except ValueError:
+        return True
+    if doc is None:
+        return False
+    meta = doc.get("metadata") if isinstance(doc, dict) else None
+    rid = meta.get("run_id") if isinstance(meta, dict) else None
+    if rid is None and isinstance(doc, dict):
+        rid = doc.get("run_id")
+    return rid != ctx.paths.run_id
+
+
+def _pred_ct_israeli(ctx: Ctx, g: dict[str, Any], instance: str | None) -> bool:
+    """Owed until the structure is known to be outside Israel, so it is asked in the same batch."""
+    answer = _answer_id(ctx, "ct_jurisdiction")
+    return answer is None or answer in CT_ISRAELI
+
+
+def _pred_ct_pool_unknown(ctx: Ctx, g: dict[str, Any], instance: str | None) -> bool:
+    inputs = _ct_run_doc(ctx, "inputs.json")
+    if not ct_equity_base(inputs):
+        return False
+    return not _ct_has(inputs.get("option_pool")) or _ct_state(ctx, "ct_option_pool") == "open"
+
+
+def _pred_ct_priced_round(ctx: Ctx, g: dict[str, Any], instance: str | None) -> bool:
+    if ctx.mode == "fast_assess":
+        return True
+    return "priced_round" in str(_answer_id(ctx, "ct_scenario_selection") or "").split(",")
+
+
+def _pred_ct_pool_target(ctx: Ctx, g: dict[str, Any], instance: str | None) -> bool:
+    return _answer_id(ctx, "ct_pool_topup_intent") not in (None, "none", "not_sure")
+
+
+def _pred_ct_safe_terms(ctx: Ctx, g: dict[str, Any], instance: str | None) -> bool:
+    safes = _ct_items(ctx, "safes")
+    if not safes:
+        return False
+    missing = any(
+        s.get("post_money_valuation_cap") is None
+        and s.get("pre_money_valuation_cap") is None
+        and s.get("discount_multiplier") is None
+        and s.get("form") != "yc_uncapped_mfn"
+        for s in safes
+    )
+    return missing or _ct_state(ctx, "ct_safe_terms") == "open"
+
+
+def _pred_ct_flip_grants(ctx: Ctx, g: dict[str, Any], instance: str | None) -> bool:
+    if "flip" not in str(_answer_id(ctx, "ct_scenario_selection") or "").split(","):
+        return False
+    inputs = _ct_run_doc(ctx, "inputs.json") or {}
+    pool = inputs.get("option_pool") if isinstance(inputs, dict) else None
+    issued = pool.get("issued") if isinstance(pool, dict) else None
+    return not _ct_items(ctx, "option_grants") and isinstance(issued, (int, float)) and issued > 0
+
+
+def ct_answered_fields(ctx: Ctx) -> set[str]:
+    """Extracted fields the founder has since answered (a note question, or a founder fact naming the field)."""
+    out: set[str] = set()
+    for key, entry in ((ctx.ledger or {}).get("gates") or {}).items():
+        if not isinstance(entry, dict) or entry.get("state") != "answered":
+            continue
+        gate_id, _, instance = key.partition(".")
+        if gate_id in CT_NOTE_FIELDS:
+            out.add(CT_NOTE_FIELDS[gate_id])
+        elif gate_id == "ct_founder_fact" and instance:
+            out.add(instance.rsplit(".", 1)[-1])
+    return out
+
+
+def _pred_ct_extraction(ctx: Ctx, g: dict[str, Any], instance: str | None) -> bool:
+    """Per instance, from the extraction the enforcer is about to save. `aoa_fields` is opened by the model for
+    an AoA's low-confidence batch."""
+    if instance == "aoa_fields":
+        return True
+    pending = _ct_run_doc(ctx, CT_PENDING)
+    if not isinstance(pending, dict):
+        return False
+    receipt: dict[str, Any] = pending["receipt"] if isinstance(pending.get("receipt"), dict) else {}
+    answered = ct_answered_fields(ctx)
+    if instance == "flagged_fields":
+        return bool(set(receipt.get("attention_needed_fields") or []) - answered)
+    if instance == "unverifiable_doc":
+        ev = receipt.get("evidence_verification") or {}
+        meta = ev.get("doc_metadata") or {}
+        return ev.get("overall_status") == "unverifiable_doc" or meta.get("verification_source") == "model_vision"
+    if instance == "ambiguities":
+        return any(not (isinstance(a, dict) and a.get("field") in answered) for a in receipt.get("ambiguities") or [])
+    return False
+
+
+def _ct_pending_binding(ctx: Ctx, name: str, spec: dict[str, Any], instance: str | None) -> dict[str, Any] | None:
+    """What a confirmation of the extraction confirmed: the document and the values, minus the fields the
+    founder supplies afterwards (their answers are written back into the same extraction)."""
+    if instance not in spec["instances"]:
+        return None
+    pending = _ct_run_doc(ctx, CT_PENDING)
+    if not isinstance(pending, dict):
+        return None
+    instrument: dict[str, Any] = pending["instrument"] if isinstance(pending.get("instrument"), dict) else {}
+    canon = json.dumps(
+        {
+            "doc": pending.get("doc"),
+            "instrument": {k: v for k, v in instrument.items() if k not in CT_FOUNDER_SUPPLIED_FIELDS},
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+    return {"binder": name, "fingerprint": hashlib.sha256(canon.encode("utf-8")).hexdigest()}
+
+
+def _src_ct_applicable_scenarios(ctx: Ctx, instance: str | None) -> list[dict[str, Any]]:
+    """The scenarios this cap table supports: a cap-implied SAFE snapshot only with SAFEs and no note (a note
+    makes that route refuse); a priced round always; a note conversion with notes; a flip on a flip-focused
+    engagement or an Israeli-context structure."""
+    safes, notes = bool(_ct_items(ctx, "safes")), bool(_ct_items(ctx, "convertible_notes"))
+    ids = []
+    if safes and not notes:
+        ids.append("cap_implied_safe")
+    ids.append("priced_round")
+    if notes:
+        ids.append("note_conversion")
+    if _answer_id(ctx, "ct_engagement_mode") == "flip_focused" or _answer_id(ctx, "ct_jurisdiction") in CT_ISRAELI:
+        ids.append("flip")
+    return [_o(i, i) for i in ids]
+
+
+OPTION_SOURCES["ct_applicable_scenarios"] = _src_ct_applicable_scenarios
+PREDICATES.update(
+    {
+        # Asked in every run whose mode lists the gate (Step 2, Step 5); a producer then checks its file agrees.
+        "ct_asked_in_mode": _pred_always,
+        "ct_scenarios_owed": _pred_always,
+        "ct_pool_existence_unknown": _pred_ct_pool_unknown,
+        "ct_cap_base_built": _pred_ct_cap_base,
+        "ct_no_cap_base": _pred_ct_no_cap_base,
+        **{
+            f"ct_note_{name}": _pred_ct_note_field(gid)
+            for gid, name in (
+                ("ct_note_cap_denominator", "denominator_unset"),
+                ("ct_note_maturity_default", "maturity_unset"),
+                ("ct_note_qualified_threshold", "threshold_unset"),
+                ("ct_note_interest_type", "interest_type_unset"),
+                ("ct_note_interest_converts", "interest_converts_unset"),
+            )
+        },
+        "ct_existing_review_found": _pred_ct_existing_review,
+        "ct_priced_round_modelled": _pred_ct_priced_round,
+        "ct_pool_basis_unsettled": _pred_ct_pool_target,
+        # Opened by run_scenario.py / quick_assess.py when the solver refused the stated basis.
+        "ct_pool_basis_refused": _pred_always,
+        "ct_israeli_company": _pred_ct_israeli,
+        "ct_safe_terms_missing": _pred_ct_safe_terms,
+        "ct_flip_grants_missing": _pred_ct_flip_grants,
+        # Opened by extract_instrument.py for a .docx with tracked changes (or by the model after --detect).
+        "ct_docx_has_tracked_changes": _pred_always,
+        "ct_extraction_needs_confirmation": _pred_ct_extraction,
+        # Opened where a producer or the extraction reports a value only the founder has.
+        "ct_producer_reports_null": _pred_always,
+    }
+)
+
+
 def _fill_question(gate_id: str, instance: str | None, ctx: Ctx) -> tuple[str, list[str]] | None:
     """The filled question, or None for a gate with no filler (or nothing to fill from yet). Fails closed: a file
     it cannot use is undecidable, never a question with the slots left blank."""
@@ -2764,7 +3082,20 @@ BINDERS: dict[str, dict[str, Any]] = {
         "include": ("approach_chosen",),
     },
     "ic_score_dimensions": {"kind": "json_fingerprint", "files": ("score_dimensions.json",), "exclude": ("metadata",)},
-    "ct_cap_base_fields": {"kind": "json_fingerprint", "files": ("inputs.json",), "exclude": ("metadata",)},
+    # The cap base the question shows, and nothing else: inputs.json later takes the document's stated totals,
+    # AoA findings and an acquisition block, none of which is a different base.
+    "ct_cap_base_fields": {
+        "kind": "json_fingerprint",
+        "files": ("inputs.json",),
+        "exclude": ("metadata",),
+        "include": CT_EQUITY_KEYS,
+    },
+    # The extraction a confirmation confirmed; `aoa_fields` is not about it.
+    "ct_extraction_pending": {
+        "kind": "ct_extraction_pending",
+        "files": ("extraction_pending.json",),
+        "instances": ("flagged_fields", "unverifiable_doc", "ambiguities"),
+    },
     # The competitor set Gate 1 confirmed. The draft later takes the deferred recall candidates (Gate 1's own
     # writer, then Step 4's promotions) and its candidate axes may change at Gate 2: neither is the set.
     "cp_landscape_draft": {
@@ -2784,12 +3115,14 @@ BINDERS: dict[str, dict[str, Any]] = {
 }
 
 
-def binding(ctx: Ctx, name: str | None) -> dict[str, Any] | None:
+def binding(ctx: Ctx, name: str | None, instance: str | None = None) -> dict[str, Any] | None:
     if name is None:
         return None
     spec = BINDERS.get(name)
     if spec is not None and spec["kind"] == "fmr_normalised_inputs":
         return _fmr_binding(ctx, name, spec)
+    if spec is not None and spec["kind"] == "ct_extraction_pending":
+        return _ct_pending_binding(ctx, name, spec, instance)
     if spec is None or spec["kind"] != "json_fingerprint":
         raise Unimplemented(f"binder {name!r} is not implemented yet")
     run_dir = ctx.run_dir
@@ -3356,7 +3689,10 @@ def record(
     if entry["state"] is not None and _terminal(entry):
         cur = entry["current"] or {}
         # Checked first: the same answer to a changed artifact is a new confirmation, not a repeat.
-        stale = cur.get("binding") is not None and _binding_now(ctx, g, bound) not in (None, cur.get("binding"))
+        stale = cur.get("binding") is not None and _binding_now(ctx, g, bound, instance) not in (
+            None,
+            cur.get("binding"),
+        )
         same = bool(options) and _same(entry, options, value) and cur.get("resolution") == resolution
         if same and not stale and not after_hold:
             if note is None or note == cur.get("note"):
@@ -3402,7 +3738,7 @@ def record(
         resolution=resolution,
         default_reason=default_reason,
         basis=basis,
-        bound=_binding_now(ctx, g, bound) if terminal else None,
+        bound=_binding_now(ctx, g, bound, instance) if terminal else None,
         asked_evidence=asked_evidence,
         held=g["asked_check"] == "since_invocation",
     )
@@ -3423,8 +3759,10 @@ def record(
     return {"key": key, "state": entry["state"], "answer_id": entry["current"]["answer_id"], "declined": declined}
 
 
-def _binding_now(ctx: Ctx, g: dict[str, Any], given: dict[str, Any] | None) -> dict[str, Any] | None:
-    return given if given is not None else binding(ctx, g["binds"])
+def _binding_now(
+    ctx: Ctx, g: dict[str, Any], given: dict[str, Any] | None, instance: str | None = None
+) -> dict[str, Any] | None:
+    return given if given is not None else binding(ctx, g["binds"], instance)
 
 
 def _reopen_complete(
@@ -3994,7 +4332,7 @@ def require_terminal(ctx: Ctx, ledger: dict[str, Any], key: str, *, by: str = RE
     entry = _entry(ledger, key)
     if entry["state"] is not None and _terminal(entry):
         cur = entry["current"] or {}
-        if g["binds"] and cur.get("binding") is not None and binding(ctx, g["binds"]) != cur.get("binding"):
+        if g["binds"] and cur.get("binding") is not None and binding(ctx, g["binds"], instance) != cur.get("binding"):
             # A finished run's answers never move through an enforcer: RUN_FINISHED, nothing written.
             _guard_finished(ctx.status, g)
             _supersede(ledger, entry, by, "binding_changed")
@@ -4110,6 +4448,51 @@ def apply_writer_pre_answer(
     return result
 
 
+def exempt_from_writer(paths: _run_status.RunPaths, key: str, writer: str, reason: str) -> dict[str, Any]:
+    """A script that may (SCRIPT_EXEMPTIONS) records a question not applicable on the run's behalf, bound to what
+    it saw, so a later change to that content asks it again. Only that script: the model cannot close a
+    script-owed question, and no field in a file it writes clears one."""
+
+    def fn(ctx: Ctx, ledger: dict[str, Any], status: dict[str, Any]) -> dict[str, Any]:
+        gate_id, _instance, g = check_key(key, ctx.skill)
+        if writer not in SCRIPT_EXEMPTIONS.get(gate_id, ()):
+            raise GateRejection("WRITER_IS_OTHER_SCRIPT", f"{writer} may not close {gate_id}")
+        entry = (ledger.get("gates") or {}).get(key)
+        if isinstance(entry, dict) and entry.get("state") == "answered":
+            return {"key": key, "unchanged": True, "state": "answered"}
+        if isinstance(entry, dict) and entry.get("state") == "not_owed":
+            cur = entry.get("current") or {}
+            if cur.get("binding") == binding(ctx, g["binds"]):
+                return {"key": key, "unchanged": True, "state": "not_owed"}
+            _supersede(ledger, entry, writer, "binding_changed")
+        return record(
+            ctx, ledger, key, note=reason, resolution="not_applicable", basis="script", by=writer, writer=g["writer"]
+        )
+
+    out: dict[str, Any] = transact(paths, fn)
+    return out
+
+
+def supersede_for_what_if(paths: _run_status.RunPaths, key: str, by: str, reason: str) -> bool:
+    """A what-if on a reopened revision (revision >= 1, not finished) asked for something a recorded answer
+    rules out: the answer is superseded (`what_if:<reason>`) and the question re-opens, to be asked and
+    answered again under the new revision. A first revision's disagreement is a mismatch, never this. False
+    when there is nothing to supersede or the run is not a reopened revision."""
+
+    def fn(ctx: Ctx, ledger: dict[str, Any], status: dict[str, Any]) -> bool:
+        check_key(key, ctx.skill)
+        if status.get("status") in _run_status.FINAL_STATUSES or int(status.get("revision") or 0) < 1:
+            return False
+        entry = (ledger.get("gates") or {}).get(key)
+        if entry is None or not _terminal(entry):
+            return False
+        _supersede(ledger, entry, by, f"what_if:{reason}")
+        return True
+
+    done: bool = transact(paths, fn)
+    return done
+
+
 def supersede_from_writer(paths: _run_status.RunPaths, key: str, writer: str, reason: str) -> bool:
     """A dedicated writer found that what an answer confirmed has changed: the answer is superseded and
     the gate re-opens, so it is asked again. False when there is no recorded answer to supersede."""
@@ -4206,6 +4589,8 @@ CLI_CODES = {
     "cp_producers": ["RUN_ID_REQUIRED"],
     # ic-sim's compose: a simulation dir that belongs to a run, whose files do not agree on which.
     "ic_producers": ["RUN_ID_REQUIRED"],
+    # cap-table's producers: a call into a bound review dir with no (or an empty) --run-id.
+    "ct_producers": ["RUN_ID_REQUIRED"],
     "usage": ["USAGE"],
     "notices": ["PRE_ANSWER_IGNORED", "PRE_ANSWER_INVALID", "PRE_ANSWER_NOT_APPLIED"],
 }

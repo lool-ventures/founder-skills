@@ -14,6 +14,9 @@
     "cp_producers": [
       "RUN_ID_REQUIRED"
     ],
+    "ct_producers": [
+      "RUN_ID_REQUIRED"
+    ],
     "deliverables": [
       "RUN_NOT_COMPLETE"
     ],
@@ -524,14 +527,14 @@
           "id": "different",
           "label": "Different — I'll correct it in chat",
           "only_skills": null,
-          "pre_answerable": true,
+          "pre_answerable": false,
           "takes_value": true,
-          "terminal": true
+          "terminal": false
         }
       ],
       "question": "Please confirm [Company]'s cap-table base — I'll use exactly these numbers for all the math:",
       "skill": "cap-table",
-      "step": "2"
+      "step": "4"
     },
     "ct_docx_tracked_changes": {
       "asked_check": "none",
@@ -676,9 +679,9 @@
           "id": "has_corrections",
           "label": "I have corrections",
           "only_skills": null,
-          "pre_answerable": true,
+          "pre_answerable": false,
           "takes_value": true,
-          "terminal": true
+          "terminal": false
         }
       ],
       "question": "Do these extracted values look right?",
@@ -709,6 +712,15 @@
           "only_skills": null,
           "pre_answerable": true,
           "takes_value": true,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "not_sure",
+          "label": "Not sure",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
           "terminal": true
         }
       ],
@@ -840,6 +852,15 @@
           "pre_answerable": true,
           "takes_value": true,
           "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "not_sure",
+          "label": "Not sure",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
         }
       ],
       "question": "This term needs your confirmation before it is used. What does the document say?",
@@ -867,6 +888,15 @@
           "only_skills": null,
           "pre_answerable": true,
           "takes_value": true,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "not_sure",
+          "label": "Not sure",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
           "terminal": true
         }
       ],
@@ -1199,7 +1229,7 @@
       ],
       "question": "Does the company have an employee option pool?",
       "skill": "cap-table",
-      "step": "3"
+      "step": "4"
     },
     "ct_pool_basis": {
       "asked_check": "none",
@@ -2609,7 +2639,13 @@
     "ic-sim refuses `RUN_FINISHED` (exit 1, nothing written) when its fund profile or report is built again for a `complete` run: new materials after delivery are a new simulation, under a new run id.",
     "competitive-positioning: `open --gate cp_gate1_landscape` prints the question naming every competitor the independent search found that the set lacks, and `context_lines`, one per candidate; when it applies a request line (or the gate is already answered) the same lines are under `context.<gate>`. `missing`, `remove` and `change_axes` leave the question open (asked again after the change) and cannot be sent ahead.",
     "competitive-positioning's Step 4 additions question offers only the form the open slots allow (all / top <n> / free a slot by merging) and is not owed when nothing can be added; an option of another form is `OPTION_UNLISTED`. `include_top` takes research's first <n>; only `include_some` asks `cp_research_pick`, which records any candidate (comma-joined ids, at most the open slots) though it shows four. `cp_consolidation_merge` has one instance per merger research found (`<slug_a>+<slug_b>`); an answered pair is never offered again.",
-    "A competitive-positioning report composed again after `complete` (the delivery check's fix, or a coordinate the founder disputes) starts a new revision: `running`, `revision` + 1, deliverables and `handed_over_at` cleared, until the coaching is inserted again."
+    "A competitive-positioning report composed again after `complete` (the delivery check's fix, or a coordinate the founder disputes) starts a new revision: `running`, `revision` + 1, deliverables and `handed_over_at` cleared, until the coaching is inserted again.",
+    "A cap-table what-if after `complete` (a new scenario or pool, re-run through the scenario solver or the fast assessment) reopens the run the same way. A what-if that asks for something a recorded answer rules out supersedes that answer (`what_if:<reason>`) and the question is asked again (exit 10); on the first revision the same disagreement is `GATE_RECORD_MISMATCH` (exit 1). A fast assessment or concise answer finishes again.",
+    "cap-table's no-cap-base fork ends with `run_status.py finish --mode extraction_only`, allowed on a full run only once `ct_no_cap_base_fork` is answered `terms_only`; finishing closes the questions that mode does not ask. A rule lookup's finish closes Step 1's unanswered questions the same way.",
+    "`ct_cap_base_confirmation` is asked after the documents are read, before the cap state is built. `different` leaves it open until the corrected base is confirmed. A base the freeform mapper built wholly from the founder's spreadsheet is recorded not applicable by that script, bound to that base: any later change to the base asks it again. No field in inputs.json clears it.",
+    "`ct_extraction_confirmation.{flagged_fields,unverifiable_doc,ambiguities}` are decided by extract_instrument.py from the extraction it is about to save and bound to it; `has_corrections` leaves the question open until the corrected extraction is confirmed. `aoa_fields` is opened by the skill for an AoA's batch. A founder's later answer written back into the note never asks it again.",
+    "`ct_lane3_blocker.<BLOCK.FIELD>` pre-answers (`FS_HOST_VALUE ct_lane3_blocker.0.<field>=stated | <value>`) are applied by the freeform emit, and recorded only when the mapper accepts the value; the block index is the detection's own order, so a host cannot know it in advance on a sheet with several blocks of one kind.",
+    "`ct_iia_grants` closes itself (not applicable, by script) once `ct_jurisdiction` is outside Israel. `ct_existing_review` is owed only when the review dir holds another run's report. `ct_founder_fact`, `ct_lane1_counsel_review` and `ct_lane2_column_mapping` take `not_sure`; a founder fact asked again replaces its earlier answer."
   ],
   "pages_after_coaching": {
     "cap-table": [],

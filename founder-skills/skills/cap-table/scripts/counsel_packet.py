@@ -19,6 +19,7 @@ import sys
 from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _ct_gates  # noqa: E402
 from _artifact_writer import ArtifactValidationError, load_schema, write_artifact  # noqa: E402
 
 _SCHEMA_DIR = os.path.join(
@@ -174,6 +175,7 @@ def main() -> int:
     p.add_argument("--write-md", default=None, help="Path to write counsel_packet.md")
     p.add_argument("--pretty", action="store_true")
     args = p.parse_args()
+    _ct_gates.refuse_without_run_id(_ct_gates.run_dir_of(args.output_json), args.run_id)
 
     with open(args.rule_audit, encoding="utf-8") as f:
         rule_audit = json.load(f)

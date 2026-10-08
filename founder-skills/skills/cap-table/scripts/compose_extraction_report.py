@@ -45,6 +45,7 @@ import sys
 from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _ct_gates  # noqa: E402
 from _rule_pack import RULE_PACK_VERSION  # noqa: E402
 
 SCHEMA_VERSION = "v0.1.0-cap-table-extraction-only"
@@ -619,6 +620,17 @@ def _cli() -> int:
     )
     p.add_argument("--pretty", action="store_true")
     args = p.parse_args()
+    # With a ledger (the bound review dir that holds inputs.json): the founder chose instrument terms only, and
+    # every extraction confirmation the run opened is recorded. The -extraction dir itself carries no ref.
+    run_dir = _ct_gates.run_dir_of(args.inputs)
+    _ct_gates.refuse_without_run_id(run_dir, args.run_id)
+    _ledger = _ct_gates.require_or_exit(run_dir, args.run_id, [_ct_gates.FORK], by="compose_extraction_report.py")
+    if _ledger is not None:
+        if (_ct_gates.answers(_ledger).get(_ct_gates.FORK) or {}).get("answer_id") != "terms_only":
+            _ct_gates.mismatch(
+                "the founder chose to provide the cap base: run the full review, not instrument terms only"
+            )
+        _ct_gates.refuse_open_gates(_ledger)
 
     with open(args.inputs) as f:
         inputs = json.load(f)

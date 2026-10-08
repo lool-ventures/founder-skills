@@ -42,6 +42,7 @@ from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _artifact_io  # type: ignore[import-not-found]  # noqa: E402
+import _ct_gates  # noqa: E402
 from _artifact_writer import ArtifactValidationError, load_schema, write_artifact  # noqa: E402
 
 _SCHEMA_DIR = os.path.join(
@@ -1438,6 +1439,7 @@ def main() -> int:
     p.add_argument("--today", default=None, help="ISO date override for status evaluation (testing)")
     p.add_argument("--pretty", action="store_true")
     args = p.parse_args()
+    _ct_gates.refuse_without_run_id(_ct_gates.run_dir_of(args.output), args.run_id)
 
     if args.phase == "pre_math":
         for required in ("inputs", "instruments", "cap_state"):

@@ -30,6 +30,7 @@ import sys
 from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _ct_gates  # noqa: E402
 import _warning_callouts  # noqa: E402
 
 # aggregate_ownership_by_class keys -> founder-facing labels (same data the full
@@ -256,6 +257,7 @@ def main() -> int:
     p.add_argument("-o", "--output-md", required=True, help="path to write the concise markdown")
     p.add_argument("--pretty", action="store_true")
     args = p.parse_args()
+    _ct_gates.refuse_without_run_id(_ct_gates.run_dir_of(args.inputs), args.run_id)
 
     try:
         inputs = _load(args.inputs)

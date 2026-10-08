@@ -22,9 +22,10 @@ naming them, then runs this again, with `--strip` if they are still there. `--st
 its bullet or paragraph (and a lead-in or heading left with nothing under it), adds one founder-facing line saying
 so, and leaves `coaching.md` as it was.
 
-Every run writes `<coaching.md>.pool-check.json`: {run_id, sha256 of coaching.md, action, findings, reason,
-output_sha256 of the file it wrote}. When the check cannot run after reading the run, it passes the commentary
-through with ERROR_NOTE appended, and the record carries `code: POOL_CHECK_NOT_RUN`, `severity: medium`.
+Every run writes `<coaching.md>.pool-check.json`: {run_id, sha256 of coaching.md, scenarios_sha256 of the
+scenarios.json it judged against, action, findings, reason, output_sha256 of the file it wrote}. When the
+check cannot run after reading the run, it passes the commentary through with ERROR_NOTE appended, and the
+record carries `code: POOL_CHECK_NOT_RUN`, `severity: medium`.
 """
 
 from __future__ import annotations
@@ -214,6 +215,9 @@ def main() -> int:
     if not isinstance(run_id, str) or not run_id:
         return _refuse_input(record, record_path, "this run's scenarios.json carries no metadata.run_id")
     record["run_id"] = run_id
+    # The figures the claims were judged against: a what-if that re-solves the scenarios makes this record stale,
+    # so neither the release nor the insert takes it for the new figures.
+    record["scenarios_sha256"] = _sha256(a.scenarios)
     try:
         # The pool sections' acquisition note reads the pre-round snapshot beside scenarios.json when a scenario
         # carries none of its own; without it the note is rebuilt from the scenario alone.

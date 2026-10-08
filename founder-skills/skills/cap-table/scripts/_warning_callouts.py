@@ -162,6 +162,10 @@ def render_warning_callouts(cap_state_warnings: list[str]) -> list[str]:
 # by _solver_subject() -- deliberately not %-formatted against the raw dict, so a missing key degrades
 # to a slightly vaguer sentence instead of raising mid-report.
 _SOLVER_WARNING_PROSE: dict[str, str] = {
+    "qualified_financing_threshold_defaulted": (
+        "**The note's qualified-financing threshold was not stated; it was treated as met by this round.** "
+        "Check the note's own threshold before relying on its conversion."
+    ),
     "W_MFN_NOT_MOST_FAVORABLE": (
         "**This MFN election is a counterfactual, not your entitlement.** The most-favoured-nation "
         "SAFE below was modelled against the terms it named, but a better set of sibling terms "

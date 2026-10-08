@@ -18,24 +18,6 @@ Model cap-table mechanics for founders so they understand what their term sheets
 
 For any eligibility, qualification, or status determination that turns on tax or legal facts the cap-table data cannot settle — QSBS (IRC §1202), Israeli §102 track / holding period, IIA obligations, or any rule carrying `counsel_review` — state the **cited fact** (the date window, threshold, or clock) and stop there. **Never conclude that the founder does or will qualify** ("yes, you qualify", "you're eligible", "strong eligibility posture"). The date or threshold is a fact you may assert with its citation; the *conclusion* is a counsel determination — present it as such and emit a counsel item. This holds whether the engagement runs the full pipeline, fast-assess, or a one-line directional answer: the boundary is about what you may *conclude*, not how deep the analysis went.
 
-## Skill Metadata
-
-- **Author:** lool-ventures
-- **Version:** managed in `founder-skills/.claude-plugin/plugin.json`
-- **Compatibility:** Python 3.10+ and `uv` for script execution.
-- **Rule pack:** consumes `data/cap-table-rules.json` at script runtime.
-- **Exports (full pipeline, in `cap-table-{slug}/`):**
-  - `inputs.json` + `scenarios.json` → `financial-model-review` (cross-validates revenue/dilution scenarios)
-  - `cap_state.json` → `ic-sim` (IC partners ask about dilution exposure)
-  - `counsel_packet.json` → `fundraise-readiness` (overall readiness scorecard)
-  - `report.json` → `fundraise-readiness`, future `cross-document-consistency` skill
-- **Exports (fast-assess mode, in `cap-table-{slug}-fastassess/`):**
-  - `fast_assess_only.json` — sentinel marking that fast-assess ran (no canonical artifacts). See `${CLAUDE_PLUGIN_ROOT}/skills/cap-table/references/sentinel-schema.md`. Future cross-skill consumers MUST check for this sentinel before treating a missing canonical artifact as "cap-table never ran."
-  - `report_fast_assess.md` — founder-facing markdown deliverable
-- **Imports:**
-  - `market-sizing:sizing.json` — sanity-check that the planned raise + cap is consistent with modeled SAM/SOM
-  - `financial-model-review:report.json` — current revenue scale + runway, to gate scenario plausibility
-
 ## Skill Execution Model (READ FIRST)
 
 > See `founder-skills/references/skill-execution-model.md` for the full inline-skill execution model (3 dispatch contexts, Mitigation 1+2, producer contract, Cowork quirks, per-symptom triage).
@@ -68,7 +50,7 @@ Each lane produces normalized `instruments.json` and/or `cap_state.json` plus an
   - **Try OCR first** (the full-parity agent image ships `tesseract` + `pdftoppm`): `python3 "$SCRIPTS/extract_pdf_tables.py" "<path>"` rasterizes + OCRs the pages into a `--mode=grid` payload (same shape Lane 3 consumes). Paste that grid into the Lane-3 `SPREADSHEET_STRUCTURE_DETECTION` dispatch and run `--mode=freeform-emit` (the normal Lane-3 path). Set `metadata.extraction_mode = "ocr_image_pdf"`. **A3:** if the OCR grid shows a printed grand fully-diluted total (a "Total"/"Fully Diluted" row), copy it into `inputs.json` `stated_totals` so `cap_state.py` cross-foots it (`W_FD_RECONCILE_DELTA`). OCR is lossy — confirm the cap base with the founder before math.
   - **If OCR is unavailable or fails** (binaries absent / `extract_pdf_tables` errors): fall back to vision — set `metadata.extraction_mode = "vision_image_pdf"` (so `cap_state.py` emits `W_VISION_EXTRACTION_LOW_CONFIDENCE` and the artifacts carry the caveat), tell the founder the cap table is LOW-CONFIDENCE / directional, and PROCEED (degraded-but-honest — never silently present vision numbers as authoritative).
   - **RTL / reversed-Hebrew text layer.** `pdf_probe.py` also reports an `rtl` block; when `rtl.rtl_suspect` is true (a Hebrew-locale export — common in this corpus — even one that HAS a text layer), do not transcribe tables from a vision read alone: extract the raw text (pdfplumber), check line direction, and if `rtl.rtl_reversed_likely` reverse each line before reading labels (digits inside an RTL line usually stay LTR — verify against a printed total / `stated_totals` before math). Warning only; lane routing is unchanged.
-- **Tracked-changes DOCX guard (any `.docx` source).** Before relying on a `.docx` read, run `python3 "$SCRIPTS/_docx_text.py" "<path>" --detect`. If `has_tracked_changes: true`, the file is a **redline / unsigned draft under negotiation** — the operative terms are ambiguous (struck vs inserted). Do NOT silently extract. Raise an `AskUserQuestion` BEFORE extraction: "This document has tracked changes — it's a redline / unsigned draft, not a final executed version. How should I proceed?" Options: `Upload the clean / final executed version` / `Proceed on the accepted (final-proposed) terms — I understand it's a draft`. **This gate message is the PRIMARY draft caveat** (it reaches the founder even for a standalone instrument that never builds a cap base). On "proceed": get the accepted-view text with `python3 "$SCRIPTS/_docx_text.py" "<path>" --extract` and (a) paste **that** output as the document text in the Context-A `INSTRUMENT_EXTRACTION` dispatch — NOT the raw Read-tool view — so the extractor and `evidence_verifier` read the SAME accepted-revisions view (else a correct inserted-term extraction can't be verified); and (b) set `inputs.metadata.source_markup = "tracked_changes_accepted"` so `cap_state.py` emits `W_REDLINE_DRAFT` and the report persists the caveat. (`_docx_text` reads the accepted view stdlib-only — works in the sandbox, which omits `office_convert`.)
+- **Tracked-changes DOCX guard (any `.docx` source).** Before relying on a `.docx` read, run `python3 "$SCRIPTS/_docx_text.py" "<path>" --detect`. If `has_tracked_changes: true`, the file is a **redline / unsigned draft under negotiation** — the operative terms are ambiguous (struck vs inserted). Do NOT silently extract. Open `ct_docx_tracked_changes` (`python3 "$SHARED_SCRIPTS/record_gate_answer.py" open --run-id "$RUN_ID" --artifacts-root "$ARTIFACTS_ROOT" --gate ct_docx_tracked_changes`) and record the reply; `extract_instrument.py` refuses a tracked-changes `.docx` until it is recorded, and refuses the file on the clean-version answer. Raise an `AskUserQuestion` BEFORE extraction: "This document has tracked changes — it's a redline / unsigned draft, not a final executed version. How should I proceed?" Options: `Upload the clean / final executed version` / `Proceed on the accepted (final-proposed) terms — I understand it's a draft`. **This gate message is the PRIMARY draft caveat** (it reaches the founder even for a standalone instrument that never builds a cap base). On "proceed": get the accepted-view text with `python3 "$SCRIPTS/_docx_text.py" "<path>" --extract` and (a) paste **that** output as the document text in the Context-A `INSTRUMENT_EXTRACTION` dispatch — NOT the raw Read-tool view — so the extractor and `evidence_verifier` read the SAME accepted-revisions view (else a correct inserted-term extraction can't be verified); and (b) set `inputs.metadata.source_markup = "tracked_changes_accepted"` so `cap_state.py` emits `W_REDLINE_DRAFT` and the report persists the caveat. (`_docx_text` reads the accepted view stdlib-only — works in the sandbox, which omits `office_convert`.)
 - **Lane 2 — Carta XLSX export.** Typical: multi-sheet XLSX (Securities, Convertibles, Stakeholders). `extract_cap_table.py --mode=carta` reads the sheet-name fingerprint and maps known columns → canonical schema. User confirms ambiguous mappings. See `${CLAUDE_PLUGIN_ROOT}/skills/cap-table/references/carta-pulley-mapping.md` for the column-mapping table. Pulley is not yet supported end-to-end (`--mode=pulley` is a stub that returns a structured blocker pointing to Lane 3 / `--mode=freeform-emit`); restore when a real Pulley XLSX is available to verify against. **Carta exports carry no founder identities or pool structure — Lane 2 writes `instruments.json` + `extraction_audit.json` ONLY; always build `inputs.json` from founder answers (one batched `AskUserQuestion`: founders + share counts, pool authorized/issued/unallocated).** When offering founder candidate options, EXCLUDE obvious investor vehicles — names containing `Ventures`/`Capital`/`Fund` (founders are natural persons or a clearly personal holding entity). A holder also appearing as a SAFE/note investor MAY still be a legit founder co-investor — ASK rather than auto-exclude on that alone. Present an investor vehicle as context labeled "(investor — not a founder)", never as a founder option. (`cap_state.py` emits `W_FOUNDER_LOOKS_LIKE_INVESTOR` as a backstop.) **Reconciliation:** if the carta receipt's `summary.fully_diluted` is present (Carta's printed grand total — independent of the rows you rebuild), copy it into `inputs.json` `stated_totals` `{ "fully_diluted": <n>, "source": "carta_summary" }`. `cap_state.py` cross-foots the rebuilt cap base against it and emits `W_FD_RECONCILE_DELTA` if they diverge > 0.1% — catching a holder/class dropped during the manual rebuild.
 - **Lane 3 — Freeform spreadsheet (founder's Excel).** Arbitrary structure — no fixed schema, unlike Lanes 1/2/4.
 
@@ -102,52 +84,6 @@ Each lane produces normalized `instruments.json` and/or `cap_state.json` plus an
   A fabricated date is worse than a missing one. A missing one stops the founder; a fabricated one gives
   them a QSBS clock that is wrong by however far you guessed.
 - **Anything not matching a lane above** (e.g. a multi-page PDF export of a pro-forma cap table, a scanned ledger, an unfamiliar tool export). No dedicated lane exists yet — reconstruct via **Lane 4** from the document + founder confirmation: read/transcribe what you can, hand-build `inputs.json` / `instruments.json`, and flow through `--mode=validate`. This is a **sanctioned fallback** (see Coverage & Disclosure), not an improvisation — stamp `metadata.cap_base_provenance = "model_reconstructed"` and apply the cap-base confirmation gate as normal.
-
-## Available Scripts
-
-All scripts live at `${CLAUDE_PLUGIN_ROOT}/skills/cap-table/scripts/`:
-
-- **`extract_instrument.py`** — Validates Lane-1 sub-agent output against the per-instrument schema; anti-hallucination gate (per-field confidence; "did you find this verbatim in the document"). Accepts: `safe`, `convertible_note`, `convertible_loan_agreement` (Israeli CLA), `convertible_security` (YC pre-SAFE form), `term_sheet`, `option_plan`, `warrant`, `non_instrument`, `amendment`. The last three are non-extractable — classified and surfaced but not persisted to an instrument array; an `amendment` restates one clause of an existing instrument (its other terms legitimately absent), so its clause deltas surface from the receipt `ambiguities` rather than being forced through the note gate. **`term_sheet` / `option_plan` are terms-docs:** no strict field schema, not persisted to a math array — their extracted `fields` ride in the receipt's `terms_doc`. Both cases render from the receipt: write it to `extraction_audit.json` and pass `compose_extraction_report.py --audit`, which emits an "Amendments (terms modified)" section and a "Term sheet terms (as extracted)" table. Piping a term sheet / option plan through `extract_instrument.py` and saving the `--audit` receipt is mandatory; never hand-compose `report_extraction_only.md`. Terms docs never block on a verifier/invariant finding (those surface as per-field to-confirm markers), but a missing `--source-doc` or other input-integrity error still fails loud. **The full pipeline saves the receipt the same way** (Step 3's Lane-1 invocation always passes `-o "$REVIEW_DIR/extraction_audit.json"`), and `compose_report.py` reads it directly — no `--audit` flag there, since `compose_extraction_report.py` is the no-cap-base fork's renderer.
-- **`extract_aoa.py`** — Validates Lane-1 sub-agent output for Articles of Association (separate sub-context `ARTICLES_OF_ASSOCIATION_EXTRACTION`). Per-preferred-series field gates; detects 4 Israeli AoA counsel-review items (`israeli_aoa.*` rule pack domain): drag-along < 75%, §102 plan absent, liquidation preference > 1x, full-ratchet anti-dilution. With `--inputs` flag, merges validated preferred_series block into `inputs.json.preferred_series[]` with extraction provenance stamp.
-- **`extract_cap_table.py`** — Lane-2/3/4 cap-table extraction; modes: `carta`, `pulley`, `freeform-emit`, `validate`, `auto`, `grid`. `grid` dumps all sheets as a JSON cell-value grid for Lane-3 `SPREADSHEET_STRUCTURE_DETECTION` dispatch; `freeform-emit` deterministically maps the detected blocks (via `freeform_mapper.py` + the `freeform-role-map.json` contract) into schema-valid `inputs.json` + `instruments.json`, with founder-confirmation blockers for fields freeform can't supply. Emits `instruments.json` + `extraction_audit.json` (plus `inputs.json` on the freeform-emit path). NOT `cap_state.json` — that is `cap_state.py`'s output at Step 4.
-- **`cap_state.py`** — Reads `inputs.json` + `instruments.json`; computes as-converted totals; writes `cap_state.json`. Validates per the §11 schema. **Note:** the YC Company Capitalization denominator scoping (Gotcha #1) is enforced here — `as_converted_totals.*` is the pre-financing snapshot.
-- **`detect_structure.py`** — Signal-based coverage detector. Reads `inputs.json` + `instruments.json`; emits `required_primitives`, `covered` (bool), `uncovered_parts`, and `route.scenario_requests` for covered deals. Deterministic (no NLP). Run before any math to determine whether the deterministic pipeline covers the deal. See `## Coverage & Disclosure`.
-- **`rule_audit.py`** — Two-phase: `--phase=pre_math` writes the gating block (per-rule, per-instance status + scope + overlays) BEFORE math runs; `--phase=post_math` composes watchlist + counsel-review items AFTER math. Math producers consume the gating block.
-- **`run_scenario.py`** — Solver / orchestrator (NOT a fixed chain). Builds a dependency graph; classifies independent vs coupled computations; algebraic resolution first, fixed-point iteration as fallback for non-linear systems (discount-only SAFEs). Convergence threshold + max iterations are parameterized.
-- **`safe_conversion.py`** — SAFE conversion math (cap-only, cap-plus-discount, discount-only, uncapped-MFN). Binds rule-pack inputs per the §5.1 binding table (see design doc).
-- **`note_conversion.py`** — Convertible-note conversion math (cap, discount, both, repay, extend, counsel-review, override branches). Binds rule-pack inputs per the §5.2 binding table.
-- **`priced_round.py`** — Priced-round math (pre-money, new-money, pool top-up, anti-dilution). Coupled with SAFE/note conversion via the solver.
-- **`option_pool.py`** — Pool top-up by `target_basis` (`option_pool.pre_money_topup`, `option_pool.increase_sized_target`).
-- **`pool_clause.py`** — Checks a quoted pool sentence is really in the uploaded document (exact or normalized only, never fuzzy), so it may be shown inside the *Pool basis* question. Evidence only; the founder's answer decides.
-- **`anti_dilution.py`** — BBWA / full-ratchet anti-dilution (Gotcha #2 enforced here).
-- **`flip_scenario.py`** — Israeli ↔ Delaware flip mechanics (share-for-share 1:1 only — see Gotcha #7).
-- **`counsel_packet.py`** — Extracts counsel-review items from `rule_audit.json` into a standalone counsel-handoff packet.
-- **`compose_report.py`** — Assembles all artifacts into `report.md` + `report.json` (with embedded `coaching_payload` block). Cross-artifact validation; emits per-uuid coaching insertion marker.
-- **`visualize.py`** — Generates `report.html` (self-contained, inline SVG donut + tables; no CDN). The interactive `explore.py` is the one that uses vendored Chart.js.
-- **`explore.py`** — Generates `explorer.html` (polished interactive scenario tool; demo/video-friendly).
-- **`sweep.py`** — Generates the optional `sweep.json`: a pre-money parametric sweep (K real solver frames, `new_money` held fixed) that powers the explorer's "drag pre-money" slider. No new math — re-runs the priced-round path across a `pre_money` range. Slider snaps to discrete frames, so every value shown is real.
-- **`quick_assess.py`** — Fast-assess directional review (Step 5-fast); writes the `fast_assess_only.json` sentinel + `report_fast_assess.md`, skipping the full pipeline.
-- **`verify_one.py`** — Rule-lookup mode (Step 5-lookup): `--rule-lookup <rule_id>` returns the cited constant a rule holds (e.g. the QSBS OBBBA window start) + its citations + the reliance boundary, for a bare eligibility/date question. Allowlists by data: rules without a stored constant (e.g. §102 capital-gains) return `lookup_status: "escalate"` rather than echoing a non-constant field. No solver, no artifact.
-- **`concise_report.py`** — Concise mode (Step 5-concise): renders `scenarios.json` (the solver's `computed_outputs`) + optional `rule_audit.json` flags into a short cited `report_concise.md`, skipping `visualize`/`explore`/`counsel_packet`/the full `compose_report`/the coaching sub-agent. Same numbers as the full pipeline (reads the same output); for a single quick math question.
-- **`evidence_verifier.py` / `invariant_checker.py` / `cross_checker.py` / `backward_verifier.py`** — Lane-1 verification stack (Step 3). Forward evidence-quote check, real-world-bounds check, multi-extractor cross-check (demote-only), and fresh-sub-agent backward re-extraction. `extract_instrument.py` invokes these by default; they are also runnable standalone.
-- **`_dispatch_json.py`** — Tolerant JSON extraction for Context A returns.
-
-Also available from `${CLAUDE_PLUGIN_ROOT}/scripts/` (shared):
-
-- **`founder_context.py`** — Per-company context management (init/read/merge/validate)
-- **`find_artifact.py`** — Resolves artifact paths by skill name, artifact filename, optional company slug
-
-Run with: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/cap-table/scripts/<script>.py --pretty [args]`
-
-## Available References
-
-Read as needed from `${CLAUDE_PLUGIN_ROOT}/skills/cap-table/references/`:
-
-- **`cap-table-reference.md`** — Domain primer: SAFE mechanics, note mechanics, anti-dilution formulas, §102/3(i)/85A/104H/103K, IIA royalty mechanics, BBWA formula, counsel-review semantics. **Read before implementing any math producer.**
-- **`../data/cap-table-rules.json`** — The executable reference layer: source-cited rules across the SAFE / convertible-note / option-pool / anti-dilution / Israeli-AoA / Delaware-flip / warrants / dual-class / benchmark domains, each with formulas, inputs, outputs, source citations, date_window semantics, and behavior_target (`script_formula` / `validation_rule` / `warning_rule` / `counsel_review_flag` / `benchmark` / `source_note`). Every math producer loads this at start and stamps its `metadata.version` into provenance.
-- **`cap-table-rules.schema.json`** — JSON Schema for the rule pack (Draft 2020-12). The schema description on `counsel_review` is the authoritative definition of "reliance boundary, not confidence score" (see Gotcha #9).
-- **`schemas/`** — JSON Schemas (Draft 2020-12) for every artifact: `inputs.schema.json`, `instruments.schema.json`, `cap_state.schema.json`, `scenarios.schema.json`, `rule_audit.schema.json`, `counsel_packet.schema.json`, `fast_assess_only.schema.json`. Each producer script validates against the matching schema.
-- **`carta-pulley-mapping.md`** — Per-vendor column-mapping table for Lane 2 extraction.
 
 ## Artifact Pipeline
 
@@ -277,7 +213,7 @@ When neither the term sheet nor the AoA settles these questions, batch them into
 
 **EVERY BASH CALL IS A FRESH SHELL — no variable set here survives into the next block.** This is the single most likely place a run silently drifts, because `$SCRIPTS`, `$REVIEW_DIR`, `$RUN_ID` and `$HANDOFF_DIR` do not error when they are unset: they expand to the empty string, so a path quietly becomes `/inputs.json` and a `--run-id` quietly becomes blank (which then fails compose's run_id-parity check, several steps and one sub-agent dispatch later, far from the cause). Two lines below already say this individually for `ARTIFACTS_ROOT` and `HANDOFF_AGENT`; it is true of all of them.
 
-**So: read the printed values out of Step 0's output and paste them as literals into every later block that uses them.** Do not carry a variable forward and assume it survived. `$PLUGIN_ROOT` — and everything derived from it (`$SCRIPTS`, `$SHARED_SCRIPTS`) — is resolved via `select_plugin_root.py` exactly ONCE, below: re-running that self-heal search in a later block can land on a DIFFERENT candidate mount than Step 0 picked when more than one is present (see why in the block's comments), so paste the printed `PLUGIN_ROOT` literal rather than re-deriving it. `$ARTIFACTS_ROOT` stays fine to recompute from a pasted `$SHARED_SCRIPTS` literal — once the plugin root is fixed it is a deterministic filesystem lookup with no state. `$RUN_ID` is the one exception with a different failure mode: it is minted once, below, and must stay constant for the whole engagement (compose enforces parity) — re-running that mint line in a later block re-mints a DIFFERENT value in the fresh shell and silently splits the hand-off dir mid-run. Paste the `RUN_ID` literal the block below prints instead of re-running the line that made it. What is NOT fine, either way, is referencing `$REVIEW_DIR` in Step 6 because Step 0 set it.
+**So: read the printed values out of Step 0's output and paste them as literals into every later block that uses them.** Do not carry a variable forward and assume it survived. `$PLUGIN_ROOT` — and everything derived from it (`$SCRIPTS`, `$SHARED_SCRIPTS`) — is resolved via `select_plugin_root.py` exactly ONCE, below: re-running that self-heal search in a later block can land on a DIFFERENT candidate mount than Step 0 picked when more than one is present (see why in the block's comments), so paste the printed `PLUGIN_ROOT` literal rather than re-deriving it. `$ARTIFACTS_ROOT` stays fine to recompute from a pasted `$SHARED_SCRIPTS` literal — once the plugin root is fixed it is a deterministic filesystem lookup with no state. `$RUN_ID` is the `run_id` the run's record prints below, and must stay constant for the whole engagement (compose enforces parity): paste that literal, and never start the record again in a later block. Every producer refuses an empty `--run-id` (`RUN_ID_REQUIRED`); after a context reset, re-read this skill from its base directory and take the id from the run status. What is NOT fine, either way, is referencing `$REVIEW_DIR` in Step 6 because Step 0 set it.
 
 Optional, best-effort, and via the **Read tool** (not a shell command): before the block below, Read `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json` and note its `version` field as `EXPECT_VERSION`. Passing it to `select_plugin_root.py` below lets an exact version match win over an arbitrary first hit. If the Read fails, skip it and omit `--expect-version` — selection is still deterministic without it. Skip it if that path still begins with `$`.
 
@@ -338,11 +274,6 @@ esac
 # desyncing cross-skill find_artifact.py and breaking path-based checks. The script computes the root
 # deterministically (under the promoted outputs/ dir in Cowork, ./artifacts in the CLI) and creates it.
 python3 "$SHARED_SCRIPTS/resolve_artifacts_root.py"   # prints ARTIFACTS_ROOT — use the printed path verbatim as ARTIFACTS_ROOT in every later block (a captured var dies in the next fresh shell)
-
-# Per-run identifier — used by every producer's --run-id. Stays constant
-# across the whole engagement (compose enforces parity).
-RUN_ID="${RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)}"
-echo "RUN_ID=$RUN_ID"   # prints RUN_ID — paste this literal into every later block; never re-run this mint line, or a fresh shell mints a DIFFERENT run_id and silently splits the hand-off dir mid-run
 ```
 
 **If the preflight line printed `UNSUPPORTED_ENVIRONMENT`, stop here.** This environment serves the
@@ -352,6 +283,16 @@ Tell the founder, in one sentence, that this skill needs Claude Cowork or Claude
 have not run it — then stop. Do not improvise the missing steps: an analysis that grades itself and
 reviews itself reads exactly like one that was checked, which is the failure this stop exists to
 prevent.
+
+**Then start the run's record, once**, with every request line that starts `FS_HOST_` copied between the markers (none: leave the placeholder, which is ignored). `RUN_ID` is the `run_id` it prints. Any non-zero exit here or from `bind` below: say in one sentence that the review could not start, and stop.
+
+```bash
+python3 "<printed PLUGIN_ROOT>/scripts/run_status.py" start --skill cap-table --artifacts-root "<printed ARTIFACTS_ROOT>" <<'FS_HOST_EOF'
+<each FS_HOST_ line of the request>
+FS_HOST_EOF
+```
+
+**A resume** (`resume: 1`) continues at the question `waiting_on` names: Steps 0 and 1 run again, then ask that question from its `needs_input`, record the reply and re-run the step that stopped. Never redo an extraction or re-ask a question already recorded.
 
 Plugin folder for Reads and prompts (as loaded): `${CLAUDE_PLUGIN_ROOT}` — this skill's references are in `${CLAUDE_PLUGIN_ROOT}/skills/cap-table/references/`. If Step 0 printed `READ_ROOT=`, use that value instead.
 
@@ -376,7 +317,9 @@ REVIEW_DIR="${REVIEW_DIR:-$ARTIFACTS_ROOT/cap-table-$SLUG}"                # ful
 # REVIEW_DIR="${REVIEW_DIR:-$ARTIFACTS_ROOT/cap-table-$SLUG-fastassess}"  # fast-assess
 # REVIEW_DIR="${REVIEW_DIR:-$ARTIFACTS_ROOT/cap-table-$SLUG-concise}"     # concise
 # Rule-lookup mode has NO REVIEW_DIR and writes no artifact — skip this block entirely.
-mkdir -p "$REVIEW_DIR"
+RUN_ID="<the run_id start printed>"
+mkdir -p "$REVIEW_DIR" && python3 "$SHARED_SCRIPTS/run_status.py" bind --run-id "$RUN_ID" \
+  --artifacts-root "$ARTIFACTS_ROOT" --run-dir "$REVIEW_DIR" --slug "$SLUG" || exit 1
 # Context A hand-off dir — PER RUN: sub-agents WRITE their raw extraction JSON here (the audit
 # trail — raw sub-agent output as returned, before validator gating). Permanent by rule
 # (nothing under outputs/ is ever deleted, by this skill's rule); nothing in it is ever a canonical artifact.
@@ -482,19 +425,31 @@ the explicit pipe, and `compose_report.py` never reads `handoff/`.
 
 **Routing heuristics.** In order: (1) a **bare eligibility/date question** (QSBS, §102, IIA) with no instruments and no document → **rule-lookup** (Step 5-lookup) — a cited fact, not a pipeline run. (2) A **single quick math question** that `quick_assess` can't shape (warrant fully-diluted count, as-converted snapshot, standalone anti-dilution, a lone note/SAFE outside a priced round) → **concise mode** (Step 5-concise) — the real math, short answer, no heavy tail. (3) A **priced-round gut-check** / first-touch conversational answer (no document, no "full review"/"counsel packet"/"report"/"explorer"/"deep dive") → **fast-assess**. (4) Otherwise → **full pipeline**. If an existing `cap-table-$SLUG/report.json` is present, ask via `AskUserQuestion` whether to use it or start fresh. **Extraction-only is NOT a route you select here.** A single uploaded instrument still routes to (4) full pipeline; the extraction-only path is entered ONLY via the Step-2 no-cap-base fork, after extraction has confirmed there is genuinely no equity base. Never choose extraction-only at Step 0 — nothing has been extracted yet, so "no base" cannot be known, and routing to it here would skip the fork that lets the founder supply a base they do have.
 
+**Existing review.** On the full route, the question above is a recorded gate: after `bind`, open `ct_existing_review` (`python3 "$SHARED_SCRIPTS/record_gate_answer.py" open --run-id "$RUN_ID" --artifacts-root "$ARTIFACTS_ROOT" --gate ct_existing_review`; `not_owed`: no earlier review) and ask it from its `needs_input`; record the reply with the `answer_command` it printed (none: `default --reason start_fresh_by_default`). `Start fresh`: write this run's own `inputs.json` (Step 2) and an empty `instruments.json` with this run's id before Step 3 — the extraction refuses to append to an earlier run's. `Use existing review`: send the earlier review's files as they are; nothing is recomputed, and this run stops there.
+
 **Artifact-worthy boundary (write the sentinel).** If your answer presents a founder-facing ownership/dilution **table** or a **post-financing ownership %**, you MUST run a script-backed path — `quick_assess` (fast-assess; writes the `fast_assess_only.json` sentinel + `report_fast_assess.md`), `concise_report` (concise mode; writes the real `cap_state.json` + `scenarios.json` + `report_concise.md`), or the full pipeline — do NOT hand-build such an answer in chat. A one-line directional aside while gathering inputs (e.g. "≈20% to new investors") is fine in chat and writes no artifact. This keeps any quantitative ownership answer backed by the script + sentinel, so downstream consumers can detect that cap-table ran.
 
 ### Step 1: Read or Create Founder Context
 
 ```bash
-python3 "$SHARED_SCRIPTS/founder_context.py" read --artifacts-root "$ARTIFACTS_ROOT" --pretty
+python3 "$SHARED_SCRIPTS/founder_context.py" read --artifacts-root "$ARTIFACTS_ROOT" --run-id "$RUN_ID" \
+  --skill cap-table --pretty
 ```
 
 **Exit 0 (found):** Use the company slug and pre-filled fields. Proceed to Step 2.
 
 **`W_SECTOR_TYPE_UNKNOWN` is benign for cap-table engagements.** If `founder_context.py` emits a `W_SECTOR_TYPE_UNKNOWN` warning (triggered by free-text sectors such as "technology"), proceed — `sector_type` is not read by any cap-table rule or script, so this warning has no effect on cap-table math or counsel-review gating. Do not re-prompt the founder just to resolve it.
 
-**Exit 1 (not found):** Expected on a first run — do NOT mention this check or its exit status to the founder; if you narrate anything first, say only "Let me grab a few basics about the company." Use `AskUserQuestion` (NOT plain chat) to ask for company name, stage, sector, and geography — the Gate Catalog rows *Company name*, *Company stage*, *Sector*, *Geography* below give the phrasing and option shape for each (stage is a fixed 4-label set; name/sector/geography are runtime-labelled — an affirmative option carrying whatever was derived from the conversation or materials, a stated-value fallback, and an explicit defer so the question still renders at 2 options when nothing was derived). **Carry the stage into `inputs.metadata.stage`** — stage-scoped benchmarks read it there, and withhold rather than guess when it is absent. Then create:
+**Exit 1 (not found: no `code`, or `CONTEXT_NOT_FOUND`):** Open the questions (the block below) first. Expected on a first run — do NOT mention this check or its exit status to the founder; if you narrate anything first, say only "Let me grab a few basics about the company." Use `AskUserQuestion` (NOT plain chat) to ask for company name, stage, sector, and geography — the Gate Catalog rows *Company name*, *Company stage*, *Sector*, *Geography* below give the phrasing and option shape for each (stage is a fixed 4-label set; name/sector/geography are runtime-labelled — an affirmative option carrying whatever was derived from the conversation or materials, a stated-value fallback, and an explicit defer so the question still renders at 2 options when nothing was derived). **Carry the stage into `inputs.metadata.stage`** — stage-scoped benchmarks read it there, and withhold rather than guess when it is absent.
+
+**Each question is a recorded gate: open, ask, answer.** Ask from the printed `needs_input`, then record each reply with the `answer_command` it printed. A value the request or the materials give is recorded, not asked: `python3 "$SHARED_SCRIPTS/record_gate_answer.py" default --run-id "$RUN_ID" --artifacts-root "$ARTIFACTS_ROOT" --gate <gate> --reason stated_in_request --answer-id <option>` (or `derived_from_materials` / `inferred` with `--answer-id use_derived --value "<value>"`). A `Series B+` reply opens the follow-up (`ctx_stage_detail`): ask and record it the same way. <!-- gate: ctx_stage_detail -->
+
+```bash
+python3 "$SHARED_SCRIPTS/record_gate_answer.py" open --run-id "$RUN_ID" --artifacts-root "$ARTIFACTS_ROOT" \
+  --gate ctx_basics.company_name --gate ctx_basics.stage --gate ctx_basics.sector --gate ctx_basics.geography
+```
+
+Then create (exit 10 names a question not yet recorded: ask it, record it, run `init` again):
 
 ```bash
 python3 "$SHARED_SCRIPTS/founder_context.py" init \
@@ -502,10 +457,10 @@ python3 "$SHARED_SCRIPTS/founder_context.py" init \
   --stage <pre-seed | seed | series-a | series-b | series-c | series-d | later> \
   --sector "B2B SaaS" \
   --geography "US" --artifacts-root "$ARTIFACTS_ROOT" \
-  --run-id "$RUN_ID"
+  --run-id "$RUN_ID" --skill cap-table
 ```
 
-**Exit 2 (multiple):** Present the list, ask which company, re-read with `--slug`.
+**Exit 10 (several companies):** ask which from the printed `needs_input`, record it with its `answer_command`, then re-read with `--slug`; `A different company` → as Exit 1. <!-- gate: ctx_select_company --> Exit 1 with another `code`: report it and stop.
 
 #### Execution checkpoint — END OF STEP 1, READ BEFORE CONTINUING
 
@@ -561,7 +516,7 @@ the transcript says.
 
 ### Step 2: Confirm Engagement Mode + Jurisdiction → `inputs.json`
 
-Ask the founder via `AskUserQuestion` (NOT plain chat). **Take all three question texts and option labels from the Gate Catalog rows below, verbatim and in the row's order** — they are deliberately not repeated here, because a second copy is exactly what drifted last time. The arrows map each row's labels, in order, onto the enum written to `inputs.json`:
+Open the three first (`python3 "$SHARED_SCRIPTS/record_gate_answer.py" open --run-id "$RUN_ID" --artifacts-root "$ARTIFACTS_ROOT" --gate ct_engagement_mode --gate ct_jurisdiction --gate ct_iia_grants`; the IIA question closes itself once the structure is outside Israel), record any the request states, then ask the rest via `AskUserQuestion` (NOT plain chat) and record each reply. `inputs.json` must carry the recorded answers: `cap_state.py` refuses one that differs. **Take all three question texts and option labels from the Gate Catalog rows below, verbatim and in the row's order** — they are deliberately not repeated here, because a second copy is exactly what drifted last time. The arrows map each row's labels, in order, onto the enum written to `inputs.json`:
 
 1. **Mode** — row *Engagement mode* → `standard | flip_focused`.
 2. **Jurisdiction structure** — row *Jurisdiction structure* → `israeli | delaware | mid_flip | delaware_with_israeli_sub`.
@@ -571,9 +526,9 @@ Then build `inputs.json` via heredoc. The skeleton below is the **minimal** shap
 
 **If the host tells you to collect input another way, this gate still uses `AskUserQuestion`.** Cowork's own prompt guidance steers skill ARGUMENT COLLECTION toward an elicitation widget and away from `AskUserQuestion`; that guidance is about gathering arguments, and this is not that. S2 is a correctness control — it confirms the skill's INTERPRETATION of the founder's numbers before any math binds to them, and a mis-mapped holder caught here is a wrong report avoided. A batched `AskUserQuestion` is what makes the options explicit and the answer auditable, so prefer it for every mandatory gate in the Gate Catalog. If `AskUserQuestion` is genuinely unavailable in the host, do NOT skip the gate and do NOT assume the base: ask the same question in plain chat, state the options, and wait for an explicit confirmation before running math. (This precedence applies to every skill's mandatory gates, not only cap-table's.)
 
-**MANDATORY cap-base confirmation gate (S2).** Before any FULL-pipeline math on an engagement where someone owns shares (Lanes 1/2/4), the founder cap base — each founder + common share count, and the option pool (authorized / issued / unallocated) — MUST be founder-confirmed via one batched `AskUserQuestion` (same rule as Lane 2). Raise this gate EVEN when the founder states the full base inline — it confirms your INTERPRETATION of their numbers (which founder owns which class, the pool split), catching mapping errors before downstream math binds to them; do NOT treat inline-stated data as pre-confirmed. NEVER assume founder share counts or pool silently, and never use generic placeholder names like `Founder A` / `Founder B`. Set `metadata.cap_base_source = "confirmed"` once confirmed. `cap_state.py` defaults to ASSUMED: it emits `W_CAP_BASE_ASSUMED` on any engagement with an equity base UNLESS `cap_base_source = "confirmed"` — so you must affirmatively set `"confirmed"` to suppress the directional caveat (the compliance burden is on the safe side). (Lane 3 is exempt — the freeform emit stamps `cap_base_source = "confirmed"`, since the base is extracted from the founder's own spreadsheet.) **Provenance:** when you hand-build `inputs.json` directly (Lanes 1/2/4 — a PDF/Carta read, a manual rebuild, or pasted data the deterministic freeform mapper did not produce), also set `metadata.cap_base_provenance = "model_reconstructed"`. The freeform emit auto-stamps `cap_base_provenance = "deterministic_mapped"` — do NOT override it. `cap_state.py` emits `W_CAP_BASE_RECONSTRUCTED` for any `confirmed` base that is not `deterministic_mapped`, so a hand-built base is flagged as not-mechanically-verified even when confirmed.
+**MANDATORY cap-base confirmation gate (S2).** Before any FULL-pipeline math on an engagement where someone owns shares (Lanes 1/2/4), the founder cap base — each founder + common share count, and the option pool (authorized / issued / unallocated) — MUST be founder-confirmed via one batched `AskUserQuestion` (same rule as Lane 2). Raise this gate EVEN when the founder states the full base inline — it confirms your INTERPRETATION of their numbers (which founder owns which class, the pool split), catching mapping errors before downstream math binds to them; do NOT treat inline-stated data as pre-confirmed. NEVER assume founder share counts or pool silently, and never use generic placeholder names like `Founder A` / `Founder B`. It is a recorded gate, opened after Step 3's extraction and merges, right before Step 4: first `python3 "$SHARED_SCRIPTS/record_gate_answer.py" open --run-id "$RUN_ID" --artifacts-root "$ARTIFACTS_ROOT" --gate ct_option_pool` (pool unknown: ask, record, write the pool), then `python3 "$SHARED_SCRIPTS/record_gate_answer.py" open --run-id "$RUN_ID" --artifacts-root "$ARTIFACTS_ROOT" --gate ct_cap_base_confirmation` with the whole base in the question; the reply is recorded; `Different — I'll correct it in chat` keeps it open until the corrected base is confirmed, and `cap_state.py` refuses an unconfirmed or since-changed base. Set `metadata.cap_base_source = "confirmed"` once confirmed. `cap_state.py` defaults to ASSUMED: it emits `W_CAP_BASE_ASSUMED` on any engagement with an equity base UNLESS `cap_base_source = "confirmed"` — so you must affirmatively set `"confirmed"` to suppress the directional caveat (the compliance burden is on the safe side). (Lane 3 is exempt — the freeform emit stamps `cap_base_source = "confirmed"`, since the base is extracted from the founder's own spreadsheet.) **Provenance:** when you hand-build `inputs.json` directly (Lanes 1/2/4 — a PDF/Carta read, a manual rebuild, or pasted data the deterministic freeform mapper did not produce), also set `metadata.cap_base_provenance = "model_reconstructed"`. The freeform emit auto-stamps `cap_base_provenance = "deterministic_mapped"` — do NOT override it. `cap_state.py` emits `W_CAP_BASE_RECONSTRUCTED` for any `confirmed` base that is not `deterministic_mapped`, so a hand-built base is flagged as not-mechanically-verified even when confirmed.
 
-**No-cap-base fork (standalone instrument).** If, after extraction, the upload is a single financing instrument (SAFE/note/term sheet/option plan) with NO equity base anywhere — none of `founders[]`, `option_pool`, `preferred_series`, or `common_batches` — then `cap_state.py` cannot run (it hard-errors `E_NO_EQUITY_BASE`), the cap-base confirmation gate has nothing to confirm, and `rule_audit.py`/`run_scenario.py`/`compose_report.py` are all unusable (each requires `cap_state.json`). Raise ONE `AskUserQuestion` — the **No-cap-base fork** gate (canonical phrasing below) — offering the founder a choice: provide the cap base for a full review, or proceed with an instrument-terms-only extraction. **Carry the material extraction findings INTO this gate message.** This gate can END the
+**No-cap-base fork (standalone instrument).** If, after extraction, the upload is a single financing instrument (SAFE/note/term sheet/option plan) with NO equity base anywhere — none of `founders[]`, `option_pool`, `preferred_series`, or `common_batches` — then `cap_state.py` cannot run (it hard-errors `E_NO_EQUITY_BASE`), the cap-base confirmation gate has nothing to confirm, and `rule_audit.py`/`run_scenario.py`/`compose_report.py` are all unusable (each requires `cap_state.json`). Open `ct_no_cap_base_fork` (`python3 "$SHARED_SCRIPTS/record_gate_answer.py" open --run-id "$RUN_ID" --artifacts-root "$ARTIFACTS_ROOT" --gate ct_no_cap_base_fork`), record the reply, and raise ONE `AskUserQuestion` — the **No-cap-base fork** gate (canonical phrasing below) — offering the founder a choice: provide the cap base for a full review, or proceed with an instrument-terms-only extraction. **Carry the material extraction findings INTO this gate message.** This gate can END the
 engagement: a founder who picks neither option — or who stops here to go fetch their cap table — may
 never see a report at all. So state, in the gate message itself, before the options:
 
@@ -607,7 +562,12 @@ python3 "$SCRIPTS/compose_extraction_report.py" \
   --run-id "$RUN_ID" --pretty
 ```
 
-— which writes `report_extraction_only.md` (an instrument-terms report carrying a prominent "instrument terms only — no cap base modeled" banner), the `extraction_only.json` sentinel, and `coverage_disclosure.json` (`computation_method: "extraction_only"`), and does NOT invoke `cap_state.py`/`rule_audit.py`/`compose_report.py`. To cite a specific rule for the instrument without the pipeline, use `verify_one.py --rule-lookup <rule_id>`.
+— which writes `report_extraction_only.md` (an instrument-terms report carrying a prominent "instrument terms only — no cap base modeled" banner), the `extraction_only.json` sentinel, and `coverage_disclosure.json` (`computation_method: "extraction_only"`), and does NOT invoke `cap_state.py`/`rule_audit.py`/`compose_report.py`. To cite a specific rule for the instrument without the pipeline, use `verify_one.py --rule-lookup <rule_id>`. Never hand-compose `report_extraction_only.md`. Then close the run:
+
+```bash
+python3 "$SHARED_SCRIPTS/run_status.py" finish --mode extraction_only --run-id "$RUN_ID" --artifacts-root "$ARTIFACTS_ROOT" \
+  --output "$ARTIFACTS_ROOT/cap-table-$SLUG-extraction/extraction_only.json"
+```
 
 **Then jump to Step 12, extraction-only branch.** `report_extraction_only.md` is this route's ONLY deliverable — finishing without handing it over leaves the founder nothing. Its source dir is `$ARTIFACTS_ROOT/cap-table-$SLUG-extraction`, **not** `$REVIEW_DIR`.
 
@@ -685,6 +645,8 @@ cat "$HANDOFF_DIR/<doc_slug>_extraction_output.json" | python3 "$SCRIPTS/extract
 ```
 <!-- skill-quality-ci: bash-after-subagent-ok -->
 
+**Exit 10** means extracted values need the founder's confirmation before they are saved (`ct_extraction_confirmation`; the values are in `needs_input`): ask, record the reply and run the same pipe again. On `I have corrections`, re-dispatch with the founder's values, pipe that, and ask again.
+
 `extract_instrument.py` reads the sub-agent JSON from **stdin** and updates `--instruments` **in place**. The `-o/--output` flag writes a JSON receipt confirming the write (does not change where instruments are stored) — **always pass it, in the full pipeline too, not only the no-cap-base fork below.** For a `term_sheet` / `option_plan` / `amendment` this receipt is the ONLY place that document's content lives (their `fields` never enter `instruments.json`): `compose_report.py` reads `extraction_audit.json` when present and renders a "Term sheet terms (as extracted)" / "Amendments (terms modified)" section, so the content still reaches the delivered `report.md` even on an engagement that otherwise has a real cap base. If the id already exists in the target array you'll get `E_DUPLICATE_INSTRUMENT_ID`; re-run with `--replace` to overwrite the existing entry instead. Multiple Lane-1 documents in one engagement share this single file — a second `-o` call overwrites the first's receipt (same limitation as the no-cap-base fork's `--audit`, not new here).
 
 **Dispatch independence rule (CRITICAL):** the sub-agent dispatch prompt for `INSTRUMENT_EXTRACTION` contains the document text and the GENERIC extraction rules only. NEVER include per-document hints, expected values, or pre-decided classifications in the dispatch prompt (e.g. "this doc's form is cap_plus_discount", "use issuance_date 2024-01-15") — the sub-agent's reading must be independent. The verification stack (`evidence_verifier.py` → `invariant_checker.py` → `cross_checker.py`) exists to catch divergence; a led witness cannot diverge. Generic normalization rules (e.g. '"Discount Rate is 80%" means multiplier 0.80') are field semantics, not per-document answers — those belong in the dispatch prompt.
@@ -695,7 +657,7 @@ cat "$HANDOFF_DIR/<doc_slug>_extraction_output.json" | python3 "$SCRIPTS/extract
 
 **Trigger.** Extractor warnings that say "confirm with note text" or "confirm with founder" are a **QUESTION GATE** — not suggestions. After any extraction (Lane 1, 2, or 3), scan all warnings for any field flagged as assumed or left null (e.g. `qualified_financing_threshold`, `maturity_default_treatment`, `interest_converts_to_shares`, `interest_rate_type`, `capitalization_denominator`).
 
-**Required action.** Batch ALL such fields into ONE `AskUserQuestion` call and get the founder's answers before running any math. NEVER fill them with "standard assumptions" and proceed silently. Two of these fields have real closed enums with catalog phrasing — use the Gate Catalog rows *Interest rate type (note)* and *Interest converts to shares (note)* verbatim rather than improvising labels; `maturity_default_treatment` and `capitalization_denominator` are already catalogued as *Note maturity default* and *Note "Company Capitalization" denominator*. Any remaining assumed/null field in the batch is founder-specific data — shape it per the *Founder-only fact gates* row (a stated-value option plus an explicit defer). If the founder cannot confirm a field, you MUST:
+**Required action.** Open them in one call first (`python3 "$SHARED_SCRIPTS/record_gate_answer.py" open --run-id "$RUN_ID" --artifacts-root "$ARTIFACTS_ROOT" --gate ct_note_cap_denominator --gate ct_note_maturity_default --gate ct_note_qualified_threshold --gate ct_note_interest_type --gate ct_note_interest_converts`, plus `--gate ct_founder_fact.<field path>` per other field; `not_owed` ones are not asked). Write each stated answer into the note (same `id`, `--replace`); a defaulted one stays null and the report discloses the default. Batch ALL such fields into ONE `AskUserQuestion` call and get the founder's answers before running any math. NEVER fill them with "standard assumptions" and proceed silently. Two of these fields have real closed enums with catalog phrasing — use the Gate Catalog rows *Interest rate type (note)* and *Interest converts to shares (note)* verbatim rather than improvising labels; `maturity_default_treatment` and `capitalization_denominator` are already catalogued as *Note maturity default* and *Note "Company Capitalization" denominator*. Any remaining assumed/null field in the batch is founder-specific data — shape it per the *Founder-only fact gates* row (a stated-value option plus an explicit defer). If the founder cannot confirm a field, you MUST:
 - (a) name the assumption explicitly in the final presentation (e.g. "interest rate type assumed fixed simple — confirm with note text");
 - (b) emit a counsel item flagging it.
 
@@ -727,7 +689,7 @@ Do not end the turn on the question for a blank template; raise `AskUserQuestion
 
 **Freeform multi-snapshot column self-check (Lane 3).** A founder's spreadsheet often has several date columns representing successive closing snapshots (e.g. "Seed closing", "Bridge closing", "Current"). When the `SPREADSHEET_STRUCTURE_DETECTION` dispatch identifies more than one snapshot or closing column, you MUST do both of the following in the confirm-gate before any math runs: (a) **name the column you used** as the current/outstanding share count — state it explicitly (e.g. "I used the 'Current' column dated 2025-03-31 as the outstanding share count"); and (b) **cross-check your per-holder sums** against that column's printed subtotal or total cell for each series — if the sheet shows a "Total Preferred" or "Fully Diluted" cell for that column, sum the holders you mapped and compare; surface any mismatch in the confirm-gate (e.g. "My mapped holders sum to 4,800,000 preferred shares; the sheet's total cell shows 5,000,000 — please confirm which holders I may have missed"). This is an LLM-process self-check, not a deterministic guarantee; the goal is to catch a missed holder or misread column before the math binds. If the sheet has no printed total cell for the chosen column, note that the cross-check was not possible. **Stated-total stamp (both Lane-3 paths):** whenever a same-basis printed grand fully-diluted total is available (pool-inclusive, as-converted — e.g. a "Total Fully Diluted"/"TFD" cell for the chosen column), stamp it into `inputs.stated_totals` so `cap_state.py` can cross-foot the rebuilt cap base and emit `W_FD_RECONCILE_DELTA` if they diverge — mirroring Lane 2 (`carta_summary`) and the OCR path. Two paths: (a) **freeform-emit path** — include `stated_total: <n>` at the top level of the `SPREADSHEET_STRUCTURE_DETECTION` response JSON (the mapper carries it through `--mode=freeform-emit` into `inputs.stated_totals` mechanically); (b) **direct-build path** (mapper bypassed, `inputs.json` assembled by hand from the grid) — write `"stated_totals": { "fully_diluted": <n>, "source": "freeform_grid" }` into `inputs.json` directly. **Basis-match rule (prevents false positives):** stamp ONLY a total that is explicitly fully-diluted and pool-inclusive; omit the stamp when the sheet's grand total is labeled "Issued"/"Outstanding" (pool-excluded), is as-issued rather than as-converted, or the basis is ambiguous — a wrong-basis stamp fires `W_FD_RECONCILE_DELTA` on a correct sheet (a cry-wolf warning is worse than no warning). Better no cross-foot than a false positive. Non-circularity: use only a total the sheet itself prints; never a sum the skill computed.
 
-**Image-only PDFs (vision fallback):** if the document has no text layer, the verifier can't match values. Dispatch a FRESH sub-agent to transcribe the relevant passages, then feed that text to the verifier via `--doc-text <file> --doc-text-source model_vision`. The verifier stamps `verification_source: "model_vision"` and demotes confidence one level — surface that to the founder. (A missing PDF parser is different: it raises `E_MISSING_DEPENDENCY` and blocks, not a silent image-only pass.)
+**Image-only PDFs (vision fallback):** if the document has no text layer, the verifier can't match values. Dispatch a FRESH sub-agent to transcribe the relevant passages, then pass that text to the same `extract_instrument.py` pipe as `--doc-text <file> --doc-text-source model_vision` (the founder confirms those values before they are saved: exit 10 above). The verifier stamps `verification_source: "model_vision"` and demotes confidence one level — surface that to the founder. (A missing PDF parser is different: it raises `E_MISSING_DEPENDENCY` and blocks, not a silent image-only pass.)
 
 **Lane 4 instruments.json SAFE skeleton** (use when authoring by heredoc or conversational reconstruction):
 
@@ -748,7 +710,7 @@ Do not end the turn on the question for a blank template; raise `AskUserQuestion
   "convertible_notes": [],
   "warrants": [],
   "option_grants": [],
-  "metadata": {"run_id": "<RUN_ID>", "schema_version": "v0.5.0-instruments"}
+  "metadata": {"run_id": "<the run_id start printed>", "schema_version": "v0.5.0-instruments"}
 }
 ```
 
@@ -767,6 +729,8 @@ python3 "$SCRIPTS/cap_state.py" \
   --run-id "$RUN_ID" \
   -o "$REVIEW_DIR/cap_state.json" --pretty
 ```
+
+**Exit 10** names a question not yet recorded, or a base changed since it was confirmed: ask it from `needs_input`, record it, run `cap_state.py` again. Never edit the base or a record to get past it. Exit 2 `GATE_UNDECIDABLE` (any step): a file the question reads carries another run's id; re-run its producer with this `RUN_ID`. Never edit an earlier run's file.
 
 The script computes the pre-financing `as_converted_totals` (Gotcha #1 enforced structurally) and validates against `references/schemas/cap_state.schema.json`.
 
@@ -815,18 +779,24 @@ python3 "$SCRIPTS/quick_assess.py" \
 
 **Never assume a pool top-up — and never assume its basis.** Pass `--target-pool-percent X --target-basis <pre_money|post_money|post_money_increase>` ONLY when the founder stated a pool target (or confirmed one when you asked), and pass the basis they actually stated — `--target-basis` is NOT always `post_money`; a term sheet just as often sizes the pool pre-money. If the founder gave a percent without saying which denominator, add it to the same batched `AskUserQuestion` below rather than defaulting silently. Otherwise run WITHOUT those flags — the report then carries an explicit "No pool top-up modeled" note, and you offer the 10% what-if as a follow-up re-run. A silently assumed pool target — or a silently assumed basis — materially changes the founder's headline ownership; both are the founder's negotiation variables, not yours.
 
-Inputs are built from the founder's conversational description via `AskUserQuestion` (Lane 4 only — fast-assess does NOT invoke Lane-1/2/3 extractors). **Do not skip the question gate, and do not split it:** batch everything still missing into ONE `AskUserQuestion` call before running — typically jurisdiction structure (Gate Catalog row *Jurisdiction structure*, if not obvious), IIA/OCS grant history (Gate Catalog row *IIA / OCS grants*, Israeli companies), and pool-target intent. **The catalog's *Pool top-up intent* row covers whether/how-much; it does NOT cover basis.** When a pool target is being modelled, ask what it measures with the *Pool basis* row in the SAME batched call, under that row's rule — never default silently; the paragraph above states why. Everything in Step 5's **Pool basis** paragraph applies here too; the flags are `--custom-basis-stated-by-founder` and `--excluding-basis-modeled-as`.
+Inputs are built from the founder's conversational description via `AskUserQuestion` (Lane 4 only — fast-assess does NOT invoke Lane-1/2/3 extractors). Open the questions first (`python3 "$SHARED_SCRIPTS/record_gate_answer.py" open --run-id "$RUN_ID" --artifacts-root "$ARTIFACTS_ROOT" --gate ct_jurisdiction --gate ct_iia_grants --gate ct_pool_topup_intent --gate ct_pool_basis`) and record each reply; `quick_assess.py` refuses (exit 10) while one is unrecorded, and (exit 1) flags that differ from the record. **Do not skip the question gate, and do not split it:** batch everything still missing into ONE `AskUserQuestion` call before running — typically jurisdiction structure (Gate Catalog row *Jurisdiction structure*, if not obvious), IIA/OCS grant history (Gate Catalog row *IIA / OCS grants*, Israeli companies), and pool-target intent. **The catalog's *Pool top-up intent* row covers whether/how-much; it does NOT cover basis.** When a pool target is being modelled, ask what it measures with the *Pool basis* row in the SAME batched call, under that row's rule — never default silently; the paragraph above states why. Everything in Step 5's **Pool basis** paragraph applies here too; the flags are `--custom-basis-stated-by-founder` and `--excluding-basis-modeled-as`.
 
 If the founder's message already supplied everything, ask nothing and run. When you present the result, state in one line any flag choices that encode an assumption (e.g. "modeled with no pool top-up" / "modeled with the 10% post-money pool you mentioned"). The script writes:
 
 - `${REVIEW_DIR}/fast_assess_only.json` — sentinel for downstream consumers
 - `${REVIEW_DIR}/report_fast_assess.md` — 1-page founder-facing markdown
 
-**Read `report_fast_assess.md` and present its numbers verbatim to the founder — never re-derive or reconstruct the ownership table in chat.** If you computed preliminary estimates while gathering inputs, discard them in favour of the script output. The script is the authoritative source; hand-reconstructed math will diverge from the fixed-point solver result. This includes the dilution explanation — use the share counts from the report; never re-derive top-up or conversion shares by hand. For what-if follow-ups (e.g. "what if we top up the pool to 10%?"), re-run `quick_assess.py` with the changed flag and present the new report — never estimate the answer by hand.
+(The sentinel's shape: `${CLAUDE_PLUGIN_ROOT}/skills/cap-table/references/sentinel-schema.md`.) Then close the run:
+
+```bash
+python3 "$SHARED_SCRIPTS/run_status.py" finish --mode fast_assess --run-id "$RUN_ID" --artifacts-root "$ARTIFACTS_ROOT" --output "$REVIEW_DIR/fast_assess_only.json"
+```
+
+**Read `report_fast_assess.md` and present its numbers verbatim to the founder — never re-derive or reconstruct the ownership table in chat.** If you computed preliminary estimates while gathering inputs, discard them in favour of the script output. The script is the authoritative source; hand-reconstructed math will diverge from the fixed-point solver result. This includes the dilution explanation — use the share counts from the report; never re-derive top-up or conversion shares by hand. For what-if follow-ups (e.g. "what if we top up the pool to 10%?"), re-run `quick_assess.py` with the changed flag (exit 10 asks a question the change needs), run the finish again, and present the new report — never estimate the answer by hand.
 
 **Full-pipeline what-ifs (applies to both fast-assess and full reviews):** the `explorer.html` displays only precomputed scenarios (plus, when `sweep.json` exists, a pre-money slider that scrubs precomputed real solver frames — also not hand-estimated). For any scenario not yet modeled, write a new scenario request and re-run the full pipeline:
 1. Add the new scenario to `scenario_requests.json`
-2. Re-run `run_scenario.py` → `rule_audit.py --phase=post_math` → `compose_report.py`
+2. Re-run `run_scenario.py` → `rule_audit.py --phase=post_math` → `compose_report.py` → Steps 9–12
 3. Present the updated `report.md` numbers verbatim
 Never hand-estimate a new scenario in chat.
 
@@ -844,6 +814,12 @@ python3 "$SCRIPTS/verify_one.py" --rule-lookup delaware_cross_border.qsbs_date_s
 - **`lookup_status: "escalate"`** — the rule holds no stored constant (e.g. `israel_equity_tax.section_102_capital_gains`, whose clock runs from a plan/trustee-specific date the pack does not store). Do **not** state a default. Ask the founder for the specific fact the payload names (e.g. the trustee-deposit date), and treat it as a counsel determination.
 - **`lookup_status: "not_found"`** — the rule_id was wrong; pick the correct one or fall back to fast-assess / full pipeline.
 
+Then close the run (exit 10 on `escalate`: ask the fact its `needs_input` names, record the reply, run it again):
+
+```bash
+python3 "$SHARED_SCRIPTS/run_status.py" finish --mode rule_lookup --run-id "$RUN_ID" --artifacts-root "$ARTIFACTS_ROOT" --lookup-status <lookup_status>
+```
+
 This writes no artifact and runs in well under a second. End your response with: "If you'd like the full cap-table review — saved artifacts, dilution scenarios, and a counsel packet — just say 'review my cap table' or 'model the round'." If the founder then supplies instruments or asks for the full picture, route to fast-assess or the full pipeline.
 
 ### Step 5-concise (CONCISE MODE ONLY): run the math, render a short answer, skip the heavy tail
@@ -859,18 +835,18 @@ python3 "$SCRIPTS/rule_audit.py" --phase=post_math --inputs "$REVIEW_DIR/inputs.
 python3 "$SCRIPTS/concise_report.py" --inputs "$REVIEW_DIR/inputs.json" --scenarios "$REVIEW_DIR/scenarios.json" --rule-audit "$REVIEW_DIR/rule_audit.json" --cap-state "$REVIEW_DIR/cap_state.json" --run-id "$RUN_ID" -o "$REVIEW_DIR/report_concise.md"
 ```
 
-Pass `--cap-state` so the concise answer surfaces any anti-dilution recovery warning — a standalone anti-dilution question routes here, and without it the recovery is silently dropped on this route.
+Then `run_status.py finish --mode concise --run-id "$RUN_ID" --artifacts-root "$ARTIFACTS_ROOT" --output "$REVIEW_DIR/scenarios.json"` (after a what-if, run the finish again). Pass `--cap-state` so the concise answer surfaces any anti-dilution recovery warning — a standalone anti-dilution question routes here, and without it the recovery is silently dropped on this route.
 
 Present `report_concise.md` verbatim — never re-derive its numbers in chat. Concise mode writes the real `cap_state.json` + `scenarios.json` (so downstream consumers detect cap-table ran). Then jump to **Step 12: Deliver Artifacts** and close with a STATEMENT offering the full review as a follow-up (not a trailing question — a final turn ending in a bare "?" with no tool call is a stall), e.g. "If you'd like the full cap-table review — saved artifacts, dilution scenarios, and a counsel packet — just say 'review my cap table' or 'model the round'."
 
 ### Step 5: Determine Scenarios + Run Math → `scenarios.json`
 
-Ask the founder via `AskUserQuestion` which scenarios to model (1–4). Common patterns:
+Open `ct_scenario_selection` (`python3 "$SHARED_SCRIPTS/record_gate_answer.py" open --run-id "$RUN_ID" --artifacts-root "$ARTIFACTS_ROOT" --gate ct_scenario_selection`; its options are the scenarios this cap table supports), ask the founder via `AskUserQuestion` which to model (1–4), and record the reply. Then open what it leads to (`--gate ct_pool_topup_intent --gate ct_pool_basis --gate ct_s102_grant_route --gate ct_safe_terms`; `not_owed` ones are not asked). Common patterns:
 
 - **Standalone SAFE conversion** (cap-implied math; no priced round): `{type: "safe_conversion", parameters: {}}`
 - **Series A priced round**: `{type: "priced_round", parameters: {pre_money, new_money, target_pool_percent, target_basis}}`
 
-**Pool basis — from the founder, never defaulted.** `target_basis` is the basis the founder stated, or the Gate Catalog's *Pool basis* answer (`post_money` / `post_money_increase` / `pre_money`); on `Something else / not sure — ask counsel`, omit `target_pool_percent` and say no top-up was modelled and why. Either post-money reading beside existing unallocated options is always disclosed, and the full review shows the other reading's figures: the answer chooses which reading is modelled, never whether it is disclosed. If the founder asked not to be asked where this row would have asked: with post-money stated, use `post_money`; with no basis stated, omit `target_basis` (the assumed basis is disclosed) — never write one in. If an uploaded document states the pool sentence, first run `python3 "$SCRIPTS/pool_clause.py" --doc <file> --quote "<the whole sentence, verbatim>"`, and quote it in the question body only when it returns `verified: true`; otherwise ask plainly. It is evidence, never the answer. **On `E_POOL_BASIS_NOT_MODELED`**, ask the remedy's question and pass the founder's answer as `custom_basis_stated_by_founder`; **on `E_POOL_BASIS_EXCLUDING_NOT_MODELED`**, ask whether to see the figures that count the conversion shares and pass `excluding_basis_modeled_as: "post_money_by_founder_choice"` only on a yes. Never change `target_basis` to clear either block.
+**Pool basis — from the founder, never defaulted.** `target_basis` is the basis the founder stated, or the Gate Catalog's *Pool basis* answer (`post_money` / `post_money_increase` / `pre_money`); on `Something else / not sure — ask counsel`, omit `target_pool_percent` and say no top-up was modelled and why. Either post-money reading beside existing unallocated options is always disclosed, and the full review shows the other reading's figures: the answer chooses which reading is modelled, never whether it is disclosed. If the founder asked not to be asked where this row would have asked: with post-money stated, use `post_money`; with no basis stated, omit `target_basis` (the assumed basis is disclosed) — never write one in. If an uploaded document states the pool sentence, first run `python3 "$SCRIPTS/pool_clause.py" --doc <file> --quote "<the whole sentence, verbatim>"`, and quote it in the question body only when it returns `verified: true`; otherwise ask plainly. It is evidence, never the answer. Put and left unanswered, record `default --reason asked_unanswered` (option 1); asked not to be asked, `asked_not_to_be_asked`. **On `E_POOL_BASIS_NOT_MODELED`** (`run_scenario.py` opens `ct_pool_basis_remedy`), ask the remedy's question and pass the founder's answer as `custom_basis_stated_by_founder`; **on `E_POOL_BASIS_EXCLUDING_NOT_MODELED`**, ask whether to see the figures that count the conversion shares and pass `excluding_basis_modeled_as: "post_money_by_founder_choice"` only on a yes. Never change `target_basis` to clear either block.
 - **Convertible note conversion at financing**: `{type: "note_conversion", parameters: {transaction_event_date, priced_round_new_money, qualified_financing_price}}`
 - **Israeli ↔ Delaware flip** (only when mode=flip_focused or explicitly requested): `{type: "flip", parameters: {iia_grants_in_history, section_102_grants_outstanding}}`. `section_102_grants_outstanding` is derived from `cap_state.outstanding_options` (count of grants whose `plan_type` starts with `section_102`), so on a flip where `option_grants[]` is empty but the pool has issued options, first collect per-grant tax-route data (per holder: `plan_type` + `grant_date`; strike optional) via one batched `AskUserQuestion`, shaped per the Gate Catalog's *§102 per-grant tax route* row — never pass `0` merely because grants weren't captured (an empty grant list otherwise reports zero §102 exposure).
 
@@ -945,6 +921,8 @@ python3 "$SCRIPTS/run_scenario.py" \
   -o "$REVIEW_DIR/scenarios.json" --pretty
 ```
 
+**Exit 10**: a question the scenarios need is unrecorded, or the solver refused a pool basis (`ct_pool_basis_remedy`): ask it from `needs_input`, record it, run again. **Exit 1 `GATE_RECORD_MISMATCH`**: a request disagrees with a recorded answer (a scenario not chosen, another basis or pool target): fix the request, never the record. On a delivered review a what-if that does so re-opens that question instead (exit 10): ask it again and record the new answer.
+
 `run_scenario.py` dispatches to the right math producer per scenario type and consumes the gating block from Step 4.5. After this completes, share a one-sentence finding per scenario with the founder (e.g., "Series A drops your stake from 87% to 64%; the 10% pool top-up costs you ~3pp").
 
 **`scenarios.json` ownership shape:** per-holder ownership percentages live in `scenarios.json` → `scenarios[n].computed_outputs.aggregate_ownership_by_class` (an object keyed by class, e.g. `{"founders": 0.64, "preferred": 0.26, "option_pool": 0.10}`). Per-holder share counts and full ownership tables are always rendered in `report.md`'s Current Cap State section by `compose_report.py`: individual founders appear by name with share counts and pre-round % in both single-class and dual-class engagements. There is no `post_financing_table.rows` field in `scenarios.json` — do not look for one there.
@@ -984,12 +962,12 @@ python3 "$SCRIPTS/compose_report.py" \
 
 `compose_report.py` validates run_id parity (emits `STALE_ARTIFACT` warning on mismatch) and writes the per-run uuid `insertion_marker` Context B will use in Step 11.
 
-**Post-write verification:** `compose_report.py` exits non-zero (code 2) if the output files don't exist or are empty. If compose exits non-zero, stop and report the exact stderr — do not proceed to Step 9.
+**Post-write verification:** `compose_report.py` exits non-zero (code 2) if the output files don't exist or are empty. Exit 10 is a question: ask the gate its JSON names, record it, compose again; never re-run without the answer. Any other non-zero exit: stop and report the exact stderr — do not proceed to Step 9.
 
 ### Step 9: Generate `report.html`
 
 ```bash
-python3 "$SCRIPTS/visualize.py" --dir "$REVIEW_DIR" -o "$REVIEW_DIR/report.html"
+python3 "$SCRIPTS/visualize.py" --dir "$REVIEW_DIR" --run-id "$RUN_ID" -o "$REVIEW_DIR/report.html"
 ```
 
 ### Step 10: Generate `explorer.html`
@@ -1004,7 +982,7 @@ renders no slider.
 # Optional: precomputed pre-money sweep for the explorer slider (skip if no eligible priced_round scenario).
 python3 "$SCRIPTS/sweep.py" --dir "$REVIEW_DIR" --run-id "$RUN_ID" -o "$REVIEW_DIR/sweep.json" || true
 
-python3 "$SCRIPTS/explore.py" --dir "$REVIEW_DIR" -o "$REVIEW_DIR/explorer.html"
+python3 "$SCRIPTS/explore.py" --dir "$REVIEW_DIR" --run-id "$RUN_ID" -o "$REVIEW_DIR/explorer.html"
 ```
 
 ### Step 11: Post-Compose Coaching Commentary (Context B dispatch — POST_COMPOSE_COACHING)
@@ -1169,6 +1147,12 @@ cp "$REVIEW_DIR/report_concise.md"     "$OUT/${SLUG_TITLE}_Cap_Table_Summary.md"
 # EXTRACTION-ONLY instead (different SOURCE dir — not $REVIEW_DIR):
 cp "$ARTIFACTS_ROOT/cap-table-$SLUG-extraction/report_extraction_only.md" \
    "$OUT/${SLUG_TITLE}_Instrument_Terms.md"
+```
+
+Before sending them, close the run's file list (for a host; nothing to tell the founder):
+
+```bash
+python3 "<printed PLUGIN_ROOT>/scripts/run_status.py" deliverables --run-id "$RUN_ID" --artifacts-root "$ARTIFACTS_ROOT" --final || :
 ```
 
 **Send the finished work to the founder — the complete set, as files.** Not a path, and not a subset.

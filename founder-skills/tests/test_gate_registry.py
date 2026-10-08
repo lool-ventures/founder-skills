@@ -133,9 +133,10 @@ def test_which_gates_are_bound() -> None:
         "ct_cap_base_confirmation",
         "cp_gate1_landscape",
         "fmr_extracted_values",
+        "ct_extraction_confirmation",
     }
     assert {g["binds"] for g in GATES.values() if g["binds"]} == set(_gates.BINDERS)
-    assert len(_gates.BINDERS) == 5
+    assert len(_gates.BINDERS) == 6
 
 
 def test_only_the_cash_follow_up_reopens_a_complete_run() -> None:
@@ -178,36 +179,9 @@ def test_gates_recorded_by_their_own_script() -> None:
 
 # Every registry name with no implementation yet. Each skill's wiring implements its own and shrinks
 # this; growing it means a new gate whose check nobody wrote.
-UNIMPLEMENTED = {
-    "predicates": [
-        "ct_cap_base_built",
-        "ct_docx_has_tracked_changes",
-        "ct_engagement_unknown",
-        "ct_existing_review_found",
-        "ct_extraction_needs_confirmation",
-        "ct_flip_grants_missing",
-        "ct_israeli_company",
-        "ct_jurisdiction_unknown",
-        "ct_no_cap_base",
-        "ct_note_denominator_unset",
-        "ct_note_interest_converts_unset",
-        "ct_note_interest_type_unset",
-        "ct_note_maturity_unset",
-        "ct_note_threshold_unset",
-        "ct_pool_basis_refused",
-        "ct_pool_basis_unsettled",
-        "ct_pool_existence_unknown",
-        "ct_priced_round_modelled",
-        "ct_producer_reports_null",
-        "ct_safe_terms_missing",
-        "ct_scenarios_owed",
-    ],
-    "option_sources": [
-        "ct_applicable_scenarios",
-    ],
-    "binders": [],
-    "requires": [],
-}
+# Empty since cap-table's wiring (the last skill): every predicate, option source, binder and requires check is
+# implemented. `GATE_NOT_WIRED` stays reachable for a future gate; its test patches a predicate out.
+UNIMPLEMENTED: dict[str, list[str]] = {"predicates": [], "option_sources": [], "binders": [], "requires": []}
 
 
 def test_the_unimplemented_set_is_pinned() -> None:
@@ -611,7 +585,6 @@ NEW_WORDING = {
     ("ct_pool_basis_remedy", "excluding.keep_refused"),
     ("ct_extraction_confirmation", "question"),
     ("ct_extraction_confirmation", "values_ok"),
-    ("ct_extraction_confirmation", "has_corrections"),
     ("ct_founder_fact", "question"),
     ("ct_founder_fact", "stated"),
     ("ct_lane1_counsel_review", "question"),

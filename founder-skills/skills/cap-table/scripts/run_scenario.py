@@ -26,6 +26,7 @@ import sys
 from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _ct_gates  # noqa: E402
 from _artifact_io import fd_sum_mismatch, id_missing, instrument_id_blockers  # noqa: E402
 from _artifact_writer import ArtifactValidationError, load_schema, write_artifact  # noqa: E402
 from _rule_pack import RULE_PACK_VERSION  # noqa: E402
@@ -867,6 +868,169 @@ def _fail(code: str, message: str, output_path: str) -> None:
     sys.stderr.write(f"run_scenario.py: {os.path.abspath(output_path)} was left unchanged.\n")
 
 
+_BY = "run_scenario.py"
+_THRESHOLD_CODE = "qualified_financing_threshold_defaulted"
+# A note answer that is written into the note (the others leave the field null on purpose).
+_LEFT_NULL = {
+    "ct_note_cap_denominator": ("check_note_text",),
+    "ct_note_qualified_threshold": ("same_as_round", "check_note_text"),
+}
+
+
+def lift_note_disclosures(scenarios: list[dict[str, Any]]) -> None:
+    """A note's threshold disclosure lives on its per-note row; the report and pages read the scenario's own
+    warnings, so it is lifted there (once per note)."""
+    for s in scenarios:
+        co = s.get("computed_outputs") if isinstance(s, dict) else None
+        if not isinstance(co, dict):
+            continue
+        seen = {(w.get("code"), w.get("note_id")) for w in co.get("warnings") or [] if isinstance(w, dict)}
+        for row in co.get("per_note") or []:
+            for w in (row.get("warnings") or []) if isinstance(row, dict) else []:
+                key = (w.get("code"), w.get("note_id")) if isinstance(w, dict) else None
+                if key is not None and key[0] == _THRESHOLD_CODE and key not in seen:
+                    co.setdefault("warnings", []).append(dict(w))
+                    seen.add(key)
+
+
+def _gate_checks(run_dir: str, run_id: str, requests: list[Any], instruments: dict[str, Any]) -> Any:
+    """With a ledger: the questions the scenarios rest on are recorded (exit 10), and each request agrees with the
+    recorded answers. A disagreement on a what-if (a delivered review reopened) asks the question again (exit 10);
+    on the first revision it is `GATE_RECORD_MISMATCH` (exit 1). Returns the ledger, or None."""
+    _ct_gates.reopen_if_complete(run_dir, run_id, step="5")
+    ledger = _ct_gates.require_or_exit(run_dir, run_id, _ct_gates.SCENARIO_KEYS, by=_BY)
+    if ledger is None:
+        return None
+    rec = _ct_gates.answers(ledger)
+
+    def cur(key: str) -> dict[str, Any]:
+        r = rec.get(key) or {}
+        return r if r.get("state") == "answered" else {}
+
+    def disagree(key: str, message: str, reason: str) -> None:
+        _ct_gates.what_if_or_mismatch(run_dir, run_id, key, message, reason=reason, by=_BY)
+
+    chosen = str(cur(_ct_gates.SELECTION).get("answer_id") or "")
+    allowed = {t for c in chosen.split(",") for t in _ct_gates.SELECTION_TYPES.get(c, ())}
+    topup = cur(_ct_gates.TOPUP).get("answer_id")
+    basis = cur(_ct_gates.BASIS)
+    for req in requests:
+        if not isinstance(req, dict):
+            continue
+        kind = req.get("type")
+        if chosen and kind not in allowed:
+            disagree(
+                _ct_gates.SELECTION,
+                f"scenario {req.get('scenario_id')!r} is a {kind!r}, which the founder did not choose to model "
+                f"(chosen: {chosen}); on a what-if keep the earlier scenarios selected, or remove their request",
+                "scenario",
+            )
+        params: dict[str, Any] = req["parameters"] if isinstance(req.get("parameters"), dict) else {}
+        for param, inst in _ct_gates.REMEDY_PARAMS.items():
+            key = f"{_ct_gates.REMEDY}.{inst}"
+            if param in params and cur(key).get("answer_id") != _ct_gates.REMEDY_OPTIONS[inst]:
+                disagree(
+                    key,
+                    f"scenario {req.get('scenario_id')!r} passes {param}, but the founder's answer to that pool-basis "
+                    "question is not recorded; leave it out until the solver refuses the basis and the founder answers",
+                    "pool_remedy",
+                )
+        if kind != "priced_round":
+            continue
+        pct, given = params.get("target_pool_percent"), params.get("target_basis")
+        if pct and topup in ("none", "not_sure"):
+            disagree(
+                _ct_gates.TOPUP,
+                f"scenario {req.get('scenario_id')!r} models a pool target, but the founder's answer on a top-up was "
+                f"{topup!r} (leave target_pool_percent out)",
+                "pool_target",
+            )
+        if not pct or given in ("custom", "post_money_excluding_converting_securities"):
+            continue
+        recorded = basis.get("answer_id")
+        if recorded == "counsel":
+            disagree(
+                _ct_gates.BASIS,
+                "the founder sent the pool basis to counsel: leave target_pool_percent out",
+                "pool_basis",
+            )
+        quiet = basis.get("resolution") == "default_taken" and basis.get("default_reason") in (
+            "asked_not_to_be_asked",
+            "producer_default_disclosed",
+        )
+        if quiet and given is not None:
+            disagree(
+                _ct_gates.BASIS,
+                f"scenario {req.get('scenario_id')!r} passes target_basis {given!r}, but no basis was asked or stated: "
+                "leave target_basis out (the assumed basis is disclosed)",
+                "pool_basis",
+            )
+        if recorded and not quiet and given != recorded:
+            disagree(
+                _ct_gates.BASIS,
+                f"scenario {req.get('scenario_id')!r} passes target_basis {given!r}, but the recorded pool basis is "
+                f"{recorded!r}",
+                "pool_basis",
+            )
+        if not recorded and given is not None:
+            _ct_gates.mismatch(
+                f"scenario {req.get('scenario_id')!r} passes target_basis {given!r} with no pool-basis answer recorded"
+            )
+    notes: list[Any] = (
+        instruments["convertible_notes"] if isinstance(instruments.get("convertible_notes"), list) else []
+    )
+    for gate, field in (
+        ("ct_note_cap_denominator", "capitalization_denominator"),
+        ("ct_note_maturity_default", "maturity_default_treatment"),
+        ("ct_note_qualified_threshold", "qualified_financing_threshold"),
+        ("ct_note_interest_type", "interest_rate_type"),
+        ("ct_note_interest_converts", "interest_converts_to_shares"),
+    ):
+        r = cur(gate)
+        if r.get("resolution") != "answered" or r.get("answer_id") in _LEFT_NULL.get(gate, ()):
+            continue
+        targets = [n for n in notes if isinstance(n, dict)]
+        if gate == "ct_note_cap_denominator":
+            targets = [n for n in targets if n.get("valuation_cap") is not None]
+        if any(n.get(field) is None for n in targets):
+            _ct_gates.mismatch(
+                f"the founder answered {gate} ({r.get('answer_id')!r}), but a note still has {field} empty; write the "
+                "answer into the note (re-pipe it with the same id and --replace) before modelling"
+            )
+    return ledger
+
+
+def _after_solve(run_dir: str, run_id: str, ledger: Any, scenarios: list[dict[str, Any]]) -> None:
+    """With a ledger: a pool basis the solver refused is asked (`ct_pool_basis_remedy`, exit 10, nothing written);
+    a threshold the founder confirmed as this round's needs no disclosure that it was not stated."""
+    if ledger is None:
+        return
+    rec = _ct_gates.answers(ledger)
+    for s in scenarios:
+        co = s.get("computed_outputs") if isinstance(s, dict) else None
+        for b in (co or {}).get("blockers") or []:
+            inst = _ct_gates.REMEDY_CODES.get(str((b or {}).get("code")))
+            if inst is None:
+                continue
+            key = f"{_ct_gates.REMEDY}.{inst}"
+            r = rec.get(key) or {}
+            if r.get("state") != "answered":
+                _ct_gates.require_or_exit(run_dir, run_id, [key], by=_BY)
+            elif r.get("answer_id") != "keep_refused":
+                _ct_gates.mismatch(
+                    f"the founder answered the pool-basis question ({r.get('answer_id')!r}), but scenario "
+                    f"{s.get('scenario_id')!r} does not pass it; add it to the request"
+                )
+    threshold = rec.get("ct_note_qualified_threshold") or {}
+    if threshold.get("resolution") == "answered" and threshold.get("answer_id") == "same_as_round":
+        for s in scenarios:
+            co = s.get("computed_outputs") if isinstance(s, dict) else None
+            if isinstance(co, dict) and co.get("warnings"):
+                co["warnings"] = [
+                    w for w in co["warnings"] if not (isinstance(w, dict) and w.get("code") == _THRESHOLD_CODE)
+                ]
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--inputs", required=True)
@@ -877,6 +1041,8 @@ def main() -> int:
     p.add_argument("-o", "--output", required=True)
     p.add_argument("--pretty", action="store_true")
     args = p.parse_args()
+    run_dir = _ct_gates.run_dir_of(args.inputs)
+    _ct_gates.refuse_without_run_id(run_dir, args.run_id)
 
     with open(args.inputs, encoding="utf-8") as f:
         inputs = json.load(f)
@@ -946,12 +1112,15 @@ def main() -> int:
         )
         return 1
 
+    ledger = _gate_checks(run_dir, args.run_id, scenario_requests, instruments)
     scenarios = run_all_scenarios(
         inputs=inputs,
         instruments=instruments,
         cap_state=cap_state,
         scenario_requests=scenario_requests,
     )
+    lift_note_disclosures(scenarios)
+    _after_solve(run_dir, args.run_id, ledger, scenarios)
 
     data = {"scenarios": scenarios}
     schema = load_schema(os.path.join(_SCHEMA_DIR, "scenarios.schema.json"))

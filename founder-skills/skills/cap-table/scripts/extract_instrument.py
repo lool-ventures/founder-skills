@@ -26,6 +26,7 @@ import sys
 from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _ct_gates  # noqa: E402
 from _artifact_io import id_missing as _id_missing  # noqa: E402
 from _artifact_writer import ArtifactValidationError, load_schema, write_artifact  # noqa: E402
 from cross_checker import cross_check as _cross_check  # noqa: E402
@@ -602,9 +603,29 @@ def main() -> int:
         "in place (upsert). Without this flag, a duplicate id is a hard error "
         "(E_DUPLICATE_INSTRUMENT_ID) and the file is left unchanged.",
     )
+    p.add_argument(
+        "--doc-text",
+        default=None,
+        help="A text file of the document (e.g. a fresh sub-agent's transcription of an image-only document), "
+        "verified against in place of --source-doc's text layer. Needs --doc-text-source.",
+    )
+    p.add_argument(
+        "--doc-text-source",
+        choices=("text_layer", "model_vision"),
+        default=None,
+        help="Where --doc-text came from: 'model_vision' (a transcription) stamps verification_source and "
+        "marks the confidence demoted, and the founder confirms the values before they are saved.",
+    )
     p.add_argument("--pretty", action="store_true")
     p.add_argument("-o", "--output", default=None, help="Write the receipt to this file; emit a receipt to stdout")
     args = p.parse_args()
+
+    # A transcription is never verified as if it were the document's own text layer: the source must be named.
+    if (args.doc_text is None) != (args.doc_text_source is None):
+        sys.stderr.write("extract_instrument.py: --doc-text and --doc-text-source go together\n")
+        return 1
+    run_dir = _ct_gates.run_dir_of(args.instruments)
+    _ct_gates.refuse_without_run_id(run_dir, args.run_id)
 
     # Fail loud if a --source-doc path was given but does not exist: a missing file is an agent
     # plumbing error (e.g. a host/VM path mismatch), NOT an image-only doc. Silently degrading to
@@ -711,6 +732,17 @@ def main() -> int:
     # `metadata` branch is the exception and the reason this is worth doing: a non-dict `metadata`
     # is silently discarded by `write_artifact`, so today that path exits 0 having overwritten
     # whatever was there.
+    ledger = _ct_gates.open_ledger_or_exit(run_dir, args.run_id)
+    if ledger is not None and args.source_doc and args.source_doc.lower().endswith(".docx"):
+        import _docx_text
+
+        if _docx_text.detect_tracked_changes(args.source_doc).get("has_tracked_changes"):
+            _ct_gates.require_or_exit(run_dir, args.run_id, [_ct_gates.TRACKED], by="extract_instrument.py")
+            if (_ct_gates.answers(ledger).get(_ct_gates.TRACKED) or {}).get("answer_id") == "upload_clean":
+                _ct_gates.mismatch(
+                    "the founder chose to upload the clean, final version of this document; extract that one, "
+                    "not this redline"
+                )
     if os.path.exists(args.instruments):
         try:
             with open(args.instruments, encoding="utf-8") as f:
@@ -745,6 +777,15 @@ def main() -> int:
             return _instruments_refusal(
                 args.instruments,
                 f"metadata is a {type(instruments['metadata']).__name__}, not an object — continuing would discard it",
+            )
+        held_by = (instruments.get("metadata") or {}).get("run_id")
+        if ledger is not None and held_by not in (None, args.run_id):
+            # Starting a review afresh never appends to an earlier review's instruments: that would adopt them
+            # under this run's id on the next write.
+            return _instruments_refusal(
+                args.instruments,
+                f"file holds an earlier review's instruments (run {held_by}); start this run's own instruments.json "
+                "(the empty skeleton with this run's id), never append to an earlier run's",
             )
         # Forgiving only now: at least one array proves the file's identity, so the rest being
         # absent is an incomplete instruments.json rather than the wrong one. `write_artifact`
@@ -965,7 +1006,10 @@ def main() -> int:
             from pathlib import Path as _Path
 
             try:
-                doc_text = _ev_load_doc_text(_Path(args.source_doc))
+                if args.doc_text is not None:
+                    doc_text = _Path(args.doc_text).read_text(encoding="utf-8")
+                else:
+                    doc_text = _ev_load_doc_text(_Path(args.source_doc))
             except MissingDependencyError as _e:
                 # Blocking gate must fail loudly on a missing parser, not
                 # silently degrade to 'unverifiable_doc' (which would pass).
@@ -982,6 +1026,10 @@ def main() -> int:
             raw_report = report_to_dict(verification_report)
             absent_fields = documented_absent_fields(fields, confidence)
             filtered = filter_verifier_report(raw_report, absent_fields, no_quote_soft=itype in TERMS_DOC_ITYPES)
+            if args.doc_text_source == "model_vision":
+                # As the standalone verifier stamps it: a transcription is less reliable than a text layer.
+                filtered.setdefault("doc_metadata", {})["verification_source"] = "model_vision"
+                filtered["doc_metadata"]["confidence_demoted"] = True
             gates["evidence_verification"] = filtered
 
             # Structured rejection contract: when there are real value_in_doc
@@ -1051,7 +1099,11 @@ def main() -> int:
             # is informational; a missing parser here downgrades to no-op rather
             # than crashing (the blocking gate already covers the loud path).
             try:
-                _doc_text = locals().get("doc_text") or _ev_load_doc_text(_Path(args.source_doc))
+                _doc_text = locals().get("doc_text") or (
+                    _Path(args.doc_text).read_text(encoding="utf-8")
+                    if args.doc_text is not None
+                    else _ev_load_doc_text(_Path(args.source_doc))
+                )
             except MissingDependencyError:
                 _doc_text = ""
             ctx = _ExtractionContext(instrument_type=itype, source_text=_doc_text, source_path=args.source_doc)
@@ -1115,6 +1167,28 @@ def main() -> int:
                 attention_fields.add(r["field_name"])
     gates["attention_needed_fields"] = sorted(attention_fields)
 
+    if ledger is not None:
+        # The founder confirms the values the checks flagged BEFORE they are saved: the extraction it would save is
+        # written beside the run (what the confirmation binds to), and nothing else is written until it stands.
+        ev = gates.get("evidence_verification") or {}
+        _ct_gates.write_json(
+            os.path.join(run_dir, "extraction_pending.json"),
+            {
+                "metadata": {"run_id": args.run_id},
+                "doc": os.path.basename(args.source_doc) if args.source_doc else None,
+                "instrument": {"instrument_type": itype, **fields},
+                "receipt": {
+                    "attention_needed_fields": gates["attention_needed_fields"],
+                    "ambiguities": ambiguities,
+                    "evidence_verification": {
+                        "overall_status": ev.get("overall_status"),
+                        "doc_metadata": ev.get("doc_metadata") or {},
+                    },
+                },
+            },
+        )
+        _ct_gates.require_or_exit(run_dir, args.run_id, _ct_gates.CONFIRM_KEYS, by="extract_instrument.py")
+
     schema = load_schema(os.path.join(_SCHEMA_DIR, "instruments.schema.json"))
     try:
         receipt = write_artifact(
@@ -1147,6 +1221,9 @@ def main() -> int:
 
     # Gate findings computed BEFORE the write (see the banner above) are merged in here.
     receipt.update(gates)
+    if ledger is not None:
+        # The receipt names its run, so a later step never reads an earlier review's receipt as this run's.
+        receipt["run_id"] = args.run_id
 
     if args.output:
         with open(args.output, "w", encoding="utf-8") as _fh:

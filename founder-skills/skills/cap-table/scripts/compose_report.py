@@ -33,6 +33,7 @@ from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _artifact_writer  # noqa: E402
+import _ct_gates  # noqa: E402
 import _labels  # noqa: E402
 import _rules  # noqa: E402
 import _warning_callouts  # noqa: E402
@@ -1833,6 +1834,13 @@ def main() -> int:
     p.add_argument("--strict", action="store_true", help="Exit 1 on high-severity validation warnings")
     p.add_argument("--pretty", action="store_true")
     args = p.parse_args()
+    # With a ledger: a delivered review composed again (a what-if) is a new revision first; every question the
+    # report rests on is recorded (exit 10), and none the run opened is left unanswered.
+    _ct_gates.refuse_without_run_id(args.dir, args.run_id)
+    _ct_gates.reopen_if_complete(args.dir, args.run_id, step="8")
+    _ledger = _ct_gates.require_or_exit(args.dir, args.run_id, _ct_gates.COMPOSE_KEYS, by="compose_report.py")
+    if _ledger is not None:
+        _ct_gates.refuse_open_gates(_ledger)
 
     # Load all required artifacts
     artifacts: dict[str, dict[str, Any]] = {}
@@ -2206,6 +2214,8 @@ def main() -> int:
         sys.stderr.write(f"compose_report.py: report.json missing or empty at {json_path}\n")
         return 2
 
+    if _ledger is not None:
+        _ct_gates.coaching_pending(_ledger)
     receipt = {
         "ok": True,
         "report_json": json_path,

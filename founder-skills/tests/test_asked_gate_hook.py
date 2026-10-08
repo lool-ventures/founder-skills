@@ -867,7 +867,7 @@ def _answer(paths: _run_status.RunPaths, skill: str, gate: str, answer_id: str, 
     gates' predicates and binders belong to their skills' own steps, so here the gate is owed and binds
     nothing."""
     monkeypatch.setattr(_gates, "owed", lambda ctx, g, instance: True)
-    monkeypatch.setattr(_gates, "_binding_now", lambda ctx, g, given: None)
+    monkeypatch.setattr(_gates, "_binding_now", lambda ctx, g, given, instance=None: None)
     status = _run_status.blank_status(skill, paths)
     status["run_dir_shell"] = str(Path(paths.artifacts_root) / f"{skill}-acme")
     status["mode"] = "full"

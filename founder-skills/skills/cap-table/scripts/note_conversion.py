@@ -287,6 +287,25 @@ def convert_note(
         qualified_financing_price=qualified_financing_price,
     )
 
+    # Disclosure when the note states no qualified-financing threshold and a priced round converts it: with no
+    # threshold there is nothing to compare the round against, so the conversion treats it as met. Computed here,
+    # not in `_classify_branch`, whose return lines are mutation anchors.
+    if (
+        priced_round_new_money is not None
+        and qualified_financing_price is not None
+        and note.get("qualified_financing_threshold") is None
+    ):
+        warnings.append(
+            {
+                "code": "qualified_financing_threshold_defaulted",
+                "severity": "medium",
+                "note_id": note.get("id"),
+                "message": (
+                    "The note's qualified-financing threshold was not stated; it was treated as met by this round."
+                ),
+            }
+        )
+
     # Disclosure warning when maturity_default_treatment was absent and the
     # maturity path was entered via the default ("convert_at_cap").  Standard
     # note forms (e.g. Fenwick seed-stage template) default to repayment on

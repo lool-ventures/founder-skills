@@ -378,6 +378,13 @@ def cmd_finish(args: argparse.Namespace) -> int:
         # so it is the one mode that finishes an unbound run.
         bound_mode = status.get("mode")
         unbound_ok = bound_mode is None and args.mode == "rule_lookup"
+        # cap-table's no-cap-base fork: a full run whose founder chose instrument terms only finishes as an
+        # extraction-only run (its report is written beside the run dir, in the `-extraction` sibling).
+        if args.mode == "extraction_only" and bound_mode == "full":
+            fork = (gates.load_ledger(paths).get("gates") or {}).get("ct_no_cap_base_fork") or {}
+            unbound_ok = (
+                fork.get("state") == "answered" and (fork.get("current") or {}).get("answer_id") == "terms_only"
+            )
         if bound_mode != args.mode and not unbound_ok:
             _exit(
                 1,
@@ -390,7 +397,13 @@ def cmd_finish(args: argparse.Namespace) -> int:
         except rs.RunStatusError as e:
             _unreachable(e.code, str(e), args.pretty)
         if unbound_ok:
-            status["mode"] = "rule_lookup"
+            status["mode"] = args.mode
+            # Questions opened before the mode was known that this mode does not ask (Step 1's on a lookup; the
+            # full review's on a terms-only fork) are closed, so they cannot hold the run open.
+            if gates.close_unowed_for_mode(ledger, args.mode, "run_status.py"):
+                rs.atomic_write_json(paths.ledger, ledger)
+                gates.derive_status(gates.Ctx(paths, status, str(status.get("skill"))), ledger, status)
+                rs.write_status(paths, status)
         ctx = gates.Ctx(paths, status, str(status.get("skill")))
         if args.mode == "rule_lookup" and args.lookup_status == "escalate":
             before = json.dumps(ledger, sort_keys=True)
@@ -488,7 +501,9 @@ def main() -> int:
     sp.set_defaults(func=cmd_bind)
 
     sp = sub.add_parser("finish", help="complete a run whose mode has no coaching")
-    sp.add_argument("--mode", required=True, choices=("quick_check", "fast_assess", "concise", "rule_lookup"))
+    sp.add_argument(
+        "--mode", required=True, choices=("quick_check", "fast_assess", "concise", "rule_lookup", "extraction_only")
+    )
     sp.add_argument("--run-id", required=True)
     sp.add_argument("--artifacts-root", required=True)
     sp.add_argument("--output", default=None, help="the JSON artifact this run wrote")

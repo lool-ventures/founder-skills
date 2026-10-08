@@ -1149,6 +1149,328 @@ def cp_closer_scenarios() -> dict[str, dict[str, Any]]:
     return out
 
 
+# --- cap-table producers ------------------------------------------------------------------------
+
+CT_SCRIPTS = SKILLS / "cap-table" / "scripts"
+CT_RUN = "20261008T100000Z-c7a0b1"
+# An invented note: capped, with its Company Capitalization count, and no qualified-financing threshold.
+CT_NOTE: dict[str, Any] = {
+    "id": "note_001",
+    "investor_name": "Lender One",
+    "principal": 300000,
+    "annual_interest_rate": 0.06,
+    "interest_rate_type": "fixed_numeric",
+    "day_count_basis": 365,
+    "issuance_date": "2025-02-01",
+    "maturity_date": "2027-02-01",
+    "valuation_cap": 9000000,
+    "discount_multiplier": 0.8,
+    "capitalization_denominator": 10500000,
+    "maturity_default_treatment": "convert_at_cap",
+    "qualified_financing_threshold": None,
+    "extraction_confidence": "high",
+}
+CT_DOC = (
+    "SIMPLE AGREEMENT FOR FUTURE EQUITY. In exchange for the payment by Orchard Lane Partners of $400,000 (the "
+    '"Purchase Amount") on or about March 3, 2025, Example Co grants that buyer a later claim on its stock. '
+    'The "Post-Money Valuation Cap" is $12,000,000. This instrument converts '
+    "when a priced round closes later. Liquidity, wind-down and expiry follow the usual clauses of the form, and "
+    "each side keeps its rights once the instrument converts into shares of the Company. Questions about this "
+    "paper go to the two contacts listed at its end, and either side may ask for a fresh copy whenever it likes. "
+)
+CT_SAFE_EXTRACTION: dict[str, Any] = {
+    "instrument_type": "safe",
+    "fields": {
+        "id": "safe_002",
+        "investor_name": "Orchard Lane Partners",
+        "purchase_amount": 400000,
+        "post_money_valuation_cap": 12000000,
+        "discount_multiplier": None,
+        "issuance_date": "2025-03-03",
+        "form": "yc_postmoney_cap",
+    },
+    "confidence": {
+        "investor_name": {"level": "high", "evidence_quote": "Orchard Lane Partners"},
+        "purchase_amount": {"level": "medium", "evidence_quote": '$400,000 (the "Purchase Amount")'},
+        "post_money_valuation_cap": {
+            "level": "high",
+            "evidence_quote": 'The "Post-Money Valuation Cap" is $12,000,000.',
+        },
+        "issuance_date": {"level": "high", "evidence_quote": "on or about March 3, 2025"},
+    },
+    "ambiguities": [],
+}
+CT_REQUESTS: list[dict[str, Any]] = [
+    {"scenario_id": "base", "label": "Base case", "type": "safe_conversion", "parameters": {}},
+    {
+        "scenario_id": "series_a",
+        "label": "Series A",
+        "type": "priced_round",
+        "parameters": {"pre_money": 20000000, "new_money": 5000000, "target_pool_percent": 0.10},
+    },
+]
+# The same round with the note converting in it (a note needs the conversion date).
+CT_NOTE_REQUEST: dict[str, Any] = {
+    **CT_REQUESTS[1],
+    "parameters": {**CT_REQUESTS[1]["parameters"], "transaction_event_date": "2026-06-01"},
+}
+_THRESHOLD_CODE = "qualified_financing_threshold_defaulted"
+
+
+def ct_dir(root: Path, *, note: bool = False) -> None:
+    """A review dir from the committed cap-table fixture (its run id rewritten), optionally with one note."""
+    for name in ("inputs.json", "instruments.json"):
+        doc = json.loads((FIXTURES / "cap-table" / name).read_text(encoding="utf-8"))
+        doc["metadata"]["run_id"] = CT_RUN
+        if name == "instruments.json" and note:
+            doc["convertible_notes"] = [dict(CT_NOTE)]
+        (root / name).write_text(json.dumps(doc), encoding="utf-8")
+
+
+def _ct(script: str, *args: str, stdin: str | None = None) -> subprocess.CompletedProcess[str]:
+    return run([str(CT_SCRIPTS / script), *args], stdin=stdin)
+
+
+def _ct_math(root: Path, requests: list[dict[str, Any]]) -> subprocess.CompletedProcess[str]:
+    i, n = str(root / "inputs.json"), str(root / "instruments.json")
+    _ct("cap_state.py", "--inputs", i, "--instruments", n, "--run-id", CT_RUN, "-o", str(root / "cap_state.json"))
+    _ct(
+        "rule_audit.py",
+        "--phase=pre_math",
+        "--inputs",
+        i,
+        "--instruments",
+        n,
+        "--cap-state",
+        str(root / "cap_state.json"),
+        "--run-id",
+        CT_RUN,
+        "-o",
+        str(root / "rule_audit.json"),
+    )
+    (root / "scenario_requests.json").write_text(json.dumps(requests), encoding="utf-8")
+    return _ct(
+        "run_scenario.py",
+        "--inputs",
+        i,
+        "--instruments",
+        n,
+        "--cap-state",
+        str(root / "cap_state.json"),
+        "--scenarios-input",
+        str(root / "scenario_requests.json"),
+        "--run-id",
+        CT_RUN,
+        "-o",
+        str(root / "scenarios.json"),
+    )
+
+
+def strip_threshold_warnings(scenarios: Any) -> tuple[Any, int]:
+    """scenarios.json without the threshold disclosure (the one sanctioned no-ledger change), and how many
+    entries were removed, so a golden still sees every other byte the solver writes."""
+    removed = 0
+    for s in (scenarios or {}).get("scenarios") or []:
+        co = s.get("computed_outputs") if isinstance(s, dict) else None
+        if not isinstance(co, dict):
+            continue
+        kept = [w for w in co.get("warnings") or [] if not (isinstance(w, dict) and w.get("code") == _THRESHOLD_CODE)]
+        removed += len(co.get("warnings") or []) - len(kept)
+        if "warnings" in co:
+            co["warnings"] = kept
+        for n in co.get("per_note") or []:
+            if isinstance(n, dict) and n.get("warnings"):
+                k2 = [w for w in n["warnings"] if not (isinstance(w, dict) and w.get("code") == _THRESHOLD_CODE)]
+                n["warnings"] = k2
+                if not k2:
+                    del n["warnings"]
+    return scenarios, removed
+
+
+def ct_cap_state_scenarios() -> dict[str, dict[str, Any]]:
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        ct_dir(root)
+        proc = _ct(
+            "cap_state.py",
+            "--inputs",
+            str(root / "inputs.json"),
+            "--instruments",
+            str(root / "instruments.json"),
+            "--run-id",
+            CT_RUN,
+            "-o",
+            str(root / "cap_state.json"),
+        )
+        return {"fixture": result(proc, td, root)}
+
+
+def ct_run_scenario_scenarios() -> dict[str, dict[str, Any]]:
+    out: dict[str, dict[str, Any]] = {}
+    for name, note, requests in (
+        ("safe_and_priced", False, CT_REQUESTS),
+        ("note_priced", True, [CT_NOTE_REQUEST]),
+    ):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            ct_dir(root, note=note)
+            proc = _ct_math(root, requests)
+            scen = json.loads((root / "scenarios.json").read_text(encoding="utf-8"))
+            scen, _removed = strip_threshold_warnings(scen)
+            (root / "scenarios.json").write_text(json.dumps(scen, sort_keys=True), encoding="utf-8")
+            res = result(proc, td, root)
+            res["stdout"] = _sha(re.sub(r'"bytes": ?\d+', '"bytes":<N>', normalise(proc.stdout, td)))
+            out[name] = res
+    return out
+
+
+def ct_extract_instrument_scenarios() -> dict[str, dict[str, Any]]:
+    out: dict[str, dict[str, Any]] = {}
+    cases = (
+        ("receipt_stdout", CT_SAFE_EXTRACTION, False),
+        ("receipt_file", CT_SAFE_EXTRACTION, True),
+        (
+            "rejected",
+            {**CT_SAFE_EXTRACTION, "fields": {**CT_SAFE_EXTRACTION["fields"], "purchase_amount": 450000}},
+            False,
+        ),
+    )
+    for name, extraction, to_file in cases:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            ct_dir(root)
+            doc = root / "safe.txt"
+            doc.write_text(CT_DOC, encoding="utf-8")
+            argv = ["--instruments", str(root / "instruments.json"), "--run-id", CT_RUN, "--source-doc", str(doc)]
+            if to_file:
+                argv += ["-o", str(root / "extraction_audit.json")]
+            out[name] = result(_ct("extract_instrument.py", *argv, stdin=json.dumps(extraction)), td, root)
+    return out
+
+
+def ct_quick_assess_scenarios() -> dict[str, dict[str, Any]]:
+    out: dict[str, dict[str, Any]] = {}
+    for name, extra in (("plain", []), ("pool", ["--target-pool-percent", "0.1", "--target-basis", "pre_money"])):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            ct_dir(root)
+            safes = json.loads((root / "instruments.json").read_text(encoding="utf-8"))["safes"]
+            (root / "safes.json").write_text(json.dumps(safes), encoding="utf-8")
+            proc = _ct(
+                "quick_assess.py",
+                "--inputs",
+                str(root / "inputs.json"),
+                "--safes",
+                str(root / "safes.json"),
+                "--pre-money",
+                "20000000",
+                "--new-money",
+                "5000000",
+                "--review-dir",
+                str(root),
+                "--run-id",
+                CT_RUN,
+                *extra,
+            )
+            out[name] = result(proc, td, root)
+    return out
+
+
+def _ct_full(root: Path) -> None:
+    ct_dir(root)
+    _ct_math(root, CT_REQUESTS)
+    i, s = str(root / "inputs.json"), str(root / "scenarios.json")
+    _ct(
+        "rule_audit.py",
+        "--phase=post_math",
+        "--inputs",
+        i,
+        "--scenarios",
+        s,
+        "--run-id",
+        CT_RUN,
+        "-o",
+        str(root / "rule_audit.json"),
+    )
+    _ct(
+        "counsel_packet.py",
+        "--rule-audit",
+        str(root / "rule_audit.json"),
+        "--inputs",
+        i,
+        "--scenarios",
+        s,
+        "--run-id",
+        CT_RUN,
+        "-o",
+        str(root / "counsel_packet.json"),
+        "--write-md",
+        str(root / "counsel_packet.md"),
+    )
+
+
+def ct_compose_scenarios() -> dict[str, dict[str, Any]]:
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        _ct_full(root)
+        proc = _ct(
+            "compose_report.py",
+            "--dir",
+            str(root),
+            "--run-id",
+            CT_RUN,
+            "-o",
+            str(root / "report.json"),
+            "--write-md",
+            str(root / "report.md"),
+        )
+        res = result(proc, td, root)
+        res["stdout"] = _sha(re.sub(r'"bytes": ?\d+', '"bytes":<N>', normalise(proc.stdout, td)))
+        return {"full": res}
+
+
+def ct_concise_scenarios() -> dict[str, dict[str, Any]]:
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        _ct_full(root)
+        proc = _ct(
+            "concise_report.py",
+            "--inputs",
+            str(root / "inputs.json"),
+            "--scenarios",
+            str(root / "scenarios.json"),
+            "--rule-audit",
+            str(root / "rule_audit.json"),
+            "--run-id",
+            CT_RUN,
+            "-o",
+            str(root / "report_concise.md"),
+        )
+        return {"plain": result(proc, td, root)}
+
+
+def ct_compose_extraction_scenarios() -> dict[str, dict[str, Any]]:
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        ct_dir(root)
+        inputs = json.loads((root / "inputs.json").read_text(encoding="utf-8"))
+        for key in ("founders", "preferred_series", "option_pool", "common_batches"):
+            inputs.pop(key, None)
+        (root / "inputs.json").write_text(json.dumps(inputs), encoding="utf-8")
+        proc = _ct(
+            "compose_extraction_report.py",
+            "--inputs",
+            str(root / "inputs.json"),
+            "--instruments",
+            str(root / "instruments.json"),
+            "--review-dir",
+            str(root / "out-extraction"),
+            "--run-id",
+            CT_RUN,
+        )
+        return {"plain": result(proc, td, root)}
+
+
 GROUPS: dict[str, Callable[[], dict[str, dict[str, Any]]]] = {
     "html": lambda: {f"{s}/{w}": html_scenario(s, w) for s, w, _k in HTML_WRITERS},
     "insert_coaching": coaching_scenarios,
@@ -1180,6 +1502,13 @@ GROUPS: dict[str, Callable[[], dict[str, dict[str, Any]]]] = {
     "cp_scorers": cp_scorers_scenarios,
     "cp_compose": cp_compose_scenarios,
     "cp_closer": cp_closer_scenarios,
+    "ct_cap_state": ct_cap_state_scenarios,
+    "ct_run_scenario": ct_run_scenario_scenarios,
+    "ct_extract_instrument": ct_extract_instrument_scenarios,
+    "ct_quick_assess": ct_quick_assess_scenarios,
+    "ct_compose": ct_compose_scenarios,
+    "ct_concise": ct_concise_scenarios,
+    "ct_compose_extraction": ct_compose_extraction_scenarios,
 }
 
 

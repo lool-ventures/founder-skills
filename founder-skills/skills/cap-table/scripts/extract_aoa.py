@@ -49,6 +49,7 @@ import sys
 from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _ct_gates  # noqa: E402
 from _rule_pack import RULE_PACK_VERSION  # noqa: E402
 
 _SCHEMA_DIR = os.path.join(
@@ -561,6 +562,8 @@ def _cli() -> int:
     )
     p.add_argument("--pretty", action="store_true")
     args = p.parse_args()
+    if args.inputs:
+        _ct_gates.refuse_without_run_id(_ct_gates.run_dir_of(args.inputs), args.run_id)
 
     extraction = json.load(sys.stdin)
 

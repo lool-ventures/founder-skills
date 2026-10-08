@@ -117,7 +117,7 @@ cat "$HANDOFF_DIR/structure_detection_output.json" | python3 "$SCRIPTS/extract_c
 
 ## Resolve blockers with the founder, then re-emit
 
-Batch the **blockers** into ONE `AskUserQuestion`. Any `warnings` in the same response are
+Batch the **blockers** into ONE `AskUserQuestion` (the script opened each as `ct_lane3_blocker.<BLOCK.FIELD>`; an `--answer` it accepts is recorded). <!-- gate: ct_lane3_blocker --> Any `warnings` in the same response are
 transparency notes (e.g. the discount rate→multiplier conversion) — show them inline as context,
 NOT as gate questions (same rule as the `ok:true` branch above). Feed the founder's answers back
 as repeatable `--answer BLOCK.FIELD=VALUE` flags (the producer validates each against the field's

@@ -578,6 +578,10 @@ def _mode_carta(args: argparse.Namespace) -> int:
     if not args.xlsx:
         sys.stderr.write("--xlsx required for --mode=carta\n")
         return 1
+    if args.instruments:
+        import _ct_gates
+
+        _ct_gates.refuse_without_run_id(_ct_gates.run_dir_of(args.instruments), args.run_id)
     if not os.path.exists(args.xlsx):
         sys.stderr.write(f"file not found: {args.xlsx}\n")
         return 1
@@ -992,6 +996,9 @@ def _mode_freeform_emit(args: argparse.Namespace) -> int:
     if not args.dir:
         sys.stderr.write("--dir required for --mode=freeform-emit\n")
         return 1
+    import _ct_gates
+
+    _ct_gates.refuse_without_run_id(args.dir, args.run_id)
     if not os.path.exists(args.xlsx):
         print(
             json.dumps(
@@ -1104,6 +1111,13 @@ def _mode_freeform_emit(args: argparse.Namespace) -> int:
     )
 
     if result["blockers"]:
+        try:
+            applied = _apply_blocker_pre_answers(args, blocks, grid, existing_inputs, answers, stated_total, result)
+        except Exception as e:
+            return _run_ref.report_failure(e)
+        if applied is not None:
+            answers, result = applied
+    if result["blockers"]:
         # A schema/empty blocker (a block carried the wrong field schema — row_range/columns instead of
         # cell_range/column_role_map — or equity blocks mapped 0 records) is NOT founder-answerable: it
         # needs a re-dispatch with the correct field names. Check this FIRST (its field values are
@@ -1174,6 +1188,12 @@ def _mode_freeform_emit(args: argparse.Namespace) -> int:
     for fname, data in (("inputs.json", result["inputs"]), ("instruments.json", result["instruments"])):
         with open(os.path.join(args.dir, fname), "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
+    try:
+        exempted = _exempt_mapped_base(args, existing_inputs, result["inputs"])
+    except Exception as e:
+        return _run_ref.report_failure(e)
+    if exempted and gates_out is not None:
+        gates_out["exempted"] = exempted
     receipt = {
         "ok": True,
         "mode": "freeform-emit",
@@ -1243,6 +1263,93 @@ def _reusable_blocker_answers(
         else:
             gates.supersede_from_writer(paths, key, "extract_cap_table.py", "block_changed")
     return out
+
+
+def _apply_blocker_pre_answers(
+    args: argparse.Namespace,
+    blocks: list[dict[str, Any]],
+    grid: dict[str, Any],
+    existing_inputs: dict[str, Any],
+    answers: dict[str, Any],
+    stated_total: Any,
+    result: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]] | None:
+    """The request's answers to this pass's blockers (`FS_HOST_VALUE ct_lane3_blocker.<BLOCK.FIELD>=stated | v`),
+    recorded only once the mapper accepts them. A value it refuses is withheld (the line is noted, the question
+    stays open and is asked). None when the run has no ledger or no request line applied."""
+    import freeform_mapper
+
+    ledger = _run_ref.open_ledger(args.dir, args.run_id or "")
+    if ledger is None:
+        return None
+    gates, paths = ledger
+    keys = sorted(
+        f"ct_lane3_blocker.{b.get('block_index')}.{b.get('field')}"
+        for b in result["blockers"]
+        if isinstance(b.get("block_index"), int)
+    )
+    if not keys:
+        return None
+    gates.open_from_writer(paths, keys, "extract_cap_table.py")
+    stored = gates.load_ledger(paths)
+    tried: dict[str, str] = {}
+    for key in keys:
+        pa = gates.pending_pre_answer(stored, key)
+        if pa is not None and pa.get("option_id") == "stated" and isinstance(pa.get("value"), str):
+            tried[key.split(".", 1)[1]] = pa["value"]
+    if not tried:
+        return None
+    trial = {**answers, **tried}
+    second = freeform_mapper.map_freeform(
+        blocks,
+        grid,
+        existing_inputs=existing_inputs,
+        answers=trial,
+        run_id=args.run_id or "",
+        stated_total=stated_total,
+    )
+    left = {f"{b.get('block_index')}.{b.get('field')}" for b in second["blockers"]}
+    accepted = {}
+    for bf, value in tried.items():
+        key = f"ct_lane3_blocker.{bf}"
+        index = int(bf.split(".", 1)[0])
+        if bf in left:
+            gates.apply_writer_pre_answer(
+                paths, key, "extract_cap_table.py", ["stated"], withheld="the mapper refused the stated value"
+            )
+            continue
+        gates.apply_writer_pre_answer(
+            paths, key, "extract_cap_table.py", ["stated"], bound=_block_fingerprint(blocks, grid, index)
+        )
+        accepted[bf] = value
+    if not accepted:
+        return None
+    merged = {**answers, **accepted}
+    final = freeform_mapper.map_freeform(
+        blocks,
+        grid,
+        existing_inputs=existing_inputs,
+        answers=merged,
+        run_id=args.run_id or "",
+        stated_total=stated_total,
+    )
+    return merged, final
+
+
+def _exempt_mapped_base(args: argparse.Namespace, existing: dict[str, Any], written: dict[str, Any]) -> str | None:
+    """The base came wholly from the founder's own spreadsheet (none was there before this emit): the base
+    question is recorded not applicable for this run, bound to that base, so any later change to it (an AoA
+    merge, a hand edit) asks it again. Never on a base the model built and the mapper only added to."""
+    ledger = _run_ref.open_ledger(args.dir, args.run_id or "")
+    if ledger is None:
+        return None
+    gates, paths = ledger
+    if gates.ct_equity_base(existing) or not gates.ct_equity_base(written):
+        return None
+    gates.exempt_from_writer(
+        paths, "ct_cap_base_confirmation", "extract_cap_table.py", "the base was mapped from the founder's spreadsheet"
+    )
+    return "ct_cap_base_confirmation"
 
 
 def _freeform_gates(

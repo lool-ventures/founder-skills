@@ -45,6 +45,7 @@ from typing import Any
 
 # Import sibling math producers
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _ct_gates  # noqa: E402
 from _pool_text import _AFTER_THE_ROUND, _BEFORE_THE_ROUND, _TERM_SHEET_BRIDGE, pool_target_pct  # noqa: E402
 from _rule_pack import RULE_PACK_VERSION  # noqa: E402
 from cap_state import CapStateInvariantError, build_cap_state  # noqa: E402
@@ -545,7 +546,68 @@ def quick_assess(
     except Exception:
         pass
     sentinel["_report_md"] = _md
+    # Read by the CLI (the ledger's pool-basis question); never part of the sentinel.
+    _LAST_BLOCKER_CODES[:] = [str(b.get("code")) for b in solver_result.get("blockers") or [] if isinstance(b, dict)]
     return sentinel
+
+
+_BY = "quick_assess.py"
+# The solver's blocker codes from the last `quick_assess` call in this process (the CLI reads them).
+_LAST_BLOCKER_CODES: list[str] = []
+
+
+def _gate_checks(args: argparse.Namespace) -> Any:
+    """With a ledger: a what-if on a delivered fast assessment reopens it first; the questions this route asks are
+    recorded (exit 10); the pool flags agree with the recorded answers (a what-if re-asks the question it
+    contradicts; otherwise exit 1 `GATE_RECORD_MISMATCH`). Returns the ledger, or None."""
+    run_dir = args.review_dir
+    _ct_gates.reopen_if_complete(run_dir, args.run_id, step="5-fast")
+    keys = (_ct_gates.JURISDICTION, _ct_gates.IIA, _ct_gates.TOPUP, _ct_gates.BASIS)
+    ledger = _ct_gates.require_or_exit(run_dir, args.run_id, keys, by=_BY)
+    if ledger is None:
+        return None
+    rec = _ct_gates.answers(ledger)
+
+    def cur(key: str) -> dict[str, Any]:
+        r = rec.get(key) or {}
+        return r if r.get("state") == "answered" else {}
+
+    def disagree(key: str, message: str, reason: str) -> None:
+        _ct_gates.what_if_or_mismatch(run_dir, args.run_id, key, message, reason=reason, by=_BY)
+
+    topup, basis = cur(_ct_gates.TOPUP).get("answer_id"), cur(_ct_gates.BASIS)
+    for flag, inst in (("custom_basis_stated_by_founder", "custom"), ("excluding_basis_modeled_as", "excluding")):
+        key = f"{_ct_gates.REMEDY}.{inst}"
+        if getattr(args, flag) is not None and cur(key).get("answer_id") != _ct_gates.REMEDY_OPTIONS[inst]:
+            disagree(
+                key, f"--{flag.replace('_', '-')} needs the founder's recorded answer to that question", "pool_remedy"
+            )
+    if args.target_pool_percent and topup in ("none", "not_sure"):
+        disagree(
+            _ct_gates.TOPUP,
+            f"--target-pool-percent models a pool target, but the founder's answer on a top-up was {topup!r}",
+            "pool_target",
+        )
+    given = args.target_basis
+    if args.target_pool_percent and given != "post_money_excluding_converting_securities":
+        recorded = basis.get("answer_id")
+        quiet = basis.get("resolution") == "default_taken" and basis.get("default_reason") in (
+            "asked_not_to_be_asked",
+            "producer_default_disclosed",
+        )
+        if recorded == "counsel":
+            disagree(
+                _ct_gates.BASIS, "the founder sent the pool basis to counsel: run without a pool target", "pool_basis"
+            )
+        if quiet and given is not None:
+            disagree(_ct_gates.BASIS, "no pool basis was asked or stated: leave --target-basis out", "pool_basis")
+        if recorded and not quiet and given != recorded:
+            disagree(
+                _ct_gates.BASIS, f"--target-basis {given!r} is not the recorded pool basis {recorded!r}", "pool_basis"
+            )
+        if not recorded and given is not None:
+            _ct_gates.mismatch(f"--target-basis {given!r} has no pool-basis answer recorded")
+    return ledger
 
 
 def _cli() -> int:
@@ -597,6 +659,8 @@ def _cli() -> int:
     p.add_argument("--run-id", default=None, help="Override the run_id in the sentinel (optional)")
     p.add_argument("--pretty", action="store_true")
     args = p.parse_args()
+    _ct_gates.refuse_without_run_id(args.review_dir, args.run_id)
+    ledger = _gate_checks(args)
 
     with open(args.inputs) as f:
         inputs = json.load(f)
@@ -645,6 +709,18 @@ def _cli() -> int:
         sys.stderr.write(f"quick_assess.py: {os.path.abspath(args.review_dir)} was left unchanged.\n")
         return 1
 
+    blocker_codes = list(_LAST_BLOCKER_CODES)
+    if ledger is not None:
+        for code in blocker_codes:
+            inst = _ct_gates.REMEDY_CODES.get(code)
+            if inst is None:
+                continue
+            key = f"{_ct_gates.REMEDY}.{inst}"
+            r = _ct_gates.answers(ledger).get(key) or {}
+            if r.get("state") != "answered":
+                _ct_gates.require_or_exit(args.review_dir, args.run_id, [key], by=_BY)
+            elif r.get("answer_id") != "keep_refused":
+                _ct_gates.mismatch(f"the founder answered the pool-basis question ({r.get('answer_id')!r}); pass it")
     os.makedirs(args.review_dir, exist_ok=True)
     md_path = os.path.join(args.review_dir, "report_fast_assess.md")
     with open(md_path, "w") as f:

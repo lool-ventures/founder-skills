@@ -16,7 +16,7 @@ INSTRUMENTS_EOF
 python3 "$SCRIPTS/extract_cap_table.py" --mode=validate --dir "$REVIEW_DIR"
 ```
 
-If validation fails, surface the errors to the founder via `AskUserQuestion` and iterate.
+If validation fails, surface the errors to the founder via `AskUserQuestion` (a missing value is `ct_founder_fact.<field path>`: open it, ask, record) and iterate.
 
 ## Path B — Conversational reconstruction
 

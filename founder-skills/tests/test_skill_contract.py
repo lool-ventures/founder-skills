@@ -1818,7 +1818,13 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 159_052 -> 159_178 (+126 B) on 2026-10-05: the Step 0 STAGING_DIR block says
     # scratch output (a redirect or a temp file) goes in $STAGING_DIR, never a fixed /tmp/<name>, because
     # /tmp is shared across sessions.
-    "cap-table": 159_178,
+    # 159,178 -> 156,625 (-2,553 B) on 2026-10-08: gates wired. The catalog sections (Skill Metadata, Available
+    # Scripts, Available References) are out; the Gate Catalog stays, "never hand-compose report_extraction_only.md"
+    # moved to the no-cap-base fork and the sentinel-schema pointer to Step 5-fast. Step 0 starts the run's record
+    # (the RUN_ID mint line is out), the slug block binds it; every question is opened, asked and recorded; the
+    # extraction is confirmed before it is saved; the lightweight routes and the terms-only fork finish the run;
+    # exit-10 carve-outs; the pages take --run-id and Step 12 closes the run's file list.
+    "cap-table": 156_625,
 }
 
 
@@ -1930,15 +1936,14 @@ def test_deck_review_carries_the_fresh_shell_fact_sentence() -> None:
 def test_cap_table_echoes_run_id_so_the_paste_remedy_is_satisfiable() -> None:
     """cap-table's note tells the model to paste RUN_ID's printed literal — so Step 0 must print it.
 
-    Before this, Step 0 printed ARTIFACTS_ROOT (via resolve_artifacts_root.py) and
-    HANDOFF_AGENT, but never RUN_ID — the one variable the remedy most depends on
-    having a literal for. `echo "RUN_ID=..."` right after the mint line closes that gap.
+    Since the gates release the literal is the `run_id` the run's record (`run_status.py start`) prints, and the
+    note says so; the old mint-and-echo line is gone (a re-run of it would start a second id).
     """
     text = (SKILLS_ROOT / "cap-table" / "SKILL.md").read_text(encoding="utf-8")
-    assert re.search(r'echo\s+"RUN_ID=\$RUN_ID"', text), (
-        "cap-table/SKILL.md's Step 0 must echo the minted RUN_ID so its own fresh-shell note's "
-        "'paste the printed literal' remedy has an actual literal to paste."
-    )
+    assert 'run_status.py" start --skill cap-table' in text
+    assert "`$RUN_ID` is the `run_id` the run's record prints below" in text
+    assert 'RUN_ID="<the run_id start printed>"' in text
+    assert not re.search(r'echo\s+"RUN_ID=\$RUN_ID"', text)
 
 
 # competitive-positioning raised for the recall/recency schemas: recent_developments[] (dated,
@@ -4567,7 +4572,13 @@ def test_no_shipped_text_carries_a_host_answer_line_for_a_gate_a_hook_reads() ->
 # --- recorded gates ----------------------------------------------------------------------------------------
 
 # The skills whose Step 0 starts the run's record; each skill's wiring commit adds itself.
-WIRED = ("deck-review", "financial-model-review", "market-sizing", "ic-sim", "competitive-positioning")
+WIRED = ("deck-review", "financial-model-review", "market-sizing", "ic-sim", "competitive-positioning", "cap-table")
+# cap-table's Step 0 sits past the window by construction: everything before it (Reliance Boundary, execution
+# model, the four input lanes, the artifact pipeline, coverage and disclosure) is about 27 KB, and moving it is the
+# withdrawn front-loading/reordering class (an e2e A/B and a ceiling raise). After a compaction the producers carry
+# the instruction back: each refuses an empty --run-id (RUN_ID_REQUIRED) and an unrecorded question (exit 10).
+# Pinned so it reds the day the block would fit, and the exemption is then removed.
+WINDOW_EXEMPT = frozenset({"cap-table"})
 # `record_gate_answer.py open` lines per SKILL.md, the companion to ASKUSER_MENTIONS: an open site added or
 # removed changes this count, and the gate-site test in the skill's own contract file says which.
 OPEN_LINES: dict[str, int] = {
@@ -4576,7 +4587,7 @@ OPEN_LINES: dict[str, int] = {
     "financial-model-review": 2,
     "ic-sim": 2,
     "competitive-positioning": 6,
-    "cap-table": 0,
+    "cap-table": 10,
 }
 
 
@@ -4598,7 +4609,12 @@ def test_step0_starts_the_run_record_inside_the_reattached_window(skill: str) ->
         assert body.index("I can run it now") < start
     assert start < body.index("### Step 1:")
     fence_end = body.index("```", start) + 3
-    assert fence_end <= _REATTACH_LAST_SAFE_CHARS - _REATTACH_PREFIX_MAX_CHARS, fence_end
+    if skill in WINDOW_EXEMPT:
+        assert fence_end > _REATTACH_LAST_SAFE_CHARS - _REATTACH_PREFIX_MAX_CHARS, (
+            f"{skill}'s start block now ends inside the window ({fence_end}); drop it from WINDOW_EXEMPT"
+        )
+    else:
+        assert fence_end <= _REATTACH_LAST_SAFE_CHARS - _REATTACH_PREFIX_MAX_CHARS, fence_end
     text = (SKILLS_ROOT / skill / "SKILL.md").read_text(encoding="utf-8")
     assert 'RUN_ID="${RUN_ID:-' not in text and "date -u +%Y%m%dT%H%M%SZ" not in text
 

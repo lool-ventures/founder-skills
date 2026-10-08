@@ -146,6 +146,8 @@ cat "$HANDOFF_DIR/<doc_slug>_extraction_output.json" | python3 "$SCRIPTS/extract
 
 ## Handling non-zero exit from `extract_instrument.py`
 
+Every founder confirmation below is a recorded gate, opened before it is asked and recorded after: extracted values → `ct_extraction_confirmation` (the pipe's exit 10); a value only the founder has → `ct_founder_fact.<field path>`; a counsel item or a backward-verification disagreement → `ct_lane1_counsel_review.<field path>`.
+
 - **Validation errors** (`errors` in stderr): show via `AskUserQuestion` and re-extract.
 - **Evidence verification rejection** (`rejection` block in receipt with `failed_fields`): the verifier found values that don't appear in the source doc. Re-dispatch the sub-agent with the `retry_hint` text from the rejection, asking it to re-check those specific fields against the document. If the same field fails verification on a second pass, treat as low-confidence and present to the founder via `AskUserQuestion` for confirmation.
 - **Invariant hard violation** (`invariant_check.n_hard_violations > 0`, stderr mentions `invariant_checker`): a math impossibility was detected (e.g., both `pre_money_valuation_cap` and `post_money_valuation_cap` set on the same SAFE). Show the violation reasons to the founder and re-extract.
@@ -197,7 +199,7 @@ cat "$STAGING_DIR/bv_responses.json" | python3 "$SCRIPTS/backward_verifier.py" -
   --extraction "$EXTRACTION_JSON" -o "$STAGING_DIR/bv_report.json" --pretty
 ```
 
-Backward verification is **informational (WARN-mode)** by default — disagreements between original and re-extracted values surface in the report but do NOT block. Present disagreements to the founder via `AskUserQuestion`. Calibration found ~7% disagreement rate on the canonical eval set, dominated by genuinely ambiguous form-classification cases (pre-money vs post-money) — too noisy for auto-rejection but valuable as a confirmation prompt.
+Backward verification is **informational (WARN-mode)** by default — disagreements between original and re-extracted values surface in the report but do NOT block. Present disagreements to the founder via `AskUserQuestion`. <!-- gate: ct_lane1_counsel_review --> Calibration found ~7% disagreement rate on the canonical eval set, dominated by genuinely ambiguous form-classification cases (pre-money vs post-money) — too noisy for auto-rejection but valuable as a confirmation prompt.
 
 **Recommended trigger:** run backward verification on high-stakes extractions — priced rounds, $1M+ investments, or when forward verification was marginal (high `fuzzy_ratio`, many `unverifiable` fields).
 
@@ -321,4 +323,4 @@ cat "$HANDOFF_DIR/aoa_extraction_output.json" | python3 "$SCRIPTS/extract_aoa.py
 
 Pay-to-play detection (`anti_dilution.pay_to_play_provision_detected`) is also run at extraction time; if triggered it is persisted into `inputs.json.aoa_findings` and surfaces in `rule_audit.py --phase=post_math`.
 
-After the script exits zero, present any `counsel_review_items` to the founder via `AskUserQuestion` and batch any low-confidence or ambiguous fields into a single confirmation prompt before proceeding to math.
+After the script exits zero, present any `counsel_review_items` to the founder via `AskUserQuestion` (`ct_lane1_counsel_review`; the low-confidence batch is `ct_extraction_confirmation.aoa_fields`) and batch any low-confidence or ambiguous fields into a single confirmation prompt before proceeding to math.

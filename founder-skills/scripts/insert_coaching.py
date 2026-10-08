@@ -175,7 +175,9 @@ def _load_commentary(commentary_file: str | None) -> tuple[str | None, str | Non
     return commentary, None, parsed.get("check_record")
 
 
-def _check_record_reason(declared_run: str, record_path: object, commentary: str) -> str | None:
+def _check_record_reason(
+    declared_run: str, record_path: object, commentary: str, scenarios: str | None = None
+) -> str | None:
     """Why a declared report refuses this commentary, or None when its check record passes it."""
     import hashlib
 
@@ -196,6 +198,16 @@ def _check_record_reason(declared_run: str, record_path: object, commentary: str
         return f"{lead}; the check record is from run {record.get('run_id')}, not {declared_run}"
     if record.get("checked_commentary_sha256") != hashlib.sha256(commentary.encode("utf-8")).hexdigest():
         return f"{lead}; the commentary is not the text the check passed"
+    if scenarios is not None and "scenarios_sha256" in record:
+        # The figures the check judged the commentary against must be the ones the report now shows (a what-if
+        # re-solves them on the same run).
+        try:
+            with open(scenarios, "rb") as f:
+                now = hashlib.sha256(f.read()).hexdigest()
+        except OSError:
+            return f"{lead}; the scenarios the check read are not readable at {scenarios}"
+        if record.get("scenarios_sha256") != now:
+            return f"{lead}; the scenarios changed after the check -- run the check step again on the new figures"
     return None
 
 
@@ -406,7 +418,8 @@ def main() -> None:
         sys.exit(_blocked(load_error or "commentary_markdown missing or empty", pretty, output))
     declared = _DECLARATION_RE.search(report_text)
     if declared is not None:
-        record_error = _check_record_reason(declared.group(1), check_record, commentary)
+        scenarios = next((p for p in args.verify_artifact if os.path.basename(p) == "scenarios.json"), None)
+        record_error = _check_record_reason(declared.group(1), check_record, commentary, scenarios)
         if record_error is not None:
             sys.exit(_blocked(record_error, pretty, output))
         # The declaration has done its job; it never reaches the delivered report.
