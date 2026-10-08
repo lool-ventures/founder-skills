@@ -1005,6 +1005,27 @@ class TestRunIdOriginAndHistory:
             assert entry["origin"] == origin
             assert entry["correction_count"] == 1 and entry["changed_count"] == 1
 
+    def test_the_channel_is_how_the_values_arrived_and_the_origin_who_sent_them(self, tmp_path: Any) -> None:
+        """`channel` keeps its meaning from before `origin` existed (a file or `--set`); `origin` says who."""
+        original, _ = self._setup(tmp_path)
+        cases = {
+            ("--set", None): "chat",
+            ("--set", "chat"): "chat",
+            ("--set", "external"): "chat",
+            ("file", "external"): "review_page",
+            ("file", "upload"): "review_page",
+        }
+        for n, ((how, origin), channel) in enumerate(cases.items()):
+            out_dir = tmp_path / f"channel{n}"
+            source = ["--set", "revenue.customers=120"] if how == "--set" else [str(self._changes_file(tmp_path))]
+            args = [*source] + (["--run-id", self._RUN, "--origin", origin] if origin else [])
+            result = self._call(original, out_dir, args)
+            assert result.returncode == 0, (how, origin, result.stdout, result.stderr)
+            [entry] = self._history(out_dir)
+            audit = json.loads((out_dir / "extraction_corrections.json").read_text())
+            assert (entry["channel"], audit["channel"]) == (channel, channel), (how, origin)
+            assert (entry["origin"], audit["origin"]) == (origin, origin), (how, origin)
+
     # -- the history ------------------------------------------------------------------------------
 
     def test_a_corrections_call_then_a_cash_call_keeps_both_in_the_history(self, tmp_path: Any) -> None:

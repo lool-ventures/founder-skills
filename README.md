@@ -322,6 +322,11 @@ company's context. A request with nobody to answer should carry them; otherwise 
 step. Under `FS_HOST_NO_ASK` the run cannot answer a question itself (it may only mark a name, sector or
 geography as unknown), so a value stated only in the request's prose is not used: send it as a line.
 `FS_HOST_NO_ASK` stays in force on every resume of the run, and `run_status.json` says so (`no_ask: true`).
+The company's context stays in the artifacts folder and later runs read it again. When the folder holds exactly
+one company's context, a run there reads it without asking, whichever company the request is about; with two or
+more, the run asks `ctx_select_company`, which a request answers with `FS_HOST_ANSWER ctx_select_company=<slug>`
+(a company already in the folder) or `FS_HOST_ANSWER ctx_select_company=different_company`. Use one artifacts
+folder per company unless every run there is for a company the folder already knows.
 
 **Where the status is.** Each run writes `runs/<run id>/run_status.json` under the skills' artifacts
 folder, beside the run's record of answers:
@@ -360,7 +365,11 @@ coaching (deck review, market sizing, IC simulation, competitive positioning) ar
 as they are written, and `deliverables_status` turns from `pending` to `final`. Read only the files
 `deliverables` lists for the run; an HTML file not listed there is not this run's. `complete` with
 `deliverables_status: pending` after the skill has returned means no more pages will come. Deliverables are final only
-at `complete`: a run may list `report_md` and still be `waiting`.
+at `complete`: a run may list `report_md` and still be `waiting`. When another run of this skill, for this
+company, starts in the same artifacts folder, it takes the folder over: the earlier run's status then reads
+`deliverables_status: superseded` and names the later run in `superseded_by`. Its files may have been replaced or
+removed, so use one only while its `sha256` still matches; copy a run's files before starting another for the same
+company there.
 
 **Waiting and resuming.** A run that needs an answer stops at `waiting`. To continue it, send
 

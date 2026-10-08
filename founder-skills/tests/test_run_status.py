@@ -789,3 +789,55 @@ def test_a_writer_that_outlived_its_lock_does_not_remove_the_next_holders(
         # Another writer took the lock over as stale while this one was still inside.
         marker.write_text("another-writer-token")
     assert marker.read_text() == "another-writer-token"
+
+
+def test_a_request_line_ignored_on_two_invocations_is_one_notice(tmp_path: Path) -> None:
+    """A basics line the company's existing context made moot, sent again with the resume: one notice at the end."""
+    root = _root(tmp_path)
+    (root / "founder-context-example-co.json").write_text(
+        json.dumps({"company_name": "Example Co", "slug": "example-co", "stage": "seed", "sector": "saas"}),
+        encoding="utf-8",
+    )
+    lines = "FS_HOST_RUN_ID=dup-notice-1\nFS_HOST_ANSWER ctx_basics.stage=seed\n"
+    read = ("read", "--artifacts-root", str(root), "--run-id", "dup-notice-1", "--skill", "market-sizing")
+    assert h.start(root, "market-sizing", lines).returncode == 0
+    assert h.run(h.SHARED / "founder_context.py", *read).returncode == 0
+    assert h.bind(root, "dup-notice-1", root / "market-sizing-example-co", "example-co").returncode == 0
+    assert h.record(root, "dup-notice-1", "open", "--gate", "ms_methodology").returncode == 0
+    assert h.start(root, "market-sizing", lines).returncode == 0
+    assert h.run(h.SHARED / "founder_context.py", *read).returncode == 0
+    assert (
+        h.record(root, "dup-notice-1", "answer", "--gate", "ms_methodology", "--answer-id", "looks_good").returncode
+        == 0
+    )
+    done = h.run(h.RUN_STATUS, "fail", "--run-id", "dup-notice-1", "--artifacts-root", str(root), "--code",
+                 "PRODUCER_FAILED", "--reason", "x")  # fmt: skip
+    assert done.returncode == 0, done.stdout + done.stderr
+    notices = [n for n in h.status(root, "dup-notice-1")["notices"] if n.get("gate") == "ctx_basics.stage"]
+    assert len(notices) == 1, notices
+
+
+def test_a_different_line_for_the_same_question_is_still_its_own_notice(tmp_path: Path) -> None:
+    """De-duplication keys on the lines too: a resume that sends a NEW line for a question already passed over
+    lists that line as well."""
+    root = _root(tmp_path)
+    (root / "founder-context-example-co.json").write_text(
+        json.dumps({"company_name": "Example Co", "slug": "example-co", "stage": "seed", "sector": "saas"}),
+        encoding="utf-8",
+    )
+    rid = "dup-notice-2"
+    read = ("read", "--artifacts-root", str(root), "--run-id", rid, "--skill", "market-sizing")
+    assert (
+        h.start(root, "market-sizing", f"FS_HOST_RUN_ID={rid}\nFS_HOST_ANSWER ctx_basics.stage=seed\n").returncode == 0
+    )
+    assert h.run(h.SHARED / "founder_context.py", *read).returncode == 0
+    assert h.bind(root, rid, root / "market-sizing-example-co", "example-co").returncode == 0
+    assert h.record(root, rid, "open", "--gate", "ms_methodology").returncode == 0
+    resume = f"FS_HOST_RUN_ID={rid}\nFS_HOST_ANSWER ctx_basics.stage=series_a\n"
+    assert h.start(root, "market-sizing", resume).returncode == 0
+    assert h.run(h.SHARED / "founder_context.py", *read).returncode == 0
+    lines = [n["lines"] for n in h.status(root, rid)["notices"] if n.get("gate") == "ctx_basics.stage"]
+    assert sorted(lines) == [
+        ["FS_HOST_ANSWER ctx_basics.stage=seed"],
+        ["FS_HOST_ANSWER ctx_basics.stage=series_a"],
+    ], lines

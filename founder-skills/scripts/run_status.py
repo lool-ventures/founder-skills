@@ -19,7 +19,9 @@ an id in use or finished is refused PRINT-ONLY (JSON on stdout, one stderr line,
 `runs/<id>/start_refusals.jsonl`), and a malformed id writes nothing at all.
 
 `bind` records the run dir and slug once they exist, and writes `<run_dir>/handoff/<id>/run_ref.json`,
-which is what tells the skill's own scripts that this run has a ledger.
+which is what tells the skill's own scripts that this run has a ledger. It also takes the run dir for this
+run: every earlier run whose files or unfinished work are in it is marked superseded by this one
+(`_gates.take_folder_noted`).
 
 Exit codes: 0 ok; 1 refused (JSON on stdout, a line on stderr, nothing written beyond what the refusal
 says); 2 usage, IO, an unreachable registry or no status for the id (stdout carries `code`); 10 a gate
@@ -353,7 +355,17 @@ def cmd_bind(args: argparse.Namespace) -> int:
         # The mode decides which gates the run lists, so the list is re-derived with it.
         _gates.derive_status(_gates.Ctx(paths, status, str(status.get("skill"))), ledger, status)
         rs.write_status(paths, status)
-    _out({"ok": True, "run_id": paths.run_id, "slug": args.slug, "mode": status["mode"], "run_ref": ref}, args.pretty)
+    payload: dict[str, Any] = {
+        "ok": True,
+        "run_id": paths.run_id,
+        "slug": args.slug,
+        "mode": status["mode"],
+        "run_ref": ref,
+    }
+    superseded = _require_gates(args.pretty).take_folder_noted(paths)
+    if superseded:
+        payload["superseded_runs"] = superseded
+    _out(payload, args.pretty)
     return 0
 
 
@@ -504,10 +516,10 @@ def cmd_deliverables(args: argparse.Namespace) -> int:
                 f"Refused: run {paths.run_id} is {status.get('status')}, not complete; nothing was written",
                 args.pretty,
             )
-        if status.get("deliverables_status") != "final":
+        if status.get("deliverables_status") not in ("final", "superseded"):
             status["deliverables_status"] = "final"
             rs.write_status(paths, status)
-    _out({"ok": True, "run_id": paths.run_id, "deliverables_status": "final"}, args.pretty)
+    _out({"ok": True, "run_id": paths.run_id, "deliverables_status": status["deliverables_status"]}, args.pretty)
     return 0
 
 

@@ -193,6 +193,22 @@ def _carries_history(path: str) -> bool:
     return isinstance(gate, dict) and bool(gate.get("history"))
 
 
+def _mark_superseded(artifacts_root: str, review_dir: str, run_id: str) -> None:
+    """After the clean pass removed an earlier run's reports: mark that run superseded, so its status does not
+    keep listing files that are gone. Only when this run already has a status (`run_status.py start` ran);
+    otherwise nothing is loaded and nothing changes. Never changes this script's output or exit (`bind` marks
+    the same runs again and reports what it could not)."""
+    if not _run_ref.RUN_ID_RE.match(run_id):
+        return
+    if not os.path.isfile(os.path.join(artifacts_root, "runs", run_id, "run_status.json")):
+        return
+    try:
+        status = _run_ref.load_shared("_run_status")
+        status.supersede_runs_in(artifacts_root, review_dir, run_id)
+    except Exception:  # noqa: BLE001 - the clean already happened; bind marks the same runs and reports
+        return
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description="Resolve REVIEW_DIR and run_id.")
     p.add_argument("--artifacts-root", required=True, help="Path to artifacts root directory")
@@ -290,6 +306,9 @@ def main() -> int:
                 continue
             with contextlib.suppress(OSError):
                 os.remove(path)
+        # A report the pass removed may be listed by an earlier run's status; that run is marked superseded
+        # right after, so its status stops promising it.
+        _mark_superseded(artifacts_root, review_dir, run_id)
         # Also remove a stale answered gate_state.json so it cannot be
         # misread as a resume signal on a later invocation.
         #

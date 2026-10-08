@@ -332,7 +332,9 @@ def test_colliding_files_in_a_run_dir_get_distinct_keys(tmp_path: Path) -> None:
 
 def test_the_contract_publishes_the_fields_the_note_and_the_key_transform() -> None:
     data = json.loads(CONTRACT.read_text(encoding="utf-8"))
-    assert data["run_status_fields"][-3:] == ["invocation", "resumed_from", "invocations"]
+    fields = data["run_status_fields"]
+    end = fields.index("invocations") + 1
+    assert fields[end - 3 : end] == ["invocation", "resumed_from", "invocations"]
     assert any(n.startswith("`untouched_since_resume` lists the run-dir files") for n in data["notes"])
     assert any("`null` means no manifest could be taken, never that nothing ran." in n for n in data["notes"])
     assert "every `.` and `/` replaced by `_`" in data["shapes"]["evidence_key"]

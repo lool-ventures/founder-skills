@@ -643,8 +643,8 @@ def _read_with_ledger(args: argparse.Namespace) -> str | None:
                 by="founder_context.py",
             )
             if pending is not None:
-                ledger.setdefault("notices", []).append(
-                    {"code": "PRE_ANSWER_IGNORED", "gate": key, "lines": pending["raw"], "reason": "not_owed"}
+                _gates.add_notice(
+                    ledger, {"code": "PRE_ANSWER_IGNORED", "gate": key, "lines": pending["raw"], "reason": "not_owed"}
                 )
         return out
 

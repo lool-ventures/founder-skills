@@ -127,6 +127,10 @@ PAGES_AFTER_COACHING: dict[str, tuple[str, ...]] = {
 }
 
 DELIVERABLE_KEYS = ("report_md", "report_json", "report_html", "explorer_html")
+# `superseded`: a later run of the same skill has taken over the folder that holds this run's files or its
+# unfinished work, so the files listed may be gone or replaced. It stays until this run takes the folder back
+# (`take_folder`).
+DELIVERABLES_STATUSES = ("pending", "final", "superseded")
 
 # The record the asked-gate hook (`asked_gate_check.py`) appends beside a run's `run_ref.json`, one line
 # per decision on a held step. Held equal to the hook's own constants by a test: the hook does not
@@ -173,6 +177,8 @@ FIELDS: tuple[str, ...] = (
     "invocation",
     "resumed_from",
     "invocations",
+    "superseded_by",
+    "superseded_at",
 )
 
 # --- resume evidence ---------------------------------------------------------------------------------
@@ -434,13 +440,33 @@ def _flock(fd: int) -> bool:
     return True
 
 
+def _flock_until(fd: int, deadline: float) -> bool:
+    """`_flock`, polling until `deadline` and then LOCK_UNAVAILABLE. A lock someone else holds is
+    `BlockingIOError`, itself an `OSError`: it is told apart first, or a held lock would read as "no flock here"
+    and the lockfile fallback would let a second writer in."""
+    try:
+        import fcntl
+    except ImportError:
+        return False
+    while True:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return True
+        except BlockingIOError:
+            if time.monotonic() > deadline:
+                raise RunStatusError("LOCK_UNAVAILABLE", "the run lock is held by another writer") from None
+            time.sleep(0.05)
+        except OSError:
+            return False
+
+
 @contextlib.contextmanager
-def _excl_lockfile(path: str) -> Iterator[None]:
+def _excl_lockfile(path: str, deadline: float | None = None) -> Iterator[None]:
     """An O_EXCL lockfile, for filesystems without flock. A lockfile older than LOCK_STALE_S is a writer
     that died holding it, and is taken over."""
     marker = f"{path}.excl"
     token = f"{os.getpid()}-{secrets.token_hex(8)}"
-    deadline = time.monotonic() + LOCK_WAIT_S
+    deadline = time.monotonic() + LOCK_WAIT_S if deadline is None else deadline
     while True:
         try:
             fd = os.open(marker, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
@@ -471,7 +497,7 @@ def _excl_lockfile(path: str) -> Iterator[None]:
 
 
 @contextlib.contextmanager
-def run_lock(paths: RunPaths, *, create: bool = False) -> Iterator[None]:
+def run_lock(paths: RunPaths, *, create: bool = False, wait_s: float | None = None) -> Iterator[None]:
     """Exclusive, re-entrant within one process. Only `start` creates the run dir (`create=True`); for any
     other writer a missing run is RUN_NOT_FOUND, with nothing created."""
     key = paths.lock
@@ -487,7 +513,8 @@ def run_lock(paths: RunPaths, *, create: bool = False) -> Iterator[None]:
     elif not os.path.isdir(paths.run_root):
         raise RunStatusError("RUN_NOT_FOUND", f"no run at {paths.run_root}")
     with open(key, "a+", encoding="utf-8") as fh:
-        if _flock(fh.fileno()):
+        deadline = None if wait_s is None else time.monotonic() + wait_s
+        if _flock(fh.fileno()) if deadline is None else _flock_until(fh.fileno(), deadline):
             _HELD[key] = 1
             try:
                 sweep_stale_tmp(paths.run_root)
@@ -495,7 +522,7 @@ def run_lock(paths: RunPaths, *, create: bool = False) -> Iterator[None]:
             finally:
                 _HELD.pop(key, None)
             return
-        with _excl_lockfile(key):
+        with _excl_lockfile(key, deadline):
             _HELD[key] = 1
             try:
                 sweep_stale_tmp(paths.run_root)
@@ -659,7 +686,14 @@ def _unused_request_notices(paths: RunPaths, status: dict[str, Any]) -> None:
         if not isinstance(ledger, dict):
             return
         notices = list(status.get("notices") or [])
-        seen = {(n.get("gate"), n.get("reason")) for n in notices if isinstance(n, dict)}
+
+        # One notice per code, gate and lines (as `_gates.add_notice` keys them): a line already listed (on an
+        # earlier invocation, or by the step that passed over it) is not listed again under another reason.
+        def notice_key(n: dict[str, Any]) -> tuple[Any, Any, tuple[Any, ...]]:
+            lines = n.get("lines")
+            return n.get("code"), n.get("gate"), tuple(lines) if isinstance(lines, list) else ()
+
+        seen = {notice_key(n) for n in notices if isinstance(n, dict)}
         gates = ledger.get("gates") or {}
         pre = ledger.get("pre_answers") or {}
         instance_used = {str(pa.get("from")) for pa in pre.values() if isinstance(pa, dict) and pa.get("from")}
@@ -690,7 +724,8 @@ def _unused_request_notices(paths: RunPaths, status: dict[str, Any]) -> None:
                             {"code": "PRE_ANSWER_IGNORED", "gate": key, "lines": [rec.get("raw")], "reason": reason}
                         )
         for n in out:
-            if (n["gate"], n["reason"]) not in seen:
+            if notice_key(n) not in seen:
+                seen.add(notice_key(n))
                 notices.append(n)
         status["notices"] = notices
     except Exception:  # noqa: BLE001 - a notice never fails a status write
@@ -699,6 +734,9 @@ def _unused_request_notices(paths: RunPaths, status: dict[str, Any]) -> None:
 
 def write_status(paths: RunPaths, status: dict[str, Any]) -> None:
     status["updated_at"] = now_iso()
+    if status.get("superseded_by"):
+        # A run whose folder a later run took over stays superseded, whatever its own writers set after.
+        status["deliverables_status"] = "superseded"
     if status.get("status") in FINAL_STATUSES:
         _unused_request_notices(paths, status)
     fold_asked_evidence(status)
@@ -1167,3 +1205,109 @@ def coaching_blocked(paths: RunPaths) -> dict[str, Any]:
             status["message"] = MESSAGES["COACHING_BLOCKED"]
 
     return update(paths, fn)
+
+
+# --- a later run taking over a run's folder -------------------------------------------------------------
+
+# How long marking waits for each earlier run's lock, and for all of them: past either, that run is `failed`
+# and the next bind retries. Overridable for tests only.
+SUPERSEDE_LOCK_WAIT_S = float(os.environ.get("FOUNDER_SKILLS_SUPERSEDE_WAIT_S") or 5.0)
+SUPERSEDE_TOTAL_S = 15.0
+
+
+def _rel(path: str, root: str) -> str | None:
+    """`path` relative to the artifacts root it was written under, or None when it is outside it. Relative,
+    because two sessions may see the same folder under different absolute paths."""
+    rel = os.path.relpath(os.path.abspath(path), os.path.abspath(root))
+    return None if rel == ".." or rel.startswith(".." + os.sep) else rel
+
+
+def _claims(status: dict[str, Any], rel_dir: str) -> bool:
+    """True when the folder at `rel_dir` (relative to the artifacts root) holds a file this run lists, or this
+    unfinished run's own work."""
+    root = status.get("artifacts_root_shell")
+    if not isinstance(root, str):
+        return False
+    for entry in (status.get("deliverables") or {}).values():
+        path = entry.get("path_shell") if isinstance(entry, dict) else None
+        if isinstance(path, str) and _rel(os.path.dirname(path), root) == rel_dir:
+            return True
+    bound = status.get("run_dir_shell")
+    return status.get("status") not in FINAL_STATUSES and isinstance(bound, str) and _rel(bound, root) == rel_dir
+
+
+def supersede_runs_in(artifacts_root: str, run_dir: str, by_run_id: str) -> list[dict[str, Any]]:
+    """Mark every other run whose listed files, or whose unfinished work, are in `run_dir` as superseded by
+    `by_run_id` (`superseded_by`, `superseded_at`; `deliverables_status` then reads `superseded`). Its `status`
+    and `code` are not touched. Folders are compared relative to each run's own artifacts root.
+
+    One run lock at a time, never nested: the caller holds none (RuntimeError otherwise). Each earlier run's lock
+    is waited for at most SUPERSEDE_LOCK_WAIT_S, and all of them at most SUPERSEDE_TOTAL_S. A run already superseded
+    is left as it is. Never raises for another run's state: each result is `marked`, `already`, `failed` (it
+    claims the folder and was not marked) or `unreadable` (its status could not be read)."""
+    if any(_HELD.values()):
+        raise RuntimeError("supersede_runs_in must be called with no run lock held")
+    rel_dir = _rel(run_dir, artifacts_root)
+    runs_root = os.path.join(os.path.abspath(artifacts_root), "runs")
+    try:
+        names = sorted(os.listdir(runs_root))
+    except OSError:
+        return []
+    if rel_dir is None:
+        return []
+    budget_end = time.monotonic() + SUPERSEDE_TOTAL_S
+    results: list[dict[str, Any]] = []
+    for name in names:
+        if name == by_run_id or not valid_run_id(name):
+            continue
+        paths = run_paths(artifacts_root, name)
+        try:
+            peek = load_status(paths)
+        except ValueError as e:
+            results.append({"run_id": name, "result": "unreadable", "error": str(e)})
+            continue
+        if peek is None or not _claims(peek, rel_dir):
+            continue
+        outcome: dict[str, Any] = {"run_id": name, "result": "already"}
+        left = budget_end - time.monotonic()
+        if left <= 0:
+            results.append({"run_id": name, "result": "failed", "error": "not marked within the time budget"})
+            continue
+        try:
+            with run_lock(paths, wait_s=min(SUPERSEDE_LOCK_WAIT_S, left)):
+                status = load_status(paths)
+                if status is None or status.get("superseded_by") or not _claims(status, rel_dir):
+                    results.append(outcome)
+                    continue
+                status["superseded_by"] = by_run_id
+                status["superseded_at"] = now_iso()
+                write_status(paths, status)
+                outcome["result"] = "marked"
+        except (RunStatusError, OSError, ValueError) as e:
+            outcome = {"run_id": name, "result": "failed", "error": str(e)}
+        results.append(outcome)
+    return results
+
+
+def take_folder(paths: RunPaths) -> list[dict[str, Any]]:
+    """This run writes into its folder (again): it is the folder's current run. Under its own lock, clear its own
+    `superseded_by`/`superseded_at` (its `deliverables_status` is then what its state says: re-derived when
+    complete, null otherwise); release; then mark every other run that claims the folder. Called by `bind` and
+    after any transaction that reopened a complete run. Returns `supersede_runs_in`'s results ([] unbound)."""
+    with run_lock(paths):
+        status = load_status(paths)
+        if status is None:
+            return []
+        run_dir = status.get("run_dir_shell")
+        if status.get("superseded_by"):
+            status["superseded_by"] = None
+            status["superseded_at"] = None
+            if status.get("status") == "complete":
+                full = status.get("mode") in (None, "full")
+                status["deliverables_status"] = deliverables_status_for(status) if full else "final"
+            else:
+                status["deliverables_status"] = None
+            write_status(paths, status)
+    if not isinstance(run_dir, str):
+        return []
+    return supersede_runs_in(paths.artifacts_root, run_dir, paths.run_id)

@@ -75,7 +75,10 @@ No grade, score or verdict changed for the same inputs. What moved, per skill wh
   - **`deliverables_status`.** `complete` means the markdown and JSON reports are final. Where a skill builds
     its pages after the coaching (deck review, market sizing, IC simulation, competitive positioning), they
     are listed in `deliverables` as they are written, and `deliverables_status` turns from `pending` to
-    `final`. An HTML file not listed there is not this run's.
+    `final`. An HTML file not listed there is not this run's. When a later run of the same skill for the same
+    company takes over the folder (by starting there, resuming, or reopening a finished run), the earlier run's
+    status turns `superseded` (`superseded_by`, `superseded_at`), so it no longer promises files that were removed
+    or replaced.
   - **Resume, in the same session only.** A waiting run continues with `FS_HOST_RUN_ID=<id>`, every
     `FS_HOST_` line of the first request, and the answer to the waiting question; `resume_prompt` carries every
     line but the new answer. Whether a new session can see an earlier session's files has not been established on any surface,

@@ -47,7 +47,8 @@
     "notices": [
       "PRE_ANSWER_IGNORED",
       "PRE_ANSWER_INVALID",
-      "PRE_ANSWER_NOT_APPLIED"
+      "PRE_ANSWER_NOT_APPLIED",
+      "SUPERSEDE_NOT_RECORDED"
     ],
     "start_payload": [],
     "usage": [
@@ -64,6 +65,11 @@
     "producer_default_disclosed",
     "start_fresh_by_default",
     "asked_unanswered"
+  ],
+  "deliverables_statuses": [
+    "pending",
+    "final",
+    "superseded"
   ],
   "exit_codes": {
     "not_owed": 11,
@@ -2627,6 +2633,7 @@
   "notes": [
     "`complete` means the markdown and JSON reports are final; HTML pages may appear in `deliverables` after `complete`, and an HTML file not listed there is not this run's.",
     "`complete` with `deliverables_status: pending` after the skill has returned means no more pages will be listed.",
+    "`deliverables_status: superseded` means a later run of the same skill for the same company has taken over the folder that holds this run's files (`superseded_by` names it), so they may have been replaced or removed; that run may also have stopped before writing anything. Use a listed file only while its `sha256` still matches. The run that most recently took the folder is the one not marked. `status` and `code` are unchanged.",
     "A resume request repeats every FS_HOST_ line of the original request, plus the answer for the waiting gate.",
     "Before `bind`, `gates[]` holds the gates already reached plus those common to every mode of the skill; `bind` completes the list for the run's mode.",
     "`RUN_ID_IN_USE`, `RUN_ID_FINISHED` and `RUN_ID_MALFORMED` are printed only; they never change a run's run_status.json.",
@@ -2761,12 +2768,15 @@
     "failure",
     "invocation",
     "resumed_from",
-    "invocations"
+    "invocations",
+    "superseded_by",
+    "superseded_at"
   ],
   "schema": "founder-skills/host-contract",
   "schema_version": 1,
   "shapes": {
     "blocked_by_gate": "the gate key a refused step waits on (exit 10); answer it, then run the step again",
+    "deliverables_status": "null until the run completes and again after a reopen; then `pending` or `final`; `superseded` while `superseded_by` is set",
     "evidence_key": "a run-dir-relative path with every `.` and `/` replaced by `_`; paths whose keys collide take `__2`, `__3`, ... in sorted path order, skipping any key already taken (so `a_b.json`, `a/b.json`, `a.b/json` and a file named `a_b_json__2` take `a_b_json__3`, `a_b_json__2`, `a_b_json` and `a_b_json__2__2`)",
     "invocation": "1 at a fresh start; +1 at every resume and every reopen of a complete run; never reset",
     "invocations": "append-only [{n, kind, started_at, ended_at, resumed_from, reuse, manifest, manifest_incomplete, untouched_since_resume, touched_since_resume, counts, maps_dropped}]; `kind` is `start`, `resume` or `reopen`; `manifest` is the snapshot's path relative to the artifacts root, null before `bind`. An invocation ends at the next start or reopen; at the coaching insert, unless the skill lists pages after its coaching, in which case when `deliverables_status` turns `final`; and when the run completes with no page still to come or is refused. Until then, and whenever no complete manifest and walk exist, both partitions and `counts` are null. At the end every file up to 8 MiB is hashed again: different bytes are `changed`, the same bytes with another mtime are `rewritten_identical`, and the same bytes with the same mtime count as untouched, so an identical copy that kept its mtime (`cp -p`, `copy2`, `rsync -t`) or a permission change is untouched. `counts` is {untouched, changed, rewritten_identical, added, removed}. Only the 2 most recent ended invocations keep their key maps; an older one has both partitions null, `maps_dropped: true` and its `counts`",
@@ -2783,6 +2793,7 @@
       "step": "the skill step that asks it"
     },
     "resumed_from": "{gate, step, reason} of the current invocation: the gate key it started at, that gate's step, and `resume` or `reopened`; null on invocation 1. A competitive-positioning report composed again after `complete` reopens with `gate` null and `step` \"7\" (no gate started it)",
+    "superseded": "`superseded_by` (the later run's id) and `superseded_at`: null until a later run of the same skill for the same company takes over this run's folder, and null again when this run takes it back (a resume that binds again, or a reopen); while set, `deliverables_status` reads `superseded`",
     "touched_kinds": [
       "changed",
       "rewritten_identical",

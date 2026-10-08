@@ -30,13 +30,26 @@ RUN_DIR_PREFIX = {
 
 
 def run(
-    script: Path | str, *args: str, stdin: str | None = None, cwd: str | None = None, env: dict[str, str] | None = None
+    script: Path | str,
+    *args: str,
+    stdin: str | None = None,
+    cwd: str | None = None,
+    env: dict[str, str] | None = None,
+    timeout: float | None = None,
 ) -> subprocess.CompletedProcess[str]:
+    """`timeout` (seconds) for a call that could block on a lock another process holds: past it the call is
+    killed and `subprocess.TimeoutExpired` fails the test instead of hanging the suite."""
     base = {k: v for k, v in os.environ.items() if not k.startswith(("FS_HOST_", "COWORK_", "CLAUDE_CODE_REMOTE"))}
     if env:
         base.update(env)
     return subprocess.run(
-        [sys.executable, str(script), *args], input=stdin, capture_output=True, text=True, cwd=cwd, env=base
+        [sys.executable, str(script), *args],
+        input=stdin,
+        capture_output=True,
+        text=True,
+        cwd=cwd,
+        env=base,
+        timeout=timeout,
     )
 
 

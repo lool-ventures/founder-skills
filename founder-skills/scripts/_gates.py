@@ -31,6 +31,7 @@ import json
 import os
 import re
 import sys
+import time
 from collections.abc import Callable
 from typing import Any, NoReturn
 
@@ -218,6 +219,10 @@ CONTRACT_NOTES = (
     "`complete` means the markdown and JSON reports are final; HTML pages may appear in `deliverables` after "
     "`complete`, and an HTML file not listed there is not this run's.",
     "`complete` with `deliverables_status: pending` after the skill has returned means no more pages will be listed.",
+    "`deliverables_status: superseded` means a later run of the same skill for the same company has taken over "
+    "the folder that holds this run's files (`superseded_by` names it), so they may have been replaced or removed; "
+    "that run may also have stopped before writing anything. Use a listed file only while its `sha256` still "
+    "matches. The run that most recently took the folder is the one not marked. `status` and `code` are unchanged.",
     "A resume request repeats every FS_HOST_ line of the original request, plus the answer for the waiting gate.",
     "Before `bind`, `gates[]` holds the gates already reached plus those common to every mode of the skill; "
     "`bind` completes the list for the run's mode.",
@@ -3501,6 +3506,15 @@ def load_ledger(paths: _run_status.RunPaths) -> dict[str, Any]:
     return data
 
 
+def add_notice(ledger: dict[str, Any], notice: dict[str, Any]) -> None:
+    """Append a request-line notice unless one with the same code, gate and lines is already listed: the same
+    line ignored again on a later invocation (or for another reason) is one notice, not two."""
+    notices = ledger.setdefault("notices", [])
+    same = (notice.get("code"), notice.get("gate"), notice.get("lines"))
+    if not any(isinstance(n, dict) and (n.get("code"), n.get("gate"), n.get("lines")) == same for n in notices):
+        notices.append(notice)
+
+
 def _event(ledger: dict[str, Any], entry: dict[str, Any], event: str, by: str, **extra: Any) -> None:
     ledger["seq"] = int(ledger.get("seq") or 0) + 1
     entry["history"].append({"seq": ledger["seq"], "at": _run_status.now_iso(), "event": event, "by": by, **extra})
@@ -4142,8 +4156,8 @@ def store_pre_answers(ledger: dict[str, Any], pre: dict[str, dict[str, Any]], by
         if terminal and not replaceable_by_request(ledger, entry):
             assert isinstance(entry, dict)
             _event(ledger, entry, "pre_answer_ignored", by, raw=new["raw"])
-            ledger.setdefault("notices", []).append(
-                {"code": "PRE_ANSWER_IGNORED", "gate": key, "lines": new["raw"], "reason": "already_answered"}
+            add_notice(
+                ledger, {"code": "PRE_ANSWER_IGNORED", "gate": key, "lines": new["raw"], "reason": "already_answered"}
             )
             continue
         stored[key] = {**new, "stored_at": _run_status.now_iso(), "applied_at": None}
@@ -4205,9 +4219,7 @@ def _apply_pre_answer(ctx: Ctx, ledger: dict[str, Any], key: str, by: str) -> st
         if "pre_answer_unlisted" not in entry["flags"]:
             entry["flags"].append("pre_answer_unlisted")
             _event(ledger, entry, "pre_answer_unlisted", by, raw=pa["raw"], reason="requires_unmet")
-            ledger.setdefault("notices", []).append(
-                {"code": "PRE_ANSWER_NOT_APPLIED", "gate": key, "lines": pa["raw"], "reason": str(e)}
-            )
+            add_notice(ledger, {"code": "PRE_ANSWER_NOT_APPLIED", "gate": key, "lines": pa["raw"], "reason": str(e)})
         return "unlisted"
     _mark_applied(ledger, entry, pa, by)
     if result.get("declined"):
@@ -4466,9 +4478,95 @@ def transact(
             derive_status(ctx, ledger, status, declined=declined, refused_code=refused_code)
         if status != before_status:
             _run_status.write_status(paths, status)
-        if stopped is not None:
-            raise stopped
-        return out
+        reopened = status.get("revision") != before_status.get("revision")
+        owes_mark = _supersede_retry_due(ledger)
+    # A complete run reopened (`_reopen_complete`, the one writer of `revision`) writes into its folder again and
+    # takes it back. A run whose earlier marking failed retries only the marking, at most once per
+    # SUPERSEDE_RETRY_EVERY_S, and never takes the folder back by it. After the lock, never on a run this
+    # transaction refused, and never from inside `take_folder_noted` itself.
+    if stopped is None and not _TAKING:
+        if reopened:
+            take_folder_noted(paths)
+        elif owes_mark:
+            take_folder_noted(paths, retry=True)
+    if stopped is not None:
+        raise stopped
+    return out
+
+
+SUPERSEDE_NOTICE = "SUPERSEDE_NOT_RECORDED"
+# The ledger key that holds when a failed marking was last attempted (epoch seconds) and how often.
+SUPERSEDE_RETRY_KEY = "supersede_retry"
+# A failed marking is retried by the run's later transactions at most this often. Overridable for tests only.
+SUPERSEDE_RETRY_EVERY_S = float(os.environ.get("FOUNDER_SKILLS_SUPERSEDE_RETRY_S") or 60.0)
+_TAKING: list[bool] = []
+
+
+def _is_supersede_notice(n: Any) -> bool:
+    return isinstance(n, dict) and n.get("code") == SUPERSEDE_NOTICE
+
+
+def _supersede_retry_due(ledger: dict[str, Any]) -> bool:
+    """A `SUPERSEDE_NOT_RECORDED` notice is held and the last attempt is at least SUPERSEDE_RETRY_EVERY_S old."""
+    if not any(_is_supersede_notice(n) for n in ledger.get("notices") or []):
+        return False
+    rec = ledger.get(SUPERSEDE_RETRY_KEY)
+    last = rec.get("last_attempt_epoch") if isinstance(rec, dict) else None
+    return not isinstance(last, (int, float)) or time.time() - last >= SUPERSEDE_RETRY_EVERY_S
+
+
+def take_folder_noted(paths: _run_status.RunPaths, *, retry: bool = False) -> list[str]:
+    """This run takes its folder (`_run_status.take_folder`) and records the outcome: each run that claims the
+    folder and was not marked is one stderr line and a `SUPERSEDE_NOT_RECORDED` notice in this run's ledger
+    (`derive_status` copies the ledger's notices into the status); every other such notice is dropped, so one
+    never outlives the fact. Called by `bind` and after a reopen; never raises. Returns the ids it marked.
+
+    `retry` (a later transaction retrying a failed marking) only marks the other runs: it never clears this run's
+    own `superseded_by`, since a transaction is not a return to the folder, and when this run has itself been
+    superseded meanwhile it marks nothing and drops its notices."""
+    if _TAKING:
+        return []
+    _TAKING.append(True)
+    try:
+        results: list[dict[str, Any]] = []
+        try:
+            if not retry:
+                results = _run_status.take_folder(paths)
+            else:
+                status = _run_status.load_status(paths) or {}
+                run_dir = status.get("run_dir_shell")
+                if not status.get("superseded_by") and isinstance(run_dir, str):
+                    results = _run_status.supersede_runs_in(paths.artifacts_root, run_dir, paths.run_id)
+        except Exception as e:  # noqa: BLE001 - the caller's own write is done; a later transaction retries
+            print(f"note: other runs of this folder are not yet marked as replaced: {e}", file=sys.stderr)
+            return []
+        failed = sorted({r["run_id"] for r in results if r["result"] == "failed"})
+        for rid in failed:
+            print(
+                f"note: run {rid} is not yet marked as replaced by this run; nothing to do, it is retried",
+                file=sys.stderr,
+            )
+        wanted = [{"code": SUPERSEDE_NOTICE, "run_id": rid} for rid in failed]
+
+        def note(_ctx: Ctx, ledger: dict[str, Any], _status: dict[str, Any]) -> None:
+            ledger["notices"] = [n for n in ledger.get("notices") or [] if not _is_supersede_notice(n)] + wanted
+            if failed:
+                prior = ledger.get(SUPERSEDE_RETRY_KEY)
+                attempts = int(prior.get("attempts") or 0) if isinstance(prior, dict) else 0
+                ledger[SUPERSEDE_RETRY_KEY] = {"last_attempt_epoch": time.time(), "attempts": attempts + 1}
+            else:
+                ledger.pop(SUPERSEDE_RETRY_KEY, None)
+
+        try:
+            ledger = load_ledger(paths)
+            held = [n for n in ledger.get("notices") or [] if _is_supersede_notice(n)]
+            if held != wanted or failed or SUPERSEDE_RETRY_KEY in ledger:
+                transact(paths, note)
+        except Exception as e:  # noqa: BLE001 - the marking is done; the note is a report
+            print(f"note: the run status could not record that: {e}", file=sys.stderr)
+        return sorted(r["run_id"] for r in results if r["result"] == "marked")
+    finally:
+        _TAKING.pop()
 
 
 def _status_stale(status: dict[str, Any], ledger: dict[str, Any]) -> bool:
@@ -4688,8 +4786,8 @@ def close_unowed_for_mode(ledger: dict[str, Any], mode: str, by: str) -> list[st
         _event(ledger, entry, "closed", by, reason=f"not_owed_in_mode:{mode}")
         pa = pending_pre_answer(ledger, key)
         if pa is not None:
-            ledger.setdefault("notices", []).append(
-                {"code": "PRE_ANSWER_IGNORED", "gate": key, "lines": pa["raw"], "reason": "not_asked_in_mode"}
+            add_notice(
+                ledger, {"code": "PRE_ANSWER_IGNORED", "gate": key, "lines": pa["raw"], "reason": "not_asked_in_mode"}
             )
         closed.append(key)
     return closed
@@ -4977,8 +5075,8 @@ def apply_writer_pre_answer(
                 entry["flags"].append("pre_answer_unlisted")
                 _event(ledger, entry, "pre_answer_unlisted", writer, raw=pa["raw"], reason=withheld)
                 if withheld is not None:
-                    ledger.setdefault("notices", []).append(
-                        {"code": "PRE_ANSWER_NOT_APPLIED", "gate": key, "lines": pa["raw"], "reason": withheld}
+                    add_notice(
+                        ledger, {"code": "PRE_ANSWER_NOT_APPLIED", "gate": key, "lines": pa["raw"], "reason": withheld}
                     )
             return {"unlisted": pa["raw"]}
         out = record(
@@ -5147,7 +5245,7 @@ CLI_CODES = {
     "usage": ["USAGE"],
     # `run_status.py fail` on a run still waiting for an answer.
     "fail": ["RUN_WAITING"],
-    "notices": ["PRE_ANSWER_IGNORED", "PRE_ANSWER_INVALID", "PRE_ANSWER_NOT_APPLIED"],
+    "notices": ["PRE_ANSWER_IGNORED", "PRE_ANSWER_INVALID", "PRE_ANSWER_NOT_APPLIED", "SUPERSEDE_NOT_RECORDED"],
 }
 
 SHAPES = {
@@ -5186,6 +5284,11 @@ SHAPES = {
     "`a.b/json` and a file named `a_b_json__2` take `a_b_json__3`, `a_b_json__2`, `a_b_json` and "
     "`a_b_json__2__2`)",
     "touched_kinds": list(_run_status.TOUCHED_KINDS),
+    "superseded": "`superseded_by` (the later run's id) and `superseded_at`: null until a later run of the same "
+    "skill for the same company takes over this run's folder, and null again when this run takes it back (a resume "
+    "that binds again, or a reopen); while set, `deliverables_status` reads `superseded`",
+    "deliverables_status": "null until the run completes and again after a reopen; then `pending` or `final`; "
+    "`superseded` while `superseded_by` is set",
 }
 
 
@@ -5213,6 +5316,7 @@ def contract() -> dict[str, Any]:
         "run_status_fields": list(_run_status.FIELDS),
         "resumable": _run_status.RESUMABLE_BY_SURFACE,
         "pages_after_coaching": {k: list(v) for k, v in _run_status.PAGES_AFTER_COACHING.items()},
+        "deliverables_statuses": list(_run_status.DELIVERABLES_STATUSES),
         "form_reply_enabled": _form_reply.FORM_REPLY_ENABLED,
         "notes": list(CONTRACT_NOTES),
     }

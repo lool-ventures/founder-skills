@@ -26,6 +26,10 @@ corrected. A value is read as JSON first (45000, true, null) and as text otherwi
 required whenever a run id is given; only `upload` can be checked here (it must arrive as a file, not
 as `--set`). Every call appends one line to extraction_corrections.history.jsonl, so a later call
 cannot erase an earlier one; extraction_corrections.json holds only the last call.
+Both records carry `channel`, which is HOW the values arrived and predates `origin`: `review_page` for a
+corrections file, `chat` for `--set` values, whoever supplied either. WHO supplied them is `origin` (an
+`external` call with `--set` is `channel: chat, origin: external`). The field keeps its earlier meaning so the
+audit file keeps its shape; read `origin`, never `channel`, for the source.
 
 Output:
     stdout: {"status": "completed"|"error", "correction_count": N, ...}
