@@ -879,7 +879,7 @@
   "preRunHashes": {},
   "scenarioSource": "../scenarios/deck-review-smoke.yaml",
   "fingerprint": {
-    "baseline": "2.26454.0",
+    "baseline": "2.26454.2",
     "hashFormat": "jcs1",
     "skillHash": "fa38116be9186060b18ab5660a83adf97969d0fb89bc65e405fc94d6a2e4746e",
     "promptAssetsHash": "267cb799c2e18b49",
