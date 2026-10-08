@@ -657,6 +657,23 @@ def test_a_skip_record_off_the_closed_list_is_refused(tmp_path: Path) -> None:
     assert not (d / "report.json").exists()
 
 
+def test_a_declined_skip_is_refused_only_when_the_request_said_not_to_ask(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The gate's no-ask half, called directly: a hand-written `founder_declined` for this run stops compose
+    under FS_HOST_NO_ASK (nobody was asked, so nobody declined) and passes attended; other reasons pass both."""
+    rt_refuse = _load("compose_report")._rt_refuse
+    declined = {"reason": "founder_declined", "_produced_by": "record_red_team_skip", "metadata": {"run_id": RUN}}
+    rt_refuse(RUN, {RUN}, (), declined)
+    rt_refuse(RUN, {RUN}, (), {**declined, "reason": "dispatch_failed"}, no_ask=True)
+    with pytest.raises(SystemExit) as stop:
+        rt_refuse(RUN, {RUN}, (), declined, no_ask=True)
+    assert stop.value.code == 1
+    out = json.loads(capsys.readouterr().out)
+    assert out["code"] == out["validation"]["code"] == "NO_ASK_FOUNDER_DECLINED"
+    assert all(r in out["validation"]["errors"][0] for r in ("dispatch_failed", "no_network_available"))
+
+
 # --- what the founder reads ---------------------------------------------------------------------------------
 
 

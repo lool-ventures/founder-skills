@@ -304,7 +304,7 @@ starts the skill:
 | `FS_HOST_NOTE <question>=<text>` | A note for a question this request also answers. |
 | `FS_HOST_NO_ASK` | With `FS_HOST_RUN_ID`: the run asks nothing. A question with a default takes it (listed as `DEFAULT_TAKEN:<question>`); any other leaves the run `waiting` for an answer you send on resume. |
 | `FS_HOST_WAIT <question>` | With `FS_HOST_NO_ASK`: stop `waiting` at this question even though it has a default, so someone can answer it later. |
-| `FS_HOST_DERIVE <question>` | With `FS_HOST_NO_ASK`: the run may take this answer from the materials, recording where it says it found it (`DERIVED:<question>`). Company name, sector, geography and competitive positioning's product questions only; never the stage. |
+| `FS_HOST_DERIVE <question>` | With `FS_HOST_NO_ASK`: the run may take this answer from the materials, recording where it says it found it (`DERIVED:<question>`). Company name, sector, geography and competitive positioning's product questions only; never the stage. Without it, those product questions wait for a line. |
 
 `<question>` is a question id, or `<id>.<instance>` for a question asked once per item (for example
 `ctx_basics.stage`). A question that allows several options takes them comma-joined. Send each skill only its
@@ -319,8 +319,14 @@ leaves the run `waiting` with `PRE_ANSWER_UNLISTED`.
 Every skill first settles four basics about the company (`ctx_basics.company_name`, `.stage`, `.sector`,
 `.geography`, and `ctx_stage_detail` after `Series B+`) unless the artifacts folder already holds that
 company's context. A request with nobody to answer should carry them; otherwise the run waits at its first
-step. Under `FS_HOST_NO_ASK` the run cannot answer a question itself (it may only mark a name, sector or
-geography as unknown, and competitive positioning may record the product's availability where the materials state it), so a value stated only in the request's prose is not used: send it as a line.
+step. Under `FS_HOST_NO_ASK` the run cannot answer a question itself, nor record by hand that one does not
+apply (the recorder refuses with `NO_ASK_ANSWER`, `NO_ASK_DEFAULT` or `NO_ASK_NOT_APPLICABLE`, and writes
+nothing), so a value stated only in the request's prose is not used: send it as a line. The run may only mark a
+name, sector or geography as unknown, start a cap-table review fresh, take a cap-table producer's disclosed
+default for a note or pool term, and record competitive positioning's product availability as stated by the
+materials in place of its default. That last one is the run's own reading, not checked, and is listed as
+`MATERIALS_STATED:cp_product_availability`. A review cannot be recorded as declined by the founder
+(`NO_ASK_FOUNDER_DECLINED`): it may be skipped only for a reason that is not a person's choice.
 `FS_HOST_NO_ASK` stays in force on every resume of the run, and `run_status.json` says so (`no_ask: true`).
 It governs only the skills' own questions, never the host's permission prompts: run an unattended skill in a
 permission mode that does not prompt, or a skill that researches the web stops at its first fetch until
@@ -356,7 +362,8 @@ A `waiting` run names the question in `waiting_on`; `gates` lists every question
 run's mode (complete once the run is bound) with its options, its state (`open`, `answered`,
 `not_owed`, `not_reached`) and the recorded answer.
 `disclosures` lists answers taken as defaults (`DEFAULT_TAKEN:<question>`) or from the request
-(`PRE_ANSWERED:<question>`) or the materials (`DERIVED:<question>`), and anything the report discloses about
+(`PRE_ANSWERED:<question>`) or the materials (`DERIVED:<question>`), questions recorded as stated by the
+materials under `FS_HOST_NO_ASK` (`MATERIALS_STATED:<question>`), and anything the report discloses about
 them; deck review adds `DECK_READ_AS_TEXT` when it read the slides as text (its four design criteria are not
 scored). A request line the run never used is listed in `notices` with a `reason` once the run is final.
 

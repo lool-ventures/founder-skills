@@ -626,21 +626,31 @@ def test_a_request_that_says_not_to_ask_takes_unsure_for_availability(tmp_path: 
 
 
 def test_unattended_the_materials_availability_survives_the_batched_open_and_ranks_today(tmp_path: Path) -> None:
-    """Under FS_HOST_NO_ASK the batched open takes `not_sure` at once; the materials' value, recorded after it in
-    one batch with the product questions, replaces it, the profile keeps `shipping`, and today's point is ranked."""
+    """Under FS_HOST_NO_ASK the product questions come from the materials only through FS_HOST_DERIVE; the batched
+    open takes `not_sure` for availability at once, and the materials' value, recorded after it as not applicable,
+    replaces that default and is disclosed. The profile keeps `shipping` and today's point is ranked. Residual: the
+    profile's product text is not checked against the derived values, nor the stated availability against the
+    materials (the run's own statement, listed as `MATERIALS_STATED:`)."""
     from test_competitive_positioning import _make_valid_positioning_input
 
-    root, rid, rd = h.start_bound(tmp_path, CP, lines=f"FS_HOST_RUN_ID={FIXTURE_RUN}\nFS_HOST_NO_ASK\n")
+    product = [f"cp_product_profile.{f}" for f in ("product", "customers", "differentiation")]
+    lines = "".join(f"FS_HOST_DERIVE {k}\n" for k in product)
+    root, rid, rd = h.start_bound(tmp_path, CP, lines=f"FS_HOST_RUN_ID={FIXTURE_RUN}\nFS_HOST_NO_ASK\n{lines}")
     rd.mkdir(parents=True, exist_ok=True)
-    keys = [
-        *[f"cp_product_profile.{f}" for f in ("product", "customers", "differentiation")],
-        "cp_product_availability",
-    ]
-    gates = [a for k in keys for a in ("--gate", k)]
-    h.record(root, rid, "open", *gates)  # exits 12 for the product questions; availability takes its default
+    keys = [*product, "cp_product_availability"]
+    _ok(h.record(root, rid, "open", *[a for k in keys for a in ("--gate", k)]))
     assert h.ledger(root, rid)["gates"]["cp_product_availability"]["current"]["answer_id"] == "not_sure"
-    _ok(h.record(root, rid, "not-applicable", *gates, "--reason", "slide 3 says it is in use"))
-    assert all(h.ledger(root, rid)["gates"][k]["state"] == "not_owed" for k in keys)
+    for k in product:
+        argv = ["--gate", k, "--answer-id", "use_derived", "--value", "invented text", "--source", "slide 2"]
+        _ok(h.record(root, rid, "derive", *argv))
+    _ok(h.record(root, rid, "not-applicable", "--gate", "cp_product_availability", "--reason", "slide 3: in use"))
+    led = h.ledger(root, rid)["gates"]
+    assert all(led[k]["state"] == "answered" for k in product)
+    assert led["cp_product_availability"]["state"] == "not_owed"
+    disclosures = h.status(root, rid)["disclosures"]
+    assert all(f"DERIVED:{k}" in disclosures for k in product)
+    assert "MATERIALS_STATED:cp_product_availability" in disclosures
+    assert "DEFAULT_TAKEN:cp_product_availability" not in disclosures
     _ok(_profile(rd, rid, "shipping"))
     payload = _make_valid_positioning_input()
     pt = next(p for p in payload["views"][0]["points"] if p["competitor"] == "_startup")
@@ -679,6 +689,73 @@ def test_an_open_documents_question_stops_compose_and_a_skipped_review_closes_it
     argv: list[Any] = [SCRIPTS / "record_red_team_skip.py", "--reason", "founder_declined", "--run-id", rid]
     _ok(h.run(*argv, "-o", str(rd / "red_team_skip.json")))
     assert h.ledger(root, rid)["gates"]["cp_upload_path"]["state"] == "not_owed"
+    _ok(_compose(rd))
+
+
+def _skip(rd: Path, rid: str, reason: str) -> Any:
+    argv: list[Any] = [SCRIPTS / "record_red_team_skip.py", "--reason", reason, "--run-id", rid]
+    return h.run(*argv, "-o", str(rd / "red_team_skip.json"))
+
+
+def test_unattended_a_declined_review_is_refused_and_writes_nothing(tmp_path: Path) -> None:
+    """Under FS_HOST_NO_ASK nobody was asked, so nobody declined: the skip is refused before its file is written,
+    and the documents question stays open."""
+    root, rid, rd = h.start_bound(tmp_path, CP, lines=f"FS_HOST_RUN_ID={FIXTURE_RUN}\nFS_HOST_NO_ASK\n")
+    rd.mkdir(parents=True, exist_ok=True)
+    assert h.record(root, rid, "open", "--gate", "cp_upload_path").returncode == 12
+    before = h.snapshot(root, rid)
+    proc = _skip(rd, rid, "founder_declined")
+    assert proc.returncode == 1, proc.stdout + proc.stderr
+    out = json.loads(proc.stdout)
+    assert out["code"] == out["validation"]["code"] == "NO_ASK_FOUNDER_DECLINED"
+    assert "dispatch_failed" in proc.stdout and not (rd / "red_team_skip.json").exists()
+    assert h.snapshot(root, rid) == before
+    assert h.ledger(root, rid)["gates"]["cp_upload_path"]["state"] == "open"
+
+
+def test_unattended_a_review_that_could_not_run_still_closes_the_documents_question(tmp_path: Path) -> None:
+    root, rid, rd = h.start_bound(tmp_path, CP, lines=f"FS_HOST_RUN_ID={FIXTURE_RUN}\nFS_HOST_NO_ASK\n")
+    rd.mkdir(parents=True, exist_ok=True)
+    assert h.record(root, rid, "open", "--gate", "cp_upload_path").returncode == 12
+    _ok(_skip(rd, rid, "dispatch_failed"))
+    assert _read(rd / "red_team_skip.json")["reason"] == "dispatch_failed"
+    entry = h.ledger(root, rid)["gates"]["cp_upload_path"]
+    assert (entry["state"], entry["current"]["resolution_basis"]) == ("not_owed", "script")
+
+
+def _no_ask_fixture_run(tmp: Path) -> tuple[Path, str, Path]:
+    """The fixture analysis on a run whose request said not to ask, every question answered by a request line
+    or taken from the materials through FS_HOST_DERIVE."""
+    product = [f"cp_product_profile.{f}" for f in ("product", "customers", "differentiation")]
+    lines = "".join(f"FS_HOST_DERIVE {k}\n" for k in product) + "".join(
+        f"FS_HOST_ANSWER {gid}=no_changes\n" for gid in ("cp_gate1_landscape", "cp_gate2_axes", "cp_gate3_position")
+    )
+    root, rid, rd = h.start_bound(tmp, CP, lines=f"FS_HOST_RUN_ID={FIXTURE_RUN}\nFS_HOST_NO_ASK\n{lines}")
+    rd.mkdir(parents=True, exist_ok=True)
+    for f in FIXTURES.iterdir():
+        if f.suffix == ".json":
+            shutil.copy(f, rd / f.name)
+    _ok(h.record(root, rid, "open", *[a for k in [*product, "cp_product_availability"] for a in ("--gate", k)]))
+    for k in product:
+        argv = ["--gate", k, "--answer-id", "use_derived", "--value", "invented text", "--source", "slide 2"]
+        _ok(h.record(root, rid, "derive", *argv))
+    return root, rid, rd
+
+
+def test_unattended_a_hand_written_declined_review_stops_compose(tmp_path: Path) -> None:
+    """The skip recorder refuses `founder_declined` under FS_HOST_NO_ASK; the same record written by hand is
+    refused at compose, and a reason that is not a person's choice composes."""
+    root, rid, rd = _no_ask_fixture_run(tmp_path)
+    (rd / "redteam.json").unlink(missing_ok=True)
+    skip = {"reason": "founder_declined", "_produced_by": "record_red_team_skip", "metadata": {"run_id": rid}}
+    _write(rd / "red_team_skip.json", skip)
+    proc = _compose(rd)
+    assert proc.returncode == 1, proc.stdout + proc.stderr
+    out = json.loads(proc.stdout)
+    assert out["code"] == out["validation"]["code"] == "NO_ASK_FOUNDER_DECLINED"
+    assert "dispatch_failed" in out["validation"]["errors"][0]
+    assert not (rd / "report.md").exists() and not (rd / "report.json").exists()
+    _write(rd / "red_team_skip.json", {**skip, "reason": "dispatch_failed"})
     _ok(_compose(rd))
 
 

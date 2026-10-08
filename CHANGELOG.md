@@ -61,8 +61,11 @@ No grade, score or verdict changed for the same inputs. What moved, per skill wh
     skill with nobody to answer: the run asks nothing, takes each question's default where one exists, and
     otherwise stops `waiting` for a line on resume (the skill's scripts exit 12). It cannot silence the host's own
     permission prompts: run the skill in a permission mode that does not prompt, or a skill that researches the
-    web waits at its first fetch. Under it the run cannot answer a question itself; it may only mark a
-    company's name, sector or geography as unknown. Where the plugin's hooks run, the question tool is
+    web waits at its first fetch. Under it the run cannot answer a question itself or record by hand that one
+    does not apply; it may only mark a company's name, sector or geography as unknown, start a cap-table review
+    fresh, take a cap-table producer's disclosed default, and record competitive positioning's product
+    availability as stated by the materials (listed as `MATERIALS_STATED:`). An outside review may be skipped
+    only for a reason that is not a person's choice. Where the plugin's hooks run, the question tool is
     refused, and the end-of-turn check skips its asks to attach files and to send the values-review page: it
     still checks that the closing message carries the printed hand-over, and otherwise asks only when a turn
     leaves the run `running`.

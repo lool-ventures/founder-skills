@@ -84,8 +84,9 @@ DEFAULT_REASONS = (
 )
 RESOLUTIONS = ("answered", "default_taken", "not_applicable")
 # `host_no_ask`: a no-ask default the script took on a request carrying FS_HOST_NO_ASK; `model_no_ask`: a
-# value marked unknown by the model under it (NO_ASK_MODEL_DEFAULTS); `host_authorized`: an answer taken from
-# the materials for a key the request named in FS_HOST_DERIVE.
+# record the model made under it, a value marked unknown (NO_ASK_MODEL_DEFAULTS) or the availability record that
+# replaces its no-ask default (`check_model_not_applicable`); `host_authorized`: an answer taken from the
+# materials for a key the request named in FS_HOST_DERIVE.
 RESOLUTION_BASES = ("script", "model", "host_no_ask", "model_no_ask", "host_authorized")
 GATE_STATES = ("open", "answered", "not_owed")
 # How the status lists a registered gate of the run's skill and mode that the run has not reached.
@@ -133,6 +134,7 @@ REJECTION_CODES = (
     "GATE_RECORD_MISMATCH",
     "NO_ASK_ANSWER",
     "NO_ASK_DEFAULT",
+    "NO_ASK_NOT_APPLICABLE",
     "DERIVE_NOT_AUTHORIZED",
 )
 # Exit 2: the run or the registry cannot be reached.
@@ -176,7 +178,8 @@ REQUEST_TOKENS = {
 # Under it no question is put. A gate the request answered takes that answer; a gate with a no-ask default
 # takes it (unless the request named the gate in FS_HOST_WAIT); a key named in FS_HOST_DERIVE may be taken
 # from the materials with its source (`derive`); every other gate leaves the run `waiting` and the script
-# exits 12. The model cannot answer: the recorder refuses `answer`, and `default` only for the triples below.
+# exits 12. The model cannot answer: the recorder refuses `answer`, `default` except for the triples below, and
+# `not-applicable` except where NA_REPLACES_NO_ASK_DEFAULT allows it (`check_model_not_applicable`).
 
 NO_ASK_STOP = (
     "The request said not to ask, so this run stops here, waiting for an answer from the request. Ask nothing "
@@ -212,7 +215,9 @@ DERIVE_SCOPE: dict[str, str] = {
     "cp_product_profile.differentiation": "use_derived",
 }
 # Model-owed gates with a no-ask default, where the step reads the answer from the materials after its batched
-# open has already taken that default: a not-applicable record replaces the default. Pinned by a test.
+# open has already taken that default: a not-applicable record replaces the default. Pinned by a test. Under
+# FS_HOST_NO_ASK it is the one not-applicable the model may record, only over that default and only when the
+# request did not name the gate in FS_HOST_WAIT; the status then lists it as `MATERIALS_STATED:<gate>`.
 NA_REPLACES_NO_ASK_DEFAULT = ("cp_product_availability",)
 # Gates whose question asks for a file or a path: under FS_HOST_NO_ASK the waiting status names the input.
 INPUT_GATES = ("dr_input_request", "dr_primary_deck", "ms_upload_path", "cp_upload_path", "ct_docx_tracked_changes")
@@ -250,9 +255,20 @@ CONTRACT_NOTES = (
     "`FS_HOST_NO_ASK` (only beside `FS_HOST_RUN_ID`) marks a run that asks nothing: each question takes the answer "
     "a request line gives, else its no-ask default where it has one (`DEFAULT_TAKEN:<gate>`, `resolution_basis: "
     "host_no_ask`); any other question leaves the run `waiting` and the script exits 12. The run cannot answer a "
-    "question itself under it; it may only mark a company's name, sector or geography as unknown, and record "
-    "`cp_product_availability` not applicable, with the words, where the materials state it (that record replaces "
-    "its no-ask default). The flag stays "
+    "question itself under it, nor record by hand that one does not apply: the recorder refuses (`NO_ASK_ANSWER`, "
+    "`NO_ASK_DEFAULT`, `NO_ASK_NOT_APPLICABLE`; exit 1, nothing written). It may only mark a company's name, sector "
+    "or geography as unknown, start a cap-table review fresh rather than reuse an earlier one, take a cap-table "
+    "producer's disclosed default for a note or pool term, and record `cp_product_availability` not applicable "
+    "where it says the materials state it, in place of that question's no-ask default (not when the request named "
+    "it in `FS_HOST_WAIT`); each of these is recorded with `resolution_basis: model_no_ask`. The availability "
+    "record is the run's own statement, not checked against the materials; the product profile's value then "
+    "decides whether today's position on the map is ranked, and `disclosures` lists it as "
+    "`MATERIALS_STATED:cp_product_availability`. A competitive-positioning product question is taken from the "
+    "materials only where an `FS_HOST_DERIVE` line names it. An outside review cannot be recorded as declined by "
+    "the founder under it: competitive-positioning's skip recorder and both market-sizing's and "
+    "competitive-positioning's compose refuse it (exit 1, nothing written, `code: NO_ASK_FOUNDER_DECLINED` at the "
+    "top of the printed JSON and under `validation`), so a review may be skipped only for a reason that is not a "
+    "person's choice. The flag stays "
     "set for every later resume of the run, and `run_status.json` carries `no_ask`. A no-ask default is replaced "
     "by an answer line a later resume sends.",
     '`open` prints `"applied": "pre_answer"` for a question the request resolved, whether by an answer line or '
@@ -275,8 +291,10 @@ CONTRACT_NOTES = (
     "`run_dir_shell` is null until the run is bound at the end of its first step, so a run waiting there has none. "
     "`run_status_path_host` is set only on Cowork on your computer once the outputs folder's path is known; "
     "elsewhere read `<artifacts root>/runs/<id>/run_status.json`.",
-    "`disclosures` lists `DEFAULT_TAKEN:<gate>` for an answer recorded as a default and `PRE_ANSWERED:<gate>` for "
-    "one applied from a request line instead of being asked. `PRE_ANSWERED:out_of_scope_choice` means the request "
+    "`disclosures` lists `DEFAULT_TAKEN:<gate>` for an answer recorded as a default, `PRE_ANSWERED:<gate>` for "
+    "one applied from a request line instead of being asked, and `MATERIALS_STATED:<gate>` for a question the run, "
+    "under `FS_HOST_NO_ASK`, recorded not applicable because it says the materials answer it. "
+    "`PRE_ANSWERED:out_of_scope_choice` means the request "
     "chose to review a deck outside the skill's stage scope, best-effort; the report and page tell the founder so.",
     "`disclosures` also lists `EXTRACTION_UNREVIEWED` when financial-model-review's extracted values went on "
     "without being reviewed, and `CORRECTIONS_SOURCE:<origin>` (`external`, `upload` or `chat`) when corrections "
@@ -4519,6 +4537,15 @@ def derive_status(
         for k, e in entries
         if (e.get("current") or {}).get("resolution") == "default_taken"
     ]
+    # The one not-applicable the model may record under FS_HOST_NO_ASK (`check_model_not_applicable`, basis
+    # `model_no_ask`): the run's own statement that the materials answer the question, in place of the no-ask
+    # default it replaced. Keyed on the basis, so a record made before a resume added the flag is never listed.
+    status["disclosures"] += [
+        f"MATERIALS_STATED:{k}"
+        for k, e in entries
+        if (e.get("current") or {}).get("resolution") == "not_applicable"
+        and (e.get("current") or {}).get("resolution_basis") == "model_no_ask"
+    ]
     status["disclosures"] += [f"PRE_ANSWERED:{k}" for k, _e in entries if answered_by_request(ledger, k)]
     status["disclosures"] += [d for _k, e in entries for d in option_disclosures(e)]
     status["notices"] = list(ledger.get("notices") or [])
@@ -4558,7 +4585,14 @@ def derive_status(
 
 
 # Every disclosure derived from the ledger, stripped before each re-derivation so none is listed twice.
-_DERIVED_DISCLOSURES = ("DEFAULT_TAKEN:", "DERIVED:", "PRE_ANSWERED:", "EXTRACTION_UNREVIEWED", "CORRECTIONS_SOURCE")
+_DERIVED_DISCLOSURES = (
+    "DEFAULT_TAKEN:",
+    "DERIVED:",
+    "MATERIALS_STATED:",
+    "PRE_ANSWERED:",
+    "EXTRACTION_UNREVIEWED",
+    "CORRECTIONS_SOURCE",
+)
 
 
 def option_disclosures(entry: dict[str, Any]) -> list[str]:
@@ -5009,6 +5043,52 @@ def check_model_default(
     raise refuse
 
 
+def check_model_not_applicable(ledger: dict[str, Any], key: str) -> str:
+    """The resolution basis for the model's not-applicable record: `model`, or under FS_HOST_NO_ASK
+    `model_no_ask` where it is allowed; raises NO_ASK_NOT_APPLICABLE otherwise. Every gate the recorder lets the
+    model close is opened by the step that asks it, so under no-ask a not-applicable there would withdraw the
+    question or quietly pick an answer. The one exception is a gate in NA_REPLACES_NO_ASK_DEFAULT whose no-ask
+    default is in place and that the request did not ask to wait on: the record replaces that default and is
+    disclosed (`MATERIALS_STATED:<key>`, keyed on the `model_no_ask` basis). The check lives here for the
+    recorder's `not-applicable` command only: a script that finds a question does not apply goes through `record`
+    with basis `script` and is never subject to it."""
+    if not no_ask(ledger):
+        return "model"
+    gate_id, _instance = parse_key(key)
+    g = gate_def(gate_id)
+    entry = (ledger.get("gates") or {}).get(key)
+    entry = entry if isinstance(entry, dict) else {}
+    cur = entry.get("current") or {}
+    if (
+        gate_id in NA_REPLACES_NO_ASK_DEFAULT
+        and not waits_on(ledger, key)
+        and cur.get("resolution") == "default_taken"
+        and cur.get("resolution_basis") == "host_no_ask"
+    ):
+        return "model_no_ask"
+    state = entry.get("state")
+    if state == "answered":
+        route = "; its recorded answer stands"
+    elif state == "not_owed":
+        route = "; it is already recorded as not applying"
+    elif derive_authorized(ledger, key):
+        route = (
+            f"; the request named it in FS_HOST_DERIVE, so record what the materials say with `derive` (--answer-id "
+            f"{DERIVE_SCOPE.get(key)}, --value and --source)"
+        )
+    elif state == "open":
+        route = NO_ASK_LEAVE
+    elif g["no_ask_default"] is not None and not waits_on(ledger, key):
+        route = "; run its open, which takes the question's no-ask default"
+    else:
+        route = "; run its open (it exits 12)" + NO_ASK_LEAVE
+    raise GateRejection(
+        "NO_ASK_NOT_APPLICABLE",
+        f"the request said not to ask; under it {key} cannot be recorded as not applying by hand" + route,
+        gate=key,
+    )
+
+
 def record_derived(
     ctx: Ctx, ledger: dict[str, Any], key: str, answer_id: str, value: str, source: str, *, by: str
 ) -> dict[str, Any]:
@@ -5385,10 +5465,12 @@ CLI_CODES = {
     "fmr_producers": ["RUN_ID_REQUIRED"],
     # market-sizing's producers and prompt generator: a call into a bound analysis dir that names no run.
     # PERIOD_NOT_WRITTEN: the period of a founder's figure was answered but never written into inputs.json.
-    "ms_producers": ["RUN_ID_REQUIRED", "PERIOD_NOT_WRITTEN"],
+    # NO_ASK_FOUNDER_DECLINED: compose refuses a review skip saying the founder declined under FS_HOST_NO_ASK.
+    "ms_producers": ["RUN_ID_REQUIRED", "PERIOD_NOT_WRITTEN", "NO_ASK_FOUNDER_DECLINED"],
     # competitive-positioning's producers, prompt generator and compose: a call into a bound analysis dir that
-    # names no run.
-    "cp_producers": ["RUN_ID_REQUIRED"],
+    # names no run. NO_ASK_FOUNDER_DECLINED: the skip recorder and compose refuse a review skip saying the
+    # founder declined under FS_HOST_NO_ASK.
+    "cp_producers": ["RUN_ID_REQUIRED", "NO_ASK_FOUNDER_DECLINED"],
     # ic-sim's compose: a simulation dir that belongs to a run, whose files do not agree on which.
     "ic_producers": ["RUN_ID_REQUIRED"],
     # cap-table's producers: a call into a bound review dir with no (or an empty) --run-id.

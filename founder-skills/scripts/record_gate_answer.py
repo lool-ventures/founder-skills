@@ -29,9 +29,11 @@ untouched); 2 usage, IO, an unreachable registry, or a gate whose skill is not w
 (`require`: the gate was opened, `needs_input` printed); 11 not owed; 12 waiting, and the request said not to
 ask (FS_HOST_NO_ASK): nothing is asked and nothing is recorded by hand; the run waits for a request line.
 
-Under FS_HOST_NO_ASK `answer` is refused (NO_ASK_ANSWER) and `default` only marks a company's name, sector or
-geography as unknown or takes a producer's disclosed default (NO_ASK_DEFAULT otherwise). `open` that applies a
-request's declining answer exits 1 (REQUEST_DECLINED): the run is `refused`.
+Under FS_HOST_NO_ASK `answer` is refused (NO_ASK_ANSWER); `default` only marks a company's name, sector or
+geography as unknown, starts a cap-table review fresh, or takes a producer's disclosed default (NO_ASK_DEFAULT
+otherwise); and `not-applicable` only replaces `cp_product_availability`'s no-ask default, disclosed as
+`MATERIALS_STATED:` (NO_ASK_NOT_APPLICABLE otherwise). `open` that applies a request's declining answer exits 1
+(REQUEST_DECLINED): the run is `refused`.
 """
 
 from __future__ import annotations
@@ -263,6 +265,7 @@ def cmd_not_applicable(args: argparse.Namespace) -> int:
 
     def fn(ctx: Any, ledger: dict[str, Any], status: dict[str, Any]) -> list[dict[str, Any]]:
         # Every gate is checked before any is recorded: one refusal writes nothing for the others either.
+        bases: dict[str, str] = {}
         for key in args.gate:
             gid, _inst, gdef = g.check_key(key, ctx.skill)
             if gdef["writer"] != g.RECORDER:
@@ -271,8 +274,9 @@ def cmd_not_applicable(args: argparse.Namespace) -> int:
                 raise g.GateRejection(
                     "CLOSE_SCRIPT_OWED", f"{gid} is decided by a script, so only that script can find it does not apply"
                 )
+            bases[key] = g.check_model_not_applicable(ledger, key)
         return [
-            g.record(ctx, ledger, key, note=args.reason, resolution="not_applicable", basis="model", by=BY)
+            g.record(ctx, ledger, key, note=args.reason, resolution="not_applicable", basis=bases[key], by=BY)
             for key in args.gate
         ]
 

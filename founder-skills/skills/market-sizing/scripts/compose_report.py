@@ -303,7 +303,7 @@ def _checklist_below_solid(summary: dict[str, Any]) -> bool:
 # the founder-facing Warnings section. Deliberately a subset of WARNING_SEVERITY, not all of it.
 #
 # Forwarding anything registered would let an artifact assert codes compose OWNS. Measured: a
-# `sizing.json` carrying {"code": "MISSING_ARTIFACT"} with all six artifacts present yields
+# `sizing.json` carrying a MISSING_ARTIFACT warning code with all six artifacts present yields
 # `[HIGH] MISSING_ARTIFACT`, which is not clearable (ACCEPTIBLE_SEVERITIES is medium-only) and
 # drags a FOUNDER_TEXT_TOKEN leak behind it when the message names the file. The containment is
 # the point.
@@ -2360,9 +2360,16 @@ def _section_assumptions(validation: dict[str, Any] | None, sizing: dict[str, An
 
 
 def _red_team_state(
-    artifacts: dict[str, dict[str, Any] | None], methodology: dict[str, Any] | None, primary: str | None
+    artifacts: dict[str, dict[str, Any] | None],
+    methodology: dict[str, Any] | None,
+    primary: str | None,
+    no_ask: bool = False,
 ) -> tuple[str, str | None, str | None]:
-    """("ran" | "skipped" | "ungated", <skip reason enum or None>, <refusal detail or None>).
+    """("ran" | "skipped" | "ungated" | "no_ask_declined", <skip reason enum or None>, <refusal detail or None>).
+
+    `no_ask`: the run's request said not to ask (FS_HOST_NO_ASK), so nobody was asked: this run's skip saying
+    the founder declined is "no_ask_declined", a refusal like "ungated" that carries the code
+    NO_ASK_FOUNDER_DECLINED and offers only the other reasons.
 
     "ungated" is the refusal case: no review for this run AND no decision of this run's recorded. It
     is not a state the report can render, because the whole point is that nobody decided anything. The
@@ -2395,6 +2402,15 @@ def _red_team_state(
         # a leftover methodology.json carrying an earlier run's skip otherwise passed a later run's gate.
         # Only a set that carries no run id at all has nothing to compare the stamp with.
         if primary is None or stamp == primary:
+            if no_ask and reason == "founder_declined":
+                others = ", ".join(sorted(r for r in _RED_TEAM_SKIP_REASONS if r != "founder_declined"))
+                return (
+                    "no_ask_declined",
+                    reason,
+                    "methodology.red_team_skipped is founder_declined, but the request said not to ask "
+                    "(FS_HOST_NO_ASK), so nobody could decline the adversarial review. Run Step 6c, or set "
+                    f"methodology.red_team_skipped to why the review did not run, one of: {others}",
+                )
             return ("skipped", reason, None)
         if isinstance(stamp, str) and stamp:
             detail = (
@@ -3169,16 +3185,21 @@ class RevisionOwed(Exception):
         self.parameters = parameters
 
 
-def compose(dir_path: str, report_path: str | None = None, gate_view: dict[str, Any] | None = None) -> dict[str, Any]:
+def compose(
+    dir_path: str, report_path: str | None = None, gate_view: dict[str, Any] | None = None, no_ask: bool = False
+) -> dict[str, Any]:
     """Render inside one currency scope: the default is back to USD when this returns or raises.
 
     `gate_view` is the run ledger's answers (`_ms_gates.answers_view`), None for a run without one: with it,
-    "Your Answers" is read from the ledger, and an unasked revision question raises RevisionOwed."""
+    "Your Answers" is read from the ledger, and an unasked revision question raises RevisionOwed. `no_ask`: the
+    run's request said not to ask (read from the ledger), so a skip the founder declined is refused."""
     with _view.render_scope():
-        return _compose(dir_path, report_path, gate_view)
+        return _compose(dir_path, report_path, gate_view, no_ask)
 
 
-def _compose(dir_path: str, report_path: str | None = None, gate_view: dict[str, Any] | None = None) -> dict[str, Any]:
+def _compose(
+    dir_path: str, report_path: str | None = None, gate_view: dict[str, Any] | None = None, no_ask: bool = False
+) -> dict[str, Any]:
     """Main composition: load artifacts, validate, assemble report."""
     # Load all artifacts
     all_names = REQUIRED_ARTIFACTS + OPTIONAL_ARTIFACTS
@@ -3240,7 +3261,19 @@ def _compose(dir_path: str, report_path: str | None = None, gate_view: dict[str,
     #
     # Severity could not do this job: Step 7 runs compose without --strict, so even `high` halts
     # nothing. Only a non-zero exit reaches SKILL.md's documented stop-and-report branch.
-    _rt_state, _rt_reason, _rt_detail = _red_team_state(artifacts, artifacts.get("methodology.json"), _rt_run_id)
+    _rt_state, _rt_reason, _rt_detail = _red_team_state(
+        artifacts, artifacts.get("methodology.json"), _rt_run_id, no_ask
+    )
+    if _rt_state == "no_ask_declined":
+        # Its detail names the reasons on offer itself: the closed list carries the very reason refused.
+        _fail_compose(
+            {
+                "code": "NO_ASK_FOUNDER_DECLINED",
+                "validation": {"status": "invalid", "code": "NO_ASK_FOUNDER_DECLINED", "errors": [f"{_rt_detail}."]},
+                "report_markdown": "",
+            },
+            report_path,
+        )
     if _rt_state == "ungated":
         _detail = _rt_detail or "no adversarial review was run for this run"
         # The closed list of skip reasons is printed only where a skip is a remedy on offer; a review of
@@ -3631,8 +3664,10 @@ def main() -> None:
             by="compose_report.py",
         )
         gate_view = _ms_gates.answers_view(args.dir) or {}
+    # The request said not to ask: read once from the ledger, for the review gate's founder_declined refusal.
+    quiet = ledger is not None and bool(ledger[0].no_ask(ledger[0].load_ledger(ledger[1])))
     try:
-        result = compose(args.dir, report_path=report_path, gate_view=gate_view)
+        result = compose(args.dir, report_path=report_path, gate_view=gate_view, no_ask=quiet)
     except RevisionOwed as e:
         _ms_gates.revision_owed(args.dir, run_id, e.parameters)
         raise

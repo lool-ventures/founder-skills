@@ -269,7 +269,9 @@ _REVIEW_FOUNDER_MESSAGES = {
 }
 
 
-def _rt_refuse(run_id: str | None, all_run_ids: set[str], reviews: Sequence[Any], skip_record: Any) -> None:
+def _rt_refuse(
+    run_id: str | None, all_run_ids: set[str], reviews: Sequence[Any], skip_record: Any, no_ask: bool = False
+) -> None:
     """THE OUTSIDE-REVIEW GATE: a run's report is composed only when its review ran or the decision not to
     run one was recorded. Silence is not a third option.
 
@@ -286,6 +288,9 @@ def _rt_refuse(run_id: str | None, all_run_ids: set[str], reviews: Sequence[Any]
     while the report showed no review; `all_run_ids` only names that mixed set in the refusal. A run with
     no sub-agents records `no_subagent_dispatch`. RESIDUAL, stated: deleting the review and the skip
     record trips this refusal rather than passing it; hand-writing a skip record is a named fabrication.
+
+    `no_ask`: the run's request said not to ask (FS_HOST_NO_ASK), so nobody was asked and this run's skip
+    saying the founder declined is refused (NO_ASK_FOUNDER_DECLINED), as the skip recorder refuses it.
     """
     if not run_id:
         return
@@ -294,6 +299,20 @@ def _rt_refuse(run_id: str | None, all_run_ids: set[str], reviews: Sequence[Any]
     rec = _as_dict(skip_record)
     recorded = rec.get("reason")
     if _as_dict(rec.get("metadata")).get("run_id") == run_id:
+        if no_ask and recorded == "founder_declined":
+            offered = ", ".join(r for r in _cp_redteam_copy.SKIP_REASONS if r != "founder_declined")
+            error = (
+                "red_team_skip.json records founder_declined, but the request said not to ask (FS_HOST_NO_ASK), "
+                "so nobody could decline the outside review. Run Step 6.5, or record why it did not run with "
+                f"record_red_team_skip.py --reason <one of: {offered}>."
+            )
+            refusal = {
+                "code": "NO_ASK_FOUNDER_DECLINED",
+                "validation": {"status": "invalid", "code": "NO_ASK_FOUNDER_DECLINED", "errors": [error]},
+            }
+            sys.stdout.write(json.dumps(refusal, indent=2) + "\n")
+            print(f"Error: report not composed: {error}", file=sys.stderr)
+            sys.exit(1)
         if recorded in _cp_redteam_copy.SKIP_REASONS:
             return
         detail = f"red_team_skip.json records {recorded!r}, which is not a recognised reason"
@@ -2140,8 +2159,9 @@ def _emit_coaching_payload(
     }
 
 
-def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
-    """Main composition: load artifacts, validate, assemble report."""
+def compose(dir_path: str, report_path: str | None = None, no_ask: bool = False) -> dict[str, Any]:
+    """Main composition: load artifacts, validate, assemble report. `no_ask`: the run's request said not to ask
+    (read from the ledger), so a review skip the founder declined is refused."""
     all_names = REQUIRED_ARTIFACTS + OPTIONAL_ARTIFACTS
     artifacts: dict[str, dict[str, Any] | None] = {}
     for name in all_names:
@@ -2180,6 +2200,7 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
         # or a delete of redteam.json).
         (artifacts.get("redteam.json"), _rt_shown),
         artifacts.get("red_team_skip.json"),
+        no_ask,
     )
     artifacts["redteam.json"] = _rt_shown
     _rt_skip = _cp_redteam_copy.skip_reason(artifacts.get("red_team_skip.json"), _rt_run_id)
@@ -2565,7 +2586,9 @@ def main() -> None:
 
     ledger = _gate_check(args.dir)
     report_path = os.path.abspath(args.write_md) if args.write_md else None
-    result = compose(args.dir, report_path=report_path)
+    # The request said not to ask: read once from the ledger, for the review gate's founder_declined refusal.
+    quiet = ledger is not None and bool(ledger[0].no_ask(ledger[0].load_ledger(ledger[1])))
+    result = compose(args.dir, report_path=report_path, no_ask=quiet)
 
     if args.write_md:
         report_markdown = result.get("report_markdown", "")

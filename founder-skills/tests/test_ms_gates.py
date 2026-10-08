@@ -511,6 +511,27 @@ def test_compose_refuses_a_question_opened_and_never_recorded(tmp_path: Path) ->
     assert h.status(root, run_id)["last_error_code"] == "GATE_UNRESOLVED"
 
 
+def test_unattended_a_review_the_founder_declined_is_refused_and_another_reason_composes(tmp_path: Path) -> None:
+    """Under FS_HOST_NO_ASK nobody was asked, so a skip saying the founder declined cannot be this run's."""
+    rid = "20261008T100000Z-0a0b0c"
+    root, run_id, run_dir = _run_dir(tmp_path, lines=f"FS_HOST_RUN_ID={rid}\nFS_HOST_NO_ASK\n")
+    _artifacts(run_dir, run_id)
+    assert json.loads((run_dir / "methodology.json").read_text())["red_team_skipped"] == "founder_declined"
+    proc = _compose(run_dir)
+    assert proc.returncode == 1, proc.stdout + proc.stderr
+    out = json.loads(proc.stdout)
+    assert out["code"] == out["validation"]["code"] == "NO_ASK_FOUNDER_DECLINED"
+    error = out["validation"]["errors"][0]
+    assert "FS_HOST_NO_ASK" in error and "methodology.red_team_skipped" in error
+    offered = error.split("one of:", 1)[1]
+    assert "no_subagent_dispatch" in offered and "founder_declined" not in offered
+    assert error.count("one of:") == 1
+    assert not (run_dir / "report.md").exists() and not (run_dir / "report.json").exists()
+    meth = json.loads((run_dir / "methodology.json").read_text())
+    _write(run_dir / "methodology.json", {**meth, "red_team_skipped": "no_subagent_dispatch"})
+    _ok(_compose(run_dir))
+
+
 def test_the_report_says_the_request_answered_and_what_was_not_asked_on_every_surface(tmp_path: Path) -> None:
     root, run_id, run_dir = _run_dir(tmp_path, lines="FS_HOST_ANSWER ms_methodology=looks_good")
     _artifacts(run_dir, run_id)

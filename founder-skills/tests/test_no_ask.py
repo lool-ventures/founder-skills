@@ -307,6 +307,243 @@ def test_a_script_records_its_own_default_unhindered(tmp_path: Path) -> None:
     assert _entry(root, "fmr_extracted_values")["state"] == "answered"
 
 
+# --- the model cannot record that a question does not apply ----------------------------------------------------
+
+# Every model-owed question the recorder closes, but the availability one: each is opened only once its question
+# arises, so a not-applicable there would withdraw the question or pick an answer for the founder.
+REFUSED_NA = [
+    ("deck-review", "dr_primary_deck"),
+    ("deck-review", "dr_input_request.copy_failed"),
+    ("market-sizing", "ms_fx_rate"),
+    ("market-sizing", "ms_upload_path"),
+    ("competitive-positioning", "cp_product_profile.product"),
+    ("competitive-positioning", "cp_consolidation_merge.alpha+beta"),
+    ("competitive-positioning", "cp_upload_path"),
+    ("cap-table", "ct_lane1_counsel_review.safes.0.purchase_amount"),
+    ("cap-table", "ct_lane2_column_mapping.holder_name"),
+]
+PRODUCT = [f"cp_product_profile.{f}" for f in ("product", "customers", "differentiation")]
+CP = "competitive-positioning"
+
+
+def _na(root: Path, *keys: str, reason: str = "slide 3 says so") -> subprocess.CompletedProcess[str]:
+    return _rec(root, "not-applicable", *[a for k in keys for a in ("--gate", k)], "--reason", reason)
+
+
+def _refused_na(proc: subprocess.CompletedProcess[str]) -> str:
+    assert proc.returncode == 1 and _out(proc)["code"] == "NO_ASK_NOT_APPLICABLE", proc.stdout + proc.stderr
+    return str(_out(proc)["message"])
+
+
+def test_the_model_owed_questions_the_recorder_closes_are_exactly_these() -> None:
+    """The refused list plus the availability exception is every gate `not-applicable` accepts at all."""
+    accepted = {gid for gid, gd in g.GATES.items() if gd["owed"] == "model" and gd["writer"] == g.RECORDER}
+    assert accepted == {g.parse_key(k)[0] for _s, k in REFUSED_NA} | set(g.NA_REPLACES_NO_ASK_DEFAULT)
+
+
+@pytest.mark.parametrize(("skill", "key"), REFUSED_NA)
+def test_a_question_left_open_cannot_be_recorded_as_not_applying(tmp_path: Path, skill: str, key: str) -> None:
+    root, _rid, _rd = _bound(tmp_path, skill)
+    _stops(_open(root, key))
+    before = h.snapshot(root, RID)
+    message = _refused_na(_na(root, key))
+    assert message.endswith(g.NO_ASK_LEAVE) and "exits 12" not in message
+    assert h.snapshot(root, RID) == before
+    st = h.status(root, RID)
+    assert (st["status"], st["waiting_on"]) == ("waiting", key)
+    assert _entry(root, key)["state"] == "open"
+
+
+@pytest.mark.parametrize(("skill", "key"), [REFUSED_NA[0], REFUSED_NA[5]])
+def test_an_unopened_question_is_refused_and_the_message_says_to_open_it(tmp_path: Path, skill: str, key: str) -> None:
+    root, _rid, _rd = _bound(tmp_path, skill)
+    before = h.snapshot(root, RID)
+    message = _refused_na(_na(root, key))
+    assert "run its open (it exits 12)" in message and message.endswith(g.NO_ASK_LEAVE)
+    assert h.snapshot(root, RID) == before
+    assert key not in (h.ledger(root, RID).get("gates") or {})
+
+
+def test_an_unopened_availability_question_is_told_to_open_without_an_exit_12(tmp_path: Path) -> None:
+    """Its open takes the no-ask default and exits 0, after which the materials' record may replace it."""
+    root, _rid, _rd = _bound(tmp_path, CP)
+    message = _refused_na(_na(root, "cp_product_availability"))
+    assert "run its open, which takes the question's no-ask default" in message and "exits 12" not in message
+    _ok(_open(root, "cp_product_availability"))
+    _ok(_na(root, "cp_product_availability"))
+
+
+def test_a_derive_line_routes_the_product_questions_to_derive(tmp_path: Path) -> None:
+    root, _rid, _rd = _bound(tmp_path, CP, "FS_HOST_DERIVE cp_product_profile.product\n")
+    message = _refused_na(_na(root, "cp_product_profile.product"))
+    assert "FS_HOST_DERIVE" in message and "`derive`" in message and "use_derived" in message
+    assert "exits 12" not in message and "leave it" not in message
+    _ok(_open(root, "cp_product_profile.product"))  # a derive key's open prints the derive route, exit 0
+    assert "`derive`" in _refused_na(_na(root, "cp_product_profile.product"))
+
+
+def test_the_batch_of_product_questions_and_availability_is_refused_whole(tmp_path: Path) -> None:
+    root, _rid, _rd = _bound(tmp_path, CP)
+    h.record(root, RID, "open", *[a for k in [*PRODUCT, "cp_product_availability"] for a in ("--gate", k)])
+    assert _entry(root, "cp_product_availability")["current"]["answer_id"] == "not_sure"
+    before = h.snapshot(root, RID)
+    _refused_na(_na(root, *PRODUCT, "cp_product_availability"))
+    assert h.snapshot(root, RID) == before
+    cur = _entry(root, "cp_product_availability")["current"]
+    assert (cur["answer_id"], cur["resolution_basis"]) == ("not_sure", "host_no_ask")
+
+
+def test_availability_alone_replaces_its_no_ask_default_and_says_so(tmp_path: Path) -> None:
+    root, _rid, _rd = _bound(tmp_path, CP)
+    _ok(_open(root, "cp_product_availability"))
+    assert "DEFAULT_TAKEN:cp_product_availability" in h.status(root, RID)["disclosures"]
+    _ok(_na(root, "cp_product_availability", reason="slide 3: live with paying customers"))
+    cur = _entry(root, "cp_product_availability")
+    assert (cur["state"], cur["current"]["resolution"], cur["current"]["resolution_basis"]) == (
+        "not_owed",
+        "not_applicable",
+        "model_no_ask",
+    )
+    disclosures = h.status(root, RID)["disclosures"]
+    assert "MATERIALS_STATED:cp_product_availability" in disclosures
+    assert "DEFAULT_TAKEN:cp_product_availability" not in disclosures
+    assert disclosures.count("MATERIALS_STATED:cp_product_availability") == 1
+
+
+def test_availability_the_request_answered_is_refused_by_the_no_ask_check(tmp_path: Path) -> None:
+    root, _rid, _rd = _bound(tmp_path, CP, "FS_HOST_ANSWER cp_product_availability=pilot\n")
+    _ok(_open(root, "cp_product_availability"))
+    before = h.snapshot(root, RID)
+    assert "its recorded answer stands" in _refused_na(_na(root, "cp_product_availability"))
+    assert h.snapshot(root, RID) == before
+    assert _entry(root, "cp_product_availability")["current"]["answer_id"] == "pilot"
+
+
+def test_availability_the_request_asked_to_wait_on_is_refused(tmp_path: Path) -> None:
+    root, _rid, _rd = _bound(tmp_path, CP, "FS_HOST_WAIT cp_product_availability\n")
+    _stops(_open(root, "cp_product_availability"))
+    before = h.snapshot(root, RID)
+    _refused_na(_na(root, "cp_product_availability"))
+    assert h.snapshot(root, RID) == before
+
+
+def test_availability_a_resume_asked_to_wait_on_after_the_default_is_refused(tmp_path: Path) -> None:
+    """The wait line arrives after the default was taken: the default stands as the answer, and the model may not
+    replace it, since the request now wants the question answered by a request line."""
+    root, _rid, _rd = _bound(tmp_path, CP)
+    _ok(_open(root, "cp_product_availability"))
+    _stops(_open(root, "cp_product_profile.product"))
+    _resume(root, CP, "FS_HOST_WAIT cp_product_availability\n")
+    assert g.waits_on(h.ledger(root, RID), "cp_product_availability")
+    before = h.snapshot(root, RID)
+    _refused_na(_na(root, "cp_product_availability"))
+    assert h.snapshot(root, RID) == before
+    assert _entry(root, "cp_product_availability")["current"]["resolution_basis"] == "host_no_ask"
+
+
+def test_availability_only_replaces_the_default_no_ask_took(tmp_path: Path) -> None:
+    """A default recorded on any basis other than the no-ask one is not the record the materials may replace: the
+    refusal is the no-ask check's, ahead of the shared writer's ANSWER_STANDS."""
+    root, _rid, _rd = _bound(tmp_path, CP)
+    paths = rs.run_paths(str(root), RID)
+
+    def fn(ctx: Any, led: dict[str, Any], st: dict[str, Any]) -> Any:
+        return g.record(
+            ctx,
+            led,
+            "cp_product_availability",
+            answer_ids=["not_sure"],
+            resolution="default_taken",
+            default_reason="asked_not_to_be_asked",
+            basis="script",
+            by="persist_agent_artifact.py",
+        )
+
+    g.transact(paths, fn)
+    before = h.snapshot(root, RID)
+    _refused_na(_na(root, "cp_product_availability"))
+    assert h.snapshot(root, RID) == before
+
+
+def test_an_attended_not_applicable_is_unchanged_and_carries_no_disclosure(tmp_path: Path) -> None:
+    root, run_id, _rd = h.start_bound(tmp_path, CP)
+    _ok(h.record(root, run_id, "open", "--gate", "cp_upload_path"))
+    _ok(h.record(root, run_id, "not-applicable", "--gate", "cp_upload_path", "--reason", "no documents"))
+    _ok(h.record(root, run_id, "not-applicable", "--gate", "cp_product_availability", "--reason", "slide 3"))
+    st = h.status(root, run_id)
+    assert not any(str(d).startswith("MATERIALS_STATED:") for d in st["disclosures"])
+    assert h.ledger(root, run_id)["gates"]["cp_upload_path"]["state"] == "not_owed"
+
+
+def test_a_record_made_before_a_resume_added_the_flag_is_not_listed_as_materials_stated(tmp_path: Path) -> None:
+    """MATERIALS_STATED keys on the basis the record was made with, not on whether the run is no-ask now."""
+    root, run_id, _rd = h.start_bound(tmp_path, CP, lines=f"FS_HOST_RUN_ID={RID}\n")
+    _ok(h.record(root, run_id, "open", "--gate", "cp_upload_path"))
+    _ok(h.record(root, run_id, "not-applicable", "--gate", "cp_upload_path", "--reason", "no documents"))
+    _ok(h.record(root, run_id, "not-applicable", "--gate", "cp_product_availability", "--reason", "slide 3"))
+    _ok(h.record(root, run_id, "open", "--gate", "cp_product_profile.product"))
+    assert h.status(root, run_id)["status"] == "waiting"
+    _ok(h.start(root, CP, f"FS_HOST_RUN_ID={RID}\nFS_HOST_NO_ASK\n"))
+    st = h.status(root, run_id)
+    assert st["no_ask"] is True
+    assert not any(str(d).startswith("MATERIALS_STATED:") for d in st["disclosures"]), st["disclosures"]
+    assert _entry(root, "cp_upload_path")["current"]["resolution_basis"] == "model"
+
+
+def test_a_question_a_script_already_closed_is_refused_with_that_said(tmp_path: Path) -> None:
+    root, _rid, run_dir = _bound(tmp_path, CP)
+    _stops(_open(root, "cp_upload_path"))
+    argv = ["--reason", "dispatch_failed", "--run-id", RID, "-o", str(run_dir / "red_team_skip.json")]
+    _ok(h.run(h.SKILLS / CP / "scripts" / "record_red_team_skip.py", *argv))
+    assert _entry(root, "cp_upload_path")["state"] == "not_owed"
+    message = _refused_na(_na(root, "cp_upload_path"))
+    assert message.endswith("it is already recorded as not applying") and "answer stands" not in message
+
+
+def test_a_script_records_not_applicable_under_no_ask_unhindered(tmp_path: Path) -> None:
+    """The check lives in the recorder's `not-applicable` command only; a script's own closure goes through."""
+    root, _rid, _rd = _bound(tmp_path, "market-sizing")
+    _stops(_open(root, "ms_upload_path"))
+    paths = rs.run_paths(str(root), RID)
+
+    def fn(ctx: Any, led: dict[str, Any], st: dict[str, Any]) -> Any:
+        return g.record(
+            ctx, led, "ms_upload_path", note="x", resolution="not_applicable", basis="script", by="compose_report.py"
+        )
+
+    g.transact(paths, fn)
+    assert _entry(root, "ms_upload_path")["state"] == "not_owed"
+    assert not any(str(d).startswith("MATERIALS_STATED:") for d in h.status(root, RID)["disclosures"])
+
+
+def test_a_refused_input_question_is_answered_by_the_resume_line(tmp_path: Path) -> None:
+    root, _rid, _rd = _bound(tmp_path, "deck-review")
+    _stops(_open(root, "dr_input_request.copy_failed"))
+    _refused_na(_na(root, "dr_input_request.copy_failed"))
+    _resume(root, "deck-review", "FS_HOST_VALUE dr_input_request.copy_failed=provide | /tmp/example-deck.pdf\n")
+    out = _out(_ok(_open(root, "dr_input_request.copy_failed")))
+    assert out["applied_answers"]["dr_input_request.copy_failed"]["value"] == "/tmp/example-deck.pdf"
+    assert _entry(root, "dr_input_request.copy_failed")["state"] == "answered"
+
+
+def test_a_refused_merger_question_is_answered_by_the_resume_line(tmp_path: Path) -> None:
+    root, _rid, _rd = _bound(tmp_path, CP)
+    key = "cp_consolidation_merge.alpha+beta"
+    _stops(_open(root, key))
+    _refused_na(_na(root, key))
+    _resume(root, CP, f"FS_HOST_ANSWER {key}=keep_separate\n")
+    _ok(_open(root, key))
+    cur = _entry(root, key)
+    assert (cur["state"], cur["current"]["answer_id"]) == ("answered", "keep_separate")
+
+
+def test_without_the_flag_not_applicable_is_unchanged(tmp_path: Path) -> None:
+    root, run_id, _rd = h.start_bound(tmp_path, "market-sizing")
+    _ok(h.record(root, run_id, "open", "--gate", "ms_fx_rate"))
+    _ok(h.record(root, run_id, "not-applicable", "--gate", "ms_fx_rate", "--reason", "all figures in USD"))
+    assert h.ledger(root, run_id)["gates"]["ms_fx_rate"]["state"] == "not_owed"
+
+
 # --- deriving from the materials ------------------------------------------------------------------------------
 
 

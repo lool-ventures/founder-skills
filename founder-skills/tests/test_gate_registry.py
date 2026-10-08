@@ -435,6 +435,7 @@ _CODE_SOURCES = [
     SKILLS / "financial-model-review" / "scripts" / "compose_report.py",
     SKILLS / "market-sizing" / "scripts" / "record_revision_answer.py",
     SKILLS / "market-sizing" / "scripts" / "_ms_gates.py",
+    SKILLS / "market-sizing" / "scripts" / "compose_report.py",
     SKILLS / "ic-sim" / "scripts" / "_ic_gates.py",
     SKILLS / "ic-sim" / "scripts" / "compose_report.py",
     SKILLS / "ic-sim" / "scripts" / "fund_profile.py",
@@ -442,6 +443,7 @@ _CODE_SOURCES = [
     SKILLS / "competitive-positioning" / "scripts" / "_cp_gates.py",
     SKILLS / "competitive-positioning" / "scripts" / "compose_report.py",
     SKILLS / "competitive-positioning" / "scripts" / "cp_dispatch_prompt.py",
+    SKILLS / "competitive-positioning" / "scripts" / "record_red_team_skip.py",
     *_HTML_WRITERS,
 ]
 _Q = r"""['"]"""
