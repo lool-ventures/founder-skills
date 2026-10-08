@@ -501,3 +501,201 @@ def test_the_deck_review_progress_line_names_a_dispatch_under_either_tool_name()
         block = ToolUseBlock(id="d", name=name, input={"description": "score slides", "subagent_type": "probe"})
         line = lane._summarize_sdk_message(AssistantMessage(content=[block], model="m"))
         assert f"→ {name}[probe]: score slides" in line, line
+
+
+# --- question holds: a misfire unless the lane left that gate unanswered ---------------------------------
+
+ASKED_HOLD = "PreToolUse:Agent hook error: [asked-gate-check][market-sizing:CONTEXT: RED_TEAM] Ask first"
+FIGURES_HOLD = "PreToolUse:Agent hook error: [two-figures-check][TOP_DOWN] Before sizing, ask which figure"
+
+
+@pytest.mark.parametrize(
+    "content, kind",
+    [(ASKED_HOLD, "[asked-gate-check]["), (FIGURES_HOLD, "[two-figures-check]["), (HOLD, None)],
+)
+def test_a_question_hold_of_the_printed_prompt_is_a_misfire_unless_the_lane_expects_it(
+    harness: Any, tmp_path: Path, monkeypatch: Any, content: str, kind: str | None
+) -> None:
+    stream = [
+        _init(),
+        *_generator("gen", PRINTED),
+        _dispatch("q", PRINTED),
+        _result("q", is_error=True, content=content),
+    ]
+    report = _report(harness, tmp_path, monkeypatch, stream)
+    row = _rows(report)["q"]
+    assert row["status"] == "held" and row["sent_matches"] is True
+    if kind is not None:
+        assert row["hold_kind"] == kind
+        assert f"by `{kind}`" in harness.format_dispatch_report("RED_TEAM", report)
+    # By default every hold of the printed prompt is a misfire, a question hold included: a lane that
+    # answered the question in its request expects the hook to let the dispatch through.
+    with pytest.raises(AssertionError, match="held a dispatch that sent the printed prompt"):
+        harness.assert_dispatch_outcomes(report, "RED_TEAM")
+    if kind is None:
+        # A prompt-check hold of the printed prompt stays a misfire whatever a lane expects.
+        with pytest.raises(AssertionError, match="held a dispatch that sent the printed prompt"):
+            harness.assert_dispatch_outcomes(
+                report, "RED_TEAM", expected_question_holds=frozenset(harness.QUESTION_HOLD_MARKERS)
+            )
+    else:
+        harness.assert_dispatch_outcomes(report, "RED_TEAM", expected_question_holds=frozenset({kind}))
+        other = next(m for m in harness.QUESTION_HOLD_MARKERS if m != kind)
+        with pytest.raises(AssertionError, match="held a dispatch that sent the printed prompt"):
+            harness.assert_dispatch_outcomes(report, "RED_TEAM", expected_question_holds=frozenset({other}))
+
+
+def test_only_question_markers_may_be_expected(harness: Any, tmp_path: Path, monkeypatch: Any) -> None:
+    report = _report(harness, tmp_path, monkeypatch, [_init()])
+    with pytest.raises(AssertionError):
+        harness.assert_dispatch_outcomes(report, "RED_TEAM", expected_question_holds=frozenset({"[dispatch-check]["}))
+
+
+def test_question_holds_finds_a_marker_in_any_result(harness: Any) -> None:
+    cap = harness.RunCapture()
+    cap.tool_results = {
+        "a": {"is_error": True, "content": ASKED_HOLD},
+        "b": {"is_error": True, "content": [{"type": "text", "text": FIGURES_HOLD}]},
+        "c": {"is_error": False, "content": ASKED_HOLD},
+    }
+    assert harness.question_holds(cap, "[asked-gate-check][") == ["a"]
+    assert harness.question_holds(cap, "[two-figures-check][") == ["b"]
+
+
+# --- the host's request and the run status it produces ----------------------------------------------------
+
+
+def test_a_lane_run_id_is_fresh_and_valid(harness: Any) -> None:
+    a, b = harness.lane_run_id("ct-pool"), harness.lane_run_id("ct-pool")
+    assert a != b and re.fullmatch(r"e2e-ct-pool-[0-9a-f]{8}", a) and harness.RUN_ID_RE.match(a)
+
+
+def test_the_host_lines_start_their_own_lines_and_the_hooks_read_them(harness: Any) -> None:
+    text = harness.host_request(
+        "Run it.  ", "e2e-xx-0a1b2c3d", answers=[("gate_one", "opt_a")], notes=[("gate_one", "a note")]
+    )
+    lines = text.split("\n")
+    assert lines[:2] == ["Run it.", ""] and lines[-1] == ""
+    assert lines[2:-1] == [
+        "FS_HOST_RUN_ID=e2e-xx-0a1b2c3d",
+        "FS_HOST_ANSWER gate_one=opt_a",
+        "FS_HOST_NOTE gate_one=a note",
+    ]
+    spec = importlib.util.spec_from_file_location("_lc_two_figures", TESTS.parent / "scripts" / "two_figures_check.py")
+    assert spec and spec.loader
+    tf = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(tf)
+    rows = [{"type": "user", "message": {"role": "user", "content": text}}]
+    assert tf.host_line_in(rows, 0, "gate_one", ("ANSWER", "VALUE"), lambda r: True)
+
+
+def _status(tmp_path: Path, **over: Any) -> dict[str, Any]:
+    import hashlib
+
+    (tmp_path / "report.md").write_text("# r\n")
+    (tmp_path / "report.json").write_text("{}")
+    sha = {n: hashlib.sha256((tmp_path / n).read_bytes()).hexdigest() for n in ("report.md", "report.json")}
+    status = {
+        "status": "complete",
+        "code": "COMPLETE",
+        "run_id": "R",
+        "skill": "market-sizing",
+        "waiting_on": None,
+        "gates": [{"id": "g", "state": "answered"}],
+        "deliverables_status": "final",
+        "deliverables": {"report_md": {"sha256": sha["report.md"]}, "report_json": {"sha256": sha["report.json"]}},
+    }
+    status.update(over)
+    return status
+
+
+def test_a_completed_run_whose_reports_are_on_disk_has_no_problems(harness: Any, tmp_path: Path) -> None:
+    assert harness.run_complete_problems(_status(tmp_path), "R", "market-sizing", tmp_path) == []
+
+
+@pytest.mark.parametrize(
+    "over, needle",
+    [
+        ({"status": "waiting", "waiting_on": "ms_methodology"}, "waiting_on 'ms_methodology'"),
+        ({"run_id": "OTHER"}, "names run 'OTHER'"),
+        ({"gates": [{"id": "g", "state": "open"}]}, "still open: ['g']"),
+        ({"deliverables_status": "pending"}, "deliverables_status 'pending'"),
+        ({"deliverables": {"report_md": {"sha256": "0" * 64}}}, "not the report.md on disk"),
+    ],
+)
+def test_each_way_a_run_is_not_complete_is_named(harness: Any, tmp_path: Path, over: dict, needle: str) -> None:
+    problems = harness.run_complete_problems(_status(tmp_path, **over), "R", "market-sizing", tmp_path)
+    assert any(needle in p for p in problems), problems
+    if "status" in over:
+        assert "waiting_on" in problems[0], "the gate a run waits on must be named first"
+
+
+def _ledger(**cur: Any) -> dict[str, Any]:
+    base = {"answer_id": "looks_good", "resolution": "answered", "note": "n", "answered_at": "T1"}
+    base.update(cur)
+    return {"gates": {"g": {"state": "answered", "current": base}}, "pre_answers": {"g": {"applied_at": "T1"}}}
+
+
+def test_an_answer_the_request_carried_has_no_problems(harness: Any) -> None:
+    assert harness.pre_answer_problems(_ledger(), "g", "looks_good", "n") == []
+
+
+@pytest.mark.parametrize(
+    "cur, needle",
+    [
+        ({"resolution": "default_taken"}, "current"),
+        ({"note": None}, "note"),
+        ({"answered_at": "T2"}, "not what answered it"),
+        ({"answer_id": "other"}, "current"),
+    ],
+)
+def test_an_answer_the_request_did_not_carry_is_named(harness: Any, cur: dict, needle: str) -> None:
+    assert any(needle in p for p in harness.pre_answer_problems(_ledger(**cur), "g", "looks_good", "n"))
+
+
+def _record(tmp_path: Path, **rec: Any) -> None:
+    import json
+
+    body = {"run_id": "R", "exit_code": 0, "outputs": {"report_json": {"written": True}}}
+    body.update(rec)
+    (tmp_path / "compose_result.json").write_text(json.dumps(body))
+
+
+def test_the_compose_record_is_judged_on_the_compose_that_wrote_the_report(harness: Any, tmp_path: Path) -> None:
+    status = _status(tmp_path)
+    _record(tmp_path)
+    assert harness.compose_record_problems(tmp_path, "R", status) == []
+    # A later compose that wrote nothing (a re-check, a refused re-run) is not judged.
+    _record(tmp_path, exit_code=1, outputs={"report_json": {"written": False}})
+    assert harness.compose_record_problems(tmp_path, "R", status) == []
+    _record(tmp_path, exit_code=1)
+    assert any("exited 1" in p for p in harness.compose_record_problems(tmp_path, "R", status))
+    _record(tmp_path, run_id="OTHER")
+    assert any("names run 'OTHER'" in p for p in harness.compose_record_problems(tmp_path, "R", status))
+    _record(tmp_path)
+    (tmp_path / "report.json").write_text('{"rewritten": true}')
+    assert any("after it was delivered" in p for p in harness.compose_record_problems(tmp_path, "R", status))
+    (tmp_path / "compose_result.json").unlink()
+    assert harness.compose_record_problems(tmp_path, "R", status) == ["no compose_result.json beside the report"]
+
+
+def _mirror(source: str | None) -> dict[str, Any]:
+    body: dict[str, Any] = {"gate_id": "stage_confirmation"}
+    if source is not None:
+        body.update(answer="A", answer_source=source)
+    return body
+
+
+@pytest.mark.parametrize(
+    "mirror, current, state, ok",
+    [
+        (_mirror(None), None, "open", True),
+        (_mirror("auto_satisfied"), {"answer": "A", "resolution": "default_taken"}, "answered", True),
+        (_mirror("founder"), {"answer": "A", "resolution": "answered"}, "answered", True),
+        (_mirror("founder"), {"answer": "A", "resolution": "default_taken"}, "answered", False),
+        (_mirror("founder"), {"answer": "B", "resolution": "answered"}, "answered", False),
+    ],
+)
+def test_the_stage_mirror_is_held_to_the_ledger(harness: Any, mirror: dict, current: Any, state: str, ok: bool) -> None:
+    ledger = {"gates": {"stage_confirmation": {"state": state, "current": current}}}
+    assert (harness.mirror_problems(mirror, ledger) == []) is ok

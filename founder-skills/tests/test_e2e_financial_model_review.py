@@ -17,6 +17,7 @@ Carries the `e2e` marker, so the default suite skips it.
 
 from __future__ import annotations
 
+import ast
 import importlib.util
 import json
 import re
@@ -36,17 +37,45 @@ from _e2e_harness import (
     assert_received_prompt,
     assert_run_id_parity,
     assert_stop_block_evidence_agrees,
+    compose_record_problems,
     dispatch_report,
     format_dispatch_report,
     has_claude_auth,
+    host_request,
+    lane_run_id,
     locate_review_dir,
     model_from_capture,
+    pre_answer_problems,
+    question_holds,
+    read_run_ledger,
+    read_run_status,
+    run_complete_problems,
     run_skill_capture,
     step_summary,
 )
 
 MODEL_FIXTURE = FIXTURES / "models" / "synthetic-seed-model.csv"
 SCRIPTS = PLUGIN_PATH / "skills" / "financial-model-review" / "scripts"
+
+# The host's lines (read by test_lane_host_lines.py, which feeds them to the real `start` on every free run).
+# `proceed_unreviewed` is also the gate's no-ask default, so what proves the line did the answering is the
+# note (a default carries none), `answered`, and the disclosure only that answer produces.
+LANE = "fmr"
+SKILL = "financial-model-review"
+CANARY = "lane canary 2c9e"
+HOST_ANSWERS = (("fmr_extracted_values", "proceed_unreviewed"),)
+HOST_NOTES = (("fmr_extracted_values", CANARY),)
+
+
+def _compose_constant(name: str) -> str:
+    """A string constant of the skill's compose, read from its source: the report's own wording, never a copy."""
+    tree = ast.parse((SCRIPTS / "compose_report.py").read_text(encoding="utf-8"))
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(getattr(t, "id", None) == name for t in node.targets):
+            value = ast.literal_eval(node.value)
+            assert isinstance(value, str)
+            return value
+    raise AssertionError(f"compose_report.py defines no {name}")
 
 
 def _load_handover_check() -> Any:
@@ -200,6 +229,8 @@ def test_financial_model_review_smoke(tmp_path: Path) -> None:
         f"just run the review end to end and produce the report."
     )
 
+    run_id = lane_run_id(LANE)
+    prompt = host_request(prompt, run_id, answers=HOST_ANSWERS, notes=HOST_NOTES)
     cap = run_skill_capture(prompt, workdir, label="fmr")
     captured = cap.messages
     review_dir = locate_review_dir(workdir, "financial-model-review-*", captured, "financial-model-review")
@@ -348,6 +379,35 @@ def test_financial_model_review_smoke(tmp_path: Path) -> None:
         review_dir,
         ["inputs.json", "checklist.json", "unit_economics.json", "runway.json", "report.json"],
     )
+
+    # === The run status a host reads. ===
+    status = read_run_status(workdir, run_id)
+    ledger = read_run_ledger(workdir, run_id)
+    problems = run_complete_problems(status, run_id, SKILL, review_dir)
+    problems += pre_answer_problems(ledger, "fmr_extracted_values", "proceed_unreviewed", CANARY)
+    cur = ((ledger.get("gates") or {}).get("fmr_extracted_values") or {}).get("current") or {}
+    if cur.get("asked_evidence") != "host_line":
+        problems.append(f"fmr_extracted_values asked_evidence {cur.get('asked_evidence')!r}")
+    held = question_holds(cap, "[asked-gate-check][")
+    if held:
+        problems.append(f"the checklist was held for the values question the request answered: {held}")
+    # The disclosure that answer produces, on every surface it reaches: the lever, engaged.
+    codes = [w.get("code") for w in (report_json.get("validation") or {}).get("warnings") or []]
+    if "EXTRACTION_UNREVIEWED" not in codes:
+        problems.append(f"EXTRACTION_UNREVIEWED not among report.json's warnings {codes}")
+    if "EXTRACTION_UNREVIEWED" not in (status.get("disclosures") or []):
+        problems.append(f"EXTRACTION_UNREVIEWED not in the status disclosures {status.get('disclosures')}")
+    if _compose_constant("EXTRACTION_UNREVIEWED_TEXT") not in md:
+        problems.append("report.md does not say the figures were not checked with the founder")
+    cash = {k: v for k, v in (ledger.get("gates") or {}).items() if k.startswith("fmr_cash_basics.")}
+    cash_view = {
+        k: ((v.get("current") or {}).get("resolution"), (v.get("current") or {}).get("default_reason"))
+        for k, v in cash.items()
+    }
+    print(f"[e2e:fmr] cash basics: {cash_view}", flush=True)
+    problems += [f"{k} is still open" for k, v in cash.items() if v.get("state") == "open"]
+    problems += compose_record_problems(review_dir, run_id, status)
+    assert not problems, "\n".join(problems)
 
     # === The checklist grades against the computed figures (Step 4 before Step 5). ===
     # Recorded before asserting, like the evidence above, so a red names what the stream showed.

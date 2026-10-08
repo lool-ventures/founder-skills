@@ -39,11 +39,19 @@ from _e2e_harness import (
     assert_received_prompt,
     assert_run_id_parity,
     assert_stop_block_evidence_agrees,
+    compose_record_problems,
     dispatch_context,
     dispatch_report,
     format_dispatch_report,
     has_claude_auth,
+    host_request,
+    lane_run_id,
     locate_review_dir,
+    pre_answer_problems,
+    question_holds,
+    read_run_ledger,
+    read_run_status,
+    run_complete_problems,
     run_skill_capture,
     step_summary,
 )
@@ -54,6 +62,17 @@ SCANNED_DECK = Path(__file__).resolve().parent / "fixtures" / "market-sizing" / 
 SCRIPTS = PLUGIN_PATH / "skills" / "market-sizing" / "scripts"
 
 _HANDOVER_CHECK = PLUGIN_PATH / "scripts" / "_handover_check.py"
+
+# The host's lines, appended to the prompt the way an unattended host answers up front. The methodology is
+# answered with a note the run cannot invent (a default carries none); the two-figures line answers every
+# input the founder's materials state more than one figure for -- the attached deck states three prices
+# per customer per month (onboarding, renewal, blended) beside the prompt's one. Read by
+# test_lane_host_lines.py, which feeds them to the real `run_status.py start` on every free run.
+LANE = "ms"
+SKILL = "market-sizing"
+CANARY = "lane canary 7f3a"
+HOST_ANSWERS = (("ms_methodology", "looks_good"), ("ms_two_figures", "typed"))
+HOST_NOTES = (("ms_methodology", CANARY),)
 
 
 def _load_handover_check() -> Any:
@@ -101,6 +120,8 @@ def test_market_sizing_smoke(tmp_path: Path) -> None:
         "Don't ask clarifying questions — just run it end to end and produce the report."
     )
 
+    run_id = lane_run_id(LANE)
+    prompt = host_request(prompt, run_id, answers=HOST_ANSWERS, notes=HOST_NOTES)
     cap = run_skill_capture(prompt, workdir, label="market-sizing", uploads=[SCANNED_DECK])
     captured = cap.messages
     review_dir = locate_review_dir(workdir, "market-sizing-*", captured, "market-sizing")
@@ -370,3 +391,46 @@ def test_market_sizing_smoke(tmp_path: Path) -> None:
         review_dir,
         ["inputs.json", "sizing.json", "validation.json", "sensitivity.json", "checklist.json", "report.json"],
     )
+
+    # === The run status a host reads. ===
+    # The sizing prompts are printed by the generator (B3) and pass through the dispatch hook; both questions
+    # they follow were answered by the request, so ANY question hold is a misfire, never an expected one.
+    sizing = [
+        t
+        for t in cap.tool_uses
+        if t["name"] in ("Task", "Agent")
+        and t["parent_tool_use_id"] is None
+        and dispatch_context(t["input"].get("prompt", ""))
+        in ("CONTEXT: TOP_DOWN_METHODOLOGY", "CONTEXT: BOTTOM_UP_METHODOLOGY")
+    ]
+    sizing_report = dispatch_report(cap, sizing)
+    sizing_text = format_dispatch_report("SIZING", sizing_report)
+    print(f"[e2e:market-sizing] sizing dispatch report:\n{sizing_text}", flush=True)
+    step_summary(sizing_text)
+    assert sizing, "neither sizing build was dispatched"
+    assert_dispatch_outcomes(sizing_report, "SIZING")
+    assert_received_prompt(sizing_report, "SIZING")
+    for context in ("CONTEXT: TOP_DOWN_METHODOLOGY", "CONTEXT: BOTTOM_UP_METHODOLOGY"):
+        went = [
+            d
+            for d, row in zip(sizing, sizing_report["dispatches"], strict=True)
+            if row["status"] == "succeeded" and dispatch_context(d["input"].get("prompt", "")) == context
+        ]
+        assert len(went) == 1, f"{context}: {len(went)} dispatches went through, expected one:\n{sizing_text}"
+    for marker in ("[asked-gate-check][", "[two-figures-check]["):
+        held = question_holds(cap, marker)
+        assert not held, f"{marker} held {held} although the request answered its question"
+
+    status = read_run_status(workdir, run_id)
+    ledger = read_run_ledger(workdir, run_id)
+    problems = run_complete_problems(status, run_id, SKILL, review_dir)
+    problems += pre_answer_problems(ledger, "ms_methodology", "looks_good", CANARY)
+    entry = (ledger.get("gates") or {}).get("ms_methodology") or {}
+    if (entry.get("current") or {}).get("asked_evidence") != "host_line":
+        problems.append(f"ms_methodology asked_evidence {(entry.get('current') or {}).get('asked_evidence')!r}")
+    # The fixture's three prices make the two-figures question owed; printed, so the run says it engaged.
+    two = {k: v.get("state") for k, v in (ledger.get("gates") or {}).items() if k.startswith("ms_two_figures.")}
+    print(f"[e2e:market-sizing] two-figures instances: {two}", flush=True)
+    problems += [f"{k} is {s}" for k, s in two.items() if s == "open"]
+    problems += compose_record_problems(review_dir, run_id, status)
+    assert not problems, "\n".join(problems)

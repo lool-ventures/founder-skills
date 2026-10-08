@@ -96,6 +96,7 @@ assert:
   # the mount; this key catches a regression if the mount mode ever loosens). Allowlist = artifact
   # namespace (incl. handoff/**) + founder-context sidecar + promoted deliverables. tightened from discovery actuals (observed x1.5).
   - no_unexpected_files:
+      - 'outputs/artifacts/runs/**'  # the run's status, ledger and resume evidence (`run_status.py`)
       - 'outputs/artifacts/.host-outputs-*'  # Step 0's file-tool path proof (artifacts root)
       - 'outputs/artifacts/cap-table-cadence/**'
       - 'outputs/artifacts/founder-context-cadence.json'

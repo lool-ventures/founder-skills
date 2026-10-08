@@ -25,24 +25,38 @@ prompt: |
   For the inputs the model doesn't state explicitly: current cash on hand is $1,500,000, monthly net
   burn is about $120,000, and we want runway measured from 2026-06-01.
 
-# NO scripted anchor for the Step-3.6 extracted-values STOP, deliberately — `on_unanswered: first`
-# answers it, and that is the ROBUST choice here rather than the lazy one.
-#
-# Step 3.6 offers TWO DIFFERENT option sets depending on how the model arrived (SKILL.md): Path A,
-# the uploaded-workbook branch, offers `I reviewed the page — the values look right, proceed`;
-# Path B, the conversational branch, offers `Looks right, proceed`. Anchors are LEADING substrings,
-# so no single anchor covers both, and a scripted `choose:` that matches NO offered option is a hard
-# failure — it is not absorbed by `on_unanswered`.
-#
-# MEASURED: this scenario uploads an Excel workbook (Path A), yet the live run offered Path B's
-# labels — "Looks right — proceed with the full review" / "I need to correct something" — attached to
-# Path A's question ("Does the review page look right?"). The skill mixed the two branches. Until
-# that is settled, an anchor for either path is a coin flip that costs a paid record to discover.
-# `first` is correct under BOTH: option 0 is the proceed option in each, so the run completes and
-# never takes the dead-end corrections branch (which is unreachable headlessly anyway — there is no
-# corrections file to upload).
+  FS_HOST_RUN_ID=cw-fmr-smoke-0a1b2c3d
+
+# The values question now carries the registry's labels on both paths, and an earlier recording offered the
+# paraphrase "Looks right — proceed with the full review"; `Looks right` binds both and no other option.
+# Earlier there was no anchor, because the two paths offered different labels.
+answers:
+  - when_question: "extracted values look right"
+    choose: "Looks right"
 
 assert:
+  # THE RUN STATUS A HOST READS (gates and run status release). One concern per item.
+  # Fixed run id: the status asserts below need a literal path. Safe only because every record stages a
+  # fresh workspace; re-running a KEPT outputs dir (`--repeat`, `eval`, a `verify-run` re-run) meets its
+  # own id (`RUN_ID_IN_USE` / `RUN_ID_FINISHED`). Inert until this lane is re-recorded.
+  - artifact_json:
+      artifact: outputs/artifacts/runs/cw-fmr-smoke-0a1b2c3d/run_status.json
+      path: status
+      equals: complete
+  - artifact_json:
+      artifact: outputs/artifacts/runs/cw-fmr-smoke-0a1b2c3d/run_status.json
+      path: deliverables_status
+      equals: final
+  # compose's own record names this run (judging its exit belongs to the e2e lanes: a later compose that
+  # wrote nothing may legitimately have exited non-zero).
+  - artifact_json:
+      artifact: outputs/artifacts/financial-model-review-cadence/compose_result.json
+      path: run_id
+      equals: cw-fmr-smoke-0a1b2c3d
+  - artifact_json:
+      artifact: outputs/artifacts/runs/cw-fmr-smoke-0a1b2c3d/gates.json
+      path: gates.fmr_extracted_values.current.answer_id
+      equals: values_ok
   # A relative or /sessions/ file-tool path is refused at host-loop; the Step 0 proof exists so none is used.
   # Content-class, so it covers sub-agent tool results too (checked by replay on a sub-agent-only string).
   - tool_result_not_contains: "denied by your permission settings"
@@ -163,6 +177,7 @@ assert:
   # Allowlist = artifact namespace (incl. handoff/**) + founder-context sidecar + promoted
   # deliverables. Pre-0.24 cassettes exclude loudly (no preRunPaths). tightened from discovery actuals (observed x1.5).
   - no_unexpected_files:
+      - 'outputs/artifacts/runs/**'  # the run's status, ledger and resume evidence (`run_status.py`)
       - 'outputs/artifacts/.host-outputs-*'  # Step 0's file-tool path proof (artifacts root)
       - 'outputs/artifacts/financial-model-review-cadence/**'
       - 'outputs/artifacts/founder-context-cadence.json'

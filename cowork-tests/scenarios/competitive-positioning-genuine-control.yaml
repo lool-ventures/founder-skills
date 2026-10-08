@@ -50,6 +50,7 @@ assert:
   - max_turns: 160
   - tool_calls_max: 150
   - no_unexpected_files:
+      - 'outputs/artifacts/runs/**'  # the run's status, ledger and resume evidence (`run_status.py`)
       - 'outputs/artifacts/.host-outputs-*'  # Step 0's file-tool path proof (artifacts root)
       - 'outputs/artifacts/competitive-positioning-cadence/**'
       - 'outputs/artifacts/founder-context-cadence.json'

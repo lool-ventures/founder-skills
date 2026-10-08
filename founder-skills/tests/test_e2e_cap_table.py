@@ -41,8 +41,15 @@ import pytest
 from _e2e_harness import (
     assert_coaching_commentary_landed,
     assert_run_id_parity,
+    compose_record_problems,
     has_claude_auth,
+    host_request,
+    lane_run_id,
     locate_review_dir,
+    pre_answer_problems,
+    read_run_ledger,
+    read_run_status,
+    run_complete_problems,
     run_skill,
 )
 from _pool_sizing_claims import (
@@ -54,6 +61,85 @@ from _pool_sizing_claims import (
 )
 
 CAP_TABLE_OPT_IN = "RUN_PAID_E2E_CAP_TABLE"
+
+# The host's lines (read by test_lane_host_lines.py, which feeds them to the real `start` on every free run).
+# Neither prompt states the engagement mode, which has no default, and neither lane can ask; the smoke names
+# no existing option plan (the pool lane states one, so its pool question is never owed). The scenarios
+# include the cap-implied SAFE snapshot because it is the one that produces the rows the substance check
+# reads. Jurisdiction, the top-up and the pool basis stay in the prose: those are the stated defaults the
+# assertions check.
+# Each prompt states every field the cap-table schemas require of what a founder supplies (founder names and
+# shares, the SAFE's investor, amount, date and form, and in the pool lane the plan's type and counts): a field
+# the founder did not state is never invented, it becomes a founder-fact question with no default, and these
+# unattended lanes cannot answer one. `STATED` pairs each such field with the words that state it;
+# test_lane_host_lines.py holds both against the schemas. Names and figures are invented.
+SMOKE_PROMPT = (
+    "Use the cap-table skill. Foobar Systems is a fictional Delaware C-corp. Its two founders, Avery Foo and "
+    "Blake Bar, hold 4,000,000 common shares each (8,000,000 in total). There is one outstanding YC post-money SAFE "
+    "from Example Seed Fund for $500,000 at a $5,000,000 post-money valuation cap, signed 2024-03-01. We are now "
+    "modelling a priced Series A: $3,000,000 of new money at a $12,000,000 pre-money valuation, with a 10% "
+    "post-money option pool. Use 'foobar' as the slug. Also tell me whether our founder shares will qualify for "
+    "QSBS when we sell. Don't ask clarifying questions — run it end to end and produce the full review."
+)
+POOL_PROMPT = (
+    "Use the cap-table skill. Barbaz Labs is a fictional Delaware C-corp. Its two founders, Avery Foo and Blake "
+    "Bar, hold 4,000,000 common shares each (8,000,000 in total). The existing option plan is an ISO plan with "
+    "1,000,000 options authorized: 800,000 granted and outstanding, and 200,000 unallocated and available for "
+    "grant. There is one outstanding YC post-money SAFE from Example Seed Fund for $500,000 at a $5,000,000 "
+    "post-money valuation cap, signed 2024-03-01. We are modelling a priced Series A: $3,000,000 of new money at "
+    "a $12,000,000 pre-money valuation, with a 10% post-money option pool. Use 'barbaz' as the slug. Don't ask "
+    "me questions -- just run it end to end and produce the full review."
+)
+_COMMON_STATED = {
+    "founders.name": ("Avery Foo", "Blake Bar"),
+    "founders.common_shares": ("4,000,000 common shares each",),
+    "safes.investor_name": ("Example Seed Fund",),
+    "safes.purchase_amount": ("$500,000",),
+    "safes.issuance_date": ("2024-03-01",),
+    "safes.form": ("YC post-money SAFE", "$5,000,000 post-money valuation cap"),
+}
+STATED = {
+    "smoke": dict(_COMMON_STATED),
+    "pool": {
+        **_COMMON_STATED,
+        "option_pool.plan_type": ("ISO plan",),
+        "option_pool.authorized": ("1,000,000 options authorized",),
+        "option_pool.issued": ("800,000 granted and outstanding",),
+        "option_pool.unallocated": ("200,000 unallocated",),
+    },
+}
+
+SKILL = "cap-table"
+CANARY = "lane canary 5d1b"
+SMOKE_LANE = "ct"
+SMOKE_ANSWERS = (
+    ("ct_cap_base_confirmation", "confirmed"),
+    ("ct_scenario_selection", "cap_implied_safe,priced_round"),
+    ("ct_engagement_mode", "standard"),
+    ("ct_option_pool", "no_pool"),
+)
+SMOKE_NOTES = (("ct_cap_base_confirmation", CANARY),)
+POOL_LANE = "ct-pool"
+POOL_ANSWERS = (
+    ("ct_cap_base_confirmation", "confirmed"),
+    ("ct_scenario_selection", "priced_round"),
+    ("ct_engagement_mode", "standard"),
+)
+
+
+def _status_problems(workdir: Path, run_id: str, review_dir: Path) -> tuple[list[str], dict, dict]:
+    status = read_run_status(workdir, run_id)
+    ledger = read_run_ledger(workdir, run_id)
+    problems = run_complete_problems(status, run_id, SKILL, review_dir)
+    problems += compose_record_problems(review_dir, run_id, status)
+    return problems, status, ledger
+
+
+def _current(ledger: dict, gate: str) -> tuple:
+    cur = ((ledger.get("gates") or {}).get(gate) or {}).get("current") or {}
+    return (cur.get("answer_id"), cur.get("resolution"), cur.get("default_reason"))
+
+
 POOL_READING_OPT_IN = "RUN_PAID_E2E_CAP_TABLE_POOL"
 
 # The artifacts a full-pipeline run writes that carry `metadata.run_id`. Parity across them is what
@@ -120,16 +206,10 @@ def test_cap_table_smoke(tmp_path: Path) -> None:
     workdir = tmp_path / "workspace"
     workdir.mkdir()
 
-    prompt = (
-        "Use the cap-table skill. Foobar Systems is a fictional Delaware C-corp. Founders hold "
-        "8,000,000 common shares. There is one outstanding YC post-money SAFE for $500,000 at a "
-        "$5,000,000 post-money valuation cap, signed 2024-03-01. We are now modelling a priced "
-        "Series A: $3,000,000 of new money at a $12,000,000 pre-money valuation, with a 10% "
-        "post-money option pool. Use 'foobar' as the slug. Also tell me whether our founder shares "
-        "will qualify for QSBS when we sell. Don't ask clarifying questions — run it end to end and "
-        "produce the full review."
-    )
+    prompt = SMOKE_PROMPT
 
+    run_id = lane_run_id(SMOKE_LANE)
+    prompt = host_request(prompt, run_id, answers=SMOKE_ANSWERS, notes=SMOKE_NOTES)
     captured = run_skill(prompt, workdir, label="cap-table")
     review_dir = locate_review_dir(workdir, "cap-table-*", captured, "cap-table")
 
@@ -202,6 +282,16 @@ def test_cap_table_smoke(tmp_path: Path) -> None:
     assert_pool_basis_commentary_matches_inputs(review_dir)
     assert_pool_backstop_engaged(review_dir)
 
+    # ---------------------------------------------------------------- the run status a host reads
+    problems, _status, ledger = _status_problems(workdir, run_id, review_dir)
+    problems += pre_answer_problems(ledger, "ct_cap_base_confirmation", "confirmed", CANARY)
+    picked = _current(ledger, "ct_scenario_selection")
+    if set(str(picked[0] or "").split(",")) != {"cap_implied_safe", "priced_round"} or picked[1] != "answered":
+        problems.append(f"ct_scenario_selection is {picked}, the request selected cap_implied_safe,priced_round")
+    if _current(ledger, "ct_jurisdiction") != ("delaware", "default_taken", "stated_in_request"):
+        problems.append(f"ct_jurisdiction is {_current(ledger, 'ct_jurisdiction')}, stated as Delaware in the prompt")
+    assert not problems, "\n".join(problems)
+
 
 def assert_cap_implied_self_consistent(review_dir: Path) -> None:
     """A SAFE's stated ownership must be the ownership its stated share count delivers.
@@ -215,6 +305,7 @@ def assert_cap_implied_self_consistent(review_dir: Path) -> None:
     against the formula that produced it and never against the others.
     """
     scenarios = json.loads((review_dir / "scenarios.json").read_text(encoding="utf-8"))
+    checked = 0
 
     for scenario in scenarios.get("scenarios") or []:
         outputs = scenario.get("computed_outputs") or {}
@@ -253,6 +344,7 @@ def assert_cap_implied_self_consistent(review_dir: Path) -> None:
             if stated is None or not shares:
                 continue
             realised = shares / total
+            checked += 1
             assert abs(realised - stated) < 1e-6, (
                 f"{safe_id}: report states {stated:.2%} cap-implied ownership but the {shares:,.0f} "
                 f"shares it also states deliver {realised:.2%} of the {total:,.0f}-share Company "
@@ -272,6 +364,14 @@ def assert_cap_implied_self_consistent(review_dir: Path) -> None:
                 f"the cap-implied denominator did not close: company_capitalization is {total:,.0f} "
                 f"but the pre-financing base plus converting shares is {closed:,.0f}"
             )
+
+    # THE LEVER, ENGAGED. Only the cap-implied SAFE snapshot produces `cap_implied` rows; a run that modelled
+    # the priced round alone would pass every check above by having nothing to check. The request selects the
+    # snapshot, so at least one row must have been checked.
+    assert checked >= 1, (
+        "no cap-implied SAFE row was checked: the cap-implied snapshot did not run, so this lane's substance "
+        f"check tested nothing (scenario types: {[s.get('type') for s in scenarios.get('scenarios') or []]})"
+    )
 
 
 def assert_pool_backstop_engaged(review_dir: Path) -> None:
@@ -393,16 +493,10 @@ def test_cap_table_pool_reading_lane(tmp_path: Path) -> None:
     workdir = tmp_path / "workspace"
     workdir.mkdir()
 
-    pool_prompt = (
-        "Use the cap-table skill. Barbaz Labs is a fictional Delaware C-corp. Founders hold 8,000,000 common "
-        "shares. The existing option plan has 1,000,000 options authorized: 800,000 granted and outstanding, "
-        "and 200,000 unallocated and available for grant. There is one outstanding YC post-money SAFE for "
-        "$500,000 at a $5,000,000 post-money valuation cap, signed 2024-03-01. We are modelling a priced "
-        "Series A: $3,000,000 of new money at a $12,000,000 pre-money valuation, with a 10% post-money option "
-        "pool. Use 'barbaz' as the slug. Don't ask me questions -- just run it end to end and produce the full "
-        "review."
-    )
+    pool_prompt = POOL_PROMPT
 
+    run_id = lane_run_id(POOL_LANE)
+    pool_prompt = host_request(pool_prompt, run_id, answers=POOL_ANSWERS)
     captured = run_skill(pool_prompt, workdir, label="cap-table-pool-reading")
     review_dir = locate_review_dir(workdir, "cap-table-*", captured, "cap-table")
     assert_run_id_parity(review_dir, RUN_ID_ARTIFACTS)
@@ -444,3 +538,10 @@ def test_cap_table_pool_reading_lane(tmp_path: Path) -> None:
     )
     assert not problems, f"the coach's pool-sizing figures are not the computed ones: {problems!r}"
     assert_pool_backstop_engaged(review_dir)
+
+    # ---------------------------------------------------------------- the run status a host reads
+    # The prompt states a post-money pool and asks not to be asked, so the pool basis is the stated default.
+    status_problems, _status, ledger = _status_problems(workdir, run_id, review_dir)
+    if _current(ledger, "ct_pool_basis") != ("post_money", "default_taken", "stated_in_request"):
+        status_problems.append(f"ct_pool_basis is {_current(ledger, 'ct_pool_basis')}, stated post-money")
+    assert not status_problems, "\n".join(status_problems)

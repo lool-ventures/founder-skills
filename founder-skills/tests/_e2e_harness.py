@@ -466,7 +466,16 @@ def same_prompt(a: str, b: str) -> bool:
 # review_page_check on a question); CLI
 # 2.1.286 delivers it as "PreToolUse:Agent hook error: <reason>", and a hook that exits 2 arrives in the
 # same form with its stderr. Either counts as a hold. Any other error result is a failure.
-HOOK_HOLD_MARKERS = ("[dispatch-check][", "[dispatch-type][", "[two-figures-check][", "[review-page-check]")
+HOOK_HOLD_MARKERS = (
+    "[dispatch-check][",
+    "[dispatch-type][",
+    "[two-figures-check][",
+    "[asked-gate-check][",
+    "[review-page-check]",
+)
+# The two holds that ask a question rather than check a prompt. A lane that answers the question in its
+# request expects none; only a lane that leaves a gate unanswered may name its marker as expected.
+QUESTION_HOLD_MARKERS = ("[asked-gate-check][", "[two-figures-check][")
 _HOOK_ERROR_RE = re.compile(r"PreToolUse:(?:Agent|Task|AskUserQuestion) hook error: ")
 
 
@@ -476,6 +485,14 @@ def _text_of(content: Any) -> str:
     if isinstance(content, list):
         return "\n".join(str(b.get("text", "")) for b in content if isinstance(b, dict))
     return ""
+
+
+def hold_kind(result: dict[str, Any]) -> str | None:
+    """Which hook held this call: its marker, `"generic"` for a hold that names none, None when not a hold."""
+    if not is_hook_hold(result):
+        return None
+    text = _text_of(result.get("content"))
+    return next((m for m in HOOK_HOLD_MARKERS if m in text), "generic")
 
 
 def is_hook_hold(result: dict[str, Any]) -> bool:
@@ -552,6 +569,7 @@ def dispatch_report(cap: RunCapture, dispatches: Sequence[dict[str, Any]]) -> di
             row["sent_matches"] = same_prompt(sent, expected)
         if res is not None:
             row["status"] = ("held" if is_hook_hold(res) else "failed") if res["is_error"] else "succeeded"
+            row["hold_kind"] = hold_kind(res) if row["status"] == "held" else None
             structured = res.get("tool_use_result") or {}
             received = structured.get("prompt") if isinstance(structured, dict) else None
             if row["status"] == "succeeded" and isinstance(received, str):
@@ -572,15 +590,24 @@ def dispatch_report(cap: RunCapture, dispatches: Sequence[dict[str, Any]]) -> di
     }
 
 
-def assert_dispatch_outcomes(report: dict[str, Any], step: str) -> None:
+def assert_dispatch_outcomes(
+    report: dict[str, Any], step: str, *, expected_question_holds: frozenset[str] = frozenset()
+) -> None:
     """No checked dispatch failed (an error that is not a hold), and no hold caught the printed prompt.
 
     A hold of a dispatch that sent exactly what the generator printed is the hook misfiring; a failure
-    followed by a retry would otherwise read as one clean dispatch."""
+    followed by a retry would otherwise read as one clean dispatch. A question hold (`QUESTION_HOLD_MARKERS`)
+    is a misfire too, unless the lane names its marker in `expected_question_holds`: only a lane that leaves
+    that gate unanswered in its request may, since a lane that answers it expects the hook to pass."""
+    assert expected_question_holds <= set(QUESTION_HOLD_MARKERS), expected_question_holds
     text = format_dispatch_report(step, report)
     failed = [r["id"] for r in report["dispatches"] if r["status"] == "failed"]
     assert not failed, f"{step} dispatch(es) {failed} failed with an error that is not a hook hold:\n{text}"
-    false_holds = [r["id"] for r in report["dispatches"] if r["status"] == "held" and r["sent_matches"] is True]
+    false_holds = [
+        r["id"]
+        for r in report["dispatches"]
+        if r["status"] == "held" and r["sent_matches"] is True and r.get("hold_kind") not in expected_question_holds
+    ]
     assert not false_holds, f"the hook held a dispatch that sent the printed prompt: {false_holds}\n{text}"
 
 
@@ -619,7 +646,9 @@ def format_dispatch_report(step: str, report: dict[str, Any]) -> str:
     ]
     for r in report["dispatches"]:
         lines.append(
-            f"  - `{r['id']}` {r['status']}: sent prompt equals the printed one: {r['sent_matches']}; "
+            f"  - `{r['id']}` {r['status']}"
+            + (f" by `{r['hold_kind']}`" if r.get("hold_kind") else "")
+            + f": sent prompt equals the printed one: {r['sent_matches']}; "
             f"received prompt equals it: {r.get('received_matches') if r['received'] is not None else 'n/a'}"
             + (f"; no printed prompt: {r['regenerate_error']}" if "regenerate_error" in r else "")
         )
@@ -815,3 +844,157 @@ def assert_coaching_commentary_landed(review_dir: Path, payload_key: str) -> dic
     # against the wrong file or the marker drifted.
     assert "insertion_marker" not in md, "report.md still carries the raw insertion marker"
     return payload
+
+
+# --- the run status a host reads (gates and run status release) -------------------------------------
+#
+# Each lane names its run with `FS_HOST_RUN_ID=<id>` and answers its gates up front, as an unattended host
+# does, then checks what that host would read: `<artifacts root>/runs/<id>/run_status.json` and the
+# ledger beside it. These helpers are pure (files and a capture in, problems out) so the free suite tests
+# them; `test_lane_host_lines.py` feeds every lane's lines to the real `start` on every run.
+
+RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+
+
+def lane_run_id(lane: str) -> str:
+    """`e2e-<lane>-<8 hex>`: fresh per run, so a re-run never meets its own finished id."""
+    import uuid
+
+    rid = f"e2e-{lane}-{uuid.uuid4().hex[:8]}"
+    assert RUN_ID_RE.match(rid), rid
+    return rid
+
+
+def host_request(
+    prompt: str,
+    run_id: str,
+    *,
+    answers: Sequence[tuple[str, str]] = (),
+    notes: Sequence[tuple[str, str]] = (),
+) -> str:
+    """The prompt with the host's lines appended, each at the start of its own line (the hooks and
+    `run_status.py start` read `FS_HOST_` lines only there)."""
+    lines = [f"FS_HOST_RUN_ID={run_id}"]
+    lines += [f"FS_HOST_ANSWER {k}={v}" for k, v in answers]
+    lines += [f"FS_HOST_NOTE {k}={v}" for k, v in notes]
+    return prompt.rstrip() + "\n\n" + "\n".join(lines) + "\n"
+
+
+def run_status_path(workdir: Path, run_id: str) -> Path:
+    return workdir / "artifacts" / "runs" / run_id / "run_status.json"
+
+
+def read_run_status(workdir: Path, run_id: str) -> dict[str, Any]:
+    path = run_status_path(workdir, run_id)
+    assert path.is_file(), (
+        f"no run status at {path}: the run did not start under the request's FS_HOST_RUN_ID "
+        f"(runs present: {sorted(p.name for p in path.parent.parent.glob('*'))})"
+    )
+    data: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+    return data
+
+
+def read_run_ledger(workdir: Path, run_id: str) -> dict[str, Any]:
+    data: dict[str, Any] = json.loads((run_status_path(workdir, run_id).parent / "gates.json").read_text("utf-8"))
+    return data
+
+
+def _sha256(path: Path) -> str:
+    import hashlib
+
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def run_complete_problems(status: dict[str, Any], run_id: str, skill: str, review_dir: Path) -> list[str]:
+    """Why this status is not a completed run of this id whose listed reports are the files on disk.
+
+    The first problem names what the run is waiting on, so a paid red says which question stopped it."""
+    problems: list[str] = []
+    if status.get("status") != "complete":
+        problems.append(
+            f"status {status.get('status')!r} code {status.get('code')!r} waiting_on {status.get('waiting_on')!r} "
+            f"message {status.get('message')!r}"
+        )
+    if (status.get("run_id"), status.get("skill")) != (run_id, skill):
+        problems.append(f"status names run {status.get('run_id')!r} of {status.get('skill')!r}")
+    open_gates = [g.get("id") for g in status.get("gates") or [] if g.get("state") == "open"]
+    if open_gates:
+        problems.append(f"gates still open: {open_gates}")
+    if status.get("deliverables_status") != "final":
+        problems.append(f"deliverables_status {status.get('deliverables_status')!r}")
+    listed = status.get("deliverables") or {}
+    for key, name in (("report_md", "report.md"), ("report_json", "report.json")):
+        entry, path = listed.get(key), review_dir / name
+        if not isinstance(entry, dict):
+            problems.append(f"{key} not listed among the deliverables")
+        elif not path.is_file() or entry.get("sha256") != _sha256(path):
+            problems.append(f"the listed {key} is not the {name} on disk")
+    return problems
+
+
+def pre_answer_problems(ledger: dict[str, Any], gate: str, option_id: str, note: str | None = None) -> list[str]:
+    """Why `gate` was not answered by the request's line: the option, the note, `answered`, and the
+    ledger's own test that the current answer is the one the request carried."""
+    entry = (ledger.get("gates") or {}).get(gate)
+    pa = (ledger.get("pre_answers") or {}).get(gate)
+    if not isinstance(entry, dict):
+        return [f"{gate}: no ledger entry (pre_answers: {sorted(ledger.get('pre_answers') or {})})"]
+    cur = entry.get("current") or {}
+    problems = []
+    if cur.get("answer_id") != option_id or cur.get("resolution") != "answered":
+        problems.append(f"{gate}: current {cur.get('answer_id')!r} / {cur.get('resolution')!r}, sent {option_id!r}")
+    if note is not None and cur.get("note") != note:
+        problems.append(f"{gate}: note {cur.get('note')!r}, sent {note!r}")
+    if not isinstance(pa, dict) or not pa.get("applied_at") or pa.get("applied_at") != cur.get("answered_at"):
+        problems.append(f"{gate}: the request's line was not what answered it (pre_answer {pa!r})")
+    return problems
+
+
+def question_holds(cap: RunCapture, marker: str) -> list[str]:
+    """Ids of calls a question hold (`marker`) stopped, main thread or sub-agent."""
+    return [
+        tid for tid, res in cap.tool_results.items() if res.get("is_error") and marker in _text_of(res.get("content"))
+    ]
+
+
+def compose_record_problems(review_dir: Path, run_id: str, status: dict[str, Any] | None = None) -> list[str]:
+    """compose's own record of its last exit (`compose_result.json`), judged on the compose that produced
+    the delivered report: it must name this run; when it wrote the report on disk, it exited 0. A later
+    compose that wrote nothing (a re-check, a refused re-run) is not the producing one and is not judged."""
+    path = review_dir / "compose_result.json"
+    if not path.is_file():
+        return ["no compose_result.json beside the report"]
+    rec = json.loads(path.read_text(encoding="utf-8"))
+    problems = []
+    if rec.get("run_id") != run_id:
+        problems.append(f"compose_result.json names run {rec.get('run_id')!r}")
+    wrote = ((rec.get("outputs") or {}).get("report_json") or {}).get("written") is True
+    if wrote and rec.get("exit_code") != 0:
+        problems.append(f"the compose that wrote report.json exited {rec.get('exit_code')!r}")
+    if wrote and status is not None:
+        listed = ((status.get("deliverables") or {}).get("report_json") or {}).get("sha256")
+        report = review_dir / "report.json"
+        if listed is not None and report.is_file() and listed != _sha256(report):
+            problems.append("the last compose rewrote report.json after it was delivered")
+    return problems
+
+
+def mirror_problems(gate_state: dict[str, Any], ledger: dict[str, Any]) -> list[str]:
+    """deck-review's `gate_state.json` against the ledger it mirrors: the same answer, `auto_satisfied` for a
+    default taken, `founder` or `host` for an answer."""
+    gid = gate_state.get("gate_id")
+    entry = (ledger.get("gates") or {}).get(gid)
+    if not isinstance(entry, dict):
+        return [f"the ledger has no {gid!r}"]
+    cur = entry.get("current")
+    if "answer" not in gate_state:
+        return [] if entry.get("state") == "open" and cur is None else [f"{gid}: mirror unanswered, ledger {cur!r}"]
+    if not isinstance(cur, dict):
+        return [f"{gid}: mirror answered {gate_state.get('answer')!r}, ledger has no answer"]
+    problems = []
+    if cur.get("answer") != gate_state.get("answer"):
+        problems.append(f"{gid}: mirror {gate_state.get('answer')!r}, ledger {cur.get('answer')!r}")
+    expected = "default_taken" if gate_state.get("answer_source") == "auto_satisfied" else "answered"
+    if cur.get("resolution") != expected:
+        problems.append(f"{gid}: mirror source {gate_state.get('answer_source')!r}, ledger {cur.get('resolution')!r}")
+    return problems

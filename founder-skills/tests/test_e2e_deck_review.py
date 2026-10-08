@@ -52,9 +52,24 @@ from typing import Any
 
 import pytest
 
-# The one piece this lane takes from the shared harness: account connectors off, and the post-run
-# check that they were. A safety control is not a place for a second copy that can drift.
-from _e2e_harness import CONNECTOR_ISOLATION_ENV, assert_no_account_connectors, connector_isolation_options
+# What this lane takes from the shared harness: account connectors off, and the post-run check that they
+# were (a safety control is not a place for a second copy that can drift); and the pure readers of the run
+# status a host sees (no SDK, no options). Those it RECORDS rather than failing on: it is the release gate,
+# and a run status not yet complete beside a correct report would red a tag on model pacing. Harden after
+# two tagged releases.
+from _e2e_harness import (
+    CONNECTOR_ISOLATION_ENV,
+    assert_no_account_connectors,
+    compose_record_problems,
+    connector_isolation_options,
+    host_request,
+    lane_run_id,
+    mirror_problems,
+    read_run_ledger,
+    read_run_status,
+    run_complete_problems,
+    run_status_path,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = REPO_ROOT / "founder-skills" / "tests" / "fixtures"
@@ -305,6 +320,7 @@ def _drive_deck_review_lane(
     company: str,
     slug: str,
     extra_checks: Callable[..., None] | None = None,
+    lane: str = "dr",
 ) -> None:
     """Drive deck-review against one deck fixture and check it against one golden file.
 
@@ -342,6 +358,10 @@ def _drive_deck_review_lane(
         f"seed — treat that as my answer if you would otherwise ask. "
         f"Don't ask clarifying questions — just run."
     )
+    # The host names the run, as an unattended host does; nothing else is pre-answered (the stage is the
+    # founder's stated answer above, which the gate may take as its default).
+    run_id = lane_run_id(lane)
+    prompt = host_request(prompt, run_id)
 
     # Capture the SDK message stream so failure diagnostics can include it.
     captured_messages: list[str] = []
@@ -656,6 +676,25 @@ def _drive_deck_review_lane(
                     "fixture's assertion means items, not categories, and the golden file should say so"
                 )
 
+    # 7. The run status a host reads -- recorded and printed, never a failure on this lane (see the import).
+    try:
+        status_file = run_status_path(workdir, run_id)
+        observed["run_status.exists"] = status_file.is_file()
+        if status_file.is_file():
+            status = read_run_status(workdir, run_id)
+            observed["run_status.status"] = status.get("status")
+            observed["run_status.code"] = status.get("code")
+            observed["run_status.deliverables_status"] = status.get("deliverables_status")
+            observed["run_status.complete_problems"] = run_complete_problems(status, run_id, "deck-review", review_dir)
+            observed["compose_result.problems"] = compose_record_problems(review_dir, run_id, status)
+            run_ledger = read_run_ledger(workdir, run_id)
+            stage = ((run_ledger.get("gates") or {}).get("stage_confirmation") or {}).get("current") or {}
+            observed["ledger.stage_confirmation"] = (stage.get("resolution"), stage.get("default_reason"))
+            if gate is not None:
+                observed["gate_state.mirror_problems"] = mirror_problems(gate, run_ledger)
+    except Exception as e:  # noqa: BLE001 -- recorded, never a failure on the release gate
+        observed["run_status.error"] = repr(e)
+
     if extra_checks is not None:
         extra_checks(review_dir=review_dir, report=report, assertions=a, observed=observed, failures=failures)
 
@@ -786,4 +825,5 @@ def test_deck_review_contradiction_lane(tmp_path: Path) -> None:
         company="Foobar Systems",
         slug="foobar",
         extra_checks=_check_contradictions,
+        lane="dr-contra",
     )

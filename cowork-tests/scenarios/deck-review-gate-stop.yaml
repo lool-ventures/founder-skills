@@ -70,7 +70,21 @@ prompt: |
 
   Give me the full review with the scored checklist and the written report.
 
+  FS_HOST_RUN_ID=cw-dr-gatestop-0a1b2c3d
+
 assert:
+  # THE RUN STATUS A HOST READS (gates and run status release). One concern per item.
+  # Fixed run id: the status asserts below need a literal path. Safe only because every record stages a
+  # fresh workspace; re-running a KEPT outputs dir (`--repeat`, `eval`, a `verify-run` re-run) meets its
+  # own id (`RUN_ID_IN_USE` / `RUN_ID_FINISHED`). Inert until this lane is re-recorded.
+  - artifact_json:
+      artifact: outputs/artifacts/runs/cw-dr-gatestop-0a1b2c3d/run_status.json
+      path: status
+      equals: refused
+  - artifact_json:
+      artifact: outputs/artifacts/runs/cw-dr-gatestop-0a1b2c3d/run_status.json
+      path: code
+      equals: FOUNDER_DECLINED
   # A relative or /sessions/ file-tool path is refused at host-loop; the Step 0 proof exists so none is used.
   # Content-class, so it covers sub-agent tool results too (checked by replay on a sub-agent-only string).
   - tool_result_not_contains: "denied by your permission settings"
@@ -132,6 +146,9 @@ assert:
   # promoted deliverable are all ABSENT from it, so producing one reds the lane. That is the
   # "a founder who said no got a report" tripwire.
   - no_unexpected_files:
+      - 'outputs/artifacts/runs/**'  # the run's status, ledger and resume evidence (`run_status.py`)
+      # bind's record that this run dir is the run's (`handoff/<id>/run_ref.json`); never the whole dir
+      - 'outputs/artifacts/deck-review-testco/handoff/**'
       - 'outputs/artifacts/.host-outputs-*'  # Step 0's file-tool path proof (artifacts root)
       - 'outputs/artifacts/deck-review-testco/gate_state.json'
       # The advisory lock `gate_state.py answer` takes before its compare-and-set. A real,

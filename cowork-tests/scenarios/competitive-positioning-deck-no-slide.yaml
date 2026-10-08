@@ -120,6 +120,7 @@ assert:
   - tool_calls_max: 160
   - input_unmodified: 'uploads/**'
   - no_unexpected_files:
+      - 'outputs/artifacts/runs/**'  # the run's status, ledger and resume evidence (`run_status.py`)
       - 'outputs/artifacts/.host-outputs-*'  # Step 0's file-tool path proof (artifacts root)
       - 'outputs/artifacts/competitive-positioning-acmecorp/**'
       - 'outputs/artifacts/founder-context-acmecorp.json'

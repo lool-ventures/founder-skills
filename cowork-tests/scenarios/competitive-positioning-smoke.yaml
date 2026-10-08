@@ -32,7 +32,31 @@ prompt: |
   competitive landscape and moats. Use exactly these three competitors — do not add others:
   ServiceTitan, Jobber, and Housecall Pro. Then produce the positioning report and the explorer.
 
+  FS_HOST_RUN_ID=cw-cp-smoke-0a1b2c3d
+
 assert:
+  # THE RUN STATUS A HOST READS (gates and run status release). One concern per item.
+  # Fixed run id: the status asserts below need a literal path. Safe only because every record stages a
+  # fresh workspace; re-running a KEPT outputs dir (`--repeat`, `eval`, a `verify-run` re-run) meets its
+  # own id (`RUN_ID_IN_USE` / `RUN_ID_FINISHED`). Inert until this lane is re-recorded.
+  - artifact_json:
+      artifact: outputs/artifacts/runs/cw-cp-smoke-0a1b2c3d/run_status.json
+      path: status
+      equals: complete
+  - artifact_json:
+      artifact: outputs/artifacts/runs/cw-cp-smoke-0a1b2c3d/run_status.json
+      path: deliverables_status
+      equals: final
+  # compose's own record names this run (judging its exit belongs to the e2e lanes: a later compose that
+  # wrote nothing may legitimately have exited non-zero).
+  - artifact_json:
+      artifact: outputs/artifacts/competitive-positioning-tessivane/compose_result.json
+      path: run_id
+      equals: cw-cp-smoke-0a1b2c3d
+  - artifact_json:
+      artifact: outputs/artifacts/runs/cw-cp-smoke-0a1b2c3d/gates.json
+      path: gates.cp_gate1_landscape.state
+      equals: answered
   # A relative or /sessions/ file-tool path is refused at host-loop; the Step 0 proof exists so none is used.
   # Content-class, so it covers sub-agent tool results too (checked by replay on a sub-agent-only string).
   - tool_result_not_contains: "denied by your permission settings"
@@ -126,6 +150,7 @@ assert:
   # Allowlist = artifact namespace (incl. handoff/**) + founder-context sidecar + promoted
   # deliverables. Pre-0.24 cassettes exclude loudly (no preRunPaths). tightened from discovery actuals (observed x1.5).
   - no_unexpected_files:
+      - 'outputs/artifacts/runs/**'  # the run's status, ledger and resume evidence (`run_status.py`)
       - 'outputs/artifacts/.host-outputs-*'  # Step 0's file-tool path proof (artifacts root)
       - 'outputs/artifacts/competitive-positioning-tessivane/**'
       - 'outputs/artifacts/founder-context-tessivane.json'

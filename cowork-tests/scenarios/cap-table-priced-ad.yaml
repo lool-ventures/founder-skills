@@ -92,6 +92,7 @@ assert:
   # Allowlist = artifact namespace (incl. handoff/**) + founder-context sidecar + promoted
   # deliverables. Pre-0.24 cassettes exclude loudly (no preRunPaths). tightened from discovery actuals (observed x1.5).
   - no_unexpected_files:
+      - 'outputs/artifacts/runs/**'  # the run's status, ledger and resume evidence (`run_status.py`)
       - 'outputs/artifacts/.host-outputs-*'  # Step 0's file-tool path proof (artifacts root)
       - 'outputs/artifacts/cap-table-cadence/**'
       - 'outputs/artifacts/founder-context-cadence.json'
