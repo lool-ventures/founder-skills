@@ -1315,8 +1315,9 @@ def test_the_paid_lanes_prompt_states_no_existing_pool() -> None:
     paid lane says "Don't ask clarifying questions". Adding a pool to its prompt would make it answer a
     question it has no way to answer, and a paid run would be the first to find out."""
     source = (REPO_ROOT / "founder-skills" / "tests" / "test_e2e_cap_table.py").read_text(encoding="utf-8")
-    start = source.find("prompt = (")
-    prompt = source[start : source.find(")", start)].lower()
+    start = source.find("SMOKE_PROMPT = (")
+    assert start != -1, "the smoke lane's prompt is gone"
+    prompt = re.sub(r'"\s+"', "", source[start : source.find("\n)", start)]).lower()
     assert "post-money option pool" in prompt  # positive control: this is the prompt, not some other string
     for needle in ("unallocated", "authorized", "issued", "available for", "existing pool"):
         assert needle not in prompt, needle
@@ -1326,10 +1327,10 @@ def test_the_new_options_lanes_prompt_does_state_an_existing_pool() -> None:
     """The inverse of the no-pool test above: the second lane exists to reach the disclosure, which needs
     unallocated options beside a post-money target and a founder who is not asked."""
     source = (REPO_ROOT / "founder-skills" / "tests" / "test_e2e_cap_table.py").read_text(encoding="utf-8")
-    start = source.find("pool_prompt = (")
+    start = source.find("POOL_PROMPT = (")
     assert start != -1, "the new-options lane's prompt is gone"
     # Join the adjacent string literals, so a phrase wrapped across two source lines still reads as one.
-    prompt = re.sub(r'"\s+"', "", source[start : source.find(")", start)]).lower()
+    prompt = re.sub(r'"\s+"', "", source[start : source.find("\n)", start)]).lower()
     assert "post-money option pool" in prompt and "unallocated" in prompt
     assert "don't ask" in prompt
 
