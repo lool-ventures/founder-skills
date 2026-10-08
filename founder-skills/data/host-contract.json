@@ -299,6 +299,68 @@
       "skill": "competitive-positioning",
       "step": "4"
     },
+    "cp_product_availability": {
+      "asked_check": "none",
+      "id": "cp_product_availability",
+      "instances": null,
+      "kind": "fixed",
+      "mandatory": false,
+      "modes": [
+        "full"
+      ],
+      "multi": false,
+      "no_ask_default": "not_sure",
+      "options": [
+        {
+          "hidden": false,
+          "id": "shipping",
+          "label": "Yes, it is shipping",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "pilot",
+          "label": "Pilot or private beta",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "poc",
+          "label": "A working prototype",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": false,
+          "id": "concept",
+          "label": "Not built yet",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        },
+        {
+          "hidden": true,
+          "id": "not_sure",
+          "label": "Not sure",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": false,
+          "terminal": true
+        }
+      ],
+      "question": "Can people use the product today?",
+      "skill": "competitive-positioning",
+      "step": "2"
+    },
     "cp_product_profile": {
       "asked_check": "none",
       "id": "cp_product_profile",

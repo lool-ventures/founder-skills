@@ -55,8 +55,15 @@ def _load_skill_module(skill: str, name: str) -> Any:
 # --- shape -----------------------------------------------------------------------------------------
 
 
-def test_there_are_59_gates() -> None:
-    assert len(GATES) == 59
+def test_there_are_60_gates() -> None:
+    assert len(GATES) == 60
+
+
+def test_only_listed_gates_let_the_materials_replace_a_no_ask_default() -> None:
+    """The recorder lets a not-applicable replace a no-ask default only for the allow-set, and the allow-set is
+    exactly the model-owed gates that carry a no-ask default: a new one must be listed (or not) on purpose."""
+    reachable = {k for k, v in GATES.items() if v["owed"] == "model" and v["no_ask_default"] is not None}
+    assert set(_gates.NA_REPLACES_NO_ASK_DEFAULT) == reachable == {"cp_product_availability"}
 
 
 def test_the_contract_file_is_the_registry() -> None:
@@ -571,6 +578,12 @@ NEW_WORDING = {
     ("cp_product_profile", "question.differentiation"),
     ("cp_product_profile", "use_derived"),
     ("cp_product_profile", "describe_in_chat"),
+    ("cp_product_availability", "question"),
+    ("cp_product_availability", "shipping"),
+    ("cp_product_availability", "pilot"),
+    ("cp_product_availability", "poc"),
+    ("cp_product_availability", "concept"),
+    ("cp_product_availability", "not_sure"),
     ("cp_research_pick", "question"),
     ("cp_scoring_basis", "question"),
     ("cp_consolidation_merge", "keep_separate"),

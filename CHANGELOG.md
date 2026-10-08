@@ -59,8 +59,10 @@ No grade, score or verdict changed for the same inputs. What moved, per skill wh
     value written only in prose is not an answer.
   - **A request that says not to ask.** `FS_HOST_NO_ASK` (with `FS_HOST_RUN_ID`) is for a host that runs a
     skill with nobody to answer: the run asks nothing, takes each question's default where one exists, and
-    otherwise stops `waiting` for a line on resume (the skill's scripts exit 12). Under it the run cannot answer
-    a question itself; it may only mark a company's name, sector or geography as unknown. `FS_HOST_WAIT
+    otherwise stops `waiting` for a line on resume (the skill's scripts exit 12). It cannot silence the host's own
+    permission prompts: run the skill in a permission mode that does not prompt, or a skill that researches the
+    web waits at its first fetch. Under it the run cannot answer a question itself; it may only mark a
+    company's name, sector or geography as unknown. `FS_HOST_WAIT
     <question>` stops at a question that has a default; `FS_HOST_DERIVE <question>` lets the run take the
     company's name, sector or geography, or competitive positioning's product answers, from the materials,
     saying where (listed as `DERIVED:<question>`; never the stage). A failure the run cannot recover from ends
@@ -151,6 +153,11 @@ No grade, score or verdict changed for the same inputs. What moved, per skill wh
 - **A folder holding one company's context no longer reads it for a request about another company.** When the
   request names a different company, or answers which company the run is for, the run asks (or waits, when the
   request said not to ask) instead of reusing that context.
+- **Financial model review: a delivered review's inputs no longer change after it is finished.** A cash
+  balance the review already used, restated, or any other changed figure, is refused with nothing written;
+  only the balance the hand-over asked for is applied, and the review is then rebuilt with it.
+- **Competitive positioning: whether people can use the product today is a recorded question**, asked with
+  the three product questions when the materials do not say, and the profile carries the answer given.
 
 ### Development
 

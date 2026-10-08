@@ -958,21 +958,21 @@ Here the printed hand-over replaces the named entries and the offer described ab
 is the only offer made, and a connected folder is written to only if the founder asks.
 
 **When the hand-over asked for the cash balance and the founder replies with it**, keep this run's
-`RUN_ID` and `$REVIEW_DIR`. Record the balance as a plain number, its month as `YYYY-MM`, and the answer; promote; re-run runway: <!-- gate: fmr_cash_followup -->
+`RUN_ID` and `$REVIEW_DIR`. Record the balance (a plain number, month `YYYY-MM`) and the answer; promote; re-run runway: <!-- gate: fmr_cash_followup -->
 
 ```bash
 python3 "$SCRIPTS/apply_corrections.py" --set cash.current_balance=<amount> --set cash.balance_date=<YYYY-MM> \
-  --original "$REVIEW_DIR/inputs.json" --output-dir "$REVIEW_DIR" --run-id "$RUN_ID" --origin chat
+  --original "$REVIEW_DIR/inputs.json" --output-dir "$REVIEW_DIR" --run-id "$RUN_ID" --origin chat &&
 python3 "$SHARED_SCRIPTS/record_gate_answer.py" answer --run-id "$RUN_ID" --run-dir "$REVIEW_DIR" \
   --gate fmr_cash_followup --answer-id provided --gate fmr_cash_basics.current_balance --answer-id stated \
-  --value "<amount>" --gate fmr_cash_basics.balance_date --answer-id stated --value "<YYYY-MM>"
-cp "$REVIEW_DIR/corrected_inputs.json" "$REVIEW_DIR/inputs.json"
+  --value "<amount>" --gate fmr_cash_basics.balance_date --answer-id stated --value "<YYYY-MM>" &&
+cp "$REVIEW_DIR/corrected_inputs.json" "$REVIEW_DIR/inputs.json" &&
 cat "$REVIEW_DIR/inputs.json" | python3 "$SCRIPTS/runway.py" --pretty --run-id "$RUN_ID" -o "$REVIEW_DIR/runway.json"
 ```
 
 Then Steps 7, 7.5 (runway lens), 8a-8c, Gates 1-2, this step, with `--cash-update` on the
-closer, which states the update; its output stays your whole final message. Any other changed figure after
-delivery needs a new review: this run's steps refuse it.
+closer; its output stays your whole final message. A balance the review already had, or any other changed
+figure, is refused (`RUN_FINISHED`): say what it printed.
 
 ## Main-Thread Return
 

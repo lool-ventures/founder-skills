@@ -170,6 +170,13 @@ def main() -> None:
             _cp_gates.require_or_exit(
                 run_dir, args.run_id, list(_cp_gates.PRODUCT_GATES), by="persist_agent_artifact.py"
             )
+            why = _cp_gates.availability_mismatch(run_dir, args.run_id, data)
+            if why is not None:
+                _fail_invalid(
+                    {"artifact": args.artifact, "validation": {"status": "invalid", "errors": [why]}},
+                    args.output,
+                    indent,
+                )
     data["_produced_by"] = STAMP
     if args.run_id:
         meta = data.setdefault("metadata", {})

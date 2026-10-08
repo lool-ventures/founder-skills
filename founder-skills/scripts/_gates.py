@@ -211,6 +211,9 @@ DERIVE_SCOPE: dict[str, str] = {
     "cp_product_profile.customers": "use_derived",
     "cp_product_profile.differentiation": "use_derived",
 }
+# Model-owed gates with a no-ask default, where the step reads the answer from the materials after its batched
+# open has already taken that default: a not-applicable record replaces the default. Pinned by a test.
+NA_REPLACES_NO_ASK_DEFAULT = ("cp_product_availability",)
 # Gates whose question asks for a file or a path: under FS_HOST_NO_ASK the waiting status names the input.
 INPUT_GATES = ("dr_input_request", "dr_primary_deck", "ms_upload_path", "cp_upload_path", "ct_docx_tracked_changes")
 _NO_ASK_BASES = ("host_no_ask", "host_authorized")
@@ -1145,6 +1148,37 @@ GATES: dict[str, dict[str, Any]] = {
         "binds": None,
         "no_ask_default": None,
         "defaults": _STATED,
+        "reopens_complete": False,
+        "mandatory": False,
+        "catalog_row": None,
+    },
+    # Whether today's position is ranked beside a planned one. Recorded not-applicable, with the words, when
+    # the materials say it; the profile's `product_availability` must then match an answer.
+    "cp_product_availability": {
+        "skill": "competitive-positioning",
+        "step": "2",
+        "modes": _FULL,
+        "kind": "fixed",
+        "question": "Can people use the product today?",
+        "form_label": "Availability",
+        "instances": None,
+        "multi": False,
+        "options": (
+            _o("shipping", "Yes, it is shipping"),
+            _o("pilot", "Pilot or private beta"),
+            _o("poc", "A working prototype"),
+            _o("concept", "Not built yet"),
+            # Not shown (four at most): the free-text reply, and the default when the request says not to ask.
+            _o("not_sure", "Not sure", shown=False),
+        ),
+        "option_source": None,
+        "option_variants": None,
+        "owed": "model",
+        "asked_check": "none",
+        "writer": "record_gate_answer.py",
+        "binds": None,
+        "no_ask_default": "not_sure",
+        "defaults": _no_ask("not_sure"),
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": None,
@@ -3929,6 +3963,15 @@ def record(
         if stale:
             _supersede(ledger, entry, by, "binding_changed")
         elif replacing_after_hold or (cur.get("resolution") == "default_taken" and resolution == "answered"):
+            pass
+        elif (
+            gate_id in NA_REPLACES_NO_ASK_DEFAULT
+            and cur.get("resolution") == "default_taken"
+            and cur.get("resolution_basis") == "host_no_ask"
+            and resolution == "not_applicable"
+        ):
+            # A no-ask default marks the value unknown; the materials stating it, recorded by the step that
+            # read them (often after the batched open took the default), is the better record.
             pass
         else:
             hint = ""

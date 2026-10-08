@@ -382,7 +382,10 @@ def test_a_finished_run_whose_figures_changed_is_refused_and_nothing_moves(tmp_p
     _settle_step1(root, run_id)
     _ok(_rec(root, run_id, "answer", "--gate", "fmr_extracted_values", "--answer-id", "values_ok"))
     rs.update(rs.run_paths(str(root), run_id), lambda s: (s.update(coaching="inserted"), rs.mark_complete(s)))
-    _corrections(run_dir, None, None, "revenue.mrr=48000")
+    # Edited by hand: the corrections script itself refuses a finished run (the test below).
+    inputs = json.loads((run_dir / "inputs.json").read_text())
+    inputs["revenue"]["mrr"]["value"] = 48000
+    (run_dir / "inputs.json").write_text(json.dumps(inputs))
     before = _snapshot(run_dir, root, run_id)
     proc = _producer("runway.py", run_dir, run_id)
     assert proc.returncode == 1 and _out(proc)["code"] == "RUN_FINISHED"
@@ -533,7 +536,8 @@ def _verify(run_dir: Path, gate: str) -> dict[str, Any]:
     return data
 
 
-def test_the_cash_reply_reopens_the_run_and_completes_it_again(tmp_path: Path) -> None:
+def _delivered_without_cash(tmp_path: Path) -> tuple[Path, str, Path]:
+    """A delivered review built without a cash balance: its hand-over asked for one (the follow-up waits)."""
     root, run_id, run_dir = _run(tmp_path)
     inputs = json.loads((run_dir / "inputs.json").read_text())
     for k in ("current_balance", "balance_date"):
@@ -597,6 +601,11 @@ def test_the_cash_reply_reopens_the_run_and_completes_it_again(tmp_path: Path) -
         )
     )
     assert h.status(root, run_id)["handed_over_at"] is not None
+    return root, run_id, run_dir
+
+
+def test_the_cash_reply_reopens_the_run_and_completes_it_again(tmp_path: Path) -> None:
+    root, run_id, run_dir = _delivered_without_cash(tmp_path)
 
     # The founder replies with the balance (a new prompt): the three SKILL.md Step 12 calls.
     time.sleep(0.002)
@@ -652,6 +661,83 @@ def test_the_cash_reply_reopens_the_run_and_completes_it_again(tmp_path: Path) -
         )
     )
     assert h.status(root, run_id)["handed_over_at"] is not None
+    # The follow-up is answered: a further balance after this delivery is a new review, and nothing moves.
+    before = _snapshot(run_dir, root, run_id)
+    again = _apply(run_dir, run_id, "cash.current_balance=850000", "cash.balance_date=2026-10")
+    assert again.returncode == 1 and _out(again)["code"] == "RUN_FINISHED"
+    assert _snapshot(run_dir, root, run_id) == before
+
+
+def _delivered_with_cash(tmp: Path) -> tuple[Path, str, Path]:
+    """A complete run whose review was built with the cash balance the founder gave at Step 1."""
+    root, run_id, run_dir = _run(tmp)
+    _settle_step1(root, run_id)
+    _ok(_rec(root, run_id, "answer", "--gate", "fmr_extracted_values", "--answer-id", "values_ok"))
+    _ok(_producer("unit_economics.py", run_dir, run_id))
+    _ok(_producer("runway.py", run_dir, run_id))
+    _ok(_compose(run_dir))
+    assert _complete(root, run_id, run_dir)["status"] == "complete"
+    return root, run_id, run_dir
+
+
+def _apply(run_dir: Path, run_id: str | None, *sets: str) -> subprocess.CompletedProcess[str]:
+    """`--set` each `PATH=VALUE`; anything else passes through as a flag."""
+    args = [a for s in sets for a in (("--set", s) if "=" in s else (s,))]
+    args += ["--original", str(run_dir / "inputs.json"), "--output-dir", str(run_dir)]
+    if run_id is not None:
+        args += ["--run-id", run_id, "--origin", "chat"]
+    return h.run(FMR / "apply_corrections.py", *args)
+
+
+@pytest.mark.parametrize(
+    "sets",
+    [("revenue.mrr=43217",), ("cash.current_balance=900000",), ("cash.balance_date=2026-09",)],
+)
+def test_the_waiting_follow_up_takes_both_cash_paths_and_nothing_else(tmp_path: Path, sets: tuple[str, ...]) -> None:
+    """The follow-up's answer needs a call setting both cash paths; any other call is refused before it writes."""
+    root, run_id, run_dir = _delivered_without_cash(tmp_path)
+    before = _snapshot(run_dir, root, run_id)
+    proc = _apply(run_dir, run_id, *sets)
+    assert proc.returncode == 1 and _out(proc)["code"] == "RUN_FINISHED", proc.stdout + proc.stderr
+    assert _snapshot(run_dir, root, run_id) == before
+
+
+def test_a_call_naming_no_run_into_a_delivered_review_is_refused(tmp_path: Path) -> None:
+    root, run_id, run_dir = _delivered_with_cash(tmp_path)
+    original = json.loads((run_dir / "inputs.json").read_text())
+    original.pop("metadata", None)
+    elsewhere = tmp_path / "copy.json"
+    elsewhere.write_text(json.dumps(original))
+    before = _snapshot(run_dir, root, run_id)
+    args = ["--set", "revenue.mrr=43217", "--original", str(elsewhere), "--output-dir", str(run_dir)]
+    proc = h.run(FMR / "apply_corrections.py", *args)
+    assert proc.returncode == 1 and _out(proc)["code"] == "RUN_ID_REQUIRED", proc.stdout + proc.stderr
+    assert _snapshot(run_dir, root, run_id) == before
+
+
+@pytest.mark.parametrize(
+    ("sets", "words"),
+    [
+        # The balance the review already used, restated: nothing to apply, no rerun.
+        (("cash.current_balance=1500000", "cash.balance_date=2026-05"), "already uses"),
+        # Same amount, a later date: a changed confirmed figure after delivery is a new review.
+        (("cash.current_balance=1500000", "cash.balance_date=2026-06"), "new review"),
+        (("revenue.mrr=51000",), "new review"),
+    ],
+)
+@pytest.mark.parametrize("with_run_id", [True, False])
+def test_corrections_on_a_delivered_review_with_its_balance_are_refused_and_nothing_moves(
+    tmp_path: Path, sets: tuple[str, ...], words: str, with_run_id: bool
+) -> None:
+    root, run_id, run_dir = _delivered_with_cash(tmp_path)
+    before = _snapshot(run_dir, root, run_id)
+    status_out = tmp_path / "apply_status.json"
+    proc = _apply(run_dir, run_id if with_run_id else None, *sets, "-o", str(status_out))
+    assert proc.returncode == 1, proc.stdout + proc.stderr
+    assert not status_out.exists()
+    assert _out(proc)["code"] == "RUN_FINISHED" and words in proc.stdout
+    assert "nothing was written" in proc.stderr
+    assert _snapshot(run_dir, root, run_id) == before
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root ignores file modes")

@@ -1354,6 +1354,7 @@ def _cp_first_invocation(tmp: Path) -> tuple[Path, str, Path]:
         )
     )
     product = [a for f in ("product", "customers", "differentiation") for a in ("--gate", f"cp_product_profile.{f}")]
+    product += ["--gate", "cp_product_availability"]
     rec("not-applicable", *product, "--reason", "the deck states it")
     for artifact in ("product_profile.json", "landscape_draft.json"):
         body = json.loads((CP_FIXTURES / artifact).read_text(encoding="utf-8"))

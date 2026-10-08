@@ -322,6 +322,9 @@ company's context. A request with nobody to answer should carry them; otherwise 
 step. Under `FS_HOST_NO_ASK` the run cannot answer a question itself (it may only mark a name, sector or
 geography as unknown), so a value stated only in the request's prose is not used: send it as a line.
 `FS_HOST_NO_ASK` stays in force on every resume of the run, and `run_status.json` says so (`no_ask: true`).
+It governs only the skills' own questions, never the host's permission prompts: run an unattended skill in a
+permission mode that does not prompt, or a skill that researches the web stops at its first fetch until
+someone approves it.
 The company's context stays in the artifacts folder and later runs read it again. With two or more companies'
 contexts in the folder, the run asks `ctx_select_company`, which a request answers with
 `FS_HOST_ANSWER ctx_select_company=<slug>` (a company already in the folder) or

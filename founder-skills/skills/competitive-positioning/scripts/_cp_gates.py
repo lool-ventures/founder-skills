@@ -26,7 +26,13 @@ import _run_ref  # noqa: E402
 
 GATE1 = "cp_gate1_landscape"
 BASIS_GATE = "cp_scoring_basis"
-PRODUCT_GATES = ("cp_product_profile.product", "cp_product_profile.customers", "cp_product_profile.differentiation")
+AVAILABILITY_GATE = "cp_product_availability"
+PRODUCT_GATES = (
+    "cp_product_profile.product",
+    "cp_product_profile.customers",
+    "cp_product_profile.differentiation",
+    AVAILABILITY_GATE,
+)
 # Step 4's questions, after Gate 1 and before the set is final.
 STEP4_GATES = ("cp_research_additions", "cp_research_pick", "cp_merge_pick")
 # What the scoring prompts rest on.
@@ -145,6 +151,30 @@ def refuse_without_run_id(output: str | None, run_id: str | None) -> None:
         sys.stdout.write(json.dumps({"status": "rejected", "code": "RUN_ID_REQUIRED", "message": message}) + "\n")
         print(f"Error: {message}; nothing was written", file=sys.stderr)
         sys.exit(1)
+
+
+def availability_mismatch(run_dir: str, run_id: str | None, profile: dict[str, Any]) -> str | None:
+    """Why the profile's `product_availability` disagrees with the recorded answer, or None. An answer is the
+    founder's (or the request's) word, so the profile must carry it, and `not_sure` none; a not-applicable
+    record means the materials say it, and the profile's own value stands. Read only; no ledger: None."""
+    ledger = open_ledger_or_exit(run_dir, run_id)
+    if ledger is None:
+        return None
+    gates, paths = ledger
+    entry = (gates.load_ledger(paths).get("gates") or {}).get(AVAILABILITY_GATE) or {}
+    current = entry.get("current") if entry.get("state") == "answered" else None
+    answer = current.get("answer_id") if isinstance(current, dict) else None
+    if answer is None:
+        return None
+    want = None if answer == "not_sure" else answer
+    got = profile.get("product_availability")
+    if got == want:
+        return None
+    return (
+        f"product_availability is {got!r} but {AVAILABILITY_GATE} was answered {answer!r}; write "
+        + (f"{want!r}" if want else "no product_availability")
+        + " (the recorded answer stands)"
+    )
 
 
 def refuse_if_finished(run_dir: str, run_id: str | None) -> None:

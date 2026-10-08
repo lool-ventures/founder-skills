@@ -876,6 +876,21 @@ def main() -> None:
             "corrections",
         )
 
+    # A run's ledger: a finished review's inputs never move (only the cash follow-up it asked for). Loaded
+    # here, not at import: the gate binder loads this file by path for its normalising steps alone.
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import _fmr_gates
+
+    run_id = args.run_id or (original.get("metadata") or {}).get("run_id")
+    # Naming no run into a dir that belongs to one: RUN_ID_REQUIRED, so no copy of the inputs skips the check.
+    _fmr_gates.refuse_without_run_id(os.path.join(args.output_dir, "corrected_inputs.json"), run_id)
+    _fmr_gates.refuse_finished_corrections(
+        args.output_dir,
+        run_id,
+        {str(c.get("path")) if isinstance(c, dict) else "" for c in corrections} if shape == "changes" else {""},
+        sum(1 for c in corrections if _is_change(c)),
+    )
+
     overrides = payload.get("warning_overrides", [])
     ils_fields = payload.get("ils_fields", {})
 

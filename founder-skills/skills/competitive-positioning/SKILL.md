@@ -335,18 +335,18 @@ Extract from the founder's materials or conversation: company name, product desc
 
 **Check the deck's vintage.** If a footer date, copyright year, event slide, or embedded metadata shows the materials are noticeably older than today (a rule of thumb: more than ~12 months), flag this to the founder before proceeding — competitor pricing, funding, and positioning claims from a stale deck may already be outdated. Note the observed vintage in `product_profile.json`'s `source_materials` (e.g. `"pitch deck (PDF, copyright 2024)"`).
 
-Record `product_availability` — `concept`, `poc`, `pilot` or `shipping` — with `availability_quote`, the words in the materials that show it. It decides only whether today's position is ranked beside a planned one.
+`product_availability` (`concept`, `poc`, `pilot`, `shipping`) decides only whether today's position is ranked beside a plan: the materials' value with their words (`availability_quote`), or the answer; record `not_sure` if they're unsure.
 
-**The three product questions are a recorded gate.** Open them first. A field the materials state is recorded, not asked: `record_gate_answer.py not-applicable --gate cp_product_profile.<field> --reason "<where the materials state it>"`. Ask only the rest, from the printed `needs_input` (`AskUserQuestion`: an affirmative option carrying any partial signal, and the free-text fallback), and record each reply with its `answer_command`. The write below refuses (exit 10) until all three are recorded.
+**The four product questions are recorded gates; ask no other about the product.** Open them first. What the materials state is recorded, not asked: `record_gate_answer.py not-applicable --gate <key> --reason "<where the materials state it>"`. Ask only the rest, from the printed `needs_input` (`AskUserQuestion`: an affirmative option carrying any partial signal, and the free-text fallback), and record each reply with its `answer_command`. The write below refuses (exit 10) until all four are recorded.
 
 ```bash
 python3 "$SHARED_SCRIPTS/record_gate_answer.py" open --run-id "$RUN_ID" --run-dir "$ANALYSIS_DIR" --gate cp_product_profile.product \
-  --gate cp_product_profile.customers --gate cp_product_profile.differentiation
+  --gate cp_product_profile.customers --gate cp_product_profile.differentiation --gate cp_product_availability
 ```
 
 Write `product_profile.json` to `$ANALYSIS_DIR`.
 
-**Write it through the producer, not by a bare heredoc into `$ANALYSIS_DIR`.** Stage the JSON in `$STAGING_DIR` (the `/tmp` scratch dir from Step 0 — never the promoted outputs mount) and pipe it:
+**Write it through the producer, not by a bare heredoc into `$ANALYSIS_DIR`.** Stage the JSON in `$STAGING_DIR` (Step 0's `/tmp` scratch dir, never the outputs mount) and pipe it:
 
 ```bash
 cat "$STAGING_DIR/product_profile.json" | python3 "$SCRIPTS/persist_agent_artifact.py" \
@@ -369,7 +369,7 @@ If the founder's deck mentions competitors you are excluding from the formal lan
 
 Write `landscape_draft.json` to `$ANALYSIS_DIR`.
 
-**Write it through the producer, not by a bare heredoc into `$ANALYSIS_DIR`.** Stage the JSON in `$STAGING_DIR` (the `/tmp` scratch dir from Step 0 — never the promoted outputs mount) and pipe it:
+**Write it through the producer, not by a bare heredoc into `$ANALYSIS_DIR`.** Stage the JSON in `$STAGING_DIR` (Step 0's `/tmp` scratch dir, never the outputs mount) and pipe it:
 
 ```bash
 cat "$STAGING_DIR/landscape_draft.json" | python3 "$SCRIPTS/persist_agent_artifact.py" \
@@ -836,7 +836,7 @@ The report and the coaching read it; never state a patent status yourself.
 
 Write `positioning.json` to `$ANALYSIS_DIR` (consult `${CLAUDE_PLUGIN_ROOT}/skills/competitive-positioning/references/artifact-schemas.md` for the schema).
 
-**Write it through the producer, not by a bare heredoc into `$ANALYSIS_DIR`.** Stage the JSON in `$STAGING_DIR` (the `/tmp` scratch dir from Step 0 — never the promoted outputs mount) and pipe it:
+**Write it through the producer, not by a bare heredoc into `$ANALYSIS_DIR`.** Stage the JSON in `$STAGING_DIR` (Step 0's `/tmp` scratch dir, never the outputs mount) and pipe it:
 
 ```bash
 cat "$STAGING_DIR/positioning.json" | python3 "$SCRIPTS/persist_agent_artifact.py" \

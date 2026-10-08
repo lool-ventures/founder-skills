@@ -77,6 +77,44 @@ def require_or_exit(run_dir: str, run_id: str | None, keys: tuple[str, ...]) -> 
         )
 
 
+CASH_PATHS = frozenset(("cash.current_balance", "cash.balance_date"))
+UNCHANGED_MESSAGE = "this review is complete and already uses these values; there is nothing to apply and no rerun"
+
+
+def refuse_finished_corrections(run_dir: str, run_id: str | None, paths_set: set[str], changed: int) -> None:
+    """Corrections into a finished run: exit 1 `RUN_FINISHED` before anything is written, so the corrected
+    inputs never move under a delivered review. The one exception is the cash follow-up the hand-over asked
+    for: a `complete` run whose follow-up is owed and still holds the producer's default, for a call that sets
+    both cash paths and nothing else (the follow-up's answer needs both). A run with no ledger, or one still
+    running, returns at once."""
+    ledger = open_ledger_or_exit(run_dir, run_id)
+    if ledger is None:
+        return
+    gates, paths = ledger
+    rs = sys.modules["_run_status"]
+
+    def fn(ctx: Any, led: dict[str, Any], st: dict[str, Any]) -> dict[str, Any]:
+        state = st.get("status")
+        if state not in rs.FINAL_STATUSES:
+            return {}
+        if state == "complete" and paths_set == CASH_PATHS:
+            entry = (led.get("gates") or {}).get(CASH_FOLLOWUP) or {}
+            waiting = (entry.get("current") or {}).get("resolution") == "default_taken"
+            if waiting and gates.owed(ctx, gates.gate_def(CASH_FOLLOWUP), None):
+                return {}
+        return {"finished": state}
+
+    try:
+        out = gates.transact(paths, fn)
+    except Exception as e:  # noqa: BLE001 -- unreachable registry, unwired predicate: exit 2, nothing written
+        sys.exit(_run_ref.report_failure(e))
+    if out.get("finished"):
+        message = UNCHANGED_MESSAGE if changed == 0 else FINISHED_MESSAGE
+        sys.stdout.write(json.dumps({"status": "rejected", "code": "RUN_FINISHED", "message": message}) + "\n")
+        print(f"Error: {message}; nothing was written", file=sys.stderr)
+        sys.exit(1)
+
+
 def refuse_without_run_id(output: str | None, run_id: str | None) -> None:
     """A call into a run dir that carries any run's ref must name its run: exit 1 `RUN_ID_REQUIRED`."""
     if output is None or run_id:

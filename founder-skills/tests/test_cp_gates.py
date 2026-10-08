@@ -491,6 +491,7 @@ def _fixture_run(tmp: Path) -> tuple[Path, str, Path]:
 
 def _answer_all(root: Path, rid: str, rd: Path) -> None:
     keys = [f"cp_product_profile.{f}" for f in ("product", "customers", "differentiation")]
+    keys.append("cp_product_availability")
     args = [a for k in keys for a in ("--gate", k)]
     _ok(h.record(root, rid, "not-applicable", *args, "--reason", "the deck states it"))
     _ok(h.record(root, rid, "answer", "--gate", "cp_gate1_landscape", "--answer-id", "no_changes"))
@@ -570,6 +571,88 @@ def test_the_product_profile_waits_for_its_questions_and_a_delivered_run_is_not_
         refused = _persist(rd, rid, artifact)
         assert refused.returncode == 1 and _out(refused)["code"] == "RUN_FINISHED", artifact
     _ok(_persist(rd, rid, "positioning.json"))
+
+
+def _profile(rd: Path, rid: str, availability: str | None) -> Any:
+    body = _read(FIXTURES / "product_profile.json")
+    body.pop("_produced_by", None)
+    if availability is not None:
+        body.update(product_availability=availability, availability_quote="invented quote")
+    argv = ["--artifact", "product_profile.json", "-o", str(rd / "product_profile.json"), "--run-id", rid]
+    return h.run(SCRIPTS / "persist_agent_artifact.py", *argv, stdin=json.dumps(body))
+
+
+def _three_stated(root: Path, rid: str) -> None:
+    keys = [f"cp_product_profile.{f}" for f in ("product", "customers", "differentiation")]
+    _ok(h.record(root, rid, "not-applicable", *[a for k in keys for a in ("--gate", k)], "--reason", "stated"))
+
+
+def test_whether_the_product_ships_is_a_recorded_question_the_profile_carries(tmp_path: Path) -> None:
+    root, rid, rd = _fixture_run(tmp_path)
+    (rd / "product_profile.json").unlink()
+    _three_stated(root, rid)
+    waiting = _profile(rd, rid, "pilot")
+    assert waiting.returncode == 10 and _out(waiting)["blocked_by_gate"] == "cp_product_availability"
+    assert not (rd / "product_profile.json").exists()
+    labels = [o["label"] for o in _out(waiting)["needs_input"][0]["options"]]
+    assert "Pilot or private beta" in labels and len(labels) == 4
+    _ok(h.record(root, rid, "answer", "--gate", "cp_product_availability", "--answer-id", "pilot"))
+    for other in ("shipping", None):
+        refused = _profile(rd, rid, other)
+        assert refused.returncode == 1 and "cp_product_availability" in refused.stdout, other
+        assert not (rd / "product_profile.json").exists()
+    _ok(_profile(rd, rid, "pilot"))
+
+
+def test_an_unsure_answer_leaves_availability_out_and_a_stated_one_is_the_materials(tmp_path: Path) -> None:
+    root, rid, rd = _fixture_run(tmp_path)
+    (rd / "product_profile.json").unlink()
+    _three_stated(root, rid)
+    _ok(h.record(root, rid, "answer", "--gate", "cp_product_availability", "--answer-id", "not_sure"))
+    assert _profile(rd, rid, "shipping").returncode == 1
+    _ok(_profile(rd, rid, None))
+    root2, rid2, rd2 = _fixture_run(tmp_path / "stated")
+    _three_stated(root2, rid2)
+    _ok(h.record(root2, rid2, "not-applicable", "--gate", "cp_product_availability", "--reason", "slide 3"))
+    _ok(_profile(rd2, rid2, "shipping"))
+
+
+def test_a_request_that_says_not_to_ask_takes_unsure_for_availability(tmp_path: Path) -> None:
+    root, rid, _rd = h.start_bound(tmp_path, CP, lines=f"FS_HOST_RUN_ID={FIXTURE_RUN}\nFS_HOST_NO_ASK\n")
+    proc = h.record(root, rid, "open", "--gate", "cp_product_availability")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    cur = h.ledger(root, rid)["gates"]["cp_product_availability"]["current"]
+    assert (cur["answer_id"], cur["resolution"]) == ("not_sure", "default_taken")
+
+
+def test_unattended_the_materials_availability_survives_the_batched_open_and_ranks_today(tmp_path: Path) -> None:
+    """Under FS_HOST_NO_ASK the batched open takes `not_sure` at once; the materials' value, recorded after it in
+    one batch with the product questions, replaces it, the profile keeps `shipping`, and today's point is ranked."""
+    from test_competitive_positioning import _make_valid_positioning_input
+
+    root, rid, rd = h.start_bound(tmp_path, CP, lines=f"FS_HOST_RUN_ID={FIXTURE_RUN}\nFS_HOST_NO_ASK\n")
+    rd.mkdir(parents=True, exist_ok=True)
+    keys = [
+        *[f"cp_product_profile.{f}" for f in ("product", "customers", "differentiation")],
+        "cp_product_availability",
+    ]
+    gates = [a for k in keys for a in ("--gate", k)]
+    h.record(root, rid, "open", *gates)  # exits 12 for the product questions; availability takes its default
+    assert h.ledger(root, rid)["gates"]["cp_product_availability"]["current"]["answer_id"] == "not_sure"
+    _ok(h.record(root, rid, "not-applicable", *gates, "--reason", "slide 3 says it is in use"))
+    assert all(h.ledger(root, rid)["gates"][k]["state"] == "not_owed" for k in keys)
+    _ok(_profile(rd, rid, "shipping"))
+    payload = _make_valid_positioning_input()
+    pt = next(p for p in payload["views"][0]["points"] if p["competitor"] == "_startup")
+    pt.update(x=10, y=10, planned_x=90, planned_y=90)
+    scored = h.run(
+        SCRIPTS / "score_positioning.py",
+        "--product-profile",
+        str(rd / "product_profile.json"),
+        stdin=json.dumps(payload),
+    )
+    assert scored.returncode == 0, scored.stderr
+    assert json.loads(scored.stdout)["views"][0]["today"]["ranked"] is True
 
 
 def _compose(rd: Path, *extra: str) -> Any:

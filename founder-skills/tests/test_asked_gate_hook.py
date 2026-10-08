@@ -813,6 +813,18 @@ def _lines(run: Path) -> list[dict[str, Any]]:
     return [json.loads(x) for x in path.read_text(encoding="utf-8").splitlines() if x.strip()]
 
 
+def test_a_reply_typed_while_the_question_card_was_open_is_a_question_asked(tmp_path: Path) -> None:
+    """The reply arrives as the question's own result, with no `is_error` key and the runtime's
+    "The user responded:" wording: it is still `ask_user_question`, never a hold."""
+    run, _paths = _bound(tmp_path, "financial-model-review")
+    question = _question("toolu_card", _labels("fmr_extracted_values"))
+    block = {"type": "tool_result", "tool_use_id": "toolu_card", "content": "The user responded: churn is 4%."}
+    reply = {"type": "user", "message": {"role": "user", "content": [block]}}
+    rows = [*_start("financial-model-review"), question, reply]
+    assert _decide(tmp_path, rows, "CHECKLIST", "financial-model-review") is None
+    assert [(x["decision"], x["evidence"]) for x in _lines(run)] == [("pass", "ask_user_question")]
+
+
 def test_every_decision_is_recorded_beside_the_runs_ref(tmp_path: Path) -> None:
     run, _paths = _bound(tmp_path, "market-sizing")
     reason = _reason(_decide(tmp_path, _start("market-sizing"), "TOP_DOWN_METHODOLOGY", "market-sizing"))
