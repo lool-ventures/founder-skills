@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [0.17.0] - 2026-10-08 — Every question recorded, a run status a host can read, and checks that the key questions were asked
+## [0.17.0] - 2026-10-09 — Every question recorded, a run status a host can read, and checks that the key questions were asked
 
 ### Highlights
 
