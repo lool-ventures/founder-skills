@@ -66,6 +66,19 @@ def test_setup_run_cleans_existing_artifacts_with_clean_flag() -> None:
             assert not os.path.exists(os.path.join(review_dir, name))
 
 
+def test_setup_run_clean_removes_an_earlier_compose_record() -> None:
+    """compose's record of an earlier run's exit must not sit beside a fresh run's artifacts."""
+    with tempfile.TemporaryDirectory() as d:
+        artifacts_root = os.path.join(d, "artifacts")
+        review_dir = os.path.join(artifacts_root, "deck-review-acme-corp")
+        os.makedirs(review_dir)
+        with open(os.path.join(review_dir, "compose_result.json"), "w") as f:
+            f.write('{"run_id": "old", "exit_code": 0}')
+        rc, _, _ = _run(["--artifacts-root", artifacts_root, "--slug", "acme-corp", "--clean"], cwd=d)
+        assert rc == 0
+        assert not os.path.exists(os.path.join(review_dir, "compose_result.json"))
+
+
 def _gate_body(run_id: str, gate_id: str = "stage_confirmation", options: list[str] | None = None) -> dict:
     """A COMPLETE gate, as `gate_state.py emit` would write it.
 

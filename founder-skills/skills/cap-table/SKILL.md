@@ -960,9 +960,9 @@ python3 "$SCRIPTS/compose_report.py" \
   --write-md "$REVIEW_DIR/report.md" --pretty
 ```
 
-`compose_report.py` validates run_id parity (emits `STALE_ARTIFACT` warning on mismatch) and writes the per-run uuid `insertion_marker` Context B will use in Step 11.
+`compose_report.py` checks run_id parity (`STALE_ARTIFACT` if not) and writes the `insertion_marker` Step 11 uses.
 
-**Post-write verification:** `compose_report.py` exits non-zero (code 2) if the output files don't exist or are empty. Exit 10 is a question: ask the gate its JSON names, record it, compose again; never re-run without the answer. Any other non-zero exit: stop and report the exact stderr — do not proceed to Step 9.
+**Post-write verification:** `compose_report.py` exits 2 if an output is missing or empty. On a non-zero exit, read `compose_result.json` beside the report for the codes. Exit 10 is a question: ask the gate its JSON names, record it, compose again; never re-run without the answer. Any other non-zero exit: stop and report the exact stderr — do not proceed to Step 9.
 
 ### Step 9: Generate `report.html`
 

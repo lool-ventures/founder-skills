@@ -3696,4 +3696,8 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    import _compose_result
+    import _ms_gates
+
+    with _compose_result.recording(skill="market-sizing", run_id_of=_ms_gates.run_id_of):
+        main()

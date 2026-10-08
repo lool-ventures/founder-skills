@@ -663,6 +663,7 @@ _STRAY_ALLOWLIST = [
     "corrected_inputs.json",
     "extraction_corrections.json",
     "extraction_corrections.history.jsonl",
+    "compose_result.json",
     "corrections*.json",
     "verify*.json",
     # Context A hand-off audit trail (per-run subdirs; permanent by design)

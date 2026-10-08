@@ -1913,4 +1913,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    import _compose_result
+
+    with _compose_result.recording(skill="ic-sim", run_id_of=lambda d: _ic_gates().run_id_of(d)):
+        main()

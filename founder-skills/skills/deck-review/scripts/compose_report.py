@@ -2298,4 +2298,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    import _compose_result
+
+    with _compose_result.recording(skill="deck-review", run_id_of=_artifacts_run_id):
+        main()

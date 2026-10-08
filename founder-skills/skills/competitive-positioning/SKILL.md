@@ -1045,7 +1045,7 @@ python3 "$SCRIPTS/compose_report.py" --dir "$ANALYSIS_DIR" --pretty \
   --write-md "$ANALYSIS_DIR/report.md"
 ```
 
-`compose_report.py` writes both `report.json` and `report.md` deterministically. **Do NOT** read `report_markdown` out of `report.json` and re-write it via heredoc.
+`compose_report.py` writes both `report.json` and `report.md`. **Do NOT** re-write `report_markdown` from `report.json` via heredoc.
 
 Inspect the warnings in the output. Fix any high-severity warnings (missing artifacts, stale run_id, corrupt JSON, artifacts not written by their producer script) and re-run Pass 1.
 
@@ -1077,7 +1077,7 @@ python3 "$SCRIPTS/compose_report.py" --dir "$ANALYSIS_DIR" --strict --pretty \
   --write-md "$ANALYSIS_DIR/report.md"
 ```
 
-**Post-write verification:** `compose_report.py` exits non-zero (code 2) if the declared output files don't exist or are empty after writing. Exit 10 is a question, not a failure: ask the gate its JSON names (`blocked_by_gate`), record it, compose again; never re-run compose without the answer. `RUN_FINISHED`: an answer this delivered analysis rests on has changed, which starts a new analysis (Step 0). Any other non-zero exit: stop and report the exact stderr — do not proceed.
+**Post-write verification:** `compose_report.py` exits 2 if an output is missing or empty. On a non-zero exit, read `compose_result.json` beside the report for the codes. Exit 10 is a question, not a failure: ask the gate its JSON names (`blocked_by_gate`), record it, compose again; never re-run compose without the answer. `RUN_FINISHED`: an answer this delivered analysis rests on has changed, which starts a new analysis (Step 0). Any other non-zero exit: stop and report the exact stderr — do not proceed.
 
 **7b — Cross-skill lookups:** Use `find_artifact.py` to locate prior deck-review and market-sizing artifacts. If found, note findings for inclusion in coaching commentary. Example (resolve the market-sizing sizing artifact for this company):
 

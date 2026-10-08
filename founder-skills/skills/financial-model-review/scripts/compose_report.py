@@ -2244,4 +2244,8 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    import _compose_result
+    import _fmr_gates
+
+    with _compose_result.recording(skill="financial-model-review", run_id_of=_fmr_gates.run_id_of):
+        main()

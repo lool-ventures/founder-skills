@@ -1008,7 +1008,7 @@ python3 "$SCRIPTS/compose_report.py" --dir "$SIM_DIR" --pretty \
   --write-md "$SIM_DIR/report.md"
 ```
 
-`compose_report.py` writes both `report.json` and `report.md` deterministically. **Do NOT** read `report_markdown` out of `report.json` and re-write it via heredoc — agent heredoc handling can drift and produce unparseable output.
+`compose_report.py` writes both `report.json` and `report.md`. **Do NOT** re-write `report_markdown` from `report.json` via heredoc — agent heredoc handling can drift and produce unparseable output.
 
 Fix high-severity warnings and re-run. Use `--strict` to enforce a clean report.
 
@@ -1020,7 +1020,7 @@ Return (Decline / Invest / More Diligence), never the bare `pass`/`hard_pass` en
 mismatch as a noted caveat (the report already renders this as an executive-summary note); mention in your own summary
 that qualitative debate and the quantitative score diverged, without treating it as an error to fix.
 
-**Post-write verification:** `compose_report.py` exits non-zero (code 2) if the declared output files don't exist or are empty after writing. Exit 10 is a question, not a failure: ask the gate its JSON names (`blocked_by_gate`; `ic_decline_confirmation` is Step 8.5), record it, and compose again; never re-run compose without the answer. `RUN_FINISHED`: the simulation is complete and its score changed; that needs a new simulation (Step 0). Any other non-zero exit: stop and report the exact stderr — do not proceed to Step 10.
+**Post-write verification:** `compose_report.py` exits 2 if an output is missing or empty. On a non-zero exit, read `compose_result.json` beside the report for the codes. Exit 10 is a question, not a failure: ask the gate its JSON names (`blocked_by_gate`; `ic_decline_confirmation` is Step 8.5), record it, and compose again; never re-run compose without the answer. `RUN_FINISHED`: the simulation is complete and its score changed; that needs a new simulation (Step 0). Any other non-zero exit: stop and report the exact stderr — do not proceed to Step 10.
 
 ### Step 10: Post-Compose Coaching Commentary (Context B dispatch — POST_COMPOSE_COACHING)
 

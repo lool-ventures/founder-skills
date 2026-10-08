@@ -957,7 +957,9 @@ SKILL_MD_CEILING: dict[str, int] = {
     # record, the slug block binds it, Step 1 and every question site open, ask and record, exit 10 is a
     # question at Steps 5 and 7, the quick check finishes, Step 9's page carries the run id and Step 10
     # closes the file list (+4,370).
-    "market-sizing": 106_282,
+    # 106,282 -> 106,256 (-26), LOWERED, commit 10 (O3): the compose step says to read compose_result.json on a
+    # non-zero exit, paid for in the same step; "Two codes sit in neither class" loses its aside.
+    "market-sizing": 106_256,
     # fmr raised for two founder-facing-correctness items measured in a live run: the CHECKLIST
     # dispatch now forbids citing our artifact filenames in evidence (that run put `inputs.json` in 10
     # items' evidence, printed verbatim into the founder's report), and the producer pipe passes
@@ -1092,7 +1094,9 @@ SKILL_MD_CEILING: dict[str, int] = {
     # file list and records the cash reply. Five restatements trimmed to fit (the AskUserQuestion-fallback aside,
     # the coaching heredoc parenthetical, Step 12's repeated no-rm paragraph, a stale five-skills sentence, the
     # Path B anecdote).
-    "financial-model-review": 85_520,
+    # 85,520 -> 85,517 (-3), LOWERED, commit 10 (O3): the compose step says to read compose_result.json on a non-
+    # zero exit, paid for in the same step; the heredoc warning shortened, its reason kept.
+    "financial-model-review": 85_517,
     # ic-sim SHRANK: the REQUIRED ic-dynamics.md read at Step 7 is deleted. Step 7 is a pure producer
     # pipe — compose_discussion.py derives discussion.json from the partners' own files and nothing
     # is authored by the main thread — so the read informed no decision while pulling a whole
@@ -1170,7 +1174,9 @@ SKILL_MD_CEILING: dict[str, int] = {
     # starts the run's record after the run-it-now offer, the slug block binds it, Step 1 opens the shared
     # questions with the mode and fund, Step 8.5 opens the decline question by script, compose and the page
     # carry exit-10 / finished-run sentences, Step 12 closes the deliverables list. Eight restatements trimmed.
-    "ic-sim": 94_814,
+    # 94,814 -> 94,811 (-3), LOWERED, commit 10 (O3): the compose step says to read compose_result.json on a non-
+    # zero exit, paid for in the same step; the heredoc warning shortened, its reason kept.
+    "ic-sim": 94_811,
     # deck-review +1,165 B: Step 0 carried only a parenthetical fresh-shell mention buried in a code
     # comment, unlike the four skills that mint RUN_ID in a LATER block and so carry the shared banner.
     # deck-review mints RUN_ID INSIDE this re-runnable Step-0 block (like cap-table), so the shared
@@ -1514,7 +1520,9 @@ SKILL_MD_CEILING: dict[str, int] = {
     # already closed is the producer's line, a round raised now is `claimed_stage`); the `reuse_checkpoints`
     # paragraph no longer names gate_state.json, which `--clean` can now remove while keeping this run's
     # checkpoints; two justification/history sentences removed to pay for it.
-    "deck-review": 113_613,
+    # 113,613 -> 113,610 (-3), LOWERED, commit 10 (O3): the compose step says to read compose_result.json on a
+    # non-zero exit, paid for in the same step; the heredoc warning shortened, its reason kept.
+    "deck-review": 113_610,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
@@ -1697,7 +1705,9 @@ SKILL_MD_CEILING: dict[str, int] = {
     # delivery as a new revision, the pages' run id and the deliverables close; two restatements trimmed.
     # 129,608 -> 129,580: after a re-compose, fresh coaching under the revision's own hand-off file and the way
     # back when that compose is refused; the recall-dispatch rationale and the version-match sentence shortened.
-    "competitive-positioning": 129_580,
+    # 129,580 -> 129,577 (-3), LOWERED, commit 10 (O3): the compose step says to read compose_result.json on a
+    # non-zero exit, paid for in the same step; the heredoc warning shortened, its reason kept.
+    "competitive-positioning": 129_577,
     # cap-table, the largest raise (+2,383 B) and the one with the most founder-visible payoff:
     #   * Main-Thread Return named THREE of the four files Step 12 copies; a live run delivered exactly
     #     three and dropped `{Company}_Cap_Table.html`. All four are now named explicitly.
@@ -1824,6 +1834,8 @@ SKILL_MD_CEILING: dict[str, int] = {
     # (the RUN_ID mint line is out), the slug block binds it; every question is opened, asked and recorded; the
     # extraction is confirmed before it is saved; the lightweight routes and the terms-only fork finish the run;
     # exit-10 carve-outs; the pages take --run-id and Step 12 closes the run's file list.
+    # 156,625 unchanged, commit 10 (O3): the compose step says to read compose_result.json on a non-zero exit,
+    # paid for in the same step (the Step 8 parity sentence shortened).
     "cap-table": 156_625,
 }
 

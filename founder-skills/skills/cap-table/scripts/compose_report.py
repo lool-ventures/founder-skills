@@ -2255,4 +2255,7 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    import _compose_result
+
+    with _compose_result.recording(skill="cap-table", run_id_flag=True):
+        sys.exit(main())

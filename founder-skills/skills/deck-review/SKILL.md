@@ -1249,7 +1249,7 @@ python3 "$SCRIPTS/compose_report.py" --dir "$REVIEW_DIR" --pretty \
 
 **Always pass `--gate-state`, including on a run you believe never gated.** An absent file is fine and says nothing; the flag is what lets the report disclose a stage that was confirmed on the founder's behalf rather than by them. Deciding not to pass it is deciding they do not need to know.
 
-`compose_report.py` writes both `report.json` and `report.md` deterministically. **Do NOT** read `report_markdown` out of `report.json` and re-write it via heredoc — heredoc re-writing can corrupt `report.json`. Compose owns the file outputs.
+`compose_report.py` writes both `report.json` and `report.md`. **Do NOT** re-write `report_markdown` from `report.json` via heredoc — heredoc re-writing can corrupt `report.json`. Compose owns the file outputs.
 
 High-severity warnings split into two kinds — treat them differently:
 
@@ -1271,7 +1271,7 @@ same 13 occurrences in `report.json`. The token almost always enters in a sub-ag
 
 `--strict` counts content findings too, so use it as a pipeline gate only when the checklist outcome is already known-clean.
 
-**Post-write verification:** `compose_report.py` exits non-zero (code 2) if the declared output files don't exist or are empty after writing. Exit 10 is a question, not a failure: for the gate its JSON names (`blocked_by_gate`), a stage gate follows the `gate_action` table (`rebuild` first, then emit); any other is recorded with its `answer_command`, or `not-applicable` if moot. Then re-run `setup_run.py` and compose again. Any other non-zero exit: stop and report the exact stderr — do not proceed to Step 7.
+**Post-write verification:** `compose_report.py` exits 2 if an output is missing or empty. On a non-zero exit, read `compose_result.json` beside the report for the codes. Exit 10 is a question, not a failure: for the gate its JSON names (`blocked_by_gate`), a stage gate follows the `gate_action` table (`rebuild` first, then emit); any other is recorded with its `answer_command`, or `not-applicable` if moot. Then re-run `setup_run.py` and compose again. Any other non-zero exit: stop and report the exact stderr — do not proceed to Step 7.
 
 ### Step 7: Post-Compose Coaching Commentary (Context B dispatch — POST_COMPOSE_COACHING)
 

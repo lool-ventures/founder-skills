@@ -694,11 +694,11 @@ python3 "$SCRIPTS/compose_report.py" --dir "$REVIEW_DIR" --pretty \
   --write-md "$REVIEW_DIR/report.md"
 ```
 
-`compose_report.py` writes both `report.json` and `report.md` deterministically. **Do NOT** read `report_markdown` out of `report.json` and re-write it via heredoc.
+`compose_report.py` writes both `report.json` and `report.md`. **Do NOT** re-write `report_markdown` from `report.json` via heredoc.
 
 Check `validation.warnings`: fix high-severity (corrupt/missing artifacts), present medium-severity (checklist failures, runway inconsistencies, metrics gaps, unsupported comparisons) in the report, note low/info. `--strict` only blocks on high-severity warnings. Fix high-severity warnings, re-deposit, re-compose.
 
-**Post-write verification:** `compose_report.py` exits non-zero (code 2) if the declared output files don't exist or are empty after writing. Exit 10 is a question, not a failure: ask the gate its JSON names (`blocked_by_gate`) — for `fmr_extracted_values` that is Step 3.6 again, then Steps 4–5 — record it, and compose again; never re-run compose without the answer. Any other non-zero exit: stop and report the exact stderr — do not proceed.
+**Post-write verification:** `compose_report.py` exits 2 if an output is missing or empty. On a non-zero exit, read `compose_result.json` beside the report for the codes. Exit 10 is a question, not a failure: ask the gate its JSON names (`blocked_by_gate`) — for `fmr_extracted_values` that is Step 3.6 again, then Steps 4–5 — record it, and compose again; never re-run compose without the answer. Any other non-zero exit: stop and report the exact stderr — do not proceed.
 
 ### Verification Gate 1 (after compose)
 

@@ -1293,6 +1293,8 @@ def test_an_ic_sim_resume_at_the_decline_question_rewrites_only_what_follows_it(
     untouched = {k for k in entry["untouched_since_resume"] if not k.startswith("handoff_")}
     assert untouched == IC_KEPT_ON_RESUME
     assert {"report_json", "report_md", "report_html"} <= set(entry["touched_since_resume"])
+    # compose's own record is a write the resume made, so the evidence shows it rather than leaving it out.
+    assert "compose_result_json" in entry["touched_since_resume"]
 
 
 def test_an_ic_sim_resume_without_the_answer_asks_again(tmp_path: Path) -> None:

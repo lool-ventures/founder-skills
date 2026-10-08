@@ -1008,7 +1008,7 @@ re-running fix it?**
   `SIZING_ALTERED` and `UNIT_CHANGED_AFTER_REJECTION` are disclosures: deliver. Never edit
   `sizing.json`, the review, or a research figure's unit to make any of these agree.
 
-Two codes sit in neither class, and saying so is more useful than filing them wrongly:
+Two codes sit in neither class:
 
 - **`IMPLAUSIBLE_PCT_SCALE`** fires for any share between 0 and 1, because `0.35` meaning
   35% and a legitimate `0.35%` are indistinguishable from the number alone — the producer
@@ -1028,7 +1028,7 @@ for the founder in plain language. A `FOUNDER_TEXT_TOKEN` message says where the
 is and what to do about it.
 
 
-**Post-write verification:** `compose_report.py` exits non-zero (code 2) if the declared output files don't exist or are empty after writing. Exit 10 is a question, not a failure: ask the gate its JSON names (`blocked_by_gate`; `ms_revision` is Step 6d; `ms_methodology` is the Gate, then Steps 5–6 again), record it, compose again; never re-run compose without the answer. Any other non-zero exit: stop and report the exact stderr — do not proceed to Step 8.
+**Post-write verification:** `compose_report.py` exits 2 if an output is missing or empty. On a non-zero exit, read `compose_result.json` beside the report for the codes. Exit 10 is a question, not a failure: ask the gate its JSON names (`blocked_by_gate`; `ms_revision` is Step 6d; `ms_methodology` is the Gate, then Steps 5–6 again), record it, compose again; never re-run compose without the answer. Any other non-zero exit: stop and report the exact stderr — do not proceed to Step 8.
 
 ### Step 8: Post-Compose Coaching Commentary (Context B dispatch, POST_COMPOSE_COACHING)
 
