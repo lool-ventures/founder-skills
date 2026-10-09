@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import datetime as _dt
 import json
+import math
 import os
 import re
 import sys
@@ -448,10 +449,82 @@ _RATIO_METRIC_LABELS: dict[str, tuple[str, ...]] = {
 }
 
 # A number within this many characters AFTER a metric label is treated as a
-# claim about that metric. Wide enough for "burn multiple of roughly 7x".
+# claim about that metric. Wide enough for "burn multiple of roughly 7x". It
+# bounds where the number may START, not where the text is cut: cutting first
+# read "0.4x" at the window's edge as "0".
 _CLAIM_WINDOW_CHARS = 40
 
-_NUMBER_RE = re.compile(r"(?<![\w.])(\d+(?:\.\d+)?)\s*x?")
+# The figure slot after a label: an optional currency sign, the number, and an
+# optional percent or scale suffix. The scale suffix set ([kmb]|bn|mn) is copied
+# from `_evidence_multiple.OPERAND_RE` on purpose rather than shared: that module
+# needs a currency or scale mark where this check needs the opposite, and its
+# header warns against unifying the two grammars. Matched on lowered text, so a
+# lowercase "73.5k" is a scale like "73.5K". A comma belongs to the number only
+# when a digit follows it ("73,516"), so "7, which is high" reads 7.
+_SLOT_RE = re.compile(
+    r"(?<![\w.,])([$€£₹]\s?)?(\d+(?:,\d+)*(?:\.\d+)?)(\s?%|\s?(?:percent|pct)\b|\s?(?:[kmb]|bn|mn)\b)?"
+)
+# A figure written BEFORE the label and touching it: "11-month CAC payback",
+# "0.4x burn multiple". Singular "month" only, so "In 3 months CAC payback fell
+# to 9" does not read 3.
+_PRE_MONTH_RE = re.compile(r"(?<![\w.,$€£₹])(\d+(?:\.\d+)?)[- ]month\s+$")
+_PRE_TIMES_RE = re.compile(r"(?<![\w.,$€£₹])(\d+(?:\.\d+)?)\s?[x×]\s+$")
+_MONTHS_UNIT_RE = re.compile(r"\s?(?:-|\s)?(?:months?|mos?)\b")
+_X_SUFFIX_RE = re.compile(r"\s?[x×](?!\w)")
+# One end of a range ("10-12 months", "1.5x-2x", "between 10 and 12") is not a
+# single claim.
+_RANGE_BEFORE_RE = re.compile(r"\d\s?[x×]?\s?(?:-|–|to)\s?$")
+_RANGE_AFTER_RE = re.compile(r"\s?[x×]?\s?(?:-|–|to)\s?\d")
+_RANGE_BETWEEN_RE = re.compile(r"(?<![a-z])between\s+$")
+_RANGE_AND_RE = re.compile(r"\s?[x×]?\s?and\s?\d")
+# A bound glued to a figure before the label ("a sub-1x burn multiple", "<1x").
+_BOUND_MARK_RE = re.compile(r"(?:sub-?|<|≤|>|≥)\s?$")
+# How far back a figure-before-the-label pattern looks: a short number and its
+# unit, and for the comparative a few words. Bounds the cost per label mention.
+_LOOKBACK_CHARS = 64
+# A number the metric is compared AGAINST ("well under the 3x bar", "against the
+# typical 2x seed bar") is a comparand, not a restatement. "around" and "near" are
+# deliberately absent: "burn multiple of around 7x" is a restatement. Matched as
+# a word: "founder" contains "under".
+_COMPARATIVE_RE = re.compile(
+    r"(?<![a-z])(?:under|below|above|over|exceeds?|exceeding|against|vs\.?|versus|than|toward|towards)"
+    r"\s+(?:the\s+)?(?:\w+\s+){0,2}$"
+)
+_BAR_AFTER_RE = re.compile(r"\s?[x×]?\s+(?:bar|benchmark|target|threshold|guideline|ceiling|rule|norm|median)\b")
+
+# Names of OTHER figures. When one sits between a label and the first number,
+# the number is that figure's ("does not track burn multiple. CAC payback is 14
+# months"). A word that is part of the metric's own labels ("cac" for CAC
+# payback) is left out for that metric.
+_OTHER_FIGURE_WORDS: tuple[str, ...] = (
+    "churn",
+    "gross margin",
+    "runway",
+    "nrr",
+    "grr",
+    "rule of 40",
+    "arr",
+    "mrr",
+    "cac",
+    "ltv",
+)
+_PAYBACK_METRICS = frozenset({"cac_payback"})
+
+
+def _other_figure_re(name: str) -> re.Pattern[str]:
+    own = _RATIO_METRIC_LABELS[name]
+    words = {label for other, labels in _RATIO_METRIC_LABELS.items() if other != name for label in labels}
+    words |= {w for w in _OTHER_FIGURE_WORDS if not any(w in label for label in own)}
+    alternation = "|".join(re.escape(w) for w in sorted(words, key=len, reverse=True))
+    return re.compile(rf"(?<![a-z0-9_])(?:{alternation})(?![a-z0-9_])")
+
+
+# A closed parenthesis between the label and the number is usually the metric's
+# own definition ("burn multiple (net burn / net new ARR) is 7x"); the other-figure
+# names inside it do not stop the search.
+_PARENTHESISED_RE = re.compile(r"\([^()]*\)")
+
+_OTHER_FIGURE_RES: dict[str, re.Pattern[str]] = {name: _other_figure_re(name) for name in _RATIO_METRIC_LABELS}
 
 
 def _numeric(value: Any) -> float | None:
@@ -467,18 +540,51 @@ def _close(a: float, b: float, tolerance: float = 0.05) -> bool:
     return abs(a - b) / denom <= tolerance
 
 
-def _metric_claims_in_text(text: str, labels: tuple[str, ...]) -> list[float]:
-    """The value each mention of `labels` in `text` asserts for that metric.
+def _metric_claims_in_text(text: str, name: str) -> list[float]:
+    """The value each mention of metric `name` in `text` asserts for that metric.
 
-    Only the FIRST number after a label is taken. A restatement puts its figure
-    there ("burn multiple of 7x"), while every number AFTER it is something the
-    metric is being compared to — a benchmark ("4.5x exceeds the 2.0x target") or
-    an adjacent metric ("4.5x and an LTV/CAC of 3.2"). Reading past the first
-    number produced exactly those two false positives, and a check that fires on
-    normal, well-written evidence prose trains the reader to ignore it.
+    Per mention of one of the metric's labels, at most ONE number is read:
+
+    - A figure written just before the label and touching it ("11-month CAC
+      payback", "0.4x burn multiple") is the claim. Payback reads only the
+      singular "N-month" form; the ratios only "Nx". It is no claim when it is
+      one end of a range ("10-12 month"), a bound ("sub-1x", "<1x"), a figure the
+      metric is compared against ("well under the 2x burn multiple") or a bar
+      ("the 12-month CAC payback benchmark").
+    - Otherwise the FIRST number starting within `_CLAIM_WINDOW_CHARS` after the
+      label. A restatement puts its figure there ("burn multiple of 7x"), while
+      every number AFTER it is something the metric is being compared to -- a
+      benchmark ("4.5x exceeds the 2.0x target") or an adjacent metric ("4.5x
+      and an LTV/CAC of 3.2"). Reading past the first number produced exactly
+      those two false positives.
+
+    That first number is no claim -- and the search STOPS rather than skipping
+    to the next one -- when it carries a currency sign, a percent, a scale
+    suffix or a thousands separator (it is another figure: "3.1% churn",
+    "$73.5K"), when another figure's name sits between it and the label outside
+    a closed parenthesis (a definition such as "(net burn / net new ARR)" does
+    not count), when its unit is the wrong one for the metric (months after a
+    ratio, "x" after a payback), when it is one end of a range ("10-12 months", "1.5x to 2x",
+    "between 10 and 12"), or when it is a comparand ("well under the 3x bar"). A
+    bare "payback" label counts for CAC payback only with a months unit ("payback
+    of 14 months").
+
+    There is deliberately no stop at the end of a sentence: "does not track
+    burn multiple. On its inputs it works out to about 0.4x" would otherwise go
+    unchecked. The accepted cost: "burn multiple. Revenue grew 7x" reads 7.
+    Also accepted: a comparative restatement ("of over 7x", "more than 7x") and a
+    definition outside parentheses ("burn multiple, i.e. net burn/net new ARR,
+    7x") are not read.
     """
     found: list[float] = []
+    # Every search and every offset below is into `lowered` alone, never mixed with
+    # `text`: a character whose lowercase form is longer ("İ") would otherwise shift
+    # one string's offsets against the other's.
     lowered = text.lower()
+    payback = name in _PAYBACK_METRICS
+    labels = _RATIO_METRIC_LABELS[name] + (("payback",) if payback else ())
+    pre = _PRE_MONTH_RE if payback else _PRE_TIMES_RE
+    other_figure = _OTHER_FIGURE_RES[name]
     for label in labels:
         start = 0
         while True:
@@ -486,15 +592,50 @@ def _metric_claims_in_text(text: str, labels: tuple[str, ...]) -> list[float]:
             if at < 0:
                 break
             start = at + len(label)
-            window = text[start : start + _CLAIM_WINDOW_CHARS]
-            match = _NUMBER_RE.search(window)
-            if match is None:
+            before = pre.search(lowered, max(0, at - _LOOKBACK_CHARS), at)
+            if before is not None:
+                num_at = before.start(1)
+                back = max(0, num_at - _LOOKBACK_CHARS)
+                if not (
+                    _RANGE_BEFORE_RE.search(lowered, back, num_at)
+                    or _COMPARATIVE_RE.search(lowered, back, num_at)
+                    or _BOUND_MARK_RE.search(lowered, back, num_at)
+                    or _BAR_AFTER_RE.match(lowered, start)
+                ):
+                    _append_finite(found, before.group(1))
                 continue
-            try:
-                found.append(float(match.group(1)))
-            except ValueError:
+            slot = _SLOT_RE.search(lowered, start)
+            if slot is None or slot.start() - start > _CLAIM_WINDOW_CHARS:
                 continue
+            if slot.group(1) or slot.group(3) or "," in slot.group(2):
+                continue
+            between = lowered[start : slot.start()]
+            if other_figure.search(_PARENTHESISED_RE.sub(" ", between)):
+                continue
+            if _COMPARATIVE_RE.search(between) or _BAR_AFTER_RE.match(lowered, slot.end()):
+                continue
+            if _RANGE_AFTER_RE.match(lowered, slot.end()) or _RANGE_BEFORE_RE.search(
+                lowered, max(0, slot.start() - _LOOKBACK_CHARS), slot.start()
+            ):
+                continue
+            if _RANGE_BETWEEN_RE.search(between) and _RANGE_AND_RE.match(lowered, slot.end()):
+                continue
+            if payback:
+                if _X_SUFFIX_RE.match(lowered, slot.end()):
+                    continue
+                if label == "payback" and not _MONTHS_UNIT_RE.match(lowered, slot.end()):
+                    continue
+            elif _MONTHS_UNIT_RE.match(lowered, slot.end()):
+                continue
+            _append_finite(found, slot.group(2))
     return found
+
+
+def _append_finite(found: list[float], digits: str) -> None:
+    """Append the figure unless it is too long to be one (a 310-digit run reads as inf)."""
+    value = float(digits)
+    if math.isfinite(value):
+        found.append(value)
 
 
 #: Founder-facing stand-in when a checklist item carries no label. Never the criterion id.
@@ -621,7 +762,7 @@ def _check_metric_self_contradiction(
     seen: set[tuple[str, float]] = set()
     for criterion, text in texts:
         for name, value in canonical.items():
-            for claim in _metric_claims_in_text(text, _RATIO_METRIC_LABELS[name]):
+            for claim in _metric_claims_in_text(text, name):
                 if any(_close(claim, allowed) for allowed in permitted[name]):
                     continue
                 dedup_key = (name, round(claim, 3))

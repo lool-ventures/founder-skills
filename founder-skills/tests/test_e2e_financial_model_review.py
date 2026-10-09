@@ -206,6 +206,42 @@ def metric_self_contradictions(report_json: dict) -> list[dict]:
     ]
 
 
+_RATIO_METRICS = ("burn_multiple", "ltv_cac_ratio", "magic_number", "cac_payback")
+
+
+def contradiction_context(review_dir: Path, contradictions: list[dict]) -> tuple[list[tuple[str, str]], dict]:
+    """What a contradiction warning was raised over, so a red can be read from the log.
+
+    Returns (criterion id, its evidence sentence) per warning -- the id parsed from the message, the
+    warning has no structured id field -- and each ratio metric's computed value and benchmark.
+    Diagnostic only: nothing is asserted from it.
+    """
+
+    def _load(name: str) -> dict:
+        try:
+            data = json.loads((review_dir / name).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    evidence_by_id = {
+        str(item.get("id")): str(item.get("evidence") or "")
+        for item in _load("checklist.json").get("items") or []
+        if isinstance(item, dict)
+    }
+    pairs: list[tuple[str, str]] = []
+    for w in contradictions:
+        m = re.search(r"criterion '([^']+)'", str(w.get("message") or ""))
+        criterion = m.group(1) if m else "?"
+        pairs.append((criterion, evidence_by_id.get(criterion, "<no such criterion in checklist.json>")))
+    computed = {
+        str(metric.get("id") or metric.get("name")): (metric.get("value"), metric.get("benchmark"))
+        for metric in _load("unit_economics.json").get("metrics") or []
+        if isinstance(metric, dict) and (metric.get("id") or metric.get("name")) in _RATIO_METRICS
+    }
+    return pairs, computed
+
+
 @pytest.mark.e2e
 @pytest.mark.skipif(
     not has_claude_auth(),
@@ -414,14 +450,21 @@ def test_financial_model_review_smoke(tmp_path: Path) -> None:
     ordered, order_why = unit_economics_before_checklist(cap.tool_uses)
     ck_reads = checklist_read_paths(cap.tool_uses)
     contradictions = metric_self_contradictions(report_json)
+    contradiction_evidence, computed_ratios = contradiction_context(review_dir, contradictions)
     print(
         f"[e2e:fmr] step order: {ordered} ({order_why}); checklist reads: {ck_reads}; "
         f"METRIC_SELF_CONTRADICTION: {len(contradictions)}",
         flush=True,
     )
+    for criterion, evidence in contradiction_evidence:
+        print(f"[e2e:fmr]   contradiction in {criterion}: {evidence!r}", flush=True)
+    if contradictions:
+        print(f"[e2e:fmr]   computed ratios (value, benchmark): {computed_ratios}", flush=True)
     step_summary(
         f"- unit_economics before CHECKLIST: {ordered} ({order_why})\n"
         f"- METRIC_SELF_CONTRADICTION warnings: {len(contradictions)}\n"
+        + "".join(f"  - {criterion}: {evidence!r}\n" for criterion, evidence in contradiction_evidence)
+        + (f"  - computed ratios (value, benchmark): {computed_ratios}\n" if contradictions else "")
     )
     # (a) ORDER. A CHECKLIST dispatched before unit_economics.py ran has no computed figures to
     # read, so it computes its own burn multiple / payback / LTV:CAC -- the second number the
@@ -439,7 +482,8 @@ def test_financial_model_review_smoke(tmp_path: Path) -> None:
     # number; this is the founder-visible consequence, judged by compose's own check.
     assert not contradictions, (
         "the checklist states a metric value that contradicts unit_economics.json: "
-        f"{[w.get('message') for w in contradictions]}. Inspect {review_dir}"
+        f"{[w.get('message') for w in contradictions]}. Evidence: {contradiction_evidence}. "
+        f"Computed (value, benchmark): {computed_ratios}. Inspect {review_dir}"
     )
 
     # The founder's message CONTAINS the printed hand-over, whole: the report's own verdict (rating and

@@ -22,6 +22,8 @@ import sys
 import tempfile
 from typing import Any
 
+import pytest
+
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 FMR_SCRIPTS_DIR = os.path.join(os.path.dirname(SCRIPT_DIR), "skills", "financial-model-review", "scripts")
 FIXTURES_DIR = os.path.join(SCRIPT_DIR, "fixtures")
@@ -8704,7 +8706,14 @@ def test_extract_model_output_size_warning() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _ue_with_ratios(burn_multiple: float = 4.5, ltv_cac: float = 3.2) -> dict[str, Any]:
+_DEFAULT_BURN_BENCHMARK: dict[str, Any] = {"target": 2.0, "source": "test", "as_of": "2025-Q1"}
+
+
+def _ue_with_ratios(
+    burn_multiple: float = 4.5,
+    ltv_cac: float = 3.2,
+    burn_benchmark: dict[str, Any] | None = _DEFAULT_BURN_BENCHMARK,
+) -> dict[str, Any]:
     return {
         "metrics": [
             {
@@ -8713,7 +8722,7 @@ def _ue_with_ratios(burn_multiple: float = 4.5, ltv_cac: float = 3.2) -> dict[st
                 "value": burn_multiple,
                 "rating": "warning",
                 "evidence": "Net burn over net-new ARR",
-                "benchmark": {"target": 2.0, "source": "test", "as_of": "2025-Q1"},
+                "benchmark": dict(burn_benchmark) if burn_benchmark is not None else None,
                 "benchmark_source": "test",
                 "benchmark_as_of": "2025-Q1",
             },
@@ -8879,6 +8888,382 @@ def test_metric_self_contradiction_absent_when_evidence_agrees() -> None:
         _checklist_with_evidence("Burn multiple of 4.5x and an LTV/CAC of 3.2 are both in range."),
     )
     assert "METRIC_SELF_CONTRADICTION" not in codes
+
+
+# ---------------------------------------------------------------------------
+# METRIC_SELF_CONTRADICTION -- what counts as a figure FOR the metric
+#
+# The check read the first bare number within 40 characters after a metric's name, so a sentence
+# listing several metrics ("an 11-month CAC payback and 3.1% monthly churn") was read as a second
+# payback figure of 3.1, and "about 0.4x" cut at the window's edge was read as 0. These tests run
+# the check in-process (one per rule, so reverting a rule reds the test named for it); the two
+# compose-level tests at the end go through the real script.
+# ---------------------------------------------------------------------------
+
+_PAYBACK_BENCHMARK: dict[str, Any] = {"target": 12.0, "source": "test", "as_of": "2025-Q1"}
+_FMR_COMPOSE_CACHE: list[Any] = []
+
+
+def _fmr_compose() -> Any:
+    if not _FMR_COMPOSE_CACHE:
+        _FMR_COMPOSE_CACHE.append(_load_fmr_compose_module())
+    return _FMR_COMPOSE_CACHE[0]
+
+
+def _flagged_claims(
+    evidence: str,
+    metrics: dict[str, tuple[float, dict[str, Any] | None]],
+) -> dict[str, list[float]]:
+    """{metric: [figures the check flags as contradicting it]} for one evidence string."""
+    unit_economics = {
+        "metrics": [
+            {"id": name, "name": name, "value": value, "rating": "contextual", "benchmark": benchmark}
+            for name, (value, benchmark) in metrics.items()
+        ]
+    }
+    checklist = {"items": [{"id": "METRIC_35", "label": "Benchmarks", "status": "warn", "evidence": evidence}]}
+    flagged: dict[str, list[float]] = {}
+    for warning in _fmr_compose()._check_metric_self_contradiction(unit_economics, checklist):
+        assert warning["code"] == "METRIC_SELF_CONTRADICTION"
+        match = re.match(r"(\w+) is computed as .* states ([-\d.,]+) for the same metric", warning["message"])
+        assert match is not None, warning["message"]
+        flagged.setdefault(match.group(1), []).append(float(match.group(2).replace(",", "")))
+    return flagged
+
+
+def _unbenched(metric: str, computed: float, evidence: str) -> list[float]:
+    """As `_flags`, with no benchmark at all, so no benchmark value can mask a misread."""
+    return _flagged_claims(evidence, {metric: (computed, None)}).get(metric, [])
+
+
+def _flags(metric: str, computed: float, evidence: str, benchmark: dict[str, Any] | None = None) -> list[float]:
+    if benchmark is None and metric == "cac_payback":
+        benchmark = _PAYBACK_BENCHMARK
+    return _flagged_claims(evidence, {metric: (computed, benchmark)}).get(metric, [])
+
+
+# The metric phrases recorded reviews of the synthetic fixture wrote (computed CAC payback 11), each
+# kept as written inside a shortened sentence (same text between label and figure, same reading path).
+# The full recorded sentences pass too, in a replay over the kept review runs. The first two were
+# flagged before this fix, reading the churn's 3.1 as a payback figure; the other six are pins.
+_RECORDED_PAYBACK_SENTENCES = [
+    "Revenue growth, 76% gross margin, 11-month CAC payback and 3.1% monthly churn are never compared with peers.",
+    "The model never sets its 11-month CAC payback or 3.1% monthly logo churn against seed-stage SaaS peers.",
+    "Nothing places the 11-month payback or 3.1% monthly churn beside a peer range.",
+    "The review does not compare the 3.1% monthly logo churn or 11-month CAC payback to seed SaaS peers.",
+    "Key metrics (churn (3.1%/month), gross margin (76%), CAC payback (11 months)) have no benchmark beside them.",
+    "No peer comparison for gross margin (76%), CAC payback (11 months) and monthly churn (3.1%).",
+    "The model reports a CAC payback of 11 months but never says whether that is good for its stage.",
+    "Its 76% margin and the 11-month CAC payback are not compared with any benchmark.",
+]
+
+
+@pytest.mark.parametrize("evidence", _RECORDED_PAYBACK_SENTENCES)
+def test_metric_claim_recorded_payback_sentences_do_not_fire(evidence: str) -> None:
+    assert _flags("cac_payback", 11.0, evidence) == []
+
+
+def test_metric_claim_unit_stops_the_search() -> None:
+    """The first number after the name carries a percent, currency or scale: it is another figure.
+
+    The search STOPS there rather than skipping on to the next bare number (194 here).
+    """
+    assert _flags("cac_payback", 11.0, "CAC payback and 3.1% churn, with 194 customers") == []
+    assert _flags("burn_multiple", 0.4, "burn multiple not stated, churn 3.1%") == []
+    assert _flags("burn_multiple", 0.4, "burn multiple not tracked, against $2M of burn") == []
+    assert _flags("burn_multiple", 0.4, "burn multiple not stated; $9 per seat") == []
+
+
+def test_metric_claim_stops_at_a_grouping_comma() -> None:
+    """A number written with a thousands separator is an amount, not a ratio."""
+    evidence = (
+        "The model does not track burn multiple. One can be calculated from its figures "
+        "(73,516 net burn / 183,000 net new ARR = 0.4x)."
+    )
+    assert _flags("burn_multiple", 0.4, evidence) == []
+    assert _flags("burn_multiple", 4.46, "Burn multiple = 900,000 / 201,800, about 4.5x") == []
+
+
+def test_metric_claim_scale_and_percent_words_are_matched_in_any_case() -> None:
+    """A lowercase "73.5k" is an amount like "73.5K"; "3.1 percent" is a percentage like "3.1%"."""
+    evidence = (
+        "The model does not track a burn multiple. Net burn of 73.5k a month against net new ARR "
+        "works out to roughly 0.4x."
+    )
+    assert _flags("burn_multiple", 0.4, evidence) == []
+    assert _flags("cac_payback", 11.0, "CAC payback and 3.1 percent churn") == []
+    assert _flags("cac_payback", 11.0, "CAC payback and 3.1 pct churn") == []
+
+
+def test_metric_claim_months_unit_is_matched_in_any_case() -> None:
+    assert _flags("cac_payback", 11.0, "Payback of 15 Months") == [15.0]
+
+
+def test_metric_claim_another_figures_name_stops_the_search() -> None:
+    """ "does not track X. <the figures it does have>" -- the next number is another metric's."""
+    assert _flags("burn_multiple", 0.4, "The model does not track burn multiple. CAC payback is 14 months.") == []
+    assert _flags("burn_multiple", 0.4, "The model does not track burn multiple; LTV/CAC of 3.8x.") == []
+    assert _flags("burn_multiple", 0.4, "burn multiple not stated; runway 14 months") == []
+    assert _flags("cac_payback", 11.0, "CAC payback not shown; LTV/CAC is 3.8x") == []
+    assert _flags("cac_payback", 11.0, "CAC payback not shown; burn multiple 0.4x") == []
+
+
+def test_metric_claim_another_figures_name_is_matched_as_a_word() -> None:
+    """ "arr" inside "narrowed" is not ARR."""
+    assert _flags("burn_multiple", 0.4, "burn multiple, which narrowed to 7x") == [7.0]
+
+
+def test_metric_claim_months_are_not_a_ratio() -> None:
+    assert _flags("burn_multiple", 0.4, "burn multiple of 3 months") == []
+    assert _flags("burn_multiple", 0.4, "burn multiple not tracked; 18 months of runway") == []
+
+
+def test_metric_claim_a_multiple_is_not_a_payback() -> None:
+    assert _flags("cac_payback", 11.0, "CAC payback of 3.8x") == []
+
+
+def test_metric_claim_range_before_the_name_is_no_claim() -> None:
+    assert _unbenched("cac_payback", 11.0, "a 10-12 month CAC payback is typical") == []
+    assert _flags("burn_multiple", 0.4, "a 1.5-2x burn multiple is typical") == []
+    assert _flags("burn_multiple", 0.4, "a 1.5x-2x burn multiple is typical") == []
+
+
+def test_metric_claim_range_after_the_name_is_no_claim() -> None:
+    assert _flags("cac_payback", 11.0, "CAC payback of 10-12 months is typical") == []
+    assert _flags("cac_payback", 11.0, "CAC payback of 10–12 months is typical") == []
+    assert _flags("burn_multiple", 0.4, "burn multiple of 1.5-2x is typical") == []
+
+
+def test_metric_claim_comparative_marks_a_comparand() -> None:
+    """A number the metric is compared AGAINST is not a second figure for it."""
+    assert _flags("burn_multiple", 0.4, "burn multiple well under the 3x bar") == []
+    assert _flags("burn_multiple", 0.4, "burn multiple against the typical 2x seed bar") == []
+
+
+def test_metric_claim_bar_noun_marks_a_comparand() -> None:
+    assert _flags("burn_multiple", 0.4, "burn multiple is the 3x bar") == []
+    assert _flags("burn_multiple", 0.4, "burn multiple: 3x benchmark for seed") == []
+
+
+def test_metric_claim_number_before_the_name_must_touch_it() -> None:
+    assert _flags("burn_multiple", 0.4, "well under the 3x bar for burn multiple") == []
+    assert _flags("burn_multiple", 0.4, "the usual 3x bar on burn multiple") == []
+
+
+def test_metric_claim_before_the_name_reads_singular_month_only() -> None:
+    """ "In 3 months CAC payback fell to 9" is a payback of 9, not 3."""
+    assert _flags("cac_payback", 9.0, "In 3 months CAC payback fell to 9") == []
+
+
+def test_metric_claim_window_reads_a_number_whole() -> None:
+    """The window bounds where a number STARTS; it no longer cuts "0.4x" to "0"."""
+    evidence = "Burn multiple on these inputs works out to roughly 0.4x."
+    lowered = evidence.lower()
+    rest = lowered[lowered.find("burn multiple") + len("burn multiple") :]
+    assert rest.find("0.4") in (38, 39), "the figure must start at the window's edge for this test to bite"
+    assert _flags("burn_multiple", 0.4, evidence) == []
+    assert _flags("burn_multiple", 0.4, evidence.replace("0.4x", "7.5x")) == [7.5]
+
+
+def test_metric_claim_number_starting_past_the_window_is_no_claim() -> None:
+    evidence = "burn multiple is never reported in this model or in its notes; it has 7 tabs"
+    lowered = evidence.lower()
+    assert lowered.find("7") - (lowered.find("burn multiple") + len("burn multiple")) > 40
+    assert _flags("burn_multiple", 0.4, evidence) == []
+
+
+def test_metric_claim_bare_payback_needs_a_months_unit() -> None:
+    assert _flags("cac_payback", 11.0, "the payback on 3 new hires") == []
+    assert _flags("cac_payback", 11.0, "payback of 14 monthly cohorts") == []
+
+
+def test_metric_claim_before_the_name_comparative_marks_a_comparand() -> None:
+    assert _flags("burn_multiple", 0.4, "against the typical 2x burn multiple") == []
+    assert _flags("burn_multiple", 0.4, "it works out well under the 2x burn multiple") == []
+
+
+def test_metric_claim_before_the_name_bar_noun_marks_a_comparand() -> None:
+    assert _flags("burn_multiple", 0.4, "within the 2x burn multiple benchmark for seed") == []
+    assert _unbenched("cac_payback", 11.0, "the 12-month CAC payback benchmark investors expect") == []
+    assert _unbenched("cac_payback", 11.0, "well inside the 18-month CAC payback ceiling") == []
+
+
+def test_metric_claim_before_the_name_bound_is_no_claim() -> None:
+    assert _flags("burn_multiple", 0.4, "a sub-1x burn multiple") == []
+    assert _flags("burn_multiple", 0.4, "a <1x burn multiple") == []
+
+
+def test_metric_claim_comparative_is_matched_as_a_word() -> None:
+    """ "founder" contains "under", "turnover" contains "over": neither marks a comparand."""
+    assert _flags("burn_multiple", 0.4, "burn multiple the founder reports as 7x") == [7.0]
+    assert _flags("burn_multiple", 0.4, "the burn multiple the founder calculates at 7x") == [7.0]
+    assert _flags("burn_multiple", 0.4, "burn multiple on turnover 7x") == [7.0]
+
+
+def test_metric_claim_comma_after_a_number_is_not_a_separator() -> None:
+    assert _flags("burn_multiple", 0.4, "burn multiple of 7, which is high") == [7.0]
+    assert _flags("cac_payback", 11.0, "CAC payback is 15, far above the 12-month bar") == [15.0]
+    assert _flags("cac_payback", 11.0, "CAC payback of 15, under the 24-month bar") == [15.0]
+    assert _flags("burn_multiple", 0.4, "burn multiple of 1,2x") == []
+    assert _flags("burn_multiple", 0.4, "burn multiple of 7,500x") == []
+
+
+def test_metric_claim_range_with_multiples_is_no_claim() -> None:
+    graded = {"target": 2.0}
+    assert _flags("burn_multiple", 1.8, "burn multiple of 1.5x-2x is typical", graded) == []
+    assert _flags("burn_multiple", 1.8, "burn multiple of 1.5x to 2x is typical", graded) == []
+    assert _flags("burn_multiple", 8.5, "burn multiple of 7x-10x") == []
+
+
+def test_metric_claim_between_range_is_no_claim() -> None:
+    assert _flags("burn_multiple", 1.8, "burn multiple between 1.5x and 2x is typical", {"target": 2.0}) == []
+    assert _flags("cac_payback", 11.0, "CAC payback typically between 10 and 12 months") == []
+
+
+def test_metric_claim_definition_in_parentheses_does_not_stop_the_search() -> None:
+    assert _flags("burn_multiple", 0.4, "burn multiple (net burn / net new ARR) is 7x") == [7.0]
+    assert _flags("burn_multiple", 0.4, "burn multiple (net burn over net new ARR) of 7x") == [7.0]
+    assert _flags("magic_number", 1.2, "magic number (net new ARR / S&M spend) of 0.5") == [0.5]
+    assert _flags("cac_payback", 11.0, "CAC payback (CAC / gross margin per customer) of 20 months") == [20.0]
+    # An open parenthesis around another figure still stops it.
+    assert _flags("burn_multiple", 0.4, "burn multiple not stated (CAC payback is 15 months)") == []
+
+
+def test_metric_claim_an_overlong_digit_run_is_no_claim() -> None:
+    """A run of digits too long to be a figure reads as infinity; it is dropped, never printed."""
+    assert _flags("burn_multiple", 0.4, "burn multiple of " + "9" * 400 + "x") == []
+    assert _flags("burn_multiple", 0.4, "9" * 400 + "x burn multiple") == []
+
+
+def test_metric_claim_documented_misses() -> None:
+    """Accepted: these restatements are not read, as the price of not reading comparands."""
+    for evidence in (
+        "burn multiple of over 7x",
+        "burn multiple of just over 7x",
+        "burn multiple of more than 7x",
+        "burn multiple exceeds 7x",
+        "burn multiple higher than 7x",
+        "burn multiple climbed toward 7x",
+        "burn multiple at this runway is 7x",
+        "burn multiple, i.e. net burn/net new ARR, 7x",
+    ):
+        assert _flags("burn_multiple", 0.4, evidence) == [], evidence
+
+
+def test_metric_claim_documented_older_misreads() -> None:
+    """Unchanged from before this fix, recorded so a change to them is deliberate."""
+    assert _flags("burn_multiple", 0.4, "burn multiple in 2024 was 7x") == [2024.0]
+    assert _flags("burn_multiple", 0.4, "burn multiple in the 3rd quarter was 7x") == [3.0]
+    assert _flags("burn_multiple", -0.4, "burn multiple of -0.4x") == [0.4]
+    assert _flags("cac_payback", 11.0, "CAC payback improved, with 173 customers added") == [173.0]
+    # Changed by the range rule: "from 2x to 0.4x" is now no claim (it read 2 before).
+    assert _flags("burn_multiple", 0.4, "burn multiple fell from 2x to 0.4x") == []
+
+
+def test_metric_claim_recorded_comparand_after_the_name_does_not_fire() -> None:
+    assert _flags("burn_multiple", 0.4, "Burn multiple works out well under 1x ($73.5K monthly burn).") == []
+
+
+def test_metric_claim_recorded_two_sentence_burn_multiple_does_not_fire() -> None:
+    evidence = (
+        "The model does not track burn multiple. On its inputs it works out to about 0.4x "
+        "(net burn $73,516 against net new ARR of $183k)."
+    )
+    assert _flags("burn_multiple", 0.4, evidence) == []
+
+
+def test_metric_claim_has_no_sentence_stop() -> None:
+    """Documented behaviour, not a goal: there is no stop at a sentence's end.
+
+    A stop would leave "does not track burn multiple. On its inputs it works out to about 0.4x"
+    unchecked. The accepted cost is this string, which reads 7 as a burn multiple.
+    """
+    assert _flags("burn_multiple", 0.4, "burn multiple. Revenue grew 7x") == [7.0]
+
+
+def test_metric_claim_two_metrics_in_one_sentence_each_read_correctly() -> None:
+    flagged = _flagged_claims(
+        "burn multiple of 0.4. CAC payback 11 months",
+        {"burn_multiple": (0.4, None), "cac_payback": (11.0, _PAYBACK_BENCHMARK)},
+    )
+    assert flagged == {}
+
+
+def test_metric_claim_index_is_taken_from_one_string() -> None:
+    """A character whose lowercase form is longer ("İ") must not shift the figure's position."""
+    assert _flags("burn_multiple", 0.4, "\u0130\u0130\u0130\u0130 Burn Multiple 7x") == [7.0]
+
+
+@pytest.mark.parametrize(
+    ("metric", "computed", "evidence", "expected"),
+    [
+        ("cac_payback", 11.0, "a 15-month CAC payback", 15.0),
+        ("cac_payback", 11.0, "the payback of 15 months is long", 15.0),
+        ("cac_payback", 15.0, "an 11-month payback period", 11.0),
+        ("cac_payback", 11.0, "CAC payback of 15 months and 3.1% churn", 15.0),
+        ("burn_multiple", 0.4, "burn multiple of 7x", 7.0),
+        ("burn_multiple", 0.4, "7x burn multiple", 7.0),
+        ("burn_multiple", 0.4, "a ~7x burn multiple", 7.0),
+        ("burn_multiple", 0.4, "burn multiple of 7x and 3.1% churn", 7.0),
+        ("burn_multiple", 0.4, "burn multiple of around 7x", 7.0),
+        ("burn_multiple", 2.14, "implying a burn multiple of roughly 26×", 26.0),
+        # No benchmark and no bars list: a figure equal to a common bar is still a restatement.
+        ("burn_multiple", 0.4, "burn multiple of 2x", 2.0),
+        ("burn_multiple", 0.4, "burn multiple at 4x", 4.0),
+        ("magic_number", 1.2, "magic number of 0.5", 0.5),
+        ("ltv_cac_ratio", 3.59, "LTV/CAC of 3x", 3.0),
+    ],
+)
+def test_metric_claim_restatement_that_disagrees_fires(
+    metric: str, computed: float, evidence: str, expected: float
+) -> None:
+    assert _flags(metric, computed, evidence) == [expected]
+
+
+def test_e2e_contradiction_context_names_the_evidence_and_computed_value(tmp_path: Any) -> None:
+    """The paid lane's diagnostic, run free: a red must print the sentence and the computed figure."""
+    from test_e2e_financial_model_review import contradiction_context
+
+    (tmp_path / "checklist.json").write_text(
+        json.dumps({"items": [{"id": "METRIC_34", "evidence": "Burn multiple of 7x."}, {"id": "X", "evidence": "y"}]})
+    )
+    (tmp_path / "unit_economics.json").write_text(
+        json.dumps({"metrics": [{"id": "burn_multiple", "value": 0.4, "benchmark": None}, {"id": "nrr", "value": 1.1}]})
+    )
+    warning = {"message": "burn_multiple is computed as 0.4 ..., but checklist criterion 'METRIC_34' states 7 ..."}
+    pairs, computed = contradiction_context(tmp_path, [warning])
+    assert pairs == [("METRIC_34", "Burn multiple of 7x.")]
+    assert computed == {"burn_multiple": (0.4, None)}
+    assert contradiction_context(tmp_path / "missing", []) == ([], {})
+    # The lane's hand copy of the ratio metrics must match the check's own list.
+    from test_e2e_financial_model_review import _RATIO_METRICS
+
+    assert set(_RATIO_METRICS) == set(_fmr_compose()._RATIO_METRIC_LABELS)
+
+
+def test_metric_self_contradiction_quiet_on_recorded_ungraded_burn_multiple() -> None:
+    """A sentence a release check recorded, against the ungraded burn multiple it was written for.
+
+    The money amount right after the name was read as a burn multiple of 73.5.
+    """
+    codes = _compose_codes(
+        _ue_with_ratios(burn_multiple=0.4, burn_benchmark=None),
+        _checklist_with_evidence(
+            "The model does not track a burn multiple. From its figures, net burn ($73.5K a month) against "
+            "net new ARR works out to roughly 0.4x. We have left that ungraded on purpose: with growth this "
+            "early and this fast (about 14% a month), comparing it to the usual benchmark bands would flatter "
+            "the company in a way investors will discount."
+        ),
+    )
+    assert "METRIC_SELF_CONTRADICTION" not in codes
+
+
+def test_metric_self_contradiction_ungraded_restatement_still_fires() -> None:
+    codes = _compose_codes(
+        _ue_with_ratios(burn_multiple=0.4, burn_benchmark=None),
+        _checklist_with_evidence("Burn multiple of 2x on the model's own figures."),
+    )
+    assert "METRIC_SELF_CONTRADICTION" in codes
 
 
 # ---------------------------------------------------------------------------

@@ -5,9 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [0.17.1] - 2026-10-09 — Request lines honoured when they arrive as the skill's arguments
+## [0.17.2] - 2026-10-09 — A model review no longer reports a second figure it never stated, and request lines are honoured as the skill's arguments
 
 ### Highlights
+
+This release also carries the fixes prepared as 0.17.1, which was not published on its own.
+
+**The financial model review no longer warns that it shows two different numbers for a metric when it
+stated only one.** The review checks that every figure it quotes for burn multiple, CAC payback, LTV/CAC
+or magic number agrees with the figure it computed. It could misread a sentence such as "an 11-month CAC
+payback and 3.1% monthly churn": it took the churn percentage as a second payback figure, then told you
+the report gave two payback figures, 11 and 3.1. A number cut off at the edge of what it read ("0.4x" read
+as 0) caused the same false warning for burn multiple. The check now reads a figure written just before
+the metric's name ("11-month", "0.4x") and reads a number whole. It no longer takes as the metric's figure
+a percentage, an amount of money, a number written with a thousands separator, a figure that belongs to
+another metric named in between, a figure in the wrong unit (months for a ratio), one end of a range, or a
+benchmark the metric is being compared against. A real disagreement between two figures is still
+reported, with the same wording as before.
 
 **A run whose request lines arrive as the skill's arguments is no longer held for questions the request
 already settled.** Some hosts pass the request's lines (the run id, "do not ask", an answer to a question)
@@ -22,6 +36,14 @@ None.
 
 ### Fixed
 
+- Financial model review: a sentence listing several metrics together ("an 11-month CAC payback and 3.1%
+  monthly churn") no longer produces a warning that the report shows two different numbers for one of
+  them.
+- Financial model review: a figure written before the metric's name ("a 14-month CAC payback", "a 7x burn
+  multiple") is now checked against the computed figure, as is a payback stated as "payback of 14 months".
+- Financial model review: a benchmark the review compares a metric against, such as "well under the 3x
+  bar", is no longer read as a second figure for it, and neither is a range ("10-12 months") or a figure
+  that belongs to the next metric in the sentence.
 - For a host that passes its request lines as the skill's arguments: a run whose request said not to ask
   is no longer held at the market sizing approach and figures, financial model review's extracted values
   or the IC simulation's Decline confirmation, and the end-of-turn check no longer asks it to attach
@@ -37,8 +59,15 @@ None.
 
 Contributor-facing only; nothing here changes what a founder installs or runs.
 
+- Where the false contradiction warning was a review's only warning, `report.json`'s `validation.status`
+  and `compose_result.json` now read "clean" rather than "warnings"; a host reading either sees one
+  warning fewer. No score, grade or rating changes, and the coaching never received this warning.
+- Replayed over the locally kept review runs, the false contradiction warnings are gone and the one real
+  disagreement among them is still reported.
+- The end-to-end financial model review lane now prints the evidence sentence and the computed figures
+  behind any contradiction warning, so a failure can be read from the log without downloading the run.
 - The recorded test sessions were not refreshed for this release: none of them sends "do not ask" or an
-  answer in its request, so none reaches the new reads.
+  answer in its request, so none reaches the new reads of the request record.
 - The run's record of its request is the first file the model can write that lets one of these checks
   pass rather than hold; what that trusts, and why it is acceptable, is written down beside the code.
 
