@@ -334,3 +334,71 @@ def test_the_two_figures_host_line_decides_the_same_under_the_system_python(tmp_
     dev, system = _both(SCRIPTS / "pretooluse_dispatch.py", _payload(tmp_path, [_user("Size my market." + line)]))
     assert dev == system
     assert bool(dev) is not answered
+
+
+# The run's ledger read by the dispatch checks and the Stop hook (a host that passes its request lines as the
+# skill's arguments). Hand-built `run_ref.json`, ledger and status, so the fixtures need no 3.10 script.
+_AT = "2026-01-02T03:04:05.000000Z"
+
+
+def _ledger_fixture(tmp_path: Path, kind: str) -> dict[str, Any]:
+    from test_asked_gate_hook import RUN_ID, _run_dir
+
+    run = _run_dir(tmp_path, "ic-sim")
+    rel = f"runs/{RUN_ID}/gates.json"
+    (run / "handoff" / RUN_ID / "run_ref.json").write_text(json.dumps({"run_id": RUN_ID, "ledger_rel": rel}))
+    ledger: dict[str, Any] = {"run_id": RUN_ID, "gates": {}}
+    if kind == "no_ask":
+        ledger["no_ask"] = {"raw": ["FS_HOST_NO_ASK"], "wait": {}}
+    elif kind == "pre_answer":
+        gate = "ic_decline_confirmation"
+        ledger["gates"][gate] = {"state": "answered", "current": {"answered_at": _AT}}
+        ledger["pre_answers"] = {gate: {"option_id": "finish", "applied_at": _AT}}
+    path = tmp_path / "artifacts" / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(ledger), encoding="utf-8")
+    return ledger
+
+
+@needs_old
+@pytest.mark.parametrize("kind", ["attended", "no_ask", "pre_answer"])
+def test_a_dispatch_the_runs_ledger_releases_decides_the_same_under_the_system_python(
+    tmp_path: Path, kind: str
+) -> None:
+    from test_asked_gate_hook import _expanded, _payload
+
+    _ledger_fixture(tmp_path, kind)
+    payload = _payload(tmp_path, _expanded("ic-sim", "FS_HOST_NO_ASK"), "POST_COMPOSE_COACHING", "ic-sim")
+    dev, system = _both(SCRIPTS / "pretooluse_dispatch.py", payload)
+    assert dev == system
+    assert bool(dev) is (kind == "attended")
+
+
+@needs_old
+@pytest.mark.parametrize("kind", ["attended", "no_ask"])
+def test_the_stop_hooks_ledger_read_decides_the_same_under_the_system_python(tmp_path: Path, kind: str) -> None:
+    from test_asked_gate_hook import RUN_ID, _expanded
+
+    _ledger_fixture(tmp_path, kind)
+    status = tmp_path / "run_status.json"
+    status.write_text(json.dumps({"status": "running", "no_ask": kind == "no_ask"}), encoding="utf-8")
+    printed = {
+        "ledger_path_shell": str(tmp_path / "artifacts" / "runs" / RUN_ID / "gates.json"),
+        "status_path": str(status),
+    }
+    start = {
+        "type": "user",
+        "message": {"content": [{"type": "tool_result", "tool_use_id": "s1", "content": json.dumps(printed)}]},
+    }
+    transcript = tmp_path / "t.jsonl"
+    rows = [*_expanded("ic-sim", "FS_HOST_NO_ASK"), start]
+    transcript.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+    payload = {
+        "session_id": "s",
+        "transcript_path": str(transcript),
+        "hook_event_name": "Stop",
+        "stop_hook_active": False,
+    }
+    dev, system = _both(SCRIPTS / "stop_handover_check.py", payload)
+    assert dev == system
+    assert ("[no-ask-end]" in dev) is (kind == "no_ask")

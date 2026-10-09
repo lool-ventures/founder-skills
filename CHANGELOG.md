@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.17.1] - 2026-10-09 — Request lines honoured when they arrive as the skill's arguments
+
+### Highlights
+
+**A run whose request lines arrive as the skill's arguments is no longer held for questions the request
+already settled.** Some hosts pass the request's lines (the run id, "do not ask", an answer to a question)
+as the skill's arguments rather than in the message itself. The scripts already read those lines and
+record them for the run, but the checks that confirm a question was asked looked only at the message, so
+such a run could be stopped once at a confirmation the request had answered, or told to attach files when
+nobody was there to ask. Those checks now also read what the run recorded from its request.
+
+### Scoring changes
+
+None.
+
+### Fixed
+
+- For a host that passes its request lines as the skill's arguments: a run whose request said not to ask
+  is no longer held at the market sizing approach and figures, financial model review's extracted values
+  or the IC simulation's Decline confirmation, and the end-of-turn check no longer asks it to attach
+  files; a run left unfinished is still asked to say why.
+- A confirmation the run recorded as answered by the request is no longer held once. For market sizing's
+  figures, only the inputs the request did not answer are still asked about. An answer recorded by hand
+  in the run is still not taken as the founder's.
+- Where these checks run outside the session's own files (a local Cowork session), the question check and
+  the end-of-turn check still see "do not ask" only in the request's own message; the checks before the
+  analysis steps read it from the run wherever they can open the run's own folder.
+
+### Development
+
+Contributor-facing only; nothing here changes what a founder installs or runs.
+
+- The recorded test sessions were not refreshed for this release: none of them sends "do not ask" or an
+  answer in its request, so none reaches the new reads.
+- The run's record of its request is the first file the model can write that lets one of these checks
+  pass rather than hold; what that trusts, and why it is acceptable, is written down beside the code.
+
 ## [0.17.0] - 2026-10-09 — Every question recorded, a run status a host can read, and checks that the key questions were asked
 
 ### Highlights

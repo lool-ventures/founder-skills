@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # /// script
-# requires-python = ">=3.10"
+# requires-python = ">=3.9"
 # dependencies = []
 # ///
 """Stop hook: after the model's final turn, does the founder's message carry the printed hand-over?
@@ -431,7 +431,15 @@ def decide(payload: dict[str, Any]) -> dict[str, str] | None:
     quiet = False
     if rows is not None:
         try:
-            quiet = bool(_load_figures().no_ask_in(rows, _current_prompt_start(rows), _is_real_user_prompt))
+            # The request said not to ask: in the founder's own message, or recorded in the run's ledger, which
+            # the latest `start` result of this prompt names. That covers a host that passes its request lines as
+            # the skill's arguments; the path is the session shell's, so at Cowork local (this hook on the host,
+            # the shell in the VM) only the message counts.
+            figures = _load_figures()
+            start = _current_prompt_start(rows)
+            quiet = bool(figures.no_ask_in(rows, start, _is_real_user_prompt)) or bool(
+                figures.ledger_no_ask(figures.read_ledger(figures.ledger_path(rows[start:])))
+            )
         except Exception as e:  # noqa: BLE001 - fail open
             _log(f"no-ask check: {type(e).__name__}: {e}")
     if quiet and rows is not None:

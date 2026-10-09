@@ -17,6 +17,35 @@ finding in checks whose remedy can change their own comparand. The transcript is
 runtime: an `AskUserQuestion` whose question or options name every figure is the evidence, read
 there.
 
+THE ONE ARTIFACT READ: THE RUN'S LEDGER, FOR WHAT THE REQUEST CARRIED. A host that passes its request
+lines as the skill's arguments leaves them in the skill's expanded text, which no check here counts.
+So the run's ledger is read too (shared with `asked_gate_check.py`, `no_ask_check.py` and the Stop
+hook): a ledger with `no_ask` set is not held, and an input the ledger shows answered from the request
+(`answered_by_request`: the stored line's `applied_at` equal to the answer's `answered_at`, as
+`_gates.answered_by_request` tests it) is left out of the hold. An answer recorded through the recorder
+never counts; that is the case this hook exists for. What the ledger shows is that the run's ledger
+records that the request carried a line, not that a person sent it. Exactly what that trusts:
+(1) a line reaches the ledger through the run status script's `start`, at a fresh start or a resume
+of a `waiting` run; a model that opens the held gate (the run then waits), resumes under the same run id
+with an answer line or `FS_HOST_NO_ASK`, and opens again holds an applied pre-answer (or a no-ask
+ledger) with nothing asked. That is the host's own resume flow, so it is not refused; points (3) to (5)
+are what make it acceptable (a test pins it as a known residual); (2) a shell can hand-edit
+`gates.json` and nothing detects it, the same residual as a hand-written gate record; (3) a forge buys
+one skipped hold, and the hold already lets the second dispatch through; (4) a forged `no_ask` makes the
+recorder refuse every answer the model types, so it costs the model more than it saves; (5) a forged
+pre-answer is disclosed, since the status and the reports say the request answered it rather than the
+founder. The asymmetry is new and named: `inputs.json` is model-writable too, but it can only ADD a
+hold; the ledger is the first model-writable input that REMOVES one. Under a host that passes the lines
+as arguments nothing in the transcript is runtime-written either (the Skill call's arguments and its
+expanded text are the model's), so any fix there trusts a model-transcribed line, and the ledger is the
+one the recorder and the report are already bound to. Which ledger: the one the dispatch's OUTPUT_PATH
+names (`run_ref.json` beside `handoff/<run id>/`, its run id and the ledger's both equal to the
+OUTPUT_PATH's), read live, so a stale OUTPUT_PATH reads that older run's ledger. It reaches the ledger
+wherever the hook can open OUTPUT_PATH; at the Cowork host loop OUTPUT_PATH is the host path of the
+outputs folder, as for `inputs.json` below, so the ledger should be reached there too (code-read from
+the same path; not yet observed on a Cowork-local run). Only a regular file is opened: every path here
+is model-written, and a FIFO or a device would block the hook.
+
 THE DESKTOP QUESTION FORM. Desktop steers a first question to a form instead: a `show_widget` call
 whose HTML is a `<form class="elicit">`, answered by the founder's next message on one line, the
 form's header, a space, an em dash, a space, then the choices (or a fixed Skip line). Two things
@@ -467,6 +496,97 @@ def host_line_in(
     return False
 
 
+# --- the run's ledger -------------------------------------------------------------------------------
+# Shared with `asked_gate_check.py`, `no_ask_check.py` and the Stop hook. Read only, never `_gates.py`
+# (a hook never loads it); every failure is None or False, so an unreadable ledger is today's behaviour.
+
+# The run id grammar (`_run_status.RUN_ID_RE`, held equal by a test).
+RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+_LEDGER_PATH = re.compile(r'"ledger_path_shell"\s*:\s*"([^"]+)"')
+
+
+def ledger_path(rows: list[dict[str, Any]]) -> str | None:
+    """The ledger the latest `start` result on the main thread named, if any: the route for a check with no
+    OUTPUT_PATH (the question tool, the Stop hook). The path is the session shell's, so it opens only where
+    the hook shares that filesystem."""
+    strings = _dispatch_tools().strings
+    found = None
+    for row in rows:
+        if row.get("type") != "user" or row.get("isSidechain"):
+            continue
+        for text in strings((row.get("message") or {}).get("content")):
+            m = _LEDGER_PATH.search(text)
+            if m:
+                found = m.group(1)
+    return found
+
+
+def read_ledger(path: str | None, run_id: str | None = None) -> dict[str, Any] | None:
+    """The ledger at `path`, or None when it cannot be read or is not an object; with `run_id`, also None
+    when the ledger is another run's."""
+    # A regular file only: the path is model-written, and opening a FIFO or a device would block the hook.
+    if not isinstance(path, str) or not path or not os.path.isfile(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as fh:
+            ledger = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(ledger, dict):
+        return None
+    if run_id is not None and ledger.get("run_id") != run_id:
+        return None
+    return ledger
+
+
+def run_ledger(run_dir: str | None, run_id: str | None) -> dict[str, Any] | None:
+    """The ledger this run's `run_ref.json` names, found as the run status finds it
+    (`_run_status.locate_from_run_dir`): the ref's run id must be this one, its `ledger_rel` relative with
+    no `..`, and the nearest ancestor of the run dir holding it wins. None wherever that fails."""
+    if not run_dir or not isinstance(run_id, str) or not RUN_ID_RE.match(run_id):
+        return None
+    ref_path = os.path.join(run_dir, "handoff", run_id, "run_ref.json")
+    if not os.path.isfile(ref_path):  # a regular file only, as in `read_ledger`
+        return None
+    try:
+        with open(ref_path, encoding="utf-8") as fh:
+            ref = json.load(fh)
+        rel = ref.get("ledger_rel") if isinstance(ref, dict) else None
+        if not isinstance(rel, str) or not rel or ref.get("run_id") != run_id:
+            return None
+        if os.path.isabs(rel) or ".." in rel.split("/"):
+            return None
+        probe = os.path.dirname(os.path.abspath(run_dir))
+        while not os.path.isfile(os.path.join(probe, rel)):
+            parent = os.path.dirname(probe)
+            if parent == probe:
+                return None
+            probe = parent
+    except (OSError, ValueError):
+        return None
+    return read_ledger(os.path.join(probe, rel), run_id)
+
+
+def ledger_no_ask(ledger: Any) -> bool:
+    """The run's ledger records that the request said not to ask (`_gates.no_ask`)."""
+    return isinstance(ledger, dict) and isinstance(ledger.get("no_ask"), dict)
+
+
+def answered_by_request(ledger: Any, key: str) -> bool:
+    """The run's ledger records that this gate's current answer was applied from a line the request carried,
+    rather than recorded by hand: a copy of `_gates.answered_by_request`, held equal to it by a test."""
+    if not isinstance(ledger, dict):
+        return False
+    gates, pre = ledger.get("gates"), ledger.get("pre_answers")
+    entry = gates.get(key) if isinstance(gates, dict) else None
+    pa = pre.get(key) if isinstance(pre, dict) else None
+    if not isinstance(entry, dict) or not isinstance(pa, dict) or entry.get("state") != "answered":
+        return False
+    cur = entry.get("current")
+    answered_at = cur.get("answered_at") if isinstance(cur, dict) else None
+    return bool(pa.get("applied_at")) and pa.get("applied_at") == answered_at
+
+
 def _marker(context: str) -> str:
     """One hold per sizing dispatch. On the first live firing TOP_DOWN was held and BOTTOM_UP,
     dispatched beside it, went through on TOP_DOWN's marker -- the one retry spent by a sibling."""
@@ -545,7 +665,14 @@ def decide(payload: dict[str, Any], rows: list[dict[str, Any]] | None = None) ->
         rows, _window_start(rows, tools._is_real_user_prompt), GATE, ("ANSWER",), tools._is_real_user_prompt
     ):
         return None
-    missing = unasked(inputs, rows, tools._is_real_user_prompt)
+    # The run's ledger records that the request said not to ask, or answered an input from its own lines
+    # (bare or per input: the bare line is applied to each input's key). See THE ONE ARTIFACT READ.
+    found = run_dir_from_output_path(prompt, cwd)
+    ledger = run_ledger(*found) if found is not None else None
+    if ledger_no_ask(ledger):
+        return None
+    unanswered = unasked(inputs, rows, tools._is_real_user_prompt)
+    missing = [m for m in unanswered if not answered_by_request(ledger, f"{GATE}.{m[0]}")]
     if not missing:
         return None
     return {

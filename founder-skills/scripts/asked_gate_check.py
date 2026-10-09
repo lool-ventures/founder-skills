@@ -43,7 +43,19 @@ THE EVIDENCE, any one of, strongest first:
 
 A REQUEST THAT SAYS NOT TO ASK. A request carrying `FS_HOST_NO_ASK` is not held: nothing is asked in it, and
 its scripts stop the run instead. No evidence line is written for it (it is not evidence that anyone was
-asked), so nothing is folded into the status.
+asked), so nothing is folded into the status. The line counts in a founder's own message, or when the run's
+ledger records that the request carried it: a host that passes its request lines as the skill's arguments
+leaves them only in the skill's expanded text, which never counts.
+
+WHAT THE REQUEST ANSWERED. After the evidence above, and before the hold's marker, a gate the run's ledger
+shows answered from the request's own lines passes (`two_figures_check.answered_by_request`, a copy of
+`_gates.answered_by_request`: the stored line's `applied_at` equal to the answer's `answered_at`). An answer
+the model recorded never counts. The ledger read is the one `two_figures_check.py` makes, shared with it:
+the ledger the dispatch's OUTPUT_PATH names through `run_ref.json`, its run id and the ledger's both this
+run's, read live (a stale OUTPUT_PATH reads that older run's ledger), reachable wherever the hook can open
+OUTPUT_PATH (at the Cowork host loop too, code-read from the same path; not yet observed on a Cowork-local
+run). It is the first model-writable input that removes a hold; what that trusts, and why it is
+acceptable, is set out in that module's THE ONE ARTIFACT READ paragraph.
 
 ONE HOLD, ONE RETRY. The hold's reason is the question and its options, and the way out for a founder
 who asked not to be asked. The second dispatch goes through on the hold's own marker,
@@ -60,6 +72,9 @@ in the run's dir, when that dir already holds the run's `run_ref.json`; nothing 
 the hook never makes a directory. The run status folds a pass on evidence into the gate's
 `asked_evidence`, bound to the answer it followed by that answer's `answered_at`, read from the ledger.
 It is a measurement of which evidence carried each step, not an attestation: the file is a plain file.
+`passed_on` is `evidence`, `marker`, or `request` (the ledger shows the request answered it; `evidence` and
+`kinds` empty). Only `evidence` is folded: on `request` the hook saw no one asked, and the script that
+applied the line already set the gate's `asked_evidence`. The schema version is unchanged by that value.
 
 LAST SENTENCE. A question with no slot also matches the asked text's last sentence, still with at least one
 of the gate's labels. A near question ending a lead ("Do the cash values look right?") can therefore pass when
@@ -95,8 +110,6 @@ RECORD = True
 MATCH_RATIO = 0.8
 # The verdicts ic-sim confirms before finishing the write-up.
 DECLINES = ("pass", "hard_pass")
-# The run id grammar (`_run_status.RUN_ID_RE`, held equal by a test).
-RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _RECORD_MAX = 4000
 
 
@@ -487,25 +500,14 @@ def reason_for(mark: str, spec: GateSpec) -> str:
 
 def _ledger_answered_at(run_dir: str, run_id: str, gate: str) -> str | None:
     """The recorded answer's `answered_at`, read from the ledger the run's `run_ref.json` names (the
-    nearest ancestor of the run dir holding it, as the run status finds it). None when unreadable."""
+    nearest ancestor of the run dir holding it, as the run status finds it; `two_figures_check.run_ledger`).
+    None when unreadable."""
+    ledger = _two_figures().run_ledger(run_dir, run_id)
     try:
-        with open(os.path.join(run_dir, "handoff", run_id, "run_ref.json"), encoding="utf-8") as fh:
-            ref = json.load(fh)
-        rel = ref.get("ledger_rel") if isinstance(ref, dict) else None
-        if not isinstance(rel, str) or ref.get("run_id") != run_id or os.path.isabs(rel) or ".." in rel.split("/"):
-            return None
-        probe = os.path.dirname(os.path.abspath(run_dir))
-        while not os.path.isfile(os.path.join(probe, rel)):
-            parent = os.path.dirname(probe)
-            if parent == probe:
-                return None
-            probe = parent
-        with open(os.path.join(probe, rel), encoding="utf-8") as fh:
-            ledger = json.load(fh)
-        value = ((ledger.get("gates") or {}).get(gate) or {}).get("current") or {}
+        value = (((ledger or {}).get("gates") or {}).get(gate) or {}).get("current") or {}
         at = value.get("answered_at") if isinstance(value, dict) else None
         return at if isinstance(at, str) else None
-    except (OSError, ValueError, AttributeError, TypeError):
+    except (AttributeError, TypeError):
         return None
 
 
@@ -566,7 +568,7 @@ def decide(payload: dict[str, Any]) -> dict[str, Any] | None:
     cwd = raw_cwd if isinstance(raw_cwd, str) and raw_cwd else None
     found = figures.run_dir_from_output_path(prompt, cwd)
     run_dir, run_id = found if found is not None else (None, None)
-    if run_id is not None and not RUN_ID_RE.match(run_id):
+    if run_id is not None and not figures.RUN_ID_RE.match(run_id):
         run_id = None
     if not owed(spec, run_dir):
         return None
@@ -574,6 +576,10 @@ def decide(payload: dict[str, Any]) -> dict[str, Any] | None:
     ctx = _Ctx(tools.read_transcript(transcript), tools._is_real_user_prompt, _form_reply(), figures)
     start, window = window_start(ctx, spec.skill, run_id, dispatch)
     if figures.no_ask_in(ctx.rows, start, ctx.is_prompt):
+        return None
+    # Read after the message check above, which returned when the request's own message settled it.
+    ledger = figures.run_ledger(run_dir, run_id)
+    if figures.ledger_no_ask(ledger):
         return None
     strongest, kinds = evidence(ctx, start, gate, spec)
     mark = marker(agent, str(context))
@@ -585,6 +591,9 @@ def decide(payload: dict[str, Any]) -> dict[str, Any] | None:
 
     if strongest is not None:
         note("pass", "evidence", kinds)
+        return None
+    if figures.answered_by_request(ledger, gate):
+        note("pass", "request", [])
         return None
     if held_before(ctx.rows, start, mark, dispatch.strings, figures):
         note("pass", "marker", [])

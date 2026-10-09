@@ -1279,6 +1279,96 @@ def test_the_stop_hook_asks_once_when_a_no_ask_run_is_left_running(tmp_path: Pat
     assert stop.decide({"hook_event_name": "Stop", "transcript_path": _transcript(tmp_path, [req, refused])}) is None
 
 
+# A host that passes its request lines as the skill's arguments: the lines reach the transcript only in the skill's
+# expanded text (an `isMeta` row), which never counts. The run's ledger, named by this prompt's `start` result,
+# records them, and the question tool and the Stop hook read it there.
+
+
+def _expanded(lines: str) -> list[dict[str, Any]]:
+    skill = {
+        "type": "assistant",
+        "message": {
+            "role": "assistant",
+            "content": [
+                {"type": "tool_use", "id": "toolu_s", "name": "Skill", "input": {"skill": "founder-skills:ic-sim"}}
+            ],
+        },
+    }
+    body = f"Base directory for this skill: /x\n\nBody.\n\nARGUMENTS: {lines.strip()}"
+    return [_user("Run it."), skill, _user(body, isMeta=True)]
+
+
+def _start_result(root: Path, run_id: str) -> dict[str, Any]:
+    printed = {"ledger_path_shell": str(h.ledger_path(root, run_id)), "status_path": str(h.status_path(root, run_id))}
+    block = {"type": "tool_result", "tool_use_id": "s1", "content": json.dumps(printed)}
+    return {"type": "user", "message": {"role": "user", "content": [block]}}
+
+
+def test_the_question_tool_is_denied_when_the_lines_came_as_the_skills_arguments(tmp_path: Path) -> None:
+    root, _rid, _rd = _bound(tmp_path, "ic-sim")
+    assert isinstance(h.ledger(root, RID).get("no_ask"), dict)
+    rows = _expanded(NO_ASK)
+    assert _ask(tmp_path, rows) is None, "the expanded text alone never counts"
+    assert _ask(tmp_path, [*rows, _start_result(root, RID)]) is not None
+    attended_root, attended_id, _r = h.start_bound(tmp_path / "b", "ic-sim")
+    assert _ask(tmp_path, [*rows, _start_result(attended_root, attended_id)]) is None
+
+
+def test_the_stop_hook_reads_no_ask_from_the_ledger_when_the_lines_came_as_arguments(tmp_path: Path) -> None:
+    stop = _load("stop_handover_check_under_test", h.SHARED / "stop_handover_check.py")
+    root, _rid, _rd = _bound(tmp_path, "ic-sim")
+    assert isinstance(h.ledger(root, RID).get("no_ask"), dict) and h.status(root, RID)["status"] == "running"
+    rows = [*_expanded(NO_ASK), _start_result(root, RID)]
+    block = stop.decide({"hook_event_name": "Stop", "transcript_path": _transcript(tmp_path, rows)})
+    assert block is not None and block["reason"].startswith(stop.NO_ASK_END_MARKER)
+    # An attended run's ledger, with the same rows: today's behaviour (nothing to ask here).
+    attended_root, attended_id, _r = h.start_bound(tmp_path / "b", "ic-sim")
+    assert h.status(attended_root, attended_id)["status"] == "running"
+    rows = [*_expanded(NO_ASK), _start_result(attended_root, attended_id)]
+    assert stop.decide({"hook_event_name": "Stop", "transcript_path": _transcript(tmp_path, rows)}) is None
+    # An unreadable ledger: today's behaviour, no exception.
+    h.ledger_path(root, RID).write_text("{not json", encoding="utf-8")
+    rows = [*_expanded(NO_ASK), _start_result(root, RID)]
+    assert stop.decide({"hook_event_name": "Stop", "transcript_path": _transcript(tmp_path, rows)}) is None
+
+
+def _through_wrapper(wrapper: str, payload: dict[str, Any]) -> subprocess.CompletedProcess[str]:
+    """The hook as the runtime runs it, with a bound: a hook that blocks fails the test instead of hanging it."""
+    try:
+        return subprocess.run(
+            ["sh", str(h.SHARED / wrapper)], input=json.dumps(payload), capture_output=True, text=True, timeout=20
+        )
+    except subprocess.TimeoutExpired:
+        pytest.fail(f"{wrapper} blocked on a path that is not a regular file")
+
+
+@pytest.mark.skipif(not hasattr(__import__("os"), "mkfifo"), reason="no FIFOs on this platform")
+def test_a_ledger_path_that_is_not_a_regular_file_is_passed_over_at_once(tmp_path: Path) -> None:
+    """The path a `start` result names is model-written: `echo '{"ledger_path_shell": "<fifo>"}'` would put a
+    FIFO there. Opening it would block the hook until the runtime's timeout; only a regular file is opened."""
+    import os
+
+    fifo = tmp_path / "gates.json"
+    os.mkfifo(fifo)
+    named = {
+        "type": "user",
+        "message": {
+            "role": "user",
+            "content": [
+                {"type": "tool_result", "tool_use_id": "s1", "content": json.dumps({"ledger_path_shell": str(fifo)})}
+            ],
+        },
+    }
+    rows = [_user("Review it."), named]
+    question = {"hook_event_name": "PreToolUse", "tool_name": "AskUserQuestion", "tool_input": {"questions": []}}
+    asked = _through_wrapper("pretooluse-dispatch.sh", {**question, "transcript_path": _transcript(tmp_path, rows)})
+    assert asked.returncode == 0 and asked.stdout == "", asked
+    stopped = _through_wrapper(
+        "stop-handover-check.sh", {"hook_event_name": "Stop", "transcript_path": _transcript(tmp_path, rows)}
+    )
+    assert stopped.returncode == 0 and stopped.stdout == "", stopped
+
+
 # --- the skills' text --------------------------------------------------------------------------------------------
 
 

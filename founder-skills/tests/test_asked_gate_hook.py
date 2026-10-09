@@ -274,7 +274,9 @@ def test_every_planned_row_is_its_gates_skill_and_an_allowed_agent() -> None:
 
 
 def test_the_run_id_grammar_and_record_names_are_the_run_status_modules() -> None:
-    assert SHIPPED.RUN_ID_RE.pattern == _run_status.RUN_ID_RE.pattern
+    # One copy of the grammar on the hook path, in the shared ledger helpers.
+    assert not hasattr(SHIPPED, "RUN_ID_RE")
+    assert _load("two_figures_check").RUN_ID_RE.pattern == _run_status.RUN_ID_RE.pattern
     assert SHIPPED.EVIDENCE_FILE == _run_status.ASKED_EVIDENCE_FILE
     assert SHIPPED.EVIDENCE_SCHEMA == _run_status.ASKED_EVIDENCE_SCHEMA
     assert SHIPPED.EVIDENCE_SCHEMA_VERSION == _run_status.ASKED_EVIDENCE_SCHEMA_VERSION
@@ -1006,3 +1008,191 @@ def test_a_slotted_question_is_matched_as_before() -> None:
     mod, form = _load(), _load("_form_reply")
     q = _gates.GATES["ms_methodology"]["question"]
     assert not mod.question_matches(form, f"{_PREAMBLE} Does this approach look right?", q)
+
+
+# --- the run's ledger: what the request carried ---------------------------------------------------------
+# A host that passes its request lines as the skill's arguments leaves them only in the skill's expanded text
+# (an `isMeta` row ending `ARGUMENTS: ...`), which no evidence rule counts. The run's ledger, found through the
+# dispatch's OUTPUT_PATH and `run_ref.json`, records what the request carried. Every ledger below is built by
+# the real `run_status.py start` + `bind` (and the recorder's `open`), so a shape change in the ledger fails
+# these tests rather than passing them vacuously; only the corrupt and foreign cases are hand-edited.
+
+import gate_run_helpers as h  # noqa: E402
+
+_ANSWERS = {"ms_methodology": "looks_good", "fmr_extracted_values": "values_ok", "ic_decline_confirmation": "finish"}
+
+
+def _expanded(agent: str, lines: str) -> list[dict[str, Any]]:
+    """The bug's shape: the request's lines only as the skill's arguments, in its expanded text."""
+    args = f"FS_HOST_RUN_ID={RUN_ID}\n{lines}".strip()
+    return [
+        _user("Run it."),
+        _skill(agent),
+        _user(f"Base directory for this skill: /x\n\nBody.\n\nARGUMENTS: {args}", isMeta=True),
+    ]
+
+
+def _real(tmp_path: Path, skill: str, lines: str = "") -> tuple[Path, Path]:
+    """(artifacts root, run dir) for a run started and bound by the real scripts, where `_payload` looks."""
+    root, rid, run = h.start_bound(tmp_path, skill, slug="acme", lines=f"FS_HOST_RUN_ID={RUN_ID}\n{lines}")
+    assert rid == RUN_ID and run == _run_dir(tmp_path, skill)
+    return root, run
+
+
+def _applied(tmp_path: Path, skill: str, gate: str, lines: str) -> tuple[Path, Path]:
+    """A run whose request answered `gate`, applied by the recorder's `open` (the gate must be owed for that)."""
+    root, run = _real(tmp_path, skill, lines)
+    if skill == "ic-sim":
+        scores = {"summary": {"verdict": "pass"}, "metadata": {"run_id": RUN_ID}}
+        (run / "score_dimensions.json").write_text(json.dumps(scores), encoding="utf-8")
+    opened = h.record(root, RUN_ID, "open", "--gate", gate)
+    assert opened.returncode == 0 and json.loads(opened.stdout).get("applied") == "pre_answer", opened.stdout
+    return root, run
+
+
+@pytest.mark.parametrize(("context", "agent", "gate"), ROW_CASES, ids=_IDS)
+def test_a_ledger_that_says_not_to_ask_is_not_held_and_writes_no_record(
+    tmp_path: Path, context: str, agent: str, gate: str
+) -> None:
+    rows = _expanded(agent, "FS_HOST_NO_ASK")
+    root, run = _real(tmp_path / "a", agent, "FS_HOST_NO_ASK\n")
+    assert isinstance(h.ledger(root, RUN_ID).get("no_ask"), dict)
+    assert _decide(tmp_path / "a", rows, context, agent) is None
+    assert _lines(run) == []
+    # Control: the same rows over an attended ledger are held, so the pass above is the ledger's.
+    root_b, run_b = _real(tmp_path / "b", agent)
+    assert h.ledger(root_b, RUN_ID).get("no_ask") is None
+    assert _decide(tmp_path / "b", rows, context, agent) is not None
+
+
+@pytest.mark.parametrize(("context", "agent", "gate"), ROW_CASES, ids=_IDS)
+@pytest.mark.parametrize("spoil", ["ref_run_id", "ledger_run_id", "garbage", "ledger_rel_up"])
+def test_a_ledger_that_is_not_this_runs_or_cannot_be_read_holds_as_today(
+    tmp_path: Path, context: str, agent: str, gate: str, spoil: str
+) -> None:
+    root, run = _real(tmp_path, agent, "FS_HOST_NO_ASK\n")
+    ledger_file, ref = h.ledger_path(root, RUN_ID), run / "handoff" / RUN_ID / "run_ref.json"
+    if spoil == "ref_run_id":
+        ref.write_text(json.dumps({**json.loads(ref.read_text()), "run_id": "r-other-1"}), encoding="utf-8")
+    elif spoil == "ledger_run_id":
+        ledger_file.write_text(json.dumps({**h.ledger(root, RUN_ID), "run_id": "r-other-1"}), encoding="utf-8")
+    elif spoil == "garbage":
+        ledger_file.write_text("{not json", encoding="utf-8")
+    else:
+        ref.write_text(json.dumps({**json.loads(ref.read_text()), "ledger_rel": "../x"}), encoding="utf-8")
+    assert _decide(tmp_path, _expanded(agent, "FS_HOST_NO_ASK"), context, agent) is not None
+
+
+@pytest.mark.parametrize(("context", "agent", "gate"), ROW_CASES, ids=_IDS)
+def test_a_gate_the_request_answered_passes_and_is_recorded_as_the_requests(
+    tmp_path: Path, context: str, agent: str, gate: str
+) -> None:
+    line = f"FS_HOST_ANSWER {gate}={_ANSWERS[gate]}\n"
+    root, run = _applied(tmp_path, agent, gate, line)
+    assert _gates.answered_by_request(h.ledger(root, RUN_ID), gate) is True
+    assert _decide(tmp_path, _expanded(agent, line), context, agent) is None
+    (rec,) = _lines(run)
+    assert (rec["decision"], rec["passed_on"], rec["evidence"], rec["kinds"]) == ("pass", "request", None, [])
+    assert rec["answered_at"] == h.ledger(root, RUN_ID)["gates"][gate]["current"]["answered_at"]
+
+
+@pytest.mark.parametrize(("context", "agent", "gate"), ROW_CASES, ids=_IDS)
+def test_an_answer_the_model_recorded_is_still_held(tmp_path: Path, context: str, agent: str, gate: str) -> None:
+    root, run = _real(tmp_path, agent)
+    if agent == "ic-sim":
+        scores = {"summary": {"verdict": "pass"}, "metadata": {"run_id": RUN_ID}}
+        (run / "score_dimensions.json").write_text(json.dumps(scores), encoding="utf-8")
+    opened = h.record(root, RUN_ID, "open", "--gate", gate)
+    assert opened.returncode == 0 and json.loads(opened.stdout)["needs_input"], opened.stdout
+    assert h.record(root, RUN_ID, "answer", "--gate", gate, "--answer-id", _ANSWERS[gate]).returncode == 0
+    ledger = h.ledger(root, RUN_ID)
+    assert ledger["gates"][gate]["state"] == "answered" and not _gates.answered_by_request(ledger, gate)
+    assert _decide(tmp_path, _expanded(agent, ""), context, agent) is not None
+
+
+def test_a_request_answer_the_model_then_replaced_is_held(tmp_path: Path) -> None:
+    line = "FS_HOST_ANSWER fmr_extracted_values=values_ok\n"
+    root, _run = _applied(tmp_path, "financial-model-review", "fmr_extracted_values", line)
+    replaced = h.record(
+        root, RUN_ID, "answer", "--gate", "fmr_extracted_values", "--answer-id", "proceed_unreviewed", "--after-hold"
+    )
+    assert replaced.returncode == 0, replaced.stdout
+    ledger = h.ledger(root, RUN_ID)
+    applied, current = (
+        ledger["pre_answers"]["fmr_extracted_values"]["applied_at"],
+        ledger["gates"]["fmr_extracted_values"],
+    )
+    assert applied and applied != current["current"]["answered_at"] and current["state"] == "answered"
+    assert not _gates.answered_by_request(ledger, "fmr_extracted_values")
+    assert _decide(tmp_path, _expanded("financial-model-review", line), "CHECKLIST", "financial-model-review")
+
+
+def test_a_host_line_in_the_founders_message_is_still_recorded_as_evidence(tmp_path: Path) -> None:
+    """The attended record is unchanged where the request's own message carries the line."""
+    line = "FS_HOST_ANSWER ms_methodology=looks_good\n"
+    root, run = _applied(tmp_path, "market-sizing", "ms_methodology", line)
+    assert _gates.answered_by_request(h.ledger(root, RUN_ID), "ms_methodology") is True
+    rows = [_user(f"Size Acme.\nFS_HOST_RUN_ID={RUN_ID}\n{line}"), _skill("market-sizing")]
+    assert _decide(tmp_path, rows, "TOP_DOWN_METHODOLOGY", "market-sizing") is None
+    (rec,) = _lines(run)
+    assert (rec["passed_on"], rec["evidence"]) == ("evidence", "host_line")
+
+
+def test_the_hooks_answered_by_request_agrees_with_the_registrys(tmp_path: Path) -> None:
+    figures = _load("two_figures_check")
+    gate, line = "fmr_extracted_values", "FS_HOST_ANSWER fmr_extracted_values=values_ok\n"
+    ledgers: dict[str, dict[str, Any]] = {}
+    root, _r = _applied(tmp_path / "applied", "financial-model-review", gate, line)
+    ledgers["applied"] = h.ledger(root, RUN_ID)
+    root, _r = _real(tmp_path / "stored", "financial-model-review", line)
+    ledgers["stored_not_applied"] = h.ledger(root, RUN_ID)
+    root, _r = _applied(tmp_path / "replaced", "financial-model-review", gate, line)
+    h.record(root, RUN_ID, "answer", "--gate", gate, "--answer-id", "proceed_unreviewed", "--after-hold")
+    ledgers["replaced"] = h.ledger(root, RUN_ID)
+    root, _r = _real(tmp_path / "model", "financial-model-review")
+    h.record(root, RUN_ID, "open", "--gate", gate)
+    h.record(root, RUN_ID, "answer", "--gate", gate, "--answer-id", "values_ok")
+    ledgers["model_recorded"] = h.ledger(root, RUN_ID)
+    seen = {name: _gates.answered_by_request(ledger, gate) for name, ledger in ledgers.items()}
+    assert seen == {"applied": True, "stored_not_applied": False, "replaced": False, "model_recorded": False}
+    for name, ledger in ledgers.items():
+        assert figures.answered_by_request(ledger, gate) is seen[name], name
+    odds: list[Any] = [None, [], {"gates": []}, {"gates": {gate: {"state": "answered"}}, "pre_answers": {gate: "x"}}]
+    for odd in odds:
+        assert figures.answered_by_request(odd, gate) is False
+
+
+def test_a_run_ref_that_is_not_a_regular_file_is_passed_over_at_once(tmp_path: Path) -> None:
+    """`run_ref.json` sits in a model-writable folder: a FIFO there must not block the dispatch hook. The
+    dispatch is then decided as a run with no ledger (held, nothing asked)."""
+    if not hasattr(os, "mkfifo"):
+        pytest.skip("no FIFOs on this platform")
+    payload = _payload(tmp_path, _start("ic-sim"), "POST_COMPOSE_COACHING", "ic-sim")
+    os.mkfifo(tmp_path / "artifacts" / "ic-sim-acme" / "handoff" / RUN_ID / "run_ref.json")
+    try:
+        r = subprocess.run(["sh", str(WRAPPER)], input=json.dumps(payload), capture_output=True, text=True, timeout=20)
+    except subprocess.TimeoutExpired:
+        pytest.fail("the dispatch hook blocked on a run_ref.json that is not a regular file")
+    assert r.returncode == 0 and f"{MARKER}[ic-sim:POST_COMPOSE_COACHING]" in r.stdout, r
+
+
+def test_residual_a_held_model_can_answer_through_the_hosts_resume_flow(tmp_path: Path) -> None:
+    """A KNOWN RESIDUAL, PINNED, NOT A GUARD. A held model can open the gate (the run waits), resume the
+    waiting run under the same id with an answer line, and open again: the ledger then shows the request
+    answered it, and the dispatch passes with nothing asked. That is exactly how a host answers a waiting
+    question, so it is not refused, and "fixing" this test by holding the dispatch would break the host's own
+    resume. It is acceptable because a forge buys one skipped hold (the hold lets a second dispatch through
+    anyway) and the answer is disclosed as the request's. The test is here so that a change to how `start`
+    resumes, or to what the hook accepts, is noticed."""
+    root, run = _real(tmp_path, "market-sizing")
+    opened = h.record(root, RUN_ID, "open", "--gate", "ms_methodology")
+    assert opened.returncode == 0 and json.loads(opened.stdout)["needs_input"], opened.stdout
+    assert h.status(root, RUN_ID)["status"] == "waiting"
+    resumed = h.start(root, "market-sizing", f"FS_HOST_RUN_ID={RUN_ID}\nFS_HOST_ANSWER ms_methodology=looks_good\n")
+    assert resumed.returncode == 0 and json.loads(resumed.stdout)["run_id"] == RUN_ID, resumed.stdout
+    again = h.record(root, RUN_ID, "open", "--gate", "ms_methodology")
+    assert json.loads(again.stdout).get("applied") == "pre_answer", again.stdout
+    assert _gates.answered_by_request(h.ledger(root, RUN_ID), "ms_methodology") is True
+    assert _decide(tmp_path, _expanded("market-sizing", ""), "TOP_DOWN_METHODOLOGY", "market-sizing") is None
+    (rec,) = _lines(run)
+    assert (rec["decision"], rec["passed_on"]) == ("pass", "request")

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # /// script
-# requires-python = ">=3.10"
+# requires-python = ">=3.9"
 # dependencies = []
 # ///
 """PreToolUse on Agent/Task/AskUserQuestion: one process runs every check, the first hold wins.

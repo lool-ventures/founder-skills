@@ -850,3 +850,202 @@ def test_a_marker_quoted_in_a_skills_expanded_text_does_not_spend_the_retry(tmp_
         {"type": "user", "origin": {"kind": "task-notification"}, "message": {"role": "user", "content": quoted}},
     ):
         assert _decision(_run(tmp_path, [_user("Size my market."), row]))["permissionDecision"] == "deny", row
+
+
+# --- the run's ledger: what the request carried ---------------------------------------------------------
+# A host that passes its request lines as the skill's arguments leaves them only in the skill's expanded text,
+# which never counts. The run's ledger, found through the dispatch's OUTPUT_PATH and `run_ref.json`, records
+# what the request carried. Ledgers are built by the real `run_status.py start` + `bind` and the recorder's
+# `open` (which applies a stored line only to an input that is owed, so `inputs.json` comes first); only the
+# corrupt and foreign cases are hand-edited. Run through the whole PreToolUse chain.
+
+import sys  # noqa: E402
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import gate_run_helpers as h  # noqa: E402
+
+_RID = "r-acme-1"
+_TWO_INPUTS = {
+    "founder_stated_inputs": {"arpu": 120, "churn": 3},
+    "founder_stated_alternatives": {
+        "arpu": [{"value": 150, "period": "month", "label": "list price"}],
+        "churn": [{"value": 5}],
+    },
+}
+_ONE_INPUT = {"founder_stated_inputs": {"arpu": 120}, "founder_stated_alternatives": _SYNTH_ALTERNATIVES}
+
+
+def _registry() -> Any:
+    import importlib.util
+
+    if str(SCRIPTS) not in sys.path:
+        sys.path.insert(0, str(SCRIPTS))
+    spec = importlib.util.spec_from_file_location("_gates_for_figures", SCRIPTS / "_gates.py")
+    assert spec is not None and spec.loader is not None
+    mod: Any = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _ledger_run(
+    tmp_path: Path, lines: str = "", inputs: dict[str, Any] = _TWO_INPUTS, open_keys: tuple[str, ...] = ()
+) -> tuple[Path, Path]:
+    """(artifacts root, analysis dir) under `<tmp>/outputs/artifacts/market-sizing-acme`, started and bound."""
+    root, rid, run = h.start_bound(
+        tmp_path / "outputs", "market-sizing", slug="acme", lines=f"FS_HOST_RUN_ID={_RID}\n{lines}"
+    )
+    assert rid == _RID
+    (run / "inputs.json").write_text(json.dumps(inputs), encoding="utf-8")
+    if open_keys:
+        opened = h.record(root, _RID, "open", *[a for k in open_keys for a in ("--gate", f"ms_two_figures.{k}")])
+        assert opened.returncode == 0, opened.stdout
+    return root, run
+
+
+def _expanded_rows(lines: str) -> list[dict[str, Any]]:
+    args = f"FS_HOST_RUN_ID={_RID}\n{lines}".strip()
+    skill = {
+        "type": "assistant",
+        "message": {
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "tool_use",
+                    "id": "toolu_s",
+                    "name": "Skill",
+                    "input": {"skill": "founder-skills:market-sizing"},
+                }
+            ],
+        },
+    }
+    return [
+        _user("Size my market."),
+        skill,
+        _user(f"Base directory for this skill: /x\n\nBody.\n\nARGUMENTS: {args}", isMeta=True),
+    ]
+
+
+def _through_chain(tmp_path: Path, run: Path, lines: str) -> subprocess.CompletedProcess[str]:
+    prompt = f"CONTEXT: BOTTOM_UP_METHODOLOGY\nOUTPUT_PATH: {run / 'handoff' / _RID / 'bottom_up_output.json'}\n"
+    return _run(tmp_path, _expanded_rows(lines), prompt=prompt, cwd=_EMPTY_CWD)
+
+
+def test_a_ledger_that_says_not_to_ask_is_not_held(tmp_path: Path) -> None:
+    root, run = _ledger_run(tmp_path / "a", "FS_HOST_NO_ASK\n")
+    assert isinstance(h.ledger(root, _RID).get("no_ask"), dict)
+    _silent(_through_chain(tmp_path / "a", run, "FS_HOST_NO_ASK"))
+    # Control: the same rows over an attended ledger are held.
+    root_b, run_b = _ledger_run(tmp_path / "b")
+    assert h.ledger(root_b, _RID).get("no_ask") is None
+    assert _decision(_through_chain(tmp_path / "b", run_b, "FS_HOST_NO_ASK"))["permissionDecision"] == "deny"
+
+
+def test_a_bare_line_the_request_applied_to_every_input_is_not_held(tmp_path: Path) -> None:
+    line = "FS_HOST_ANSWER ms_two_figures=typed"
+    root, run = _ledger_run(tmp_path, line + "\n", open_keys=("arpu", "churn"))
+    ledger, gates = h.ledger(root, _RID), _registry()
+    assert gates.answered_by_request(ledger, "ms_two_figures.arpu") is True
+    assert gates.answered_by_request(ledger, "ms_two_figures.churn") is True
+    _silent(_through_chain(tmp_path, run, line))
+
+
+def test_a_per_input_line_the_request_applied_is_not_held(tmp_path: Path) -> None:
+    line = "FS_HOST_ANSWER ms_two_figures.arpu=typed"
+    root, run = _ledger_run(tmp_path, line + "\n", inputs=_ONE_INPUT, open_keys=("arpu",))
+    assert _registry().answered_by_request(h.ledger(root, _RID), "ms_two_figures.arpu") is True
+    _silent(_through_chain(tmp_path, run, line))
+
+
+def test_only_the_inputs_the_request_answered_leave_the_hold(tmp_path: Path) -> None:
+    line = "FS_HOST_ANSWER ms_two_figures.arpu=typed"
+    root, run = _ledger_run(tmp_path, line + "\n", open_keys=("arpu", "churn"))
+    ledger, gates = h.ledger(root, _RID), _registry()
+    assert gates.answered_by_request(ledger, "ms_two_figures.arpu") is True
+    assert gates.answered_by_request(ledger, "ms_two_figures.churn") is False
+    reason = _decision(_through_chain(tmp_path, run, line))["permissionDecisionReason"]
+    assert "churn: never offered" in reason and "ARPU" not in reason, reason
+
+
+def test_an_input_answer_the_model_recorded_is_still_held(tmp_path: Path) -> None:
+    root, run = _ledger_run(tmp_path, inputs=_ONE_INPUT, open_keys=("arpu",))
+    answered = h.record(root, _RID, "answer", "--gate", "ms_two_figures.arpu", "--answer-id", "typed")
+    assert answered.returncode == 0, answered.stdout
+    ledger = h.ledger(root, _RID)
+    assert ledger["gates"]["ms_two_figures.arpu"]["state"] == "answered"
+    assert not _registry().answered_by_request(ledger, "ms_two_figures.arpu")
+    assert _decision(_through_chain(tmp_path, run, ""))["permissionDecision"] == "deny"
+
+
+def test_a_foreign_or_unreadable_ledger_holds_as_today(tmp_path: Path) -> None:
+    for spoil in ("ledger_run_id", "ref_run_id", "garbage"):
+        here = tmp_path / spoil
+        root, run = _ledger_run(here, "FS_HOST_NO_ASK\n")
+        ledger_file, ref = h.ledger_path(root, _RID), run / "handoff" / _RID / "run_ref.json"
+        if spoil == "ledger_run_id":
+            ledger_file.write_text(json.dumps({**h.ledger(root, _RID), "run_id": "r-other-1"}), encoding="utf-8")
+        elif spoil == "ref_run_id":
+            ref.write_text(json.dumps({**json.loads(ref.read_text()), "run_id": "r-other-1"}), encoding="utf-8")
+        else:
+            ledger_file.write_text("{not json", encoding="utf-8")
+        r = _through_chain(here, run, "FS_HOST_NO_ASK")
+        assert _decision(r)["permissionDecision"] == "deny", spoil
+        assert "Traceback" not in r.stderr, spoil
+
+
+def test_every_input_the_hook_can_hold_has_a_key_the_request_can_answer(tmp_path: Path) -> None:
+    """The ledger filter keys `ms_two_figures.<field>` on `unasked`'s field names, and the recorder keys the
+    instances on `_ms_gates.two_figure_keys`. A subset, not equality: an input with one alternative and no typed
+    figure has a recorder key but fewer than two figures, so the hook never holds on it. The direction that
+    matters is that every field the hook names is one a request line can answer."""
+    import importlib.util
+
+    ms = SCRIPTS.parent / "skills" / "market-sizing" / "scripts"
+    sys.path.insert(0, str(ms))
+    spec = importlib.util.spec_from_file_location("_ms_gates_for_figures", ms / "_ms_gates.py")
+    assert spec is not None and spec.loader is not None
+    ms_gates: Any = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ms_gates)
+    hook_spec = importlib.util.spec_from_file_location("two_figures_keys", SCRIPTS / "two_figures_check.py")
+    assert hook_spec is not None and hook_spec.loader is not None
+    hook: Any = importlib.util.module_from_spec(hook_spec)
+    hook_spec.loader.exec_module(hook)
+    shapes = [
+        _TWO_INPUTS,
+        _ONE_INPUT,
+        {
+            "founder_stated_inputs": {},
+            "founder_stated_alternatives": {"seats": [{"value": 9}, {"value": 12}], "x": [{"value": 1}]},
+        },
+        {
+            "founder_stated_inputs": {"tam_share": 0.2},
+            "founder_stated_alternatives": {"tam_share": [{"value": 0.3, "label": "slide"}], "y": []},
+        },
+    ]
+    for i, inputs in enumerate(shapes):
+        d = tmp_path / str(i)
+        d.mkdir()
+        (d / "inputs.json").write_text(json.dumps(inputs), encoding="utf-8")
+        held = {field for field, _figs in hook.unasked(inputs, [], lambda row: False)}
+        keys = {k.split(".", 1)[1] for k in ms_gates.two_figure_keys(str(d))}
+        assert held and held <= keys, (inputs, held, keys)
+
+
+def test_a_resume_that_adds_no_ask_to_a_waiting_run_is_not_held(tmp_path: Path) -> None:
+    """The flag is sticky and read live: a waiting run resumed with `FS_HOST_NO_ASK` is no-ask from then on."""
+    root, run = _ledger_run(tmp_path, inputs=_ONE_INPUT, open_keys=("arpu",))
+    assert h.status(root, _RID)["status"] == "waiting" and h.ledger(root, _RID).get("no_ask") is None
+    resumed = h.start(root, "market-sizing", f"FS_HOST_RUN_ID={_RID}\nFS_HOST_NO_ASK\n")
+    assert resumed.returncode == 0 and json.loads(resumed.stdout)["run_id"] == _RID, resumed.stdout
+    assert isinstance(h.ledger(root, _RID).get("no_ask"), dict)
+    _silent(_through_chain(tmp_path, run, "FS_HOST_NO_ASK"))
+
+
+def test_a_bare_line_stored_but_not_yet_applied_is_still_held(tmp_path: Path) -> None:
+    """Only an applied line counts: before `open` applies the bare line to each input, nothing is answered."""
+    line = "FS_HOST_ANSWER ms_two_figures=typed"
+    root, run = _ledger_run(tmp_path, line + "\n")
+    ledger = h.ledger(root, _RID)
+    assert ledger["pre_answers"]["ms_two_figures"]["applied_at"] is None
+    assert not any(k.startswith("ms_two_figures.") for k in ledger.get("gates", {}))
+    reason = _decision(_through_chain(tmp_path, run, line))["permissionDecisionReason"]
+    assert "ARPU: never offered" in reason and "churn: never offered" in reason, reason
