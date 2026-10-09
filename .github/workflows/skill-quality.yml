@@ -3,13 +3,19 @@ name: Skill Quality
 # Triggers:
 # - pull_request: contract-tests only (free, fast). e2e is excluded by the
 #   per-job `if:` to avoid unbounded $5-15/push cost while iterating on a PR.
-# - push: tags ['v*']: every release tag runs the three end-to-end smokes.
-#   Tag failure = delete tag, fix, retag (no user impact yet, since
-#   sync-test-repo.sh is the actual distribution event — see CLAUDE.md
-#   "Release Process" for the required ordering).
-# - workflow_dispatch: manual on-demand. Use for pre-release validation on
-#   a branch tip (`gh workflow run skill-quality.yml --ref <branch>`) or to
-#   opt in for architectural-surface PRs (see CLAUDE.md for the trigger list).
+# - workflow_dispatch: manual on-demand. Runs the three end-to-end smokes and
+#   the mutation corpus, never publish-release. THIS is the release gate:
+#   `gh workflow run skill-quality.yml --ref release/vX.Y.Z` runs it on the
+#   release branch before main moves, because pushing main is what ships
+#   (the marketplace clone tracks main). A dispatch skips the tag/manifest
+#   and Scoring-changes checks; scripts/pre-tag.sh runs those locally. Also
+#   the opt-in for architectural-surface PRs (see CLAUDE.md for the list).
+# - push: tags ['v*']: the tag, pushed after main, runs the same jobs again
+#   plus those two checks, and publish-release creates the GitHub Release.
+#   Main already carries the version by then, so a real failure here means
+#   keep the tag (the next release's Scoring-changes check diffs from it),
+#   publish no Release, and release the next patch — never re-tag. See
+#   CLAUDE.md "Release Process" for the full ordering.
 #
 # No `schedule:` trigger until Phase D body exists. A cron firing a no-op
 # job would create green checkmarks for nothing — slow corruption of what
@@ -107,8 +113,8 @@ jobs:
     # DO NOT MAKE THE RELEASE HINGE ON THE NULL COERCION. `inputs` is null on a `push`, and
     # null == '' is true in an Actions expression — but `publish-release` now `needs:` this job,
     # and a skipped dependency skips the dependent, so if that coercion were ever wrong the
-    # Release would silently not publish. The tag path has never executed (v0.10.0 predates
-    # `publish-release`), so the coercion is untested here. Guarding the `inputs` read behind an
+    # Release would silently not publish. The tag path has run (v0.17.0's tag run published its
+    # Release), but one green run is thin evidence for the coercion. Guarding the `inputs` read behind an
     # explicit `workflow_dispatch` test makes the tag-push branch reach it not at all: on a push
     # the first disjunct is already true. Same behaviour, one fewer untested assumption in the
     # release chain.
@@ -116,10 +122,10 @@ jobs:
       github.event_name != 'pull_request' &&
       (github.event_name != 'workflow_dispatch' || inputs.verify_release_notes_for == '')
     needs: contract-tests
-    # Tag-push: never cancel in-flight authoritative tag run if a quick
-    # re-tag follows. workflow_dispatch on the same ref will queue the
-    # second invocation behind the first ($20 worst case for double-fire,
-    # accepted vs. the disaster of cancelling the authoritative run).
+    # Never cancel an in-flight run: a second dispatch on the same release
+    # branch (after a fix was force-pushed) or a re-run on the tag queues
+    # behind the first ($20 worst case for double-fire, accepted vs. the
+    # disaster of cancelling the authoritative run).
     concurrency:
       group: deck-review-e2e-${{ github.ref }}
       cancel-in-progress: false

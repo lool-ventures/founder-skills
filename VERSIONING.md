@@ -83,8 +83,8 @@ Two non-negotiable rules. CI enforces the second mechanically (see `.github/work
 
 The marketplace clone tracks `main`. A release that lives on a feature branch — even if tagged — has not been released to consumers.
 
-- Every release must merge to `main`. No long-lived `release/*` branches as a substitute.
-- The `version` field on `main` is what users actually see (the marketplace clone tracks `main`). Tags do not change what users install, but pushing a `vX.Y.Z` tag triggers the `deck-review-e2e-smoke` release gate in `.github/workflows/skill-quality.yml`, whose preflight fails fast unless the tag matches both `pyproject.toml` and `plugin.json`. Distribution must wait for that job to go green — see "How to Release" below and the Release Process section of CLAUDE.md.
+- Every release must merge to `main`. A `release/vX.Y.Z` branch exists only to run the release gate before `main` moves, and is deleted once `main` carries the release; it is never a substitute for `main`.
+- The `version` field on `main` is what users actually see (the marketplace clone tracks `main`), so **pushing `main` is the distribution event**. Tags do not change what users install. The paid release gate (`deck-review-e2e-smoke` and `mutation-corpus` in `.github/workflows/skill-quality.yml`) therefore runs on the release branch before `main` is pushed, and again on the tag, where it also checks that the tag matches both `pyproject.toml` and `plugin.json` — see "How to Release" below and the Release Process section of CLAUDE.md.
 
 ### 2. Every content change on `main` must bump the version
 
@@ -92,27 +92,37 @@ The marketplace clone tracks `main`. A release that lives on a feature branch �
 
 - Treat `plugin.json#version` as immutable per `main` commit-state.
 - If you've already pushed `0.4.0` and need to add a fix: bump to `0.4.1`. Don't sneak fixes under the existing version.
-- The version bump should be the **last** commit of a release branch (or part of the merge commit) — never the first. If you bump early and then add more commits, bump again before merging.
+- The version bump should be the **last** commit of a release branch — never the first. A fix found while the release branch is still under test, before `main` carries the version, goes below the bump commit with no new bump (see "How to Release"); once `main` carries the version, any further fix needs a new bump.
 
 The "No Version Bump Needed" cases above (CI workflow changes, test-only changes, repository markdown, lockfile) are exactly the paths the CI check's `requires_bump()` filter exempts. The filter forces a bump for any other file under `founder-skills/` and for `pyproject.toml` — note this includes `plugin.json` metadata-only edits (description/author), which therefore do require a bump despite being non-functional.
 
 ## How to Release
 
-Releases are manual up to the tag push; CI then creates the GitHub Release. On version bump:
+Releases are manual up to the tag push; CI then creates the GitHub Release. `main` does not move until the release has passed the paid gate on its own branch. On version bump:
 
 1. Update `version` in `founder-skills/.claude-plugin/plugin.json`
 2. Update `version` in `pyproject.toml` to match
 3. Update `CHANGELOG.md` — move items from `[Unreleased]` to the new version, add `### Highlights`, and add a `### Scoring changes` section ("None." when nothing changed), which is checked at tag time
-4. Commit, push to `main` (this should be the **last** commit of the release; if more fixes follow, bump the patch version again)
-5. Tag and push:
+4. Commit on local `main` with a sign-off (`git commit -s`; this should be the **last** commit of the release), and run `scripts/pre-tag.sh vX.Y.Z`. Do not push `main` yet.
+5. Push a release branch and open a PR from it. The PR is the record of the release, and runs the free checks: `ci.yml` (lint, typecheck, tests, privacy guard, manifest validation), the version-bump check, skill-quality's contract tests, `cowork-replay.yml` when its paths changed, and DCO. Write the notes to a file first, so a failure stops before the PR opens:
 
 ```bash
-git tag -a v0.2.0 -m "v0.2.0"
+git push origin HEAD:refs/heads/release/v0.2.0
+python3 .github/scripts/changelog-notes.py v0.2.0 > /tmp/notes.md
+gh pr create --base main --head release/v0.2.0 --title "release: v0.2.0" --body-file /tmp/notes.md
+```
+
+6. **Run the paid gate on the branch** and wait for `deck-review-e2e-smoke` and `mutation-corpus` to go green: `gh workflow run skill-quality.yml --ref release/v0.2.0`. On a red lane, read the failing assertion first; a re-run is paid, so re-run once only for what reads as LLM variance. On a real failure, `main` has not moved and no user has the build, so the fix needs no new bump: put it below the release commit (amend it in, or rebase it under), add it to this version's `CHANGELOG.md` section, re-run `scripts/pre-tag.sh v0.2.0`, then `git push --force-with-lease origin HEAD:refs/heads/release/v0.2.0` and dispatch again.
+7. **Green: fast-forward `main`, then tag.** Green means the paid gate and every PR check (`gh pr checks release/v0.2.0`): the push to `main` goes around branch protection, so nothing else enforces them. Check that the green run tested `git rev-parse HEAD`. This push ships the release to users. Per GitHub's behaviour, the PR is marked merged when its head reaches `main`; do not use the PR's merge, squash or rebase buttons (a merge commit is unsigned, and a rebase changes the commits the gate tested).
+
+```bash
+git push origin HEAD:main
+git tag v0.2.0
 git push origin v0.2.0
 ```
 
-6. **Wait for `deck-review-e2e-smoke` to go green** in the GitHub Actions UI (the tag push triggers it; its preflight fails fast if the tag doesn't match `pyproject.toml` and `plugin.json`). Only after green do consumers get a build that passed the release gate.
-7. The GitHub Release is created for you: the `publish-release` job in `.github/workflows/skill-quality.yml` runs on the tag push once both release gates are green (`deck-review-e2e-smoke` and `mutation-corpus`), and takes the notes and title from that version's `CHANGELOG.md` section. Do not also run `gh release create` by hand — whichever runs second fails on "release already exists". To check the notes before tagging, without publishing anything: `gh workflow run skill-quality.yml -f verify_release_notes_for=vX.Y.Z`. If the job fails and you must publish by hand, use the command in the Release Process section of CLAUDE.md.
+8. Delete the release branch: `git push origin :release/v0.2.0`.
+9. The GitHub Release is created for you: the tag push runs the gate again, and the `publish-release` job in `.github/workflows/skill-quality.yml` runs once both jobs are green, taking the notes and title from that version's `CHANGELOG.md` section. Do not also run `gh release create` by hand — whichever runs second fails on "release already exists". To check the notes before tagging, without publishing anything: `gh workflow run skill-quality.yml -f verify_release_notes_for=vX.Y.Z`. A red tag run after a green branch run on the same commit is most likely a flake: read the failing assertion, then choose between one paid re-run and a patch release. If it fails for real, the version has already shipped on `main`: keep the tag, which marks what shipped, leave it without a Release, and release the next patch version. Do not delete the tag — the next release's Scoring changes check diffs from the previous version's tag and fails when it is missing — and never re-tag a version `main` has carried. If the job fails and you must publish by hand, use the command in the Release Process section of CLAUDE.md.
 
 ## Tag Naming
 

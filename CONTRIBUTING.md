@@ -150,7 +150,7 @@ For larger changes — restructuring a workflow, changing scoring methodology, a
 
 ## Releasing
 
-Release process, versioning rules, and the tag-triggered e2e gate are documented in [VERSIONING.md](VERSIONING.md). Only maintainers cut releases — contributors don't need this unless a PR requires a version bump.
+Release process, versioning rules, and the paid e2e gate (run on a release branch before `main` moves, and again on the tag) are documented in [VERSIONING.md](VERSIONING.md). Only maintainers cut releases — contributors don't need this unless a PR requires a version bump.
 
 ## Code Style
 

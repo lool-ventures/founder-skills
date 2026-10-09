@@ -68,6 +68,8 @@ Contributor-facing only; nothing here changes what a founder installs or runs.
   behind any contradiction warning, so a failure can be read from the log without downloading the run.
 - The recorded test sessions were not refreshed for this release: none of them sends "do not ask" or an
   answer in its request, so none reaches the new reads of the request record.
+- Releases now pass the paid checks on a release branch, through a release pull request, before `main`
+  moves. Users install from `main`, so a version now reaches them only after those checks pass.
 - The run's record of its request is the first file the model can write that lets one of these checks
   pass rather than hold; what that trusts, and why it is acceptable, is written down beside the code.
 

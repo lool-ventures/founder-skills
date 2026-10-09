@@ -67,8 +67,8 @@ run_gate "pytest evals"      uv run pytest evals/cap-table/ -q
 # the `and not mutation` in that line is what excludes this lane, and it is excluded from a bare
 # `pytest` by `addopts`. Without `-m mutation` here it collects nothing and reports green.
 # ~3 min: copies the repo to a temp dir once, then injects each named defect and re-runs the
-# cap-table selection. Mirrors the `mutation-corpus` job in skill-quality.yml, which fires on tag
-# push — i.e. AFTER the tag exists, which is the wrong side of the decision this script is for.
+# cap-table selection. Mirrors the `mutation-corpus` job in skill-quality.yml, which first fires on
+# the dispatched release-branch run — i.e. after the branch is pushed, a paid round-trip later.
 run_gate "mutation corpus"   uv run pytest founder-skills/tests/test_mutation_corpus.py -q -m mutation
 
 # --- privacy ------------------------------------------------------------------------------

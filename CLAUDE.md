@@ -66,7 +66,7 @@
 - Hook and harness tests: `test_stop_handover_hook.py` (the Stop hook's checks), `test_dispatch_prompt_hook.py`, `test_review_page_hook.py`, `test_two_figures_hook.py`, `test_asked_gate_hook.py`, `test_asked_evidence_fold.py`, `test_dispatch_type_check.py`, `test_dispatch_prompt_rejection.py`, `test_dispatch_comparand.py`, `test_handoff_audit.py`, `test_handover_check_cassette.py`, `test_lint_skill_gate.py`, `test_rerecord_preflight.py`, `test_cassette_file_tool_paths.py` (no relative or `/sessions/` path reaches a file tool in any cassette), `test_fmr_handover.py`
 - `founder-skills/tests/test_visualize_cap_table.py` — Cap-table HTML visualization tests
 - `founder-skills/tests/mutation_corpus.py` + `test_mutation_corpus.py` — Curated mutant corpus over cap-table's math producers: `MUST_KILL` / `KNOWN_SURVIVORS`, both SHRINK-ONLY; every kill names the test that must notice (`killed_by`, measured never guessed — a kill from anywhere else fails); a no-op control must stay PASSING. The registry lives in the non-`test_*` module deliberately — its docstring says why.
-- `founder-skills/tests/test_release_gating.py` — The release chain asserted: every job in `publish-release`'s TRANSITIVE `needs` closure must run on a tag push, because in Actions a skipped dependency SKIPS the dependent (four tags once shipped with no Release). Frozen `if:` strings + a simulated-tag-push evaluator that raises on an unknown context property. Wiring only, never that a job passes. The chain is unexercised: v0.10.0 predates the `publish-release` job.
+- `founder-skills/tests/test_release_gating.py` — The release chain asserted: every job in `publish-release`'s TRANSITIVE `needs` closure must run on a tag push, because in Actions a skipped dependency SKIPS the dependent (four tags once shipped with no Release). Frozen `if:` strings + a simulated-tag-push evaluator that raises on an unknown context property. Wiring only, never that a job passes. The chain has run: v0.17.0's tag run published its Release through `publish-release`.
 - `founder-skills/tests/cowork_async_subagent_filter.py` — Cowork sub-agent tool-name compatibility helper (skill-quality CI; v0.4.0-regression detector)
 - `cowork-tests/leak_scan.py` — Founder-facing "internal plumbing" leak detector: nine syntactic classes plus the semantic `plumbing_verb`. Point it at a cassette FILE or `events.jsonl`; a directory glob finds only `*.json` and reports a silent false-clean.
 - `founder-skills/tests/test_founder_facing_leaks.py` — A REPORT over `leak_scan.py` across the committed cassettes, not a gate: it prints every founder-facing leak and never fails on the count (demoted 2026-10-08, because the count varies about 5x on identical input and the class set varies too; the file's header holds the measurements). It still fails if the detector loses a known class or no cassette is scanned. Read the report after a re-record; a rise there is a prompt to look, not a verdict. Clean narration is not proven by a low count either: what still passes is internal vocabulary with no plumbing verb ("canonical artifacts", "schema-drift warning", bare `STOP`/`BLOCKED`, "Gate 1 passes"). Do not fix that by enumerating words — extending the classes was tried and does NOT red the suite, but an enumerated blocklist is unwinnable by the detector's own design note.
@@ -97,7 +97,7 @@
   carry the `e2e` marker. Derive the list with `ls founder-skills/tests/test_e2e_*.py`; a hand-list
   here has gone stale before.
   Shared plumbing in `tests/_e2e_harness.py` — deck-review deliberately does NOT use it (it is the
-  lane the release tag gates on; fold it in when a failure costs a re-run rather than a re-tag),
+  lane the release gates on; fold it in when a failure costs a re-run rather than a patch release),
   except for the account-connector switch (`ENABLE_CLAUDEAI_MCP_SERVERS=false`) and its post-run
   check, which every lane runs; `test_lane_connector_isolation.py` holds both, free.
   Each lane answers its questions up front with `FS_HOST_` lines and asserts the run status;
@@ -481,7 +481,7 @@ run with fifteen dispatches recorded zero boundaries. Truncation is head-preserv
 
 ## Release Process
 
-Tag-push triggers `deck-review-e2e-smoke` in `.github/workflows/skill-quality.yml`. The workflow's preflight step fails fast if the tag does not match both `pyproject.toml` and `founder-skills/.claude-plugin/plugin.json` versions — version-bump errors are caught before the paid SDK call (~5 sec, no cost). Per-PR e2e is off by default; opt in via manual dispatch for architectural-surface PRs (list below).
+**Pushing `main` ships.** Users install from the marketplace clone that tracks `main`, so the paid gate (`deck-review-e2e-smoke` and `mutation-corpus` in `.github/workflows/skill-quality.yml`) runs on a `release/vX.Y.Z` branch BEFORE `main` moves, dispatched by hand, and again on the tag, where `publish-release` creates the GitHub Release. On a tag push the job's preflight also fails fast if the tag does not match both `pyproject.toml` and `founder-skills/.claude-plugin/plugin.json` versions (~5 sec, no cost); a dispatch skips that step and the Scoring-changes check, which `scripts/pre-tag.sh vX.Y.Z` runs locally first. Per-PR e2e is off by default; opt in via manual dispatch for architectural-surface PRs (list below).
 
 ### Release ordering
 
@@ -519,8 +519,8 @@ Tag-push triggers `deck-review-e2e-smoke` in `.github/workflows/skill-quality.ym
      burned two tags on exactly this — a `verify_positioning.py` shadowed-variable error hid 8 errors
      in `tests/`.
    - **`uv run ruff format --check .` and `uv run ruff check .`**.
-   Run all of them, then bump. A retag is cheap (step 6 documents it) but each one costs a full
-   paid e2e run.
+   Run all of them (`scripts/pre-tag.sh` runs them all), then bump. Each failure the
+   branch run finds costs another paid run; a real one the tag run finds costs a patch version.
 1. Bump versions in `pyproject.toml` and `founder-skills/.claude-plugin/plugin.json` (must match)
 2. Update `CHANGELOG.md` — and **read the diffs, not the commit messages**. The v0.7.0 pass found a
    duplicated entry, four script filenames in user-facing text (0.6.0 names zero `.py` to users), and
@@ -528,13 +528,68 @@ Tag-push triggers `deck-review-e2e-smoke` in `.github/workflows/skill-quality.ym
    `### Highlights`, then Added / Changed / Fixed) rather than dumping bullets under `Fixed`.
    Every release section has `### Scoring changes` ("None." when nothing changed): it is a downstream
    contract, checked at tag time against the scoring-file registry in `.github/scripts/scoring_changes_check.py`.
-3. `git commit -m "release: vX.Y.Z"`
-4. `git push`
-5. `git tag vX.Y.Z && git push --tags`
-6. **Wait for `deck-review-e2e-smoke` green** in the GitHub Actions UI
-   - Tag failure: `git tag -d vX.Y.Z && git push origin :refs/tags/vX.Y.Z`, fix, retag — no user impact yet (no Release exists, so nothing advertises the tag)
-   - LLM-variance flake: re-run the job from the Actions UI (free retry, same SHA)
-7. **The GitHub Release is now created FOR you — do not run `gh release create` by hand.**
+3. `git commit -s -m "release: vX.Y.Z"`, then `scripts/pre-tag.sh vX.Y.Z`, which also checks the
+   tag against both manifests and the Scoring changes section (a dispatched gate run skips both).
+   Before anything leaves the machine: `main` must fast-forward from `origin/main`
+   (`git fetch origin main && git merge-base --is-ancestor origin/main HEAD`; never `--force` to
+   `main`), `python3 scripts/privacy_guard.py --tree --no-names` and `--range origin/main..HEAD` must
+   be clean, and `git diff --stat origin/main..HEAD` must name nothing under `docs/internal/`,
+   `docs/plans/` or `evals-local/`.
+4. **Open the release PR from a branch; `main` does not move yet.** Write the notes to a file first,
+   so a failure of `changelog-notes.py` stops here rather than opening a PR with an empty body:
+
+   ```bash
+   git push origin HEAD:refs/heads/release/vX.Y.Z
+   python3 .github/scripts/changelog-notes.py vX.Y.Z > /tmp/notes.md
+   gh pr create --base main --head release/vX.Y.Z --title "release: vX.Y.Z" --body-file /tmp/notes.md
+   ```
+
+   The PR is the review page and the record. It runs `ci.yml` (lint, typecheck, tests, the
+   name-free privacy guard, manifest validation), `version-check.yml`, skill-quality's free contract
+   tests, `cowork-replay.yml` when its paths changed, and DCO. It holds only the release range, so
+   every commit in it must carry a sign-off.
+5. **Run the paid gate on the branch:** `gh workflow run skill-quality.yml --ref release/vX.Y.Z`.
+   A dispatch runs `deck-review-e2e-smoke` (the three e2e lanes) and `mutation-corpus`, never
+   `publish-release`. Wait for both green.
+   - A red lane: read the failing assertion before anything else. A re-run is PAID (the three lanes
+     again), so re-run once only when the assertion reads as LLM variance; never re-run blind.
+   - A real failure: the version has not shipped, so it needs no new bump. Put the fix below the
+     release commit, so `release: vX.Y.Z` stays last (amend it in with `git commit --amend -s`, or
+     commit it and rebase it under the release commit), add it to that version's CHANGELOG section,
+     re-run `scripts/pre-tag.sh vX.Y.Z`, then
+     `git push --force-with-lease origin HEAD:refs/heads/release/vX.Y.Z` and dispatch again. A lease
+     refused with `(stale info)` means the local view of the branch is old: `git fetch origin
+     release/vX.Y.Z` and push again. The bump-again rule in VERSIONING.md applies only once `main`
+     carries the version.
+6. **Green: fast-forward `main`, then tag.** Green means the paid gate AND every PR check
+   (`gh pr checks release/vX.Y.Z`): the push to `main` goes around branch protection
+   (`enforce_admins` is false), so nothing else enforces lint, typecheck, tests, DCO or the review.
+   Then confirm that the SHA the green run tested is `git rev-parse HEAD`:
+   `gh run list --workflow skill-quality.yml --branch release/vX.Y.Z --event workflow_dispatch --json databaseId,headSha,conclusion`.
+
+   ```bash
+   git push origin HEAD:main
+   git tag vX.Y.Z && git push origin vX.Y.Z
+   ```
+
+   The push to `main` is what ships. Per GitHub's behaviour, the PR is marked merged when its head
+   lands on `main`; never use its merge, squash or rebase buttons — a merge commit lands unsigned
+   and a rebase rewrites the SHAs the gate tested. The tag push runs the gate again, with the
+   version and Scoring changes checks, and `publish-release` waits on both jobs.
+   - A red tag run after a green branch run on the same SHA is most likely a flake. Read the failing
+     assertion first, then choose between one (paid) re-run and a patch release.
+   - A real tag-run failure: `main` already shipped this version. KEEP the tag — it marks what
+     shipped — and let it stand with no Release; then release the next patch through these same
+     steps. Deleting it breaks the next release: `scoring_changes_check.py` diffs from the tag of the
+     previous CHANGELOG section and fails when that tag is missing. Never re-tag a version `main`
+     has carried.
+
+   **Cost:** the paid gate runs twice per release, on the branch and on the tag — roughly the three
+   lanes again, at the per-run cost the workflow's own comments state. Letting `publish-release` rely on the branch run
+   would drop the second run, but it changes the chain `test_release_gating.py` pins; it is an
+   option, not the current flow.
+7. **Delete the release branch:** `git push origin :release/vX.Y.Z`.
+8. **The GitHub Release is now created FOR you — do not run `gh release create` by hand.**
    `publish-release` in `skill-quality.yml` fires on a tag PUSH (and only a push — a
    `workflow_dispatch` on a tag ref is excluded, or dispatching the rehearsal would publish), after
    the paid gate is green. It builds the notes and the title from `CHANGELOG.md` via
@@ -565,7 +620,7 @@ Tag-push triggers `deck-review-e2e-smoke` in `.github/workflows/skill-quality.ym
    **The release ENDS here.** `sync-test-repo.sh` is deliberately NOT a release step — see below.
 
    Two mechanics worth knowing: `--verify-tag` aborts if the tag isn't on the remote (catches a
-   forgotten `git push --tags`), and **"Latest" is computed, not chronological** — when backfilling
+   forgotten tag push), and **"Latest" is computed, not chronological** — when backfilling
    several, create them oldest-first with `--latest=false` and pass `--latest` only on the newest, or
    the badge lands on whichever GitHub decides. Reversible: a Release can be deleted without touching
    the tag.
@@ -576,7 +631,7 @@ It used to be numbered step 7 of the release, which read as "do this to finish s
 
 **Model-tier acceptance:** when adopting or recommending a new model tier, run the cap-table reliability bench (`evals/cap-table/run_reliability_bench.py`, see its `README.md`) and record the per-tier correctness; Sonnet 4.6 is the support floor. (The bench lives at repo-root `evals/` — outside the distributed `founder-skills/` plugin — so it isn't shipped to users, mounted into cowork runs, or folded into the cassette staleness hash.)
 
-**Already-distributed retag pitfall:** if you had separately run `sync-test-repo.sh` before noticing the bug, **bump to the next patch version instead of retagging** — Cowork caches by `plugin.json#version`, so retagging the same version will not refresh user caches (`cpd refresh ... --force-fetch -y` is the manual recovery, not always coordinatable across users).
+**Already-distributed retag pitfall:** a version is distributed once `main` carries it — the marketplace clone tracks `main`, so the push in step 6 ships it whether or not the tag run is green; keep its tag (step 6 says why). The same holds if you had separately run `sync-test-repo.sh` before noticing the bug. Either way, **bump to the next patch version instead of retagging** — Cowork caches by `plugin.json#version`, so retagging the same version will not refresh user caches (`cpd refresh ... --force-fetch -y` is the manual recovery, not always coordinatable across users).
 
 ### When to manually dispatch e2e on a PR
 

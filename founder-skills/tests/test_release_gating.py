@@ -7,8 +7,9 @@ stops firing on a tag push does not merely stop gating -- it silently stops the 
 at all.
 
 That failure is invisible until a release, and this repo has already shipped **four tags with no
-Release** because a release step lived only in prose. The chain is also unexercised by construction:
-the newest tag (v0.10.0) predates the `publish-release` job, so the tag path has never run.
+Release** because a release step lived only in prose. The chain has run once end to end: v0.17.0's
+tag run published its Release through `publish-release`. One green run proves the wiring held then,
+not that an edit since keeps it.
 
 TWO INDEPENDENT CHECKS, because they fail differently and a single one hides the other:
 
