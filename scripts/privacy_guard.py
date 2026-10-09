@@ -31,6 +31,7 @@ and the added token only, never which private file matched or any of its text.
                   only against the founder-supplied DOCUMENTS among the sources (INPUT_DOC_EXTS, and
                   .md/.txt beside one): kept run transcripts and reports share the skills' own prose
                   with every recording, while a document quoted into a recording is the leak.
+                  A synthetic corpus file (SYNTHETIC_CORPUS_FILES) is treated the same way.
                   Layers 4-5 skip a file listed in GENERATED_FILES (generated from a scanned source and
                   held equal to it by a test).
   6. figure-provenance — everywhere. A figure token on a line that also says where real data came
@@ -222,6 +223,13 @@ INDEX_VERSION = "3"
 # prose sits in every kept run transcript and report, while a founder document quoted into a
 # recording is the leak the layer exists for there.
 RECORDING_PREFIXES = ("cowork-tests/cassettes/",)
+# Replay corpora harvested from runs of tracked synthetic fixtures. The harvest script admits only those
+# runs (an input file whose hash equals a tracked synthetic fixture's, or the e2e lane's own run id and
+# the fixture's company name), and the kept runs it reads are among the private sources, so the
+# fixture's figures and sentences collide with themselves there. The figure layer skips these files,
+# and verbatim matches them against the founder documents only, exactly as for a recording. Exact
+# paths, not a prefix: any other file under `evals/` is hand-written and fully checked.
+SYNTHETIC_CORPUS_FILES = frozenset({"evals/financial-model-review/metric_claim_corpus.json"})
 # Founder-supplied documents among the private sources: their grams form `grams_inputs`. Kept apart
 # from layer 1's DOC_EXTS (which governs files tracked in the repo, and has no .csv).
 INPUT_DOC_EXTS = frozenset({".pdf", ".csv", ".docx", ".pptx", ".xlsx"})
@@ -672,15 +680,26 @@ def is_recording(path: str) -> bool:
     return path.startswith(RECORDING_PREFIXES) and path.endswith(".cassette.json")
 
 
+def is_synthetic_corpus(path: str) -> bool:
+    """A replay corpus of synthetic runs (SYNTHETIC_CORPUS_FILES)."""
+    return path in SYNTHETIC_CORPUS_FILES
+
+
+def _documents_only(path: str) -> bool:
+    """Figure layer skipped, verbatim against the founder documents only: recordings and synthetic corpora."""
+    return is_recording(path) or is_synthetic_corpus(path)
+
+
 def find_verbatim_leaks(
     path: str, lines: list[tuple[int, str]], idx: PrivateIndex, all_sources: bool = False
 ) -> list[Finding]:
     """A 6-word run of the added text found in the private sources. Runs may span added lines of one file.
 
-    A recording is matched against the founder documents only (`grams_inputs`), its JSON escapes decoded
-    first; `all_sources=True` matches it against every source instead (the triage count, never a gate)."""
+    A recording or a synthetic corpus is matched against the founder documents only (`grams_inputs`), its
+    JSON escapes decoded first; `all_sources=True` matches it against every source instead (the triage
+    count, never a gate)."""
     out = []
-    recording = is_recording(path) and not all_sources
+    recording = _documents_only(path) and not all_sources
     grams = idx.grams_inputs if recording else idx.grams
     flat: list[tuple[int, str]] = [
         (n, w) for n, text in lines for w in _words(_unescape_json(text) if recording else text)
@@ -752,7 +771,7 @@ def scan_added(
     findings: list[Finding] = []
     for path, lines in added.items():
         if idx is not None and path not in _SELF_EXEMPT and path not in GENERATED_FILES:
-            if not is_recording(path):
+            if not _documents_only(path):
                 findings.extend(find_figure_leaks(path, lines, idx))
             findings.extend(find_verbatim_leaks(path, lines, idx))
         findings.extend(find_figure_provenance(path, lines))
@@ -823,7 +842,7 @@ def _verbatim_report(added: dict[str, list[tuple[int, str]]], idx: PrivateIndex 
         if p in _SELF_EXEMPT or p in GENERATED_FILES:
             continue
         n = len(find_verbatim_leaks(p, lines, idx))
-        n_all = len(find_verbatim_leaks(p, lines, idx, all_sources=True)) if is_recording(p) else None
+        n_all = len(find_verbatim_leaks(p, lines, idx, all_sources=True)) if _documents_only(p) else None
         if n or n_all:
             rows.append((n, p, n_all))
     rows.sort(key=lambda r: (-r[0], -(r[2] or 0), r[1]))

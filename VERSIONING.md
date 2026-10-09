@@ -83,7 +83,7 @@ Two non-negotiable rules. CI enforces the second mechanically (see `.github/work
 
 The marketplace clone tracks `main`. A release that lives on a feature branch — even if tagged — has not been released to consumers.
 
-- Every release must merge to `main`. A `release/vX.Y.Z` branch exists only to run the release gate before `main` moves, and is deleted once `main` carries the release; it is never a substitute for `main`.
+- Every release must merge to `main`. A `release/vX.Y.Z` branch exists only to run the release gate before `main` moves, and is deleted once `main` carries the release (this repository's `delete_branch_on_merge` setting usually does that itself); it is never a substitute for `main`.
 - The `version` field on `main` is what users actually see (the marketplace clone tracks `main`), so **pushing `main` is the distribution event**. Tags do not change what users install. The paid release gate (`deck-review-e2e-smoke` and `mutation-corpus` in `.github/workflows/skill-quality.yml`) therefore runs on the release branch before `main` is pushed, and again on the tag, where it also checks that the tag matches both `pyproject.toml` and `plugin.json` — see "How to Release" below and the Release Process section of CLAUDE.md.
 
 ### 2. Every content change on `main` must bump the version
@@ -121,7 +121,7 @@ git tag v0.2.0
 git push origin v0.2.0
 ```
 
-8. Delete the release branch: `git push origin :release/v0.2.0`.
+8. Delete the release branch if it still exists. This repository is set to delete a merged PR's head branch (`delete_branch_on_merge`), and the PR is marked merged when its head reaches `main`, so it is usually gone already: `git ls-remote --exit-code origin refs/heads/release/v0.2.0 && git push origin :release/v0.2.0`.
 9. The GitHub Release is created for you: the tag push runs the gate again, and the `publish-release` job in `.github/workflows/skill-quality.yml` runs once both jobs are green, taking the notes and title from that version's `CHANGELOG.md` section. Do not also run `gh release create` by hand — whichever runs second fails on "release already exists". To check the notes before tagging, without publishing anything: `gh workflow run skill-quality.yml -f verify_release_notes_for=vX.Y.Z`. A red tag run after a green branch run on the same commit is most likely a flake: read the failing assertion, then choose between one paid re-run and a patch release. If it fails for real, the version has already shipped on `main`: keep the tag, which marks what shipped, leave it without a Release, and release the next patch version. Do not delete the tag — the next release's Scoring changes check diffs from the previous version's tag and fails when it is missing — and never re-tag a version `main` has carried. If the job fails and you must publish by hand, use the command in the Release Process section of CLAUDE.md.
 
 ## Tag Naming

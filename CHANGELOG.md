@@ -5,6 +5,54 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.17.3] - 2026-10-09 — A year in a model review is no longer read as a second burn multiple
+
+### Highlights
+
+**The financial model review no longer reads a date, a count or a plain number as a second figure for
+a metric.** The review checks that each figure it quotes for burn multiple, CAC payback, LTV/CAC or
+magic number agrees with the one it computed. A sentence ending "it stops at Jun-2026 actuals" was read
+as a burn multiple of 2,026, and the report then said it showed two different burn multiples, one of them 2,026. A
+number now counts as one of these figures only when it carries the metric's unit: "x" for burn multiple
+and LTV/CAC, and months for CAC payback. Magic number is usually written without an "x" ("a magic number
+of 0.85"), so for it a number with a decimal point also counts. Years, quarters, counts, amounts of money
+and percentages never do. A figure written without its unit ("a burn multiple of 7") is no longer
+checked. A real disagreement, such as "a burn multiple of roughly 26×" against a computed 2.14, is still
+reported, with the same wording.
+
+### Scoring changes
+
+None.
+
+### Fixed
+
+- Financial model review: a year, quarter or count near a metric's name ("Jun-2026", "Q3 2025",
+  "173 customers") no longer produces a warning that the report shows two different numbers for it.
+- Financial model review: months that describe the model's span rather than a payback ("18 months of
+  runway", "6 months of actuals", "the model covers 24 months") are no longer read as a CAC payback.
+- Financial model review: a bound written after the metric's name ("the burn multiple is sub-1x") is no
+  longer read as a burn multiple of 1, as it already was not when written before the name.
+
+### Development
+
+Contributor-facing only; nothing here changes what a founder installs or runs.
+
+- The free tests now replay the checklist sentences recorded by past review runs of the synthetic test
+  companies, and expect exactly the one real disagreement among them. One command adds a new run's
+  sentences, and admits a run only when what it extracted from its model equals what the tracked
+  synthetic test files extract to.
+- Replayed over the locally kept review runs and the release checks' kept review files, the check fires
+  once, on that real disagreement.
+- The local commit checks treat that file of recorded sentences as they treat a recorded test session.
+- Where the false contradiction warning was a review's only warning, `report.json`'s `validation.status`
+  and `compose_result.json` now read "clean" rather than "warnings". No score, grade or rating changes, and
+  the coaching never received this warning.
+- The recorded test sessions were not refreshed for this release: the one recorded review's contradiction
+  warning is the real disagreement, which the rule still reports, and no recorded sentence reads
+  differently under it.
+- The release steps now say to delete the release branch only if it still exists: this repository is set
+  to delete it once the release pull request is marked merged.
+
 ## [0.17.2] - 2026-10-09 — A model review no longer reports a second figure it never stated, and request lines are honoured as the skill's arguments
 
 ### Highlights

@@ -513,6 +513,57 @@ def test_only_a_cassette_file_under_the_cassettes_folder_is_a_recording(tmp_path
     }
 
 
+# ---- synthetic replay corpora: treated as recordings --------------------------------------------
+
+CORPUS = "evals/financial-model-review/metric_claim_corpus.json"
+
+
+def test_the_synthetic_corpus_skips_the_figure_layer(tmp_path):
+    """Its runs are kept among the private sources, so its figures collide with themselves there."""
+    idx = _index(tmp_path)
+    assert pg.is_synthetic_corpus(CORPUS) and not pg.is_recording(CORPUS)
+    line = [(1, json.dumps({"evidence": "margin of 7,777.77 and about 13.3x"}))]
+    assert pg.find_figure_leaks(CORPUS, line, idx)  # lever engaged: the figures are in the index
+    assert pg.scan_added({CORPUS: line}, idx, []) == []
+
+
+def test_a_document_run_on_the_synthetic_corpus_still_blocks(tmp_path):
+    idx = _index(tmp_path)
+    six = " ".join(DOCX_QUOTE.split()[:6])
+    found = pg.scan_added({CORPUS: [(4, json.dumps({"evidence": f"as quoted: {six}, end"}))]}, idx, [])
+    assert [f.layer for f in found] == ["verbatim"]
+
+
+def test_a_kept_run_phrase_does_not_block_the_synthetic_corpus(tmp_path):
+    """Verbatim against the documents only: a kept run's transcript or report repeats the corpus."""
+    idx = _index(tmp_path)
+    for quote in (TRANSCRIPT_QUOTE, FAKE_QUOTE):
+        assert pg.find_verbatim_leaks(CORPUS, [(1, json.dumps({"evidence": quote}))], idx) == []
+        assert pg.find_verbatim_leaks(CORPUS, [(1, json.dumps({"evidence": quote}))], idx, all_sources=True)
+
+
+def test_the_synthetic_corpus_keeps_figure_provenance(tmp_path):
+    """Only the figure layer and the verbatim source set change; layer 6 still reads the corpus."""
+    line = [(1, "a live run printed $1,111")]
+    assert {f.layer for f in pg.scan_added({CORPUS: line}, _index(tmp_path), [])} == {"figure-provenance"}
+
+
+def test_any_other_file_under_evals_is_fully_checked(tmp_path):
+    idx = _index(tmp_path)
+    for other in (
+        "evals/financial-model-review/harvest_metric_claims.py",
+        "evals/financial-model-review/other_corpus.json",
+        "evals/cap-table/metric_claim_corpus.json",
+        "x/evals/financial-model-review/metric_claim_corpus.json",
+    ):
+        assert not pg.is_synthetic_corpus(other)
+        assert {f.layer for f in pg.scan_added({other: [(1, "a live run printed $1,111")]}, idx, [])} >= {
+            "figure",
+            "figure-provenance",
+        }, other
+        assert pg.find_verbatim_leaks(other, [(1, TRANSCRIPT_QUOTE)], idx), other
+
+
 def test_own_code_is_subtracted_from_the_documents_set(tmp_path):
     """A document phrase that is also in our published code is ours, on a recording path too."""
     idx = _index(tmp_path, own_text=DOCX_QUOTE)

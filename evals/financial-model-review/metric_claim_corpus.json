@@ -1,0 +1,878 @@
+{
+ "about": "Checklist sentences naming a ratio metric, from review runs of tracked synthetic fixtures, with the computed figures they were checked against. Written by harvest_metric_claims.py; `expected` is edited by hand.",
+ "runs": {
+  "foobar-systems-2c2b5f54": {
+   "origins": [
+    "local kept run",
+    "ci run 37899444153",
+    "ci run 37947412112"
+   ],
+   "input": "synthetic-seed-model.csv",
+   "metrics": [
+    {
+     "id": "burn_multiple",
+     "value": 0.41,
+     "benchmark": null,
+     "benchmark_reference": null
+    },
+    {
+     "id": "cac_payback",
+     "value": 11.0,
+     "benchmark": {
+      "target": 12,
+      "source": "composite (best-practices doc)",
+      "as_of": "2024-Q4"
+     },
+     "benchmark_reference": null
+    },
+    {
+     "id": "ltv_cac_ratio",
+     "value": 3.59,
+     "benchmark": null,
+     "benchmark_reference": null
+    },
+    {
+     "id": "magic_number",
+     "value": 3.94,
+     "benchmark": {
+      "target": 1.0,
+      "source": "Scale VP 2024",
+      "as_of": "2024-Q4"
+     },
+     "benchmark_reference": null
+    }
+   ]
+  },
+  "foobar-systems-03a1128b": {
+   "origins": [
+    "local kept run"
+   ],
+   "input": "synthetic-seed-model.csv",
+   "metrics": [
+    {
+     "id": "burn_multiple",
+     "value": 0.42,
+     "benchmark": null,
+     "benchmark_reference": null
+    },
+    {
+     "id": "cac_payback",
+     "value": 11.0,
+     "benchmark": {
+      "target": 12,
+      "source": "composite (best-practices doc)",
+      "as_of": "2024-Q4"
+     },
+     "benchmark_reference": null
+    },
+    {
+     "id": "ltv_cac_ratio",
+     "value": 3.59,
+     "benchmark": null,
+     "benchmark_reference": null
+    },
+    {
+     "id": "magic_number",
+     "value": 3.93,
+     "benchmark": {
+      "target": 1.0,
+      "source": "Scale VP 2024",
+      "as_of": "2024-Q4"
+     },
+     "benchmark_reference": null
+    }
+   ]
+  },
+  "foobar-systems-630c4f42": {
+   "origins": [
+    "local kept run",
+    "ci run 37329472040",
+    "ci run 37422076445",
+    "ci run 37936046055",
+    "ci run 37943657952"
+   ],
+   "input": "synthetic-seed-model.csv",
+   "metrics": [
+    {
+     "id": "burn_multiple",
+     "value": 0.4,
+     "benchmark": null,
+     "benchmark_reference": null
+    },
+    {
+     "id": "cac_payback",
+     "value": 11.0,
+     "benchmark": {
+      "target": 12,
+      "source": "composite (best-practices doc)",
+      "as_of": "2024-Q4"
+     },
+     "benchmark_reference": null
+    },
+    {
+     "id": "ltv_cac_ratio",
+     "value": 3.59,
+     "benchmark": null,
+     "benchmark_reference": null
+    },
+    {
+     "id": "magic_number",
+     "value": 4.05,
+     "benchmark": {
+      "target": 1.0,
+      "source": "Scale VP 2024",
+      "as_of": "2024-Q4"
+     },
+     "benchmark_reference": null
+    }
+   ]
+  },
+  "foobar-systems-8982121f": {
+   "origins": [
+    "local kept run",
+    "ci run 37851960635"
+   ],
+   "input": "synthetic-seed-model.csv",
+   "metrics": [
+    {
+     "id": "burn_multiple",
+     "value": 0.65,
+     "benchmark": {
+      "target": 2.0,
+      "source": "CFO Advisors 2025 / best-practices resolution",
+      "as_of": "2025-Q1"
+     },
+     "benchmark_reference": null
+    },
+    {
+     "id": "cac_payback",
+     "value": 11.0,
+     "benchmark": {
+      "target": 12,
+      "source": "composite (best-practices doc)",
+      "as_of": "2024-Q4"
+     },
+     "benchmark_reference": null
+    },
+    {
+     "id": "ltv_cac_ratio",
+     "value": 3.59,
+     "benchmark": null,
+     "benchmark_reference": null
+    },
+    {
+     "id": "magic_number",
+     "value": 2.51,
+     "benchmark": {
+      "target": 1.0,
+      "source": "Scale VP 2024",
+      "as_of": "2024-Q4"
+     },
+     "benchmark_reference": null
+    }
+   ]
+  },
+  "cadence-6060fba5": {
+   "origins": [
+    "local kept run"
+   ],
+   "input": "sample_model.xlsx",
+   "metrics": [
+    {
+     "id": "burn_multiple",
+     "value": 2.14,
+     "benchmark": {
+      "target": 2.0,
+      "source": "CFO Advisors 2025 / best-practices resolution",
+      "as_of": "2025-Q1"
+     },
+     "benchmark_reference": null
+    },
+    {
+     "id": "cac_payback",
+     "value": null,
+     "benchmark": null,
+     "benchmark_reference": null
+    },
+    {
+     "id": "ltv_cac_ratio",
+     "value": null,
+     "benchmark": null,
+     "benchmark_reference": null
+    },
+    {
+     "id": "magic_number",
+     "value": null,
+     "benchmark": null,
+     "benchmark_reference": null
+    }
+   ]
+  },
+  "foobar-systems-3adc2035": {
+   "origins": [
+    "ci run 36755086524"
+   ],
+   "input": "synthetic-seed-model.csv",
+   "metrics": [
+    {
+     "id": "burn_multiple",
+     "value": 0.4,
+     "benchmark": null,
+     "benchmark_reference": null
+    },
+    {
+     "id": "cac_payback",
+     "value": 11.0,
+     "benchmark": {
+      "target": 12,
+      "source": "composite (best-practices doc)",
+      "as_of": "2024-Q4"
+     },
+     "benchmark_reference": null
+    },
+    {
+     "id": "ltv_cac_ratio",
+     "value": 3.59,
+     "benchmark": null,
+     "benchmark_reference": null
+    },
+    {
+     "id": "magic_number",
+     "value": 1.76,
+     "benchmark": {
+      "target": 1.0,
+      "source": "Scale VP 2024",
+      "as_of": "2024-Q4"
+     },
+     "benchmark_reference": null
+    }
+   ]
+  },
+  "foobar-systems-a0af2e87": {
+   "origins": [
+    "ci run 37119862967"
+   ],
+   "input": "synthetic-seed-model.csv",
+   "metrics": [
+    {
+     "id": "burn_multiple",
+     "value": 0.4,
+     "benchmark": null,
+     "benchmark_reference": null
+    },
+    {
+     "id": "cac_payback",
+     "value": 11.0,
+     "benchmark": {
+      "target": 12,
+      "source": "composite (best-practices doc)",
+      "as_of": "2024-Q4"
+     },
+     "benchmark_reference": null
+    },
+    {
+     "id": "ltv_cac_ratio",
+     "value": 3.59,
+     "benchmark": null,
+     "benchmark_reference": null
+    },
+    {
+     "id": "magic_number",
+     "value": 4.06,
+     "benchmark": {
+      "target": 1.0,
+      "source": "Scale VP 2024",
+      "as_of": "2024-Q4"
+     },
+     "benchmark_reference": null
+    }
+   ]
+  },
+  "foobar-systems-45d2d73a": {
+   "origins": [
+    "ci run 37149666435"
+   ],
+   "input": "synthetic-seed-model.csv",
+   "metrics": [
+    {
+     "id": "burn_multiple",
+     "value": 0.4,
+     "benchmark": null,
+     "benchmark_reference": null
+    },
+    {
+     "id": "cac_payback",
+     "value": 11.0,
+     "benchmark": {
+      "target": 12,
+      "source": "composite (best-practices doc)",
+      "as_of": "2024-Q4"
+     },
+     "benchmark_reference": null
+    },
+    {
+     "id": "ltv_cac_ratio",
+     "value": 3.59,
+     "benchmark": null,
+     "benchmark_reference": null
+    },
+    {
+     "id": "magic_number",
+     "value": null,
+     "benchmark": null,
+     "benchmark_reference": null
+    }
+   ]
+  },
+  "foobar-systems-a60dbda7": {
+   "origins": [
+    "ci run 37185490789"
+   ],
+   "input": "synthetic-seed-model.csv",
+   "metrics": [
+    {
+     "id": "burn_multiple",
+     "value": 0.41,
+     "benchmark": null,
+     "benchmark_reference": null
+    },
+    {
+     "id": "cac_payback",
+     "value": 10.75,
+     "benchmark": {
+      "target": 12,
+      "source": "composite (best-practices doc)",
+      "as_of": "2024-Q4"
+     },
+     "benchmark_reference": null
+    },
+    {
+     "id": "ltv_cac_ratio",
+     "value": 3.57,
+     "benchmark": null,
+     "benchmark_reference": null
+    },
+    {
+     "id": "magic_number",
+     "value": 4.88,
+     "benchmark": {
+      "target": 1.0,
+      "source": "Scale VP 2024",
+      "as_of": "2024-Q4"
+     },
+     "benchmark_reference": null
+    }
+   ]
+  }
+ },
+ "rows": [
+  {
+   "run": "foobar-systems-2c2b5f54",
+   "criterion": "UNIT_16",
+   "evidence": "The model shows CAC payback of 11.0 months, which is within the 12-month bar for a sales-led seed company and is consistent with CAC 4,350 / (ARPU 533 x 76% gross margin). However, the model does not state how the payback is calculated."
+  },
+  {
+   "run": "foobar-systems-2c2b5f54",
+   "criterion": "UNIT_17",
+   "evidence": "The model shows lifetime value (15,600) and CAC (4,350), about 3.6x LTV/CAC, but LTV rests on assumed rather than observed retention. That makes the ratio directional only, so it is left ungraded rather than scored against a benchmark. LTV is also higher than ARPU x gross margin / logo churn (about 13,070), and the model does not show the formula or say whether inputs are assumed or observed."
+  },
+  {
+   "run": "foobar-systems-2c2b5f54",
+   "criterion": "METRIC_33",
+   "evidence": "There is no KPI summary. ARR (1,240,800), net burn, gross margin, churn, CAC and payback all appear as rows, but runway is missing and the KPIs are not gathered in one view."
+  },
+  {
+   "run": "foobar-systems-2c2b5f54",
+   "criterion": "METRIC_34",
+   "evidence": "The model does not track burn multiple. From its inputs it works out to about 0.4x, which looks excellent, but at roughly 14% monthly growth the company is in hyper-growth, where the standard bar is not a fair comparison, so this figure is left ungraded rather than scored."
+  },
+  {
+   "run": "foobar-systems-2c2b5f54",
+   "criterion": "METRIC_35",
+   "evidence": "No benchmarks are cited anywhere in the model. Investors will expect the founder to know where gross margin (76%), CAC payback (11 months) and monthly churn (3.1%) stand against seed SaaS peers."
+  },
+  {
+   "run": "foobar-systems-2c2b5f54",
+   "criterion": "UNIT_16",
+   "evidence": "The model shows CAC payback of 11.0 months, which sits within the usual 12-month band for this motion, but the formula is not shown; it is roughly consistent with CAC $4,350 over ARPA $533 x 76% margin, yet an investor cannot see that."
+  },
+  {
+   "run": "foobar-systems-2c2b5f54",
+   "criterion": "METRIC_33",
+   "evidence": "MRR, ARR, burn, gross margin, churn, CAC, LTV and payback appear as rows, but there is no separate summary view and runway is not shown at all."
+  },
+  {
+   "run": "foobar-systems-2c2b5f54",
+   "criterion": "METRIC_34",
+   "evidence": "MRR is growing roughly 14% a month, a pace at which the usual seed comparison bar does not fit. The model itself does not track it, but its figures give a burn multiple of about 0.41x; given that growth pace it was deliberately left ungraded rather than scored good or bad."
+  },
+  {
+   "run": "foobar-systems-2c2b5f54",
+   "criterion": "METRIC_35",
+   "evidence": "No benchmarks are cited anywhere in the model. Monthly churn of 3.1% is not compared with seed-stage SaaS peers. Separately, the 76% gross margin and a CAC payback of 11 months are not placed against seed-stage SaaS comparisons either."
+  },
+  {
+   "run": "foobar-systems-03a1128b",
+   "criterion": "UNIT_16",
+   "evidence": "Payback 11.0 months shown; reproducible from CAC, ARPA, margin; within 12-month band."
+  },
+  {
+   "run": "foobar-systems-03a1128b",
+   "criterion": "METRIC_33",
+   "evidence": "Most KPIs are in the sheet (ARR $1.24M, MRR, burn, gross margin, logo churn, CAC, payback, LTV), but they are spread across sections rather than on one summary. Runway, cash-out date and revenue retention (NRR/GRR) are absent."
+  },
+  {
+   "run": "foobar-systems-03a1128b",
+   "criterion": "METRIC_34",
+   "evidence": "The model does not track burn multiple. From its figures it works out at about 0.4x (June net burn against annualised net new ARR), which would be very efficient. It was left ungraded on purpose: at roughly 14% monthly growth the standard bar does not give a meaningful comparison, and the figure also depends on the burn calculation flagged in the runway item."
+  },
+  {
+   "run": "foobar-systems-03a1128b",
+   "criterion": "METRIC_35",
+   "evidence": "The model cites no benchmarks. Growth, 3.1% monthly logo churn, 76% gross margin and the 11-month CAC payback are not compared with seed-stage SaaS peers, so investors cannot see that the founder knows where the company stands."
+  },
+  {
+   "run": "foobar-systems-2c2b5f54",
+   "criterion": "STRUCT_01",
+   "evidence": "The model is a single sheet. It has a short Assumptions block at the bottom (starting cash 1,800,000, headcount, stage, geography, currency), but the key drivers (new MRR added, churn, ARPU, CAC, payback) are typed straight into the output rows. No inputs are colour-coded or held on a dedicated tab."
+  },
+  {
+   "run": "foobar-systems-2c2b5f54",
+   "criterion": "UNIT_16",
+   "evidence": "The model states CAC payback of 11.0 months in Jun, which is inside the roughly 12-month band investors look for. The method is not shown, though, and it rests on the undocumented 4,350 CAC."
+  },
+  {
+   "run": "foobar-systems-2c2b5f54",
+   "criterion": "METRIC_33",
+   "evidence": "MRR, ARR, burn, gross margin, logo churn, CAC, LTV and payback all appear as rows, but there is no summary view and no runway line. Revenue retention (NRR/GRR) is not shown."
+  },
+  {
+   "run": "foobar-systems-2c2b5f54",
+   "criterion": "METRIC_34",
+   "evidence": "The model does not track a burn multiple. It can be worked out from the figures: about 0.4x (73,516 net burn against roughly 177,000 a month of net new ARR). That is excellent on its face, but at about 14% monthly growth it is not a like-for-like comparison with the usual bar, so it is not graded either way."
+  },
+  {
+   "run": "foobar-systems-2c2b5f54",
+   "criterion": "METRIC_35",
+   "evidence": "The model cites no benchmarks. Gross margin (76%), CAC payback (11 months) and churn (3.1% monthly logo) are shown with no comparison to seed SaaS norms."
+  },
+  {
+   "run": "foobar-systems-2c2b5f54",
+   "criterion": "BRIDGE_37",
+   "evidence": "The model sets no forward targets (for example ARR at Series A, or a burn multiple goal); it stops at Jun-2026 actuals."
+  },
+  {
+   "run": "foobar-systems-2c2b5f54",
+   "criterion": "UNIT_16",
+   "evidence": "Payback shown monthly (10.5 to 11.0 months); within one-year band for sales-led SaaS."
+  },
+  {
+   "run": "foobar-systems-2c2b5f54",
+   "criterion": "UNIT_17",
+   "evidence": "The model shows lifetime value ($15,600) and CAC ($4,350), roughly 3.6x LTV to CAC. We have not graded that ratio against a benchmark: the LTV rests on assumed rather than observed retention, so it is directional only. The model's LTV also does not reproduce from its own inputs ($533 ARPU x 76% margin / 3.1% churn is about $13.1K, not $15.6K), and LTV is not labelled as assumed."
+  },
+  {
+   "run": "foobar-systems-2c2b5f54",
+   "criterion": "METRIC_33",
+   "evidence": "There is no KPI summary. ARR ($1.24M), MRR, burn, gross margin, churn, CAC and payback all appear as rows of the single sheet, but runway and growth rate are not shown, and there is no single summary block."
+  },
+  {
+   "run": "foobar-systems-2c2b5f54",
+   "criterion": "METRIC_34",
+   "evidence": "The model does not track a burn multiple. From its figures, net burn ($73.5K a month) against net new ARR works out to roughly 0.4x. We have left that ungraded on purpose: with growth this early and this fast (about 14% a month), comparing it to the usual benchmark bands would flatter the company in a way investors will discount."
+  },
+  {
+   "run": "foobar-systems-2c2b5f54",
+   "criterion": "METRIC_35",
+   "evidence": "No benchmarks are cited anywhere in the model. Investors expect to see where 76% gross margin, 3.1% monthly churn and 11-month CAC payback sit against seed SaaS peers."
+  },
+  {
+   "run": "foobar-systems-2c2b5f54",
+   "criterion": "OVERALL_45",
+   "evidence": "An investor can find ARR, burn, margin, CAC and payback by scanning the single sheet, but there is no dashboard, and runway and growth rate have to be worked out by hand (about 18 months at today's burn; MRR growing about 14% a month)."
+  },
+  {
+   "run": "foobar-systems-630c4f42",
+   "criterion": "UNIT_16",
+   "evidence": "CAC payback 11 months, within a 12-month bar; reconciles to CAC over margin-adjusted ARPU."
+  },
+  {
+   "run": "foobar-systems-630c4f42",
+   "criterion": "UNIT_17",
+   "evidence": "The model shows LTV ($15,600) and CAC ($4,350), so LTV/CAC works out to about 3.6x. That ratio rests on an assumed lifetime rather than observed cohorts, so it is not graded against a benchmark. The stated LTV is also higher than its own inputs support: $533 ARPU x 76% margin / 3.1% churn gives about $13,070."
+  },
+  {
+   "run": "foobar-systems-630c4f42",
+   "criterion": "METRIC_33",
+   "evidence": "ARR, MRR, burn, gross margin, churn, CAC, LTV and payback all appear as rows, but there is no summary view. Runway is not shown anywhere, and the KPIs sit in the monthly grid rather than on a dashboard."
+  },
+  {
+   "run": "foobar-systems-630c4f42",
+   "criterion": "METRIC_34",
+   "evidence": "The model does not track burn multiple. On its inputs it works out to about 0.4x (net burn $73,516 against net new ARR at a 14.7% monthly growth rate). Growth is so high (about 419% annualised) that the standard 3x bar is not a fair comparison, so this was left ungraded."
+  },
+  {
+   "run": "foobar-systems-630c4f42",
+   "criterion": "METRIC_35",
+   "evidence": "The model cites no benchmarks. Its 76% gross margin, 11-month CAC payback and 3.1% monthly churn are never compared with peers, so investors cannot see that you know where you stand."
+  },
+  {
+   "run": "foobar-systems-8982121f",
+   "criterion": "UNIT_16",
+   "evidence": "Payback 11.0 months shown; reconciles to CAC over margin-adjusted ARPU."
+  },
+  {
+   "run": "foobar-systems-8982121f",
+   "criterion": "METRIC_33",
+   "evidence": "Key figures (MRR, ARR, burn, gross margin, CAC, payback, churn) are present as rows but there is no summary view, and runway and retention (NRR) are not shown at all."
+  },
+  {
+   "run": "foobar-systems-8982121f",
+   "criterion": "METRIC_34",
+   "evidence": "The model does not track a burn multiple. From its figures it works out well under 1x ($73.5K monthly burn against roughly $113K of monthly net new ARR), which investors would like, but founders need to show it themselves."
+  },
+  {
+   "run": "foobar-systems-8982121f",
+   "criterion": "METRIC_35",
+   "evidence": "The model cites no benchmarks; there is no comparison of its 76% gross margin, 11-month payback or 3.1% monthly churn against seed SaaS peers."
+  },
+  {
+   "run": "foobar-systems-03a1128b",
+   "criterion": "UNIT_16",
+   "evidence": "CAC payback 11 months shown monthly; within the 12-month band for sales-led SaaS."
+  },
+  {
+   "run": "foobar-systems-03a1128b",
+   "criterion": "METRIC_33",
+   "evidence": "Most KPIs are present but sit as rows on the single sheet: MRR, ARR, net burn, cash, gross margin, logo churn, CAC, LTV and payback. There is no summary view, and runway and growth rate are not shown anywhere."
+  },
+  {
+   "run": "foobar-systems-03a1128b",
+   "criterion": "METRIC_34",
+   "evidence": "The model does not track a burn multiple. One can be calculated from its figures (73,516 net burn against roughly 14% monthly MRR growth gives about 0.4x), but at this hyper-growth rate the figure is not comparable to the usual seed benchmark, so it was deliberately left ungraded rather than scored as a pass."
+  },
+  {
+   "run": "foobar-systems-03a1128b",
+   "criterion": "METRIC_35",
+   "evidence": "The model cites no benchmarks. There is no comparison of its 76% gross margin, 11-month CAC payback or 3.1% monthly logo churn against seed-stage SaaS peers."
+  },
+  {
+   "run": "foobar-systems-03a1128b",
+   "criterion": "BRIDGE_37",
+   "evidence": "The model has no forward-looking plan and no Series A targets (e.g. ARR, growth, payback) by a given date. All six months are history."
+  },
+  {
+   "run": "foobar-systems-630c4f42",
+   "criterion": "UNIT_16",
+   "evidence": "The model shows CAC payback rising from 10.5 to 11.0 months, which is within a healthy band for a sales-led motion and reconciles with CAC and gross-margin-adjusted ARPU (about 10.7 months). But the calculation method is not stated in the model."
+  },
+  {
+   "run": "foobar-systems-630c4f42",
+   "criterion": "METRIC_33",
+   "evidence": "Most KPIs exist as rows (MRR, ARR, net burn, cash, gross margin, logo churn, CAC, payback, LTV) but there is no summary view, and runway and revenue retention are not shown at all."
+  },
+  {
+   "run": "foobar-systems-630c4f42",
+   "criterion": "METRIC_34",
+   "evidence": "The model does not track burn multiple. From its figures it is very low (about 0.4x: June net burn 73,516 against net new ARR), but at roughly 14.7% monthly growth this is not compared to the usual benchmark bar, so it is left ungraded rather than scored as strong."
+  },
+  {
+   "run": "foobar-systems-630c4f42",
+   "criterion": "METRIC_35",
+   "evidence": "No benchmarks are cited anywhere in the model, e.g., no comparison of 76% gross margin, 3.1% monthly logo churn or 11-month CAC payback to seed SaaS peers."
+  },
+  {
+   "run": "foobar-systems-630c4f42",
+   "criterion": "UNIT_16",
+   "evidence": "The model shows CAC payback of 10.5 to 11.0 months, a good result for a sales-led seed company, but gives no formula or method (e.g. whether margin-adjusted) behind the row."
+  },
+  {
+   "run": "foobar-systems-630c4f42",
+   "criterion": "METRIC_33",
+   "evidence": "MRR, ARR, burn, gross margin, churn, CAC, LTV and payback each appear as rows in the monthly grid, but there is no summary view and runway is not shown at all."
+  },
+  {
+   "run": "foobar-systems-630c4f42",
+   "criterion": "METRIC_34",
+   "evidence": "The model does not track a burn multiple. Computed from its inputs it is very low (about 0.4x), but at roughly 15% monthly growth it is not meaningful to grade against the standard benchmark, so it is left ungraded here rather than passed."
+  },
+  {
+   "run": "foobar-systems-630c4f42",
+   "criterion": "METRIC_35",
+   "evidence": "The model cites no benchmarks: churn (3.1%/month), gross margin (76%), CAC payback (11 months) and growth (~15%/month) are not compared with any seed SaaS reference."
+  },
+  {
+   "run": "cadence-6060fba5",
+   "criterion": "UNIT_16",
+   "evidence": "CAC payback cannot be computed — no CAC figure appears anywhere in the model. Without customer acquisition cost data, payback period is not derivable from the workbook."
+  },
+  {
+   "run": "cadence-6060fba5",
+   "criterion": "UNIT_17",
+   "evidence": "LTV is computed at $12,500 (formula: ARPU $500 × gross margin 75% ÷ monthly churn 3%, labeled as assumed). However, CAC is entirely absent from the model, so no LTV/CAC ratio can be derived or presented to investors."
+  },
+  {
+   "run": "cadence-6060fba5",
+   "criterion": "METRIC_33",
+   "evidence": "The model has no KPI summary view. ARR ($702K as of March 2025) and MRR ($58,500) are derivable from the Revenue sheet, but burn, runway, gross margin trend, CAC, payback, and retention are not consolidated anywhere. An investor reviewing this model cannot orient in 5 minutes."
+  },
+  {
+   "run": "cadence-6060fba5",
+   "criterion": "METRIC_34",
+   "evidence": "Burn multiple is not tracked or computed anywhere in the model. Net burn is $120,000/month (founder-stated) and net new ARR would need to be derived from the growth assumptions, but the model itself does not calculate or present this metric."
+  },
+  {
+   "run": "cadence-6060fba5",
+   "criterion": "OVERALL_45",
+   "evidence": "The model's three sheets (Assumptions, Revenue, P&L with a single month) do not constitute a dashboard. An investor cannot quickly orient on burn and runway (not in the model), unit economics (CAC absent, payback missing), or growth trajectory (no projections). The core information an investor needs for a 5-minute audit is not present."
+  },
+  {
+   "run": "cadence-6060fba5",
+   "criterion": "UNIT_16",
+   "evidence": "CAC payback cannot be computed. No CAC figure exists in the model, and no payback period is stated or calculable from the available data."
+  },
+  {
+   "run": "cadence-6060fba5",
+   "criterion": "UNIT_17",
+   "evidence": "LTV is estimated at $12,500 using a formula (ARPU $500 × gross margin 75% ÷ churn 3%), and inputs are labeled as assumed rather than observed. However, no CAC appears anywhere in the model, making the LTV/CAC ratio uncomputable. For a seed-stage company, presenting LTV without CAC tells only half the unit economics story."
+  },
+  {
+   "run": "cadence-6060fba5",
+   "criterion": "METRIC_34",
+   "evidence": "Burn multiple is not tracked or computed anywhere in the model. The inputs needed to compute it (net burn and net new ARR) come from different sources — the founder's stated figures and the model's growth assumptions — and are never brought together in the model itself."
+  },
+  {
+   "run": "cadence-6060fba5",
+   "criterion": "UNIT_16",
+   "evidence": "CAC payback cannot be computed — no CAC data or sales and marketing cost breakdown appears anywhere in the workbook. This is a primary metric seed investors use to evaluate go-to-market efficiency."
+  },
+  {
+   "run": "cadence-6060fba5",
+   "criterion": "UNIT_17",
+   "evidence": "No LTV, CAC, or LTV/CAC ratio appears anywhere in the workbook. At seed stage, investors expect at minimum a directional LTV/CAC estimate with stated assumptions. The model provides no unit economics beyond gross margin."
+  },
+  {
+   "run": "cadence-6060fba5",
+   "criterion": "METRIC_33",
+   "evidence": "The workbook contains no KPI summary or dashboard. Burn, runway, CAC payback, and retention metrics are either absent from the model entirely or scattered without a single place where an investor can get a quick read on the business."
+  },
+  {
+   "run": "cadence-6060fba5",
+   "criterion": "METRIC_34",
+   "evidence": "The burn multiple is not tracked or computed anywhere in the workbook. This is a standard seed-stage efficiency metric; its absence means investors cannot assess whether capital is being deployed efficiently relative to ARR growth."
+  },
+  {
+   "run": "cadence-6060fba5",
+   "criterion": "UNIT_16",
+   "evidence": "CAC payback cannot be computed — there is no CAC figure in the model, no S&M expense breakdown, and no attribution of acquisition costs to new customer growth."
+  },
+  {
+   "run": "cadence-6060fba5",
+   "criterion": "UNIT_17",
+   "evidence": "LTV is computed using the formula (ARPU × gross margin / churn monthly) = $500 × 0.75 / 0.03 = $12,500, with inputs shown and labeled as assumed rather than observed. However, CAC is entirely absent, so the LTV/CAC ratio — the key seed-stage metric — cannot be derived."
+  },
+  {
+   "run": "cadence-6060fba5",
+   "criterion": "METRIC_33",
+   "evidence": "There is no KPI summary tab or dashboard in the model. Key metrics — ARR, burn, runway, gross margin, churn, CAC/payback — are scattered across or absent from the three-tab workbook. An investor cannot answer the fundamental questions within 5 minutes of opening the file."
+  },
+  {
+   "run": "cadence-6060fba5",
+   "criterion": "METRIC_34",
+   "evidence": "Burn multiple is not tracked or computed anywhere in the model. With a stated monthly burn of $120,000 and MRR growing from $50,000 at 8% monthly, the burn multiple would be very high, but the model does not surface this ratio for investor review."
+  },
+  {
+   "run": "cadence-6060fba5",
+   "criterion": "UNIT_16",
+   "evidence": "CAC payback cannot be computed because no CAC data is present in the model. Neither sales and marketing spend nor new-customer acquisition costs are tracked."
+  },
+  {
+   "run": "cadence-6060fba5",
+   "criterion": "UNIT_17",
+   "evidence": "No LTV/CAC analysis appears in the model. At seed stage, investors expect to see unit economics with formula inputs labeled as assumed vs. observed. The model contains neither LTV nor CAC calculations."
+  },
+  {
+   "run": "cadence-6060fba5",
+   "criterion": "METRIC_33",
+   "evidence": "No KPI summary tab or dashboard exists. ARR ($702,000 as of Mar 2025), burn ($120,000/month), runway (~12.5 months), and gross margin (75%) are derivable but scattered or absent. CAC, payback, and retention metrics are not surfaced anywhere in the model."
+  },
+  {
+   "run": "cadence-6060fba5",
+   "criterion": "METRIC_34",
+   "evidence": "Burn multiple is not tracked in the model. Based on the available figures — $120,000/month net burn and 8% monthly growth on $58,500 MRR — net new ARR is approximately $56,160 per year, implying a burn multiple of roughly 26× (annual burn of ~$1.44M divided by ~$56K in net new ARR). This is far above the investable threshold; the model does not compute or display this metric."
+  },
+  {
+   "run": "cadence-6060fba5",
+   "criterion": "OVERALL_45",
+   "evidence": "The model has no summary view or dashboard. An investor cannot quickly orient to burn, runway, growth rate, gross margin, and unit economics — these are either scattered across three separate tabs or absent entirely. Several key metrics (CAC, payback, LTV) are not in the model at all."
+  },
+  {
+   "run": "foobar-systems-3adc2035",
+   "criterion": "UNIT_16",
+   "evidence": "CAC payback computed at 11.0 months, within reasonable band for sales-led SaaS"
+  },
+  {
+   "run": "foobar-systems-3adc2035",
+   "criterion": "UNIT_17",
+   "evidence": "LTV of $15,600 is derived from a formula (ARPU $533 x gross margin 76% / monthly churn 3.1%) rather than observed cohort data — the model flags this as 'assumed', not 'observed'. LTV/CAC is ~3.6x which reads well, but at 3.1% monthly churn the implied 32-month customer lifetime has not yet been demonstrated by any cohort (the model only has 6 months of history), so the number is directional at best."
+  },
+  {
+   "run": "foobar-systems-3adc2035",
+   "criterion": "METRIC_33",
+   "evidence": "the underlying KPIs are all present (MRR, ARR, customer count, ARPU, churn, CAC, payback, LTV, gross margin) but they are scattered across the sheet rather than consolidated onto a single dashboard view. An investor doing a five-minute review has to hunt for each one instead of seeing them in one place."
+  },
+  {
+   "run": "foobar-systems-3adc2035",
+   "criterion": "METRIC_34",
+   "evidence": "burn multiple computable: $73.5K net burn / (103.4K x 14.7% x 12 / 12) ~= 0.48 monthly, healthy for seed"
+  },
+  {
+   "run": "foobar-systems-a0af2e87",
+   "criterion": "UNIT_15",
+   "evidence": "CAC is marked fully loaded at $4,350; magic number of 4.06 (strong) implies S&M spend is captured realistically"
+  },
+  {
+   "run": "foobar-systems-a0af2e87",
+   "criterion": "UNIT_16",
+   "evidence": "CAC payback is computed at 11.0 months and improves slightly across the six months"
+  },
+  {
+   "run": "foobar-systems-a0af2e87",
+   "criterion": "UNIT_17",
+   "evidence": "LTV/CAC of 3.6x is shown but LTV ($15,600) is assumed, not observed from cohorts — the inputs are labeled 'assumed'"
+  },
+  {
+   "run": "foobar-systems-a0af2e87",
+   "criterion": "METRIC_33",
+   "evidence": "key metrics (MRR, ARR, burn, gross margin, CAC, payback, churn) all appear in the model but are scattered across Revenue, Costs, Cash and Unit economics sections rather than consolidated on a summary dashboard"
+  },
+  {
+   "run": "foobar-systems-a0af2e87",
+   "criterion": "METRIC_34",
+   "evidence": "burn multiple is computable at 0.4x (strong on absolute terms) but the figure is contextual and intentionally left ungraded against the 3x benchmark because 420% annualized growth distorts the ratio at this scale"
+  },
+  {
+   "run": "foobar-systems-a0af2e87",
+   "criterion": "BRIDGE_37",
+   "evidence": "no next-round KPI targets (ARR, growth, NRR, burn multiple) are stated anywhere in the model"
+  },
+  {
+   "run": "foobar-systems-a0af2e87",
+   "criterion": "OVERALL_45",
+   "evidence": "the KPIs needed for a 5-minute audit (MRR, growth, burn, runway, gross margin, CAC payback) are all present but spread across four sections; an investor would have to assemble them"
+  },
+  {
+   "run": "foobar-systems-45d2d73a",
+   "criterion": "UNIT_16",
+   "evidence": "CAC payback is 11.0 months — strong versus the typical sub-12-month bar for sales-led SaaS"
+  },
+  {
+   "run": "foobar-systems-45d2d73a",
+   "criterion": "UNIT_17",
+   "evidence": "LTV/CAC comes out at 3.6x with inputs shown (ARPU $533, 3.1% monthly churn, 76% gross margin), but the LTV is labeled 'assumed' rather than observed — at 6 months of history there is not yet enough cohort data to validate the churn assumption, so the ratio should be treated as directional"
+  },
+  {
+   "run": "foobar-systems-45d2d73a",
+   "criterion": "METRIC_33",
+   "evidence": "the key metrics (MRR, ARR, cash, burn, GM, CAC, LTV, payback, churn) all exist in the model, but they are scattered across the Revenue, Cash and Unit economics sections — there is no single KPI summary view that an investor can scan in 60 seconds"
+  },
+  {
+   "run": "foobar-systems-45d2d73a",
+   "criterion": "METRIC_34",
+   "evidence": "burn multiple works out to about 0.4x (excellent in isolation), but with only 6 months of history and growth running at an exceptional annualized pace, there is no benchmark reference that compares cleanly — the figure is directional rather than comparable to a scaled-company bar"
+  },
+  {
+   "run": "foobar-systems-45d2d73a",
+   "criterion": "BRIDGE_37",
+   "evidence": "no next-round milestone targets are stated anywhere — investors at seed want to see the ARR, growth rate, CAC payback and burn figures the company plans to hit before raising a Series A, and the model does not identify them"
+  },
+  {
+   "run": "foobar-systems-a60dbda7",
+   "criterion": "UNIT_16",
+   "evidence": "CAC payback of 10.75 months is present as a line in the model, derived from CAC and gross-margin-adjusted ARPU; this is a strong figure against the ~12 month seed-stage bar"
+  },
+  {
+   "run": "foobar-systems-a60dbda7",
+   "criterion": "UNIT_17",
+   "evidence": "LTV of $15,100 is shown with inputs (ARPU $520, monthly churn 3.2%, 77% gross margin) and labeled 'assumed' rather than observed; the 3.6x LTV/CAC that falls out should be read as directional until cohort data validates it"
+  },
+  {
+   "run": "foobar-systems-a60dbda7",
+   "criterion": "METRIC_33",
+   "evidence": "ARR/MRR, monthly net burn, cash balance, gross margin, logo churn, CAC, LTV and CAC payback are all visible as dedicated rows; what is missing from a formal 'summary' is any single dashboard view — all the KPIs are there but the reader assembles them"
+  },
+  {
+   "run": "foobar-systems-a60dbda7",
+   "criterion": "METRIC_34",
+   "evidence": "burn multiple is roughly 0.4x — exceptionally efficient — but this review's figure was deliberately left ungraded because annualized growth of ~424% from the current MoM rate is hyper-early and inflates the ratio; the model itself does not display or compute burn multiple as a line item"
+  },
+  {
+   "run": "foobar-systems-a60dbda7",
+   "criterion": "METRIC_35",
+   "evidence": "the model carries numbers but makes no explicit benchmark comparisons — no reference to typical seed-stage SaaS benchmarks for gross margin, CAC payback, LTV/CAC or burn multiple appears alongside the figures, so the reader is left to supply context"
+  },
+  {
+   "run": "foobar-systems-a60dbda7",
+   "criterion": "OVERALL_45",
+   "evidence": "all the key figures (MRR, ARR, cash, burn, gross margin, CAC, payback, LTV) are in one sheet and visible within a minute of opening, but there is no formal dashboard or summary row — an investor can orient quickly but has to assemble the picture themselves"
+  },
+  {
+   "run": "foobar-systems-630c4f42",
+   "criterion": "UNIT_16",
+   "evidence": "The model shows CAC payback of 11.0 months, which is within a healthy band for a sales-led motion and roughly reproducible from CAC $4,350, ARPU $533 and 76% margin, but the formula is not shown in the model."
+  },
+  {
+   "run": "foobar-systems-630c4f42",
+   "criterion": "UNIT_17",
+   "evidence": "LTV of $15,600 and CAC of $4,350 are shown, giving LTV/CAC of about 3.6x, but this ratio was deliberately left ungraded because LTV rests on assumed rather than observed retention. The stated LTV is also not reproducible: $533 x 76% / 3.1% churn gives about $13.1K, not $15,600, and the model does not label LTV as assumed."
+  },
+  {
+   "run": "foobar-systems-630c4f42",
+   "criterion": "METRIC_33",
+   "evidence": "MRR, ARR, burn, gross margin, churn, CAC, LTV and payback all appear as rows, but there is no summary view and runway is not shown."
+  },
+  {
+   "run": "foobar-systems-630c4f42",
+   "criterion": "METRIC_34",
+   "evidence": "The model does not track burn multiple. From its figures it is about 0.4x, but at roughly 14.7% monthly growth the business is growing too fast for the usual benchmark to be a fair comparison, so the figure was left ungraded rather than passed."
+  },
+  {
+   "run": "foobar-systems-630c4f42",
+   "criterion": "METRIC_35",
+   "evidence": "No benchmarks are cited in the model; gross margin (76%), churn (3.1% monthly), CAC payback (11 months) and growth are not compared against seed SaaS norms."
+  },
+  {
+   "run": "foobar-systems-630c4f42",
+   "criterion": "UNIT_16",
+   "evidence": "CAC payback is shown at 11.0 months in Jun-2026, inside the roughly 12-month band investors look for, but the model does not state how it is calculated (margin-adjusted or not, which revenue figure)."
+  },
+  {
+   "run": "foobar-systems-630c4f42",
+   "criterion": "METRIC_33",
+   "evidence": "ARR, MRR, burn, gross margin, churn, CAC and payback are all present as rows, but there is no KPI summary view and runway is not shown anywhere."
+  },
+  {
+   "run": "foobar-systems-630c4f42",
+   "criterion": "METRIC_34",
+   "evidence": "The model does not track a burn multiple. From its figures it works out to about 0.4x, which looks excellent, but at roughly 15% monthly growth over only six months of history that figure is not meaningful against the usual benchmark, so it was left ungraded."
+  },
+  {
+   "run": "foobar-systems-630c4f42",
+   "criterion": "METRIC_35",
+   "evidence": "No benchmarks are cited anywhere in the model; investors will want to see where 76% gross margin, 3.1% monthly logo churn and 11-month CAC payback sit against seed SaaS peers."
+  },
+  {
+   "run": "foobar-systems-630c4f42",
+   "criterion": "BRIDGE_37",
+   "evidence": "No forward-looking milestones or next-round targets (e.g. ARR, NRR, burn multiple for a Series A) appear in the model."
+  }
+ ],
+ "expected": [
+  {
+   "run": "cadence-6060fba5",
+   "criterion": "METRIC_34",
+   "metric": "burn_multiple",
+   "claim": 26.0
+  }
+ ]
+}

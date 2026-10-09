@@ -434,7 +434,9 @@ def _warn(code: str, message: str, founder_message: str | None = None) -> dict[s
 # prose gets caught, not just the one we found.
 #
 # Scope is deliberately narrow to keep the precision high enough to act on:
-# ratio metrics only, where a bare multiple is unambiguous. Percent- and
+# ratio metrics only, and a number counts only when it carries the metric's own
+# unit (x for a ratio, months for a payback), so a year, a quarter, a count, an
+# amount or a percentage never does. Percent- and
 # currency-denominated metrics are excluded because "0.75" / "75%" / "$75K"
 # render the same value three ways and the resulting false positives would
 # train the reader to ignore the warning.
@@ -470,7 +472,19 @@ _SLOT_RE = re.compile(
 _PRE_MONTH_RE = re.compile(r"(?<![\w.,$€£₹])(\d+(?:\.\d+)?)[- ]month\s+$")
 _PRE_TIMES_RE = re.compile(r"(?<![\w.,$€£₹])(\d+(?:\.\d+)?)\s?[x×]\s+$")
 _MONTHS_UNIT_RE = re.compile(r"\s?(?:-|\s)?(?:months?|mos?)\b")
-_X_SUFFIX_RE = re.compile(r"\s?[x×](?!\w)")
+# The unit that makes a number a claim about a ratio: "x"/"×", never an operator ("7 x 12") and never
+# the start of a word ("7xx", "7 xl"). "times" and "5:1" are not read. Magic number is the one ratio
+# unit_economics.py writes bare ("Magic number of 0.85"), so for it a number with a decimal point counts
+# in place of the x; a year, a quarter or a count never carries one.
+_RATIO_UNIT_RE = re.compile(r"\s?[x×](?!\w)(?!\s?\d)")
+# A months figure that measures a horizon, not a payback: "18 months of runway", "18 months' cash",
+# "6 months of actuals". Matched right after the months unit.
+_HORIZON_AFTER_RE = re.compile(
+    r"\s*(?:'s|')?\s*(?:of\s+)?(?:cash\s+)?(?:runway|cash|actuals|history|data|projections?|forecasts?|horizon)\b"
+)
+# A verb of span between a payback label and its figure: "the model covers 24 months". "runs" is
+# deliberately absent: "the payback runs 14 months" is a restatement.
+_HORIZON_VERB_RE = re.compile(r"(?<![a-z])(?:covers?|spans?|extends?|projects?|forecasts?|models?)\s+(?:\w+\s+){0,3}$")
 # One end of a range ("10-12 months", "1.5x-2x", "between 10 and 12") is not a
 # single claim.
 _RANGE_BEFORE_RE = re.compile(r"\d\s?[x×]?\s?(?:-|–|to)\s?$")
@@ -558,16 +572,32 @@ def _metric_claims_in_text(text: str, name: str) -> list[float]:
       and an LTV/CAC of 3.2"). Reading past the first number produced exactly
       those two false positives.
 
-    That first number is no claim -- and the search STOPS rather than skipping
-    to the next one -- when it carries a currency sign, a percent, a scale
-    suffix or a thousands separator (it is another figure: "3.1% churn",
-    "$73.5K"), when another figure's name sits between it and the label outside
-    a closed parenthesis (a definition such as "(net burn / net new ARR)" does
-    not count), when its unit is the wrong one for the metric (months after a
-    ratio, "x" after a payback), when it is one end of a range ("10-12 months", "1.5x to 2x",
-    "between 10 and 12"), or when it is a comparand ("well under the 3x bar"). A
-    bare "payback" label counts for CAC payback only with a months unit ("payback
-    of 14 months").
+    That first number is a claim only when it carries the metric's own unit:
+    "x"/"×" for a ratio ("7x", not "7 x 12", "7xx" or "7x 2024"), and "month(s)",
+    "mo" or "mos" for CAC payback. So a year, a quarter, a count, an amount or a
+    percentage never is one ("it stops at Jun-2026 actuals" reads nothing).
+    Magic number, which unit_economics.py writes bare ("Magic number of 0.85"),
+    also counts a number with a decimal point in place of the x, unless months
+    follow it; a bare integer after its name is still no claim.
+
+    The first number is no claim -- and the search STOPS rather than skipping
+    to the next one -- when it lacks that unit, when it carries a currency sign,
+    a percent, a scale suffix or a thousands separator (it is another figure:
+    "3.1% churn", "$73.5K"), when another figure's name sits between it and the
+    label outside a closed parenthesis (a definition such as "(net burn / net
+    new ARR)" does not count), when it is one end of a range ("10-12 months",
+    "1.5x to 2x", "between 10 and 12"), when it is a comparand ("well under the
+    3x bar") or a bound ("is sub-1x", "is <1x"), or, for CAC payback, when the
+    months measure a horizon ("18 months of runway", "6 months of actuals", "the
+    model covers 24 months").
+
+    Accepted misses, the price of that precision: a figure written without its
+    unit ("burn multiple of 7", "CAC payback period of 14", "cac_payback=14",
+    "LTV/CAC of 5", "magic number of 1"), "7 times", "5:1", and a payback whose
+    months are followed by "of data" or "runway", or follow "model" or another
+    span verb ("CAC payback the model puts at 14 months"). A bare year or count before the real
+    figure stops the search: "burn multiple in 2024 was 7x" reads nothing. A
+    decimal change in magic number ("improved 0.3 points") reads 0.3.
 
     There is deliberately no stop at the end of a sentence: "does not track
     burn multiple. On its inputs it works out to about 0.4x" would otherwise go
@@ -607,6 +637,9 @@ def _metric_claims_in_text(text: str, name: str) -> list[float]:
             slot = _SLOT_RE.search(lowered, start)
             if slot is None or slot.start() - start > _CLAIM_WINDOW_CHARS:
                 continue
+            # The comma check is load-bearing: "1,2x" would otherwise reach float("1,2"). The
+            # currency, percent and scale checks are now belt-and-braces, since such a figure never
+            # carries the metric's unit either.
             if slot.group(1) or slot.group(3) or "," in slot.group(2):
                 continue
             between = lowered[start : slot.start()]
@@ -620,12 +653,17 @@ def _metric_claims_in_text(text: str, name: str) -> list[float]:
                 continue
             if _RANGE_BETWEEN_RE.search(between) and _RANGE_AND_RE.match(lowered, slot.end()):
                 continue
-            if payback:
-                if _X_SUFFIX_RE.match(lowered, slot.end()):
+            # A bound glued to the figure ("is sub-1x", "is <1x") is no claim, as before the label.
+            if _BOUND_MARK_RE.search(lowered, max(0, slot.start() - _LOOKBACK_CHARS), slot.start()):
+                continue
+            unit = (_MONTHS_UNIT_RE if payback else _RATIO_UNIT_RE).match(lowered, slot.end())
+            if unit is None:
+                # A decimal stands in for magic number's x, but never one followed by months.
+                if not (
+                    name == "magic_number" and "." in slot.group(2) and not _MONTHS_UNIT_RE.match(lowered, slot.end())
+                ):
                     continue
-                if label == "payback" and not _MONTHS_UNIT_RE.match(lowered, slot.end()):
-                    continue
-            elif _MONTHS_UNIT_RE.match(lowered, slot.end()):
+            elif payback and (_HORIZON_AFTER_RE.match(lowered, unit.end()) or _HORIZON_VERB_RE.search(between)):
                 continue
             _append_finite(found, slot.group(2))
     return found
