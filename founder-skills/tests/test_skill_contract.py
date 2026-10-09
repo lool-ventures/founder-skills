@@ -3870,8 +3870,8 @@ def test_paid_lanes_require_explicit_opt_in_not_merely_credentials() -> None:
 def test_every_paid_lane_gates_on_the_opt_in() -> None:
     """All three lanes, not just the two that share a harness.
 
-    deck-review deliberately carries its own auth check (it is the lane the release tag
-    gates on), so a gate added to the shared harness alone leaves it open — which is the
+    deck-review deliberately carries its own auth check (it is the oldest lane of the paid
+    release gate), so a gate added to the shared harness alone leaves it open — which is the
     exact shape of the incident: one of two copies.
     """
     import importlib.util
@@ -3997,13 +3997,13 @@ def test_the_authorized_paid_job_supplies_the_opt_in_and_fails_on_skips() -> Non
 
 
 def test_the_release_path_runs_the_whole_free_suite() -> None:
-    """The paid lane and the release tag both hang off `contract-tests`, which ran four
+    """The paid lane and `publish-release` both hang off `contract-tests`, which ran four
     skill-quality meta-check files. The gate authorization tests, the ledger grammar and
     the reconciliation rules live elsewhere, so a tag could go green having run none of
     them. `ci.yml` covers push and PR; it does not cover the tag path."""
     workflow = (REPO_ROOT / ".github" / "workflows" / "skill-quality.yml").read_text(encoding="utf-8")
     assert "pytest founder-skills/tests/ -q" in workflow, (
-        "the job the release tag depends on does not run the full free suite"
+        "the job publish-release depends on does not run the full free suite"
     )
 
 

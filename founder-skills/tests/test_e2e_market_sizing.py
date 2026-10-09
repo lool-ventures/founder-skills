@@ -71,8 +71,33 @@ _HANDOVER_CHECK = PLUGIN_PATH / "scripts" / "_handover_check.py"
 LANE = "ms"
 SKILL = "market-sizing"
 CANARY = "lane canary 7f3a"
-HOST_ANSWERS = (("ms_methodology", "looks_good"), ("ms_two_figures", "typed"))
+HOST_ANSWERS = (("ms_methodology", "looks_good"), ("ms_two_figures", "typed"), ("ctx_basics.stage", "seed"))
 HOST_NOTES = (("ms_methodology", CANARY),)
+# The company basics, sent up front so the run never waits on one (an earlier prompt stated no location
+# and the run stopped at the geography question). Each value is stated VERBATIM in PROMPT: the skill types
+# them again from the prose, and a typed value that differs from the recorded one is refused.
+# test_lane_host_lines.py pins both.
+HOST_VALUES = (
+    ("ctx_basics.company_name", "different", "Foobar Fleet"),
+    ("ctx_basics.sector", "different", "B2B SaaS"),
+    ("ctx_basics.geography", "different", "United States"),
+)
+
+# The attached deck is Foobar FLEET (a synthetic fleet-maintenance software company), and its
+# page 2 says the renewal rate rests on n=13 customer-months. The prompt states the same figure
+# on n=37 -- the misread from the run that motivated all of this -- so a red team that reads the
+# page has something to cite. The TAM is stated without a currency on purpose (see the module
+# docstring: that is the comparison_blocked shape). The scanned deck states no location, so the
+# prompt's does not contradict it.
+PROMPT = (
+    "Use the market-sizing skill. Foobar Fleet is a fictional seed-stage B2B SaaS company based in "
+    "the United States, selling maintenance-scheduling software to delivery fleets, sold through "
+    "regional vehicle dealers and priced per customer per month. Our deck is attached as "
+    "a scanned PDF. Our renewal rate is $157 per customer per month, measured over 37 "
+    "customer-months from 24 customers. Our deck states a TAM of 3.2 billion. Size the market "
+    "top-down AND bottom-up. Use 'foobar-fleet' as the slug and USD as the analysis currency. "
+    "Don't ask clarifying questions — just run it end to end and produce the report."
+)
 
 
 def _load_handover_check() -> Any:
@@ -105,23 +130,8 @@ def test_market_sizing_smoke(tmp_path: Path) -> None:
     workdir = tmp_path / "workspace"
     workdir.mkdir()
 
-    # The attached deck is Foobar FLEET (a synthetic fleet-maintenance software company), and its
-    # page 2 says the renewal rate rests on n=13 customer-months. The prompt states the same figure
-    # on n=37 -- the misread from the run that motivated all of this -- so a red team that reads the
-    # page has something to cite. The TAM is stated without a currency on purpose (see the module
-    # docstring: that is the comparison_blocked shape).
-    prompt = (
-        "Use the market-sizing skill. Foobar Fleet is a fictional seed-stage company selling "
-        "maintenance-scheduling software to delivery fleets, sold through regional vehicle dealers "
-        "and priced per customer per month. Our deck is attached as "
-        "a scanned PDF. Our renewal rate is $157 per customer per month, measured over 37 "
-        "customer-months from 24 customers. Our deck states a TAM of 3.2 billion. Size the market "
-        "top-down AND bottom-up. Use 'foobar-fleet' as the slug and USD as the analysis currency. "
-        "Don't ask clarifying questions — just run it end to end and produce the report."
-    )
-
     run_id = lane_run_id(LANE)
-    prompt = host_request(prompt, run_id, answers=HOST_ANSWERS, notes=HOST_NOTES)
+    prompt = host_request(PROMPT, run_id, answers=HOST_ANSWERS, values=HOST_VALUES, notes=HOST_NOTES)
     cap = run_skill_capture(prompt, workdir, label="market-sizing", uploads=[SCANNED_DECK])
     captured = cap.messages
     review_dir = locate_review_dir(workdir, "market-sizing-*", captured, "market-sizing")

@@ -15,8 +15,8 @@
 #   ./scripts/pre-tag.sh              # gates only
 #   ./scripts/pre-tag.sh v0.7.1       # gates + verify the tag matches both manifests
 #
-# The version-parity block is lifted from .github/workflows/skill-quality.yml, which runs
-# the same check on tag push. Keeping the two in step is guarded by
+# The version-parity block is lifted from .github/workflows/skill-quality.yml, whose
+# verify-branch-gate job runs the same check on tag push. Keeping the two in step is guarded by
 # founder-skills/tests/test_pre_tag_covers_ci.py — if a gate is added to ci.yml and not
 # here, that test fails.
 
@@ -67,7 +67,7 @@ run_gate "pytest evals"      uv run pytest evals/cap-table/ -q
 # the `and not mutation` in that line is what excludes this lane, and it is excluded from a bare
 # `pytest` by `addopts`. Without `-m mutation` here it collects nothing and reports green.
 # ~3 min: copies the repo to a temp dir once, then injects each named defect and re-runs the
-# cap-table selection. Mirrors the `mutation-corpus` job in skill-quality.yml, which first fires on
+# cap-table selection. Mirrors the `mutation-corpus` job in skill-quality.yml, which runs only on
 # the dispatched release-branch run — i.e. after the branch is pushed, a paid round-trip later.
 run_gate "mutation corpus"   uv run pytest founder-skills/tests/test_mutation_corpus.py -q -m mutation
 
@@ -107,7 +107,7 @@ fi
 # --- scoring changes (release-only; a downstream contract) ---------------------------------
 # The newest CHANGELOG section must carry `### Scoring changes`, naming each skill whose pinned
 # scoring files changed since the previous tag ("None." when none did). With a tag, the newest
-# section must also BE that version. skill-quality.yml runs it on tag push; deliberately not in
+# section must also BE that version. skill-quality.yml's verify-branch-gate runs it on tag push; deliberately not in
 # ci.yml, since it is about a release, not a PR.
 if [ -n "$TAG" ]; then
   run_gate "scoring changes"   python3 .github/scripts/scoring_changes_check.py --tag "$TAG"

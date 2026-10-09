@@ -63,8 +63,23 @@ SCRIPTS = PLUGIN_PATH / "skills" / "financial-model-review" / "scripts"
 LANE = "fmr"
 SKILL = "financial-model-review"
 CANARY = "lane canary 2c9e"
-HOST_ANSWERS = (("fmr_extracted_values", "proceed_unreviewed"),)
+HOST_ANSWERS = (("fmr_extracted_values", "proceed_unreviewed"), ("ctx_basics.stage", "seed"))
 HOST_NOTES = (("fmr_extracted_values", CANARY),)
+# The company basics, sent up front so the run never waits on one. Each value is stated VERBATIM in
+# PROMPT_TEMPLATE: the skill types them again from the prose, and a typed value that differs from the
+# recorded one is refused. test_lane_host_lines.py pins both.
+HOST_VALUES = (
+    ("ctx_basics.company_name", "different", "Foobar Systems"),
+    ("ctx_basics.sector", "different", "B2B SaaS"),
+    ("ctx_basics.geography", "different", "Israel"),
+)
+PROMPT_TEMPLATE = (
+    "Use the financial-model-review skill to review the model at {model_path}. "
+    "It's a fictional seed-stage B2B SaaS company called Foobar Systems, based in "
+    "Israel, selling on an annual sales-led motion. Use 'foobar-systems' as the "
+    "slug. Everything you need is in the file — don't ask clarifying questions, "
+    "just run the review end to end and produce the report."
+)
 
 
 def _compose_constant(name: str) -> str:
@@ -257,16 +272,10 @@ def test_financial_model_review_smoke(tmp_path: Path) -> None:
     model_dst = workdir / MODEL_FIXTURE.name
     shutil.copy(MODEL_FIXTURE, model_dst)
 
-    prompt = (
-        f"Use the financial-model-review skill to review the model at {model_dst}. "
-        f"It's a fictional seed-stage B2B SaaS company called Foobar Systems, based in "
-        f"Israel, selling on an annual sales-led motion. Use 'foobar-systems' as the "
-        f"slug. Everything you need is in the file — don't ask clarifying questions, "
-        f"just run the review end to end and produce the report."
-    )
+    prompt = PROMPT_TEMPLATE.format(model_path=model_dst)
 
     run_id = lane_run_id(LANE)
-    prompt = host_request(prompt, run_id, answers=HOST_ANSWERS, notes=HOST_NOTES)
+    prompt = host_request(prompt, run_id, answers=HOST_ANSWERS, values=HOST_VALUES, notes=HOST_NOTES)
     cap = run_skill_capture(prompt, workdir, label="fmr")
     captured = cap.messages
     review_dir = locate_review_dir(workdir, "financial-model-review-*", captured, "financial-model-review")

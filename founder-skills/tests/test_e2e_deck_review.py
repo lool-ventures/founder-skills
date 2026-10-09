@@ -172,12 +172,43 @@ def _summarize_sdk_message(msg: object) -> str:
 
 PAID_OPT_IN_ENV = "RUN_PAID_E2E"
 
+# The two decks this file drives, by the company name each prompt states.
+SMOKE_COMPANY = "Acmecorp"
+CONTRADICTION_COMPANY = "Foobar Systems"
+
+
+def lane_prompt(deck_path: Path | str, company: str, slug: str) -> str:
+    """The request a deck-review lane sends, before the host's lines.
+
+    The stage is stated as MY answer, not as background colour. The gate's documented
+    auto-satisfy branch fires only when Step 1 captured a stage from the founder and the
+    detected stage matches it; a prompt that merely mentions "seed-stage" leaves the agent
+    to decide whether it has an answer, so the run exercises an ambiguous path instead of
+    the sanctioned one. `authorize()` refuses auto-satisfy against a low-confidence
+    profile, which is a legitimate refusal -- this wording makes a refusal here mean
+    "detection was not confident", not "nobody said what stage this is".
+    """
+    return (
+        f"Use the deck-review skill to review the synthetic deck at "
+        f"{deck_path}. It's a fictional company called {company}. "
+        f"Use '{slug}' as the slug. I am the founder and the stage is "
+        f"seed — treat that as my answer if you would otherwise ask. "
+        f"Don't ask clarifying questions — just run."
+    )
+
+
+def host_values(company: str) -> tuple[tuple[str, str, str], ...]:
+    """The host's value lines for a deck-review lane: the company name only, which `lane_prompt` states
+    verbatim (the skill types it again from the prose, and a typed value that differs from the recorded
+    one is refused). test_lane_host_lines.py pins both."""
+    return (("ctx_basics.company_name", "different", company),)
+
 
 def _paid_run_authorized() -> bool:
     """Has anyone actually ASKED for a billed run? A credential is not permission.
 
     Duplicated from `_e2e_harness.paid_run_authorized` because this lane deliberately does
-    not use the shared harness (it is the one the release tag gates on). The duplication is
+    not use the shared harness (it is the oldest lane of the paid release gate). The duplication is
     the failure point to watch: a gate present in one of two copies is exactly the shape of
     the incident this closes — an audit ran the default suite on a Mac and started two paid
     runs, because credential detection was the only question anyone asked.
@@ -229,7 +260,7 @@ CONTRADICTION_DECK = FIXTURES / "decks" / "synthetic-contradiction-deck.txt"
 CONTRADICTION_GOLDEN = FIXTURES / "golden" / "deck-review" / "synthetic-contradiction-deck.expected.json"
 
 # The contradiction lane bills SEPARATELY from the release gate, and that is the point.
-# `test_deck_review_smoke` is what a tag spends on; adding a second deck to it would double
+# `test_deck_review_smoke` is what a release spends on; adding a second deck to it would double
 # the cost of every release for a lane that answers a different question. This variable is
 # the opt-in, and the CI skip-check names the lane as a deliberate opt-out so a skip here
 # still cannot pass for a run.
@@ -344,24 +375,13 @@ def _drive_deck_review_lane(
 
     options = _deck_review_options(workdir, plugin_path)
 
-    # The stage is stated as MY answer, not as background colour. The gate's documented
-    # auto-satisfy branch fires only when Step 1 captured a stage from the founder and the
-    # detected stage matches it; a prompt that merely mentions "seed-stage" leaves the agent
-    # to decide whether it has an answer, so the run exercises an ambiguous path instead of
-    # the sanctioned one. `authorize()` refuses auto-satisfy against a low-confidence
-    # profile, which is a legitimate refusal -- this wording makes a refusal here mean
-    # "detection was not confident", not "nobody said what stage this is".
-    prompt = (
-        f"Use the deck-review skill to review the synthetic deck at "
-        f"{deck_dst}. It's a fictional company called {company}. "
-        f"Use '{slug}' as the slug. I am the founder and the stage is "
-        f"seed — treat that as my answer if you would otherwise ask. "
-        f"Don't ask clarifying questions — just run."
-    )
-    # The host names the run, as an unattended host does; nothing else is pre-answered (the stage is the
-    # founder's stated answer above, which the gate may take as its default).
+    prompt = lane_prompt(deck_dst, company, slug)
+    # The host names the run, as an unattended host does, and sends the company's name, which the prompt
+    # states verbatim. Nothing else is pre-answered: the deck states no sector or location, so those stay
+    # the run's to derive, and the stage is the founder's stated answer above, which the gate may take as
+    # its default (a host stage line would neither enable nor disable the stage gate's auto-satisfy).
     run_id = lane_run_id(lane)
-    prompt = host_request(prompt, run_id)
+    prompt = host_request(prompt, run_id, values=host_values(company))
 
     # Capture the SDK message stream so failure diagnostics can include it.
     captured_messages: list[str] = []
@@ -720,12 +740,12 @@ def _drive_deck_review_lane(
     ),
 )
 def test_deck_review_smoke(tmp_path: Path) -> None:
-    """The release gate. One deck, the thin-stub fixture; a tag spends on exactly this."""
+    """The release gate. One deck, the thin-stub fixture; a release spends on exactly this."""
     _drive_deck_review_lane(
         tmp_path,
         deck_fixture=DECK_FIXTURE,
         golden_path=GOLDEN,
-        company="Acmecorp",
+        company=SMOKE_COMPANY,
         slug="acmecorp",
     )
 
@@ -812,7 +832,7 @@ def _check_contradictions(
     not _contradiction_lane_authorized(),
     reason=(
         "Contradiction lane: needs RUN_PAID_E2E=1 AND RUN_PAID_E2E_CONTRADICTION=1 plus Claude "
-        "auth. Billed separately from the release gate on purpose — a tag should not pay for "
+        "auth. Billed separately from the release gate on purpose — a release should not pay for "
         "two decks, and this one answers a different question."
     ),
 )
@@ -822,7 +842,7 @@ def test_deck_review_contradiction_lane(tmp_path: Path) -> None:
         tmp_path,
         deck_fixture=CONTRADICTION_DECK,
         golden_path=CONTRADICTION_GOLDEN,
-        company="Foobar Systems",
+        company=CONTRADICTION_COMPANY,
         slug="foobar",
         extra_checks=_check_contradictions,
         lane="dr-contra",

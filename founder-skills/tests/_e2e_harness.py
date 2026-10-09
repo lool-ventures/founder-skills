@@ -2,17 +2,18 @@
 
 Extracted when the second and third lanes were added. `test_e2e_deck_review.py` is
 deliberately NOT refactored onto this module (it imports only the account-connector
-switch and its check, below): it is the lane the release tag gates on,
+switch and its check, below): it is the oldest lane of the paid release gate,
 it is the only one with a validated green run behind it, and a mechanical refactor of a
-paid lane on the eve of a tag trades a real risk for a cosmetic gain. Fold it in after
-the release, when a failure costs a re-run rather than a re-tag.
+paid lane on the eve of a release trades a real risk for a cosmetic gain. Fold it in after
+the release, when a failure costs a re-run rather than a version.
 
 Everything here is copied from that file, comments included — in particular the
 byte-stream timeout, which was learned the expensive way and applies to every lane.
 
 **Cost**: each lane is a full skill run — roughly $5-15 on `ANTHROPIC_API_KEY`, 5-20
 minutes wall time. They carry the `e2e` marker, are excluded from the default suite, and
-run only from `skill-quality.yml` (tag push or manual dispatch).
+run only from `skill-quality.yml` (manual dispatch: once per release on the release branch,
+and on demand for an architectural-surface PR).
 
 **Run one with `-s`** or it looks silent for the whole run:
 
@@ -870,12 +871,16 @@ def host_request(
     run_id: str,
     *,
     answers: Sequence[tuple[str, str]] = (),
+    values: Sequence[tuple[str, str, str]] = (),
     notes: Sequence[tuple[str, str]] = (),
 ) -> str:
     """The prompt with the host's lines appended, each at the start of its own line (the hooks and
-    `run_status.py start` read `FS_HOST_` lines only there)."""
+    `run_status.py start` read `FS_HOST_` lines only there). `values` are (gate, option, value) for an
+    option that takes a value; a lane must state each value verbatim in its prompt, because the skill
+    types it again from the prose and a typed value that differs from the recorded one is refused."""
     lines = [f"FS_HOST_RUN_ID={run_id}"]
     lines += [f"FS_HOST_ANSWER {k}={v}" for k, v in answers]
+    lines += [f"FS_HOST_VALUE {k}={option} | {value}" for k, option, value in values]
     lines += [f"FS_HOST_NOTE {k}={v}" for k, v in notes]
     return prompt.rstrip() + "\n\n" + "\n".join(lines) + "\n"
 

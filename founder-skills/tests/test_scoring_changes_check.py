@@ -235,8 +235,9 @@ def test_the_check_is_wired_into_pre_tag_and_the_tag_job() -> None:
     wf = (REPO / ".github" / "workflows" / "skill-quality.yml").read_text(encoding="utf-8")
     assert ".github/scripts/scoring_changes_check.py" in wf
     jobs = yaml.safe_load(wf)["jobs"]
-    job = jobs["deck-review-e2e-smoke"]
-    assert "deck-review-e2e-smoke" in jobs["publish-release"]["needs"], "the check must gate the Release"
+    # The tag no longer runs the paid jobs; the check lives in the job that verifies the branch run.
+    job = jobs["verify-branch-gate"]
+    assert "verify-branch-gate" in jobs["publish-release"]["needs"], "the check must gate the Release"
     steps = job["steps"]
     assert any("scoring_changes_check.py" in str(s.get("run", "")) for s in steps)
     checkout = next(s for s in steps if str(s.get("uses", "")).startswith("actions/checkout"))

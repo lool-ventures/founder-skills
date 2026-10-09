@@ -15,8 +15,8 @@ Two reasons, and the second is the one that paid for it.
    behaviourally verified" rule has a worked example of a shipped fleet prose guardrail that turned
    out inert. cap-table is the skill that change targets, so the gate needs a cap-table lane.
 
-NOT on the release tag gate, deliberately. `skill-quality.yml` names exactly three lanes in its
-EXPECTED set; a tag pays for one document per skill and that gate is already a measured coin-flip
+NOT in the paid release gate, deliberately. `skill-quality.yml` names exactly three lanes in its
+EXPECTED set; a release run pays for one document per skill and that gate is already a measured coin-flip
 (docs/internal/2026-08-26-e2e-gate-is-a-coin-flip.md). This lane follows the
 `test_deck_review_contradiction_lane` precedent instead: its own opt-in env var, named in the
 workflow's ALLOWED_SKIPS, so an UNEXPECTED skip still reds while this one is a visible decision.
@@ -197,7 +197,7 @@ def _cap_table_lane_authorized() -> bool:
     not (has_claude_auth() and _cap_table_lane_authorized()),
     reason=(
         f"cap-table's paid lane needs Claude auth, RUN_PAID_E2E=1, and {CAP_TABLE_OPT_IN}=1. "
-        "Billed separately from the release gate on purpose — a tag should not pay for a fourth "
+        "Billed separately from the release gate on purpose — a release should not pay for a fourth "
         "document, and this lane answers a different question (does the reliance boundary hold, and "
         "does a SKILL.md change move behaviour)."
     ),
@@ -314,7 +314,7 @@ def assert_cap_implied_self_consistent(review_dir: Path) -> None:
         # id-keyed maps were removed -- an id read out of a founder's PDF cannot be a dict key,
         # because two colliding ids drop a row while the totals keep counting both. This file was
         # ON the measured migration list and was missed anyway: `addopts` deselects `e2e`, so the
-        # suite that would have caught it never collects this module, and the tag gate skips this
+        # suite that would have caught it never collects this module, and the release gate skips this
         # lane by name. Two independent reasons a broken assertion stayed green.
         per_safe = outputs.get("per_safe") or []
         assert isinstance(per_safe, list), (
@@ -476,7 +476,7 @@ def _payload_percentages(review_dir: Path) -> list[float]:
     reason=(
         f"cap-table's pool-reading lane needs Claude auth, RUN_PAID_E2E=1, and {POOL_READING_OPT_IN}=1. "
         "It is the only run that reaches the unconfirmed pool-reading disclosure and the figure computed "
-        "for it; billed on demand, never by a tag."
+        "for it; billed on demand, never by a release."
     ),
 )
 def test_cap_table_pool_reading_lane(tmp_path: Path) -> None:
