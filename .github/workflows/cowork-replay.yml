@@ -394,8 +394,11 @@ jobs:
         run: |
           fail=0
           for f in cowork-tests/cassettes/*.cassette.json; do
-            out="$(python3 cowork-tests/handover_check_cassette.py "$f" 2>&1)"
-            case "$?" in
+            # `|| rc=$?`, not a bare assignment: the step runs under `bash -e`, so a non-zero exit from the
+            # substitution (2, "no closing script") would end the step before `case` could read it.
+            rc=0
+            out="$(python3 cowork-tests/handover_check_cassette.py "$f" 2>&1)" || rc=$?
+            case "$rc" in
               0) echo "✓ $(basename "$f"): $out" ;;
               2) : ;;  # no closing script in this recording
               *) echo "::error::$(basename "$f"): $out"; fail=1 ;;
