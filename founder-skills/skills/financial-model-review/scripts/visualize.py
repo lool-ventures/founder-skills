@@ -1455,6 +1455,7 @@ def compose_html(dir_path: str, review_note: str = "") -> str:
     scripts_dir = os.path.dirname(os.path.abspath(__file__))
     if scripts_dir not in sys.path:
         sys.path.insert(0, scripts_dir)
+    import _growth_rate
     import _theme
 
     all_names = REQUIRED_ARTIFACTS + OPTIONAL_ARTIFACTS
@@ -1475,6 +1476,10 @@ def compose_html(dir_path: str, review_note: str = "") -> str:
 
     # Build sections
     summary_html = _executive_summary(inputs, checklist, unit_economics, runway)
+    # A growth rate computed from the monthly series, not stated: the same sentence report.md carries.
+    growth_note = _growth_rate.disclosure(inputs) if _usable(inputs) else None
+    if growth_note is not None:
+        summary_html += f'<p class="growth-note">{_esc(growth_note)}</p>'
     findings_html = _key_findings(checklist, unit_economics, runway)
     checklist_html = _chart_checklist_heatmap(checklist)
     unit_econ_html = _chart_unit_economics(unit_economics)

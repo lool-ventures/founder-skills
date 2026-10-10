@@ -310,8 +310,11 @@ CONTRACT_NOTES = (
     "`ctx_select_company` is owed when the artifacts folder holds two or more companies' contexts. With exactly "
     "one, it is owed when the request answers it (`<slug>` reads that context, `different_company` starts a new "
     "one) or when the request's `ctx_basics.company_name` value names another company (compared word for word, "
-    "with case, accents, punctuation and a trailing legal form such as Inc or Ltd aside); a request that names no "
-    "company (a working title, the model file's name, `FS_HOST_DERIVE`) reads the one context. Under "
+    "with case, accents, punctuation and a trailing legal form such as Inc or Ltd aside), or when the run's "
+    "materials name another company (the name a deck or model states, which the skill passes as "
+    "`founder_context.py read --expect-company <name>`, compared the same way). A request that names no company "
+    "(a working title, the model file's name, `FS_HOST_DERIVE`) reads the one context unless the materials name "
+    "another. Under "
     "`FS_HOST_NO_ASK` it waits (exit 12) without an answer line. A resume whose corrected name now matches is "
     "reported `waiting` by `start` (no answer line for the open question), and its next read closes the "
     "question and goes on.",
@@ -2423,10 +2426,32 @@ def _same_company(requested: str, path: str) -> bool:
     )
 
 
+# The ledger key holding the company name the run's materials state (`founder_context.py read --expect-company`).
+MATERIALS_COMPANY_KEY = "materials_company"
+
+
+def _materials_company_name(ledger: dict[str, Any]) -> str | None:
+    """The company name the run's materials state, as `read --expect-company` recorded it, or None."""
+    entry = ledger.get(MATERIALS_COMPANY_KEY)
+    value = entry.get("name") if isinstance(entry, dict) else None
+    return value if isinstance(value, str) and _name_key(value) else None
+
+
+def note_materials_company(ledger: dict[str, Any], name: str, by: str) -> None:
+    """Record the company name the run's materials state, which `_pred_select_company` reads. Kept in the ledger
+    rather than passed in, because every transaction settles again which gates are owed: a name only the reading
+    process knew would close the question it opened at the next recorder call. Left as it is when the name is
+    the one already recorded, so a repeated read writes nothing."""
+    if _materials_company_name(ledger) == name:
+        return
+    ledger[MATERIALS_COMPANY_KEY] = {"name": name, "set_at": _run_status.now_iso(), "by": by}
+
+
 def _pred_select_company(ctx: Ctx, g: dict[str, Any], instance: str | None) -> bool:
     """Owed with two or more contexts in the artifacts root; with exactly one, when the request answered the
-    question itself (applied or not, so an answer it gave keeps it owed) or names a company that context is not.
-    Never with none: there is nothing to pick. Outside a transaction only the count is known."""
+    question itself (applied or not, so an answer it gave keeps it owed), or when the request or the run's
+    materials name a company that context is not. Never with none: there is nothing to pick. Outside a
+    transaction only the count is known."""
     files = _context_files(ctx.paths.artifacts_root)
     if len(files) >= 2:
         return True
@@ -2434,8 +2459,8 @@ def _pred_select_company(ctx: Ctx, g: dict[str, Any], instance: str | None) -> b
         return False
     if isinstance((ctx.ledger.get("pre_answers") or {}).get("ctx_select_company"), dict):
         return True
-    requested = _requested_company_name(ctx.ledger)
-    return requested is not None and not _same_company(requested, files[0])
+    names = (_requested_company_name(ctx.ledger), _materials_company_name(ctx.ledger))
+    return any(name is not None and not _same_company(name, files[0]) for name in names)
 
 
 # `model`: the model decides the gate applies (and may record it not applicable). `by_writer`: the

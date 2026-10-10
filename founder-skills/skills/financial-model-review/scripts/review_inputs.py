@@ -1733,9 +1733,11 @@ def _build_html(
     html = html.replace("/*__EMBEDDED_DATA__*/", data_js)
 
     # Inject extraction warnings banner above the warnings container
-    if extraction_warnings and extraction_warnings.get("status") == "warn":
-        banner = _extraction_warnings_html(extraction_warnings)
-        html = html.replace('<div id="warnings-container">', banner + '\n<div id="warnings-container">')
+    # And the computed values (status "info") in a neutral card: a computed value is not an extraction error.
+    if extraction_warnings and extraction_warnings.get("status") in ("warn", "pass"):
+        banner = _extraction_warnings_html(extraction_warnings) + _extraction_info_html(extraction_warnings)
+        if banner:
+            html = html.replace('<div id="warnings-container">', banner + '\n<div id="warnings-container">')
 
     return html
 
@@ -1781,6 +1783,25 @@ def _extraction_warnings_html(ew: dict[str, Any]) -> str:
         '<div id="extraction-warnings" style="padding:0 32px;margin-bottom:8px;">'
         '<div style="font-size:0.8rem;font-weight:600;color:var(--lool-danger);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.06em;">'
         "Extraction Warnings</div>" + "\n".join(cards) + "</div>"
+    )
+
+
+def _extraction_info_html(ew: dict[str, Any]) -> str:
+    """A neutral card per informational check (a value computed at Step 3.5), never styled as a warning."""
+    infos = [c for c in ew.get("checks", []) if isinstance(c, dict) and c.get("status") == "info"]
+    if not infos:
+        return ""
+    cards = [
+        '<div class="extraction-info-card" style="background:var(--lool-paper-2);'
+        'border-left:3px solid var(--lool-azure);padding:0.75rem 1rem;margin-bottom:0.5rem;">'
+        f'<span style="color:var(--lool-ink);font-size:0.9rem">{_html.escape(str(c.get("message", "")))}</span>'
+        "</div>"
+        for c in infos
+    ]
+    return (
+        '<div id="extraction-info" style="padding:0 32px;margin-bottom:8px;">'
+        '<div style="font-size:0.8rem;font-weight:600;color:var(--lool-ink);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.06em;">'
+        "Computed Values</div>" + "\n".join(cards) + "</div>"
     )
 
 
@@ -2040,6 +2061,7 @@ _WARNING_TAB: dict[str, str] = {
     "MISSING_RETENTION": "revenue",
     "MISSING_GROSS_MARGIN": "ue",
     "CUSTOMERS_MISSING": "revenue",
+    "UNCLASSIFIED_REASON_NOT_RECORDED": "company",
     "TYPE_ERROR": "company",
     "BURN_SIGN_ERROR": "cash",
     "DERIVED_METRIC_REDUNDANT": "ue",

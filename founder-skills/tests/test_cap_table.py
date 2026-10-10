@@ -6805,6 +6805,78 @@ class TestPricedRoundNoteDateBlocker:
         assert sentinel.get("assumptions"), "expected disclosed assumption for missing note date"
         assert any("today" in a.lower() for a in sentinel["assumptions"])
 
+    # The fast answer and an unstated qualified-financing threshold. The disclosure lives on the note's
+    # per-note row; the full route lifts it into the scenario, and the fast route read only the solver's
+    # own warnings, so a founder asking the quick question was never told the threshold was treated as met.
+    _THRESHOLD = "qualified_financing_threshold_defaulted"
+    _THRESHOLD_LINE = "qualified-financing threshold was not stated"
+
+    def _note(self, note_id: str, threshold: float | None) -> dict[str, Any]:
+        note: dict[str, Any] = {
+            "id": note_id,
+            "principal": 250_000,
+            "issuance_date": "2024-01-01",
+            "interest_rate": 0.06,
+            "valuation_cap": 8_000_000,
+            "capitalization_denominator": 10_000_000,
+        }
+        if threshold is not None:
+            note["qualified_financing_threshold"] = threshold
+        return note
+
+    def _fast(self, notes: list[dict[str, Any]]) -> dict[str, Any]:
+        import quick_assess as qa  # type: ignore[import-not-found]
+
+        return qa.quick_assess(  # type: ignore[no-any-return]
+            company_name="TestCo",
+            inputs=dict(_BASIC_INPUTS),
+            safes=[],
+            notes=notes,
+            pre_money=8_000_000,
+            new_money=2_000_000,
+            target_pool_percent=None,
+            target_basis="post_money",
+            event_date="2026-01-15",
+        )
+
+    def test_fast_answer_says_an_unstated_threshold_was_treated_as_met(self) -> None:
+        sentinel = self._fast([self._note("n1", None)])
+        assert sentinel.get("warnings", []).count(self._THRESHOLD) == 1
+        md = sentinel["_report_md"]
+        assert md.count(self._THRESHOLD_LINE) == 1
+        assert "(affects `n1`)" in md
+
+    def test_fast_answer_is_silent_when_the_threshold_is_stated(self) -> None:
+        sentinel = self._fast([self._note("n1", 1_000_000)])
+        assert self._THRESHOLD not in sentinel.get("warnings", [])
+        assert self._THRESHOLD_LINE not in sentinel["_report_md"]
+
+    def test_fast_answer_states_each_note_once(self) -> None:
+        sentinel = self._fast([self._note("n1", None), self._note("n2", None), self._note("n3", 1_000_000)])
+        assert sentinel.get("warnings", []).count(self._THRESHOLD) == 2
+        md = sentinel["_report_md"]
+        assert md.count(self._THRESHOLD_LINE) == 2
+        assert "(affects `n1`)" in md and "(affects `n2`)" in md and "(affects `n3`)" not in md
+
+    def test_fast_answer_lifts_a_note_already_in_the_solver_warnings_once(self, monkeypatch: Any) -> None:
+        """Deduped by note id: a note the solver's own list already names, or whose row repeats, is one code."""
+        import priced_round as _pr  # type: ignore[import-not-found]
+        import quick_assess as qa  # type: ignore[import-not-found]
+
+        real = _pr.solve_priced_round
+
+        def doubled(**kw: Any) -> dict[str, Any]:
+            r = real(**kw)
+            row = next(x for x in r["per_note"] if x.get("id") == "n1")
+            lifted = next(w for w in row["warnings"] if w.get("code") == self._THRESHOLD)
+            r["warnings"] = list(r.get("warnings") or []) + [dict(lifted)]
+            r["per_note"] = list(r["per_note"]) + [row]
+            return r  # type: ignore[no-any-return]
+
+        monkeypatch.setattr(qa, "solve_priced_round", doubled)
+        sentinel = self._fast([self._note("n1", None), self._note("n2", None)])
+        assert sentinel.get("warnings", []).count(self._THRESHOLD) == 2
+
 
 class TestPreAdBaselineDenominator:
     """math-3: pre_ad_post_fd includes common_batches + warrants, so the AD

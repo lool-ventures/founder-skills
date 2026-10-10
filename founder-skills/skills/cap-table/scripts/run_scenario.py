@@ -31,7 +31,7 @@ from _artifact_io import fd_sum_mismatch, id_missing, instrument_id_blockers  # 
 from _artifact_writer import ArtifactValidationError, load_schema, write_artifact  # noqa: E402
 from _rule_pack import RULE_PACK_VERSION  # noqa: E402
 from _warning_callouts import humanize_warning  # noqa: E402
-from flip_scenario import flip_share_for_share  # noqa: E402
+from flip_scenario import flip_share_for_share, section_102_not_modeled  # noqa: E402
 from note_conversion import (  # noqa: E402
     convert_note,
     derive_scenario_completeness,
@@ -833,6 +833,11 @@ def run_all_scenarios(
         elif stype == "flip":
             outputs = run_flip_scenario(req, cap_state=step_cap_state, instruments=step_instruments)
             flip_outputs[req["scenario_id"]] = outputs
+            # Read off this run's own inputs and instruments, the documents the §102 grants question reads, so
+            # the line and the question cannot disagree (see `section_102_not_modeled`).
+            s102 = section_102_not_modeled(inputs, instruments)
+            if s102 is not None:
+                outputs.setdefault("warnings", []).append(s102)
         else:
             outputs = {
                 "completeness": "structural_only",

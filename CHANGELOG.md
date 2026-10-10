@@ -5,6 +5,65 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.18.1] - 2026-10-10 — A model's growth rate is worked out from its own monthly revenue, and a stored company is checked against the one being reviewed
+
+### Highlights
+
+**Financial model review works out the monthly growth rate from the model's monthly revenue.** When a
+model lists at least four months of revenue up to the month of its MRR figure, the growth rate is taken
+from those months, over at most the last six, instead of being estimated by hand. The report and both
+pages say which months it came from. A figure the founder corrected on the review page is kept as they
+wrote it, and nothing is computed for a model built for a project rather than a recurring business.
+
+**Every skill checks a stored company against the company being reviewed.** When the founder's request
+or materials name a company, and the one stored company profile is for a different company, the skill
+asks which company this review is for instead of reusing the other company's details.
+
+### Scoring changes
+
+Financial model review:
+
+- The monthly growth rate behind the burn multiple and the runway projection is worked out from the
+  model's monthly revenue when at least four months with revenue reach the month of its MRR figure,
+  over at most the last six. It is not worked out for a project-built model, nor where the extracted rate
+  is missing, zero or negative, nor where the founder corrected it. The burn multiple and the runway can
+  move on such reviews.
+- A model whose revenue falls over those months now gets a negative growth rate. Its burn multiple is
+  then not graded, and its runway projection shows revenue falling.
+
+Every other skill: none.
+
+### Added
+
+- Financial model review: the review page shows a worked-out growth rate in its own "Computed values"
+  card, and the report and the explorer say which months it came from.
+- Cap table: a flip that leaves Section 102 tax exposure unmodelled says so on every page and in the
+  hand-over's list of disclosures, wherever options are issued with no per-grant tax route. A structure
+  that is Delaware only is not flagged. The coaching is unchanged.
+
+### Changed
+
+- Financial model review: a figure the checklist restates is matched to the computed one at the
+  precision it was written to. "0.4x" covers 0.35 to 0.45, and for a ratio the allowance is at most a
+  quarter of the figure, so "1x" does not cover 1.45. The earlier comparison still applies first.
+
+### Fixed
+
+- IC simulation: a fund profile the check rejects now stops the run with the reason and leaves the
+  earlier profile in place. Before, the rejected profile replaced it and the run went on.
+- Cap table: the quick answer now says when a note's qualified-financing threshold was not stated and was
+  treated as met, as the full review already did.
+- Financial model review: a revenue model recorded as not classified with no reason gets a note asking
+  which reason applies. It never stops the review.
+
+### Development
+
+Contributor-facing only; nothing here changes what a founder installs or runs.
+
+- An opt-in paid lane checks that a licensing model is recorded as not classified, with a reason. It runs
+  with the release gate on request.
+- The recorded test sessions were not refreshed for this release.
+
 ## [0.18.0] - 2026-10-10 — A deck's consistency is scored from the arithmetic, and a runway is read from the deck's own burn plan
 
 ### Highlights

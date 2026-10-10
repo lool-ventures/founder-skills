@@ -32,6 +32,7 @@ from typing import Any, TypeGuard
 # flagged figure is caveated on every founder-facing surface, not just the one compose renders.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _evidence_multiple  # noqa: E402
+import _growth_rate  # noqa: E402
 
 # Sentinel for corrupt (unparseable) artifact files
 _CORRUPT: dict[str, Any] = {"__corrupt__": True}
@@ -554,8 +555,33 @@ def _close(a: float, b: float, tolerance: float = 0.05) -> bool:
     return abs(a - b) / denom <= tolerance
 
 
-def _metric_claims_in_text(text: str, name: str) -> list[float]:
-    """The value each mention of metric `name` in `text` asserts for that metric.
+# The share of the compared value a written-precision allowance may reach for a ratio. Without it a
+# whole-number ratio would get a half-unit of slack: "1x" would pass against 1.45. Payback months
+# keep the plain half-unit, so "11-month" passes against 11.2.
+_RATIO_PRECISION_CAP = 0.25
+
+
+def _claim_matches(claim: float, decimals: int, allowed: float, name: str) -> bool:
+    """Whether a written figure states `allowed` at the precision it was written to.
+
+    Today's relative test comes first, so this can only accept what `_close` already accepts and
+    more -- never fire where it did not, including against a computed 0. The second test allows
+    half of the claim's last written digit ("0.4x" covers 0.35-0.45), which is what rounding to
+    that many places means; for a ratio that allowance is capped at a quarter of the compared value.
+    """
+    if _close(claim, allowed):
+        return True
+    floor = 0.5 * 10.0**-decimals
+    if name not in _PAYBACK_METRICS:
+        floor = min(floor, _RATIO_PRECISION_CAP * abs(allowed))
+    return abs(claim - allowed) <= floor
+
+
+def _metric_claims_in_text(text: str, name: str) -> list[tuple[float, int]]:
+    """The value each mention of metric `name` in `text` asserts for that metric, with its decimals.
+
+    Each claim is `(value, decimals)`, the decimals counted from the digits as written ("0.40x" -> 2),
+    so the comparison can allow for the precision the writer chose.
 
     Per mention of one of the metric's labels, at most ONE number is read:
 
@@ -606,7 +632,7 @@ def _metric_claims_in_text(text: str, name: str) -> list[float]:
     definition outside parentheses ("burn multiple, i.e. net burn/net new ARR,
     7x") are not read.
     """
-    found: list[float] = []
+    found: list[tuple[float, int]] = []
     # Every search and every offset below is into `lowered` alone, never mixed with
     # `text`: a character whose lowercase form is longer ("İ") would otherwise shift
     # one string's offsets against the other's.
@@ -669,11 +695,12 @@ def _metric_claims_in_text(text: str, name: str) -> list[float]:
     return found
 
 
-def _append_finite(found: list[float], digits: str) -> None:
-    """Append the figure unless it is too long to be one (a 310-digit run reads as inf)."""
+def _append_finite(found: list[tuple[float, int]], digits: str) -> None:
+    """Append the figure and its written decimals unless it is too long to be one (310 digits read as inf)."""
     value = float(digits)
     if math.isfinite(value):
-        found.append(value)
+        _, dot, fraction = digits.partition(".")
+        found.append((value, len(fraction) if dot else 0))
 
 
 #: Founder-facing stand-in when a checklist item carries no label. Never the criterion id.
@@ -800,8 +827,8 @@ def _check_metric_self_contradiction(
     seen: set[tuple[str, float]] = set()
     for criterion, text in texts:
         for name, value in canonical.items():
-            for claim in _metric_claims_in_text(text, name):
-                if any(_close(claim, allowed) for allowed in permitted[name]):
+            for claim, decimals in _metric_claims_in_text(text, name):
+                if any(_claim_matches(claim, decimals, allowed, name) for allowed in permitted[name]):
                     continue
                 dedup_key = (name, round(claim, 3))
                 if dedup_key in seen:
@@ -1222,6 +1249,11 @@ def _section_executive_summary(
         if data_confidence != "exact":
             dq_label = "Mixed" if data_confidence == "mixed" else "Estimated"
             lines.append(f"**Data Quality:** {dq_label} — review based on {model_format}, not audited financials  ")
+        # The growth rate the burn multiple and the runway projection used was computed, not stated: say so in
+        # the report itself, which a founder who answered the values check up front never saw a page for.
+        growth_note = _growth_rate.disclosure(inputs)
+        if growth_note is not None:
+            lines.append(f"**Monthly Growth:** {growth_note}  ")
 
     quality = _quality_line(checklist, data_confidence)
     if quality is not None:
@@ -1278,8 +1310,10 @@ def _profile_field_name(field: str) -> str:
     return {"sector": "revenue model"}.get(field, field)
 
 
-def _revenue_model_not_stated(inputs: dict[str, Any] | None) -> bool:
-    """`unclassified`: no revenue model we can benchmark is stated, as opposed to one we could not match."""
+def _revenue_model_unclassified(inputs: dict[str, Any] | None) -> bool:
+    """Whether the revenue model is `unclassified`: no type we benchmark applies, as opposed to a value we
+    could not match. It covers both reasons (no model stated, or one stated that fits no type); which one
+    is `_unclassified_reason`'s answer, and every founder-facing sentence branches on that."""
     company = _as_dict(_as_dict(inputs).get("company"))
     return str(company.get("revenue_model_type") or "").strip().lower() == "unclassified"
 
@@ -1297,7 +1331,7 @@ def _unresolved_clause(field: str, inputs: dict[str, Any] | None) -> str:
     `unclassified` is two cases -- no model stated, or one stated that fits no benchmarked type. When
     the extraction did not record which, the hedged sentence is true in both.
     """
-    if field == "sector" and _revenue_model_not_stated(inputs):
+    if field == "sector" and _revenue_model_unclassified(inputs):
         return {
             "not_stated": "no revenue model is stated in your materials",
             "no_fitting_type": "your revenue model is not one our model-specific checks cover",
@@ -1307,7 +1341,7 @@ def _unresolved_clause(field: str, inputs: dict[str, Any] | None) -> str:
 
 def _technical_unresolved(field: str, inputs: dict[str, Any] | None, clause: str) -> str:
     """The developer-facing `message` form of the clause (the founder reads `founder_message`)."""
-    if field == "sector" and _revenue_model_not_stated(inputs):
+    if field == "sector" and _revenue_model_unclassified(inputs):
         return f"unclassified ({_unclassified_reason(inputs) or 'reason not recorded'})"
     return clause.removeprefix("your ")
 
@@ -1391,7 +1425,7 @@ def _section_checklist(checklist: dict[str, Any] | None, inputs: dict[str, Any] 
     for field, ids in sorted(unresolved.items()):
         dropped = _as_list(ids)
         if dropped:
-            _label = "Not assessed" if field == "sector" and _revenue_model_not_stated(inputs) else "Not matched"
+            _label = "Not assessed" if field == "sector" and _revenue_model_unclassified(inputs) else "Not matched"
             lines.append(
                 f"**{_label}:** {_unresolved_clause(str(field), inputs)}, so "
                 f"{len(dropped)} checks that may apply were excluded from the score above: "

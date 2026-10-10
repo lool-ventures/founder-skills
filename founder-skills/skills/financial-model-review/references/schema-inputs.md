@@ -159,7 +159,7 @@ Additional effects for `deck` / `conversational`:
 | `arr` | object | no | Annual recurring revenue snapshot |
 | `mrr` | object | no | Monthly recurring revenue snapshot |
 | `monthly_total` | number | no | Fallback when `mrr` is absent for non-SaaS models |
-| `growth_rate_monthly` | number | no | Month-over-month growth rate (decimal). **NET of churn** — the observed month-over-month change in MRR, which is what a founder means by "growing 4% a month". Do NOT subtract a churn figure from it: `net_new_ARR = mrr × growth_rate_monthly × 12` already. Subtracting churn again double-counts it and understates net-new ARR. If the founder gives a GROSS new-business rate, net it yourself before writing this field, and note that in `metadata`. |
+| `growth_rate_monthly` | number | no | Month-over-month growth rate (decimal). **NET of churn** — the observed month-over-month change in MRR, which is what a founder means by "growing 4% a month". Do NOT subtract a churn figure from it: `net_new_ARR = mrr × growth_rate_monthly × 12` already. Subtracting churn again double-counts it and understates net-new ARR. If the founder gives a GROSS new-business rate, net it yourself before writing this field, and note that in `metadata`. With 4+ months of `monthly[]` revenue up to `mrr.as_of`, Step 3.5 computes it from the series (`metadata.growth_rate_derivation`); do not hand-compute it. |
 | `churn_monthly` | number | no | Monthly churn rate (decimal) |
 | `nrr` | number | no | Net revenue retention (decimal) |
 | `grr` | number | no | Gross revenue retention (decimal) |

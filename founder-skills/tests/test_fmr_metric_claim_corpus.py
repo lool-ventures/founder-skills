@@ -55,6 +55,36 @@ def test_the_corpus_flags_exactly_the_expected_rows() -> None:
     assert flagged == expected
 
 
+def _flags_with_seed_burn_multiple(value: float) -> list[tuple[str, str, str, float]]:
+    """The replay with every seed run's computed burn multiple set to `value`; the 26x run untouched."""
+    corpus = json.loads(json.dumps(_corpus()))
+    for key, run in corpus["runs"].items():
+        if key.startswith("cadence-"):
+            continue
+        for metric in run["metrics"]:
+            if metric["id"] == "burn_multiple":
+                metric["value"] = value
+    harvest = _harvest()
+    return sorted(_key(f) for f in harvest.replay(corpus, harvest.load_compose()))
+
+
+def test_a_written_one_decimal_burn_multiple_matches_a_computed_value_it_rounds_to() -> None:
+    """The recorded seed claims ("0.4x", "0.41x") against computed values a run can produce.
+
+    Before the tolerance followed the written precision, a computed 0.43 flagged the five "0.4x" rows
+    (six fires with the 26x row). Now 0.43 leaves only the 26x; 0.45 adds the two-decimal "0.41"; and a
+    wide gap (0.49, 0.65) still flags every seed claim. The 26x row fires under every value.
+    """
+    cadence = {k for k in _flags_with_seed_burn_multiple(0.43) if k[0].startswith("cadence-")}
+    assert cadence == {_key(e) for e in _corpus()["expected"]}
+    assert len(_flags_with_seed_burn_multiple(0.43)) == 1
+    at_045 = _flags_with_seed_burn_multiple(0.45)
+    assert len(at_045) == 2 and {k[3] for k in at_045} == {26.0, 0.41}
+    for far in (0.49, 0.65):
+        flagged = _flags_with_seed_burn_multiple(far)
+        assert len(flagged) == 7 and {k[3] for k in flagged} == {26.0, 0.4, 0.41}
+
+
 def test_the_corpus_keeps_the_recorded_year_sentence() -> None:
     """The release-check sentence a year once read as a burn multiple of 2,026 in."""
     rows = [r for r in _corpus()["rows"] if "stops at Jun-2026 actuals" in r["evidence"]]

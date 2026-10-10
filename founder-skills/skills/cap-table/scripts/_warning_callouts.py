@@ -162,6 +162,13 @@ def render_warning_callouts(cap_state_warnings: list[str]) -> list[str]:
 # by _solver_subject() -- deliberately not %-formatted against the raw dict, so a missing key degrades
 # to a slightly vaguer sentence instead of raising mid-report.
 _SOLVER_WARNING_PROSE: dict[str, str] = {
+    "W_SECTION_102_NOT_MODELED": (
+        "**Section 102 tax exposure was not modelled: the tax route of each option grant was not provided.** "
+        "In a flip, options over the Israeli company's shares are usually replaced with options over the new "
+        "parent's shares, and whether each grant keeps its tax treatment depends on its plan and grant date. "
+        "Share those for each grant, or confirm the exposure with an Israeli tax advisor before relying on "
+        "this flip."
+    ),
     "qualified_financing_threshold_defaulted": (
         "**The note's qualified-financing threshold was not stated; it was treated as met by this round.** "
         "Check the note's own threshold before relying on its conversion."
@@ -242,6 +249,7 @@ _SOLVER_WARNING_PROSE: dict[str, str] = {
 # `_labels.MAPS` LIVE and passes it as `extra_keep` to the report scan, so putting codes there would
 # make every one of them a KEEP token and silently disarm the leak scan for the whole class.
 _SOLVER_WARNING_LABELS: dict[str, str] = {
+    "W_SECTION_102_NOT_MODELED": "Section 102 tax exposure on the flip not modelled",
     "qualified_financing_threshold_defaulted": "Note's unstated qualified-financing threshold treated as met",
     "W_MFN_NOT_MOST_FAVORABLE": "MFN election modelled as a counterfactual",
     "W_MFN_ELECTION_OVERRIDES_INSTRUMENT": "Scenario setting overrode the instrument's terms",
@@ -315,6 +323,12 @@ def solver_callouts_plaintext(
 # twice. Everything else that reaches a scenario's warnings is rendered here: a prefix test used to drop any
 # code not spelled `W_`, which the fallback below exists to prevent.
 RENDERED_ELSEWHERE = frozenset({"target_basis_defaulted"})
+
+# The flip's disclosures. Rendered as a solver callout on every surface like any other, but handed to the main
+# thread for the hand-over (report.json `report_disclosures`), never to the coach: the coaching payload stays as it
+# was for every run, a flip included.
+FLIP_DISCLOSURE_CODES = frozenset({"W_SECTION_102_NOT_MODELED"})
+FLIP_DISCLOSURE_POINTER = "See the warnings at the top of the report."
 
 
 def is_solver_callout(code: str) -> bool:

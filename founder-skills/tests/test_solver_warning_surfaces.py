@@ -376,3 +376,154 @@ def test_the_coach_sees_the_same_warnings_the_callouts_render() -> None:
     compose = (SCRIPTS / "compose_report.py").read_text(encoding="utf-8")
     assert "_warning_callouts.is_solver_callout(" in compose
     assert 'str(w.get("code") or "").startswith("W_")\n    )' not in compose
+
+
+# --- the flip's Section 102 line ------------------------------------------------------------------------------
+# A flip with issued options and no per-grant data said nothing to the founder about Section 102: the counsel
+# item fired only for a §102 or mixed pool, and the flip's outputs carried no warnings at all. The line is now a
+# flip disclosure: on every surface, in the hand-over list, and NOT in the coaching payload.
+
+S102 = "W_SECTION_102_NOT_MODELED"
+
+
+def _flip_inputs(*, issued: float, structure: str | None = "israeli", plan_type: str = "iso") -> dict:
+    inputs = _fx("inputs.json")
+    inputs["option_pool"] = dict(inputs["option_pool"], issued=issued, plan_type=plan_type)
+    if structure is not None:
+        inputs["jurisdiction"] = {"structure": structure}
+    return inputs
+
+
+def _grant() -> dict:
+    return {
+        "grant_id": "g1",
+        "holder": "Employee One",
+        "shares": 1_000,
+        "strike_price": 0.1,
+        "plan_type": "section_102_cg",
+        "grant_date": "2024-01-01",
+    }
+
+
+def _run_flip(inputs: dict, grants: list[dict] | None = None) -> list[dict]:
+    rs = _load("run_scenario")
+    instruments = _fx("instruments.json")
+    instruments["option_grants"] = list(grants or [])
+    scenarios: list[dict] = rs.run_all_scenarios(
+        inputs=inputs,
+        instruments=instruments,
+        cap_state=_fx("cap_state.json"),
+        scenario_requests=[{"scenario_id": "s_flip", "label": "Flip", "type": "flip", "parameters": {}}],
+    )
+    return scenarios
+
+
+def _s102_codes(scenarios: list[dict]) -> list[str]:
+    return [w.get("code") for w in WC.collect_solver_warnings(scenarios) if w.get("code") == S102]
+
+
+class TestFlipSection102Line:
+    def test_issued_options_with_no_grant_data_are_disclosed_whatever_the_plan(self) -> None:
+        for plan_type in ("iso", "nso", "section_3i", "section_102_cg", "mixed"):
+            scenarios = _run_flip(_flip_inputs(issued=50_000, plan_type=plan_type))
+            assert _s102_codes(scenarios) == [S102], plan_type
+
+    def test_grant_data_present_states_nothing(self) -> None:
+        """Also the recorded 'share' / 'partial' answer followed through: the grants reached the instruments, so
+        the line is not stated, and no ledger drop is needed to remove it."""
+        assert _s102_codes(_run_flip(_flip_inputs(issued=50_000, plan_type="section_102_cg"), [_grant()])) == []
+
+    def test_no_issued_options_states_nothing(self) -> None:
+        assert _s102_codes(_run_flip(_flip_inputs(issued=0))) == []
+
+    def test_a_delaware_only_structure_states_nothing(self) -> None:
+        assert _s102_codes(_run_flip(_flip_inputs(issued=50_000, structure="delaware"))) == []
+
+    def test_the_line_keys_on_the_documents_the_grants_question_reads(self) -> None:
+        """One source for the line and the question: `_pred_ct_flip_grants` reads `inputs.option_pool.issued`
+        and `instruments.option_grants`. A fractional issued count is owed the question (> 0) though the cap
+        state truncates it to 0; the line follows the question."""
+        flip = _load("flip_scenario")
+        assert flip.section_102_not_modeled(_flip_inputs(issued=0.5), {"option_grants": []}) is not None
+        assert flip.section_102_not_modeled(_flip_inputs(issued=10), {"option_grants": ["not-a-grant"]}) is not None
+        assert flip.section_102_not_modeled(_flip_inputs(issued=10), {"option_grants": [_grant()]}) is None
+        gates = (REPO / "scripts" / "_gates.py").read_text(encoding="utf-8")
+        assert 'issued = pool.get("issued") if isinstance(pool, dict) else None' in gates
+        assert 'not _ct_items(ctx, "option_grants")' in gates
+
+    def test_prose_and_label(self) -> None:
+        assert WC._SOLVER_WARNING_PROSE[S102].startswith("**Section 102 tax exposure was not modelled")
+        assert WC._SOLVER_WARNING_LABELS[S102]
+        assert S102 in WC.FLIP_DISCLOSURE_CODES
+        assert WC.is_solver_callout(S102)
+
+    def test_the_text_passes_the_founder_text_scan(self) -> None:
+        sys.path.insert(0, str(REPO / "scripts"))
+        try:
+            import _founder_text  # type: ignore[import-not-found]
+        finally:
+            sys.path.pop(0)
+        for text in (WC._SOLVER_WARNING_PROSE[S102], WC._SOLVER_WARNING_LABELS[S102], WC.humanize_warning(S102)):
+            assert _founder_text.scan(text) == {"enums": [], "filenames": []}, text
+        assert S102 not in WC.humanize_warning(S102)
+
+    def test_every_surface_states_it(self) -> None:
+        scenarios = _run_flip(_flip_inputs(issued=50_000))
+        needle = WC._SOLVER_WARNING_PROSE[S102].split("**")[1]
+        cm = _load("compose_report")
+        artifacts = {
+            "inputs.json": _flip_inputs(issued=50_000),
+            "instruments.json": _fx("instruments.json"),
+            "cap_state.json": _fx("cap_state.json"),
+            "scenarios.json": {"scenarios": scenarios},
+            "rule_audit.json": _fx("rule_audit.json"),
+            "counsel_packet.json": _fx("counsel_packet.json"),
+        }
+        md = cm.render_report_markdown(artifacts=artifacts, validation_warnings=[], insertion_marker="MARKER")
+        assert md.count(needle) == 1
+        cr = _load("concise_report")
+        assert needle in cr.render({"company_name": "Acme"}, {"scenarios": scenarios}, rule_audit=None)
+        viz, exp = _load("visualize"), _load("explore")
+        kw = {
+            "inputs": artifacts["inputs.json"],
+            "cap_state": artifacts["cap_state.json"],
+            "scenarios_doc": {"scenarios": scenarios},
+            "counsel_packet": artifacts["counsel_packet.json"],
+        }
+        assert needle in str(viz.render_report_html(rule_audit=artifacts["rule_audit.json"], **kw))
+        assert needle in str(exp.render_explorer_html(**kw))
+
+    def test_the_hand_over_list_and_not_the_coaching_payload(self) -> None:
+        """Routed like the pool-basis disclosures: the coaching payload of a flip run is the payload it was before
+        the line existed, and the main thread's hand-over list names it with a pointer to where the report says it."""
+        cm = _load("compose_report")
+        with_line = _run_flip(_flip_inputs(issued=50_000))
+        assert _s102_codes(with_line) == [S102]
+        without_line = [
+            dict(s, computed_outputs={k: v for k, v in s["computed_outputs"].items() if k != "warnings"})
+            for s in with_line
+        ]
+
+        def payload(scenarios: list[dict]) -> dict:
+            result: dict = cm.build_coaching_payload(
+                artifacts={
+                    "inputs.json": _flip_inputs(issued=50_000),
+                    "instruments.json": _fx("instruments.json"),
+                    "cap_state.json": _fx("cap_state.json"),
+                    "scenarios.json": {"scenarios": scenarios},
+                    "rule_audit.json": _fx("rule_audit.json"),
+                    "counsel_packet.json": _fx("counsel_packet.json"),
+                },
+                review_dir="/tmp/x",
+                report_path="/tmp/x/report.md",
+                insertion_marker="MARKER",
+            )
+            return result
+
+        assert payload(with_line) == payload(without_line)
+        assert S102 not in str(payload(with_line))
+        listed = [d for d in cm.build_report_disclosures(with_line) if d["code"] == S102]
+        assert len(listed) == 1, listed
+        assert listed[0]["label"] == WC._SOLVER_WARNING_LABELS[S102]
+        assert listed[0]["pointer"] == WC.FLIP_DISCLOSURE_POINTER
+        assert listed[0]["severity"] == "medium"

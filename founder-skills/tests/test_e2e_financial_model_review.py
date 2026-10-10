@@ -20,6 +20,7 @@ from __future__ import annotations
 import ast
 import importlib.util
 import json
+import os
 import re
 import shlex
 import shutil
@@ -535,3 +536,122 @@ def test_financial_model_review_smoke(tmp_path: Path) -> None:
     assert ok_after, f"{why_after}\nprinted: {printed}\non screen: {after[-1500:]}"
     # A block after a message that already carried the hand-over is the hook misreading the session.
     assert not (ok_before and blocks), "the Stop hook blocked a message that already carried the hand-over"
+
+
+# === The unclassified-revenue-model measurement lane =========================================================
+# Owed since the `unclassified` reason shipped: every kept review is a SaaS-like company, so nothing has shown
+# that a real run WRITES `company.unclassified_reason` for a business whose revenue fits no type. This lane is
+# that measurement, on a model whose income is licence and royalty fees and whose materials name no revenue
+# model type. It is observational: the first assertion IS the finding, and a red names what the run wrote.
+# Billed on its own opt-in, never by a release (named in the workflow's ALLOWED_SKIPS).
+UNCLASSIFIED_OPT_IN_ENV = "RUN_PAID_E2E_FMR_UNCLASSIFIED"
+UNCLASSIFIED_LANE = "fmr-uncl"
+UNCLASSIFIED_MODEL_FIXTURE = FIXTURES / "models" / "synthetic-licensing-model.csv"
+UNCLASSIFIED_REASONS = ("not_stated", "no_fitting_type")
+UNCLASSIFIED_HOST_VALUES = (
+    ("ctx_basics.company_name", "different", "Harbourlight Rights"),
+    ("ctx_basics.sector", "different", "Media licensing"),
+    ("ctx_basics.geography", "different", "Israel"),
+)
+UNCLASSIFIED_PROMPT_TEMPLATE = (
+    "Use the financial-model-review skill to review the model at {model_path}. "
+    "It's a fictional seed-stage Media licensing company called Harbourlight Rights, "
+    "based in Israel. Use 'harbourlight-rights' as the slug. Everything you need is in "
+    "the file — don't ask clarifying questions, just run the review end to end and "
+    "produce the report."
+)
+# Metrics only a SaaS model is graded on (unit_economics.py `_SAAS_ONLY_METRICS`), and the ratings that are a grade.
+_SAAS_ONLY_METRIC_IDS = frozenset({"nrr", "grr", "magic_number", "rule_of_40", "arr_per_fte"})
+_GRADED_RATINGS = frozenset({"strong", "acceptable", "warning", "fail"})
+
+
+def _unclassified_lane_authorized() -> bool:
+    return os.environ.get(UNCLASSIFIED_OPT_IN_ENV, "").strip().lower() in {"1", "true", "yes"}
+
+
+def unclassified_measurement_problems(inputs: dict[str, Any]) -> list[str]:
+    """The finding itself: did the run record `unclassified` and say why. Empty when it did."""
+    raw = inputs.get("company")
+    company: dict[str, Any] = raw if isinstance(raw, dict) else {}
+    model = company.get("revenue_model_type")
+    if model != "unclassified":
+        return [
+            f"company.revenue_model_type is {model!r}, not 'unclassified': the extractor fitted a type to a "
+            "licensing and royalty business whose materials name none"
+        ]
+    reason = company.get("unclassified_reason")
+    if reason not in UNCLASSIFIED_REASONS:
+        return [
+            f"company.revenue_model_type is 'unclassified' but company.unclassified_reason is {reason!r}, "
+            f"not one of {list(UNCLASSIFIED_REASONS)}: the extractor does not write the reason"
+        ]
+    return []
+
+
+def saas_grading_problems(unit_economics: dict[str, Any], checklist: dict[str, Any]) -> list[str]:
+    """SaaS-only metrics carry no grade, and the checklist records the sector criteria as unassessed."""
+    problems = []
+    for metric in unit_economics.get("metrics") or []:
+        if not isinstance(metric, dict):
+            continue
+        name = metric.get("id") or metric.get("name")
+        if name in _SAAS_ONLY_METRIC_IDS and metric.get("rating") in _GRADED_RATINGS:
+            problems.append(f"SaaS-only metric {name!r} is graded {metric.get('rating')!r} for an unclassified model")
+    summary = checklist.get("summary")
+    excluded = summary.get("unresolved_profile_exclusions") if isinstance(summary, dict) else None
+    if not (isinstance(excluded, dict) and excluded.get("sector")):
+        problems.append(
+            f"checklist.json records no sector criteria as unassessed (unresolved_profile_exclusions is {excluded!r})"
+        )
+    return problems
+
+
+@pytest.mark.e2e
+@pytest.mark.skipif(
+    not (has_claude_auth() and _unclassified_lane_authorized()),
+    reason=(
+        f"The unclassified-revenue-model lane needs Claude auth, RUN_PAID_E2E=1, and {UNCLASSIFIED_OPT_IN_ENV}=1. "
+        "It measures whether a real run records `unclassified` with a reason; billed on demand, never by a release."
+    ),
+)
+def test_financial_model_review_unclassified_lane(tmp_path: Path) -> None:
+    """A licensing and royalty model naming no revenue model type: does the run write `unclassified` and why."""
+    workdir = tmp_path / "workspace"
+    workdir.mkdir()
+    model_dst = workdir / UNCLASSIFIED_MODEL_FIXTURE.name
+    shutil.copy(UNCLASSIFIED_MODEL_FIXTURE, model_dst)
+
+    run_id = lane_run_id(UNCLASSIFIED_LANE)
+    prompt = host_request(
+        UNCLASSIFIED_PROMPT_TEMPLATE.format(model_path=model_dst),
+        run_id,
+        answers=HOST_ANSWERS,
+        values=UNCLASSIFIED_HOST_VALUES,
+        notes=HOST_NOTES,
+    )
+    cap = run_skill_capture(prompt, workdir, label="fmr-unclassified")
+    review_dir = locate_review_dir(workdir, "financial-model-review-*", cap.messages, "financial-model-review")
+
+    inputs = json.loads((review_dir / "inputs.json").read_text(encoding="utf-8"))
+    company = inputs.get("company") or {}
+    observed = {k: company.get(k) for k in ("revenue_model_type", "unclassified_reason")}
+    print(f"[e2e:fmr-unclassified] observed: {observed}", flush=True)
+    step_summary(
+        "### financial-model-review e2e: unclassified lane\n\n"
+        f"- model: `{model_from_capture(cap.messages)}`\n"
+        f"- company.revenue_model_type: `{observed['revenue_model_type']}`\n"
+        f"- company.unclassified_reason: `{observed['unclassified_reason']}`\n"
+    )
+
+    # THE MEASUREMENT. Everything below is only meaningful once this holds.
+    measured = unclassified_measurement_problems(inputs)
+    assert not measured, f"{'; '.join(measured)}. Observed {observed}. Inspect {review_dir}"
+
+    unit_economics = json.loads((review_dir / "unit_economics.json").read_text(encoding="utf-8"))
+    checklist = json.loads((review_dir / "checklist.json").read_text(encoding="utf-8"))
+    graded = saas_grading_problems(unit_economics, checklist)
+    assert not graded, f"{'; '.join(graded)}. Inspect {review_dir}"
+
+    status = read_run_status(workdir, run_id)
+    problems = run_complete_problems(status, run_id, SKILL, review_dir)
+    assert not problems, "\n".join(problems)

@@ -258,6 +258,22 @@ def quick_assess(
     _solver_warnings = [
         w for w in (solver_result.get("warnings") or []) if isinstance(w, dict) and str(w.get("code") or "")
     ]
+    # A note that states no qualified-financing threshold carries its disclosure on its per-note row, not in
+    # the solver's warnings; the full route lifts it into the scenario (`run_scenario.lift_note_disclosures`).
+    # Lift it here too, once per note. The threshold question is asked only on the full review, so the fast
+    # answer always says when the threshold was treated as met.
+    _seen_notes = {
+        w.get("note_id") for w in _solver_warnings if w.get("code") == "qualified_financing_threshold_defaulted"
+    }
+    for _row in solver_result.get("per_note") or []:
+        for _w in (_row.get("warnings") or []) if isinstance(_row, dict) else []:
+            if (
+                isinstance(_w, dict)
+                and _w.get("code") == "qualified_financing_threshold_defaulted"
+                and _w.get("note_id") not in _seen_notes
+            ):
+                _solver_warnings.append(dict(_w))
+                _seen_notes.add(_w.get("note_id"))
     if _cs_warnings or _solver_warnings:
         sentinel["warnings"] = _cs_warnings + [str(w["code"]) for w in _solver_warnings]
 

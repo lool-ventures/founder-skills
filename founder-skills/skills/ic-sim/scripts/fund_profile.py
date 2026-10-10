@@ -25,7 +25,7 @@ import argparse
 import json
 import os
 import sys
-from typing import Any
+from typing import Any, NoReturn
 
 
 def _write_output(data: str, output_path: str | None, *, summary: dict[str, Any] | None = None) -> None:
@@ -45,6 +45,23 @@ def _write_output(data: str, output_path: str | None, *, summary: dict[str, Any]
         sys.stdout.write(json.dumps(receipt, separators=(",", ":")) + "\n")
     else:
         sys.stdout.write(data)
+
+
+def _fail_invalid(result: dict[str, Any], output_path: str | None, indent: int | None) -> NoReturn:
+    """Emit a validation-error result and exit NON-ZERO, without touching `output_path`.
+
+    The error JSON still goes to STDOUT so the caller can read the diagnostic; only the exit
+    code and stderr are new. It is deliberately NOT written to `--output`: that path is the
+    canonical fund profile, and overwriting it with a rejected stub would destroy the earlier
+    good one and read as truth downstream. Exit 1 makes SKILL.md's "the pipe fails next" branch
+    reachable.
+    """
+    sys.stdout.write(json.dumps(result, indent=indent) + "\n")
+    errors = result.get("validation", {}).get("errors") or ["unspecified validation error"]
+    print(f"Error: input rejected, no output written: {'; '.join(str(e) for e in errors)}", file=sys.stderr)
+    if output_path:
+        print(f"Error: {os.path.abspath(output_path)} was left unchanged.", file=sys.stderr)
+    sys.exit(1)
 
 
 VALID_ROLES = {"visionary", "operator", "analyst"}
@@ -217,6 +234,8 @@ def main() -> None:
     result["metadata"] = {"run_id": args.run_id}
 
     indent = 2 if args.pretty else None
+    if result["validation"]["status"] != "valid":
+        _fail_invalid(result, args.output, indent)
     out = json.dumps(result, indent=indent) + "\n"
     _write_output(
         out,

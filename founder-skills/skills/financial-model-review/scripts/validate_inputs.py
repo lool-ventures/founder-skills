@@ -947,6 +947,25 @@ def _validate_completeness(inputs: dict[str, Any]) -> list[dict[str, Any]]:
                 }
             )
 
+    # `unclassified` with no reason: the report then hedges between "no model stated" and "a model that fits
+    # none of our types". Informational only, never critical: leaving the reason out when unsure is what the
+    # schema asks, so it must not stop Step 3.5.
+    # An unknown reason is an enum error in layer 1, not this note.
+    if model_type == "unclassified" and _deep_get(inputs, "company", "unclassified_reason") in (None, ""):
+        warnings.append(
+            {
+                "code": "UNCLASSIFIED_REASON_NOT_RECORDED",
+                "message": (
+                    "The revenue model is not classified and no reason is recorded, so the report cannot say "
+                    "whether no model is stated or the one stated fits none of the types we benchmark. "
+                    "Say which, if you know."
+                ),
+                "field": "company.unclassified_reason",
+                "layer": 4,
+                "severity": "info",
+            }
+        )
+
     # gross_margin at seed+
     if _stage_in(stage, _SEED_PLUS) and _deep_get(inputs, "unit_economics", "gross_margin") is None:
         warnings.append(

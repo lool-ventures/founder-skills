@@ -28,6 +28,9 @@ import os
 import sys
 from typing import Any
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _growth_rate  # noqa: E402
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -990,6 +993,31 @@ def validate(
     }
 
 
+def _growth_rate_check(inputs: dict[str, Any], outcome: dict[str, Any] | None) -> dict[str, Any] | None:
+    """An informational check row for the review page: the growth rate computed, or the founder's kept.
+
+    `info` never makes the result `warn`; the review page shows it in a neutral card, not as an error.
+    """
+    if outcome is None:
+        return None
+    if outcome["action"] in ("set", "unchanged"):
+        sentence = _growth_rate.disclosure(inputs)
+        if sentence is None:
+            return None
+        message = f"{sentence} This is a computed value, not a problem: edit it below if your own figure differs."
+    elif outcome["action"] == "founder_value_kept":
+        message = _growth_rate.founder_kept_message(outcome["derivation"])
+    else:
+        return None
+    return {
+        "id": "GROWTH_RATE_DERIVED",
+        "status": "info",
+        "action": outcome["action"],
+        "message": message,
+        "derivation": outcome["derivation"],
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Validate extraction: cross-reference model_data vs inputs")
     parser.add_argument("--inputs", required=True, help="Path to inputs.json")
@@ -1048,7 +1076,25 @@ def main() -> None:
                 inputs = inputs_to_fix
                 scale_factor = factor
 
+    # --fix: the monthly growth rate, computed from the monthly series (the rule and its thresholds live in
+    # _growth_rate.py). Only where the extraction is validated at all: never for a conversational or deck model.
+    growth_outcome: dict[str, Any] | None = None
+    if args.fix and model_data is not None and _should_skip(model_data, inputs) is None:
+        growth_outcome = _growth_rate.apply(inputs)
+        if growth_outcome["action"] == "set":
+            with open(args.inputs, "w", encoding="utf-8") as f:
+                json.dump(inputs, f, indent=2)
+            print(
+                f"Fixed: monthly growth rate set to {inputs['revenue']['growth_rate_monthly']} from the monthly series",
+                file=sys.stderr,
+            )
+
     result = validate(inputs, model_data, scale_factor=scale_factor)
+    growth_check = _growth_rate_check(inputs, growth_outcome)
+    if growth_check is not None and result["status"] != "skip":
+        result["checks"].append(growth_check)
+        result["summary"]["total"] += 1
+        result["summary"]["info"] = result["summary"].get("info", 0) + 1
 
     # Add fix info to result if fix was applied
     if scale_factor > 1:

@@ -107,6 +107,9 @@ SCORING_FILES: dict[str, list[str]] = {
         f"{PLUGIN}/skills/financial-model-review/scripts/checklist.py",
         # The 11 unit-economics metrics and their ratings against stage targets.
         f"{PLUGIN}/skills/financial-model-review/scripts/unit_economics.py",
+        # The monthly growth rate computed from the monthly revenue series at Step 3.5, which the burn
+        # multiple and the runway projection read: its window and minimum are thresholds.
+        f"{PLUGIN}/skills/financial-model-review/scripts/_growth_rate.py",
         # The criteria definitions the CHECKLIST dispatch grades from.
         f"{PLUGIN}/skills/financial-model-review/references/checklist-criteria.md",
         # Prints the CHECKLIST dispatch, including which structural-error sentence the grader gets.

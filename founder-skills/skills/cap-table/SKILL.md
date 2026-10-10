@@ -431,6 +431,8 @@ the explicit pipe, and `compose_report.py` never reads `handoff/`.
 
 ### Step 1: Read or Create Founder Context
 
+If the founder's message or the attached materials name the company, add `--expect-company "<that name>"` to this read (never a file name); a context stored for another company then asks which (Exit 10).
+
 ```bash
 python3 "$SHARED_SCRIPTS/founder_context.py" read --artifacts-root "$ARTIFACTS_ROOT" --run-id "$RUN_ID" \
   --skill cap-table --pretty
@@ -1257,7 +1259,7 @@ This skill runs inline in the main thread (not as a sub-agent). The final outcom
   `{Company}_Cap_Table.md`, `{Company}_Cap_Table.html` (**the one that goes missing**),
   `{Company}_Cap_Table_Explorer.html`, `{Company}_Counsel_Packet.md`. On a lightweight route, name that
   route's single deliverable instead.
-- The headline outcome fields, sourced from the `coaching_payload` staged in Step 11 (`scenario_digest`, `counsel_review_summary`, `high_severity_warnings`) and `report.json`'s `report_disclosures` (the option pool's disclosures, by `label`) plus the `insert_coaching.py` receipt (`status`, `report_path`, `run_id`). The Context B sub-agent no longer echoes these — do not source them from its return.
+- The headline outcome fields, sourced from the `coaching_payload` staged in Step 11 (`scenario_digest`, `counsel_review_summary`, `high_severity_warnings`) and `report.json`'s `report_disclosures` (the option pool's disclosures and a flip's unmodelled Section 102 exposure, by `label`) plus the `insert_coaching.py` receipt (`status`, `report_path`, `run_id`). The Context B sub-agent no longer echoes these — do not source them from its return.
 
   **Nesting — for cap-table all three are TOP LEVEL** on `coaching_payload`: `scenario_digest`, `counsel_review_summary`, `high_severity_warnings`. Do not reach under `.summary` (it holds only scenario counts and a deliberately-null `score_percent`). There is no checklist and no score to fall back to — if a field is null read `report.json`, never invent a number.
 

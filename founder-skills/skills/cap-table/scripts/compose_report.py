@@ -363,20 +363,27 @@ def build_scenario_digest(scenarios: list[dict[str, Any]]) -> list[dict[str, Any
     return digest
 
 
+# The disclosures the hand-over names and the coach is not handed (see `build_report_disclosures`).
+_REPORT_DISCLOSURE_CODES = POOL_DISCLOSURE_CODES | _warning_callouts.FLIP_DISCLOSURE_CODES
+
+
 def build_report_disclosures(scenarios: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """The pool-basis disclosures, for the main thread's hand-over. They are the report's, shown in each
-    scenario's Option pool section, and deliberately NOT in `coaching_payload`: that file is staged whole to the
-    coach, and the pool's sizing is not the commentary's to explain. One of them is high severity, so the
-    hand-over still names it."""
+    """The pool-basis and flip disclosures, for the main thread's hand-over. They are the report's -- the pool's
+    shown in each scenario's Option pool section, the flip's among the warnings at the top -- and deliberately NOT
+    in `coaching_payload`: that file is staged whole to the coach, and neither the pool's sizing nor the flip's
+    unmodelled tax exposure is the commentary's to explain. One of them is high severity, so the hand-over still
+    names it."""
     return [
         {
             "code": w.get("code"),
             "severity": "high" if w.get("severity") == "high" else "medium",
             "label": _warning_callouts.humanize_warning(str(w.get("code") or "")),
-            "pointer": POOL_DISCLOSURE_POINTER,
+            "pointer": POOL_DISCLOSURE_POINTER
+            if w.get("code") in POOL_DISCLOSURE_CODES
+            else _warning_callouts.FLIP_DISCLOSURE_POINTER,
         }
         for w in _warning_callouts.collect_solver_warnings(scenarios)
-        if isinstance(w, dict) and w.get("code") in POOL_DISCLOSURE_CODES
+        if isinstance(w, dict) and w.get("code") in _REPORT_DISCLOSURE_CODES
     ]
 
 
@@ -626,7 +633,7 @@ def build_coaching_payload(
             "message": w.get("detail") or w.get("reason") or w.get("message") or "",
         }
         for w in solver_warnings
-        if w.get("code") not in POOL_DISCLOSURE_CODES
+        if w.get("code") not in _REPORT_DISCLOSURE_CODES
     )
 
     # summary.passed / summary.failed are SCENARIO counts, not blocker counts. A
