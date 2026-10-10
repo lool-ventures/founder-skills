@@ -582,6 +582,9 @@ def _read_with_ledger(args: argparse.Namespace) -> str | None:
             f"Error: run {run_id} has a gate ledger; pass --skill so read can check the run is this skill's",
         )
     expect = getattr(args, "expect_company", None)
+    if isinstance(expect, list):
+        # Python before 3.12 parses `--expect-company=--` as an empty list, not the string "--".
+        expect = " ".join(expect)
     if expect is not None and not _gates._name_key(expect):
         # A name with no letters or digits would compare unequal to every context and read as another company.
         _init_refusal(
