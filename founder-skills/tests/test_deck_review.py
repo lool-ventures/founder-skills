@@ -397,7 +397,7 @@ def test_checklist_omits_null_evidence_and_notes() -> None:
     for item in data["items"]:
         if item["id"] == "no_dodged_competition":
             # The zero-weight mirror carries a real evidence string naming where it is scored.
-            assert item["evidence"].startswith("Scored once, under "), item
+            assert item["evidence"].startswith("Carries no weight of its own; its result counts toward "), item
             assert "notes" not in item
             continue
         assert "evidence" not in item, f"{item['id']} emitted a null evidence key"
@@ -6149,7 +6149,9 @@ def test_the_duplicate_mirrors_the_canonical_status(canonical: str) -> None:
     dup = next(i for i in data["items"] if i["id"] == _DUP)
     assert dup["status"] == canonical
     assert dup["weight"] == 0
-    assert dup["evidence"] == "Scored once, under 'Competition section is honest and substantive'"
+    assert dup["evidence"] == (
+        "Carries no weight of its own; its result counts toward 'Competition section is honest and substantive'"
+    )
     assert "notes" not in dup and "verified_by" not in dup
     s = data["summary"]
     assert s["total"] == 35 and s["scored"] == 34

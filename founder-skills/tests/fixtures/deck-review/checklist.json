@@ -172,7 +172,7 @@
       "label": "Competition slide exists and is substantive",
       "status": "warn",
       "weight": 0,
-      "evidence": "Scored once, under 'Competition section is honest and substantive'"
+      "evidence": "Carries no weight of its own; its result counts toward 'Competition section is honest and substantive'"
     },
     {
       "id": "ai_retention_rebased",

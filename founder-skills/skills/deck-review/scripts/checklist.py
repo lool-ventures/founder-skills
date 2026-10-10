@@ -192,7 +192,9 @@ def _mirror_zero_weight(items: list[dict[str, Any]]) -> None:
             continue
         dup["status"] = canonical.get("status")
         dup["weight"] = 0
-        dup["evidence"] = f"Scored once, under '{ITEM_LOOKUP[canonical_id]['label']}'"
+        dup["evidence"] = (
+            f"Carries no weight of its own; its result counts toward '{ITEM_LOOKUP[canonical_id]['label']}'"
+        )
         dup.pop("notes", None)
         dup.pop("verified_by", None)
 
