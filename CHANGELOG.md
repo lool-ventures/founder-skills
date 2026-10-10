@@ -5,6 +5,95 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.18.0] - 2026-10-10 — A deck's consistency is scored from the arithmetic, and a runway is read from the deck's own burn plan
+
+### Highlights
+
+**Deck review now scores "Claims in deck are internally consistent" from its arithmetic check, not from
+a reading of the deck.** The review already works out how the figures a deck states relate to each
+other. That check now decides this criterion: it fails when a figure disagrees with another the deck
+states, or when a plan passes a limit the deck itself sets; it warns when a total is further from its
+parts than its own rounding explains; it passes when comparisons ran and none disagrees; and when
+nothing on the deck could be compared it is not applicable, rather than passing by default. The
+coaching follows the same rule: it mentions a numeric disagreement only when the arithmetic found it.
+
+**The arithmetic reads more of what a deck states, and no longer compares months with years.** A
+runway is worked out from the deck's own burn plan rather than from one year's burn, counting only the
+cash the deck names. A runway the deck states in years is now compared in years: before, a runway
+computed in months could be reported as contradicting a stated runway in years because the two
+numbers differed.
+
+### Scoring changes
+
+Deck review:
+
+- "Claims in deck are internally consistent" is scored from the arithmetic check: fail on a surviving
+  disagreement between two figures the deck states, or on a plan past a limit the deck states; warn on
+  a total off by more than its own rounding; not applicable when nothing could be compared; pass
+  otherwise. The reviewer's own reading no longer decides it.
+- "Competition slide exists and is substantive" carries no weight. It asks what "Competition section is
+  honest and substantive" asks, so it now shows that criterion's result and the weakness is counted
+  once, not twice. All 35 criteria are still checked; the score is taken over 34.
+- Expected movement from the consistency change, replayed over 33 kept reviews: most decks with
+  nothing the arithmetic could compare move from pass to not applicable on this criterion, and a few
+  move to fail or to pass. Scores move by a few points either way, and no deck changed band.
+
+### Added
+
+- Deck review: a runway is checked against the deck's own burn plan, month by month, counting only the
+  cash the deck names. A plan that turns cash-flow positive is not read as a burn.
+- Deck review: a stated cut in one measure is checked against the stated rise in its reciprocal. A
+  disagreement is reported only for measures that are reciprocal by definition (resistance and
+  conductance, cost per unit and units per dollar).
+- Deck review: the total implied by an amount and the share it is said to be is shown as a worked-out
+  reading, never as a disagreement.
+- Deck review: a total that is off from its parts by more than its own rounding is reported in its own
+  section of the report and the page, as a question to check rather than an error.
+- Deck review: a report whose consistency criterion was scored without the arithmetic check carries a
+  warning saying so.
+
+### Changed
+
+- Deck review: the coaching mentions a numeric disagreement only if the arithmetic found it, and is told
+  that finding none does not mean the figures agree.
+- Deck review: the slide reviews are told to say two figures disagree only when the arithmetic lists the
+  disagreement or the deck writes one quantity two ways. A metric and its inverse, a part of a later
+  total, or a figure the deck labels conservative is not a disagreement.
+- Deck review: the report says the score is taken over the scored criteria, and the competition item
+  that carries no weight is marked as counted under its twin.
+
+### Fixed
+
+- Deck review: a runway or other duration stated in one unit is no longer compared against another
+  unit as if they were the same, such as months against years. When either unit is not written, the
+  comparison is not made.
+- Deck review: a stated duration's precision allowance is about a month either way. "1 year" no longer
+  covers six months on each side.
+- Deck review: when a deck states a runway and prints a burn plan, and the burn-plan runway uses the
+  same cash and burn as a flat cash ÷ one-year-burn comparison, the flat comparison is replaced by the
+  burn-plan runway instead of both being shown.
+- Deck review: the skill no longer says geography decides how the deck is graded. It is saved for later
+  reviews, and the financial model review grades against it.
+
+### Development
+
+Contributor-facing only; nothing here changes what a founder installs or runs.
+
+- The paid checks run once per release, on the release branch. The tag no longer runs them again: it
+  checks that a green run of them exists at the tagged commit, then publishes the Release from that
+  result.
+- A free self-test exercises that tag-time check on every pull request, so it does not first run when a
+  Release depends on it.
+- The paid release lanes send the company's basics up front (market sizing and financial model review
+  send all four; deck review sends the name), so a run never stops at one of those questions.
+- Two opt-in paid deck-review lanes, one on a deck whose figures disagree and one on a deck that needs
+  the new runway and reciprocal checks, can be run with the release gate on request.
+- Each paid lane saves its full message stream to its run folder, which is uploaded whether the lane
+  passes or fails.
+- The slide reviews' numeric check reports only: it prints a line for a stated disagreement the
+  arithmetic did not find, and never blocks the step or changes what the founder sees.
+- The recorded test sessions, the deck-review ones included, were not refreshed for this release.
+
 ## [0.17.3] - 2026-10-09 — A year in a model review is no longer read as a second burn multiple
 
 ### Highlights
