@@ -642,6 +642,9 @@ LEGACY_REFERENCES_CAP = 8 * 1024  # historical; references now ship whole
 # rather than done here, because "do four routes need four names" is a design question.
 #    See docs/internal/2026-08-26-cap-table-deliverable-naming.md.
 SKILL_MD_CEILING: dict[str, int] = {
+    # All six raised 2026-10-10 by one Step 1 sentence (+213 B deck review, +205 B the rest): the read now
+    # takes the company name the founder's message or the materials state (`--expect-company`), so a single
+    # stored context for another company asks which one instead of being read for this one.
     # All six lowered 2026-10-08 by 4 B: Step 1's exit-10 label reads "(which company)", since the company
     # question is now also asked with one stored context when the request names another company.
     # All six lowered 2026-10-08, each to its new size: Step 0's start paragraph gains the one sentence routing
@@ -966,7 +969,7 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 106,282 -> 106,256 (-26), LOWERED, commit 10 (O3): the compose step says to read compose_result.json on a
     # non-zero exit, paid for in the same step; "Two codes sit in neither class" loses its aside.
     # -1 B, LOWERED, commit 13: a derived stage takes its option id and no value; the sentence is shortened to pay.
-    "market-sizing": 106_247,
+    "market-sizing": 106_452,
     # fmr raised for two founder-facing-correctness items measured in a live run: the CHECKLIST
     # dispatch now forbids citing our artifact filenames in evidence (that run put `inputs.json` in 10
     # items' evidence, printed verbatim into the founder's report), and the producer pipe passes
@@ -1103,7 +1106,7 @@ SKILL_MD_CEILING: dict[str, int] = {
     # Path B anecdote).
     # 85,520 -> 85,517 (-3), LOWERED, commit 10 (O3): the compose step says to read compose_result.json on a non-
     # zero exit, paid for in the same step; the heredoc warning shortened, its reason kept.
-    "financial-model-review": 85_475,
+    "financial-model-review": 85_680,
     # ic-sim SHRANK: the REQUIRED ic-dynamics.md read at Step 7 is deleted. Step 7 is a pure producer
     # pipe — compose_discussion.py derives discussion.json from the partners' own files and nothing
     # is authored by the main thread — so the read informed no decision while pulling a whole
@@ -1185,7 +1188,7 @@ SKILL_MD_CEILING: dict[str, int] = {
     # zero exit, paid for in the same step; the heredoc warning shortened, its reason kept.
     # -5 B, LOWERED, commit 13: Step 8.5 names the GATE_UNDECIDABLE remedy (re-run Step 8, same RUN_ID), paid for
     # by two rationale clauses in the same step; a derived stage takes its option id and no value.
-    "ic-sim": 94_798,
+    "ic-sim": 95_003,
     # deck-review +1,165 B: Step 0 carried only a parenthetical fresh-shell mention buried in a code
     # comment, unlike the four skills that mint RUN_ID in a LATER block and so carry the shared banner.
     # deck-review mints RUN_ID INSIDE this re-runnable Step-0 block (like cap-table), so the shared
@@ -1554,7 +1557,7 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 114,890 -> 115,052 (+162 B): the What-If rule says a recomputation starts from the delivered
     # checklist.json items (not the reviewer's checklist_output.json), omits --reconciliation and prints
     # to stdout; Step 5's sentence now points there instead of restating it.
-    "deck-review": 115_052,
+    "deck-review": 115_265,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
@@ -1740,7 +1743,7 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 129,580 -> 129,577 (-3), LOWERED, commit 10 (O3): the compose step says to read compose_result.json on a
     # non-zero exit, paid for in the same step; the heredoc warning shortened, its reason kept.
     # -1 B, LOWERED, commit 13: a derived stage takes its option id and no value; the sentence is shortened to pay.
-    "competitive-positioning": 129_568,
+    "competitive-positioning": 129_773,
     # cap-table, the largest raise (+2,383 B) and the one with the most founder-visible payoff:
     #   * Main-Thread Return named THREE of the four files Step 12 copies; a live run delivered exactly
     #     three and dropped `{Company}_Cap_Table.html`. All four are now named explicitly.
@@ -1871,7 +1874,7 @@ SKILL_MD_CEILING: dict[str, int] = {
     # paid for in the same step (the Step 8 parity sentence shortened).
     # -8 B, LOWERED, commit 13: a derived stage takes its option id and no value; two clauses of the same
     # paragraph shortened.
-    "cap-table": 156_609,
+    "cap-table": 156_814,
 }
 
 
@@ -2334,6 +2337,23 @@ def test_feedback_offer_tells_the_founder_to_type_the_command(skill: str) -> Non
     offers = [line for line in text.splitlines() if "/founder-skills:feedback" in line]
     for line in offers:
         assert "type `/founder-skills:feedback`" in line, f"{skill}: an offer that does not say to type it: {line}"
+
+
+@pytest.mark.parametrize("skill", sorted(SKILL_MD_CEILING))
+def test_step_one_passes_the_company_the_materials_name_to_the_first_read(skill: str) -> None:
+    """The name must reach the FIRST read: a read that finds one context settles the Step-1 basics from it, and a
+    later read cannot take that back. So the instruction sits before the read block, and the script takes it."""
+    text = (SKILLS_ROOT / skill / "SKILL.md").read_text(encoding="utf-8")
+    start = text.index("### Step 1: Read or Create Founder Context")
+    read_at = text.index('founder_context.py" read', start)
+    assert '--expect-company "<that name>"' in text[start:read_at], f"{skill}: Step 1 does not pass the name"
+    helped = subprocess.run(
+        [sys.executable, str(PLUGIN_ROOT_DIR / "scripts" / "founder_context.py"), "read", "--help"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "--expect-company" in helped.stdout
 
 
 def test_feedback_skill_survives_compaction_whole() -> None:

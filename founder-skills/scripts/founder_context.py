@@ -551,8 +551,11 @@ def _read_with_ledger(args: argparse.Namespace) -> str | None:
     returns None and `read` is exactly what it always was. Otherwise:
 
       * a run already bound to a company reads that company's context (a resume never re-asks which);
-      * `ctx_select_company` is owed with several contexts, and with one when the request answered it or names
-        another company (`_gates._pred_select_company`): with no record the read stops at exit 10 and prints the
+      * `--expect-company` records the company name the materials state in the ledger (not on a bound run), where
+        the predicate below reads it on every later transaction too;
+      * `ctx_select_company` is owed with several contexts, and with one when the request answered it, or the
+        request or the materials name another company (`_gates._pred_select_company`): with no record the read
+        stops at exit 10 and prints the
         question; a recorded company is read; `different_company` reads as "not found" (exit 1, so the skill
         creates a new context); a `--slug` other than the record is refused;
       * a context that is read records the Step-1 basics as not applicable ("context existed"), once, and
@@ -578,6 +581,14 @@ def _read_with_ledger(args: argparse.Namespace) -> str | None:
             {"status": "error", "code": "USAGE", "message": "this run has a gate ledger, so read needs --skill"},
             f"Error: run {run_id} has a gate ledger; pass --skill so read can check the run is this skill's",
         )
+    expect = getattr(args, "expect_company", None)
+    if expect is not None and not _gates._name_key(expect):
+        # A name with no letters or digits would compare unequal to every context and read as another company.
+        _init_refusal(
+            2,
+            {"status": "error", "code": "USAGE", "message": "--expect-company names no company"},
+            f"Error: --expect-company {expect!r} names no company; pass the name the materials state, or omit it",
+        )
     paths = _run_status.run_paths(root, run_id)
     status = _run_status.load_status(paths) or {}
     if status.get("status") in _run_status.FINAL_STATUSES or status.get("skill") != args.skill:
@@ -599,6 +610,8 @@ def _read_with_ledger(args: argparse.Namespace) -> str | None:
     def fn(ctx: Any, ledger: dict[str, Any], st: dict[str, Any]) -> dict[str, Any]:
         out: dict[str, Any] = {"slug": args.slug}
         gates = ledger.get("gates") or {}
+        if expect is not None and not bound and files:
+            _gates.note_materials_company(ledger, expect.strip(), "founder_context.py")
         if bound:
             if args.slug and args.slug != bound:
                 return {"mismatch": bound}
@@ -671,8 +684,8 @@ def _read_with_ledger(args: argparse.Namespace) -> str | None:
             {"status": "waiting", "blocked_by_gate": "ctx_select_company", "needs_input": [out["needs_input"]]},
             "Waiting: several companies have a context; ask which one, record it, then read again"
             if len(files) >= 2
-            else "Waiting: the request names a company other than the one this folder's context holds, or answers "
-            "which company this is; ask which one, record it, then read again",
+            else "Waiting: the request or its materials names a company other than the one this folder's context "
+            "holds, or the request answers which company this is; ask which one, record it, then read again",
         )
     if out.get("not_found"):
         # Its own code, so a caller can tell "create the context" from a refusal (GATE_RECORD_MISMATCH and the
@@ -998,6 +1011,12 @@ def parse_args() -> argparse.Namespace:
         help="With a gate ledger for this run, the read records the Step-1 questions it settles",
     )
     sp_read.add_argument("--skill", default=None, help="Required when --run-id has a gate ledger")
+    sp_read.add_argument(
+        "--expect-company",
+        default=None,
+        help="The company name the attached materials state. With a gate ledger and one stored context for another "
+        "company, the read asks which company this is; with no ledger it is not used",
+    )
     _add_common(sp_read)
 
     # merge

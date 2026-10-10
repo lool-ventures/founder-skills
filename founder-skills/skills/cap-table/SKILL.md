@@ -431,6 +431,8 @@ the explicit pipe, and `compose_report.py` never reads `handoff/`.
 
 ### Step 1: Read or Create Founder Context
 
+If the founder's message or the attached materials name the company, add `--expect-company "<that name>"` to this read (never a file name); a context stored for another company then asks which (Exit 10).
+
 ```bash
 python3 "$SHARED_SCRIPTS/founder_context.py" read --artifacts-root "$ARTIFACTS_ROOT" --run-id "$RUN_ID" \
   --skill cap-table --pretty

@@ -965,6 +965,159 @@ def test_a_bound_run_reads_its_company_whatever_the_request_names(tmp_path: Path
     assert (entry["state"], entry["current"]["resolution"]) == ("not_owed", "not_applicable")
 
 
+# --- one stored context: the picker is owed when the materials name another company (--expect-company) ------
+
+
+def _expect(name: str) -> tuple[str, str]:
+    return ("--expect-company", name)
+
+
+@pytest.mark.parametrize(
+    ("name", "stored", "slug"),
+    [
+        ("Example Co", "Example Co", "example-co"),
+        ("example co.", "Example Co", "example-co"),
+        ("Acme Inc.", "Acme", "acme"),
+    ],
+)
+def test_one_context_and_materials_naming_it_read_it_without_asking(
+    tmp_path: Path, name: str, stored: str, slug: str
+) -> None:
+    root, rid = _started(tmp_path)
+    _context(root, stored, slug)
+    proc = _read(root, rid, *_expect(name))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert _out(proc)["slug"] == slug
+    assert "ctx_select_company" not in h.ledger(root, rid)["gates"]
+    before = h.snapshot(root, rid)
+    assert _read(root, rid, *_expect(name)).returncode == 0
+    assert h.snapshot(root, rid) == before, "a second read with the same name changed the record"
+
+
+def test_one_context_and_materials_naming_another_company_ask_which(tmp_path: Path) -> None:
+    root, rid = _started(tmp_path)
+    _context(root, "Example Co", "example-co")
+    proc = _read(root, rid, *_expect("Sample Labs"))
+    assert proc.returncode == 10, proc.stdout + proc.stderr
+    needs = _out(proc)["needs_input"][0]
+    assert needs["gate"] == "ctx_select_company"
+    assert {o["id"] for o in needs["options"]} == {"example-co", "different_company"}
+    assert "names a company other than the one" in proc.stderr
+    st = h.status(root, rid)
+    assert (st["status"], st["waiting_on"]) == ("waiting", "ctx_select_company")
+    basics = h.ledger(root, rid)["gates"].get("ctx_basics.company_name") or {}
+    assert basics.get("state") != "not_owed", "the basics were settled from the other company's context"
+
+
+@pytest.mark.parametrize(("answer", "code"), [("example-co", 0), ("different_company", 1)])
+def test_the_answer_after_a_materials_mismatch_is_recorded_and_the_next_read_follows_it(
+    tmp_path: Path, answer: str, code: int
+) -> None:
+    """The materials' name is kept in the ledger, so the recorder's own transaction still owes the question: an
+    answer is recorded rather than refused as not owed, and a read without the flag follows it."""
+    root, rid = _started(tmp_path)
+    _context(root, "Example Co", "example-co")
+    assert _read(root, rid, *_expect("Sample Labs")).returncode == 10
+    ans = h.record(root, rid, "answer", "--gate", "ctx_select_company", "--answer-id", answer)
+    assert ans.returncode == 0, ans.stdout + ans.stderr
+    proc = _read(root, rid)
+    assert proc.returncode == code, proc.stdout + proc.stderr
+    if code:
+        assert _out(proc)["code"] == "CONTEXT_NOT_FOUND"
+    else:
+        assert _out(proc)["slug"] == "example-co"
+
+
+def test_one_context_and_materials_naming_another_company_under_no_ask_waits(tmp_path: Path) -> None:
+    root, rid = _started(tmp_path, f"FS_HOST_RUN_ID={_NO_ASK_RID}\nFS_HOST_NO_ASK\n")
+    _context(root, "Example Co", "example-co")
+    proc = _read(root, rid, *_expect("Sample Labs"))
+    assert proc.returncode == 12, proc.stdout + proc.stderr
+    out = _out(proc)
+    assert out["blocked_by_gate"] == "ctx_select_company"
+    assert "sector" not in out and "slug" not in out, "a context was printed"
+    st = h.status(root, rid)
+    assert (st["status"], st["waiting_on"]) == ("waiting", "ctx_select_company")
+
+
+def test_a_corrected_materials_name_reads_the_context_and_closes_the_question(tmp_path: Path) -> None:
+    """A name misread off the materials, read again with the corrected name, closes the open question by script
+    and reads the context: the newer name replaces the recorded one before the question is decided."""
+    root, rid = _started(tmp_path)
+    _context(root, "Example Co", "example-co")
+    assert _read(root, rid, *_expect("Sample Labs")).returncode == 10
+    proc = _read(root, rid, *_expect("Example Co"))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert _out(proc)["slug"] == "example-co"
+    entry = h.ledger(root, rid)["gates"]["ctx_select_company"]
+    assert (entry["state"], entry["current"]["resolution"]) == ("not_owed", "not_applicable")
+    assert h.status(root, rid)["status"] != "waiting"
+
+
+@pytest.mark.parametrize(
+    ("skill", "line"),
+    [
+        ("deck-review", "FS_HOST_ANSWER ctx_basics.company_name=working_title\n"),
+        ("financial-model-review", "FS_HOST_ANSWER ctx_basics.company_name=use_model_file\n"),
+    ],
+)
+def test_a_request_naming_no_company_is_decided_by_the_materials(tmp_path: Path, skill: str, line: str) -> None:
+    """A working title or `Use what the model file states` names no company, so the request alone reads the one
+    context; the name the materials state then decides."""
+    root = tmp_path / "artifacts"
+    root.mkdir()
+    rid = h.start_ok(root, skill, line)
+    _context(root, "Example Co", "example-co")
+    other = _read(root, rid, *_expect("Sample Labs"), skill=skill)
+    assert other.returncode == 10, other.stdout + other.stderr
+    same_root = tmp_path / "same"
+    same_root.mkdir()
+    same_rid = h.start_ok(same_root, skill, line)
+    _context(same_root, "Example Co", "example-co")
+    same = _read(same_root, same_rid, *_expect("Example Co"), skill=skill)
+    assert same.returncode == 0, same.stdout + same.stderr
+
+
+def test_a_request_naming_the_stored_company_still_asks_when_the_materials_name_another(tmp_path: Path) -> None:
+    root, rid = _started(tmp_path, _NAMED.format("Example Co"))
+    _context(root, "Example Co", "example-co")
+    assert _read(root, rid, *_expect("Sample Labs")).returncode == 10
+
+
+def test_a_bound_run_ignores_the_materials_name(tmp_path: Path) -> None:
+    root, rid = _started(tmp_path)
+    _context(root, "Example Co", "example-co")
+    assert h.bind(root, rid, root / "deck-review-example-co", "example-co").returncode == 0
+    proc = _read(root, rid, *_expect("Sample Labs"))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert _out(proc)["slug"] == "example-co"
+    assert "materials_company" not in h.ledger(root, rid)
+
+
+@pytest.mark.parametrize("name", ["", "  ", "--"])
+def test_an_expected_name_with_no_letters_is_refused_and_nothing_is_written(tmp_path: Path, name: str) -> None:
+    root, rid = _started(tmp_path)
+    _context(root, "Example Co", "example-co")
+    before = h.snapshot(root, rid)
+    proc = _read(root, rid, f"--expect-company={name}")
+    assert proc.returncode == 2 and _out(proc)["code"] == "USAGE", proc.stdout + proc.stderr
+    assert h.snapshot(root, rid) == before
+
+
+def test_a_read_with_no_ledger_is_unchanged_by_the_expected_name(tmp_path: Path) -> None:
+    _context(tmp_path, "Example Co", "example-co")
+    plain = _read(tmp_path, None, "--pretty")
+    for extra in (_expect("Sample Labs"), _expect("Example Co")):
+        with_flag = _read(tmp_path, None, "--pretty", *extra)
+        assert (with_flag.returncode, with_flag.stdout, with_flag.stderr) == (
+            plain.returncode,
+            plain.stdout,
+            plain.stderr,
+        )
+    no_ledger = _read(tmp_path, "20261007T090000Z-0f0f0f", *_expect("Sample Labs"))
+    assert (no_ledger.returncode, no_ledger.stdout) == (0, _read(tmp_path, None).stdout)
+
+
 # --- setup_run on a bound run -------------------------------------------------------------------------
 
 
