@@ -482,3 +482,33 @@ def test_saas_only_metrics_do_not_imply_the_company_is_not_saas(reason: str | No
             assert suffix in m["evidence"], m
         else:
             assert "not assessed because" not in m["evidence"], m
+
+
+# --- an unclassified model with no reason is noted, never blocking -----------------------------------
+
+
+def _validator(inputs: dict[str, Any]) -> dict[str, Any]:
+    rc, data, stderr = run_script("validate_inputs.py", [], stdin_data=json.dumps(inputs))
+    assert data is not None, stderr
+    return data
+
+
+def test_validator_notes_an_unclassified_model_with_no_reason_without_blocking() -> None:
+    """Leaving the reason out when unsure is what the schema asks, so the note must not stop Step 3.5."""
+    data = _validator(_reason_inputs(None))
+    notes = [w for w in data["warnings"] if w["code"] == "UNCLASSIFIED_REASON_NOT_RECORDED"]
+    assert len(notes) == 1
+    assert notes[0]["layer"] == 4 and notes[0]["severity"] == "info" and not notes[0].get("critical")
+    assert data["has_critical_warnings"] is False
+
+
+@pytest.mark.parametrize("reason", ["not_stated", "no_fitting_type"])
+def test_validator_has_no_note_when_the_reason_is_recorded(reason: str) -> None:
+    codes = [w["code"] for w in _validator(_reason_inputs(reason))["warnings"]]
+    assert "UNCLASSIFIED_REASON_NOT_RECORDED" not in codes
+
+
+def test_validator_has_no_note_for_a_classified_model() -> None:
+    inputs = _reason_inputs(None)
+    inputs["company"]["revenue_model_type"] = "saas-sales-led"
+    assert "UNCLASSIFIED_REASON_NOT_RECORDED" not in [w["code"] for w in _validator(inputs)["warnings"]]

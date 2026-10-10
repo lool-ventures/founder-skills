@@ -1310,8 +1310,10 @@ def _profile_field_name(field: str) -> str:
     return {"sector": "revenue model"}.get(field, field)
 
 
-def _revenue_model_not_stated(inputs: dict[str, Any] | None) -> bool:
-    """`unclassified`: no revenue model we can benchmark is stated, as opposed to one we could not match."""
+def _revenue_model_unclassified(inputs: dict[str, Any] | None) -> bool:
+    """Whether the revenue model is `unclassified`: no type we benchmark applies, as opposed to a value we
+    could not match. It covers both reasons (no model stated, or one stated that fits no type); which one
+    is `_unclassified_reason`'s answer, and every founder-facing sentence branches on that."""
     company = _as_dict(_as_dict(inputs).get("company"))
     return str(company.get("revenue_model_type") or "").strip().lower() == "unclassified"
 
@@ -1329,7 +1331,7 @@ def _unresolved_clause(field: str, inputs: dict[str, Any] | None) -> str:
     `unclassified` is two cases -- no model stated, or one stated that fits no benchmarked type. When
     the extraction did not record which, the hedged sentence is true in both.
     """
-    if field == "sector" and _revenue_model_not_stated(inputs):
+    if field == "sector" and _revenue_model_unclassified(inputs):
         return {
             "not_stated": "no revenue model is stated in your materials",
             "no_fitting_type": "your revenue model is not one our model-specific checks cover",
@@ -1339,7 +1341,7 @@ def _unresolved_clause(field: str, inputs: dict[str, Any] | None) -> str:
 
 def _technical_unresolved(field: str, inputs: dict[str, Any] | None, clause: str) -> str:
     """The developer-facing `message` form of the clause (the founder reads `founder_message`)."""
-    if field == "sector" and _revenue_model_not_stated(inputs):
+    if field == "sector" and _revenue_model_unclassified(inputs):
         return f"unclassified ({_unclassified_reason(inputs) or 'reason not recorded'})"
     return clause.removeprefix("your ")
 
@@ -1423,7 +1425,7 @@ def _section_checklist(checklist: dict[str, Any] | None, inputs: dict[str, Any] 
     for field, ids in sorted(unresolved.items()):
         dropped = _as_list(ids)
         if dropped:
-            _label = "Not assessed" if field == "sector" and _revenue_model_not_stated(inputs) else "Not matched"
+            _label = "Not assessed" if field == "sector" and _revenue_model_unclassified(inputs) else "Not matched"
             lines.append(
                 f"**{_label}:** {_unresolved_clause(str(field), inputs)}, so "
                 f"{len(dropped)} checks that may apply were excluded from the score above: "

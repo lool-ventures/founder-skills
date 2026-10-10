@@ -2061,6 +2061,7 @@ _WARNING_TAB: dict[str, str] = {
     "MISSING_RETENTION": "revenue",
     "MISSING_GROSS_MARGIN": "ue",
     "CUSTOMERS_MISSING": "revenue",
+    "UNCLASSIFIED_REASON_NOT_RECORDED": "company",
     "TYPE_ERROR": "company",
     "BURN_SIGN_ERROR": "cash",
     "DERIVED_METRIC_REDUNDANT": "ue",
