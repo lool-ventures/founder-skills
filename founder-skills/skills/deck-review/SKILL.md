@@ -1111,6 +1111,10 @@ slide_reviews.py (no metadata block; the producer script adds it):
 }
 `importance` must be exactly one of `critical`, `important`, `nice_to_have`
 (underscores only).
+Say two deck figures disagree only when <REVIEW_DIR_AGENT>/reconciliation.json
+lists that disagreement, or the deck writes one quantity two ways (quote both). A
+metric and its inverse, a part of a later total, or a figure labelled conservative
+is not a disagreement.
 All string values must be JSON-escaped (`\n` for line breaks, `\"` for embedded
 quotes); the file must parse with a strict JSON parser.
 Then return ONLY the receipt JSON in your final assistant message:

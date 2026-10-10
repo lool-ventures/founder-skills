@@ -1547,7 +1547,11 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 114,249 -> 114,623 (+374 B): `numbers_consistent` is scored from the arithmetic. Step 5's checklist.py
     # command carries `--reconciliation` plus one sentence that a what-if rerun omits it; Step 7's coaching
     # template names `numeric_findings` and says an empty list is not an all-clear.
-    "deck-review": 114_623,
+    # 114,623 -> 114,890 (+267 B): Step 4's SLIDE_REVIEWS template says two figures disagree only when
+    # reconciliation.json lists it or the deck writes one quantity two ways, and names the three classes that
+    # are not disagreements (inverse metric, part of a later total, a figure labelled conservative). Placed
+    # after the return shape so the template's pinned windows are untouched; slide_reviews.py lints for it.
+    "deck-review": 114_890,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.

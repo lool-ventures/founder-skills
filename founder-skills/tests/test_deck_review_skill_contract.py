@@ -2183,3 +2183,25 @@ def test_the_coach_is_told_an_empty_numeric_findings_is_not_an_all_clear() -> No
         text = path.read_text(encoding="utf-8").lower()
         assert "only if it is in" in text and "numeric_findings" in text, path.name
         assert "does not mean the figures agree" in text, path.name
+
+
+def test_slide_reviews_states_a_disagreement_only_from_the_arithmetic() -> None:
+    """The slide reviewer is told the arithmetic decides whether two figures disagree.
+
+    Bounded on structure (the template's closing fence; the agent's SLIDE_REVIEWS section up to the
+    next `For ` section), not a character window. Only a paid lane shows the reviewer follows it;
+    slide_reviews.py's warn-only numeric lint measures it on every run.
+    """
+    skill_text = SKILL_MD.read_text(encoding="utf-8")
+    start = skill_text.find("CONTEXT: SLIDE_REVIEWS")
+    end = skill_text.find("```", start)
+    assert start != -1 and end != -1
+    agent_text = AGENT_MD.read_text(encoding="utf-8")
+    a_start = agent_text.find("For `SLIDE_REVIEWS`:")
+    a_end = agent_text.find("\nFor `", a_start + 1)
+    assert a_start != -1 and a_end != -1
+    for name, section in (("SKILL.md", skill_text[start:end]), ("agent", agent_text[a_start:a_end])):
+        flat = " ".join(section.split())
+        assert "disagree only when" in flat and "reconciliation.json" in flat, name
+        assert "one quantity two ways (quote both)" in flat, name
+        assert "labelled conservative" in flat and "its inverse" in flat, name

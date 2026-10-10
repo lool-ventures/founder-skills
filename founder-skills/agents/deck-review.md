@@ -72,6 +72,11 @@ the producer script). Required top-level fields:
   (underscores only)
 - `overall_narrative_assessment`: string summarising the deck's narrative arc
 
+Say two deck figures disagree only when the review dir's `reconciliation.json` lists
+that disagreement, or the deck writes one quantity two ways (quote both). A metric and
+its inverse, a part of a later total, or a figure labelled conservative is not a
+disagreement.
+
 For `LEDGER_EXTRACTION`: record every number the deck states, and nothing else.
 Do not compute, do not relate figures to each other, do not record a figure the
 deck does not state. Two rules carry the weight:
