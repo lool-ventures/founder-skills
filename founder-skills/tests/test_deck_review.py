@@ -6484,6 +6484,38 @@ def test_a_plan_past_a_stated_limit_fails_the_item(tmp_path: Path) -> None:
     assert _NC_EXCEEDS["rendered"] in item["notes"]
 
 
+def test_a_deck_with_only_restatements_is_not_applicable(tmp_path: Path) -> None:
+    """A restatement is reached only when no stated figure was compared, so it establishes nothing
+    about one: checked + only withheld restatements (and a derived reading) is a free pass."""
+    recon = _nc_recon(relations=[_NC_DERIVED], suppressed={"restatement": 2, "derived": 1})
+    code, out, err = _nc_score(tmp_path, recon, {"status": "pass", "evidence": "adds up"})
+    assert code == 0, err
+    item = _nc_item(out)
+    assert item["status"] == "not_applicable", item
+    assert "none disagrees" not in item["evidence"]
+
+
+def test_a_plan_past_a_stated_limit_is_not_told_the_deck_disagrees_with_itself(tmp_path: Path) -> None:
+    code, out, err = _nc_score(tmp_path, _nc_recon(relations=[_NC_EXCEEDS]))
+    assert code == 0, err
+    item = _nc_item(out)
+    assert item["status"] == "fail"
+    assert "agrees with itself" not in item["notes"]
+    assert "Bring the plan within the limit" in item["notes"]
+    both = _nc_item(_nc_score(tmp_path, _nc_recon(relations=[_NC_CONTRA, _NC_EXCEEDS]))[1])["notes"]
+    assert "agrees with itself" in both and "Bring the plan within the limit" in both
+
+
+def test_the_reconciliation_refusals_name_the_remedy(tmp_path: Path) -> None:
+    rpath = tmp_path / "reconciliation.json"
+    rpath.write_text(json.dumps(_nc_recon()), encoding="utf-8")
+    payload = json.dumps({"items": _make_checklist_items()})
+    code, out, _ = run_script("checklist.py", ["--run-id", "other-run", "--reconciliation", str(rpath)], payload)
+    assert code == 1 and out is not None
+    msg = " ".join(out["validation"]["errors"])
+    assert "Steps 3.5-3.8" in msg and "do not drop --reconciliation" in msg
+
+
 def test_a_rounding_gap_alone_warns(tmp_path: Path) -> None:
     code, out, err = _nc_score(tmp_path, _nc_recon(relations=[_NC_ROUNDING]))
     assert code == 0, err

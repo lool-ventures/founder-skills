@@ -631,11 +631,13 @@ def validate_checklist(
 # (a figure worked out with nothing to compare it to), `incomparable` and `dropped` (no
 # comparison made) and `superseded` (replaced by a comparison counted on its own) establish
 # nothing about consistency. A `downgraded` contradiction was compared and then withdrawn on
-# review: it counts as a comparison, never as a disagreement.
+# review: it counts as a comparison, never as a disagreement. A `restatement` is NOT one: the
+# engine reaches it only when no stated figure was compared (a sum of two figures restating a
+# third the deck already prints), so it establishes nothing about a stated figure and a deck
+# whose only relations are restatements would otherwise earn a free pass.
 _COMPARISON_VERDICTS = frozenset(
     {
         "confirmation",
-        "restatement",
         "contradiction",
         "exceeds_stated_limit",
         "rounding_gap",
@@ -702,6 +704,10 @@ def _apply_numeric_scoring(result: dict[str, Any], reconciliation: dict[str, Any
     `scored_by: "arithmetic"` -- compose warns on a checked run whose item carries no stamp.
     The reviewer's own status is kept as `reviewer_status`, for measuring how often the two
     disagree; it is never rendered.
+
+    Residual: a plan past a stated limit has no withdrawal path. Only contradictions and
+    rounding gaps are reviewable (`REVIEWABLE_VERDICTS` in reconcile.py), so the engine's own
+    domain guards are the only protection against a false one.
     """
     items: list[dict[str, Any]] = result.get("items", [])
     item = next((i for i in items if isinstance(i, dict) and i.get("id") == NUMBERS_CRITERION), None)
@@ -737,11 +743,18 @@ def _apply_numeric_scoring(result: dict[str, Any], reconciliation: dict[str, Any
                 " Nobody reviewed these for cases where the comparison itself does not hold, so treat "
                 "them as questions to check rather than settled problems."
             )
-        notes = (
-            "Reconcile these figures so the deck agrees with itself: "
-            + "; ".join(found)
-            + ". Correct whichever figure is wrong, or state the basis each one is computed on."
-        )
+        fixes: list[str] = []
+        if disagree:
+            fixes.append(
+                "Reconcile these figures so the deck agrees with itself: "
+                + "; ".join(disagree)
+                + ". Correct whichever figure is wrong, or state the basis each one is computed on."
+            )
+        if exceeded:
+            fixes.append(
+                "Bring the plan within the limit the deck states, or restate the limit: " + "; ".join(exceeded) + "."
+            )
+        notes = " ".join(fixes)
     elif rounding:
         status = "warn"
         evidence = "Scored from the arithmetic: " + "; ".join(rounding) + "."
@@ -772,29 +785,36 @@ def _apply_numeric_scoring(result: dict[str, Any], reconciliation: dict[str, Any
     return result
 
 
+_RECON_REMEDY = (
+    ". Re-run the arithmetic steps (the ledger chain, Steps 3.5-3.8) for this run so reconciliation.json "
+    "is written for it; do not drop --reconciliation, which would score the criterion by eye"
+)
+
+
 def load_reconciliation(path: str, run_id: str) -> tuple[dict[str, Any] | None, str | None]:
     """Read the reconciliation this checklist is scored against. Returns (data, error).
 
     A PRECONDITION, not an input to skip on: a file that is unreadable, from another run, or has
     no status would otherwise score this criterion from nothing -- or from an earlier review of
     the same company -- and the delivered report would carry it as this deck's arithmetic.
+    Every refusal names the remedy: re-run the arithmetic steps for this run, never drop the flag.
     """
     try:
         with open(path, encoding="utf-8") as fh:
             data = json.load(fh)
     except (OSError, json.JSONDecodeError) as exc:
-        return None, f"reconciliation artifact at {path} is unreadable: {exc}"
+        return None, f"reconciliation artifact at {path} is unreadable: {exc}{_RECON_REMEDY}"
     if not isinstance(data, dict):
-        return None, f"reconciliation artifact at {path} is not a JSON object"
+        return None, f"reconciliation artifact at {path} is not a JSON object{_RECON_REMEDY}"
     found = _as_dict(data.get("metadata")).get("run_id")
     if found != run_id:
         return None, (
             f"reconciliation artifact at {path} belongs to run {found!r}, not {run_id!r} — "
-            "it is left over from an earlier review and says nothing about this deck"
+            f"it is left over from an earlier review and says nothing about this deck{_RECON_REMEDY}"
         )
     status = data.get("status")
     if not isinstance(status, str) or not status:
-        return None, f"reconciliation artifact at {path} carries no status"
+        return None, f"reconciliation artifact at {path} carries no status{_RECON_REMEDY}"
     return data, None
 
 

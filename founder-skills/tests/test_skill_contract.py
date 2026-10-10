@@ -1551,7 +1551,10 @@ SKILL_MD_CEILING: dict[str, int] = {
     # reconciliation.json lists it or the deck writes one quantity two ways, and names the three classes that
     # are not disagreements (inverse metric, part of a later total, a figure labelled conservative). Placed
     # after the return shape so the template's pinned windows are untouched; slide_reviews.py lints for it.
-    "deck-review": 114_890,
+    # 114,890 -> 115,052 (+162 B): the What-If rule says a recomputation starts from the delivered
+    # checklist.json items (not the reviewer's checklist_output.json), omits --reconciliation and prints
+    # to stdout; Step 5's sentence now points there instead of restating it.
+    "deck-review": 115_052,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
