@@ -17,6 +17,7 @@ import urllib.request
 from typing import Any
 
 import pytest
+from html_text import script_bodies
 
 _SCRIPTS = os.path.join(
     os.path.dirname(__file__),
@@ -1612,7 +1613,7 @@ def _unguarded_api_fetches(js: str) -> list[str]:
 def test_every_api_fetch_in_the_static_page_is_in_an_is_static_else_branch() -> None:
     rc, html, stderr = _generate_static(_FULL_INPUTS)
     assert rc == 0, stderr
-    js = "\n".join(re.findall(r"<script>(.*?)</script>", html, re.S))
+    js = "\n".join(script_bodies(html))
     assert "const IS_STATIC = true;" in js, "control: the static build bakes the flag in"
     fetches = re.findall(r"fetch\(\s*[\"'`]/api/[a-z]+", js)
     assert len(fetches) >= 2, f"control: expected the check and feedback fetches, found {fetches}"
