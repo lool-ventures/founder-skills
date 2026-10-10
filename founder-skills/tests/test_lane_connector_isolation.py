@@ -98,12 +98,14 @@ def _fake_query(tools: list[str], servers: list[dict[str, str]]) -> Any:
 def test_shared_harness_run_fails_when_a_connector_loaded(harness: Any, tmp_path: Path, monkeypatch: Any) -> None:
     import claude_agent_sdk
 
+    workdir = tmp_path / "workspace"
+    workdir.mkdir()
     monkeypatch.setattr(claude_agent_sdk, "query", _fake_query(["Bash", "mcp__claude_ai_Gmail__send_message"], []))
     with pytest.raises(AssertionError, match="connector"):
-        harness.run_skill_capture("probe", tmp_path, label="probe")
+        harness.run_skill_capture("probe", workdir, label="probe")
     # The clean stream passes the check (and returns the capture).
     monkeypatch.setattr(claude_agent_sdk, "query", _fake_query(["Bash", "Read"], []))
-    cap = harness.run_skill_capture("probe", tmp_path, label="probe")
+    cap = harness.run_skill_capture("probe", workdir, label="probe")
     assert cap.session_tools == ["Bash", "Read"]
 
 

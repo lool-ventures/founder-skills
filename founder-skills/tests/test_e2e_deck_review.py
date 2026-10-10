@@ -59,6 +59,7 @@ import pytest
 # two tagged releases.
 from _e2e_harness import (
     CONNECTOR_ISOLATION_ENV,
+    SdkStreamFile,
     assert_no_account_connectors,
     compose_record_problems,
     connector_isolation_options,
@@ -401,16 +402,18 @@ def _drive_deck_review_lane(
 
     async def run() -> None:
         msg_count = 0
-        async for msg in query(prompt=prompt, options=options):
-            msg_count += 1
-            captured_messages.append(str(msg))
-            if isinstance(msg, SystemMessage) and msg.subtype == "init":
-                session_tools.extend(str(t) for t in msg.data.get("tools") or [])
-                mcp_servers.extend(msg.data.get("mcp_servers") or [])
-            for block in getattr(msg, "content", None) or []:
-                if type(block).__name__ == "ToolUseBlock":
-                    tool_call_names.append(str(getattr(block, "name", "")))
-            print(f"[e2e #{msg_count:03d}] {_summarize_sdk_message(msg)}", flush=True)
+        with SdkStreamFile(workdir, lane) as stream:
+            async for msg in query(prompt=prompt, options=options):
+                msg_count += 1
+                stream.write(msg)
+                captured_messages.append(str(msg))
+                if isinstance(msg, SystemMessage) and msg.subtype == "init":
+                    session_tools.extend(str(t) for t in msg.data.get("tools") or [])
+                    mcp_servers.extend(msg.data.get("mcp_servers") or [])
+                for block in getattr(msg, "content", None) or []:
+                    if type(block).__name__ == "ToolUseBlock":
+                        tool_call_names.append(str(getattr(block, "name", "")))
+                print(f"[e2e #{msg_count:03d}] {_summarize_sdk_message(msg)}", flush=True)
         print(f"[e2e] --- SDK loop complete ({msg_count} messages) ---", flush=True)
 
     asyncio.run(run())

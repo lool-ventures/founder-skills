@@ -662,6 +662,73 @@ def format_dispatch_report(step: str, report: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+_SECRET_NAME = re.compile(r"KEY|TOKEN|SECRET|PASSWORD|AUTH", re.IGNORECASE)
+_SECRET_MIN_LEN = 8
+
+
+def sdk_stream_path(workdir: Path, label: str) -> Path:
+    """Where a lane's SDK stream is kept: beside `workspace/`, never inside the skill's `artifacts/` root.
+
+    Every lane stages `workdir = tmp_path / "workspace"`, so this is `<test dir>/artifacts/`, which the
+    workflow's upload glob (`pytest/**/artifacts/**`) collects. The skill's own artifacts root is
+    `workdir/artifacts`, which several resolvers list; a stray file there would be read as a run.
+    """
+    return workdir.parent / "artifacts" / f"sdk-stream-{label}.jsonl"
+
+
+def secret_values() -> list[str]:
+    """Every environment value that looks like a credential, longest first (so a prefix cannot split one).
+
+    By NAME PATTERN, not two literals: the SDK's environment is `**os.environ`, so a developer's local run
+    can carry any credential. GitHub masks secrets in logs, not in uploaded artifacts.
+    """
+    found = {v for k, v in os.environ.items() if _SECRET_NAME.search(k) and len(v) >= _SECRET_MIN_LEN}
+    return sorted(found, key=len, reverse=True)
+
+
+def redact_secrets(text: str) -> str:
+    for value in secret_values():
+        text = text.replace(value, "[REDACTED]")
+    return text
+
+
+class SdkStreamFile:
+    """The SDK message stream of one lane, written as it arrives, so a failing run still leaves it.
+
+    One JSONL line per message (`n`, `type`, `text` = `str(msg)`), appended and flushed per line, with
+    credential values replaced. If the loop raises, the `finally` writes an `{"error": ...}` line before
+    the file closes. The file is the evidence for a lane that fails; it is written whether the lane
+    passes or fails, which is why it is not gated on the assertions that follow the loop.
+    """
+
+    def __init__(self, workdir: Path, label: str) -> None:
+        self.path = sdk_stream_path(workdir, label)
+        self.label = label
+        self.count = 0
+        self._handle: Any = None
+
+    def __enter__(self) -> SdkStreamFile:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._handle = open(self.path, "a", encoding="utf-8")
+        return self
+
+    def _line(self, obj: dict[str, Any]) -> None:
+        self._handle.write(redact_secrets(json.dumps(obj, ensure_ascii=False)) + "\n")
+        self._handle.flush()
+
+    def write(self, msg: object) -> None:
+        self.count += 1
+        self._line({"n": self.count, "type": type(msg).__name__, "text": str(msg)})
+
+    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+        try:
+            if exc is not None:
+                self._line({"error": f"{exc_type.__name__}: {exc}", "after_messages": self.count})
+        finally:
+            self._handle.close()
+            print(f"[e2e:{self.label}] SDK stream: {self.path} ({self.count} messages)", flush=True)
+
+
 def run_skill(prompt: str, workdir: Path, label: str, uploads: Sequence[Path] = ()) -> list[str]:
     """Drive one skill run to completion. Returns the captured message stream.
 
@@ -700,10 +767,12 @@ def run_skill_capture(prompt: str, workdir: Path, label: str, uploads: Sequence[
 
     async def _run() -> None:
         count = 0
-        async for msg in query(prompt=prompt, options=options):
-            count += 1
-            record_message(cap, msg)
-            print(f"[e2e:{label} #{count:03d}] {summarize_sdk_message(msg)}", flush=True)
+        with SdkStreamFile(workdir, label) as stream:
+            async for msg in query(prompt=prompt, options=options):
+                count += 1
+                stream.write(msg)
+                record_message(cap, msg)
+                print(f"[e2e:{label} #{count:03d}] {summarize_sdk_message(msg)}", flush=True)
         print(f"[e2e:{label}] --- SDK loop complete ({count} messages) ---", flush=True)
 
     asyncio.run(_run())
