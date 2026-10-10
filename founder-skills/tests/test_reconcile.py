@@ -2249,6 +2249,24 @@ def test_outside_the_reciprocal_table_a_disagreement_establishes_nothing() -> No
     assert _inverse("↓36%", "churn reduction", "56%", 56, "retention gain", "reduction").verdict == "confirmation"
 
 
+@pytest.mark.parametrize(
+    ("op_raw", "op_label", "exp_raw", "exp_value", "exp_label"),
+    [
+        ("↓30%", "time to close reduction", "50%", 50, "sales velocity increase"),
+        ("↓25%", "onboarding time savings", "60%", 60, "activation speed"),
+        ("↓40%", "processing time reduction", "100%", 100, "throughput increase"),
+        ("↓40%", "latency reduction", "100%", 100, "throughput gain"),
+    ],
+)
+def test_measures_that_are_not_reciprocal_by_definition_never_disagree(
+    op_raw: str, op_label: str, exp_raw: str, exp_value: float, exp_label: str
+) -> None:
+    """Startup vocabulary where "time" and "speed", or latency and throughput, are not each
+    other's reciprocal: faster processing and more throughput are both true at once."""
+    r = _inverse(op_raw, op_label, exp_raw, exp_value, exp_label, "reduction")
+    assert r.verdict != "contradiction", r.rendered
+
+
 def test_a_declared_direction_the_wording_contradicts_is_refused() -> None:
     assert (
         _inverse("↓36%", "resistivity reduction", "56%", 56, "conductivity gain", "increase").verdict == "incomparable"

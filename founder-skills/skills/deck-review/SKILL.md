@@ -910,8 +910,8 @@ the operator, and a value invented to fit the operator is rejected.
     add `"schedule": [{"id": "<burn id>", "from": "YYYY-MM", "to": "YYYY-MM"}]` (`to`
     inclusive; only the last segment omits it) and optional `"start": "YYYY-MM"`.
   - `inverse_change`: one percent operand, `"direction": "reduction"` or `"increase"`, against
-    the stated change in its reciprocal (resistivity/conductivity, latency/throughput,
-    time/speed, cost per unit/units per dollar).
+    the stated change in its reciprocal (only resistivity/conductivity,
+    resistance/conductance, cost per unit/units per dollar).
   - `implied_base`: a money figure, then the percent of a whole it is; no `expected_id`.
 Two optional fields go with `expected_id`. `"relation": "at_most"` says the deck states a
 **ceiling** the other figures must not exceed — a production capacity, a budget, a headcount

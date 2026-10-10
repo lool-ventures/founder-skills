@@ -1542,7 +1542,9 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 114,117 -> 114,252 (+135 B): a `rounding_gap` (a total its parts reach only through their own
     # rounding) reaches the founder, so Step 3.9 runs on one too and the INTERPRETATION template says the
     # same two withdrawal grounds apply to it; without that the verdict has no review path.
-    "deck-review": 114_252,
+    # 114,252 -> 114,249 (-3 B), LOWERED: the reciprocal pairs Step 3.7 names shrink to the ones that are
+    # reciprocal by definition (time/speed and latency/throughput reported disagreements that were not).
+    "deck-review": 114_249,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.

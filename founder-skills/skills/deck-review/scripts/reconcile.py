@@ -1650,11 +1650,15 @@ def _runway(r: Relation, real: list[Figure], rel_spec: dict[str, Any], alias: di
 # thing other than the proposer that can establish it. Outside the table the operator may still
 # CONFIRM -- recognising that two figures agree removes a false finding -- but it never
 # reports a disagreement. Mirrored in SKILL.md Step 3.7 so the proposer sees the same list.
+#
+# RECIPROCAL BY DEFINITION ONLY. Two rows were cut after review: time <-> speed/velocity
+# matched startup vocabulary where the two are unrelated (a sales cycle's length against a
+# pipeline's velocity, an onboarding's length against an activation speed), and latency <->
+# throughput holds only at fixed concurrency (faster processing AND more throughput is an
+# ordinary, true pair of claims). Each reported a disagreement that was not one.
 _RECIPROCAL_PAIRS: tuple[tuple[str, str], ...] = (
     (r"\bresistivity\b", r"\bconductivity\b"),
     (r"\bresistance\b", r"\bconductance\b"),
-    (r"\b(?:latency|response time|cycle time|lead time|processing time)\b", r"\bthroughput\b"),
-    (r"\btime\b", r"\b(?:speed|velocity)\b"),
     (r"\bcost per\b", r"\bper (?:dollar|euro|pound|\$|€|£)"),
 )
 
