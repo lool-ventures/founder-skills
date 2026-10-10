@@ -804,7 +804,10 @@ def is_visible(quote: str) -> bool:
 
 
 # Longest-first, so "minutes" is not matched by "min" inside "minimum" and "hrs" beats "hr".
-# Word-bounded at the call site for the same reason.
+# Bounded at the call site: never a letter on the left, a word boundary on the right. Not `\b`
+# on the left, because a digit and a letter have no word boundary between them and "36mo",
+# "3yr" and "18-20mo" are how decks print durations. Bare "m" is not in the table at all: it
+# is millions as often as months.
 _TIME_UNITS: tuple[tuple[tuple[str, ...], float], ...] = (
     (("seconds", "second", "secs", "sec"), 1.0),
     (("minutes", "minute", "mins", "min"), 60.0),
@@ -834,14 +837,49 @@ def time_scale(raw: str) -> float | None:
     return unit[1] if unit else None
 
 
+def _unit_tokens(text: str) -> list[tuple[int, int, str, float]]:
+    """Every time-unit token in `text` as (start, end, singular name, seconds), non-overlapping."""
+    low = (text or "").lower()
+    found: list[tuple[int, int, str, float]] = []
+    for names, secs in _TIME_UNITS:
+        for n in names:
+            for m in re.finditer(rf"(?<![a-z]){n}\b", low):
+                if not any(m.start() < e and s < m.end() for s, e, _, _ in found):
+                    found.append((m.start(), m.end(), names[1], secs))
+    return sorted(found)
+
+
 def time_unit(raw: str) -> tuple[str, float] | None:
     """The written time unit as (singular name, seconds per unit), or None. See `time_scale`."""
     low = (raw or "").lower()
     for names, secs in _TIME_UNITS:
         for n in names:
-            if re.search(rf"\b{n}\b", low):
+            if re.search(rf"(?<![a-z]){n}\b", low):
                 return names[1], secs
     return None
+
+
+_NUMERAL_AFTER = re.compile(r"^[\s-]*\d")
+_NUMERAL_BEFORE = re.compile(r"\d[\s-]*$")
+
+
+def _label_time_unit(label: str) -> tuple[str, float] | None:
+    """The unit a LABEL declares for its figure, or None when it does not declare exactly one.
+
+    A label is prose about the figure, not the figure, so it is read more strictly than a raw
+    string. A unit token next to a numeral names some OTHER quantity -- "payback period (year
+    1)" is about the first year, "a 6-month cohort" about a cohort -- and is skipped; reading it
+    turned a bare "14" into fourteen years. A label that still names two different units says
+    nothing decidable about which one this figure is in, and is refused rather than resolved by
+    table order.
+    """
+    text = label or ""
+    units = {
+        (name, secs)
+        for start, end, name, secs in _unit_tokens(text)
+        if not _NUMERAL_AFTER.match(text[end:]) and not _NUMERAL_BEFORE.search(text[:start])
+    }
+    return units.pop() if len(units) == 1 else None
 
 
 def written_time_unit(fig: Figure) -> tuple[str, float] | None:
@@ -850,33 +888,52 @@ def written_time_unit(fig: Figure) -> tuple[str, float] | None:
     The raw string wins. The label is read only when the raw names no unit, because ledgers
     routinely carry the unit there and nowhere else -- "12-14" labelled "runway secured
     (months)" -- and refusing that figure lost two expert-graded real findings on a kept run.
-    A raw like "36m" with no unit in its label is still refused (it reads as 36 million).
+    A raw like "36m" with no unit in its label is still refused (it reads as 36 million). The
+    label is read by `_label_time_unit`, which skips numeral-adjacent units and refuses two.
     """
-    return time_unit(fig.raw) or time_unit(fig.label)
+    return time_unit(fig.raw) or _label_time_unit(fig.label)
 
 
 _MONTH_SECONDS = 2_629_800.0
 
 DURATION_TOLERANCE_FLOOR_SECONDS = _MONTH_SECONDS
-"""A stated duration with no bound tolerates at least one unit of its written unit, but never
-more than a month. A CHOICE.
+"""A stated duration's written precision is worth about one month, both ways. TWO CHOICES.
 
-The significant-figure floor reads "26 months" as +/-0.5 month, so a computed 25.4 months
-contradicted it -- a 2% gap on a figure decks quote in whole months and almost never mark
-"~". One written unit (+/-1 month) is the honest reading of a whole-month figure. The month
-cap is what keeps the rule from LOOSENING anything else: "one written unit" of "3 years" is
-a whole year, against today's half-year, so a year-stated figure keeps its own precision
-and a day- or week-stated one gains at most a single day or week.
+FLOOR. The significant-figure floor reads "26 months" as +/-0.5 month, so a computed 25.4
+months contradicted it -- a 2% gap on a figure decks quote in whole months and almost never
+mark "~". An unbounded duration tolerates at least one written unit, never more than a month.
+
+CAP. The same half-unit rule reads "1 year" as +/-6 months, so the verdict depended on which
+unit the deck wrote: six months of cash against "~1 year" confirmed while the same cash
+against "18-20 months" was an expert-graded real finding, and 19 months confirmed "2 years"
+while contradicting "24 months". So for a duration the half-unit of the last written digit
+counts for at most a month; the relative rule (CAP) and an explicit "~" still widen as they
+do for every figure. Measured: on the r5 corpus nothing moves, and on the kept runs exactly
+that "~1 year" line becomes a contradiction. Duration-only, so Phase 2's precision rule for
+every other unit is untouched.
 """
 
 
 def duration_tolerance(fig: Figure) -> float:
-    """`figure_tolerance`, floored for an unbounded duration. See DURATION_TOLERANCE_FLOOR_SECONDS."""
+    """`figure_tolerance` with a duration's written precision capped and floored at a month.
+
+    See DURATION_TOLERANCE_FLOOR_SECONDS. Anything that is not a duration with a known written
+    unit gets `figure_tolerance` unchanged.
+    """
     tol = figure_tolerance(fig)
     unit = written_time_unit(fig)
-    if fig.unit_kind != DURATION or fig.bound is not None or unit is None:
+    if fig.unit_kind != DURATION or unit is None or fig.value == 0 or _is_exact_count(fig):
         return tol
-    return max(tol, min(1.0, DURATION_TOLERANCE_FLOOR_SECONDS / unit[1]))
+    month = min(1.0, DURATION_TOLERANCE_FLOOR_SECONDS / unit[1])
+    p = _precision(fig.raw)
+    rel = min(p[0] / p[1], CAP) if p and p[1] else CAP
+    tol = max(min(implied_tolerance(fig.raw), month), abs(fig.value) * rel)
+    if fig.bound == "approximate":
+        lo, hi = fig.span()
+        tol = max(tol, APPROX_WIDENING * max(abs(lo), abs(hi)))
+    if fig.bound is None:
+        tol = max(tol, month)
+    return tol
 
 
 def _is_exact_count(fig: Figure) -> bool:

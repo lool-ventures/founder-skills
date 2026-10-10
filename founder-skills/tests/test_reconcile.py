@@ -2015,16 +2015,75 @@ def test_a_sum_of_durations_in_different_units_is_refused() -> None:
     ("raw", "value", "expected"),
     [
         ("26 months", 26, 1.0),  # one written unit, not the half-month of its last digit
-        ("3 years", 3, 0.5),  # capped at a month, so a year-stated figure keeps its own precision
+        ("3 years", 3, 0.15),  # the half-year of "3" is capped at a month; the 5% rule binds
+        ("2 years", 2, 0.1),
+        ("~1 year", 1, 0.1),  # the "~" widens by 10%, no longer by a half-unit of six months
         ("45 days", 45, 1.0),  # one day
         ("~26 months", 26, 2.6),  # an approximate figure keeps its own (wider) widening
-        ("26+ months", 26, 0.5),  # a bounded figure is untouched
+        ("26+ months", 26, 0.5),  # a bounded figure gets no floor
     ],
 )
 def test_duration_tolerance_floor(raw: str, value: float, expected: float) -> None:
     from reconcile import duration_tolerance
 
     assert duration_tolerance(fig(raw, value, "duration", label="runway")) == pytest.approx(expected)
+
+
+def test_six_months_of_cash_contradicts_a_stated_year() -> None:
+    """The written half-unit of "~1 year" is six months; capped at one, the shortfall shows --
+    as it did for the same cash against a runway written in months."""
+    cash = fig("$300K+", 300_000, "money", label="major raise", id="cash")
+    burn = fig("$50K/month", 50_000, "money", label="monthly opex", id="burn", period="month")
+    exp = fig("~1 year", 1, "duration", label="runway with major raise", id="exp")
+    r = _cmp("ratio", ["cash", "burn"], "exp", {"cash": cash, "burn": burn, "exp": exp})
+    assert r.verdict == "contradiction", (r.rendered, r.reasons)
+    assert "~1 year" in r.rendered
+
+
+def test_the_same_fact_gets_one_verdict_whichever_unit_the_deck_wrote() -> None:
+    burn = fig("$50K/month", 50_000, "money", id="burn", period="month")
+    cash = fig("$950K", 950_000, "money", id="cash")  # 19 months
+    verdicts = {
+        raw: _cmp(
+            "ratio", ["cash", "burn"], "exp", {"cash": cash, "burn": burn, "exp": fig(raw, v, "duration", id="exp")}
+        ).verdict
+        for raw, v in (("2 years", 2), ("24 months", 24))
+    }
+    assert set(verdicts.values()) == {"contradiction"}, verdicts
+
+
+@pytest.mark.parametrize(("raw", "unit"), [("36mo", "month"), ("3yr", "year"), ("18-20mo", "month"), ("36m", None)])
+def test_a_unit_printed_against_its_digits_is_read(raw: str, unit: str | None) -> None:
+    from reconcile import time_unit
+
+    found = time_unit(raw)
+    assert (found[0] if found else None) == unit
+
+
+@pytest.mark.parametrize(
+    ("label", "unit"),
+    [
+        ("Payback period (year 1)", None),  # "year 1" names a year, not this figure's unit
+        ("a 6-month cohort", None),
+        ("runway (months, or years at scale)", None),  # two units: undecidable
+        ("runway in years (as of month 6)", "year"),
+        ("Runway months at 12 FTEs", "month"),
+        ("runway secured (months)", "month"),
+    ],
+)
+def test_a_label_declares_a_unit_only_when_it_names_exactly_one(label: str, unit: str | None) -> None:
+    from reconcile import written_time_unit
+
+    found = written_time_unit(fig("14", 14, "duration", label=label))
+    assert (found[0] if found else None) == unit
+
+
+def test_a_year_qualifier_in_the_label_does_not_manufacture_a_contradiction() -> None:
+    cash = fig("$560K", 560_000, "money", id="cash")
+    burn = fig("$40k/month", 40_000, "money", id="burn", period="month")
+    exp = fig("14", 14, "duration", label="Payback period (year 1)", id="exp")
+    r = _cmp("ratio", ["cash", "burn"], "exp", {"cash": cash, "burn": burn, "exp": exp})
+    assert r.verdict == "incomparable", r.rendered
 
 
 def test_a_whole_month_runway_tolerates_one_month() -> None:
