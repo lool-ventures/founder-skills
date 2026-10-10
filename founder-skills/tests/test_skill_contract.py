@@ -3675,6 +3675,7 @@ _REJECTING_PAYLOADS: list[tuple[str, str, list[str], str] | tuple[str, str, list
     # without it is valid; a `company` that is present and not an object is not.
     ("financial-model-review", "runway.py", [], '{"company":"x"}'),
     ("ic-sim", "score_dimensions.py", ["--run-id", "RID"], '{"items":[{"id":"bogus","status":"concern"}]}'),
+    ("ic-sim", "fund_profile.py", ["--run-id", "RID"], '{"fund_name":"x"}'),
     # A figure recorded at 1/1000 of what its own `raw` string says. This is THE ledger
     # failure mode: the arithmetic downstream is then flawless and wrong by a thousand.
     (

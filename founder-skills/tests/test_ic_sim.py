@@ -545,7 +545,7 @@ def test_fund_profile_invalid_check_size() -> None:
     profile["check_size_range"] = {"min": 10000000, "max": 500000, "currency": "USD"}
     payload = json.dumps(profile)
     rc, data, _ = run_script("fund_profile.py", ["--pretty"], stdin_data=payload)
-    assert rc == 0
+    assert rc == 1
     assert data is not None
     assert data["validation"]["status"] == "invalid"
     assert any("min" in e and "max" in e for e in data["validation"]["errors"])
@@ -557,7 +557,7 @@ def test_fund_profile_wrong_archetype_count() -> None:
     profile["archetypes"] = profile["archetypes"][:2]
     payload = json.dumps(profile)
     rc, data, _ = run_script("fund_profile.py", ["--pretty"], stdin_data=payload)
-    assert rc == 0
+    assert rc == 1
     assert data is not None
     assert data["validation"]["status"] == "invalid"
     assert any("3 archetypes" in e for e in data["validation"]["errors"])
@@ -569,7 +569,7 @@ def test_fund_profile_missing_sources_fund_specific() -> None:
     profile["sources"] = []
     payload = json.dumps(profile)
     rc, data, _ = run_script("fund_profile.py", ["--pretty"], stdin_data=payload)
-    assert rc == 0
+    assert rc == 1
     assert data is not None
     assert data["validation"]["status"] == "invalid"
     assert any("sources" in e for e in data["validation"]["errors"])
@@ -581,7 +581,7 @@ def test_fund_profile_empty_thesis() -> None:
     profile["thesis_areas"] = []
     payload = json.dumps(profile)
     rc, data, _ = run_script("fund_profile.py", ["--pretty"], stdin_data=payload)
-    assert rc == 0
+    assert rc == 1
     assert data is not None
     assert data["validation"]["status"] == "invalid"
     assert any("thesis_areas" in e for e in data["validation"]["errors"])
@@ -597,7 +597,7 @@ def test_fund_profile_invalid_role() -> None:
     ]
     payload = json.dumps(profile)
     rc, data, _ = run_script("fund_profile.py", ["--pretty"], stdin_data=payload)
-    assert rc == 0
+    assert rc == 1
     assert data is not None
     assert data["validation"]["status"] == "invalid"
     assert any("dreamer" in e for e in data["validation"]["errors"])
@@ -624,10 +624,27 @@ def test_fund_profile_specific_portfolio_still_required() -> None:
     del profile["portfolio"]
     payload = json.dumps(profile)
     rc, data, _ = run_script("fund_profile.py", ["--pretty"], stdin_data=payload)
-    assert rc == 0
+    assert rc == 1
     assert data is not None
     assert data["validation"]["status"] == "invalid"
     assert any("portfolio" in e for e in data["validation"]["errors"])
+
+
+def test_fund_profile_rejected_leaves_earlier_profile_in_place() -> None:
+    """A rejected profile exits 1, names the output on stderr and does not replace the earlier file."""
+    with tempfile.TemporaryDirectory() as td:
+        out = os.path.join(td, "fund_profile.json")
+        good = json.dumps(_VALID_GENERIC_PROFILE)
+        rc, _, stderr = run_script_raw("fund_profile.py", ["-o", out], stdin_data=good)
+        assert rc == 0, stderr
+        with open(out, "rb") as f:
+            before = f.read()
+        rc, stdout, stderr = run_script_raw("fund_profile.py", ["-o", out], stdin_data='{"fund_name": "x"}')
+        assert rc == 1
+        with open(out, "rb") as f:
+            assert f.read() == before
+        assert "left unchanged" in stderr
+        assert json.loads(stdout)["validation"]["status"] == "invalid"
 
 
 def test_fund_profile_output_flag() -> None:
@@ -2375,7 +2392,7 @@ def test_fund_profile_empty_mode() -> None:
     profile["mode"] = ""
     payload = json.dumps(profile)
     rc, data, _ = run_script("fund_profile.py", ["--pretty"], stdin_data=payload)
-    assert rc == 0
+    assert rc == 1
     assert data is not None
     assert data["validation"]["status"] == "invalid"
     assert any("mode" in e.lower() for e in data["validation"]["errors"])
@@ -2598,7 +2615,7 @@ def test_fund_profile_thesis_areas_string() -> None:
     profile["thesis_areas"] = "B2B SaaS"
     payload = json.dumps(profile)
     rc, data, _ = run_script("fund_profile.py", ["--pretty"], stdin_data=payload)
-    assert rc == 0
+    assert rc == 1
     assert data is not None
     assert data["validation"]["status"] == "invalid"
     assert any("thesis_areas" in e and "array" in e for e in data["validation"]["errors"])
@@ -2610,7 +2627,7 @@ def test_fund_profile_archetypes_string() -> None:
     profile["archetypes"] = "visionary, operator, analyst"
     payload = json.dumps(profile)
     rc, data, _ = run_script("fund_profile.py", ["--pretty"], stdin_data=payload)
-    assert rc == 0
+    assert rc == 1
     assert data is not None
     assert data["validation"]["status"] == "invalid"
     assert any("archetypes" in e and "array" in e for e in data["validation"]["errors"])
@@ -2622,7 +2639,7 @@ def test_fund_profile_portfolio_string() -> None:
     profile["portfolio"] = "FinLedger, DataPipe"
     payload = json.dumps(profile)
     rc, data, _ = run_script("fund_profile.py", ["--pretty"], stdin_data=payload)
-    assert rc == 0
+    assert rc == 1
     assert data is not None
     assert data["validation"]["status"] == "invalid"
     assert any("portfolio" in e and "array" in e for e in data["validation"]["errors"])
@@ -2766,7 +2783,7 @@ def test_fund_profile_check_size_not_dict() -> None:
     profile["check_size_range"] = "5M"
     payload = json.dumps(profile)
     rc, data, _ = run_script("fund_profile.py", ["--pretty"], stdin_data=payload)
-    assert rc == 0
+    assert rc == 1
     assert data is not None
     assert data["validation"]["status"] == "invalid"
     assert any("object" in e.lower() for e in data["validation"]["errors"])
@@ -2778,7 +2795,7 @@ def test_fund_profile_empty_stage_focus() -> None:
     profile["stage_focus"] = []
     payload = json.dumps(profile)
     rc, data, _ = run_script("fund_profile.py", ["--pretty"], stdin_data=payload)
-    assert rc == 0
+    assert rc == 1
     assert data is not None
     assert data["validation"]["status"] == "invalid"
     assert any("stage_focus" in e for e in data["validation"]["errors"])
@@ -2790,7 +2807,7 @@ def test_fund_profile_source_without_url_or_title() -> None:
     profile["sources"] = [{}]
     payload = json.dumps(profile)
     rc, data, _ = run_script("fund_profile.py", ["--pretty"], stdin_data=payload)
-    assert rc == 0
+    assert rc == 1
     assert data is not None
     assert data["validation"]["status"] == "invalid"
     assert any("url" in e.lower() or "title" in e.lower() for e in data["validation"]["errors"])

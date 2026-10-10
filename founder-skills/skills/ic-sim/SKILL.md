@@ -346,9 +346,9 @@ PRIOR_EOF
 
 **Fund-specific mode:** Use WebSearch to research fund thesis, portfolio, partner backgrounds, check size range, and stage preference. Map real partners to archetype roles. Include the researched `portfolio` array and a `sources` array (each source needs `url` or `title`).
 
-`fund_profile.py` exits 10 while the mode or fund question is unrecorded (ask, record, re-run), and refuses a `mode` that is not the recorded fund choice (`generic` / `fund_specific`).
+`fund_profile.py` exits 10 while the mode or fund question is unrecorded (ask, record, re-run), refuses a `mode` other than the recorded fund choice, and exits 1 on a rejected profile (fix that field on stderr).
 
-**Validation constraints:** `check_size_range` must be a dict (not a string), `stage_focus` must be a non-empty array, each source must have `url` or `title`.
+**Validation constraints:** `check_size_range` must be a dict, `stage_focus` a non-empty array, each source needs `url` or `title`.
 
 Generic-mode example (note: no `portfolio` key):
 

@@ -877,11 +877,16 @@ IC_SCRIPTS = SKILLS / "ic-sim" / "scripts"
 
 def ic_fund_profile_scenarios() -> dict[str, dict[str, Any]]:
     """fund_profile.py as Step 4 calls it, in a dir with no run ref: a generic profile, a fund-specific one,
-    and a profile it rejects (which it writes through `-o` and exits 0, as it always has)."""
+    and a profile it rejects (exit 1, the diagnostic on stdout, `-o` never written)."""
     generic = json.loads((FIXTURES / "ic-sim" / "fund_profile.json").read_text(encoding="utf-8"))
     for key in ("validation", "metadata"):
         generic.pop(key, None)
-    specific = {**generic, "mode": "fund_specific", "portfolio": [{"name": "Example Portfolio Co"}]}
+    specific = {
+        **generic,
+        "mode": "fund_specific",
+        "portfolio": [{"name": "Example Portfolio Co"}],
+        "sources": [{"title": "Example Fund site"}],
+    }
     out: dict[str, dict[str, Any]] = {}
     for name, body, to_file in (
         ("generic_stdout", generic, False),

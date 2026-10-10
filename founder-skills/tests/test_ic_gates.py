@@ -121,6 +121,7 @@ def _profile(mode: str = "generic") -> dict[str, Any]:
     body["mode"] = mode
     if mode == "fund_specific":
         body["portfolio"] = [{"name": "Example Portfolio Co"}]
+        body["sources"] = [{"title": "Example Fund site"}]
     return body
 
 

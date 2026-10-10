@@ -1045,10 +1045,10 @@
     "fund_specific": {
       "exit": 0,
       "files": {
-        "fund_profile.json": "47d1df12a05ff3a335be66fc62efbbd62bf6bf1af873981d99258a0e3ff64e67"
+        "fund_profile.json": "dcac22d743eece28b6eaac61e579a1f8ad115234d17cd25912ea45c19230d761"
       },
       "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout": "4e2db7e48a5bd4c3efe3e5939922809dac686c94cc082a85b7289b60becf141c"
+      "stdout": "34ab11dbd9540eedf221ef757f721150cca4daba82e8d77fda0a262e9188eecc"
     },
     "generic": {
       "exit": 0,
@@ -1065,12 +1065,10 @@
       "stdout": "a105229fbe41a357267fed467f155f218ebd2f183d6491cb1936f686cf7d56b6"
     },
     "rejected": {
-      "exit": 0,
-      "files": {
-        "fund_profile.json": "903eaa3263febc93597f8c0c64ef89d60d4632749061e885e0089c8565b005fd"
-      },
-      "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout": "2c7bb769e779276ca951acb0f9fa2f1ba620e2585955419630648498a832a70c"
+      "exit": 1,
+      "files": {},
+      "stderr": "e289948b336099537ec3aa80e2a827aa669d08eebcce18789328aaf0ff6471d6",
+      "stdout": "903eaa3263febc93597f8c0c64ef89d60d4632749061e885e0089c8565b005fd"
     }
   },
   "insert_coaching": {
