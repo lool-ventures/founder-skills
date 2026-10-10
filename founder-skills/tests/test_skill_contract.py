@@ -1557,7 +1557,9 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 114,890 -> 115,052 (+162 B): the What-If rule says a recomputation starts from the delivered
     # checklist.json items (not the reviewer's checklist_output.json), omits --reconciliation and prints
     # to stdout; Step 5's sentence now points there instead of restating it.
-    "deck-review": 115_265,
+    # 115,265 -> 115,318 (+53 B): Step 1 takes the company name from the request, or the title slide only
+    # when it is already readable (the copy Read reaches is made in Step 2).
+    "deck-review": 115_318,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
@@ -1874,7 +1876,8 @@ SKILL_MD_CEILING: dict[str, int] = {
     # paid for in the same step (the Step 8 parity sentence shortened).
     # -8 B, LOWERED, commit 13: a derived stage takes its option id and no value; two clauses of the same
     # paragraph shortened.
-    "cap-table": 156_814,
+    # 156,814 -> 156,859 (+45 B): Step 12 says report_disclosures also carries a flip's unmodelled Section 102 line.
+    "cap-table": 156_859,
 }
 
 

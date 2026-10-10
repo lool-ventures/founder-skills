@@ -216,7 +216,7 @@ Pass `RUN_ID` to every producer script via `--run-id`. Producer scripts inject i
 
 ### Step 1: Read or Create Founder Context
 
-Take the company's name from the deck's title slide first and add `--expect-company "<that name>"` to this read (omit it when the deck names none); a context stored for another company then asks which (Exit 10).
+Take the company's name from the founder's message, or from the deck's title slide when you can already read it, and add `--expect-company "<that name>"` to this read (omit it when neither names one); a context stored for another company then asks which (Exit 10).
 
 ```bash
 python3 "$SHARED_SCRIPTS/founder_context.py" read --artifacts-root "$ARTIFACTS_ROOT" --run-id "$RUN_ID" --skill deck-review --pretty
