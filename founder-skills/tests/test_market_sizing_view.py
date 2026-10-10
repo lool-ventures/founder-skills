@@ -892,7 +892,7 @@ def _claims_dir(tmp_path: Path) -> Path:
 
 def _text_nodes(html: str) -> str:
     """Founder-visible text only: script and style bodies are not prose, and attributes are not read."""
-    body = re.sub(r"<script.*?</script>", " ", html, flags=re.S)
+    body = re.sub(r"<script\b.*?</script\s*>", " ", html, flags=re.S | re.I)
     body = re.sub(r"<style.*?</style>", " ", body, flags=re.S)
     return re.sub(r"<[^>]+>", " ", body)
 

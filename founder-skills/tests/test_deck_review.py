@@ -6684,7 +6684,7 @@ def test_the_html_page_renders_the_arithmetic_verdict_and_never_the_bookkeeping(
     code, html, err = run_script_raw("visualize.py", ["--dir", str(work), "--ungated"])
     assert code == 0, err
     # Founder-visible text only: script bodies are data, not prose.
-    page = re.sub(r"<script.*?</script>", "", html, flags=re.S)
+    page = re.sub(r"<script\b.*?</script\s*>", "", html, flags=re.S | re.I)
     assert "Reconcile these figures" in page, "the scorer's fix never reached the page"
     for token in ("scored_by", "reviewer_status", "exceeds_stated_limit", "rounding_gap"):
         assert token not in page, token
