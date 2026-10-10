@@ -2422,12 +2422,13 @@ def test_an_implied_base_from_a_zero_share_is_refused() -> None:
 
 def _total(parts: list[tuple[str, Any]], stated_raw: str, stated: float, **spec: Any) -> Relation:
     by: dict[str, Figure] = {}
-    ids = []
+    operand_ids = []
     for n, (raw, value) in enumerate(parts):
-        ids.append(f"p{n}")
+        operand_ids.append(f"p{n}")
         by[f"p{n}"] = fig(raw, value, "money", label=f"segment {n}", id=f"p{n}")
     by["t"] = fig(stated_raw, stated, "money", label="total bookings", id="t")
-    return compute({"operator": "sum", "operands": ids, "expected_id": "t", "kind": "derived_ratio", **spec}, by)
+    spec = {"operator": "sum", "operands": operand_ids, "expected_id": "t", "kind": "derived_ratio", **spec}
+    return compute(spec, by)
 
 
 _PARTS = [("$1.0M", 1_000_000), ("$4.2M", 4_200_000), ("$4.1M", 4_100_000), ("$3.8M", 3_800_000)]
