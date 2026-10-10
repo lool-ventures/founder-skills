@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from html_text import visible_text  # noqa: E402
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DECK_REVIEW_DIR = os.path.join(os.path.dirname(SCRIPT_DIR), "skills", "deck-review", "scripts")
@@ -6684,7 +6685,7 @@ def test_the_html_page_renders_the_arithmetic_verdict_and_never_the_bookkeeping(
     code, html, err = run_script_raw("visualize.py", ["--dir", str(work), "--ungated"])
     assert code == 0, err
     # Founder-visible text only: script bodies are data, not prose.
-    page = re.sub(r"<script\b.*?</script\s*>", "", html, flags=re.S | re.I)
+    page = visible_text(html)
     assert "Reconcile these figures" in page, "the scorer's fix never reached the page"
     for token in ("scored_by", "reviewer_status", "exceeds_stated_limit", "rounding_gap"):
         assert token not in page, token

@@ -22,6 +22,8 @@ import tempfile
 import types
 from typing import Any
 
+from html_text import visible_text  # noqa: E402
+
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DECK_REVIEW_DIR = os.path.join(os.path.dirname(SCRIPT_DIR), "skills", "deck-review", "scripts")
 
@@ -1058,9 +1060,7 @@ def _visible_text(html: str) -> str:
     Script and style bodies are not founder-facing prose, so they are removed before the
     text is examined -- a token that appears only inside a <script> has not reached anyone.
     """
-    body = re.sub(r"<script\b.*?</script\s*>", " ", html, flags=re.S | re.I)
-    body = re.sub(r"<style.*?</style>", " ", body, flags=re.S)
-    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", body))
+    return re.sub(r"\s+", " ", visible_text(html))
 
 
 def test_html_carries_the_same_coverage_counts_as_markdown() -> None:

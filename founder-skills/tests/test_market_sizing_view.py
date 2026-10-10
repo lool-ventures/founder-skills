@@ -17,6 +17,7 @@ from typing import Any
 
 _TESTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(_TESTS))
+from html_text import visible_text  # noqa: E402
 from test_market_sizing import (  # noqa: E402
     _VALID_CHECKLIST,
     _VALID_METHODOLOGY,
@@ -892,9 +893,7 @@ def _claims_dir(tmp_path: Path) -> Path:
 
 def _text_nodes(html: str) -> str:
     """Founder-visible text only: script and style bodies are not prose, and attributes are not read."""
-    body = re.sub(r"<script\b.*?</script\s*>", " ", html, flags=re.S | re.I)
-    body = re.sub(r"<style.*?</style>", " ", body, flags=re.S)
-    return re.sub(r"<[^>]+>", " ", body)
+    return visible_text(html)
 
 
 _LITERAL = re.compile(r"[{\[]\s*['\"]")
