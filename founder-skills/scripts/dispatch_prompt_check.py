@@ -1213,10 +1213,10 @@ def _raw_quiet(text: str) -> str:
 
 def _raw_targets_by_line(lines: list[str], bodies: set[int]) -> tuple[list[list[str] | None], set[int]]:
     """`_raw_write_targets` per line, read per command, and the lines read as text. A quote left open,
-    or a backslash continuation, joins the lines up to the one that ends the command; that line holds the
-    joined command's targets, and the lines before it are read as text, as a heredoc body is. A text
-    line is None: read whole, and only where the write pattern finds a write in it. So is every line of
-    a quote never closed."""
+    or a backslash continuation, joins the lines up to the one that ends the command; every joined line
+    holds the joined command's targets, and the lines before the last are read as text, as a heredoc body
+    is. When those targets cannot be told, the joined lines are None: read whole, and only where the
+    write pattern finds a write in them. So is every line of a quote never closed."""
     out: list[list[str] | None] = [None for _ in lines]
     text = set(bodies)
     pending: list[int] = []
@@ -1228,6 +1228,10 @@ def _raw_targets_by_line(lines: list[str], bodies: set[int]) -> tuple[list[list[
         if _raw_tokens(joined) is None:
             continue  # a quote still open, or a line continued: the command goes on
         out[i] = _raw_write_targets(joined)
+        if out[i] is not None:
+            # The lines a quote or continuation joined are one command: they write where it writes.
+            for j in pending[:-1]:
+                out[j] = out[i]
         text.update(pending[:-1])
         pending = []
     return out, text
@@ -1238,10 +1242,12 @@ def _raw_write_targets(line: str) -> list[str] | None:
     that writes files (`tee`, `dd`, `sed -i`, ...; only the destination of `cp`, `install`, `rsync`). None
     when that cannot be told: the line does not tokenize, a quoted argument is a command line that writes
     (`bash -c "cp ..."`), or it runs inline code that opens a file (`open(..., 'w')`)."""
-    if re.search(r"open\(|write_text\(|write_bytes\(", line):
+    # A bare `open(path)` with one plain argument opens for reading; a method `.open(...)`, `open(*args)`, any other
+    # open, or a call that writes, is unknown.
+    if re.search(r"open\(|write_text\(|write_bytes\(", re.sub(r"(?<![\w.])open\(\s*[^,()*]*\)", "", line)):
         return None
     tokens = _raw_tokens(line)
-    if tokens is None or any(" " in t and _RAW_WRITE_RE.search(_raw_quiet(t)) for t in tokens):
+    if tokens is None or any(re.search(r"\s", t) and _RAW_WRITE_RE.search(_raw_quiet(t)) for t in tokens):
         return None  # a quoted argument that is itself a command line (`bash -c "cp ..."`)
     out: list[str] = []
     words: list[str] = []

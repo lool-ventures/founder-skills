@@ -471,6 +471,48 @@ def test_a_trusted_generator_run_saved_to_tmp_is_no_write() -> None:
     assert DPC._distrusts(block) == set()
 
 
+# A shape a paid lane sent: after a `cd` and a loop, a producer saved to a staging file and, on the same line,
+# inline code over several lines that only reads (`open(path)`). The joined lines are one command, and it
+# writes only to the staging file, so nothing wrote into the plugin.
+_PRODUCER_THEN_READER = (
+    f"cd /home/claude/work; A=$PWD/a; SS=$P/scripts; SC=$P/{MS_SCRIPTS}\n"
+    "for s in a b; do echo $s; done\n"
+    'python3 $SS/merge_json.py "$A/x.json" | python3 $SC/market_sizing.py --stdin -o "$A/sizing.json" '
+    '> {target}; echo "sizing $?"; python3 -c \'\n'
+    'import json;d=json.load(open("\'"$A"\'/sizing.json"))\n'
+    "{inline}print(d)'; grep -m5 warn /tmp/ms-acme.staging.X1/out.txt"
+)
+
+
+def _producer_then_reader(target: str = "/tmp/ms-acme.staging.X1/out.txt", inline: str = "") -> str:
+    return f"P={_SYNCED}\n" + _PRODUCER_THEN_READER.format(target=target, inline=inline)
+
+
+def test_a_producer_saved_elsewhere_beside_inline_code_that_only_reads_is_no_write() -> None:
+    block = _producer_then_reader()
+    assert DPC._parse_block(block) is None  # the raw fallback is what decides this block
+    assert DPC._distrusts(block) == set()
+
+
+@pytest.mark.parametrize(
+    "block",
+    [
+        _producer_then_reader(target="$SC/_params.py"),
+        _producer_then_reader(inline="open('$SC/x.py','w')\n"),
+        _producer_then_reader(inline="m='w'; open(\"$A/y.json\", m)\n"),
+        _producer_then_reader(inline="import pathlib; pathlib.Path('$SC/x.py').write_text('x')\n"),
+        _producer_then_reader(inline="import pathlib; pathlib.Path('$SC/x.py').open('w').write('x')\n"),
+        _producer_then_reader(inline="a=('$SC/x.py','w'); open(*a).write('x')\n"),
+        # A quoted command split by tabs rather than spaces is still a command line that writes.
+        f"P={_SYNCED}\ncd /home/claude/work; SC=$P/{MS_SCRIPTS}\nfor s in a; do echo $s; done\n"
+        "python3 $SC/market_sizing.py --stdin > /tmp/o.txt; bash -c '\ncp\t/tmp/o\t$SC/x.py\n'",
+    ],
+)
+def test_the_same_shape_that_writes_or_may_write_into_the_plugin_still_distrusts(block: str) -> None:
+    assert DPC._parse_block(block) is None, block
+    assert DPC._distrusts(block) == set(DPC.GENERATORS), block
+
+
 def _raw_writes_as_before(command: str) -> bool:
     """The raw check before a generator's own run was set aside."""
     for line in command.splitlines():
