@@ -33,6 +33,34 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _emit import add_output_args, emit  # noqa: E402
 from _rule_pack import RULE_PACK_VERSION  # noqa: E402
 
+SECTION_102_NOT_MODELED = "W_SECTION_102_NOT_MODELED"
+
+
+def section_102_not_modeled(inputs: dict[str, Any], instruments: dict[str, Any] | None) -> dict[str, Any] | None:
+    """The disclosure a flip carries when options are issued and no grant says which tax route it took.
+
+    Reads the documents the §102 grants question reads (`_gates._pred_ct_flip_grants`: `inputs.option_pool.issued`
+    and `instruments.option_grants`), so the line is stated exactly when that question was owed, whatever was
+    answered: the per-grant data either reached the instruments or it did not. Not `cap_state`, whose issued count
+    is the same figure cast to an integer. Any plan type: an ISO, NSO or §3(i) pool in a company that flips has
+    grants whose tax route is as unknown as a §102 pool's. A Delaware-only structure has no Israeli grants to model.
+    """
+    jurisdiction = inputs.get("jurisdiction") if isinstance(inputs, dict) else None
+    if isinstance(jurisdiction, dict) and jurisdiction.get("structure") == "delaware":
+        return None
+    pool = inputs.get("option_pool") if isinstance(inputs, dict) else None
+    issued = pool.get("issued") if isinstance(pool, dict) else None
+    if not isinstance(issued, (int, float)) or issued <= 0:
+        return None
+    grants = (instruments or {}).get("option_grants")
+    if isinstance(grants, list) and any(isinstance(g, dict) for g in grants):
+        return None
+    return {
+        "code": SECTION_102_NOT_MODELED,
+        "severity": "medium",
+        "message": "Section 102 tax exposure was not modelled: the tax route of each option grant was not provided.",
+    }
+
 
 def flip_share_for_share(
     cap_state: dict[str, Any],
