@@ -1533,10 +1533,13 @@ def _months_of_runway(cash: float, segments: list[tuple[int, int | None, float]]
 def _runway(r: Relation, real: list[Figure], rel_spec: dict[str, Any], alias: dict[str, str]) -> str | None:
     """Months of runway from the named cash and the deck's burn, or the reason it cannot be had.
 
-    CASH IS ONLY WHAT THE DECK NAMES, and the line says so. A company holding cash the deck
-    does not mention has a LONGER runway than this computes, which is why the comparison is
-    one-sided in the founder's favour (see the comparison block): only a computed runway
-    shorter than the stated one is ever a disagreement.
+    CASH IS ONLY WHAT THE DECK NAMES, and the line says so: a company holding cash the deck does
+    not mention has a longer runway than this computes. The comparison is nonetheless TWO-SIDED,
+    exactly like a flat `ratio`. A one-sided rule (only a shorter computed runway disagrees) was
+    built and measured: the corpus's expert-graded real runway findings run in BOTH directions,
+    and two of them -- a deck whose own cash and burn give several times the runway it states --
+    became confirmations, so the stated caveat covers the shorter direction and nothing is
+    dropped in the longer one.
 
     A burn PLAN is read as given: `schedule` lists each burn figure with the months it covers
     ("YYYY-MM", `to` inclusive, only the last segment open), so a deck that budgets one rate
@@ -1634,7 +1637,7 @@ def _runway(r: Relation, real: list[Figure], rel_spec: dict[str, Any], alias: di
         r.head = f"{cash_text} against a burn of {plan}, starting {_month_label(start)}"
     else:
         r.head = f"{cash_text} ÷ {burn_figs[0].raw}"
-    r.unit_word, r.note = " months", ", counting only the cash named"
+    r.unit_word, r.note = " months", ", counting only the cash the deck names"
     r.rendered = (
         f"{r.head} = {_span_text(*(sorted((low, high)) if low != high else (point, point)))}{r.unit_word}{r.note}"
     )
@@ -2225,7 +2228,7 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
             return r
         if relation == "at_most" and r.operator == "runway":
             r.verdict = "incomparable"
-            r.reasons.append("a runway is tested only for falling short of the stated one, never as a ceiling")
+            r.reasons.append("a runway is tested against the stated runway, never as a ceiling")
             return r
         if relation == "at_most" and exp.bound == "at_least":
             # INCOHERENT, so it suppresses. The relation says the figure is a ceiling and
@@ -2237,13 +2240,9 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
                 "what the deck asserts about it is undecided and nothing is established"
             )
             return r
-        if r.operator == "runway":
-            # ONE-SIDED IN THE FOUNDER'S FAVOUR. Only the cash the deck names is counted, and
-            # any cash it does not name can only LENGTHEN the runway -- so a computed runway
-            # longer than the stated one is the deck being conservative, and a shorter one is
-            # the only disagreement. Against an "up to" stated runway nothing can disagree.
-            disjoint = exp.bound != "at_most" and c_hi < e_lo - tol
-        elif relation == "at_most":
+        # `runway` takes the same test as every other operator, two-sided unless the stated
+        # figure is bounded -- see `_runway` for why it is not one-sided.
+        if relation == "at_most":
             disjoint = c_lo > e_hi + tol
         # A bounded figure gets a ONE-SIDED test. "$200B+" is satisfied by anything at or
         # above it, so a computed $212.3B confirms it rather than contradicting it.
@@ -2676,19 +2675,26 @@ def supersede(relations: list[Relation]) -> None:
 
     Narrow on purpose, because a mis-built runway (wrong cash, wrong segment) that CONFIRMS would
     otherwise suppress a real flat contradiction:
+      - only a flat `ratio` is replaced -- a sum or anything else that happens to start with the
+        cash is another claim;
       - the replacement is a non-dropped `runway` whose comparison actually ran (confirmation,
         contradiction or exceeds_stated_limit -- never incomparable, convention or withdrawn);
       - it is compared against the same `expected_id`;
-      - the flat relation's numerator (`operands[0]`, the cash by the numerator-first rule) is
-        among the runway's operands. Not a full operand subset: the flat division's burn is a
-        yearly figure while the plan's burns are its segments, so a subset test would never fire.
+      - BOTH of the ratio's figures are among the runway's operands: the cash it divides and the
+        burn it divides by. A runway over the same cash but a different burn (one cost line
+        scheduled as the whole plan) does not retire a division by the deck's real burn. When the
+        flat division uses a yearly burn the plan never lists, nothing is superseded and both
+        lines stand -- the safe direction.
+    RESIDUAL, named rather than hidden: a runway over exactly those figures, with a schedule that
+    is wrong and happens to confirm, still retires the flat line. The runway is two-sided like the
+    ratio (see `_runway`), so a wrong schedule that disagrees shows on its own.
     `inverse_change` replaces nothing here: no flat relation it would supersede has been named.
     """
     runways = [r for r in relations if r.operator == "runway" and not r.dropped and r.verdict in _COMPARED_VERDICTS]
     for rel in relations:
-        if rel.dropped or rel.operator in ("runway", "inverse_change") or not rel.expected_id or not rel.operands:
+        if rel.dropped or rel.operator != "ratio" or not rel.expected_id or len(rel.operands) != 2:
             continue
-        if any(rw.expected_id == rel.expected_id and rel.operands[0] in rw.operands for rw in runways):
+        if any(rw.expected_id == rel.expected_id and set(rel.operands) <= set(rw.operands) for rw in runways):
             rel.verdict = "superseded"
             rel.reasons.append("replaced by a runway computed over the deck's own burn plan")
 

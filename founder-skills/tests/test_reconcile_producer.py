@@ -1068,11 +1068,12 @@ _PLAN_LEDGER = {
         _fig("burn_next", 2_160_000, "$2.16M", "money", "burn next year", "burn next year $2.16M", "year"),
         _fig("runway", 25, "25 months", "duration", "runway", "runway of 25 months"),
         _fig("runway_goal", 30, "30 months", "duration", "runway target", "runway target of 30 months"),
+        _fig("burn_ads", 163_000, "$163K/month", "money", "ads spend", "ads spend $163K/month", "month"),
     ]
 }
 _PLAN_TRANSCRIPT = (
     "Slide 9: cash in bank of $4.2M after a seed raised of $4.8M; burn this year $150K/month, "
-    "burn next year $2.16M; runway of 25 months; runway target of 30 months."
+    "burn next year $2.16M; runway of 25 months; runway target of 30 months; ads spend $163K/month."
 )
 _PLAN_SCHEDULE = [{"id": "burn_now", "from": "2026-04", "to": "2027-03"}, {"id": "burn_next", "from": "2027-04"}]
 
@@ -1136,3 +1137,46 @@ def test_a_runway_that_did_not_compare_supersedes_nothing(broken: dict) -> None:
     out = _plan_run([_flat(), _plan_runway(**broken)])
     assert [r["verdict"] for r in out["relations"]] == ["contradiction"]
     assert "superseded" not in out["suppressed"]
+
+
+def test_a_sum_that_starts_with_the_cash_is_not_superseded() -> None:
+    """Only a flat ratio is the runway's duplicate; a sum is another claim."""
+    total = {"expected_id": "runway", "operands": ["cash", "burn_next"], "kind": "derived_ratio"}
+    total["operator"] = "sum"
+    out = _plan_run([total, _plan_runway()])
+    assert out["suppressed"].get("superseded") is None, out["suppressed"]
+
+
+def test_a_runway_over_another_burn_does_not_retire_the_flat_division() -> None:
+    """One cost line scheduled as the whole plan confirms the stated runway by accident; the
+    division by the deck's real burn must still be shown."""
+    misbuilt = {
+        "kind": "derived_ratio",
+        "operator": "runway",
+        "operands": ["cash", "burn_ads"],
+        "expected_id": "runway",
+    }
+    out = _plan_run([_flat(), misbuilt])
+    assert [r["verdict"] for r in out["relations"]] == ["contradiction"], out["relations"]
+    assert "superseded" not in out["suppressed"]
+
+
+def test_a_longer_runway_keeps_its_finding_when_both_operators_are_proposed() -> None:
+    """The measured regression: a ratio and a runway over the same figures, against a stated
+    runway the figures exceed several times over. The runway's own contradiction must show, and
+    the review pass must still be owed."""
+    ledger = {
+        "figures": [
+            _fig("pool", 1_350_000, "$1.35M", "money", "pre-seed pool", "pre-seed pool of $1.35M"),
+            _fig("burn", 17_300, "$17.3K", "money", "monthly burn", "monthly burn of $17.3K", "month"),
+            _fig("secured", 11, "10-12", "duration", "runway secured (months)", "runway secured 10-12 months"),
+        ]
+    }
+    transcript = "Slide 9: pre-seed pool of $1.35M; monthly burn of $17.3K; runway secured 10-12 months."
+    flat = {"kind": "derived_ratio", "operator": "ratio", "operands": ["pool", "burn"], "expected_id": "secured"}
+    runway = {**flat, "operator": "runway"}
+    rc, out, err = _run([flat, runway], ledger=ledger, transcript=transcript, slides=[9])
+    assert rc == 0, err
+    assert [(r["operator"], r["verdict"]) for r in out["relations"]] == [("runway", "contradiction")]
+    assert out["suppressed"].get("superseded") == 1
+    assert out["interpretation"]["status"] == "not_run"

@@ -167,7 +167,7 @@
             ]
           },
           "operator": {
-            "description": "ratio, product, sum, increase_by, difference, runway (named cash against the burn plan, compared one-sided), inverse_change (the change implied in a reciprocal measure) or implied_base (the whole a stated share implies; a reading only, never compared).",
+            "description": "ratio, product, sum, increase_by, difference, runway (the cash the deck names against its burn plan), inverse_change (the change implied in a reciprocal measure) or implied_base (the whole a stated share implies; a reading only, never compared).",
             "type": "string"
           },
           "operands": {

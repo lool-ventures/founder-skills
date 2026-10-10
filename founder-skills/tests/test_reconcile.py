@@ -2067,22 +2067,52 @@ def test_a_piecewise_runway_reads_the_burn_plan() -> None:
     assert r.computed_unit == "duration:month"
     assert "$4.2M" in r.rendered and "$150K/month (Apr 2026–Mar 2027)" in r.rendered
     assert "$2.16M a year (from Apr 2027)" in r.rendered and "starting Apr 2026" in r.rendered
-    assert "counting only the cash named" in r.rendered
+    assert "counting only the cash the deck names" in r.rendered
 
 
 def test_a_runway_shorter_than_stated_contradicts_and_a_matching_one_confirms() -> None:
     r = _plan("32 months", 32)
     assert r.verdict == "contradiction", r.reasons
-    assert "counting only the cash named" in r.rendered and "the deck states 32 months" in r.rendered
+    assert "counting only the cash the deck names" in r.rendered and "the deck states 32 months" in r.rendered
     assert _plan("25 months", 25).verdict == "confirmation"
 
 
-def test_a_runway_longer_than_stated_is_never_a_disagreement() -> None:
-    """Cash the deck does not name only lengthens the runway; a longer computed one is the
-    deck being conservative."""
+def test_a_runway_longer_than_stated_is_a_disagreement_too() -> None:
+    """Two-sided, like a flat ratio. A deck whose own cash and burn give several times the
+    runway it states is a finding an expert graded real twice on the corpus; a one-sided rule
+    turned both into confirmations."""
     r = _plan("17 months", 17)
-    assert r.verdict == "confirmation", r.reasons
-    assert "consistent with the stated 17 months" in r.rendered
+    assert r.verdict == "contradiction", r.reasons
+    assert "the deck states 17 months" in r.rendered
+
+
+def test_a_runway_several_times_the_stated_one_fires() -> None:
+    """The corpus shape, invented figures: cash over a small monthly burn, against a stated
+    range whose unit lives only in the label."""
+    cash = fig("$1.35M", 1_350_000, "money", label="pre-seed pool", id="cash")
+    burn = fig("$17.3K", 17_300, "money", label="monthly burn", id="burn", period="month")
+    exp = fig("10-12", 11, "duration", label="runway secured (months)", id="exp")
+    by = {"cash": cash, "burn": burn, "exp": exp}
+    for operator in ("ratio", "runway"):
+        r = _cmp(operator, ["cash", "burn"], "exp", by)
+        assert r.verdict == "contradiction", (operator, r.rendered, r.reasons)
+        assert r.computed == pytest.approx(1_350_000 / 17_300) and " months" in r.rendered
+
+
+@pytest.mark.parametrize("stated", [18, 23, 25, 26, 27, 28, 30, 36])
+@pytest.mark.parametrize(
+    ("burn_raw", "burn", "period"), [("$150K/month", 150_000, "month"), ("$1.92M", 1_920_000, "year")]
+)
+def test_a_flat_ratio_and_a_single_burn_runway_agree(stated: int, burn_raw: str, burn: int, period: str) -> None:
+    """Whichever operator the proposer picks must not decide the founder's finding."""
+    by = {
+        "cash": fig("$4.2M", 4_200_000, "money", id="cash"),
+        "burn": fig(burn_raw, burn, "money", id="burn", period=period),
+        "exp": fig(f"{stated} months", stated, "duration", label="runway", id="exp"),
+    }
+    flat = _cmp("ratio", ["cash", "burn"], "exp", by)
+    runway = _cmp("runway", ["cash", "burn"], "exp", by)
+    assert flat.verdict == runway.verdict, (flat.rendered, runway.rendered)
 
 
 def test_a_runway_against_a_stated_ceiling_is_refused() -> None:
