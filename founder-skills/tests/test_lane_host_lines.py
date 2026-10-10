@@ -50,6 +50,14 @@ DR = _module("test_e2e_deck_review")  # the SDK is imported only inside its test
 LANES: list[tuple[str, str, str, Any, Any, Any]] = [
     (MS.LANE, MS.SKILL, "foobar-fleet", MS.HOST_ANSWERS, MS.HOST_VALUES, MS.HOST_NOTES),
     (FMR.LANE, FMR.SKILL, "foobar-systems", FMR.HOST_ANSWERS, FMR.HOST_VALUES, FMR.HOST_NOTES),
+    (
+        FMR.UNCLASSIFIED_LANE,
+        FMR.SKILL,
+        "harbourlight-rights",
+        FMR.HOST_ANSWERS,
+        FMR.UNCLASSIFIED_HOST_VALUES,
+        FMR.HOST_NOTES,
+    ),
     (CT.SMOKE_LANE, CT.SKILL, "foobar", CT.SMOKE_ANSWERS, (), CT.SMOKE_NOTES),
     (CT.POOL_LANE, CT.SKILL, "barbaz", CT.POOL_ANSWERS, (), ()),
     ("dr", "deck-review", "acmecorp", (), DR.host_values(DR.SMOKE_COMPANY), ()),
@@ -61,6 +69,7 @@ LANES: list[tuple[str, str, str, Any, Any, Any]] = [
 PROMPTS: dict[str, str] = {
     MS.LANE: MS.PROMPT,
     FMR.LANE: FMR.PROMPT_TEMPLATE.format(model_path="/workspace/model.csv"),
+    FMR.UNCLASSIFIED_LANE: FMR.UNCLASSIFIED_PROMPT_TEMPLATE.format(model_path="/workspace/model.csv"),
     CT.SMOKE_LANE: CT.SMOKE_PROMPT,
     CT.POOL_LANE: CT.POOL_PROMPT,
     "dr": DR.lane_prompt("/workspace/deck.txt", DR.SMOKE_COMPANY, "acmecorp"),

@@ -1,0 +1,19 @@
+Harbourlight Rights — Seed Financial Model (synthetic; not a real company)
+Section,Line item,Jan-2026,Feb-2026,Mar-2026,Apr-2026,May-2026,Jun-2026
+Revenue,Royalty income from licensees,21000,22500,24000,26500,28000,30500
+Revenue,Upfront licence fees,6000,0,9000,0,7500,0
+Revenue,Total revenue,27000,22500,33000,26500,35500,30500
+Revenue,Licences in force,9,10,10,11,12,12
+Costs,Rights and clearance costs,6200,5600,7400,6300,7900,7000
+Costs,Staff payroll,38000,38000,42000,42000,42000,46000
+Costs,Legal and registration,5200,5200,5600,5600,6000,6000
+Costs,G&A,7000,7000,7500,7500,8000,8000
+Costs,Total operating costs,56400,55800,62500,61400,63900,67000
+Cash,Gross margin percent,0.77,0.75,0.78,0.76,0.78,0.77
+Cash,Monthly net burn,29400,33300,29500,34900,28400,36500
+Cash,Cash balance end of month,970600,937300,907800,872900,844500,808000
+Assumptions,Starting cash,1000000,,,,,
+Assumptions,Team size at month end,6,6,6,7,8,8
+Assumptions,Stage,seed,,,,,
+Assumptions,Geography,Israel,,,,,
+Assumptions,Currency,USD,,,,,

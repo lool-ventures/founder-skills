@@ -570,6 +570,13 @@ run with fifteen dispatches recorded zero boundaries. Truncation is head-preserv
      extra lane reds its job; `branch_gate_check.py` accepts any green dispatched run at the commit, so
      a red extra run does not block the tag once the plain gate run is green. Run them when the numeric
      chain or its proposer prompt changed.
+   - **The opt-in financial-model-review unclassified-revenue-model lane** runs only on request:
+     `gh workflow run skill-quality.yml --ref release/vX.Y.Z -f extra_lanes=true` (about $5-15), a
+     separate dispatch from the gate's, with the same posture as the deck lanes above (the env
+     `RUN_PAID_E2E_FMR_UNCLASSIFIED` is set from the input, never an `if:`; the lane is named in
+     `ALLOWED_SKIPS`). It is a measurement: a red on its first assertion reports what the run wrote for
+     `company.revenue_model_type` / `unclassified_reason`, not a regression. Locally (billed):
+     `RUN_PAID_E2E=1 RUN_PAID_E2E_FMR_UNCLASSIFIED=1 uv run pytest founder-skills/tests/test_e2e_financial_model_review.py -k unclassified -v -m e2e --tb=short -s --basetemp /tmp/fs-e2e` (`--basetemp` OUTSIDE `~/.claude`).
 6. **Green: fast-forward `main`, then tag.** Green means the paid gate AND every PR check
    (`gh pr checks release/vX.Y.Z`): the push to `main` goes around branch protection
    (`enforce_admins` is false), so nothing else enforces lint, typecheck, tests, DCO or the review.

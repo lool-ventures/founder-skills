@@ -63,6 +63,14 @@ on:
         required: false
         type: boolean
         default: false
+      # The opt-in measurement lanes that are not deck-review's (today: financial-model-review's
+      # unclassified-revenue-model lane). Same posture as extra_deck_lanes: env-only, never an `if:`,
+      # and a separate dispatch from the gate's.
+      extra_lanes:
+        description: "Also run the opt-in measurement lanes (financial-model-review unclassified revenue model). Adds ~$5-15."
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   contract-tests:
@@ -205,6 +213,8 @@ jobs:
           # "false" otherwise, which neither does, so the lanes skip as named in ALLOWED_SKIPS below.
           RUN_PAID_E2E_CONTRADICTION: ${{ inputs.extra_deck_lanes }}
           RUN_PAID_E2E_NUMERIC: ${{ inputs.extra_deck_lanes }}
+          # "true" on a dispatch with `-f extra_lanes=true`; "false" otherwise, so the lane skips as named below.
+          RUN_PAID_E2E_FMR_UNCLASSIFIED: ${{ inputs.extra_lanes }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY_CI }}
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN_CI }}
       # `if: always()`, deliberately not `failure()`. A run that lands on a self-gated
@@ -273,6 +283,10 @@ jobs:
               # cap-table's pool-reading lane: its own RUN_PAID_E2E_CAP_TABLE_POOL opt-in. The only run that
               # reaches the unconfirmed pool-reading disclosure (the smoke lane's prompt names no pool).
               "test_cap_table_pool_reading_lane",
+              # financial-model-review's unclassified-revenue-model lane: its own RUN_PAID_E2E_FMR_UNCLASSIFIED
+              # opt-in. It measures whether a real run writes `unclassified` with a reason for a licensing
+              # model; runs when a dispatch passes `-f extra_lanes=true`.
+              "test_financial_model_review_unclassified_lane",
           }
           suite = ET.parse("e2e-results.xml").getroot()
           cases = list(suite.iter("testcase"))
