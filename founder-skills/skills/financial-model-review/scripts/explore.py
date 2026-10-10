@@ -33,6 +33,7 @@ from typing import Any, TypeGuard
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _evidence_multiple  # noqa: E402
+import _growth_rate  # noqa: E402
 from unit_economics import (  # noqa: E402, I001
     CAC_PAYBACK_BY_ACV,
     STAGE_BENCHMARKS,
@@ -475,6 +476,9 @@ def _build_data_payload(
         "checklist": checklist_summary,
         "commentary": commentary,
         "_stub_reasons": stub_reasons,
+        # Server-rendered (underscore keys are not embedded): the growth rate was computed from the monthly
+        # revenue series, not stated. The sentence report.md carries.
+        "_growth_note": _growth_rate.disclosure(inputs),
     }
 
 
@@ -681,6 +685,7 @@ def _generate_html(data: dict[str, Any]) -> str:
         disabled_names=disabled_names,
         chartjs_source=_chartjs_source(),
         checklist_html=checklist_html,
+        growth_note=str(data.get("_growth_note") or ""),
     )
 
 
@@ -698,6 +703,7 @@ def _build_html_string(
     disabled_names: list[str],
     chartjs_source: str,
     checklist_html: str,
+    growth_note: str = "",
 ) -> str:
     """Build the full HTML document string."""
     scripts_dir = os.path.dirname(os.path.abspath(__file__))
@@ -841,6 +847,14 @@ def _build_html_string(
     css = _theme.brand_css() + "\n" + "\n".join(css_lines)
 
     hl_div = "<div class='headline'>" + headline + "</div>" if headline else ""
+    # A neutral note, never a warning: the growth rate was computed from the monthly revenue series.
+    growth_div = (
+        "<div class='growth-note' style='background:var(--lool-paper-2);color:var(--lool-ink);"
+        "border-left:3px solid var(--lool-azure);padding:8px 12px;font-size:0.85rem;margin:8px 0'>"
+        f"{_esc(growth_note)}</div>"
+        if growth_note
+        else ""
+    )
     if talking_points:
         hl_div += (
             "<div class='talking-points'><div class='tp-label'>Talking points for investor "
@@ -881,7 +895,7 @@ def _build_html_string(
 <div class="header">
   <h1>{company_name}</h1>
   <div class="meta">{stage} &middot; {sector}</div>
-  {hl_div}
+  {hl_div}{growth_div}
 </div>
 
 {checklist_html}

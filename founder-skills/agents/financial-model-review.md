@@ -77,6 +77,9 @@ company name sourcing, payroll aggregation, collections vs revenue).
 exceeds total MRR, it is probably aggregate revenue, not per-customer ARPU — divide
 by customer count to get the correct value. This is the most common extraction error.
 
+**Growth rate:** do not hand-compute a compound rate from `revenue.monthly[]`. When the series
+reaches the MRR date, Step 3.5 computes `growth_rate_monthly` from it; write your best stated figure.
+
 **Periodicity conversion:** if the model is quarterly or annual, all flow metrics
 (burn, revenue, expenses) must be divided by 3 or 12 respectively. Do NOT convert
 stock metrics (cash balance, headcount, customer count, ARR).

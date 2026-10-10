@@ -2151,7 +2151,10 @@ REFERENCES_CEILING: dict[str, int] = {
     # +205 B (79_249 -> 79_454): METRIC_35 had pass/warn/fail only for a model that uses benchmarks, so
     # an assessor set a model citing none aside as not_applicable. It now grades that case warn.
     # +326 B on 2026-10-08 (commit 13): report.json's ledger-only `disclosures` key is documented.
-    "financial-model-review": 79_780,
+    # 79_780 -> 80_245: Step 3.5 now computes the monthly growth rate from the monthly series;
+    # extraction-pitfalls.md #8 and schema-inputs.md's growth row say so (and what it never replaces), so
+    # the extraction stops hand-computing a figure the hand arithmetic got wrong.
+    "financial-model-review": 80_245,
     # ic-sim +1446 B: evaluation-criteria.md omitted `to_confirm` from the status table AND from the
     # scoring formula, which excluded only not_applicable. Following it changed the conviction
     # score, since score_dimensions.py excludes both. The >6 coverage cap was undocumented too.

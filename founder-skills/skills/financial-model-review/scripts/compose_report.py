@@ -32,6 +32,7 @@ from typing import Any, TypeGuard
 # flagged figure is caveated on every founder-facing surface, not just the one compose renders.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _evidence_multiple  # noqa: E402
+import _growth_rate  # noqa: E402
 
 # Sentinel for corrupt (unparseable) artifact files
 _CORRUPT: dict[str, Any] = {"__corrupt__": True}
@@ -1248,6 +1249,11 @@ def _section_executive_summary(
         if data_confidence != "exact":
             dq_label = "Mixed" if data_confidence == "mixed" else "Estimated"
             lines.append(f"**Data Quality:** {dq_label} — review based on {model_format}, not audited financials  ")
+        # The growth rate the burn multiple and the runway projection used was computed, not stated: say so in
+        # the report itself, which a founder who answered the values check up front never saw a page for.
+        growth_note = _growth_rate.disclosure(inputs)
+        if growth_note is not None:
+            lines.append(f"**Monthly Growth:** {growth_note}  ")
 
     quality = _quality_line(checklist, data_confidence)
     if quality is not None:
