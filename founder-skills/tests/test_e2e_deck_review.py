@@ -173,7 +173,8 @@ def _summarize_sdk_message(msg: object) -> str:
 
 PAID_OPT_IN_ENV = "RUN_PAID_E2E"
 
-# The two decks this file drives, by the company name each prompt states.
+# The first two decks this file drives, by the company name each prompt states (the numeric-operators
+# deck's is beside its lane, below).
 SMOKE_COMPANY = "Acmecorp"
 CONTRADICTION_COMPANY = "Foobar Systems"
 
@@ -834,8 +835,8 @@ def _check_contradictions(
             if nc.get("status") != wanted_nc:
                 failures.append(f"numbers_consistent is {nc.get('status')!r}, expected {wanted_nc!r}")
 
-    # THE COACH SEES WHAT THE ARITHMETIC FOUND. This is the only lane where `numeric_findings`
-    # can be non-empty, so it is the only live test of the payload the coach reads it from.
+    # THE COACH SEES WHAT THE ARITHMETIC FOUND. This lane and the numeric-operators lane are the only ones
+    # where `numeric_findings` can be non-empty, so they are the live tests of the payload the coach reads.
     findings_floor = assertions.get("numeric_findings_min")
     if findings_floor is not None:
         findings = (report.get("coaching_payload") or {}).get("numeric_findings") or []
@@ -884,4 +885,278 @@ def test_deck_review_contradiction_lane(tmp_path: Path) -> None:
         slug="foobar",
         extra_checks=_check_contradictions,
         lane="dr-contra",
+    )
+
+
+NUMERIC_DECK = FIXTURES / "decks" / "synthetic-numeric-operators-deck.txt"
+NUMERIC_GOLDEN = FIXTURES / "golden" / "deck-review" / "synthetic-numeric-operators-deck.expected.json"
+NUMERIC_COMPANY = "Kestrelline"
+
+# The numeric-operators lane bills separately too, for the contradiction lane's reason: it answers a
+# question a release does not ask -- does the MODEL propose `runway` over a burn plan, `inverse_change`
+# and `implied_base` from a real deck -- and it is the only live test of that. Its own opt-in.
+NUMERIC_OPT_IN_ENV = "RUN_PAID_E2E_NUMERIC"
+
+# The operators the engine replay reports on: the three this lane exists for, and the flat division a
+# runway may retire.
+_NUMERIC_TARGET_OPERATORS = ("runway", "inverse_change", "implied_base", "ratio")
+
+
+def _numeric_lane_authorized() -> bool:
+    return _has_claude_auth() and os.environ.get(NUMERIC_OPT_IN_ENV, "").strip().lower() in {"1", "true", "yes"}
+
+
+def _relation_proposals(review_dir: Path, run_id: str | None) -> tuple[list[dict], str | None]:
+    """The Step 3.7 hand-off -- what the MODEL proposed -- or the reason it cannot be read.
+
+    `reconciliation.json` carries only the relations `select()` kept and a count of the rest, so it cannot
+    say whether an operator was proposed; the proposer's own file is the only record. Read from this run's
+    hand-off dir when the run id is known, else from the one dir there is.
+    """
+    candidates = sorted(review_dir.glob("handoff/*/relations_output.json"))
+    if run_id:
+        candidates = [p for p in candidates if p.parent.name == run_id] or candidates
+    if len(candidates) != 1:
+        return [], f"expected one handoff/<run_id>/relations_output.json, found {[str(p) for p in candidates]}"
+    try:
+        data = json.loads(candidates[0].read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return [], f"{candidates[0]} is unreadable: {exc}"
+    relations = data.get("relations") if isinstance(data, dict) else None
+    if not isinstance(relations, list):
+        return [], f"{candidates[0]} carries no `relations` list"
+    return [r for r in relations if isinstance(r, dict)], None
+
+
+def _engine_replay(review_dir: Path, proposals: list[dict]) -> list[dict] | str:
+    """Re-run the engine over the run's own ledger, second read and proposals: each target relation's
+    verdict and the engine's stated reasons, for diagnosis only.
+
+    `reconciliation.json` records suppressed relations as counts with no reasons, so a proposed runway that
+    came back `incomparable` (a burn with no period, a start month outside the plan) is otherwise
+    undiagnosable after a billed run. Never an assertion: the artifact is what the founder got, and this is
+    a second computation beside it.
+    """
+    import importlib.util  # noqa: PLC0415
+
+    try:
+        ledger = json.loads((review_dir / "ledger.json").read_text(encoding="utf-8"))
+        second = json.loads((review_dir / "second_read.json").read_text(encoding="utf-8"))
+        scripts = REPO_ROOT / "founder-skills" / "skills" / "deck-review" / "scripts"
+        if str(scripts) not in sys.path:
+            sys.path.insert(0, str(scripts))
+        rec = sys.modules.get("_numeric_lane_reconcile")
+        if rec is None:
+            spec = importlib.util.spec_from_file_location("_numeric_lane_reconcile", scripts / "reconcile.py")
+            assert spec and spec.loader
+            rec = importlib.util.module_from_spec(spec)
+            # Registered BEFORE exec: the module's dataclasses resolve their annotations through it.
+            sys.modules[spec.name] = rec
+            spec.loader.exec_module(rec)
+        figures, alias = rec.merge_range_twins(rec.load_figures(ledger))
+        rec.verify(figures, str(second.get("transcript") or ""), rec.quote_in_doc)
+        by_id = {f.id: f for f in figures}
+        computed = [rec.compute({**proposal, "_alias": alias}, by_id) for proposal in proposals]
+        rec.supersede(computed)
+    except Exception as exc:  # noqa: BLE001 -- a diagnostic that cannot run says so; it never fails the lane
+        return f"engine replay could not run: {exc!r}"
+    return [
+        {
+            "operator": r.operator,
+            "operands": r.operands,
+            "expected_id": r.expected_id,
+            "verdict": "dropped" if r.dropped else r.verdict,
+            "confidence": r.confidence,
+            "rendered": r.rendered,
+            "reasons": r.reasons,
+        }
+        for r in computed
+        if r.operator in _NUMERIC_TARGET_OPERATORS
+    ]
+
+
+def _check_numeric_operators(
+    *,
+    review_dir: Path,
+    report: dict,
+    assertions: dict,
+    observed: dict,
+    failures: list,
+) -> None:
+    """Did the model PROPOSE the three operators, and did the founder get what the engine makes of them?
+
+    Two kinds of check, kept apart. What the model proposed is read from its hand-off and is the test --
+    nothing else shows these operators proposed from a real deck. What the engine decided is read from
+    `reconciliation.json` and is fixed once the proposal is right (test_lane_numeric_checks.py runs this
+    deck's figures through the real engine for free); a gap there is diagnosed by replaying the engine over
+    the run's own artifacts rather than guessed at.
+    """
+    recon_path = review_dir / "reconciliation.json"
+    recon: dict = {}
+    if recon_path.exists():
+        try:
+            loaded = json.loads(recon_path.read_text(encoding="utf-8"))
+            recon = loaded if isinstance(loaded, dict) else {}
+        except json.JSONDecodeError as exc:
+            failures.append(f"reconciliation.json is not parseable JSON: {exc}")
+    else:
+        failures.append("reconciliation.json absent, so no operator's outcome can be judged")
+    meta = recon.get("metadata")
+    run_id = meta.get("run_id") if isinstance(meta, dict) else None
+
+    wanted = assertions.get("reconciliation_status_in")
+    if wanted and recon and recon.get("status") not in wanted:
+        failures.append(f"reconciliation status {recon.get('status')!r} not in {wanted}")
+
+    # 1. WHAT THE MODEL PROPOSED -- the test.
+    proposals, why_not = _relation_proposals(review_dir, run_id)
+    proposed_ops = sorted({str(p.get("operator")) for p in proposals})
+    observed["numeric.proposed_operators"] = proposed_ops
+    observed["numeric.proposals"] = len(proposals)
+    if why_not:
+        failures.append(f"the proposer's hand-off cannot be read, so nothing it proposed can be judged: {why_not}")
+    else:
+        for op in assertions.get("proposed_operators_required") or []:
+            if op not in proposed_ops:
+                failures.append(
+                    f"the model never proposed `{op}` (proposed: {proposed_ops}). This lane's deck is built so "
+                    f"that `{op}` is a relation an analyst would run; a proposer that skips it leaves the "
+                    "operator unreached in production"
+                )
+        if assertions.get("runway_proposed_with_schedule"):
+            runways = [p for p in proposals if p.get("operator") == "runway"]
+            if runways and not any(isinstance(p.get("schedule"), list) and p.get("schedule") for p in runways):
+                failures.append(
+                    "the model proposed `runway` without a `schedule`, so the deck's burn PLAN was read as one "
+                    "flat burn -- the division the plan exists to replace"
+                )
+
+    # 2. WHAT THE ENGINE DECIDED -- fixed once the proposal is right.
+    relations = [r for r in (recon.get("relations") or []) if isinstance(r, dict)]
+    # Split on VERDICT, never `kind`: `kind` is the model's framing, `verdict` is the engine's answer.
+    contradictions = [r for r in relations if r.get("verdict") == "contradiction"]
+    raw_suppressed = recon.get("suppressed")
+    suppressed: dict = raw_suppressed if isinstance(raw_suppressed, dict) else {}
+    observed["numeric.surfaced"] = [(r.get("operator"), r.get("verdict")) for r in relations]
+    observed["numeric.suppressed"] = suppressed
+    observed["numeric.superseded"] = suppressed.get("superseded", 0)
+    observed["numeric.implied_base_surfaced"] = [
+        r.get("rendered") for r in relations if r.get("operator") == "implied_base"
+    ]
+    surfaced_ops = {str(r.get("operator")) for r in contradictions}
+    for op in assertions.get("surfaced_contradiction_operators_required") or []:
+        if op not in surfaced_ops:
+            how = "was proposed but" if op in proposed_ops else "was never proposed, so it"
+            failures.append(
+                f"no `{op}` contradiction reached the founder: it {how} did not surface. "
+                "numeric.engine_replay below carries the engine's own reason"
+            )
+
+    if assertions.get("runway_stated_longer_than_computed"):
+        for r in contradictions:
+            computed, stated = r.get("computed"), r.get("expected_value")
+            if (
+                r.get("operator") == "runway"
+                and isinstance(computed, (int, float))
+                and isinstance(stated, (int, float))
+                and computed >= stated
+            ):
+                failures.append(
+                    f"a runway contradiction computes {computed:.1f} months against a stated {stated}: every "
+                    "cash the deck names gives LESS runway than it states, so what was counted as cash is "
+                    f"not cash -- {r.get('rendered')!r}"
+                )
+
+    # A FLAT DIVISION NEVER STANDS BESIDE THE RUNWAY THAT REPLACES IT. `supersede()` retires a flat `ratio`
+    # against the same stated figure whose two operands are both among a compared runway's; one that
+    # survives beside the runway is two readings of one claim shown to a founder as two findings.
+    if assertions.get("flat_runway_ratio_never_beside_runway"):
+        runways_shown = [r for r in relations if r.get("operator") == "runway"]
+        for flat in relations:
+            if flat.get("operator") != "ratio" or not flat.get("expected_id"):
+                continue
+            for rw in runways_shown:
+                if rw.get("expected_id") == flat.get("expected_id") and set(flat.get("operands") or []) <= set(
+                    rw.get("operands") or []
+                ):
+                    failures.append(
+                        f"a flat division {flat.get('rendered')!r} surfaced beside the runway over the plan "
+                        f"{rw.get('rendered')!r}; supersede() should have retired it"
+                    )
+
+    blocked = set(assertions.get("no_downgrade_of_operators") or [])
+    raw_interpretation = recon.get("interpretation")
+    interpretation: dict = raw_interpretation if isinstance(raw_interpretation, dict) else {}
+    downgraded = [d for d in (interpretation.get("downgraded") or []) if isinstance(d, dict)]
+    observed["numeric.downgraded"] = [(d.get("operator"), d.get("class")) for d in downgraded]
+    for d in downgraded:
+        if d.get("operator") in blocked:
+            failures.append(
+                f"the interpretation pass withdrew a `{d.get('operator')}` contradiction as {d.get('class')!r} "
+                f"({d.get('reason')!r}); neither withdrawal class describes this deck's figures"
+            )
+
+    # The founder reads report.md, not the artifact.
+    md_path = review_dir / "report.md"
+    if contradictions and md_path.exists():
+        md = md_path.read_text(encoding="utf-8")
+        unrendered = [
+            r.get("rendered")
+            for r in contradictions
+            if r.get("rendered") and str(r.get("rendered")).split("=")[0].strip() not in md
+        ]
+        if unrendered:
+            failures.append(f"contradictions surfaced but absent from report.md: {unrendered}")
+
+    # 3. The scored criterion and the coach, as in the contradiction lane.
+    wanted_nc = assertions.get("numbers_consistent_status")
+    if wanted_nc is not None:
+        checklist_path = review_dir / "checklist.json"
+        if not checklist_path.exists():
+            failures.append("numbers_consistent_status requested but checklist.json is absent")
+        else:
+            items = json.loads(checklist_path.read_text(encoding="utf-8")).get("items") or []
+            nc = next((i for i in items if isinstance(i, dict) and i.get("id") == "numbers_consistent"), {})
+            observed["checklist.numbers_consistent"] = (nc.get("status"), nc.get("scored_by"))
+            if nc.get("scored_by") != "arithmetic":
+                failures.append(
+                    "numbers_consistent carries no scored_by: arithmetic, so Step 5 ran checklist.py "
+                    "without --reconciliation and the reviewer's reading decided it"
+                )
+            if nc.get("status") != wanted_nc:
+                failures.append(f"numbers_consistent is {nc.get('status')!r}, expected {wanted_nc!r}")
+    findings_floor = assertions.get("numeric_findings_min")
+    if findings_floor is not None:
+        findings = (report.get("coaching_payload") or {}).get("numeric_findings") or []
+        observed["coaching_payload.numeric_findings"] = len(findings)
+        if len(findings) < findings_floor:
+            failures.append(
+                f"coaching_payload.numeric_findings has {len(findings)} entries, expected >= {findings_floor}"
+            )
+
+    # Diagnosis, printed with the observed values: the engine's verdict and reason per target relation.
+    if proposals:
+        observed["numeric.engine_replay"] = _engine_replay(review_dir, proposals)
+
+
+@pytest.mark.e2e
+@pytest.mark.skipif(
+    not _numeric_lane_authorized(),
+    reason=(
+        "Numeric-operators lane: needs RUN_PAID_E2E=1 AND RUN_PAID_E2E_NUMERIC=1 plus Claude auth. Billed "
+        "separately from the release gate on purpose -- it asks whether the model proposes the runway, "
+        "inverse_change and implied_base operators, which a release does not."
+    ),
+)
+def test_deck_review_numeric_operators_lane(tmp_path: Path) -> None:
+    """A deck with a burn plan, a reciprocal pair and a share of a total: the model must propose all three
+    operators, and the founder must get the runway and reciprocal disagreements."""
+    _drive_deck_review_lane(
+        tmp_path,
+        deck_fixture=NUMERIC_DECK,
+        golden_path=NUMERIC_GOLDEN,
+        company=NUMERIC_COMPANY,
+        slug="kestrelline",
+        extra_checks=_check_numeric_operators,
+        lane="dr-numeric",
     )

@@ -1,0 +1,29 @@
+SLIDE 1: TITLE
+Kestrelline — automated claims audit for regional health insurers
+
+SLIDE 2: PROBLEM
+Regional insurers audit medical claims by sampling, so most billing errors are never reviewed
+before the claim is paid.
+
+SLIDE 3: SOLUTION
+Kestrelline checks every claim against the provider contract and the policy rules before payment.
+
+SLIDE 4: TRACTION
+Annual revenue of $1.1M, which is 5% of mid-market claims-audit software spend.
+Since launch, a 35% reduction in cost per claim audited.
+Over the same period, a 12% increase in claims audited per dollar of audit spend.
+
+SLIDE 5: FINANCIALS
+Cash in the bank: $3.1M as of January 2027.
+Burn plan: $120K per month from January 2027 through December 2027.
+2028 burn budget: $2.4M for the year, from January 2028, as the sales team is hired.
+Runway: 44 months.
+
+SLIDE 6: TEAM
+Two founders: a former payment-integrity lead at a regional insurer, and a former data
+platform engineer.
+
+SLIDE 7: ASK
+Raising $3.65M seed at $14M post-money.
+
+[Note: 7 slides. Kestrelline is FICTIONAL — no real founder or company data.]

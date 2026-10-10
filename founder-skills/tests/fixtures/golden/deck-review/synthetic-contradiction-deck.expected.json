@@ -58,6 +58,6 @@
     "--reconciliation), so a surfaced contradiction fails it whatever the reviewer read, and the",
     "item must carry scored_by: arithmetic (absent means Step 5 ran without the flag).",
     "numeric_findings_min 1: the coaching payload must hand the coach the surfaced finding; this is",
-    "the only lane where the coach reads a non-empty list. Same floor reasoning as above."
+    "one of the two lanes (with numeric-operators) where the coach reads a non-empty list. Same floor reasoning as above."
   ]
 }

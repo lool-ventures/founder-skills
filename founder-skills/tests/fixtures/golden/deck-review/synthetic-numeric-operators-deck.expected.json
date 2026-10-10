@@ -1,0 +1,85 @@
+{
+  "fixture_version": 1,
+  "skill": "deck-review",
+  "input": "synthetic-numeric-operators-deck.txt",
+  "assertions": {
+    "report_json_exists": true,
+    "report_md_exists": true,
+    "all_artifacts_have_run_id": true,
+    "schema_validation_passes": true,
+    "coaching_payload_present": true,
+    "score_pct_range": [
+      10,
+      70
+    ],
+    "overall_status_in": [
+      "needs_work",
+      "major_revision"
+    ],
+    "no_high_severity_warnings_other_than": [
+      "CHECKLIST_FAILURES_CRITICAL"
+    ],
+    "reconciliation_status_in": [
+      "checked"
+    ],
+    "proposed_operators_required": [
+      "runway",
+      "inverse_change",
+      "implied_base"
+    ],
+    "runway_proposed_with_schedule": true,
+    "surfaced_contradiction_operators_required": [
+      "runway",
+      "inverse_change"
+    ],
+    "runway_stated_longer_than_computed": true,
+    "flat_runway_ratio_never_beside_runway": true,
+    "no_downgrade_of_operators": [
+      "runway",
+      "inverse_change"
+    ],
+    "numbers_consistent_status": "fail",
+    "numeric_findings_min": 2
+  },
+  "_calibration_notes": [
+    "THIS LANE EXISTS FOR ONE REASON: three operators -- `runway` over a burn plan, `inverse_change`",
+    "for a pair of measures reciprocal by definition, and `implied_base` -- are covered offline by",
+    "hand-written proposals only. Nothing else shows the MODEL proposing them from a real deck, and",
+    "a model that never proposes an operator makes the operator dead code however well it is tested.",
+    "",
+    "TWO KINDS OF ASSERTION, kept apart on purpose:",
+    "  - What the model proposed (`proposed_operators_required`, `runway_proposed_with_schedule`),",
+    "    read from the Step 3.7 hand-off (`handoff/<run_id>/relations_output.json`). These ARE the",
+    "    test; a failure names the operator the proposer skipped.",
+    "  - What the engine decides once those are proposed. Verified offline through the real",
+    "    `reconcile.build()` over a ledger built from this deck's own sentences",
+    "    (test_lane_numeric_checks.py runs it free on every suite):",
+    "      runway over the plan: $3.1M against $120K/month for Jan-Dec 2027 then $2.4M/year from",
+    "      Jan 2028 = 20.3 months, against a stated 44 -> contradiction. Counting the $3.65M raise as",
+    "      cash gives 38.55 months, still a contradiction, so the raise is no way out.",
+    "      inverse_change: a 35% reduction in cost per claim = a 53.8% increase in claims per dollar,",
+    "      against a stated 12% -> contradiction (the pair is the engine's `cost per` / `per dollar`",
+    "      table row; outside the table a disagreement is never reported).",
+    "      implied_base: $1.1M at 5% implies about $19.1M-$25.6M -> a derived reading, never a",
+    "      finding, so it is asserted as PROPOSED only; whether it surfaces depends on select()'s cap",
+    "      of three derived readings and on the label the extractor writes, and is printed instead.",
+    "      flat path: $3.1M / $120K a month (25.8 months) and $3.1M / $2.4M a year (15.5 months)",
+    "      against the same 44 are both retired as `superseded` by the runway over the plan, because",
+    "      both burns are the plan's own segments. `flat_runway_ratio_never_beside_runway` checks the",
+    "      founder-visible half (no such ratio survives beside the runway); the superseded count is",
+    "      printed, since it is zero when the model simply did not propose a flat division.",
+    "",
+    "The engine half still depends on the extraction (labels, periods, units), so a proposed operator",
+    "that does not surface is diagnosed rather than guessed at: the lane replays the engine over the",
+    "run's own ledger, second read and proposals and prints each target relation's verdict and the",
+    "engine's stated reason.",
+    "",
+    "numeric_findings_min 2 follows from the two required surfaced contradictions; it is the coach's",
+    "half of the same claim.",
+    "",
+    "score_pct and overall_status ranges copied from the contradiction lane (same slide count, same",
+    "kind of deck); never measured on this fixture. Re-derive both from the first two runs.",
+    "",
+    "Kestrelline is fictional. No real founder or company data. Figures invented for this fixture."
+  ]
+}

@@ -564,6 +564,12 @@ run with fifteen dispatches recorded zero boundaries. Truncation is head-preserv
      refused with `(stale info)` means the local view of the branch is old: `git fetch origin
      release/vX.Y.Z` and push again. The bump-again rule in VERSIONING.md applies only once `main`
      carries the version.
+   - **The two opt-in deck-review lanes** (contradiction, numeric operators) run only on request:
+     `gh workflow run skill-quality.yml --ref release/vX.Y.Z -f extra_deck_lanes=true`, a SEPARATE
+     dispatch from the gate's (about $10-30 more). That run repeats the gate's lanes as well, and a red
+     extra lane reds its job; `branch_gate_check.py` accepts any green dispatched run at the commit, so
+     a red extra run does not block the tag once the plain gate run is green. Run them when the numeric
+     chain or its proposer prompt changed.
 6. **Green: fast-forward `main`, then tag.** Green means the paid gate AND every PR check
    (`gh pr checks release/vX.Y.Z`): the push to `main` goes around branch protection
    (`enforce_admins` is false), so nothing else enforces lint, typecheck, tests, DCO or the review.

@@ -54,6 +54,7 @@ LANES: list[tuple[str, str, str, Any, Any, Any]] = [
     (CT.POOL_LANE, CT.SKILL, "barbaz", CT.POOL_ANSWERS, (), ()),
     ("dr", "deck-review", "acmecorp", (), DR.host_values(DR.SMOKE_COMPANY), ()),
     ("dr-contra", "deck-review", "foobar", (), DR.host_values(DR.CONTRADICTION_COMPANY), ()),
+    ("dr-numeric", "deck-review", "kestrelline", (), DR.host_values(DR.NUMERIC_COMPANY), ()),
 ]
 
 # Each lane's prompt as sent, before the host's lines. The paths are placeholders; only the words matter.
@@ -64,6 +65,7 @@ PROMPTS: dict[str, str] = {
     CT.POOL_LANE: CT.POOL_PROMPT,
     "dr": DR.lane_prompt("/workspace/deck.txt", DR.SMOKE_COMPANY, "acmecorp"),
     "dr-contra": DR.lane_prompt("/workspace/deck.txt", DR.CONTRADICTION_COMPANY, "foobar"),
+    "dr-numeric": DR.lane_prompt("/workspace/deck.txt", DR.NUMERIC_COMPANY, "kestrelline"),
 }
 
 

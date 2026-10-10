@@ -53,6 +53,16 @@ on:
         description: "Rehearse release-note extraction for this tag (e.g. v0.10.0). Publishes NOTHING."
         required: false
         type: string
+      # The two opt-in deck-review lanes (contradiction, numeric operators), billed on top of the gate's
+      # three. Read only by the paid job's env, never by an `if:`: off, the job is exactly the release
+      # gate; on, the same job also runs both lanes, and a red one reds the job. verify-branch-gate
+      # accepts ANY green dispatched run at the tagged commit, so dispatch the lanes as a separate
+      # run from the gate's: a red lane then cannot cost the release its green gate run.
+      extra_deck_lanes:
+        description: "Also run the two opt-in deck-review lanes (contradiction, numeric operators). Adds ~$10-30."
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   contract-tests:
@@ -191,6 +201,10 @@ jobs:
           # until the variable was set here. A safety fix that no-ops its own consumer has
           # moved the defect rather than removed it.
           RUN_PAID_E2E: "1"
+          # "true" on a dispatch with `-f extra_deck_lanes=true`, which both lanes' opt-ins accept;
+          # "false" otherwise, which neither does, so the lanes skip as named in ALLOWED_SKIPS below.
+          RUN_PAID_E2E_CONTRADICTION: ${{ inputs.extra_deck_lanes }}
+          RUN_PAID_E2E_NUMERIC: ${{ inputs.extra_deck_lanes }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY_CI }}
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN_CI }}
       # `if: always()`, deliberately not `failure()`. A run that lands on a self-gated
@@ -245,6 +259,10 @@ jobs:
           # is a visible decision to stop gating on it rather than a silent omission.
           ALLOWED_SKIPS = {
               "test_deck_review_contradiction_lane",
+              # deck-review's numeric-operators lane: its own RUN_PAID_E2E_NUMERIC opt-in. The only run
+              # that shows the model proposing runway / inverse_change / implied_base from a real deck.
+              # Both deck lanes run when a dispatch passes `-f extra_deck_lanes=true`.
+              "test_deck_review_numeric_operators_lane",
               # cap-table's lane, same precedent: its own RUN_PAID_E2E_CAP_TABLE opt-in, run
               # on demand rather than per release. It exists to answer a question a release does not
               # ask — does the reliance boundary hold, and does a SKILL.md edit move
