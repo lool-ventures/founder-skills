@@ -2469,3 +2469,60 @@ def test_select_orders_findings_then_rounding_gaps_then_readings() -> None:
     shown = select([reading, *gaps, contra])
     assert shown[0] is contra and shown[-1] is reading
     assert [r.operands for r in shown[1:-1]] == [["g4"], ["g3"], ["g2"]], "most wrong first, capped at three"
+
+
+# --------------------------------------------------------------------------
+# Review fixes: a sign-changing plan, and lines a founder can read.
+# --------------------------------------------------------------------------
+
+
+def test_a_burn_plan_that_turns_cash_positive_is_refused() -> None:
+    """Reading every row as spend reported a runway that runs out when the plan never does."""
+    cash = fig("$4.2M", 4_200_000, "money", label="cash in bank", id="cash")
+    b1 = fig("(150)", -150_000, "money", label="net cashflow this year", id="b1", period="month")
+    b2 = fig("(50)", -50_000, "money", label="net cashflow next year", id="b2", period="month")
+    b3 = fig("200", 200_000, "money", label="net cashflow after", id="b3", period="month")
+    spec = {
+        "operator": "runway",
+        "operands": ["cash", "b1", "b2", "b3"],
+        "kind": "derived_ratio",
+        "schedule": [
+            {"id": "b1", "from": "2026-01", "to": "2026-12"},
+            {"id": "b2", "from": "2027-01", "to": "2027-12"},
+            {"id": "b3", "from": "2028-01"},
+        ],
+    }
+    r = compute(spec, {"cash": cash, "b1": b1, "b2": b2, "b3": b3})
+    assert r.dropped and "changes sign" in " ".join(r.reasons), r.rendered
+
+
+def test_a_parenthesised_burn_prints_as_an_amount() -> None:
+    cash = fig("$4.2M", 4_200_000, "money", label="cash in bank", id="cash", currency="USD")
+    b1 = fig("(150)", -150_000, "money", label="net cashflow", id="b1", period="month", currency="USD")
+    spec = {
+        "operator": "runway",
+        "operands": ["cash", "b1"],
+        "kind": "derived_ratio",
+        "schedule": [{"id": "b1", "from": "2026-04"}],
+    }
+    out = compute(spec, {"cash": cash, "b1": b1})
+    assert "$150K a month" in out.rendered, out.rendered
+
+
+def test_an_inverse_line_reads_in_words() -> None:
+    r = _inverse("↓36%", "resistivity reduction", "56%", 56, "conductivity gain", "reduction")
+    assert r.rendered.startswith("a reduction of 36% in resistivity ="), r.rendered
+    assert "↓" not in r.rendered.split(" — ")[0]
+
+
+@pytest.mark.parametrize(
+    ("raw", "value", "currency", "shown"),
+    [("$4.8M", 4_800_000, "USD", "$38M–$42.17M"), ("€480K", 480_000, "EUR", "€3.8M–€4.22M")],
+)
+def test_an_implied_base_prints_in_the_figures_own_currency_and_scale(
+    raw: str, value: float, currency: str, shown: str
+) -> None:
+    m = fig(raw, value, "money", label="EMEA revenue", id="m", currency=currency)
+    p = fig("12%", 12, "percent", label="share of revenue", id="p")
+    r = compute({"operator": "implied_base", "operands": ["m", "p"], "kind": "derived_ratio"}, {"m": m, "p": p})
+    assert r.rendered.endswith(f"implies a total of about {shown}"), r.rendered

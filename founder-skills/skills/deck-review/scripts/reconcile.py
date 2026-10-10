@@ -1587,6 +1587,24 @@ def _months_of_runway(cash: float, segments: list[tuple[int, int | None, float]]
     return None
 
 
+_CURRENCY_SYMBOLS = {"USD": "$", "EUR": "€", "GBP": "£", "ILS": "₪", "JPY": "¥", "INR": "₹"}
+_LEADING_SYMBOL = re.compile(r"^\s*([^\d\s(\-~≈.,+<>≤≥]+)")
+
+
+def _money_text(value: float, like: Figure) -> str:
+    """A computed amount in the founder's terms: the figure's own currency sign and a K/M/B scale.
+
+    "38,000,000-42,173,913" with the sign dropped is arithmetic, not a sentence; "$38M-$42.2M"
+    is the same fact in the form the deck printed its own figures.
+    """
+    m = _LEADING_SYMBOL.match(like.raw or "")
+    symbol = m.group(1) if m else _CURRENCY_SYMBOLS.get(str(like.currency or "").upper(), "")
+    for scale, suffix in ((1e9, "B"), (1e6, "M"), (1e3, "K")):
+        if abs(value) >= scale:
+            return f"{symbol}{f'{value / scale:,.2f}'.rstrip('0').rstrip('.')}{suffix}"
+    return f"{symbol}{value:,.0f}"
+
+
 def _runway(r: Relation, real: list[Figure], rel_spec: dict[str, Any], alias: dict[str, str]) -> str | None:
     """Months of runway from the named cash and the deck's burn, or the reason it cannot be had.
 
@@ -1646,6 +1664,12 @@ def _runway(r: Relation, real: list[Figure], rel_spec: dict[str, Any], alias: di
             return f"{f.raw} is not a burn (money per period)"
         if f.period not in PERIODS:
             return f"{f.raw} has no period, so it cannot be read as a burn rate"
+    # A PLAN THAT CHANGES SIGN IS NOT A BURN. Reading every row as spend is right for a
+    # cashflow table written in parentheses, and wrong the moment a row turns positive -- the
+    # "cash-flow positive by next year" slide a founder prints -- where it reported a runway
+    # that runs out when the plan never does.
+    if len({f.value > 0 for f in burn_figs if f.value != 0}) > 1:
+        return "the burn plan changes sign, so it cannot be read as a burn"
     currencies = {f.currency for f in [*cash, *burn_figs]}
     if len(currencies) > 1:
         return f"currency mismatch: {sorted(str(c) for c in currencies)}"
@@ -1685,7 +1709,9 @@ def _runway(r: Relation, real: list[Figure], rel_spec: dict[str, Any], alias: di
     if schedule:
 
         def per(f: Figure) -> str:
-            return f.raw if time_unit(f.raw) else f"{f.raw} a {f.period}"
+            # A cashflow row written "(150)" is spend of 150 thousand: print the amount.
+            amount = _money_text(abs(f.value), f) if f.value < 0 else f.raw
+            return amount if time_unit(f.raw) and f.value >= 0 else f"{amount} a {f.period}"
 
         plan = ", then ".join(
             f"{per(f)} ({_month_label(a)}–{_month_label(b)})" if b is not None else f"{per(f)} (from {_month_label(a)})"
@@ -1718,6 +1744,9 @@ _RECIPROCAL_PAIRS: tuple[tuple[str, str], ...] = (
     (r"\bresistance\b", r"\bconductance\b"),
     (r"\bcost per\b", r"\bper (?:dollar|euro|pound|\$|€|£)"),
 )
+
+
+_DIRECTION_WORDS = re.compile(r"\b(?:reduction|decrease|savings|increase|gain|growth|improvement)\b", re.I)
 
 
 def _known_reciprocals(a: str, b: str) -> bool:
@@ -1766,7 +1795,11 @@ def _inverse_change(r: Relation, real: list[Figure], rel_spec: dict[str, Any]) -
     if lo != hi:
         r.span_lo, r.span_hi = inverse(lo), inverse(hi)
     other = "increase" if direction == "reduction" else "reduction"
-    r.head = f"a {direction} of {pct.raw}" + (f" in {pct.label}" if pct.label else "")
+    # In words, not glyphs, and the measure once: "a reduction of 36% in resistivity", never
+    # "a reduction of ↓36% in resistivity reduction".
+    amount = re.sub(r"[↓↑▼▲]", "", pct.raw or "").strip()
+    measure = re.sub(r"\s+", " ", _DIRECTION_WORDS.sub("", pct.label or "")).strip(" ,-")
+    r.head = f"a {direction} of {amount}" + (f" in {measure}" if measure else "")
     r.unit_word, r.note = "%", f" {other} in the reciprocal measure"
     shown = (r.span_lo, r.span_hi) if r.span_lo is not None and r.span_hi is not None else (r.computed, r.computed)
     r.rendered = f"{r.head} = {_span_text(*shown)}{r.unit_word}{r.note}"
@@ -1805,7 +1838,10 @@ def _implied_base(r: Relation, real: list[Figure]) -> str | None:
     r.computed = money.value / (pct.value / 100.0)
     r.span_lo, r.span_hi = m_lo / (p_hi / 100.0), m_hi / (p_lo / 100.0)
     r.computed_unit = MONEY + (f":{money.period}" if money.period else "")
-    r.rendered = f"{money.raw} at {pct.raw} implies a base of {r.span_lo:,.0f}–{r.span_hi:,.0f}"
+    r.rendered = (
+        f"{money.raw} at {pct.raw} implies a total of about "
+        f"{_money_text(r.span_lo, money)}–{_money_text(r.span_hi, money)}"
+    )
     if r.span_hi / r.span_lo > IMPLIED_BASE_MAX_SPREAD:
         r.confidence = "medium"
         r.reasons.append("the implied base is too wide to be a useful reading")
@@ -2472,8 +2508,11 @@ def _is_rounding_gap(operator: str, relation: str, exp: Figure, c_lo: float, c_h
     """A total the parts reach only through their own rounding, by a gap worth a look.
 
     Sums and differences only (the only operators whose tolerance the parts widen), a plain
-    `equals` claim only, and never a bounded stated side: "$200B+" or a stated floor is
-    satisfied one-sidedly, and testing it two-sided would turn the agreement into a gap.
+    `equals` claim only, and never a stated side carrying any bound. "$200B+" or a stated floor
+    is satisfied one-sidedly, and testing it two-sided would turn the agreement into a gap; an
+    APPROXIMATE stated total (one marked "~") is excluded too, because the author's "~" already
+    claims more slack than the parts' rounding could explain, so a gap inside it is not a
+    question about rounding.
     """
     if operator not in ("sum", "difference") or relation != "equals" or exp.bound is not None:
         return False
