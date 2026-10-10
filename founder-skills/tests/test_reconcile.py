@@ -13,6 +13,7 @@ Run: uv run pytest founder-skills/tests/test_reconcile.py -q
 from __future__ import annotations
 
 import pathlib
+import re
 import sys
 from typing import Any
 
@@ -1942,3 +1943,335 @@ def test_a_spelled_out_range_is_a_range() -> None:
 
     assert parse_range("three-five") is None  # only the first cardinal is rewritten; a word range is not read
     assert parse_range("3-5") == (3.0, 5.0)
+
+
+# --------------------------------------------------------------------------
+# A duration is compared in the unit the deck wrote it in.
+# --------------------------------------------------------------------------
+
+
+def _runway_case(burn: Figure, stated_raw: str, stated: float, label: str = "runway") -> Relation:
+    cash = fig("$3.33M", 3_330_000, "money", id="cash")
+    exp = fig(stated_raw, stated, "duration", label=label, id="exp")
+    return _cmp("ratio", ["cash", burn.id], "exp", {"cash": cash, burn.id: burn, "exp": exp})
+
+
+_MONTHLY = fig("$111K/month", 111_000, "money", id="burn", period="month")
+_YEARLY = fig("$1.332M/year", 1_332_000, "money", id="burn", period="year")
+
+
+@pytest.mark.parametrize(
+    ("burn", "stated_raw", "stated", "shown"),
+    [
+        (_MONTHLY, "2.5 years", 2.5, "= 2.5 years"),
+        (_YEARLY, "30 months", 30, "= 30.0 months"),
+        (_YEARLY, "2.5 years", 2.5, "= 2.5 years"),
+        (_MONTHLY, "30 months", 30, "= 30.0 months"),
+    ],
+)
+def test_a_runway_is_compared_in_the_stated_unit(burn: Figure, stated_raw: str, stated: float, shown: str) -> None:
+    """30 months against a stated "2.5 years" was a CONTRADICTION -- 30 against 2.5. Every
+    pairing of a monthly or yearly burn with a runway stated in months or years agrees here,
+    and the computed side is printed in the unit the deck wrote."""
+    r = _runway_case(burn, stated_raw, stated)
+    assert r.verdict == "confirmation", (r.rendered, r.reasons)
+    assert shown in r.rendered
+
+
+def test_a_real_cross_unit_disagreement_still_fires() -> None:
+    r = _runway_case(_MONTHLY, "4 years", 4)
+    assert r.verdict == "contradiction", r.reasons
+    assert "= 2.5 years" in r.rendered and "4 years" in r.rendered
+
+
+def test_a_stated_duration_with_no_written_unit_is_refused() -> None:
+    """ "30m" parses as thirty MILLION with a tolerance of 500,000 -- any runway confirms it."""
+    r = _runway_case(_MONTHLY, "30m", 30)
+    assert r.verdict == "incomparable"
+    assert "not written" in " ".join(r.reasons)
+
+
+def test_a_unit_carried_only_by_the_label_is_read() -> None:
+    """Ledgers put the unit in the label ("runway secured (months)") under a bare "10-12" raw;
+    refusing those lost two expert-graded real findings on a kept run."""
+    r = _runway_case(_MONTHLY, "10-12", 11, label="runway secured (months)")
+    assert r.verdict == "contradiction", r.reasons
+    r = _runway_case(_MONTHLY, "28-32", 30, label="runway secured (months)")
+    assert r.verdict == "confirmation", r.reasons
+
+
+def test_a_sum_of_durations_in_different_units_is_refused() -> None:
+    a = fig("9 months", 9, "duration", label="build", id="a")
+    b = fig("1 year", 1, "duration", label="pilot", id="b")
+    e = fig("21 months", 21, "duration", label="time to launch", id="e")
+    r = _cmp("sum", ["a", "b"], "e", {"a": a, "b": b, "e": e})
+    assert r.verdict == "incomparable", (r.rendered, r.reasons)
+    b2 = fig("12 months", 12, "duration", label="pilot", id="b")
+    r = _cmp("sum", ["a", "b"], "e", {"a": a, "b": b2, "e": e})
+    assert r.verdict == "confirmation", r.reasons
+
+
+@pytest.mark.parametrize(
+    ("raw", "value", "expected"),
+    [
+        ("26 months", 26, 1.0),  # one written unit, not the half-month of its last digit
+        ("3 years", 3, 0.5),  # capped at a month, so a year-stated figure keeps its own precision
+        ("45 days", 45, 1.0),  # one day
+        ("~26 months", 26, 2.6),  # an approximate figure keeps its own (wider) widening
+        ("26+ months", 26, 0.5),  # a bounded figure is untouched
+    ],
+)
+def test_duration_tolerance_floor(raw: str, value: float, expected: float) -> None:
+    from reconcile import duration_tolerance
+
+    assert duration_tolerance(fig(raw, value, "duration", label="runway")) == pytest.approx(expected)
+
+
+def test_a_whole_month_runway_tolerates_one_month() -> None:
+    burn = fig("$50K/month", 50_000, "money", id="burn", period="month")
+    exp = fig("26 months", 26, "duration", label="runway", id="exp")
+    close = fig("$1.27M", 1_270_000, "money", id="cash")  # 25.4 months
+    far = fig("$1.245M", 1_245_000, "money", id="cash")  # 24.9 months
+    assert _cmp("ratio", ["cash", "burn"], "exp", {"cash": close, "burn": burn, "exp": exp}).verdict == "confirmation"
+    assert _cmp("ratio", ["cash", "burn"], "exp", {"cash": far, "burn": burn, "exp": exp}).verdict == "contradiction"
+
+
+# --------------------------------------------------------------------------
+# `runway`: the named cash against the deck's own burn plan.
+# --------------------------------------------------------------------------
+
+
+def _plan(stated_raw: str | None = None, stated: float = 0.0, **spec: Any) -> Relation:
+    cash = fig("$4.2M", 4_200_000, "money", label="cash in bank", id="cash")
+    b1 = fig("$150K/month", 150_000, "money", label="burn this year", id="b1", period="month")
+    b2 = fig("$2.16M", 2_160_000, "money", label="burn next year", id="b2", period="year")
+    by: dict[str, Figure] = {"cash": cash, "b1": b1, "b2": b2}
+    body: dict[str, Any] = {
+        "operator": "runway",
+        "operands": ["cash", "b1", "b2"],
+        "kind": "contradiction",
+        "schedule": [{"id": "b1", "from": "2026-04", "to": "2027-03"}, {"id": "b2", "from": "2027-04"}],
+    }
+    if stated_raw is not None:
+        by["exp"] = fig(stated_raw, stated, "duration", label="runway", id="exp")
+        body["expected_id"] = "exp"
+    body.update(spec)
+    return compute(body, by)
+
+
+def test_a_piecewise_runway_reads_the_burn_plan() -> None:
+    """Twelve months at the first rate, then what is left at the second rate's monthly equivalent."""
+    r = _plan()
+    assert not r.dropped, r.reasons
+    assert r.computed == pytest.approx(12 + 2_400_000 / 180_000)
+    assert r.computed_unit == "duration:month"
+    assert "$4.2M" in r.rendered and "$150K/month (Apr 2026–Mar 2027)" in r.rendered
+    assert "$2.16M a year (from Apr 2027)" in r.rendered and "starting Apr 2026" in r.rendered
+    assert "counting only the cash named" in r.rendered
+
+
+def test_a_runway_shorter_than_stated_contradicts_and_a_matching_one_confirms() -> None:
+    r = _plan("32 months", 32)
+    assert r.verdict == "contradiction", r.reasons
+    assert "counting only the cash named" in r.rendered and "the deck states 32 months" in r.rendered
+    assert _plan("25 months", 25).verdict == "confirmation"
+
+
+def test_a_runway_longer_than_stated_is_never_a_disagreement() -> None:
+    """Cash the deck does not name only lengthens the runway; a longer computed one is the
+    deck being conservative."""
+    r = _plan("17 months", 17)
+    assert r.verdict == "confirmation", r.reasons
+    assert "consistent with the stated 17 months" in r.rendered
+
+
+def test_a_runway_against_a_stated_ceiling_is_refused() -> None:
+    assert _plan("32 months", 32, relation="at_most").verdict == "incomparable"
+
+
+def test_a_start_month_skips_the_burn_already_spent() -> None:
+    r = _plan(start="2026-10")
+    assert r.computed == pytest.approx(6 + 3_300_000 / 180_000)
+    assert "starting Oct 2026" in r.rendered
+
+
+def test_a_single_burn_runway_equals_the_plain_ratio() -> None:
+    cash = fig("$1.95M", 1_950_000, "money", id="cash")
+    burn = fig("$75K/month", 75_000, "money", id="burn", period="month")
+    by = {"cash": cash, "burn": burn}
+    runway = compute({"operator": "runway", "operands": ["cash", "burn"], "kind": "derived_ratio"}, by)
+    ratio = compute({"operator": "ratio", "operands": ["cash", "burn"], "kind": "derived_ratio"}, by)
+    assert runway.computed == pytest.approx(ratio.computed) == pytest.approx(26.0)
+
+
+def test_a_runway_against_a_stated_figure_in_years_is_converted() -> None:
+    cash = fig("$1.95M", 1_950_000, "money", id="cash")
+    burn = fig("$75K/month", 75_000, "money", id="burn", period="month")
+    exp = fig("3 years", 3, "duration", label="runway", id="exp")
+    r = _cmp("runway", ["cash", "burn"], "exp", {"cash": cash, "burn": burn, "exp": exp})
+    assert r.verdict == "contradiction", r.reasons
+    assert "= 2.2 years" in r.rendered
+
+
+def test_a_negative_cashflow_burn_is_read_as_spend() -> None:
+    cash = fig("$1.95M", 1_950_000, "money", id="cash")
+    burn = fig("(75)", -75_000, "money", id="burn", period="month")
+    spec = {"operator": "runway", "operands": ["cash", "burn"], "kind": "derived_ratio"}
+    assert compute(spec, {"cash": cash, "burn": burn}).computed == pytest.approx(26.0)
+
+
+@pytest.mark.parametrize(
+    ("schedule", "reason"),
+    [
+        ([{"id": "b1", "from": "2026-04", "to": "2027-03"}, {"id": "b2", "from": "2027-05"}], "gap"),
+        ([{"id": "b1", "from": "2026-04", "to": "2027-03"}, {"id": "b2", "from": "2027-02"}], "overlap"),
+        ([{"id": "b1", "from": "2026-04"}, {"id": "b2", "from": "2027-04"}], "only the last"),
+        ([{"id": "b1", "from": "April 2026", "to": "2027-03"}, {"id": "b2", "from": "2027-04"}], "YYYY-MM"),
+        (
+            [{"id": "b1", "from": "2026-04", "to": "2027-03"}, {"id": "b2", "from": "2027-04", "to": "2027-06"}],
+            "outlasts",
+        ),
+        ([{"id": "b1", "from": "2026-04", "to": "2027-03"}, {"id": "zz", "from": "2027-04"}], "not one of"),
+    ],
+)
+def test_a_burn_plan_that_cannot_be_read_is_refused(schedule: list[dict[str, str]], reason: str) -> None:
+    r = _plan(schedule=schedule)
+    assert r.dropped, r.rendered
+    assert reason in " ".join(r.reasons)
+
+
+def test_a_start_outside_the_plan_is_refused() -> None:
+    assert _plan(start="2026-01").dropped
+
+
+@pytest.mark.parametrize(
+    ("cash", "burn", "reason"),
+    [
+        (fig("$1.95M", 1_950_000, "money", id="cash"), fig("$75K", 75_000, "money", id="burn"), "no period"),
+        (
+            fig("$1.95M+", 1_950_000, "money", id="cash"),
+            fig("$75K/mo", 75_000, "money", id="burn", period="month"),
+            "open-ended",
+        ),
+        (
+            fig("$1.95M", 1_950_000, "money", id="cash", currency="USD"),
+            fig("€75K/mo", 75_000, "money", id="burn", period="month", currency="EUR"),
+            "currency",
+        ),
+        (
+            fig("$1.95M", 1_950_000, "money", id="cash"),
+            fig("$0/mo", 0, "money", id="burn", period="month"),
+            "division by zero",
+        ),
+    ],
+)
+def test_a_runway_refuses_inputs_it_cannot_read(cash: Figure, burn: Figure, reason: str) -> None:
+    spec = {"operator": "runway", "operands": ["cash", "burn"], "kind": "derived_ratio"}
+    r = compute(spec, {"cash": cash, "burn": burn})
+    assert r.dropped and reason in " ".join(r.reasons), r.reasons
+
+
+# --------------------------------------------------------------------------
+# `inverse_change`: a cut in one measure is a rise in its reciprocal.
+# --------------------------------------------------------------------------
+
+
+def _inverse(op_raw: str, op_label: str, exp_raw: str, exp_value: float, exp_label: str, direction: str) -> Relation:
+    value = float(re.sub(r"[^\d.]", "", op_raw))
+    op = fig(op_raw, value, "percent", label=op_label, id="op")
+    exp = fig(exp_raw, exp_value, "percent", label=exp_label, id="exp")
+    spec = {
+        "operator": "inverse_change",
+        "operands": ["op"],
+        "expected_id": "exp",
+        "direction": direction,
+        "kind": "contradiction",
+    }
+    return compute(spec, {"op": op, "exp": exp})
+
+
+def test_a_reduction_confirms_its_reciprocal_increase() -> None:
+    """36% less resistivity IS 56.25% more conductivity; a flat comparison of the two reports a
+    disagreement that does not exist."""
+    r = _inverse("↓36%", "resistivity reduction", "56%", 56, "conductivity gain", "reduction")
+    assert r.verdict == "confirmation", (r.rendered, r.reasons)
+    assert r.computed == pytest.approx(56.25)
+    assert r.computed_unit == "percent"
+
+
+def test_an_increase_confirms_its_reciprocal_reduction() -> None:
+    r = _inverse("45%", "throughput", "↓31%", 31, "latency", "increase")
+    assert r.verdict == "confirmation", (r.rendered, r.reasons)
+    assert r.computed == pytest.approx(45 / 145 * 100)
+
+
+def test_a_known_reciprocal_pair_that_disagrees_is_a_finding() -> None:
+    r = _inverse("↓36%", "resistivity reduction", "70%", 70, "conductivity gain", "reduction")
+    assert r.verdict == "contradiction", r.reasons
+    assert "reciprocal measure" in r.rendered
+
+
+def test_outside_the_reciprocal_table_a_disagreement_establishes_nothing() -> None:
+    r = _inverse("↓36%", "churn reduction", "70%", 70, "retention gain", "reduction")
+    assert r.verdict == "incomparable"
+    assert "not known to be reciprocals" in " ".join(r.reasons)
+    # ... but an agreement outside the table still stands.
+    assert _inverse("↓36%", "churn reduction", "56%", 56, "retention gain", "reduction").verdict == "confirmation"
+
+
+def test_a_declared_direction_the_wording_contradicts_is_refused() -> None:
+    assert (
+        _inverse("↓36%", "resistivity reduction", "56%", 56, "conductivity gain", "increase").verdict == "incomparable"
+    )
+    # the stated side worded as the SAME direction is refused too
+    r = _inverse("↓36%", "resistivity reduction", "56%", 56, "conductivity reduction", "reduction")
+    assert r.verdict == "incomparable"
+
+
+def test_an_at_most_operand_spans_from_zero() -> None:
+    r = _inverse("up to 36%", "resistivity reduction", "70%", 70, "conductivity gain", "reduction")
+    assert (r.span_lo, r.span_hi) == (pytest.approx(0.0), pytest.approx(56.25))
+    assert r.verdict == "contradiction"
+
+
+@pytest.mark.parametrize("raw", ["36%+", "↓100%"])
+def test_inverse_change_refuses_what_has_no_reciprocal(raw: str) -> None:
+    r = _inverse(raw, "resistivity reduction", "56%", 56, "conductivity gain", "reduction")
+    assert r.dropped, r.rendered
+
+
+# --------------------------------------------------------------------------
+# `implied_base`: always a reading, never a finding.
+# --------------------------------------------------------------------------
+
+
+def _base(money_raw: str, money: float, pct_raw: str, pct: float, **spec: Any) -> Relation:
+    m = fig(money_raw, money, "money", label="EMEA revenue", id="m", attribution="quote_carries_label")
+    p = fig(pct_raw, pct, "percent", label="share of revenue", id="p", attribution="quote_carries_label")
+    e = fig("$41M", 41_000_000, "money", label="total revenue", id="e")
+    body = {"operator": "implied_base", "operands": ["m", "p"], "kind": "derived_ratio", **spec}
+    return compute(body, {"m": m, "p": p, "e": e})
+
+
+def test_an_implied_base_is_a_derived_interval() -> None:
+    r = _base("$4.8M", 4_800_000, "12%", 12)
+    assert r.verdict == "derived" and r.confidence == "high"
+    assert r.span_lo is not None and r.span_hi is not None
+    assert r.span_lo < 40_000_000 < r.span_hi
+    assert select([r]) == [r]
+
+
+def test_an_implied_base_never_binds_a_stated_figure() -> None:
+    r = _base("$4.8M", 4_800_000, "12%", 12, expected_id="e")
+    assert r.verdict == "derived" and r.expected_id is None
+    assert "reading only" in " ".join(r.reasons)
+
+
+def test_a_wide_implied_base_is_held_back() -> None:
+    r = _base("$3M", 3_000_000, "4%", 4)
+    assert r.confidence == "medium"
+    assert select([r]) == []
+
+
+def test_an_implied_base_from_a_zero_share_is_refused() -> None:
+    assert _base("$3M", 3_000_000, "0%", 0).dropped

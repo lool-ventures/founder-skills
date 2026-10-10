@@ -885,8 +885,7 @@ Propose a relation whenever the deck implies one an investor would run:
   - **two dated magnitudes plus a growth multiple or CAGR between them** — a market
     slide stating a size now, a size in N years, and a "4X" or a rate is three
     claims about the same two numbers, so propose `end / start` against the stated
-    multiple. Measured: a deck stated all four, the ledger extracted all four, and
-    zero relations were proposed. This is the slide founders paste third-party
+    multiple. This is the slide founders paste third-party
     research onto and rarely re-check, and every operand is printed rather than
     inferred.
   - a characterisation the numbers support that the deck never states at all
@@ -905,7 +904,15 @@ Use your Write tool to write to OUTPUT_PATH:
 `kind` must be exactly `contradiction` or `derived_ratio` — nothing else. A sum of
 components is `derived_ratio`; the name refers to how the comparison is framed, not to
 the operator, and a value invented to fit the operator is rejected.
-`operator` must be one of `ratio`, `product`, `sum`, `increase_by`, `difference`.
+`operator` must be one of `ratio`, `product`, `sum`, `increase_by`, `difference`,
+`runway`, `inverse_change`, `implied_base`.
+  - `runway`: cash ids, then burn ids. Given a burn plan, never divide by one year's burn:
+    add `"schedule": [{"id": "<burn id>", "from": "YYYY-MM", "to": "YYYY-MM"}]` (`to`
+    inclusive; only the last segment omits it) and optional `"start": "YYYY-MM"`.
+  - `inverse_change`: one percent operand, `"direction": "reduction"` or `"increase"`, against
+    the stated change in its reciprocal (resistivity/conductivity, latency/throughput,
+    time/speed, cost per unit/units per dollar).
+  - `implied_base`: a money figure, then the percent of a whole it is; no `expected_id`.
 Two optional fields go with `expected_id`. `"relation": "at_most"` says the deck states a
 **ceiling** the other figures must not exceed — a production capacity, a budget, a headcount
 cap — rather than a target they should match; the default is `equals`. `"per": "year"` says

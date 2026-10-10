@@ -115,7 +115,10 @@ optional `expected_id`. Alongside `expected_id` you may add `"relation":
 "at_most"` when the stated figure is a ceiling the others must not exceed (a
 capacity, a budget, a headcount cap) rather than a target they should match,
 and `"per": "year"` when the two operands are snapshots one year apart so
-their difference is an annual rate.
+their difference is an annual rate. For `runway`, list cash then burn and, when
+the deck gives a burn plan, a `schedule` of the burn's months, never one
+year's burn; `inverse_change` takes a `direction` and only reciprocal measures;
+`implied_base` takes no `expected_id`.
 
 For `INTERPRETATION`: review comparisons the arithmetic found to disagree with a
 figure the deck itself states, and withdraw any that should not be put to a founder

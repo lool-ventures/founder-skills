@@ -130,6 +130,12 @@ class Relation:
     # about the one claim an investor will probe hardest. Carries the claim's own wording, so
     # a renderer can name it rather than gesture at it.
     untested_claim: str = ""
+    # Rendering parts for operators whose line is rebuilt once the comparison has fixed the
+    # number space: `head` is everything before " = ", `unit_word` follows the number and
+    # `note` closes the line. Never emitted; `rendered` is the only founder-facing text.
+    head: str = ""
+    unit_word: str = ""
+    note: str = ""
 
 
 # A single-letter suffix must not be the first letter of a WORD. Without this guard
@@ -824,12 +830,53 @@ def time_scale(raw: str) -> float | None:
     comparable to a labelled one, and guessing would put the same class of error back with
     a different magnitude.
     """
+    unit = time_unit(raw)
+    return unit[1] if unit else None
+
+
+def time_unit(raw: str) -> tuple[str, float] | None:
+    """The written time unit as (singular name, seconds per unit), or None. See `time_scale`."""
     low = (raw or "").lower()
     for names, secs in _TIME_UNITS:
         for n in names:
             if re.search(rf"\b{n}\b", low):
-                return secs
+                return names[1], secs
     return None
+
+
+def written_time_unit(fig: Figure) -> tuple[str, float] | None:
+    """A duration figure's time unit: from its raw string, else from its own label.
+
+    The raw string wins. The label is read only when the raw names no unit, because ledgers
+    routinely carry the unit there and nowhere else -- "12-14" labelled "runway secured
+    (months)" -- and refusing that figure lost two expert-graded real findings on a kept run.
+    A raw like "36m" with no unit in its label is still refused (it reads as 36 million).
+    """
+    return time_unit(fig.raw) or time_unit(fig.label)
+
+
+_MONTH_SECONDS = 2_629_800.0
+
+DURATION_TOLERANCE_FLOOR_SECONDS = _MONTH_SECONDS
+"""A stated duration with no bound tolerates at least one unit of its written unit, but never
+more than a month. A CHOICE.
+
+The significant-figure floor reads "26 months" as +/-0.5 month, so a computed 25.4 months
+contradicted it -- a 2% gap on a figure decks quote in whole months and almost never mark
+"~". One written unit (+/-1 month) is the honest reading of a whole-month figure. The month
+cap is what keeps the rule from LOOSENING anything else: "one written unit" of "3 years" is
+a whole year, against today's half-year, so a year-stated figure keeps its own precision
+and a day- or week-stated one gains at most a single day or week.
+"""
+
+
+def duration_tolerance(fig: Figure) -> float:
+    """`figure_tolerance`, floored for an unbounded duration. See DURATION_TOLERANCE_FLOOR_SECONDS."""
+    tol = figure_tolerance(fig)
+    unit = written_time_unit(fig)
+    if fig.unit_kind != DURATION or fig.bound is not None or unit is None:
+        return tol
+    return max(tol, min(1.0, DURATION_TOLERANCE_FLOOR_SECONDS / unit[1]))
 
 
 def _is_exact_count(fig: Figure) -> bool:
@@ -1441,6 +1488,281 @@ def _scale_divergent(computed: float, stated: float) -> bool:
     return any(abs(ratio / 10**n - 1.0) < 0.01 for n in (3, 6, 9))
 
 
+# Months per period, for converting a flow between bases.
+PERIODS = {"month": 1.0, "year": 12.0, "quarter": 3.0, "week": 1 / 4.345, "day": 1 / 30.44}
+
+_YEAR_MONTH = re.compile(r"^\s*(\d{4})-(\d{2})\s*$")
+_MONTH_NAMES = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+
+def _month_index(text: Any) -> int | None:
+    """A "YYYY-MM" string as a month count, or None when it is anything else."""
+    m = _YEAR_MONTH.match(text) if isinstance(text, str) else None
+    if not m or not 1 <= int(m.group(2)) <= 12:
+        return None
+    return int(m.group(1)) * 12 + int(m.group(2)) - 1
+
+
+def _month_label(index: int) -> str:
+    return f"{_MONTH_NAMES[index % 12]} {index // 12}"
+
+
+def _span_text(lo: float, hi: float) -> str:
+    return f"{lo:,.1f}" if lo == hi else f"{lo:,.2f}–{hi:,.2f}"
+
+
+def _months_of_runway(cash: float, segments: list[tuple[int, int | None, float]], start: int) -> float | None:
+    """Months until `cash` is spent on a burn plan of contiguous (from, to-inclusive, monthly burn)
+    segments, counted from the start of month `start`. None when the cash outlasts the plan: a
+    closed last segment ends with cash left, or an open one burns nothing."""
+    remaining, months = cash, 0.0
+    for first, last, burn in segments:
+        first = max(first, start)
+        if last is not None and last < first:
+            continue
+        if last is None:
+            return months + remaining / burn if burn > 0 else None
+        span = last - first + 1
+        if burn > 0 and remaining <= burn * span:
+            return months + remaining / burn
+        remaining -= burn * span
+        months += span
+    return None
+
+
+def _runway(r: Relation, real: list[Figure], rel_spec: dict[str, Any], alias: dict[str, str]) -> str | None:
+    """Months of runway from the named cash and the deck's burn, or the reason it cannot be had.
+
+    CASH IS ONLY WHAT THE DECK NAMES, and the line says so. A company holding cash the deck
+    does not mention has a LONGER runway than this computes, which is why the comparison is
+    one-sided in the founder's favour (see the comparison block): only a computed runway
+    shorter than the stated one is ever a disagreement.
+
+    A burn PLAN is read as given: `schedule` lists each burn figure with the months it covers
+    ("YYYY-MM", `to` inclusive, only the last segment open), so a deck that budgets one rate
+    this year and another next is not divided by a single year's burn. With no schedule the
+    last operand is the burn and the rest are cash -- a plain cash / burn division. The burn's
+    period is converted to monthly; a burn with no period is refused, never assumed.
+    """
+    schedule = rel_spec.get("schedule")
+    start_spec = rel_spec.get("start")
+    if len(real) < 2:
+        return "a runway needs at least one cash figure and one burn figure"
+    by_op = {f.id: f for f in real}
+    if schedule:
+        if not isinstance(schedule, list) or not all(isinstance(s, dict) for s in schedule):
+            return "the burn schedule must be a list of segments"
+        parsed: list[tuple[int, int | None, Figure]] = []
+        for seg in schedule:
+            seg_id = alias.get(str(seg.get("id")), str(seg.get("id")))
+            first, last_raw = _month_index(seg.get("from")), seg.get("to")
+            last = _month_index(last_raw) if last_raw is not None else None
+            if seg_id not in by_op:
+                return f"burn schedule names {seg.get('id')!r}, which is not one of this relation's operands"
+            if first is None or (last_raw is not None and last is None):
+                return "a burn schedule month is not of the form YYYY-MM"
+            if last is not None and last < first:
+                return "a burn schedule segment ends before it starts"
+            parsed.append((first, last, by_op[seg_id]))
+        parsed.sort(key=lambda p: p[0])
+        for (_f0, l0, _b0), (f1, _l1, _b1) in zip(parsed, parsed[1:], strict=False):
+            if l0 is None:
+                return "only the last burn schedule segment may be open-ended"
+            if f1 != l0 + 1:
+                return "the burn schedule's segments overlap or leave a gap"
+        burns = list(dict.fromkeys(p[2].id for p in parsed))
+        cash = [f for f in real if f.id not in burns]
+    else:
+        parsed = [(0, None, real[-1])]
+        burns, cash = [real[-1].id], real[:-1]
+    if not cash:
+        return "a runway needs at least one cash figure besides the burn"
+    for f in cash:
+        if f.unit_kind != MONEY or f.period:
+            return f"{f.raw} is not a cash balance (money with no period)"
+    burn_figs = [by_op[b] for b in burns]
+    for f in burn_figs:
+        if f.unit_kind != MONEY:
+            return f"{f.raw} is not a burn (money per period)"
+        if f.period not in PERIODS:
+            return f"{f.raw} has no period, so it cannot be read as a burn rate"
+    currencies = {f.currency for f in [*cash, *burn_figs]}
+    if len(currencies) > 1:
+        return f"currency mismatch: {sorted(str(c) for c in currencies)}"
+    bounded = [f for f in [*cash, *burn_figs] if f.bound in ("at_least", "at_most")]
+    if bounded:
+        return f"cannot compute a runway from an open-ended figure ({bounded[0].raw})"
+    first_month = parsed[0][0]
+    start = first_month
+    if start_spec is not None:
+        start_index = _month_index(start_spec)
+        if start_index is None:
+            return "the runway's start month is not of the form YYYY-MM"
+        if start_index < first_month or (parsed[-1][1] is not None and start_index > parsed[-1][1]):
+            return "the runway's start month falls outside the burn schedule"
+        start = start_index
+
+    def monthly(f: Figure, v: float) -> float:
+        return abs(v) / PERIODS[str(f.period)]
+
+    def run(cash_pick: int, burn_pick: int) -> float | None:
+        total = sum(f.span()[cash_pick] if cash_pick >= 0 else f.value for f in cash)
+        segs: list[tuple[int, int | None, float]] = []
+        for first, last, f in parsed:
+            lo, hi = sorted(monthly(f, v) for v in f.span())
+            segs.append((first, last, (lo, hi)[burn_pick] if burn_pick >= 0 else monthly(f, f.value)))
+        return _months_of_runway(total, segs, start) if total > 0 else None
+
+    point, low, high = run(-1, -1), run(0, 1), run(1, 0)
+    if point is None or low is None or high is None:
+        if not schedule and monthly(burn_figs[0], burn_figs[0].value) == 0:
+            return "division by zero"
+        return "the named cash outlasts the burn plan (it ends, or burns nothing), so no runway can be computed"
+    r.computed, r.computed_unit = point, "duration:month"
+    if low != high:
+        r.span_lo, r.span_hi = low, high
+    cash_text = " + ".join(f.raw for f in cash)
+    if schedule:
+
+        def per(f: Figure) -> str:
+            return f.raw if time_unit(f.raw) else f"{f.raw} a {f.period}"
+
+        plan = ", then ".join(
+            f"{per(f)} ({_month_label(a)}–{_month_label(b)})" if b is not None else f"{per(f)} (from {_month_label(a)})"
+            for a, b, f in parsed
+        )
+        r.head = f"{cash_text} against a burn of {plan}, starting {_month_label(start)}"
+    else:
+        r.head = f"{cash_text} ÷ {burn_figs[0].raw}"
+    r.unit_word, r.note = " months", ", counting only the cash named"
+    r.rendered = (
+        f"{r.head} = {_span_text(*(sorted((low, high)) if low != high else (point, point)))}{r.unit_word}{r.note}"
+    )
+    return None
+
+
+# Pairs of measures where a cut in one IS a rise in the other (each the reciprocal of the
+# other), matched on the two figures' labels. CLOSED, and deliberately short: `inverse_change`
+# rests on the proposer saying two metrics are reciprocals, and a pair named here is the only
+# thing other than the proposer that can establish it. Outside the table the operator may still
+# CONFIRM -- recognising that two figures agree removes a false finding -- but it never
+# reports a disagreement. Mirrored in SKILL.md Step 3.7 so the proposer sees the same list.
+_RECIPROCAL_PAIRS: tuple[tuple[str, str], ...] = (
+    (r"\bresistivity\b", r"\bconductivity\b"),
+    (r"\bresistance\b", r"\bconductance\b"),
+    (r"\b(?:latency|response time|cycle time|lead time|processing time)\b", r"\bthroughput\b"),
+    (r"\btime\b", r"\b(?:speed|velocity)\b"),
+    (r"\bcost per\b", r"\bper (?:dollar|euro|pound|\$|€|£)"),
+)
+
+
+def _known_reciprocals(a: str, b: str) -> bool:
+    for x, y in _RECIPROCAL_PAIRS:
+        if (re.search(x, a, re.I) and re.search(y, b, re.I)) or (re.search(y, a, re.I) and re.search(x, b, re.I)):
+            return True
+    return False
+
+
+def _inverse_change(r: Relation, real: list[Figure], rel_spec: dict[str, Any]) -> str | None:
+    """The change in a measure's reciprocal implied by a stated change in the measure.
+
+    A reduction of r% in one is an increase of r/(100-r)% in its reciprocal; an increase of g%
+    is a reduction of g/(100+g)%. So "20% faster" and "a sixth less time" are one claim, and a
+    flat comparison of the two percentages reports a disagreement that does not exist.
+
+    `computed_unit` is "percent", never "dimensionless": the dimensionless path into the
+    comparison is where a stated reduction is refused against a computed share, and this
+    result is neither.
+    """
+    direction = str(rel_spec.get("direction", ""))
+    if len(real) != 1:
+        return "inverse_change takes exactly one percent operand"
+    (pct,) = real
+    if pct.unit_kind != PERCENT:
+        return f"inverse_change needs a percent, got {pct.raw}"
+    if direction not in ("reduction", "increase"):
+        return "inverse_change needs a direction of reduction or increase"
+    if pct.bound == "at_least":
+        return f"cannot invert an open-ended change ({pct.raw})"
+    lo, hi = pct.span()
+    if min(lo, hi, pct.value) < 0:
+        return f"{pct.raw} is negative; state the direction instead"
+    if pct.bound == "at_most":
+        lo = 0.0
+    elif pct.bound == "approximate":
+        widen = APPROX_WIDENING * max(abs(lo), abs(hi))
+        lo, hi = max(0.0, lo - widen), hi + widen
+    if direction == "reduction" and max(hi, pct.value) >= 100:
+        return f"a reduction of {pct.raw} leaves nothing whose reciprocal can grow"
+
+    def inverse(x: float) -> float:
+        return x / (100.0 - x) * 100.0 if direction == "reduction" else x / (100.0 + x) * 100.0
+
+    r.computed, r.computed_unit = inverse(pct.value), "percent"
+    if lo != hi:
+        r.span_lo, r.span_hi = inverse(lo), inverse(hi)
+    other = "increase" if direction == "reduction" else "reduction"
+    r.head = f"a {direction} of {pct.raw}" + (f" in {pct.label}" if pct.label else "")
+    r.unit_word, r.note = "%", f" {other} in the reciprocal measure"
+    shown = (r.span_lo, r.span_hi) if r.span_lo is not None and r.span_hi is not None else (r.computed, r.computed)
+    r.rendered = f"{r.head} = {_span_text(*shown)}{r.unit_word}{r.note}"
+    return None
+
+
+IMPLIED_BASE_MAX_SPREAD = 1.5
+"""Widest an implied base may be (high / low) and still be shown. A CHOICE.
+
+The base is a division by a percentage, and a small rounded percentage makes it very wide:
+"$3M is 5%" spans 54-67M from rounding alone, "is 2%" 1.2-2x. Past 1.5x the reading says
+little a founder can use, so it is held to medium confidence and `select()` keeps it back.
+"""
+
+
+def _implied_base(r: Relation, real: list[Figure]) -> str | None:
+    """The whole a stated amount is a stated share of: money / percent. A READING, never a finding.
+
+    Both operands are widened by their own written precision before dividing, because the
+    division amplifies the percentage's rounding; the base is therefore always an interval.
+    """
+    if len(real) != 2:
+        return "implied_base needs a money figure and the percent it is of"
+    money, pct = real
+    if money.unit_kind != MONEY or pct.unit_kind != PERCENT:
+        return f"implied_base needs money then a percent, got {money.raw} and {pct.raw}"
+    bounded = [f for f in real if f.bound in ("at_least", "at_most")]
+    if bounded:
+        return f"cannot imply a base from an open-ended figure ({bounded[0].raw})"
+    m_tol, p_tol = figure_tolerance(money), figure_tolerance(pct)
+    m_lo, m_hi = money.span()
+    p_lo, p_hi = pct.span()
+    m_lo, m_hi, p_lo, p_hi = m_lo - m_tol, m_hi + m_tol, p_lo - p_tol, p_hi + p_tol
+    if p_lo <= 0 or m_lo <= 0:
+        return f"{pct.raw} of {money.raw} is too close to zero to imply a base"
+    r.computed = money.value / (pct.value / 100.0)
+    r.span_lo, r.span_hi = m_lo / (p_hi / 100.0), m_hi / (p_lo / 100.0)
+    r.computed_unit = MONEY + (f":{money.period}" if money.period else "")
+    r.rendered = f"{money.raw} at {pct.raw} implies a base of {r.span_lo:,.0f}–{r.span_hi:,.0f}"
+    if r.span_hi / r.span_lo > IMPLIED_BASE_MAX_SPREAD:
+        r.confidence = "medium"
+        r.reasons.append("the implied base is too wide to be a useful reading")
+    return None
+
+
+def _computed_time_unit(r: Relation, real: list[Figure]) -> tuple[str, float] | None:
+    """The time unit the computed side of a duration comparison is in, or None if unknown.
+
+    A rate's result is in its denominator's period ("duration:month"); every other operator
+    carries its duration operands' own written unit, which must be one unit for all of them.
+    """
+    cu = r.computed_unit or ""
+    if r.operator in ("ratio", "runway"):
+        return time_unit(cu.split(":", 1)[1]) if ":" in cu else None
+    units = {written_time_unit(f) for f in real if f.unit_kind == DURATION}
+    if len(units) != 1:
+        return None
+    return units.pop()
+
+
 def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
     """Compute one proposed relation, or refuse it.
 
@@ -1474,13 +1796,11 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
     # and "2030 increased by 20% = 2,436" rendered as a founder-facing line.
     #
     # REFUSED, not converted -- including `difference`, which is the one date relation with
-    # an obvious meaning. Computing it is still unsafe: the result carries `unit_kind: date`,
-    # `time_scale` normalizes time units in the `ratio` branch ONLY, and the comparison gate
-    # matches a bare duration against ANY stated DURATION regardless of the unit written on
-    # the slide. So "10 years - 5 years = 5" against a stated "60 months" would return a
-    # CONTRADICTION where today it returns incomparable, and a false contradiction is the
-    # worst thing this module can emit. Generic duration normalization has to land first,
-    # as its own change; until then a date difference computes nothing, which is safe.
+    # an obvious meaning. The comparison gate now converts a computed duration into the
+    # stated figure's written unit (and refuses when either unit is unknown), but a date
+    # difference would carry `unit_kind: date` and no written time unit at all, so it would
+    # need its own normalization; until that lands a date difference computes nothing, which
+    # is safe.
     #
     # THE STATED SIDE IS INCLUDED. Otherwise a count sum gets compared against a year and
     # that year's tolerance decides it -- and a quarter-prefixed year's tolerance is 101.25,
@@ -1512,7 +1832,6 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
     #     were likewise refused instead of converted.
     #
     # Refuse only what is genuinely meaningless; convert what is merely inconvenient.
-    PERIODS = {"month": 1.0, "year": 12.0, "quarter": 3.0, "week": 1 / 4.345, "day": 1 / 30.44}
 
     def as_fraction(f: Figure) -> float:
         """A percent participates in arithmetic as a fraction, never as its face value."""
@@ -1688,6 +2007,17 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
         r.computed = (a.value - b.value) if both_pct else (as_fraction(a) - as_fraction(b))
         r.computed_unit = a.unit_kind + (f":{a.period}" if a.period else "")
         r.rendered = f"{a.raw} − {b.raw} = {r.computed:,.2f}".rstrip("0").rstrip(".")
+    elif r.operator in ("runway", "inverse_change", "implied_base"):
+        # Read as literal strings so `test_dispatch_schema_drift.py` sees the spec keys consumed.
+        if r.operator == "runway":
+            refusal = _runway(r, real, rel_spec, alias)
+        elif r.operator == "inverse_change":
+            refusal = _inverse_change(r, real, rel_spec)
+        else:
+            refusal = _implied_base(r, real)
+        if refusal:
+            r.dropped, r.reasons = True, [refusal]
+            return r
     else:
         r.dropped, r.reasons = True, [f"unsupported operator: {r.operator!r}"]
         return r
@@ -1709,6 +2039,12 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
         return r
     exp_id = rel_spec.get("expected_id")
     exp_id = alias.get(str(exp_id), exp_id) if exp_id else exp_id
+    if exp_id and r.operator == "implied_base":
+        # A READING, NEVER A FINDING. The base is a division by a rounded percentage, wide by
+        # construction, and nothing the deck states is "the base" in a sense this could test.
+        # Same shape as the corroboration guard below: the binding goes, the reading stays.
+        r.reasons.append("an implied base is a reading only and is never tested against a stated figure")
+        exp_id = None
     if exp_id and (exp := by_id.get(str(exp_id))) is not None and not exp.verified:
         # THE STATED SIDE MUST CLEAR THE SAME GATE THE OPERANDS DO. Operands are dropped
         # hard when the second read cannot find them (above); the expected figure was
@@ -1749,6 +2085,21 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
         )
         r.untested_claim = f"{exp.raw}{f' ({exp.label})' if exp.label else ''}"
         exp_id = None
+    if r.operator == "inverse_change":
+        # THE DECLARED DIRECTION MUST AGREE WITH THE DECK'S OWN WORDING, on both sides: the
+        # operand reads as a reduction exactly when the direction says so, and the stated
+        # figure reads as the opposite change. `_is_reduction` is glyph- and word-based and
+        # cannot read every phrasing, so a mismatch is undecided rather than wrong -- it
+        # refuses, and never manufactures a disagreement.
+        reduction = str(rel_spec.get("direction")) == "reduction"
+        stated = by_id.get(str(exp_id)) if exp_id else None
+        if _is_reduction(real[0]) != reduction or (stated is not None and _is_reduction(stated) == reduction):
+            r.verdict = "incomparable"
+            r.reasons.append(
+                "the stated direction of change does not match how the deck words these figures, "
+                "so nothing is established"
+            )
+            return r
     if exp_id and (exp := by_id.get(str(exp_id))) is not None and r.computed is not None:
         r.expected_id, r.expected_value = exp.id, exp.value
         # BRING BOTH SIDES INTO THE SAME UNIT BEFORE COMPARING, or refuse to compare.
@@ -1774,7 +2125,26 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
             r.computed_unit = f"{r.computed_unit}:{per}"
         cu = r.computed_unit or ""
         comparable: float | None = None
-        if cu == exp_unit or (cu.startswith(exp.unit_kind) and not exp.period):
+        # A DURATION IS COMPARED IN THE STATED FIGURE'S OWN WRITTEN UNIT. The magnitude lives
+        # in `value` and the unit only in the raw string, and the old gate compared the bare
+        # magnitudes -- so a cash / monthly burn of 30.0 months contradicted a stated "2.5
+        # years", 30 against 2.5. This branch comes FIRST because the generic one below
+        # (`cu.startswith(exp.unit_kind)`) matches every "duration:<period>" and would compare
+        # raw numbers again. Either unit unknown is a refusal: "36m" reads as 36 million, and a
+        # guessed unit is the same error at a different magnitude (see `time_scale`).
+        dur_scale, dur_unit = 1.0, ""
+        if exp.unit_kind == DURATION and cu.startswith(DURATION):
+            c_unit, e_unit = _computed_time_unit(r, real), written_time_unit(exp)
+            if c_unit is None or e_unit is None:
+                r.verdict = "incomparable"
+                r.reasons.append(
+                    f"cannot test a duration against {exp.raw}: the time unit of "
+                    f"{'the stated figure' if e_unit is None else 'the computed side'} is not written"
+                )
+                return r
+            dur_scale, dur_unit = c_unit[1] / e_unit[1], e_unit[0]
+            comparable = r.computed * dur_scale
+        elif cu == exp_unit or (cu.startswith(exp.unit_kind) and not exp.period):
             comparable = r.computed
         elif cu == "dimensionless" and exp.unit_kind == PERCENT and _is_reduction(exp):
             # A REDUCTION AND A REMAINING RATIO ARE NOT THE SAME QUANTITY. They are
@@ -1802,8 +2172,6 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
         elif cu == "dimensionless" and exp.unit_kind in (PERCENT, MULTIPLE):
             # a bare ratio IS a percent, once scaled
             comparable = r.computed * 100 if exp.unit_kind == PERCENT else r.computed
-        elif cu.startswith("duration:") and exp.unit_kind == DURATION:
-            comparable = r.computed
 
         if comparable is None:
             r.verdict = "incomparable"
@@ -1817,12 +2185,12 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
         # computed against a stated 3.5% was certified as matching. Under any
         # significant-figures rule it also becomes actively destructive -- a $57,000
         # operand would donate +/-500 and silently absorb a genuine 34% error.
-        tol = figure_tolerance(exp) + operand_tolerance(r.operator, real)
+        tol = duration_tolerance(exp) + operand_tolerance(r.operator, real) * dur_scale
         # Compare INTERVALS, not points. A contradiction exists only when the computed
         # range and the stated range cannot both be true -- if they overlap, the deck is
         # consistent with itself and there is nothing to report. Point values are
         # zero-width intervals, so this subsumes the simple case.
-        scale = 100.0 if (r.computed_unit == "dimensionless" and exp.unit_kind == PERCENT) else 1.0
+        scale = 100.0 if (r.computed_unit == "dimensionless" and exp.unit_kind == PERCENT) else dur_scale
         c_lo = (r.span_lo if r.span_lo is not None else r.computed) * scale
         c_hi = (r.span_hi if r.span_hi is not None else r.computed) * scale
         c_lo, c_hi = min(c_lo, c_hi), max(c_lo, c_hi)
@@ -1854,6 +2222,10 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
                 f"{'percentage' if exp.unit_kind == PERCENT else 'multiple'}, so nothing is established"
             )
             return r
+        if relation == "at_most" and r.operator == "runway":
+            r.verdict = "incomparable"
+            r.reasons.append("a runway is tested only for falling short of the stated one, never as a ceiling")
+            return r
         if relation == "at_most" and exp.bound == "at_least":
             # INCOHERENT, so it suppresses. The relation says the figure is a ceiling and
             # the figure's own text says it is a floor; nothing here can decide which the
@@ -1864,7 +2236,13 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
                 "what the deck asserts about it is undecided and nothing is established"
             )
             return r
-        if relation == "at_most":
+        if r.operator == "runway":
+            # ONE-SIDED IN THE FOUNDER'S FAVOUR. Only the cash the deck names is counted, and
+            # any cash it does not name can only LENGTHEN the runway -- so a computed runway
+            # longer than the stated one is the deck being conservative, and a shorter one is
+            # the only disagreement. Against an "up to" stated runway nothing can disagree.
+            disjoint = exp.bound != "at_most" and c_hi < e_lo - tol
+        elif relation == "at_most":
             disjoint = c_lo > e_hi + tol
         # A bounded figure gets a ONE-SIDED test. "$200B+" is satisfied by anything at or
         # above it, so a computed $212.3B confirms it rather than contradicting it.
@@ -1877,7 +2255,13 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
         # Render the computed side in the STATED figure's unit. "145.5%" printed beside
         # "20–40×" is arithmetically right and reads as apples to oranges; 1.45x beside
         # 20–40x is the same fact, comparable at a glance.
-        if exp.unit_kind == MULTIPLE and r.computed_unit == "dimensionless":
+        if dur_unit:
+            # Printed in the unit it was compared in, which is the unit the deck wrote.
+            head = r.head or r.rendered.partition(" = ")[0]
+            r.rendered = f"{head} = {_span_text(c_lo, c_hi)} {dur_unit}s{r.note}"
+        elif r.head:
+            r.rendered = f"{r.head} = {_span_text(c_lo, c_hi)}{r.unit_word}{r.note}"
+        elif exp.unit_kind == MULTIPLE and r.computed_unit == "dimensionless":
             span = f"{c_lo:,.2f}–{c_hi:,.2f}x" if c_lo != c_hi else f"{c_lo:,.2f}x"
             r.rendered = r.rendered.split(" = ")[0] + f" = {span}"
         elif r.span_lo is not None and r.span_lo != r.span_hi:
@@ -1942,6 +2326,12 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
             # it does for a contradiction.
             src = "the deck states a limit of" if exp.visible else "the underlying data behind that chart gives"
             r.rendered += f"  — more than {src} {_stated(exp)}" + (f" ({exp.label})" if exp.label else "")
+        elif disjoint and r.operator == "inverse_change" and not _known_reciprocals(real[0].label, exp.label):
+            # Only the table of known reciprocal measures, never the proposer's say-so, can
+            # establish that these two move inversely -- so outside it a disagreement says
+            # nothing. See _RECIPROCAL_PAIRS.
+            r.verdict = "incomparable"
+            r.reasons.append("the two measures are not known to be reciprocals, so no disagreement is established")
         elif disjoint:
             r.verdict = "contradiction"
             # "the deck states X" is a claim about what the document SAYS, and it must
@@ -1966,7 +2356,7 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
                 "is within the stated"
                 if relation == "at_most"
                 else "is consistent with the stated"
-                if exp.bound in ("at_least", "at_most")
+                if exp.bound in ("at_least", "at_most") or r.operator == "runway"
                 else "matches the stated"
             )
             r.rendered += f"  — {verb} {_stated(exp)}"

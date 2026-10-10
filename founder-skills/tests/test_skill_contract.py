@@ -1534,7 +1534,12 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 113,605 -> 113,597 (-8 B), LOWERED, commit 8 (N7): Step 1's geography line no longer says geography
     # selects the guidance the whole deck review is graded against (no deck-review script reads geography); it
     # says it is saved for later reviews and a financial model review grades against it.
-    "deck-review": 113_597,
+    # 113,597 -> 114,117 (+520 B): Step 3.7's RELATION_PROPOSAL template names the three new operators
+    # (`runway` with its burn-plan `schedule`/`start`, `inverse_change` with `direction` and the closed list
+    # of reciprocal pairs the engine accepts, `implied_base` with no `expected_id`), appended after the
+    # operator line so the dated-magnitudes window is untouched. The "Measured: ..." history sentence in
+    # that bullet was removed to pay for part of it; the measurement lives in its contract test.
+    "deck-review": 114_117,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
