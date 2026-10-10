@@ -607,8 +607,9 @@ LEGACY_REFERENCES_CAP = 8 * 1024  # historical; references now ship whole
 # described a field existing in no script or artifact.
 # deck-review +645 B and market-sizing +137 B for the geography guard. A live run derived company,
 # stage and sector from the deck, found NO geography signal anywhere in it, and recorded "US"
-# rather than asking — inferred from `$` and from two founders' ex-employers. Geography selects the
-# regulatory and benchmark guidance the whole review is graded against. deck-review already said to
+# rather than asking — inferred from `$` and from two founders' ex-employers. Geography is saved for
+# later reviews and a financial model review grades against it (no deck-review script reads it; a deck
+# review is not graded by it, as this comment once claimed). deck-review already said to
 # ask when the deck yields no signal; what was missing is that deriving THREE of the four does not
 # license skipping the ask for the fourth. market-sizing's carve-out went further and named
 # currency as a geography signal outright, which is unsound: `$` is also CAD, AUD and SGD.
@@ -1530,7 +1531,10 @@ SKILL_MD_CEILING: dict[str, int] = {
     # checkpoints; two justification/history sentences removed to pay for it.
     # 113,613 -> 113,610 (-3), LOWERED, commit 10 (O3): the compose step says to read compose_result.json on a
     # non-zero exit, paid for in the same step; the heredoc warning shortened, its reason kept.
-    "deck-review": 113_605,
+    # 113,605 -> 113,597 (-8 B), LOWERED, commit 8 (N7): Step 1's geography line no longer says geography
+    # selects the guidance the whole deck review is graded against (no deck-review script reads geography); it
+    # says it is saved for later reviews and a financial model review grades against it.
+    "deck-review": 113_597,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.

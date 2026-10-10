@@ -2114,3 +2114,33 @@ def test_funding_history_has_its_own_field_and_the_template_invents_none() -> No
     fence = text.index("INVENTORY_EOF", step2)
     heredoc = text[fence : text.index("INVENTORY_EOF", fence + 1)]
     assert "prior_rounds" not in heredoc
+
+
+# ---------------------------------------------------------------------------
+# Geography is not a deck-review grading input
+# ---------------------------------------------------------------------------
+
+
+def _deck_review_scripts_reading_geography() -> list[str]:
+    return sorted(p.name for p in SCRIPTS_DIR.rglob("*.py") if "geograph" in p.read_text(encoding="utf-8").lower())
+
+
+def test_skill_md_does_not_claim_geography_grades_the_deck() -> None:
+    """SKILL.md may not say a review is 'graded against' geography while no deck-review script reads it.
+
+    Two-sided: while no script reads geography the claim must be absent; the day one does, this test fails
+    so the sentence is revisited (a claim made true by the code may then be restored, and the pin updated).
+    """
+    readers = _deck_review_scripts_reading_geography()
+    text = SKILL_MD.read_text(encoding="utf-8")
+    claim = re.search(r"geograph[^.\n]{0,200}graded against", text, re.IGNORECASE)
+    assert not readers, (
+        f"{readers} now read geography: revisit Step 1's geography sentence in SKILL.md, then update this pin."
+    )
+    assert claim is None, (
+        f"SKILL.md says geography is graded against, but no deck-review script reads it: {claim.group(0)!r}"
+    )
+    # The engaged-lever check: the sentence we kept names the skill that does read it.
+    fmr = REPO_ROOT / "founder-skills" / "skills" / "financial-model-review" / "scripts" / "checklist.py"
+    assert "geograph" in fmr.read_text(encoding="utf-8").lower()
+    assert "a financial model review grades against it" in text
