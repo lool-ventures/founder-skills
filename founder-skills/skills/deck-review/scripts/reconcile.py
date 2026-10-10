@@ -2517,6 +2517,13 @@ So the corpus contains zero positive evidence for a mis-specification class and 
 counterexample. Adding it would invite the model to withdraw precisely the findings the expert
 kept -- the same mistake the sign-convention rule nearly made before review caught it. If a
 future corpus produces a real mis-specified relation, add the class then, with the case attached.
+
+WHY `supersede()` IS NOT THAT CLASS. A flat cash / one-year-burn division compared against a
+stated runway, beside a computed runway over the deck's own month-by-month burn plan and the same
+stated figure, is two readings of one claim, and the flat one ignores the plan the deck printed.
+Withdrawing it is not a judgement laid on a finding: the engine decides it, from relations it
+computed, only when the replacement actually ran a comparison against the same stated figure and
+counts the same cash. No model names it, so nothing here invites the model to withdraw a finding.
 """
 
 REVIEWABLE_VERDICTS = ("contradiction", "rounding_gap")
@@ -2654,6 +2661,38 @@ def apply_downgrades(
     return applied, errors
 
 
+# The verdicts that mean a comparison against the stated figure actually ran.
+_COMPARED_VERDICTS = ("confirmation", "contradiction", "exceeds_stated_limit")
+
+
+def supersede(relations: list[Relation]) -> None:
+    """Retire a flat relation that a computed runway over the same stated figure replaces.
+
+    A deck that states a runway and prints a burn plan invites two relations: a flat division of
+    the cash by one period's burn, and a `runway` over the plan. When both are compared against
+    the same stated figure, the flat one is the worse reading of the same claim -- and two
+    findings bracketing one stated number read as incoherent. The flat one becomes `superseded`,
+    a suppressed count, decided here and never by the model.
+
+    Narrow on purpose, because a mis-built runway (wrong cash, wrong segment) that CONFIRMS would
+    otherwise suppress a real flat contradiction:
+      - the replacement is a non-dropped `runway` whose comparison actually ran (confirmation,
+        contradiction or exceeds_stated_limit -- never incomparable, convention or withdrawn);
+      - it is compared against the same `expected_id`;
+      - the flat relation's numerator (`operands[0]`, the cash by the numerator-first rule) is
+        among the runway's operands. Not a full operand subset: the flat division's burn is a
+        yearly figure while the plan's burns are its segments, so a subset test would never fire.
+    `inverse_change` replaces nothing here: no flat relation it would supersede has been named.
+    """
+    runways = [r for r in relations if r.operator == "runway" and not r.dropped and r.verdict in _COMPARED_VERDICTS]
+    for rel in relations:
+        if rel.dropped or rel.operator in ("runway", "inverse_change") or not rel.expected_id or not rel.operands:
+            continue
+        if any(rw.expected_id == rel.expected_id and rel.operands[0] in rw.operands for rw in runways):
+            rel.verdict = "superseded"
+            rel.reasons.append("replaced by a runway computed over the deck's own burn plan")
+
+
 def _coverage(figures: list[Figure], slides_transcribed: list[Any]) -> dict[str, Any]:
     """Which figure-bearing slides the second read actually covered.
 
@@ -2736,6 +2775,9 @@ def build(
     # Copy each spec before stamping the alias map: the caller's payload is not ours to
     # mutate, and a re-run with the same specs must behave identically.
     computed = [compute({**spec, "_alias": alias}, by_id) for spec in rel_specs] if status == "checked" else []
+    # BEFORE the counts below, so `contradictions_before` describes the arithmetic's own decision
+    # and a superseded flat contradiction never makes the interpretation pass owed.
+    supersede(computed)
 
     # The interpretation pass runs AFTER the arithmetic and BEFORE selection, so `select()`
     # stays the single place that decides what a founder sees. A downgrade is an input to

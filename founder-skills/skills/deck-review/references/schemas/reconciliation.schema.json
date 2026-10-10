@@ -84,7 +84,7 @@
       "type": "integer"
     },
     "suppressed": {
-      "description": "Counts by reason for every computed relation the founder does NOT see. Contents are deliberately absent.",
+      "description": "Counts by reason for every computed relation the founder does NOT see. Contents are deliberately absent. `superseded` counts flat relations replaced by a runway computed over the deck's own burn plan against the same stated figure.",
       "type": "object"
     },
     "interpretation": {

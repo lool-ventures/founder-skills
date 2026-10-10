@@ -16,6 +16,8 @@ import subprocess
 import sys
 import tempfile
 
+import pytest
+
 SCRIPTS = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "skills",
@@ -1042,3 +1044,95 @@ def test_the_stanza_prints_a_rounding_gap_with_its_verdict(tmp_path: pathlib.Pat
     stanza = json.loads(printed.stdout)
     assert [s["verdict"] for s in stanza] == ["rounding_gap"]
     assert stanza[0]["operands"] == ["seg_a", "seg_b", "seg_c", "seg_d"]
+
+
+# ---------------------------------------------------------------------------
+# A computed runway over the deck's own burn plan replaces a flat division of the same claim.
+# ---------------------------------------------------------------------------
+
+
+def _fig(fid: str, value: float, raw: str, unit: str, label: str, quote: str, period: str | None = None) -> dict:
+    out = {"id": fid, "value": value, "raw": raw, "unit_kind": unit, "label": label, "slide": 9, "quote": quote}
+    if unit == "money":
+        out["currency"] = "USD"
+    if period:
+        out["period"] = period
+    return out
+
+
+_PLAN_LEDGER = {
+    "figures": [
+        _fig("cash", 4_200_000, "$4.2M", "money", "cash in bank", "cash in bank of $4.2M"),
+        _fig("raised", 4_800_000, "$4.8M", "money", "seed raised", "seed raised of $4.8M"),
+        _fig("burn_now", 150_000, "$150K/month", "money", "burn this year", "burn this year $150K/month", "month"),
+        _fig("burn_next", 2_160_000, "$2.16M", "money", "burn next year", "burn next year $2.16M", "year"),
+        _fig("runway", 25, "25 months", "duration", "runway", "runway of 25 months"),
+        _fig("runway_goal", 30, "30 months", "duration", "runway target", "runway target of 30 months"),
+    ]
+}
+_PLAN_TRANSCRIPT = (
+    "Slide 9: cash in bank of $4.2M after a seed raised of $4.8M; burn this year $150K/month, "
+    "burn next year $2.16M; runway of 25 months; runway target of 30 months."
+)
+_PLAN_SCHEDULE = [{"id": "burn_now", "from": "2026-04", "to": "2027-03"}, {"id": "burn_next", "from": "2027-04"}]
+
+
+def _flat(numerator: str = "cash", expected: str = "runway") -> dict:
+    return {"kind": "derived_ratio", "operator": "ratio", "operands": [numerator, "burn_next"], "expected_id": expected}
+
+
+def _plan_runway(expected: str = "runway", **over: object) -> dict:
+    return {
+        "kind": "derived_ratio",
+        "operator": "runway",
+        "operands": ["cash", "burn_now", "burn_next"],
+        "expected_id": expected,
+        "schedule": _PLAN_SCHEDULE,
+        **over,
+    }
+
+
+def _plan_run(relations: list[dict]) -> dict:
+    rc, out, err = _run(relations, ledger=_PLAN_LEDGER, transcript=_PLAN_TRANSCRIPT, slides=[9])
+    assert rc == 0, err
+    return out
+
+
+def test_a_flat_division_alone_is_compared_as_before() -> None:
+    """$4.2M over a year's $2.16M is under two years -- short of the stated 25 months."""
+    out = _plan_run([_flat()])
+    assert [r["verdict"] for r in out["relations"]] == ["contradiction"]
+
+
+def test_a_runway_over_the_burn_plan_supersedes_the_flat_division() -> None:
+    out = _plan_run([_flat(), _plan_runway()])
+    assert out["relations"] == [], "the flat contradiction must not stand beside the plan's runway"
+    assert out["suppressed"] == {"superseded": 1, "confirmation": 1}
+    # Decided before the count: nothing is left for the interpretation pass to review.
+    assert out["interpretation"] == {"status": "not_needed", "contradictions_before": 0, "downgraded": []}
+
+
+def test_a_runway_against_a_different_stated_figure_supersedes_nothing() -> None:
+    out = _plan_run([_flat(), _plan_runway(expected="runway_goal")])
+    verdicts = sorted(r["verdict"] for r in out["relations"])
+    assert verdicts == ["contradiction", "contradiction"], out["relations"]
+    assert "superseded" not in out["suppressed"]
+
+
+def test_a_flat_division_of_other_cash_is_not_superseded() -> None:
+    """The runway counted the bank balance; a division of the amount raised is another claim."""
+    out = _plan_run([_flat(numerator="raised"), _plan_runway()])
+    assert "superseded" not in out["suppressed"]
+
+
+@pytest.mark.parametrize(
+    "broken",
+    [
+        {"relation": "at_most"},  # refused as a ceiling: incomparable, no comparison ran
+        {"schedule": [{"id": "burn_now", "from": "2026-04", "to": "2027-01"}, {"id": "burn_next", "from": "2027-04"}]},
+    ],
+)
+def test_a_runway_that_did_not_compare_supersedes_nothing(broken: dict) -> None:
+    out = _plan_run([_flat(), _plan_runway(**broken)])
+    assert [r["verdict"] for r in out["relations"]] == ["contradiction"]
+    assert "superseded" not in out["suppressed"]
