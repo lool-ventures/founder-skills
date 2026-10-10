@@ -1544,7 +1544,10 @@ SKILL_MD_CEILING: dict[str, int] = {
     # same two withdrawal grounds apply to it; without that the verdict has no review path.
     # 114,252 -> 114,249 (-3 B), LOWERED: the reciprocal pairs Step 3.7 names shrink to the ones that are
     # reciprocal by definition (time/speed and latency/throughput reported disagreements that were not).
-    "deck-review": 114_249,
+    # 114,249 -> 114,623 (+374 B): `numbers_consistent` is scored from the arithmetic. Step 5's checklist.py
+    # command carries `--reconciliation` plus one sentence that a what-if rerun omits it; Step 7's coaching
+    # template names `numeric_findings` and says an empty list is not an all-clear.
+    "deck-review": 114_623,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
@@ -2170,7 +2173,10 @@ REFERENCES_CEILING: dict[str, int] = {
     # 51_791 -> 52_206 (+415 B): the competition check counts once. checklist-criteria.md says
     # `no_dodged_competition` carries no weight; artifact-schemas.md documents the item's
     # `weight`, the summary's `scored`, and a score taken over `scored`, not `total`.
-    "deck-review": 52_206,
+    # 52_206 -> 52_810 (+604 B): `numbers_consistent` is scored from the arithmetic. checklist-criteria.md
+    # says so on the criterion; artifact-schemas.md and checklist.schema.json declare the item's
+    # `scored_by` and `reviewer_status`.
+    "deck-review": 52_810,
     # competitive-positioning +474 B: artifact-schemas.md documented the `startup_rank` RENDERING
     # convention but not its SENTINEL. `score_moats.py` stamps {"rank": -1, "total": 0} when the
     # startup is not_applicable on a dimension, and compose_report.py rendered it verbatim —
@@ -3598,6 +3604,7 @@ def test_plugin_root_block_pipes_candidates_on_stdin_with_expected_version(skill
 # knowledge, and a generic one (`{}`) is accepted by some of these scripts.
 # ---------------------------------------------------------------------------
 
+
 # (skill, script, extra argv, a payload that script MUST reject[, canonical-path flag])
 #
 # The 5th element is OPTIONAL and defaults to "-o". It exists because the canonical artifact
@@ -3606,6 +3613,14 @@ def test_plugin_root_block_pipes_candidates_on_stdin_with_expected_version(skill
 # entry would have (a) failed argparse for the missing required flag, exiting non-zero and
 # FALSE-GREENING this test for entirely the wrong reason, and (b) guarded the receipt file
 # rather than the artifact the fleet rule is about.
+def _deck_review_valid_checklist() -> str:
+    """A 35-item checklist that checklist.py ACCEPTS, so an entry using it rejects on its flag alone."""
+    text = (SKILLS_ROOT / "deck-review" / "scripts" / "checklist.py").read_text(encoding="utf-8")
+    ids = re.findall(r'"id":\s*"(\w+)",\s*"category"', text)
+    assert len(ids) == 35, ids
+    return json.dumps({"items": [{"id": i, "status": "pass", "evidence": "checked"} for i in ids]})
+
+
 # tuple[skill, script, extra argv, rejecting payload] plus an OPTIONAL 5th element naming the
 # canonical-path flag when it is not `-o` (see the header comment above).
 _REJECTING_PAYLOADS: list[tuple[str, str, list[str], str] | tuple[str, str, list[str], str, str]] = [
@@ -3639,6 +3654,14 @@ _REJECTING_PAYLOADS: list[tuple[str, str, list[str], str] | tuple[str, str, list
     ("market-sizing", "checklist.py", [], '{"notitems":1}'),
     ("market-sizing", "red_team.py", [], '{"findings":"not a list"}'),
     ("deck-review", "checklist.py", ["--run-id", "RID"], '{"items":[{"id":"bogus","status":"pass"}]}'),
+    # A VALID checklist (accepted without the flag; see the control test below) and a
+    # reconciliation that cannot be read: the refusal is the flag's own precondition.
+    (
+        "deck-review",
+        "checklist.py",
+        ["--run-id", "RID", "--reconciliation", "/nonexistent/reconciliation.json"],
+        _deck_review_valid_checklist(),
+    ),
     ("financial-model-review", "checklist.py", [], '{"notitems":1}'),
     ("financial-model-review", "unit_economics.py", [], '{"nocompany":1}'),
     # runway.py does not require `company` (a quick check states only cash and burn), so a payload
@@ -3749,6 +3772,27 @@ def test_producer_rejects_loudly_without_clobbering(entry: tuple, tmp_path: Path
     assert json.loads(out.read_text(encoding="utf-8")) == {"sentinel": True}, (
         f"{where} overwrote the canonical artifact with an analysis-free stub on a rejected run"
     )
+
+
+def test_the_deck_review_reconciliation_entry_rejects_on_the_flag_alone(tmp_path: Path) -> None:
+    """Control for the `--reconciliation` entry: the same payload, without the flag, is accepted.
+    Otherwise the entry could green on a payload refusal and guard nothing."""
+    out = tmp_path / "checklist.json"
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(SKILLS_ROOT / "deck-review" / "scripts" / "checklist.py"),
+            "--run-id",
+            "RID",
+            "-o",
+            str(out),
+        ],
+        input=_deck_review_valid_checklist(),
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert json.loads(out.read_text(encoding="utf-8"))["summary"]["pass"] == 34
 
 
 # `_REJECTING_PAYLOADS` cannot hold these: they live outside a skill's scripts dir, or guard a file that

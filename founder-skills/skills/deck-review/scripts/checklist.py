@@ -25,7 +25,7 @@ import argparse
 import json
 import os
 import sys
-from typing import Any
+from typing import Any, NoReturn
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _thresholds  # noqa: E402
@@ -611,6 +611,198 @@ def validate_checklist(items: list[dict[str, Any]]) -> tuple[dict[str, Any], lis
     )
 
 
+# ---------------------------------------------------------------------------
+# `numbers_consistent` IS SCORED FROM THE ARITHMETIC, not from the reviewer's reading.
+#
+# The reviewer reads the deck by eye and, in kept runs, has both called a deck consistent while
+# the arithmetic found a figure its own inputs refute, and failed one on a disagreement nothing
+# computed. The reconciliation artifact carries the engine's decision (`select()` in
+# reconcile.py is the one place that decides what a founder sees), so this criterion reads only
+# its surviving `relations` and its suppressed COUNTS -- never a second opinion on what survived.
+#
+# The verdicts that mean a comparison against a figure the deck states actually ran. `derived`
+# (a figure worked out with nothing to compare it to), `incomparable` and `dropped` (no
+# comparison made) and `superseded` (replaced by a comparison counted on its own) establish
+# nothing about consistency. A `downgraded` contradiction was compared and then withdrawn on
+# review: it counts as a comparison, never as a disagreement.
+_COMPARISON_VERDICTS = frozenset(
+    {
+        "confirmation",
+        "restatement",
+        "contradiction",
+        "exceeds_stated_limit",
+        "rounding_gap",
+        "convention_differs",
+        "downgraded",
+    }
+)
+NUMBERS_CRITERION = "numbers_consistent"
+
+# Why the criterion could not be scored, by reconciliation status, in the founder's terms.
+_UNCHECKED_REASON = {
+    "no_figures": "no figures could be read off the deck to compare",
+    "gate_failed": "the figures read off the deck could not be confirmed by a second read, so none could be compared",
+}
+
+
+def _as_list(value: Any) -> list[Any]:
+    return value if isinstance(value, list) else []
+
+
+def _as_dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def count_comparisons(reconciliation: dict[str, Any]) -> int:
+    """How many comparisons against a stated figure ran, selected or suppressed."""
+    shown = sum(
+        1 for rel in _as_list(reconciliation.get("relations")) if _as_dict(rel).get("verdict") in _COMPARISON_VERDICTS
+    )
+    withheld = sum(
+        count
+        for key, count in _as_dict(reconciliation.get("suppressed")).items()
+        if key in _COMPARISON_VERDICTS and isinstance(count, int)
+    )
+    return shown + withheld
+
+
+def _rendered(relations: list[dict[str, Any]]) -> list[str]:
+    return [line for line in (str(r.get("rendered", "")).strip() for r in relations) if line]
+
+
+def _untested_tail(reconciliation: dict[str, Any]) -> str:
+    claims = [str(c).strip() for c in _as_list(reconciliation.get("untested_claims")) if str(c).strip()]
+    if not claims:
+        return ""
+    return f" It could not test: {'; '.join(claims)}."
+
+
+def _apply_numeric_scoring(result: dict[str, Any], reconciliation: dict[str, Any]) -> dict[str, Any]:
+    """Score `numbers_consistent` from the reconciliation, then recompute the summary.
+
+    Rules, in order:
+      * the reconciliation did not check the figures -> not_applicable;
+      * it checked them but ran ZERO comparisons -> not_applicable. A pass there would say the
+        figures agree when the arithmetic established nothing either way;
+      * any surviving contradiction, or a plan passing a limit the deck states -> fail;
+      * else any total off by more than its own rounding -> warn;
+      * else pass, saying how many comparisons ran and naming any claim it could not test.
+
+    A contradiction withdrawn on review has verdict `downgraded` and is not in `relations`, so
+    it does not fail the item. A fail or warn carries `notes` written here: without them the
+    criterion never reaches the fixes list, and "your deck disagrees with itself" is the one
+    finding that most needs to. Every outcome, not_applicable included, is stamped
+    `scored_by: "arithmetic"` -- compose warns on a checked run whose item carries no stamp.
+    The reviewer's own status is kept as `reviewer_status`, for measuring how often the two
+    disagree; it is never rendered.
+    """
+    items: list[dict[str, Any]] = result.get("items", [])
+    item = next((i for i in items if isinstance(i, dict) and i.get("id") == NUMBERS_CRITERION), None)
+    if item is None:
+        return result
+    reviewer_status = item.get("status")
+    status_value = reconciliation.get("status")
+    relations = [_as_dict(r) for r in _as_list(reconciliation.get("relations"))]
+    disagree = _rendered([r for r in relations if r.get("verdict") == "contradiction"])
+    exceeded = _rendered([r for r in relations if r.get("verdict") == "exceeds_stated_limit"])
+    rounding = _rendered([r for r in relations if r.get("verdict") == "rounding_gap"])
+    comparisons = count_comparisons(reconciliation)
+
+    notes: str | None = None
+    if status_value != "checked":
+        reason = _UNCHECKED_REASON.get(str(status_value), "the deck's figures could not be cross-checked")
+        status = "not_applicable"
+        evidence = f"Not scored: {reason}."
+    elif comparisons == 0:
+        status = "not_applicable"
+        evidence = (
+            "Not scored: no figure on the deck could be compared against another figure it states, "
+            "so the arithmetic established nothing either way." + _untested_tail(reconciliation)
+        )
+    elif disagree or exceeded:
+        status = "fail"
+        found = disagree + exceeded
+        evidence = "Scored from the arithmetic: " + "; ".join(found) + "."
+        if _as_dict(reconciliation.get("interpretation")).get("status") == "not_run":
+            # Failing is the right incentive (skipping the review pass must not improve the
+            # score), but the founder must not read an un-reviewed disagreement as settled.
+            evidence += (
+                " Nobody reviewed these for cases where the comparison itself does not hold, so treat "
+                "them as questions to check rather than settled problems."
+            )
+        notes = (
+            "Reconcile these figures so the deck agrees with itself: "
+            + "; ".join(found)
+            + ". Correct whichever figure is wrong, or state the basis each one is computed on."
+        )
+    elif rounding:
+        status = "warn"
+        evidence = "Scored from the arithmetic: " + "; ".join(rounding) + "."
+        notes = (
+            "Check these totals against the unrounded parts and print figures that add up: " + "; ".join(rounding) + "."
+        )
+    else:
+        status = "pass"
+        plural = "comparison" if comparisons == 1 else "comparisons"
+        evidence = (
+            f"Scored from the arithmetic: {comparisons} {plural} between figures the deck states "
+            f"{'was' if comparisons == 1 else 'were'} computed, and none disagrees." + _untested_tail(reconciliation)
+        )
+
+    item["status"] = status
+    item["evidence"] = evidence
+    if notes is None:
+        item.pop("notes", None)
+    else:
+        item["notes"] = notes
+    item.pop("verified_by", None)
+    item["scored_by"] = "arithmetic"
+    if isinstance(reviewer_status, str):
+        item["reviewer_status"] = reviewer_status
+
+    if result.get("summary") is not None:
+        result["summary"] = _recompute_summary(items)
+    return result
+
+
+def load_reconciliation(path: str, run_id: str) -> tuple[dict[str, Any] | None, str | None]:
+    """Read the reconciliation this checklist is scored against. Returns (data, error).
+
+    A PRECONDITION, not an input to skip on: a file that is unreadable, from another run, or has
+    no status would otherwise score this criterion from nothing -- or from an earlier review of
+    the same company -- and the delivered report would carry it as this deck's arithmetic.
+    """
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, json.JSONDecodeError) as exc:
+        return None, f"reconciliation artifact at {path} is unreadable: {exc}"
+    if not isinstance(data, dict):
+        return None, f"reconciliation artifact at {path} is not a JSON object"
+    found = _as_dict(data.get("metadata")).get("run_id")
+    if found != run_id:
+        return None, (
+            f"reconciliation artifact at {path} belongs to run {found!r}, not {run_id!r} — "
+            "it is left over from an earlier review and says nothing about this deck"
+        )
+    status = data.get("status")
+    if not isinstance(status, str) or not status:
+        return None, f"reconciliation artifact at {path} carries no status"
+    return data, None
+
+
+def _fail_invalid(errors: list[str], output_path: str | None, indent: int | None) -> NoReturn:
+    """Reject loudly: diagnostic on stdout, a line on stderr, `-o` untouched, exit 1.
+
+    Copy of market-sizing's helper (sibling scripts are standalone).
+    """
+    sys.stdout.write(json.dumps({"validation": {"status": "invalid", "errors": errors}}, indent=indent) + "\n")
+    print(f"Error: input rejected, no output written: {'; '.join(errors)}", file=sys.stderr)
+    if output_path:
+        print(f"Error: {os.path.abspath(output_path)} was left unchanged.", file=sys.stderr)
+    sys.exit(1)
+
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Deck review checklist scorer (reads JSON from stdin)")
     p.add_argument("--pretty", action="store_true", help="Pretty-print JSON")
@@ -622,6 +814,14 @@ def parse_args() -> argparse.Namespace:
             "Path to deck_inventory.json; when provided, applies deterministic"
             " AI-criteria gating from ai_company_status and deterministic"
             " Design-criteria gating from input_format"
+        ),
+    )
+    p.add_argument(
+        "--reconciliation",
+        help=(
+            "Path to this run's reconciliation.json; when provided, numbers_consistent is scored"
+            " from the arithmetic. An unreadable file, another run's, or one with no status is"
+            " refused (exit 1, -o untouched). A what-if rerun omits it."
         ),
     )
     return p.parse_args()
@@ -649,6 +849,14 @@ def main() -> None:
         sys.exit(1)
 
     indent = 2 if args.pretty else None
+
+    # The reconciliation is checked FIRST, before the items: a refused precondition must not
+    # depend on whether the sub-agent's hand-off also happened to be valid.
+    reconciliation: dict[str, Any] | None = None
+    if args.reconciliation:
+        reconciliation, recon_error = load_reconciliation(args.reconciliation, args.run_id)
+        if recon_error:
+            _fail_invalid([recon_error], args.output, indent)
 
     # --- Validation ---
     # On stdout (no -o): emit the JSON error dict and exit 0 (the caller pipes
@@ -707,6 +915,10 @@ def main() -> None:
                 inventory_data.get("input_quality", ""),
                 inventory_data,
             )
+
+    # After every other gate, so nothing later can overwrite the arithmetic's status.
+    if reconciliation is not None:
+        result = _apply_numeric_scoring(result, reconciliation)
 
     out = json.dumps(result, indent=indent) + "\n"
     s = result["summary"]

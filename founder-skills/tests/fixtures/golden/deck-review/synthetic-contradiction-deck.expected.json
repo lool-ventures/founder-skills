@@ -1,5 +1,5 @@
 {
-  "fixture_version": 1,
+  "fixture_version": 2,
   "skill": "deck-review",
   "input": "synthetic-contradiction-deck.txt",
   "assertions": {
@@ -22,7 +22,9 @@
     "reconciliation_status_in": [
       "checked"
     ],
-    "surfaced_contradictions_min": 1
+    "surfaced_contradictions_min": 1,
+    "numbers_consistent_status": "fail",
+    "numeric_findings_min": 1
   },
   "_calibration_notes": [
     "THIS LANE EXISTS FOR ONE REASON: the stub-deck lane surfaced ZERO relations, so the",
@@ -50,6 +52,12 @@
     "market slide, so more criteria can pass. Floor left at 10 -- a deck that contradicts",
     "itself twice should not score well, and how an LLM weighs that has not been measured.",
     "",
-    "Foobar Systems is fictional. No real founder or company data."
+    "Foobar Systems is fictional. No real founder or company data.",
+    "",
+    "fixture_version 2: numbers_consistent is scored from the arithmetic (checklist.py",
+    "--reconciliation), so a surfaced contradiction fails it whatever the reviewer read, and the",
+    "item must carry scored_by: arithmetic (absent means Step 5 ran without the flag).",
+    "numeric_findings_min 1: the coaching payload must hand the coach the surfaced finding; this is",
+    "the only lane where the coach reads a non-empty list. Same floor reasoning as above."
   ]
 }

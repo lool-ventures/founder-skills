@@ -810,6 +810,41 @@ def _check_contradictions(
         if unrendered:
             failures.append(f"contradictions surfaced but absent from report.md: {unrendered}")
 
+    # THE CRITERION IS SCORED FROM THE ARITHMETIC. A surfaced contradiction fails
+    # `numbers_consistent` whatever the reviewer read, and the stamp proves Step 5 passed
+    # `--reconciliation` (without it the reviewer's status stands and nothing else notices).
+    wanted_nc = assertions.get("numbers_consistent_status")
+    if wanted_nc is not None:
+        checklist_path = review_dir / "checklist.json"
+        if not checklist_path.exists():
+            failures.append("numbers_consistent_status requested but checklist.json is absent")
+        else:
+            items = json.loads(checklist_path.read_text()).get("items") or []
+            nc = next((i for i in items if isinstance(i, dict) and i.get("id") == "numbers_consistent"), {})
+            observed["checklist.numbers_consistent"] = (
+                nc.get("status"),
+                nc.get("scored_by"),
+                nc.get("reviewer_status"),
+            )
+            if nc.get("scored_by") != "arithmetic":
+                failures.append(
+                    "numbers_consistent carries no scored_by: arithmetic, so Step 5 ran checklist.py "
+                    "without --reconciliation and the reviewer's reading decided it"
+                )
+            if nc.get("status") != wanted_nc:
+                failures.append(f"numbers_consistent is {nc.get('status')!r}, expected {wanted_nc!r}")
+
+    # THE COACH SEES WHAT THE ARITHMETIC FOUND. This is the only lane where `numeric_findings`
+    # can be non-empty, so it is the only live test of the payload the coach reads it from.
+    findings_floor = assertions.get("numeric_findings_min")
+    if findings_floor is not None:
+        findings = (report.get("coaching_payload") or {}).get("numeric_findings") or []
+        observed["coaching_payload.numeric_findings"] = len(findings)
+        if len(findings) < findings_floor:
+            failures.append(
+                f"coaching_payload.numeric_findings has {len(findings)} entries, expected >= {findings_floor}"
+            )
+
     # ORDERING, asserted only when there are two to order — with one, order is not a claim.
     if len(contradictions) >= 2:
 

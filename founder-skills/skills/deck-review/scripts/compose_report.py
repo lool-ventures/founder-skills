@@ -180,10 +180,15 @@ WARNING_SEVERITY: dict[str, str] = {
     # `_handoff_bypassed`). Medium: the results are valid and must not block. In
     # _UNACCEPTABLE_MEDIUM: a disclosure about the run that model-written accepted_warnings cannot clear.
     "HANDOFF_BYPASSED": "medium",
+    # The arithmetic checked this run's figures, yet the internal-consistency criterion was scored
+    # by the reviewer's reading alone: Step 5 ran `checklist.py` without `--reconciliation`. The
+    # flag is optional (a what-if rerun omits it), so nothing else notices the skipped step.
+    # Medium: the report is complete. In _UNACCEPTABLE_MEDIUM for the same reason as HANDOFF_BYPASSED.
+    "NUMBERS_NOT_SCORED_FROM_ARITHMETIC": "medium",
 }
 
 ACCEPTIBLE_SEVERITIES = {"medium"}
-_UNACCEPTABLE_MEDIUM = {"HANDOFF_BYPASSED"}
+_UNACCEPTABLE_MEDIUM = {"HANDOFF_BYPASSED", "NUMBERS_NOT_SCORED_FROM_ARITHMETIC"}
 
 # Human-readable warning code labels
 WARNING_LABELS: dict[str, str] = {
@@ -212,6 +217,7 @@ WARNING_LABELS: dict[str, str] = {
     "SLIDE_REVIEW_MISSING": "Slides Not Reviewed",
     "SLIDE_REVIEW_DUPLICATE": "Slide Reviewed More Than Once",
     "HANDOFF_BYPASSED": "Some Steps Were Not Checked",
+    "NUMBERS_NOT_SCORED_FROM_ARITHMETIC": "Consistency Scored By Eye",
 }
 
 
@@ -1622,6 +1628,7 @@ def _emit_coaching_payload(
     review_dir: str,
     report_path: str,
     insertion_marker: str,
+    reconciliation: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the v0.4.2 coaching_payload for deck-review (schema_version v0.4.2-deck-review).
 
@@ -1634,6 +1641,8 @@ def _emit_coaching_payload(
             "score_pct": summary.get("score_pct"),
             "overall_status": summary.get("overall_status"),
             "total": summary.get("total"),
+            # The criteria the score is taken over; `total` also lists the one that carries no weight.
+            "scored": summary.get("scored"),
             "pass": summary.get("pass"),
             "fail": summary.get("fail"),
             "warn": summary.get("warn"),
@@ -1664,11 +1673,43 @@ def _emit_coaching_payload(
         # Without this the coach saw `not_applicable: 4` with no reason and wrote "strong" over
         # a category nobody could look at.
         "design_gate": _design_gate_payload(checklist),
+        # The ONLY numeric disagreements the coach may mention. Without it the coach had the
+        # reviewer's prose and nothing else, and could restate a disagreement the arithmetic
+        # never found -- or miss the one it did.
+        "numeric_findings": numeric_findings(reconciliation),
         "company_name": inventory.get("company_name"),
         "review_dir": review_dir,
         "report_path": report_path,
         "insertion_marker": insertion_marker,
     }
+
+
+# The founder-facing heading each finding verdict renders under in report.md, so the coach
+# reads the same words the report uses rather than a verdict name.
+_NUMERIC_FINDING_LABELS: tuple[tuple[str, str], ...] = (
+    ("contradiction", "Figures that disagree"),
+    ("exceeds_stated_limit", "Where the plan passes a stated limit"),
+    ("rounding_gap", _reconciliation_prose.ROUNDING_GAP_HEADING),
+)
+
+
+def numeric_findings(reconciliation: dict[str, Any] | None) -> list[dict[str, str]]:
+    """The surviving numeric findings, as {label, line}, in report order.
+
+    From `relations` only -- `select()` already decided what survives, and reaching into the
+    suppressed counts would put a second decider in front of the coach. Empty when nothing was
+    found OR nothing could be compared; the coach is told an empty list is not an all-clear.
+    """
+    if not isinstance(reconciliation, dict) or reconciliation.get("status") != "checked":
+        return []
+    relations = [_as_dict(r) for r in _as_list(reconciliation.get("relations"))]
+    out: list[dict[str, str]] = []
+    for verdict, label in _NUMERIC_FINDING_LABELS:
+        for rel in relations:
+            line = str(rel.get("rendered", "")).strip()
+            if rel.get("verdict") == verdict and line:
+                out.append({"label": label, "line": line})
+    return out
 
 
 class GateNotAuthorized(ValueError):
@@ -2103,6 +2144,41 @@ def compose(
                 )
             )
 
+    # THE SCORING STEP CAN BE SKIPPED IN SILENCE, because `--reconciliation` is optional. Keyed
+    # on the stamp being ABSENT: a not-applicable decided by the arithmetic carries it too, so
+    # this fires only when the checklist was produced without the reconciliation at all. Same
+    # run only -- a reconciliation from another run is already STALE_ARTIFACT.
+    if (
+        reconciliation is not None
+        and reconciliation.get("status") == "checked"
+        and checklist_data is not None
+        and not _is_stub(checklist_data)
+    ):
+        _recon_rid = _as_dict(reconciliation.get("metadata")).get("run_id")
+        _check_rid = _as_dict(checklist_data.get("metadata")).get("run_id")
+        _item = next(
+            (
+                _as_dict(i)
+                for i in _as_list(checklist_data.get("items"))
+                if _as_dict(i).get("id") == "numbers_consistent"
+            ),
+            None,
+        )
+        if _recon_rid and _recon_rid == _check_rid and _item is not None and "scored_by" not in _item:
+            warnings.append(
+                _warn(
+                    "NUMBERS_NOT_SCORED_FROM_ARITHMETIC",
+                    (
+                        "the reconciliation checked this run's figures, but checklist.py ran without "
+                        "--reconciliation, so numbers_consistent carries the reviewer's status"
+                    ),
+                    founder_message=(
+                        "Whether your deck's figures agree with each other was scored by reading the "
+                        "deck rather than from the arithmetic check below, so the two can disagree."
+                    ),
+                )
+            )
+
     # Render every section EXCEPT Warnings first, so we can pre-scan the body
     # for a marker collision and append MARKER_COLLISION before status and the
     # Warnings section are computed. Otherwise status could read "clean" while
@@ -2223,6 +2299,7 @@ def compose(
         review_dir=os.path.abspath(dir_path),
         report_path=resolved_report_path,
         insertion_marker=marker,
+        reconciliation=reconciliation,
     )
 
     result = {

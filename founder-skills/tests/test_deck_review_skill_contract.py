@@ -830,6 +830,8 @@ def test_post_compose_coaching_dispatch_includes_coaching_payload_keys() -> None
         # TOP-LEVEL name deliberately: nesting it under `summary` would keep this test green
         # while the field could be dropped from both prompts.
         "design_gate",
+        # The only numeric disagreements the coach may mention: the arithmetic's survivors.
+        "numeric_findings",
     }
     # Mechanics keys: documented in the agent body (as ignore-these), and
     # insertion_marker is used by the main thread's script invocation.
@@ -2144,3 +2146,40 @@ def test_skill_md_does_not_claim_geography_grades_the_deck() -> None:
     fmr = REPO_ROOT / "founder-skills" / "skills" / "financial-model-review" / "scripts" / "checklist.py"
     assert "geograph" in fmr.read_text(encoding="utf-8").lower()
     assert "a financial model review grades against it" in text
+
+
+# ---------------------------------------------------------------------------
+# numbers_consistent is scored from the arithmetic
+# ---------------------------------------------------------------------------
+
+
+def test_step_5_scores_the_checklist_against_this_runs_reconciliation() -> None:
+    """The flag is optional in the script (a what-if rerun omits it), so the production command
+    is the only thing that makes the arithmetic decide `numbers_consistent`. Pinned on the
+    command itself, bounded by its fence, not on a mention anywhere in the file."""
+    text = SKILL_MD.read_text(encoding="utf-8")
+    start = text.find("### Step 5:")
+    end = text.find("\n### Step 6", start)
+    assert start != -1 and end != -1, "SKILL.md has no Step 5 section"
+    step = text[start:end]
+    command_start = step.find('python3 "$SCRIPTS/checklist.py"')
+    assert command_start != -1, "Step 5 no longer runs checklist.py"
+    command = step[command_start : step.find("\n```", command_start)]
+    assert '--reconciliation "$REVIEW_DIR/reconciliation.json"' in command, command
+    assert '-o "$REVIEW_DIR/checklist.json"' in command, command
+
+
+def test_criteria_reference_says_numbers_consistent_is_scored_from_the_arithmetic() -> None:
+    text = (DR_DIR / "references" / "checklist-criteria.md").read_text(encoding="utf-8")
+    start = text.find("### `numbers_consistent`")
+    end = text.find("\n### ", start + 1)
+    assert start != -1
+    assert "from the run's arithmetic check" in text[start:end]
+
+
+def test_the_coach_is_told_an_empty_numeric_findings_is_not_an_all_clear() -> None:
+    """A bare absence read as a strength is the design-gate defect again."""
+    for path in (SKILL_MD, AGENT_MD):
+        text = path.read_text(encoding="utf-8").lower()
+        assert "only if it is in" in text and "numeric_findings" in text, path.name
+        assert "does not mean the figures agree" in text, path.name

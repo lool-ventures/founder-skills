@@ -277,6 +277,7 @@ Mark all as `not_applicable` if the company is not AI-first.
 **Fail:** Numbers contradict each other across slides (e.g., different ARR on traction vs. financials slide).
 **Warn:** Minor inconsistencies that could be rounding or presentation differences.
 **Basis:** a16z — deck must be consistent with what you'll show in the data room.
+**Scoring:** `checklist.py` decides this item from the run's arithmetic check, not from your reading: fail on a figure that disagrees with one the deck states (or a plan past a stated limit), warn on a total off by more than its rounding, pass when comparisons ran and none disagrees, not applicable when nothing could be compared. Score it anyway.
 
 ### `data_room_ready`
 **Label:** Diligence materials referenced or available

@@ -34,6 +34,9 @@
     "measured, and a floor above the pass-only score would red the paid e2e on that guess.",
     "Tighten the floor once two post-R2 e2e runs have been observed, not before.",
     "overall_status stays needs_work/major_revision: 65% is below solid (70), which is",
-    "itself pinned by the >10-failures invariant -- see scripts/_thresholds.py."
+    "itself pinned by the >10-failures invariant -- see scripts/_thresholds.py.",
+    "numbers_consistent is scored from the arithmetic: this stub surfaces no relations (zero",
+    "comparisons ran), so expect it not_applicable, leaving at most 33 of the 34 scored criteria",
+    "applicable. That moves the score by under 2 points at the ceiling; ranges kept."
   ]
 }

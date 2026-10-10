@@ -223,8 +223,8 @@ file, and you never re-type or re-emit the commentary after the Write.
 The staged `coaching_payload.json` (Read it from the path in your dispatch prompt) contains these
 keys (do not refetch from disk):
 
-- `summary` (score_pct, overall_status, total, pass, fail, warn,
-  not_applicable)
+- `summary` (score_pct, overall_status, total, scored, pass, fail, warn,
+  not_applicable) — the score is over `scored` criteria, not `total`
 - `failed_items`, `warned_items`
 - `high_severity_warnings` — objects, one per warning, each with `code`,
   `label` and `message`. Write the `label`; the `code` is ours, not the
@@ -235,6 +235,10 @@ keys (do not refetch from disk):
   `reason`. Say so, and do not present the score or `overall_status` as though
   design had been judged. It is a gap in the review, not a strength and not a
   criticism of the deck.
+- `numeric_findings` — objects with `label` and `line`: the figures the arithmetic
+  found disagreeing, passing a stated limit, or off by more than their rounding.
+  Mention a numeric disagreement ONLY if it is in this list, quoting its `line`.
+  An empty list does not mean the figures agree — it may mean nothing could be compared.
 - `review_dir`, `report_path` — context only; you don't open either.
 - `insertion_marker` — consumed by the main thread's
   `insert_coaching.py` invocation, NOT by you. Ignore it.

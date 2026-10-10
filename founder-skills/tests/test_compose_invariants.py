@@ -48,7 +48,7 @@ COACHING_SKILLS = [
 # Keys that tell the coaching sub-agent how much of the review actually ran. A skill with no
 # entry has no such qualification to carry; add a row when one gains it.
 _COACHING_COVERAGE_KEYS: dict[str, tuple[str, ...]] = {
-    "deck-review": ("design_gate",),
+    "deck-review": ("design_gate", "numeric_findings"),
     "market-sizing": ("comparison_blocked", "approach_comparison"),
     "financial-model-review": ("score_coverage",),
     "ic-sim": ("consensus_strength",),

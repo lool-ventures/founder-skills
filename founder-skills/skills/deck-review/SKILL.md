@@ -1243,8 +1243,11 @@ run_id stamping.
 ```bash
 cat "$HANDOFF_DIR/checklist_output.json" | python3 "$SCRIPTS/checklist.py" --run-id "$RUN_ID" --pretty \
   --inventory "$REVIEW_DIR/deck_inventory.json" \
+  --reconciliation "$REVIEW_DIR/reconciliation.json" \
   -o "$REVIEW_DIR/checklist.json"
 ```
+
+`--reconciliation` scores `numbers_consistent` from the arithmetic, so keep it here; a what-if rerun omits it, or it overwrites the founder's hypothetical status for that criterion.
 <!-- skill-quality-ci: bash-after-subagent-ok -->
 
 ### Step 6: Compose Report
@@ -1336,9 +1339,10 @@ Follow your agent body's Context B procedure (POST_COMPOSE_COACHING):
 
 1. Compose commentary from the STAGED coaching_payload (failed_items,
    warned_items, summary, high_severity_warnings, stage, ai_company_status,
-   design_gate). If `design_gate.design_reviewed` is false, that many design
+   design_gate, numeric_findings). If `design_gate.design_reviewed` is false, that many design
    criteria were never assessed — say so rather than writing as though the
-   deck's look had been judged.
+   deck's look had been judged. Mention a numeric disagreement only if it is in
+   `numeric_findings`; an empty list does not mean the figures agree.
    Do NOT Read the full report.md. Do NOT edit report.md or any canonical artifact.
    The commentary is appended to the founder's report, so write it in their language:
    never a checklist item id (`STRUCT_03`), a status enum (`major_revision`), a warning

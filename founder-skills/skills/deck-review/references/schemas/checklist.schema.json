@@ -30,6 +30,16 @@
             "type": "integer",
             "enum": [0],
             "description": "Present only as 0, on a criterion that duplicates another: its status mirrors that criterion's and it is left out of every count and the score. ABSENCE MEANS 1 (counted)."
+          },
+          "scored_by": {
+            "type": "string",
+            "enum": ["arithmetic"],
+            "description": "Present only on numbers_consistent when its status was decided from the run's reconciliation rather than the reviewer's reading. ABSENCE MEANS the reviewer's status stands."
+          },
+          "reviewer_status": {
+            "type": "string",
+            "enum": ["pass", "fail", "warn", "not_applicable"],
+            "description": "Beside scored_by: the status the reviewer gave before the arithmetic decided it. Kept for measuring disagreement; never rendered."
           }
         }
       }

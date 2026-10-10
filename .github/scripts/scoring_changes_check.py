@@ -66,6 +66,8 @@ SCORING_FILES: dict[str, list[str]] = {
         f"{PLUGIN}/skills/deck-review/scripts/checklist.py",
         # The band cutoffs checklist.py selects the overall status from.
         f"{PLUGIN}/skills/deck-review/scripts/_thresholds.py",
+        # The arithmetic numbers_consistent is scored from: its verdicts decide that criterion's status.
+        f"{PLUGIN}/skills/deck-review/scripts/reconcile.py",
         # The criteria definitions with their pass/fail/warn thresholds; the CHECKLIST dispatch grades from it.
         f"{PLUGIN}/skills/deck-review/references/checklist-criteria.md",
         # The stage table written into stage_profile.json, which the CHECKLIST dispatch grades the

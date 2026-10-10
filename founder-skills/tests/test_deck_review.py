@@ -1452,6 +1452,8 @@ def test_compose_severity_map_complete() -> None:
         "UNVERIFIED_MEASUREMENT",
         # A step whose output reached its producer without passing the hand-off gate.
         "HANDOFF_BYPASSED",
+        # The arithmetic checked the figures but the checklist was scored without it.
+        "NUMBERS_NOT_SCORED_FROM_ARITHMETIC",
     ]
     assert len(sev_map) == len(expected), f"expected {len(expected)} codes, got {len(sev_map)}"
     for code in expected:
@@ -6308,3 +6310,321 @@ def test_both_renderers_place_rounding_gaps_between_disagreements_and_readings()
     for name, page in (("report.md", md), ("report.html", html)):
         positions = [page.index(heading) for heading in order]
         assert positions == sorted(positions), f"{name} orders the numbers sections {positions}"
+
+
+# -- numbers_consistent is scored from the arithmetic (`checklist.py --reconciliation`) --
+#
+# Invented figures throughout; none is from a real deck.
+
+_NC_RUN = "nc-run-1"
+_NC_FIXTURE_DIR = Path(SCRIPT_DIR) / "fixtures" / "deck-review"
+
+
+def _nc_recon(
+    *,
+    status: str = "checked",
+    relations: list[dict] | None = None,
+    suppressed: dict | None = None,
+    untested: list[str] | None = None,
+    interpretation: str = "applied",
+    run_id: str = _NC_RUN,
+) -> dict:
+    return {
+        "status": status,
+        "figures_total": 6,
+        "figures_verified": 6,
+        "relations": relations or [],
+        "suppressed": suppressed or {},
+        "untested_claims": untested or [],
+        "relations_proposed": 3,
+        "interpretation": {"status": interpretation, "contradictions_before": 0, "downgraded": []},
+        "metadata": {"run_id": run_id},
+    }
+
+
+_NC_CONTRA = {
+    "kind": "derived_product",
+    "operator": "product",
+    "operands": ["accounts", "price"],
+    "computed": 26_311.0,
+    "rendered": "317 × $83 = $26,311 — but the deck states $21.4K (MRR)",
+    "confidence": "high",
+    "verdict": "contradiction",
+    "expected_id": "mrr",
+    "expected_value": 21_400.0,
+}
+_NC_EXCEEDS = {
+    "kind": "derived_ratio",
+    "operator": "ratio",
+    "operands": ["spend", "raise"],
+    "computed": 1.3,
+    "rendered": "$3.17M of planned spend against a $2.35M raise — the plan runs past the stated limit",
+    "confidence": "high",
+    "verdict": "exceeds_stated_limit",
+}
+_NC_ROUNDING = {
+    "kind": "derived_sum",
+    "operator": "sum",
+    "operands": ["a", "b", "c"],
+    "computed": 4.1,
+    "rendered": "$1.47M + $1.38M + $1.21M = $4.06M — the deck states $4.27M (total)",
+    "confidence": "high",
+    "verdict": "rounding_gap",
+}
+_NC_DERIVED = {
+    "kind": "derived_ratio",
+    "operator": "ratio",
+    "operands": ["x", "y"],
+    "computed": 0.4,
+    "rendered": "$40K ÷ $100K = 40%",
+    "confidence": "high",
+    "verdict": "derived",
+}
+
+
+def _nc_score(
+    tmp_path: Path, recon: dict, reviewer: dict | None = None, run_id: str = _NC_RUN
+) -> tuple[int, dict | None, str]:
+    rpath = tmp_path / "reconciliation.json"
+    rpath.write_text(json.dumps(recon), encoding="utf-8")
+    overrides = {"numbers_consistent": reviewer} if reviewer else None
+    payload = json.dumps({"items": _make_checklist_items(overrides=overrides)})
+    return run_script("checklist.py", ["--run-id", run_id, "--reconciliation", str(rpath)], payload)
+
+
+def _nc_item(out: dict | None) -> dict:
+    assert out is not None
+    item: dict = next(i for i in out["items"] if i["id"] == "numbers_consistent")
+    return item
+
+
+@pytest.mark.parametrize("status", ["no_figures", "gate_failed"])
+def test_numbers_consistent_is_not_applicable_when_the_figures_were_not_checked(tmp_path: Path, status: str) -> None:
+    code, out, err = _nc_score(tmp_path, _nc_recon(status=status), {"status": "pass", "evidence": "looks fine"})
+    assert code == 0, err
+    item = _nc_item(out)
+    assert item["status"] == "not_applicable"
+    assert item["scored_by"] == "arithmetic"
+    assert item["reviewer_status"] == "pass"
+    assert "notes" not in item
+
+
+def test_numbers_consistent_is_not_applicable_on_zero_comparisons(tmp_path: Path) -> None:
+    """Checked, but nothing compared against a stated figure: the arithmetic established
+    nothing, so a pass would be a free one. Withheld derived readings are not comparisons."""
+    recon = _nc_recon(relations=[_NC_DERIVED], suppressed={"derived": 2, "incomparable": 1, "dropped": 1})
+    code, out, err = _nc_score(tmp_path, recon)
+    assert code == 0, err
+    item = _nc_item(out)
+    assert item["status"] == "not_applicable", item
+    assert item["scored_by"] == "arithmetic"
+    assert out is not None and out["summary"]["not_applicable"] == 1
+
+
+def test_a_reviewer_fail_is_overridden_to_pass_when_the_arithmetic_found_nothing(tmp_path: Path) -> None:
+    reviewer = {"status": "fail", "evidence": "ARR differs between slides", "notes": "Fix the ARR."}
+    recon = _nc_recon(suppressed={"confirmation": 3}, untested=["growth of 3x year on year"])
+    code, out, err = _nc_score(tmp_path, recon, reviewer)
+    assert code == 0, err
+    item = _nc_item(out)
+    assert item["status"] == "pass"
+    assert item["reviewer_status"] == "fail"
+    assert "3 comparisons between figures the deck states were computed, and none disagrees" in item["evidence"]
+    assert "growth of 3x year on year" in item["evidence"], "an untested claim must be named on a pass"
+    assert "notes" not in item, "a pass carries no fix"
+    assert out is not None and out["summary"]["fail"] == 0
+
+
+def test_a_reviewer_pass_is_overridden_to_fail_on_a_contradiction(tmp_path: Path) -> None:
+    code, out, err = _nc_score(tmp_path, _nc_recon(relations=[_NC_CONTRA, _NC_DERIVED]))
+    assert code == 0, err
+    item = _nc_item(out)
+    assert item["status"] == "fail"
+    assert item["reviewer_status"] == "pass"
+    assert _NC_CONTRA["rendered"] in item["evidence"]
+    assert _NC_DERIVED["rendered"] not in item["evidence"], "a derived reading is not a disagreement"
+    # The fix must exist, or the finding never reaches the fixes list.
+    assert out is not None
+    failed = {f["id"]: f for f in out["summary"]["failed_items"]}
+    assert "numbers_consistent" in failed
+    assert _load_notes_module().usable_fix(failed["numbers_consistent"]["notes"]), failed["numbers_consistent"]
+
+
+def test_a_plan_past_a_stated_limit_fails_the_item(tmp_path: Path) -> None:
+    code, out, err = _nc_score(tmp_path, _nc_recon(relations=[_NC_EXCEEDS]))
+    assert code == 0, err
+    item = _nc_item(out)
+    assert item["status"] == "fail"
+    assert _NC_EXCEEDS["rendered"] in item["notes"]
+
+
+def test_a_rounding_gap_alone_warns(tmp_path: Path) -> None:
+    code, out, err = _nc_score(tmp_path, _nc_recon(relations=[_NC_ROUNDING]))
+    assert code == 0, err
+    item = _nc_item(out)
+    assert item["status"] == "warn"
+    assert _load_notes_module().usable_fix(item["notes"])
+    assert out is not None and "numbers_consistent" in [w["id"] for w in out["summary"]["warned_items"]]
+
+
+def test_a_contradiction_outranks_a_rounding_gap(tmp_path: Path) -> None:
+    code, out, err = _nc_score(tmp_path, _nc_recon(relations=[_NC_CONTRA, _NC_ROUNDING]))
+    assert code == 0, err
+    assert _nc_item(out)["status"] == "fail"
+
+
+def test_a_withdrawn_contradiction_does_not_fail_the_item(tmp_path: Path) -> None:
+    """A downgraded contradiction is suppressed, not surviving: it was compared, never failed."""
+    code, out, err = _nc_score(tmp_path, _nc_recon(suppressed={"downgraded": 1}))
+    assert code == 0, err
+    item = _nc_item(out)
+    assert item["status"] == "pass", item
+    assert "1 comparison " in item["evidence"]
+
+
+def test_an_unreviewed_contradiction_fails_and_says_it_was_not_reviewed(tmp_path: Path) -> None:
+    """Skipping the review pass must not improve the score, and must not read as settled."""
+    code, out, err = _nc_score(tmp_path, _nc_recon(relations=[_NC_CONTRA], interpretation="not_run"))
+    assert code == 0, err
+    item = _nc_item(out)
+    assert item["status"] == "fail"
+    assert "Nobody reviewed these" in item["evidence"]
+
+
+def test_without_the_flag_the_reviewer_status_stands() -> None:
+    payload = json.dumps({"items": _make_checklist_items()})
+    code, out, err = run_script("checklist.py", ["--run-id", _NC_RUN], payload)
+    assert code == 0, err
+    item = _nc_item(out)
+    assert item["status"] == "pass"
+    assert "scored_by" not in item and "reviewer_status" not in item
+
+
+@pytest.mark.parametrize("case", ["missing", "unparseable", "other_run", "no_status"])
+def test_an_unusable_reconciliation_is_refused_loudly(tmp_path: Path, case: str) -> None:
+    rpath = tmp_path / "reconciliation.json"
+    if case == "unparseable":
+        rpath.write_text("{not json", encoding="utf-8")
+    elif case == "other_run":
+        rpath.write_text(json.dumps(_nc_recon(run_id="an-earlier-run")), encoding="utf-8")
+    elif case == "no_status":
+        recon = _nc_recon()
+        del recon["status"]
+        rpath.write_text(json.dumps(recon), encoding="utf-8")
+    out = tmp_path / "checklist.json"
+    out.write_text('{"sentinel": true}', encoding="utf-8")
+    payload = json.dumps({"items": _make_checklist_items()})
+    code, stdout, err = run_script_raw(
+        "checklist.py", ["--run-id", _NC_RUN, "--reconciliation", str(rpath), "-o", str(out)], payload
+    )
+    assert code == 1
+    assert err.strip()
+    assert json.loads(stdout)["validation"]["status"] == "invalid"
+    assert json.loads(out.read_text(encoding="utf-8")) == {"sentinel": True}
+
+
+def _nc_compose_dir(tmp_path: Path, recon: dict | None = None, rescore: bool = True) -> Path:
+    """A copy of the shared fixture dir, optionally with its checklist re-scored against `recon`."""
+    import shutil
+
+    work = tmp_path / "work"
+    shutil.copytree(_NC_FIXTURE_DIR, work)
+    if recon is not None:
+        (work / "reconciliation.json").write_text(json.dumps(recon), encoding="utf-8")
+    if rescore:
+        checklist = json.loads((work / "checklist.json").read_text(encoding="utf-8"))
+        args = ["--run-id", checklist["metadata"]["run_id"], "--reconciliation", str(work / "reconciliation.json")]
+        args += ["-o", str(work / "checklist.json")]
+        code, _stdout, err = run_script_raw("checklist.py", args, json.dumps({"items": checklist["items"]}))
+        assert code == 0, err
+    return work
+
+
+def _nc_fixture_run_id() -> str:
+    data = json.loads((_NC_FIXTURE_DIR / "reconciliation.json").read_text(encoding="utf-8"))
+    return str(data["metadata"]["run_id"])
+
+
+def test_the_coaching_payload_carries_only_the_engine_findings(tmp_path: Path) -> None:
+    recon = _nc_recon(relations=[_NC_CONTRA, _NC_EXCEEDS, _NC_ROUNDING, _NC_DERIVED], run_id=_nc_fixture_run_id())
+    work = _nc_compose_dir(tmp_path, recon)
+    code, out, err = _run_compose(str(work))
+    assert code == 0, err
+    assert out is not None
+    findings = out["coaching_payload"]["numeric_findings"]
+    assert [f["line"] for f in findings] == [_NC_CONTRA["rendered"], _NC_EXCEEDS["rendered"], _NC_ROUNDING["rendered"]]
+    assert all(f["label"] and "_" not in f["label"] for f in findings), findings
+    summary = out["coaching_payload"]["summary"]
+    assert summary["scored"] == summary["total"] - 1
+
+
+def test_the_coaching_payload_has_no_numeric_findings_when_nothing_was_checked(tmp_path: Path) -> None:
+    recon = _nc_recon(status="gate_failed", relations=[_NC_CONTRA], run_id=_nc_fixture_run_id())
+    work = _nc_compose_dir(tmp_path, recon)
+    code, out, err = _run_compose(str(work))
+    assert code == 0, err
+    assert out is not None and out["coaching_payload"]["numeric_findings"] == []
+
+
+def test_a_flipped_numbers_fail_reaches_the_priority_fixes(tmp_path: Path) -> None:
+    """The shared fixture's reviewer passed the item beside a contradiction. Re-scored, it fails,
+    and the fix the scorer wrote is what the founder reads in the fixes list."""
+    work = _nc_compose_dir(tmp_path)
+    code, out, err = _run_compose(str(work))
+    assert code == 0, err
+    assert out is not None
+    md = out["report_markdown"]
+    fixes = md.split("## Up to 5 Fixes to Make", 1)[1].split("\n## ", 1)[0]
+    assert "Reconcile these figures" in fixes, fixes
+    # The backstop note is for a checklist NOT scored from the arithmetic; scored, the fail says it.
+    assert "the criteria review marked your figures internally consistent" not in md
+
+
+def test_compose_warns_when_the_checklist_was_not_scored_from_the_arithmetic(tmp_path: Path) -> None:
+    work = _nc_compose_dir(tmp_path, rescore=False)
+    code, out, err = _run_compose(str(work))
+    assert code == 0, err
+    assert out is not None
+    codes = {w["code"]: w for w in out["validation"]["warnings"]}
+    assert "NUMBERS_NOT_SCORED_FROM_ARITHMETIC" in codes
+    assert codes["NUMBERS_NOT_SCORED_FROM_ARITHMETIC"]["severity"] == "medium"
+
+
+def test_compose_does_not_warn_on_an_arithmetic_not_applicable(tmp_path: Path) -> None:
+    """Keyed on the stamp being ABSENT: a not-applicable the arithmetic decided is not a skipped step."""
+    recon = _nc_recon(relations=[], suppressed={"derived": 2}, run_id=_nc_fixture_run_id())
+    work = _nc_compose_dir(tmp_path, recon)
+    code, out, err = _run_compose(str(work))
+    assert code == 0, err
+    assert out is not None
+    assert "NUMBERS_NOT_SCORED_FROM_ARITHMETIC" not in {w["code"] for w in out["validation"]["warnings"]}
+
+
+def test_the_not_scored_warning_cannot_be_accepted_away(tmp_path: Path) -> None:
+    work = _nc_compose_dir(tmp_path, rescore=False)
+    profile = json.loads((work / "stage_profile.json").read_text(encoding="utf-8"))
+    profile["accepted_warnings"] = [
+        {"code": "NUMBERS_NOT_SCORED_FROM_ARITHMETIC", "match": "reconciliation", "reason": "fine"}
+    ]
+    (work / "stage_profile.json").write_text(json.dumps(profile), encoding="utf-8")
+    code, out, err = _run_compose(str(work))
+    assert code == 0, err
+    assert out is not None
+    severity = {w["code"]: w["severity"] for w in out["validation"]["warnings"]}
+    assert severity["NUMBERS_NOT_SCORED_FROM_ARITHMETIC"] == "medium"
+    # The lever engaged: the refusal line prints only for a code in the unacceptable set.
+    assert "cannot accept 'NUMBERS_NOT_SCORED_FROM_ARITHMETIC'" in err, err
+
+
+def test_the_html_page_renders_the_arithmetic_verdict_and_never_the_bookkeeping(tmp_path: Path) -> None:
+    """report.html over a checklist the arithmetic scored: the new evidence reaches the page, the
+    stamp and the reviewer's status do not, and no verdict name leaks."""
+    recon = _nc_recon(relations=[_NC_CONTRA, _NC_EXCEEDS, _NC_ROUNDING], run_id=_nc_fixture_run_id())
+    work = _nc_compose_dir(tmp_path, recon)
+    code, html, err = run_script_raw("visualize.py", ["--dir", str(work), "--ungated"])
+    assert code == 0, err
+    # Founder-visible text only: script bodies are data, not prose.
+    page = re.sub(r"<script.*?</script>", "", html, flags=re.S)
+    assert "Reconcile these figures" in page, "the scorer's fix never reached the page"
+    for token in ("scored_by", "reviewer_status", "exceeds_stated_limit", "rounding_gap"):
+        assert token not in page, token

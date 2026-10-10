@@ -223,6 +223,8 @@ JSON schemas for all artifacts deposited during the deck review workflow. Each a
 | `evidence` | string \| null | Why this verdict. For fail/warn: both the deck's actual content (quote/describe the specific slide) AND the best-practice principle or benchmark it falls short of — the deck observation is not optional. For pass: what was checked and what satisfied it. For not_applicable: the reason. |
 | `notes` | string \| null | The specific change the founder should make — imperative, concrete, particular to this deck (not a restatement of the criterion, not a record of what was checked). Required on fail/warn; omitted on pass/not_applicable. |
 | `weight` | integer | Only `0`, on `no_dodged_competition`: it mirrors `competition_honest`'s status and is left out of every count. Absent means counted. |
+| `scored_by` | string | Only `"arithmetic"`, on `numbers_consistent` when `--reconciliation` decided its status. Absent means the reviewer's status stands. |
+| `reviewer_status` | string | Beside `scored_by`: the reviewer's own status. Never rendered. |
 
 ### summary
 
