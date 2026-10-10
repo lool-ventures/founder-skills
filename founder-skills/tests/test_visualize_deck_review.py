@@ -1162,3 +1162,34 @@ def test_the_unrendered_slide_caption_does_not_call_a_pdf_text() -> None:
     text = _visible_text(html)
     assert "could not be rendered" in text, text[:400]
     assert "reached the review as text" not in text, "a PDF was described as text"
+
+
+def test_key_findings_show_the_competition_weakness_once() -> None:
+    """The zero-weight duplicate mirrors `competition_honest`; the page lists the weakness once.
+
+    The checklist comes from the real producer, so the duplicate carries the stamped `weight: 0`
+    the page keys on, never a table of its own.
+    """
+    items: list[dict[str, Any]] = [{"id": cid, "status": "pass", "evidence": "Checked."} for cid in _CHECKLIST_IDS]
+    canon_fix = "Name the closest rival and the axis you win on."
+    dup_fix = "Put a competition slide in the deck."
+    for item in items:
+        if item["id"] == "competition_honest":
+            item.update(status="fail", evidence="The deck names no competitor.", notes=canon_fix)
+        elif item["id"] == "no_dodged_competition":
+            item.update(status="fail", evidence="No competition slide.", notes=dup_fix)
+    proc = subprocess.run(
+        [sys.executable, os.path.join(DECK_REVIEW_DIR, "checklist.py"), "--run-id", "t-c6"],
+        input=json.dumps({"items": items}),
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0, proc.stderr
+    arts: dict[str, Any] = _all_artifacts()
+    arts["checklist.json"] = json.loads(proc.stdout)
+    rc, stdout, stderr = _run_viz(_make_artifact_dir(arts))
+    assert rc == 0, stderr
+    assert stdout.count(canon_fix) == 1
+    assert dup_fix not in stdout
+    assert "Competition slide exists and is substantive" not in stdout
+    assert "Competition section is honest and substantive" in stdout

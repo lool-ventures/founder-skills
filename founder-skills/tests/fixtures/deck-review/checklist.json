@@ -170,7 +170,9 @@
       "id": "no_dodged_competition",
       "category": "Common Mistakes",
       "label": "Competition slide exists and is substantive",
-      "status": "pass"
+      "status": "warn",
+      "weight": 0,
+      "evidence": "Scored once, under 'Competition section is honest and substantive'"
     },
     {
       "id": "ai_retention_rebased",
@@ -217,11 +219,12 @@
   ],
   "summary": {
     "total": 35,
-    "pass": 33,
+    "scored": 34,
+    "pass": 32,
     "fail": 1,
     "warn": 1,
     "not_applicable": 0,
-    "score_pct": 94.3,
+    "score_pct": 95.6,
     "overall_status": "strong",
     "by_category": {
       "Narrative Flow": {
@@ -249,7 +252,7 @@
         "not_applicable": 0
       },
       "Common Mistakes": {
-        "pass": 5,
+        "pass": 4,
         "fail": 0,
         "warn": 0,
         "not_applicable": 0

@@ -235,6 +235,7 @@ is not an error, because a judgement reached by real reasoning is still worth ha
 **Fail:** No competition slide, or "we have no competitors."
 **Warn:** Competition slide exists but is superficial.
 **Basis:** DocSend — investors scrutinize this section more than founders think.
+**Weight:** none. Score it, but the result shown is `competition_honest`'s and only that one counts, so one weakness is not counted twice.
 
 ## Category 6 — AI Company (4 items)
 

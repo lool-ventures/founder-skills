@@ -855,6 +855,21 @@ def _section_title(inventory: dict[str, Any] | None) -> str:
     )
 
 
+def _scored_criteria(checklist: dict[str, Any] | None) -> int:
+    """How many criteria the score counts, read from the artifact (`summary.scored`).
+
+    Not `total`: one of the 35 listed criteria duplicates another and carries no weight, so the
+    founder is told the number the score is actually taken over. A checklist written before
+    `scored` existed counted every listed criterion, so its `total` is the honest figure there.
+    """
+    summary = _as_dict(_as_dict(checklist).get("summary"))
+    for key in ("scored", "total"):
+        value = summary.get(key)
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+            return value
+    return 34
+
+
 def _section_executive_summary(
     profile: dict[str, Any] | None,
     checklist: dict[str, Any] | None,
@@ -880,19 +895,20 @@ def _section_executive_summary(
         fail_c = summary.get("fail", 0)
         warn_c = summary.get("warn", 0)
         na_c = summary.get("not_applicable", 0)
+        scored_n = _scored_criteria(checklist)
 
         status_label = {
             # Craft language only. These used to promise investability ("investor-ready"),
             # which this same block now disclaims one line below — and half credit for a
             # warn widened that string's reach (25 pass / 10 warn moved Solid -> Strong).
             # A deck can meet every craft criterion and still be uninvestable.
-            "strong": "Strong — meets nearly all 35 craft criteria; what is left is polish",
+            "strong": f"Strong — meets nearly all {scored_n} scored craft criteria; what is left is polish",
             "solid": "Solid — a well-built deck with a few craft gaps to close",
             "needs_work": "Needs Work — several craft gaps to close before sending",
             "major_revision": "Major Revision — worth reworking before it goes out; see the fixes below",
         }.get(status, status)
 
-        # "Deck-craft score", not "Overall Score": this measures conformance to 35
+        # "Deck-craft score", not "Overall Score": this measures conformance to 34 scored
         # deck-craft criteria and does NOT predict investability. Measured across four
         # decks, it does not even rank with an experienced reader's verdict — the
         # strongest company scored among the weakest decks.
@@ -919,7 +935,7 @@ def _section_executive_summary(
             )
         lines.append(
             "\n*Score = (pass + half credit per warn) ÷ applicable. Measures conformance to "
-            "35 deck-craft criteria, not investability.*"
+            f"{scored_n} scored deck-craft criteria, not investability.*"
         )
 
     lines.extend(_ai_classification_note(inventory))
@@ -986,7 +1002,8 @@ def _scope_note(checklist: dict[str, Any] | None = None) -> list[str]:
         "story, evidence, structure, design" if design_gate_reason(checklist) is None else "story, evidence, structure"
     )
     return [
-        f"\n> **What this review does not cover.** These 35 criteria assess how the deck is "
+        f"\n> **What this review does not cover.** These {_scored_criteria(checklist)} scored criteria "
+        "assess how the deck is "
         f"built — {built_from}. They do not assess your market, your "
         "technology, or the regulatory, clinical, licensing or compliance questions specific "
         "to your sector. An investor will ask about those separately, and a clean score here "
@@ -1577,6 +1594,9 @@ def _section_full_checklist(checklist: dict[str, Any] | None) -> str:
         cat = item.get("category", "?")
         label = item.get("label", item.get("id", "?"))
         status = status_icons.get(item.get("status", "?"), "?")
+        if item.get("weight", 1) == 0:
+            # A duplicate criterion: it shows its canonical row's result and carries no weight.
+            status = f"{status} (counted above)"
         evidence = _md_safe(item.get("evidence", "") or "")
         lines.append(f"| {i} | {cat} | {label} | {status} | {evidence} |")
 

@@ -496,6 +496,10 @@ def _key_findings(
             for item in items:
                 if not isinstance(item, dict) or item.get("status") != wanted:
                     continue
+                # A zero-weight item mirrors a criterion already listed here; showing it would
+                # put one weakness on the page twice.
+                if item.get("weight", 1) == 0:
+                    continue
                 label = str(item.get("label", item.get("id", "")))
                 # The FINDING is the diagnosis (evidence); the ACTION is the fix (notes).
                 # Deliberately not `notes or evidence` in both — that printed the same

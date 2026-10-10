@@ -22,6 +22,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DECK_REVIEW_DIR = os.path.join(os.path.dirname(SCRIPT_DIR), "skills", "deck-review", "scripts")
 SKILL_MD_PATH = os.path.join(os.path.dirname(DECK_REVIEW_DIR), "SKILL.md")
@@ -197,8 +199,10 @@ def test_checklist_all_pass() -> None:
     assert rc == 0
     assert data is not None
     s = data["summary"]
+    # 35 listed, 34 counted: no_dodged_competition mirrors competition_honest at no weight.
     assert s["total"] == 35
-    assert s["pass"] == 35
+    assert s["scored"] == 34
+    assert s["pass"] == 34
     assert s["fail"] == 0
     assert s["warn"] == 0
     assert s["score_pct"] == 100.0
@@ -280,7 +284,9 @@ def test_checklist_warn_status() -> None:
     s = data["summary"]
     assert s["warn"] == 2
     assert s["fail"] == 1
-    assert s["pass"] == 32
+    # 34 counted - 3 = 31: no_dodged_competition mirrors the competition_honest fail, uncounted.
+    assert s["pass"] == 31
+    assert s["status_by_id"]["no_dodged_competition"] == "fail"
     warned_ids = {w["id"] for w in s["warned_items"]}
     assert warned_ids == {"headlines_carry_story", "minimal_text"}
     failed_ids = {f["id"] for f in s["failed_items"]}
@@ -389,6 +395,11 @@ def test_checklist_omits_null_evidence_and_notes() -> None:
     assert rc == 0
     assert data is not None
     for item in data["items"]:
+        if item["id"] == "no_dodged_competition":
+            # The zero-weight mirror carries a real evidence string naming where it is scored.
+            assert item["evidence"].startswith("Scored once, under "), item
+            assert "notes" not in item
+            continue
         assert "evidence" not in item, f"{item['id']} emitted a null evidence key"
         assert "notes" not in item, f"{item['id']} emitted a null notes key"
 
@@ -2109,7 +2120,7 @@ def test_checklist_pass_without_evidence_warned() -> None:
     warnings = data["validation"]["warnings"]
     assert any("purpose_clear" in w and "pass" in w for w in warnings), warnings
     # Still counted as a pass — the warning is advisory, not a status override.
-    assert data["summary"]["pass"] == 35
+    assert data["summary"]["pass"] == 34
     assert data["summary"]["score_pct"] == 100.0
 
 
@@ -4028,8 +4039,9 @@ def test_not_applicable_still_leaves_the_denominator() -> None:
     payload = json.dumps({"items": _make_checklist_items(overrides=overrides)})
     rc, data, _ = run_script("checklist.py", ["--pretty", "--run-id", "t"], stdin_data=payload)
     assert rc == 0 and data is not None
-    # 1 pass, 34 N/A -> 1 applicable -> 100.0, not 1/35 = 2.9
-    assert data["summary"]["not_applicable"] == 34
+    # 1 pass, 33 counted N/A (the 34th N/A is the zero-weight mirror, never counted)
+    # -> 1 applicable -> 100.0, not 1/34 = 2.9
+    assert data["summary"]["not_applicable"] == 33
     assert data["summary"]["score_pct"] == 100.0
 
 
@@ -6077,3 +6089,155 @@ def test_status_by_id_reaches_no_founder_surface_or_the_coaching_payload(tmp_pat
     # The quoted key: pytest's tmp dir carries this test's name, and the payload carries that path.
     assert '"status_by_id"' not in json.dumps(data["coaching_payload"])
     assert "status_by_id" not in data["report_markdown"].replace(str(tmp_path), "")
+
+
+# -- The competition check counts once (zero-weight mirror) --
+#
+# `no_dodged_competition` duplicates `competition_honest`. The grader still scores all 35; the
+# producer makes the duplicate show the canonical status, stamps it `weight: 0` and leaves it out
+# of every count, so one weakness is not counted, listed or fixed twice.
+
+_CANON = "competition_honest"
+_DUP = "no_dodged_competition"
+
+
+def _score(overrides: dict[str, dict]) -> dict:
+    payload = json.dumps({"items": _make_checklist_items(overrides=overrides)})
+    rc, data, stderr = run_script("checklist.py", ["--run-id", "t-c6"], stdin_data=payload)
+    assert rc == 0 and data is not None, stderr
+    return data
+
+
+def _counted(summary: dict) -> int:
+    return int(summary["pass"] + summary["fail"] + summary["warn"] + summary["not_applicable"])
+
+
+def test_both_competition_items_failing_scores_the_same_as_one() -> None:
+    both = _score(
+        {
+            _CANON: {"status": "fail", "evidence": "No competitors named.", "notes": "Name the two closest rivals."},
+            _DUP: {"status": "fail", "evidence": "No competition slide.", "notes": "Add a competition slide."},
+        }
+    )["summary"]
+    one = _score(
+        {_CANON: {"status": "fail", "evidence": "No competitors named.", "notes": "Name the two closest rivals."}}
+    )["summary"]
+    assert both["score_pct"] == one["score_pct"]
+    assert both["fail"] == one["fail"] == 1
+    assert [i["id"] for i in both["failed_items"]] == [_CANON]
+    # 33 pass + 1 fail over 34 scored criteria.
+    assert both["score_pct"] == round(33 / 34 * 100, 1)
+
+
+@pytest.mark.parametrize("canonical", ["pass", "fail", "warn", "not_applicable"])
+def test_the_duplicate_mirrors_the_canonical_status(canonical: str) -> None:
+    """Whatever the grader wrote for the duplicate, it shows the canonical status and counts nowhere."""
+    reviewer_dup = "pass" if canonical != "pass" else "fail"
+    data = _score(
+        {
+            _CANON: {"status": canonical, "evidence": "Competition evidence.", "notes": "Name the rivals."},
+            _DUP: {
+                "status": reviewer_dup,
+                "evidence": "Grader's own view.",
+                "notes": "A second fix.",
+                "verified_by": "inferred",
+            },
+        }
+    )
+    dup = next(i for i in data["items"] if i["id"] == _DUP)
+    assert dup["status"] == canonical
+    assert dup["weight"] == 0
+    assert dup["evidence"] == "Scored once, under 'Competition section is honest and substantive'"
+    assert "notes" not in dup and "verified_by" not in dup
+    s = data["summary"]
+    assert s["total"] == 35 and s["scored"] == 34
+    assert _counted(s) == s["scored"]
+    assert s["status_by_id"][_DUP] == canonical
+    assert len(data["items"]) == 35
+    assert _DUP not in {i["id"] for i in s["failed_items"] + s["warned_items"]}
+    # Common Mistakes counts four criteria; the duplicate is listed under it, never counted.
+    assert sum(s["by_category"]["Common Mistakes"].values()) == 4
+    canonical_item = next(i for i in data["items"] if i["id"] == _CANON)
+    assert "weight" not in canonical_item
+
+
+def test_the_duplicate_needs_no_fix_of_its_own() -> None:
+    """A grader's fail on the duplicate with no notes is not fatal: its text is replaced anyway."""
+    data = _score(
+        {
+            _CANON: {"status": "fail", "evidence": "No competitors named.", "notes": "Name the two closest rivals."},
+            _DUP: {"status": "fail"},
+        }
+    )
+    assert data["validation"]["status"] == "valid"
+
+
+def test_rescoring_after_a_gate_keeps_the_mirror_in_step() -> None:
+    """Every rescoring path re-mirrors, so the duplicate cannot drift from its canonical item."""
+    import importlib.util
+
+    if DECK_REVIEW_DIR not in sys.path:
+        sys.path.insert(0, DECK_REVIEW_DIR)
+    spec = importlib.util.spec_from_file_location("dr_checklist_c6", os.path.join(DECK_REVIEW_DIR, "checklist.py"))
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    result, errors, _ = mod.validate_checklist(_make_checklist_items())
+    assert errors == []
+    items = result["items"]
+    next(i for i in items if i["id"] == _CANON)["status"] = "warn"
+    summary = mod._recompute_summary(items)
+    assert next(i for i in items if i["id"] == _DUP)["status"] == "warn"
+    assert summary["warn"] == 1 and _counted(summary) == 34
+    # The design gate rescoring (the --inventory path) keeps the invariant too.
+    gated = mod._apply_design_gating(result, "text")
+    assert _counted(gated["summary"]) == gated["summary"]["scored"] == 34
+    assert gated["summary"]["status_by_id"][_DUP] == gated["summary"]["status_by_id"][_CANON]
+
+
+def test_the_fixture_mirror_follows_its_canonical_status() -> None:
+    """The shared fixture's grader disagreed (canonical warn, duplicate pass); the mirror follows the warn."""
+    with open(os.path.join(SCRIPT_DIR, "fixtures", "deck-review", "checklist.json")) as f:
+        fixture = json.load(f)
+    by_id = {i["id"]: i for i in fixture["items"]}
+    assert by_id[_CANON]["status"] == "warn"
+    assert by_id[_DUP]["status"] == "warn" and by_id[_DUP]["weight"] == 0
+    s = fixture["summary"]
+    assert _counted(s) == s["scored"] == 34 and s["total"] == 35
+    assert s["score_pct"] == 95.6
+
+
+def test_report_lists_the_competition_fix_once_and_marks_the_duplicate_row() -> None:
+    """Through the real producer and compose: the canonical fix reaches the fixes list once, the
+    duplicate's grader-written fix never does, the appendix row says it was counted above, and the
+    founder is told the score covers 34 scored criteria."""
+    canon_fix = "Name the two closest rivals and the axis you win on."
+    dup_fix = "Add a slide that names your competitors."
+    checklist = _score(
+        {
+            _CANON: {"status": "fail", "evidence": "The deck names no competitor.", "notes": canon_fix},
+            _DUP: {"status": "fail", "evidence": "No competition slide.", "notes": dup_fix},
+        }
+    )
+    checklist["metadata"] = {"run_id": "run-test"}
+    d = _make_artifact_dir(
+        {
+            "deck_inventory.json": _VALID_INVENTORY,
+            "stage_profile.json": _VALID_PROFILE,
+            "slide_reviews.json": _VALID_REVIEWS,
+            "checklist.json": checklist,
+            "reconciliation.json": _VALID_RECONCILIATION,
+        }
+    )
+    rc, data, stderr = _run_compose(d)
+    assert rc == 0 and data is not None, stderr
+    md = str(data["report_markdown"])
+    fixes = md.split("## Up to 5 Fixes to Make", 1)[1].split("\n## ", 1)[0]
+    assert fixes.count(canon_fix) == 1, fixes
+    assert dup_fix not in md
+    assert "Competition slide exists and is substantive" not in fixes
+    row = next(line for line in md.splitlines() if "| Competition slide exists and is substantive |" in line)
+    assert "FAIL (counted above)" in row
+    assert "34 scored deck-craft criteria" in md
+    assert "These 34 scored criteria" in md
+    assert "35 deck-craft criteria" not in md and "These 35 criteria" not in md

@@ -2157,7 +2157,10 @@ REFERENCES_CEILING: dict[str, int] = {
     # which every run already failed by habit while the text named only a top-down chart.
     # 51_834 -> 51_791 (-43 B): deck_inventory's `prior_rounds` row added; the `claimed_stage` and
     # `detected_stage` rows and the example's ai_evidence shortened to pay for it.
-    "deck-review": 51_791,
+    # 51_791 -> 52_206 (+415 B): the competition check counts once. checklist-criteria.md says
+    # `no_dodged_competition` carries no weight; artifact-schemas.md documents the item's
+    # `weight`, the summary's `scored`, and a score taken over `scored`, not `total`.
+    "deck-review": 52_206,
     # competitive-positioning +474 B: artifact-schemas.md documented the `startup_rank` RENDERING
     # convention but not its SENTINEL. `score_moats.py` stamps {"rank": -1, "total": 0} when the
     # startup is not_applicable on a dimension, and compose_report.py rendered it verbatim —

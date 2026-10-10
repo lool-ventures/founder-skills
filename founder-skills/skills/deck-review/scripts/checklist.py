@@ -7,7 +7,8 @@
 Deck review checklist scorer.
 
 Validates 35 criteria across 7 categories with pass/fail/warn/not_applicable
-scoring. Computes overall score percentage and status.
+scoring. Computes overall score percentage and status over the 34 that carry
+weight (see ZERO_WEIGHT).
 
 Always reads JSON from stdin.
 
@@ -153,6 +154,49 @@ VALID_IDS = {item["id"] for item in CHECKLIST_ITEMS}
 VALID_STATUSES = {"pass", "fail", "warn", "not_applicable"}
 ITEM_LOOKUP = {item["id"]: item for item in CHECKLIST_ITEMS}
 
+# CRITERIA THAT ARE GRADED BUT CARRY NO WEIGHT, each mapped to the criterion it duplicates.
+#
+# `no_dodged_competition` asks the question `competition_honest` asks: the same Fail
+# condition ("no competition slide" / "we have no competitors") and overlapping Pass/Warn.
+# Over the kept review checklists the two never split fail/pass, and every
+# `competition_honest` fail came with a `no_dodged_competition` fail -- so one weakness was
+# counted twice, and a deck that dodged competition lost two criteria for it.
+#
+# The grader still scores all 35 (the id list is the artifact contract, and downstream readers
+# list ids). The duplicate then MIRRORS the canonical status, is stamped `weight: 0`, and is
+# left out of every count, the score, `by_category` and the fail/warn lists, so the weakness
+# reaches the fixes once. `status_by_id` keeps it. Only this producer decides weight;
+# renderers read the stamped `weight`, never this table.
+ZERO_WEIGHT: dict[str, str] = {"no_dodged_competition": "competition_honest"}
+
+# How many criteria the score is computed over. `total` stays the number of criteria listed.
+SCORED_COUNT = len(CHECKLIST_ITEMS) - len(ZERO_WEIGHT)
+
+
+def _is_zero_weight(item: dict[str, Any]) -> bool:
+    return bool(item.get("weight", 1) == 0)
+
+
+def _mirror_zero_weight(items: list[dict[str, Any]]) -> None:
+    """Make each zero-weight item show its canonical criterion's status. Mutates in place.
+
+    Idempotent and re-derived from the canonical item every time, so a gate that changes the
+    canonical status before the summary is recomputed still leaves the two in agreement. The
+    duplicate's own evidence and fix are dropped: the canonical item carries the finding.
+    """
+    by_id = {item.get("id"): item for item in items if isinstance(item, dict)}
+    for dup_id, canonical_id in ZERO_WEIGHT.items():
+        dup = by_id.get(dup_id)
+        canonical = by_id.get(canonical_id)
+        if dup is None or canonical is None:
+            continue
+        dup["status"] = canonical.get("status")
+        dup["weight"] = 0
+        dup["evidence"] = f"Scored once, under '{ITEM_LOOKUP[canonical_id]['label']}'"
+        dup.pop("notes", None)
+        dup.pop("verified_by", None)
+
+
 # The 4 AI-criteria IDs that are gated by ai_company_status.
 _AI_CRITERIA_IDS = frozenset(
     {
@@ -213,7 +257,12 @@ _MEASUREMENT_DEPENDENT_IDS = frozenset(_DESIGN_CRITERIA_IDS)
 
 
 def _recompute_summary(items: list[dict[str, Any]]) -> dict[str, Any]:
-    """Recompute the summary block from a (possibly gated) items list."""
+    """Recompute the summary block from a (possibly gated) items list.
+
+    Side effect: re-mirrors the zero-weight items first, so every path that rescores (the
+    producer, the AI gate, the design gate) leaves them showing their canonical status.
+    """
+    _mirror_zero_weight(items)
     pass_count = 0
     fail_count = 0
     warn_count = 0
@@ -229,6 +278,10 @@ def _recompute_summary(items: list[dict[str, Any]]) -> dict[str, Any]:
         category = item.get("category", meta.get("category", "Unknown"))
         evidence = item.get("evidence")
         notes = item.get("notes")
+
+        if _is_zero_weight(item):
+            # Listed and shown, never counted: it mirrors a criterion already counted.
+            continue
 
         if category not in categories:
             categories[category] = {"pass": 0, "fail": 0, "warn": 0, "not_applicable": 0}
@@ -275,13 +328,16 @@ def _recompute_summary(items: list[dict[str, Any]]) -> dict[str, Any]:
     # Still no per-CRITERION weighting — that is a different question, deliberately
     # refused below to avoid subjective weight arguments. This is partial credit for a
     # STATUS, which the rubric already defines.
-    applicable = len(CHECKLIST_ITEMS) - na_count
+    applicable = SCORED_COUNT - na_count
     score_pct = round(((pass_count + 0.5 * warn_count) / applicable) * 100, 1) if applicable > 0 else 0.0
 
     overall_status = _thresholds.band_for(score_pct)
 
     return {
         "total": len(CHECKLIST_ITEMS),
+        # pass + fail + warn + not_applicable == scored, never total: a zero-weight item is
+        # listed (total) but not counted (scored).
+        "scored": SCORED_COUNT,
         "pass": pass_count,
         "fail": fail_count,
         "warn": warn_count,
@@ -489,6 +545,10 @@ def validate_checklist(items: list[dict[str, Any]]) -> tuple[dict[str, Any], lis
     # fail/warn (scrutinized above) it was previously never checked at all.
     pass_evidence_warnings: list[str] = []
     for item in enriched:
+        if item["id"] in ZERO_WEIGHT:
+            # Its evidence and fix are replaced by the mirror, so requiring them would spend a
+            # corrective dispatch on text nobody reads.
+            continue
         if item["status"] in ("fail", "warn"):
             ev = item.get("evidence")
             if not ev or (isinstance(ev, str) and not ev.strip()):

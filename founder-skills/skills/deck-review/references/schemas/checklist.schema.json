@@ -25,7 +25,12 @@
             "description": "How this criterion's judgement was reached. 'measured' = the property was directly observed with a tool that can observe it. 'inferred' = reasoned from other evidence. 'not_possible' = the assigned reviewer had no way to observe it. Optional; ABSENCE MEANS UNSTATED, which is not the same as 'measured'."
           },
           "evidence": {"type": "string"},
-          "notes": {"type": "string"}
+          "notes": {"type": "string"},
+          "weight": {
+            "type": "integer",
+            "enum": [0],
+            "description": "Present only as 0, on a criterion that duplicates another: its status mirrors that criterion's and it is left out of every count and the score. ABSENCE MEANS 1 (counted)."
+          }
         }
       }
     },
@@ -34,6 +39,10 @@
       "required": ["total", "pass", "fail", "warn", "not_applicable", "score_pct", "overall_status"],
       "properties": {
         "total": {"type": "integer"},
+        "scored": {
+          "type": "integer",
+          "description": "Criteria that carry weight; pass + fail + warn + not_applicable equals this, not total. Absent on artifacts written before zero-weight criteria existed, where it equals total."
+        },
         "pass": {"type": "integer"},
         "fail": {"type": "integer"},
         "warn": {"type": "integer"},
