@@ -2129,6 +2129,24 @@ def test_a_piecewise_runway_reads_the_burn_plan() -> None:
     assert "counting only the cash the deck names" in r.rendered
 
 
+def test_a_flat_runway_prints_the_burn_as_an_amount_not_the_raw_row() -> None:
+    """A cashflow row written "(150)" is spend of 150 thousand; the flat line reads like the schedule's."""
+    cash = fig("$4.2M", 4_200_000, "money", label="cash in bank", id="cash")
+    burn = fig("($150K)", -150_000, "money", label="net burn", id="b1", period="month")
+    r = compute({"operator": "runway", "operands": ["cash", "b1"], "kind": "contradiction"}, {"cash": cash, "b1": burn})
+    assert not r.dropped, r.reasons
+    assert "($150K)" not in r.rendered and "$4.2M ÷ $150K a month =" in r.rendered, r.rendered
+
+
+def test_a_flat_runway_keeps_a_burn_already_written_with_its_period() -> None:
+    cash = fig("$4.2M", 4_200_000, "money", label="cash in bank", id="cash")
+    r = compute(
+        {"operator": "runway", "operands": ["cash", "b1"], "kind": "contradiction"},
+        {"cash": cash, "b1": fig("$150K/month", 150_000, "money", id="b1", period="month")},
+    )
+    assert "$4.2M ÷ $150K/month =" in r.rendered, r.rendered
+
+
 def test_a_runway_shorter_than_stated_contradicts_and_a_matching_one_confirms() -> None:
     r = _plan("32 months", 32)
     assert r.verdict == "contradiction", r.reasons
@@ -2326,6 +2344,19 @@ def test_measures_that_are_not_reciprocal_by_definition_never_disagree(
     assert r.verdict != "contradiction", r.rendered
 
 
+@pytest.mark.parametrize("label", ["reduction in resistivity", "decrease of resistivity", "resistivity reduction"])
+def test_a_direction_word_leaves_no_doubled_preposition(label: str) -> None:
+    r = _inverse("↓36%", label, "70%", 70, "conductivity gain", "reduction")
+    assert "a reduction of 36% in resistivity =" in r.rendered, r.rendered
+    assert " in in " not in r.rendered
+
+
+def test_a_signed_raw_is_printed_without_its_sign() -> None:
+    r = _inverse("-36%", "reduction in resistivity", "70%", 70, "conductivity gain", "reduction")
+    assert "a reduction of 36% in resistivity" in r.rendered, r.rendered
+    assert "of -36%" not in r.rendered
+
+
 def test_a_declared_direction_the_wording_contradicts_is_refused() -> None:
     assert (
         _inverse("↓36%", "resistivity reduction", "56%", 56, "conductivity gain", "increase").verdict == "incomparable"
@@ -2479,7 +2510,7 @@ def test_select_orders_findings_then_rounding_gaps_then_readings() -> None:
 def test_a_burn_plan_that_turns_cash_positive_is_refused() -> None:
     """Reading every row as spend reported a runway that runs out when the plan never does."""
     cash = fig("$4.2M", 4_200_000, "money", label="cash in bank", id="cash")
-    b1 = fig("(150)", -150_000, "money", label="net cashflow this year", id="b1", period="month")
+    b1 = fig("($150K)", -150_000, "money", label="net cashflow this year", id="b1", period="month")
     b2 = fig("(50)", -50_000, "money", label="net cashflow next year", id="b2", period="month")
     b3 = fig("200", 200_000, "money", label="net cashflow after", id="b3", period="month")
     spec = {
@@ -2498,7 +2529,7 @@ def test_a_burn_plan_that_turns_cash_positive_is_refused() -> None:
 
 def test_a_parenthesised_burn_prints_as_an_amount() -> None:
     cash = fig("$4.2M", 4_200_000, "money", label="cash in bank", id="cash", currency="USD")
-    b1 = fig("(150)", -150_000, "money", label="net cashflow", id="b1", period="month", currency="USD")
+    b1 = fig("($150K)", -150_000, "money", label="net cashflow", id="b1", period="month", currency="USD")
     spec = {
         "operator": "runway",
         "operands": ["cash", "b1"],

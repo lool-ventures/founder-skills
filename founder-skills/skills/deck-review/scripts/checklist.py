@@ -466,8 +466,14 @@ def _apply_design_gating(
     return result
 
 
-def validate_checklist(items: list[dict[str, Any]]) -> tuple[dict[str, Any], list[str], list[str]]:
+def validate_checklist(
+    items: list[dict[str, Any]], *, numbers_from_arithmetic: bool = False
+) -> tuple[dict[str, Any], list[str], list[str]]:
     """Validate checklist input and produce scored summary. Returns (result, errors, warnings).
+
+    `numbers_from_arithmetic` (set when `--reconciliation` is given) means `numbers_consistent`'s
+    status and evidence are replaced by the arithmetic afterwards, so a reviewer's fail on it
+    needs no notes: demanding them would cost a corrective dispatch for text that is discarded.
 
     `errors` is fatal (missing/duplicate/unknown IDs, invalid status, or a
     fail/warn item with no evidence) — a non-empty `errors` blocks the run.
@@ -562,7 +568,8 @@ def validate_checklist(items: list[dict[str, Any]]) -> tuple[dict[str, Any], lis
             # exactly this step. Rendering the criterion label instead is what made the
             # fixes section contain no fixes.
             nt = item.get("notes")
-            if not nt or (isinstance(nt, str) and not nt.strip()):
+            replaced = numbers_from_arithmetic and item["id"] == NUMBERS_CRITERION
+            if not replaced and (not nt or (isinstance(nt, str) and not nt.strip())):
                 msg = f"{item['id']} has status '{item['status']}' but no notes (the founder-facing fix)"
                 print(f"Warning: {msg}", file=sys.stderr)
                 evidence_errors.append(msg)
@@ -872,7 +879,9 @@ def main() -> None:
         errors.append("'items' must be an array")
 
     if not errors:
-        result, errors, pass_warnings = validate_checklist(data["items"])
+        result, errors, pass_warnings = validate_checklist(
+            data["items"], numbers_from_arithmetic=reconciliation is not None
+        )
     else:
         result = {"items": [], "summary": None}
 

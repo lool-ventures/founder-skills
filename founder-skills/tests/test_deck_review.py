@@ -6435,6 +6435,32 @@ def test_a_reviewer_fail_is_overridden_to_pass_when_the_arithmetic_found_nothing
     assert out is not None and out["summary"]["fail"] == 0
 
 
+def test_a_reviewer_fail_without_notes_is_accepted_when_the_arithmetic_scores_the_item(tmp_path: Path) -> None:
+    """With `--reconciliation` the reviewer's status and evidence are replaced, so demanding the fix
+    notes would cost a corrective dispatch for text that is thrown away."""
+    reviewer = {"status": "fail", "evidence": "the ARR differs between slides"}
+    code, out, err = _nc_score(tmp_path, _nc_recon(suppressed={"confirmation": 2}), reviewer)
+    assert code == 0, err
+    assert _nc_item(out)["scored_by"] == "arithmetic"
+
+
+def test_a_reviewer_fail_without_notes_is_still_refused_without_the_flag() -> None:
+    reviewer = {"status": "fail", "evidence": "the ARR differs between slides"}
+    payload = json.dumps({"items": _make_checklist_items(overrides={"numbers_consistent": reviewer})})
+    _, out, _ = run_script("checklist.py", ["--run-id", _NC_RUN], payload)
+    assert out is not None and out["validation"]["status"] == "invalid"
+    assert any("numbers_consistent has status 'fail' but no notes" in e for e in out["validation"]["errors"])
+
+
+def test_other_criteria_keep_the_notes_rule_under_the_flag(tmp_path: Path) -> None:
+    other = {"status": "fail", "evidence": "x"}
+    rpath = tmp_path / "reconciliation.json"
+    rpath.write_text(json.dumps(_nc_recon()), encoding="utf-8")
+    payload = json.dumps({"items": _make_checklist_items(overrides={"purpose_clear": other})})
+    _, out, _ = run_script("checklist.py", ["--run-id", _NC_RUN, "--reconciliation", str(rpath)], payload)
+    assert out is not None and out["validation"]["status"] == "invalid"
+
+
 def test_a_reviewer_pass_is_overridden_to_fail_on_a_contradiction(tmp_path: Path) -> None:
     code, out, err = _nc_score(tmp_path, _nc_recon(relations=[_NC_CONTRA, _NC_DERIVED]))
     assert code == 0, err

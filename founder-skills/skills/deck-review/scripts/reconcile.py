@@ -1597,7 +1597,7 @@ def _money_text(value: float, like: Figure) -> str:
     "38,000,000-42,173,913" with the sign dropped is arithmetic, not a sentence; "$38M-$42.2M"
     is the same fact in the form the deck printed its own figures.
     """
-    m = _LEADING_SYMBOL.match(like.raw or "")
+    m = _LEADING_SYMBOL.match((like.raw or "").lstrip("(-−– "))
     symbol = m.group(1) if m else _CURRENCY_SYMBOLS.get(str(like.currency or "").upper(), "")
     for scale, suffix in ((1e9, "B"), (1e6, "M"), (1e3, "K")):
         if abs(value) >= scale:
@@ -1719,7 +1719,10 @@ def _runway(r: Relation, real: list[Figure], rel_spec: dict[str, Any], alias: di
         )
         r.head = f"{cash_text} against a burn of {plan}, starting {_month_label(start)}"
     else:
-        r.head = f"{cash_text} ÷ {burn_figs[0].raw}"
+        burn = burn_figs[0]
+        # A cashflow row written "(150)" is spend of 150 thousand: print the amount, not the row.
+        burn_text = _money_text(abs(burn.value), burn) if burn.value < 0 else burn.raw
+        r.head = f"{cash_text} ÷ {burn_text}" + ("" if time_unit(burn.raw) or not burn.period else f" a {burn.period}")
     r.unit_word, r.note = " months", ", counting only the cash the deck names"
     r.rendered = (
         f"{r.head} = {_span_text(*(sorted((low, high)) if low != high else (point, point)))}{r.unit_word}{r.note}"
@@ -1746,7 +1749,9 @@ _RECIPROCAL_PAIRS: tuple[tuple[str, str], ...] = (
 )
 
 
-_DIRECTION_WORDS = re.compile(r"\b(?:reduction|decrease|savings|increase|gain|growth|improvement)\b", re.I)
+_DIRECTION_WORDS = re.compile(
+    r"\b(?:reduction|decrease|savings|increase|gain|growth|improvement)\b(?:\s+(?:in|of)\b)?", re.I
+)
 
 
 def _known_reciprocals(a: str, b: str) -> bool:
@@ -1798,6 +1803,7 @@ def _inverse_change(r: Relation, real: list[Figure], rel_spec: dict[str, Any]) -
     # In words, not glyphs, and the measure once: "a reduction of 36% in resistivity", never
     # "a reduction of ↓36% in resistivity reduction".
     amount = re.sub(r"[↓↑▼▲]", "", pct.raw or "").strip()
+    amount = re.sub(r"^[-−–+]\s*", "", amount)
     measure = re.sub(r"\s+", " ", _DIRECTION_WORDS.sub("", pct.label or "")).strip(" ,-")
     r.head = f"a {direction} of {amount}" + (f" in {measure}" if measure else "")
     r.unit_word, r.note = "%", f" {other} in the reciprocal measure"
