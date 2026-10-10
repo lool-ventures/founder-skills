@@ -121,7 +121,7 @@ year's burn; `inverse_change` takes a `direction` and only reciprocal measures;
 `implied_base` takes no `expected_id`.
 
 For `INTERPRETATION`: review comparisons the arithmetic found to disagree with a
-figure the deck itself states, and withdraw any that should not be put to a founder
+figure the deck itself states (or totals off by more than their rounding), and withdraw any that should not be put to a founder
 as a disagreement. You may only WITHDRAW — never add a finding, never change a
 number, never turn a disagreement into an agreement. Exactly two grounds are
 available and they are the whole list:

@@ -25,6 +25,14 @@ from typing import Any
 # -- see the note where it gets its own sentence.
 INCONCLUSIVE_SUPPRESSION_CLASSES = ("incomparable", "downgraded")
 
+# The rounding-gap subsection's heading and lead, one copy for both renderers.
+ROUNDING_GAP_HEADING = "Totals off by more than their rounding"
+ROUNDING_GAP_LEAD = (
+    "Each of these totals is further from the sum of its parts than the total's own rounding "
+    "explains, though the parts' rounding could still account for it. Check them against the "
+    "unrounded figures; they are questions, not errors."
+)
+
 
 def _as_list(value: Any) -> list[Any]:
     """Copy of compose's coercer. Sibling helpers are per-script by convention."""
@@ -113,6 +121,7 @@ def coverage_line(
     # establishes that anything held; two of them mean the comparison could not be made.
     verdicts = [str(_as_dict(r).get("verdict")) for r in _as_list(reconciliation.get("relations"))]
     disagreements = sum(1 for v in verdicts if v == "contradiction")
+    rounding_gaps = sum(1 for v in verdicts if v == "rounding_gap")
     exceeded = sum(1 for v in verdicts if v == "exceeds_stated_limit")
     suppressed_counts = _as_dict(reconciliation.get("suppressed"))
     # `dropped` counts comparisons that were REFUSED before any arithmetic ran; it is
@@ -184,6 +193,20 @@ def coverage_line(
         settled += (
             f"{lead} {emphasis(str(withheld_derived))} produced figures worked out from your "
             "numbers that I am not confident enough to report"
+        )
+    # ITS OWN COUNT. A rounding gap is neither a disagreement nor an agreement, and it is what
+    # keeps "the comparisons that ran held" true: it is not in `agreed`, so that sentence
+    # cannot be said beside one.
+    if rounding_gaps:
+        lead = ". Of those," if settled.endswith("what was checked") else ". A further"
+        settled += (
+            f"{lead} {emphasis(str(rounding_gaps))} "
+            + ("total is" if rounding_gaps == 1 else "totals are")
+            + " off from "
+            + ("its" if rounding_gaps == 1 else "their")
+            + " parts by more than "
+            + ("its" if rounding_gaps == 1 else "their")
+            + " own rounding, listed below"
         )
     if inconclusive and (disagreements or exceeded):
         settled += (

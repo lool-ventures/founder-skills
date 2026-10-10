@@ -88,7 +88,7 @@
       "type": "object"
     },
     "interpretation": {
-      "description": "The demote-only pass over surviving contradictions. `not_needed` = nothing to interpret. `not_run` = contradictions survived and no pass was supplied, so the founder sees the un-reviewed set. `applied` = the pass ran, and every withdrawal is recorded with its class and reason, because a suppression with no stated ground cannot be audited later.",
+      "description": "The demote-only pass over surviving contradictions and rounding gaps. `not_needed` = nothing to interpret. `not_run` = contradictions or rounding gaps survived and no pass was supplied, so the founder sees the un-reviewed set. `applied` = the pass ran, and every withdrawal is recorded with its class and reason, because a suppression with no stated ground cannot be audited later.",
       "type": "object",
       "required": [
         "status"
@@ -192,7 +192,7 @@
             ]
           },
           "verdict": {
-            "description": "contradiction, exceeds_stated_limit and derived are the only three that reach a founder. convention_differs, confirmation and restatement are suppressed by select() and appear only in the counts above.",
+            "description": "contradiction, exceeds_stated_limit, rounding_gap and derived are the only four that reach a founder. rounding_gap: a sum or difference whose gap to the stated figure exceeds that figure's own rounding (and is at least 1% of it) but not the rounding its parts add. convention_differs, confirmation and restatement are suppressed by select() and appear only in the counts above.",
             "type": "string",
             "enum": [
               "contradiction",
@@ -201,7 +201,8 @@
               "restatement",
               "convention_differs",
               "downgraded",
-              "exceeds_stated_limit"
+              "exceeds_stated_limit",
+              "rounding_gap"
             ]
           },
           "expected_id": {

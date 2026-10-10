@@ -415,7 +415,7 @@ def test_only_a_contradiction_can_be_withdrawn() -> None:
             text=True,
         )
     assert res.returncode != 0
-    assert "only a contradiction can be withdrawn" in res.stderr
+    assert "only a contradiction or a rounding gap can be withdrawn" in res.stderr
 
 
 def test_status_distinguishes_not_run_from_not_needed() -> None:
@@ -907,3 +907,138 @@ def test_the_stanza_omits_relations_that_cannot_be_withdrawn(tmp_path: pathlib.P
     )
     assert out.returncode == 0, out.stderr
     assert json.loads(out.stdout) == [], "a derived reading is not withdrawable"
+
+
+# ---------------------------------------------------------------------------
+# A rounding gap reaches the founder, so it can be reviewed and withdrawn like a contradiction.
+# ---------------------------------------------------------------------------
+
+_GAP_LEDGER = {
+    "figures": [
+        {
+            "id": "seg_a",
+            "value": 1000000,
+            "raw": "$1.0M",
+            "unit_kind": "money",
+            "label": "segment A bookings",
+            "slide": 4,
+            "quote": "segment A bookings $1.0M",
+            "currency": "USD",
+        },
+        {
+            "id": "seg_b",
+            "value": 4200000,
+            "raw": "$4.2M",
+            "unit_kind": "money",
+            "label": "segment B bookings",
+            "slide": 4,
+            "quote": "segment B bookings $4.2M",
+            "currency": "USD",
+        },
+        {
+            "id": "seg_c",
+            "value": 4100000,
+            "raw": "$4.1M",
+            "unit_kind": "money",
+            "label": "segment C bookings",
+            "slide": 4,
+            "quote": "segment C bookings $4.1M",
+            "currency": "USD",
+        },
+        {
+            "id": "seg_d",
+            "value": 3800000,
+            "raw": "$3.8M",
+            "unit_kind": "money",
+            "label": "segment D bookings",
+            "slide": 4,
+            "quote": "segment D bookings $3.8M",
+            "currency": "USD",
+        },
+        {
+            "id": "bookings_total",
+            "value": 13300000,
+            "raw": "$13.3M",
+            "unit_kind": "money",
+            "label": "total bookings",
+            "slide": 4,
+            "quote": "total bookings $13.3M",
+            "currency": "USD",
+        },
+    ]
+}
+_GAP_TRANSCRIPT = (
+    "Slide 4: segment A bookings $1.0M, segment B bookings $4.2M, segment C bookings $4.1M, "
+    "segment D bookings $3.8M; total bookings $13.3M."
+)
+_GAP_RELATION = {
+    "kind": "derived_ratio",
+    "operator": "sum",
+    "operands": ["seg_a", "seg_b", "seg_c", "seg_d"],
+    "expected_id": "bookings_total",
+}
+
+
+def _run_gap(downgrades: list[dict] | None) -> tuple[int, dict, str]:
+    with tempfile.TemporaryDirectory() as d:
+        lp, sp, dp = (os.path.join(d, n) for n in ("ledger.json", "second.json", "dg.json"))
+        with open(lp, "w", encoding="utf-8") as f:
+            json.dump(_GAP_LEDGER, f)
+        with open(sp, "w", encoding="utf-8") as f:
+            json.dump({"transcript": _GAP_TRANSCRIPT, "slides_transcribed": [4]}, f)
+        args = [sys.executable, SCRIPT, "--ledger", lp, "--second-read", sp, "--run-id", "r1"]
+        if downgrades is not None:
+            with open(dp, "w", encoding="utf-8") as f:
+                json.dump({"downgrades": downgrades}, f)
+            args += ["--downgrades", dp]
+        res = subprocess.run(args, input=json.dumps({"relations": [_GAP_RELATION]}), capture_output=True, text=True)
+    try:
+        parsed = json.loads(res.stdout)
+    except json.JSONDecodeError:
+        parsed = {}
+    return res.returncode, parsed, res.stderr
+
+
+def test_a_rounding_gap_reaches_the_founder_and_owes_a_review() -> None:
+    rc, out, err = _run_gap(None)
+    assert rc == 0, err
+    assert [r["verdict"] for r in out["relations"]] == ["rounding_gap"]
+    # Nothing contradicts, but a founder-visible verdict was not reviewed: the pass is owed.
+    assert out["interpretation"]["status"] == "not_run"
+    assert out["interpretation"]["contradictions_before"] == 0
+
+
+def test_a_rounding_gap_can_be_withdrawn_as_a_partial_enumeration() -> None:
+    withdrawal = {
+        "operator": "sum",
+        "operands": ["seg_a", "seg_b", "seg_c", "seg_d"],
+        "expected_id": "bookings_total",
+        "class": "partial_enumeration",
+        "reason": "the slide lists its four largest segments and never says they are all of them",
+    }
+    rc, out, err = _run_gap([withdrawal])
+    assert rc == 0, err
+    assert out["relations"] == []
+    assert out["interpretation"]["status"] == "applied"
+    assert out["suppressed"] == {"downgraded": 1}
+
+
+def test_the_stanza_prints_a_rounding_gap_with_its_verdict(tmp_path: pathlib.Path) -> None:
+    rc, out, err = _run_gap(None)
+    assert rc == 0, err
+    printed = subprocess.run(
+        [
+            sys.executable,
+            SCRIPT,
+            "--print-downgrade-stanza",
+            _write(tmp_path, "reconciliation.json", out),
+            "--ledger",
+            _write(tmp_path, "ledger.json", _GAP_LEDGER),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert printed.returncode == 0, printed.stderr
+    stanza = json.loads(printed.stdout)
+    assert [s["verdict"] for s in stanza] == ["rounding_gap"]
+    assert stanza[0]["operands"] == ["seg_a", "seg_b", "seg_c", "seg_d"]

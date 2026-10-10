@@ -962,10 +962,10 @@ with their figures, pre-empting the render.
 
 ### Step 3.9: Review the Disagreements Before Showing Them (Context A dispatch)
 
-**Run this only when `reconciliation.json` reports at least one `contradiction`.** With none,
+**Run this only when `reconciliation.json` reports a `contradiction` or `rounding_gap`.** With neither,
 `interpretation.status` is already `not_needed` and there is nothing to review. An
 `exceeds_stated_limit` relation is NOT reviewable here — the interpretation pass may withdraw
-only a contradiction — so a run whose findings are all of that kind skips this step.
+only those two — so a run whose findings are all of that kind skips this step.
 
 Arithmetic can be right about a comparison that should never have been made. Two cases
 recur, both of which a founder would rightly reject: a sum of listed components against a
@@ -1002,6 +1002,8 @@ RUN_ID: <RUN_ID>
 You are the deck-review agent dispatched in Context A (INTERPRETATION). Below are
 comparisons the arithmetic found to disagree with a figure the deck itself states.
 Your job is to withdraw any that should not be put to the founder as a disagreement.
+An entry whose verdict is `rounding_gap` is a total its parts reach only through their
+rounding; the same two grounds apply to it.
 
 Withdraw a comparison ONLY when one of these is true:
 

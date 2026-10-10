@@ -2275,3 +2275,90 @@ def test_a_wide_implied_base_is_held_back() -> None:
 
 def test_an_implied_base_from_a_zero_share_is_refused() -> None:
     assert _base("$3M", 3_000_000, "0%", 0).dropped
+
+
+# --------------------------------------------------------------------------
+# A total its parts reach only through their own rounding is reported, not confirmed.
+# --------------------------------------------------------------------------
+
+
+def _total(parts: list[tuple[str, Any]], stated_raw: str, stated: float, **spec: Any) -> Relation:
+    by: dict[str, Figure] = {}
+    ids = []
+    for n, (raw, value) in enumerate(parts):
+        ids.append(f"p{n}")
+        by[f"p{n}"] = fig(raw, value, "money", label=f"segment {n}", id=f"p{n}")
+    by["t"] = fig(stated_raw, stated, "money", label="total bookings", id="t")
+    return compute({"operator": "sum", "operands": ids, "expected_id": "t", "kind": "derived_ratio", **spec}, by)
+
+
+_PARTS = [("$1.0M", 1_000_000), ("$4.2M", 4_200_000), ("$4.1M", 4_100_000), ("$3.8M", 3_800_000)]
+
+
+def test_a_total_outside_its_own_rounding_is_a_rounding_gap() -> None:
+    """The parts fall short of the stated total by one and a half percent -- outside the stated
+    figure's own +/-50K, inside the +/-200K the four parts' rounding adds. That allowance COULD
+    explain the gap; it does not show that it does, so the founder is asked to check rather than
+    told it matches."""
+    r = _total(_PARTS, "$13.3M", 13_300_000)
+    assert r.verdict == "rounding_gap", (r.rendered, r.reasons)
+    assert "within what rounding of the parts allows" in r.rendered
+    assert "$13.3M" in r.rendered
+
+
+def test_an_exact_total_still_matches() -> None:
+    assert _total(_PARTS, "$13.1M", 13_100_000).verdict == "confirmation"
+
+
+def test_a_cashflow_sized_gap_below_the_floor_stays_a_confirmation() -> None:
+    """The accumulation `operand_tolerance` exists for: a gap outside the total's own rounding
+    but a small fraction of a percent of it."""
+    parts = [("$2.31M", 2_310_000), ("$1.47M", 1_470_000), ("$3.08M", 3_080_000)]
+    r = _total(parts, "$6.87M", 6_870_000)
+    assert r.verdict == "confirmation", (r.rendered, r.reasons)
+
+
+def test_a_bounded_stated_total_is_never_a_rounding_gap() -> None:
+    """A stated floor is satisfied one-sidedly; testing it two-sided would turn the
+    agreement into a gap."""
+    assert _total(_PARTS, "$13.3M+", 13_300_000).verdict == "confirmation"
+
+
+def test_a_ceiling_claim_is_never_a_rounding_gap() -> None:
+    assert _total(_PARTS, "$13.3M", 13_300_000, relation="at_most").verdict == "confirmation"
+
+
+def test_a_percentage_total_under_the_materiality_floor_is_not_a_rounding_gap() -> None:
+    by = {
+        "a": fig("31%", 31, "percent", label="channel a", id="a"),
+        "b": fig("34%", 34, "percent", label="channel b", id="b"),
+        "c": fig("34%", 34, "percent", label="channel c", id="c"),
+        "t": fig("100%", 100, "percent", label="all channels", id="t"),
+    }
+    r = compute({"operator": "sum", "operands": ["a", "b", "c"], "expected_id": "t", "kind": "derived_ratio"}, by)
+    assert r.verdict != "rounding_gap", r.rendered
+
+
+def test_the_rounding_gap_floor_is_the_documented_choice() -> None:
+    from reconcile import ROUNDING_GAP_MIN_REL
+
+    assert ROUNDING_GAP_MIN_REL == 0.01
+
+
+def test_select_orders_findings_then_rounding_gaps_then_readings() -> None:
+    contra = Relation(kind="contradiction", operands=["a"], operator="ratio", verdict="contradiction")
+    gaps = [
+        Relation(
+            kind="derived_ratio",
+            operands=[f"g{n}"],
+            operator="sum",
+            verdict="rounding_gap",
+            computed=100.0 - n,
+            expected_value=100.0 + n,
+        )
+        for n in range(1, 5)
+    ]
+    reading = Relation(kind="derived_ratio", operands=["d"], operator="ratio", verdict="derived")
+    shown = select([reading, *gaps, contra])
+    assert shown[0] is contra and shown[-1] is reading
+    assert [r.operands for r in shown[1:-1]] == [["g4"], ["g3"], ["g2"]], "most wrong first, capped at three"

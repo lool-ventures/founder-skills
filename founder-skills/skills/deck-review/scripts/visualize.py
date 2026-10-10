@@ -1286,8 +1286,9 @@ def _numbers_section(reconciliation: dict[str, Any] | None) -> str:
     # renderers must agree, and `kind` is the model's proposal, not the engine's finding.
     contradictions = [r for r in relations if r.get("verdict") == "contradiction"]
     exceeded = [r for r in relations if r.get("verdict") == "exceeds_stated_limit"]
+    rounding = [r for r in relations if r.get("verdict") == "rounding_gap"]
     derived = [r for r in relations if r.get("verdict") == "derived"]
-    if not contradictions and not exceeded and not derived and not coverage:
+    if not contradictions and not exceeded and not rounding and not derived and not coverage:
         return ""
 
     parts: list[str] = []
@@ -1304,6 +1305,13 @@ def _numbers_section(reconciliation: dict[str, Any] | None) -> str:
     if contradictions:
         rows = "".join(f'<li class="finding-fail">{_esc(r.get("rendered", ""))}</li>' for r in contradictions)
         parts.append(f"<h3>Figures that disagree</h3><ul>{rows}</ul>")
+    if rounding:
+        rows = "".join(f'<li class="finding-warn">{_esc(r.get("rendered", ""))}</li>' for r in rounding)
+        parts.append(
+            f"<h3>{_esc(_reconciliation_prose.ROUNDING_GAP_HEADING)}</h3>"
+            f"<p>{_esc(_reconciliation_prose.ROUNDING_GAP_LEAD)}</p>"
+            f"<ul>{rows}</ul>"
+        )
     if derived:
         rows = "".join(f'<li class="finding-warn">{_esc(r.get("rendered", ""))}</li>' for r in derived)
         parts.append(

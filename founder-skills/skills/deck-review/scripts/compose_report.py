@@ -1419,8 +1419,9 @@ def _section_numbers(
     parsed = [_as_dict(x) for x in relations]
     contradictions = [r for r in parsed if r.get("verdict") == "contradiction"]
     exceeded = [r for r in parsed if r.get("verdict") == "exceeds_stated_limit"]
+    rounding = [r for r in parsed if r.get("verdict") == "rounding_gap"]
     derived = [r for r in parsed if r.get("verdict") == "derived"]
-    if not contradictions and not exceeded and not derived:
+    if not contradictions and not exceeded and not rounding and not derived:
         return ""
 
     lines = ["## What Your Numbers Say About Each Other\n"]
@@ -1449,6 +1450,16 @@ def _section_numbers(
     if contradictions:
         lines.append("### Figures that disagree\n")
         for rel in contradictions:
+            rendered = str(rel.get("rendered", "")).strip()
+            if rendered:
+                lines.append(f"- {rendered}")
+        lines.append("")
+
+    if rounding:
+        # Heading and lead from the shared prose module, so report.html says the same words.
+        lines.append(f"### {_reconciliation_prose.ROUNDING_GAP_HEADING}\n")
+        lines.append(_reconciliation_prose.ROUNDING_GAP_LEAD + "\n")
+        for rel in rounding:
             rendered = str(rel.get("rendered", "")).strip()
             if rendered:
                 lines.append(f"- {rendered}")

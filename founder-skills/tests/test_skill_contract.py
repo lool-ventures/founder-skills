@@ -1539,7 +1539,10 @@ SKILL_MD_CEILING: dict[str, int] = {
     # of reciprocal pairs the engine accepts, `implied_base` with no `expected_id`), appended after the
     # operator line so the dated-magnitudes window is untouched. The "Measured: ..." history sentence in
     # that bullet was removed to pay for part of it; the measurement lives in its contract test.
-    "deck-review": 114_117,
+    # 114,117 -> 114,252 (+135 B): a `rounding_gap` (a total its parts reach only through their own
+    # rounding) reaches the founder, so Step 3.9 runs on one too and the INTERPRETATION template says the
+    # same two withdrawal grounds apply to it; without that the verdict has no review path.
+    "deck-review": 114_252,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.

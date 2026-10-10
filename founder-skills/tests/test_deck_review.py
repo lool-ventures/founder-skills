@@ -6241,3 +6241,70 @@ def test_report_lists_the_competition_fix_once_and_marks_the_duplicate_row() -> 
     assert "34 scored deck-craft criteria" in md
     assert "These 34 scored criteria" in md
     assert "35 deck-craft criteria" not in md and "These 35 criteria" not in md
+
+
+# --------------------------------------------------------------------------
+# A rounding gap renders the same sentence in both renderers.
+# --------------------------------------------------------------------------
+
+_ROUNDING_GAP_RELATION = {
+    "kind": "derived_ratio",
+    "operator": "sum",
+    "operands": ["seg_a", "seg_b", "seg_c", "seg_d"],
+    "computed": 13_100_000.0,
+    "rendered": (
+        "$1.0M + $4.2M + $4.1M + $3.8M = 13,100,000  — the deck states $13.3M (total bookings), more than its own "
+        "rounding away but within what rounding of the parts allows: check the unrounded parts"
+    ),
+    "confidence": "high",
+    "verdict": "rounding_gap",
+    "expected_id": "bookings_total",
+}
+
+
+def _reconciliation_with_rounding_gap() -> dict:
+    return {**_VALID_RECONCILIATION, "relations_proposed": 1, "relations": [dict(_ROUNDING_GAP_RELATION)]}
+
+
+def test_a_rounding_gap_renders_identically_in_report_md_and_report_html() -> None:
+    import html as html_mod
+
+    prose = _load_prose_module()
+    report, d = _compose_from_reconciliation(_reconciliation_with_rounding_gap())
+    md = report["report_markdown"]
+    code, html, err = run_script_raw("visualize.py", ["--dir", d, "--ungated"])
+    assert code == 0, err
+    for text in (prose.ROUNDING_GAP_HEADING, prose.ROUNDING_GAP_LEAD, "check the unrounded parts"):
+        assert text in md, f"report.md lacks {text!r}"
+        assert html_mod.unescape(text) in html_mod.unescape(html), f"report.html lacks {text!r}"
+    # It is not a disagreement, and must not be filed as one in either renderer.
+    assert "Figures that disagree" not in md and "Figures that disagree" not in html
+
+
+def test_the_coverage_line_counts_a_rounding_gap_on_its_own() -> None:
+    """Not a disagreement, and not an agreement: "the comparisons that ran held" must not be
+    said beside one."""
+    prose = _load_prose_module()
+    line = prose.coverage_line(_reconciliation_with_rounding_gap(), lambda x: x)
+    assert "off from its parts by more than its own rounding" in line, line
+    assert "disagree" not in line and "held" not in line, line
+
+
+def test_both_renderers_place_rounding_gaps_between_disagreements_and_readings() -> None:
+    """The ORDER is pinned, not only the presence: a rounding gap is a question, so it follows
+    the findings and precedes the readings in both renderers."""
+    prose = _load_prose_module()
+    reading = {**_CONTRADICTION_RELATION, "verdict": "derived", "rendered": "$9K ÷ $493K = 1.8%"}
+    recon = {
+        **_VALID_RECONCILIATION,
+        "relations": [dict(_CONTRADICTION_RELATION), dict(_ROUNDING_GAP_RELATION), reading],
+        "relations_proposed": 3,
+    }
+    report, d = _compose_from_reconciliation(recon)
+    md = report["report_markdown"]
+    code, html, err = run_script_raw("visualize.py", ["--dir", d, "--ungated"])
+    assert code == 0, err
+    order = ("Figures that disagree", prose.ROUNDING_GAP_HEADING, "What the numbers imply")
+    for name, page in (("report.md", md), ("report.html", html)):
+        positions = [page.index(heading) for heading in order]
+        assert positions == sorted(positions), f"{name} orders the numbers sections {positions}"

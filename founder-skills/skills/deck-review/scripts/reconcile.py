@@ -123,7 +123,7 @@ class Relation:
     span_hi: float | None = None
     expected_id: str | None = None
     expected_value: float | None = None
-    verdict: str = "derived"  # contradiction | confirmation | derived | restatement
+    verdict: str = "derived"  # contradiction | rounding_gap | confirmation | derived | restatement | ...
     # A CLAIM THE DECK MAKES THAT THIS RUN COULD NOT TEST. Set when the time guard refuses a
     # rate-over-time binding. Suppression alone is invisible -- `suppressed` carries counts by
     # verdict and nothing else -- so without this the founder is told "your figures line up"
@@ -2185,7 +2185,8 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
         # computed against a stated 3.5% was certified as matching. Under any
         # significant-figures rule it also becomes actively destructive -- a $57,000
         # operand would donate +/-500 and silently absorb a genuine 34% error.
-        tol = duration_tolerance(exp) + operand_tolerance(r.operator, real) * dur_scale
+        tol_stated = duration_tolerance(exp)
+        tol = tol_stated + operand_tolerance(r.operator, real) * dur_scale
         # Compare INTERVALS, not points. A contradiction exists only when the computed
         # range and the stated range cannot both be true -- if they overlap, the deck is
         # consistent with itself and there is nothing to report. Point values are
@@ -2347,6 +2348,13 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
                     "computed from chart data that is plotted but not printed on the slide, "
                     "and it disagrees with a figure the deck does print"
                 )
+        elif _is_rounding_gap(r.operator, relation, exp, c_lo, c_hi, tol_stated):
+            r.verdict = "rounding_gap"
+            src = "the deck states" if exp.visible else "the underlying data behind that chart gives"
+            r.rendered += (
+                f"  — {src} {_stated(exp)} ({exp.label}), more than its own rounding away but within what "
+                "rounding of the parts allows: check the unrounded parts"
+            )
         else:
             r.verdict = "confirmation"
             # A satisfied bound is not a match. 1,195 against "fewer than 2,000" agrees
@@ -2383,7 +2391,43 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
     return r
 
 
-def select(relations: list[Relation], max_derived: int = 3) -> list[Relation]:
+ROUNDING_GAP_MIN_REL = 0.01
+"""Smallest gap, relative to the stated total, that is reported as a rounding gap. A CHOICE.
+
+A sum's tolerance adds every part's rounding, which is right -- eight cashflow rows each
+rounded to the thousand carry +/-4,000 against a 19.3M total, and the 0.01% gap between them
+is accumulation, not a finding (see `operand_tolerance`). But the same allowance can hide a
+real one: three parts printed to one decimal falling about two percent short of the stated
+total pass because the parts' rounding COULD explain it, not because it does.
+
+Calibrated on the r5 corpus: every unbounded sum/difference confirmation there that fails the
+stated figure's own tolerance sits below one percent of the stated total (five of them, the
+largest just under), so 1% reports none of them while catching the two-percent case it exists
+for. Half a percent would add two, both on one deck and both plausibly a rounded first part.
+The corpus therefore shows no flip at 1%, and this verdict is pinned by synthetic tests only.
+"""
+
+
+def _is_rounding_gap(operator: str, relation: str, exp: Figure, c_lo: float, c_hi: float, tol_stated: float) -> bool:
+    """A total the parts reach only through their own rounding, by a gap worth a look.
+
+    Sums and differences only (the only operators whose tolerance the parts widen), a plain
+    `equals` claim only, and never a bounded stated side: "$200B+" or a stated floor is
+    satisfied one-sidedly, and testing it two-sided would turn the agreement into a gap.
+    """
+    if operator not in ("sum", "difference") or relation != "equals" or exp.bound is not None:
+        return False
+    e_lo, e_hi = exp.span()
+    gap = max(e_lo - c_hi, c_lo - e_hi, 0.0)
+    magnitude = max(abs(e_lo), abs(e_hi))
+    # A percentage gap under the materiality floor is not worth a founder's attention as a
+    # disagreement, and it is not worth it as a rounding question either.
+    if gap <= tol_stated or not magnitude or _immaterial_percent((c_lo + c_hi) / 2.0, exp):
+        return False
+    return gap / magnitude >= ROUNDING_GAP_MIN_REL
+
+
+def select(relations: list[Relation], max_derived: int = 3, max_rounding_gaps: int = 3) -> list[Relation]:
     """Decide what a founder actually sees.
 
     Every material CONTRADICTION, because those are established rather than judged, and
@@ -2433,8 +2477,12 @@ def select(relations: list[Relation], max_derived: int = 3) -> list[Relation]:
         key=_wrongness,
         reverse=True,
     )
+    # A ROUNDING GAP IS A QUESTION, not a disagreement, so it follows the findings and is
+    # capped like the derived readings: `max_rounding_gaps` is a CAP, and 3 is a choice made
+    # for the same reason `max_derived` is -- volume is the enemy of the few that count.
+    rounding = sorted((r for r in live if r.verdict == "rounding_gap"), key=_wrongness, reverse=True)
     derived = [r for r in live if r.verdict == "derived" and r.confidence == "high"]
-    return contradictions + derived[:max_derived]
+    return contradictions + rounding[:max_rounding_gaps] + derived[:max_derived]
 
 
 DOWNGRADE_CLASSES = {
@@ -2449,7 +2497,7 @@ DOWNGRADE_CLASSES = {
         "percentage: this weighs how loose the author's own '~' was meant to be."
     ),
 }
-"""The only reasons a surviving contradiction may be withdrawn. A CLOSED SET, and short.
+"""The only reasons a surviving contradiction or rounding gap may be withdrawn. A CLOSED SET, and short.
 
 Each class is here because the corpus contains a finding the expert graded not-a-problem for
 exactly that reason, and because the convention-classes work established that no deterministic
@@ -2470,6 +2518,9 @@ counterexample. Adding it would invite the model to withdraw precisely the findi
 kept -- the same mistake the sign-convention rule nearly made before review caught it. If a
 future corpus produces a real mis-specified relation, add the class then, with the case attached.
 """
+
+REVIEWABLE_VERDICTS = ("contradiction", "rounding_gap")
+"""What the interpretation pass may withdraw, and what makes it owed."""
 
 MIN_FIGURES = 2
 """Below this a deck states too few numbers for any relation to exist.
@@ -2535,19 +2586,19 @@ def _signature(operator: str, operands: list[str], expected_id: str | None) -> t
 def apply_downgrades(
     relations: list[Relation], downgrades: list[dict[str, Any]]
 ) -> tuple[list[dict[str, Any]], list[str]]:
-    """Withdraw contradictions the interpretation pass judged not to be findings.
+    """Withdraw contradictions (and rounding gaps) the interpretation pass judged not to be findings.
 
     DEMOTE-ONLY, in the same shape as cap-table's `cross_checker.py`: this can move a relation
     out of the founder's view and can do nothing else. It never upgrades, never converts a
     contradiction into a confirmation, never edits a number, and never touches a relation that
-    is not currently a contradiction. The deterministic verdict is what it was; `downgraded`
-    records that a judgement was laid on top of it.
+    is not currently a contradiction or a rounding gap. The deterministic verdict is what it
+    was; `downgraded` records that a judgement was laid on top of it.
 
     That makes a wrong downgrade FAIL SILENT — it suppresses a finding rather than manufacturing
     one — which is the second half of the rule governing everything that crosses the code/model
     boundary here. The first half is that the code can check the claim, and it can: the class
-    must come from a closed set, and the relation named must actually exist and actually be a
-    contradiction.
+    must come from a closed set, and the relation named must actually exist and actually be in
+    REVIEWABLE_VERDICTS.
 
     An unmatched downgrade is an ERROR, not a no-op. A downgrade that silently matches nothing
     is indistinguishable from one that worked, and the whole pass would report success while
@@ -2579,8 +2630,14 @@ def apply_downgrades(
         if target is None:
             errors.append(f"{where} names no relation in this reconciliation: {sig}")
             continue
-        if target.verdict != "contradiction":
-            errors.append(f"{where} targets a {target.verdict!r} relation; only a contradiction can be withdrawn")
+        # A ROUNDING GAP IS WITHDRAWABLE TOO, under the same two classes: a list of parts falling
+        # a little short of a stated total is the textbook `partial_enumeration` case, and a
+        # founder-visible verdict with no review path is one nothing can correct.
+        if target.verdict not in REVIEWABLE_VERDICTS:
+            errors.append(
+                f"{where} targets a {target.verdict!r} relation; "
+                "only a contradiction or a rounding gap can be withdrawn"
+            )
             continue
         target.verdict = "downgraded"
         applied.append(
@@ -2684,12 +2741,13 @@ def build(
     # stays the single place that decides what a founder sees. A downgrade is an input to
     # that decision, never an edit to its output.
     contradictions_before = sum(1 for r in computed if not r.dropped and r.verdict == "contradiction")
+    reviewable_before = sum(1 for r in computed if not r.dropped and r.verdict in REVIEWABLE_VERDICTS)
     applied: list[dict[str, Any]] = []
     if downgrades:
         applied, downgrade_errors = apply_downgrades(computed, downgrades)
         if downgrade_errors:
             return None, "; ".join(downgrade_errors)
-    if contradictions_before == 0:
+    if reviewable_before == 0:
         interpretation = "not_needed"
     elif downgrades is None:
         interpretation = "not_run"
@@ -2799,14 +2857,15 @@ def _print_downgrade_stanza(recon_path: str, ledger_path: str) -> int:
     removes the transcription entirely. Quotes and slides ride along because the judgement
     is made on the evidence, not on the signature.
 
-    CONTRADICTIONS ONLY. `select()` returns contradictions PLUS high-confidence derived
-    readings, and `apply_downgrades` refuses a target that is not a contradiction -- which
-    fails the whole step. Reads `relations` and never the suppressed counts, so it cannot
-    reach past `select()`.
+    CONTRADICTIONS AND ROUNDING GAPS ONLY, each labelled with its verdict. `select()` also
+    returns high-confidence derived readings, and `apply_downgrades` refuses a target outside
+    REVIEWABLE_VERDICTS -- which fails the whole step. Reads `relations` and never the
+    suppressed counts, so it cannot reach past `select()`.
 
     NOTE the coupling: this is sound only while `select()` promotes EVERY contradiction. If
     a cap is ever put on that promotion, this stanza and `apply_downgrades`' signature map
-    (built over all non-dropped computed relations) diverge silently.
+    (built over all non-dropped computed relations) diverge silently. Rounding gaps ARE capped
+    (`max_rounding_gaps`); one past the cap is not shown, so it needs no review.
     """
     recon, err = _read_json(recon_path, "reconciliation")
     if err:
@@ -2819,11 +2878,12 @@ def _print_downgrade_stanza(recon_path: str, ledger_path: str) -> int:
     by_id = {str(f.get("id")): f for f in (ledger or {}).get("figures", []) if isinstance(f, dict)}
     stanza: list[dict[str, Any]] = []
     for rel in (recon or {}).get("relations", []):
-        if not isinstance(rel, dict) or rel.get("verdict") != "contradiction":
+        if not isinstance(rel, dict) or rel.get("verdict") not in REVIEWABLE_VERDICTS:
             continue
         ids = [*rel.get("operands", []), rel.get("expected_id")]
         stanza.append(
             {
+                "verdict": rel.get("verdict"),
                 "operator": rel.get("operator"),
                 "operands": rel.get("operands"),
                 "expected_id": rel.get("expected_id"),
