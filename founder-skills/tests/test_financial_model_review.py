@@ -8944,6 +8944,41 @@ def _flags(metric: str, computed: float, evidence: str, benchmark: dict[str, Any
     return _flagged_claims(evidence, {metric: (computed, benchmark)}).get(metric, [])
 
 
+# The written precision of a claim widens the match: "0.4x" states one decimal, so it covers 0.35-0.45.
+# For a ratio the half-unit is capped at a quarter of the compared value, so a whole-number "1x" does
+# not cover 1.45. Payback months keep the plain half-unit.
+@pytest.mark.parametrize(
+    ("metric", "computed", "evidence", "flagged"),
+    [
+        ("burn_multiple", 0.43, "The 0.4x burn multiple is efficient.", []),
+        ("burn_multiple", 0.45, "Burn multiple of 0.41x is efficient.", [0.41]),
+        ("burn_multiple", 1.45, "Burn multiple of 1x is efficient.", [1.0]),
+        ("burn_multiple", 2.6, "Burn multiple of 2x is efficient.", [2.0]),
+        ("burn_multiple", 2.49, "Burn multiple of 2x is efficient.", []),
+        ("burn_multiple", 0.43, "Burn multiple of 0.40x is efficient.", [0.4]),
+        ("cac_payback", 11.2, "An 11-month CAC payback is fine.", []),
+        ("cac_payback", 11.75, "An 11-month CAC payback is fine.", [11.0]),
+    ],
+)
+def test_metric_claim_tolerance_follows_written_precision(
+    metric: str, computed: float, evidence: str, flagged: list[float]
+) -> None:
+    assert _unbenched(metric, computed, evidence) == flagged
+
+
+def test_metric_claim_precision_never_fires_where_the_relative_test_passed() -> None:
+    """Against a compared value of 0, the old absolute 0.05 still holds: the new rule only loosens.
+
+    A benchmark of 0 is the reachable case (a computed 0 is skipped before comparison). Two decimals
+    give a half-unit of 0.005, capped to 0 for a ratio, so without the old test kept first "0.03x"
+    against a 0 bar would fire.
+    """
+    zero_bar = {"target": 0.0, "source": "test", "as_of": "2025-Q1"}
+    assert _flags("burn_multiple", 4.5, "Burn multiple of 0.03x would be ideal.", zero_bar) == []
+    assert _fmr_compose()._claim_matches(0.03, 2, 0.0, "burn_multiple")
+    assert not _fmr_compose()._claim_matches(0.06, 2, 0.0, "burn_multiple")
+
+
 # The metric phrases recorded reviews of the synthetic fixture wrote (computed CAC payback 11), each
 # kept as written inside a shortened sentence (same text between label and figure, same reading path).
 # The full recorded sentences pass too, in a replay over the kept review runs. The first two were

@@ -554,8 +554,33 @@ def _close(a: float, b: float, tolerance: float = 0.05) -> bool:
     return abs(a - b) / denom <= tolerance
 
 
-def _metric_claims_in_text(text: str, name: str) -> list[float]:
-    """The value each mention of metric `name` in `text` asserts for that metric.
+# The share of the compared value a written-precision allowance may reach for a ratio. Without it a
+# whole-number ratio would get a half-unit of slack: "1x" would pass against 1.45. Payback months
+# keep the plain half-unit, so "11-month" passes against 11.2.
+_RATIO_PRECISION_CAP = 0.25
+
+
+def _claim_matches(claim: float, decimals: int, allowed: float, name: str) -> bool:
+    """Whether a written figure states `allowed` at the precision it was written to.
+
+    Today's relative test comes first, so this can only accept what `_close` already accepts and
+    more -- never fire where it did not, including against a computed 0. The second test allows
+    half of the claim's last written digit ("0.4x" covers 0.35-0.45), which is what rounding to
+    that many places means; for a ratio that allowance is capped at a quarter of the compared value.
+    """
+    if _close(claim, allowed):
+        return True
+    floor = 0.5 * 10.0**-decimals
+    if name not in _PAYBACK_METRICS:
+        floor = min(floor, _RATIO_PRECISION_CAP * abs(allowed))
+    return abs(claim - allowed) <= floor
+
+
+def _metric_claims_in_text(text: str, name: str) -> list[tuple[float, int]]:
+    """The value each mention of metric `name` in `text` asserts for that metric, with its decimals.
+
+    Each claim is `(value, decimals)`, the decimals counted from the digits as written ("0.40x" -> 2),
+    so the comparison can allow for the precision the writer chose.
 
     Per mention of one of the metric's labels, at most ONE number is read:
 
@@ -606,7 +631,7 @@ def _metric_claims_in_text(text: str, name: str) -> list[float]:
     definition outside parentheses ("burn multiple, i.e. net burn/net new ARR,
     7x") are not read.
     """
-    found: list[float] = []
+    found: list[tuple[float, int]] = []
     # Every search and every offset below is into `lowered` alone, never mixed with
     # `text`: a character whose lowercase form is longer ("İ") would otherwise shift
     # one string's offsets against the other's.
@@ -669,11 +694,12 @@ def _metric_claims_in_text(text: str, name: str) -> list[float]:
     return found
 
 
-def _append_finite(found: list[float], digits: str) -> None:
-    """Append the figure unless it is too long to be one (a 310-digit run reads as inf)."""
+def _append_finite(found: list[tuple[float, int]], digits: str) -> None:
+    """Append the figure and its written decimals unless it is too long to be one (310 digits read as inf)."""
     value = float(digits)
     if math.isfinite(value):
-        found.append(value)
+        _, dot, fraction = digits.partition(".")
+        found.append((value, len(fraction) if dot else 0))
 
 
 #: Founder-facing stand-in when a checklist item carries no label. Never the criterion id.
@@ -800,8 +826,8 @@ def _check_metric_self_contradiction(
     seen: set[tuple[str, float]] = set()
     for criterion, text in texts:
         for name, value in canonical.items():
-            for claim in _metric_claims_in_text(text, name):
-                if any(_close(claim, allowed) for allowed in permitted[name]):
+            for claim, decimals in _metric_claims_in_text(text, name):
+                if any(_claim_matches(claim, decimals, allowed, name) for allowed in permitted[name]):
                     continue
                 dedup_key = (name, round(claim, 3))
                 if dedup_key in seen:
