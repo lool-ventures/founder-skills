@@ -1666,12 +1666,25 @@ def cli_version(rows: list[dict[str, Any]]) -> tuple[int, ...] | None:
     return None
 
 
-def _notice(output_path: str) -> str:
+# market-sizing's two sizing builds: a build the comparison flagged has a redo of its own, printed by the
+# generator like any other prompt (it is then this OUTPUT_PATH's comparand), so the notice names it there.
+_SIZING_CONTEXTS = ("CONTEXT: TOP_DOWN_METHODOLOGY", "CONTEXT: BOTTOM_UP_METHODOLOGY")
+
+
+def _notice(output_path: str, context: str | None = None) -> str:
+    """The rewrite's additionalContext. Its head ("[...] This dispatch was sent") is what `rewrite_failed`
+    reads back from the transcript, so it never changes."""
+    if context in _SIZING_CONTEXTS:
+        routes = (
+            "A producer's rejection goes back through its --correction producer-rejected, and a sizing build the "
+            "comparison flagged through dispatch_prompt.py --redo comparison; nothing else does."
+        )
+    else:
+        routes = "A producer's rejection goes back through its --correction producer-rejected, and nothing else does."
     return (
         f"{REWRITE_MARKER}[{output_path}] This dispatch was sent with the prompt the generator printed; "
         "the changes in your version were dropped. Do not send this dispatch again. Nothing is added to a "
-        "generated prompt by hand: re-run the generator. A producer's rejection goes back through its "
-        "--correction producer-rejected, and nothing else does."
+        "generated prompt by hand: re-run the generator. " + routes
     )
 
 
@@ -1709,7 +1722,7 @@ def rewrite_failed(rows: list[dict[str, Any]]) -> bool:
     return False
 
 
-def _rewrite(tool_input: dict[str, Any], printed: str, output_path: str) -> dict[str, Any]:
+def _rewrite(tool_input: dict[str, Any], printed: str, output_path: str, context: str | None = None) -> dict[str, Any]:
     updated = dict(tool_input)
     updated["prompt"] = printed
     return {
@@ -1718,7 +1731,7 @@ def _rewrite(tool_input: dict[str, Any], printed: str, output_path: str) -> dict
             "permissionDecision": "allow",
             "permissionDecisionReason": f"{REWRITE_MARKER}[{output_path}] sent as the prompt generator printed it",
             "updatedInput": updated,
-            "additionalContext": _notice(output_path),
+            "additionalContext": _notice(output_path, context),
         }
     }
 
@@ -1936,7 +1949,7 @@ def decide(payload: dict[str, Any]) -> dict[str, Any] | None:
     if printed is not None and _squash(printed) == _squash(prompt):
         return None
     if printed is not None and isinstance(tool_input, dict) and _may_rewrite(tool_input, rows):
-        return _rewrite(tool_input, printed + "\n", output_path)
+        return _rewrite(tool_input, printed + "\n", output_path, context)
     if _holds(rows, output_path) >= MAX_HOLDS:
         print(
             f"dispatch_prompt_check: {output_path} sent unlike the printed prompt after {MAX_HOLDS} holds",

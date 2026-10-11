@@ -1224,3 +1224,152 @@ def test_a_setting_that_changes_what_the_generator_runs_is_named(tmp_path: Path)
     rows = [_user("Size my market."), *_printed(_GENERATED, command="PYTHONPATH=/tmp/e " + GEN_CMD)]
     reason = _deny(_run(tmp_path, rows, _GENERATED))
     assert "`PYTHONPATH=/tmp/e`" in reason and "changes what it runs" in reason and "no such setting" in reason
+
+
+# --- market-sizing's comparison redo (dispatch_prompt.py <sizing> --redo comparison) ------------------------
+#
+# The redo is an ordinary generator output for the same OUTPUT_PATH, so it becomes that path's comparand. No
+# hook code tells it apart; these pin that it works, and that a refusal never becomes a comparand.
+
+
+def _sizing_redo_printed() -> str:
+    import importlib.util
+    import tempfile
+
+    gen = SCRIPTS.parent / "skills" / "market-sizing" / "scripts" / "dispatch_prompt.py"
+    spec = importlib.util.spec_from_file_location("ms_gen_hook_redo", gen)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    with tempfile.TemporaryDirectory() as d:
+        for name in ("inputs.json", "validation.json", "methodology.json"):
+            Path(d, name).write_text("{}")
+        out: str = mod.sizing(
+            "top_down_methodology",
+            "R",
+            d,
+            "agent/market-sizing-acme/handoff/R",
+            "agent/market-sizing-acme",
+            redo={"flagged": ["tam", "som"], "suspect": ["industry_total"]},
+        )
+    return out
+
+
+_TD_PLAIN = _sizing_printed("top_down_methodology")
+_TD_REDO = _sizing_redo_printed()
+_TD_IMPROVISED = _TD_PLAIN.replace(
+    "you convert nothing.", "you convert nothing. The total above is global; use the orchard-belt one instead."
+)
+_TD_PATH = "agent/market-sizing-acme/handoff/R/top_down_output.json"
+_REDO_CMD = _sizing_cmd("top_down_methodology") + " --redo comparison --suspect industry_total"
+_SIZING_INPUT = {"subagent_type": "founder-skills:market-sizing", "description": "Market sizing: top-down"}
+
+
+def _first_build_done() -> list[dict[str, Any]]:
+    """The original printed and dispatched, as Step 5 leaves it."""
+    uid, use = _call("Agent", {**_SIZING_INPUT, "prompt": _TD_PLAIN})
+    return [*_printed(_TD_PLAIN, command=_sizing_cmd("top_down_methodology")), use, _result(uid, "done")]
+
+
+def test_the_redo_is_a_different_prompt_from_the_plain_one() -> None:
+    assert _TD_IMPROVISED != _TD_PLAIN
+    assert "COMPARISON REDO:" in _TD_REDO and _TD_REDO.endswith("Do NOT write any file other than OUTPUT_PATH.\n")
+
+
+def test_an_improvised_repair_after_the_redo_print_is_rewritten_to_the_redo(tmp_path: Path, monkeypatch: Any) -> None:
+    """H1: once the redo is printed for the path, a hand-written repair is sent as the redo."""
+    mod = _hook()
+    monkeypatch.setattr(mod, "REWRITE_FLOOR", (2, 1, 290))
+    rows = _versioned(
+        [_user("Size my market."), *_first_build_done(), *_printed(_TD_REDO, command=_REDO_CMD)], "2.1.290"
+    )
+    out = _decide(mod, tmp_path, rows, {**_SIZING_INPUT, "prompt": _TD_IMPROVISED})["hookSpecificOutput"]
+    assert out["permissionDecision"] == "allow"
+    assert out["updatedInput"]["prompt"] == _TD_REDO
+    assert "--redo comparison" in out["additionalContext"]
+
+
+def test_with_no_redo_printed_an_improvised_repair_is_rewritten_to_the_original(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    """H2: the observed failure, pinned as the leg with no redo printed: the repair's reason is dropped."""
+    mod = _hook()
+    monkeypatch.setattr(mod, "REWRITE_FLOOR", (2, 1, 290))
+    rows = _versioned([_user("Size my market."), *_first_build_done()], "2.1.290")
+    out = _decide(mod, tmp_path, rows, {**_SIZING_INPUT, "prompt": _TD_IMPROVISED})["hookSpecificOutput"]
+    assert out["updatedInput"]["prompt"] == _TD_PLAIN
+
+
+def test_the_printed_redo_goes_through_unchanged(tmp_path: Path) -> None:
+    """H3."""
+    mod = _hook()
+    rows = [_user("Size my market."), *_first_build_done(), *_printed(_TD_REDO, command=_REDO_CMD)]
+    assert _decide(mod, tmp_path, rows, {**_SIZING_INPUT, "prompt": _TD_REDO}) is None
+
+
+@pytest.mark.parametrize("shape", ["is_error", "echo_exit"])
+def test_a_refused_redo_is_never_a_comparand(tmp_path: Path, monkeypatch: Any, shape: str) -> None:
+    """H4: the generator's refusal prints no context line, so the original stays the comparand, and a redo
+    block typed by hand is rewritten away."""
+    mod = _hook()
+    monkeypatch.setattr(mod, "REWRITE_FLOOR", (2, 1, 290))
+    refusal = '{"status": "refused", "code": "SIZING_REDO_NOT_FLAGGED", "message": "no gap was flagged"}\n'
+    if shape == "is_error":
+        uid, use = _call("Bash", {"command": _REDO_CMD})
+        refused = [use, _result(uid, refusal, is_error=True)]
+    else:
+        refused = _printed(refusal + "EXIT=1\n", command=_REDO_CMD + '; echo "EXIT=$?"')
+    rows = _versioned([_user("Size my market."), *_first_build_done(), *refused], "2.1.290")
+    printed = mod.latest_printed(rows, "CONTEXT: TOP_DOWN_METHODOLOGY", _TD_PATH)
+    assert printed is not None and printed.strip() == _TD_PLAIN.strip()
+    out = _decide(mod, tmp_path, rows, {**_SIZING_INPUT, "prompt": _TD_REDO})["hookSpecificOutput"]
+    assert out["updatedInput"]["prompt"] == _TD_PLAIN
+
+
+def test_a_plain_print_after_the_redo_becomes_the_comparand(tmp_path: Path, monkeypatch: Any) -> None:
+    """H5: the ordering hazard. The latest print wins, so a plain reprint after the redo would rewrite the redo
+    dispatch to the plain prompt; the generator's SIZING_REDO_PENDING refusal is what prevents that print."""
+    mod = _hook()
+    monkeypatch.setattr(mod, "REWRITE_FLOOR", (2, 1, 290))
+    rows = _versioned(
+        [
+            _user("Size my market."),
+            *_first_build_done(),
+            *_printed(_TD_REDO, command=_REDO_CMD),
+            *_printed(_TD_PLAIN, command=_sizing_cmd("top_down_methodology")),
+        ],
+        "2.1.290",
+    )
+    out = _decide(mod, tmp_path, rows, {**_SIZING_INPUT, "prompt": _TD_REDO})["hookSpecificOutput"]
+    assert out["updatedInput"]["prompt"] == _TD_PLAIN
+
+
+def test_the_redo_option_before_the_context_still_names_the_context(tmp_path: Path) -> None:
+    """The hook reads a generator call's context as its first positional argument, stepping over every option
+    as taking a value. `--redo comparison` takes one, so it may come first."""
+    mod = _hook()
+    # The generator last in a block whose earlier command printed: only then is the subcommand what names the
+    # result's context (a block of the generator alone is the comparand for every context it printed).
+    flag_first = (
+        'cat /w/notes.txt; python3 "$SCRIPTS/dispatch_prompt.py" --redo comparison --suspect industry_total '
+        'top_down_methodology --run-id "$RUN_ID" --analysis-dir "$ANALYSIS_DIR" --handoff-dir "$HANDOFF_DIR" '
+        '--handoff-agent "$HANDOFF_AGENT"'
+    )
+    rows = [_user("Size my market."), *_printed("notes\n" + _TD_REDO, command=flag_first)]
+    printed = mod.latest_printed(rows, "CONTEXT: TOP_DOWN_METHODOLOGY", _TD_PATH)
+    assert printed is not None and printed.strip() == _TD_REDO.strip()
+    assert _decide(mod, tmp_path, rows, {**_SIZING_INPUT, "prompt": _TD_REDO}) is None
+    # Control: a bare flag would swallow the next word as its value, and the print would count for no context.
+    bare = flag_first.replace("--redo comparison", "--redo")
+    rows = [_user("Size my market."), *_printed("notes\n" + _TD_REDO, command=bare)]
+    assert mod.latest_printed(rows, "CONTEXT: TOP_DOWN_METHODOLOGY", _TD_PATH) is None
+
+
+def test_only_a_sizing_rewrite_notice_names_the_redo() -> None:
+    mod = _hook()
+    sizing = mod._notice("/h/top_down_output.json", "CONTEXT: TOP_DOWN_METHODOLOGY")
+    other = mod._notice("/h/redteam_output.json", "CONTEXT: RED_TEAM")
+    assert "--redo comparison" in sizing and "--redo" not in other
+    assert other == mod._notice("/h/redteam_output.json"), "every other context keeps the notice it had"
+    for notice in (sizing, other):
+        assert "] This dispatch was sent" in notice and "producer-rejected" in notice

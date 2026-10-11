@@ -1049,3 +1049,70 @@ def test_a_bare_line_stored_but_not_yet_applied_is_still_held(tmp_path: Path) ->
     assert not any(k.startswith("ms_two_figures.") for k in ledger.get("gates", {}))
     reason = _decision(_through_chain(tmp_path, run, line))["permissionDecisionReason"]
     assert "ARPU: never offered" in reason and "churn: never offered" in reason, reason
+
+
+# --- the comparison redo: a second TOP_DOWN dispatch in the same window ---------------------------------
+#
+# dispatch_prompt.py --redo comparison sends one build a second time, its prompt carrying the redo block. The
+# questions it follows were answered before the first dispatch; neither question check may hold it.
+
+_REDO = "CONTEXT: TOP_DOWN_METHODOLOGY\nOUTPUT_PATH: x\nCOMPARISON REDO: this build is being done once more.\n"
+
+
+def _first_top_down() -> list[dict[str, Any]]:
+    plain = "CONTEXT: TOP_DOWN_METHODOLOGY\nOUTPUT_PATH: x\n" + _END + "\n"
+    sent = {
+        "type": "assistant",
+        "message": {
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "tool_use",
+                    "id": "toolu_td_first",
+                    "name": "Agent",
+                    "input": {"prompt": plain, "subagent_type": "founder-skills:market-sizing"},
+                }
+            ],
+        },
+    }
+    done = {
+        "type": "user",
+        "message": {
+            "role": "user",
+            "content": [{"type": "tool_result", "tool_use_id": "toolu_td_first", "content": "done"}],
+        },
+    }
+    return [*_chain(plain), sent, done]
+
+
+def test_a_redo_dispatch_after_host_answers_is_not_held(tmp_path: Path) -> None:
+    """Q-a: the request answered both questions by host lines; the redo passes both question checks."""
+    _outputs(tmp_path)
+    lines = "Size my market.\nFS_HOST_ANSWER ms_methodology=looks_good\nFS_HOST_ANSWER ms_two_figures=typed\n"
+    _silent(_run(tmp_path, [_user(lines), *_first_top_down()], prompt=_REDO))
+
+
+def test_a_redo_dispatch_after_the_question_was_asked_is_not_held(tmp_path: Path) -> None:
+    """Q-b: the figures question was asked earlier in the window with every figure offered."""
+    _outputs(tmp_path)
+    rows = [
+        _user("Size my market."),
+        _question("$157 per month (chat)", "$317/month (deck)", "$261 per month (deck)"),
+        *_first_top_down(),
+    ]
+    _silent(_run(tmp_path, rows, prompt=_REDO))
+
+
+def test_a_redo_after_a_founder_message_is_held_once_then_passes(tmp_path: Path) -> None:
+    """Residual, pinned: the figures check windows on the current prompt, so a founder's plain-chat reply
+    between the first build and the redo (a period question at Step 5) holds the redo once; the retry passes."""
+    _outputs(tmp_path)
+    rows = [
+        _user("Size my market."),
+        _question("$157 per month (chat)", "$317/month (deck)", "$261 per month (deck)"),
+        *_first_top_down(),
+        _user("It is per month."),
+    ]
+    first = _decision(_run(tmp_path, rows, prompt=_REDO))
+    assert first["permissionDecision"] == "deny" and MARKER in first["permissionDecisionReason"]
+    _silent(_run(tmp_path, [*rows, _denied(first["permissionDecisionReason"])], prompt=_REDO))
