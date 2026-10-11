@@ -555,7 +555,8 @@ def test_the_sizing_over_a_consumed_redo_records_after_once(tmp_path: Path) -> N
     assert _pipe(a, h).returncode == 0
     rec = json.loads((a / sr.RECORD_NAME).read_text())
     after = rec["after"]
-    assert after["input_refs"]["industry_total"]["derived"]["op"] == "multiply"
+    redone_total = after["input_refs"]["industry_total"]
+    assert redone_total["derived"]["op"] == "multiply"
     assert (
         after["gaps"]["tam"]["delta_pct"] == json.loads((a / "sizing.json").read_text())["comparison"]["tam_delta_pct"]
     )
