@@ -34,7 +34,9 @@ Usage:
     closing_message.py --report R --deliverable "LABEL=PATH" [--deliverable ...]
                        [--link auto|computer|path|none]
 
-Exit 2 if the report cannot be read; a failed `handover.txt` write is a stderr line.
+Exit 2 if the report cannot be read, or was composed for another run than this folder's inputs
+(`RUN_ID_MISMATCH`: stdout empty, no `handover.txt`, no hand-over time); a failed `handover.txt` write is a
+stderr line.
 """
 
 from __future__ import annotations
@@ -97,6 +99,23 @@ def verdict_for_chat(verdict: str) -> str:
     return text
 
 
+# The code a refused report prints. Kept as a literal so the host contract's code scan sees it.
+REFUSAL = {"code": "RUN_ID_MISMATCH"}
+
+
+def refuse_another_runs_report(report: dict[str, Any], ours: str | None) -> None:
+    """Exit 2, nothing printed or written, when report.json was composed for another run than this folder's.
+    A missing id on either side is not compared: a report from before the stamp, or inputs with no run id."""
+    theirs = report.get("run_id")
+    if isinstance(theirs, str) and theirs and ours and theirs != ours:
+        print(
+            f"Error: {REFUSAL['code']}: this report was written by an earlier run ({theirs}), not this one "
+            f"({ours}). Compose the report again for this run, then run this again. Nothing was printed.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+
 def build(report: dict[str, Any], deliverables: list[tuple[str, str | None]]) -> str:
     verdict = report.get("verdict")
     if not isinstance(verdict, str) or not verdict.strip():
@@ -131,11 +150,15 @@ def main() -> None:
     p.add_argument("--link", choices=["auto", "computer", "path", "none"], default="auto")
     a = p.parse_args()
     link = detect_link_form(os.getcwd(), dict(os.environ)) if a.link == "auto" else a.link
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import _ms_gates
+
     try:
         with open(a.report, encoding="utf-8") as fh:
             report = json.load(fh)
         if not isinstance(report, dict):
             raise ValueError("report.json is not an object")
+        refuse_another_runs_report(report, _ms_gates.run_id_of(os.path.dirname(os.path.abspath(a.report))))
         text = build(report, _deliverables(a.deliverable, link))
     except (OSError, ValueError) as e:
         print(f"Error: cannot build the hand-over from report {a.report}: {e}", file=sys.stderr)
@@ -148,9 +171,6 @@ def main() -> None:
         print(f"Warning: could not write {handover}: {e}", file=sys.stderr)
     try:
         # With a run ledger, the status records when the hand-over was printed; nothing here changes stdout.
-        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-        import _ms_gates
-
         _ms_gates.stamp_handed_over(a.report)
     except Exception as e:  # noqa: BLE001 -- the hand-over is printed whatever happens here
         print(f"warning: the hand-over time was not recorded in the run status: {e}", file=sys.stderr)

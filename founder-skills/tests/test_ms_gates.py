@@ -791,6 +791,21 @@ def test_the_closer_stamps_the_hand_over_and_prints_the_same(tmp_path: Path) -> 
     assert again.returncode == 0 and again.stdout == first.stdout
 
 
+def test_the_closer_refuses_a_report_composed_for_another_run(tmp_path: Path) -> None:
+    root, run_id, run_dir = _run_dir(tmp_path)
+    _artifacts(run_dir, run_id)
+    _ok(_answer(root, run_id, "ms_methodology", "looks_good"))
+    _ok(_compose(run_dir))
+    report = json.loads((run_dir / "report.json").read_text(encoding="utf-8"))
+    assert report["run_id"] == run_id  # the stamp is this run's
+    report["run_id"] = "20261001T090000Z-0f0f0f"
+    _write(run_dir / "report.json", report)
+    proc = h.run(MS / "closing_message.py", "--report", str(run_dir / "report.json"), "--link", "path")
+    assert proc.returncode == 2 and proc.stdout == "" and "RUN_ID_MISMATCH" in proc.stderr, proc
+    assert not (run_dir / "handover.txt").exists()
+    assert h.status(root, run_id)["handed_over_at"] is None
+
+
 # --- skill-local copies -------------------------------------------------------------------------------------
 
 

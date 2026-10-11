@@ -25,7 +25,9 @@ Usage:
     fmr_closing_message.py --report R --deliverable "LABEL=PATH" [--deliverable ...]
                            [--link auto|computer|path|none] [--cash-update]
 
-Exit 2 if the report cannot be read or carries no verdict; a failed handover.txt write is a stderr line.
+Exit 2 if the report cannot be read, carries no verdict, or was composed for another run than this
+folder's inputs (`RUN_ID_MISMATCH`: stdout empty, no handover.txt, no hand-over time); a failed
+handover.txt write is a stderr line.
 """
 
 from __future__ import annotations
@@ -86,6 +88,23 @@ def _deliverables(specs: list[str], link: str) -> list[tuple[str, str | None]]:
     return out
 
 
+# The code a refused report prints. Kept as a literal so the host contract's code scan sees it.
+REFUSAL = {"code": "RUN_ID_MISMATCH"}
+
+
+def refuse_another_runs_report(report: dict[str, Any], ours: str | None) -> None:
+    """Exit 2, nothing printed or written, when report.json was composed for another run than this folder's.
+    A missing id on either side is not compared: a report from before the stamp, or inputs with no run id."""
+    theirs = report.get("run_id")
+    if isinstance(theirs, str) and theirs and ours and theirs != ours:
+        print(
+            f"Error: {REFUSAL['code']}: this report was written by an earlier run ({theirs}), not this one "
+            f"({ours}). Compose the report again for this run, then run this again. Nothing was printed.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+
 def build(report: dict[str, Any], deliverables: list[tuple[str, str | None]], cash_update: bool = False) -> str:
     verdict = report.get("verdict")
     if not isinstance(verdict, str) or not verdict.strip():
@@ -128,11 +147,15 @@ def main() -> None:
     )
     a = p.parse_args()
     link = detect_link_form(os.getcwd(), dict(os.environ)) if a.link == "auto" else a.link
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import _fmr_gates  # noqa: PLC0415
+
     try:
         with open(a.report, encoding="utf-8") as fh:
             report = json.load(fh)
         if not isinstance(report, dict):
             raise ValueError("report.json is not an object")
+        refuse_another_runs_report(report, _fmr_gates.run_id_of(os.path.dirname(os.path.abspath(a.report))))
         text = build(report, _deliverables(a.deliverable, link), cash_update=a.cash_update)
     except (OSError, ValueError) as e:
         print(f"Error: cannot build the hand-over from report {a.report}: {e}", file=sys.stderr)
@@ -144,9 +167,6 @@ def main() -> None:
     except OSError as e:
         print(f"Warning: could not write {handover}: {e}", file=sys.stderr)
     # A run with a gate ledger records when its hand-over was printed; nothing here changes stdout.
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    import _fmr_gates  # noqa: PLC0415
-
     _fmr_gates.stamp_handed_over(a.report)
     sys.stdout.write(text)
 

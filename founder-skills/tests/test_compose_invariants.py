@@ -1250,6 +1250,25 @@ def test_every_skill_syncs_report_json_when_inserting_coaching() -> None:
         )
 
 
+def test_every_skills_insert_command_names_its_runs_artifacts() -> None:
+    """In a folder that belongs to a run, an insert with no `--verify-artifact` is refused (`RUN_ID_REQUIRED`): the
+    artifacts are how the insert learns which run it closes. So each documented insert command names them. Bounded
+    on the command's own end (the first line that does not continue), never a character window."""
+    skills_root = Path(__file__).resolve().parents[1] / "skills"
+    callers = sorted(p for p in skills_root.glob("*/SKILL.md") if "insert_coaching.py" in p.read_text(encoding="utf-8"))
+    assert len(callers) >= 5, f"expected the coaching step fleet-wide, found {len(callers)}"
+    for skill_md in callers:
+        lines = skill_md.read_text(encoding="utf-8").splitlines()
+        start = next(i for i, ln in enumerate(lines) if 'insert_coaching.py" \\' in ln)
+        block: list[str] = []
+        for ln in lines[start:]:
+            block.append(ln)
+            if not ln.rstrip().endswith("\\"):
+                break
+        named = re.findall(r'--verify-artifact\s+"\$[A-Z_]+/[^"]+\.json"', "\n".join(block))
+        assert len(named) >= 1, f"{skill_md.parent.name}/SKILL.md's insert command names no --verify-artifact"
+
+
 # ---------------------------------------------------------------------------
 # S3 — one overall-status vocabulary, four implementations, nothing asserting they agree.
 # ---------------------------------------------------------------------------

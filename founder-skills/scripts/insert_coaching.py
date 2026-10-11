@@ -42,7 +42,18 @@ allow it, and other scripts do rename there, so this is a choice, not a
 platform limit.)
 
 Output: JSON receipt to stdout (--pretty for indented output; -o writes
-the receipt to a file and emits a confirmation receipt to stdout).
+the receipt to a file and emits a confirmation receipt to stdout). A blocked
+diagnostic always goes to stdout and leaves -o untouched. -o may not name a
+file this script reads, the report.json / report.md beside the report, or an
+existing file that is not one of its own receipts (`OUTPUT_IS_INPUT`).
+
+Run checks: in a folder carrying any run's `handoff/*/run_ref.json`, an
+insert with no --verify-artifact is `RUN_ID_REQUIRED`, and one whose
+artifacts' run has no `run_ref.json` there is `RUN_NOT_BOUND`. A
+--report-json whose top-level `run_id` is another run's than the artifacts'
+is `RUN_ID_MISMATCH` (a missing id on either side is not compared). Each of
+these four carries `code` and a model-facing `fix`; a folder with no ref is
+handled exactly as before.
 
 Check-record declaration: a report whose compose wrote
     <!-- COACHING_REQUIRES_CHECK_RECORD run_id=<run> -->
@@ -129,12 +140,113 @@ def _status_write(outcome: str) -> None:
         print(f"warning: the run status was not updated: {e}", file=sys.stderr)
 
 
-def _blocked(reason: str, pretty: bool, output: str | None) -> int:
+def _blocked(reason: str, pretty: bool, refusal: dict[str, str] | None = None) -> int:
+    """The refusal: its diagnostic on STDOUT, always, and `-o` left untouched (a receipt already there stays).
+    Writing it through `-o` would leave the reason where the caller does not read it, and a refusal aimed at
+    an input would itself overwrite that input. `refusal` adds a stable `code` and a model-facing `fix`."""
     payload: dict[str, object] = {"status": "blocked", "reason": reason}
-    _emit(payload, pretty, output)
+    if refusal is not None:
+        payload.update(refusal)
+    _emit(payload, pretty, None)
     print(f"BLOCKED: {reason}", file=sys.stderr)
     _status_write("blocked")
     return 1
+
+
+# Every key a payload of this script carries; an existing `-o` whose keys are not all among them, or whose
+# `status` is not one of RECEIPT_STATUSES, is some other file and is never overwritten.
+RECEIPT_KEYS = frozenset(
+    {
+        "status",
+        "reason",
+        "code",
+        "fix",
+        "report_path",
+        "run_id",
+        "verified_artifacts",
+        "footer_dropped",
+        "commentary_bytes",
+        "founder_text_findings",
+    }
+)
+RECEIPT_STATUSES = frozenset({"inserted", "already_inserted", "blocked"})
+
+_OUTPUT_IS_INPUT_REASON = (
+    "The coaching was not added: the step was asked to save its receipt over one of the review's own files. "
+    "Nothing was changed."
+)
+_RUN_ID_REQUIRED_REASON = "The coaching was not added: it could not be tied to this review's run. Nothing was changed."
+_RUN_NOT_BOUND_REASON = (
+    "The coaching was not added: the review's files belong to a different run than this folder's. Nothing was changed."
+)
+_RUN_ID_MISMATCH_REASON = (
+    "The coaching was not added: the report on disk was written by an earlier run. Nothing was changed."
+)
+
+
+def _is_receipt(path: str) -> bool:
+    """A regular file holding a payload this script writes. Only ever called on a regular file, so a device
+    (`/dev/null`, a pipe) is never read."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return False
+    return isinstance(data, dict) and set(data) <= RECEIPT_KEYS and data.get("status") in RECEIPT_STATUSES
+
+
+def _output_onto_input(args: argparse.Namespace) -> bool:
+    """`-o` names a file this step reads, the report beside it, or an existing file that is not its receipt.
+    A path that does not exist yet is always fine."""
+    out = args.output
+    if not out:
+        return False
+    report_dir = os.path.dirname(os.path.abspath(args.report))
+    protected = [
+        args.report,
+        args.report_json,
+        args.commentary_file,
+        *args.verify_artifact,
+        # The incident's shape omitted --report-json, so the report's own siblings are protected by name too.
+        os.path.join(report_dir, "report.json"),
+        os.path.join(report_dir, "report.md"),
+    ]
+    real_out = os.path.realpath(out)
+    out_exists = os.path.exists(out)
+    for path in protected:
+        if not path:
+            continue
+        if os.path.realpath(path) == real_out:
+            return True
+        if out_exists and os.path.exists(path):
+            try:
+                if os.path.samefile(out, path):  # a hard link, or a case-variant name on a folding FS
+                    return True
+            except OSError:
+                pass
+    return os.path.isfile(out) and not _is_receipt(out)
+
+
+def _bound(report: str) -> bool:
+    """The report's folder carries some run's `run_ref.json`: the producers' test (`refuse_without_run_id`)."""
+    import glob
+
+    run_dir = os.path.dirname(os.path.abspath(report))
+    return bool(glob.glob(os.path.join(glob.escape(run_dir), "handoff", "*", "run_ref.json")))
+
+
+def _run_ref_here(report: str, run_id: str) -> bool:
+    """This run's `run_ref.json` is beside the report, under a well-formed id. Called only in a bound folder,
+    so the shared module loads only where a run ledger exists."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    if here not in sys.path:
+        sys.path.append(here)
+    import _run_status
+
+    if not _run_status.RUN_ID_RE.match(run_id):
+        return False
+    run_dir = os.path.dirname(os.path.abspath(report))
+    return os.path.isfile(os.path.join(run_dir, "handoff", run_id, "run_ref.json"))
 
 
 def _emit(payload: dict[str, object], pretty: bool, output: str | None) -> None:
@@ -326,6 +438,22 @@ def _scan_commentary(commentary: str) -> dict[str, list[str]]:
     return found
 
 
+def _load_report_json(path: str) -> tuple[dict[str, object] | None, str | None]:
+    """(the composed report.json, None), or (None, why it cannot be synced)."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except OSError as exc:
+        return None, f"--report-json named {path} but it is not readable: {exc}"
+    except json.JSONDecodeError as exc:
+        return None, f"--report-json at {path} is not valid JSON: {exc}"
+    if not isinstance(data, dict):
+        return None, f"--report-json at {path} is not a JSON object"
+    if "report_markdown" not in data:
+        return None, f"--report-json at {path} has no `report_markdown` key — is it a composed report.json?"
+    return data, None
+
+
 def _sync_report_json(path: str, markdown: str) -> str | None:
     """Rewrite report.json's `report_markdown` to match report.md. Error string, or None.
 
@@ -337,17 +465,9 @@ def _sync_report_json(path: str, markdown: str) -> str | None:
     Rewritten in place with no delete/rename, by rule, the same way the markdown write is (see the
     module docstring).
     """
-    try:
-        with open(path, encoding="utf-8") as f:
-            data = json.load(f)
-    except OSError as exc:
-        return f"--report-json named {path} but it is not readable: {exc}"
-    except json.JSONDecodeError as exc:
-        return f"--report-json at {path} is not valid JSON: {exc}"
-    if not isinstance(data, dict):
-        return f"--report-json at {path} is not a JSON object"
-    if "report_markdown" not in data:
-        return f"--report-json at {path} has no `report_markdown` key — is it a composed report.json?"
+    data, err = _load_report_json(path)
+    if err is not None or data is None:
+        return err
     data["report_markdown"] = markdown
     try:
         with open(path, "w", encoding="utf-8") as f:
@@ -362,34 +482,102 @@ def main() -> None:
     pretty: bool = args.pretty
     output: str | None = args.output
 
+    # FIRST: nothing may be written through -o before this. A receipt saved over report.json replaced a whole
+    # report with a few hundred bytes on a downstream host's run.
+    if _output_onto_input(args):
+        sys.exit(
+            _blocked(
+                _OUTPUT_IS_INPUT_REASON,
+                pretty,
+                {
+                    "code": "OUTPUT_IS_INPUT",
+                    "fix": "drop -o, or point it at a new file in the scratch folder; never at report.json, "
+                    "report.md or a file this step reads",
+                },
+            )
+        )
+
     try:
         with open(args.report, encoding="utf-8") as f:
             report_text = f.read()
     except OSError as exc:
-        sys.exit(_blocked(f"report.md not readable at {args.report}: {exc}", pretty, output))
+        sys.exit(_blocked(f"report.md not readable at {args.report}: {exc}", pretty))
 
     # CHECKED BEFORE ANY WRITE. A named-but-unreadable report.json discovered afterwards would
     # leave report.md inserted and the JSON stale — the exact divergence this flag exists to
     # close, reintroduced by the fix's own error path.
     if args.report_json and not os.path.isfile(args.report_json):
-        sys.exit(_blocked(f"--report-json named {args.report_json} but no file is there", pretty, output))
+        sys.exit(_blocked(f"--report-json named {args.report_json} but no file is there", pretty))
+
+    # A folder that belongs to a run takes the coaching only for a named run: with no artifacts to read the run
+    # from, the insert would land and leave the run unfinished. Before the matrix, so a resume is covered too.
+    # A folder with no run_ref.json skips this and the next check: today's path, unchanged.
+    bound = _bound(args.report)
+    if bound and not args.verify_artifact:
+        sys.exit(
+            _blocked(
+                _RUN_ID_REQUIRED_REASON,
+                pretty,
+                {
+                    "code": "RUN_ID_REQUIRED",
+                    "fix": "this folder belongs to a run; run the insert exactly as the skill's instructions give "
+                    "it, with every --verify-artifact listed there",
+                },
+            )
+        )
 
     commentary_count = report_text.count(COMMENTARY_HEADING)
     marker_count = report_text.count(args.marker)
 
     reason = _matrix_reason(commentary_count, marker_count)
     if reason is not None:
-        sys.exit(_blocked(reason, pretty, output))
+        sys.exit(_blocked(reason, pretty))
 
     run_id, parity_error = _verify_run_id_parity(args.verify_artifact)
     if parity_error is not None:
-        sys.exit(_blocked(parity_error, pretty, output))
+        sys.exit(_blocked(parity_error, pretty))
+    if bound and run_id and not _run_ref_here(args.report, run_id):
+        # The artifacts carry a run that is not bound here (an earlier session's files under a later run): the
+        # insert would land and the bound run would never hear of it.
+        sys.exit(
+            _blocked(
+                _RUN_NOT_BOUND_REASON,
+                pretty,
+                {
+                    "code": "RUN_NOT_BOUND",
+                    "fix": f"the --verify-artifact files carry run {run_id}, which is not bound here; run this "
+                    "run's producers and compose again, then insert",
+                },
+            )
+        )
     if run_id:
         _STATUS_RUN.update(
             run_id=run_id,
             report=os.path.abspath(args.report),
             report_json=os.path.abspath(args.report_json) if args.report_json else "",
         )
+
+    if args.report_json:
+        # Before either report.json write (the insert's and the resume's), and before report.md is touched: a
+        # report.json the sync would refuse is refused here with the sync's own message, since refusing after
+        # report.md was written would leave the two apart.
+        composed, err = _load_report_json(args.report_json)
+        if err is not None or composed is None:
+            sys.exit(_blocked(err or f"--report-json at {args.report_json} is not usable", pretty))
+        # Only the top-level `run_id` is read (one shape). Missing on either side: nothing to compare.
+        theirs = composed.get("run_id")
+        if isinstance(theirs, str) and theirs and run_id and theirs != run_id:
+            sys.exit(
+                _blocked(
+                    _RUN_ID_MISMATCH_REASON,
+                    pretty,
+                    {
+                        "code": "RUN_ID_MISMATCH",
+                        "fix": f"report.json is run {theirs}, the artifacts are run {run_id}; compose the report "
+                        "again for this run, then insert",
+                    },
+                )
+            )
 
     already_inserted = commentary_count == 1 and marker_count == 0
     if already_inserted:
@@ -398,7 +586,7 @@ def main() -> None:
         if args.report_json:
             err = _sync_report_json(args.report_json, report_text)
             if err is not None:
-                sys.exit(_blocked(err, pretty, output))
+                sys.exit(_blocked(err, pretty))
         _emit(
             {
                 "status": "already_inserted",
@@ -415,13 +603,13 @@ def main() -> None:
     # State (0, 1): insert.
     commentary, load_error, check_record = _load_commentary(args.commentary_file)
     if load_error is not None or commentary is None:
-        sys.exit(_blocked(load_error or "commentary_markdown missing or empty", pretty, output))
+        sys.exit(_blocked(load_error or "commentary_markdown missing or empty", pretty))
     declared = _DECLARATION_RE.search(report_text)
     if declared is not None:
         scenarios = next((p for p in args.verify_artifact if os.path.basename(p) == "scenarios.json"), None)
         record_error = _check_record_reason(declared.group(1), check_record, commentary, scenarios)
         if record_error is not None:
-            sys.exit(_blocked(record_error, pretty, output))
+            sys.exit(_blocked(record_error, pretty))
         # The declaration has done its job; it never reaches the delivered report.
         report_text = _DECLARATION_RE.sub("", report_text)
 
@@ -441,7 +629,6 @@ def main() -> None:
                 f"contain the heading or the marker string; report.md was "
                 f"NOT modified",
                 pretty,
-                output,
             )
         )
 
@@ -451,12 +638,12 @@ def main() -> None:
         with open(args.report, "w", encoding="utf-8") as f:
             f.write(new_text)
     except OSError as exc:
-        sys.exit(_blocked(f"write-back to {args.report} failed: {exc}", pretty, output))
+        sys.exit(_blocked(f"write-back to {args.report} failed: {exc}", pretty))
 
     if args.report_json:
         err = _sync_report_json(args.report_json, new_text)
         if err is not None:
-            sys.exit(_blocked(err, pretty, output))
+            sys.exit(_blocked(err, pretty))
 
     _emit(
         {

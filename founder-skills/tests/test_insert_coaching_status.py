@@ -184,3 +184,61 @@ def test_a_ref_whose_ledger_is_gone_changes_nothing_printed(tmp_path: Path) -> N
     assert _normalised(gone, bad) == _normalised(writable, good)
     lines = gone.stderr.strip().splitlines()
     assert len(lines) == 1 and "warning" in lines[0], gone.stderr
+
+
+# --- a folder that belongs to a run takes the coaching only for that run -----------------------------------------
+
+
+def _plain(report: Path, marker: str = goldens.COACH_MARKER, *extra: str) -> subprocess.CompletedProcess[str]:
+    argv = [sys.executable, str(h.SHARED / "insert_coaching.py"), "--report", str(report), "--marker", marker, *extra]
+    return subprocess.run(argv, input=goldens.COACH_STDIN, capture_output=True, text=True)
+
+
+@pytest.mark.parametrize("resume", [False, True], ids=["insert", "already_inserted"])
+def test_no_verify_artifact_in_a_bound_dir_is_refused(tmp_path: Path, resume: bool) -> None:
+    root, _run_dir, report, rj, _art = _ledgered(tmp_path)
+    if resume:
+        report.write_text(goldens.COACH_REPORT.replace(goldens.COACH_MARKER, "## Coaching Commentary\n\nEarlier."))
+    before = (report.read_bytes(), rj.read_bytes(), h.status_path(root, RUN).read_bytes())
+    proc = _plain(report, goldens.COACH_MARKER, "--report-json", str(rj))
+    assert proc.returncode == 1, proc.stdout
+    assert json.loads(proc.stdout)["code"] == "RUN_ID_REQUIRED"
+    assert (report.read_bytes(), rj.read_bytes(), h.status_path(root, RUN).read_bytes()) == before
+    assert h.status(root, RUN)["status"] == "running"
+
+
+def test_artifacts_of_a_run_not_bound_here_are_refused(tmp_path: Path) -> None:
+    """The run bound here is RUN; the artifacts are an earlier, unbound session's. Inserting would land and leave
+    the bound run `running` with nothing to say why."""
+    root, run_dir, report, rj, _art = _ledgered(tmp_path)
+    other = run_dir / "sizing.json"
+    other.write_text(json.dumps({"metadata": {"run_id": "20261001T090000Z-0f0f0f"}}), encoding="utf-8")
+    before = (report.read_bytes(), h.status_path(root, RUN).read_bytes())
+    proc = _plain(report, goldens.COACH_MARKER, "--verify-artifact", str(other), "--report-json", str(rj))
+    assert proc.returncode == 1, proc.stdout
+    out = json.loads(proc.stdout)
+    assert out["code"] == "RUN_NOT_BOUND" and "20261001T090000Z-0f0f0f" in out["fix"], out
+    assert (report.read_bytes(), h.status_path(root, RUN).read_bytes()) == before
+
+
+def test_a_report_json_of_another_run_blocks_this_runs_coaching(tmp_path: Path) -> None:
+    root, _run_dir, report, rj, art = _ledgered(tmp_path)
+    data = json.loads(rj.read_text(encoding="utf-8"))
+    data["run_id"] = "20261001T090000Z-0f0f0f"
+    rj.write_text(json.dumps(data), encoding="utf-8")
+    before = (report.read_bytes(), rj.read_bytes())
+    proc = _insert(report, rj, art)
+    assert proc.returncode == 1 and json.loads(proc.stdout)["code"] == "RUN_ID_MISMATCH", proc.stdout
+    assert (report.read_bytes(), rj.read_bytes()) == before
+    st = h.status(root, RUN)
+    assert (st["status"], st["last_error_code"], st["coaching"]) == ("running", "COACHING_BLOCKED", "blocked")
+
+
+def test_a_report_json_of_this_run_completes_it(tmp_path: Path) -> None:
+    root, _run_dir, report, rj, art = _ledgered(tmp_path)
+    data = json.loads(rj.read_text(encoding="utf-8"))
+    data["run_id"] = RUN
+    rj.write_text(json.dumps(data), encoding="utf-8")
+    proc = _insert(report, rj, art)
+    assert proc.returncode == 0, proc.stdout
+    assert h.status(root, RUN)["status"] == "complete"

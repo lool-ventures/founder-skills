@@ -5560,6 +5560,12 @@ CLI_CODES = {
     "ic_producers": ["RUN_ID_REQUIRED"],
     # cap-table's producers: a call into a bound review dir with no (or an empty) --run-id.
     "ct_producers": ["RUN_ID_REQUIRED"],
+    # insert_coaching.py (exit 1, stdout `{"status": "blocked", "code", "reason", "fix"}`, nothing written): -o
+    # onto a file it reads or a non-receipt; in a bound dir, no --verify-artifact or the artifacts' run not bound
+    # there; a report.json whose top-level run_id is another run's.
+    "insert_coaching": ["OUTPUT_IS_INPUT", "RUN_ID_REQUIRED", "RUN_NOT_BOUND", "RUN_ID_MISMATCH"],
+    # The three closers (exit 2, stdout empty, the code on stderr): a report.json composed for another run.
+    "closers": ["RUN_ID_MISMATCH"],
     "usage": ["USAGE"],
     # `run_status.py fail` on a run still waiting for an answer.
     "fail": ["RUN_WAITING"],

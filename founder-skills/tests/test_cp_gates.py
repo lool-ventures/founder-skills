@@ -814,6 +814,21 @@ def test_the_closer_stamps_the_hand_over(tmp_path: Path) -> None:
     assert h.status(root, rid)["handed_over_at"]
 
 
+def test_the_closer_refuses_a_report_composed_for_another_run(tmp_path: Path) -> None:
+    root, rid, rd = _fixture_run(tmp_path)
+    _answer_all(root, rid, rd)
+    _ok(_compose(rd))
+    report = _read(rd / "report.json")
+    assert report["run_id"] == rid  # the stamp is this run's
+    report["verdict"] = "Example Co leads its map on one axis of two."
+    report["run_id"] = "20261001T090000Z-0f0f0f"
+    _write(rd / "report.json", report)
+    proc = h.run(SCRIPTS / "cp_closing_message.py", "--report", str(rd / "report.json"), "--link", "path")
+    assert proc.returncode == 2 and proc.stdout == "" and "RUN_ID_MISMATCH" in proc.stderr, proc
+    assert not (rd / "handover.txt").exists()
+    assert h.status(root, rid)["handed_over_at"] is None
+
+
 @pytest.mark.parametrize("script", ["score_moats.py", "score_positioning.py", "checklist.py"])
 def test_a_scorer_into_a_run_dir_names_its_run(tmp_path: Path, script: str) -> None:
     _root, _rid, rd = _fixture_run(tmp_path)

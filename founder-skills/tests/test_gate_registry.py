@@ -444,6 +444,10 @@ _CODE_SOURCES = [
     SKILLS / "competitive-positioning" / "scripts" / "compose_report.py",
     SKILLS / "competitive-positioning" / "scripts" / "cp_dispatch_prompt.py",
     SKILLS / "competitive-positioning" / "scripts" / "record_red_team_skip.py",
+    # The three closers: a report composed for another run is refused with a code.
+    SKILLS / "market-sizing" / "scripts" / "closing_message.py",
+    SKILLS / "competitive-positioning" / "scripts" / "cp_closing_message.py",
+    SKILLS / "financial-model-review" / "scripts" / "fmr_closing_message.py",
     *_HTML_WRITERS,
 ]
 _Q = r"""['"]"""

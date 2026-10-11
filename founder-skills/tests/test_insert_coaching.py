@@ -20,7 +20,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
@@ -818,3 +818,288 @@ def test_only_cap_tables_compose_declares_a_check_record() -> None:
     assert len(composes) == 6, composes
     declaring = [p.parent.parent.name for p in composes if "COACHING_REQUIRES_CHECK_RECORD" in p.read_text("utf-8")]
     assert declaring == ["cap-table"], declaring
+
+
+# ---------------------------------------------------------------------------
+# -o onto an input (OUTPUT_IS_INPUT), and a refusal never writes through -o
+# ---------------------------------------------------------------------------
+
+
+def _load_insert() -> Any:
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("insert_coaching_under_test", SCRIPT)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _composed(tmp_path: Path, run_id: str | None = "r1") -> tuple[Path, Path, Path]:
+    """(report.md, report.json, a verified artifact of run r1) as a compose leaves them; `run_id` is report.json's
+    `metadata.run_id`, never its top level."""
+    report = make_report(tmp_path, BASE_REPORT)
+    rj = make_report_json(tmp_path, BASE_REPORT, run_id=run_id)
+    art = make_artifact(tmp_path, "inputs.json", "r1")
+    return report, rj, art
+
+
+def _bytes(*paths: Path) -> dict[str, bytes]:
+    return {str(p): p.read_bytes() for p in paths}
+
+
+def test_output_onto_report_json_is_refused_and_nothing_changes(tmp_path: Path) -> None:
+    report, rj, art = _composed(tmp_path)
+    before = _bytes(report, rj, art)
+    code, out, err = run_insert(
+        ["--report", str(report), "--marker", MARKER, "--verify-artifact", str(art), "--report-json", str(rj)]
+        + ["-o", str(rj)],
+        commentary_stdin(),
+    )
+    assert code == 1 and out is not None and out["code"] == "OUTPUT_IS_INPUT", (code, out)
+    assert out["status"] == "blocked" and "Nothing was changed" in str(out["reason"]) and out["fix"]
+    assert "BLOCKED:" in err
+    assert _bytes(report, rj, art) == before
+
+
+def test_output_onto_report_json_without_the_report_json_flag_is_refused(tmp_path: Path) -> None:
+    """The incident's shape: no --report-json on the command line, -o at the report.json beside the report. The
+    file is dressed as a receipt, so only the sibling-path rule can refuse it."""
+    report, rj, art = _composed(tmp_path)
+    _receipt_shaped(rj)
+    before = _bytes(report, rj)
+    code, out, _ = run_insert(
+        ["--report", str(report), "--marker", MARKER, "--verify-artifact", str(art), "-o", str(rj)],
+        commentary_stdin(),
+    )
+    assert code == 1 and out is not None and out["code"] == "OUTPUT_IS_INPUT", (code, out)
+    assert _bytes(report, rj) == before
+
+
+def _receipt_shaped(path: Path) -> None:
+    """A protected file dressed as an insert receipt, so only the path checks can catch -o aimed at it."""
+    path.write_text(json.dumps({"status": "inserted", "run_id": None}), encoding="utf-8")
+
+
+@pytest.mark.parametrize("target", ["artifact", "commentary", "report_md"])
+def test_output_onto_a_file_the_insert_reads_is_refused_by_its_path(tmp_path: Path, target: str) -> None:
+    report, rj, art = _composed(tmp_path)
+    commentary = tmp_path / "commentary.json"
+    commentary.write_text(commentary_stdin(), encoding="utf-8")
+    victim = {"artifact": art, "commentary": commentary, "report_md": report}[target]
+    if target == "artifact":
+        _receipt_shaped(art)  # parity would fail later, but -o must be refused first, by its path
+    before = _bytes(report, rj, art, commentary)
+    code, out, _ = run_insert(
+        ["--report", str(report), "--marker", MARKER, "--verify-artifact", str(art)]
+        + ["--commentary-file", str(commentary), "--report-json", str(rj), "-o", str(victim)],
+    )
+    assert code == 1 and out is not None and out["code"] == "OUTPUT_IS_INPUT", (code, out)
+    assert _bytes(report, rj, art, commentary) == before
+
+
+def test_output_through_a_hard_link_to_an_input_is_refused(tmp_path: Path) -> None:
+    report, rj, art = _composed(tmp_path)
+    _receipt_shaped(art)  # so the shape rule cannot be what refuses it: only samefile sees a hard link
+    alias = tmp_path / "elsewhere" / "alias.json"
+    alias.parent.mkdir()
+    os.link(art, alias)
+    before = _bytes(report, rj, art)
+    code, out, _ = run_insert(
+        ["--report", str(report), "--marker", MARKER, "--verify-artifact", str(art), "-o", str(alias)],
+        commentary_stdin(),
+    )
+    assert code == 1 and out is not None and out["code"] == "OUTPUT_IS_INPUT", (code, out)
+    assert _bytes(report, rj, art) == before
+
+
+def test_output_through_a_case_variant_name_is_refused(tmp_path: Path) -> None:
+    report, rj, art = _composed(tmp_path)
+    variant = tmp_path / "INPUTS.JSON"
+    if not variant.exists():
+        pytest.skip("case-sensitive file system: a case variant is a different file here")
+    _receipt_shaped(art)  # only samefile sees the variant: realpath keeps the case as typed
+    before = _bytes(report, rj, art)
+    code, out, _ = run_insert(
+        ["--report", str(report), "--marker", MARKER, "--verify-artifact", str(art), "-o", str(variant)],
+        commentary_stdin(),
+    )
+    assert code == 1 and out is not None and out["code"] == "OUTPUT_IS_INPUT", (code, out)
+    assert _bytes(report, rj, art) == before
+
+
+def test_output_onto_an_existing_file_that_is_not_a_receipt_is_refused(tmp_path: Path) -> None:
+    """Another canonical artifact the command does not name, caught by its shape rather than a list of names."""
+    report, rj, art = _composed(tmp_path)
+    other = tmp_path / "elsewhere" / "checklist.json"
+    other.parent.mkdir()
+    other.write_text(json.dumps({"items": [], "metadata": {"run_id": "r1"}}), encoding="utf-8")
+    before = _bytes(report, rj, other)
+    code, out, _ = run_insert(
+        ["--report", str(report), "--marker", MARKER, "--verify-artifact", str(art), "-o", str(other)],
+        commentary_stdin(),
+    )
+    assert code == 1 and out is not None and out["code"] == "OUTPUT_IS_INPUT", (code, out)
+    assert _bytes(report, rj, other) == before
+
+
+def test_output_onto_a_previous_receipt_or_a_new_path_is_allowed(tmp_path: Path) -> None:
+    report, rj, art = _composed(tmp_path)
+    receipt = tmp_path / "scratch" / "receipt.json"
+    args = ["--report", str(report), "--marker", MARKER, "--verify-artifact", str(art), "--report-json", str(rj)]
+    code, out, _ = run_insert([*args, "-o", str(receipt)], commentary_stdin())
+    assert code == 0 and out is not None and out["written"] == str(receipt), (code, out)
+    # The resume, saving over its own earlier receipt.
+    code, out, _ = run_insert([*args, "-o", str(receipt)], commentary_stdin())
+    assert code == 0 and json.loads(receipt.read_text(encoding="utf-8"))["status"] == "already_inserted"
+
+
+def test_output_to_a_device_is_never_read_and_allowed(tmp_path: Path) -> None:
+    report, _rj, _art = _composed(tmp_path)
+    code, out, _ = run_insert(["--report", str(report), "--marker", MARKER, "-o", os.devnull], commentary_stdin())
+    assert code == 0 and out is not None and out["written"] == os.devnull, (code, out)
+
+
+def test_blocked_with_output_prints_the_reason_and_leaves_output_alone(tmp_path: Path) -> None:
+    report, _rj, _art = _composed(tmp_path)
+    receipt = tmp_path / "receipt.json"
+    prior = json.dumps({"status": "inserted", "run_id": "r0"}) + "\n"
+    receipt.write_text(prior, encoding="utf-8")
+    code, out, err = run_insert(
+        ["--report", str(report), "--marker", "<!-- COACHING_INSERTION_POINT_00000000 -->", "-o", str(receipt)],
+        commentary_stdin(),
+    )
+    assert code == 1 and out is not None and out["status"] == "blocked", (code, out)
+    assert "insertion marker" in str(out["reason"]) and "BLOCKED:" in err
+    assert receipt.read_text(encoding="utf-8") == prior
+
+
+# ---------------------------------------------------------------------------
+# A report.json composed for another run (RUN_ID_MISMATCH)
+# ---------------------------------------------------------------------------
+
+
+def _stamp(rj: Path, run_id: str | None) -> None:
+    data = json.loads(rj.read_text(encoding="utf-8"))
+    data["run_id"] = run_id
+    rj.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+
+@pytest.mark.parametrize("resume", [False, True], ids=["insert", "already_inserted"])
+def test_report_json_from_another_run_is_refused(tmp_path: Path, resume: bool) -> None:
+    report, rj, art = _composed(tmp_path)
+    if resume:
+        report.write_text(BASE_REPORT.replace(MARKER, f"{HEADING}\n\nEarlier commentary."), encoding="utf-8")
+    _stamp(rj, "r0")
+    before = _bytes(report, rj)
+    code, out, _ = run_insert(
+        ["--report", str(report), "--marker", MARKER, "--verify-artifact", str(art), "--report-json", str(rj)],
+        commentary_stdin(),
+    )
+    assert code == 1 and out is not None and out["code"] == "RUN_ID_MISMATCH", (code, out)
+    assert "r0" in str(out["fix"]) and "r1" in str(out["fix"])
+    assert _bytes(report, rj) == before  # before either report.json write, and before report.md
+
+
+@pytest.mark.parametrize("shape", ["none", "metadata_only", "null"])
+def test_report_json_without_a_top_level_run_id_passes(tmp_path: Path, shape: str) -> None:
+    """A report from before the stamp: nothing to compare. Only the top level is read, so a report whose run sits
+    only under `metadata` (the goldens fixture's shape) is not compared either, even when it differs."""
+    report, rj, art = _composed(tmp_path, run_id=("r0" if shape == "metadata_only" else None))
+    if shape == "null":
+        _stamp(rj, None)
+    code, out, _ = run_insert(
+        ["--report", str(report), "--marker", MARKER, "--verify-artifact", str(art), "--report-json", str(rj)],
+        commentary_stdin(),
+    )
+    assert code == 0 and out is not None and out["status"] == "inserted", (code, out)
+
+
+def test_a_report_json_of_the_same_run_passes(tmp_path: Path) -> None:
+    report, rj, art = _composed(tmp_path)
+    _stamp(rj, "r1")
+    code, out, _ = run_insert(
+        ["--report", str(report), "--marker", MARKER, "--verify-artifact", str(art), "--report-json", str(rj)],
+        commentary_stdin(),
+    )
+    assert code == 0 and out is not None and out["status"] == "inserted" and out["run_id"] == "r1", (code, out)
+
+
+def test_an_unparseable_report_json_is_refused_before_report_md_is_written(tmp_path: Path) -> None:
+    report, rj, art = _composed(tmp_path)
+    rj.write_text("{not json", encoding="utf-8")
+    before = _bytes(report, rj)
+    code, out, _ = run_insert(
+        ["--report", str(report), "--marker", MARKER, "--verify-artifact", str(art), "--report-json", str(rj)],
+        commentary_stdin(),
+    )
+    assert code == 1 and out is not None and "is not valid JSON" in str(out["reason"]), (code, out)
+    assert _bytes(report, rj) == before
+
+
+# ---------------------------------------------------------------------------
+# What every payload may carry, and what the founder may read
+# ---------------------------------------------------------------------------
+
+
+def test_every_payload_key_is_a_receipt_key(tmp_path: Path) -> None:
+    """The -o shape rule overwrites only a file whose keys are all receipt keys, so a payload key missing from
+    RECEIPT_KEYS would make the script refuse its own earlier receipt. Drives every outcome."""
+    allowed = set(_load_insert().RECEIPT_KEYS)
+    seen: list[dict[str, object]] = []
+    report, rj, art = _composed(tmp_path)
+    base = ["--report", str(report), "--marker", MARKER, "--verify-artifact", str(art), "--report-json", str(rj)]
+    for argv in (base, base, [*base, "-o", str(rj)]):  # inserted, already_inserted, OUTPUT_IS_INPUT
+        _code, out, _ = run_insert(argv, commentary_stdin())
+        assert out is not None
+        seen.append(out)
+    _stamp(rj, "r0")
+    _code, out, _ = run_insert(base, commentary_stdin())  # RUN_ID_MISMATCH
+    assert out is not None
+    seen.append(out)
+    fresh = tmp_path / "fresh"
+    fresh.mkdir()
+    r2 = make_report(fresh, BASE_REPORT)
+    _code, out, _ = run_insert(["--report", str(r2), "--marker", MARKER], json.dumps({"commentary_markdown": ""}))
+    assert out is not None
+    seen.append(out)  # a plain refusal
+    assert {str(p["status"]) for p in seen} == {"inserted", "already_inserted", "blocked"}
+    assert {"OUTPUT_IS_INPUT", "RUN_ID_MISMATCH"} <= {str(p.get("code")) for p in seen}
+    for payload in seen:
+        assert set(payload) <= allowed, sorted(set(payload) - allowed)
+
+
+def test_refusal_reasons_are_founder_safe() -> None:
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("_founder_text", os.path.join(SCRIPTS_DIR, "_founder_text.py"))
+    assert spec is not None and spec.loader is not None
+    ft = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ft)
+    mod = _load_insert()
+    names = ("_OUTPUT_IS_INPUT_REASON", "_RUN_ID_REQUIRED_REASON", "_RUN_NOT_BOUND_REASON", "_RUN_ID_MISMATCH_REASON")
+    for name in names:
+        reason = getattr(mod, name)
+        assert ft.scan(reason) == {"enums": [], "filenames": []}, (name, ft.scan(reason))
+        assert "_" not in reason and ".json" not in reason and ".md" not in reason, (name, reason)
+
+
+# Today's output for an insert with no --verify-artifact in a folder with no run ref, captured from the script as it
+# stood before the run checks were added (v0.18.1), as a literal. The temp path is the only part that varies.
+_UNBOUND_INSERTED = (
+    '{"status": "inserted", "footer_dropped": false, "report_path": "<TMP>/report.md", "run_id": null, '
+    '"verified_artifacts": 0, "commentary_bytes": 36, "founder_text_findings": {"enums": [], "filenames": []}}\n'
+)
+_UNBOUND_ALREADY = (
+    '{"status": "already_inserted", "report_path": "<TMP>/report.md", "run_id": null, "verified_artifacts": 0}\n'
+)
+
+
+def test_no_verify_artifact_in_an_unbound_dir_is_unchanged(tmp_path: Path) -> None:
+    report = make_report(tmp_path, BASE_REPORT)
+    argv = [sys.executable, SCRIPT, "--report", str(report), "--marker", MARKER]
+    first = subprocess.run(argv, input=commentary_stdin(), capture_output=True, text=True)
+    again = subprocess.run(argv, input=commentary_stdin(), capture_output=True, text=True)
+    norm = [p.stdout.replace(str(tmp_path), "<TMP>") for p in (first, again)]
+    assert (first.returncode, again.returncode) == (0, 0)
+    assert norm == [_UNBOUND_INSERTED, _UNBOUND_ALREADY]

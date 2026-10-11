@@ -11,6 +11,9 @@
       "RUN_ALREADY_BOUND",
       "RUN_REFUSED"
     ],
+    "closers": [
+      "RUN_ID_MISMATCH"
+    ],
     "cp_producers": [
       "RUN_ID_REQUIRED",
       "NO_ASK_FOUNDER_DECLINED"
@@ -40,6 +43,12 @@
     ],
     "ic_producers": [
       "RUN_ID_REQUIRED"
+    ],
+    "insert_coaching": [
+      "OUTPUT_IS_INPUT",
+      "RUN_ID_REQUIRED",
+      "RUN_NOT_BOUND",
+      "RUN_ID_MISMATCH"
     ],
     "ms_producers": [
       "RUN_ID_REQUIRED",
