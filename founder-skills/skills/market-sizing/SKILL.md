@@ -940,8 +940,8 @@ and found nothing", never as a failure.
 ### Step 6d: One Revision, Only If the Founder Asks for It
 
 A review is final. Only if an accepted finding in `redteam.json` is `high` and names a `parameter`:
-open the question first, `record_revision_answer.py --dir "$ANALYSIS_DIR" --from-pre-answer` (`applied`:
-the request answered it, ask nothing), then ask via `AskUserQuestion`: option 1 "Deliver with the challenges
+open the question first, `record_revision_answer.py --dir "$ANALYSIS_DIR" --from-pre-answer` (`applied` or
+`answered`: settled, ask nothing), then ask via `AskUserQuestion`: option 1 "Deliver with the challenges
 shown", option 2 "Revise the challenged inputs and have it reviewed once more (about 10 minutes)". Otherwise
 go to Step 7. Record the answer (without it, compose refuses):
 `python3 "$SCRIPTS/record_revision_answer.py" --dir "$ANALYSIS_DIR" --answer deliver|revise --source founder`

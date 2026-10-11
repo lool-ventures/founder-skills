@@ -969,7 +969,8 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 106,282 -> 106,256 (-26), LOWERED, commit 10 (O3): the compose step says to read compose_result.json on a
     # non-zero exit, paid for in the same step; "Two codes sit in neither class" loses its aside.
     # -1 B, LOWERED, commit 13: a derived stage takes its option id and no value; the sentence is shortened to pay.
-    "market-sizing": 106_452,
+    # -2 B, LOWERED: Step 6d reads `applied` or `answered` as settled (the apply step run again reports `answered`).
+    "market-sizing": 106_450,
     # fmr raised for two founder-facing-correctness items measured in a live run: the CHECKLIST
     # dispatch now forbids citing our artifact filenames in evidence (that run put `inputs.json` in 10
     # items' evidence, printed verbatim into the founder's report), and the producer pipe passes
