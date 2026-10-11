@@ -328,6 +328,52 @@ def test_a_redo_after_a_real_rejection_is_accepted_in_the_shapes_runs_use(
     assert (hook.latest_printed(_shell_rows(calls), "CONTEXT: CHECKLIST", "/h/o.json") is not None) is accepted
 
 
+# --- a comparison redo the producer rejected (dispatch_prompt.py <sizing> --redo comparison) --------------
+
+_MS_P = (
+    'python3 "$SHARED_SCRIPTS/merge_json.py" "$HANDOFF_DIR/top_down_output.json" "$HANDOFF_DIR/bottom_up_output.json" '
+    '--set approach=both | python3 "$SCRIPTS/market_sizing.py" --stdin --run-id R -o "$ANALYSIS_DIR/sizing.json" '
+    '2> "$HANDOFF_DIR/producer_rejected.txt"'
+)
+_MS_ARGS = '--run-id R --correction producer-rejected --detail-file "$HANDOFF_DIR/producer_rejected.txt"'
+_MS_REDO_AFTER = f'python3 "$SCRIPTS/dispatch_prompt.py" top_down_methodology --redo comparison {_MS_ARGS}'
+_MS_REDO_FIRST = f'python3 "$SCRIPTS/dispatch_prompt.py" --redo comparison top_down_methodology {_MS_ARGS}'
+_MS_REDO_TEXT = (
+    "CONTEXT: TOP_DOWN_METHODOLOGY\nOUTPUT_PATH: /h/top_down_output.json\n"
+    "COMPARISON REDO: this build is being done once more.\nThe producer rejected your previous file.\n"
+    "Do NOT write any file other than OUTPUT_PATH.\n"
+)
+
+
+@pytest.mark.parametrize(
+    ("calls", "accepted"),
+    [
+        ([(_MS_P, "Exit code 1", True), (_MS_REDO_AFTER, _MS_REDO_TEXT, False)], True),
+        ([(_MS_P, "Exit code 1", True), (_MS_REDO_FIRST, _MS_REDO_TEXT, False)], True),
+        ([(_MS_P + '; echo "EXIT=$?"', "EXIT=1", False), (_MS_REDO_AFTER, _MS_REDO_TEXT, False)], True),
+        # The pairing rule holds with --redo present: no failed producer, or a succeeded one, is no comparand.
+        ([(_MS_REDO_AFTER, _MS_REDO_TEXT, False)], False),
+        ([(_MS_P, "{}", False), (_MS_REDO_AFTER, _MS_REDO_TEXT, False)], False),
+        (
+            [
+                (_MS_P, "Exit code 1", True),
+                ('echo "round two" >> "$HANDOFF_DIR/producer_rejected.txt"', "", False),
+                (_MS_REDO_FIRST, _MS_REDO_TEXT, False),
+            ],
+            False,
+        ),
+    ],
+)
+def test_a_comparison_redo_after_a_real_rejection_pairs_like_any_redo(
+    calls: list[tuple[str, str, bool]], accepted: bool
+) -> None:
+    """`--redo comparison --correction producer-rejected --detail-file F`: the redo option, on either side of
+    the context, changes nothing about when the quoted message counts as the producer's."""
+    hook = _load(HOOK, "hook_ms_redo_shapes")
+    printed = hook.latest_printed(_shell_rows(calls), "CONTEXT: TOP_DOWN_METHODOLOGY", "/h/top_down_output.json")
+    assert (printed is not None) is accepted
+
+
 # --- an empty identifier is refused, never printed ------------------------------------------------------
 
 # The flags each generator renders into the prompt or reads from disk. A shell that did not re-assign a
