@@ -3180,9 +3180,11 @@ def _emit_coaching_payload(
 class RevisionOwed(Exception):
     """With a run ledger, Step 6d's unasked question is a question to ask, not a disclosure."""
 
-    def __init__(self, parameters: list[str]) -> None:
+    def __init__(self, parameters: list[str], run_id: str | None = None) -> None:
         super().__init__(", ".join(parameters))
         self.parameters = parameters
+        # The run the review belongs to: the request's answer is applied only for a review of the ledger's run.
+        self.run_id = run_id
 
 
 def compose(
@@ -3303,7 +3305,7 @@ def _compose(
         rounds=int(_rt_facts.get("rounds") or 0),
     )
     if _unoffered and gate_view is not None:
-        raise RevisionOwed(_unoffered)
+        raise RevisionOwed(_unoffered, _rt_run_id)
     if _unoffered:
         _named = ", ".join(_humanize_param(p) for p in _unoffered)
         warnings.append(
@@ -3669,8 +3671,17 @@ def main() -> None:
     try:
         result = compose(args.dir, report_path=report_path, gate_view=gate_view, no_ask=quiet)
     except RevisionOwed as e:
-        _ms_gates.revision_owed(args.dir, run_id, e.parameters)
-        raise
+        # Step 6d's question with no answer recorded: what the request carried for it is applied here, as the
+        # step's own open would have (a run can reach compose without it). Settled, the report is composed once
+        # more, with "Your Answers" read again so the request's answer is listed; else this exits waiting.
+        if not _ms_gates.revision_owed(args.dir, run_id, e.parameters, review_run_id=e.run_id):
+            raise
+        gate_view = _ms_gates.answers_view(args.dir) or {}
+        try:
+            result = compose(args.dir, report_path=report_path, gate_view=gate_view, no_ask=quiet)
+        except RevisionOwed as again:
+            _ms_gates.revision_owed(args.dir, run_id, again.parameters, review_run_id=again.run_id, apply=False)
+            raise
     if ledger is not None:
         _ms_gates.refuse_open_gates(ledger)
         status = sys.modules["_run_status"].load_status(ledger[1]) or {}

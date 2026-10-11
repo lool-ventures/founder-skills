@@ -21,7 +21,9 @@ With a run ledger the answer is recorded there first (`ms_revision`) and this fi
 `--from-pre-answer` is the step's open, before it asks: when the review raises the question it opens the gate
 and applies an answer the request carried (`FS_HOST_ANSWER ms_revision=deliver`), printing `"applied": true`
 (ask nothing) or `false` (ask). When the review raises no question it prints `"owed": false` and touches
-nothing. With no ledger it prints `"applied": false` and writes nothing.
+nothing. Run again after the question is answered, it prints `"owed": false` with the recorded `answered`
+and changes nothing (a missing record is rewritten from the ledger). With no ledger it prints
+`"applied": false` and writes nothing. compose runs the same open itself when this step was skipped.
 
 Rejects loudly: diagnostic JSON to stdout, a line to stderr, nothing written, exit 1.
 
@@ -40,7 +42,7 @@ from typing import NoReturn
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _run_ref  # noqa: E402
-from _revision_answer import ANSWERS, SOURCES, qualifying_parameters, record_path  # noqa: E402
+from _revision_answer import ANSWERS, SOURCES, qualifying_parameters, record_path, write_record  # noqa: E402
 
 # `host` is written only by --from-pre-answer, from the request's own line.
 _CLI_SOURCES = tuple(x for x in SOURCES if x != "host")
@@ -109,7 +111,7 @@ def main() -> None:
                 gates.record_from_writer(paths, "ms_revision", a.answer, "record_revision_answer.py", by_model=True)
     except Exception as e:  # noqa: BLE001 -- RUN_FINISHED or an unreachable ledger: printed, nothing written
         sys.exit(_rejected(e))
-    _write_mirror(path, a.answer, a.source, parameters, run_id, a.pretty)
+    write_record(path, a.answer, a.source, parameters, run_id, produced_by="record_revision_answer", pretty=a.pretty)
     print(json.dumps({"ok": True, "path": path, "answer": a.answer, "parameters": parameters}))
 
 
@@ -125,20 +127,10 @@ def _rejected(e: BaseException) -> int:
     return _run_ref.report_failure(e)
 
 
-def _write_mirror(path: str, answer: str, source: str, parameters: list[str], run_id: str, pretty: bool) -> None:
-    record = {
-        "answer": answer,
-        "source": source,
-        "parameters": parameters,
-        "_produced_by": "record_revision_answer",
-        "metadata": {"run_id": run_id},
-    }
-    with open(path, "w", encoding="utf-8") as fh:
-        fh.write(json.dumps(record, indent=2 if pretty else None) + "\n")
-
-
 def _from_pre_answer(analysis_dir: str, pretty: bool) -> None:
-    """Open the question and apply the request's answer, when the review raises the question."""
+    """Open the question and apply the request's answer, when the review raises the question. The body is
+    `_ms_gates.apply_revision_from_request`, which compose also runs when this step was skipped. Run again once
+    the question is answered, it changes nothing and says so (`answered`, `owed: false`)."""
     try:
         with open(os.path.join(analysis_dir, "redteam.json"), encoding="utf-8") as fh:
             redteam = json.load(fh)
@@ -154,31 +146,20 @@ def _from_pre_answer(analysis_dir: str, pretty: bool) -> None:
         if ledger is None:
             print(json.dumps({"applied": False}))
             return
+        import _ms_gates  # noqa: PLC0415
+
         gates, paths = ledger
-        gates.open_from_writer(paths, ["ms_revision"], "record_revision_answer.py")
-        got = gates.apply_writer_pre_answer(paths, "ms_revision", "record_revision_answer.py", list(ANSWERS))
-        source = "host"
-        if got is None and gates.no_ask(gates.load_ledger(paths)):
-            # The request said not to ask: the question's no-ask default (deliver) is taken here, by this script.
-            got = gates.record_from_writer(
-                paths,
-                "ms_revision",
-                "deliver",
-                "record_revision_answer.py",
-                by_model=False,
-                resolution="default_taken",
-                default_reason="asked_not_to_be_asked",
-            )
-            source = "no_questions"
+        got = _ms_gates.apply_revision_from_request(
+            gates, paths, analysis_dir, parameters, produced_by="record_revision_answer", pretty=pretty
+        )
     except Exception as e:  # noqa: BLE001
         sys.exit(_rejected(e))
-    if isinstance(got, dict) and got.get("answer_id") in ANSWERS:
-        path = record_path(analysis_dir, run_id)
-        if os.path.isdir(os.path.dirname(path)):
-            _write_mirror(path, str(got["answer_id"]), source, parameters, run_id, pretty)
-        print(json.dumps({"applied": True, "answer": got["answer_id"], "parameters": parameters}))
-        return
-    print(json.dumps({"applied": False, "owed": True, "parameters": parameters}))
+    if got.get("applied"):
+        print(json.dumps({"applied": True, "answer": got["answer"], "parameters": parameters}))
+    elif got.get("answered"):
+        print(json.dumps({"applied": False, "owed": False, "answered": got["answered"], "parameters": parameters}))
+    else:
+        print(json.dumps({"applied": False, "owed": True, "parameters": parameters}))
 
 
 if __name__ == "__main__":

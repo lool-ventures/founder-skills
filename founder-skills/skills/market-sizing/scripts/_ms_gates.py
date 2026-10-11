@@ -16,6 +16,7 @@ import sys
 from typing import Any, NoReturn
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _revision_answer  # noqa: E402
 import _run_ref  # noqa: E402
 
 METHODOLOGY_GATE = "ms_methodology"
@@ -201,21 +202,113 @@ def period_question(run_dir: str, run_id: str | None, params: list[str]) -> None
     sys.exit(gates.EXIT_CODES["waiting"])
 
 
-def revision_owed(run_dir: str, run_id: str | None, unoffered: list[str]) -> None:
+REVISION_WRITER = "record_revision_answer.py"
+
+
+def _revision_source(gates: Any, led: dict[str, Any], current: dict[str, Any]) -> str:
+    """The record's `source` for an answer the ledger holds."""
+    if current.get("resolution") == "default_taken":
+        return "no_questions"
+    return "host" if gates.answered_by_request(led, REVISION_GATE) else "founder"
+
+
+def apply_revision_from_request(
+    gates: Any,
+    paths: Any,
+    run_dir: str,
+    parameters: list[str],
+    *,
+    produced_by: str,
+    pretty: bool = False,
+) -> dict[str, Any]:
+    """Step 6d's open, and the answer the request gave it: the one owner for `record_revision_answer.py
+    --from-pre-answer` and for compose, which runs it itself when the step was skipped.
+
+    Returns `{"applied": True, "answer", "source"}` when an answer was recorded now (the request's line, or under
+    FS_HOST_NO_ASK with no line sent, the question's default `deliver`), `{"applied": False, "answered", "source"}`
+    when the ledger already holds this run's answer for these parameters (the record is rewritten from the ledger
+    when it is missing, unreadable or another run's), and `{"applied": False, "owed": True}` when the question is
+    open and waits. Every write is the ledger's first and the record (its mirror) second.
+
+    An answer recorded for fewer parameters than the review now names is superseded, only when the record says
+    so: a missing record is not evidence the review grew. The request's line is applied once; after such a
+    supersede it is spent (`applied_at`), so the question waits, attended or not, until a resume repeats it.
+    FS_HOST_WAIT cannot name this gate (its own script records it, `_gates._flag_key`), so no wait is checked."""
+    run_id = paths.run_id
+    record = _revision_answer.record_path(run_dir, run_id)
+    has_dir = os.path.isdir(os.path.dirname(record))
+    led = gates.load_ledger(paths)
+    entry = (led.get("gates") or {}).get(REVISION_GATE) or {}
+    if entry.get("state") == "answered":
+        current = entry.get("current") or {}
+        answer = current.get("answer_id")
+        state = _revision_answer.record_state(run_dir, run_id, parameters)
+        if state == "fewer":
+            gates.supersede_from_writer(paths, REVISION_GATE, REVISION_WRITER, "review_names_more")
+        elif answer in _revision_answer.ANSWERS:
+            source = _revision_source(gates, led, current)
+            if state == "missing" and has_dir:
+                # The ledger holds the answer: its mirror is written from it, never the question asked again.
+                _revision_answer.write_record(
+                    record, str(answer), source, parameters, run_id, produced_by=produced_by, pretty=pretty
+                )
+            return {"applied": False, "answered": answer, "source": source}
+        else:
+            return {"applied": False, "owed": True}
+    gates.open_from_writer(paths, [REVISION_GATE], REVISION_WRITER)
+    got = gates.apply_writer_pre_answer(paths, REVISION_GATE, REVISION_WRITER, list(_revision_answer.ANSWERS))
+    source = "host"
+    if got is None:
+        led = gates.load_ledger(paths)
+        if gates.no_ask(led) and REVISION_GATE not in (led.get("pre_answers") or {}):
+            # The request said not to ask and sent no answer: the question's no-ask default (deliver) is taken
+            # here, by this script. A line it did send and that is spent waits instead.
+            got = gates.record_from_writer(
+                paths,
+                REVISION_GATE,
+                "deliver",
+                REVISION_WRITER,
+                by_model=False,
+                resolution="default_taken",
+                default_reason="asked_not_to_be_asked",
+            )
+            source = "no_questions"
+    if isinstance(got, dict) and got.get("answer_id") in _revision_answer.ANSWERS:
+        if has_dir:
+            _revision_answer.write_record(
+                record, str(got["answer_id"]), source, parameters, run_id, produced_by=produced_by, pretty=pretty
+            )
+        return {"applied": True, "answer": got["answer_id"], "source": source}
+    return {"applied": False, "owed": True}
+
+
+def revision_owed(
+    run_dir: str,
+    run_id: str | None,
+    unoffered: list[str],
+    *,
+    review_run_id: str | None = None,
+    apply: bool = True,
+) -> bool:
     """Compose: the review raised a high challenge naming `unoffered` parameters and no answer to Step 6d's
     question covers them (`_revision_answer.recorded`, the rule compose uses without a ledger). With a ledger
-    that is a question, not a disclosure: exit 10 naming it, nothing written. An answer recorded for fewer
-    parameters than the review now names is superseded, so the founder's new answer can be recorded."""
+    that is a question, not a disclosure. First, when the review is this run's (`review_run_id`), what the request
+    carried is applied, as Step 6d's open would have (`apply_revision_from_request`): True means the question is
+    settled and compose runs again. Else exit 10 naming it (12 under FS_HOST_NO_ASK), nothing written. False only
+    with no ledger."""
     ledger = open_ledger_or_exit(run_dir, run_id)
     if ledger is None or not unoffered:
-        return
+        return False
     gates, paths = ledger
-    entry = (gates.load_ledger(paths).get("gates") or {}).get(REVISION_GATE) or {}
     try:
-        if entry.get("state") == "answered":
-            gates.supersede_from_writer(paths, REVISION_GATE, "record_revision_answer.py", "review_names_more")
+        if apply and review_run_id is not None and review_run_id == paths.run_id:
+            got = apply_revision_from_request(gates, paths, run_dir, unoffered, produced_by="compose_report")
+            if got.get("applied") or got.get("answered"):
+                return True
         else:
-            gates.open_from_writer(paths, [REVISION_GATE], "record_revision_answer.py")
+            # A review of another run is not answered for this one, and an answer this run recorded is not
+            # superseded on its account.
+            gates.open_from_writer(paths, [REVISION_GATE], REVISION_WRITER)
     except Exception as e:  # noqa: BLE001
         exit_on_rejection(gates, e)
     if gates.no_ask(gates.load_ledger(paths)):

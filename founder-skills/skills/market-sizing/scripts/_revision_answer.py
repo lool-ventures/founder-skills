@@ -63,3 +63,43 @@ def recorded(analysis_dir: str, run_id: str, parameters: list[str]) -> bool:
         and isinstance(covered, list)
         and set(parameters) <= {p for p in covered if isinstance(p, str)}
     )
+
+
+def write_record(
+    path: str, answer: str, source: str, parameters: list[str], run_id: str, *, produced_by: str, pretty: bool = False
+) -> None:
+    """Write the record (with a run ledger, the ledger's mirror). `produced_by` names the script that wrote it:
+    the recorder, or compose when it applied the request's answer itself."""
+    record = {
+        "answer": answer,
+        "source": source,
+        "parameters": parameters,
+        "_produced_by": produced_by,
+        "metadata": {"run_id": run_id},
+    }
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps(record, indent=2 if pretty else None) + "\n")
+
+
+def record_state(analysis_dir: str, run_id: str, parameters: list[str]) -> str:
+    """What this run's record says about `parameters`: `covers` (it answers them), `fewer` (a well-formed record
+    of this run, written for fewer parameters than these), or `missing` (no record, an unreadable or malformed
+    one, or one carrying another run's id)."""
+    if recorded(analysis_dir, run_id, parameters):
+        return "covers"
+    try:
+        with open(record_path(analysis_dir, run_id), encoding="utf-8") as f:
+            rec = json.load(f)
+    except (OSError, ValueError):
+        return "missing"
+    if not isinstance(rec, dict):
+        return "missing"
+    meta = rec.get("metadata")
+    well_formed = (
+        isinstance(meta, dict)
+        and meta.get("run_id") == run_id
+        and rec.get("answer") in ANSWERS
+        and rec.get("source") in SOURCES
+        and isinstance(rec.get("parameters"), list)
+    )
+    return "fewer" if well_formed else "missing"

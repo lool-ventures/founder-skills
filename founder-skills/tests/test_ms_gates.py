@@ -501,6 +501,145 @@ def test_compose_asks_for_the_revision_answer_only_when_the_review_raises_the_qu
     assert "REVISION_NOT_OFFERED" not in [w["code"] for w in report["validation"]["warnings"]]
 
 
+NO_ASK_RID = "20261011T100000Z-0d0e0f"
+ARPU_HIGH = {**HIGH, "parameter": "arpu", "claim_attacked": "The price per seat the sizing uses"}
+
+
+def _report(run_dir: Path) -> tuple[dict[str, Any], str]:
+    report: dict[str, Any] = json.loads((run_dir / "report.json").read_text(encoding="utf-8"))
+    return report, (run_dir / "report.md").read_text(encoding="utf-8")
+
+
+def _mirror(run_dir: Path, run_id: str) -> dict[str, Any]:
+    mirror: dict[str, Any] = json.loads((run_dir / "handoff" / run_id / "revision_answer.json").read_text())
+    return mirror
+
+
+def _from_pre_answer(run_dir: Path) -> dict[str, Any]:
+    return _out(_ok(h.run(MS / "record_revision_answer.py", "--dir", str(run_dir), "--from-pre-answer")))
+
+
+def _skipped_6d(tmp_path: Path, lines: str, *, no_ask: bool = False) -> tuple[Path, str, Path]:
+    """A run whose review raised the revision question, composed with Step 6d skipped."""
+    head = f"FS_HOST_RUN_ID={NO_ASK_RID}\nFS_HOST_NO_ASK\n" if no_ask else ""
+    root, run_id, run_dir = _run_dir(tmp_path, lines=head + "FS_HOST_ANSWER ms_methodology=looks_good\n" + lines)
+    _artifacts(run_dir, run_id, redteam=_redteam(run_id))
+    _ok(_open(root, run_id, "ms_methodology"))
+    return root, run_id, run_dir
+
+
+def test_compose_applies_the_requests_revision_answer_when_step_6d_was_skipped(tmp_path: Path) -> None:
+    root, run_id, run_dir = _skipped_6d(tmp_path, "FS_HOST_ANSWER ms_revision=deliver\n")
+    _ok(_compose(run_dir))
+    mirror = _mirror(run_dir, run_id)
+    assert (mirror["answer"], mirror["source"], mirror["parameters"]) == ("deliver", "host", ["segment_pct"])
+    assert mirror["_produced_by"] == "compose_report" and mirror["metadata"]["run_id"] == run_id
+    entry = _entry(root, run_id, "ms_revision")
+    assert entry["current"]["answer_id"] == "deliver"
+    assert h.ledger(root, run_id)["pre_answers"]["ms_revision"]["applied_at"] == entry["current"]["answered_at"]
+    report, md = _report(run_dir)
+    assert "PRE_ANSWERED:ms_revision" in report["disclosures"]
+    assert "REVISION_NOT_OFFERED" not in [w["code"] for w in report["validation"]["warnings"]]
+    assert "chose to deliver it with the outside review's challenges shown" in md
+    assert h.status(root, run_id)["coaching"] == "pending"
+
+
+def test_compose_applies_the_requests_line_under_no_ask_too(tmp_path: Path) -> None:
+    root, run_id, run_dir = _skipped_6d(tmp_path, "FS_HOST_ANSWER ms_revision=deliver\n", no_ask=True)
+    proc = _ok(_compose(run_dir))
+    assert _mirror(run_dir, run_id)["source"] == "host"
+    st = h.status(root, run_id)
+    assert st["status"] != "waiting" and st["coaching"] == "pending", proc.stderr
+    assert "PRE_ANSWERED:ms_revision" in st["disclosures"]
+
+
+def test_compose_takes_the_revision_default_when_no_ask_sent_no_answer(tmp_path: Path) -> None:
+    root, run_id, run_dir = _skipped_6d(tmp_path, "", no_ask=True)
+    _ok(_compose(run_dir))
+    assert (_mirror(run_dir, run_id)["answer"], _mirror(run_dir, run_id)["source"]) == ("deliver", "no_questions")
+    cur = _entry(root, run_id, "ms_revision")["current"]
+    assert (cur["resolution"], cur["resolution_basis"]) == ("default_taken", "host_no_ask")
+    report, _md = _report(run_dir)
+    assert "DEFAULT_TAKEN:ms_revision" in report["disclosures"]
+
+
+def test_attended_with_no_answer_sent_compose_still_asks(tmp_path: Path) -> None:
+    """The default is the no-ask request's; an attended run with no line is asked, as before."""
+    root, run_id, run_dir = _skipped_6d(tmp_path, "")
+    proc = _compose(run_dir)
+    assert proc.returncode == 10 and _out(proc)["blocked_by_gate"] == "ms_revision"
+    assert "record_revision_answer.py" in proc.stderr
+    assert not (run_dir / "handoff" / run_id / "revision_answer.json").exists()
+
+
+@pytest.mark.parametrize("no_ask", [False, True])
+def test_a_revision_line_the_review_now_outgrows_is_not_applied_twice(tmp_path: Path, no_ask: bool) -> None:
+    """The request's line answered the review it was applied to. A review naming more is asked again (attended)
+    or waits (no-ask): the spent line is neither applied again nor replaced by the default."""
+    root, run_id, run_dir = _skipped_6d(tmp_path, "FS_HOST_ANSWER ms_revision=deliver\n", no_ask=no_ask)
+    assert _from_pre_answer(run_dir)["applied"] is True
+    grown = _redteam(run_id)
+    grown["findings"].append(ARPU_HIGH)
+    _write(run_dir / "redteam.json", grown)
+    proc = _compose(run_dir)
+    assert proc.returncode == (12 if no_ask else 10), proc.stdout + proc.stderr
+    assert _out(proc)["blocked_by_gate"] == "ms_revision"
+    if no_ask:
+        assert _out(proc)["stop"] == g.NO_ASK_STOP and "apply_with" not in _out(proc)
+    entry = _entry(root, run_id, "ms_revision")
+    assert (entry["state"], entry["supersessions"]) == ("open", 1)
+    assert [ev["reason"] for ev in entry["history"] if ev["event"] == "superseded"] == ["review_names_more"]
+    assert [ev["event"] for ev in entry["history"]].count("pre_answer_applied") == 1
+    assert "DEFAULT_TAKEN:ms_revision" not in h.status(root, run_id)["disclosures"]
+    assert not (run_dir / "report.md").exists()
+
+
+def test_from_pre_answer_run_twice_changes_nothing_and_asks_nothing(tmp_path: Path) -> None:
+    root, run_id, run_dir = _skipped_6d(tmp_path, "FS_HOST_ANSWER ms_revision=deliver\n")
+    assert _from_pre_answer(run_dir)["applied"] is True
+    before = (h.snapshot(root, run_id), _mirror(run_dir, run_id))
+    again = _from_pre_answer(run_dir)
+    assert again == {"applied": False, "owed": False, "answered": "deliver", "parameters": ["segment_pct"]}
+    assert (h.snapshot(root, run_id), _mirror(run_dir, run_id)) == before
+
+
+def test_from_pre_answer_run_twice_under_no_ask_is_not_refused(tmp_path: Path) -> None:
+    root, run_id, run_dir = _skipped_6d(tmp_path, "", no_ask=True)
+    assert _from_pre_answer(run_dir)["applied"] is True
+    assert _from_pre_answer(run_dir)["answered"] == "deliver"
+
+
+def test_a_missing_record_is_written_from_the_ledger_and_the_answer_stands(tmp_path: Path) -> None:
+    """An answered question whose record is gone (or another run's) is not asked again: the record is rewritten
+    from the ledger, and the answer is not superseded."""
+    for case in ("gone", "other_run"):
+        root, run_id, run_dir = _skipped_6d(tmp_path / case, "FS_HOST_ANSWER ms_revision=deliver\n")
+        assert _from_pre_answer(run_dir)["applied"] is True
+        record = run_dir / "handoff" / run_id / "revision_answer.json"
+        if case == "gone":
+            record.unlink()
+        else:
+            _write(record, {**_mirror(run_dir, run_id), "metadata": {"run_id": "20200101T000000Z-aaaaaa"}})
+        _ok(_compose(run_dir))
+        entry = _entry(root, run_id, "ms_revision")
+        assert (entry["state"], entry["supersessions"]) == ("answered", 0), case
+        mirror = _mirror(run_dir, run_id)
+        assert (mirror["answer"], mirror["source"], mirror["metadata"]["run_id"]) == ("deliver", "host", run_id)
+
+
+def test_a_review_of_another_run_is_not_answered_for_this_one(tmp_path: Path) -> None:
+    """compose applies the request's answer only for a review of the ledger's own run."""
+    _root, run_id, run_dir = _skipped_6d(tmp_path, "FS_HOST_ANSWER ms_revision=deliver\n")
+    sys.path.insert(0, str(MS))
+    ms_gates = _load("ms_gates_for_other_run", MS / "_ms_gates.py")
+    with pytest.raises(SystemExit) as ended:
+        ms_gates.revision_owed(str(run_dir), run_id, ["segment_pct"], review_run_id="20200101T000000Z-bbbbbb")
+    assert ended.value.code == 10
+    assert not (run_dir / "handoff" / run_id / "revision_answer.json").exists()
+    assert ms_gates.revision_owed(str(run_dir), run_id, ["segment_pct"], review_run_id=run_id) is True
+    assert _mirror(run_dir, run_id)["source"] == "host"
+
+
 def test_compose_refuses_a_question_opened_and_never_recorded(tmp_path: Path) -> None:
     root, run_id, run_dir = _run_dir(tmp_path)
     _artifacts(run_dir, run_id)
