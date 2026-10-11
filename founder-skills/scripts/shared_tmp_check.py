@@ -33,11 +33,14 @@ code a command runs (`bash -c "..."`, `python3 -c "open(...)"`, and the words af
 /tmp/y`): KNOWN RESIDUALS, with a fixed folder under /tmp, a name assigned in an earlier shell call, a
 `cd` to a folder it cannot read, and writes this does not model: a name the server or URL chooses
 (`curl -O`, `curl --remote-name`, `wget -P /tmp`, `--directory-prefix`), tar's archive named only by the
-`TAPE` variable or with its mode in a later word after an old-style `f` cluster, `touch /tmp/flag`,
-`python3 -m json.tool in /tmp/out`, and `pushd /tmp && cmd > out` (only `cd` moves the folder). Each is a
-miss, bounded like a false hold by nothing but the budget below. One residual in the other direction: a
-`case` inside `$( ... )` (`x=$(case $y in a) cd /tmp;; esac); cmd > out`), whose pattern `)` the shared
-substitution lifter reads as the end of the `$(`, so the `cd` is read in the outer block: a false hold.
+`TAPE` variable or with its mode in a later word after an old-style `f` cluster, `gtar` / `bsdtar` (only
+`tar` is read), a zip archive named after `-x` / `-i` patterns (`zip -x '*.git*' -r /tmp/a.zip .`),
+`touch /tmp/flag`, `python3 -m json.tool in /tmp/out`, and `pushd /tmp && cmd > out` (only `cd` moves the
+folder). Each is a miss, bounded like a false hold by nothing but the budget below. Residuals in the other
+direction (false holds): a `case` inside `$( ... )` (`x=$(case $y in a) cd /tmp;; esac); cmd > out`),
+whose pattern `)` the shared substitution lifter reads as the end of the `$(`, so the `cd` is read in the
+outer block; a `case` whose `in` is on the next line, or with no pattern at all (`case $x in esac`), whose
+parens are then read as subshells; `zip -FF X --out Y`, whose X is read and held as well as Y.
 
 WHY `-o` IS AN OUTPUT UNLESS THE COMMAND IS LISTED. `-o` writes a file for curl, sort, gcc, pandoc and
 our own scripts (`compose_report.py -o`, read through the interpreter as `python3 X.py -o`), and for

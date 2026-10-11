@@ -138,6 +138,11 @@ DENIED = [
     # RESIDUAL (a false hold): the shared substitution lifter ends the `$(` at the pattern's `)`, so the
     # `cd` is read in the outer block. A fix to the lifter flips this row, deliberately.
     ("x=$(case $y in a) cd /tmp;; esac); cmd > out", ["/tmp/out"]),
+    # RESIDUALS (false holds, budget-bounded): a `case` with `in` on the next line or with no pattern is not
+    # read as a case, so its parens are read as subshells; `zip -FF X --out Y` holds the X it only reads.
+    ("(case $x\nin\n a) true;;\nesac; cd /tmp); cmd > out", ["/tmp/out"]),
+    ("case $x in esac; (cd /tmp); echo > o", ["/tmp/o"]),
+    ("zip -FF /tmp/x.zip --out /tmp/y.zip", ["/tmp/x.zip", "/tmp/y.zip"]),
 ]
 
 PASSED = [
@@ -208,6 +213,9 @@ PASSED = [
     "(case $x in (a) true;; esac; cd /tmp); echo hi > out",
     "(case $x in a) cd /tmp;; esac); cmd > out",
     '(\ncase "$x" in\n  a) cd /tmp ;;\nesac\n)\ncmd > out',
+    # RESIDUALS (misses): an archive named after zip's patterns; tar under another name.
+    'zip -x "*.git*" -r /tmp/a.zip .',
+    "gtar -czf /tmp/x d",
 ]
 
 
