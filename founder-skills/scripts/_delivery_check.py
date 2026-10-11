@@ -12,7 +12,9 @@ WHEN IT ASKS -- all of these, read from the session transcript:
 1. The current prompt ran a founder-skills report build (a compose or closing script) through a
    SHELL tool, and it succeeded. The script name inside an Agent or TaskCreate input is not a run.
 2. No shell call after it failed. A run that hit an error after building the report and stopped
-   is not asked to deliver what it chose to withhold.
+   is not asked to deliver what it chose to withhold. A shell call the PreToolUse shared-/tmp check
+   held (its result carries `[shared-tmp]`, after the runtime's "PreToolUse:<tool> hook error: "
+   prefix) did not fail: it never ran, and the model is told to run it again elsewhere.
 3. The final message points at a deliverable (a `computer://` link, or an absolute path or link
    target ending .md/.html/.pdf/.xlsx). A model that withheld delivery does not link the files.
    For a closing script's build (`closing_message` / `cp_closing_message` / `fmr_closing_message`),
@@ -60,6 +62,8 @@ _DELIVERABLE = re.compile(
     re.IGNORECASE | re.MULTILINE,
 )
 STOP_FEEDBACK_PREFIX = "Stop hook feedback:"
+# shared_tmp_check.MARKER: a shell call that check held never ran, so it is not a failed one (rule 2).
+SHARED_TMP_MARKER = "[shared-tmp]"
 # financial-model-review's values-check page, built for the founder to look at before the review goes
 # on. Only that skill ships `review_inputs.py`; its server mode (no --static) serves a local address
 # and writes no page to send.
@@ -130,12 +134,15 @@ def missing_delivery(rows: list[dict[str, Any]], start: int, printed: str | None
     if any(r.get("entrypoint") == "cli" for r in rows):
         return None
     results: dict[str, bool] = {}
+    held: set[str] = set()
     for row in rows[start:]:
         if row.get("isSidechain"):
             continue
         for b in _content(row):
             if isinstance(b, dict) and b.get("type") == "tool_result" and isinstance(b.get("tool_use_id"), str):
                 results[b["tool_use_id"]] = bool(b.get("is_error"))
+                if b.get("is_error") and any(SHARED_TMP_MARKER in s for s in _strings(b.get("content"))):
+                    held.add(b["tool_use_id"])
     build_at: int | None = None
     compose_at: int | None = None
     closer_at: int | None = None
@@ -190,7 +197,7 @@ def missing_delivery(rows: list[dict[str, Any]], start: int, printed: str | None
                 continue
             cid = b.get("id")
             outcome = results.get(cid) if isinstance(cid, str) else None
-            if i > fail_from and b.get("name") in SHELL_TOOLS and outcome is True:
+            if i > fail_from and b.get("name") in SHELL_TOOLS and outcome is True and cid not in held:
                 return None
             if i > deliver_from and is_delivery_tool(b.get("name")) and outcome is False:
                 return None

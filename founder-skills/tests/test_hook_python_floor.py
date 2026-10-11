@@ -45,6 +45,7 @@ def test_the_hook_module_list_is_complete() -> None:
         "asked_gate_check.py",
         "no_ask_check.py",
         "_form_reply.py",
+        "shared_tmp_check.py",
     }
     assert expected <= names, names
 
@@ -402,3 +403,23 @@ def test_the_stop_hooks_ledger_read_decides_the_same_under_the_system_python(tmp
     dev, system = _both(SCRIPTS / "stop_handover_check.py", payload)
     assert dev == system
     assert ("[no-ask-end]" in dev) is (kind == "no_ask")
+
+
+@needs_old
+@pytest.mark.parametrize(
+    ("command", "held"),
+    [
+        ('python3 "$SCRIPTS/compose_report.py" > /tmp/compose_out.txt 2>&1; tail -5 /tmp/compose_out.txt', True),
+        ('python3 "$SCRIPTS/compose_report.py" > "$STAGING_DIR/out.txt"', False),
+        ("cd /tmp && cmd > out.txt", True),
+        ("ls -la", False),
+    ],
+)
+def test_the_shared_tmp_check_decides_the_same_under_the_system_python(
+    tmp_path: Path, command: str, held: bool
+) -> None:
+    from test_shared_tmp_hook import _payload, _started
+
+    dev, system = _both(SCRIPTS / "pretooluse_dispatch.py", _payload(tmp_path, _started(), command=command))
+    assert dev == system
+    assert bool(dev) is held

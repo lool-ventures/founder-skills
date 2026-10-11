@@ -3,11 +3,13 @@
 # requires-python = ">=3.9"
 # dependencies = []
 # ///
-"""PreToolUse on Agent/Task/AskUserQuestion: one process runs every check, the first hold wins.
+"""PreToolUse on Agent/Task/AskUserQuestion and the Cowork shell: one process runs every check, the first
+hold wins.
 
-Every dispatch and every question in every session with the plugin starts this, so the checks share one
-python start rather than one each, and each returns at its own tool-name and prefix tests before
-reading anything. Fails open:
+Every dispatch, every question and every Cowork shell call in every session with the plugin starts this,
+so the checks share one python start rather than one each, and each returns at its own tool-name and
+prefix tests before reading anything. A shell call runs only the shell check (SHELL_CHECKS) and every
+other call skips it, so a shell call loads no dispatch or question check. Fails open:
 any error, any unexpected shape, exit 0 with no stdout and one stderr line.
 """
 
@@ -26,7 +28,8 @@ from typing import Any
 # The no-ask check comes before the review-page check: in a run whose request said not to ask, no question
 # is put at all, so the review page's "send it first, then ask again" never applies there.
 # The question check answers only AskUserQuestion, and every dispatch check only Agent/Task: each returns
-# at its own tool-name test, so the order between the two groups decides nothing.
+# at its own tool-name test, so the order between the two groups decides nothing. The shell check is
+# last and is the only one a shell call runs.
 CHECKS = (
     "dispatch_type_check",
     "asked_gate_check",
@@ -34,7 +37,13 @@ CHECKS = (
     "dispatch_prompt_check",
     "no_ask_check",
     "review_page_check",
+    "shared_tmp_check",
 )
+SHELL_CHECKS = ("shared_tmp_check",)
+
+
+def _is_shell(name: object) -> bool:
+    return isinstance(name, str) and (name == "Bash" or name.endswith("__bash"))
 
 
 def _load(name: str) -> Any:
@@ -51,7 +60,8 @@ def main() -> None:
     try:
         payload = json.load(sys.stdin)
         if isinstance(payload, dict):
-            for name in CHECKS:
+            shell = _is_shell(payload.get("tool_name"))
+            for name in (n for n in CHECKS if (n in SHELL_CHECKS) == shell):
                 try:
                     decision = _load(name).decide(payload)
                 except Exception as e:  # noqa: BLE001 - one broken check must not silence the other

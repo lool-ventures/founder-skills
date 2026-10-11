@@ -1235,6 +1235,7 @@ def test_the_check_runs_before_the_review_page_check() -> None:
         "dispatch_prompt_check",
         "no_ask_check",
         "review_page_check",
+        "shared_tmp_check",
     )
 
 

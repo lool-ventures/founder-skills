@@ -41,7 +41,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Agent|Task|AskUserQuestion",
+        "matcher": "Agent|Task|AskUserQuestion|mcp__workspace__bash",
         "hooks": [
           {
             "type": "command",

@@ -219,8 +219,9 @@ def test_the_dispatcher_is_the_one_declared_hook_for_dispatches() -> None:
     manifest = json.loads((SCRIPTS.parent / ".claude-plugin" / "plugin.json").read_text())
     entries = manifest["hooks"]["PreToolUse"]
     assert len(entries) == 1
-    # AskUserQuestion reaches the same process for the review-page check (test_review_page_hook.py).
-    assert set(entries[0]["matcher"].split("|")) == {"Agent", "Task", "AskUserQuestion"}
+    # AskUserQuestion reaches the same process for the review-page check (test_review_page_hook.py), and
+    # the Cowork shell for the shared-/tmp check (test_shared_tmp_hook.py).
+    assert set(entries[0]["matcher"].split("|")) == {"Agent", "Task", "AskUserQuestion", "mcp__workspace__bash"}
     assert [h["command"].rsplit("/", 1)[-1] for h in entries[0]["hooks"]] == ["pretooluse-dispatch.sh"]
 
 
