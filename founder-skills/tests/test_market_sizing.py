@@ -10253,3 +10253,205 @@ def test_the_producer_and_the_verdict_word_the_gap_clause_alike() -> None:
     producer = importlib.import_module("market_sizing")
     view = importlib.import_module("_view")
     assert producer.GAP_TAIL == " Review assumptions — " + view._GAP_CLAUSE
+
+
+# === the comparison paragraph says what each build's TAM is built from ===
+
+_TD_LABEL = "Global widget analytics software market, 2025 (Example Research)"
+_BU_LABEL = "US independent bakeries"
+
+
+def _view_module() -> Any:
+    import importlib
+
+    if MARKET_SIZING_DIR not in sys.path:
+        sys.path.insert(0, MARKET_SIZING_DIR)
+    return importlib.import_module("_view")
+
+
+def _scope_arts(industry_total: float) -> dict[str, Any]:
+    """_v1_artifacts' record with two invented labels and a 2% target capture. At 70B the two TAMs agree
+    (only SOM is flagged); at 700B the TAM gap is flagged too. The two fixtures differ in that one figure."""
+    labels = {"industry_total": _TD_LABEL, "customer_count": _BU_LABEL}
+    record = {
+        **_V1_RECORD,
+        "industry_total": (industry_total, *_V1_RECORD["industry_total"][1:]),
+        "target_pct": (2, *_V1_RECORD["target_pct"][1:]),
+    }
+    assumptions = [
+        _v1_entry(name, value, unit, **more, **({"label": labels[name]} if name in labels else {}))
+        for name, (value, unit, more) in record.items()
+    ]
+    refs = {"approach": "both", **{name: {"assumption": name} for name in record}}
+    validation, sizing = _v1_run(assumptions, refs)
+    return {
+        "inputs.json": _VALID_INPUTS,
+        "methodology.json": {**_VALID_METHODOLOGY, "approach_chosen": "both"},
+        "validation.json": validation,
+        "sizing.json": sizing,
+        "sensitivity.json": _stamped(_VALID_SENSITIVITY, sizing),
+        "checklist.json": _stamped(_VALID_CHECKLIST, sizing),
+    }
+
+
+def _comparison_line_and_note(arts: dict[str, Any]) -> tuple[str, str]:
+    d = _make_artifact_dir(arts)
+    md = _compose_md_text(Path(d))
+    line = next(ln for ln in md.splitlines() if ln.startswith("**Top-down vs bottom-up:**"))
+    rc_html, html_text, err = run_script_raw("visualize.py", ["--dir", d])
+    assert rc_html == 0, err
+    note = html_text[html_text.index('class="chart-note"') :]
+    import html
+
+    return line, html.unescape(note[: note.index("</p>")])
+
+
+def test_the_comparison_says_what_each_tam_is_built_from_on_both_pages() -> None:
+    arts = _scope_arts(700e9)
+    assert arts["sizing.json"]["comparison"].get("warning"), arts["sizing.json"]["comparison"]
+    top_down = f'the recorded figure "{_TD_LABEL}"'
+    bottom_up = f'the recorded figure "{_BU_LABEL}" times a recorded price per customer'
+    want = f"What each TAM is built from: the top-down TAM starts from {top_down}; the bottom-up TAM from {bottom_up}"
+    want += ", counted over a year."
+    line, note = _comparison_line_and_note(arts)
+    assert line.endswith(want), line
+    assert note.endswith(want), note
+
+
+def test_no_built_from_sentence_without_a_flagged_tam() -> None:
+    """The same record with the TAMs in agreement: SOM is still flagged, and the sentence is not said."""
+    arts = _scope_arts(70e9)
+    comp = arts["sizing.json"]["comparison"]
+    assert "warning" not in comp and comp.get("som_warning"), comp
+    line, note = _comparison_line_and_note(arts)
+    assert "What each TAM is built from" not in line and "What each TAM is built from" not in note
+
+
+def test_built_from_sentence_needs_both_builds_and_recorded_references() -> None:
+    v = _view_module()
+    arts = _scope_arts(700e9)
+    sizing, validation = arts["sizing.json"], arts["validation.json"]
+    assert v.scope_sentence(sizing, validation)  # the positive the negatives below each differ from
+    assert v.scope_sentence({k: x for k, x in sizing.items() if k != "bottom_up"}, validation) is None
+    assert v.scope_sentence({k: x for k, x in sizing.items() if k != "input_refs"}, validation) is None
+
+
+def _scope_of(refs: dict[str, Any], validation: dict[str, Any], **sizing: Any) -> str:
+    out = _view_module().scope_sentence(
+        {
+            "top_down": {"tam": {}},
+            "bottom_up": {"tam": {}},
+            "comparison": {"warning": "x"},
+            "input_refs": refs,
+            **sizing,
+        },
+        validation,
+    )
+    assert isinstance(out, str)
+    return out
+
+
+_SCOPE_RECORD = {
+    "assumptions": [
+        {"name": "region_spend", "label": "Regional pastry spend (Example Survey)"},
+        {"name": "shop_total", "label": "Shops in the region"},
+        {"name": "online_shops", "label": "Shops selling online"},
+        {"name": "list_price", "label": "Published list price"},
+    ]
+}
+
+
+def test_built_from_frames_each_kind_of_reference() -> None:
+    def _d(op: str, *factors: Any) -> dict[str, Any]:
+        return {"derived": {"op": op, "factors": list(factors)}}
+
+    a, b, c = ({"assumption": n} for n in ("region_spend", "shop_total", "online_shops"))
+    deep = _d("multiply", _d("multiply", _d("multiply", a, b), c), c)
+    text = _scope_of(
+        {
+            "industry_total": _d("multiply", a, {"estimate": 0.4, "why": "SECRET_WHY"}),
+            "customer_count": _d("to_fraction", _d("divide", c, b)),
+            "arpu": {"founder_stated": "arpu"},
+        },
+        _SCOPE_RECORD,
+    )
+    assert (
+        'the top-down TAM starts from a figure derived from the recorded figure "Regional pastry spend (Example '
+        'Survey)" and an estimate;' in text
+    ), text
+    assert "SECRET_WHY" not in text and "0.4" not in text
+    assert 'the recorded figure "Shops selling online" as a share of the recorded figure "Shops in the region"' in text
+    assert text.endswith("times the price you stated, counted over a year."), text
+    divided = _scope_of(
+        {"industry_total": a, "customer_count": {"derived": {"op": "divide", "factors": [b, c]}}}, _SCOPE_RECORD
+    )
+    assert 'the recorded figure "Shops in the region" divided by the recorded figure "Shops selling online"' in divided
+    assert "times the price per customer, counted over a year." in divided  # no arpu reference recorded
+    nested = _scope_of({"industry_total": deep, "customer_count": b}, _SCOPE_RECORD)
+    assert "a figure derived from other figures" in nested, nested
+    assert "Regional pastry spend" not in nested, nested  # the innermost level is summarised, not spelled out
+    percent = _scope_of(
+        {"industry_total": a, "customer_count": {"derived": {"op": "to_percent", "factors": [c]}}}, _SCOPE_RECORD
+    )
+    assert 'the recorded figure "Shops selling online" expressed as a percentage' in percent, percent
+
+
+def test_built_from_a_researched_monthly_price_is_said_per_year() -> None:
+    """The calculator annualises every price per customer by its recorded period, the founder's or not."""
+    text = _scope_of({"industry_total": {"assumption": "region_spend"}, "customer_count": {"assumption": "shop_total"},
+                      "arpu": {"assumption": "list_price"}}, _SCOPE_RECORD)  # fmt: skip
+    assert text.endswith('times the recorded figure "Published list price", counted over a year.'), text
+
+
+def test_built_from_names_a_converted_price() -> None:
+    text = _scope_of(
+        {"industry_total": {"assumption": "region_spend"}, "customer_count": {"assumption": "shop_total"},
+         "arpu": {"founder_stated": "arpu"}},
+        _SCOPE_RECORD,
+        fx={"conversions": [{"field": "arpu", "from": "ILS", "to": "USD", "rate": 0.27}]},
+    )  # fmt: skip
+    assert text.endswith("times the price you stated, converted to USD, counted over a year."), text
+
+
+def test_built_from_never_calls_a_missing_entry_recorded() -> None:
+    """A reference whose entry is gone from the record (deleted after the sizing) is not "the recorded figure";
+    an unlabelled price is said as a price, not by its field name."""
+    record = {"assumptions": [*_SCOPE_RECORD["assumptions"], {"name": "arpu", "value": 99}]}
+    text = _scope_of(
+        {"industry_total": {"assumption": "gone_entry"}, "customer_count": {"assumption": "shop_total"},
+         "arpu": {"assumption": "arpu"}},
+        record,
+    )  # fmt: skip
+    assert 'starts from a figure the research record no longer holds ("Gone Entry");' in text, text
+    assert 'the recorded figure "Gone Entry"' not in text, text
+    assert text.endswith("times a recorded price per customer, counted over a year."), text
+    assert "ARPU" not in text, text
+
+
+def test_built_from_names_a_converted_industry_total() -> None:
+    text = _scope_of(
+        {"industry_total": {"assumption": "region_spend"}, "customer_count": {"assumption": "shop_total"}},
+        _SCOPE_RECORD,
+        fx={"conversions": [{"field": "industry_total", "from": "EUR", "to": "USD", "rate": 1.1}]},
+    )
+    assert 'starts from the recorded figure "Regional pastry spend (Example Survey)", converted to USD;' in text, text
+
+
+def test_built_from_keeps_our_vocabulary_out_of_a_label() -> None:
+    sys.path.insert(0, os.path.join(FOUNDER_SKILLS_DIR, "scripts"))
+    import importlib
+
+    ft = importlib.import_module("_founder_text")
+    hostile = {
+        "assumptions": [
+            {"name": "region_spend", "label": "Total from validation.json via industry_total"},
+            {"name": "shop_total"},
+        ]
+    }
+    text = _scope_of(
+        {"industry_total": {"assumption": "region_spend"}, "customer_count": {"assumption": "shop_total"}}, hostile
+    )
+    assert ft.scan(text) == {"enums": [], "filenames": []}, (text, ft.scan(text))
+    assert "validation.json" not in text and "industry_total" not in text, text
+    # An unlabelled figure falls back to its humanized name.
+    assert 'the bottom-up TAM from the recorded figure "Shop Total"' in text, text

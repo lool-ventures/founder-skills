@@ -27,6 +27,7 @@ import _provenance
 from _quote_match import quote_in_doc
 from _redteam_text import humanize_claim as _humanize_claim
 from _redteam_text import humanize_param as _humanize_param
+from _redteam_text import humanize_review_text as _humanize_review_text
 
 # Sentinel for corrupt (unparseable) artifact files
 _CORRUPT: dict[str, Any] = {"__corrupt__": True}
@@ -2051,6 +2052,102 @@ def redo_sentence(record: dict[str, Any] | None, validation: Any) -> str | None:
             + ", ".join(_label(n, validation) for n in changed)
             + "."
         )
+    return _founder_prose(text)
+
+
+# How deep a derived reference is spelled out before it is summarised; references are model-written and
+# nest without bound.
+_SCOPE_DEPTH = 2
+
+
+def _entry(name: str, validation: Any) -> dict[str, Any] | None:
+    for a in _as_list(_as_dict(validation).get("assumptions")):
+        if isinstance(a, dict) and a.get("name") == name:
+            return a
+    return None
+
+
+def _ref_words(ref: Any, validation: Any, depth: int = 0, unlabelled: str | None = None) -> str:
+    """What one sizing reference is, in words, each kind in its own frame (`_provenance`'s grammar).
+
+    A recorded figure is quoted by its label (falling back to the humanized name, or to `unlabelled` when the
+    caller has a plainer phrase for an unlabelled entry); a reference whose entry the record no longer holds is
+    said to be one; an estimate is only ever "an estimate", never its reason, which is model prose written
+    after the research.
+    """
+    r = _as_dict(ref)
+    if "assumption" in r:
+        name = str(r.get("assumption"))
+        entry = _entry(name, validation)
+        if entry is None:
+            return f'a figure the research record no longer holds ("{_humanize_param(name)}")'
+        has_label = isinstance(entry.get("label"), str) and bool(entry["label"].strip())
+        if not has_label and unlabelled:
+            return unlabelled
+        # Labels are model-written: our file names and identifiers in one are reworded before it is quoted.
+        label, _ = _humanize_review_text(_label(name, validation))
+        return f'the recorded figure "{label}"'
+    if "founder_stated" in r:
+        return "the price you stated" if r.get("founder_stated") == "arpu" else "a figure you stated"
+    if "estimate" in r:
+        return "an estimate"
+    derived = _as_dict(r.get("derived"))
+    factors = _as_list(derived.get("factors"))
+    op = derived.get("op")
+    if not derived or not factors or depth >= _SCOPE_DEPTH:
+        return "a figure derived from other figures"
+    if op in ("to_percent", "to_fraction") and len(factors) == 1:
+        # A share is a division turned into a percentage or fraction: say it once, as a share.
+        inner = _as_dict(_as_dict(factors[0]).get("derived"))
+        parts = _as_list(inner.get("factors"))
+        if inner.get("op") == "divide" and len(parts) == 2:
+            a, b = (_ref_words(f, validation, depth + 1) for f in parts)
+            return f"{a} as a share of {b}"
+        kind = "a percentage" if op == "to_percent" else "a fraction"
+        return f"{_ref_words(factors[0], validation, depth + 1)} expressed as {kind}"
+    words = [_ref_words(f, validation, depth + 1) for f in factors]
+    if op == "divide" and len(words) == 2:
+        return f"{words[0]} divided by {words[1]}"
+    if len(words) == 1:
+        return f"a figure derived from {words[0]}"
+    return "a figure derived from " + ", ".join(words[:-1]) + " and " + words[-1]
+
+
+def scope_sentence(sizing: Any, validation: Any) -> str | None:
+    """What each build's TAM is built from, from the references the sizing recorded; None when there is none to tell.
+
+    Said only when both builds exist, the producer flagged their TAM gap, and the sizing resolved by reference
+    (the legacy numeric path records none). It decides nothing: a global all-category total beside a count of
+    the product's own buyers is there for the founder to read. Labels are the CURRENT validation.json labels,
+    outside the redo's research digest, so a label rewritten after the gap changes this sentence and no record
+    notices; it is the same label the assumptions table shows.
+    """
+    s = _as_dict(sizing)
+    if not (_as_dict(s.get("top_down")) and _as_dict(s.get("bottom_up"))):
+        return None
+    if not _as_dict(s.get("comparison")).get("warning"):
+        return None
+    refs = _as_dict(s.get("input_refs"))
+    if not refs.get("industry_total") or not refs.get("customer_count"):
+        return None
+    top = _ref_words(refs["industry_total"], validation)
+    fx = _fx_conversions(s).get("industry_total")
+    if fx and isinstance(fx.get("to"), str) and fx["to"]:
+        top += f", converted to {fx['to']}"
+    count = _ref_words(refs["customer_count"], validation)
+    price = (
+        _ref_words(refs["arpu"], validation, unlabelled="a recorded price per customer")
+        if refs.get("arpu")
+        else "the price per customer"
+    )
+    price_fx = _fx_conversions(s).get("arpu")
+    if price_fx and isinstance(price_fx.get("to"), str) and price_fx["to"]:
+        price += f", converted to {price_fx['to']}"
+    # The calculator annualises every price per customer by its recorded period, the founder's or not.
+    text = (
+        f"What each TAM is built from: the top-down TAM starts from {top}; the bottom-up TAM from {count} "
+        f"times {price}, counted over a year."
+    )
     return _founder_prose(text)
 
 

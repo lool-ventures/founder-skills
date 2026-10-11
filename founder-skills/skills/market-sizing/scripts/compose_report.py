@@ -2087,9 +2087,11 @@ def _section_sizing_table(
     provenance: dict[str, dict[str, Any]] | None = None,
     validation: dict[str, Any] | None = None,
     redo: str | None = None,
+    scope: str | None = None,
 ) -> str:
     """Section 4: Market sizing table. `redo`: the comparison redo's sentence (`_view.redo_sentence`), said
-    after the comparison it explains."""
+    after the comparison it explains. `scope`: what each build's TAM is built from (`_view.scope_sentence`),
+    said last."""
     if sizing is None:
         return "## Market Sizing\n\n*No sizing data available.*\n"
     if _is_stub(sizing):
@@ -2197,7 +2199,8 @@ def _section_sizing_table(
         # producer's own caveat for it sat unrendered in sizing.json.
         _shared = _shared_input_values(sizing, validation)
         _paragraph = _comparison_paragraph(comparison, _shared)
-        lines.append(f"\n**Top-down vs bottom-up:** {_paragraph + ' ' + redo if redo else _paragraph}")
+        _paragraph = " ".join(p for p in (_paragraph, redo, scope) if p)
+        lines.append(f"\n**Top-down vs bottom-up:** {_paragraph}")
 
     # Deck Claims comparison table
     if provenance:
@@ -3460,7 +3463,13 @@ def _compose(
         _section_analysis_checklist(checklist, artifacts_found),
         _section_methodology(methodology),
         _section_definitions(),
-        _section_sizing_table(sizing, provenance_data, validation_data, _view.redo_sentence(_redo, validation_data)),
+        _section_sizing_table(
+            sizing,
+            provenance_data,
+            validation_data,
+            _view.redo_sentence(_redo, validation_data),
+            _view.scope_sentence(sizing, validation_data),
+        ),
         _section_deck_claims_narrative(inputs),
         _section_assumptions(validation_data, sizing),
         _section_adversarial(
