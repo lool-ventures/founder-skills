@@ -1206,9 +1206,20 @@ _RAW_TARGET_WRITERS = frozenset({"cp", "mv", "ln", "tee", "install", "rsync", "d
 _RAW_CUTS = frozenset({*_RAW_SEGMENT_SEPS, "&", "(", ")", "{", "}", ";;"})
 
 
+# The redirects that write no file: to the null device or a standard stream (`> /dev/null`, `2>/dev/stderr`,
+# `&>> '/dev/null'`), or a descriptor duplicated or closed (`2>&1`, `>&2`, `3>&-`). The target must end
+# where the shell ends a word, so `/dev/nullx`, `/dev/null2` and `/dev/null/../x` are still files.
+_RAW_QUIET_TARGETS = frozenset({"/dev/null", "/dev/stdout", "/dev/stderr"})
+_RAW_WORD_END = r"(?=$|[\s;&|()<>]|[\"'`](?:$|[\s;&|()<>]))"
+_RAW_QUIET_RE = re.compile(
+    r"(?:[0-9]*|&)(?:>>|>\||>&|>)[ \t]*(?P<q>[\"']?)/dev/(?:null|stdout|stderr)(?P=q)" + _RAW_WORD_END
+    + r"|[0-9]*>&[ \t]*(?:[0-9]+|-)" + _RAW_WORD_END
+)  # fmt: skip
+
+
 def _raw_quiet(text: str) -> str:
-    """`text` without the redirects that write nothing (`2>&1`, `>/dev/null`)."""
-    return text.replace("2>&1", "").replace(">/dev/null", "").replace(">&/dev/null", "")
+    """`text` without the redirects that write nothing (`_RAW_QUIET_RE`)."""
+    return _RAW_QUIET_RE.sub(" ", text)
 
 
 def _raw_targets_by_line(lines: list[str], bodies: set[int]) -> tuple[list[list[str] | None], set[int]]:
@@ -1270,7 +1281,8 @@ def _raw_write_targets(line: str) -> list[str] | None:
         if tok and set(tok) <= set("<>&|") and ("<" in tok or ">" in tok):
             target = tokens[n] if n < len(tokens) else ""
             n += 1
-            if ">" in tok and not (tok.endswith("&") and re.fullmatch(r"[0-9-]+", target)):
+            dup = tok.endswith("&") and re.fullmatch(r"[0-9-]+", target)
+            if ">" in tok and not dup and target not in _RAW_QUIET_TARGETS:
                 out.append(target)
             if words and words[-1].isdigit():
                 words.pop()
@@ -1386,11 +1398,12 @@ def _raw_writes_into_plugin(command: str) -> bool:
         if _RAW_LINK_RE.search(line) and _into_plugin(_raw_filled(line, values)):
             return True
         # A line writes when the pattern says so, or when its own words show a target the pattern can miss
-        # (`echo x>"$F"`, with no space before the `>`), or cannot be read and holds a `>`.
+        # (`echo x>"$F"`, with no space before the `>`), or cannot be read and holds a `>` (any `>`, one to
+        # the null device included: beside code that may write anywhere, a quiet redirect proves nothing).
         # A line of text (a heredoc body, the inside of a string) is read by the pattern alone, as before.
         targets = targets_at[i]
         matched = _RAW_WRITE_RE.search(_raw_quiet(line))
-        if not matched and (targets == [] or i in text_lines or (targets is None and ">" not in _raw_quiet(line))):
+        if not matched and (targets == [] or i in text_lines or (targets is None and ">" not in line)):
             continue
         if matched and (_into_plugin(line) or "dispatch_" in line or "prompt.py" in line):
             return True

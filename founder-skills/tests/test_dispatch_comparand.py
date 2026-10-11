@@ -1118,6 +1118,142 @@ def test_a_redirect_of_both_streams_to_a_file_is_a_write_in_an_unreadable_block(
     assert DPC._distrusts(block) == (set(DPC.GENERATORS) if distrusts else set()), write
 
 
+# --- a redirect that writes no file, in a block the parser cannot read --------------------------------------
+
+# The shape a paid lane sent: a `cd`, a heredoc that writes the research file, a check of it, then the
+# sizing generator run with its output discarded, to see that it would print. The heredoc makes the block
+# unreadable, so the raw check decides it, and the generator line must not read as a write.
+_TD_ARGS = '--run-id R7 --analysis-dir "$AD" --analysis-dir-agent "$AD" --handoff-dir "$H" --handoff-agent "$H"'
+_DISCARDED_HEAD = (
+    "cd /home/claude/work\n"
+    "AD=$PWD/artifacts/market-sizing-acme\n"
+    "cat <<'VAL_EOF' > \"$AD/validation.json\"\n"
+    "{\n"
+    '  "assumptions": [{"name": "widget_market", "value": 1234, "unit": "count", "category": "sourced"}],\n'
+    '  "metadata": {"run_id": "R7"}\n'
+    "}\n"
+    "VAL_EOF\n"
+    'python3 -m json.tool "$AD/validation.json" >/dev/null && echo valid\n'
+    f"S={_SYNCED}/{MS_SCRIPTS}\n"
+    "H=$AD/handoff/R7\n"
+)
+
+
+def _discarded(tail: str = ' > /dev/null; echo "td=$?"') -> str:
+    return _DISCARDED_HEAD + f"python3 $S/dispatch_prompt.py top_down_methodology {_TD_ARGS}{tail}"
+
+
+def test_a_generator_run_with_its_output_discarded_is_no_write(tmp_path: Path) -> None:
+    block = _discarded()
+    assert DPC._parse_block(block) is None  # the raw fallback is what decides this block
+    assert DPC._distrusts(block) == set()
+    # End to end: a later printed prompt is still the comparand, so its dispatch passes.
+    rows = _rows(("Bash", {"command": block}, "valid\ntd=0\n"), ("Bash", {"command": _STANDALONE}, _RT_PRINTED))
+    assert DPC.latest_printed(rows, "CONTEXT: RED_TEAM", _RT_OUTPUT) == _RT_PRINTED.rstrip("\n")
+    transcript = tmp_path / "t.jsonl"
+    transcript.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+    tool_input = {"subagent_type": "founder-skills:market-sizing-redteam", "description": "d", "prompt": _RT_PRINTED}
+    payload = {"hook_event_name": "PreToolUse", "tool_name": "Agent", "transcript_path": str(transcript)}
+    assert DPC.decide({**payload, "tool_input": tool_input}) is None
+
+
+@pytest.mark.parametrize(
+    "tail",
+    [
+        ">/dev/null",
+        " > /dev/null 2>&1",
+        " 2> /dev/null",
+        " &> /dev/null",
+        " >> /dev/null",
+        " >| /dev/null",
+        " >& /dev/null",
+        ' > "/dev/null"',
+        " > /dev/stderr",
+        " 1> /dev/stdout",
+        " 1>&2",
+        " >&2; exec 3>&-",
+    ],
+)
+def test_a_redirect_that_writes_no_file_is_no_write(tail: str) -> None:
+    block = _discarded(tail)
+    assert DPC._parse_block(block) is None, tail
+    assert DPC._distrusts(block) == set(), tail
+
+
+@pytest.mark.parametrize(
+    "tail",
+    [
+        " > out.txt",
+        ' > "$S/x.py"',
+        " >> /dev/null2",
+        " > /dev/nullx",
+        " > /dev/null/../x",
+        " >/dev/null.py",
+        " | tee /tmp/x/p.txt",
+        " > /dev/null; cp /tmp/e $S/x.py",
+        " > /dev/null 2> /tmp/x/err.txt",
+        " 2>/dev/null > /tmp/x/o.txt",
+        " &> /tmp/x/o.txt",
+        " >| /tmp/x/o.txt",
+        " >& /tmp/x/o.txt",
+        '\nread -r O\necho x > /dev/null 2> "$O"',
+        "\necho x > /dev/null > $S/x.py",
+        "\necho x &> /dev/null; echo y > $S/x.py",
+        # A line whose targets cannot be told (inline code that may open a file) holds a `>` even when the
+        # redirect is to the null device: the code beside it may write anywhere.
+        "\npython3 -c \"m='w';open('$S/x.py',m).write('e')\" > /dev/null",
+        # Not quiet: a descriptor or terminal device may be a file the block opened (`exec 3>$S/x.py`).
+        " >/dev/fd/1",
+        " >/dev/tty",
+        " >/proc/self/fd/1",
+        "\nexec 3>$S/x.py\necho x >/dev/fd/3",
+    ],
+)
+def test_a_real_write_beside_a_discarded_one_still_distrusts(tail: str) -> None:
+    block = _discarded(tail)
+    assert DPC._parse_block(block) is None, tail
+    assert DPC._distrusts(block) == set(DPC.GENERATORS), tail
+
+
+@pytest.mark.parametrize(
+    ("text", "writes"),
+    [
+        ("cmd >/dev/null", False),
+        ("cmd > /dev/null 2>&1", False),
+        ("cmd 2>/dev/null >&2", False),
+        ("cmd &>>'/dev/null'", False),
+        ('X="$(cmd 2>/dev/null)"', False),
+        ("cmd >/dev/nullx", True),
+        ("cmd > /dev/null2", True),
+        ("cmd > /dev/null/../x", True),
+        ('cmd > "/dev/null"x', True),
+        ("cmd > /dev/fd/3", True),
+        ("cmd > /dev/fd/1", True),
+        ("cmd > /dev/tty", True),
+        ("cmd > /proc/self/fd/1", True),
+        ("cmd > /dev/null > o", True),
+    ],
+)
+def test_only_a_whole_null_or_standard_stream_target_is_quiet(text: str, writes: bool) -> None:
+    assert (DPC._RAW_WRITE_RE.search(DPC._raw_quiet(text)) is not None) is writes, text
+
+
+def test_the_parsed_reading_takes_the_null_device_as_no_write() -> None:
+    """A block the parser reads decides the same, by its own path: a write to the null device names no
+    file in the plugin, and a write into the plugin still distrusts."""
+    assert DPC._parse_block(GEN + " > /dev/null") is not None
+    assert DPC._distrusts(GEN + " > /dev/null") == set()
+    assert DPC._distrusts(GEN + " > /dev/null 2>&1") == set()
+    assert DPC._distrusts(f'{GEN} > "{_SYNCED}/{MS_SCRIPTS}/x.py"') == set(DPC.GENERATORS)
+
+
+def test_a_generator_run_with_its_output_discarded_printed_no_prompt() -> None:
+    """Discarding the output is no write, and no print either: such a run is never the comparand."""
+    assert DPC.comparands(_rows(("Bash", {"command": GEN + " > /dev/null"}, PRINTED))) == []
+    rows = _rows(("Bash", {"command": _discarded()}, _RT_PRINTED))
+    assert DPC.latest_printed(rows, "CONTEXT: RED_TEAM", _RT_OUTPUT) is None
+
+
 # --- what printed before the generator is not the comparand for another context ------------------------------
 
 _CK_GEN = GEN.replace("red_team", "checklist")
