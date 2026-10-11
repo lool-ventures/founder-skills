@@ -92,6 +92,52 @@ DENIED = [
         'STAGING_DIR=/tmp/market-sizing-acme.staging.Ab12Cd; cp f "$STAGING_DIR"',
         ["/tmp/market-sizing-acme.staging.Ab12Cd"],
     ),
+    # wget's document and its log, in every spelling.
+    ("wget -O /tmp/a.html http://x", ["/tmp/a.html"]),
+    ("wget --output-document=/tmp/a.html http://x", ["/tmp/a.html"]),
+    ("wget --output-document /tmp/a.html http://x", ["/tmp/a.html"]),
+    ("wget -O/tmp/a.html http://x", ["/tmp/a.html"]),
+    ("wget -q -O /tmp/x u", ["/tmp/x"]),
+    ("wget -qO /tmp/x u", ["/tmp/x"]),
+    ("wget -qO/tmp/x u", ["/tmp/x"]),
+    ("wget -t 3 -O /tmp/x u", ["/tmp/x"]),
+    ("wget -o /tmp/log u", ["/tmp/log"]),
+    ("wget -a /tmp/log u", ["/tmp/log"]),
+    ("wget --output-file=/tmp/log u", ["/tmp/log"]),
+    ("wget --append-output /tmp/log u", ["/tmp/log"]),
+    # A script's own `-o` after the shell that runs it; the shell's own `-o pipefail` is not a file.
+    ("bash script.sh -o /tmp/x", ["/tmp/x"]),
+    ("bash -e script.sh -o /tmp/x", ["/tmp/x"]),
+    ("sh ./run.sh -o /tmp/x", ["/tmp/x"]),
+    ("bash -o pipefail script.sh -o /tmp/x", ["/tmp/x"]),
+    ("sh ./run.sh --output=/tmp/r.json", ["/tmp/r.json"]),
+    # A script named like a listed command does not inherit that command's switch.
+    ("sh zip -o /tmp/x", ["/tmp/x"]),
+    # Accepted edge: `extglob` is read as the operand, and the outcome is still right.
+    ("bash -O extglob script.sh -o /tmp/x", ["/tmp/x"]),
+    ("set -o pipefail; cmd > /tmp/z", ["/tmp/z"]),
+    # zip's archive (and its -O); tar's archive under a create or append mode.
+    ("zip -r /tmp/acme_data.zip outputs/", ["/tmp/acme_data.zip"]),
+    ("zip /tmp/out.zip f", ["/tmp/out.zip"]),
+    ("cd /tmp && zip pack.zip f", ["/tmp/pack.zip"]),
+    ("zip -O /tmp/new.zip old.zip", ["/tmp/new.zip"]),
+    ("tar -czf /tmp/x.tgz d", ["/tmp/x.tgz"]),
+    ("tar czf /tmp/x d", ["/tmp/x"]),
+    ("tar -cf/tmp/x d", ["/tmp/x"]),
+    ("tar -c -f /tmp/x d", ["/tmp/x"]),
+    ("tar -f /tmp/x -c d", ["/tmp/x"]),
+    ("tar --create --file=/tmp/x d", ["/tmp/x"]),
+    ("tar -c --file /tmp/x d", ["/tmp/x"]),
+    ("tar -rf /tmp/x more", ["/tmp/x"]),
+    # A `case` pattern's `)` is not the end of the subshell around it.
+    ("cd /tmp; (case $x in a) echo;; esac; cd /; ) ; echo > o2", ["/tmp/o2"]),
+    # A top-level case's `cd` stays (conditional, but the text says it can happen), nested too.
+    ("case $x in a|b) cd /tmp;; esac; cmd > out.txt", ["/tmp/out.txt"]),
+    ("case $x in a) case $y in b) cd /tmp;; esac;; esac; cmd > out", ["/tmp/out"]),
+    ('case "$x" in\n  a) cd /tmp ;;\n  *) true ;;\nesac\ncmd > out', ["/tmp/out"]),
+    # RESIDUAL (a false hold): the shared substitution lifter ends the `$(` at the pattern's `)`, so the
+    # `cd` is read in the outer block. A fix to the lifter flips this row, deliberately.
+    ("x=$(case $y in a) cd /tmp;; esac); cmd > out", ["/tmp/out"]),
 ]
 
 PASSED = [
@@ -131,6 +177,37 @@ PASSED = [
     '(OUT=/tmp/x.txt); cmd > "$OUT"',
     "cmd > /tmp/*.txt",
     "cmd > ~/out.txt",
+    # wget's `-` is stdout, glued or not; a name the URL chooses is a residual.
+    "wget -O- http://x",
+    "cd /tmp && wget -O- http://x",
+    "cd /tmp && wget -O - http://x",
+    "wget --output-document=- http://x",
+    "wget -P /tmp u",
+    "curl -O http://x/a",
+    # A shell's own options; code after `-c` (a residual).
+    "bash -o pipefail script.sh",
+    'bash -c "x" -o /tmp/y',
+    'set -o pipefail; cmd > "$STAGING_DIR/o"',
+    "sh /tmp/run.sh",
+    # zip: an archive the shell names, stdout, a temp-path value, a read mode, a pattern.
+    'zip -r "$STAGING_DIR/a.zip" d',
+    'zip - f > "$STAGING_DIR/a.zip"',
+    "zip -b /tmp out.zip f",
+    "zip -T /tmp/x.zip",
+    "zip -sf /tmp/x.zip",
+    "zip -r out.zip d -x /tmp/y",
+    "unzip -o /tmp/deck.zip -d x",
+    # tar: read modes, stdout, -C (the archive is not relative to it).
+    "tar -xf /tmp/x.tar",
+    "tar xzf /tmp/x.tgz",
+    "tar -tf /tmp/x",
+    'tar -czf - d > "$STAGING_DIR/x"',
+    "tar -C /tmp -czf out.tgz d",
+    # A `case` inside a subshell: its pattern `)` does not end the subshell early, and its `cd` ends with it.
+    "(case $x in a) true;; esac; cd /tmp); echo hi > out",
+    "(case $x in (a) true;; esac; cd /tmp); echo hi > out",
+    "(case $x in a) cd /tmp;; esac); cmd > out",
+    '(\ncase "$x" in\n  a) cd /tmp ;;\nesac\n)\ncmd > out',
 ]
 
 
@@ -209,6 +286,23 @@ def test_a_started_skills_fixed_tmp_write_is_held_naming_the_path_and_the_fix(tm
     assert reason is not None
     assert reason.startswith("[shared-tmp][/tmp/compose_out.txt] Held:")
     assert "$STAGING_DIR" in reason and "compose_result.json" in reason
+
+
+@pytest.mark.parametrize(
+    ("command", "path"),
+    [
+        ("wget -qO /tmp/page.html https://example.com/p", "/tmp/page.html"),
+        ('bash "$SCRIPTS/export.sh" -o /tmp/export.json', "/tmp/export.json"),
+        ("zip -r /tmp/acme_working_data.zip outputs/", "/tmp/acme_working_data.zip"),
+        ("tar -czf /tmp/acme_working_data.tgz outputs/", "/tmp/acme_working_data.tgz"),
+        ("(case $m in a) echo;; esac; cd /); cd /tmp; cmd > notes.txt", "/tmp/notes.txt"),
+    ],
+    ids=["wget", "script-args", "zip", "tar", "case"],
+)
+def test_each_new_write_class_reaches_the_deny(tmp_path: Path, command: str, path: str) -> None:
+    """Not only `hits`: the hold is the decision the runtime receives, with the path's marker."""
+    reason = _held(CHECK.decide(_payload(tmp_path, _started(), command=command)))
+    assert reason is not None and reason.startswith(f"[shared-tmp][{path}] Held:")
 
 
 def test_several_paths_are_held_together_each_with_its_own_marker(tmp_path: Path) -> None:

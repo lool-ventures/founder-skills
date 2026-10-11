@@ -15,21 +15,29 @@ WHAT IS HELD. A write, read from the command's own text, whose target is a fixed
 exactly /tmp, /private/tmp or /var/tmp: an output redirect (`>`, `>>`, `>|`, `&>`, `N>`, `>& FILE`),
 `tee`, `dd of=`, `truncate`, `sed -i`, the destination of `cp`/`mv`/`install`/`rsync`/`ln` (`-t DIR`
 too, and a bare /tmp destination, which writes the source's name there), and any command's
-`-o`/`--output`/`--out` value, except for the commands in `_O_NOT_OUTPUT`. A name is fixed when
-nothing in it is left to the shell once the block's own literal assignments are filled in;
-`${TMPDIR:-/tmp}` reads as /tmp, since TMPDIR is unset in the Cowork VM. A relative target counts after
-an in-block literal `cd /tmp`; a `cd` inside `( ... )` ends with the subshell, and so do its
-assignments. Heredoc bodies are not commands and are skipped; a heredoc this cannot follow leaves every
-line read as commands.
+`-o`/`--output`/`--out` value, except for the commands in `_O_NOT_OUTPUT`. Also: wget's document
+(`-O`, `-qO`, `--output-document`) and log (`-o`, `-a`, `--output-file`, `--append-output`), `-` being
+stdout; a script's own `-o`/`--output` after `bash X` / `sh X` (the shell's own `-o pipefail` before
+the script is not a file); zip's archive (its first operand; not under `-T`/`-sf`, which read it) and
+its `-O`; tar's archive (`-f X`, `-czf X`, `--file=X`, the dashless `tar czf X`) when a create or append
+mode is given. A name is fixed when nothing in it is left to the shell once the block's own literal
+assignments are filled in; `${TMPDIR:-/tmp}` reads as /tmp, since TMPDIR is unset in the Cowork VM. A
+relative target counts after an in-block literal `cd /tmp`; a `cd` inside `( ... )` ends with the
+subshell, and so do its assignments; a `case` pattern's `)` is not a subshell's end. Heredoc bodies are
+not commands and are skipped; a heredoc this cannot follow leaves every line read as commands.
 
 WHAT IS NOT. A name with anything still to expand (`$STAGING_DIR/x`, bare `$TMPDIR/x`, `$(mktemp)`,
 `/tmp/out_$$.txt`), a path below a folder in /tmp (`/tmp/<dir>/<file>`), /dev, every read, a copy or
 move OUT of /tmp, a path the transcript shows `mktemp` printed (a staging folder pasted as text), and
-code a command runs (`bash -c "..."`, `python3 -c "open(...)"`): KNOWN RESIDUALS, with a fixed folder
-under /tmp, a name assigned in an earlier shell call, a `cd` to a folder it cannot read, and writes this
-does not model: `tar -czf /tmp/x`, `touch /tmp/flag`, `python3 -m json.tool in /tmp/out`, and
-`pushd /tmp && cmd > out` (only `cd` moves the folder). Each is a miss, bounded like a false hold by
-nothing but the budget below.
+code a command runs (`bash -c "..."`, `python3 -c "open(...)"`, and the words after it, `bash -c "x" -o
+/tmp/y`): KNOWN RESIDUALS, with a fixed folder under /tmp, a name assigned in an earlier shell call, a
+`cd` to a folder it cannot read, and writes this does not model: a name the server or URL chooses
+(`curl -O`, `curl --remote-name`, `wget -P /tmp`, `--directory-prefix`), tar's archive named only by the
+`TAPE` variable or with its mode in a later word after an old-style `f` cluster, `touch /tmp/flag`,
+`python3 -m json.tool in /tmp/out`, and `pushd /tmp && cmd > out` (only `cd` moves the folder). Each is a
+miss, bounded like a false hold by nothing but the budget below. One residual in the other direction: a
+`case` inside `$( ... )` (`x=$(case $y in a) cd /tmp;; esac); cmd > out`), whose pattern `)` the shared
+substitution lifter reads as the end of the `$(`, so the `cd` is read in the outer block: a false hold.
 
 WHY `-o` IS AN OUTPUT UNLESS THE COMMAND IS LISTED. `-o` writes a file for curl, sort, gcc, pandoc and
 our own scripts (`compose_report.py -o`, read through the interpreter as `python3 X.py -o`), and for
@@ -39,7 +47,7 @@ exists for, while a false hold costs one retry and ends after the budget. So the
 commands whose `-o` is a switch (unzip's overwrite, grep's only-matching, ls, tar, zip, cpio, xargs,
 od, find's or) or takes a value that is not a file it writes (ps's format, ssh/scp/sftp's option,
 mount's options, a shell's `set -o`). Every false hold seen so far is in it; one found later is added
-there.
+there. A switch `-o` is not the command's only write: zip's and tar's archives are read separately.
 
 SCOPE. Only a founder-skills run: the transcript's main thread started one of the six analysis skills
 (a `Skill` call or a typed `<command-name>`; text a tool returned does not count), or the command runs
@@ -100,6 +108,39 @@ _VALUE_FLAGS = {
 }
 _OTHER_BREAKS = re.compile("[\r\v\f\x1c\x1d\x1e\x85  ]")
 
+_SHELLS = frozenset({"bash", "sh", "dash", "zsh"})
+# wget's short options that take a value: in a cluster (`-qO X`) the first of them takes the rest.
+_WGET_VALUE = frozenset("eoaiBtTwOPUlQARDXI")
+_WGET_WRITES = frozenset("Ooa")  # -O the document, -o / -a the log
+_WGET_LONG = ("--output-document", "--output-file", "--append-output")
+# zip's options whose next word is a value, not the archive.
+_ZIP_VALUE = frozenset(
+    {
+        "-b",
+        "-n",
+        "-t",
+        "-tt",
+        "-P",
+        "-Z",
+        "-s",
+        "-ds",
+        "-lf",
+        "--temp-path",
+        "--suffixes",
+        "--from-date",
+        "--before-date",
+        "--password",
+        "--compression-method",
+        "--split-size",
+        "--logfile-path",
+    }
+)
+_ZIP_READ = frozenset({"-T", "--test", "-sf", "-sf-", "--show-files"})  # read the archive, never write it
+# tar's short options that take a value: in a cluster the first of them takes the rest (or the next word).
+_TAR_VALUE = frozenset("bCfFgHIKLNTVX")
+_TAR_MODES = frozenset("cruA")  # create / append / update / concatenate write the archive
+_TAR_LONG_MODES = frozenset({"--create", "--append", "--update", "--catenate", "--concatenate"})
+
 _HERE = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -142,6 +183,10 @@ class _Block:
         self.dirs: set[str] = set()  # paths the block uses as a folder (`mkdir X`, `X/...`)
         self.words: list[str] = []  # every word, expanded where it can be
         self.saved: list[tuple[str | None, dict[str, str]]] = []  # (cwd, env) at each open `(`
+        # Each open `case`, as the subshell depth it opened at, and whether a pattern is due: a pattern's
+        # `)` (and its optional leading `(`) is not a subshell. Kept across lines: `scan` reads one at a time.
+        self.case_bases: list[int] = []
+        self.case_pending = False
 
     def fill(self, word: str) -> str:
         word = _TMPDIR_DEFAULT_RE.sub(lambda m: m.group(1), word)
@@ -196,7 +241,15 @@ class _Block:
                 self.targets.append(p)
 
     def _command_targets(self, name: str, args: list[str]) -> list[str]:
+        if name in _SHELLS:
+            return _script_targets(self, args)
         out: list[str] = []
+        if name == "wget":
+            out += _wget_targets(args)
+        elif name == "zip":
+            out += _zip_targets(args)
+        elif name == "tar":
+            out += _tar_targets(args)
         operands: list[str] = []
         target_dir: str | None = None
         skip = False
@@ -247,6 +300,17 @@ class _Block:
                     out.append(dest)
         return out
 
+    def _case_words(self, words: list[str]) -> None:
+        """The segment a cut closes opens a `case` (its patterns follow) or ends one (`esac`)."""
+        head = [w for w in words if not _ASSIGN_RE.match(w) and w not in _LEADERS]
+        if head and head[0] == "case" and "in" in head:
+            self.case_bases.append(len(self.saved))
+            self.case_pending = True
+        elif head and head[0] == "esac":
+            if self.case_bases:
+                self.case_bases.pop()
+            self.case_pending = False
+
     def read(self, text: str) -> None:
         """Walk one command: its segments, assignments, folder changes and writes, in order."""
         tokens = _tokens(text)
@@ -260,11 +324,22 @@ class _Block:
             n += 1
             if tok in _CUTS or (tok and set(tok) <= set("();|&")):
                 # shlex glues punctuation (`);`, `((`): every character of such a token is a cut
+                self._case_words(words)
                 self.segment(words, writes)
                 words, writes = [], []
-                for ch in tok:
-                    if ch == "(":
+                j = 0
+                while j < len(tok):
+                    if tok[j : j + 2] in (";;", ";&"):
+                        self.case_pending = bool(self.case_bases)  # the next pattern begins
+                        j += 2
+                        continue
+                    ch = tok[j]
+                    j += 1
+                    at_pattern = self.case_pending and bool(self.case_bases) and len(self.saved) == self.case_bases[-1]
+                    if ch == "(" and not at_pattern:
                         self.saved.append((self.cwd, dict(self.env)))
+                    elif ch == ")" and at_pattern:
+                        self.case_pending = False  # a `case` pattern's `)`: no subshell ends here
                     elif ch == ")" and self.saved:  # a subshell's `cd` and assignments end with it
                         self.cwd, self.env = self.saved.pop()
                 continue
@@ -277,6 +352,136 @@ class _Block:
                     words.pop()
                 continue
             words.append(tok)
+
+
+def _cluster_value(args: list[str], i: int, letters: frozenset[str]) -> tuple[str | None, str | None, bool]:
+    """In the short-option cluster `args[i]`: the first letter that takes a value, that value (the rest of
+    the cluster, else the next word), and whether the next word was used."""
+    a = args[i]
+    for k in range(1, len(a)):
+        if a[k] in letters:
+            rest = a[k + 1 :]
+            if rest:
+                return a[k], rest, False
+            return a[k], (args[i + 1] if i + 1 < len(args) else None), i + 1 < len(args)
+    return None, None, False
+
+
+def _wget_targets(args: list[str]) -> list[str]:
+    """wget's document (`-O`, `--output-document`) and its log (`-o`, `-a` and their long forms). `-` is
+    stdout. The generic loop reads `-o X` too; `hits` drops the duplicate."""
+    out: list[str] = []
+    i = 0
+    while i < len(args):
+        a = args[i]
+        value: str | None = None
+        used = False
+        if a == "--":
+            break
+        if a.startswith(_WGET_LONG):
+            flag, eq, rest = a.partition("=")
+            if flag in _WGET_LONG:
+                if eq:
+                    value = rest
+                elif i + 1 < len(args) and not args[i + 1].startswith("-"):
+                    value, used = args[i + 1], True
+        elif a.startswith("-") and not a.startswith("--") and len(a) > 1:
+            letter, value, used = _cluster_value(args, i, _WGET_VALUE)
+            if used and value is not None and value.startswith("-"):
+                value, used = None, False  # `-O -` (stdout) or `-O -q`: no file named
+            if letter not in _WGET_WRITES:
+                value = None  # another option's value (`-t 3`), skipped
+        if value and value != "-":
+            out.append(value)
+        i += 2 if used else 1
+    return out
+
+
+def _script_targets(block: _Block, args: list[str]) -> list[str]:
+    """A shell's own options name no file it writes (`bash -o pipefail`); the words after its script
+    operand are the script's, and its `-o` / `--output` are read as any command's, under a fixed neutral
+    name so a script called `zip` does not inherit zip's switch. `-c` or `-s` before the operand: what
+    follows is code or positional parameters (inline code is a residual). Accepted edge: `bash -O extglob
+    x.sh -o F` reads `extglob` as the operand, and `x.sh -o F` is then the rest: the same outcome."""
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a == "--":
+            i += 1
+            break
+        if a in ("-o", "+o", "--rcfile", "--init-file"):
+            i += 2
+            continue
+        if a.startswith(("-", "+")) and len(a) > 1:
+            if not a.startswith("--") and ("c" in a[1:] or "s" in a[1:]):
+                return []
+            i += 1
+            continue
+        break
+    return block._command_targets("script", args[i + 1 :]) if i < len(args) else []
+
+
+def _zip_targets(args: list[str]) -> list[str]:
+    """zip's archive (its first operand after options; `-` is stdout) and `-O` / `--output-file`'s value.
+    The archive is not counted when a read mode (`-T`, `-sf`) is given. zip's `-o` stays a switch."""
+    out: list[str] = []
+    read_mode = any(a in _ZIP_READ for a in args)
+    archive_seen = False
+    i = 0
+    while i < len(args):
+        a = args[i]
+        nxt = args[i + 1] if i + 1 < len(args) else None
+        if a in ("-x", "-i", "--exclude", "--include"):
+            break  # patterns follow; they come after the archive in practice
+        if a in ("-O", "--output-file") and nxt is not None:
+            if nxt != "-":
+                out.append(nxt)
+            i += 2
+            continue
+        if a in _ZIP_VALUE and nxt is not None:
+            i += 2
+            continue
+        if a.startswith("--output-file="):
+            out.append(a.split("=", 1)[1])
+        elif not (a.startswith("-") and a != "-") and not archive_seen:
+            archive_seen = True
+            if a != "-" and not read_mode:
+                out.append(a)
+        i += 1
+    return out
+
+
+def _tar_targets(args: list[str]) -> list[str]:
+    """tar's archive when a create or append mode is given anywhere: `-f X`, `-cfX`, `-czf X`, `--file[=]X`,
+    and the old dashless form `tar czf X` (first word). `-f -` is stdout; `-x` / `-t` read the archive."""
+    archive: str | None = None
+    mode = False
+    i = 0
+    while i < len(args):
+        a = args[i]
+        used = False
+        if a in _TAR_LONG_MODES:
+            mode = True
+        elif a.startswith("--file="):
+            archive = a.split("=", 1)[1]
+        elif a == "--file" and i + 1 < len(args):
+            archive, used = args[i + 1], True
+        elif a.startswith("-") and not a.startswith("--") and len(a) > 1:
+            letter, value, used = _cluster_value(args, i, _TAR_VALUE)
+            stop = a.index(letter) if letter else len(a)
+            mode = mode or any(ch in _TAR_MODES for ch in a[1:stop])
+            if letter == "f":
+                archive = value
+        elif i == 0 and re.fullmatch(r"[A-Za-z]+", a) and "f" in a:
+            # the old form: each value letter takes the next word, in order
+            mode = mode or any(ch in _TAR_MODES for ch in a)
+            values = [ch for ch in a if ch in _TAR_VALUE]
+            k = values.index("f")
+            archive = args[1 + k] if 1 + k < len(args) else None
+            i = 1 + len(values)
+            continue
+        i += 2 if used else 1
+    return [archive] if mode and archive and archive != "-" else []
 
 
 def scan(command: str, dp: Any) -> _Block:
