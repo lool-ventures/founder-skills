@@ -319,17 +319,35 @@ def _all_artifacts_on(rd: Path, rid: str) -> None:
 def _producer(script: str, rd: Path, run_id: str) -> tuple[Any, Path]:
     """(the call, its -o target) for each producer the guard is pinned on."""
     out = {"cap_state.py": "cap_state.out.json", "compose_report.py": "report.json", "visualize.py": "report.html",
-           "explore.py": "explorer.html"}[script]  # fmt: skip
+           "explore.py": "explorer.html", "sweep.py": "sweep.json", "detect_structure.py": "structure.json",
+           "write_coverage_disclosure.py": "coverage_disclosure.json",
+           "cap_state_after_round.py": "cap_state_after_round.json"}[script]  # fmt: skip
+    pair = ["--inputs", str(rd / "inputs.json"), "--instruments", str(rd / "instruments.json")]
     args = {
-        "cap_state.py": ["--inputs", str(rd / "inputs.json"), "--instruments", str(rd / "instruments.json")],
+        "cap_state.py": pair,
         "compose_report.py": ["--dir", str(rd), "--write-md", str(rd / "report.md")],
         "visualize.py": ["--dir", str(rd)],
         "explore.py": ["--dir", str(rd)],
-    }[script]
-    return ct(script, *args, "-o", str(rd / out), "--run-id", run_id), rd / out
+        "sweep.py": ["--dir", str(rd)],
+        "detect_structure.py": pair,
+        "write_coverage_disclosure.py": [],
+        "cap_state_after_round.py": ["--cap-state", str(rd / "cap_state.json"), "--scenarios",
+                                     str(rd / "scenarios.json"), "--scenario-id", "base"],
+    }[script]  # fmt: skip
+    hand_roll = {"schema_version": "v0.1-coverage-disclosure", "covered": False,
+                 "computation_method": "manual_outside_pipeline", "uncovered_parts": ["warrant_conversion"],
+                 "counsel_review": True}  # fmt: skip
+    stdin = json.dumps(hand_roll) if script == "write_coverage_disclosure.py" else None
+    return ct(script, *args, "-o", str(rd / out), "--run-id", run_id, stdin=stdin), rd / out
 
 
-@pytest.mark.parametrize("script", ["cap_state.py", "compose_report.py", "visualize.py", "explore.py"])
+# Every cap-table script that takes a --run-id: the producers, the two pages, and the four that open no ledger
+# (their own artifacts would otherwise be stamped with the wrong run).
+GUARDED = ["cap_state.py", "compose_report.py", "visualize.py", "explore.py", "sweep.py", "detect_structure.py",
+           "write_coverage_disclosure.py", "cap_state_after_round.py"]  # fmt: skip
+
+
+@pytest.mark.parametrize("script", GUARDED)
 @pytest.mark.parametrize("wrong", [FOREIGN, "fixture-run", "not a run id"], ids=["foreign", "fixture", "malformed"])
 def test_a_run_id_not_bound_in_a_bound_review_dir_is_refused(tmp_path: Path, script: str, wrong: str) -> None:
     root, rid, rd = h.start_bound(tmp_path, CT)
@@ -340,14 +358,37 @@ def test_a_run_id_not_bound_in_a_bound_review_dir_is_refused(tmp_path: Path, scr
     assert lever.returncode == 10, lever.stdout + lever.stderr
     _all_artifacts_on(rd, wrong if wrong != "not a run id" else FOREIGN)
     before = h.status_path(root, rid).read_bytes()
+    files_before = {p.name for p in rd.iterdir()}
     proc, out = _producer(script, rd, wrong)
     assert proc.returncode == 1, proc.stdout + proc.stderr
     body = _out(proc)
     assert body["code"] == "RUN_NOT_BOUND" and rid in body["message"]
-    assert "nothing was written" in proc.stderr
+    assert "no artifact was written" in proc.stderr
     assert not out.exists() and not (rd / "report.md").exists()
     assert h.status_path(root, rid).read_bytes() == before
     assert not list((root / "runs").glob(f"{wrong}*"))
+    new = {p.name for p in rd.iterdir()} - files_before
+    if script == "compose_report.py":
+        # compose records every exit, this refusal included, stamped with the id it was given (not a deliverable).
+        assert new == {"compose_result.json"}
+        rec = json.loads((rd / "compose_result.json").read_text(encoding="utf-8"))
+        assert (rec["exit_code"], rec["code"], rec["run_id"]) == (1, "RUN_NOT_BOUND", wrong)
+    else:
+        assert new == set()
+
+
+@pytest.mark.parametrize("script", ["sweep.py", "detect_structure.py", "write_coverage_disclosure.py",
+                                    "cap_state_after_round.py"])  # fmt: skip
+def test_the_ledgerless_run_id_takers_pass_the_bound_id_and_an_unbound_dir(tmp_path: Path, script: str) -> None:
+    """The four open no ledger: the bound id writes as before, and an unbound dir takes any id as before."""
+    _root, rid, rd = h.start_bound(tmp_path / "bound", CT)
+    _all_artifacts_on(rd, rid)
+    proc, out = _producer(script, rd, rid)
+    assert proc.returncode == 0 and out.is_file(), proc.stdout + proc.stderr
+    plain = tmp_path / "plain"
+    _all_artifacts_on(plain, "fixture-run")
+    proc, out = _producer(script, plain, FOREIGN)
+    assert proc.returncode == 0 and out.is_file(), proc.stdout + proc.stderr
 
 
 def test_the_bound_runs_own_id_still_reaches_its_gates(tmp_path: Path) -> None:

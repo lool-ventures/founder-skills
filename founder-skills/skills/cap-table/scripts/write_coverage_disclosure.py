@@ -145,6 +145,11 @@ def main() -> None:
     ap.add_argument("--pretty", action="store_true")
     ap.add_argument("--input", default="-", help="Input JSON file, or '-' for stdin (default)")
     args = ap.parse_args()
+    if args.output:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import _ct_gates
+
+        _ct_gates.refuse_unbound_run_id(_ct_gates.run_dir_of(args.output), args.run_id)
     indent = 2 if args.pretty else None
 
     raw = sys.stdin.read() if args.input == "-" else pathlib.Path(args.input).read_text(encoding="utf-8")

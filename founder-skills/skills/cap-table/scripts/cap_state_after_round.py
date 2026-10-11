@@ -167,6 +167,9 @@ def _cli() -> int:
     p.add_argument("-o", "--output", required=True)
     p.add_argument("--pretty", action="store_true")
     args = p.parse_args()
+    import _ct_gates
+
+    _ct_gates.refuse_unbound_run_id(_ct_gates.run_dir_of(args.output), args.run_id)
 
     with open(args.cap_state, encoding="utf-8") as f:
         cap_state = json.load(f)

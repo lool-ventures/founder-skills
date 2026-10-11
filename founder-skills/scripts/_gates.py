@@ -5572,7 +5572,8 @@ CLI_CODES = {
     # ic-sim's compose: a simulation dir that belongs to a run, whose files do not agree on which.
     "ic_producers": ["RUN_ID_REQUIRED"],
     # cap-table's producers (and its two pages): a call into a bound review dir with no (or an empty) --run-id,
-    # or with a --run-id not bound there while the dir carries another run's (exit 1, nothing written).
+    # or with a --run-id not bound there while the dir carries another run's (exit 1, no artifact written; compose
+    # still leaves its compose_result.json record of the refusal, stamped with the refused id).
     "ct_producers": ["RUN_ID_REQUIRED", "RUN_NOT_BOUND"],
     # insert_coaching.py (exit 1, stdout `{"status": "blocked", "code", "reason", "fix"}`, nothing written): -o
     # onto a file it reads or a non-receipt; in a bound dir, no --verify-artifact or the artifacts' run not bound

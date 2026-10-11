@@ -155,6 +155,9 @@ def main() -> int:
     ap.add_argument("--steps", type=int, default=DEFAULT_STEPS)
     ap.add_argument("--pretty", action="store_true")
     args = ap.parse_args()
+    import _ct_gates
+
+    _ct_gates.refuse_unbound_run_id(args.dir, args.run_id)
 
     def _read(name: str) -> Any:
         with open(os.path.join(args.dir, name), encoding="utf-8") as f:

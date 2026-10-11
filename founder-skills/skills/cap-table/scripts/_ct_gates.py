@@ -85,10 +85,12 @@ def _bound_run_ids(run_dir: str) -> list[str]:
 
 def refuse_unbound_run_id(run_dir: str, run_id: str | None) -> None:
     """A non-empty `--run-id` with no `run_ref.json` in a review dir that carries another run's: exit 1
-    `RUN_NOT_BOUND`, nothing written. Otherwise the id has no ledger here, so every gate check would be skipped
-    in silence and the step would write under the wrong run (a stale id typed after a compaction, or one copied
-    from an earlier run's file). The insert's own rule. Residual: a dir carrying two refs (a later run bound
-    into an earlier run's folder) accepts either id, since each has its ref there."""
+    `RUN_NOT_BOUND`, and no artifact is written (compose still leaves its own `compose_result.json`, the record of
+    this refusal, stamped with the refused id, as it records every exit). Otherwise the id has no ledger here,
+    so every gate check would be skipped in silence and the step would write under the wrong run (a stale id
+    typed after a compaction, or one copied from an earlier run's file). The insert's own rule. Residual: a dir
+    carrying two refs (a later run bound into an earlier run's folder) accepts either id, since each has its ref
+    there."""
     if not run_id:
         return
     bound = _bound_run_ids(run_dir)
@@ -99,7 +101,7 @@ def refuse_unbound_run_id(run_dir: str, run_id: str | None) -> None:
         "that run's id (the run_id Step 0 printed), or start a new run for a new review"
     )
     sys.stdout.write(json.dumps({"status": "rejected", "code": "RUN_NOT_BOUND", "message": message}) + "\n")
-    print(f"Error: {message}; nothing was written", file=sys.stderr)
+    print(f"Error: {message}; no artifact was written", file=sys.stderr)
     sys.exit(1)
 
 

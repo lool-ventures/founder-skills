@@ -1752,6 +1752,8 @@ def main() -> int:
     )
     p.add_argument("--pretty", action="store_true", help="Indent the JSON receipt printed to stdout")
     args = p.parse_args()
+    if args.run_id is not None:
+        _ct_gates_module().refuse_unbound_run_id(args.dir, args.run_id)  # before any rendering work
 
     def _read(name: str) -> dict[str, Any]:
         with open(os.path.join(args.dir, name), encoding="utf-8") as f:
@@ -1777,7 +1779,6 @@ def main() -> int:
         sweep=sweep,
     )
     if args.run_id is not None:
-        _ct_gates_module().refuse_unbound_run_id(args.dir, args.run_id)
         html_out = _run_ref_module().page_for_run(html_out, args.run_id, _own_run_id(args.dir))
     out = os.path.abspath(args.output)
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
