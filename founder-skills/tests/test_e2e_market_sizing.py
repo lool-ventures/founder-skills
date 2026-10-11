@@ -63,6 +63,94 @@ SCRIPTS = PLUGIN_PATH / "skills" / "market-sizing" / "scripts"
 
 _HANDOVER_CHECK = PLUGIN_PATH / "scripts" / "_handover_check.py"
 
+# --- the sizing dispatches: one each, or one sanctioned comparison redo per run ---------------------------
+#
+# A "both" run whose builds disagree by more than 30% may redo ONE build once (dispatch_prompt.py --redo
+# comparison). The lane does not provoke it; it accounts for it when the model takes it. A second dispatch of
+# a build passes only when its comparand (what the dispatch hook held it to) is the redo prompt and the first
+# one's was not, the sub-agent received it, the run's record names that build, the report says the sizing used
+# it, and the redo's sub-agent opened none of the files the prompt rules out. A second dispatch whose
+# comparand is the plain prompt is the observed failure (a hand-written repair rewritten back), and fails.
+
+REDO_LEAD = "COMPARISON REDO:"  # dispatch_prompt.REDO_LEAD; test_lane_sizing_redo_checks.py holds them equal
+SIZING_CONTEXTS = {
+    "CONTEXT: TOP_DOWN_METHODOLOGY": ("top_down", "top_down_output.json", "bottom_up_output.json"),
+    "CONTEXT: BOTTOM_UP_METHODOLOGY": ("bottom_up", "bottom_up_output.json", "top_down_output.json"),
+}
+# What the redo's sub-agent may not open: the sizing (both builds' figures), the record, the other build.
+_REDO_FORBIDDEN = ("sizing.json", "sizing_redo.json")
+
+
+def _call_target(call: dict[str, Any]) -> str:
+    inp = call.get("input") or {}
+    return " ".join(str(inp[k]) for k in ("file_path", "path", "pattern", "glob") if inp.get(k))
+
+
+def sizing_redo_problems(
+    cap: Any,
+    sizing: list[dict[str, Any]],
+    sizing_report: dict[str, Any],
+    review_dir: Path,
+    run_id: str,
+    report: dict[str, Any],
+    ledger: dict[str, Any] | None,
+    comparand: Any = None,
+) -> list[str]:
+    """Every way the sizing dispatches break the one-redo rule; [] when they keep it. `comparand(cap, d)` is
+    the hook's comparand for a dispatch (default: `printed_prompt_for`)."""
+    comparand = comparand or _e2e_harness.printed_prompt_for
+    held = (ledger or {}).get("sizing_redo")
+    record = held if isinstance(held, dict) and held.get("run_id") == run_id else None
+    if record is None:
+        try:
+            on_disk = json.loads((review_dir / "sizing_redo.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            on_disk = None
+        record = on_disk if isinstance(on_disk, dict) and on_disk.get("run_id") == run_id else None
+    problems: list[str] = []
+    redos = 0
+    for context, (build, own, other) in SIZING_CONTEXTS.items():
+        went = [
+            (d, row)
+            for d, row in zip(sizing, sizing_report["dispatches"], strict=True)
+            if row["status"] == "succeeded" and dispatch_context(d["input"].get("prompt", "")) == context
+        ]
+        if len(went) == 1:
+            continue
+        if len(went) != 2:
+            problems.append(f"{context}: {len(went)} dispatches went through, expected one, or two with a redo")
+            continue
+        (first, _), (second, row) = went
+        try:
+            texts = [str(comparand(cap, first)), str(comparand(cap, second))]
+        except LookupError as exc:
+            problems.append(f"{context}: no comparand for a dispatch: {exc}")
+            continue
+        if REDO_LEAD in texts[0] or REDO_LEAD not in texts[1]:
+            problems.append(
+                f"{context}: a second dispatch whose comparand is not the comparison redo (a repair the hook "
+                "rewrote back to the plain prompt, or a re-roll)"
+            )
+            continue
+        redos += 1
+        if row.get("received_matches") is not True:
+            problems.append(f"{context}: the redo's sub-agent did not receive the printed redo")
+        if record is None or record.get("build") != build:
+            problems.append(f"{context}: a redo went out with no record of it for this run naming {build}")
+        for name in ("Read", "Glob", "Grep"):
+            for call in cap.calls(name, parent=second["id"]):
+                target = _call_target(call)
+                if name != "Read" or any(f in target for f in (*_REDO_FORBIDDEN, other)):
+                    problems.append(f"{context}: the redo's sub-agent ran {name} on {target!r}")
+                elif "_output.json" in target and not target.endswith(own):
+                    problems.append(f"{context}: the redo's sub-agent read another hand-off, {target!r}")
+    if redos > 1:
+        problems.append(f"{redos} comparison redos in one run; the budget is one")
+    if redos and (report.get("sizing_redo") or {}).get("outcome") in (None, "not_run"):
+        problems.append(f"a redo went out but the report says {report.get('sizing_redo')!r}")
+    return problems
+
+
 # The host's lines, appended to the prompt the way an unattended host answers up front. The methodology is
 # answered with a note the run cannot invent (a default carries none); the two-figures line answers every
 # input the founder's materials state more than one figure for -- the attached deck states three prices
@@ -420,13 +508,10 @@ def test_market_sizing_smoke(tmp_path: Path) -> None:
     assert sizing, "neither sizing build was dispatched"
     assert_dispatch_outcomes(sizing_report, "SIZING")
     assert_received_prompt(sizing_report, "SIZING")
-    for context in ("CONTEXT: TOP_DOWN_METHODOLOGY", "CONTEXT: BOTTOM_UP_METHODOLOGY"):
-        went = [
-            d
-            for d, row in zip(sizing, sizing_report["dispatches"], strict=True)
-            if row["status"] == "succeeded" and dispatch_context(d["input"].get("prompt", "")) == context
-        ]
-        assert len(went) == 1, f"{context}: {len(went)} dispatches went through, expected one:\n{sizing_text}"
+    redo_problems = sizing_redo_problems(
+        cap, sizing, sizing_report, review_dir, run_id, report, read_run_ledger(workdir, run_id)
+    )
+    assert not redo_problems, "\n".join(redo_problems) + f"\n{sizing_text}"
     for marker in ("[asked-gate-check][", "[two-figures-check]["):
         held = question_holds(cap, marker)
         assert not held, f"{marker} held {held} although the request answered its question"
