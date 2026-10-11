@@ -23,6 +23,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import compose_invocations as ci  # noqa: E402
+import gate_run_helpers as h  # noqa: E402
 import no_ledger_goldens as goldens  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -117,8 +118,9 @@ def _insert_block(skill: str) -> list[str]:
     return names
 
 
-def _composed_for_insert(skill: str, root: Path) -> tuple[Path, list[str], str | None]:
-    """(run dir, extra insert args, stdin) for a composed fixture ready for the SKILL.md's insert."""
+def _composed_for_insert(skill: str, root: Path, cap_run_id: str = "fixture-run") -> tuple[Path, list[str], str | None]:
+    """(run dir, extra insert args, stdin) for a composed fixture ready for the SKILL.md's insert. cap-table's
+    fixture is restamped to `cap_run_id` first when that is not its own."""
     run_dir = root / "run"
     run_dir.mkdir()
     if skill != "cap-table":
@@ -130,9 +132,14 @@ def _composed_for_insert(skill: str, root: Path) -> tuple[Path, list[str], str |
     for f in (FIXTURES / "cap-table").iterdir():
         if f.is_file():
             shutil.copy(f, run_dir / f.name)
+            if cap_run_id != "fixture-run" and f.suffix == ".json":
+                doc = json.loads(f.read_text(encoding="utf-8"))
+                assert doc["metadata"]["run_id"] == "fixture-run"  # replaced, never added
+                doc["metadata"]["run_id"] = cap_run_id
+                (run_dir / f.name).write_text(json.dumps(doc), encoding="utf-8")
     scripts = SKILLS / "cap-table" / "scripts"
     run = [sys.executable, str(scripts / "compose_report.py"), "--dir", str(run_dir)]
-    run += ["-o", str(run_dir / "report.json"), "--write-md", str(run_dir / "report.md"), "--run-id", "fixture-run"]
+    run += ["-o", str(run_dir / "report.json"), "--write-md", str(run_dir / "report.md"), "--run-id", cap_run_id]
     proc = subprocess.run(run, capture_output=True, text=True)
     assert proc.returncode == 0, proc.stderr
     (run_dir / "coaching.md").write_text("Lead with the round's size; the rest follows from it.\n", encoding="utf-8")
@@ -179,6 +186,90 @@ def test_a_report_json_stamped_for_another_run_is_refused(skill: str, tmp_path: 
     assert proc.returncode == 1, (proc.stdout, proc.stderr)
     assert json.loads(proc.stdout)["code"] == "RUN_ID_MISMATCH"
     assert {n: (run_dir / n).read_bytes() for n in before} == before
+
+
+# --- the same insert, in a bound dir ----------------------------------------------------------------------------------
+# The insert's run checks are skill-agnostic, but what each SKILL.md passes is not: the artifact names, whether a real
+# compose stamps `metadata.run_id` on each of them, and (cap-table) the check-record declaration. Composed unbound
+# (a bound compose would wait on each skill's questions, which the per-skill gate files answer), then bound.
+
+BOUND_RUN = "20261011T120000Z-c0ffee"
+OTHER_RUN = "20261011T000000Z-aaaaaa"
+
+
+def _bound_for_insert(skill: str, tmp: Path) -> tuple[Path, Path, list[str], str | None]:
+    """(artifacts root, run dir, extra insert args, stdin): composed for BOUND_RUN and bound to it."""
+    root = tmp / "artifacts"
+    root.mkdir(parents=True)
+    run_dir, extra, stdin = _composed_for_insert(skill, root, cap_run_id=BOUND_RUN)
+    if skill != "cap-table":
+        for name in _insert_block(skill):
+            doc = json.loads((run_dir / name).read_text(encoding="utf-8"))
+            meta = doc.get("metadata")
+            assert isinstance(meta, dict) and meta.get("run_id"), (skill, name, "compose left no run id")
+            meta["run_id"] = BOUND_RUN  # replaced, never added
+            (run_dir / name).write_text(json.dumps(doc), encoding="utf-8")
+        report = _report(run_dir)
+        report["run_id"] = BOUND_RUN
+        (run_dir / "report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    assert _report(run_dir)["run_id"] == BOUND_RUN
+    assert h.start_ok(root, skill, f"FS_HOST_RUN_ID={BOUND_RUN}\n") == BOUND_RUN
+    proc = h.bind(root, BOUND_RUN, run_dir, "example-co")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    # Lever: the dir is bound, and the run is not complete before the insert.
+    assert (run_dir / "handoff" / BOUND_RUN / "run_ref.json").is_file()
+    assert h.status(root, BOUND_RUN)["status"] == "running"
+    return root, run_dir, extra, stdin
+
+
+def _untouched(root: Path, run_dir: Path) -> tuple[bytes, ...]:
+    return tuple(
+        p.read_bytes() for p in (run_dir / "report.md", run_dir / "report.json", h.status_path(root, BOUND_RUN))
+    )
+
+
+@pytest.mark.parametrize("skill", SKILL_NAMES)
+def test_the_documented_insert_in_a_bound_dir(skill: str, tmp_path: Path) -> None:
+    root, run_dir, extra, stdin = _bound_for_insert(skill, tmp_path / "ok")
+    proc = _insert_as_documented(skill, run_dir, extra, stdin)
+    assert proc.returncode == 0, (proc.stdout, proc.stderr)
+    assert json.loads(proc.stdout)["run_id"] == BOUND_RUN
+    st = h.status(root, BOUND_RUN)
+    assert (st["status"], st["coaching"]) == ("complete", "inserted")  # only the bound path writes this
+
+    # Every listed file restamped to one other well-formed id: that run is not bound here.
+    root, run_dir, extra, stdin = _bound_for_insert(skill, tmp_path / "not-bound")
+    for name in _insert_block(skill):
+        doc = json.loads((run_dir / name).read_text(encoding="utf-8"))
+        doc["metadata"]["run_id"] = OTHER_RUN
+        (run_dir / name).write_text(json.dumps(doc), encoding="utf-8")
+    before = _untouched(root, run_dir)
+    proc = _insert_as_documented(skill, run_dir, extra, stdin)
+    assert proc.returncode == 1 and json.loads(proc.stdout)["code"] == "RUN_NOT_BOUND", proc.stdout
+    assert _untouched(root, run_dir) == before
+
+    # The documented command with every --verify-artifact removed.
+    root, run_dir, extra, stdin = _bound_for_insert(skill, tmp_path / "no-verify")
+    before = _untouched(root, run_dir)
+    argv = [sys.executable, str(INSERT), "--report", str(run_dir / "report.md")]
+    argv += ["--report-json", str(run_dir / "report.json")]
+    argv += ["--marker", _report(run_dir)["coaching_payload"]["insertion_marker"], *extra]
+    proc = subprocess.run(argv, input=stdin, capture_output=True, text=True)
+    assert proc.returncode == 1 and json.loads(proc.stdout)["code"] == "RUN_ID_REQUIRED", proc.stdout
+    assert _untouched(root, run_dir) == before
+
+    # report.json's stamp changed by one character: blocked, with the bound-only status write. For cap-table this
+    # is also the proof that the run check precedes the check-record declaration in a bound dir.
+    root, run_dir, extra, stdin = _bound_for_insert(skill, tmp_path / "mismatch")
+    report = _report(run_dir)
+    report["run_id"] = f"{BOUND_RUN}x"
+    (run_dir / "report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    md_before = (run_dir / "report.md").read_bytes()
+    proc = _insert_as_documented(skill, run_dir, extra, stdin)
+    assert proc.returncode == 1 and json.loads(proc.stdout)["code"] == "RUN_ID_MISMATCH", proc.stdout
+    assert (run_dir / "report.md").read_bytes() == md_before
+    st = h.status(root, BOUND_RUN)
+    assert (st["status"], st["last_error_code"]) == ("running", "COACHING_BLOCKED")
 
 
 # --- the closers ------------------------------------------------------------------------------------------------------
