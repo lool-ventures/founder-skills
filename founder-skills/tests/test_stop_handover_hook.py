@@ -435,7 +435,11 @@ def test_an_errored_compound_call_that_printed_the_hand_over_still_counts(tmp_pa
         _result_for("toolu_close", "[exit 1]\n" + PRINTED + "ls: x: No such file\n", is_error=True, as_string=True),
         _assistant_text(OWN_VERDICT),
     )
-    assert json.loads(_run(tmp_path, rows).stdout)["decision"] == "block"
+    out = json.loads(_run(tmp_path, rows).stdout)
+    # Judged against its printed hand-over, not read as a refused closing call.
+    assert out["decision"] == "block" and PRINTED.rstrip() in out["reason"] and LEAD in out["reason"]
+    rows[-1] = _assistant_text(PRINTED)
+    assert _run(tmp_path, rows).stdout == ""
 
 
 # --- a closing step that refused -----------------------------------------------------------------------------
