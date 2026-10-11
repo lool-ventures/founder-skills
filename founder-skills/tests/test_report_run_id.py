@@ -324,3 +324,23 @@ def test_closers_print_when_either_side_has_no_run_id(skill: str) -> None:
         (root / "report.json").write_text(json.dumps(report), encoding="utf-8")
         proc = subprocess.run(argv, capture_output=True, text=True)
         assert proc.returncode == 0 and proc.stdout.startswith("Here's your finished"), proc.stderr
+
+
+@pytest.mark.parametrize("skill", sorted(_CLOSERS))
+def test_closers_print_when_the_folder_has_no_run_id(skill: str) -> None:
+    """The other side: the report carries its stamp, the folder's artifacts carry none (market-sizing and
+    financial-model-review read inputs.json; competitive-positioning the majority of its required artifacts)."""
+    with tempfile.TemporaryDirectory() as td:
+        root, argv = _closer_dir(skill, Path(td))
+        for path in root.glob("*.json"):
+            if path.name == "report.json":
+                continue
+            doc = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(doc, dict) and isinstance(doc.get("metadata"), dict):
+                doc["metadata"].pop("run_id", None)
+                path.write_text(json.dumps(doc), encoding="utf-8")
+        # Lever: the folder side is now empty and the report side is not, so only the "not compared" branch prints.
+        assert _derived(skill, root) is None
+        assert _report(root)["run_id"]
+        proc = subprocess.run(argv, capture_output=True, text=True)
+        assert proc.returncode == 0 and proc.stdout.startswith("Here's your finished"), proc.stderr

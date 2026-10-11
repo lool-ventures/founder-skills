@@ -823,10 +823,12 @@ def test_the_closer_refuses_a_report_composed_for_another_run(tmp_path: Path) ->
     report["verdict"] = "Example Co leads its map on one axis of two."
     report["run_id"] = "20261001T090000Z-0f0f0f"
     _write(rd / "report.json", report)
+    before = h.status_path(root, rid).read_bytes()
     proc = h.run(SCRIPTS / "cp_closing_message.py", "--report", str(rd / "report.json"), "--link", "path")
     assert proc.returncode == 2 and proc.stdout == "" and "RUN_ID_MISMATCH" in proc.stderr, proc
     assert not (rd / "handover.txt").exists()
     assert h.status(root, rid)["handed_over_at"] is None
+    assert h.status_path(root, rid).read_bytes() == before
 
 
 @pytest.mark.parametrize("script", ["score_moats.py", "score_positioning.py", "checklist.py"])

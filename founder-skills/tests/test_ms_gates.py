@@ -800,10 +800,12 @@ def test_the_closer_refuses_a_report_composed_for_another_run(tmp_path: Path) ->
     assert report["run_id"] == run_id  # the stamp is this run's
     report["run_id"] = "20261001T090000Z-0f0f0f"
     _write(run_dir / "report.json", report)
+    before = h.status_path(root, run_id).read_bytes()
     proc = h.run(MS / "closing_message.py", "--report", str(run_dir / "report.json"), "--link", "path")
     assert proc.returncode == 2 and proc.stdout == "" and "RUN_ID_MISMATCH" in proc.stderr, proc
     assert not (run_dir / "handover.txt").exists()
     assert h.status(root, run_id)["handed_over_at"] is None
+    assert h.status_path(root, run_id).read_bytes() == before
 
 
 # --- skill-local copies -------------------------------------------------------------------------------------
