@@ -1238,6 +1238,12 @@ def main() -> None:
     _stamp_run_id(result, args.run_id)
     out = json.dumps(result, indent=indent) + "\n"
     _write_output(out, args.output, summary={"approach": approach})
+    if args.output and isinstance(result.get("comparison"), dict):
+        # The first sizing that used this run's comparison redo records the gap it produced, once
+        # (_sizing_redo.py). No record, or a redo not yet gated, changes nothing.
+        import _sizing_redo  # noqa: PLC0415
+
+        _sizing_redo.fill_after(os.path.dirname(os.path.abspath(args.output)), args.run_id, result)
 
 
 if __name__ == "__main__":

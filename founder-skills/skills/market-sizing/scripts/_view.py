@@ -1936,3 +1936,95 @@ def checked_multiples(text: str, sizing: Any, inputs: Any = None) -> str:
                     break
         start = sentence_end
     return "".join(out)
+
+
+# --- the comparison redo -----------------------------------------------------------------------------
+#
+# A sizing build the comparison flagged may be done once more per run (dispatch_prompt.py --redo comparison;
+# the record and its residuals are in _sizing_redo.py). Both renderers print the same sentence from here.
+# The gap before comes from the record (written at the print) and the gap after from the record (written by
+# market_sizing.py once, at the first sizing that used the redo), never from the sizing as it now stands.
+
+_BUILD_NAMES = {"top_down": "top-down", "bottom_up": "bottom-up"}
+
+
+def _redo_levels(levels: list[str]) -> str:
+    names = [str(lvl).upper() for lvl in levels]
+    if not names:
+        return ""
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+
+
+def _redo_gap(gap: Any) -> str | None:
+    gap = _as_dict(gap)
+    factor = _params.gap_factor(gap.get("top_down"), gap.get("bottom_up"))
+    if factor is not None:
+        return factor
+    delta = gap.get("delta_pct")
+    return _params.fmt_delta(delta) if isinstance(delta, (int, float)) else None
+
+
+def redo_record(analysis_dir: str, run_id: str | None) -> dict[str, Any] | None:
+    """This run's comparison-redo record, or None (another run's is never returned)."""
+    import _sizing_redo
+
+    record: dict[str, Any] | None = _sizing_redo.load(analysis_dir, run_id)
+    return record
+
+
+def redo_outcome(record: dict[str, Any] | None) -> str | None:
+    """`changed` / `same_inputs` / `not_run` for a record, None with none."""
+    if record is None:
+        return None
+    import _sizing_redo
+
+    out: str = _sizing_redo.outcome(record)
+    return out
+
+
+def redo_sentence(record: dict[str, Any] | None, validation: Any) -> str | None:
+    """The founder-facing account of a redo the sizing used; None when there is none to tell."""
+    outcome = redo_outcome(record)
+    if record is None or outcome not in ("changed", "same_inputs"):
+        return None
+    import _sizing_redo
+
+    build = _BUILD_NAMES.get(str(record.get("build")), "one")
+    levels = [str(x) for x in _as_list(record.get("flagged"))]
+    after = _as_dict(record.get("after"))
+    if outcome == "same_inputs":
+        what = "it chose the same inputs again"
+    else:
+        before_refs = _as_dict(record.get("first_input_refs"))
+        now_refs = _as_dict(after.get("input_refs"))
+        changed = [n for n in now_refs if now_refs.get(n) != before_refs.get(n)]
+        what = "it changed its " + ", ".join(_humanize_param(n) for n in changed) if changed else "its inputs changed"
+    text = (
+        f"The {build} build was done a second time because the two builds' {_redo_levels(levels)} differed by "
+        f"more than 30%; {what}."
+    )
+    before_gaps = _as_dict(record.get("before"))
+    after_gaps = _as_dict(after.get("gaps"))
+    pairs = []
+    for level in levels:
+        b, a = _redo_gap(before_gaps.get(level)), _redo_gap(after_gaps.get(level))
+        if b is not None and a is not None:
+            pairs.append(f"their {level.upper()} differed by {b} before the redo and by {a} after it")
+    if pairs:
+        joined = "; ".join(pairs).replace("their ", "the two builds' ", 1)
+        text += " " + joined[0].upper() + joined[1:] + "."
+    new = _sizing_redo.new_research(record)
+    if new:
+        text += (
+            " The redo used research recorded after the two builds were first made: "
+            + ", ".join(_label(n, validation) for n in new)
+            + "."
+        )
+    return text
+
+
+REDO_NOT_RUN_MESSAGE = (
+    "One of the two builds was ordered to be done a second time because they disagreed by more than 30%, but "
+    "there is no record that the second build reached the figures in this report. The figures shown are the "
+    "ones the sizing used."
+)

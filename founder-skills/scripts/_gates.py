@@ -5552,6 +5552,19 @@ CLI_CODES = {
     # PERIOD_NOT_WRITTEN: the period of a founder's figure was answered but never written into inputs.json.
     # NO_ASK_FOUNDER_DECLINED: compose refuses a review skip saying the founder declined under FS_HOST_NO_ASK.
     "ms_producers": ["RUN_ID_REQUIRED", "PERIOD_NOT_WRITTEN", "NO_ASK_FOUNDER_DECLINED"],
+    # market-sizing's prompt generator, on a sizing build's comparison redo (`--redo comparison`; exit 1, stdout
+    # `{"status": "refused", "code", "message"}`, nothing printed or written), and on a plain sizing print while
+    # that build's redo has not reached the sizing (SIZING_REDO_PENDING).
+    "ms_sizing_redo": [
+        "SIZING_REDO_NO_SIZING",
+        "SIZING_REDO_NOT_FLAGGED",
+        "SIZING_REDO_TOO_LATE",
+        "SIZING_REDO_NO_FIRST_BUILD",
+        "SIZING_REDO_SPENT",
+        "SIZING_REDO_SUSPECT_CHANGED",
+        "SIZING_REDO_PENDING",
+        "RUN_FINISHED",
+    ],
     # competitive-positioning's producers, prompt generator and compose: a call into a bound analysis dir that
     # names no run. NO_ASK_FOUNDER_DECLINED: the skip recorder and compose refuse a review skip saying the
     # founder declined under FS_HOST_NO_ASK.

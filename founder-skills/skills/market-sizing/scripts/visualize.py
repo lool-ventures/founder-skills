@@ -909,7 +909,9 @@ def _chart_tornado(sensitivity: dict[str, Any] | None) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _chart_cross_validation(sizing: dict[str, Any] | None, validation: dict[str, Any] | None = None) -> str:
+def _chart_cross_validation(
+    sizing: dict[str, Any] | None, validation: dict[str, Any] | None = None, redo: str | None = None
+) -> str:
     """Chart 3: Grouped bars comparing TD vs BU for TAM/SAM/SOM."""
     if sizing is None:
         return '<div class="placeholder">No data available</div>'
@@ -1072,6 +1074,9 @@ def _chart_cross_validation(sizing: dict[str, Any] | None, validation: dict[str,
                 + " "
                 + " ".join(shared_details)
             )
+        if redo:
+            # The comparison redo's sentence, from the one owner report.md prints it from (_view.redo_sentence).
+            text = f"{text} {redo}" if text.strip() else redo
         if text.strip():
             note_html = (
                 '<p class="chart-note" style="color:var(--lool-mute);font-size:0.8rem;'
@@ -1689,7 +1694,9 @@ def _compose_html(dir_path: str) -> str:
     )
     key_findings_html = _chart_key_findings(checklist, validation, provenance_data)
     tornado_html = _chart_tornado(sensitivity)
-    cross_val_html = _chart_cross_validation(sizing, _as_dict(validation) or None)
+    cross_val_html = _chart_cross_validation(
+        sizing, _as_dict(validation) or None, _view.redo_sentence(_view.redo_record(dir_path, _rt_run_id), validation)
+    )
     confidence_html = _chart_confidence_donut(validation, sizing)
     checklist_html = _chart_checklist_donut(checklist)
     _upload_display = _upload_names.for_redteam(artifacts.get("redteam.json"))

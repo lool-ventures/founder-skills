@@ -56,6 +56,25 @@ hook reads the transcript for that. The subcommand is the context's name in lowe
 a generator call's context from it. `red_team` likewise waits for the percent-scale question
 (`ms_pct_scale.<input>`), which the review must see answered.
 
+THE COMPARISON REDO (`--redo comparison`, sizing contexts only). On a "both" run whose `sizing.json` carries
+the producer's own gap flag (`comparison.warning`, `sam_warning` or `som_warning`), one build may be done once
+more per run. The prompt is the ordinary sizing prompt plus a block this file writes, before the closing
+line: which levels were flagged, optionally which of the build's own inputs to check first (`--suspect`, a
+closed list), never a figure or which build is higher (a direction is an anchor), and the only files the
+sub-agent may open. The first print writes the record (`_sizing_redo.py`, which states the residuals); a
+reprint is rebuilt from the record, so it is byte-identical and stays the dispatch hook's comparand for the
+same OUTPUT_PATH. It is an option that takes a value on purpose: the dispatch hook reads a generator call's
+context as its first positional argument and steps over every option as taking one. Every refusal prints a
+JSON line on stdout with no context line (a refusal must never become a comparand), a line on stderr, writes
+nothing, and exits 1: SIZING_REDO_NO_SIZING, SIZING_REDO_NOT_FLAGGED, SIZING_REDO_TOO_LATE (a sensitivity,
+checklist or review of this run exists: a change after that is Step 6d's), SIZING_REDO_NO_FIRST_BUILD,
+SIZING_REDO_SPENT (per run: the other build, a redo the sizing already used, or a consumed redo printed
+again with no transport correction), SIZING_REDO_SUSPECT_CHANGED, RUN_FINISHED. A plain sizing print for the
+same build into the same hand-off dir while the redo has not reached the sizing is SIZING_REDO_PENDING: a
+plain print after the redo would make the plain prompt the comparand again, and the redo dispatch would be
+rewritten to it. The first plain sizing print of a run also notes which research figures existed
+(`_sizing_redo.SNAPSHOT_NAME`), so compose can name research recorded after the builds were first made.
+
 Output is deterministic for fixed inputs: sorted listings, no timestamps.
 
 Usage:
@@ -65,15 +84,17 @@ Usage:
                       [--analysis-dir-agent A_AGENT]
     dispatch_prompt.py top_down_methodology|bottom_up_methodology --run-id R --analysis-dir A
                       --handoff-dir D --handoff-agent H [--analysis-dir-agent A_AGENT]
+                      [--redo comparison [--suspect INPUT]...]
 
 Prints the prompt. Exit 2 on a missing artifact or an image-only PDF the OCR receipt does not cover; exit 10
 (nothing printed that carries a context line) while a question the prompt depends on has no answer; exit 1
-`RUN_FINISHED` on a finished run whose answer has changed.
+`RUN_FINISHED` on a finished run whose answer has changed, and on a refused redo.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -583,6 +604,194 @@ _SIZING_TAIL = [
 SIZING_CONTEXTS = tuple(_SIZING_LINES)
 SIZING_NEEDS = ("inputs.json", "methodology.json", "validation.json")
 
+# --- the comparison redo ------------------------------------------------------------------------------
+#
+# Every word below is this file's. The model supplies ids, paths, and at most a choice from the build's own
+# input names. No figure from `comparison` is printed, and no direction: "yours is far above" invites
+# shrinking an input until the gap closes, which manufactures the convergence compare() warns is not
+# confirmation. The flagged levels carry no magnitude.
+REDO_KIND = "comparison"
+REDO_LEAD = "COMPARISON REDO:"
+# The build's own input names, from its output shape above (a closed list for --suspect).
+SUSPECTS = {
+    "top_down_methodology": ("industry_total", "segment_pct", "share_pct"),
+    "bottom_up_methodology": ("customer_count", "arpu", "serviceable_pct", "target_pct"),
+}
+
+
+def _levels(flagged: list[str]) -> str:
+    names = [lvl.upper() for lvl in flagged]
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+
+
+def redo_text(flagged: list[str], suspect: list[str]) -> str:
+    """The block a comparison redo adds before the closing line. ValueError with no flagged level."""
+    if not flagged:
+        raise ValueError("a comparison redo needs a flagged level")
+    lines = [
+        f"{REDO_LEAD} this build is being done once more. This analysis was also built the other way, and the",
+        f"two builds' {_levels(flagged)} differ by more than 30%, so at least one build's inputs probably do not",
+        "measure the product's actual target universe. Re-read validation.json and check each input against that",
+        "universe: the market an industry total covers (its geography, its categories), and the population a",
+        "count covers.",
+    ]
+    if suspect:
+        lines.append(f"Check these inputs first: {', '.join(suspect)}.")
+    lines += [
+        "Do not change an input to bring the two builds closer: you are not shown the other build, and a number",
+        "picked to agree with it is not evidence. Change an input only where validation.json records a figure",
+        "that measures the target universe better; if none does, write the same references again. A",
+        "disagreement between two honest builds is reported to the founder, not removed.",
+        "Open only inputs.json and validation.json at the paths this prompt gives, and OUTPUT_PATH, which holds",
+        "this build's earlier version, only to replace it. Do not open any other file in the analysis folder or",
+        "the hand-off folder.",
+    ]
+    return "\n".join(lines)
+
+
+def _with_redo(text: str, block: str | None) -> str:
+    if block is None:
+        return text
+    if not text.endswith(_END):
+        raise ValueError("a prompt must end with the closing line")
+    return text[: -len(_END)] + block + "\n" + _END
+
+
+class RedoRefused(Exception):
+    """A comparison redo, or a plain sizing print while one is pending, refused with a code."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
+def _redo_module() -> Any:
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import _sizing_redo  # noqa: PLC0415
+
+    return _sizing_redo
+
+
+def _same_dir(a: Any, b: str) -> bool:
+    return isinstance(a, str) and os.path.realpath(a) == os.path.realpath(b)
+
+
+def _this_runs(path: str, run_id: str) -> bool:
+    return bool(_redo_module().run_id_of(_read_json(path)) == run_id)
+
+
+def _read_json(path: str) -> Any:
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return None
+
+
+def comparison_redo(
+    context: str,
+    run_id: str,
+    analysis_dir: str,
+    handoff_dir: str,
+    handoff_agent: str,
+    suspect: list[str],
+    correction: str | None,
+) -> dict[str, Any]:
+    """The redo record to print from: this run's, or a new one written now. RedoRefused otherwise."""
+    sr = _redo_module()
+    build, handoff_name, _names = sr.BUILDS[context]
+    if sr.run_finished(analysis_dir, run_id):
+        raise RedoRefused(
+            "RUN_FINISHED", "this analysis is complete; a sizing changed now starts a new analysis (run Step 0 again)"
+        )
+    late = [
+        f
+        for f in ("sensitivity.json", "checklist.json", "redteam.json")
+        if _this_runs(os.path.join(analysis_dir, f), run_id)
+    ]
+    if late:
+        raise RedoRefused(
+            "SIZING_REDO_TOO_LATE",
+            f"this run has gone past the sizing ({', '.join(late)}); a change to an input now is Step 6d's, "
+            "with the founder's consent",
+        )
+    record: dict[str, Any] | None = sr.load(analysis_dir, run_id)
+    if record is not None:
+        if record.get("build") != build:
+            raise RedoRefused("SIZING_REDO_SPENT", "this run's one comparison redo was the other build's")
+        if record.get("after") is not None or not _same_dir(record.get("handoff_dir"), handoff_dir):
+            raise RedoRefused("SIZING_REDO_SPENT", "this run's comparison redo has already been used by the sizing")
+        if correction is None and sr.consumed(record):
+            raise RedoRefused(
+                "SIZING_REDO_SPENT",
+                "this run's comparison redo was already sent and its hand-off checked; re-run the sizing pipe",
+            )
+        if sorted(suspect) != sorted(record.get("suspect") or []):
+            raise RedoRefused(
+                "SIZING_REDO_SUSPECT_CHANGED",
+                f"this redo was printed with --suspect {' '.join(record.get('suspect') or []) or '(none)'}; "
+                "print it again with the same arguments",
+            )
+        return record
+    sizing_json = _read_json(os.path.join(analysis_dir, "sizing.json"))
+    if sr.run_id_of(sizing_json) != run_id:
+        raise RedoRefused("SIZING_REDO_NO_SIZING", "there is no sizing of this run to compare")
+    assert isinstance(sizing_json, dict)
+    comparison = sizing_json.get("comparison")
+    flagged = sr.flagged_levels(comparison)
+    if (
+        not (isinstance(sizing_json.get("top_down"), dict) and isinstance(sizing_json.get("bottom_up"), dict))
+        or not flagged
+    ):
+        raise RedoRefused(
+            "SIZING_REDO_NOT_FLAGGED",
+            "the sizing did not flag a gap between the two builds; there is nothing for a redo to examine",
+        )
+    handoff_file = os.path.join(handoff_dir, handoff_name)
+    first_refs = sr.handoff_refs(handoff_file, sr.BUILDS[context][2])
+    if first_refs is None or not os.path.isfile(handoff_file + sr.GATE_SUFFIX):
+        raise RedoRefused("SIZING_REDO_NO_FIRST_BUILD", "this build has no checked hand-off to redo")
+    printed_at, _epoch = sr.now()
+    record = {
+        "run_id": run_id,
+        "build": build,
+        "context": context,
+        "printed_at": printed_at,
+        "flagged": flagged,
+        "suspect": sorted(suspect),
+        "before": sr.gaps(comparison),
+        "handoff_dir": os.path.abspath(handoff_dir),
+        "handoff_file": os.path.abspath(handoff_file),
+        "output_path": f"{handoff_agent.rstrip('/')}/{handoff_name}",
+        "first_handoff_sha256": sr.file_sha256(handoff_file),
+        "first_input_refs": first_refs,
+        "research_at_first_print": sr.read_snapshot(handoff_dir, run_id),
+        "research_at_redo_print": sr.research_names(_read_json(os.path.join(analysis_dir, "validation.json"))),
+        "text_sha256": hashlib.sha256(redo_text(flagged, sorted(suspect)).encode("utf-8")).hexdigest(),
+        "after": None,
+    }
+    sr.save(analysis_dir, run_id, record)
+    return record
+
+
+def redo_pending(context: str, run_id: str, analysis_dir: str, handoff_dir: str) -> None:
+    """A plain sizing print while this build's redo, printed into the same hand-off dir, has not reached the
+    sizing: RedoRefused SIZING_REDO_PENDING."""
+    sr = _redo_module()
+    record = sr.load(analysis_dir, run_id)
+    if (
+        record is not None
+        and record.get("build") == sr.BUILDS[context][0]
+        and record.get("after") is None
+        and _same_dir(record.get("handoff_dir"), handoff_dir)
+    ):
+        raise RedoRefused(
+            "SIZING_REDO_PENDING",
+            "this build's comparison redo is printed and has not reached the sizing; print it again with "
+            "--redo comparison (and the same --suspect) and send that, never the plain prompt",
+        )
+
 
 def sizing(
     context: str,
@@ -593,8 +802,10 @@ def sizing(
     *,
     correction: str | None = None,
     detail: str | None = None,
+    redo: dict[str, Any] | None = None,
 ) -> str:
-    """The TOP_DOWN or BOTTOM_UP prompt. FileNotFoundError names a missing artifact."""
+    """The TOP_DOWN or BOTTOM_UP prompt. FileNotFoundError names a missing artifact. With `redo` (a record),
+    its block goes before the closing line, ahead of any transport correction."""
     missing = [f for f in SIZING_NEEDS if not os.path.isfile(os.path.join(analysis_dir, f))]
     if missing:
         raise FileNotFoundError(", ".join(missing))
@@ -604,6 +815,8 @@ def sizing(
         .replace("<ANALYSIS_DIR_AGENT>", analysis_dir_agent.rstrip("/"))
         .replace("<RUN_ID>", run_id)
     )
+    if redo is not None:
+        text = _with_redo(text, redo_text(list(redo.get("flagged") or []), list(redo.get("suspect") or [])))
     return _corrected(text, correction, detail)
 
 
@@ -637,6 +850,26 @@ def _detail(correction: str | None, path: str | None) -> str | None:
         print(f"Error: --detail-file {path} is empty; save the producer's stderr to it first", file=sys.stderr)
         sys.exit(2)
     return text
+
+
+def _check_redo_args(args: argparse.Namespace) -> None:
+    """Exit 2 for --redo outside a sizing context, --suspect without --redo, or a --suspect that is not one
+    of this build's own inputs."""
+    if args.redo is not None and args.context not in SIZING_CONTEXTS:
+        print("Error: --redo comparison applies only to top_down_methodology / bottom_up_methodology", file=sys.stderr)
+        sys.exit(2)
+    if args.suspect and args.redo is None:
+        print("Error: --suspect is read only with --redo comparison", file=sys.stderr)
+        sys.exit(2)
+    allowed = SUSPECTS.get(args.context, ())
+    wrong = [s for s in args.suspect if s not in allowed]
+    if wrong or len(set(args.suspect)) != len(args.suspect):
+        print(
+            f"Error: --suspect takes this build's own inputs, each once: {', '.join(allowed)} "
+            f"(got {', '.join(args.suspect)})",
+            file=sys.stderr,
+        )
+        sys.exit(2)
 
 
 def _refuse_empty(args: argparse.Namespace, flags: tuple[str, ...]) -> None:
@@ -674,6 +907,17 @@ def main() -> None:
         "--correction", choices=sorted([*CORRECTIONS, PRODUCER_REJECTED]), help="a corrective redo's added line"
     )
     p.add_argument("--detail-file", help="producer-rejected: the file the producer's stderr was saved to")
+    p.add_argument(
+        "--redo",
+        choices=[REDO_KIND],
+        help="sizing only: the run's one comparison redo of this build (the gap the sizing flagged)",
+    )
+    p.add_argument(
+        "--suspect",
+        action="append",
+        default=[],
+        help="with --redo: one of this build's own inputs to check first (repeatable)",
+    )
     a = p.parse_args()
     _refuse_empty(
         a,
@@ -688,6 +932,7 @@ def main() -> None:
         ),
     )
     detail = _detail(a.correction, a.detail_file)
+    _check_redo_args(a)
     if a.context in SIZING_CONTEXTS:
         missing = [f for f in SIZING_NEEDS if not os.path.isfile(os.path.join(a.analysis_dir, f))]
         if missing:
@@ -703,6 +948,21 @@ def main() -> None:
             open_follow_ups=g.SIZING_FOLLOW_UPS,
             by="dispatch_prompt.py",
         )
+        redo: dict[str, Any] | None = None
+        try:
+            if a.redo is None:
+                redo_pending(a.context, a.run_id, a.analysis_dir, a.handoff_dir)
+            else:
+                redo = comparison_redo(
+                    a.context, a.run_id, a.analysis_dir, a.handoff_dir, a.handoff_agent, a.suspect, a.correction
+                )
+        except RedoRefused as e:
+            message = g.FINISHED_MESSAGE if e.code == "RUN_FINISHED" else e.message
+            sys.stdout.write(json.dumps({"status": "refused", "code": e.code, "message": message}) + "\n")
+            print(f"Error ({e.code}): {message}; nothing was printed or written", file=sys.stderr)
+            sys.exit(1)
+        if redo is None:
+            _redo_module().write_snapshot(a.handoff_dir, a.run_id, os.path.join(a.analysis_dir, "validation.json"))
         sys.stdout.write(
             sizing(
                 a.context,
@@ -712,6 +972,7 @@ def main() -> None:
                 a.analysis_dir_agent or a.analysis_dir,
                 correction=a.correction,
                 detail=detail,
+                redo=redo,
             )
         )
         return

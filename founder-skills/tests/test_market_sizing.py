@@ -1302,7 +1302,10 @@ def test_compose_severity_map_complete() -> None:
     # +1: the founder's materials state two figures for one metric. Medium (the run is valid) and not
     # acceptable away; test_market_sizing_claim_alternatives pins that.
     assert sev_map.get("DECK_CLAIMS_DISAGREE") == "medium"
-    assert len(sev_map) == 63, f"expected 63 codes, got {len(sev_map)}"
+    # +1: a comparison redo printed and never used by the sizing. Medium, not acceptable away
+    # (test_ms_sizing_redo.py::test_a_redo_never_used_is_disclosed_and_cannot_be_accepted).
+    assert sev_map.get("SIZING_REDO_NOT_RUN") == "medium"
+    assert len(sev_map) == 64, f"expected 64 codes, got {len(sev_map)}"
     for code in expected_codes:
         assert code in sev_map, f"{code} missing from severity map"
     # All values are "high", "medium", or "low"

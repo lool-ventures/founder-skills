@@ -55,6 +55,16 @@
       "PERIOD_NOT_WRITTEN",
       "NO_ASK_FOUNDER_DECLINED"
     ],
+    "ms_sizing_redo": [
+      "SIZING_REDO_NO_SIZING",
+      "SIZING_REDO_NOT_FLAGGED",
+      "SIZING_REDO_TOO_LATE",
+      "SIZING_REDO_NO_FIRST_BUILD",
+      "SIZING_REDO_SPENT",
+      "SIZING_REDO_SUSPECT_CHANGED",
+      "SIZING_REDO_PENDING",
+      "RUN_FINISHED"
+    ],
     "notices": [
       "PRE_ANSWER_IGNORED",
       "PRE_ANSWER_INVALID",

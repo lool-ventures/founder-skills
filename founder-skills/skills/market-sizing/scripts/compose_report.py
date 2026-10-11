@@ -262,10 +262,15 @@ WARNING_SEVERITY: dict[str, str] = {
     # severity halts the run, and the findings themselves are valid and shown. In _UNACCEPTABLE_MEDIUM
     # because `accepted_warnings` is model-written, and the model is the one that skipped the question.
     "REVISION_NOT_OFFERED": "medium",
+    # A sizing build was ordered redone (dispatch_prompt.py --redo comparison) and the record shows no redo
+    # that reached the figures: its hand-off was not written and checked after the print, or the sizing never
+    # used it (_sizing_redo.outcome). MEDIUM for the HANDOFF_BYPASSED reasons: the figures shown are valid as
+    # what the sizing used. In _UNACCEPTABLE_MEDIUM: it is a disclosure about how the run was carried out.
+    "SIZING_REDO_NOT_RUN": "medium",
 }
 
 # Medium codes that `accepted_warnings` can never clear: disclosures about the run itself.
-_UNACCEPTABLE_MEDIUM = {"HANDOFF_BYPASSED", "REVISION_NOT_OFFERED", "DECK_CLAIMS_DISAGREE"}
+_UNACCEPTABLE_MEDIUM = {"HANDOFF_BYPASSED", "REVISION_NOT_OFFERED", "DECK_CLAIMS_DISAGREE", "SIZING_REDO_NOT_RUN"}
 
 # Only medium-severity codes can be accepted. High-severity = integrity violations.
 ACCEPTIBLE_SEVERITIES = {"medium"}
@@ -395,6 +400,7 @@ WARNING_LABELS: dict[str, str] = {
     "FOUNDER_INPUT_REWRITTEN": "A Figure You Gave Was Changed Without Your Confirmation",
     "HANDOFF_BYPASSED": "Some Steps Were Not Checked",
     "REVISION_NOT_OFFERED": "You Were Not Offered A Revision",
+    "SIZING_REDO_NOT_RUN": "A Build Ordered Redone Was Not Redone",
 }
 
 
@@ -2078,8 +2084,10 @@ def _section_sizing_table(
     sizing: dict[str, Any] | None,
     provenance: dict[str, dict[str, Any]] | None = None,
     validation: dict[str, Any] | None = None,
+    redo: str | None = None,
 ) -> str:
-    """Section 4: Market sizing table."""
+    """Section 4: Market sizing table. `redo`: the comparison redo's sentence (`_view.redo_sentence`), said
+    after the comparison it explains."""
     if sizing is None:
         return "## Market Sizing\n\n*No sizing data available.*\n"
     if _is_stub(sizing):
@@ -2186,7 +2194,8 @@ def _section_sizing_table(
         # LLM-written prose channels, both of which called a 9.4% gap "corroboration", while the
         # producer's own caveat for it sat unrendered in sizing.json.
         _shared = _shared_input_values(sizing, validation)
-        lines.append(f"\n**Top-down vs bottom-up:** {_comparison_paragraph(comparison, _shared)}")
+        _paragraph = _comparison_paragraph(comparison, _shared)
+        lines.append(f"\n**Top-down vs bottom-up:** {_paragraph + ' ' + redo if redo else _paragraph}")
 
     # Deck Claims comparison table
     if provenance:
@@ -3316,6 +3325,11 @@ def _compose(
                 "reviewed once more. The challenges are shown as they stand, and you can still ask for that revision.",
             )
         )
+    # The comparison redo: this run's record only (the ledger's copy first), settled from round 1's hand-off.
+    _redo = _view.redo_record(dir_path, _rt_run_id)
+    _redo_outcome = _view.redo_outcome(_redo)
+    if _redo_outcome == "not_run":
+        warnings.append(_warn("SIZING_REDO_NOT_RUN", _view.REDO_NOT_RUN_MESSAGE))
     warnings.extend(_warn(code, message) for code, message in _rt_codes)
     warnings.extend(_warn(code, message) for code, message in _sz_codes)
     warnings.extend(
@@ -3444,7 +3458,7 @@ def _compose(
         _section_analysis_checklist(checklist, artifacts_found),
         _section_methodology(methodology),
         _section_definitions(),
-        _section_sizing_table(sizing, provenance_data, validation_data),
+        _section_sizing_table(sizing, provenance_data, validation_data, _view.redo_sentence(_redo, validation_data)),
         _section_deck_claims_narrative(inputs),
         _section_assumptions(validation_data, sizing),
         _section_adversarial(
@@ -3620,6 +3634,13 @@ def _compose(
 
     if provenance_data:
         result["provenance"] = provenance_data
+    if _redo is not None:
+        # For hosts: which build was redone, the levels flagged, and whether the sizing used it.
+        result["sizing_redo"] = {
+            "build": _redo.get("build"),
+            "flagged": list(_redo.get("flagged") or []),
+            "outcome": _redo_outcome,
+        }
 
     return result
 
