@@ -5,6 +5,82 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.18.2] - 2026-10-11 — An answer the request already gave is used, and a report is never handed over for the wrong run
+
+### Highlights
+
+**A question the request already answered no longer stops the run.** When a request answers market
+sizing's deliver-or-revise question up front, the report takes that answer even if the run reached the
+report without putting the question. A run told not to ask, with no answer sent, takes the default
+(deliver) and says so. A deck review's stage confirmation sent on a resume is applied the same way. For
+the few questions only their own step can apply, the run now names that step instead of waiting.
+
+**A report is only coached and handed over for the run that built it.** Every report records the run it
+was composed for. Inserting the coaching and printing the closing message refuse a report left by another
+run, so a step that did not run can no longer hand over an earlier run's results.
+
+### Scoring changes
+
+Market sizing:
+
+- When the two builds disagree by more than 30%, the run may now redo one build once, from instructions
+  the plugin writes: which levels disagree and which of that build's inputs to check first. The figures,
+  and the scoring of the self-check, are unchanged. The report says when a build was redone.
+
+Financial model review:
+
+- The note on a burn multiple left ungraded because revenue fell now names the months it fell over. No
+  grade changes.
+
+Every other skill: none.
+
+### Fixed
+
+- Market sizing: when the two builds disagree by more than 30%, the run may redo one build once, from a
+  prompt that says which levels disagree and which inputs to check first. It never says which build is
+  higher or shows a figure. The report says the build was redone, gives the gap before and after, and
+  names any research the sizing uses that was added or changed after the two builds were first made. A redo that never reached the
+  figures is disclosed and cannot be accepted away. Before this, a repair the run wrote itself was dropped
+  and the build was redone from the same instructions.
+- Market sizing: an answer the request sent is used once. If the outside review later names more inputs,
+  the question is asked again, or a run told not to ask waits, instead of reusing the answer.
+- Market sizing: opening the deliver-or-revise question a second time changes nothing and reports the
+  recorded answer. An answered question whose record went missing gets its record back from the run's
+  own answers instead of being asked again.
+- Deck review: a stage confirmation sent on a resume is applied when the report is composed. An answer
+  that disagrees with the deck's stated stage, or confirms a low-confidence detection, is still put to
+  the founder.
+- Inserting the coaching commentary refuses to save its receipt over the report or any file it reads, and
+  a refusal never writes anything; the reason is printed where it can be read.
+- In a review that belongs to a run, inserting the coaching commentary without naming the run's files is
+  refused, rather than inserting and leaving the run marked unfinished.
+- The end-of-turn check no longer judges a closing message that was refused or never ran against an
+  earlier run's summary; it asks once for the closing step to be run again.
+- When several sessions share one machine, a shell command in a founder-skills run that writes to a fixed
+  name directly in the shared temporary folder is stopped before it runs, with the run's own scratch
+  folder named instead. Such a write could fail without the command running, and reading the name back
+  then showed another session's output. After two stops for the same name the command is let through.
+
+### Changed
+
+- A stop on a question the request already answered, where only that question's own step can apply the
+  answer (deck review's stage pick and out-of-scope question, cap-table spreadsheet blockers), names that
+  step. Under "don't ask" the stop says to run it and ask nothing.
+- Every report.json carries the id of the run it was composed for.
+
+### Development
+
+Contributor-facing only; nothing here changes what a founder installs or runs.
+
+- The market-sizing release lane accepts one sanctioned redo per run and still fails any other second
+  sizing dispatch.
+- The record of each checked hand-off notes when it was checked.
+- A seventh PreToolUse check covers the Cowork shell. The hook matcher adds that shell tool only; a shell
+  call runs only this check, and no dispatch or question call loads it.
+- The host contract lists the coaching insert's and the closing scripts' refusal codes.
+- The recorded test sessions were not refreshed for this release; the plugin manifest change marks them
+  stale, which is a warning only.
+
 ## [0.18.1] - 2026-10-10 — A model's growth rate is worked out from its own monthly revenue, and a stored company is checked against the one being reviewed
 
 ### Highlights
