@@ -2054,9 +2054,11 @@ def _comparison_sentences(comparison: dict[str, Any]) -> str:
     sentence once in first-appearance order.
 
     No prose is parsed for MEANING and nothing is reworded -- the producer still owns every
-    sentence. Splitting is on ". " only, which cannot split a decimal ("9.4%") or a parenthetical
-    ("(>30%)."). If the texts happen to share nothing, every sentence survives and the output is
-    exactly what concatenating them would have produced, so the degradation is the old behaviour.
+    sentence -- with one version shim: a gap clause an older sizing.json carries is replaced by
+    today's (`_view.legacy_gap_tail`, whose docstring states its reach). Splitting is on ". " only,
+    which cannot split a decimal ("9.4%") or a parenthetical ("(>30%)."). If the texts happen to
+    share nothing, every sentence survives and the output is exactly what concatenating them would
+    have produced, so the degradation is the old behaviour.
     """
     leads: list[str] = []
     rest: list[str] = []
@@ -2067,7 +2069,7 @@ def _comparison_sentences(comparison: dict[str, Any]) -> str:
     ):
         if delta_key not in comparison:
             continue
-        text = str(comparison.get(warn_key) or comparison.get(note_key) or "").strip()
+        text = _view.legacy_gap_tail(str(comparison.get(warn_key) or comparison.get(note_key) or "").strip())
         if not text:
             continue
         sentences = [s.strip() for s in text.split(". ") if s.strip()]

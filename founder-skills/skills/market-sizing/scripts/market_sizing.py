@@ -500,6 +500,12 @@ def bottom_up(
     return result
 
 
+# The clause every >30% builds gap ends with (TAM, SAM and SOM alike). It names scope as one reading
+# and never asserts which: a wrong figure, a scale or period slip, a narrowing percentage and two
+# builds that count different markets all produce the same gap, and nothing here can tell them apart.
+GAP_TAIL = " Review assumptions — an input may be wrong, or the two builds may measure different markets."
+
+
 def compare(td: dict[str, Any], bu: dict[str, Any]) -> dict[str, Any]:
     """Compare top-down and bottom-up TAM/SAM/SOM estimates.
 
@@ -527,7 +533,7 @@ def compare(td: dict[str, Any], bu: dict[str, Any]) -> dict[str, Any]:
             result["warning"] = (
                 _params.gap_sentence("tam", td_tam, bu_tam)
                 or f"Top-down and bottom-up TAM differ by {_params.fmt_delta(result['tam_delta_pct'])}."
-            ) + " Review assumptions — one approach likely has a flawed input."
+            ) + GAP_TAIL
         elif delta_pct > 15:
             result["note"] = (
                 f"TAM estimates differ by {_params.fmt_delta(result['tam_delta_pct'])}. "
@@ -566,7 +572,7 @@ def compare(td: dict[str, Any], bu: dict[str, Any]) -> dict[str, Any]:
                 _params.gap_sentence(metric, td_val, bu_val)
                 or f"Top-down and bottom-up {metric.upper()} differ by "
                 f"{_params.fmt_delta(result[f'{metric}_delta_pct'])}."
-            ) + " Review assumptions — one approach likely has a flawed input."
+            ) + GAP_TAIL
         elif m_delta_pct > 15:
             result[f"{metric}_note"] = (
                 f"{metric.upper()} estimates differ by {_params.fmt_delta(result[f'{metric}_delta_pct'])}. "

@@ -6923,14 +6923,25 @@ def test_compose_comparison_line_uses_warning_over_note_per_metric() -> None:
         "checklist.json": _VALID_CHECKLIST,
         "sensitivity.json": _VALID_SENSITIVITY,
     }
-    md = _compose_md_text(Path(_make_artifact_dir(arts)))
+    d = _make_artifact_dir(arts)
+    md = _compose_md_text(Path(d))
     line = next(ln for ln in md.splitlines() if ln.startswith("**Top-down vs bottom-up:**"))
     # The >30% metric contributes its WARNING, not a note, and it leads like the others.
     assert "Top-down and bottom-up SAM differ by 58.0% (>30%)." in line, line
     assert "SOM estimates differ by 3.0%." in line, line
     # Its distinct advice survives; the caveat the other two share still appears once.
-    assert "Review assumptions — one approach likely has a flawed input." in line, line
     assert line.count("Closeness is not confirmation") == 1, line
+    # The fixture carries the clause an older sizing.json was written with: both pages say today's, once,
+    # and the old one nowhere (the version shim in `_view.legacy_gap_tail`, engaged by this fixture).
+    new_tail = "Review assumptions — an input may be wrong, or the two builds may measure different markets."
+    assert line.count(new_tail) == 1, line
+    assert "flawed input" not in md
+    rc_html, html_text, err = run_script_raw("visualize.py", ["--dir", d])
+    assert rc_html == 0, err
+    note = html_text[html_text.index('class="chart-note"') :]
+    note = note[: note.index("</p>")]
+    assert note.count(new_tail) == 1, note
+    assert "flawed input" not in html_text
 
 
 def test_compose_comparison_line_skips_a_metric_the_producer_did_not_compare() -> None:
@@ -8820,7 +8831,7 @@ def _verdict_sizing() -> dict[str, Any]:
     """Top-down SOM $20.7M, bottom-up SOM $54.1M, deltas set as the producer would (the helper pins
     comparison to a 0.0 TAM delta; compose never recomputes)."""
     s = _both_sizing(2.4e9, 7.5, 11.5, 287_400, 1884, 25.0, 10.0)
-    tail = "Review assumptions — one approach likely has a flawed input."
+    tail = "Review assumptions — an input may be wrong, or the two builds may measure different markets."
     s["comparison"] = {
         "tam_delta_pct": 131.4,
         "sam_delta_pct": 12.0,
@@ -8850,8 +8861,10 @@ def test_summary_opens_with_the_verdict_from_fields() -> None:
     head = _summary_head(md)
     assert "You stated SOM $100.0M; this analysis finds $20.7M (top-down) and $54.1M (bottom-up)." in head, head
     assert (
-        "The two builds differ by 131.4% on TAM and 94.2% on SOM — one approach likely has a flawed input." in head
+        "The two builds differ by 131.4% on TAM and 94.2% on SOM — an input may be wrong, or the two builds may "
+        "measure different markets." in head
     ), head
+    assert "flawed input" not in md
     assert "An outside review raised 1 challenge: 1 from this analysis's own output." in head, head
     assert "from published sources" not in head  # the finding is internal; the old wording said "published"
     assert "The most serious:" in head and "(from this analysis's own output)" in head, head
@@ -10186,3 +10199,57 @@ def test_handoff_bypass_known_residual_gated_then_degraded_is_not_disclosed() ->
     _seed_gated(d, _ALL_STEPS)
     # ...the re-dispatch degrades: its JSON is staged in /tmp and piped straight to checklist.py.
     assert _bypass_warning(_compose_dir(d)) is None
+
+
+# === a builds gap names scope as one reading and asserts no flawed input ===
+
+_GAP_CLAUSE = "an input may be wrong, or the two builds may measure different markets."
+
+
+def test_a_builds_gap_tail_names_scope_and_asserts_no_flawed_input() -> None:
+    """Real producer output: a wrong figure, a period slip, a narrowing estimate and two builds that count
+    different markets all produce the same >30% gap, so the tail may not say which."""
+    comp = _comparison_note(50_000, 18_000)  # top-down 100B vs bottom-up 0.9B: every level flagged
+    warnings = [str(comp.get(k) or "") for k in ("warning", "sam_warning", "som_warning")]
+    assert all(w.endswith("Review assumptions — " + _GAP_CLAUSE) for w in warnings), warnings
+    assert not any("flawed input" in w for w in warnings), warnings
+    close = _comparison_note(5_000_000, 20_000)
+    assert "warning" not in close and "Review assumptions" not in str(close.get("note")), close
+
+
+def test_the_verdict_gap_clause_is_the_same_on_every_surface() -> None:
+    """report.md's Executive Summary, report.json `verdict`, report.html's verdict and the chat hand-over."""
+    rc, data, d = _compose_with_sizing(_verdict_sizing(), redteam=_REDTEAM_ARTIFACT)
+    assert rc == 0 and data is not None
+    want = "The two builds differ by 131.4% on TAM and 94.2% on SOM — " + _GAP_CLAUSE
+    head = _summary_head(_compose_md_text(Path(d)))
+    assert want in head and "flawed input" not in head, head
+    assert want in data["verdict"] and "flawed input" not in data["verdict"], data["verdict"]
+    rc_html, html_text, err = run_script_raw("visualize.py", ["--dir", d])
+    assert rc_html == 0, err
+    assert want in html_text and "flawed input" not in html_text
+    rc_c, out, err = _closing(_write_report(d, data))
+    assert rc_c == 0, err
+    assert want in out and "flawed input" not in out, out
+
+
+def test_flawed_input_survives_in_the_scripts_only_as_the_legacy_clause() -> None:
+    hits = []
+    for name in sorted(os.listdir(MARKET_SIZING_DIR)):
+        if name.endswith(".py"):
+            for line in _read(os.path.join(MARKET_SIZING_DIR, name)).splitlines():
+                if "flawed input" in line:
+                    hits.append((name, line.strip()))
+    assert hits == [("_view.py", '_LEGACY_GAP_CLAUSE = "one approach likely has a flawed input."')], hits
+
+
+def test_the_producer_and_the_verdict_word_the_gap_clause_alike() -> None:
+    """market_sizing.py cannot import _view, so the clause is two literals: the producer's tail (which the
+    recomputed path and the legacy swap's target meet) and the verdict's. They must not drift apart."""
+    import importlib
+
+    if MARKET_SIZING_DIR not in sys.path:
+        sys.path.insert(0, MARKET_SIZING_DIR)
+    producer = importlib.import_module("market_sizing")
+    view = importlib.import_module("_view")
+    assert producer.GAP_TAIL == " Review assumptions — " + view._GAP_CLAUSE

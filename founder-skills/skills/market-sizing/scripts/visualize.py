@@ -1047,7 +1047,7 @@ def _chart_cross_validation(
         ):
             if delta_key not in comparison:
                 continue
-            text = str(comparison.get(warn_key) or comparison.get(note_key) or "").strip()
+            text = _view.legacy_gap_tail(str(comparison.get(warn_key) or comparison.get(note_key) or "").strip())
             if not text:
                 continue
             for i, raw in enumerate([s.strip() for s in text.split(". ") if s.strip()]):

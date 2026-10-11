@@ -610,6 +610,26 @@ def _holds_up(claim: float, found: list[float], high: float | None = None) -> st
     return "does not hold up — neither build comes close to it"
 
 
+# The clause a >30% builds gap ends with, here and in market_sizing.py's `GAP_TAIL` (the producer cannot
+# import this module). It names scope as one reading and never asserts which.
+_GAP_CLAUSE = "an input may be wrong, or the two builds may measure different markets."
+# The clause 0.18.2 and earlier wrote into sizing.json. A version shim, not new evidence: see legacy_gap_tail.
+_LEGACY_GAP_CLAUSE = "one approach likely has a flawed input."
+
+
+def legacy_gap_tail(text: str) -> str:
+    """A producer gap sentence with the clause an older sizing.json carries replaced by today's.
+
+    Both renderers call it on each producer string before splitting it into sentences, so the two pages
+    cannot word the gap two ways. Reach: only the non-recomputed path -- a sizing.json written by 0.18.2 or
+    earlier whose figures still match its inputs. When they do not, `sizing_integrity` re-renders through
+    `_recompute`, which calls today's `compare()` and gets today's clause anyway. Residuals: sub-agents
+    dispatched on such a resumed run (checklist, red team) still read the old clause in sizing.json, and a
+    report.md composed by an older release whose report.html alone is regenerated shows two clauses.
+    """
+    return text.replace(_LEGACY_GAP_CLAUSE, _GAP_CLAUSE)
+
+
 def _summary_verdict(
     sizing: dict[str, Any],
     provenance: dict[str, dict[str, Any]] | None,
@@ -683,7 +703,7 @@ def _summary_verdict(
                 factor = _params.gap_factor(comparison.get(f"top_down_{metric}"), comparison.get(f"bottom_up_{metric}"))
                 gaps.append(f"{factor or _params.fmt_delta(delta)} on {metric.upper()}")
         if gaps:
-            sentences.append(f"The two builds differ by {' and '.join(gaps)} — one approach likely has a flawed input.")
+            sentences.append(f"The two builds differ by {' and '.join(gaps)} — {_GAP_CLAUSE}")
     sentences.append(_adversarial_outcome(redteam, skip_reason))
     top = _top_challenge(redteam, sizing, inputs)
     if top:
