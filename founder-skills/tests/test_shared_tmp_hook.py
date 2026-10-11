@@ -134,6 +134,11 @@ PASSED = [
 ]
 
 
+def _said(text: str) -> dict[str, Any]:
+    """The model's final message as a transcript row."""
+    return {"type": "assistant", "message": {"content": [{"type": "text", "text": text}]}}
+
+
 @pytest.mark.parametrize(("command", "expected"), DENIED, ids=[c[:50] for c, _ in DENIED])
 def test_a_fixed_name_written_directly_in_tmp_is_found(command: str, expected: list[str]) -> None:
     assert CHECK.hits(command) == expected
@@ -286,7 +291,7 @@ def test_a_skill_name_a_tool_returned_does_not_put_the_session_in_scope(tmp_path
 
 def test_running_an_installed_plugin_script_puts_the_command_in_scope_with_no_skill_row(tmp_path: Path) -> None:
     """The cloud lane: a skill typed as the first message leaves no Skill row."""
-    command = f"python3 {INSTALLED}/skills/market-sizing/scripts/compose_report.py --dir d > /tmp/out.txt"
+    command = f"python3 {INSTALLED}/skills/ic-sim/scripts/zz_probe_tool.py --dir w7 > /tmp/probe_7.txt"
     assert _held(CHECK.decide(_payload(tmp_path, [_user("Size my market.")], command=command))) is not None
     via_var = f'SCRIPTS="{INSTALLED}/skills/ic-sim/scripts"; python3 "$SCRIPTS/compose_report.py" > /tmp/out.txt'
     assert _held(CHECK.decide(_payload(tmp_path, [_user("Go.")], command=via_var))) is not None
@@ -498,11 +503,11 @@ def test_a_held_closing_call_run_again_is_judged_on_the_rerun(tmp_path: Path) ->
         "toolu_c1", f"{CLOSING_CMD} | tee /tmp/h.txt", f"{DENY_PREFIX}[shared-tmp][/tmp/h.txt] Held.", is_error=True
     )
     rerun = _shell("toolu_c2", CLOSING_CMD, PRINTED)
-    rows = [_user("Use the market-sizing skill on this deck."), *held, *rerun]
-    verdict = {"type": "assistant", "message": {"content": [{"type": "text", "text": OWN_VERDICT}]}}
+    rows = [_user("Example Co asks for the market-sizing skill on its seed deck."), *held, *rerun]
+    verdict = _said(OWN_VERDICT)
     out = json.loads(_stop(tmp_path, [*rows, verdict]).stdout)
     assert out["decision"] == "block" and PRINTED.rstrip() in out["reason"]
-    carried = {"type": "assistant", "message": {"content": [{"type": "text", "text": "Done.\n\n" + PRINTED}]}}
+    carried = _said("Done.\n\n" + PRINTED)
     assert _stop(tmp_path, [*rows, carried]).stdout == ""
 
 
