@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import subprocess
 import sys
 import types
@@ -35,7 +36,8 @@ def test_a_passing_gate_writes_a_record_that_matches_the_file(tmp_path: Path) ->
     assert result.returncode == 0, result.stdout
     assert json.loads(result.stdout)["gate_record"] == str(f) + audit.GATE_SUFFIX
     record = json.loads((tmp_path / ("checklist_output.json" + audit.GATE_SUFFIX)).read_text(encoding="utf-8"))
-    assert record == {"sha256": audit.file_sha256(str(f)), "format": "json"}
+    assert record == {"sha256": audit.file_sha256(str(f)), "format": "json", "gated_at": record["gated_at"]}
+    assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{6}Z", record["gated_at"])
     assert audit.gate_ok(str(f))
 
 

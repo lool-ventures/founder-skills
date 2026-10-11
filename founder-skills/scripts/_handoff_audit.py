@@ -37,6 +37,7 @@ import hashlib
 import json
 import os
 from collections.abc import Sequence
+from datetime import datetime, timezone
 
 GATE_SUFFIX = ".gate.json"
 
@@ -49,10 +50,19 @@ def file_sha256(path: str) -> str:
     return h.hexdigest()
 
 
+def gated_now() -> str:
+    """The time of a pass, ISO-8601 UTC to the microsecond (a print and a gate in one second stay ordered)."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
 def write_gate_record(path: str, fmt: str) -> None:
-    """Record that `path` passed the gate. Raises OSError if the record cannot be written."""
+    """Record that `path` passed the gate, and when. Raises OSError if the record cannot be written.
+
+    `gated_at` is rewritten on every pass, so it says when the file was LAST gated, not when it was written:
+    market-sizing's comparison redo (`_sizing_redo.consumed`) pairs it with the file's mtime. A record from
+    before the field existed reads there as "time unknown", never as recent."""
     with open(path + GATE_SUFFIX, "w", encoding="utf-8") as f:
-        json.dump({"sha256": file_sha256(path), "format": fmt}, f)
+        json.dump({"sha256": file_sha256(path), "format": fmt, "gated_at": gated_now()}, f)
         f.write("\n")
 
 
