@@ -353,7 +353,7 @@ def test_the_record_is_written_once_and_a_reprint_is_byte_identical(tmp_path: Pa
     assert record["first_input_refs"] == {k: v for k, v in _TD.items() if k != "approach"}
     assert record["before"]["tam"]["delta_pct"] == 199.5
     assert record["output_path"] == f"{AGENT}/handoff/{RUN}/top_down_output.json"
-    assert record["research_at_redo_print"] == sorted(x["name"] for x in _VALIDATION["assumptions"])
+    assert sorted(record["research_at_redo_print"]) == sorted(x["name"] for x in _VALIDATION["assumptions"])
     # The research changes; the reprint is rebuilt from the record, not from the sizing.
     _write(a / "sizing.json", {**json.loads((a / "sizing.json").read_text()), "comparison": {"tam_delta_pct": 1}})
     again = _redo(a, h, "top_down_methodology", "--suspect", "industry_total")
@@ -618,7 +618,7 @@ def test_research_recorded_after_the_first_print_is_named(tmp_path: Path) -> Non
     a, h = _run_dir(tmp_path)
     assert _gen(a, h).returncode == 0  # the first plain print notes the research
     snap = json.loads((h / sr.SNAPSHOT_NAME).read_text())
-    assert snap["run_id"] == RUN and "pear_growers" in snap["names"]
+    assert snap["run_id"] == RUN and "pear_growers" in snap["entries"]
     r = _pipe(a, h)
     assert r.returncode == 0, r.stdout + r.stderr
     extra = {
@@ -634,8 +634,64 @@ def test_research_recorded_after_the_first_print_is_named(tmp_path: Path) -> Non
     _rewrite_handoff(h, {**_TD, "industry_total": {"assumption": "pear_belt_total"}})
     assert _pipe(a, h).returncode == 0
     rec = json.loads((a / sr.RECORD_NAME).read_text())
-    assert sr.new_research(rec) == ["pear_belt_total"]
+    assert sr.research_since(rec) == (["pear_belt_total"], [])
     assert json.loads((h / sr.SNAPSHOT_NAME).read_text()) == snap, "the first snapshot is kept"
+
+
+def test_research_edited_after_the_first_print_is_named_even_with_the_same_inputs(tmp_path: Path) -> None:
+    """An entry's value edited after both builds were seen moves the gap with the references unchanged: the
+    record says the research changed, and the founder's sentence says so beside "the same inputs again"."""
+    a, h = _run_dir(tmp_path)
+    assert _gen(a, h).returncode == 0
+    assert _pipe(a, h).returncode == 0
+    edited = [
+        {**x, "value": 2_100_000_000} if x["name"] == "orchard_sensor_total" else x for x in _VALIDATION["assumptions"]
+    ]
+    relabelled = [{**x, "label": "Spend on orchard sensors"} if x["name"] == "pear_belt_share" else x for x in edited]
+    _write(a / "validation.json", {**_VALIDATION, "assumptions": relabelled})
+    assert _redo(a, h).returncode == 0
+    _rewrite_handoff(h, dict(_TD))
+    assert _pipe(a, h).returncode == 0
+    rec = json.loads((a / sr.RECORD_NAME).read_text())
+    assert sr.outcome(rec) == "same_inputs"
+    assert sr.research_since(rec) == ([], ["orchard_sensor_total"]), "a label is how an entry is shown, not data"
+    view = _load("_view_redo_t", SCRIPTS / "_view.py")
+    sentence = view.redo_sentence(rec, {**_VALIDATION, "assumptions": relabelled})
+    assert "it chose the same inputs again" in sentence
+    assert "Research the sizing uses was changed after the two builds were first made: Orchard sensor spend" in sentence
+
+
+def test_the_outcome_is_settled_once_the_sizing_used_the_redo(tmp_path: Path) -> None:
+    """Step 6d's sizing re-dispatch runs before HANDOFF_DIR points at r2/, so it rewrites round 1's hand-off.
+    That must not turn a redo that ran into "not run"."""
+    a, h = _real_run(tmp_path)
+    assert _redo(a, h).returncode == 0
+    _rewrite_handoff(h, {**_TD, "share_pct": {"assumption": "pear_belt_share"}})
+    assert _pipe(a, h).returncode == 0
+    rec = json.loads((a / sr.RECORD_NAME).read_text())
+    assert sr.outcome(rec) == "changed"
+    _rewrite_handoff(h, {**_TD, "segment_pct": {"assumption": "served_share"}})  # the 6d re-dispatch, gated
+    assert sr.outcome(rec) == "changed"
+    (h / "top_down_output.json").write_text(json.dumps(_TD), encoding="utf-8")  # and not gated
+    assert sr.outcome(rec) == "changed"
+
+
+@pytest.mark.parametrize("correction", ["missing-file", "receipt-only"])
+def test_only_a_producers_rejection_reprints_a_consumed_redo(tmp_path: Path, correction: str) -> None:
+    a, h = _run_dir(tmp_path)
+    assert _redo(a, h).returncode == 0
+    _rewrite_handoff(h, {**_TD, "share_pct": {"assumption": "pear_belt_share"}})
+    _refused(_redo(a, h, "top_down_methodology", "--correction", correction), "SIZING_REDO_SPENT")
+
+
+def test_past_the_sizing_an_unused_redo_no_longer_blocks_the_plain_prompt(tmp_path: Path) -> None:
+    """Step 6d: a new redo is TOO_LATE, so the plain prompt must print, or the run could not re-dispatch."""
+    a, h = _run_dir(tmp_path)
+    assert _redo(a, h).returncode == 0
+    _refused(_gen(a, h), "SIZING_REDO_PENDING")
+    _write(a / "redteam.json", {"metadata": {"run_id": RUN}})
+    assert _gen(a, h).returncode == 0
+    _refused(_redo(a, h), "SIZING_REDO_TOO_LATE")
 
 
 # --- compose and the page: the sentence, the warning, report.json ----------------------------------------
@@ -697,8 +753,8 @@ def _seed_record(d: Path, *, consumed: bool, after: bool, run_id: str = FIXTURE_
         "output_path": "/agent/x/top_down_output.json",
         "first_handoff_sha256": None,
         "first_input_refs": {n: first[n] for n in names},
-        "research_at_first_print": ["orchard_sensor_total", "pear_belt_share", "reachable_share"],
-        "research_at_redo_print": ["orchard_sensor_total", "pear_belt_total"],
+        "research_at_first_print": {"orchard_sensor_total": "1", "pear_belt_share": "2", "reachable_share": "3"},
+        "research_at_redo_print": {"orchard_sensor_total": "1", "pear_belt_total": "4"},
         "text_sha256": "x",
         "after": None,
     }
@@ -707,6 +763,8 @@ def _seed_record(d: Path, *, consumed: bool, after: bool, run_id: str = FIXTURE_
             "gaps": {"tam": {"delta_pct": 21.0, "top_down": 9_500_000_000, "bottom_up": 8_100_000_000}},
             "input_refs": {n: redo[n] for n in names},
             "at": printed_at,
+            "research_added": ["pear_belt_total"],
+            "research_changed": [],
         }
     _write(d / sr.RECORD_NAME, record)
     return record
@@ -753,7 +811,7 @@ def test_a_redo_the_sizing_used_is_told_in_both_surfaces(tmp_path: Path) -> None
     assert sentence in md
     assert "it changed its Industry Total" in md and "industry_total" not in md
     assert "differed by a factor of 5.0 before the redo and by a factor of 1.2 after it" in md
-    assert "The redo used research recorded after the two builds were first made: Pear Belt Total." in md
+    assert "The sizing now uses research recorded after the two builds were first made: Pear Belt Total." in md
     assert "SIZING_REDO_NOT_RUN" not in _codes(report)
     assert report["sizing_redo"] == {"build": "top_down", "flagged": ["tam"], "outcome": "changed"}
     page = html.unescape(_html(d))
@@ -866,6 +924,24 @@ def test_with_a_ledger_the_record_is_in_the_ledger_and_survives_the_files_deleti
     again = _lgen(run_dir, run_id, hand, "top_down_methodology", "--redo", "comparison")
     assert again.stdout == first.stdout
     assert sr.load(str(run_dir), run_id) == held
+
+
+def test_an_unreachable_ledger_is_refused_never_read_around(tmp_path: Path) -> None:
+    """With a ref and a ledger it cannot reach, the record is not read from the file: the reader refuses with
+    the shared failure JSON, exit 2, and no traceback."""
+    root, run_id, run_dir, hand = _ledger_run(tmp_path)
+    assert _lgen(run_dir, run_id, hand, "top_down_methodology", "--redo", "comparison").returncode == 0
+    grh.ledger_path(root, run_id).unlink()
+    with pytest.raises(sr._run_ref.LedgerUnavailable):
+        sr.load(str(run_dir), run_id)
+    probe = (
+        "import sys; sys.path.insert(0, sys.argv[1]); import _view; print(_view.redo_record(sys.argv[2], sys.argv[3]))"
+    )
+    r = subprocess.run(
+        [sys.executable, "-c", probe, str(SCRIPTS), str(run_dir), run_id], capture_output=True, text=True
+    )
+    assert r.returncode == 2 and "Traceback" not in r.stderr, r.stderr
+    assert json.loads(r.stdout.strip().splitlines()[-1])["status"] == "error"
 
 
 def test_a_finished_run_refuses_a_redo(tmp_path: Path) -> None:

@@ -1965,10 +1965,15 @@ def _redo_gap(gap: Any) -> str | None:
 
 
 def redo_record(analysis_dir: str, run_id: str | None) -> dict[str, Any] | None:
-    """This run's comparison-redo record, or None (another run's is never returned)."""
+    """This run's comparison-redo record, or None (another run's is never returned). With a ref whose ledger
+    cannot be reached, the renderer refuses (the shared failure JSON, exit 2) rather than read the file."""
+    import _run_ref
     import _sizing_redo
 
-    record: dict[str, Any] | None = _sizing_redo.load(analysis_dir, run_id)
+    try:
+        record: dict[str, Any] | None = _sizing_redo.load(analysis_dir, run_id)
+    except _run_ref.LedgerUnavailable as e:
+        sys.exit(_run_ref.report_failure(e))
     return record
 
 
@@ -2013,14 +2018,20 @@ def redo_sentence(record: dict[str, Any] | None, validation: Any) -> str | None:
     if pairs:
         joined = "; ".join(pairs).replace("their ", "the two builds' ", 1)
         text += " " + joined[0].upper() + joined[1:] + "."
-    new = _sizing_redo.new_research(record)
-    if new:
+    added, changed = _sizing_redo.research_since(record)
+    if added:
         text += (
-            " The redo used research recorded after the two builds were first made: "
-            + ", ".join(_label(n, validation) for n in new)
+            " The sizing now uses research recorded after the two builds were first made: "
+            + ", ".join(_label(n, validation) for n in added)
             + "."
         )
-    return text
+    if changed:
+        text += (
+            " Research the sizing uses was changed after the two builds were first made: "
+            + ", ".join(_label(n, validation) for n in changed)
+            + "."
+        )
+    return _founder_prose(text)
 
 
 REDO_NOT_RUN_MESSAGE = (

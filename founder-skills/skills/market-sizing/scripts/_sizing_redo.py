@@ -14,18 +14,22 @@ run, never by the model. With a gate ledger the same record is also written into
 first: deleting the file neither erases the disclosure nor reopens the budget. It holds the build, the
 levels the producer flagged, the inputs named as suspect, the gap before the redo (`before`), the
 hand-off the redo writes (its shell path and the agent's OUTPUT_PATH), the first hand-off's sha and
-references, the research names recorded when the first builds were printed and when the redo was, and
-`after`, which `market_sizing.py` writes ONCE: on its first successful run over a consumed redo whose
-references it actually used. Compose prints the gap after the redo only from there, so Step 6d's later
-replay or round-2 re-dispatch cannot move it.
+references, a digest of every research entry (name -> hash of the entry's recorded fields) when the
+first builds were printed and when the redo was, and `after`, which `market_sizing.py` writes ONCE: on its
+first successful run over a consumed redo whose references it actually used, with the gap it produced, the
+references it used, and which research entries the sizing uses were added or changed since the first
+builds were printed. Compose reads the outcome and every sentence from the record alone once `after` is
+set, so Step 6d's later replay, or its sizing re-dispatch (which rewrites round 1's hand-off, since it
+runs before Step 6d points HANDOFF_DIR at `r2/`), cannot move it or turn it into "not run".
 
-CONSUMED, one predicate (`consumed`), called by the generator (SPENT) and compose (NOT_RUN): the gate
+CONSUMED, one predicate (`consumed`), called by the generator (SPENT) and by `fill_after`: the gate
 record beside the redo's hand-off carries `gated_at` later than the print, the hand-off file's mtime is
 later than the print, and the gate record's sha256 is the file's. All three, no fallback: check_handoff.py
 rewrites the gate record on every pass, so a re-gate of the untouched first file after the print has a
 late `gated_at` and an early mtime; and "the same references again" is an allowed outcome, so the sha
-alone says nothing. A gate record written before `gated_at` existed reads as not consumed. Settled from
-round 1's hand-off only: Step 6d's round 2 writes under `r2/`, which the record does not name.
+alone says nothing. A gate record written before `gated_at` existed reads as not consumed. It is settled
+when `after` is written; compose's outcome is `not_run` exactly when `after` is absent, and never re-reads
+the hand-off, which a later round may rewrite.
 
 RESIDUALS, stated:
 - The budget limits PRINTS, not dispatches. The identical redo prompt can be dispatched again and again;
@@ -37,8 +41,12 @@ RESIDUALS, stated:
   place and check_handoff.py passes it; the mtime conjunct reads that as not consumed (SIZING_REDO_NOT_RUN).
 - The redo sub-agent may open its own OUTPUT_PATH (the file tool reads an existing file before it
   overwrites it); that file is this build's own first references, never the other build's figures.
-- Research recorded after the first builds were printed is disclosed when the redo uses it; a snapshot
-  that is missing (deleted, or a run printed before this existed) discloses nothing.
+- Research added, or an entry's recorded fields changed, after the first builds were printed is disclosed
+  when the sizing uses it (by entry; its label is not part of the digest); a snapshot that is missing
+  (deleted, or a run printed before this existed) discloses nothing. Research changed after `after` is
+  written is Step 6d's and the review's to report, not this record's.
+- With a ref and a ledger it cannot reach, every reader refuses (`_run_ref.LedgerUnavailable`); it never
+  falls back to the file.
 - A re-read, after the redo print, of an earlier redirected plain print is not detected here.
 
 Standalone: stdlib, plus the shared ledger modules through `_run_ref` when the run has a ledger.
@@ -119,10 +127,19 @@ def run_id_of(data: Any) -> str | None:
     return rid if isinstance(rid, str) and rid else None
 
 
-def research_names(validation: Any) -> list[str]:
-    """The names of the figures the research record holds."""
+# An entry's label is how it is shown, not what it records; every other field is part of its digest.
+_NOT_DIGESTED = ("label",)
+
+
+def research_digest(validation: Any) -> dict[str, str]:
+    """name -> sha256 of what each research entry records (value, unit, source, date, factors...)."""
     items = validation.get("assumptions") if isinstance(validation, dict) else None
-    return sorted({str(a["name"]) for a in items or [] if isinstance(a, dict) and isinstance(a.get("name"), str)})
+    out: dict[str, str] = {}
+    for a in items or []:
+        if isinstance(a, dict) and isinstance(a.get("name"), str):
+            kept = {k: v for k, v in a.items() if k not in _NOT_DIGESTED}
+            out[a["name"]] = hashlib.sha256(json.dumps(kept, sort_keys=True).encode("utf-8")).hexdigest()
+    return out
 
 
 def referenced_names(refs: Any) -> set[str]:
@@ -187,19 +204,19 @@ def _ledger(analysis_dir: str, run_id: str) -> Any:
 
 
 def load(analysis_dir: str, run_id: str | None) -> dict[str, Any] | None:
-    """This run's record: the ledger's copy first, the file second; another run's is never returned."""
+    """This run's record: the ledger's copy first, the file second; another run's is never returned.
+
+    With a ref whose ledger cannot be reached or read, raises `_run_ref.LedgerUnavailable`, never falling
+    back to the file (the `_run_ref.open_ledger` rule): the file is the copy a deletion can remove."""
     if not run_id:
         return None
-    try:
-        ledger = _ledger(analysis_dir, run_id)
-    except Exception:  # noqa: BLE001 -- an unreachable ledger: the file is what is left to read
-        ledger = None
+    ledger = _ledger(analysis_dir, run_id)
     if ledger is not None:
         gates, paths = ledger
         try:
             held = gates.load_ledger(paths).get(LEDGER_KEY)
-        except Exception:  # noqa: BLE001
-            held = None
+        except Exception as e:  # noqa: BLE001 -- an unreadable ledger is unreachable, reported as such
+            raise _run_ref.LedgerUnavailable("LEDGER_UNREADABLE", f"the run's ledger cannot be read: {e}") from e
         if isinstance(held, dict) and held.get("run_id") == run_id:
             return held
     data = _read(os.path.join(analysis_dir, RECORD_NAME))
@@ -244,16 +261,16 @@ def write_snapshot(handoff_dir: str, run_id: str, validation_path: str) -> None:
     if _read(path) is not None and run_id_of(_read(path)) == run_id:
         return
     try:
-        _write(path, {"run_id": run_id, "names": research_names(_read(validation_path))})
+        _write(path, {"run_id": run_id, "entries": research_digest(_read(validation_path))})
     except OSError as exc:
         print(f"warning: the research snapshot was not written: {exc}", file=sys.stderr)
 
 
-def read_snapshot(handoff_dir: str, run_id: str) -> list[str] | None:
+def read_snapshot(handoff_dir: str, run_id: str) -> dict[str, str] | None:
     data = _read(os.path.join(handoff_dir, SNAPSHOT_NAME))
-    if run_id_of(data) != run_id or not isinstance(data.get("names"), list):
+    if run_id_of(data) != run_id or not isinstance(data.get("entries"), dict):
         return None
-    return [str(n) for n in data["names"]]
+    return {str(k): str(v) for k, v in data["entries"].items()}
 
 
 # --- the one predicate ----------------------------------------------------------------------------------
@@ -288,24 +305,39 @@ def build_names(record: dict[str, Any]) -> tuple[str, ...]:
 
 
 def outcome(record: dict[str, Any]) -> str:
-    """`changed` / `same_inputs` when the redo was consumed and the sizing used it, else `not_run`."""
+    """`changed` / `same_inputs` once the sizing used the redo (`after`, written only over a consumed redo
+    whose references the sizing used), else `not_run`. From the record alone: round 1's hand-off may be
+    rewritten later (Step 6d's sizing re-dispatch), and that says nothing about this redo."""
     after = record.get("after")
-    if not consumed(record) or not isinstance(after, dict):
-        return "not_run"
-    names = build_names(record)
-    now_refs = handoff_refs(str(record.get("handoff_file")), names)
-    if now_refs is None or after.get("input_refs") != now_refs:
+    if not isinstance(after, dict) or not isinstance(after.get("input_refs"), dict):
         return "not_run"
     return "same_inputs" if after.get("input_refs") == record.get("first_input_refs") else "changed"
 
 
-def new_research(record: dict[str, Any]) -> list[str]:
-    """Figures the redo used that the research did not hold when the first builds were printed."""
-    snapshot = record.get("research_at_first_print")
+def research_since(record: dict[str, Any]) -> tuple[list[str], list[str]]:
+    """(added, changed): research entries the sizing used that were not recorded, or recorded otherwise,
+    when the first builds were printed. Read from `after`; ([], []) when unknown."""
     after = record.get("after")
-    if not isinstance(snapshot, list) or not isinstance(after, dict):
-        return []
-    return sorted(referenced_names(after.get("input_refs")) - set(snapshot))
+    if not isinstance(after, dict):
+        return [], []
+    added, changed = after.get("research_added"), after.get("research_changed")
+    return (
+        [str(n) for n in added] if isinstance(added, list) else [],
+        [str(n) for n in changed] if isinstance(changed, list) else [],
+    )
+
+
+def _research_moves(record: dict[str, Any], refs: dict[str, Any], validation: Any) -> dict[str, Any]:
+    """Compared with the first print's snapshot, for every entry the sizing references (both builds)."""
+    snapshot = record.get("research_at_first_print")
+    if not isinstance(snapshot, dict):
+        return {"research_added": None, "research_changed": None}
+    now_digest = research_digest(validation)
+    used = sorted(referenced_names(refs))
+    return {
+        "research_added": [n for n in used if n not in snapshot],
+        "research_changed": [n for n in used if n in snapshot and now_digest.get(n) != snapshot[n]],
+    }
 
 
 def fill_after(analysis_dir: str, run_id: str | None, result: dict[str, Any]) -> None:
@@ -324,6 +356,8 @@ def fill_after(analysis_dir: str, run_id: str | None, result: dict[str, Any]) ->
         if used != handoff_refs(str(record.get("handoff_file")), names):
             return
         at, _ = now()
-        save(analysis_dir, run_id, {**record, "after": {"gaps": gaps(comparison), "input_refs": used, "at": at}})
+        moves = _research_moves(record, refs, _read(os.path.join(analysis_dir, "validation.json")))
+        after = {"gaps": gaps(comparison), "input_refs": used, "at": at, **moves}
+        save(analysis_dir, run_id, {**record, "after": after})
     except Exception as exc:  # noqa: BLE001 -- the sizing is written whatever happens here
         print(f"warning: the comparison redo's result was not recorded: {exc}", file=sys.stderr)

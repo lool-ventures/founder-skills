@@ -69,11 +69,15 @@ JSON line on stdout with no context line (a refusal must never become a comparan
 nothing, and exits 1: SIZING_REDO_NO_SIZING, SIZING_REDO_NOT_FLAGGED, SIZING_REDO_TOO_LATE (a sensitivity,
 checklist or review of this run exists: a change after that is Step 6d's), SIZING_REDO_NO_FIRST_BUILD,
 SIZING_REDO_SPENT (per run: the other build, a redo the sizing already used, or a consumed redo printed
-again with no transport correction), SIZING_REDO_SUSPECT_CHANGED, RUN_FINISHED. A plain sizing print for the
-same build into the same hand-off dir while the redo has not reached the sizing is SIZING_REDO_PENDING: a
-plain print after the redo would make the plain prompt the comparand again, and the redo dispatch would be
-rewritten to it. The first plain sizing print of a run also notes which research figures existed
-(`_sizing_redo.SNAPSHOT_NAME`), so compose can name research recorded after the builds were first made.
+again other than for a producer's rejection), SIZING_REDO_SUSPECT_CHANGED, RUN_FINISHED. A plain sizing print
+for the same build into the same hand-off dir while the redo has not reached the sizing is
+SIZING_REDO_PENDING: a plain print after the redo would make the plain prompt the comparand again, and the
+redo dispatch would be rewritten to it. Once the run has moved past the sizing, the plain print is allowed
+again (a new redo is then TOO_LATE, and Step 6d's sizing re-dispatch needs it); compose reports the unused
+redo as not run. With a ref and an unreachable ledger, the redo's record is never read from the file: exit
+2 with the shared failure JSON. The first plain sizing print of a run also notes a digest of every research
+entry (`_sizing_redo.SNAPSHOT_NAME`), so compose can name research added or changed after the builds were
+first made.
 
 Output is deterministic for fixed inputs: sorted listings, no timestamps.
 
@@ -689,6 +693,15 @@ def _read_json(path: str) -> Any:
         return None
 
 
+def _past_sizing(analysis_dir: str, run_id: str) -> list[str]:
+    """This run's artifacts from after the sizing (a sensitivity test, a self-check, a review)."""
+    return [
+        f
+        for f in ("sensitivity.json", "checklist.json", "redteam.json")
+        if _this_runs(os.path.join(analysis_dir, f), run_id)
+    ]
+
+
 def comparison_redo(
     context: str,
     run_id: str,
@@ -705,11 +718,7 @@ def comparison_redo(
         raise RedoRefused(
             "RUN_FINISHED", "this analysis is complete; a sizing changed now starts a new analysis (run Step 0 again)"
         )
-    late = [
-        f
-        for f in ("sensitivity.json", "checklist.json", "redteam.json")
-        if _this_runs(os.path.join(analysis_dir, f), run_id)
-    ]
+    late = _past_sizing(analysis_dir, run_id)
     if late:
         raise RedoRefused(
             "SIZING_REDO_TOO_LATE",
@@ -722,7 +731,8 @@ def comparison_redo(
             raise RedoRefused("SIZING_REDO_SPENT", "this run's one comparison redo was the other build's")
         if record.get("after") is not None or not _same_dir(record.get("handoff_dir"), handoff_dir):
             raise RedoRefused("SIZING_REDO_SPENT", "this run's comparison redo has already been used by the sizing")
-        if correction is None and sr.consumed(record):
+        # Only a producer's rejection reprints a consumed redo: its hand-off was gated, and then refused.
+        if correction != PRODUCER_REJECTED and sr.consumed(record):
             raise RedoRefused(
                 "SIZING_REDO_SPENT",
                 "this run's comparison redo was already sent and its hand-off checked; re-run the sizing pipe",
@@ -767,7 +777,7 @@ def comparison_redo(
         "first_handoff_sha256": sr.file_sha256(handoff_file),
         "first_input_refs": first_refs,
         "research_at_first_print": sr.read_snapshot(handoff_dir, run_id),
-        "research_at_redo_print": sr.research_names(_read_json(os.path.join(analysis_dir, "validation.json"))),
+        "research_at_redo_print": sr.research_digest(_read_json(os.path.join(analysis_dir, "validation.json"))),
         "text_sha256": hashlib.sha256(redo_text(flagged, sorted(suspect)).encode("utf-8")).hexdigest(),
         "after": None,
     }
@@ -779,6 +789,10 @@ def redo_pending(context: str, run_id: str, analysis_dir: str, handoff_dir: str)
     """A plain sizing print while this build's redo, printed into the same hand-off dir, has not reached the
     sizing: RedoRefused SIZING_REDO_PENDING."""
     sr = _redo_module()
+    if _past_sizing(analysis_dir, run_id):
+        # The run moved on with the redo unused: a new redo is TOO_LATE, so the plain prompt is the only
+        # one left (Step 6d's sizing re-dispatch); the record stays and compose reports it not run.
+        return
     record = sr.load(analysis_dir, run_id)
     if (
         record is not None
@@ -956,6 +970,8 @@ def main() -> None:
                 redo = comparison_redo(
                     a.context, a.run_id, a.analysis_dir, a.handoff_dir, a.handoff_agent, a.suspect, a.correction
                 )
+        except _redo_module()._run_ref.LedgerUnavailable as e:
+            sys.exit(_redo_module()._run_ref.report_failure(e))
         except RedoRefused as e:
             message = g.FINISHED_MESSAGE if e.code == "RUN_FINISHED" else e.message
             sys.stdout.write(json.dumps({"status": "refused", "code": e.code, "message": message}) + "\n")
