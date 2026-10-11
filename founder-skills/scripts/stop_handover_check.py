@@ -308,19 +308,17 @@ def refused_reason(skill: str, error: str) -> str:
     held = _SHARED_TMP_HELD.findall(error) if "hook error:" in error else []
     if held:
         return (
-            f"The {label} closing step never ran: its command would have written {', '.join(held)}, a fixed "
-            "name in the shared temp folder, and was held before it started, so no summary from the analysis "
-            "reached the founder in this turn. That message is already in front of the founder, so send a "
-            "follow-up: run the closing step again with no redirect into the shared temp folder, and send what "
-            "it prints exactly as printed. If it cannot be run again, say so in one line, and add nothing with "
-            "a number."
+            f"The {label} closing step's last run never ran: its command would have written {', '.join(held)}, "
+            "a fixed name in the shared temp folder, and was held before it started, so it printed nothing. "
+            "Your last message is already in front of the founder, so send a follow-up: run the closing step "
+            "again with no redirect into the shared temp folder, and send what it prints exactly as printed. "
+            "If it cannot be run again, say so in one line, and add nothing with a number."
         )
     return (
-        f"The {label} closing step stopped with an error and printed no hand-over ({error}), so no summary "
-        "from the analysis reached the founder in this turn. That message is already in front of the "
-        "founder, so send a follow-up: compose the report again for this run, run the closing step again, "
-        "and send what it prints exactly as printed. If it cannot be run again, say so in one line, and add "
-        "nothing with a number."
+        f"The {label} closing step's last run stopped with an error and printed no hand-over ({error}). Your "
+        "last message is already in front of the founder, so send a follow-up: compose the report again for "
+        "this run, run the closing step again, and send what it prints exactly as printed. If it cannot be "
+        "run again, say so in one line, and add nothing with a number."
     )
 
 

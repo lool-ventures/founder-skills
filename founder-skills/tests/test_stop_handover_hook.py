@@ -469,6 +469,7 @@ def test_a_refused_closing_call_is_named_once_and_no_stale_hand_over_is_dictated
     assert "RUN_ID_MISMATCH" in reason and "compose the report again for this run" in reason
     assert PRINTED.rstrip() not in reason and "$7.0B" not in reason
     assert LEAD not in reason and "did not deliver" not in reason  # it never says the message was wrong
+    assert "reached the founder" not in reason and "no summary" not in reason  # it cannot know that
     # Once: the hook's own follow-up turn spends the budget.
     r = _run(tmp_path, rows, {"stop_hook_active": True})
     assert r.returncode == 0 and r.stdout == ""
@@ -500,13 +501,52 @@ def test_a_closing_call_the_shared_tmp_check_held_is_asked_to_run_again_without_
     assert "compose the report again" not in reason and "[shared-tmp]" not in reason
     assert PRINTED.rstrip() not in reason and "$7.0B" not in reason
     assert LEAD not in reason and "did not deliver" not in reason  # it never says the message was wrong
+    assert "reached the founder" not in reason and "no summary" not in reason
     r = _run(tmp_path, rows, {"stop_hook_active": True})
     assert r.returncode == 0 and r.stdout == ""
 
 
+def test_a_held_closer_with_the_runtimes_prefixed_sibling_field_reads_the_same(tmp_path: Path) -> None:
+    """As the host loop records a held shell call: `content` without a prefix, and a top-level
+    `tool_use_result` with an "Error: " one. The hook reads `message.content` only, so the sibling field is
+    invisible to it by construction; this row pins that it stays invisible (same reason as without it)."""
+    plain = _rows_with_result(
+        _result_for("toolu_close", HELD_BY_SHARED_TMP, is_error=True, as_string=True),
+        _assistant_text(OWN_VERDICT),
+        cmd=f"{CLOSING_CMD} | tee /tmp/h.txt",
+    )
+    recorded = json.loads(json.dumps(plain))
+    recorded[2]["tool_use_result"] = "Error: " + HELD_BY_SHARED_TMP
+    want = json.loads(_run(tmp_path, plain).stdout)
+    got = json.loads(_run(tmp_path, recorded).stdout)
+    assert got["decision"] == "block" and "never ran" in got["reason"] and "/tmp/h.txt" in got["reason"]
+    assert got == want
+
+
+def test_the_held_closer_branch_reads_the_shared_tmp_checks_own_deny_reason(tmp_path: Path) -> None:
+    """Couples the two modules: the result text is what `shared_tmp_check.decide` itself returns, behind the
+    runtime's hook-error prefix, so a change to that check's marker format reds this test."""
+    from test_shared_tmp_hook import CHECK, DENY_PREFIX, _payload, _started
+
+    command = f"{CLOSING_CMD} | tee /tmp/h.txt"
+    decision = CHECK.decide(_payload(tmp_path, _started(), command=command))
+    assert decision is not None  # lever: the check really holds this command
+    deny = decision["hookSpecificOutput"]["permissionDecisionReason"]
+    rows = _rows_with_result(
+        _result_for("toolu_close", DENY_PREFIX + deny, is_error=True, as_string=True),
+        _assistant_text(OWN_VERDICT),
+        cmd=command,
+    )
+    out = json.loads(_run(tmp_path, rows).stdout)
+    assert out["decision"] == "block"
+    assert "never ran" in out["reason"] and "/tmp/h.txt" in out["reason"]
+    assert "run the closing step again with no redirect into the shared temp folder" in out["reason"]
+
+
 def test_a_refused_closing_call_after_a_good_one_never_falls_back_to_it(tmp_path: Path) -> None:
     """A what-if: the first closer printed for the old figures, the re-run refused. The earlier hand-over is
-    never the comparand."""
+    never the comparand, and the follow-up does not say no summary reached the founder (one did, this
+    turn, for the old figures)."""
     rows = [
         _user("Use the market-sizing skill on this deck."),
         _call_with_id("mcp__workspace__bash", CLOSING_CMD, "toolu_first"),
@@ -517,6 +557,26 @@ def test_a_refused_closing_call_after_a_good_one_never_falls_back_to_it(tmp_path
     ]
     out = json.loads(_run(tmp_path, rows).stdout)
     assert out["decision"] == "block" and "RUN_ID_MISMATCH" in out["reason"]
+    assert PRINTED.rstrip() not in out["reason"]
+    assert "reached the founder" not in out["reason"] and "no summary" not in out["reason"]
+    assert "last run stopped with an error" in out["reason"]
+
+
+def test_a_held_closing_call_after_a_good_one_takes_the_held_branch(tmp_path: Path) -> None:
+    """The what-if shape with the re-run held: only the last call is read, and the held follow-up makes no
+    claim about what reached the founder either."""
+    held_cmd = f"{CLOSING_CMD} | tee /tmp/h.txt"
+    rows = [
+        _user("Use the market-sizing skill on this deck."),
+        _call_with_id("mcp__workspace__bash", CLOSING_CMD, "toolu_first"),
+        _result_for("toolu_first", PRINTED),
+        _call_with_id("mcp__workspace__bash", held_cmd, "toolu_close"),
+        _result_for("toolu_close", HELD_BY_SHARED_TMP, is_error=True, as_string=True),
+        _assistant_text(COULD_NOT_FINISH),
+    ]
+    out = json.loads(_run(tmp_path, rows).stdout)
+    assert out["decision"] == "block" and "never ran" in out["reason"]
+    assert "reached the founder" not in out["reason"] and "no summary" not in out["reason"]
     assert PRINTED.rstrip() not in out["reason"]
 
 
