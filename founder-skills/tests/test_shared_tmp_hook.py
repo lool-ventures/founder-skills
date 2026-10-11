@@ -81,6 +81,12 @@ DENIED = [
     ("x=$(cmd 2>/tmp/err.txt)", ["/tmp/err.txt"]),
     ("cmd \\\n  > /tmp/cont.txt", ["/tmp/cont.txt"]),
     ('echo "a | b" > /tmp/pipe.txt', ["/tmp/pipe.txt"]),
+    # A `cd` inside a subshell still moves the subshell's own writes.
+    ("(cd /tmp && cmd > out.txt)", ["/tmp/out.txt"]),
+    # A brace group runs in the block's own shell: its `cd` stays.
+    ("{ cd /tmp; ls; }; cmd > out.txt", ["/tmp/out.txt"]),
+    # Only the listed commands' `-o` is not an output.
+    ("curl -o /tmp/deck.pdf https://example.com/d", ["/tmp/deck.pdf"]),
     # A literal staging folder pasted as text is held by the text alone; the transcript exempts it (below).
     (
         'STAGING_DIR=/tmp/market-sizing-acme.staging.Ab12Cd; cp f "$STAGING_DIR"',
@@ -113,6 +119,16 @@ PASSED = [
     "mkdir -p /tmp/scratch && cmd > /tmp/scratch/out.txt",
     "find /tmp -name x -o -name y",
     "cd /tmp && unzip -o -q pack.zip -d verify",  # seen in a kept run: `-o` there is a switch
+    # For these commands `-o` is a switch or takes a value that is not a file they write.
+    'unzip -o /tmp/deck.zip -d "$STAGING_DIR"',
+    "grep -o /tmp/foo.txt log",
+    "cd /tmp && grep -oE x f",
+    "cd /tmp && unzip -oq pack.zip",
+    "ps -o pid,comm > /dev/null",
+    # A subshell's `cd` and assignments end with it.
+    "(cd /tmp && ls); cmd > out.txt",
+    "(cd /tmp && ls) ; cmd > out.txt",
+    '(OUT=/tmp/x.txt); cmd > "$OUT"',
     "cmd > /tmp/*.txt",
     "cmd > ~/out.txt",
 ]

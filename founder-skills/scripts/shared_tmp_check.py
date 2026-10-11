@@ -15,16 +15,31 @@ WHAT IS HELD. A write, read from the command's own text, whose target is a fixed
 exactly /tmp, /private/tmp or /var/tmp: an output redirect (`>`, `>>`, `>|`, `&>`, `N>`, `>& FILE`),
 `tee`, `dd of=`, `truncate`, `sed -i`, the destination of `cp`/`mv`/`install`/`rsync`/`ln` (`-t DIR`
 too, and a bare /tmp destination, which writes the source's name there), and any command's
-`-o`/`--output`/`--out` value. A name is fixed when nothing in it is left to the shell once the block's
-own literal assignments are filled in; `${TMPDIR:-/tmp}` reads as /tmp, since TMPDIR is unset in the
-Cowork VM. A relative target counts after an in-block literal `cd /tmp`. Heredoc bodies are not
-commands and are skipped; a heredoc this cannot follow leaves every line read as commands.
+`-o`/`--output`/`--out` value, except for the commands in `_O_NOT_OUTPUT`. A name is fixed when
+nothing in it is left to the shell once the block's own literal assignments are filled in;
+`${TMPDIR:-/tmp}` reads as /tmp, since TMPDIR is unset in the Cowork VM. A relative target counts after
+an in-block literal `cd /tmp`; a `cd` inside `( ... )` ends with the subshell, and so do its
+assignments. Heredoc bodies are not commands and are skipped; a heredoc this cannot follow leaves every
+line read as commands.
 
 WHAT IS NOT. A name with anything still to expand (`$STAGING_DIR/x`, bare `$TMPDIR/x`, `$(mktemp)`,
 `/tmp/out_$$.txt`), a path below a folder in /tmp (`/tmp/<dir>/<file>`), /dev, every read, a copy or
 move OUT of /tmp, a path the transcript shows `mktemp` printed (a staging folder pasted as text), and
 code a command runs (`bash -c "..."`, `python3 -c "open(...)"`): KNOWN RESIDUALS, with a fixed folder
-under /tmp, a name assigned in an earlier shell call, and a `cd` to a folder it cannot read.
+under /tmp, a name assigned in an earlier shell call, a `cd` to a folder it cannot read, and writes this
+does not model: `tar -czf /tmp/x`, `touch /tmp/flag`, `python3 -m json.tool in /tmp/out`, and
+`pushd /tmp && cmd > out` (only `cd` moves the folder). Each is a miss, bounded like a false hold by
+nothing but the budget below.
+
+WHY `-o` IS AN OUTPUT UNLESS THE COMMAND IS LISTED. `-o` writes a file for curl, sort, gcc, pandoc and
+our own scripts (`compose_report.py -o`, read through the interpreter as `python3 X.py -o`), and for
+any command this has never seen. The other choice, holding `-o` only for commands known to write
+through it, would miss every unknown command and every plugin script, and a miss is the defect this
+exists for, while a false hold costs one retry and ends after the budget. So the table names the
+commands whose `-o` is a switch (unzip's overwrite, grep's only-matching, ls, tar, zip, cpio, xargs,
+od, find's or) or takes a value that is not a file it writes (ps's format, ssh/scp/sftp's option,
+mount's options, a shell's `set -o`). Every false hold seen so far is in it; one found later is added
+there.
 
 SCOPE. Only a founder-skills run: the transcript's main thread started one of the six analysis skills
 (a `Skill` call or a typed `<command-name>`; text a tool returned does not count), or the command runs
@@ -71,6 +86,13 @@ _ASSIGN_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$", re.DOTALL)
 _CUTS = frozenset({";", "&&", "||", "|", "&", "(", ")", "{", "}", ";;", "|&"})
 _LEADERS = frozenset({"then", "do", "else", "elif", "!", "time", "command", "exec", "nohup", "sudo"})
 _COPIERS = frozenset({"cp", "mv", "install", "rsync", "ln"})
+# Commands whose `-o` (alone or glued, `-oq`) is a switch, not an output: nothing after it is a target.
+_O_SWITCH = frozenset(
+    {"unzip", "grep", "egrep", "fgrep", "zgrep", "rg", "ls", "tar", "zip", "cpio", "xargs", "od", "find"}
+)
+# Commands whose `-o` takes a value that is not a file they write: the value is skipped.
+_O_VALUE = frozenset({"ps", "ssh", "scp", "sftp", "mount", "set", "bash", "sh", "dash", "zsh"})
+_O_NOT_OUTPUT = _O_SWITCH | _O_VALUE
 # Flags whose next word is a value, not a file the command writes.
 _VALUE_FLAGS = {
     "truncate": ("-s", "--size", "-r", "--reference"),
@@ -119,6 +141,7 @@ class _Block:
         self.targets: list[str] = []  # fixed absolute paths written, as typed after expansion
         self.dirs: set[str] = set()  # paths the block uses as a folder (`mkdir X`, `X/...`)
         self.words: list[str] = []  # every word, expanded where it can be
+        self.saved: list[tuple[str | None, dict[str, str]]] = []  # (cwd, env) at each open `(`
 
     def fill(self, word: str) -> str:
         word = _TMPDIR_DEFAULT_RE.sub(lambda m: m.group(1), word)
@@ -182,8 +205,10 @@ class _Block:
                 skip = False
                 continue
             nxt = args[i + 1] if i + 1 < len(args) else None
-            if a in ("-o", "--output", "--out") and nxt is not None:
-                if not nxt.startswith("-"):  # `unzip -o -q`: there `-o` is a switch, not an output
+            if name in _O_NOT_OUTPUT and a.startswith("-o") and not a.startswith("--"):
+                skip = a == "-o" and name in _O_VALUE and nxt is not None  # `ps -o pid`: a value, no file
+            elif a in ("-o", "--output", "--out") and nxt is not None:
+                if not nxt.startswith("-"):  # `cmd -o -q`: a switch after all, not an output
                     out.append(nxt)
                 skip = True
             elif a.startswith(("--output=", "--out=")):
@@ -233,9 +258,15 @@ class _Block:
         while n <= len(tokens):
             tok = tokens[n] if n < len(tokens) else ";"
             n += 1
-            if tok in _CUTS:
+            if tok in _CUTS or (tok and set(tok) <= set("();|&")):
+                # shlex glues punctuation (`);`, `((`): every character of such a token is a cut
                 self.segment(words, writes)
                 words, writes = [], []
+                for ch in tok:
+                    if ch == "(":
+                        self.saved.append((self.cwd, dict(self.env)))
+                    elif ch == ")" and self.saved:  # a subshell's `cd` and assignments end with it
+                        self.cwd, self.env = self.saved.pop()
                 continue
             if tok and set(tok) <= set("<>&|") and ("<" in tok or ">" in tok):
                 target = tokens[n] if n < len(tokens) else ""
