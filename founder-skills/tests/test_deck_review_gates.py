@@ -449,6 +449,78 @@ def _resume(root: Path, extra: str) -> None:
     assert proc.returncode == 0, proc.stdout + proc.stderr
 
 
+LOOKS_RIGHT = "FS_HOST_ANSWER stage_confirmation=looks_right\n"
+
+
+@pytest.mark.parametrize("no_ask", [False, True])
+def test_compose_applies_a_stage_answer_a_resume_carried(tmp_path: Path, no_ask: bool) -> None:
+    """Step 3 emitted the question, a resume sent the answer, and the run composed without emitting again: the
+    answer is applied as the emit would, and the report says the request answered it."""
+    root, run_dir = _run(tmp_path, "FS_HOST_NO_ASK\n" if no_ask else "")
+    emitted = _emit(run_dir, "stage_confirmation", "seed")
+    assert emitted.returncode == (12 if no_ask else 0), emitted.stdout + emitted.stderr
+    _resume(root, LOOKS_RIGHT)
+    asked = json.loads((run_dir / "gate_state.json").read_text(encoding="utf-8"))
+    proc = _compose(run_dir)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    mirror = json.loads((run_dir / "gate_state.json").read_text(encoding="utf-8"))
+    assert (mirror["answer"], mirror["answer_source"], mirror["metadata"]["run_id"]) == ("Looks right", "host", RID)
+    assert {k: v for k, v in mirror.items() if k not in ("answer", "answer_source")} == asked
+    led = h.ledger(root, RID)
+    entry = led["gates"]["stage_confirmation"]
+    assert entry["state"] == "answered"
+    assert entry["current"]["binding"] == {"binder": "dr_confirmed_stage", "fingerprint": "seed"}
+    assert led["pre_answers"]["stage_confirmation"]["applied_at"] == entry["current"]["answered_at"]
+    assert "PRE_ANSWERED:stage_confirmation" in h.status(root, RID)["disclosures"]
+    assert "the request that started this review answered it" in (run_dir / "report.md").read_text(encoding="utf-8")
+
+
+def test_compose_keeps_a_resume_line_withheld_when_the_deck_states_another_stage(tmp_path: Path) -> None:
+    root, run_dir = _run(tmp_path, claimed="series_a")
+    _asked(run_dir, "stage_confirmation", "seed")
+    _resume(root, LOOKS_RIGHT)
+    proc = _compose(run_dir)
+    assert proc.returncode == 10, proc.stdout + proc.stderr
+    assert _out(proc)["blocked_by_gate"] == "stage_confirmation" and "apply_with" not in _out(proc)
+    notices = [n for n in h.ledger(root, RID)["notices"] if n["code"] == "PRE_ANSWER_NOT_APPLIED"]
+    assert len(notices) == 1 and "deck states Series A" in notices[0]["reason"]
+    assert "answer" not in json.loads((run_dir / "gate_state.json").read_text(encoding="utf-8"))
+    assert h.ledger(root, RID)["gates"]["stage_confirmation"]["state"] == "open"
+
+
+def test_compose_applies_nothing_when_the_answered_gate_would_not_validate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A line the mirror would refuse is not recorded: compose falls back to its refusal."""
+    root, run_dir = _run(tmp_path)
+    _asked(run_dir, "stage_confirmation", "seed")
+    _resume(root, LOOKS_RIGHT)
+    sys.path.insert(0, str(h.SHARED))
+    import _gates  # type: ignore[import-not-found]  # noqa: PLC0415
+    import _run_status  # type: ignore[import-not-found]  # noqa: PLC0415
+    from _artifact_writer import ArtifactValidationError  # type: ignore[import-not-found]  # noqa: PLC0415
+
+    def refuse(*_a: Any, **_k: Any) -> Any:
+        raise ArtifactValidationError("answer: not a listed option")
+
+    monkeypatch.setattr(gate_state, "_apply_request_answer", refuse)
+    compose_mod = _load_compose()
+    ledger = (_gates, _run_status.run_paths(str(root), RID))
+    assert compose_mod._apply_resume_answer(ledger, str(run_dir / "gate_state.json")) is False
+    assert "was not applied" in capsys.readouterr().err
+    assert h.ledger(root, RID)["gates"]["stage_confirmation"]["state"] == "open"
+
+
+def _load_compose() -> Any:
+    import importlib.util  # noqa: PLC0415
+
+    spec = importlib.util.spec_from_file_location("dr_compose_for_apply", COMPOSE)
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
 def test_an_out_of_scope_answer_a_resume_carried_names_the_emit_that_applies_it(tmp_path: Path) -> None:
     """Compose applies only the stage confirmation itself; for the out-of-scope question (and the stage pick), a
     line a resume stored is named with the step that applies it, never left to wait on as unanswered."""

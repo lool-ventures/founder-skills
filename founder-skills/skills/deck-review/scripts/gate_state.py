@@ -1159,6 +1159,57 @@ def _apply_request_answer(gates: Any, paths: Any, gate_id: str, data: dict[str, 
     )
 
 
+def apply_pending_from_mirror(gates: Any, paths: Any, gate_path: str) -> dict[str, Any] | None:
+    """compose found the stage confirmation unanswered while the request carries an answer for it (a resume
+    sent the line after Step 3 emitted the question, and the run composed without emitting again): apply it
+    here, exactly as `emit` would, and write the mirror as emit's answered branch does.
+
+    The stage confirmation only: the stage pick and the out-of-scope question are left to their emit (the
+    stop names it, `_gates.writer_apply_step`). Acts only when the mirror is this run's (`paths.run_id`), carries
+    no answer, and the ledger holds the question open with a pending line that was not withheld. The line goes
+    through `_apply_request_answer`, so emit's withheld rules (the deck states another stage; `Looks right` at
+    low confidence) and its stage binding hold here too. Returns the receipt's `answered` block, or None when
+    nothing was applied. Raises ArtifactValidationError when the answered mirror would not validate (nothing is
+    recorded then). Held under the file's lock, as `answer` is."""
+    lock_path = f"{gate_path}.lock"
+    with open(lock_path, "a+", encoding="utf-8") as lock:
+        with contextlib.suppress(OSError):
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        return _apply_pending_locked(gates, paths, gate_path)
+
+
+def _apply_pending_locked(gates: Any, paths: Any, gate_path: str) -> dict[str, Any] | None:
+    try:
+        with open(gate_path, encoding="utf-8") as f:
+            gate = json.load(f)
+    except (OSError, ValueError):
+        return None
+    run_id = str(paths.run_id)
+    if not isinstance(gate, dict) or gate.get("answer") is not None or _as_run_id(gate) != run_id:
+        return None
+    gate_id = gate.get("gate_id")
+    stage = gate.get("confirmed_stage")
+    if gate_id != AUTO_SATISFIABLE_GATE or stage not in STAGE_LABELS:
+        return None
+    led = gates.load_ledger(paths)
+    entry = (led.get("gates") or {}).get(gate_id) or {}
+    if entry.get("state") != "open" or "pre_answer_unlisted" in (entry.get("flags") or []):
+        return None
+    if ((led.get("pre_answers") or {}).get(gate_id) or {}).get("applied_at", True) is not None:
+        return None
+    data = {k: v for k, v in gate.items() if k not in ("metadata", "answer", "answer_source")}
+    shim = argparse.Namespace(output=gate_path, run_id=run_id, stage=stage, pretty=False)
+    applied = _apply_request_answer(gates, paths, gate_id, data, shim)
+    if not isinstance(applied, dict) or "answer_id" not in applied:
+        return None
+    led = gates.load_ledger(paths)
+    recorded = ((led.get("gates") or {}).get(gate_id) or {}).get("current") or {}
+    data["answer"] = recorded.get("answer")
+    data["answer_source"] = HOST if gates.answered_by_request(led, gate_id) else FOUNDER
+    write_artifact(data=data, schema=load_schema(_schema_path()), run_id=run_id, output_path=gate_path, pretty=False)
+    return {"gate_id": gate_id, "answer": data["answer"], "answer_source": data["answer_source"]}
+
+
 def cmd_answer(args: argparse.Namespace) -> int:
     # HELD ACROSS READ-CHECK-WRITE. `os.replace` makes the write atomic, which prevents a
     # TORN file and does nothing about a LOST UPDATE: two calls both read an unanswered gate,

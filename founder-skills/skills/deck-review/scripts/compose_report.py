@@ -1773,6 +1773,24 @@ def _next_stage_gate(gate: dict[str, Any], code: str) -> str:
     return "out_of_scope_choice"
 
 
+def _apply_resume_answer(ledger: Any, gate_path: str | None) -> bool:
+    """The stage confirmation is unanswered, and the request may carry its answer (a resume sent it after Step 3
+    emitted the question): apply it through `gate_state.py`'s own path, its withheld rules included. True when an
+    answer was recorded and the mirror rewritten. A line the mirror would refuse, or anything unreadable, applies
+    nothing, and the refusal stands."""
+    if not gate_path:
+        return False
+    from _artifact_writer import ArtifactValidationError  # noqa: PLC0415
+    from gate_state import apply_pending_from_mirror  # noqa: PLC0415
+
+    gates, paths = ledger
+    try:
+        return apply_pending_from_mirror(gates, paths, gate_path) is not None
+    except ArtifactValidationError as exc:
+        print(f"warning: the request's answer was not applied: {exc}", file=sys.stderr)
+        return False
+
+
 def _record_refusal(ledger: Any, gate: dict[str, Any], e: GateNotAuthorized) -> int:
     """The run status for a refused compose, and the exit code: 10 when it is a question to ask again.
 
@@ -2385,9 +2403,20 @@ def main() -> None:
     try:
         result = compose(args.dir, report_path=report_path, gate_state=gate_state)
     except GateNotAuthorized as e:
-        rc = _record_refusal(ledger, gate_state or {}, e) if ledger is not None else 1
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(rc)
+        refused: GateNotAuthorized | None = e
+        if ledger is not None and e.code == "GATE_UNANSWERED" and _apply_resume_answer(ledger, args.gate_state):
+            # The request answered the stage confirmation after Step 3 emitted it: applied as the emit would,
+            # and composed once more against the answered gate.
+            gate_state = read_gate_state(args.gate_state)
+            try:
+                result = compose(args.dir, report_path=report_path, gate_state=gate_state)
+                refused = None
+            except GateNotAuthorized as again:
+                refused = again
+        if refused is not None:
+            rc = _record_refusal(ledger, gate_state or {}, refused) if ledger is not None else 1
+            print(f"Error: {refused}", file=sys.stderr)
+            sys.exit(rc)
     if ledger is not None:
         _refuse_open_gates(ledger)
 
