@@ -1875,13 +1875,20 @@ def main() -> None:
             print(f"Error: cannot write --write-md file: {e}", file=sys.stderr)
             sys.exit(2)
 
+    # The run this report was composed for, last: the insert refuses another run's report.
+    result["run_id"] = run_id or None
     indent = 2 if args.pretty else None
     out = json.dumps(result, indent=indent) + "\n"
     v = result["validation"]
     _write_output(
         out,
         args.output,
-        summary={"validation": v["status"], "warnings": len(v["warnings"])},
+        summary={
+            "validation": v["status"],
+            "warnings": len(v["warnings"]),
+            "run_id": run_id or None,
+            "dir": os.path.abspath(args.dir),
+        },
     )
 
     # Post-write on-disk verification: confirm declared output files exist and are non-empty.

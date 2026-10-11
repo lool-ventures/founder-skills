@@ -2201,6 +2201,8 @@ def main() -> int:
         "reconciliation_status": _recon_status,
         "max_divergence_ppm": _max_ppm,
         "disclosure_banner": _banner,
+        # The run this report was composed for, last: the insert refuses another run's report.
+        "run_id": args.run_id or None,
     }
 
     # Write report.json
@@ -2230,6 +2232,8 @@ def main() -> int:
         "coverage_disclosure": _disclosure_path,
         "insertion_marker": insertion_marker,
         "validation_warnings": len(validation_warnings),
+        "run_id": args.run_id or None,
+        "dir": os.path.abspath(args.dir),
     }
     print(json.dumps(receipt, indent=2 if args.pretty else None))
 

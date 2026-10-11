@@ -10,12 +10,16 @@ some other arm.
 Normalisation replaces only what legitimately varies between runs: the temp dir's path, timestamps,
 random uuids and the per-run coaching marker suffix. Everything else is hashed as written.
 
-The committed file was captured from a checkout of the commit before the registry, by pointing this
-helper at that checkout's plugin (`NO_LEDGER_GOLDENS_PLUGIN`). Regenerate ONLY when a writer's no-ledger
-behaviour is meant to change, the same way:
+The committed file was first captured from a checkout of the commit before the registry, by pointing this
+helper at that checkout's plugin (`NO_LEDGER_GOLDENS_PLUGIN`). That procedure is for PROVING a change kept
+the old behaviour: run it against the commit before, and the file must not move.
     git worktree add <dir> <commit-before-the-change>
     NO_LEDGER_GOLDENS_PLUGIN=<dir>/founder-skills python founder-skills/tests/no_ledger_goldens.py --write
     git worktree remove <dir>
+When a writer's no-ledger output is MEANT to change, regenerate from the tree that changes it
+(`python founder-skills/tests/no_ledger_goldens.py --write`), after a key-by-key diff of the old capture
+against the new one shows only the keys the change names moved. Every compose's report.json and its success
+receipt moved that way when each report began to carry its run's id; the insert scenarios did not move.
 """
 
 from __future__ import annotations

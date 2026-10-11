@@ -2607,6 +2607,9 @@ def main() -> None:
             print(f"Error: cannot write --write-md file: {e}", file=sys.stderr)
             sys.exit(2)
 
+    # The run this report was composed for, last: the insert and the closer refuse another run's report.
+    run_id = _cp_gates.run_id_of(args.dir)
+    result["run_id"] = run_id or None
     indent = 2 if args.pretty else None
     out = json.dumps(result, indent=indent) + "\n"
 
@@ -2616,6 +2619,8 @@ def main() -> None:
         summary={
             "warnings": len(result["warnings"]),
             "artifacts_loaded": len(result["artifacts_loaded"]),
+            "run_id": run_id or None,
+            "dir": os.path.abspath(args.dir),
         },
     )
 
