@@ -4837,6 +4837,10 @@ def needs_input(ctx: Ctx, ledger: dict[str, Any], key: str) -> dict[str, Any]:
             out["answer_command"] += f' --value "{VALUE_SLOT}"'
     else:
         out["answer_command"] = None
+        step = writer_apply_step(ctx, ledger, key)
+        if step is not None:
+            # A request line its own step applies, stored since that step ran: run it, never ask.
+            out["apply_with"] = step
     return out
 
 
@@ -5190,9 +5194,52 @@ def mark_context_written(paths: _run_status.RunPaths) -> None:
     transact(paths, fn)
 
 
+NO_ASK_APPLY_STOP = (
+    "The request carried an answer for this question, which its own step applies: run {step}, then continue. "
+    "Ask nothing — not with the question tool, not in chat — and record no answer yourself."
+)
+
+
+def writer_apply_step(ctx: Ctx, ledger: dict[str, Any], key: str) -> str | None:
+    """The step that applies a request line stored for a script-owned gate, when a script that is not the gate's
+    writer stops on it; None otherwise.
+
+    A gate its own script records (`writer` is not the recorder) takes a stored line only in that script's call,
+    which can be skipped: the stop then names that call, so the line is applied rather than waited on. Only for a
+    line still pending and not flagged `pre_answer_unlisted` (a line its writer withheld or did not offer is the
+    founder's question, and the ordinary stop stands). Read only: `pending_pre_answer` is not called, since it
+    writes a bare line's copy into the ledger. cap-table's blockers reach only this: applying a value there
+    means mapping the workbook again, which no other script has the inputs for."""
+    gate_id, _instance = parse_key(key)
+    g = GATES.get(gate_id)
+    if g is None or g["writer"] == RECORDER:
+        return None
+    stored = ledger.get("pre_answers") or {}
+    pa = stored.get(key)
+    if pa is None and gate_id in BARE_PRE_ANSWER_GATES:
+        pa = stored.get(gate_id)
+    if not isinstance(pa, dict) or pa.get("applied_at") is not None:
+        return None
+    entry = (ledger.get("gates") or {}).get(key)
+    if isinstance(entry, dict) and "pre_answer_unlisted" in (entry.get("flags") or []):
+        return None
+    if g["writer"] == "record_revision_answer.py":
+        script = os.path.join(_MS_SCRIPTS, "record_revision_answer.py")
+        if ctx.run_dir:
+            return f'`python3 "{script}" --dir "{ctx.run_dir}" --from-pre-answer`'
+        return f'Step 6d\'s `python3 "{script}" --dir "<the analysis dir>" --from-pre-answer`'
+    if g["writer"] == "gate_state.py":
+        return "Step 3's `gate_state.py emit` for this question again (it applies the request's answer)"
+    if g["writer"] == "extract_cap_table.py":
+        return "`extract_cap_table.py --mode=freeform-emit` again with the same blocks (it applies the request's value)"
+    return f"`{g['writer']}` again (it applies the request's answer)"
+
+
 def no_ask_payload(ctx: Ctx, ledger: dict[str, Any], keys: list[str]) -> dict[str, Any]:
     """What a script prints in place of `needs_input` when the request said not to ask: the questions the run
-    waits on (for the record, never to be put) and the stop. Empty when nothing waits."""
+    waits on (for the record, never to be put) and the stop. Empty when nothing waits. When the first question
+    is a script-owned gate whose stored request line its own step was skipped before applying, the stop names
+    that step (`writer_apply_step`), and `apply_with` carries it."""
     if not keys:
         return {}
     waiting = []
@@ -5204,7 +5251,11 @@ def no_ask_payload(ctx: Ctx, ledger: dict[str, Any], keys: list[str]) -> dict[st
         except Unimplemented:
             opts = fixed_options(g, instance, ctx.skill)
         waiting.append({"gate": k, "question": render_question(g, instance, ctx), "options": [o["id"] for o in opts]})
-    return {"status": "waiting", "no_ask": True, "waiting": waiting, "stop": NO_ASK_STOP}
+    step = writer_apply_step(ctx, ledger, keys[0])
+    if step is None:
+        return {"status": "waiting", "no_ask": True, "waiting": waiting, "stop": NO_ASK_STOP}
+    stop = NO_ASK_APPLY_STOP.format(step=step)
+    return {"status": "waiting", "no_ask": True, "waiting": waiting, "stop": stop, "apply_with": step}
 
 
 def derive_instruction(ctx: Ctx, key: str) -> dict[str, Any]:
@@ -5228,13 +5279,22 @@ def waiting_exit(ctx: Ctx, ledger: dict[str, Any], key: str) -> tuple[int, dict[
     on an unanswered gate builds its exit here."""
     if no_ask(ledger):
         payload = {**no_ask_payload(ctx, ledger, [key]), "blocked_by_gate": key}
-        return NO_ASK_EXIT, payload, f"Waiting (the request said not to ask): {key}. {NO_ASK_STOP}"
-    return (
-        EXIT_CODES["waiting"],
-        {"status": "waiting", "blocked_by_gate": key, "needs_input": [needs_input(ctx, ledger, key)]},
+        return NO_ASK_EXIT, payload, f"Waiting (the request said not to ask): {key}. {payload['stop']}"
+    attended: dict[str, Any] = {
+        "status": "waiting",
+        "blocked_by_gate": key,
+        "needs_input": [needs_input(ctx, ledger, key)],
+    }
+    line = (
         f"Waiting: {key} has no answer for this run yet; ask it, record the answer, then run this again. "
-        "Nothing was written.",
+        "Nothing was written."
     )
+    step = writer_apply_step(ctx, ledger, key)
+    if step is not None:
+        # The request answered it already, in a line only the gate's own step applies: name that step first.
+        attended["apply_with"] = step
+        line += f" The request carried an answer for it, which its own step applies: run {step} first."
+    return EXIT_CODES["waiting"], attended, line
 
 
 # --- the dedicated writers ---------------------------------------------------------------------------

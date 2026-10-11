@@ -1821,11 +1821,18 @@ def _record_refusal(ledger: Any, gate: dict[str, Any], e: GateNotAuthorized) -> 
         # The request said not to ask: nothing to put to anyone; the run waits for a request line.
         payload = gates.transact(paths, lambda ctx, led, st: gates.no_ask_payload(ctx, led, [key]))
         sys.stdout.write(json.dumps({**payload, "code": e.code, "blocked_by_gate": key, "message": str(e)}) + "\n")
-        print(f"Waiting (the request said not to ask): {key}. {gates.NO_ASK_STOP}", file=sys.stderr)
+        print(f"Waiting (the request said not to ask): {key}. {payload['stop']}", file=sys.stderr)
         return int(gates.NO_ASK_EXIT)
-    sys.stdout.write(
-        json.dumps({"status": "waiting", "code": e.code, "blocked_by_gate": key, "message": str(e)}) + "\n"
-    )
+    waiting_out: dict[str, Any] = {"status": "waiting", "code": e.code, "blocked_by_gate": key, "message": str(e)}
+    try:
+        step = gates.transact(paths, lambda ctx, led, st: gates.writer_apply_step(ctx, led, key))
+    except Exception:  # noqa: BLE001 -- the hint never changes the exit
+        step = None
+    if step is not None:
+        # The request answered it in a line only Step 3's emit applies: name that step, never ask.
+        waiting_out["apply_with"] = step
+        print(f"The request carried an answer for {key}, which its own step applies: run {step}.", file=sys.stderr)
+    sys.stdout.write(json.dumps(waiting_out) + "\n")
     return int(gates.EXIT_CODES["waiting"])
 
 

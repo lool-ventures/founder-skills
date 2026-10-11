@@ -443,6 +443,36 @@ def test_compose_over_an_unanswered_gate_waits_on_it(tmp_path: Path) -> None:
     assert not (run_dir / "report.json").exists() and not (run_dir / "report.md").exists()
 
 
+def _resume(root: Path, extra: str) -> None:
+    prompt = str(h.status(root, RID)["resume_prompt"])
+    proc = h.start(root, "deck-review", prompt + extra)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_an_out_of_scope_answer_a_resume_carried_names_the_emit_that_applies_it(tmp_path: Path) -> None:
+    """Compose applies only the stage confirmation itself; for the out-of-scope question (and the stage pick), a
+    line a resume stored is named with the step that applies it, never left to wait on as unanswered."""
+    root, run_dir = _run(tmp_path, "FS_HOST_NO_ASK\n", stage="growth")
+    assert _emit(run_dir, "out_of_scope_choice", "growth").returncode == 12
+    _resume(root, "FS_HOST_ANSWER out_of_scope_choice=proceed_anyway\n")
+    proc = _compose(run_dir)
+    assert proc.returncode == 12, proc.stdout + proc.stderr
+    out = _out(proc)
+    assert out["blocked_by_gate"] == "out_of_scope_choice" and "gate_state.py emit" in out["stop"]
+    assert "gate_state.py emit" in proc.stderr and out["apply_with"] in out["stop"]
+    assert h.ledger(root, RID)["pre_answers"]["out_of_scope_choice"]["applied_at"] is None
+
+
+def test_attended_an_out_of_scope_answer_a_resume_carried_is_named_too(tmp_path: Path) -> None:
+    root, run_dir = _run(tmp_path, stage="growth")
+    _asked(run_dir, "out_of_scope_choice", "growth")
+    _resume(root, "FS_HOST_ANSWER out_of_scope_choice=proceed_anyway\n")
+    proc = _compose(run_dir)
+    assert proc.returncode == 10, proc.stdout + proc.stderr
+    assert "gate_state.py emit" in _out(proc)["apply_with"] and "gate_state.py emit" in proc.stderr
+    assert not (run_dir / "report.md").exists()
+
+
 def test_compose_on_an_intermediate_pick_keeps_the_pick(tmp_path: Path) -> None:
     root, run_dir = _run(tmp_path)
     _settle(run_dir, "stage_confirmation", "seed", "Different stage")

@@ -1477,3 +1477,83 @@ def test_a_founder_fact_asked_again_is_asked_not_refused_as_an_unreadable_input(
     second = g.transact(paths, lambda ctx, led, st: g.open_gates(ctx, led, [key]))
     assert [w["gate"] for w in second["waiting"]] == [key]
     assert h.status(root, RID)["status"] == "waiting"
+
+
+# --- a request line its own step applies, when that step was skipped ---------------------------------------------
+
+CT = h.SKILLS / "cap-table" / "scripts"
+BLOCKER = "ct_lane3_blocker.0.interest_rate_type"
+BLOCKER_LINE = f"FS_HOST_VALUE {BLOCKER}=stated | fixed_numeric_simple\n"
+
+
+def _ct_blocker(tmp: Path, lines: str = "", *, attended: bool = False) -> Path:
+    """A cap-table run whose freeform emit left the interest-rate blocker open (or, with a line the mapper refuses,
+    open and flagged). Returns the artifacts root."""
+    if attended:
+        root, run_id, run_dir = h.start_bound(tmp, "cap-table", lines=f"FS_HOST_RUN_ID={RID}\n{lines}")
+        assert run_id == RID
+    else:
+        root, _rid, run_dir = _bound(tmp, "cap-table", lines)
+    inputs = {**goldens.CT_INPUTS, "metadata": {"run_id": RID, "schema_version": "v0.5.0-inputs"}}
+    (run_dir / "inputs.json").write_text(json.dumps(inputs), encoding="utf-8")
+    emit = h.run(
+        CT / "extract_cap_table.py",
+        "--mode=freeform-emit",
+        "--xlsx",
+        str(goldens.ct_workbook(tmp)),
+        "--dir",
+        str(run_dir),
+        "--run-id",
+        RID,
+        stdin=json.dumps(goldens.CT_NOTE_BLOCKS),
+    )
+    assert emit.returncode == 0, emit.stdout + emit.stderr
+    assert _entry(root, BLOCKER)["state"] == "open"
+    return root
+
+
+def _ct_compose_stop(root: Path, capsys: pytest.CaptureFixture[str]) -> tuple[int, dict[str, Any], str]:
+    """cap-table compose's open-question check, in process (it needs no math run to reach the blocker)."""
+    ct_gates = _load("ct_gates_for_floor", CT / "_ct_gates.py")
+    capsys.readouterr()
+    with pytest.raises(SystemExit) as ended:
+        ct_gates.refuse_open_gates((g, rs.run_paths(str(root), RID)))
+    out = capsys.readouterr()
+    payload: dict[str, Any] = json.loads(out.out.strip().splitlines()[-1])
+    return int(ended.value.code or 0), payload, out.err
+
+
+def test_a_script_owned_gate_with_a_stored_line_names_the_step_that_applies_it(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A resume stored the blocker's value and compose ran before the emit that applies it: the stop names the
+    emit, so the run is not left waiting on an answer it already has."""
+    root = _ct_blocker(tmp_path)
+    _resume(root, "cap-table", BLOCKER_LINE)
+    code, out, err = _ct_compose_stop(root, capsys)
+    assert code == 12 and out["blocked_by_gate"] == BLOCKER
+    assert out["stop"] != g.NO_ASK_STOP and "extract_cap_table.py --mode=freeform-emit" in out["stop"]
+    assert "Ask nothing" in out["stop"] and out["apply_with"] in out["stop"]
+    assert err.startswith("Waiting (the request said not to ask):")
+    assert "extract_cap_table.py --mode=freeform-emit" in err
+    assert "needs_input" not in out
+
+
+def test_a_withheld_line_waits_with_the_ordinary_stop(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """A line the gate's own step refused is the founder's question: the ordinary stop, no step named."""
+    root = _ct_blocker(tmp_path, f"FS_HOST_VALUE {BLOCKER}=stated | not-an-enum\n")
+    assert "pre_answer_unlisted" in _entry(root, BLOCKER)["flags"]
+    code, out, err = _ct_compose_stop(root, capsys)
+    assert code == 12 and out["stop"] == g.NO_ASK_STOP and "apply_with" not in out
+    assert "extract_cap_table.py" not in err
+
+
+def test_an_attended_stop_on_a_stored_line_names_the_step_too(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = _ct_blocker(tmp_path, attended=True)
+    prompt = str(h.status(root, RID)["resume_prompt"])
+    _ok(h.start(root, "cap-table", prompt + BLOCKER_LINE))
+    code, out, _err = _ct_compose_stop(root, capsys)
+    assert code == 10 and out["blocked_by_gate"] == BLOCKER
+    assert "extract_cap_table.py --mode=freeform-emit" in out["needs_input"][0]["apply_with"]
