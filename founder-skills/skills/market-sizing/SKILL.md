@@ -570,7 +570,7 @@ re-dispatch from a done one.
 
 **When methodology is "both":** Research both approaches in parallel (two WebSearch calls in one assistant turn — one for top-down market data, one for bottom-up customer/ARPU data).
 
-- **Top-down research:** WebSearch for industry reports, government statistics, analyst estimates for total market size, segment percentages, market growth rates.
+- **Top-down research:** WebSearch for industry reports, government statistics, analyst estimates for total market size, segment percentages, market growth rates. For the industry total, prefer a figure for the product's own geography and category; label a broader one as broader.
 - **Bottom-up research:** WebSearch for customer counts, pricing/ARPU benchmarks, competitor data, serviceable segment data.
 
 **When methodology is single:** Perform one research pass for the chosen approach.
@@ -748,11 +748,15 @@ When methodology is "bottom_up" only: same with `bottom_up_output.json`.
 
 For "both", read `sizing.json`'s comparison: each of TAM, SAM and SOM is gated at >30% (`tam_delta_pct`,
 `sam_delta_pct`, `som_delta_pct`); TAM agreeing says nothing about SAM/SOM. A TAM/SAM/SOM discrepancy over
-30% means checking which build's inputs miss the product's actual target universe (not an inflated industry
-total); record a better figure in `validation.json` if research finds one. Then, once per run, re-run that
+30% means an input may be wrong, or the two builds may measure different markets (say, a global all-category
+total against a count of the product's buyers); record a better-fitting figure in `validation.json` if
+research finds one. Then, once per run, re-run that
 build's generator with the same arguments plus `--redo comparison` (`--suspect <input>` for inputs you
 doubt), send its output in your next call, gate it, and re-run the same pipe. Never print that build's plain
-prompt again or edit a sizing prompt by hand. A gap that remains is reported, not removed.
+prompt again or edit a sizing prompt by hand. That redo, with the hand-off corrections above for it, is the
+only sizing dispatch a gap allows; a redo refused as `SIZING_REDO_SPENT` or `SIZING_REDO_TOO_LATE` is not
+retried. A gap that remains is reported, not removed: no later step re-dispatches a build for it unless the founder
+asks at Step 6d.
 
 **Multi-vertical / platform companies:** If `inputs.json` lists applications in 2+ distinct industries:
 

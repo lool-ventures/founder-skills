@@ -302,6 +302,18 @@ def test_step_5_names_the_redo_the_generator_accepts() -> None:
         assert "a sizing build: a redo keeps `--redo comparison`" in row
 
 
+def test_step_5_allows_one_sizing_dispatch_per_gap() -> None:
+    """A builds gap is not a fault to repair: the redo (and its hand-off corrections) is the only dispatch it
+    allows, the two terminal refusals are not retried, and no later step re-dispatches a build for it unless
+    the founder asks at Step 6d. Scoped to the gap: Step 7's remedies for a stale or altered sizing still apply."""
+    text = (PLUGIN / "skills" / "market-sizing" / "SKILL.md").read_text(encoding="utf-8")
+    step5 = " ".join(text[text.index("### Step 5: Calculate TAM/SAM/SOM") : text.index("### Step 5.5")].split())
+    assert "with the hand-off corrections above for it, is the only sizing dispatch a gap allows" in step5
+    assert "`SIZING_REDO_SPENT` or `SIZING_REDO_TOO_LATE` is not retried" in step5
+    assert "no later step re-dispatches a build for it unless the founder asks at Step 6d" in step5
+    assert "flawed input" not in step5
+
+
 # --- T3: the printed redo -----------------------------------------------------------------------------
 
 

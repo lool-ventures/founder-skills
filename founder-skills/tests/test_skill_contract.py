@@ -978,7 +978,12 @@ SKILL_MD_CEILING: dict[str, int] = {
     # corrections (exit 3, producer rejection) name the sizing builds as printed prompts too, and say a redo's
     # correction keeps `--redo comparison` (+96).
     # 106,737 -> 106,739 (+2 B): one Step 5 clause reworded ("each of TAM, SAM and SOM is gated").
-    "market-sizing": 106_739,
+    # 106,739 -> 107,162 (+423 B), RAISED: Step 5 says a builds gap gets the one comparison redo (with its
+    # hand-off corrections) and otherwise stands as a finding, naming the two refusals not retried and saying
+    # no later step re-dispatches a build for it unless the founder asks at Step 6d, and reads a gap as a
+    # wrong input or two builds measuring different markets (+305); Step 4 asks for an industry total matching
+    # the product's geography and category (+118).
+    "market-sizing": 107_162,
     # fmr raised for two founder-facing-correctness items measured in a live run: the CHECKLIST
     # dispatch now forbids citing our artifact filenames in evidence (that run put `inputs.json` in 10
     # items' evidence, printed verbatim into the founder's report), and the producer pipe passes
