@@ -5,6 +5,59 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.18.3] - 2026-10-12 — A market-size gap is described as it is, and no step runs under another review's id
+
+### Highlights
+
+**A disagreement between the two market-size builds no longer blames an input it cannot name.** When the
+top-down and bottom-up builds differ by more than 30%, the report now says an input may be wrong, or the
+two builds may measure different markets, and names the research figure each total market estimate is
+built from, so a founder can see when one counts a whole industry worldwide and the other counts their
+own customers. Before this it said one approach likely had a flawed input, which was misleading when the
+two builds simply measured different things.
+
+**A cap-table step run under another review's id is refused.** In a folder that belongs to a review, a
+step given a different review's id used to run with that review's questions skipped. It is now refused,
+as inserting the coaching commentary already was.
+
+### Scoring changes
+
+None.
+
+### Fixed
+
+- Market sizing: when the two builds differ by more than 30%, the report, the summary and the closing
+  message say an input may be wrong, or the two builds may measure different markets, instead of
+  asserting a flawed input. A report built before this release shows the new wording when rebuilt.
+- Market sizing: a builds gap is redone at most once; a gap that remains is reported, and the run no
+  longer sends a build back for it unless the founder asks for a revision.
+- Cap table: in a folder that belongs to a review, any step given a different review's id is refused,
+  instead of running with that review's questions skipped.
+- In Cowork, a command that would save a download, a script's output or an archive under a fixed name in
+  the shared temporary folder is now caught like any other write there, and a `case` statement inside
+  parentheses no longer confuses which folder a later command writes into.
+- When a closing step that was run again fails, the follow-up the assistant is asked to send says what
+  that step's last run did, instead of saying that no summary reached you.
+- A step that ran a prompt generator and discarded its output, in a block that also wrote another file,
+  no longer makes every later sub-agent hand-off in the session wait twice before going through.
+
+### Changed
+
+- Market sizing: when the total market estimates are flagged, the report adds one sentence naming the
+  research figure, or the kind of input, each one is built from.
+- Market sizing: the research step prefers a market total for the product's own geography and category,
+  and labels a broader one as broader.
+
+### Development
+
+Contributor-facing only; nothing here changes what a founder installs or runs.
+
+- The host contract lists the run-not-bound refusal among cap-table's producer codes.
+- New tests: the coaching insert as each skill runs it, in a folder bound to a run; closing steps with no
+  run id; a refused closing step leaves the run status untouched.
+- The recorded test sessions were not refreshed for this release; the changed shared scripts mark them
+  stale, which is a warning only.
+
 ## [0.18.2] - 2026-10-11 — An answer the request already gave is used, and a report is never handed over for the wrong run
 
 ### Highlights
