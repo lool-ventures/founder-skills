@@ -224,25 +224,39 @@ def _results_by_id(rows: list[dict[str, Any]]) -> dict[str, str]:
     return out
 
 
-def text_after_closing_call(rows: list[dict[str, Any]]) -> str | None:
-    """Every top-level assistant text after the last closing-message call of the current prompt, or
-    None when there was none (see `closing_call`)."""
-    found = closing_call(rows)
-    return found[1] if found is not None else None
+_EXIT_PREFIX = re.compile(r"\[exit (-?\d+)\]")
 
 
-def closing_call(rows: list[dict[str, Any]]) -> tuple[str, str, str | None] | None:
-    """(skill, every top-level assistant text after the last closing-message call of the current
-    prompt, restarting after any Stop-hook feedback turn, the printed hand-over sliced from the
-    latest of that skill's closing calls whose result holds one -- else None), or None when the
-    current prompt made no such call: this stop is not ours."""
+def _errored_ids(rows: list[dict[str, Any]]) -> set[str]:
+    """Ids of top-level tool results that report a failure: `is_error`, or the host loop's `[exit N]` lead
+    with N other than 0."""
+    out: set[str] = set()
+    for row in rows:
+        if row.get("type") != "user" or row.get("isSidechain"):
+            continue
+        content = (row.get("message") or {}).get("content")
+        if not isinstance(content, list):
+            continue
+        for b in content:
+            if not (isinstance(b, dict) and b.get("type") == "tool_result"):
+                continue
+            rid = b.get("tool_use_id")
+            if not (isinstance(rid, str) and rid):
+                continue
+            m = _EXIT_PREFIX.match(_text_of(b.get("content")).lstrip())
+            if b.get("is_error") is True or (m is not None and m.group(1) != "0"):
+                out.add(rid)
+    return out
+
+
+def _latest_closing_call(rows: list[dict[str, Any]]) -> tuple[int, int, str, str | None] | None:
+    """(current prompt's first row, the row of its last closing-message call, that call's skill, its id or
+    None), or None when the current prompt made no such call."""
     start = 0
     for i, row in enumerate(rows):
         if _is_real_user_prompt(row):
             start = i
-    call_at = None
-    call_skill: str | None = None
-    calls: list[tuple[str, str]] = []  # (skill, call id) in order
+    found: tuple[int, int, str, str | None] | None = None
     for i in range(start, len(rows)):
         row = rows[i]
         if row.get("type") != "assistant" or row.get("isSidechain"):
@@ -254,11 +268,61 @@ def closing_call(rows: list[dict[str, Any]]) -> tuple[str, str, str | None] | No
             if isinstance(b, dict) and b.get("type") == "tool_use":
                 skill = _skill_of_call(b.get("input"))
                 if skill is not None:
-                    call_at, call_skill = i, skill
-                    if isinstance(b.get("id"), str) and b["id"]:
-                        calls.append((skill, b["id"]))
-    if call_at is None or call_skill is None:
+                    cid = b.get("id")
+                    found = (start, i, skill, cid if isinstance(cid, str) and cid else None)
+    return found
+
+
+def refused_closing_call(rows: list[dict[str, Any]]) -> tuple[str, str] | None:
+    """(skill, the first line of its error) when the current prompt's LAST closing-message call failed and
+    printed no hand-over -- a closer that refused a report from another run, say. Any handover.txt on disk
+    is then an earlier run's, so nothing is judged against it; an earlier closing call of the same prompt
+    is never used either. A failed call that still printed a whole hand-over (a compound command whose
+    other part failed) is judged as before."""
+    latest = _latest_closing_call(rows)
+    if latest is None or latest[3] is None:
         return None
+    start, _at, skill, cid = latest
+    if cid not in _errored_ids(rows[start:]):
+        return None
+    text = _results_by_id(rows[start:]).get(cid, "")
+    opener = next(o for name, _t, _g, o in SKILLS if name == skill)
+    if printed_from_result(text, opener) is not None:
+        return None
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip() and not _EXIT_PREFIX.fullmatch(ln.strip())]
+    return skill, (lines[0][:300] if lines else "no output")
+
+
+def refused_reason(skill: str, error: str) -> str:
+    """The once-only follow-up for a closing step that refused. It states what the closing step did, never
+    that the message above was wrong (the rule cannot tell), and dictates no earlier run's hand-over."""
+    label = skill.replace("-", " ")
+    return (
+        f"The {label} closing step stopped with an error and printed no hand-over ({error}), so no summary "
+        "from the analysis reached the founder in this turn. That message is already in front of the "
+        "founder, so send a follow-up: compose the report again for this run, run the closing step again, "
+        "and send what it prints exactly as printed. If it cannot be run again, say so in one line, and add "
+        "nothing with a number."
+    )
+
+
+def text_after_closing_call(rows: list[dict[str, Any]]) -> str | None:
+    """Every top-level assistant text after the last closing-message call of the current prompt, or
+    None when there was none (see `closing_call`)."""
+    found = closing_call(rows)
+    return found[1] if found is not None else None
+
+
+def closing_call(rows: list[dict[str, Any]]) -> tuple[str, str, str | None] | None:
+    """(skill, every top-level assistant text after the last closing-message call of the current
+    prompt, restarting after any Stop-hook feedback turn, the printed hand-over sliced from that
+    last call's result -- else None), or None when the current prompt made no such call: this stop
+    is not ours. Only the last call's result is read: an earlier closing call of the same prompt
+    printed for figures the run has since replaced (a what-if, a refused re-run)."""
+    latest = _latest_closing_call(rows)
+    if latest is None:
+        return None
+    start, call_at, call_skill, last_id = latest
     texts: list[str] = []
     for row in rows[call_at + 1 :]:
         if row.get("isSidechain"):
@@ -275,12 +339,7 @@ def closing_call(rows: list[dict[str, Any]]) -> tuple[str, str, str | None] | No
             texts.append(t)
     results = _results_by_id(rows[start:])
     opener = next(o for name, _t, _g, o in SKILLS if name == call_skill)
-    printed: str | None = None
-    for skill, cid in reversed(calls):
-        if skill == call_skill and cid in results:
-            printed = printed_from_result(results[cid], opener)
-            if printed is not None:
-                break
+    printed = printed_from_result(results[last_id], opener) if last_id in results else None
     return call_skill, "\n".join(texts), printed
 
 
@@ -426,6 +485,10 @@ def decide(payload: dict[str, Any]) -> dict[str, str] | None:
         return None
     transcript = payload.get("transcript_path")
     rows = read_transcript(transcript) if isinstance(transcript, str) and os.path.isfile(transcript) else None
+    refused = refused_closing_call(rows) if rows is not None else None
+    if refused is not None:
+        # Before anything reads a handover.txt: the one on disk is an earlier run's. Once, as every block is.
+        return {"decision": "block", "reason": refused_reason(*refused)}
     handover = _handover_problem(payload, rows)
     tool: str | None = None
     quiet = False

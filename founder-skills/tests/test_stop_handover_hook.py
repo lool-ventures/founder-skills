@@ -438,6 +438,91 @@ def test_an_errored_compound_call_that_printed_the_hand_over_still_counts(tmp_pa
     assert json.loads(_run(tmp_path, rows).stdout)["decision"] == "block"
 
 
+# --- a closing step that refused -----------------------------------------------------------------------------
+# A closer refuses a report composed for another run (exit 2, nothing printed). The handover.txt on disk is then
+# the earlier run's: judging against it would dictate that run's figures as this one's. So the refusal is named
+# instead, once, and no hand-over is dictated.
+
+REFUSED = (
+    "[exit 2]\nError: RUN_ID_MISMATCH: this report was written by an earlier run (20261001T090000Z-0f0f0f), not "
+    "this one (20261011T090000Z-1a2b3c). Compose the report again for this run, then run this again. Nothing was "
+    "printed.\n"
+)
+COULD_NOT_FINISH = "I could not produce the closing summary; the report on disk is from an earlier run."
+
+
+@pytest.mark.parametrize("is_error", [True, False], ids=["is_error", "hostloop_exit_prefix"])
+def test_a_refused_closing_call_is_named_once_and_no_stale_hand_over_is_dictated(
+    tmp_path: Path, is_error: bool
+) -> None:
+    _handover(tmp_path)  # the earlier run's file, still on disk
+    rows = _rows_with_result(
+        _result_for("toolu_close", REFUSED, is_error=is_error, as_string=True), _assistant_text(COULD_NOT_FINISH)
+    )
+    out = json.loads(_run(tmp_path, rows).stdout)
+    assert out["decision"] == "block"
+    reason = out["reason"]
+    assert "RUN_ID_MISMATCH" in reason and "compose the report again for this run" in reason
+    assert PRINTED.rstrip() not in reason and "$7.0B" not in reason
+    assert LEAD not in reason and "did not deliver" not in reason  # it never says the message was wrong
+    # Once: the hook's own follow-up turn spends the budget.
+    r = _run(tmp_path, rows, {"stop_hook_active": True})
+    assert r.returncode == 0 and r.stdout == ""
+
+
+def test_a_refused_closing_call_after_a_good_one_never_falls_back_to_it(tmp_path: Path) -> None:
+    """A what-if: the first closer printed for the old figures, the re-run refused. The earlier hand-over is
+    never the comparand."""
+    rows = [
+        _user("Use the market-sizing skill on this deck."),
+        _call_with_id("mcp__workspace__bash", CLOSING_CMD, "toolu_first"),
+        _result_for("toolu_first", PRINTED),
+        _call_with_id("mcp__workspace__bash", CLOSING_CMD, "toolu_close"),
+        _result_for("toolu_close", REFUSED, is_error=True, as_string=True),
+        _assistant_text(COULD_NOT_FINISH),
+    ]
+    out = json.loads(_run(tmp_path, rows).stdout)
+    assert out["decision"] == "block" and "RUN_ID_MISMATCH" in out["reason"]
+    assert PRINTED.rstrip() not in out["reason"]
+
+
+def test_a_cut_short_latest_call_never_falls_back_to_an_earlier_one(tmp_path: Path) -> None:
+    cut = "\n".join(PRINTED.splitlines()[:3]) + "\n"
+    rows = [
+        _user("Use the market-sizing skill on this deck."),
+        _call_with_id("mcp__workspace__bash", CLOSING_CMD, "toolu_first"),
+        _result_for("toolu_first", PRINTED.replace("$7.0B", "$6.0B")),
+        _call_with_id("mcp__workspace__bash", CLOSING_CMD, "toolu_close"),
+        _result_for("toolu_close", cut),
+        _assistant_text(PRINTED),
+    ]
+    r = _run(tmp_path, rows)
+    assert r.returncode == 0 and r.stdout == "" and "no handover.txt" in r.stderr
+
+
+def test_a_refused_closing_call_then_a_good_re_run_is_judged_as_before(tmp_path: Path) -> None:
+    rows = [
+        _user("Use the market-sizing skill on this deck."),
+        _call_with_id("mcp__workspace__bash", CLOSING_CMD, "toolu_refused"),
+        _result_for("toolu_refused", REFUSED, is_error=True, as_string=True),
+        _call_with_id("mcp__workspace__bash", CLOSING_CMD, "toolu_close"),
+        _result_for("toolu_close", PRINTED),
+        _assistant_text("Done!\n\n" + PRINTED),
+    ]
+    r = _run(tmp_path, rows)
+    assert r.returncode == 0 and r.stdout == "", r
+    rows[-1] = _assistant_text(OWN_VERDICT)
+    out = json.loads(_run(tmp_path, rows).stdout)
+    assert out["decision"] == "block" and PRINTED.rstrip() in out["reason"] and LEAD in out["reason"]
+
+
+def test_a_successful_closing_call_is_not_read_as_refused(tmp_path: Path) -> None:
+    """`[exit 0]` is the host loop's lead on a success: not an error."""
+    rows = _rows_with_result(_result_for("toolu_close", "[exit 0]\n" + PRINTED), _assistant_text(PRINTED))
+    r = _run(tmp_path, rows)
+    assert r.returncode == 0 and r.stdout == "", r
+
+
 def test_a_cut_short_result_is_not_a_comparand(tmp_path: Path) -> None:
     """`| head -3` keeps the opener and drops the offer: judging against that would pass a message
     that drops lines. No closing offer, no slice -- fail open, as before."""
