@@ -293,10 +293,27 @@ def refused_closing_call(rows: list[dict[str, Any]]) -> tuple[str, str] | None:
     return skill, (lines[0][:300] if lines else "no output")
 
 
+# shared_tmp_check's hold, as the runtime records it: "PreToolUse:<tool> hook error: [shared-tmp][<path>]...".
+_SHARED_TMP_HELD = re.compile(r"\[shared-tmp\]\[([^\]]+)\]")
+
+
 def refused_reason(skill: str, error: str) -> str:
     """The once-only follow-up for a closing step that refused. It states what the closing step did, never
-    that the message above was wrong (the rule cannot tell), and dictates no earlier run's hand-over."""
+    that the message above was wrong (the rule cannot tell), and dictates no earlier run's hand-over.
+
+    A closing call the shared-/tmp check held never ran: the report needs nothing, only the command again
+    without its redirect into the shared temp folder. The check's marker is not repeated, since that check
+    counts every main-thread row carrying it as one of its holds."""
     label = skill.replace("-", " ")
+    held = _SHARED_TMP_HELD.findall(error) if "hook error:" in error else []
+    if held:
+        return (
+            f"The {label} closing step never ran: its command wrote {', '.join(held)}, a fixed name in the "
+            "shared temp folder, and was held before it started, so no summary from the analysis reached the "
+            "founder in this turn. That message is already in front of the founder, so send a follow-up: run "
+            "the closing step again with no redirect into the shared temp folder, and send what it prints "
+            "exactly as printed. If it cannot be run again, say so in one line, and add nothing with a number."
+        )
     return (
         f"The {label} closing step stopped with an error and printed no hand-over ({error}), so no summary "
         "from the analysis reached the founder in this turn. That message is already in front of the "

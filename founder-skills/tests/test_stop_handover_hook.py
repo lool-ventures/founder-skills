@@ -474,6 +474,36 @@ def test_a_refused_closing_call_is_named_once_and_no_stale_hand_over_is_dictated
     assert r.returncode == 0 and r.stdout == ""
 
 
+HELD_BY_SHARED_TMP = (
+    "PreToolUse:mcp__workspace__bash hook error: [shared-tmp][/tmp/h.txt] Held: this command writes /tmp/h.txt, "
+    "a fixed name directly in /tmp. Other sessions share /tmp, so the name may already be another session's file."
+)
+
+
+def test_a_closing_call_the_shared_tmp_check_held_is_asked_to_run_again_without_the_redirect(
+    tmp_path: Path,
+) -> None:
+    """The closer was held before it ran (`| tee /tmp/h.txt`), and the model wrote its own message. Asked once
+    to run it again with no redirect; the report needs no new compose, no earlier hand-over is dictated, and the
+    check's marker is not repeated (that check would count it as one of its holds)."""
+    _handover(tmp_path)  # an earlier run's file, still on disk
+    rows = _rows_with_result(
+        _result_for("toolu_close", HELD_BY_SHARED_TMP, is_error=True, as_string=True),
+        _assistant_text(OWN_VERDICT),
+        cmd=f"{CLOSING_CMD} | tee /tmp/h.txt",
+    )
+    out = json.loads(_run(tmp_path, rows).stdout)
+    assert out["decision"] == "block"
+    reason = out["reason"]
+    assert "never ran" in reason and "/tmp/h.txt" in reason
+    assert "run the closing step again with no redirect into the shared temp folder" in reason
+    assert "compose the report again" not in reason and "[shared-tmp]" not in reason
+    assert PRINTED.rstrip() not in reason and "$7.0B" not in reason
+    assert LEAD not in reason and "did not deliver" not in reason  # it never says the message was wrong
+    r = _run(tmp_path, rows, {"stop_hook_active": True})
+    assert r.returncode == 0 and r.stdout == ""
+
+
 def test_a_refused_closing_call_after_a_good_one_never_falls_back_to_it(tmp_path: Path) -> None:
     """A what-if: the first closer printed for the old figures, the re-run refused. The earlier hand-over is
     never the comparand."""
