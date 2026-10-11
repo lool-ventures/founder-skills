@@ -25,6 +25,7 @@ from typing import Any, NoReturn
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _fingerprint  # noqa: E402
 import _fmr_gates  # noqa: E402
+import _growth_rate  # noqa: E402
 
 
 def _write_output(data: str, output_path: str | None, *, summary: dict[str, Any] | None = None) -> None:
@@ -1514,10 +1515,15 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
         else:
             metrics.append(_metric("burn_multiple", None, "not_rated", "Insufficient data for burn multiple"))
     else:
-        # Inputs present but growth_rate <= 0 — economics undefined, no fallback
-        metrics.append(
-            _metric("burn_multiple", None, "not_rated", "Growth rate is zero or negative; burn multiple undefined")
+        # Inputs present but growth_rate <= 0 — economics undefined, no fallback. When the rate in use is the one
+        # computed from the monthly series, the months it fell over are named.
+        _fell = _growth_rate.falling_window(inputs, growth_rate)
+        _undefined = (
+            f"Revenue fell from {_fell}, so monthly growth is negative; burn multiple undefined"
+            if _fell
+            else "Growth rate is zero or negative; burn multiple undefined"
         )
+        metrics.append(_metric("burn_multiple", None, "not_rated", _undefined))
 
     # Before the non-USD caveat, which leaves an already-contextual metric alone: a reference grade on a
     # ratio inflated by gross revenue would be the misleading part.

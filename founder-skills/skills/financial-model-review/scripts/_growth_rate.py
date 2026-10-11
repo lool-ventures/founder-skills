@@ -77,6 +77,26 @@ def month_label(month: Any) -> str:
     return f"{_MONTH_NAMES[index % 12]} {index // 12}"
 
 
+def window_label(marker: dict[str, Any]) -> str:
+    """A computed rate's window for a founder: "Jan 2026 to Jun 2026"."""
+    return f"{month_label(marker.get('from_month'))} to {month_label(marker.get('to_month'))}"
+
+
+def falling_window(inputs: dict[str, Any] | None, rate: Any) -> str | None:
+    """The window a negative rate in use was computed over (`window_label`), or None: no computed rate, one that
+    is not negative, or a rate that is not the computed one (the founder's correction is never attributed to the
+    window)."""
+    if not isinstance(inputs, dict):
+        return None
+    marker = _as_dict(inputs.get("metadata")).get(MARKER_KEY)
+    if not isinstance(marker, dict):
+        return None
+    value = marker.get("value")
+    if not _same(rate, value) or not isinstance(value, (int, float)) or value >= 0:
+        return None
+    return window_label(marker)
+
+
 def _positive(value: Any) -> float | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
@@ -218,10 +238,7 @@ def disclosure(inputs: dict[str, Any] | None) -> str | None:
     value = marker.get("value")
     if not _same(current, value):
         return None
-    sentence = (
-        f"Monthly growth of {_pct(value)} was computed from your monthly revenue, "
-        f"{month_label(marker.get('from_month'))} to {month_label(marker.get('to_month'))}"
-    )
+    sentence = f"Monthly growth of {_pct(value)} was computed from your monthly revenue, {window_label(marker)}"
     replaced = marker.get("replaced")
     if isinstance(replaced, (int, float)) and not isinstance(replaced, bool) and _pct(replaced) != _pct(value):
         sentence += f", in place of an earlier estimate of {_pct(replaced)}"
@@ -234,5 +251,5 @@ def founder_kept_message(marker: dict[str, Any]) -> str:
     computed = _pct(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else "the computed rate"
     return (
         f"Monthly growth: your corrected figure is kept. Your monthly revenue gives {computed} "
-        f"({month_label(marker.get('from_month'))} to {month_label(marker.get('to_month'))})."
+        f"({window_label(marker)})."
     )

@@ -388,6 +388,65 @@ def test_no_disclosure_once_the_founder_corrected_the_rate(tmp_path: Path) -> No
     assert "growth-note" not in explorer
 
 
+# Invented: revenue falling every month, Mar to Aug 2025.
+_FALLING = [52_000, 50_500, 48_900, 47_600, 46_200, 44_800]
+
+
+def _falling_inputs(tmp_path: Path) -> dict[str, Any]:
+    inputs = _inputs("absent")
+    inputs["revenue"]["monthly"] = [
+        {"month": m, "actual": True, "total": t} for m, t in zip(_MONTHS, _FALLING, strict=True)
+    ]
+    inputs["revenue"]["mrr"]["value"] = _FALLING[-1]
+    model = copy.deepcopy(_MODEL_DATA)
+    model["sheets"][0]["rows"] = [["Revenue", *_FALLING]]
+    _fix(tmp_path, inputs, model)
+    computed = _read(tmp_path)
+    assert computed["revenue"]["growth_rate_monthly"] < 0
+    return computed
+
+
+def _burn_multiple_metric(inputs: dict[str, Any]) -> dict[str, Any]:
+    proc = subprocess.run(
+        [sys.executable, str(SCRIPTS / "unit_economics.py")],
+        input=json.dumps(inputs),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    metric: dict[str, Any] = next(m for m in json.loads(proc.stdout)["metrics"] if m["name"] == "burn_multiple")
+    return metric
+
+
+def test_a_burn_multiple_left_ungraded_by_falling_revenue_names_the_months(tmp_path: Path) -> None:
+    metric = _burn_multiple_metric(_falling_inputs(tmp_path))
+    assert (metric["value"], metric["rating"]) == (None, "not_rated")
+    assert metric["evidence"] == (
+        "Revenue fell from Mar 2025 to Aug 2025, so monthly growth is negative; burn multiple undefined"
+    )
+    founder_text = _load_shared("_founder_text")
+    assert founder_text.scan(metric["evidence"]) == {"enums": [], "filenames": []}
+
+
+def test_a_corrected_negative_rate_is_not_attributed_to_the_months(tmp_path: Path) -> None:
+    inputs = _falling_inputs(tmp_path)
+    inputs["revenue"]["growth_rate_monthly"] = -0.05  # the founder's figure, not the computed one
+    metric = _burn_multiple_metric(inputs)
+    assert (metric["rating"], metric["evidence"]) == (
+        "not_rated",
+        "Growth rate is zero or negative; burn multiple undefined",
+    )
+
+
+def _load_shared(name: str) -> Any:
+    path = SCRIPTS.parents[2] / "scripts" / f"{name}.py"
+    spec = importlib.util.spec_from_file_location(f"fmr_growth_test_shared_{name}", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def test_the_review_page_shows_the_computed_rate_in_a_neutral_card(tmp_path: Path) -> None:
     """An info row renders on its own (a passing extraction used to render no banner at all), never in red."""
     inputs = _computed_inputs(tmp_path)
