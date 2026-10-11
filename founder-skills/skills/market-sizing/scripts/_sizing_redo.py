@@ -1,6 +1,6 @@
 """The comparison redo's record: one sanctioned second build of one sizing approach, once per run.
 
-WHY. On a "both" run `market_sizing.py` flags a gap of more than 30% between the two builds' TAM, SAM or
+WHY. On a "both" run `market_sizing.py` flags a gap above 30% between the top-down and bottom-up TAM, SAM or
 SOM (`comparison.warning` / `sam_warning` / `som_warning`). The only way the main thread's reading of
 that gap could reach a sizing sub-agent was a changed prompt, and the dispatch hook rewrites any prompt
 that is not the generator's output back to the printed one: the repair's reason was dropped and the build

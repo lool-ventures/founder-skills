@@ -977,7 +977,8 @@ SKILL_MD_CEILING: dict[str, int] = {
     # (`--redo comparison`, optional `--suspect`) and forbids reprinting the plain prompt. The two transport
     # corrections (exit 3, producer rejection) name the sizing builds as printed prompts too, and say a redo's
     # correction keeps `--redo comparison` (+96).
-    "market-sizing": 106_737,
+    # 106,737 -> 106,739 (+2 B): one Step 5 clause reworded ("each of TAM, SAM and SOM is gated").
+    "market-sizing": 106_739,
     # fmr raised for two founder-facing-correctness items measured in a live run: the CHECKLIST
     # dispatch now forbids citing our artifact filenames in evidence (that run put `inputs.json` in 10
     # items' evidence, printed verbatim into the founder's report), and the producer pipe passes

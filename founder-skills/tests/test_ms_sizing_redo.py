@@ -56,15 +56,15 @@ _VALIDATION: dict[str, Any] = {
         {
             "name": "pear_belt_share",
             "value": 12,
-            "unit": "percent_points",
             "category": "sourced",
+            "unit": "percent_points",
             "label": "Pear-belt share",
         },
         {
             "name": "reachable_share",
             "value": 5,
-            "unit": "percent_points",
             "category": "agent_estimate",
+            "unit": "percent_points",
             "label": "Reachable share",
         },
         {"name": "pear_growers", "value": 4100, "unit": "count", "category": "sourced", "label": "Pear growers"},
@@ -77,20 +77,20 @@ _VALIDATION: dict[str, Any] = {
             "category": "sourced",
             "label": "Sensor plan price",
         },
-        {"name": "served_share", "value": 60, "unit": "percent_points", "category": "sourced", "label": "Served share"},
+        {"name": "served_share", "value": 60, "category": "sourced", "unit": "percent_points", "label": "Served share"},
         {
             "name": "target_share",
             "value": 8,
-            "unit": "percent_points",
             "category": "agent_estimate",
+            "unit": "percent_points",
             "label": "Target share",
         },
     ],
     "metadata": {"run_id": RUN},
 }
 _TD = {
-    "approach": "top_down",
     "industry_total": {"assumption": "orchard_sensor_total"},
+    "approach": "top_down",
     "segment_pct": {"assumption": "pear_belt_share"},
     "share_pct": {"assumption": "reachable_share"},
 }
@@ -113,7 +113,7 @@ _COMPARISON = {
     "top_down_som": 56_400_000,
     "bottom_up_som": 511_680,
     "som_delta_pct": 196.4,
-    "som_warning": "Top-down and bottom-up SOM differ by a factor of 110.2 (top-down is higher).",
+    "som_warning": "SOM: the top-down build is 110.2 times the bottom-up one.",
 }
 
 

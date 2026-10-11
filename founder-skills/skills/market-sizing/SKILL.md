@@ -746,7 +746,7 @@ When methodology is "top_down" only: print and dispatch one TOP_DOWN_METHODOLOGY
 (deriving `$CURRENCY` and `$SIZING_BASIS` from `inputs.json` exactly as above).
 When methodology is "bottom_up" only: same with `bottom_up_output.json`.
 
-For "both", read `sizing.json`'s comparison: TAM, SAM and SOM are each gated at >30% (`tam_delta_pct`,
+For "both", read `sizing.json`'s comparison: each of TAM, SAM and SOM is gated at >30% (`tam_delta_pct`,
 `sam_delta_pct`, `som_delta_pct`); TAM agreeing says nothing about SAM/SOM. A TAM/SAM/SOM discrepancy over
 30% means checking which build's inputs miss the product's actual target universe (not an inflated industry
 total); record a better figure in `validation.json` if research finds one. Then, once per run, re-run that
