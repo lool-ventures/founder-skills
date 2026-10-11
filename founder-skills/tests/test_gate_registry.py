@@ -440,6 +440,7 @@ _CODE_SOURCES = [
     SKILLS / "ic-sim" / "scripts" / "compose_report.py",
     SKILLS / "ic-sim" / "scripts" / "fund_profile.py",
     SKILLS / "cap-table" / "scripts" / "extract_cap_table.py",
+    SKILLS / "cap-table" / "scripts" / "_ct_gates.py",
     SKILLS / "competitive-positioning" / "scripts" / "_cp_gates.py",
     SKILLS / "competitive-positioning" / "scripts" / "compose_report.py",
     SKILLS / "competitive-positioning" / "scripts" / "cp_dispatch_prompt.py",

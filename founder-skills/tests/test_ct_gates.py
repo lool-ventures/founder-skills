@@ -300,6 +300,112 @@ def test_an_empty_run_id_on_a_ledger_run_is_refused(tmp_path: Path, script: str)
     assert not any((rd / n).exists() for n in ("cap_state.json", "scenarios.json", "report.json", "rule_audit.json"))
 
 
+# A well-formed id the review dir does not carry a ref for has no ledger here: before the guard every gate check
+# was skipped in silence, and the whole chain (both pages included) ran under the wrong id. The realistic shape is
+# a stale id typed after a compaction, which then reaches every producer, so every artifact carries it.
+FOREIGN = "20261011T000000Z-aaaaaa"
+_FIXTURE_FILES = ("inputs.json", "instruments.json", "cap_state.json", "rule_audit.json", "scenarios.json",
+                  "counsel_packet.json")  # fmt: skip
+
+
+def _all_artifacts_on(rd: Path, rid: str) -> None:
+    rd.mkdir(parents=True, exist_ok=True)
+    for name in _FIXTURE_FILES:
+        doc = json.loads((FIXTURES / name).read_text(encoding="utf-8"))
+        doc["metadata"]["run_id"] = rid
+        (rd / name).write_text(json.dumps(doc), encoding="utf-8")
+
+
+def _producer(script: str, rd: Path, run_id: str) -> tuple[Any, Path]:
+    """(the call, its -o target) for each producer the guard is pinned on."""
+    out = {"cap_state.py": "cap_state.out.json", "compose_report.py": "report.json", "visualize.py": "report.html",
+           "explore.py": "explorer.html"}[script]  # fmt: skip
+    args = {
+        "cap_state.py": ["--inputs", str(rd / "inputs.json"), "--instruments", str(rd / "instruments.json")],
+        "compose_report.py": ["--dir", str(rd), "--write-md", str(rd / "report.md")],
+        "visualize.py": ["--dir", str(rd)],
+        "explore.py": ["--dir", str(rd)],
+    }[script]
+    return ct(script, *args, "-o", str(rd / out), "--run-id", run_id), rd / out
+
+
+@pytest.mark.parametrize("script", ["cap_state.py", "compose_report.py", "visualize.py", "explore.py"])
+@pytest.mark.parametrize("wrong", [FOREIGN, "fixture-run", "not a run id"], ids=["foreign", "fixture", "malformed"])
+def test_a_run_id_not_bound_in_a_bound_review_dir_is_refused(tmp_path: Path, script: str, wrong: str) -> None:
+    root, rid, rd = h.start_bound(tmp_path, CT)
+    _all_artifacts_on(rd, rid)
+    # Lever: for the bound id the gates are live here (the cap state waits for the engagement question).
+    lever = ct("cap_state.py", "--inputs", str(rd / "inputs.json"), "--instruments", str(rd / "instruments.json"),
+               "-o", str(rd / "lever.json"), "--run-id", rid)  # fmt: skip
+    assert lever.returncode == 10, lever.stdout + lever.stderr
+    _all_artifacts_on(rd, wrong if wrong != "not a run id" else FOREIGN)
+    before = h.status_path(root, rid).read_bytes()
+    proc, out = _producer(script, rd, wrong)
+    assert proc.returncode == 1, proc.stdout + proc.stderr
+    body = _out(proc)
+    assert body["code"] == "RUN_NOT_BOUND" and rid in body["message"]
+    assert "nothing was written" in proc.stderr
+    assert not out.exists() and not (rd / "report.md").exists()
+    assert h.status_path(root, rid).read_bytes() == before
+    assert not list((root / "runs").glob(f"{wrong}*"))
+
+
+def test_the_bound_runs_own_id_still_reaches_its_gates(tmp_path: Path) -> None:
+    root, rid, rd = h.start_bound(tmp_path, CT)
+    _all_artifacts_on(rd, rid)
+    proc, out = _producer("compose_report.py", rd, rid)
+    assert proc.returncode == 10 and not out.exists(), proc.stdout + proc.stderr  # waits for the run's questions
+    proc, out = _producer("visualize.py", rd, rid)
+    assert proc.returncode == 0 and out.is_file(), proc.stdout + proc.stderr
+
+
+def test_an_unbound_review_dir_takes_any_run_id_as_before(tmp_path: Path) -> None:
+    """No ref at all: today's path. compose does not compare --run-id with the artifacts; it stamps it."""
+    rd = tmp_path / "plain"
+    _all_artifacts_on(rd, "fixture-run")
+    proc, out = _producer("compose_report.py", rd, FOREIGN)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert json.loads(proc.stdout.strip().splitlines()[0])["validation_warnings"] == 0
+    assert json.loads(out.read_text(encoding="utf-8"))["run_id"] == FOREIGN
+
+
+def test_a_review_dir_with_two_runs_bound_takes_either_id(tmp_path: Path) -> None:
+    """RESIDUAL (the fleet-wide run-ownership work): a later run bound into an earlier run's folder leaves both
+    refs there, so either id passes the guard; a third is refused."""
+    root, rid, rd = h.start_bound(tmp_path, CT)
+    second = h.start_ok(root, CT)
+    _ok(h.bind(root, second, rd, "example-co"))
+    assert (rd / "handoff" / rid / "run_ref.json").is_file() and (rd / "handoff" / second / "run_ref.json").is_file()
+    gates = _load("_ct_gates_under_test", SCRIPTS / "_ct_gates.py")
+    gates.refuse_unbound_run_id(str(rd), rid)
+    gates.refuse_unbound_run_id(str(rd), second)
+    with pytest.raises(SystemExit) as e:
+        gates.refuse_unbound_run_id(str(rd), FOREIGN)
+    assert e.value.code == 1
+
+
+def test_a_foreign_id_compose_in_an_unbound_dir_is_refused_at_the_insert(tmp_path: Path) -> None:
+    """Unbound, compose stamps a --run-id the artifacts lack with no warning; the documented insert then refuses
+    the report (`RUN_ID_MISMATCH`, checked before the check-record declaration) and leaves it untouched."""
+    import test_report_run_id as rr
+
+    run_dir = tmp_path / "run"
+    _all_artifacts_on(run_dir, "fixture-run")
+    compose, _out_path = _producer("compose_report.py", run_dir, FOREIGN)
+    assert compose.returncode == 0, compose.stdout + compose.stderr
+    assert json.loads(compose.stdout.strip().splitlines()[0])["validation_warnings"] == 0
+    assert rr._report(run_dir)["run_id"] == FOREIGN
+    (run_dir / "coaching.md").write_text("Lead with the round's size; the rest follows from it.\n", encoding="utf-8")
+    _ok(ct("pool_claims_check.py", str(run_dir / "coaching.md"), "--scenarios", str(run_dir / "scenarios.json"),
+           "-o", str(run_dir / "coaching.checked.json")))  # fmt: skip
+    _ok(ct("pool_check_release.py", str(run_dir / "coaching.md"), "--checked", str(run_dir / "coaching.checked.json"),
+           "--scenarios", str(run_dir / "scenarios.json"), "-o", str(run_dir / "released.json")))  # fmt: skip
+    before = {n: (run_dir / n).read_bytes() for n in ("report.json", "report.md")}
+    proc = rr._insert_as_documented(CT, run_dir, ["--commentary-file", str(run_dir / "released.json")], None)
+    assert proc.returncode == 1 and json.loads(proc.stdout)["code"] == "RUN_ID_MISMATCH", proc.stdout
+    assert {n: (run_dir / n).read_bytes() for n in before} == before
+
+
 # --- extract_instrument.py -------------------------------------------------------------------------------------
 
 

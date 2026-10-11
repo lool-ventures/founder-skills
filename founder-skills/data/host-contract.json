@@ -19,7 +19,8 @@
       "NO_ASK_FOUNDER_DECLINED"
     ],
     "ct_producers": [
-      "RUN_ID_REQUIRED"
+      "RUN_ID_REQUIRED",
+      "RUN_NOT_BOUND"
     ],
     "deliverables": [
       "RUN_NOT_COMPLETE"

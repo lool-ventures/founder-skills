@@ -891,6 +891,14 @@ def _run_ref_module() -> ModuleType:
     return _run_ref
 
 
+def _ct_gates_module() -> ModuleType:
+    """The sibling `_ct_gates`, loaded only when `--run-id` is given: a bound review dir refuses another run's id."""
+    _run_ref_module()  # puts this dir on sys.path
+    import _ct_gates
+
+    return _ct_gates
+
+
 def _own_run_id(dir_path: str) -> str | None:
     """This page's run id: inputs.json's."""
     rid: str | None = _run_ref_module().json_run_id(os.path.join(dir_path, "inputs.json"))
@@ -942,6 +950,7 @@ def main() -> int:
     )
 
     if args.run_id is not None:
+        _ct_gates_module().refuse_unbound_run_id(args.dir, args.run_id)
         html_out = _run_ref_module().page_for_run(html_out, args.run_id, _own_run_id(args.dir))
     out = os.path.abspath(args.output)
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)

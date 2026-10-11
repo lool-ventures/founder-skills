@@ -77,12 +77,40 @@ def run_dir_of(path: str) -> str:
     return os.path.dirname(os.path.abspath(path))
 
 
-def refuse_without_run_id(run_dir: str, run_id: str | None) -> None:
-    """A review dir that carries any run's ref must be called with its run's id: exit 1 `RUN_ID_REQUIRED`. An
-    empty `--run-id` (a fresh shell after a compaction) is refused, never read as "no ledger"."""
-    if run_id:
+def _bound_run_ids(run_dir: str) -> list[str]:
+    """The ids of every run whose `run_ref.json` this review dir carries."""
+    refs = glob.glob(os.path.join(glob.escape(os.path.abspath(run_dir)), "handoff", "*", _run_ref.RUN_REF_NAME))
+    return sorted(os.path.basename(os.path.dirname(p)) for p in refs)
+
+
+def refuse_unbound_run_id(run_dir: str, run_id: str | None) -> None:
+    """A non-empty `--run-id` with no `run_ref.json` in a review dir that carries another run's: exit 1
+    `RUN_NOT_BOUND`, nothing written. Otherwise the id has no ledger here, so every gate check would be skipped
+    in silence and the step would write under the wrong run (a stale id typed after a compaction, or one copied
+    from an earlier run's file). The insert's own rule. Residual: a dir carrying two refs (a later run bound
+    into an earlier run's folder) accepts either id, since each has its ref there."""
+    if not run_id:
         return
-    if glob.glob(os.path.join(glob.escape(os.path.abspath(run_dir)), "handoff", "*", _run_ref.RUN_REF_NAME)):
+    bound = _bound_run_ids(run_dir)
+    if not bound or _run_ref.has_ledger(os.path.abspath(run_dir), run_id):
+        return  # an unbound dir (today's path), or this run's own ref (a malformed id never has one)
+    message = (
+        f"--run-id {run_id!r} is not a run bound to this review dir, which belongs to {', '.join(bound)}; pass "
+        "that run's id (the run_id Step 0 printed), or start a new run for a new review"
+    )
+    sys.stdout.write(json.dumps({"status": "rejected", "code": "RUN_NOT_BOUND", "message": message}) + "\n")
+    print(f"Error: {message}; nothing was written", file=sys.stderr)
+    sys.exit(1)
+
+
+def refuse_without_run_id(run_dir: str, run_id: str | None) -> None:
+    """A review dir that carries any run's ref must be called with a run's id bound there: an empty `--run-id`
+    (a fresh shell after a compaction) is exit 1 `RUN_ID_REQUIRED`, never read as "no ledger"; an id with no
+    ref in a dir that carries another run's is exit 1 `RUN_NOT_BOUND` (`refuse_unbound_run_id`)."""
+    if run_id:
+        refuse_unbound_run_id(run_dir, run_id)
+        return
+    if _bound_run_ids(run_dir):
         message = (
             "this review dir belongs to a run; pass its --run-id (the run_id Step 0 printed) so the run's checks "
             "apply. After a context reset, re-read the skill from its base directory first"

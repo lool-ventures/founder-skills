@@ -314,6 +314,14 @@ def test_another_runs_ref_records_a_composed_report(skill: str, tmp_path: Path) 
     _stage(skill, tmp_path)
     _ref(tmp_path, "another-run")
     proc = _compose(skill, tmp_path)
+    if skill == "cap-table":
+        # cap-table refuses a --run-id with no ref in a dir that carries another run's (RUN_NOT_BOUND), so the
+        # record is of that refusal, and no report is written.
+        assert proc.returncode == 1, (proc.stdout, proc.stderr)
+        rec = _record(tmp_path)
+        assert (rec["exit_code"], rec["code"], rec["run_id"]) == (1, "RUN_NOT_BOUND", FIXTURE_RUN_ID[skill])
+        assert rec["outputs"]["report_json"]["written"] is False and not (tmp_path / "report.json").exists()
+        return
     assert proc.returncode == 0, (proc.stdout, proc.stderr)
     rec = _record(tmp_path)
     report = json.loads((tmp_path / "report.json").read_text(encoding="utf-8"))
@@ -360,8 +368,9 @@ def test_a_call_the_parser_refuses_still_replaces_the_record(skill: str, tail: l
     """A flag missing its value exits 2 before compose runs; the previous call's record must not survive it."""
     _stage(skill, tmp_path)
     _ref(tmp_path, "another-run")
-    assert _compose(skill, tmp_path).returncode == 0
-    assert _record(tmp_path)["exit_code"] == 0
+    first = 1 if skill == "cap-table" else 0  # cap-table refuses an id not bound there (RUN_NOT_BOUND)
+    assert _compose(skill, tmp_path).returncode == first
+    assert _record(tmp_path)["exit_code"] == first
     script = SKILLS / skill / "scripts" / "compose_report.py"
     proc = subprocess.run(
         [sys.executable, str(script), "--dir", str(tmp_path), *tail], capture_output=True, text=True, cwd=tmp_path
