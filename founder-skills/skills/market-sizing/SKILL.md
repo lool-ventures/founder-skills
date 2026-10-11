@@ -655,11 +655,11 @@ printf '%s' '<agent final message verbatim>' | \
 Branch on the exit code (complete state machine — do not improvise):
 
 - **Exit 0** → pipe the file through the producer: `cat "$HANDOFF_DIR/<step>_output.json" | python3 "$SCRIPTS/<producer>.py" ...`
-- **Exit 3** (missing/empty file — receipt may be fabricated) → **redo-dispatch**: fresh Task, same prompt plus one line: "your receipt claimed a file at `<path>` but none exists; use Write to create exactly that path." For a generated prompt (RED_TEAM, CHECKLIST), re-run `dispatch_prompt.py` with the same arguments plus `--correction missing-file` and send that output instead.
+- **Exit 3** (missing/empty file — receipt may be fabricated) → **redo-dispatch**: fresh Task, same prompt plus one line: "your receipt claimed a file at `<path>` but none exists; use Write to create exactly that path." For a printed prompt (RED_TEAM, CHECKLIST, a sizing build: a redo keeps `--redo comparison`), re-run `dispatch_prompt.py` with the same arguments plus `--correction missing-file` and send that output instead.
 - **Exit 4** (file exists, invalid JSON) → **repair-dispatch**: fresh Task: "Read `<OUTPUT_PATH>`; it fails JSON parsing with `<verbatim detail from the diagnostic>`; fix and rewrite it; return the receipt."
 - **Exit 5** (receipt echoes a different path) → **repair-dispatch** telling the agent the exact expected OUTPUT_PATH (it wrote somewhere else).
 - **Exit 6** (receipt unparseable / no `output_path` key) → **redo-dispatch** with "return ONLY the receipt JSON — no fences, no prose." For a generated prompt, use `--correction receipt-only`.
-- **Producer schema rejection** (the pipe fails next) → **repair-dispatch** with the producer's stderr verbatim, **unless the message names another remedy**: `(remedy: record_research)` is NOT a sub-agent fault (a missing exchange rate, currency or period that only you can look up): record it and re-run the same pipe. Re-dispatching there burns the retry budget and invites the sub-agent to invent the figure. For a generated prompt (RED_TEAM, CHECKLIST), re-run the failed pipe with `2> "$HANDOFF_DIR/producer_rejected.txt"`, then `dispatch_prompt.py` with the same arguments plus `--correction producer-rejected --detail-file "$HANDOFF_DIR/producer_rejected.txt"`, and send that output.
+- **Producer schema rejection** (the pipe fails next) → **repair-dispatch** with the producer's stderr verbatim, **unless the message names another remedy**: `(remedy: record_research)` is NOT a sub-agent fault (a missing exchange rate, currency or period that only you can look up): record it and re-run the same pipe. Re-dispatching there burns the retry budget and invites the sub-agent to invent the figure. For a printed prompt (RED_TEAM, CHECKLIST, a sizing build: a redo keeps `--redo comparison`), re-run the failed pipe with `2> "$HANDOFF_DIR/producer_rejected.txt"`, then `dispatch_prompt.py` with the same arguments plus `--correction producer-rejected --detail-file "$HANDOFF_DIR/producer_rejected.txt"`, and send that output.
 - **Exit 8** (`path_namespace_mismatch`) → the sub-agent **complied**; the agent-namespace prefix was wrong. Its relative `OUTPUT_PATH` resolved against the outputs mount instead of the session root, so the file landed at the doubled path reported in `found_at`. Only a RELATIVE agent path can do this, so the Step 0 proof did not run: run it. Do NOT treat this as a fabricated receipt (that is exit 3), and do NOT read the hand-off from `found_at` — it is diagnostic only. Re-run `resolve_artifacts_root.py --agent`, rebuild the agent-namespace prefix from the printed value, and re-dispatch. Counts against the same 2-dispatch retry budget.
 - **Blocked `write_refused`** (the sub-agent's Write was refused — its path was relative or a `/sessions/...` path) → run the Step 0 proof if it did not run, rebuild the agent-namespace paths from the resolver, re-dispatch ONCE. A second `write_refused` STOPs with both details quoted.
 - **Any other exit** (script crash etc.) → STOP with the stderr.
@@ -746,12 +746,13 @@ When methodology is "top_down" only: print and dispatch one TOP_DOWN_METHODOLOGY
 (deriving `$CURRENCY` and `$SIZING_BASIS` from `inputs.json` exactly as above).
 When methodology is "bottom_up" only: same with `bottom_up_output.json`.
 
-For "both" mode, check the comparison section — `market_sizing.py` gates TAM, SAM, and SOM
-independently, each against the same >30% threshold (`tam_delta_pct`, `sam_delta_pct`,
-`som_delta_pct`). A >30% TAM/SAM/SOM discrepancy on ANY of the three means investigating which
-assumptions are flawed — a large TAM convergence does NOT imply SAM/SOM also converge (they use
-different narrowing parameters per approach), so check all three, not just TAM. TAM must match
-the product's actual target universe (not inflated industry totals).
+For "both", read `sizing.json`'s comparison: TAM, SAM and SOM are each gated at >30% (`tam_delta_pct`,
+`sam_delta_pct`, `som_delta_pct`); TAM agreeing says nothing about SAM/SOM. A TAM/SAM/SOM discrepancy over
+30% means checking which build's inputs miss the product's actual target universe (not an inflated industry
+total); record a better figure in `validation.json` if research finds one. Then, once per run, re-run that
+build's generator with the same arguments plus `--redo comparison` (`--suspect <input>` for inputs you
+doubt), send its output in your next call, gate it, and re-run the same pipe. Never print that build's plain
+prompt again or edit a sizing prompt by hand. A gap that remains is reported, not removed.
 
 **Multi-vertical / platform companies:** If `inputs.json` lists applications in 2+ distinct industries:
 

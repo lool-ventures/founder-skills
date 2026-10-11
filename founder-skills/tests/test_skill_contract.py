@@ -970,7 +970,14 @@ SKILL_MD_CEILING: dict[str, int] = {
     # non-zero exit, paid for in the same step; "Two codes sit in neither class" loses its aside.
     # -1 B, LOWERED, commit 13: a derived stage takes its option id and no value; the sentence is shortened to pay.
     # -2 B, LOWERED: Step 6d reads `applied` or `answered` as settled (the apply step run again reports `answered`).
-    "market-sizing": 106_450,
+    # 106,450 -> 106,737 (+287 B), RAISED: Step 5's comparison paragraph is rewritten, not extended (+191): the
+    # old "investigate which assumptions are flawed" sentence named no action, and the hand-written repair it
+    # led to was rewritten back to the original prompt by the dispatch hook, so the build was redone from the
+    # same instructions and nothing recorded it. It now names the generator's one sanctioned redo per run
+    # (`--redo comparison`, optional `--suspect`) and forbids reprinting the plain prompt. The two transport
+    # corrections (exit 3, producer rejection) name the sizing builds as printed prompts too, and say a redo's
+    # correction keeps `--redo comparison` (+96).
+    "market-sizing": 106_737,
     # fmr raised for two founder-facing-correctness items measured in a live run: the CHECKLIST
     # dispatch now forbids citing our artifact filenames in evidence (that run put `inputs.json` in 10
     # items' evidence, printed verbatim into the founder's report), and the producer pipe passes
