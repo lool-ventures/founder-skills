@@ -632,18 +632,13 @@ run_id stamping.
 deterministically — the JSON flows from the hand-off file, never re-typed:
 
 ```bash
-# Repeat for visionary, operator, analyst (change both occurrences of the role)
-cat "$HANDOFF_DIR/partner_visionary_output.json" | python3 -c "
-import json, sys
-data = json.load(sys.stdin)
-data['metadata'] = {'run_id': '$RUN_ID'}
-with open('$SIM_DIR/partner_assessment_visionary.json', 'w') as f:
-    json.dump(data, f, indent=2)
-"
+# Repeat for visionary, operator, analyst (change all three occurrences of the role)
+cat "$HANDOFF_DIR/partner_visionary_output.json" | python3 "$SCRIPTS/persist_partner.py" --kind assessment \
+  --archetype visionary --run-id "$RUN_ID" -o "$SIM_DIR/partner_assessment_visionary.json"
 ```
 <!-- skill-quality-ci: bash-after-subagent-ok -->
 
-**Verify after writes:** check that `$SIM_DIR` contains all three `partner_assessment_*.json` files. If any are missing, re-run that dispatch before proceeding.
+**Verify after writes:** check that `$SIM_DIR` contains all three `partner_assessment_*.json` files. If any are missing, re-run that dispatch before proceeding. `persist_partner.py` exits 1 on a hand-off that is not this archetype's: repair-dispatch that archetype.
 
 ### Step 6b: Partner Rebuttals (PARTNER_REBUTTAL × 3 in parallel)
 
@@ -763,14 +758,9 @@ run_id stamping.
 deterministically — the JSON flows from the hand-off file, never re-typed:
 
 ```bash
-# Repeat for visionary, operator, analyst (change both occurrences of the role)
-cat "$HANDOFF_DIR/partner_rebuttal_visionary_output.json" | python3 -c "
-import json, sys
-data = json.load(sys.stdin)
-data['metadata'] = {'run_id': '$RUN_ID'}
-with open('$SIM_DIR/partner_rebuttal_visionary.json', 'w') as f:
-    json.dump(data, f, indent=2)
-"
+# Repeat for visionary, operator, analyst (change all three occurrences of the role)
+cat "$HANDOFF_DIR/partner_rebuttal_visionary_output.json" | python3 "$SCRIPTS/persist_partner.py" --kind rebuttal \
+  --archetype visionary --run-id "$RUN_ID" -o "$SIM_DIR/partner_rebuttal_visionary.json"
 ```
 <!-- skill-quality-ci: bash-after-subagent-ok -->
 
@@ -800,7 +790,8 @@ dealbreaker with no evidence or an unrecognized dimension id). **Repair-dispatch
 PARTNER_REBUTTAL sub-agent for the specific archetype the diagnostic names, quoting the diagnostic
 verbatim, then re-run this command from the top (never hand-patch `discussion.json` — there is no
 `-o` file to patch, since nothing is written on a rejection). Counts against Step 6b's Context A
-retry budget (see the hand-off protocol above).
+retry budget (see the hand-off protocol above). `PARTNER_ARTIFACTS_STALE` instead: the fund profile
+changed after Steps 6-6b ran; run Steps 5-8 again under the same run id.
 
 **Founder-facing narration — render partner verdicts in words.** If you summarize the three partners' positions to the founder (e.g. "visionary → …, operator → …, analyst → …"), render each verdict in words — `invest` → "Invest", `more_diligence` → "More Diligence", `pass`/`hard_pass` → "Decline" — NEVER the raw `pass`/`hard_pass`/`invest`/`more_diligence` enum. A founder reads a bare "pass" as approval when it means the opposite. This applies to any progress line that mentions a partner's or the mechanical verdict, not just the final headline (see the narration rule in the workflow preamble and Main-Thread Return).
 

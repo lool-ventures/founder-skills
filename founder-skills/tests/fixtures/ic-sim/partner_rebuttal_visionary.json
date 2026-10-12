@@ -12,5 +12,8 @@
     "Competitive teardown of QuickBooks/Xero AI roadmap",
     "3 customer reference calls on why they switched"
   ],
+  "graded_against": {
+    "fund_profile": "2fdfd9c0517e817eed38dc82f02bbb2f715b669c778985f81dd820001fa6079b"
+  },
   "metadata": {"run_id": "fixture-ic-sim-001"}
 }

@@ -39,6 +39,7 @@ def _load(name: str, path: Path | None = None) -> ModuleType:
 
 
 rs = _load("_run_status")
+fp = _load("_ic_fund_profile_gates", h.SKILLS / "ic-sim" / "scripts" / "fund_profile.py")
 g = _load("_gates")
 
 IC = h.SKILLS / "ic-sim" / "scripts"
@@ -296,31 +297,36 @@ def _record_specific_fund(root: Path, run_id: str) -> None:
     _ok(_answer(root, run_id, "ic_fund_mode", "specific", "--value", "Northwind Ventures"))
 
 
-def _redo_steps_5_to_8(run_dir: Path, run_id: str, mode: str) -> None:
-    """Steps 5, 7 and 8's producers again, under the same run id, over the files already in the dir (the
-    Step 6/6b sub-agents' output is the fixture's; a real redo re-dispatches them)."""
-    conflict = json.loads((run_dir / "conflict_check.json").read_text(encoding="utf-8"))
-    _ok(
-        h.run(
-            IC / "detect_conflicts.py",
-            "--run-id",
-            run_id,
-            "-o",
-            str(run_dir / "conflict_check.json"),
-            stdin=json.dumps({"portfolio_size": conflict["portfolio_size"], "conflicts": conflict["conflicts"]}),
-        )
+def _persist_partners(run_dir: Path, run_id: str) -> None:
+    """Steps 6 and 6b's persisting step again: each partner file's content (the fixture's, as a re-dispatched
+    sub-agent's hand-off) piped through persist_partner.py."""
+    for kind in ("assessment", "rebuttal"):
+        for archetype in ("visionary", "operator", "analyst"):
+            path = run_dir / f"partner_{kind}_{archetype}.json"
+            body = json.loads(path.read_text(encoding="utf-8"))
+            _ok(
+                h.run(
+                    IC / "persist_partner.py",
+                    "--kind",
+                    kind,
+                    "--archetype",
+                    archetype,
+                    "--run-id",
+                    run_id,
+                    "-o",
+                    str(path),
+                    stdin=json.dumps(body),
+                )
+            )
+
+
+def _redo_steps_7_to_8(run_dir: Path, run_id: str, mode: str) -> subprocess.CompletedProcess[str]:
+    """Step 7 then Step 8; returns compose_discussion's result (Step 8 runs only if it passed)."""
+    proc = h.run(
+        IC / "compose_discussion.py", "--dir", str(run_dir), "--run-id", run_id, "-o", str(run_dir / "discussion.json")
     )
-    _ok(
-        h.run(
-            IC / "compose_discussion.py",
-            "--dir",
-            str(run_dir),
-            "--run-id",
-            run_id,
-            "-o",
-            str(run_dir / "discussion.json"),
-        )
-    )
+    if proc.returncode != 0:
+        return proc
     scores = json.loads((run_dir / "score_dimensions.json").read_text(encoding="utf-8"))
     _ok(
         h.run(
@@ -334,6 +340,25 @@ def _redo_steps_5_to_8(run_dir: Path, run_id: str, mode: str) -> None:
             stdin=json.dumps({"items": scores["items"]}),
         )
     )
+    return proc
+
+
+def _redo_steps_5_to_8(run_dir: Path, run_id: str, mode: str) -> None:
+    """Steps 5-8 again under the same run id, over the content already in the dir (the Step 6/6b sub-agents'
+    output is the fixture's; a real redo re-dispatches them and persists their hand-offs)."""
+    conflict = json.loads((run_dir / "conflict_check.json").read_text(encoding="utf-8"))
+    _ok(
+        h.run(
+            IC / "detect_conflicts.py",
+            "--run-id",
+            run_id,
+            "-o",
+            str(run_dir / "conflict_check.json"),
+            stdin=json.dumps({"portfolio_size": conflict["portfolio_size"], "conflicts": conflict["conflicts"]}),
+        )
+    )
+    _persist_partners(run_dir, run_id)
+    _ok(_redo_steps_7_to_8(run_dir, run_id, mode))
 
 
 def test_rebuilding_only_the_profile_does_not_compose_and_a_full_redo_does(tmp_path: Path) -> None:
@@ -361,6 +386,14 @@ def test_rebuilding_only_the_profile_does_not_compose_and_a_full_redo_does(tmp_p
     assert not (run_dir / "report.md").exists() and not (run_dir / "report.json").exists()
     record = json.loads((run_dir / "compose_result.json").read_text(encoding="utf-8"))
     assert record["code"] == "PARTNER_ARTIFACTS_STALE"
+    assert "partner_assessment_visionary.json" in _out(proc)["message"]
+    # Steps 7-8 only: the partner files were written against the old profile.
+    proc = _redo_steps_7_to_8(run_dir, run_id, "fund_specific")
+    assert proc.returncode == 1, proc.stdout + proc.stderr
+    assert _out(proc)["code"] == "PARTNER_ARTIFACTS_STALE" and "PARTNER_ARTIFACTS_STALE" in proc.stderr
+    assert "partner_rebuttal_analyst.json" in _out(proc)["message"]
+    proc = _compose(run_dir)
+    assert proc.returncode == 1 and _out(proc)["code"] == "PARTNER_ARTIFACTS_STALE"
     # Steps 5-8 again.
     _redo_steps_5_to_8(run_dir, run_id, "fund_specific")
     proc = _compose(run_dir)
@@ -375,9 +408,27 @@ def test_each_producer_stamps_the_profile_it_was_built_from(tmp_path: Path) -> N
     _ok(_fund_profile(run_dir, run_id, "fund_specific"))
     _redo_steps_5_to_8(run_dir, run_id, "fund_specific")
     _ok(_compose(run_dir))
-    for name in ("conflict_check.json", "discussion.json", "score_dimensions.json"):
+    for name in fp.PROFILE_DEPENDENTS:
         data = json.loads((run_dir / name).read_text(encoding="utf-8"))
         assert len(data["graded_against"]["fund_profile"]) == 64, name
+
+
+def test_the_generic_path_is_held_to_the_same_stamps(tmp_path: Path) -> None:
+    """Generic mode: the conflict check is the stub, and a rebuilt profile still needs Steps 5-8 again."""
+    root, run_id, run_dir = _sim(tmp_path, "invest")
+    profile = json.loads((run_dir / "fund_profile.json").read_text(encoding="utf-8"))
+    profile["thesis_areas"] = ["Climate software"]
+    _write(run_dir / "fund_profile.json", profile)
+    proc = _compose(run_dir)
+    assert proc.returncode == 1 and _out(proc)["code"] == "PARTNER_ARTIFACTS_STALE"
+    _ok(
+        h.run(
+            IC / "detect_conflicts.py", "--generic-stub", "--run-id", run_id, "-o", str(run_dir / "conflict_check.json")
+        )
+    )
+    _persist_partners(run_dir, run_id)
+    _ok(_redo_steps_7_to_8(run_dir, run_id, "generic"))
+    _ok(_compose(run_dir))
 
 
 def test_accepting_a_warning_stales_nothing(tmp_path: Path) -> None:

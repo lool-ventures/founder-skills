@@ -117,7 +117,7 @@ Contains imported artifacts from prior market-sizing or deck-review analyses. If
 | `validation` | object | output | Added by `fund_profile.py`: `{status, errors}` |
 | `accepted_warnings` | object[] | no | Warnings to acknowledge: `[{code, match, reason}]`. Match is case-insensitive substring. Only medium-severity codes can be accepted. |
 
-`conflict_check.json`, `discussion.json` and `score_dimensions.json` each carry `graded_against.fund_profile`, written by their producer: the sha256 of the fund profile beside them when they ran (without `metadata`, `validation` and `accepted_warnings`). Compose refuses (`PARTNER_ARTIFACTS_STALE`) when one differs from the current profile or is missing.
+The six `partner_assessment_*` / `partner_rebuttal_*` files, `conflict_check.json`, `discussion.json` and `score_dimensions.json` each carry `graded_against.fund_profile`, written by their script: the sha256 of the fund profile beside them when they ran (without `metadata`, `validation` and `accepted_warnings`). Compose refuses (`PARTNER_ARTIFACTS_STALE`) when one differs from the current profile or is missing.
 
 The top-level keys are a closed set (the rows above); any other key (`partners`, `team`, ...) is refused (`FUND_FIELD_NOT_ALLOWED`). A source URL that is a person's page (LinkedIn `/in/...` or `/pub/...`, Crunchbase `/person/...`) is refused (`SOURCE_IS_A_PERSON`). A refusal names the field, never its value.
 

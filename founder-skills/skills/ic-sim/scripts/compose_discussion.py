@@ -392,6 +392,15 @@ def main() -> None:
         print(f"Error: directory not found: {args.dir}", file=sys.stderr)
         sys.exit(1)
 
+    # The six partner files must have been persisted (persist_partner.py) against the current fund profile:
+    # exit 1 PARTNER_ARTIFACTS_STALE, -o untouched, otherwise. A missing file is compose()'s own error below.
+    scripts_dir = os.path.dirname(os.path.abspath(__file__))
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    import fund_profile
+
+    fund_profile.refuse_stale_dependents(args.dir, by="compose_discussion.py", names=fund_profile.PARTNER_FILES)
+
     result = compose(args.dir)
 
     if "error" in result:

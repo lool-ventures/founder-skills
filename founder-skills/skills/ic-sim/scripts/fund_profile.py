@@ -240,7 +240,13 @@ GRADED_AGAINST = "graded_against"
 # Not part of what a later step was built from: the run stamp, the producer's own verdict, and the warnings
 # the founder accepted at compose time (adding one must not make every earlier step stale).
 FINGERPRINT_EXCLUDED = frozenset({"metadata", "validation", "accepted_warnings"})
-PROFILE_DEPENDENTS = ("conflict_check.json", "discussion.json", "score_dimensions.json")
+# The six partner files are written by persist_partner.py (Steps 6 and 6b), the other three by their producers.
+PARTNER_FILES = tuple(
+    f"partner_{kind}_{archetype}.json"
+    for kind in ("assessment", "rebuttal")
+    for archetype in ("visionary", "operator", "analyst")
+)
+PROFILE_DEPENDENTS = (*PARTNER_FILES, "conflict_check.json", "discussion.json", "score_dimensions.json")
 STALE_FIX = "run Steps 5-8 again under the same run id, then compose"
 
 
@@ -271,8 +277,8 @@ def stamp_profile(result: dict[str, Any], output_path: str | None) -> None:
     result[GRADED_AGAINST] = {"fund_profile": profile_fingerprint_in(os.path.dirname(os.path.abspath(output_path)))}
 
 
-def stale_dependents(sim_dir: str) -> list[str]:
-    """The artifacts in PROFILE_DEPENDENTS built from a fund profile other than the current one. A missing
+def stale_dependents(sim_dir: str, names: tuple[str, ...] = PROFILE_DEPENDENTS) -> list[str]:
+    """The artifacts in `names` built from a fund profile other than the current one. A missing
     stamp counts as stale, in every mode: a file written before the stamp existed, or by hand, cannot show what
     it was built from (a pre-stamp run resumed under this version redoes Steps 5-8 once). A missing or
     unreadable fund_profile.json, or a missing dependent, is not judged here: compose reports those as missing
@@ -281,7 +287,7 @@ def stale_dependents(sim_dir: str) -> list[str]:
     if current is None:
         return []
     stale: list[str] = []
-    for name in PROFILE_DEPENDENTS:
+    for name in names:
         try:
             with open(os.path.join(sim_dir, name), encoding="utf-8") as f:
                 data = json.load(f)
@@ -295,10 +301,10 @@ def stale_dependents(sim_dir: str) -> list[str]:
     return stale
 
 
-def refuse_stale_dependents(sim_dir: str, *, by: str) -> None:
+def refuse_stale_dependents(sim_dir: str, *, by: str, names: tuple[str, ...] = PROFILE_DEPENDENTS) -> None:
     """Exit 1 `PARTNER_ARTIFACTS_STALE`, nothing written, when an artifact the report is built from was made
     against another fund profile than the current one (`stale_dependents`)."""
-    stale = stale_dependents(sim_dir)
+    stale = stale_dependents(sim_dir, names)
     if not stale:
         return
     message = (

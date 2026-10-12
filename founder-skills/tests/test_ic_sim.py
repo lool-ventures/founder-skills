@@ -934,6 +934,102 @@ def test_the_page_does_not_check_staleness() -> None:
         assert rc == 0, verr
 
 
+_PARTNER_PAYLOAD = {"partner": "operator", "verdict": "more_diligence", "rationale": "Invented rationale."}
+
+
+def test_persist_partner_stamps_the_profile_and_the_run() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        d = os.path.join(td, "sim")
+        shutil.copytree(_IC_FIXTURES, d)
+        out = os.path.join(d, "partner_assessment_operator.json")
+        payload = {**_PARTNER_PAYLOAD, "graded_against": {"fund_profile": "model-written"}, "metadata": {"run_id": "x"}}
+        rc, stdout, stderr = run_script_raw(
+            "persist_partner.py",
+            ["--kind", "assessment", "--archetype", "operator", "--run-id", "RID", "-o", out],
+            stdin_data=json.dumps(payload),
+        )
+        assert rc == 0, stderr
+        assert json.loads(stdout)["fund_profile_stamped"] is True
+        with open(out, encoding="utf-8") as f:
+            written = json.load(f)
+        fp = _fund_profile_module()
+        assert written["graded_against"] == {"fund_profile": fp.profile_fingerprint_in(d)}
+        assert written["metadata"] == {"run_id": "RID"}
+        assert written["rationale"] == "Invented rationale."
+
+
+@pytest.mark.parametrize(
+    "args, payload, code",
+    [
+        (["--archetype", "visionary"], _PARTNER_PAYLOAD, "PARTNER_MISMATCH"),
+        (["--archetype", "operator", "--kind", "rebuttal"], _PARTNER_PAYLOAD, "OUTPUT_NAME_MISMATCH"),
+        (["--archetype", "operator"], ["not", "an", "object"], "not a JSON object"),
+    ],
+)
+def test_persist_partner_refuses_loudly(args: list[str], payload: Any, code: str) -> None:
+    with tempfile.TemporaryDirectory() as td:
+        d = os.path.join(td, "sim")
+        shutil.copytree(_IC_FIXTURES, d)
+        out = os.path.join(d, "partner_assessment_operator.json")
+        with open(out, "rb") as f:
+            before = f.read()
+        argv = [*args, "--run-id", "RID", "-o", out]
+        if "--kind" not in argv:
+            argv = ["--kind", "assessment", *argv]
+        rc, stdout, stderr = run_script_raw("persist_partner.py", argv, stdin_data=json.dumps(payload))
+        assert rc == 1, stdout + stderr
+        assert code in stdout and "left unchanged" in stderr
+        with open(out, "rb") as f:
+            assert f.read() == before
+
+
+def test_persist_partner_refuses_without_a_fund_profile() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        out = os.path.join(td, "partner_assessment_operator.json")
+        rc, stdout, stderr = run_script_raw(
+            "persist_partner.py",
+            ["--kind", "assessment", "--archetype", "operator", "--run-id", "RID", "-o", out],
+            stdin_data=json.dumps(_PARTNER_PAYLOAD),
+        )
+        assert rc == 1 and "FUND_PROFILE_MISSING" in stdout and not os.path.exists(out)
+
+
+def test_compose_discussion_refuses_an_unstamped_partner_file() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        d = os.path.join(td, "sim")
+        shutil.copytree(_IC_FIXTURES, d)
+        path = os.path.join(d, "partner_rebuttal_operator.json")
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        del data["graded_against"]
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+        out = os.path.join(d, "discussion.json")
+        with open(out, "rb") as f:
+            before = f.read()
+        rc, stdout, stderr = run_script_raw("compose_discussion.py", ["--dir", d, "--run-id", "RID", "-o", out])
+        assert rc == 1, stdout + stderr
+        printed = json.loads(stdout.strip().splitlines()[-1])
+        assert printed["code"] == "PARTNER_ARTIFACTS_STALE" and "partner_rebuttal_operator.json" in printed["message"]
+        assert "PARTNER_ARTIFACTS_STALE" in stderr
+        with open(out, "rb") as f:
+            assert f.read() == before
+
+
+def test_skill_md_persists_every_partner_handoff_through_the_script() -> None:
+    """Steps 6 and 6b persist hand-offs through persist_partner.py (the stamp is the script's), never an inline
+    write a model could change."""
+    for heading, kind in (
+        ("### Step 6: Partner Assessments", "assessment"),
+        ("### Step 6b: Partner Rebuttals", "rebuttal"),
+    ):
+        text = _read(_SKILL_MD_PATH)
+        start = text.index(heading)
+        section = text[start : text.index("\n### ", start + 10)]
+        assert f'persist_partner.py" --kind {kind}' in section, heading
+        assert "json.dump(data" not in section and "python3 -c" not in section, heading
+
+
 def test_compose_renders_partner_labels_from_the_role() -> None:
     with tempfile.TemporaryDirectory() as td:
         d = os.path.join(td, "sim")
