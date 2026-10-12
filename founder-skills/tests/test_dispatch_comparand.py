@@ -774,9 +774,19 @@ def test_a_line_that_writes_nothing_into_the_plugin_is_not_read_whole(line: str)
     ],
 )
 def test_the_inside_of_a_string_is_not_read_as_commands(inner: str) -> None:
-    """A quote left open joins the lines that follow it into one command; their text is no redirect."""
+    """A quote left open joins the lines that follow it into one command; their text is no redirect. The
+    code itself names the plugin, so it is held as a readable block holds the same code (its one-line form
+    parses and distrusts); the same code naming no plugin folder writes nothing."""
     block = f"P={_SYNCED}; SC=$P/{_CP}\nfor s in a; do :; done\nnode -e '\n{inner}\n' $SC/x.js"
-    assert DPC._distrusts(block) == set(), block
+    assert DPC._parse_block(block) is None
+    targets, text = DPC._raw_targets_by_line(block.splitlines(), set())
+    assert targets[2:] == [[], [], []] and {2, 3} <= text, (targets, text)
+    assert DPC._distrusts(block) == set(DPC.GENERATORS), block
+    one_line = f"P={_SYNCED}; SC=$P/{_CP}\nnode -e '{inner}' $SC/x.js"
+    assert DPC._parse_block(one_line) is not None
+    assert DPC._distrusts(one_line) == set(DPC.GENERATORS), one_line
+    elsewhere = block.replace("$SC/x", "/tmp/w/x").replace('"$SC"', '"/tmp/w"')
+    assert DPC._distrusts(elsewhere) == set(), elsewhere
 
 
 def test_a_continued_line_is_read_with_the_line_it_continues() -> None:
@@ -1437,3 +1447,421 @@ def test_a_subcommand_given_as_a_variable_is_read_from_the_blocks_own_assignment
     # Set in an earlier block, it cannot be read here: the call counts for no context.
     unset = _rows(("Bash", {"command": f"cat /w/notes.txt; {gen}"}, "notes\n" + PRINTED))
     assert DPC.latest_printed(unset, "CONTEXT: RED_TEAM") is None
+
+
+# --- inline code in a block the parser cannot read ----------------------------------------------------------
+
+# Each line is put after `_DISCARDED_HEAD` (a heredoc makes the block unreadable). `$S` is the installed
+# plugin's market-sizing scripts folder; `_T` a module beside the generators.
+_T = "$S/x.py"
+_INLINE_INTO_PLUGIN = [
+    f"python3 -c \"m='w';open('{_T}',m).write('e')\"",
+    "python3 -c \"import shutil;shutil.copy('/tmp/e','$S/dispatch_prompt.py')\" > /dev/null",
+    "python3 -c \"import shutil;shutil.copy('/tmp/e','$S/dispatch_prompt.py')\"",
+    "bash -c 'python3 $S/dispatch_prompt.py top_down_methodology>$S/dispatch_prompt.py' >/dev/null",
+    "python3 - <<'PY'\nimport shutil; shutil.copy('/tmp/e', '$S/dispatch_prompt.py')\nPY",
+    'bash -c "python3 $S/dispatch_prompt.py x > /dev/null; echo x>$S/dispatch_prompt.py"',
+    'bash -c "echo x>$S/dispatch_prompt.py"',
+    "python3 -c \"\nimport shutil\nshutil.copy('/tmp/e', '$S/dispatch_prompt.py')\n\"",
+    f"python3 -c \"\nm='w'\nopen('{_T}', m).write('e')\n\"",
+    f"python3 - <<'PY'\np = '{_T}'\nopen(p, 'w').write('e')\nPY",
+    "cat <<'PY' | python3\nimport shutil; shutil.copy('/tmp/e', '$S/dispatch_prompt.py')\nPY",
+    "timeout 5 python3 -c \"import shutil;shutil.copy('/tmp/e','$S/dispatch_prompt.py')\"",
+    f"node -e \"require('fs').writeFileSync('{_T}','e')\"",
+    "cat > /tmp/w1/w.py <<'PY'\nimport shutil; shutil.copy('/tmp/e', '$S/dispatch_prompt.py')\nPY\n"
+    "python3 /tmp/w1/w.py",
+    "echo \"import shutil;shutil.copy('/tmp/e','$S/dispatch_prompt.py')\" | python3",
+    f'python3 -c "import sys,shutil;shutil.copy(\'/tmp/e\',sys.argv[1])" "{_T}"',
+    "X=\"$(python3 -c \"import shutil;shutil.copy('/tmp/e','$S/dispatch_prompt.py')\")\"",
+    "X=\"`python3 -c \\\"import shutil;shutil.copy('/tmp/e','$S/dispatch_prompt.py')\\\"`\"",
+    "X=$(python3 -c \"import shutil;shutil.copy('/tmp/e','$S/dispatch_prompt.py')\")",
+    # Arithmetic beside a quoted substitution: removed first, so the substitution is still read.
+    "N=$((N+1)); X=\"$(python3 -c \"import shutil;shutil.copy('/tmp/e','$S/dispatch_prompt.py')\")\"",
+    # Write forms no list could hold: the code names the plugin, which is what the readable block holds.
+    f"python3 -c \"from shutil import copy;copy('/tmp/e','{_T}')\"",
+    f"python3 -c \"from os import rename;rename('/tmp/e','{_T}')\"",
+    f"python3 -c \"from os import link as l;l('/tmp/e','{_T}')\"",
+    f"python3 -c \"o=open;print('e',file=o('{_T}','w'))\"",
+    f"python3 -c \"import io;print('e',file=io.FileIO('{_T}','w'))\"",
+    "python3 -c \"import zipfile;zipfile.ZipFile('/tmp/e.zip').extractall('$S')\"",
+    f"python3 -c \"import logging;logging.FileHandler('{_T}','w');logging.warning('e')\"",
+    f'python3 -c "import runpy;runpy.run_path(\'/tmp/w/w.py\')" "{_T}"',
+    f"python3 -c \"import sys,shutil;sys.modules['shutil'].copy('/tmp/e','{_T}')\"",
+    f"python3 -c \"import builtins;print('e',file=vars(builtins)['open']('{_T}','w'))\"",
+    f"python3 -c \"print('e',file=__builtins__.__dict__['open']('{_T}','w'))\"",
+    'python3 -m zipfile -e /tmp/e.zip "$S/"',
+    'python3 -m tarfile -e /tmp/e.tar "$S/"',
+    f"P=python3; $P -c \"import shutil;shutil.copy('/tmp/e','{_T}')\"",
+    f'X=cp; bash -c "$X /tmp/e {_T}"',
+    f"cat > /tmp/w/w.py <<'PY'\nimport sys,shutil;shutil.copy('/tmp/e',sys.argv[1])\nPY\npython3 /tmp/w/w.py \"{_T}\"",
+    f"python3 - \"{_T}\" <<'PY'\nimport sys,shutil;shutil.copy('/tmp/e',sys.argv[1])\nPY",
+    "python3 -c \"import tempfile;tempfile.NamedTemporaryFile(dir='$S',suffix='.pth',delete=False).write(b'e')\"",
+    f'perl -e \'rename("/tmp/e","{_T}")\'',
+    f'perl -MFile::Copy -e \'copy("/tmp/e","{_T}")\'',
+    f"node -e \"const fs=require('fs');const d=fs.openSync('{_T}','w');fs.writeSync(d,'e')\"",
+    f"node -e \"require('child_process').spawnSync('cp',['/tmp/e','{_T}'])\"",
+    f'ruby -e \'require "fileutils";FileUtils.cp("/tmp/e","{_T}")\'',
+    f'ruby -e \'File.binwrite("{_T}","e")\'',
+    f"bun -e \"require('fs').writeFileSync('{_T}','e')\"",
+    f"pypy3 -c \"from shutil import copy;copy('/tmp/e','{_T}')\"",
+    # A path under a skills folder names the plugin, unlike Step 0's bare quoted `"/skills/"` separator.
+    "python3 -c \"import glob,os;r=glob.glob(os.path.expanduser('~/**/skills/market-sizing/scripts'),"
+    "recursive=True)[0];from shutil import copy;copy('/tmp/e',r+'/x.py')\"",
+    "python3 -c \"import glob,os;r=glob.glob(os.path.expanduser('~/**/skills/market-sizing/scripts'),"
+    "recursive=True)[0];import zipfile;zipfile.ZipFile('/tmp/e.zip').extractall(r)\"",
+    "node -e \"const fs=require('fs');const d=fs.openSync('/x/skills/ms/x.py','w');fs.writeSync(d,'e')\"",
+    'ruby -e \'r=Dir.glob(ENV["HOME"]+"/**/skills/market-sizing/scripts")[0];File.binwrite(r+"/x.py","e")\'',
+    'perl -e \'@r=glob("$ENV{HOME}/*/*/*/*/skills/market-sizing/scripts");rename("/tmp/e","$r[0]/x.py")\'',
+    "S2=$P/skills/market-sizing/scripts; python3 -c \"from shutil import copy;copy('/tmp/e','$S2/x.py')\"",
+    # A heredoc-saved body this shell runs through `.`, `source` or `eval`.
+    f"cat > /tmp/w/h.sh <<'SH'\npython3 -c \"from shutil import copy;copy('/tmp/e','{_T}')\"\nSH\n. /tmp/w/h.sh",
+    f"cat > /tmp/w/h.sh <<'SH'\npython3 -c \"from shutil import copy;copy('/tmp/e','{_T}')\"\nSH\nsource /tmp/w/h.sh",
+    f"cat > /tmp/w/h.sh <<'SH'\npython3 -c \"from shutil import copy;copy('/tmp/e','{_T}')\"\nSH\n"
+    'eval "$(cat /tmp/w/h.sh)"',
+    # A pipe at the end of a line feeds the interpreter on the next.
+    f"cat <<'PY' |\nfrom shutil import copy;copy('/tmp/e','{_SYNCED}/{MS_SCRIPTS}/x.py')\nPY\npython3",
+    # A heredoc inside the code argument.
+    f"python3 -c \"$(cat <<PY\nfrom shutil import copy;copy('/tmp/e','{_T}')\nPY\n)\"",
+    # An unquoted heredoc body is expanded: its substitutions run.
+    f"cat > \"$AD/notes.md\" <<EOF\n$(python3 -c \"from shutil import copy;copy('/tmp/e','{_T}')\")\nEOF",
+    f"cat > \"$AD/notes.md\" <<EOF\n`python3 -c \"from shutil import copy;copy('/tmp/e','{_T}')\"`\nEOF",
+    # A continued line before `-c`, and an interpreter variable with more than one value.
+    f"python3 \\\n-c \"from shutil import copy;copy('/tmp/e','{_T}')\"",
+    f"P=echo; P=python3; $P -c \"from shutil import copy;copy('/tmp/e','{_T}')\"",
+    f"for P in python3 perl; do $P -c \"from shutil import copy;copy('/tmp/e','{_T}')\"; done",
+    f"# P=notes\nP=python3; $P -c \"from shutil import copy;copy('/tmp/e','{_T}')\"",
+    # A comment's unbalanced `$(` does not stop the substitution before it being read.
+    f"X=\"$(python3 -c \"import shutil;shutil.copy('/tmp/e','{_T}')\")\" # note $(",
+]
+# Already held before this rule, by the per-line write reading: pinned so they stay held.
+_INLINE_HELD_BEFORE = [
+    f"python3 -Ic \"open('{_T}','w').write('e')\"",
+    f'perl -E \'open(my $f,">","{_T}");print $f "e"\'',
+    f'perl -pe \'BEGIN{{open(F,">{_T}");print F "e"}}\' /dev/null',
+    f"osascript -e 'do shell script \"cp /tmp/e {_T}\"'",
+    f'base64 -d /tmp/e.b64 > "{_T}"',
+]
+
+
+@pytest.mark.parametrize("line", _INLINE_INTO_PLUGIN + _INLINE_HELD_BEFORE)
+def test_inline_code_that_names_the_plugin_distrusts_as_a_readable_block_does(line: str) -> None:
+    block = _DISCARDED_HEAD + line
+    assert DPC._parse_block(block) is None, line
+    assert DPC._distrusts(block) == set(DPC.GENERATORS), line
+
+
+@pytest.mark.parametrize(
+    "line",
+    [x for x in _INLINE_INTO_PLUGIN if "\n" not in x and x.startswith(("python3 -c", "perl", "node -e", "ruby"))],
+)
+def test_the_same_one_line_inline_code_in_a_readable_block_distrusts(line: str) -> None:
+    """The mirror: with nothing that makes the block unreadable, the parsed reading holds the same line."""
+    block = f"S={_SYNCED}/{MS_SCRIPTS}; " + line
+    assert DPC._parse_block(block) is not None, line
+    assert DPC._distrusts(block) == set(DPC.GENERATORS), line
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        # Inline code naming neither a generator nor the plugin.
+        "python3 -c \"import json;v=json.load(open('$AD/validation.json'));print(sorted(v))\"",
+        "python3 - <<'PY'\nimport json; print(json.load(open('/home/claude/work/a.json')))\nPY",
+        'echo 1 | python3 -c "import sys;print(sys.stdin.read())"',
+        # A plugin producer beside arithmetic, or beside an interpreter that reads no program: the producer's
+        # own redirect is not inline code.
+        'N=$((N+1)); python3 "$S/market_sizing.py" --inputs "$AD/inputs.json" > "$AD/sizing.json"',
+        'python3 --version; python3 "$S/market_sizing.py" --inputs "$AD/inputs.json" > "$AD/sizing.json"',
+        'node --version 2>/dev/null; python3 "$S/sensitivity.py" --sizing "$AD/sizing.json" > "$AD/sens.json"',
+        # An unbalanced `$(` beside a producer: its segments are read, never the whole line as code.
+        'echo "$(date"; python3 "$S/market_sizing.py" --inputs "$AD/inputs.json" > "$AD/sizing.json"',
+        # Data heredocs: a `/skills/` URL and the word "install" are not code, and nothing runs them.
+        "cat > \"$AD/research.md\" <<'EOF'\nSource: https://github.com/example/skills/blob/main/x.md\n"
+        "To install the SDK run pip install x\nEOF",
+        # A comparison straight after `)` in code is no redirect.
+        "python3 - <<'PY'\nimport sys\nif len(sys.argv)>1: print('$AD/x.json')\nPY",
+        # A saved body run by `.` that names no plugin; an expanded body whose substitution runs no code; a
+        # heredoc piped on the next line into a command that is no interpreter.
+        "cat > /tmp/w/h.sh <<'SH'\necho hi\nSH\n. /tmp/w/h.sh",
+        'cat > "$AD/notes.md" <<EOF\nrun at $(date)\nEOF',
+        "cat <<'EOF' |\nsee $S for the scripts\nEOF\ngrep scripts",
+    ],
+)
+def test_inline_code_naming_no_plugin_is_no_write(line: str) -> None:
+    block = _DISCARDED_HEAD + line
+    assert DPC._parse_block(block) is None, line
+    assert DPC._distrusts(block) == set(), line
+
+
+def test_a_producer_beside_inline_code_that_reads_is_still_no_write() -> None:
+    """The inline unit is its own words, never its line's: the same line also runs a plugin producer."""
+    block = _producer_then_reader()
+    assert DPC._parse_block(block) is None
+    assert DPC._inline_units(block.splitlines(), set(), {}) != []
+    assert DPC._distrusts(block) == set()
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        # Held as a readable block holds them: inline code that names the plugin by a hint other than
+        # `/skills/`, or a `dispatch_` word, whether or not it writes.
+        "python3 -c \"import json;print(json.load(open('$S/../data/x.json')))\"",
+        "python3 -c \"import re,json;p=re.compile('x');print(json.load(open('$S/../../../data/host-contract.json')))\"",
+        'python3 -c "import json,sys;print(json.load(open(sys.argv[1]))[\'x\'])" "$H/dispatch_log.json"',
+        # A helper the block saves and runs with a plugin path as its argument.
+        "cat > /tmp/w/h.py <<'PY'\nimport json,sys\nd=json.load(open(sys.argv[1]))\nPY\n"
+        'python3 /tmp/w/h.py "$S/../../../data/host-contract.json"',
+    ],
+)
+def test_inline_code_naming_the_plugin_without_writing_is_held_as_the_parsed_reading_holds_it(line: str) -> None:
+    block = _DISCARDED_HEAD + line
+    assert DPC._parse_block(block) is None, line
+    assert DPC._distrusts(block) == set(DPC.GENERATORS), line
+    if "\n" not in line:
+        one_line = f"S={_SYNCED}/{MS_SCRIPTS}; H=/w/h; " + line
+        assert DPC._parse_block(one_line) is not None, line
+        assert DPC._distrusts(one_line) == set(DPC.GENERATORS), line
+
+
+def _step0_finders() -> list[tuple[str, str]]:
+    """The block holding the `ours()` plugin-finder in each SKILL.md's Step 0, read from the skills as they are."""
+    import re
+
+    skills = Path(__file__).resolve().parents[1] / "skills"
+    out = []
+    for md in sorted(skills.glob("*/SKILL.md")):
+        blocks = re.finditer(r"^```bash\n(.*?)^```", md.read_text(), re.M | re.S)
+        out += [(md.parent.name, m.group(1)) for m in blocks if "ours()" in m.group(1)]
+    return out
+
+
+def test_step_0s_plugin_finder_is_no_write_and_the_same_code_writing_is_held() -> None:
+    """Step 0's finder is inline code whose only naming of the plugin is the quoted `/skills/`: it is held
+    only when it also writes. With a `"w"` added to its `open(`, every skill's copy is held."""
+    finders = _step0_finders()
+    skills = {
+        "market-sizing",
+        "deck-review",
+        "cap-table",
+        "ic-sim",
+        "financial-model-review",
+        "competitive-positioning",
+    }
+    assert {skill for skill, _ in finders} >= skills, finders
+    for skill, block in finders:
+        lines = block.splitlines()
+        assert DPC._parse_block(block) is None, skill
+        units = DPC._inline_units(lines, DPC._heredoc_bodies(lines) or set(), {})
+        assert any('"/skills/"' in u for u in units), skill  # the finder is read as inline code
+        assert DPC._distrusts(block) == set(), skill
+        old = '/.claude-plugin/plugin.json"))'
+        assert block.count(old) == 1, skill
+        writing = block.replace(old, '/.claude-plugin/plugin.json", "w"))')
+        assert DPC._distrusts(writing) == set(DPC.GENERATORS), skill
+
+
+@pytest.mark.parametrize(
+    "tail",
+    [
+        # An apostrophe in a comment no longer joins the inline code that follows into a quote.
+        "# don't\npython3 -c \"import shutil; shutil.copy('/tmp/e', '$S/x.py')\"\necho it's done'",
+        "# don't\nD=$S; python3 -c \"import shutil; shutil.copy('/tmp/e', '$D/x.py')\"; echo '",
+        "# don't\npython3 -c \"import os; t='$S/x.py'; os.replace('/tmp/e', t)\"; echo '",
+    ],
+)
+def test_a_comment_does_not_split_inline_code_from_its_write(tail: str) -> None:
+    block = f"cd /w\nS={_SYNCED}/{MS_SCRIPTS}\nfor s in a; do :; done\n{tail}"
+    assert DPC._parse_block(block) is None, tail
+    assert DPC._distrusts(block) == set(DPC.GENERATORS), tail
+
+
+@pytest.mark.parametrize(
+    ("line", "held"),
+    [
+        # Fed to an interpreter, or saved to a file a later segment runs: code.
+        (
+            "cat > /tmp/w1/w.py <<'PY'\nimport shutil; shutil.copy('/tmp/e', '$S/dispatch_prompt.py')\nPY\n"
+            "python3 /tmp/w1/w.py",
+            True,
+        ),
+        (f"python3 - \"{_T}\" <<'PY'\nimport sys,shutil;shutil.copy('/tmp/e',sys.argv[1])\nPY", True),
+        # Saved and never run, or written as data: never read as code.
+        (
+            "cat > /tmp/w1/w.py <<'PY'\nimport shutil; shutil.copy('/tmp/e', sys.argv[1])\nPY\n"
+            'python3 /tmp/w2/v.py "$AD/x"\necho "$S"',
+            False,
+        ),
+        (
+            "cat > \"$AD/validation.json\" <<'EOF'\n"
+            '{"sources": [{"url": "https://example.com/x", "note": "see the skills report"}]}\nEOF',
+            False,
+        ),
+    ],
+)
+def test_a_heredoc_body_is_code_only_when_an_interpreter_runs_it(line: str, held: bool) -> None:
+    block = _DISCARDED_HEAD + line
+    assert DPC._parse_block(block) is None, line
+    assert DPC._distrusts(block) == (set(DPC.GENERATORS) if held else set()), line
+
+
+# A heredoc-saved file that a later segment runs, by any spelling the interpreter takes (`_run_program`).
+_SAVED_PY = "cat > /tmp/w/h.py <<'PY'\nimport sys,shutil;shutil.copy('/tmp/e',sys.argv[1])\nPY\n"
+_SAVED_SH = "cat > /tmp/w/h.sh <<'SH'\npython3 -c \"from shutil import copy;copy('/tmp/e','$S/x.py')\"\nSH\n"
+_SAVED_RUNS = [
+    _SAVED_PY + 'python3 /tmp/w/h.py "$S/x.py"',
+    _SAVED_PY + 'python3 -X utf8 /tmp/w/h.py "$S/x.py"',
+    _SAVED_PY + 'python3 -W ignore /tmp/w/h.py "$S/x.py"',
+    _SAVED_PY + 'python3 -m runpy /tmp/w/h.py "$S/x.py"',
+    _SAVED_PY + 'uv run --with x /tmp/w/h.py "$S/x.py"',
+    _SAVED_PY + 'uv run python3 /tmp/w/h.py "$S/x.py"',
+    _SAVED_PY + 'python3 /tmp/w/h.py "$S/run_scenario.py"',
+    "cd /tmp/w\ncat > h.py <<'PY'\nimport sys,shutil;shutil.copy('/tmp/e',sys.argv[1])\nPY\npython3 ./h.py \"$S/x.py\"",
+    "cat > /tmp/w/h.js <<'JS'\nrequire('fs').copyFileSync('/tmp/e',process.argv[2])\nJS\n"
+    'node -r x /tmp/w/h.js "$S/x.py"',
+    "cat > /tmp/w/h.pl <<'PL'\nrename('/tmp/e',$ARGV[0])\nPL\nperl -I /tmp /tmp/w/h.pl \"$S/x.py\"",
+    _SAVED_SH + 'eval "$(cat /tmp/w/h.sh)"',
+    "F=/tmp/w/h.sh\ncat > \"$F\" <<'SH'\npython3 -c \"from shutil import copy;copy('/tmp/e','$S/x.py')\"\nSH\n"
+    'source -- "$F" a',
+    "cd /tmp/w\ncat > h.sh <<'SH'\npython3 -c \"from shutil import copy;copy('/tmp/e','$S/x.py')\"\nSH\n. ./h.sh",
+    # A pipe and stderr at the end of a line feed the interpreter on the next.
+    f"cat <<'PY' |&\nfrom shutil import copy;copy('/tmp/e','{_SYNCED}/{MS_SCRIPTS}/x.py')\nPY\npython3",
+    # A continued line elsewhere in the block does not stop a quoted body being read.
+    f"cat <<'PY' | python3\nfrom shutil import copy;copy('/tmp/e','{_SYNCED}/{MS_SCRIPTS}/x.py')\nPY\necho x \\\n y",
+    # A quoted `/skills/` glued to a name is a path under a skills folder, not Step 0's separator.
+    "S2=\"$P\"'/skills/'market-sizing/scripts; python3 -c \"from shutil import copy;copy('/tmp/e','$S2/x.py')\"",
+    "S2=$P'/skills/'market-sizing/scripts; python3 -c \"from shutil import copy;copy('/tmp/e','$S2/x.py')\"",
+    "S2=$P\"/skills/\"market-sizing/scripts; python3 -c \"from shutil import copy;copy('/tmp/e','$S2/x.py')\"",
+]
+
+
+@pytest.mark.parametrize("line", _SAVED_RUNS)
+def test_a_saved_file_run_as_the_program_is_read_as_code(line: str) -> None:
+    block = _DISCARDED_HEAD + line
+    assert DPC._parse_block(block) is None, line
+    assert DPC._distrusts(block) == set(DPC.GENERATORS), line
+
+
+# A data file written by a heredoc and given to a plugin script in the same call, with no `\` continuation
+# (which made the block's bodies unreadable and hid the case): the file is that script's data, not code.
+_REVIEW = "REVIEW_DIR=/home/claude/artifacts/acme-review\n"
+_SAVED_DATA = [
+    _REVIEW + "cat <<'EOF' > \"$REVIEW_DIR/scenario_requests.json\"\n"
+    '{"scenarios": [{"type": "priced_round"}]}\nEOF\n'
+    'python3 "$SCRIPTS/run_scenario.py" --inputs "$REVIEW_DIR/inputs.json" --instruments "$REVIEW_DIR/instruments.json"'
+    ' --cap-state "$REVIEW_DIR/cap_state.json" --scenarios-input "$REVIEW_DIR/scenario_requests.json"'
+    ' --run-id "$RUN_ID" -o "$REVIEW_DIR/scenarios.json"',
+    _REVIEW + "cat > \"$REVIEW_DIR/inputs.json\" <<'EOF'\n"
+    '{"company": {"company_name": "Acme"}}\nEOF\n'
+    'python3 "$SCRIPTS/validate_inputs.py" "$REVIEW_DIR/inputs.json" --pretty',
+    _REVIEW + "cat > \"$REVIEW_DIR/ctx.json\" <<'EOF'\n"
+    '{"stage": "seed"}\nEOF\n'
+    'python3 "$SHARED_SCRIPTS/founder_context.py" merge --file "$REVIEW_DIR/ctx.json" '
+    '--artifacts-root "$ARTIFACTS_ROOT"',
+    # The same through an installed path, and with options before the script.
+    _REVIEW + f"CT={_SYNCED}/skills/cap-table/scripts\n" + "cat <<'EOF' > \"$REVIEW_DIR/scenario_requests.json\"\n"
+    '{"scenarios": [{"type": "priced_round"}]}\nEOF\n'
+    'python3 -X utf8 "$CT/run_scenario.py" --scenarios-input "$REVIEW_DIR/scenario_requests.json"',
+    _REVIEW + "cat > \"$REVIEW_DIR/ctx.json\" <<'EOF'\n"
+    '{"stage": "seed"}\nEOF\n'
+    'uv run "$SHARED_SCRIPTS/founder_context.py" merge --file "$REVIEW_DIR/ctx.json"',
+]
+
+
+@pytest.mark.parametrize("line", _SAVED_DATA)
+def test_a_saved_data_file_given_to_a_plugin_script_is_its_data(line: str) -> None:
+    block = f"S={_SYNCED}/{MS_SCRIPTS}\nfor s in a; do :; done\n" + line
+    assert DPC._parse_block(block) is None, line
+    assert DPC._distrusts(block) == set(), line
+
+
+# The hook's own root with no install marker (a CI checkout, a `--plugin-dir` session), assigned in the block
+# and used for a shared script given a heredoc-saved file: the file is still that script's data.
+_UNMARKED = "/home/runner/work/acme/acme/founder-skills"
+_UA = "/home/runner/work/_temp/ws/artifacts"
+_UNMARKED_DATA = [
+    f"S={_UNMARKED}/scripts; FS={_UNMARKED}/skills/financial-model-review/scripts; A={_UA}\n"
+    'RD=$A/financial-model-review-acme\ncat > "$RD/ctx.json" <<\'EOF\'\n{"stage": "seed"}\nEOF\n'
+    'python3 $S/founder_context.py merge --file "$RD/ctx.json" --artifacts-root "$A"; echo "rc=$?"',
+    f"P={_UNMARKED}; A={_UA}; H=$A/deck-review-acme/handoff/r1\n"
+    "cat > \"$H/commentary.md\" <<'EOF'\n## Coaching\n\nText.\nEOF\n"
+    'python3 "$P/scripts/md_to_commentary.py" "$H/commentary.md" -o "$H/commentary.json" --pretty',
+    f'P={_UNMARKED}; H={_UA}/x/handoff/r1\ncat > "$H/a.json" <<\'EOF\'\n{{"a": 1}}\nEOF\n'
+    'cat > "$H/b.json" <<\'EOF\'\n{"b": 2}\nEOF\n'
+    'python3 "$P/scripts/merge_json.py" "$H/a.json" "$H/b.json" > "$H/ab.json"',
+    f'S={_UNMARKED}/scripts; H={_UA}/x/handoff/r1\ncat > "$H/out.json" <<\'EOF\'\n{{"a": 1}}\nEOF\n'
+    'python3 $S/check_handoff.py "$H/out.json" --agent-path "$H/out.json"; echo "rc=$?"',
+    f"cd {_UA}/..\nSS={_UNMARKED}/scripts\nS={_UNMARKED}/skills/market-sizing/scripts\n"
+    "AD=$PWD/artifacts/market-sizing-acme\n"
+    'cat > "$AD/handoff/r1/commentary.json" <<\'EOF\'\n{"commentary": "x"}\nEOF\n'
+    'python3 "$SS/insert_coaching.py" --commentary "$AD/handoff/r1/commentary.json" --report "$AD/report.md" '
+    '--verify-artifact "$AD/report.json"',
+    f'S={_UNMARKED}/scripts; H={_UA}/x\ncat > "$H/h.py" <<\'EOF\'\nprint(1)\nEOF\npython3 "$S/merge_json.py" "$H/h.py"',
+    # Control: an installed (marked) root, which names the plugin by its marker.
+    f'P={_SYNCED}; H=/home/claude/x/handoff/r1\ncat > "$H/a.json" <<\'EOF\'\n{{"a": 1}}\nEOF\n'
+    'python3 "$P/scripts/merge_json.py" "$H/a.json" > "$H/ab.json"',
+]
+
+
+@pytest.mark.parametrize("block", _UNMARKED_DATA)
+def test_a_saved_data_file_given_through_the_hooks_own_unmarked_root_is_its_data(monkeypatch: Any, block: str) -> None:
+    monkeypatch.setattr(DPC, "HOOK_PLUGIN_ROOT", _UNMARKED)
+    assert not any(m in _UNMARKED + "/" for m in DPC._INSTALL_MARKERS)
+    assert DPC._parse_block(block) is None, block
+    assert DPC._distrusts(block) == set(), block
+
+
+def test_a_saved_script_run_through_the_hooks_own_unmarked_root_is_still_code(monkeypatch: Any) -> None:
+    """Control: the saved file is the program, and its body names the plugin through the root."""
+    monkeypatch.setattr(DPC, "HOOK_PLUGIN_ROOT", _UNMARKED)
+    block = (
+        f"S={_UNMARKED}/scripts; H={_UA}/x\n"
+        'cat > "$H/h.py" <<\'EOF\'\nimport shutil; shutil.copy("/tmp/e", "$S/x.py")\nEOF\npython3 "$H/h.py"'
+    )
+    assert DPC._parse_block(block) is None
+    assert DPC._distrusts(block) == set(DPC.GENERATORS)
+
+
+@pytest.mark.parametrize(
+    ("name", "words", "program"),
+    [
+        ("python3", ["/w/h.py", "a"], "/w/h.py"),
+        ("python3", ["-X", "utf8", "/w/h.py"], "/w/h.py"),
+        ("python3", ["-W", "ignore", "-u", "/w/h.py"], "/w/h.py"),
+        ("python3", ["-m", "runpy", "/w/h.py"], "/w/h.py"),
+        ("python3", ["-m", "json.tool", "/w/a.json"], ""),
+        ("python3", ["--", "/w/h.py"], "/w/h.py"),
+        ("uv", ["run", "--with", "x", "/w/h.py"], "/w/h.py"),
+        ("uv", ["run", "python3", "-X", "utf8", "/w/h.py"], "/w/h.py"),
+        ("uv", ["pip", "install", "x"], ""),
+        ("uvx", ["tool", "a"], "tool"),
+        ("node", ["-r", "x", "/w/h.js"], "/w/h.js"),
+        ("perl", ["-I", "/tmp", "/w/h.pl"], "/w/h.pl"),
+        ("bash", ["-o", "pipefail", "/w/h.sh"], "/w/h.sh"),
+        ("python3", ["-u"], ""),
+    ],
+)
+def test_the_program_of_a_run_is_its_first_word_after_the_interpreters_options(
+    name: str, words: list[str], program: str
+) -> None:
+    assert DPC._run_program(name, words) == program, (name, words)
+
+
+@pytest.mark.parametrize(
+    ("code", "writes"),
+    [
+        ("open(p)", False),
+        ('open(p, "r")', False),
+        ("open(p, 'rb')", False),
+        ('open(f(x) + "/y")', False),
+        ('json.load(open(c.rsplit("/skills/", 1)[0] + "/.claude-plugin/plugin.json"))', False),
+        ("x.open(p, 'w')", False),
+        ("open(p, m)", True),
+        ('open(p, "w")', True),
+        ("open(*a)", True),
+        ("open(p, mode=m)", True),
+        ("open(p, ", True),
+    ],
+)
+def test_which_open_calls_may_write(code: str, writes: bool) -> None:
+    assert DPC._open_writes(code) is writes, code

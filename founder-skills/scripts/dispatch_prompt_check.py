@@ -88,11 +88,36 @@ dispatch is held as above:
 
 KNOWN RESIDUALS. Whether a block wrote into the plugin is read from its text, so these writes are not seen:
   * `xargs ... cp {}` and `find ... -exec cp {} DEST`: the destination is built when the command runs;
-  * `tar -C DIR` and `unzip -d DIR`: they are not read as writes in a block the parser cannot follow;
-  * `perl -i`, and inline code (`python3 -c`, `perl -e`) that writes to a path passed as an argument;
-  * inline code that builds its path at run time (`os.environ[...]`, string joins in a heredoc body);
-  * a relative path or glob after a `cd` in a block the parser can follow (`cd "$SCRIPTS" && cp x y*`);
-  * a name set in an earlier shell call: it is not resolved, and a write through it is not counted.
+  * in a block the parser cannot follow, writers the raw reading does not list: `tar -C`, `unzip -d`,
+    `curl -o`, `wget -O`, `git`, `sqlite3 .output`, `sed 'w FILE'`, `python3 -m pip install -t`,
+    `python3 -m json.tool OUTFILE`;
+  * `perl -i`, and inline code that neither reading sees as inline: an interpreter reached through a
+    substitution (`"$(which python3)" -c`), a short-option cluster (`python3 -Bc`), `node -p` / `--eval`,
+    `php -r`, an option given through a variable (`FLAG=-c; python3 $FLAG ...`);
+  * inline code that builds its path at run time (`os.environ[...]`, string joins), or reads it from stdin or a
+    pipe (`echo "$S/x.py" | python3 -c '...stdin...'`, `xargs -I{} python3 -c '...{}...'`), and, for code
+    whose only naming of the plugin is the quoted literal `"/skills/"` (the plugin-finder every SKILL.md's
+    Step 0 runs), a write form the raw reading does not list;
+  * a script written in an earlier shell call, or in this block by anything but a heredoc
+    (`printf ... > h.py`), and run in this one; a heredoc-saved file run through a process substitution
+    (`bash <(cat F)`) or named inside a `-c` string (`sh -c ". F"`); a heredoc whose opener line is itself
+    continued (`cat <<'PY' | \\` then `python3` on the next line);
+  * in a block the parser cannot follow, a heredoc-saved script run with a plugin path as the value of an
+    interpreter option the reading does not know to take one (`python3 --opt "$S/x.py" saved.py`): the
+    plugin path is read as the program, so the saved script is read as its data;
+  * a relative path or glob after a `cd` (`cd "$SCRIPTS" && cp x y*`), and a relative target straight after
+    `)>` or `;>`;
+  * a name set in an earlier shell call: it is not resolved, and a write through it is not counted;
+  * a parameter expansion with an operator (`${S%/x}`, `${S:-/tmp}`, `${S/a/b}`, the indirect `${!N}`): it is
+    not read as naming `S`; and, in a block the parser cannot follow, a chain of more than four aliases
+    (`A=$S; B=$A; ...`);
+  * in a block the parser can follow, a `#` after an escaped character (`echo x\\ #y; cp ...`): it is read as
+    a comment, so the rest of that line is not read;
+  * in a block the parser cannot follow, `$'...'` quoting with an escaped quote inside (`$'it\\'s'`): the raw
+    reading takes it as plain single quotes, so the quoting after it can be misread.
+COST. In a block the parser cannot follow, a quote left open re-reads the growing joined command at every
+later line, so the raw reading is quadratic in such a block's length; a few hundred lines after an unclosed
+quote can take longer than the hook's timeout. Not capped here.
 """
 
 from __future__ import annotations
@@ -922,7 +947,8 @@ def _distrusts(command: str) -> set[str]:
     read-only command; and every generator when the block writes into the plugin (a redirect, an
     in-place edit, a copy, link or extraction whose target points there), makes a link to it (`ln`,
     `cp -l`/`-s`, from its scripts, a generator or an install root), runs inline code that names
-    it, or cannot be read and mentions it in a line that writes (`_raw_writes_into_plugin`). Names are
+    it, or cannot be read and either runs such inline code or mentions it in a line that writes
+    (`_raw_writes_into_plugin`). Names are
     read with the block's own assignments filled in, so a name spelt apart (`G=dispatch_prompt; ...
     "$G.py"`) is still seen, and a name a quote ends (`"$S"ts/x.py`) is read as the shell reads it."""
     command = _QUOTE_ENDS_NAME_RE.sub(r"${\1}", command)
@@ -986,7 +1012,8 @@ _RAW_WRITE_RE = re.compile(
 _RAW_LINK_RE = re.compile(
     r"(?:^|[\s;&|(])(?:\S*/)?(?:ln\s|cp\s+(?:[^;&|]*\s)?(?:-[A-Za-z]*[ls][A-Za-z]*|--link|--symbolic-link)(?:\s|$))"
 )
-_RAW_ASSIGN_RE = re.compile(r"(?<![\w$./-])([A-Za-z_][A-Za-z0-9_]*)=(\"[^\"]*\"|'[^']*'|[^\s;&|]*)")
+# An assignment and its value: a run of quoted and bare segments (`S2="$P"'/skills/'x` is one value).
+_RAW_ASSIGN_RE = re.compile(r"(?<![\w$./-])([A-Za-z_][A-Za-z0-9_]*)=((?:\"[^\"]*\"|'[^']*'|[^\s;&|\"'])*)")
 
 
 def _raw_filled(line: str, values: dict[str, list[str]]) -> str:
@@ -1389,12 +1416,14 @@ def _raw_dynamic_names(lines: list[str], shell_lines: list[str]) -> tuple[set[st
     return out, loops
 
 
-def _heredoc_bodies(lines: list[str]) -> set[int] | None:
+def _heredoc_bodies(lines: list[str], quoted_ok: bool = False) -> set[int] | None:
     """The indexes of the lines that are heredoc bodies (each body's closing word included), or None when a
     `<<` cannot be followed: one the pattern does not read (`<< $V`, `$((1<<2))`, `<<EOF:x`, `<<"E"OF`), a
     body never closed, one this shell itself runs (`source`, `.`, `eval`), whose assignments would then
     be real, or a block with a heredoc and any line ending in a backslash (in an unquoted body the shell
-    joins it to the next line, which then cannot close the body)."""
+    joins it to the next line, which then cannot close the body). With `quoted_ok` (the inline reading), a
+    continued line elsewhere does not stop a QUOTED body being followed, whose text the shell takes as it
+    stands; only a continued opener line, or an unquoted body beside a continued line, does."""
     bodies: set[int] = set()
     pending: list[tuple[str, bool]] = []  # (closing word, tabs stripped), in the order the line opened them
     for i, line in enumerate(lines):
@@ -1410,14 +1439,302 @@ def _heredoc_bodies(lines: list[str]) -> set[int] | None:
         if opened and re.search(r"(?:^|[\s;&|({])(?:source|\.|eval)\s", line):  # a body this shell runs
             return None
         pending = [(m.group(2) or m.group(3) or m.group(4), m.group(1) == "-") for m in opened]
-        if opened and any(x.endswith("\\") for x in lines):
+        unquoted = any(m.group(4) for m in opened)
+        if opened and (line.endswith("\\") or ((unquoted or not quoted_ok) and any(x.endswith("\\") for x in lines))):
             return None
     return None if pending else bodies
 
 
+# Inline code that may change a file: a write call, or a call that runs other code. Read only for code whose
+# one naming of the plugin is the bare `/skills/` separator (`_inline_into_plugin`).
+_INLINE_WRITE_RE = re.compile(
+    r"write_text\(|write_bytes\(|\.write\(|\bshutil\.|\bos\.(?:rename|replace|link|symlink|remove|unlink|system|"
+    r"popen|spawn|exec|write|open|makedirs|mkdir|chmod|truncate)|\bsubprocess\b|\bexec\(|\beval\(|__import__|"
+    r"\bimportlib\b|\bgetattr\(|(?<![\w.])compile\(|\.(?:rename|symlink_to|hardlink_to|link_to|touch|unlink)\("
+    r"|\.(?:write|append)File\w*\(|\.(?:copyFile|cp|rename|symlink|link|createWriteStream)\w*\(|\bFile\.(?:write|open)"
+    r"|\bIO\.write|\.open\("
+)
+# Shell arithmetic (`$((N+1))`), which `_lift_substitutions` does not follow.
+_ARITH_RE = re.compile(r"\$\(\((?:[^()]|\([^()]*\))*\)\)")
+# How deep command substitutions inside command substitutions are read for inline code.
+_INLINE_DEPTH = 4
+
+
+def _open_writes(code: str) -> bool:
+    """Whether an `open(` call in `code` may write: one with a second argument that is not a literal read
+    mode (`"r"`, `"rb"`, `"rt"`), a `mode` keyword, a starred argument, or one whose arguments cannot be
+    read. Arguments are split at the call's own commas, so `open(c.rsplit("/", 1)[0] + "/p.json")` is one."""
+    for m in re.finditer(r"(?<![\w.])open\(", code):
+        depth, i = 1, m.end()
+        args: list[str] = []
+        current = ""
+        while i < len(code) and depth:
+            ch = code[i]
+            if ch in "([{":
+                depth += 1
+            elif ch in ")]}":
+                depth -= 1
+            if depth == 1 and ch == ",":
+                args.append(current)
+                current = ""
+            elif depth:
+                current += ch
+            i += 1
+        if depth:
+            return True  # never closed
+        args = [a.strip() for a in [*args, current] if a.strip()]
+        if not args or any(a.startswith(("*", "mode")) for a in args):
+            return True
+        if len(args) > 1 and not re.fullmatch(r"""(["'])r?[bt]?r?\1""", args[1]):
+            return True
+    return False
+
+
+# Commands that run a file's text as commands of this shell: a heredoc body saved to that file is code.
+_BODY_RUNNERS = frozenset({"source", ".", "eval"})
+
+
+def _interpreter(name: str) -> bool:
+    """A program name the raw reading takes as an interpreter (`_INTERPRETERS_RE`, and `pypy`)."""
+    return bool(_INTERPRETERS_RE.match(name) or re.fullmatch(r"pypy[0-9.]*", name))
+
+
+# Interpreter options that take the next word as their value, per family: the program never follows one
+# directly. An option not listed is read as a flag.
+_OPTION_ARGS: dict[str, frozenset[str]] = {
+    "python": frozenset({"-X", "-W", "--check-hash-based-pycs"}),
+    "perl": frozenset({"-I", "-M", "-m"}),
+    "node": frozenset({"-r", "--require", "--import", "--loader", "--experimental-loader", "-C", "--conditions",
+                       "--input-type", "--env-file"}),
+    "ruby": frozenset({"-I", "-r", "-C", "-E"}),
+    "sh": frozenset({"-o", "-O", "+o", "+O"}),
+    "uv": frozenset({"--with", "--with-editable", "--with-requirements", "--python", "-p", "--project",
+                     "--directory", "--env-file", "--index", "--default-index", "--extra", "--group", "--package",
+                     "--from", "-w"}),
+}  # fmt: skip
+
+
+def _family(name: str) -> str:
+    if re.fullmatch(r"(?:python|pypy)[0-9.]*", name):
+        return "python"
+    if name in ("node", "deno", "bun"):
+        return "node"
+    if name in ("bash", "sh", "zsh", "dash", "ksh"):
+        return "sh"
+    if name in ("uv", "uvx"):
+        return "uv"
+    return name
+
+
+def _run_program(name: str, words: list[str], depth: int = 0) -> str:
+    """The program a run of interpreter `name` with `words` executes: the first plain word after the
+    interpreter's own options and their values (`-X utf8 F`, `-W ignore F`, `node -r X F`, `uv run --with x
+    F`; `python3 -m runpy F` runs F). "" when it is not a file the words name: a module (`-m json.tool`), no
+    plain word, `uv` without `run`."""
+    family = _family(name)
+    if name == "uv":  # `uvx F` runs F; `uv` runs one only through `uv run`
+        if not words or words[0] != "run":
+            return ""
+        words = words[1:]
+    takes = _OPTION_ARGS.get(family, frozenset())
+    i = 0
+    while i < len(words):
+        w = words[i]
+        if w == "--":
+            i += 1
+            break
+        if family == "python" and w == "-m":
+            if i + 1 < len(words) and words[i + 1] == "runpy":
+                i += 2
+                continue
+            return ""
+        if w in takes or (w and set(w) <= set("<>&|")):
+            i += 2  # an option and its value, or a redirect and its target
+            continue
+        if w.startswith(("-", "+")) and len(w) > 1:
+            i += 1
+            continue
+        break
+    if i >= len(words):
+        return ""
+    program = words[i]
+    if family == "uv" and depth < 2 and _interpreter(os.path.basename(program)):
+        return _run_program(os.path.basename(program), words[i + 1 :], depth + 1)  # `uv run python3 F`
+    return program
+
+
+def _runs(target: str, program: str, words: list[str]) -> bool:
+    """Whether a run names the saved file `target` (spelt the same, or the same path once normalised:
+    `h.sh` / `./h.sh`), or a substitution among its words reads it (`eval "$(cat F)"`). `program` is set
+    only when the run's program is a plugin script: the saved file is then that script's data, so only the
+    program word counts. Otherwise any word may be the program (an option the reading does not know)."""
+    norm = os.path.normpath(target) if not target.startswith("$") else target
+    candidates = [program] if program else words
+    if any(w == target or (w and not w.startswith("$") and os.path.normpath(w) == norm) for w in candidates):
+        return True
+    return any(target in w for w in words if "$(" in w or "`" in w)
+
+
+def _inline_units(lines: list[str], bodies: set[int], values: dict[str, list[str]], depth: int = 0) -> list[str]:
+    """The inline code a raw block runs, each piece with the words it is given, read per command (lines a
+    quote, a continuation or a trailing `|`, `|&`, `&&` or `||` joins are one) and per segment:
+      * an interpreter given `-c` or `-e` (named directly, or by a variable any of whose values the block
+        assigns is one, `P=python3; $P -c`): the words after the interpreter, so a path passed as an
+        argument is read too, and a heredoc the command opens (`-c "$(cat <<PY ... PY)"`);
+      * an interpreter that reads its program from stdin, only where stdin is fed: after `|`, with a `<`
+        redirect, with a heredoc of its own (or after `|` from a segment that opened one), or with `-` or
+        `-s` as its program. `python3 --version` reads nothing. For a heredoc, the body is the code and the
+        interpreter's words its arguments (`python3 - "$T" <<PY`);
+      * a heredoc body saved to a file that a later segment of the block runs, as a script or through
+        `source`, `.` or `eval` (`cat > w.py <<PY ... PY; python3 w.py "$T"`), joined with that segment's
+        words. When that segment's program (`_run_program`) is a plugin script, only the program word
+        counts: a file given to a plugin script as an argument is that script's data
+        (`--scenarios-input saved.json`). A body this block runs no other way is data, never code; one
+        written by anything but a heredoc is not read (KNOWN RESIDUALS);
+      * the same, recursively, inside each command substitution (`X="$(python3 -c ...)"`, backticks), and
+        inside an UNQUOTED heredoc body, which the shell expands; arithmetic and comments removed first. A
+        substitution that cannot be followed adds nothing, since its command's own segments are read anyway.
+    Each piece is read on its own words, never its line's: the same line may run a plugin script."""
+    units: list[str] = []
+    pending: list[int] = []
+    fed_bodies: dict[int, str] = {}  # a heredoc's opening line -> the words of the interpreter it feeds
+    saved: dict[int, list[str]] = {}  # each line of a command -> what that command writes to
+    # (last line, words after the runner, its program when that is a plugin script) of each script run
+    runs: list[tuple[int, list[str], str]] = []
+
+    def program(word: str) -> str:
+        if word.startswith("$"):
+            found = [v for v in values.get(word[1:].strip("{}"), []) if _interpreter(os.path.basename(v))]
+            return os.path.basename(found[0]) if found else ""
+        return os.path.basename(word)
+
+    def plugin_program(word: str) -> str:  # the program word when it is a plugin script, else ""
+        # Read per word, as `_inline_into_plugin` reads it: a value that is the hook's own root names the plugin.
+        return word if word and any(_into_plugin(w) for w in _raw_filled(word, values).split()) else ""
+
+    def substitutions(text: str) -> list[str]:
+        subs = [b.replace('\\"', '"') for b in re.findall(r"`((?:[^`\\]|\\.)*)`", text)]
+        plain = _strip_comments(_ARITH_RE.sub("0", text))
+        lifted = _lift_substitutions(plain) if "$(" in plain else None
+        return subs + (lifted[1] if lifted is not None else [])
+
+    for i in range(len(lines)):
+        if i in bodies:
+            continue
+        pending.append(i)
+        joined = "\n".join(lines[j] for j in pending)
+        # `\` and a newline outside single quotes join two lines into one word list (`python3 \` + `-c ...`).
+        tokens = _raw_tokens(re.sub(r"\\\n", " ", joined))
+        if i < len(lines) - 1 and (tokens is None or (tokens and tokens[-1] in ("|", "|&", "&&", "||"))):
+            continue  # a quote still open, a line continued, or a pipe into the next line: the command goes on
+        tokens = tokens if tokens is not None else joined.split()
+        command, last = list(pending), pending[-1]
+        pending = []
+        if depth < _INLINE_DEPTH:
+            for sub in substitutions(joined):
+                units += _inline_units(sub.splitlines(), set(), values, depth + 1)
+        targets = _raw_write_targets(joined) or []
+        saved.update({j: targets for j in command})
+        opener = next((j for j in command if "<<" in lines[j]), None)
+        segment: list[str] = []
+        before = ";"
+        heredoc_before = False
+        for tok in [*tokens, ";"]:
+            if tok not in _RAW_CUTS and tok != "|&":
+                segment.append(tok)
+                continue
+            words, sep, before, segment = segment, before, tok, []
+            piped = sep in ("|", "|&")
+            own_heredoc = any(w in ("<<", "<<-") for w in words)
+            heredoc_fed = own_heredoc or (piped and heredoc_before)
+            heredoc_before = heredoc_before or own_heredoc
+            if words and words[0] in _BODY_RUNNERS:
+                args = [w for w in words[1:] if w != "--"]
+                runs.append((last, words[1:], plugin_program(args[0] if args else "")))  # runs a file as commands
+                continue
+            at = [k for k, w in enumerate(words) if _interpreter(program(w))]
+            if not at:
+                continue
+            rest = words[at[0] + 1 :]
+            if any(w in ("-c", "-e") for w in rest):
+                units.append(" ".join(rest))
+                if opener is not None and any("<<" in w for w in rest):
+                    fed_bodies[opener] = " ".join(rest)  # a heredoc inside the code argument
+                continue
+            plain: list[str] = []
+            skip = False
+            fed = piped
+            first = ""
+            for w in rest:
+                if skip:
+                    skip = False  # a redirect's target
+                elif w and set(w) <= set("<>&|"):
+                    skip = True
+                    fed = fed or "<" in w
+                elif w == "-" and not first:
+                    first = "-"  # `python3 - ARGS`: the program is stdin, the rest its arguments
+                elif not w.startswith(("-", "/dev/stdin", "/proc/self/fd/0")):
+                    plain.append(w)
+                    first = first or w
+            if plain and "-s" not in rest and first != "-":
+                # runs a script, read only when this block wrote it
+                runs.append((last, rest, plugin_program(_run_program(program(words[at[0]]), rest))))
+            elif opener is not None and heredoc_fed:
+                fed_bodies[opener] = " ".join(rest)
+            elif fed:
+                units.append(joined)
+    group: list[int] = []
+    for i in range(len(lines) + 1):
+        if i in bodies:
+            group.append(i)
+            continue
+        if group:
+            body = "\n".join(lines[j] for j in group)
+            opener = group[0] - 1
+            if opener in fed_bodies:
+                units.append(body + "\n" + fed_bodies[opener])
+            for target in saved.get(opener, []):
+                for ran_at, rest, prog in runs:
+                    if ran_at > opener and _runs(target, prog, rest):
+                        units.append(body + "\n" + " ".join(rest))
+            # An unquoted body is expanded by the shell: its substitutions run.
+            if depth < _INLINE_DEPTH and any(m.group(4) for m in _RAW_HEREDOC_RE.finditer(lines[opener])):
+                for sub in substitutions(body):
+                    units += _inline_units(sub.splitlines(), set(), values, depth + 1)
+            group = []
+    return units
+
+
+def _inline_into_plugin(code: str, values: dict[str, list[str]]) -> bool:
+    """Whether a piece of inline code (`_inline_units`), with the block's assignments filled in, is held:
+    as the parsed branch holds it, when it names a generator or names the plugin by anything but the bare
+    `/skills/` separator (`$SCRIPTS`, `PLUGIN_ROOT`, an install marker, an absolute path under the plugin
+    this hook runs from). Code whose only naming is `/skills/` -- the plugin-finder every SKILL.md's
+    Step 0 runs (`c.rsplit("/skills/", 1)[0] + "/.claude-plugin/plugin.json"`) -- is held only when it
+    also writes or runs code (`_INLINE_WRITE_RE`, `_open_writes`, a redirect or copy). That holds only for
+    `/skills/` as a whole quoted literal: a path under a skills folder (`'~/**/skills/x/scripts'`,
+    `$P/skills/...` with `P` set in an earlier call) names the plugin, and is held."""
+    filled = _raw_filled(code, values)
+    if any(g in filled for g in GENERATORS) or "dispatch_" in filled or "prompt.py" in filled:
+        return True
+    words = re.split(r"""[\s"'(),=+]+""", filled)
+    if not (_into_plugin(filled) or any(_into_plugin(w) for w in words)):
+        return False
+    if any(h in filled for h in _PLUGIN_HINTS if h != "/skills/"):
+        return True
+    if "/skills/" in re.sub(r"""(?<![\w"'$}/])(["'])/skills/\1(?![\w"'/$])""", "", filled):
+        return True  # a path under a skills folder, not the bare separator Step 0 passes to `rsplit`
+    root = norm_path(HOOK_PLUGIN_ROOT) + "/"
+    if any(w.startswith("/") and (norm_path(w) + "/").startswith(root) for w in words):
+        return True
+    return bool(_INLINE_WRITE_RE.search(filled) or _open_writes(filled) or _RAW_WRITE_RE.search(_raw_quiet(filled)))
+
+
 def _raw_writes_into_plugin(command: str) -> bool:
-    """For a block the parser cannot read (a heredoc, a loop): whether any line both writes (a redirect,
-    a copy, an in-place edit, a file opened by inline code) and names the plugin or a generator. Read
+    """For a block the parser cannot read (a heredoc, a loop): whether it runs inline code that names a
+    generator or the plugin (`_inline_units`, `_inline_into_plugin`), as a readable block's inline code is
+    held, or any line both writes (a redirect, a copy, an in-place edit, a file opened by inline code) and
+    names the plugin or a generator. Read
     line by line, so a heredoc's body is checked too. A line that only runs a generator and saves its
     output outside the plugin is not such a line, unless the block changes folder (a relative path
     elsewhere in it could then land in the plugin) or has a heredoc it cannot follow. A heredoc's body is
@@ -1445,6 +1762,10 @@ def _raw_writes_into_plugin(command: str) -> bool:
     values: dict[str, list[str]] = {name: list(words) for name, words in loops.items()}
     for name, value in _RAW_ASSIGN_RE.findall(command):
         values.setdefault(name, []).append(value.strip("\"'"))
+    # Inline code that names a generator or the plugin, as a readable block's does (`_inline_into_plugin`).
+    inline_bodies = None if _RAW_OTHER_BREAKS.search(command) else _heredoc_bodies(lines, quoted_ok=True)
+    if any(_inline_into_plugin(unit, values) for unit in _inline_units(lines, inline_bodies or set(), values)):
+        return True
     targets_at, text_lines = _raw_targets_by_line(lines, bodies)
     for i, line in enumerate(lines):
         env = None if off or i in bodies else _raw_env([x for j, x in enumerate(lines[:i]) if j not in bodies], once)
