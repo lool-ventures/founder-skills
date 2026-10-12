@@ -355,6 +355,16 @@ def _ic_gates() -> Any:
     return _ic_gates
 
 
+def _fund_profile_module() -> Any:
+    """The sibling `fund_profile` (the role labels and the check for a profile that names people)."""
+    scripts_dir = os.path.dirname(os.path.abspath(__file__))
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    import fund_profile
+
+    return fund_profile
+
+
 def _handoff_bypassed(dir_path: str, artifacts: dict[str, Any]) -> list[str]:
     """Which sub-agent steps this report's artifacts came from have no gated hand-off in this run.
 
@@ -1235,15 +1245,20 @@ def _section_fund_profile(fund: dict[str, Any] | None) -> str:
         max_str = _fmt_number(check_size.get("max"))
         lines.append(f"**Check Size:** {currency} {min_str} - {max_str}")
 
+    # Partners are role names only: the label comes from the role, never from the file's `name` or
+    # `background`, and the line carries the archetype's focus areas.
+    role_labels = _fund_profile_module().ROLE_LABELS
     archetypes = _as_list(fund.get("archetypes"))
     if archetypes:
         lines.append("\n**Partners:**")
         for arch in archetypes:
             if not isinstance(arch, dict):
                 continue
-            role = arch.get("role", "?").title()
-            name = arch.get("name", "?")
-            lines.append(f"- **{name}** ({role}): {arch.get('background', '?')}")
+            label = role_labels.get(str(arch.get("role", "")))
+            if label is None:
+                continue
+            focus = ", ".join(str(a) for a in _as_list(arch.get("focus_areas")))
+            lines.append(f"- **{label}**: {focus}" if focus else f"- **{label}**")
 
     return "\n".join(lines) + "\n"
 
@@ -1854,6 +1869,8 @@ def main() -> None:
     ledger = gates.require_or_exit(args.dir, run_id, [gates.DECLINE_GATE], by="compose_report.py")
     if ledger is not None:
         gates.refuse_open_gates(ledger)
+    # After the run's gates (a finished run reports RUN_FINISHED, which it can act on), before any write.
+    _fund_profile_module().refuse_profile_naming_people(args.dir, by="compose_report.py")
 
     report_path = os.path.abspath(args.write_md) if args.write_md else None
     result = compose(args.dir, report_path=report_path)

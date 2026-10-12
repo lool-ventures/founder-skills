@@ -1161,6 +1161,16 @@ def _run_ref_module() -> ModuleType:
     return _run_ref
 
 
+def _fund_profile_module() -> ModuleType:
+    """The sibling `fund_profile`, for its check of a profile that names people."""
+    scripts_dir = os.path.dirname(os.path.abspath(__file__))
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    import fund_profile
+
+    return fund_profile
+
+
 def _own_run_id(dir_path: str) -> str | None:
     """This page's run id: the one the simulation's files agree on, read as compose reads it
     (`_ic_gates.run_id_of`), so a model-written profile alone never decides it."""
@@ -1206,6 +1216,10 @@ def main() -> None:
     if not os.path.isdir(args.dir):
         print(f"Error: directory not found: {args.dir}", file=sys.stderr)
         sys.exit(1)
+
+    # A profile that names people means the partner prose this page renders was written by sub-agents that saw
+    # them: refuse before writing (this page has no run gate, so it also runs on a finished old folder).
+    _fund_profile_module().refuse_profile_naming_people(args.dir, by="visualize.py")
 
     html_out = compose_html(args.dir)
     if args.run_id is not None:

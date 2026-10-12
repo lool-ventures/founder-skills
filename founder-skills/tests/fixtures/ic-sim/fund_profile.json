@@ -18,8 +18,6 @@
   "archetypes": [
     {
       "role": "visionary",
-      "name": "The Visionary",
-      "background": "Former founder, market analyst",
       "focus_areas": [
         "market size",
         "timing",
@@ -28,8 +26,6 @@
     },
     {
       "role": "operator",
-      "name": "The Operator",
-      "background": "Former operating executive",
       "focus_areas": [
         "GTM motion",
         "execution speed",
@@ -38,8 +34,6 @@
     },
     {
       "role": "analyst",
-      "name": "The Analyst",
-      "background": "Former investment banker",
       "focus_areas": [
         "unit economics",
         "capital efficiency",

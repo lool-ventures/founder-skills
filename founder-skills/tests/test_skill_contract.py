@@ -1202,7 +1202,11 @@ SKILL_MD_CEILING: dict[str, int] = {
     # zero exit, paid for in the same step; the heredoc warning shortened, its reason kept.
     # -5 B, LOWERED, commit 13: Step 8.5 names the GATE_UNDECIDABLE remedy (re-run Step 8, same RUN_ID), paid for
     # by two rationale clauses in the same step; a derived stage takes its option id and no value.
-    "ic-sim": 95_003,
+    # 95,003 -> 95,006 (+3 B) on 2026-10-12: partners are role names only. Step 4 drops the partner-mapping read
+    # and the example's names and backgrounds, and says to research the fund, never its people (the closed
+    # archetype and portfolio keys, and that the founder is told the partners are role-played); compose's and
+    # the page's steps route FUND_PROFILE_NAMES_PEOPLE to a rebuild rather than to "report the exact stderr".
+    "ic-sim": 95_006,
     # deck-review +1,165 B: Step 0 carried only a parenthetical fresh-shell mention buried in a code
     # comment, unlike the four skills that mint RUN_ID in a LATER block and so carry the shared banner.
     # deck-review mints RUN_ID INSIDE this re-runnable Step-0 block (like cap-table), so the shared
@@ -2178,7 +2182,9 @@ REFERENCES_CEILING: dict[str, int] = {
     # ic-sim 55,805 -> 56,354 (+549 B) on 2026-10-08: the maintainer notes SKILL.md's Available References
     # carried (which file a step reads, which is documentation only, where the sub-agents' copy lives) moved
     # into the three references' headers when the catalog left SKILL.md.
-    "ic-sim": 56_354,
+    # 56,354 -> 56,849 (+495 B) on 2026-10-12: artifact-schemas.md states the fund profile's closed key sets
+    # (archetype role + focus_areas, portfolio name/sector/status, top-level keys) and the refusal codes.
+    "ic-sim": 56_849,
     # 49_039 -> 50_080 (R1): artifact-schemas.md now documents the evidence/notes
     # contract and its JSON example demonstrates a fail item carrying both.
     # 50_080 -> 50_124 (R2): artifact-schemas.md documents the half-credit formula.

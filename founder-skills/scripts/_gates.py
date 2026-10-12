@@ -5570,7 +5570,9 @@ CLI_CODES = {
     # founder declined under FS_HOST_NO_ASK.
     "cp_producers": ["RUN_ID_REQUIRED", "NO_ASK_FOUNDER_DECLINED"],
     # ic-sim's compose: a simulation dir that belongs to a run, whose files do not agree on which.
-    "ic_producers": ["RUN_ID_REQUIRED"],
+    # FUND_PROFILE_NAMES_PEOPLE: compose and the page refuse (exit 1, nothing written) a fund profile written
+    # before partners became role names; the skill rebuilds the profile and the discussion under the same run.
+    "ic_producers": ["RUN_ID_REQUIRED", "FUND_PROFILE_NAMES_PEOPLE"],
     # cap-table's producers (and its two pages): a call into a bound review dir with no (or an empty) --run-id,
     # or with a --run-id not bound there while the dir carries another run's (exit 1, no artifact written; compose
     # still leaves its compose_result.json record of the refusal, stamped with the refused id).

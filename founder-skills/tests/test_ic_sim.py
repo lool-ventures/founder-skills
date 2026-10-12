@@ -22,6 +22,8 @@ import tempfile
 from datetime import datetime, timedelta
 from typing import Any
 
+import pytest
+
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 IC_SIM_DIR = os.path.join(os.path.dirname(SCRIPT_DIR), "skills", "ic-sim", "scripts")
 
@@ -489,9 +491,9 @@ _VALID_GENERIC_PROFILE: dict[str, Any] = {
     "check_size_range": {"min": 500000, "max": 5000000, "currency": "USD"},
     "stage_focus": ["pre_seed", "seed"],
     "archetypes": [
-        {"role": "visionary", "name": "The Visionary", "background": "Ex-founder", "focus_areas": ["market"]},
-        {"role": "operator", "name": "The Operator", "background": "Ex-COO", "focus_areas": ["execution"]},
-        {"role": "analyst", "name": "The Analyst", "background": "Ex-banker", "focus_areas": ["unit economics"]},
+        {"role": "visionary", "focus_areas": ["market"]},
+        {"role": "operator", "focus_areas": ["execution"]},
+        {"role": "analyst", "focus_areas": ["unit economics"]},
     ],
     "portfolio": [
         {"name": "FinLedger", "sector": "Fintech", "status": "active"},
@@ -501,21 +503,21 @@ _VALID_GENERIC_PROFILE: dict[str, Any] = {
 }
 
 _VALID_FUND_SPECIFIC: dict[str, Any] = {
-    "fund_name": "Sequoia Capital",
+    "fund_name": "Northwind Ventures",
     "mode": "fund_specific",
     "thesis_areas": ["Consumer", "Enterprise", "Crypto"],
     "check_size_range": {"min": 1000000, "max": 10000000, "currency": "USD"},
     "stage_focus": ["seed", "series_a"],
     "archetypes": [
-        {"role": "visionary", "name": "Alfred Lin", "background": "Ex-Zappos COO", "focus_areas": ["market"]},
-        {"role": "operator", "name": "Jess Lee", "background": "Ex-Polyvore CEO", "focus_areas": ["product"]},
-        {"role": "analyst", "name": "Pat Grady", "background": "Growth investor", "focus_areas": ["metrics"]},
+        {"role": "visionary", "focus_areas": ["market"]},
+        {"role": "operator", "focus_areas": ["product"]},
+        {"role": "analyst", "focus_areas": ["metrics"]},
     ],
     "portfolio": [
-        {"name": "Stripe", "sector": "Fintech"},
-        {"name": "DoorDash", "sector": "Logistics"},
+        {"name": "Kestrel Ledger", "sector": "Fintech"},
+        {"name": "Tidewell Logistics", "sector": "Logistics"},
     ],
-    "sources": [{"url": "https://sequoiacap.com"}, {"title": "Crunchbase"}],
+    "sources": [{"url": "https://northwind.example"}, {"title": "Northwind Ventures — Thesis"}],
 }
 
 
@@ -591,9 +593,9 @@ def test_fund_profile_invalid_role() -> None:
     """Invalid archetype role -> validation error."""
     profile = dict(_VALID_GENERIC_PROFILE)
     profile["archetypes"] = [
-        {"role": "dreamer", "name": "Test", "background": "Test", "focus_areas": []},
-        {"role": "operator", "name": "Test", "background": "Test", "focus_areas": []},
-        {"role": "analyst", "name": "Test", "background": "Test", "focus_areas": []},
+        {"role": "dreamer", "focus_areas": []},
+        {"role": "operator", "focus_areas": []},
+        {"role": "analyst", "focus_areas": []},
     ]
     payload = json.dumps(profile)
     rc, data, _ = run_script("fund_profile.py", ["--pretty"], stdin_data=payload)
@@ -645,6 +647,219 @@ def test_fund_profile_rejected_leaves_earlier_profile_in_place() -> None:
             assert f.read() == before
         assert "left unchanged" in stderr
         assert json.loads(stdout)["validation"]["status"] == "invalid"
+
+
+# --- partners are role names only ---------------------------------------------------------------------
+# Invented throughout: "Dana Whitlock" stands for a person a model might record; no real fund or person.
+
+_PERSON = "Dana Whitlock"
+_PERSON_BIO = "Ex-Harbor Lane Capital partner"
+
+
+def _specific_with(**changes: Any) -> dict[str, Any]:
+    profile: dict[str, Any] = json.loads(json.dumps(_VALID_FUND_SPECIFIC))
+    profile.update(changes)
+    return profile
+
+
+def _refused_without_echo(profile: dict[str, Any], code: str, *secrets: str) -> None:
+    """Exit 1, `-o` untouched, a stderr line, the code in the errors, and no refused value in any stream."""
+    with tempfile.TemporaryDirectory() as td:
+        out = os.path.join(td, "fund_profile.json")
+        with open(out, "w", encoding="utf-8") as f:
+            f.write("earlier\n")
+        rc, stdout, stderr = run_script_raw("fund_profile.py", ["-o", out], stdin_data=json.dumps(profile))
+        assert rc == 1, stdout + stderr
+        with open(out, encoding="utf-8") as f:
+            assert f.read() == "earlier\n"
+        assert "left unchanged" in stderr and code in stderr
+        data = json.loads(stdout)
+        assert any(e.startswith(code + ":") for e in data["validation"]["errors"])
+        for secret in secrets:
+            assert secret not in stdout, f"{secret!r} echoed on stdout"
+            assert secret not in stderr, f"{secret!r} echoed on stderr"
+
+
+def test_fund_profile_refuses_a_partner_name_without_echoing_it() -> None:
+    profile = _specific_with()
+    profile["archetypes"][0]["name"] = _PERSON
+    _refused_without_echo(profile, "PARTNER_NAME_NOT_ROLE", _PERSON, "Kestrel Ledger", "northwind.example")
+
+
+def test_fund_profile_refuses_a_partner_name_in_generic_mode_too() -> None:
+    profile = json.loads(json.dumps(_VALID_GENERIC_PROFILE))
+    profile["archetypes"][2]["name"] = _PERSON
+    _refused_without_echo(profile, "PARTNER_NAME_NOT_ROLE", _PERSON)
+
+
+def test_fund_profile_refuses_a_background_without_echoing_it() -> None:
+    profile = _specific_with()
+    profile["archetypes"][1]["background"] = _PERSON_BIO
+    _refused_without_echo(profile, "ARCHETYPE_FIELD_NOT_ALLOWED", _PERSON_BIO)
+
+
+@pytest.mark.parametrize("key", ["bio", "linkedin", "partner", "title"])
+def test_fund_profile_refuses_any_other_archetype_key(key: str) -> None:
+    profile = _specific_with()
+    profile["archetypes"][0][key] = _PERSON
+    _refused_without_echo(profile, "ARCHETYPE_FIELD_NOT_ALLOWED", _PERSON)
+
+
+@pytest.mark.parametrize("key", ["partners", "team", "people", "notes"])
+def test_fund_profile_refuses_an_unknown_fund_key(key: str) -> None:
+    _refused_without_echo(_specific_with(**{key: [_PERSON]}), "FUND_FIELD_NOT_ALLOWED", _PERSON)
+
+
+def test_fund_profile_refuses_a_portfolio_key_outside_the_closed_set() -> None:
+    profile = _specific_with()
+    profile["portfolio"][0]["lead_partner"] = _PERSON
+    _refused_without_echo(profile, "PORTFOLIO_FIELD_NOT_ALLOWED", _PERSON)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://www.linkedin.com/in/dana-whitlock",
+        "https://UK.LinkedIn.com/IN/dana-whitlock",
+        "linkedin.com/in/dana-whitlock/",
+        "https://www.crunchbase.com/person/dana-whitlock",
+        "http://CRUNCHBASE.COM/Person/dana-whitlock",
+    ],
+)
+def test_fund_profile_refuses_a_source_that_is_a_person(url: str) -> None:
+    profile = _specific_with(sources=[{"url": "https://northwind.example/thesis"}, {"url": url}])
+    _refused_without_echo(profile, "SOURCE_IS_A_PERSON", "dana-whitlock")
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://northwind.example/team",
+        "https://www.linkedin.com/company/northwind",
+        "https://www.crunchbase.com/organization/northwind-ventures",
+        "https://x.com/northwindvc",
+        "https://notlinkedin.com/in/x",
+        "https://linkedin.com.example/in/x",
+    ],
+)
+def test_fund_profile_accepts_a_fund_level_source(url: str) -> None:
+    profile = _specific_with(sources=[{"url": url}])
+    rc, data, stderr = run_script("fund_profile.py", [], stdin_data=json.dumps(profile))
+    assert rc == 0, stderr
+    assert data is not None and data["validation"]["status"] == "valid"
+
+
+def test_fund_profile_accepts_the_exact_role_label_and_does_not_write_it() -> None:
+    profile = _specific_with()
+    for arch in profile["archetypes"]:
+        arch["name"] = {"visionary": "The Visionary", "operator": "The Operator", "analyst": "The Analyst"}[
+            arch["role"]
+        ]
+    with tempfile.TemporaryDirectory() as td:
+        out = os.path.join(td, "fund_profile.json")
+        rc, _, stderr = run_script_raw("fund_profile.py", ["-o", out], stdin_data=json.dumps(profile))
+        assert rc == 0, stderr
+        with open(out, encoding="utf-8") as f:
+            written = json.load(f)
+    assert [sorted(a) for a in written["archetypes"]] == [["focus_areas", "role"]] * 3
+
+
+def test_fund_profile_accepts_profiles_with_no_name() -> None:
+    for profile in (_VALID_GENERIC_PROFILE, _VALID_FUND_SPECIFIC):
+        rc, data, stderr = run_script("fund_profile.py", [], stdin_data=json.dumps(profile))
+        assert rc == 0, stderr
+        assert data is not None
+        assert all("name" not in a for a in data["archetypes"])
+
+
+def test_fund_profile_an_invalid_role_with_a_name_reports_the_role_error() -> None:
+    profile = _specific_with()
+    profile["archetypes"][0] = {"role": "dreamer", "name": "The Visionary", "focus_areas": ["market"]}
+    rc, data, stderr = run_script("fund_profile.py", [], stdin_data=json.dumps(profile))
+    assert rc == 1, stderr
+    assert "Traceback" not in stderr
+    assert data is not None
+    errors = data["validation"]["errors"]
+    assert any("dreamer" in e for e in errors)
+    assert any(e.startswith("PARTNER_NAME_NOT_ROLE: archetype 0 (unknown role)") for e in errors)
+
+
+def test_fund_profile_other_refusals_keep_the_full_echo() -> None:
+    """Only a people refusal withholds the archetypes, portfolio and sources from the diagnostic."""
+    profile = _specific_with(thesis_areas=[])
+    rc, data, _ = run_script("fund_profile.py", [], stdin_data=json.dumps(profile))
+    assert rc == 1 and data is not None
+    assert data["archetypes"] == _VALID_FUND_SPECIFIC["archetypes"]
+    assert data["portfolio"] == _VALID_FUND_SPECIFIC["portfolio"]
+
+
+# --- compose and visualize refuse a profile written before partners became role names -------------------
+
+_IC_FIXTURES = os.path.join(SCRIPT_DIR, "fixtures", "ic-sim")
+
+
+def _old_profile_dir(td: str, mode: str, arch0: dict[str, Any]) -> str:
+    d = os.path.join(td, "sim")
+    shutil.copytree(_IC_FIXTURES, d)
+    path = os.path.join(d, "fund_profile.json")
+    with open(path, encoding="utf-8") as f:
+        profile = json.load(f)
+    profile["mode"] = mode
+    profile["archetypes"][0].update(arch0)
+    if mode == "fund_specific":
+        profile["portfolio"] = [{"name": "Kestrel Ledger", "sector": "Fintech"}]
+        profile["sources"] = [{"url": "https://northwind.example/team", "title": "Northwind Ventures — Team"}]
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(profile, f)
+    return d
+
+
+def test_compose_and_visualize_refuse_a_profile_that_names_people() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        d = _old_profile_dir(td, "fund_specific", {"name": _PERSON, "background": _PERSON_BIO})
+        rj, md, html_out = (os.path.join(d, n) for n in ("report.json", "report.md", "report.html"))
+        rc, stdout, stderr = run_script_raw("compose_report.py", ["--dir", d, "-o", rj, "--write-md", md])
+        assert rc == 1, stdout + stderr
+        assert not os.path.exists(rj) and not os.path.exists(md)
+        printed = json.loads(stdout.strip().splitlines()[-1])
+        assert printed["status"] == "rejected" and printed["code"] == "FUND_PROFILE_NAMES_PEOPLE"
+        assert "archetype 0 (visionary): name" in printed["message"]
+        assert "archetype 0 (visionary): background" in printed["message"]
+        assert "FUND_PROFILE_NAMES_PEOPLE" in stderr
+        rc, vout, verr = run_script_raw("visualize.py", ["--dir", d, "-o", html_out])
+        assert rc == 1, vout + verr
+        assert not os.path.exists(html_out)
+        assert json.loads(vout.strip().splitlines()[-1])["code"] == "FUND_PROFILE_NAMES_PEOPLE"
+        for stream in (stdout, stderr, vout, verr):
+            assert _PERSON not in stream and _PERSON_BIO not in stream
+
+
+def test_compose_renders_partner_labels_from_the_role() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        d = os.path.join(td, "sim")
+        shutil.copytree(_IC_FIXTURES, d)
+        rj, md = os.path.join(d, "report.json"), os.path.join(d, "report.md")
+        rc, _, stderr = run_script_raw("compose_report.py", ["--dir", d, "-o", rj, "--write-md", md])
+        assert rc == 0, stderr
+        with open(md, encoding="utf-8") as f:
+            report = f.read()
+    assert "- **The Visionary**: market size, timing, category creation" in report
+    assert "- **The Operator**: GTM motion, execution speed, customer evidence" in report
+    assert "- **The Analyst**: unit economics, capital efficiency, financial modeling" in report
+
+
+def test_a_generic_profile_background_is_not_refused_and_never_rendered() -> None:
+    bio = "Invented generic persona: repeat founder in logistics"
+    with tempfile.TemporaryDirectory() as td:
+        d = _old_profile_dir(td, "generic", {"name": "The Visionary", "background": bio})
+        rj, md, html_out = (os.path.join(d, n) for n in ("report.json", "report.md", "report.html"))
+        rc, _, stderr = run_script_raw("compose_report.py", ["--dir", d, "-o", rj, "--write-md", md])
+        assert rc == 0, stderr
+        rc, _, verr = run_script_raw("visualize.py", ["--dir", d, "-o", html_out])
+        assert rc == 0, verr
+        for path in (rj, md, html_out):
+            with open(path, encoding="utf-8") as f:
+                assert bio not in f.read(), path
 
 
 def test_fund_profile_output_flag() -> None:
@@ -872,9 +1087,9 @@ _VALID_FUND = {
     "check_size_range": {"min": 500000, "max": 5000000, "currency": "USD"},
     "stage_focus": ["seed"],
     "archetypes": [
-        {"role": "visionary", "name": "V", "background": "b", "focus_areas": ["market"]},
-        {"role": "operator", "name": "O", "background": "b", "focus_areas": ["execution"]},
-        {"role": "analyst", "name": "A", "background": "b", "focus_areas": ["numbers"]},
+        {"role": "visionary", "focus_areas": ["market"]},
+        {"role": "operator", "focus_areas": ["execution"]},
+        {"role": "analyst", "focus_areas": ["numbers"]},
     ],
     "portfolio": [
         {"name": "FinLedger", "sector": "Fintech", "status": "active"},
@@ -4383,18 +4598,51 @@ def test_skill_md_step7_inlines_conflict_check() -> None:
     assert "CONFLICT_CHECK:" in step7
 
 
-def test_skill_md_step4_partner_archetypes_read_is_fund_specific() -> None:
-    """The Step-4 REQUIRED read of partner-archetypes.md is for mapping a REAL fund's
-    partners to archetype roles — pointless in generic mode (which uses the three
-    canonical archetypes). The read must be scoped to fund-specific mode, not demanded
-    unconditionally (a wasted read + a contradiction with the reference-list note)."""
+def test_skill_md_step4_reads_no_partner_reference_and_researches_no_people() -> None:
+    """Step 4 researches the fund, never its people: no partner-mapping read, the three role names, and the
+    instruction that keeps a person out of the profile and out of what the founder is told."""
     step4 = _skill_md_section("### Step 4: Build Fund Profile -> `fund_profile.json`")
-    # Find the partner-archetypes read instruction and confirm it's mode-scoped.
-    assert "partner-archetypes.md" in step4
-    idx = step4.index("partner-archetypes.md")
-    window = step4[max(0, idx - 200) : idx + 200].lower()
-    assert "fund-specific" in window, "the partner-archetypes.md read must be scoped to fund-specific mode"
-    assert "generic" in window, "the partner-archetypes.md read must state generic mode does not need it"
+    assert "partner-archetypes.md" not in step4
+    assert "never its people" in step4
+    assert "partner backgrounds" not in step4
+    for label in ("The Visionary", "The Operator", "The Analyst"):
+        assert label in step4
+    assert "role-played, never the fund's real people" in step4
+
+
+def test_skill_md_step4_example_passes_the_producer() -> None:
+    """The profile Step 4 shows the model is one its own producer accepts (the boundary commit 1 of the role
+    names change is drawn on: the example must never be refused by fund_profile.py)."""
+    step4 = _skill_md_section("### Step 4: Build Fund Profile -> `fund_profile.json`")
+    m = re.search(r"<<'FUND_EOF'[^\n]*\n(.*?)\nFUND_EOF", step4, re.S)
+    assert m, "Step 4's FUND_EOF heredoc not found"
+    body = json.loads(m.group(1))
+    rc, data, stderr = run_script("fund_profile.py", ["--pretty"], stdin_data=json.dumps(body))
+    assert rc == 0, stderr
+    assert data is not None and data["validation"]["status"] == "valid"
+
+
+@pytest.mark.parametrize(
+    "heading",
+    [
+        "### Step 9: Compose and Validate Report",
+        "### Step 11 (Optional): Generate Visual Report",
+    ],
+)
+def test_skill_md_routes_a_profile_that_names_people_before_the_stop_branch(heading: str) -> None:
+    """compose and visualize refuse an old profile naming people with FUND_PROFILE_NAMES_PEOPLE; the skill
+    must route it to a rebuild, not to "report the exact stderr" (the founder would be read the refusal)."""
+    text = _read(_SKILL_MD_PATH)
+    start = text.index(heading)
+    nxt = re.search(r"\n### |\n## ", text[start + len(heading) :])
+    section = text[start : start + len(heading) + (nxt.start() if nxt else len(text))]
+    assert "FUND_PROFILE_NAMES_PEOPLE" in section
+    idx = section.index("FUND_PROFILE_NAMES_PEOPLE")
+    tail = section[idx : idx + 400]
+    assert "rebuild the fund profile (Step 4)" in tail
+    assert "tell the founder only that the fund profile is being rebuilt" in tail
+    if "Any other non-zero exit" in section:
+        assert idx < section.index("Any other non-zero exit")
 
 
 def test_skill_md_step4_generic_mode_omits_portfolio() -> None:

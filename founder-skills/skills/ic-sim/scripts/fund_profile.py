@@ -10,6 +10,10 @@ Validates fund profile structure: exactly 3 archetypes, valid check_size_range,
 at least 1 thesis area, sources required for fund-specific mode, portfolio
 array present with name fields.
 
+Partners are role names only, never real people: an archetype carries only `role` and
+`focus_areas`, and the profile's keys, portfolio rows and source URLs are closed sets that leave no
+place for a person. A refusal never echoes the value it refused.
+
 Always reads JSON from stdin.
 
 Usage:
@@ -26,6 +30,7 @@ import json
 import os
 import sys
 from typing import Any, NoReturn
+from urllib.parse import urlsplit
 
 
 def _write_output(data: str, output_path: str | None, *, summary: dict[str, Any] | None = None) -> None:
@@ -56,8 +61,14 @@ def _fail_invalid(result: dict[str, Any], output_path: str | None, indent: int |
     good one and read as truth downstream. Exit 1 makes SKILL.md's "the pipe fails next" branch
     reachable.
     """
-    sys.stdout.write(json.dumps(result, indent=indent) + "\n")
     errors = result.get("validation", {}).get("errors") or ["unspecified validation error"]
+    if any(str(e).split(":", 1)[0] in PEOPLE_CODES for e in errors):
+        # The refused value may be a person: the diagnostic names where it was, never what it was.
+        result = dict(result)
+        for key in list(result):
+            if key in WITHHELD_ON_PEOPLE or key not in FUND_KEYS:
+                result[key] = WITHHELD
+    sys.stdout.write(json.dumps(result, indent=indent) + "\n")
     print(f"Error: input rejected, no output written: {'; '.join(str(e) for e in errors)}", file=sys.stderr)
     if output_path:
         print(f"Error: {os.path.abspath(output_path)} was left unchanged.", file=sys.stderr)
@@ -66,6 +77,120 @@ def _fail_invalid(result: dict[str, Any], output_path: str | None, indent: int |
 
 VALID_ROLES = {"visionary", "operator", "analyst"}
 VALID_MODES = {"generic", "fund_specific"}
+
+# The three partners are always these role names. compose_report.py renders the Fund Profile's partner
+# labels from this table (never from the file), and the skill's text uses the same three strings.
+ROLE_LABELS = {"visionary": "The Visionary", "operator": "The Operator", "analyst": "The Analyst"}
+
+# Closed key sets. An allowlist is the only deterministic way to keep a person's name or bio out of the
+# structured fields; a list of forbidden key names is not. `name` on an archetype is tolerated only as the
+# exact role label (an older example carried it) and is never written.
+FUND_KEYS = frozenset(
+    {
+        "fund_name",
+        "mode",
+        "thesis_areas",
+        "check_size_range",
+        "stage_focus",
+        "archetypes",
+        "portfolio",
+        "sources",
+        "accepted_warnings",
+        "metadata",
+        "validation",
+    }
+)
+ARCHETYPE_KEYS = frozenset({"role", "focus_areas"})
+PORTFOLIO_KEYS = frozenset({"name", "sector", "status"})
+
+PEOPLE_CODES = frozenset(
+    {
+        "PARTNER_NAME_NOT_ROLE",
+        "ARCHETYPE_FIELD_NOT_ALLOWED",
+        "FUND_FIELD_NOT_ALLOWED",
+        "PORTFOLIO_FIELD_NOT_ALLOWED",
+        "SOURCE_IS_A_PERSON",
+    }
+)
+# On a people refusal the diagnostic withholds these and every key outside FUND_KEYS (a refused `team` list).
+WITHHELD_ON_PEOPLE = ("archetypes", "portfolio", "sources")
+WITHHELD = "<withheld: refused>"
+
+# A URL whose path is a person's page by construction: (host suffix, first path segment).
+_PERSON_PAGES = (("linkedin.com", "in"), ("crunchbase.com", "person"))
+
+
+def _is_person_page(url: Any) -> bool:
+    """True for a LinkedIn `/in/...` or Crunchbase `/person/...` URL, on any subdomain and in any case."""
+    if not isinstance(url, str) or not url.strip():
+        return False
+    text = url.strip()
+    if "//" not in text:
+        text = "//" + text
+    try:
+        parts = urlsplit(text)
+        host = (parts.hostname or "").casefold().rstrip(".")
+    except ValueError:
+        return False
+    segments = [seg for seg in parts.path.casefold().split("/") if seg]
+    first = segments[0] if segments else ""
+    return any((host == suffix or host.endswith("." + suffix)) and first == seg for suffix, seg in _PERSON_PAGES)
+
+
+def _role_text(role: Any) -> str:
+    return role if isinstance(role, str) and role in VALID_ROLES else "unknown role"
+
+
+def people_problems(profile: dict[str, Any]) -> list[str]:
+    """Where an already-written fund profile names people, one entry per field, naming the archetype by
+    index and role and never the value. compose_report.py and visualize.py refuse a profile written before
+    partners became role names: a `name` that is not the role label (any mode), or a `background` in
+    fund-specific mode. A generic profile's invented `background` names no one and is not listed."""
+    problems: list[str] = []
+    archetypes = profile.get("archetypes")
+    if not isinstance(archetypes, list):
+        return problems
+    fund_specific = profile.get("mode") == "fund_specific"
+    for i, arch in enumerate(archetypes):
+        if not isinstance(arch, dict):
+            continue
+        role = arch.get("role")
+        label = ROLE_LABELS.get(role) if isinstance(role, str) else None
+        if "name" in arch and (label is None or arch.get("name") != label):
+            problems.append(f"archetype {i} ({_role_text(role)}): name")
+        if fund_specific and "background" in arch:
+            problems.append(f"archetype {i} ({_role_text(role)}): background")
+    return problems
+
+
+NAMES_PEOPLE_FIX = (
+    "rebuild the fund profile (Step 4) and run Steps 5-8 again under the same run id, then compose; tell the "
+    "founder only that the fund profile is being rebuilt"
+)
+
+
+def refuse_profile_naming_people(sim_dir: str, *, by: str) -> None:
+    """Exit 1 `FUND_PROFILE_NAMES_PEOPLE`, nothing written, when the dir's fund_profile.json names people
+    (`people_problems`). The partner discussion in the dir was written by sub-agents that saw those names, so
+    relabelling the Fund Profile section would not reach it. A missing or unreadable profile is left to the
+    caller's own handling."""
+    try:
+        with open(os.path.join(sim_dir, "fund_profile.json"), encoding="utf-8") as f:
+            profile = json.load(f)
+    except (OSError, ValueError):
+        return
+    if not isinstance(profile, dict):
+        return
+    problems = people_problems(profile)
+    if not problems:
+        return
+    message = (
+        f"fund_profile.json was written before partners became role names and names people "
+        f"({'; '.join(problems)}); {NAMES_PEOPLE_FIX}"
+    )
+    sys.stdout.write(json.dumps({"status": "rejected", "code": "FUND_PROFILE_NAMES_PEOPLE", "message": message}) + "\n")
+    print(f"Error: {by}: FUND_PROFILE_NAMES_PEOPLE: {message}; nothing was written", file=sys.stderr)
+    sys.exit(1)
 
 
 def validate_fund_profile(profile: dict[str, Any]) -> dict[str, Any]:
@@ -148,10 +273,18 @@ def validate_fund_profile(profile: dict[str, Any]) -> dict[str, Any]:
                 errors.append(f"Archetype {i}: duplicate role '{role}'")
             else:
                 roles_seen.add(role)
-            if not arch.get("name"):
-                errors.append(f"Archetype {i}: missing 'name' field")
-            if not arch.get("background"):
-                errors.append(f"Archetype {i}: missing 'background'")
+            if "name" in arch:
+                label = ROLE_LABELS.get(role) if isinstance(role, str) else None
+                if label is None or arch.get("name") != label:
+                    errors.append(
+                        f"PARTNER_NAME_NOT_ROLE: archetype {i} ({_role_text(role)}): name is not the role label; "
+                        'partners are role names only, do not record a person. Remove "name".'
+                    )
+            for key in sorted(str(k) for k in arch if k not in ARCHETYPE_KEYS and k != "name"):
+                errors.append(
+                    f'ARCHETYPE_FIELD_NOT_ALLOWED: archetype {i} ({_role_text(role)}): field "{key}" is not '
+                    "allowed; an archetype carries only role and focus_areas."
+                )
             if not isinstance(arch.get("focus_areas"), list) or not arch.get("focus_areas"):
                 errors.append(f"Archetype {i}: 'focus_areas' must be a non-empty array")
 
@@ -163,8 +296,14 @@ def validate_fund_profile(profile: dict[str, Any]) -> dict[str, Any]:
         for i, entry in enumerate(portfolio):
             if not isinstance(entry, dict):
                 errors.append(f"Portfolio entry {i} must be an object")
-            elif not entry.get("name"):
-                errors.append(f"Portfolio entry {i}: missing 'name' field")
+            else:
+                if not entry.get("name"):
+                    errors.append(f"Portfolio entry {i}: missing 'name' field")
+                for key in sorted(str(k) for k in entry if k not in PORTFOLIO_KEYS):
+                    errors.append(
+                        f'PORTFOLIO_FIELD_NOT_ALLOWED: portfolio entry {i}: field "{key}" is not allowed; '
+                        "a portfolio entry carries only name, sector and status."
+                    )
 
     # Sources required for fund-specific mode
     if mode == "fund_specific":
@@ -178,9 +317,31 @@ def validate_fund_profile(profile: dict[str, Any]) -> dict[str, Any]:
                 elif not source.get("url") and not source.get("title"):
                     errors.append(f"Source {i} must have at least 'url' or 'title'")
 
+    # Every mode: a source that is a person's page carries that person's name into every sub-agent prompt.
+    all_sources = profile.get("sources")
+    if isinstance(all_sources, list):
+        for i, source in enumerate(all_sources):
+            if isinstance(source, dict) and _is_person_page(source.get("url")):
+                errors.append(
+                    f"SOURCE_IS_A_PERSON: source {i}: the url is a person's profile page; research the fund, "
+                    "never its people, and cite the fund's own pages instead."
+                )
+
+    # The fund-level keys are a closed set: a `partners` or `team` list has no place in the profile.
+    for key in sorted(str(k) for k in profile if k not in FUND_KEYS):
+        errors.append(
+            f'FUND_FIELD_NOT_ALLOWED: field "{key}" is not allowed in a fund profile; it carries only '
+            f"{', '.join(sorted(FUND_KEYS - {'metadata', 'validation'}))}."
+        )
+
     status = "valid" if not errors else "invalid"
 
     result = dict(profile)
+    if "archetypes" in profile and isinstance(archetypes, list):
+        # A tolerated role-label `name` is not written. New dicts, so the caller's input is untouched.
+        result["archetypes"] = [
+            {k: v for k, v in arch.items() if k != "name"} if isinstance(arch, dict) else arch for arch in archetypes
+        ]
     result["validation"] = {"status": status, "errors": errors}
     return result
 

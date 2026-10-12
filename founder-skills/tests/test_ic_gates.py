@@ -252,6 +252,23 @@ def test_compose_waits_for_the_decline_and_writes_nothing(tmp_path: Path) -> Non
     assert not (run_dir / "report.md").exists() and not (run_dir / "report.json").exists()
 
 
+def test_compose_refuses_a_profile_naming_people_and_records_the_code(tmp_path: Path) -> None:
+    """A profile written before partners became role names: compose refuses before writing, and the run's
+    compose_result.json carries the code the skill routes on. The invented person is in no stream."""
+    root, run_id, run_dir = _sim(tmp_path, "invest")
+    profile = json.loads((run_dir / "fund_profile.json").read_text(encoding="utf-8"))
+    profile["mode"] = "fund_specific"
+    profile["archetypes"][0].update(name="Dana Whitlock", background="Invented partner bio")
+    _write(run_dir / "fund_profile.json", profile)
+    proc = _compose(run_dir)
+    assert proc.returncode == 1, proc.stdout + proc.stderr
+    assert not (run_dir / "report.md").exists() and not (run_dir / "report.json").exists()
+    record = json.loads((run_dir / "compose_result.json").read_text(encoding="utf-8"))
+    assert record["code"] == "FUND_PROFILE_NAMES_PEOPLE"
+    for text in (proc.stdout, proc.stderr, json.dumps(record)):
+        assert "Dana Whitlock" not in text and "Invented partner bio" not in text
+
+
 def test_compose_after_hold_off_says_to_wait_not_to_ask(tmp_path: Path) -> None:
     root, run_id, run_dir = _sim(tmp_path)
     _ok(_open(root, run_id, DECLINE))

@@ -93,20 +93,14 @@ _VALID_FUND: dict[str, Any] = {
     "archetypes": [
         {
             "role": "visionary",
-            "name": "V",
-            "background": "b",
             "focus_areas": ["market"],
         },
         {
             "role": "operator",
-            "name": "O",
-            "background": "b",
             "focus_areas": ["execution"],
         },
         {
             "role": "analyst",
-            "name": "A",
-            "background": "b",
             "focus_areas": ["numbers"],
         },
     ],

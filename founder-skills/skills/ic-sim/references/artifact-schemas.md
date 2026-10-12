@@ -111,20 +111,22 @@ Contains imported artifacts from prior market-sizing or deck-review analyses. If
 | `thesis_areas` | string[] | yes | At least 1 investment thesis area |
 | `check_size_range` | object | yes | `{min: number, max: number, currency: string}` |
 | `stage_focus` | string[] | yes | Stages the fund invests in |
-| `archetypes` | object[] | yes | Exactly 3 partner archetypes |
+| `archetypes` | object[] | yes | Exactly 3 partner archetypes, one per role |
 | `portfolio` | object[] | conditional | Required when `mode == "fund_specific"` (a real fund's actual holdings). OPTIONAL in generic mode — a synthesized/illustrative fund has no real holdings, and forcing this field would manufacture a fabricated portfolio (and fabricated conflicts against it downstream). `fund_profile.py` and `compose_report.py` both treat it this way. |
 | `sources` | object[] | conditional | Required when `mode == "fund_specific"`. Each entry is an object with at least `url` or `title`: `{url, title}` |
 | `validation` | object | output | Added by `fund_profile.py`: `{status, errors}` |
 | `accepted_warnings` | object[] | no | Warnings to acknowledge: `[{code, match, reason}]`. Match is case-insensitive substring. Only medium-severity codes can be accepted. |
 
+The top-level keys are a closed set (the rows above); any other key (`partners`, `team`, ...) is refused (`FUND_FIELD_NOT_ALLOWED`). A source URL that is a person's page (LinkedIn `/in/...`, Crunchbase `/person/...`) is refused (`SOURCE_IS_A_PERSON`). A refusal names the field, never its value.
+
 ### archetypes[] entry
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `role` | string | yes | `"visionary"`, `"operator"`, or `"analyst"` |
-| `name` | string | yes | Partner name (or archetype name in generic mode) |
-| `background` | string | yes | Brief background description |
-| `focus_areas` | string[] | yes | Key areas this partner evaluates |
+| `role` | string | yes | `"visionary"`, `"operator"`, or `"analyst"`; the report labels it The Visionary, The Operator or The Analyst |
+| `focus_areas` | string[] | yes | Key areas this partner evaluates (may follow the fund's thesis, never a person) |
+
+Partners are role names only, in every mode: an archetype carries only `role` and `focus_areas`. `background` or any other key is refused (`ARCHETYPE_FIELD_NOT_ALLOWED`); `name` is not part of the schema (a `name` exactly equal to the role's label is accepted and not written; any other is refused, `PARTNER_NAME_NOT_ROLE`).
 
 ### portfolio[] entry
 
@@ -133,6 +135,8 @@ Contains imported artifacts from prior market-sizing or deck-review analyses. If
 | `name` | string | yes | Company name |
 | `sector` | string | no | Industry/vertical |
 | `status` | string | no | `"active"`, `"exited"`, `"written_off"` |
+
+A portfolio entry carries only these three keys (`PORTFOLIO_FIELD_NOT_ALLOWED` otherwise).
 
 ### sources[] entry
 
@@ -150,9 +154,9 @@ Contains imported artifacts from prior market-sizing or deck-review analyses. If
   "check_size_range": {"min": 500000, "max": 5000000, "currency": "USD"},
   "stage_focus": ["pre_seed", "seed"],
   "archetypes": [
-    {"role": "visionary", "name": "The Visionary", "background": "Former founder, market analyst", "focus_areas": ["market size", "timing", "category creation"]},
-    {"role": "operator", "name": "The Operator", "background": "Former operating executive", "focus_areas": ["GTM motion", "execution speed", "customer evidence"]},
-    {"role": "analyst", "name": "The Analyst", "background": "Former investment banker", "focus_areas": ["unit economics", "capital efficiency", "financial modeling"]}
+    {"role": "visionary", "focus_areas": ["market size", "timing", "category creation"]},
+    {"role": "operator", "focus_areas": ["GTM motion", "execution speed", "customer evidence"]},
+    {"role": "analyst", "focus_areas": ["unit economics", "capital efficiency", "financial modeling"]}
   ],
   "sources": [],
   "validation": {"status": "valid", "errors": []},

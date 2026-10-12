@@ -342,11 +342,9 @@ PRIOR_EOF
 
 ### Step 4: Build Fund Profile -> `fund_profile.json`
 
-**Fund-specific mode only — read `${CLAUDE_PLUGIN_ROOT}/skills/ic-sim/references/partner-archetypes.md` now.** You need it to map a real fund's partners to the three archetype roles. **In generic mode, skip this read** — generic mode uses the three canonical archetypes (visionary, operator, analyst) verbatim and does no real-partner mapping, so the file adds nothing. (Literal token, not the shell's path to the plugin folder — a file-tool Read of a `/sessions` path is denied on host-loop.)
-
 **Generic mode:** Build a standard early-stage fund profile with the three canonical archetypes (visionary, operator, analyst). **OMIT the `portfolio` field entirely — do not fabricate holdings.** A generic fund is a synthesized/illustrative persona with no real portfolio; inventing companies here manufactures fictional conflicts against them downstream (Step 5), and those fabricated conflicts can distort the verdict. `portfolio` is optional in generic mode precisely so it can be left out. Use the example below verbatim as the shape, adapting only thesis/stage/check-size to the startup's sector — but keep `portfolio` absent.
 
-**Fund-specific mode:** Use WebSearch to research fund thesis, portfolio, partner backgrounds, check size range, and stage preference. Map real partners to archetype roles. Include the researched `portfolio` array and a `sources` array (each source needs `url` or `title`).
+**Fund-specific mode:** Use WebSearch for the fund's thesis, stage focus, check-size range and portfolio, and include the `portfolio` array and a `sources` array (each source needs `url` or `title`). Research the fund, never its people: do not look up partners or team members, and put no person's name or background anywhere in the profile or in what you tell the founder. The three partners are always The Visionary, The Operator and The Analyst: each archetype carries only `role` and `focus_areas`, and each portfolio entry only `name`, `sector`, `status`. When you tell the founder about the fund, say the partners are role-played, never the fund's real people.
 
 `fund_profile.py` exits 10 while the mode or fund question is unrecorded (ask, record, re-run), refuses a `mode` other than the recorded fund choice, and exits 1 on a rejected profile (fix that field on stderr).
 
@@ -363,9 +361,9 @@ cat <<'FUND_EOF' | python3 "$SCRIPTS/fund_profile.py" --pretty --run-id "$RUN_ID
   "check_size_range": {"min": 500000, "max": 3000000, "currency": "USD"},
   "stage_focus": ["pre-seed", "seed"],
   "archetypes": [
-    {"role": "visionary", "name": "The Visionary", "background": "Repeat founder; pattern-matches on market timing and 10x outcomes", "focus_areas": ["market size", "timing", "founder ambition"]},
-    {"role": "operator", "name": "The Operator", "background": "Former VP of Sales; scaled GTM at two startups", "focus_areas": ["go-to-market", "unit economics", "execution risk"]},
-    {"role": "analyst", "name": "The Analyst", "background": "Ex-growth-equity; underwrites metrics and defensibility", "focus_areas": ["retention", "margins", "competitive moat"]}
+    {"role": "visionary", "focus_areas": ["market size", "timing", "founder ambition"]},
+    {"role": "operator", "focus_areas": ["go-to-market", "unit economics", "execution risk"]},
+    {"role": "analyst", "focus_areas": ["retention", "margins", "competitive moat"]}
   ]
 }
 FUND_EOF
@@ -816,7 +814,7 @@ the 28 dimensions — without the real conflict data, that dimension can only de
 
 `fund_profile.json` is inlined here too (not just at Step 4) because three more of the 28
 dimensions — `fit_thesis_alignment`, `fit_stage_match`, `fit_value_add` — are defined against the
-fund's actual thesis, stage focus, check size, and partner backgrounds. Step 4 builds a real
+fund's actual thesis, stage focus, check size, and portfolio. Step 4 builds a real
 `fund_profile.json` in BOTH generic and fund-specific mode, so without this inline the sub-agent
 would have no grounded basis for those three dimensions and would have to invent one — potentially
 contradicting the profile already sitting on disk.
@@ -1020,7 +1018,7 @@ Return (Decline / Invest / More Diligence), never the bare `pass`/`hard_pass` en
 mismatch as a noted caveat (the report already renders this as an executive-summary note); mention in your own summary
 that qualitative debate and the quantitative score diverged, without treating it as an error to fix.
 
-**Post-write verification:** `compose_report.py` exits 2 if an output is missing or empty. On a non-zero exit, read `compose_result.json` beside the report for the codes. Exit 10 is a question, not a failure: ask the gate its JSON names (`blocked_by_gate`; `ic_decline_confirmation` is Step 8.5), record it, and compose again; never re-run compose without the answer. `RUN_FINISHED`: the simulation is complete and its score changed; that needs a new simulation (Step 0). Any other non-zero exit: stop and report the exact stderr — do not proceed to Step 10.
+**Post-write verification:** `compose_report.py` exits 2 if an output is missing or empty. On a non-zero exit, read `compose_result.json` beside the report for the codes. Exit 10 is a question, not a failure: ask the gate its JSON names (`blocked_by_gate`; `ic_decline_confirmation` is Step 8.5), record it, and compose again; never re-run compose without the answer. `RUN_FINISHED`: the simulation is complete and its score changed; that needs a new simulation (Step 0). `FUND_PROFILE_NAMES_PEOPLE`: rebuild the fund profile (Step 4) and run Steps 5-8 again under the same run id, then compose; tell the founder only that the fund profile is being rebuilt. Any other non-zero exit: stop and report the exact stderr — do not proceed to Step 10.
 
 ### Step 10: Post-Compose Coaching Commentary (Context B dispatch — POST_COMPOSE_COACHING)
 
@@ -1148,6 +1146,8 @@ The gate (`check_handoff.py --format=markdown`) verifies the sub-agent's hand-of
 ```bash
 python3 "$SCRIPTS/visualize.py" --dir "$SIM_DIR" --run-id "$RUN_ID" -o "$SIM_DIR/report.html"
 ```
+
+`FUND_PROFILE_NAMES_PEOPLE` (exit 1, nothing written): rebuild the fund profile (Step 4) and run Steps 5-8 again under the same run id, then compose and visualize; tell the founder only that the fund profile is being rebuilt.
 
 **Do not hand this over here** — the Deliver step below is the only place work reaches the founder, and it sends the complete set as files. A path presented here is the partial-delivery bug.
 
