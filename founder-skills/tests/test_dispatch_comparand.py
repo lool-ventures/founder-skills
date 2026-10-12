@@ -1247,11 +1247,35 @@ def test_the_parsed_reading_takes_the_null_device_as_no_write() -> None:
     assert DPC._distrusts(f'{GEN} > "{_SYNCED}/{MS_SCRIPTS}/x.py"') == set(DPC.GENERATORS)
 
 
-def test_a_generator_run_with_its_output_discarded_printed_no_prompt() -> None:
-    """Discarding the output is no write, and no print either: such a run is never the comparand."""
-    assert DPC.comparands(_rows(("Bash", {"command": GEN + " > /dev/null"}, PRINTED))) == []
-    rows = _rows(("Bash", {"command": _discarded()}, _RT_PRINTED))
+@pytest.mark.parametrize("tail", [" > /dev/null", " > /dev/stdout", " > /dev/stderr", " >/dev/null 2>&1"])
+def test_a_generator_run_with_its_output_discarded_printed_no_prompt(tail: str) -> None:
+    """Discarding the output is no write, and no print either: such a run is never the comparand. The
+    same generator run plainly is (the control that makes the pair discriminate)."""
+    assert DPC._parse_block(GEN + tail) is not None
+    assert DPC.comparands(_rows(("Bash", {"command": GEN}, PRINTED))) != []
+    assert DPC.comparands(_rows(("Bash", {"command": GEN + tail}, PRINTED))) == []
+
+
+def test_an_unreadable_block_is_never_a_comparand() -> None:
+    """A block the parser cannot read is no comparand whatever its generator's output does: this says
+    nothing about the null device (any unreadable block gives the same answer)."""
+    block = _discarded()
+    assert DPC._parse_block(block) is None
+    rows = _rows(("Bash", {"command": block}, _RT_PRINTED))
     assert DPC.latest_printed(rows, "CONTEXT: RED_TEAM", _RT_OUTPUT) is None
+
+
+@pytest.mark.parametrize("device", ["/dev/stdout", "/dev/stderr", "/dev/null", "/proc/self/fd/1"])
+def test_a_generator_output_sent_to_a_device_is_never_read_back_as_its_prompt(device: str) -> None:
+    """A device or process path is not a file the generator's prompt is kept in: a later `cat` of it is
+    never read back as the printed prompt. (A link the block made to a device is not seen from the text;
+    reopening a pipe's end is what defends that shape.)"""
+    assert DPC._generator_block(GEN + " > " + device)[1] == []
+    rows = _rows(("Bash", {"command": GEN + " > " + device}, ""), ("Bash", {"command": "cat " + device}, PRINTED))
+    assert DPC.comparands(rows) == []
+    # Control: the same generator run plainly is the comparand, and a real file it saved to is kept.
+    assert DPC.comparands(_rows(("Bash", {"command": GEN}, PRINTED))) != []
+    assert DPC._generator_block(GEN + " > /abs/h/p.txt")[1] == ["/abs/h/p.txt"]
 
 
 # --- what printed before the generator is not the comparand for another context ------------------------------

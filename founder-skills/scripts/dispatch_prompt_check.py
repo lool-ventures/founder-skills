@@ -42,7 +42,8 @@ tool result counts only when the call that produced it is paired by tool id and 
     cannot be read, runs an interpreter other than the plugin's own scripts, or writes or names a path
     it cannot resolve. `/private/tmp` and `/tmp` are the same file. A file directly in `/tmp`,
     `/private/tmp` or `/var/tmp` never counts, in its own block or later: every session writes there, so
-    a failed redirect leaves another session's prompt under the same name.
+    a failed redirect leaves another session's prompt under the same name. Nor does a device or process
+    path (`> /dev/stdout`, `/proc/self/fd/1`): such a run printed no comparand, and none is read back.
 A redo printed with `--correction producer-rejected --detail-file F` quotes F inside the prompt, so it
 counts only when the transcript shows F written by a plugin producer run in the main thread (a
 truncating `2> F`, no other command in that block naming F) that failed -- the call exited non-zero,
@@ -483,6 +484,13 @@ def _shared_tmp(path: str) -> bool:
     return os.path.dirname(norm_path(path)) in _SHARED_TMP
 
 
+def _device(path: str) -> bool:
+    """A device or process path (`/dev/stdout`, `/proc/self/fd/1`, `/dev/null`): never a file a generator's
+    output is kept in. Read from the text alone, so a link the block made to a device is not seen."""
+    p = norm_path(path)
+    return p in ("/dev", "/proc") or p.startswith(("/dev/", "/proc/"))
+
+
 def _script(words: list[str]) -> str | None:
     """The script a python / uv command runs, or None (inline code, a module, stdin, flags)."""
     if not words:
@@ -720,7 +728,7 @@ def _generator_block(
     trust = set(distrusted)
     for gen in gens:
         target = _expand(gen.stdout_file, env) if gen.stdout_file is not None and not gen.piped else None
-        if target is not None and target.startswith("/") and not _shared_tmp(target):
+        if target is not None and target.startswith("/") and not _shared_tmp(target) and not _device(target):
             path = norm_path(target)
             # Only what runs after the generator (or inside a substitution) can change its file.
             later = [c for c in cmds[cmds.index(gen) + 1 :] if c is not gen] + [c for c in cmds if c.substituted]
