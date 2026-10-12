@@ -5,6 +5,66 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.18.4] - 2026-10-12 — A simulated investment committee never names real people
+
+### Highlights
+
+**A simulated fund's partners are role-played, never its real people.** When you ask how a named fund
+would evaluate you, the simulation still researches the fund's thesis, stage focus, check size and
+portfolio, and still checks the portfolio for conflicts, but the three partners are always The
+Visionary, The Operator and The Analyst. No real partner, employee or investor of the fund is named or
+described anywhere in the run, and a fund profile that names people is refused. If the fund profile is
+rebuilt, the partners' discussion is redone from scratch rather than reused.
+
+### Scoring changes
+
+IC simulation:
+
+- For a named fund, the Fund Fit dimensions (thesis alignment, stage match, value-add) are judged from
+  the fund's thesis, stage focus, check size and portfolio only; individual partners' backgrounds are no
+  longer an input. Value-add scores for a named fund may move. Simulations of a generic fund are
+  unchanged.
+
+Market sizing:
+
+- When the two builds disagree by more than 30% and one build is redone, the instructions the plugin
+  writes for that redo no longer say an input is probably wrong. They say an input may be wrong, or the
+  two builds may measure different markets, and still ask for each input's geography, categories and
+  population to be checked against the product's market. The figures, the self-check and its scoring are
+  unchanged.
+
+Every other skill: none.
+
+### Fixed
+
+- IC simulation: a fund-specific simulation no longer looks up or names the fund's partners; the
+  partners are The Visionary, The Operator and The Analyst, and you are told they are role-played.
+- IC simulation: a fund profile carrying a person's name, background or personal profile link is
+  refused without repeating it, and the run rebuilds the profile. A report is never built from partner
+  work done against an earlier fund profile, and that work cannot be reused unchanged after the profile
+  changes.
+- Market sizing: the instructions for redoing one build no longer presume an input is wrong.
+- In Cowork, a shell block the plugin cannot fully read no longer lets inline code that writes into the
+  plugin's own scripts pass unnoticed, and a redirect written straight after `;` or `)`, or hidden after
+  a comment, is read as the write it is. A step's output sent to a device such as `/dev/stdout` is never
+  read back as the prompt it printed.
+
+### Changed
+
+- IC simulation: the report's fund profile lists each partner by role with their focus areas.
+
+### Development
+
+Contributor-facing only; nothing here changes what a founder installs or runs.
+
+- The host contract lists three new IC simulation refusal codes: a fund profile that names people, partner
+  work built from another fund profile, and partner work reused unchanged after a profile rebuild.
+- Each IC simulation step that uses the fund profile records which version it was built from; the partner
+  write-ups are saved through a script that records it.
+- The public test fixtures use an invented fund and invented partners.
+- The recorded test sessions were not refreshed for this release; the changed shared scripts mark them
+  stale, which is a warning only.
+
 ## [0.18.3] - 2026-10-12 — A market-size gap is described as it is, and no step runs under another review's id
 
 ### Highlights
