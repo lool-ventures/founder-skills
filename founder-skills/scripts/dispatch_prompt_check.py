@@ -108,9 +108,8 @@ KNOWN RESIDUALS. Whether a block wrote into the plugin is read from its text, so
   * a relative path or glob after a `cd` (`cd "$SCRIPTS" && cp x y*`), and a relative target straight after
     `)>` or `;>`;
   * a name set in an earlier shell call: it is not resolved, and a write through it is not counted;
-  * a parameter expansion with an operator (`${S%/x}`, `${S:-/tmp}`, `${S/a/b}`, the indirect `${!N}`): it is
-    not read as naming `S`; and, in a block the parser cannot follow, a chain of more than four aliases
-    (`A=$S; B=$A; ...`);
+  * in a block the parser can follow, a parameter expansion with an operator (`${S%/x}`, `${S:-/tmp}`,
+    `${S/a/b}`, the indirect `${!N}`): it is not read as naming `S` (the raw reading reads it so);
   * in a block the parser can follow, a `#` after an escaped character (`echo x\\ #y; cp ...`): it is read as
     a comment, so the rest of that line is not read;
   * in a block the parser cannot follow, `$'...'` quoting with an escaped quote inside (`$'it\\'s'`): the raw
@@ -1018,15 +1017,15 @@ _RAW_ASSIGN_RE = re.compile(r"(?<![\w$./-])([A-Za-z_][A-Za-z0-9_]*)=((?:\"[^\"]*
 
 def _raw_filled(line: str, values: dict[str, list[str]]) -> str:
     """`line` followed by every value the block assigns anywhere to each variable it names, filled in the
-    same way a few levels deep: what a link's operands could be, whichever assignment ran."""
+    same way through every alias: what a link's operands could be, whichever assignment ran. A parameter
+    expansion with an operator (`${S%/x}`, `${S:-/tmp}`, `${S/a/b}`) names `S` too: its value stands for it."""
     seen: set[str] = set()
     out = [line]
     frontier = [line]
-    for _ in range(4):
+    while frontier:
         nxt = []
         for text in frontier:
-            for m in _VAR_RE.finditer(text):
-                key = m.group(1) or m.group(2)
+            for key in _RAW_REF_RE.findall(text):
                 if key in seen:
                     continue
                 seen.add(key)
@@ -1717,6 +1716,8 @@ def _inline_into_plugin(code: str, values: dict[str, list[str]]) -> bool:
     filled = _raw_filled(code, values)
     if any(g in filled for g in GENERATORS) or "dispatch_" in filled or "prompt.py" in filled:
         return True
+    if "${!" in filled:
+        return True  # an indirect expansion names whatever variable it is given, the plugin's included
     words = re.split(r"""[\s"'(),=+]+""", filled)
     if not (_into_plugin(filled) or any(_into_plugin(w) for w in words)):
         return False
@@ -1790,8 +1791,9 @@ def _raw_writes_into_plugin(command: str) -> bool:
         filled = _raw_filled(written, values)
         if _into_plugin(filled) or "dispatch_" in filled or "prompt.py" in filled:
             return True
-        # A name the block assigns in a form that cannot be read could hold anything.
-        if any(name in dynamic for name in _RAW_REF_RE.findall(written)):
+        # A name the block assigns in a form that cannot be read could hold anything; so could an indirect
+        # expansion (`${!N}`), which names whatever variable N holds.
+        if any(name in dynamic for name in _RAW_REF_RE.findall(written)) or "${!" in filled:
             return True
     return False
 

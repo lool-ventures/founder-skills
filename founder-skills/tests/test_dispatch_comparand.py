@@ -1865,3 +1865,32 @@ def test_the_program_of_a_run_is_its_first_word_after_the_interpreters_options(
 )
 def test_which_open_calls_may_write(code: str, writes: bool) -> None:
     assert DPC._open_writes(code) is writes, code
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "python3 -c \"from shutil import copy;copy('/tmp/e','${S%/x}/x.py')\"",
+        'cp /tmp/e "${S%/x}/x.py"',
+        'cp /tmp/e "${S:-/tmp}/x.py"',
+        'cp /tmp/e "${S/scripts/scripts}/x.py"',
+        # Indirect: names whatever variable N holds.
+        'N=S; cp /tmp/e "${!N}/x.py"',
+        'N=S; A="${!N}"; cp /tmp/e "$A/x.py"',  # through an alias
+        "N=S; python3 -c \"from shutil import copy;copy('/tmp/e','${!N}/x.py')\"",
+        # Every link of an alias chain is followed.
+        "A=$S; B=$A; C=$B; D=$C; E=$D; python3 -c \"from shutil import copy;copy('/tmp/e','$E/x.py')\"",
+        'A=$S; B=$A; C=$B; D=$C; E=$D; cp /tmp/e "$E/x.py"',
+        'A=$S; B=$A; C=$B; D=$C; E=$D; F=$E; cp /tmp/e "$F/x.py"',
+    ],
+)
+def test_a_parameter_expansion_or_an_alias_chain_names_its_variable_in_an_unreadable_block(line: str) -> None:
+    block = _DISCARDED_HEAD + line
+    assert DPC._parse_block(block) is None, line
+    assert DPC._distrusts(block) == set(DPC.GENERATORS), line
+
+
+def test_an_expansion_of_a_name_outside_the_plugin_is_no_write() -> None:
+    block = _DISCARDED_HEAD + 'W=/tmp/w; cp /tmp/e "${W%/x}/x.py"; cp /tmp/e "${W:-/tmp}/y.py"'
+    assert DPC._parse_block(block) is None
+    assert DPC._distrusts(block) == set()
