@@ -1147,7 +1147,7 @@ The gate (`check_handoff.py --format=markdown`) verifies the sub-agent's hand-of
 python3 "$SCRIPTS/visualize.py" --dir "$SIM_DIR" --run-id "$RUN_ID" -o "$SIM_DIR/report.html"
 ```
 
-`FUND_PROFILE_NAMES_PEOPLE` (exit 1, nothing written): rebuild the fund profile (Step 4) and run Steps 5-8 again under the same run id, then compose and visualize; tell the founder only that the fund profile is being rebuilt.
+`FUND_PROFILE_NAMES_PEOPLE` (exit 1, nothing written): rebuild the fund profile (Step 4) and run Steps 5-8 again under the same run id, then compose and visualize; tell the founder only that the fund profile is being rebuilt. On a finished simulation this needs a new simulation (Step 0).
 
 **Do not hand this over here** — the Deliver step below is the only place work reaches the founder, and it sends the complete set as files. A path presented here is the partial-delivery bug.
 

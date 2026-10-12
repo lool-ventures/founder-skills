@@ -30,7 +30,7 @@ import json
 import os
 import sys
 from typing import Any, NoReturn
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 
 def _write_output(data: str, output_path: str | None, *, summary: dict[str, Any] | None = None) -> None:
@@ -116,25 +116,40 @@ PEOPLE_CODES = frozenset(
 WITHHELD_ON_PEOPLE = ("archetypes", "portfolio", "sources")
 WITHHELD = "<withheld: refused>"
 
-# A URL whose path is a person's page by construction: (host suffix, first path segment).
-_PERSON_PAGES = (("linkedin.com", "in"), ("crunchbase.com", "person"))
+# A URL whose path is a person's page by construction: (host suffix, first path segment). LinkedIn's `/pub/`
+# is its older public-profile path (`/pub/dir/...`, a people-search listing, is a person search too), and its
+# mobile-lite pages put the same path behind `/mwlite/`.
+_PERSON_PAGES = (("linkedin.com", "in"), ("linkedin.com", "pub"), ("crunchbase.com", "person"))
+_PATH_PREFIXES = {"linkedin.com": ("mwlite",)}
+
+
+def _host_matches(host: str, suffix: str) -> bool:
+    return host == suffix or host.endswith("." + suffix)
 
 
 def _is_person_page(url: Any) -> bool:
-    """True for a LinkedIn `/in/...` or Crunchbase `/person/...` URL, on any subdomain and in any case."""
+    """True for a LinkedIn `/in/...` or `/pub/...` URL (also behind `/mwlite/`) or a Crunchbase `/person/...`
+    URL, on any subdomain and in any case, with the path percent-decoded and a single-slash scheme
+    (`https:/host/...`) read as the host it names."""
     if not isinstance(url, str) or not url.strip():
         return False
     text = url.strip()
-    if "//" not in text:
+    scheme, sep, rest = text.partition(":")
+    if sep and scheme.casefold() in ("http", "https") and not rest.startswith("//"):
+        text = scheme + "://" + rest.lstrip("/")
+    elif "//" not in text:
         text = "//" + text
     try:
         parts = urlsplit(text)
         host = (parts.hostname or "").casefold().rstrip(".")
     except ValueError:
         return False
-    segments = [seg for seg in parts.path.casefold().split("/") if seg]
+    segments = [seg for seg in unquote(parts.path).casefold().split("/") if seg]
+    for suffix, prefixes in _PATH_PREFIXES.items():
+        if _host_matches(host, suffix) and segments and segments[0] in prefixes:
+            segments = segments[1:]
     first = segments[0] if segments else ""
-    return any((host == suffix or host.endswith("." + suffix)) and first == seg for suffix, seg in _PERSON_PAGES)
+    return any(_host_matches(host, suffix) and first == seg for suffix, seg in _PERSON_PAGES)
 
 
 def _role_text(role: Any) -> str:
@@ -142,24 +157,38 @@ def _role_text(role: Any) -> str:
 
 
 def people_problems(profile: dict[str, Any]) -> list[str]:
-    """Where an already-written fund profile names people, one entry per field, naming the archetype by
-    index and role and never the value. compose_report.py and visualize.py refuse a profile written before
-    partners became role names: a `name` that is not the role label (any mode), or a `background` in
-    fund-specific mode. A generic profile's invented `background` names no one and is not listed."""
+    """Where an already-written fund profile leaves a place for a person, one entry per field, naming where
+    and never the value. compose_report.py and visualize.py refuse such a profile: it was written before
+    partners became role names, or around this producer. The rules are the producer's own, so a profile it
+    wrote can never be listed: a `name` that is not the role label, any other archetype key outside
+    `ARCHETYPE_KEYS`, any top-level key outside `FUND_KEYS`, any portfolio key outside `PORTFOLIO_KEYS`, and a
+    source that is a person's page. The one exemption: a generic profile's `background`, which an older
+    example invented and which names no one (it is never rendered)."""
     problems: list[str] = []
-    archetypes = profile.get("archetypes")
-    if not isinstance(archetypes, list):
-        return problems
     fund_specific = profile.get("mode") == "fund_specific"
-    for i, arch in enumerate(archetypes):
+    for key in sorted(str(k) for k in profile if k not in FUND_KEYS):
+        problems.append(f'field "{key}"')
+    archetypes = profile.get("archetypes")
+    for i, arch in enumerate(archetypes if isinstance(archetypes, list) else []):
         if not isinstance(arch, dict):
             continue
         role = arch.get("role")
         label = ROLE_LABELS.get(role) if isinstance(role, str) else None
         if "name" in arch and (label is None or arch.get("name") != label):
             problems.append(f"archetype {i} ({_role_text(role)}): name")
-        if fund_specific and "background" in arch:
-            problems.append(f"archetype {i} ({_role_text(role)}): background")
+        for key in sorted(str(k) for k in arch if k not in ARCHETYPE_KEYS and k != "name"):
+            if key == "background" and not fund_specific:
+                continue
+            problems.append(f'archetype {i} ({_role_text(role)}): field "{key}"')
+    portfolio = profile.get("portfolio")
+    for i, entry in enumerate(portfolio if isinstance(portfolio, list) else []):
+        if isinstance(entry, dict):
+            for key in sorted(str(k) for k in entry if k not in PORTFOLIO_KEYS):
+                problems.append(f'portfolio entry {i}: field "{key}"')
+    sources = profile.get("sources")
+    for i, source in enumerate(sources if isinstance(sources, list) else []):
+        if isinstance(source, dict) and _is_person_page(source.get("url")):
+            problems.append(f"source {i}: a person's page")
     return problems
 
 
@@ -167,6 +196,9 @@ NAMES_PEOPLE_FIX = (
     "rebuild the fund profile (Step 4) and run Steps 5-8 again under the same run id, then compose; tell the "
     "founder only that the fund profile is being rebuilt"
 )
+# The page has no run gate, so it is the one caller that also runs on a finished simulation, which no step can
+# rebuild.
+FINISHED_FIX = "on a finished simulation this needs a new simulation (Step 0)"
 
 
 def refuse_profile_naming_people(sim_dir: str, *, by: str) -> None:
@@ -185,9 +217,11 @@ def refuse_profile_naming_people(sim_dir: str, *, by: str) -> None:
     if not problems:
         return
     message = (
-        f"fund_profile.json was written before partners became role names and names people "
+        f"fund_profile.json has a place for a person, which a profile built by this version never has "
         f"({'; '.join(problems)}); {NAMES_PEOPLE_FIX}"
     )
+    if by == "visualize.py":
+        message += f"; {FINISHED_FIX}"
     sys.stdout.write(json.dumps({"status": "rejected", "code": "FUND_PROFILE_NAMES_PEOPLE", "message": message}) + "\n")
     print(f"Error: {by}: FUND_PROFILE_NAMES_PEOPLE: {message}; nothing was written", file=sys.stderr)
     sys.exit(1)

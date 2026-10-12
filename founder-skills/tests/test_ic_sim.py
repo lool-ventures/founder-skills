@@ -724,6 +724,11 @@ def test_fund_profile_refuses_a_portfolio_key_outside_the_closed_set() -> None:
         "linkedin.com/in/dana-whitlock/",
         "https://www.crunchbase.com/person/dana-whitlock",
         "http://CRUNCHBASE.COM/Person/dana-whitlock",
+        "https://www.linkedin.com/pub/dana-whitlock/1/2/3",
+        "https://www.linkedin.com/mwlite/in/dana-whitlock",
+        "https://www.linkedin.com/%69n/dana-whitlock",
+        "https:/www.crunchbase.com/person/dana-whitlock",
+        "HTTPS:/linkedin.com/in/dana-whitlock",
     ],
 )
 def test_fund_profile_refuses_a_source_that_is_a_person(url: str) -> None:
@@ -740,6 +745,9 @@ def test_fund_profile_refuses_a_source_that_is_a_person(url: str) -> None:
         "https://x.com/northwindvc",
         "https://notlinkedin.com/in/x",
         "https://linkedin.com.example/in/x",
+        "https://www.linkedin.com/pulse/northwind-thesis",
+        "https://www.linkedin.com/mwlite/company/northwind",
+        "https://northwind.example/in/news",
     ],
 )
 def test_fund_profile_accepts_a_fund_level_source(url: str) -> None:
@@ -824,7 +832,7 @@ def test_compose_and_visualize_refuse_a_profile_that_names_people() -> None:
         printed = json.loads(stdout.strip().splitlines()[-1])
         assert printed["status"] == "rejected" and printed["code"] == "FUND_PROFILE_NAMES_PEOPLE"
         assert "archetype 0 (visionary): name" in printed["message"]
-        assert "archetype 0 (visionary): background" in printed["message"]
+        assert 'archetype 0 (visionary): field "background"' in printed["message"]
         assert "FUND_PROFILE_NAMES_PEOPLE" in stderr
         rc, vout, verr = run_script_raw("visualize.py", ["--dir", d, "-o", html_out])
         assert rc == 1, vout + verr
@@ -832,6 +840,51 @@ def test_compose_and_visualize_refuse_a_profile_that_names_people() -> None:
         assert json.loads(vout.strip().splitlines()[-1])["code"] == "FUND_PROFILE_NAMES_PEOPLE"
         for stream in (stdout, stderr, vout, verr):
             assert _PERSON not in stream and _PERSON_BIO not in stream
+
+
+def test_compose_and_visualize_refuse_a_hand_written_profile_with_a_place_for_a_person() -> None:
+    """A profile written around the producer (no name or background, but other person-carrying fields) is
+    refused by the producer's own rules, not only an old profile's name and background."""
+    with tempfile.TemporaryDirectory() as td:
+        d = _old_profile_dir(td, "fund_specific", {"bio": _PERSON_BIO})
+        path = os.path.join(d, "fund_profile.json")
+        with open(path, encoding="utf-8") as f:
+            profile = json.load(f)
+        profile["archetypes"][1]["linkedin"] = "https://linkedin.com/in/dana-whitlock"
+        profile["partners"] = [{"name": _PERSON, "bio": _PERSON_BIO}]
+        profile["portfolio"] = [{"name": "Kestrel Ledger", "lead_partner": _PERSON}]
+        profile["sources"] = [{"url": "https://www.linkedin.com/in/dana-whitlock", "title": _PERSON}]
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(profile, f)
+        rj, md, html_out = (os.path.join(d, n) for n in ("report.json", "report.md", "report.html"))
+        rc, stdout, stderr = run_script_raw("compose_report.py", ["--dir", d, "-o", rj, "--write-md", md])
+        assert rc == 1, stdout + stderr
+        assert not os.path.exists(rj) and not os.path.exists(md)
+        message = json.loads(stdout.strip().splitlines()[-1])["message"]
+        for where in (
+            'field "partners"',
+            'archetype 0 (visionary): field "bio"',
+            'archetype 1 (operator): field "linkedin"',
+            'portfolio entry 0: field "lead_partner"',
+            "source 0: a person's page",
+        ):
+            assert where in message, where
+        rc, vout, verr = run_script_raw("visualize.py", ["--dir", d, "-o", html_out])
+        assert rc == 1 and not os.path.exists(html_out)
+        assert json.loads(vout.strip().splitlines()[-1])["code"] == "FUND_PROFILE_NAMES_PEOPLE"
+        assert "on a finished simulation this needs a new simulation (Step 0)" in vout
+        for stream in (stdout, stderr, vout, verr):
+            assert _PERSON not in stream and _PERSON_BIO not in stream and "dana-whitlock" not in stream
+
+
+def test_a_generic_profile_exempts_only_background() -> None:
+    """The generic exemption is for an old example's invented background only; any other archetype key is
+    refused in generic mode too."""
+    with tempfile.TemporaryDirectory() as td:
+        d = _old_profile_dir(td, "generic", {"bio": "Invented generic persona"})
+        rc, stdout, _ = run_script_raw("compose_report.py", ["--dir", d, "-o", os.path.join(d, "report.json")])
+        assert rc == 1
+        assert json.loads(stdout.strip().splitlines()[-1])["code"] == "FUND_PROFILE_NAMES_PEOPLE"
 
 
 def test_compose_renders_partner_labels_from_the_role() -> None:

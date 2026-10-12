@@ -269,6 +269,28 @@ def test_compose_refuses_a_profile_naming_people_and_records_the_code(tmp_path: 
         assert "Dana Whitlock" not in text and "Invented partner bio" not in text
 
 
+def _old_profile(run_dir: Path) -> None:
+    profile = json.loads((run_dir / "fund_profile.json").read_text(encoding="utf-8"))
+    profile["mode"] = "fund_specific"
+    profile["archetypes"][0].update(name="Dana Whitlock", background="Invented partner bio")
+    _write(run_dir / "fund_profile.json", profile)
+
+
+def test_the_profile_refusal_comes_after_the_run_gates(tmp_path: Path) -> None:
+    """A finished run reports RUN_FINISHED (it cannot rebuild a profile), and an open decline question is
+    asked first: the profile refusal is placed after both."""
+    root, run_id, run_dir = _sim(tmp_path, "pass")
+    _old_profile(run_dir)
+    proc = _compose(run_dir)
+    assert proc.returncode == 10 and "FUND_PROFILE_NAMES_PEOPLE" not in proc.stdout
+    root2, run_id2, run_dir2 = _sim(tmp_path / "b", "invest")
+    rs.update(rs.run_paths(str(root2), run_id2), lambda s: (s.update(coaching="inserted"), rs.mark_complete(s)))
+    _old_profile(run_dir2)
+    proc = _compose(run_dir2)
+    assert proc.returncode == 1 and _out(proc)["code"] == "RUN_FINISHED", proc.stdout + proc.stderr
+    assert "FUND_PROFILE_NAMES_PEOPLE" not in proc.stdout + proc.stderr
+
+
 def test_compose_after_hold_off_says_to_wait_not_to_ask(tmp_path: Path) -> None:
     root, run_id, run_dir = _sim(tmp_path)
     _ok(_open(root, run_id, DECLINE))

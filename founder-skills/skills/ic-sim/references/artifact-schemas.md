@@ -117,7 +117,7 @@ Contains imported artifacts from prior market-sizing or deck-review analyses. If
 | `validation` | object | output | Added by `fund_profile.py`: `{status, errors}` |
 | `accepted_warnings` | object[] | no | Warnings to acknowledge: `[{code, match, reason}]`. Match is case-insensitive substring. Only medium-severity codes can be accepted. |
 
-The top-level keys are a closed set (the rows above); any other key (`partners`, `team`, ...) is refused (`FUND_FIELD_NOT_ALLOWED`). A source URL that is a person's page (LinkedIn `/in/...`, Crunchbase `/person/...`) is refused (`SOURCE_IS_A_PERSON`). A refusal names the field, never its value.
+The top-level keys are a closed set (the rows above); any other key (`partners`, `team`, ...) is refused (`FUND_FIELD_NOT_ALLOWED`). A source URL that is a person's page (LinkedIn `/in/...` or `/pub/...`, Crunchbase `/person/...`) is refused (`SOURCE_IS_A_PERSON`). A refusal names the field, never its value.
 
 ### archetypes[] entry
 
