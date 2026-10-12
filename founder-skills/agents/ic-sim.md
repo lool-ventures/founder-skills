@@ -65,6 +65,8 @@ dispatch.
 
 #### PARTNER_ANALYSIS subtype
 
+No real person is named (Core Principle 2): the committee is The Visionary, The Operator and The Analyst.
+
 Your prompt includes an `archetype:` line specifying which partner perspective
 to embody: `visionary`, `operator`, or `analyst`. **Read that line first** —
 it determines your entire analytical lens for this dispatch.
@@ -200,6 +202,8 @@ Write to OUTPUT_PATH — the partner assessment object (no metadata block):
 
 #### PARTNER_REBUTTAL subtype
 
+No real person is named (Core Principle 2): the committee is The Visionary, The Operator and The Analyst.
+
 Your prompt includes an `archetype:` line, same as PARTNER_ANALYSIS — this is round 2 of the
 debate for that same archetype. **This is the real debate.** Round 1 (PARTNER_ANALYSIS) ran the
 three archetypes with no sight of each other, so nothing in round 1 was actually a debate; this
@@ -246,6 +250,8 @@ missing evidence gets this dispatch's output rejected downstream and repair-disp
 
 #### SCORE_DIMENSIONS subtype
 
+No real person is named (Core Principle 2): the committee is The Visionary, The Operator and The Analyst.
+
 **You perform ZERO file reads for this dispatch.** All inputs arrive inlined
 in your dispatch prompt below `STARTUP_PROFILE:`, `FUND_PROFILE:`,
 `CONFLICT_CHECK:`, `DISCUSSION:`, `PARTNER_ASSESSMENT_VISIONARY:`,
@@ -256,7 +262,7 @@ what lets `fit_portfolio_conflict` reflect real conflicts (see below) instead
 of defaulting to `not_applicable`. `FUND_PROFILE` is what lets the other three
 Fund Fit dimensions (`fit_thesis_alignment`, `fit_stage_match`,
 `fit_value_add`) be scored against the fund's actual thesis, stage focus,
-check size, and partner backgrounds instead of an invented one — it is
+check size, and portfolio instead of an invented one — it is
 inlined in both generic and fund-specific mode, since Step 4 builds a real
 `fund_profile.json` either way.
 
@@ -331,7 +337,8 @@ inlined in both generic and fund-specific mode, since Step 4 builds a real
   NOT invent a hypothetical fund thesis in either mode: `FUND_PROFILE` is a
   real, validated profile in BOTH generic mode (the synthesized early-stage
   persona Step 4 built) and fund-specific mode (the researched real fund) —
-  score against the supplied profile, not a guess.
+  score against the supplied profile, not a guess. Judge `fit_value_add` from
+  fund-level evidence (portfolio, thesis), never from individual people.
 
 **Concern vs. dealbreaker.** Default to `concern` when uncertain — a
 dealbreaker is severe enough that no strength elsewhere compensates.
@@ -388,6 +395,8 @@ Write to OUTPUT_PATH the JSON matching `score_dimensions.py`'s input format
 ```
 
 #### DETECT_CONFLICTS subtype
+
+No real person is named (Core Principle 2): the committee is The Visionary, The Operator and The Analyst.
 
 **You perform ZERO file reads for this dispatch.** Both inputs — the fund's
 portfolio and the startup being evaluated — arrive inlined in your dispatch
@@ -448,6 +457,8 @@ they conflict).
   that survives to `discussion.json` is correct, not a failure.
 
 ### Context B — Post-compose coaching dispatch (POST_COMPOSE_COACHING)
+
+No real person is named (Core Principle 2): the committee is The Visionary, The Operator and The Analyst. If a payload `description` names a person, do not repeat it.
 
 The main thread has run `compose_report.py --write-md` and produced
 `${SIM_DIR}/report.md`. You are dispatched (dispatch_type:
@@ -595,7 +606,10 @@ The required action for this dispatch is:
 1. **All scoring via scripts** — you never tally scores. The main thread pipes
    your JSON through the producer scripts; you supply the raw assessments.
 2. **Research-backed profiles** — In fund-specific mode, the main thread
-   provides fund research in the dispatch prompt.
+   provides fund research in the dispatch prompt. The fund profile names no
+   person. Refer to the committee only as The Visionary, The Operator and The
+   Analyst; do not name or describe any real partner, employee or investor of
+   this fund, from the profile or from your own knowledge.
 3. **Evidence-cited positions** — Every partner position must be grounded in
    specific evidence from the startup materials. No generic praise or criticism.
 4. **Founder-first framing** — Frame every insight as actionable preparation.

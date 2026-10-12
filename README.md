@@ -117,10 +117,10 @@ Simulates a realistic VC Investment Committee discussion with three partner arch
 - Forms each partner's view independently, so they genuinely disagree rather than echoing one another
 - Scores 28 dimensions across 7 categories (team, market, product, business model, financials, risk, fund fit)
 - Checks portfolio conflicts against the fund's existing investments
-- Can simulate a named fund, researching its thesis and portfolio first
+- Can simulate a named fund, researching its thesis and portfolio first; the partners are role-played (The Visionary, The Operator, The Analyst), never the fund's real people
 - Imports prior market-sizing and deck-review artifacts for grounded analysis
 
-**What to provide:** A pitch deck, financial model, data room contents, or a verbal description of the business. Optionally, name a specific fund to simulate (e.g. "How would Sequoia evaluate us?"). Works best after running market sizing and/or deck review first — those artifacts are imported automatically.
+**What to provide:** A pitch deck, financial model, data room contents, or a verbal description of the business. Optionally, name a specific fund to simulate (e.g. "How would Northwind Ventures evaluate us?"). Works best after running market sizing and/or deck review first — those artifacts are imported automatically.
 
 **What you get back:** A simulated IC debate with three distinct partner voices, a conviction score across 28 dimensions, a consensus verdict (invest / more diligence / decline / decline — hard pass), portfolio conflict analysis, and coaching on exactly what to prepare before a real IC meeting.
 

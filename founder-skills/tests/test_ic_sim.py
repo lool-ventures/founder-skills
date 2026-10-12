@@ -4645,6 +4645,87 @@ def test_skill_md_routes_a_profile_that_names_people_before_the_stop_branch(head
         assert idx < section.index("Any other non-zero exit")
 
 
+_AGENT_MD_PATH = os.path.join(os.path.dirname(SCRIPT_DIR), "agents", "ic-sim.md")
+_PARTNER_ARCHETYPES_PATH = os.path.join(
+    os.path.dirname(SCRIPT_DIR), "skills", "ic-sim", "references", "partner-archetypes.md"
+)
+
+
+def _agent_section(heading: str) -> str:
+    text = _read(_AGENT_MD_PATH)
+    start = text.index(heading)
+    rest = text[start + len(heading) :]
+    end = re.search(r"\n#{2,4} ", rest)
+    return heading + rest[: end.start() if end else len(rest)]
+
+
+def test_agent_core_principle_2_names_no_person() -> None:
+    principles = _agent_section("## Core Principles (apply in both contexts)")
+    m = re.search(r"2\. \*\*Research-backed profiles\*\*(.*?)\n3\. ", principles, re.S)
+    assert m, "Core Principle 2 not found"
+    text = " ".join(m.group(1).split())
+    assert "The fund profile names no person." in text
+    assert "do not name or describe any real partner, employee or investor of this fund" in text
+    assert "from the profile or from your own knowledge" in text
+
+
+@pytest.mark.parametrize(
+    "heading",
+    [
+        "#### PARTNER_ANALYSIS subtype",
+        "#### PARTNER_REBUTTAL subtype",
+        "#### SCORE_DIMENSIONS subtype",
+        "#### DETECT_CONFLICTS subtype",
+        "### Context B — Post-compose coaching dispatch (POST_COMPOSE_COACHING)",
+    ],
+)
+def test_every_agent_context_points_to_the_no_person_rule(heading: str) -> None:
+    section = _agent_section(heading)
+    assert "No real person is named (Core Principle 2)" in section, heading
+    if heading.startswith("### Context B"):
+        assert "If a payload `description` names a person, do not repeat it." in section
+
+
+def test_agent_scores_fund_fit_from_the_fund_not_its_people() -> None:
+    text = " ".join(_read(_AGENT_MD_PATH).split())
+    assert "partner backgrounds" not in text
+    assert "Judge `fit_value_add` from fund-level evidence (portfolio, thesis), never from individual people." in text
+
+
+def test_partner_archetypes_reference_maps_no_real_partner() -> None:
+    text = _read(_PARTNER_ARCHETYPES_PATH)
+    assert "real name" not in text
+    assert "map real partners" not in text.lower()
+    assert "never mapped to, named after or described as a real fund's people" in " ".join(text.split())
+
+
+@pytest.mark.parametrize(
+    "path",
+    [_SKILL_MD_PATH, _PARTNER_ARCHETYPES_PATH, _AGENT_MD_PATH],
+    ids=["skill-md-step4", "partner-archetypes", "agent-core-principle-2"],
+)
+def test_role_labels_match_the_skill_text(path: str) -> None:
+    """The labels compose renders (fund_profile.ROLE_LABELS) are the three strings each text uses."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "_ic_fund_profile_labels", os.path.join(IC_SIM_DIR, "fund_profile.py")
+    )
+    assert spec and spec.loader
+    fund_profile = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fund_profile)
+    assert set(fund_profile.ROLE_LABELS) == fund_profile.VALID_ROLES
+    if path == _SKILL_MD_PATH:
+        text = _skill_md_section("### Step 4: Build Fund Profile -> `fund_profile.json`")
+    elif path == _AGENT_MD_PATH:
+        text = _agent_section("## Core Principles (apply in both contexts)")
+    else:
+        text = _read(path)
+    text = " ".join(text.split())
+    labels = list(fund_profile.ROLE_LABELS.values())
+    assert f"{labels[0]}, {labels[1]} and {labels[2]}" in text, path
+
+
 def test_skill_md_step4_generic_mode_omits_portfolio() -> None:
     """Step 4 must explicitly instruct the agent to OMIT the portfolio in generic
     mode (prose, not just an example). A synthesized/illustrative fund has no real

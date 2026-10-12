@@ -436,7 +436,7 @@ def test_the_catalog_sections_are_out_and_their_notes_head_the_references() -> N
         assert heading not in text
     refs = h.SKILLS / "ic-sim" / "references"
     for name, phrase in (
-        ("partner-archetypes.md", "fund-specific mode only"),
+        ("partner-archetypes.md", "no workflow step reads this file"),
         ("evaluation-criteria.md", "no workflow step reads this file"),
         ("ic-dynamics.md", "a normal run does not read it"),
     ):

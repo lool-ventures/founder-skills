@@ -1,10 +1,8 @@
 # Partner Archetypes
 
-> Read by the main thread in fund-specific mode only (Step 4), to map real partners to roles. The partner sub-agents never read this file: their copy of the rubric is in `agents/ic-sim.md`, so an edit here must be made there too.
+> Documentation only: no workflow step reads this file. The partner sub-agents' copy of the rubric is in `agents/ic-sim.md`, so an edit here must be made there too.
 
-Three canonical partner archetypes for the IC simulation. Each archetype represents a real lens that VC partners bring to investment decisions. In a real fund, partners naturally gravitate toward one of these perspectives based on their background and experience.
-
-When running in **fund-specific mode**, map real partners to these archetypes based on their known focus areas and backgrounds. When running in **generic mode**, use the archetypes directly.
+Three canonical partner archetypes for the IC simulation. Each archetype is a lens VC partners bring to investment decisions. The three partners are always role names, The Visionary, The Operator and The Analyst, in every mode: they are never mapped to, named after or described as a real fund's people.
 
 ## The Visionary
 
@@ -135,18 +133,8 @@ When running in **fund-specific mode**, map real partners to these archetypes ba
 
 ## Using Archetypes in the Simulation
 
-### Generic Mode
-Use the archetypes directly. Name them "The Visionary," "The Operator," and "The Analyst." Each evaluates the startup through their distinctive lens.
-
-### Fund-Specific Mode
-When researching a specific fund:
-1. Identify the fund's key partners from their website and recent investments
-2. Map each partner to the closest archetype based on:
-   - Their career background (founder → Operator, banker → Analyst, VC lifer → Visionary)
-   - Their public writing and podcast appearances (what topics do they care about?)
-   - Their portfolio pattern (what types of companies do they invest in?)
-3. Use the partner's real name but overlay the archetype's evaluation framework
-4. Note where the real partner diverges from the archetype (e.g., "This partner is primarily an Operator but also has strong thesis-driven conviction, so they may combine Operator and Visionary perspectives")
+### Both Modes
+The partners are The Visionary, The Operator and The Analyst, each evaluating the startup through their own lens. In fund-specific mode the fund, not its people, is what makes the simulation specific: its thesis, stage focus, check size and portfolio (and the portfolio conflict check). Each archetype's `focus_areas` may follow the fund's thesis (a fintech-only fund's Analyst looks at regulatory capital); no partner, employee or investor of the fund is looked up, named or described.
 
 ### Assessment Independence
 Each partner produces their assessment independently before the debate phase. This mirrors real IC dynamics:

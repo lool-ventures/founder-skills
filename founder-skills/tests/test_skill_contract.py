@@ -2184,7 +2184,9 @@ REFERENCES_CEILING: dict[str, int] = {
     # into the three references' headers when the catalog left SKILL.md.
     # 56,354 -> 56,849 (+495 B) on 2026-10-12: artifact-schemas.md states the fund profile's closed key sets
     # (archetype role + focus_areas, portfolio name/sector/status, top-level keys) and the refusal codes.
-    "ic-sim": 56_849,
+    # 56,849 -> 56,233 (-616 B), LOWERED, same day: partner-archetypes.md no longer describes mapping a real
+    # fund's partners to roles (no workflow step reads it now); it states the three role names for every mode.
+    "ic-sim": 56_233,
     # 49_039 -> 50_080 (R1): artifact-schemas.md now documents the evidence/notes
     # contract and its JSON example demonstrates a fail item carrying both.
     # 50_080 -> 50_124 (R2): artifact-schemas.md documents the half-credit formula.
