@@ -398,15 +398,19 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-def _stamp_fund_profile(result: dict[str, Any], output_path: str | None) -> None:
-    """Record which fund profile this output was built from (`fund_profile.stamp_profile`), so compose can
-    tell an output made before the profile was rebuilt."""
+def _fund_profile_module() -> Any:
     scripts_dir = os.path.dirname(os.path.abspath(__file__))
     if scripts_dir not in sys.path:
         sys.path.insert(0, scripts_dir)
     import fund_profile
 
-    fund_profile.stamp_profile(result, output_path)
+    return fund_profile
+
+
+def _stamp_fund_profile(result: dict[str, Any], output_path: str | None, source_sha256: str) -> None:
+    """Record which fund profile this output was built from, and the hand-off it consumed
+    (`fund_profile.stamp_profile`), so compose can tell an output made before the profile was rebuilt."""
+    _fund_profile_module().stamp_profile(result, output_path, source_sha256)
 
 
 def main() -> None:
@@ -420,11 +424,15 @@ def main() -> None:
         )
         sys.exit(1)
 
+    raw = sys.stdin.buffer.read()
     try:
-        data = json.load(sys.stdin)
-    except json.JSONDecodeError as e:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
         print(f"Error: invalid JSON input: {e}", file=sys.stderr)
         sys.exit(1)
+    source = _fund_profile_module().bytes_sha256(raw)
+    # The same scoring hand-off re-piped after the fund profile was rebuilt: refuse, a new dispatch is owed.
+    _fund_profile_module().refuse_handoff_not_redispatched(args.output, source, by="score_dimensions.py")
 
     if not isinstance(data, dict) or "items" not in data:
         print("Error: JSON must be an object with an 'items' key", file=sys.stderr)
@@ -435,7 +443,7 @@ def main() -> None:
         sys.exit(1)
 
     result = validate_dimensions(data["items"], fund_mode=args.fund_mode)
-    _stamp_fund_profile(result, args.output)
+    _stamp_fund_profile(result, args.output, source)
 
     # Inject metadata.run_id as the last step before serialization (overrides any stdin metadata).
     result["metadata"] = {"run_id": args.run_id}

@@ -28,6 +28,34 @@ from typing import Any, NoReturn
 
 ARCHETYPES = ("visionary", "operator", "analyst")
 KINDS = ("assessment", "rebuttal")
+# The dispatch templates' shapes (agents/ic-sim.md). A closed set keeps any other structured field (a name, a
+# bio) out of the file the next dispatches inline, and refuses a body of the other kind. `metadata` and
+# `graded_against` are accepted and replaced by this script.
+KEYS = {
+    "assessment": frozenset(
+        {
+            "partner",
+            "verdict",
+            "rationale",
+            "conviction_points",
+            "key_concerns",
+            "questions_for_founders",
+            "diligence_requirements",
+        }
+    ),
+    "rebuttal": frozenset(
+        {
+            "partner",
+            "revised_verdict",
+            "verdict_changed",
+            "changed_because",
+            "responses",
+            "dealbreakers",
+            "diligence_requirements",
+        }
+    ),
+}
+REPLACED_KEYS = frozenset({"metadata", "graded_against"})
 
 
 def _fund_profile_module() -> Any:
@@ -56,6 +84,11 @@ def validate(data: Any, kind: str, archetype: str, output_path: str) -> list[str
     if not isinstance(data, dict):
         errors.append("the hand-off is not a JSON object")
         return errors
+    for key in sorted(str(k) for k in data if k not in KEYS[kind] and k not in REPLACED_KEYS):
+        errors.append(
+            f'PARTNER_FIELD_NOT_ALLOWED: field "{key}" is not part of a partner {kind}; it carries only '
+            f"{', '.join(sorted(KEYS[kind]))}"
+        )
     partner = data.get("partner")
     if partner != archetype:
         errors.append(
@@ -83,9 +116,10 @@ def main() -> None:
     if sys.stdin.isatty():
         print("Error: pipe the hand-off JSON via stdin", file=sys.stderr)
         sys.exit(1)
+    raw = sys.stdin.buffer.read()
     try:
-        data = json.load(sys.stdin)
-    except json.JSONDecodeError as e:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
         _refuse([f"invalid JSON input: {e}"], args.output)
 
     errors = validate(data, args.kind, args.archetype, args.output)
@@ -98,12 +132,13 @@ def main() -> None:
             ["FUND_PROFILE_MISSING: no readable fund_profile.json beside -o; build the fund profile (Step 4) first"],
             args.output,
         )
-    result = {k: v for k, v in data.items() if k not in ("metadata", "graded_against")}
-    fp.stamp_profile(result, args.output)
+    source = fp.bytes_sha256(raw)
+    fp.refuse_handoff_not_redispatched(args.output, source, by="persist_partner.py")
+    result = {k: v for k, v in data.items() if k not in REPLACED_KEYS}
+    fp.stamp_profile(result, args.output, source)
     result["metadata"] = {"run_id": args.run_id}
 
     abs_path = os.path.abspath(args.output)
-    os.makedirs(os.path.dirname(abs_path), exist_ok=True)
     text = json.dumps(result, indent=2 if args.pretty else None) + "\n"
     with open(abs_path, "w", encoding="utf-8") as f:
         f.write(text)

@@ -953,7 +953,8 @@ def test_persist_partner_stamps_the_profile_and_the_run() -> None:
         with open(out, encoding="utf-8") as f:
             written = json.load(f)
         fp = _fund_profile_module()
-        assert written["graded_against"] == {"fund_profile": fp.profile_fingerprint_in(d)}
+        assert written["graded_against"]["fund_profile"] == fp.profile_fingerprint_in(d)
+        assert len(written["graded_against"]["source_sha256"]) == 64
         assert written["metadata"] == {"run_id": "RID"}
         assert written["rationale"] == "Invented rationale."
 
@@ -964,6 +965,17 @@ def test_persist_partner_stamps_the_profile_and_the_run() -> None:
         (["--archetype", "visionary"], _PARTNER_PAYLOAD, "PARTNER_MISMATCH"),
         (["--archetype", "operator", "--kind", "rebuttal"], _PARTNER_PAYLOAD, "OUTPUT_NAME_MISMATCH"),
         (["--archetype", "operator"], ["not", "an", "object"], "not a JSON object"),
+        (
+            ["--archetype", "operator"],
+            {**_PARTNER_PAYLOAD, "partner_name": "Dana Whitlock"},
+            "PARTNER_FIELD_NOT_ALLOWED",
+        ),
+        (["--archetype", "operator"], {**_PARTNER_PAYLOAD, "_produced_by": "x"}, "PARTNER_FIELD_NOT_ALLOWED"),
+        (
+            ["--archetype", "operator", "--kind", "rebuttal"],
+            {**_PARTNER_PAYLOAD},
+            "PARTNER_FIELD_NOT_ALLOWED",
+        ),
     ],
 )
 def test_persist_partner_refuses_loudly(args: list[str], payload: Any, code: str) -> None:
@@ -976,9 +988,15 @@ def test_persist_partner_refuses_loudly(args: list[str], payload: Any, code: str
         argv = [*args, "--run-id", "RID", "-o", out]
         if "--kind" not in argv:
             argv = ["--kind", "assessment", *argv]
+        if "rebuttal" in args and code == "PARTNER_FIELD_NOT_ALLOWED":
+            out = os.path.join(d, "partner_rebuttal_operator.json")
+            argv = [*args, "--run-id", "RID", "-o", out]
+            with open(out, "rb") as f:
+                before = f.read()
         rc, stdout, stderr = run_script_raw("persist_partner.py", argv, stdin_data=json.dumps(payload))
         assert rc == 1, stdout + stderr
         assert code in stdout and "left unchanged" in stderr
+        assert "Dana Whitlock" not in stdout + stderr
         with open(out, "rb") as f:
             assert f.read() == before
 
@@ -1014,6 +1032,24 @@ def test_compose_discussion_refuses_an_unstamped_partner_file() -> None:
         assert "PARTNER_ARTIFACTS_STALE" in stderr
         with open(out, "rb") as f:
             assert f.read() == before
+
+
+def test_skill_md_routes_every_persist_partner_refusal() -> None:
+    text = _read(_SKILL_MD_PATH)
+    step6 = text[text.index("### Step 6: Partner Assessments") : text.index("### Step 6b: Partner Rebuttals")]
+    for code in (
+        "PARTNER_MISMATCH",
+        "PARTNER_FIELD_NOT_ALLOWED",
+        "OUTPUT_NAME_MISMATCH",
+        "FUND_PROFILE_MISSING",
+        "HANDOFF_NOT_REDISPATCHED",
+    ):
+        assert f"`{code}`" in step6, code
+    assert "a new round, not a corrective dispatch" in step6
+    step6b = text[text.index("### Step 6b: Partner Rebuttals") : text.index("### Step 7:")]
+    assert "`persist_partner.py` refusals: as in Step 6." in step6b
+    step8 = text[text.index("### Step 8: Score Dimensions") : text.index("### Step 8.5")]
+    assert "`HANDOFF_NOT_REDISPATCHED`" in step8 and "dispatch SCORE_DIMENSIONS again" in step8
 
 
 def test_skill_md_persists_every_partner_handoff_through_the_script() -> None:

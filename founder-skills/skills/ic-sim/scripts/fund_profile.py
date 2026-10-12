@@ -269,12 +269,53 @@ def profile_fingerprint_in(sim_dir: str) -> str | None:
         return None
 
 
-def stamp_profile(result: dict[str, Any], output_path: str | None) -> None:
-    """Record, on a producer's output, the fingerprint of the fund profile beside where it is written. With no
-    `-o` nothing is stamped (stdout output is never composed). Overrides any `graded_against` in the input."""
+def stamp_profile(result: dict[str, Any], output_path: str | None, source_sha256: str | None = None) -> None:
+    """Record, on a producer's output, the fingerprint of the fund profile beside where it is written, and (for a
+    step fed by a sub-agent's hand-off) the sha256 of the hand-off bytes it consumed. With no `-o` nothing is
+    stamped (stdout output is never composed). Overrides any `graded_against` in the input."""
     if not output_path:
         return
-    result[GRADED_AGAINST] = {"fund_profile": profile_fingerprint_in(os.path.dirname(os.path.abspath(output_path)))}
+    stamp: dict[str, Any] = {"fund_profile": profile_fingerprint_in(os.path.dirname(os.path.abspath(output_path)))}
+    if source_sha256 is not None:
+        stamp["source_sha256"] = source_sha256
+    result[GRADED_AGAINST] = stamp
+
+
+def bytes_sha256(raw: bytes) -> str:
+    return hashlib.sha256(raw).hexdigest()
+
+
+def refuse_handoff_not_redispatched(output_path: str | None, source_sha256: str, *, by: str) -> None:
+    """Exit 1 `HANDOFF_NOT_REDISPATCHED`, `-o` untouched, when the hand-off about to be persisted is byte for byte
+    the one the existing `-o` was built from, and that file was built against an earlier fund profile. Re-piping
+    the old hand-off would re-stamp prose a sub-agent wrote against the old profile, which no stamp could then
+    tell apart: the remedy is a new dispatch. A repair under the same profile is never refused (its stamp is
+    current), and a missing or unreadable `-o`, or one with no recorded hand-off, is never refused either: the
+    check must not block a repair. Residuals: a one-byte edit of the old hand-off, or deleting `-o` first, passes;
+    both are outside the never-re-type and never-delete rules."""
+    if not output_path:
+        return
+    try:
+        with open(os.path.abspath(output_path), encoding="utf-8") as f:
+            existing = json.load(f)
+    except (OSError, ValueError):
+        return
+    stamp = existing.get(GRADED_AGAINST) if isinstance(existing, dict) else None
+    if not isinstance(stamp, dict) or stamp.get("source_sha256") != source_sha256:
+        return
+    if stamp.get("fund_profile") == profile_fingerprint_in(os.path.dirname(os.path.abspath(output_path))):
+        return
+    name = os.path.basename(output_path)
+    message = (
+        f"{name} was built from this same hand-off against an earlier fund profile; re-dispatch the sub-agent for "
+        "this step (a new round under the current profile, not a corrective dispatch), then persist its new hand-off"
+    )
+    sys.stdout.write(json.dumps({"status": "rejected", "code": "HANDOFF_NOT_REDISPATCHED", "message": message}) + "\n")
+    print(
+        f"Error: {by}: HANDOFF_NOT_REDISPATCHED: {message}; {os.path.abspath(output_path)} was left unchanged",
+        file=sys.stderr,
+    )
+    sys.exit(1)
 
 
 def stale_dependents(sim_dir: str, names: tuple[str, ...] = PROFILE_DEPENDENTS) -> list[str]:
@@ -309,7 +350,8 @@ def refuse_stale_dependents(sim_dir: str, *, by: str, names: tuple[str, ...] = P
         return
     message = (
         f"{', '.join(stale)} {'was' if len(stale) == 1 else 'were'} not built from the current fund_profile.json "
-        f"(the profile changed after they ran, or they carry no record of it); {STALE_FIX}"
+        f"(the profile changed after they ran, they ran where no readable profile was, or they carry no record of "
+        f"it); {STALE_FIX}"
     )
     sys.stdout.write(json.dumps({"status": "rejected", "code": "PARTNER_ARTIFACTS_STALE", "message": message}) + "\n")
     print(f"Error: {by}: PARTNER_ARTIFACTS_STALE: {message}; nothing was written", file=sys.stderr)

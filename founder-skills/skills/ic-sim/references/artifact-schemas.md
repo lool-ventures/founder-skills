@@ -2,7 +2,7 @@
 
 JSON schemas for all artifacts deposited during the IC simulation workflow. Each artifact is a JSON file written to the `SIM_DIR` working directory.
 
-**Every artifact must carry a `metadata.run_id` block** at the top level: `"metadata": {"run_id": "<RUN_ID>"}`. For agent-written artifacts (heredocs), include it inline. For producer-script artifacts (`fund_profile.py`, `detect_conflicts.py`, `score_dimensions.py`), pass `--run-id "$RUN_ID"` and the script injects the block. `compose_report.py` checks that all artifact run IDs match — a mismatch triggers a `STALE_ARTIFACT` warning. The `metadata.run_id` row and example are shown per artifact below.
+**Every artifact must carry a `metadata.run_id` block** at the top level: `"metadata": {"run_id": "<RUN_ID>"}`. The two heredoc-written artifacts (`startup_profile.json`, `prior_artifacts.json`) include it inline; every other artifact is written by a script that takes `--run-id "$RUN_ID"` and injects it (`fund_profile.py`, `detect_conflicts.py`, `persist_partner.py`, `compose_discussion.py`, `score_dimensions.py`). `compose_report.py` checks that all artifact run IDs match — a mismatch triggers a `STALE_ARTIFACT` warning. The `metadata.run_id` row and example are shown per artifact below.
 
 ## startup_profile.json
 
@@ -237,11 +237,11 @@ Additional fields added by the script:
 
 ## partner_assessment_{visionary|operator|analyst}.json
 
-**Producer:** Context A dispatch (PARTNER_ANALYSIS) — the ic-sim agent dispatched three times in parallel, one per archetype; the main thread writes each return with `metadata.run_id` injected (Step 6)
+**Producer:** Context A dispatch (PARTNER_ANALYSIS) — the ic-sim agent dispatched three times in parallel, one per archetype; the main thread pipes each gated hand-off through `persist_partner.py`, which injects `metadata.run_id` and the `graded_against` stamp (Step 6); its keys are a closed set, the table below
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `metadata` | object | yes | `{run_id}` — injected by the main thread when writing the return |
+| `metadata` | object | yes | `{run_id}` — injected by `persist_partner.py` |
 | `partner` | string | yes | `"visionary"`, `"operator"`, or `"analyst"` |
 | `verdict` | string | yes | `"invest"`, `"more_diligence"`, `"pass"`, or `"hard_pass"` |
 | `rationale` | string | yes | Free-text rationale grounded in archetype's focus areas |
@@ -284,11 +284,11 @@ Additional fields added by the script:
 
 ## partner_rebuttal_{visionary|operator|analyst}.json
 
-**Producer:** Context A dispatch (PARTNER_REBUTTAL) — the ic-sim agent dispatched three times in parallel, one per archetype, each shown its own round-1 assessment plus the other two's; the main thread writes each return with `metadata.run_id` injected (Step 6b). This is round 2 of the debate — round 1 is `partner_assessment_*.json` above, where the three archetypes ran with no sight of each other.
+**Producer:** Context A dispatch (PARTNER_REBUTTAL) — the ic-sim agent dispatched three times in parallel, one per archetype, each shown its own round-1 assessment plus the other two's; the main thread pipes each gated hand-off through `persist_partner.py`, which injects `metadata.run_id` and the `graded_against` stamp (Step 6b); its keys are a closed set, the table below. This is round 2 of the debate — round 1 is `partner_assessment_*.json` above, where the three archetypes ran with no sight of each other.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `metadata` | object | yes | `{run_id}` — injected by the main thread when writing the return |
+| `metadata` | object | yes | `{run_id}` — injected by `persist_partner.py` |
 | `partner` | string | yes | `"visionary"`, `"operator"`, or `"analyst"` — must match the archetype this dispatch was made for; `compose_discussion.py` rejects a mismatch |
 | `revised_verdict` | string | yes | `"invest"`, `"more_diligence"`, `"pass"`, or `"hard_pass"` — this partner's verdict AFTER reading the other two's round-1 assessments |
 | `verdict_changed` | boolean | yes | Whether `revised_verdict` differs from this partner's round-1 `verdict` |

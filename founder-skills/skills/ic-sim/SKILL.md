@@ -638,7 +638,9 @@ cat "$HANDOFF_DIR/partner_visionary_output.json" | python3 "$SCRIPTS/persist_par
 ```
 <!-- skill-quality-ci: bash-after-subagent-ok -->
 
-**Verify after writes:** check that `$SIM_DIR` contains all three `partner_assessment_*.json` files. If any are missing, re-run that dispatch before proceeding. `persist_partner.py` exits 1 on a hand-off that is not this archetype's: repair-dispatch that archetype.
+**Verify after writes:** check that `$SIM_DIR` contains all three `partner_assessment_*.json` files. If any are missing, re-run that dispatch before proceeding.
+
+**`persist_partner.py` refusals:** `PARTNER_MISMATCH` or `PARTNER_FIELD_NOT_ALLOWED`: repair-dispatch that archetype. `OUTPUT_NAME_MISMATCH` / `FUND_PROFILE_MISSING`: the command is wrong (the `-o` name, or no Step 4); fix it and run it again. `HANDOFF_NOT_REDISPATCHED`: this hand-off was already persisted against an earlier fund profile; dispatch the archetype again. A redo of Steps 5-8 is a new round, not a corrective dispatch.
 
 ### Step 6b: Partner Rebuttals (PARTNER_REBUTTAL × 3 in parallel)
 
@@ -764,7 +766,7 @@ cat "$HANDOFF_DIR/partner_rebuttal_visionary_output.json" | python3 "$SCRIPTS/pe
 ```
 <!-- skill-quality-ci: bash-after-subagent-ok -->
 
-**Verify after writes:** check that `$SIM_DIR` contains all three `partner_rebuttal_*.json` files. If any are missing, re-run that dispatch before proceeding.
+**Verify after writes:** check that `$SIM_DIR` contains all three `partner_rebuttal_*.json` files. If any are missing, re-run that dispatch before proceeding. `persist_partner.py` refusals: as in Step 6.
 
 ### Step 7: Compose Discussion -> `discussion.json` (producer pipe)
 
@@ -944,6 +946,8 @@ cat "$HANDOFF_DIR/score_dimensions_output.json" | \
     -o "$SIM_DIR/score_dimensions.json"
 ```
 <!-- skill-quality-ci: bash-after-subagent-ok -->
+
+`HANDOFF_NOT_REDISPATCHED`: this scoring hand-off was already used against an earlier fund profile; dispatch SCORE_DIMENSIONS again.
 
 ### Step 8.5: Decline Confirmation Gate (conditional)
 

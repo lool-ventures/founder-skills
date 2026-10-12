@@ -45,7 +45,8 @@
     "ic_producers": [
       "RUN_ID_REQUIRED",
       "FUND_PROFILE_NAMES_PEOPLE",
-      "PARTNER_ARTIFACTS_STALE"
+      "PARTNER_ARTIFACTS_STALE",
+      "HANDOFF_NOT_REDISPATCHED"
     ],
     "insert_coaching": [
       "OUTPUT_IS_INPUT",

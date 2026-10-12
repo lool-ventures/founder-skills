@@ -1213,7 +1213,11 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 95,199 -> 95,333 (+134 B), same day: Steps 6 and 6b persist each hand-off through persist_partner.py
     # (which stamps the fund profile) in place of an inline python write (net -165 B), plus one routing
     # sentence for its refusal and one for Step 7's PARTNER_ARTIFACTS_STALE.
-    "ic-sim": 95_333,
+    # 95,333 -> 95,842 (+509 B), same day: Step 6 routes every persist_partner.py refusal (a repair dispatch
+    # for a wrong or over-keyed hand-off, a command fix for a wrong -o or a missing profile, a new dispatch for a
+    # hand-off already used against an earlier profile) and says a redo is a new round, not a corrective
+    # dispatch; Step 6b points to it; Step 8 routes the scoring script's HANDOFF_NOT_REDISPATCHED.
+    "ic-sim": 95_842,
     # deck-review +1,165 B: Step 0 carried only a parenthetical fresh-shell mention buried in a code
     # comment, unlike the four skills that mint RUN_ID in a LATER block and so carry the shared banner.
     # deck-review mints RUN_ID INSIDE this re-runnable Step-0 block (like cap-table), so the shared
@@ -2197,7 +2201,9 @@ REFERENCES_CEILING: dict[str, int] = {
     # 56,247 -> 56,604 (+357 B), same day: artifact-schemas.md documents graded_against.fund_profile on the three
     # profile-built artifacts and compose's PARTNER_ARTIFACTS_STALE refusal.
     # 56,604 -> 56,663 (+59 B), same day: the stamp is documented on the six partner files too.
-    "ic-sim": 56_663,
+    # 56,663 -> 56,940 (+277 B), same day: artifact-schemas.md says the partner files go through
+    # persist_partner.py (closed key sets, the stamp) where it still said the main thread writes them.
+    "ic-sim": 56_940,
     # 49_039 -> 50_080 (R1): artifact-schemas.md now documents the evidence/notes
     # contract and its JSON example demonstrates a fail item carrying both.
     # 50_080 -> 50_124 (R2): artifact-schemas.md documents the half-credit formula.

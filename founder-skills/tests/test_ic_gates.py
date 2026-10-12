@@ -297,49 +297,76 @@ def _record_specific_fund(root: Path, run_id: str) -> None:
     _ok(_answer(root, run_id, "ic_fund_mode", "specific", "--value", "Northwind Ventures"))
 
 
-def _persist_partners(run_dir: Path, run_id: str) -> None:
-    """Steps 6 and 6b's persisting step again: each partner file's content (the fixture's, as a re-dispatched
-    sub-agent's hand-off) piped through persist_partner.py."""
-    for kind in ("assessment", "rebuttal"):
-        for archetype in ("visionary", "operator", "analyst"):
-            path = run_dir / f"partner_{kind}_{archetype}.json"
-            body = json.loads(path.read_text(encoding="utf-8"))
-            _ok(
-                h.run(
-                    IC / "persist_partner.py",
-                    "--kind",
-                    kind,
-                    "--archetype",
-                    archetype,
-                    "--run-id",
-                    run_id,
-                    "-o",
-                    str(path),
-                    stdin=json.dumps(body),
-                )
-            )
+PARTNERS = [
+    (kind, archetype) for kind in ("assessment", "rebuttal") for archetype in ("visionary", "operator", "analyst")
+]
 
 
-def _redo_steps_7_to_8(run_dir: Path, run_id: str, mode: str) -> subprocess.CompletedProcess[str]:
-    """Step 7 then Step 8; returns compose_discussion's result (Step 8 runs only if it passed)."""
+def _handoff(run_dir: Path, name: str, tag: str) -> str:
+    """A sub-agent's hand-off for this round: the file's content without what the scripts stamp, with one
+    invented diligence item naming the round, so each dispatch round is new content (as a real re-dispatch
+    is)."""
+    body = json.loads((run_dir / name).read_text(encoding="utf-8"))
+    body = {k: v for k, v in body.items() if k not in ("metadata", "graded_against")}
+    body["diligence_requirements"] = [*body.get("diligence_requirements", []), f"Invented check for round {tag}."]
+    return json.dumps(body)
+
+
+def _persist(run_dir: Path, run_id: str, kind: str, archetype: str, text: str) -> subprocess.CompletedProcess[str]:
+    out = run_dir / f"partner_{kind}_{archetype}.json"
+    return h.run(
+        IC / "persist_partner.py",
+        "--kind",
+        kind,
+        "--archetype",
+        archetype,
+        "--run-id",
+        run_id,
+        "-o",
+        str(out),
+        stdin=text,
+    )
+
+
+def _persist_partners(run_dir: Path, run_id: str, tag: str = "redo") -> dict[str, str]:
+    """Steps 6 and 6b again: a new hand-off per archetype and kind, persisted; returns the hand-offs sent."""
+    sent: dict[str, str] = {}
+    for kind, archetype in PARTNERS:
+        text = _handoff(run_dir, f"partner_{kind}_{archetype}.json", tag)
+        _ok(_persist(run_dir, run_id, kind, archetype, text))
+        sent[f"{kind}:{archetype}"] = text
+    return sent
+
+
+def _score_handoff(run_dir: Path, tag: str) -> str:
+    scores = json.loads((run_dir / "score_dimensions.json").read_text(encoding="utf-8"))
+    items = [dict(i) for i in scores["items"]]
+    items[0]["evidence"] = f"{items[0].get('evidence') or 'Invented evidence'} (round {tag})"
+    return json.dumps({"items": items})
+
+
+def _score(run_dir: Path, run_id: str, mode: str, text: str) -> subprocess.CompletedProcess[str]:
+    return h.run(
+        IC / "score_dimensions.py",
+        "--run-id",
+        run_id,
+        "--fund-mode",
+        mode,
+        "-o",
+        str(run_dir / "score_dimensions.json"),
+        stdin=text,
+    )
+
+
+def _redo_steps_7_to_8(run_dir: Path, run_id: str, mode: str, tag: str = "redo") -> subprocess.CompletedProcess[str]:
+    """Step 7 then Step 8 (a new scoring hand-off); returns compose_discussion's result (Step 8 runs only if it
+    passed)."""
     proc = h.run(
         IC / "compose_discussion.py", "--dir", str(run_dir), "--run-id", run_id, "-o", str(run_dir / "discussion.json")
     )
     if proc.returncode != 0:
         return proc
-    scores = json.loads((run_dir / "score_dimensions.json").read_text(encoding="utf-8"))
-    _ok(
-        h.run(
-            IC / "score_dimensions.py",
-            "--run-id",
-            run_id,
-            "--fund-mode",
-            mode,
-            "-o",
-            str(run_dir / "score_dimensions.json"),
-            stdin=json.dumps({"items": scores["items"]}),
-        )
-    )
+    _ok(_score(run_dir, run_id, mode, _score_handoff(run_dir, tag)))
     return proc
 
 
@@ -411,6 +438,71 @@ def test_each_producer_stamps_the_profile_it_was_built_from(tmp_path: Path) -> N
     for name in fp.PROFILE_DEPENDENTS:
         data = json.loads((run_dir / name).read_text(encoding="utf-8"))
         assert len(data["graded_against"]["fund_profile"]) == 64, name
+
+
+def test_re_piping_the_old_handoffs_after_a_rebuild_is_refused(tmp_path: Path) -> None:
+    """The partner work and scores were persisted from these hand-offs under one profile; the profile is rebuilt;
+    piping the SAME hand-offs through again would re-stamp prose written against the old profile, so it is
+    refused (nothing written) until the step is dispatched again, and a new hand-off is accepted."""
+    root, run_id, run_dir = _sim(tmp_path, "invest")
+    _record_specific_fund(root, run_id)
+    _ok(_fund_profile(run_dir, run_id, "fund_specific"))
+    old = _persist_partners(run_dir, run_id, "old")
+    old_score = _score_handoff(run_dir, "old")
+    _ok(
+        h.run(
+            IC / "compose_discussion.py",
+            "--dir",
+            str(run_dir),
+            "--run-id",
+            run_id,
+            "-o",
+            str(run_dir / "discussion.json"),
+        )
+    )
+    _ok(_score(run_dir, run_id, "fund_specific", old_score))
+    # Rebuild Step 4 with different content.
+    body = _profile("fund_specific")
+    body["thesis_areas"] = ["Climate software"]
+    _ok(
+        h.run(
+            IC / "fund_profile.py", "--run-id", run_id, "-o", str(run_dir / "fund_profile.json"), stdin=json.dumps(body)
+        )
+    )
+    # Re-pipe the old hand-offs: refused, file untouched.
+    target = run_dir / "partner_assessment_visionary.json"
+    before = target.read_bytes()
+    proc = _persist(run_dir, run_id, "assessment", "visionary", old["assessment:visionary"])
+    assert proc.returncode == 1, proc.stdout + proc.stderr
+    assert _out(proc)["code"] == "HANDOFF_NOT_REDISPATCHED" and "HANDOFF_NOT_REDISPATCHED" in proc.stderr
+    assert target.read_bytes() == before
+    scores_before = (run_dir / "score_dimensions.json").read_bytes()
+    proc = _score(run_dir, run_id, "fund_specific", old_score)
+    assert proc.returncode == 1 and _out(proc)["code"] == "HANDOFF_NOT_REDISPATCHED"
+    assert (run_dir / "score_dimensions.json").read_bytes() == scores_before
+    # A new round: accepted, and the run composes.
+    conflict = json.loads((run_dir / "conflict_check.json").read_text(encoding="utf-8"))
+    _ok(
+        h.run(
+            IC / "detect_conflicts.py",
+            "--run-id",
+            run_id,
+            "-o",
+            str(run_dir / "conflict_check.json"),
+            stdin=json.dumps({"portfolio_size": conflict["portfolio_size"], "conflicts": conflict["conflicts"]}),
+        )
+    )
+    _persist_partners(run_dir, run_id, "new")
+    _ok(_redo_steps_7_to_8(run_dir, run_id, "fund_specific", "new"))
+    _ok(_compose(run_dir))
+
+
+def test_a_repair_under_the_same_profile_is_never_refused(tmp_path: Path) -> None:
+    """The same hand-off persisted twice with the profile unchanged (a repeated command) is accepted."""
+    root, run_id, run_dir = _sim(tmp_path, "invest")
+    text = _handoff(run_dir, "partner_assessment_operator.json", "same")
+    _ok(_persist(run_dir, run_id, "assessment", "operator", text))
+    _ok(_persist(run_dir, run_id, "assessment", "operator", text))
 
 
 def test_the_generic_path_is_held_to_the_same_stamps(tmp_path: Path) -> None:
