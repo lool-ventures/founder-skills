@@ -1208,7 +1208,9 @@ SKILL_MD_CEILING: dict[str, int] = {
     # the page's steps route FUND_PROFILE_NAMES_PEOPLE to a rebuild rather than to "report the exact stderr".
     # 95,006 -> 95,069 (+63 B), same day: the page's branch says a finished simulation needs a new one (Step 0),
     # since the page has no run gate and runs after the run is complete.
-    "ic-sim": 95_069,
+    # 95,069 -> 95,199 (+130 B), same day: compose's step routes PARTNER_ARTIFACTS_STALE (the conflict check,
+    # discussion or scores were built from another fund profile) to a redo of Steps 5-8.
+    "ic-sim": 95_199,
     # deck-review +1,165 B: Step 0 carried only a parenthetical fresh-shell mention buried in a code
     # comment, unlike the four skills that mint RUN_ID in a LATER block and so carry the shared banner.
     # deck-review mints RUN_ID INSIDE this re-runnable Step-0 block (like cap-table), so the shared
@@ -2189,7 +2191,9 @@ REFERENCES_CEILING: dict[str, int] = {
     # 56,849 -> 56,233 (-616 B), LOWERED, same day: partner-archetypes.md no longer describes mapping a real
     # fund's partners to roles (no workflow step reads it now); it states the three role names for every mode.
     # 56,233 -> 56,247 (+14 B), same day: the person-page source rule also names LinkedIn's /pub/ path.
-    "ic-sim": 56_247,
+    # 56,247 -> 56,604 (+357 B), same day: artifact-schemas.md documents graded_against.fund_profile on the three
+    # profile-built artifacts and compose's PARTNER_ARTIFACTS_STALE refusal.
+    "ic-sim": 56_604,
     # 49_039 -> 50_080 (R1): artifact-schemas.md now documents the evidence/notes
     # contract and its JSON example demonstrates a fail item carrying both.
     # 50_080 -> 50_124 (R2): artifact-schemas.md documents the half-credit formula.

@@ -210,6 +210,8 @@ EXPECTED_KEYS: dict[str, set[str]] = {
         "conflicts",
         "summary",
         "validation",
+        # Which fund profile it was built from (fund_profile.stamp_profile); compose refuses a stale one.
+        "graded_against",
     },
     "discussion.json": {
         "assessment_mode",
@@ -223,10 +225,12 @@ EXPECTED_KEYS: dict[str, set[str]] = {
         # compose_discussion.py's uncalibrated capitulation signal (see 4d.
         # PARTNER_CAPITULATION below and that script's module docstring).
         "warnings",
+        "graded_against",
     },
     "score_dimensions.json": {
         "items",
         "summary",
+        "graded_against",
     },
     "prior_artifacts.json": {
         "imported",
@@ -1871,6 +1875,7 @@ def main() -> None:
         gates.refuse_open_gates(ledger)
     # After the run's gates (a finished run reports RUN_FINISHED, which it can act on), before any write.
     _fund_profile_module().refuse_profile_naming_people(args.dir, by="compose_report.py")
+    _fund_profile_module().refuse_stale_dependents(args.dir, by="compose_report.py")
 
     report_path = os.path.abspath(args.write_md) if args.write_md else None
     result = compose(args.dir, report_path=report_path)

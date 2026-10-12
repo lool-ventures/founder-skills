@@ -291,6 +291,105 @@ def test_the_profile_refusal_comes_after_the_run_gates(tmp_path: Path) -> None:
     assert "FUND_PROFILE_NAMES_PEOPLE" not in proc.stdout + proc.stderr
 
 
+def _record_specific_fund(root: Path, run_id: str) -> None:
+    _ok(_answer(root, run_id, "ic_mode", "interactive"))
+    _ok(_answer(root, run_id, "ic_fund_mode", "specific", "--value", "Northwind Ventures"))
+
+
+def _redo_steps_5_to_8(run_dir: Path, run_id: str, mode: str) -> None:
+    """Steps 5, 7 and 8's producers again, under the same run id, over the files already in the dir (the
+    Step 6/6b sub-agents' output is the fixture's; a real redo re-dispatches them)."""
+    conflict = json.loads((run_dir / "conflict_check.json").read_text(encoding="utf-8"))
+    _ok(
+        h.run(
+            IC / "detect_conflicts.py",
+            "--run-id",
+            run_id,
+            "-o",
+            str(run_dir / "conflict_check.json"),
+            stdin=json.dumps({"portfolio_size": conflict["portfolio_size"], "conflicts": conflict["conflicts"]}),
+        )
+    )
+    _ok(
+        h.run(
+            IC / "compose_discussion.py",
+            "--dir",
+            str(run_dir),
+            "--run-id",
+            run_id,
+            "-o",
+            str(run_dir / "discussion.json"),
+        )
+    )
+    scores = json.loads((run_dir / "score_dimensions.json").read_text(encoding="utf-8"))
+    _ok(
+        h.run(
+            IC / "score_dimensions.py",
+            "--run-id",
+            run_id,
+            "--fund-mode",
+            mode,
+            "-o",
+            str(run_dir / "score_dimensions.json"),
+            stdin=json.dumps({"items": scores["items"]}),
+        )
+    )
+
+
+def test_rebuilding_only_the_profile_does_not_compose_and_a_full_redo_does(tmp_path: Path) -> None:
+    """A waiting run resumed with a profile that names people: compose refuses it; rebuilding Step 4 alone
+    is refused as stale (every artifact keeps the run's id, so only the stamps can tell); Steps 5-8 again
+    under the same run id compose."""
+    root, run_id, run_dir = _sim(tmp_path, "hard_pass")
+    _record_specific_fund(root, run_id)
+    _ok(_open(root, run_id, DECLINE))
+    _ok(_answer(root, run_id, DECLINE, "hold_off"))
+    _old_profile(run_dir)
+    _ok(_answer(root, run_id, DECLINE, "finish"))
+    proc = _compose(run_dir)
+    assert proc.returncode == 1 and _out(proc)["code"] == "FUND_PROFILE_NAMES_PEOPLE"
+    record_after = json.loads((run_dir / "compose_result.json").read_text(encoding="utf-8"))
+    assert record_after["code"] == "FUND_PROFILE_NAMES_PEOPLE"
+    # Step 4 only.
+    proc = _fund_profile(run_dir, run_id, "fund_specific")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    proc = _compose(run_dir)
+    assert proc.returncode == 1, proc.stdout + proc.stderr
+    assert _out(proc)["code"] == "PARTNER_ARTIFACTS_STALE"
+    for name in ("conflict_check.json", "discussion.json", "score_dimensions.json"):
+        assert name in _out(proc)["message"]
+    assert not (run_dir / "report.md").exists() and not (run_dir / "report.json").exists()
+    record = json.loads((run_dir / "compose_result.json").read_text(encoding="utf-8"))
+    assert record["code"] == "PARTNER_ARTIFACTS_STALE"
+    # Steps 5-8 again.
+    _redo_steps_5_to_8(run_dir, run_id, "fund_specific")
+    proc = _compose(run_dir)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "- **The Visionary**" in (run_dir / "report.md").read_text(encoding="utf-8")
+
+
+def test_each_producer_stamps_the_profile_it_was_built_from(tmp_path: Path) -> None:
+    """Redoing all but one step leaves that step's artifact stale: each producer's stamp is load-bearing."""
+    root, run_id, run_dir = _sim(tmp_path, "invest")
+    _record_specific_fund(root, run_id)
+    _ok(_fund_profile(run_dir, run_id, "fund_specific"))
+    _redo_steps_5_to_8(run_dir, run_id, "fund_specific")
+    _ok(_compose(run_dir))
+    for name in ("conflict_check.json", "discussion.json", "score_dimensions.json"):
+        data = json.loads((run_dir / name).read_text(encoding="utf-8"))
+        assert len(data["graded_against"]["fund_profile"]) == 64, name
+
+
+def test_accepting_a_warning_stales_nothing(tmp_path: Path) -> None:
+    """accepted_warnings live in the fund profile and are added after compose warns; they are not what any
+    earlier step was built from."""
+    root, run_id, run_dir = _sim(tmp_path, "invest")
+    profile = json.loads((run_dir / "fund_profile.json").read_text(encoding="utf-8"))
+    profile["accepted_warnings"] = [{"code": "SEQUENTIAL_FALLBACK", "match": "x", "reason": "invented"}]
+    _write(run_dir / "fund_profile.json", profile)
+    _ok(_compose(run_dir))
+
+
 def test_compose_after_hold_off_says_to_wait_not_to_ask(tmp_path: Path) -> None:
     root, run_id, run_dir = _sim(tmp_path)
     _ok(_open(root, run_id, DECLINE))

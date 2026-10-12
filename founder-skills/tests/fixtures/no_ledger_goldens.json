@@ -983,8 +983,8 @@
     "decline": {
       "exit": 0,
       "files": {
-        "conflict_check.json": "6ff83b4ae658601d702f15a7218c59778caf602463ecb1b866a68f492cc48fc3",
-        "discussion.json": "925129077f59a307aadccbb3dfbf507b7f0d9eb40d586c3711cf426638b56a84",
+        "conflict_check.json": "912bb4c8f255531cb32480f4ddc98df26326d24780f7160d5f186c509a8ad687",
+        "discussion.json": "4131ef760df2f3d17dae95b873ee146c5e0cde21e95517c4ffcd11c87dc8c6d2",
         "fund_profile.json": "14403353df1cbed0a7a2cddb645c6abc34243068354ffe281f1b13a51cd5ffc4",
         "partner_assessment_analyst.json": "44c048560370e1e233c55ef1ae2a3297134ad729089066518f51784f856cd0a2",
         "partner_assessment_operator.json": "df56304f83e5442bf75f21ecaaf731584ee08adf920d8c8fb50689f9f84dc7de",
@@ -994,7 +994,7 @@
         "partner_rebuttal_visionary.json": "f9ab6d585cf7328e7c1f057ea196d178ff74a121f211b774c3ac1bc6df6e04aa",
         "report.json": "3833aebee3a1860142858a141c1e7ef3076bc8584bad481a3937a83a2db4ae51",
         "report.md": "b9bdd69a4855103b732d25b8af28327751332b658fe95fb632e1fcbb72c78d67",
-        "score_dimensions.json": "22ad5f0cc59045cb9861cdac7a9ec5ad5ec618a1070dc4001dcd15a009dd2f18",
+        "score_dimensions.json": "e6bd517b8347c86d5b1a0f4cd11acf018fad27fc82c35deb5f9e84735276b72b",
         "startup_profile.json": "58d58aca268e5b9c70c27ab57489986f0e1d1582f139a5c1774a99dd7a08a7db"
       },
       "stderr": "6f9ae91be68440670f729747629bc8cb5e07c6433677c8cb0ed57bddedbda098",
@@ -1003,8 +1003,8 @@
     "plain": {
       "exit": 0,
       "files": {
-        "conflict_check.json": "6ff83b4ae658601d702f15a7218c59778caf602463ecb1b866a68f492cc48fc3",
-        "discussion.json": "925129077f59a307aadccbb3dfbf507b7f0d9eb40d586c3711cf426638b56a84",
+        "conflict_check.json": "912bb4c8f255531cb32480f4ddc98df26326d24780f7160d5f186c509a8ad687",
+        "discussion.json": "4131ef760df2f3d17dae95b873ee146c5e0cde21e95517c4ffcd11c87dc8c6d2",
         "fund_profile.json": "14403353df1cbed0a7a2cddb645c6abc34243068354ffe281f1b13a51cd5ffc4",
         "partner_assessment_analyst.json": "44c048560370e1e233c55ef1ae2a3297134ad729089066518f51784f856cd0a2",
         "partner_assessment_operator.json": "df56304f83e5442bf75f21ecaaf731584ee08adf920d8c8fb50689f9f84dc7de",
@@ -1014,7 +1014,7 @@
         "partner_rebuttal_visionary.json": "f9ab6d585cf7328e7c1f057ea196d178ff74a121f211b774c3ac1bc6df6e04aa",
         "report.json": "22269cfc056f0b969178a306b9e0884ad22099cefdda6809a48e53d06a54a1ff",
         "report.md": "d201888cb90515185d171357565973948b03932eaeefee6dc21c1bddc7a2c7c8",
-        "score_dimensions.json": "25f80efe0ba0da7ef65f5fced690ad858d0a28ada72317100efeb0f80f5d50a6",
+        "score_dimensions.json": "5cfa2f9295f817dd0571b7e0d7bee74e0fedd2fb59a260a94f6980bf4f428d56",
         "startup_profile.json": "58d58aca268e5b9c70c27ab57489986f0e1d1582f139a5c1774a99dd7a08a7db"
       },
       "stderr": "240b22db92a7840b39c33464efdb63a9a07a49e56b92f3eeeb7846328cbfae9d",
@@ -1023,8 +1023,8 @@
     "strict": {
       "exit": 1,
       "files": {
-        "conflict_check.json": "6ff83b4ae658601d702f15a7218c59778caf602463ecb1b866a68f492cc48fc3",
-        "discussion.json": "925129077f59a307aadccbb3dfbf507b7f0d9eb40d586c3711cf426638b56a84",
+        "conflict_check.json": "912bb4c8f255531cb32480f4ddc98df26326d24780f7160d5f186c509a8ad687",
+        "discussion.json": "4131ef760df2f3d17dae95b873ee146c5e0cde21e95517c4ffcd11c87dc8c6d2",
         "fund_profile.json": "14403353df1cbed0a7a2cddb645c6abc34243068354ffe281f1b13a51cd5ffc4",
         "partner_assessment_analyst.json": "44c048560370e1e233c55ef1ae2a3297134ad729089066518f51784f856cd0a2",
         "partner_assessment_operator.json": "df56304f83e5442bf75f21ecaaf731584ee08adf920d8c8fb50689f9f84dc7de",
@@ -1034,7 +1034,7 @@
         "partner_rebuttal_visionary.json": "f9ab6d585cf7328e7c1f057ea196d178ff74a121f211b774c3ac1bc6df6e04aa",
         "report.json": "22269cfc056f0b969178a306b9e0884ad22099cefdda6809a48e53d06a54a1ff",
         "report.md": "d201888cb90515185d171357565973948b03932eaeefee6dc21c1bddc7a2c7c8",
-        "score_dimensions.json": "25f80efe0ba0da7ef65f5fced690ad858d0a28ada72317100efeb0f80f5d50a6",
+        "score_dimensions.json": "5cfa2f9295f817dd0571b7e0d7bee74e0fedd2fb59a260a94f6980bf4f428d56",
         "startup_profile.json": "58d58aca268e5b9c70c27ab57489986f0e1d1582f139a5c1774a99dd7a08a7db"
       },
       "stderr": "18cf83207b285cdb188118b2aaf2daa28680d7cb9fd7bc911e5d1135d1224cdf",

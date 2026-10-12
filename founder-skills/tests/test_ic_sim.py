@@ -887,6 +887,53 @@ def test_a_generic_profile_exempts_only_background() -> None:
         assert json.loads(stdout.strip().splitlines()[-1])["code"] == "FUND_PROFILE_NAMES_PEOPLE"
 
 
+def test_fixture_artifacts_are_stamped_with_the_fixture_profile() -> None:
+    """The fixture's profile-built artifacts carry the fixture profile's fingerprint; editing the fixture
+    profile without re-stamping them makes every compose over the fixture refuse PARTNER_ARTIFACTS_STALE."""
+    fp = _fund_profile_module()
+    digest = fp.profile_fingerprint_in(_IC_FIXTURES)
+    assert digest
+    for name in fp.PROFILE_DEPENDENTS:
+        with open(os.path.join(_IC_FIXTURES, name), encoding="utf-8") as f:
+            assert json.load(f)[fp.GRADED_AGAINST] == {"fund_profile": digest}, name
+
+
+def test_compose_refuses_an_unstamped_artifact_in_every_mode() -> None:
+    """A missing stamp is stale (fail closed): written before stamps existed, or by hand."""
+    for mode in ("generic", "fund_specific"):
+        arts = _all_required_artifacts()
+        arts["fund_profile.json"] = {**_VALID_FUND, "mode": mode, "sources": [{"title": "Northwind thesis"}]}
+        d = _make_artifact_dir(arts)
+        path = os.path.join(d, "score_dimensions.json")
+        with open(path, encoding="utf-8") as f:
+            scores = json.load(f)
+        del scores["graded_against"]
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(scores, f)
+        rj = os.path.join(d, "report.json")
+        rc, stdout, stderr = run_script_raw("compose_report.py", ["--dir", d, "-o", rj])
+        assert rc == 1, stdout + stderr
+        printed = json.loads(stdout.strip().splitlines()[-1])
+        assert printed["code"] == "PARTNER_ARTIFACTS_STALE" and "score_dimensions.json" in printed["message"]
+        assert "conflict_check.json" not in printed["message"]
+        assert not os.path.exists(rj)
+
+
+def test_the_page_does_not_check_staleness() -> None:
+    """visualize runs on finished simulations, where no step can redo Steps 5-8; only compose refuses."""
+    with tempfile.TemporaryDirectory() as td:
+        d = os.path.join(td, "sim")
+        shutil.copytree(_IC_FIXTURES, d)
+        path = os.path.join(d, "fund_profile.json")
+        with open(path, encoding="utf-8") as f:
+            profile = json.load(f)
+        profile["thesis_areas"] = ["Climate"]
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(profile, f)
+        rc, _, verr = run_script_raw("visualize.py", ["--dir", d, "-o", os.path.join(d, "report.html")])
+        assert rc == 0, verr
+
+
 def test_compose_renders_partner_labels_from_the_role() -> None:
     with tempfile.TemporaryDirectory() as td:
         d = os.path.join(td, "sim")
@@ -905,6 +952,7 @@ def test_a_generic_profile_background_is_not_refused_and_never_rendered() -> Non
     bio = "Invented generic persona: repeat founder in logistics"
     with tempfile.TemporaryDirectory() as td:
         d = _old_profile_dir(td, "generic", {"name": "The Visionary", "background": bio})
+        _restamp(d)
         rj, md, html_out = (os.path.join(d, n) for n in ("report.json", "report.md", "report.html"))
         rc, _, stderr = run_script_raw("compose_report.py", ["--dir", d, "-o", rj, "--write-md", md])
         assert rc == 0, stderr
@@ -1113,13 +1161,50 @@ def test_conflicts_output_flag() -> None:
 # ============================================================
 
 
-def _make_artifact_dir(artifacts: dict[str, dict]) -> str:
-    """Create a temp dir with JSON artifacts. Returns dir path."""
+def _fund_profile_module() -> Any:
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("_ic_fund_profile_tests", os.path.join(IC_SIM_DIR, "fund_profile.py"))
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _make_artifact_dir(artifacts: dict[str, dict], *, stamp: bool = True) -> str:
+    """Create a temp dir with JSON artifacts. Returns dir path.
+
+    With `stamp`, each artifact built from the fund profile (conflict_check, discussion, score_dimensions)
+    that carries no `graded_against` is stamped with the profile written beside it, as its producer would
+    have, so compose's staleness check passes; `stamp=False` writes them as given."""
     d = tempfile.mkdtemp(prefix="test-ic-sim-")
+    profile = artifacts.get("fund_profile.json")
+    fp = _fund_profile_module() if stamp and isinstance(profile, dict) else None
     for name, data in artifacts.items():
+        if (
+            fp is not None
+            and name in fp.PROFILE_DEPENDENTS
+            and isinstance(data, dict)
+            and fp.GRADED_AGAINST not in data
+        ):
+            data = {**data, fp.GRADED_AGAINST: {"fund_profile": fp.profile_fingerprint(profile)}}
         with open(os.path.join(d, name), "w") as f:
             json.dump(data, f)
     return d
+
+
+def _restamp(d: str) -> None:
+    """Stamp the dir's profile-built artifacts with its current fund_profile.json (a test that edits a copied
+    fixture's profile, where the producers would have run again)."""
+    fp = _fund_profile_module()
+    digest = fp.profile_fingerprint_in(d)
+    for name in fp.PROFILE_DEPENDENTS:
+        path = os.path.join(d, name)
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        data[fp.GRADED_AGAINST] = {"fund_profile": digest}
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f)
 
 
 _VALID_STARTUP = {
@@ -4698,6 +4783,15 @@ def test_skill_md_routes_a_profile_that_names_people_before_the_stop_branch(head
         assert idx < section.index("Any other non-zero exit")
 
 
+def test_skill_md_routes_stale_partner_artifacts_to_a_redo() -> None:
+    text = _read(_SKILL_MD_PATH)
+    start = text.index("### Step 9: Compose and Validate Report")
+    section = text[start : text.index("\n### ", start + 10)]
+    idx = section.index("`PARTNER_ARTIFACTS_STALE`")
+    assert "run Steps 5-8 again under the same run id, then compose" in section[idx : idx + 200]
+    assert idx < section.index("Any other non-zero exit")
+
+
 _AGENT_MD_PATH = os.path.join(os.path.dirname(SCRIPT_DIR), "agents", "ic-sim.md")
 _PARTNER_ARCHETYPES_PATH = os.path.join(
     os.path.dirname(SCRIPT_DIR), "skills", "ic-sim", "references", "partner-archetypes.md"
@@ -4759,14 +4853,7 @@ def test_partner_archetypes_reference_maps_no_real_partner() -> None:
 )
 def test_role_labels_match_the_skill_text(path: str) -> None:
     """The labels compose renders (fund_profile.ROLE_LABELS) are the three strings each text uses."""
-    import importlib.util
-
-    spec = importlib.util.spec_from_file_location(
-        "_ic_fund_profile_labels", os.path.join(IC_SIM_DIR, "fund_profile.py")
-    )
-    assert spec and spec.loader
-    fund_profile = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(fund_profile)
+    fund_profile = _fund_profile_module()
     assert set(fund_profile.ROLE_LABELS) == fund_profile.VALID_ROLES
     if path == _SKILL_MD_PATH:
         text = _skill_md_section("### Step 4: Build Fund Profile -> `fund_profile.json`")

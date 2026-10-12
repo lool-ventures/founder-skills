@@ -44,7 +44,8 @@
     ],
     "ic_producers": [
       "RUN_ID_REQUIRED",
-      "FUND_PROFILE_NAMES_PEOPLE"
+      "FUND_PROFILE_NAMES_PEOPLE",
+      "PARTNER_ARTIFACTS_STALE"
     ],
     "insert_coaching": [
       "OUTPUT_IS_INPUT",

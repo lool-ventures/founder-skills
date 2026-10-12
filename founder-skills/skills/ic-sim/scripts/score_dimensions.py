@@ -398,6 +398,17 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
+def _stamp_fund_profile(result: dict[str, Any], output_path: str | None) -> None:
+    """Record which fund profile this output was built from (`fund_profile.stamp_profile`), so compose can
+    tell an output made before the profile was rebuilt."""
+    scripts_dir = os.path.dirname(os.path.abspath(__file__))
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    import fund_profile
+
+    fund_profile.stamp_profile(result, output_path)
+
+
 def main() -> None:
     args = parse_args()
 
@@ -424,6 +435,7 @@ def main() -> None:
         sys.exit(1)
 
     result = validate_dimensions(data["items"], fund_mode=args.fund_mode)
+    _stamp_fund_profile(result, args.output)
 
     # Inject metadata.run_id as the last step before serialization (overrides any stdin metadata).
     result["metadata"] = {"run_id": args.run_id}

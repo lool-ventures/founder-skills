@@ -26,6 +26,7 @@ Output: JSON with validated profile including validation.status and validation.e
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -224,6 +225,88 @@ def refuse_profile_naming_people(sim_dir: str, *, by: str) -> None:
         message += f"; {FINISHED_FIX}"
     sys.stdout.write(json.dumps({"status": "rejected", "code": "FUND_PROFILE_NAMES_PEOPLE", "message": message}) + "\n")
     print(f"Error: {by}: FUND_PROFILE_NAMES_PEOPLE: {message}; nothing was written", file=sys.stderr)
+    sys.exit(1)
+
+
+# --- what each later artifact was built from -------------------------------------------------------------
+# run_id parity cannot see a fund profile rebuilt WITHIN a run (the remedy for FUND_PROFILE_NAMES_PEOPLE is
+# exactly that): every file keeps the run's id. So the producers that consume the profile -- detect_conflicts.py,
+# compose_discussion.py, score_dimensions.py -- record the fingerprint of the fund_profile.json beside their
+# output when they run, and compose compares it with the profile as it stands now (the financial-model-review
+# `graded_against` pattern). Comparing the artifacts with each other would not do: they can agree while all
+# are stale.
+
+GRADED_AGAINST = "graded_against"
+# Not part of what a later step was built from: the run stamp, the producer's own verdict, and the warnings
+# the founder accepted at compose time (adding one must not make every earlier step stale).
+FINGERPRINT_EXCLUDED = frozenset({"metadata", "validation", "accepted_warnings"})
+PROFILE_DEPENDENTS = ("conflict_check.json", "discussion.json", "score_dimensions.json")
+STALE_FIX = "run Steps 5-8 again under the same run id, then compose"
+
+
+def profile_fingerprint(profile: Any) -> str:
+    """Order-insensitive sha256 of a fund profile, without the keys in FINGERPRINT_EXCLUDED."""
+    material = profile
+    if isinstance(profile, dict):
+        material = {k: v for k, v in profile.items() if k not in FINGERPRINT_EXCLUDED}
+    encoded = json.dumps(material, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def profile_fingerprint_in(sim_dir: str) -> str | None:
+    """The fingerprint of `<sim_dir>/fund_profile.json` as it is on disk; None when missing or unreadable,
+    which no comparison treats as a match."""
+    try:
+        with open(os.path.join(sim_dir, "fund_profile.json"), encoding="utf-8") as f:
+            return profile_fingerprint(json.load(f))
+    except (OSError, ValueError):
+        return None
+
+
+def stamp_profile(result: dict[str, Any], output_path: str | None) -> None:
+    """Record, on a producer's output, the fingerprint of the fund profile beside where it is written. With no
+    `-o` nothing is stamped (stdout output is never composed). Overrides any `graded_against` in the input."""
+    if not output_path:
+        return
+    result[GRADED_AGAINST] = {"fund_profile": profile_fingerprint_in(os.path.dirname(os.path.abspath(output_path)))}
+
+
+def stale_dependents(sim_dir: str) -> list[str]:
+    """The artifacts in PROFILE_DEPENDENTS built from a fund profile other than the current one. A missing
+    stamp counts as stale, in every mode: a file written before the stamp existed, or by hand, cannot show what
+    it was built from (a pre-stamp run resumed under this version redoes Steps 5-8 once). A missing or
+    unreadable fund_profile.json, or a missing dependent, is not judged here: compose reports those as missing
+    artifacts."""
+    current = profile_fingerprint_in(sim_dir)
+    if current is None:
+        return []
+    stale: list[str] = []
+    for name in PROFILE_DEPENDENTS:
+        try:
+            with open(os.path.join(sim_dir, name), encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        stamp = data.get(GRADED_AGAINST)
+        if not isinstance(stamp, dict) or stamp.get("fund_profile") != current:
+            stale.append(name)
+    return stale
+
+
+def refuse_stale_dependents(sim_dir: str, *, by: str) -> None:
+    """Exit 1 `PARTNER_ARTIFACTS_STALE`, nothing written, when an artifact the report is built from was made
+    against another fund profile than the current one (`stale_dependents`)."""
+    stale = stale_dependents(sim_dir)
+    if not stale:
+        return
+    message = (
+        f"{', '.join(stale)} {'was' if len(stale) == 1 else 'were'} not built from the current fund_profile.json "
+        f"(the profile changed after they ran, or they carry no record of it); {STALE_FIX}"
+    )
+    sys.stdout.write(json.dumps({"status": "rejected", "code": "PARTNER_ARTIFACTS_STALE", "message": message}) + "\n")
+    print(f"Error: {by}: PARTNER_ARTIFACTS_STALE: {message}; nothing was written", file=sys.stderr)
     sys.exit(1)
 
 
