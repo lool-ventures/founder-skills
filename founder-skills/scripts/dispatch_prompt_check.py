@@ -973,9 +973,12 @@ def _distrusts(command: str) -> set[str]:
 
 # A write in a line the parser could not read: a redirect (a `>` after a space, so `<path>` is not one),
 # a copy or in-place edit, a file opened for writing by inline code.
-# `>&` to a file (`>& F`, `1>&F`) is a write; `>&2` and `>&-` are not.
+# `>&` to a file (`>& F`, `1>&F`) is a write; `>&2` and `>&-` are not. Straight after `;`, `(` or `)` a
+# redirect counts only before a path-like target (`;>"$S/x.py"`, `(gen)>/w/o`): `)>1` and `f(x)>=2` are
+# comparisons in every language but shell, and this pattern also reads heredoc bodies and quoted code.
 _RAW_WRITE_RE = re.compile(
     r"(?:(?:^|\s)[0-9&]?>>?\s*[^\s&]|(?:^|\s)[0-9]?>&\s*[^\s0-9&-]"
+    r"|[;()][0-9&]?>>?\s*(?:[/$\"'~]|\.\.?/)|[;()][0-9]?>&\s*(?:[/$\"'~]|\.\.?/)"
     r"|\b(?:cp|mv|ln|tee|install|rsync|dd|truncate|patch)\s|sed\s+-i"
     r"|open\([^)]*,\s*['\"][wax+]|write_text\(|write_bytes\()"
 )
@@ -1012,14 +1015,59 @@ _RAW_SEGMENT_SEPS = frozenset({";", "&&", "||", "|"})
 _RAW_QUIET_REDIRECTS = (("2", ">", "/dev/null"), ("2", ">&", "1"))
 
 
+def _strip_comments(text: str) -> str:
+    r"""`text` without its shell comments: a `#` that begins a word outside quotes, to the end of its line.
+    shlex's own comment reading also cuts at a `#` inside a word (`$#`, `${#A}`, `a#b`), so it is not
+    used; and with no comment reading at all, an apostrophe in a comment (`# don't`) opens a quote that
+    pairs with the next real one and misreads every command after it. An escaped character is part of its
+    word, so `x\ #y` is the one word `x #y` and starts no comment."""
+    out: list[str] = []
+    quote = ""
+    escaped = False  # the character before `i` was the second half of an escape pair (`\ `, `\;`)
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if ch == "\\" and quote != "'" and i + 1 < len(text):
+            out.append(text[i : i + 2])  # an escaped character, outside quotes or inside double quotes
+            i += 2
+            escaped = True
+            continue
+        if quote:
+            if ch == quote:
+                quote = ""
+        elif ch in "'\"":
+            quote = ch
+        elif ch == "#" and not escaped and (i == 0 or text[i - 1] in " \t\n;&|()"):
+            end = text.find("\n", i)
+            i = len(text) if end < 0 else end
+            continue
+        out.append(ch)
+        escaped = False
+        i += 1
+    return "".join(out)
+
+
+# A run of operator characters shlex returns as one token (`;>`, `)>`, `);`): split into the shell's own
+# operators, so a redirect or a cut straight after `;`, `(` or `)` is read as one. `;;` stays whole.
+_RAW_OPERATOR_RE = re.compile(r";;|[;()]|[<>&|]+")
+
+
 def _raw_tokens(line: str) -> list[str] | None:
-    lex = shlex.shlex(line, posix=True, punctuation_chars=True)
+    """`line`'s shell words and operators, comments removed; None when its quoting cannot be read."""
+    lex = shlex.shlex(_strip_comments(line), posix=True, punctuation_chars=True)
     lex.whitespace_split = True
     lex.commenters = ""
     try:
-        return list(lex)
+        tokens = list(lex)
     except ValueError:
         return None
+    out: list[str] = []
+    for tok in tokens:
+        if len(tok) > 1 and tok != ";;" and set(tok) <= set(";()<>&|") and set(tok) & set(";()"):
+            out += _RAW_OPERATOR_RE.findall(tok)
+        else:
+            out.append(tok)
+    return out
 
 
 _RAW_OPENERS = frozenset({"for", "while", "until", "if", "case", "select", "{", "("})

@@ -1207,6 +1207,10 @@ def test_a_redirect_that_writes_no_file_is_no_write(tail: str) -> None:
         " >/dev/tty",
         " >/proc/self/fd/1",
         "\nexec 3>$S/x.py\necho x >/dev/fd/3",
+        # A redirect straight after `;`: shlex returns `;>` as one token, which hid the write.
+        " >/dev/null;>$S/x.py",
+        ";>$S/x.py",
+        ';>"$S/x.py"',
     ],
 )
 def test_a_real_write_beside_a_discarded_one_still_distrusts(tail: str) -> None:
@@ -1232,10 +1236,112 @@ def test_a_real_write_beside_a_discarded_one_still_distrusts(tail: str) -> None:
         ("cmd > /dev/tty", True),
         ("cmd > /proc/self/fd/1", True),
         ("cmd > /dev/null > o", True),
+        # Straight after `;`, `(` or `)`, a redirect only before a path-like target: `)>1` is a comparison.
+        ("cmd;>/w/o", True),
+        ('(cmd)>"$S/o"', True),
+        ("cmd;>$S/o", True),
+        ("(cmd)>>~/o", True),
+        ("(cmd)>./o", True),
+        ("cmd;2>&/w/o", True),
+        ("if len(a)>1: x", False),
+        ("f(x)>=2", False),
+        ("if len(a)>n: x", False),
     ],
 )
 def test_only_a_whole_null_or_standard_stream_target_is_quiet(text: str, writes: bool) -> None:
     assert (DPC._RAW_WRITE_RE.search(DPC._raw_quiet(text)) is not None) is writes, text
+
+
+def test_a_redirect_straight_after_a_parenthesis_is_a_write() -> None:
+    """`(cmd)>"$S/x.py"` writes the file: shlex returned `)>` as one token, so the write was not seen.
+    The same shape to a folder outside the plugin is no write into it."""
+    gen = f"python3 $S/dispatch_prompt.py top_down_methodology {_TD_ARGS}"
+    for cmd in (gen, "echo x"):
+        for target in ("$S/x.py", '"$S/x.py"', f"{_SYNCED}/{MS_SCRIPTS}/x.py"):
+            block = _DISCARDED_HEAD + f"({cmd})>{target}"
+            assert DPC._parse_block(block) is None, target
+            assert DPC._distrusts(block) == set(DPC.GENERATORS), (cmd, target)
+    assert DPC._distrusts(_DISCARDED_HEAD + "(echo x)>/tmp/w/o.txt") == set()
+
+
+@pytest.mark.parametrize(
+    ("line", "tokens"),
+    [
+        ("x >/dev/null;>$S/x.py", ["x", ">", "/dev/null", ";", ">", "$S/x.py"]),
+        ("(x)>$S/x.py", ["(", "x", ")", ">", "$S/x.py"]),
+        ("x);y", ["x", ")", ";", "y"]),
+        # Deliberate, pinned: a process substitution reads as a redirect to `(` and then `tee f` as a
+        # writer (conservative), and `;;&` as `;;` then `&`. `;;` and `|&` are kept whole.
+        ("x >(tee f)", ["x", ">", "(", "tee", "f", ")"]),
+        ("a;;& b", ["a", ";;", "&", "b"]),
+        ("a;; b", ["a", ";;", "b"]),
+        ("a |& b", ["a", "|&", "b"]),
+        ('echo ";;"', ["echo", ";;"]),
+        # A comment is not read: its apostrophe opens no quote.
+        ("x # it's\ny 'a'", ["x", "y", "a"]),
+    ],
+)
+def test_the_raw_tokens_split_a_run_of_operators(line: str, tokens: list[str]) -> None:
+    assert DPC._raw_tokens(line) == tokens, line
+
+
+@pytest.mark.parametrize(
+    ("text", "stripped"),
+    [
+        ("a#b", "a#b"),
+        ("echo $#", "echo $#"),
+        ("echo ${#A}", "echo ${#A}"),
+        ('echo "#x"', 'echo "#x"'),
+        ("echo '#x'", "echo '#x'"),
+        ("echo \\#x", "echo \\#x"),
+        ('echo "a\\"#x"', 'echo "a\\"#x"'),
+        # An escaped character is part of its word: no comment starts after it.
+        ("echo x\\ #y; cp a b", "echo x\\ #y; cp a b"),
+        ("echo x\\;#y; cp a b", "echo x\\;#y; cp a b"),
+        ("echo x\\(#y; cp a b", "echo x\\(#y; cp a b"),
+        ("echo x\\\\ #y", "echo x\\\\ "),
+        ("x # it's", "x "),
+        ("f;#c'", "f;"),
+        ("x\n# c\ny", "x\n\ny"),
+        ("(#c\n)", "(\n)"),
+    ],
+)
+def test_a_comment_is_a_hash_that_begins_a_word_outside_quotes(text: str, stripped: str) -> None:
+    assert DPC._strip_comments(text) == stripped, text
+
+
+@pytest.mark.parametrize(
+    "tail",
+    [
+        # An apostrophe in a comment opened a quote that joined the next lines into text, where a redirect
+        # with no space was not seen.
+        "# don't\necho x>$S/x.py\necho '",
+        # A `#` inside a word is not a comment: these still write into the plugin.
+        "echo ${#A} > $S/x.py",
+        "echo $# > $S/x.py",
+        # A `#` after an escaped character is part of the word: the shell still runs the copy after it.
+        'echo x\\ #y; cp /tmp/e "$S/x.py"',
+        'echo x\\;#y; cp /tmp/e "$S/x.py"',
+        'echo x\\(#y; cp /tmp/e "$S/x.py"',
+    ],
+)
+def test_a_comment_does_not_hide_the_commands_after_it(tail: str) -> None:
+    block = f"S={_SYNCED}/{MS_SCRIPTS}\nfor s in a; do :; done\n{tail}"
+    assert DPC._parse_block(block) is None, tail
+    assert DPC._distrusts(block) == set(DPC.GENERATORS), tail
+
+
+def test_a_copy_after_an_escaped_hash_outside_the_plugin_is_no_write() -> None:
+    block = f"S={_SYNCED}/{MS_SCRIPTS}\nfor s in a; do :; done\necho x\\ #y; cp /tmp/e /tmp/w/x.py"
+    assert DPC._parse_block(block) is None
+    assert DPC._distrusts(block) == set()
+
+
+def test_a_copy_after_a_closing_parenthesis_is_read_as_a_copy() -> None:
+    """`W=$(dirname "$A"); cp ...`: `);` was one token, so the `cp` segment did not start with `cp` and its
+    destination was missed (a recorded deck-review step; the target is outside the plugin)."""
+    line = 'W=$(dirname "$A"); cp "$R/report.md" "$W/Acme_Review.md"; cp "$R/report.html" "$W/Acme_Review.html"'
+    assert DPC._raw_write_targets(line) == ["$W/Acme_Review.md", "$W/Acme_Review.html"]
 
 
 def test_the_parsed_reading_takes_the_null_device_as_no_write() -> None:
