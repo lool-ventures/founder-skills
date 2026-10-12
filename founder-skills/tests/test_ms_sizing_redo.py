@@ -41,6 +41,7 @@ def _load(name: str, path: Path) -> Any:
 
 gen = _load("ms_gen_redo", GEN)
 sr = _load("_sizing_redo", SCRIPTS / "_sizing_redo.py")
+view = _load("ms_view_redo", SCRIPTS / "_view.py")
 
 # Invented research: an orchard-sensor market, two builds that disagree by far more than 30%.
 _VALIDATION: dict[str, Any] = {
@@ -341,6 +342,16 @@ def test_a_flagged_run_prints_the_prompt_plus_the_redo_block(tmp_path: Path) -> 
     # No direction: which build is higher is an anchor. "more than 30%" is the threshold, not a direction.
     for word in ("higher", "lower", "larger", "smaller", "above", "below", "exceed", "too big", "too small", "shrink"):
         assert word not in block.lower(), word
+    # No presumed cause: the gap is worded as the report words it, and the check is asked for either way.
+    flat = " ".join(block.split())
+    assert view._GAP_CLAUSE in flat, flat
+    assert "Either way the check is the same." in flat
+    for word in ("probably", "flawed", "presum", "broad", "narrow"):
+        assert word not in block.lower(), word
+    # The lever that moves an input is unchanged.
+    assert (
+        "Change an input only where validation.json records a figure that measures the target universe better" in flat
+    )
 
 
 def test_the_block_names_only_the_levels_flagged(tmp_path: Path) -> None:

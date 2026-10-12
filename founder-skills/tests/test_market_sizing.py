@@ -10244,15 +10244,19 @@ def test_flawed_input_survives_in_the_scripts_only_as_the_legacy_clause() -> Non
 
 
 def test_the_producer_and_the_verdict_word_the_gap_clause_alike() -> None:
-    """market_sizing.py cannot import _view, so the clause is two literals: the producer's tail (which the
-    recomputed path and the legacy swap's target meet) and the verdict's. They must not drift apart."""
+    """market_sizing.py and dispatch_prompt.py cannot import _view, so the clause is three literals: the
+    producer's tail (which the recomputed path and the legacy swap's target meet), the verdict's, and the
+    comparison redo's. They must not drift apart."""
     import importlib
 
     if MARKET_SIZING_DIR not in sys.path:
         sys.path.insert(0, MARKET_SIZING_DIR)
     producer = importlib.import_module("market_sizing")
     view = importlib.import_module("_view")
+    gen = importlib.import_module("dispatch_prompt")
     assert producer.GAP_TAIL == " Review assumptions — " + view._GAP_CLAUSE
+    assert gen.GAP_CLAUSE == view._GAP_CLAUSE
+    assert gen.GAP_CLAUSE in " ".join(gen.redo_text(["tam"], []).split())
 
 
 # === the comparison paragraph says what each build's TAM is built from ===

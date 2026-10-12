@@ -104,6 +104,7 @@ import os
 import re
 import subprocess
 import sys
+import textwrap
 from typing import Any
 
 REQUIRED_ARTIFACTS = ("inputs.json", "sizing.json", "validation.json")
@@ -616,6 +617,9 @@ SIZING_NEEDS = ("inputs.json", "methodology.json", "validation.json")
 # confirmation. The flagged levels carry no magnitude.
 REDO_KIND = "comparison"
 REDO_LEAD = "COMPARISON REDO:"
+# Why the builds may disagree, worded as the report words it (`_view._GAP_CLAUSE`, held equal by a test):
+# no cause is presumed. A literal, since this script imports nothing from the skill's other modules.
+GAP_CLAUSE = "an input may be wrong, or the two builds may measure different markets."
 # The build's own input names, from its output shape above (a closed list for --suspect).
 SUSPECTS = {
     "top_down_methodology": ("industry_total", "segment_pct", "share_pct"),
@@ -632,13 +636,13 @@ def redo_text(flagged: list[str], suspect: list[str]) -> str:
     """The block a comparison redo adds before the closing line. ValueError with no flagged level."""
     if not flagged:
         raise ValueError("a comparison redo needs a flagged level")
-    lines = [
-        f"{REDO_LEAD} this build is being done once more. This analysis was also built the other way, and the",
-        f"two builds' {_levels(flagged)} differ by more than 30%, so at least one build's inputs probably do not",
-        "measure the product's actual target universe. Re-read validation.json and check each input against that",
-        "universe: the market an industry total covers (its geography, its categories), and the population a",
-        "count covers.",
-    ]
+    lead = (
+        f"{REDO_LEAD} this build is being done once more. This analysis was also built the other way, and the two "
+        f"builds' {_levels(flagged)} differ by more than 30%: {GAP_CLAUSE} Either way the check is the same. "
+        "Re-read validation.json and check each input against the product's target universe: the market an "
+        "industry total covers (its geography, its categories), and the population a count covers."
+    )
+    lines = textwrap.wrap(lead, width=104)
     if suspect:
         lines.append(f"Check these inputs first: {', '.join(suspect)}.")
     lines += [
