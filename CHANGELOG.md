@@ -5,6 +5,57 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.19.0] - 2026-10-13 — A new review no longer picks up an earlier review's files
+
+### Highlights
+
+**A new review no longer picks up an earlier review's files.** When a company's folder already holds an
+earlier review, every step of the new review now checks that the files it reads are its own, and the report
+is built only from them. If a step of the new review did not run, the review stops and names that step
+instead of quietly using the earlier file. Your spreadsheet and documents are read as before.
+
+**No step writes its result over a file it was given to read.** Every step that saves a result now refuses
+to save it over one of its own inputs, so a mistyped path can no longer destroy the file a review depends on.
+
+### Scoring changes
+
+Deck review, market sizing, financial model review, competitive positioning: the scoring steps now refuse to
+read or overwrite a file that belongs to another review in the same folder. No criterion, threshold or grade
+changed. Every other skill: none.
+
+### Fixed
+
+- Market sizing, financial model review, competitive positioning, IC simulation: a step run under a review id
+  that does not belong to the folder now stops, and says which review the folder belongs to, instead of
+  running without the review's checks.
+- Deck review: a step run under a review id that does not belong to the folder now stops instead of running.
+- Cap table: importing a Carta export or a spreadsheet into a folder that holds an earlier review's records
+  now stops instead of adding to that earlier review's records.
+- A what-if on a review kept in an archived copy of its folder revises that review there and no longer marks
+  the newer review in the original folder as replaced.
+
+### Changed
+
+- A folder belongs to the review most recently started or resumed in it. A what-if on a completed review that
+  a newer review has replaced is refused; start a new review to revisit it.
+- An optional file left by another review is left out of the report, and the report's build record names it.
+- In Claude Code and Cowork, the check that a review's or scorer's instructions go out exactly as the plugin
+  printed them now looks at whether the plugin's own files have changed, instead of reading the shell
+  commands run before it, so it no longer holds a step over a command it misread. If the plugin's files have
+  changed, one step is held once, and later steps are still checked but never corrected automatically.
+
+### Development
+
+Contributor-facing only; nothing here changes what a founder installs or runs.
+
+- The host contract lists two new refusal codes (a run another review replaced; a file that belongs to
+  another review) and the existing output-over-input and run-not-bound codes for every skill. A folder's run
+  record now carries the order it was bound in.
+- The plugin carries a list of its scripts' hashes, regenerated with one command after any script change; the
+  pre-commit check and a test fail until it is.
+- The recorded test sessions were not refreshed for this release; the changed scripts mark them stale, which
+  is a warning only.
+
 ## [0.18.4] - 2026-10-12 — A simulated investment committee never names real people
 
 ### Highlights
