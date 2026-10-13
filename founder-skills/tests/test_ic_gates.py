@@ -592,12 +592,16 @@ def test_compose_refuses_a_question_opened_and_never_recorded(tmp_path: Path) ->
 
 
 def test_an_unfilled_profile_id_does_not_take_compose_off_the_ledger(tmp_path: Path) -> None:
+    """A placeholder id is not this run's: in a folder that belongs to a run it is refused by name (it no longer
+    reaches the gates at all), and the report is never composed from it."""
     root, run_id, run_dir = _sim(tmp_path)
     profile = json.loads((run_dir / "startup_profile.json").read_text(encoding="utf-8"))
     profile["metadata"]["run_id"] = "<RUN_ID>"
     _write(run_dir / "startup_profile.json", profile)
     proc = _compose(run_dir)
-    assert proc.returncode == 10 and _out(proc)["blocked_by_gate"] == DECLINE
+    assert proc.returncode == 1 and _out(proc)["code"] == "ARTIFACT_OTHER_RUN"
+    assert _out(proc)["files"] == [{"file": "startup_profile.json", "run_id": "<RUN_ID>"}]
+    assert not (run_dir / "report.md").exists()
 
 
 def test_files_that_do_not_agree_on_a_run_are_refused_in_a_runs_dir(tmp_path: Path) -> None:
@@ -607,7 +611,9 @@ def test_files_that_do_not_agree_on_a_run_are_refused_in_a_runs_dir(tmp_path: Pa
         data["metadata"]["run_id"] = f"20260101T00000{i}Z-aaaaaa"
         _write(run_dir / name, data)
     proc = _compose(run_dir)
-    assert proc.returncode == 1 and _out(proc)["code"] == "RUN_ID_REQUIRED"
+    assert proc.returncode == 1 and _out(proc)["code"] == "ARTIFACT_OTHER_RUN"
+    named = {f["file"] for f in _out(proc)["files"]}
+    assert named == {"startup_profile.json", "fund_profile.json", "conflict_check.json", "discussion.json"}
     assert not (run_dir / "report.md").exists()
 
 

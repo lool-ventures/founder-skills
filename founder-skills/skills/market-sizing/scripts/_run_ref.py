@@ -184,6 +184,39 @@ def refuse_not_this_runs(
         )
 
 
+def compose_run_or_exit(
+    run_dir: str,
+    derived: str | None,
+    required: Iterable[str],
+    optional: Iterable[str] = (),
+    *,
+    noun: str,
+    run_id: str | None = None,
+    written: str = "nothing was written",
+) -> tuple[str | None, list[str]]:
+    """(the run this report is composed for, the optional artifacts to read as absent).
+
+    A folder with no ref: `(derived, [])`, reading nothing (today's path). A folder that belongs to a run: the
+    run is the folder's current run (`folder_current_run`), or `run_id` where the compose takes one (cap-table),
+    which must then be that run (`refuse_not_this_runs`). The derived id (whatever the artifacts say) is never
+    the answer there: every required artifact must carry the run's id, else exit 1 `ARTIFACT_OTHER_RUN` naming
+    each one; a required artifact with no id is not compared. An optional artifact carrying another run's id is
+    returned to be read as absent: refusing it would deadlock a run that legitimately skipped that step, since
+    the model never deletes under outputs, and its absence is already handled by run id where it matters."""
+    run_dir = os.path.abspath(run_dir)
+    if not glob.glob(os.path.join(glob.escape(run_dir), "handoff", "*", RUN_REF_NAME)):
+        return derived, []
+    rid = run_id if run_id is not None else folder_current_run(run_dir)
+    refuse_not_this_runs(run_dir, rid, [os.path.join(run_dir, n) for n in required], noun=noun, written=written)
+    ignored = [name for name, _r in foreign_artifacts(run_dir, str(rid), [os.path.join(run_dir, n) for n in optional])]
+    if ignored:
+        print(
+            f"Note: left out {', '.join(ignored)}: another run's file, not this run's ({rid})",
+            file=sys.stderr,
+        )
+    return rid, ignored
+
+
 def stamp_html(html: str, run_id: str) -> str | None:
     """The page with this run's id in a meta tag right after its first `<head>`; None if it has none."""
     if not RUN_ID_RE.match(run_id):

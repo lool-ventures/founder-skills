@@ -275,8 +275,16 @@ def _write_output(data: str, output_path: str | None, *, summary: dict[str, Any]
         sys.stdout.write(data)
 
 
+# Optional artifacts another run wrote, in a folder that belongs to a run: read as absent (`main` sets this from
+# `_run_ref.compose_run_or_exit`; empty for a folder with no ref, and for every in-process caller).
+_IGNORED_OTHER_RUN: set[str] = set()
+
+
 def _load_artifact(dir_path: str, name: str) -> dict[str, Any] | None:
-    """Load a JSON artifact. Returns None if missing, _CORRUPT if unparseable."""
+    """Load a JSON artifact. Returns None if missing (or another run's optional file, `_IGNORED_OTHER_RUN`),
+    _CORRUPT if unparseable."""
+    if name in _IGNORED_OTHER_RUN:
+        return None
     path = os.path.join(dir_path, name)
     if not os.path.exists(path):
         return None
@@ -2390,8 +2398,13 @@ def main() -> None:
     # match what it confirmed) before anything is written; an open question refuses; the cash follow-up is
     # settled; the coaching state is written. With no ref none of this runs.
     import _fmr_gates  # noqa: PLC0415
+    import _run_ref  # noqa: PLC0415
 
-    run_id = _fmr_gates.run_id_of(args.dir)
+    # In a folder that belongs to a run, the report is the folder's current run's, built only from its files.
+    run_id, ignored = _run_ref.compose_run_or_exit(
+        args.dir, _fmr_gates.run_id_of(args.dir), REQUIRED_ARTIFACTS, OPTIONAL_ARTIFACTS, noun="review dir"
+    )
+    _IGNORED_OTHER_RUN.update(ignored)
     ledger = _fmr_gates.open_ledger_or_exit(args.dir, run_id)
     gate_record = None
     if ledger is not None:
@@ -2432,6 +2445,7 @@ def main() -> None:
             "warnings": len(v["warnings"]),
             "run_id": run_id or None,
             "dir": os.path.abspath(args.dir),
+            **({"ignored_other_run": ignored} if ignored else {}),
         },
     )
 
@@ -2474,6 +2488,11 @@ def main() -> None:
 if __name__ == "__main__":
     import _compose_result
     import _fmr_gates
+    import _run_ref
 
-    with _compose_result.recording(skill="financial-model-review", run_id_of=_fmr_gates.run_id_of):
+    # Filed under the folder's current run in a folder that belongs to a run, never the artifacts' id.
+    with _compose_result.recording(
+        skill="financial-model-review",
+        run_id_of=lambda d: _run_ref.folder_current_run(d) or _fmr_gates.run_id_of(d),
+    ):
         main()

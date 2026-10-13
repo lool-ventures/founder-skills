@@ -1855,6 +1855,18 @@ def main() -> int:
     # With a ledger: a delivered review composed again (a what-if) is a new revision first; every question the
     # report rests on is recorded (exit 10), and none the run opened is left unanswered.
     _ct_gates.refuse_without_run_id(args.dir, args.run_id)
+    # In a folder that belongs to a run, the report is built only from this run's files: every required artifact
+    # must carry its id. BEFORE the reopen below, so a run that no longer holds the folder never takes it back.
+    _run_ref = _ct_gates._run_ref
+    _rid, _ignored = _run_ref.compose_run_or_exit(
+        args.dir,
+        args.run_id,
+        REQUIRED_ARTIFACTS,
+        ("extraction_audit.json",),
+        noun="review dir",
+        run_id=args.run_id,
+        written="no artifact was written",
+    )
     _ct_gates.reopen_if_complete(args.dir, args.run_id, step="8")
     _ledger = _ct_gates.require_or_exit(args.dir, args.run_id, _ct_gates.COMPOSE_KEYS, by="compose_report.py")
     if _ledger is not None:
@@ -1892,7 +1904,9 @@ def main() -> int:
     # absent for the common pure-SAFE/note case, where it's simply not there).
     _extraction_audit_candidate = os.path.join(args.dir, "extraction_audit.json")
     _extraction_audit_path: str | None = (
-        _extraction_audit_candidate if os.path.exists(_extraction_audit_candidate) else None
+        _extraction_audit_candidate
+        if os.path.exists(_extraction_audit_candidate) and "extraction_audit.json" not in _ignored
+        else None
     )
 
     # Build reconciliation_status — compare computed PPS/FD against source-stated values.

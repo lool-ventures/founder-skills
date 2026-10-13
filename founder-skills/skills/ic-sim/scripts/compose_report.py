@@ -159,6 +159,18 @@ OPTIONAL_ARTIFACTS = [
     "partner_assessment_analyst.json",
 ]
 
+# Files every run of this skill writes (Steps 6 and 6b, one per archetype): in a folder that belongs to a run,
+# another run's copy is refused at compose like a required artifact (`fund_profile.PARTNER_FILES`; a test holds
+# them equal).
+RUN_ALWAYS_WRITES = (
+    "partner_assessment_visionary.json",
+    "partner_assessment_operator.json",
+    "partner_assessment_analyst.json",
+    "partner_rebuttal_visionary.json",
+    "partner_rebuttal_operator.json",
+    "partner_rebuttal_analyst.json",
+)
+
 PARTNER_ASSESSMENT_FILES = [
     "partner_assessment_visionary.json",
     "partner_assessment_operator.json",
@@ -300,8 +312,16 @@ def _write_output(data: str, output_path: str | None, *, summary: dict[str, Any]
         sys.stdout.write(data)
 
 
+# Optional artifacts another run wrote, in a folder that belongs to a run: read as absent (`main` sets this from
+# `_run_ref.compose_run_or_exit`; empty for a folder with no ref, and for every in-process caller).
+_IGNORED_OTHER_RUN: set[str] = set()
+
+
 def _load_artifact(dir_path: str, name: str) -> dict[str, Any] | None:
-    """Load a JSON artifact. Returns None if missing, _CORRUPT if unparseable."""
+    """Load a JSON artifact. Returns None if missing (or another run's optional file, `_IGNORED_OTHER_RUN`),
+    _CORRUPT if unparseable."""
+    if name in _IGNORED_OTHER_RUN:
+        return None
     path = os.path.join(dir_path, name)
     if not os.path.exists(path):
         return None
@@ -1876,7 +1896,18 @@ def main() -> None:
     # written up only once its question is recorded, and a question opened and never recorded refuses the
     # report. With no `run_ref.json` none of this runs.
     gates = _ic_gates()
-    run_id = gates.run_id_of(args.dir)
+    import _run_ref  # noqa: PLC0415
+
+    # In a folder that belongs to a run, the report is the folder's current run's, built only from its files. The
+    # six partner files are written by every run, so another run's is refused here, ahead of the profile checks.
+    run_id, ignored = _run_ref.compose_run_or_exit(
+        args.dir,
+        gates.run_id_of(args.dir),
+        (*REQUIRED_ARTIFACTS, *RUN_ALWAYS_WRITES),
+        [n for n in OPTIONAL_ARTIFACTS if n not in RUN_ALWAYS_WRITES],
+        noun="simulation dir",
+    )
+    _IGNORED_OTHER_RUN.update(ignored)
     gates.refuse_without_run_id(args.dir, run_id)
     ledger = gates.require_or_exit(args.dir, run_id, [gates.DECLINE_GATE], by="compose_report.py")
     if ledger is not None:
@@ -1918,6 +1949,7 @@ def main() -> None:
             "warnings": len(v["warnings"]),
             "run_id": run_id or None,
             "dir": os.path.abspath(args.dir),
+            **({"ignored_other_run": ignored} if ignored else {}),
         },
     )
 
@@ -1951,6 +1983,10 @@ def main() -> None:
 
 if __name__ == "__main__":
     import _compose_result
+    import _run_ref
 
-    with _compose_result.recording(skill="ic-sim", run_id_of=lambda d: _ic_gates().run_id_of(d)):
+    # Filed under the folder's current run in a folder that belongs to a run, never the artifacts' id.
+    with _compose_result.recording(
+        skill="ic-sim", run_id_of=lambda d: _run_ref.folder_current_run(d) or _ic_gates().run_id_of(d)
+    ):
         main()

@@ -19,6 +19,7 @@ import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -301,7 +302,6 @@ EXEMPT_PARITY: dict[tuple[str, str], str] = {
     "hand-off under handoff/<run_id>/, namespaced per run and gated by check_handoff.py",
     ("skills/market-sizing/scripts/red_team.py", "--uploads-dir"): "reads no run file: stdin and the founder's uploads",
     # Compose and the pages read their run files from --dir; they check them in their own commits.
-    ("skills/cap-table/scripts/compose_report.py", "--dir"): "compose: its own required scan",
     ("skills/cap-table/scripts/visualize.py", "--dir"): "page: its own required scan",
     ("skills/cap-table/scripts/explore.py", "--dir"): "page: its own required scan",
     ("skills/competitive-positioning/scripts/visualize.py", "--dir"): "page: its own required scan",
@@ -331,10 +331,12 @@ def _parity_findings() -> list[str]:
         }
         if "refuse_output_onto_input" not in names and not rel.endswith("dispatch_prompt.py"):
             continue
+        # A compose checks through compose_run_or_exit, whose third argument is the required list.
         calls = [
             n
             for n in ast.walk(tree)
-            if isinstance(n, ast.Call) and getattr(n.func, "attr", "") == "refuse_not_this_runs"
+            if isinstance(n, ast.Call)
+            and getattr(n.func, "attr", "") in ("refuse_not_this_runs", "compose_run_or_exit")
         ]
         with_inputs = [
             c
@@ -354,3 +356,279 @@ def test_every_reader_with_a_run_id_checks_its_inputs_or_is_exempt() -> None:
 
 def test_every_parity_exemption_names_a_script_that_exists() -> None:
     assert [r for r, _f in EXEMPT_PARITY if not (PLUGIN / r).is_file()] == []
+
+
+# --- compose: built only from the folder's current run ----------------------------------------------------
+
+
+def _ct_compose_for(rid: str) -> Callable[[Path], subprocess.CompletedProcess[str]]:
+    def run(d: Path) -> subprocess.CompletedProcess[str]:
+        argv = ["compose_report.py", "--dir", str(d), "--run-id", rid]
+        return goldens._ct(*argv, "-o", str(d / "report.json"), "--write-md", str(d / "report.md"))
+
+    return run
+
+
+@dataclass
+class Compose:
+    skill: str
+    build: Callable[[Path], None]
+    run: Callable[[Folder], subprocess.CompletedProcess[str]]
+    required: tuple[str, ...]
+
+
+def _required(skill: str) -> tuple[str, ...]:
+    import ast
+
+    tree = ast.parse((SKILLS / skill / "scripts" / "compose_report.py").read_text(encoding="utf-8"))
+    names: list[str] = []
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and getattr(node.targets[0], "id", "") in (
+            "REQUIRED_ARTIFACTS",
+            "RUN_ALWAYS_WRITES",
+        ):
+            names += list(ast.literal_eval(node.value))
+    return tuple(names)
+
+
+COMPOSES = {
+    "market-sizing": Compose(
+        "market-sizing",
+        lambda r: goldens._ms_variant(r, "plain"),
+        lambda f: goldens._ms_compose(f.dir),
+        _required("market-sizing"),
+    ),
+    "financial-model-review": Compose(
+        "financial-model-review",
+        goldens._fmr_review_dir,
+        lambda f: goldens._fmr_compose(f.dir),
+        _required("financial-model-review"),
+    ),
+    "ic-sim": Compose("ic-sim", goldens._ic_dir, lambda f: goldens._ic_compose(f.dir), _required("ic-sim")),
+    "competitive-positioning": Compose(
+        "competitive-positioning",
+        goldens._cp_dir,
+        lambda f: goldens._cp_compose(f.dir),
+        _required("competitive-positioning"),
+    ),
+    "deck-review": Compose(
+        "deck-review", goldens._dr_dir, lambda f: goldens._dr_compose(f.dir), _required("deck-review")
+    ),
+    "cap-table": Compose(
+        "cap-table", goldens._ct_full, lambda f: _ct_compose_for(f.new)(f.dir), _required("cap-table")
+    ),
+}
+
+
+def _outputs_and_statuses(f: Folder) -> tuple[bool, bool, tuple[bytes, bytes]]:
+    return (f.dir / "report.json").exists(), (f.dir / "report.md").exists(), statuses(f)
+
+
+@pytest.mark.parametrize("skill", sorted(COMPOSES))
+def test_compose_over_a_wholly_earlier_set_refuses_every_required_file(skill: str, tmp_path: Path) -> None:
+    c = COMPOSES[skill]
+    f = two_runs(tmp_path, c.skill, c.build)
+    restamp_all(f.dir, f.old)
+    before = statuses(f)
+    proc = c.run(f)
+    assert proc.returncode == 1 and code_of(proc) == "ARTIFACT_OTHER_RUN", (proc.stdout, proc.stderr)
+    named = {x["file"] for x in json.loads(proc.stdout.strip().splitlines()[-1])["files"]}
+    stamped = {n for n in c.required if json.loads((f.dir / n).read_text()).get("metadata", {}).get("run_id")}
+    assert named == stamped and stamped
+    assert _outputs_and_statuses(f) == (False, False, before)
+
+
+@pytest.mark.parametrize("skill", sorted(COMPOSES))
+def test_compose_names_exactly_the_one_required_file_left_from_the_earlier_run(skill: str, tmp_path: Path) -> None:
+    c = COMPOSES[skill]
+    f = two_runs(tmp_path, c.skill, c.build)
+    left = c.required[-1]
+    goldens._restamp(f.dir / left, f.old)
+    proc = c.run(f)
+    assert proc.returncode == 1 and code_of(proc) == "ARTIFACT_OTHER_RUN", (proc.stdout, proc.stderr)
+    assert json.loads(proc.stdout.strip().splitlines()[-1])["files"] == [{"file": left, "run_id": f.old}]
+    assert not (f.dir / "report.json").exists()
+
+
+@pytest.mark.parametrize("skill", sorted(COMPOSES))
+def test_compose_over_the_folders_own_files_gets_past_ownership(skill: str, tmp_path: Path) -> None:
+    """The lever for the two rows above: the same set restamped to the folder's run passes the check (and then
+    stops wherever the run's own gates stop it)."""
+    c = COMPOSES[skill]
+    f = two_runs(tmp_path, c.skill, c.build)
+    proc = c.run(f)
+    assert code_of(proc) not in OWNERSHIP_CODES, (proc.stdout, proc.stderr)
+
+
+@pytest.mark.parametrize("skill", ["market-sizing", "financial-model-review"])
+def test_inputs_carrying_another_runs_id_is_refused(skill: str, tmp_path: Path) -> None:
+    """Their composes used to derive the run from inputs.json alone: a well-formed other id there composed with
+    no ledger and every gate skipped. Now the folder's run is read from its refs and inputs.json is named."""
+    c = COMPOSES[skill]
+    f = two_runs(tmp_path, c.skill, c.build)
+    goldens._restamp(f.dir / "inputs.json", STRANGER)
+    proc = c.run(f)
+    assert proc.returncode == 1 and code_of(proc) == "ARTIFACT_OTHER_RUN", (proc.stdout, proc.stderr)
+    assert json.loads(proc.stdout.strip().splitlines()[-1])["files"] == [{"file": "inputs.json", "run_id": STRANGER}]
+
+
+def test_another_runs_pruned_ledger_does_not_lock_the_folder(tmp_path: Path) -> None:
+    c = COMPOSES["competitive-positioning"]
+    f = two_runs(tmp_path, c.skill, c.build)
+    shutil.rmtree(f.root / "runs" / f.old)
+    proc = c.run(f)
+    assert code_of(proc) not in OWNERSHIP_CODES, (proc.stdout, proc.stderr)
+
+
+def _complete(f: Folder, run_id: str) -> None:
+    (f.dir / "report.md").write_text("# Example Co\n", encoding="utf-8")
+    rs = _load_shared("_run_status")
+    rs.complete_after_coaching(rs.run_paths(str(f.root), run_id), str(f.dir / "report.md"), None)
+
+
+def _load_shared(name: str) -> Any:
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(f"{name}_fo", h.SHARED / f"{name}.py")
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[f"{name}_fo"] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_a_what_if_on_a_replaced_complete_review_never_takes_the_folder_back(tmp_path: Path) -> None:
+    """cap-table compose under the earlier run's id, the earlier run complete: refused before the reopen, so its
+    revision does not move and the later run is not marked superseded."""
+    c = COMPOSES["cap-table"]
+    f = two_runs(tmp_path, c.skill, c.build)
+    _complete(f, f.old)
+    assert h.status(f.root, f.old)["status"] == "complete"
+    restamp_all(f.dir, f.old)
+    before = statuses(f)
+    proc = _ct_compose_for(f.old)(f.dir)
+    assert proc.returncode == 1 and code_of(proc) == "RUN_SUPERSEDED", (proc.stdout, proc.stderr)
+    assert statuses(f) == before
+    assert h.status(f.root, f.old)["revision"] == 0 and h.status(f.root, f.new)["superseded_by"] is None
+
+
+# --- an optional file of another run is read as absent ----------------------------------------------------
+
+SENTINEL = "Quillfeather Zentrovane"
+
+
+def _cp_composed(tmp: Path, stamp_other: bool) -> tuple[subprocess.CompletedProcess[str], Path]:
+    import test_cp_gates as cpg
+
+    root, rid, rd = cpg._fixture_run(tmp)
+    cpg._answer_all(root, rid, rd)
+    profile = json.loads((rd / "product_profile.json").read_text(encoding="utf-8"))
+    profile["product_description"] = f"{SENTINEL} for small firms."
+    profile["metadata"]["run_id"] = STRANGER if stamp_other else rid
+    (rd / "product_profile.json").write_text(json.dumps(profile), encoding="utf-8")
+    return cpg._compose(rd), rd
+
+
+def _dr_composed(tmp: Path, stamp_other: bool) -> tuple[subprocess.CompletedProcess[str], Path]:
+    import test_deck_review_gates as drg
+
+    root, rd = drg._run(tmp)
+    drg._settle(rd, "stage_confirmation", "seed", "Looks right")
+    ledger = json.loads((rd / "ledger.json").read_text(encoding="utf-8"))
+    ledger["figures"][0]["label"] = SENTINEL
+    ledger["figures"][0]["quote"] = f"{SENTINEL} of $493K in 2024"
+    if stamp_other:
+        ledger["metadata"]["run_id"] = STRANGER
+    (rd / "ledger.json").write_text(json.dumps(ledger), encoding="utf-8")
+    return drg._compose(rd), rd
+
+
+OPTIONAL = {"competitive-positioning product_profile.json": _cp_composed}
+
+
+def _delivered_text(rd: Path) -> str:
+    return (rd / "report.md").read_text(encoding="utf-8") + (rd / "report.json").read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("name", sorted(OPTIONAL))
+def test_another_runs_optional_file_is_left_out_of_the_report(name: str, tmp_path: Path) -> None:
+    proc, rd = OPTIONAL[name](tmp_path, True)
+    assert proc.returncode == 0, (proc.stdout, proc.stderr)
+    assert SENTINEL not in _delivered_text(rd)
+    receipt = json.loads(proc.stdout.strip().splitlines()[0])
+    assert receipt["ignored_other_run"] == [name.split()[-1]]
+    assert "left out" in proc.stderr
+
+
+@pytest.mark.parametrize("name", sorted(OPTIONAL))
+def test_the_same_optional_file_of_this_run_reaches_the_report(name: str, tmp_path: Path) -> None:
+    """The lever: restamped to the run, the sentinel is in what the founder gets."""
+    proc, rd = OPTIONAL[name](tmp_path, False)
+    assert proc.returncode == 0, (proc.stdout, proc.stderr)
+    assert SENTINEL in _delivered_text(rd)
+    assert "ignored_other_run" not in json.loads(proc.stdout.strip().splitlines()[0])
+
+
+# --- ic-sim: another run's partner file is refused by name, never as a stale profile ---------------------------
+
+
+@pytest.mark.parametrize("same_profile", [True, False])
+def test_another_runs_partner_file_is_named_not_reported_as_stale(same_profile: bool, tmp_path: Path) -> None:
+    import test_ic_gates as icg
+
+    root, rid, rd = icg._sim(tmp_path, "invest")
+    target = rd / "partner_assessment_visionary.json"
+    doc = json.loads(target.read_text(encoding="utf-8"))
+    doc["metadata"]["run_id"] = STRANGER
+    if not same_profile:
+        doc["metadata"]["fund_profile_sha256"] = "0" * 64
+        doc["metadata"]["fund_profile"] = {"sha256": "0" * 64}
+    target.write_text(json.dumps(doc), encoding="utf-8")
+    proc = icg._compose(rd)
+    assert proc.returncode == 1 and code_of(proc) == "ARTIFACT_OTHER_RUN", (proc.stdout, proc.stderr)
+    files = json.loads(proc.stdout.strip().splitlines()[-1])["files"]
+    assert files == [{"file": "partner_assessment_visionary.json", "run_id": STRANGER}]
+    assert "PARTNER_ARTIFACTS_STALE" not in proc.stdout
+
+
+def test_deck_reviews_ledger_of_another_run_is_left_out_not_warned_about(tmp_path: Path) -> None:
+    """deck-review's optional ledger joins the run-id parity loop when read; another run's is now left out, so the
+    report carries no stale-file row for it (its content is checked, not rendered, so the observable is the row)."""
+    proc, rd = _dr_composed(tmp_path, True)
+    assert proc.returncode == 0, (proc.stdout, proc.stderr)
+    assert json.loads(proc.stdout.strip().splitlines()[0])["ignored_other_run"] == ["ledger.json"]
+    warnings = json.loads((rd / "report.json").read_text(encoding="utf-8"))["validation"]["warnings"]
+    assert [w for w in warnings if w["code"] == "STALE_ARTIFACT"] == []
+    same, rd2 = _dr_composed(tmp_path / "same", False)
+    assert same.returncode == 0 and "ignored_other_run" not in json.loads(same.stdout.strip().splitlines()[0])
+
+
+def test_a_host_resume_of_the_earlier_run_takes_the_folder_back_and_refuses_the_later_files(tmp_path: Path) -> None:
+    """O bound, N bound later, then O re-bound (its resume runs the slug block again): O holds the folder, its
+    compose names N's leftovers (saying to re-run them even on a resume), and N's id is now RUN_SUPERSEDED."""
+    c = COMPOSES["competitive-positioning"]
+    f = two_runs(tmp_path, c.skill, c.build)  # every file is N's
+    assert h.bind(f.root, f.old, f.dir, "example-co").returncode == 0
+    proc = c.run(f)
+    assert proc.returncode == 1 and code_of(proc) == "ARTIFACT_OTHER_RUN", (proc.stdout, proc.stderr)
+    body = json.loads(proc.stdout.strip().splitlines()[-1])
+    assert {x["run_id"] for x in body["files"]} == {f.new}
+    assert "another run bound to this folder" in body["message"] and "even on a resume" in body["fix"]
+    p = PRODUCERS["competitive-positioning/checklist.py"]
+    argv, stdin, _out = p.call(f.dir, f.new)
+    assert code_of(h.run(*argv, stdin=stdin)) == "RUN_SUPERSEDED"  # type: ignore[arg-type]
+
+
+def test_ic_sims_always_written_files_are_the_partner_files() -> None:
+    """compose's RUN_ALWAYS_WRITES is fund_profile.PARTNER_FILES, the six files every run writes."""
+    import ast
+
+    tree = ast.parse((SKILLS / "ic-sim" / "scripts" / "compose_report.py").read_text(encoding="utf-8"))
+    always = next(
+        ast.literal_eval(n.value)
+        for n in tree.body
+        if isinstance(n, ast.Assign) and getattr(n.targets[0], "id", "") == "RUN_ALWAYS_WRITES"
+    )
+    code = "import sys; sys.path.insert(0, sys.argv[1]); import fund_profile; print(list(fund_profile.PARTNER_FILES))"
+    proc = h.run("-c", code, str(SKILLS / "ic-sim" / "scripts"))  # type: ignore[arg-type]
+    assert sorted(always) == sorted(json.loads(proc.stdout.replace("'", '"'))), proc.stderr

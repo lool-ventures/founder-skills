@@ -299,6 +299,14 @@ def test_a_dir_with_no_ref_is_left_as_before(skill: str, tmp_path: Path) -> None
 def test_a_refusal_from_a_sibling_module_is_recorded_with_the_skills_run_id(skill: str, tmp_path: Path) -> None:
     """A ref naming this run with no ledger behind it: compose exits 2 from its gates module."""
     _stage(skill, tmp_path)
+    if skill == "cap-table":
+        # Its fixture carries another id than the --run-id the shared drive passes: restamped (replaced, never
+        # added), or the required artifacts are another run's and compose refuses them before the gates module.
+        for p in tmp_path.glob("*.json"):
+            doc = json.loads(p.read_text(encoding="utf-8"))
+            if isinstance(doc, dict) and isinstance(doc.get("metadata"), dict) and "run_id" in doc["metadata"]:
+                doc["metadata"]["run_id"] = FIXTURE_RUN_ID[skill]
+                p.write_text(json.dumps(doc), encoding="utf-8")
     _ref(tmp_path, FIXTURE_RUN_ID[skill])
     proc = _compose(skill, tmp_path)
     assert proc.returncode == 2, (proc.stdout, proc.stderr)
@@ -310,14 +318,21 @@ def test_a_refusal_from_a_sibling_module_is_recorded_with_the_skills_run_id(skil
 
 
 @pytest.mark.parametrize("skill", SKILL_NAMES)
-def test_another_runs_ref_records_a_composed_report(skill: str, tmp_path: Path) -> None:
+def test_another_runs_ref_records_the_refusal_under_that_run(skill: str, tmp_path: Path) -> None:
+    """The folder belongs to the run whose ref it carries, so a report from the fixture's files (another run's)
+    is refused by name, and the record is filed under the folder's run, never the files' id."""
     _stage(skill, tmp_path)
     _ref(tmp_path, "another-run")
     proc = _compose(skill, tmp_path)
-    if skill in ("cap-table", "competitive-positioning", "ic-sim"):
-        # These composes check the run they compose for (cap-table its --run-id; the other two the id their
-        # artifacts carry): an id with no ref in a dir that carries another run's is RUN_NOT_BOUND, so the record is
-        # of that refusal, and no report is written.
+    if skill != "cap-table":
+        assert proc.returncode == 1, (proc.stdout, proc.stderr)
+        rec = _record(tmp_path)
+        assert (rec["exit_code"], rec["code"], rec["run_id"]) == (1, "ARTIFACT_OTHER_RUN", "another-run")
+        assert rec["outputs"]["report_json"]["written"] is False and not (tmp_path / "report.json").exists()
+        return
+    if skill == "cap-table":
+        # cap-table refuses a --run-id with no ref in a dir that carries another run's (RUN_NOT_BOUND), so the
+        # record is of that refusal, and no report is written.
         assert proc.returncode == 1, (proc.stdout, proc.stderr)
         rec = _record(tmp_path)
         assert (rec["exit_code"], rec["code"], rec["run_id"]) == (1, "RUN_NOT_BOUND", FIXTURE_RUN_ID[skill])
@@ -369,8 +384,7 @@ def test_a_call_the_parser_refuses_still_replaces_the_record(skill: str, tail: l
     """A flag missing its value exits 2 before compose runs; the previous call's record must not survive it."""
     _stage(skill, tmp_path)
     _ref(tmp_path, "another-run")
-    # an id not bound there is refused (RUN_NOT_BOUND) by the composes that check their run's id
-    first = 1 if skill in ("cap-table", "competitive-positioning", "ic-sim") else 0
+    first = 1  # the folder is another run's: its files are refused (cap-table: the id is not bound there)
     assert _compose(skill, tmp_path).returncode == first
     assert _record(tmp_path)["exit_code"] == first
     script = SKILLS / skill / "scripts" / "compose_report.py"

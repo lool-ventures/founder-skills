@@ -645,14 +645,27 @@ def _warn(code: str, message: str, founder_message: str | None = None) -> dict[s
     return w
 
 
+# Optional artifacts another run wrote, in a folder that belongs to a run: read as absent (`main` sets this from
+# `_run_ref.compose_run_or_exit`; empty for a folder with no ref, and for every in-process caller).
+_IGNORED_OTHER_RUN: set[str] = set()
+
+
+# The run this report is composed for, set by `_gate_check` (the folder's current run in a folder that belongs
+# to a run; the artifacts' own id otherwise).
+_COMPOSE_RUN: list[str | None] = []
+
+
 def _load_artifact(dir_path: str, name: str) -> dict[str, Any] | None:
     """Load a JSON artifact.
 
     Returns None if missing, _CORRUPT if unparseable OR if the parsed top-level
     payload is not a JSON object (e.g. a list/string/number). Wrong-shape valid
     JSON degrades to the CORRUPT_ARTIFACT path rather than crashing downstream
-    `.get()` access.
+    `.get()` access. Another run's optional file in a folder that belongs to a run (`_IGNORED_OTHER_RUN`) is
+    read as missing.
     """
+    if name in _IGNORED_OTHER_RUN:
+        return None
     path = os.path.join(dir_path, name)
     if not os.path.exists(path):
         return None
@@ -2560,7 +2573,15 @@ def _gate_check(dir_path: str) -> Any:
     revision; every question the analysis rests on must be recorded (exit 10 names one), nothing asked may be
     left open (`GATE_UNRESOLVED`), and the map must be scored on the basis the run recorded. Returns the ledger,
     or None for a run without one (today's path, unchanged)."""
-    run_id = _cp_gates.run_id_of(dir_path)
+    import _run_ref  # noqa: PLC0415
+
+    # In a folder that belongs to a run, the report is the folder's current run's, built only from its files.
+    # BEFORE the reopen below: a run that no longer holds the folder must never take it back by composing.
+    run_id, ignored = _run_ref.compose_run_or_exit(
+        dir_path, _cp_gates.run_id_of(dir_path), REQUIRED_ARTIFACTS, OPTIONAL_ARTIFACTS, noun="analysis dir"
+    )
+    _IGNORED_OTHER_RUN.update(ignored)
+    _COMPOSE_RUN[:] = [run_id]
     _cp_gates.refuse_without_run_id(os.path.join(dir_path, "report.json"), run_id)
     ledger = _cp_gates.open_ledger_or_exit(dir_path, run_id)
     if ledger is None:
@@ -2616,7 +2637,7 @@ def main() -> None:
             sys.exit(2)
 
     # The run this report was composed for, last: the insert and the closer refuse another run's report.
-    run_id = _cp_gates.run_id_of(args.dir)
+    run_id = _COMPOSE_RUN[0] if _COMPOSE_RUN else _cp_gates.run_id_of(args.dir)
     result["run_id"] = run_id or None
     indent = 2 if args.pretty else None
     out = json.dumps(result, indent=indent) + "\n"
@@ -2629,6 +2650,7 @@ def main() -> None:
             "artifacts_loaded": len(result["artifacts_loaded"]),
             "run_id": run_id or None,
             "dir": os.path.abspath(args.dir),
+            **({"ignored_other_run": sorted(_IGNORED_OTHER_RUN)} if _IGNORED_OTHER_RUN else {}),
         },
     )
 
@@ -2665,6 +2687,11 @@ def main() -> None:
 
 if __name__ == "__main__":
     import _compose_result
+    import _run_ref
 
-    with _compose_result.recording(skill="competitive-positioning", run_id_of=_cp_gates.run_id_of):
+    # Filed under the folder's current run in a folder that belongs to a run, never the artifacts' id.
+    with _compose_result.recording(
+        skill="competitive-positioning",
+        run_id_of=lambda d: _run_ref.folder_current_run(d) or _cp_gates.run_id_of(d),
+    ):
         main()

@@ -269,8 +269,16 @@ def _write_output(data: str, output_path: str | None, *, summary: dict[str, Any]
         sys.stdout.write(data)
 
 
+# Optional artifacts another run wrote, in a folder that belongs to a run: read as absent (`main` sets this from
+# `_run_ref.compose_run_or_exit`; empty for a folder with no ref, and for every in-process caller).
+_IGNORED_OTHER_RUN: set[str] = set()
+
+
 def _load_artifact(dir_path: str, name: str) -> dict[str, Any] | None:
-    """Load a JSON artifact. Returns None if missing, _CORRUPT if unparseable."""
+    """Load a JSON artifact. Returns None if missing (or another run's optional file, `_IGNORED_OTHER_RUN`),
+    _CORRUPT if unparseable."""
+    if name in _IGNORED_OTHER_RUN:
+        return None
     path = os.path.join(dir_path, name)
     if not os.path.exists(path):
         return None
@@ -1744,14 +1752,15 @@ def _artifacts_run_id(dir_path: str) -> str:
     return ""
 
 
-def _open_run_ledger(dir_path: str) -> Any:
-    """(the shared `_gates`, the run's paths) when the artifacts' run has a ledger, else None. A run with a
-    `run_ref.json` whose ledger cannot be reached exits 2 here, before anything is written: nothing falls
-    back to the no-ledger path."""
+def _open_run_ledger(dir_path: str, run_id: str | None = None) -> Any:
+    """(the shared `_gates`, the run's paths) when the run has a ledger, else None: `run_id` (the folder's
+    current run, in a folder that belongs to a run), else the artifacts' run. A run with a `run_ref.json` whose
+    ledger cannot be reached exits 2 here, before anything is written: nothing falls back to the no-ledger
+    path."""
     import _run_ref  # noqa: PLC0415
 
     try:
-        return _run_ref.open_ledger(os.path.abspath(dir_path), _artifacts_run_id(dir_path))
+        return _run_ref.open_ledger(os.path.abspath(dir_path), run_id or _artifacts_run_id(dir_path))
     except _run_ref.LedgerUnavailable as e:
         sys.exit(_run_ref.report_failure(e))
 
@@ -2390,6 +2399,15 @@ def main() -> None:
         )
         sys.exit(1)
 
+    # In a folder that belongs to a run, the report is the folder's current run's, built only from its files.
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import _run_ref  # noqa: PLC0415
+
+    folder_run, ignored = _run_ref.compose_run_or_exit(
+        args.dir, None, REQUIRED_ARTIFACTS, OPTIONAL_ARTIFACTS, noun="review dir"
+    )
+    _IGNORED_OTHER_RUN.update(ignored)
+
     report_path = os.path.abspath(args.write_md) if args.write_md else None
     try:
         gate_state = read_gate_state(args.gate_state)
@@ -2399,7 +2417,7 @@ def main() -> None:
     # THE RUN'S GATE LEDGER, when it has one: the refusal classes, the open-question check and the
     # coaching state are written to its status. With no `run_ref.json` none of this runs.
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    ledger = _open_run_ledger(args.dir)
+    ledger = _open_run_ledger(args.dir, folder_run)
     if ledger is not None and gate_state is None:
         # A run with a ledger records its stage gate, so composing it ungated would skip `authorize()`.
         print(
@@ -2459,6 +2477,7 @@ def main() -> None:
             "warnings": len(v["warnings"]),
             "run_id": run_id,
             "dir": os.path.abspath(args.dir),
+            **({"ignored_other_run": ignored} if ignored else {}),
         },
     )
 
@@ -2492,6 +2511,10 @@ def main() -> None:
 
 if __name__ == "__main__":
     import _compose_result
+    import _run_ref
 
-    with _compose_result.recording(skill="deck-review", run_id_of=_artifacts_run_id):
+    # Filed under the folder's current run in a folder that belongs to a run, never the artifacts' id.
+    with _compose_result.recording(
+        skill="deck-review", run_id_of=lambda d: _run_ref.folder_current_run(d) or _artifacts_run_id(d)
+    ):
         main()
