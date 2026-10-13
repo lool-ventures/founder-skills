@@ -746,6 +746,11 @@ Cowork caches plugin files per-session. To hot-patch files for testing without r
    done
    ```
 
+   If you changed any `.py` file or agent body, first run `python3 founder-skills/scripts/script_hashes.py --write`
+   and copy `data/script-hashes.json` into every target too. A copied script the shipped hashes do not list
+   makes the dispatch check hold the first paired dispatch once, then hold (never rewrite) a dispatch that
+   differs from its printed prompt, so the session would behave unlike any real install.
+
 4. **Start a new conversation** — running conversations have already loaded skill bodies into context.
 
 ### Verifying the Marketplace Clone Actually Advanced
