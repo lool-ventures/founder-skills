@@ -1233,18 +1233,32 @@ def file_sha256(path: str) -> str:
 def complete_after_coaching(paths: RunPaths, report_md: str, report_json: str | None) -> dict[str, Any]:
     """Coaching landed: list the reports with their post-insert hashes, and complete unless a gate is open.
 
-    A read-modify-write, so pages a skill wrote before its coaching stay listed.
+    A read-modify-write, so pages a skill wrote before its coaching stay listed. On a run already `complete`, a
+    report whose bytes this revision's entry already lists keeps that entry: an insert run again on the
+    delivered report (`already_inserted`) changes nothing, so it re-stamps nothing, and `written_at` stays the
+    delivery time a later step may compare with.
     """
 
     def fn(status: dict[str, Any]) -> None:
         open_now = open_gate_ids(paths)
         revision = int(status.get("revision") or 0)
         deliverables = dict(status.get("deliverables") or {})
-        deliverables["report_md"] = deliverable_entry(report_md, file_sha256(report_md), "insert_coaching.py", revision)
+
+        def entry(key: str, path: str) -> dict[str, Any]:
+            sha = file_sha256(path)
+            kept = deliverables.get(key)
+            if (
+                status.get("status") == "complete"
+                and isinstance(kept, dict)
+                and kept.get("sha256") == sha
+                and kept.get("revision") == revision
+            ):
+                return kept
+            return deliverable_entry(path, sha, "insert_coaching.py", revision)
+
+        deliverables["report_md"] = entry("report_md", report_md)
         if report_json and os.path.isfile(report_json):
-            deliverables["report_json"] = deliverable_entry(
-                report_json, file_sha256(report_json), "insert_coaching.py", revision
-            )
+            deliverables["report_json"] = entry("report_json", report_json)
         status["deliverables"] = deliverables
         status["coaching"] = "inserted"
         # The coaching insert ends this invocation, whether or not the run completes with it, unless the

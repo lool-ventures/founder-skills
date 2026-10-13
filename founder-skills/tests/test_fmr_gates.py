@@ -1195,3 +1195,92 @@ def test_a_cash_reply_recorded_after_a_later_run_took_the_folder_is_refused(tmp_
     assert proc.returncode == 1 and _out(proc)["code"] == "RUN_SUPERSEDED", proc.stdout + proc.stderr
     assert (h.snapshot(root, run_id), h.snapshot(root, later)) == before
     assert rs.folder_current_run(str(run_dir)) == later
+
+
+def _default(root: Path, run_id: str) -> subprocess.CompletedProcess[str]:
+    return _rec(root, run_id, "default", "--gate", "fmr_cash_followup", "--reason", "producer_default_disclosed")
+
+
+def test_a_default_on_a_delivered_review_reopens_nothing_and_the_reply_still_records(tmp_path: Path) -> None:
+    """Only the founder's recorded reply reopens a delivered review: a default (no reply, no evidence) records
+    without a reopen, and the reply given after delivery is still accepted after it."""
+    root, run_id, run_dir = _delivered_real(tmp_path)
+    time.sleep(0.002)
+    _ok(_apply(run_dir, run_id, *CASH_REPLY))
+    _ok(_default(root, run_id))
+    st = h.status(root, run_id)
+    assert (st["status"], st["revision"], st["invocations"][-1]["kind"]) == ("complete", 0, "start"), st
+    _ok(_cash_answer(root, run_id, "1500000", "2026-06"))
+    st = h.status(root, run_id)
+    assert (st["status"], st["revision"]) == ("running", 1)
+    assert (
+        h.ledger(root, run_id)["gates"]["fmr_cash_followup"]["current"]["evidence"]["history_seq"]
+        == (_history(run_dir)[-1]["seq"])
+    )
+
+
+def test_a_default_on_a_delivered_review_another_run_replaced_is_refused(tmp_path: Path) -> None:
+    root, run_id, run_dir = _delivered_real(tmp_path)
+    time.sleep(0.002)
+    _ok(_apply(run_dir, run_id, *CASH_REPLY))
+    later = "20261008T095000Z-ee0007"
+    h.start_ok(root, "financial-model-review", f"FS_HOST_RUN_ID={later}\n")
+    _ok(h.bind(root, later, run_dir, "example-co"))
+    before = (h.snapshot(root, run_id), h.snapshot(root, later))
+    proc = _default(root, run_id)
+    assert proc.returncode == 1 and _out(proc)["code"] == "RUN_SUPERSEDED", proc.stdout + proc.stderr
+    assert (h.snapshot(root, run_id), h.snapshot(root, later)) == before
+    assert rs.folder_current_run(str(run_dir)) == later
+
+
+def test_a_repeated_coaching_insert_does_not_move_the_delivery(tmp_path: Path) -> None:
+    """A retried Step 8c on the delivered report (`already_inserted`) changes nothing, so a reply given before
+    it is still a reply to the delivered review, and compose still refuses to rebuild it unrecorded."""
+    root, run_id, run_dir = _delivered_real(tmp_path)
+    listed = h.status(root, run_id)["deliverables"]
+    time.sleep(0.002)
+    _ok(_apply(run_dir, run_id, *CASH_REPLY))
+    time.sleep(0.002)
+    _coach(run_dir, run_id)
+    assert h.status(root, run_id)["deliverables"] == listed
+    shutil.copy(run_dir / "corrected_inputs.json", run_dir / "inputs.json")
+    _ok(_producer("runway.py", run_dir, run_id))
+    assert _compose(run_dir).returncode == 10
+    _ok(_cash_answer(root, run_id, "1500000", "2026-06"))
+    assert h.status(root, run_id)["revision"] == 1
+
+
+def test_a_finished_quick_check_takes_no_cash_update(tmp_path: Path) -> None:
+    """The follow-up belongs to a full review; a complete run of any other mode writes nothing."""
+    root, run_id, run_dir = _delivered_real(tmp_path)
+    _hand_edit(h.status_path(root, run_id), lambda st: st.update(mode="quick_check"))
+    before = _snapshot(run_dir, root, run_id)
+    proc = _apply(run_dir, run_id, *CASH_REPLY)
+    assert proc.returncode == 1 and _out(proc)["code"] == "RUN_FINISHED", proc.stdout + proc.stderr
+    assert _snapshot(run_dir, root, run_id) == before
+
+
+def test_a_cash_update_is_always_revision_1() -> None:
+    """Step 12 names the revision's hand-off folder `r1` literally. That holds because nothing else reopens a
+    financial-model-review run: its only `reopens_complete` gate is the cash follow-up, whose one reply is the
+    review's one update (an answered follow-up refuses another), and no FMR script reopens for a recompose. A
+    change to any of these must revisit Step 12's `r1`."""
+    fmr_reopening = [k for k, v in g.GATES.items() if v["skill"] == "financial-model-review" and v["reopens_complete"]]
+    assert fmr_reopening == ["fmr_cash_followup"]
+    for script in FMR.glob("*.py"):
+        text = script.read_text(encoding="utf-8")
+        assert "reopen_for_recompose" not in text and "reopen_if_complete" not in text, script.name
+    assert '"$RUN_ID/r1"' in SKILL_MD.read_text(encoding="utf-8")
+
+
+def test_a_cash_updates_redo_writes_its_hand_offs_to_the_revision_folder() -> None:
+    """Step 12 sends the model back through Steps 5 and 8c, whose blocks set HANDOFF_AGENT from Step 0: both
+    must say the revision's `r1` values win there, or the CHECKLIST overwrites the delivered review's hand-off."""
+    text = SKILL_MD.read_text(encoding="utf-8")
+    step5 = _section(text, "### Step 5:")
+    line = next(x for x in step5.splitlines() if x.startswith("HANDOFF_AGENT="))
+    assert "Step 12's r1 value" in line
+    step12 = _section(text, "### Step 12:")
+    update = step12[step12.index("**When the founder gives a cash balance or its date after delivery") :]
+    assert "both replace Step 0's in every step" in update
+    assert "(a new one starts a new review)" in update

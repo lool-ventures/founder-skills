@@ -1123,7 +1123,11 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 85,680 -> 85,679 (-1), LOWERED: Step 12's cash paragraph now covers a newer balance or date after delivery
     # (same conversation, once per review), redoes the checklist (Step 5) and writes the revision's hand-offs
     # to `r1/`; the per-revision runway.py line left the command and the rest was tightened to fit.
-    "financial-model-review": 85_679,
+    # 85,679 -> 85,797 (+118 B) on 2026-10-14: Step 5's HANDOFF_AGENT line says a cash update uses Step 12's r1
+    # value (its Step 0 value sent the revision's CHECKLIST to r0, overwriting the delivered review's hand-off);
+    # Step 12 says the r1 values replace Step 0's in every step it redoes, that a new conversation starts a new
+    # review, and names "the values it already uses" plainly. Owner-approved raise.
+    "financial-model-review": 85_797,
     # ic-sim SHRANK: the REQUIRED ic-dynamics.md read at Step 7 is deleted. Step 7 is a pure producer
     # pipe — compose_discussion.py derives discussion.json from the partners' own files and nothing
     # is authored by the main thread — so the read informed no decision while pulling a whole

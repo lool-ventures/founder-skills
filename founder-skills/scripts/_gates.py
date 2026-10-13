@@ -3560,12 +3560,12 @@ def fmr_post_delivery_cash_call(ctx: Ctx) -> dict[str, Any] | None:
     """On a `complete` financial-model-review run, the newest call of this run that set both cash paths and
     changed one, made after the delivered report was listed (`deliverables.report_md.written_at`); None on any
     other run or when there is none. Such a call with no report time to compare it with cannot be placed
-    before or after the delivery: GATE_UNDECIDABLE, never "not owed". A quick check never gets here: the
-    follow-up's modes drop it before its predicate runs. Residual: a coaching insert run again on a resume
-    re-stamps the report time, which can move it past a call made between the two inserts."""
+    before or after the delivery: GATE_UNDECIDABLE, never "not owed". Only a full review has the follow-up, so
+    any other mode is None here (its callers include the apply allowance and compose, not only `owed()`). A
+    coaching insert run again on the delivered report keeps the report time (`complete_after_coaching`)."""
     from datetime import datetime  # noqa: PLC0415
 
-    if ctx.status.get("status") != "complete":
+    if ctx.status.get("status") != "complete" or ctx.mode not in (None, "full"):
         return None
     calls = [r for r in _fmr_history(ctx) if _fmr_cash_call(r) and (r.get("changed_count") or 0) >= 1]
     if not calls:
@@ -3590,14 +3590,13 @@ def fmr_post_delivery_cash_call(ctx: Ctx) -> dict[str, Any] | None:
 
 def _req_fmr_cash(ctx: Ctx, entry: dict[str, Any]) -> dict[str, Any] | None:
     """A call for this run, in chat or by the host, that set both cash paths after the follow-up was opened; on
-    a delivered review whose follow-up was never opened (it had its balance), one made after the delivery."""
-    if entry.get("opened_at") is None:
-        rec = fmr_post_delivery_cash_call(ctx)
-        return {"origin": rec["origin"], "history_seq": rec.get("seq")} if rec else None
-    for rec in reversed(_fmr_history(ctx)):
-        if _fmr_cash_call(rec) and _after_open(rec, entry):
-            return {"origin": rec["origin"], "history_seq": rec.get("seq")}
-    return None
+    a delivered review, also the newest one made after the delivery, opened or not."""
+    found = None
+    if entry.get("opened_at") is not None:
+        found = next((r for r in reversed(_fmr_history(ctx)) if _fmr_cash_call(r) and _after_open(r, entry)), None)
+    # On a delivered review the reply may predate an opening (a default recorded after it opened the entry).
+    found = found or fmr_post_delivery_cash_call(ctx)
+    return {"origin": found["origin"], "history_seq": found.get("seq")} if found else None
 
 
 # `requires` checks on an option. Each reads evidence a script wrote and returns what it found (stored on the
@@ -4017,7 +4016,10 @@ def record(
         )
     _guard_finished(ctx.status, g)
     check_note(note)
-    reopening = ctx.status.get("status") == "complete" and g["reopens_complete"]
+    if ctx.status.get("status") == "complete" and g["reopens_complete"]:
+        _refuse_replaced_run(ctx)
+    # Only a recorded reply reopens a delivered run: a default is never one, so it is recorded with no reopen.
+    reopening = ctx.status.get("status") == "complete" and g["reopens_complete"] and resolution == "answered"
     if not owed(ctx, g, instance):
         raise GateRejection("GATE_NOT_OWED", f"{key} does not apply to this run")
     if resolution == "default_taken" and not derived:
@@ -4121,6 +4123,21 @@ def record(
         _reopen_complete(ctx.status, key, g)
     declined = any(o["declines"] for o in options)
     return {"key": key, "state": entry["state"], "answer_id": entry["current"]["answer_id"], "declined": declined}
+
+
+def _refuse_replaced_run(ctx: Ctx) -> None:
+    """A write to a `reopens_complete` gate of a complete run can reopen it, which takes its folder back, so it
+    is refused `RUN_SUPERSEDED` when the folder is no longer this run's: a later run was bound there after it
+    (the folder's refs decide, `folder_current_run`; the status's `superseded_by` is their mirror, which a
+    timed-out marking can leave unset). Checked under the run lock, inside the transaction."""
+    current = _run_status.folder_current_run(ctx.run_dir) if ctx.run_dir else None
+    if (current is not None and current != ctx.paths.run_id) or ctx.status.get("superseded_by"):
+        raise GateRejection(
+            "RUN_SUPERSEDED",
+            "a later run was bound in this run's folder; a finished run that no longer holds its folder is not "
+            "reopened",
+            current_run=current if current not in (None, ctx.paths.run_id) else ctx.status.get("superseded_by"),
+        )
 
 
 def _binding_now(

@@ -133,10 +133,10 @@ def _refuse_no_ask_answer(g: Any, paths: rs.RunPaths) -> None:
 
 
 def _refuse_reopen_elsewhere(g: Any, args: argparse.Namespace, paths: rs.RunPaths, keys: list[str]) -> None:
-    """An answer that reopens a `complete` run (a `reopens_complete` gate) takes the run's folder back, so it is
-    refused `RUN_SUPERSEDED` before anything is written when the folder is no longer this run's: a later run
-    was bound there after it (the folder's refs decide, `folder_current_run`; the status's `superseded_by` is
-    its mirror), or `--run-dir` names a folder other than the run's own (an archived copy)."""
+    """An answer that can reopen a `complete` run (a `reopens_complete` gate) is refused `RUN_SUPERSEDED` before
+    anything is written when `--run-dir` names a folder other than the run's own (an archived copy): only the
+    recorder knows the flag. Whether a later run holds the run's own folder is checked inside the transaction,
+    under the run lock (`_gates.record`)."""
     reopens = False
     for key in keys:
         try:
@@ -144,23 +144,12 @@ def _refuse_reopen_elsewhere(g: Any, args: argparse.Namespace, paths: rs.RunPath
         except g.GateRejection:
             continue
     status = rs.load_status(paths) or {}
-    if not reopens or status.get("status") != "complete":
+    if not reopens or status.get("status") != "complete" or not args.run_dir:
         return
     shell = status.get("run_dir_shell")
-    run_dir = args.run_dir or shell
-    if not isinstance(run_dir, str) or not run_dir:
-        return
-    if isinstance(shell, str) and shell and os.path.realpath(run_dir) != os.path.realpath(shell):
+    if isinstance(shell, str) and shell and os.path.realpath(args.run_dir) != os.path.realpath(shell):
         raise g.GateRejection(
-            "RUN_SUPERSEDED", f"{run_dir} is not this run's folder; a finished run reopens only in its own folder"
-        )
-    current = rs.folder_current_run(run_dir)
-    if (current is not None and current != args.run_id) or status.get("superseded_by"):
-        raise g.GateRejection(
-            "RUN_SUPERSEDED",
-            "a later run was bound in this run's folder; a finished run that no longer holds its folder is not "
-            "reopened",
-            current_run=current if current != args.run_id else status.get("superseded_by"),
+            "RUN_SUPERSEDED", f"{args.run_dir} is not this run's folder; a finished run reopens only in its own folder"
         )
 
 
@@ -271,6 +260,7 @@ def _form_reply(g: Any, args: argparse.Namespace) -> int:
 def cmd_default(args: argparse.Namespace) -> int:
     g = _gates_or_exit(args.pretty)
     paths = _locate(args)
+    _refuse_reopen_elsewhere(g, args, paths, [args.gate])
 
     def fn(ctx: Any, ledger: dict[str, Any], status: dict[str, Any]) -> Any:
         basis = g.check_model_default(ledger, args.gate, args.reason, args.answer_id, args.value)

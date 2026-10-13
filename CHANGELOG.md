@@ -31,8 +31,8 @@ None.
 
 - Financial model review: the closing message after a cash update now says the balance you gave was used,
   rather than added, since it may replace one the review already had.
-- A delivered review that a newer review in the same folder has replaced, or a copy of a review's folder,
-  can no longer be updated with a cash balance; the update is made in the review's own folder.
+- A delivered review that a newer review in the same folder has replaced, or a copy of a review's folder, is
+  not updated with a cash balance; the update runs in the review's own folder.
 - The update needs a person in the conversation: a review whose request said not to ask questions is not
   updated after delivery.
 

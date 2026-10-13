@@ -86,11 +86,11 @@ def refuse_finished_corrections(run_dir: str, run_id: str | None, paths_set: set
     """Corrections into a finished run: exit 1 `RUN_FINISHED` before anything is written, so the corrected
     inputs never move under a delivered review. The one exception is the cash update: a call that sets both
     cash paths and nothing else (the follow-up's answer needs both), changes one of them, on a review that
-    is `complete` and whose follow-up was never answered with the founder's reply (it asked for the balance,
-    or the review had one and this is a newer balance or date). Once per review: an answered follow-up means a
-    new review. Not on a run whose request said not to ask (its follow-up cannot be answered), and not from a
-    folder other than the run's own (an archived copy). A run with no ledger, or one still running, returns at
-    once."""
+    is `complete` (a full review: the follow-up is that mode's) and whose follow-up was never answered with
+    the founder's reply (it asked for the balance, or the review had one and this is a newer balance or date).
+    Once per review: an answered follow-up means a new review. Not on a run whose request said not to ask (its
+    follow-up cannot be answered), and not from a folder other than the run's own (an archived copy). A run
+    with no ledger, or one still running, returns at once."""
     ledger = open_ledger_or_exit(run_dir, run_id)
     if ledger is None:
         return
@@ -105,7 +105,7 @@ def refuse_finished_corrections(run_dir: str, run_id: str | None, paths_set: set
             entry = (led.get("gates") or {}).get(CASH_FOLLOWUP) or {}
             replied = (entry.get("current") or {}).get("resolution") == "answered"
             own = isinstance(ctx.run_dir, str) and os.path.realpath(ctx.run_dir) == os.path.realpath(run_dir)
-            if not replied and own:
+            if not replied and own and st.get("mode") in (None, "full"):
                 return {}
         return {"finished": state}
 

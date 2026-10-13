@@ -672,7 +672,7 @@ Run the generator in a shell call of its own — nothing before it but variable 
 ```bash
 # A fresh shell: set each value again from Step 0's printed output (an empty one is refused).
 RUN_ID="<Step 0 run id>"
-HANDOFF_AGENT="<Step 0 printed value>"
+HANDOFF_AGENT="<Step 0 printed value>"   # on a cash update, Step 12's r1 value
 REVIEW_DIR_AGENT="<Step 0 printed value>"
 REVIEW_DIR="<Step 0 review dir>"
 python3 "$SCRIPTS/fmr_dispatch_prompt.py" checklist --run-id "$RUN_ID" \
@@ -960,8 +960,8 @@ Here the printed hand-over replaces the named entries and the offer described ab
 is the only offer made, and a connected folder is written to only if the founder asks.
 
 **When the founder gives a cash balance or its date after delivery** (asked for or not) in this conversation
-only, keep `RUN_ID`, `$REVIEW_DIR`. Set both (a number; `YYYY-MM`, this month for "today"; restate
-the unchanged one); record (follow-up first); promote: <!-- gate: fmr_cash_followup -->
+(a new one starts a new review), keep `RUN_ID`, `$REVIEW_DIR`. Set both (a number; `YYYY-MM`, this month for
+"today"; restate the unchanged one); record (follow-up first); promote: <!-- gate: fmr_cash_followup -->
 
 ```bash
 python3 "$SCRIPTS/apply_corrections.py" --set cash.current_balance=<amount> --set cash.balance_date=<YYYY-MM> \
@@ -973,8 +973,9 @@ cp "$REVIEW_DIR/corrected_inputs.json" "$REVIEW_DIR/inputs.json" && mkdir -p "$R
 ```
 
 `HANDOFF_DIR` is that `r1` dir; `HANDOFF_AGENT` from Step 0's `--handoff-dir-agent` with
-`--run-id "$RUN_ID/r1"`; redo Steps 4, 5, 7, 7.5, 8a-8c, Gates 1-2 and this step, closer with `--cash-update`.
-Values it has, a second update or other figures: `RUN_FINISHED`; say what it printed.
+`--run-id "$RUN_ID/r1"`; both replace Step 0's in every step; redo Steps 4, 5, 7, 7.5, 8a-8c, Gates 1-2
+and this step, closer with `--cash-update`.
+The values it already uses, a second update or other figures: `RUN_FINISHED`; say what it printed.
 
 ## Main-Thread Return
 
