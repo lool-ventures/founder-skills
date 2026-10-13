@@ -27,7 +27,7 @@ PLUGIN = Path(__file__).resolve().parents[1]
 SCRIPTS = PLUGIN / "scripts"
 HOOK_MODULES = sorted(PLUGIN / rel for rel in _hook_files(PLUGIN) if rel.endswith(".py"))
 # Modules no hook loads yet that are kept 3.9-clean so one can: held to the same checks.
-_PY39_READY: set[str] = set()
+_PY39_READY: set[str] = {"script_hashes.py"}
 FLOOR_MODULES = sorted({*HOOK_MODULES, *(SCRIPTS / name for name in _PY39_READY)})
 
 
@@ -52,8 +52,8 @@ def test_the_hook_module_list_is_complete() -> None:
 
 # Calls and keywords that exist only from 3.10.
 _NEW_KEYWORDS = {("zip", "strict"), ("dataclass", "slots"), ("dataclass", "kw_only"), ("field", "kw_only")}
-# `UTC` is `datetime.UTC`, 3.11; the hooks write `timezone.utc`.
-_NEW_ATTRIBUTES = {"pairwise", "bit_count", "aiter", "anext", "UTC"}
+# `UTC` is `datetime.UTC`, 3.11; the hooks write `timezone.utc`. `file_digest` is `hashlib.file_digest`, 3.11.
+_NEW_ATTRIBUTES = {"pairwise", "bit_count", "aiter", "anext", "UTC", "file_digest"}
 _TYPE_NAMES = {"str", "int", "float", "bool", "bytes", "dict", "list", "set", "tuple", "type", "Any"}
 
 
