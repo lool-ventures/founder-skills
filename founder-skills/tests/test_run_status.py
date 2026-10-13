@@ -336,14 +336,19 @@ def test_start_runs_from_a_posix_shell_heredoc_under_the_c_locale(tmp_path: Path
 def test_bind_is_idempotent_for_the_same_slug_and_writes_the_run_ref(tmp_path: Path) -> None:
     root, run_id, run_dir = h.start_bound(tmp_path, "ic-sim")
     ref = json.loads((run_dir / "handoff" / run_id / "run_ref.json").read_text())
+    bound_at = ref.pop("bound_at")
+    assert isinstance(bound_at, str) and bound_at.endswith("Z")
     assert ref == {
         "schema": "founder-skills/run_ref",
         "schema_version": 1,
         "run_id": run_id,
         "skill": "ic-sim",
         "ledger_rel": f"runs/{run_id}/gates.json",
+        "bound_seq": 1,
     }
     assert h.bind(root, run_id, run_dir, "example-co").returncode == 0
+    # A re-bind stamps the ref again: the folder's current run is its newest bind.
+    assert json.loads((run_dir / "handoff" / run_id / "run_ref.json").read_text())["bound_seq"] == 2
     st = h.status(root, run_id)
     assert st["slug"] == "example-co" and st["mode"] == "full" and st["run_dir_shell"] == str(run_dir)
     assert st["scripts_dir_shell"] == str(h.SKILLS / "ic-sim" / "scripts")

@@ -11,6 +11,7 @@ across skills); a test holds the copies equal, and `RUN_ID_RE` equal to the shar
 
 from __future__ import annotations
 
+import glob
 import importlib.util
 import json
 import os
@@ -29,6 +30,47 @@ _SHARED_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__fi
 
 def run_ref_path(run_dir: str, run_id: str) -> str:
     return os.path.join(run_dir, "handoff", run_id, RUN_REF_NAME)
+
+
+def folder_current_run(run_dir: str) -> str | None:
+    """The run this folder belongs to now: the run whose `run_ref.json` here was bound last.
+
+    Read from the folder alone (no status, no ledger, no lock): every `bind` stamps its ref with `bound_seq`
+    (one more than the highest already in the folder) and `bound_at`, so the newest bind wins, a re-bind of
+    an earlier run (a host resume) takes the folder back, and an implicit reopen (which does not bind) does
+    not. Refs with no stamp (bound before the stamp existed) sort below every stamped one and among
+    themselves by the ref file's mtime. A tie on all of that (two binds in the same instant computing the
+    same `bound_seq`) is broken by the run id: a host error, named here as a residual. A ref that cannot be
+    read is skipped. None when the folder carries no ref.
+
+    `_run_status.folder_current_run` is canonical; each skill's `_run_ref.py` carries the same function
+    (held equal by a test), so a skill script answers this without loading the plugin's shared code.
+    """
+    best: tuple[int, str, float, str] | None = None
+    pattern = os.path.join(glob.escape(os.path.abspath(run_dir)), "handoff", "*", RUN_REF_NAME)
+    for ref in glob.glob(pattern):
+        run_id = os.path.basename(os.path.dirname(ref))
+        if not RUN_ID_RE.match(run_id):
+            continue
+        try:
+            with open(ref, encoding="utf-8") as f:
+                data = json.load(f)
+            mtime = os.path.getmtime(ref)
+        except (OSError, ValueError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        seq = data.get("bound_seq")
+        at = data.get("bound_at")
+        key = (
+            seq if isinstance(seq, int) and not isinstance(seq, bool) else 0,
+            at if isinstance(at, str) else "",
+            mtime,
+            run_id,
+        )
+        if best is None or key > best:
+            best = key
+    return best[3] if best is not None else None
 
 
 def has_ledger(run_dir: str, run_id: object) -> bool:

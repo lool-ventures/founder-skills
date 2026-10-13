@@ -21,6 +21,7 @@ Standalone: stdlib only. Imported by path from the shared scripts beside it and,
 from __future__ import annotations
 
 import contextlib
+import glob
 import hashlib
 import json
 import os
@@ -332,7 +333,24 @@ def run_ref_path(run_dir: str, run_id: str) -> str:
     return os.path.join(run_dir, "handoff", run_id, RUN_REF_NAME)
 
 
+def _highest_bound_seq(run_dir: str) -> int:
+    """The highest `bound_seq` among the refs already in the folder (a ref with none counts as 0)."""
+    top = 0
+    for ref in glob.glob(os.path.join(glob.escape(os.path.abspath(run_dir)), "handoff", "*", RUN_REF_NAME)):
+        try:
+            data = read_json(ref)
+        except (OSError, ValueError):
+            continue
+        seq = data.get("bound_seq") if isinstance(data, dict) else None
+        if isinstance(seq, int) and not isinstance(seq, bool):
+            top = max(top, seq)
+    return top
+
+
 def write_run_ref(run_dir: str, paths: RunPaths, skill: str) -> str:
+    """Write the run's ref into its run dir. Every bind (a re-bind of the same run included) stamps
+    `bound_seq` and `bound_at`, so the folder's current run is its newest bind (`folder_current_run`).
+    Additive: `schema_version` stays 1."""
     path = run_ref_path(run_dir, paths.run_id)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     data = {
@@ -341,9 +359,52 @@ def write_run_ref(run_dir: str, paths: RunPaths, skill: str) -> str:
         "run_id": paths.run_id,
         "skill": skill,
         "ledger_rel": paths.ledger_rel,
+        "bound_seq": _highest_bound_seq(run_dir) + 1,
+        "bound_at": now_iso(),
     }
     atomic_write_json(path, data)
     return path
+
+
+def folder_current_run(run_dir: str) -> str | None:
+    """The run this folder belongs to now: the run whose `run_ref.json` here was bound last.
+
+    Read from the folder alone (no status, no ledger, no lock): every `bind` stamps its ref with `bound_seq`
+    (one more than the highest already in the folder) and `bound_at`, so the newest bind wins, a re-bind of
+    an earlier run (a host resume) takes the folder back, and an implicit reopen (which does not bind) does
+    not. Refs with no stamp (bound before the stamp existed) sort below every stamped one and among
+    themselves by the ref file's mtime. A tie on all of that (two binds in the same instant computing the
+    same `bound_seq`) is broken by the run id: a host error, named here as a residual. A ref that cannot be
+    read is skipped. None when the folder carries no ref.
+
+    `_run_status.folder_current_run` is canonical; each skill's `_run_ref.py` carries the same function
+    (held equal by a test), so a skill script answers this without loading the plugin's shared code.
+    """
+    best: tuple[int, str, float, str] | None = None
+    pattern = os.path.join(glob.escape(os.path.abspath(run_dir)), "handoff", "*", RUN_REF_NAME)
+    for ref in glob.glob(pattern):
+        run_id = os.path.basename(os.path.dirname(ref))
+        if not RUN_ID_RE.match(run_id):
+            continue
+        try:
+            with open(ref, encoding="utf-8") as f:
+                data = json.load(f)
+            mtime = os.path.getmtime(ref)
+        except (OSError, ValueError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        seq = data.get("bound_seq")
+        at = data.get("bound_at")
+        key = (
+            seq if isinstance(seq, int) and not isinstance(seq, bool) else 0,
+            at if isinstance(at, str) else "",
+            mtime,
+            run_id,
+        )
+        if best is None or key > best:
+            best = key
+    return best[3] if best is not None else None
 
 
 def locate_from_run_dir(run_dir: str, run_id: str) -> RunPaths | None:
