@@ -11,9 +11,11 @@ runs on its own. Scoped to the session and restored afterwards, so a test that i
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import tempfile
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 
@@ -35,3 +37,24 @@ def _tempfiles_under_pytest_basetemp(tmp_path_factory: pytest.TempPathFactory) -
             os.environ.pop("TMPDIR", None)
         else:
             os.environ["TMPDIR"] = env_before
+
+
+@pytest.fixture(scope="session")
+def plugin_hashes_current() -> None:
+    """For the modules that run the dispatch-prompt hook against this checkout: the hook holds a paired
+    dispatch while a plugin file differs from `data/script-hashes.json`, so an edited `.py` with the
+    manifest not regenerated would read as dozens of hook failures. Fail once, naming the command.
+    Requested per module (never autouse, never at session start): the mutation lane runs a child pytest in
+    a mutated copy of the tree and must not trip it."""
+    path = Path(__file__).resolve().parents[1] / "scripts" / "script_hashes.py"
+    spec = importlib.util.spec_from_file_location("script_hashes_conftest", path)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    mismatched, why = mod.verify_detail(str(path.parents[1]))
+    if mismatched is None or mismatched:
+        pytest.fail(
+            f"plugin files differ from data/script-hashes.json ({', '.join(mismatched or []) or why}): run "
+            "`python3 founder-skills/scripts/script_hashes.py --write`",
+            pytrace=False,
+        )

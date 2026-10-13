@@ -301,6 +301,7 @@ def test_holds_are_counted_for_any_output_path(tmp_path: Path, path: str) -> Non
     _silent(r)
 
 
+@pytest.mark.usefixtures("plugin_hashes_current")
 def test_each_check_has_its_own_hold_budget(tmp_path: Path) -> None:
     """Two holds for the wrong agent must not spend the prompt check's budget: the same steered prompt
     then sent to the right agent is still held."""

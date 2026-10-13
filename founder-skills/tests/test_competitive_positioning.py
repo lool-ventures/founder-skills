@@ -7100,6 +7100,7 @@ class TestCpDispatchPrompt:
         )
         assert proc.returncode == 2 and "--analysis-dir" in proc.stderr
 
+    @pytest.mark.usefixtures("plugin_hashes_current")
     @pytest.mark.parametrize("context", ["moat_scoring", "positioning_scoring", "checklist", "startup_research"])
     def test_the_hook_passes_the_printed_prompt_and_holds_a_steered_one(self, context: str, tmp_path: Any) -> None:
         printed = self._render(context)

@@ -13,15 +13,20 @@ PreToolUse dispatcher's POSIX wrapper, with transcripts shaped like the session 
 
 from __future__ import annotations
 
+import importlib.util
 import itertools
 import json
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
+pytestmark = pytest.mark.usefixtures("plugin_hashes_current")
+
+PLUGIN = Path(__file__).resolve().parents[1]
+SCRIPTS = PLUGIN / "scripts"
 WRAPPER = SCRIPTS / "pretooluse-dispatch.sh"
 MARKER = "[dispatch-check]"
 
@@ -104,7 +109,14 @@ def _held(reason: str) -> dict[str, Any]:
     }
 
 
-def _run(tmp_path: Path, rows: list[dict[str, Any]], prompt: str, tool: str = "Agent", agent: str | None = None) -> Any:
+def _run(
+    tmp_path: Path,
+    rows: list[dict[str, Any]],
+    prompt: str,
+    tool: str = "Agent",
+    agent: str | None = None,
+    wrapper: Path = WRAPPER,
+) -> Any:
     path = tmp_path / "t.jsonl"
     path.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
     payload = {
@@ -123,7 +135,7 @@ def _run(tmp_path: Path, rows: list[dict[str, Any]], prompt: str, tool: str = "A
             ),
         },
     }
-    return subprocess.run(["sh", str(WRAPPER)], input=json.dumps(payload), capture_output=True, text=True, timeout=30)
+    return subprocess.run(["sh", str(wrapper)], input=json.dumps(payload), capture_output=True, text=True, timeout=30)
 
 
 def _deny(r: Any) -> str:
@@ -1191,17 +1203,78 @@ def test_a_multi_line_quoted_argument_before_the_generator_is_named(tmp_path: Pa
     assert "a quoted argument that spans lines" in reason and "python3 -c" in reason
 
 
-def test_after_the_plugins_scripts_were_changed_the_hold_says_it_will_let_through(tmp_path: Path) -> None:
-    """No re-run can help once the session wrote into the plugin's scripts: the hold says so, and that the
-    dispatch goes through after the hold limit, rather than asking for a generator run."""
-    rows = [
-        _user("Size my market."),
-        *_printed("", command='echo x > "$SCRIPTS/_params.py"'),
-        *_printed(_GENERATED, command=GEN_CMD),
-    ]
-    reason = _deny(_run(tmp_path, rows, _GENERATED))
-    assert "were changed in this session" in reason and "after 2 holds" in reason
-    assert "$SCRIPTS/" not in reason
+def _plugin_copy(tmp_path: Path) -> Path:
+    """A copy of the plugin's hook, every hashed file and the manifest, to change one byte in."""
+    dst = tmp_path / "founder-skills"
+    ignore = shutil.ignore_patterns("__pycache__", "*.pyc")
+    for rel in ("scripts", "data", "agents"):
+        shutil.copytree(PLUGIN / rel, dst / rel, ignore=ignore)
+    for scripts in sorted((PLUGIN / "skills").glob("*/scripts")):
+        shutil.copytree(scripts, dst / scripts.relative_to(PLUGIN), ignore=ignore)
+    return dst
+
+
+def _hashes(root: Path) -> Any:
+    spec = importlib.util.spec_from_file_location("script_hashes_copy", root / "scripts" / "script_hashes.py")
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+_MS_GEN = "skills/market-sizing/scripts/dispatch_prompt.py"
+
+
+def test_a_changed_plugin_file_holds_one_dispatch_per_session_then_lets_through(tmp_path: Path) -> None:
+    """The lever is a real byte flip in a copy of the plugin, never a shell row: a changed generator holds the
+    first paired dispatch once, naming the file, then every later one goes through with a stderr line."""
+    copy = _plugin_copy(tmp_path / "plugin")
+    wrapper = copy / "scripts" / "pretooluse-dispatch.sh"
+    rows = [_user("Size my market."), *_printed(_GENERATED)]
+    # Control: the untouched copy compares as the checkout does, with nothing said about its files.
+    assert _hashes(copy).verify(str(copy)) == []
+    clean = _run(tmp_path, rows, _GENERATED, wrapper=wrapper)
+    assert clean.returncode == 0 and clean.stdout == "" and "plugin files" not in clean.stderr, clean.stderr
+    with (copy / _MS_GEN).open("ab") as f:
+        f.write(b"# x\n")
+    assert _hashes(copy).verify(str(copy)) == [_MS_GEN]  # the lever engaged
+    reason = _deny(_run(tmp_path, rows, _GENERATED, wrapper=wrapper))
+    assert reason.startswith(f"{MARKER}[plugin-files] Held: a plugin file differs"), reason
+    assert f"`{_MS_GEN}`" in reason and "nothing in this session can change that" in reason
+    assert f"{MARKER}[agent/handoff/R/r2/redteam_output.json]" not in reason  # no per-round budget spent
+    assert "script-hashes" not in reason and "--write" not in reason  # never the bypass
+    # Once per session: with that hold in the transcript, another round's dispatch goes through unchecked.
+    second = _GENERATED.replace("/r2/", "/r3/")
+    later = _run(tmp_path, [*rows, _held(reason), *_printed(second)], second, wrapper=wrapper)
+    assert later.returncode == 0 and later.stdout == "", later.stdout
+    assert f"({_MS_GEN}); agent/handoff/R/r3/redteam_output.json sent unchecked" in later.stderr, later.stderr
+
+
+def test_the_dispatchs_own_generator_is_named_first(tmp_path: Path) -> None:
+    copy = _plugin_copy(tmp_path / "plugin")
+    for rel in ("scripts/_gates.py", _MS_GEN):
+        with (copy / rel).open("ab") as f:
+            f.write(b"# x\n")
+    reason = _deny(_run(tmp_path, [_user("Size my market."), *_printed(_GENERATED)], _GENERATED,
+                        wrapper=copy / "scripts" / "pretooluse-dispatch.sh"))  # fmt: skip
+    assert f"(`{_MS_GEN}`, and 1 more)" in reason, reason
+
+
+@pytest.mark.parametrize("missing", ["data/script-hashes.json", "scripts/script_hashes.py"])
+def test_without_the_manifest_or_its_module_the_dispatch_is_compared_as_before(tmp_path: Path, missing: str) -> None:
+    """Fail-open: no manifest (or no module to read it) is said once on stderr, and the prompt check runs as
+    it always did -- the printed prompt passes, an edited one is held for its own round."""
+    copy = _plugin_copy(tmp_path / "plugin")
+    with (copy / _MS_GEN).open("ab") as f:
+        f.write(b"# x\n")
+    (copy / missing).unlink()
+    wrapper = copy / "scripts" / "pretooluse-dispatch.sh"
+    rows = [_user("Size my market."), *_printed(_GENERATED)]
+    same = _run(tmp_path, rows, _GENERATED, wrapper=wrapper)
+    assert same.returncode == 0 and same.stdout == "", same.stdout
+    assert same.stderr.count("dispatch_prompt_check: plugin files not checked") == 1, same.stderr
+    reason = _deny(_run(tmp_path, rows, _STEERED, wrapper=wrapper))
+    assert reason.startswith(f"{MARKER}[agent/handoff/R/r2/redteam_output.json] Held"), reason
 
 
 def test_a_heredoc_beside_a_redirected_generator_is_not_read_as_a_plugin_write(tmp_path: Path) -> None:

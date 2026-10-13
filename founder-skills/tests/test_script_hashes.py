@@ -410,3 +410,14 @@ def test_a_generator_reading_a_reference_file_is_caught(tmp_path: Path) -> None:
         label: ["skills/market-sizing/references/x.md"]
         for label in ("ms red_team", "ms checklist", "ms top_down_methodology", "ms bottom_up_methodology")
     }
+
+
+# --- 9. the hook loads this module the way the Python-3.9 floor test can see ------------------------------------
+
+
+def test_the_hook_loads_the_module_where_the_floor_test_finds_it() -> None:
+    """The floor test discovers a hook module only through the literal sibling-load spelling; a load spelled
+    any other way would leave this module out of the 3.9 check, silently."""
+    from test_hook_wrappers import _hook_files
+
+    assert "scripts/script_hashes.py" in _hook_files(PLUGIN)

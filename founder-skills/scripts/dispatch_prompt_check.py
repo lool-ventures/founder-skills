@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # /// script
-# requires-python = ">=3.10"
+# requires-python = ">=3.9"
 # dependencies = []
 # ///
 """A generated dispatch prompt is sent as the generator printed it: the red team's, and the checklist's.
@@ -19,9 +19,10 @@ tool result counts only when the call that produced it is paired by tool id and 
     `fmr_dispatch_prompt.py` from its own skill's `skills/<skill>/scripts/` folder of an INSTALLED
     plugin (a Cowork or Desktop plugin mount or cache, the CLI's plugin cache, the cloud skills mount,
     the folder the runtime says it loaded our skill from, or the one this hook runs from) or as
-    `$SCRIPTS/<generator>`, the form SKILL.md writes; never a copy elsewhere, and never once any call in
-    the session (a sub-agent's included) wrote into the plugin's scripts or over a generator, with names
-    read through the block's own assignments -- whose output reaches the result, and in which EVERY
+    `$SCRIPTS/<generator>`, the form SKILL.md writes; never a copy elsewhere, never while a plugin file
+    differs from the copy this version shipped with (THE PLUGIN'S FILES), nor after a file tool (a
+    sub-agent's included) wrote over a generator; names are read through the block's own assignments --
+    whose output reaches the result, and in which EVERY
     other command is known to be quiet: assignments, `cd`, `mkdir`, `ls` (before the generator only),
     `wc`, `test`, `true`, `set -e`, `cp`/`mv` with no device or /proc argument, the plugin's
     `resolve_artifacts_root.py` and `ocr_uploads.py` (piped at most into `head`/`tail`/`wc`), and `echo`
@@ -86,37 +87,32 @@ dispatch is held as above:
     only after a rewritten dispatch's result exists, so the floor alone covers the first rewrite and
     any sibling dispatched beside it.
 
-KNOWN RESIDUALS. Whether a block wrote into the plugin is read from its text, so these writes are not seen:
-  * `xargs ... cp {}` and `find ... -exec cp {} DEST`: the destination is built when the command runs;
-  * in a block the parser cannot follow, writers the raw reading does not list: `tar -C`, `unzip -d`,
-    `curl -o`, `wget -O`, `git`, `sqlite3 .output`, `sed 'w FILE'`, `python3 -m pip install -t`,
-    `python3 -m json.tool OUTFILE`;
-  * `perl -i`, and inline code that neither reading sees as inline: an interpreter reached through a
-    substitution (`"$(which python3)" -c`), a short-option cluster (`python3 -Bc`), `node -p` / `--eval`,
-    `php -r`, an option given through a variable (`FLAG=-c; python3 $FLAG ...`);
-  * inline code that builds its path at run time (`os.environ[...]`, string joins), or reads it from stdin or a
-    pipe (`echo "$S/x.py" | python3 -c '...stdin...'`, `xargs -I{} python3 -c '...{}...'`), and, for code
-    whose only naming of the plugin is the quoted literal `"/skills/"` (the plugin-finder every SKILL.md's
-    Step 0 runs), a write form the raw reading does not list;
-  * a script written in an earlier shell call, or in this block by anything but a heredoc
-    (`printf ... > h.py`), and run in this one; a heredoc-saved file run through a process substitution
-    (`bash <(cat F)`) or named inside a `-c` string (`sh -c ". F"`); a heredoc whose opener line is itself
-    continued (`cat <<'PY' | \\` then `python3` on the next line);
-  * in a block the parser cannot follow, a heredoc-saved script run with a plugin path as the value of an
-    interpreter option the reading does not know to take one (`python3 --opt "$S/x.py" saved.py`): the
-    plugin path is read as the program, so the saved script is read as its data;
-  * a relative path or glob after a `cd` (`cd "$SCRIPTS" && cp x y*`), and a relative target straight after
-    `)>` or `;>`;
-  * a name set in an earlier shell call: it is not resolved, and a write through it is not counted;
-  * in a block the parser can follow, a parameter expansion with an operator (`${S%/x}`, `${S:-/tmp}`,
-    `${S/a/b}`, the indirect `${!N}`): it is not read as naming `S` (the raw reading reads it so);
-  * in a block the parser can follow, a `#` after an escaped character (`echo x\\ #y; cp ...`): it is read as
-    a comment, so the rest of that line is not read;
-  * in a block the parser cannot follow, `$'...'` quoting with an escaped quote inside (`$'it\\'s'`): the raw
-    reading takes it as plain single quotes, so the quoting after it can be misread.
-COST. In a block the parser cannot follow, a quote left open re-reads the growing joined command at every
-later line, so the raw reading is quadratic in such a block's length; a few hundred lines after an unclosed
-quote can take longer than the hook's timeout. Not capped here.
+THE PLUGIN'S FILES. Whether the generator that printed is the one this version shipped is read from the files,
+never from the shell commands run before it. `data/script-hashes.json` (written by `script_hashes.py --write`)
+lists the sha256 of every `.py` under the plugin outside the top-level `tests/`, and of every agent file by the
+text after its front matter: the synced and org installs rewrite agent (and SKILL.md) front matter while the
+body arrives as written, so any `.md` added to the manifest later needs the same rule. A paired dispatch with
+a transcript checks the plugin this hook runs from against it; a `.py` the manifest does not list counts as a
+change (a `json.py` beside a generator is imported before the standard library's). A difference holds ONE
+paired dispatch per session, with its own marker (`[dispatch-check][plugin-files]`), naming the file: nothing
+in the session can change an install, so every later paired dispatch goes through unchecked with one stderr
+line. No manifest, an unreadable one, or more than `max(5, entries // 10)` differing files (an installer
+transform or a mixed install, not an improvised edit) and nothing is checked, with one stderr line. A file
+tool writing over a generator (structured input, not shell text) still distrusts that generator's later
+prints, with the per-OUTPUT_PATH budget.
+Where it matters: a shell edit is possible, and seen, on the CLI (the install is user-writable; the SDK's file
+tools refuse `~/.claude`), in a `--plugin-dir` checkout and the CI lanes, and on the cloud lane if its install
+is writable (unmeasured). At Cowork local the plugin root is mounted read-only into the VM, so there the check
+is cost only (a hash of about 200 files, some 15-30 ms, paid only by a paired dispatch).
+Residuals: a generator modified, run and restored by shell inside the session hashes clean at dispatch (the
+file-tool check narrows it); the manifest regenerated after an edit, or this hook or `script_hashes.py`
+edited, is a deliberate actor with no local root of trust; `$SCRIPTS` set in an earlier shell call naming
+another copy is not resolved, so not hashed; a planted `__pycache__/*.pyc` matching its source's mtime and
+size is loaded instead of the source and is not hashed; site-packages and the interpreter are out of scope;
+agent front matter (e.g. `tools:`), SKILL.md and `references/` are not hashed; a generator run from another
+installed copy by an absolute path is not hashed; the hook's own
+imports run from `scripts/` and are shadowable before any hash is taken; and more than the threshold of
+changed files turns the check off with one stderr line.
 """
 
 from __future__ import annotations
@@ -207,6 +203,16 @@ def _squash(text: str) -> str:
 def _transcript_tools() -> Any:
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "stop_handover_check.py")
     spec = importlib.util.spec_from_file_location("stop_handover_check", path)
+    if spec is None or spec.loader is None:
+        raise ImportError(path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _script_hashes() -> Any:
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "script_hashes.py")
+    spec = importlib.util.spec_from_file_location("script_hashes", path)
     if spec is None or spec.loader is None:
         raise ImportError(path)
     mod = importlib.util.module_from_spec(spec)
@@ -876,543 +882,12 @@ def touches_file(command: str, path: str, distrusted: frozenset[str] | set[str] 
     return _writes_file(cmds, path, env, raw, assigned, set(distrusted))
 
 
-# What in a written path points into the plugin: the script folders as SKILL.md names them, a skills tree,
-# an install root.
-_PLUGIN_HINTS = ("$SCRIPTS", "${SCRIPTS}", "$SHARED_SCRIPTS", "${SHARED_SCRIPTS}", "PLUGIN_ROOT", "/skills/",
-                 *_INSTALL_MARKERS)  # fmt: skip
-_WRITERS = frozenset({"cp", "mv", "ln", "install", "rsync", "tee", "dd", "truncate", "patch", "tar", "unzip",
-                      "touch", "chmod", "curl", "wget", "git"})  # fmt: skip
-
-
-def _unwrapped(words: list[str]) -> list[str]:
-    """`words` without a leading `command` or `env` (and env's options and assignments)."""
-    while words and os.path.basename(words[0]) in ("command", "env"):
-        words = words[1:]
-        while words and (words[0].startswith("-") or _ASSIGN_RE.match(words[0])):
-            words = words[1:]
-    return words
-
-
-def _links(name: str, args: list[str]) -> bool:
-    """A command that makes a link: `ln` in any form, or `cp` with `-l`, `-s`, `--link` or
-    `--symbolic-link` (alone or in a cluster such as `-al`)."""
-    if name == "ln":
-        return True
-    if name != "cp":
-        return False
-    for a in args:
-        if a == "--":
-            break
-        if a in ("--link", "--symbolic-link") or (a.startswith("-") and not a.startswith("--") and
-                                                   re.search(r"[ls]", a[1:])):  # fmt: skip
-            return True
-    return False
-
-
-def _into_plugin(text: str) -> bool:
-    if any(g in text for g in GENERATORS) or any(h in text for h in _PLUGIN_HINTS):
-        return True
-    return text.startswith("/") and (norm_path(text) + "/").startswith(norm_path(HOOK_PLUGIN_ROOT) + "/")
-
-
-def _dynamic_names(cmds: list[_Cmd], command: str) -> set[str]:
-    """Names a parsed block assigns in a form its literal reading does not follow: from a command
-    substitution that could print a plugin path (`_may_name_plugin`), an array element (`NAME[0]=`),
-    `NAME+=`, `${NAME:=...}`, or a `read`, `printf -v`, `mapfile`, `getopts`, `declare -n`. A write
-    whose target names one could land anywhere."""
-    out = {name for name, sub in _subst_assignments(command) if _may_name_plugin(sub)}
-    for c in cmds:
-        if c.substituted:
-            continue
-        words = _words(c.argv)
-        for w in [*words, *(v for _n, v in c.assigns)]:
-            for groups in _RAW_DYNAMIC_RE.findall(w):
-                out.update(g for g in groups if g)
-        if words and (
-            (words[0] in _RAW_ASSIGNERS and (words[0] != "printf" or "-v" in words))
-            or (words[0] in _RAW_DECLARERS and any(re.fullmatch(r"-[A-Za-z]*n[A-Za-z]*", w) for w in words))
-        ):
-            out.update(m.group(0) for w in words[1:] for m in [re.match(r"[A-Za-z_][A-Za-z0-9_]*", w)] if m)
-    return out
-
-
-# `$NAME` directly followed by a quote: the quote ends the name (`"$S"ts` is `${S}ts`), but once quotes are
-# removed the two would read as one name (`$Sts`). Braced first, so every later reading keeps the boundary.
-_QUOTE_ENDS_NAME_RE = re.compile(r"\$([A-Za-z_][A-Za-z0-9_]*)(?=[\"'])")
-
-
-def _distrusts(command: str) -> set[str]:
-    """Generators a shell block could have rewritten. A generator named by anything but a run of it or a
-    read-only command; and every generator when the block writes into the plugin (a redirect, an
-    in-place edit, a copy, link or extraction whose target points there), makes a link to it (`ln`,
-    `cp -l`/`-s`, from its scripts, a generator or an install root), runs inline code that names
-    it, or cannot be read and either runs such inline code or mentions it in a line that writes
-    (`_raw_writes_into_plugin`). Names are
-    read with the block's own assignments filled in, so a name spelt apart (`G=dispatch_prompt; ...
-    "$G.py"`) is still seen, and a name a quote ends (`"$S"ts/x.py`) is read as the shell reads it."""
-    command = _QUOTE_ENDS_NAME_RE.sub(r"${\1}", command)
-    cmds = _parse_block(command)
-    if cmds is None:
-        return set(GENERATORS) if _raw_writes_into_plugin(command) else set()
-    _env_values, raw, _assigned = _env(cmds)
-    dynamic = _dynamic_names(cmds, command)
-
-    def unread(word: str) -> bool:  # names a name the block assigns in a form that cannot be read
-        return any(n in dynamic for n in _RAW_REF_RE.findall(word))
-
-    out: set[str] = set()
-    for c in cmds:
-        words = _words(c.argv)
-        name = os.path.basename(words[0]) if words else ""
-        filled = [_partial(w, raw) for w in words[1:]]
-        if any(_into_plugin(_partial(t, raw)) or unread(t) for t in c.writes):
-            return set(GENERATORS)
-        if name in _WRITERS:
-            targets = words[1:][-1:] if name in ("cp", "ln", "install", "rsync") else words[1:]
-            if any(_into_plugin(_partial(t, raw)) or (name in _RAW_TARGET_WRITERS and unread(t)) for t in targets):
-                return set(GENERATORS)
-        if name == "sed" and any(w == "-i" or w.startswith("-i") for w in filled) and any(map(_into_plugin, filled)):
-            return set(GENERATORS)
-        # A link to the plugin's scripts or a generator, wherever it is made, is a path a later write
-        # reaches the plugin through (`ln -s $SCRIPTS /tmp/L`, then `> /tmp/L/x.py`). A plain copy out of
-        # the plugin cannot change it, so only the link forms count.
-        link_words = _unwrapped(words)
-        link_name = os.path.basename(link_words[0]) if link_words else ""
-        link_args = [_partial(w, raw) for w in link_words[1:]]
-        if _links(link_name, link_words[1:]) and any(_into_plugin(w) for w in link_args if not w.startswith("-")):
-            return set(GENERATORS)
-        inline = _INTERPRETERS_RE.match(name) and any(w in ("-c", "-e") for w in words[1:])
-        if inline and any(_into_plugin(w) or "dispatch_" in w or "prompt.py" in w for w in filled):
-            return set(GENERATORS)
-        script = _script(words)
-        for g in GENERATORS:
-            if any(os.path.basename(_partial(t, raw)) == g for t in c.writes):
-                out.add(g)
-            elif any(os.path.basename(w) == g for w in filled) and name not in _READ_ONLY:
-                running = script is not None and os.path.basename(script) == g
-                if running and not any(os.path.basename(w) == g for w in filled[1:]):
-                    continue
-                out.add(g)
-    return out
-
-
-# A write in a line the parser could not read: a redirect (a `>` after a space, so `<path>` is not one),
-# a copy or in-place edit, a file opened for writing by inline code.
-# `>&` to a file (`>& F`, `1>&F`) is a write; `>&2` and `>&-` are not. Straight after `;`, `(` or `)` a
-# redirect counts only before a path-like target (`;>"$S/x.py"`, `(gen)>/w/o`): `)>1` and `f(x)>=2` are
-# comparisons in every language but shell, and this pattern also reads heredoc bodies and quoted code.
-_RAW_WRITE_RE = re.compile(
-    r"(?:(?:^|\s)[0-9&]?>>?\s*[^\s&]|(?:^|\s)[0-9]?>&\s*[^\s0-9&-]"
-    r"|[;()][0-9&]?>>?\s*(?:[/$\"'~]|\.\.?/)|[;()][0-9]?>&\s*(?:[/$\"'~]|\.\.?/)"
-    r"|\b(?:cp|mv|ln|tee|install|rsync|dd|truncate|patch)\s|sed\s+-i"
-    r"|open\([^)]*,\s*['\"][wax+]|write_text\(|write_bytes\()"
-)
-# A line that makes a link (`_links`), for the raw check.
-_RAW_LINK_RE = re.compile(
-    r"(?:^|[\s;&|(])(?:\S*/)?(?:ln\s|cp\s+(?:[^;&|]*\s)?(?:-[A-Za-z]*[ls][A-Za-z]*|--link|--symbolic-link)(?:\s|$))"
-)
-# An assignment and its value: a run of quoted and bare segments (`S2="$P"'/skills/'x` is one value).
-_RAW_ASSIGN_RE = re.compile(r"(?<![\w$./-])([A-Za-z_][A-Za-z0-9_]*)=((?:\"[^\"]*\"|'[^']*'|[^\s;&|\"'])*)")
-
-
-def _raw_filled(line: str, values: dict[str, list[str]]) -> str:
-    """`line` followed by every value the block assigns anywhere to each variable it names, filled in the
-    same way through every alias: what a link's operands could be, whichever assignment ran. A parameter
-    expansion with an operator (`${S%/x}`, `${S:-/tmp}`, `${S/a/b}`) names `S` too: its value stands for it."""
-    seen: set[str] = set()
-    out = [line]
-    frontier = [line]
-    while frontier:
-        nxt = []
-        for text in frontier:
-            for key in _RAW_REF_RE.findall(text):
-                if key in seen:
-                    continue
-                seen.add(key)
-                nxt += values.get(key, [])
-        out += nxt
-        frontier = nxt
-    return " ".join(out)
-
-
-# Commands a line may run beside a generator that saves its output: they print, and write nothing.
-_RAW_READERS = frozenset({"echo", "printf", "wc", "ls", "test", "[", "true", "cat", "head", "tail"})
-_RAW_SEGMENT_SEPS = frozenset({";", "&&", "||", "|"})
-_RAW_QUIET_REDIRECTS = (("2", ">", "/dev/null"), ("2", ">&", "1"))
-
-
-def _strip_comments(text: str) -> str:
-    r"""`text` without its shell comments: a `#` that begins a word outside quotes, to the end of its line.
-    shlex's own comment reading also cuts at a `#` inside a word (`$#`, `${#A}`, `a#b`), so it is not
-    used; and with no comment reading at all, an apostrophe in a comment (`# don't`) opens a quote that
-    pairs with the next real one and misreads every command after it. An escaped character is part of its
-    word, so `x\ #y` is the one word `x #y` and starts no comment."""
-    out: list[str] = []
-    quote = ""
-    escaped = False  # the character before `i` was the second half of an escape pair (`\ `, `\;`)
-    i = 0
-    while i < len(text):
-        ch = text[i]
-        if ch == "\\" and quote != "'" and i + 1 < len(text):
-            out.append(text[i : i + 2])  # an escaped character, outside quotes or inside double quotes
-            i += 2
-            escaped = True
-            continue
-        if quote:
-            if ch == quote:
-                quote = ""
-        elif ch in "'\"":
-            quote = ch
-        elif ch == "#" and not escaped and (i == 0 or text[i - 1] in " \t\n;&|()"):
-            end = text.find("\n", i)
-            i = len(text) if end < 0 else end
-            continue
-        out.append(ch)
-        escaped = False
-        i += 1
-    return "".join(out)
-
-
-# A run of operator characters shlex returns as one token (`;>`, `)>`, `);`): split into the shell's own
-# operators, so a redirect or a cut straight after `;`, `(` or `)` is read as one. `;;` stays whole.
-_RAW_OPERATOR_RE = re.compile(r";;|[;()]|[<>&|]+")
-
-
-def _raw_tokens(line: str) -> list[str] | None:
-    """`line`'s shell words and operators, comments removed; None when its quoting cannot be read."""
-    lex = shlex.shlex(_strip_comments(line), posix=True, punctuation_chars=True)
-    lex.whitespace_split = True
-    lex.commenters = ""
-    try:
-        tokens = list(lex)
-    except ValueError:
-        return None
-    out: list[str] = []
-    for tok in tokens:
-        if len(tok) > 1 and tok != ";;" and set(tok) <= set(";()<>&|") and set(tok) & set(";()"):
-            out += _RAW_OPERATOR_RE.findall(tok)
-        else:
-            out.append(tok)
-    return out
-
-
-_RAW_OPENERS = frozenset({"for", "while", "until", "if", "case", "select", "{", "("})
-_RAW_CLOSERS = frozenset({"done", "fi", "esac", "}", ")"})
-
-
-def _raw_env(lines: list[str], names: set[str]) -> dict[str, str] | None:
-    """The literal assignments of `lines` (a raw block's lines before the one judged) that bash certainly
-    ran: a command of assignments only, outside any loop, test or group, opening its line or following a
-    `;` (never after `&&` or `||`, which may skip it, nor before `|`, which runs it in a subshell), to a
-    name the whole block assigns once (`names`). A quote left open joins the lines up to the one that
-    closes it, read as one command (its string is no assignment). None when the nesting cannot be
-    followed or a quote is never closed."""
-    env: dict[str, str] = {}
-    depth = 0
-    before = ";"  # the separator before the next segment; a line that ends in `&&`, `||` or `|` carries it
-    pending = ""
-    for line in lines:
-        pending = f"{pending}\n{line}" if pending else line
-        tokens = _raw_tokens(pending)
-        if tokens is None:
-            continue
-        pending = ""
-        segment: list[str] = []
-        for tok in [*tokens, None]:
-            if tok is not None and tok not in _RAW_SEGMENT_SEPS:
-                segment.append(tok)
-                continue
-            if tok is None and not segment:
-                break  # an empty line, or one ending in a separator: `before` carries over
-            after = ";" if tok is None else tok
-            head = segment[0] if segment else ""
-            if head in _RAW_OPENERS:
-                depth += 1
-            elif head in _RAW_CLOSERS:
-                depth -= 1
-            elif (
-                depth == 0 and segment and before == ";" and after != "|"
-                and all(_ASSIGN_RE.match(w) for w in segment)
-            ):  # fmt: skip
-                for word in segment:
-                    name, _, value = word.partition("=")
-                    expanded = _expand(value, env)
-                    if name in names and expanded is not None:
-                        env[name] = expanded
-            before = after
-            segment = []
-        if depth < 0:
-            return None
-    return None if pending else env
-
-
-def _installed_script(path: str, env: dict[str, str], assigned: set[str]) -> bool:
-    """A plugin script other than a generator, run from an installed plugin: the path, filled from `env`,
-    is `<root>/skills/<skill>/scripts/<name>.py` or `<root>/scripts/<name>.py` where the root is the plugin
-    this hook runs from or one this session's runtime loaded our skills from (never merely a path that
-    contains an install marker), or `$SCRIPTS/<name>.py` / `$SHARED_SCRIPTS/<name>.py` with that variable
-    set in an earlier block. Running it is not a write into the plugin, as in the parsed branch."""
-    if os.path.basename(path) in GENERATORS:
-        return False
-    filled = _partial(path, env)
-    for var in ("SCRIPTS", "SHARED_SCRIPTS"):
-        if re.fullmatch(rf"\$(?:{var}|{{{var}}})/[\w.-]+\.py", filled):
-            return var not in assigned
-    m = re.fullmatch(r"(/[^$]*?)(?:/skills/[a-z][a-z-]*)?/scripts/[\w.-]+\.py", filled)
-    if m is None or ".." in filled.split("/") or "." in filled.split("/"):
-        return False
-    root = norm_path(m.group(1))
-    return root == norm_path(HOOK_PLUGIN_ROOT) or root in {norm_path(r) for r in _SESSION_ROOTS}
-
-
-def _saves_generator_output_elsewhere(line: str, env: dict[str, str], assigned: set[str]) -> bool:
-    """A raw line that only runs a generator, or another plugin script, and saves its output outside the
-    plugin, all or nothing: as in the parsed branch, a script named as the one being run is not a
-    mention of it. Exactly one command is `python<N> <script> ...` with no assignment before it, the
-    script a trusted generator (`_trusted_generator`) or an installed plugin script
-    (`_installed_script`), every argument resolved by `env` and none in the plugin or naming a
-    generator, and its only write its stdout to an absolute path that is neither; every other command is
-    a reader with no write. No substitution, no in-place flag, no `tee`; any doubt and
-    the line is not exempt."""
-    if "`" in line or "$(" in line:
-        return False
-    tokens = _raw_tokens(line)
-    if not tokens:
-        return False
-    segments: list[list[str]] = [[]]
-    for tok in tokens:
-        if tok in _RAW_SEGMENT_SEPS:
-            segments.append([])
-        else:
-            segments[-1].append(tok)
-    runs = 0
-    for seg in segments:
-        words: list[str] = []
-        redirects: list[tuple[str, str, str]] = []
-        i = 0
-        while i < len(seg):
-            tok = seg[i]
-            if tok and tok[0] in "<>&" or tok.endswith((">", "<")):
-                if i + 1 >= len(seg):
-                    return False
-                fd = words.pop() if words and words[-1].isdigit() else ""
-                redirects.append((fd, tok, seg[i + 1]))
-                i += 2
-                continue
-            words.append(tok)
-            i += 1
-        names = words
-        if not names or _ASSIGN_RE.match(names[0]) or "-i" in words or "tee" in words:
-            return False
-        quiet = all(r in _RAW_QUIET_REDIRECTS for r in redirects)
-        if names[0] in _RAW_READERS:
-            if not quiet or (names[0] == "printf" and "-v" in names):
-                return False
-            if any(_into_plugin(w) or "dispatch_" in w or "prompt.py" in w for w in names):
-                return False
-            continue
-        if not (re.fullmatch(r"python[0-9.]*", names[0]) and len(names) > 1):
-            return False
-        if not (_trusted_generator(names[1], env, assigned, set()) or _installed_script(names[1], env, assigned)):
-            return False
-        for arg in names[2:]:
-            value = _expand(arg, env)
-            if value is None or _into_plugin(value) or os.path.basename(value) in GENERATORS:
-                return False
-        runs += 1
-        out = [r for r in redirects if r not in _RAW_QUIET_REDIRECTS]
-        if len(out) > 1 or (out and (out[0][0] not in ("", "1") or out[0][1] not in (">", ">|"))):
-            return False
-        if out:
-            target = _expand(out[0][2], env)
-            if target is None or not target.startswith("/") or _into_plugin(target):
-                return False
-            if os.path.basename(target) in GENERATORS:
-                return False
-    return runs == 1
-
-
 # A heredoc opened on a line: `<<` or `<<-`, then a word wholly bare or wholly quoted (`PY`, `'PY'`,
 # `"EOF"`, `\EOF`) of letters, digits, `_`, `.` and `-`, ending where the shell ends a word. Anything else
 # (`<<EOF:x`, `<<"E"OF`, `<<E'OF'`, `<< $V`) is not read, and the block is not followed.
 _RAW_HEREDOC_RE = re.compile(
     r"(?<!<)<<(?!<)(-?)[ \t]*(?:'([\w.-]+)'|\"([\w.-]+)\"|\\?([A-Za-z_][\w.-]*))(?=[ \t;&|()<>]|$)"
 )
-# What `str.splitlines` splits on besides `\n`; the shell does not, so a block holding one is not followed.
-_RAW_OTHER_BREAKS = re.compile("[\r\v\f\x1c\x1d\x1e\x85\u2028\u2029]")
-# A command this shell runs from text (`eval`, `source`, `.`): what it assigns cannot be read.
-_RAW_SOURCES_RE = re.compile(r"(?:^|[\s;&|({])(?:source|\.|eval)(?:\s|$)")
-# Commands that assign the names they are given a value the block does not show, and declarations that can
-# make a name refer to another (`declare -n`); a declaration's `NAME=value` is counted like any assignment.
-_RAW_ASSIGNERS = frozenset({"read", "mapfile", "readarray", "printf", "getopts", "select"})
-_RAW_DECLARERS = frozenset({"declare", "typeset", "local", "export", "readonly"})
-_RAW_DYNAMIC_RE = re.compile(
-    r"\$\{([A-Za-z_][A-Za-z0-9_]*):?=|(?<![\w$./-])([A-Za-z_][A-Za-z0-9_]*)(?:\[[^\]]*\])?\+="
-    r"|(?<![\w$./-])([A-Za-z_][A-Za-z0-9_]*)\[[^\]]*\]="
-)
-# `NAME=$(...)` or NAME=`...` (quoted or not), with the substitution's text up to the line's end.
-_RAW_SUBST_ASSIGN_RE = re.compile(r"(?<![\w$./-])([A-Za-z_][A-Za-z0-9_]*)=\"?(?=\$\(|`)")
-
-
-def _subst_assignments(text: str) -> list[tuple[str, str]]:
-    """Each `NAME=$(...)` / NAME=`...` in `text`, with the substitution's own text (to its matching `)`
-    or backtick; to the end of `text` when it is never closed)."""
-    out = []
-    for m in _RAW_SUBST_ASSIGN_RE.finditer(text):
-        i = m.end()
-        if text[i] == "`":
-            j = text.find("`", i + 1)
-            out.append((m.group(1), text[i : j + 1 if j >= 0 else len(text)]))
-            continue
-        depth, j = 0, i + 1
-        while j < len(text):
-            depth += {"(": 1, ")": -1}.get(text[j], 0)
-            if depth == 0:
-                break
-            j += 1
-        out.append((m.group(1), text[i : j + 1]))
-    return out
-
-
-def _may_name_plugin(text: str) -> bool:
-    """Whether a command substitution could print a path into the plugin: its text names the plugin, or
-    a plugin, skills or scripts folder (`$(ls -d ~/.claude/plugins/cache/*/x/scripts)`). One that names
-    none (`$(dirname "$ARTIFACTS_ROOT")`, `$(date +%s)`) is taken not to."""
-    return (
-        _into_plugin(text) or re.search(r"(?<![A-Za-z])(?:plugins?|skills|scripts)(?![A-Za-z])", text, re.I) is not None
-    )
-
-
-# Commands whose arguments may be what they write (`sed` only with `-i`): the ones `_RAW_WRITE_RE` names.
-_RAW_TARGET_WRITERS = frozenset({"cp", "mv", "ln", "tee", "install", "rsync", "dd", "truncate", "patch", "sed"})
-_RAW_CUTS = frozenset({*_RAW_SEGMENT_SEPS, "&", "(", ")", "{", "}", ";;"})
-
-
-# The redirects that write no file: to the null device or a standard stream (`> /dev/null`, `2>/dev/stderr`,
-# `&>> '/dev/null'`), or a descriptor duplicated or closed (`2>&1`, `>&2`, `3>&-`). The target must end
-# where the shell ends a word, so `/dev/nullx`, `/dev/null2` and `/dev/null/../x` are still files.
-_RAW_QUIET_TARGETS = frozenset({"/dev/null", "/dev/stdout", "/dev/stderr"})
-_RAW_WORD_END = r"(?=$|[\s;&|()<>]|[\"'`](?:$|[\s;&|()<>]))"
-_RAW_QUIET_RE = re.compile(
-    r"(?:[0-9]*|&)(?:>>|>\||>&|>)[ \t]*(?P<q>[\"']?)/dev/(?:null|stdout|stderr)(?P=q)" + _RAW_WORD_END
-    + r"|[0-9]*>&[ \t]*(?:[0-9]+|-)" + _RAW_WORD_END
-)  # fmt: skip
-
-
-def _raw_quiet(text: str) -> str:
-    """`text` without the redirects that write nothing (`_RAW_QUIET_RE`)."""
-    return _RAW_QUIET_RE.sub(" ", text)
-
-
-def _raw_targets_by_line(lines: list[str], bodies: set[int]) -> tuple[list[list[str] | None], set[int]]:
-    """`_raw_write_targets` per line, read per command, and the lines read as text. A quote left open,
-    or a backslash continuation, joins the lines up to the one that ends the command; every joined line
-    holds the joined command's targets, and the lines before the last are read as text, as a heredoc body
-    is. When those targets cannot be told, the joined lines are None: read whole, and only where the
-    write pattern finds a write in them. So is every line of a quote never closed."""
-    out: list[list[str] | None] = [None for _ in lines]
-    text = set(bodies)
-    pending: list[int] = []
-    for i in range(len(lines)):
-        if i in bodies:
-            continue
-        pending.append(i)
-        joined = "\n".join(lines[j] for j in pending)
-        if _raw_tokens(joined) is None:
-            continue  # a quote still open, or a line continued: the command goes on
-        out[i] = _raw_write_targets(joined)
-        if out[i] is not None:
-            # The lines a quote or continuation joined are one command: they write where it writes.
-            for j in pending[:-1]:
-                out[j] = out[i]
-        text.update(pending[:-1])
-        pending = []
-    return out, text
-
-
-def _raw_write_targets(line: str) -> list[str] | None:
-    """The words a raw line writes to: each output redirect's target, and every argument of a command
-    that writes files (`tee`, `dd`, `sed -i`, ...; only the destination of `cp`, `install`, `rsync`). None
-    when that cannot be told: the line does not tokenize, a quoted argument is a command line that writes
-    (`bash -c "cp ..."`), or it runs inline code that opens a file (`open(..., 'w')`)."""
-    # A bare `open(path)` with one plain argument opens for reading; a method `.open(...)`, `open(*args)`, any other
-    # open, or a call that writes, is unknown.
-    if re.search(r"open\(|write_text\(|write_bytes\(", re.sub(r"(?<![\w.])open\(\s*[^,()*]*\)", "", line)):
-        return None
-    tokens = _raw_tokens(line)
-    if tokens is None or any(re.search(r"\s", t) and _RAW_WRITE_RE.search(_raw_quiet(t)) for t in tokens):
-        return None  # a quoted argument that is itself a command line (`bash -c "cp ..."`)
-    out: list[str] = []
-    words: list[str] = []
-    n = 0
-    while n <= len(tokens):
-        tok = tokens[n] if n < len(tokens) else ";"
-        n += 1
-        if tok in _RAW_CUTS:
-            cmd = _unwrapped(words)
-            name = os.path.basename(cmd[0]) if cmd else ""
-            args = cmd[1:]
-            if name in ("cp", "install", "rsync") and not any(
-                a.startswith("-t") or a.startswith("--target") for a in args
-            ):
-                out += args[-1:]  # the destination; a copy out of the plugin is no write into it
-            elif name in _RAW_TARGET_WRITERS and (name != "sed" or any(w.startswith("-i") for w in cmd)):
-                out += args
-            words = []
-            continue
-        if tok and set(tok) <= set("<>&|") and ("<" in tok or ">" in tok):
-            target = tokens[n] if n < len(tokens) else ""
-            n += 1
-            dup = tok.endswith("&") and re.fullmatch(r"[0-9-]+", target)
-            if ">" in tok and not dup and target not in _RAW_QUIET_TARGETS:
-                out.append(target)
-            if words and words[-1].isdigit():
-                words.pop()
-            continue
-        words.append(tok)
-    return out
-
-
-_RAW_REF_RE = re.compile(r"\$\{?([A-Za-z_][A-Za-z0-9_]*)")
-
-
-def _raw_dynamic_names(lines: list[str], shell_lines: list[str]) -> tuple[set[str], dict[str, list[str]]]:
-    """Names a raw block may assign in a way `_raw_env` does not read: `${NAME:=...}`, `${NAME=...}` or
-    `NAME+=`, an array element (`NAME[0]=`, which `$NAME` reads) anywhere (an unquoted heredoc body
-    expands the first two in this shell), a value from a command substitution that could print a plugin
-    path (`NAME=$(ls -d .../scripts)`, `_may_name_plugin`),
-    and every name-like word of a `read`, `printf -v`, `declare`, ... command among the lines this shell
-    runs. Such a name is
-    never resolved, and a write that names it may land anywhere. Also each `for NAME in WORDS` loop's
-    words, which are what NAME can hold (a `for` with no `in` takes the arguments, and is a name above)."""
-    out: set[str] = set()
-    loops: dict[str, list[str]] = {}
-    for line in lines:
-        for groups in _RAW_DYNAMIC_RE.findall(line):
-            out.update(g for g in groups if g)
-        for name, sub in _subst_assignments(line):
-            if _may_name_plugin(sub):
-                out.add(name)
-    for line in shell_lines:
-        tokens = _raw_tokens(line) or line.split()
-        segment: list[str] = []
-        for tok in [*tokens, ";"]:
-            if tok not in _RAW_SEGMENT_SEPS and tok not in ("&", "(", ")", "{", "}"):
-                segment.append(tok)
-                continue
-            words = _unwrapped(segment)
-            if words and (
-                (words[0] in _RAW_ASSIGNERS and (words[0] != "printf" or "-v" in words))
-                or (words[0] in _RAW_DECLARERS and any(re.fullmatch(r"-[A-Za-z]*n[A-Za-z]*", w) for w in words))
-            ):
-                out.update(m.group(0) for w in words[1:] for m in [re.match(r"[A-Za-z_][A-Za-z0-9_]*", w)] if m)
-            elif words[:1] == ["for"] and len(words) > 1:
-                if len(words) > 2 and words[2] == "in":
-                    loops.setdefault(words[1], []).extend(words[3:])
-                else:
-                    out.add(words[1])
-            segment = []
-    return out, loops
 
 
 def _heredoc_bodies(lines: list[str], quoted_ok: bool = False) -> set[int] | None:
@@ -1420,7 +895,7 @@ def _heredoc_bodies(lines: list[str], quoted_ok: bool = False) -> set[int] | Non
     `<<` cannot be followed: one the pattern does not read (`<< $V`, `$((1<<2))`, `<<EOF:x`, `<<"E"OF`), a
     body never closed, one this shell itself runs (`source`, `.`, `eval`), whose assignments would then
     be real, or a block with a heredoc and any line ending in a backslash (in an unquoted body the shell
-    joins it to the next line, which then cannot close the body). With `quoted_ok` (the inline reading), a
+    joins it to the next line, which then cannot close the body). With `quoted_ok`, a
     continued line elsewhere does not stop a QUOTED body being followed, whose text the shell takes as it
     stands; only a continued opener line, or an unquoted body beside a continued line, does."""
     bodies: set[int] = set()
@@ -1442,360 +917,6 @@ def _heredoc_bodies(lines: list[str], quoted_ok: bool = False) -> set[int] | Non
         if opened and (line.endswith("\\") or ((unquoted or not quoted_ok) and any(x.endswith("\\") for x in lines))):
             return None
     return None if pending else bodies
-
-
-# Inline code that may change a file: a write call, or a call that runs other code. Read only for code whose
-# one naming of the plugin is the bare `/skills/` separator (`_inline_into_plugin`).
-_INLINE_WRITE_RE = re.compile(
-    r"write_text\(|write_bytes\(|\.write\(|\bshutil\.|\bos\.(?:rename|replace|link|symlink|remove|unlink|system|"
-    r"popen|spawn|exec|write|open|makedirs|mkdir|chmod|truncate)|\bsubprocess\b|\bexec\(|\beval\(|__import__|"
-    r"\bimportlib\b|\bgetattr\(|(?<![\w.])compile\(|\.(?:rename|symlink_to|hardlink_to|link_to|touch|unlink)\("
-    r"|\.(?:write|append)File\w*\(|\.(?:copyFile|cp|rename|symlink|link|createWriteStream)\w*\(|\bFile\.(?:write|open)"
-    r"|\bIO\.write|\.open\("
-)
-# Shell arithmetic (`$((N+1))`), which `_lift_substitutions` does not follow.
-_ARITH_RE = re.compile(r"\$\(\((?:[^()]|\([^()]*\))*\)\)")
-# How deep command substitutions inside command substitutions are read for inline code.
-_INLINE_DEPTH = 4
-
-
-def _open_writes(code: str) -> bool:
-    """Whether an `open(` call in `code` may write: one with a second argument that is not a literal read
-    mode (`"r"`, `"rb"`, `"rt"`), a `mode` keyword, a starred argument, or one whose arguments cannot be
-    read. Arguments are split at the call's own commas, so `open(c.rsplit("/", 1)[0] + "/p.json")` is one."""
-    for m in re.finditer(r"(?<![\w.])open\(", code):
-        depth, i = 1, m.end()
-        args: list[str] = []
-        current = ""
-        while i < len(code) and depth:
-            ch = code[i]
-            if ch in "([{":
-                depth += 1
-            elif ch in ")]}":
-                depth -= 1
-            if depth == 1 and ch == ",":
-                args.append(current)
-                current = ""
-            elif depth:
-                current += ch
-            i += 1
-        if depth:
-            return True  # never closed
-        args = [a.strip() for a in [*args, current] if a.strip()]
-        if not args or any(a.startswith(("*", "mode")) for a in args):
-            return True
-        if len(args) > 1 and not re.fullmatch(r"""(["'])r?[bt]?r?\1""", args[1]):
-            return True
-    return False
-
-
-# Commands that run a file's text as commands of this shell: a heredoc body saved to that file is code.
-_BODY_RUNNERS = frozenset({"source", ".", "eval"})
-
-
-def _interpreter(name: str) -> bool:
-    """A program name the raw reading takes as an interpreter (`_INTERPRETERS_RE`, and `pypy`)."""
-    return bool(_INTERPRETERS_RE.match(name) or re.fullmatch(r"pypy[0-9.]*", name))
-
-
-# Interpreter options that take the next word as their value, per family: the program never follows one
-# directly. An option not listed is read as a flag.
-_OPTION_ARGS: dict[str, frozenset[str]] = {
-    "python": frozenset({"-X", "-W", "--check-hash-based-pycs"}),
-    "perl": frozenset({"-I", "-M", "-m"}),
-    "node": frozenset({"-r", "--require", "--import", "--loader", "--experimental-loader", "-C", "--conditions",
-                       "--input-type", "--env-file"}),
-    "ruby": frozenset({"-I", "-r", "-C", "-E"}),
-    "sh": frozenset({"-o", "-O", "+o", "+O"}),
-    "uv": frozenset({"--with", "--with-editable", "--with-requirements", "--python", "-p", "--project",
-                     "--directory", "--env-file", "--index", "--default-index", "--extra", "--group", "--package",
-                     "--from", "-w"}),
-}  # fmt: skip
-
-
-def _family(name: str) -> str:
-    if re.fullmatch(r"(?:python|pypy)[0-9.]*", name):
-        return "python"
-    if name in ("node", "deno", "bun"):
-        return "node"
-    if name in ("bash", "sh", "zsh", "dash", "ksh"):
-        return "sh"
-    if name in ("uv", "uvx"):
-        return "uv"
-    return name
-
-
-def _run_program(name: str, words: list[str], depth: int = 0) -> str:
-    """The program a run of interpreter `name` with `words` executes: the first plain word after the
-    interpreter's own options and their values (`-X utf8 F`, `-W ignore F`, `node -r X F`, `uv run --with x
-    F`; `python3 -m runpy F` runs F). "" when it is not a file the words name: a module (`-m json.tool`), no
-    plain word, `uv` without `run`."""
-    family = _family(name)
-    if name == "uv":  # `uvx F` runs F; `uv` runs one only through `uv run`
-        if not words or words[0] != "run":
-            return ""
-        words = words[1:]
-    takes = _OPTION_ARGS.get(family, frozenset())
-    i = 0
-    while i < len(words):
-        w = words[i]
-        if w == "--":
-            i += 1
-            break
-        if family == "python" and w == "-m":
-            if i + 1 < len(words) and words[i + 1] == "runpy":
-                i += 2
-                continue
-            return ""
-        if w in takes or (w and set(w) <= set("<>&|")):
-            i += 2  # an option and its value, or a redirect and its target
-            continue
-        if w.startswith(("-", "+")) and len(w) > 1:
-            i += 1
-            continue
-        break
-    if i >= len(words):
-        return ""
-    program = words[i]
-    if family == "uv" and depth < 2 and _interpreter(os.path.basename(program)):
-        return _run_program(os.path.basename(program), words[i + 1 :], depth + 1)  # `uv run python3 F`
-    return program
-
-
-def _runs(target: str, program: str, words: list[str]) -> bool:
-    """Whether a run names the saved file `target` (spelt the same, or the same path once normalised:
-    `h.sh` / `./h.sh`), or a substitution among its words reads it (`eval "$(cat F)"`). `program` is set
-    only when the run's program is a plugin script: the saved file is then that script's data, so only the
-    program word counts. Otherwise any word may be the program (an option the reading does not know)."""
-    norm = os.path.normpath(target) if not target.startswith("$") else target
-    candidates = [program] if program else words
-    if any(w == target or (w and not w.startswith("$") and os.path.normpath(w) == norm) for w in candidates):
-        return True
-    return any(target in w for w in words if "$(" in w or "`" in w)
-
-
-def _inline_units(lines: list[str], bodies: set[int], values: dict[str, list[str]], depth: int = 0) -> list[str]:
-    """The inline code a raw block runs, each piece with the words it is given, read per command (lines a
-    quote, a continuation or a trailing `|`, `|&`, `&&` or `||` joins are one) and per segment:
-      * an interpreter given `-c` or `-e` (named directly, or by a variable any of whose values the block
-        assigns is one, `P=python3; $P -c`): the words after the interpreter, so a path passed as an
-        argument is read too, and a heredoc the command opens (`-c "$(cat <<PY ... PY)"`);
-      * an interpreter that reads its program from stdin, only where stdin is fed: after `|`, with a `<`
-        redirect, with a heredoc of its own (or after `|` from a segment that opened one), or with `-` or
-        `-s` as its program. `python3 --version` reads nothing. For a heredoc, the body is the code and the
-        interpreter's words its arguments (`python3 - "$T" <<PY`);
-      * a heredoc body saved to a file that a later segment of the block runs, as a script or through
-        `source`, `.` or `eval` (`cat > w.py <<PY ... PY; python3 w.py "$T"`), joined with that segment's
-        words. When that segment's program (`_run_program`) is a plugin script, only the program word
-        counts: a file given to a plugin script as an argument is that script's data
-        (`--scenarios-input saved.json`). A body this block runs no other way is data, never code; one
-        written by anything but a heredoc is not read (KNOWN RESIDUALS);
-      * the same, recursively, inside each command substitution (`X="$(python3 -c ...)"`, backticks), and
-        inside an UNQUOTED heredoc body, which the shell expands; arithmetic and comments removed first. A
-        substitution that cannot be followed adds nothing, since its command's own segments are read anyway.
-    Each piece is read on its own words, never its line's: the same line may run a plugin script."""
-    units: list[str] = []
-    pending: list[int] = []
-    fed_bodies: dict[int, str] = {}  # a heredoc's opening line -> the words of the interpreter it feeds
-    saved: dict[int, list[str]] = {}  # each line of a command -> what that command writes to
-    # (last line, words after the runner, its program when that is a plugin script) of each script run
-    runs: list[tuple[int, list[str], str]] = []
-
-    def program(word: str) -> str:
-        if word.startswith("$"):
-            found = [v for v in values.get(word[1:].strip("{}"), []) if _interpreter(os.path.basename(v))]
-            return os.path.basename(found[0]) if found else ""
-        return os.path.basename(word)
-
-    def plugin_program(word: str) -> str:  # the program word when it is a plugin script, else ""
-        # Read per word, as `_inline_into_plugin` reads it: a value that is the hook's own root names the plugin.
-        return word if word and any(_into_plugin(w) for w in _raw_filled(word, values).split()) else ""
-
-    def substitutions(text: str) -> list[str]:
-        subs = [b.replace('\\"', '"') for b in re.findall(r"`((?:[^`\\]|\\.)*)`", text)]
-        plain = _strip_comments(_ARITH_RE.sub("0", text))
-        lifted = _lift_substitutions(plain) if "$(" in plain else None
-        return subs + (lifted[1] if lifted is not None else [])
-
-    for i in range(len(lines)):
-        if i in bodies:
-            continue
-        pending.append(i)
-        joined = "\n".join(lines[j] for j in pending)
-        # `\` and a newline outside single quotes join two lines into one word list (`python3 \` + `-c ...`).
-        tokens = _raw_tokens(re.sub(r"\\\n", " ", joined))
-        if i < len(lines) - 1 and (tokens is None or (tokens and tokens[-1] in ("|", "|&", "&&", "||"))):
-            continue  # a quote still open, a line continued, or a pipe into the next line: the command goes on
-        tokens = tokens if tokens is not None else joined.split()
-        command, last = list(pending), pending[-1]
-        pending = []
-        if depth < _INLINE_DEPTH:
-            for sub in substitutions(joined):
-                units += _inline_units(sub.splitlines(), set(), values, depth + 1)
-        targets = _raw_write_targets(joined) or []
-        saved.update({j: targets for j in command})
-        opener = next((j for j in command if "<<" in lines[j]), None)
-        segment: list[str] = []
-        before = ";"
-        heredoc_before = False
-        for tok in [*tokens, ";"]:
-            if tok not in _RAW_CUTS and tok != "|&":
-                segment.append(tok)
-                continue
-            words, sep, before, segment = segment, before, tok, []
-            piped = sep in ("|", "|&")
-            own_heredoc = any(w in ("<<", "<<-") for w in words)
-            heredoc_fed = own_heredoc or (piped and heredoc_before)
-            heredoc_before = heredoc_before or own_heredoc
-            if words and words[0] in _BODY_RUNNERS:
-                args = [w for w in words[1:] if w != "--"]
-                runs.append((last, words[1:], plugin_program(args[0] if args else "")))  # runs a file as commands
-                continue
-            at = [k for k, w in enumerate(words) if _interpreter(program(w))]
-            if not at:
-                continue
-            rest = words[at[0] + 1 :]
-            if any(w in ("-c", "-e") for w in rest):
-                units.append(" ".join(rest))
-                if opener is not None and any("<<" in w for w in rest):
-                    fed_bodies[opener] = " ".join(rest)  # a heredoc inside the code argument
-                continue
-            plain: list[str] = []
-            skip = False
-            fed = piped
-            first = ""
-            for w in rest:
-                if skip:
-                    skip = False  # a redirect's target
-                elif w and set(w) <= set("<>&|"):
-                    skip = True
-                    fed = fed or "<" in w
-                elif w == "-" and not first:
-                    first = "-"  # `python3 - ARGS`: the program is stdin, the rest its arguments
-                elif not w.startswith(("-", "/dev/stdin", "/proc/self/fd/0")):
-                    plain.append(w)
-                    first = first or w
-            if plain and "-s" not in rest and first != "-":
-                # runs a script, read only when this block wrote it
-                runs.append((last, rest, plugin_program(_run_program(program(words[at[0]]), rest))))
-            elif opener is not None and heredoc_fed:
-                fed_bodies[opener] = " ".join(rest)
-            elif fed:
-                units.append(joined)
-    group: list[int] = []
-    for i in range(len(lines) + 1):
-        if i in bodies:
-            group.append(i)
-            continue
-        if group:
-            body = "\n".join(lines[j] for j in group)
-            opener = group[0] - 1
-            if opener in fed_bodies:
-                units.append(body + "\n" + fed_bodies[opener])
-            for target in saved.get(opener, []):
-                for ran_at, rest, prog in runs:
-                    if ran_at > opener and _runs(target, prog, rest):
-                        units.append(body + "\n" + " ".join(rest))
-            # An unquoted body is expanded by the shell: its substitutions run.
-            if depth < _INLINE_DEPTH and any(m.group(4) for m in _RAW_HEREDOC_RE.finditer(lines[opener])):
-                for sub in substitutions(body):
-                    units += _inline_units(sub.splitlines(), set(), values, depth + 1)
-            group = []
-    return units
-
-
-def _inline_into_plugin(code: str, values: dict[str, list[str]]) -> bool:
-    """Whether a piece of inline code (`_inline_units`), with the block's assignments filled in, is held:
-    as the parsed branch holds it, when it names a generator or names the plugin by anything but the bare
-    `/skills/` separator (`$SCRIPTS`, `PLUGIN_ROOT`, an install marker, an absolute path under the plugin
-    this hook runs from). Code whose only naming is `/skills/` -- the plugin-finder every SKILL.md's
-    Step 0 runs (`c.rsplit("/skills/", 1)[0] + "/.claude-plugin/plugin.json"`) -- is held only when it
-    also writes or runs code (`_INLINE_WRITE_RE`, `_open_writes`, a redirect or copy). That holds only for
-    `/skills/` as a whole quoted literal: a path under a skills folder (`'~/**/skills/x/scripts'`,
-    `$P/skills/...` with `P` set in an earlier call) names the plugin, and is held."""
-    filled = _raw_filled(code, values)
-    if any(g in filled for g in GENERATORS) or "dispatch_" in filled or "prompt.py" in filled:
-        return True
-    if "${!" in filled:
-        return True  # an indirect expansion names whatever variable it is given, the plugin's included
-    words = re.split(r"""[\s"'(),=+]+""", filled)
-    if not (_into_plugin(filled) or any(_into_plugin(w) for w in words)):
-        return False
-    if any(h in filled for h in _PLUGIN_HINTS if h != "/skills/"):
-        return True
-    if "/skills/" in re.sub(r"""(?<![\w"'$}/])(["'])/skills/\1(?![\w"'/$])""", "", filled):
-        return True  # a path under a skills folder, not the bare separator Step 0 passes to `rsplit`
-    root = norm_path(HOOK_PLUGIN_ROOT) + "/"
-    if any(w.startswith("/") and (norm_path(w) + "/").startswith(root) for w in words):
-        return True
-    return bool(_INLINE_WRITE_RE.search(filled) or _open_writes(filled) or _RAW_WRITE_RE.search(_raw_quiet(filled)))
-
-
-def _raw_writes_into_plugin(command: str) -> bool:
-    """For a block the parser cannot read (a heredoc, a loop): whether it runs inline code that names a
-    generator or the plugin (`_inline_units`, `_inline_into_plugin`), as a readable block's inline code is
-    held, or any line both writes (a redirect, a copy, an in-place edit, a file opened by inline code) and
-    names the plugin or a generator. Read
-    line by line, so a heredoc's body is checked too. A line that only runs a generator and saves its
-    output outside the plugin is not such a line, unless the block changes folder (a relative path
-    elsewhere in it could then land in the plugin) or has a heredoc it cannot follow. A heredoc's body is
-    not commands of this shell: it never supplies an assignment (`_raw_env` reads only the other lines),
-    every assignment-like word in it still counts against resolving that name, and a line in it is never
-    exempt."""
-    lines = command.splitlines()
-    bodies = None if _RAW_OTHER_BREAKS.search(command) else _heredoc_bodies(lines)
-    shell_lines = [x for j, x in enumerate(lines) if j not in (bodies or set())]
-    off = (
-        bodies is None
-        or re.search(r"(?<![\w.-])(?:cd|pushd|popd)(?![\w.-])", command) is not None
-        or any(_RAW_SOURCES_RE.search(x) for x in shell_lines)
-    )
-    bodies = bodies or set()
-    # Every name the block assigns anywhere (a loop or heredoc body, a command's prefix, `export`): one
-    # assigned twice is never resolved, nor one assigned in a form `_raw_env` does not read.
-    counts: dict[str, int] = {}
-    for name in re.findall(r"(?<![\w$./-])([A-Za-z_][A-Za-z0-9_]*)=", command):
-        counts[name] = counts.get(name, 0) + 1
-    dynamic, loops = _raw_dynamic_names(lines, shell_lines)
-    for name in [*dynamic, *loops]:
-        counts[name] = counts.get(name, 0) + 2
-    once = {name for name, n in counts.items() if n == 1}
-    values: dict[str, list[str]] = {name: list(words) for name, words in loops.items()}
-    for name, value in _RAW_ASSIGN_RE.findall(command):
-        values.setdefault(name, []).append(value.strip("\"'"))
-    # Inline code that names a generator or the plugin, as a readable block's does (`_inline_into_plugin`).
-    inline_bodies = None if _RAW_OTHER_BREAKS.search(command) else _heredoc_bodies(lines, quoted_ok=True)
-    if any(_inline_into_plugin(unit, values) for unit in _inline_units(lines, inline_bodies or set(), values)):
-        return True
-    targets_at, text_lines = _raw_targets_by_line(lines, bodies)
-    for i, line in enumerate(lines):
-        env = None if off or i in bodies else _raw_env([x for j, x in enumerate(lines[:i]) if j not in bodies], once)
-        if env is not None and _saves_generator_output_elsewhere(line, env, set(counts)):
-            continue
-        # A link whose operand reaches the plugin only through a variable (`ln -s "$S" /tmp/L`).
-        if _RAW_LINK_RE.search(line) and _into_plugin(_raw_filled(line, values)):
-            return True
-        # A line writes when the pattern says so, or when its own words show a target the pattern can miss
-        # (`echo x>"$F"`, with no space before the `>`), or cannot be read and holds a `>` (any `>`, one to
-        # the null device included: beside code that may write anywhere, a quiet redirect proves nothing).
-        # A line of text (a heredoc body, the inside of a string) is read by the pattern alone, as before.
-        targets = targets_at[i]
-        matched = _RAW_WRITE_RE.search(_raw_quiet(line))
-        if not matched and (targets == [] or i in text_lines or (targets is None and ">" not in line)):
-            continue
-        if matched and (_into_plugin(line) or "dispatch_" in line or "prompt.py" in line):
-            return True
-        # What it writes to, with the block's own values filled in (`cat > "$D/$G" <<EOF`), whichever
-        # assignment ran; the whole line when its targets cannot be told apart.
-        written = line if targets is None else " ".join(targets)
-        filled = _raw_filled(written, values)
-        if _into_plugin(filled) or "dispatch_" in filled or "prompt.py" in filled:
-            return True
-        # A name the block assigns in a form that cannot be read could hold anything; so could an indirect
-        # expansion (`${!N}`), which names whatever variable N holds.
-        if any(name in dynamic for name in _RAW_REF_RE.findall(written)) or "${!" in filled:
-            return True
-    return False
 
 
 def _file_keys(word: str, env: dict[str, str]) -> frozenset[str]:
@@ -1926,7 +1047,6 @@ def _comparands(rows: list[dict[str, Any]]) -> list[tuple[str, frozenset[str] | 
                     cmd = inp.get("command")
                     if not isinstance(cmd, str):
                         continue
-                    distrusted |= _distrusts(cmd)
                     verdict: Verdict = (False, [], None) if side else _generator_block(cmd, distrusted)
                     details = redo_details(cmd)
                     if details is not None and not (details and all(any(d & r for r in rejected) for d in details)):
@@ -2251,7 +1371,6 @@ def _unprinted_reason(rows: list[dict[str, Any]], context: str, agent: str, outp
             cmd = b["input"].get("command")
             if not isinstance(cmd, str):
                 continue
-            distrusted |= _distrusts(cmd)
             if not row.get("isSidechain") and generator is not None:
                 cmds = _parse_block(cmd)
                 runs = (
@@ -2264,9 +1383,9 @@ def _unprinted_reason(rows: list[dict[str, Any]], context: str, agent: str, outp
                     latest_distrusted = set(distrusted)
     if generator is not None and generator in distrusted:
         return (
-            f"{head}. The plugin's scripts were changed in this session, so no prompt printed since can be "
-            "trusted as the generator's own, and running it again will not change that. This dispatch goes "
-            f"through after {MAX_HOLDS} holds."
+            f"{head}. The prompt generator was written over in this session (`{generator}`), so no prompt it "
+            "prints can be vouched for as its own, and nothing in this session can change that. This dispatch "
+            f"goes through after {MAX_HOLDS} holds."
         )
     if latest is None or generator is None:
         return f"{head}. {_HOW_TO_PRINT}"
@@ -2315,6 +1434,56 @@ def _unprinted_reason(rows: list[dict[str, Any]], context: str, agent: str, outp
     )
 
 
+# --- the plugin's files against the hashes this version shipped with (module docstring) ------------------
+
+PLUGIN_FILES = "plugin-files"  # the tree hold's marker key: `[dispatch-check][plugin-files]`, once per session
+
+
+def _plugin_mismatches() -> list[str]:
+    """The plugin files that differ from `data/script-hashes.json` under the root this hook runs from; [] when
+    they all match, and [] with one stderr line when the manifest cannot judge this install."""
+    try:
+        mismatched, why = _script_hashes().verify_detail(HOOK_PLUGIN_ROOT)
+    except Exception as e:  # noqa: BLE001 - a missing or broken module must not take the comparison down
+        mismatched, why = None, f"{type(e).__name__}: {e}"
+    if mismatched is None:
+        print(f"dispatch_prompt_check: plugin files not checked ({why})", file=sys.stderr)
+        return []
+    return list(mismatched)
+
+
+def _tree_hold(
+    rows: list[dict[str, Any]], output_path: str, agent: str, mismatched: list[str]
+) -> dict[str, Any] | None:
+    """One hold per session when a plugin file differs, naming it (the dispatch's own generator first); every
+    later paired dispatch goes through unchecked with a stderr line, since nothing in the session can change
+    an install."""
+    generator = _generator_for(agent)
+    own = f"skills/{GENERATORS[generator]}/scripts/{generator}" if generator is not None else None
+    first = own if own in mismatched else mismatched[0]
+    if _holds(rows, PLUGIN_FILES) >= 1:
+        print(
+            f"dispatch_prompt_check: plugin files differ from the shipped hashes ({first}); "
+            f"{output_path} sent unchecked",
+            file=sys.stderr,
+        )
+        return None
+    more = f", and {len(mismatched) - 1} more" if len(mismatched) > 1 else ""
+    reason = (
+        f"{MARKER}[{PLUGIN_FILES}] Held: a plugin file differs from the copy this version shipped with "
+        f"(`{first}`{more}), so no prompt the generator prints for OUTPUT_PATH {output_path} can be vouched for "
+        "as its own, and nothing in this session can change that. Every later dispatch goes through without "
+        "this check."
+    )
+    return {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": reason,
+        }
+    }
+
+
 def decide(payload: dict[str, Any]) -> dict[str, Any] | None:
     if payload.get("hook_event_name") != "PreToolUse" or payload.get("tool_name") not in DISPATCH_TOOLS:
         return None
@@ -2336,7 +1505,12 @@ def decide(payload: dict[str, Any]) -> dict[str, Any] | None:
     if not isinstance(transcript, str) or not os.path.isfile(transcript):
         return None
     output_path = _output_path(prompt) or "?"
+    # Only a paired dispatch with a transcript pays for the hash. A difference is decided before any comparand
+    # is looked for, so a print from a changed plugin is never compared, let alone sent in a rewrite.
+    mismatched = _plugin_mismatches()
     rows = _transcript_tools().read_transcript(transcript)
+    if mismatched:
+        return _tree_hold(rows, output_path, name or "", mismatched)
     printed = latest_printed(rows, context, output_path)
     if printed is not None and _squash(printed) == _squash(prompt):
         return None

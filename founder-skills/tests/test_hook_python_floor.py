@@ -27,7 +27,7 @@ PLUGIN = Path(__file__).resolve().parents[1]
 SCRIPTS = PLUGIN / "scripts"
 HOOK_MODULES = sorted(PLUGIN / rel for rel in _hook_files(PLUGIN) if rel.endswith(".py"))
 # Modules no hook loads yet that are kept 3.9-clean so one can: held to the same checks.
-_PY39_READY: set[str] = {"script_hashes.py"}
+_PY39_READY: set[str] = set()
 FLOOR_MODULES = sorted({*HOOK_MODULES, *(SCRIPTS / name for name in _PY39_READY)})
 
 
@@ -46,6 +46,7 @@ def test_the_hook_module_list_is_complete() -> None:
         "no_ask_check.py",
         "_form_reply.py",
         "shared_tmp_check.py",
+        "script_hashes.py",
     }
     assert expected <= names, names
 
@@ -212,6 +213,7 @@ def _dispatch_transcript(tmp_path: Path) -> Path:
 
 
 @needs_old
+@pytest.mark.usefixtures("plugin_hashes_current")
 @pytest.mark.parametrize(
     ("prompt", "agent", "held"),
     [
@@ -278,6 +280,7 @@ def test_the_question_check_decides_the_same_under_the_system_python(tmp_path: P
 
 
 @needs_old
+@pytest.mark.usefixtures("plugin_hashes_current")
 @pytest.mark.parametrize("answered", [False, True])
 def test_the_two_figures_check_reads_a_question_form_the_same_under_the_system_python(
     tmp_path: Path, answered: bool
@@ -326,6 +329,7 @@ def test_the_asked_gate_check_decides_the_same_under_the_system_python(tmp_path:
 
 
 @needs_old
+@pytest.mark.usefixtures("plugin_hashes_current")
 @pytest.mark.parametrize("answered", [False, True])
 def test_the_two_figures_host_line_decides_the_same_under_the_system_python(tmp_path: Path, answered: bool) -> None:
     from test_two_figures_hook import _outputs, _payload, _user

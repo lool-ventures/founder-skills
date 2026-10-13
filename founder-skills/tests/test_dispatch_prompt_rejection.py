@@ -18,6 +18,8 @@ from typing import Any
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("plugin_hashes_current")
+
 PLUGIN = Path(__file__).resolve().parents[1]
 MS_GEN = PLUGIN / "skills" / "market-sizing" / "scripts" / "dispatch_prompt.py"
 CP_GEN = PLUGIN / "skills" / "competitive-positioning" / "scripts" / "cp_dispatch_prompt.py"

@@ -18,6 +18,10 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+import pytest
+
+pytestmark = pytest.mark.usefixtures("plugin_hashes_current")
+
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 WRAPPER = SCRIPTS / "pretooluse-dispatch.sh"
 MARKER = "[two-figures-check]"
