@@ -396,6 +396,16 @@ def main() -> None:
         script="compose_discussion.py",
         extra=[os.path.join(args.dir, n) for n in (*fund_profile.PARTNER_FILES, "fund_profile.json")],
     )
+    # In a folder that belongs to a run: only that folder's current run, reading only its own files.
+    import _run_ref
+
+    _run_ref.refuse_not_this_runs(
+        args.dir,
+        args.run_id,
+        [os.path.join(args.dir, n) for n in ("fund_profile.json",)]
+        + [os.path.join(args.dir, n) for n in fund_profile.PARTNER_FILES],
+        noun="simulation dir",
+    )
 
     if not os.path.isdir(args.dir):
         print(f"Error: directory not found: {args.dir}", file=sys.stderr)

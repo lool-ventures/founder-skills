@@ -1050,6 +1050,16 @@ def main() -> int:
     import _out_guard
 
     _out_guard.refuse_output_onto_input([args.output], script="run_scenario.py")
+    # In a folder that belongs to a run: only that folder's current run, reading only its own files.
+    import _run_ref
+
+    _run_ref.refuse_not_this_runs(
+        _ct_gates.run_dir_of(args.inputs),
+        args.run_id,
+        [args.inputs, args.instruments, args.cap_state],
+        noun="review dir",
+        written="no artifact was written",
+    )
     run_dir = _ct_gates.run_dir_of(args.inputs)
     _ct_gates.refuse_without_run_id(run_dir, args.run_id)
 

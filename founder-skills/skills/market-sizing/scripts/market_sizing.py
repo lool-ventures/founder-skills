@@ -1031,6 +1031,15 @@ def main() -> None:
     # `--replay sizing.json -o sizing.json` is the documented remedy (Step 6d): it reads the sizing whole, then
     # rewrites it. Every other input is still protected.
     _out_guard.refuse_output_onto_input([args.output], script="market_sizing.py", in_place=[args.replay])
+    # In a folder that belongs to a run: only that folder's current run, reading only its own files.
+    import _run_ref
+
+    _run_ref.refuse_not_this_runs(
+        os.path.dirname(os.path.abspath(args.output)) if args.output else None,
+        args.run_id,
+        [args.validation, args.inputs, args.replay],
+        noun="analysis dir",
+    )
     indent = 2 if args.pretty else None
 
     if args.replay:

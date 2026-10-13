@@ -310,6 +310,11 @@ def main() -> None:
     _refuse_empty(a, ("--run-id", "--handoff-agent", "--review-dir-agent", "--review-dir"))
     detail = _detail(a.correction, a.detail_file)
     inputs_path = os.path.join(a.review_dir, "inputs.json")
+    # In a folder that belongs to a run: only that folder's current run, and the checklist is never briefed
+    # from another run's inputs.
+    import _run_ref
+
+    _run_ref.refuse_not_this_runs(a.review_dir, a.run_id, [inputs_path], noun="review dir")
     if not os.path.isfile(inputs_path):
         print(f"Error: no inputs.json in --review-dir {a.review_dir}; the checklist grades it", file=sys.stderr)
         sys.exit(2)

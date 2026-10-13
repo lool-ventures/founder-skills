@@ -142,10 +142,15 @@ def require_or_exit(
 
 
 def refuse_without_run_id(output: str | None, run_id: str | None) -> None:
-    """A call into a run dir that carries any run's ref must name its run: exit 1 `RUN_ID_REQUIRED`."""
-    if output is None or run_id:
+    """A call into a run dir that carries any run's ref must name its run: exit 1 `RUN_ID_REQUIRED`. A named run
+    must be bound there (`RUN_NOT_BOUND`) and be the folder's current run (`RUN_SUPERSEDED`):
+    `_run_ref.refuse_not_this_runs`."""
+    if output is None:
         return
     run_dir = os.path.dirname(os.path.abspath(output))
+    if run_id:
+        _run_ref.refuse_not_this_runs(run_dir, run_id, noun="analysis dir")
+        return
     if glob.glob(os.path.join(glob.escape(run_dir), "handoff", "*", _run_ref.RUN_REF_NAME)):
         message = "this analysis dir belongs to a run; pass its --run-id so the run's checks apply"
         sys.stdout.write(json.dumps({"status": "rejected", "code": "RUN_ID_REQUIRED", "message": message}) + "\n")

@@ -56,8 +56,11 @@ def run_id_of(sim_dir: str) -> str | None:
 
 
 def refuse_without_run_id(sim_dir: str, run_id: str | None) -> None:
-    """A simulation dir that carries any run's ref must say which run it is: exit 1 `RUN_ID_REQUIRED`."""
+    """A simulation dir that carries any run's ref must say which run it is: exit 1 `RUN_ID_REQUIRED`. A named run
+    must be bound there (`RUN_NOT_BOUND`) and be the folder's current run (`RUN_SUPERSEDED`):
+    `_run_ref.refuse_not_this_runs`."""
     if run_id:
+        _run_ref.refuse_not_this_runs(sim_dir, run_id, noun="simulation dir")
         return
     if glob.glob(os.path.join(glob.escape(os.path.abspath(sim_dir)), "handoff", "*", _run_ref.RUN_REF_NAME)):
         message = (

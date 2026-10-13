@@ -165,6 +165,24 @@ def main() -> int:
             os.path.join(args.dir, n) for n in ("inputs.json", "instruments.json", "cap_state.json", "scenarios.json")
         ],
     )
+    # In a folder that belongs to a run: only that folder's current run, reading only its own files.
+    import _run_ref
+
+    _run_ref.refuse_not_this_runs(
+        args.dir,
+        args.run_id,
+        [
+            os.path.join(args.dir, n)
+            for n in (
+                "inputs.json",
+                "instruments.json",
+                "cap_state.json",
+                "scenarios.json",
+            )
+        ],
+        noun="review dir",
+        written="no artifact was written",
+    )
     import _ct_gates
 
     _ct_gates.refuse_unbound_run_id(args.dir, args.run_id)

@@ -129,6 +129,16 @@ def main() -> int:
     import _out_guard
 
     _out_guard.refuse_output_onto_input([args.output], script="detect_structure.py")
+    # In a folder that belongs to a run: only that folder's current run, reading only its own files.
+    import _run_ref
+
+    _run_ref.refuse_not_this_runs(
+        os.path.dirname(os.path.abspath(args.output)) if args.output else None,
+        args.run_id,
+        [args.inputs, args.instruments],
+        noun="review dir",
+        written="no artifact was written",
+    )
     import _ct_gates
 
     _ct_gates.refuse_unbound_run_id(_ct_gates.run_dir_of(args.output), args.run_id)

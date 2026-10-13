@@ -888,6 +888,9 @@ def main() -> None:
     run_id = args.run_id or (original.get("metadata") or {}).get("run_id")
     # Naming no run into a dir that belongs to one: RUN_ID_REQUIRED, so no copy of the inputs skips the check.
     _fmr_gates.refuse_without_run_id(os.path.join(args.output_dir, "corrected_inputs.json"), run_id)
+    if run_id:
+        # The original inputs must be this run's: a correction applied to another run's figures is refused.
+        _fmr_gates._run_ref.refuse_not_this_runs(args.output_dir, run_id, [args.original], noun="review dir")
     _fmr_gates.refuse_finished_corrections(
         args.output_dir,
         run_id,

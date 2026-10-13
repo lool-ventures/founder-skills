@@ -17,8 +17,9 @@ import json
 import os
 import re
 import sys
+from collections.abc import Iterable
 from types import ModuleType
-from typing import Any
+from typing import Any, NoReturn
 
 RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 RUN_REF_NAME = "run_ref.json"
@@ -79,6 +80,108 @@ def has_ledger(run_dir: str, run_id: object) -> bool:
     if not isinstance(run_id, str) or not RUN_ID_RE.match(run_id):
         return False
     return os.path.isfile(run_ref_path(run_dir, run_id))
+
+
+def _artifact_run_id(path: str) -> tuple[bool, object]:
+    """(carries an id, the id) for a JSON object file: `metadata.run_id`, or a top-level `run_id` when it has no
+    `metadata` (cap-table's receipts). A file that is not a JSON object, or carries no id, is (False, None)."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return False, None
+    if not isinstance(data, dict):
+        return False, None
+    meta = data.get("metadata")
+    if isinstance(meta, dict):
+        return ("run_id" in meta and meta["run_id"] is not None), meta.get("run_id")
+    return ("run_id" in data and data["run_id"] is not None), data.get("run_id")
+
+
+def foreign_artifacts(run_dir: str, run_id: str, paths: Iterable[str | None]) -> list[tuple[str, str]]:
+    """(file name, the id it carries) for each path that is a regular file inside the run dir (not under
+    `handoff/`, whose files are namespaced per run), parses as a JSON object, and carries another run's id (or a
+    malformed one). Files outside the run dir (the founder's uploads, another skill's folder), non-JSON files and
+    id-less JSON are not compared."""
+    base = os.path.realpath(run_dir)
+    handoff = os.path.join(base, "handoff")
+    out: list[tuple[str, str]] = []
+    for p in paths:
+        if not p or not os.path.isfile(p):
+            continue
+        real = os.path.realpath(p)
+        if not real.startswith(base + os.sep) or real.startswith(handoff + os.sep):
+            continue
+        has, rid = _artifact_run_id(p)
+        if has and rid != run_id:
+            out.append((os.path.relpath(real, base), str(rid)))
+    return out
+
+
+def _reject(code: str, message: str, written: str, **extra: object) -> NoReturn:
+    sys.stdout.write(json.dumps({"status": "rejected", "code": code, "message": message, **extra}) + "\n")
+    print(f"Error ({code}): {message}; {written}", file=sys.stderr)
+    sys.exit(1)
+
+
+def refuse_not_this_runs(
+    run_dir: str | None,
+    run_id: str | None,
+    inputs: Iterable[str | None] = (),
+    *,
+    noun: str,
+    written: str = "nothing was written",
+) -> None:
+    """In a folder that belongs to a run (it carries any `run_ref.json`), a step runs only as that folder's
+    current run and reads only that run's files. Exit 1, nothing written, on the first of:
+    1. no id: `RUN_ID_REQUIRED`;
+    2. no ref for the id here: `RUN_NOT_BOUND`;
+    3. the id is not the folder's current run (`folder_current_run`, the newest bind): `RUN_SUPERSEDED`,
+       naming the run that holds the folder;
+    4. an input carrying another run's id (`foreign_artifacts`): `ARTIFACT_OTHER_RUN`, naming each file.
+    A folder with no ref returns at once and reads nothing (the no-ledger path, byte-identical). Loads nothing
+    from the plugin root. `written` ends the stderr line (cap-table's compose still records its own exit)."""
+    if not run_dir:
+        return
+    run_dir = os.path.abspath(run_dir)
+    if not glob.glob(os.path.join(glob.escape(run_dir), "handoff", "*", RUN_REF_NAME)):
+        return
+    if not run_id:
+        _reject(
+            "RUN_ID_REQUIRED", f"this {noun} belongs to a run; pass its --run-id so the run's checks apply", written
+        )
+    current = folder_current_run(run_dir)
+    if not has_ledger(run_dir, run_id):
+        _reject(
+            "RUN_NOT_BOUND",
+            f"--run-id {run_id!r} is not a run bound to this {noun}, which belongs to {current}; pass that run's id "
+            "(the run_id Step 0 printed), or start a new run for a new review",
+            written,
+        )
+    if current is not None and current != run_id:
+        _reject(
+            "RUN_SUPERSEDED",
+            f"run {run_id} no longer holds this {noun}: run {current} was bound here after it. Pass {current}'s id "
+            "to continue the review this folder holds now, or start a new run in another folder to revisit the "
+            "earlier one",
+            written,
+            current_run=current,
+        )
+    foreign = foreign_artifacts(run_dir, str(run_id), inputs)
+    if foreign:
+        names = ", ".join(f"{name} (run {rid})" for name, rid in foreign)
+        bound_here = [rid for _n, rid in foreign if has_ledger(run_dir, rid)]
+        why = "which another run bound to this folder wrote" if bound_here else "left by an earlier review"
+        _reject(
+            "ARTIFACT_OTHER_RUN",
+            f"this step reads {names}, {why}, not this run's",
+            written,
+            files=[{"file": name, "run_id": rid} for name, rid in foreign],
+            fix=(
+                "run the step that writes each named file again for this run, even on a resume: the resume rule "
+                "keeps only this run's own files"
+            ),
+        )
 
 
 def stamp_html(html: str, run_id: str) -> str | None:

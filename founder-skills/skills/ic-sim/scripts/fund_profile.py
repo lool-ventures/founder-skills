@@ -521,6 +521,12 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    # In a folder that belongs to a run: only that folder's current run (fund_profile opens the run's ledger).
+    import _run_ref
+
+    _run_ref.refuse_not_this_runs(
+        os.path.dirname(os.path.abspath(args.output)) if args.output else None, args.run_id, noun="simulation dir"
+    )
 
     if sys.stdin.isatty():
         print("Error: pipe JSON input via stdin", file=sys.stderr)

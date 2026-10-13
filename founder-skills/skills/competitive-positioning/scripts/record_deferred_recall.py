@@ -160,6 +160,8 @@ def main() -> None:
 
         run_dir = os.path.dirname(os.path.abspath(draft_path))
         _cp_gates.refuse_without_run_id(draft_path, args.run_id)
+        # The draft it appends to must be this run's (the verification file's own id is checked below).
+        _cp_gates._run_ref.refuse_not_this_runs(run_dir, args.run_id, [draft_path], noun="analysis dir")
         _cp_gates.require_or_exit(run_dir, args.run_id, [_cp_gates.GATE1], by="record_deferred_recall.py")
         entries = _from_verification(args.from_verification, args.run_id, reject)
         if not entries:

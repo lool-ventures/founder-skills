@@ -951,6 +951,19 @@ def main() -> None:
     )
     detail = _detail(a.correction, a.detail_file)
     _check_redo_args(a)
+    # In a folder that belongs to a run: only that folder's current run, and a sub-agent is never briefed from
+    # another run's files.
+    import _run_ref
+
+    _run_ref.refuse_not_this_runs(
+        a.analysis_dir,
+        a.run_id,
+        [
+            os.path.join(a.analysis_dir, n)
+            for n in ("inputs.json", "methodology.json", "validation.json", "sizing.json")
+        ],
+        noun="analysis dir",
+    )
     if a.context in SIZING_CONTEXTS:
         missing = [f for f in SIZING_NEEDS if not os.path.isfile(os.path.join(a.analysis_dir, f))]
         if missing:

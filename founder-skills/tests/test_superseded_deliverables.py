@@ -266,7 +266,9 @@ def test_a_reopened_complete_run_takes_the_folder_back(tmp_path: Path, skill: st
     assert (b["deliverables_status"], b["superseded_by"]) == ("superseded", EARLIER)
 
 
-def test_the_cash_reply_reopen_takes_the_folder_back(tmp_path: Path) -> None:
+def test_the_cash_reply_of_a_replaced_run_is_refused(tmp_path: Path) -> None:
+    """A complete review whose folder a later run took cannot reopen through a cash follow-up: the reopen is a
+    side effect of a step, not a host's re-bind, so the earlier id is `RUN_SUPERSEDED` and neither run moves."""
     import test_fmr_gates as fm
 
     root, run_id, run_dir = fm._run(tmp_path)
@@ -298,18 +300,14 @@ def test_the_cash_reply_reopen_takes_the_folder_back(tmp_path: Path) -> None:
     rs = _rs()
     rs.complete_after_coaching(rs.run_paths(str(root), later), str(run_dir / "report.md"), None)
     time.sleep(0.002)
-    fm._corrections(run_dir, run_id, "chat", "cash.current_balance=900000", "cash.balance_date=2026-09")
-    fm._ok(
-        fm._rec(
-            root, run_id, "answer",
-            "--gate", "fmr_cash_followup", "--answer-id", "provided",
-            "--gate", "fmr_cash_basics.current_balance", "--answer-id", "stated", "--value", "900000",
-            "--gate", "fmr_cash_basics.balance_date", "--answer-id", "stated", "--value", "2026-09",
-        )
-    )  # fmt: skip
-    a, b = h.status(root, run_id), h.status(root, later)
-    assert (a["status"], a["revision"], a["superseded_by"]) == ("running", 1, None)
-    assert (b["deliverables_status"], b["superseded_by"]) == ("superseded", run_id)
+    before = (h.status_path(root, run_id).read_bytes(), h.status_path(root, later).read_bytes())
+    corrected = (run_dir / "corrected_inputs.json").read_bytes()
+    args = ["--set", "cash.current_balance=900000", "--set", "cash.balance_date=2026-09"]
+    args += ["--original", str(run_dir / "inputs.json"), "--output-dir", str(run_dir), "--run-id", run_id]
+    proc = h.run(fm.FMR / "apply_corrections.py", *args, "--origin", "chat")
+    assert proc.returncode == 1 and json.loads(proc.stdout)["code"] == "RUN_SUPERSEDED", proc.stdout + proc.stderr
+    assert (run_dir / "corrected_inputs.json").read_bytes() == corrected
+    assert (h.status_path(root, run_id).read_bytes(), h.status_path(root, later).read_bytes()) == before
 
 
 def test_a_status_written_under_another_absolute_path_is_still_matched(tmp_path: Path) -> None:

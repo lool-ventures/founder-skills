@@ -362,6 +362,14 @@ CONTRACT_NOTES = (
     "`ct_existing_review` is owed only when the review dir holds another run's report. `ct_founder_fact`, "
     "`ct_lane1_counsel_review` and `ct_lane2_column_mapping` take `not_sure`; a founder fact asked again replaces "
     "its earlier answer.",
+    "A run dir's current run is the run whose `run_ref.json` there was bound last (`bound_seq`, stamped by every "
+    "`bind`, a re-bind of the same run included, so a resume that re-binds takes the folder back). In a run dir "
+    "that carries any ref, a step named with another run's id exits 1 and writes nothing: `RUN_NOT_BOUND` when "
+    "that run has no ref there (before, a producer of market sizing, financial model review, competitive "
+    "positioning or IC simulation ran ungated with exit 0), `RUN_SUPERSEDED` when a later run was bound there "
+    "after it (`current_run` names the run that holds the folder; `superseded_by` is the status-side mirror). A "
+    "step that reads a run file carrying another run's id exits 1 `ARTIFACT_OTHER_RUN` naming each file "
+    "(`files`) and the step to re-run (`fix`). A run dir with no ref is unchanged.",
 )
 
 
@@ -5550,11 +5558,19 @@ CLI_CODES = {
     # written). stdin is never an input, so a documented in-place fix that reads stdin stays legal.
     "html_writers": ["RUN_ID_MISMATCH", "OUTPUT_IS_INPUT"],
     # financial-model-review's producers: a call into a bound review dir that names no run.
-    "fmr_producers": ["RUN_ID_REQUIRED", "OUTPUT_IS_INPUT"],
+    "fmr_producers": ["RUN_ID_REQUIRED", "OUTPUT_IS_INPUT", "RUN_NOT_BOUND", "RUN_SUPERSEDED", "ARTIFACT_OTHER_RUN"],
     # market-sizing's producers and prompt generator: a call into a bound analysis dir that names no run.
     # PERIOD_NOT_WRITTEN: the period of a founder's figure was answered but never written into inputs.json.
     # NO_ASK_FOUNDER_DECLINED: compose refuses a review skip saying the founder declined under FS_HOST_NO_ASK.
-    "ms_producers": ["RUN_ID_REQUIRED", "PERIOD_NOT_WRITTEN", "NO_ASK_FOUNDER_DECLINED", "OUTPUT_IS_INPUT"],
+    "ms_producers": [
+        "RUN_ID_REQUIRED",
+        "PERIOD_NOT_WRITTEN",
+        "NO_ASK_FOUNDER_DECLINED",
+        "OUTPUT_IS_INPUT",
+        "RUN_NOT_BOUND",
+        "RUN_SUPERSEDED",
+        "ARTIFACT_OTHER_RUN",
+    ],
     # market-sizing's prompt generator, on a sizing build's comparison redo (`--redo comparison`; exit 1, stdout
     # `{"status": "refused", "code", "message"}`, nothing printed or written), and on a plain sizing print while
     # that build's redo has not reached the sizing (SIZING_REDO_PENDING).
@@ -5571,9 +5587,17 @@ CLI_CODES = {
     # competitive-positioning's producers, prompt generator and compose: a call into a bound analysis dir that
     # names no run. NO_ASK_FOUNDER_DECLINED: the skip recorder and compose refuse a review skip saying the
     # founder declined under FS_HOST_NO_ASK.
-    "cp_producers": ["RUN_ID_REQUIRED", "NO_ASK_FOUNDER_DECLINED", "OUTPUT_IS_INPUT"],
-    # deck-review's producers and compose: an output naming one of the step's own input files.
-    "dr_producers": ["OUTPUT_IS_INPUT"],
+    "cp_producers": [
+        "RUN_ID_REQUIRED",
+        "NO_ASK_FOUNDER_DECLINED",
+        "OUTPUT_IS_INPUT",
+        "RUN_NOT_BOUND",
+        "RUN_SUPERSEDED",
+        "ARTIFACT_OTHER_RUN",
+    ],
+    # deck-review's producers and compose: an output naming one of the step's own input files; in a run dir that
+    # belongs to a run, a call named with no run, another run, or reading another run's file.
+    "dr_producers": ["OUTPUT_IS_INPUT", "RUN_ID_REQUIRED", "RUN_NOT_BOUND", "RUN_SUPERSEDED", "ARTIFACT_OTHER_RUN"],
     # ic-sim's compose: a simulation dir that belongs to a run, whose files do not agree on which.
     # FUND_PROFILE_NAMES_PEOPLE: compose and the page refuse (exit 1, nothing written) a fund profile written
     # before partners became role names; the skill rebuilds the profile and the discussion under the same run.
@@ -5587,11 +5611,15 @@ CLI_CODES = {
         "PARTNER_ARTIFACTS_STALE",
         "HANDOFF_NOT_REDISPATCHED",
         "OUTPUT_IS_INPUT",
+        "RUN_NOT_BOUND",
+        "RUN_SUPERSEDED",
+        "ARTIFACT_OTHER_RUN",
     ],
     # cap-table's producers (and its two pages): a call into a bound review dir with no (or an empty) --run-id,
-    # or with a --run-id not bound there while the dir carries another run's (exit 1, no artifact written; compose
+    # or with a --run-id not bound there while the dir carries another run's, or with the id of a run a later run
+    # replaced there (RUN_SUPERSEDED), or reading another run's file (exit 1, no artifact written; compose
     # still leaves its compose_result.json record of the refusal, stamped with the refused id).
-    "ct_producers": ["RUN_ID_REQUIRED", "RUN_NOT_BOUND", "OUTPUT_IS_INPUT"],
+    "ct_producers": ["RUN_ID_REQUIRED", "RUN_NOT_BOUND", "OUTPUT_IS_INPUT", "RUN_SUPERSEDED", "ARTIFACT_OTHER_RUN"],
     # insert_coaching.py (exit 1, stdout `{"status": "blocked", "code", "reason", "fix"}`, nothing written): -o
     # onto a file it reads or a non-receipt; in a bound dir, no --verify-artifact or the artifacts' run not bound
     # there; a report.json whose top-level run_id is another run's.

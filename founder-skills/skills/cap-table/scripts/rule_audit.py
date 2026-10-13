@@ -1443,6 +1443,16 @@ def main() -> int:
     import _out_guard
 
     _out_guard.refuse_output_onto_input([args.output], script="rule_audit.py")
+    # In a folder that belongs to a run: only that folder's current run, reading only its own files.
+    import _run_ref
+
+    _run_ref.refuse_not_this_runs(
+        _ct_gates.run_dir_of(args.output) if args.output else None,
+        args.run_id,
+        [args.inputs, args.instruments, args.cap_state, args.scenarios],
+        noun="review dir",
+        written="no artifact was written",
+    )
     _ct_gates.refuse_without_run_id(_ct_gates.run_dir_of(args.output), args.run_id)
 
     if args.phase == "pre_math":

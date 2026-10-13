@@ -17,18 +17,27 @@
     "cp_producers": [
       "RUN_ID_REQUIRED",
       "NO_ASK_FOUNDER_DECLINED",
-      "OUTPUT_IS_INPUT"
+      "OUTPUT_IS_INPUT",
+      "RUN_NOT_BOUND",
+      "RUN_SUPERSEDED",
+      "ARTIFACT_OTHER_RUN"
     ],
     "ct_producers": [
       "RUN_ID_REQUIRED",
       "RUN_NOT_BOUND",
-      "OUTPUT_IS_INPUT"
+      "OUTPUT_IS_INPUT",
+      "RUN_SUPERSEDED",
+      "ARTIFACT_OTHER_RUN"
     ],
     "deliverables": [
       "RUN_NOT_COMPLETE"
     ],
     "dr_producers": [
-      "OUTPUT_IS_INPUT"
+      "OUTPUT_IS_INPUT",
+      "RUN_ID_REQUIRED",
+      "RUN_NOT_BOUND",
+      "RUN_SUPERSEDED",
+      "ARTIFACT_OTHER_RUN"
     ],
     "fail": [
       "RUN_WAITING"
@@ -40,7 +49,10 @@
     ],
     "fmr_producers": [
       "RUN_ID_REQUIRED",
-      "OUTPUT_IS_INPUT"
+      "OUTPUT_IS_INPUT",
+      "RUN_NOT_BOUND",
+      "RUN_SUPERSEDED",
+      "ARTIFACT_OTHER_RUN"
     ],
     "founder_context": [
       "CONTEXT_NOT_FOUND",
@@ -55,7 +67,10 @@
       "FUND_PROFILE_NAMES_PEOPLE",
       "PARTNER_ARTIFACTS_STALE",
       "HANDOFF_NOT_REDISPATCHED",
-      "OUTPUT_IS_INPUT"
+      "OUTPUT_IS_INPUT",
+      "RUN_NOT_BOUND",
+      "RUN_SUPERSEDED",
+      "ARTIFACT_OTHER_RUN"
     ],
     "insert_coaching": [
       "OUTPUT_IS_INPUT",
@@ -67,7 +82,10 @@
       "RUN_ID_REQUIRED",
       "PERIOD_NOT_WRITTEN",
       "NO_ASK_FOUNDER_DECLINED",
-      "OUTPUT_IS_INPUT"
+      "OUTPUT_IS_INPUT",
+      "RUN_NOT_BOUND",
+      "RUN_SUPERSEDED",
+      "ARTIFACT_OTHER_RUN"
     ],
     "ms_sizing_redo": [
       "SIZING_REDO_NO_SIZING",
@@ -2761,7 +2779,8 @@
     "`ct_cap_base_confirmation` is asked after the documents are read, before the cap state is built. `different` leaves it open until the corrected base is confirmed. A base the freeform mapper built wholly from the founder's spreadsheet is recorded not applicable by that script, bound to that base: any later change to the base asks it again. No field in inputs.json clears it.",
     "`ct_extraction_confirmation.{flagged_fields,unverifiable_doc,ambiguities}` are decided by extract_instrument.py from the extraction it is about to save and bound to it; `has_corrections` leaves the question open until the corrected extraction is confirmed. `aoa_fields` is opened by the skill for an AoA's batch. A founder's later answer written back into the note never asks it again.",
     "`ct_lane3_blocker.<BLOCK.FIELD>` pre-answers (`FS_HOST_VALUE ct_lane3_blocker.0.<field>=stated | <value>`) are applied by the freeform emit, and recorded only when the mapper accepts the value; the block index is the detection's own order, so a host cannot know it in advance on a sheet with several blocks of one kind.",
-    "`ct_iia_grants` closes itself (not applicable, by script) once `ct_jurisdiction` is outside Israel. `ct_existing_review` is owed only when the review dir holds another run's report. `ct_founder_fact`, `ct_lane1_counsel_review` and `ct_lane2_column_mapping` take `not_sure`; a founder fact asked again replaces its earlier answer."
+    "`ct_iia_grants` closes itself (not applicable, by script) once `ct_jurisdiction` is outside Israel. `ct_existing_review` is owed only when the review dir holds another run's report. `ct_founder_fact`, `ct_lane1_counsel_review` and `ct_lane2_column_mapping` take `not_sure`; a founder fact asked again replaces its earlier answer.",
+    "A run dir's current run is the run whose `run_ref.json` there was bound last (`bound_seq`, stamped by every `bind`, a re-bind of the same run included, so a resume that re-binds takes the folder back). In a run dir that carries any ref, a step named with another run's id exits 1 and writes nothing: `RUN_NOT_BOUND` when that run has no ref there (before, a producer of market sizing, financial model review, competitive positioning or IC simulation ran ungated with exit 0), `RUN_SUPERSEDED` when a later run was bound there after it (`current_run` names the run that holds the folder; `superseded_by` is the status-side mirror). A step that reads a run file carrying another run's id exits 1 `ARTIFACT_OTHER_RUN` naming each file (`files`) and the step to re-run (`fix`). A run dir with no ref is unchanged."
   ],
   "pages_after_coaching": {
     "cap-table": [],

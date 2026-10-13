@@ -161,6 +161,22 @@ def main() -> None:
             for n in ("landscape.json", "landscape_draft.json", "product_profile.json")
         ],
     )
+    # In a folder that belongs to a run: only that folder's current run, reading only its own files.
+    import _run_ref
+
+    _run_ref.refuse_not_this_runs(
+        args.analysis_dir or (os.path.dirname(os.path.abspath(args.output)) if args.output else None),
+        args.run_id,
+        [
+            os.path.join(args.analysis_dir or os.path.dirname(os.path.abspath(args.output or ".")), n)
+            for n in (
+                "landscape.json",
+                "landscape_draft.json",
+                "product_profile.json",
+            )
+        ],
+        noun="analysis dir",
+    )
     indent = 2 if args.pretty else None
 
     raw = sys.stdin.read()

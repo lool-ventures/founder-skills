@@ -421,6 +421,15 @@ def main() -> None:
     import _out_guard
 
     _out_guard.refuse_output_onto_input([args.output], script="checklist.py")
+    # In a folder that belongs to a run: only that folder's current run, reading only its own files.
+    import _run_ref
+
+    _run_ref.refuse_not_this_runs(
+        os.path.dirname(os.path.abspath(args.output)) if args.output else None,
+        args.run_id,
+        [args.positioning_scores],
+        noun="analysis dir",
+    )
     # A call into a run's analysis dir names its run (RUN_ID_REQUIRED); outside a run, nothing changes.
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import _cp_gates

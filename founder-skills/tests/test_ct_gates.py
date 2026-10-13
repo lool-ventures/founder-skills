@@ -410,19 +410,40 @@ def test_an_unbound_review_dir_takes_any_run_id_as_before(tmp_path: Path) -> Non
     assert json.loads(out.read_text(encoding="utf-8"))["run_id"] == FOREIGN
 
 
-def test_a_review_dir_with_two_runs_bound_takes_either_id(tmp_path: Path) -> None:
-    """RESIDUAL (the fleet-wide run-ownership work): a later run bound into an earlier run's folder leaves both
-    refs there, so either id passes the guard; a third is refused."""
+def test_a_review_dir_with_two_runs_bound_takes_only_the_later_id(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A later run bound into an earlier run's folder holds it (the newest bind): the earlier id is
+    `RUN_SUPERSEDED` naming the later run, the later passes, a third is `RUN_NOT_BOUND`."""
     root, rid, rd = h.start_bound(tmp_path, CT)
     second = h.start_ok(root, CT)
     _ok(h.bind(root, second, rd, "example-co"))
     assert (rd / "handoff" / rid / "run_ref.json").is_file() and (rd / "handoff" / second / "run_ref.json").is_file()
     gates = _load("_ct_gates_under_test", SCRIPTS / "_ct_gates.py")
-    gates.refuse_unbound_run_id(str(rd), rid)
     gates.refuse_unbound_run_id(str(rd), second)
-    with pytest.raises(SystemExit) as e:
-        gates.refuse_unbound_run_id(str(rd), FOREIGN)
-    assert e.value.code == 1
+    for refused, code in ((rid, "RUN_SUPERSEDED"), (FOREIGN, "RUN_NOT_BOUND")):
+        capsys.readouterr()
+        with pytest.raises(SystemExit) as e:
+            gates.refuse_unbound_run_id(str(rd), refused)
+        assert e.value.code == 1
+        body = json.loads(capsys.readouterr().out)
+        assert body["code"] == code
+    assert body["code"] == "RUN_NOT_BOUND" and second in body["message"]
+
+
+def test_a_refused_earlier_run_does_not_hold_the_folder(tmp_path: Path) -> None:
+    """RESIDUAL, harmless: ownership is the newest bind, so an earlier run is superseded whatever its status;
+    a refused run's own producers refuse anyway."""
+    root, rid, rd = h.start_bound(tmp_path, CT)
+    second = h.start_ok(root, CT)
+    _ok(h.bind(root, second, rd, "example-co"))
+    fail = ["fail", "--run-id", rid, "--artifacts-root", str(root), "--code", "INPUT_UNREADABLE", "--reason", "x"]
+    _ok(h.run(h.RUN_STATUS, *fail))
+    assert h.status(root, rid)["status"] == "refused"
+    gates = _load("_ct_gates_under_test2", SCRIPTS / "_ct_gates.py")
+    gates.refuse_unbound_run_id(str(rd), second)
+    with pytest.raises(SystemExit):
+        gates.refuse_unbound_run_id(str(rd), rid)
 
 
 def test_a_foreign_id_compose_in_an_unbound_dir_is_refused_at_the_insert(tmp_path: Path) -> None:

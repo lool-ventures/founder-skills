@@ -179,6 +179,16 @@ def main() -> int:
     import _out_guard
 
     _out_guard.refuse_output_onto_input([args.output_json, args.write_md], script="counsel_packet.py")
+    # In a folder that belongs to a run: only that folder's current run, reading only its own files.
+    import _run_ref
+
+    _run_ref.refuse_not_this_runs(
+        _ct_gates.run_dir_of(args.output_json) if args.output_json else None,
+        args.run_id,
+        [args.rule_audit, args.inputs, args.scenarios],
+        noun="review dir",
+        written="no artifact was written",
+    )
     _ct_gates.refuse_without_run_id(_ct_gates.run_dir_of(args.output_json), args.run_id)
 
     with open(args.rule_audit, encoding="utf-8") as f:

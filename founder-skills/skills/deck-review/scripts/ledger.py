@@ -474,6 +474,15 @@ def main() -> int:
     import _out_guard
 
     _out_guard.refuse_output_onto_input([args.output], script="ledger.py")
+    # In a folder that belongs to a run: only that folder's current run, reading only its own files.
+    import _run_ref
+
+    _run_ref.refuse_not_this_runs(
+        os.path.dirname(os.path.abspath(args.output)) if args.output else None,
+        args.run_id,
+        [args.inventory],
+        noun="review dir",
+    )
 
     if sys.stdin.isatty():
         print("Error: pipe the extracted ledger as JSON via stdin", file=sys.stderr)

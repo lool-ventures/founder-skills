@@ -689,6 +689,25 @@ def main() -> None:
     a = p.parse_args()
     _refuse_empty(a, ("--run-id", "--handoff-agent", "--analysis-dir-agent", "--analysis-dir", "--handoff-dir"))
     detail = _detail(a.correction, a.detail_file)
+    # In a folder that belongs to a run: only that folder's current run, and a sub-agent is never briefed from
+    # another run's files.
+    import _run_ref
+
+    if a.analysis_dir:
+        _run_ref.refuse_not_this_runs(
+            a.analysis_dir,
+            a.run_id,
+            [
+                os.path.join(a.analysis_dir, n)
+                for n in (
+                    "product_profile.json",
+                    "competitor_verification.json",
+                    "landscape.json",
+                    "landscape_draft.json",
+                )
+            ],
+            noun="analysis dir",
+        )
     if a.context == "positioning_scoring" and not a.analysis_dir:
         print("Error: positioning_scoring needs --analysis-dir to read the job to be done", file=sys.stderr)
         sys.exit(2)
