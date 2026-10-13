@@ -1120,7 +1120,10 @@ SKILL_MD_CEILING: dict[str, int] = {
     # Path B anecdote).
     # 85,520 -> 85,517 (-3), LOWERED, commit 10 (O3): the compose step says to read compose_result.json on a non-
     # zero exit, paid for in the same step; the heredoc warning shortened, its reason kept.
-    "financial-model-review": 85_680,
+    # 85,680 -> 85,679 (-1), LOWERED: Step 12's cash paragraph now covers a newer balance or date after delivery
+    # (same conversation, once per review), redoes the checklist (Step 5) and writes the revision's hand-offs
+    # to `r1/`; the per-revision runway.py line left the command and the rest was tightened to fit.
+    "financial-model-review": 85_679,
     # ic-sim SHRANK: the REQUIRED ic-dynamics.md read at Step 7 is deleted. Step 7 is a pure producer
     # pipe — compose_discussion.py derives discussion.json from the partners' own files and nothing
     # is authored by the main thread — so the read informed no decision while pulling a whole

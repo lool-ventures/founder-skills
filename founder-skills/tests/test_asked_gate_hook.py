@@ -1196,3 +1196,37 @@ def test_residual_a_held_model_can_answer_through_the_hosts_resume_flow(tmp_path
     assert _decide(tmp_path, _expanded("market-sizing", ""), "TOP_DOWN_METHODOLOGY", "market-sizing") is None
     (rec,) = _lines(run)
     assert (rec["decision"], rec["passed_on"]) == ("pass", "request")
+
+
+# --- financial-model-review's cash update after delivery: a revision's CHECKLIST --------------------------
+
+
+def _revision_prompt(tmp_path: Path) -> str:
+    run = _run_dir(tmp_path, "financial-model-review")
+    return f"CONTEXT: CHECKLIST\nOUTPUT_PATH: {run}/handoff/{RUN_ID}/r1/checklist_output.json\nRead the files.\n"
+
+
+def test_a_cash_update_in_the_conversation_that_delivered_the_review_redoes_the_checklist_unheld(
+    tmp_path: Path,
+) -> None:
+    """The values question was asked earlier in this conversation; the revision's CHECKLIST is not held."""
+    rows = [
+        *_start("financial-model-review"),
+        *_asked(_labels("fmr_extracted_values")),
+        _text("Here is your review."),
+        _user("There is about 2.4M in the account now, as of this month."),
+        *_shell("python3 apply_corrections.py --set cash.current_balance=2400000", "toolu_a", "ok"),
+    ]
+    prompt = _revision_prompt(tmp_path)
+    assert _decide(tmp_path, rows, "CHECKLIST", "financial-model-review", prompt=prompt) is None
+
+
+def test_a_cash_update_in_a_new_conversation_is_held_once_at_the_checklist(tmp_path: Path) -> None:
+    """Out of scope, pinned: a new conversation has none of the review's questions in its window, so the
+    revision's CHECKLIST is held once, with the values question as the reason; the retry passes."""
+    rows = [_user("There is about 2.4M in the account now, as of this month."), _skill("financial-model-review")]
+    prompt = _revision_prompt(tmp_path)
+    reason = _reason(_decide(tmp_path, rows, "CHECKLIST", "financial-model-review", prompt=prompt))
+    assert _gates.GATES["fmr_extracted_values"]["question"] in reason
+    retry = [*rows, _result("toolu_x", reason, is_error=True)]
+    assert _decide(tmp_path, retry, "CHECKLIST", "financial-model-review", prompt=prompt) is None

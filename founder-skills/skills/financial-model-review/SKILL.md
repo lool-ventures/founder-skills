@@ -959,8 +959,9 @@ it — runway, burn and scores come from the report, in the report's words.
 Here the printed hand-over replaces the named entries and the offer described above: its archive offer
 is the only offer made, and a connected folder is written to only if the founder asks.
 
-**When the hand-over asked for the cash balance and the founder replies with it**, keep this run's
-`RUN_ID` and `$REVIEW_DIR`. Record the balance (a plain number, month `YYYY-MM`) and the answer; promote; re-run runway: <!-- gate: fmr_cash_followup -->
+**When the founder gives a cash balance or its date after delivery** (asked for or not) in this conversation
+only, keep `RUN_ID`, `$REVIEW_DIR`. Set both (a number; `YYYY-MM`, this month for "today"; restate
+the unchanged one); record (follow-up first); promote: <!-- gate: fmr_cash_followup -->
 
 ```bash
 python3 "$SCRIPTS/apply_corrections.py" --set cash.current_balance=<amount> --set cash.balance_date=<YYYY-MM> \
@@ -968,13 +969,12 @@ python3 "$SCRIPTS/apply_corrections.py" --set cash.current_balance=<amount> --se
 python3 "$SHARED_SCRIPTS/record_gate_answer.py" answer --run-id "$RUN_ID" --run-dir "$REVIEW_DIR" \
   --gate fmr_cash_followup --answer-id provided --gate fmr_cash_basics.current_balance --answer-id stated \
   --value "<amount>" --gate fmr_cash_basics.balance_date --answer-id stated --value "<YYYY-MM>" &&
-cp "$REVIEW_DIR/corrected_inputs.json" "$REVIEW_DIR/inputs.json" &&
-cat "$REVIEW_DIR/inputs.json" | python3 "$SCRIPTS/runway.py" --pretty --run-id "$RUN_ID" -o "$REVIEW_DIR/runway.json"
+cp "$REVIEW_DIR/corrected_inputs.json" "$REVIEW_DIR/inputs.json" && mkdir -p "$REVIEW_DIR/handoff/$RUN_ID/r1"
 ```
 
-Then Steps 7, 7.5 (runway lens), 8a-8c, Gates 1-2, this step, with `--cash-update` on the
-closer; its output stays your whole final message. A balance the review already had, or any other changed
-figure, is refused (`RUN_FINISHED`): say what it printed.
+`HANDOFF_DIR` is that `r1` dir; `HANDOFF_AGENT` from Step 0's `--handoff-dir-agent` with
+`--run-id "$RUN_ID/r1"`; redo Steps 4, 5, 7, 7.5, 8a-8c, Gates 1-2 and this step, closer with `--cash-update`.
+Values it has, a second update or other figures: `RUN_FINISHED`; say what it printed.
 
 ## Main-Thread Return
 

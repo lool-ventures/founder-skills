@@ -5,6 +5,47 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — A newer cash balance updates a delivered financial model review
+
+### Highlights
+
+**A newer cash balance updates the review you already have.** After a financial model review is delivered,
+telling Claude a newer cash balance or a later as-of date, in the same conversation, now updates that
+review: the runway, the checklist and the commentary are recomputed and the files are sent again, instead of
+being told to start a new review. This works once per review; any other changed figure, or a second update,
+still starts a new review.
+
+### Scoring changes
+
+None.
+
+### Fixed
+
+- Financial model review: when the review asked for your cash balance and you gave it, the checklist was not
+  scored again with the balance, so the final check could stop on a stale checklist. It is now redone.
+- Financial model review: the report's corrections section said a cash balance was given "after the review"
+  whenever a correction touched only the cash figures, including one made while the extracted values were
+  being checked. It now says so only for the balance you gave after the review was delivered.
+
+### Changed
+
+- Financial model review: the closing message after a cash update now says the balance you gave was used,
+  rather than added, since it may replace one the review already had.
+- A delivered review that a newer review in the same folder has replaced, or a copy of a review's folder,
+  can no longer be updated with a cash balance; the update is made in the review's own folder.
+- The update needs a person in the conversation: a review whose request said not to ask questions is not
+  updated after delivery.
+
+### Development
+
+Contributor-facing only; nothing here changes what a founder installs or runs.
+
+- The host contract's notes say a `complete` financial-model-review run returns to `running` once, at the
+  next revision, when a newer cash balance or date arrives after delivery, and the recorder's refusal codes
+  gain `RUN_SUPERSEDED` (a reopen of a run whose folder another run holds, or from another folder).
+- A revision's sub-agent hand-offs go to their own `r<revision>/` folder, and the report's check that each
+  step's hand-off was gated reads that folder for the checklist.
+
 ## [0.19.0] - 2026-10-13 — A new review no longer picks up an earlier review's files
 
 ### Highlights

@@ -720,6 +720,27 @@ def test_fmr_own_runway_figure_is_blocked_with_the_fmr_hand_over(tmp_path: Path)
     assert "Base runway: 14 months" in out["reason"]
 
 
+def test_fmr_a_cash_update_turn_is_judged_against_its_own_closing_call(tmp_path: Path) -> None:
+    """After delivery the founder gives a newer balance; the rebuilt review's closer (`--cash-update`) in that
+    later prompt is the one compared, and its `handover.txt` replaced the first one."""
+    updated = FMR_PRINTED.replace(
+        "Here's your finished", "I've used the cash balance you gave me.\n\nHere's your finished"
+    )
+    updated = updated.replace("14 months", "15 months")
+    _handover(tmp_path, text=updated, run="financial-model-review-foo")
+    first = _fmr_rows_after_call(_assistant_text(FMR_PRINTED))
+    second = [
+        _user("There is about 2.4M in the account now, as of this month."),
+        _assistant_call("mcp__workspace__bash", FMR_CLOSING_CMD + " --cash-update"),
+        _tool_result(),
+    ]
+    r = _run(tmp_path, [*first, *second, _assistant_text(updated)])
+    assert r.returncode == 0 and r.stdout == "", r
+    r = _run(tmp_path, [*first, *second, _assistant_text(FMR_PRINTED)])
+    out = json.loads(r.stdout)
+    assert out["decision"] == "block" and "Base runway: 15 months" in out["reason"]
+
+
 def test_fmr_call_reads_only_fmr_run_directories(tmp_path: Path) -> None:
     _handover(tmp_path, text=CP_PRINTED, run="competitive-positioning-foo")
     r = _run(tmp_path, _fmr_rows_after_call(_assistant_text(FMR_OWN_VERDICT)))
