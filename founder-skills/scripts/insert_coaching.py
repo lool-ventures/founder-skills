@@ -179,6 +179,9 @@ _RUN_ID_REQUIRED_REASON = "The coaching was not added: it could not be tied to t
 _RUN_NOT_BOUND_REASON = (
     "The coaching was not added: the review's files belong to a different run than this folder's. Nothing was changed."
 )
+_RUN_SUPERSEDED_REASON = (
+    "The coaching was not added: this review's folder now belongs to a later review. Nothing was changed."
+)
 _RUN_ID_MISMATCH_REASON = (
     "The coaching was not added: the report on disk was written by an earlier run. Nothing was changed."
 )
@@ -247,6 +250,18 @@ def _run_ref_here(report: str, run_id: str) -> bool:
         return False
     run_dir = os.path.dirname(os.path.abspath(report))
     return os.path.isfile(os.path.join(run_dir, "handoff", run_id, "run_ref.json"))
+
+
+def _folder_current_run(report: str) -> str | None:
+    """The run the report's folder belongs to now (`_run_status.folder_current_run`, its newest bind). Called
+    only in a bound folder."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    if here not in sys.path:
+        sys.path.append(here)
+    import _run_status
+
+    current: str | None = _run_status.folder_current_run(os.path.dirname(os.path.abspath(report)))
+    return current
 
 
 def _emit(payload: dict[str, object], pretty: bool, output: str | None) -> None:
@@ -550,6 +565,22 @@ def main() -> None:
                 },
             )
         )
+    if bound and run_id:
+        current = _folder_current_run(args.report)
+        if current is not None and current != run_id:
+            # The artifacts' run is bound here but a later run took the folder: inserting would mark the replaced
+            # run complete while the folder's run stays unfinished.
+            sys.exit(
+                _blocked(
+                    _RUN_SUPERSEDED_REASON,
+                    pretty,
+                    {
+                        "code": "RUN_SUPERSEDED",
+                        "fix": f"the --verify-artifact files carry run {run_id}, but this folder belongs to run "
+                        f"{current} now; compose that run's report and insert into it",
+                    },
+                )
+            )
     if run_id:
         _STATUS_RUN.update(
             run_id=run_id,

@@ -1763,6 +1763,28 @@ def main() -> int:
             for n in ("inputs.json", "scenarios.json", "cap_state.json", "counsel_packet.json", "sweep.json")
         ],
     )
+    # In a folder that belongs to a run: only the folder's current run, and only its files on the page (the same
+    # code compose gives for the same folder).
+    if args.run_id:
+        import _run_ref
+
+        _run_ref.refuse_not_this_runs(
+            args.dir,
+            args.run_id,
+            [
+                os.path.join(args.dir, n)
+                for n in (
+                    "inputs.json",
+                    "instruments.json",
+                    "cap_state.json",
+                    "scenarios.json",
+                    "rule_audit.json",
+                    "counsel_packet.json",
+                )
+            ],
+            noun="review dir",
+            written="no artifact was written",
+        )
     if args.run_id is not None:
         _ct_gates_module().refuse_unbound_run_id(args.dir, args.run_id)  # before any rendering work
 

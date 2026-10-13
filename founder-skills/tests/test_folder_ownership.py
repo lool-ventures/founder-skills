@@ -301,16 +301,6 @@ EXEMPT_PARITY: dict[tuple[str, str], str] = {
     ("skills/competitive-positioning/scripts/persist_agent_artifact.py", "--input"): "its input is a sub-agent's "
     "hand-off under handoff/<run_id>/, namespaced per run and gated by check_handoff.py",
     ("skills/market-sizing/scripts/red_team.py", "--uploads-dir"): "reads no run file: stdin and the founder's uploads",
-    # Compose and the pages read their run files from --dir; they check them in their own commits.
-    ("skills/cap-table/scripts/visualize.py", "--dir"): "page: its own required scan",
-    ("skills/cap-table/scripts/explore.py", "--dir"): "page: its own required scan",
-    ("skills/competitive-positioning/scripts/visualize.py", "--dir"): "page: its own required scan",
-    ("skills/competitive-positioning/scripts/explore.py", "--dir"): "page: its own required scan",
-    ("skills/deck-review/scripts/visualize.py", "--dir"): "page: its own required scan",
-    ("skills/financial-model-review/scripts/visualize.py", "--dir"): "page: its own required scan",
-    ("skills/financial-model-review/scripts/explore.py", "--dir"): "page: its own required scan",
-    ("skills/ic-sim/scripts/visualize.py", "--dir"): "page: its own required scan",
-    ("skills/market-sizing/scripts/visualize.py", "--dir"): "page: its own required scan",
 }
 
 
@@ -632,3 +622,156 @@ def test_ic_sims_always_written_files_are_the_partner_files() -> None:
     code = "import sys; sys.path.insert(0, sys.argv[1]); import fund_profile; print(list(fund_profile.PARTNER_FILES))"
     proc = h.run("-c", code, str(SKILLS / "ic-sim" / "scripts"))  # type: ignore[arg-type]
     assert sorted(always) == sorted(json.loads(proc.stdout.replace("'", '"'))), proc.stderr
+
+
+# --- pages, closers and the insert --------------------------------------------------------------------------
+
+
+def _ct_page(f: Folder, rid: str, script: str = "visualize.py") -> tuple[subprocess.CompletedProcess[str], Path]:
+    page = f.dir / f"page_{script}.html"
+    return goldens._ct(script, "--dir", str(f.dir), "--run-id", rid, "-o", str(page)), page
+
+
+@pytest.mark.parametrize("script", ["visualize.py", "explore.py"])
+def test_a_page_for_the_replaced_run_is_refused(script: str, tmp_path: Path) -> None:
+    c = COMPOSES["cap-table"]
+    f = two_runs(tmp_path, c.skill, c.build)
+    proc, page = _ct_page(f, f.old, script)
+    assert proc.returncode == 1 and code_of(proc) == "RUN_SUPERSEDED", (proc.stdout, proc.stderr)
+    assert not page.exists()
+    lever, page = _ct_page(f, f.new, script)
+    assert code_of(lever) not in OWNERSHIP_CODES and page.exists(), (lever.stdout, lever.stderr)
+
+
+def test_the_page_and_compose_give_the_same_code_for_a_resumed_runs_folder(tmp_path: Path) -> None:
+    """O re-bound over N's files: compose and the page both name N's files (ARTIFACT_OTHER_RUN), so a host reads
+    one answer from either surface; RUN_ID_MISMATCH keeps its unbound meaning."""
+    c = COMPOSES["competitive-positioning"]
+    f = two_runs(tmp_path, c.skill, c.build)
+    assert h.bind(f.root, f.old, f.dir, "example-co").returncode == 0
+    compose = c.run(f)
+    page = goldens.run(
+        [str(goldens.CP_SCRIPTS / "visualize.py"), "--dir", str(f.dir), "--run-id", f.old, "-o", str(f.dir / "r.html")]
+    )
+    assert code_of(compose) == code_of(page) == "ARTIFACT_OTHER_RUN", (compose.stdout, page.stdout)
+    assert not (f.dir / "r.html").exists()
+
+
+def _cp_page(rd: Path, rid: str) -> tuple[subprocess.CompletedProcess[str], Path]:
+    page = rd / "report.html"
+    argv = [str(goldens.CP_SCRIPTS / "visualize.py"), "--dir", str(rd), "--run-id", rid, "-o", str(page)]
+    return goldens.run(argv), page
+
+
+@pytest.mark.parametrize("stamp_other", [True, False])
+def test_a_page_leaves_out_another_runs_optional_file(stamp_other: bool, tmp_path: Path) -> None:
+    """The page names what it left out, as compose does; the lever is the parameter (this run's file: no note)."""
+    proc, rd = _cp_composed(tmp_path, False)
+    assert proc.returncode == 0, proc.stderr
+    rid = json.loads((rd / "report.json").read_text(encoding="utf-8"))["run_id"]
+    skip = json.loads((rd / "red_team_skip.json").read_text(encoding="utf-8"))
+    skip["metadata"]["run_id"] = STRANGER if stamp_other else rid
+    (rd / "red_team_skip.json").write_text(json.dumps(skip), encoding="utf-8")
+    page_proc, page = _cp_page(rd, rid)
+    assert page_proc.returncode == 0, (page_proc.stdout, page_proc.stderr)
+    assert ("left out red_team_skip.json" in page_proc.stderr) is stamp_other
+
+
+def test_a_pages_loader_reads_a_left_out_file_as_missing(tmp_path: Path) -> None:
+    import importlib.util
+
+    scripts = SKILLS / "competitive-positioning" / "scripts"
+    sys.path.insert(0, str(scripts))
+    spec = importlib.util.spec_from_file_location("cp_visualize_fo", scripts / "visualize.py")
+    assert spec and spec.loader
+    viz = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(viz)
+    goldens._cp_dir(tmp_path)
+    assert viz._load_artifact(str(tmp_path), "product_profile.json") is not None
+    viz._IGNORED_OTHER_RUN.add("product_profile.json")
+    assert viz._load_artifact(str(tmp_path), "product_profile.json") is None
+
+
+def _cp_composed_then_replaced(tmp: Path) -> tuple[Path, str, str, Path]:
+    """A composed report for run O, then a later run N bound into the same folder before N wrote anything."""
+    proc, rd = _cp_composed(tmp, False)
+    assert proc.returncode == 0, proc.stderr
+    root = rd.parent
+    old = json.loads((rd / "report.json").read_text(encoding="utf-8"))["run_id"]
+    new = h.start_ok(root, "competitive-positioning")
+    assert h.bind(root, new, rd, "example-co").returncode == 0
+    return root, old, new, rd
+
+
+def test_the_closer_refuses_a_report_of_the_run_the_folder_no_longer_belongs_to(tmp_path: Path) -> None:
+    root, old, new, rd = _cp_composed_then_replaced(tmp_path)
+    before = h.status_path(root, old).read_bytes()
+    argv = [str(goldens.CP_SCRIPTS / "cp_closing_message.py"), "--report", str(rd / "report.json"), "--link", "path"]
+    proc = goldens.run(argv)
+    assert proc.returncode == 2 and proc.stdout == "" and "RUN_SUPERSEDED" in proc.stderr and new in proc.stderr
+    assert not (rd / "handover.txt").exists()
+    assert h.status_path(root, old).read_bytes() == before
+
+
+def test_the_closer_prints_for_the_folders_own_run(tmp_path: Path) -> None:
+    """The lever: the same report, the folder not taken by a later run, prints its hand-over."""
+    proc, rd = _cp_composed(tmp_path, False)
+    argv = [str(goldens.CP_SCRIPTS / "cp_closing_message.py"), "--report", str(rd / "report.json"), "--link", "path"]
+    out = goldens.run(argv)
+    # The fixture report has no verdict, so the hand-over itself is refused for that reason, after the check.
+    assert "RUN_SUPERSEDED" not in out.stderr and "RUN_NOT_BOUND" not in out.stderr, out.stderr
+    assert "carries no verdict" in out.stderr
+
+
+def test_the_insert_refuses_coaching_for_the_run_the_folder_no_longer_belongs_to(tmp_path: Path) -> None:
+    import test_report_run_id as rr
+
+    root, run_dir, extra, stdin = rr._bound_for_insert("competitive-positioning", tmp_path)
+    newer = h.start_ok(root, "competitive-positioning")
+    assert h.bind(root, newer, run_dir, "example-co").returncode == 0
+    before = (run_dir / "report.md").read_bytes(), h.status_path(root, rr.BOUND_RUN).read_bytes()
+    proc = rr._insert_as_documented("competitive-positioning", run_dir, extra, stdin)
+    assert proc.returncode == 1 and json.loads(proc.stdout)["code"] == "RUN_SUPERSEDED", proc.stdout
+    assert ((run_dir / "report.md").read_bytes(), h.status_path(root, rr.BOUND_RUN).read_bytes()) == before
+    lever_root, lever_dir, lever_extra, lever_stdin = rr._bound_for_insert("competitive-positioning", tmp_path / "x")
+    lever = rr._insert_as_documented("competitive-positioning", lever_dir, lever_extra, lever_stdin)
+    assert lever.returncode == 0, lever.stdout
+
+
+# --- an archived review: a what-if there never marks the fresh run in the original folder ----------------
+
+
+def test_a_what_if_in_an_archived_copy_leaves_the_fresh_run_alone(tmp_path: Path) -> None:
+    root, old, run_dir = h.start_bound(tmp_path, "cap-table")
+    stage = tmp_path / "stage"
+    stage.mkdir()
+    goldens._ct_full(stage)
+    for p in stage.iterdir():
+        if p.is_file():
+            shutil.copy(p, run_dir / p.name)
+    restamp_all(run_dir, old)
+    (run_dir / "report.md").write_text("# Example Co\n", encoding="utf-8")
+    rs = _load_shared("_run_status")
+    rs.add_deliverable(rs.run_paths(str(root), old), "report_md", str(run_dir / "report.md"), "0" * 64, "test")
+    rs.complete_after_coaching(rs.run_paths(str(root), old), str(run_dir / "report.md"), None)
+    archive = root / "_archive" / run_dir.name
+    archive.parent.mkdir()
+    shutil.move(str(run_dir), str(archive))
+    new = h.start_ok(root, "cap-table")
+    assert h.bind(root, new, run_dir, "example-co").returncode == 0
+    assert h.status(root, old)["superseded_by"] == new  # the archived run claims the original folder: expected
+    before = h.status_path(root, new).read_bytes()
+    proc = goldens._ct(
+        "compose_report.py",
+        "--dir",
+        str(archive),
+        "--run-id",
+        old,
+        "-o",
+        str(archive / "report.json"),
+        "--write-md",
+        str(archive / "report.md"),
+    )
+    assert code_of(proc) not in OWNERSHIP_CODES, (proc.stdout, proc.stderr)
+    assert h.status(root, old)["revision"] == 1, proc.stderr  # the what-if reopened the archived review
+    assert h.status_path(root, new).read_bytes() == before, "the fresh run was marked replaced by the archive"

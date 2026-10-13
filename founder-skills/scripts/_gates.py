@@ -4100,11 +4100,13 @@ def _reopen_complete(
     )
 
 
-def reopen_for_recompose(paths: _run_status.RunPaths, step: str) -> bool:
+def reopen_for_recompose(paths: _run_status.RunPaths, step: str, *, run_dir: str | None = None) -> bool:
     """A compose that rewrites a delivered (`complete`) run's report reopens it as a new revision first: the
     report it writes lacks the coaching, and its listed deliverables no longer match, so the run is `running`
     until the coaching is inserted again. A question the new report now owes is then asked, never refused as a
-    finished run's. Returns whether it reopened; any other status is left as it is."""
+    finished run's. Returns whether it reopened; any other status is left as it is. `run_dir`: the folder the
+    compose ran in; a reopen from a folder other than the run's own (an archived copy) takes no folder back
+    (`_run_status.take_folder`)."""
 
     def fn(ctx: Ctx, ledger: dict[str, Any], status: dict[str, Any]) -> bool:
         if status.get("status") != "complete":
@@ -4112,8 +4114,16 @@ def reopen_for_recompose(paths: _run_status.RunPaths, step: str) -> bool:
         _reopen_complete(status, None, None, step=step)
         return True
 
-    reopened: bool = transact(paths, fn)
+    _REOPEN_FROM[:] = [run_dir] if run_dir else []
+    try:
+        reopened: bool = transact(paths, fn)
+    finally:
+        _REOPEN_FROM.clear()
     return reopened
+
+
+# The folder a compose-driven reopen ran from, while it runs (`reopen_for_recompose`); read by `take_folder_noted`.
+_REOPEN_FROM: list[str] = []
 
 
 # --- pre-answers ------------------------------------------------------------------------------------
@@ -4749,7 +4759,7 @@ def take_folder_noted(paths: _run_status.RunPaths, *, retry: bool = False) -> li
         results: list[dict[str, Any]] = []
         try:
             if not retry:
-                results = _run_status.take_folder(paths)
+                results = _run_status.take_folder(paths, from_dir=_REOPEN_FROM[0] if _REOPEN_FROM else None)
             else:
                 status = _run_status.load_status(paths) or {}
                 run_dir = status.get("run_dir_shell")
@@ -5556,7 +5566,15 @@ CLI_CODES = {
     # Every writer with an output flag (`-o`, `--write-md`, ...), the pages included, refuses an output that names one
     # of its own input files (exit 1, stdout `{"status": "rejected", "code", "message", "output", "input"}`, nothing
     # written). stdin is never an input, so a documented in-place fix that reads stdin stays legal.
-    "html_writers": ["RUN_ID_MISMATCH", "OUTPUT_IS_INPUT"],
+    # In a run dir that carries a ref, a page given --run-id must be that folder's current run (RUN_NOT_BOUND,
+    # RUN_SUPERSEDED) and its required files that run's (ARTIFACT_OTHER_RUN); another run's optional file is left
+    # off the page.
+    "html_writers": ["RUN_ID_MISMATCH", "OUTPUT_IS_INPUT", "RUN_NOT_BOUND", "RUN_SUPERSEDED", "ARTIFACT_OTHER_RUN"],
+    # The six composes, in a run dir that carries a ref: the report is the folder's current run's (the newest
+    # bind; cap-table's --run-id must be it), and every required artifact must carry its id (ARTIFACT_OTHER_RUN,
+    # `files` naming each, exit 1, nothing written); another run's optional artifact is left out and named in
+    # the receipt's `ignored_other_run`.
+    "compose": ["RUN_ID_REQUIRED", "RUN_NOT_BOUND", "RUN_SUPERSEDED", "ARTIFACT_OTHER_RUN", "OUTPUT_IS_INPUT"],
     # financial-model-review's producers: a call into a bound review dir that names no run.
     "fmr_producers": ["RUN_ID_REQUIRED", "OUTPUT_IS_INPUT", "RUN_NOT_BOUND", "RUN_SUPERSEDED", "ARTIFACT_OTHER_RUN"],
     # market-sizing's producers and prompt generator: a call into a bound analysis dir that names no run.
@@ -5623,9 +5641,11 @@ CLI_CODES = {
     # insert_coaching.py (exit 1, stdout `{"status": "blocked", "code", "reason", "fix"}`, nothing written): -o
     # onto a file it reads or a non-receipt; in a bound dir, no --verify-artifact or the artifacts' run not bound
     # there; a report.json whose top-level run_id is another run's.
-    "insert_coaching": ["OUTPUT_IS_INPUT", "RUN_ID_REQUIRED", "RUN_NOT_BOUND", "RUN_ID_MISMATCH"],
-    # The three closers (exit 2, stdout empty, the code on stderr): a report.json composed for another run.
-    "closers": ["RUN_ID_MISMATCH"],
+    # RUN_SUPERSEDED: the artifacts' run is bound there but a later run took the folder.
+    "insert_coaching": ["OUTPUT_IS_INPUT", "RUN_ID_REQUIRED", "RUN_NOT_BOUND", "RUN_ID_MISMATCH", "RUN_SUPERSEDED"],
+    # The three closers (exit 2, stdout empty, the code on stderr): a report.json composed for another run; in a
+    # run dir that carries a ref, for a run that no longer holds the folder (RUN_SUPERSEDED) or is not bound there.
+    "closers": ["RUN_ID_MISMATCH", "RUN_SUPERSEDED", "RUN_NOT_BOUND"],
     "usage": ["USAGE"],
     # `run_status.py fail` on a run still waiting for an answer.
     "fail": ["RUN_WAITING"],

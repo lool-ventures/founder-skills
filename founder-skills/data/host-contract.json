@@ -12,7 +12,16 @@
       "RUN_REFUSED"
     ],
     "closers": [
-      "RUN_ID_MISMATCH"
+      "RUN_ID_MISMATCH",
+      "RUN_SUPERSEDED",
+      "RUN_NOT_BOUND"
+    ],
+    "compose": [
+      "RUN_ID_REQUIRED",
+      "RUN_NOT_BOUND",
+      "RUN_SUPERSEDED",
+      "ARTIFACT_OTHER_RUN",
+      "OUTPUT_IS_INPUT"
     ],
     "cp_producers": [
       "RUN_ID_REQUIRED",
@@ -60,7 +69,10 @@
     ],
     "html_writers": [
       "RUN_ID_MISMATCH",
-      "OUTPUT_IS_INPUT"
+      "OUTPUT_IS_INPUT",
+      "RUN_NOT_BOUND",
+      "RUN_SUPERSEDED",
+      "ARTIFACT_OTHER_RUN"
     ],
     "ic_producers": [
       "RUN_ID_REQUIRED",
@@ -76,7 +88,8 @@
       "OUTPUT_IS_INPUT",
       "RUN_ID_REQUIRED",
       "RUN_NOT_BOUND",
-      "RUN_ID_MISMATCH"
+      "RUN_ID_MISMATCH",
+      "RUN_SUPERSEDED"
     ],
     "ms_producers": [
       "RUN_ID_REQUIRED",

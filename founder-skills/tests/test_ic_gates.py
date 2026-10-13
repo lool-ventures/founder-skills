@@ -625,8 +625,10 @@ def test_the_page_and_compose_read_one_run_id(tmp_path: Path) -> None:
     profile["metadata"]["run_id"] = "<RUN_ID>"
     _write(run_dir / "startup_profile.json", profile)
     page = run_dir / "report.html"
-    _ok(h.run(IC / "visualize.py", "--dir", str(run_dir), "--run-id", run_id, "-o", str(page)))
-    assert f'content="{run_id}"' in page.read_text(encoding="utf-8")
+    # In a folder that belongs to a run the page refuses a required file carrying another (here a placeholder)
+    # id, the same code compose gives; the page's own id is still the one compose's checks read.
+    proc = h.run(IC / "visualize.py", "--dir", str(run_dir), "--run-id", run_id, "-o", str(page))
+    assert proc.returncode == 1 and _out(proc)["code"] == "ARTIFACT_OTHER_RUN" and not page.exists()
     viz = _load("ic_viz_pin", IC / "visualize.py")
     gates = _load("_ic_gates_pin", IC / "_ic_gates.py")
     assert viz._own_run_id(str(run_dir)) == gates.run_id_of(str(run_dir)) == run_id

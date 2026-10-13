@@ -1352,16 +1352,26 @@ def supersede_runs_in(artifacts_root: str, run_dir: str, by_run_id: str) -> list
     return results
 
 
-def take_folder(paths: RunPaths) -> list[dict[str, Any]]:
+def take_folder(paths: RunPaths, *, from_dir: str | None = None) -> list[dict[str, Any]]:
     """This run writes into its folder (again): it is the folder's current run. Under its own lock, clear its own
     `superseded_by`/`superseded_at` (its `deliverables_status` is then what its state says: re-derived when
     complete, null otherwise); release; then mark every other run that claims the folder. Called by `bind` and
-    after any transaction that reopened a complete run. Returns `supersede_runs_in`'s results ([] unbound)."""
+    after any transaction that reopened a complete run. Returns `supersede_runs_in`'s results ([] unbound).
+
+    `from_dir`: the folder a reopen ran from. When it is not the run's own recorded folder (a host moved the
+    review to an archive and a what-if ran there), the reopen takes nothing: the run's original folder now
+    belongs to another run, which must not be marked replaced by it."""
     with run_lock(paths):
         status = load_status(paths)
         if status is None:
             return []
         run_dir = status.get("run_dir_shell")
+        if (
+            from_dir is not None
+            and isinstance(run_dir, str)
+            and os.path.realpath(from_dir) != os.path.realpath(run_dir)
+        ):
+            return []
         if status.get("superseded_by"):
             status["superseded_by"] = None
             status["superseded_at"] = None

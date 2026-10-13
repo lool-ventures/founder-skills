@@ -182,7 +182,7 @@ def reopen_if_complete(run_dir: str, run_id: str | None, *, step: str) -> None:
         return
     gates, paths = ledger
     try:
-        if gates.reopen_for_recompose(paths, step):
+        if gates.reopen_for_recompose(paths, step, run_dir=os.path.abspath(run_dir)):
             revision = (sys.modules["_run_status"].load_status(paths) or {}).get("revision")
             print(f"note: the delivered review is reopened as revision {revision} for this what-if", file=sys.stderr)
     except Exception as e:  # noqa: BLE001

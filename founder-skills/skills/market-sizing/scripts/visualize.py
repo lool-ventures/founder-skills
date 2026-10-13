@@ -71,8 +71,15 @@ OPTIONAL_ARTIFACTS: list[str] = ["redteam.json"]
 _CONFIDENCE_CATEGORIES: list[str] = ["sourced", "derived", "agent_estimate"]
 
 
+# Optional artifacts another run wrote, in a folder that belongs to a run: read as absent (`main` sets this from
+# `_run_ref.foreign_artifacts` when given --run-id; empty for a folder with no ref, and in-process callers).
+_IGNORED_OTHER_RUN: set[str] = set()
+
+
 def _load_artifact(dir_path: str, name: str) -> dict[str, Any] | None:
     """Load a JSON artifact. Returns None if missing, _CORRUPT if unparseable."""
+    if name in _IGNORED_OTHER_RUN:
+        return None
     path = os.path.join(dir_path, name)
     if not os.path.exists(path):
         return None
@@ -1916,6 +1923,38 @@ def main() -> None:
             )
         ],
     )
+    # In a folder that belongs to a run: only the folder's current run, and only its files on the page (the same
+    # code compose gives for the same folder).
+    if args.run_id:
+        import _run_ref
+
+        _run_ref.refuse_not_this_runs(
+            args.dir,
+            args.run_id,
+            [
+                os.path.join(args.dir, n)
+                for n in (
+                    "inputs.json",
+                    "methodology.json",
+                    "validation.json",
+                    "sizing.json",
+                    "checklist.json",
+                    "sensitivity.json",
+                )
+            ],
+            noun="analysis dir",
+        )
+        _IGNORED_OTHER_RUN.update(
+            n
+            for n, _r in _run_ref.foreign_artifacts(
+                args.dir, args.run_id, [os.path.join(args.dir, n) for n in ("redteam.json",)]
+            )
+        )
+        if _IGNORED_OTHER_RUN:
+            print(
+                f"Note: left out {', '.join(sorted(_IGNORED_OTHER_RUN))}: another run's file, not this run's",
+                file=sys.stderr,
+            )
 
     if not os.path.isdir(args.dir):
         print(f"Error: directory not found: {args.dir}", file=sys.stderr)

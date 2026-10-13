@@ -103,6 +103,30 @@ def verdict_for_chat(verdict: str) -> str:
 REFUSAL = {"code": "RUN_ID_MISMATCH"}
 
 
+# The codes a report composed for a run that does not hold the folder prints (literals: the contract's code scan
+# reads them).
+FOLDER_REFUSALS = {"superseded": {"code": "RUN_SUPERSEDED"}, "not_bound": {"code": "RUN_NOT_BOUND"}}
+
+
+def refuse_report_of_another_folder_run(report: dict[str, Any], run_dir: str) -> None:
+    """In a folder that belongs to a run: exit 2, nothing printed or written, when report.json was composed for a
+    run that no longer holds the folder (`RUN_SUPERSEDED`: a later run was bound here) or is not bound here at all
+    (`RUN_NOT_BOUND`). A folder with no ref, or a report with no run id, is not checked here."""
+    import _run_ref
+
+    current = _run_ref.folder_current_run(run_dir)
+    theirs = report.get("run_id")
+    if current is None or not isinstance(theirs, str) or not theirs or theirs == current:
+        return
+    which = "superseded" if _run_ref.has_ledger(run_dir, theirs) else "not_bound"
+    print(
+        f"Error: {FOLDER_REFUSALS[which]['code']}: this report was composed for run {theirs}, but this folder belongs "
+        f"to run {current}. Compose the report again for {current}, then run this again. Nothing was printed.",
+        file=sys.stderr,
+    )
+    sys.exit(2)
+
+
 def refuse_another_runs_report(report: dict[str, Any], ours: str | None) -> None:
     """Exit 2, nothing printed or written, when report.json was composed for another run than this folder's.
     A missing id on either side is not compared: a report from before the stamp, or inputs with no run id."""
@@ -159,6 +183,7 @@ def main() -> None:
         if not isinstance(report, dict):
             raise ValueError("report.json is not an object")
         refuse_another_runs_report(report, _ms_gates.run_id_of(os.path.dirname(os.path.abspath(a.report))))
+        refuse_report_of_another_folder_run(report, os.path.dirname(os.path.abspath(a.report)))
         text = build(report, _deliverables(a.deliverable, link))
     except (OSError, ValueError) as e:
         print(f"Error: cannot build the hand-over from report {a.report}: {e}", file=sys.stderr)

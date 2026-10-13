@@ -201,7 +201,7 @@ def reopen_if_complete(run_dir: str, run_id: str | None, *, step: str) -> None:
         return
     gates, paths = ledger
     try:
-        if gates.reopen_for_recompose(paths, step):
+        if gates.reopen_for_recompose(paths, step, run_dir=os.path.abspath(run_dir)):
             revision = (sys.modules["_run_status"].load_status(paths) or {}).get("revision")
             # The coaching about the earlier map is not this revision's: SKILL.md names its fresh hand-off file by
             # this number, so a stale file can never pass the gate.
