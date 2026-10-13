@@ -676,6 +676,9 @@ def _cli() -> int:
     p.add_argument("--pretty", action="store_true")
     args = p.parse_args()
     _ct_gates.refuse_without_run_id(args.review_dir, args.run_id)
+    _ct_gates._run_ref.refuse_not_this_runs(
+        args.review_dir, args.run_id, [args.inputs], noun="review dir", written="no artifact was written"
+    )
     ledger = _gate_checks(args)
 
     with open(args.inputs) as f:

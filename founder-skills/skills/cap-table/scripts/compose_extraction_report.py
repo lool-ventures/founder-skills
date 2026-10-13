@@ -624,6 +624,13 @@ def _cli() -> int:
     # every extraction confirmation the run opened is recorded. The -extraction dir itself carries no ref.
     run_dir = _ct_gates.run_dir_of(args.inputs)
     _ct_gates.refuse_without_run_id(run_dir, args.run_id)
+    _ct_gates._run_ref.refuse_not_this_runs(
+        run_dir,
+        args.run_id,
+        [args.inputs, args.instruments, args.audit],
+        noun="review dir",
+        written="no artifact was written",
+    )
     _ledger = _ct_gates.require_or_exit(run_dir, args.run_id, [_ct_gates.FORK], by="compose_extraction_report.py")
     if _ledger is not None:
         if (_ct_gates.answers(_ledger).get(_ct_gates.FORK) or {}).get("answer_id") != "terms_only":

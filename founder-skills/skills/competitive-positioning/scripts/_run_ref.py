@@ -140,7 +140,9 @@ def refuse_not_this_runs(
        naming the run that holds the folder;
     4. an input carrying another run's id (`foreign_artifacts`): `ARTIFACT_OTHER_RUN`, naming each file.
     A folder with no ref returns at once and reads nothing (the no-ledger path, byte-identical). Loads nothing
-    from the plugin root. `written` ends the stderr line (cap-table's compose still records its own exit)."""
+    from the plugin root. Residual: a producer that derives the run dir from an `-o` written outside it (a
+    staging dir) sees no ref there and checks nothing; no SKILL.md writes a producer's `-o` outside the run dir.
+    `written` ends the stderr line (cap-table's compose still records its own exit)."""
     if not run_dir:
         return
     run_dir = os.path.abspath(run_dir)

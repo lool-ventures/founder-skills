@@ -582,6 +582,21 @@ def _mode_carta(args: argparse.Namespace) -> int:
         import _ct_gates
 
         _ct_gates.refuse_without_run_id(_ct_gates.run_dir_of(args.instruments), args.run_id)
+        # The store this lane merges into and restamps must be this run's: never adopt an earlier review's
+        # instruments under this run's id (lane 1's append guard, the same rule).
+        _ct_gates._run_ref.refuse_not_this_runs(
+            _ct_gates.run_dir_of(args.instruments),
+            args.run_id,
+            [args.instruments],
+            noun="review dir",
+            written="no artifact was written",
+        )
+        if args.output and os.path.abspath(args.output) == os.path.abspath(args.instruments):
+            # The audit would be written first and then read back as the store it merges into.
+            message = "-o names the --instruments store this mode merges into; point -o at the audit file"
+            sys.stdout.write(json.dumps({"status": "rejected", "code": "OUTPUT_IS_INPUT", "message": message}) + "\n")
+            print(f"Error: extract_cap_table.py: {message}; nothing was written", file=sys.stderr)
+            return 1
     if not os.path.exists(args.xlsx):
         sys.stderr.write(f"file not found: {args.xlsx}\n")
         return 1
@@ -999,6 +1014,15 @@ def _mode_freeform_emit(args: argparse.Namespace) -> int:
     import _ct_gates
 
     _ct_gates.refuse_without_run_id(args.dir, args.run_id)
+    # The base this lane merges into and rewrites must be this run's: an earlier review's founders and pool are
+    # never carried forward under this run's id.
+    _ct_gates._run_ref.refuse_not_this_runs(
+        args.dir,
+        args.run_id,
+        [os.path.join(args.dir, "inputs.json"), os.path.join(args.dir, "instruments.json")],
+        noun="review dir",
+        written="no artifact was written",
+    )
     if not os.path.exists(args.xlsx):
         print(
             json.dumps(

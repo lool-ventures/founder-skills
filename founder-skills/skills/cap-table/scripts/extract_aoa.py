@@ -564,6 +564,14 @@ def _cli() -> int:
     args = p.parse_args()
     if args.inputs:
         _ct_gates.refuse_without_run_id(_ct_gates.run_dir_of(args.inputs), args.run_id)
+        # The AoA terms are merged into --inputs and written back: never into an earlier review's file.
+        _ct_gates._run_ref.refuse_not_this_runs(
+            _ct_gates.run_dir_of(args.inputs),
+            args.run_id,
+            [args.inputs],
+            noun="review dir",
+            written="no artifact was written",
+        )
 
     extraction = json.load(sys.stdin)
 

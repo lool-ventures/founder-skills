@@ -294,17 +294,87 @@ PLUGIN = h.REPO_ROOT / "founder-skills"
 EXEMPT_PARITY: dict[tuple[str, str], str] = {
     ("skills/cap-table/scripts/extract_instrument.py", "--instruments"): "its own append guard already refuses an "
     "earlier run's instruments store; its other inputs are the founder's documents",
-    ("skills/cap-table/scripts/extract_cap_table.py", "--dir"): "lane 3 rewrites the dir's inputs.json in place for "
-    "this run and the validate lane reads the founder's spreadsheet; its own gate checks bind a spreadsheet-built base",
+    ("skills/cap-table/scripts/compose_extraction_report.py", "--review-dir"): "the folder it writes the terms-only "
+    "report into; the run files it reads come through --inputs, --instruments and --audit, which are checked",
+    (
+        "skills/competitive-positioning/scripts/cp_red_team.py",
+        "--uploads-dir",
+    ): "the founder's documents, not run files",
     ("skills/cap-table/scripts/write_coverage_disclosure.py", "--input"): "its input is the model's staged payload "
     "(stdin or a scratch file), not a run file",
     ("skills/competitive-positioning/scripts/persist_agent_artifact.py", "--input"): "its input is a sub-agent's "
     "hand-off under handoff/<run_id>/, namespaced per run and gated by check_handoff.py",
     ("skills/market-sizing/scripts/red_team.py", "--uploads-dir"): "reads no run file: stdin and the founder's uploads",
 }
+# Each skill's `_compose_result.py` reads compose's own argv to record what compose wrote; compose checks its files.
+for _skill in (
+    "cap-table",
+    "competitive-positioning",
+    "deck-review",
+    "financial-model-review",
+    "ic-sim",
+    "market-sizing",
+):
+    EXEMPT_PARITY[(f"skills/{_skill}/scripts/_compose_result.py", "--dir")] = (
+        "compose's wrapper: reads compose's argv to file its record; compose itself checks the run's files"
+    )
+
+
+RUN_FILE_FLAGS = frozenset(
+    {
+        "--inputs",
+        "--instruments",
+        "--cap-state",
+        "--scenarios",
+        "--rule-audit",
+        "--audit",
+        "--sizing",
+        "--validation",
+        "--replay",
+        "--inventory",
+        "--reconciliation",
+        "--ledger",
+        "--second-read",
+        "--downgrades",
+        "--positioning-scores",
+        "--product-profile",
+        "--carry-deferred",
+        "--landscape",
+        "--blind-set",
+        "--scores",
+        "--draft",
+        "--original",
+        "--input",
+        "--dir",
+        "--review-dir",
+        "--analysis-dir",
+        "--uploads-dir",
+    }
+)
+
+
+def _flag_dests(tree: Any) -> dict[str, str]:
+    """{flag: dest} for every RUN_FILE_FLAGS flag the script registers."""
+    import ast
+
+    out: dict[str, str] = {}
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Call) and getattr(n.func, "attr", "") == "add_argument":
+            flags = [a.value for a in n.args if isinstance(a, ast.Constant) and isinstance(a.value, str)]
+            dest = next(
+                (k.value.value for k in n.keywords if k.arg == "dest" and isinstance(k.value, ast.Constant)), None
+            )
+            longs = [f for f in flags if f.startswith("--")]
+            for f in flags:
+                if f in RUN_FILE_FLAGS:
+                    out[f] = str(dest or longs[0][2:].replace("-", "_"))
+    return out
 
 
 def _parity_findings() -> list[str]:
+    """Every run-file flag of every skill script that takes a --run-id (an output flag or not) reaches a
+    `refuse_not_this_runs` / `compose_run_or_exit` call, or is exempt as (script, flag) with a reason. A script's
+    exemption covers only the flag it names."""
     import ast
 
     problems = []
@@ -314,34 +384,49 @@ def _parity_findings() -> list[str]:
         if '"--run-id"' not in src:
             continue
         tree = ast.parse(src)
-        names = {
-            (n.func.attr if isinstance(n.func, ast.Attribute) else getattr(n.func, "id", ""))
-            for n in ast.walk(tree)
-            if isinstance(n, ast.Call)
-        }
-        if "refuse_output_onto_input" not in names and not rel.endswith("dispatch_prompt.py"):
+        flags = _flag_dests(tree)
+        if not flags:
             continue
-        # A compose checks through compose_run_or_exit, whose third argument is the required list.
-        calls = [
-            n
-            for n in ast.walk(tree)
-            if isinstance(n, ast.Call)
-            and getattr(n.func, "attr", "") in ("refuse_not_this_runs", "compose_run_or_exit")
-        ]
-        with_inputs = [
-            c
-            for c in calls
-            if (len(c.args) >= 3 and not (isinstance(c.args[2], ast.List) and not c.args[2].elts))
-            or any(k.arg == "inputs" for k in c.keywords)
-        ]
-        if with_inputs or any(r == rel for r, _f in EXEMPT_PARITY):
-            continue
-        problems.append(f"{rel}: has --run-id and reads run files, but never checks they are this run's")
+        checked: set[str] = set()
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Call) and getattr(n.func, "attr", "") in (
+                "refuse_not_this_runs",
+                "compose_run_or_exit",
+            ):
+                checked |= {s.attr for s in ast.walk(n) if isinstance(s, ast.Attribute)}
+                checked |= {s.id for s in ast.walk(n) if isinstance(s, ast.Name)}
+        for flag, dest in sorted(flags.items()):
+            if (rel, flag) in EXEMPT_PARITY or dest in checked:
+                continue
+            problems.append(f"{rel}: {flag} (args.{dest}) reads run files and never reaches the ownership check")
     return problems
+
+
+# Readers of run files that take no --run-id, so they have nothing to compare against: why each is left out.
+NO_RUN_ID_READERS: dict[str, str] = {
+    "skills/competitive-positioning/scripts/gate3_triggers.py": "reads the positioning scores the same step pair "
+    "just wrote and prints which Gate 3 triggers fire; its output is read once in the main thread, never a run "
+    "artifact another step consumes, so giving it a --run-id would add a flag with nothing behind it",
+}
 
 
 def test_every_reader_with_a_run_id_checks_its_inputs_or_is_exempt() -> None:
     assert _parity_findings() == []
+
+
+def test_the_readers_with_no_run_id_still_have_none() -> None:
+    """If one gains a --run-id, it moves into the scan above and this entry goes."""
+    for rel in NO_RUN_ID_READERS:
+        assert '"--run-id"' not in (PLUGIN / rel).read_text(encoding="utf-8"), rel
+
+
+def test_an_exemption_covers_only_its_own_flag() -> None:
+    """The scan is per flag: exempting one flag of a script leaves its other run-file flags checked."""
+    assert all(isinstance(k, tuple) and k[1] in RUN_FILE_FLAGS for k in EXEMPT_PARITY), sorted(EXEMPT_PARITY)
+    # extract_cap_table.py's lanes 2 and 3 merge into the run's store: both flags are checked, neither exempt.
+    rel = "skills/cap-table/scripts/extract_cap_table.py"
+    assert (rel, "--instruments") not in EXEMPT_PARITY and (rel, "--dir") not in EXEMPT_PARITY
+    assert not [p for p in _parity_findings() if p.startswith(rel)]
 
 
 def test_every_parity_exemption_names_a_script_that_exists() -> None:
@@ -775,3 +860,108 @@ def test_a_what_if_in_an_archived_copy_leaves_the_fresh_run_alone(tmp_path: Path
     assert code_of(proc) not in OWNERSHIP_CODES, (proc.stdout, proc.stderr)
     assert h.status(root, old)["revision"] == 1, proc.stderr  # the what-if reopened the archived review
     assert h.status_path(root, new).read_bytes() == before, "the fresh run was marked replaced by the archive"
+
+
+# --- cap-table lanes 2 and 3 merge into the run's store: never into an earlier review's ------------------------
+
+CARTA = h.REPO_ROOT / "founder-skills" / "tests" / "fixtures" / "cap-table-corpus" / "synthetic_carta.xlsx"
+
+
+def _ct_bound(tmp: Path) -> tuple[Path, str, Path]:
+    import test_ct_gates as ctg
+
+    root, rid, rd = ctg.bound(tmp)
+    return root, rid, rd
+
+
+def _carta(rd: Path, rid: str, out: Path | None = None) -> subprocess.CompletedProcess[str]:
+    argv = [str(SKILLS / "cap-table" / "scripts" / "extract_cap_table.py"), "--mode=carta", "--xlsx", str(CARTA)]
+    argv += ["--instruments", str(rd / "instruments.json"), "--run-id", rid]
+    return goldens.run([*argv, "-o", str(out or rd / "extraction_audit.json")])
+
+
+def _count(path: Path) -> int:
+    d = json.loads(path.read_text(encoding="utf-8"))
+    return sum(len(d.get(k) or []) for k in ("safes", "convertible_notes", "warrants", "preferred_series"))
+
+
+@pytest.mark.parametrize("store", ["foreign", "this_run", "absent"])
+def test_lane_2_merges_only_into_this_runs_store(store: str, tmp_path: Path) -> None:
+    root, rid, rd = _ct_bound(tmp_path)
+    inst = rd / "instruments.json"
+    if store == "absent":
+        inst.unlink(missing_ok=True)
+    else:
+        doc = json.loads(inst.read_text(encoding="utf-8"))
+        doc["metadata"]["run_id"] = STRANGER if store == "foreign" else rid
+        inst.write_text(json.dumps(doc), encoding="utf-8")
+    before = inst.read_bytes() if inst.exists() else None
+    proc = _carta(rd, rid)
+    if store == "foreign":
+        assert proc.returncode == 1 and code_of(proc) == "ARTIFACT_OTHER_RUN", (proc.stdout, proc.stderr)
+        assert json.loads(proc.stdout.strip().splitlines()[-1])["files"] == [
+            {"file": "instruments.json", "run_id": STRANGER}
+        ]
+        assert inst.read_bytes() == before and not (rd / "extraction_audit.json").exists()
+    else:  # the lever: the first document (no store yet) and the run's own store still merge
+        assert code_of(proc) not in OWNERSHIP_CODES and proc.returncode == 0, (proc.stdout, proc.stderr)
+        assert _count(inst) > 0 and json.loads(inst.read_text())["metadata"]["run_id"] == rid
+
+
+def test_lane_2_refuses_its_audit_written_onto_the_store(tmp_path: Path) -> None:
+    root, rid, rd = _ct_bound(tmp_path)
+    (rd / "instruments.json").unlink()
+    proc = _carta(rd, rid, out=rd / "instruments.json")
+    assert proc.returncode == 1 and code_of(proc) == "OUTPUT_IS_INPUT", (proc.stdout, proc.stderr)
+    assert not (rd / "instruments.json").exists()
+
+
+@pytest.mark.parametrize("foreign", [True, False])
+def test_lane_3_merges_only_into_this_runs_base(foreign: bool, tmp_path: Path) -> None:
+    root, rid, rd = _ct_bound(tmp_path)
+    xlsx = goldens.ct_workbook(rd)
+    inputs: dict[str, Any] = json.loads(json.dumps(goldens.CT_INPUTS))
+    inputs["metadata"] = {"run_id": STRANGER if foreign else rid}
+    (rd / "inputs.json").write_text(json.dumps(inputs), encoding="utf-8")
+    (rd / "instruments.json").unlink(missing_ok=True)
+    before = (rd / "inputs.json").read_bytes()
+    argv = [str(SKILLS / "cap-table" / "scripts" / "extract_cap_table.py"), "--mode=freeform-emit", "--xlsx", str(xlsx)]
+    argv += ["--dir", str(rd), "--run-id", rid, "--answer", "0.interest_rate_type=fixed_numeric_simple"]
+    proc = goldens.run(argv, stdin=json.dumps(goldens.CT_NOTE_BLOCKS))
+    if foreign:
+        assert proc.returncode == 1 and code_of(proc) == "ARTIFACT_OTHER_RUN", (proc.stdout, proc.stderr)
+        assert (rd / "inputs.json").read_bytes() == before and not (rd / "instruments.json").exists()
+    else:
+        assert code_of(proc) not in OWNERSHIP_CODES, (proc.stdout, proc.stderr)
+        assert (rd / "inputs.json").read_bytes() != before  # the in-place merge still happens
+
+
+@pytest.mark.parametrize("foreign", [True, False])
+def test_the_aoa_merge_and_the_terms_report_read_only_this_runs_files(foreign: bool, tmp_path: Path) -> None:
+    """extract_aoa.py writes its terms back into --inputs; compose_extraction_report.py renders from --inputs and
+    --instruments. Neither takes another run's file (the lever: the same files stamped with this run's id)."""
+    root, rid, rd = _ct_bound(tmp_path)
+    for name in ("inputs.json", "instruments.json"):
+        doc = json.loads((rd / name).read_text(encoding="utf-8"))
+        doc["metadata"]["run_id"] = STRANGER if foreign else rid
+        (rd / name).write_text(json.dumps(doc), encoding="utf-8")
+    before = (rd / "inputs.json").read_bytes()
+    aoa = goldens._ct("extract_aoa.py", "--inputs", str(rd / "inputs.json"), "--run-id", rid, stdin="{}")
+    report = goldens._ct(
+        "compose_extraction_report.py",
+        "--inputs",
+        str(rd / "inputs.json"),
+        "--instruments",
+        str(rd / "instruments.json"),
+        "--review-dir",
+        str(rd),
+        "--run-id",
+        rid,
+    )
+    if foreign:
+        for proc in (aoa, report):
+            assert proc.returncode == 1 and code_of(proc) == "ARTIFACT_OTHER_RUN", (proc.stdout, proc.stderr)
+        assert (rd / "inputs.json").read_bytes() == before
+    else:
+        for proc in (aoa, report):
+            assert code_of(proc) not in OWNERSHIP_CODES, (proc.stdout, proc.stderr)
