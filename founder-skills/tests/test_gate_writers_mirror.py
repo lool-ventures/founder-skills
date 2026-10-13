@@ -77,6 +77,7 @@ def _out(proc: subprocess.CompletedProcess[str]) -> dict[str, Any]:
         "ct_compose",
         "ct_concise",
         "ct_compose_extraction",
+        "mixed_run_compose",
     ],
 )
 def test_with_no_ledger_each_writer_matches_its_golden(group: str) -> None:

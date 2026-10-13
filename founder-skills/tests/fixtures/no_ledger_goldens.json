@@ -1113,6 +1113,160 @@
       "stdout": "3f7e7a6f0f806833a75ef424974e652e2b92400410cac9288d9de99a76392fb4"
     }
   },
+  "mixed_run_compose": {
+    "cap-table/required": {
+      "exit": 0,
+      "files": {
+        "cap_state.json": "e8f5c79a26040e45248e747b9c44280b961aae86aab7488c641d827242149b1a",
+        "counsel_packet.json": "b04c16cfcd8e4cd91ff2682135575e966b5beea4e90159f89c4f1df2eadb8e9d",
+        "counsel_packet.md": "4719feb527d70294e41b8007a1b74c6ce9e587341c0c9d8f5c97d7a4ecffd2ce",
+        "coverage_disclosure.json": "9b6707f3a135c193e8fc65269bd688ff1c2f6352b6dcf8ebe17346dea7f40e91",
+        "inputs.json": "631d2fa20e6c47d40e448e227e4a222d6c8b3ba7eee857d4f28665fb5ad5a883",
+        "instruments.json": "d52ad2ea74f1468f7b568fa232883cf5a7c34eaec412dfb6f412e84b1e6d8c18",
+        "report.json": "90dab020400ef269eb9dcf208c9e5fbcc16e83e467b732536b1aef751f0b9bad",
+        "report.md": "95574ef4c9a63c497faae7aec75da092cc1c4ef3a6898f60a274c1125beacdd9",
+        "rule_audit.json": "1c188b2272b9298a53bf72afa9fe0c1e42d9bca04f3ccf9df5b0c042612e3825",
+        "scenario_requests.json": "356f9df9565bdbde35e8a9efab68146f8b4ac14338cabc411f54bbf7dc9f9481",
+        "scenarios.json": "ab7974787a597d73cf12ec2eb4d51556be67296f2e00193808445ad0d28dc740"
+      },
+      "stderr": "7e4609c4b953301ee8fe2ef139f020b44889e1e8adb1f0664f66b769b442a13e",
+      "stdout": "ed20edbbc8ee8b075d7f3a84e3e4e21325b34c042581cd78ab194fc24852a513"
+    },
+    "competitive-positioning/optional": {
+      "exit": 0,
+      "files": {
+        "checklist.json": "1316c8ee1762f6532a3dced7dfa605ad4103898cc7efea4d024c6ee87b7e59ae",
+        "landscape.json": "39b631ba8d79cb7e14934e9e9dcc45f79311add074deb4c5b0625c708ae09949",
+        "landscape_draft.json": "7f70e9b3d44fddbe139ee26da58a635578c207f6ccd30ed7bc3f79f7d055219b",
+        "moat_scores.json": "1a82e5c4435244f6d368ae5284d4c2efb46fb2789da6fcff99d9741bc59eb628",
+        "positioning.json": "18487809b5038233286829322521a391c9809eda75b3337fd7d28b18f0adcb48",
+        "positioning_scores.json": "ec3f79ffd9afe3c64e50b5e1509e77e692251e7c832531572c2010a50f67e755",
+        "product_profile.json": "13ced8f889f63ab3f0f45485cb9c2d692e9773f40a06ac20f16246ea445ed4e3",
+        "red_team_skip.json": "09d2289cdfb0043aae9ef323ad1b2273eac53f0aca184ba13c0fa1423fd5380f",
+        "report.json": "bcaa6413d8ccbae75539215ad8445052fe00d5713426479f834ca9e33ca0e29d",
+        "report.md": "84f20529ea6e816a6bbfe3b0a651f3c1254e33be5b45d9fc0b24a80b54114375"
+      },
+      "stderr": "9b518cbac0fecf2579086e9051f67ae3a60dc10229be5cfca37097dce2796630",
+      "stdout": "8e0139441d52b4a343525b47e39268f5d9e937f857dbe2ff35aa781c758b733a"
+    },
+    "competitive-positioning/required": {
+      "exit": 0,
+      "files": {
+        "checklist.json": "2862ad743bd6b9489ac8541816fa7e8a4099eb30b421a067aa77404658480c8f",
+        "landscape.json": "39b631ba8d79cb7e14934e9e9dcc45f79311add074deb4c5b0625c708ae09949",
+        "landscape_draft.json": "7f70e9b3d44fddbe139ee26da58a635578c207f6ccd30ed7bc3f79f7d055219b",
+        "moat_scores.json": "1a82e5c4435244f6d368ae5284d4c2efb46fb2789da6fcff99d9741bc59eb628",
+        "positioning.json": "18487809b5038233286829322521a391c9809eda75b3337fd7d28b18f0adcb48",
+        "positioning_scores.json": "ec3f79ffd9afe3c64e50b5e1509e77e692251e7c832531572c2010a50f67e755",
+        "product_profile.json": "3d7bef4cbc379bde66595b6835abd2b4e10e7fb4ce4020e817d87d1ea28e5327",
+        "red_team_skip.json": "09d2289cdfb0043aae9ef323ad1b2273eac53f0aca184ba13c0fa1423fd5380f",
+        "report.json": "f5174f4537a404f5965569bb239a1223054939bb4ed9668cae903f8cf06dcd38",
+        "report.md": "84f20529ea6e816a6bbfe3b0a651f3c1254e33be5b45d9fc0b24a80b54114375"
+      },
+      "stderr": "91aa7757d9d894b707f1969342bfb558514cf13c0611b317a346042a487d71c7",
+      "stdout": "8e0139441d52b4a343525b47e39268f5d9e937f857dbe2ff35aa781c758b733a"
+    },
+    "deck-review/optional": {
+      "exit": 0,
+      "files": {
+        "checklist.json": "1753a769296e05d651f3d4b458f9ae716c13b5c532cd80c451f888a890bfe776",
+        "deck_inventory.json": "49f97392eef67c3f62009586ad889e6135a55f8fdc3589e9c0bc6804f62733ff",
+        "ledger.json": "1a40587a930ef32fcdee8f2cb5945e36c95395793faab4a66d89764dc2e298de",
+        "reconciliation.json": "d6b6a11f0f00c514781be09ebf3c30bbed3fd9330b32273483e804d6c307d087",
+        "report.json": "02b019e82e74f2937a9c94b1eafd058589f1124425052d30e9fd7d2aa796f8db",
+        "report.md": "4876c9831bfe74b961178cfc037e517b794c3cfec6698fcd22d7ab1f12feeb82",
+        "second_read.json": "e745c34b0be6276e28acbc99f14faf607330ea9fca6f46a463244ceea86f7ede",
+        "slide_reviews.json": "cd44a7bf9d0692c36a8f2923f8034f4a5c43016585fdf7b8d08f12515c12945c",
+        "stage_profile.json": "4b28a39f5672263d8374dce61ed71cb3d1c7c539e1759a78c2dba7cc91fd5a9c"
+      },
+      "stderr": "1124e63d468d63964b593cbfadbb1c66f2d260fecfbf99cf927fc565ca3b2786",
+      "stdout": "300680e0711cfab07ec6cc9234b6671673c827da9cc02ad7bebe7498e8ea9e9a"
+    },
+    "deck-review/required": {
+      "exit": 0,
+      "files": {
+        "checklist.json": "cd51e2fbbaf604a968bb60874856c9da55c2e808e49193137154a746139a2f66",
+        "deck_inventory.json": "49f97392eef67c3f62009586ad889e6135a55f8fdc3589e9c0bc6804f62733ff",
+        "ledger.json": "af5b2eb1d6c1ccc4814806b4f0d0af874aa8e6c9736fe08698adee5beb7cbb31",
+        "reconciliation.json": "d6b6a11f0f00c514781be09ebf3c30bbed3fd9330b32273483e804d6c307d087",
+        "report.json": "b74acbf91a88a273629e5581c926c692c9bba5b7aaa91a98585768187fb37e31",
+        "report.md": "80fd3935030e2436a16f4e11b87a2690fdd1e78debc084ebe747e0f0b3b14d73",
+        "second_read.json": "e745c34b0be6276e28acbc99f14faf607330ea9fca6f46a463244ceea86f7ede",
+        "slide_reviews.json": "cd44a7bf9d0692c36a8f2923f8034f4a5c43016585fdf7b8d08f12515c12945c",
+        "stage_profile.json": "4b28a39f5672263d8374dce61ed71cb3d1c7c539e1759a78c2dba7cc91fd5a9c"
+      },
+      "stderr": "4ddc797e027d7aea12bfeecbe0dc5633b74a5eea71832f78a450568f295a290c",
+      "stdout": "36b8a8c1f65965601c1cd75e5efdfb4b865a190c8fd83de70eb5f93f056c6570"
+    },
+    "financial-model-review/required": {
+      "exit": 0,
+      "files": {
+        "checklist.json": "4afa720c543d7a2b1e5a2ca0c75ba9507f893054f06d8b0fd594402f8178bc4a",
+        "inputs.json": "ed0bb8241c468220a17e1bbecc79243ec6e3de4fa92b8dcec0c3f18a7da14306",
+        "report.json": "e87c66fa8aaf8086a5e9426c361720715f85ff0e17eedf781061ad8f76cfe0b2",
+        "report.md": "1c684bd3e3c7922b231d4b19a063ce5eba73586cd1a8af31b8209a7e2676c96f",
+        "runway.json": "6c7e4c29634d48e80543dc6efb03a70b84730d800e9f5fe3ada0787f6803061a",
+        "unit_economics.json": "f8a9df4cbf19b4d066e6121af6ed42a6b9a1e530e126c180b05b537a17774396"
+      },
+      "stderr": "541fef91a427253731407a8792621c74aa4adf9d8b1e5312f257aed21d2eacf8",
+      "stdout": "4b2d2e7af6f13cb19b2d072b42a8a82385a8ffbc115370c6a6295eca4665b052"
+    },
+    "ic-sim/optional": {
+      "exit": 0,
+      "files": {
+        "conflict_check.json": "912bb4c8f255531cb32480f4ddc98df26326d24780f7160d5f186c509a8ad687",
+        "discussion.json": "4131ef760df2f3d17dae95b873ee146c5e0cde21e95517c4ffcd11c87dc8c6d2",
+        "fund_profile.json": "14403353df1cbed0a7a2cddb645c6abc34243068354ffe281f1b13a51cd5ffc4",
+        "partner_assessment_analyst.json": "2c1bab3558936854884cdcdc63075ce70485d45a95660fa9f40e862248a829c6",
+        "partner_assessment_operator.json": "2f3a2b910f9d8e657b8d083701aa5e747ac705c025ce6f7823e1388c9ce24954",
+        "partner_assessment_visionary.json": "59264213bfea29810fa0c9a54d45366c7ae721e06159821a63a9f4105b3e5f86",
+        "partner_rebuttal_analyst.json": "854d2944eb0c74f48050beb0ea425e35ceddf9e1fe10ef2f203dacfb9584ca42",
+        "partner_rebuttal_operator.json": "7b626fcd49fe1f951874890cca71aef6db9073ebe4cd2f502a0fa00f2bf26be5",
+        "partner_rebuttal_visionary.json": "cbe3d0d76440b2f6c34de18bff2013f8766e5fc5d6aacb3b4f4a927f9c5cd716",
+        "report.json": "460aa7be046ccf1b1ca8cdc2bc862d8d8325804e6554fbc9cb3b7c92039bfaf2",
+        "report.md": "ad55373fb5643932664ea83fe56110ffedff1a9a6003bbdd300b9ca1d139cb74",
+        "score_dimensions.json": "5cfa2f9295f817dd0571b7e0d7bee74e0fedd2fb59a260a94f6980bf4f428d56",
+        "startup_profile.json": "58d58aca268e5b9c70c27ab57489986f0e1d1582f139a5c1774a99dd7a08a7db"
+      },
+      "stderr": "551d02884a0d8c2ece7936f258e0918970df0a918afef363bf2d98d23fcbe52c",
+      "stdout": "31d74a6b4c34816fc31aa05d9674bfb13757c884840559e635931e6f8076d9d0"
+    },
+    "ic-sim/required": {
+      "exit": 0,
+      "files": {
+        "conflict_check.json": "912bb4c8f255531cb32480f4ddc98df26326d24780f7160d5f186c509a8ad687",
+        "discussion.json": "922be914b1736fd9495f9c0c1c237002c731a6c1d01ab642fe9232e7dd394ffb",
+        "fund_profile.json": "14403353df1cbed0a7a2cddb645c6abc34243068354ffe281f1b13a51cd5ffc4",
+        "partner_assessment_analyst.json": "2c1bab3558936854884cdcdc63075ce70485d45a95660fa9f40e862248a829c6",
+        "partner_assessment_operator.json": "2f3a2b910f9d8e657b8d083701aa5e747ac705c025ce6f7823e1388c9ce24954",
+        "partner_assessment_visionary.json": "e36072754b34ac7d7530237c463c963fc5059e55dcceaa5ef001cdae33d612fd",
+        "partner_rebuttal_analyst.json": "854d2944eb0c74f48050beb0ea425e35ceddf9e1fe10ef2f203dacfb9584ca42",
+        "partner_rebuttal_operator.json": "7b626fcd49fe1f951874890cca71aef6db9073ebe4cd2f502a0fa00f2bf26be5",
+        "partner_rebuttal_visionary.json": "cbe3d0d76440b2f6c34de18bff2013f8766e5fc5d6aacb3b4f4a927f9c5cd716",
+        "report.json": "a146606ffec658a3fc2c83a37ec0d42282d48efc5d0e789afec2fe4cb6137308",
+        "report.md": "4c6416bd3c7136caded9e892154e43551701c8aed4c457863983378fcbbb9a62",
+        "score_dimensions.json": "5cfa2f9295f817dd0571b7e0d7bee74e0fedd2fb59a260a94f6980bf4f428d56",
+        "startup_profile.json": "58d58aca268e5b9c70c27ab57489986f0e1d1582f139a5c1774a99dd7a08a7db"
+      },
+      "stderr": "df775077b53ce98b259c5bb119e1fa86569e6065acd271508ebaefc331e24d17",
+      "stdout": "31d74a6b4c34816fc31aa05d9674bfb13757c884840559e635931e6f8076d9d0"
+    },
+    "market-sizing/required": {
+      "exit": 0,
+      "files": {
+        "checklist.json": "361254f257740a9846fd9534973652697e5d7348b1222bde3b4566e782c3fb92",
+        "inputs.json": "50b3547d9ea6c410c114c77f989cad18580251514c3ce6b34e3dbdb188f09858",
+        "methodology.json": "c72739cdf62904bd05b86a12f08c80660d850df92d84d314ba25b13c75bdc39a",
+        "report.json": "f32f866c651ec100d02d6bc2fb5db225f6e0adf381a24ac48c41e327941c2fe7",
+        "report.md": "377fe41f8afd39091c7a67ceaa407d4a8b3d3a07a0d063af9dc9e069a6fe3443",
+        "sensitivity.json": "bd23d45ba6939b45cac3f31f392170d73500c76f85436f50f207a4fba27c9772",
+        "sizing.json": "2dbdc6e6ac54373cb9dd2bfcad1a2ef735074facf8d8a0931c91a77f2f5eba11",
+        "validation.json": "412cbeca725386c937665f34b2a51bbf1060e94c6989bbf19f06e176861f7bae"
+      },
+      "stderr": "b59b0e3311ba5c02a42bccdbae087b3955225cf6140f0aba5e788592c73d8659",
+      "stdout": "8720fcb80d6d72b823cfa70e6513f33f27f232f3b72aaf64efebdaed577e491f"
+    }
+  },
   "ms_checklist": {
     "sizing_stamp": {
       "exit": 0,

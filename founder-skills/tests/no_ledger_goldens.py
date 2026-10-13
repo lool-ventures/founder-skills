@@ -1480,6 +1480,106 @@ def ct_compose_extraction_scenarios() -> dict[str, dict[str, Any]]:
         return {"plain": result(proc, td, root)}
 
 
+# --- a folder holding two runs' files, with no run ref -------------------------------------------
+
+OTHER_RUN = "20260901T080000Z-0e1d2c"
+
+
+def _restamp(path: Path, run_id: str) -> None:
+    """Replace the file's run id (metadata first, top level when it has no metadata), never add one."""
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if isinstance(data.get("metadata"), dict) and "run_id" in data["metadata"]:
+        data["metadata"]["run_id"] = run_id
+    else:
+        assert "run_id" in data, path
+        data["run_id"] = run_id
+    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+
+def _dr_dir(root: Path) -> None:
+    import shutil
+
+    for f in (FIXTURES / "deck-review").iterdir():
+        if f.is_file():
+            shutil.copy(f, root / f.name)
+
+
+def _dr_compose(root: Path) -> subprocess.CompletedProcess[str]:
+    script = str(SKILLS / "deck-review" / "scripts" / "compose_report.py")
+    return run(
+        [
+            script,
+            "--dir",
+            str(root),
+            "-o",
+            str(root / "report.json"),
+            "--write-md",
+            str(root / "report.md"),
+            "--ungated",
+        ]
+    )
+
+
+def _ic_compose(root: Path) -> subprocess.CompletedProcess[str]:
+    return run(
+        [
+            str(IC_SCRIPTS / "compose_report.py"),
+            "--dir",
+            str(root),
+            "-o",
+            str(root / "report.json"),
+            "--write-md",
+            str(root / "report.md"),
+        ]
+    )
+
+
+def _ct_compose(root: Path) -> subprocess.CompletedProcess[str]:
+    return _ct(
+        "compose_report.py",
+        "--dir",
+        str(root),
+        "--run-id",
+        CT_RUN,
+        "-o",
+        str(root / "report.json"),
+        "--write-md",
+        str(root / "report.md"),
+    )
+
+
+# (scenario, build, compose, file restamped to another run). A required file from another run is today a
+# STALE_ARTIFACT row and exit 0; an optional one joins the parity loop the same way. A folder with no run
+# ref must keep that behaviour byte for byte once run ownership is enforced in bound folders.
+MIXED_RUN_CASES: tuple[
+    tuple[str, Callable[[Path], None], Callable[[Path], subprocess.CompletedProcess[str]], str], ...
+] = (
+    ("market-sizing/required", lambda r: _ms_variant(r, "plain"), _ms_compose, "checklist.json"),
+    ("financial-model-review/required", _fmr_review_dir, _fmr_compose, "checklist.json"),
+    ("ic-sim/required", _ic_dir, _ic_compose, "discussion.json"),
+    ("ic-sim/optional", _ic_dir, _ic_compose, "partner_assessment_visionary.json"),
+    ("competitive-positioning/required", _cp_dir, _cp_compose, "checklist.json"),
+    ("competitive-positioning/optional", _cp_dir, _cp_compose, "product_profile.json"),
+    ("deck-review/required", _dr_dir, _dr_compose, "checklist.json"),
+    ("deck-review/optional", _dr_dir, _dr_compose, "ledger.json"),
+    ("cap-table/required", _ct_full, _ct_compose, "counsel_packet.json"),
+)
+
+
+def mixed_run_compose_scenarios() -> dict[str, dict[str, Any]]:
+    out: dict[str, dict[str, Any]] = {}
+    for name, build, compose, restamped in MIXED_RUN_CASES:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            build(root)
+            _restamp(root / restamped, OTHER_RUN)
+            proc = compose(root)
+            res = result(proc, td, root)
+            res["stdout"] = _sha(re.sub(r'"bytes": ?\d+', '"bytes":<N>', normalise(proc.stdout, td)))
+            out[name] = res
+    return out
+
+
 GROUPS: dict[str, Callable[[], dict[str, dict[str, Any]]]] = {
     "html": lambda: {f"{s}/{w}": html_scenario(s, w) for s, w, _k in HTML_WRITERS},
     "insert_coaching": coaching_scenarios,
@@ -1518,6 +1618,7 @@ GROUPS: dict[str, Callable[[], dict[str, dict[str, Any]]]] = {
     "ct_compose": ct_compose_scenarios,
     "ct_concise": ct_concise_scenarios,
     "ct_compose_extraction": ct_compose_extraction_scenarios,
+    "mixed_run_compose": mixed_run_compose_scenarios,
 }
 
 
