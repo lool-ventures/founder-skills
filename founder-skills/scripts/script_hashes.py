@@ -19,8 +19,13 @@ THE CHECK. `verify_detail(root)` names every listed file under `root` that diffe
 read, and every `.py` the same walk finds that the manifest does not list (a new `scripts/json.py` would be
 imported by a script in that folder before the standard library's). It never raises. When it cannot judge
 the root it returns no list and says why: the manifest is absent or not one this module writes, or more
-than `max(5, entries // 10)` entries differ, which an installer transform, a mixed install or an extracted
-archive's metadata produces, and an improvised edit to one or a few files does not.
+than `max(5, entries // 10)` LISTED entries differ, which an installer transform or a mixed install produces,
+and an improvised edit to one or a few files does not. Unlisted scripts are always named and never count
+toward that threshold (a package installed into a scripts folder is an edit, not another install).
+Residual: the walk does not follow a symlinked folder inside the plugin (`os.walk`'s default; following one
+could loop or leave the plugin), so its listed files read as missing and, past the threshold, the check is
+off for that install. No install measured carries one; the plugin ROOT reached through a symlink (the Cowork
+host loop's) is walked normally.
 
 USE. `--write` regenerates the manifest of the plugin this file belongs to (run it after editing any plugin
 `.py` or agent body); `--check` verifies this plugin (or `--root DIR` against this plugin's manifest) and
@@ -139,13 +144,15 @@ def verify_detail(root: str, manifest_path: str | None = None) -> tuple[list[str
             return None, why
         files: dict[str, str] = manifest["files"]
         bodies: dict[str, str] = manifest["agent_bodies"]
-        out = [rel for rel, want in files.items() if digest(os.path.join(root, rel)) != want]
-        out += [rel for rel, want in bodies.items() if digest(os.path.join(root, rel), body=True) != want]
-        out += [rel for rel in _python_files(root) if rel not in files]
+        listed = [rel for rel, want in files.items() if digest(os.path.join(root, rel)) != want]
+        listed += [rel for rel, want in bodies.items() if digest(os.path.join(root, rel), body=True) != want]
         entries = len(files) + len(bodies)
-        if len(out) > threshold(entries):
-            return None, f"{len(out)} of {entries} files differ: the manifest does not describe this install"
-        return sorted(set(out)), ""
+        if len(listed) > threshold(entries):
+            return None, f"{len(listed)} of {entries} files differ: the manifest does not describe this install"
+        # Unlisted scripts never count toward the threshold: a package installed into a scripts folder is an
+        # edit to hold on, not an install the manifest fails to describe.
+        unlisted = [rel for rel in _python_files(root) if rel not in files]
+        return sorted(set(listed + unlisted)), ""
     except Exception as e:  # noqa: BLE001 - the hook's check must never take the whole dispatch check down
         return None, f"{type(e).__name__}: {e}"
 

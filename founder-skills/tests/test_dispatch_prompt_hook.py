@@ -1211,6 +1211,9 @@ def _plugin_copy(tmp_path: Path) -> Path:
         shutil.copytree(PLUGIN / rel, dst / rel, ignore=ignore)
     for scripts in sorted((PLUGIN / "skills").glob("*/scripts")):
         shutil.copytree(scripts, dst / scripts.relative_to(PLUGIN), ignore=ignore)
+    # The copy's own manifest, so each test changes exactly what it means to (a stale checkout manifest is
+    # the sync test's to report).
+    (dst / "data" / "script-hashes.json").write_text(_hashes(dst).manifest_text(str(dst)), encoding="utf-8")
     return dst
 
 
@@ -1225,9 +1228,19 @@ def _hashes(root: Path) -> Any:
 _MS_GEN = "skills/market-sizing/scripts/dispatch_prompt.py"
 
 
+def _run_input(wrapper: Path, tmp_path: Path, rows: list[dict[str, Any]], tool_input: dict[str, Any]) -> Any:
+    """`wrapper` on a dispatch carrying the whole `tool_input` (description included, as a rewrite needs)."""
+    path = tmp_path / "t.jsonl"
+    path.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+    payload = {"transcript_path": str(path), "cwd": str(tmp_path), "hook_event_name": "PreToolUse",
+               "tool_name": "Agent", "tool_input": tool_input}  # fmt: skip
+    return subprocess.run(["sh", str(wrapper)], input=json.dumps(payload), capture_output=True, text=True, timeout=30)
+
+
 def test_a_changed_plugin_file_holds_one_dispatch_per_session_then_lets_through(tmp_path: Path) -> None:
     """The lever is a real byte flip in a copy of the plugin, never a shell row: a changed generator holds the
-    first paired dispatch once, naming the file, then every later one goes through with a stderr line."""
+    first paired dispatch once, naming the file; later dispatches equal to their print go through, still
+    compared, with a stderr line."""
     copy = _plugin_copy(tmp_path / "plugin")
     wrapper = copy / "scripts" / "pretooluse-dispatch.sh"
     rows = [_user("Size my market."), *_printed(_GENERATED)]
@@ -1241,13 +1254,41 @@ def test_a_changed_plugin_file_holds_one_dispatch_per_session_then_lets_through(
     reason = _deny(_run(tmp_path, rows, _GENERATED, wrapper=wrapper))
     assert reason.startswith(f"{MARKER}[plugin-files] Held: a plugin file differs"), reason
     assert f"`{_MS_GEN}`" in reason and "nothing in this session can change that" in reason
+    assert "This hold is not repeated: later dispatches are still compared" in reason
     assert f"{MARKER}[agent/handoff/R/r2/redteam_output.json]" not in reason  # no per-round budget spent
     assert "script-hashes" not in reason and "--write" not in reason  # never the bypass
-    # Once per session: with that hold in the transcript, another round's dispatch goes through unchecked.
+    # Once per session: with that hold in the transcript, another round's dispatch equal to its print passes.
     second = _GENERATED.replace("/r2/", "/r3/")
     later = _run(tmp_path, [*rows, _held(reason), *_printed(second)], second, wrapper=wrapper)
     assert later.returncode == 0 and later.stdout == "", later.stdout
-    assert f"({_MS_GEN}); agent/handoff/R/r3/redteam_output.json sent unchecked" in later.stderr, later.stderr
+    expected = f"({_MS_GEN}); agent/handoff/R/r3/redteam_output.json compared with its printed prompt"
+    assert expected in later.stderr, later.stderr
+
+
+def test_after_the_plugin_files_hold_a_steered_dispatch_is_still_held_and_never_rewritten(tmp_path: Path) -> None:
+    """The prompt check outlives the plugin-files hold: a dispatch steered away from its print is the defect
+    the hook exists for, whatever the tree. A changed plugin's print is never sent INTO a dispatch, so even a
+    CLI at the rewrite floor gets a hold with the printed prompt, under that round's own budget."""
+    copy = _plugin_copy(tmp_path / "plugin")
+    wrapper = copy / "scripts" / "pretooluse-dispatch.sh"
+    rows = [_user("Size my market."), *_printed(_GENERATED)]
+    with (copy / _MS_GEN).open("ab") as f:
+        f.write(b"# x\n")
+    tree_reason = _deny(_run(tmp_path, rows, _GENERATED, wrapper=wrapper))
+    assert tree_reason.startswith(f"{MARKER}[plugin-files] Held")
+    second, steered = _GENERATED.replace("/r2/", "/r3/"), _STEERED.replace("/r2/", "/r3/")
+    later = _versioned([*rows, _held(tree_reason), *_printed(second)], "2.1.290")
+    tool_input = {"subagent_type": "founder-skills:market-sizing-redteam", "description": "Outside review",
+                  "prompt": steered}  # fmt: skip
+    r = _run_input(wrapper, tmp_path, later, tool_input)
+    reason = _deny(r)
+    assert reason.startswith(f"{MARKER}[agent/handoff/R/r3/redteam_output.json] Held"), reason
+    assert second.strip() in reason
+    assert "updatedInput" not in r.stdout
+    # Control: on the untouched copy the same dispatch at the same CLI is rewritten to its print.
+    clean = _plugin_copy(tmp_path / "clean")
+    out = json.loads(_run_input(clean / "scripts" / "pretooluse-dispatch.sh", tmp_path, later, tool_input).stdout)
+    assert out["hookSpecificOutput"]["permissionDecision"] == "allow", out
 
 
 def test_the_dispatchs_own_generator_is_named_first(tmp_path: Path) -> None:

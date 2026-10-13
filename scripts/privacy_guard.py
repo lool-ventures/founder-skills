@@ -256,6 +256,10 @@ GENERATED_FILES = {
         "founder-skills/scripts/_gates.py",
         "founder-skills/tests/test_gate_registry.py",
     ),
+    "founder-skills/data/script-hashes.json": (
+        "founder-skills/scripts/script_hashes.py",
+        "founder-skills/tests/test_script_hashes.py",
+    ),
 }
 
 # A figure token. The look-arounds make it WHOLE-TOKEN: no digit, letter, `.`, `,` or `$` may touch

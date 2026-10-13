@@ -95,9 +95,12 @@ body arrives as written, so any `.md` added to the manifest later needs the same
 a transcript checks the plugin this hook runs from against it; a `.py` the manifest does not list counts as a
 change (a `json.py` beside a generator is imported before the standard library's). A difference holds ONE
 paired dispatch per session, with its own marker (`[dispatch-check][plugin-files]`), naming the file: nothing
-in the session can change an install, so every later paired dispatch goes through unchecked with one stderr
-line. No manifest, an unreadable one, or more than `max(5, entries // 10)` differing files (an installer
-transform or a mixed install, not an improvised edit) and nothing is checked, with one stderr line. A file
+in the session can change an install, so that hold is not repeated. Every later paired dispatch is still
+compared with its printed prompt (a steered dispatch is the defect whatever the tree's state) and held when
+it differs, with one stderr line, but never rewritten to the print: a changed plugin's print is not sent INTO
+a dispatch. No manifest, an unreadable one, or more than `max(5, entries // 10)` differing LISTED files (an
+installer transform or a mixed install, not an improvised edit) and nothing is checked, with one stderr
+line; a `.py` the manifest does not list is always named and never counts toward that threshold. A file
 tool writing over a generator (structured input, not shell text) still distrusts that generator's later
 prints, with the per-OUTPUT_PATH budget. A generator run by an absolute path from ANOTHER installed copy of
 the plugin is hashed where it ran, against this version's entry for it, but only when that file exists on
@@ -115,8 +118,9 @@ size is loaded instead of the source and is not hashed; site-packages and the in
 agent front matter (e.g. `tools:`), SKILL.md and `references/` are not hashed; a generator run from another
 installed copy by an absolute path the hook's host cannot open (every Cowork-local VM path) is not checked,
 and one it can open is checked for the generator file alone, not the modules it imports; the hook's own
-imports run from `scripts/` and are shadowable before any hash is taken; and more than the threshold of
-changed files turns the check off with one stderr line.
+imports run from `scripts/` and are shadowable before any hash is taken; more than the threshold of changed
+listed files turns the check off with one stderr line; and a symlinked folder inside the plugin is not walked,
+so its files read as missing (`script_hashes.py`'s docstring).
 """
 
 from __future__ import annotations
@@ -1493,19 +1497,24 @@ def _plugin_mismatches() -> list[str]:
     return list(mismatched)
 
 
+def _first_mismatch(agent: str, mismatched: list[str]) -> str:
+    generator = _generator_for(agent)
+    own = f"skills/{GENERATORS[generator]}/scripts/{generator}" if generator is not None else None
+    return own if own is not None and own in mismatched else mismatched[0]
+
+
 def _tree_hold(
     rows: list[dict[str, Any]], output_path: str, agent: str, mismatched: list[str]
 ) -> dict[str, Any] | None:
-    """One hold per session when a plugin file differs, naming it (the dispatch's own generator first); every
-    later paired dispatch goes through unchecked with a stderr line, since nothing in the session can change
-    an install."""
-    generator = _generator_for(agent)
-    own = f"skills/{GENERATORS[generator]}/scripts/{generator}" if generator is not None else None
-    first = own if own in mismatched else mismatched[0]
+    """The session's one hold when a plugin file differs, naming it (the dispatch's own generator first), or
+    None once that hold is in the transcript (nothing in the session can change an install): the caller then
+    goes on comparing the dispatch with its printed prompt, but never rewrites it to that print, with a stderr
+    line."""
+    first = _first_mismatch(agent, mismatched)
     if _holds(rows, PLUGIN_FILES) >= 1:
         print(
             f"dispatch_prompt_check: plugin files differ from the shipped hashes ({first}); "
-            f"{output_path} sent unchecked",
+            f"{output_path} compared with its printed prompt, never rewritten to it",
             file=sys.stderr,
         )
         return None
@@ -1513,8 +1522,9 @@ def _tree_hold(
     reason = (
         f"{MARKER}[{PLUGIN_FILES}] Held: a plugin file differs from the copy this version shipped with "
         f"(`{first}`{more}), so no prompt the generator prints for OUTPUT_PATH {output_path} can be vouched for "
-        "as its own, and nothing in this session can change that. Every later dispatch goes through without "
-        "this check."
+        "as its own, and nothing in this session can change that. This hold is not repeated: later dispatches "
+        "are still compared with the prompt their generator printed, and held when they differ, but none is "
+        "replaced by it."
     )
     return {
         "hookSpecificOutput": {
@@ -1546,16 +1556,20 @@ def decide(payload: dict[str, Any]) -> dict[str, Any] | None:
     if not isinstance(transcript, str) or not os.path.isfile(transcript):
         return None
     output_path = _output_path(prompt) or "?"
-    # Only a paired dispatch with a transcript pays for the hash. A difference is decided before any comparand
-    # is looked for, so a print from a changed plugin is never compared, let alone sent in a rewrite.
+    # Only a paired dispatch with a transcript pays for the hash. A difference holds the session's first paired
+    # dispatch before any comparand is looked for; after that hold the prompt is still compared, since a
+    # dispatch steered away from its print is the defect whatever the tree's state, but a changed plugin's
+    # print is never sent INTO a dispatch: no rewrite, a hold instead.
     mismatched = _plugin_mismatches()
     rows = _transcript_tools().read_transcript(transcript)
     if mismatched:
-        return _tree_hold(rows, output_path, name or "", mismatched)
+        tree_hold = _tree_hold(rows, output_path, name or "", mismatched)
+        if tree_hold is not None:
+            return tree_hold
     printed = latest_printed(rows, context, output_path)
     if printed is not None and _squash(printed) == _squash(prompt):
         return None
-    if printed is not None and isinstance(tool_input, dict) and _may_rewrite(tool_input, rows):
+    if printed is not None and not mismatched and isinstance(tool_input, dict) and _may_rewrite(tool_input, rows):
         return _rewrite(tool_input, printed + "\n", output_path, context)
     if _holds(rows, output_path) >= MAX_HOLDS:
         print(

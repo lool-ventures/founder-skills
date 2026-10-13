@@ -38,7 +38,9 @@ SH = _load()
 
 
 def _copy(tmp_path: Path) -> Path:
-    """The plugin's hashed files and its manifest, copied: every `.py` outside `tests/`, the agents, `data/`."""
+    """The plugin's hashed files, copied (every `.py` outside `tests/`, the agents, `data/`), with a manifest
+    built from the copy itself: each rule test then changes exactly what it means to, and a checkout whose
+    manifest is stale is reported once, by the sync test, with the command."""
     dst = tmp_path / "founder-skills"
     ignore = shutil.ignore_patterns("__pycache__", "*.pyc", ".mypy_cache", ".ruff_cache")
     shutil.copytree(PLUGIN / "scripts", dst / "scripts", ignore=ignore)
@@ -46,6 +48,7 @@ def _copy(tmp_path: Path) -> Path:
     shutil.copytree(PLUGIN / "agents", dst / "agents", ignore=ignore)
     for scripts in sorted((PLUGIN / "skills").glob("*/scripts")):
         shutil.copytree(scripts, dst / scripts.relative_to(PLUGIN), ignore=ignore)
+    (dst / "data" / "script-hashes.json").write_text(SH.manifest_text(str(dst)), encoding="utf-8")
     return dst
 
 
@@ -135,22 +138,28 @@ def test_an_added_script_is_named(tmp_path: Path) -> None:
     assert _verify(root) == ["skills/market-sizing/scripts/json.py", "skills/market-sizing/tests/t.py"]
 
 
-def test_metadata_beside_the_scripts_is_not_a_script(tmp_path: Path) -> None:
+_METADATA = {
+    # skipped by the walk -> the same file where only the skip rule's mark is removed (which IS named)
+    "__MACOSX/skills/market-sizing/scripts/._dispatch_prompt.py": "MACOSX/skills/market-sizing/scripts/d.py",
+    "skills/market-sizing/scripts/._dispatch_prompt.py": "skills/market-sizing/scripts/x_dispatch_prompt.py",
+    "skills/market-sizing/scripts/.#dispatch_prompt.py": "skills/market-sizing/scripts/x#dispatch_prompt.py",
+    ".in_use/1.py": "in_use/1.py",
+    "scripts/__pycache__/x.py": "scripts/pycache/x.py",
+    "tests/test_x.py": "skills/market-sizing/tests/test_x.py",
+}
+
+
+@pytest.mark.parametrize("marked", [True, False])
+def test_metadata_beside_the_scripts_is_not_a_script(tmp_path: Path, marked: bool) -> None:
     """An archive's `__MACOSX/` and `._x.py` entries, an editor's `.#x.py` lock, a runtime's `.in_use/`
-    folder, bytecode and the top-level `tests/` are not modules of the plugin."""
+    folder, bytecode and the top-level `tests/` are not modules of the plugin. The lever: the same files with
+    only that mark removed are named, so it is the skip rules that keep the marked ones out."""
     root = _copy(tmp_path)
-    for rel in (
-        "__MACOSX/skills/market-sizing/scripts/._dispatch_prompt.py",
-        "skills/market-sizing/scripts/._dispatch_prompt.py",
-        "skills/market-sizing/scripts/.#dispatch_prompt.py",
-        ".in_use/1.py",
-        "scripts/__pycache__/x.py",
-        "tests/test_x.py",
-    ):
+    for rel in _METADATA if marked else _METADATA.values():
         path = root / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"\x00\x05\x16\x07")
-    assert _verify(root) == []
+    assert _verify(root) == ([] if marked else sorted(_METADATA.values()))
 
 
 @pytest.mark.parametrize("extra", [0, 1])
@@ -171,6 +180,23 @@ def test_more_differences_than_an_edit_makes_mean_the_manifest_does_not_describe
         assert result is None and f"{limit + 1} of {entries} files differ" in why
     else:
         assert result == changed and why == ""
+
+
+def test_a_package_installed_into_a_scripts_folder_is_named_however_many_files_it_adds(tmp_path: Path) -> None:
+    """Unlisted scripts never count toward the threshold: `pip install -t` into a scripts folder is an edit to
+    hold on (and the shape that plants shadow modules), not an install the manifest fails to describe."""
+    root = _copy(tmp_path)
+    manifest = json.loads((root / "data" / "script-hashes.json").read_text(encoding="utf-8"))
+    limit = SH.threshold(len(manifest["files"]) + len(manifest["agent_bodies"]))
+    vendor = root / "skills" / "market-sizing" / "scripts" / "vendor"
+    vendor.mkdir()
+    added = [f"skills/market-sizing/scripts/vendor/m{n:02d}.py" for n in range(limit + 5)]
+    for rel in added:
+        (root / rel).write_text("x = 1\n", encoding="utf-8")
+    with (root / MS_GEN_REL).open("ab") as f:
+        f.write(b"# x\n")
+    assert len(added) > limit  # the lever: more new files than the threshold
+    assert _verify(root) == sorted([MS_GEN_REL, *added])
 
 
 # --- 4. no usable manifest: not checked, said once -----------------------------------------------------------
@@ -213,8 +239,9 @@ def test_verify_never_raises(tmp_path: Path, monkeypatch: Any) -> None:
     def boom(*_a: Any, **_k: Any) -> Any:
         raise RuntimeError("walk failed")
 
+    root = _copy(tmp_path)
     monkeypatch.setattr(SH, "_python_files", boom)
-    result, why = SH.verify_detail(str(_copy(tmp_path)))
+    result, why = SH.verify_detail(str(root))
     assert result is None and "walk failed" in why
 
 
@@ -412,17 +439,6 @@ def test_a_generator_reading_a_reference_file_is_caught(tmp_path: Path) -> None:
     }
 
 
-# --- 9. the hook loads this module the way the Python-3.9 floor test can see ------------------------------------
-
-
-def test_the_hook_loads_the_module_where_the_floor_test_finds_it() -> None:
-    """The floor test discovers a hook module only through the literal sibling-load spelling; a load spelled
-    any other way would leave this module out of the 3.9 check, silently."""
-    from test_hook_wrappers import _hook_files
-
-    assert "scripts/script_hashes.py" in _hook_files(PLUGIN)
-
-
 # --- 8. a generator run from another installed copy is hashed where it ran -----------------------------------
 
 _RAN_PRINTED = (
@@ -480,3 +496,14 @@ def test_a_generator_run_from_another_installed_copy_is_hashed_where_it_ran(tmp_
     # The rule: a path the hook's host cannot open is never a mismatch (every Cowork-local VM path).
     generator.unlink()
     assert _ran_from(tmp_path, generator) is None
+
+
+# --- 9. the hook loads this module the way the Python-3.9 floor test can see ------------------------------------
+
+
+def test_the_hook_loads_the_module_where_the_floor_test_finds_it() -> None:
+    """The floor test discovers a hook module only through the literal sibling-load spelling; a load spelled
+    any other way would leave this module out of the 3.9 check, silently."""
+    from test_hook_wrappers import _hook_files
+
+    assert "scripts/script_hashes.py" in _hook_files(PLUGIN)
