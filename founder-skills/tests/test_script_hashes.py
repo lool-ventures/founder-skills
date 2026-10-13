@@ -421,3 +421,62 @@ def test_the_hook_loads_the_module_where_the_floor_test_finds_it() -> None:
     from test_hook_wrappers import _hook_files
 
     assert "scripts/script_hashes.py" in _hook_files(PLUGIN)
+
+
+# --- 8. a generator run from another installed copy is hashed where it ran -----------------------------------
+
+_RAN_PRINTED = (
+    "CONTEXT: RED_TEAM\nOUTPUT_PATH: /h/r1/redteam_output.json\nRUN_ID: R\n\nRead the documents.\n"
+    "Do NOT write any file other than OUTPUT_PATH.\n"
+)
+
+
+def _dpc() -> Any:
+    spec = importlib.util.spec_from_file_location("dpc_ran_path", SCRIPTS / "dispatch_prompt_check.py")
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _ran_from(tmp_path: Path, generator: Path) -> Any:
+    """The hook's decision on a RED_TEAM dispatch equal to what `generator`, run by its absolute path, printed."""
+    rows: list[dict[str, Any]] = []
+    for n, (tool, tool_input, result) in enumerate(
+        [("Bash", {"command": f"python3 {generator} red_team --run-id R"}, _RAN_PRINTED)]
+    ):
+        use = {"type": "tool_use", "id": f"toolu_{n}", "name": tool, "input": tool_input}
+        rows.append({"type": "assistant", "message": {"content": [use]}})
+        rows.append({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": f"toolu_{n}",
+                                                               "content": result}]}})  # fmt: skip
+    transcript = tmp_path / "t.jsonl"
+    transcript.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+    tool_input = {"subagent_type": "founder-skills:market-sizing-redteam", "description": "d", "prompt": _RAN_PRINTED}
+    return _dpc().decide(
+        {
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Agent",
+            "transcript_path": str(transcript),
+            "tool_input": tool_input,
+        }
+    )
+
+
+@pytest.mark.usefixtures("plugin_hashes_current")
+def test_a_generator_run_from_another_installed_copy_is_hashed_where_it_ran(tmp_path: Path) -> None:
+    other = tmp_path / ".claude" / "plugins" / "x" / "founder-skills"
+    generator = other / MS_GEN_REL
+    generator.parent.mkdir(parents=True)
+    shutil.copy2(PLUGIN / MS_GEN_REL, generator)
+    # Control: the other copy's generator is the shipped one, so its print is compared (and matches).
+    assert _ran_from(tmp_path, generator) is None
+    with generator.open("ab") as f:
+        f.write(b"# x\n")
+    decision = _ran_from(tmp_path, generator)
+    assert decision is not None, "a changed generator in another installed copy was compared"
+    reason = decision["hookSpecificOutput"]["permissionDecisionReason"]
+    assert f"The prompt generator that ran (`{generator}`) differs from the copy this version shipped with" in reason
+    assert "after 2 holds" in reason and "$SCRIPTS" not in reason
+    # The rule: a path the hook's host cannot open is never a mismatch (every Cowork-local VM path).
+    generator.unlink()
+    assert _ran_from(tmp_path, generator) is None

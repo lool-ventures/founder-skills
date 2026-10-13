@@ -99,7 +99,10 @@ in the session can change an install, so every later paired dispatch goes throug
 line. No manifest, an unreadable one, or more than `max(5, entries // 10)` differing files (an installer
 transform or a mixed install, not an improvised edit) and nothing is checked, with one stderr line. A file
 tool writing over a generator (structured input, not shell text) still distrusts that generator's later
-prints, with the per-OUTPUT_PATH budget.
+prints, with the per-OUTPUT_PATH budget. A generator run by an absolute path from ANOTHER installed copy of
+the plugin is hashed where it ran, against this version's entry for it, but only when that file exists on
+the host the hook runs on (a path it cannot open, as every Cowork-local VM path, is never a mismatch); a
+copy that differs is not the plugin's own, with the per-OUTPUT_PATH budget.
 Where it matters: a shell edit is possible, and seen, on the CLI (the install is user-writable; the SDK's file
 tools refuse `~/.claude`), in a `--plugin-dir` checkout and the CI lanes, and on the cloud lane if its install
 is writable (unmeasured). At Cowork local the plugin root is mounted read-only into the VM, so there the check
@@ -110,13 +113,15 @@ edited, is a deliberate actor with no local root of trust; `$SCRIPTS` set in an 
 another copy is not resolved, so not hashed; a planted `__pycache__/*.pyc` matching its source's mtime and
 size is loaded instead of the source and is not hashed; site-packages and the interpreter are out of scope;
 agent front matter (e.g. `tools:`), SKILL.md and `references/` are not hashed; a generator run from another
-installed copy by an absolute path is not hashed; the hook's own
+installed copy by an absolute path the hook's host cannot open (every Cowork-local VM path) is not checked,
+and one it can open is checked for the generator file alone, not the modules it imports; the hook's own
 imports run from `scripts/` and are shadowable before any hash is taken; and more than the threshold of
 changed files turns the check off with one stderr line.
 """
 
 from __future__ import annotations
 
+import functools
 import importlib.util
 import os
 import re
@@ -582,6 +587,34 @@ def _installed_root(root: str) -> bool:
     return r == norm_path(HOOK_PLUGIN_ROOT) or r in _SESSION_ROOTS or any(m in r + "/" for m in _INSTALL_MARKERS)
 
 
+@functools.lru_cache(maxsize=1)
+def _shipped_hashes() -> Any:
+    """This plugin's manifest (`script_hashes`' `files` map), read once per process; None when unusable."""
+    sh = _script_hashes()
+    manifest, _why = sh.load_manifest(os.path.join(HOOK_PLUGIN_ROOT, sh.MANIFEST_REL))
+    return (sh, manifest["files"]) if manifest is not None else None
+
+
+def _ran_copy_differs(filled: str) -> bool:
+    """A generator run by an absolute path from another installed copy of the plugin, whose file differs from
+    this version's entry for it. Never for a path with a variable left in it, a path this host cannot open
+    (every Cowork-local VM path: the absent-on-host rule), the copy this hook runs from (hashed whole
+    already), or without a usable manifest."""
+    if not filled.startswith("/") or "$" in filled or not os.path.isfile(filled):
+        return False
+    try:
+        parts = filled.rsplit("/", 4)  # <root>/skills/<skill>/scripts/<generator>
+        root, rel = parts[0], "/".join(parts[1:])
+        if os.path.realpath(root) == os.path.realpath(HOOK_PLUGIN_ROOT):
+            return False
+        shipped = _shipped_hashes()
+        if shipped is None or rel not in shipped[1]:
+            return False
+        return bool(shipped[0].digest(filled) != shipped[1][rel])
+    except Exception:  # noqa: BLE001 - the ran-path hash is a narrowing; it must never break the comparison
+        return False
+
+
 def _trusted_generator(path: str, raw: dict[str, str], assigned: set[str], distrusted: set[str]) -> bool:
     """A generator run from its own skill's scripts folder of an installed plugin: the path, filled from
     the block's own assignments, ends `/skills/<skill>/scripts/<generator>` under such a root, or is
@@ -594,7 +627,7 @@ def _trusted_generator(path: str, raw: dict[str, str], assigned: set[str], distr
     filled = _partial(path, raw)
     suffix = f"/skills/{skill}/scripts/{base}"
     if filled.endswith(suffix):
-        return _installed_root(filled[: -len(suffix)])
+        return _installed_root(filled[: -len(suffix)]) and not _ran_copy_differs(filled)
     return filled in (f"$SCRIPTS/{base}", f"${{SCRIPTS}}/{base}") and "SCRIPTS" not in assigned
 
 
@@ -1405,6 +1438,14 @@ def _unprinted_reason(rows: list[dict[str, Any]], context: str, agent: str, outp
     if cmds is not None:
         _env_values, raw, assigned = _env(cmds)
         if not any(_kind(c, raw, assigned, latest_distrusted) == "generator" for c in gens):
+            ran = [_partial(_script(_words(c.argv)) or _words(c.argv)[0], raw) for c in gens if _words(c.argv)]
+            differing = next((p for p in ran if _ran_copy_differs(p)), None)
+            if differing is not None:
+                return (
+                    f"{head}. The prompt generator that ran (`{differing}`) differs from the copy this version "
+                    f"shipped with, so its output cannot be vouched for as its own. This dispatch goes through "
+                    f"after {MAX_HOLDS} holds."
+                )
             return (
                 f"{head}. The prompt generator that ran is not the plugin's own: it was run from another folder, "
                 "or by a path the check does not recognise. Run it from the skill's own scripts "
