@@ -968,3 +968,91 @@ def test_the_aoa_merge_and_the_terms_report_read_only_this_runs_files(foreign: b
     else:
         for proc in (aoa, report):
             assert code_of(proc) not in OWNERSHIP_CODES, (proc.stdout, proc.stderr)
+
+
+# --- 8.6-3: market sizing's and financial model review's optional files of another run --------------------------
+
+
+def test_market_sizings_review_of_another_run_reads_as_no_review(tmp_path: Path) -> None:
+    """Another run's redteam.json is left out, so compose takes its absence path (no review and no recorded skip:
+    refused), never treating the earlier review as this run's. The lever: the run's own review composes."""
+    import test_ms_gates as msg
+
+    root, rid, rd = msg._run_dir(tmp_path)
+    msg._artifacts(rd, rid, redteam=msg._redteam(rid))
+    msg._ok(msg._answer(root, rid, "ms_methodology", "looks_good"))
+    assert msg._compose(rd).returncode == 10
+    revision = h.run(
+        msg.MS / "record_revision_answer.py", "--dir", str(rd), "--answer", "deliver", "--source", "founder"
+    )
+    msg._ok(revision)
+    own = msg._compose(rd)
+    assert own.returncode == 0, (own.stdout, own.stderr)
+    assert "ignored_other_run" not in json.loads(own.stdout.strip().splitlines()[0])
+    goldens._restamp(rd / "redteam.json", STRANGER)
+    before = (rd / "report.json").read_bytes()
+    proc = msg._compose(rd)
+    assert proc.returncode != 0 and code_of(proc) not in OWNERSHIP_CODES, (proc.stdout, proc.stderr)
+    assert "left out redteam.json" in proc.stderr
+    assert (rd / "report.json").read_bytes() == before
+    # Read as absent, exactly: the same compose with the file gone answers the same.
+    (rd / "redteam.json").rename(tmp_path / "set_aside.json")
+    absent = msg._compose(rd)
+    assert (absent.returncode, absent.stdout) == (proc.returncode, proc.stdout)
+
+
+def test_financial_model_reviews_corrections_of_another_run_are_left_out(tmp_path: Path) -> None:
+    import test_fmr_gates as fg
+
+    root, rid, rd = fg._delivered_without_cash(tmp_path)
+    fg._ok(fg._apply(rd, rid, "cash.current_balance=900000", "cash.balance_date=2026-09"))
+    ec = rd / "extraction_corrections.json"
+    assert ec.is_file()
+    own = fg._compose(rd)
+    assert code_of(own) not in OWNERSHIP_CODES, (own.stdout, own.stderr)
+    assert "extraction_corrections.json" not in own.stderr
+    goldens._restamp(ec, STRANGER)
+    proc = fg._compose(rd)
+    assert code_of(proc) not in OWNERSHIP_CODES, (proc.stdout, proc.stderr)
+    assert proc.returncode == own.returncode, (proc.stdout, proc.stderr)
+    assert "left out extraction_corrections.json" in proc.stderr
+    assert proc.returncode == 0, (proc.stdout, proc.stderr)
+    assert json.loads(proc.stdout.strip().splitlines()[0])["ignored_other_run"] == ["extraction_corrections.json"]
+    with_foreign = _report_text(rd)
+    # Read as absent, exactly: the same compose with the file gone renders the same report.
+    ec.rename(tmp_path / "set_aside.json")
+    fg._ok(fg._compose(rd))
+    assert _report_text(rd) == with_foreign
+
+
+def _report_text(rd: Path) -> str:
+    import re
+
+    text = (rd / "report.md").read_text(encoding="utf-8")
+    return re.sub(r"COACHING_INSERTION_POINT_[0-9a-f]+", "M", text)
+
+
+# --- the resumed older run: one folder state, each surface's code pinned ------------------------------------------
+
+
+def test_the_resumed_older_runs_folder_state_is_pinned_on_every_surface(tmp_path: Path) -> None:
+    """O re-bound over N's composed files: compose and the page name N's artifacts (ARTIFACT_OTHER_RUN); the closer,
+    given N's report, says the folder belongs to O now (RUN_SUPERSEDED). Both true; pinned so neither drifts."""
+    proc, rd = _cp_composed(tmp_path, False)
+    assert proc.returncode == 0, proc.stderr
+    root = rd.parent
+    n_run = json.loads((rd / "report.json").read_text(encoding="utf-8"))["run_id"]
+    older = h.start_ok(root, "competitive-positioning")
+    assert h.bind(root, older, rd, "example-co").returncode == 0  # O, "resumed": newest bind
+    f = Folder(root, older, n_run, rd)
+    compose = goldens._cp_compose(rd)
+    page = goldens.run(
+        [str(goldens.CP_SCRIPTS / "visualize.py"), "--dir", str(rd), "--run-id", older, "-o", str(rd / "o.html")]
+    )
+    closer = goldens.run(
+        [str(goldens.CP_SCRIPTS / "cp_closing_message.py"), "--report", str(rd / "report.json"), "--link", "path"]
+    )
+    assert code_of(compose) == code_of(page) == "ARTIFACT_OTHER_RUN", (compose.stdout, page.stdout)
+    assert closer.returncode == 2 and "RUN_SUPERSEDED" in closer.stderr and older in closer.stderr
+    assert not (rd / "o.html").exists() and not (rd / "handover.txt").exists()
+    assert f.new == n_run
