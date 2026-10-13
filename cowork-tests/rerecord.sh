@@ -318,6 +318,10 @@ case "${COWORK_HARNESS_RUNS_DIR:-}" in
   "$REPO_ROOT/founder-skills"*) echo "FATAL: COWORK_HARNESS_RUNS_DIR must not live under founder-skills/ (it gets mounted + hashed)"; exit 1 ;;
 esac
 echo "runs root: ${COWORK_HARNESS_RUNS_DIR:-~/.cowork-harness/runs (harness default; feeds the stats index)}"
+# Recordings mount the working tree, and the dispatch-prompt hook holds a paired dispatch while a plugin
+# file differs from data/script-hashes.json: a recording made from an unregenerated tree would freeze that.
+python3 "$REPO_ROOT/founder-skills/scripts/script_hashes.py" --check \
+  || { echo "FATAL: plugin files differ from data/script-hashes.json — run python3 founder-skills/scripts/script_hashes.py --write"; exit 1; }
 
 # --- select scenarios ---
 # The bare (no-args) form is a REFRESH of the committed cassettes, so it selects only scenarios that

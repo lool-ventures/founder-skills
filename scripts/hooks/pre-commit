@@ -24,7 +24,20 @@ if [ -n "$staged_py" ]; then
   fi
 fi
 
-# --- 2. privacy-leak guard on all staged files --------------------------------
+# --- 2. the plugin's script hashes ---------------------------------------------
+# A staged plugin .py, agent body or the manifest itself: the working tree must match
+# data/script-hashes.json (the dispatch-prompt hook checks the plugin against it).
+staged_hashed=$(git diff --cached --name-only --diff-filter=ACMD -- 'founder-skills/*.py' \
+  'founder-skills/agents/*.md' 'founder-skills/data/script-hashes.json' ':!founder-skills/tests/' || true)
+if [ -n "$staged_hashed" ]; then
+  if ! python3 founder-skills/scripts/script_hashes.py --check; then
+    echo ""
+    echo "Pre-commit: regenerate the hashes with 'python3 founder-skills/scripts/script_hashes.py --write' and stage data/script-hashes.json."
+    exit 1
+  fi
+fi
+
+# --- 3. privacy-leak guard on all staged files --------------------------------
 # Layers: stray confidential documents, named-after-company provenance tags, and
 # exact names from the local (git-ignored) denylist. See scripts/privacy_guard.py.
 if ! uv run python scripts/privacy_guard.py --staged; then

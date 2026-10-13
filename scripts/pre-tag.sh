@@ -59,6 +59,9 @@ run_gate "mypy cap-table"               uv run mypy founder-skills/skills/cap-ta
 run_gate "mypy tests"                   uv run mypy founder-skills/tests/
 run_gate "mypy shared scripts"          uv run mypy founder-skills/scripts/
 
+# --- the plugin's script hashes (the dispatch-prompt hook checks the plugin against them) -----------
+run_gate "script hashes"     uv run python founder-skills/scripts/script_hashes.py --check
+
 # --- tests --------------------------------------------------------------------------------
 run_gate "pytest"            uv run pytest founder-skills/tests/ -q -m "not e2e and not mutation"
 run_gate "pytest evals"      uv run pytest evals/cap-table/ -q
