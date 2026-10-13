@@ -860,6 +860,9 @@ def test_a_what_if_in_an_archived_copy_leaves_the_fresh_run_alone(tmp_path: Path
     assert code_of(proc) not in OWNERSHIP_CODES, (proc.stdout, proc.stderr)
     assert h.status(root, old)["revision"] == 1, proc.stderr  # the what-if reopened the archived review
     assert h.status_path(root, new).read_bytes() == before, "the fresh run was marked replaced by the archive"
+    # The archived review is being revised, not replaced: its folder is now the archive, and its mirror is clear.
+    st = h.status(root, old)
+    assert st["superseded_by"] is None and st["run_dir_shell"] == str(archive)
 
 
 # --- cap-table lanes 2 and 3 merge into the run's store: never into an earlier review's ------------------------

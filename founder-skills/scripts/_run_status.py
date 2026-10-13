@@ -1359,8 +1359,10 @@ def take_folder(paths: RunPaths, *, from_dir: str | None = None) -> list[dict[st
     after any transaction that reopened a complete run. Returns `supersede_runs_in`'s results ([] unbound).
 
     `from_dir`: the folder a reopen ran from. When it is not the run's own recorded folder (a host moved the
-    review to an archive and a what-if ran there), the reopen takes nothing: the run's original folder now
-    belongs to another run, which must not be marked replaced by it."""
+    review to an archive and a what-if ran there), the run's folder is now that one: it is recorded as the run's
+    `run_dir_shell` and its own `superseded_by` cleared (it is being revised, not replaced), and no other run is
+    marked, since the original folder belongs to another run now and the archive holds only this run's ref."""
+    archived = False
     with run_lock(paths):
         status = load_status(paths)
         if status is None:
@@ -1371,8 +1373,10 @@ def take_folder(paths: RunPaths, *, from_dir: str | None = None) -> list[dict[st
             and isinstance(run_dir, str)
             and os.path.realpath(from_dir) != os.path.realpath(run_dir)
         ):
-            return []
-        if status.get("superseded_by"):
+            archived = True
+            status["run_dir_shell"] = os.path.abspath(from_dir)
+            run_dir = status["run_dir_shell"]
+        if archived or status.get("superseded_by"):
             status["superseded_by"] = None
             status["superseded_at"] = None
             if status.get("status") == "complete":
@@ -1381,6 +1385,6 @@ def take_folder(paths: RunPaths, *, from_dir: str | None = None) -> list[dict[st
             else:
                 status["deliverables_status"] = None
             write_status(paths, status)
-    if not isinstance(run_dir, str):
+    if archived or not isinstance(run_dir, str):
         return []
     return supersede_runs_in(paths.artifacts_root, run_dir, paths.run_id)
