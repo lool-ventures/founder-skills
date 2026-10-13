@@ -507,3 +507,27 @@ def test_the_hook_loads_the_module_where_the_floor_test_finds_it() -> None:
     from test_hook_wrappers import _hook_files
 
     assert "scripts/script_hashes.py" in _hook_files(PLUGIN)
+
+
+# --- the own-tree check is strict past the threshold -------------------------------------------------------
+
+
+def test_check_on_its_own_tree_fails_when_many_files_differ_but_spares_another_root(tmp_path: Path) -> None:
+    root = _copy(tmp_path)
+    scripts = sorted(p for p in root.rglob("*.py") if "tests" not in p.relative_to(root).parts)
+    threshold = SH.verify_detail(str(root), str(root / "data" / "script-hashes.json"))
+    assert threshold[0] == [], "the copy must start clean"
+    for path in scripts[:40]:
+        path.write_text(path.read_text(encoding="utf-8") + "\n# edited\n", encoding="utf-8")
+    assert SH.verify(str(root)) is None, "40 edits must exceed the threshold (lever engaged)"
+    own = _check(root)
+    assert own.returncode == 1, own.stderr
+    assert "--write" in own.stderr
+    other = subprocess.run(
+        [sys.executable, str(SCRIPTS / "script_hashes.py"), "--check", "--root", str(root)],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert other.returncode == 0, other.stderr
+    assert "not checked" in other.stderr

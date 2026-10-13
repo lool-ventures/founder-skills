@@ -190,6 +190,11 @@ def main(argv: list[str] | None = None) -> int:
     mismatched, why = verify_detail(root, manifest_path)
     if mismatched is None:
         print(f"script_hashes: plugin files not checked ({why})", file=sys.stderr)
+        # On this plugin's own tree the manifest must describe it exactly: a stale manifest after a large
+        # change is not "another install". The threshold only spares installs this tree did not produce.
+        if root == PLUGIN_ROOT and why.endswith("does not describe this install"):
+            print(f"after editing the plugin, regenerate it: {REGEN}", file=sys.stderr)
+            return 1
         return 0
     if mismatched:
         print(f"script_hashes: {len(mismatched)} plugin file(s) differ from {MANIFEST_REL}:", file=sys.stderr)
