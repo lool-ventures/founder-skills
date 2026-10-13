@@ -13,7 +13,11 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 from typing import Any
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _out_guard  # noqa: E402
 
 
 def add_output_args(parser: argparse.ArgumentParser) -> None:
@@ -36,6 +40,9 @@ def emit(result: Any, args: argparse.Namespace, *, default: Any = None) -> None:
     """
     indent = 2 if getattr(args, "pretty", False) else None
     output = getattr(args, "output", None)
+    # The one choke point every math producer writes through: an -o naming one of the call's own input files
+    # (a --cap-state, a --doc) is refused before anything is opened for writing.
+    _out_guard.refuse_output_onto_input([output], script=os.path.basename(sys.argv[0]))
     if output:
         with open(output, "w", encoding="utf-8") as fh:
             json.dump(result, fh, indent=indent, default=default)

@@ -27,8 +27,22 @@ from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _ct_gates  # noqa: E402
+import _out_guard  # noqa: E402
 from _artifact_io import id_missing as _id_missing  # noqa: E402
 from _artifact_writer import ArtifactValidationError, load_schema, write_artifact  # noqa: E402
+
+# The review's analysis files and report (compose's REQUIRED_ARTIFACTS plus its two outputs; a test holds them
+# equal). The receipt this step writes through -o may never replace one of them.
+CANONICAL_ARTIFACTS = (
+    "inputs.json",
+    "instruments.json",
+    "cap_state.json",
+    "scenarios.json",
+    "rule_audit.json",
+    "counsel_packet.json",
+    "report.json",
+    "report.md",
+)
 from cross_checker import cross_check as _cross_check  # noqa: E402
 from evidence_verifier import (  # noqa: E402
     MissingDependencyError,  # noqa: E402
@@ -619,6 +633,15 @@ def main() -> int:
     p.add_argument("--pretty", action="store_true")
     p.add_argument("-o", "--output", default=None, help="Write the receipt to this file; emit a receipt to stdout")
     args = p.parse_args()
+    # FIRST: -o is a receipt beside the instruments store this step appends to. Never onto an input (the store,
+    # the document), never onto one of the review's analysis files; an earlier receipt is fine (the documented
+    # -o is one path for every document of a review).
+    review_dir = _ct_gates.run_dir_of(args.instruments)
+    _out_guard.refuse_output_onto_input(
+        [args.output],
+        script="extract_instrument.py",
+        protect=[os.path.join(review_dir, n) for n in CANONICAL_ARTIFACTS],
+    )
 
     # A transcription is never verified as if it were the document's own text layer: the source must be named.
     if (args.doc_text is None) != (args.doc_text_source is None):

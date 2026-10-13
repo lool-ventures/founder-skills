@@ -61,7 +61,20 @@ from typing import Any, NoReturn
 _SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 if _SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, _SCRIPTS_DIR)
+import _out_guard  # noqa: E402
 from verify_competitors import normalize_competitor_slug  # noqa: E402
+
+# The analysis's files and report (compose's REQUIRED_ARTIFACTS plus its two outputs; a test holds them equal).
+# The receipt this step writes through -o may never replace one of them.
+CANONICAL_ARTIFACTS = (
+    "landscape.json",
+    "positioning.json",
+    "moat_scores.json",
+    "positioning_scores.json",
+    "checklist.json",
+    "report.json",
+    "report.md",
+)
 
 FIELD = "deferred_recall_candidates"
 REQUIRED_STRINGS = ("name", "slug", "why_considered")
@@ -131,6 +144,13 @@ def main() -> None:
     args = ap.parse_args()
     indent = 2 if args.pretty else None
     draft_path: str = args.draft
+    # FIRST: the draft is written before the receipt goes through -o, so an -o onto the draft would replace the
+    # merge just made. Never onto an input or one of the analysis files; an earlier receipt is fine.
+    _out_guard.refuse_output_onto_input(
+        [args.output],
+        script="record_deferred_recall.py",
+        protect=[os.path.join(os.path.dirname(os.path.abspath(draft_path)), n) for n in CANONICAL_ARTIFACTS],
+    )
 
     def reject(errors: list[str]) -> NoReturn:
         _fail_invalid({"validation": {"status": "invalid", "errors": errors}}, draft_path, indent)
