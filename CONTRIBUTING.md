@@ -128,6 +128,7 @@ Use the existing skills (`market-sizing`, `deck-review`, `ic-sim`, `financial-mo
 - **Scripts** use PEP 723 inline metadata for dependencies
 - **Agent definitions** go in `founder-skills/agents/<name>.md`
 - **Questions** a skill asks once its run has started are registered in `founder-skills/scripts/_gates.py` and recorded through it (see "Gates and run status" in `founder-skills/references/skill-execution-model.md`). After changing the registry, regenerate the host contract with `python3 founder-skills/scripts/_gates.py --dump-contract`; never edit `founder-skills/data/host-contract.json` by hand
+- **Plugin scripts and agent bodies** are listed by hash in `founder-skills/data/script-hashes.json`, which the dispatch-prompt hook checks the plugin against. After editing any plugin `.py` or `agents/*.md`, regenerate it with `python3 founder-skills/scripts/script_hashes.py --write`; never edit it by hand
 
 ## Improving Existing Skills
 
