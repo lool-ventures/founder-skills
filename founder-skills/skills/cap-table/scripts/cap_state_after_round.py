@@ -167,6 +167,10 @@ def _cli() -> int:
     p.add_argument("-o", "--output", required=True)
     p.add_argument("--pretty", action="store_true")
     args = p.parse_args()
+    # FIRST: an output naming one of this step's own input files is refused before anything is written.
+    import _out_guard
+
+    _out_guard.refuse_output_onto_input([args.output], script="cap_state_after_round.py")
     import _ct_gates
 
     _ct_gates.refuse_unbound_run_id(_ct_gates.run_dir_of(args.output), args.run_id)

@@ -702,6 +702,10 @@ def main() -> None:
         help="Write the status JSON to this file instead of stdout (emits a JSON receipt on stdout)",
     )
     args = parser.parse_args()
+    # FIRST: an output naming one of this step's own input files is refused before anything is written.
+    import _out_guard
+
+    _out_guard.refuse_output_onto_input([args.output], script="apply_corrections.py")
 
     def _emit(result: dict[str, Any], args: argparse.Namespace) -> None:
         """Write the status JSON to stdout, or to -o with a stdout receipt."""

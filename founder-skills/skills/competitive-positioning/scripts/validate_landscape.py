@@ -700,6 +700,10 @@ def _apply_run_id(result: dict, run_id: str | None) -> None:
 
 def main() -> None:
     args = parse_args()
+    # FIRST: an output naming one of this step's own input files is refused before anything is written.
+    import _out_guard
+
+    _out_guard.refuse_output_onto_input([args.output], script="validate_landscape.py")
 
     if sys.stdin.isatty():
         print("Error: pipe JSON input via stdin", file=sys.stderr)

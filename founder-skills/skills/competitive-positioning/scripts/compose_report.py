@@ -2579,6 +2579,14 @@ def _gate_check(dir_path: str) -> Any:
 
 def main() -> None:
     args = parse_args()
+    # FIRST: an output naming one of this step's own input files is refused before anything is written.
+    import _out_guard
+
+    _out_guard.refuse_output_onto_input(
+        [args.output, args.write_md],
+        script="compose_report.py",
+        extra=[os.path.join(args.dir, n) for n in (*REQUIRED_ARTIFACTS, *OPTIONAL_ARTIFACTS)],
+    )
 
     if not os.path.isdir(args.dir):
         print(f"Error: directory not found: {args.dir}", file=sys.stderr)

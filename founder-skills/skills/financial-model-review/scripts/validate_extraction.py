@@ -1026,6 +1026,10 @@ def main() -> None:
     parser.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
     parser.add_argument("-o", "--output", help="Write output to file instead of stdout")
     args = parser.parse_args()
+    # FIRST: an output naming one of this step's own input files is refused before anything is written.
+    import _out_guard
+
+    _out_guard.refuse_output_onto_input([args.output], script="validate_extraction.py")
 
     # Read inputs
     try:

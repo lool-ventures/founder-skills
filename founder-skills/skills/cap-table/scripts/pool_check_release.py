@@ -88,6 +88,10 @@ def main() -> int:
     p.add_argument("--scenarios", required=True)
     p.add_argument("-o", "--output", required=True, help="the envelope insert_coaching.py --commentary-file reads")
     a = p.parse_args()
+    # FIRST: an output naming one of this step's own input files is refused before anything is written.
+    import _out_guard
+
+    _out_guard.refuse_output_onto_input([a.output], script="pool_check_release.py")
     envelope, why = release(a.coaching_md, a.checked, a.scenarios)
     if envelope is None:
         return _refuse(why)

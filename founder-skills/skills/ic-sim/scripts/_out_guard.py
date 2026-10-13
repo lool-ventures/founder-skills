@@ -16,6 +16,10 @@ What counts as an input:
 A match is a path that resolves to the same file (`realpath`), or, when both exist, the same inode (a hard
 link, or a case variant on a case-folding volume). Two outputs naming one file are refused too.
 
+`in_place`: inputs the script reads in full and then rewrites through its output by design (market-sizing's
+documented `market_sizing.py --replay sizing.json ... -o sizing.json`). An output naming one of them is not
+refused; anything else still is.
+
 `protect`: for a writer whose `-o` is a receipt beside a store it edits, an existing `-o` is also refused
 when it is one of the skill's canonical artifacts (`protect` lists their paths) or a JSON object carrying
 `metadata.run_id`, which every canonical artifact does and no receipt does. A receipt from an earlier call
@@ -71,6 +75,7 @@ def find_collision(
     argv: Sequence[str] | None = None,
     extra: Iterable[str | None] = (),
     protect: Iterable[str] | None = None,
+    in_place: Iterable[str | None] = (),
 ) -> tuple[str, str, str] | None:
     """(output, the file it collides with, why) for the first collision, else None. Reads no file except
     an existing output when `protect` is given."""
@@ -83,6 +88,8 @@ def find_collision(
             remaining.remove(o)
     inputs = [t for t in remaining if os.path.isfile(t)]
     inputs += [e for e in extra if e and os.path.isfile(e)]
+    rewritten = [p for p in in_place if p]
+    inputs = [i for i in inputs if not any(_same(i, p) for p in rewritten)]
     for i, o in enumerate(outs):
         for other in outs[i + 1 :]:
             if _same(o, other):
@@ -103,10 +110,11 @@ def refuse_output_onto_input(
     argv: Sequence[str] | None = None,
     extra: Iterable[str | None] = (),
     protect: Iterable[str] | None = None,
+    in_place: Iterable[str | None] = (),
 ) -> None:
     """Exit 1 `OUTPUT_IS_INPUT`, writing nothing, when an output names one of this call's inputs (or, with
     `protect`, an existing analysis file). Returns silently otherwise."""
-    hit = find_collision(outputs, argv=argv, extra=extra, protect=protect)
+    hit = find_collision(outputs, argv=argv, extra=extra, protect=protect, in_place=in_place)
     if hit is None:
         return
     out, other, why = hit

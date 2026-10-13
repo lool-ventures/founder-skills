@@ -161,6 +161,10 @@ def main() -> int:
     p.add_argument("-o", "--output-json", default=None, help="write the result JSON to a file")
     p.add_argument("--pretty", action="store_true")
     args = p.parse_args()
+    # FIRST: an output naming one of this step's own input files is refused before anything is written.
+    import _out_guard
+
+    _out_guard.refuse_output_onto_input([args.output_json], script="verify_one.py")
 
     try:
         with open(args.rules, encoding="utf-8") as fh:

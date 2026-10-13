@@ -541,6 +541,10 @@ def main() -> int:
     parser.add_argument("--pretty", action="store_true")
     parser.add_argument("-o", "--output", type=Path)
     args = parser.parse_args()
+    # FIRST: an output naming one of this step's own input files is refused before anything is written.
+    import _out_guard
+
+    _out_guard.refuse_output_onto_input([args.output], script="evidence_verifier.py")
 
     extraction = json.loads(args.extraction.read_text())
 

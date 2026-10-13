@@ -1841,6 +1841,17 @@ def main() -> int:
     p.add_argument("--strict", action="store_true", help="Exit 1 on high-severity validation warnings")
     p.add_argument("--pretty", action="store_true")
     args = p.parse_args()
+    # FIRST: an output naming one of this step's own input files is refused before anything is written.
+    import _out_guard
+
+    _out_guard.refuse_output_onto_input(
+        [args.output, args.write_md],
+        script="compose_report.py",
+        extra=[
+            os.path.join(args.dir, n)
+            for n in (*REQUIRED_ARTIFACTS, "extraction_audit.json", "coverage_result.json", "coverage_disclosure.json")
+        ],
+    )
     # With a ledger: a delivered review composed again (a what-if) is a new revision first; every question the
     # report rests on is recorded (exit 10), and none the run opened is left unanswered.
     _ct_gates.refuse_without_run_id(args.dir, args.run_id)

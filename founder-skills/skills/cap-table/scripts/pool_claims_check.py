@@ -200,6 +200,10 @@ def main() -> int:
     p.add_argument("-o", "--output", required=True, help="the checked commentary envelope insert_coaching.py reads")
     p.add_argument("--strip", action="store_true", help="remove flagged claims instead of reporting them")
     a = p.parse_args()
+    # FIRST: an output naming one of this step's own input files is refused before anything is written.
+    import _out_guard
+
+    _out_guard.refuse_output_onto_input([a.output], script="pool_claims_check.py")
     record_path = f"{a.coaching_md}.pool-check.json"
     with open(a.coaching_md, encoding="utf-8") as f:
         commentary = f.read()

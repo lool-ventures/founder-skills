@@ -1104,6 +1104,10 @@ def main() -> int:
     p.add_argument("--currency", default="USD", help="Currency code (default USD)")
     p.add_argument("--pretty", action="store_true", help="Pretty-print JSON + stderr summary")
     args = p.parse_args()
+    # FIRST: an output naming one of this step's own input files is refused before anything is written.
+    import _out_guard
+
+    _out_guard.refuse_output_onto_input([args.output], script="cap_state.py")
     run_dir = _ct_gates.run_dir_of(args.inputs)
     _ct_gates.refuse_without_run_id(run_dir, args.run_id)
 

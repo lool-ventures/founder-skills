@@ -32,6 +32,7 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import glob
 import json
 import os
 import re
@@ -1072,6 +1073,14 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     """Entry point."""
     args = parse_args()
+    # FIRST: an output naming one of this step's own input files is refused before anything is written.
+    import _out_guard
+
+    _out_guard.refuse_output_onto_input(
+        [getattr(args, "output", None)],
+        script="founder_context.py",
+        extra=sorted(glob.glob(os.path.join(glob.escape(args.artifacts_root), "founder-context-*.json"))),
+    )
     if args.command == "init":
         cmd_init(args)
     elif args.command == "read":

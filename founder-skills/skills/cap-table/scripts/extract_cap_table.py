@@ -1443,6 +1443,16 @@ def main() -> int:
         help="(freeform-emit) founder answer to a blocker, e.g. 0.interest_rate_type=fixed_numeric_simple. Repeatable.",
     )
     args = p.parse_args()
+    # FIRST: an output naming one of this step's own input files is refused before anything is written.
+    import _out_guard
+
+    _out_guard.refuse_output_onto_input(
+        [args.output],
+        script="extract_cap_table.py",
+        extra=[os.path.join(args.dir, n) for n in ("inputs.json", "instruments.json", "cap_state.json")]
+        if args.dir
+        else [],
+    )
 
     # Normalize the xlsx path if provided (handle macOS dupe suffixes)
     if args.xlsx:

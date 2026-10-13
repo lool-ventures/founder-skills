@@ -1752,6 +1752,17 @@ def main() -> int:
     )
     p.add_argument("--pretty", action="store_true", help="Indent the JSON receipt printed to stdout")
     args = p.parse_args()
+    # FIRST: an output naming one of this step's own input files is refused before anything is written.
+    import _out_guard
+
+    _out_guard.refuse_output_onto_input(
+        [args.output],
+        script="explore.py",
+        extra=[
+            os.path.join(args.dir, n)
+            for n in ("inputs.json", "scenarios.json", "cap_state.json", "counsel_packet.json", "sweep.json")
+        ],
+    )
     if args.run_id is not None:
         _ct_gates_module().refuse_unbound_run_id(args.dir, args.run_id)  # before any rendering work
 

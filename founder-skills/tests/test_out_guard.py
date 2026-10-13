@@ -157,3 +157,15 @@ def test_the_argv_default_is_the_processes_own(
 ) -> None:
     monkeypatch.setattr(sys, "argv", ["probe.py", "--inputs", str(inp), "-o", str(inp)])
     _refused(capsys, [str(inp)])
+
+
+def test_in_place_allows_only_the_named_input(tmp_path: Path, inp: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """`market_sizing.py --replay sizing.json -o sizing.json`: the replayed file may be rewritten, nothing else."""
+    sizing = tmp_path / "sizing.json"
+    sizing.write_text("{}", encoding="utf-8")
+    argv = ["--replay", str(sizing), "--inputs", str(inp), "-o", str(sizing)]
+    _passes(capsys, [str(sizing)], argv=argv, in_place=[str(sizing)])
+    _refused(capsys, [str(sizing)], argv=argv)  # the lever: without in_place the same call is refused
+    _refused(
+        capsys, [str(inp)], argv=["--replay", str(sizing), "--inputs", str(inp), "-o", str(inp)], in_place=[str(sizing)]
+    )

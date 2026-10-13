@@ -175,6 +175,10 @@ def main() -> int:
     p.add_argument("--write-md", default=None, help="Path to write counsel_packet.md")
     p.add_argument("--pretty", action="store_true")
     args = p.parse_args()
+    # FIRST: an output naming one of this step's own input files is refused before anything is written.
+    import _out_guard
+
+    _out_guard.refuse_output_onto_input([args.output_json, args.write_md], script="counsel_packet.py")
     _ct_gates.refuse_without_run_id(_ct_gates.run_dir_of(args.output_json), args.run_id)
 
     with open(args.rule_audit, encoding="utf-8") as f:

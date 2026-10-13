@@ -145,6 +145,10 @@ def main() -> None:
     ap.add_argument("--pretty", action="store_true")
     ap.add_argument("--input", default="-", help="Input JSON file, or '-' for stdin (default)")
     args = ap.parse_args()
+    # FIRST: an output naming one of this step's own input files is refused before anything is written.
+    import _out_guard
+
+    _out_guard.refuse_output_onto_input([args.output], script="write_coverage_disclosure.py")
     if args.output:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         import _ct_gates

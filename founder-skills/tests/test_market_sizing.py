@@ -9221,7 +9221,15 @@ def test_red_team_fails_loudly_when_the_shared_scripts_are_missing(tmp_path: Pat
     scripts = Path(__file__).resolve().parent.parent / "skills" / "market-sizing" / "scripts"
     lone = tmp_path / "a" / "b" / "c" / "scripts"
     lone.mkdir(parents=True)
-    for name in ("red_team.py", "_redteam_text.py", "_redteam_copy.py", "_quote_match.py"):
+    # The skill-local helpers every script loads first (the output guard, the run ref) travel with the script.
+    for name in (
+        "red_team.py",
+        "_redteam_text.py",
+        "_redteam_copy.py",
+        "_quote_match.py",
+        "_out_guard.py",
+        "_run_ref.py",
+    ):
         shutil.copy(scripts / name, lone / name)
     out = tmp_path / "redteam.json"
     out.write_text('{"sentinel": true}')

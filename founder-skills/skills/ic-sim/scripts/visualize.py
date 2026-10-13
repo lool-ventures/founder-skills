@@ -1212,6 +1212,27 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     """Entry point."""
     args = parse_args()
+    # FIRST: an output naming one of this step's own input files is refused before anything is written.
+    import _out_guard
+
+    _out_guard.refuse_output_onto_input(
+        [args.output],
+        script="visualize.py",
+        extra=[
+            os.path.join(args.dir, n)
+            for n in (
+                "startup_profile.json",
+                "fund_profile.json",
+                "conflict_check.json",
+                "discussion.json",
+                "score_dimensions.json",
+                "prior_artifacts.json",
+                "partner_assessment_visionary.json",
+                "partner_assessment_operator.json",
+                "partner_assessment_analyst.json",
+            )
+        ],
+    )
 
     if not os.path.isdir(args.dir):
         print(f"Error: directory not found: {args.dir}", file=sys.stderr)

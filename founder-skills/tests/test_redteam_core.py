@@ -78,7 +78,15 @@ def test_a_missing_core_is_refused_loudly_even_when_the_text_policy_is_present(t
 
     lone = tmp_path / "plugin" / "skills" / "market-sizing" / "scripts"
     lone.mkdir(parents=True)
-    for name in ("red_team.py", "_redteam_text.py", "_redteam_copy.py", "_quote_match.py"):
+    # The skill-local helpers every script loads first (the output guard, the run ref) travel with the script.
+    for name in (
+        "red_team.py",
+        "_redteam_text.py",
+        "_redteam_copy.py",
+        "_quote_match.py",
+        "_out_guard.py",
+        "_run_ref.py",
+    ):
         shutil.copy(MS / name, lone / name)
     shared = tmp_path / "plugin" / "scripts"
     shared.mkdir()

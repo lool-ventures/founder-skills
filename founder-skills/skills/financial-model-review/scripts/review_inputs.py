@@ -2396,6 +2396,10 @@ def main() -> None:
         help="Path to extraction_validation.json for extraction warning banner",
     )
     args = parser.parse_args()
+    # FIRST: an output naming one of this step's own input files is refused before anything is written.
+    import _out_guard
+
+    _out_guard.refuse_output_onto_input([args.static or args.o], script="review_inputs.py")
 
     # Read inputs
     try:

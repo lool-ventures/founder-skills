@@ -741,6 +741,10 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    # FIRST: an output naming one of this step's own input files is refused before anything is written.
+    import _out_guard
+
+    _out_guard.refuse_output_onto_input([args.output], script="score_positioning.py")
     # A call into a run's analysis dir names its run (RUN_ID_REQUIRED); outside a run, nothing changes.
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import _cp_gates

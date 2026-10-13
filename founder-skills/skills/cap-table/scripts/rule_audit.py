@@ -1439,6 +1439,10 @@ def main() -> int:
     p.add_argument("--today", default=None, help="ISO date override for status evaluation (testing)")
     p.add_argument("--pretty", action="store_true")
     args = p.parse_args()
+    # FIRST: an output naming one of this step's own input files is refused before anything is written.
+    import _out_guard
+
+    _out_guard.refuse_output_onto_input([args.output], script="rule_audit.py")
     _ct_gates.refuse_without_run_id(_ct_gates.run_dir_of(args.output), args.run_id)
 
     if args.phase == "pre_math":

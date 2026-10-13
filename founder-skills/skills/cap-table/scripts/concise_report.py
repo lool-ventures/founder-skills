@@ -257,6 +257,10 @@ def main() -> int:
     p.add_argument("-o", "--output-md", required=True, help="path to write the concise markdown")
     p.add_argument("--pretty", action="store_true")
     args = p.parse_args()
+    # FIRST: an output naming one of this step's own input files is refused before anything is written.
+    import _out_guard
+
+    _out_guard.refuse_output_onto_input([args.output_md], script="concise_report.py")
     _ct_gates.refuse_without_run_id(_ct_gates.run_dir_of(args.inputs), args.run_id)
 
     try:

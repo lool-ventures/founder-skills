@@ -1168,6 +1168,30 @@ def main() -> None:
     )
     parser.add_argument("--pretty", action="store_true", help="(no-op, HTML output)")
     args = parser.parse_args()
+    # FIRST: an output naming one of this step's own input files is refused before anything is written.
+    import _out_guard
+
+    _out_guard.refuse_output_onto_input(
+        [args.output],
+        script="explore.py",
+        extra=[
+            os.path.join(args.dir, n)
+            for n in (
+                "checklist.json",
+                "competitor_verification.json",
+                "landscape.json",
+                "landscape_draft.json",
+                "moat_scores.json",
+                "positioning.json",
+                "positioning_scores.json",
+                "product_profile.json",
+                "red_team_skip.json",
+                "redteam.json",
+                "report.json",
+                "startup_research.json",
+            )
+        ],
+    )
 
     if not os.path.isdir(args.dir):
         print(f"Error: directory not found: {args.dir}", file=sys.stderr)

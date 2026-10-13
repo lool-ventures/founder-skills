@@ -1025,6 +1025,12 @@ _FOUNDER_QUESTION_RE = re.compile(r"^E_[A-Z_]+: (\w+): .*\(remedy: founder_quest
 
 def main() -> None:
     args = parse_args()
+    # FIRST: an output naming one of this step's own input files is refused before anything is written.
+    import _out_guard
+
+    # `--replay sizing.json -o sizing.json` is the documented remedy (Step 6d): it reads the sizing whole, then
+    # rewrites it. Every other input is still protected.
+    _out_guard.refuse_output_onto_input([args.output], script="market_sizing.py", in_place=[args.replay])
     indent = 2 if args.pretty else None
 
     if args.replay:
