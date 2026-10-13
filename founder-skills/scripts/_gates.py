@@ -136,6 +136,7 @@ REJECTION_CODES = (
     "NO_ASK_DEFAULT",
     "NO_ASK_NOT_APPLICABLE",
     "DERIVE_NOT_AUTHORIZED",
+    "RUN_SUPERSEDED",
 )
 # Exit 2: the run or the registry cannot be reached.
 UNREACHABLE_CODES = (
@@ -299,10 +300,15 @@ CONTRACT_NOTES = (
     "`disclosures` also lists `EXTRACTION_UNREVIEWED` when financial-model-review's extracted values went on "
     "without being reviewed, and `CORRECTIONS_SOURCE:<origin>` (`external`, `upload` or `chat`) when corrections "
     "to them were applied, naming who supplied them.",
-    "A `complete` financial-model-review run returns to `running`, with `revision` + 1 and `handed_over_at` "
-    "cleared, when the founder answers the cash follow-up; it completes again at the next coaching insert.",
+    "A `complete` financial-model-review run returns to `running`, with `revision` + 1 and `handed_over_at`, "
+    "`deliverables`, `deliverables_status` and `coaching` cleared, when the founder answers the cash follow-up, "
+    "or gives a newer cash balance or its date after delivery (`invocations[]` gains a `reopen` entry naming "
+    "`fmr_cash_followup`); it completes again at the next coaching insert. Once per review, in the conversation "
+    "that delivered it, on a run not under `FS_HOST_NO_ASK`, from the run's own folder; a second update is "
+    "`RUN_FINISHED`. The recorder refuses that reopen `RUN_SUPERSEDED` when a later run holds the folder.",
     "An enforcer never re-opens a finished run's answer: on a `complete` or `refused` run whose confirmed input "
-    "changed, it refuses `RUN_FINISHED` and writes nothing; a changed figure after `complete` needs a new run.",
+    "changed, it refuses `RUN_FINISHED` and writes nothing; a changed figure after `complete` needs a new run, "
+    "except financial-model-review's cash update above.",
     "`ms_two_figures` has one instance per input the founder stated two figures for "
     "(`FS_HOST_ANSWER ms_two_figures.arpu=typed`). The bare `FS_HOST_ANSWER ms_two_figures=<option>` answers every "
     "instance; a line naming an instance wins for that instance. Its alternatives' ids are keyed on the figure "
@@ -2504,12 +2510,15 @@ def fmr_runway_has_no_cash(runway: Any) -> bool:
 
 def _fmr_no_cash_balance(ctx: Ctx) -> bool:
     """Owed while this run's runway.json lacks the balance, and once reached: the founder's reply is then
-    recordable whether or not runway was already re-run with it."""
+    recordable whether or not runway was already re-run with it. Also owed on a delivered review that had its
+    balance once the person in the conversation has given a newer balance or date (`fmr_post_delivery_cash_call`)."""
     for view in ctx.status.get("gates") or []:
         if isinstance(view, dict) and view.get("id") == "fmr_cash_followup" and view.get("state") in GATE_STATES:
             return True
     if ctx.run_dir is None:
         return False
+    if fmr_post_delivery_cash_call(ctx) is not None:
+        return True
     try:
         runway = _run_status.read_json(os.path.join(ctx.run_dir, "runway.json"))
     except ValueError:
@@ -3541,15 +3550,52 @@ def _req_fmr_corrections(ctx: Ctx, entry: dict[str, Any]) -> dict[str, Any] | No
     return None
 
 
+def _fmr_cash_call(rec: dict[str, Any]) -> bool:
+    """A corrections call, in chat or by the host, that set both cash paths."""
+    paths = {c.get("path") for c in rec.get("corrections") or [] if isinstance(c, dict)}
+    return rec.get("origin") in ("chat", "external") and {"cash.current_balance", "cash.balance_date"} <= paths
+
+
+def fmr_post_delivery_cash_call(ctx: Ctx) -> dict[str, Any] | None:
+    """On a `complete` financial-model-review run, the newest call of this run that set both cash paths and
+    changed one, made after the delivered report was listed (`deliverables.report_md.written_at`); None on any
+    other run or when there is none. Such a call with no report time to compare it with cannot be placed
+    before or after the delivery: GATE_UNDECIDABLE, never "not owed". A quick check never gets here: the
+    follow-up's modes drop it before its predicate runs. Residual: a coaching insert run again on a resume
+    re-stamps the report time, which can move it past a call made between the two inserts."""
+    from datetime import datetime  # noqa: PLC0415
+
+    if ctx.status.get("status") != "complete":
+        return None
+    calls = [r for r in _fmr_history(ctx) if _fmr_cash_call(r) and (r.get("changed_count") or 0) >= 1]
+    if not calls:
+        return None
+    written = ((ctx.status.get("deliverables") or {}).get("report_md") or {}).get("written_at")
+    try:
+        delivered = datetime.strptime(str(written), _HISTORY_TS)
+    except ValueError:
+        raise Unimplemented(
+            "fmr_cash_followup: this complete run lists no delivered report time, so a cash call cannot be placed "
+            "before or after the delivery",
+            code="GATE_UNDECIDABLE",
+        ) from None
+    for rec in reversed(calls):
+        try:
+            if datetime.strptime(str(rec.get("timestamp")), _HISTORY_TS) > delivered:
+                return rec
+        except ValueError:
+            continue
+    return None
+
+
 def _req_fmr_cash(ctx: Ctx, entry: dict[str, Any]) -> dict[str, Any] | None:
-    """A call for this run, in chat or by the host, that set both cash paths after the follow-up was opened."""
+    """A call for this run, in chat or by the host, that set both cash paths after the follow-up was opened; on
+    a delivered review whose follow-up was never opened (it had its balance), one made after the delivery."""
+    if entry.get("opened_at") is None:
+        rec = fmr_post_delivery_cash_call(ctx)
+        return {"origin": rec["origin"], "history_seq": rec.get("seq")} if rec else None
     for rec in reversed(_fmr_history(ctx)):
-        paths = {c.get("path") for c in rec.get("corrections") or [] if isinstance(c, dict)}
-        if (
-            rec.get("origin") in ("chat", "external")
-            and {"cash.current_balance", "cash.balance_date"} <= paths
-            and _after_open(rec, entry)
-        ):
+        if _fmr_cash_call(rec) and _after_open(rec, entry):
             return {"origin": rec["origin"], "history_seq": rec.get("seq")}
     return None
 

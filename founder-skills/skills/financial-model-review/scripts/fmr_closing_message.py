@@ -56,10 +56,11 @@ EXTRACTION_UNREVIEWED = (
     "The figures this review used were not checked with you before the analysis ran, so check them against "
     "your model before relying on these numbers."
 )
-# Printed with --cash-update, on the re-run after the founder answers that request. Without it the model
-# announced the update in its own words around the hand-over on the re-run turn, which the Stop hook then
-# corrected with a second message; the sentence it wanted to write is printed here instead.
-CASH_UPDATE = "I've added the cash balance you gave me and recomputed your runway; the files above are updated."
+# Printed with --cash-update, on the re-run after the founder gives a cash balance (asked for, or a newer one
+# or its date after delivery). Without it the model announced the update in its own words around the hand-over
+# on the re-run turn, which the Stop hook then corrected with a second message; the sentence it wanted to
+# write is printed here instead. "Used", not "added": the balance may replace one the review already had.
+CASH_UPDATE = "I've used the cash balance you gave me and recomputed your runway; the files above are updated."
 
 
 def detect_link_form(cwd: str, env: dict[str, str]) -> str:

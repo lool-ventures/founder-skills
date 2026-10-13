@@ -342,7 +342,7 @@ def _handoff_audit() -> Any:
         return None
 
 
-def _handoff_bypassed(dir_path: str, artifacts: dict[str, Any]) -> list[str]:
+def _handoff_bypassed(dir_path: str, artifacts: dict[str, Any], revision: int = 0) -> list[str]:
     """Which sub-agent steps this report's artifacts came from have no gated hand-off in this run.
 
     Built from the artifacts present, never from what SKILL.md says should run. The inputs review runs
@@ -352,6 +352,9 @@ def _handoff_bypassed(dir_path: str, artifacts: dict[str, Any]) -> list[str]:
     A missing `handoff/<run_id>/` is NOT silence: with no dir there are no gate records, so every step
     the artifacts show ran is reported unchecked. Deleting the dir can only add this warning. A run
     that dispatched no sub-agent has none of these artifacts, so nothing is required of it.
+
+    A reopened revision (`revision` >= 1, read from the run status; 0 with no ledger) redoes the checklist
+    into `r<revision>/`, so only that hand-off satisfies it: revision 0's record says nothing about it.
 
     RESIDUAL: a pass proves a gated hand-off exists and still matches its record -- not that the
     producer consumed it. See `_handoff_audit.py`.
@@ -384,7 +387,8 @@ def _handoff_bypassed(dir_path: str, artifacts: dict[str, Any]) -> list[str]:
     if ran_inputs_review:
         requirements.append(("the review of the extracted model", ["inputs_review_output.json"]))
     if isinstance(artifacts.get("checklist.json"), dict):
-        requirements.append(("the scored checklist", ["checklist_output.json"]))
+        checklist = f"r{revision}/checklist_output.json" if revision >= 1 else "checklist_output.json"
+        requirements.append(("the scored checklist", [checklist]))
     labels: list[str] = audit.bypassed(run_dir, requirements)
     return labels
 
@@ -1834,7 +1838,6 @@ CORRECTIONS_ORIGIN_TEXT: dict[str, str] = {
     "inputs_review": "The following extracted values were corrected during the review.",
     "cash": "The cash balance you gave after the review, entered by the assistant.",
 }
-_CASH_PATHS = frozenset({"cash.current_balance", "cash.balance_date"})
 
 
 def _history_calls(dir_path: str, run_id: str | None) -> list[dict[str, Any]]:
@@ -1856,14 +1859,16 @@ def _history_calls(dir_path: str, run_id: str | None) -> list[dict[str, Any]]:
     return out
 
 
-def _call_label(call: dict[str, Any]) -> str:
-    paths = {c.get("path") for c in _as_list(call.get("corrections")) if isinstance(c, dict)}
-    if call.get("origin") == "chat" and paths and paths <= _CASH_PATHS:
+def _call_label(call: dict[str, Any], cash_reply_seq: Any = None) -> str:
+    """Who supplied a call. The cash reply after the review is the call the cash follow-up's recorded answer
+    names (its history line), never one picked by which paths it set: a cash call made while the values were
+    being checked is not "after the review"."""
+    if cash_reply_seq is not None and call.get("seq") == cash_reply_seq and call.get("origin") == "chat":
         return CORRECTIONS_ORIGIN_TEXT["cash"]
     return CORRECTIONS_ORIGIN_TEXT.get(str(call.get("origin")), CORRECTIONS_ORIGIN_TEXT["inputs_review"])
 
 
-def _section_corrections_by_call(calls: list[dict[str, Any]]) -> str:
+def _section_corrections_by_call(calls: list[dict[str, Any]], cash_reply_seq: Any = None) -> str:
     """With a ledger, every corrections call this run made, one block per call with who supplied it -- so a
     later call (the cash follow-up) never replaces an earlier one's corrections in the report."""
     blocks: list[str] = []
@@ -1874,7 +1879,8 @@ def _section_corrections_by_call(calls: list[dict[str, Any]]) -> str:
         if body:
             blocks.append(
                 body.replace(
-                    "_The following extracted values were corrected during the review._", f"_{_call_label(call)}_"
+                    "_The following extracted values were corrected during the review._",
+                    f"_{_call_label(call, cash_reply_seq)}_",
                 ).replace("## Corrections Applied\n\n", "", 1 if blocks else 0)
             )
     return "\n".join(blocks)
@@ -2170,7 +2176,7 @@ def compose(dir_path: str, report_path: str | None = None, gate_record: dict[str
 
     # Run validation
     warnings = validate_artifacts(artifacts)
-    _bypassed_steps = _handoff_bypassed(dir_path, artifacts)
+    _bypassed_steps = _handoff_bypassed(dir_path, artifacts, int((gate_record or {}).get("revision") or 0))
     if _bypassed_steps:
         _msg = _handoff_audit().founder_message(_bypassed_steps)
         warnings.append(_warn("HANDOFF_BYPASSED", _msg, _msg))
@@ -2204,7 +2210,7 @@ def compose(dir_path: str, report_path: str | None = None, gate_record: dict[str
             disclosures.append(f"CORRECTIONS_SOURCE:{gate_record['origin']}")
         calls = _history_calls(dir_path, gate_record.get("run_id"))
         if calls:
-            corrections_section = _section_corrections_by_call(calls)
+            corrections_section = _section_corrections_by_call(calls, gate_record.get("cash_reply_seq"))
 
     # Render every section EXCEPT the Warnings section first; the Warnings
     # section is spliced in after the marker pre-scan so MARKER_COLLISION (which

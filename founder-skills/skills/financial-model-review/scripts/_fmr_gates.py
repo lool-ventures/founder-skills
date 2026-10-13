@@ -22,8 +22,9 @@ CASH_FOLLOWUP = "fmr_cash_followup"
 
 # A changed figure after the review was delivered: the enforcer will not re-open a finished run's answer.
 FINISHED_MESSAGE = (
-    "this review is complete and a figure it confirmed has changed since; a changed figure starts a new review "
-    "(run Step 0 again)"
+    "this review is complete and a figure it confirmed has changed since; only a first newer cash balance or "
+    "its date, given in the conversation that delivered it, updates it in place: any other changed figure "
+    "starts a new review (run Step 0 again)"
 )
 
 
@@ -83,10 +84,13 @@ UNCHANGED_MESSAGE = "this review is complete and already uses these values; ther
 
 def refuse_finished_corrections(run_dir: str, run_id: str | None, paths_set: set[str], changed: int) -> None:
     """Corrections into a finished run: exit 1 `RUN_FINISHED` before anything is written, so the corrected
-    inputs never move under a delivered review. The one exception is the cash follow-up the hand-over asked
-    for: a `complete` run whose follow-up is owed and still holds the producer's default, for a call that sets
-    both cash paths and nothing else (the follow-up's answer needs both). A run with no ledger, or one still
-    running, returns at once."""
+    inputs never move under a delivered review. The one exception is the cash update: a call that sets both
+    cash paths and nothing else (the follow-up's answer needs both), changes one of them, on a review that
+    is `complete` and whose follow-up was never answered with the founder's reply (it asked for the balance,
+    or the review had one and this is a newer balance or date). Once per review: an answered follow-up means a
+    new review. Not on a run whose request said not to ask (its follow-up cannot be answered), and not from a
+    folder other than the run's own (an archived copy). A run with no ledger, or one still running, returns at
+    once."""
     ledger = open_ledger_or_exit(run_dir, run_id)
     if ledger is None:
         return
@@ -97,10 +101,11 @@ def refuse_finished_corrections(run_dir: str, run_id: str | None, paths_set: set
         state = st.get("status")
         if state not in rs.FINAL_STATUSES:
             return {}
-        if state == "complete" and paths_set == CASH_PATHS:
+        if state == "complete" and paths_set == CASH_PATHS and changed >= 1 and not gates.no_ask(led):
             entry = (led.get("gates") or {}).get(CASH_FOLLOWUP) or {}
-            waiting = (entry.get("current") or {}).get("resolution") == "default_taken"
-            if waiting and gates.owed(ctx, gates.gate_def(CASH_FOLLOWUP), None):
+            replied = (entry.get("current") or {}).get("resolution") == "answered"
+            own = isinstance(ctx.run_dir, str) and os.path.realpath(ctx.run_dir) == os.path.realpath(run_dir)
+            if not replied and own:
                 return {}
         return {"finished": state}
 
@@ -134,7 +139,9 @@ def refuse_without_run_id(output: str | None, run_id: str | None) -> None:
 
 def values_record(run_dir: str) -> dict[str, Any] | None:
     """What the run's ledger holds for the values check, for the report: `{run_id, answer_id, resolution,
-    by_request, origin}` (`answer_id` None when it is not answered); None with no ledger. Read only."""
+    by_request, origin, cash_reply_seq, revision}` (`answer_id` None when it is not answered;
+    `cash_reply_seq` the history line the cash follow-up's recorded reply came from, or None; `revision` the
+    run status's); None with no ledger. Read only."""
     run_id = run_id_of(run_dir)
     ledger = open_ledger_or_exit(run_dir, run_id)
     if ledger is None:
@@ -144,12 +151,18 @@ def values_record(run_dir: str) -> dict[str, Any] | None:
     entry = (led.get("gates") or {}).get(VALUES_GATE)
     answered = isinstance(entry, dict) and entry.get("state") == "answered"
     cur = (entry.get("current") or {}) if answered and isinstance(entry, dict) else {}
+    cash = ((led.get("gates") or {}).get(CASH_FOLLOWUP) or {}).get("current") or {}
+    status = sys.modules["_run_status"].load_status(paths) or {}
     return {
         "run_id": run_id,
         "answer_id": cur.get("answer_id"),
         "resolution": cur.get("resolution"),
         "by_request": gates.answered_by_request(led, VALUES_GATE),
         "origin": (cur.get("evidence") or {}).get("origin"),
+        "cash_reply_seq": (cash.get("evidence") or {}).get("history_seq")
+        if cash.get("resolution") == "answered"
+        else None,
+        "revision": int(status.get("revision") or 0),
     }
 
 
@@ -201,8 +214,11 @@ def settle_cash_followup(ledger: Any, no_cash_balance: bool) -> None:
 
     Runway still lacks the balance: the follow-up is recorded at once as the producer's disclosed default, so
     it never sits open (nobody may ever answer it). Runway now has it, on a run that is still `complete` with
-    the follow-up a default: the founder's reply was used but never recorded, so compose refuses (exit 10,
-    nothing written) and names the record to make -- the reply IS the answer; it is not asked again."""
+    the follow-up a default, or a newer balance or date was given after delivery and the follow-up holds no
+    reply: the founder's reply was used but never recorded, so compose refuses (exit 10, nothing written) and
+    names the record to make -- the reply IS the answer; it is not asked again. Residual: the producers can
+    still rewrite runway.json on the complete run before the record; compose is where the founder's report is
+    held."""
     gates, paths = ledger
     led = gates.load_ledger(paths)
     entry = (led.get("gates") or {}).get(CASH_FOLLOWUP) or {}
@@ -224,7 +240,17 @@ def settle_cash_followup(ledger: Any, no_cash_balance: bool) -> None:
         gates.transact(paths, record)
         return
     status = sys.modules["_run_status"].load_status(paths) or {}
-    if status.get("status") == "complete" and resolution == "default_taken":
+    if status.get("status") != "complete" or resolution == "answered":
+        return
+    # A newer balance or date given after delivery and never recorded: rebuilding the delivered review in place
+    # would replace it at the same revision with no reopen, so the record comes first.
+    try:
+        unrecorded = resolution == "default_taken" or (
+            gates.transact(paths, lambda ctx, led, st: gates.fmr_post_delivery_cash_call(ctx)) is not None
+        )
+    except Exception as e:  # noqa: BLE001 -- an undecidable delivery time: exit 2, nothing written
+        sys.exit(_run_ref.report_failure(e))
+    if unrecorded:
         message = (
             "the founder's cash balance reached this report but its answer was never recorded; record `provided` "
             "with Step 12's three-part answer command (the founder's reply is the answer: do not ask again), then "

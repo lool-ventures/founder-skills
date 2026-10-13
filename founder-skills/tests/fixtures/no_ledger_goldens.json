@@ -645,7 +645,7 @@
       "exit": 0,
       "files": {
         "checklist.json": "bb90b847ae7a061cb446fecb49c2b260ed5e6c97f1a43388a7d7d0341548c4dd",
-        "handover.txt": "08575a78cf5a8321b3f6fe3519b3da75436194a794b2aa3bbca5492860079d94",
+        "handover.txt": "8f0194aca463e4a7e2b2fa7566723275b86a5fdebb28f18fe53907886953297e",
         "inputs.json": "ed0bb8241c468220a17e1bbecc79243ec6e3de4fa92b8dcec0c3f18a7da14306",
         "report.json": "5537703d297010f3e0356469beed9f83adb2eac0899159ca0f89926f6486aed4",
         "report.md": "423bd30f802a19dd4ab875c23ea62295331e978079e22bb8604bcd055d5110d3",
@@ -653,7 +653,7 @@
         "unit_economics.json": "f8a9df4cbf19b4d066e6121af6ed42a6b9a1e530e126c180b05b537a17774396"
       },
       "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout": "08575a78cf5a8321b3f6fe3519b3da75436194a794b2aa3bbca5492860079d94"
+      "stdout": "8f0194aca463e4a7e2b2fa7566723275b86a5fdebb28f18fe53907886953297e"
     },
     "no_cash": {
       "exit": 0,

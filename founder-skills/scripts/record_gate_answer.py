@@ -132,6 +132,38 @@ def _refuse_no_ask_answer(g: Any, paths: rs.RunPaths) -> None:
         )
 
 
+def _refuse_reopen_elsewhere(g: Any, args: argparse.Namespace, paths: rs.RunPaths, keys: list[str]) -> None:
+    """An answer that reopens a `complete` run (a `reopens_complete` gate) takes the run's folder back, so it is
+    refused `RUN_SUPERSEDED` before anything is written when the folder is no longer this run's: a later run
+    was bound there after it (the folder's refs decide, `folder_current_run`; the status's `superseded_by` is
+    its mirror), or `--run-dir` names a folder other than the run's own (an archived copy)."""
+    reopens = False
+    for key in keys:
+        try:
+            reopens = reopens or bool((g.GATES.get(g.parse_key(key)[0]) or {}).get("reopens_complete"))
+        except g.GateRejection:
+            continue
+    status = rs.load_status(paths) or {}
+    if not reopens or status.get("status") != "complete":
+        return
+    shell = status.get("run_dir_shell")
+    run_dir = args.run_dir or shell
+    if not isinstance(run_dir, str) or not run_dir:
+        return
+    if isinstance(shell, str) and shell and os.path.realpath(run_dir) != os.path.realpath(shell):
+        raise g.GateRejection(
+            "RUN_SUPERSEDED", f"{run_dir} is not this run's folder; a finished run reopens only in its own folder"
+        )
+    current = rs.folder_current_run(run_dir)
+    if (current is not None and current != args.run_id) or status.get("superseded_by"):
+        raise g.GateRejection(
+            "RUN_SUPERSEDED",
+            "a later run was bound in this run's folder; a finished run that no longer holds its folder is not "
+            "reopened",
+            current_run=current if current != args.run_id else status.get("superseded_by"),
+        )
+
+
 def _segments(rest: list[str]) -> list[list[str]]:
     segs: list[list[str]] = []
     for tok in rest:
@@ -172,6 +204,7 @@ def cmd_answer(args: argparse.Namespace, rest: list[str]) -> int:
         parsed.append(a)
     paths = _locate(args)
     _refuse_no_ask_answer(g, paths)
+    _refuse_reopen_elsewhere(g, args, paths, [a.gate for a in parsed])
 
     def fn(ctx: Any, ledger: dict[str, Any], status: dict[str, Any]) -> dict[str, Any]:
         results = []

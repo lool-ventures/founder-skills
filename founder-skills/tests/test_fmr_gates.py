@@ -495,7 +495,9 @@ def test_every_corrections_call_has_its_block_and_its_source(tmp_path: Path) -> 
     _ok(_compose(run_dir))
     md = (run_dir / "report.md").read_text()
     assert md.count("## Corrections Applied") == 1
-    assert compose.CORRECTIONS_ORIGIN_TEXT["chat"] in md and compose.CORRECTIONS_ORIGIN_TEXT["cash"] in md
+    # Both calls were made before any delivery: a cash call is "after the review" only when it is the history
+    # line the cash follow-up's recorded answer names, never by which paths it set.
+    assert md.count(compose.CORRECTIONS_ORIGIN_TEXT["chat"]) == 2 and compose.CORRECTIONS_ORIGIN_TEXT["cash"] not in md
     assert "revenue.mrr" in md, "the cash call must not replace the earlier corrections"
     assert json.loads((run_dir / "report.json").read_text())["disclosures"] == ["CORRECTIONS_SOURCE:chat"]
 
@@ -739,8 +741,10 @@ def test_a_call_naming_no_run_into_a_delivered_review_is_refused(tmp_path: Path)
     [
         # The balance the review already used, restated: nothing to apply, no rerun.
         (("cash.current_balance=1500000", "cash.balance_date=2026-05"), "already uses"),
-        # Same amount, a later date: a changed confirmed figure after delivery is a new review.
-        (("cash.current_balance=1500000", "cash.balance_date=2026-06"), "new review"),
+        # A newer balance or date updates the review in place only as both cash paths and nothing else (the
+        # same amount at a later date is accepted: test_a_later_balance_date_after_delivery_...).
+        (("cash.balance_date=2026-06",), "new review"),
+        (("cash.current_balance=1500000", "cash.balance_date=2026-06", "revenue.mrr=51000"), "new review"),
         (("revenue.mrr=51000",), "new review"),
     ],
 )
@@ -897,3 +901,297 @@ def test_the_cash_follow_up_reads_only_this_runs_runway(tmp_path: Path) -> None:
     assert _rec(root, run_id, "require", "--gate", "fmr_cash_followup").returncode == 11
     (run_dir / "runway.json").write_text(json.dumps({**no_cash, "metadata": {"run_id": run_id}}))
     assert _rec(root, run_id, "require", "--gate", "fmr_cash_followup").returncode == 10
+
+
+# --- a newer cash balance or date after delivery ----------------------------------------------------------
+#
+# Built through the real chain: the checklist piped from a gated hand-off with `--inputs` (so its fingerprint
+# is real), the commentary, and the coaching inserted by `md_to_commentary.py | insert_coaching.py`, so both
+# verification gates are asserted whole rather than filtered for one message.
+
+COMMENTARY = {
+    "headline": "An invented headline for the test.",
+    "lenses": {"runway": {"callout": "An invented callout."}, "unit_economics": {"callout": "Another one."}},
+}
+
+
+def _gate_file(path: Path, *flags: str) -> None:
+    _ok(h.run(h.SHARED / "check_handoff.py", str(path), *flags))
+
+
+def _handoff_dir(run_dir: Path, run_id: str, revision: int) -> Path:
+    hd = run_dir / "handoff" / run_id
+    if revision:
+        hd = hd / f"r{revision}"
+    hd.mkdir(parents=True, exist_ok=True)
+    return hd
+
+
+def _checklist(run_dir: Path, run_id: str, revision: int = 0) -> None:
+    """Step 5: the sub-agent's hand-off (the fixture's grades), gated, piped with `--inputs`."""
+    handoff = _handoff_dir(run_dir, run_id, revision) / "checklist_output.json"
+    items = json.loads((FIXTURES / "checklist.json").read_text())["items"]
+    keep = ("id", "status", "evidence", "notes")
+    handoff.write_text(json.dumps({"items": [{k: i.get(k) for k in keep} for i in items]}))
+    _gate_file(handoff)
+    args = ("--run-id", run_id, "--inputs", str(run_dir / "inputs.json"), "-o", str(run_dir / "checklist.json"))
+    _ok(h.run(FMR / "checklist.py", *args, stdin=handoff.read_text()))
+
+
+def _coach(run_dir: Path, run_id: str, revision: int = 0) -> None:
+    """Step 8c: the coaching hand-off, gated, wrapped and inserted by the shared scripts."""
+    marker = json.loads((run_dir / "report.json").read_text())["coaching_payload"]["insertion_marker"]
+    md = _handoff_dir(run_dir, run_id, revision) / "coaching.md"
+    md.write_text("Invented coaching for this test.\n")
+    _gate_file(md, "--format", "markdown", "--marker", marker)
+    envelope = _ok(h.run(h.SHARED / "md_to_commentary.py", str(md))).stdout
+    args = ["--report", str(run_dir / "report.md"), "--report-json", str(run_dir / "report.json"), "--marker", marker]
+    for name in ("inputs.json", "checklist.json", "unit_economics.json", "runway.json"):
+        args += ["--verify-artifact", str(run_dir / name)]
+    _ok(h.run(h.SHARED / "insert_coaching.py", *args, stdin=envelope))
+
+
+def _gates_clean(run_dir: Path) -> None:
+    for gate in ("1", "2"):
+        out = _verify(run_dir, gate)
+        assert out["summary"]["errors"] == [], (gate, out["summary"])
+
+
+def _build(root: Path, run_id: str, run_dir: Path, revision: int = 0, *, checklist: bool = True) -> None:
+    """Steps 4, 5, 7, 7.5 and 8c for one revision."""
+    _ok(_producer("unit_economics.py", run_dir, run_id))
+    _ok(_producer("runway.py", run_dir, run_id))
+    if checklist:
+        _checklist(run_dir, run_id, revision)
+    (run_dir / "commentary.json").write_text(json.dumps(COMMENTARY))
+    _ok(_compose(run_dir))
+    _coach(run_dir, run_id, revision)
+
+
+def _close(run_dir: Path, *flags: str) -> str:
+    argv = ("--report", str(run_dir / "report.json"), "--link", "path", "--deliverable", f"r={run_dir}/report.md")
+    return _ok(h.run(FMR / "fmr_closing_message.py", *argv, *flags)).stdout
+
+
+def _delivered_real(tmp: Path) -> tuple[Path, str, Path]:
+    """A review built with the founder's Step 1 balance, delivered and handed over."""
+    root, run_id, run_dir = _run(tmp)
+    _settle_step1(root, run_id)
+    _ok(_rec(root, run_id, "answer", "--gate", "fmr_extracted_values", "--answer-id", "values_ok"))
+    _build(root, run_id, run_dir)
+    _gates_clean(run_dir)
+    st = h.status(root, run_id)
+    assert (st["status"], st["revision"], st["coaching"]) == ("complete", 0, "inserted")
+    _close(run_dir)
+    return root, run_id, run_dir
+
+
+# The founder's reply in the observed shape: the amount the review used, one month later.
+CASH_REPLY = ("cash.current_balance=1500000", "cash.balance_date=2026-06")
+
+
+def _cash_answer(root: Path, run_id: str, balance: str, date: str) -> subprocess.CompletedProcess[str]:
+    """Step 12's record: the follow-up first, so its `reopens` effect re-opens the two basics it re-answers."""
+    return _rec(
+        root,
+        run_id,
+        "answer",
+        "--gate",
+        "fmr_cash_followup",
+        "--answer-id",
+        "provided",
+        "--gate",
+        "fmr_cash_basics.current_balance",
+        "--answer-id",
+        "stated",
+        "--value",
+        balance,
+        "--gate",
+        "fmr_cash_basics.balance_date",
+        "--answer-id",
+        "stated",
+        "--value",
+        date,
+    )
+
+
+def _history(run_dir: Path) -> list[dict[str, Any]]:
+    lines = (run_dir / "extraction_corrections.history.jsonl").read_text().splitlines()
+    return [json.loads(x) for x in lines]
+
+
+def test_a_later_balance_date_after_delivery_reopens_the_run_and_completes_it_again(tmp_path: Path) -> None:
+    root, run_id, run_dir = _delivered_real(tmp_path)
+    first_report = (run_dir / "report.md").read_text()
+    time.sleep(0.002)
+    _ok(_apply(run_dir, run_id, *CASH_REPLY))
+    last = _history(run_dir)[-1]
+    assert (last["changed_count"], last["origin"]) == (1, "chat")
+    _ok(_cash_answer(root, run_id, "1500000", "2026-06"))
+    shutil.copy(run_dir / "corrected_inputs.json", run_dir / "inputs.json")
+    st = h.status(root, run_id)
+    assert (st["status"], st["revision"], st["handed_over_at"], st["deliverables"]) == ("running", 1, None, None)
+    assert st["invocations"][-1]["kind"] == "reopen"
+    assert st["invocations"][-1]["resumed_from"]["gate"] == "fmr_cash_followup"
+    led = h.ledger(root, run_id)["gates"]
+    assert led["fmr_cash_followup"]["current"]["evidence"]["history_seq"] == last["seq"]
+    assert led["fmr_cash_basics.balance_date"]["current"]["value"] == "2026-06"
+    assert led["fmr_extracted_values"]["current"]["answer_id"] == "values_ok"
+
+    _build(root, run_id, run_dir, revision=1)
+    _gates_clean(run_dir)
+    st = h.status(root, run_id)
+    assert (st["status"], st["revision"]) == ("complete", 1)
+    assert {d["revision"] for d in st["deliverables"].values()} == {1}
+    report = (run_dir / "report.md").read_text()
+    assert report != first_report and "The cash balance you gave after the review" in report
+    assert "I've used the cash balance you gave me" in _close(run_dir, "--cash-update")
+    assert h.status(root, run_id)["handed_over_at"] is not None
+
+    # One update per review: a further balance is a new review, and nothing moves.
+    before = _snapshot(run_dir, root, run_id)
+    again = _apply(run_dir, run_id, "cash.current_balance=1400000", "cash.balance_date=2026-07")
+    assert again.returncode == 1 and _out(again)["code"] == "RUN_FINISHED"
+    assert _snapshot(run_dir, root, run_id) == before
+
+
+def _hand_edit(path: Path, fn: Any) -> None:
+    data = json.loads(path.read_text())
+    fn(data)
+    path.write_text(json.dumps(data))
+
+
+def test_an_unrecorded_cash_update_cannot_rebuild_the_delivered_review_in_place(tmp_path: Path) -> None:
+    """The apply is allowed; skipping the record must not let compose replace the delivered review at the same
+    revision with no reopen."""
+    root, run_id, run_dir = _delivered_real(tmp_path)
+    delivered = (run_dir / "report.md").read_bytes()
+    time.sleep(0.002)
+    _ok(_apply(run_dir, run_id, *CASH_REPLY))
+    shutil.copy(run_dir / "corrected_inputs.json", run_dir / "inputs.json")
+    _ok(_producer("unit_economics.py", run_dir, run_id))
+    _ok(_producer("runway.py", run_dir, run_id))
+    proc = _compose(run_dir)
+    assert proc.returncode == 10 and _out(proc)["blocked_by_gate"] == "fmr_cash_followup", proc.stdout + proc.stderr
+    assert "do not ask again" in proc.stderr
+    assert (run_dir / "report.md").read_bytes() == delivered
+    st = h.status(root, run_id)
+    assert (st["status"], st["revision"]) == ("complete", 0)
+
+
+def test_skipping_the_checklist_after_a_cash_update_fails_gate_1(tmp_path: Path) -> None:
+    """Step 12's redo list includes Step 5: the checklist graded the inputs the cash update changed."""
+    root, run_id, run_dir = _delivered_real(tmp_path)
+    time.sleep(0.002)
+    _ok(_apply(run_dir, run_id, *CASH_REPLY))
+    _ok(_cash_answer(root, run_id, "1500000", "2026-06"))
+    shutil.copy(run_dir / "corrected_inputs.json", run_dir / "inputs.json")
+    _ok(_producer("unit_economics.py", run_dir, run_id))
+    _ok(_producer("runway.py", run_dir, run_id))
+    _ok(_compose(run_dir))
+    errors = _verify(run_dir, "1")["summary"]["errors"]
+    assert any("checklist" in e.lower() and "CHECKLIST" in e for e in errors), errors
+
+
+def test_a_reopened_revision_needs_its_own_checklist_hand_off(tmp_path: Path) -> None:
+    """Re-piping revision 0's hand-off into the new revision's checklist is named, not passed."""
+    root, run_id, run_dir = _delivered_real(tmp_path)
+    time.sleep(0.002)
+    _ok(_apply(run_dir, run_id, *CASH_REPLY))
+    _ok(_cash_answer(root, run_id, "1500000", "2026-06"))
+    shutil.copy(run_dir / "corrected_inputs.json", run_dir / "inputs.json")
+    _ok(_producer("unit_economics.py", run_dir, run_id))
+    _ok(_producer("runway.py", run_dir, run_id))
+    old = run_dir / "handoff" / run_id / "checklist_output.json"
+    args = ("--run-id", run_id, "--inputs", str(run_dir / "inputs.json"), "-o", str(run_dir / "checklist.json"))
+    _ok(h.run(FMR / "checklist.py", *args, stdin=old.read_text()))
+    _ok(_compose(run_dir))
+    codes = [w.get("code") for w in json.loads((run_dir / "report.json").read_text())["validation"]["warnings"]]
+    assert "HANDOFF_BYPASSED" in codes
+    _checklist(run_dir, run_id, revision=1)
+    _ok(_compose(run_dir))
+    codes = [w.get("code") for w in json.loads((run_dir / "report.json").read_text())["validation"]["warnings"]]
+    assert "HANDOFF_BYPASSED" not in codes
+
+
+def test_a_cash_call_made_before_delivery_does_not_reopen_the_review(tmp_path: Path) -> None:
+    """Only a call made after the delivered report was listed is a reply to the delivered review."""
+    root, run_id, run_dir = _run(tmp_path)
+    _settle_step1(root, run_id)
+    _opened(root, run_id)
+    _corrections(run_dir, run_id, "chat", "cash.current_balance=1400000", "cash.balance_date=2026-05")
+    _ok(_rec(root, run_id, "answer", "--gate", "fmr_extracted_values", "--answer-id", "corrections_applied"))
+    _build(root, run_id, run_dir)
+    assert h.status(root, run_id)["status"] == "complete"
+    before = _snapshot(run_dir, root, run_id)
+    proc = _cash_answer(root, run_id, "1400000", "2026-05")
+    assert proc.returncode == 1 and _out(proc)["code"] == "GATE_NOT_OWED", proc.stdout + proc.stderr
+    assert _snapshot(run_dir, root, run_id) == before
+
+
+def test_a_cash_call_on_a_complete_run_with_no_delivery_time_is_undecidable(tmp_path: Path) -> None:
+    root, run_id, run_dir = _delivered_real(tmp_path)
+    time.sleep(0.002)
+    _ok(_apply(run_dir, run_id, *CASH_REPLY))
+    _hand_edit(h.status_path(root, run_id), lambda st: st["deliverables"].pop("report_md"))
+    before = _snapshot(run_dir, root, run_id)
+    proc = _cash_answer(root, run_id, "1500000", "2026-06")
+    assert proc.returncode == 2 and _out(proc)["code"] == "GATE_UNDECIDABLE", proc.stdout + proc.stderr
+    assert _snapshot(run_dir, root, run_id) == before
+
+
+def test_a_run_whose_request_said_not_to_ask_keeps_its_delivered_review(tmp_path: Path) -> None:
+    """Attended only: under FS_HOST_NO_ASK the follow-up cannot be answered, so the apply writes nothing."""
+    root, run_id, run_dir = _delivered_real(tmp_path)
+    _hand_edit(h.ledger_path(root, run_id), lambda led: led.update(no_ask={}))
+    before = _snapshot(run_dir, root, run_id)
+    proc = _apply(run_dir, run_id, *CASH_REPLY)
+    assert proc.returncode == 1 and _out(proc)["code"] == "RUN_FINISHED", proc.stdout + proc.stderr
+    assert _snapshot(run_dir, root, run_id) == before
+
+
+def test_a_refused_run_takes_no_cash_update(tmp_path: Path) -> None:
+    root, run_id, run_dir = _delivered_real(tmp_path)
+    _hand_edit(h.status_path(root, run_id), lambda st: st.update(status="refused"))
+    before = _snapshot(run_dir, root, run_id)
+    proc = _apply(run_dir, run_id, *CASH_REPLY)
+    assert proc.returncode == 1 and _out(proc)["code"] == "RUN_FINISHED", proc.stdout + proc.stderr
+    assert _snapshot(run_dir, root, run_id) == before
+
+
+def test_an_archived_copy_takes_no_cash_update(tmp_path: Path) -> None:
+    """Refused, not adopted: the update runs in the review's own folder."""
+    root, run_id, run_dir = _delivered_real(tmp_path)
+    copy = root / "archive" / run_dir.name
+    shutil.copytree(run_dir, copy)
+    time.sleep(0.002)
+    proc = _apply(copy, run_id, *CASH_REPLY)
+    assert proc.returncode == 1 and _out(proc)["code"] == "RUN_FINISHED", proc.stdout + proc.stderr
+    assert not (copy / "corrected_inputs.json").exists()
+    assert not (copy / "extraction_corrections.history.jsonl").exists()
+    # The recorder, pointed at the copy, refuses even with the reply on record in the run's own folder.
+    _ok(_apply(run_dir, run_id, *CASH_REPLY))
+    before = h.snapshot(root, run_id)
+    args = ("--run-id", run_id, "--run-dir", str(copy), "--gate", "fmr_cash_followup", "--answer-id", "provided")
+    proc = h.run(h.RECORD, "answer", *args)
+    assert proc.returncode == 1 and _out(proc)["code"] == "RUN_SUPERSEDED", proc.stdout + proc.stderr
+    assert h.snapshot(root, run_id) == before
+
+
+@pytest.mark.parametrize("marked", [True, False])
+def test_a_cash_reply_recorded_after_a_later_run_took_the_folder_is_refused(tmp_path: Path, marked: bool) -> None:
+    """The folder's refs decide who holds it; the status's `superseded_by` is only its mirror (a later bind's
+    marking can time out), so the recorder refuses on either and never takes the folder back."""
+    root, run_id, run_dir = _delivered_real(tmp_path)
+    time.sleep(0.002)
+    _ok(_apply(run_dir, run_id, *CASH_REPLY))
+    later = "20261008T095000Z-ee0006"
+    h.start_ok(root, "financial-model-review", f"FS_HOST_RUN_ID={later}\n")
+    _ok(h.bind(root, later, run_dir, "example-co"))
+    if not marked:
+        _hand_edit(h.status_path(root, run_id), lambda st: st.update(superseded_by=None))
+    before = (h.snapshot(root, run_id), h.snapshot(root, later))
+    proc = _cash_answer(root, run_id, "1500000", "2026-06")
+    assert proc.returncode == 1 and _out(proc)["code"] == "RUN_SUPERSEDED", proc.stdout + proc.stderr
+    assert (h.snapshot(root, run_id), h.snapshot(root, later)) == before
+    assert rs.folder_current_run(str(run_dir)) == later
