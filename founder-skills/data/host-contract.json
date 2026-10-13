@@ -16,14 +16,19 @@
     ],
     "cp_producers": [
       "RUN_ID_REQUIRED",
-      "NO_ASK_FOUNDER_DECLINED"
+      "NO_ASK_FOUNDER_DECLINED",
+      "OUTPUT_IS_INPUT"
     ],
     "ct_producers": [
       "RUN_ID_REQUIRED",
-      "RUN_NOT_BOUND"
+      "RUN_NOT_BOUND",
+      "OUTPUT_IS_INPUT"
     ],
     "deliverables": [
       "RUN_NOT_COMPLETE"
+    ],
+    "dr_producers": [
+      "OUTPUT_IS_INPUT"
     ],
     "fail": [
       "RUN_WAITING"
@@ -34,19 +39,23 @@
       "MODE_NOT_OFFERED"
     ],
     "fmr_producers": [
-      "RUN_ID_REQUIRED"
+      "RUN_ID_REQUIRED",
+      "OUTPUT_IS_INPUT"
     ],
     "founder_context": [
-      "CONTEXT_NOT_FOUND"
+      "CONTEXT_NOT_FOUND",
+      "OUTPUT_IS_INPUT"
     ],
     "html_writers": [
-      "RUN_ID_MISMATCH"
+      "RUN_ID_MISMATCH",
+      "OUTPUT_IS_INPUT"
     ],
     "ic_producers": [
       "RUN_ID_REQUIRED",
       "FUND_PROFILE_NAMES_PEOPLE",
       "PARTNER_ARTIFACTS_STALE",
-      "HANDOFF_NOT_REDISPATCHED"
+      "HANDOFF_NOT_REDISPATCHED",
+      "OUTPUT_IS_INPUT"
     ],
     "insert_coaching": [
       "OUTPUT_IS_INPUT",
@@ -57,7 +66,8 @@
     "ms_producers": [
       "RUN_ID_REQUIRED",
       "PERIOD_NOT_WRITTEN",
-      "NO_ASK_FOUNDER_DECLINED"
+      "NO_ASK_FOUNDER_DECLINED",
+      "OUTPUT_IS_INPUT"
     ],
     "ms_sizing_redo": [
       "SIZING_REDO_NO_SIZING",

@@ -429,6 +429,9 @@ _CODE_SOURCES = [
     SKILLS / "deck-review" / "scripts" / "_run_ref.py",
     SCRIPTS / "founder_context.py",
     SCRIPTS / "insert_coaching.py",
+    # The output guard every writer calls first (the skills carry byte-identical copies of it).
+    SCRIPTS / "_out_guard.py",
+    SCRIPTS / "pptx_to_text.py",
     SKILLS / "deck-review" / "scripts" / "gate_state.py",
     SKILLS / "deck-review" / "scripts" / "compose_report.py",
     SKILLS / "financial-model-review" / "scripts" / "_fmr_gates.py",
