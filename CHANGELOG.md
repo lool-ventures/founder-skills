@@ -5,6 +5,63 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — A deck's checklist is scored only from its slide-by-slide review
+
+### Highlights
+
+**The deck checklist is scored only after the slide-by-slide review has been read.** A deck review grades its
+35 criteria from the review of each slide. When the two steps were started together, the checklist could be
+graded before the slide review existed, from the deck's outline alone, and those grades ran higher. A
+checklist graded that way is now refused and graded again, so the score in your report always comes from the
+slide-by-slide findings.
+
+### Scoring changes
+
+Deck review: the checklist is now scored only from a grade made after reading the review's slide-by-slide
+findings; a grade made without them is refused and the checklist is graded again. No criterion, threshold or
+formula changed. A review whose checklist used to be graded without the slide findings can now score lower
+than it would have, because those grades ran higher in every case we compared. Every other skill: none.
+
+### Fixed
+
+- Deck review: a checklist graded without the slide-by-slide findings, which happened when both steps were
+  started at the same time, was accepted into the report. It is now refused, and the checklist is graded
+  again once the slide findings are written.
+- Deck review: when the slide-by-slide review is redone after the checklist (for example, to remove an
+  internal file name from the report), the checklist is now graded again too, and a report whose checklist
+  was graded against an earlier version of the slide findings says so.
+
+### Changed
+
+- Deck review: where the review's helpers cannot read the review's folder (a host that returns their work
+  in their reply rather than as a file, or a folder path given to them wrongly), the review now stops at the
+  checklist step and says why, instead of delivering a checklist graded without the slide findings.
+- Deck review: the checklist step can take one more pass than before, when its first grade did not read the
+  slide findings.
+
+### Development
+
+Contributor-facing only; nothing here changes what a founder installs or runs.
+
+- The slide reviews carry a read token derived from their content and the run id, never printed. The
+  CHECKLIST grade must echo it; the checklist producer requires `--slide-reviews` whenever it writes a file
+  (a usage error without it; the What-If rerun to stdout is exempt) and stamps `graded_against` with the
+  token and the bytes it checked. A token alone, not the file's existence: under a same-message dispatch the
+  slide reviews exist by the time the checklist is piped, so an existence check passes a blind grade.
+- Host contract: the deck-review producers' refusal codes gain `SLIDE_REVIEWS_MISSING` (the slide reviews
+  are missing, unusable, another run's or carry no token: run Step 4 again) and `SLIDE_REVIEWS_NOT_READ` (the
+  grade does not echo the token: a new CHECKLIST dispatch of the full Step 5 prompt, never a repair). Neither
+  refusal prints the token. The hand-off state machine's producer-rejection row now sends
+  `SLIDE_REVIEWS_NOT_READ` to a redo, not a repair.
+- Compose raises `STALE_ARTIFACT` (high, with a founder-facing line) when a same-run checklist was graded
+  against other slide reviews, or carries no stamp beside tokened slide reviews. Slide reviews written before
+  this release carry no token, and compose says nothing about them; a run resumed across the upgrade with
+  such a file redoes Step 4 once.
+- A host whose sub-agents cannot read the review folder (the message-channel fallback, or an agent-namespace
+  prefix that exit 8 reports) now stops at Step 5 after its retry budget, where it used to deliver a blind
+  grade.
+- The deck-review release-gate lane asserts that the checklist's stamped token equals the slide reviews'.
+
 ## [0.19.1] - 2026-10-14 — A newer cash balance updates a delivered financial model review
 
 ### Highlights
