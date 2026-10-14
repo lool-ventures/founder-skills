@@ -983,7 +983,11 @@ SKILL_MD_CEILING: dict[str, int] = {
     # no later step re-dispatches a build for it unless the founder asks at Step 6d, and reads a gap as a
     # wrong input or two builds measuring different markets (+305); Step 4 asks for an industry total matching
     # the product's geography and category (+118).
-    "market-sizing": 107_162,
+    # 107,162 -> 107,216 (+54 B), RAISED on 2026-10-14: Step 5 says to record a better-fitting figure in
+    # validation.json in a shell call of its own and to run the comparison redo's generator in a shell call of
+    # its own. A redo printed as the last command of a block that first recorded research through a heredoc
+    # could not be vouched for, and the dispatch hook sent the build's older plain prompt in its place.
+    "market-sizing": 107_216,
     # fmr raised for two founder-facing-correctness items measured in a live run: the CHECKLIST
     # dispatch now forbids citing our artifact filenames in evidence (that run put `inputs.json` in 10
     # items' evidence, printed verbatim into the founder's report), and the producer pipe passes
