@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased] — Redesigned pages for financial model review, deck review and market sizing
+## [0.20.0] - 2026-10-15 — Redesigned report pages for financial model review, deck review and market sizing
 
 ### Highlights
 
@@ -81,6 +81,23 @@ None.
 - Deck review: the checklist's "All" filter now counts every criterion it lists, including one shown
   greyed out because its result counts under another.
 - Deck review: the summary card no longer names the score's band twice.
+
+### Development
+
+Contributor-facing only; nothing here changes what a founder installs or runs.
+
+- A shared page-components module, `_ui.py` (page shell, header card, score ring, a grouped checklist
+  whose filters work without scripts, the founder-text and stage-label helpers, and the shared styles and
+  script). The canonical copy is at the plugin root; each skill whose page renders with it carries a
+  byte-identical copy, held equal by `test_ui_sync.py`, which also catches a skill that renders with it
+  without being listed. financial-model-review's `_checklist_view.py` groups its checklist for both pages.
+- `test_page_structure.py` checks every redesigned page by meaning (ids, `data-*` attributes, tags), never
+  by class name: the page shell (phone viewport, language, one `<main>`, a light colour scheme, every
+  `<details>` opened by a `<summary>`, no content hidden by an inline toggle) and checklist coverage (every
+  criterion of the run's checklist on the page exactly once, with its own status). It parses with the small
+  stdlib reader in `tests/_dom.py`. `test_ui.py` covers the module itself.
+- The no-ledger goldens move only the HTML leaves of the four redesigned pages (deck review report,
+  financial model review report and explorer, market sizing report).
 
 ## [0.19.2] - 2026-10-14 — A deck's checklist is scored only from its slide-by-slide review
 
