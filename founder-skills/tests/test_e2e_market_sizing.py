@@ -97,7 +97,14 @@ def sizing_redo_problems(
     comparand: Any = None,
 ) -> list[str]:
     """Every way the sizing dispatches break the one-redo rule; [] when they keep it. `comparand(cap, d)` is
-    the hook's comparand for a dispatch (default: `printed_prompt_for`)."""
+    the hook's comparand for a dispatch (default: `printed_prompt_for`).
+
+    A red cause that is the model, not the hook: when the redo is printed in a block the dispatch hook cannot
+    vouch for (say, after a research heredoc), the hook holds the redo dispatch twice (A NEWER PRINT in
+    `dispatch_prompt_check.py`) and asks for the generator in a shell call of its own. A model that sends the
+    redo a third time instead is let through as sent; its comparand is still the plain print, so this check's
+    "not the comparison redo" line and `assert_received_prompt` both fire. SKILL.md's Step 5 was broken; do
+    not re-run that as variance."""
     comparand = comparand or _e2e_harness.printed_prompt_for
     held = (ledger or {}).get("sizing_redo")
     record = held if isinstance(held, dict) and held.get("run_id") == run_id else None
@@ -148,6 +155,16 @@ def sizing_redo_problems(
         problems.append(f"{redos} comparison redos in one run; the budget is one")
     if redos and (report.get("sizing_redo") or {}).get("outcome") in (None, "not_run"):
         problems.append(f"a redo went out but the report says {report.get('sizing_redo')!r}")
+    # Independent of the comparand: a report that says the redo ran needs a sizing sub-agent that received the
+    # redo's instructions. The redo record cannot see what a sub-agent received (`_sizing_redo.py`, RESIDUALS).
+    if (report.get("sizing_redo") or {}).get("outcome") in ("changed", "same_inputs") and not any(
+        row["status"] == "succeeded" and isinstance(row.get("received"), str) and REDO_LEAD in row["received"]
+        for row in sizing_report["dispatches"]
+    ):
+        problems.append(
+            f"the report says the redo ran ({report.get('sizing_redo')!r}) but no sizing sub-agent received the "
+            "comparison redo"
+        )
     return problems
 
 

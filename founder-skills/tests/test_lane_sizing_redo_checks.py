@@ -235,3 +235,22 @@ def test_a_redo_the_sub_agent_did_not_receive_fails(lane: Any, gen: Any, tmp_pat
     redo = c.dispatch(text, received=_prompt(gen, TD))
     problems = _problems(lane, c, [*sizing, redo], tmp_path)
     assert any("did not receive" in p for p in problems), problems
+
+
+@pytest.mark.parametrize("outcome", ["changed", "same_inputs"])
+def test_a_report_claiming_a_redo_no_sub_agent_received_fails(
+    lane: Any, gen: Any, tmp_path: Path, outcome: str
+) -> None:
+    """Comparand-independent: each build dispatched once (so the per-build check passes by `continue`), yet
+    the report says the redo ran. No sub-agent received the redo's instructions, so the claim is false."""
+    import _e2e_harness
+
+    c = _Capture(_e2e_harness)
+    sizing = _both_once(c, gen)
+    report = {"sizing_redo": {"build": "top_down", "flagged": ["tam"], "outcome": outcome}}
+    problems = _problems(lane, c, sizing, tmp_path, report=report)
+    assert any("no sizing sub-agent received the comparison redo" in p for p in problems), problems
+    # Control: the same claim with a received redo raises no such line.
+    redo = _with_redo(c, gen)
+    ok = _problems(lane, c, [*sizing, redo], tmp_path, report=report)
+    assert not any("no sizing sub-agent received" in p for p in ok), ok
