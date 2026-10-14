@@ -30,6 +30,7 @@ if os.path.dirname(os.path.abspath(__file__)) not in sys.path:
 import _notes  # noqa: E402
 import _reconciliation_prose  # noqa: E402
 import _thresholds  # noqa: E402
+import _ui  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Artifact loading infrastructure
@@ -245,20 +246,10 @@ def _design_gate_note(checklist: dict[str, Any] | None) -> str:
     ]
     if not gated:
         return ""
-    reason = str(gated[0].get("evidence", ""))[len(_GATE_EVIDENCE) :]
-    if reason.startswith("quality=image_only"):
-        why = "its slides are images with no readable text layer"
-    elif reason.startswith("quality=partial"):
-        why = "not every page could be read"
-    elif reason.startswith("quality=slide_not_rendered"):
-        # Its own branch. The fallback below says the deck "reached the review as text",
-        # which is FALSE for this reason -- it fires on a rendered format when a particular
-        # slide was never seen, and compose_report carries the correct sentence already.
-        why = "at least one slide could not be rendered"
-    else:
-        why = "it reached the review as text rather than as a rendered file"
+    why = _gate_reason(str(gated[0].get("evidence", "")))
     return (
-        f'<p class="note"><strong>{len(gated)} design criteria could not be reviewed</strong> — '
+        f'<p class="ui-callout ui-callout--warn" data-note="design-gate">'
+        f"<strong>{len(gated)} design criteria could not be reviewed</strong> — "
         f"{_esc(why)}, so nothing here judges how the deck looks. They are excluded from the "
         f"score rather than counted against it, and the Design &amp; Readability category is left "
         f"out of the charts above rather than scored on whichever criterion survived.</p>"
@@ -288,178 +279,23 @@ def _placeholder(message: str) -> str:
 
 
 def _css() -> str:
-    """Return the inline CSS for the report."""
-    return f"""
-        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-        body {{
-            font-family: var(--font-body);
-            background: var(--lool-white);
-            color: var(--lool-ink);
-            line-height: 1.6;
-            padding: 2rem;
-            max-width: 960px;
-            margin: 0 auto;
-            -webkit-font-smoothing: antialiased;
-            -moz-osx-font-smoothing: grayscale;
-        }}
-        header {{
-            text-align: center;
-            margin-bottom: 2rem;
-            padding-bottom: 1.5rem;
-            border-bottom: 3px solid var(--lool-blue);
-        }}
-        header h1 {{
-            font-size: 1.75rem;
-            font-weight: 400;
-            color: var(--lool-blue);
-            letter-spacing: -0.01em;
-            margin-bottom: 0.25rem;
-        }}
-        header .subtitle {{
-            font-size: 0.9rem;
-            color: var(--lool-mute);
-        }}
-        main {{ display: flex; flex-direction: column; gap: 2rem; }}
-        .chart-section {{
-            background: var(--lool-paper);
-            border: 1px solid var(--lool-line-2);
-            border-radius: 0;
-            padding: 1.5rem;
-        }}
-        .chart-section h2 {{
-            font-size: 1.1rem;
-            font-weight: 500;
-            color: var(--lool-royal);
-            margin-bottom: 1rem;
-            text-transform: uppercase;
-            letter-spacing: 0.06em;
-        }}
-        .chart-container {{
-            display: flex;
-            justify-content: center;
-            align-items: center;
-        }}
-        .placeholder {{
-            text-align: center;
-            color: var(--lool-faint);
-            padding: 2rem;
-            font-style: italic;
-            background: var(--lool-paper-2);
-            border-radius: 0;
-        }}
-        footer {{
-            text-align: center;
-            margin-top: 2rem;
-            padding-top: 1rem;
-            border-top: 1px solid var(--lool-line-2);
-            color: var(--lool-faint);
-            font-size: 0.8rem;
-        }}
-        footer a, header a {{ color: var(--lool-azure); text-decoration: none; }}
-        footer a:hover, header a:hover {{ color: var(--lool-azure-deep); text-decoration: underline; }}
-        svg text {{ font-family: var(--font-body); }}
-        .collapsible-toggle {{
-            cursor: pointer;
-            user-select: none;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            padding: 0.5rem 0;
-        }}
-        .collapsible-toggle:hover {{ background: var(--lool-paper-2); border-radius: var(--r-input); }}
-        .chevron {{
-            display: inline-block;
-            transition: transform 0.2s;
-            font-size: 0.75rem;
-            color: var(--lool-faint);
-        }}
-        .collapsible-content {{ padding-left: 1.5rem; }}
-        .finding-item {{
-            padding: 0.75rem;
-            border-left: 3px solid var(--lool-line-2);
-            margin-bottom: 0.5rem;
-            border-radius: 0;
-        }}
-        .finding-strong {{ border-left-color: {_COLOR_PASS}; }}
-        .finding-attention {{ border-left-color: {_COLOR_FAIL}; }}
-        .finding-action {{ border-left-color: {_CLR_ACCENT}; }}
-        .findings-subsection {{ margin-bottom: 1rem; }}
-        .findings-subsection h3 {{
-            font-size: 0.9rem;
-            font-weight: 500;
-            color: var(--lool-slate);
-            margin-bottom: 0.5rem;
-        }}
-        @media print {{
-            body {{ background: #fff; padding: 0; }}
-            .chart-section {{ break-inside: avoid; border: 1px solid #ccc; }}
-            header {{ border-bottom-color: #000; }}
-            header h1 {{ color: #000; }}
-            .collapsible-content {{ display: block !important; }}
-            .collapsible-toggle .chevron {{ display: none; }}
-            [data-tooltip] {{ cursor: default; }}
-        }}
+    """This page's own styles, after `_ui.UI_CSS` (the shell, cards, ring and checklist)."""
+    return """
+        .chart-container { display: flex; justify-content: center; align-items: center; }
+        .chart-container svg { max-width: 100%; height: auto; }
+        /* The slide map scales down with the page but stops at a size its labels stay legible at; on
+           a phone the rest scrolls inside the card, never the page. */
+        .dr-wide { min-width: 460px; }
+        svg text { font-family: var(--font-body); }
+        .placeholder {
+            text-align: center; color: var(--ui-ink-2); font-style: italic;
+            padding: 2rem; background: var(--ui-surface-2); border-radius: var(--ui-r1);
+        }
+        .dr-framing { margin: var(--ui-s3) 0 0; font-size: 0.82rem; font-style: italic; color: var(--ui-ink-2); }
+        .dr-coverage { margin: 0 0 var(--ui-s3); font-size: 0.9rem; }
+        .dr-lead { margin: 0 0 var(--ui-s2); font-size: 0.88rem; color: var(--ui-ink-2); }
+        #numbers h3 { margin-top: var(--ui-s4); }
     """
-
-
-# ---------------------------------------------------------------------------
-# Inline JS
-# ---------------------------------------------------------------------------
-
-
-def _tooltip_js() -> str:
-    """Return inline JS for hover tooltips on elements with data-tooltip attribute."""
-    return (
-        "<script>\n"
-        "document.addEventListener('DOMContentLoaded', function() {\n"
-        "    var tip = document.createElement('div');\n"
-        "    tip.style.cssText = 'position:fixed;padding:8px 12px;background:#374B65;color:#fff;'\n"
-        "        + 'border-radius:4px;font-size:12px;max-width:300px;pointer-events:none;'\n"
-        "        + 'z-index:1000;display:none;line-height:1.4;white-space:pre-line;'\n"
-        "        + 'box-shadow:0 2px 8px rgba(0,0,0,0.15)';\n"
-        "    document.body.appendChild(tip);\n"
-        "    document.addEventListener('mouseover', function(e) {\n"
-        "        var el = e.target.closest('[data-tooltip]');\n"
-        "        if (el) {\n"
-        "            tip.textContent = el.getAttribute('data-tooltip');\n"
-        "            tip.style.display = 'block';\n"
-        "        }\n"
-        "    });\n"
-        "    document.addEventListener('mousemove', function(e) {\n"
-        "        if (tip.style.display === 'block') {\n"
-        "            tip.style.left = Math.min(e.clientX + 12, window.innerWidth - 320) + 'px';\n"
-        "            tip.style.top = (e.clientY + 16) + 'px';\n"
-        "        }\n"
-        "    });\n"
-        "    document.addEventListener('mouseout', function(e) {\n"
-        "        if (e.target.closest('[data-tooltip]')) tip.style.display = 'none';\n"
-        "    });\n"
-        "});\n"
-        "</script>"
-    )
-
-
-def _collapsible_js() -> str:
-    """Return inline JS for collapsible sections."""
-    return (
-        "<script>\n"
-        "document.addEventListener('DOMContentLoaded', function() {\n"
-        "    document.querySelectorAll('.collapsible-toggle').forEach(function(btn) {\n"
-        "        btn.addEventListener('click', function() {\n"
-        "            var content = this.nextElementSibling;\n"
-        "            var chevron = this.querySelector('.chevron');\n"
-        "            if (content.style.display === 'none') {\n"
-        "                content.style.display = 'block';\n"
-        "                if (chevron) chevron.style.transform = 'rotate(90deg)';\n"
-        "            } else {\n"
-        "                content.style.display = 'none';\n"
-        "                if (chevron) chevron.style.transform = 'rotate(0deg)';\n"
-        "            }\n"
-        "        });\n"
-        "    });\n"
-        "});\n"
-        "</script>"
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -467,14 +303,19 @@ def _collapsible_js() -> str:
 # ---------------------------------------------------------------------------
 
 
+# A card is either one sentence, or (criterion id, eyebrow, title, body): the criterion's label as its
+# title, its category above it and the assessor's sentence below, so nothing on the card repeats.
+_Card = str | tuple[str, str, str, str]
+
+
 def _key_findings(
     checklist: dict[str, Any] | None,
     reviews: dict[str, Any] | None,
 ) -> str:
     """Build actionable Key Findings section from checklist and slide reviews."""
-    strong: list[str] = []
-    attention: list[str] = []
-    actions: list[str] = []
+    strong: list[_Card] = []
+    attention: list[_Card] = []
+    actions: list[_Card] = []
 
     if _usable(checklist):
         summary = _as_dict(checklist.get("summary"))
@@ -507,18 +348,20 @@ def _key_findings(
                 # put one weakness on the page twice.
                 if item.get("weight", 1) == 0:
                     continue
+                item_id = str(item.get("id") or "")
                 label = str(item.get("label", item.get("id", "")))
+                category = str(item.get("category") or "")
                 # The FINDING is the diagnosis (evidence); the ACTION is the fix (notes).
                 # Deliberately not `notes or evidence` in both — that printed the same
                 # string twice in adjacent sections.
-                evidence = str(item.get("evidence") or "")
-                attention.append(f"{label}: {evidence}" if evidence else label)
+                evidence = _ui.founder_text(str(item.get("evidence") or ""))
+                attention.append((item_id, category, label, evidence))
                 # Shared predicate, not a local copy: compose_report.py suppresses the
                 # same strings, and a duplicated check drifts invisibly — one delivered
                 # artifact would hide a bad note while the other rendered it.
                 fix = _notes.usable_fix(item.get("notes"))
                 if fix is not None:
-                    actions.append(f"{label}: {fix}")
+                    actions.append((item_id, "", label, _ui.founder_text(fix)))
 
     # Slide review findings. INSERTED AT THE FRONT, not appended: the lists are
     # truncated to 3 at render time and failures are already in them, so on a real deck
@@ -526,8 +369,8 @@ def _key_findings(
     # A critical missing slide also genuinely outranks a failed criterion.
     if _usable(reviews):
         missing = _as_list(reviews.get("missing_slides"))
-        ms_attention: list[str] = []
-        ms_actions: list[str] = []
+        ms_attention: list[_Card] = []
+        ms_actions: list[_Card] = []
         critical: list[int] = []
         for ms in missing[:3]:
             if isinstance(ms, dict):
@@ -543,7 +386,7 @@ def _key_findings(
                 if importance != "critical" or not rec:
                     continue
                 ms_attention.append(f"Missing: {label} ({importance})")
-                ms_actions.append(f"Add a {label} slide: {rec}")
+                ms_actions.append(f"Add a {label} slide: {_ui.founder_text(rec)}")
                 # Index into the PARALLEL list, recorded while building it. Enumerating
                 # `missing` instead desyncs the moment an entry is skipped, and the
                 # isinstance guard above then only looks like it protects this.
@@ -561,17 +404,28 @@ def _key_findings(
     if not strong and not attention and not actions:
         return ""
 
-    def _render_items(items: list[str], css_class: str, max_items: int = 3) -> str:
-        return "".join(f'<div class="finding-item {css_class}">{_esc(item)}</div>' for item in items[:max_items])
+    def _card(item: _Card, tone: str) -> str:
+        if isinstance(item, str):
+            return f'<div class="ui-finding ui-finding--{tone}">{_esc(item)}</div>'
+        item_id, eyebrow, title, body = item
+        eyebrow_html = f'<p class="ui-finding__eyebrow">{_esc(eyebrow)}</p>' if eyebrow else ""
+        body_html = f'<p class="ui-finding__body">{_esc(body)}</p>' if body else ""
+        return (
+            f'<div class="ui-finding ui-finding--{tone}" data-finding="{_esc(item_id)}">'
+            f'{eyebrow_html}<p class="ui-finding__title">{_esc(title)}</p>{body_html}</div>'
+        )
+
+    def _render_items(items: list[_Card], tone: str, max_items: int = 3) -> str:
+        return "".join(_card(item, tone) for item in items[:max_items])
+
+    def _column(key: str, heading: str, inner: str) -> str:
+        return f'<div class="ui-finding-col" data-findings="{key}"><h3>{heading}</h3>{inner}</div>'
 
     parts: list[str] = []
     if strong:
-        parts.append(
-            '<div class="findings-subsection"><h3>What\'s strong</h3>'
-            # Five. Strengths are not findings the founder is owed in full, and report.md
-            # has no strengths section for this to diverge from.
-            f"{_render_items(strong, 'finding-strong', max_items=5)}</div>"
-        )
+        # Five. Strengths are not findings the founder is owed in full, and report.md
+        # has no strengths section for this to diverge from.
+        parts.append(_column("strong", "What's strong", _render_items(strong, "pass", max_items=5)))
     if attention:
         # A FAIL is a finding the founder is owed, not a display-budget line item. Cap what
         # is SHOWN, never what is DELIVERED: the overflow goes behind a disclosure so the
@@ -582,157 +436,172 @@ def _key_findings(
         # list without this silently re-caps and the overflow is lost twice over.
         head, tail = attention[:5], attention[5:]
         overflow = (
-            f"<details><summary>{len(tail)} more</summary>"
-            f"{_render_items(tail, 'finding-attention', max_items=len(tail))}</details>"
+            f'<details class="ui-more"><summary>{len(tail)} more</summary>'
+            f"{_render_items(tail, 'fail', max_items=len(tail))}</details>"
             if tail
             else ""
         )
         parts.append(
-            '<div class="findings-subsection">'
-            "<h3>What needs attention</h3>"
-            f"{_render_items(head, 'finding-attention', max_items=len(head))}"
-            f"{overflow}"
-            "</div>"
+            _column("attention", "What needs attention", _render_items(head, "fail", max_items=len(head)) + overflow)
         )
     if actions:
-        parts.append(
-            '<div class="findings-subsection"><h3>Top actions</h3>'
-            # FIVE, HARD, matching report.md's "Up to 5 Fixes to Make". That section caps
-            # rather than discloses BECAUSE the tail order is arbitrary and must not read as
-            # a ranking -- so a disclosure here would deliver what the markdown deliberately
-            # withholds. Parity in the opposite direction is still divergence.
-            f"{_render_items(actions, 'finding-action', max_items=5)}</div>"
-        )
+        # FIVE, HARD, matching report.md's "Up to 5 Fixes to Make". That section caps
+        # rather than discloses BECAUSE the tail order is arbitrary and must not read as
+        # a ranking -- so a disclosure here would deliver what the markdown deliberately
+        # withholds. Parity in the opposite direction is still divergence.
+        parts.append(_column("actions", "Top actions", _render_items(actions, "action", max_items=5)))
 
-    return "".join(parts)
+    return '<div class="ui-findings">' + "".join(parts) + "</div>"
 
 
 # ---------------------------------------------------------------------------
-# Chart 1: Score Gauge (semi-circle)
+# Score ring and verdict
 # ---------------------------------------------------------------------------
 
+# The one-line verdict report.md prints after the score, keyed on the band `checklist.py` wrote. Word
+# for word compose_report.py's `status_label` (craft language only; a test renders both pages from one
+# dir and holds them equal). `{scored}` is the criteria count the score is taken over.
+_BAND_VERDICT: dict[str, str] = {
+    "strong": "Strong — meets nearly all {scored} scored craft criteria; what is left is polish",
+    "solid": "Solid — a well-built deck with a few craft gaps to close",
+    "needs_work": "Needs Work — several craft gaps to close before sending",
+    "major_revision": "Major Revision — worth reworking before it goes out; see the fixes below",
+}
 
-def _chart_score_gauge(checklist: dict[str, Any] | None) -> str:
-    """Render a semi-circle score gauge SVG.
+# The ring's colour per band: the two upper bands read as pass, the lower two as warn and fail.
+_BAND_TONE = {"strong": "pass", "solid": "pass", "needs_work": "warn", "major_revision": "fail"}
 
-    Uses stroked zone arcs inside an annular-semicircle clipPath drawn at
-    exact ranges (the clipPath hides endpoint artifacts at the baseline).
-    The score is indicated by a needle, not an arc.
+
+def _scored_criteria(checklist: dict[str, Any] | None) -> int:
+    """How many criteria the score counts (`summary.scored`, else `total`, else 34), as compose reads it."""
+    summary = _as_dict(_as_dict(checklist).get("summary"))
+    for key in ("scored", "total"):
+        value = summary.get(key)
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+            return value
+    return 34
+
+
+def _band(checklist: dict[str, Any]) -> tuple[float, str]:
+    """(score, band). The band is the one `checklist.py` wrote; a checklist with none (or one this page
+    does not know) is banded from its score by the same module that scored it, never by re-typed edges."""
+    summary = _as_dict(checklist.get("summary"))
+    pct = max(0.0, min(100.0, _num(summary.get("score_pct"), 0.0)))
+    status = str(summary.get("overall_status") or "").strip()
+    if status not in _BAND_TONE:
+        status = _thresholds.band_for(pct)
+    return pct, status
+
+
+def _verdict(checklist: dict[str, Any] | None) -> str:
+    """The report's one-line verdict for this score; "" without a usable checklist."""
+    if not _usable(checklist):
+        return ""
+    _pct, band = _band(checklist)
+    return _BAND_VERDICT.get(band, "").format(scored=_scored_criteria(checklist))
+
+
+def _score_ring(checklist: dict[str, Any] | None) -> str:
+    """The header's score ring: the deck-craft score, coloured by its band, linking to the checklist.
+
+    No band caption under it: the verdict beside it opens with the band's name ("Major Revision — …"),
+    so a caption would say it twice. The band stays in the spoken label.
+    """
+    if not _usable(checklist):
+        return ""
+    pct, band = _band(checklist)
+    band_text = band.replace("_", " ").title()
+    return _ui.score_ring(
+        pct,
+        tone=_BAND_TONE.get(band, "neutral"),
+        value_text=f"{_ui.score_text(pct)}%",
+        label="Deck-craft score",
+        aria_label=f"Deck-craft score {_ui.score_text(pct)} percent, {band_text}",
+        href="#checklist",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Checklist, grouped by category
+# ---------------------------------------------------------------------------
+
+_TONE = {"pass": "pass", "fail": "fail", "warn": "warn", "not_applicable": "na"}
+
+
+def _gate_reason(evidence: str) -> str:
+    """Why a design criterion could not be reviewed, in words, from the reason `checklist.py` stamped."""
+    reason = evidence[len(_GATE_EVIDENCE) :]
+    if reason.startswith("quality=image_only"):
+        return "its slides are images with no readable text layer"
+    if reason.startswith("quality=partial"):
+        return "not every page could be read"
+    if reason.startswith("quality=slide_not_rendered"):
+        # Its own branch. The fallback below says the deck "reached the review as text", which is
+        # FALSE for this reason -- it fires on a rendered format when a particular slide was never
+        # seen, and compose_report carries the correct sentence already.
+        return "at least one slide could not be rendered"
+    return "it reached the review as text rather than as a rendered file"
+
+
+def _checklist_section(checklist: dict[str, Any] | None) -> str:
+    """Every criterion, grouped by category in the page's canonical order, with its evidence.
+
+    The weightless duplicate (`weight: 0`, stamped by `checklist.py`) is listed muted with the sentence
+    the producer wrote for it and counted nowhere, so one weakness is never counted twice. A criterion
+    the design gate set aside says why it was not reviewed, never the raw reason code.
     """
     if checklist is None:
         return _placeholder("No data available")
     if checklist is _CORRUPT:
         return _placeholder("Data unavailable")
     if _is_stub(checklist):
-        reason = _esc(checklist.get("reason", "Skipped"))
-        return _placeholder(f"Skipped: {reason}")
+        return _placeholder(f"Skipped: {checklist.get('reason', 'Skipped')}")
+    items = [i for i in _as_list(checklist.get("items")) if isinstance(i, dict)]
+    if not items:
+        return _placeholder("No checklist data available")
 
-    summary = _as_dict(checklist.get("summary"))
-    score_pct = _num(summary.get("score_pct"), 0.0)
-    raw_status = str(summary.get("overall_status", "unknown")).strip()
-    overall_status = _esc(raw_status.replace("_", " ").title())
+    by_cat: dict[str, list[dict[str, Any]]] = {}
+    for item in items:
+        by_cat.setdefault(str(item.get("category") or "Other"), []).append(item)
+    gated_cats = _gated_categories(checklist)
 
-    # Clamp score to 0-100
-    score_pct = max(0.0, min(100.0, score_pct))
+    groups: list[dict[str, Any]] = []
+    for cat in _ordered_categories(by_cat):
+        rows: list[dict[str, Any]] = []
+        passed = applicable = 0
+        for item in by_cat[cat]:
+            tone = _TONE.get(str(item.get("status")), "na")
+            weightless = item.get("weight", 1) == 0
+            if not weightless and tone != "na":
+                applicable += 1
+                passed += tone == "pass"
+            raw = str(item.get("evidence") or "").strip()
+            evidence = (
+                f"Not reviewed: {_gate_reason(raw)}." if raw.startswith(_GATE_EVIDENCE) else _ui.founder_text(raw)
+            )
+            rows.append(
+                {
+                    "tone": tone,
+                    "title": str(item.get("label") or "").strip() or "Checklist item",
+                    "criterion": str(item.get("id") or ""),
+                    "evidence": evidence,
+                    "weightless": weightless,
+                }
+            )
+        if cat in gated_cats:
+            count = "Not scored"
+        elif applicable:
+            count = f"{passed}/{applicable} pass"
+        else:
+            count = "Not applicable"
+        groups.append({"name": cat, "count_text": count, "items": rows})
 
-    # SVG dimensions
-    w, h = 300, 180
-    cx, cy = _num(w / 2), _num(h - 20)
-    r = _num(110)
-    band_w = 18
-    outer_r = _num(r + band_w / 2)  # 119
-    inner_r = _num(r - band_w / 2)  # 101
-
-    def _angle(pct: float) -> float:
-        """Convert percentage to angle (radians). 0%=pi, 100%=0."""
-        return math.pi * (1 - _num(pct) / 100.0)
-
-    def _arc_path(start_pct: float, end_pct: float) -> str:
-        """SVG arc path along the centre radius."""
-        a1, a2 = _angle(start_pct), _angle(end_pct)
-        x1 = _num(cx + r * math.cos(a1))
-        y1 = _num(cy - r * math.sin(a1))
-        x2 = _num(cx + r * math.cos(a2))
-        y2 = _num(cy - r * math.sin(a2))
-        large = 1 if abs(end_pct - start_pct) > 50 else 0
-        return f"M {x1:.2f} {y1:.2f} A {r:.2f} {r:.2f} 0 {large} 1 {x2:.2f} {y2:.2f}"
-
-    # ClipPath: annular semicircle — the exact visible gauge shape
-    clip = (
-        f'<defs><clipPath id="gc">'
-        f'<path d="M {_num(cx - outer_r):.2f} {cy:.2f} '
-        f"A {outer_r:.2f} {outer_r:.2f} 0 1 1 "
-        f"{_num(cx + outer_r):.2f} {cy:.2f} "
-        f"L {_num(cx + inner_r):.2f} {cy:.2f} "
-        f"A {inner_r:.2f} {inner_r:.2f} 0 1 0 "
-        f'{_num(cx - inner_r):.2f} {cy:.2f} Z"/>'
-        f"</clipPath></defs>"
+    scored = _scored_criteria(checklist)
+    summary = (
+        f"Score = (pass + half credit per warn) ÷ applicable. Measures conformance to {scored} scored "
+        "deck-craft criteria, not investability."
     )
-
-    # Zone arcs — exact ranges, clipPath handles baseline edges
-    # Derived from the band thresholds, never re-typed. These were literals, so a
-    # threshold change elsewhere would have painted the needle in a zone that
-    # contradicted the caption printed beside it.
-    _e = _thresholds.zone_edges()
-    zones = [
-        (_e[0], _e[1], _COLOR_FAIL),
-        (_e[1], _e[2], _COLOR_WARN),
-        (_e[2], _e[3], "#71B48D"),
-        (_e[3], _e[4], _COLOR_PASS),
-    ]
-    arcs = []
-    for z_start, z_end, color in zones:
-        arcs.append(
-            f'<path d="{_esc(_arc_path(z_start, z_end))}" fill="none" '
-            f'stroke="{_esc(color)}" stroke-width="{band_w}" '
-            f'opacity="0.25"/>'
-        )
-
-    # Needle
-    needle_angle = _angle(score_pct)
-    nx = _num(cx + (inner_r - 20) * math.cos(needle_angle))
-    ny = _num(cy - (inner_r - 20) * math.sin(needle_angle))
-    needle = (
-        f'<line x1="{cx:.2f}" y1="{cy:.2f}" x2="{nx:.2f}" y2="{ny:.2f}" '
-        f'stroke="{_esc(_COLOR_PRIMARY)}" stroke-width="3" '
-        f'stroke-linecap="round"/>'
-        f'<circle cx="{cx:.2f}" cy="{cy:.2f}" r="5" '
-        f'fill="{_esc(_COLOR_PRIMARY)}"/>'
-    )
-
-    # Score text
-    score_text = (
-        f'<text x="{cx:.2f}" y="{_num(cy - 30):.2f}" '
-        f'text-anchor="middle" font-size="28" font-weight="700" '
-        f'fill="#374B65">{_esc(f"{score_pct:.0f}")}%</text>'
-        f'<text x="{cx:.2f}" y="{_num(cy - 8):.2f}" '
-        f'text-anchor="middle" font-size="13" '
-        f'fill="#7D90A3">{overall_status}</text>'
-    )
-
-    # Threshold labels
-    labels = ""
-    label_r = _num(outer_r + 12)
-    for pct, label in [(e, f"{e:g}") for e in _thresholds.zone_edges()]:
-        a = _angle(pct)
-        lx = _num(cx + label_r * math.cos(a))
-        ly = _num(cy - label_r * math.sin(a))
-        labels += (
-            f'<text x="{lx:.2f}" y="{ly:.2f}" text-anchor="middle" font-size="9" fill="#A6AEB5">{_esc(label)}</text>'
-        )
-
-    clipped = f'{clip}<g clip-path="url(#gc)">{"".join(arcs)}</g>'
-
-    svg = (
-        f'<svg viewBox="0 0 {w} {h}" xmlns="http://www.w3.org/2000/svg" '
-        f'width="{w}" height="{h}">'
-        f"{clipped}"
-        f"{needle}"
-        f"{score_text}"
-        f"{labels}"
-        f"</svg>"
-    )
-    return f'<div class="chart-container">{svg}</div>'
+    return _ui.checklist(groups, summary_html=_esc(summary))
 
 
 # ---------------------------------------------------------------------------
@@ -1301,33 +1170,37 @@ def _numbers_section(reconciliation: dict[str, Any] | None) -> str:
     parts: list[str] = []
     # Already carries markup from `_html_emphasis`/`_esc`; escaping again would show tags.
     if coverage:
-        parts.append(f'<p class="coverage">{coverage}</p>')
+        parts.append(f'<p class="dr-coverage">{coverage}</p>')
     if untested:
-        parts.append(f'<p class="coverage">{untested}</p>')
+        parts.append(f'<p class="dr-coverage">{untested}</p>')
     # ORDER MATCHES report.md. Two renderers over one artifact set must not disagree about
     # what comes first either -- that is the same drift in a quieter costume.
     if exceeded:
-        rows = "".join(f'<li class="finding-fail">{_esc(r.get("rendered", ""))}</li>' for r in exceeded)
-        parts.append(f"<h3>Where the plan passes a stated limit</h3><ul>{rows}</ul>")
+        parts.append(f"<h3>Where the plan passes a stated limit</h3>{_relation_cards(exceeded, 'fail')}")
     if contradictions:
-        rows = "".join(f'<li class="finding-fail">{_esc(r.get("rendered", ""))}</li>' for r in contradictions)
-        parts.append(f"<h3>Figures that disagree</h3><ul>{rows}</ul>")
+        parts.append(f"<h3>Figures that disagree</h3>{_relation_cards(contradictions, 'fail')}")
     if rounding:
-        rows = "".join(f'<li class="finding-warn">{_esc(r.get("rendered", ""))}</li>' for r in rounding)
         parts.append(
             f"<h3>{_esc(_reconciliation_prose.ROUNDING_GAP_HEADING)}</h3>"
-            f"<p>{_esc(_reconciliation_prose.ROUNDING_GAP_LEAD)}</p>"
-            f"<ul>{rows}</ul>"
+            f'<p class="dr-lead">{_esc(_reconciliation_prose.ROUNDING_GAP_LEAD)}</p>'
+            f"{_relation_cards(rounding, 'warn')}"
         )
     if derived:
-        rows = "".join(f'<li class="finding-warn">{_esc(r.get("rendered", ""))}</li>' for r in derived)
         parts.append(
             "<h3>What the numbers imply</h3>"
-            "<p>Readings, not errors — the arithmetic is exact, the interpretation is a "
+            '<p class="dr-lead">Readings, not errors — the arithmetic is exact, the interpretation is a '
             "judgement call, and an investor may well make it.</p>"
-            f"<ul>{rows}</ul>"
+            f"{_relation_cards(derived, 'warn')}"
         )
-    return '<div class="chart-section"><h2>What Your Numbers Say About Each Other</h2>' + "".join(parts) + "</div>"
+    return "".join(parts)
+
+
+def _relation_cards(relations: list[dict[str, Any]], tone: str) -> str:
+    """Each selected relation's rendered sentence, as a finding card."""
+    return "".join(
+        f'<div class="ui-finding ui-finding--{tone}" data-relation>{_esc(r.get("rendered", ""))}</div>'
+        for r in relations
+    )
 
 
 # Shown under the header when a host's request line answered the stage question: the founder never saw it.
@@ -1364,84 +1237,80 @@ def compose_html(dir_path: str, stage_note: str = "") -> str:
     if _usable(inventory):
         company_name = str(inventory.get("company_name", "Unknown Company"))
 
-    # Build header
-    header_parts = [f"<h1>Deck Review: {_esc(company_name)}</h1>"]
-    if _usable(inventory):
-        date = _esc(inventory.get("review_date", ""))
-        total_slides = _esc(str(inventory.get("total_slides", "?")))
-        fmt = _esc(inventory.get("input_format", ""))
-        header_parts.append(f'<div class="subtitle">{date} | {total_slides} slides | {fmt}</div>')
-
-    header_parts.append(
-        '<div class="subtitle">Generated by '
-        '<a href="https://github.com/lool-ventures/founder-skills">founder skills</a>'
-        ' by <a href="https://lool.vc">lool ventures</a>'
-        " — Deck Review Agent</div>"
-    )
-    header_parts.append(
-        '<div class="subtitle" style="font-style:italic;margin-top:0.5rem;">'
-        "Scores and assessments are agent-generated against best-practice frameworks</div>"
-    )
-
-    header = "<header>" + "".join(header_parts) + "</header>"
-    if stage_note:
-        header += f'<p class="note">{html.escape(stage_note)}</p>'
-
-    # Build chart sections
-    gauge_section = f'<div class="chart-section"><h2>Deck-craft score</h2>{_chart_score_gauge(checklist)}</div>'
-
-    # Key Findings section
-    findings_html = _key_findings(checklist, reviews)
-    findings_section = ""
-    if findings_html:
-        findings_section = f'<div class="chart-section"><h2>Key Findings</h2>{findings_html}</div>'
-
-    radar_section = f'<div class="chart-section"><h2>Category Radar</h2>{_chart_radar(checklist)}</div>'
-
-    breakdown_section = (
-        f'<div class="chart-section"><h2>Category Breakdown</h2>{_chart_category_breakdown(checklist)}'
-        f"{_design_gate_note(checklist)}</div>"
-    )
-
     stage_profile = artifacts.get("stage_profile.json")
-    slide_map_chart = _chart_slide_map(reviews, inventory, stage_profile)
-    slide_map_section = f'<div class="chart-section"><h2>Slide Map</h2>{slide_map_chart}</div>'
 
-    numbers_section = _numbers_section(artifacts.get("reconciliation.json"))
-
-    main_content = (
-        f"<main>{gauge_section}{findings_section}{numbers_section}"
-        f"{radar_section}{breakdown_section}{slide_map_section}</main>"
+    # The header card: the stage (as words), the date, the slide count and the format as chips; the
+    # report's one-line verdict for this score; the score as a ring that opens the checklist.
+    chips: list[str] = []
+    if _usable(stage_profile):
+        chips.append(_ui.stage_label(stage_profile.get("detected_stage")))
+    if _usable(inventory):
+        chips.append(str(inventory.get("review_date", "")))
+        chips.append(f"{inventory.get('total_slides', '?')} slides")
+        fmt = str(inventory.get("input_format", "") or "")
+        chips.append(fmt.upper() if len(fmt) <= 4 else fmt.title())
+    meta_html = "".join(f'<span class="ui-chip">{_esc(c)}</span>' for c in chips if c)
+    body_bits: list[str] = []
+    if stage_note:
+        body_bits.append(f'<p class="ui-callout ui-callout--warn" data-note="stage">{html.escape(stage_note)}</p>')
+    body_bits.append(
+        '<p class="dr-framing">Scores and assessments are agent-generated against best-practice frameworks</p>'
+    )
+    header = _ui.header_card(
+        eyebrow="Deck Review",
+        title=company_name,
+        meta_html=meta_html,
+        verdict_html=_esc(_verdict(checklist)),
+        body_html="".join(body_bits),
+        ring_html=_score_ring(checklist),
     )
 
-    footer = (
-        "<footer>Generated by "
-        '<a href="https://github.com/lool-ventures/founder-skills">founder skills</a>'
-        ' by <a href="https://lool.vc">lool ventures</a>'
-        " — Deck Review Agent</footer>"
+    # (section id, heading, body). Optional sections drop out when empty.
+    sections: list[tuple[str, str, str]] = []
+    findings_html = _key_findings(checklist, reviews)
+    if findings_html:
+        sections.append(("findings", "Key Findings", findings_html))
+    numbers_html = _numbers_section(artifacts.get("reconciliation.json"))
+    if numbers_html:
+        sections.append(("numbers", "What Your Numbers Say About Each Other", numbers_html))
+    sections += [
+        ("checklist", "Checklist", _checklist_section(checklist)),
+        ("radar", "Category Radar", f'<div class="ui-scroll">{_chart_radar(checklist)}</div>'),
+        (
+            "breakdown",
+            "Category Breakdown",
+            f'<div class="ui-scroll">{_chart_category_breakdown(checklist)}</div>{_design_gate_note(checklist)}',
+        ),
+        (
+            "slides",
+            "Slide Map",
+            f'<div class="ui-scroll"><div class="dr-wide">{_chart_slide_map(reviews, inventory, stage_profile)}'
+            "</div></div>",
+        ),
+    ]
+
+    nav = (
+        '<nav class="ui-nav" aria-label="Sections">'
+        + "".join(f'<a href="#{sid}">{_esc(title)}</a>' for sid, title, _ in sections)
+        + "</nav>"
+    )
+    body = (
+        header
+        + nav
+        + "".join(
+            f'<section class="ui-section" id="{sid}" aria-labelledby="{sid}-h"><h2 id="{sid}-h">{_esc(title)}</h2>'
+            f"{content}</section>"
+            for sid, title, content in sections
+        )
     )
 
-    html_doc = (
-        "<!DOCTYPE html>\n"
-        '<html lang="en">\n'
-        "<head>\n"
-        '    <meta charset="UTF-8">\n'
-        '    <meta name="viewport" content="width=device-width, initial-scale=1.0">\n'
-        f"    <title>Deck Review: {_esc(company_name)}</title>\n"
-        f"    <style>{brand_css}{_css()}</style>\n"
-        "</head>\n"
-        "<body>\n"
-        f"{header}\n"
-        f"{main_content}\n"
-        f"{footer}\n"
-        f"    {_tooltip_js()}\n"
-        f"    {_collapsible_js()}\n"
-        f"{_theme.FOOTER_CREDIT_HTML}\n"
-        "</body>\n"
-        "</html>\n"
+    return _ui.page_shell(
+        title=f"Deck Review: {company_name}",
+        body_html=body,
+        brand_css=brand_css,
+        page_css=_css(),
+        skill_name="Deck Review",
     )
-
-    return html_doc
 
 
 # ---------------------------------------------------------------------------

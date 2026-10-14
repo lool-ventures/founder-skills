@@ -27,7 +27,9 @@ from types import ModuleType
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from typing import Any, TypeGuard
 
+import _checklist_view  # noqa: E402
 import _evidence_multiple  # noqa: E402
+import _ui  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Artifact loading infrastructure (duplicated from compose_report.py per PEP 723)
@@ -202,69 +204,6 @@ _CLR_WARN = "#C9892B"
 _CLR_FAIL = "#C0392B"
 _CLR_NA = "#A6AEB5"
 
-_STATUS_COLORS: dict[str, str] = {
-    "pass": _CLR_PASS,
-    "fail": _CLR_FAIL,
-    "warn": _CLR_WARN,
-    "not_applicable": _CLR_NA,
-}
-
-_CHECKLIST_LABELS: dict[str, str] = {
-    "STRUCT_01": "Assumptions on dedicated tab",
-    "STRUCT_02": "Tab structure is navigable",
-    "STRUCT_03": "Actuals vs. projections separated",
-    "STRUCT_04": "Scenario toggles (base/up/down)",
-    "STRUCT_05": "Model matches pitch deck",
-    "STRUCT_06": "Version/date included",
-    "STRUCT_07": "Monthly granularity appropriate",
-    "STRUCT_08": "No structural errors",
-    "STRUCT_09": "Professional formatting",
-    "UNIT_10": "Revenue is bottom-up",
-    "UNIT_11": "Churn modeled explicitly",
-    "UNIT_12": "Pricing logic explicit",
-    "UNIT_13": "Expansion revenue modeled",
-    "UNIT_14": "COGS/margin matches model type",
-    "UNIT_15": "CAC fully loaded",
-    "UNIT_16": "CAC payback computed",
-    "UNIT_17": "LTV/CAC shown",
-    "UNIT_18": "Sales capacity constrains revenue",
-    "UNIT_19": "Conversion rates grounded",
-    "CASH_20": "Headcount plan drives expenses",
-    "CASH_21": "Benefits/tax burden included",
-    "CASH_22": "Working capital modeled",
-    "CASH_23": "Cash runway computed correctly",
-    "CASH_24": "Runway length adequate",
-    "CASH_25": "Cash-out date explicit",
-    "CASH_26": "Step costs captured",
-    "CASH_27": "OpEx scales with revenue",
-    "CASH_28": "FX sensitivity modeled",
-    "CASH_29": "Entity-level cash solvent",
-    "CASH_30": "Israel statutory costs itemized",
-    "CASH_31": "Government grants modeled",
-    "CASH_32": "VAT/indirect tax cash timing",
-    "METRIC_33": "KPI summary visible",
-    "METRIC_34": "Burn multiple tracked",
-    "METRIC_35": "Benchmark awareness",
-    "BRIDGE_36": "Raise-runway-milestones linked",
-    "BRIDGE_37": "Next-round milestones identified",
-    "BRIDGE_38": "Dilution/ownership shown",
-    "SECTOR_39": "Marketplace: two-sided mechanics",
-    "SECTOR_40": "AI: inference costs modeled",
-    "SECTOR_41": "Hardware: milestones + capex",
-    "SECTOR_42": "Usage-based: margin at scale",
-    "SECTOR_43": "Consumer: retention curves",
-    "SECTOR_44": "Deferred revenue handled",
-    "OVERALL_45": "5-minute audit possible",
-    "OVERALL_46": "Country-level metrics tracked",
-}
-
-_STATUS_ICONS: dict[str, str] = {
-    "pass": "\u2713",  # checkmark
-    "fail": "\u2717",  # X
-    "warn": "\u26a0",  # warning triangle
-    "not_applicable": "\u2014",  # em dash
-}
-
 _RATING_COLORS: dict[str, str] = {
     "strong": _CLR_PASS,
     "acceptable": "#21A2E3",
@@ -324,195 +263,88 @@ def _tooltip_js() -> str:
     )
 
 
-def _collapsible_js() -> str:
-    """Return inline JS for collapsible sections."""
-    return (
-        "<script>\n"
-        "document.addEventListener('DOMContentLoaded', function() {\n"
-        "    document.querySelectorAll('.collapsible-toggle').forEach(function(btn) {\n"
-        "        btn.addEventListener('click', function() {\n"
-        "            var content = this.nextElementSibling;\n"
-        "            var chevron = this.querySelector('.chevron');\n"
-        "            if (content.style.display === 'none') {\n"
-        "                content.style.display = 'block';\n"
-        "                if (chevron) chevron.style.transform = 'rotate(90deg)';\n"
-        "            } else {\n"
-        "                content.style.display = 'none';\n"
-        "                if (chevron) chevron.style.transform = 'rotate(0deg)';\n"
-        "            }\n"
-        "        });\n"
-        "    });\n"
-        "});\n"
-        "</script>"
-    )
-
-
 # ---------------------------------------------------------------------------
 # CSS
 # ---------------------------------------------------------------------------
 
 
 def _css() -> str:
-    """Return inline CSS for the report."""
-    return f"""
-        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-        body {{
-            font-family: var(--font-body);
-            line-height: 1.6;
-            color: var(--lool-ink);
-            background: var(--lool-white);
-            padding: 2rem;
-            max-width: 960px;
-            margin: 0 auto;
-            -webkit-font-smoothing: antialiased;
-            -moz-osx-font-smoothing: grayscale;
-        }}
-        header {{
-            border-bottom: 3px solid var(--lool-blue);
-            padding-bottom: 1rem;
-            margin-bottom: 2rem;
-        }}
-        header h1 {{
-            color: var(--lool-blue);
-            font-weight: 400;
-            font-size: 1.75rem;
-        }}
-        header p {{
-            color: var(--lool-mute);
-            font-size: 0.875rem;
-        }}
-        main section {{
-            background: var(--lool-paper);
-            border: 1px solid var(--lool-line-2);
-            border-radius: 0;
-            padding: 1.5rem;
-            margin-bottom: 1.5rem;
-        }}
-        main section h2 {{
-            color: var(--lool-royal);
-            font-weight: 500;
-            font-size: 1.25rem;
-            margin-bottom: 1rem;
-            border-bottom: 1px solid var(--lool-line-2);
-            padding-bottom: 0.5rem;
-        }}
-        .chart-container {{
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            flex-wrap: wrap;
-            gap: 2rem;
-        }}
-        .placeholder {{
-            text-align: center;
-            color: var(--lool-faint);
-            font-style: italic;
-            padding: 2rem;
-            background: var(--lool-paper-2);
-            border-radius: 0;
-        }}
-        .legend {{
-            display: flex;
-            justify-content: center;
-            gap: 1.5rem;
-            flex-wrap: wrap;
-            margin-top: 1rem;
-            font-size: 0.85rem;
-        }}
-        .legend-item {{
-            display: flex;
-            align-items: center;
-            gap: 0.35rem;
-        }}
-        .legend-swatch {{
-            width: 14px;
-            height: 14px;
-            border-radius: 0;
-            display: inline-block;
-        }}
-        .summary-grid {{
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-            gap: 1rem;
-            margin-bottom: 1.5rem;
-        }}
-        .summary-card {{
-            background: var(--lool-paper);
-            border: 1px solid var(--lool-line-2);
-            border-radius: 0;
-            padding: 1rem;
-            text-align: center;
-        }}
-        .summary-card .label {{
-            font-size: 0.75rem;
-            color: var(--lool-subtle);
-            text-transform: uppercase;
-            letter-spacing: 0.06em;
-        }}
-        .summary-card .value {{
-            font-size: 1.5rem;
-            font-weight: bold;
-            color: var(--lool-ink);
-        }}
-        footer {{
-            text-align: center;
-            color: var(--lool-faint);
-            font-size: 0.75rem;
-            padding-top: 1rem;
-            border-top: 1px solid var(--lool-line-2);
-        }}
-        footer a, header a {{ color: var(--lool-azure); text-decoration: none; }}
-        footer a:hover, header a:hover {{ color: var(--lool-azure-deep); text-decoration: underline; }}
-        .collapsible-toggle {{
-            cursor: pointer;
-            user-select: none;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            padding: 0.5rem 0;
-        }}
-        .collapsible-toggle:hover {{ background: var(--lool-paper-2); }}
-        .chevron {{
-            display: inline-block;
-            transition: transform 0.2s;
-            font-size: 0.75rem;
-            color: var(--lool-faint);
-        }}
-        .collapsible-content {{ padding-left: 1.5rem; }}
-        .finding-item {{
-            padding: 0.75rem;
-            border-left: 3px solid var(--lool-line);
-            margin-bottom: 0.5rem;
-            border-radius: 0;
-        }}
-        .finding-strong {{ border-left-color: {_CLR_PASS}; }}
-        .finding-attention {{ border-left-color: {_CLR_FAIL}; }}
-        .finding-action {{ border-left-color: {_CLR_ACCENT}; }}
-        .findings-subsection {{ margin-bottom: 1rem; }}
-        .findings-subsection h3 {{
-            font-size: 0.9rem;
-            color: var(--lool-slate);
-            margin-bottom: 0.5rem;
-        }}
-        @media print {{
-            body {{ background: #fff; padding: 0; }}
-            main section {{ break-inside: avoid; border: 1px solid #ccc; }}
-            header {{ border-bottom-color: #000; }}
-            header h1 {{ color: #000; }}
-            .collapsible-content {{ display: block !important; }}
-            .collapsible-toggle .chevron {{ display: none; }}
-            [data-tooltip] {{ cursor: default; }}
-        }}
+    """This page's own styles, after `_ui.UI_CSS` (the shell, cards, tiles, ring and checklist)."""
+    return """
+        .chart-container {
+            display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 2rem;
+        }
+        .placeholder {
+            text-align: center; color: var(--ui-ink-2); font-style: italic;
+            padding: 2rem; background: var(--ui-surface-2); border-radius: var(--ui-r1);
+        }
+        .legend {
+            display: flex; justify-content: center; gap: 0.5rem 1.5rem; flex-wrap: wrap;
+            margin-top: 1rem; font-size: 0.85rem; color: var(--ui-ink-2);
+        }
+        .legend-item { display: flex; align-items: center; gap: 0.35rem; }
+        .legend-swatch { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+        .ue-row { padding: 0.6rem 0; border-bottom: 1px solid var(--ui-line); }
+        .ue-row:last-of-type { border-bottom: 0; }
+        .ue-row__main {
+            display: grid; grid-template-columns: 170px minmax(120px, 260px) minmax(0, 1fr);
+            gap: 0.4rem 1rem; align-items: center;
+        }
+        .ue-name { font-size: 0.9rem; font-weight: 600; }
+        .ue-bar { display: block; width: 100%; height: 16px; }
+        .ue-val { font-size: 0.85rem; font-weight: 500; }
+        .ue-reason { font-size: 0.8rem; color: var(--ui-ink-2); margin: 0.2rem 0 0 calc(170px + 1rem); }
+        .fmr-subhead { margin: var(--ui-s5) 0 var(--ui-s2); }
+        .fmr-runway-summary { margin: 0 0 var(--ui-s4); font-size: 0.95rem; line-height: 1.55; max-width: 72ch; }
+        .fmr-runway-chart { margin: 0 0 var(--ui-s4); }
+        .fmr-runway-chart figcaption { margin-top: 4px; font-size: 0.8rem; color: var(--ui-ink-2); }
+        .fmr-runway-table caption { text-align: left; font-size: 0.8rem; color: var(--ui-ink-2); padding-bottom: 6px; }
+        .fmr-runway-table th[scope="row"] {
+            font-weight: 600; vertical-align: top; text-transform: none; letter-spacing: normal;
+            font-size: 0.88rem; color: var(--ui-ink);
+        }
+        .fmr-runway-table .ui-pill { white-space: nowrap; }
+        .fmr-runway-table td { vertical-align: top; }
+        .fmr-runway-table .fmr-num { text-align: right; }
+        .fmr-scn { display: inline-flex; align-items: center; gap: 8px; }
+        .fmr-swatch { display: inline-block; width: 10px; height: 10px; border-radius: 3px; flex: none; }
+        .fmr-swatch--dash { height: 0; border-radius: 0; border-top: 2px dashed; }
+        .fmr-assume { display: block; margin-top: 2px; font-size: 0.78rem; font-weight: 400; color: var(--ui-ink-2); }
+        .fmr-runway-table th[scope="row"] .fmr-assume { margin-left: 18px; }
+        @media (max-width: 640px) {
+            /* On a phone each scenario is a two-line entry: name and runway, then cash-out and raise-by. */
+            .fmr-runway-table thead { display: none; }
+            .fmr-runway-table tr {
+                display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px;
+                padding: 10px 0; border-bottom: 1px solid var(--ui-line);
+            }
+            .fmr-runway-table th, .fmr-runway-table td { padding: 0; border: 0; }
+            .fmr-runway-table td:not(.fmr-num) { font-size: 0.8rem; color: var(--ui-ink-2); text-align: left; }
+            .fmr-runway-table td[data-label="Raise by"], .fmr-runway-table td.fmr-raise { text-align: right; }
+            .fmr-runway-table td[data-label]::before { content: attr(data-label) " "; }
+        }
+        #revenue .ui-tiles { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+        .fmr-trend { min-width: 480px; }
+        .fmr-runway-chart .chart-container { min-width: 520px; }
+        [data-tooltip] { cursor: help; }
+        @media (max-width: 640px) {
+            .ue-row__main { grid-template-columns: minmax(0, 1fr) auto; }
+            .ue-bar { grid-column: 1 / -1; grid-row: 2; }
+            .ue-reason { margin-left: 0; }
+        }
+        @media print { [data-tooltip] { cursor: default; } }
     """
 
 
 # ---------------------------------------------------------------------------
-# Chart 1: Checklist Heatmap
+# Chart 1: Checklist, grouped by category
 # ---------------------------------------------------------------------------
 
 
 def _chart_checklist_heatmap(checklist: dict[str, Any] | None) -> str:
-    """Categorized status list with compact color bars and expandable item details."""
+    """Every criterion grouped by category (`_checklist_view`, shared with the explorer), with the
+    filter chips and per-group status bars of `_ui.checklist`. Problem groups stay open; all-pass
+    groups close on load, and every group is open with scripts off or in print."""
     if checklist is None:
         return '<div class="placeholder">No data available</div>'
     if checklist is _CORRUPT:
@@ -525,101 +357,10 @@ def _chart_checklist_heatmap(checklist: dict[str, Any] | None) -> str:
     if not items:
         return '<div class="placeholder">No checklist items</div>'
 
-    # Group items by category, preserving order
-    categories: list[str] = []
-    cat_items: dict[str, list[dict[str, Any]]] = {}
-    for item in items:
-        if not isinstance(item, dict):
-            continue
-        cat = str(item.get("category", "Other"))
-        if cat not in cat_items:
-            categories.append(cat)
-            cat_items[cat] = []
-        cat_items[cat].append(item)
-
-    if not categories:
+    groups = _checklist_view.groups(items)
+    if not groups:
         return '<div class="placeholder">No checklist categories</div>'
-
-    parts: list[str] = []
-    for cat in categories:
-        cat_list = cat_items[cat]
-        # Count statuses
-        counts: dict[str, int] = {"pass": 0, "fail": 0, "warn": 0, "not_applicable": 0}
-        for item in cat_list:
-            status = str(item.get("status", "not_applicable"))
-            counts[status] = counts.get(status, 0) + 1
-        applicable = len(cat_list) - counts["not_applicable"]
-        pass_pct = f"{counts['pass'] / applicable * 100:.0f}%" if applicable > 0 else "N/A"
-
-        # Compact color bar (inline SVG)
-        bar_w = 200
-        bar_h = 8
-        bar_svg = f'<svg width="{bar_w}" height="{bar_h}" style="vertical-align:middle;">'
-        x_offset = 0.0
-        for status in ("pass", "fail", "warn", "not_applicable"):
-            if counts[status] > 0:
-                seg_w = counts[status] / len(cat_list) * bar_w
-                color = _STATUS_COLORS.get(status, _CLR_NA)
-                bar_svg += (
-                    f'<rect x="{x_offset:.1f}" y="0" width="{seg_w:.1f}" height="{bar_h}" fill="{_esc(color)}" />'
-                )
-                x_offset += seg_w
-        bar_svg += "</svg>"
-
-        # Category header (collapsible toggle)
-        header_text = f"{_esc(cat)} — {counts['pass']}/{applicable} ({pass_pct})"
-        parts.append(
-            f'<div style="margin-bottom:0.75rem;">'
-            f'<div class="collapsible-toggle">'
-            f'<span class="chevron">\u25b6</span>'
-            f'<span style="font-weight:600;font-size:0.9rem;">{header_text}</span>'
-            f'<span style="margin-left:0.5rem;">{bar_svg}</span>'
-            f"</div>"
-        )
-
-        # Collapsible item list (hidden by default)
-        parts.append('<div class="collapsible-content" style="display:none;">')
-        for item in cat_list:
-            item_id = str(item.get("id", ""))
-            status = str(item.get("status", "not_applicable"))
-            icon = _STATUS_ICONS.get(status, "\u2014")
-            color = _STATUS_COLORS.get(status, _CLR_NA)
-            # Never fall back to the id: printing it puts `CASH_23` in front of a founder. Prefer
-            # the item's OWN label over the map -- `_CHECKLIST_LABELS` below is a hand-maintained
-            # literal, nothing keeps it in step with `checklist.py`, and it has already drifted on
-            # five of the forty-six. The artifact is the fresher source.
-            label = str(item.get("label") or "") or _CHECKLIST_LABELS.get(item_id) or "Checklist item"
-            # Caveat here too, not only in report.md. This page renders the same assessor-written
-            # evidence straight from checklist.json and never sees compose's warnings section, so a
-            # founder handed only the HTML would read the unsupported comparison with nothing beside
-            # it. Shared detector, so the three surfaces cannot drift.
-            evidence = _evidence_multiple.caveat(str(item.get("evidence") or item.get("notes") or ""))
-            parts.append(
-                f'<div style="display:flex;align-items:flex-start;gap:0.5rem;'
-                f'padding:0.35rem 0;border-bottom:1px solid var(--lool-line-2);">'
-                f'<span style="color:{_esc(color)};font-weight:bold;min-width:1.2rem;">'
-                f"{_esc(icon)}</span>"
-                f"<div>"
-                f'<span style="font-size:0.85rem;">{_esc(label)}</span>'
-            )
-            if evidence:
-                parts.append(
-                    f'<div style="font-size:0.75rem;color:var(--lool-mute);margin-top:0.15rem;">{_esc(evidence)}</div>'
-                )
-            parts.append("</div></div>")
-        parts.append("</div></div>")
-
-    # Legend
-    legend_items: list[str] = []
-    for status, color in [("pass", _CLR_PASS), ("fail", _CLR_FAIL), ("warn", _CLR_WARN), ("n/a", _CLR_NA)]:
-        legend_items.append(
-            f'<span class="legend-item">'
-            f'<span class="legend-swatch" style="background:{_esc(color)}"></span>'
-            f" {_esc(status.title())}</span>"
-        )
-    legend = '<div class="legend">' + "".join(legend_items) + "</div>"
-
-    return "".join(parts) + legend
+    return _ui.checklist(groups)
 
 
 # ---------------------------------------------------------------------------
@@ -743,8 +484,8 @@ def _chart_unit_economics(unit_economics: dict[str, Any] | None) -> str:
 
         # Build inline SVG bullet chart
         svg = (
-            f'<svg width="{bar_width}" height="{bar_height}" '
-            f'style="vertical-align:middle;" data-tooltip="{_esc(tooltip)}">'
+            f'<svg class="ue-bar" width="{bar_width}" height="{bar_height}" '
+            f'viewBox="0 0 {bar_width} {bar_height}" preserveAspectRatio="none" data-tooltip="{_esc(tooltip)}">'
         )
         # Background track
         svg += f'<rect x="0" y="0" width="{bar_width}" height="{bar_height}" fill="#F1F4F4" rx="3" />'
@@ -776,21 +517,13 @@ def _chart_unit_economics(unit_economics: dict[str, Any] | None) -> str:
             reason = ev.split("; ", 1)[1] if rating == "contextual" and "; " in ev else ev
             reason = reason[:1].upper() + reason[1:]
         parts.append(
-            f'<div style="padding:0.4rem 0;border-bottom:1px solid var(--lool-line-2);">'
-            f'<div style="display:flex;align-items:center;gap:0.75rem;">'
-            f'<span style="min-width:140px;font-size:0.85rem;font-weight:600;'
-            f'color:var(--lool-ink);">{_esc(display_name)}</span>'
+            f'<div class="ue-row" data-metric="{_esc(name)}">'
+            f'<div class="ue-row__main">'
+            f'<span class="ue-name">{_esc(display_name)}</span>'
             f"{svg}"
-            f'<span style="min-width:120px;font-size:0.8rem;color:{_esc(color)};">'
+            f'<span class="ue-val" style="color:{_esc(color)};">'
             f"{_esc(f'{val_str} — {rating_label}' if has_value else rating_label)}</span>"
-            f"</div>"
-            + (
-                f'<div style="font-size:0.75rem;color:var(--lool-mute);margin:0.15rem 0 0 calc(140px + 0.75rem);">'
-                f"{_esc(reason)}</div>"
-                if reason
-                else ""
-            )
-            + "</div>"
+            f"</div>" + (f'<div class="ue-reason">{_esc(reason)}</div>' if reason else "") + "</div>"
         )
 
     # Legend
@@ -854,7 +587,7 @@ def _chart_runway(runway: dict[str, Any] | None) -> str:
 
     # SVG dimensions
     margin_left = 80
-    margin_right = 30
+    margin_right = 56
     margin_top = 30
     margin_bottom = 40
     chart_width = 500
@@ -902,7 +635,8 @@ def _chart_runway(runway: dict[str, Any] | None) -> str:
         return _num(margin_top + (1 - (cash - min_cash) / (max_cash - min_cash)) * chart_height)
 
     parts: list[str] = [
-        f'<svg width="{_num(svg_w):.0f}" height="{_num(svg_h):.0f}" xmlns="http://www.w3.org/2000/svg">'
+        f'<svg width="{_num(svg_w):.0f}" height="{_num(svg_h):.0f}" '
+        f'viewBox="0 0 {_num(svg_w):.0f} {_num(svg_h):.0f}" xmlns="http://www.w3.org/2000/svg">'
     ]
 
     # Y-axis labels
@@ -913,7 +647,7 @@ def _chart_runway(runway: dict[str, Any] | None) -> str:
         parts.append(
             f'<text x="{_num(margin_left - 8):.2f}" y="{y:.2f}" '
             f'text-anchor="end" dominant-baseline="central" '
-            f'font-size="9" fill="#7D90A3">{_esc(_fmt_usd(cash_val, currency_code))}</text>'
+            f'font-size="11" fill="#5E6A78">{_esc(_fmt_usd(cash_val, currency_code))}</text>'
         )
         # Grid line
         parts.append(
@@ -943,211 +677,402 @@ def _chart_runway(runway: dict[str, Any] | None) -> str:
         f'font-size="10" fill="#7D90A3">Months</text>'
     )
 
-    # Plot each scenario as a polyline
-    end_labels: list[tuple[float, float, str, str]] = []  # (x, y, name, color)
+    # Plot each scenario as a polyline. Each line is named where it ends, or at the point it reaches
+    # $0 when it runs out (with a dot there), so the chart needs no separate legend.
+    labels: list[tuple[float, float, str, str, bool]] = []  # (x, y, text, color, at_zero)
     for name, points in scenario_data:
         color = _SCENARIO_COLORS.get(name, _CLR_PRIMARY)
+        display = _SCENARIO_LABELS.get(name, name.title())
         sorted_points = sorted(points, key=lambda p: p[0])
         point_strs = [f"{x_pos(m):.2f},{y_pos(c):.2f}" for m, c in sorted_points]
-        if point_strs:
-            dash = ' stroke-dasharray="6,3"' if name == "threshold" else ""
-            pts = " ".join(point_strs)
-            parts.append(f'<polyline points="{pts}" fill="none" stroke="{_esc(color)}" stroke-width="2.5"{dash} />')
-            last_x = x_pos(sorted_points[-1][0])
-            last_y = y_pos(sorted_points[-1][1])
-            display = _SCENARIO_LABELS.get(name, name.title())
-            end_labels.append((last_x, last_y, display, color))
-
-            # Cash-out marker: dot where line crosses zero
-            for j in range(1, len(sorted_points)):
-                prev_cash = sorted_points[j - 1][1]
-                curr_cash = sorted_points[j][1]
-                if prev_cash > 0 >= curr_cash:
-                    cx = x_pos(sorted_points[j][0])
-                    cy = y_pos(0)
-                    parts.append(
-                        f'<circle cx="{cx:.2f}" cy="{cy:.2f}" r="4" '
-                        f'fill="{_esc(color)}" stroke="#fff" stroke-width="1.5" '
-                        f'data-tooltip="Month {sorted_points[j][0]}: cash runs out ({_esc(name)})" />'
-                    )
-                    break
-
-    # Label collision avoidance: offset labels that overlap in both X and Y
-    end_labels.sort(key=lambda el: (el[0], el[1]))  # sort by x, then y
-    for i in range(1, len(end_labels)):
-        prev_x, prev_y = end_labels[i - 1][0], end_labels[i - 1][1]
-        cur_x, cur_y = end_labels[i][0], end_labels[i][1]
-        if abs(cur_x - prev_x) < 40 and abs(cur_y - prev_y) < 14:
-            x, _y, n, c = end_labels[i]
-            end_labels[i] = (x, prev_y + 14, n, c)
-
-    for lx, ly, lname, lcolor in end_labels:
-        parts.append(
-            f'<text x="{_num(lx + 5):.2f}" y="{ly:.2f}" '
-            f'dominant-baseline="central" font-size="9" '
-            f'fill="{_esc(lcolor)}" font-weight="bold">{_esc(lname)}</text>'
-        )
-
-    # Decision point markers from scenario data — deduplicate by month
-    dp_by_month: dict[int, str] = {}  # month -> action label
-    for s in scenarios:
-        if not isinstance(s, dict):
+        if not point_strs:
             continue
-        dp_list = _as_list(s.get("decision_points"))
-        dp_raw = s.get("decision_point")
-        if isinstance(dp_raw, dict) and dp_raw.get("month"):
-            dp_list = [dp_raw] + dp_list
-        elif isinstance(dp_raw, str) and dp_raw:
-            rw = s.get("runway_months")
-            if rw is not None:
-                dp_month_idx = max(int(_num(rw)) - 12, 0)
-                dp_list = [{"month": dp_month_idx, "action": "Start fundraising"}] + dp_list
-        for dp in dp_list:
-            if not isinstance(dp, dict):
-                continue
-            dp_month = int(_num(dp.get("month", 0)))
-            dp_action = str(dp.get("action", ""))
-            if dp_month > 0 and min_month <= dp_month <= max_month:
-                dp_by_month.setdefault(dp_month, dp_action)
+        dash = ' stroke-dasharray="6,3"' if name == "threshold" else ""
+        pts = " ".join(point_strs)
+        parts.append(f'<polyline points="{pts}" fill="none" stroke="{_esc(color)}" stroke-width="2.5"{dash} />')
+        zero_month: int | None = None
+        for j in range(1, len(sorted_points)):
+            if sorted_points[j - 1][1] > 0 >= sorted_points[j][1]:
+                zero_month = sorted_points[j][0]
+                break
+        if zero_month is not None:
+            cx, cy = x_pos(zero_month), y_pos(0)
+            parts.append(
+                f'<circle cx="{cx:.2f}" cy="{cy:.2f}" r="4.5" fill="{_esc(color)}" stroke="#fff" '
+                f'stroke-width="1.5" data-zero="{_esc(name)}" />'
+            )
+            labels.append((cx, cy, f"{display} · M{zero_month}", color, True))
+        else:
+            labels.append((x_pos(sorted_points[-1][0]), y_pos(sorted_points[-1][1]), display, color, False))
 
-    # Render deduplicated decision points with collision-aware labels
-    dp_labels: list[tuple[float, float, str]] = []  # (x, y, text)
-    for dp_month, dp_action in sorted(dp_by_month.items()):
-        dpx = x_pos(dp_month)
+    # A label at $0 sits above its dot; labels that would touch are stacked upwards. A label at a line's
+    # end sits to its right, nudged down when another end label is too close.
+    placed: list[tuple[float, float]] = []
+    for lx, ly, text, color, at_zero in sorted(labels, key=lambda el: (el[0], el[1])):
+        width = 6.2 * len(text)
+        if at_zero:
+            x, y, anchor = lx, ly - 10, "middle"
+            while any(abs(x - px) < (width + 8) and abs(y - py) < 13 for px, py in placed):
+                y -= 14
+        else:
+            x, y, anchor = lx + 6, ly, "start"
+            while any(abs(x - px) < 40 and abs(y - py) < 13 for px, py in placed):
+                y += 14
+        placed.append((x, y))
         parts.append(
-            f'<line x1="{dpx:.2f}" y1="{_num(margin_top):.2f}" '
-            f'x2="{dpx:.2f}" y2="{_num(margin_top + chart_height):.2f}" '
-            f'stroke="{_CLR_ACCENT}" stroke-width="1.5" stroke-dasharray="4,3" />'
-        )
-        if dp_action:
-            dp_labels.append((dpx, margin_top - 5, dp_action[:30]))
-
-    # Offset overlapping decision point labels
-    for i in range(1, len(dp_labels)):
-        prev_x, prev_y = dp_labels[i - 1][0], dp_labels[i - 1][1]
-        cur_x, cur_y = dp_labels[i][0], dp_labels[i][1]
-        if abs(cur_x - prev_x) < 80 and abs(cur_y - prev_y) < 12:
-            dp_labels[i] = (dp_labels[i][0], prev_y - 12, dp_labels[i][2])
-
-    for dpx, dpy, dp_text in dp_labels:
-        parts.append(
-            f'<text x="{dpx:.2f}" y="{_num(dpy):.2f}" '
-            f'text-anchor="middle" font-size="8" fill="{_CLR_ACCENT}">'
-            f"{_esc(dp_text)}</text>"
+            f'<text x="{_num(x):.2f}" y="{_num(y):.2f}" text-anchor="{anchor}" dominant-baseline="central" '
+            f'font-size="11" font-weight="600" fill="{_esc(color)}" stroke="#FFFFFF" stroke-width="3" '
+            f'paint-order="stroke">{_esc(text)}</text>'
         )
 
     parts.append("</svg>")
+    return (
+        '<figure class="fmr-runway-chart"><div class="ui-scroll"><div class="chart-container">'
+        + "\n".join(parts)
+        + "</div></div><figcaption>Cash balance under each scenario. A dot marks the month cash reaches zero."
+        "</figcaption></figure>"
+    )
 
-    # Legend
-    legend_items: list[str] = []
-    for name, _points in scenario_data:
-        color = _SCENARIO_COLORS.get(name, _CLR_PRIMARY)
-        legend_items.append(
-            f'<span class="legend-item">'
-            f'<span class="legend-swatch" style="background:{_esc(color)}"></span>'
-            f" {_esc(_SCENARIO_LABELS.get(name, name.title()))}</span>"
-        )
-    legend = '<div class="legend">' + "".join(legend_items) + "</div>"
 
-    # Annotation box summarizing key runway numbers
-    risk_assessment = str(runway.get("risk_assessment") or "")
-    risk_level = _risk_level(risk_assessment)
-    annotations: list[tuple[str, str]] = []  # (text, border color)
-    for s in scenarios:
+# ---------------------------------------------------------------------------
+# Runway scenarios: summary sentence and scenario table
+# ---------------------------------------------------------------------------
+
+_MONTH_NAMES = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+
+def _month_text(value: Any) -> str:
+    """A "YYYY-MM" month as "Mon YYYY"; anything else as written."""
+    text = str(value or "").strip()
+    parts = text.split("-")
+    if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit() and 1 <= int(parts[1]) <= 12:
+        return f"{_MONTH_NAMES[int(parts[1]) - 1]} {parts[0]}"
+    return text
+
+
+def _scenario_assumption(s: dict[str, Any]) -> str:
+    """The scenario's own stated parameters, worded as report.md's scenarios table words them, after the
+    scenario's label when runway.json gives one. "" when it states none."""
+    bits: list[str] = []
+    growth_rate = s.get("growth_rate")
+    if isinstance(growth_rate, (int, float)) and not isinstance(growth_rate, bool):
+        bits.append(f"growth {growth_rate * 100:.0f}%/mo")
+    burn_change = s.get("burn_change")
+    if isinstance(burn_change, (int, float)) and not isinstance(burn_change, bool):
+        bits.append(f"burn {'+' if burn_change >= 0 else ''}{burn_change * 100:.0f}%")
+    fx = s.get("fx_adjustment")
+    if isinstance(fx, (int, float)) and not isinstance(fx, bool) and fx != 0:
+        bits.append(f"fx {'+' if fx >= 0 else ''}{fx * 100:.0f}%")
+    label = str(s.get("label") or "").strip()
+    text = ", ".join(bits)
+    return " · ".join(t for t in (label, text) if t)
+
+
+def _runway_rows(runway: dict[str, Any]) -> list[dict[str, Any]]:
+    """One row per scenario, earliest deadline first; a scenario that never runs out comes last."""
+    risk_level = _risk_level(str(runway.get("risk_assessment") or ""))
+    rows: list[dict[str, Any]] = []
+    for order, s in enumerate(_as_list(runway.get("scenarios"))):
         if not isinstance(s, dict):
             continue
-        sname = str(s.get("name", ""))
-        slabel = _SCENARIO_LABELS.get(sname, sname.title())
+        name = str(s.get("name", ""))
         months = s.get("runway_months")
-        if months is not None:
-            annotations.append((f"{slabel}: {int(_num(months))} months runway", _CLR_ACCENT))
-        elif s.get("default_alive"):
-            if sname == "base" and risk_level in ("moderate", "elevated", "critical"):
-                # The base scenario's own risk_assessment disagrees with a bare "cash never
-                # runs out" read (finding 19) — surface the static (today's-burn) floor and
-                # the rated risk level instead of an unqualified default-alive annotation.
-                static_months = s.get("static_runway_months")
-                static_str = f", {static_months:g} mo at today's burn" if static_months is not None else ""
-                annotations.append(
-                    (f"{slabel}: default alive by projection, but rated {risk_level} risk{static_str}", _CLR_WARN)
+        months_n = _num(months) if isinstance(months, (int, float)) and not isinstance(months, bool) else None
+        alive = bool(s.get("default_alive")) or (months_n is None and bool(s.get("became_profitable")))
+        caveat = ""
+        if months_n is not None:
+            # runway.py's own lines: a raise starts 12 months before cash-out (its decision point),
+            # and 18 months is its target runway (`target_runway`). Literals there, so restated here.
+            tone = "fail" if months_n < 12 else "warn" if months_n <= 18 else "neutral"
+            pill = f"{months_n:g} mo"
+        elif alive:
+            tone, pill = "pass", "Default alive"
+            if name == "base" and risk_level in ("moderate", "elevated", "critical"):
+                # runway.py rates this scenario moderate-or-worse risk (finding 19): never an
+                # unqualified green, and the today's-burn floor travels with it.
+                tone = "warn"
+                static = s.get("static_runway_months")
+                caveat = f"rated {risk_level} risk" + (
+                    f" · {static:g} mo at today's burn" if isinstance(static, (int, float)) else ""
                 )
-            elif s.get("became_profitable"):
-                annotations.append((f"{slabel}: on track to profitability", _CLR_ACCENT))
-            else:
-                annotations.append((f"{slabel}: cash never runs out (default alive)", _CLR_ACCENT))
-    annotation_html = ""
-    if annotations:
-        items_html = "".join(
-            f'<div class="finding-item" style="border-left-color:{_esc(color)};">{_esc(a)}</div>'
-            for a, color in annotations[:4]
+        else:
+            tone, pill = "neutral", "—"
+        rows.append(
+            {
+                "name": name,
+                "label": _SCENARIO_LABELS.get(name, name.title()),
+                "color": _SCENARIO_COLORS.get(name, _CLR_PRIMARY),
+                "dashed": name == "threshold",
+                "assumption": _scenario_assumption(s),
+                "months": months_n,
+                "alive": alive,
+                "profitable": bool(s.get("became_profitable")),
+                "tone": tone,
+                "pill": pill,
+                "caveat": caveat,
+                "cash_out": s.get("cash_out_date"),
+                "decision": s.get("decision_point"),
+                "order": order,
+            }
         )
-        annotation_html = f'<div style="margin-top:1rem;">{items_html}</div>'
+    rows.sort(key=lambda r: (r["months"] is None, r["months"] if r["months"] is not None else 0, r["order"]))
+    return rows
 
-    return '<div class="chart-container">' + "\n".join(parts) + "</div>" + legend + annotation_html
+
+def _runway_summary(rows: list[dict[str, Any]]) -> str:
+    """One sentence from the data: what the base case does, then the earliest deadline."""
+    base = next((r for r in rows if r["name"] == "base"), None)
+    parts: list[str] = []
+    if base is not None:
+        if base["alive"] and base["tone"] == "pass" and base["profitable"]:
+            parts.append("In the base case the company becomes profitable before cash runs out.")
+        elif base["alive"] and base["tone"] == "pass":
+            parts.append("In the base case cash does not run out within the projection.")
+        elif base["alive"]:
+            parts.append(f"In the base case cash does not run out within the projection, but it is {base['caveat']}.")
+        elif base["months"] is not None:
+            parts.append(f"In the base case cash runs out in {base['months']:g} months.")
+    others = [r for r in rows if r["months"] is not None and r["name"] != "base"]
+    if others:
+        first = others[0]
+        lead = "In the other scenarios" if base is not None else "Across the scenarios"
+        parts.append(
+            f"{lead} the earliest deadline is <strong>{first['months']:g} months</strong> away "
+            f"({_esc(first['label'])})."
+        )
+    return " ".join(parts)
+
+
+def _runway_table(rows: list[dict[str, Any]], runway: dict[str, Any]) -> str:
+    """The scenarios as a table, earliest deadline first. A column shows only when runway.json carries
+    its field; on a phone each row becomes a two-line entry (name and runway, then the two dates)."""
+    scenarios = [x for x in _as_list(runway.get("scenarios")) if isinstance(x, dict)]
+    has_cash_out = any("cash_out_date" in x for x in scenarios)
+    has_decision = any("decision_point" in x for x in scenarios)
+    head = '<th scope="col">Scenario</th><th scope="col" class="fmr-num">Runway</th>'
+    if has_cash_out:
+        head += '<th scope="col">Cash runs out</th>'
+    if has_decision:
+        head += '<th scope="col">Start raising by</th>'
+    body: list[str] = []
+    for r in rows:
+        swatch = (
+            f'<span class="fmr-swatch fmr-swatch--dash" style="border-top-color:{_esc(r["color"])}" aria-hidden="true">'
+            "</span>"
+            if r["dashed"]
+            else f'<span class="fmr-swatch" style="background:{_esc(r["color"])}" aria-hidden="true"></span>'
+        )
+        assumption = f'<span class="fmr-assume">{_esc(r["assumption"])}</span>' if r["assumption"] else ""
+        caveat = f'<span class="fmr-assume">{_esc(r["caveat"])}</span>' if r["caveat"] else ""
+        # A neutral runway (over eighteen months) is the plain pill; the others take their status ink.
+        pill_cls = "ui-pill" if r["tone"] == "neutral" else f"ui-pill ui-pill--{r['tone']}"
+        cells = (
+            f'<th scope="row"><span class="fmr-scn">{swatch}{_esc(r["label"])}</span>{assumption}</th>'
+            f'<td class="fmr-num" data-runway-tone="{r["tone"]}"><span class="{pill_cls}">'
+            f"{_esc(r['pill'])}</span>{caveat}</td>"
+        )
+        if has_cash_out:
+            if r["cash_out"] or not r["alive"]:
+                out = _month_text(r["cash_out"]) if r["cash_out"] else "—"
+                cells += f'<td data-label="Out">{_esc(out)}</td>'
+            else:
+                cells += "<td>Does not run out</td>"
+        if has_decision:
+            if r["decision"] or not r["alive"]:
+                raise_by = _month_text(r["decision"]) if r["decision"] else "—"
+                cells += f'<td data-label="Raise by">{_esc(raise_by)}</td>'
+            else:
+                cells += '<td class="fmr-raise">Raise optional</td>'
+        body.append(f'<tr data-scenario="{_esc(r["name"])}">{cells}</tr>')
+    return (
+        '<div class="ui-table-wrap"><table class="ui-table fmr-runway-table">'
+        "<caption>Ordered from the earliest deadline</caption>"
+        f"<thead><tr>{head}</tr></thead><tbody>{''.join(body)}</tbody></table></div>"
+    )
+
+
+def _runway_section(runway: dict[str, Any] | None) -> str:
+    """Runway Scenarios: a one-sentence summary, the chart, and the scenario table."""
+    chart = _chart_runway(runway)
+    if not _usable(runway):
+        return chart
+    rows = _runway_rows(runway)
+    if not rows:
+        return chart
+    summary = _runway_summary(rows)
+    lead = f'<p class="fmr-runway-summary" data-runway-summary>{summary}</p>' if summary else ""
+    return lead + chart + _runway_table(rows, runway)
 
 
 # ---------------------------------------------------------------------------
-# Chart 4: Revenue Waterfall (optional ARR bar)
+# Chart 4: Revenue overview (tiles from inputs.revenue, and the monthly trend)
 # ---------------------------------------------------------------------------
 
 
-def _chart_revenue_waterfall(inputs: dict[str, Any] | None) -> str:
-    """Simple bar chart showing ARR value if available."""
-    if inputs is None:
-        return '<div class="placeholder">No data available</div>'
-    if inputs is _CORRUPT:
-        return '<div class="placeholder">Data unavailable</div>'
-    if _is_stub(inputs):
-        reason = _esc(inputs.get("reason", "Skipped"))
-        return f'<div class="placeholder">{reason}</div>'
+def _fmt_rate(value: float) -> str:
+    """A monthly rate as a percentage with at most one decimal (0.035 -> "3.5%"), never rounded to a
+    whole number that would state a different rate."""
+    return f"{round(value * 100, 1):g}%"
 
+
+def _stated(value: Any) -> float | None:
+    """`value` as a number when the inputs state one, else None (a missing figure is never shown as 0)."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    v = float(value)
+    return v if math.isfinite(v) else None
+
+
+def _revenue_tiles(inputs: dict[str, Any]) -> str:
+    """The revenue figures the inputs state, one tile each: ARR and MRR (with their as-of month),
+    monthly growth, monthly churn and customers. A figure the inputs do not state gets no tile."""
     revenue = _as_dict(inputs.get("revenue"))
-    arr_data = _as_dict(revenue.get("arr"))
-    arr_value = _num(arr_data.get("value", 0))
-    arr_as_of = str(arr_data.get("as_of", ""))
     currency_code = _resolve_currency(inputs)
+    tiles: list[str] = []
+    for key, label in (("arr", "ARR"), ("mrr", "MRR")):
+        snap = _as_dict(revenue.get(key))
+        value = _stated(snap.get("value"))
+        if value is None:
+            continue
+        as_of = str(snap.get("as_of") or "").strip()
+        tiles.append(
+            _tile(
+                f"revenue-{key}",
+                label,
+                _fmt_usd(value, currency_code),
+                [f"as of {_month_text(as_of)}" if as_of else ""],
+            )
+        )
+    growth = _stated(revenue.get("growth_rate_monthly"))
+    if growth is not None:
+        tiles.append(_tile("revenue-growth", "Monthly growth", _fmt_rate(growth), []))
+    churn = _stated(revenue.get("churn_monthly"))
+    if churn is not None:
+        tiles.append(_tile("revenue-churn", "Monthly churn", _fmt_rate(churn), []))
+    customers = _stated(revenue.get("customers"))
+    if customers is not None:
+        tiles.append(_tile("revenue-customers", "Customers", f"{customers:,.0f}", []))
+    return '<div class="ui-tiles">' + "".join(tiles) + "</div>" if tiles else ""
 
-    if arr_value <= 0:
-        return '<div class="placeholder">No ARR data available</div>'
 
-    # Simple single-bar chart
-    svg_w = 300
-    svg_h = 200
-    margin_top = 30
-    margin_bottom = 40
-    bar_x = 100
-    bar_width = 100
-    chart_height = svg_h - margin_top - margin_bottom
-    bar_h = _num(chart_height * 0.8)
+def _revenue_months(inputs: dict[str, Any]) -> list[tuple[str, float, bool]]:
+    """(month, total, actual) for every `revenue.monthly[]` entry that states both a month and a total,
+    in month order."""
+    rows: list[tuple[str, float, bool]] = []
+    for entry in _as_list(_as_dict(inputs.get("revenue")).get("monthly")):
+        if not isinstance(entry, dict):
+            continue
+        month = str(entry.get("month") or "").strip()
+        total = _stated(entry.get("total"))
+        if not month or total is None:
+            continue
+        rows.append((month, total, entry.get("actual") is not False))
+    return sorted(rows, key=lambda r: r[0])
 
-    parts: list[str] = [f'<svg width="{svg_w}" height="{svg_h}" xmlns="http://www.w3.org/2000/svg">']
 
-    bar_y = _num(margin_top + chart_height - bar_h)
+def _nice_ceiling(value: float) -> float:
+    """The smallest 1 / 2 / 2.5 / 5 x 10^n at or above `value`, so the axis ticks read cleanly."""
+    if value <= 0:
+        return 1.0
+    exp = math.floor(math.log10(value))
+    for step in (1.0, 2.0, 2.5, 5.0, 10.0):
+        top = step * 10.0**exp
+        if top >= value:
+            return top
+    return 10.0 ** (exp + 1)
+
+
+def _chart_revenue_trend(inputs: dict[str, Any]) -> str:
+    """Monthly revenue as a line over a value axis, from `revenue.monthly[]`; "" with fewer than two
+    months (a single point is not a trend). Projected months are drawn dashed with open dots."""
+    rows = _revenue_months(inputs)
+    if len(rows) < 2:
+        return ""
+    currency_code = _resolve_currency(inputs)
+    w, h = 860, 280
+    left, right, top, bottom = 72, 44, 24, 44
+    plot_w, plot_h = w - left - right, h - top - bottom
+    lo = min(0.0, min(t for _, t, _ in rows))
+    hi = _nice_ceiling(max(t for _, t, _ in rows))
+    span = hi - lo or 1.0
+    n = len(rows)
+
+    def x(i: int) -> float:
+        return _num(left + (plot_w * i / (n - 1)))
+
+    def y(v: float) -> float:
+        return _num(top + plot_h * (1 - (v - lo) / span))
+
+    parts: list[str] = [
+        f'<svg width="{w}" height="{h}" viewBox="0 0 {w} {h}" xmlns="http://www.w3.org/2000/svg" role="img" '
+        f'aria-label="{_esc(f"Monthly revenue, {_month_text(rows[0][0])} to {_month_text(rows[-1][0])}")}">'
+    ]
+    for k in range(5):
+        v = lo + span * k / 4
+        gy = y(v)
+        parts.append(
+            f'<line x1="{left}" y1="{gy:.2f}" x2="{w - right}" y2="{gy:.2f}" stroke="#E2E7EE" stroke-width="1" />'
+        )
+        parts.append(
+            f'<text x="{left - 8}" y="{gy + 4:.2f}" text-anchor="end" font-size="11" fill="#5E6A78">'
+            f"{_esc(_fmt_usd(v, currency_code) if v else ('$0' if currency_code == 'USD' else f'0 {currency_code}'))}"
+            "</text>"
+        )
+    # Month labels: every month up to twelve, then every other one (or sparser) so they never collide.
+    every = max(1, math.ceil(n / 12))
+    for i, (month, _t, _a) in enumerate(rows):
+        if i % every == 0 or i == n - 1:
+            parts.append(
+                f'<text x="{x(i):.2f}" y="{h - bottom + 18}" text-anchor="middle" font-size="11" '
+                f'fill="#5E6A78">{_esc(_month_text(month))}</text>'
+            )
+    for i in range(1, n):
+        dashed = not rows[i][2]
+        dash = ' stroke-dasharray="5,4"' if dashed else ""
+        parts.append(
+            f'<line x1="{x(i - 1):.2f}" y1="{y(rows[i - 1][1]):.2f}" x2="{x(i):.2f}" y2="{y(rows[i][1]):.2f}" '
+            f'stroke="{_CLR_PRIMARY}" stroke-width="2.5"{dash} />'
+        )
+    for i, (_m, total, actual) in enumerate(rows):
+        fill = _CLR_PRIMARY if actual else "#FFFFFF"
+        parts.append(
+            f'<circle cx="{x(i):.2f}" cy="{y(total):.2f}" r="4" fill="{fill}" stroke="{_CLR_PRIMARY}" '
+            f'stroke-width="2" />'
+        )
+    last_m, last_t, _ = rows[-1]
     parts.append(
-        f'<rect x="{_num(bar_x):.2f}" y="{bar_y:.2f}" '
-        f'width="{_num(bar_width):.2f}" height="{bar_h:.2f}" '
-        f'fill="{_CLR_PRIMARY}" opacity="0.8" rx="4" />'
+        f'<text x="{x(n - 1):.2f}" y="{y(last_t) - 10:.2f}" text-anchor="end" font-size="12" font-weight="600" '
+        f'fill="#374B65">{_esc(_fmt_usd(last_t, currency_code))}</text>'
     )
-
-    # Value label above bar
-    parts.append(
-        f'<text x="{_num(bar_x + bar_width / 2):.2f}" y="{_num(bar_y - 8):.2f}" '
-        f'text-anchor="middle" font-size="14" fill="#374B65" font-weight="bold">'
-        f"{_esc(_fmt_usd(arr_value, currency_code))}</text>"
-    )
-
-    # Label below bar
-    label = "ARR"
-    if arr_as_of:
-        label = f"ARR (as of {arr_as_of})"
-    parts.append(
-        f'<text x="{_num(bar_x + bar_width / 2):.2f}" y="{_num(margin_top + chart_height + 18):.2f}" '
-        f'text-anchor="middle" font-size="11" fill="#7D90A3">{_esc(label)}</text>'
-    )
-
     parts.append("</svg>")
+    legend = ""
+    if any(not a for _, _, a in rows):
+        legend = (
+            '<div class="legend">'
+            f'<span class="legend-item"><span class="legend-swatch" style="background:{_CLR_PRIMARY}"></span>'
+            " Actual</span>"
+            '<span class="legend-item"><span class="legend-swatch" style="background:#FFFFFF;'
+            f'border:2px solid {_CLR_PRIMARY}"></span> Projected</span>'
+            "</div>"
+        )
+    return (
+        '<div class="ui-scroll" data-chart="revenue-trend"><div class="chart-container fmr-trend">'
+        + "\n".join(parts)
+        + "</div></div>"
+        + legend
+    )
 
-    return '<div class="chart-container">' + "\n".join(parts) + "</div>"
+
+def _revenue_overview(inputs: dict[str, Any] | None) -> str:
+    """The Revenue Overview section's body: the stated revenue figures as tiles and, with two or more
+    months of `revenue.monthly[]`, the monthly trend under them. "" when the inputs state none of it."""
+    if not _usable(inputs):
+        return ""
+    tiles = _revenue_tiles(inputs)
+    trend = _chart_revenue_trend(inputs)
+    if trend:
+        trend = f'<h3 class="fmr-subhead">Monthly revenue</h3>{trend}'
+    return tiles + trend
 
 
 # ---------------------------------------------------------------------------
@@ -1174,9 +1099,64 @@ def _score_coverage_note(summary: dict[str, Any]) -> str:
     total = summary.get("total")
     over = f" of {int(_num(total))}" if total is not None else ""
     return (
-        f'<div class="label" style="color:{_esc(_CLR_WARN)}">'
+        '<p class="ui-callout ui-callout--warn" data-note="score-coverage">'
         f"{missing}{over} checks were not assessed — scored over the rest"
-        f"</div>"
+        "</p>"
+    )
+
+
+def _score_ring(checklist: dict[str, Any] | None) -> tuple[str, str]:
+    """(the header card's score ring, the note under it that the score left criteria out).
+
+    A deck-only review (no spreadsheet) is scored on Business Quality, said under the ring; any other
+    review on the checklist score, its status beneath. The 80 / 60 bands are the page's own.
+    """
+    if not _usable(checklist):
+        return "", ""
+    summary = _as_dict(checklist.get("summary"))
+    score_pct = summary.get("score_pct")
+    overall = str(summary.get("overall_status") or "")
+    overall_text = overall.replace("_", " ").title()
+    biz_pct = summary.get("business_quality_pct")
+    mat_pct = summary.get("model_maturity_pct")
+    if biz_pct is not None and mat_pct is None:
+        pct = _num(biz_pct)
+        shown = _ui.score_text(pct, decimals=_checklist_view.SCORE_DECIMALS)  # as report.md prints it
+        ring = _ui.score_ring(
+            pct,
+            tone=_checklist_view.score_tone(pct),
+            value_text=f"{shown}%",
+            label="Business Quality",
+            caption="Based on pitch deck (no spreadsheet provided)",
+            aria_label=f"Business quality {shown} percent, based on pitch deck",
+            href="#checklist",
+        )
+        return ring, ""
+    if score_pct is None:
+        return "", ""
+    pct = _num(score_pct)
+    shown = _ui.score_text(pct, decimals=_checklist_view.SCORE_DECIMALS)  # as report.md prints it
+    ring = _ui.score_ring(
+        pct,
+        tone=_checklist_view.score_tone(pct),
+        value_text=f"{shown}%",
+        label="Checklist Score",
+        caption=overall_text,
+        aria_label=f"Checklist score {shown} percent" + (f", {overall_text}" if overall_text else ""),
+        href="#checklist",
+    )
+    return ring, _score_coverage_note(summary)
+
+
+def _tile(key: str, label: str, value: str, subs: list[str], tone: str = "", attrs: str = "") -> str:
+    """One headline figure as a `ui-tile` (label, value, the lines under it). Plain text in."""
+    tone_cls = f" ui-tile--{tone}" if tone else ""
+    sub_html = "".join(f'<p class="ui-tile__sub">{html.escape(t, quote=False)}</p>' for t in subs if t)
+    return (
+        f'<div class="ui-tile{tone_cls}" data-tile="{_esc(key)}"{attrs}>'
+        f'<p class="ui-tile__label">{_esc(label)}</p>'
+        f'<p class="ui-tile__value" data-tile-value>{_esc(value)}</p>'
+        f"{sub_html}</div>"
     )
 
 
@@ -1189,36 +1169,6 @@ def _executive_summary(
     """Build an executive summary section with key numbers."""
     cards: list[str] = []
 
-    # Checklist score
-    if _usable(checklist):
-        summary = _as_dict(checklist.get("summary"))
-        score_pct = summary.get("score_pct")
-        overall = summary.get("overall_status", "")
-        biz_pct = summary.get("business_quality_pct")
-        mat_pct = summary.get("model_maturity_pct")
-
-        if biz_pct is not None and mat_pct is None:
-            # Deck-only review: show Business Quality
-            color = _CLR_PASS if _num(biz_pct) >= 80 else (_CLR_WARN if _num(biz_pct) >= 60 else _CLR_FAIL)
-            cards.append(
-                f'<div class="summary-card">'
-                f'<div class="label">Business Quality</div>'
-                f'<div class="value" style="color:{_esc(color)}">{_esc(f"{_num(biz_pct):.0f}%")}</div>'
-                f'<div class="label">Based on pitch deck (no spreadsheet provided)</div>'
-                f"</div>"
-            )
-        elif score_pct is not None:
-            # Normal: show Checklist Score
-            color = _CLR_PASS if _num(score_pct) >= 80 else (_CLR_WARN if _num(score_pct) >= 60 else _CLR_FAIL)
-            cards.append(
-                f'<div class="summary-card">'
-                f'<div class="label">Checklist Score</div>'
-                f'<div class="value" style="color:{_esc(color)}">{_esc(f"{_num(score_pct):.0f}%")}</div>'
-                f'<div class="label">{_esc(overall)}</div>'
-                f"{_score_coverage_note(summary)}"
-                f"</div>"
-            )
-
     # Unit economics summary
     if _usable(unit_economics):
         # The count is over GRADED figures only. A figure shown without a grade (contextual, not rated,
@@ -1229,7 +1179,7 @@ def _executive_summary(
         graded_n = strong + sum(int(_num(ue_summary.get(k, 0))) for k in ("acceptable", "warning", "fail"))
         # `computed` counts every figure with a value; a graded figure always has one.
         ungraded_n = max(int(_num(ue_summary.get("computed", 0))) - graded_n, 0)
-        ungraded_label = f'<div class="label">{_esc(f"{ungraded_n} shown without a grade")}</div>'
+        ungraded_label = f"{ungraded_n} shown without a grade"
         if graded_n:
             # List strong metric names if 3 or fewer
             strong_names: list[str] = []
@@ -1242,22 +1192,16 @@ def _executive_summary(
             else:
                 ue_label = f"{strong} strong metrics"
             cards.append(
-                f'<div class="summary-card">'
-                f'<div class="label">Unit Economics</div>'
-                f'<div class="value" style="color:{_CLR_PRIMARY}">{_esc(str(strong))}/{_esc(str(graded_n))}</div>'
-                f'<div class="label">{_esc(ue_label)}</div>'
-                f"{ungraded_label if ungraded_n else ''}"
-                f"</div>"
+                _tile(
+                    "unit-economics",
+                    "Unit Economics",
+                    f"{strong}/{graded_n}",
+                    [ue_label, ungraded_label if ungraded_n else ""],
+                )
             )
         elif ungraded_n:
             shown = f"{ungraded_n} figure{'s' if ungraded_n != 1 else ''} shown; none graded for this business"
-            cards.append(
-                f'<div class="summary-card">'
-                f'<div class="label">Unit Economics</div>'
-                f'<div class="value" style="color:{_CLR_PRIMARY}">—</div>'
-                f'<div class="label">{_esc(shown)}</div>'
-                f"</div>"
-            )
+            cards.append(_tile("unit-economics", "Unit Economics", "—", [shown]))
 
     # Runway (base case)
     if _usable(runway):
@@ -1277,26 +1221,20 @@ def _executive_summary(
                     # out" read (finding 19): the flat-burn projection never depletes, but the
                     # producer itself rates this scenario moderate-or-worse risk — never render
                     # it as the unqualified "strong" green a plain default_alive check would.
-                    alive_color = _CLR_WARN
+                    alive_tone = "warn"
                     alive_label = f"Default alive, but rated {risk_level} risk"
                     if static_months is not None:
                         alive_label += f" — {static_months:g} mo at today's burn"
                     if risk_assessment:
                         tooltip_attr = f' data-tooltip="{_esc(risk_assessment)}"'
                 elif alive:
-                    alive_color = _CLR_PASS
+                    alive_tone = "pass"
                     alive_label = "On track to profitability" if profitable else "Default alive (cash never runs out)"
                 else:
-                    alive_color = _CLR_FAIL
+                    alive_tone = "fail"
                     alive_label = "Cash runs out before profitability"
                 cards.append(
-                    f'<div class="summary-card"{tooltip_attr}>'
-                    f'<div class="label">Base Runway</div>'
-                    f'<div class="value" style="color:{_esc(alive_color)}">{runway_display}</div>'
-                    f'<div class="label">'
-                    f"{alive_label}"
-                    f"</div>"
-                    f"</div>"
+                    _tile("base-runway", "Base Runway", runway_display, [alive_label], alive_tone, tooltip_attr)
                 )
                 break
 
@@ -1307,18 +1245,12 @@ def _executive_summary(
         arr_val = _num(arr_data.get("value", 0))
         if arr_val > 0:
             currency_code = _resolve_currency(inputs)
-            cards.append(
-                f'<div class="summary-card">'
-                f'<div class="label">ARR</div>'
-                f'<div class="value" style="color:{_CLR_PRIMARY}">{_esc(_fmt_usd(arr_val, currency_code))}</div>'
-                f'<div class="label">current</div>'
-                f"</div>"
-            )
+            cards.append(_tile("arr", "ARR", _fmt_usd(arr_val, currency_code), ["current"]))
 
     if not cards:
         return ""
 
-    return '<div class="summary-grid">' + "".join(cards) + "</div>"
+    return '<div class="ui-tiles">' + "".join(cards) + "</div>"
 
 
 # ---------------------------------------------------------------------------
@@ -1333,7 +1265,8 @@ def _key_findings(
 ) -> str:
     """Build an actionable Key Findings section from artifact data."""
     strong: list[str] = []
-    attention: list[str] = []
+    # A checklist card is (criterion id, category, label, evidence); every other card is one sentence.
+    attention: list[str | tuple[str, str, str, str]] = []
     actions: list[str] = []
 
     # --- Checklist findings ---
@@ -1345,16 +1278,14 @@ def _key_findings(
         total_applicable = sum(1 for i in items if isinstance(i, dict) and i.get("status") != "not_applicable")
         if total_applicable > 0 and pass_count / total_applicable >= 0.7:
             strong.append(f"Checklist: {pass_count} of {total_applicable} criteria pass")
-        for item in fail_items[:3]:
+        for item in [*fail_items[:3], *warn_items[:2]]:
+            item_id = str(item.get("id") or "")
             cat = str(item.get("category", ""))
-            notes = _evidence_multiple.caveat(str(item.get("notes") or item.get("evidence") or ""))
-            label = f"{cat}: {notes}" if notes else cat
-            attention.append(label)
-        for item in warn_items[:2]:
-            cat = str(item.get("category", ""))
-            notes = _evidence_multiple.caveat(str(item.get("notes") or item.get("evidence") or ""))
-            label = f"{cat}: {notes}" if notes else cat
-            attention.append(label)
+            title = (
+                str(item.get("label") or "").strip() or _checklist_view.FALLBACK_LABELS.get(item_id) or "Checklist item"
+            )
+            raw = _checklist_view.founder_text(str(item.get("notes") or item.get("evidence") or ""))
+            attention.append((item_id, cat, title, _evidence_multiple.caveat(raw)))
 
     # --- Unit economics findings ---
     if _usable(unit_economics):
@@ -1415,29 +1346,31 @@ def _key_findings(
 
     parts: list[str] = []
 
-    def _render_items(items: list[str], css_class: str, max_items: int = 3) -> str:
-        html_parts: list[str] = []
-        for item in items[:max_items]:
-            html_parts.append(f'<div class="finding-item {css_class}">{_esc(item)}</div>')
-        return "".join(html_parts)
+    def _card(item: str | tuple[str, str, str, str], tone: str) -> str:
+        if isinstance(item, str):
+            return f'<div class="ui-finding ui-finding--{tone}">{_esc(item)}</div>'
+        item_id, cat, title, body = item
+        eyebrow = f'<p class="ui-finding__eyebrow">{_esc(cat)}</p>' if cat else ""
+        body_html = f'<p class="ui-finding__body">{_esc(body)}</p>' if body else ""
+        return (
+            f'<div class="ui-finding ui-finding--{tone}" data-finding="{_esc(item_id)}">'
+            f'{eyebrow}<p class="ui-finding__title">{_esc(title)}</p>{body_html}</div>'
+        )
+
+    def _column(
+        key: str, heading: str, items: list[str] | list[str | tuple[str, str, str, str]], tone: str, max_items: int = 3
+    ) -> str:
+        cards = "".join(_card(item, tone) for item in items[:max_items])
+        return f'<div class="ui-finding-col" data-findings="{key}"><h3>{heading}</h3>{cards}</div>'
 
     if strong:
-        parts.append(
-            f'<div class="findings-subsection"><h3>What\'s strong</h3>{_render_items(strong, "finding-strong")}</div>'
-        )
+        parts.append(_column("strong", "What's strong", strong, "pass"))
     if attention:
-        parts.append(
-            '<div class="findings-subsection">'
-            "<h3>What needs attention</h3>"
-            f"{_render_items(attention, 'finding-attention')}"
-            "</div>"
-        )
+        parts.append(_column("attention", "What needs attention", attention, "fail"))
     if actions:
-        parts.append(
-            f'<div class="findings-subsection"><h3>Top actions</h3>{_render_items(actions, "finding-action")}</div>'
-        )
+        parts.append(_column("actions", "Top actions", actions, "action"))
 
-    return "".join(parts)
+    return '<div class="ui-findings">' + "".join(parts) + "</div>"
 
 
 # ---------------------------------------------------------------------------
@@ -1455,6 +1388,17 @@ VALUES_BY_REQUEST_NOTE = (
     "The extracted values were not put to you as a question: the request that started this review said they "
     "had been checked."
 )
+
+
+def _headline(dir_path: str) -> str:
+    """The coaching commentary's headline, the verdict the explorer opens with; "" without one.
+
+    Read the way explore.py reads it: commentary.json must be an object with a `headline`.
+    """
+    raw = _load_artifact(dir_path, "commentary.json")
+    if not isinstance(raw, dict) or raw is _CORRUPT:
+        return ""
+    return str(raw.get("headline") or "").strip()
 
 
 def compose_html(dir_path: str, review_note: str = "") -> str:
@@ -1486,81 +1430,61 @@ def compose_html(dir_path: str, review_note: str = "") -> str:
     # A growth rate computed from the monthly series, not stated: the same sentence report.md carries.
     growth_note = _growth_rate.disclosure(inputs) if _usable(inputs) else None
     if growth_note is not None:
-        summary_html += f'<p class="growth-note">{_esc(growth_note)}</p>'
+        summary_html += f'<p class="ui-callout growth-note" data-note="growth">{_esc(growth_note)}</p>'
     findings_html = _key_findings(checklist, unit_economics, runway)
     checklist_html = _chart_checklist_heatmap(checklist)
     unit_econ_html = _chart_unit_economics(unit_economics)
-    runway_html = _chart_runway(runway)
-    # Revenue section only if time-series data exists
-    has_mrr_series = False
-    if _usable(inputs):
-        revenue = _as_dict(inputs.get("revenue"))
-        has_mrr_series = len(_as_list(revenue.get("monthly"))) > 1 or len(_as_list(revenue.get("quarterly"))) > 1
-    revenue_html = _chart_revenue_waterfall(inputs) if has_mrr_series else ""
+    runway_html = _runway_section(runway)
+    # The revenue the inputs state, as tiles, and the monthly trend when there are two or more months.
+    revenue_html = _revenue_overview(inputs)
 
-    # Key Findings section (only if there are findings)
-    findings_section = ""
+    ring_html, coverage_html = _score_ring(checklist)
+    note_html = (
+        f'<p class="ui-callout review-note" data-note="review"><em>{_esc(review_note)}</em></p>' if review_note else ""
+    )
+    header = _ui.header_card(
+        eyebrow="Financial Model Review",
+        title=company_name,
+        verdict_html=_esc(_headline(dir_path)),
+        body_html=note_html + coverage_html,
+        ring_html=ring_html,
+    )
+
+    # (section id, heading, body). Optional sections drop out when empty.
+    sections: list[tuple[str, str, str]] = [("summary", "Executive Summary", summary_html)]
     if findings_html:
-        findings_section = f"""
-        <section>
-            <h2>Key Findings</h2>
-            {findings_html}
-        </section>"""
-
-    # Revenue section (only if MRR time-series available)
-    revenue_section = ""
+        sections.append(("findings", "Key Findings", findings_html))
+    sections += [
+        ("checklist", "Checklist", checklist_html),
+        ("unit-economics", "Unit Economics Dashboard", unit_econ_html),
+        ("runway", "Runway Scenarios", runway_html),
+    ]
     if revenue_html:
-        revenue_section = f"""
-        <section>
-            <h2>Revenue Overview</h2>
-            {revenue_html}
-        </section>"""
+        sections.append(("revenue", "Revenue Overview", revenue_html))
 
-    brand_css = _theme.brand_css()
-    note_html = f'<p class="review-note"><em>{_esc(review_note)}</em></p>' if review_note else ""
+    nav = (
+        '<nav class="ui-nav" aria-label="Sections">'
+        + "".join(f'<a href="#{sid}">{_esc(title)}</a>' for sid, title, _ in sections)
+        + "</nav>"
+    )
+    body = (
+        header
+        + nav
+        + "".join(
+            f'<section class="ui-section" id="{sid}" aria-labelledby="{sid}-h"><h2 id="{sid}-h">{_esc(title)}</h2>'
+            f"{content}</section>"
+            for sid, title, content in sections
+        )
+    )
 
-    return f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Financial Model Review: {_esc(company_name)}</title>
-    <style>{brand_css}{_css()}</style>
-</head>
-<body>
-    <header>
-        <h1>Financial Model Review: {_esc(company_name)}</h1>
-        <p>Generated by <a href="https://github.com/lool-ventures/founder-skills">founder skills</a>
-        by <a href="https://lool.vc">lool ventures</a> — Financial Model Review Agent</p>
-    </header>
-    <main>
-        <section>
-            <h2>Executive Summary</h2>
-            {note_html}{summary_html}
-        </section>{findings_section}
-        <section>
-            <h2>Checklist</h2>
-            {checklist_html}
-        </section>
-        <section>
-            <h2>Unit Economics Dashboard</h2>
-            {unit_econ_html}
-        </section>
-        <section>
-            <h2>Runway Scenarios</h2>
-            {runway_html}
-        </section>{revenue_section}
-    </main>
-    <footer>
-        Generated by <a href="https://github.com/lool-ventures/founder-skills">founder skills</a>
-        by <a href="https://lool.vc">lool ventures</a> — Financial Model Review Agent
-    </footer>
-    {_tooltip_js()}
-    {_collapsible_js()}
-    {_theme.FOOTER_CREDIT_HTML}
-</body>
-</html>
-"""
+    return _ui.page_shell(
+        title=f"Financial Model Review: {company_name}",
+        body_html=body,
+        brand_css=_theme.brand_css(),
+        page_css=_css(),
+        skill_name="Financial Model Review",
+        scripts_html=_tooltip_js() + "\n",
+    )
 
 
 # ---------------------------------------------------------------------------

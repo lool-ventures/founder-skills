@@ -5,6 +5,83 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — Redesigned pages for financial model review, deck review and market sizing
+
+### Highlights
+
+**The financial model review's two pages are redesigned.** Both the report page and the interactive
+explorer now open with a summary card showing the company, the review's headline and the checklist score
+as a ring. The explorer's charts come straight after it, with the checklist as a tab beside them. The
+review checklist on both pages lists every criterion grouped by category, passing ones included. Each
+criterion's evidence sits below its title, and filter buttons (all, needs attention, fail, warn, pass, not
+applicable) narrow the list. Groups with nothing to fix start collapsed. The pages fit a phone screen and
+the preview pane. No figure or score changed.
+
+**The deck review and market sizing report pages follow.** Each opens with the same summary card: the
+company, the report's own verdict and its score as a ring (the deck-craft score; the market sizing
+self-check). Both pages now list their whole checklist grouped by category, with the same filters, where
+before the deck review showed only the problems and market sizing only a count. No figure, score or
+verdict changed.
+
+### Scoring changes
+
+None.
+
+### Changed
+
+- Financial model review: the explorer's checklist moved into a Checklist tab beside the charts and now
+  lists passing criteria too; the score in the summary card opens it.
+- Financial model review: the report page opens with the review's headline, as the explorer does, and has
+  a section bar that stays at the top while you scroll, the headline figures as tiles, and the key
+  findings side by side on a wide screen.
+- Financial model review: each checklist item under "What needs attention" now shows the criterion's
+  name, with its category above it and the evidence below, instead of the category and the evidence on
+  one line.
+- Financial model review: printing a page shows every checklist item, whichever filter is picked.
+- Financial model review: the explorer's stage reads as words ("Seed", "Series A").
+- Financial model review: the report's Revenue Overview, which showed a single bar with no context, now
+  shows the revenue figures your model states (recurring revenue with its date, monthly growth, churn,
+  customers) and, when the model has at least two months of revenue, a monthly trend chart.
+- Financial model review: the report's Runway Scenarios open with one sentence on the base case and the
+  earliest deadline. The chart names each scenario on its own line and marks where cash reaches zero,
+  and a table in place of the four cards lists the scenarios from the earliest deadline: their
+  assumptions, runway, the month cash runs out and the month to start raising. On a phone each scenario
+  is a short two-line entry.
+- Deck review: the report page opens with a summary card (stage, date, slide count, the one-line verdict
+  the written report gives, and the deck-craft score as a ring in place of the half-circle gauge) and
+  lists all 35 criteria grouped by category, each with its evidence. A criterion whose result counts
+  under another is shown greyed out, with a note saying where it counts, and is never counted twice.
+  The key findings are cards with the criterion's name, its category and the evidence, and a section
+  bar links the parts of the page.
+- Market sizing: the report page opens with a summary card (the date, the verdict the written report
+  opens with, the sizing basis, and the self-check score as a ring) and lists all 22 self-check criteria
+  grouped by category with their notes, in place of the count-only chart. The key findings and the
+  outside review's challenges are cards, and a section bar links the parts of the page.
+- Deck review, market sizing and financial model review: every page ends with one line naming the
+  skill, the credit and a "Share feedback" button, in place of the two credit lines each page carried.
+
+### Fixed
+
+- Financial model review: the report page was cut off on the right on a phone; its charts now shrink to
+  fit.
+- Financial model review: the report showed the checklist status in its raw form under the score; it is
+  now written as words, as on the explorer.
+- Financial model review: internal field names an assessor wrote into a checklist item's evidence are
+  now written out in words on both pages.
+- Market sizing: the report page showed at most three items in each key findings column and dropped the
+  rest without saying so; the rest are now one click away under "N more".
+- Market sizing: on a phone the report's charts ran off the right edge; they now shrink to fit, and the
+  widest ones scroll inside their own card, with a shadow on the side that scrolls.
+- Market sizing: the Top-Down and Bottom-Up circle diagrams were each drawn to fill the same space, so a
+  build four times smaller looked the same size. They now share one scale: each circle's area follows
+  its figure, a circle too small to see keeps a minimum size marked as not to scale, and every label
+  still shows the exact figure.
+- Deck review, market sizing and financial model review: the score in the summary card is now shown
+  as the report states it (for example 68.2%, not 68%).
+- Deck review: the checklist's "All" filter now counts every criterion it lists, including one shown
+  greyed out because its result counts under another.
+- Deck review: the summary card no longer names the score's band twice.
+
 ## [0.19.2] - 2026-10-14 — A deck's checklist is scored only from its slide-by-slide review
 
 ### Highlights

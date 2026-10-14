@@ -22,6 +22,9 @@ import tempfile
 import types
 from typing import Any
 
+import pytest
+from _dom import by_attr, by_id, by_tag, parse
+
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 FMR_SCRIPTS_DIR = os.path.join(os.path.dirname(SCRIPT_DIR), "skills", "financial-model-review", "scripts")
 _VISUALIZE_SCRIPT = os.path.join(FMR_SCRIPTS_DIR, "visualize.py")
@@ -87,9 +90,10 @@ _VALID_CHECKLIST: dict[str, Any] = {
         {
             "id": f"UNIT_{i}",
             "category": "Revenue & Unit Economics",
-            "label": f"Item {i}",
+            # The failed and warned items carry the label and evidence their summary entries repeat.
+            "label": "Churn modeled" if i == 11 else f"Item {i}",
             "status": "pass" if i != 11 else "fail",
-            "evidence": f"Evidence {i}",
+            "evidence": "Zero churn" if i == 11 else f"Evidence {i}",
             "notes": None,
         }
         for i in range(10, 20)
@@ -98,9 +102,9 @@ _VALID_CHECKLIST: dict[str, Any] = {
         {
             "id": f"CASH_{i}",
             "category": "Expenses, Cash & Runway",
-            "label": f"Item {i}",
+            "label": "Runway calc" if i == 23 else f"Item {i}",
             "status": "pass" if i not in (23, 28) else ("warn" if i == 23 else "not_applicable"),
-            "evidence": f"Evidence {i}",
+            "evidence": "Unclear method" if i == 23 else f"Evidence {i}",
             "notes": None,
         }
         for i in range(20, 33)
@@ -340,7 +344,8 @@ def test_brand_theme_present() -> None:
     assert rc == 0
     assert "--lool-blue: #0D549D" in stdout
     assert "font-family: 'Sora'" in stdout
-    assert "founder-skills by lool ventures" in stdout
+    (footer,) = by_tag(parse(stdout), "footer")
+    assert "founder skills by lool ventures" in footer.text()
 
 
 def test_missing_optional_artifact() -> None:
@@ -695,13 +700,18 @@ def test_visualize_default_alive_moderate_risk_summary_card_flags_risk() -> None
 
 
 def test_visualize_runway_chart_annotation_shows_risk_level_and_static_runway() -> None:
-    """The runway-chart annotation box must carry the same moderate-risk
-    caveat, not the bare 'cash never runs out (default alive)' text."""
+    """The Runway Scenarios section (its scenario table, which replaced the annotation box) must carry
+    the same moderate-risk caveat, never a bare green default-alive. Read inside the section, so the
+    executive summary's own copy of the caveat cannot satisfy it."""
     d = _make_artifact_dir(overrides={"runway.json": _moderate_risk_default_alive_runway()})
     rc, stdout, _stderr = run_script_raw("visualize.py", ["--dir", d])
     assert rc == 0
-    assert "rated moderate risk" in stdout
-    assert "6.9 mo at today's burn" in stdout
+    section = by_id(parse(stdout), "runway")
+    assert section is not None
+    assert "rated moderate risk" in section.text()
+    assert "6.9 mo at today's burn" in section.text()
+    (base,) = by_attr(section, "data-scenario", "base")
+    assert [e.get("data-runway-tone") for e in base.iter() if e.has("data-runway-tone")] == ["warn"]
 
 
 def test_visualize_default_alive_low_risk_still_shown_as_strong() -> None:
@@ -1150,14 +1160,15 @@ class TestExploreBurnMultipleFormula:
 # "checklist" key (score_pct/overall/fails/warns) but no client-side JS ever
 # read it and no server-side markup ever rendered it, so the review's own
 # checklist score was silently absent from the explorer. Fixed by rendering
-# a static "Review Checklist" summary box server-side (_render_checklist_summary).
+# the "Review Checklist" section server-side (_render_checklist): the score, the
+# counts, and every criterion grouped by category.
 # ---------------------------------------------------------------------------
 
 
 def test_explore_checklist_score_and_counts_rendered() -> None:
     """The explorer must surface the checklist score and fail/warn counts.
 
-    _VALID_CHECKLIST's summary has score_pct=95.9 (rounds to 96%), 1 failed
+    _VALID_CHECKLIST's summary has score_pct=95.9 (printed as report.md prints it, 96%), 1 failed
     item, 1 warned item.
     """
     d = _make_artifact_dir()
@@ -1181,6 +1192,15 @@ def test_explore_checklist_failing_and_warned_items_listed() -> None:
     assert "Zero churn" in stdout
     assert "CASH_23" in stdout
     assert "Runway calc" in stdout
+    doc = parse(stdout)
+    (fail_row,) = by_attr(doc, "data-criterion", "UNIT_11")
+    assert fail_row.get("data-status") == "fail"
+    assert "Churn modeled" in fail_row.text() and "Zero churn" in fail_row.text()
+    (warn_row,) = by_attr(doc, "data-criterion", "CASH_23")
+    assert warn_row.get("data-status") == "warn" and "Runway calc" in warn_row.text()
+    # Passing criteria are listed too, not only the problems.
+    (pass_row,) = by_attr(doc, "data-criterion", "STRUCT_01")
+    assert pass_row.get("data-status") == "pass"
 
 
 def test_explore_checklist_absent_renders_without_crash() -> None:
@@ -1191,7 +1211,96 @@ def test_explore_checklist_absent_renders_without_crash() -> None:
     rc, stdout, _stderr = run_script_raw("explore.py", ["--dir", d])
     assert rc == 0
     assert stdout.startswith("<!DOCTYPE html>")
-    assert 'class="checklist-summary"' not in stdout
+    assert by_id(parse(stdout), "checklist") is None
+    assert not by_attr(parse(stdout), "data-lens", "checklist"), "a Checklist tab with no checklist behind it"
+
+
+def test_explore_checklist_is_a_tab_that_degrades_to_a_visible_section() -> None:
+    """The checklist is a tab beside the lenses, but the markup never hides it: only the page script
+    swaps it for the lens panel, so with scripts off every criterion is still on the page."""
+    d = _make_artifact_dir()
+    rc, stdout, _stderr = run_script_raw("explore.py", ["--dir", d])
+    assert rc == 0
+    doc = parse(stdout)
+    (tab,) = by_attr(doc, "data-lens", "checklist")
+    assert tab.tag == "button" and tab.text() == "Checklist"
+    assert "switchLens('checklist')" in (tab.get("onclick") or "")
+    section = by_id(doc, "checklist")
+    assert section is not None and not section.has("hidden")
+    assert len(by_attr(section, "data-criterion")) == len(_VALID_CHECKLIST["items"])
+
+
+def test_explore_with_scripts_off_says_the_lenses_need_them() -> None:
+    """The lens panel is empty until the script draws it, so with scripts off it says why and points
+    to the checklist below."""
+    d = _make_artifact_dir()
+    rc, stdout, _stderr = run_script_raw("explore.py", ["--dir", d])
+    assert rc == 0
+    (note,) = by_tag(parse(stdout), "noscript")
+    assert "need scripts" in note.text() and "checklist is below" in note.text()
+
+
+def test_explore_checklist_counts_come_from_the_items_the_chips_count() -> None:
+    """A summary whose failed/warned lists are stale must not put "1 failing" above chips saying 3."""
+    ck = json.loads(json.dumps(_VALID_CHECKLIST))
+    for item in ck["items"]:
+        if item["id"] in ("UNIT_12", "UNIT_13"):
+            item["status"] = "fail"
+    d = _make_artifact_dir({"checklist.json": ck})
+    rc, stdout, _stderr = run_script_raw("explore.py", ["--dir", d])
+    assert rc == 0
+    assert len(ck["summary"]["failed_items"]) == 1, "the summary is stale on purpose"
+    section = by_id(parse(stdout), "checklist")
+    assert section is not None
+    assert "3 failing" in section.text() and "1 failing" not in section.text()
+    (chip,) = [e for e in by_tag(section, "label") if e.get("for") == "ck-f-fail"]
+    assert chip.text() == "Fail 3"
+
+
+def test_both_pages_fall_back_to_the_same_criterion_name() -> None:
+    """An item with no label of its own gets the hand-kept name on both pages, never "Checklist item"
+    on one and a name on the other."""
+    ck = json.loads(json.dumps(_VALID_CHECKLIST))
+    for item in ck["items"]:
+        if item["id"] == "STRUCT_01":
+            item["label"] = ""
+    d = _make_artifact_dir({"checklist.json": ck})
+    for script in ("visualize.py", "explore.py"):
+        rc, stdout, _stderr = run_script_raw(script, ["--dir", d])
+        assert rc == 0
+        (row,) = by_attr(parse(stdout), "data-criterion", "STRUCT_01")
+        assert "Assumptions on dedicated tab" in row.text(), (script, row.text())
+
+
+def test_report_header_shows_the_commentary_headline_and_not_the_credit() -> None:
+    headline = "Invented headline: the cash plan needs one fix before the raise."
+    d = _make_artifact_dir({"commentary.json": {"headline": headline}})
+    rc, stdout, _stderr = run_script_raw("visualize.py", ["--dir", d])
+    assert rc == 0
+    (hero,) = by_tag(parse(stdout), "header")
+    assert headline in hero.text()
+    credit = "founder skills by lool ventures"
+    assert credit not in hero.text(), "the credit line belongs in the footer, not the summary card"
+    # The one footer line the shell writes: the skill, the credit, the feedback button.
+    (footer,) = by_tag(parse(stdout), "footer")
+    assert footer.text().startswith("Financial Model Review") and credit in footer.text()
+    # No commentary: no verdict, and still no credit in the card.
+    rc, stdout, _stderr = run_script_raw("visualize.py", ["--dir", _make_artifact_dir()])
+    assert rc == 0
+    (hero,) = by_tag(parse(stdout), "header")
+    assert headline not in hero.text() and credit not in hero.text()
+
+
+def test_attention_cards_name_the_criterion_with_its_category_and_evidence_once() -> None:
+    d = _make_artifact_dir()
+    rc, stdout, _stderr = run_script_raw("visualize.py", ["--dir", d])
+    assert rc == 0
+    doc = parse(stdout)
+    (card,) = by_attr(doc, "data-finding", "UNIT_11")
+    parts = [e.text() for e in card.iter() if e.tag == "p"]
+    assert parts == ["Revenue & Unit Economics", "Churn modeled", "Zero churn"]
+    (findings,) = by_attr(doc, "data-findings", "attention")
+    assert "Revenue & Unit Economics: Zero churn" not in findings.text()
 
 
 def test_explore_checklist_summary_self_contained() -> None:
@@ -1270,3 +1379,213 @@ def test_explorer_html_discloses_a_score_computed_over_fewer_criteria() -> None:
     with open(out, encoding="utf-8") as fh:
         html = fh.read()
     assert "not assessed" in html.lower(), "explorer.html shows a score badge with no sign that criteria were dropped"
+
+
+# ---------------------------------------------------------------------------
+# Revenue Overview: the stated revenue figures as tiles, and the monthly trend with two or more months.
+# It replaced a single ARR bar with no context. Invented figures throughout.
+# ---------------------------------------------------------------------------
+
+_REV_TILES = ("revenue-arr", "revenue-mrr", "revenue-growth", "revenue-churn", "revenue-customers")
+
+
+def _revenue_page(revenue: dict[str, Any] | None) -> tuple[Any, str]:
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    if revenue is None:
+        inputs.pop("revenue", None)
+    else:
+        inputs["revenue"] = revenue
+    rc, stdout, _stderr = run_script_raw("visualize.py", ["--dir", _make_artifact_dir({"inputs.json": inputs})])
+    assert rc == 0
+    return parse(stdout), stdout
+
+
+def _months(n: int, *, projected_from: int | None = None) -> list[dict[str, Any]]:
+    return [
+        {
+            "month": f"2031-{m + 1:02d}",
+            "actual": projected_from is None or m < projected_from,
+            "total": 40_000 + 3_000 * m,
+        }
+        for m in range(n)
+    ]
+
+
+def test_revenue_tiles_show_only_the_figures_the_inputs_state() -> None:
+    doc, _ = _revenue_page({"mrr": {"value": 41_000, "as_of": "2031-04"}, "growth_rate_monthly": 0.035})
+    section = by_id(doc, "revenue")
+    assert section is not None
+    present = {t.get("data-tile") for t in by_attr(section, "data-tile")}
+    assert present == {"revenue-mrr", "revenue-growth"}
+    (mrr,) = by_attr(section, "data-tile", "revenue-mrr")
+    assert "$41.0K" in mrr.text() and "as of Apr 2031" in mrr.text()
+    (growth,) = by_attr(section, "data-tile", "revenue-growth")
+    assert "3.5%" in growth.text(), "a stated rate is never rounded to a different one"
+    assert not by_attr(doc, "data-chart", "revenue-trend"), "no monthly series, so no trend chart"
+
+
+def test_every_stated_revenue_figure_gets_its_tile_and_two_months_get_the_trend() -> None:
+    revenue = {
+        "arr": {"value": 552_000, "as_of": "2031-02"},
+        "mrr": {"value": 46_000, "as_of": "2031-02"},
+        "growth_rate_monthly": 0.07,
+        "churn_monthly": 0.02,
+        "customers": 91,
+        "monthly": _months(2),
+    }
+    doc, _ = _revenue_page(revenue)
+    section = by_id(doc, "revenue")
+    assert section is not None
+    assert [t.get("data-tile") for t in by_attr(section, "data-tile")] == list(_REV_TILES)
+    (customers,) = by_attr(section, "data-tile", "revenue-customers")
+    assert "91" in customers.text()
+    (chart,) = by_attr(section, "data-chart", "revenue-trend")
+    text = chart.text()
+    assert "Jan 2031" in text and "Feb 2031" in text, "every month is labelled, as the table words months"
+    svg = [e for e in chart.iter() if e.tag == "svg"][0]
+    assert svg.has("viewbox") and "Jan 2031 to Feb 2031" in (svg.get("aria-label") or "")
+    assert len([e for e in chart.iter() if e.tag == "circle"]) == 2
+    ticks = [e.text() for e in chart.iter() if e.tag == "text"]
+    assert "$0" in ticks and "$0.00" not in ticks, "the zero tick reads $0, as the runway chart's zero line does"
+
+
+def test_one_month_of_revenue_draws_no_trend_but_keeps_the_tiles() -> None:
+    doc, _ = _revenue_page({"mrr": {"value": 40_000, "as_of": "2031-01"}, "monthly": _months(1)})
+    section = by_id(doc, "revenue")
+    assert section is not None
+    assert by_attr(section, "data-tile", "revenue-mrr")
+    assert not by_attr(doc, "data-chart", "revenue-trend")
+
+
+def test_projected_months_are_drawn_apart_from_actuals() -> None:
+    doc, _ = _revenue_page({"monthly": _months(5, projected_from=3)})
+    (chart,) = by_attr(doc, "data-chart", "revenue-trend")
+    dashed = [e for e in chart.iter() if e.tag == "line" and e.has("stroke-dasharray")]
+    assert len(dashed) == 2, "the two segments into projected months are dashed"
+    section = by_id(doc, "revenue")
+    assert section is not None and "Projected" in section.text()
+
+
+# ---------------------------------------------------------------------------
+# Runway Scenarios (layout A): a summary sentence, the chart labelled on its lines, and a scenario table
+# in place of the callout cards. Invented figures throughout.
+# ---------------------------------------------------------------------------
+
+
+def _runway_page(runway: dict[str, Any]) -> Any:
+    rc, stdout, _stderr = run_script_raw("visualize.py", ["--dir", _make_artifact_dir({"runway.json": runway})])
+    assert rc == 0
+    section = by_id(parse(stdout), "runway")
+    assert section is not None
+    return section
+
+
+def _scenario(name: str, months: int | None, **extra: Any) -> dict[str, Any]:
+    alive = months is None
+    pts = [{"month": m, "cash_balance": 900_000 - 100_000 * m} for m in range(1, (months or 6) + 4)]
+    return {
+        "name": name,
+        "runway_months": months,
+        "cash_out_date": None if alive else f"2032-{(months or 0) % 12 + 1:02d}",
+        "decision_point": None if alive else f"2031-{(months or 0) % 12 + 1:02d}",
+        "default_alive": alive,
+        "became_profitable": alive,
+        "growth_rate": 0.05,
+        "burn_change": 0.0,
+        "monthly_projections": pts if not alive else [{"month": 1, "cash_balance": 900_000}],
+        **extra,
+    }
+
+
+def _runway_of(*scenarios: dict[str, Any]) -> dict[str, Any]:
+    runway = json.loads(json.dumps(_VALID_RUNWAY))
+    runway["scenarios"] = list(scenarios)
+    runway["risk_assessment"] = "Low risk: invented."
+    return runway  # type: ignore[no-any-return]
+
+
+def test_the_scenario_table_lists_the_earliest_deadline_first() -> None:
+    section = _runway_page(
+        _runway_of(_scenario("base", None), _scenario("slow", 13), _scenario("crisis", 7), _scenario("threshold", 19))
+    )
+    order = [r.get("data-scenario") for r in by_attr(section, "data-scenario")]
+    assert order == ["crisis", "slow", "threshold", "base"]
+
+
+@pytest.mark.parametrize(
+    ("months", "tone"), [(7, "fail"), (11, "fail"), (12, "warn"), (18, "warn"), (19, "neutral"), (None, "pass")]
+)
+def test_the_runway_pill_takes_its_tone_from_the_months(months: int | None, tone: str) -> None:
+    section = _runway_page(_runway_of(_scenario("slow", months)))
+    (row,) = by_attr(section, "data-scenario", "slow")
+    (cell,) = [e for e in row.iter() if e.has("data-runway-tone")]
+    assert cell.get("data-runway-tone") == tone
+    assert cell.text() == ("Default alive" if months is None else f"{months} mo")
+
+
+def test_a_column_shows_only_when_runway_json_carries_its_field() -> None:
+    bare = [_scenario("slow", 13), _scenario("crisis", 7)]
+    for s in bare:
+        del s["decision_point"]
+    section = _runway_page(_runway_of(*bare))
+    headings = [e.text() for e in section.iter() if e.tag == "th" and e.get("scope") == "col"]
+    assert headings == ["Scenario", "Runway", "Cash runs out"]
+    assert "Lowest cash" not in section.text(), "runway.json carries no lowest-cash figure"
+    for s in bare:
+        del s["cash_out_date"]
+    section = _runway_page(_runway_of(*bare))
+    headings = [e.text() for e in section.iter() if e.tag == "th" and e.get("scope") == "col"]
+    assert headings == ["Scenario", "Runway"]
+
+
+def test_the_callout_cards_are_gone_and_the_dates_read_as_months() -> None:
+    section = _runway_page(_runway_of(_scenario("base", None), _scenario("crisis", 7)))
+    assert not [e for e in section.iter() if "ui-finding" in (e.get("class") or "")]
+    assert "months runway" not in section.text()
+    (crisis,) = by_attr(section, "data-scenario", "crisis")
+    assert "Aug 2032" in crisis.text() and "Aug 2031" in crisis.text()
+    (base,) = by_attr(section, "data-scenario", "base")
+    assert "Does not run out" in base.text() and "Raise optional" in base.text()
+    assert not [e for e in base.iter() if e.has("data-label")], "no label is glued in front of the words"
+    assert "growth 5%/mo, burn +0%" in crisis.text(), (
+        "the scenario's stated assumptions, worded as report.md words them"
+    )
+
+
+def test_the_summary_names_the_base_case_and_the_earliest_deadline() -> None:
+    section = _runway_page(_runway_of(_scenario("base", None), _scenario("slow", 13), _scenario("crisis", 7)))
+    (summary,) = by_attr(section, "data-runway-summary")
+    assert summary.text() == (
+        "In the base case the company becomes profitable before cash runs out. "
+        "In the other scenarios the earliest deadline is 7 months away (Crisis)."
+    )
+
+
+def test_each_line_that_runs_out_has_a_dot_and_a_label_at_zero_and_no_legend_row() -> None:
+    section = _runway_page(_runway_of(_scenario("base", None), _scenario("crisis", 7)))
+    dots = by_attr(section, "data-zero")
+    assert [d.get("data-zero") for d in dots] == ["crisis"]
+    texts = [e.text() for e in section.iter() if e.tag == "text"]
+    assert any(t.startswith("Crisis · M") for t in texts), "a line that runs out is named at its zero point"
+    assert "Base" in texts, "a line that never runs out is named at its end"
+    assert not [e for e in section.iter() if "legend" in (e.get("class") or "").split()]
+
+
+def test_on_a_phone_each_scenario_is_a_two_line_entry() -> None:
+    mod = _load_visualize_module()
+    css = mod._css()
+    phone = css[css.index("@media (max-width: 640px)") :]
+    assert ".fmr-runway-table tr {" in phone and "grid-template-columns: minmax(0, 1fr) auto" in phone
+    assert ".fmr-runway-table thead { display: none; }" in phone
+    assert '.fmr-runway-table td[data-label]::before { content: attr(data-label) " "; }' in phone
+    section = _runway_page(_runway_of(_scenario("crisis", 7)))
+    labels = [e.get("data-label") for e in section.iter() if e.tag == "td" and e.has("data-label")]
+    assert labels == ["Out", "Raise by"]
+    # The chart scrolls inside its card on a phone rather than shrinking its zero-point labels together.
+    assert ".fmr-runway-chart .chart-container { min-width: 520px; }" in css
+
+
+def test_no_stated_revenue_means_no_revenue_section() -> None:
+    doc, stdout = _revenue_page(None)
+    assert by_id(doc, "revenue") is None
+    assert "Revenue Overview" not in stdout

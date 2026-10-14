@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from _dom import by_attr, parse
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "skills" / "financial-model-review" / "scripts"
 if str(SCRIPTS) not in sys.path:
@@ -374,7 +375,8 @@ def test_report_md_html_and_explorer_carry_the_disclosure(tmp_path: Path) -> Non
     explore = _load("explore")
     data = explore._build_data_payload(inputs, None, None, None, None, stub_reasons={})
     explorer = explore._generate_html(data)
-    assert "<div class='growth-note'" in explorer and _escaped(sentence) in explorer
+    (note,) = by_attr(parse(explorer), "data-note", "growth")
+    assert note.text() == sentence and _escaped(sentence) in explorer
     assert sentence not in explorer.split("const DATA", 1)[1], "server-rendered, not embedded in the payload"
 
 
@@ -385,7 +387,7 @@ def test_no_disclosure_once_the_founder_corrected_the_rate(tmp_path: Path) -> No
     assert "Monthly Growth" not in _load("compose_report")._section_executive_summary(inputs, None, None, None)
     explore = _load("explore")
     explorer = explore._generate_html(explore._build_data_payload(inputs, None, None, None, None, stub_reasons={}))
-    assert "growth-note" not in explorer
+    assert not by_attr(parse(explorer), "data-note", "growth")
 
 
 # Invented: revenue falling every month, Mar to Aug 2025.

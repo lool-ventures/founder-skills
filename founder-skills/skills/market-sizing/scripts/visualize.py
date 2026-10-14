@@ -27,6 +27,8 @@ from typing import Any
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _params  # noqa: E402
 import _redteam_copy  # noqa: E402
+import _thresholds  # noqa: E402
+import _ui  # noqa: E402
 import _upload_names  # noqa: E402
 import _view  # noqa: E402
 from _redteam_text import humanize_claim as _humanize_claim  # noqa: E402
@@ -175,12 +177,6 @@ _CONFIDENCE_COLORS: dict[str, str] = {
     "agent_estimate": _CLR_FAIL,
 }
 
-_CHECKLIST_COLORS: dict[str, str] = {
-    "pass": _CLR_PASS,
-    "fail": _CLR_FAIL,
-    "not_applicable": _CLR_NA,
-}
-
 
 # ---------------------------------------------------------------------------
 # CSS
@@ -188,143 +184,48 @@ _CHECKLIST_COLORS: dict[str, str] = {
 
 
 def _css() -> str:
-    """Return inline CSS for the report."""
+    """This page's own styles, after `_ui.UI_CSS` (the shell, cards, ring and checklist)."""
     return """
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: var(--font-body);
-            line-height: 1.6;
-            color: var(--lool-ink);
-            background: var(--lool-white);
-            padding: 2rem;
-            max-width: 960px;
-            margin: 0 auto;
-            -webkit-font-smoothing: antialiased;
-            -moz-osx-font-smoothing: grayscale;
-        }
-        header {
-            border-bottom: 3px solid var(--lool-blue);
-            padding-bottom: 1rem;
-            margin-bottom: 2rem;
-        }
-        header h1 {
-            color: var(--lool-blue);
-            font-size: 1.75rem;
-            font-weight: 400;
-            letter-spacing: -0.01em;
-        }
-        header p {
-            color: var(--lool-mute);
-            font-size: 0.875rem;
-        }
-        main section {
-            background: var(--lool-paper);
-            border: 1px solid var(--lool-line-2);
-            padding: 1.5rem;
-            margin-bottom: 1.5rem;
-        }
-        main section h2 {
-            color: var(--lool-royal);
-            font-size: 1.25rem;
-            font-weight: 500;
-            margin-bottom: 1rem;
-            border-bottom: 1px solid var(--lool-line-2);
-            padding-bottom: 0.5rem;
-        }
         .chart-container {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            flex-wrap: wrap;
-            gap: 2rem;
+            display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 2rem;
         }
+        .chart-container svg { max-width: 100%; height: auto; }
+        svg text { font-family: var(--font-body); }
         .placeholder {
-            text-align: center;
-            color: var(--lool-faint);
-            font-style: italic;
-            padding: 2rem;
-            background: var(--lool-paper-2);
+            text-align: center; color: var(--ui-ink-2); font-style: italic;
+            padding: 2rem; background: var(--ui-surface-2); border-radius: var(--ui-r1); margin: 0;
         }
         .legend {
-            display: flex;
-            justify-content: center;
-            gap: 1.5rem;
-            flex-wrap: wrap;
-            margin-top: 1rem;
-            font-size: 0.85rem;
+            display: flex; justify-content: center; gap: 0.5rem 1.5rem; flex-wrap: wrap;
+            margin-top: 1rem; font-size: 0.85rem; color: var(--ui-ink-2);
         }
-        .legend-item {
-            display: flex;
-            align-items: center;
-            gap: 0.35rem;
+        .legend-item { display: flex; align-items: center; gap: 0.35rem; }
+        .legend-swatch { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+        .chart-note, .ms-foot { margin: 0.6rem 0 0; font-size: 0.82rem; color: var(--ui-ink-2); }
+        .ms-foot--warn { color: var(--st-warn); font-size: 0.86rem; }
+        .estimate-note { margin: 0.5rem 0 0; font-size: 0.86rem; }
+        .ms-lead { margin: 0 0 var(--ui-s4); font-size: 0.86rem; color: var(--ui-ink-2); }
+        .ms-meta { margin: var(--ui-s3) 0 0; font-size: 0.82rem; color: var(--ui-ink-2); }
+        .ms-meta p { margin: 2px 0 0; }
+        .ms-prov { margin-top: var(--ui-s4); }
+        /* The funnel and the tornado scale with the page but stop where their labels stay legible; on a
+           phone the rest scrolls inside the card, never the page. */
+        .ms-wide { min-width: 460px; }
+        .ms-prov td:first-child { white-space: nowrap; }
+        .ms-grade { font-weight: 600; }
+        .ms-grade--sourced { color: var(--st-pass-ink); }
+        .ms-grade--derived { color: var(--st-warn); }
+        .ms-grade--agent_estimate { color: var(--st-fail); }
+        .ms-grade--unknown { color: var(--st-na); }
+        .ms-challenge__truth { margin: 4px 0 0; }
+        .ms-quote {
+            margin: var(--ui-s2) 0 0; padding-left: 0.75rem; border-left: 3px solid var(--ui-line);
+            color: var(--ui-ink-2);
         }
-        .legend-swatch {
-            width: 14px;
-            height: 14px;
-            display: inline-block;
-        }
-        footer {
-            text-align: center;
-            color: var(--lool-faint);
-            font-size: 0.75rem;
-            padding-top: 1rem;
-            border-top: 1px solid var(--lool-line-2);
-        }
-        footer a, header a { color: var(--lool-azure); text-decoration: none; }
-        footer a:hover, header a:hover {
-            color: var(--lool-azure-deep);
-            text-decoration: underline;
-        }
-        .collapsible-toggle {
-            cursor: pointer;
-            user-select: none;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            padding: 0.5rem 0;
-        }
-        .collapsible-toggle:hover { background: var(--lool-paper-2); }
-        .chevron {
-            display: inline-block;
-            transition: transform 0.2s;
-            font-size: 0.75rem;
-            color: var(--lool-faint);
-        }
-        .collapsible-content { padding-left: 1.5rem; }
-        .finding-item {
-            padding: 0.75rem;
-            border-left: 3px solid var(--lool-line-2);
-            margin-bottom: 0.5rem;
-        }
-        .finding-strong { border-left-color: var(--lool-success); }
-        .finding-attention { border-left-color: var(--lool-danger); }
-        .finding-action { border-left-color: var(--lool-azure); }
-        .findings-subsection { margin-bottom: 1rem; }
-        .findings-subsection h3 {
-            font-size: 0.9rem;
-            font-weight: 500;
-            color: var(--lool-slate);
-            margin-bottom: 0.5rem;
-        }
-        .confidence-badge {
-            display: inline-block;
-            padding: 0.1rem 0.4rem;
-            border-radius: var(--r-input);
-            font-size: 0.65rem;
-            font-weight: 600;
-            color: var(--lool-white);
-            margin-left: 0.25rem;
-            vertical-align: middle;
-        }
-        @media print {
-            body { background: #fff; padding: 0; }
-            main section { break-inside: avoid; border: 1px solid #ccc; }
-            header { border-bottom-color: #000; }
-            header h1 { color: #000; }
-            .collapsible-content { display: block !important; }
-            .collapsible-toggle .chevron { display: none; }
-            [data-tooltip] { cursor: default; }
-        }
+        .ms-cite { margin: 4px 0 0; font-size: 0.82rem; color: var(--ui-ink-2); }
+        #sensitivity h3 { margin-top: var(--ui-s4); }
+        [data-tooltip] { cursor: help; }
+        @media print { [data-tooltip] { cursor: default; } }
     """
 
 
@@ -359,29 +260,6 @@ def _tooltip_js() -> str:
         "    });\n"
         "    document.addEventListener('mouseout', function(e) {\n"
         "        if (e.target.closest('[data-tooltip]')) tip.style.display = 'none';\n"
-        "    });\n"
-        "});\n"
-        "</script>"
-    )
-
-
-def _collapsible_js() -> str:
-    """Return inline JS for collapsible sections."""
-    return (
-        "<script>\n"
-        "document.addEventListener('DOMContentLoaded', function() {\n"
-        "    document.querySelectorAll('.collapsible-toggle').forEach(function(btn) {\n"
-        "        btn.addEventListener('click', function() {\n"
-        "            var content = this.nextElementSibling;\n"
-        "            var chevron = this.querySelector('.chevron');\n"
-        "            if (content.style.display === 'none') {\n"
-        "                content.style.display = 'block';\n"
-        "                if (chevron) chevron.style.transform = 'rotate(90deg)';\n"
-        "            } else {\n"
-        "                content.style.display = 'none';\n"
-        "                if (chevron) chevron.style.transform = 'rotate(0deg)';\n"
-        "            }\n"
-        "        });\n"
         "    });\n"
         "});\n"
         "</script>"
@@ -473,6 +351,9 @@ def _render_donut_paths_centered(
 # Chart 1: TAM/SAM/SOM Funnel (concentric circles)
 # ---------------------------------------------------------------------------
 
+# The smallest TAM circle drawn, in px of a 100 px scale: below it the circle is a dot nobody can read.
+_MIN_TAM_R = 20.0
+
 _FUNNEL_COLORS = {
     "tam": "#0D549D",
     "sam": "#1B5FB2",
@@ -487,11 +368,18 @@ def _chart_funnel_single(
     cy: float,
     max_r: float,
     label_side: str | None = None,
+    scale_value: float | None = None,
 ) -> str:
     """Render a single concentric-circle funnel centered at (cx, cy).
 
     label_side: "left" or "right" to place TAM/SAM/SOM labels externally
     with horizontal leader lines. None = centered labels (single-approach).
+
+    scale_value: the value a circle of radius `max_r` stands for. Two builds drawn side by side pass the
+    larger of their two TAMs, so both diagrams share ONE scale: every circle's AREA is proportional to
+    its value, and a build whose TAM is a quarter of the other's is drawn at half the radius. A circle
+    too small to see keeps a minimum radius (dashed, "not to scale"); its label always prints the exact
+    figure. None = this build's own TAM (a lone diagram fills its space).
     """
     tam_val = _num(_as_dict(approach_data.get("tam")).get("value", 0))
     sam_val = _num(_as_dict(approach_data.get("sam")).get("value", 0))
@@ -504,24 +392,34 @@ def _chart_funnel_single(
             f'fill="{_SVG_TEXT_FAINT}" font-size="12">No TAM data</text>'
         )
 
-    r_tam = _num(max_r)
-    r_sam_proportional = _num(max_r * math.sqrt(max(sam_val, 0) / tam_val)) if tam_val > 0 else 0.0
-    r_som_proportional = _num(max_r * math.sqrt(max(som_val, 0) / tam_val)) if tam_val > 0 else 0.0
+    ref = scale_value if scale_value is not None and scale_value >= tam_val else tam_val
+
+    def _radius(value: float) -> float:
+        return _num(max_r * math.sqrt(max(value, 0) / ref)) if ref > 0 else 0.0
+
+    r_tam_proportional = _radius(tam_val)
+    r_sam_proportional = _radius(sam_val)
+    r_som_proportional = _radius(som_val)
 
     # Apply minimum floors for visibility and track clamping
+    r_tam = max(_num(r_tam_proportional), _MIN_TAM_R)
+    tam_clamped = r_tam_proportional < _MIN_TAM_R
     r_sam = max(_num(r_sam_proportional), 15.0)
     r_som = max(_num(r_som_proportional), 8.0)
     sam_clamped = r_sam_proportional < 15.0
     som_clamped = r_som_proportional < 8.0
 
     # Dashed stroke for floor-clamped circles to signal "not to scale"
+    tam_dash = f' stroke="#ffffff" stroke-width="2" stroke-dasharray="{_DASH_CLAMPED_CIRCLE}"' if tam_clamped else ""
     sam_dash = f' stroke-dasharray="{_DASH_CLAMPED_CIRCLE}"' if sam_clamped else ""
     som_dash = f' stroke-dasharray="{_DASH_CLAMPED_CIRCLE}"' if som_clamped else ""
 
     parts: list[str] = []
 
     # TAM circle (outermost)
-    parts.append(f'<circle cx="{cx:.2f}" cy="{cy:.2f}" r="{r_tam:.2f}" fill="{_FUNNEL_COLORS["tam"]}" opacity="0.3" />')
+    parts.append(
+        f'<circle cx="{cx:.2f}" cy="{cy:.2f}" r="{r_tam:.2f}" fill="{_FUNNEL_COLORS["tam"]}" opacity="0.3"{tam_dash} />'
+    )
     # SAM circle — white stroke to separate from TAM
     parts.append(
         f'<circle cx="{cx:.2f}" cy="{cy:.2f}" r="{r_sam:.2f}" fill="{_FUNNEL_COLORS["sam"]}" opacity="0.5"'
@@ -573,7 +471,7 @@ def _chart_funnel_single(
             )
     else:
         # Centered labels (single-approach mode)
-        label_y_tam = _num(cy - r_tam - 8)
+        label_y_tam = _num(cy - max_r - 8)
         parts.append(
             f'<text x="{cx:.2f}" y="{label_y_tam:.2f}" text-anchor="middle" '
             f'font-size="11" fill="{_SVG_TEXT_DARK}" font-weight="bold">'
@@ -582,7 +480,7 @@ def _chart_funnel_single(
 
         # SAM label — move outside circle with leader line when too small to fit
         if r_sam < _SAM_LABEL_FONT * 3.5:
-            label_y_sam = _num(cy - r_tam - 22)
+            label_y_sam = _num(cy - max_r - 22)
             line_y_start = _num(label_y_sam + 4)
             line_y_end = _num(cy - r_sam)
             parts.append(
@@ -604,7 +502,7 @@ def _chart_funnel_single(
         )
 
     # Approach label below
-    label_y_bot = _num(cy + r_tam + 18)
+    label_y_bot = _num(cy + max_r + 18)
     parts.append(
         f'<text x="{cx:.2f}" y="{label_y_bot:.2f}" text-anchor="middle" '
         f'font-size="12" fill="{_CLR_PRIMARY}" font-weight="bold">{_esc(label)}</text>'
@@ -639,10 +537,12 @@ def _chart_funnel(sizing: dict[str, Any] | None) -> str:
         svg_w = 700
         svg_h = 280
         max_r = 100.0
+        # ONE scale for both diagrams: the larger TAM fills the radius, the other is drawn to it.
+        shared = max(_num(_as_dict(td_d.get("tam")).get("value", 0)), _num(_as_dict(bu_d.get("tam")).get("value", 0)))
         parts = [
-            f'<svg width="{svg_w}" height="{svg_h}" xmlns="http://www.w3.org/2000/svg">',
-            _chart_funnel_single(td_d, "Top-Down", 230.0, 130.0, max_r, label_side="left"),
-            _chart_funnel_single(bu_d, "Bottom-Up", 470.0, 130.0, max_r, label_side="right"),
+            f'<svg width="{svg_w}" height="{svg_h}" viewBox="0 0 {svg_w} {svg_h}" xmlns="http://www.w3.org/2000/svg">',
+            _chart_funnel_single(td_d, "Top-Down", 230.0, 130.0, max_r, label_side="left", scale_value=shared),
+            _chart_funnel_single(bu_d, "Bottom-Up", 470.0, 130.0, max_r, label_side="right", scale_value=shared),
             "</svg>",
         ]
     elif has_td:
@@ -650,7 +550,7 @@ def _chart_funnel(sizing: dict[str, Any] | None) -> str:
         svg_h = 280
         max_r = 100.0
         parts = [
-            f'<svg width="{svg_w}" height="{svg_h}" xmlns="http://www.w3.org/2000/svg">',
+            f'<svg width="{svg_w}" height="{svg_h}" viewBox="0 0 {svg_w} {svg_h}" xmlns="http://www.w3.org/2000/svg">',
             _chart_funnel_single(td_d, "Top-Down", 150.0, 130.0, max_r),
             "</svg>",
         ]
@@ -659,7 +559,7 @@ def _chart_funnel(sizing: dict[str, Any] | None) -> str:
         svg_h = 280
         max_r = 100.0
         parts = [
-            f'<svg width="{svg_w}" height="{svg_h}" xmlns="http://www.w3.org/2000/svg">',
+            f'<svg width="{svg_w}" height="{svg_h}" viewBox="0 0 {svg_w} {svg_h}" xmlns="http://www.w3.org/2000/svg">',
             _chart_funnel_single(bu_d, "Bottom-Up", 150.0, 130.0, max_r),
             "</svg>",
         ]
@@ -705,7 +605,9 @@ def _render_tornado_svg(
             return _num(label_width)
         return _num(label_width + (val - global_min) / span * chart_width)
 
-    parts: list[str] = [f'<svg width="{svg_w}" height="{svg_h}" xmlns="http://www.w3.org/2000/svg">']
+    parts: list[str] = [
+        f'<svg width="{svg_w}" height="{svg_h}" viewBox="0 0 {svg_w} {svg_h}" xmlns="http://www.w3.org/2000/svg">'
+    ]
 
     # Base SOM center line
     base_x = x_pos(base_som)
@@ -956,7 +858,9 @@ def _chart_cross_validation(
     svg_w = len(metrics) * group_width + 60
     svg_h = chart_height + margin_top + margin_bottom
 
-    parts: list[str] = [f'<svg width="{svg_w}" height="{svg_h}" xmlns="http://www.w3.org/2000/svg">']
+    parts: list[str] = [
+        f'<svg width="{svg_w}" height="{svg_h}" viewBox="0 0 {svg_w} {svg_h}" xmlns="http://www.w3.org/2000/svg">'
+    ]
 
     for i, metric in enumerate(metrics):
         gx = _num(30 + i * group_width + group_width / 2)
@@ -1091,10 +995,7 @@ def _chart_cross_validation(
             # What each build's TAM is built from, from the one owner report.md prints it from (_view.scope_sentence).
             text = f"{text} {scope}" if text.strip() else scope
         if text.strip():
-            note_html = (
-                '<p class="chart-note" style="color:var(--lool-mute);font-size:0.8rem;'
-                'margin-top:0.5rem;">' + _esc(text) + "</p>"
-            )
+            note_html = '<p class="chart-note">' + _esc(text) + "</p>"
 
     return '<div class="chart-container">' + "\n".join(parts) + "</div>" + legend + note_html
 
@@ -1170,8 +1071,13 @@ def _chart_confidence_donut(validation: dict[str, Any] | None, sizing: dict[str,
 # ---------------------------------------------------------------------------
 
 
-def _chart_checklist_donut(checklist: dict[str, Any] | None) -> str:
-    """Chart 5: Donut chart of checklist pass/fail/NA."""
+def _checklist_section(checklist: dict[str, Any] | None) -> str:
+    """Every self-check criterion, grouped by category in the order `checklist.py` lists them.
+
+    market-sizing grades pass / fail / not applicable only, so the filters offer no Warn chip. Each
+    item's `notes` is the text shown under it, through the same founder-text pass report.md's rows take
+    (`_view._founder_prose`).
+    """
     if checklist is None:
         return '<div class="placeholder">No data available</div>'
     if checklist is _CORRUPT:
@@ -1179,38 +1085,75 @@ def _chart_checklist_donut(checklist: dict[str, Any] | None) -> str:
     if _is_stub(checklist):
         reason = _esc(checklist.get("reason", "Skipped"))
         return f'<div class="placeholder">{reason}</div>'
-
-    summary = _as_dict(checklist.get("summary"))
-    pass_ct = _num(summary.get("pass", 0))
-    fail_ct = _num(summary.get("fail", 0))
-    na_ct = _num(summary.get("not_applicable", 0))
-
-    if pass_ct + fail_ct + na_ct <= 0:
+    items = [i for i in _as_list(checklist.get("items")) if isinstance(i, dict)]
+    if not items:
         return '<div class="placeholder">No checklist data</div>'
 
-    # Canonical order: pass, fail, not_applicable
-    segments: list[tuple[str, float, str]] = [
-        ("pass", pass_ct, _CHECKLIST_COLORS["pass"]),
-        ("fail", fail_ct, _CHECKLIST_COLORS["fail"]),
-        ("not_applicable", na_ct, _CHECKLIST_COLORS["not_applicable"]),
-    ]
-    # Filter out zero segments
-    segments = [(s, v, c) for s, v, c in segments if v > 0]
+    order: list[str] = []
+    by_cat: dict[str, list[dict[str, Any]]] = {}
+    for item in items:
+        cat = str(item.get("category") or "Other")
+        if cat not in by_cat:
+            order.append(cat)
+            by_cat[cat] = []
+        by_cat[cat].append(item)
 
-    svg = _svg_donut(segments)
+    groups: list[dict[str, Any]] = []
+    for cat in order:
+        rows: list[dict[str, Any]] = []
+        passed = applicable = 0
+        for item in by_cat[cat]:
+            tone = _CHECKLIST_TONE.get(str(item.get("status")), "na")
+            if tone != "na":
+                applicable += 1
+                passed += tone == "pass"
+            notes = item.get("notes")
+            rows.append(
+                {
+                    "tone": tone,
+                    "title": str(item.get("label") or "").strip() or "Checklist item",
+                    "criterion": str(item.get("id") or ""),
+                    "evidence": _view._founder_prose(str(notes).strip()) if notes is not None else "",
+                }
+            )
+        count = f"{passed}/{applicable} pass" if applicable else "Not applicable"
+        groups.append({"name": cat, "count_text": count, "items": rows})
+    return _ui.checklist(groups, statuses=("fail", "pass", "na"))
 
-    status_labels = {"pass": "Pass", "fail": "Fail", "not_applicable": "N/A"}
-    legend_items: list[str] = []
-    for cat, val, color in segments:
-        label = _esc(status_labels.get(cat, cat))
-        legend_items.append(
-            f'<span class="legend-item">'
-            f'<span class="legend-swatch" style="background:{_esc(color)}"></span>'
-            f" {label}: {int(val)}</span>"
-        )
-    legend = '<div class="legend">' + "".join(legend_items) + "</div>"
 
-    return '<div class="chart-container">' + svg + "</div>" + legend
+# The self-check's statuses onto the page's tones (market-sizing has no warn).
+_CHECKLIST_TONE = {"pass": "pass", "fail": "fail", "not_applicable": "na"}
+
+# The ring's colour per band: the two upper bands read as pass, the lower two as warn and fail.
+_BAND_TONE = {"strong": "pass", "solid": "pass", "needs_work": "warn", "major_revision": "fail"}
+
+
+def _score_ring(checklist: dict[str, Any] | None) -> str:
+    """The header's ring: the self-check score report.md's summary states, linking to the checklist.
+
+    The band is the one `checklist.py` wrote; one this page does not know is banded from the score by
+    the same module that scored it.
+    """
+    if not _usable(checklist):
+        return ""
+    summary = _as_dict(checklist.get("summary"))
+    raw = summary.get("score_pct")
+    if not isinstance(raw, (int, float)) or isinstance(raw, bool):
+        return ""
+    pct = max(0.0, min(100.0, float(raw)))
+    band = str(summary.get("overall_status") or "")
+    if band not in _BAND_TONE:
+        band = _thresholds.band_for(pct)
+    band_text = band.replace("_", " ").title()
+    return _ui.score_ring(
+        pct,
+        tone=_BAND_TONE.get(band, "neutral"),
+        value_text=f"{_ui.score_text(pct)}%",
+        label="Self-check",
+        caption=band_text,
+        aria_label=f"Self-check {_ui.score_text(pct)} percent, {band_text}",
+        href="#checklist",
+    )
 
 
 def _chart_provenance_summary(
@@ -1257,7 +1200,7 @@ def _chart_provenance_summary(
                 "agent_estimate": "Agent Estimate",
                 "unknown": "Unknown",
             }
-            color = badge_colors.get(classification, _CLR_NA)
+            grade_key = classification if classification in badge_colors else "unknown"
             label = badge_labels.get(classification, classification)
 
             # The CONVERTED claim, matching report.md. Rendering the raw one made the two
@@ -1308,7 +1251,7 @@ def _chart_provenance_summary(
             rows.append(
                 f"<tr>"
                 f"<td>{_esc(metric.upper())} ({_esc(method)}){(' ' + mark) if mark else ''}</td>"
-                f'<td style="color:{_esc(color)}">{_esc(label)}</td>'
+                f'<td class="ms-grade ms-grade--{_esc(grade_key)}">{_esc(label)}</td>'
                 f"<td>{estimate_str}</td>"
                 f"<td>{deck_str}</td>"
                 f"<td>{delta_str}</td>"
@@ -1318,49 +1261,42 @@ def _chart_provenance_summary(
     if not rows:
         return ""
 
-    th_style = "text-align:left;padding:0.4rem;border-bottom:1px solid var(--lool-line-2);color:var(--lool-subtle);"
     headers = "".join(
-        f'<th style="{th_style}">{label}</th>'
-        for label in ("Metric", "Classification", "Our Estimate", "Your Figure", "Delta")
+        f"<th>{label}</th>" for label in ("Metric", "Classification", "Our Estimate", "Your Figure", "Delta")
     )
     footnote = ""
     if identity_metrics:
         footnote += (
-            '<p style="color:var(--lool-mute);font-size:0.8rem;margin-top:0.5rem;">&dagger; '
+            '<p class="ms-foot">&dagger; '
             + _esc(" ".join(str(x["detail"]) for x in shared if x["kind"] == "identity"))
             + " Agreement on these rows is arithmetic, not corroboration.</p>"
         )
     if shared_metrics:
         footnote += (
-            '<p style="color:var(--lool-mute);font-size:0.8rem;margin-top:0.5rem;">&Dagger; Both builds '
+            '<p class="ms-foot">&Dagger; Both builds '
             "narrow this figure by the same number(s), so on it they are not independent checks of each other: "
             + _esc(" ".join(str(x["detail"]) for x in shared if x["kind"] in ("equal_value", "shared_factor")))
             + "</p>"
         )
     if contested_rows:
         footnote += (
-            '<p style="color:var(--lool-mute);font-size:0.8rem;margin-top:0.5rem;">&sect; Built on a '
+            '<p class="ms-foot">&sect; Built on a '
             "figure you stated that a cited source contradicts; see Adversarial Findings.</p>"
         )
     for _item in _view.claim_disagreements(inputs):
         # The same sentence report.md's warning carries, from the same owner.
-        footnote += (
-            f'<p style="color:{_esc(_CLR_WARN)};font-size:0.85rem;margin-top:0.5rem;">'
-            + _esc(_view.disagreement_sentence(_item))
-            + "</p>"
-        )
+        footnote += '<p class="ms-foot ms-foot--warn">' + _esc(_view.disagreement_sentence(_item)) + "</p>"
     if close_agreement:
         footnote += (
-            '<p style="color:var(--lool-mute);font-size:0.8rem;margin-top:0.5rem;">'
+            '<p class="ms-foot">'
             f"* Within {CLOSE_AGREEMENT_PCT:.0f}% of the figure you gave. "
             "Agreement on a number is not independent confirmation &mdash; it can mean both "
             "analyses drew on the same source, or that our input came from a figure you gave. "
             "To get a real check, size it again from an independently chosen value.</p>"
         )
     return (
-        '<div style="margin-top:1rem;font-size:0.85rem;">'
-        '<table style="width:100%;border-collapse:collapse;">'
-        "<tr>" + headers + "</tr>" + "".join(rows) + "</table>" + footnote + "</div>"
+        '<div class="ms-prov"><div class="ui-table-wrap"><table class="ui-table">'
+        "<tr>" + headers + "</tr>" + "".join(rows) + "</table></div>" + footnote + "</div>"
     )
 
 
@@ -1419,16 +1355,12 @@ def _chart_adversarial(
                 cite += " (quoted from a page that could not be machine-read)"
         else:
             cite = f'<a href="{url}">{title or url}</a>' if url else ""
+        tone = {"high": " ui-finding--fail", "medium": " ui-finding--warn"}.get(str(f.get("severity")), "")
         return (
-            f'<div style="margin-bottom:1rem;"><strong>{claim}</strong>'
-            f"<p>{truth}</p>"
-            + (
-                f'<blockquote style="border-left:3px solid var(--lool-mute);margin:0;'
-                f'padding-left:0.75rem;color:var(--lool-mute);">{quote}</blockquote>'
-                if quote
-                else ""
-            )
-            + (f'<p style="font-size:0.85rem;">&mdash; {cite}</p>' if cite else "")
+            f'<div class="ui-finding{tone}" data-challenge><p class="ui-finding__title">{claim}</p>'
+            f'<p class="ms-challenge__truth">{truth}</p>'
+            + (f'<blockquote class="ms-quote">{quote}</blockquote>' if quote else "")
+            + (f'<p class="ms-cite">&mdash; {cite}</p>' if cite else "")
             + "</div>"
         )
 
@@ -1463,7 +1395,7 @@ def _chart_adversarial(
         was = "it was" if dropped == 1 else "they were"
         its = "its" if dropped == 1 else "their"
         parts.append(
-            f'<p style="color:var(--lool-mute);font-size:0.85rem;">{dropped} further {noun} '
+            f'<p class="ms-foot">{dropped} further {noun} '
             f"could not be shown here because {was} incomplete or did not cite {its} evidence "
             "in a form that can be checked.</p>"
         )
@@ -1471,15 +1403,25 @@ def _chart_adversarial(
     return "".join(parts)
 
 
+# A card is either one sentence, or (criterion id, eyebrow, title, body): a failed criterion's label as
+# its title, its category above it and its notes below, so nothing on the card repeats.
+_Card = str | tuple[str, str, str, str]
+
+
 def _chart_key_findings(
     checklist: dict[str, Any] | None,
     validation: dict[str, Any] | None,
     provenance: dict[str, dict[str, Any]] | None,
 ) -> str:
-    """Render Key Findings section with strong/attention/actions subsections."""
-    strong: list[str] = []
-    attention: list[str] = []
-    actions: list[str] = []
+    """Key Findings: what's strong, what needs attention and the top actions, as cards.
+
+    A failed criterion's card is its label as the title, its category above and its notes below, so
+    nothing repeats; every other finding is one sentence. Each column shows its first three and puts the
+    rest behind "N more", so nothing is dropped from the page.
+    """
+    strong: list[_Card] = []
+    attention: list[_Card] = []
+    actions: list[_Card] = []
 
     # --- Checklist findings ---
     if _usable(checklist):
@@ -1494,9 +1436,8 @@ def _chart_key_findings(
             if item.get("status") == "fail":
                 label = str(item.get("label", item.get("id", "Unknown")))
                 raw_notes = item.get("notes")
-                notes = str(raw_notes) if raw_notes is not None else ""
-                text = f"{label}: {notes}" if notes else label
-                attention.append(text)
+                notes = _view._founder_prose(str(raw_notes)) if raw_notes is not None else ""
+                attention.append((str(item.get("id") or ""), str(item.get("category") or ""), label, notes))
                 actions.append(f"Address: {label}")
 
     # --- Validation findings ---
@@ -1571,31 +1512,44 @@ def _chart_key_findings(
     if not strong and not attention and not actions:
         return ""
 
-    def _render_items(items: list[str], css_class: str, max_items: int = 3) -> str:
-        return "".join(f'<div class="finding-item {css_class}">{_esc(item)}</div>' for item in items[:max_items])
+    def _card(item: _Card, tone: str) -> str:
+        if isinstance(item, str):
+            return f'<div class="ui-finding ui-finding--{tone}">{_esc(item)}</div>'
+        item_id, eyebrow, title, body = item
+        eyebrow_html = f'<p class="ui-finding__eyebrow">{_esc(eyebrow)}</p>' if eyebrow else ""
+        body_html = f'<p class="ui-finding__body">{_esc(body)}</p>' if body else ""
+        return (
+            f'<div class="ui-finding ui-finding--{tone}" data-finding="{_esc(item_id)}">'
+            f'{eyebrow_html}<p class="ui-finding__title">{_esc(title)}</p>{body_html}</div>'
+        )
+
+    def _column(key: str, heading: str, items: list[_Card], tone: str, shown: int = 3) -> str:
+        # The first three, then the rest behind a disclosure: a finding the page used to drop
+        # silently past the third is now one click away, never gone.
+        head, tail = items[:shown], items[shown:]
+        more = (
+            f'<details class="ui-more"><summary>{len(tail)} more</summary>'
+            + "".join(_card(i, tone) for i in tail)
+            + "</details>"
+            if tail
+            else ""
+        )
+        return (
+            f'<div class="ui-finding-col" data-findings="{key}"><h3>{heading}</h3>'
+            + "".join(_card(i, tone) for i in head)
+            + more
+            + "</div>"
+        )
 
     parts: list[str] = []
     if strong:
-        parts.append(
-            f'<div class="findings-subsection"><h3>What\'s strong</h3>{_render_items(strong, "finding-strong")}</div>'
-        )
+        parts.append(_column("strong", "What's strong", strong, "pass"))
     if attention:
-        parts.append(
-            '<div class="findings-subsection">'
-            "<h3>What needs attention</h3>"
-            f"{_render_items(attention, 'finding-attention')}"
-            "</div>"
-        )
+        parts.append(_column("attention", "What needs attention", attention, "fail"))
     if actions:
-        parts.append(
-            f'<div class="findings-subsection"><h3>Top actions</h3>{_render_items(actions, "finding-action")}</div>'
-        )
+        parts.append(_column("actions", "Top actions", actions, "action"))
 
-    return (
-        '<section><h2 style="color:var(--lool-royal);font-size:1.25rem;margin-bottom:1rem;'
-        'border-bottom:1px solid var(--lool-line-2);padding-bottom:0.5rem;">Key Findings</h2>'
-        '<div style="font-size:0.9rem;">' + "".join(parts) + "</div></section>"
-    )
+    return '<div class="ui-findings">' + "".join(parts) + "</div>"
 
 
 # ---------------------------------------------------------------------------
@@ -1714,7 +1668,7 @@ def _compose_html(dir_path: str) -> str:
         _view.scope_sentence(sizing, validation),
     )
     confidence_html = _chart_confidence_donut(validation, sizing)
-    checklist_html = _chart_checklist_donut(checklist)
+    checklist_html = _checklist_section(checklist)
     _upload_display = _upload_names.for_redteam(artifacts.get("redteam.json"))
     adversarial_html = _chart_adversarial(
         artifacts.get("redteam.json"),
@@ -1726,13 +1680,7 @@ def _compose_html(dir_path: str) -> str:
         _rt_facts.get("later"),
     )
     _answers = _view._your_answers_lines(artifacts.get("methodology.json"), inputs, dir_path, _gate_view(dir_path))
-    answers_html = (
-        "<section>\n            <h2>Your Answers</h2>\n            <ul>"
-        + "".join(f"<li>{_esc(line)}</li>" for line in _answers)
-        + "</ul>\n        </section>"
-        if _answers
-        else ""
-    )
+    answers_html = "<ul>" + "".join(f"<li>{_esc(line)}</li>" for line in _answers) + "</ul>" if _answers else ""
     # The same verdict paragraph report.md opens with -- the second renderer is where this class of
     # defect survives. Marks recomputed from the same detectors the provenance table uses.
     verdict_html = ""
@@ -1757,14 +1705,10 @@ def _compose_html(dir_path: str) -> str:
         _verdict_text, _ = _summary_verdict(
             sizing, provenance_data, checklist if _usable(checklist) else None, _rt_for_verdict, _skip, _marks, inputs
         )
-        verdict_html = f'<p class="verdict">{_esc(_upload_names.humanize(_verdict_text, _upload_display))}</p>'
+        verdict_html = _esc(_upload_names.humanize(_verdict_text, _upload_display))
     else:
         _outcome = _esc(_upload_names.humanize(_adversarial_outcome(_rt_for_verdict, _skip), _upload_display))
-        verdict_html = f'<p class="verdict">No sizing was produced; see Warnings. {_outcome}</p>'
-
-    date_line = ""
-    if analysis_date:
-        date_line = f"<p>Analysis date: {_esc(analysis_date)}</p>"
+        verdict_html = f"No sizing was produced; see Warnings. {_outcome}"
 
     basis_label = _sizing_basis_label(_resolve_sizing_basis(sizing, inputs))
     sizing_basis_line = f"<p>Sizing basis: {_esc(basis_label)}</p>"
@@ -1792,69 +1736,71 @@ def _compose_html(dir_path: str) -> str:
                 f"(as of {_esc(str(_asof))}, {_esc(str(_src))})</p>"
             )
 
-    brand_css = _theme.brand_css()
+    # The header card: the analysis date as a chip, the verdict paragraph report.md opens with, the
+    # sizing basis and any conversion beneath it, and the self-check score as a ring.
+    meta_html = f'<span class="ui-chip">{_esc(analysis_date)}</span>' if analysis_date else ""
+    header = _ui.header_card(
+        eyebrow="Market Sizing",
+        title=company_name,
+        meta_html=meta_html,
+        verdict_html=verdict_html,
+        body_html=f'<div class="ms-meta">{sizing_basis_line}{fx_line}</div>',
+        ring_html=_score_ring(checklist),
+    )
 
-    return f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Market Sizing: {_esc(company_name)}</title>
-    <style>{brand_css}{_css()}</style>
-</head>
-<body>
-    <header>
-        <h1>Market Sizing: {_esc(company_name)}</h1>
-        {date_line}
-        {sizing_basis_line}
-        {fx_line}
-        <p>Generated by <a href="https://github.com/lool-ventures/founder-skills">founder skills</a>
-        by <a href="https://lool.vc">lool ventures</a> — Market Sizing Agent</p>
-        {verdict_html}
-    </header>
-    <main>
-        <section>
-            <h2>TAM / SAM / SOM</h2>
-            {funnel_html}
-            {provenance_summary_html}
-        </section>
-        {key_findings_html}
-        <section>
-            <h2>Sensitivity Analysis</h2>
-            <p style="color:var(--lool-mute);font-size:0.85rem;margin-bottom:1rem;">
-            Wider bars = a wider stress range, which follows from how confident
-            we are in each input &mdash; not from how much the answer depends on it.
-            Focus on sourcing or validating the widest-stressed parameters first.</p>
-            {tornado_html}
-        </section>
-        <section>
-            <h2>Top-down vs Bottom-up</h2>
-            {cross_val_html}
-        </section>
-        <section>
-            <h2>Assumption Confidence</h2>
-            {confidence_html}
-        </section>
-        <section>
-            <h2>Checklist Status</h2>
-            {checklist_html}
-        </section>
-        <section>
-            <h2>Adversarial Findings</h2>
-            {adversarial_html}
-        </section>
-        {answers_html}
-    </main>
-    <footer>
-        Generated by <a href="https://github.com/lool-ventures/founder-skills">founder skills</a>
-        by <a href="https://lool.vc">lool ventures</a> — Market Sizing Agent
-    </footer>
-    {_theme.FOOTER_CREDIT_HTML}
-    {_tooltip_js()}
-    {_collapsible_js()}
-</body>
-</html>
-"""
+    sensitivity_lead = (
+        '<p class="ms-lead">Wider bars = a wider stress range, which follows from how confident we are in '
+        "each input &mdash; not from how much the answer depends on it. Focus on sourcing or validating the "
+        "widest-stressed parameters first.</p>"
+    )
+    # (section id, heading, body). Optional sections drop out when empty.
+    sections: list[tuple[str, str, str]] = [
+        (
+            "sizing",
+            "TAM / SAM / SOM",
+            f'<div class="ui-scroll"><div class="ms-wide">{funnel_html}</div></div>{provenance_summary_html}',
+        ),
+    ]
+    if key_findings_html:
+        sections.append(("findings", "Key Findings", key_findings_html))
+    sections += [
+        (
+            "sensitivity",
+            "Sensitivity Analysis",
+            sensitivity_lead + f'<div class="ui-scroll"><div class="ms-wide">{tornado_html}</div></div>',
+        ),
+        ("comparison", "Top-down vs Bottom-up", cross_val_html),
+        ("confidence", "Assumption Confidence", confidence_html),
+        ("checklist", "Analysis Checklist", checklist_html),
+        ("adversarial", "Adversarial Findings", adversarial_html),
+    ]
+    if answers_html:
+        sections.append(("answers", "Your Answers", answers_html))
+
+    nav = (
+        '<nav class="ui-nav" aria-label="Sections">'
+        + "".join(f'<a href="#{sid}">{_esc(title)}</a>' for sid, title, _ in sections)
+        + "</nav>"
+    )
+    body = (
+        header
+        + nav
+        + "".join(
+            f'<section class="ui-section" id="{sid}" aria-labelledby="{sid}-h"><h2 id="{sid}-h">{_esc(title)}</h2>'
+            f"{content}</section>"
+            for sid, title, content in sections
+        )
+    )
+
+    return _ui.page_shell(
+        title=f"Market Sizing: {company_name}",
+        body_html=body,
+        brand_css=_theme.brand_css(),
+        page_css=_css(),
+        skill_name="Market Sizing",
+        # The tornado bars' hover text (`data-tooltip`) is the one live tooltip in the fleet.
+        scripts_html=_tooltip_js() + "\n",
+    )
 
 
 # ---------------------------------------------------------------------------

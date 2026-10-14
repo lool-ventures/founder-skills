@@ -23,6 +23,7 @@ from typing import Any
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent))
+from _dom import by_attr, parse  # noqa: E402
 from test_explore import _extract_data_payload  # noqa: E402
 from test_financial_model_review import (  # noqa: E402
     _VALID_CHECKLIST,
@@ -94,12 +95,10 @@ def _visible_text(html: str) -> str:
 
 def _ue_card(html: str) -> tuple[str, str]:
     """(value, whole visible text) of the Unit Economics headline card."""
-    start = html.index('<div class="label">Unit Economics</div>')
-    end = html.find('<div class="summary-card"', start)
-    card = html[start : end if end != -1 else start + 2000]
-    m = re.search(r'class="value"[^>]*>([^<]*)<', card)
-    assert m, card
-    return m.group(1).strip(), _visible_text(card)
+    (card,) = by_attr(parse(html), "data-tile", "unit-economics")
+    (value,) = [e for e in card.iter() if e.has("data-tile-value")]
+    assert "Unit Economics" in card.text(), card.text()
+    return value.text(), card.text()
 
 
 def _summary_line(case: str) -> str:

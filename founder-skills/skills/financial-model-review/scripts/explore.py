@@ -32,8 +32,10 @@ from typing import Any, TypeGuard
 # ---------------------------------------------------------------------------
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import _evidence_multiple  # noqa: E402
+import _checklist_view  # noqa: E402
 import _growth_rate  # noqa: E402
+import _theme  # noqa: E402
+import _ui  # noqa: E402
 from unit_economics import (  # noqa: E402, I001
     CAC_PAYBACK_BY_ACV,
     STAGE_BENCHMARKS,
@@ -470,6 +472,9 @@ def _build_data_payload(
             "warns": summary.get("warned_items", []),
             "not_assessed": _not_assessed,
             "total": summary.get("total"),
+            # Every criterion, passing ones included: the explorer lists the whole checklist grouped by
+            # category, as report.html does. Server-rendered only, like the rest of this dict.
+            "items": [i for i in _deep_get(checklist, "items", default=[]) if isinstance(i, dict)],
         }
 
     return {
@@ -515,103 +520,91 @@ def _compute_lens_status(data: dict[str, Any]) -> dict[str, bool]:
 
 
 # ---------------------------------------------------------------------------
-# Checklist summary rendering
+# Checklist rendering
 #
-# The DATA payload has carried a "checklist" key (score_pct/overall/fails/
-# warns, built in _build_data_payload) since it was added, but no client-side
-# JS ever read DATA.checklist and no server-side markup rendered it either --
-# a founder-facing feature (the review's own checklist score) was silently
-# missing from the explorer. Rendered here, server-side, from the same Python
-# dict visualize.py's executive summary uses (score_pct >= 80/60 thresholds
-# mirror visualize.py:1131/1141) so the score/verdict never depends on
-# client-side JS running correctly.
+# Rendered server-side from the slim dict `_build_data_payload` builds (never from DATA), so the
+# score and the criteria never depend on client-side JS. Grouping, labels, tones and the evidence
+# caveat come from `_checklist_view`, the module report.html uses too, so the two pages agree.
 # ---------------------------------------------------------------------------
 
 
-def _checklist_badge_class(score_pct: float) -> str:
-    """Map a checklist score_pct to the existing .badge color classes."""
-    if score_pct >= 80:
-        return "strong"
-    if score_pct >= 60:
-        return "warning"
-    return "fail"
+def _checklist_counts(checklist: dict[str, Any]) -> list[str]:
+    """The count line beside the score: failing, warning, and how many criteria went unassessed.
 
-
-def _checklist_item_row(item: Any, kind: str) -> str:
-    """Render one failing/warning checklist item as a <li>."""
-    if not isinstance(item, dict):
-        return ""
-    item_id = str(item.get("id") or "").strip()
-    label = str(item.get("label") or item.get("criterion") or "").strip()
-    # Same caveat as report.md and report.html: this page reads checklist.json directly and never
-    # sees compose's warnings, so an unsupported comparison would render here unqualified.
-    evidence = _evidence_multiple.caveat(str(item.get("evidence") or "").strip())
-    badge_class = "fail" if kind == "fail" else "warning"
-    icon = "✗" if kind == "fail" else "⚠"
-    # The id is NOT founder-facing text. This rendered `STRUCT_01: No structural errors` on every
-    # failed row -- a criterion id in front of every finding, built from the item's own `id` field,
-    # so no amount of scrubbing the EVIDENCE could reach it. It went unseen because the fmr HTML
-    # fixture carried 34 pass / 12 not_applicable and zero fail or warn, so this row was never
-    # walked by `test_html_founder_text.py`; the fixture now carries one of each.
-    # The id stays available to anyone inspecting the DOM as a data- attribute, which that scan
-    # correctly does not treat as prose.
-    title = label or "Checklist item"
-    id_attr = f' data-criterion="{_esc(item_id)}"' if item_id else ""
-    detail = f' <span class="checklist-item-evidence">&mdash; {_esc(evidence)}</span>' if evidence else ""
-    return f'<li{id_attr}><span class="badge {badge_class}">{icon}</span> {_esc(title)}{detail}</li>'
-
-
-def _render_checklist_summary(checklist: dict[str, Any] | None) -> str:
-    """Render the review checklist's score, pass/fail/warn signal, and any
-    failing/warning items as a static summary box. Returns "" when no
-    checklist data is available (nothing to render, no placeholder needed --
-    the disabled-lens reasons already cover missing-artifact messaging)."""
-    if not isinstance(checklist, dict):
-        return ""
-
-    score_pct = checklist.get("score_pct")
-    overall = checklist.get("overall")
-    fails = checklist.get("fails")
-    warns = checklist.get("warns")
-    fails = fails if isinstance(fails, list) else []
-    warns = warns if isinstance(warns, list) else []
-
-    header_bits: list[str] = []
-    if isinstance(score_pct, (int, float)):
-        badge_class = _checklist_badge_class(float(score_pct))
-        header_bits.append(f'<span class="badge {badge_class}">{score_pct:.0f}%</span>')
-    if overall:
-        header_bits.append(_esc(str(overall).replace("_", " ").title()))
-    count_bits = []
-    if fails:
-        count_bits.append(f"{len(fails)} failing")
-    if warns:
-        count_bits.append(f"{len(warns)} warning")
+    Failing and warning are counted from the items, the list the filter chips count, so the line and
+    the chips cannot disagree.
+    """
+    items = checklist.get("items")
+    statuses = [i.get("status") for i in items if isinstance(i, dict)] if isinstance(items, list) else []
+    n_fail = statuses.count("fail")
+    n_warn = statuses.count("warn")
+    count_bits: list[str] = []
+    if n_fail:
+        count_bits.append(f"{n_fail} failing")
+    if n_warn:
+        count_bits.append(f"{n_warn} warning")
     # The score is a fraction and this shrank its denominator without moving the number, so a
-    # bare badge reads as a complete result. Threaded in from the payload builder above.
+    # bare score reads as a complete result. Threaded in from the payload builder above.
     not_assessed = checklist.get("not_assessed")
     if isinstance(not_assessed, int) and not_assessed > 0:
         total = checklist.get("total")
         over = f" of {int(total)}" if isinstance(total, (int, float)) else ""
         count_bits.append(f"{not_assessed}{over} not assessed")
+    return count_bits
+
+
+def _render_checklist(checklist: dict[str, Any] | None) -> tuple[str, str]:
+    """(score ring for the header card, the checklist section below the lenses).
+
+    Both are "" when there is no checklist: the disabled-lens reasons already cover a missing
+    artifact. The section (`id="checklist"`, which the ring links to) is the page's Checklist tab:
+    the lens script shows it in place of the lens panel. With scripts off it is simply the section
+    below the lenses, every criterion listed, grouped by category. The criterion id is never text:
+    it rides each row as `data-criterion`.
+    """
+    if not isinstance(checklist, dict):
+        return "", ""
+
+    score_pct = checklist.get("score_pct")
+    overall = checklist.get("overall")
+    overall_text = str(overall).replace("_", " ").title() if overall else ""
+    count_bits = _checklist_counts(checklist)
+
+    ring = ""
+    head_bits: list[str] = []
+    if isinstance(score_pct, (int, float)):
+        tone = _checklist_view.score_tone(float(score_pct))
+        # The score as report.md prints it, so the page and the report never state it two ways.
+        shown = _ui.score_text(score_pct, decimals=_checklist_view.SCORE_DECIMALS)
+        head_bits.append(f'<span class="ui-pill ui-pill--{tone}">{shown}%</span>')
+        spoken = f"Review checklist score {shown} percent" + (f", {overall_text}" if overall_text else "")
+        ring = _ui.score_ring(
+            float(score_pct),
+            tone=tone,
+            value_text=f"{shown}%",
+            label="Review Checklist",
+            caption=overall_text,
+            aria_label=spoken,
+            href="#checklist",
+        )
+    if overall_text:
+        head_bits.append(f'<span class="ck-head-status">{_esc(overall_text)}</span>')
     if count_bits:
-        header_bits.append(f'<span class="checklist-counts">{" &middot; ".join(count_bits)}</span>')
+        head_bits.append(f'<span class="ck-head-counts">{" &middot; ".join(count_bits)}</span>')
+    if not head_bits:
+        return "", ""
 
-    if not header_bits:
-        return ""
-
-    items_html = "".join(_checklist_item_row(item, "fail") for item in fails) + "".join(
-        _checklist_item_row(item, "warning") for item in warns
+    items = checklist.get("items")
+    groups = _checklist_view.groups(items if isinstance(items, list) else [])
+    body = _ui.checklist(groups) if groups else ""
+    section = (
+        '<section class="ui-card ck-panel" id="checklist" aria-labelledby="ck-title">'
+        '<div class="ck-head"><h2 class="ck-head-title" id="ck-title">Review Checklist</h2>'
+        f'<span class="ck-head-bits">{"".join(head_bits)}</span></div>'
+        f'<div class="ck-panel__body">{body}</div>'
+        "</section>"
     )
-    list_html = f'<ul class="checklist-item-list">{items_html}</ul>' if items_html else ""
-
-    return (
-        '<div class="checklist-summary">'
-        '<div class="checklist-summary-header">'
-        "<strong>Review Checklist</strong> &nbsp; " + " &nbsp; ".join(header_bits) + "</div>"
-        f"{list_html}"
-        "</div>"
-    )
+    return ring, section
 
 
 # ---------------------------------------------------------------------------
@@ -625,18 +618,19 @@ def _generate_html(data: dict[str, Any]) -> str:
     stub_reasons = data.get("_stub_reasons", {})
 
     # Remove internal field before embedding
-    # `checklist` is rendered SERVER-SIDE (see _render_checklist_summary) so the score never
-    # depends on client-side JS running. It is therefore excluded from the embedded payload rather
-    # than shipped twice: an embedded key no script reads is dead weight, and a dead DATA key is
-    # exactly how the checklist score came to be missing from this explorer in the first place.
-    # Guarded by test_explore_every_embedded_data_key_is_read_by_the_script.
+    # `checklist` is rendered SERVER-SIDE (see _render_checklist) so the score never depends on
+    # client-side JS running. It is therefore excluded from the embedded payload rather than shipped
+    # twice: an embedded key no script reads is dead weight, and a dead DATA key is exactly how the
+    # checklist score came to be missing from this explorer in the first place.
+    # Guarded by tests/test_dead_payload.py::test_no_embedded_payload_key_is_provably_unread.
     _SERVER_RENDERED_ONLY = {"checklist"}
     data_for_embed = {k: v for k, v in data.items() if not k.startswith("_") and k not in _SERVER_RENDERED_ONLY}
     data_json = _embed_json(data_for_embed, indent=2, default=str)
 
-    company_name = _esc(data.get("company", {}).get("name", ""))
-    stage = _esc(data.get("company", {}).get("stage", ""))
-    sector = _esc(data.get("company", {}).get("sector", ""))
+    # Plain text: the header card escapes it.
+    company_name = str(data.get("company", {}).get("name", ""))
+    stage = str(data.get("company", {}).get("stage", ""))
+    sector = str(data.get("company", {}).get("sector", ""))
     headline = ""
     talking_points: list[str] = []
     if data.get("commentary"):
@@ -677,7 +671,13 @@ def _generate_html(data: dict[str, Any]) -> str:
 
     enabled_count = sum(1 for v in lens_status.values() if v)
     disabled_names = [lens for lens in _LENSES if not lens_status[lens]]
-    checklist_html = _render_checklist_summary(data.get("checklist"))
+    ring_html, checklist_html = _render_checklist(data.get("checklist"))
+    if checklist_html:
+        # The checklist is a tab beside the lenses. With scripts off the tabs do nothing, and the
+        # checklist stays where it is rendered, below the lens panel, in full.
+        tabs_html += (
+            '  <button class="tab" data-lens="checklist" onclick="switchLens(\'checklist\')">Checklist</button>\n'
+        )
 
     return _build_html_string(
         data_json=data_json,
@@ -692,6 +692,7 @@ def _generate_html(data: dict[str, Any]) -> str:
         disabled_names=disabled_names,
         chartjs_source=_chartjs_source(),
         checklist_html=checklist_html,
+        ring_html=ring_html,
         growth_note=str(data.get("_growth_note") or ""),
     )
 
@@ -710,213 +711,188 @@ def _build_html_string(
     disabled_names: list[str],
     chartjs_source: str,
     checklist_html: str,
+    ring_html: str = "",
     growth_note: str = "",
 ) -> str:
-    """Build the full HTML document string."""
-    scripts_dir = os.path.dirname(os.path.abspath(__file__))
-    if scripts_dir not in sys.path:
-        sys.path.insert(0, scripts_dir)
-    import _theme
+    """Build the full HTML document string on the shared page shell (`_ui`).
 
-    # CSS built as list to keep lines under 120 chars
+    `company_name`, `stage`, `sector` and `growth_note` are plain text; `headline` and
+    `talking_points` arrive escaped; the rest is markup this module built.
+    """
+    # The lens panels' own styles (their markup is built by the script below). The page shell, the
+    # header card, the score ring and the checklist are styled by `_ui.UI_CSS`.
     css_lines = [
-        "* { margin: 0; padding: 0; box-sizing: border-box; }",
-        "body {",
-        "  font-family: var(--font-body);",
-        "  background: var(--lool-white); color: var(--lool-ink); padding: 1rem;",
-        "  -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;",
-        "}",
-        ".header {",
-        "  background: var(--lool-paper); border: 1px solid var(--lool-line-2);",
-        "  padding: 1.5rem; margin-bottom: 1rem;",
-        "}",
-        ".header h1 {",
-        "  font-size: 1.5rem; margin-bottom: 0.25rem;",
-        "  color: var(--lool-blue); font-weight: 400;",
-        "}",
-        ".header .meta { color: var(--lool-mute); font-size: 0.875rem; }",
-        ".talking-points {margin-top:0.6rem;font-size:0.9rem;}",
-        ".talking-points .tp-label {font-weight:600;opacity:0.75;margin-bottom:0.2rem;}",
-        ".talking-points ul {margin:0;padding-left:1.1rem;}",
-        ".talking-points li {margin:0.15rem 0;}",
-        ".header .headline {",
-        "  margin-top: 0.75rem; color: var(--lool-ink);",
-        "  font-size: 1rem; line-height: 1.5;",
+        ".lens-bar {",
+        "  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;",
+        "  gap: var(--ui-s3); margin: var(--ui-s5) 0 var(--ui-s3);",
         "}",
         ".tab-bar {",
-        "  display: flex; gap: 0.5rem;",
-        "  margin-bottom: 1rem; flex-wrap: wrap;",
+        "  display: inline-flex; flex-wrap: wrap; gap: 4px; padding: 4px;",
+        "  background: var(--ui-surface); border: 1px solid var(--ui-line); border-radius: var(--ui-r1);",
+        "  box-shadow: var(--ui-shadow);",
         "}",
         ".tab {",
-        "  padding: 0.5rem 1rem; border: 1px solid var(--lool-line-form);",
-        "  border-radius: var(--r-input); background: var(--lool-white);",
-        "  font-family: var(--font-body); color: var(--lool-ink);",
-        "  cursor: pointer; font-size: 0.875rem;",
-        "  transition: all 0.2s;",
+        "  padding: 0.5rem 1.1rem; border: 0; border-radius: 7px; background: transparent;",
+        "  font-family: var(--font-body); color: var(--ui-ink-2); font-weight: 500;",
+        "  cursor: pointer; font-size: 0.9rem; transition: background 0.15s, color 0.15s;",
         "}",
-        ".tab:hover:not(.disabled) { background: var(--lool-paper-2); }",
-        ".tab.active {",
-        "  background: var(--lool-blue); color: var(--lool-white);",
-        "  border-color: var(--lool-blue);",
-        "}",
-        ".tab.active:hover:not(.disabled) { background: var(--lool-blue-deep); }",
-        ".tab.disabled {",
-        "  opacity: 0.4; cursor: not-allowed; background: var(--lool-paper);",
-        "}",
+        ".tab:hover:not(.disabled):not(.active) { background: var(--ui-surface-2); color: var(--ui-ink); }",
+        ".tab.active { background: var(--ui-accent); color: var(--ui-on-accent); }",
+        ".tab.disabled { opacity: 0.45; cursor: not-allowed; }",
         ".content {",
-        "  background: var(--lool-paper); border: 1px solid var(--lool-line-2);",
-        "  padding: 1.5rem; min-height: 400px;",
+        "  background: var(--ui-surface); border: 1px solid var(--ui-line); border-radius: var(--ui-r2);",
+        "  padding: var(--ui-s5); min-height: 400px; box-shadow: var(--ui-shadow);",
         "}",
-        ".content h2 { color: var(--lool-royal); font-weight: 500; }",
-        ".content h3 { color: var(--lool-royal); font-weight: 500; }",
+        ".content h2 { color: var(--ui-ink); font-size: 1.2rem; font-weight: 600; margin: 0 0 0.75rem; }",
+        ".content h3 { color: var(--ui-ink); font-size: 1rem; font-weight: 600; margin: 1.25rem 0 0.5rem; }",
+        ".content p { margin: 0.5rem 0; }",
         ".lens-panel { display: none; }",
+        ".lens-noscript { color: var(--ui-ink-2); margin: 0; }",
         ".lens-panel.active { display: block; }",
         ".slider-group { margin: 1rem 0; }",
         ".slider-group label {",
-        "  display: block; font-weight: 600; margin-bottom: 0.25rem;",
+        "  display: block; font-weight: 600; margin-bottom: 0.25rem; font-size: 0.9rem;",
         "}",
         ".slider-row { display: flex; gap: 8px; align-items: center; }",
-        '.slider-row input[type="range"] { flex: 1; }',
+        '.slider-row input[type="range"] { flex: 1; min-width: 0; accent-color: var(--ui-accent); }',
         ".slider-edit {",
-        "  width: 80px; padding: 2px 6px; border: 1px solid var(--lool-line-form);",
-        "  border-radius: var(--r-input);",
+        "  width: 88px; padding: 4px 8px; border: 1px solid var(--ui-line);",
+        "  border-radius: 6px;",
         "  font-family: var(--font-mono); font-size: 0.85rem; text-align: right;",
-        "  background: var(--lool-white); color: var(--lool-ink);",
+        "  background: var(--ui-surface); color: var(--ui-ink);",
         "}",
         ".slider-edit:focus {",
         "  outline: none; border-color: var(--lool-azure);",
-        "  background: var(--lool-white);",
+        "  box-shadow: 0 0 0 3px var(--ui-accent-tint);",
         "}",
-        ".slider-unit { font-size: 0.8rem; color: var(--lool-mute); min-width: 24px; }",
-        ".slider-value { font-size: 0.875rem; color: var(--lool-mute); }",
+        ".slider-unit { font-size: 0.8rem; color: var(--ui-ink-2); min-width: 24px; }",
+        ".slider-value { font-size: 0.875rem; color: var(--ui-ink-2); font-weight: 500; }",
         ".badge {",
-        "  display: inline-block; padding: 0.125rem 0.5rem;",
-        "  border-radius: var(--r-input); font-size: 0.75rem; font-weight: 600;",
+        "  display: inline-block; padding: 0.15rem 0.6rem;",
+        "  border-radius: var(--r-pill); font-size: 0.72rem; font-weight: 600; letter-spacing: 0.02em;",
         "}",
-        ".badge.strong { background: var(--lool-success-tint); color: var(--lool-success); }",
-        ".badge.acceptable { background: var(--lool-line-2); color: var(--lool-royal); }",
-        ".badge.contextual { background: var(--lool-line-2); color: var(--lool-mute); }",
-        ".badge.warning { background: var(--lool-warning-tint); color: var(--lool-warning); }",
-        ".badge.fail { background: var(--lool-danger-tint); color: var(--lool-danger); }",
+        ".badge.strong { background: var(--st-pass-tint); color: var(--st-pass-ink); }",
+        ".badge.acceptable { background: var(--ui-accent-tint); color: var(--ui-accent-2); }",
+        ".badge.contextual { background: var(--st-na-tint); color: var(--st-na); }",
+        ".badge.warning { background: var(--st-warn-tint); color: var(--st-warn); }",
+        ".badge.fail { background: var(--st-fail-tint); color: var(--st-fail); }",
         ".chart-container {",
-        "  position: relative; height: 300px; margin: 1rem 0;",
+        "  position: relative; height: 320px; margin: 1rem 0;",
         "}",
         ".commentary-box {",
-        "  background: var(--lool-line-2); border-left: 3px solid var(--lool-azure);",
-        "  padding: 1rem; margin: 1rem 0;",
+        "  background: var(--ui-accent-tint); border-left: 4px solid var(--lool-azure);",
+        "  border-radius: var(--ui-r1); padding: 0.85rem 1rem; margin: 0.75rem 0; font-size: 0.92rem;",
         "}",
         ".stub-reason {",
-        "  background: var(--lool-warning-tint); border-left: 3px solid var(--lool-warning);",
-        "  padding: 0.75rem;",
+        "  background: var(--st-warn-tint); border-left: 4px solid var(--st-warn-bar);",
+        "  border-radius: var(--ui-r1); padding: 0.75rem 1rem;",
         "  margin: 0.5rem 0; font-size: 0.875rem;",
         "}",
         ".reset-btn {",
-        "  padding: 0.5rem 1rem; border: 1px solid var(--lool-line-form);",
-        "  border-radius: var(--r-input); background: var(--lool-white);",
-        "  font-family: var(--font-body); color: var(--lool-ink);",
-        "  cursor: pointer; font-size: 0.875rem;",
+        "  padding: 0.5rem 1rem; border: 1px solid var(--ui-line);",
+        "  border-radius: var(--ui-r1); background: var(--ui-surface);",
+        "  font-family: var(--font-body); color: var(--ui-ink-2);",
+        "  cursor: pointer; font-size: 0.875rem; font-weight: 500;",
         "}",
-        ".reset-btn:hover { background: var(--lool-paper-2); }",
+        ".reset-btn:hover { color: var(--ui-ink); border-color: var(--ui-accent); }",
+        "button { font-family: var(--font-body); }",
+        ".content button:not(.tab):not(.reset-btn) {",
+        "  padding: 0.35rem 0.8rem; border: 1px solid var(--ui-line); border-radius: 6px;",
+        "  background: var(--ui-surface); color: var(--ui-ink); cursor: pointer; font-size: 0.85rem;",
+        "}",
         ".metrics-strip {",
-        "  display: flex; align-items: center; gap: 0.5rem;",
+        "  display: flex; align-items: center; gap: 0.5rem 1rem;",
         "  flex-wrap: wrap; margin: 0.75rem 0;",
         "}",
-        ".metrics-table th, .metrics-table td {",
-        "  text-align: left; padding: 0.5rem 0.75rem;",
-        "  border-bottom: 1px solid var(--lool-line-2);",
+        ".metrics-table, .scenario-table { width: 100%; border-collapse: collapse; }",
+        ".metrics-table th, .metrics-table td, .scenario-table th, .scenario-table td {",
+        "  text-align: left; padding: 0.55rem 0.75rem;",
+        "  border-bottom: 1px solid var(--ui-line);",
         "}",
-        ".metrics-table th {",
-        "  font-weight: 600; color: var(--lool-subtle);",
-        "  text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.06em;",
+        ".metrics-table th, .scenario-table th {",
+        "  font-weight: 600; color: var(--ui-ink-2);",
+        "  text-transform: uppercase; font-size: 0.72rem; letter-spacing: 0.06em;",
         "}",
-        ".scenario-table th, .scenario-table td {",
-        "  text-align: left; padding: 0.5rem 0.75rem;",
-        "  border-bottom: 1px solid var(--lool-line-2);",
+        ".clickable { cursor: pointer; }",
+        ".clickable:hover { background: var(--ui-surface-2); }",
+        ".clickable.active { background: var(--ui-accent-tint); }",
+        "[hidden] { display: none !important; }",
+        ".ck-panel { padding: 0; overflow: hidden; margin-top: var(--ui-s5); }",
+        ".content[hidden] + .ck-panel { margin-top: 0; }",
+        ".ck-head {",
+        "  display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 1rem;",
+        "  padding: var(--ui-s4) var(--ui-s5);",
         "}",
-        ".scenario-table th {",
-        "  font-weight: 600; color: var(--lool-subtle);",
-        "  text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.06em;",
+        ".ui-page .ck-head-title { font-size: 1.2rem; font-weight: 600; margin: 0; }",
+        ".ck-head-bits { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem; }",
+        ".ck-head-status { font-weight: 500; }",
+        ".ck-head-counts { color: var(--ui-ink-2); font-size: 0.9rem; }",
+        ".ck-panel__body { padding: var(--ui-s4) var(--ui-s5) var(--ui-s5); border-top: 1px solid var(--ui-line); }",
+        "@media (max-width: 640px) {",
+        "  .content { padding: var(--ui-s4); }",
+        "  .tab-bar { display: grid; grid-template-columns: 1fr 1fr; width: 100%; }",
+        "  .tab { flex: 1 1 auto; padding: 0.5rem 0.6rem; }",
+        "  .chart-container { height: 260px; }",
+        "  .content table { display: block; overflow-x: auto; }",
+        "  .ck-head, .ck-panel__body { padding-left: var(--ui-s4); padding-right: var(--ui-s4); }",
         "}",
-        ".clickable:hover { background: var(--lool-paper-2); }",
-        ".clickable.active { background: var(--lool-line-2); }",
-        ".checklist-summary {",
-        "  background: var(--lool-paper); border: 1px solid var(--lool-line-2);",
-        "  padding: 0.75rem 1rem; margin-bottom: 1rem; font-size: 0.875rem;",
-        "}",
-        ".checklist-summary-header { display: flex; align-items: center; flex-wrap: wrap; gap: 0.4rem; }",
-        ".checklist-counts { color: var(--lool-mute); }",
-        ".checklist-item-list { list-style: none; margin: 0.5rem 0 0; padding: 0; }",
-        ".checklist-item-list li {",
-        "  padding: 0.2rem 0; display: flex; align-items: baseline; gap: 0.4rem;",
-        "}",
-        ".checklist-item-evidence { color: var(--lool-mute); }",
+        "@media print { .lens-bar { display: none; } }",
     ]
-    css = _theme.brand_css() + "\n" + "\n".join(css_lines)
+    css = "\n".join(css_lines)
 
-    hl_div = "<div class='headline'>" + headline + "</div>" if headline else ""
+    # The stage as a founder reads it ("Seed", "Series A"), the same helper every page's stage chip uses.
+    meta_html = "".join(f'<span class="ui-chip">{_esc(v)}</span>' for v in (_ui.stage_label(stage), sector) if v)
+    body_bits: list[str] = []
     # A neutral note, never a warning: the growth rate was computed from the monthly revenue series.
-    growth_div = (
-        "<div class='growth-note' style='background:var(--lool-paper-2);color:var(--lool-ink);"
-        "border-left:3px solid var(--lool-azure);padding:8px 12px;font-size:0.85rem;margin:8px 0'>"
-        f"{_esc(growth_note)}</div>"
-        if growth_note
-        else ""
-    )
+    if growth_note:
+        body_bits.append(f'<p class="ui-callout growth-note" data-note="growth">{_esc(growth_note)}</p>')
     if talking_points:
-        hl_div += (
-            "<div class='talking-points'><div class='tp-label'>Talking points for investor "
-            "conversations</div><ul>" + "".join(f"<li>{p}</li>" for p in talking_points) + "</ul></div>"
+        body_bits.append(
+            '<details class="ui-points" open><summary>Talking points for investor conversations</summary><ul>'
+            + "".join(f"<li>{p}</li>" for p in talking_points)
+            + "</ul></details>"
         )
+    header = _ui.header_card(
+        eyebrow="Financial Model Explorer",
+        title=company_name,
+        meta_html=meta_html,
+        verdict_html=headline,
+        body_html="".join(body_bits),
+        ring_html=ring_html,
+    )
 
-    # Lens panels — each on multiple lines for readability
+    # Lens panels: each is replaced wholesale by its render function on first view, which draws its
+    # own chart canvas. (The Unit Economics lens draws a table, not a chart, so it gets no canvas.)
     panels = []
     panel_defs = [
         ("runway", "Runway Projection", "chart-runway"),
         ("raise_planner", "Raise Planner", "chart-raise"),
-        ("unit_economics", "Unit Economics", "chart-ue"),
+        ("unit_economics", "Unit Economics", ""),
         ("stress_test", "Stress Test", "chart-stress"),
     ]
     for pid, title, cid in panel_defs:
-        panels.append(
-            f'  <div class="lens-panel" id="lens-{pid}">'
-            f"<h2>{title}</h2>"
-            f'<div class="chart-container">'
-            f'<canvas id="{cid}"></canvas>'
-            f"</div></div>"
-        )
+        canvas = f'<div class="chart-container"><canvas id="{cid}"></canvas></div>' if cid else ""
+        panels.append(f'  <div class="lens-panel" id="lens-{pid}"><h2>{title}</h2>{canvas}</div>')
     panels_html = "\n".join(panels)
 
-    return f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>FMR Explorer — {company_name}</title>
-<script>{chartjs_source}</script>
-<style>
-{css}
-</style>
-</head>
-<body>
+    body = f"""{header}
 
-<div class="header">
-  <h1>{company_name}</h1>
-  <div class="meta">{stage} &middot; {sector}</div>
-  {hl_div}{growth_div}
-</div>
-
-{checklist_html}
-
-<div class="tab-bar">
-{tabs_html}  <button class="reset-btn" onclick="resetAll()">Reset</button>
+<div class="lens-bar">
+<div class="tab-bar" role="group" aria-label="Lenses">
+{tabs_html}</div>
+<button class="reset-btn" onclick="resetAll()">Reset</button>
 </div>
 
 <div class="content">
+<noscript><p class="lens-noscript">The interactive lenses need scripts to run;
+the review checklist is below.</p></noscript>
 {disabled_reasons_html}
 {panels_html}
 </div>
 
-<script>
+{checklist_html}"""
+
+    lens_script = f"""<script>
 const DATA = {data_json};
 
 // ---------------------------------------------------------------------------
@@ -1179,6 +1155,11 @@ var currentLens = null;
 // ---------------------------------------------------------------------------
 
 function switchLens(name) {{
+  // The Checklist tab shows the server-rendered checklist section in place of the lens panel.
+  var ckSection = document.getElementById('checklist');
+  var lensBox = document.querySelector('.content');
+  if (ckSection) ckSection.hidden = name !== 'checklist';
+  if (lensBox) lensBox.hidden = name === 'checklist' && !!ckSection;
   document.querySelectorAll('.lens-panel').forEach(function(el) {{
     el.classList.remove('active');
   }});
@@ -2137,6 +2118,20 @@ function renderStressChart(result) {{
 // ---------------------------------------------------------------------------
 
 (function() {{
+  // The score ring links to #checklist: open the Checklist tab rather than scroll past the lenses.
+  document.querySelectorAll('a[href="#checklist"]').forEach(function(a) {{
+    a.addEventListener('click', function(e) {{
+      if (!document.getElementById('checklist')) return;
+      e.preventDefault();
+      switchLens('checklist');
+      var bar = document.querySelector('.lens-bar');
+      if (bar) bar.scrollIntoView({{block: 'start'}});
+    }});
+  }});
+  if (location.hash === '#checklist' && document.getElementById('checklist')) {{
+    switchLens('checklist');
+    return;
+  }}
   var lenses = {json.dumps(_LENSES)};
   for (var i = 0; i < lenses.length; i++) {{
     var tab = document.querySelector('.tab[data-lens="' + lenses[i] + '"]:not(.disabled)');
@@ -2147,9 +2142,16 @@ function renderStressChart(result) {{
   }}
 }})();
 </script>
-{_theme.FOOTER_CREDIT_HTML}
-</body>
-</html>"""
+"""
+    return _ui.page_shell(
+        title=f"FMR Explorer — {company_name}",
+        body_html=body,
+        brand_css=_theme.brand_css(),
+        page_css=css,
+        head_html=f"<script>{chartjs_source}</script>\n",
+        scripts_html=lens_script,
+        skill_name="Financial Model Review",
+    )
 
 
 # ---------------------------------------------------------------------------

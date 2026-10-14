@@ -933,26 +933,26 @@
     "deck-review/visualize.py": {
       "exit": 0,
       "files": {
-        "page.html": "0e91b0a79a46f1c50767ed8a1d5437326b36d09d13fc444ffaac693ffb1df770"
+        "page.html": "7de9b1eb2c7708b40a0bd7c09a26e08785a2d4e2187120c4b1f8b5017067ccfa"
       },
       "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout": "0b132daab6bea75444232e094c38c9d9dcc4c1fbe73134ad8973831a44710db5"
+      "stdout": "f67de767d9cffdee51de4edd4ac8b4b39cd65969660b1cbd1a791237b8b4baf0"
     },
     "financial-model-review/explore.py": {
       "exit": 0,
       "files": {
-        "page.html": "34a73bbdbde63017291d595087a0998dcfa67fe1f9fca254be5987969e496a68"
+        "page.html": "f3b4986cc4047f48f88da29e0875f0903cc7192ea68f81f0894d2b2404409baf"
       },
       "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout": "762a3109038a036d5bf627c32b75ad5e1a905fe9933c5eda7ff8c1f9d967a00f"
+      "stdout": "16a1fbf7537513334203999bced062811c9f228dfbe1e303b14b643aca48b017"
     },
     "financial-model-review/visualize.py": {
       "exit": 0,
       "files": {
-        "page.html": "785e62f80bcfb4c397845b75de6d650b4664e3cbd1bf7aa06473ee2cc3d52361"
+        "page.html": "d512b3b49f9c914e376af388cedb625a229c971a25c6576b0fbc075d9e91f94d"
       },
       "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout": "6efc524de6a989d15161a9b9bc575ec89db1c6d4d74fdc0be461b8cc131a8724"
+      "stdout": "fbae6533a6604452a892bd34fc749165d76cb551274f6f8305a1e2c851429ef7"
     },
     "ic-sim/visualize.py": {
       "exit": 0,
@@ -965,10 +965,10 @@
     "market-sizing/visualize.py": {
       "exit": 0,
       "files": {
-        "page.html": "727f6ea7ff9360512e7a022458fe7a41765837b2bc5558c825ea530cc3356130"
+        "page.html": "b06c471e75c3fd78aff47a433ead899eadb8dfff63f01c139e9a94b4aafe1279"
       },
       "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout": "c1f5f02a8d3c3b5fece53cbd88bf9d5ef3dc4b339c91bdf351d509850bfc646b"
+      "stdout": "7c9c0353c15d57f37a342e9e123455819d4a2416083e967d06d2c7e5483faaa1"
     }
   },
   "html_stdout": {
@@ -976,7 +976,7 @@
       "exit": 0,
       "files": {},
       "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout": "727f6ea7ff9360512e7a022458fe7a41765837b2bc5558c825ea530cc3356130"
+      "stdout": "b06c471e75c3fd78aff47a433ead899eadb8dfff63f01c139e9a94b4aafe1279"
     }
   },
   "ic_compose": {

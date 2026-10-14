@@ -25,8 +25,9 @@ SCOPE, stated so a green is not over-read:
     markdown was repaired and the HTML was not, so the two delivered pages read the SAME sentence two
     ways, which is worse than both being wrong and is a shape this scan cannot see. Where a string is
     shared, the repair now belongs at the one owner both renderers read it from (`_view._founder_prose`
-    on the assumption rows). Strings only the HTML renders still bypass the policy -- the red team's
-    `what_is_true` through `checked_multiples`, and the checklist notes.
+    on the assumption rows). The checklist evidence and notes the financial-model-review, deck-review and
+    market-sizing pages list now take the policy pass on the page (seeded tests below); strings only the
+    HTML renders elsewhere still bypass it -- e.g. the red team's `what_is_true` through `checked_multiples`.
 """
 
 from __future__ import annotations
@@ -64,6 +65,17 @@ GENERATORS = [
 # Static-text floor per generator. NOT one number: a 300 KB explorer legitimately yields ~250 B of
 # text nodes, so a single floor either passes vacuously for explorers or fails honestly-thin pages.
 _TEXT_FLOOR = {"visualize.py": 700, "explore.py": 200, "review_inputs.py": 200}
+# Per page, where a page renders far more static text than its generator's name implies. The
+# financial-model-review explorer renders its whole checklist server-side (about 3.5 KB on the
+# fixture), so the shared 200 B explorer floor would let most of it vanish unnoticed.
+_TEXT_FLOOR_BY_PAGE = {
+    ("financial-model-review", "explore.py"): 2500,
+    # deck-review's report lists every criterion with its evidence (about 5 KB of text on the fixture,
+    # against 2.5 KB before it did), so the shared 700 B floor would let the whole checklist vanish.
+    ("deck-review", "visualize.py"): 4000,
+    # market-sizing's report lists all 22 self-check criteria (about 3.8 KB of text on the fixture).
+    ("market-sizing", "visualize.py"): 3000,
+}
 
 
 def _founder_text():  # type: ignore[no-untyped-def]
@@ -153,7 +165,7 @@ def test_generated_html_carries_no_internal_tokens(skill: str, generator: str) -
     # Non-vacuity: a trivially small page would pass without proving anything.
     assert len(html) > 2000, f"{skill}/{generator} produced only {len(html)}B"
     text = _text_nodes(html)
-    floor = _TEXT_FLOOR[generator]
+    floor = _TEXT_FLOOR_BY_PAGE.get((skill, generator), _TEXT_FLOOR[generator])
     assert len(text) > floor, (
         f"{skill}/{generator} yielded {len(text)}B of text nodes, below its {floor}B floor — either the "
         f"stripper broke or the page stopped rendering static text"
@@ -466,3 +478,111 @@ def test_the_outside_review_section_carries_no_internal_tokens_on_either_page() 
         assert found == {"enums": [], "filenames": []}, (
             f"{name}'s outside-review section reaches the founder with internal tokens: {found}"
         )
+
+
+# ---------------------------------------------------------------------------------------------------
+# The financial-model-review checklist reaches both pages for every criterion, passing ones included,
+# as assessor-written text. The fixture's passing evidence is the word "fixture", which cannot trip the
+# scan, so the page scan above passes over those rows without showing that it reaches them. These two
+# tests seed one passing item and prove both halves: the scan SEES the rows (a token the policy does not
+# rewrite is found on both pages), and the pages put that text through the policy (a snake_case token is
+# rewritten on both pages before it is shown).
+# ---------------------------------------------------------------------------------------------------
+
+_FMR_SEEDED_EVIDENCE = "Verified against seeded_snake_token and SEEDED_SHOUT_TOKEN in the model."
+
+
+def _fmr_pages_with_seeded_pass_item() -> dict[str, str]:
+    import json
+
+    skill = "financial-model-review"
+    scripts = REPO_ROOT / "founder-skills" / "skills" / skill / "scripts"
+    pages: dict[str, str] = {}
+    with tempfile.TemporaryDirectory() as td:
+        work = Path(td)
+        drive_compose(skill, FIXTURES / skill, work)
+        ck = json.loads((work / "checklist.json").read_text())
+        seeded = next(i for i in ck["items"] if i["status"] == "pass")
+        seeded["evidence"] = _FMR_SEEDED_EVIDENCE
+        (work / "checklist.json").write_text(json.dumps(ck))
+        for generator in ("visualize.py", "explore.py"):
+            out = work / f"{generator}.html"
+            result = subprocess.run(
+                [sys.executable, str(scripts / generator), "--dir", str(work), "-o", str(out)],
+                capture_output=True,
+                text=True,
+            )
+            assert result.returncode == 0, result.stderr[-400:]
+            pages[generator] = out.read_text(encoding="utf-8")
+    return pages
+
+
+def test_the_scan_reaches_fmr_passing_checklist_rows_on_both_pages() -> None:
+    ft = _founder_text()
+    pages = _fmr_pages_with_seeded_pass_item()
+    assert set(pages) == {"visualize.py", "explore.py"}
+    for generator, html in pages.items():
+        found = ft.scan(_text_nodes(html))
+        assert "SEEDED_SHOUT_TOKEN" in found["enums"], (
+            f"financial-model-review/{generator}: a token seeded into a PASSING item's evidence was not "
+            f"seen by the founder-text scan ({found}), so the scan does not reach those rows"
+        )
+
+
+def test_fmr_checklist_evidence_goes_through_the_founder_text_policy_on_both_pages() -> None:
+    ft = _founder_text()
+    for generator, html in _fmr_pages_with_seeded_pass_item().items():
+        text = _text_nodes(html)
+        assert "seeded snake token" in text, f"financial-model-review/{generator}: the seeded row did not render"
+        assert "seeded_snake_token" not in ft.scan(text)["enums"], (
+            f"financial-model-review/{generator}: checklist evidence reached the page without the policy pass"
+        )
+
+
+# ---------------------------------------------------------------------------------------------------
+# The same two proofs for the report pages that began listing every criterion: deck-review (whose
+# checklist shows each item's evidence) and market-sizing (whose checklist shows each item's notes).
+# Their fixtures' passing items carry no text at all, so without a seed the page scan passes over rows
+# it never had to read.
+# ---------------------------------------------------------------------------------------------------
+
+# (skill, the checklist item field the page shows under each criterion)
+_SEEDED_REPORT_PAGES = [("deck-review", "evidence"), ("market-sizing", "notes")]
+
+
+def _report_page_with_seeded_pass_item(skill: str, field: str) -> str:
+    import json
+
+    from no_ledger_goldens import html_argv
+
+    with tempfile.TemporaryDirectory() as td:
+        work = Path(td)
+        drive_compose(skill, FIXTURES / skill, work)
+        ck = json.loads((work / "checklist.json").read_text())
+        seeded = next(i for i in ck["items"] if i["status"] == "pass" and i.get("weight", 1) != 0)
+        seeded[field] = _FMR_SEEDED_EVIDENCE
+        (work / "checklist.json").write_text(json.dumps(ck))
+        out = work / "page.html"
+        result = subprocess.run(
+            [sys.executable, *html_argv(skill, "visualize.py", work, out)], capture_output=True, text=True
+        )
+        assert result.returncode == 0, result.stderr[-400:]
+        return out.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize(("skill", "field"), _SEEDED_REPORT_PAGES)
+def test_the_scan_reaches_passing_checklist_rows_on_the_report_page(skill: str, field: str) -> None:
+    found = _founder_text().scan(_text_nodes(_report_page_with_seeded_pass_item(skill, field)))
+    assert "SEEDED_SHOUT_TOKEN" in found["enums"], (
+        f"{skill}/visualize.py: a token seeded into a PASSING item's {field} was not seen by the "
+        f"founder-text scan ({found}), so the scan does not reach those rows"
+    )
+
+
+@pytest.mark.parametrize(("skill", "field"), _SEEDED_REPORT_PAGES)
+def test_report_page_checklist_text_goes_through_the_founder_text_policy(skill: str, field: str) -> None:
+    text = _text_nodes(_report_page_with_seeded_pass_item(skill, field))
+    assert "seeded snake token" in text, f"{skill}/visualize.py: the seeded row did not render"
+    assert "seeded_snake_token" not in _founder_text().scan(text)["enums"], (
+        f"{skill}/visualize.py: checklist {field} reached the page without the policy pass"
+    )

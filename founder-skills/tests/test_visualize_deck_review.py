@@ -22,6 +22,8 @@ import tempfile
 import types
 from typing import Any
 
+import pytest
+from _dom import by_attr, by_id, parse  # noqa: E402
 from html_text import visible_text  # noqa: E402
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -1191,5 +1193,67 @@ def test_key_findings_show_the_competition_weakness_once() -> None:
     assert rc == 0, stderr
     assert stdout.count(canon_fix) == 1
     assert dup_fix not in stdout
-    assert "Competition slide exists and is substantive" not in stdout
+    # The weakness reaches the findings once, under the criterion that owns it. The checklist lists the
+    # duplicate too (every criterion is listed), but as a weightless row that says where its result
+    # counts, never as a second finding.
+    doc = parse(stdout)
+    findings = by_id(doc, "findings")
+    assert findings is not None
+    assert "Competition slide exists and is substantive" not in findings.text()
+    assert not by_attr(doc, "data-finding", "no_dodged_competition")
+    (dup,) = by_attr(doc, "data-criterion", "no_dodged_competition")
+    assert dup.get("data-weight") == "0" and "counts toward 'Competition section is honest" in dup.text()
     assert "Competition section is honest and substantive" in stdout
+
+
+# ---------------------------------------------------------------------------
+# The header card: the score as a ring, the report's own verdict, the stage as words
+# ---------------------------------------------------------------------------
+
+_BAND_SCORES = {"strong": 90.0, "solid": 75.0, "needs_work": 55.0, "major_revision": 30.0}
+
+
+@pytest.mark.parametrize("band", sorted(_BAND_SCORES))
+def test_the_header_verdict_is_the_sentence_report_md_prints(band: str) -> None:
+    """The header card opens with the one-line verdict report.md prints after the score, word for
+    word: the page keeps its own copy of the four sentences (compose is not imported into a page), so
+    this renders both deliverables from one folder and holds them equal for every band."""
+    import shutil
+    from pathlib import Path
+
+    from compose_invocations import drive_compose
+
+    fixtures = Path(SCRIPT_DIR) / "fixtures" / "deck-review"
+    with tempfile.TemporaryDirectory() as td:
+        fix, work = Path(td) / "fix", Path(td) / "work"
+        shutil.copytree(fixtures, fix)
+        work.mkdir()
+        ck = json.loads((fix / "checklist.json").read_text())
+        ck["summary"]["overall_status"] = band
+        ck["summary"]["score_pct"] = _BAND_SCORES[band]
+        (fix / "checklist.json").write_text(json.dumps(ck))
+        report = json.loads(drive_compose("deck-review", fix, work).read_text())
+        rc, page, err = _run_viz(str(work))
+    assert rc == 0, err
+    line = next(ln for ln in report["report_markdown"].splitlines() if ln.startswith("**Deck-craft score:**"))
+    md_verdict = line.split(" — ", 1)[1]
+    doc = parse(page)
+    (header,) = [h for h in doc.iter() if h.tag == "header"]
+    assert md_verdict in header.text(), (md_verdict, header.text()[:300])
+    # The verdict already opens with the band's name; the ring under it must not say it a second time.
+    band_title = band.replace("_", " ").title()
+    assert header.text().count(band_title) == 1, header.text()[:300]
+    # The ring says the same score and band, and opens the checklist.
+    ring = [e for e in header.iter() if e.get("role") == "img" and "percent" in (e.get("aria-label") or "")]
+    assert ring and f"{_BAND_SCORES[band]:.0f} percent" in (ring[0].get("aria-label") or "")
+    assert any(a.get("href") == "#checklist" for a in header.iter() if a.tag == "a")
+
+
+def test_the_header_shows_the_stage_as_words() -> None:
+    arts = _all_artifacts()
+    arts["stage_profile.json"] = {**_VALID_PROFILE, "detected_stage": "series_a"}
+    rc, page, err = _run_viz(_make_artifact_dir(arts))
+    assert rc == 0, err
+    (header,) = [h for h in parse(page).iter() if h.tag == "header"]
+    assert "Series A" in header.text()
+    assert "series_a" not in page

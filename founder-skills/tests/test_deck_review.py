@@ -4069,15 +4069,16 @@ def test_band_boundaries_are_attainable_on_the_score_grid() -> None:
 
 
 def test_gauge_zones_match_band_thresholds() -> None:
-    """The HTML gauge and the printed band must come from the same numbers.
+    """The HTML score and the printed band must come from the same numbers.
 
-    They were independent literals. Had a threshold moved, the needle would have sat in
+    They were independent literals. Had a threshold moved, the gauge's needle would have sat in
     a coloured zone contradicting the caption printed beside it -- the failure mode this
-    test exists to make impossible.
+    test exists to make impossible. The gauge is now a score ring whose colour follows the band;
+    a checklist that carries no band is banded by the same module that scored it.
     """
     T = _thresholds_mod()
     viz = Path(os.path.join(DECK_REVIEW_DIR, "visualize.py")).read_text(encoding="utf-8")
-    assert "_thresholds.zone_edges()" in viz, "gauge zones must be derived, not re-typed"
+    assert "_thresholds.band_for(" in viz, "the ring's band must be derived, not re-typed"
     assert "(0, 50, _COLOR_FAIL)" not in viz, "hardcoded zone literals are back"
     assert T.zone_edges() == (0.0, T.NEEDS_WORK, T.SOLID, T.STRONG, 100.0)
 

@@ -22,6 +22,8 @@ import tempfile
 import types
 from typing import Any
 
+from _dom import by_attr, parse
+
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 MARKET_SIZING_DIR = os.path.join(os.path.dirname(SCRIPT_DIR), "skills", "market-sizing", "scripts")
 
@@ -1115,6 +1117,45 @@ def test_funnel_clamped_circle_dashed_stroke() -> None:
         assert 'stroke-dasharray="3,2"' not in attrs, "SAM circle should not be dashed"
 
 
+def _both_builds(td_tam: float, bu_tam: float) -> dict[str, Any]:
+    def build(tam: float) -> dict[str, Any]:
+        return {
+            "tam": {"value": tam, "inputs": {}},
+            "sam": {"value": tam * 0.4, "inputs": {}},
+            "som": {"value": tam * 0.05, "inputs": {}},
+        }
+
+    return {"approach": "both", "top_down": build(td_tam), "bottom_up": build(bu_tam)}
+
+
+def _tam_radii(html_text: str) -> list[float]:
+    """The TAM circles' radii, in document order (Top-Down first)."""
+    return [float(r) for r in re.findall(r'<circle[^>]*r="([\d.]+)" fill="#0D549D" opacity="0.3"', html_text)]
+
+
+def test_both_builds_share_one_scale_so_a_quarter_tam_is_half_the_radius() -> None:
+    """The two diagrams used to fill the same circle whatever their TAMs, so a build four times smaller
+    looked the same size. The larger TAM now sets the radius and every circle's area follows its value."""
+    arts = _all_artifacts()
+    arts["sizing.json"] = _both_builds(40_000_000_000, 10_000_000_000)
+    rc, stdout, _stderr = _run_visualize(_make_artifact_dir(arts))
+    assert rc == 0
+    assert _tam_radii(stdout) == [100.0, 50.0]
+    assert "TAM: $40.0B" in stdout and "TAM: $10.0B" in stdout
+
+
+def test_a_tiny_tam_keeps_a_visible_radius_and_its_exact_label() -> None:
+    arts = _all_artifacts()
+    arts["sizing.json"] = _both_builds(100_000_000_000, 100_000_000)
+    rc, stdout, _stderr = _run_visualize(_make_artifact_dir(arts))
+    assert rc == 0
+    td_r, bu_r = _tam_radii(stdout)
+    assert td_r == 100.0 and bu_r == 20.0, (td_r, bu_r)
+    tiny = re.search(r'<circle[^>]*r="20.00" fill="#0D549D" opacity="0.3"([^>]*)/>', stdout)
+    assert tiny and 'stroke-dasharray="3,2"' in tiny.group(1), "a clamped TAM circle must say it is not to scale"
+    assert "TAM: $100.0M" in stdout
+
+
 def test_funnel_normal_ratio_no_leader_line() -> None:
     """AC-13: Normal ratio (SAM large relative to TAM) has no leader line."""
     arts = _all_artifacts()
@@ -1248,8 +1289,9 @@ def test_key_findings_absent_when_no_signals() -> None:
     d = _make_artifact_dir(arts)
     rc, stdout, _stderr = _run_visualize(d)
     assert rc == 0
-    # With all-passing data, "needs attention" subsection should not appear
-    assert "needs attention" not in stdout.lower()
+    # With all-passing data, the "needs attention" column should not appear. Read by its hook, not by the
+    # words: the checklist's filter chips carry their own fixed labels.
+    assert not by_attr(parse(stdout), "data-findings", "attention")
     assert "Top actions" not in stdout
 
 
@@ -1278,8 +1320,32 @@ def test_key_findings_structured_subsections() -> None:
     d = _make_artifact_dir(arts)
     rc, stdout, _stderr = _run_visualize(d)
     assert rc == 0
-    assert "finding-attention" in stdout
+    (attention,) = by_attr(parse(stdout), "data-findings", "attention")
+    assert by_attr(attention, "data-finding", "data_current"), "the failed criterion is not a card under attention"
     assert "Data is current" in stdout
+
+
+def test_key_findings_past_the_third_are_behind_a_disclosure_not_dropped() -> None:
+    """Each column used to show three findings and drop the rest without a word. A founder with five
+    failed criteria saw three. Now the first three show and the rest sit behind "N more"."""
+    ids = ["data_current", "sources_reputable", "figures_triangulated", "formulas_shown", "sources_cited"]
+    items = [
+        {"id": cid, "category": "Data Quality", "label": f"Criterion {n}", "status": "fail", "notes": f"Note {n}"}
+        for n, cid in enumerate(ids)
+    ]
+    arts = _all_artifacts()
+    summary: dict[str, Any] = {"failed_items": ids, "fail": len(ids), "pass": 0}
+    summary.update(total=len(ids), not_applicable=0)
+    arts["checklist.json"] = {"items": items, "summary": summary}
+    rc, stdout, _stderr = _run_visualize(_make_artifact_dir(arts))
+    assert rc == 0
+    (attention,) = by_attr(parse(stdout), "data-findings", "attention")
+    cards = by_attr(attention, "data-finding")
+    assert [c.get("data-finding") for c in cards] == ids, "a failed criterion is missing from the findings"
+    hidden = [c.get("data-finding") for c in cards if any(a.tag == "details" for a in c.ancestors())]
+    assert hidden == ids[3:]
+    (more,) = [e for e in attention.iter() if e.tag == "summary"]
+    assert more.text() == "2 more"
 
 
 # ===========================================================================
@@ -1390,35 +1456,35 @@ class TestMarketSizingConfidenceColorCoverage:
 
 
 # ---------------------------------------------------------------------------
-# Test B: checklist statuses → visualize._CHECKLIST_COLORS coverage
+# Test B: checklist statuses → visualize._CHECKLIST_TONE coverage
 # ---------------------------------------------------------------------------
 
 
 class TestMarketSizingChecklistColorCoverage:
     """Every checklist status that market-sizing checklist.py can emit must
-    either appear in visualize._CHECKLIST_COLORS OR be documented as an
-    intentional exclusion (warn is excluded from the donut by design — the
-    donut reads only pass_ct / fail_ct / na_ct from the summary).
+    either have a tone in visualize._CHECKLIST_TONE (the page's grouped checklist
+    renders each item by its own status) OR be documented as an intentional
+    exclusion.
 
     Produced set is derived live from market-sizing checklist.VALID_STATUSES.
     Note that market-sizing checklist.py does NOT emit "warn" (unlike
     deck-review); so there is no silent exclusion gap.
     """
 
-    # Statuses intentionally excluded from the donut (none for market-sizing).
+    # Statuses intentionally given no tone (none for market-sizing).
     EXPLICIT_EXCLUSIONS: set[str] = set()
 
     def test_all_checklist_statuses_covered(self) -> None:
-        """Every checklist status must either be in _CHECKLIST_COLORS or excluded."""
+        """Every checklist status must either be in _CHECKLIST_TONE or excluded."""
         produced = _load_ms_checklist().VALID_STATUSES
         viz = _load_ms_visualize()
-        color_keys: set[str] = set(viz._CHECKLIST_COLORS.keys())
+        color_keys: set[str] = set(viz._CHECKLIST_TONE.keys())
         covered = color_keys | self.EXPLICIT_EXCLUSIONS
 
         missing = produced - covered
         assert not missing, (
-            f"visualize._CHECKLIST_COLORS is missing a colour entry for checklist status(es): "
-            f"{sorted(missing)}. Add entries to _CHECKLIST_COLORS or EXPLICIT_EXCLUSIONS."
+            f"visualize._CHECKLIST_TONE is missing a tone for checklist status(es): "
+            f"{sorted(missing)}. Add entries to _CHECKLIST_TONE or EXPLICIT_EXCLUSIONS."
         )
 
     def test_producer_checklist_statuses_min_count(self) -> None:
@@ -1429,11 +1495,11 @@ class TestMarketSizingChecklistColorCoverage:
         )
 
     def test_checklist_colors_min_count(self) -> None:
-        """_CHECKLIST_COLORS must cover at least the producer statuses."""
+        """_CHECKLIST_TONE must cover at least the producer statuses."""
         produced = _load_ms_checklist().VALID_STATUSES
         viz = _load_ms_visualize()
-        assert len(viz._CHECKLIST_COLORS) >= len(produced), (
-            f"visualize._CHECKLIST_COLORS has only {len(viz._CHECKLIST_COLORS)} entries; expected >= {len(produced)}."
+        assert len(viz._CHECKLIST_TONE) >= len(produced), (
+            f"visualize._CHECKLIST_TONE has only {len(viz._CHECKLIST_TONE)} entries; expected >= {len(produced)}."
         )
 
 

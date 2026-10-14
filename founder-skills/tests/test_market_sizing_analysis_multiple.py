@@ -22,6 +22,7 @@ from typing import Any
 
 _TESTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(_TESTS))
+from _dom import by_id, parse  # noqa: E402
 from test_market_sizing import (  # noqa: E402
     _CRUN,
     _GOOD_FINDING,
@@ -115,7 +116,8 @@ def test_every_surface_carries_the_caveat(tmp_path: Path) -> None:
     assert _view._MULTIPLE_CAVEAT in data["report_markdown"]
     # The findings section itself, not only the verdict above it (which carries the caveat too, and
     # hid an unchecked section from a looser assertion).
-    assert "none of this analysis" in html_page[html_page.index("<h2>Adversarial Findings</h2>") :]
+    adversarial = by_id(parse(html_page), "adversarial")
+    assert adversarial is not None and "none of this analysis" in adversarial.text()
     assert "none of this analysis" in payload
     # The verdict, which the hand-over message prints: its strongest challenge carries it too.
     verdict = next(line for line in data["report_markdown"].splitlines() if "The most serious" in line)

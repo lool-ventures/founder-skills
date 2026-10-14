@@ -22,6 +22,7 @@ import tempfile
 from typing import Any
 
 import pytest
+from _dom import by_attr, by_tag, parse
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 # Market-sizing scripts are colocated with the skill
@@ -9000,7 +9001,7 @@ def test_verdict_when_the_review_was_skipped() -> None:
 
 
 def test_verdict_paragraph_renders_in_the_html_hero() -> None:
-    """Sliced between </h1> and <main>, so the funnel label further down cannot satisfy it."""
+    """Read from the page's header card, so the funnel label further down cannot satisfy it."""
     inputs = {**_VALID_INPUTS, "existing_claims": {"tam": None, "sam": None, "som": 100_000_000}}
     rt = {
         **_REDTEAM_ARTIFACT,
@@ -9010,8 +9011,10 @@ def test_verdict_paragraph_renders_in_the_html_hero() -> None:
     assert rc == 0
     rc_html, html_text, err = run_script_raw("visualize.py", ["--dir", d])
     assert rc_html == 0, err
-    hero = html_text[html_text.index("</h1>") : html_text.index("<main")]
-    assert 'class="verdict"' in hero
+    (header,) = by_tag(parse(html_text), "header")
+    (verdict,) = by_attr(header, "data-verdict")
+    hero = verdict.text()
+    assert verdict.tag == "p" and hero, "the header card carries no verdict paragraph"
     assert "You stated SOM $100.0M; this analysis finds $20.7M (top-down) and $54.1M (bottom-up)." in hero
     assert "The two builds differ by 131.4% on TAM and 94.2% on SOM" in hero
     # visualize escapes the apostrophe; assert the class phrase without it
