@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased] — A deck's checklist is scored only from its slide-by-slide review
+## [0.19.2] - 2026-10-14 — A deck's checklist is scored only from its slide-by-slide review
 
 ### Highlights
 
