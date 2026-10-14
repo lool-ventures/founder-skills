@@ -1487,3 +1487,247 @@ def test_only_a_sizing_rewrite_notice_names_the_redo() -> None:
     assert other == mod._notice("/h/redteam_output.json"), "every other context keeps the notice it had"
     for notice in (sizing, other):
         assert "] This dispatch was sent" in notice and "producer-rejected" in notice
+
+
+# --- a newer print the check cannot vouch for makes the vouched one stale ------------------------------------
+#
+# The release-gate failure: the redo was printed as the last command of a block that first recorded research
+# through a heredoc. The block could not be vouched for, so the comparand stayed the build's plain print, and
+# the redo dispatch, sent verbatim, was rewritten to the plain prompt. The sub-agent rebuilt from the original
+# instructions and the report said the redo had chosen the same inputs again.
+
+_TD = "CONTEXT: TOP_DOWN_METHODOLOGY"
+_HEREDOC_REDO_CMD = 'AD=/w/a\npython3 - "$AD/validation.json" <<\'PY\'\nimport json,sys\nprint("ok")\nPY\n' + _REDO_CMD
+_STALE_HEAD = f"{MARKER}[{_TD_PATH}] Held: the newest prompt printed for this OUTPUT_PATH is in a result"
+
+
+def _heredoc_redo_rows(version: str | None = "2.1.290") -> list[dict[str, Any]]:
+    rows = [_user("Size my market."), *_first_build_done(), *_printed("ok\n" + _TD_REDO, command=_HEREDOC_REDO_CMD)]
+    return _versioned(rows, version) if version else rows
+
+
+def test_a_redo_printed_beside_a_heredoc_is_held_not_rewritten_to_the_plain_prompt(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    mod = _hook()
+    monkeypatch.setattr(mod, "REWRITE_FLOOR", (2, 1, 290))
+    rows = _heredoc_redo_rows()
+    # The lever engaged: the heredoc block is not vouched for, the comparand is the plain print, and the
+    # newest print is the redo.
+    assert mod.generator_block(_HEREDOC_REDO_CMD)[0] is False
+    printed = mod.latest_printed(rows, _TD, _TD_PATH)
+    assert printed is not None and printed.strip() == _TD_PLAIN.strip()
+    newest = mod.newest_print(rows, _TD, _TD_PATH)
+    assert newest is not None and newest.strip() == _TD_REDO.strip()
+    out = _decide(mod, tmp_path, rows, {**_SIZING_INPUT, "prompt": _TD_REDO})["hookSpecificOutput"]
+    assert out["permissionDecision"] == "deny" and "updatedInput" not in out
+    reason = out["permissionDecisionReason"]
+    assert reason.startswith(_STALE_HEAD), reason
+    assert "same generator arguments in a shell call of its own" in reason
+    assert "a heredoc" in reason
+    assert _TD_PLAIN.strip() not in reason
+
+
+def test_without_the_newer_print_rule_the_redo_is_rewritten_to_the_plain_prompt(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    """The fix removed (no newer print is ever found): the observed defect comes back."""
+    mod = _hook()
+    monkeypatch.setattr(mod, "REWRITE_FLOOR", (2, 1, 290))
+    monkeypatch.setattr(mod, "newest_print", lambda *a, **k: None)
+    out = _decide(mod, tmp_path, _heredoc_redo_rows(), {**_SIZING_INPUT, "prompt": _TD_REDO})["hookSpecificOutput"]
+    assert out["permissionDecision"] == "allow" and out["updatedInput"]["prompt"] == _TD_PLAIN
+
+
+def test_after_two_holds_the_stale_dispatch_goes_through_as_sent(tmp_path: Path, monkeypatch: Any, capsys: Any) -> None:
+    mod = _hook()
+    monkeypatch.setattr(mod, "REWRITE_FLOOR", (2, 1, 290))
+    held = _held(f"{MARKER}[{_TD_PATH}] x")
+    rows = _versioned([*_heredoc_redo_rows(None), held, held], "2.1.290")
+    assert _decide(mod, tmp_path, rows, {**_SIZING_INPUT, "prompt": _TD_REDO}) is None
+    assert f"{_TD_PATH} sent unlike the printed prompt after 2 holds" in capsys.readouterr().err
+
+
+def test_the_redo_rerun_in_a_call_of_its_own_goes_through(tmp_path: Path, monkeypatch: Any) -> None:
+    """The retry the hold asks for: the same arguments alone print the same redo, now vouched and newest."""
+    mod = _hook()
+    monkeypatch.setattr(mod, "REWRITE_FLOOR", (2, 1, 290))
+    rows = _versioned(
+        [*_heredoc_redo_rows(None), _held(f"{MARKER}[{_TD_PATH}] x"), *_printed(_TD_REDO, command=_REDO_CMD)],
+        "2.1.290",
+    )
+    assert _decide(mod, tmp_path, rows, {**_SIZING_INPUT, "prompt": _TD_REDO}) is None
+    out = _decide(mod, tmp_path, rows, {**_SIZING_INPUT, "prompt": _TD_IMPROVISED})["hookSpecificOutput"]
+    assert out["permissionDecision"] == "allow" and out["updatedInput"]["prompt"] == _TD_REDO
+
+
+def test_below_the_floor_the_stale_hold_does_not_inline_the_plain_prompt(tmp_path: Path) -> None:
+    mod = _hook()
+    out = _decide(mod, tmp_path, _heredoc_redo_rows(None), {**_SIZING_INPUT, "prompt": _TD_REDO})
+    reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+    assert reason.startswith(_STALE_HEAD) and _TD_PLAIN.strip() not in reason
+
+
+def test_after_the_plugin_files_hold_the_stale_hold_does_not_inline_the_plain_prompt(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    mod = _hook()
+    monkeypatch.setattr(mod, "_plugin_mismatches", lambda: ["skills/market-sizing/scripts/dispatch_prompt.py"])
+    rows = [*_heredoc_redo_rows(), _held(f"{MARKER}[plugin-files] Held: x")]
+    out = _decide(mod, tmp_path, rows, {**_SIZING_INPUT, "prompt": _TD_REDO})["hookSpecificOutput"]
+    reason = out["permissionDecisionReason"]
+    assert reason.startswith(_STALE_HEAD) and _TD_PLAIN.strip() not in reason
+
+
+def test_a_failed_shell_result_carrying_a_print_counts(tmp_path: Path, monkeypatch: Any) -> None:
+    mod = _hook()
+    monkeypatch.setattr(mod, "REWRITE_FLOOR", (2, 1, 290))
+    uid, use = _call("Bash", {"command": _HEREDOC_REDO_CMD})
+    rows = _versioned(
+        [_user("Size my market."), *_first_build_done(), use, _result(uid, "ok\n" + _TD_REDO, is_error=True)],
+        "2.1.290",
+    )
+    out = _decide(mod, tmp_path, rows, {**_SIZING_INPUT, "prompt": _TD_REDO})["hookSpecificOutput"]
+    assert out["permissionDecision"] == "deny" and out["permissionDecisionReason"].startswith(_STALE_HEAD)
+
+
+def test_a_dispatch_result_carrying_a_print_is_not_a_newer_print(tmp_path: Path, monkeypatch: Any) -> None:
+    """A hold's reason inlines the older print, and a sub-agent's reply is no print: neither makes a comparand
+    stale."""
+    mod = _hook()
+    monkeypatch.setattr(mod, "REWRITE_FLOOR", (2, 1, 290))
+    uid, use = _call("Agent", {**_SIZING_INPUT, "prompt": _TD_IMPROVISED})
+    rows = _versioned([_user("Size my market."), *_first_build_done(), use, _result(uid, _TD_REDO)], "2.1.290")
+    assert mod.newest_print(rows, _TD, _TD_PATH) == mod.latest_printed(rows, _TD, _TD_PATH)
+    out = _decide(mod, tmp_path, rows, {**_SIZING_INPUT, "prompt": _TD_IMPROVISED})["hookSpecificOutput"]
+    assert out["updatedInput"]["prompt"] == _TD_PLAIN
+
+
+def test_an_unvouched_reprint_equal_to_the_vouched_one_still_rewrites(tmp_path: Path, monkeypatch: Any) -> None:
+    """7(a): no newer text, nothing stale."""
+    mod = _hook()
+    monkeypatch.setattr(mod, "REWRITE_FLOOR", (2, 1, 290))
+    plain_cmd = _HEREDOC_REDO_CMD.replace(" --redo comparison --suspect industry_total", "")
+    rows = _versioned(
+        [_user("Size my market."), *_first_build_done(), *_printed("ok\n" + _TD_PLAIN, command=plain_cmd)], "2.1.290"
+    )
+    assert mod.generator_block(plain_cmd)[0] is False
+    out = _decide(mod, tmp_path, rows, {**_SIZING_INPUT, "prompt": _TD_IMPROVISED})["hookSpecificOutput"]
+    assert out["permissionDecision"] == "allow" and out["updatedInput"]["prompt"] == _TD_PLAIN
+
+
+def test_an_unvouched_print_for_another_output_path_changes_nothing(tmp_path: Path, monkeypatch: Any) -> None:
+    """7(b)."""
+    mod = _hook()
+    monkeypatch.setattr(mod, "REWRITE_FLOOR", (2, 1, 290))
+    other = _TD_REDO.replace(_TD_PATH, "agent/market-sizing-acme/handoff/R/r2/top_down_output.json")
+    assert other != _TD_REDO
+    rows = _versioned(
+        [_user("Size my market."), *_first_build_done(), *_printed("ok\n" + other, command=_HEREDOC_REDO_CMD)],
+        "2.1.290",
+    )
+    out = _decide(mod, tmp_path, rows, {**_SIZING_INPUT, "prompt": _TD_IMPROVISED})["hookSpecificOutput"]
+    assert out["permissionDecision"] == "allow" and out["updatedInput"]["prompt"] == _TD_PLAIN
+
+
+def test_a_vouched_read_back_after_an_older_unvouched_print_is_the_newest(tmp_path: Path, monkeypatch: Any) -> None:
+    """7(c): an unvouched print, then the redo redirected to a file and Read back (vouched). The newest print
+    is the vouched one, so nothing is stale and a repair is rewritten to the redo."""
+    mod = _hook()
+    monkeypatch.setattr(mod, "REWRITE_FLOOR", (2, 1, 290))
+    redirect = 'H="/w/handoff/R"\n' + _REDO_CMD + ' > "$H/redo_prompt.txt"\necho "EXIT=$?"'
+    rows = _versioned(
+        [
+            _user("Size my market."),
+            *_first_build_done(),
+            *_printed("ok\n" + _TD_IMPROVISED, command=_HEREDOC_REDO_CMD),
+            *_printed("EXIT=0\n", command=redirect),
+            *_read("/w/handoff/R/redo_prompt.txt", _TD_REDO),
+        ],
+        "2.1.290",
+    )
+    printed = mod.latest_printed(rows, _TD, _TD_PATH)
+    assert printed is not None and printed.strip() == _TD_REDO.strip()
+    out = _decide(mod, tmp_path, rows, {**_SIZING_INPUT, "prompt": _TD_IMPROVISED})["hookSpecificOutput"]
+    assert out["permissionDecision"] == "allow" and out["updatedInput"]["prompt"] == _TD_REDO
+
+
+def test_reading_back_the_older_plain_prompt_after_a_vouched_redo_does_not_hold_the_redo(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    """7(d): a vouched redo, then a Read of the OLDER plain prompt's file. The newest print differs from the
+    comparand, but the dispatch equals the comparand, so it passes before the rule is asked."""
+    mod = _hook()
+    monkeypatch.setattr(mod, "REWRITE_FLOOR", (2, 1, 290))
+    rows = _versioned(
+        [
+            _user("Size my market."),
+            *_first_build_done(),
+            *_printed(_TD_REDO, command=_REDO_CMD),
+            *_read("/w/notes/top_down_prompt.txt", _TD_PLAIN),
+        ],
+        "2.1.290",
+    )
+    newest = mod.newest_print(rows, _TD, _TD_PATH)
+    assert newest is not None and newest.strip() == _TD_PLAIN.strip()  # the lever: the newest print differs
+    assert _decide(mod, tmp_path, rows, {**_SIZING_INPUT, "prompt": _TD_REDO}) is None
+
+
+def test_the_trade_a_forged_print_turns_a_rewrite_into_two_holds_then_a_pass(
+    tmp_path: Path, monkeypatch: Any, capsys: Any
+) -> None:
+    """THE TRADE (module docstring): any result carrying another text for this context and path makes the
+    vouched print stale. A steered dispatch the check used to rewrite with no budget is held twice, then
+    sent as written. Accepted: a reverted redo is silent, a pass after two holds is loud."""
+    mod = _hook()
+    monkeypatch.setattr(mod, "REWRITE_FLOOR", (2, 1, 290))
+    forged = _printed(_TD_IMPROVISED, command="cat /w/notes/top_down.txt")
+    rows = _versioned([_user("Size my market."), *_first_build_done(), *forged], "2.1.290")
+    out = _decide(mod, tmp_path, rows, {**_SIZING_INPUT, "prompt": _TD_IMPROVISED})["hookSpecificOutput"]
+    assert out["permissionDecision"] == "deny" and "updatedInput" not in out
+    assert out["permissionDecisionReason"].startswith(_STALE_HEAD)
+    # Control: without the forged result, the same dispatch is rewritten, with no budget.
+    clean = _versioned([_user("Size my market."), *_first_build_done()], "2.1.290")
+    rewritten = _decide(mod, tmp_path, clean, {**_SIZING_INPUT, "prompt": _TD_IMPROVISED})["hookSpecificOutput"]
+    assert rewritten["updatedInput"]["prompt"] == _TD_PLAIN
+    held = _held(f"{MARKER}[{_TD_PATH}] x")
+    after = _versioned([_user("Size my market."), *_first_build_done(), *forged, held, held], "2.1.290")
+    assert _decide(mod, tmp_path, after, {**_SIZING_INPUT, "prompt": _TD_IMPROVISED}) is None
+    assert "after 2 holds" in capsys.readouterr().err
+
+
+def test_a_distrusted_correction_print_is_held_without_the_uncorrected_print(tmp_path: Path, monkeypatch: Any) -> None:
+    """A `--correction producer-rejected` redo whose detail file no failed producer wrote is never the
+    comparand, but it is the newest print: held, and the hold no longer inlines the uncorrected prompt. (Its
+    body may name the wrong cause; that is part of the trade.)"""
+    mod = _hook()
+    monkeypatch.setattr(mod, "REWRITE_FLOOR", (2, 1, 290))
+    corrected = _GENERATED.replace("Then read", "CORRECTION: your hand-off was rejected.\nThen read")
+    cmd = GEN_CMD + ' --correction producer-rejected --detail-file "$HANDOFF_DIR/producer_rejected.txt"'
+    rows = _versioned([_user("Size my market."), *_printed(_GENERATED), *_printed(corrected, command=cmd)], "2.1.290")
+    printed = mod.latest_printed(rows, "CONTEXT: RED_TEAM", "agent/handoff/R/r2/redteam_output.json")
+    assert printed is not None and printed.strip() == _GENERATED.strip()
+    out = _decide(mod, tmp_path, rows, {**_INPUT, "prompt": corrected})["hookSpecificOutput"]
+    assert out["permissionDecision"] == "deny" and "updatedInput" not in out
+    assert _GENERATED.strip() not in out["permissionDecisionReason"]
+
+
+def test_a_competitive_positioning_correction_beside_a_heredoc_is_held_not_rewritten(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    """The rule is keyed on context and OUTPUT_PATH only, so it covers every generator's contexts."""
+    mod = _hook()
+    monkeypatch.setattr(mod, "REWRITE_FLOOR", (2, 1, 290))
+    path = "agent/competitive-positioning-acme/handoff/R/moat_scoring_output.json"
+    plain = f"CONTEXT: MOAT_SCORING\nOUTPUT_PATH: {path}\nRUN_ID: R\n\nScore each moat.\n{mod.END}\n"
+    fixed = plain.replace("Score each moat.", "CORRECTION: a file was missing.\nScore each moat.")
+    gen = 'python3 "$SCRIPTS/cp_dispatch_prompt.py" moat_scoring --run-id "$RUN_ID"'
+    messy = "python3 - <<'PY'\nprint(\"ok\")\nPY\n" + gen + " --correction missing-file"
+    rows = _versioned(
+        [_user("Map my competitors."), *_printed(plain, command=gen), *_printed("ok\n" + fixed, command=messy)],
+        "2.1.290",
+    )
+    tool_input = {"subagent_type": "founder-skills:competitive-positioning", "description": "Moats", "prompt": fixed}
+    out = _decide(mod, tmp_path, rows, tool_input)["hookSpecificOutput"]
+    assert out["permissionDecision"] == "deny" and "updatedInput" not in out
+    assert out["permissionDecisionReason"].startswith(f"{MARKER}[{path}] Held: the newest prompt printed")

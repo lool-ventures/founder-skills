@@ -70,7 +70,9 @@ make the report depend on the hook, and a missing marker would read as clean. Th
 own marker and budget.
 
 NO PRINTED PROMPT. Held, with "run the prompt generator": the only way to satisfy it puts the
-comparand in the transcript.
+comparand in the transcript. A known exception to reading results only: to word that hold, a block that
+will not parse is searched as text for this context's generator call; that picks the message, never
+whether the dispatch is held, passed or rewritten.
 
 SENDING THE PRINTED PROMPT INSTEAD. Where a printed prompt exists and the dispatch differs,
 the hook can allow the dispatch with `updatedInput` -- the dispatch's own input with only `prompt`
@@ -86,6 +88,31 @@ dispatch is held as above:
     the printed prompt. One mismatch and every later dispatch is held, with a stderr line. This runs
     only after a rewritten dispatch's result exists, so the floor alone covers the first rewrite and
     any sibling dispatched beside it.
+
+A NEWER PRINT. An older print is never sent in place of a newer one. When the dispatch differs from the
+vouched print, and the newest text printed for the same context and OUTPUT_PATH by any main-thread shell or
+Read result (`newest_print`, vouched or not, a failed shell result included) differs from the vouched one,
+the vouched print is stale: the dispatch is neither rewritten nor held with it inlined, but held as if
+nothing were printed, under a head that asks for the same generator arguments in a shell call of its own,
+and after the round's two holds it goes through as sent. The case that made this rule: a comparison redo
+printed as the last command of a block that first recorded research through a heredoc. The block could not
+be vouched for, so the comparand stayed the build's first plain print, the redo dispatch was rewritten to
+that, and the report said the redo had chosen the same inputs again. The rule reads printed text only,
+never a command. A dispatch equal to the vouched print still passes, even with a newer print beside it, so
+reading back an older prompt file after a vouched redo holds nothing.
+THE TRADE, stated: this is a model-writable input that turns a rewrite into a budgeted hold. Any result the
+model can produce carrying another context line, the same OUTPUT_PATH and the closing line (an `echo`, a
+`cat` of a file it wrote, a Write then a Read) makes the vouched print stale, so a steered dispatch that
+was rewritten with no budget is now held twice and then sent as written; so is a print this check
+deliberately distrusts (a `--correction producer-rejected` redo no failed producer wrote the detail for, a
+generator written over, a foreign copy, a PATH setting), whose hold may then name the wrong cause. Accepted
+because a reverted redo is silent and makes the report false, where a pass after two holds is loud: the
+release gate's received-prompt check fails on it. Residuals: a dispatch sending the OLD vouched print
+verbatim while a newer differing print exists passes (that equals the comparand); and a generator result
+the runtime saved to a file ("Full output saved to: ...") carries no context line, so it is seen only once
+Read back. Read from the CLI's binaries (2.1.293 and 2.1.299): a shell result is saved when it exceeds
+30,000 characters by default, a setting that can go as low as 4,000; a sizing redo is about 7 KB, so
+it stays in the result by default but would be saved under the lowest setting.
 
 THE PLUGIN'S FILES. Whether the generator that printed is the one this version shipped is read from the files,
 never from the shell commands run before it. `data/script-hashes.json` (written by `script_hashes.py --write`)
@@ -1187,6 +1214,41 @@ def latest_printed(rows: list[dict[str, Any]], context: str, output_path: str | 
     return found
 
 
+def newest_print(rows: list[dict[str, Any]], context: str, output_path: str) -> str | None:
+    """The newest text printed for `context` and `output_path` by ANY main-thread shell or Read result,
+    vouched for or not (A NEWER PRINT in the module docstring). Read from the result text alone, as
+    `latest_printed` reads a comparand: never from the command. A failed shell result counts (a print is
+    what the model can copy, whatever the exit code; a generator's refusal prints no context line). A
+    dispatch's result does not: a hold's reason inlines the older print, and a sub-agent's reply is no print."""
+    names: dict[str, Any] = {}
+    found = None
+    line_re = _context_line_re(context)
+    for row in rows:
+        content = (row.get("message") or {}).get("content")
+        if row.get("isSidechain") or not isinstance(content, list):
+            continue
+        for b in content:
+            if not isinstance(b, dict):
+                continue
+            if row.get("type") == "assistant" and b.get("type") == "tool_use":
+                names[str(b.get("id"))] = b.get("name")
+            elif row.get("type") == "user" and b.get("type") == "tool_result":
+                name = names.get(str(b.get("tool_use_id")))
+                if not (_is_shell(name) or name == "Read"):
+                    continue
+                text = _result_text(b)
+                if name == "Read":
+                    text = _unnumbered(text)
+                starts = [m.start() for m in line_re.finditer(text)]
+                if not starts:
+                    continue
+                start = text.index(context, starts[-1])
+                end = text.find(END, start)
+                if end >= 0 and _output_path(text[start : end + len(END)]) == output_path:
+                    found = text[start : end + len(END)]
+    return found
+
+
 def strings(obj: Any) -> Any:
     """Every string inside a decoded JSON value, so a marker is found in the text the runtime wrote and
     not in an encoding that escapes non-ASCII characters, quotes and backslashes."""
@@ -1383,11 +1445,22 @@ def _loud_command(command: str, distrusted: set[str]) -> str | None:
     return None
 
 
-def _unprinted_reason(rows: list[dict[str, Any]], context: str, agent: str, output_path: str) -> str:
+def _unprinted_reason(
+    rows: list[dict[str, Any]], context: str, agent: str, output_path: str, stale: bool = False
+) -> str:
     """The hold's reason when no printed prompt exists for this OUTPUT_PATH, by what the transcript shows:
     this context's generator ran in a block that could not be vouched for (named); its output was
-    redirected away; or it never ran (whether or not another context's did)."""
-    head = f"{MARKER}[{output_path}] Held: no printed prompt for this OUTPUT_PATH yet"
+    redirected away; or it never ran (whether or not another context's did). `stale`: a vouched print exists
+    but a later result printed another text for this path (A NEWER PRINT); only the head differs. Which body
+    is chosen reads the shell text of a block that will not parse; that selects the message only, never
+    whether the dispatch is held, passed or rewritten."""
+    head = (
+        f"{MARKER}[{output_path}] Held: the newest prompt printed for this OUTPUT_PATH is in a result the check "
+        "cannot vouch for, so neither it nor an earlier print is sent in its place. Run the same generator "
+        "arguments in a shell call of its own"
+        if stale
+        else f"{MARKER}[{output_path}] Held: no printed prompt for this OUTPUT_PATH yet"
+    )
     generator = _generator_for(agent)
     sub = context.split(":", 1)[1].strip().lower()
     latest: str | None = None
@@ -1569,6 +1642,12 @@ def decide(payload: dict[str, Any]) -> dict[str, Any] | None:
     printed = latest_printed(rows, context, output_path)
     if printed is not None and _squash(printed) == _squash(prompt):
         return None
+    # A NEWER PRINT (module docstring): a later result printed something else for this context and path, so
+    # the vouched print is stale. Neither it nor the newer one is sent: held as if nothing were printed.
+    newer = newest_print(rows, context, output_path) if printed is not None else None
+    stale = newer is not None and printed is not None and _squash(newer) != _squash(printed)
+    if stale:
+        printed = None
     if printed is not None and not mismatched and isinstance(tool_input, dict) and _may_rewrite(tool_input, rows):
         return _rewrite(tool_input, printed + "\n", output_path, context)
     if _holds(rows, output_path) >= MAX_HOLDS:
@@ -1578,7 +1657,7 @@ def decide(payload: dict[str, Any]) -> dict[str, Any] | None:
         )
         return None
     if printed is None:
-        reason = _unprinted_reason(rows, context, name or "", output_path)
+        reason = _unprinted_reason(rows, context, name or "", output_path, stale=stale)
     else:
         reason = f"{MARKER}[{output_path}] Held: {reason_text}. Send this as the prompt, unchanged:\n\n{printed}"
     return {
