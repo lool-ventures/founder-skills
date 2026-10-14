@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -256,7 +257,10 @@ def test_lint_is_warn_only_receipt_and_stderr() -> None:
         assert "47%" not in err
         with open(out, encoding="utf-8") as fh:
             written = json.load(fh)
-        assert written == dict(payload, metadata={"run_id": "r1"})
+        # The metadata is the run id plus Step 5's read token (a 12-hex value from the body); the lint adds nothing.
+        token = written["metadata"].get("read_token")
+        assert isinstance(token, str) and re.fullmatch(r"[0-9a-f]{12}", token), written["metadata"]
+        assert written == dict(payload, metadata={"run_id": "r1", "read_token": token})
 
 
 def test_lint_backed_hit_prints_nothing() -> None:

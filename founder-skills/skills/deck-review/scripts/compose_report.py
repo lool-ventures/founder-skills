@@ -2231,7 +2231,7 @@ def compose(
                     _warn(
                         "STALE_ARTIFACT",
                         (
-                            "checklist.json was written without checking that the grader read the slide reviews: "
+                            "the checklist was written without checking that the grader read the slide reviews: "
                             "dispatch the CHECKLIST (Step 5) again, pipe it with --slide-reviews, then re-run "
                             "compose"
                         ),
@@ -2246,7 +2246,7 @@ def compose(
                     _warn(
                         "STALE_ARTIFACT",
                         (
-                            "checklist.json was graded against an earlier version of the slide reviews: dispatch "
+                            "the checklist was graded against an earlier version of the slide reviews: dispatch "
                             "the CHECKLIST (Step 5) again, then re-run compose"
                         ),
                         founder_message=(
