@@ -2213,6 +2213,49 @@ def compose(
                 )
             )
 
+    # A CHECKLIST GRADED ON OTHER SLIDE REVIEWS. `checklist.py --slide-reviews` refuses a grade that does not
+    # echo slide_reviews.json's read token and stamps the token it accepted, so the two agree on a run that
+    # followed Step 5. They disagree when Step 4 ran again after Step 5 (the founder-text remedy re-dispatches
+    # SLIDE_REVIEWS), or when the checklist file was written without the check. Compared by the content-derived
+    # token, not the file's bytes, so re-piping identical reviews is not stale. Same run only (another run's
+    # file is already STALE_ARTIFACT by run id); a slide-reviews file with no token (written before the token
+    # existed) says nothing either way.
+    _sr_meta = _as_dict(slide_reviews.get("metadata")) if _usable(slide_reviews) else {}
+    _sr_token = _sr_meta.get("read_token")
+    if isinstance(_sr_token, str) and _sr_token and _usable(checklist_data):
+        _ck_rid = _as_dict(checklist_data.get("metadata")).get("run_id")
+        if _ck_rid and _ck_rid == _sr_meta.get("run_id"):
+            _graded = _as_dict(checklist_data.get("graded_against")).get("slide_reviews")
+            if not isinstance(_graded, dict):
+                warnings.append(
+                    _warn(
+                        "STALE_ARTIFACT",
+                        (
+                            "checklist.json was written without checking that the grader read the slide reviews: "
+                            "dispatch the CHECKLIST (Step 5) again, pipe it with --slide-reviews, then re-run "
+                            "compose"
+                        ),
+                        founder_message=(
+                            "The checklist was scored without confirming the slide-by-slide review had been "
+                            "read, so its score may not reflect that review."
+                        ),
+                    )
+                )
+            elif _graded.get("read_token") != _sr_token:
+                warnings.append(
+                    _warn(
+                        "STALE_ARTIFACT",
+                        (
+                            "checklist.json was graded against an earlier version of the slide reviews: dispatch "
+                            "the CHECKLIST (Step 5) again, then re-run compose"
+                        ),
+                        founder_message=(
+                            "The checklist was scored before the slide-by-slide review was last revised, so its "
+                            "score may not reflect that review."
+                        ),
+                    )
+                )
+
     # Render every section EXCEPT Warnings first, so we can pre-scan the body
     # for a marker collision and append MARKER_COLLISION before status and the
     # Warnings section are computed. Otherwise status could read "clean" while

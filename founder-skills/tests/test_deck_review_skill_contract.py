@@ -2205,3 +2205,67 @@ def test_slide_reviews_states_a_disagreement_only_from_the_arithmetic() -> None:
         assert "disagree only when" in flat and "reconciliation.json" in flat, name
         assert "one quantity two ways (quote both)" in flat, name
         assert "labelled conservative" in flat and "its inverse" in flat, name
+
+
+# ---------------------------------------------------------------------------
+# Step 5 is graded only from a grade that read this run's slide reviews (checklist.py --slide-reviews).
+# ---------------------------------------------------------------------------
+
+
+def _checklist_template() -> str:
+    """The CHECKLIST dispatch template, bounded by its own fences (never a fixed character window)."""
+    text = SKILL_MD.read_text(encoding="utf-8")
+    start = text.index("CONTEXT: CHECKLIST\nOUTPUT_PATH:")
+    end = text.index("\n```", start)
+    return text[start:end]
+
+
+def _step5() -> str:
+    text = SKILL_MD.read_text(encoding="utf-8")
+    start = text.index("### Step 5:")
+    return text[start : text.index("\n### Step 6", start)]
+
+
+def test_checklist_template_requires_the_slide_reviews_and_names_the_echo() -> None:
+    flat = " ".join(_checklist_template().split())
+    assert "<REVIEW_DIR_AGENT>/slide_reviews.json (a required read)" in flat
+    assert "for reference" not in flat, "the read must not sound optional"
+    assert '{"slide_reviews_read_token": ' in flat, "the echo key belongs in the output-shape literal the grader copies"
+    assert "copy it from the `slide_reviews.json` you Read" in flat
+
+
+def test_no_main_thread_placeholder_names_the_read_token() -> None:
+    """Every `<...>` in a dispatch template is a main-thread substitution target. One naming the token would
+    have the main thread read slide_reviews.json and fill it in, and the echo would prove nothing."""
+    template = _checklist_template()
+    placeholders = re.findall(r"<[^<>\n]+>", template)
+    assert "<REVIEW_DIR_AGENT>" in placeholders, "the scan must see the template's placeholders"
+    assert [p for p in placeholders if "read_token" in p or "token" in p.lower()] == []
+    text = SKILL_MD.read_text(encoding="utf-8")
+    assert not [p for p in re.findall(r"<[^<>\n]+>", text) if "read_token" in p]
+    assert not re.search(r"\b[0-9a-f]{12}\b", template), "the template must never carry a token value"
+
+
+def test_step5_pipe_passes_slide_reviews_and_routes_the_two_codes() -> None:
+    step = _step5()
+    flat = " ".join(step.split())
+    assert "never in the same message as SLIDE_REVIEWS" in flat
+    fence = step.index("```bash")
+    pipe = step[fence : step.index("```\n", fence + 3)]
+    assert '--slide-reviews "$REVIEW_DIR/slide_reviews.json"' in pipe
+    assert "`SLIDE_REVIEWS_NOT_READ`: dispatch the CHECKLIST again" in flat and "never a repair" in flat
+    assert "`SLIDE_REVIEWS_MISSING`: run Step 4 first." in flat
+    # The bash-after-subagent marker stays directly after the routing line (test_skill_orchestration keys on it).
+    assert step.rstrip().endswith("<!-- skill-quality-ci: bash-after-subagent-ok -->")
+
+
+def test_the_hand_off_state_machine_redoes_rather_than_repairs_a_blind_grade() -> None:
+    """The producer-rejection row is what the model branches on, and a repair prompt carries the diagnostic."""
+    text = SKILL_MD.read_text(encoding="utf-8")
+    row = next(line for line in text.splitlines() if line.startswith("- **Producer schema rejection**"))
+    assert "except `SLIDE_REVIEWS_NOT_READ`" in row and "**redo-dispatch** of the full Step 5 prompt" in row
+
+
+def test_the_founder_text_remedy_regrades_step5_after_a_slide_reviews_redispatch() -> None:
+    flat = " ".join(SKILL_MD.read_text(encoding="utf-8").split())
+    assert "when that step was SLIDE_REVIEWS, Step 5 too (a regrade, outside its retry budget)" in flat

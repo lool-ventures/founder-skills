@@ -1596,7 +1596,14 @@ SKILL_MD_CEILING: dict[str, int] = {
     # to stdout; Step 5's sentence now points there instead of restating it.
     # 115,265 -> 115,318 (+53 B): Step 1 takes the company name from the request, or the title slide only
     # when it is already readable (the copy Read reaches is made in Step 2).
-    "deck-review": 115_318,
+    # 115,318 -> 116,102 (+784 B): Step 5's checklist is written only from a grade that read this run's slide
+    # reviews (checklist.py --slide-reviews refuses a grade without the file's read token). Step 5 says not to
+    # dispatch with SLIDE_REVIEWS; its template marks the read required and names the echo key (no `<...>`
+    # placeholder, so the main thread never fills it); the pipe passes the flag; one line routes the two codes.
+    # The hand-off state machine's producer-rejection row carves SLIDE_REVIEWS_NOT_READ out as a redo, never a
+    # repair (a repair prompt carries the diagnostic, and the row is what the model branches on), and the
+    # FOUNDER_TEXT_TOKEN remedy says a SLIDE_REVIEWS re-dispatch also regrades Step 5. Approved 2026-10-14.
+    "deck-review": 116_102,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
@@ -3701,6 +3708,52 @@ def _deck_review_valid_checklist() -> str:
     return json.dumps({"items": [{"id": i, "status": "pass", "evidence": "checked"} for i in ids]})
 
 
+def _deck_review_slide_reviews() -> tuple[str, str]:
+    """(path, read token) of a slide_reviews.json for run RID, written once by the REAL slide_reviews.py.
+
+    `checklist.py -o` requires `--slide-reviews` and a grade that echoes the file's token, so every deck
+    checklist entry below carries both; each entry then rejects on its own reason alone. The token is read
+    back from the written file, never recomputed here.
+    """
+    import atexit
+    import shutil
+    import tempfile
+
+    work = Path(tempfile.mkdtemp(prefix="fs-dr-slide-reviews-"))
+    atexit.register(shutil.rmtree, work, True)
+    recon = work / "reconciliation.json"
+    recon.write_text(json.dumps({"status": "checked", "metadata": {"run_id": "RID"}}), encoding="utf-8")
+    fixture = REPO_ROOT / "founder-skills" / "tests" / "fixtures" / "deck-review" / "slide_reviews.json"
+    body = json.loads(fixture.read_text(encoding="utf-8"))
+    body.pop("metadata", None)
+    out = work / "slide_reviews.json"
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(SKILLS_ROOT / "deck-review" / "scripts" / "slide_reviews.py"),
+            "--run-id",
+            "RID",
+            "-o",
+            str(out),
+            "--reconciliation",
+            str(recon),
+        ],
+        input=json.dumps(body),
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0, proc.stderr
+    return str(out), json.loads(out.read_text(encoding="utf-8"))["metadata"]["read_token"]
+
+
+_DR_SLIDE_REVIEWS, _DR_READ_TOKEN = _deck_review_slide_reviews()
+
+
+def _dr_echo(payload: str) -> str:
+    """The grade as Step 5's template asks for it: the items plus the read token the grader copied."""
+    return json.dumps({**json.loads(payload), "slide_reviews_read_token": _DR_READ_TOKEN})
+
+
 # tuple[skill, script, extra argv, rejecting payload] plus an OPTIONAL 5th element naming the
 # canonical-path flag when it is not `-o` (see the header comment above).
 _REJECTING_PAYLOADS: list[tuple[str, str, list[str], str] | tuple[str, str, list[str], str, str]] = [
@@ -3733,13 +3786,34 @@ _REJECTING_PAYLOADS: list[tuple[str, str, list[str], str] | tuple[str, str, list
     ("market-sizing", "sensitivity.py", [], '{"approach":"bottom_up","base":{},"ranges":{}}'),
     ("market-sizing", "checklist.py", [], '{"notitems":1}'),
     ("market-sizing", "red_team.py", [], '{"findings":"not a list"}'),
-    ("deck-review", "checklist.py", ["--run-id", "RID"], '{"items":[{"id":"bogus","status":"pass"}]}'),
+    # A sighted grade (slide reviews and their echo) whose items are bogus: the refusal is the items'.
+    (
+        "deck-review",
+        "checklist.py",
+        ["--run-id", "RID", "--slide-reviews", _DR_SLIDE_REVIEWS],
+        _dr_echo('{"items":[{"id":"bogus","status":"pass"}]}'),
+    ),
     # A VALID checklist (accepted without the flag; see the control test below) and a
     # reconciliation that cannot be read: the refusal is the flag's own precondition.
     (
         "deck-review",
         "checklist.py",
-        ["--run-id", "RID", "--reconciliation", "/nonexistent/reconciliation.json"],
+        [
+            "--run-id",
+            "RID",
+            "--slide-reviews",
+            _DR_SLIDE_REVIEWS,
+            "--reconciliation",
+            "/nonexistent/reconciliation.json",
+        ],
+        _dr_echo(_deck_review_valid_checklist()),
+    ),
+    # The same VALID checklist with this run's slide reviews but no echo of their read token: a grade made
+    # without reading them (SLIDE_REVIEWS_NOT_READ). The control below accepts it with the echo.
+    (
+        "deck-review",
+        "checklist.py",
+        ["--run-id", "RID", "--slide-reviews", _DR_SLIDE_REVIEWS],
         _deck_review_valid_checklist(),
     ),
     ("financial-model-review", "checklist.py", [], '{"notitems":1}'),
@@ -3862,8 +3936,9 @@ def test_producer_rejects_loudly_without_clobbering(entry: tuple, tmp_path: Path
 
 
 def test_the_deck_review_reconciliation_entry_rejects_on_the_flag_alone(tmp_path: Path) -> None:
-    """Control for the `--reconciliation` entry: the same payload, without the flag, is accepted.
-    Otherwise the entry could green on a payload refusal and guard nothing."""
+    """Control for the `--reconciliation` entry and the no-echo entry: the same payload, without the
+    reconciliation flag and with the read token echoed, is accepted. Otherwise either entry could green on a
+    payload refusal and guard nothing."""
     out = tmp_path / "checklist.json"
     proc = subprocess.run(
         [
@@ -3871,10 +3946,12 @@ def test_the_deck_review_reconciliation_entry_rejects_on_the_flag_alone(tmp_path
             str(SKILLS_ROOT / "deck-review" / "scripts" / "checklist.py"),
             "--run-id",
             "RID",
+            "--slide-reviews",
+            _DR_SLIDE_REVIEWS,
             "-o",
             str(out),
         ],
-        input=_deck_review_valid_checklist(),
+        input=_dr_echo(_deck_review_valid_checklist()),
         capture_output=True,
         text=True,
     )

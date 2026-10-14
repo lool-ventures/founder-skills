@@ -60,6 +60,21 @@
         "score_pct": {"type": "number"},
         "overall_status": {"type": "string", "enum": ["strong", "solid", "needs_work", "major_revision"]}
       }
+    },
+    "graded_against": {
+      "type": "object",
+      "description": "Written by checklist.py in producer mode (-o): the files this grade was checked against. slide_reviews.read_token is the token the grader echoed (equal to slide_reviews.json's metadata.read_token); each sha256 records the bytes of a file checklist.py opened, null when it was not given. Absent on a what-if rerun (stdout) and on files written before 0.19.2.",
+      "properties": {
+        "slide_reviews": {
+          "type": "object",
+          "properties": {
+            "read_token": {"type": "string"},
+            "sha256": {"type": "string"}
+          }
+        },
+        "inventory": {"type": ["string", "null"]},
+        "reconciliation": {"type": ["string", "null"]}
+      }
     }
   }
 }

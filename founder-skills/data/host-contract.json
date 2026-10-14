@@ -46,7 +46,9 @@
       "RUN_ID_REQUIRED",
       "RUN_NOT_BOUND",
       "RUN_SUPERSEDED",
-      "ARTIFACT_OTHER_RUN"
+      "ARTIFACT_OTHER_RUN",
+      "SLIDE_REVIEWS_MISSING",
+      "SLIDE_REVIEWS_NOT_READ"
     ],
     "fail": [
       "RUN_WAITING"

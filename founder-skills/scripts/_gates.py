@@ -5678,7 +5678,19 @@ CLI_CODES = {
     ],
     # deck-review's producers and compose: an output naming one of the step's own input files; in a run dir that
     # belongs to a run, a call named with no run, another run, or reading another run's file.
-    "dr_producers": ["OUTPUT_IS_INPUT", "RUN_ID_REQUIRED", "RUN_NOT_BOUND", "RUN_SUPERSEDED", "ARTIFACT_OTHER_RUN"],
+    # checklist.py -o (Step 5, with or without a ledger): SLIDE_REVIEWS_MISSING when this run's slide_reviews.json
+    # is missing, unusable, another run's or carries no read token (run Step 4 again); SLIDE_REVIEWS_NOT_READ when
+    # the grade does not echo that file's read token (a new CHECKLIST dispatch of the full Step 5 prompt, never a
+    # repair). Neither prints the token.
+    "dr_producers": [
+        "OUTPUT_IS_INPUT",
+        "RUN_ID_REQUIRED",
+        "RUN_NOT_BOUND",
+        "RUN_SUPERSEDED",
+        "ARTIFACT_OTHER_RUN",
+        "SLIDE_REVIEWS_MISSING",
+        "SLIDE_REVIEWS_NOT_READ",
+    ],
     # ic-sim's compose: a simulation dir that belongs to a run, whose files do not agree on which.
     # FUND_PROFILE_NAMES_PEOPLE: compose and the page refuse (exit 1, nothing written) a fund profile written
     # before partners became role names; the skill rebuilds the profile and the discussion under the same run.

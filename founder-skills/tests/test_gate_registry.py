@@ -434,6 +434,8 @@ _CODE_SOURCES = [
     SCRIPTS / "pptx_to_text.py",
     SKILLS / "deck-review" / "scripts" / "gate_state.py",
     SKILLS / "deck-review" / "scripts" / "compose_report.py",
+    # Step 5's producer: a grade made without this run's slide reviews is refused with a code.
+    SKILLS / "deck-review" / "scripts" / "checklist.py",
     SKILLS / "financial-model-review" / "scripts" / "_fmr_gates.py",
     SKILLS / "financial-model-review" / "scripts" / "compose_report.py",
     SKILLS / "market-sizing" / "scripts" / "record_revision_answer.py",

@@ -52,6 +52,53 @@ def run_script_raw(name: str, args: list[str] | None = None, stdin_data: str | N
     return result.returncode, result.stdout, result.stderr
 
 
+_SR_FIXTURE = Path(SCRIPT_DIR) / "fixtures" / "deck-review" / "slide_reviews.json"
+
+
+def _tokened_slide_reviews(directory: str | Path, run_id: str, body: dict | None = None) -> tuple[str, str]:
+    """Write `<directory>/slide_reviews.json` for `run_id` through the REAL slide_reviews.py; return (path, token).
+
+    The token is read back from the written file, never recomputed here, so these tests cannot drift from the
+    producer's hash. `body` defaults to the committed fixture's reviews. The producer needs this run's
+    reconciliation: an existing `<directory>/reconciliation.json` of this run is used, else a minimal one is
+    written beside it under another name, so a test's own reconciliation.json is never replaced.
+    """
+    d = Path(directory)
+    d.mkdir(parents=True, exist_ok=True)
+    if body is None:
+        body = json.loads(_SR_FIXTURE.read_text(encoding="utf-8"))
+        body.pop("metadata", None)
+    recon = d / "reconciliation.json"
+    try:
+        usable = json.loads(recon.read_text(encoding="utf-8")).get("metadata", {}).get("run_id") == run_id
+    except (OSError, ValueError, AttributeError):
+        usable = False
+    if not usable:
+        recon = d / f"sr-reconciliation-{run_id}.json"
+        recon.write_text(json.dumps({"status": "checked", "metadata": {"run_id": run_id}}), encoding="utf-8")
+    out = d / "slide_reviews.json"
+    rc, _stdout, err = run_script_raw(
+        "slide_reviews.py",
+        ["--run-id", run_id, "-o", str(out), "--reconciliation", str(recon)],
+        stdin_data=json.dumps(body),
+    )
+    assert rc == 0, err
+    token = json.loads(out.read_text(encoding="utf-8"))["metadata"]["read_token"]
+    assert isinstance(token, str) and token
+    return str(out), token
+
+
+def _with_echo(payload: str, token: str) -> str:
+    """The grader's hand-off as Step 5's template asks for it: the items plus the read token it copied."""
+    return json.dumps({**json.loads(payload), "slide_reviews_read_token": token})
+
+
+def _sighted(directory: str | Path, run_id: str, payload: str) -> tuple[list[str], str]:
+    """For a producer-mode (`-o`) checklist call: (the `--slide-reviews` args, the payload carrying the echo)."""
+    path, token = _tokened_slide_reviews(directory, run_id)
+    return ["--slide-reviews", path], _with_echo(payload, token)
+
+
 # -- All 35 canonical checklist IDs --
 
 _CHECKLIST_IDS = [
@@ -366,25 +413,21 @@ def test_checklist_non_dict_item() -> None:
     _assert_validation_errors(data, "must be an object")
 
 
-def test_checklist_output_flag() -> None:
+def test_checklist_output_flag(tmp_path: Path) -> None:
     """checklist.py with -o writes to file, stdout empty."""
     payload = json.dumps({"items": _make_checklist_items()})
-    with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
-        tmp = f.name
-    try:
-        rc, stdout, stderr = run_script_raw(
-            "checklist.py", ["--pretty", "--run-id", "test-run", "-o", tmp], stdin_data=payload
-        )
-        assert rc == 0, f"rc={rc}, stderr={stderr}"
-        receipt = json.loads(stdout)
-        assert receipt["ok"] is True
-        with open(tmp) as fh:
-            data = json.load(fh)
-        assert "summary" in data
-        assert len(data["items"]) == 35
-    finally:
-        if os.path.exists(tmp):
-            os.unlink(tmp)
+    sr_args, payload = _sighted(tmp_path, "test-run", payload)
+    tmp = str(tmp_path / "checklist.json")
+    rc, stdout, stderr = run_script_raw(
+        "checklist.py", ["--pretty", "--run-id", "test-run", *sr_args, "-o", tmp], stdin_data=payload
+    )
+    assert rc == 0, f"rc={rc}, stderr={stderr}"
+    receipt = json.loads(stdout)
+    assert receipt["ok"] is True
+    with open(tmp) as fh:
+        data = json.load(fh)
+    assert "summary" in data
+    assert len(data["items"]) == 35
 
 
 def test_checklist_omits_null_evidence_and_notes() -> None:
@@ -405,7 +448,7 @@ def test_checklist_omits_null_evidence_and_notes() -> None:
         assert "notes" not in item, f"{item['id']} emitted a null notes key"
 
 
-def test_checklist_output_validates_against_schema() -> None:
+def test_checklist_output_validates_against_schema(tmp_path: Path) -> None:
     """Real -o producer output (all pass, no evidence) must pass checklist.schema.json — no false SCHEMA_VIOLATION."""
     sys.path.insert(0, DECK_REVIEW_DIR)
     from _artifact_writer import load_schema  # type: ignore[import-not-found]  # noqa: E402
@@ -413,19 +456,16 @@ def test_checklist_output_validates_against_schema() -> None:
 
     items = [{"id": cid, "status": "pass"} for cid in _CHECKLIST_IDS]
     payload = json.dumps({"items": items})
-    with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
-        tmp = f.name
-    try:
-        rc, _, stderr = run_script_raw("checklist.py", ["--run-id", "r1", "-o", tmp], stdin_data=payload)
-        assert rc == 0, stderr
-        with open(tmp) as fh:
-            data = json.load(fh)
-        schema = load_schema(os.path.join(DECK_REVIEW_DIR, "..", "references", "schemas", "checklist.schema.json"))
-        errs = _schema_validate(data, schema)
-        assert errs == [], f"producer output should be schema-clean, got: {errs}"
-    finally:
-        if os.path.exists(tmp):
-            os.unlink(tmp)
+    sr_args, payload = _sighted(tmp_path, "r1", payload)
+    tmp = str(tmp_path / "checklist.json")
+    rc, _, stderr = run_script_raw("checklist.py", ["--run-id", "r1", *sr_args, "-o", tmp], stdin_data=payload)
+    assert rc == 0, stderr
+    with open(tmp) as fh:
+        data = json.load(fh)
+    assert "graded_against" in data, "the schema check must cover the producer's graded_against stamp"
+    schema = load_schema(os.path.join(DECK_REVIEW_DIR, "..", "references", "schemas", "checklist.schema.json"))
+    errs = _schema_validate(data, schema)
+    assert errs == [], f"producer output should be schema-clean, got: {errs}"
 
 
 def test_checklist_fixture_matches_producer_shape_and_schema() -> None:
@@ -456,15 +496,17 @@ def test_checklist_o_mode_validation_failure_exits_1_no_write() -> None:
     payload = json.dumps({"items": items})
     d = tempfile.mkdtemp(prefix="test-checklist-fail-")
     out = os.path.join(d, "checklist.json")
+    # A sighted grade, so the refusal below is the items' and not the slide reviews' precondition.
+    sr_args, payload = _sighted(d, "r1", payload)
     try:
-        rc, stdout, stderr = run_script_raw("checklist.py", ["--run-id", "r1", "-o", out], stdin_data=payload)
+        rc, stdout, stderr = run_script_raw("checklist.py", ["--run-id", "r1", *sr_args, "-o", out], stdin_data=payload)
         assert rc == 1, f"expected exit 1, got {rc}; stdout={stdout}"
         assert "validation failed" in stderr.lower()
         assert not os.path.exists(out), "no artifact must be written on validation failure"
     finally:
-        if os.path.exists(out):
-            os.unlink(out)
-        os.rmdir(d)
+        import shutil
+
+        shutil.rmtree(d, ignore_errors=True)
 
 
 def _load_stage_profile_module() -> Any:
@@ -2136,7 +2178,10 @@ def test_checklist_pass_without_evidence_does_not_block_o_mode(tmp_path: Path) -
     }
     payload = json.dumps({"items": _make_checklist_items(overrides=overrides)})
     out = str(tmp_path / "checklist.json")
-    rc, stdout, stderr = run_script_raw("checklist.py", ["--run-id", "test-run", "-o", out], stdin_data=payload)
+    sr_args, payload = _sighted(tmp_path, "test-run", payload)
+    rc, stdout, stderr = run_script_raw(
+        "checklist.py", ["--run-id", "test-run", *sr_args, "-o", out], stdin_data=payload
+    )
     assert rc == 0, stderr
     assert os.path.exists(out), "artifact must still be written for an advisory-only warning"
     with open(out) as f:
@@ -2195,10 +2240,11 @@ def test_checklist_output_includes_metadata_run_id(tmp_path: Path) -> None:
     """checklist.py output includes metadata.run_id when --run-id is provided."""
     items = [{"id": id_, "status": "pass", "evidence": "x", "notes": "y"} for id_ in _CHECKLIST_IDS]
     out = str(tmp_path / "checklist.json")
+    sr_args, payload = _sighted(tmp_path, "20260503T120000Z", json.dumps({"items": items}))
     rc, _, err = run_script(
         "checklist.py",
-        ["--run-id", "20260503T120000Z", "-o", out],
-        stdin_data=json.dumps({"items": items}),
+        ["--run-id", "20260503T120000Z", *sr_args, "-o", out],
+        stdin_data=payload,
     )
     assert rc == 0, err
     with open(out) as f:
@@ -3214,9 +3260,10 @@ def test_checklist_gating_not_ai_forces_ai_criteria_not_applicable(tmp_path: Pat
     out_path = str(tmp_path / "checklist.json")
     payload = json.dumps({"items": _make_all_evaluated_checklist_items()})
 
+    sr_args, payload = _sighted(tmp_path, "r1", payload)
     rc, stdout, stderr = run_script_raw(
         "checklist.py",
-        ["--run-id", "r1", "--inventory", str(inv_path), "--pretty", "-o", out_path],
+        ["--run-id", "r1", "--inventory", str(inv_path), "--pretty", *sr_args, "-o", out_path],
         stdin_data=payload,
     )
     assert rc == 0, stderr
@@ -3258,9 +3305,10 @@ def test_checklist_gating_ai_core_keeps_sub_agent_statuses(tmp_path: Path) -> No
     out_path = str(tmp_path / "checklist.json")
     payload = json.dumps({"items": _make_all_evaluated_checklist_items()})
 
+    sr_args, payload = _sighted(tmp_path, "r1", payload)
     rc, stdout, stderr = run_script_raw(
         "checklist.py",
-        ["--run-id", "r1", "--inventory", str(inv_path), "--pretty", "-o", out_path],
+        ["--run-id", "r1", "--inventory", str(inv_path), "--pretty", *sr_args, "-o", out_path],
         stdin_data=payload,
     )
     assert rc == 0, stderr
@@ -3299,9 +3347,10 @@ def test_checklist_gating_ai_claimed_unverified_keeps_sub_agent_statuses(tmp_pat
     out_path = str(tmp_path / "checklist.json")
     payload = json.dumps({"items": _make_all_evaluated_checklist_items()})
 
+    sr_args, payload = _sighted(tmp_path, "r1", payload)
     rc, stdout, stderr = run_script_raw(
         "checklist.py",
-        ["--run-id", "r1", "--inventory", str(inv_path), "--pretty", "-o", out_path],
+        ["--run-id", "r1", "--inventory", str(inv_path), "--pretty", *sr_args, "-o", out_path],
         stdin_data=payload,
     )
     assert rc == 0, stderr
@@ -3323,9 +3372,10 @@ def test_checklist_gating_absent_inventory_no_gating(tmp_path: Path) -> None:
     out_path = str(tmp_path / "checklist.json")
     payload = json.dumps({"items": _make_all_evaluated_checklist_items()})
 
+    sr_args, payload = _sighted(tmp_path, "r1", payload)
     rc, stdout, stderr = run_script_raw(
         "checklist.py",
-        ["--run-id", "r1", "--pretty", "-o", out_path],
+        ["--run-id", "r1", "--pretty", *sr_args, "-o", out_path],
         stdin_data=payload,
     )
     assert rc == 0, stderr
@@ -3396,9 +3446,10 @@ def test_checklist_gating_input_format_text_forces_design_not_applicable(tmp_pat
     out_path = str(tmp_path / "checklist.json")
     payload = json.dumps({"items": _make_all_evaluated_checklist_items_design_fail()})
 
+    sr_args, payload = _sighted(tmp_path, "r1", payload)
     rc, stdout, stderr = run_script_raw(
         "checklist.py",
-        ["--run-id", "r1", "--inventory", str(inv_path), "--pretty", "-o", out_path],
+        ["--run-id", "r1", "--inventory", str(inv_path), "--pretty", *sr_args, "-o", out_path],
         stdin_data=payload,
     )
     assert rc == 0, stderr
@@ -3433,9 +3484,10 @@ def test_checklist_gating_input_format_pdf_keeps_sub_agent_statuses(tmp_path: Pa
     out_path = str(tmp_path / "checklist.json")
     payload = json.dumps({"items": _make_all_evaluated_checklist_items_design_fail()})
 
+    sr_args, payload = _sighted(tmp_path, "r1", payload)
     rc, stdout, stderr = run_script_raw(
         "checklist.py",
-        ["--run-id", "r1", "--inventory", str(inv_path), "--pretty", "-o", out_path],
+        ["--run-id", "r1", "--inventory", str(inv_path), "--pretty", *sr_args, "-o", out_path],
         stdin_data=payload,
     )
     assert rc == 0, stderr
@@ -3457,9 +3509,10 @@ def test_checklist_gating_absent_inventory_no_design_gating(tmp_path: Path) -> N
     out_path = str(tmp_path / "checklist.json")
     payload = json.dumps({"items": _make_all_evaluated_checklist_items_design_fail()})
 
+    sr_args, payload = _sighted(tmp_path, "r1", payload)
     rc, stdout, stderr = run_script_raw(
         "checklist.py",
-        ["--run-id", "r1", "--pretty", "-o", out_path],
+        ["--run-id", "r1", "--pretty", *sr_args, "-o", out_path],
         stdin_data=payload,
     )
     assert rc == 0, stderr
@@ -3488,9 +3541,10 @@ def test_checklist_gating_ai_and_design_gates_both_apply(tmp_path: Path) -> None
     }
     payload = json.dumps({"items": _make_checklist_items(overrides=overrides)})
 
+    sr_args, payload = _sighted(tmp_path, "r1", payload)
     rc, stdout, stderr = run_script_raw(
         "checklist.py",
-        ["--run-id", "r1", "--inventory", str(inv_path), "--pretty", "-o", out_path],
+        ["--run-id", "r1", "--inventory", str(inv_path), "--pretty", *sr_args, "-o", out_path],
         stdin_data=payload,
     )
     assert rc == 0, stderr
@@ -6575,8 +6629,9 @@ def test_an_unusable_reconciliation_is_refused_loudly(tmp_path: Path, case: str)
     out = tmp_path / "checklist.json"
     out.write_text('{"sentinel": true}', encoding="utf-8")
     payload = json.dumps({"items": _make_checklist_items()})
+    sr_args, payload = _sighted(tmp_path / "sr", _NC_RUN, payload)
     code, stdout, err = run_script_raw(
-        "checklist.py", ["--run-id", _NC_RUN, "--reconciliation", str(rpath), "-o", str(out)], payload
+        "checklist.py", ["--run-id", _NC_RUN, "--reconciliation", str(rpath), *sr_args, "-o", str(out)], payload
     )
     assert code == 1
     assert err.strip()
@@ -6594,9 +6649,16 @@ def _nc_compose_dir(tmp_path: Path, recon: dict | None = None, rescore: bool = T
         (work / "reconciliation.json").write_text(json.dumps(recon), encoding="utf-8")
     if rescore:
         checklist = json.loads((work / "checklist.json").read_text(encoding="utf-8"))
-        args = ["--run-id", checklist["metadata"]["run_id"], "--reconciliation", str(work / "reconciliation.json")]
+        rid = checklist["metadata"]["run_id"]
+        # The producer now writes a checklist only from a grade that read this run's slide reviews: re-pipe the
+        # fixture's reviews (gaining their read token) and echo it, as a sighted Step 5 would.
+        body = json.loads((work / "slide_reviews.json").read_text(encoding="utf-8"))
+        body.pop("metadata", None)
+        sr_path, token = _tokened_slide_reviews(work, rid, body)
+        args = ["--run-id", rid, "--reconciliation", str(work / "reconciliation.json"), "--slide-reviews", sr_path]
         args += ["-o", str(work / "checklist.json")]
-        code, _stdout, err = run_script_raw("checklist.py", args, json.dumps({"items": checklist["items"]}))
+        payload = _with_echo(json.dumps({"items": checklist["items"]}), token)
+        code, _stdout, err = run_script_raw("checklist.py", args, payload)
         assert code == 0, err
     return work
 
@@ -6689,3 +6751,268 @@ def test_the_html_page_renders_the_arithmetic_verdict_and_never_the_bookkeeping(
     assert "Reconcile these figures" in page, "the scorer's fix never reached the page"
     for token in ("scored_by", "reviewer_status", "exceeds_stated_limit", "rounding_gap"):
         assert token not in page, token
+
+
+# -- The checklist is graded only from a grade that read this run's slide reviews (`--slide-reviews`) --
+#
+# The defect: SLIDE_REVIEWS and CHECKLIST dispatched in one message. The grader's Read of
+# slide_reviews.json failed (the file is written only after SLIDE_REVIEWS returns and is piped), and it
+# graded the deck from the inventory alone; checklist.py accepted the grade. Invented content throughout.
+
+_SR_RUN = "sr-run-1"
+
+
+def _sr_payload(token: str | None = None) -> str:
+    grade: dict[str, Any] = {"items": _make_checklist_items()}
+    if token is not None:
+        grade["slide_reviews_read_token"] = token
+    return json.dumps(grade)
+
+
+def _sr_body(**changes: Any) -> dict:
+    body: dict = json.loads(_SR_FIXTURE.read_text(encoding="utf-8"))
+    body.pop("metadata", None)
+    body.update(changes)
+    return body
+
+
+def _sha256_of(path: str) -> str:
+    import hashlib
+
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def _no_secret_printed(text: str, *secrets: str) -> None:
+    for secret in secrets:
+        assert secret not in text, "the refusal printed a value a repair could copy without reading the file"
+
+
+# L1 -- slide_reviews.py writes the token.
+
+
+def test_slide_reviews_writes_a_content_derived_read_token(tmp_path: Path) -> None:
+    path_a, token_a = _tokened_slide_reviews(tmp_path / "a", _SR_RUN)
+    _path_b, token_b = _tokened_slide_reviews(tmp_path / "b", _SR_RUN)
+    assert re.fullmatch(r"[0-9a-f]{12}", token_a), token_a
+    assert token_a == token_b, "the same reviews piped twice must carry the same token"
+    _p, token_c = _tokened_slide_reviews(tmp_path / "c", _SR_RUN, _sr_body(overall_narrative_assessment="Changed."))
+    assert token_c != token_a, "changed reviews must carry a new token"
+    _p, token_d = _tokened_slide_reviews(tmp_path / "d", "another-run")
+    assert token_d != token_a, "the run id is part of the token"
+    data = json.loads(Path(path_a).read_text(encoding="utf-8"))
+    assert data["metadata"]["run_id"] == _SR_RUN
+
+
+def test_slide_reviews_overwrites_a_token_the_hand_off_carries_and_never_prints_it(tmp_path: Path) -> None:
+    _p, honest = _tokened_slide_reviews(tmp_path / "honest", _SR_RUN)
+    body = _sr_body()
+    body["metadata"] = {"read_token": "aaaaaaaaaaaa", "run_id": "forged"}
+    recon = tmp_path / "recon.json"
+    recon.write_text(json.dumps({"status": "checked", "metadata": {"run_id": _SR_RUN}}), encoding="utf-8")
+    for pretty in ([], ["--pretty"]):
+        out = tmp_path / f"slide_reviews{len(pretty)}.json"
+        rc, stdout, err = run_script_raw(
+            "slide_reviews.py",
+            ["--run-id", _SR_RUN, "-o", str(out), "--reconciliation", str(recon), *pretty],
+            json.dumps(body),
+        )
+        assert rc == 0, err
+        written = json.loads(out.read_text(encoding="utf-8"))["metadata"]
+        assert written == {"read_token": honest, "run_id": _SR_RUN}, "a hand-off's token must be replaced"
+        _no_secret_printed(stdout + err, honest)
+
+
+# L2-L6 -- checklist.py refuses a grade made without them.
+
+
+def _sr_refused(tmp_path: Path, args: list[str], payload: str, *secrets: str) -> dict:
+    out = tmp_path / "checklist.json"
+    out.write_text('{"sentinel": true}', encoding="utf-8")
+    rc, stdout, err = run_script_raw("checklist.py", ["--run-id", _SR_RUN, *args, "-o", str(out)], payload)
+    assert rc == 1, (rc, stdout, err)
+    assert err.strip()
+    assert json.loads(out.read_text(encoding="utf-8")) == {"sentinel": True}, "-o must be left untouched"
+    _no_secret_printed(stdout + err, *secrets)
+    rejection: dict = json.loads(stdout)
+    assert rejection["status"] == "rejected" and rejection["fix"], rejection
+    return rejection
+
+
+def test_a_grade_with_no_echo_is_refused_as_not_read(tmp_path: Path) -> None:
+    path, token = _tokened_slide_reviews(tmp_path, _SR_RUN)
+    rejection = _sr_refused(tmp_path, ["--slide-reviews", path], _sr_payload(), token, _sha256_of(path))
+    assert rejection["code"] == "SLIDE_REVIEWS_NOT_READ"
+    assert "do not repair" in rejection["fix"] and "Step 5" in rejection["fix"]
+
+
+def test_a_grade_with_the_wrong_echo_is_refused_as_not_read(tmp_path: Path) -> None:
+    path, token = _tokened_slide_reviews(tmp_path, _SR_RUN)
+    wrong = "0123456789ab" if token != "0123456789ab" else "ba9876543210"
+    rejection = _sr_refused(tmp_path, ["--slide-reviews", path], _sr_payload(wrong), token, wrong, _sha256_of(path))
+    assert rejection["code"] == "SLIDE_REVIEWS_NOT_READ"
+
+
+def test_a_grade_with_the_right_echo_is_written_with_its_stamp(tmp_path: Path) -> None:
+    path, token = _tokened_slide_reviews(tmp_path, _SR_RUN)
+    inv = tmp_path / "deck_inventory.json"
+    inv.write_text(json.dumps(_inventory_with_input_format("pdf")), encoding="utf-8")
+    out = tmp_path / "checklist.json"
+    rc, stdout, err = run_script_raw(
+        "checklist.py",
+        ["--run-id", _SR_RUN, "--inventory", str(inv), "--slide-reviews", path, "-o", str(out)],
+        _sr_payload(token),
+    )
+    assert rc == 0, err
+    _no_secret_printed(stdout, token)
+    data = json.loads(out.read_text(encoding="utf-8"))
+    assert data["graded_against"] == {
+        "slide_reviews": {"read_token": token, "sha256": _sha256_of(path)},
+        "inventory": _sha256_of(str(inv)),
+        "reconciliation": None,
+    }
+    assert data["metadata"] == {"run_id": _SR_RUN}, "metadata keeps its shape"
+
+
+def test_o_without_the_flag_is_a_usage_error_and_stdout_mode_is_exempt(tmp_path: Path) -> None:
+    out = tmp_path / "checklist.json"
+    rc, stdout, err = run_script_raw("checklist.py", ["--run-id", _SR_RUN, "-o", str(out)], _sr_payload())
+    assert rc == 2, (rc, stdout, err)
+    assert "--slide-reviews is required with -o" in err
+    assert not out.exists()
+    # The What-If control: stdout, no flag, no echo -> scored as before.
+    rc, stdout, err = run_script_raw("checklist.py", ["--run-id", _SR_RUN], _sr_payload())
+    assert rc == 0, err
+    assert json.loads(stdout)["validation"]["status"] == "valid"
+    assert "graded_against" not in json.loads(stdout)
+
+
+@pytest.mark.parametrize("case", ["missing", "unparseable", "not_object", "stub", "other_run", "no_token"])
+def test_an_unusable_slide_reviews_file_is_refused_as_missing(tmp_path: Path, case: str) -> None:
+    sr = tmp_path / "slide_reviews.json"
+    honest_path, token = _tokened_slide_reviews(tmp_path / "honest", _SR_RUN)
+    if case == "unparseable":
+        sr.write_text("{not json", encoding="utf-8")
+    elif case == "not_object":
+        sr.write_text("[]", encoding="utf-8")
+    elif case == "stub":
+        sr.write_text(json.dumps({"skipped": True, "metadata": {"run_id": _SR_RUN, "read_token": token}}))
+    elif case == "other_run":
+        data = json.loads(Path(honest_path).read_text(encoding="utf-8"))
+        data["metadata"]["run_id"] = "an-earlier-run"
+        sr.write_text(json.dumps(data), encoding="utf-8")
+    elif case == "no_token":
+        data = json.loads(Path(honest_path).read_text(encoding="utf-8"))
+        del data["metadata"]["read_token"]
+        sr.write_text(json.dumps(data), encoding="utf-8")
+    rejection = _sr_refused(tmp_path, ["--slide-reviews", str(sr)], _sr_payload(token), token)
+    assert rejection["code"] == "SLIDE_REVIEWS_MISSING", rejection
+    assert "Step 4" in rejection["fix"]
+
+
+def test_in_a_bound_folder_another_runs_slide_reviews_is_artifact_other_run_first(tmp_path: Path) -> None:
+    path, token = _tokened_slide_reviews(tmp_path, "an-earlier-run")
+    ref = tmp_path / "handoff" / _SR_RUN / "run_ref.json"
+    ref.parent.mkdir(parents=True)
+    ref.write_text(json.dumps({"run_id": _SR_RUN, "bound_seq": 1}), encoding="utf-8")
+    rejection = _sr_refused(tmp_path, ["--slide-reviews", path], _sr_payload(token))
+    assert rejection["code"] == "ARTIFACT_OTHER_RUN", rejection
+
+
+# B1-B3 -- the observed ordering, reproduced.
+
+
+def test_a_grade_written_before_the_slide_reviews_is_refused_after_regating_and_touching(tmp_path: Path) -> None:
+    """B1: the grader's hand-off is written FIRST (its Read failed: no slide_reviews.json yet), then Step 4's
+    pipe writes the slide reviews, then Step 5's pipe runs. B2: re-gating and touching the blind hand-off
+    would clear a gate-time or an mtime check; they do not clear this one, because the comparand is the
+    token. B3: a new dispatch that read the file passes."""
+    handoff = tmp_path / "handoff" / _SR_RUN / "checklist_output.json"
+    handoff.parent.mkdir(parents=True)
+    handoff.write_text(_sr_payload(), encoding="utf-8")
+    assert not (tmp_path / "slide_reviews.json").exists(), "the grade must predate the slide reviews"
+    sr_path, token = _tokened_slide_reviews(tmp_path, _SR_RUN)
+    out = tmp_path / "checklist.json"
+    pipe = ["--run-id", _SR_RUN, "--slide-reviews", sr_path, "-o", str(out)]
+
+    rc, stdout, _err = run_script_raw("checklist.py", pipe, handoff.read_text(encoding="utf-8"))
+    assert rc == 1 and json.loads(stdout)["code"] == "SLIDE_REVIEWS_NOT_READ"
+
+    # B2: put the slide reviews in the past, then re-gate and touch the blind hand-off.
+    past = Path(sr_path).stat().st_mtime - 600
+    os.utime(sr_path, (past, past))
+    check = os.path.join(os.path.dirname(SCRIPT_DIR), "scripts", "check_handoff.py")
+    gate = subprocess.run([sys.executable, check, str(handoff)], capture_output=True, text=True)
+    assert gate.returncode == 0, gate.stderr
+    os.utime(handoff, None)
+    from datetime import datetime, timezone
+
+    record = json.loads((handoff.parent / "checklist_output.json.gate.json").read_text(encoding="utf-8"))
+    gated_at = datetime.strptime(record["gated_at"], "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=timezone.utc).timestamp()
+    sr_mtime = Path(sr_path).stat().st_mtime
+    # The lever engaged: both time comparisons a weaker check would make now read "graded after".
+    assert handoff.stat().st_mtime > sr_mtime
+    assert gated_at > sr_mtime
+    rc, stdout, _err = run_script_raw("checklist.py", pipe, handoff.read_text(encoding="utf-8"))
+    assert rc == 1 and json.loads(stdout)["code"] == "SLIDE_REVIEWS_NOT_READ"
+    assert not out.exists()
+
+    # B3: the redo, which read the file.
+    handoff.write_text(_sr_payload(token), encoding="utf-8")
+    rc, _stdout, err = run_script_raw("checklist.py", pipe, handoff.read_text(encoding="utf-8"))
+    assert rc == 0, err
+    assert json.loads(out.read_text(encoding="utf-8"))["graded_against"]["slide_reviews"]["read_token"] == token
+
+
+# L7 -- compose's backstop.
+
+
+def _sr_compose_dir(tmp_path: Path) -> Path:
+    work = _nc_compose_dir(tmp_path)
+    sr = json.loads((work / "slide_reviews.json").read_text(encoding="utf-8"))
+    check = json.loads((work / "checklist.json").read_text(encoding="utf-8"))
+    assert sr["metadata"]["read_token"] == check["graded_against"]["slide_reviews"]["read_token"]
+    return work
+
+
+def _stale_warnings(work: Path) -> list[dict]:
+    code, out, err = _run_compose(str(work))
+    assert code == 0, err
+    assert out is not None
+    return [w for w in out["validation"]["warnings"] if w["code"] == "STALE_ARTIFACT"]
+
+
+def test_compose_is_silent_when_the_checklist_was_graded_on_these_slide_reviews(tmp_path: Path) -> None:
+    assert _stale_warnings(_sr_compose_dir(tmp_path)) == []
+
+
+def test_compose_flags_a_checklist_graded_on_earlier_slide_reviews(tmp_path: Path) -> None:
+    work = _sr_compose_dir(tmp_path)
+    rid = json.loads((work / "checklist.json").read_text(encoding="utf-8"))["metadata"]["run_id"]
+    body = json.loads((work / "slide_reviews.json").read_text(encoding="utf-8"))
+    body.pop("metadata")
+    body["overall_narrative_assessment"] = "A rewritten narrative assessment."
+    _tokened_slide_reviews(work, rid, body)  # Step 4 again, after Step 5
+    stale = _stale_warnings(work)
+    assert len(stale) == 1, stale
+    assert stale[0]["severity"] == "high"
+    assert "Step 5" in stale[0]["message"] and "CHECKLIST" in stale[0]["message"]
+    assert stale[0]["founder_message"] and "Step" not in stale[0]["founder_message"]
+    assert ".json" not in stale[0]["founder_message"]
+
+
+def test_compose_flags_an_unstamped_checklist_beside_tokened_slide_reviews(tmp_path: Path) -> None:
+    work = _sr_compose_dir(tmp_path)
+    check = json.loads((work / "checklist.json").read_text(encoding="utf-8"))
+    del check["graded_against"]
+    (work / "checklist.json").write_text(json.dumps(check), encoding="utf-8")
+    stale = _stale_warnings(work)
+    assert len(stale) == 1, stale
+    assert "--slide-reviews" in stale[0]["message"] and "Step 5" in stale[0]["message"]
+    assert stale[0]["founder_message"] and ".json" not in stale[0]["founder_message"]
+
+
+def test_compose_is_silent_on_untokened_slide_reviews(tmp_path: Path) -> None:
+    """A review written before the token existed (and the shared fixture) carries none: nothing to compare."""
+    work = _nc_compose_dir(tmp_path, rescore=False)
+    assert "read_token" not in json.loads((work / "slide_reviews.json").read_text(encoding="utf-8"))["metadata"]
+    assert _stale_warnings(work) == []

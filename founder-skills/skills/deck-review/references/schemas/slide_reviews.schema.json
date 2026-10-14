@@ -7,7 +7,13 @@
     "metadata": {
       "type": "object",
       "required": ["run_id"],
-      "properties": {"run_id": {"type": "string"}}
+      "properties": {
+        "run_id": {"type": "string"},
+        "read_token": {
+          "type": "string",
+          "description": "Written by slide_reviews.py from this file's content and run id. The CHECKLIST grader copies it into its hand-off; checklist.py refuses a grade without it. Optional: a file written before 0.19.2 has none."
+        }
+      }
     },
     "reviews": {
       "type": "array",

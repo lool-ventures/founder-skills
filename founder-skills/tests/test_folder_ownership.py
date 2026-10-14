@@ -333,6 +333,7 @@ RUN_FILE_FLAGS = frozenset(
         "--replay",
         "--inventory",
         "--reconciliation",
+        "--slide-reviews",
         "--ledger",
         "--second-read",
         "--downgrades",

@@ -22,6 +22,7 @@ Output: JSON with validated items and summary.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -832,6 +833,101 @@ def _fail_invalid(errors: list[str], output_path: str | None, indent: int | None
     sys.exit(1)
 
 
+_SLIDE_REVIEWS_MISSING_FIX = (
+    "run Step 4 (the slide reviews) for this run, then dispatch the CHECKLIST again with the Step 5 prompt"
+)
+_SLIDE_REVIEWS_NOT_READ_FIX = (
+    "the grade was made without reading this run's slide reviews. Dispatch the CHECKLIST again as a new "
+    "dispatch of the full Step 5 prompt, after the slide reviews are written; do not repair this file"
+)
+
+
+def _refuse(rejection: dict[str, Any], output_path: str | None) -> NoReturn:
+    """Refuse loudly in the run-ref shape: stdout JSON with `code` and `fix`, a stderr line, `-o` untouched, exit 1.
+
+    The rejection never carries the expected token, the received echo or a file hash: the protocol pastes a
+    producer's diagnostic into the next dispatch, and a token there could be copied without any read.
+    """
+    sys.stdout.write(json.dumps(rejection) + "\n")
+    written = f"{os.path.abspath(output_path)} was left unchanged" if output_path else "nothing was written"
+    print(f"Error ({rejection['code']}): {rejection['message']}; {written}", file=sys.stderr)
+    sys.exit(1)
+
+
+def _file_sha256(path: str | None) -> str | None:
+    if not path:
+        return None
+    try:
+        with open(path, "rb") as fh:
+            return hashlib.sha256(fh.read()).hexdigest()
+    except OSError:
+        return None
+
+
+def check_slide_reviews(path: str, run_id: str, grade: dict[str, Any], output_path: str | None) -> dict[str, str]:
+    """The grade must echo this run's slide_reviews.json read token. Returns the stamp for `graded_against`.
+
+    WHY A TOKEN AND NOT EXISTENCE. When SLIDE_REVIEWS and CHECKLIST are dispatched in the same message,
+    both results return together and Step 4's pipe runs before Step 5's, so by the time this script runs
+    slide_reviews.json EXISTS with this run's id while the grade on stdin was made without it (the
+    grader's Read failed before the file was written). An existence-plus-run-id check passes that blind
+    grade. A time comparison does not hold either: a background dispatch can write after the file exists
+    without reading it, and a repair rewrites the hand-off, which moves its time. Only the echo of a
+    value that exists solely inside the file shows the grader had it open.
+
+    Refuses `SLIDE_REVIEWS_MISSING` for a file that is missing, unreadable, not an object, a stub,
+    another run's, or carries no token (go back to Step 4), and `SLIDE_REVIEWS_NOT_READ` for a grade
+    with no echo or another value (a new CHECKLIST dispatch, never a repair).
+    """
+    data: Any = None
+    problem: str | None = None
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except FileNotFoundError:
+        problem = "does not exist"
+    except (OSError, json.JSONDecodeError):
+        problem = "cannot be read as JSON"
+    meta = _as_dict(data.get("metadata")) if isinstance(data, dict) else {}
+    token = meta.get("read_token")
+    if problem is None:
+        if not isinstance(data, dict):
+            problem = "is not a JSON object"
+        elif data.get("skipped") is True:
+            problem = "is a skipped stub, not slide reviews"
+        elif meta.get("run_id") != run_id:
+            problem = "belongs to another run"
+        elif not isinstance(token, str) or not token:
+            problem = "carries no read token (it was not written by this version's slide-reviews step)"
+    if problem is not None:
+        _refuse(
+            {
+                "status": "rejected",
+                "code": "SLIDE_REVIEWS_MISSING",
+                "message": f"the slide reviews at {path} {problem}, so the checklist cannot be checked against them",
+                "fix": _SLIDE_REVIEWS_MISSING_FIX,
+            },
+            output_path,
+        )
+    token = str(token)
+    echo = grade.get("slide_reviews_read_token")
+    if not isinstance(echo, str) or echo.strip() != token:
+        _refuse(
+            {
+                "status": "rejected",
+                "code": "SLIDE_REVIEWS_NOT_READ",
+                "message": (
+                    f"the grade does not carry the read token of the slide reviews at {path}"
+                    if not isinstance(echo, str) or not echo.strip()
+                    else f"the grade's slide_reviews_read_token is not the one in the slide reviews at {path}"
+                ),
+                "fix": _SLIDE_REVIEWS_NOT_READ_FIX,
+            },
+            output_path,
+        )
+    return {"read_token": token, "sha256": _file_sha256(path) or ""}
+
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Deck review checklist scorer (reads JSON from stdin)")
     p.add_argument("--pretty", action="store_true", help="Pretty-print JSON")
@@ -853,7 +949,22 @@ def parse_args() -> argparse.Namespace:
             " refused (exit 1, -o untouched). A what-if rerun omits it."
         ),
     )
-    return p.parse_args()
+    p.add_argument(
+        "--slide-reviews",
+        help=(
+            "Path to this run's slide_reviews.json. Required with -o: the grade on stdin must carry"
+            " the file's read token as slide_reviews_read_token, or it is refused (exit 1, -o"
+            " untouched). A what-if rerun (stdout) omits it."
+        ),
+    )
+    args = p.parse_args()
+    # The main thread's own argv, not a run-state problem: a usage error (exit 2), no code.
+    if args.output and not args.slide_reviews:
+        p.error(
+            '--slide-reviews is required with -o: pass --slide-reviews "$REVIEW_DIR/slide_reviews.json" '
+            "(Step 5's pipe); a checklist file is written only from a grade made with this run's slide reviews"
+        )
+    return args
 
 
 def main() -> None:
@@ -868,7 +979,7 @@ def main() -> None:
     _run_ref.refuse_not_this_runs(
         os.path.dirname(os.path.abspath(args.output)) if args.output else None,
         args.run_id,
-        [args.inventory, args.reconciliation],
+        [args.inventory, args.reconciliation, args.slide_reviews],
         noun="review dir",
     )
 
@@ -899,6 +1010,11 @@ def main() -> None:
         reconciliation, recon_error = load_reconciliation(args.reconciliation, args.run_id)
         if recon_error:
             _fail_invalid([recon_error], args.output, indent)
+
+    # Then the slide reviews, also before the items: a grade made without them is refused whatever its shape.
+    slide_reviews_stamp: dict[str, str] | None = None
+    if args.slide_reviews:
+        slide_reviews_stamp = check_slide_reviews(args.slide_reviews, args.run_id, data, args.output)
 
     # --- Validation ---
     # On stdout (no -o): emit the JSON error dict and exit 0 (the caller pipes
@@ -931,6 +1047,14 @@ def main() -> None:
 
     result["validation"] = {"status": "valid", "errors": [], "warnings": pass_warnings}
     result["metadata"] = {"run_id": args.run_id}
+    if slide_reviews_stamp is not None:
+        # Top level beside metadata (financial-model-review's placement), so metadata keeps its shape.
+        # The token is what the grader echoed; the hashes record which bytes this run opened.
+        result["graded_against"] = {
+            "slide_reviews": slide_reviews_stamp,
+            "inventory": _file_sha256(args.inventory),
+            "reconciliation": _file_sha256(args.reconciliation),
+        }
 
     # Apply deterministic gating when --inventory is provided. Gating belongs to
     # the producer, not the sub-agent; the sub-agent scores all 35 criteria and

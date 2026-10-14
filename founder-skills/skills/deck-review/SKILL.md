@@ -684,7 +684,7 @@ Branch on the exit code (complete state machine — do not improvise):
 - **Exit 4** (file exists, invalid JSON) → **repair-dispatch**: fresh Task: "Read `<OUTPUT_PATH>`; it fails JSON parsing with `<verbatim detail from the diagnostic>`; fix and rewrite it; return the receipt."
 - **Exit 5** (receipt echoes a different path) → **repair-dispatch** telling the agent the exact expected OUTPUT_PATH (it wrote somewhere else).
 - **Exit 6** (receipt unparseable / no `output_path` key) → **redo-dispatch** with "return ONLY the receipt JSON — no fences, no prose."
-- **Producer schema rejection** (the pipe fails next) → **repair-dispatch** with the producer's stderr verbatim.
+- **Producer schema rejection** (the pipe fails next) → **repair-dispatch** with the producer's stderr verbatim — except `SLIDE_REVIEWS_NOT_READ`, which is a **redo-dispatch** of the full Step 5 prompt (the hand-off is regraded, never repaired).
 - **Exit 8** (`path_namespace_mismatch`) → the sub-agent **complied**; the agent-namespace prefix was wrong. Its relative `OUTPUT_PATH` resolved against the outputs mount instead of the session root, so the file landed at the doubled path reported in `found_at`. Only a RELATIVE agent path can do this, so the Step 0 proof did not run: run it. Do NOT treat this as a fabricated receipt (that is exit 3), and do NOT read the hand-off from `found_at` — it is diagnostic only. Re-run `resolve_artifacts_root.py --agent`, rebuild the agent-namespace prefix from the printed value, and re-dispatch. Counts against the same 2-dispatch retry budget.
 - **Blocked `write_refused`** (the sub-agent's Write was refused — its path was relative or a `/sessions/...` path) → run the Step 0 proof if it did not run, rebuild the agent-namespace paths from the resolver, re-dispatch ONCE. A second `write_refused` STOPs with both details quoted.
 - **Any other exit** (script crash etc.) → STOP with the stderr.
@@ -1137,6 +1137,8 @@ cat "$HANDOFF_DIR/slide_reviews_output.json" | \
 
 ### Step 5: Score Checklist -> `checklist.json` (Context A dispatch)
 
+Dispatch it only after Step 4's pipe has written `slide_reviews.json`, never in the same message as SLIDE_REVIEWS: the grader reads that file.
+
 **Dispatch the deck-review sub-agent in Context A (CHECKLIST).** **Call the `Task` tool with `subagent_type: "founder-skills:deck-review"`** and the prompt below. Substitute `<HANDOFF_AGENT>` / `<REVIEW_DIR_AGENT>` with the agent-namespace values and `<RUN_ID>` with `$RUN_ID`; leave the `${CLAUDE_PLUGIN_ROOT}/...` reference path literal (same idiom as SLIDE_REVIEWS).
 
 **Dispatch prompt template:**
@@ -1150,8 +1152,8 @@ You are the deck-review agent dispatched in Context A (CHECKLIST).
 If a reference path below cannot be read (refused or not found), read the same file under the plugin folder your own instructions name.
 Evaluate all
 35 criteria from ${CLAUDE_PLUGIN_ROOT}/skills/deck-review/references/checklist-criteria.md
-using the deck content (read from <REVIEW_DIR_AGENT>/slide_reviews.json for
-reference), the stage profile at <REVIEW_DIR_AGENT>/stage_profile.json, and the
+using the slide reviews at <REVIEW_DIR_AGENT>/slide_reviews.json (a required
+read), the stage profile at <REVIEW_DIR_AGENT>/stage_profile.json, and the
 deck inventory at <REVIEW_DIR_AGENT>/deck_inventory.json.
 
 Assess ALL 35 criteria including the 4 AI criteria and the 5 Design & Readability
@@ -1230,7 +1232,8 @@ State what is true of the DECK.
 
 Use your Write tool to write to OUTPUT_PATH the items array without a summary
 (the producer script computes the summary):
-{"items": [{"id": "purpose_clear", "status": "pass", "evidence": "...", "notes": "..."}, ...all 35 items...]}
+{"slide_reviews_read_token": "the metadata.read_token value you read", "items": [{"id": "purpose_clear", "status": "pass", "evidence": "...", "notes": "..."}, ...all 35 items...]}
+The main thread leaves `slide_reviews_read_token` to you; copy it from the `slide_reviews.json` you Read.
 On the four visual Design & Readability criteria add `"verified_by"`: `"measured"` only
 when you directly observed the property with a tool that can observe it, `"inferred"` when
 you reasoned it from other evidence, `"not_possible"` when you had no way to observe it.
@@ -1250,10 +1253,12 @@ run_id stamping.
 cat "$HANDOFF_DIR/checklist_output.json" | python3 "$SCRIPTS/checklist.py" --run-id "$RUN_ID" --pretty \
   --inventory "$REVIEW_DIR/deck_inventory.json" \
   --reconciliation "$REVIEW_DIR/reconciliation.json" \
+  --slide-reviews "$REVIEW_DIR/slide_reviews.json" \
   -o "$REVIEW_DIR/checklist.json"
 ```
 
 `--reconciliation` scores `numbers_consistent` from the arithmetic, so keep it here (a what-if rerun omits it: see the What-If rule).
+`SLIDE_REVIEWS_NOT_READ`: dispatch the CHECKLIST again with the prompt above as a new dispatch, never a repair (it counts against the retry budget). `SLIDE_REVIEWS_MISSING`: run Step 4 first.
 <!-- skill-quality-ci: bash-after-subagent-ok -->
 
 ### Step 6: Compose Report
@@ -1280,7 +1285,7 @@ for the founder in plain language. A `FOUNDER_TEXT_TOKEN` naming an internal FIL
 the one to watch — that text is still in `report.md` and must be removed before you
 hand anything over.
 
-**Remove it upstream: re-dispatch the step that produced the text, then re-run compose.**
+**Remove it upstream: re-dispatch the step that produced the text and, when that step was SLIDE_REVIEWS, Step 5 too (a regrade, outside its retry budget), then re-run compose.**
 Never `sed`, Edit, or otherwise hand-edit a composed file. Compose owns its outputs, and a
 hand-edit fixes only the surface you touched — measured, it cleaned `report.md` and left the
 same 13 occurrences in `report.json`. The token almost always enters in a sub-agent's

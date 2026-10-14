@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -144,6 +145,27 @@ def numeric_lint(data: dict[str, Any], recon: dict[str, Any]) -> list[dict[str, 
     return hits
 
 
+# ---------------------------------------------------------------------------
+# READ TOKEN: proof that Step 5's grader opened this file.
+#
+# The CHECKLIST grader copies `metadata.read_token` into its hand-off, and `checklist.py
+# --slide-reviews` refuses a grade whose echo differs. The token exists only in this file, so a
+# grader whose Read failed cannot produce it, and the grader has no shell to derive it. Derived from
+# the content and the run id, not drawn at random: re-piping the same reviews yields the same token,
+# so a repeat pipe never stales a correct checklist, and compose uses it as the staleness key. Any
+# token a hand-off carries is overwritten, and the receipt never prints it.
+# ---------------------------------------------------------------------------
+
+READ_TOKEN_HEX = 12
+
+
+def read_token(run_id: str, data: dict[str, Any]) -> str:
+    """First 12 hex chars of sha256(run_id, a newline, the body without `metadata` as canonical JSON)."""
+    body = {k: v for k, v in data.items() if k != "metadata"}
+    canonical = json.dumps(body, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(f"{run_id}\n{canonical}".encode()).hexdigest()[:READ_TOKEN_HEX]
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description="Producer for slide_reviews.json")
     p.add_argument("--run-id", required=True)
@@ -193,6 +215,11 @@ def main() -> int:
             "slide_reviews.schema.json",
         )
     )
+
+    meta = data.get("metadata")
+    meta = {k: v for k, v in meta.items() if k != "read_token"} if isinstance(meta, dict) else {}
+    meta["read_token"] = read_token(args.run_id, data)
+    data = {**data, "metadata": meta}
 
     try:
         receipt = write_artifact(
