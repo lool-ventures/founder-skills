@@ -617,6 +617,23 @@ def _drive_deck_review_lane(
     if ledger is not None:
         observed["ledger.figures"] = len(ledger.get("figures") or [])
 
+    # 6b'. Step 5 graded THIS run's slide reviews. checklist.py -o refuses a grade that does not echo
+    # slide_reviews.json's read token and stamps the token it accepted, so the two must agree. A mismatch or
+    # a missing stamp means the checklist was written without the check (or Step 4 ran again after it).
+    slide_reviews = _artifact("slide_reviews.json")
+    checklist_art = _artifact("checklist.json")
+    if slide_reviews is not None and checklist_art is not None:
+        sr_token = (slide_reviews.get("metadata") or {}).get("read_token")
+        graded = ((checklist_art.get("graded_against") or {}).get("slide_reviews") or {}).get("read_token")
+        observed["checklist.graded_against_slide_reviews"] = bool(graded) and graded == sr_token
+        if not sr_token:
+            failures.append("slide_reviews.json carries no metadata.read_token: Step 4's producer did not write it")
+        elif graded != sr_token:
+            failures.append(
+                "checklist.json's graded_against.slide_reviews.read_token does not equal slide_reviews.json's "
+                "metadata.read_token: Step 5 wrote the checklist without a grade that read this run's slide reviews"
+            )
+
     # 6c. `schema_validation_passes` -- declared in the golden file, never evaluated. Validate
     # the LIVE artifacts against the same schemas the fixture sweep uses.
     if a.get("schema_validation_passes"):
