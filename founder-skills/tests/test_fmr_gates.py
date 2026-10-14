@@ -1050,7 +1050,7 @@ def test_a_later_balance_date_after_delivery_reopens_the_run_and_completes_it_ag
 
     # One update per review: a further balance is a new review, and nothing moves.
     before = _snapshot(run_dir, root, run_id)
-    again = _apply(run_dir, run_id, "cash.current_balance=1400000", "cash.balance_date=2026-07")
+    again = _apply(run_dir, run_id, "cash.current_balance=1462803", "cash.balance_date=2026-07")
     assert again.returncode == 1 and _out(again)["code"] == "RUN_FINISHED"
     assert _snapshot(run_dir, root, run_id) == before
 
@@ -1119,12 +1119,12 @@ def test_a_cash_call_made_before_delivery_does_not_reopen_the_review(tmp_path: P
     root, run_id, run_dir = _run(tmp_path)
     _settle_step1(root, run_id)
     _opened(root, run_id)
-    _corrections(run_dir, run_id, "chat", "cash.current_balance=1400000", "cash.balance_date=2026-05")
+    _corrections(run_dir, run_id, "chat", "cash.current_balance=1462803", "cash.balance_date=2026-05")
     _ok(_rec(root, run_id, "answer", "--gate", "fmr_extracted_values", "--answer-id", "corrections_applied"))
     _build(root, run_id, run_dir)
     assert h.status(root, run_id)["status"] == "complete"
     before = _snapshot(run_dir, root, run_id)
-    proc = _cash_answer(root, run_id, "1400000", "2026-05")
+    proc = _cash_answer(root, run_id, "1462803", "2026-05")
     assert proc.returncode == 1 and _out(proc)["code"] == "GATE_NOT_OWED", proc.stdout + proc.stderr
     assert _snapshot(run_dir, root, run_id) == before
 

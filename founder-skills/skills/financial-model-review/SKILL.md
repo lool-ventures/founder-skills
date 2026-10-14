@@ -969,7 +969,8 @@ python3 "$SCRIPTS/apply_corrections.py" --set cash.current_balance=<amount> --se
 python3 "$SHARED_SCRIPTS/record_gate_answer.py" answer --run-id "$RUN_ID" --run-dir "$REVIEW_DIR" \
   --gate fmr_cash_followup --answer-id provided --gate fmr_cash_basics.current_balance --answer-id stated \
   --value "<amount>" --gate fmr_cash_basics.balance_date --answer-id stated --value "<YYYY-MM>" &&
-cp "$REVIEW_DIR/corrected_inputs.json" "$REVIEW_DIR/inputs.json" && mkdir -p "$REVIEW_DIR/handoff/$RUN_ID/r1"
+cp "$REVIEW_DIR/corrected_inputs.json" "$REVIEW_DIR/inputs.json" &&
+mkdir -p "$REVIEW_DIR/handoff/${RUN_ID}/r1"
 ```
 
 `HANDOFF_DIR` is that `r1` dir; `HANDOFF_AGENT` from Step 0's `--handoff-dir-agent` with

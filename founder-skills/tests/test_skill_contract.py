@@ -1127,7 +1127,8 @@ SKILL_MD_CEILING: dict[str, int] = {
     # value (its Step 0 value sent the revision's CHECKLIST to r0, overwriting the delivered review's hand-off);
     # Step 12 says the r1 values replace Step 0's in every step it redoes, that a new conversation starts a new
     # review, and names "the values it already uses" plainly. Owner-approved raise.
-    "financial-model-review": 85_797,
+    # 85,797 -> 85,799 (+2): the r1 mkdir moved to its own line and spells `${RUN_ID}`, a rewording.
+    "financial-model-review": 85_799,
     # ic-sim SHRANK: the REQUIRED ic-dynamics.md read at Step 7 is deleted. Step 7 is a pure producer
     # pipe — compose_discussion.py derives discussion.json from the partners' own files and nothing
     # is authored by the main thread — so the read informed no decision while pulling a whole
