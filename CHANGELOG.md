@@ -35,6 +35,10 @@ than it would have, because those grades ran higher in every case we compared. E
   which a markdown viewer such as GitHub reads as an unclosed bold tag, so the rest of the file showed in bold.
   They are now `[A]` and `[B]`, here and in the same question's text in the host contract (its id and options
   are unchanged). What the skill does is unchanged.
+- Market sizing: when the two ways of sizing the market disagreed by more than 30% and one of them was redone,
+  the redo could go out with the first build's instructions in place of its own, and the report then said the
+  redo had chosen the same inputs again. The prompt check no longer swaps a redo's instructions for the
+  original's; it holds the redo and asks for it to be printed again on its own.
 
 ### Changed
 
@@ -67,6 +71,20 @@ Contributor-facing only; nothing here changes what a founder installs or runs.
   prefix that exit 8 reports) now stops at Step 5 after its retry budget, where it used to deliver a blind
   grade.
 - The deck-review release-gate lane asserts that the checklist's stamped token equals the slide reviews'.
+- The dispatch check no longer sends an older printed prompt in place of a newer one. When a dispatch differs
+  from the vouched print and a later main-thread shell or Read result printed another text for the same
+  context and OUTPUT_PATH, the dispatch is held as if nothing were printed (a new head asks for the same
+  generator arguments in a shell call of its own), and after the round's two holds it goes through as sent.
+  It reads the printed text, never the command, and a dispatch equal to the vouched print still passes. The
+  trade is stated in the check's docstring and pinned by a test: a result the model writes can now turn a
+  rewrite into two holds and a pass. The hold budget is shared by a build and its redo, which use one
+  OUTPUT_PATH.
+- Market-sizing Step 5 says to record a better-fitting figure in a shell call of its own and to run the redo
+  generator in a shell call of its own. The redo record's residuals say it cannot see which prompt the redo's
+  sub-agent received.
+- The market-sizing release-gate lane fails a report that says the redo ran when no sizing sub-agent received
+  the comparison redo, whatever the hook's comparand; its docstring names the one red cause that is the model
+  ignoring two holds, not the hook.
 
 ## [0.19.1] - 2026-10-14 — A newer cash balance updates a delivered financial model review
 
