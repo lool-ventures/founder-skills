@@ -1498,7 +1498,7 @@ def test_only_a_sizing_rewrite_notice_names_the_redo() -> None:
 
 _TD = "CONTEXT: TOP_DOWN_METHODOLOGY"
 _HEREDOC_REDO_CMD = 'AD=/w/a\npython3 - "$AD/validation.json" <<\'PY\'\nimport json,sys\nprint("ok")\nPY\n' + _REDO_CMD
-_STALE_HEAD = f"{MARKER}[{_TD_PATH}] Held: the newest prompt printed for this OUTPUT_PATH is in a result"
+_STALE_HEAD = f"{MARKER}[{_TD_PATH}] Held: the newest prompt printed for this OUTPUT_PATH differs from the one"
 
 
 def _heredoc_redo_rows(version: str | None = "2.1.290") -> list[dict[str, Any]]:

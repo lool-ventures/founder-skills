@@ -752,7 +752,8 @@ For "both", read `sizing.json`'s comparison: each of TAM, SAM and SOM is gated a
 total against a count of the product's buyers); if research finds a better-fitting figure, record it in
 `validation.json` in a shell call of its own. Then, once per run, re-run that
 build's generator in a shell call of its own with the same arguments plus `--redo comparison` (`--suspect <input>` for inputs you
-doubt), send its output in your next call, gate it, and re-run the same pipe. Never print that build's plain
+doubt; printing it again unchanged before it is gated is the same redo), send its output in your next call,
+gate it, and re-run the same pipe. Never print that build's plain
 prompt again or edit a sizing prompt by hand. That redo, with the hand-off corrections above for it, is the
 only sizing dispatch a gap allows; a redo refused as `SIZING_REDO_SPENT` or `SIZING_REDO_TOO_LATE` is not
 retried. A gap that remains is reported, not removed: no later step re-dispatches a build for it unless the founder

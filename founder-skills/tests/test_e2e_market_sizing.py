@@ -99,12 +99,16 @@ def sizing_redo_problems(
     """Every way the sizing dispatches break the one-redo rule; [] when they keep it. `comparand(cap, d)` is
     the hook's comparand for a dispatch (default: `printed_prompt_for`).
 
-    A red cause that is the model, not the hook: when the redo is printed in a block the dispatch hook cannot
-    vouch for (say, after a research heredoc), the hook holds the redo dispatch twice (A NEWER PRINT in
-    `dispatch_prompt_check.py`) and asks for the generator in a shell call of its own. A model that sends the
-    redo a third time instead is let through as sent; its comparand is still the plain print, so this check's
-    "not the comparison redo" line and `assert_received_prompt` both fire. SKILL.md's Step 5 was broken; do
-    not re-run that as variance."""
+    Two red causes when the redo is printed in a block the dispatch hook cannot vouch for (say, after a
+    research heredoc). The comparand then stays the plain print, so this check's "not the comparison redo"
+    line and `assert_received_prompt` both fire when the redo goes through as sent:
+    - the model: the hook held the redo dispatch twice (A NEWER PRINT in `dispatch_prompt_check.py`), asking
+      for the generator in a shell call of its own, and the model sent it a third time instead;
+    - the shared hold budget: the build and its redo share one OUTPUT_PATH, so when the first build already
+      spent that path's two holds, the redo went through as sent with no hold on it at all.
+    Tell them apart in `format_dispatch_report`'s per-dispatch lines: in the first, the redo's own earlier
+    attempts on the path are `held`; in the second, no redo dispatch is held and the holds sit on the first
+    build's dispatches. Neither is variance; do not re-run either to green."""
     comparand = comparand or _e2e_harness.printed_prompt_for
     held = (ledger or {}).get("sizing_redo")
     record = held if isinstance(held, dict) and held.get("run_id") == run_id else None

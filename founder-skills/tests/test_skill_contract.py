@@ -987,7 +987,10 @@ SKILL_MD_CEILING: dict[str, int] = {
     # validation.json in a shell call of its own and to run the comparison redo's generator in a shell call of
     # its own. A redo printed as the last command of a block that first recorded research through a heredoc
     # could not be vouched for, and the dispatch hook sent the build's older plain prompt in its place.
-    "market-sizing": 107_216,
+    # 107,216 -> 107,281 (+65 B), RAISED on 2026-10-14: Step 5 says printing the redo again unchanged before it
+    # is gated is the same redo, so "once per run" does not contradict the dispatch hook's hold, which asks for
+    # the same generator arguments again when the redo was printed in a block it cannot vouch for.
+    "market-sizing": 107_281,
     # fmr raised for two founder-facing-correctness items measured in a live run: the CHECKLIST
     # dispatch now forbids citing our artifact filenames in evidence (that run put `inputs.json` in 10
     # items' evidence, printed verbatim into the founder's report), and the producer pipe passes

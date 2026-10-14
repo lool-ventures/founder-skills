@@ -83,8 +83,9 @@ Contributor-facing only; nothing here changes what a founder installs or runs.
   generator in a shell call of its own. The redo record's residuals say it cannot see which prompt the redo's
   sub-agent received.
 - The market-sizing release-gate lane fails a report that says the redo ran when no sizing sub-agent received
-  the comparison redo, whatever the hook's comparand; its docstring names the one red cause that is the model
-  ignoring two holds, not the hook.
+  the comparison redo, whatever the hook's comparand. Its docstring names the two red causes when a redo is
+  printed in a block the hook cannot vouch for (the model ignoring two holds, or a hold budget the first build
+  already spent) and how to tell them apart.
 
 ## [0.19.1] - 2026-10-14 — A newer cash balance updates a delivered financial model review
 

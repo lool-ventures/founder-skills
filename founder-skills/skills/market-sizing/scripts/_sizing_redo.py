@@ -50,8 +50,8 @@ RESIDUALS, stated:
 - A re-read, after the redo print, of an earlier redirected plain print is not detected here.
 - The record cannot see which prompt the redo's sub-agent received. The dispatch hook no longer sends an
   older print in place of a newer one, but a dispatch it lets through after its two holds, a redo saved to
-  a file by the runtime (a shell result over 30,000 characters by default) and never read back, or a run
-  with no hook at all, is read here as the redo having run.
+  a file by the runtime (a shell result over 30,000 characters by default, as read from CLI 2.1.293 and
+  2.1.299) and never read back, or a run with no hook at all, is read here as the redo having run.
 
 Standalone: stdlib, plus the shared ledger modules through `_run_ref` when the run has a ledger.
 """

@@ -110,7 +110,8 @@ because a reverted redo is silent and makes the report false, where a pass after
 release gate's received-prompt check fails on it. Residuals: a dispatch sending the OLD vouched print
 verbatim while a newer differing print exists passes (that equals the comparand); and a generator result
 the runtime saved to a file ("Full output saved to: ...") carries no context line, so it is seen only once
-Read back. Read from the CLI's binaries (2.1.293 and 2.1.299): a shell result is saved when it exceeds
+Read back. As read from the CLI's binaries 2.1.293 and 2.1.299 (unconfirmed on 2.1.286, the release gate's
+CLI, and the rest of 2.1.28x): a shell result is saved when it exceeds
 30,000 characters by default, a setting that can go as low as 4,000; a sizing redo is about 7 KB, so
 it stays in the result by default but would be saved under the lowest setting.
 
@@ -1455,8 +1456,8 @@ def _unprinted_reason(
     is chosen reads the shell text of a block that will not parse; that selects the message only, never
     whether the dispatch is held, passed or rewritten."""
     head = (
-        f"{MARKER}[{output_path}] Held: the newest prompt printed for this OUTPUT_PATH is in a result the check "
-        "cannot vouch for, so neither it nor an earlier print is sent in its place. Run the same generator "
+        f"{MARKER}[{output_path}] Held: the newest prompt printed for this OUTPUT_PATH differs from the one the "
+        "check can vouch for, so neither it nor an earlier print is sent in its place. Run the same generator "
         "arguments in a shell call of its own"
         if stale
         else f"{MARKER}[{output_path}] Held: no printed prompt for this OUTPUT_PATH yet"
