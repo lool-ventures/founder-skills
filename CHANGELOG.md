@@ -45,8 +45,9 @@ Contributor-facing only; nothing here changes what a founder installs or runs.
 
 - The slide reviews carry a read token derived from their content and the run id, never printed. The
   CHECKLIST grade must echo it; the checklist producer requires `--slide-reviews` whenever it writes a file
-  (a usage error without it; the What-If rerun to stdout is exempt) and stamps `graded_against` with the
-  token and the bytes it checked. A token alone, not the file's existence: under a same-message dispatch the
+  (a usage error without it) and stamps `graded_against` with the token and the bytes it checked. A What-If
+  rerun prints to stdout and passes neither `--slide-reviews` nor `--reconciliation`: the delivered items it
+  reruns carry no echo, and a stdout run given the flag is checked like any other. A token alone, not the file's existence: under a same-message dispatch the
   slide reviews exist by the time the checklist is piped, so an existence check passes a blind grade.
 - Host contract: the deck-review producers' refusal codes gain `SLIDE_REVIEWS_MISSING` (the slide reviews
   are missing, unusable, another run's or carry no token: run Step 4 again) and `SLIDE_REVIEWS_NOT_READ` (the

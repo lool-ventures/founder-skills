@@ -2231,7 +2231,11 @@ def test_checklist_template_requires_the_slide_reviews_and_names_the_echo() -> N
     assert "<REVIEW_DIR_AGENT>/slide_reviews.json (a required read)" in flat
     assert "for reference" not in flat, "the read must not sound optional"
     assert '{"slide_reviews_read_token": ' in flat, "the echo key belongs in the output-shape literal the grader copies"
-    assert "copy it from the `slide_reviews.json` you Read" in flat
+    # The grader is told where the value sits and what it looks like, so it can check what it copied.
+    assert (
+        "copy it from the `metadata.read_token` field at the end of the `slide_reviews.json` you Read "
+        "(12 hex characters)" in flat
+    )
 
 
 def test_no_main_thread_placeholder_names_the_read_token() -> None:
@@ -2269,3 +2273,12 @@ def test_the_hand_off_state_machine_redoes_rather_than_repairs_a_blind_grade() -
 def test_the_founder_text_remedy_regrades_step5_after_a_slide_reviews_redispatch() -> None:
     flat = " ".join(SKILL_MD.read_text(encoding="utf-8").split())
     assert "when that step was SLIDE_REVIEWS, Step 5 too (a regrade, outside its retry budget)" in flat
+
+
+def test_the_what_if_rule_drops_both_precondition_flags() -> None:
+    """A what-if reruns the delivered items, which carry no echo: keeping --slide-reviews there is refused
+    SLIDE_REVIEWS_NOT_READ, whose remedy (a new dispatch) is wrong for a what-if."""
+    text = SKILL_MD.read_text(encoding="utf-8")
+    start = text.index("## What-If Recomputation Rule")
+    rule = " ".join(text[start : text.index("\n## ", start + 3)].split())
+    assert "with no `--reconciliation` and no `--slide-reviews`, and output to stdout, never `-o`" in rule

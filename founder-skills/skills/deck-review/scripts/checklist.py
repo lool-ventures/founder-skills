@@ -838,7 +838,8 @@ _SLIDE_REVIEWS_MISSING_FIX = (
 )
 _SLIDE_REVIEWS_NOT_READ_FIX = (
     "the grade was made without reading this run's slide reviews. Dispatch the CHECKLIST again as a new "
-    "dispatch of the full Step 5 prompt, after the slide reviews are written; do not repair this file"
+    "dispatch of the full Step 5 prompt, after the slide reviews are written; do not repair this file. "
+    "(A what-if rerun to stdout passes neither --slide-reviews nor -o.)"
 )
 
 
@@ -962,7 +963,8 @@ def parse_args() -> argparse.Namespace:
     if args.output and not args.slide_reviews:
         p.error(
             '--slide-reviews is required with -o: pass --slide-reviews "$REVIEW_DIR/slide_reviews.json" '
-            "(Step 5's pipe); a checklist file is written only from a grade made with this run's slide reviews"
+            "(Step 5's pipe); a checklist file is written only from a grade made with this run's slide reviews. "
+            "A what-if rerun passes neither --slide-reviews nor -o: it prints to stdout"
         )
     return args
 

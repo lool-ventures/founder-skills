@@ -1233,7 +1233,7 @@ State what is true of the DECK.
 Use your Write tool to write to OUTPUT_PATH the items array without a summary
 (the producer script computes the summary):
 {"slide_reviews_read_token": "the metadata.read_token value you read", "items": [{"id": "purpose_clear", "status": "pass", "evidence": "...", "notes": "..."}, ...all 35 items...]}
-The main thread leaves `slide_reviews_read_token` to you; copy it from the `slide_reviews.json` you Read.
+The main thread leaves `slide_reviews_read_token` to you; copy it from the `metadata.read_token` field at the end of the `slide_reviews.json` you Read (12 hex characters).
 On the four visual Design & Readability criteria add `"verified_by"`: `"measured"` only
 when you directly observed the property with a tool that can observe it, `"inferred"` when
 you reasoned it from other evidence, `"not_possible"` when you had no way to observe it.
@@ -1506,7 +1506,7 @@ This skill runs inline in the main thread (not as a sub-agent). The final outcom
 
 ## What-If Recomputation Rule
 
-If the founder asks "what's my score if I fix X" or any score recomputation question: re-run `checklist.py` starting from the delivered `$REVIEW_DIR/checklist.json` items (not the reviewer's hand-off, which carries its own reading of `numbers_consistent`), changing only the hypothetical, with no `--reconciliation` and output to stdout, never `-o` (or read the Appendix evidence from report.md) and present the script's output. Never compute a revised score by mental arithmetic in the chat — the formula is non-trivial (a warn earns half credit, a fail none; N/A items are excluded from the denominator) and off-by-one errors cause real harm.
+If the founder asks "what's my score if I fix X" or any score recomputation question: re-run `checklist.py` starting from the delivered `$REVIEW_DIR/checklist.json` items (not the reviewer's hand-off, which carries its own reading of `numbers_consistent`), changing only the hypothetical, with no `--reconciliation` and no `--slide-reviews`, and output to stdout, never `-o` (or read the Appendix evidence from report.md) and present the script's output. Never compute a revised score by mental arithmetic in the chat — the formula is non-trivial (a warn earns half credit, a fail none; N/A items are excluded from the denominator) and off-by-one errors cause real harm.
 
 ## Feedback
 

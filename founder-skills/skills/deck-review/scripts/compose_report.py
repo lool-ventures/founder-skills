@@ -2219,7 +2219,9 @@ def compose(
     # SLIDE_REVIEWS), or when the checklist file was written without the check. Compared by the content-derived
     # token, not the file's bytes, so re-piping identical reviews is not stale. Same run only (another run's
     # file is already STALE_ARTIFACT by run id); a slide-reviews file with no token (written before the token
-    # existed) says nothing either way.
+    # existed) says nothing either way. The agent-facing `message` says "the checklist", not its file name:
+    # `high_severity_warnings` copies `message` (not `founder_message`) into the coaching payload, and
+    # insert_coaching's founder-text scan flags an internal file name the coach echoes from it.
     _sr_meta = _as_dict(slide_reviews.get("metadata")) if _usable(slide_reviews) else {}
     _sr_token = _sr_meta.get("read_token")
     if isinstance(_sr_token, str) and _sr_token and _usable(checklist_data):

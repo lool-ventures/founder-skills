@@ -6845,6 +6845,21 @@ def test_a_grade_with_no_echo_is_refused_as_not_read(tmp_path: Path) -> None:
     assert "do not repair" in rejection["fix"] and "Step 5" in rejection["fix"]
 
 
+def test_a_stdout_run_that_asks_for_the_check_gets_it(tmp_path: Path) -> None:
+    """A decision, not an accident: stdout mode with --slide-reviews checks the echo too. The delivered items a
+    what-if reruns carry none, so the What-If rule drops the flag, and the refusal's fix says so."""
+    path, token = _tokened_slide_reviews(tmp_path, _SR_RUN)
+    rc, stdout, err = run_script_raw("checklist.py", ["--run-id", _SR_RUN, "--slide-reviews", path], _sr_payload())
+    assert rc == 1, (rc, stdout, err)
+    rejection = json.loads(stdout)
+    assert rejection["code"] == "SLIDE_REVIEWS_NOT_READ"
+    assert "A what-if rerun to stdout passes neither --slide-reviews nor -o" in rejection["fix"]
+    _no_secret_printed(stdout + err, token)
+    rc, stdout, err = run_script_raw("checklist.py", ["--run-id", _SR_RUN, "--slide-reviews", path], _sr_payload(token))
+    assert rc == 0, err
+    assert json.loads(stdout)["graded_against"]["slide_reviews"]["read_token"] == token
+
+
 def test_a_grade_with_the_wrong_echo_is_refused_as_not_read(tmp_path: Path) -> None:
     path, token = _tokened_slide_reviews(tmp_path, _SR_RUN)
     wrong = "0123456789ab" if token != "0123456789ab" else "ba9876543210"
@@ -6878,6 +6893,7 @@ def test_o_without_the_flag_is_a_usage_error_and_stdout_mode_is_exempt(tmp_path:
     rc, stdout, err = run_script_raw("checklist.py", ["--run-id", _SR_RUN, "-o", str(out)], _sr_payload())
     assert rc == 2, (rc, stdout, err)
     assert "--slide-reviews is required with -o" in err
+    assert "A what-if rerun passes neither --slide-reviews nor -o" in " ".join(err.split())
     assert not out.exists()
     # The What-If control: stdout, no flag, no echo -> scored as before.
     rc, stdout, err = run_script_raw("checklist.py", ["--run-id", _SR_RUN], _sr_payload())

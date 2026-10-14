@@ -1603,7 +1603,11 @@ SKILL_MD_CEILING: dict[str, int] = {
     # The hand-off state machine's producer-rejection row carves SLIDE_REVIEWS_NOT_READ out as a redo, never a
     # repair (a repair prompt carries the diagnostic, and the row is what the model branches on), and the
     # FOUNDER_TEXT_TOKEN remedy says a SLIDE_REVIEWS re-dispatch also regrades Step 5. Approved 2026-10-14.
-    "deck-review": 116_102,
+    # 116,102 -> 116,194 (+92 B): the What-If rule names --slide-reviews among the flags a rerun drops (kept,
+    # the delivered items carry no echo and the rerun is refused with a "dispatch again" fix that is wrong for a
+    # what-if), and the template's echo sentence says where the value sits and its shape (12 hex characters),
+    # so the grader can check what it copied.
+    "deck-review": 116_194,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
@@ -3742,7 +3746,10 @@ def _deck_review_slide_reviews() -> tuple[str, str]:
         capture_output=True,
         text=True,
     )
-    assert proc.returncode == 0, proc.stderr
+    # At import time: a failure here fails collection of this whole module, so name the cause.
+    assert proc.returncode == 0, (
+        f"deck-review slide_reviews.py failed while building the checklist entries: {proc.stderr}"
+    )
     return str(out), json.loads(out.read_text(encoding="utf-8"))["metadata"]["read_token"]
 
 
