@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased] — A newer cash balance updates a delivered financial model review
+## [0.19.1] - 2026-10-14 — A newer cash balance updates a delivered financial model review
 
 ### Highlights
 
