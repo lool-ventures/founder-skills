@@ -1401,7 +1401,7 @@ GATES: dict[str, dict[str, Any]] = {
         "modes": _FULL,
         "kind": "templated",
         "question": (
-            "My research also found that <A> and <B> are now one company as of <date>, per <source> — want me "
+            "My research also found that [A] and [B] are now one company as of [date], per [source] — want me "
             "to combine them?"
         ),
         "form_label": "Merge",

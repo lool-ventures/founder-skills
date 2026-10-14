@@ -188,7 +188,7 @@
           "terminal": true
         }
       ],
-      "question": "My research also found that <A> and <B> are now one company as of <date>, per <source> — want me to combine them?",
+      "question": "My research also found that [A] and [B] are now one company as of [date], per [source] — want me to combine them?",
       "skill": "competitive-positioning",
       "step": "4"
     },

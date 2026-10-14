@@ -31,6 +31,11 @@ than it would have, because those grades ran higher in every case we compared. E
   internal file name from the report), the checklist is now graded again too, and a report whose checklist
   was graded against an earlier version of the slide findings says so.
 
+- Competitive positioning: the skill file's example merge sentence named its companies `<A>` and `<B>`,
+  which a markdown viewer such as GitHub reads as an unclosed bold tag, so the rest of the file showed in bold.
+  They are now `[A]` and `[B]`, here and in the same question's text in the host contract (its id and options
+  are unchanged). What the skill does is unchanged.
+
 ### Changed
 
 - Deck review: where the review's helpers cannot read the review's folder (a host that returns their work
