@@ -1825,9 +1825,9 @@ def test_a_competitive_positioning_correction_beside_a_heredoc_is_held_not_rewri
 
 # --- a forced mismatch at CLI 2.1.141: what a host verifying the rewrite should see ------------------------
 #
-# The floor was lowered to 2.1.141 after a live probe on that CLI. A host that drives the chain unattended runs
-# that version; these rows are the transcript its verification recipe produces (a real deck review, the
-# generator run as Step 5 says, then a CHECKLIST dispatch with one sentence appended). The deny rows below are
+# The floor was lowered to 2.1.141 after a live probe on that CLI. These rows are what a host verifying the
+# rewrite at 2.1.141 should see (a real deck review, the generator run as Step 5 says, then a CHECKLIST dispatch
+# with one sentence appended). The deny rows below are
 # built WITHOUT the runtime's `PreToolUse:<Tool> hook error: ` prefix on purpose: that prefix is confirmed only
 # on 2.1.28x-2.1.29x, and the hold budget matches the marker prefix-free, so it counts whatever the prefix is.
 
@@ -2110,9 +2110,13 @@ def test_a_refused_generator_run_is_named_with_its_code(tmp_path: Path) -> None:
     assert "The prompt generator refused (`SLIDE_REVIEWS_MISSING`): do what its output says" in reason
     assert "`$SCRIPTS/dr_dispatch_prompt.py checklist`" in reason
     assert "nothing printed" not in reason and '"fix"' not in reason  # only the code is echoed
-    # At the Cowork host loop the result opens with an exit lead.
-    reason = _deny(_run(tmp_path, _refused_rows("[exit 1]\n" + _DR_REFUSAL), _dr_printed(), agent=_DR_AGENT))
+    # At the Cowork host loop the result opens with an exit lead and carries no `is_error`.
+    rows = _refused_rows("[exit 1]\n" + _DR_REFUSAL, is_error=False)
+    reason = _deny(_run(tmp_path, rows, _dr_printed(), agent=_DR_AGENT))
     assert "refused (`SLIDE_REVIEWS_MISSING`)" in reason
+    # An exit lead of 0 is not a failure.
+    rows = _refused_rows("[exit 0]\n" + _DR_REFUSAL, is_error=False)
+    assert "refused" not in _deny(_run(tmp_path, rows, _dr_printed(), agent=_DR_AGENT))
 
 
 def test_a_result_that_is_not_an_error_is_not_a_refusal(tmp_path: Path) -> None:

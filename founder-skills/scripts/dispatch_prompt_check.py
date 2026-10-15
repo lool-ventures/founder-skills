@@ -88,7 +88,8 @@ budget.
 NO PRINTED PROMPT. Held, naming the generator to run (`$SCRIPTS/<generator> <subcommand>` and its
 identifier flags; never the hook's own folder, which at the host loop is a host path the shell sees as the
 VM mount): the only way to satisfy it puts the comparand in the transcript. When this context's latest
-generator call REFUSED -- its result is an error (`is_error`), carries no context line, and has a line that
+generator call REFUSED -- its result is an error (`is_error`, or a leading `[exit N]` with N other than 0, the
+Cowork host loop's shape), carries no context line, and has a line that
 is a JSON object with `"status"` `rejected` or `refused` and a `code` -- the hold says the generator refused,
 echoing only the code (`[A-Z_]{1,64}`), and to do what its output says before running it again (the last
 such line wins, so a producer's refusal earlier in the same block is not named). Never on the stale head.
@@ -1472,16 +1473,21 @@ def _how_to_print(generator: str | None, sub: str) -> str:
 
 
 _CODE_RE = re.compile(r"^[A-Z_]{1,64}$")
-_EXIT_LEAD_RE = re.compile(r"^\[exit \d+\]\s*")
+_EXIT_LEAD_RE = re.compile(r"^\[exit (\d+)\]\s*")
 _ANY_CONTEXT_LINE_RE = re.compile(r"^[ \t]*CONTEXT:[ \t]*[A-Z]", re.MULTILINE)
 
 
 def _refusal_code(block: dict[str, Any] | None) -> str | None:
     """The code of a generator's refusal in its result (NO PRINTED PROMPT), or None. Model-visible text, so only a
     code of capitals and underscores is ever returned, never a message."""
-    if not isinstance(block, dict) or not block.get("is_error"):
+    if not isinstance(block, dict):
         return None
     text = _result_text(block)
+    # A failed call: `is_error`, or (the Cowork host loop's shape, as `_failed` and the Stop hook read it) a
+    # leading `[exit N]` with N other than 0.
+    lead = _EXIT_LEAD_RE.match(text.lstrip())
+    if not block.get("is_error") and not (lead is not None and lead.group(1) != "0"):
+        return None
     if _ANY_CONTEXT_LINE_RE.search(text):
         return None  # a printed prompt that quotes a producer's code is not a refusal
     found = None
