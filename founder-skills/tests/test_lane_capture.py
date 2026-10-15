@@ -718,3 +718,65 @@ def test_deck_reviews_generator_folded_last_into_its_pipe_block_is_a_comparand(
         _result("d", structured={"prompt": printed}),
     ]
     assert _rows(_report(harness, tmp_path, monkeypatch, stream))["d"]["sent_matches"] is True
+
+
+# --- the deck lane's recorded CHECKLIST report (free; the lane itself is paid) ------------------------------
+
+
+def _deck_lane() -> Any:
+    spec = importlib.util.spec_from_file_location("_deck_lane_probe", TESTS / "test_e2e_deck_review.py")
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_the_deck_lanes_checklist_report_records_a_parallel_dispatch(tmp_path: Path) -> None:
+    """The report the release gate records: a CHECKLIST sent before SLIDE_REVIEWS returned is named, and the
+    printed prompt it sent equals both the hook's comparand and an offline regeneration. Exercised here because a
+    bug in a recorder must never red the paid lane, and the paid lane is the only other place it runs."""
+    import json
+    import subprocess
+
+    from claude_agent_sdk import AssistantMessage, ToolUseBlock
+
+    lane = _deck_lane()
+    review = tmp_path / "deck-review-acme"
+    review.mkdir()
+    (review / "slide_reviews.json").write_text(
+        json.dumps({"reviews": [], "metadata": {"run_id": "r1", "read_token": "0123456789ab"}}), encoding="utf-8"
+    )
+    args = ["checklist", "--run-id", "r1", "--handoff-agent", f"{review}/handoff/r1"]
+    args += ["--review-dir-agent", str(review), "--review-dir", str(review)]
+    command = f"python3 {DR_SCRIPTS}/dr_dispatch_prompt.py " + " ".join(args)
+    printed = subprocess.run(
+        [sys.executable, f"{DR_SCRIPTS}/dr_dispatch_prompt.py", *args], capture_output=True, text=True, timeout=30
+    ).stdout
+    assert printed.startswith("CONTEXT: CHECKLIST")
+    sr = AssistantMessage(
+        content=[ToolUseBlock(id="sr", name="Agent", input={"prompt": "CONTEXT: SLIDE_REVIEWS\nOUTPUT_PATH: x\n"})],
+        model="m",
+    )
+    checklist = AssistantMessage(
+        content=[ToolUseBlock(id="ck", name="Agent", input={"prompt": printed, "subagent_type": "deck-review"})],
+        model="m",
+    )
+    stream = [
+        _init(),
+        *_shell("g", command, printed),
+        sr,
+        checklist,
+        _result("sr", structured={"prompt": "CONTEXT: SLIDE_REVIEWS\nOUTPUT_PATH: x\n"}),
+        _result("ck", structured={"prompt": printed}),
+    ]
+    cap = lane.RunCapture()
+    for msg in stream:
+        lane.record_message(cap, msg)
+    observed: dict[str, Any] = {}
+    lane._record_checklist_dispatches(cap, review, "r1", observed)
+    assert "checklist_dispatch.error" not in observed, observed
+    assert observed["checklist_dispatch.count"] == 1
+    assert observed["checklist_dispatch.beside_slide_reviews"] == ["ck"]
+    assert observed["checklist_dispatch.equals_offline_regeneration"] == [True]
+    assert observed["checklist_dispatch.outcomes"] == "pass"
+    assert observed["checklist_dispatch.received_prompt"] == "pass"

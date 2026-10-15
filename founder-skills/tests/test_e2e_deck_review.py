@@ -56,20 +56,29 @@ import pytest
 # were (a safety control is not a place for a second copy that can drift); and the pure readers of the run
 # status a host sees (no SDK, no options). Those it RECORDS rather than failing on: it is the release gate,
 # and a run status not yet complete beside a correct report would red a tag on model pacing. Harden after
-# two tagged releases.
+# two tagged releases. It also folds the stream into a RunCapture for the CHECKLIST dispatch report, which is
+# RECORDED for one release too (see `_record_checklist_dispatches`).
 from _e2e_harness import (
     CONNECTOR_ISOLATION_ENV,
+    RunCapture,
     SdkStreamFile,
+    assert_dispatch_outcomes,
     assert_no_account_connectors,
+    assert_received_prompt,
     compose_record_problems,
     connector_isolation_options,
+    dispatch_report,
+    format_dispatch_report,
     host_request,
     lane_run_id,
     mirror_problems,
     read_run_ledger,
     read_run_status,
+    record_message,
     run_complete_problems,
     run_status_path,
+    same_prompt,
+    step_summary,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -400,6 +409,10 @@ def _drive_deck_review_lane(
     session_tools: list[str] = []
     mcp_servers: list[Any] = []
     tool_call_names: list[str] = []
+    # The structured record for the CHECKLIST dispatch report. Folding a message never fails the run: the
+    # report is recorded, and a bug in it must not red the release gate.
+    cap = RunCapture()
+    capture_errors: list[str] = []
 
     async def run() -> None:
         msg_count = 0
@@ -408,6 +421,10 @@ def _drive_deck_review_lane(
                 msg_count += 1
                 stream.write(msg)
                 captured_messages.append(str(msg))
+                try:
+                    record_message(cap, msg)
+                except Exception as e:  # noqa: BLE001 -- recorded, never a failure on the release gate
+                    capture_errors.append(repr(e))
                 if isinstance(msg, SystemMessage) and msg.subtype == "init":
                     session_tools.extend(str(t) for t in msg.data.get("tools") or [])
                     mcp_servers.extend(msg.data.get("mcp_servers") or [])
@@ -717,6 +734,11 @@ def _drive_deck_review_lane(
                     "fixture's assertion means items, not categories, and the golden file should say so"
                 )
 
+    # 6f. Step 5's CHECKLIST dispatches against the prompt dr_dispatch_prompt.py printed -- RECORDED, never a
+    # failure on this lane for one release (see `_record_checklist_dispatches`). 6b' above stays the gated check.
+    observed["checklist_dispatch.capture_errors"] = capture_errors[:3]
+    _record_checklist_dispatches(cap, review_dir, run_id, observed)
+
     # 7. The run status a host reads -- recorded and printed, never a failure on this lane (see the import).
     try:
         status_file = run_status_path(workdir, run_id)
@@ -748,6 +770,103 @@ def _drive_deck_review_lane(
     assert not failures, "live deck-review run failed {} check(s):\n{}\n\nreview_dir: {}".format(
         len(failures), "\n".join(f"  - {f}" for f in failures), review_dir
     )
+
+
+def _dispatch_rows(cap: RunCapture, context: str) -> list[dict[str, Any]]:
+    """The main thread's dispatches whose prompt opens with `context` (a suffix such as "(repair)" included)."""
+    out = []
+    for call in cap.tool_uses:
+        if call["name"] not in ("Agent", "Task") or call["parent_tool_use_id"] is not None:
+            continue
+        prompt = str((call.get("input") or {}).get("prompt", ""))
+        first = next((line.strip() for line in prompt.splitlines() if line.strip()), "")
+        if first == context or first.startswith(context + " "):
+            out.append(call)
+    return out
+
+
+def _row_index(cap: RunCapture, *, tool_use_id: str, result: bool) -> int | None:
+    """Where in the transcript-shaped rows a call was made (or its result arrived)."""
+    for index, row in enumerate(cap.rows):
+        if row.get("isSidechain"):
+            continue
+        content = (row.get("message") or {}).get("content")
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            if result and block.get("type") == "tool_result" and block.get("tool_use_id") == tool_use_id:
+                return index
+            if not result and block.get("type") == "tool_use" and block.get("id") == tool_use_id:
+                return index
+    return None
+
+
+def _regenerated_checklist(prompt: str, review_dir: Path, run_id: str) -> str | None:
+    """Step 5's prompt printed again after the run, from the identifiers the dispatched prompt carries: the only
+    check that sees a run in which no print was ever vouched for (the hook's comparand then does not exist)."""
+    import re
+
+    output = re.search(r"^OUTPUT_PATH:\s*(.+?)\s*$", prompt, re.MULTILINE)
+    review_agent = re.search(r"using the slide reviews at (\S+)/slide_reviews\.json", " ".join(prompt.split()))
+    if output is None or review_agent is None:
+        return None
+    generator = REPO_ROOT / "founder-skills" / "skills" / "deck-review" / "scripts" / "dr_dispatch_prompt.py"
+    args = ["checklist", "--run-id", run_id, "--handoff-agent", os.path.dirname(output.group(1))]
+    args += ["--review-dir-agent", review_agent.group(1), "--review-dir", str(review_dir)]
+    r = subprocess.run([sys.executable, str(generator), *args], capture_output=True, text=True, timeout=60)
+    return r.stdout if r.returncode == 0 else None
+
+
+def _record_checklist_dispatches(cap: RunCapture, review_dir: Path, run_id: str, observed: dict[str, Any]) -> None:
+    """Step 5's CHECKLIST dispatches judged against the prompt the generator printed. RECORDED for one release
+    (job summary and run log), never a failure here: the person running the release reads this report in the
+    paid-gate run summary and records its verdict in the next release's plan, and both dispatch assertions
+    become gated at the next tag unless the record shows a non-hold error class or a false hold.
+
+    Known misattribution, accepted for that release: when the hook's holds run out and checklist.py refuses a
+    blind grade, the gated stamp check (6b') is skipped, not failed, because checklist.json does not exist; the
+    lane then reds later on the missing artifact. This report names the right cause."""
+    try:
+        checklists = _dispatch_rows(cap, "CONTEXT: CHECKLIST")
+        slide_reviews = _dispatch_rows(cap, "CONTEXT: SLIDE_REVIEWS")
+        report = dispatch_report(cap, checklists)
+        text = format_dispatch_report("CHECKLIST", report)
+        observed["checklist_dispatch.count"] = len(checklists)
+        observed["checklist_dispatch.held"] = report["held"]
+        observed["checklist_dispatch.rewrites"] = report["rewrites"]
+        # Parallel: a CHECKLIST dispatched before a SLIDE_REVIEWS dispatch's result had arrived.
+        parallel = []
+        for c in checklists:
+            made = _row_index(cap, tool_use_id=str(c["id"]), result=False)
+            for sr in slide_reviews:
+                done = _row_index(cap, tool_use_id=str(sr["id"]), result=True)
+                if made is not None and (done is None or made < done):
+                    parallel.append(c["id"])
+                    break
+        observed["checklist_dispatch.beside_slide_reviews"] = parallel
+        regenerated = []
+        for c in checklists:
+            res = cap.result(str(c["id"])) or {}
+            received = (res.get("tool_use_result") or {}).get("prompt") if isinstance(res, dict) else None
+            prompt = received if isinstance(received, str) else str((c.get("input") or {}).get("prompt", ""))
+            again = _regenerated_checklist(prompt, review_dir, run_id)
+            regenerated.append(None if again is None else same_prompt(prompt, again))
+        observed["checklist_dispatch.equals_offline_regeneration"] = regenerated
+        for name, check in (
+            ("outcomes", lambda: assert_dispatch_outcomes(report, "CHECKLIST")),
+            ("received_prompt", lambda: assert_received_prompt(report, "CHECKLIST", enabled=True)),
+        ):
+            try:
+                check()
+                observed[f"checklist_dispatch.{name}"] = "pass"
+            except AssertionError as e:
+                observed[f"checklist_dispatch.{name}"] = "FAIL: " + str(e).splitlines()[0]
+        print("[e2e] " + text.replace("\n", "\n[e2e] "), flush=True)
+        step_summary("### deck-review CHECKLIST dispatches (recorded, not gated)\n" + text)
+    except Exception as e:  # noqa: BLE001 -- recorded, never a failure on the release gate
+        observed["checklist_dispatch.error"] = repr(e)
 
 
 @pytest.mark.e2e
