@@ -29,6 +29,7 @@ import sys
 from typing import Any, NoReturn
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _slide_reviews_file  # noqa: E402
 import _thresholds  # noqa: E402
 
 
@@ -834,11 +835,13 @@ def _fail_invalid(errors: list[str], output_path: str | None, indent: int | None
 
 
 _SLIDE_REVIEWS_MISSING_FIX = (
-    "run Step 4 (the slide reviews) for this run, then dispatch the CHECKLIST again with the Step 5 prompt"
+    "run Step 4 (the slide reviews) for this run, then run the Step 5 prompt generator and dispatch the CHECKLIST "
+    "again with what it prints"
 )
 _SLIDE_REVIEWS_NOT_READ_FIX = (
-    "the grade was made without reading this run's slide reviews. Dispatch the CHECKLIST again as a new "
-    "dispatch of the full Step 5 prompt, after the slide reviews are written; do not repair this file. "
+    "the grade was made without reading this run's slide reviews. Save this pipe's stderr and run the Step 5 "
+    "prompt generator with --correction producer-rejected --detail-file on that file; dispatch what it prints as "
+    "a new dispatch, after the slide reviews are written; do not repair this file. "
     "(A what-if rerun to stdout passes neither --slide-reviews nor -o.)"
 )
 
@@ -880,27 +883,8 @@ def check_slide_reviews(path: str, run_id: str, grade: dict[str, Any], output_pa
     another run's, or carries no token (go back to Step 4), and `SLIDE_REVIEWS_NOT_READ` for a grade
     with no echo or another value (a new CHECKLIST dispatch, never a repair).
     """
-    data: Any = None
-    problem: str | None = None
-    try:
-        with open(path, encoding="utf-8") as fh:
-            data = json.load(fh)
-    except FileNotFoundError:
-        problem = "does not exist"
-    except (OSError, json.JSONDecodeError):
-        problem = "cannot be read as JSON"
-    meta = _as_dict(data.get("metadata")) if isinstance(data, dict) else {}
-    token = meta.get("read_token")
-    if problem is None:
-        if not isinstance(data, dict):
-            problem = "is not a JSON object"
-        elif data.get("skipped") is True:
-            problem = "is a skipped stub, not slide reviews"
-        elif meta.get("run_id") != run_id:
-            problem = "belongs to another run"
-        elif not isinstance(token, str) or not token:
-            problem = "carries no read token (it was not written by this version's slide-reviews step)"
-    if problem is not None:
+    ok, problem = _slide_reviews_file.usable(path, run_id)
+    if not ok:
         _refuse(
             {
                 "status": "rejected",
@@ -910,7 +894,7 @@ def check_slide_reviews(path: str, run_id: str, grade: dict[str, Any], output_pa
             },
             output_path,
         )
-    token = str(token)
+    token = _slide_reviews_file.token(path, run_id)
     echo = grade.get("slide_reviews_read_token")
     if not isinstance(echo, str) or echo.strip() != token:
         _refuse(

@@ -436,6 +436,8 @@ _CODE_SOURCES = [
     SKILLS / "deck-review" / "scripts" / "compose_report.py",
     # Step 5's producer: a grade made without this run's slide reviews is refused with a code.
     SKILLS / "deck-review" / "scripts" / "checklist.py",
+    # Step 5's prompt generator: it prints nothing until this run's slide reviews are written.
+    SKILLS / "deck-review" / "scripts" / "dr_dispatch_prompt.py",
     SKILLS / "financial-model-review" / "scripts" / "_fmr_gates.py",
     SKILLS / "financial-model-review" / "scripts" / "compose_report.py",
     SKILLS / "market-sizing" / "scripts" / "record_revision_answer.py",

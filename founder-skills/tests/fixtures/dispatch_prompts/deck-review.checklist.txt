@@ -1,0 +1,101 @@
+CONTEXT: CHECKLIST
+OUTPUT_PATH: /agent/handoff/R/checklist_output.json
+RUN_ID: R
+
+You are the deck-review agent dispatched in Context A (CHECKLIST).
+If a reference path below cannot be read (refused or not found), read the same file under the plugin folder your own instructions name.
+Evaluate all
+35 criteria from @PLUGIN_ROOT@/skills/deck-review/references/checklist-criteria.md
+using the slide reviews at /agent/review/slide_reviews.json (a required
+read), the stage profile at /agent/review/stage_profile.json, and the
+deck inventory at /agent/review/deck_inventory.json.
+
+Assess ALL 35 criteria including the 4 AI criteria and the 5 Design & Readability
+criteria — do NOT self-gate. `checklist.py` applies deterministic AI-criteria
+gating from `deck_inventory.json`'s `ai_company_status` AND deterministic
+Design-criteria gating from its `input_format` (forcing Design & Readability to
+`not_applicable` when the deck was described in text rather than uploaded as a
+file) after you return — assess every criterion regardless of format.
+
+Evidence quality rules:
+- Every fail and warn `evidence` MUST include BOTH what this deck actually does (quote or describe the specific slide content) AND the best-practice principle or benchmark it falls short of — the deck observation is not optional.
+- Every pass MUST record in `evidence` what was checked.
+- not_applicable items MUST include a reason.
+- `notes` is the specific change the founder should make — imperative, concrete, particular to this deck, never a restatement of the criterion or a record of what you checked. Required on fail and warn; omit it entirely on pass and not_applicable.
+- Before asserting a visual or design element is absent (photos, charts,
+  diagrams, logos), check the `visuals` field of every relevant slide in
+  `deck_inventory.json` and cite the slide number(s) you checked in the evidence.
+
+Evaluate every one of these 35 criteria — one item per id, no omissions, no
+invented ids. Grouped by category:
+
+Narrative Flow:
+  - purpose_clear
+  - headlines_carry_story
+  - narrative_arc_present
+  - strongest_proof_early
+  - story_stands_alone
+Slide Content:
+  - problem_quantified
+  - solution_shows_workflow
+  - why_now_has_catalyst
+  - market_bottom_up
+  - competition_honest
+  - business_model_clear
+  - gtm_has_proof
+  - team_has_depth
+Stage Fit:
+  - stage_appropriate_structure
+  - stage_appropriate_traction
+  - stage_appropriate_financials
+  - ask_ties_to_milestones
+  - round_size_realistic
+Design & Readability:
+  - one_idea_per_slide
+  - minimal_text
+  - slide_count_appropriate
+  - consistent_design
+  - mobile_readable
+Common Mistakes:
+  - no_vague_purpose
+  - no_nice_to_have_problem
+  - no_hype_without_proof
+  - no_features_over_outcomes
+  - no_dodged_competition
+AI Company (score all 4; the producer script gates them after you return):
+  - ai_retention_rebased
+  - ai_cost_to_serve_shown
+  - ai_defensibility_beyond_model
+  - ai_responsible_controls
+Diligence Readiness:
+  - numbers_consistent
+  - data_room_ready
+  - contact_info_present
+
+When you cite deck figures in evidence, quote them verbatim from the deck
+content — do not paraphrase or round numbers, percentages, dates, or named
+metrics.
+
+Evidence prints VERBATIM in the founder's report, so name the source the way the
+founder knows it — never by our filename or a dispatch label. They saw their deck,
+not `deck_inventory.json` or `deck-best-practices.md`.
+  Instead of: "slide_reviews.json shows no competition slide"
+  Write:      "the deck has no competition slide"
+State what is true of the DECK.
+
+
+Use your Write tool to write to OUTPUT_PATH the items array without a summary
+(the producer script computes the summary):
+{"slide_reviews_read_token": "the metadata.read_token value you read", "items": [{"id": "purpose_clear", "status": "pass", "evidence": "...", "notes": "..."}, ...all 35 items...]}
+The main thread leaves `slide_reviews_read_token` to you; copy it from the `metadata.read_token` field at the end of the `slide_reviews.json` you Read (12 hex characters).
+On the four visual Design & Readability criteria add `"verified_by"`: `"measured"` only
+when you directly observed the property with a tool that can observe it, `"inferred"` when
+you reasoned it from other evidence, `"not_possible"` when you had no way to observe it.
+Leaving it off means unstated, which is not the same as measured.
+All string values must be JSON-escaped (`\n` for line breaks, `\"` for embedded
+quotes); the file must parse with a strict JSON parser.
+Then return ONLY the receipt JSON in your final assistant message:
+{"status": "complete", "output_path": "<echo of OUTPUT_PATH>"}
+You never write a canonical artifact; anything else you write bypasses schema
+validation and run_id stamping.
+Do NOT write any file other than OUTPUT_PATH.

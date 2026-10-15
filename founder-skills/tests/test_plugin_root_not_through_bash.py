@@ -39,6 +39,7 @@ TOKEN = "${CLAUDE_PLUGIN_ROOT}"
 MS_GEN = PLUGIN / "skills" / "market-sizing" / "scripts" / "dispatch_prompt.py"
 CP_GEN = PLUGIN / "skills" / "competitive-positioning" / "scripts" / "cp_dispatch_prompt.py"
 FMR_GEN = PLUGIN / "skills" / "financial-model-review" / "scripts" / "fmr_dispatch_prompt.py"
+DR_GEN = PLUGIN / "skills" / "deck-review" / "scripts" / "dr_dispatch_prompt.py"
 RESOLVER = PLUGIN / "scripts" / "resolve_artifacts_root.py"
 # Off a /sessions tree each reference-naming prompt is pinned as readable text, one file per prompt, with the
 # generator's plugin folder written as @PLUGIN_ROOT@. The files began as the previous generator's output when
@@ -363,7 +364,7 @@ def test_the_old_flag_changes_nothing(gen: Path, context: str, tmp_path: Path) -
         assert (r.returncode, r.stdout, r.stderr) == (0, plain.stdout, ""), (value, r.stderr)
 
 
-@pytest.mark.parametrize("gen", [MS_GEN, CP_GEN, FMR_GEN], ids=lambda p: p.stem)
+@pytest.mark.parametrize("gen", [MS_GEN, CP_GEN, FMR_GEN, DR_GEN], ids=lambda p: p.stem)
 def test_help_does_not_offer_the_old_flag(gen: Path) -> None:
     r = subprocess.run([sys.executable, str(gen), "--help"], capture_output=True, text=True, timeout=30)
     assert r.returncode == 0
@@ -373,7 +374,7 @@ def test_help_does_not_offer_the_old_flag(gen: Path) -> None:
 # --- lane detection is the resolver's ----------------------------------------------------------
 
 
-@pytest.mark.parametrize("gen", [MS_GEN, CP_GEN, FMR_GEN], ids=lambda p: p.stem)
+@pytest.mark.parametrize("gen", [MS_GEN, CP_GEN, FMR_GEN, DR_GEN], ids=lambda p: p.stem)
 def test_lane_detection_is_a_copy_of_the_resolvers(gen: Path) -> None:
     mod = _load(gen, f"lane_{gen.stem}")
     res = _load(RESOLVER, "lane_resolver")
@@ -393,7 +394,7 @@ def test_lane_detection_is_a_copy_of_the_resolvers(gen: Path) -> None:
         assert mod.on_session_tree(path) == res.on_session_tree(path), path
 
 
-@pytest.mark.parametrize("gen", [MS_GEN, CP_GEN, FMR_GEN], ids=lambda p: p.stem)
+@pytest.mark.parametrize("gen", [MS_GEN, CP_GEN, FMR_GEN, DR_GEN], ids=lambda p: p.stem)
 def test_the_lane_is_read_from_the_folder_and_the_cwd(
     gen: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

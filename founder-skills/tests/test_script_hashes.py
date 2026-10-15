@@ -102,6 +102,7 @@ def test_the_manifest_lists_every_tracked_script_and_agent_and_nothing_else() ->
         MS_GEN_REL,
         "skills/competitive-positioning/scripts/cp_dispatch_prompt.py",
         "skills/financial-model-review/scripts/fmr_dispatch_prompt.py",
+        "skills/deck-review/scripts/dr_dispatch_prompt.py",
         "scripts/script_hashes.py",
         "scripts/dispatch_prompt_check.py",
     ):
@@ -353,18 +354,24 @@ def _generator_runs(root: Path, work: Path) -> dict[str, list[str]]:
         "moat_scores.json",
     ):
         (run / name).write_text("{}", encoding="utf-8")
+    # deck-review's generator prints only once this run's slide reviews carry a read token.
+    (run / "slide_reviews.json").write_text(
+        json.dumps({"reviews": [], "metadata": {"run_id": "R", "read_token": "0123456789ab"}}), encoding="utf-8"
+    )
     ms = str(root / MS_GEN_REL)
     cp = str(root / "skills" / "competitive-positioning" / "scripts" / "cp_dispatch_prompt.py")
     fmr = str(root / "skills" / "financial-model-review" / "scripts" / "fmr_dispatch_prompt.py")
     ms_ids = ["--run-id", "R", "--analysis-dir", str(run), "--handoff-dir", str(handoff), "--handoff-agent", "a/h/R"]
     cp_ids = ["--run-id", "R", "--handoff-agent", "a/h/R", "--analysis-dir-agent", "a"]
     cp_dirs = ["--analysis-dir", str(run), "--handoff-dir", str(handoff)]
+    dr = str(root / "skills" / "deck-review" / "scripts" / "dr_dispatch_prompt.py")
     fmr_ids = ["--run-id", "R", "--handoff-agent", "a/h/R", "--review-dir-agent", "a", "--review-dir", str(run)]
     runs = {f"ms {c}": [ms, c, *ms_ids] for c in ("red_team", "checklist", "top_down_methodology")}
     runs["ms bottom_up_methodology"] = [ms, "bottom_up_methodology", *ms_ids]
     runs.update({f"cp {c}": [cp, c, *cp_ids] for c in ("moat_scoring", "checklist", "startup_research")})
     runs["cp red_team"] = [cp, "red_team", *cp_ids, *cp_dirs]
     runs["fmr checklist"] = [fmr, "checklist", *fmr_ids]
+    runs["dr checklist"] = [dr, "checklist", *fmr_ids]
     return runs
 
 
@@ -410,10 +417,19 @@ def test_every_plugin_file_a_generator_reads_is_a_hashed_script(tmp_path: Path) 
         "ms": MS_GEN_REL,
         "cp": "competitive-positioning/scripts/cp_dispatch_prompt.py",
         "fmr": "fmr_dispatch_prompt",
+        "dr": "dr_dispatch_prompt",
     }
-    assert len(reads) == 9 and all(any(gens[k.split()[0]].split("/")[-1] in r for r in v) for k, v in reads.items())
+    assert len(reads) == 10 and all(any(gens[k.split()[0]].split("/")[-1] in r for r in v) for k, v in reads.items())
     seen = {Path(r).name.split(".")[0] for rels in reads.values() for r in rels}
-    assert {"_ms_gates", "_sizing_redo", "_run_ref", "_cp_gates", "_cp_view", "pdf_probe"} <= seen, seen
+    assert {
+        "_ms_gates",
+        "_sizing_redo",
+        "_run_ref",
+        "_cp_gates",
+        "_cp_view",
+        "pdf_probe",
+        "_slide_reviews_file",
+    } <= seen, seen
     assert _not_hashed(reads) == {}
 
 
