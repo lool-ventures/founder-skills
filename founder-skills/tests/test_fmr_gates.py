@@ -1151,6 +1151,11 @@ def test_a_run_whose_request_said_not_to_ask_keeps_its_delivered_review(tmp_path
     proc = _apply(run_dir, run_id, *CASH_REPLY)
     assert proc.returncode == 1 and _out(proc)["code"] == "RUN_FINISHED", proc.stdout + proc.stderr
     assert _snapshot(run_dir, root, run_id) == before
+    # A pin, not a lever: the no-ask check refuses the default before the finished-run check is reached, so
+    # this passes with that check removed, by design.
+    proc = _default(root, run_id)
+    assert proc.returncode == 1 and _out(proc)["code"] == "NO_ASK_DEFAULT", proc.stdout + proc.stderr
+    assert _snapshot(run_dir, root, run_id) == before
 
 
 def test_a_refused_run_takes_no_cash_update(tmp_path: Path) -> None:
@@ -1205,19 +1210,30 @@ def test_a_cash_reply_recorded_after_a_later_run_took_the_folder_is_refused(tmp_
     assert rs.folder_current_run(str(run_dir)) == later
 
 
-def _default(root: Path, run_id: str) -> subprocess.CompletedProcess[str]:
-    return _rec(root, run_id, "default", "--gate", "fmr_cash_followup", "--reason", "producer_default_disclosed")
+def _default(
+    root: Path, run_id: str, reason: str = "producer_default_disclosed", answer_id: str | None = None
+) -> subprocess.CompletedProcess[str]:
+    extra = ("--answer-id", answer_id) if answer_id else ()
+    return _rec(root, run_id, "default", "--gate", "fmr_cash_followup", "--reason", reason, *extra)
 
 
-def test_a_default_on_a_delivered_review_reopens_nothing_and_the_reply_still_records(tmp_path: Path) -> None:
-    """Only the founder's recorded reply reopens a delivered review: a default (no reply, no evidence) records
-    without a reopen, and the reply given after delivery is still accepted after it."""
+@pytest.mark.parametrize(
+    ("reason", "answer_id"), [("producer_default_disclosed", None), ("stated_in_request", "provided")]
+)
+def test_a_default_on_a_delivered_review_is_refused_and_the_reply_still_records(
+    tmp_path: Path, reason: str, answer_id: str | None
+) -> None:
+    """Only the founder's recorded reply reopens a delivered review. With a post-delivery cash call on record,
+    the recorder's default is refused `RUN_FINISHED` and writes nothing (it used to record, leaving a notice on
+    a review in which nothing had changed), and the reply given after delivery is still accepted after it."""
     root, run_id, run_dir = _delivered_real(tmp_path)
     time.sleep(0.002)
     _ok(_apply(run_dir, run_id, *CASH_REPLY))
-    _ok(_default(root, run_id))
-    st = h.status(root, run_id)
-    assert (st["status"], st["revision"], st["invocations"][-1]["kind"]) == ("complete", 0, "start"), st
+    before = _snapshot(run_dir, root, run_id)
+    proc = _default(root, run_id, reason, answer_id)
+    assert proc.returncode == 1 and _out(proc)["code"] == "RUN_FINISHED", proc.stdout + proc.stderr
+    assert "record that answer" in _out(proc)["message"]
+    assert _snapshot(run_dir, root, run_id) == before
     _ok(_cash_answer(root, run_id, "1500000", "2026-06"))
     st = h.status(root, run_id)
     assert (st["status"], st["revision"]) == ("running", 1)
@@ -1225,6 +1241,36 @@ def test_a_default_on_a_delivered_review_reopens_nothing_and_the_reply_still_rec
         h.ledger(root, run_id)["gates"]["fmr_cash_followup"]["current"]["evidence"]["history_seq"]
         == (_history(run_dir)[-1]["seq"])
     )
+
+
+@pytest.mark.parametrize(
+    ("reason", "answer_id"), [("producer_default_disclosed", None), ("stated_in_request", "provided")]
+)
+def test_a_recorder_default_keeps_its_old_code_where_nothing_was_reopenable(
+    tmp_path: Path, reason: str, answer_id: str | None
+) -> None:
+    """The refusal above is placed after the owed and terminal-entry checks: with no post-delivery cash call
+    the follow-up is not owed (`GATE_NOT_OWED`), and where it already holds compose's own default the
+    recorder's default is `ANSWER_STANDS` (the founder's reply is recorded with `answer`)."""
+    root, run_id, run_dir = _delivered_real(tmp_path)
+    proc = _default(root, run_id, reason, answer_id)
+    assert proc.returncode == 1 and _out(proc)["code"] == "GATE_NOT_OWED", proc.stdout + proc.stderr
+    root, run_id, run_dir = _delivered_without_cash(tmp_path / "without")
+    proc = _default(root, run_id, reason, answer_id)
+    assert proc.returncode == 1 and _out(proc)["code"] == "ANSWER_STANDS", proc.stdout + proc.stderr
+
+
+def test_the_post_delivery_cash_call_is_none_off_a_full_review(tmp_path: Path) -> None:
+    """The follow-up is a full review's. The predicate the recorder, the allowance and compose read finds the
+    call on a delivered full review and nothing once the run's mode is another. The transact writes nothing
+    here: on a final status `settle_owed` returns at once."""
+    root, run_id, run_dir = _delivered_real(tmp_path)
+    time.sleep(0.002)
+    _ok(_apply(run_dir, run_id, *CASH_REPLY))
+    paths = rs.run_paths(str(root), run_id)
+    assert g.transact(paths, lambda c, led, s: g.fmr_post_delivery_cash_call(c)) is not None  # the lever engaged
+    _hand_edit(h.status_path(root, run_id), lambda st: st.update(mode="quick_check"))
+    assert g.transact(paths, lambda c, led, s: g.fmr_post_delivery_cash_call(c)) is None
 
 
 def test_a_default_on_a_delivered_review_another_run_replaced_is_refused(tmp_path: Path) -> None:

@@ -305,7 +305,10 @@ CONTRACT_NOTES = (
     "or gives a newer cash balance or its date after delivery (`invocations[]` gains a `reopen` entry naming "
     "`fmr_cash_followup`); it completes again at the next coaching insert. Once per review, in the conversation "
     "that delivered it, on a run not under `FS_HOST_NO_ASK`, from the run's own folder; a second update is "
-    "`RUN_FINISHED`, and so is a cash update that gives no finite balance or no `YYYY-MM` date. The recorder "
+    "`RUN_FINISHED`, and so is a cash update that gives no finite balance or no `YYYY-MM` date. The recorder's "
+    "`default` on that follow-up of a `complete` run is `RUN_FINISHED` too (the founder's reply is the only record "
+    "it takes; the message says to record it). Where the follow-up already holds compose's own default, the "
+    "recorder's `default` stays `ANSWER_STANDS`: record the founder's reply with `answer`. The recorder "
     "refuses that reopen `RUN_SUPERSEDED` when a later run holds the folder.",
     "An enforcer never re-opens a finished run's answer: on a `complete` or `refused` run whose confirmed input "
     "changed, it refuses `RUN_FINISHED` and writes nothing; a changed figure after `complete` needs a new run, "
@@ -4020,7 +4023,9 @@ def record(
     check_note(note)
     if ctx.status.get("status") == "complete" and g["reopens_complete"]:
         _refuse_replaced_run(ctx)
-    # Only a recorded reply reopens a delivered run: a default is never one, so it is recorded with no reopen.
+    # Only a recorded reply reopens a delivered run. The recorder's default is refused below; compose's own
+    # disclosed default is written only while the run is running (it refuses on a final run:
+    # `_fmr_gates.settle_cash_followup`).
     reopening = ctx.status.get("status") == "complete" and g["reopens_complete"] and resolution == "answered"
     if not owed(ctx, g, instance):
         raise GateRejection("GATE_NOT_OWED", f"{key} does not apply to this run")
@@ -4089,6 +4094,22 @@ def record(
             )
     elif after_hold:
         raise GateRejection("AFTER_HOLD_NO_ANSWER", f"{key} has no recorded answer for --after-hold to replace")
+    # A delivered run's reopening gate takes only a recorded answer from the recorder: a default would close it
+    # with no reopen and leave a notice on a run in which nothing changed. Placed after the owed and
+    # terminal-entry checks, so `GATE_NOT_OWED` and `ANSWER_STANDS` keep their meaning, and before any
+    # `requires` reader or effect runs. Residual: a future `reopens_complete` gate WITH a `no_ask_default` would
+    # have `_take_no_ask_default` (by the recorder) refused here and the gate left open; it fails closed.
+    if (
+        ctx.status.get("status") == "complete"
+        and g["reopens_complete"]
+        and resolution == "default_taken"
+        and by == RECORDER
+    ):
+        raise GateRejection(
+            "RUN_FINISHED",
+            f"{key} on a finished run takes only a recorded answer; a default never reopens it: when the founder "
+            "gives the reply, record that answer",
+        )
     evidence = None
     for o in options:
         evidence = _requires_met(ctx, o, entry) or evidence
