@@ -18,7 +18,7 @@
     "scripts/_handoff_audit.py": "cd8aed6e6a71df40fd0416af5890e9d9490b1465f8a75ab8f8530d6716f6e26d",
     "scripts/_handover_check.py": "310eae49bbb73a280ea9f97def68bb18abfd948259ad47527ad0bc8c0fc2e071",
     "scripts/_out_guard.py": "69aeb7fec72a66320ff85495df38792d7bd77591ebe85c1cc7fdbe270cb8c95f",
-    "scripts/_redteam_core.py": "8853ea40be1ab7dcae97ada0fe22de9d2f8554dc517bd04f2e7b6e7ff9c661cf",
+    "scripts/_redteam_core.py": "051d8539712da2d2981da763a513c052081abfebcf16da3e869ecb36b35af658",
     "scripts/_run_status.py": "eac2117ad815b4ffc6473623c9a491785b1c9a9e1271ebe0eb3bbc199360a0d5",
     "scripts/_ui.py": "629f6978a68880a22c3f8b4b1db57d07547eb6a8656f6a77a6c9854757084ea7",
     "scripts/asked_gate_check.py": "6c98b457c4b0e0e7f331ac5e652135517e87d2c3fc2fcdf6ff81a2f7fd89609f",

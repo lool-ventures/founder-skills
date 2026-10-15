@@ -8,6 +8,7 @@ home, and the copies that must stay identical to it do.
 from __future__ import annotations
 
 import ast
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -188,3 +189,48 @@ def test_primary_run_id_ignores_stubs_and_unusable_ids() -> None:
     assert core.primary_run_id([_art(None), _art(""), _art(7), None, "x", {}, _art(R2)]) == R2
     assert core.primary_run_id([stub, _art(None), None]) is None
     assert core.primary_run_id([]) is None
+
+
+# --- two reviews of one run: a copy, or a second review ----------------------------------------------
+
+
+_FINDING = {"claim_attacked": "The segment share", "what_is_true": "The share is lower.", "severity": "high"}
+
+
+def _two_copies(tmp_path: Path, findings: list[dict[str, Any]]) -> tuple[str, dict[str, Any]]:
+    """Round 1 of analysis A and round 2 of analysis B, from different hand-offs, the same findings.
+
+    Skill-neutral: competitive-positioning reads `resolve` too, and this needs no fixture of either."""
+    d = tmp_path / "handoff" / R1
+    d.mkdir(parents=True)
+    for n, sha, reviewed in ((1, "a" * 64, "A"), (2, "b" * 64, "B")):
+        doc = {
+            "findings": findings,
+            "rejected": [],
+            "could_not_check": [],
+            "summary": {"total": len(findings)},
+            "validation": {"status": "valid", "errors": []},
+            "metadata": {"run_id": R1},
+            "inputs_reviewed": reviewed,
+            "_review_copy": {"round": n, "handoff_sha256": sha},
+        }
+        (d / f"redteam.r{n}.json").write_text(json.dumps(doc))
+    # redteam.json as the producer leaves it: the latest copy without its bookkeeping.
+    return str(tmp_path), {k: v for k, v in doc.items() if k != "_review_copy"}
+
+
+def test_two_clean_reviews_from_different_hand_offs_are_two_reviews(tmp_path: Path) -> None:
+    """Two reviews that found nothing carry identical findings, yet nothing in them could be copied: a
+    clean round 2 is compared with round 1 by hash only, and is the review of the analysis as it is now."""
+    analysis, redteam = _two_copies(tmp_path, [])
+    _, codes, facts = _core().resolve(analysis, R1, redteam, skipped=False, same_as_now=lambda r: r == "B")
+    assert facts["rounds"] == 2  # the lever engaged: both copies were read
+    assert "REDTEAM_ALTERED" not in [c for c, _ in codes], codes
+    assert facts["round_shown"] == 2
+
+
+def test_two_reviews_with_the_same_finding_are_still_round_one_copied(tmp_path: Path) -> None:
+    analysis, redteam = _two_copies(tmp_path, [_FINDING])
+    _, codes, facts = _core().resolve(analysis, R1, redteam, skipped=False, same_as_now=lambda r: r == "B")
+    assert "REDTEAM_ALTERED" in [c for c, _ in codes], codes
+    assert facts["round_shown"] == 1

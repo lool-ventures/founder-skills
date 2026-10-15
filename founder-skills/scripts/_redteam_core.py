@@ -568,6 +568,11 @@ def resolve(
     # from a different hand-off and says something round 1 did not. One carrying round 1's hash, or
     # round 1's findings word for word, is round 1 copied: the review shown is round 1's. The findings
     # are compared, not only the hash, because the hash sits in the same file a copier is editing.
+    # A review with no findings has nothing to copy: a second clean review is compared by hash only,
+    # since two genuine reviews that both found nothing reduce to the same content. Keyed on findings
+    # or rejected findings, not on could_not_check, which two genuine reviews of one scanned deck can
+    # share. Residual: a hand-written round 2 copying a CLEAN round 1 under a changed hash is no longer
+    # caught -- it carries no finding to launder.
     def _findings(doc: dict[str, Any]) -> dict[str, Any]:
         return {k: v for k, v in strip(doc).items() if k != REVIEWED_KEY}
 
@@ -577,7 +582,10 @@ def resolve(
         and (
             as_dict(usable[0][1].get(COPY_KEY)).get("handoff_sha256")
             == as_dict(usable[1][1].get(COPY_KEY)).get("handoff_sha256")
-            or _findings(usable[0][1]) == _findings(usable[1][1])
+            or (
+                bool(usable[0][1].get("findings") or usable[0][1].get("rejected"))
+                and _findings(usable[0][1]) == _findings(usable[1][1])
+            )
         )
     )
     matching = [(n, d) for n, d in usable if same_as_now(d.get(REVIEWED_KEY))]

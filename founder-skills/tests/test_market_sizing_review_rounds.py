@@ -15,10 +15,13 @@ a harsher one either; a change between reviews is a computed disclosure; and not
 
 from __future__ import annotations
 
+import importlib
 import json
 import sys
 from pathlib import Path
 from typing import Any
+
+import pytest
 
 _TESTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(_TESTS))
@@ -32,13 +35,17 @@ from test_market_sizing import (  # noqa: E402
     run_script_raw,
 )
 from test_market_sizing_view import (  # noqa: E402
+    _RUN,
+    _SCRIPTS,
     _codes,
     _compose,
     _edit,
     _html,
+    _record,
     _replay,
     _review,
     _reviewed_dir,
+    _run_dir,
 )
 
 _FIRST = "The first review found the share is 6.1%."
@@ -131,6 +138,69 @@ def test_a_review_of_the_changed_analysis_is_shown_and_the_change_is_computed(tm
     assert "The analysis changed after the first review" in section
     assert "Segment %: 37% → 30%" in section
     assert "Segment %: 37% → 30%" in _html(d)
+
+
+_REJECTED_ONLY = {
+    "findings": [{"claim_attacked": "The segment share", "what_is_true": "It is lower.", "severity": "high"}]
+}
+
+
+def _pipe(d: Path, payload: dict[str, Any]) -> int:
+    rc, out, err = run_script_raw(
+        "red_team.py", ["--run-id", _RUN, "-o", str(d / "redteam.json")], stdin_data=json.dumps(payload)
+    )
+    assert rc == 0, out + err
+    return int(json.loads(out)["round"])
+
+
+def _clean_dir(tmp_path: Path, first: dict[str, Any]) -> Path:
+    """An analysis reviewed once, then changed and re-sized: Step 6d's round 2 comes next."""
+    d = _run_dir(tmp_path, _record())
+    _edit(d, "methodology.json", lambda m: m.pop("red_team_skipped", None))
+    assert _pipe(d, first) == 1
+    _edit(d, "validation.json", lambda v: v["assumptions"][2].update(value=30))
+    _replay(d)
+    return d
+
+
+def test_two_clean_reviews_of_a_changed_analysis_are_two_reviews(tmp_path: Path) -> None:
+    """Two reviews that both found nothing reduce to the same findings. That used to read as round 1
+    copied: the report said the review was altered and the analysis changed after review."""
+    d = _clean_dir(tmp_path, {"findings": []})
+    assert _pipe(d, {"findings": [], "rejected": []}) == 2
+    copies = d / "handoff" / _RUN
+    r1, r2 = (json.loads((copies / f"redteam.r{n}.json").read_text()) for n in (1, 2))
+    # The lever engaged: two different hand-offs, so only the content comparison could call it a copy.
+    assert r1["_review_copy"]["handoff_sha256"] != r2["_review_copy"]["handoff_sha256"]
+    codes = _codes(_compose(d))
+    assert "REDTEAM_ALTERED" not in codes and "RECORD_CHANGED_AFTER_REVIEW" not in codes, codes
+    assert "ANALYSIS_CHANGED_BETWEEN_REVIEWS" in codes, codes
+
+
+@pytest.mark.parametrize(
+    ("first", "same_hash"),
+    [({"findings": []}, True), (_REJECTED_ONLY, False)],
+    ids=["clean-same-hash", "rejected-only-changed-hash"],
+)
+def test_a_review_copied_into_round_two_is_still_round_one(
+    tmp_path: Path, first: dict[str, Any], same_hash: bool
+) -> None:
+    """A clean review copied with its hash is caught by the hash; a review whose only content is a
+    rejected finding is caught by its content even with the hash rewritten."""
+    d = _clean_dir(tmp_path, first)
+    copies = d / "handoff" / _RUN
+    r1 = json.loads((copies / "redteam.r1.json").read_text())
+    if first is _REJECTED_ONLY:
+        assert r1["rejected"] and not r1["findings"]  # the lever engaged: only a rejected finding
+    sys.path.insert(0, str(_SCRIPTS))
+    state = importlib.import_module("_redteam_copy").reviewed_state(str(d))
+    block = {**r1["_review_copy"], "round": 2}
+    if not same_hash:
+        block["handoff_sha256"] = "0" * 64
+    forged = {**r1, "inputs_reviewed": state, "_review_copy": block}
+    (copies / "redteam.r2.json").write_text(json.dumps(forged))
+    (d / "redteam.json").write_text(json.dumps({k: v for k, v in forged.items() if k != "_review_copy"}))
+    assert "REDTEAM_ALTERED" in _codes(_compose(d))
 
 
 def test_no_review_of_the_analysis_as_delivered_is_stated_as_such(tmp_path: Path) -> None:
