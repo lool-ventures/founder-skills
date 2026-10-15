@@ -78,6 +78,8 @@ SCORING_FILES: dict[str, list[str]] = {
         f"{PLUGIN}/skills/deck-review/references/deck-best-practices.md",
         # The CHECKLIST sub-agent's own grading instructions (its "For `CHECKLIST`" section).
         f"{PLUGIN}/agents/deck-review.md",
+        # The CHECKLIST prompt generator: the grader's instructions come from here.
+        f"{PLUGIN}/skills/deck-review/scripts/dr_dispatch_prompt.py",
     ],
     "market-sizing": [
         # The 22-item self-check scorer.

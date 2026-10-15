@@ -385,6 +385,11 @@ CONTRACT_NOTES = (
     "after it (`current_run` names the run that holds the folder; `superseded_by` is the status-side mirror). A "
     "step that reads a run file carrying another run's id exits 1 `ARTIFACT_OTHER_RUN` naming each file "
     "(`files`) and the step to re-run (`fix`). A run dir with no ref is unchanged.",
+    "deck-review's Step 5 prompt generator (`dr_dispatch_prompt.py`) also prints `SLIDE_REVIEWS_MISSING` (exit 1) "
+    "before any CHECKLIST is dispatched, while this run's slide reviews are not written: its `fix` is to run Step "
+    "4's pipe, then the generator again, never to dispatch a CHECKLIST whose prompt was not printed. In a run dir "
+    "that carries any ref it also refuses `ARTIFACT_OTHER_RUN` when a file the grader reads (`slide_reviews.json`, "
+    "`stage_profile.json`, `deck_inventory.json`, `reconciliation.json`) is another run's.",
 )
 
 
@@ -5727,8 +5732,10 @@ CLI_CODES = {
     # belongs to a run, a call named with no run, another run, or reading another run's file.
     # checklist.py -o (Step 5, with or without a ledger): SLIDE_REVIEWS_MISSING when this run's slide_reviews.json
     # is missing, unusable, another run's or carries no read token (run Step 4 again); SLIDE_REVIEWS_NOT_READ when
-    # the grade does not echo that file's read token (a new CHECKLIST dispatch of the full Step 5 prompt, never a
-    # repair). Neither prints the token.
+    # the grade does not echo that file's read token (a new CHECKLIST dispatch, printed by the Step 5 generator with
+    # --correction producer-rejected, never a repair). Neither prints the token. dr_dispatch_prompt.py (Step 5's
+    # prompt generator) also prints SLIDE_REVIEWS_MISSING, before any dispatch, with its own fix (run Step 4's pipe,
+    # then the generator again), and ARTIFACT_OTHER_RUN for another run's file the grader reads.
     "dr_producers": [
         "OUTPUT_IS_INPUT",
         "RUN_ID_REQUIRED",
