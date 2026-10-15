@@ -194,7 +194,7 @@
     "skills/ic-sim/scripts/_run_ref.py": "fd5df2ba47fcafd46b587439b5969d851cb86e2a6f6f5acac54a981582a3de2a",
     "skills/ic-sim/scripts/_theme.py": "b380df5d5cfbb471451e50e20b08a1acf8fb272f6da87e1506af45107cd83d9b",
     "skills/ic-sim/scripts/compose_discussion.py": "0e5e36572be3e1ec67c503d943b85a448f34796fb48d7523fc30e650e2f37663",
-    "skills/ic-sim/scripts/compose_report.py": "5977aae15f5cf6c79b87c2f1db34a3a7997b5d921f0be3a73ae5559d79d2c3b9",
+    "skills/ic-sim/scripts/compose_report.py": "d982306be9f7cbab26fefb7456e94c1dbe53ea83ec72a6c268dcdf1ecbe0beed",
     "skills/ic-sim/scripts/detect_conflicts.py": "09a4001b433c6da2f49b68d4adbd1a6a48c2c317bf99e3237ca83723063f756c",
     "skills/ic-sim/scripts/fund_profile.py": "e7b601d30a1b84f9ca90a80002a752b29e6f5a7903b9001cf815d137ed0ebf37",
     "skills/ic-sim/scripts/host_context.py": "8fad5cb9420fe291fe6a540866c39b6b9024a14e3b5fe3a3ecb5b8410ea95cb8",

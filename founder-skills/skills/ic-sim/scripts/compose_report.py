@@ -1255,7 +1255,9 @@ def _host_context_module() -> Any:
     return host_context
 
 
-_MD_INLINE = re.compile(r"([\\*_`\[<])")
+# An underscore inside a word (`pre_seed`) is never emphasis, so it stays as written and the founder-text
+# keep-set is what leaves it alone; one at a word's edge (`_word_`) is escaped.
+_MD_INLINE = re.compile(r"([\\*`\[<]|(?<!\w)_|_(?!\w))")
 _MD_LEAD = re.compile(r"^(\s*)(#|-|\+|>|\d+\.)")
 
 

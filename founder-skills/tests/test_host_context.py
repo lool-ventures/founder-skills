@@ -263,6 +263,7 @@ _KEEP = [
     "ARR 1,370,250 at the end of last quarter",
     "Board meeting dated 2026-01-05",
     "Office in the +972 area",
+    "Covers 2026-01-05 - 2026-02-01",
     "Stage is pre_seed and the audit is SOC_2",
 ]
 

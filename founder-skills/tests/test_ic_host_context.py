@@ -171,6 +171,8 @@ def test_compose_renders_the_context_verbatim_and_keeps_its_tokens(tmp_path: Pat
     for item in _REPORT_ITEMS:
         assert f"{item['fact']} ({item['source']}, {item['date']})" in unescaped
     assert "\n- \\# a heading" in md and "\\*\\*bold\\*\\*" in md
+    # Verbatim: the token is neither escaped nor humanized (the keep-set reaches the substitution too).
+    assert "- Stage is pre_seed per the data room (source A, 2026-01-05)" in md
     assert "1 of 5 facts supplied with this request was not used: fact 5 (its date was not a real date)." in md
     assert not [w for w in report["validation"]["warnings"] if w["code"] == "FOUNDER_TEXT_TOKEN"]
     hc = report["host_context"]
