@@ -455,6 +455,23 @@ def test_the_person_page_rule_is_fund_profiles() -> None:
         assert ht._is_person_page(url) == person_page(url), url
 
 
+def test_the_hooks_read_a_request_with_a_cap_size_line_unchanged() -> None:
+    """The hooks read request lines with line-anchored patterns and never parse a value: a 32,768-character value
+    line beside the others changes nothing they find, and costs no measurable time."""
+    import time
+
+    tf = _load("two_figures_check")
+    long_line = f"FS_HOST_VALUE host_context=supplied | {'x' * g.VALUE_MAX}"
+    text = f"FS_HOST_RUN_ID={RUN_ID}\nFS_HOST_NO_ASK\n{long_line}\nFS_HOST_ANSWER ms_two_figures=typed\n"
+    rows = [{"type": "user", "message": {"role": "user", "content": text}}]
+    started = time.monotonic()
+    assert tf.no_ask_in(rows, 0, is_prompt=lambda row: True)
+    assert tf.host_line_in(rows, 0, "ms_two_figures", ("ANSWER", "VALUE"), is_prompt=lambda row: True)
+    assert tf.host_line_in(rows, 0, "host_context", ("ANSWER", "VALUE"), is_prompt=lambda row: True)
+    assert not tf.host_line_in(rows, 0, "ic_fund_mode", ("ANSWER", "VALUE"), is_prompt=lambda row: True)
+    assert time.monotonic() - started < 1.0
+
+
 def test_a_cap_size_value_line_is_accepted(tmp_path: Path) -> None:
     value = "x" * g.VALUE_MAX
     lines = f"FS_HOST_RUN_ID={RUN_ID}\nFS_HOST_VALUE host_context=supplied | {value}\n"

@@ -150,7 +150,7 @@ about 15–20 minutes and produces a scored report with the partner debate and t
 scoring, say so and I'll answer outside the IC simulation." Naming the trade-off is honest; quietly
 substituting the cheap version is not.
 
-**Then start the run's record, once**, copying every `FS_HOST_` line of the request between the markers. `RUN_ID` is the `run_id` it prints. Any non-zero exit here or from `bind` below: say in one sentence that the simulation could not start, and stop. Exit 12 from any script: ask nothing; say what the run is waiting for, and stop.
+**Then start the run's record, once**, copying every `FS_HOST_` line of the request between the markers byte for byte; never reformat or wrap a line. `RUN_ID` is the `run_id` it prints. Any non-zero exit here or from `bind` below: say in one sentence that the simulation could not start, and stop. Exit 12 from any script: ask nothing; say what the run is waiting for, and stop.
 
 ```bash
 python3 "<printed PLUGIN_ROOT>/scripts/run_status.py" start --skill ic-sim --artifacts-root "<printed ARTIFACTS_ROOT>" <<'FS_HOST_EOF'
@@ -245,8 +245,10 @@ as directional.
 ```bash
 python3 "$SHARED_SCRIPTS/record_gate_answer.py" open --run-id "$RUN_ID" --artifacts-root "$ARTIFACTS_ROOT" \
   --gate ctx_basics.company_name --gate ctx_basics.stage --gate ctx_basics.sector --gate ctx_basics.geography \
-  --gate ic_mode --gate ic_fund_mode
+  --gate ic_mode --gate ic_fund_mode --gate host_context
 ```
+
+`host_context` (Context supplied with the request) is owed only when the request carries it and is never asked: it applies from the request or waits. Waiting on it: say the context sent with the request could not be read, and stop.
 
 Then create (exit 10 names a question not yet recorded: ask it, record it, run `init` again):
 
@@ -333,6 +335,8 @@ cat <<'PROFILE_EOF' > "$SIM_DIR/startup_profile.json"
 PROFILE_EOF
 ```
 
+Then run `python3 "$SCRIPTS/host_context.py" --run-id "$RUN_ID" --profile "$SIM_DIR/startup_profile.json"`. It adds the context supplied with the request, if any; never write `host_context` yourself. Exit 1: run it once more on a profile without `host_context`; a second exit 1 → `run_status.py fail --code PRODUCER_FAILED`.
+
 Write `prior_artifacts.json` (stub if no prior artifacts):
 ```bash
 cat <<'PRIOR_EOF' > "$SIM_DIR/prior_artifacts.json"
@@ -345,6 +349,8 @@ PRIOR_EOF
 **Generic mode:** Build a standard early-stage fund profile with the three canonical archetypes (visionary, operator, analyst). **OMIT the `portfolio` field entirely — do not fabricate holdings.** A generic fund is a synthesized/illustrative persona with no real portfolio; inventing companies here manufactures fictional conflicts against them downstream (Step 5), and those fabricated conflicts can distort the verdict. `portfolio` is optional in generic mode precisely so it can be left out. Use the example below verbatim as the shape, adapting only thesis/stage/check-size to the startup's sector — but keep `portfolio` absent.
 
 **Fund-specific mode:** Use WebSearch for the fund's thesis, stage focus, check-size range and portfolio, and include the `portfolio` array and a `sources` array (each source needs `url` or `title`). Research the fund, never its people: do not look up partners or team members, and put no person's name or background anywhere in the profile or in what you tell the founder. The three partners are always The Visionary, The Operator and The Analyst: each archetype carries only `role` and `focus_areas`, and each portfolio entry only `name`, `sector`, `status`. When you tell the founder about the fund, say the partners are role-played, never the fund's real people.
+
+**A fund profile supplied with the request** (the fund answer `host_profile`, A fund profile supplied with the request, applied at Step 1): do not search. `python3 "$SCRIPTS/fund_profile.py" --from-request --pretty --run-id "$RUN_ID" -o "$SIM_DIR/fund_profile.json"`. Exit 1 here cannot be fixed in this run: say so in one sentence, record `run_status.py fail --code INPUT_REJECTED --reason <code>`, and end.
 
 `fund_profile.py` exits 10 while the mode or fund question is unrecorded (ask, record, re-run), refuses a `mode` other than the recorded fund choice, and exits 1 on a rejected profile (fix that field on stderr).
 
@@ -483,8 +489,13 @@ If that printed the "skip to Step 6" line (generic mode), **skip the rest of Ste
 
 **The sub-agent performs ZERO file reads.** Read the two inputs it needs in the main thread and paste their content into the dispatch prompt below — do not send it a path to Read.
 
+Print each file in a Bash call of its own:
+
 ```bash
 cat "$SIM_DIR/fund_profile.json"
+```
+
+```bash
 cat "$SIM_DIR/startup_profile.json"
 ```
 
@@ -549,9 +560,17 @@ cat "$HANDOFF_DIR/detect_conflicts_output.json" | \
 
 **The sub-agent performs ZERO file reads** — its archetype rubric is already in `agents/ic-sim.md` (no read needed), and the three dynamic inputs below must be inlined, not pointed at by path.
 
+Print each file in a Bash call of its own:
+
 ```bash
 cat "$SIM_DIR/startup_profile.json"
+```
+
+```bash
 cat "$SIM_DIR/fund_profile.json"
+```
+
+```bash
 cat "$SIM_DIR/prior_artifacts.json"
 ```
 
@@ -812,13 +831,33 @@ fund's actual thesis, stage focus, check size, and portfolio. Step 4 builds a re
 would have no grounded basis for those three dimensions and would have to invent one — potentially
 contradicting the profile already sitting on disk.
 
+Print each file in a Bash call of its own:
+
 ```bash
 cat "$SIM_DIR/startup_profile.json"
+```
+
+```bash
 cat "$SIM_DIR/fund_profile.json"
+```
+
+```bash
 cat "$SIM_DIR/conflict_check.json"
+```
+
+```bash
 cat "$SIM_DIR/discussion.json"
+```
+
+```bash
 cat "$SIM_DIR/partner_assessment_visionary.json"
+```
+
+```bash
 cat "$SIM_DIR/partner_assessment_operator.json"
+```
+
+```bash
 cat "$SIM_DIR/partner_assessment_analyst.json"
 ```
 
@@ -1013,7 +1052,7 @@ Return (Decline / Invest / More Diligence), never the bare `pass`/`hard_pass` en
 mismatch as a noted caveat (the report already renders this as an executive-summary note); mention in your own summary
 that qualitative debate and the quantitative score diverged, without treating it as an error to fix.
 
-**Post-write verification:** `compose_report.py` exits 2 if an output is missing or empty. On a non-zero exit, read `compose_result.json` beside the report for the codes. Exit 10 is a question, not a failure: ask the gate its JSON names (`blocked_by_gate`; `ic_decline_confirmation` is Step 8.5), record it, and compose again; never re-run compose without the answer. `RUN_FINISHED`: the simulation is complete and its score changed; that needs a new simulation (Step 0). `FUND_PROFILE_NAMES_PEOPLE`: rebuild the fund profile (Step 4) and run Steps 5-8 again under the same run id, then compose; tell the founder only that the fund profile is being rebuilt. `PARTNER_ARTIFACTS_STALE`: the fund profile changed after Steps 5-8 ran; run Steps 5-8 again under the same run id, then compose. Any other non-zero exit: stop and report the exact stderr — do not proceed to Step 10.
+**Post-write verification:** `compose_report.py` exits 2 if an output is missing or empty. On a non-zero exit, read `compose_result.json` beside the report for the codes. Exit 10 is a question, not a failure: ask the gate its JSON names (`blocked_by_gate`; `ic_decline_confirmation` is Step 8.5), record it, and compose again; never re-run compose without the answer. `RUN_FINISHED`: the simulation is complete and its score changed; that needs a new simulation (Step 0). `FUND_PROFILE_NAMES_PEOPLE`: rebuild the fund profile (Step 4) and run Steps 5-8 again under the same run id, then compose; tell the founder only that the fund profile is being rebuilt. `PARTNER_ARTIFACTS_STALE`: the fund profile changed after Steps 5-8 ran; run Steps 5-8 again under the same run id, then compose. `FUND_PROFILE_SOURCE_MISMATCH`: rebuild the fund profile with `--from-request` (Step 4) and run Steps 5-8 again, same run id. `HOST_CONTEXT_MISSING` / `HOST_CONTEXT_NOT_SUPPLIED`: run the command the message prints, then Steps 5-8 again, same run id. Any other non-zero exit: stop and report the exact stderr — do not proceed to Step 10.
 
 ### Step 10: Post-Compose Coaching Commentary (Context B dispatch — POST_COMPOSE_COACHING)
 

@@ -143,7 +143,7 @@ about 15–25 minutes and produces a scored report across all 35 criteria. I can
 scoring, say so and I'll answer outside the deck review." Naming the trade-off is honest; quietly
 substituting the cheap version is not.
 
-**Then start the run's record, once**, copying every `FS_HOST_` line of the request between the markers. `RUN_ID` is the `run_id` it prints; `resume: 1` needs nothing special. Any non-zero exit here or from `setup_run`/`bind` below: say in one sentence that the review could not start, and stop. Exit 12 from any script: ask nothing; say what the run is waiting for, and stop. (`bind` printing `RUN_REFUSED` is the founder's decline: follow `gate_action` `stop`.)
+**Then start the run's record, once**, copying every `FS_HOST_` line of the request between the markers byte for byte; never reformat or wrap a line. `RUN_ID` is the `run_id` it prints; `resume: 1` needs nothing special. Any non-zero exit here or from `setup_run`/`bind` below: say in one sentence that the review could not start, and stop. Exit 12 from any script: ask nothing; say what the run is waiting for, and stop. (`bind` printing `RUN_REFUSED` is the founder's decline: follow `gate_action` `stop`.)
 
 ```bash
 python3 "<printed PLUGIN_ROOT>/scripts/run_status.py" start --skill deck-review --artifacts-root "<printed ARTIFACTS_ROOT>" <<'FS_HOST_EOF'

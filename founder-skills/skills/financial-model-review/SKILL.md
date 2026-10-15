@@ -142,7 +142,7 @@ have not run it — then stop. Do not improvise the missing steps: an analysis t
 reviews itself reads exactly like one that was checked, which is the failure this stop exists to
 prevent.
 
-**Then start the run's record, once**, copying every `FS_HOST_` line of the request between the markers. `RUN_ID` is the `run_id` it prints. Any non-zero exit here or from `bind` below: say in one sentence that the review could not start, and stop. Exit 12 from any script: ask nothing; say what the run is waiting for, and stop.
+**Then start the run's record, once**, copying every `FS_HOST_` line of the request between the markers byte for byte; never reformat or wrap a line. `RUN_ID` is the `run_id` it prints. Any non-zero exit here or from `bind` below: say in one sentence that the review could not start, and stop. Exit 12 from any script: ask nothing; say what the run is waiting for, and stop.
 
 ```bash
 python3 "<printed PLUGIN_ROOT>/scripts/run_status.py" start --skill financial-model-review --artifacts-root "<printed ARTIFACTS_ROOT>" <<'FS_HOST_EOF'

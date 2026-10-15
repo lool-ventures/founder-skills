@@ -990,7 +990,9 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 107,216 -> 107,281 (+65 B), RAISED on 2026-10-14: Step 5 says printing the redo again unchanged before it
     # is gated is the same redo, so "once per run" does not contradict the dispatch hook's hold, which asks for
     # the same generator arguments again when the redo was printed in a block it cannot vouch for.
-    "market-sizing": 107_281,
+    # 107,281 -> 107,326 (+45 B) on 2026-10-16: Step 0's `start` sentence asks for each request line to be copied
+    # byte for byte, never reformatted or wrapped (a value sent with the request is checked as sent).
+    "market-sizing": 107_326,
     # fmr raised for two founder-facing-correctness items measured in a live run: the CHECKLIST
     # dispatch now forbids citing our artifact filenames in evidence (that run put `inputs.json` in 10
     # items' evidence, printed verbatim into the founder's report), and the producer pipe passes
@@ -1135,7 +1137,9 @@ SKILL_MD_CEILING: dict[str, int] = {
     # Step 12 says the r1 values replace Step 0's in every step it redoes, that a new conversation starts a new
     # review, and names "the values it already uses" plainly. Owner-approved raise.
     # 85,797 -> 85,799 (+2): the r1 mkdir moved to its own line and spells `${RUN_ID}`, a rewording.
-    "financial-model-review": 85_799,
+    # 85,799 -> 85,844 (+45 B) on 2026-10-16: Step 0's `start` sentence asks for each request line to be copied byte
+    # for byte, never reformatted or wrapped (a value sent with the request is checked as sent).
+    "financial-model-review": 85_844,
     # ic-sim SHRANK: the REQUIRED ic-dynamics.md read at Step 7 is deleted. Step 7 is a pure producer
     # pipe — compose_discussion.py derives discussion.json from the partners' own files and nothing
     # is authored by the main thread — so the read informed no decision while pulling a whole
@@ -1232,7 +1236,12 @@ SKILL_MD_CEILING: dict[str, int] = {
     # for a wrong or over-keyed hand-off, a command fix for a wrong -o or a missing profile, a new dispatch for a
     # hand-off already used against an earlier profile) and says a redo is a new round, not a corrective
     # dispatch; Step 6b points to it; Step 8 routes the scoring script's HANDOFF_NOT_REDISPATCHED.
-    "ic-sim": 95_842,
+    # 95,842 -> 97,378 (+1536 B) on 2026-10-16: Step 0's `start` sentence asks for each request line to be copied
+    # byte for byte, never reformatted or wrapped (a value sent with the request is checked as sent). Step 1 opens
+    # the context supplied with the request; Steps 2-3 add it by script; Step 4 builds a fund profile supplied with
+    # the request with --from-request; Steps 5, 6 and 8 print one file per Bash call; Step 9 routes the three new
+    # compose refusals.
+    "ic-sim": 97_378,
     # deck-review +1,165 B: Step 0 carried only a parenthetical fresh-shell mention buried in a code
     # comment, unlike the four skills that mint RUN_ID in a LATER block and so carry the shared banner.
     # deck-review mints RUN_ID INSIDE this re-runnable Step-0 block (like cap-table), so the shared
@@ -1620,7 +1629,9 @@ SKILL_MD_CEILING: dict[str, int] = {
     # for every CHECKLIST redo, SLIDE_REVIEWS_NOT_READ through producer-rejected.
     # 113,135 -> 113,211 (+76 B): the pipe keeps its stderr visible on the first run (checklist.py's warnings reach
     # the model); only the re-run after a rejection saves it with `2> F`, the form financial-model-review uses.
-    "deck-review": 113_211,
+    # 113,211 -> 113,256 (+45 B) on 2026-10-16: Step 0's `start` sentence asks for each request line to be copied
+    # byte for byte, never reformatted or wrapped (a value sent with the request is checked as sent).
+    "deck-review": 113_256,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
@@ -1806,7 +1817,9 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 129,580 -> 129,577 (-3), LOWERED, commit 10 (O3): the compose step says to read compose_result.json on a
     # non-zero exit, paid for in the same step; the heredoc warning shortened, its reason kept.
     # -1 B, LOWERED, commit 13: a derived stage takes its option id and no value; the sentence is shortened to pay.
-    "competitive-positioning": 129_773,
+    # 129,773 -> 129,818 (+45 B) on 2026-10-16: Step 0's `start` sentence asks for each request line to be copied
+    # byte for byte, never reformatted or wrapped (a value sent with the request is checked as sent).
+    "competitive-positioning": 129_818,
     # cap-table, the largest raise (+2,383 B) and the one with the most founder-visible payoff:
     #   * Main-Thread Return named THREE of the four files Step 12 copies; a live run delivered exactly
     #     three and dropped `{Company}_Cap_Table.html`. All four are now named explicitly.
@@ -1938,7 +1951,9 @@ SKILL_MD_CEILING: dict[str, int] = {
     # -8 B, LOWERED, commit 13: a derived stage takes its option id and no value; two clauses of the same
     # paragraph shortened.
     # 156,814 -> 156,859 (+45 B): Step 12 says report_disclosures also carries a flip's unmodelled Section 102 line.
-    "cap-table": 156_859,
+    # 156,859 -> 156,904 (+45 B) on 2026-10-16: Step 0's `start` sentence asks for each request line to be copied
+    # byte for byte, never reformatted or wrapped (a value sent with the request is checked as sent).
+    "cap-table": 156_904,
 }
 
 
@@ -2235,7 +2250,9 @@ REFERENCES_CEILING: dict[str, int] = {
     # 56,604 -> 56,663 (+59 B), same day: the stamp is documented on the six partner files too.
     # 56,663 -> 56,940 (+277 B), same day: artifact-schemas.md says the partner files go through
     # persist_partner.py (closed key sets, the stamp) where it still said the main thread writes them.
-    "ic-sim": 56_940,
+    # 56,940 -> 57,808 (+868 B) on 2026-10-16: artifact-schemas.md documents profile_source and the caps of a fund
+    # profile supplied with the request, and host_context on the startup profile.
+    "ic-sim": 57_808,
     # 49_039 -> 50_080 (R1): artifact-schemas.md now documents the evidence/notes
     # contract and its JSON example demonstrates a fail item carrying both.
     # 50_080 -> 50_124 (R2): artifact-schemas.md documents the half-credit formula.

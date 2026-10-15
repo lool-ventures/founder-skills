@@ -23,6 +23,7 @@ JSON schemas for all artifacts deposited during the IC simulation workflow. Each
 | `key_metrics` | object | no | Stage-relevant metrics (ARR, MRR, users, etc.) |
 | `materials_provided` | string[] | yes | What the user provided (deck, data room, description, etc.) |
 | `team_highlights` | string[] | no | Key team credentials extracted by sub-agent |
+| `host_context` | object | no | Written only by `host_context.py`, never by hand: the context supplied with the request, `{provenance: "supplied_with_request", sha256, items: [{index, fact, source, date}], dropped: [{index, cause}]}`. Third-party facts, never the founder's statements; compose checks it against the run. |
 
 **Example:**
 ```json
@@ -116,6 +117,9 @@ Contains imported artifacts from prior market-sizing or deck-review analyses. If
 | `sources` | object[] | conditional | Required when `mode == "fund_specific"`. Each entry is an object with at least `url` or `title`: `{url, title}` |
 | `validation` | object | output | Added by `fund_profile.py`: `{status, errors}` |
 | `accepted_warnings` | object[] | no | Warnings to acknowledge: `[{code, match, reason}]`. Match is case-insensitive substring. Only medium-severity codes can be accepted. |
+| `profile_source` | object | no | Written only by `fund_profile.py --from-request`: `{kind: "request", sha256}` (closed). Marks a profile supplied with the request, used as given; `sources` is then optional and an archetype carries no `name`. |
+
+A profile supplied with the request is capped: strings 200 characters (`fund_name` 120, `currency` 8, `sources[].url` 512), `thesis_areas` / `stage_focus` / each `focus_areas` 20 items, `portfolio` 200 rows, `sources` 20, no control characters (`FUND_FIELD_TOO_LONG`, `FUND_FIELD_INVALID_CHARS`).
 
 The six `partner_assessment_*` / `partner_rebuttal_*` files, `conflict_check.json`, `discussion.json` and `score_dimensions.json` each carry `graded_against.fund_profile`, written by their script: the sha256 of the fund profile beside them when they ran (without `metadata`, `validation` and `accepted_warnings`). Compose refuses (`PARTNER_ARTIFACTS_STALE`) when one differs from the current profile or is missing.
 
