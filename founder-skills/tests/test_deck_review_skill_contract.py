@@ -104,6 +104,23 @@ def _load_script_module(script_name: str, sys_key: str) -> types.ModuleType:
     return mod
 
 
+def _checklist_prompt() -> str:
+    """Step 5's CHECKLIST prompt as `dr_dispatch_prompt.py` prints it, its identifiers left as the placeholders
+    the template carries and the plugin folder written as `${CLAUDE_PLUGIN_ROOT}`. The prompt moved out of
+    SKILL.md into the generator; the template contracts below read it here."""
+    mod = _load_script_module("dr_dispatch_prompt.py", "_dr_dispatch_prompt_contract")
+    mod._plugin_root = lambda: "${CLAUDE_PLUGIN_ROOT}"  # type: ignore[attr-defined]
+    text: str = mod.checklist(  # type: ignore[attr-defined]
+        run_id="<RUN_ID>", handoff_agent="<HANDOFF_AGENT>", review_dir_agent="<REVIEW_DIR_AGENT>", session_tree=False
+    )
+    return text
+
+
+def _with_checklist_prompt() -> str:
+    """SKILL.md with the printed CHECKLIST prompt appended in a fence of its own, as the template once sat there."""
+    return SKILL_MD.read_text(encoding="utf-8") + "\n```\n" + _checklist_prompt() + "```\n"
+
+
 def _load_checklist_module() -> types.ModuleType:
     return _load_script_module("checklist.py", "dr_checklist_contract")
 
@@ -253,7 +270,7 @@ def test_checklist_id_enumeration_population_is_independent() -> None:
     # Build population independently of VALID_IDS: extract "id": "some_id" from the
     # CHECKLIST dispatch templates only. A fenced block declaring a different CONTEXT
     # is a different vocabulary; prose outside any block still counts.
-    combined = SKILL_MD.read_text(encoding="utf-8") + "\n" + AGENT_MD.read_text(encoding="utf-8")
+    combined = _with_checklist_prompt() + "\n" + AGENT_MD.read_text(encoding="utf-8")
     in_scope: list[str] = []
     for i, chunk in enumerate(re.split(r"^```.*$", combined, flags=re.MULTILINE)):
         is_fenced = i % 2 == 1
@@ -302,7 +319,7 @@ def test_checklist_dispatch_template_enumerates_all_canonical_ids() -> None:
     mod = _load_checklist_module()
     valid_ids: set[str] = set(mod.VALID_IDS)  # type: ignore[attr-defined]
 
-    skill_text = SKILL_MD.read_text(encoding="utf-8")
+    skill_text = _with_checklist_prompt()
     anchor = "CONTEXT: CHECKLIST"
     start = skill_text.find(anchor)
     assert start != -1, f"{SKILL_MD.name} has no '{anchor}' section"
@@ -392,7 +409,7 @@ def test_ai_criteria_ids_in_skill_md_and_agent_match_checklist_py() -> None:
     # Deck-review SKILL.md CHECKLIST template now enumerates all 35 IDs in a grouped
     # list including the 4 AI-criteria IDs. Use a 3000-char window to cover the
     # full enumerated-ID block.
-    skill_text = SKILL_MD.read_text(encoding="utf-8")
+    skill_text = _with_checklist_prompt()
     anchor = "CONTEXT: CHECKLIST"
     start = skill_text.find(anchor)
     assert start != -1, f"{SKILL_MD.name} has no '{anchor}' section"
@@ -687,7 +704,7 @@ def test_checklist_dispatch_requires_visuals_cross_check_before_absence_claims()
     is absent — otherwise a sub-agent can hallucinate 'no photos' about a slide the
     inventory records as having them.
     """
-    skill_text = SKILL_MD.read_text(encoding="utf-8")
+    skill_text = _with_checklist_prompt()
     anchor = "CONTEXT: CHECKLIST"
     start = skill_text.find(anchor)
     assert start != -1, f"{SKILL_MD.name} has no '{anchor}' section"
@@ -747,7 +764,7 @@ def test_context_a_templates_require_json_escaped_strings() -> None:
     """The SLIDE_REVIEWS and CHECKLIST dispatch templates must require JSON-escaped
     string values so long free-text fields cannot break the producer pipe.
     """
-    skill_text = SKILL_MD.read_text(encoding="utf-8")
+    skill_text = _with_checklist_prompt()
     for anchor in ("CONTEXT: SLIDE_REVIEWS", "CONTEXT: CHECKLIST"):
         start = skill_text.find(anchor)
         assert start != -1, f"{SKILL_MD.name} has no '{anchor}' section"
@@ -774,7 +791,7 @@ def test_checklist_dispatch_return_shape_keys() -> None:
     # SKILL.md: the return shape appears in the CONTEXT: CHECKLIST section.
     # Use a 3000-char window to cover the full enumerated-ID block (35 IDs added
     # in Fix A push "items" beyond the old 1500-char limit).
-    skill_text = SKILL_MD.read_text(encoding="utf-8")
+    skill_text = _with_checklist_prompt()
     anchor = "CONTEXT: CHECKLIST"
     start = skill_text.find(anchor)
     assert start != -1, f"{SKILL_MD.name} has no '{anchor}' section"
@@ -932,7 +949,7 @@ def test_context_a_dispatch_templates_contain_no_write_instruction() -> None:
     explicitly forbid artifact writes — a sub-agent that writes files directly
     bypasses schema validation and run_id stamping.
     """
-    skill_text = SKILL_MD.read_text(encoding="utf-8")
+    skill_text = _with_checklist_prompt()
 
     for context, anchor in (
         ("SLIDE_REVIEWS", "CONTEXT: SLIDE_REVIEWS"),
@@ -1465,7 +1482,7 @@ def test_checklist_dispatch_specifies_notes_as_the_fix() -> None:
     a fixed window silently stops covering the tail as the template grows — measured:
     an additive edit to these same evidence rules broke a 3500-char window.
     """
-    skill_text = SKILL_MD.read_text(encoding="utf-8")
+    skill_text = _with_checklist_prompt()
     anchor = "CONTEXT: CHECKLIST"
     start = skill_text.find(anchor)
     assert start != -1, f"{SKILL_MD.name} has no '{anchor}' section"
@@ -2213,11 +2230,8 @@ def test_slide_reviews_states_a_disagreement_only_from_the_arithmetic() -> None:
 
 
 def _checklist_template() -> str:
-    """The CHECKLIST dispatch template, bounded by its own fences (never a fixed character window)."""
-    text = SKILL_MD.read_text(encoding="utf-8")
-    start = text.index("CONTEXT: CHECKLIST\nOUTPUT_PATH:")
-    end = text.index("\n```", start)
-    return text[start:end]
+    """The CHECKLIST dispatch prompt, as the generator prints it (placeholders kept)."""
+    return _checklist_prompt()
 
 
 def _step5() -> str:
@@ -2254,10 +2268,18 @@ def test_step5_pipe_passes_slide_reviews_and_routes_the_two_codes() -> None:
     step = _step5()
     flat = " ".join(step.split())
     assert "never in the same message as SLIDE_REVIEWS" in flat
-    fence = step.index("```bash")
+    fence = step.index("```bash", step.index("**After the sub-agent returns:**"))
     pipe = step[fence : step.index("```\n", fence + 3)]
+    assert '"$SCRIPTS/checklist.py"' in pipe
     assert '--slide-reviews "$REVIEW_DIR/slide_reviews.json"' in pipe
-    assert "`SLIDE_REVIEWS_NOT_READ`: dispatch the CHECKLIST again" in flat and "never a repair" in flat
+    # The pipe saves its stderr in the SAME block, on the producer's own command: the dispatch hook pairs a
+    # `--correction producer-rejected --detail-file` print only with a failed producer's own `2> F`.
+    assert '-o "$REVIEW_DIR/checklist.json" 2> "$HANDOFF_DIR/producer_rejected.txt"' in pipe
+    assert (
+        "`SLIDE_REVIEWS_NOT_READ`: run the generator with the same arguments plus `--correction producer-rejected "
+        '--detail-file "$HANDOFF_DIR/producer_rejected.txt"` and dispatch what it prints, a new dispatch, never a '
+        "repair" in flat
+    )
     assert "`SLIDE_REVIEWS_MISSING`: run Step 4 first." in flat
     # The bash-after-subagent marker stays directly after the routing line (test_skill_orchestration keys on it).
     assert step.rstrip().endswith("<!-- skill-quality-ci: bash-after-subagent-ok -->")
@@ -2267,7 +2289,8 @@ def test_the_hand_off_state_machine_redoes_rather_than_repairs_a_blind_grade() -
     """The producer-rejection row is what the model branches on, and a repair prompt carries the diagnostic."""
     text = SKILL_MD.read_text(encoding="utf-8")
     row = next(line for line in text.splitlines() if line.startswith("- **Producer schema rejection**"))
-    assert "except `SLIDE_REVIEWS_NOT_READ`" in row and "**redo-dispatch** of the full Step 5 prompt" in row
+    assert "For the CHECKLIST, the redo is the generator's `--correction producer-rejected` print" in row
+    assert "never a hand-written repair, `SLIDE_REVIEWS_NOT_READ` included" in row
 
 
 def test_the_founder_text_remedy_regrades_step5_after_a_slide_reviews_redispatch() -> None:
@@ -2282,3 +2305,59 @@ def test_the_what_if_rule_drops_both_precondition_flags() -> None:
     start = text.index("## What-If Recomputation Rule")
     rule = " ".join(text[start : text.index("\n## ", start + 3)].split())
     assert "with no `--reconciliation` and no `--slide-reviews`, and output to stdout, never `-o`" in rule
+
+
+# ---------------------------------------------------------------------------
+# Step 5's prompt is printed by dr_dispatch_prompt.py; every CHECKLIST correction goes through it.
+# ---------------------------------------------------------------------------
+
+
+def test_step5_runs_the_generator_with_its_four_identifiers() -> None:
+    step = _step5()
+    blocks = re.findall(r"^```bash\n(.*?)^```", step, re.MULTILINE | re.DOTALL)
+    gen = next(b for b in blocks if "dr_dispatch_prompt.py" in b)
+    call = gen[gen.index("python3 ") :]
+    assert call.startswith('python3 "$SCRIPTS/dr_dispatch_prompt.py" checklist ')
+    used = set(re.findall(r'"\$([A-Z_]+)', call)) - {"SCRIPTS"}
+    assert used == {"RUN_ID", "HANDOFF_AGENT", "REVIEW_DIR_AGENT", "REVIEW_DIR"}, used
+    # Each shell starts fresh: every value the call uses is set again in the block.
+    for name in used:
+        assert re.search(rf'^{name}="', gen[: gen.index("python3 ")], re.MULTILINE), name
+    flat = " ".join(step.split())
+    assert 'subagent_type: "founder-skills:deck-review"` and `description: "Score the checklist"`' in flat
+    assert "CONTEXT: CHECKLIST" not in step, "the template left SKILL.md; the generator prints it"
+
+
+def test_step5_keeps_the_grader_contract_visible() -> None:
+    """The prompt lives in a script, outside the critique corpus: one sentence keeps the contract in SKILL.md."""
+    flat = " ".join(_step5().split())
+    assert (
+        "The prompt has the grader read this run's slide reviews as a required read and copy their "
+        "`metadata.read_token` into `slide_reviews_read_token`; the generator prints nothing until Step 4's pipe "
+        "has written them (`SLIDE_REVIEWS_MISSING`: run Step 4's pipe, then the generator again)." in flat
+    )
+
+
+def test_every_checklist_correction_is_printed_by_the_generator() -> None:
+    text = SKILL_MD.read_text(encoding="utf-8")
+    rows = {
+        key: next(line for line in text.splitlines() if line.startswith(key))
+        for key in ("- **Exit 3**", "- **Exit 6**", "- For the CHECKLIST, exits 4 and 5")
+    }
+    assert "`dr_dispatch_prompt.py` with the same arguments plus `--correction missing-file`" in rows["- **Exit 3**"]
+    assert "`dr_dispatch_prompt.py` with the same arguments plus `--correction receipt-only`" in rows["- **Exit 6**"]
+    assert (
+        "re-run `dr_dispatch_prompt.py` with the same arguments and send that output"
+        in rows["- For the CHECKLIST, exits 4 and 5"]
+    )
+    assert "no CHECKLIST correction is ever hand-written" in rows["- For the CHECKLIST, exits 4 and 5"]
+
+
+def test_the_orchestration_marker_sits_between_the_cue_and_the_generator() -> None:
+    """The dispatch cue line matches the orchestration detector's cue regex, and the generator fence follows
+    within its window: the marker between them is what keeps that layout legal."""
+    step = _step5()
+    cue = step.index("**Dispatch the deck-review sub-agent in Context A (CHECKLIST).**")
+    marker = step.index("<!-- skill-quality-ci: bash-after-subagent-ok -->", cue)
+    fence = step.index("```bash", cue)
+    assert cue < marker < fence

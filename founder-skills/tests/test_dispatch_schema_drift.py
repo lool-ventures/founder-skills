@@ -153,6 +153,8 @@ _SCAFFOLD: dict[str, dict[str, str]] = {
 _GENERATORS: dict[str, str] = {
     "market-sizing": "dispatch_prompt.py",
     "competitive-positioning": "cp_dispatch_prompt.py",
+    "financial-model-review": "fmr_dispatch_prompt.py",
+    "deck-review": "dr_dispatch_prompt.py",
 }
 
 

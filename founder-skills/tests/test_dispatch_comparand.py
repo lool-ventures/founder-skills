@@ -118,6 +118,9 @@ def test_the_quiet_commands_runs_use_keep_the_block_a_comparand(block: str) -> N
         ('P="$PLUGIN_ROOT/skills/market-sizing/scripts"; python3 "$P/dispatch_prompt.py" checklist', True),
         ('python3 "$SCRIPTS/dispatch_prompt.py" red_team', True),
         ('python3 "${SCRIPTS}/fmr_dispatch_prompt.py" checklist', True),
+        ('python3 "$SCRIPTS/dr_dispatch_prompt.py" checklist', True),
+        ("python3 /p/skills/market-sizing/scripts/dr_dispatch_prompt.py checklist", False),
+        ("python3 " + INSTALLED + "/skills/deck-review/scripts/dr_dispatch_prompt.py checklist --run-id R", True),
     ],
 )
 def test_the_generator_is_the_skills_own_script(block: str, ok: bool) -> None:
@@ -658,3 +661,17 @@ def test_a_subcommand_given_as_a_variable_is_read_from_the_blocks_own_assignment
     # Set in an earlier block, it cannot be read here: the call counts for no context.
     unset = _rows(("Bash", {"command": f"cat /w/notes.txt; {gen}"}, "notes\n" + PRINTED))
     assert DPC.latest_printed(unset, "CONTEXT: RED_TEAM") is None
+
+
+def test_deck_reviews_generator_options_all_take_a_value() -> None:
+    """The hook reads a generator call's context as its first positional argument, stepping over every option as
+    taking a value. dr_dispatch_prompt.py's options all take one, so its print names CHECKLIST; a store-true flag
+    would make the hook read the next word as the subcommand, and the print would count for no context."""
+    call = (
+        'python3 "$SCRIPTS/dr_dispatch_prompt.py" --run-id R checklist --handoff-agent /h --review-dir-agent /a '
+        "--review-dir /d"
+    )
+    # Last in a block whose earlier command printed: only then does the subcommand name the result's context.
+    assert DPC._generator_block("cat /w/notes.txt; " + call)[2] == frozenset({"CONTEXT: CHECKLIST"})
+    bare = call.replace("--run-id R checklist", "--pretty checklist")
+    assert DPC._generator_block("cat /w/notes.txt; " + bare)[2] != frozenset({"CONTEXT: CHECKLIST"})

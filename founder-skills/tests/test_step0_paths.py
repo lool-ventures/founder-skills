@@ -444,7 +444,7 @@ def _prompts_with_reference_paths() -> list[tuple[str, str, str]]:
 
 
 # Hard-coded, never derived from the scan below: a scan that went blind would otherwise pass on nothing.
-# The five generator templates, and the three prompts a SKILL.md still writes out in a fence.
+# The five generator templates, and the two prompts a SKILL.md still writes out in a fence.
 EXPECTED_REFERENCE_PROMPTS = {
     ("dispatch_prompt.py", "CONTEXT: CHECKLIST"),
     ("cp_dispatch_prompt.py", "CONTEXT: MOAT_SCORING"),
@@ -452,7 +452,6 @@ EXPECTED_REFERENCE_PROMPTS = {
     ("fmr_dispatch_prompt.py", "CONTEXT: CHECKLIST"),
     ("dr_dispatch_prompt.py", "CONTEXT: CHECKLIST"),
     ("deck-review", "CONTEXT: SLIDE_REVIEWS"),
-    ("deck-review", "CONTEXT: CHECKLIST"),
     ("financial-model-review", "CONTEXT: INPUTS_REVIEW"),
 }
 

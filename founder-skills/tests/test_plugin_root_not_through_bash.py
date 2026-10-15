@@ -93,7 +93,7 @@ def generator_commands() -> list[tuple[str, str, str]]:
             i = 0
             while i < len(lines):
                 line = lines[i]
-                if re.match(r'^python3 "\$SCRIPTS/(cp_|fmr_)?dispatch_prompt\.py" ', line):
+                if re.match(r'^python3 "\$SCRIPTS/(cp_|fmr_|dr_)?dispatch_prompt\.py" ', line):
                     cmd = line
                     while cmd.endswith("\\"):
                         i += 1
@@ -116,6 +116,7 @@ EXPECTED_COMMANDS = {
     ("competitive-positioning", "checklist"),
     ("competitive-positioning", "red_team"),
     ("financial-model-review", "checklist"),
+    ("deck-review", "checklist"),
 }
 # The prompts that name a bundled reference, and the references each names.
 EXPECTED_TAILS = {
@@ -126,11 +127,14 @@ EXPECTED_TAILS = {
     ("competitive-positioning", "moat_scoring"): {"skills/competitive-positioning/references/moat-definitions.md"},
     ("competitive-positioning", "checklist"): {"skills/competitive-positioning/references/checklist-criteria.md"},
     ("financial-model-review", "checklist"): {"skills/financial-model-review/references/checklist-criteria.md"},
+    ("deck-review", "checklist"): {"skills/deck-review/references/checklist-criteria.md"},
 }
 
 
 def test_the_command_scan_finds_every_generator_call() -> None:
     assert {(s, c) for s, c, _ in generator_commands()} == EXPECTED_COMMANDS
+    # Non-vacuity for the newest generator: the anchor once excluded its prefix and the scan skipped it.
+    assert any(s == "deck-review" and "dr_dispatch_prompt.py" in cmd for s, _c, cmd in generator_commands())
 
 
 def _workspace(tmp_path: Path) -> dict[str, str]:
@@ -146,6 +150,10 @@ def _workspace(tmp_path: Path) -> dict[str, str]:
     review = tmp_path / "review"
     review.mkdir(exist_ok=True)
     (review / "inputs.json").write_text("{}", encoding="utf-8")
+    # deck-review's review folder: this run's slide reviews with a read token, which its generator requires.
+    (review / "slide_reviews.json").write_text(
+        '{"reviews": [], "metadata": {"run_id": "R", "read_token": "0123456789ab"}}', encoding="utf-8"
+    )
     return {
         "RUN_ID": "R",
         "ANALYSIS_DIR": str(analysis),
@@ -288,7 +296,12 @@ def text_mismatch(label: str, expected: str, actual: str) -> str:
 
 
 def _template(skill: str, context: str) -> str:
-    gen = {"market-sizing": MS_GEN, "competitive-positioning": CP_GEN, "financial-model-review": FMR_GEN}[skill]
+    gen = {
+        "market-sizing": MS_GEN,
+        "competitive-positioning": CP_GEN,
+        "financial-model-review": FMR_GEN,
+        "deck-review": DR_GEN,
+    }[skill]
     mod = _load(gen, f"tpl_{gen.stem}")
     return str(mod._TEMPLATES[context] if skill == "competitive-positioning" else mod._CHECKLIST_TEMPLATE)
 

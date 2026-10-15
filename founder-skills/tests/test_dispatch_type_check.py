@@ -40,7 +40,7 @@ _TYPE_RE = re.compile(r'subagent_type\s*[=:]\s*"(?:founder-skills:)?([a-z-]+)"')
 _HEADING_RE = re.compile(r"^#{1,3} ", re.MULTILINE)
 _FENCE_RE = re.compile(r"^```[^\n]*\n(.*?)^```", re.MULTILINE | re.DOTALL)
 _CONTEXT_LINE_RE = re.compile(r"^CONTEXT: ([A-Z][A-Z0-9_]*)\s*$", re.MULTILINE)
-_GENERATOR_CALL_RE = re.compile(r'(?:cp_|fmr_)?dispatch_prompt\.py"? ([a-z_]+)')
+_GENERATOR_CALL_RE = re.compile(r'(?:cp_|fmr_|dr_)?dispatch_prompt\.py"? ([a-z_]+)')
 
 
 def _section(text: str, pos: int) -> str:

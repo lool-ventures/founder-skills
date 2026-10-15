@@ -999,7 +999,7 @@ def _generator_fences() -> list[tuple[str, str]]:
     import re
 
     out = []
-    for skill in ("market-sizing", "competitive-positioning", "financial-model-review"):
+    for skill in ("market-sizing", "competitive-positioning", "financial-model-review", "deck-review"):
         text = (SCRIPTS.parent / "skills" / skill / "SKILL.md").read_text(encoding="utf-8")
         for m in re.finditer(r"^```bash\n(.*?)^```", text, re.MULTILINE | re.DOTALL):
             runs = [
@@ -1020,7 +1020,8 @@ def test_every_prescribed_generator_block_is_accepted() -> None:
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     fences = _generator_fences()
-    assert len(fences) >= 6, [skill for skill, _ in fences]
+    assert len(fences) >= 7, [skill for skill, _ in fences]
+    assert any(skill == "deck-review" for skill, _ in fences), "deck-review's Step 5 block was not scanned"
     for skill, block in fences:
         assert mod.generator_block(block)[0], (skill, block)
     # competitive-positioning's checklist pipe prints with `python3 -c`, in a block of its own.

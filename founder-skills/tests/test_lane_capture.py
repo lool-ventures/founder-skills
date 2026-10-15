@@ -98,6 +98,7 @@ SKILLS = TESTS.parent / "skills"
 MS_GENERATOR = "dispatch_prompt.py"
 GEN = str(SKILLS.joinpath("market-sizing", "scripts", MS_GENERATOR))
 FMR_SCRIPTS = str(SKILLS.joinpath("financial-model-review", "scripts"))
+DR_SCRIPTS = str(SKILLS.joinpath("deck-review", "scripts"))
 PRINTED = (
     "CONTEXT: RED_TEAM\nOUTPUT_PATH: /x/handoff/r1/redteam_output.json\nRUN_ID: r1\n"
     "Do NOT write any file other than OUTPUT_PATH.\n"
@@ -699,3 +700,21 @@ def _mirror(source: str | None) -> dict[str, Any]:
 def test_the_stage_mirror_is_held_to_the_ledger(harness: Any, mirror: dict, current: Any, state: str, ok: bool) -> None:
     ledger = {"gates": {"stage_confirmation": {"state": state, "current": current}}}
     assert (harness.mirror_problems(mirror, ledger) == []) is ok
+
+
+def test_deck_reviews_generator_folded_last_into_its_pipe_block_is_a_comparand(
+    harness: Any, tmp_path: Path, monkeypatch: Any
+) -> None:
+    printed = PRINTED.replace("CONTEXT: RED_TEAM", "CONTEXT: CHECKLIST").replace("redteam_output", "checklist_output")
+    command = (
+        f"python3 {DR_SCRIPTS}/slide_reviews.py --run-id r1 -o /x/slide_reviews.json\n"
+        f"python3 {DR_SCRIPTS}/dr_dispatch_prompt.py checklist --run-id r1 --handoff-agent /x/handoff/r1 "
+        "--review-dir-agent /x --review-dir /x"
+    )
+    stream = [
+        _init(),
+        *_shell("g", command, '{"ok": true, "path": "/x/slide_reviews.json"}\n' + printed),
+        _dispatch("d", printed),
+        _result("d", structured={"prompt": printed}),
+    ]
+    assert _rows(_report(harness, tmp_path, monkeypatch, stream))["d"]["sent_matches"] is True

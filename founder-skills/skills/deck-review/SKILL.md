@@ -680,11 +680,12 @@ printf '%s' '<agent final message verbatim>' | \
 Branch on the exit code (complete state machine — do not improvise):
 
 - **Exit 0** → pipe the file through the producer: `cat "$HANDOFF_DIR/<step>_output.json" | python3 "$SCRIPTS/<producer>.py" ...`
-- **Exit 3** (missing/empty file — receipt may be fabricated) → **redo-dispatch**: fresh Task, same prompt plus one line: "your receipt claimed a file at `<path>` but none exists; use Write to create exactly that path."
+- **Exit 3** (missing/empty file — receipt may be fabricated) → **redo-dispatch**: fresh Task, same prompt plus one line: "your receipt claimed a file at `<path>` but none exists; use Write to create exactly that path." For the CHECKLIST, re-run `dr_dispatch_prompt.py` with the same arguments plus `--correction missing-file` and send that output instead.
 - **Exit 4** (file exists, invalid JSON) → **repair-dispatch**: fresh Task: "Read `<OUTPUT_PATH>`; it fails JSON parsing with `<verbatim detail from the diagnostic>`; fix and rewrite it; return the receipt."
 - **Exit 5** (receipt echoes a different path) → **repair-dispatch** telling the agent the exact expected OUTPUT_PATH (it wrote somewhere else).
-- **Exit 6** (receipt unparseable / no `output_path` key) → **redo-dispatch** with "return ONLY the receipt JSON — no fences, no prose."
-- **Producer schema rejection** (the pipe fails next) → **repair-dispatch** with the producer's stderr verbatim — except `SLIDE_REVIEWS_NOT_READ`, which is a **redo-dispatch** of the full Step 5 prompt (the hand-off is regraded, never repaired).
+- For the CHECKLIST, exits 4 and 5 are a plain reprint instead: re-run `dr_dispatch_prompt.py` with the same arguments and send that output (a fresh grade; no CHECKLIST correction is ever hand-written).
+- **Exit 6** (receipt unparseable / no `output_path` key) → **redo-dispatch** with "return ONLY the receipt JSON — no fences, no prose." For the CHECKLIST, re-run `dr_dispatch_prompt.py` with the same arguments plus `--correction receipt-only` and send that output instead.
+- **Producer schema rejection** (the pipe fails next) → **repair-dispatch** with the producer's stderr verbatim. For the CHECKLIST, the redo is the generator's `--correction producer-rejected` print, never a hand-written repair, `SLIDE_REVIEWS_NOT_READ` included: Step 5's pipe saves its stderr to `$HANDOFF_DIR/producer_rejected.txt`; re-run `dr_dispatch_prompt.py` with the same arguments plus `--correction producer-rejected --detail-file "$HANDOFF_DIR/producer_rejected.txt"` and send that output.
 - **Exit 8** (`path_namespace_mismatch`) → the sub-agent **complied**; the agent-namespace prefix was wrong. Its relative `OUTPUT_PATH` resolved against the outputs mount instead of the session root, so the file landed at the doubled path reported in `found_at`. Only a RELATIVE agent path can do this, so the Step 0 proof did not run: run it. Do NOT treat this as a fabricated receipt (that is exit 3), and do NOT read the hand-off from `found_at` — it is diagnostic only. Re-run `resolve_artifacts_root.py --agent`, rebuild the agent-namespace prefix from the printed value, and re-dispatch. Counts against the same 2-dispatch retry budget.
 - **Blocked `write_refused`** (the sub-agent's Write was refused — its path was relative or a `/sessions/...` path) → run the Step 0 proof if it did not run, rebuild the agent-namespace paths from the resolver, re-dispatch ONCE. A second `write_refused` STOPs with both details quoted.
 - **Any other exit** (script crash etc.) → STOP with the stderr.
@@ -1139,113 +1140,22 @@ cat "$HANDOFF_DIR/slide_reviews_output.json" | \
 
 Dispatch it only after Step 4's pipe has written `slide_reviews.json`, never in the same message as SLIDE_REVIEWS: the grader reads that file.
 
-**Dispatch the deck-review sub-agent in Context A (CHECKLIST).** **Call the `Task` tool with `subagent_type: "founder-skills:deck-review"`** and the prompt below. Substitute `<HANDOFF_AGENT>` / `<REVIEW_DIR_AGENT>` with the agent-namespace values and `<RUN_ID>` with `$RUN_ID`; leave the `${CLAUDE_PLUGIN_ROOT}/...` reference path literal (same idiom as SLIDE_REVIEWS).
+**Dispatch the deck-review sub-agent in Context A (CHECKLIST).** **Call the `Task` tool with `subagent_type: "founder-skills:deck-review"` and `description: "Score the checklist"`**, and the prompt the generator below prints.
+<!-- skill-quality-ci: bash-after-subagent-ok -->
 
-**Dispatch prompt template:**
+**The prompt is printed, not written.** Run the generator in a shell call of its own — nothing before it but variable assignments, nothing after it — and send the text it prints as the prompt, unchanged: nothing added, removed or reworded, including on a redo.
 
+```bash
+# A fresh shell: set each value again (an empty one is refused).
+RUN_ID="<RUN_ID>"
+HANDOFF_AGENT="<printed HANDOFF_AGENT>"
+REVIEW_DIR_AGENT="<printed REVIEW_DIR_AGENT>"
+REVIEW_DIR="<REVIEW_DIR>"
+python3 "$SCRIPTS/dr_dispatch_prompt.py" checklist --run-id "$RUN_ID" \
+  --handoff-agent "$HANDOFF_AGENT" --review-dir-agent "$REVIEW_DIR_AGENT" --review-dir "$REVIEW_DIR"
 ```
-CONTEXT: CHECKLIST
-OUTPUT_PATH: <HANDOFF_AGENT>/checklist_output.json
-RUN_ID: <RUN_ID>
 
-You are the deck-review agent dispatched in Context A (CHECKLIST).
-If a reference path below cannot be read (refused or not found), read the same file under the plugin folder your own instructions name.
-Evaluate all
-35 criteria from ${CLAUDE_PLUGIN_ROOT}/skills/deck-review/references/checklist-criteria.md
-using the slide reviews at <REVIEW_DIR_AGENT>/slide_reviews.json (a required
-read), the stage profile at <REVIEW_DIR_AGENT>/stage_profile.json, and the
-deck inventory at <REVIEW_DIR_AGENT>/deck_inventory.json.
-
-Assess ALL 35 criteria including the 4 AI criteria and the 5 Design & Readability
-criteria — do NOT self-gate. `checklist.py` applies deterministic AI-criteria
-gating from `deck_inventory.json`'s `ai_company_status` AND deterministic
-Design-criteria gating from its `input_format` (forcing Design & Readability to
-`not_applicable` when the deck was described in text rather than uploaded as a
-file) after you return — assess every criterion regardless of format.
-
-Evidence quality rules:
-- Every fail and warn `evidence` MUST include BOTH what this deck actually does (quote or describe the specific slide content) AND the best-practice principle or benchmark it falls short of — the deck observation is not optional.
-- Every pass MUST record in `evidence` what was checked.
-- not_applicable items MUST include a reason.
-- `notes` is the specific change the founder should make — imperative, concrete, particular to this deck, never a restatement of the criterion or a record of what you checked. Required on fail and warn; omit it entirely on pass and not_applicable.
-- Before asserting a visual or design element is absent (photos, charts,
-  diagrams, logos), check the `visuals` field of every relevant slide in
-  `deck_inventory.json` and cite the slide number(s) you checked in the evidence.
-
-Evaluate every one of these 35 criteria — one item per id, no omissions, no
-invented ids. Grouped by category:
-
-Narrative Flow:
-  - purpose_clear
-  - headlines_carry_story
-  - narrative_arc_present
-  - strongest_proof_early
-  - story_stands_alone
-Slide Content:
-  - problem_quantified
-  - solution_shows_workflow
-  - why_now_has_catalyst
-  - market_bottom_up
-  - competition_honest
-  - business_model_clear
-  - gtm_has_proof
-  - team_has_depth
-Stage Fit:
-  - stage_appropriate_structure
-  - stage_appropriate_traction
-  - stage_appropriate_financials
-  - ask_ties_to_milestones
-  - round_size_realistic
-Design & Readability:
-  - one_idea_per_slide
-  - minimal_text
-  - slide_count_appropriate
-  - consistent_design
-  - mobile_readable
-Common Mistakes:
-  - no_vague_purpose
-  - no_nice_to_have_problem
-  - no_hype_without_proof
-  - no_features_over_outcomes
-  - no_dodged_competition
-AI Company (score all 4; the producer script gates them after you return):
-  - ai_retention_rebased
-  - ai_cost_to_serve_shown
-  - ai_defensibility_beyond_model
-  - ai_responsible_controls
-Diligence Readiness:
-  - numbers_consistent
-  - data_room_ready
-  - contact_info_present
-
-When you cite deck figures in evidence, quote them verbatim from the deck
-content — do not paraphrase or round numbers, percentages, dates, or named
-metrics.
-
-Evidence prints VERBATIM in the founder's report, so name the source the way the
-founder knows it — never by our filename or a dispatch label. They saw their deck,
-not `deck_inventory.json` or `deck-best-practices.md`.
-  Instead of: "slide_reviews.json shows no competition slide"
-  Write:      "the deck has no competition slide"
-State what is true of the DECK.
-
-
-Use your Write tool to write to OUTPUT_PATH the items array without a summary
-(the producer script computes the summary):
-{"slide_reviews_read_token": "the metadata.read_token value you read", "items": [{"id": "purpose_clear", "status": "pass", "evidence": "...", "notes": "..."}, ...all 35 items...]}
-The main thread leaves `slide_reviews_read_token` to you; copy it from the `metadata.read_token` field at the end of the `slide_reviews.json` you Read (12 hex characters).
-On the four visual Design & Readability criteria add `"verified_by"`: `"measured"` only
-when you directly observed the property with a tool that can observe it, `"inferred"` when
-you reasoned it from other evidence, `"not_possible"` when you had no way to observe it.
-Leaving it off means unstated, which is not the same as measured.
-All string values must be JSON-escaped (`\n` for line breaks, `\"` for embedded
-quotes); the file must parse with a strict JSON parser.
-Then return ONLY the receipt JSON in your final assistant message:
-{"status": "complete", "output_path": "<echo of OUTPUT_PATH>"}
-Do NOT write any file other than OUTPUT_PATH — you never write a canonical
-artifact; anything else you write bypasses schema validation and
-run_id stamping.
-```
+The prompt has the grader read this run's slide reviews as a required read and copy their `metadata.read_token` into `slide_reviews_read_token`; the generator prints nothing until Step 4's pipe has written them (`SLIDE_REVIEWS_MISSING`: run Step 4's pipe, then the generator again).
 
 **After the sub-agent returns:** gate the hand-off per the Context A hand-off protocol, then pipe through the producer script (with `--inventory` so the producer applies deterministic AI-criteria AND Design-criteria gating from `deck_inventory.json`):
 
@@ -1254,11 +1164,12 @@ cat "$HANDOFF_DIR/checklist_output.json" | python3 "$SCRIPTS/checklist.py" --run
   --inventory "$REVIEW_DIR/deck_inventory.json" \
   --reconciliation "$REVIEW_DIR/reconciliation.json" \
   --slide-reviews "$REVIEW_DIR/slide_reviews.json" \
-  -o "$REVIEW_DIR/checklist.json"
+  -o "$REVIEW_DIR/checklist.json" 2> "$HANDOFF_DIR/producer_rejected.txt"
+echo "EXIT=$?"
 ```
 
 `--reconciliation` scores `numbers_consistent` from the arithmetic, so keep it here (a what-if rerun omits it: see the What-If rule).
-`SLIDE_REVIEWS_NOT_READ`: dispatch the CHECKLIST again with the prompt above as a new dispatch, never a repair (it counts against the retry budget). `SLIDE_REVIEWS_MISSING`: run Step 4 first.
+On a non-zero exit, the pipe's stderr is in `$HANDOFF_DIR/producer_rejected.txt`. `SLIDE_REVIEWS_NOT_READ`: run the generator with the same arguments plus `--correction producer-rejected --detail-file "$HANDOFF_DIR/producer_rejected.txt"` and dispatch what it prints, a new dispatch, never a repair (it counts against the retry budget). `SLIDE_REVIEWS_MISSING`: run Step 4 first.
 <!-- skill-quality-ci: bash-after-subagent-ok -->
 
 ### Step 6: Compose Report
