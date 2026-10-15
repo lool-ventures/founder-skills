@@ -1185,8 +1185,8 @@ def test_an_archived_copy_takes_no_cash_update(tmp_path: Path) -> None:
     assert proc.returncode == 1 and _out(proc)["code"] == "RUN_SUPERSEDED", proc.stdout + proc.stderr
     assert h.snapshot(root, run_id) == before
     # And so does a default pointed at the copy: the copy is refused before anything about the run is read.
-    args = ("--run-id", run_id, "--run-dir", str(copy), "--gate", "fmr_cash_followup")
-    proc = h.run(h.RECORD, "default", *args, "--reason", "producer_default_disclosed")
+    dargs = ("--run-id", run_id, "--run-dir", str(copy), "--gate", "fmr_cash_followup")
+    proc = h.run(h.RECORD, "default", *dargs, "--reason", "producer_default_disclosed")
     assert proc.returncode == 1 and _out(proc)["code"] == "RUN_SUPERSEDED", proc.stdout + proc.stderr
     assert h.snapshot(root, run_id) == before
 
