@@ -102,10 +102,12 @@ def sizing_redo_problems(
     Two red causes when the redo is printed in a block the dispatch hook cannot vouch for (say, after a
     research heredoc). The comparand then stays the plain print, so this check's "not the comparison redo"
     line and `assert_received_prompt` both fire when the redo goes through as sent:
-    - the model: the hook held the redo dispatch twice (A NEWER PRINT in `dispatch_prompt_check.py`), asking
-      for the generator in a shell call of its own, and the model sent it a third time instead;
-    - the shared hold budget: the build and its redo share one OUTPUT_PATH, so when the first build already
-      spent that path's two holds, the redo went through as sent with no hold on it at all.
+    - the model: the hook held the redo dispatch twice in its phase (A NEWER PRINT in
+      `dispatch_prompt_check.py`), asking for the generator in a shell call of its own, and the model sent it
+      again instead;
+    - the shared hold budget: the build and its redo share one OUTPUT_PATH. Holds are counted per phase, so
+      the first build's own holds no longer spend the redo's, but a path is held at most four times: when the
+      first build already spent four, the redo went through as sent with no hold on it at all.
     Tell them apart in `format_dispatch_report`'s per-dispatch lines: in the first, the redo's own earlier
     attempts on the path are `held`; in the second, no redo dispatch is held and the holds sit on the first
     build's dispatches. Neither is variance; do not re-run either to green."""

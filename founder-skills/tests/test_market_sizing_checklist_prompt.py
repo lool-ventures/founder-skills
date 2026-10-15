@@ -114,8 +114,8 @@ _END = "Do NOT write any file other than OUTPUT_PATH.\n"
 @pytest.mark.parametrize("kind", ["missing-file", "receipt-only"])
 def test_a_corrective_redo_is_printed_with_its_line_before_the_closing_one(tmp_path: Path, kind: str) -> None:
     """SKILL.md's exit-3 / exit-6 redo was "same prompt plus one line", typed by the main thread. The
-    dispatch hook holds any prompt that is not the printed one, so that redo was held twice and its reason
-    ("send the printed prompt unchanged") dropped the correction. The generator now prints the redo."""
+    dispatch hook holds any prompt that is not the printed one, so that redo was held (twice in its phase) and
+    its reason ("send the printed prompt unchanged") dropped the correction. The generator now prints the redo."""
     d, h = _analysis(tmp_path, _BASE)
     plain = _prompt(d, h)
     redo: str = dp.checklist("R", str(d), str(h), "AGENT/handoff/R/r2", "AGENT", session_tree=False, correction=kind)

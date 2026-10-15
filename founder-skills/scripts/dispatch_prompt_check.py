@@ -62,17 +62,39 @@ dispatch and is held like any other edit, since a redo is printed by the generat
 The comparand's context must be a line of its own. A context with no generator is not registered here
 and is never compared.
 
-THE BUDGET. A round is held at most twice, then let through with one stderr line: a hook that holds
-forever can wedge a run on its own bug. Counted per OUTPUT_PATH, i.e. per round -- the only real user
-prompts in a run are its first and its last, so a count per prompt would let round 1's holds spend
-round 2's. No disclosure code is written from here: compose reading a marker the hook wrote would
-make the report depend on the hook, and a missing marker would read as clean. The agent check keeps its
-own marker and budget.
+THE BUDGET. A hold is counted per OUTPUT_PATH, i.e. per round -- the only real user prompts in a run
+are its first and its last, so a count per prompt would let round 1's holds spend round 2's -- and per
+PHASE within it: `unprinted` (no print for the path), `printed:<sha>` (held with this print inline) or
+`stale:<sha>` (A NEWER PRINT), the sha the first 8 hex of the squashed print's sha256. Each phase is held
+at most MAX_HOLDS (2) times, and a path at most TOTAL_HOLDS (4) times whatever its phases: the total is
+checked first, then the phase, and past either the dispatch is let through with one stderr line, since a
+hook that holds forever can wedge a run on its own bug. The phase rides in the hold's own text, after the
+marker (`[dispatch-check][<path>][p:<phase>]`); a hold written before phases existed carries none and
+counts in every phase. Why per phase: two "no printed prompt" holds on a CHECKLIST sent beside the step it
+reads used to spend the whole budget, so a later steered dispatch held with the print inline (below the
+rewrite floor, or with the plugin's files changed) went through unheld with no print ever shown. The
+total is the real bound: the `stale:` sha is model-writable (THE TRADE) and the `printed:` sha changes on
+every differing reprint, so phases alone are porous. What the cap gives back: a path that spent two
+`unprinted` and two `printed:` holds has none left for a later `stale:` phase, so an unvouchable redo
+then passes unheld -- the case A NEWER PRINT was written for, now needing four earlier holds instead of
+two; the release gate's received-prompt check is what catches it. Residuals, both bounded by the total:
+sibling dispatches in one assistant message read the same transcript and can spend a phase twice in one
+turn; and the key is the OUTPUT_PATH the model typed (`?` when absent), so a varied path opens a fresh
+budget. The plugin-files hold (THE PLUGIN'S FILES) is its own key and counts toward no path. No
+disclosure code is written from here: compose reading a marker the hook wrote would make the report
+depend on the hook, and a missing marker would read as clean. The agent check keeps its own marker and
+budget.
 
-NO PRINTED PROMPT. Held, with "run the prompt generator": the only way to satisfy it puts the
-comparand in the transcript. A known exception to reading results only: to word that hold, a block that
-will not parse is searched as text for this context's generator call; that picks the message, never
-whether the dispatch is held, passed or rewritten.
+NO PRINTED PROMPT. Held, naming the generator to run (`$SCRIPTS/<generator> <subcommand>` and its
+identifier flags; never the hook's own folder, which at the host loop is a host path the shell sees as the
+VM mount): the only way to satisfy it puts the comparand in the transcript. When this context's latest
+generator call REFUSED -- its result is an error (`is_error`), carries no context line, and has a line that
+is a JSON object with `"status"` `rejected` or `refused` and a `code` -- the hold says the generator refused,
+echoing only the code (`[A-Z_]{1,64}`), and to do what its output says before running it again (the last
+such line wins, so a producer's refusal earlier in the same block is not named). Never on the stale head.
+A known exception to reading results only: to word that hold, a block that will not parse is searched as
+text for this context's generator call, and the refused call's result text is read; both pick the
+message, never whether the dispatch is held, passed or rewritten.
 
 SENDING THE PRINTED PROMPT INSTEAD. Where a printed prompt exists and the dispatch differs,
 the hook can allow the dispatch with `updatedInput` -- the dispatch's own input with only `prompt`
@@ -99,19 +121,20 @@ vouched print, and the newest text printed for the same context and OUTPUT_PATH 
 Read result (`newest_print`, vouched or not, a failed shell result included) differs from the vouched one,
 the vouched print is stale: the dispatch is neither rewritten nor held with it inlined, but held as if
 nothing were printed, under a head that asks for the same generator arguments in a shell call of its own,
-and after the round's two holds it goes through as sent. The case that made this rule: a comparison redo
-printed as the last command of a block that first recorded research through a heredoc. The block could not
-be vouched for, so the comparand stayed the build's first plain print, the redo dispatch was rewritten to
-that, and the report said the redo had chosen the same inputs again. The rule reads printed text only,
-never a command. A dispatch equal to the vouched print still passes, even with a newer print beside it, so
-reading back an older prompt file after a vouched redo holds nothing.
+and after two holds in that phase (four on the path) it goes through as sent. The case that made this
+rule: a comparison redo printed as the last command of a block that first recorded research through a
+heredoc. The block could not be vouched for, so the comparand stayed the build's first plain print, the
+redo dispatch was rewritten to that, and the report said the redo had chosen the same inputs again. The
+rule reads printed text only, never a command. A dispatch equal to the vouched print still passes, even
+with a newer print beside it, so reading back an older prompt file after a vouched redo holds nothing.
 THE TRADE, stated: this is a model-writable input that turns a rewrite into a budgeted hold. Any result the
 model can produce carrying another context line, the same OUTPUT_PATH and the closing line (an `echo`, a
 `cat` of a file it wrote, a Write then a Read) makes the vouched print stale, so a steered dispatch that
-was rewritten with no budget is now held twice and then sent as written; so is a print this check
+was rewritten with no budget is now held twice in its phase (at most four times on its path) and then
+sent as written; so is a print this check
 deliberately distrusts (a `--correction producer-rejected` redo no failed producer wrote the detail for, a
 generator written over, a foreign copy, a PATH setting), whose hold may then name the wrong cause. Accepted
-because a reverted redo is silent and makes the report false, where a pass after two holds is loud: the
+because a reverted redo is silent and makes the report false, where a pass after the holds is loud: the
 release gate's received-prompt check fails on it. Residuals: a dispatch sending the OLD vouched print
 verbatim while a newer differing print exists passes (that equals the comparand); and a generator result
 the runtime saved to a file ("Full output saved to: ...") carries no context line, so it is seen only once
@@ -159,7 +182,9 @@ so its files read as missing (`script_hashes.py`'s docstring).
 from __future__ import annotations
 
 import functools
+import hashlib
 import importlib.util
+import json
 import os
 import re
 import shlex
@@ -217,7 +242,8 @@ PAIRS: dict[tuple[str, str], str] = {
 CONTEXTS = tuple(dict.fromkeys(context for context, _ in PAIRS))
 END = "Do NOT write any file other than OUTPUT_PATH."
 DISPATCH_TOOLS = ("Agent", "Task")
-MAX_HOLDS = 2
+MAX_HOLDS = 2  # per OUTPUT_PATH and phase (THE BUDGET)
+TOTAL_HOLDS = 4  # per OUTPUT_PATH, whatever the phase; checked first
 # The rest of the line, trimmed: local-lane paths contain spaces ("…/Library/Application Support/…"),
 # and a `\S+` capture stopped at the first one, so every round and context shared one key.
 # Leading whitespace allowed: a model that re-indents the prompt is still sending the same prompt.
@@ -1273,9 +1299,43 @@ def strings(obj: Any) -> Any:
             yield from strings(value)
 
 
-def _holds(rows: list[dict[str, Any]], output_path: str) -> int:
+_PHASE_OPEN = "[p:"
+
+
+def _holds(rows: list[dict[str, Any]], output_path: str, phase: str | None = None) -> int:
+    """Hold rows for `output_path`: all of them, or with `phase` those in that phase (THE BUDGET). A hold
+    with no phase tag after its marker was written before phases existed and counts in every phase."""
     mark = f"{MARKER}[{output_path}]"
-    return sum(1 for row in rows if row.get("type") == "user" and any(mark in t for t in strings(row.get("message"))))
+    tag = f"{_PHASE_OPEN}{phase}]"
+    n = 0
+    for row in rows:
+        if row.get("type") != "user":
+            continue
+        texts = [t for t in strings(row.get("message")) if mark in t]
+        if not texts:
+            continue
+        if phase is None:
+            n += 1
+            continue
+        for t in texts:
+            tails = [t[i + len(mark) :] for i in _find_all(t, mark)]
+            if any(not rest.startswith(_PHASE_OPEN) or rest.startswith(tag) for rest in tails):
+                n += 1
+                break
+    return n
+
+
+def _find_all(text: str, sub: str) -> list[int]:
+    out = []
+    i = text.find(sub)
+    while i >= 0:
+        out.append(i)
+        i = text.find(sub, i + 1)
+    return out
+
+
+def _sha8(text: str) -> str:
+    return hashlib.sha256(_squash(text).encode("utf-8")).hexdigest()[:8]
 
 
 def cli_version(rows: list[dict[str, Any]]) -> tuple[int, ...] | None:
@@ -1382,11 +1442,62 @@ def agent_name(agent: str) -> str | None:
 
 # --- why there is no printed prompt (the hold's reason; model-facing only) --------------------------------
 
-_HOW_TO_PRINT = (
-    "Run the prompt generator in a shell call of its own, or as the last command of its block, with nothing "
-    "after it that prints, and send the text it prints as the prompt, unchanged. Do not redirect its output "
-    "away: the printed text is what the dispatch is compared with."
+# The identifier flags each generator takes, as its SKILL.md step passes them. Named in the hold so a thread
+# that lost the step (a compaction keeps only the skill's base-directory line) is pointed at the right call;
+# the values are the thread's own.
+_GENERATOR_FLAGS: dict[str, str] = {
+    "dispatch_prompt.py": "--run-id --analysis-dir --handoff-dir --handoff-agent",
+    "cp_dispatch_prompt.py": (
+        "--run-id --handoff-agent --analysis-dir-agent (red_team: also --analysis-dir --handoff-dir)"
+    ),
+    "fmr_dispatch_prompt.py": "--run-id --handoff-agent --review-dir-agent --review-dir",
+    "dr_dispatch_prompt.py": "--run-id --handoff-agent --review-dir-agent --review-dir",
+}
+_SEND = (
+    "in a shell call of its own, or as the last command of its block, with nothing after it that prints, and "
+    "send the text it prints as the prompt, unchanged. Do not redirect its output away: the printed text is what "
+    "the dispatch is compared with."
 )
+
+
+def _how_to_print(generator: str | None, sub: str) -> str:
+    """How to put the comparand in the transcript, naming the generator and its flags when known."""
+    if generator is None:
+        return f"Run the prompt generator {_SEND}"
+    flags = _GENERATOR_FLAGS.get(generator, "")
+    return (
+        f"Run `$SCRIPTS/{generator} {sub}` ($SCRIPTS is this skill's `scripts` folder under the plugin root Step 0 "
+        f"printed; pass {flags} as the skill's step gives them) {_SEND}"
+    )
+
+
+_CODE_RE = re.compile(r"^[A-Z_]{1,64}$")
+_EXIT_LEAD_RE = re.compile(r"^\[exit \d+\]\s*")
+_ANY_CONTEXT_LINE_RE = re.compile(r"^[ \t]*CONTEXT:[ \t]*[A-Z]", re.MULTILINE)
+
+
+def _refusal_code(block: dict[str, Any] | None) -> str | None:
+    """The code of a generator's refusal in its result (NO PRINTED PROMPT), or None. Model-visible text, so only a
+    code of capitals and underscores is ever returned, never a message."""
+    if not isinstance(block, dict) or not block.get("is_error"):
+        return None
+    text = _result_text(block)
+    if _ANY_CONTEXT_LINE_RE.search(text):
+        return None  # a printed prompt that quotes a producer's code is not a refusal
+    found = None
+    for line in text.splitlines():
+        line = _EXIT_LEAD_RE.sub("", line.strip())
+        if not line.startswith("{"):
+            continue
+        try:
+            data = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(data, dict) and data.get("status") in ("rejected", "refused"):
+            code = data.get("code")
+            if isinstance(code, str) and _CODE_RE.match(code):
+                found = code
+    return found
 
 
 def _generator_for(agent: str) -> str | None:
@@ -1457,7 +1568,7 @@ def _loud_command(command: str, distrusted: set[str]) -> str | None:
 
 
 def _unprinted_reason(
-    rows: list[dict[str, Any]], context: str, agent: str, output_path: str, stale: bool = False
+    rows: list[dict[str, Any]], context: str, agent: str, output_path: str, stale: bool = False, phase: str = ""
 ) -> str:
     """The hold's reason when no printed prompt exists for this OUTPUT_PATH, by what the transcript shows:
     this context's generator ran in a block that could not be vouched for (named); its output was
@@ -1465,20 +1576,29 @@ def _unprinted_reason(
     but a later result printed another text for this path (A NEWER PRINT); only the head differs. Which body
     is chosen reads the shell text of a block that will not parse; that selects the message only, never
     whether the dispatch is held, passed or rewritten."""
+    tag = f"{_PHASE_OPEN}{phase or ('stale' if stale else 'unprinted')}]"
     head = (
-        f"{MARKER}[{output_path}] Held: the newest prompt printed for this OUTPUT_PATH differs from the one the "
-        "check can vouch for, so neither it nor an earlier print is sent in its place. Run the same generator "
+        f"{MARKER}[{output_path}]{tag} Held: the newest prompt printed for this OUTPUT_PATH differs from the one "
+        "the check can vouch for, so neither it nor an earlier print is sent in its place. Run the same generator "
         "arguments in a shell call of its own"
         if stale
-        else f"{MARKER}[{output_path}] Held: no printed prompt for this OUTPUT_PATH yet"
+        else f"{MARKER}[{output_path}]{tag} Held: no printed prompt for this OUTPUT_PATH yet"
     )
     generator = _generator_for(agent)
     sub = context.split(":", 1)[1].strip().lower()
+    how = _how_to_print(generator, sub)
     latest: str | None = None
+    latest_id: str | None = None
+    results: dict[str, dict[str, Any]] = {}
     distrusted: set[str] = set()
     latest_distrusted: set[str] = set()
     for row in rows:
         content = (row.get("message") or {}).get("content")
+        if row.get("type") == "user" and not row.get("isSidechain") and isinstance(content, list):
+            for b in content:
+                if isinstance(b, dict) and b.get("type") == "tool_result":
+                    results[str(b.get("tool_use_id"))] = b
+            continue
         if row.get("type") != "assistant" or not isinstance(content, list):
             continue
         for b in content:
@@ -1501,15 +1621,16 @@ def _unprinted_reason(
                 )
                 if runs:
                     latest = cmd
+                    latest_id = str(b.get("id"))
                     latest_distrusted = set(distrusted)
     if generator is not None and generator in distrusted:
         return (
             f"{head}. The prompt generator was written over in this session (`{generator}`), so no prompt it "
             "prints can be vouched for as its own, and nothing in this session can change that. This dispatch "
-            f"goes through after {MAX_HOLDS} holds."
+            f"goes through after {MAX_HOLDS} holds of this kind."
         )
     if latest is None or generator is None:
-        return f"{head}. {_HOW_TO_PRINT}"
+        return f"{head}. {how}"
     cmds = _parse_block(latest)
     latest_env = _env(cmds)[0] if cmds is not None else {}
     gens = [c for c in cmds or [] if not c.substituted and _runs_context(c, generator, sub, latest_env)]
@@ -1521,8 +1642,14 @@ def _unprinted_reason(
             "text as the prompt, unchanged. Do not redirect its output away: the printed text is what the "
             "dispatch is compared with."
         )
+    refused = None if stale else _refusal_code(results.get(latest_id or ""))
+    if refused is not None:
+        return (
+            f"{head}. The prompt generator refused (`{refused}`): do what its output says, then run "
+            f"`$SCRIPTS/{generator} {sub}` again and send the text it prints as the prompt, unchanged."
+        )
     if generator_block(latest, latest_distrusted)[0]:
-        return f"{head}. {_HOW_TO_PRINT}"  # it printed, for another OUTPUT_PATH
+        return f"{head}. {how}"  # it printed, for another OUTPUT_PATH
     if cmds is not None:
         _env_values, raw, assigned = _env(cmds)
         if not any(_kind(c, raw, assigned, latest_distrusted) == "generator" for c in gens):
@@ -1532,7 +1659,7 @@ def _unprinted_reason(
                 return (
                     f"{head}. The prompt generator that ran (`{differing}`) differs from the copy this version "
                     f"shipped with, so its output cannot be vouched for as its own. This dispatch goes through "
-                    f"after {MAX_HOLDS} holds."
+                    f"after {MAX_HOLDS} holds of this kind."
                 )
             return (
                 f"{head}. The prompt generator that ran is not the plugin's own: it was run from another folder, "
@@ -1661,16 +1788,33 @@ def decide(payload: dict[str, Any]) -> dict[str, Any] | None:
         printed = None
     if printed is not None and not mismatched and isinstance(tool_input, dict) and _may_rewrite(tool_input, rows):
         return _rewrite(tool_input, printed + "\n", output_path, context)
-    if _holds(rows, output_path) >= MAX_HOLDS:
+    # THE BUDGET: the path's total first, then this phase's.
+    if stale and newer is not None:
+        phase = f"stale:{_sha8(newer)}"
+    elif printed is not None:
+        phase = f"printed:{_sha8(printed)}"
+    else:
+        phase = "unprinted"
+    if _holds(rows, output_path) >= TOTAL_HOLDS:
         print(
-            f"dispatch_prompt_check: {output_path} sent unlike the printed prompt after {MAX_HOLDS} holds",
+            f"dispatch_prompt_check: {output_path} sent unlike the printed prompt after {TOTAL_HOLDS} holds on "
+            "this OUTPUT_PATH",
+            file=sys.stderr,
+        )
+        return None
+    if _holds(rows, output_path, phase) >= MAX_HOLDS:
+        print(
+            f"dispatch_prompt_check: {output_path} sent unlike the printed prompt after {MAX_HOLDS} holds of this kind",
             file=sys.stderr,
         )
         return None
     if printed is None:
-        reason = _unprinted_reason(rows, context, name or "", output_path, stale=stale)
+        reason = _unprinted_reason(rows, context, name or "", output_path, stale=stale, phase=phase)
     else:
-        reason = f"{MARKER}[{output_path}] Held: {reason_text}. Send this as the prompt, unchanged:\n\n{printed}"
+        reason = (
+            f"{MARKER}[{output_path}]{_PHASE_OPEN}{phase}] Held: {reason_text}. Send this as the prompt, "
+            f"unchanged:\n\n{printed}"
+        )
     return {
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
