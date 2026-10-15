@@ -831,6 +831,8 @@ def test_the_gate_sites_are_the_registrys_both_ways() -> None:
     for gid, gd in g.GATES.items():
         if gd["skill"] not in ("financial-model-review", "shared"):
             continue
+        if gd["reads_in"] and "financial-model-review" not in gd["reads_in"]:
+            continue  # a shared gate only other skills read: this skill never opens it
         inst = gd["instances"]
         registry |= {f"{gid}.{i}" for i in inst["static"]} if inst else {gid}
     assert sites == registry

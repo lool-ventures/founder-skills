@@ -69,7 +69,8 @@
     ],
     "founder_context": [
       "CONTEXT_NOT_FOUND",
-      "OUTPUT_IS_INPUT"
+      "OUTPUT_IS_INPUT",
+      "HOST_CONTEXT_NOT_FOUNDER_CONTEXT"
     ],
     "html_writers": [
       "RUN_ID_MISMATCH",
@@ -86,7 +87,15 @@
       "OUTPUT_IS_INPUT",
       "RUN_NOT_BOUND",
       "RUN_SUPERSEDED",
-      "ARTIFACT_OTHER_RUN"
+      "ARTIFACT_OTHER_RUN",
+      "HOST_PROFILE_NEEDS_RUN",
+      "HOST_PROFILE_REQUIRED",
+      "FUND_FIELD_TOO_LONG",
+      "FUND_FIELD_INVALID_CHARS",
+      "FUND_PROFILE_SOURCE_MISMATCH",
+      "HOST_CONTEXT_NOT_SUPPLIED",
+      "HOST_CONTEXT_MISSING",
+      "PROFILE_UNREADABLE"
     ],
     "insert_coaching": [
       "OUTPUT_IS_INPUT",
@@ -118,7 +127,8 @@
       "PRE_ANSWER_IGNORED",
       "PRE_ANSWER_INVALID",
       "PRE_ANSWER_NOT_APPLIED",
-      "SUPERSEDE_NOT_RECORDED"
+      "SUPERSEDE_NOT_RECORDED",
+      "HOST_CONTEXT_ITEMS_DROPPED"
     ],
     "start_payload": [],
     "usage": [
@@ -142,6 +152,7 @@
     "superseded"
   ],
   "exit_codes": {
+    "check_would_wait": 4,
     "not_owed": 11,
     "ok": 0,
     "rejected": 1,
@@ -191,6 +202,7 @@
         }
       ],
       "question": "My research also found that [A] and [B] are now one company as of [date], per [source] — want me to combine them?",
+      "reads_in": [],
       "skill": "competitive-positioning",
       "step": "4"
     },
@@ -244,6 +256,7 @@
         }
       ],
       "question": "Found <N> competitors (I'd challenge: <names>) (stronger than drafted: <upgraded names>) (you may be missing: <recall names>) — does this set look right?",
+      "reads_in": [],
       "skill": "competitive-positioning",
       "step": "gate1"
     },
@@ -297,6 +310,7 @@
         }
       ],
       "question": "I'll plot competitors on <axis-X> × <axis-Y> — do these axes look right?",
+      "reads_in": [],
       "skill": "competitive-positioning",
       "step": "gate2"
     },
@@ -350,6 +364,7 @@
         }
       ],
       "question": "The scored position <plain-language description of the trigger> — keep it, dig deeper, or reconsider how it's scored?",
+      "reads_in": [],
       "skill": "competitive-positioning",
       "step": "gate3"
     },
@@ -366,6 +381,7 @@
       "no_ask_default": null,
       "options": [],
       "question": "Which two should I merge to free a slot?",
+      "reads_in": [],
       "skill": "competitive-positioning",
       "step": "4"
     },
@@ -428,6 +444,7 @@
         }
       ],
       "question": "Can people use the product today?",
+      "reads_in": [],
       "skill": "competitive-positioning",
       "step": "2"
     },
@@ -473,6 +490,7 @@
         "differentiation": "What do you believe differentiates you?",
         "product": "What does the product do?"
       },
+      "reads_in": [],
       "skill": "competitive-positioning",
       "step": "2"
     },
@@ -535,6 +553,7 @@
         }
       ],
       "question": "Found <N> more competitors during research — include any?",
+      "reads_in": [],
       "skill": "competitive-positioning",
       "step": "4"
     },
@@ -561,6 +580,7 @@
         }
       ],
       "question": "Which ones should I include?",
+      "reads_in": [],
       "skill": "competitive-positioning",
       "step": "4"
     },
@@ -605,6 +625,7 @@
         }
       ],
       "question": "Which basis should the scoring use?",
+      "reads_in": [],
       "skill": "competitive-positioning",
       "step": "gate2"
     },
@@ -640,6 +661,7 @@
         }
       ],
       "question": "Where are the documents you shared? The review reads them first.",
+      "reads_in": [],
       "skill": "competitive-positioning",
       "step": "6.5"
     },
@@ -675,6 +697,7 @@
         }
       ],
       "question": "Please confirm [Company]'s cap-table base — I'll use exactly these numbers for all the math:",
+      "reads_in": [],
       "skill": "cap-table",
       "step": "4"
     },
@@ -713,6 +736,7 @@
         }
       ],
       "question": "This document has tracked changes — it's a redline / unsigned draft, not a final executed version. How should I proceed?",
+      "reads_in": [],
       "skill": "cap-table",
       "step": "3"
     },
@@ -749,6 +773,7 @@
         }
       ],
       "question": "Is this a flip-focused engagement (Israeli → Delaware), or a standard cap-table modeling engagement?",
+      "reads_in": [],
       "skill": "cap-table",
       "step": "2"
     },
@@ -784,6 +809,7 @@
         }
       ],
       "question": "I found an existing cap-table review for [Company]. Use it, or start fresh?",
+      "reads_in": [],
       "skill": "cap-table",
       "step": "0"
     },
@@ -827,6 +853,7 @@
         }
       ],
       "question": "Do these extracted values look right?",
+      "reads_in": [],
       "skill": "cap-table",
       "step": "3"
     },
@@ -867,6 +894,7 @@
         }
       ],
       "question": "What is the value of <field>?",
+      "reads_in": [],
       "skill": "cap-table",
       "step": "3"
     },
@@ -913,6 +941,7 @@
         }
       ],
       "question": "Has [Company] received any IIA (Israel Innovation Authority / OCS) grants?",
+      "reads_in": [],
       "skill": "cap-table",
       "step": "2"
     },
@@ -968,6 +997,7 @@
         }
       ],
       "question": "What is [Company]'s jurisdiction structure?",
+      "reads_in": [],
       "skill": "cap-table",
       "step": "2"
     },
@@ -1006,6 +1036,7 @@
         }
       ],
       "question": "This term needs your confirmation before it is used. What does the document say?",
+      "reads_in": [],
       "skill": "cap-table",
       "step": "3"
     },
@@ -1043,6 +1074,7 @@
         }
       ],
       "question": "Which column holds this field in your export?",
+      "reads_in": [],
       "skill": "cap-table",
       "step": "3"
     },
@@ -1071,6 +1103,7 @@
         }
       ],
       "question": "What is the value of <field> for this block of the spreadsheet?",
+      "reads_in": [],
       "skill": "cap-table",
       "step": "3"
     },
@@ -1106,6 +1139,7 @@
         }
       ],
       "question": "No cap base found in your document(s). How should I proceed?",
+      "reads_in": [],
       "skill": "cap-table",
       "step": "2"
     },
@@ -1150,6 +1184,7 @@
         }
       ],
       "question": "What does the note's 'Company Capitalization' clause define as the conversion denominator?",
+      "reads_in": [],
       "skill": "cap-table",
       "step": "3"
     },
@@ -1185,6 +1220,7 @@
         }
       ],
       "question": "Does accrued interest on the note convert into shares along with principal?",
+      "reads_in": [],
       "skill": "cap-table",
       "step": "3"
     },
@@ -1238,6 +1274,7 @@
         }
       ],
       "question": "What kind of interest does the note carry?",
+      "reads_in": [],
       "skill": "cap-table",
       "step": "3"
     },
@@ -1291,6 +1328,7 @@
         }
       ],
       "question": "If the note reaches maturity before a qualified financing, what happens?",
+      "reads_in": [],
       "skill": "cap-table",
       "step": "3"
     },
@@ -1335,6 +1373,7 @@
         }
       ],
       "question": "What dollar amount triggers the note's automatic conversion (its 'qualified financing' threshold)?",
+      "reads_in": [],
       "skill": "cap-table",
       "step": "3"
     },
@@ -1370,6 +1409,7 @@
         }
       ],
       "question": "Does the company have an employee option pool?",
+      "reads_in": [],
       "skill": "cap-table",
       "step": "4"
     },
@@ -1424,6 +1464,7 @@
         }
       ],
       "question": "What does your pool target percentage measure?",
+      "reads_in": [],
       "skill": "cap-table",
       "step": "5"
     },
@@ -1481,6 +1522,7 @@
         "custom": "Which computed measure does your document's pool basis match?",
         "excluding": "Your pool basis excludes converting securities, which is not modelled. How should I proceed?"
       },
+      "reads_in": [],
       "skill": "cap-table",
       "step": "5"
     },
@@ -1535,6 +1577,7 @@
         }
       ],
       "question": "Are you planning to top up your option pool as part of this round?",
+      "reads_in": [],
       "skill": "cap-table",
       "step": "5"
     },
@@ -1570,6 +1613,7 @@
         }
       ],
       "question": "I need one fact to answer this. Can you provide it?",
+      "reads_in": [],
       "skill": "cap-table",
       "step": "5-lookup"
     },
@@ -1614,6 +1658,7 @@
         }
       ],
       "question": "I need per-grant tax-route data to model §102 exposure on the flip — do you have plan type and grant date for each holder's options?",
+      "reads_in": [],
       "skill": "cap-table",
       "step": "5"
     },
@@ -1658,6 +1703,7 @@
         }
       ],
       "question": "Do you know the valuation cap and/or discount on the SAFEs? The spreadsheet shows amounts but not the terms.",
+      "reads_in": [],
       "skill": "cap-table",
       "step": "3"
     },
@@ -1711,6 +1757,7 @@
         }
       ],
       "question": "Which scenarios should I model? (select all that apply)",
+      "reads_in": [],
       "skill": "cap-table",
       "step": "5"
     },
@@ -1880,6 +1927,7 @@
         "sector": "What sector best describes [Company]?",
         "stage": "What stage is [Company] at?"
       },
+      "reads_in": [],
       "skill": "shared",
       "step": "1"
     },
@@ -1910,6 +1958,7 @@
         }
       ],
       "question": "Which company is this for?",
+      "reads_in": [],
       "skill": "shared",
       "step": "1"
     },
@@ -1967,6 +2016,7 @@
         }
       ],
       "question": "Which stage exactly?",
+      "reads_in": [],
       "skill": "shared",
       "step": "1"
     },
@@ -2016,6 +2066,7 @@
         "pdf_unreadable": "This PDF could not be read. Can you send another export?",
         "wrong_file_type": "This file could not be read as a deck. Can you send it again?"
       },
+      "reads_in": [],
       "skill": "deck-review",
       "step": "2"
     },
@@ -2051,6 +2102,7 @@
         }
       ],
       "question": "Which file is the primary deck?",
+      "reads_in": [],
       "skill": "deck-review",
       "step": "2"
     },
@@ -2096,6 +2148,7 @@
         "current_balance": "What is the current cash balance?",
         "monthly_burn": "What is the monthly burn rate?"
       },
+      "reads_in": [],
       "skill": "financial-model-review",
       "step": "1"
     },
@@ -2122,6 +2175,7 @@
         }
       ],
       "question": "How much cash is in the bank now, and as of which date?",
+      "reads_in": [],
       "skill": "financial-model-review",
       "step": "12"
     },
@@ -2175,8 +2229,42 @@
         }
       ],
       "question": "Do the extracted values look right?",
+      "reads_in": [],
       "skill": "financial-model-review",
       "step": "3.6"
+    },
+    "host_context": {
+      "asked_check": "none",
+      "id": "host_context",
+      "instances": null,
+      "kind": "fixed",
+      "mandatory": false,
+      "modes": [
+        "full",
+        "quick_check",
+        "fast_assess",
+        "concise",
+        "extraction_only"
+      ],
+      "multi": false,
+      "no_ask_default": null,
+      "options": [
+        {
+          "hidden": true,
+          "id": "supplied",
+          "label": "Context supplied with the request",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": true,
+          "terminal": true
+        }
+      ],
+      "question": "Is there context about the company supplied with the request?",
+      "reads_in": [
+        "ic-sim"
+      ],
+      "skill": "shared",
+      "step": "1"
     },
     "ic_decline_confirmation": {
       "asked_check": "since_invocation",
@@ -2210,6 +2298,7 @@
         }
       ],
       "question": "The scored result comes out to a Decline — want me to go ahead and finish the full write-up?",
+      "reads_in": [],
       "skill": "ic-sim",
       "step": "8.5"
     },
@@ -2242,9 +2331,19 @@
           "pre_answerable": true,
           "takes_value": true,
           "terminal": true
+        },
+        {
+          "hidden": true,
+          "id": "host_profile",
+          "label": "A fund profile supplied with the request",
+          "only_skills": null,
+          "pre_answerable": true,
+          "takes_value": true,
+          "terminal": true
         }
       ],
       "question": "Should I simulate a generic fund, or research a real one?",
+      "reads_in": [],
       "skill": "ic-sim",
       "step": "1"
     },
@@ -2280,6 +2379,7 @@
         }
       ],
       "question": "Which mode should I run?",
+      "reads_in": [],
       "skill": "ic-sim",
       "step": "1"
     },
@@ -2317,6 +2417,7 @@
         }
       ],
       "question": "Which value is wrong or missing?",
+      "reads_in": [],
       "skill": "market-sizing",
       "step": "3"
     },
@@ -2352,6 +2453,7 @@
         }
       ],
       "question": "What exchange rate should the sizing use, and from what source?",
+      "reads_in": [],
       "skill": "market-sizing",
       "step": "3"
     },
@@ -2398,6 +2500,7 @@
         }
       ],
       "question": "Is this figure per month, per quarter or per year?",
+      "reads_in": [],
       "skill": "market-sizing",
       "step": "5"
     },
@@ -2442,6 +2545,7 @@
         }
       ],
       "question": "I'll size this <top-down / bottom-up / both top-down and bottom-up> — does this approach look right?",
+      "reads_in": [],
       "skill": "market-sizing",
       "step": "3"
     },
@@ -2486,6 +2590,7 @@
         }
       ],
       "question": "Which approach do you prefer?",
+      "reads_in": [],
       "skill": "market-sizing",
       "step": "3"
     },
@@ -2523,6 +2628,7 @@
         }
       ],
       "question": "Did you mean this value as given, or as that many percent?",
+      "reads_in": [],
       "skill": "market-sizing",
       "step": "5.5"
     },
@@ -2558,6 +2664,7 @@
         }
       ],
       "question": "Deliver with the challenges shown, or revise?",
+      "reads_in": [],
       "skill": "market-sizing",
       "step": "6d"
     },
@@ -2584,6 +2691,7 @@
         }
       ],
       "question": "Which changes should I make?",
+      "reads_in": [],
       "skill": "market-sizing",
       "step": "6d"
     },
@@ -2612,6 +2720,7 @@
         }
       ],
       "question": "Your materials state more than one figure for this input. Which one should the sizing use?",
+      "reads_in": [],
       "skill": "market-sizing",
       "step": "3"
     },
@@ -2647,6 +2756,7 @@
         }
       ],
       "question": "Where are the documents you shared? The review reads them first.",
+      "reads_in": [],
       "skill": "market-sizing",
       "step": "6c"
     },
@@ -2691,6 +2801,7 @@
         }
       ],
       "question": "This looks out of scope. What should I do?",
+      "reads_in": [],
       "skill": "deck-review",
       "step": "3"
     },
@@ -2707,6 +2818,7 @@
       "no_ask_default": null,
       "options": [],
       "question": "Which stage is this deck?",
+      "reads_in": [],
       "skill": "deck-review",
       "step": "3"
     },
@@ -2751,6 +2863,7 @@
         }
       ],
       "question": "Does this stage detection look right?",
+      "reads_in": [],
       "skill": "deck-review",
       "step": "3"
     }
@@ -2776,7 +2889,7 @@
     "`open` prints `\"applied\": \"pre_answer\"` for a question the request resolved, whether by an answer line or by a no-ask default; `applied_by` says which and `applied_answers` gives the answer.",
     "`FS_HOST_WAIT <gate>` (only with `FS_HOST_NO_ASK`) stops the run `waiting` at that question even though it has a default; an answer line for the same question wins. It is refused on a question asked once per item found at run time.",
     "`FS_HOST_DERIVE <gate>` (only with `FS_HOST_NO_ASK`) lets the run take that answer from the materials and say where it found it: the answer is listed as `DERIVED:<gate>` with its value and source in `gates[].current`. It covers the company's name, sector and geography and competitive-positioning's product questions; never the stage. The source is the run's own statement; it is not checked against the materials. A later resume's answer line replaces a derived answer, except a company basic once the company's context has been written.",
-    "Under `FS_HOST_NO_ASK` a question asking for a file or a path waits with `INPUT_NEEDED`; a run stopped by a failure it cannot recover from is `refused` with a code naming it (`HANDOFF_FAILED`, `PRODUCER_FAILED`, `COACHING_FAILED`, `CONTEXT_FAILED`, `INPUT_UNREADABLE`), never left `running`. `REQUEST_DECLINED` means the request's own answer line asked to stop; `FOUNDER_DECLINED` means a person chose it.",
+    "Under `FS_HOST_NO_ASK` a question asking for a file or a path waits with `INPUT_NEEDED`; a run stopped by a failure it cannot recover from is `refused` with a code naming it (`HANDOFF_FAILED`, `PRODUCER_FAILED`, `COACHING_FAILED`, `CONTEXT_FAILED`, `INPUT_UNREADABLE`, `INPUT_REJECTED`), never left `running`. `REQUEST_DECLINED` means the request's own answer line asked to stop; `FOUNDER_DECLINED` means a person chose it.",
     "A request line the run never used (its question was not reached or no longer applied, its mode does not ask it, it was already answered, or an FS_HOST_WAIT / FS_HOST_DERIVE line found nothing to act on) is listed in `notices` as `PRE_ANSWER_IGNORED` with a `reason`, at the latest once the run is `complete` or `refused`.",
     "`run_dir_shell` is null until the run is bound at the end of its first step, so a run waiting there has none. `run_status_path_host` is set only on Cowork on your computer once the outputs folder's path is known; elsewhere read `<artifacts root>/runs/<id>/run_status.json`.",
     "`disclosures` lists `DEFAULT_TAKEN:<gate>` for an answer recorded as a default, `PRE_ANSWERED:<gate>` for one applied from a request line instead of being asked, and `MATERIALS_STATED:<gate>` for a question the run, under `FS_HOST_NO_ASK`, recorded not applicable because it says the materials answer it. `PRE_ANSWERED:out_of_scope_choice` means the request chose to review a deck outside the skill's stage scope, best-effort; the report and page tell the founder so.",
@@ -2798,7 +2911,12 @@
     "`ct_lane3_blocker.<BLOCK.FIELD>` pre-answers (`FS_HOST_VALUE ct_lane3_blocker.0.<field>=stated | <value>`) are applied by the freeform emit, and recorded only when the mapper accepts the value; the block index is the detection's own order, so a host cannot know it in advance on a sheet with several blocks of one kind.",
     "`ct_iia_grants` closes itself (not applicable, by script) once `ct_jurisdiction` is outside Israel. `ct_existing_review` is owed only when the review dir holds another run's report. `ct_founder_fact`, `ct_lane1_counsel_review` and `ct_lane2_column_mapping` take `not_sure`; a founder fact asked again replaces its earlier answer.",
     "A run dir's current run is the run whose `run_ref.json` there was bound last (`bound_seq`, stamped by every `bind`, a re-bind of the same run included, so a resume that re-binds takes the folder back). In a run dir that carries any ref, a step named with another run's id exits 1 and writes nothing: `RUN_NOT_BOUND` when that run has no ref there (before, a producer of market sizing, financial model review, competitive positioning or IC simulation ran ungated with exit 0), `RUN_SUPERSEDED` when a later run was bound there after it (`current_run` names the run that holds the folder; `superseded_by` is the status-side mirror). A step that reads a run file carrying another run's id exits 1 `ARTIFACT_OTHER_RUN` naming each file (`files`) and the step to re-run (`fix`). A run dir with no ref is unchanged.",
-    "deck-review's Step 5 prompt generator (`dr_dispatch_prompt.py`) also prints `SLIDE_REVIEWS_MISSING` (exit 1) before any CHECKLIST is dispatched, while this run's slide reviews are not written: its `fix` is to run Step 4's pipe, then the generator again, never to dispatch a CHECKLIST whose prompt was not printed. In a run dir that carries any ref it also refuses `ARTIFACT_OTHER_RUN` when a file the grader reads (`slide_reviews.json`, `stage_profile.json`, `deck_inventory.json`, `reconciliation.json`) is another run's."
+    "deck-review's Step 5 prompt generator (`dr_dispatch_prompt.py`) also prints `SLIDE_REVIEWS_MISSING` (exit 1) before any CHECKLIST is dispatched, while this run's slide reviews are not written: its `fix` is to run Step 4's pipe, then the generator again, never to dispatch a CHECKLIST whose prompt was not printed. In a run dir that carries any ref it also refuses `ARTIFACT_OTHER_RUN` when a file the grader reads (`slide_reviews.json`, `stage_profile.json`, `deck_inventory.json`, `reconciliation.json`) is another run's.",
+    "An `FS_HOST_VALUE` value (the characters after `\" | \"` to the end of the line, trailing whitespace removed) is at most 32,768 characters (`request_values.value_max_chars`): a longer line is `PRE_ANSWER_INVALID` at `start`, and the recorder refuses a longer `--value` (`VALUE_TOO_LONG`). Send a JSON value on one line with compact separators and every non-ASCII character escaped (`\\uXXXX`): a raw line or paragraph separator splits the line. Copy each line byte for byte.",
+    "A hidden option that only a request line can choose (`ic_fund_mode=host_profile`, `host_context=supplied`) is refused to the recorder's `answer`, `default` and a question form (`REQUEST_ONLY_OPTION`). Its value is checked at Step 1 when the question is opened; a value that cannot be read leaves the question `waiting` with `PRE_ANSWER_MALFORMED`, and the cause is the `reason` of the latest `PRE_ANSWER_NOT_APPLIED` notice for that question (earlier notices stay listed). Correct the line and resume with the same `FS_HOST_RUN_ID`. An optional `FS_HOST_NOTE <gate>=<sha256>` (64 lowercase hex, the sha256 of the value as UTF-8) is compared with the value: a mismatch, or a note that is not a sha256, is malformed. Once the question is `answered`, `gates[].current.evidence.sha256` is the sha256 of the value the run took: compare it with your own, and on a mismatch do not use the run.",
+    "`run_status.py check --skill <skill> [--as-of YYYY-MM-DD]` reads a request on stdin exactly as `start` does and writes nothing: exit 0 the request would be accepted, 1 `start` would refuse it (`PRE_ANSWER_INVALID`), 4 (`exit_codes.check_would_wait`) a value it carries would wait at its question, 2 usage. Its `values` give a verdict per line: `applies`, `would_wait` (with `cause`), `not_used_by_skill`, or `not_checked_here` for a check that needs the run (never a failure). `--as-of` stands for the run's start date (default today, UTC).",
+    "ic-sim's `ic_fund_mode=host_profile` takes a fund profile supplied with the request, as one line of JSON, in place of a researched one (`request_values.ic_fund_profile` lists its keys and caps). `gates[].current.value` is that JSON for `host_profile` and a fund name for `specific`: branch on `answer_id`. Problems found when the profile is built (roles, portfolio row keys, a person's page, check-size numbers) end the run `refused` with `INPUT_REJECTED`; start a new run with a corrected line. `disclosures` then lists `FUND_PROFILE_SUPPLIED`.",
+    "`host_context=supplied` carries context about the company supplied with the request: a JSON array of `{fact, source, date}` (`request_values.host_context` lists the caps and the causes an item is dropped for). Every skill accepts the line; only the skills in a gate's `reads_in` use it (ic-sim), and the others list it as `PRE_ANSWER_IGNORED` with reason `not_used_by_skill`. Founder context never carries it. The items are third-party to the analysis and never the founder's statements, whatever the source label says. An item that breaks a rule is dropped and the rest are used: `notices` lists `HOST_CONTEXT_ITEMS_DROPPED` with each dropped item's 1-based `index` and `cause` and `lines: []`, and `disclosures` lists `HOST_CONTEXT_SUPPLIED` (and `HOST_CONTEXT_ITEMS_DROPPED`). The run's outputs and that notice never carry a dropped item; `gates.json`, `gates[].current.value`, `history[].raw`, `resume_prompt` and the `lines` of `PRE_ANSWER_IGNORED` and `PRE_ANSWER_NOT_APPLIED` notices keep the request line as it was sent."
   ],
   "pages_after_coaching": {
     "cap-table": [],
@@ -2849,7 +2967,9 @@
     "NO_ASK_DEFAULT",
     "NO_ASK_NOT_APPLICABLE",
     "DERIVE_NOT_AUTHORIZED",
-    "RUN_SUPERSEDED"
+    "RUN_SUPERSEDED",
+    "REQUEST_ONLY_OPTION",
+    "VALUE_TOO_LONG"
   ],
   "request_tokens": {
     "answer": "FS_HOST_ANSWER <gate>[.<instance>]=<option_id>",
@@ -2859,6 +2979,78 @@
     "run_id": "FS_HOST_RUN_ID=<run_id>",
     "value": "FS_HOST_VALUE <gate>[.<instance>]=<option_id> | <value>",
     "wait": "FS_HOST_WAIT <gate>[.<instance>]"
+  },
+  "request_values": {
+    "check": {
+      "command": "run_status.py check --skill <skill> [--as-of YYYY-MM-DD] (the request's lines on stdin)",
+      "exit_codes": {
+        "accepted": 0,
+        "start_would_refuse": 1,
+        "usage": 2,
+        "would_wait": 4
+      },
+      "verdicts": [
+        "applies",
+        "would_wait",
+        "not_used_by_skill",
+        "not_checked_here"
+      ]
+    },
+    "host_context": {
+      "date_grace_days": 1,
+      "drop_causes": [
+        "item_shape",
+        "fact_length",
+        "source_length",
+        "date_invalid",
+        "date_after_run_start",
+        "control_characters",
+        "header_text",
+        "person_detail"
+      ],
+      "fact_max_chars": 300,
+      "gate": "host_context",
+      "item_keys": [
+        "fact",
+        "source",
+        "date"
+      ],
+      "max_fact_chars_total": 4096,
+      "max_items": 60,
+      "max_value_chars": 16384,
+      "option": "supplied",
+      "source_max_chars": 80
+    },
+    "ic_fund_profile": {
+      "gate": "ic_fund_mode",
+      "keys": [
+        "archetypes",
+        "check_size_range",
+        "fund_name",
+        "metadata",
+        "mode",
+        "portfolio",
+        "sources",
+        "stage_focus",
+        "thesis_areas",
+        "validation"
+      ],
+      "list_max_items": {
+        "archetypes[].focus_areas": 20,
+        "portfolio": 200,
+        "sources": 20,
+        "stage_focus": 20,
+        "thesis_areas": 20
+      },
+      "option": "host_profile",
+      "string_max_chars": 200,
+      "string_max_chars_at": {
+        "check_size_range.currency": 8,
+        "fund_name": 120,
+        "sources[].url": 512
+      }
+    },
+    "value_max_chars": 32768
   },
   "resolutions": [
     "answered",
@@ -2951,7 +3143,8 @@
       "PRODUCER_FAILED",
       "COACHING_FAILED",
       "CONTEXT_FAILED",
-      "INPUT_UNREADABLE"
+      "INPUT_UNREADABLE",
+      "INPUT_REJECTED"
     ],
     "running": [
       "RUNNING"
@@ -2963,7 +3156,8 @@
       "OUT_OF_SCOPE_UNANSWERED",
       "AUTO_SATISFY_NOT_ALLOWED",
       "PRE_ANSWER_UNLISTED",
-      "INPUT_NEEDED"
+      "INPUT_NEEDED",
+      "PRE_ANSWER_MALFORMED"
     ]
   },
   "statuses": [

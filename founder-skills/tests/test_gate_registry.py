@@ -55,8 +55,8 @@ def _load_skill_module(skill: str, name: str) -> Any:
 # --- shape -----------------------------------------------------------------------------------------
 
 
-def test_there_are_60_gates() -> None:
-    assert len(GATES) == 60
+def test_there_are_61_gates() -> None:
+    assert len(GATES) == 61
 
 
 def test_only_listed_gates_let_the_materials_replace_a_no_ask_default() -> None:
@@ -623,6 +623,9 @@ NEW_WORDING = {
     ("ct_rule_lookup_fact", "question"),
     ("ct_rule_lookup_fact", "provide"),
     ("ct_rule_lookup_fact", "unknown"),
+    # Never asked: a host reads it in the contract; only a request line answers it.
+    ("host_context", "question"),
+    ("ic_fund_mode", "host_profile"),
 }
 
 

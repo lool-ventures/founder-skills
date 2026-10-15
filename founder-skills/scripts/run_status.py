@@ -11,6 +11,7 @@
     show          --run-id R --artifacts-root A
     deliverables  --run-id R --artifacts-root A --final
     fail          --run-id R --artifacts-root A --code C --reason TEXT
+    check         --skill S [--as-of YYYY-MM-DD]   (host request lines on stdin; writes nothing)
 
 `start` takes a run id from an `FS_HOST_RUN_ID=` line or mints one, validates every `FS_HOST_` line
 against the gate registry before writing anything, and creates `runs/<id>/run_status.json` and the gate
@@ -30,14 +31,21 @@ is still open (`blocked_by_gate`); 12 the same, on a request that said not to as
 `fail` ends a run that stopped on a failure it cannot recover from (`refused`, with a code from a closed list);
 it is named only by the rule for a request that says not to ask (FS_HOST_NO_ASK).
 It is refused (`RUN_WAITING`) while a question is open: a run waiting for an answer is never ended by it.
+
+`check` is a dry run of `start` and Step 1's checks for a request, before any run exists: the same parsing
+`start` runs, then each value's own check where it reads only the request (`_gates.dry_check`). It writes
+nothing, takes no lock and mints no id. Exit 0 the request would be accepted; 1 `start` would refuse it; 4 a
+value it carries would wait at its question; 2 usage.
 """
 
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import os
 import sys
+import time
 from typing import Any, NoReturn
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -559,6 +567,30 @@ def cmd_fail(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_check(args: argparse.Namespace) -> int:
+    gates = _require_gates(args.pretty)
+    if args.skill not in gates.SKILLS:
+        _unreachable("SKILL_UNKNOWN", f"--skill must be one of {', '.join(gates.SKILLS)}", args.pretty)
+    as_of = args.as_of
+    if as_of is None:
+        as_of = time.strftime("%Y-%m-%d", time.gmtime())
+    else:
+        try:
+            if datetime.date.fromisoformat(as_of).isoformat() != as_of:
+                raise ValueError(as_of)
+        except ValueError:
+            _exit(
+                2,
+                {"status": "error", "code": "USAGE", "message": "--as-of must be YYYY-MM-DD"},
+                "Error: --as-of must be YYYY-MM-DD",
+                args.pretty,
+            )
+    text = sys.stdin.read() if not sys.stdin.isatty() else ""
+    code, payload = gates.dry_check(text, args.skill, as_of)
+    sys.stdout.write(json.dumps(payload, indent=2 if args.pretty else None, ensure_ascii=False) + "\n")
+    return int(code)
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description="A run's status file: start, bind, finish, show, deliverables, fail")
     sub = p.add_subparsers(dest="command", required=True)
@@ -606,6 +638,12 @@ def main() -> int:
     sp.add_argument("--code", required=True)
     sp.add_argument("--reason", required=True)
     sp.set_defaults(func=cmd_fail)
+
+    sp = sub.add_parser("check", help="a dry run of start's checks for a request; writes nothing")
+    sp.add_argument("--skill", required=True)
+    sp.add_argument("--as-of", default=None, help="the run's start date to judge dates against (default today, UTC)")
+    sp.add_argument("--pretty", action="store_true")
+    sp.set_defaults(func=cmd_check)
 
     args = p.parse_args()
     pretty = getattr(args, "pretty", False)

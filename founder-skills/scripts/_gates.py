@@ -42,6 +42,7 @@ if _HERE not in sys.path:
     sys.path.append(_HERE)
 import _form_reply  # noqa: E402
 import _founder_text  # noqa: E402
+import _host_text  # noqa: E402
 import _run_status  # noqa: E402
 
 REGISTRY_VERSION = 1
@@ -137,6 +138,8 @@ REJECTION_CODES = (
     "NO_ASK_NOT_APPLICABLE",
     "DERIVE_NOT_AUTHORIZED",
     "RUN_SUPERSEDED",
+    "REQUEST_ONLY_OPTION",
+    "VALUE_TOO_LONG",
 )
 # Exit 2: the run or the registry cannot be reached.
 UNREACHABLE_CODES = (
@@ -156,6 +159,8 @@ EXIT_CODES = {
     "waiting": 10,
     "not_owed": 11,
     "waiting_no_ask": 12,
+    # `run_status.py check` only: start would accept the request, but a value it carries would wait at its question.
+    "check_would_wait": 4,
 }
 NO_ASK_EXIT = 12
 
@@ -163,6 +168,8 @@ GATE_ID_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 INSTANCE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.+-]{0,127}$")
 OPTION_ID_RE = re.compile(r"^[a-z0-9_+.-]+$")
 NOTE_MAX = 2000
+# The longest value an `FS_HOST_VALUE` line may carry: the characters after `" | "` to the end of the stripped line.
+VALUE_MAX = 32_768
 
 REQUEST_TOKENS = {
     "run_id": "FS_HOST_RUN_ID=<run_id>",
@@ -284,8 +291,8 @@ CONTRACT_NOTES = (
     "line replaces a derived answer, except a company basic once the company's context has been written.",
     "Under `FS_HOST_NO_ASK` a question asking for a file or a path waits with `INPUT_NEEDED`; a run stopped by a "
     "failure it cannot recover from is `refused` with a code naming it (`HANDOFF_FAILED`, `PRODUCER_FAILED`, "
-    "`COACHING_FAILED`, `CONTEXT_FAILED`, `INPUT_UNREADABLE`), never left `running`. `REQUEST_DECLINED` means the "
-    "request's own answer line asked to stop; `FOUNDER_DECLINED` means a person chose it.",
+    "`COACHING_FAILED`, `CONTEXT_FAILED`, `INPUT_UNREADABLE`, `INPUT_REJECTED`), never left `running`. "
+    "`REQUEST_DECLINED` means the request's own answer line asked to stop; `FOUNDER_DECLINED` means a person chose it.",
     "A request line the run never used (its question was not reached or no longer applied, its mode does not ask "
     "it, it was already answered, or an FS_HOST_WAIT / FS_HOST_DERIVE line found nothing to act on) is listed in "
     "`notices` as `PRE_ANSWER_IGNORED` with a `reason`, at the latest once the run is `complete` or `refused`.",
@@ -390,6 +397,40 @@ CONTRACT_NOTES = (
     "4's pipe, then the generator again, never to dispatch a CHECKLIST whose prompt was not printed. In a run dir "
     "that carries any ref it also refuses `ARTIFACT_OTHER_RUN` when a file the grader reads (`slide_reviews.json`, "
     "`stage_profile.json`, `deck_inventory.json`, `reconciliation.json`) is another run's.",
+    'An `FS_HOST_VALUE` value (the characters after `" | "` to the end of the line, trailing whitespace removed) is '
+    "at most 32,768 characters (`request_values.value_max_chars`): a longer line is `PRE_ANSWER_INVALID` at "
+    "`start`, and the recorder refuses a longer `--value` (`VALUE_TOO_LONG`). Send a JSON value on one line with "
+    "compact separators and every non-ASCII character escaped (`\\uXXXX`): a raw line or paragraph separator splits "
+    "the line. Copy each line byte for byte.",
+    "A hidden option that only a request line can choose (`ic_fund_mode=host_profile`, `host_context=supplied`) is "
+    "refused to the recorder's `answer`, `default` and a question form (`REQUEST_ONLY_OPTION`). Its value is checked "
+    "at Step 1 when the question is opened; a value that cannot be read leaves the question `waiting` with "
+    "`PRE_ANSWER_MALFORMED`, and the cause is the `reason` of the latest `PRE_ANSWER_NOT_APPLIED` notice for that "
+    "question (earlier notices stay listed). Correct the line and resume with the same `FS_HOST_RUN_ID`. An optional "
+    "`FS_HOST_NOTE <gate>=<sha256>` (64 lowercase hex, the sha256 of the value as UTF-8) is compared with the value: "
+    "a mismatch, or a note that is not a sha256, is malformed. Once the question is `answered`, "
+    "`gates[].current.evidence.sha256` is the sha256 of the value the run took: compare it with your own, and on a "
+    "mismatch do not use the run.",
+    "`run_status.py check --skill <skill> [--as-of YYYY-MM-DD]` reads a request on stdin exactly as `start` does and "
+    "writes nothing: exit 0 the request would be accepted, 1 `start` would refuse it (`PRE_ANSWER_INVALID`), 4 "
+    "(`exit_codes.check_would_wait`) a value it carries would wait at its question, 2 usage. Its `values` give a "
+    "verdict per line: `applies`, `would_wait` (with `cause`), `not_used_by_skill`, or `not_checked_here` for a "
+    "check that needs the run (never a failure). `--as-of` stands for the run's start date (default today, UTC).",
+    "ic-sim's `ic_fund_mode=host_profile` takes a fund profile supplied with the request, as one line of JSON, in "
+    "place of a researched one (`request_values.ic_fund_profile` lists its keys and caps). `gates[].current.value` "
+    "is that JSON for `host_profile` and a fund name for `specific`: branch on `answer_id`. Problems found when the "
+    "profile is built (roles, portfolio row keys, a person's page, check-size numbers) end the run `refused` with "
+    "`INPUT_REJECTED`; start a new run with a corrected line. `disclosures` then lists `FUND_PROFILE_SUPPLIED`.",
+    "`host_context=supplied` carries context about the company supplied with the request: a JSON array of "
+    "`{fact, source, date}` (`request_values.host_context` lists the caps and the causes an item is dropped for). "
+    "Every skill accepts the line; only the skills in a gate's `reads_in` use it (ic-sim), and the others list it "
+    "as `PRE_ANSWER_IGNORED` with reason `not_used_by_skill`. Founder context never carries it. The items are "
+    "third-party to the analysis and never the founder's statements, whatever the source label says. An item that "
+    "breaks a rule is dropped and the rest are used: `notices` lists `HOST_CONTEXT_ITEMS_DROPPED` with each "
+    "dropped item's 1-based `index` and `cause` and `lines: []`, and `disclosures` lists `HOST_CONTEXT_SUPPLIED` "
+    "(and `HOST_CONTEXT_ITEMS_DROPPED`). The run's outputs and that notice never carry a dropped item; "
+    "`gates.json`, `gates[].current.value`, `history[].raw`, `resume_prompt` and the `lines` of "
+    "`PRE_ANSWER_IGNORED` and `PRE_ANSWER_NOT_APPLIED` notices keep the request line as it was sent.",
 )
 
 
@@ -452,7 +493,10 @@ def _o(
     declines: bool = False,
     effects: dict[str, tuple[str, ...]] | None = None,
     only_skills: tuple[str, ...] | None = None,
+    request_only: bool = False,
 ) -> dict[str, Any]:
+    """`request_only`: only a request line may record the option (`REQUEST_ONLY_OPTION` otherwise); its value is
+    the request's own, checked by a filesystem-free predicate (`DRY_REQUIRES`)."""
     return {
         "id": id,
         "label": label,
@@ -465,6 +509,7 @@ def _o(
         "declines": declines,
         "effects": effects,
         "only_skills": only_skills,
+        "request_only": request_only,
     }
 
 
@@ -502,6 +547,43 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": None,
+        "reads_in": (),
+    },
+    # Context about the company supplied with the request: dated, sourced facts, one line of JSON. Registered
+    # for every skill so the line never refuses a run; only the skills in `reads_in` use it, the others list it
+    # as `not_used_by_skill`. Never asked: its one option is the request's own.
+    "host_context": {
+        "skill": "shared",
+        "step": "1",
+        "modes": _ALL_MODES,
+        "kind": "fixed",
+        "question": "Is there context about the company supplied with the request?",
+        "form_label": "Context supplied with the request",
+        "instances": None,
+        "multi": False,
+        "options": (
+            _o(
+                "supplied",
+                "Context supplied with the request",
+                shown=False,
+                value=True,
+                request_only=True,
+                requires="host_context_parses",
+                discloses="HOST_CONTEXT_SUPPLIED",
+            ),
+        ),
+        "option_source": None,
+        "option_variants": None,
+        "owed": "host_context_requested",
+        "asked_check": "none",
+        "writer": "record_gate_answer.py",
+        "binds": None,
+        "no_ask_default": None,
+        "defaults": _STATED,
+        "reopens_complete": False,
+        "mandatory": False,
+        "catalog_row": None,
+        "reads_in": ("ic-sim",),
     },
     "ctx_basics": {
         "skill": "shared",
@@ -561,6 +643,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": None,
+        "reads_in": (),
     },
     "ctx_stage_detail": {
         "skill": "shared",
@@ -588,6 +671,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": None,
+        "reads_in": (),
     },
     # --- deck-review ---------------------------------------------------------------------------
     "dr_primary_deck": {
@@ -614,6 +698,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": None,
+        "reads_in": (),
     },
     "stage_confirmation": {
         "skill": "deck-review",
@@ -644,6 +729,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": None,
+        "reads_in": (),
     },
     "out_of_scope_choice": {
         "skill": "deck-review",
@@ -682,6 +768,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": None,
+        "reads_in": (),
     },
     "stage_choice": {
         "skill": "deck-review",
@@ -704,6 +791,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": None,
+        "reads_in": (),
     },
     "dr_input_request": {
         "skill": "deck-review",
@@ -735,6 +823,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": None,
+        "reads_in": (),
     },
     # --- market-sizing -------------------------------------------------------------------------
     "ms_two_figures": {
@@ -758,6 +847,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": None,
+        "reads_in": (),
     },
     "ms_methodology": {
         "skill": "market-sizing",
@@ -792,6 +882,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": None,
+        "reads_in": (),
     },
     "ms_methodology_change": {
         "skill": "market-sizing",
@@ -818,6 +909,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": None,
+        "reads_in": (),
     },
     "ms_correct_data": {
         "skill": "market-sizing",
@@ -843,6 +935,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": None,
+        "reads_in": (),
     },
     "ms_fx_rate": {
         "skill": "market-sizing",
@@ -868,6 +961,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": None,
+        "reads_in": (),
     },
     "ms_input_period": {
         "skill": "market-sizing",
@@ -894,6 +988,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": None,
+        "reads_in": (),
     },
     "ms_pct_scale": {
         "skill": "market-sizing",
@@ -919,6 +1014,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": None,
+        "reads_in": (),
     },
     "ms_revision": {
         "skill": "market-sizing",
@@ -950,6 +1046,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": None,
+        "reads_in": (),
     },
     "ms_revision_changes": {
         "skill": "market-sizing",
@@ -972,6 +1069,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": None,
+        "reads_in": (),
     },
     "ms_upload_path": {
         "skill": "market-sizing",
@@ -997,6 +1095,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": None,
+        "reads_in": (),
     },
     # --- financial-model-review ----------------------------------------------------------------
     "fmr_cash_basics": {
@@ -1027,6 +1126,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": None,
+        "reads_in": (),
     },
     "fmr_extracted_values": {
         "skill": "financial-model-review",
@@ -1064,6 +1164,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": None,
+        "reads_in": (),
     },
     "fmr_cash_followup": {
         "skill": "financial-model-review",
@@ -1096,6 +1197,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": True,
         "mandatory": False,
         "catalog_row": None,
+        "reads_in": (),
     },
     # --- ic-sim ----------------------------------------------------------------------------------
     "ic_mode": {
@@ -1122,6 +1224,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": None,
+        "reads_in": (),
     },
     "ic_fund_mode": {
         "skill": "ic-sim",
@@ -1135,6 +1238,16 @@ GATES: dict[str, dict[str, Any]] = {
         "options": (
             _o("generic", "Generic fund"),
             _o("specific", "A specific fund — I'll name it", value=True),
+            # The profile itself, as one line of JSON, sent with the request; never shown, never the model's.
+            _o(
+                "host_profile",
+                "A fund profile supplied with the request",
+                shown=False,
+                value=True,
+                request_only=True,
+                requires="ic_fund_profile_parses",
+                discloses="FUND_PROFILE_SUPPLIED",
+            ),
         ),
         "option_source": None,
         "option_variants": None,
@@ -1147,6 +1260,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": None,
+        "reads_in": (),
     },
     "ic_decline_confirmation": {
         "skill": "ic-sim",
@@ -1172,6 +1286,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": None,
+        "reads_in": (),
     },
     # --- competitive-positioning -----------------------------------------------------------------
     "cp_product_profile": {
@@ -1202,6 +1317,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": None,
+        "reads_in": (),
     },
     # Whether today's position is ranked beside a planned one. Recorded not-applicable, with the words, when
     # the materials say it; the profile's `product_availability` must then match an answer.
@@ -1233,6 +1349,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": None,
+        "reads_in": (),
     },
     "cp_gate1_landscape": {
         "skill": "competitive-positioning",
@@ -1263,6 +1380,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": None,
+        "reads_in": (),
     },
     "cp_research_additions": {
         "skill": "competitive-positioning",
@@ -1295,6 +1413,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": None,
+        "reads_in": (),
     },
     "cp_research_pick": {
         "skill": "competitive-positioning",
@@ -1317,6 +1436,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": None,
+        "reads_in": (),
     },
     "cp_gate2_axes": {
         "skill": "competitive-positioning",
@@ -1348,6 +1468,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": None,
+        "reads_in": (),
     },
     "cp_scoring_basis": {
         "skill": "competitive-positioning",
@@ -1374,6 +1495,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": None,
+        "reads_in": (),
     },
     "cp_gate3_position": {
         "skill": "competitive-positioning",
@@ -1408,6 +1530,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": None,
+        "reads_in": (),
     },
     "cp_consolidation_merge": {
         "skill": "competitive-positioning",
@@ -1436,6 +1559,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": None,
+        "reads_in": (),
     },
     "cp_merge_pick": {
         "skill": "competitive-positioning",
@@ -1458,6 +1582,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": None,
+        "reads_in": (),
     },
     "cp_upload_path": {
         "skill": "competitive-positioning",
@@ -1483,6 +1608,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": None,
+        "reads_in": (),
     },
     # --- cap-table -------------------------------------------------------------------------------
     "ct_scenario_selection": {
@@ -1511,6 +1637,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": "Scenario selection",
+        "reads_in": (),
     },
     "ct_option_pool": {
         "skill": "cap-table",
@@ -1536,6 +1663,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": "Option pool",
+        "reads_in": (),
     },
     "ct_cap_base_confirmation": {
         "skill": "cap-table",
@@ -1561,6 +1689,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": True,
         "catalog_row": "Cap-base confirmation",
+        "reads_in": (),
     },
     "ct_no_cap_base_fork": {
         "skill": "cap-table",
@@ -1586,6 +1715,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": True,
         "catalog_row": "No-cap-base fork",
+        "reads_in": (),
     },
     "ct_note_cap_denominator": {
         "skill": "cap-table",
@@ -1618,6 +1748,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": 'Note "Company Capitalization" denominator',
+        "reads_in": (),
     },
     "ct_note_maturity_default": {
         "skill": "cap-table",
@@ -1649,6 +1780,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": "Note maturity default",
+        "reads_in": (),
     },
     "ct_note_qualified_threshold": {
         "skill": "cap-table",
@@ -1681,6 +1813,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": "Qualified-financing threshold",
+        "reads_in": (),
     },
     "ct_existing_review": {
         "skill": "cap-table",
@@ -1710,6 +1843,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": "Existing-review routing",
+        "reads_in": (),
     },
     "ct_pool_topup_intent": {
         "skill": "cap-table",
@@ -1737,6 +1871,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": "Pool top-up intent",
+        "reads_in": (),
     },
     "ct_pool_basis": {
         "skill": "cap-table",
@@ -1769,6 +1904,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": "Pool basis",
+        "reads_in": (),
     },
     "ct_pool_basis_remedy": {
         "skill": "cap-table",
@@ -1800,6 +1936,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": None,
+        "reads_in": (),
     },
     "ct_engagement_mode": {
         "skill": "cap-table",
@@ -1827,6 +1964,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": "Engagement mode",
+        "reads_in": (),
     },
     "ct_jurisdiction": {
         "skill": "cap-table",
@@ -1854,6 +1992,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": "Jurisdiction structure",
+        "reads_in": (),
     },
     "ct_iia_grants": {
         "skill": "cap-table",
@@ -1880,6 +2019,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": "IIA / OCS grants",
+        "reads_in": (),
     },
     "ct_note_interest_type": {
         "skill": "cap-table",
@@ -1911,6 +2051,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": "Interest rate type (note)",
+        "reads_in": (),
     },
     "ct_note_interest_converts": {
         "skill": "cap-table",
@@ -1940,6 +2081,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": "Interest converts to shares (note)",
+        "reads_in": (),
     },
     "ct_safe_terms": {
         "skill": "cap-table",
@@ -1969,6 +2111,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": "SAFE terms",
+        "reads_in": (),
     },
     "ct_s102_grant_route": {
         "skill": "cap-table",
@@ -1998,6 +2141,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": "§102 per-grant tax route",
+        "reads_in": (),
     },
     "ct_docx_tracked_changes": {
         "skill": "cap-table",
@@ -2029,6 +2173,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": None,
+        "reads_in": (),
     },
     "ct_extraction_confirmation": {
         "skill": "cap-table",
@@ -2054,6 +2199,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": None,
+        "reads_in": (),
     },
     "ct_founder_fact": {
         "skill": "cap-table",
@@ -2076,6 +2222,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": None,
+        "reads_in": (),
     },
     "ct_lane1_counsel_review": {
         "skill": "cap-table",
@@ -2098,6 +2245,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": None,
+        "reads_in": (),
     },
     "ct_lane2_column_mapping": {
         "skill": "cap-table",
@@ -2120,6 +2268,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": None,
+        "reads_in": (),
     },
     "ct_lane3_blocker": {
         "skill": "cap-table",
@@ -2142,6 +2291,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": None,
+        "reads_in": (),
     },
     "ct_rule_lookup_fact": {
         "skill": "cap-table",
@@ -2167,6 +2317,7 @@ GATES: dict[str, dict[str, Any]] = {
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": None,
+        "reads_in": (),
     },
 }
 
@@ -2507,7 +2658,17 @@ PREDICATES: dict[str, Callable[[Ctx, dict[str, Any], str | None], bool] | None] 
     # from a quick check once it is bound.
     "fmr_full_review": _pred_always,
     "fmr_no_cash_balance": lambda ctx, g, instance: _fmr_no_cash_balance(ctx),
+    "host_context_requested": lambda ctx, g, instance: _pred_host_context_requested(ctx, g),
 }
+# The owed predicates that confine a shared gate to the skills in its `reads_in`.
+READS_IN_PREDICATES = frozenset({"host_context_requested"})
+
+
+def _pred_host_context_requested(ctx: Ctx, g: dict[str, Any]) -> bool:
+    """Owed only in a skill that reads the context, and only when the request carried a line for it."""
+    if ctx.skill not in g["reads_in"] or ctx.ledger is None:
+        return False
+    return isinstance((ctx.ledger.get("pre_answers") or {}).get("host_context"), dict)
 
 
 _FMR_SCRIPTS = os.path.join(os.path.dirname(_HERE), "skills", "financial-model-review", "scripts")
@@ -3613,12 +3774,185 @@ def _req_fmr_cash(ctx: Ctx, entry: dict[str, Any]) -> dict[str, Any] | None:
     return {"origin": found["origin"], "history_seq": found.get("seq")} if found else None
 
 
+# --- values a request supplies (`request_only` options) -------------------------------------------------
+#
+# Each check reads the pending request line from `ctx.ledger` and nothing else, so `run_status.py check` can run
+# it before a run exists. A value that cannot be read raises REQUIRES_UNMET with `kind="malformed"` and a cause
+# naming WHERE, never the value: the question then waits (`PRE_ANSWER_MALFORMED`) and the cause is the
+# `PRE_ANSWER_NOT_APPLIED` notice's `reason`. Every decoding error is caught: one that escaped would abort the
+# transaction instead of leaving the question waiting.
+
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_VALUE_CONTROL_RE = re.compile("[\x00-\x1f\x7f-\x9f  ]")
+
+# The top-level keys a fund profile supplied with the request may carry: fund_profile.py's FUND_KEYS without
+# `accepted_warnings` (a run decision, not fund data) and `profile_source` (written only by the producer). A copy,
+# since this module never loads a skill script; a test holds it equal.
+FUND_REQUEST_KEYS = frozenset(
+    {
+        "fund_name",
+        "mode",
+        "thesis_areas",
+        "check_size_range",
+        "stage_focus",
+        "archetypes",
+        "portfolio",
+        "sources",
+        "metadata",
+        "validation",
+    }
+)
+FUND_STRING_MAX = 200
+# Longest string at a path (list indices written `[]`); every other string takes FUND_STRING_MAX.
+FUND_STRING_MAX_AT = {"fund_name": 120, "check_size_range.currency": 8, "sources[].url": 512}
+# Longest list at a path.
+FUND_LIST_MAX = {
+    "thesis_areas": 20,
+    "stage_focus": 20,
+    "archetypes[].focus_areas": 20,
+    "portfolio": 200,
+    "sources": 20,
+}
+
+
+class _Malformed(Exception):
+    pass
+
+
+def _pending_line(ctx: Ctx, entry: dict[str, Any]) -> dict[str, Any]:
+    key = entry["gate"] if entry.get("instance") is None else f"{entry['gate']}.{entry['instance']}"
+    pa = ((ctx.ledger or {}).get("pre_answers") or {}).get(key)
+    if not isinstance(pa, dict) or not isinstance(pa.get("value"), str):
+        raise _Malformed("no value was sent with the request")
+    return pa
+
+
+def _check_integrity_note(value: str, note: Any) -> str:
+    """The value's sha256 (UTF-8), checked against an `FS_HOST_NOTE <gate>=<sha256>` line when the request sent
+    one: a copy that changed on the way stops at the question instead of going on altered."""
+    sha = hashlib.sha256(value.encode("utf-8")).hexdigest()
+    if note is None:
+        return sha
+    if not isinstance(note, str) or not _SHA256_RE.match(note):
+        raise _Malformed("the checksum note is not a SHA-256 (64 lowercase hex characters)")
+    if note != sha:
+        raise _Malformed("it did not arrive intact (its checksum does not match the checksum note)")
+    return sha
+
+
+def fund_value_problem(data: Any) -> tuple[str, str] | None:
+    """(kind, cause) for a decoded fund profile that breaks a request rule checked before anything is built, or
+    None. `kind` is `not_object`, `not_allowed`, `too_long` or `invalid_chars`; the cause names where."""
+    if not isinstance(data, dict):
+        return "not_object", "the fund profile is not a JSON object"
+    for key in sorted(str(k) for k in data if k not in FUND_REQUEST_KEYS):
+        return "not_allowed", f'field "{key}" is not allowed in a fund profile'
+    found: list[tuple[str, str]] = []
+
+    def walk(node: Any, path: str, shape: str) -> None:
+        if found:
+            return
+        if isinstance(node, str):
+            limit = FUND_STRING_MAX_AT.get(shape, FUND_STRING_MAX)
+            if _VALUE_CONTROL_RE.search(node):
+                found.append(("invalid_chars", f"{path} contains a control character"))
+            elif len(node) > limit:
+                found.append(("too_long", f"{path} is longer than {limit} characters"))
+        elif isinstance(node, list):
+            most = FUND_LIST_MAX.get(shape)
+            if most is not None and len(node) > most:
+                found.append(("too_long", f"{path} has more than {most} items"))
+                return
+            for i, item in enumerate(node):
+                walk(item, f"{path}[{i}]", f"{shape}[]")
+        elif isinstance(node, dict):
+            for k, v in node.items():
+                walk(v, f"{path}.{k}" if path else str(k), f"{shape}.{k}" if shape else str(k))
+
+    for key in ("metadata", "validation"):
+        data = {k: v for k, v in data.items() if k != key}
+    walk(data, "", "")
+    return found[0] if found else None
+
+
+def _req_fund_profile(ctx: Ctx, entry: dict[str, Any]) -> dict[str, Any]:
+    """`ic_fund_mode=host_profile`: the value is the fund profile as one line of JSON, read and capped here."""
+    try:
+        pa = _pending_line(ctx, entry)
+        value = pa["value"]
+        sha = _check_integrity_note(value, pa.get("note"))
+        try:
+            data = json.loads(value)
+        except ValueError as e:
+            pos = getattr(e, "pos", None)
+            raise _Malformed(
+                "it is not valid JSON" + (f" at character {pos + 1}" if isinstance(pos, int) else "")
+            ) from e
+        problem = fund_value_problem(data)
+        if problem is not None:
+            raise _Malformed(problem[1])
+    except _Malformed as e:
+        raise GateRejection(
+            "REQUIRES_UNMET", f"the fund profile supplied with the request: {e}", kind="malformed"
+        ) from None
+    except Exception:  # noqa: BLE001 -- whatever the value holds, the question waits; it never aborts the write
+        raise GateRejection(
+            "REQUIRES_UNMET", "the fund profile supplied with the request could not be read", kind="malformed"
+        ) from None
+    return {"sha256": sha, "bytes": len(value.encode("utf-8"))}
+
+
+def run_start_date(ctx: Ctx) -> str:
+    """The run's start date (UTC, `YYYY-MM-DD`), from its first invocation; today when the status has none."""
+    invocations = ctx.status.get("invocations")
+    first = invocations[0] if isinstance(invocations, list) and invocations else {}
+    started = first.get("started_at") if isinstance(first, dict) else None
+    if isinstance(started, str) and re.match(r"^\d{4}-\d{2}-\d{2}", started):
+        return started[:10]
+    return time.strftime("%Y-%m-%d", time.gmtime())
+
+
+def _req_host_context(ctx: Ctx, entry: dict[str, Any]) -> dict[str, Any]:
+    """`host_context=supplied`: the value is an array of dated, sourced facts. A malformed whole waits; an item
+    that breaks a rule is dropped by index and cause (`_host_text`), and the rest are used."""
+    from datetime import date  # noqa: PLC0415
+
+    try:
+        pa = _pending_line(ctx, entry)
+        value = pa["value"]
+        sha = _check_integrity_note(value, pa.get("note"))
+        problem = _host_text.value_problem(value)
+        if problem is not None:
+            raise _Malformed(problem)
+        as_of = run_start_date(ctx)
+        kept, dropped = _host_text.filter_items(json.loads(value), date.fromisoformat(as_of))
+    except _Malformed as e:
+        raise GateRejection("REQUIRES_UNMET", f"the context supplied with the request: {e}", kind="malformed") from None
+    except Exception:  # noqa: BLE001 -- whatever the value holds, the question waits; it never aborts the write
+        raise GateRejection(
+            "REQUIRES_UNMET", "the context supplied with the request could not be read", kind="malformed"
+        ) from None
+    return {
+        "sha256": sha,
+        "bytes": len(value.encode("utf-8")),
+        "items_total": len(kept) + len(dropped),
+        "kept": [k["index"] for k in kept],
+        "dropped": dropped,
+        "as_of": as_of,
+    }
+
+
 # `requires` checks on an option. Each reads evidence a script wrote and returns what it found (stored on the
 # answer as `current.evidence`), or nothing when the evidence is missing.
 REQUIRES: dict[str, Callable[[Ctx, dict[str, Any]], dict[str, Any] | bool | None] | None] = {
     "fmr_corrections_audit": _req_fmr_corrections,
     "fmr_cash_audit": _req_fmr_cash,
+    "ic_fund_profile_parses": lambda ctx, entry: _req_fund_profile(ctx, entry),
+    "host_context_parses": lambda ctx, entry: _req_host_context(ctx, entry),
 }
+# The `requires` checks that read nothing but the request's own lines (no run dir, no file): `run_status.py check`
+# runs exactly these before a run exists, and every `request_only` option's check must be one of them.
+DRY_REQUIRES = frozenset({"ic_fund_profile_parses", "host_context_parses"})
 
 
 def _requires_met(ctx: Ctx, option: dict[str, Any], entry: dict[str, Any]) -> dict[str, Any] | None:
@@ -3703,6 +4037,22 @@ def validate_registry(gates: dict[str, dict[str, Any]]) -> list[str]:
                         for t in targets
                         if t in gates and gates[t]["instances"] is not None
                     )
+        reads_in = g["reads_in"]
+        if not isinstance(reads_in, tuple) or any(s not in SKILLS for s in reads_in):
+            problems.append(f"{gid}: reads_in must name skills")
+        elif reads_in and g["skill"] != SHARED:
+            problems.append(f"{gid}: only a shared gate names the skills that read it")
+        elif reads_in and g["owed"] not in READS_IN_PREDICATES:
+            problems.append(f"{gid}: a gate some skills read must be owed only in them")
+        for o in _all_options(g):
+            if not o["request_only"]:
+                continue
+            if o["shown"] or not o["pre_answerable"]:
+                problems.append(f"{gid}: request-only option {o['id']!r} must be hidden and pre-answerable")
+            if g["writer"] != RECORDER:
+                problems.append(f"{gid}: request-only option {o['id']!r} needs a gate the recorder records")
+            if o["requires"] not in DRY_REQUIRES:
+                problems.append(f"{gid}: request-only option {o['id']!r} needs a check that reads only the request")
         all_ids = {o["id"] for o in _all_options(g)}
         if g["no_ask_default"] is not None and g["no_ask_default"] not in all_ids:
             problems.append(f"{gid}: no_ask_default names no option")
@@ -4042,6 +4392,13 @@ def record(
         picked = resolve_default(gate_id, g, default_reason, answer_ids[0] if answer_ids else None)
         answer_ids = [picked] if picked else None
     options = _resolve_options(ctx, g, key, instance, answer_ids, label) if (answer_ids or label) else []
+    for o in options:
+        # Only a request line may choose it (`_apply_pre_answer` is the one caller passing `host_line`): the
+        # value is the request's own, and an answer, a default or a form naming it would be the run's.
+        if o["request_only"] and asked_evidence != "host_line":
+            raise GateRejection("REQUEST_ONLY_OPTION", f"{key}: {o['id']!r} can only be sent with the request")
+    if value is not None and len(value) > VALUE_MAX:
+        raise GateRejection("VALUE_TOO_LONG", f"{key}: a value is at most {VALUE_MAX:,} characters")
     if resolution == "answered" and not options:
         raise GateRejection("OPTION_UNLISTED", f"{key} needs an option")
     takes_value = any(o["takes_value"] for o in options)
@@ -4142,6 +4499,12 @@ def record(
     )
     if evidence is not None:
         entry["current"]["evidence"] = evidence
+        if gate_id == "host_context" and evidence.get("dropped"):
+            # By index and cause only: a dropped item's text is never copied into a notice.
+            add_notice(
+                ledger,
+                {"code": "HOST_CONTEXT_ITEMS_DROPPED", "gate": key, "lines": [], "items": list(evidence["dropped"])},
+            )
     if resolution == "not_applicable":
         entry["state"] = "not_owed"
         _event(ledger, entry, "not_applicable", by, basis=basis, reason=note)
@@ -4319,6 +4682,8 @@ def parse_request(
                 if " | " not in payload:
                     raise ValueError("FS_HOST_VALUE needs `<option_id> | <value>`")
                 option_text, value = payload.split(" | ", 1)
+                if len(value) > VALUE_MAX:
+                    raise ValueError(f"the value is longer than {VALUE_MAX:,} characters")
             ids = [p.strip() for p in option_text.split(",")] if g["multi"] else [option_text.strip()]
             for oid in ids:
                 if not OPTION_ID_RE.match(oid):
@@ -4430,6 +4795,13 @@ def replaceable_by_request(ledger: dict[str, Any], entry: dict[str, Any] | None)
     return False
 
 
+def _not_used_by_skill(ledger: dict[str, Any], key: str) -> bool:
+    """A line for a shared gate that only other skills read (`reads_in`): accepted, never judged, never used."""
+    g = GATES.get(parse_key(key)[0]) or {}
+    readers = g.get("reads_in") or ()
+    return bool(readers) and ledger.get("skill") not in readers
+
+
 def store_pre_answers(ledger: dict[str, Any], pre: dict[str, dict[str, Any]], by: str) -> None:
     """Merge validated pre-answers: added, identical no-op, replaced while the gate is open, ignored once
     the gate has an answer (the recorded answer stands; the line is listed in `notices`), except an answer a
@@ -4468,11 +4840,21 @@ def store_pre_answers(ledger: dict[str, Any], pre: dict[str, dict[str, Any]], by
             )
             continue
         stored[key] = {**new, "stored_at": _run_status.now_iso(), "applied_at": None}
+        if _not_used_by_skill(ledger, key):
+            # The status sweep lists it `not_used_by_skill` (it reads this mark, never the registry).
+            stored[key]["not_used_by_skill"] = True
         if isinstance(old, dict) and old.get("events"):
             stored[key]["events"] = list(old["events"])
         _pre_event(
             ledger, key, stored[key], "pre_answer_superseded" if old else "pre_answer_stored", by, raw=new["raw"]
         )
+        if old is not None and isinstance(entry, dict):
+            # A new line replaces one that could not be applied: what was wrong with the old one no longer
+            # describes the gate, so the new line gets its own diagnosis when it is tried.
+            stale = [f for f in ("pre_answer_unlisted", "pre_answer_malformed") if f in entry.get("flags", [])]
+            if stale:
+                entry["flags"] = [f for f in entry["flags"] if f not in stale]
+                _event(ledger, entry, "pre_answer_flags_cleared", by, flags=stale)
 
 
 def pending_pre_answer(ledger: dict[str, Any], key: str) -> dict[str, Any] | None:
@@ -4523,6 +4905,10 @@ def _apply_pre_answer(ctx: Ctx, ledger: dict[str, Any], key: str, by: str) -> st
         # `corrections_applied` with no corrections call on record): the gate stays open and is asked.
         if e.code != "REQUIRES_UNMET":
             raise
+        if e.extra.get("kind") == "malformed" and "pre_answer_malformed" not in entry["flags"]:
+            # The value sent with the request could not be read (`PRE_ANSWER_MALFORMED`); set beside the
+            # unlisted flag, which every no-ask default and resume check already honours.
+            entry["flags"].append("pre_answer_malformed")
         if "pre_answer_unlisted" not in entry["flags"]:
             entry["flags"].append("pre_answer_unlisted")
             _event(ledger, entry, "pre_answer_unlisted", by, raw=pa["raw"], reason="requires_unmet")
@@ -4582,8 +4968,9 @@ def _mark_applied(ledger: dict[str, Any], entry: dict[str, Any], pa: dict[str, A
     `applied_at` is how the ledger shows the current answer came from the request (`answered_by_request`)."""
     pa["applied_at"] = (entry.get("current") or {}).get("answered_at") or _run_status.now_iso()
     _event(ledger, entry, "pre_answer_applied", by, raw=pa["raw"])
-    if "pre_answer_unlisted" in entry["flags"]:
-        entry["flags"].remove("pre_answer_unlisted")
+    for flag in ("pre_answer_unlisted", "pre_answer_malformed"):
+        if flag in entry["flags"]:
+            entry["flags"].remove(flag)
 
 
 def answered_by_request(ledger: dict[str, Any], key: str) -> bool:
@@ -4703,7 +5090,10 @@ def derive_status(
         key, entry = (fresh or open_entries)[0]
         g = GATES[entry["gate"]]
         question = render_question(g, entry["instance"], ctx)
-        if "pre_answer_unlisted" in entry["flags"]:
+        # Malformed first: both flags are set together, and the unlisted one means "not one of the choices".
+        if "pre_answer_malformed" in entry["flags"]:
+            code = "PRE_ANSWER_MALFORMED"
+        elif "pre_answer_unlisted" in entry["flags"]:
             code = "PRE_ANSWER_UNLISTED"
         elif entry["current"] is not None:
             code = "GATE_INTERMEDIATE"
@@ -4730,6 +5120,8 @@ _DERIVED_DISCLOSURES = (
     "PRE_ANSWERED:",
     "EXTRACTION_UNREVIEWED",
     "CORRECTIONS_SOURCE",
+    "FUND_PROFILE_SUPPLIED",
+    "HOST_CONTEXT_",
 )
 
 
@@ -4747,6 +5139,8 @@ def option_disclosures(entry: dict[str, Any]) -> list[str]:
             out.append(
                 f"{o['discloses']}:{origin}" if o["discloses"] == "CORRECTIONS_SOURCE" and origin else o["discloses"]
             )
+            if o["discloses"] == "HOST_CONTEXT_SUPPLIED" and (cur.get("evidence") or {}).get("dropped"):
+                out.append("HOST_CONTEXT_ITEMS_DROPPED")
     return out
 
 
@@ -4757,6 +5151,55 @@ def resume_prompt(ledger: dict[str, Any]) -> str:
             continue  # an instance's copy of a bare line, which is listed once, as it was sent
         lines.extend(pa.get("raw") or [])
     return "\n".join(lines) + "\n"
+
+
+# --- a dry run of a request (`run_status.py check`) ------------------------------------------------------
+
+CHECK_VERDICTS = ("applies", "would_wait", "not_used_by_skill", "not_checked_here")
+
+
+def dry_check(text: str, skill: str, as_of: str) -> tuple[int, dict[str, Any]]:
+    """What `start` and Step 1's `open` would make of a request, without a run: (exit code, payload). The same
+    `parse_request` that `start` runs, then, for each line, the gate's own check where it reads only the request
+    (`DRY_REQUIRES`, against `as_of` as the run's start date); any other check needs the run and is
+    `not_checked_here`. Writes nothing. Exit 0 accepted, 1 start would refuse the request, 4 a checked value
+    would wait at its question."""
+    _rid, pre, bad, _flags = parse_request(text, skill)
+    out: dict[str, Any] = {"skill": skill, "would_start": not bad, "invalid": bad, "values": []}
+    if bad:
+        return 1, out
+    ctx = Ctx(None, {"invocations": [{"started_at": f"{as_of}T00:00:00Z"}]}, skill)  # type: ignore[arg-type]
+    ctx.ledger = {"skill": skill, "pre_answers": {k: {**v, "applied_at": None} for k, v in pre.items()}}
+    waits = False
+    for key, pa in pre.items():
+        gate_id, instance = parse_key(key)
+        g = GATES[gate_id]
+        row: dict[str, Any] = {"gate": key}
+        if g["reads_in"] and skill not in g["reads_in"]:
+            row["verdict"] = "not_used_by_skill"
+            out["values"].append(row)
+            continue
+        ids = str(pa["option_id"]).split(",")
+        checks = [o["requires"] for o in _all_options(g) if o["id"] in ids and o["requires"]]
+        if not checks:
+            row["verdict"] = "applies"
+        elif any(name not in DRY_REQUIRES for name in checks):
+            row["verdict"] = "not_checked_here"
+        else:
+            row["verdict"] = "applies"
+            for name in checks:
+                fn = REQUIRES[name]
+                assert fn is not None
+                try:
+                    found = fn(ctx, {"gate": gate_id, "instance": instance})
+                except GateRejection as e:
+                    row.update(verdict="would_wait", cause=str(e))
+                    waits = True
+                    break
+                if isinstance(found, dict) and "kept" in found:
+                    row.update(kept=found["kept"], dropped=found["dropped"])
+        out["values"].append(row)
+    return (EXIT_CODES["check_would_wait"] if waits else 0), out
 
 
 # --- transactions ------------------------------------------------------------------------------------
@@ -5610,6 +6053,7 @@ PUBLIC_GATE_FIELDS = (
     "asked_check",
     "mandatory",
     "modes",
+    "reads_in",
 )
 PUBLIC_OPTION_FIELDS = ("id", "label", "terminal", "takes_value", "hidden", "pre_answerable", "only_skills")
 
@@ -5647,6 +6091,7 @@ def _public_gate(gid: str, g: dict[str, Any]) -> dict[str, Any]:
         "asked_check": g["asked_check"],
         "mandatory": g["mandatory"],
         "modes": list(g["modes"]),
+        "reads_in": list(g["reads_in"]),
     }
     return out
 
@@ -5657,7 +6102,8 @@ CLI_CODES = {
     "finish": ["FINISH_REFUSED", "MODE_MISMATCH", "MODE_NOT_OFFERED"],
     "deliverables": ["RUN_NOT_COMPLETE"],
     "bind": ["RUN_ALREADY_BOUND", "RUN_REFUSED"],
-    "founder_context": ["CONTEXT_NOT_FOUND", "OUTPUT_IS_INPUT"],
+    # HOST_CONTEXT_NOT_FOUNDER_CONTEXT: `merge` refuses a payload carrying context supplied with the request.
+    "founder_context": ["CONTEXT_NOT_FOUND", "OUTPUT_IS_INPUT", "HOST_CONTEXT_NOT_FOUNDER_CONTEXT"],
     # Every writer with an output flag (`-o`, `--write-md`, ...), the pages included, refuses an output that names one
     # of its own input files (exit 1, stdout `{"status": "rejected", "code", "message", "output", "input"}`, nothing
     # written). stdin is never an input, so a documented in-place fix that reads stdin stays legal.
@@ -5752,6 +6198,14 @@ CLI_CODES = {
     # assessment or rebuttal, the conflict check, the discussion or the scores was built from another fund profile
     # than the current one; the skill runs Steps 5-8 again. HANDOFF_NOT_REDISPATCHED: persist_partner.py and
     # score_dimensions.py refuse the same hand-off re-piped after the profile changed; the skill dispatches again.
+    # A fund profile supplied with the request (`fund_profile.py --from-request`, exit 1, nothing written):
+    # HOST_PROFILE_NEEDS_RUN with no run ledger; HOST_PROFILE_REQUIRED for a profile piped on stdin while the
+    # recorded fund is the supplied one; FUND_FIELD_TOO_LONG / FUND_FIELD_INVALID_CHARS for a string or list over
+    # its cap or a control character. FUND_PROFILE_SOURCE_MISMATCH: compose, when the profile's `profile_source`
+    # and the recorded fund disagree. Context supplied with the request: HOST_CONTEXT_NOT_SUPPLIED
+    # (host_context.py and compose, a startup profile carrying context the request did not supply),
+    # HOST_CONTEXT_MISSING (compose, a profile without the context the request supplied), PROFILE_UNREADABLE
+    # (host_context.py, a startup profile that is not a JSON object).
     "ic_producers": [
         "RUN_ID_REQUIRED",
         "FUND_PROFILE_NAMES_PEOPLE",
@@ -5761,6 +6215,14 @@ CLI_CODES = {
         "RUN_NOT_BOUND",
         "RUN_SUPERSEDED",
         "ARTIFACT_OTHER_RUN",
+        "HOST_PROFILE_NEEDS_RUN",
+        "HOST_PROFILE_REQUIRED",
+        "FUND_FIELD_TOO_LONG",
+        "FUND_FIELD_INVALID_CHARS",
+        "FUND_PROFILE_SOURCE_MISMATCH",
+        "HOST_CONTEXT_NOT_SUPPLIED",
+        "HOST_CONTEXT_MISSING",
+        "PROFILE_UNREADABLE",
     ],
     # cap-table's producers (and its two pages): a call into a bound review dir with no (or an empty) --run-id,
     # or with a --run-id not bound there while the dir carries another run's, or with the id of a run a later run
@@ -5778,7 +6240,44 @@ CLI_CODES = {
     "usage": ["USAGE"],
     # `run_status.py fail` on a run still waiting for an answer.
     "fail": ["RUN_WAITING"],
-    "notices": ["PRE_ANSWER_IGNORED", "PRE_ANSWER_INVALID", "PRE_ANSWER_NOT_APPLIED", "SUPERSEDE_NOT_RECORDED"],
+    "notices": [
+        "PRE_ANSWER_IGNORED",
+        "PRE_ANSWER_INVALID",
+        "PRE_ANSWER_NOT_APPLIED",
+        "SUPERSEDE_NOT_RECORDED",
+        "HOST_CONTEXT_ITEMS_DROPPED",
+    ],
+}
+
+# What a request may supply as a value, as data: the caps and the per-item causes the checks enforce. Generated
+# from the constants the checks read, so the published rules are the code's.
+REQUEST_VALUES = {
+    "value_max_chars": VALUE_MAX,
+    "check": {
+        "command": "run_status.py check --skill <skill> [--as-of YYYY-MM-DD] (the request's lines on stdin)",
+        "exit_codes": {"accepted": 0, "start_would_refuse": 1, "usage": 2, "would_wait": 4},
+        "verdicts": list(CHECK_VERDICTS),
+    },
+    "host_context": {
+        "gate": "host_context",
+        "option": "supplied",
+        "max_items": _host_text.MAX_ITEMS,
+        "max_value_chars": _host_text.MAX_VALUE_CHARS,
+        "max_fact_chars_total": _host_text.MAX_FACT_CHARS_TOTAL,
+        "item_keys": list(_host_text.ITEM_KEYS),
+        "fact_max_chars": _host_text.FACT_MAX,
+        "source_max_chars": _host_text.SOURCE_MAX,
+        "date_grace_days": _host_text.DATE_GRACE_DAYS,
+        "drop_causes": list(_host_text.CAUSES),
+    },
+    "ic_fund_profile": {
+        "gate": "ic_fund_mode",
+        "option": "host_profile",
+        "keys": sorted(FUND_REQUEST_KEYS),
+        "string_max_chars": FUND_STRING_MAX,
+        "string_max_chars_at": FUND_STRING_MAX_AT,
+        "list_max_items": FUND_LIST_MAX,
+    },
 }
 
 SHAPES = {
@@ -5845,6 +6344,7 @@ def contract() -> dict[str, Any]:
         "shapes": SHAPES,
         "asked_evidence": list(ASKED_EVIDENCE),
         "request_tokens": REQUEST_TOKENS,
+        "request_values": REQUEST_VALUES,
         "run_id_grammar": _run_status.RUN_ID_RE.pattern,
         "run_status_fields": list(_run_status.FIELDS),
         "resumable": _run_status.RESUMABLE_BY_SURFACE,

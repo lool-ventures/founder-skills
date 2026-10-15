@@ -58,6 +58,7 @@ STATUS_CODES: dict[str, tuple[str, ...]] = {
         "AUTO_SATISFY_NOT_ALLOWED",
         "PRE_ANSWER_UNLISTED",
         "INPUT_NEEDED",
+        "PRE_ANSWER_MALFORMED",
     ),
     "complete": ("COMPLETE",),
     "refused": (
@@ -70,10 +71,18 @@ STATUS_CODES: dict[str, tuple[str, ...]] = {
         "COACHING_FAILED",
         "CONTEXT_FAILED",
         "INPUT_UNREADABLE",
+        "INPUT_REJECTED",
     ),
 }
 # The codes `run_status.py fail` writes: a run that stopped on a failure it cannot recover from.
-FAIL_CODES = ("HANDOFF_FAILED", "PRODUCER_FAILED", "COACHING_FAILED", "CONTEXT_FAILED", "INPUT_UNREADABLE")
+FAIL_CODES = (
+    "HANDOFF_FAILED",
+    "PRODUCER_FAILED",
+    "COACHING_FAILED",
+    "CONTEXT_FAILED",
+    "INPUT_UNREADABLE",
+    "INPUT_REJECTED",
+)
 LAST_ERROR_CODES = ("GATE_INVALID", "GATE_OTHER_RUN", "PROFILE_MISMATCH", "GATE_UNRESOLVED", "COACHING_BLOCKED")
 PRINT_ONLY_CODES = ("RUN_ID_IN_USE", "RUN_ID_FINISHED", "RUN_ID_MALFORMED")
 
@@ -103,6 +112,9 @@ MESSAGES: dict[str, str] = {
     "COACHING_FAILED": "The coaching commentary could not be added, so the run stopped.",
     "CONTEXT_FAILED": "The company's context could not be read, so the run stopped.",
     "INPUT_UNREADABLE": "A document could not be read, so the run stopped.",
+    "INPUT_REJECTED": "An input supplied with the request was refused, so the run stopped.",
+    "PRE_ANSWER_MALFORMED": "Waiting, because a value sent with the request could not be read; the latest notice "
+    "for that question says why.",
 }
 
 # Whether a `waiting` run can be resumed, per surface. Conservative: until a new session has been shown
@@ -766,7 +778,10 @@ def _unused_request_notices(paths: RunPaths, status: dict[str, Any]) -> None:
                 continue
             entry = gates.get(key)
             history = (entry or {}).get("history") or []
-            if isinstance(entry, dict) and entry.get("state") == "answered":
+            if pa.get("not_used_by_skill"):
+                # A shared gate this skill does not read (`reads_in`): the line was accepted and never judged.
+                reason = "not_used_by_skill"
+            elif isinstance(entry, dict) and entry.get("state") == "answered":
                 reason = "already_answered"
             elif isinstance(entry, dict) and history and history[-1].get("event") == "closed":
                 reason = "not_owed"

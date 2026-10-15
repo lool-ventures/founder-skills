@@ -2061,6 +2061,8 @@ def test_every_gate_site_is_a_registry_gate_and_every_gate_has_a_site() -> None:
     for gid, gdef in g.GATES.items():
         if gdef["skill"] not in ("deck-review", "shared"):
             continue
+        if gdef["reads_in"] and "deck-review" not in gdef["reads_in"]:
+            continue  # a shared gate only other skills read: this skill never opens it
         static = (gdef["instances"] or {}).get("static")
         keys |= {f"{gid}.{i}" for i in static} if static else {gid}
     for site in sites:
