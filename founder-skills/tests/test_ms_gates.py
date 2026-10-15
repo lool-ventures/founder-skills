@@ -32,6 +32,7 @@ from test_market_sizing import (  # noqa: E402
     _VALID_SENSITIVITY,
     _VALID_SIZING,
     _VALID_VALIDATION,
+    _make_checklist_items,
 )
 
 
@@ -759,6 +760,129 @@ def test_from_pre_answer_without_a_request_answer_opens_the_question(tmp_path: P
     out = _out(_ok(h.run(MS / "record_revision_answer.py", "--dir", str(run_dir), "--from-pre-answer")))
     assert out["applied"] is False and out["owed"] is True
     assert _entry(root, run_id, "ms_revision")["state"] == "open"
+
+
+# --- finished runs: not rebuilt in place --------------------------------------------------------------------
+
+_VERIFY = ("inputs.json", "methodology.json", "validation.json", "sizing.json", "sensitivity.json", "checklist.json")
+_KEPT = ("report.md", "report.json", "sizing.json", "checklist.json", "sensitivity.json")
+_SENSITIVITY_IN = {
+    "approach": "bottom_up",
+    "base": {"customer_count": 42000, "arpu": 1260, "serviceable_pct": 30, "target_pct": 4},
+    "ranges": {"customer_count": {"low_pct": -30, "high_pct": 20}, "arpu": {"low_pct": -20, "high_pct": 15}},
+}
+
+
+def _insert(run_dir: Path) -> subprocess.CompletedProcess[str]:
+    """Step 8c through the real shared scripts: the commentary wrapped, then inserted at the report's marker."""
+    marker = json.loads((run_dir / "report.json").read_text(encoding="utf-8"))["coaching_payload"]["insertion_marker"]
+    md = run_dir / "coaching.md"
+    md.write_text("Invented coaching for this test.\n", encoding="utf-8")
+    envelope = _ok(h.run(h.SHARED / "md_to_commentary.py", str(md))).stdout
+    args = ["--report", str(run_dir / "report.md"), "--report-json", str(run_dir / "report.json"), "--marker", marker]
+    for name in _VERIFY:
+        args += ["--verify-artifact", str(run_dir / name)]
+    return h.run(h.SHARED / "insert_coaching.py", *args, stdin=envelope)
+
+
+def _page(run_dir: Path, run_id: str) -> subprocess.CompletedProcess[str]:
+    return h.run(MS / "visualize.py", "--dir", str(run_dir), "--run-id", run_id, "-o", str(run_dir / "report.html"))
+
+
+def _final(root: Path, run_id: str) -> subprocess.CompletedProcess[str]:
+    return h.run(
+        h.SHARED / "run_status.py", "deliverables", "--run-id", run_id, "--artifacts-root", str(root), "--final"
+    )
+
+
+def _closer(run_dir: Path) -> subprocess.CompletedProcess[str]:
+    argv = ("--report", str(run_dir / "report.json"), "--link", "path", "--deliverable", f"r={run_dir}/report.md")
+    return h.run(MS / "closing_message.py", *argv)
+
+
+def _delivered(tmp_path: Path) -> tuple[Path, str, Path]:
+    """An analysis composed, coached, paged and handed over: `complete` at revision 0."""
+    root, run_id, run_dir = _run_dir(tmp_path)
+    _artifacts(run_dir, run_id)
+    _ok(_answer(root, run_id, "ms_methodology", "looks_good"))
+    _ok(_compose(run_dir))
+    _ok(_insert(run_dir))
+    _ok(_page(run_dir, run_id))
+    _ok(_final(root, run_id))
+    _ok(_closer(run_dir))
+    st = h.status(root, run_id)
+    assert (st["status"], st["revision"], st["coaching"]) == ("complete", 0, "inserted"), st
+    return root, run_id, run_dir
+
+
+def _producer(run_dir: Path, run_id: str, script: str, stdin: Any) -> subprocess.CompletedProcess[str]:
+    out = {"sensitivity.py": "sensitivity.json", "checklist.py": "checklist.json", "red_team.py": "redteam.json"}
+    return h.run(MS / script, "--run-id", run_id, "-o", str(run_dir / out[script]), stdin=json.dumps(stdin))
+
+
+def test_a_delivered_analysis_is_not_rebuilt_in_place(tmp_path: Path) -> None:
+    """Every step that writes the analysis, and the prompt generator in every context, refuses `RUN_FINISHED`
+    on a delivered analysis, and nothing moves. Each is fed a VALID input, so a removed guard writes (a broken
+    input would be refused on validation and only the code would differ)."""
+    root, run_id, run_dir = _delivered(tmp_path)
+    before = h.snapshot(root, run_id)
+    kept = {n: (run_dir / n).read_bytes() for n in _KEPT}
+    calls = {
+        "compose": lambda: _compose(run_dir),
+        "market_sizing.py": lambda: _size(run_dir, run_id),
+        "sensitivity.py": lambda: _producer(run_dir, run_id, "sensitivity.py", _SENSITIVITY_IN),
+        "checklist.py": lambda: _producer(run_dir, run_id, "checklist.py", {"items": _make_checklist_items()}),
+        "red_team.py": lambda: _producer(run_dir, run_id, "red_team.py", {"findings": []}),
+        "prompt top_down": lambda: _gen(run_dir, run_id),
+        "prompt checklist": lambda: _gen(run_dir, run_id, "checklist"),
+        "prompt red_team": lambda: _gen(run_dir, run_id, "red_team"),
+    }
+    for name, call in calls.items():
+        proc = call()
+        assert proc.returncode == 1 and _out(proc)["code"] == "RUN_FINISHED", (name, proc.stdout + proc.stderr)
+        assert "starts a new analysis" in _out(proc)["message"], name
+        assert "CONTEXT:" not in proc.stdout, name
+        assert h.snapshot(root, run_id) == before, name
+        assert {n: (run_dir / n).read_bytes() for n in _KEPT} == kept, name
+        assert not (run_dir / "redteam.json").exists(), name
+        assert not list((run_dir / "handoff" / run_id).glob("redteam.r*.json")), name
+
+
+def test_what_still_runs_on_a_delivered_analysis(tmp_path: Path) -> None:
+    """A pin, not a lever: it guards against over-reach. The page, the closing message, a repeated coaching
+    insert, the final deliverables list and a what-if outside the run folder still run on a delivered
+    analysis; wiring the guard into any of them reds this."""
+    root, run_id, run_dir = _delivered(tmp_path)
+    again = _ok(_insert(run_dir))
+    assert json.loads(again.stdout.strip().splitlines()[-1])["status"] == "already_inserted", again.stdout
+    _ok(_page(run_dir, run_id))
+    _ok(_closer(run_dir))
+    _ok(_final(root, run_id))
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    _ok(h.run(MS / "market_sizing.py", "--stdin", "-o", str(staging / "sizing.json"), stdin=json.dumps(_NUMERIC)))
+    assert (staging / "sizing.json").exists()
+    st = h.status(root, run_id)
+    assert (st["status"], st["revision"]) == ("complete", 0)
+
+
+def test_a_refused_analysis_takes_no_writes(tmp_path: Path) -> None:
+    root, run_id, run_dir = _delivered(tmp_path)
+    _hand_edit_status(root, run_id, status="refused")
+    before = h.snapshot(root, run_id)
+    report = (run_dir / "report.md").read_bytes()
+    proc = _compose(run_dir)
+    assert proc.returncode == 1 and _out(proc)["code"] == "RUN_FINISHED", proc.stdout + proc.stderr
+    assert "was stopped" in _out(proc)["message"] and "starts a new analysis" in _out(proc)["message"]
+    assert h.snapshot(root, run_id) == before
+    assert (run_dir / "report.md").read_bytes() == report
+
+
+def _hand_edit_status(root: Path, run_id: str, **fields: Any) -> None:
+    path = h.status_path(root, run_id)
+    st = json.loads(path.read_text(encoding="utf-8"))
+    st.update(fields)
+    path.write_text(json.dumps(st), encoding="utf-8")
 
 
 # --- the closer --------------------------------------------------------------------------------------------

@@ -313,7 +313,10 @@ CONTRACT_NOTES = (
     "An enforcer never re-opens a finished run's answer: on a `complete` or `refused` run whose confirmed input "
     "changed, it refuses `RUN_FINISHED` and writes nothing; a changed figure after `complete` needs a new run, "
     "except financial-model-review's cash update above. On a `complete` or `refused` financial-model-review run, "
-    "compose exits 10 for an unrecorded post-delivery cash reply and otherwise refuses `RUN_FINISHED`.",
+    "compose exits 10 for an unrecorded post-delivery cash reply and otherwise refuses `RUN_FINISHED`. "
+    "market-sizing's producers, prompt generator and compose refuse `RUN_FINISHED` on any `complete` or `refused` "
+    "analysis, with or without a changed answer; its page, closing message and a repeated coaching insert still "
+    "run.",
     "`ms_two_figures` has one instance per input the founder stated two figures for "
     "(`FS_HOST_ANSWER ms_two_figures.arpu=typed`). The bare `FS_HOST_ANSWER ms_two_figures=<option>` answers every "
     "instance; a line naming an instance wins for that instance. Its alternatives' ids are keyed on the figure "
@@ -5660,8 +5663,8 @@ CLI_CODES = {
     # bind; cap-table's --run-id must be it), and every required artifact must carry its id (ARTIFACT_OTHER_RUN,
     # `files` naming each, exit 1, nothing written); another run's optional artifact is left out and named in
     # the receipt's `ignored_other_run`.
-    # RUN_FINISHED: financial-model-review's compose on a `complete` or `refused` run (a delivered review is never
-    # rebuilt in place).
+    # RUN_FINISHED: financial-model-review's and market-sizing's compose on a `complete` or `refused` run (a
+    # delivered report is never rebuilt in place).
     "compose": [
         "RUN_ID_REQUIRED",
         "RUN_NOT_BOUND",
@@ -5684,6 +5687,8 @@ CLI_CODES = {
     # market-sizing's producers and prompt generator: a call into a bound analysis dir that names no run.
     # PERIOD_NOT_WRITTEN: the period of a founder's figure was answered but never written into inputs.json.
     # NO_ASK_FOUNDER_DECLINED: compose refuses a review skip saying the founder declined under FS_HOST_NO_ASK.
+    # RUN_FINISHED: any of them, compose and the prompt generator (every context, `--redo` included) into a
+    # delivered or stopped analysis.
     "ms_producers": [
         "RUN_ID_REQUIRED",
         "PERIOD_NOT_WRITTEN",
@@ -5692,6 +5697,7 @@ CLI_CODES = {
         "RUN_NOT_BOUND",
         "RUN_SUPERSEDED",
         "ARTIFACT_OTHER_RUN",
+        "RUN_FINISHED",
     ],
     # market-sizing's prompt generator, on a sizing build's comparison redo (`--redo comparison`; exit 1, stdout
     # `{"status": "refused", "code", "message"}`, nothing printed or written), and on a plain sizing print while
@@ -5704,7 +5710,6 @@ CLI_CODES = {
         "SIZING_REDO_SPENT",
         "SIZING_REDO_SUSPECT_CHANGED",
         "SIZING_REDO_PENDING",
-        "RUN_FINISHED",
     ],
     # competitive-positioning's producers, prompt generator and compose: a call into a bound analysis dir that
     # names no run. NO_ASK_FOUNDER_DECLINED: the skip recorder and compose refuse a review skip saying the

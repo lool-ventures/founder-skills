@@ -270,6 +270,7 @@ def main() -> None:
         import _ms_gates  # noqa: PLC0415
 
         _ms_gates.refuse_without_run_id(args.output, args.run_id)
+        _ms_gates.refuse_finished_write(os.path.dirname(os.path.abspath(args.output)), args.run_id)
 
     if sys.stdin.isatty():
         print("Error: pipe JSON input via stdin", file=sys.stderr)

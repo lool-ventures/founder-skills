@@ -78,6 +78,41 @@ def pct_scale_keys(run_dir: str) -> list[str]:
     return [f"{PCT_SCALE_GATE}.{f}" for f in sorted(fields)]
 
 
+FINISHED_WRITE_MESSAGES = {
+    "complete": (
+        "this analysis is complete; nothing in it is rebuilt in place: a changed figure, approach or review starts "
+        "a new analysis (run Step 0 again)"
+    ),
+    "refused": (
+        "this analysis was stopped; nothing in it is rebuilt in place: a changed figure, approach or review starts "
+        "a new analysis (run Step 0 again)"
+    ),
+}
+
+
+def refuse_finished_write(run_dir: str, run_id: str | None) -> None:
+    """A delivered (`complete`) or stopped (`refused`) analysis is never rebuilt in place: exit 1 `RUN_FINISHED`,
+    stdout `{"status": "rejected", "code", "message"}`, a stderr line, nothing written. Every step that writes the
+    analysis and the prompt generator (every context) call it before any write, with or without a changed answer.
+    Keyed on `run_dir`'s own ref, so a what-if written outside the run folder never meets it; with no run id or
+    no ledger it returns at once. A ref whose ledger cannot be reached exits 2 (`open_ledger_or_exit`). Not called
+    by the page, the closing message or the coaching insert, which still run on a delivered analysis."""
+    if not run_id:
+        return
+    ledger = open_ledger_or_exit(run_dir, run_id)
+    if ledger is None:
+        return
+    _gates, paths = ledger
+    rs = sys.modules["_run_status"]
+    state = (rs.load_status(paths) or {}).get("status")
+    if state not in rs.FINAL_STATUSES:
+        return
+    message = FINISHED_WRITE_MESSAGES.get(str(state), FINISHED_WRITE_MESSAGES["complete"])
+    sys.stdout.write(json.dumps({"status": "rejected", "code": "RUN_FINISHED", "message": message}) + "\n")
+    print(f"Error: {message}; nothing was written", file=sys.stderr)
+    sys.exit(1)
+
+
 def exit_on_rejection(gates: Any, e: Exception) -> NoReturn:
     """A refused gate write: RUN_FINISHED as a plain refusal (exit 1), anything else as the shared failure."""
     if isinstance(e, gates.GateRejection) and e.code == "RUN_FINISHED":

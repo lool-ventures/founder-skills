@@ -974,5 +974,8 @@ def test_a_finished_run_refuses_a_redo(tmp_path: Path) -> None:
     grh.status_path(root, run_id).write_text(json.dumps({**st, "status": "complete"}), encoding="utf-8")
     r = _lgen(run_dir, run_id, hand, "top_down_methodology", "--redo", "comparison")
     assert r.returncode == 1 and "CONTEXT:" not in r.stdout
-    assert json.loads(r.stdout)["code"] == "RUN_FINISHED"
+    out = json.loads(r.stdout)
+    # Refused like every other print on a finished run: the shared `rejected` shape, not the redo's `refused`.
+    assert (out["status"], out["code"]) == ("rejected", "RUN_FINISHED"), out
+    assert "starts a new analysis" in out["message"]
     assert sr.LEDGER_KEY not in grh.ledger(root, run_id)

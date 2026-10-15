@@ -250,6 +250,11 @@ def main() -> None:
         # failed copy leaves -o untouched and fails loudly.
         assert args.run_id
         analysis_dir = os.path.dirname(os.path.abspath(args.output))
+        # A delivered or stopped analysis takes no new review. Imported here, not at the top: a lone copy of this
+        # script must still meet the shared-scripts refusal above first.
+        import _ms_gates  # noqa: PLC0415
+
+        _ms_gates.refuse_finished_write(analysis_dir, args.run_id)
         try:
             summary["round"] = _redteam_copy.write_copy(
                 analysis_dir, args.run_id, result, hashlib.sha256(raw.encode("utf-8")).hexdigest()

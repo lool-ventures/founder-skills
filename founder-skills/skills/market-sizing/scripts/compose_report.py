@@ -3708,6 +3708,8 @@ def main() -> None:
     ledger = _ms_gates.open_ledger_or_exit(args.dir, run_id)
     gate_view = None
     if ledger is not None:
+        # A delivered or stopped analysis is never rebuilt in place, with or without a changed answer.
+        _ms_gates.refuse_finished_write(args.dir, run_id)
         _ms_gates.require_or_exit(
             args.dir,
             run_id,

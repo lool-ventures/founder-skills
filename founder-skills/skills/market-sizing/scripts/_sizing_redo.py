@@ -243,19 +243,6 @@ def save(analysis_dir: str, run_id: str, record: dict[str, Any]) -> None:
     _write(os.path.join(analysis_dir, RECORD_NAME), record)
 
 
-def run_finished(analysis_dir: str, run_id: str) -> bool:
-    """With a ledger, whether the run's status reads `complete`."""
-    if not _run_ref.has_ledger(os.path.abspath(analysis_dir), run_id):
-        return False
-    try:
-        rs = _run_ref.load_shared("_run_status")
-        paths = rs.locate_from_run_dir(os.path.abspath(analysis_dir), run_id)
-        status = rs.load_status(paths) or {}
-    except Exception:  # noqa: BLE001 -- the generator's own gate check reports an unreachable ledger
-        return False
-    return status.get("status") == "complete"
-
-
 def write_snapshot(handoff_dir: str, run_id: str, validation_path: str) -> None:
     """At the first plain print of a sizing prompt: the research the first builds could use. Kept once per
     run; never written into a hand-off dir that does not exist yet."""

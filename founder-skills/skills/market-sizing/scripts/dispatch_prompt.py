@@ -69,7 +69,8 @@ JSON line on stdout with no context line (a refusal must never become a comparan
 nothing, and exits 1: SIZING_REDO_NO_SIZING, SIZING_REDO_NOT_FLAGGED, SIZING_REDO_TOO_LATE (a sensitivity,
 checklist or review of this run exists: a change after that is Step 6d's), SIZING_REDO_NO_FIRST_BUILD,
 SIZING_REDO_SPENT (per run: the other build, a redo the sizing already used, or a consumed redo printed
-again other than for a producer's rejection), SIZING_REDO_SUSPECT_CHANGED, RUN_FINISHED. A plain sizing print
+again other than for a producer's rejection), SIZING_REDO_SUSPECT_CHANGED. On a delivered or stopped analysis the
+redo is refused like every other print: `{"status": "rejected", "code": "RUN_FINISHED"}`. A plain sizing print
 for the same build into the same hand-off dir while the redo has not reached the sizing is
 SIZING_REDO_PENDING: a plain print after the redo would make the plain prompt the comparand again, and the
 redo dispatch would be rewritten to it. Once the run has moved past the sizing, the plain print is allowed
@@ -92,7 +93,8 @@ Usage:
 
 Prints the prompt. Exit 2 on a missing artifact or an image-only PDF the OCR receipt does not cover; exit 10
 (nothing printed that carries a context line) while a question the prompt depends on has no answer; exit 1
-`RUN_FINISHED` on a finished run whose answer has changed, and on a refused redo.
+`RUN_FINISHED` on a `complete` or `refused` run, in every context (`--redo comparison` included), and exit 1
+with the redo's own codes on a refused redo.
 """
 
 from __future__ import annotations
@@ -718,10 +720,7 @@ def comparison_redo(
     """The redo record to print from: this run's, or a new one written now. RedoRefused otherwise."""
     sr = _redo_module()
     build, handoff_name, _names = sr.BUILDS[context]
-    if sr.run_finished(analysis_dir, run_id):
-        raise RedoRefused(
-            "RUN_FINISHED", "this analysis is complete; a sizing changed now starts a new analysis (run Step 0 again)"
-        )
+    # A finished run never reaches here: main refuses it first (`_ms_gates.refuse_finished_write`).
     late = _past_sizing(analysis_dir, run_id)
     if late:
         raise RedoRefused(
@@ -964,6 +963,9 @@ def main() -> None:
         ],
         noun="analysis dir",
     )
+    # A delivered or stopped analysis is never rebuilt in place: no prompt prints, in any context, `--redo`
+    # included.
+    _gates_module().refuse_finished_write(a.analysis_dir, a.run_id)
     if a.context in SIZING_CONTEXTS:
         missing = [f for f in SIZING_NEEDS if not os.path.isfile(os.path.join(a.analysis_dir, f))]
         if missing:
@@ -990,7 +992,7 @@ def main() -> None:
         except _redo_module()._run_ref.LedgerUnavailable as e:
             sys.exit(_redo_module()._run_ref.report_failure(e))
         except RedoRefused as e:
-            message = g.FINISHED_MESSAGE if e.code == "RUN_FINISHED" else e.message
+            message = e.message
             sys.stdout.write(json.dumps({"status": "refused", "code": e.code, "message": message}) + "\n")
             print(f"Error ({e.code}): {message}; nothing was printed or written", file=sys.stderr)
             sys.exit(1)

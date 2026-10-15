@@ -1113,6 +1113,7 @@ def main() -> None:
 
         _ms_gates.refuse_without_run_id(args.output, args.run_id)
         _out_dir = os.path.dirname(os.path.abspath(args.output))
+        _ms_gates.refuse_finished_write(_out_dir, args.run_id)
         _ms_gates.require_or_exit(
             _out_dir,
             args.run_id,
