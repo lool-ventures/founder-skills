@@ -165,3 +165,41 @@ def test_harvest_skips_repo_mount_segments(tmp_path):
     (mount / "instruments.json").write_text(json.dumps({"safes": [{"purchase_amount": 9876543.21}]}))
     _a, _r, figures = pds.harvest([str(tmp_path / "run")])
     assert "9,876,543.21" not in figures
+
+
+# ---- run from a linked worktree: main's denylist, never a copy ------------
+
+import subprocess  # noqa: E402
+
+from test_privacy_guard import isolated_git_env  # noqa: E402, F401  (autouse: same isolation as the guard's tests)
+
+
+def _git(cwd, *args):
+    subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True)
+
+
+def test_run_from_a_worktree_writes_the_main_checkouts_denylist(tmp_path, monkeypatch, capsys):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "config", "user.email", "t@example.com")
+    _git(repo, "config", "user.name", "T")
+    (repo / ".gitignore").write_text("docs/internal/\n")
+    _git(repo, "add", ".gitignore")
+    _git(repo, "commit", "-q", "-m", "init")
+    lists = repo / "docs" / "internal"
+    lists.mkdir(parents=True)
+    (lists / "privacy-denylist.txt").write_text("# manual\nManualName\n")
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "FooBarRx - Convertible Note.pdf").write_bytes(b"")
+    wt = tmp_path / "wt"
+    _git(repo, "worktree", "add", "-q", "-b", "wt", str(wt))
+    monkeypatch.chdir(wt)
+    main_denylist = os.path.realpath(str(lists / "privacy-denylist.txt"))
+    assert pds._main(["--source", str(src), "--dry-run"]) == 0
+    err = capsys.readouterr().err
+    assert main_denylist in err or str(lists / "privacy-denylist.txt") in err, err
+    assert pds._main(["--source", str(src)]) == 0
+    assert "FooBarRx" in (lists / "privacy-denylist.txt").read_text()
+    assert not (wt / "docs").exists()

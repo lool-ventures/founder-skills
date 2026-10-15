@@ -26,7 +26,8 @@ single words that could be common English — the human promotes the real ones).
 This honors the denylist's "only DISTINCTIVE names/phrases" rule.
 
 The source roots are NOT hardcoded: pass `--source DIR` (repeatable) or list them
-in the git-ignored `docs/internal/privacy-sources.txt` (one path per line).
+in the git-ignored `docs/internal/privacy-sources.txt` (one path per line). Both files are the MAIN
+checkout's (as privacy_guard.py resolves them), also when this runs from a linked worktree.
 
 Usage:
   privacy_denylist_from_sources.py --source ~/path/to/docs --source /path/to/runs
@@ -42,7 +43,11 @@ import os
 import re
 import sys
 
-# --- config paths (the denylist + the source-roots list both git-ignored) ---
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from privacy_guard import private_dir  # noqa: E402  (same scripts/ dir; stdlib-only)
+
+# --- config paths (the denylist + the source-roots list both git-ignored; read from private_dir()) ---
 DEFAULT_DENYLIST = "docs/internal/privacy-denylist.txt"
 DEFAULT_SOURCES_CONFIG = "docs/internal/privacy-sources.txt"
 
@@ -503,10 +508,15 @@ def read_allowlist(config_path: str) -> set[str]:
 def _main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Seed the local privacy denylist from source docs + run outputs.")
     ap.add_argument("--source", action="append", default=[], help="source root dir (repeatable)")
-    ap.add_argument("--config", default=DEFAULT_SOURCES_CONFIG, help="git-ignored list of source roots")
-    ap.add_argument("--denylist", default=DEFAULT_DENYLIST, help="denylist file to update")
+    ap.add_argument("--config", default=None, help="git-ignored list of source roots (default: main checkout's)")
+    ap.add_argument("--denylist", default=None, help="denylist file to update (default: main checkout's)")
     ap.add_argument("--dry-run", action="store_true", help="print, do not write")
     args = ap.parse_args(argv)
+    # The guard reads the MAIN checkout's lists, from a linked worktree too: write there, never a copy.
+    if args.config is None or args.denylist is None:
+        lists_dir = private_dir()[0]
+        args.config = args.config or os.path.join(lists_dir, os.path.basename(DEFAULT_SOURCES_CONFIG))
+        args.denylist = args.denylist or os.path.join(lists_dir, os.path.basename(DEFAULT_DENYLIST))
 
     roots = read_source_roots(args.source, args.config)
     if not roots:
@@ -530,6 +540,7 @@ def _main(argv: list[str] | None = None) -> int:
         file=sys.stderr,
     )
     if args.dry_run:
+        print(f"would write denylist: {args.denylist}", file=sys.stderr)
         sys.stdout.write(merged)
         return 0
     os.makedirs(os.path.dirname(args.denylist) or ".", exist_ok=True)

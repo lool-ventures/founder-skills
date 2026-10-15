@@ -9,6 +9,10 @@ set -euo pipefail
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
+# The guard beside this hook script, else the work tree's own (see pre-commit; keep any `cd` in $( ... )).
+guard="$(cd "$(dirname "$0")/.." && pwd)/privacy_guard.py"
+[ -f "$guard" ] || guard="$(git rev-parse --show-toplevel)/scripts/privacy_guard.py"
+
 zero="0000000000000000000000000000000000000000"
 status=0
 while read -r local_ref local_sha remote_ref remote_sha; do
@@ -23,7 +27,7 @@ while read -r local_ref local_sha remote_ref remote_sha; do
   else
     range="$remote_sha..$local_sha"
   fi
-  if ! uv run python scripts/privacy_guard.py --range "$range"; then
+  if ! uv run python "$guard" --range "$range"; then
     echo "pre-push: REJECTED by the privacy guard for $local_ref -> $remote_ref (see above)." >&2
     status=1
   fi

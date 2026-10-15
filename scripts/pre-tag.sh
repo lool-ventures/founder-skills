@@ -77,6 +77,10 @@ run_gate "mutation corpus"   uv run pytest founder-skills/tests/test_mutation_co
 # --- privacy ------------------------------------------------------------------------------
 run_gate "privacy guard"     uv run python scripts/privacy_guard.py --tree --no-names
 run_gate "privacy tests"     uv run pytest scripts/test_privacy_guard.py -q
+# Maintainer-only (CI has no private lists, so it passes there): on a machine that has the private
+# sources list, `founderskills.privacyLists` must be `required`, so a missing list fails a hook rather
+# than turning its layers off. `optional` passes with its own line; exit 3 names the setter lines.
+run_gate "privacy switch"    uv run python scripts/privacy_guard.py --check-switch
 
 # --- plugin manifests ---------------------------------------------------------------------
 if command -v claude >/dev/null 2>&1; then

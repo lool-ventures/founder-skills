@@ -255,10 +255,16 @@ def _fake_sources(tmp_path, extra_text: str = ""):
     return cfg, private
 
 
+# An allowlist path that never exists: an in-process index must not read the checkout's real allowlist.
+_NO_ALLOWLIST = os.path.join(os.sep, "nonexistent", "privacy-figure-allowlist.txt")
+
+
 def _index(tmp_path, own_text: str = ""):
     cfg, _ = _fake_sources(tmp_path)
     spec = pg.load_sources(str(cfg))
-    return pg.build_private_index(spec, own_code_texts=[own_text], cache_dir=str(tmp_path / "cache"))
+    return pg.build_private_index(
+        spec, own_code_texts=[own_text], cache_dir=str(tmp_path / "cache"), allowlist_path=_NO_ALLOWLIST
+    )
 
 
 def test_figure_in_added_text_is_flagged(tmp_path):
@@ -491,7 +497,9 @@ def test_line_numbering_never_blocks_a_recording_but_other_small_integers_do(tmp
     (room / "numbered.csv").write_text("7,8,9,10,11,12\n")
     (room / "scores.csv").write_text("12,40,7,33,18,9\n")
     spec = pg.load_sources(str(tmp_path / "sources.txt"))
-    idx = pg.build_private_index(spec, own_code_texts=[""], cache_dir=str(tmp_path / "cache2"))
+    idx = pg.build_private_index(
+        spec, own_code_texts=[""], cache_dir=str(tmp_path / "cache2"), allowlist_path=_NO_ALLOWLIST
+    )
     # space-separated, so this does not depend on the unescape
     assert pg.find_verbatim_leaks(CAS, [(1, "7 8 9 10 11 12")], idx) == []
     assert pg.find_verbatim_leaks(CAS, [(1, json.dumps({"text": "7\n8\n9\n10\n11\n12"}))], idx) == []
@@ -608,7 +616,7 @@ def test_unreadable_office_files_are_counted_never_raised_never_silent(tmp_path,
     for f in ("locked.docx", "broken.docx", "protected.xlsx", "truncated.pptx"):
         assert pg._ooxml_text(str(bad / f)) is None, f
     spec = pg.load_sources(str(_cfg))
-    idx = pg.build_private_index(spec, own_code_texts=[""], cache_dir=str(tmp_path / "c"))
+    idx = pg.build_private_index(spec, own_code_texts=[""], cache_dir=str(tmp_path / "c"), allowlist_path=_NO_ALLOWLIST)
     err = capsys.readouterr().err
     assert "2 .docx, 1 .pptx, 1 .xlsx source file(s) unreadable (encrypted or corrupt)" in err, err
     assert "locked" not in err and "badroom" not in err and "vault-alpha" not in err
@@ -625,7 +633,7 @@ def test_the_cache_key_changes_with_pdftotext_availability(tmp_path, monkeypatch
 
     def build_with(which):
         monkeypatch.setattr(pg, "_pdftotext_id", lambda: which)
-        pg.build_private_index(spec, own_code_texts=[""], cache_dir=str(cache))
+        pg.build_private_index(spec, own_code_texts=[""], cache_dir=str(cache), allowlist_path=_NO_ALLOWLIST)
         return set(os.listdir(cache))
 
     first = build_with("absent")
@@ -638,9 +646,9 @@ def test_the_cache_key_changes_with_the_document_rule(tmp_path, monkeypatch):
     cfg, _ = _fake_sources(tmp_path)
     spec = pg.load_sources(str(cfg))
     cache = tmp_path / "keyed"
-    pg.build_private_index(spec, own_code_texts=[""], cache_dir=str(cache))
+    pg.build_private_index(spec, own_code_texts=[""], cache_dir=str(cache), allowlist_path=_NO_ALLOWLIST)
     monkeypatch.setattr(pg, "OUTPUT_NAME_MARKERS", (*pg.OUTPUT_NAME_MARKERS, "notes"))
-    pg.build_private_index(spec, own_code_texts=[""], cache_dir=str(cache))
+    pg.build_private_index(spec, own_code_texts=[""], cache_dir=str(cache), allowlist_path=_NO_ALLOWLIST)
     assert len(os.listdir(cache)) == 2
 
 
@@ -757,3 +765,603 @@ def test_every_generated_file_names_a_source_and_a_sync_test_that_exist():
         assert os.path.isfile(os.path.join(root, source)), source
         with open(os.path.join(root, sync_test), encoding="utf-8") as fh:
             assert os.path.basename(gen) in fh.read(), f"{sync_test} does not check {gen}"
+
+
+# ==========================================================================
+# Where the private lists are found: the main checkout, from a linked worktree too.
+#
+# Every name and figure below is INVENTED. A tmp repo carries its own git-ignored docs/internal/ with
+# a sources list pointing at the fake vault above and a one-entry denylist; nothing real is read.
+# ==========================================================================
+
+from pathlib import Path  # noqa: E402
+from types import SimpleNamespace  # noqa: E402
+
+GUARD = os.path.join(os.path.dirname(os.path.abspath(__file__)), "privacy_guard.py")
+HOOKS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hooks")
+FAKE_NAME = "Zorblex Kettleworks"  # invented denylist entry
+COPY_ONLY_NAME = "Quillon Brackwater"  # invented, only ever in a worktree's copy
+SWITCH_KEY = "founderskills.privacyLists"
+_REAL_HOME = os.path.expanduser("~")
+
+
+@pytest.fixture(autouse=True)
+def isolated_git_env(tmp_path, monkeypatch):
+    """No test reads the maintainer's git config, private lists, cache or hook environment.
+
+    The repo-local switch of this clone is overridden by command-line config (GIT_CONFIG_COUNT), which
+    outranks every config file; a test that wants the switch on sets it through `_switch`."""
+    for k in list(os.environ):
+        if k.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")) or k in {
+            "GIT_CONFIG_COUNT",
+            "GIT_CONFIG_PARAMETERS",
+            "GIT_DIR",
+            "GIT_INDEX_FILE",
+            "GIT_WORK_TREE",
+            "GIT_PREFIX",
+            "GIT_COMMON_DIR",
+            "GIT_OBJECT_DIRECTORY",
+            "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+            "FOUNDER_SKILLS_PRIVATE_DIR",
+        }:
+            monkeypatch.delenv(k, raising=False)
+    empty = tmp_path / "_gitconfig_empty"
+    empty.write_text("")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(empty))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path.parent))
+    _switch(monkeypatch, "optional")
+    # A subprocess guard caches under HOME; uv keeps finding its real cache and this interpreter.
+    monkeypatch.setenv("UV_CACHE_DIR", os.environ.get("UV_CACHE_DIR") or os.path.join(_REAL_HOME, ".cache", "uv"))
+    monkeypatch.setenv(
+        "UV_PYTHON_INSTALL_DIR",
+        os.environ.get("UV_PYTHON_INSTALL_DIR") or os.path.join(_REAL_HOME, ".local", "share", "uv", "python"),
+    )
+    monkeypatch.setenv("UV_PYTHON", sys.executable)
+    monkeypatch.setenv("UV_OFFLINE", "1")
+    monkeypatch.setenv("UV_NO_PROGRESS", "1")
+    (tmp_path / "home").mkdir(exist_ok=True)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+
+
+def _switch(monkeypatch, value: str | None) -> None:
+    """Set the switch as command-line config, or (None) remove the override so config files decide."""
+    if value is None:
+        for k in ("GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"):
+            monkeypatch.delenv(k, raising=False)
+        return
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", SWITCH_KEY)
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", value)
+
+
+def _clean(text: str, private) -> None:
+    """Nothing private reaches the output: no vault path, no fake quote, no list entry."""
+    assert str(private) not in text and "vault-alpha" not in text, text
+    low = text.lower()
+    assert "zebra" not in low and "zorblex" not in low and "quillon" not in low, text
+
+
+def _run(args, cwd, env=None):
+    return subprocess.run(
+        [sys.executable, GUARD, *args], cwd=cwd, capture_output=True, text=True, env=env or os.environ.copy()
+    )
+
+
+def _g(cwd, *args, env=None):
+    return subprocess.run(
+        ["git", *args], cwd=cwd, capture_output=True, text=True, env=env or os.environ.copy(), check=False
+    )
+
+
+def _repo_with_worktree(tmp_path, with_scripts: bool = False):
+    """A tmp repo whose main checkout carries the private lists, a linked worktree outside it (`wt`) and
+    one in-tree under .claude/worktrees (`w2`). Neither worktree has a docs/internal/."""
+    cfg, private = _fake_sources(tmp_path)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "config", "user.email", "t@example.com")
+    _git(repo, "config", "user.name", "T")
+    (repo / ".gitignore").write_text("docs/internal/\n.claude/\n")
+    (repo / "a.md").write_text("hello\n")
+    names = [".gitignore", "a.md"]
+    if with_scripts:
+        shutil.copytree(HOOKS, repo / "scripts" / "hooks")
+        shutil.copy2(GUARD, repo / "scripts" / "privacy_guard.py")
+        names += ["scripts"]
+    _git(repo, "add", *names)
+    _git(repo, "commit", "-q", "-m", "init")
+    lists = repo / "docs" / "internal"
+    lists.mkdir(parents=True)
+    (lists / "privacy-private-sources.txt").write_text(cfg.read_text())
+    (lists / "privacy-denylist.txt").write_text(f"# invented\n{FAKE_NAME}\n")
+    wt = tmp_path / "wt"
+    _git(repo, "worktree", "add", "-q", "-b", "wt", str(wt))
+    w2 = repo / ".claude" / "worktrees" / "w2"
+    _git(repo, "worktree", "add", "-q", "-b", "w2", str(w2))
+    return SimpleNamespace(repo=repo, wt=wt, w2=w2, lists=lists, private=private, cache=tmp_path / "cache")
+
+
+def _stage(where, name: str, text: str) -> None:
+    (Path(where) / name).write_text(text)
+    _git(where, "add", name)
+
+
+def test_staged_from_a_linked_worktree_reads_the_main_checkouts_lists(tmp_path):
+    r = _repo_with_worktree(tmp_path)
+    _stage(r.wt, "x.md", "the total was $1,111\n")
+    out = _run(["--staged", "--cache-dir", str(r.cache)], r.wt)
+    assert out.returncode == 1 and "[figure" in out.stderr, out.stderr
+    _clean(out.stderr, r.private)
+
+
+def test_commit_msg_from_a_linked_worktree_reads_the_main_checkouts_lists(tmp_path):
+    r = _repo_with_worktree(tmp_path)
+    msg = tmp_path / "MSG"
+    msg.write_text("fix: handle 7,777.77 margins\n")
+    out = _run(["--commit-msg", str(msg), "--cache-dir", str(r.cache)], r.wt)
+    assert out.returncode == 1 and "[figure" in out.stderr, out.stderr
+    _clean(out.stderr, r.private)
+
+
+def test_range_from_a_linked_worktree_reads_the_main_checkouts_lists(tmp_path):
+    r = _repo_with_worktree(tmp_path)
+    _stage(r.wt, "q.md", f"{FAKE_QUOTE}\n")
+    _git(r.wt, "commit", "-q", "-m", "add q")
+    out = _run(["--range", "HEAD~1..HEAD", "--cache-dir", str(r.cache)], r.wt)
+    assert out.returncode == 1 and "[verbatim" in out.stderr, out.stderr
+    _clean(out.stderr, r.private)
+
+
+def test_names_from_a_linked_worktree_read_the_main_checkouts_denylist(tmp_path):
+    r = _repo_with_worktree(tmp_path)
+    _stage(r.wt, "n.md", f"we met {FAKE_NAME} today\n")
+    out = _run(["--staged", "--cache-dir", str(r.cache)], r.wt)
+    assert out.returncode == 1 and "[name" in out.stderr, out.stderr
+    _clean(out.stderr, r.private)
+
+
+def test_the_in_tree_worktree_reads_the_main_checkouts_lists_too(tmp_path):
+    r = _repo_with_worktree(tmp_path)
+    _stage(r.w2, "x.md", "the total was $1,111\n")
+    out = _run(["--staged", "--cache-dir", str(r.cache)], r.w2)
+    assert out.returncode == 1 and "[figure" in out.stderr, out.stderr
+
+
+def test_a_worktree_copy_is_ignored_and_counted_never_shown(tmp_path):
+    r = _repo_with_worktree(tmp_path)
+    (r.lists / "privacy-figure-allowlist.txt").write_text("# main\n9,999.99\n")
+    copy = r.wt / "docs" / "internal"
+    copy.mkdir(parents=True)
+    (copy / "privacy-figure-allowlist.txt").write_text("9,999.99\n$1,111\n")
+    _stage(r.wt, "x.md", "the total was $1,111\n")
+    out = _run(["--staged", "--cache-dir", str(r.cache)], r.wt)
+    assert out.returncode == 1 and "[figure" in out.stderr, out.stderr  # main's allowlist applies
+    note = [ln for ln in out.stderr.splitlines() if "ignoring this worktree's copy" in ln]
+    assert len(note) == 1, out.stderr
+    assert "1 entry only in the copy" in note[0] and "Delete the copy" in note[0], note
+    assert "wt/docs/internal/privacy-figure-allowlist.txt" in note[0], note
+    assert "repo/docs/internal/privacy-figure-allowlist.txt" in note[0], note
+    assert "9,999" not in note[0] and "1,111" not in note[0], note
+    _clean(out.stderr, r.private)
+
+
+def test_an_identical_or_reordered_worktree_copy_is_not_noted(tmp_path, monkeypatch):
+    r = _repo_with_worktree(tmp_path)
+    copy = r.wt / "docs" / "internal"
+    copy.mkdir(parents=True)
+    _stage(r.wt, "x.md", "plain text\n")
+    shutil.copy2(r.lists / "privacy-denylist.txt", copy / "privacy-denylist.txt")
+    out = _run(["--staged", "--cache-dir", str(r.cache)], r.wt)
+    assert out.returncode == 0 and "ignoring this worktree's copy" not in out.stderr, out.stderr
+    # same entries, other order, other comments: no note, and no refusal under the switch
+    (r.lists / "privacy-figure-allowlist.txt").write_text("# a\n9,999.99\n8,888.88\n")
+    (copy / "privacy-figure-allowlist.txt").write_text("8,888.88\n# rewritten\n\n9,999.99\n")
+    _switch(monkeypatch, "required")
+    out = _run(["--staged", "--cache-dir", str(r.cache)], r.wt)
+    assert out.returncode == 0 and "ignoring this worktree's copy" not in out.stderr, out.stderr
+
+
+def test_main_checkout_subdirectory_finds_the_lists(tmp_path):
+    r = _repo_with_worktree(tmp_path)
+    sub = r.repo / "sub"
+    sub.mkdir()
+    _stage(sub, "x.md", "the total was $1,111\n")
+    out = _run(["--staged", "--cache-dir", str(r.cache)], sub)
+    assert out.returncode == 1 and "[figure" in out.stderr, out.stderr
+
+
+def test_tree_no_names_is_unchanged_and_silent(tmp_path):
+    repo = _scratch_repo(tmp_path)
+    (repo / "a.md").write_text("hello\n")
+    _git(repo, "add", "a.md")
+    out = _run(["--tree", "--no-names"], repo)
+    assert out.returncode == 0 and out.stderr == "" and out.stdout == "", (out.stdout, out.stderr)
+
+
+def test_missing_lists_print_one_line_and_refuse_only_under_the_switch(tmp_path, monkeypatch):
+    r = _repo_with_worktree(tmp_path)
+    shutil.rmtree(r.lists)
+    _stage(r.wt, "x.md", "plain text\n")
+    out = _run(["--staged", "--cache-dir", str(r.cache)], r.wt)
+    assert out.returncode == 0, out.stderr
+    lines = [ln for ln in out.stderr.splitlines() if "no private lists here" in ln]
+    assert len(lines) == 1 and "normal for a public clone" in lines[0], out.stderr
+    assert "privacy-denylist.txt" in lines[0] and "privacy-private-sources.txt" in lines[0], lines
+    assert "allowlist" not in lines[0], lines
+    _switch(monkeypatch, "required")
+    out = _run(["--staged", "--cache-dir", str(r.cache)], r.wt)
+    assert out.returncode == 3, out.stderr
+    assert out.stderr.startswith("privacy-guard: private lists required ("), out.stderr
+    assert f"git config {SWITCH_KEY} optional" in out.stderr, out.stderr
+
+
+def test_the_switch_reaches_from_the_repo_config(tmp_path, monkeypatch):
+    r = _repo_with_worktree(tmp_path)
+    shutil.rmtree(r.lists)
+    _stage(r.wt, "x.md", "plain text\n")
+    _switch(monkeypatch, None)
+    _git(r.repo, "config", SWITCH_KEY, "required")
+    out = _run(["--staged", "--cache-dir", str(r.cache)], r.wt)
+    assert out.returncode == 3, out.stderr
+    first = out.stderr.splitlines()[0]
+    assert first.startswith("privacy-guard: private lists required (") and "config" in first, first
+    # a global `required` is overridden by a repo-local `optional`
+    glob = tmp_path / "global.gitconfig"
+    glob.write_text("[founderskills]\n\tprivacyLists = required\n")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(glob))
+    _git(r.repo, "config", SWITCH_KEY, "optional")
+    out = _run(["--staged", "--cache-dir", str(r.cache)], r.wt)
+    assert out.returncode == 0 and "no private lists here" in out.stderr, out.stderr
+
+
+def test_an_explicit_missing_list_in_a_hook_mode_is_named_and_obeys_the_switch(tmp_path, monkeypatch):
+    r = _repo_with_worktree(tmp_path)
+    _stage(r.wt, "x.md", "plain text\n")
+    missing = str(tmp_path / "absent-sources.txt")
+    args = ["--staged", "--sources-file", missing, "--cache-dir", str(r.cache)]
+    out = _run(args, r.wt)
+    assert out.returncode == 0 and "no private lists here" in out.stderr and missing in out.stderr, out.stderr
+    _switch(monkeypatch, "required")
+    out = _run(args, r.wt)
+    assert out.returncode == 3 and out.stderr.startswith("privacy-guard: private lists required ("), out.stderr
+
+
+def test_the_absence_line_names_only_lists_that_turn_a_layer_off(tmp_path):
+    r = _repo_with_worktree(tmp_path)
+    _stage(r.wt, "x.md", "plain text\n")
+    # no allowlist anywhere: nothing to say
+    out = _run(["--staged", "--cache-dir", str(r.cache)], r.wt)
+    assert out.returncode == 0 and "no private lists here" not in out.stderr, out.stderr
+    # denylist missing under --no-names: nothing to say
+    (r.lists / "privacy-denylist.txt").unlink()
+    out = _run(["--staged", "--no-names", "--cache-dir", str(r.cache)], r.wt)
+    assert out.returncode == 0 and "no private lists here" not in out.stderr, out.stderr
+    # both missing under --no-names: only the sources list is named, once
+    (r.lists / "privacy-private-sources.txt").unlink()
+    out = _run(["--staged", "--no-names", "--cache-dir", str(r.cache)], r.wt)
+    assert out.stderr.count("no private lists here") == 1, out.stderr
+    assert "privacy-private-sources.txt" in out.stderr and "privacy-denylist.txt" not in out.stderr, out.stderr
+
+
+def test_a_lost_entry_in_a_worktree_denylist_copy_refuses_under_the_switch(tmp_path, monkeypatch):
+    r = _repo_with_worktree(tmp_path)
+    copy = r.wt / "docs" / "internal"
+    copy.mkdir(parents=True)
+    (copy / "privacy-denylist.txt").write_text(f"{FAKE_NAME}\n{COPY_ONLY_NAME}\n")
+    # an allowlist copy beside it: its note must not come before the refusal's first line
+    (copy / "privacy-figure-allowlist.txt").write_text("5,555.55\n")
+    _stage(r.wt, "x.md", "plain text\n")
+    out = _run(["--staged", "--cache-dir", str(r.cache)], r.wt)
+    assert out.returncode == 0 and "1 entry only in the copy" in out.stderr, out.stderr  # a note without it
+    _switch(monkeypatch, "required")
+    out = _run(["--staged", "--cache-dir", str(r.cache)], r.wt)
+    assert out.returncode == 3 and out.stderr.startswith("privacy-guard: private lists required ("), out.stderr
+    assert "wt/docs/internal/privacy-figure-allowlist.txt" in out.stderr, out.stderr  # still noted, after it
+    assert "1 entry only in the copy" in out.stderr and "Delete the copy" in out.stderr, out.stderr
+    assert "wt/docs/internal/privacy-denylist.txt" in out.stderr, out.stderr
+    assert "repo/docs/internal/privacy-denylist.txt" in out.stderr, out.stderr
+    _clean(out.stderr, r.private)
+    assert "5,555" not in out.stderr
+    # the same in an allowlist copy is only a note: ignoring it makes the guard stricter
+    (copy / "privacy-denylist.txt").unlink()
+    (copy / "privacy-figure-allowlist.txt").write_text("4,444.44\n")
+    out = _run(["--staged", "--cache-dir", str(r.cache)], r.wt)
+    assert out.returncode == 0 and "1 entry only in the copy" in out.stderr, out.stderr
+    assert "4,444" not in out.stderr
+
+
+def test_a_copy_that_is_not_utf8_is_handled_without_a_traceback(tmp_path, monkeypatch):
+    r = _repo_with_worktree(tmp_path)
+    copy = r.wt / "docs" / "internal"
+    copy.mkdir(parents=True)
+    (copy / "privacy-denylist.txt").write_bytes(b"Caf\xe9 Invented Holdings\n")  # Latin-1, invented
+    _stage(r.wt, "x.md", "plain text\n")
+    out = _run(["--staged", "--cache-dir", str(r.cache)], r.wt)
+    assert out.returncode == 0 and "unreadable copy" in out.stderr, out.stderr
+    assert "Traceback" not in out.stderr and "Invented" not in out.stderr, out.stderr
+    _switch(monkeypatch, "required")
+    out = _run(["--staged", "--cache-dir", str(r.cache)], r.wt)
+    assert out.returncode == 3 and out.stderr.startswith("privacy-guard: private lists required ("), out.stderr
+    assert "unreadable copy" in out.stderr and "Traceback" not in out.stderr, out.stderr
+
+
+def test_an_explicit_relative_list_resolves_against_the_current_directory(tmp_path):
+    r = _repo_with_worktree(tmp_path)
+    shutil.rmtree(r.lists)
+    (r.wt / "sub").mkdir()
+    (r.wt / "sub" / "x.txt").write_text((tmp_path / "sources.txt").read_text())
+    _stage(r.wt, "x.md", "the total was $1,111\n")
+    out = _run(["--staged", "--no-names", "--sources-file", "sub/x.txt", "--cache-dir", str(r.cache)], r.wt)
+    assert out.returncode == 1 and "[figure" in out.stderr, out.stderr
+
+
+def test_outside_any_repo_the_hook_modes_stay_silent(tmp_path):
+    msg = tmp_path / "MSG"
+    msg.write_text("fix: a plain message\n")
+    out = _run(["--commit-msg", str(msg), "--cache-dir", str(tmp_path / "c")], tmp_path)
+    assert out.returncode == 0 and out.stderr == "", out.stderr
+
+
+def test_the_isolation_fixture_is_what_git_reads(tmp_path, monkeypatch):
+    """The fixture's lever bites: a global `required` that GIT_CONFIG_GLOBAL points at refuses."""
+    repo = _scratch_repo(tmp_path)
+    (repo / "a.md").write_text("plain text\n")
+    _git(repo, "add", "a.md")
+    _switch(monkeypatch, None)
+    glob = tmp_path / "global.gitconfig"
+    glob.write_text("[founderskills]\n\tprivacyLists = required\n")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(glob))
+    out = _run(["--staged", "--cache-dir", str(tmp_path / "c")], repo)
+    assert out.returncode == 3, out.stderr
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "_gitconfig_empty"))
+    out = _run(["--staged", "--cache-dir", str(tmp_path / "c")], repo)
+    assert out.returncode == 0, out.stderr
+
+
+def test_main_and_worktree_share_one_cache_entry(tmp_path):
+    r = _repo_with_worktree(tmp_path)
+    msg = tmp_path / "MSG"
+    msg.write_text("fix: handle 7,777.77 margins\n")
+    for where in (r.repo, r.wt):  # both read the lists and use the index, so one file means shared
+        out = _run(["--commit-msg", str(msg), "--cache-dir", str(r.cache)], where)
+        assert out.returncode == 1 and "[figure" in out.stderr, (where, out.stderr)
+    assert len([n for n in os.listdir(r.cache) if n.startswith("index-")]) == 1
+
+
+def test_a_relative_source_root_resolves_against_the_main_checkout_root(tmp_path):
+    r = _repo_with_worktree(tmp_path)
+    (r.lists / "privacy-private-sources.txt").write_text("# relative\n../vault-alpha\n!skill-copy\n")
+    _stage(r.w2, "x.md", "the total was $1,111\n")
+    out = _run(["--staged", "--no-names", "--cache-dir", str(r.cache)], r.w2)
+    assert out.returncode == 1 and "[figure" in out.stderr, out.stderr
+    _stage(r.repo, "y.md", "the total was $1,111\n")
+    out = _run(["--staged", "--no-names", "--cache-dir", str(r.cache)], r.repo)
+    assert out.returncode == 1 and "[figure" in out.stderr, out.stderr
+    assert len([n for n in os.listdir(r.cache) if n.startswith("index-")]) == 1
+    spec = pg.load_sources(str(r.lists / "privacy-private-sources.txt"), base=str(r.repo))
+    assert spec.roots == [os.path.normpath(str(tmp_path / "vault-alpha"))]
+
+
+# ---- the resolver ---------------------------------------------------------------------------------
+
+
+def _real(p) -> str:
+    return os.path.realpath(str(p))
+
+
+def test_resolver_finds_the_main_checkout_from_every_worktree(tmp_path, monkeypatch):
+    r = _repo_with_worktree(tmp_path)
+    for where in (r.repo, r.wt, r.w2):
+        monkeypatch.chdir(where)
+        d, how = pg.private_dir()
+        assert (_real(d), how) == (_real(r.lists), "main-checkout"), where
+    monkeypatch.setenv("FOUNDER_SKILLS_PRIVATE_DIR", str(tmp_path / "elsewhere"))
+    assert pg.private_dir() == (str(tmp_path / "elsewhere"), "env")
+    monkeypatch.delenv("FOUNDER_SKILLS_PRIVATE_DIR")
+    out = tmp_path / "outside"
+    out.mkdir()
+    monkeypatch.chdir(out)
+    assert pg.private_dir() == (os.path.join("docs", "internal"), "cwd")
+    assert pg._resolve_private_dir()[2] == ""  # outside a repo: no reason, nothing to warn about
+    monkeypatch.setenv("GIT_DIR", str(r.repo / ".git" / "worktrees" / "wt"))
+    d, how = pg.private_dir()
+    assert (_real(d), how) == (_real(r.lists), "main-checkout")
+    # GIT_DIR naming the main repo's .git with cwd outside: --show-toplevel then prints the CWD, which
+    # the work-tree check must reject (else the cwd's docs/internal would read as the main checkout's)
+    monkeypatch.setenv("GIT_DIR", str(r.repo / ".git"))
+    d, how = pg.private_dir()
+    assert (_real(d), how) == (_real(r.lists), "main-checkout")
+
+
+def test_a_git_without_path_format_is_not_read_as_outside_a_repo(tmp_path, monkeypatch):
+    """Below git 2.31 `rev-parse --path-format` fails; inside a repo that must warn, and refuse under
+    the switch, never fall to the silent "outside any repository" path."""
+    r = _repo_with_worktree(tmp_path)
+    real_git = shutil.which("git")
+    shim_dir = tmp_path / "shim"
+    shim_dir.mkdir()
+    shim = shim_dir / "git"
+    shim.write_text(
+        "#!/bin/sh\n"
+        'for a in "$@"; do case "$a" in --path-format*) echo "unknown option: $a" >&2; exit 129;; esac; done\n'
+        f'exec "{real_git}" "$@"\n'
+    )
+    shim.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{shim_dir}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.chdir(r.wt)
+    d, how, reason = pg._resolve_private_dir()
+    assert how == "cwd" and "git >= 2.31" in reason, (d, how, reason)
+    _stage(r.wt, "x.md", "plain text\n")
+    out = _run(["--staged", "--cache-dir", str(r.cache)], r.wt)
+    assert out.returncode == 0 and "git >= 2.31" in out.stderr, out.stderr
+    _switch(monkeypatch, "required")
+    out = _run(["--staged", "--cache-dir", str(r.cache)], r.wt)
+    assert out.returncode == 3 and out.stderr.startswith("privacy-guard: private lists required ("), out.stderr
+    assert "git >= 2.31" in out.stderr, out.stderr
+
+
+def test_resolver_runs_no_worktree_listing_from_the_main_checkout(tmp_path, monkeypatch):
+    r = _repo_with_worktree(tmp_path)
+    calls: list[list[str]] = []
+    real_run = subprocess.run
+
+    def logging_run(cmd, *a, **kw):
+        calls.append(list(cmd))
+        return real_run(cmd, *a, **kw)
+
+    monkeypatch.setattr(pg.subprocess, "run", logging_run)
+    monkeypatch.chdir(r.repo)
+    assert pg.private_dir()[1] == "main-checkout"
+    assert calls and not any("worktree" in c for c in calls), calls
+    calls.clear()
+    monkeypatch.chdir(r.wt)
+    assert pg.private_dir()[1] == "main-checkout"
+    assert any("worktree" in c for c in calls), calls  # control: the linked worktree does list
+
+
+def test_resolver_on_a_separate_git_dir(tmp_path, monkeypatch):
+    main = tmp_path / "sepmain"
+    _g(tmp_path, "init", "-q", "-b", "main", "--separate-git-dir", str(tmp_path / "sep.git"), str(main))
+    _git(main, "-c", "user.email=t@example.com", "-c", "user.name=T", "commit", "-q", "--allow-empty", "-m", "i")
+    _git(main, "worktree", "add", "-q", "-b", "w", str(tmp_path / "sepwt"))
+    monkeypatch.chdir(main)
+    assert pg._resolve_private_dir()[:2] == (os.path.join(_real(main), "docs", "internal"), "main-checkout")
+    monkeypatch.chdir(tmp_path / "sepwt")
+    d, how, reason = pg._resolve_private_dir()
+    assert how == "cwd" and d == os.path.join("docs", "internal") and reason, (d, how, reason)
+    msg = tmp_path / "MSG"
+    msg.write_text("fix: a plain message\n")
+    out = _run(["--commit-msg", str(msg), "--cache-dir", str(tmp_path / "c")], tmp_path / "sepwt")
+    assert "no main checkout found" in out.stderr, out.stderr
+
+
+def test_resolver_on_a_bare_repo_with_a_worktree(tmp_path, monkeypatch):
+    src = _scratch_repo(tmp_path)
+    (src / "a.md").write_text("x\n")
+    _git(src, "add", "a.md")
+    _git(src, "commit", "-q", "-m", "i")
+    _g(tmp_path, "init", "-q", "--bare", "b.git")
+    _git(src, "push", "-q", str(tmp_path / "b.git"), "main")
+    _git(tmp_path / "b.git", "worktree", "add", "-q", str(tmp_path / "bw"), "main")
+    monkeypatch.chdir(tmp_path / "bw")
+    d, how, reason = pg._resolve_private_dir()
+    assert how == "cwd" and reason, (d, how, reason)
+
+
+def test_resolver_on_a_submodule(tmp_path, monkeypatch):
+    src = _scratch_repo(tmp_path)
+    (src / "a.md").write_text("x\n")
+    _git(src, "add", "a.md")
+    _git(src, "commit", "-q", "-m", "i")
+    sup = tmp_path / "sup"
+    _g(tmp_path, "init", "-q", "-b", "main", "sup")
+    _git(sup, "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(src), "sm")
+    monkeypatch.chdir(sup / "sm")
+    assert pg._resolve_private_dir()[:2] == (os.path.join(_real(sup / "sm"), "docs", "internal"), "main-checkout")
+    _git(sup / "sm", "worktree", "add", "-q", "-b", "x", str(tmp_path / "smwt"))
+    monkeypatch.chdir(tmp_path / "smwt")
+    d, how, _reason = pg._resolve_private_dir()
+    assert (_real(d), how) == (os.path.join(_real(sup / "sm"), "docs", "internal"), "main-checkout")
+
+
+# ---- the release gate's switch check ---------------------------------------------------------------
+
+
+def test_check_switch(tmp_path, monkeypatch):
+    r = _repo_with_worktree(tmp_path)
+    _switch(monkeypatch, None)
+    out = _run(["--check-switch"], r.wt)
+    assert out.returncode == 3 and out.stderr.startswith("privacy-guard: private lists required ("), out.stderr
+    assert f"git config --global {SWITCH_KEY} required" in out.stderr, out.stderr
+    assert f"git config {SWITCH_KEY} optional" in out.stderr, out.stderr
+    _switch(monkeypatch, "required")
+    assert _run(["--check-switch"], r.wt).returncode == 0
+    _switch(monkeypatch, "optional")
+    out = _run(["--check-switch"], r.wt)
+    assert out.returncode == 0 and "switch deliberately off in" in out.stderr, out.stderr
+    shutil.rmtree(r.lists)
+    _switch(monkeypatch, None)
+    out = _run(["--check-switch"], r.wt)
+    assert out.returncode == 0 and "no private lists on this machine" in out.stderr, out.stderr
+
+
+# ---- the hooks, through a real `git commit` / `git push` ------------------------------------------
+
+STUB_MARKER = "STUB-GUARD-RAN"
+
+
+def _commit(where, *args):
+    return _g(where, "commit", "-s", "-q", *args)
+
+
+def _head(where) -> str:
+    return _git(where, "rev-parse", "HEAD").strip()
+
+
+def test_hooks_run_the_guard_beside_them_from_main_and_from_a_worktree(tmp_path):
+    r = _repo_with_worktree(tmp_path, with_scripts=True)
+    _git(r.repo, "config", "core.hooksPath", str(r.repo / "scripts" / "hooks"))
+    # The worktree's own guard is a stub that passes everything: only the guard beside the hooks refuses.
+    (r.wt / "scripts" / "privacy_guard.py").write_text(
+        f"import sys\nprint({STUB_MARKER!r}, file=sys.stderr)\nsys.exit(0)\n"
+    )
+    # (a) from the main checkout
+    before = _head(r.repo)
+    _stage(r.repo, "x.md", "the total was $1,111\n")
+    out = _commit(r.repo, "-m", "add a note")
+    assert out.returncode != 0 and "[figure" in out.stderr and _head(r.repo) == before, out.stderr
+    # (b) from the linked worktree, a partial commit (git uses a temporary index)
+    before = _head(r.wt)
+    _stage(r.wt, "y.md", "the total was $1,111\n")
+    out = _commit(r.wt, "-m", "add a note", "--", "y.md")
+    assert out.returncode != 0 and "[figure" in out.stderr and _head(r.wt) == before, out.stderr
+    assert STUB_MARKER not in out.stderr
+    _git(r.wt, "reset", "-q", "y.md")
+    # (c) the commit message carries the figure
+    _stage(r.wt, "z.md", "plain text\n")
+    out = _commit(r.wt, "-m", "fix: handle 7,777.77 margins")
+    assert out.returncode != 0 and "REJECTED by the privacy guard" in out.stderr, out.stderr
+    assert STUB_MARKER not in out.stderr and _head(r.wt) == before
+    # (d) a push of a commit made with --no-verify
+    bare = tmp_path / "remote.git"
+    _g(tmp_path, "init", "-q", "--bare", str(bare))
+    _stage(r.wt, "w.md", "the total was $1,111\n")
+    assert _commit(r.wt, "--no-verify", "-m", "skip hooks").returncode == 0
+    out = _g(r.wt, "push", "-q", str(bare), "HEAD:refs/heads/wt")
+    assert out.returncode != 0 and "pre-push: REJECTED" in out.stderr, out.stderr
+    assert STUB_MARKER not in out.stderr
+    assert _g(bare, "rev-parse", "--verify", "-q", "refs/heads/wt").returncode != 0
+    # control: the worktree's own hooks run the worktree's guard, and the stub is noticed
+    _git(r.repo, "config", "core.hooksPath", "scripts/hooks")
+    _stage(r.wt, "v.md", "plain text\n")
+    out = _commit(r.wt, "-m", "plain")
+    assert out.returncode == 0 and STUB_MARKER in out.stderr, out.stderr
+
+
+def test_hooks_with_no_guard_beside_them_fall_back_to_the_work_trees_guard(tmp_path):
+    r = _repo_with_worktree(tmp_path, with_scripts=True)
+    git_hooks = r.repo / ".git" / "hooks"
+    for layout in ("copied", "symlinked", "hookspath-symlink"):
+        shutil.rmtree(git_hooks, ignore_errors=True)
+        git_hooks.mkdir()
+        _g(r.repo, "config", "--unset", "core.hooksPath")
+        if layout == "copied":
+            for h in ("pre-commit", "commit-msg"):
+                shutil.copy2(r.repo / "scripts" / "hooks" / h, git_hooks / h)
+        elif layout == "symlinked":
+            for h in ("pre-commit", "commit-msg"):
+                os.symlink(r.repo / "scripts" / "hooks" / h, git_hooks / h)
+        else:
+            link = tmp_path / "hooklink"
+            if not link.exists():
+                os.symlink(r.repo / "scripts" / "hooks", link)
+            _git(r.repo, "config", "core.hooksPath", str(link))
+        for where in (r.repo, r.wt):
+            before = _head(where)
+            _stage(where, f"{layout}.md", "the total was $1,111\n")
+            out = _commit(where, "-m", "add a note")
+            assert out.returncode != 0 and "[figure" in out.stderr, (layout, where, out.stderr)
+            assert "can't open file" not in out.stderr and _head(where) == before, (layout, out.stderr)
+            _git(where, "reset", "-q", f"{layout}.md")

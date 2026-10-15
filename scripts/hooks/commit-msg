@@ -62,7 +62,10 @@ fi
 # Privacy: the message itself must not carry a private figure, a quoted private line, or a figure
 # beside a real-data phrase ("a live run printed …"). Local layers need the git-ignored sources file;
 # without it only the figure-provenance check runs. See scripts/privacy_guard.py.
-if ! uv run python scripts/privacy_guard.py --commit-msg "$MSG_FILE"; then
+# The guard beside this hook script, else the work tree's own (see pre-commit; keep any `cd` in $( ... )).
+guard="$(cd "$(dirname "$0")/.." && pwd)/privacy_guard.py"
+[ -f "$guard" ] || guard="$(git rev-parse --show-toplevel)/scripts/privacy_guard.py"
+if ! uv run python "$guard" --commit-msg "$MSG_FILE"; then
   echo "commit-msg: REJECTED by the privacy guard (see above)." >&2
   exit 1
 fi

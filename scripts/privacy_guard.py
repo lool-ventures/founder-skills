@@ -38,13 +38,24 @@ and the added token only, never which private file matched or any of its text.
                   from ("a live run", "the founder's", …). Blocking locally, warning-only in CI. A
                   reviewed line is accepted with the inline marker `privacy-guard: synthetic`.
 
-The private sources are folders listed in a LOCAL, git-ignored file (default
-docs/internal/privacy-private-sources.txt): one path per line, `#` comments, and `!<substring>` lines
-that exclude any file whose path contains the substring (copies of our own code). Without that file
-layers 4-5 skip silently, like layer 3 without its list. The index holds HASHES only and is cached
-outside the repo (~/.cache/founder-skills/privacy-guard), rebuilt when a source file changes. False
-alarms go in a LOCAL, git-ignored allowlist (docs/internal/privacy-figure-allowlist.txt, one figure
-per line): a committed one would reveal that a public number equals a private one.
+The private sources are folders listed in a LOCAL, git-ignored file (privacy-private-sources.txt): one
+path per line (a relative one is read from the main checkout's root), `#` comments, and `!<substring>`
+lines that exclude any file whose path contains the substring (copies of our own code). The index holds
+HASHES only and is cached outside the repo (~/.cache/founder-skills/privacy-guard), rebuilt when a
+source file changes. False alarms go in a LOCAL, git-ignored allowlist (privacy-figure-allowlist.txt,
+one figure per line): a committed one would reveal that a public number equals a private one.
+
+Where the three lists are read from: $FOUNDER_SKILLS_PRIVATE_DIR when set, else the MAIN checkout's
+docs/internal/, from a linked worktree too (a worktree's own docs/internal/ is never read; a copy there
+whose entries differ is noted, counts only), else docs/internal/ under the current directory. An
+explicit --names-file / --sources-file / --allowlist-file keeps its cwd-relative meaning.
+
+A missing list turns its layer off (CI and public clones have none). In the hook modes (--staged,
+--commit-msg, --range) one stderr line names each missing list that turns a layer off; the allowlist
+never does. When `git config founderskills.privacyLists` is `required`, a missing list, a main checkout
+that cannot be found, or a worktree denylist/sources copy holding entries main lacks exits 3 instead.
+`optional` (or unset) keeps the line only. --check-switch (the release gate) exits 3 when this machine
+has a sources list and the switch is unset.
 
 Usage:
   privacy_guard.py --staged              # staged files (layers 1-3) + staged ADDED lines (4-6)
@@ -54,8 +65,10 @@ Usage:
   privacy_guard.py FILE [FILE ...]       # scan specific files
   privacy_guard.py --staged --names-file docs/internal/privacy-denylist.txt
   privacy_guard.py --tree --no-names     # force-skip layer 3
+  privacy_guard.py --check-switch        # is the switch set on a machine that has the lists?
 
-Exit 0 = clean, 1 = findings (printed to stderr), 2 = usage error.
+Exit 0 = clean, 1 = findings (printed to stderr), 2 = usage error, 3 = private lists required but
+missing or stale (the line starts `privacy-guard: private lists required (<origin>)`).
 """
 
 from __future__ import annotations
@@ -102,6 +115,108 @@ ALLOWLISTED_DOCS = frozenset(
 )
 
 DEFAULT_NAMES_FILE = "docs/internal/privacy-denylist.txt"
+PRIVATE_DIR_REL = os.path.join("docs", "internal")
+PRIVATE_DIR_ENV = "FOUNDER_SKILLS_PRIVATE_DIR"
+SWITCH_KEY = "founderskills.privacyLists"
+EXIT_LISTS_REQUIRED = 3
+REQUIRED_PREFIX = "privacy-guard: private lists required"
+
+
+def _git_try(*args: str) -> str | None:
+    """`git <args>` stdout, stripped; None when git fails or is absent. Never raises."""
+    try:
+        r = subprocess.run(["git", *args], capture_output=True, text=True)
+    except OSError:
+        return None
+    return r.stdout.strip() if r.returncode == 0 else None
+
+
+def _is_work_tree(path: str) -> bool:
+    return os.path.exists(os.path.join(path, ".git"))
+
+
+def _main_checkout_and_reason() -> tuple[str | None, str]:
+    """(the main working tree, "") or (None, why not). The reason is "" outside any repository.
+
+    In the main worktree (git dir == common dir) it is the toplevel. From a linked worktree it is the
+    first record of `git worktree list`, verified to be a work tree: a bare record, or a record that is
+    the git dir itself (a separate git dir; a submodule is recovered through its core.worktree), is not."""
+    dirs = _git_try("rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir")
+    if dirs is None:
+        if _git_try("rev-parse", "--git-dir") is None:
+            return None, ""  # git reports no repository here
+        # Inside a repository, but this git cannot answer (no --path-format below git 2.31): never read
+        # as "outside a repo", which would take the cwd lists with no line and no refusal.
+        return None, "no main checkout found: git did not report its directories (git >= 2.31 needed)"
+    parts = dirs.splitlines()
+    if len(parts) != 2:
+        return None, "no main checkout found: git did not report its directories"
+    git_dir, common = (os.path.realpath(p) for p in parts)
+    if git_dir == common:
+        top = _git_try("rev-parse", "--show-toplevel")
+        if top and _is_work_tree(top):
+            return top, ""
+    listing = _git_try("worktree", "list", "--porcelain")
+    record = (listing or "").split("\n\n")[0].splitlines()
+    first = next((ln[len("worktree ") :] for ln in record if ln.startswith("worktree ")), None)
+    if first is None:
+        return None, "no main checkout found: git worktree list failed"
+    if "bare" in record:
+        return None, "no main checkout found: bare repository"
+    candidate = first
+    if os.path.realpath(first) == common:
+        rel = _git_try("config", "--file", os.path.join(common, "config"), "--get", "core.worktree")
+        if not rel:
+            return None, "no main checkout found: separate git dir"
+        candidate = os.path.normpath(os.path.join(common, rel))
+    if not _is_work_tree(candidate):
+        return None, "no main checkout found: its first worktree is not a work tree"
+    return candidate, ""
+
+
+def main_checkout() -> str | None:
+    """The main working tree of the repository cwd (or GIT_DIR) is in, VERIFIED to be a work tree;
+    None when it cannot be determined. Never memoized: callers chdir between calls."""
+    return _main_checkout_and_reason()[0]
+
+
+def _resolve_private_dir() -> tuple[str, str, str]:
+    """(directory, how, reason): how in {"env", "main-checkout", "cwd"}; reason is why a fallback was
+    taken inside a repository ("" otherwise)."""
+    env = os.environ.get(PRIVATE_DIR_ENV)
+    if env:
+        return env, "env", ""
+    main, reason = _main_checkout_and_reason()
+    if main:
+        return os.path.join(main, PRIVATE_DIR_REL), "main-checkout", ""
+    return PRIVATE_DIR_REL, "cwd", reason
+
+
+def private_dir() -> tuple[str, str]:
+    """(directory, how): where the private lists are read from. See the module docstring."""
+    d, how, _reason = _resolve_private_dir()
+    return d, how
+
+
+def _entries(path: str) -> set[str] | None:
+    """A list's entries: stripped lines, blanks and `#` lines dropped (order and comments ignored).
+    None when the file cannot be read as UTF-8 text."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return {s for s in (ln.strip() for ln in fh) if s and not s.startswith("#")}
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+def _switch() -> tuple[str, str]:
+    """(value, where it was set) of the `required` switch; ("", "") when unset."""
+    out = _git_try("config", "--show-origin", "--get", SWITCH_KEY)
+    if not out:
+        return "", ""
+    origin, _, value = out.partition("\t")
+    origin = origin[len("file:") :] if origin.startswith("file:") else origin.rstrip(":")
+    return value.strip(), origin
+
 
 # Layer-2 pattern (name-free, HIGH PRECISION — it gates commits, so generic
 # English must not trip it). It catches the observed "named-after-an-unknown-
@@ -350,8 +465,11 @@ class PrivateIndex:
     allow: set[str] = field(default_factory=set)  # normalised figures accepted locally
 
 
-def load_sources(path: str) -> SourcesSpec | None:
-    """The local sources file, or None when it is absent (layers 4-5 then skip silently)."""
+def load_sources(path: str, base: str | None = None) -> SourcesSpec | None:
+    """The local sources file, or None when it is absent (layers 4-5 then off).
+
+    A relative root is read from `base`, by default the main checkout's root (the cwd of every hook run
+    before worktrees were resolved), else the cwd; every root is returned absolute."""
     if not os.path.isfile(path):
         return None
     roots: list[str] = []
@@ -364,8 +482,13 @@ def load_sources(path: str) -> SourcesSpec | None:
             continue
         if s.startswith("!"):
             excludes.append(s[1:].strip())
-        else:
-            roots.append(os.path.expanduser(s))
+            continue
+        root = os.path.expanduser(s)
+        if not os.path.isabs(root):
+            if base is None:
+                base = main_checkout() or os.getcwd()
+            root = os.path.join(base, root)
+        roots.append(os.path.normpath(root))
     return SourcesSpec(roots, excludes, text)
 
 
@@ -585,20 +708,24 @@ def build_private_index(
     spec: SourcesSpec,
     own_code_texts: Iterable[str] | None = None,
     cache_dir: str = DEFAULT_CACHE_DIR,
-    allowlist_path: str = DEFAULT_ALLOWLIST_FILE,
+    allowlist_path: str | None = None,
 ) -> PrivateIndex:
     """Hashes of every figure and 6-word run in the private sources, minus our own code's runs, and the
     6-word runs of the founder documents among them (`grams_inputs`, see INPUT_DOC_EXTS).
 
     One walk, one read per file, one cache file holding both gram sets (hashes only) outside the repo;
     the key covers the sources config, every source file's path/size/mtime (which also fixes which files
-    are documents) and, when our own code is read from git, the tree it came from."""
+    are documents) and, when our own code is read from git, the tree it came from. The allowlist
+    defaults to the one in `private_dir()`."""
+    if allowlist_path is None:
+        allowlist_path = os.path.join(private_dir()[0], os.path.basename(DEFAULT_ALLOWLIST_FILE))
     notes: list[str] = []
     files = _source_files(spec, notes)
     inputs = _input_files(files)
     sig = hashlib.sha256()
     sig.update(INDEX_VERSION.encode())
     sig.update(spec.config_text.encode())
+    sig.update(("roots:" + "\0".join(spec.roots) + "\0").encode())  # resolved, so one key from any cwd
     # What can be read, and which files are documents, both change the gram sets without touching a file:
     # a PDF-less index built without pdftotext must not be reused once it is installed, and an edit to
     # INPUT_DOC_EXTS / OUTPUT_NAME_MARKERS must not reuse a cache split under the old rule.
@@ -826,7 +953,8 @@ def _report(findings: list[Finding], warn_layers: set[str]) -> int:
             print(f"  [{f.layer:<10}] {f.path}{tok}\n               {f.detail}", file=sys.stderr)
         print(
             "\nFix the text, mark a reviewed synthetic line with `privacy-guard: synthetic`, add a local false "
-            "alarm to the git-ignored figure allowlist, or — as a last resort — bypass with `--no-verify`.",
+            "alarm to the git-ignored figure allowlist in the MAIN checkout's docs/internal/ (the only place "
+            "the lists are read from), or — as a last resort — bypass with `--no-verify`.",
             file=sys.stderr,
         )
         return 1
@@ -856,6 +984,121 @@ def _verbatim_report(added: dict[str, list[tuple[int, str]]], idx: PrivateIndex 
     return 0
 
 
+_LOST_IS_FATAL = {os.path.basename(DEFAULT_NAMES_FILE), os.path.basename(DEFAULT_SOURCES_FILE)}
+_OPT_OUT = f"git config {SWITCH_KEY} optional"
+
+
+def _copy_notes(main_dir: str, bases: list[str]) -> tuple[list[str], list[str]]:
+    """(notes, lost): one count-only line per list this worktree keeps its own copy of whose ENTRIES
+    differ from main's. `lost` holds the lines of a denylist/sources copy with entries main lacks: an
+    entry added only there has been lost. Never names an entry."""
+    top = _git_try("rev-parse", "--show-toplevel")
+    main_root = os.path.dirname(os.path.dirname(main_dir))
+    if not top or os.path.realpath(top) == os.path.realpath(main_root):
+        return [], []
+    notes: list[str] = []
+    lost: list[str] = []
+    for base in bases:
+        copy, main = os.path.join(top, PRIVATE_DIR_REL, base), os.path.join(main_dir, base)
+        if not os.path.isfile(copy):
+            continue
+        theirs, ours = _entries(copy), ((_entries(main) or set()) if os.path.isfile(main) else set())
+        if theirs is None:
+            # Unreadable (not UTF-8): what it holds cannot be compared, so it is treated as lost entries.
+            line = (
+                f"privacy-guard: ignoring this worktree's copy {copy} (unreadable copy: not UTF-8 text); the "
+                f"lists are read from {main}. Delete the copy, or move its entries into main's file."
+            )
+            (lost if base in _LOST_IS_FATAL else notes).append(line)
+            continue
+        only_copy, only_main = len(theirs - ours), len(ours - theirs)
+        if not (only_copy or only_main):
+            continue
+        line = (
+            f"privacy-guard: ignoring this worktree's copy {copy} ({only_copy} "
+            f"entr{'y' if only_copy == 1 else 'ies'} only in the copy, {only_main} only in main); the lists "
+            f"are read from {main}. Delete the copy, or move its entries into main's file."
+        )
+        (lost if only_copy and base in _LOST_IS_FATAL else notes).append(line)
+    return notes, lost
+
+
+def _preflight(consulted: list[tuple[str, str]], defaulted: list[str], resolved: tuple[str, str, str] | None) -> int:
+    """Hook modes: name the missing lists that turn a layer off in one line, note worktree copies, and
+    under the `required` switch refuse (exit 3) instead. `consulted` is (path, the layers it feeds); the
+    allowlist feeds none, so it is never named. Outside a repository: silent, as before."""
+    if _git_try("rev-parse", "--git-dir") is None:
+        return 0
+    gone = [(p, layer) for p, layer in consulted if not os.path.isfile(p)]
+    missing = [p for p, _ in gone]
+    reason = resolved[2] if resolved and resolved[1] == "cwd" else ""
+    notes: list[str] = []
+    lost: list[str] = []
+    if resolved and resolved[1] == "main-checkout":
+        notes, lost = _copy_notes(resolved[0], defaulted)
+    value, origin = _switch()
+    # A refusal's FIRST line is always the `private lists required (` line, so the notes print after it.
+    if value == "required" and (missing or reason or lost):
+        why = []
+        if missing:
+            why.append(f"missing: {', '.join(missing)}")
+        if reason:
+            why.append(reason)
+        print(
+            f"{REQUIRED_PREFIX} ({origin}): {'; '.join(why) or 'a worktree copy holds entries main lacks'}",
+            file=sys.stderr,
+        )
+        for line in lost + notes:
+            print(line, file=sys.stderr)
+        print(
+            f"  The lists are read from the main checkout's {PRIVATE_DIR_REL}/ only. In a clone that has no "
+            f"private lists, opt out with: {_OPT_OUT}",
+            file=sys.stderr,
+        )
+        return EXIT_LISTS_REQUIRED
+    for line in notes + lost:
+        print(line, file=sys.stderr)
+    where = f" ({reason}; lists read relative to the current directory)" if reason else ""
+    if missing:
+        off = "/".join(layer for _, layer in gone)
+        print(
+            f"privacy-guard: no private lists here ({', '.join(missing)}); {off} layers off. "
+            f"This is normal for a public clone.{where}",
+            file=sys.stderr,
+        )
+    elif reason:
+        print(
+            f"privacy-guard: {reason}; the private lists are read relative to the current directory.", file=sys.stderr
+        )
+    return 0
+
+
+def _check_switch(lists_dir: str) -> int:
+    """The release gate: a machine that has the private sources list must have the switch set."""
+    sources = os.path.join(lists_dir, os.path.basename(DEFAULT_SOURCES_FILE))
+    if not os.path.isfile(sources):
+        print("privacy-guard: no private lists on this machine; the switch is not needed.", file=sys.stderr)
+        return 0
+    value, origin = _switch()
+    if value == "required":
+        print(f"privacy-guard: switch set (required) in {origin}.", file=sys.stderr)
+        return 0
+    if value == "optional":
+        print(f"privacy-guard: switch deliberately off in {origin}.", file=sys.stderr)
+        return 0
+    state = f"{SWITCH_KEY} is {value!r} in {origin}" if value else f"{SWITCH_KEY} is unset"
+    root = os.path.dirname(os.path.dirname(os.path.abspath(lists_dir)))
+    print(
+        f"{REQUIRED_PREFIX} ({state}): {sources} exists, but a missing list would only print a line.\n"
+        f"  Set the switch:\n"
+        f"    git config --global {SWITCH_KEY} required\n"
+        f"    git -C {root} config {SWITCH_KEY} required\n"
+        f"  or, in a clone that should not need the lists: {_OPT_OUT}",
+        file=sys.stderr,
+    )
+    return EXIT_LISTS_REQUIRED
+
+
 def _main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Privacy leak detector (pre-commit / commit-msg / pre-push / CI).")
     g = ap.add_mutually_exclusive_group()
@@ -863,11 +1106,14 @@ def _main(argv: list[str] | None = None) -> int:
     g.add_argument("--tree", action="store_true", help="scan all tracked files")
     g.add_argument("--commit-msg", metavar="FILE", help="scan a commit message file")
     g.add_argument("--range", metavar="REVS", help="scan added lines + commit messages of a rev range")
+    g.add_argument(
+        "--check-switch", action="store_true", help="release gate: exit 3 when the lists exist and the switch is unset"
+    )
     ap.add_argument("files", nargs="*", help="explicit files to scan")
-    ap.add_argument("--names-file", default=DEFAULT_NAMES_FILE, help="local denylist path")
+    ap.add_argument("--names-file", default=None, help="local denylist path (default: main checkout's)")
     ap.add_argument("--no-names", action="store_true", help="skip layer 3 (name list)")
-    ap.add_argument("--sources-file", default=DEFAULT_SOURCES_FILE, help="local private-sources list")
-    ap.add_argument("--allowlist-file", default=DEFAULT_ALLOWLIST_FILE, help="local figure allowlist")
+    ap.add_argument("--sources-file", default=None, help="local private-sources list (default: main checkout's)")
+    ap.add_argument("--allowlist-file", default=None, help="local figure allowlist (default: main checkout's)")
     ap.add_argument("--cache-dir", default=DEFAULT_CACHE_DIR, help="where the hashed index is cached")
     ap.add_argument("--provenance-warn-only", action="store_true", help="report figure-provenance as warnings")
     ap.add_argument(
@@ -877,12 +1123,37 @@ def _main(argv: list[str] | None = None) -> int:
     )
     args = ap.parse_args(argv)
 
-    names = [] if args.no_names else load_names(args.names_file)
+    # The private dir is resolved only when a list is defaulted AND consulted: `--tree --no-names` (CI)
+    # never reaches git for it. Not memoized beyond this run.
+    resolved: list[tuple[str, str, str]] = []
+    defaulted: list[str] = []
+
+    def list_path(given: str | None, default: str) -> str:
+        if given is not None:
+            return given
+        if not resolved:
+            resolved.append(_resolve_private_dir())
+        defaulted.append(os.path.basename(default))
+        return os.path.join(resolved[0][0], os.path.basename(default))
+
+    if args.check_switch:
+        return _check_switch(os.path.dirname(list_path(None, DEFAULT_SOURCES_FILE)))
+
+    names_path = None if args.no_names else list_path(args.names_file, DEFAULT_NAMES_FILE)
+    names = load_names(names_path) if names_path else []
     warn_layers = {"figure-provenance"} if (args.tree or args.provenance_warn_only) else set()
+    sources_path = allowlist_path = ""
+    if args.staged or args.commit_msg or args.range:  # the hook modes, which all build the index
+        sources_path = list_path(args.sources_file, DEFAULT_SOURCES_FILE)
+        allowlist_path = list_path(args.allowlist_file, DEFAULT_ALLOWLIST_FILE)
+        consulted = ([(names_path, "name")] if names_path else []) + [(sources_path, "figure/verbatim")]
+        rc = _preflight(consulted, defaulted, resolved[0] if resolved else None)
+        if rc:
+            return rc
 
     def index() -> PrivateIndex | None:
-        spec = load_sources(args.sources_file)
-        return None if spec is None else build_private_index(spec, None, args.cache_dir, args.allowlist_file)
+        spec = load_sources(sources_path)
+        return None if spec is None else build_private_index(spec, None, args.cache_dir, allowlist_path)
 
     if args.commit_msg:
         with open(args.commit_msg, encoding="utf-8") as fh:
@@ -902,7 +1173,7 @@ def _main(argv: list[str] | None = None) -> int:
     elif args.files:
         paths = args.files
     else:
-        ap.error("provide --staged, --tree, --commit-msg, --range, or explicit files")
+        ap.error("provide --staged, --tree, --commit-msg, --range, --check-switch, or explicit files")
         return 2
 
     if args.staged and args.verbatim_report:

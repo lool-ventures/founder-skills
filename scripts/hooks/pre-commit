@@ -40,6 +40,12 @@ fi
 # --- 3. privacy-leak guard on all staged files --------------------------------
 # Layers: stray confidential documents, named-after-company provenance tags, and
 # exact names from the local (git-ignored) denylist. See scripts/privacy_guard.py.
-if ! uv run python scripts/privacy_guard.py --staged; then
+# Run the guard that sits beside this hook script, so every worktree runs the guard of the checkout
+# core.hooksPath points at. Keep any `cd` inside $( ... ): from the main checkout git sets no GIT_DIR,
+# so a bare `cd` out of the work tree loses the repo. A hook copied or symlinked into .git/hooks, or a
+# symlinked hooksPath, has no guard beside it: fall back to the work tree's own.
+guard="$(cd "$(dirname "$0")/.." && pwd)/privacy_guard.py"
+[ -f "$guard" ] || guard="$(git rev-parse --show-toplevel)/scripts/privacy_guard.py"
+if ! uv run python "$guard" --staged; then
   exit 1
 fi
