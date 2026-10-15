@@ -44,6 +44,7 @@ import contextlib
 import copy
 import hashlib
 import json
+import math
 import os
 import re
 import sys
@@ -322,6 +323,28 @@ def _canonicalize_time_series(state: dict[str, Any]) -> None:
 
 _YYYY_MM_RE = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 _YYYY_QN_RE = re.compile(r"^\d{4}-Q[1-4]$")
+
+
+def _cash_given(state: dict[str, Any]) -> bool:
+    """Whether `state` gives a usable cash balance AND its month: what a delivered review's one cash update
+    must carry. The two paths are copied and cleaned by `_coerce_state` itself, so "blank" (empty, a space, a
+    comma, `-`, an em dash, null) means what the coercion makes of it and cannot drift from it; a coercion error
+    counts as not given (the real coercion reports it later, on a running run). A balance is a finite number and
+    not a bool (`true` passes the coercion as numeric, NaN and Infinity parse as floats); a date is `YYYY-MM`,
+    because runway does month arithmetic on it."""
+    minimal: dict[str, Any] = {
+        "cash": {
+            "current_balance": copy.deepcopy(_deep_get(state, "cash.current_balance")),
+            "balance_date": copy.deepcopy(_deep_get(state, "cash.balance_date")),
+        }
+    }
+    if _coerce_state(minimal):
+        return False
+    balance = minimal["cash"]["current_balance"]
+    date = minimal["cash"]["balance_date"]
+    balance_ok = isinstance(balance, (int, float)) and not isinstance(balance, bool) and math.isfinite(balance)
+    date_ok = isinstance(date, str) and bool(_YYYY_MM_RE.match(date.strip()))
+    return balance_ok and date_ok
 
 
 def _validate_time_series_keys(state: dict[str, Any]) -> list[dict[str, Any]]:
@@ -896,6 +919,7 @@ def main() -> None:
         run_id,
         {str(c.get("path")) if isinstance(c, dict) else "" for c in corrections} if shape == "changes" else {""},
         sum(1 for c in corrections if _is_change(c)),
+        cash_given=_cash_given(corrected),
     )
 
     overrides = payload.get("warning_overrides", [])

@@ -305,10 +305,12 @@ CONTRACT_NOTES = (
     "or gives a newer cash balance or its date after delivery (`invocations[]` gains a `reopen` entry naming "
     "`fmr_cash_followup`); it completes again at the next coaching insert. Once per review, in the conversation "
     "that delivered it, on a run not under `FS_HOST_NO_ASK`, from the run's own folder; a second update is "
-    "`RUN_FINISHED`. The recorder refuses that reopen `RUN_SUPERSEDED` when a later run holds the folder.",
+    "`RUN_FINISHED`, and so is a cash update that gives no finite balance or no `YYYY-MM` date. The recorder "
+    "refuses that reopen `RUN_SUPERSEDED` when a later run holds the folder.",
     "An enforcer never re-opens a finished run's answer: on a `complete` or `refused` run whose confirmed input "
     "changed, it refuses `RUN_FINISHED` and writes nothing; a changed figure after `complete` needs a new run, "
-    "except financial-model-review's cash update above.",
+    "except financial-model-review's cash update above. On a `complete` or `refused` financial-model-review run, "
+    "compose exits 10 for an unrecorded post-delivery cash reply and otherwise refuses `RUN_FINISHED`.",
     "`ms_two_figures` has one instance per input the founder stated two figures for "
     "(`FS_HOST_ANSWER ms_two_figures.arpu=typed`). The bare `FS_HOST_ANSWER ms_two_figures=<option>` answers every "
     "instance; a line naming an instance wins for that instance. Its alternatives' ids are keyed on the figure "
@@ -5637,9 +5639,27 @@ CLI_CODES = {
     # bind; cap-table's --run-id must be it), and every required artifact must carry its id (ARTIFACT_OTHER_RUN,
     # `files` naming each, exit 1, nothing written); another run's optional artifact is left out and named in
     # the receipt's `ignored_other_run`.
-    "compose": ["RUN_ID_REQUIRED", "RUN_NOT_BOUND", "RUN_SUPERSEDED", "ARTIFACT_OTHER_RUN", "OUTPUT_IS_INPUT"],
-    # financial-model-review's producers: a call into a bound review dir that names no run.
-    "fmr_producers": ["RUN_ID_REQUIRED", "OUTPUT_IS_INPUT", "RUN_NOT_BOUND", "RUN_SUPERSEDED", "ARTIFACT_OTHER_RUN"],
+    # RUN_FINISHED: financial-model-review's compose on a `complete` or `refused` run (a delivered review is never
+    # rebuilt in place).
+    "compose": [
+        "RUN_ID_REQUIRED",
+        "RUN_NOT_BOUND",
+        "RUN_SUPERSEDED",
+        "ARTIFACT_OTHER_RUN",
+        "OUTPUT_IS_INPUT",
+        "RUN_FINISHED",
+    ],
+    # financial-model-review's producers: a call into a bound review dir that names no run. RUN_FINISHED: a
+    # producer or `apply_corrections.py` on a finished review whose confirmed input changed, or a cash update
+    # after delivery that is not the one it takes.
+    "fmr_producers": [
+        "RUN_ID_REQUIRED",
+        "OUTPUT_IS_INPUT",
+        "RUN_NOT_BOUND",
+        "RUN_SUPERSEDED",
+        "ARTIFACT_OTHER_RUN",
+        "RUN_FINISHED",
+    ],
     # market-sizing's producers and prompt generator: a call into a bound analysis dir that names no run.
     # PERIOD_NOT_WRITTEN: the period of a founder's figure was answered but never written into inputs.json.
     # NO_ASK_FOUNDER_DECLINED: compose refuses a review skip saying the founder declined under FS_HOST_NO_ASK.

@@ -1007,6 +1007,9 @@ def test_financial_model_reviews_corrections_of_another_run_are_left_out(tmp_pat
 
     root, rid, rd = fg._delivered_without_cash(tmp_path)
     fg._ok(fg._apply(rd, rid, "cash.current_balance=900000", "cash.balance_date=2026-09"))
+    # The reply is recorded first: a delivered review is never recomposed in place, so these composes run on the
+    # reopened review.
+    fg._ok(fg._cash_answer(root, rid, "900000", "2026-09"))
     ec = rd / "extraction_corrections.json"
     assert ec.is_file()
     own = fg._compose(rd)

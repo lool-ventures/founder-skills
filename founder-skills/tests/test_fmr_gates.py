@@ -606,6 +606,9 @@ def _delivered_without_cash(tmp_path: Path) -> tuple[Path, str, Path]:
     assert json.loads((run_dir / "report.json").read_text())["runway_status"] == "no_cash_balance"
     led = h.ledger(root, run_id)["gates"]
     assert led["fmr_cash_followup"]["current"]["default_reason"] == "producer_default_disclosed"
+    # Compose records its own disclosed default while the run is running, under its own name: the recorder's
+    # default on a delivered review is refused by that name, and compose refuses on a delivered review.
+    assert led["fmr_cash_followup"]["history"][-1]["by"] == "compose_report.py"
     gate1 = _verify(run_dir, "1")
     assert not any("Step 3.6" in e for e in gate1["summary"]["errors"]), gate1
     st = _complete(root, run_id, run_dir)
@@ -1263,6 +1266,81 @@ def test_a_finished_quick_check_takes_no_cash_update(tmp_path: Path) -> None:
     proc = _apply(run_dir, run_id, *CASH_REPLY)
     assert proc.returncode == 1 and _out(proc)["code"] == "RUN_FINISHED", proc.stdout + proc.stderr
     assert _snapshot(run_dir, root, run_id) == before
+
+
+# --- a delivered review is never rebuilt in place --------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "sets",
+    [
+        ("cash.current_balance=", "cash.balance_date=2026-06"),
+        ("cash.current_balance=null", "cash.balance_date=2026-06"),
+        ("cash.current_balance=-", "cash.balance_date=2026-06"),
+        ("cash.current_balance= ", "cash.balance_date=2026-06"),
+        ("cash.current_balance=,", "cash.balance_date=2026-06"),
+        ("cash.current_balance=true", "cash.balance_date=2026-06"),
+        ("cash.current_balance=NaN", "cash.balance_date=2026-06"),
+        ("cash.current_balance=1500000", "cash.balance_date="),
+        ("cash.current_balance=1500000", "cash.balance_date=n/a"),
+        ("cash.current_balance=1500000", "cash.balance_date=2026-6"),
+    ],
+    ids=["blank", "null", "dash", "space", "comma", "true", "nan", "date-blank", "date-n/a", "date-2026-6"],
+)
+def test_a_cash_update_that_removes_the_balance_is_refused(tmp_path: Path, sets: tuple[str, ...]) -> None:
+    """The one update a delivered review takes gives a cash balance and its month. One that blanks either, or
+    gives a value that is no balance (a bool, NaN) or no month, would reopen the review and rebuild it without
+    its runway: refused before anything is written."""
+    root, run_id, run_dir = _delivered_real(tmp_path)
+    before = _snapshot(run_dir, root, run_id)
+    time.sleep(0.002)
+    proc = _apply(run_dir, run_id, *sets)
+    assert proc.returncode == 1 and _out(proc)["code"] == "RUN_FINISHED", proc.stdout + proc.stderr
+    assert "gives a cash balance" in _out(proc)["message"]
+    assert _snapshot(run_dir, root, run_id) == before
+    assert not (run_dir / "corrected_inputs.json").exists()
+
+
+def test_a_cash_update_that_gives_a_balance_and_its_month_is_still_taken(tmp_path: Path) -> None:
+    """The control for the refusal above: the same review takes the founder's reply."""
+    root, run_id, run_dir = _delivered_real(tmp_path)
+    time.sleep(0.002)
+    _ok(_apply(run_dir, run_id, *CASH_REPLY))
+    assert (run_dir / "corrected_inputs.json").exists()
+
+
+def test_compose_on_a_delivered_review_with_a_no_cash_runway_is_refused(tmp_path: Path) -> None:
+    """A delivered review whose runway lost its balance is not rebuilt with compose's own default: the default is
+    for a running review only, and the refusal is a JSON line, never a traceback."""
+    root, run_id, run_dir = _delivered_real(tmp_path)
+    _hand_edit(run_dir / "inputs.json", lambda d: d["cash"].update(current_balance=None))
+    _ok(_producer("runway.py", run_dir, run_id))
+    delivered = (run_dir / "report.md").read_bytes()
+    before = h.snapshot(root, run_id)
+    proc = _compose(run_dir)
+    assert proc.returncode == 1 and _out(proc)["code"] == "RUN_FINISHED", proc.stdout + proc.stderr
+    assert "Traceback" not in proc.stderr
+    assert (run_dir / "report.md").read_bytes() == delivered
+    assert h.snapshot(root, run_id) == before
+    st = h.status(root, run_id)
+    assert (st["status"], st["revision"], st.get("disclosures") or []) == ("complete", 0, [])
+
+
+@pytest.mark.parametrize("delivered", ["real", "without_cash"])
+def test_a_delivered_review_is_never_recomposed_in_place(tmp_path: Path, delivered: str) -> None:
+    """Building the report again on a delivered review, with nothing changed, used to exit 0 and replace the
+    delivered report at the same revision, dropping its coaching. It is refused, and nothing moves."""
+    make = _delivered_real if delivered == "real" else _delivered_without_cash
+    root, run_id, run_dir = make(tmp_path)
+    report = (run_dir / "report.md").read_bytes()
+    if delivered == "real":
+        assert b"## Coaching Commentary" in report  # the lever engaged: a rebuild would drop it
+    before = h.snapshot(root, run_id)
+    proc = _compose(run_dir)
+    assert proc.returncode == 1 and _out(proc)["code"] == "RUN_FINISHED", proc.stdout + proc.stderr
+    assert "Traceback" not in proc.stderr
+    assert h.snapshot(root, run_id) == before
+    assert (run_dir / "report.md").read_bytes() == report
 
 
 def test_a_cash_update_is_always_revision_1() -> None:

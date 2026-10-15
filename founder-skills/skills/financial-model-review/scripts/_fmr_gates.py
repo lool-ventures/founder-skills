@@ -80,17 +80,26 @@ def require_or_exit(run_dir: str, run_id: str | None, keys: tuple[str, ...]) -> 
 
 CASH_PATHS = frozenset(("cash.current_balance", "cash.balance_date"))
 UNCHANGED_MESSAGE = "this review is complete and already uses these values; there is nothing to apply and no rerun"
+CASH_REMOVED_MESSAGE = (
+    "this review is complete; an update after delivery gives a cash balance and its date, and a review without "
+    "them is a new review (run Step 0 again)"
+)
 
 
-def refuse_finished_corrections(run_dir: str, run_id: str | None, paths_set: set[str], changed: int) -> None:
+def refuse_finished_corrections(
+    run_dir: str, run_id: str | None, paths_set: set[str], changed: int, *, cash_given: bool = True
+) -> None:
     """Corrections into a finished run: exit 1 `RUN_FINISHED` before anything is written, so the corrected
     inputs never move under a delivered review. The one exception is the cash update: a call that sets both
     cash paths and nothing else (the follow-up's answer needs both), changes one of them, on a review that
     is `complete` (a full review: the follow-up is that mode's) and whose follow-up was never answered with
     the founder's reply (it asked for the balance, or the review had one and this is a newer balance or date).
     Once per review: an answered follow-up means a new review. Not on a run whose request said not to ask (its
-    follow-up cannot be answered), and not from a folder other than the run's own (an archived copy). A run
-    with no ledger, or one still running, returns at once."""
+    follow-up cannot be answered), and not from a folder other than the run's own (an archived copy). The
+    update must give a balance and its month (`cash_given`, apply_corrections' `_cash_given`): one that blanks
+    either would reopen the review and rebuild it without its runway, so it is refused too
+    (`CASH_REMOVED_MESSAGE`). A run with no ledger, or one still running, returns at once (a blank there is the
+    corrections layer's "unset")."""
     ledger = open_ledger_or_exit(run_dir, run_id)
     if ledger is None:
         return
@@ -106,6 +115,8 @@ def refuse_finished_corrections(run_dir: str, run_id: str | None, paths_set: set
             replied = (entry.get("current") or {}).get("resolution") == "answered"
             own = isinstance(ctx.run_dir, str) and os.path.realpath(ctx.run_dir) == os.path.realpath(run_dir)
             if not replied and own and st.get("mode") in (None, "full"):
+                if not cash_given:
+                    return {"finished": state, "message": CASH_REMOVED_MESSAGE}
                 return {}
         return {"finished": state}
 
@@ -114,7 +125,7 @@ def refuse_finished_corrections(run_dir: str, run_id: str | None, paths_set: set
     except Exception as e:  # noqa: BLE001 -- unreachable registry, unwired predicate: exit 2, nothing written
         sys.exit(_run_ref.report_failure(e))
     if out.get("finished"):
-        message = UNCHANGED_MESSAGE if changed == 0 else FINISHED_MESSAGE
+        message = out.get("message") or (UNCHANGED_MESSAGE if changed == 0 else FINISHED_MESSAGE)
         sys.stdout.write(json.dumps({"status": "rejected", "code": "RUN_FINISHED", "message": message}) + "\n")
         print(f"Error: {message}; nothing was written", file=sys.stderr)
         sys.exit(1)
@@ -209,61 +220,98 @@ def refuse_open_gates(ledger: Any) -> None:
     sys.exit(gates.EXIT_CODES["waiting"])
 
 
-def settle_cash_followup(ledger: Any, no_cash_balance: bool) -> None:
-    """The cash follow-up, after a successful compose and before any write.
+REBUILD_FINISHED_MESSAGE = (
+    "this review is complete; a delivered review is not rebuilt in place: a newer cash balance or its date "
+    "updates it (Step 12), anything else starts a new review (run Step 0 again)"
+)
+NO_CASH_FINISHED_MESSAGE = (
+    "this review is complete and its runway now has no cash balance; a delivered review is not rebuilt in place "
+    "without one: a newer cash balance and its date update it (Step 12), anything else starts a new review (run "
+    "Step 0 again)"
+)
+STOPPED_MESSAGE = "this review was stopped; it is not rebuilt in place: a new review starts at Step 0"
 
-    Runway still lacks the balance: the follow-up is recorded at once as the producer's disclosed default, so
-    it never sits open (nobody may ever answer it). Runway now has it, on a run that is still `complete` with
-    the follow-up a default, or a newer balance or date was given after delivery and the follow-up holds no
-    reply: the founder's reply was used but never recorded, so compose refuses (exit 10, nothing written) and
-    names the record to make -- the reply IS the answer; it is not asked again. Residual: the producers can
-    still rewrite runway.json on the complete run before the record; compose is where the founder's report is
-    held."""
+
+def _refuse_rebuild(state: Any, no_cash_balance: bool) -> None:
+    if state == "complete":
+        message = NO_CASH_FINISHED_MESSAGE if no_cash_balance else REBUILD_FINISHED_MESSAGE
+    else:
+        message = STOPPED_MESSAGE
+    sys.stdout.write(json.dumps({"status": "rejected", "code": "RUN_FINISHED", "message": message}) + "\n")
+    print(f"Error: {message}; nothing was written", file=sys.stderr)
+    sys.exit(1)
+
+
+def settle_cash_followup(ledger: Any, no_cash_balance: bool) -> None:
+    """The cash follow-up, after a successful compose and before any write. A delivered (or stopped) review is
+    never rebuilt in place.
+
+    On a `complete` or `refused` run compose writes nothing. When a newer balance or date reached runway after
+    delivery (or the follow-up holds compose's own default) and the founder's reply was never recorded, it exits
+    10 naming the record to make -- the reply IS the answer; it is not asked again, and recording it reopens the
+    review, after which compose runs on the reopened `running` run. Anything else on a final run is
+    `RUN_FINISHED` (exit 1), including a plain recompose with nothing changed, which used to replace the
+    delivered report and drop its coaching.
+
+    On a running run whose runway still lacks the balance, the follow-up is recorded at once as the producer's
+    disclosed default (by `compose_report.py`), so it never sits open (nobody may ever answer it). Residual:
+    `runway.py` / `unit_economics.py` can still rewrite their JSON on a complete run (the cash paths are exempt
+    from the binder); compose is where the founder's report is held."""
     gates, paths = ledger
+    rs = sys.modules["_run_status"]
     led = gates.load_ledger(paths)
     entry = (led.get("gates") or {}).get(CASH_FOLLOWUP) or {}
     resolution = (entry.get("current") or {}).get("resolution")
-    if no_cash_balance:
-        if entry.get("state") in ("answered", "not_owed"):
-            return
-
-        def record(ctx: Any, ledger_: dict[str, Any], st: dict[str, Any]) -> Any:
-            return gates.record(
-                ctx,
-                ledger_,
-                CASH_FOLLOWUP,
-                resolution="default_taken",
-                default_reason="producer_default_disclosed",
-                by="compose_report.py",
+    state = (rs.load_status(paths) or {}).get("status")
+    if state in rs.FINAL_STATUSES:
+        unrecorded = False
+        if not no_cash_balance and state == "complete" and resolution != "answered":
+            # A newer balance or date given after delivery and never recorded: the record comes first.
+            try:
+                unrecorded = resolution == "default_taken" or (
+                    gates.transact(paths, lambda ctx, led_, st: gates.fmr_post_delivery_cash_call(ctx)) is not None
+                )
+            except Exception as e:  # noqa: BLE001 -- an undecidable delivery time: exit 2, nothing written
+                sys.exit(_run_ref.report_failure(e))
+        if unrecorded:
+            message = (
+                "the founder's cash balance reached this report but its answer was never recorded; record "
+                "`provided` with Step 12's three-part answer command (the founder's reply is the answer: do not "
+                "ask again), then compose again"
             )
+            sys.stdout.write(
+                json.dumps(
+                    {"status": "waiting", "code": "GATE_WAITING", "blocked_by_gate": CASH_FOLLOWUP, "message": message}
+                )
+                + "\n"
+            )
+            print(f"Error: {message}. Nothing was written.", file=sys.stderr)
+            sys.exit(gates.EXIT_CODES["waiting"])
+        _refuse_rebuild(state, no_cash_balance)
+    if not no_cash_balance or entry.get("state") in ("answered", "not_owed"):
+        return
 
-        gates.transact(paths, record)
-        return
-    status = sys.modules["_run_status"].load_status(paths) or {}
-    if status.get("status") != "complete" or resolution == "answered":
-        return
-    # A newer balance or date given after delivery and never recorded: rebuilding the delivered review in place
-    # would replace it at the same revision with no reopen, so the record comes first.
+    def record(ctx: Any, ledger_: dict[str, Any], st: dict[str, Any]) -> Any:
+        # Under the lock: a run that turned final since the read above takes no default (a race guard).
+        if st.get("status") in rs.FINAL_STATUSES:
+            raise gates.GateRejection("RUN_FINISHED", "the run finished while compose was running")
+        return gates.record(
+            ctx,
+            ledger_,
+            CASH_FOLLOWUP,
+            resolution="default_taken",
+            default_reason="producer_default_disclosed",
+            by="compose_report.py",
+        )
+
     try:
-        unrecorded = resolution == "default_taken" or (
-            gates.transact(paths, lambda ctx, led, st: gates.fmr_post_delivery_cash_call(ctx)) is not None
-        )
-    except Exception as e:  # noqa: BLE001 -- an undecidable delivery time: exit 2, nothing written
+        gates.transact(paths, record)
+    except gates.GateRejection as e:
+        if e.code == "RUN_FINISHED":
+            _refuse_rebuild((rs.load_status(paths) or {}).get("status"), no_cash_balance)
         sys.exit(_run_ref.report_failure(e))
-    if unrecorded:
-        message = (
-            "the founder's cash balance reached this report but its answer was never recorded; record `provided` "
-            "with Step 12's three-part answer command (the founder's reply is the answer: do not ask again), then "
-            "compose again"
-        )
-        sys.stdout.write(
-            json.dumps(
-                {"status": "waiting", "code": "GATE_WAITING", "blocked_by_gate": CASH_FOLLOWUP, "message": message}
-            )
-            + "\n"
-        )
-        print(f"Error: {message}. Nothing was written.", file=sys.stderr)
-        sys.exit(gates.EXIT_CODES["waiting"])
+    except Exception as e:  # noqa: BLE001 -- unreachable registry, unwired predicate: exit 2, nothing written
+        sys.exit(_run_ref.report_failure(e))
 
 
 def coaching_pending(ledger: Any) -> None:
