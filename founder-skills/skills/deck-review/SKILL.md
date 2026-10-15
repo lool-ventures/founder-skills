@@ -685,7 +685,7 @@ Branch on the exit code (complete state machine — do not improvise):
 - **Exit 5** (receipt echoes a different path) → **repair-dispatch** telling the agent the exact expected OUTPUT_PATH (it wrote somewhere else).
 - For the CHECKLIST, exits 4 and 5 are a plain reprint instead: re-run `dr_dispatch_prompt.py` with the same arguments and send that output (a fresh grade; no CHECKLIST correction is ever hand-written).
 - **Exit 6** (receipt unparseable / no `output_path` key) → **redo-dispatch** with "return ONLY the receipt JSON — no fences, no prose." For the CHECKLIST, re-run `dr_dispatch_prompt.py` with the same arguments plus `--correction receipt-only` and send that output instead.
-- **Producer schema rejection** (the pipe fails next) → **repair-dispatch** with the producer's stderr verbatim. For the CHECKLIST, the redo is the generator's `--correction producer-rejected` print, never a hand-written repair, `SLIDE_REVIEWS_NOT_READ` included: Step 5's pipe saves its stderr with `2> "$HANDOFF_DIR/producer_rejected.txt"`; re-run `dr_dispatch_prompt.py` with the same arguments plus `--correction producer-rejected --detail-file "$HANDOFF_DIR/producer_rejected.txt"` and send that output.
+- **Producer schema rejection** (the pipe fails next) → **repair-dispatch** with the producer's stderr verbatim. For the CHECKLIST, the redo is the generator's `--correction producer-rejected` print, never a hand-written repair, `SLIDE_REVIEWS_NOT_READ` included: re-run the failed pipe with `2> "$HANDOFF_DIR/producer_rejected.txt"`, then `dr_dispatch_prompt.py` with the same arguments plus `--correction producer-rejected --detail-file "$HANDOFF_DIR/producer_rejected.txt"` and send that output.
 - **Exit 8** (`path_namespace_mismatch`) → the sub-agent **complied**; the agent-namespace prefix was wrong. Its relative `OUTPUT_PATH` resolved against the outputs mount instead of the session root, so the file landed at the doubled path reported in `found_at`. Only a RELATIVE agent path can do this, so the Step 0 proof did not run: run it. Do NOT treat this as a fabricated receipt (that is exit 3), and do NOT read the hand-off from `found_at` — it is diagnostic only. Re-run `resolve_artifacts_root.py --agent`, rebuild the agent-namespace prefix from the printed value, and re-dispatch. Counts against the same 2-dispatch retry budget.
 - **Blocked `write_refused`** (the sub-agent's Write was refused — its path was relative or a `/sessions/...` path) → run the Step 0 proof if it did not run, rebuild the agent-namespace paths from the resolver, re-dispatch ONCE. A second `write_refused` STOPs with both details quoted.
 - **Any other exit** (script crash etc.) → STOP with the stderr.
@@ -1164,12 +1164,11 @@ cat "$HANDOFF_DIR/checklist_output.json" | python3 "$SCRIPTS/checklist.py" --run
   --inventory "$REVIEW_DIR/deck_inventory.json" \
   --reconciliation "$REVIEW_DIR/reconciliation.json" \
   --slide-reviews "$REVIEW_DIR/slide_reviews.json" \
-  -o "$REVIEW_DIR/checklist.json" 2> "$HANDOFF_DIR/producer_rejected.txt"
-echo "EXIT=$?"
+  -o "$REVIEW_DIR/checklist.json"
 ```
 
 `--reconciliation` scores `numbers_consistent` from the arithmetic, so keep it here (a what-if rerun omits it: see the What-If rule).
-On a non-zero exit, the pipe's stderr is in `$HANDOFF_DIR/producer_rejected.txt`. `SLIDE_REVIEWS_NOT_READ`: run the generator with the same arguments plus `--correction producer-rejected --detail-file "$HANDOFF_DIR/producer_rejected.txt"` and dispatch what it prints, a new dispatch, never a repair (it counts against the retry budget). `SLIDE_REVIEWS_MISSING`: run Step 4 first.
+On a producer rejection, re-run the same pipe with `2> "$HANDOFF_DIR/producer_rejected.txt"` added after its `-o "$REVIEW_DIR/checklist.json"`, in one block (`echo "EXIT=$?"` after it), so its stderr is saved for the redo. `SLIDE_REVIEWS_NOT_READ`: run the generator with the same arguments plus `--correction producer-rejected --detail-file "$HANDOFF_DIR/producer_rejected.txt"` and dispatch what it prints, a new dispatch, never a repair (it counts against the retry budget). `SLIDE_REVIEWS_MISSING`: run Step 4 first.
 <!-- skill-quality-ci: bash-after-subagent-ok -->
 
 ### Step 6: Compose Report

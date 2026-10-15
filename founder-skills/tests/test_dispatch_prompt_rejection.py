@@ -433,14 +433,29 @@ def test_competitive_positioning_refuses_its_shell_paths_given_empty(tmp_path: P
 # --- deck-review: SLIDE_REVIEWS_NOT_READ goes back through the generator, paired with Step 5's own pipe --------
 
 
+_DR_SAVE = ' 2> "$HANDOFF_DIR/producer_rejected.txt"'
+_DR_ECHO = '\necho "EXIT=$?"\n'
+_DR_RERUN_LINE = (
+    'On a producer rejection, re-run the same pipe with `2> "$HANDOFF_DIR/producer_rejected.txt"` added after its '
+    '`-o "$REVIEW_DIR/checklist.json"`, in one block (`echo "EXIT=$?"` after it)'
+)
+
+
 def _deck_step5_pipe() -> str:
-    """The Step 5 pipe block exactly as deck-review's SKILL.md writes it (the fence that runs checklist.py)."""
+    """The re-run of Step 5's pipe after a rejection, built exactly as deck-review's SKILL.md says: its pipe fence
+    (the one that runs checklist.py, which carries no redirect) with the redirect added after `-o` and the exit
+    code echoed after it, in one block."""
     import re
 
     text = (PLUGIN / "skills" / "deck-review" / "SKILL.md").read_text(encoding="utf-8")
     step = text[text.index("### Step 5:") : text.index("\n### Step 6")]
+    assert _DR_RERUN_LINE in " ".join(step.split()), "SKILL.md no longer says how the pipe is re-run"
     fences: list[str] = re.findall(r"^```bash\n(.*?)^```", step, re.MULTILINE | re.DOTALL)
-    return next(f for f in fences if '"$SCRIPTS/checklist.py"' in f)
+    first = next(f for f in fences if '"$SCRIPTS/checklist.py"' in f)
+    assert "2>" not in first, "the first run keeps its stderr visible"
+    out = '-o "$REVIEW_DIR/checklist.json"'
+    assert first.count(out) == 1
+    return first.replace(out, out + _DR_SAVE).rstrip("\n") + _DR_ECHO
 
 
 _DR_REDO_CMD = (
@@ -464,9 +479,9 @@ def _deck_redo(tmp_path: Path) -> str:
 
 
 def test_a_slide_reviews_not_read_redo_pairs_with_step_5s_own_pipe(tmp_path: Path) -> None:
-    """Step 5's pipe as SKILL.md writes it (stderr saved on checklist.py's own command, the exit code echoed
-    after it) failing SLIDE_REVIEWS_NOT_READ, then the generator's producer-rejected print: that print is the
-    comparand, so the redo dispatch it prints goes through."""
+    """Step 5's pipe re-run as SKILL.md says after a rejection (stderr saved on checklist.py's own command, the
+    exit code echoed after it) failing SLIDE_REVIEWS_NOT_READ, then the generator's producer-rejected print: that
+    print is the comparand, so the redo dispatch it prints goes through."""
     hook = _load(HOOK, "hook_dr_redo")
     pipe = _deck_step5_pipe()
     assert '2> "$HANDOFF_DIR/producer_rejected.txt"' in pipe and 'echo "EXIT=$?"' in pipe
@@ -477,7 +492,7 @@ def test_a_slide_reviews_not_read_redo_pairs_with_step_5s_own_pipe(tmp_path: Pat
     assert printed is not None and printed.strip() == redo.strip()
     # The lever: without the redirect on the producer's own command, the redo's message is not a failed
     # producer's, and the print is not the comparand.
-    bare = pipe.replace(' 2> "$HANDOFF_DIR/producer_rejected.txt"', "")
+    bare = pipe.replace(_DR_SAVE, "")
     assert bare != pipe
     rows = _shell_rows([(bare, _DR_REJECTION, False), (_DR_REDO_CMD, redo, False)])
     assert hook.latest_printed(rows, "CONTEXT: CHECKLIST", path) is None

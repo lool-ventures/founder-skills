@@ -1617,8 +1617,10 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 116,194 -> 113,135 (-3,059 B): the CHECKLIST prompt template moved into dr_dispatch_prompt.py; Step 5 runs
     # the generator (its block re-setting the four values it passes) and sends its output unchanged, with one
     # sentence keeping the grader's contract visible. The state machine names the generator's --correction forms
-    # for every CHECKLIST redo, SLIDE_REVIEWS_NOT_READ through producer-rejected, and the pipe saves its stderr.
-    "deck-review": 113_135,
+    # for every CHECKLIST redo, SLIDE_REVIEWS_NOT_READ through producer-rejected.
+    # 113,135 -> 113,211 (+76 B): the pipe keeps its stderr visible on the first run (checklist.py's warnings reach
+    # the model); only the re-run after a rejection saves it with `2> F`, the form financial-model-review uses.
+    "deck-review": 113_211,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.

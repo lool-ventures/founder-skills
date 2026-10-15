@@ -2272,9 +2272,14 @@ def test_step5_pipe_passes_slide_reviews_and_routes_the_two_codes() -> None:
     pipe = step[fence : step.index("```\n", fence + 3)]
     assert '"$SCRIPTS/checklist.py"' in pipe
     assert '--slide-reviews "$REVIEW_DIR/slide_reviews.json"' in pipe
-    # The pipe saves its stderr in the SAME block, on the producer's own command: the dispatch hook pairs a
-    # `--correction producer-rejected --detail-file` print only with a failed producer's own `2> F`.
-    assert '-o "$REVIEW_DIR/checklist.json" 2> "$HANDOFF_DIR/producer_rejected.txt"' in pipe
+    # The first run keeps its stderr visible (warnings reach the model); only the re-run after a rejection saves
+    # it, in one block, on the producer's own command: the dispatch hook pairs a `--correction producer-rejected
+    # --detail-file` print only with a failed producer's own `2> F`.
+    assert "2>" not in pipe
+    assert (
+        'On a producer rejection, re-run the same pipe with `2> "$HANDOFF_DIR/producer_rejected.txt"` added after '
+        'its `-o "$REVIEW_DIR/checklist.json"`, in one block (`echo "EXIT=$?"` after it)' in flat
+    )
     assert (
         "`SLIDE_REVIEWS_NOT_READ`: run the generator with the same arguments plus `--correction producer-rejected "
         '--detail-file "$HANDOFF_DIR/producer_rejected.txt"` and dispatch what it prints, a new dispatch, never a '

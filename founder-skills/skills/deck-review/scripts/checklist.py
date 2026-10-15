@@ -839,9 +839,10 @@ _SLIDE_REVIEWS_MISSING_FIX = (
     "again with what it prints"
 )
 _SLIDE_REVIEWS_NOT_READ_FIX = (
-    "the grade was made without reading this run's slide reviews. Save this pipe's stderr and run the Step 5 "
-    "prompt generator with --correction producer-rejected --detail-file on that file; dispatch what it prints as "
-    "a new dispatch, after the slide reviews are written; do not repair this file. "
+    "the grade was made without reading this run's slide reviews. Re-run this pipe with its stderr saved to a "
+    "file (2> FILE), then run the Step 5 prompt generator with --correction producer-rejected --detail-file on "
+    "that file; dispatch what it prints as a new dispatch, after the slide reviews are written; do not repair this "
+    "file. "
     "(A what-if rerun to stdout passes neither --slide-reviews nor -o.)"
 )
 
