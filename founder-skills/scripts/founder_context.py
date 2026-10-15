@@ -27,6 +27,13 @@ Exit codes:
     0 = success
     1 = error (missing file, validation failure, protected field violation)
     2 = ambiguous (multiple context files, need --slug)
+
+Founder context holds the company's basics and the founder's own figures. Context supplied with the request
+(the shared `host_context` gate's value) is NOT founder context: it is third-party to the analysis and reaches
+only the skills that read it, with its provenance. Nothing here copies it: `read` and `init` take only the
+`ctx_*` answers from the run's ledger, and `merge` refuses a payload carrying a `host_context` key
+(HOST_CONTEXT_NOT_FOUNDER_CONTEXT, exit 1, file untouched). Every skill reads founder context at Step 1, so a
+supplied fact stored here would reach a skill it was never sent to, without its label.
 """
 
 from __future__ import annotations
@@ -763,6 +770,16 @@ def cmd_merge(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     source: str = args.source
+
+    if isinstance(merge_data, dict) and "host_context" in merge_data:
+        message = (
+            "context supplied with the request is not founder context and is never stored in it; "
+            "remove host_context from --data"
+        )
+        refusal = {"status": "rejected", "code": "HOST_CONTEXT_NOT_FOUNDER_CONTEXT", "message": message}
+        sys.stdout.write(json.dumps(refusal) + "\n")
+        print(f"Error: {message}; {path} was left unchanged", file=sys.stderr)
+        sys.exit(1)
 
     # Check protected fields
     if not _check_protected_fields(merge_data, source, args.force):

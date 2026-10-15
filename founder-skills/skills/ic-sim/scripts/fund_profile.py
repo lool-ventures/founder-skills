@@ -14,11 +14,14 @@ Partners are role names only, never real people: an archetype carries only `role
 `focus_areas`, and the profile's keys, portfolio rows and source URLs are closed sets that leave no
 place for a person. A refusal never echoes the value it refused.
 
-Always reads JSON from stdin.
+Reads JSON from stdin, or, with `--from-request`, the fund profile supplied with the request: the value of
+the run's `ic_fund_mode=host_profile` answer in its gate ledger (the model never types it). That profile is the
+fund's own statement, used as given (never merged with research), and stamped `profile_source`.
 
 Usage:
     echo '{"fund_name": "...", "mode": "generic", ...}' \
-        | python fund_profile.py --pretty
+        | python fund_profile.py --pretty --run-id R -o <SIM_DIR>/fund_profile.json
+    python fund_profile.py --from-request --run-id R -o <SIM_DIR>/fund_profile.json
 
 Output: JSON with validated profile including validation.status and validation.errors.
 """
@@ -99,8 +102,13 @@ FUND_KEYS = frozenset(
         "accepted_warnings",
         "metadata",
         "validation",
+        # Written only by `--from-request`: {"kind": "request", "sha256": <the ledger value's>}.
+        "profile_source",
     }
 )
+PROFILE_SOURCE_KEYS = frozenset({"kind", "sha256"})
+# Keys no input may set and a refusal's list of allowed keys does not name.
+NOT_ADVERTISED = frozenset({"metadata", "validation", "profile_source"})
 ARCHETYPE_KEYS = frozenset({"role", "focus_areas"})
 PORTFOLIO_KEYS = frozenset({"name", "sector", "status"})
 
@@ -190,6 +198,9 @@ def people_problems(profile: dict[str, Any]) -> list[str]:
     for i, source in enumerate(sources if isinstance(sources, list) else []):
         if isinstance(source, dict) and _is_person_page(source.get("url")):
             problems.append(f"source {i}: a person's page")
+    stamp = profile.get("profile_source")
+    if "profile_source" in profile and (not isinstance(stamp, dict) or set(stamp) - PROFILE_SOURCE_KEYS):
+        problems.append('field "profile_source"')
     return problems
 
 
@@ -358,8 +369,9 @@ def refuse_stale_dependents(sim_dir: str, *, by: str, names: tuple[str, ...] = P
     sys.exit(1)
 
 
-def validate_fund_profile(profile: dict[str, Any]) -> dict[str, Any]:
-    """Validate fund profile and return enriched profile with validation results."""
+def validate_fund_profile(profile: dict[str, Any], *, request: bool = False) -> dict[str, Any]:
+    """Validate fund profile and return enriched profile with validation results. `request`: a profile supplied
+    with the request, which need not list sources and may carry no archetype `name` at all."""
     errors: list[str] = []
 
     # Required top-level fields. `portfolio` is NOT unconditionally required —
@@ -440,7 +452,7 @@ def validate_fund_profile(profile: dict[str, Any]) -> dict[str, Any]:
                 roles_seen.add(role)
             if "name" in arch:
                 label = ROLE_LABELS.get(role) if isinstance(role, str) else None
-                if label is None or arch.get("name") != label:
+                if request or label is None or arch.get("name") != label:
                     errors.append(
                         f"PARTNER_NAME_NOT_ROLE: archetype {i} ({_role_text(role)}): name is not the role label; "
                         'partners are role names only, do not record a person. Remove "name".'
@@ -471,9 +483,9 @@ def validate_fund_profile(profile: dict[str, Any]) -> dict[str, Any]:
                     )
 
     # Sources required for fund-specific mode
-    if mode == "fund_specific":
+    if mode == "fund_specific" and not (request and "sources" not in profile):
         sources = profile.get("sources", [])
-        if not isinstance(sources, list) or len(sources) == 0:
+        if not isinstance(sources, list) or (len(sources) == 0 and not request):
             errors.append("sources required for fund_specific mode (at least 1)")
         elif isinstance(sources, list):
             for i, source in enumerate(sources):
@@ -496,7 +508,7 @@ def validate_fund_profile(profile: dict[str, Any]) -> dict[str, Any]:
     for key in sorted(str(k) for k in profile if k not in FUND_KEYS):
         errors.append(
             f'FUND_FIELD_NOT_ALLOWED: field "{key}" is not allowed in a fund profile; it carries only '
-            f"{', '.join(sorted(FUND_KEYS - {'metadata', 'validation'}))}."
+            f"{', '.join(sorted(FUND_KEYS - NOT_ADVERTISED))}."
         )
 
     status = "valid" if not errors else "invalid"
@@ -511,22 +523,154 @@ def validate_fund_profile(profile: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+# --- a fund profile supplied with the request ------------------------------------------------------------
+
+# The partners' focus areas when the supplied profile names no archetypes: the generic example's.
+DEFAULT_ARCHETYPES = (
+    {"role": "visionary", "focus_areas": ["market size", "timing", "founder ambition"]},
+    {"role": "operator", "focus_areas": ["go-to-market", "unit economics", "execution risk"]},
+    {"role": "analyst", "focus_areas": ["retention", "margins", "competitive moat"]},
+)
+REQUEST_REQUIRED = ("fund_name", "thesis_areas", "stage_focus", "check_size_range", "portfolio")
+# The request check's kinds (`_gates.fund_value_problem`), as this producer's codes.
+_REQUEST_CODES = {
+    "not_object": "FUND_FIELD_NOT_ALLOWED",
+    "not_allowed": "FUND_FIELD_NOT_ALLOWED",
+    "too_long": "FUND_FIELD_TOO_LONG",
+    "invalid_chars": "FUND_FIELD_INVALID_CHARS",
+}
+STAMP_ONLY_BY_REQUEST = (
+    'FUND_FIELD_NOT_ALLOWED: field "profile_source" is written only when the profile is supplied with the request '
+    "(fund_profile.py --from-request); remove it."
+)
+
+
+def request_profile(data: Any, sha256: str, value_problem: Any) -> dict[str, Any]:
+    """The fund profile supplied with the request, ready to validate: the request's own checks
+    (`value_problem`, the shared gate's) first, then its rules: `mode` is fund_specific, archetypes default to
+    the three roles, `metadata`/`validation` are re-stamped, `accepted_warnings` is refused (a run decision, not
+    fund data), and it carries `profile_source`. Problems go into `validation.errors` with their codes."""
+    errors: list[str] = []
+    problem = value_problem(data)
+    if problem is not None:
+        kind, cause = problem
+        errors.append(f"{_REQUEST_CODES.get(kind, 'FUND_FIELD_NOT_ALLOWED')}: {cause}.")
+        return {"validation": {"status": "invalid", "errors": errors}}
+    profile = {k: v for k, v in data.items() if k not in ("metadata", "validation")}
+    if "accepted_warnings" in profile:
+        errors.append(
+            'FUND_FIELD_NOT_ALLOWED: field "accepted_warnings" is not part of a fund profile supplied with the request.'
+        )
+    for key in REQUEST_REQUIRED:
+        if key not in profile:
+            errors.append(f"Missing required field: {key}")
+    mode = profile.setdefault("mode", "fund_specific")
+    if mode != "fund_specific":
+        errors.append("mode must be 'fund_specific' (or left out) in a fund profile supplied with the request")
+    if "archetypes" not in profile:
+        profile["archetypes"] = [dict(a, focus_areas=list(a["focus_areas"])) for a in DEFAULT_ARCHETYPES]
+    result = validate_fund_profile(profile, request=True)
+    result["validation"]["errors"] = errors + result["validation"]["errors"]
+    if result["validation"]["errors"]:
+        result["validation"]["status"] = "invalid"
+    result["profile_source"] = {"kind": "request", "sha256": sha256}
+    return result
+
+
+def founder_lines(profile: dict[str, Any] | None) -> list[str]:
+    """The fund's kind and where its profile came from, in the founder's words: the one owner of this wording
+    (compose and the page render it verbatim, the kind line first). Never a raw mode value."""
+    if not isinstance(profile, dict):
+        return []
+    supplied = isinstance(profile.get("profile_source"), dict)
+    if profile.get("mode") == "generic":
+        lines = ["Fund: an illustrative generic fund"]
+    elif supplied:
+        lines = ["Fund: a specific fund, profile supplied with this request"]
+    else:
+        lines = ["Fund: a specific fund, profile researched for this simulation"]
+    if supplied:
+        lines.append(
+            "The fund's thesis, stage focus, check size and portfolio were supplied with this request and were not "
+            "researched in this run. The three partners are role-played."
+        )
+        if not profile.get("sources"):
+            lines.append("No sources were listed for this fund profile.")
+    return lines
+
+
+def _refuse(code: str, message: str, output_path: str | None) -> NoReturn:
+    sys.stdout.write(json.dumps({"status": "rejected", "code": code, "message": message}) + "\n")
+    where = f"; {os.path.abspath(output_path)} was left unchanged" if output_path else ""
+    print(f"Error ({code}): {message}{where}", file=sys.stderr)
+    sys.exit(1)
+
+
+def _ledger_fund_entry(ledger: Any) -> dict[str, Any]:
+    gates, paths = ledger
+    entry = (gates.load_ledger(paths).get("gates") or {}).get("ic_fund_mode") or {}
+    return entry if isinstance(entry, dict) else {}
+
+
+def _from_request(args: argparse.Namespace, ledger: Any) -> dict[str, Any]:
+    """The profile built from the ledger's `host_profile` value; exits on a mismatch."""
+    entry = _ledger_fund_entry(ledger)
+    cur = entry.get("current") or {}
+    if cur.get("answer_id") != "host_profile":
+        _refuse(
+            "GATE_RECORD_MISMATCH",
+            f"the fund recorded for this run is {cur.get('answer_id')!r}, not a fund profile supplied with the "
+            "request; build the profile for the recorded choice (Step 4)",
+            args.output,
+        )
+    value = cur.get("value")
+    if not isinstance(value, str):
+        value = ""
+    sha = hashlib.sha256(value.encode("utf-8")).hexdigest()
+    if not value or sha != (cur.get("evidence") or {}).get("sha256"):
+        _refuse(
+            "GATE_RECORD_MISMATCH",
+            "the recorded fund profile no longer matches the one checked when it was supplied; start a new run with "
+            "the request's lines",
+            args.output,
+        )
+    try:
+        data = json.loads(value)
+    except ValueError:
+        _refuse("GATE_RECORD_MISMATCH", "the recorded fund profile is not valid JSON", args.output)
+    gates, _paths = ledger
+    return request_profile(data, sha, gates.fund_value_problem)
+
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Fund profile validator (reads JSON from stdin)")
     p.add_argument("--pretty", action="store_true", help="Pretty-print JSON")
     p.add_argument("-o", "--output", help="Write JSON to file instead of stdout")
     p.add_argument("--run-id", required=True, help="Run identifier injected into metadata.run_id")
+    p.add_argument(
+        "--from-request",
+        action="store_true",
+        help="build the profile from the fund profile supplied with the request (the run's ledger), not stdin",
+    )
     return p.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+    # FIRST: an output naming one of this step's own input files is refused before anything is written.
+    import _out_guard
+
+    _out_guard.refuse_output_onto_input([args.output], script="fund_profile.py")
     # In a folder that belongs to a run: only that folder's current run (fund_profile opens the run's ledger).
     import _run_ref
 
     _run_ref.refuse_not_this_runs(
         os.path.dirname(os.path.abspath(args.output)) if args.output else None, args.run_id, noun="simulation dir"
     )
+
+    if args.from_request:
+        _main_from_request(args)
+        return
 
     if sys.stdin.isatty():
         print("Error: pipe JSON input via stdin", file=sys.stderr)
@@ -558,7 +702,21 @@ def main() -> None:
             run_dir, args.run_id, [_ic_gates.MODE_GATE, _ic_gates.FUND_GATE], by="fund_profile.py"
         )
         if ledger is not None:
+            if (_ledger_fund_entry(ledger).get("current") or {}).get("answer_id") == _ic_gates.HOST_PROFILE:
+                # Without this, a researched or hand-written profile would pass the mode check below.
+                _refuse(
+                    "HOST_PROFILE_REQUIRED",
+                    "this run's fund profile is the one supplied with the request; run Step 4 with --from-request",
+                    args.output,
+                )
             _ic_gates.fund_choice_or_exit(ledger, data.get("mode"))
+
+    if "profile_source" in data:
+        _fail_invalid(
+            {**data, "validation": {"status": "invalid", "errors": [STAMP_ONLY_BY_REQUEST]}},
+            args.output,
+            2 if args.pretty else None,
+        )
 
     result = validate_fund_profile(data)
 
@@ -573,6 +731,37 @@ def main() -> None:
         out,
         args.output,
         summary={"validation": result["validation"]["status"]},
+    )
+
+
+def _main_from_request(args: argparse.Namespace) -> None:
+    """Step 4 when the fund profile was supplied with the request: read from the ledger, never stdin, and written
+    compactly (it is pasted whole into several dispatches, and a compact file stays under a shell result's size
+    limit). Deterministic: re-running writes the same bytes, so nothing built from it goes stale."""
+    if not args.output:
+        _refuse("HOST_PROFILE_NEEDS_RUN", "--from-request writes the run's fund_profile.json: give -o", None)
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import _ic_gates
+
+    run_dir = os.path.dirname(os.path.abspath(args.output))
+    ledger = _ic_gates.require_or_exit(
+        run_dir, args.run_id, [_ic_gates.MODE_GATE, _ic_gates.FUND_GATE], by="fund_profile.py"
+    )
+    if ledger is None:
+        _refuse(
+            "HOST_PROFILE_NEEDS_RUN",
+            "a fund profile supplied with the request is read from the run's record, and this simulation dir has none "
+            "(no run_ref.json for this run)",
+            args.output,
+        )
+    result = _from_request(args, ledger)
+    result["metadata"] = {"run_id": args.run_id}
+    if result["validation"]["status"] != "valid":
+        _fail_invalid(result, args.output, 2 if args.pretty else None)
+    _write_output(
+        json.dumps(result, separators=(",", ":")) + "\n",
+        args.output,
+        summary={"validation": "valid", "profile_source": "request"},
     )
 
 

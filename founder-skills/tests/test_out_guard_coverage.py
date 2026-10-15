@@ -39,7 +39,6 @@ EXEMPT: dict[tuple[str, str], str] = {
     "`--fix < inputs.json -o inputs.json` in-place fix reads stdin",
     ("skills/financial-model-review/scripts/runway.py", "-o"): "stdin only",
     ("skills/financial-model-review/scripts/unit_economics.py", "-o"): "stdin only",
-    ("skills/ic-sim/scripts/fund_profile.py", "-o"): "stdin only",
     ("skills/ic-sim/scripts/score_dimensions.py", "-o"): "stdin only",
     ("skills/ic-sim/scripts/persist_partner.py", "-o"): "stdin only",
     ("skills/ic-sim/scripts/detect_conflicts.py", "-o"): "stdin only",

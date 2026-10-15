@@ -350,6 +350,7 @@ RUN_FILE_FLAGS = frozenset(
         "--review-dir",
         "--analysis-dir",
         "--uploads-dir",
+        "--profile",
     }
 )
 

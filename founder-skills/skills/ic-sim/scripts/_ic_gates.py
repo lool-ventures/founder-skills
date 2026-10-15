@@ -30,8 +30,11 @@ RUN_ARTIFACTS = (
     "discussion.json",
     "score_dimensions.json",
 )
-# The fund question's answer, as fund_profile.json's `mode` states it.
-FUND_MODES = {"generic": "generic", "specific": "fund_specific"}
+# The fund question's answer, as fund_profile.json's `mode` states it. Every option id of the question is a key:
+# an unmapped answer would pass `fund_choice_or_exit` silently. `host_profile` is a fund profile supplied with the
+# request, built only by `fund_profile.py --from-request`.
+FUND_MODES = {"generic": "generic", "specific": "fund_specific", "host_profile": "fund_specific"}
+HOST_PROFILE = "host_profile"
 
 # A simulation already delivered is never written into again: new materials start a new one.
 FINISHED_MESSAGE = (

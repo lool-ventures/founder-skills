@@ -446,6 +446,9 @@ _CODE_SOURCES = [
     SKILLS / "ic-sim" / "scripts" / "_ic_gates.py",
     SKILLS / "ic-sim" / "scripts" / "compose_report.py",
     SKILLS / "ic-sim" / "scripts" / "fund_profile.py",
+    # Context supplied with the request: ic-sim's producer and the shared per-item rules.
+    SKILLS / "ic-sim" / "scripts" / "host_context.py",
+    SCRIPTS / "_host_text.py",
     SKILLS / "cap-table" / "scripts" / "extract_cap_table.py",
     SKILLS / "cap-table" / "scripts" / "_ct_gates.py",
     SKILLS / "competitive-positioning" / "scripts" / "_cp_gates.py",
@@ -625,7 +628,6 @@ NEW_WORDING = {
     ("ct_rule_lookup_fact", "unknown"),
     # Never asked: a host reads it in the contract; only a request line answers it.
     ("host_context", "question"),
-    ("ic_fund_mode", "host_profile"),
 }
 
 

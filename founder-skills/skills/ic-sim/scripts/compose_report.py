@@ -204,6 +204,8 @@ EXPECTED_KEYS: dict[str, set[str]] = {
         # basic it could only infer (not founder-state) as to_confirm and proceeds
         # rather than stalling — a sanctioned note, not schema drift.
         "to_confirm",
+        # Context supplied with the request, written only by host_context.py (compose checks it against the run).
+        "host_context",
     },
     "fund_profile.json": {
         "fund_name",
@@ -216,6 +218,8 @@ EXPECTED_KEYS: dict[str, set[str]] = {
         "sources",
         "validation",
         "accepted_warnings",
+        # Written only by fund_profile.py --from-request (compose checks it against the run).
+        "profile_source",
     },
     "conflict_check.json": {
         "portfolio_size",
@@ -1241,6 +1245,66 @@ def _section_executive_summary(
     return "\n".join(lines) + "\n"
 
 
+def _host_context_module() -> Any:
+    """The sibling `host_context` (the one owner of the supplied context's wording)."""
+    scripts_dir = os.path.dirname(os.path.abspath(__file__))
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    import host_context
+
+    return host_context
+
+
+_MD_INLINE = re.compile(r"([\\*_`\[<])")
+_MD_LEAD = re.compile(r"^(\s*)(#|-|\+|>|\d+\.)")
+
+
+def _md_escape(text: str) -> str:
+    """Supplied text rendered as written: no Markdown it happens to contain takes effect."""
+    return _MD_LEAD.sub(lambda m: m.group(1) + "\\" + m.group(2), _MD_INLINE.sub(r"\\\1", text))
+
+
+def _section_host_context(profile: dict[str, Any] | None) -> str:
+    """Context supplied with the request, verbatim, marked as unchecked and not the founder's own; absent when the
+    request supplied none."""
+    parts = _host_context_module().host_context_parts(profile, escape=_md_escape)
+    if parts is None:
+        return ""
+    intro, items, closing = parts
+    out = ["## Context Supplied With This Request\n", intro, ""]
+    out += [f"- {item}" for item in items]
+    out += ["", *closing] if closing else []
+    return "\n".join(out) + "\n"
+
+
+def _host_text_module() -> Any:
+    scripts_dir = os.path.dirname(os.path.abspath(__file__))
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    import _host_text
+
+    return _host_text
+
+
+def _host_context_report(profile: dict[str, Any] | None, keep: frozenset[str]) -> dict[str, Any]:
+    """report.json's record of the context supplied with the request (absent when none was): the kept items, the
+    dropped ones by index and cause, the tokens kept verbatim, and the disclosures."""
+    block = profile.get("host_context") if isinstance(profile, dict) else None
+    if not isinstance(block, dict):
+        return {}
+    dropped = [d for d in block.get("dropped") or [] if isinstance(d, dict)]
+    return {
+        "host_context": {
+            "provenance": block.get("provenance"),
+            "sha256": block.get("sha256"),
+            "items": _host_context_module().kept_texts(profile),
+            "dropped": dropped,
+            "keep_tokens": sorted(keep),
+        },
+        "disclosures": ["HOST_CONTEXT_SUPPLIED", *(["HOST_CONTEXT_ITEMS_DROPPED"] if dropped else [])],
+    }
+
+
 def _section_fund_profile(fund: dict[str, Any] | None) -> str:
     """Fund profile summary."""
     if fund is None or _is_stub(fund):
@@ -1248,7 +1312,9 @@ def _section_fund_profile(fund: dict[str, Any] | None) -> str:
 
     lines = ["## Fund Profile\n"]
     lines.append(f"**Fund:** {fund.get('fund_name', '?')}")
-    lines.append(f"**Mode:** {fund.get('mode', '?')}")
+    # The fund's kind and where its profile came from, in the one owner's words (never the raw mode value).
+    founder_lines = _fund_profile_module().founder_lines(fund)
+    lines.extend(f"\n{line}" for line in founder_lines)
 
     if fund.get("mode") == "generic":
         lines.append(
@@ -1746,6 +1812,7 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
     pre_warning_sections = [
         _section_title(profile),
         _section_executive_summary(profile, score_dims, discussion),
+        _section_host_context(profile),
         _section_fund_profile(fund),
         _section_conflict_check(conflict),
         _section_discussion(discussion),
@@ -1796,17 +1863,26 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
     # exact string the founder reads, and producer warning messages are where the internal tokens
     # live. Hooking in before the warnings splice substitutes nothing and reports a clean body.
     _ft = _founder_text_policy()
+    # Context supplied with the request is rendered verbatim: the tokens the scan would flag in its kept facts and
+    # sources are kept by BOTH the substitution and the scan (one set, so neither rewrites nor warns about them).
+    # Residual: such a token is also left alone where our own text uses it in this report.
+    host_items = _host_context_module().kept_texts(profile)
+    host_keep = (
+        frozenset(_host_text_module().keep_tokens(host_items, _ft.scan))
+        if (_ft is not None and host_items)
+        else frozenset()
+    )
     if _ft is not None:
         # No data-derived keep-set here. `identifier_values` is cap-table-only by design: this skill
         # uses `id` for a metric's NAME (`unit_economics.metrics[].id == "gross_margin"`), which is our
         # vocabulary and must be humanized, not a handle the founder cross-references. Keeping it left
         # "ARPU $500 x gross_margin 0.75" in a delivered report AND suppressed the warning, since the
         # scan honours the same keep-set.
-        report_markdown = _ft.substitute(report_markdown)
+        report_markdown = _ft.substitute(report_markdown, extra_keep=host_keep)
         # Our own warning codes are kept: compose renders them in small print beside a humanized
         # label (the md_term convention), which is deliberate. A code leaking anywhere else is
         # caught by the skill's own gate, not by widening this scan into a false positive.
-        _found = _ft.scan(report_markdown, extra_keep=frozenset(WARNING_SEVERITY))
+        _found = _ft.scan(report_markdown, extra_keep=frozenset(WARNING_SEVERITY) | host_keep)
         for _tok in _found["enums"]:
             warnings.append(
                 _warn(
@@ -1861,7 +1937,67 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
             "artifacts_missing": artifacts_missing,
         },
         "coaching_payload": coaching_payload,
+        **_host_context_report(profile, host_keep),
     }
+
+
+def _refuse(code: str, message: str) -> None:
+    sys.stdout.write(json.dumps({"status": "rejected", "code": code, "message": message}) + "\n")
+    print(f"Error ({code}): {message}; nothing was written", file=sys.stderr)
+    sys.exit(1)
+
+
+def _refuse_supplied_mismatch(ledger: Any, dir_path: str) -> None:
+    """What the request supplied must be what the profiles carry, both ways (a run with a ledger only):
+    the fund profile's `profile_source` exactly when the fund answer is the supplied profile, with its sha; the
+    startup profile's `host_context` exactly when context was supplied, with the sha and drops checked."""
+    gates, paths = ledger
+    recorded = gates.load_ledger(paths).get("gates") or {}
+    fund_cur = (recorded.get("ic_fund_mode") or {}).get("current") or {}
+    fund = _load_artifact(dir_path, "fund_profile.json")
+    if _usable(fund):
+        stamp = fund.get("profile_source")
+        supplied = fund_cur.get("answer_id") == "host_profile"
+        sha = (fund_cur.get("evidence") or {}).get("sha256")
+        if supplied != (isinstance(stamp, dict) and stamp.get("kind") == "request") or (
+            supplied and isinstance(stamp, dict) and stamp.get("sha256") != sha
+        ):
+            _refuse(
+                "FUND_PROFILE_SOURCE_MISMATCH",
+                "fund_profile.json does not match the fund recorded for this run (a fund profile supplied with the "
+                "request is built only by Step 4's --from-request, and only then carries profile_source); rebuild "
+                "the fund profile with --from-request (Step 4) when the fund was supplied with the request, else for "
+                "the recorded choice, and run Steps 5-8 again under the same run id",
+            )
+    profile_path = os.path.abspath(os.path.join(dir_path, "startup_profile.json"))
+    command = (
+        f'python3 "{os.path.join(os.path.dirname(os.path.abspath(__file__)), "host_context.py")}" --run-id '
+        f'"{paths.run_id}" --profile "{profile_path}"'
+    )
+    profile = _load_artifact(dir_path, "startup_profile.json")
+    if not _usable(profile):
+        return
+    block = profile.get("host_context")
+    ctx_entry = recorded.get("host_context") or {}
+    ctx_cur = ctx_entry.get("current") or {}
+    if ctx_entry.get("state") == "answered" and ctx_cur.get("answer_id") == "supplied":
+        ev = ctx_cur.get("evidence") or {}
+        if (
+            not isinstance(block, dict)
+            or block.get("sha256") != ev.get("sha256")
+            or block.get("dropped") != ev.get("dropped")
+        ):
+            _refuse(
+                "HOST_CONTEXT_MISSING",
+                "startup_profile.json does not carry the context supplied with this request; run "
+                f"{command}, then run Steps 5-8 again under the same run id",
+            )
+    elif block is not None:
+        _refuse(
+            "HOST_CONTEXT_NOT_SUPPLIED",
+            "startup_profile.json carries host_context, but no context was supplied with this request; write the "
+            f"profile again without it, run {command}, then run Steps 5-8 again under the same run id",
+        )
 
 
 def parse_args() -> argparse.Namespace:
@@ -1915,6 +2051,8 @@ def main() -> None:
     # After the run's gates (a finished run reports RUN_FINISHED, which it can act on), before any write.
     _fund_profile_module().refuse_profile_naming_people(args.dir, by="compose_report.py")
     _fund_profile_module().refuse_stale_dependents(args.dir, by="compose_report.py")
+    if ledger is not None:
+        _refuse_supplied_mismatch(ledger, args.dir)
 
     report_path = os.path.abspath(args.write_md) if args.write_md else None
     result = compose(args.dir, report_path=report_path)
