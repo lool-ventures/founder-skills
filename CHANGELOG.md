@@ -5,6 +5,74 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.20.1] - 2026-10-15 — A delivered report is never rewritten in place
+
+### Highlights
+
+**A delivered report stays as it was delivered.** A market sizing or a financial model review could be rebuilt
+after delivery and its report replaced in place, under the same version and with nothing to say it had changed.
+For a financial model review this could happen just by building the report again, which also dropped its coaching
+section. Both are now final once delivered. A changed figure or approach starts a new analysis, and a financial
+model review still takes your newer cash balance and its date once, as before.
+
+### Scoring changes
+
+Market sizing: no change to any score or grade. The self-check, the stress test and the prompt generator now
+refuse to run on a delivered analysis; nothing they compute changed. Every other skill: none.
+
+### Fixed
+
+- Market sizing: a delivered analysis could be re-run step by step and its report replaced, with the same
+  version and nothing telling you. A delivered analysis now stays as delivered; a changed figure or approach
+  starts a new analysis. Its page, its closing message and a repeated coaching step still work.
+- Financial model review: building the report again after delivery replaced the delivered report in place and
+  dropped its coaching section. A delivered review is now final; your newer cash balance and its date still
+  update it once.
+- Financial model review: a cash update after delivery that left out the balance, or gave a date that is not a
+  month, was accepted, and the review could be rebuilt without its runway. It is now refused; an update gives a
+  balance and its month.
+- Financial model review: a delivered review's cash follow-up could be closed with a default, which left a
+  notice on the review although nothing in it had changed. Only your own reply is recorded there now, and it
+  still updates the review once.
+- Market sizing: when the outside review ran a second time and again found nothing, the report said the review
+  had been changed after it was written and flagged the analysis as changed after review. Two clean reviews are
+  now read as two reviews.
+- Competitive positioning: the same; a second outside review that found nothing is shown as the review of the
+  analysis as it now stands, with the earlier one listed, instead of being reported as changed.
+
+### Development
+
+Contributor-facing only; nothing here changes what a founder installs or runs.
+
+- Hosts: on a `complete` or `refused` market-sizing run, `compose_report.py`, `market_sizing.py`,
+  `sensitivity.py`, `checklist.py`, `red_team.py` and `dispatch_prompt.py` (every context, `--redo comparison`
+  included) exit 1 with `{"status": "rejected", "code": "RUN_FINISHED"}`. Nothing is written except compose's own
+  `compose_result.json`. The comparison redo's finished-run refusal moves from the `refused` shape to that one.
+  `visualize.py`, `closing_message.py`, a repeated `insert_coaching.py` and `run_status.py deliverables --final`
+  are unchanged. In a bound dir whose ledger is unreachable, `sensitivity.py`, `checklist.py`, `red_team.py` and
+  the generator's RED_TEAM / CHECKLIST prints now exit 2, as compose, `market_sizing.py` and the sizing prints
+  already did. Residual: market-sizing's insert-blocked branch ("re-run compose and retry") now meets
+  `RUN_FINISHED` if an insert ever blocks on an already-complete run, which only a hand-edited report reaches.
+- Hosts: financial-model-review's compose on a `complete` or `refused` run exits 10 `GATE_WAITING` for an
+  unrecorded post-delivery cash reply (as before) and otherwise exits 1 `RUN_FINISHED` (was exit 0 with the report
+  rewritten). `apply_corrections.py` refuses a post-delivery cash update with no finite balance or no `YYYY-MM`
+  date `RUN_FINISHED`. The recorder's `default` on `fmr_cash_followup` of a `complete` run is `RUN_FINISHED` when a
+  post-delivery cash call is on record (`GATE_NOT_OWED` / `ANSWER_STANDS` elsewhere, as before).
+  `RUN_FINISHED` is now listed under the `compose`, `fmr_producers` and `ms_producers` code groups (removed from
+  `ms_sizing_redo`); the contract notes say when each fires.
+- `_redteam_core.resolve` compares two reviews' content only when the first has findings or rejected findings;
+  the hash comparison is unchanged. Shared with competitive positioning.
+- Privacy guard: run in a git worktree, the guard and the three privacy hooks now read the git-ignored private
+  lists from the main checkout (or from `$FOUNDER_SKILLS_PRIVATE_DIR`). Before, they looked in the worktree, found
+  none, and ran with the name, figure and verbatim layers off without saying so. In the hook modes a missing list
+  that turns a layer off is now named on stderr. A maintainer can set `git config founderskills.privacyLists
+  required`, so a missing list or a main checkout that cannot be found fails (exit 3); `scripts/pre-tag.sh` runs
+  the new `--check-switch` gate.
+- Tests: finished-run refusals per entry point, each proven to fail with its guard removed; a recompose of a
+  delivered FMR review is refused with the report byte-identical; two-clean-review and clean-copy pins; the
+  recorder's default keeps its earlier codes where nothing could be reopened. One ownership test now records the
+  cash reply before composing.
+
 ## [0.20.0] - 2026-10-15 — Redesigned report pages for financial model review, deck review and market sizing
 
 ### Highlights
