@@ -415,7 +415,9 @@ CONTRACT_NOTES = (
     "writes nothing: exit 0 the request would be accepted, 1 `start` would refuse it (`PRE_ANSWER_INVALID`), 4 "
     "(`exit_codes.check_would_wait`) a value it carries would wait at its question, 2 usage. Its `values` give a "
     "verdict per line: `applies`, `would_wait` (with `cause`), `not_used_by_skill`, or `not_checked_here` for a "
-    "check that needs the run (never a failure). `--as-of` stands for the run's start date (default today, UTC).",
+    "check that needs the run (never a failure). `--as-of` stands for the run's start date (default today, UTC). It "
+    "does not predict whether an option built from the run's own files is offered (`PRE_ANSWER_UNLISTED`): a line "
+    "with no value check reads `applies`.",
     "ic-sim's `ic_fund_mode=host_profile` takes a fund profile supplied with the request, as one line of JSON, in "
     "place of a researched one (`request_values.ic_fund_profile` lists its keys and caps). `gates[].current.value` "
     "is that JSON for `host_profile` and a fund name for `specific`: branch on `answer_id`. Problems found when the "
@@ -426,7 +428,10 @@ CONTRACT_NOTES = (
     "Every skill accepts the line; only the skills in a gate's `reads_in` use it (ic-sim), and the others list it "
     "as `PRE_ANSWER_IGNORED` with reason `not_used_by_skill`. Founder context never carries it. The items are "
     "third-party to the analysis and never the founder's statements, whatever the source label says. An item that "
-    "breaks a rule is dropped and the rest are used: `notices` lists `HOST_CONTEXT_ITEMS_DROPPED` with each "
+    "breaks a rule is dropped and the rest are used (`control_characters` covers C0, DEL, C1, the line and "
+    "paragraph separators, and the zero-width and bidirectional controls U+200B-U+200F, U+202A-U+202E, "
+    "U+2066-U+2069 and U+FEFF; `person_detail` matches an e-mail address in any script after NFKC "
+    "normalisation): `notices` lists `HOST_CONTEXT_ITEMS_DROPPED` with each "
     "dropped item's 1-based `index` and `cause` and `lines: []`, and `disclosures` lists `HOST_CONTEXT_SUPPLIED` "
     "(and `HOST_CONTEXT_ITEMS_DROPPED`). The run's outputs and that notice never carry a dropped item; "
     "`gates.json`, `gates[].current.value`, `history[].raw`, `resume_prompt` and the `lines` of "
@@ -3783,7 +3788,7 @@ def _req_fmr_cash(ctx: Ctx, entry: dict[str, Any]) -> dict[str, Any] | None:
 # transaction instead of leaving the question waiting.
 
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
-_VALUE_CONTROL_RE = re.compile("[\x00-\x1f\x7f-\x9f  ]")
+_VALUE_CONTROL_RE = _host_text._CONTROL_RE  # the same characters the context rule refuses
 
 # The top-level keys a fund profile supplied with the request may carry: fund_profile.py's FUND_KEYS without
 # `accepted_warnings` (a run decision, not fund data) and `profile_source` (written only by the producer). A copy,
@@ -3845,6 +3850,8 @@ def fund_value_problem(data: Any) -> tuple[str, str] | None:
     None. `kind` is `not_object`, `not_allowed`, `too_long` or `invalid_chars`; the cause names where."""
     if not isinstance(data, dict):
         return "not_object", "the fund profile is not a JSON object"
+    if _host_text.has_non_finite(data):
+        return "not_allowed", "the fund profile holds a number that is not finite"
     for key in sorted(str(k) for k in data if k not in FUND_REQUEST_KEYS):
         return "not_allowed", f'field "{key}" is not allowed in a fund profile'
     found: list[tuple[str, str]] = []
@@ -3882,7 +3889,7 @@ def _req_fund_profile(ctx: Ctx, entry: dict[str, Any]) -> dict[str, Any]:
         value = pa["value"]
         sha = _check_integrity_note(value, pa.get("note"))
         try:
-            data = json.loads(value)
+            data = json.loads(value, parse_constant=_host_text._reject_constant)
         except ValueError as e:
             pos = getattr(e, "pos", None)
             raise _Malformed(
@@ -3925,7 +3932,9 @@ def _req_host_context(ctx: Ctx, entry: dict[str, Any]) -> dict[str, Any]:
         if problem is not None:
             raise _Malformed(problem)
         as_of = run_start_date(ctx)
-        kept, dropped = _host_text.filter_items(json.loads(value), date.fromisoformat(as_of))
+        kept, dropped = _host_text.filter_items(
+            json.loads(value, parse_constant=_host_text._reject_constant), date.fromisoformat(as_of)
+        )
     except _Malformed as e:
         raise GateRejection("REQUIRES_UNMET", f"the context supplied with the request: {e}", kind="malformed") from None
     except Exception:  # noqa: BLE001 -- whatever the value holds, the question waits; it never aborts the write
@@ -5400,6 +5409,28 @@ def needs_input(ctx: Ctx, ledger: dict[str, Any], key: str) -> dict[str, Any]:
     return out
 
 
+REQUEST_VALUE_STOP = (
+    "A value sent with the request could not be read, and only a corrected request line can answer this question. "
+    "Ask nothing; say in one sentence that the run is waiting for it, and end the turn."
+)
+
+
+def _only_request_answers(ctx: Ctx, key: str) -> bool:
+    """Every option of the question is `request_only`: nothing can be offered to a person."""
+    gate_id, instance = parse_key(key)
+    opts = fixed_options(GATES[gate_id], instance, ctx.skill)
+    return bool(opts) and all(o["request_only"] for o in opts)
+
+
+def _latest_not_applied(ledger: dict[str, Any], key: str) -> str | None:
+    reasons = [
+        n.get("reason")
+        for n in ledger.get("notices") or []
+        if isinstance(n, dict) and n.get("code") == "PRE_ANSWER_NOT_APPLIED" and n.get("gate") == key
+    ]
+    return str(reasons[-1]) if reasons else None
+
+
 def open_gates(ctx: Ctx, ledger: dict[str, Any], keys: list[str], *, by: str = RECORDER) -> dict[str, Any]:
     """Open each owed gate (idempotent), applying a stored pre-answer where the recorder owns the gate."""
     checked = []
@@ -5446,6 +5477,10 @@ def open_gates(ctx: Ctx, ledger: dict[str, Any], keys: list[str], *, by: str = R
                 continue
         if entry["state"] == "open":
             waiting.append(key)
+    # A question only a request line can answer is never put to anyone: with no choice to offer, it waits for a
+    # corrected request line, named with the reason the line could not be used.
+    request_waiting = [k for k in waiting if _only_request_answers(ctx, k)]
+    waiting = [k for k in waiting if k not in request_waiting]
     header = FORM_HEADERS.get(ctx.skill, "")
     if not quiet and waiting and (not ledger["form_batches"] or ledger["form_batches"][-1]["gates"] != waiting):
         ledger["form_batches"].append({"header": header, "gates": waiting, "opened_at": _run_status.now_iso()})
@@ -5456,12 +5491,17 @@ def open_gates(ctx: Ctx, ledger: dict[str, Any], keys: list[str], *, by: str = R
     }
     if quiet:
         derivable = [k for k in waiting if derive_authorized(ledger, k)]
-        stop = [k for k in waiting if k not in derivable]
+        stop = [*request_waiting, *[k for k in waiting if k not in derivable]]
         out.update(no_ask_payload(ctx, ledger, stop))
         if derivable:
             out["derive"] = [derive_instruction(ctx, k) for k in derivable]
     else:
         out["needs_input"] = [needs_input(ctx, ledger, k) for k in waiting]
+        if request_waiting:
+            out["request_waiting"] = [
+                {"gate": k, "reason": _latest_not_applied(ledger, k), "stop": REQUEST_VALUE_STOP}
+                for k in request_waiting
+            ]
     if applied:
         out["applied"] = "pre_answer"
         out["applied_gates"] = applied
@@ -5708,7 +5748,7 @@ def print_waiting_and_exit(exit_: tuple[int, dict[str, Any], str], attended_line
     """Print a `waiting_exit` result and exit with its code. `attended_line` replaces the stderr line of an
     attended (exit 10) stop, so each script keeps its own wording there; the no-ask line is never replaced."""
     code, payload, line = exit_
-    if code == EXIT_CODES["waiting"] and attended_line is not None:
+    if code == EXIT_CODES["waiting"] and attended_line is not None and not payload.get("request_waiting"):
         line = attended_line
     sys.stdout.write(json.dumps(payload) + "\n")
     print(line, file=sys.stderr)
@@ -5836,6 +5876,14 @@ def waiting_exit(ctx: Ctx, ledger: dict[str, Any], key: str) -> tuple[int, dict[
     if no_ask(ledger):
         payload = {**no_ask_payload(ctx, ledger, [key]), "blocked_by_gate": key}
         return NO_ASK_EXIT, payload, f"Waiting (the request said not to ask): {key}. {payload['stop']}"
+    if _only_request_answers(ctx, key):
+        # Nothing to ask: only a corrected request line answers it.
+        held = {"gate": key, "reason": _latest_not_applied(ledger, key), "stop": REQUEST_VALUE_STOP}
+        return (
+            EXIT_CODES["waiting"],
+            {"status": "waiting", "blocked_by_gate": key, "request_waiting": [held]},
+            f"Waiting for a corrected request line: {key}. {REQUEST_VALUE_STOP}",
+        )
     attended: dict[str, Any] = {
         "status": "waiting",
         "blocked_by_gate": key,
@@ -6269,6 +6317,8 @@ REQUEST_VALUES = {
         "source_max_chars": _host_text.SOURCE_MAX,
         "date_grace_days": _host_text.DATE_GRACE_DAYS,
         "drop_causes": list(_host_text.CAUSES),
+        # What `control_characters` (and a fund profile's control-character rule) covers.
+        "control_characters": "C0, DEL, C1, U+2028, U+2029, U+200B-U+200F, U+202A-U+202E, U+2066-U+2069, U+FEFF",
     },
     "ic_fund_profile": {
         "gate": "ic_fund_mode",

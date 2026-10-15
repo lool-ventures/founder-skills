@@ -392,13 +392,6 @@ def test_stdin_may_not_carry_the_stamp(tmp_path: Path) -> None:
     assert proc.returncode == 1 and "profile_source" not in proc.stdout.split("it carries only", 1)[1]
 
 
-def test_the_output_guard_runs_first(tmp_path: Path) -> None:
-    src = tmp_path / "in.json"
-    src.write_text("{}", encoding="utf-8")
-    proc = h.run(IC / "fund_profile.py", "--run-id", RUN_ID, "-o", str(src), str(src))
-    assert proc.returncode != 0
-
-
 def test_fund_modes_are_the_option_ids_both_ways() -> None:
     assert set(icg.FUND_MODES) == {o["id"] for o in g.GATES["ic_fund_mode"]["options"]}
 

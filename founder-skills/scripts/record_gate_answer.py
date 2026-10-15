@@ -114,6 +114,14 @@ def cmd_open(args: argparse.Namespace) -> int:
             f"Waiting (the request said not to ask): {keys}. {g.NO_ASK_STOP}",
             args.pretty,
         )
+    if out.get("request_waiting"):
+        keys = ", ".join(w["gate"] for w in out["request_waiting"])
+        _exit(
+            g.EXIT_CODES["waiting"],
+            {"ok": True, "blocked_by_gate": out["request_waiting"][0]["gate"], **out},
+            f"Waiting for a corrected request line: {keys}. {g.REQUEST_VALUE_STOP}",
+            args.pretty,
+        )
     _emit({"ok": True, **out}, args.pretty)
     return 0
 

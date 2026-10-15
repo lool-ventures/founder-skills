@@ -1258,12 +1258,19 @@ def _host_context_module() -> Any:
 # An underscore inside a word (`pre_seed`) is never emphasis, so it stays as written and the founder-text
 # keep-set is what leaves it alone; one at a word's edge (`_word_`) is escaped.
 _MD_INLINE = re.compile(r"([\\*`\[<]|(?<!\w)_|_(?!\w))")
-_MD_LEAD = re.compile(r"^(\s*)(#|-|\+|>|\d+\.)")
+_MD_LEAD = re.compile(r"^(\s*)(?:([#+>-])|(\d+)([.)]))")
+
+
+def _md_lead(m: re.Match[str]) -> str:
+    # A backslash escapes punctuation only: before the marker itself, and after a number's digits.
+    if m.group(2):
+        return m.group(1) + "\\" + m.group(2)
+    return m.group(1) + m.group(3) + "\\" + m.group(4)
 
 
 def _md_escape(text: str) -> str:
     """Supplied text rendered as written: no Markdown it happens to contain takes effect."""
-    return _MD_LEAD.sub(lambda m: m.group(1) + "\\" + m.group(2), _MD_INLINE.sub(r"\\\1", text))
+    return _MD_LEAD.sub(_md_lead, _MD_INLINE.sub(r"\\\1", text))
 
 
 def _section_host_context(profile: dict[str, Any] | None) -> str:
@@ -1954,12 +1961,13 @@ def _refuse_supplied_mismatch(ledger: Any, dir_path: str) -> None:
     the fund profile's `profile_source` exactly when the fund answer is the supplied profile, with its sha; the
     startup profile's `host_context` exactly when context was supplied, with the sha and drops checked."""
     gates, paths = ledger
-    recorded = gates.load_ledger(paths).get("gates") or {}
+    led = gates.load_ledger(paths)
+    recorded = led.get("gates") or {}
     fund_cur = (recorded.get("ic_fund_mode") or {}).get("current") or {}
     fund = _load_artifact(dir_path, "fund_profile.json")
-    if _usable(fund):
-        stamp = fund.get("profile_source")
-        supplied = fund_cur.get("answer_id") == "host_profile"
+    supplied = fund_cur.get("answer_id") == "host_profile"
+    if _usable(fund) or supplied:
+        stamp = fund.get("profile_source") if _usable(fund) else None
         sha = (fund_cur.get("evidence") or {}).get("sha256")
         if supplied != (isinstance(stamp, dict) and stamp.get("kind") == "request") or (
             supplied and isinstance(stamp, dict) and stamp.get("sha256") != sha
@@ -1976,11 +1984,21 @@ def _refuse_supplied_mismatch(ledger: Any, dir_path: str) -> None:
         f'python3 "{os.path.join(os.path.dirname(os.path.abspath(__file__)), "host_context.py")}" --run-id '
         f'"{paths.run_id}" --profile "{profile_path}"'
     )
+    ctx_entry = recorded.get("host_context") or {}
+    if gates.pending_pre_answer(led, "host_context") is not None and ctx_entry.get("state") not in (
+        "answered",
+        "not_owed",
+    ):
+        # The request carried context that no step applied (Step 1's open and host_context.py both apply it).
+        _refuse(
+            "HOST_CONTEXT_MISSING",
+            f"the context supplied with this request was never applied to this run; run {command}, then run Steps "
+            "5-8 again under the same run id",
+        )
     profile = _load_artifact(dir_path, "startup_profile.json")
     if not _usable(profile):
         return
     block = profile.get("host_context")
-    ctx_entry = recorded.get("host_context") or {}
     ctx_cur = ctx_entry.get("current") or {}
     if ctx_entry.get("state") == "answered" and ctx_cur.get("answer_id") == "supplied":
         ev = ctx_cur.get("evidence") or {}

@@ -31,6 +31,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import sys
 from typing import Any, NoReturn
@@ -415,13 +416,16 @@ def validate_fund_profile(profile: dict[str, Any], *, request: bool = False) -> 
             try:
                 min_val = float(min_size)
                 max_val = float(max_size)
+                if not (math.isfinite(min_val) and math.isfinite(max_val)):
+                    # NaN compares false both ways and infinity is no check size; a huge integer overflows float().
+                    raise ValueError("a check size must be a finite number")
                 if min_val < 0:
                     errors.append(f"check_size_range.min must be non-negative, got {min_val}")
                 if max_val < 0:
                     errors.append(f"check_size_range.max must be non-negative, got {max_val}")
                 if min_val > max_val:
                     errors.append(f"check_size_range.min ({min_val}) must be <= max ({max_val})")
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, OverflowError):
                 errors.append("check_size_range.min and max must be numbers")
         else:
             if min_size is None:
@@ -545,6 +549,11 @@ STAMP_ONLY_BY_REQUEST = (
 )
 
 
+def _reject_constant(name: str) -> Any:
+    """`NaN`, `Infinity` and `-Infinity` are not JSON numbers."""
+    raise ValueError(f"{name} is not a JSON number")
+
+
 def request_profile(data: Any, sha256: str, value_problem: Any) -> dict[str, Any]:
     """The fund profile supplied with the request, ready to validate: the request's own checks
     (`value_problem`, the shared gate's) first, then its rules: `mode` is fund_specific, archetypes default to
@@ -635,7 +644,7 @@ def _from_request(args: argparse.Namespace, ledger: Any) -> dict[str, Any]:
             args.output,
         )
     try:
-        data = json.loads(value)
+        data = json.loads(value, parse_constant=_reject_constant)
     except ValueError:
         _refuse("GATE_RECORD_MISMATCH", "the recorded fund profile is not valid JSON", args.output)
     gates, _paths = ledger
@@ -739,7 +748,9 @@ def _main_from_request(args: argparse.Namespace) -> None:
     compactly (it is pasted whole into several dispatches, and a compact file stays under a shell result's size
     limit). Deterministic: re-running writes the same bytes, so nothing built from it goes stale."""
     if not args.output:
-        _refuse("HOST_PROFILE_NEEDS_RUN", "--from-request writes the run's fund_profile.json: give -o", None)
+        sys.stdout.write(json.dumps({"status": "error", "code": "USAGE", "message": "--from-request needs -o"}) + "\n")
+        print("Error (USAGE): --from-request writes the run's fund_profile.json: give -o", file=sys.stderr)
+        sys.exit(2)
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import _ic_gates
 
@@ -754,6 +765,11 @@ def _main_from_request(args: argparse.Namespace) -> None:
             "(no run_ref.json for this run)",
             args.output,
         )
+    # This path reads the run's ledger and status: an output that is one of them (through a link) is refused.
+    import _out_guard
+
+    _gates_mod, paths = ledger
+    _out_guard.refuse_output_onto_input([args.output], script="fund_profile.py", extra=[paths.ledger, paths.status])
     result = _from_request(args, ledger)
     result["metadata"] = {"run_id": args.run_id}
     if result["validation"]["status"] != "valid":

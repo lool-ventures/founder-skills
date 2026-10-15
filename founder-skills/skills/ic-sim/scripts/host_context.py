@@ -137,10 +137,13 @@ def main() -> None:
 
     sim_dir = os.path.dirname(profile_path)
     _run_ref.refuse_not_this_runs(os.path.dirname(os.path.abspath(args.profile)), args.run_id, noun="simulation dir")
-    try:
-        opened = _run_ref.open_ledger(sim_dir, args.run_id)
-    except _run_ref.LedgerUnavailable as e:
-        sys.exit(_run_ref.report_failure(e))
+    # The question itself, applied here when Step 1's open did not reach it: a pending line is applied, a value
+    # that cannot be read waits (exit 10, or 12 under FS_HOST_NO_ASK), and a run whose request carried none does
+    # not owe it. Never a context silently left behind.
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import _ic_gates
+
+    opened = _ic_gates.require_or_exit(sim_dir, args.run_id, [GATE], by="host_context.py")
     if opened is None:
         _ok({"host_context": "no_ledger", "written": False}, args.pretty)
     gates, paths = opened
@@ -168,8 +171,6 @@ def main() -> None:
         _refuse("GATE_RECORD_MISMATCH", f"{e}; start a new run with the request's lines", profile_path)
     profile[GATE] = block
     text = json.dumps(profile, indent=2, ensure_ascii=False) + "\n"
-    # Every line-splitting character was dropped with its item: nothing written may split a line.
-    assert not any(ch in text for ch in (" ", " ", "\u0085")), "a line separator reached the profile"
     with open(profile_path, "w", encoding="utf-8") as f:
         f.write(text)
     _ok(

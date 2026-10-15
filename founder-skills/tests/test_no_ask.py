@@ -1058,6 +1058,8 @@ def test_dr_compose_records_that_the_deck_was_read_as_text(tmp_path: Path) -> No
 WAITING_CODE_SITES = {
     ("founder-skills/scripts/_gates.py", "print_waiting_and_exit"),
     ("founder-skills/scripts/_gates.py", "waiting_exit"),
+    # A question only a corrected request line answers, on an attended run (the no-ask branch above it exits 12).
+    ("founder-skills/scripts/record_gate_answer.py", "cmd_open"),
     ("founder-skills/scripts/run_status.py", "_blocked"),
     ("founder-skills/scripts/founder_context.py", "_check_gate_records"),
     ("founder-skills/scripts/founder_context.py", "_read_with_ledger"),

@@ -335,7 +335,7 @@ cat <<'PROFILE_EOF' > "$SIM_DIR/startup_profile.json"
 PROFILE_EOF
 ```
 
-Then run `python3 "$SCRIPTS/host_context.py" --run-id "$RUN_ID" --profile "$SIM_DIR/startup_profile.json"`. It adds the context supplied with the request, if any; never write `host_context` yourself. Exit 1: run it once more on a profile without `host_context`; a second exit 1 → `run_status.py fail --code PRODUCER_FAILED`.
+Then run `python3 "$SCRIPTS/host_context.py" --run-id "$RUN_ID" --profile "$SIM_DIR/startup_profile.json"`. It adds the context supplied with the request, if any; never write `host_context` yourself. Exit 10 or 12: the context sent with the request could not be read; say so in one sentence and stop. Exit 1: run it once more on a profile without `host_context`; a second exit 1 → `run_status.py fail --code PRODUCER_FAILED`.
 
 Write `prior_artifacts.json` (stub if no prior artifacts):
 ```bash
@@ -350,7 +350,7 @@ PRIOR_EOF
 
 **Fund-specific mode:** Use WebSearch for the fund's thesis, stage focus, check-size range and portfolio, and include the `portfolio` array and a `sources` array (each source needs `url` or `title`). Research the fund, never its people: do not look up partners or team members, and put no person's name or background anywhere in the profile or in what you tell the founder. The three partners are always The Visionary, The Operator and The Analyst: each archetype carries only `role` and `focus_areas`, and each portfolio entry only `name`, `sector`, `status`. When you tell the founder about the fund, say the partners are role-played, never the fund's real people.
 
-**A fund profile supplied with the request** (the fund answer `host_profile`, A fund profile supplied with the request, applied at Step 1): do not search. `python3 "$SCRIPTS/fund_profile.py" --from-request --pretty --run-id "$RUN_ID" -o "$SIM_DIR/fund_profile.json"`. Exit 1 here cannot be fixed in this run: say so in one sentence, record `run_status.py fail --code INPUT_REJECTED --reason <code>`, and end.
+**A fund profile supplied with the request** (the fund answer `host_profile`, labelled *A fund profile supplied with the request*, applied at Step 1): do not search. `python3 "$SCRIPTS/fund_profile.py" --from-request --pretty --run-id "$RUN_ID" -o "$SIM_DIR/fund_profile.json"`. Exit 1 here cannot be fixed in this run: say so in one sentence, record `run_status.py fail --code INPUT_REJECTED --reason <code>`, and end.
 
 `fund_profile.py` exits 10 while the mode or fund question is unrecorded (ask, record, re-run), refuses a `mode` other than the recorded fund choice, and exits 1 on a rejected profile (fix that field on stderr).
 

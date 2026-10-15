@@ -17,7 +17,9 @@ by path and cannot import across directories); a test holds the copies equal. Py
 from __future__ import annotations
 
 import json
+import math
 import re
+import unicodedata
 from collections.abc import Callable, Iterable
 from datetime import date, timedelta
 from typing import Any
@@ -47,10 +49,12 @@ CAUSES = {
 }
 
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-# C0, DEL and C1 (U+0085 among them), and the two separators `str.splitlines()` also breaks a line on.
-_CONTROL_RE = re.compile("[\x00-\x1f\x7f-\x9f  ]")
+# C0, DEL and C1 (U+0085 among them); the line and paragraph separators `str.splitlines()` also breaks a line on;
+# and the zero-width and bidirectional controls (U+200B-U+200F, U+202A-U+202E, U+2066-U+2069, U+FEFF),
+# which can reorder or hide a fact as rendered.
+_CONTROL_RE = re.compile("[\\x00-\\x1f\\x7f-\\x9f\\u200b-\\u200f\\u2028-\\u202e\\u2066-\\u2069\\ufeff]")
 _HEADER_PREFIXES = ("CONTEXT:", "OUTPUT_PATH:", "RUN_ID:")
-_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}")
+_EMAIL_RE = re.compile(r"[^\s@<>()\[\]{},;:\"'`]+@[^\s@<>()\[\]{},;:\"'`]+\.[^\W\d_]{2,}")
 _TEL_RE = re.compile(r"\btel:", re.IGNORECASE)
 # A phone number: a run starting with `+` or `(` of digits joined only by spaces, dots, hyphens and parentheses.
 _PHONE_RUN_RE = re.compile(r"[+(][\d\s.()\-]*\d")
@@ -106,10 +110,28 @@ def _has_phone(text: str) -> bool:
 
 
 def has_person_detail(text: str) -> bool:
-    """An e-mail address, a phone number or a person's page. Names are not detected."""
+    """An e-mail address (any script in its local part), a phone number or a person's page, judged on the NFKC form
+    so a full-width `＠` is an `@`. Names are not detected."""
+    text = unicodedata.normalize("NFKC", text)
     if _EMAIL_RE.search(text) or _TEL_RE.search(text) or _has_phone(text):
         return True
     return any(_is_person_page(m.group(0).rstrip(".,;:)")) for m in _URL_RE.finditer(text))
+
+
+def _reject_constant(name: str) -> Any:
+    """`json.loads`' hook for `NaN`, `Infinity` and `-Infinity`, which JSON does not allow."""
+    raise ValueError(f"{name} is not a JSON number")
+
+
+def has_non_finite(node: Any) -> bool:
+    """A number that is not finite (`1e400` reads as infinity), anywhere in a decoded value."""
+    if isinstance(node, float):
+        return not math.isfinite(node)
+    if isinstance(node, list):
+        return any(has_non_finite(x) for x in node)
+    if isinstance(node, dict):
+        return any(has_non_finite(x) for x in node.values())
+    return False
 
 
 def value_problem(value: str) -> str | None:
@@ -117,13 +139,15 @@ def value_problem(value: str) -> str | None:
     if len(value) > MAX_VALUE_CHARS:
         return f"the context is longer than {MAX_VALUE_CHARS:,} characters"
     try:
-        items = json.loads(value)
+        items = json.loads(value, parse_constant=_reject_constant)
     except ValueError as e:
         pos = getattr(e, "pos", None)
         where = f" at character {pos + 1}" if isinstance(pos, int) else ""
         return f"the context is not valid JSON{where}"
     except Exception:  # noqa: BLE001 -- a value that cannot be decoded is malformed, never a crash
         return "the context is not valid JSON"
+    if has_non_finite(items):
+        return "the context holds a number that is not finite"
     if not isinstance(items, list):
         return "the context is not a JSON array"
     if len(items) > MAX_ITEMS:
@@ -182,7 +206,7 @@ def parse_and_filter(value: str, as_of: date) -> tuple[list[dict[str, Any]], lis
     problem = value_problem(value)
     if problem is not None:
         raise ValueError(problem)
-    return filter_items(json.loads(value), as_of)
+    return filter_items(json.loads(value, parse_constant=_reject_constant), as_of)
 
 
 def keep_tokens(kept: Iterable[dict[str, Any]], scan: Callable[..., dict[str, list[str]]]) -> list[str]:
