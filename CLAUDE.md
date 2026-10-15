@@ -100,10 +100,13 @@
   `test_e2e_market_sizing.py`, `test_e2e_cap_table.py` — the FOUR paid end-to-end lanes; LLM-driven;
   carry the `e2e` marker. Derive the list with `ls founder-skills/tests/test_e2e_*.py`; a hand-list
   here has gone stale before.
-  Shared plumbing in `tests/_e2e_harness.py` — deck-review deliberately does NOT use it (it is the
-  lane the release gates on; fold it in when a failure costs a re-run rather than a patch release),
-  except for the account-connector switch (`ENABLE_CLAUDEAI_MCP_SERVERS=false`) and its post-run
-  check, which every lane runs; `test_lane_connector_isolation.py` holds both, free.
+  Shared plumbing in `tests/_e2e_harness.py`. deck-review keeps its own SDK loop and does not use the
+  harness's driver (it is the lane the release gates on; fold the driver in when a failure costs a
+  re-run rather than a patch release). It imports the account-connector switch
+  (`ENABLE_CLAUDEAI_MCP_SERVERS=false`) and its post-run check, which every lane runs
+  (`test_lane_connector_isolation.py` holds both, free); the run-status readers; and the capture
+  pieces (`RunCapture`, `record_message`, `dispatch_report` and the two dispatch assertions), into
+  which it folds each message for its RECORDED CHECKLIST dispatch report, never a failure there.
   Each lane answers its questions up front with `FS_HOST_` lines and asserts the run status;
   `test_lane_host_lines.py` checks, free, that every line a lane sends is one the contract accepts.
   **One lane per changed coaching-payload builder is the rule**: contract tests pin that a payload
