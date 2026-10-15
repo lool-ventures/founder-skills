@@ -3,7 +3,7 @@
 # requires-python = ">=3.9"
 # dependencies = []
 # ///
-"""A generated dispatch prompt is sent as the generator printed it: the red team's, and the checklist's.
+"""A generated dispatch prompt is sent as the generator printed it: the red team's, and the checklists'.
 
 THE DEFECT. In round 2 of both live runs that reached it, the main thread ran market-sizing's
 `dispatch_prompt.py`, then sent the red team a different prompt: lines naming the revision and what
@@ -15,10 +15,10 @@ exists to look at the analysis without the constructor's framing, and this is th
 THE COMPARAND. The generator's output as the transcript recorded it (a tool result), against the
 prompt the Agent call carries. Compared with whitespace squashed, as the e2e lane does. A main-thread
 tool result counts only when the call that produced it is paired by tool id and is one of:
-  * a shell block running a TRUSTED generator -- `dispatch_prompt.py`, `cp_dispatch_prompt.py` or
-    `fmr_dispatch_prompt.py` from its own skill's `skills/<skill>/scripts/` folder of an INSTALLED
-    plugin (a Cowork or Desktop plugin mount or cache, the CLI's plugin cache, the cloud skills mount,
-    the folder the runtime says it loaded our skill from, or the one this hook runs from) or as
+  * a shell block running a TRUSTED generator -- `dispatch_prompt.py`, `cp_dispatch_prompt.py`,
+    `fmr_dispatch_prompt.py` or `dr_dispatch_prompt.py` from its own skill's `skills/<skill>/scripts/`
+    folder of an INSTALLED plugin (a Cowork or Desktop plugin mount or cache, the CLI's plugin cache, the
+    cloud skills mount, the folder the runtime says it loaded our skill from, or the one this hook runs from) or as
     `$SCRIPTS/<generator>`, the form SKILL.md writes; never a copy elsewhere, never while a plugin file
     differs from the copy this version shipped with (THE PLUGIN'S FILES), nor after a file tool (a
     sub-agent's included) wrote over a generator; names are read through the block's own assignments --
@@ -59,8 +59,8 @@ earlier shell is trusted as the skill's own folder.
 THE CONTEXT LINE. A dispatch is compared when its first non-blank line, invisible characters removed,
 opens with a registered context line at a word boundary: "CONTEXT: RED_TEAM (round 2)" is RED_TEAM's
 dispatch and is held like any other edit, since a redo is printed by the generator (`--correction`).
-The comparand's context must be a line of its own. A context with no generator (deck-review's
-CHECKLIST) is not registered here and is never compared.
+The comparand's context must be a line of its own. A context with no generator is not registered here
+and is never compared.
 
 THE BUDGET. A round is held at most twice, then let through with one stderr line: a hook that holds
 forever can wedge a run on its own bug. Counted per OUTPUT_PATH, i.e. per round -- the only real user
@@ -81,7 +81,12 @@ no hold budget (an allow cannot wedge a run). It runs only when all of these hol
 dispatch is held as above:
   * the transcript's CLI `version` is at least REWRITE_FLOOR. A runtime that ignored `updatedInput`
     on an allow would turn a visible hold into a silent pass, so the floor is the lowest version a
-    live probe showed honouring it (the replaced text is what the sub-agent's result row records);
+    live probe showed honouring it (the replaced text is what the sub-agent's result row records).
+    Probed 2026-10-15 on CLI 2.1.141 with a minimal standalone PreToolUse hook (one sync
+    `general-purpose` dispatch, a Haiku model, the CLI on macOS; 2.1.286 as the control, where the
+    same dispatch ran async): the hook fired, the sub-agent answered the replaced prompt, the result
+    row's `toolUseResult.prompt` was the replaced text, and a `hook_additional_context` row carried
+    the notice. The main thread's own `tool_use` row keeps the prompt as sent, in both versions;
   * the input is an object carrying `subagent_type` and `description` (a partial input is not sent);
   * no earlier rewrite in the session was found not to have taken: for each OUTPUT_PATH the runtime
     recorded this hook's notice against, the dispatch's result row (`toolUseResult.prompt`) must equal
@@ -163,18 +168,19 @@ from typing import Any
 
 MARKER = "[dispatch-check]"
 REWRITE_MARKER = "[dispatch-rewrite]"
-# The lowest CLI version measured honouring `updatedInput` on a PreToolUse allow: below it the dispatch
-# is held, never rewritten.
-REWRITE_FLOOR: tuple[int, ...] = (2, 1, 286)
+# The lowest CLI version measured honouring `updatedInput` on a PreToolUse allow (module docstring): below
+# it the dispatch is held, never rewritten.
+REWRITE_FLOOR: tuple[int, ...] = (2, 1, 141)
 # The dispatches whose prompt a generator prints (market-sizing's dispatch_prompt.py, competitive-
-# positioning's cp_dispatch_prompt.py, financial-model-review's fmr_dispatch_prompt.py). Every such prompt
-# ends with END.
+# positioning's cp_dispatch_prompt.py, financial-model-review's fmr_dispatch_prompt.py, deck-review's
+# dr_dispatch_prompt.py). Every such prompt ends with END.
 # CHECKLIST: in round 2 the grader was told "round 2 after a revision … down from N% in round 1"
 # and wrote it to the founder; round 1's prompt had a verdict inserted.
 # (context line, agent name after the plugin prefix) -> the reason a held dispatch is given. A dispatch
-# is checked only when BOTH match: deck-review's CHECKLIST template opens with the same context line and
-# has no generator; matched on the prefix alone, it was held for a prompt that cannot exist, or handed
-# market-sizing's. One context line can belong to several skills' pairs.
+# is checked only when BOTH match: market-sizing's and deck-review's CHECKLIST prompts open with the same
+# context line and each has its own generator; matched on the prefix alone, one skill's dispatch could be
+# handed the other's prompt. What keeps the two apart is the OUTPUT_PATH each is scoped by: the resolver
+# names each skill's hand-off dir after the skill. One context line can belong to several skills' pairs.
 _REVIEW_REASON = (
     "the review's instructions go out exactly as the prompt generator printed them, with nothing "
     "added, removed or reworded -- the review looks at the analysis without its constructor's framing"
@@ -200,6 +206,9 @@ PAIRS: dict[tuple[str, str], str] = {
     # financial-model-review's grader (fmr_dispatch_prompt.py): kept runs sent it a prompt missing most of
     # the template's sentences.
     ("CONTEXT: CHECKLIST", "financial-model-review"): _REVIEW_REASON,
+    # deck-review's grader (dr_dispatch_prompt.py): a grade dispatched beside SLIDE_REVIEWS was made blind,
+    # and a hand-written repair could tell the grader to paste the slide reviews' read token onto it.
+    ("CONTEXT: CHECKLIST", "deck-review"): _REVIEW_REASON,
     # market-sizing's sizing prompts (dispatch_prompt.py top_down_methodology / bottom_up_methodology): they
     # were hand-filled templates, and the generator is what refuses them until the approach is recorded.
     ("CONTEXT: TOP_DOWN_METHODOLOGY", "market-sizing"): _SIZING_REASON,
@@ -290,6 +299,7 @@ GENERATORS: dict[str, str] = {
     "dispatch_prompt.py": "market-sizing",
     "cp_dispatch_prompt.py": "competitive-positioning",
     "fmr_dispatch_prompt.py": "financial-model-review",
+    "dr_dispatch_prompt.py": "deck-review",
 }
 # Plugin scripts a generator block may also run: they print only paths and receipts of their own.
 _QUIET_SCRIPTS = frozenset({"resolve_artifacts_root.py", "ocr_uploads.py"})
@@ -767,7 +777,7 @@ def generator_block(command: str, distrusted: frozenset[str] | set[str] = frozen
 
 def _subcommand(c: _Cmd, env: dict[str, str]) -> str | None:
     """A generator call's subcommand (`red_team`, `checklist`): its first positional argument after the
-    script path. Every option the three generators define takes a value (`--run-id R`, `--x=v`), so an
+    script path. Every option the four generators define takes a value (`--run-id R`, `--x=v`), so an
     option's value is never read as the subcommand. A variable is filled from the block's own literal
     assignments; one that stays unresolved gives None, and the call then counts for no context."""
     words = _words(c.argv)

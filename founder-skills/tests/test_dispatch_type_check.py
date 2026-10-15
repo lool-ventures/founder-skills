@@ -202,8 +202,6 @@ def test_a_skill_never_started_is_not_the_agent(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     ("prompt", "agent"),
     [
-        ("CONTEXT: CHECKLIST\nOUTPUT_PATH: x\n", "founder-skills:deck-review"),
-        ("CONTEXT: CHECKLIST\nOUTPUT_PATH: x\n", "deck-review"),
         ("CONTEXT: SECOND_READ\nOUTPUT_PATH: x\n", "founder-skills:deck-review"),
         ("CONTEXT: POST_COMPOSE_COACHING\nOUTPUT_PATH: x\n", "founder-skills:ic-sim"),
         ("CONTEXT: INSTRUMENT_EXTRACTION\nOUTPUT_PATH: x\n", "founder-skills:cap-table"),
@@ -216,13 +214,18 @@ def test_the_right_agent_or_an_unknown_context_passes(tmp_path: Path, prompt: st
     _silent(_run(tmp_path, [_user("Review my deck.")], prompt, agent))
 
 
-def test_the_bare_financial_model_review_name_passes_the_type_check(tmp_path: Path) -> None:
-    """Run through the type check alone: through the dispatcher, financial-model-review's CHECKLIST now also
-    meets the prompt check, which holds it for having no printed prompt."""
+def test_the_bare_generated_checklist_names_pass_the_type_check(tmp_path: Path) -> None:
+    """Run through the type check alone: through the dispatcher, financial-model-review's and deck-review's
+    CHECKLIST also meet the prompt check, which holds each for having no printed prompt."""
     path = tmp_path / "t.jsonl"
     path.write_text(json.dumps(_user("Review my model.")) + "\n", encoding="utf-8")
     tool_input = {"prompt": "CONTEXT: CHECKLIST\nOUTPUT_PATH: x\n", "description": "d"}
-    for agent in ("financial-model-review", "founder-skills:financial-model-review"):
+    for agent in (
+        "financial-model-review",
+        "founder-skills:financial-model-review",
+        "deck-review",
+        "founder-skills:deck-review",
+    ):
         payload = {
             "hook_event_name": "PreToolUse",
             "tool_name": "Agent",
@@ -239,7 +242,9 @@ def test_a_repair_line_still_needs_the_right_agent(tmp_path: Path) -> None:
     """The first line is matched by prefix here, so a hand-written repair is still held to its agent."""
     repair = "CONTEXT: CHECKLIST (repair)\nOUTPUT_PATH: x\n"
     _deny(_run(tmp_path, [_user("Review my deck.")], repair, "general-purpose"))
-    _silent(_run(tmp_path, [_user("Review my deck.")], repair, "founder-skills:deck-review"))
+    # The right agent passes this check; the prompt check then holds the repair for its unprinted prompt.
+    reason = _deny(_run(tmp_path, [_user("Review my deck.")], repair, "founder-skills:deck-review"))
+    assert reason.startswith("[dispatch-check][") and "[dispatch-type]" not in reason
 
 
 def test_held_at_most_twice_per_output_path_then_let_through(tmp_path: Path) -> None:
@@ -273,7 +278,10 @@ def test_every_skill_started_in_the_session_counts(tmp_path: Path) -> None:
     market-sizing's agent; every skill started is allowed instead."""
     checklist = "CONTEXT: CHECKLIST\nOUTPUT_PATH: agent/handoff/R/checklist_output.json\n"
     rows = [_user("Review the company."), _skill("founder-skills:deck-review"), _skill("founder-skills:market-sizing")]
-    _silent(_run(tmp_path, rows, checklist, "founder-skills:deck-review"))
+    # deck-review's agent passes this check (the prompt check then holds it for its unprinted prompt), and
+    # so does market-sizing's.
+    reason = _deny(_run(tmp_path, rows, checklist, "founder-skills:deck-review"))
+    assert reason.startswith("[dispatch-check][") and "goes to its own agent" not in reason
     # market-sizing's agent passes this check; the prompt check then holds it for its unprinted prompt.
     assert "goes to its own agent" not in _deny(_run(tmp_path, rows, checklist, "founder-skills:market-sizing"))
     reason = _deny(_run(tmp_path, rows, checklist, "founder-skills:competitive-positioning"))
