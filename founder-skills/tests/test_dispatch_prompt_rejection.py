@@ -24,6 +24,7 @@ PLUGIN = Path(__file__).resolve().parents[1]
 MS_GEN = PLUGIN / "skills" / "market-sizing" / "scripts" / "dispatch_prompt.py"
 CP_GEN = PLUGIN / "skills" / "competitive-positioning" / "scripts" / "cp_dispatch_prompt.py"
 FMR_GEN = PLUGIN / "skills" / "financial-model-review" / "scripts" / "fmr_dispatch_prompt.py"
+DR_GEN = PLUGIN / "skills" / "deck-review" / "scripts" / "dr_dispatch_prompt.py"
 HOOK = PLUGIN / "scripts" / "dispatch_prompt_check.py"
 END = "Do NOT write any file other than OUTPUT_PATH.\n"
 MESSAGE = "Error: items[3].status must be one of pass, fail, warn\nError: 2 items missing evidence\n"
@@ -78,7 +79,24 @@ def _fmr_args(tmp_path: Path) -> list[str]:
     ]
 
 
-GENERATORS = {"market-sizing": _ms_args, "competitive-positioning": _cp_args, "financial-model-review": _fmr_args}
+def _dr_args(tmp_path: Path) -> list[str]:
+    review = tmp_path / "dr"
+    review.mkdir(exist_ok=True)
+    (review / "slide_reviews.json").write_text(
+        '{"reviews": [], "metadata": {"run_id": "R", "read_token": "0123456789ab"}}', encoding="utf-8"
+    )
+    return [str(DR_GEN), "checklist", "--run-id", "R", "--handoff-agent", "a/h/R", "--review-dir-agent", "a"] + [
+        "--review-dir",
+        str(review),
+    ]
+
+
+GENERATORS = {
+    "market-sizing": _ms_args,
+    "competitive-positioning": _cp_args,
+    "financial-model-review": _fmr_args,
+    "deck-review": _dr_args,
+}
 
 
 def _gen(args: list[str], *extra: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
@@ -105,7 +123,7 @@ def test_the_redo_carries_the_message_quoted_before_the_closing_line(tmp_path: P
 
 def test_every_generator_words_the_redo_alike() -> None:
     ms = _load(MS_GEN, "ms_gen_rej")
-    for other in (_load(CP_GEN, "cp_gen_rej"), _load(FMR_GEN, "fmr_gen_rej")):
+    for other in (_load(CP_GEN, "cp_gen_rej"), _load(FMR_GEN, "fmr_gen_rej"), _load(DR_GEN, "dr_gen_rej")):
         for name in ("PRODUCER_REJECTED", "REJECTION_LEAD", "REJECTION_TAIL", "DETAIL_CAP", "CORRECTIONS"):
             assert getattr(ms, name) == getattr(other, name), name
         assert ms.rejection_text(MESSAGE) == other.rejection_text(MESSAGE)
@@ -253,7 +271,7 @@ def test_the_rewrite_notice_does_not_invite_a_hand_added_correction() -> None:
     assert "producer-rejected" in notice
 
 
-@pytest.mark.parametrize("skill", ["market-sizing", "competitive-positioning", "financial-model-review"])
+@pytest.mark.parametrize("skill", ["market-sizing", "competitive-positioning", "financial-model-review", "deck-review"])
 def test_the_rejection_step_runs_the_generator(skill: str) -> None:
     text = (PLUGIN / "skills" / skill / "SKILL.md").read_text(encoding="utf-8")
     line = next(ln for ln in text.splitlines() if ln.startswith("- **Producer schema rejection**"))
@@ -410,3 +428,56 @@ def test_competitive_positioning_refuses_its_shell_paths_given_empty(tmp_path: P
     for flag in ("--analysis-dir", "--handoff-dir"):
         r = _gen(_cp_args(tmp_path), flag, "", cwd=tmp_path)
         assert r.returncode == 2 and r.stdout == "" and flag in r.stderr, (flag, r.stderr)
+
+
+# --- deck-review: SLIDE_REVIEWS_NOT_READ goes back through the generator, paired with Step 5's own pipe --------
+
+
+def _deck_step5_pipe() -> str:
+    """The Step 5 pipe block exactly as deck-review's SKILL.md writes it (the fence that runs checklist.py)."""
+    import re
+
+    text = (PLUGIN / "skills" / "deck-review" / "SKILL.md").read_text(encoding="utf-8")
+    step = text[text.index("### Step 5:") : text.index("\n### Step 6")]
+    fences: list[str] = re.findall(r"^```bash\n(.*?)^```", step, re.MULTILINE | re.DOTALL)
+    return next(f for f in fences if '"$SCRIPTS/checklist.py"' in f)
+
+
+_DR_REDO_CMD = (
+    'python3 "$SCRIPTS/dr_dispatch_prompt.py" checklist --run-id "$RUN_ID" --handoff-agent "$HANDOFF_AGENT" '
+    '--review-dir-agent "$REVIEW_DIR_AGENT" --review-dir "$REVIEW_DIR" --correction producer-rejected '
+    '--detail-file "$HANDOFF_DIR/producer_rejected.txt"'
+)
+_DR_REJECTION = (
+    '{"status": "rejected", "code": "SLIDE_REVIEWS_NOT_READ", "message": "the grade does not carry the read token", '
+    '"fix": "f"}\nEXIT=1\n'
+)
+
+
+def _deck_redo(tmp_path: Path) -> str:
+    detail = tmp_path / "producer_rejected.txt"
+    detail.write_text("Error (SLIDE_REVIEWS_NOT_READ): the grade does not carry the read token\n", encoding="utf-8")
+    args = _dr_args(tmp_path)
+    redo = _gen(args, "--correction", "producer-rejected", "--detail-file", str(detail))
+    assert redo.returncode == 0, redo.stderr
+    return redo.stdout
+
+
+def test_a_slide_reviews_not_read_redo_pairs_with_step_5s_own_pipe(tmp_path: Path) -> None:
+    """Step 5's pipe as SKILL.md writes it (stderr saved on checklist.py's own command, the exit code echoed
+    after it) failing SLIDE_REVIEWS_NOT_READ, then the generator's producer-rejected print: that print is the
+    comparand, so the redo dispatch it prints goes through."""
+    hook = _load(HOOK, "hook_dr_redo")
+    pipe = _deck_step5_pipe()
+    assert '2> "$HANDOFF_DIR/producer_rejected.txt"' in pipe and 'echo "EXIT=$?"' in pipe
+    redo = _deck_redo(tmp_path)
+    path = "a/h/R/checklist_output.json"
+    rows = _shell_rows([(pipe, _DR_REJECTION, False), (_DR_REDO_CMD, redo, False)])
+    printed = hook.latest_printed(rows, "CONTEXT: CHECKLIST", path)
+    assert printed is not None and printed.strip() == redo.strip()
+    # The lever: without the redirect on the producer's own command, the redo's message is not a failed
+    # producer's, and the print is not the comparand.
+    bare = pipe.replace(' 2> "$HANDOFF_DIR/producer_rejected.txt"', "")
+    assert bare != pipe
+    rows = _shell_rows([(bare, _DR_REJECTION, False), (_DR_REDO_CMD, redo, False)])
+    assert hook.latest_printed(rows, "CONTEXT: CHECKLIST", path) is None

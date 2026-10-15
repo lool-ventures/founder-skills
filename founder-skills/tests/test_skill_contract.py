@@ -1614,11 +1614,11 @@ SKILL_MD_CEILING: dict[str, int] = {
     # the delivered items carry no echo and the rerun is refused with a "dispatch again" fix that is wrong for a
     # what-if), and the template's echo sentence says where the value sits and its shape (12 hex characters),
     # so the grader can check what it copied.
-    # 116,194 -> 113,128 (-3,066 B): the CHECKLIST prompt template moved into dr_dispatch_prompt.py; Step 5 runs
+    # 116,194 -> 113,135 (-3,059 B): the CHECKLIST prompt template moved into dr_dispatch_prompt.py; Step 5 runs
     # the generator (its block re-setting the four values it passes) and sends its output unchanged, with one
     # sentence keeping the grader's contract visible. The state machine names the generator's --correction forms
     # for every CHECKLIST redo, SLIDE_REVIEWS_NOT_READ through producer-rejected, and the pipe saves its stderr.
-    "deck-review": 113_128,
+    "deck-review": 113_135,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
