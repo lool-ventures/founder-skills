@@ -306,8 +306,9 @@ CONTRACT_NOTES = (
     "`fmr_cash_followup`); it completes again at the next coaching insert. Once per review, in the conversation "
     "that delivered it, on a run not under `FS_HOST_NO_ASK`, from the run's own folder; a second update is "
     "`RUN_FINISHED`, and so is a cash update that gives no finite balance or no `YYYY-MM` date. The recorder's "
-    "`default` on that follow-up of a `complete` run is `RUN_FINISHED` too (the founder's reply is the only record "
-    "it takes; the message says to record it). Where the follow-up already holds compose's own default, the "
+    "`default` on that follow-up of a `complete` run is `RUN_FINISHED` too once a post-delivery cash call is on "
+    "record (the founder's reply is the only record it takes; the message says to record it); with none it is "
+    "`GATE_NOT_OWED`, as before. Where the follow-up already holds compose's own default, the "
     "recorder's `default` stays `ANSWER_STANDS`: record the founder's reply with `answer`. The recorder "
     "refuses that reopen `RUN_SUPERSEDED` when a later run holds the folder.",
     "An enforcer never re-opens a finished run's answer: on a `complete` or `refused` run whose confirmed input "

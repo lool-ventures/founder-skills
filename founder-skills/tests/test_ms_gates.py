@@ -860,7 +860,9 @@ def test_what_still_runs_on_a_delivered_analysis(tmp_path: Path) -> None:
     _ok(_final(root, run_id))
     staging = tmp_path / "staging"
     staging.mkdir()
-    _ok(h.run(MS / "market_sizing.py", "--stdin", "-o", str(staging / "sizing.json"), stdin=json.dumps(_NUMERIC)))
+    # With the run's id: the guard keys on the output folder's own ref, so a what-if outside the run folder runs.
+    what_if = ("--stdin", "--run-id", run_id, "-o", str(staging / "sizing.json"))
+    _ok(h.run(MS / "market_sizing.py", *what_if, stdin=json.dumps(_NUMERIC)))
     assert (staging / "sizing.json").exists()
     st = h.status(root, run_id)
     assert (st["status"], st["revision"]) == ("complete", 0)

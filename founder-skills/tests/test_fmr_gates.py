@@ -1056,6 +1056,11 @@ def test_a_later_balance_date_after_delivery_reopens_the_run_and_completes_it_ag
     again = _apply(run_dir, run_id, "cash.current_balance=1462803", "cash.balance_date=2026-07")
     assert again.returncode == 1 and _out(again)["code"] == "RUN_FINISHED"
     assert _snapshot(run_dir, root, run_id) == before
+    # And a recompose is refused without offering the update the review already took.
+    proc = _compose(run_dir)
+    assert proc.returncode == 1 and _out(proc)["code"] == "RUN_FINISHED", proc.stdout + proc.stderr
+    assert "already taken" in _out(proc)["message"] and "Step 12" not in _out(proc)["message"]
+    assert h.snapshot(root, run_id) == (before["status"], before["ledger"])
 
 
 def _hand_edit(path: Path, fn: Any) -> None:
@@ -1330,8 +1335,21 @@ def test_a_finished_quick_check_takes_no_cash_update(tmp_path: Path) -> None:
         ("cash.current_balance=1500000", "cash.balance_date="),
         ("cash.current_balance=1500000", "cash.balance_date=n/a"),
         ("cash.current_balance=1500000", "cash.balance_date=2026-6"),
+        ("cash.current_balance=1500000", "cash.balance_date=2026-06-15"),
     ],
-    ids=["blank", "null", "dash", "space", "comma", "true", "nan", "date-blank", "date-n/a", "date-2026-6"],
+    ids=[
+        "blank",
+        "null",
+        "dash",
+        "space",
+        "comma",
+        "true",
+        "nan",
+        "date-blank",
+        "date-n/a",
+        "date-2026-6",
+        "date-full-day",
+    ],
 )
 def test_a_cash_update_that_removes_the_balance_is_refused(tmp_path: Path, sets: tuple[str, ...]) -> None:
     """The one update a delivered review takes gives a cash balance and its month. One that blanks either, or
@@ -1342,7 +1360,7 @@ def test_a_cash_update_that_removes_the_balance_is_refused(tmp_path: Path, sets:
     time.sleep(0.002)
     proc = _apply(run_dir, run_id, *sets)
     assert proc.returncode == 1 and _out(proc)["code"] == "RUN_FINISHED", proc.stdout + proc.stderr
-    assert "gives a cash balance" in _out(proc)["message"]
+    assert "gives a cash balance and its month (YYYY-MM" in _out(proc)["message"]
     assert _snapshot(run_dir, root, run_id) == before
     assert not (run_dir / "corrected_inputs.json").exists()
 
@@ -1372,18 +1390,22 @@ def test_compose_on_a_delivered_review_with_a_no_cash_runway_is_refused(tmp_path
     assert (st["status"], st["revision"], st.get("disclosures") or []) == ("complete", 0, [])
 
 
-@pytest.mark.parametrize("delivered", ["real", "without_cash"])
+@pytest.mark.parametrize("delivered", ["real", "without_cash", "refused"])
 def test_a_delivered_review_is_never_recomposed_in_place(tmp_path: Path, delivered: str) -> None:
     """Building the report again on a delivered review, with nothing changed, used to exit 0 and replace the
-    delivered report at the same revision, dropping its coaching. It is refused, and nothing moves."""
-    make = _delivered_real if delivered == "real" else _delivered_without_cash
+    delivered report at the same revision, dropping its coaching. It is refused, and nothing moves. A stopped
+    (`refused`) review is refused the same way, with its own wording: it takes no cash update."""
+    make = _delivered_without_cash if delivered == "without_cash" else _delivered_real
     root, run_id, run_dir = make(tmp_path)
+    if delivered == "refused":
+        _hand_edit(h.status_path(root, run_id), lambda st: st.update(status="refused"))
     report = (run_dir / "report.md").read_bytes()
-    if delivered == "real":
+    if delivered != "without_cash":
         assert b"## Coaching Commentary" in report  # the lever engaged: a rebuild would drop it
     before = h.snapshot(root, run_id)
     proc = _compose(run_dir)
     assert proc.returncode == 1 and _out(proc)["code"] == "RUN_FINISHED", proc.stdout + proc.stderr
+    assert ("was stopped" in _out(proc)["message"]) == (delivered == "refused"), _out(proc)
     assert "Traceback" not in proc.stderr
     assert h.snapshot(root, run_id) == before
     assert (run_dir / "report.md").read_bytes() == report

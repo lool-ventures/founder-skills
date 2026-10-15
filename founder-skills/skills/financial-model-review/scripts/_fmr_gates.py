@@ -81,8 +81,8 @@ def require_or_exit(run_dir: str, run_id: str | None, keys: tuple[str, ...]) -> 
 CASH_PATHS = frozenset(("cash.current_balance", "cash.balance_date"))
 UNCHANGED_MESSAGE = "this review is complete and already uses these values; there is nothing to apply and no rerun"
 CASH_REMOVED_MESSAGE = (
-    "this review is complete; an update after delivery gives a cash balance and its date, and a review without "
-    "them is a new review (run Step 0 again)"
+    "this review is complete; an update after delivery gives a cash balance and its month (YYYY-MM, e.g. "
+    "2026-06), and a review without them is a new review (run Step 0 again)"
 )
 
 
@@ -230,10 +230,17 @@ NO_CASH_FINISHED_MESSAGE = (
     "Step 0 again)"
 )
 STOPPED_MESSAGE = "this review was stopped; it is not rebuilt in place: a new review starts at Step 0"
+UPDATE_TAKEN_MESSAGE = (
+    "this review is complete and its one cash update after delivery was already taken; a delivered review is not "
+    "rebuilt in place: anything else starts a new review (run Step 0 again)"
+)
 
 
-def _refuse_rebuild(state: Any, no_cash_balance: bool) -> None:
-    if state == "complete":
+def _refuse_rebuild(state: Any, no_cash_balance: bool, resolution: Any = None) -> None:
+    if state == "complete" and resolution == "answered":
+        # The follow-up holds the founder's reply: the one update is spent, so Step 12 is not offered.
+        message = UPDATE_TAKEN_MESSAGE
+    elif state == "complete":
         message = NO_CASH_FINISHED_MESSAGE if no_cash_balance else REBUILD_FINISHED_MESSAGE
     else:
         message = STOPPED_MESSAGE
@@ -287,7 +294,7 @@ def settle_cash_followup(ledger: Any, no_cash_balance: bool) -> None:
             )
             print(f"Error: {message}. Nothing was written.", file=sys.stderr)
             sys.exit(gates.EXIT_CODES["waiting"])
-        _refuse_rebuild(state, no_cash_balance)
+        _refuse_rebuild(state, no_cash_balance, resolution)
     if not no_cash_balance or entry.get("state") in ("answered", "not_owed"):
         return
 
@@ -308,7 +315,7 @@ def settle_cash_followup(ledger: Any, no_cash_balance: bool) -> None:
         gates.transact(paths, record)
     except gates.GateRejection as e:
         if e.code == "RUN_FINISHED":
-            _refuse_rebuild((rs.load_status(paths) or {}).get("status"), no_cash_balance)
+            _refuse_rebuild((rs.load_status(paths) or {}).get("status"), no_cash_balance, resolution)
         sys.exit(_run_ref.report_failure(e))
     except Exception as e:  # noqa: BLE001 -- unreachable registry, unwired predicate: exit 2, nothing written
         sys.exit(_run_ref.report_failure(e))
