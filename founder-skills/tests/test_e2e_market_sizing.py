@@ -570,6 +570,33 @@ COMPACTION_BUDGET_ENV = "RUN_PAID_E2E_MAX_BUDGET_USD"
 COMPACTION_BUDGET_USD = 25.0
 
 
+# The model, pinned for every run of an A/B: two arms on two models compare nothing.
+COMPACTION_MODEL_ENV = "RUN_PAID_E2E_MODEL"
+
+
+def compaction_model() -> str | None:
+    return os.environ.get(COMPACTION_MODEL_ENV, "").strip() or None
+
+
+def compaction_void(report: dict[str, Any]) -> str | None:
+    """Why this run measures nothing, or None. C must be the MAIN thread's compaction, placed in the stream."""
+    if report.get("compaction_at") is None:
+        if report.get("transcript_boundaries", 0) >= 1:
+            return (
+                "the transcript shows a main-thread compaction but no boundary or hook frame reached the stream, so "
+                "C cannot be placed; a re-run with another lever would not change that"
+            )
+        return "the main thread never compacted; re-run with CLAUDE_AUTOCOMPACT_PCT_OVERRIDE set"
+    if not report.get("main_thread_confirmed"):
+        return "the compaction that was seen is not confirmed as the main thread's"
+    if report.get("compaction_source") != "boundary" and report.get("transcript_boundaries", 0) >= 1:
+        return (
+            "C was placed by a SessionStart hook frame, which a sub-agent's compaction fires too, while the "
+            "stream carried no main-thread boundary: C is unpositioned"
+        )
+    return None
+
+
 def compaction_budget() -> float:
     raw = os.environ.get(COMPACTION_BUDGET_ENV, "").strip()
     return float(raw) if raw else COMPACTION_BUDGET_USD
@@ -627,6 +654,8 @@ def compaction_completion_problems(
 )
 def test_market_sizing_compaction_lane(tmp_path: Path) -> None:
     """The smoke run with a forced compaction: report C, R and F, then assert the run completed (S)."""
+    if compaction_model() is None:
+        pytest.fail(f"set {COMPACTION_MODEL_ENV} to a concrete model id: every run of the A/B is pinned to one model")
     workdir = tmp_path / "workspace"
     workdir.mkdir()
     run_id = lane_run_id(COMPACTION_LANE)
@@ -641,10 +670,12 @@ def test_market_sizing_compaction_lane(tmp_path: Path) -> None:
         uploads=[SCANNED_DECK],
         env_extra={_e2e_harness.COMPACT_WINDOW_ENV: window},
         max_budget_usd=compaction_budget(),
+        model=compaction_model(),
     )
     report = _e2e_harness.compaction_report(cap, SKILL)
     report["window"] = window
     report["max_budget_usd"] = compaction_budget()
+    report["pinned_model"] = compaction_model()
     report["run_id"] = run_id
     (workdir / "compaction_report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     text = _e2e_harness.format_compaction_report(report)
@@ -652,11 +683,11 @@ def test_market_sizing_compaction_lane(tmp_path: Path) -> None:
     print(f"[e2e:ms-compaction] report-json: {json.dumps(report)}", flush=True)
     step_summary(f"### market-sizing e2e: compaction lane\n\n{text}\n")
 
-    if report["compaction_at"] is None or not report["main_thread_confirmed"]:
-        pytest.fail(
-            f"VOID: the main thread never compacted (window {window}); this run measures nothing. "
-            f"Re-run with CLAUDE_AUTOCOMPACT_PCT_OVERRIDE set.\n{text}"
-        )
+    if cap.error is not None:
+        pytest.fail(f"the run ended `{cap.result_subtype}` ({cap.error}); spent, report written.\n{text}")
+    void = compaction_void(report)
+    if void is not None:
+        pytest.fail(f"VOID (window {window}): {void}. This run measures nothing.\n{text}")
 
     review_dir = locate_review_dir(workdir, "market-sizing-*", cap.messages, "market-sizing")
     status = read_run_status(workdir, run_id)

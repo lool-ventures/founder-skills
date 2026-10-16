@@ -54,10 +54,17 @@ def _call(call: str, name: str, inp: dict[str, Any], output: str, *, parent: str
     return [use, result]
 
 
-def _session_start(stdout: str = "") -> Any:
+def _session_start(stdout: str = "", parent: str | None = None) -> Any:
     from claude_agent_sdk import HookEventMessage
 
-    data = {"hook_event": "SessionStart", "stdout": stdout, "type": "system", "subtype": "hook_response"}
+    data: dict[str, Any] = {
+        "hook_event": "SessionStart",
+        "stdout": stdout,
+        "type": "system",
+        "subtype": "hook_response",
+    }
+    if parent is not None:
+        data["parent_tool_use_id"] = parent
     return HookEventMessage(subtype="hook_response", hook_event_name="SessionStart", data=data, session_id="sess-1")
 
 
@@ -76,6 +83,8 @@ def _capture(tmp_path: Path, monkeypatch: Any, stream: list[Any], **kw: Any) -> 
     async def fake(*, prompt: str, options: Any) -> Any:
         _SEEN["options"] = options
         for msg in stream:
+            if isinstance(msg, Exception):  # the SDK raises from the iterator after an error result
+                raise msg
             yield msg
 
     monkeypatch.setattr(claude_agent_sdk, "query", fake)
@@ -269,3 +278,102 @@ def test_the_lane_budget_defaults_and_takes_the_environment(lane: Any, monkeypat
     assert lane.compaction_budget() == 25.0
     monkeypatch.setenv(lane.COMPACTION_BUDGET_ENV, "22")
     assert lane.compaction_budget() == 22.0
+
+
+def test_c_is_the_main_threads_boundary_even_when_a_sub_agent_compacted_first(tmp_path: Path, monkeypatch: Any) -> None:
+    stream = [
+        _init(),
+        *_call("s1", "Bash", {"command": START}, "{}"),
+        # A sub-agent compacts first: its SessionStart fires, then the main thread reads SKILL.md with no cut copy.
+        _session_start(),
+        *_call("early", "Read", {"file_path": SKILL_MD}, "body"),
+        _boundary(),
+        *_call("late", "Read", {"file_path": SKILL_MD}, "body"),
+    ]
+    cap = _capture(tmp_path, monkeypatch, stream)
+    at, source = harness.compaction_point(cap)
+    assert source == "boundary" and at == cap.compactions[0]["at"]
+    report = harness.compaction_report(cap, "market-sizing", config_dir=tmp_path / "none")
+    assert report["rereads"] == ["late"] and report["compaction_source"] == "boundary"
+
+
+def test_the_session_start_fallback_drops_frames_a_sub_agent_tagged(tmp_path: Path, monkeypatch: Any) -> None:
+    stream = [
+        _init(),
+        *_call("s1", "Bash", {"command": START}, "{}"),
+        _session_start(parent="d1"),
+        *_call("early", "Read", {"file_path": SKILL_MD}, "body"),
+        _session_start(),
+        *_call("late", "Read", {"file_path": SKILL_MD}, "body"),
+    ]
+    cap = _capture(tmp_path, monkeypatch, stream)
+    report = harness.compaction_report(cap, "market-sizing", config_dir=tmp_path / "none")
+    assert report["compaction_source"] == "session_start" and report["rereads"] == ["late"]
+
+
+def test_a_budget_stop_returns_the_capture_with_its_ending(tmp_path: Path, monkeypatch: Any) -> None:
+    """The CLI exits non-zero after an error result and the SDK raises from its iterator: the capture comes
+    back, so the lane still writes its report."""
+    stream = [_init(), _result_message(25.1, "error_max_budget_usd"), RuntimeError("Command failed with exit code 1")]
+    cap = _capture(tmp_path, monkeypatch, stream, max_budget_usd=25.0)
+    assert cap.result_subtype == "error_max_budget_usd" and cap.cost_usd == 25.1
+    assert cap.error is not None and "exit code 1" in cap.error
+    report = harness.compaction_report(cap, "market-sizing", config_dir=tmp_path / "none")
+    assert report["error"] == cap.error and report["result_subtype"] == "error_max_budget_usd"
+    # Before any result, a raise is the harness failing, and propagates.
+    with pytest.raises(RuntimeError):
+        _capture(tmp_path, monkeypatch, [_init(), RuntimeError("broke")])
+
+
+def test_only_a_read_of_this_skills_own_file_is_r(tmp_path: Path, monkeypatch: Any) -> None:
+    commands = {
+        "own-sed": 'sed -n "1,80p" "/p/skills/market-sizing/SKILL.md"',
+        "own-grep": 'grep -n "### Step" /p/skills/market-sizing/SKILL.md',
+        "other": "cat /p/skills/deck-review/SKILL.md",
+        "test": "test -f /p/skills/market-sizing/SKILL.md && echo ok",
+        "write": "cat notes.txt > /p/skills/market-sizing/SKILL.md",
+    }
+    stream = [_init(), *_call("s1", "Bash", {"command": START}, "{}"), _boundary()]
+    for cid, command in commands.items():
+        stream += _call(cid, "Bash", {"command": command}, "x")
+    cap = _capture(tmp_path, monkeypatch, stream)
+    report = harness.compaction_report(cap, "market-sizing", config_dir=tmp_path / "none")
+    assert report["rereads"] == ["own-sed", "own-grep"]
+
+
+def test_with_a_transcript_only_its_main_thread_boundary_confirms(tmp_path: Path, monkeypatch: Any) -> None:
+    cap = _capture(tmp_path, monkeypatch, _stream())
+    config = tmp_path / "config"
+    _transcript(config, [{"type": "system", "subtype": "compact_boundary", "isSidechain": True}])
+    report = harness.compaction_report(cap, "market-sizing", config_dir=config)
+    assert report["transcript_found"] is True and report["main_thread_confirmed"] is False
+
+
+@pytest.mark.parametrize(
+    ("fields", "void"),
+    [
+        ({"compaction_at": 5, "main_thread_confirmed": True, "compaction_source": "boundary"}, None),
+        ({"compaction_at": None, "transcript_boundaries": 0}, "never compacted"),
+        ({"compaction_at": None, "transcript_boundaries": 1}, "cannot be placed"),
+        ({"compaction_at": 5, "main_thread_confirmed": False, "compaction_source": "boundary"}, "not confirmed"),
+        (
+            {"compaction_at": 5, "main_thread_confirmed": True, "compaction_source": "session_start",
+             "transcript_boundaries": 1},
+            "unpositioned",
+        ),
+    ],
+)  # fmt: skip
+def test_a_run_is_void_unless_c_is_the_main_threads_placed_boundary(
+    lane: Any, fields: dict[str, Any], void: str | None
+) -> None:
+    got = lane.compaction_void(fields)
+    assert (got is None) if void is None else (got is not None and void in got)
+
+
+def test_the_model_is_pinned_from_the_environment(lane: Any, tmp_path: Path, monkeypatch: Any) -> None:
+    monkeypatch.delenv(lane.COMPACTION_MODEL_ENV, raising=False)
+    assert lane.compaction_model() is None
+    monkeypatch.setenv(lane.COMPACTION_MODEL_ENV, "probe-model-1")
+    assert lane.compaction_model() == "probe-model-1"
+    _capture(tmp_path, monkeypatch, [_init()], model="probe-model-1")
+    assert _SEEN["options"].model == "probe-model-1"

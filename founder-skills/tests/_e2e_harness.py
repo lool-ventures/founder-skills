@@ -279,6 +279,9 @@ class RunCapture:
         # (`error_max_budget_usd` when a per-run cap stopped it).
         self.cost_usd: float | None = None
         self.result_subtype: str | None = None
+        # The exception the SDK raised after the run's result arrived (an error result, such as the budget
+        # stop, makes the CLI exit non-zero), kept so the lane can still write its report.
+        self.error: str | None = None
 
     def calls(self, name: str, *, parent: str | None = None) -> list[dict[str, Any]]:
         """Tool calls by name; with `parent`, only those made inside that dispatch."""
@@ -447,6 +450,7 @@ def record_message(cap: RunCapture, msg: object) -> None:
             {
                 # Where in `events` it arrived, so a mid-run hook (a compaction's SessionStart) can be placed.
                 "at": len(cap.events),
+                "parent_tool_use_id": data.get("parent_tool_use_id"),
                 "event": getattr(msg, "hook_event_name", "") or data.get("hook_event") or "",
                 "subtype": msg.subtype,
                 "stdout": stdout if isinstance(stdout, str) else str(data.get("output") or ""),
@@ -764,6 +768,7 @@ def run_skill_capture(
     uploads: Sequence[Path] = (),
     env_extra: dict[str, str] | None = None,
     max_budget_usd: float | None = None,
+    model: str | None = None,
 ) -> RunCapture:
     """Drive one skill run to completion, with sub-agent tool calls attributed.
 
@@ -785,6 +790,8 @@ def run_skill_capture(
     if max_budget_usd is not None:
         # The SDK's own per-run cap: past it the run ends with an `error_max_budget_usd` result.
         options.max_budget_usd = max_budget_usd
+    if model is not None:
+        options.model = model
     cap = RunCapture()
 
     print(f"\n[e2e:{label}] Auth detected: {detect_auth_kind()}", flush=True)
@@ -805,7 +812,15 @@ def run_skill_capture(
                 print(f"[e2e:{label} #{count:03d}] {summarize_sdk_message(msg)}", flush=True)
         print(f"[e2e:{label}] --- SDK loop complete ({count} messages) ---", flush=True)
 
-    asyncio.run(_run())
+    try:
+        asyncio.run(_run())
+    except Exception as exc:
+        # After a result frame the run is over: an error result (the budget stop, say) ends in the SDK raising
+        # from the iterator. Keep what was recorded; anything earlier is a failure of the harness, and raises.
+        if cap.result_subtype is None:
+            raise
+        cap.error = f"{type(exc).__name__}: {exc}"
+        print(f"[e2e:{label}] --- SDK raised after the result ({cap.result_subtype}): {cap.error} ---", flush=True)
     assert_no_account_connectors(cap.session_tools, [t["name"] for t in cap.tool_uses], cap.mcp_servers)
     return cap
 
@@ -1115,7 +1130,7 @@ ARGPARSE_TEXTS = ("the following arguments are required", "unrecognized argument
 # The opening of the SessionStart hook's compaction note (`compaction_reread.py`).
 REREAD_NOTE_LEAD = "If you are the main thread running the founder-skills"
 SHELL_TOOLS = ("Bash", "mcp__workspace__bash")
-_SKILL_FILE_READ = re.compile(r"\b(?:sed|grep|cat|head|tail|awk|less|more)\b[^\n]*SKILL\.md")
+_READERS = "sed|grep|rg|cat|head|tail|awk|less|more"
 
 
 def mid_run_session_starts(cap: RunCapture) -> list[dict[str, Any]]:
@@ -1146,9 +1161,16 @@ def session_transcript(cap: RunCapture, config_dir: Path | None = None) -> Path 
 def transcript_compactions(path: Path | None) -> dict[str, Any]:
     """From the transcript file: main-thread `compact_boundary` rows, whether the summaries say the skill is
     "loaded", and whether the hook's re-read note sits after the first boundary."""
-    out: dict[str, Any] = {"boundaries": 0, "summaries_say_loaded": None, "note_rows": 0, "note_after_boundary": None}
+    out: dict[str, Any] = {
+        "found": False,
+        "boundaries": 0,
+        "summaries_say_loaded": None,
+        "note_rows": 0,
+        "note_after_boundary": None,
+    }
     if path is None or not path.is_file():
         return out
+    out["found"] = True
     rows = []
     for line in path.read_text(encoding="utf-8").splitlines():
         try:
@@ -1179,12 +1201,20 @@ def transcript_compactions(path: Path | None) -> dict[str, Any]:
     return out
 
 
-def compaction_point(cap: RunCapture) -> int | None:
-    """Where in `events` the first compaction landed: the stream's own main-thread boundary if it carried one,
-    or the first mid-run SessionStart, whichever came first. None when the run never compacted."""
-    points = [c["at"] for c in cap.compactions if not c["data"].get("parent_tool_use_id")]
-    points += [ev["at"] for ev in mid_run_session_starts(cap)]
-    return min(points) if points else None
+def compaction_point(cap: RunCapture) -> tuple[int | None, str | None]:
+    """(where in `events` the first MAIN-THREAD compaction landed, which signal placed it), or (None, None).
+
+    The stream's own main-thread `compact_boundary` decides when there is one ("boundary"). A SessionStart
+    hook response is the fallback only ("session_start"): a sub-agent's compaction fires the same hook, so a
+    sub-agent compacting first would put C before any cut copy exists. Hook frames a sub-agent's turn tagged
+    are dropped, which is defence only (whether the CLI tags them is not verified)."""
+    boundaries = [c["at"] for c in cap.compactions if not c["data"].get("parent_tool_use_id")]
+    if boundaries:
+        return min(boundaries), "boundary"
+    starts = [ev["at"] for ev in mid_run_session_starts(cap) if not ev.get("parent_tool_use_id")]
+    if starts:
+        return min(starts), "session_start"
+    return None, None
 
 
 def _main_calls_after(cap: RunCapture, at: int) -> list[dict[str, Any]]:
@@ -1202,9 +1232,14 @@ def skill_rereads(cap: RunCapture, skill: str, at: int) -> list[dict[str, Any]]:
                 found.append(call)
         elif call["name"] in SHELL_TOOLS:
             command = str(inp.get("command") or "")
-            if f"{skill}/SKILL.md" in command or _SKILL_FILE_READ.search(command):
+            if _skill_file_read(skill).search(command):
                 found.append(call)
     return found
+
+
+def _skill_file_read(skill: str) -> re.Pattern[str]:
+    """A shell READ of this skill's own SKILL.md: a reading command, then the file in the same command."""
+    return re.compile(rf"\b(?:{_READERS})\b[^\n|;&>]*skills/{re.escape(skill)}/SKILL\.md")
 
 
 def argparse_failures(cap: RunCapture, at: int) -> list[str]:
@@ -1239,20 +1274,26 @@ def run_starts(cap: RunCapture) -> int:
 
 def compaction_report(cap: RunCapture, skill: str, config_dir: Path | None = None) -> dict[str, Any]:
     """Every observable the lane reports, before any assertion, so a void or red run leaves the same record."""
-    at = compaction_point(cap)
+    at, source = compaction_point(cap)
     starts = mid_run_session_starts(cap)
     on_disk = transcript_compactions(session_transcript(cap, config_dir))
     stream_main = any(not c["data"].get("parent_tool_use_id") for c in cap.compactions)
+    # The transcript's `isSidechain` is the proven main-thread signal; a stream frame with no parent id may
+    # still be a sub-agent's (whether the CLI tags those is not verified), so it counts only with no transcript.
+    confirmed = on_disk["boundaries"] > 0 if on_disk["found"] else stream_main
     return {
         "cli_version": cap.cli_version,
         "model": cap.model,
         "cost_usd": cap.cost_usd,
         "result_subtype": cap.result_subtype,
+        "error": cap.error,
         "compaction_at": at,
+        "compaction_source": source,
         "stream_boundaries": len(cap.compactions),
         "mid_run_session_starts": len(starts),
+        "transcript_found": on_disk["found"],
         "transcript_boundaries": on_disk["boundaries"],
-        "main_thread_confirmed": bool(on_disk["boundaries"]) or stream_main,
+        "main_thread_confirmed": confirmed,
         "reread_note_emitted": any(REREAD_NOTE_LEAD in (ev.get("stdout") or "") for ev in starts),
         "note_after_boundary": on_disk["note_after_boundary"],
         "summaries_say_loaded": on_disk["summaries_say_loaded"],
@@ -1267,7 +1308,8 @@ def format_compaction_report(report: dict[str, Any]) -> str:
         [
             f"- CLI `{report['cli_version'] or 'unknown'}`, model `{report['model'] or 'unknown'}`, "
             f"cost ${report['cost_usd']}, ended `{report['result_subtype']}`",
-            f"- C: compaction at event {report['compaction_at']}; stream boundaries {report['stream_boundaries']}, "
+            f"- C: compaction at event {report['compaction_at']} (from {report['compaction_source']}); "
+            f"stream boundaries {report['stream_boundaries']}, "
             f"mid-run SessionStart {report['mid_run_session_starts']}, transcript boundaries "
             f"{report['transcript_boundaries']}, main thread confirmed {report['main_thread_confirmed']}",
             f"- the re-read note: emitted {report['reread_note_emitted']}, after the boundary "

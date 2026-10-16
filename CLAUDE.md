@@ -601,8 +601,11 @@ run with fifteen dispatches recorded zero boundaries. Truncation is head-preserv
    - **The market-sizing compaction lane** (`test_market_sizing_compaction_lane`) is local only:
      `RUN_PAID_E2E_MS_COMPACTION` is never set by the workflow, and the lane is in `ALLOWED_SKIPS`. It sets
      `CLAUDE_CODE_AUTO_COMPACT_WINDOW` to the floor so the run compacts mid-way, writes
-     `compaction_report.json` (C, R, F, as `_e2e_harness.compaction_report` defines them), and asserts
-     only that the run completed. A run with no main-thread compaction fails as VOID; it is not a result.
+     `compaction_report.json` (C, R, F, as `_e2e_harness.compaction_report` defines them; written on a
+     budget stop too), and asserts only that the run completed. It refuses to start without
+     `RUN_PAID_E2E_MODEL` (a pinned model id) and caps each run with the SDK's `max_budget_usd`
+     (`RUN_PAID_E2E_MAX_BUDGET_USD`, default 25). C is the main thread's own `compact_boundary`; a run
+     without one placed in the stream fails as VOID, and is not a result.
 6. **Green: fast-forward `main`, then tag.** Green means the paid gate AND every PR check
    (`gh pr checks release/vX.Y.Z`): the push to `main` goes around branch protection
    (`enforce_admins` is false), so nothing else enforces lint, typecheck, tests, DCO or the review.
