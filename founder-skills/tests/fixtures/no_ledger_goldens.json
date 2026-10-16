@@ -933,42 +933,42 @@
     "deck-review/visualize.py": {
       "exit": 0,
       "files": {
-        "page.html": "7de9b1eb2c7708b40a0bd7c09a26e08785a2d4e2187120c4b1f8b5017067ccfa"
+        "page.html": "f52fb7a536b40d7bedd455dd1cea51934675309334ad2f54c4e69d481bb0ffd8"
       },
       "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout": "f67de767d9cffdee51de4edd4ac8b4b39cd65969660b1cbd1a791237b8b4baf0"
+      "stdout": "304bf2ec3d928e10de6d853d65de56875d5e950bafce5f0950506824b8c0ad20"
     },
     "financial-model-review/explore.py": {
       "exit": 0,
       "files": {
-        "page.html": "f3b4986cc4047f48f88da29e0875f0903cc7192ea68f81f0894d2b2404409baf"
+        "page.html": "21a3f1270a75079dc2318ba03b81c3941c0b72a4e10fb2820ef8e42ce7c1e213"
       },
       "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout": "16a1fbf7537513334203999bced062811c9f228dfbe1e303b14b643aca48b017"
+      "stdout": "39edd412edf32c5c50feccb03488f687366752ce16370f1e4241d69a505c7cc5"
     },
     "financial-model-review/visualize.py": {
       "exit": 0,
       "files": {
-        "page.html": "d512b3b49f9c914e376af388cedb625a229c971a25c6576b0fbc075d9e91f94d"
+        "page.html": "054dc67abe8d40926ecb00d64470e0a57d2b47e6427489ef046506ba0ac9041a"
       },
       "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout": "fbae6533a6604452a892bd34fc749165d76cb551274f6f8305a1e2c851429ef7"
+      "stdout": "532a7bfe1e9cad0645123bacccac5912fe0c9a90a917317287eaadce67a40196"
     },
     "ic-sim/visualize.py": {
       "exit": 0,
       "files": {
-        "page.html": "d4e3f660908a399e19bda0971c0b20fce3a61b8c35f240de94cc5e13e9f03129"
+        "page.html": "2fbff7dc8c54f73643d897483adf3128ea67a1e03cadd076b2058090cae2bfb5"
       },
       "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout": "09b2f7bc35ae081044d606d847f50ace90da726d668649a91eea3af9e31bbadd"
+      "stdout": "5f64825475a4d87f326bba9917f8f54c95940bacf1082aab3d4096d4edb329da"
     },
     "market-sizing/visualize.py": {
       "exit": 0,
       "files": {
-        "page.html": "b06c471e75c3fd78aff47a433ead899eadb8dfff63f01c139e9a94b4aafe1279"
+        "page.html": "189ab966377bdfec3632edaee0dd370900361e3c301b4d8baeae360befab5553"
       },
       "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout": "7c9c0353c15d57f37a342e9e123455819d4a2416083e967d06d2c7e5483faaa1"
+      "stdout": "fa05d9feeee3bd7886f56fb3ecf1fa8fd3187d8bb2aee48c7182fbe72b28fd85"
     }
   },
   "html_stdout": {
@@ -976,7 +976,7 @@
       "exit": 0,
       "files": {},
       "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout": "b06c471e75c3fd78aff47a433ead899eadb8dfff63f01c139e9a94b4aafe1279"
+      "stdout": "189ab966377bdfec3632edaee0dd370900361e3c301b4d8baeae360befab5553"
     }
   },
   "ic_compose": {
@@ -992,8 +992,8 @@
         "partner_rebuttal_analyst.json": "854d2944eb0c74f48050beb0ea425e35ceddf9e1fe10ef2f203dacfb9584ca42",
         "partner_rebuttal_operator.json": "7b626fcd49fe1f951874890cca71aef6db9073ebe4cd2f502a0fa00f2bf26be5",
         "partner_rebuttal_visionary.json": "cbe3d0d76440b2f6c34de18bff2013f8766e5fc5d6aacb3b4f4a927f9c5cd716",
-        "report.json": "23cde8bff7452a0a44693893d6aea79b4862d623a51c2065123862dac4d61ddd",
-        "report.md": "9c7f1e79592ba2a1b0d741c6251fa442a773514cd847535252f8c00cd0c0862e",
+        "report.json": "4b41132f62b527bba6c368ac2d26caba80084e6abf8c6a0ea6100d1b13a40f68",
+        "report.md": "699b33f5aa637db18989fc5dae951fc99ad4ebcb55ea06d7e0cdbe178c87e5a4",
         "score_dimensions.json": "e6bd517b8347c86d5b1a0f4cd11acf018fad27fc82c35deb5f9e84735276b72b",
         "startup_profile.json": "58d58aca268e5b9c70c27ab57489986f0e1d1582f139a5c1774a99dd7a08a7db"
       },
@@ -1012,8 +1012,8 @@
         "partner_rebuttal_analyst.json": "854d2944eb0c74f48050beb0ea425e35ceddf9e1fe10ef2f203dacfb9584ca42",
         "partner_rebuttal_operator.json": "7b626fcd49fe1f951874890cca71aef6db9073ebe4cd2f502a0fa00f2bf26be5",
         "partner_rebuttal_visionary.json": "cbe3d0d76440b2f6c34de18bff2013f8766e5fc5d6aacb3b4f4a927f9c5cd716",
-        "report.json": "93add19fd562aacd80a99404b59a0957fa8e6a3d7cc495297316793ec66bcecc",
-        "report.md": "682a0542e12896bcbd98646fb865bca7ff1fd41979ebf572117c0f75e7fda6a5",
+        "report.json": "51aa1e7bde536e80fd3b6289c2410e3e7383218faca4fcc87bbc3a9997423a8e",
+        "report.md": "75faa81d3bca04dc0c2ce818dce1c677cc2eb629b155696b2bb22c1c9b0b7b28",
         "score_dimensions.json": "5cfa2f9295f817dd0571b7e0d7bee74e0fedd2fb59a260a94f6980bf4f428d56",
         "startup_profile.json": "58d58aca268e5b9c70c27ab57489986f0e1d1582f139a5c1774a99dd7a08a7db"
       },
@@ -1032,8 +1032,8 @@
         "partner_rebuttal_analyst.json": "854d2944eb0c74f48050beb0ea425e35ceddf9e1fe10ef2f203dacfb9584ca42",
         "partner_rebuttal_operator.json": "7b626fcd49fe1f951874890cca71aef6db9073ebe4cd2f502a0fa00f2bf26be5",
         "partner_rebuttal_visionary.json": "cbe3d0d76440b2f6c34de18bff2013f8766e5fc5d6aacb3b4f4a927f9c5cd716",
-        "report.json": "93add19fd562aacd80a99404b59a0957fa8e6a3d7cc495297316793ec66bcecc",
-        "report.md": "682a0542e12896bcbd98646fb865bca7ff1fd41979ebf572117c0f75e7fda6a5",
+        "report.json": "51aa1e7bde536e80fd3b6289c2410e3e7383218faca4fcc87bbc3a9997423a8e",
+        "report.md": "75faa81d3bca04dc0c2ce818dce1c677cc2eb629b155696b2bb22c1c9b0b7b28",
         "score_dimensions.json": "5cfa2f9295f817dd0571b7e0d7bee74e0fedd2fb59a260a94f6980bf4f428d56",
         "startup_profile.json": "58d58aca268e5b9c70c27ab57489986f0e1d1582f139a5c1774a99dd7a08a7db"
       },
@@ -1223,8 +1223,8 @@
         "partner_rebuttal_analyst.json": "854d2944eb0c74f48050beb0ea425e35ceddf9e1fe10ef2f203dacfb9584ca42",
         "partner_rebuttal_operator.json": "7b626fcd49fe1f951874890cca71aef6db9073ebe4cd2f502a0fa00f2bf26be5",
         "partner_rebuttal_visionary.json": "cbe3d0d76440b2f6c34de18bff2013f8766e5fc5d6aacb3b4f4a927f9c5cd716",
-        "report.json": "d35f3441a621e0b46e5270f899b349608617b26b14ff5417602221612c8df31f",
-        "report.md": "a0141ce82074f44640448bf71a1cc65a82c7f290d33c99876211cfe590c9a737",
+        "report.json": "59f493009bb2582e1f984f09273f6619c80c981375570e2c79f4a2a3bf89cb42",
+        "report.md": "fbef0334708ce467a33b3cb03c1de9ccfa6c46d7a0e81eecb2256511dc5d5639",
         "score_dimensions.json": "5cfa2f9295f817dd0571b7e0d7bee74e0fedd2fb59a260a94f6980bf4f428d56",
         "startup_profile.json": "58d58aca268e5b9c70c27ab57489986f0e1d1582f139a5c1774a99dd7a08a7db"
       },
@@ -1243,8 +1243,8 @@
         "partner_rebuttal_analyst.json": "854d2944eb0c74f48050beb0ea425e35ceddf9e1fe10ef2f203dacfb9584ca42",
         "partner_rebuttal_operator.json": "7b626fcd49fe1f951874890cca71aef6db9073ebe4cd2f502a0fa00f2bf26be5",
         "partner_rebuttal_visionary.json": "cbe3d0d76440b2f6c34de18bff2013f8766e5fc5d6aacb3b4f4a927f9c5cd716",
-        "report.json": "75bf4208590e49e28e5429a3b135472382576c22554642d6775dc706837f126e",
-        "report.md": "1bc065262a0e6aef6f8666c080adcc84a0df0245c0a12971ed3f39b368969dff",
+        "report.json": "1354251d9ed1543ffbe55a54884ee87f665aee48a21f5d88fc9fe6a9c065f1d4",
+        "report.md": "e8df738c5f1ecb11c7b69e677c52c355bc3b36eec489b52bc27feb6134e37931",
         "score_dimensions.json": "5cfa2f9295f817dd0571b7e0d7bee74e0fedd2fb59a260a94f6980bf4f428d56",
         "startup_profile.json": "58d58aca268e5b9c70c27ab57489986f0e1d1582f139a5c1774a99dd7a08a7db"
       },
