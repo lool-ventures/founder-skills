@@ -271,6 +271,10 @@ class RunCapture:
         # The stream as transcript-shaped rows (the shape the plugin's hooks read), in stream order: an
         # assistant row per tool call or text, a user row per result. `isSidechain` marks a sub-agent's.
         self.rows: list[dict[str, Any]] = []
+        # From the init message: the session id, which names the session's transcript file on disk.
+        self.session_id: str | None = None
+        # `compact_boundary` system messages, as the stream carried them: {"at": index into `events`, "data"}.
+        self.compactions: list[dict[str, Any]] = []
 
     def calls(self, name: str, *, parent: str | None = None) -> list[dict[str, Any]]:
         """Tool calls by name; with `parent`, only those made inside that dispatch."""
@@ -432,6 +436,8 @@ def record_message(cap: RunCapture, msg: object) -> None:
         stdout = data.get("stdout")
         cap.hook_events.append(
             {
+                # Where in `events` it arrived, so a mid-run hook (a compaction's SessionStart) can be placed.
+                "at": len(cap.events),
                 "event": getattr(msg, "hook_event_name", "") or data.get("hook_event") or "",
                 "subtype": msg.subtype,
                 "stdout": stdout if isinstance(stdout, str) else str(data.get("output") or ""),
@@ -439,7 +445,12 @@ def record_message(cap: RunCapture, msg: object) -> None:
                 "outcome": data.get("outcome"),
             }
         )
+    elif isinstance(msg, SystemMessage) and msg.subtype == "compact_boundary":
+        cap.compactions.append({"at": len(cap.events), "data": dict(msg.data)})
     elif isinstance(msg, SystemMessage) and msg.subtype == "init":
+        session = msg.data.get("session_id")
+        if isinstance(session, str) and session:
+            cap.session_id = session
         tools = msg.data.get("tools")
         if isinstance(tools, list):
             cap.session_tools = [*(cap.session_tools or []), *(str(t) for t in tools)]
@@ -737,7 +748,13 @@ def run_skill(prompt: str, workdir: Path, label: str, uploads: Sequence[Path] = 
     return run_skill_capture(prompt, workdir, label, uploads).messages
 
 
-def run_skill_capture(prompt: str, workdir: Path, label: str, uploads: Sequence[Path] = ()) -> RunCapture:
+def run_skill_capture(
+    prompt: str,
+    workdir: Path,
+    label: str,
+    uploads: Sequence[Path] = (),
+    env_extra: dict[str, str] | None = None,
+) -> RunCapture:
     """Drive one skill run to completion, with sub-agent tool calls attributed.
 
     `uploads` are copied to `<workdir>/mnt/uploads/` and `COWORK_UPLOADS_DIR` points there, which
@@ -747,7 +764,7 @@ def run_skill_capture(prompt: str, workdir: Path, label: str, uploads: Sequence[
     """
     from claude_agent_sdk import query
 
-    env_extra: dict[str, str] = {}
+    env_extra = dict(env_extra or {})
     if uploads:
         uploads_dir = workdir / "mnt" / "uploads"
         uploads_dir.mkdir(parents=True, exist_ok=True)
@@ -1072,3 +1089,175 @@ def mirror_problems(gate_state: dict[str, Any], ledger: dict[str, Any]) -> list[
     if cur.get("resolution") != expected:
         problems.append(f"{gid}: mirror source {gate_state.get('answer_source')!r}, ledger {cur.get('resolution')!r}")
     return problems
+
+
+# === Compaction: the observables of the opt-in compaction lane ================================================
+# A run forced to compact mid-way (`CLAUDE_CODE_AUTO_COMPACT_WINDOW`): does the main thread re-read its SKILL.md
+# (R), stop guessing flags (F), and finish the run (S, judged by the lane)? Every observable is keyed on the FIRST
+# main-thread compaction (C); a run with none is void, not a pass or a fail.
+
+COMPACT_WINDOW_ENV = "CLAUDE_CODE_AUTO_COMPACT_WINDOW"
+# argparse's own words, never an exit code: several plugin refusals exit 2 legitimately mid-run.
+ARGPARSE_TEXTS = ("the following arguments are required", "unrecognized arguments", "invalid choice")
+# The opening of the SessionStart hook's compaction note (`compaction_reread.py`).
+REREAD_NOTE_LEAD = "If you are the main thread running the founder-skills"
+SHELL_TOOLS = ("Bash", "mcp__workspace__bash")
+_SKILL_FILE_READ = re.compile(r"\b(?:sed|grep|cat|head|tail|awk|less|more)\b[^\n]*SKILL\.md")
+
+
+def mid_run_session_starts(cap: RunCapture) -> list[dict[str, Any]]:
+    """SessionStart hook responses after the run's first main-thread tool call: a compaction fired the hook.
+    A sub-agent's compaction fires it too, indistinguishably, so this alone does not say whose it was."""
+    first = next(
+        (i for i, ev in enumerate(cap.events) if ev["kind"] == "tool_use" and ev["parent_tool_use_id"] is None), None
+    )
+    if first is None:
+        return []
+    return [
+        ev
+        for ev in cap.hook_events
+        if ev["event"] == "SessionStart" and ev["subtype"] == "hook_response" and ev.get("at", -1) > first
+    ]
+
+
+def session_transcript(cap: RunCapture, config_dir: Path | None = None) -> Path | None:
+    """The session's transcript on disk (`<config dir>/projects/<slug>/<session id>.jsonl`), or None."""
+    if not cap.session_id:
+        return None
+    if config_dir is None:
+        config_dir = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
+    found = sorted((config_dir / "projects").glob(f"*/{cap.session_id}.jsonl"))
+    return found[0] if found else None
+
+
+def transcript_compactions(path: Path | None) -> dict[str, Any]:
+    """From the transcript file: main-thread `compact_boundary` rows, whether the summaries say the skill is
+    "loaded", and whether the hook's re-read note sits after the first boundary."""
+    out: dict[str, Any] = {"boundaries": 0, "summaries_say_loaded": None, "note_rows": 0, "note_after_boundary": None}
+    if path is None or not path.is_file():
+        return out
+    rows = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(row, dict):
+            rows.append(row)
+    first_boundary = None
+    summaries: list[str] = []
+    note_at: list[int] = []
+    for i, row in enumerate(rows):
+        if row.get("isSidechain"):
+            continue
+        if row.get("type") == "system" and row.get("subtype") == "compact_boundary":
+            out["boundaries"] += 1
+            first_boundary = i if first_boundary is None else first_boundary
+        elif row.get("isCompactSummary"):
+            body = (row.get("message") or {}).get("content")
+            summaries.append(_text_of(body))
+        elif REREAD_NOTE_LEAD in json.dumps(row, ensure_ascii=False):
+            note_at.append(i)
+    if summaries:
+        out["summaries_say_loaded"] = any(re.search(r"\bloaded\b", s, re.I) for s in summaries)
+    out["note_rows"] = len(note_at)
+    if note_at and first_boundary is not None:
+        out["note_after_boundary"] = note_at[0] > first_boundary
+    return out
+
+
+def compaction_point(cap: RunCapture) -> int | None:
+    """Where in `events` the first compaction landed: the stream's own main-thread boundary if it carried one,
+    or the first mid-run SessionStart, whichever came first. None when the run never compacted."""
+    points = [c["at"] for c in cap.compactions if not c["data"].get("parent_tool_use_id")]
+    points += [ev["at"] for ev in mid_run_session_starts(cap)]
+    return min(points) if points else None
+
+
+def _main_calls_after(cap: RunCapture, at: int) -> list[dict[str, Any]]:
+    return [ev for ev in cap.events[at:] if ev["kind"] == "tool_use" and ev["parent_tool_use_id"] is None]
+
+
+def skill_rereads(cap: RunCapture, skill: str, at: int) -> list[dict[str, Any]]:
+    """R: main-thread reads of this skill's SKILL.md after `at` -- a Read or Grep of it, or a shell read."""
+    found = []
+    for call in _main_calls_after(cap, at):
+        inp = call.get("input") or {}
+        if call["name"] in ("Read", "Grep"):
+            target = str(inp.get("file_path") or inp.get("path") or "")
+            if target.endswith(f"skills/{skill}/SKILL.md"):
+                found.append(call)
+        elif call["name"] in SHELL_TOOLS:
+            command = str(inp.get("command") or "")
+            if f"{skill}/SKILL.md" in command or _SKILL_FILE_READ.search(command):
+                found.append(call)
+    return found
+
+
+def argparse_failures(cap: RunCapture, at: int) -> list[str]:
+    """F: main-thread shell calls after `at` that ran a plugin script and got argparse's own usage error."""
+    found = []
+    for call in _main_calls_after(cap, at):
+        if call["name"] not in SHELL_TOOLS:
+            continue
+        command = str((call.get("input") or {}).get("command") or "")
+        if ".py" not in command:
+            continue
+        text = _text_of((cap.result(call["id"]) or {}).get("content"))
+        hit = next((t for t in ARGPARSE_TEXTS if t in text), None)
+        if hit:
+            found.append(f"{command[:160]!r}: {hit}")
+    return found
+
+
+_RUN_START = re.compile(r'run_status\.py"?\s+start\b')
+
+
+def run_starts(cap: RunCapture) -> int:
+    """Main-thread `run_status.py start` calls: a second one is the run starting over."""
+    return sum(
+        1
+        for call in cap.tool_uses
+        if call["parent_tool_use_id"] is None
+        and call["name"] in SHELL_TOOLS
+        and _RUN_START.search(str((call.get("input") or {}).get("command") or ""))
+    )
+
+
+def compaction_report(cap: RunCapture, skill: str, config_dir: Path | None = None) -> dict[str, Any]:
+    """Every observable the lane reports, before any assertion, so a void or red run leaves the same record."""
+    at = compaction_point(cap)
+    starts = mid_run_session_starts(cap)
+    on_disk = transcript_compactions(session_transcript(cap, config_dir))
+    stream_main = any(not c["data"].get("parent_tool_use_id") for c in cap.compactions)
+    return {
+        "cli_version": cap.cli_version,
+        "model": cap.model,
+        "compaction_at": at,
+        "stream_boundaries": len(cap.compactions),
+        "mid_run_session_starts": len(starts),
+        "transcript_boundaries": on_disk["boundaries"],
+        "main_thread_confirmed": bool(on_disk["boundaries"]) or stream_main,
+        "reread_note_emitted": any(REREAD_NOTE_LEAD in (ev.get("stdout") or "") for ev in starts),
+        "note_after_boundary": on_disk["note_after_boundary"],
+        "summaries_say_loaded": on_disk["summaries_say_loaded"],
+        "rereads": [] if at is None else [c["id"] for c in skill_rereads(cap, skill, at)],
+        "argparse_failures": [] if at is None else argparse_failures(cap, at),
+        "run_starts": run_starts(cap),
+    }
+
+
+def format_compaction_report(report: dict[str, Any]) -> str:
+    return "\n".join(
+        [
+            f"- CLI `{report['cli_version'] or 'unknown'}`, model `{report['model'] or 'unknown'}`",
+            f"- C: compaction at event {report['compaction_at']}; stream boundaries {report['stream_boundaries']}, "
+            f"mid-run SessionStart {report['mid_run_session_starts']}, transcript boundaries "
+            f"{report['transcript_boundaries']}, main thread confirmed {report['main_thread_confirmed']}",
+            f"- the re-read note: emitted {report['reread_note_emitted']}, after the boundary "
+            f"{report['note_after_boundary']}; summaries say 'loaded': {report['summaries_say_loaded']}",
+            f"- R: {len(report['rereads'])} main-thread read(s) of SKILL.md after C",
+            f"- F: {len(report['argparse_failures'])} argparse usage error(s) after C: {report['argparse_failures']}",
+            f"- run starts: {report['run_starts']}",
+        ]
+    )

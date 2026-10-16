@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import shlex
 import subprocess
 import sys
@@ -552,3 +553,102 @@ def test_market_sizing_smoke(tmp_path: Path) -> None:
     problems += [f"{k} is {s}" for k, s in two.items() if s == "open"]
     problems += compose_record_problems(review_dir, run_id, status)
     assert not problems, "\n".join(problems)
+
+
+# === The compaction lane (opt-in measurement) ================================================================
+# The same run, forced to compact mid-way: the auto-compact window is set to the runtime's floor, so the main
+# thread compacts once its context reaches the window less the runtime's reserve. After a compaction the skill's
+# instructions come back cut inside Step 0. This lane reports whether the main thread then re-read its SKILL.md
+# (R) and whether it hit argparse usage errors (F), and asserts that the run still completed (S). It is not in
+# the release gate: billed on its own opt-in (named in the workflow's ALLOWED_SKIPS). A run that never compacted
+# on the main thread is VOID, not a result.
+COMPACTION_OPT_IN_ENV = "RUN_PAID_E2E_MS_COMPACTION"
+COMPACTION_LANE = "msc"
+COMPACTION_WINDOW = "100000"
+
+
+def _compaction_lane_authorized() -> bool:
+    return os.environ.get(COMPACTION_OPT_IN_ENV, "").strip().lower() in {"1", "true", "yes"}
+
+
+def _run_id_of(data: Any) -> Any:
+    if not isinstance(data, dict):
+        return None
+    return (data.get("metadata") or {}).get("run_id") or data.get("run_id")
+
+
+def compaction_completion_problems(
+    review_dir: Path, run_id: str, status: dict[str, Any], report: dict[str, Any]
+) -> list[str]:
+    """S: the compacted run still finished as a run: complete, this run's red team (or its recorded skip),
+    coaching inserted, and one `start` (a second is the run starting over). Empty when it did."""
+    problems = run_complete_problems(status, run_id, SKILL, review_dir)
+
+    def _load(name: str) -> Any:
+        try:
+            return json.loads((review_dir / name).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+
+    redteam, methodology = _load("redteam.json"), _load("methodology.json")
+    reviewed = _run_id_of(redteam) == run_id
+    skipped = (
+        isinstance(methodology, dict)
+        and bool(methodology.get("red_team_skipped"))
+        and methodology.get("red_team_skipped_run_id") == run_id
+    )
+    if not (reviewed or skipped):
+        problems.append(
+            f"neither this run's redteam.json nor a recorded skip for {run_id} (redteam names {_run_id_of(redteam)!r})"
+        )
+    report_md = review_dir / "report.md"
+    if not report_md.is_file() or "## Coaching Commentary" not in report_md.read_text(encoding="utf-8"):
+        problems.append("report.md carries no coaching commentary")
+    if report.get("run_starts", 0) > 1:
+        problems.append(f"the run started {report['run_starts']} times (a restart after the compaction)")
+    return problems
+
+
+@pytest.mark.e2e
+@pytest.mark.skipif(
+    not (has_claude_auth() and _compaction_lane_authorized()),
+    reason=(
+        f"The compaction lane needs Claude auth, RUN_PAID_E2E=1, and {COMPACTION_OPT_IN_ENV}=1. It measures what a "
+        "run does after a mid-run compaction; billed on demand, never by a release."
+    ),
+)
+def test_market_sizing_compaction_lane(tmp_path: Path) -> None:
+    """The smoke run with a forced compaction: report C, R and F, then assert the run completed (S)."""
+    workdir = tmp_path / "workspace"
+    workdir.mkdir()
+    run_id = lane_run_id(COMPACTION_LANE)
+    prompt = host_request(PROMPT, run_id, answers=HOST_ANSWERS, values=HOST_VALUES, notes=HOST_NOTES)
+    # A caller's own value wins, as the byte-stream timeout's does; the fallback lever,
+    # CLAUDE_AUTOCOMPACT_PCT_OVERRIDE, passes through the environment unchanged.
+    window = os.environ.get(_e2e_harness.COMPACT_WINDOW_ENV, COMPACTION_WINDOW)
+    cap = run_skill_capture(
+        prompt,
+        workdir,
+        label="market-sizing-compaction",
+        uploads=[SCANNED_DECK],
+        env_extra={_e2e_harness.COMPACT_WINDOW_ENV: window},
+    )
+    report = _e2e_harness.compaction_report(cap, SKILL)
+    report["window"] = window
+    report["run_id"] = run_id
+    (workdir / "compaction_report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+    text = _e2e_harness.format_compaction_report(report)
+    print(f"[e2e:ms-compaction] report:\n{text}", flush=True)
+    print(f"[e2e:ms-compaction] report-json: {json.dumps(report)}", flush=True)
+    step_summary(f"### market-sizing e2e: compaction lane\n\n{text}\n")
+
+    if report["compaction_at"] is None or not report["main_thread_confirmed"]:
+        pytest.fail(
+            f"VOID: the main thread never compacted (window {window}); this run measures nothing. "
+            f"Re-run with CLAUDE_AUTOCOMPACT_PCT_OVERRIDE set.\n{text}"
+        )
+
+    review_dir = locate_review_dir(workdir, "market-sizing-*", cap.messages, "market-sizing")
+    status = read_run_status(workdir, run_id)
+    problems = compaction_completion_problems(review_dir, run_id, status, report)
+    assert not problems, "\n".join(problems) + f"\n{text}"

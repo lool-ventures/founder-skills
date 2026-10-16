@@ -287,6 +287,9 @@ jobs:
               # opt-in. It measures whether a real run writes `unclassified` with a reason for a licensing
               # model; runs when a dispatch passes `-f extra_lanes=true`.
               "test_financial_model_review_unclassified_lane",
+              # market-sizing's compaction lane: its own RUN_PAID_E2E_MS_COMPACTION opt-in, never set here. It
+              # measures what a run does after a forced mid-run compaction, and is run by hand.
+              "test_market_sizing_compaction_lane",
           }
           suite = ET.parse("e2e-results.xml").getroot()
           cases = list(suite.iter("testcase"))

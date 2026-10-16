@@ -598,6 +598,11 @@ run with fifteen dispatches recorded zero boundaries. Truncation is head-preserv
      `ALLOWED_SKIPS`). It is a measurement: a red on its first assertion reports what the run wrote for
      `company.revenue_model_type` / `unclassified_reason`, not a regression. Locally (billed):
      `RUN_PAID_E2E=1 RUN_PAID_E2E_FMR_UNCLASSIFIED=1 uv run pytest founder-skills/tests/test_e2e_financial_model_review.py -k unclassified -v -m e2e --tb=short -s --basetemp /tmp/fs-e2e` (`--basetemp` OUTSIDE `~/.claude`).
+   - **The market-sizing compaction lane** (`test_market_sizing_compaction_lane`) is local only:
+     `RUN_PAID_E2E_MS_COMPACTION` is never set by the workflow, and the lane is in `ALLOWED_SKIPS`. It sets
+     `CLAUDE_CODE_AUTO_COMPACT_WINDOW` to the floor so the run compacts mid-way, writes
+     `compaction_report.json` (C, R, F, as `_e2e_harness.compaction_report` defines them), and asserts
+     only that the run completed. A run with no main-thread compaction fails as VOID; it is not a result.
 6. **Green: fast-forward `main`, then tag.** Green means the paid gate AND every PR check
    (`gh pr checks release/vX.Y.Z`): the push to `main` goes around branch protection
    (`enforce_admins` is false), so nothing else enforces lint, typecheck, tests, DCO or the review.
