@@ -2403,6 +2403,9 @@ _REATTACH_PREFIX_MAX_CHARS = 240
 # A skill over the cap is truncated: the entry keeps `slice(0, 19,900)` of prefix + body plus a 100-char marker.
 # Every WIRED skill is over it, so its run-start block must end by 19,900 - 240 body chars, not 20,001 - 240.
 _REATTACH_RETAINED_CHARS = 19_900
+# The loader substitutes this token with the plugin's path before the skill's text is recorded, so the
+# re-attached copy carries the path, not the token.
+_PLUGIN_ROOT_TOKEN = "${CLAUDE_PLUGIN_ROOT}"
 
 
 def test_feedback_skill_md_does_not_grow() -> None:
@@ -4910,12 +4913,19 @@ def test_step0_starts_the_run_record_inside_the_reattached_window(skill: str) ->
         assert body.index("I can run it now") < start
     assert start < body.index("### Step 1:")
     fence_end = body.index("```", start) + 3
+    # The re-attached copy carries `${CLAUDE_PLUGIN_ROOT}` substituted, so each token before the fence's end
+    # grows by the plugin path less the token. At the longest prefix the test assumes, that path is the prefix
+    # less "Base directory for this skill: " (31 chars) and less "/skills/<skill>".
+    expansion = body[:fence_end].count(_PLUGIN_ROOT_TOKEN) * (
+        _REATTACH_PREFIX_MAX_CHARS - 31 - len(f"/skills/{skill}") - len(_PLUGIN_ROOT_TOKEN)
+    )
+    rendered_end = fence_end + expansion
     if skill in WINDOW_EXEMPT:
-        assert fence_end > _REATTACH_RETAINED_CHARS - _REATTACH_PREFIX_MAX_CHARS, (
-            f"{skill}'s start block now ends inside the window ({fence_end}); drop it from WINDOW_EXEMPT"
+        assert rendered_end > _REATTACH_RETAINED_CHARS - _REATTACH_PREFIX_MAX_CHARS, (
+            f"{skill}'s start block now ends inside the window ({rendered_end}); drop it from WINDOW_EXEMPT"
         )
     else:
-        assert fence_end <= _REATTACH_RETAINED_CHARS - _REATTACH_PREFIX_MAX_CHARS, fence_end
+        assert rendered_end <= _REATTACH_RETAINED_CHARS - _REATTACH_PREFIX_MAX_CHARS, (fence_end, expansion)
     text = (SKILLS_ROOT / skill / "SKILL.md").read_text(encoding="utf-8")
     assert 'RUN_ID="${RUN_ID:-' not in text and "date -u +%Y%m%dT%H%M%SZ" not in text
 
