@@ -5,6 +5,81 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.22.0] - 2026-10-17 — Scores read the same everywhere, range figures in deck review, and replies sent through a host's tool
+
+### Highlights
+
+**Scores print the same way in every report, page and closing message.** One decimal at most, no trailing zero
+("63%", "71.4%"). Each skill now builds its score text and verdict in one place, so the report, its pages and the
+closing message cannot disagree. No score changed; only how it is written.
+
+**Deck review reads a figure stated as a range as the range it is.** A figure like "10-12" is accepted at either of
+its two numbers, and totals, differences and products that use it use the whole range, so the result no longer
+depends on which number was recorded, and a stated total inside the range is no longer reported as a disagreement.
+
+**A host whose founder reads replies through a tool can say so.** A new request line names that tool, and the
+end-of-turn check then judges what was sent through it, so a run that sent the printed summary whole is no longer
+sent back for an unseen closing word. Without the line nothing changes.
+
+### Scoring changes
+
+- Deck review: a figure the deck states as a range (for example "10-12") is now accepted by the figure extraction
+  check at either of its two numbers and no other, where before only the first was accepted. Sums, differences and
+  products that use a range now use the whole range, so they no longer depend on which number the extraction
+  recorded, and a stated total inside that range is no longer reported as a disagreement. For those three, whether
+  a total outside a stated figure differs only by sign, or (for a percentage) by less than the materiality floor,
+  is judged between the computed range and the stated one, which may itself be a range. Ratios and growth figures
+  keep their earlier reading of a range. This can change which figures the numbers check finds in agreement, the
+  order in which disagreements are listed, which rounding gaps are shown, and so the score.
+- Every other skill: none. Score text changed format only.
+
+### Added
+
+- A host whose founder reads replies through a tool rather than the model's plain text can name that tool with a
+  new request line, `FS_HOST_REPLY_TOOL <tool_name> <input_key>`. The end-of-turn check then judges what the turn
+  sent through that tool after the closing step, and a follow-up it asks for is asked for through the same tool.
+  Without the line nothing changes. `run_status.py check` reports the line per skill.
+
+### Changed
+
+- Scores print the same way in every report and on its pages: one decimal at most, no trailing zero. The financial
+  model review's summary and closing message show one decimal where they rounded to a whole number; the IC
+  simulation's conviction score reads "63%" where it read "63.0%"; competitive positioning's score badge shows one
+  decimal where it rounded to a whole number.
+- A financial model review states its headline score under one name in the report, on the report page and in the
+  explorer: "Model Quality", or "Deck Financial Readiness" for a review of a pitch deck or a conversation with no
+  spreadsheet.
+- Score rings and status pills carry their tone as data, and a checklist row's status word is announced once to a
+  screen reader.
+- When the end-of-turn check has already sent the model back once, it records in its own log whether the follow-up
+  carried the printed summary. It still never sends the model back a second time.
+
+### Fixed
+
+- Deck review: a figure stated as a range was refused when the extraction recorded its second number, and a sum,
+  difference or product that used it depended on which number was recorded.
+- Deck review: a checklist that named no known band printed the raw band name in the report; it now prints the band
+  its score falls in, as the page did. A checklist score that is not a number reads "not recorded" instead of "0%".
+- Financial model review: a review of a deck with exact figures was headlined on its checklist score; it is
+  headlined on its deck financial readiness, as every other deck review is.
+
+### Development
+
+Contributor-facing only; nothing here changes what a founder installs or runs.
+
+- Hosts: `FS_HOST_REPLY_TOOL` is in `data/host-contract.json`. It is read only from the founder's own messages,
+  never from the run's records, and the resume prompt never repeats it. A plugin before 0.22.0 refuses a request
+  carrying it (`PRE_ANSWER_INVALID`).
+- IC simulation: the score-mismatch warning, which reaches the coaching step when it fires, prints its figures in
+  the score format ("80%" where it printed "80.0%"); format only. There is no IC end-to-end lane, so none ran.
+- The deck lane of the release gate now records hook events and fails on a checklist dispatch that went wrong: one
+  that failed, one held although it sent the printed prompt, one that did not deliver the printed prompt, one sent
+  to another agent, or one whose dispatch check never ran. A hold for the wrong agent type is no longer counted
+  against a run on any lane.
+- The Cowork test harness is pinned exactly at 4.10.0, and recording now needs at least 4.10.0, whose agent matches
+  the one current Desktop runs. The re-record script prices a refresh as only the scenarios it records, and refuses
+  to start when a managed settings file would change the recorded cassette format.
+
 ## [0.21.0] - 2026-10-16 — IC simulation: a fund profile and context supplied with the request, and a redesigned report page
 
 ### Highlights
