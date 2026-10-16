@@ -439,6 +439,28 @@ NO_ASK_END_REASON = (
     "otherwise continue."
 )
 _STATUS_PATH = re.compile(r'"status_path"\s*:\s*"([^"]+)"')
+COMPACTED_SENTENCE = (
+    " This conversation was compacted mid-run: Read the skill's SKILL.md from the step after the last one that "
+    "ran before your next command."
+)
+
+
+def _founder_prompt_start(rows: list[dict[str, Any]]) -> int:
+    """The founder's latest message, read past a compaction: the runtime writes its summary as a user row, which
+    is not a prompt anyone sent, and the run's `start` result sits before it in the file."""
+    start = 0
+    for i, row in enumerate(rows):
+        if _is_real_user_prompt(row) and not row.get("isCompactSummary"):
+            start = i
+    return start
+
+
+def compacted_since(rows: list[dict[str, Any]], start: int) -> bool:
+    """A main-thread compaction since `start` (the runtime's `compact_boundary` row)."""
+    return any(
+        r.get("type") == "system" and r.get("subtype") == "compact_boundary" and not r.get("isSidechain")
+        for r in rows[start:]
+    )
 
 
 def _load_figures() -> Any:
@@ -515,7 +537,7 @@ def decide(payload: dict[str, Any]) -> dict[str, str] | None:
             # the skill's arguments; the path is the session shell's, so at Cowork local (this hook on the host,
             # the shell in the VM) only the message counts.
             figures = _load_figures()
-            start = _current_prompt_start(rows)
+            start = _founder_prompt_start(rows)
             quiet = bool(figures.no_ask_in(rows, start, _is_real_user_prompt)) or bool(
                 figures.ledger_no_ask(figures.read_ledger(figures.ledger_path(rows[start:])))
             )
@@ -526,8 +548,10 @@ def decide(payload: dict[str, Any]) -> dict[str, str] | None:
         # run left `running` is asked to record why.
         if handover is None:
             try:
-                if no_ask_still_running(rows, _current_prompt_start(rows)):
-                    return {"decision": "block", "reason": NO_ASK_END_REASON}
+                start = _founder_prompt_start(rows)
+                if no_ask_still_running(rows, start):
+                    reason = NO_ASK_END_REASON + (COMPACTED_SENTENCE if compacted_since(rows, start) else "")
+                    return {"decision": "block", "reason": reason}
             except Exception as e:  # noqa: BLE001 - fail open
                 _log(f"no-ask end check: {type(e).__name__}: {e}")
             return None

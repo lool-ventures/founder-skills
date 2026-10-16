@@ -1282,6 +1282,55 @@ def test_the_stop_hook_asks_once_when_a_no_ask_run_is_left_running(tmp_path: Pat
     assert stop.decide({"hook_event_name": "Stop", "transcript_path": _transcript(tmp_path, [req, refused])}) is None
 
 
+def test_the_stop_hooks_no_ask_end_names_a_compaction_and_reads_past_its_summary(tmp_path: Path) -> None:
+    """A no-ask run left `running` after a mid-run compaction: the runtime's summary is a user row written after
+    the run's `start` result, and is no prompt anyone sent, so the check still finds the status there; the
+    reason then says the conversation was compacted. With no compaction since the request, no such sentence."""
+    stop = _load("stop_handover_check_under_test", h.SHARED / "stop_handover_check.py")
+    status = tmp_path / "run_status.json"
+    status.write_text(json.dumps({"status": "running", "no_ask": True}))
+    start = {
+        "type": "user",
+        "message": {
+            "role": "user",
+            "content": [
+                {"type": "tool_result", "tool_use_id": "s1", "content": json.dumps({"status_path": str(status)})}
+            ],
+        },
+    }
+    req = _user(f"Review it.\nFS_HOST_RUN_ID={RID}\nFS_HOST_NO_ASK")
+    boundary = {
+        "type": "system",
+        "subtype": "compact_boundary",
+        "isSidechain": False,
+        "content": "Conversation compacted",
+    }
+    summary = {
+        "type": "user",
+        "isCompactSummary": True,
+        "isVisibleInTranscriptOnly": True,
+        "message": {"role": "user", "content": "This session is being continued from a previous conversation."},
+    }
+    payload = {"hook_event_name": "Stop", "transcript_path": _transcript(tmp_path, [req, start, boundary, summary])}
+    block = stop.decide(payload)
+    assert block is not None and block["reason"].startswith(stop.NO_ASK_END_MARKER)
+    assert block["reason"].endswith(stop.COMPACTED_SENTENCE)
+    assert "compacted mid-run: Read the skill's SKILL.md from the step after the last one that ran" in block["reason"]
+    payload["transcript_path"] = _transcript(tmp_path, [req, start])
+    block = stop.decide(payload)
+    assert block is not None and block["reason"] == stop.NO_ASK_END_REASON
+    # A sub-agent's compaction is not the main thread's; a compaction before the request is an earlier prompt's.
+    sub = {**boundary, "isSidechain": True}
+    payload["transcript_path"] = _transcript(tmp_path, [req, start, sub])
+    assert stop.decide(payload)["reason"] == stop.NO_ASK_END_REASON
+    payload["transcript_path"] = _transcript(tmp_path, [boundary, summary, req, start])
+    assert stop.decide(payload)["reason"] == stop.NO_ASK_END_REASON
+    # Once: the block's own feedback after the compaction stops a second.
+    feedback = _user(f"Stop hook feedback: {stop.NO_ASK_END_REASON}", isMeta=True)
+    payload["transcript_path"] = _transcript(tmp_path, [req, start, boundary, summary, feedback])
+    assert stop.decide(payload) is None
+
+
 # A host that passes its request lines as the skill's arguments: the lines reach the transcript only in the skill's
 # expanded text (an `isMeta` row), which never counts. The run's ledger, named by this prompt's `start` result,
 # records them, and the question tool and the Stop hook read it there.

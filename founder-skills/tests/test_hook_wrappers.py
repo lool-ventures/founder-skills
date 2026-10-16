@@ -134,6 +134,7 @@ def test_every_hook_and_the_python_it_runs_ships_in_the_plugin() -> None:
         "scripts/_form_reply.py",
         "scripts/script_hashes.py",
         "scripts/session-setup.sh",
+        "scripts/compaction_reread.py",
     ):
         assert expected in files, (expected, files)
     missing = [f for f in files if f not in _shipped(PLUGIN)]

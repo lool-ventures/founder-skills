@@ -47,6 +47,7 @@ def test_the_hook_module_list_is_complete() -> None:
         "_form_reply.py",
         "shared_tmp_check.py",
         "script_hashes.py",
+        "compaction_reread.py",
     }
     assert expected <= names, names
 
@@ -427,3 +428,15 @@ def test_the_shared_tmp_check_decides_the_same_under_the_system_python(
     dev, system = _both(SCRIPTS / "pretooluse_dispatch.py", _payload(tmp_path, _started(), command=command))
     assert dev == system
     assert bool(dev) is held
+
+
+@needs_old
+@pytest.mark.parametrize("state", ["running", "complete"])
+def test_the_compaction_note_decides_the_same_under_the_system_python(tmp_path: Path, state: str) -> None:
+    from test_compaction_reread_hook import _payload, _run, _set_status, _transcript
+
+    root, run_id, rows = _run(tmp_path)
+    _set_status(root, run_id, status=state)
+    dev, system = _both(SCRIPTS / "compaction_reread.py", _payload(_transcript(tmp_path, rows)))
+    assert dev == system
+    assert bool(dev) is (state == "running")
