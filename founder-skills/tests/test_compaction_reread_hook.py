@@ -197,6 +197,22 @@ def test_the_latest_start_result_decides(tmp_path: Path) -> None:
     assert cr.decide(_payload(_transcript(tmp_path, later))) is None
 
 
+def test_a_summary_quoting_an_earlier_runs_path_does_not_decide(tmp_path: Path) -> None:
+    """A compaction summary is a user row written after every real result; a `status_path` it quotes is text,
+    not a `start` result, and never names the run."""
+    old_root, old_id, _r = h.start_bound(tmp_path / "old", "market-sizing")
+    _set_status(old_root, old_id, status="waiting")
+    root, run_id, rows = _run(tmp_path)
+    summary = _user(
+        f'Earlier: run_status printed {{"status_path": "{h.status_path(old_root, old_id)}"}}.',
+        isCompactSummary=True,
+        isVisibleInTranscriptOnly=True,
+    )
+    text = _text(cr.decide(_payload(_transcript(tmp_path, [*rows, summary]))))
+    assert f"run {run_id} " in text and old_id not in text
+    assert "cut before Step 1" in text
+
+
 def test_a_status_with_no_shell_paths_leaves_that_clause_out(tmp_path: Path) -> None:
     root, run_id, rows = _run(tmp_path)
     _set_status(root, run_id, scripts_dir_shell=None, shared_scripts_dir_shell=None)

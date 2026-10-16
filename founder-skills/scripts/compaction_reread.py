@@ -6,9 +6,10 @@
 """SessionStart hook body, `source: "compact"` only: tell a run in progress to re-read its SKILL.md.
 
 WHY. After a compaction the runtime re-attaches a skill's instructions cut to a fixed window, and for the
-analysis skills that window ends inside Step 0: the steps the run is on are gone, while what survives (Step
-0's flags, a quick check's commands) reads like a whole manual. A run that carries on from that copy guesses
-flags and skips steps. This adds one note after the cut copy, last in context, naming the file to read.
+analysis skills that window ends before Step 1 (inside Step 0 in five, before it in cap-table): the steps the
+run is on are gone, while what survives (Step 0's flags, a quick check's commands) reads like a whole manual.
+A run that carries on from that copy guesses flags and skips steps. This adds one note after the cut copy,
+last in context, naming the file to read.
 
 WHEN. Only when the session started a founder-skills analysis skill on the main thread (a `Skill` call or a
 slash command; a skill name a tool returned does not count) AND the latest run status the transcript names is
@@ -51,13 +52,18 @@ def _plugin_root() -> str:
     return root or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-def latest_status_path(rows: list[dict[str, Any]], strings: Any) -> str | None:
+def latest_status_path(rows: list[dict[str, Any]], strings: Any, has_tool_result: Any) -> str | None:
     """The `status_path` the latest main-thread `run_status.py start` result printed, or None."""
     found = None
     for row in rows:
         if row.get("type") != "user" or row.get("isSidechain"):
             continue
-        for piece in strings((row.get("message") or {}).get("content")):
+        content = (row.get("message") or {}).get("content")
+        # A `start` result is a tool result. A compaction summary is a user row too, and may quote an earlier
+        # run's path after the latest real result.
+        if not has_tool_result(content):
+            continue
+        for piece in strings(content):
             for m in _STATUS_PATH.finditer(piece):
                 found = m.group(1)
     return found
@@ -67,7 +73,7 @@ def note(skill: str, run_id: str, state: str, status: dict[str, Any]) -> str:
     skill_md = os.path.join(_plugin_root(), "skills", skill, "SKILL.md")
     parts = [
         f"If you are the main thread running the founder-skills {skill} run {run_id} (status {state}), its "
-        "instructions were re-attached cut inside Step 0 by this compaction. Before your next command, Read "
+        "instructions were re-attached cut before Step 1 by this compaction. Before your next command, Read "
         f"`{skill_md}` from the `### Step` you are on (if Step 0 printed `READ_ROOT=`, use that value as the "
         "root)."
     ]
@@ -97,7 +103,7 @@ def decide(payload: dict[str, Any]) -> dict[str, Any] | None:
     started = {skill for _i, skill in dtc.invocations(rows)}
     if not started:
         return None
-    path = latest_status_path(rows, dtc.strings)
+    path = latest_status_path(rows, dtc.strings, dtc._has_tool_result)
     if not path or not os.path.isfile(path):
         return None
     with open(path, encoding="utf-8") as fh:

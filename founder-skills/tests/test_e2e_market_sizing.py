@@ -558,7 +558,7 @@ def test_market_sizing_smoke(tmp_path: Path) -> None:
 # === The compaction lane (opt-in measurement) ================================================================
 # The same run, forced to compact mid-way: the auto-compact window is set to the runtime's floor, so the main
 # thread compacts once its context reaches the window less the runtime's reserve. After a compaction the skill's
-# instructions come back cut inside Step 0. This lane reports whether the main thread then re-read its SKILL.md
+# instructions come back cut before Step 1. This lane reports whether the main thread then re-read its SKILL.md
 # (R) and whether it hit argparse usage errors (F), and asserts that the run still completed (S). It is not in
 # the release gate: billed on its own opt-in (named in the workflow's ALLOWED_SKIPS). A run that never compacted
 # on the main thread is VOID, not a result.
