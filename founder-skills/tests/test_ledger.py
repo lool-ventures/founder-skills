@@ -371,6 +371,25 @@ def test_a_scale_slip_at_a_ranges_end_is_still_refused() -> None:
     assert rc != 0
     assert "record the figure at full scale" in err, err
     assert "record 417,000 or 463,000" in err, err
+    assert "not this figure" not in err, err
+
+
+def test_a_ranges_window_is_its_own_first_ends_precision() -> None:
+    """The window is read from the range, not from the raw's first number: "5 of 37-41 pilots" has the
+    same half-unit window as "37-41", so 39 is refused there too (the 5% cap a lone "5" carries would admit
+    it)."""
+    rc, _, err = _run({"figures": [_scale_fig("5 of 37-41 pilots", 39, "count")]})
+    assert rc != 0
+    assert "record 37 or 41" in err, err
+
+
+def test_a_range_that_is_not_the_figure_is_named_as_the_likely_cause() -> None:
+    """ "$1.2M (FY2024-2026)" recorded as 1,200,000: the value is the number printed beside the range, so this
+    is not a scale slip, and the raw is what needs fixing. Said so; "full scale" would invite recording 2,024."""
+    rc, _, err = _run({"figures": [_scale_fig("$1.2M (FY2024-2026)", 1_200_000, "money")]})
+    assert rc != 0
+    assert "full scale" not in err, err
+    assert "if the range is not this figure, make raw the figure's own printed string" in err, err
 
 
 def test_a_unit_suffix_range_at_its_second_number_is_still_ambiguous() -> None:

@@ -1443,6 +1443,48 @@ def _immaterial_percent(computed: float, exp: Figure) -> bool:
     return abs(computed - exp.value) / abs(exp.value) < MATERIALITY_PCT
 
 
+# THE CONVENTION CLASSES ON TWO INTERVALS. A sum, difference or product of a range is a range,
+# and a stated figure may be one too, so neither side has one number to test. Each class has a
+# convention POINT -- the stated figure for materiality, the stated figure NEGATED for the sign
+# class -- and is satisfied when that point, widened by the stated range, meets the computed range.
+# One end chosen for both classes is right for one and wrong for the other: the end nearest the
+# stated figure is the farthest from its negation. For two points these reduce exactly to
+# `_immaterial_percent` and `_sign_convention`.
+
+
+def _interval_gap(c_lo: float, c_hi: float, exp: Figure) -> tuple[float, float]:
+    """How far the computed range lies from the stated one, and the stated end it is measured to."""
+    e_lo, e_hi = exp.span()
+    if e_lo > c_hi:
+        return e_lo - c_hi, e_lo
+    if c_lo > e_hi:
+        return c_lo - e_hi, e_hi
+    return 0.0, exp.value
+
+
+def _immaterial_between(c_lo: float, c_hi: float, exp: Figure) -> float | None:
+    """The relative gap between the two ranges when it is under the percentage materiality floor, else None."""
+    if exp.unit_kind != PERCENT:
+        return None
+    gap, end = _interval_gap(c_lo, c_hi, exp)
+    if end == 0:
+        return None
+    rel = gap / abs(end)
+    return rel if rel < MATERIALITY_PCT else None
+
+
+def _sign_between(c_lo: float, c_hi: float, exp: Figure, tol: float) -> bool:
+    """The computed range has the opposite sign throughout, and meets the stated range negated, within `tol`."""
+    e_lo, e_hi = exp.span()
+    if e_lo > 0:
+        opposite = c_hi < 0
+    elif e_hi < 0:
+        opposite = c_lo > 0
+    else:
+        return False
+    return opposite and c_lo - tol <= -e_lo and -e_hi <= c_hi + tol
+
+
 # A claim about a RATE OVER TIME, read off the STATED figure's own words. Deliberately the
 # label/raw and never `unit_kind`: a bare multiple is not a growth claim, and the recorded
 # corpus carries a non-temporal "100x" urgency multiple that keying on the unit would refuse.
@@ -1573,6 +1615,18 @@ def _month_label(index: int) -> str:
 
 def _span_text(lo: float, hi: float) -> str:
     return f"{lo:,.1f}" if lo == hi else f"{lo:,.2f}–{hi:,.2f}"
+
+
+def _with_range(r: Relation) -> None:
+    """Print a computed range as one. A derived reading is shown as computed, and only a comparison
+    re-renders it, so without this a range product or sum read as if the deck had stated its low end."""
+    if r.span_lo is None or r.span_hi is None or r.span_lo == r.span_hi:
+        return
+
+    def plain(v: float) -> str:
+        return f"{v:,.2f}".rstrip("0").rstrip(".")
+
+    r.rendered = r.rendered.partition(" = ")[0] + f" = {plain(r.span_lo)}–{plain(r.span_hi)}"
 
 
 def _months_of_runway(cash: float, segments: list[tuple[int, int | None, float]], start: int) -> float | None:
@@ -2049,6 +2103,7 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
             for f in real:
                 corners = [c * as_fraction_v(v, f) for c in corners for v in f.span()]
             r.span_lo, r.span_hi = min(corners), max(corners)
+            _with_range(r)
         # A COUNT IS A MULTIPLIER, NOT A DIMENSION -- same as a percent, and for the same
         # reason. This dropped PERCENT and kept COUNT, so `412 customers x $95/month` typed
         # as `mixed` and was incomparable to a stated MRR: the engine computed 39,140
@@ -2080,6 +2135,7 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
         if any(f.lo is not None for f in real):
             r.span_lo = sum(f.span()[0] if all_pct else as_fraction_v(f.span()[0], f) for f in real)
             r.span_hi = sum(f.span()[1] if all_pct else as_fraction_v(f.span()[1], f) for f in real)
+            _with_range(r)
         pers2 = {f.period for f in real if f.period}
         r.computed_unit = real[0].unit_kind + (f":{pers2.pop()}" if len(pers2) == 1 else "")
     elif r.operator == "increase_by":
@@ -2137,6 +2193,7 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
             r.span_lo, r.span_hi = a_lo - b_hi, a_hi - b_lo
         r.computed_unit = a.unit_kind + (f":{a.period}" if a.period else "")
         r.rendered = f"{a.raw} − {b.raw} = {r.computed:,.2f}".rstrip("0").rstrip(".")
+        _with_range(r)
     elif r.operator in ("runway", "inverse_change", "implied_base"):
         # Read as literal strings so `test_dispatch_schema_drift.py` sees the spec keys consumed.
         if r.operator == "runway":
@@ -2409,23 +2466,29 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
         conv: str | None = None
         if disjoint:
             mid = (c_lo + c_hi) / 2.0
-            # A sum, difference or product of a range is a range, and these classes are judged at
-            # its end NEAREST the stated figure, as `_is_rounding_gap` is: the middle made a gap the
-            # materiality floor calls immaterial at the near end into a contradiction. Only those
-            # three operators: before they took ranges they never set a span, so near == mid on
-            # every earlier path, while `ratio` and `increase_by` keep the middle they always used.
-            if r.operator in ("sum", "difference", "product"):
-                mid = c_hi if e_lo > c_hi else c_lo if c_lo > e_hi else mid
+            # A sum, difference or product of a range is a range, and for those three the sign and
+            # materiality classes are judged ON THE INTERVALS (see `_sign_between`): the middle made
+            # a gap the floor calls immaterial into a contradiction, and no single end serves both
+            # classes. Only those three operators: before they took ranges their computed side was
+            # always a point, while `ratio` and `increase_by` keep the middle and the stated value
+            # they always used. The growth class needs a dimensionless result, which only `ratio`
+            # produces, so it keeps the middle.
+            on_intervals = r.operator in ("sum", "difference", "product")
+            immaterial = (
+                _immaterial_between(c_lo, c_hi, exp)
+                if on_intervals
+                else (abs(mid - exp.value) / abs(exp.value) if _immaterial_percent(mid, exp) else None)
+            )
             if _growth_convention(mid, exp, _convention_tolerance(exp, mid, r.operator, real), r.computed_unit):
                 conv = (
                     f"the deck reports growth ({exp.raw}) where this computes the multiple "
                     f"({mid:,.1f}%) — the same fact, 100 points apart by convention"
                 )
-            elif _sign_convention(mid, exp, tol):
+            elif _sign_between(c_lo, c_hi, exp, tol) if on_intervals else _sign_convention(mid, exp, tol):
                 conv = f"magnitudes agree with the stated {exp.raw}; only the sign convention differs"
-            elif _immaterial_percent(mid, exp):
+            elif immaterial is not None:
                 conv = (
-                    f"differs from the stated {exp.raw} by {abs(mid - exp.value) / abs(exp.value):.1%} "
+                    f"differs from the stated {exp.raw} by {immaterial:.1%} "
                     f"— below the materiality floor for a percentage"
                 )
         # NOT SPECIAL-CASED FOR `at_most` ANY MORE. Skipping the whole convention block for a
@@ -2559,13 +2622,12 @@ def _is_rounding_gap(operator: str, relation: str, exp: Figure, c_lo: float, c_h
     # A percentage gap under the materiality floor is not worth a founder's attention as a
     # disagreement, and it is not worth it as a rounding question either.
     #
-    # Judged at the computed END NEAREST the stated figure, the end `gap` is measured from, not
-    # at the middle of the computed range. A sum or difference of a range is a range, and its
-    # middle sits further from the stated figure than its near end, so reading the middle made
-    # an agreement inside the parts' rounding into a new rounding gap. For a point the two are
-    # the same number.
-    near = c_hi if e_lo > c_hi else c_lo if c_lo > e_hi else (c_lo + c_hi) / 2.0
-    if gap <= tol_stated or not magnitude or _immaterial_percent(near, exp):
+    # Judged on the two INTERVALS (`_immaterial_between`): the same gap, over the stated end it is
+    # measured to. A sum or difference of a range is a range, and its middle sits further from the
+    # stated figure than its near end, so reading the middle made an agreement inside the parts'
+    # rounding into a new rounding gap; reading a stated range at its low end did the same from the
+    # other side. For two points this is `_immaterial_percent`.
+    if gap <= tol_stated or not magnitude or _immaterial_between(c_lo, c_hi, exp) is not None:
         return False
     return gap / magnitude >= ROUNDING_GAP_MIN_REL
 

@@ -1339,3 +1339,38 @@ def test_a_product_with_a_negative_operand_takes_the_min_and_max_corner() -> Non
         "total",
     )
     assert (r.span_lo, r.span_hi) == (-20, -12)
+
+
+@pytest.mark.parametrize(
+    ("operator", "rows", "shown"),
+    [
+        (
+            "product",
+            [("share", 17, "17-19%", "percent"), ("base", 650_000, "$650K", "money")],
+            "= 110,500–123,500",
+        ),
+        ("sum", [("eng", 3, "3-5", "count"), ("sales", 2, "2", "count")], "= 5–7"),
+        (
+            "difference",
+            [("rev", 417_000, "$417-463K", "money"), ("cost", 129_000, "$129K", "money")],
+            "= 288,000–334,000",
+        ),
+    ],
+)
+def test_a_derived_reading_of_a_range_shows_the_whole_range(operator: str, rows: list, shown: str) -> None:
+    """With no stated figure to compare against, the reading is printed as computed: a range, never its low end
+    alone, which would read as if the deck had stated that one number."""
+    rec: Any = _reconcile()
+    figures = rec.load_figures(
+        {
+            "figures": [
+                _fig(fid, value, raw, unit, f"{fid} figure", f"{fid} figure {raw}") for fid, value, raw, unit in rows
+            ]
+        }
+    )
+    for f in figures:
+        f.verified = True
+    r = rec.compute(
+        {"kind": "derived_ratio", "operator": operator, "operands": [f.id for f in figures]}, {f.id: f for f in figures}
+    )
+    assert shown in r.rendered, r.rendered

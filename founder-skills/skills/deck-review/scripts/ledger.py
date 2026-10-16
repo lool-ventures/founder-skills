@@ -38,6 +38,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _artifact_writer import load_schema, write_artifact  # type: ignore[import-not-found]  # noqa: E402
 from reconcile import (  # type: ignore[import-not-found]  # noqa: E402
     _NUM_RE,
+    _RANGE_RE,
     CAP,
     DATE,
     MONEY,
@@ -455,9 +456,11 @@ def validate_ledger(data: dict[str, Any], total_slides: int | None = None) -> tu
                 # that states a range: reconcile reads every range from its low end, so either
                 # printed end is a safe recording, and anything else (a number printed before the
                 # range, a value between its ends, a scale slip) is refused. The window is the
-                # raw's own precision, which reads the FIRST end and is applied to both: right
-                # within rounding, since the two ends are printed to the same place.
-                precision = _precision(raw)
+                # range's own precision, read from its first end (not the raw's first number,
+                # which in "5 of 37-41" is not an end) and applied to both: right within rounding,
+                # since the two ends are printed to the same place.
+                span_text = _RANGE_RE.search(numeral_form(raw))
+                precision = _precision(span_text.group(0) if span_text else raw)
                 relative = min(precision[0] / precision[1], CAP) if precision and precision[1] else 0.0
                 if not any(_reads_as(abs(value), end, relative) for end in rng):
                     if _ambiguous_suffix(raw, value, unit_kind, fig.get("currency")):
@@ -470,10 +473,22 @@ def validate_ledger(data: dict[str, Any], total_slides: int | None = None) -> tu
                             f"a range is recorded as either of its two numbers: record "
                             f"{_printed(rng[0])} or {_printed(rng[1])}"
                         )
+                        # A value that is the number printed BESIDE the range ("$1.2M (FY2024-2026)"
+                        # recorded as 1,200,000) is no slip: the range is probably not the figure, and
+                        # "full scale" would invite recording a year. Say what to fix instead.
+                        own = _precision(raw)
+                        own_rel = min(own[0] / own[1], CAP) if own and own[1] else 0.0
+                        beside = (
+                            parsed is not None
+                            and not any(_reads_as(parsed, end, 1e-9) for end in rng)
+                            and _reads_as(abs(value), parsed, own_rel)
+                        )
                         # The slide prints two numbers, so "the number the slide prints" does not
                         # say which; the range sentence does, after the rescale for a slip.
-                        slip = ratio <= 0 or abs(math.log10(ratio)) >= 1
+                        slip = not beside and (ratio <= 0 or abs(math.log10(ratio)) >= 1)
                         remedy = f"record the figure at full scale; {sentence}" if slip else sentence
+                        if beside:
+                            remedy += "; if the range is not this figure, make raw the figure's own printed string"
                         errors.append(
                             f"{where} value {value!r} disagrees with raw {raw!r}, a range from "
                             f"{_printed(rng[0])} to {_printed(rng[1])} — {remedy}"

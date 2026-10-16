@@ -519,6 +519,41 @@ def test_an_agreement_within_the_parts_rounding_stays_one_at_the_near_end() -> N
     assert r.verdict == "confirmation", (r.verdict, r.rendered)
 
 
+@pytest.mark.parametrize(
+    ("stated", "value"),
+    [
+        # Near the middle of the loss range: the end nearest the stated figure (the smaller loss) misses it.
+        ("$60.5K", 60_500),
+        # Near the small-loss end: the middle misses it.
+        ("$41.5K", 41_500),
+    ],
+)
+def test_a_sign_flipped_figure_inside_a_range_difference_is_a_sign_convention(stated: str, value: int) -> None:
+    """The sign class's point is the stated figure NEGATED, so it is judged against the whole computed interval,
+    not at one end or the middle: a loss printed positive whose size lies anywhere inside what the parts allow
+    is the convention the class exists for."""
+    a = fig("$417-463K", 417_000, "money", label="revenue", id="f1")
+    b = fig("$501K", 501_000, "money", label="cost", id="f2")
+    e = fig(stated, value, "money", label="variance", id="f3")
+    r = _cmp("difference", ["f1", "f2"], "f3", {"f1": a, "f2": b, "f3": e})
+    assert (r.span_lo, r.span_hi) == pytest.approx((-84_000, -38_000))
+    assert r.verdict == "convention_differs" and "sign" in " ".join(r.reasons), (r.verdict, r.reasons)
+
+
+@pytest.mark.parametrize("stated", ["30.0-32.5%", "32.5-30.0%"])
+def test_materiality_is_judged_between_the_computed_and_the_stated_range(stated: str) -> None:
+    """A STATED range is an interval too: a total just above its top is measured from its top, not from the low
+    end every range is now read at. Written high to low, the same range used to reach reconcile at its first
+    number (the only one the ledger then accepted) and was judged immaterial; read at its low end it became a
+    contradiction. Both spellings now give the same answer."""
+    a = fig("21.0-22.0%", 21, "percent", label="share a", id="f1")
+    c = fig("12.0%", 12, "percent", label="share c", id="f2")
+    e = fig(stated, 30, "percent", label="total share", id="f3")
+    r = _cmp("sum", ["f1", "f2"], "f3", {"f1": a, "f2": c, "f3": e})
+    assert (e.lo, e.hi) == (30, 32.5)
+    assert r.verdict == "convention_differs" and "materiality" in " ".join(r.reasons), (r.verdict, r.rendered)
+
+
 # ---------------------------------------------------------------------------
 # What "approximate" means: the author ROUNDED. Not that the author is unsure
 # about the future. A bound can only ever suppress a contradiction, so every
