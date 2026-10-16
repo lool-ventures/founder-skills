@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import pathlib
 import re
@@ -103,6 +104,11 @@ def _parsed_magnitude(raw: str) -> float | None:
     except ValueError:
         return None
     return magnitude * _raw_scale(raw)
+
+
+def _printed(number: float) -> str:
+    """A magnitude as a slide would print it: group marks, no exponent, no trailing zeros."""
+    return f"{number:,.0f}" if number == int(number) else f"{number:,.10g}"
 
 
 def _numeric_tokens(raw: str) -> list[float]:
@@ -266,7 +272,7 @@ def _ambiguous_suffix(raw: str, value: float, unit_kind: object, currency: objec
 
     So this does not try to decide. It narrows to the shape where the question ARISES --
     a bare k/m/b/t at the end of the raw, on a figure that is not money, whose value
-    equals the mantissa -- and swaps in a message that tells the model how to resolve it
+    equals a mantissa it prints (either end of a range) -- and swaps in a message that tells the model how to resolve it
     instead of telling it to inflate a building.
 
     Money is excluded because a currency marker settles it: "$493K" is thousands, always.
@@ -276,13 +282,9 @@ def _ambiguous_suffix(raw: str, value: float, unit_kind: object, currency: objec
     raw = numeral_form(raw)
     if not _BARE_SUFFIX.search(raw):
         return False
-    match = _NUM_RE.search(raw)
-    if not match or not match.group("int"):
-        return False
-    mantissa = float(match.group("int").replace(",", ""))
-    if match.group("frac"):
-        mantissa += float("0." + match.group("frac"))
-    return abs(abs(value) - mantissa) <= max(abs(mantissa) * 1e-9, 1e-9)
+    # Every mantissa the raw prints: a range's second number is as much "the mantissa" as
+    # its first, and "200-400m" recorded as 400 is the same metres question.
+    return any(abs(abs(value) - m) <= max(abs(m) * 1e-9, 1e-9) for m in _numeric_tokens(raw))
 
 
 def validate_ledger(data: dict[str, Any], total_slides: int | None = None) -> tuple[list[str], list[str]]:
@@ -470,20 +472,28 @@ def validate_ledger(data: dict[str, Any], total_slides: int | None = None) -> tu
                             f"at full scale"
                         )
                     else:
-                        # A ratio near 1 is a wrong reading, not a scale slip: "record the
-                        # figure at full scale" asks a model that wrote 12 for "10" to make a
-                        # correction it cannot make.
-                        if 0.5 <= ratio <= 2:
+                        # A scale slip is a power of ten (1000x, a percent as a fraction);
+                        # anything closer is a wrong reading, and "record the figure at full
+                        # scale" asks a model that wrote 12 or 30 for "10" to make a correction
+                        # it cannot make.
+                        scale_slip = ratio <= 0 or abs(math.log10(ratio)) >= 1
+                        range_sentence = (
+                            f"a range is recorded as its first number: record the range's "
+                            f"first number, {_printed(parsed)}"
+                        )
+                        is_range = parse_range(raw) is not None
+                        if scale_slip:
+                            remedy = "record the figure at full scale"
+                            if is_range:
+                                remedy += "; " + range_sentence
+                        elif is_range:
+                            # The slide prints two numbers, so "the number the slide prints"
+                            # does not say which; the range sentence does.
+                            remedy = range_sentence
+                        else:
                             remedy = (
                                 "record the number the slide prints, or, if this figure is printed "
                                 "elsewhere more precisely, use that string as raw"
-                            )
-                        else:
-                            remedy = "record the figure at full scale"
-                        if parse_range(raw) is not None:
-                            remedy += (
-                                f"; a range is recorded as its first number: record the range's "
-                                f"first number, {parsed:,.10g}"
                             )
                         errors.append(
                             f"{where} value {value!r} disagrees with raw {raw!r}, which reads as "

@@ -266,7 +266,7 @@ def test_a_near_miss_is_not_told_to_rescale() -> None:
     assert "disagrees with raw" in err, err
     assert "full scale" not in err, err
     assert "record the number the slide prints" in err, err
-    assert "'10'" in err, err
+    assert "reads as 10 " in err, err
 
 
 def test_a_scale_slip_is_still_told_to_rescale() -> None:
@@ -277,13 +277,61 @@ def test_a_scale_slip_is_still_told_to_rescale() -> None:
     assert "record the number the slide prints" not in err, err
 
 
+@pytest.mark.parametrize(
+    ("value", "rescale"),
+    [
+        # A scale slip is a power of ten; anything closer is a wrong reading.
+        (30, False),  # ratio 3
+        (99, False),  # ratio 9.9
+        (100, True),  # ratio 10
+        (1.1, False),  # ratio 0.11
+        (1, True),  # ratio 0.1
+        (0.01, True),  # ratio 0.001
+    ],
+)
+def test_full_scale_is_said_only_for_a_power_of_ten_slip(value: float, rescale: bool) -> None:
+    rc, _, err = _run({"figures": [_scale_fig("10", value, "count")]})
+    assert rc != 0
+    assert "disagrees with raw" in err, err
+    assert ("full scale" in err) is rescale, err
+    assert ("record the number the slide prints" in err) is not rescale, err
+
+
 def test_a_refused_range_names_its_first_number() -> None:
-    """The model records either end of a range; the check reads the first. Say so, and name it."""
+    """The model records either end of a range; the check reads the first. Say so, and name it.
+
+    For a range the range sentence IS the remedy: "record the number the slide prints" is
+    ambiguous when the slide prints two, and "use that string as raw" invites replacing it.
+    """
     rc, _, err = _run({"figures": [_scale_fig("10-12", 12, "count")]})
     assert rc != 0
     assert "disagrees with raw" in err, err
     assert "record the range's first number, 10" in err, err
     assert "full scale" not in err, err
+    assert "record the number the slide prints" not in err, err
+    assert "use that string as raw" not in err, err
+
+
+def test_a_large_range_names_its_first_number_in_full() -> None:
+    """ "$35-40B" recorded at its second number names thirty-five billion, not 3.5e+10."""
+    rc, _, err = _run({"figures": [_scale_fig("$35-40B", 40_000_000_000, "money")]})
+    assert rc != 0
+    assert "record the range's first number, 35,000,000,000" in err, err
+
+
+def test_a_unit_suffix_range_at_its_second_number_is_still_ambiguous() -> None:
+    """ "200-400m" recorded as 400 is the same metres question as recorded as 200.
+
+    Read as a multiplier, the range sentence would name 200,000,000 as the number to record,
+    the one instruction the ambiguous message exists to avoid giving.
+    """
+    rc, _, err = _run({"figures": [_scale_fig("200-400m", 400, "count")]})
+    assert rc != 0
+    assert "is ambiguous" in err, err
+    assert "first number" not in err, err
+    # The ambiguous message's own "if it is a multiplier, record value at full scale" stays;
+    # what must not appear is the scale-slip remedy.
+    assert "record the figure at full scale" not in err, err
 
 
 # ---------------------------------------------------------------------------
