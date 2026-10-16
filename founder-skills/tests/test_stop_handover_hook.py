@@ -185,6 +185,60 @@ def test_a_closing_call_from_an_earlier_prompt_does_not_trigger(tmp_path: Path) 
     assert r.stdout == ""
 
 
+# Two user rows the runtime writes itself, in the shapes a transcript records them: a compaction's summary (after
+# its `compact_boundary` system row) and a background agent's result delivered as a user row. Neither is a prompt,
+# so neither may move "the current prompt" past the closing call.
+_BOUNDARY = {"type": "system", "subtype": "compact_boundary", "isSidechain": False, "content": "Conversation compacted"}
+_SUMMARY = {
+    "type": "user",
+    "isCompactSummary": True,
+    "isVisibleInTranscriptOnly": True,
+    "isSidechain": False,
+    "message": {"role": "user", "content": "This session is being continued from a previous conversation."},
+}
+_NOTIFIED = {
+    "type": "user",
+    "isSidechain": False,
+    "origin": {"kind": "task-notification"},
+    "message": {"role": "user", "content": "<task-notification>\n<task-id>t1</task-id>\n</task-notification>"},
+}
+_NOTIFIED_OLD = {
+    "type": "user",
+    "isSidechain": False,
+    "message": {"role": "user", "content": "<task-notification>\n<status>completed</status>\n</task-notification>"},
+}
+
+
+@pytest.mark.parametrize(
+    "between", [[_BOUNDARY, _SUMMARY], [_NOTIFIED], [_NOTIFIED_OLD]], ids=["compaction", "notification", "old-cli"]
+)
+def test_a_runtime_written_user_row_after_the_closer_does_not_end_the_prompt(
+    tmp_path: Path, between: list[dict[str, Any]]
+) -> None:
+    _handover(tmp_path)
+    r = _run(tmp_path, _rows_after_call(*between, _assistant_text(OWN_VERDICT)))
+    assert json.loads(r.stdout)["decision"] == "block", r
+    r = _run(tmp_path, _rows_after_call(*between, _assistant_text("Done!\n\n" + PRINTED)))
+    assert r.stdout == "", r
+
+
+def test_every_window_starts_at_the_founders_message_not_a_runtime_row() -> None:
+    """The hand-over, delivery and review-page checks all take their window from `_current_prompt_start`."""
+    hook = _load_hook()
+    rows = _rows_after_call(_BOUNDARY, _SUMMARY, _NOTIFIED, _NOTIFIED_OLD, _assistant_text("x"))
+    assert hook._current_prompt_start(rows) == 0
+    found = hook._latest_closing_call(rows)
+    assert found is not None and found[0] == 0 and found[2] == "market-sizing"
+    human = {**_user("Next."), "origin": {"kind": "human"}}
+    assert hook._current_prompt_start([*rows, human]) == len(rows)
+
+
+def test_a_founders_message_after_a_compaction_still_starts_a_new_prompt(tmp_path: Path) -> None:
+    _handover(tmp_path)
+    rows = _rows_after_call(_BOUNDARY, _SUMMARY, _user("Thanks. What is 2+2?"), _assistant_text("4."))
+    assert _run(tmp_path, rows).stdout == ""
+
+
 def test_stop_feedback_turns_are_not_prompts(tmp_path: Path) -> None:
     """A hook's own feedback must not reset 'the current prompt', or the trigger call would fall
     before it and every later stop would read as another skill's."""

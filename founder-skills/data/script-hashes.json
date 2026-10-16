@@ -42,7 +42,7 @@
     "scripts/script_hashes.py": "87eb99af7feffc0105badbd18e135a46c3d5d167cce57300afc9bfa40af237bb",
     "scripts/select_plugin_root.py": "17c8d3d803a271871f25d696d3c3eaf17eb1b42d13a440b17d4bed3525be5316",
     "scripts/shared_tmp_check.py": "1f7e74b1bccc9c71347da79812a2af8dd74d18e91b3bb67ee7b5abdc7274438d",
-    "scripts/stop_handover_check.py": "e229a62f638d60242084d2365768c57f27d09dcfe0216aa5513ff57c13407dc7",
+    "scripts/stop_handover_check.py": "13d7267bdcb9b803779c6661161769af0b00f66f547ac6f1a5ddd5641227e875",
     "scripts/two_figures_check.py": "aaac5bb19b4d475b9640ab3c78356d7a0a38ed6f880b6992e8290fefa08ad1d8",
     "skills/cap-table/scripts/_artifact_io.py": "eb7113e59f8f56f9445b7e43fad1d452ce73e572e260fe291b5eb9a0a15353ca",
     "skills/cap-table/scripts/_artifact_writer.py": "e06703f9fa317e3bbfb5c82807bb20f00d52dead1892fff0e0176708c27db18c",

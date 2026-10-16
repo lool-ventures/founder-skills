@@ -127,10 +127,29 @@ def _load_delivery() -> Any:
     return mod
 
 
+_NOTIFICATION = "<task-notification>"
+
+
+def _starts_a_prompt(row: dict[str, Any]) -> bool:
+    """A row that opens the current prompt: a founder's turn. Two user rows the runtime writes itself are not:
+    a compaction summary (written mid-turn, after the calls the prompt made) and a background agent's result
+    delivered as a user row (`origin.kind` other than human, or, on older CLIs, text opening with the
+    notification tag)."""
+    if not _is_real_user_prompt(row) or row.get("isCompactSummary"):
+        return False
+    origin = row.get("origin")
+    if isinstance(origin, dict) and origin.get("kind") not in (None, "human"):
+        return False
+    body = (row.get("message") or {}).get("content")
+    if isinstance(body, list):
+        body = next((b.get("text") for b in body if isinstance(b, dict) and b.get("type") == "text"), "")
+    return not (isinstance(body, str) and body.lstrip().startswith(_NOTIFICATION))
+
+
 def _current_prompt_start(rows: list[dict[str, Any]]) -> int:
     start = 0
     for i, row in enumerate(rows):
-        if _is_real_user_prompt(row):
+        if _starts_a_prompt(row):
             start = i
     return start
 
@@ -252,10 +271,7 @@ def _errored_ids(rows: list[dict[str, Any]]) -> set[str]:
 def _latest_closing_call(rows: list[dict[str, Any]]) -> tuple[int, int, str, str | None] | None:
     """(current prompt's first row, the row of its last closing-message call, that call's skill, its id or
     None), or None when the current prompt made no such call."""
-    start = 0
-    for i, row in enumerate(rows):
-        if _is_real_user_prompt(row):
-            start = i
+    start = _current_prompt_start(rows)
     found: tuple[int, int, str, str | None] | None = None
     for i in range(start, len(rows)):
         row = rows[i]
@@ -445,16 +461,6 @@ COMPACTED_SENTENCE = (
 )
 
 
-def _founder_prompt_start(rows: list[dict[str, Any]]) -> int:
-    """The founder's latest message, read past a compaction: the runtime writes its summary as a user row, which
-    is not a prompt anyone sent, and the run's `start` result sits before it in the file."""
-    start = 0
-    for i, row in enumerate(rows):
-        if _is_real_user_prompt(row) and not row.get("isCompactSummary"):
-            start = i
-    return start
-
-
 def compacted_since(rows: list[dict[str, Any]], start: int) -> bool:
     """A main-thread compaction since `start` (the runtime's `compact_boundary` row)."""
     return any(
@@ -537,7 +543,7 @@ def decide(payload: dict[str, Any]) -> dict[str, str] | None:
             # the skill's arguments; the path is the session shell's, so at Cowork local (this hook on the host,
             # the shell in the VM) only the message counts.
             figures = _load_figures()
-            start = _founder_prompt_start(rows)
+            start = _current_prompt_start(rows)
             quiet = bool(figures.no_ask_in(rows, start, _is_real_user_prompt)) or bool(
                 figures.ledger_no_ask(figures.read_ledger(figures.ledger_path(rows[start:])))
             )
@@ -548,7 +554,7 @@ def decide(payload: dict[str, Any]) -> dict[str, str] | None:
         # run left `running` is asked to record why.
         if handover is None:
             try:
-                start = _founder_prompt_start(rows)
+                start = _current_prompt_start(rows)
                 if no_ask_still_running(rows, start):
                     reason = NO_ASK_END_REASON + (COMPACTED_SENTENCE if compacted_since(rows, start) else "")
                     return {"decision": "block", "reason": reason}
