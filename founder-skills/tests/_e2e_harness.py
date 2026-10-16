@@ -275,6 +275,10 @@ class RunCapture:
         self.session_id: str | None = None
         # `compact_boundary` system messages, as the stream carried them: {"at": index into `events`, "data"}.
         self.compactions: list[dict[str, Any]] = []
+        # From the result message: what the run cost as the SDK reports it, and how it ended
+        # (`error_max_budget_usd` when a per-run cap stopped it).
+        self.cost_usd: float | None = None
+        self.result_subtype: str | None = None
 
     def calls(self, name: str, *, parent: str | None = None) -> list[dict[str, Any]]:
         """Tool calls by name; with `parent`, only those made inside that dispatch."""
@@ -429,8 +433,13 @@ def record_message(cap: RunCapture, msg: object) -> None:
             cap.unattributed_results.append(
                 {"tool_use_ids": [b.tool_use_id for b in blocks], "tool_use_result": structured}
             )
-    elif isinstance(msg, ResultMessage) and isinstance(msg.result, str):
-        cap.final_text = msg.result
+    elif isinstance(msg, ResultMessage):
+        if isinstance(msg.result, str):
+            cap.final_text = msg.result
+        cost = getattr(msg, "total_cost_usd", None)
+        if isinstance(cost, (int, float)):
+            cap.cost_usd = float(cost)
+        cap.result_subtype = getattr(msg, "subtype", None)
     elif isinstance(msg, SystemMessage) and msg.subtype in ("hook_started", "hook_response"):
         data = msg.data
         stdout = data.get("stdout")
@@ -754,6 +763,7 @@ def run_skill_capture(
     label: str,
     uploads: Sequence[Path] = (),
     env_extra: dict[str, str] | None = None,
+    max_budget_usd: float | None = None,
 ) -> RunCapture:
     """Drive one skill run to completion, with sub-agent tool calls attributed.
 
@@ -772,6 +782,9 @@ def run_skill_capture(
             shutil.copy(src, uploads_dir / src.name)
         env_extra["COWORK_UPLOADS_DIR"] = str(uploads_dir)
     options = build_options(workdir, env_extra)
+    if max_budget_usd is not None:
+        # The SDK's own per-run cap: past it the run ends with an `error_max_budget_usd` result.
+        options.max_budget_usd = max_budget_usd
     cap = RunCapture()
 
     print(f"\n[e2e:{label}] Auth detected: {detect_auth_kind()}", flush=True)
@@ -1233,6 +1246,8 @@ def compaction_report(cap: RunCapture, skill: str, config_dir: Path | None = Non
     return {
         "cli_version": cap.cli_version,
         "model": cap.model,
+        "cost_usd": cap.cost_usd,
+        "result_subtype": cap.result_subtype,
         "compaction_at": at,
         "stream_boundaries": len(cap.compactions),
         "mid_run_session_starts": len(starts),
@@ -1250,7 +1265,8 @@ def compaction_report(cap: RunCapture, skill: str, config_dir: Path | None = Non
 def format_compaction_report(report: dict[str, Any]) -> str:
     return "\n".join(
         [
-            f"- CLI `{report['cli_version'] or 'unknown'}`, model `{report['model'] or 'unknown'}`",
+            f"- CLI `{report['cli_version'] or 'unknown'}`, model `{report['model'] or 'unknown'}`, "
+            f"cost ${report['cost_usd']}, ended `{report['result_subtype']}`",
             f"- C: compaction at event {report['compaction_at']}; stream boundaries {report['stream_boundaries']}, "
             f"mid-run SessionStart {report['mid_run_session_starts']}, transcript boundaries "
             f"{report['transcript_boundaries']}, main thread confirmed {report['main_thread_confirmed']}",

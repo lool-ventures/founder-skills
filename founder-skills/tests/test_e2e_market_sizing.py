@@ -565,6 +565,14 @@ def test_market_sizing_smoke(tmp_path: Path) -> None:
 COMPACTION_OPT_IN_ENV = "RUN_PAID_E2E_MS_COMPACTION"
 COMPACTION_LANE = "msc"
 COMPACTION_WINDOW = "100000"
+# The SDK's per-run spending cap, in USD; a caller may set it lower (or higher) for one run.
+COMPACTION_BUDGET_ENV = "RUN_PAID_E2E_MAX_BUDGET_USD"
+COMPACTION_BUDGET_USD = 25.0
+
+
+def compaction_budget() -> float:
+    raw = os.environ.get(COMPACTION_BUDGET_ENV, "").strip()
+    return float(raw) if raw else COMPACTION_BUDGET_USD
 
 
 def _compaction_lane_authorized() -> bool:
@@ -632,9 +640,11 @@ def test_market_sizing_compaction_lane(tmp_path: Path) -> None:
         label="market-sizing-compaction",
         uploads=[SCANNED_DECK],
         env_extra={_e2e_harness.COMPACT_WINDOW_ENV: window},
+        max_budget_usd=compaction_budget(),
     )
     report = _e2e_harness.compaction_report(cap, SKILL)
     report["window"] = window
+    report["max_budget_usd"] = compaction_budget()
     report["run_id"] = run_id
     (workdir / "compaction_report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     text = _e2e_harness.format_compaction_report(report)

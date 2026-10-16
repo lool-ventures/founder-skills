@@ -237,3 +237,35 @@ def test_the_lane_is_wired_to_its_own_opt_in(lane: Any, monkeypatch: Any) -> Non
     assert lane._compaction_lane_authorized() is False
     monkeypatch.setenv(lane.COMPACTION_OPT_IN_ENV, "1")
     assert lane._compaction_lane_authorized() is True
+
+
+def _result_message(cost: float, subtype: str = "success") -> Any:
+    from claude_agent_sdk import ResultMessage
+
+    return ResultMessage(
+        subtype=subtype,
+        duration_ms=1,
+        duration_api_ms=1,
+        is_error=subtype != "success",
+        num_turns=1,
+        session_id="sess-1",
+        total_cost_usd=cost,
+        result="done",
+    )
+
+
+def test_the_budget_cap_reaches_the_options_and_the_cost_is_reported(tmp_path: Path, monkeypatch: Any) -> None:
+    cap = _capture(tmp_path, monkeypatch, [_init(), _result_message(12.5, "error_max_budget_usd")], max_budget_usd=22.0)
+    assert _SEEN["options"].max_budget_usd == 22.0
+    report = harness.compaction_report(cap, "market-sizing", config_dir=tmp_path / "none")
+    assert report["cost_usd"] == 12.5 and report["result_subtype"] == "error_max_budget_usd"
+    assert "cost $12.5" in harness.format_compaction_report(report)
+    _capture(tmp_path, monkeypatch, [_init()])
+    assert _SEEN["options"].max_budget_usd is None
+
+
+def test_the_lane_budget_defaults_and_takes_the_environment(lane: Any, monkeypatch: Any) -> None:
+    monkeypatch.delenv(lane.COMPACTION_BUDGET_ENV, raising=False)
+    assert lane.compaction_budget() == 25.0
+    monkeypatch.setenv(lane.COMPACTION_BUDGET_ENV, "22")
+    assert lane.compaction_budget() == 22.0
