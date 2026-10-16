@@ -257,7 +257,8 @@ CONTRACT_NOTES = (
     "ran.",
     "Exit 10 means a question is owed and its gate is named in `blocked_by_gate`. The status is then `waiting`, "
     "except for `GATE_UNRESOLVED`: a question that was opened and never recorded leaves the run `running` with "
-    "`last_error_code: GATE_UNRESOLVED`. Like every `last_error_code` (`GATE_INVALID`, `GATE_OTHER_RUN`, "
+    "`last_error_code: GATE_UNRESOLVED` (never a question only a request line can answer, which stays `waiting`). "
+    "Like every `last_error_code` (`GATE_INVALID`, `GATE_OTHER_RUN`, "
     "`PROFILE_MISMATCH`, `COACHING_BLOCKED`), it records the last error seen and is cleared only when the run "
     "completes. Under `FS_HOST_NO_ASK` the run is `waiting` instead, and the exit is 12.",
     "`FS_HOST_NO_ASK` (only beside `FS_HOST_RUN_ID`) marks a run that asks nothing: each question takes the answer "
@@ -406,7 +407,11 @@ CONTRACT_NOTES = (
     "refused to the recorder's `answer`, `default` and a question form (`REQUEST_ONLY_OPTION`). Its value is checked "
     "at Step 1 when the question is opened; a value that cannot be read leaves the question `waiting` with "
     "`PRE_ANSWER_MALFORMED`, and the cause is the `reason` of the latest `PRE_ANSWER_NOT_APPLIED` notice for that "
-    "question (earlier notices stay listed). Correct the line and resume with the same `FS_HOST_RUN_ID`. An optional "
+    "question (earlier notices stay listed). Correct the line and resume with the same `FS_HOST_RUN_ID`. A question "
+    "whose every option only a request line can choose (`host_context`) is never put to anyone: while it waits, "
+    "every step that stops on it (`open`, the step's own script, compose) exits 10 with `request_waiting` (the "
+    "gate, the `reason`, the stop sentence) and no `needs_input`, and the status reads `waiting` / "
+    "`PRE_ANSWER_MALFORMED` with that gate as `waiting_on`, whatever else is open. An optional "
     "`FS_HOST_NOTE <gate>=<sha256>` (64 lowercase hex, the sha256 of the value as UTF-8) is compared with the value: "
     "a mismatch, or a note that is not a sha256, is malformed. Once the question is `answered`, "
     "`gates[].current.evidence.sha256` is the sha256 of the value the run took: compare it with your own, and on a "
@@ -5095,9 +5100,12 @@ def derive_status(
         return
     open_entries = [(k, e) for k, e in entries if e["state"] == "open"]
     if open_entries:
-        # A fresh question before a follow-up still pending on an earlier answer: it is what to ask next.
+        # A question only a corrected request line can answer, held on a line that could not be read, comes first:
+        # every step stops on it and asks nothing. Then a fresh question before a follow-up still pending on an
+        # earlier answer: it is what to ask next.
+        held = [ke for ke in open_entries if "pre_answer_malformed" in ke[1]["flags"] and request_only_open(ctx, ke[0])]
         fresh = [ke for ke in open_entries if ke[1]["current"] is None]
-        key, entry = (fresh or open_entries)[0]
+        key, entry = (held or fresh or open_entries)[0]
         g = GATES[entry["gate"]]
         question = render_question(g, entry["instance"], ctx)
         # Malformed first: both flags are set together, and the unlisted one means "not one of the choices".
@@ -5416,8 +5424,10 @@ REQUEST_VALUE_STOP = (
 )
 
 
-def _only_request_answers(ctx: Ctx, key: str) -> bool:
-    """Every option of the question is `request_only`: nothing can be offered to a person."""
+def request_only_open(ctx: Ctx, key: str) -> bool:
+    """Every option of the question is `request_only`: nothing can be offered to a person, and while it is open
+    only a corrected request line answers it. Every step that stops on an open gate routes such a gate through
+    `waiting_exit` and never puts it as a question."""
     gate_id, instance = parse_key(key)
     opts = fixed_options(GATES[gate_id], instance, ctx.skill)
     return bool(opts) and all(o["request_only"] for o in opts)
@@ -5480,10 +5490,15 @@ def open_gates(ctx: Ctx, ledger: dict[str, Any], keys: list[str], *, by: str = R
             waiting.append(key)
     # A question only a request line can answer is never put to anyone: with no choice to offer, it waits for a
     # corrected request line, named with the reason the line could not be used.
-    request_waiting = [k for k in waiting if _only_request_answers(ctx, k)]
+    request_waiting = [k for k in waiting if request_only_open(ctx, k)]
     waiting = [k for k in waiting if k not in request_waiting]
     header = FORM_HEADERS.get(ctx.skill, "")
-    if not quiet and waiting and (not ledger["form_batches"] or ledger["form_batches"][-1]["gates"] != waiting):
+    if (
+        not quiet
+        and not request_waiting
+        and waiting
+        and (not ledger["form_batches"] or ledger["form_batches"][-1]["gates"] != waiting)
+    ):
         ledger["form_batches"].append({"header": header, "gates": waiting, "opened_at": _run_status.now_iso()})
     out: dict[str, Any] = {
         "opened": opened,
@@ -5496,13 +5511,14 @@ def open_gates(ctx: Ctx, ledger: dict[str, Any], keys: list[str], *, by: str = R
         out.update(no_ask_payload(ctx, ledger, stop))
         if derivable:
             out["derive"] = [derive_instruction(ctx, k) for k in derivable]
-    else:
+    elif not request_waiting:
         out["needs_input"] = [needs_input(ctx, ledger, k) for k in waiting]
-        if request_waiting:
-            out["request_waiting"] = [
-                {"gate": k, "reason": _latest_not_applied(ledger, k), "stop": REQUEST_VALUE_STOP}
-                for k in request_waiting
-            ]
+    else:
+        # The stop wins: the run waits for a corrected request line and nothing is put to anyone this turn. The
+        # other open questions stay open and are asked by the `open` after the corrected line resumes the run.
+        out["request_waiting"] = [
+            {"gate": k, "reason": _latest_not_applied(ledger, k), "stop": REQUEST_VALUE_STOP} for k in request_waiting
+        ]
     if applied:
         out["applied"] = "pre_answer"
         out["applied_gates"] = applied
@@ -5877,7 +5893,7 @@ def waiting_exit(ctx: Ctx, ledger: dict[str, Any], key: str) -> tuple[int, dict[
     if no_ask(ledger):
         payload = {**no_ask_payload(ctx, ledger, [key]), "blocked_by_gate": key}
         return NO_ASK_EXIT, payload, f"Waiting (the request said not to ask): {key}. {payload['stop']}"
-    if _only_request_answers(ctx, key):
+    if request_only_open(ctx, key):
         # Nothing to ask: only a corrected request line answers it.
         held = {"gate": key, "reason": _latest_not_applied(ledger, key), "stop": REQUEST_VALUE_STOP}
         return (

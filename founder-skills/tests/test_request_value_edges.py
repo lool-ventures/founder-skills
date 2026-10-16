@@ -128,10 +128,42 @@ def test_an_attended_open_never_asks_a_request_only_question(tmp_path: Path) -> 
     proc = _open(root, rid, "ic_mode", "host_context")
     assert proc.returncode == 10, proc.stdout + proc.stderr
     out = _out(proc)
-    assert [n["gate"] for n in out["needs_input"]] == ["ic_mode"]
+    # The stop wins: nothing is put to anyone this turn, the mode included, and no form batch records a question.
+    assert "needs_input" not in out
     assert [w["gate"] for w in out["request_waiting"]] == ["host_context"]
     assert "not valid JSON" in out["request_waiting"][0]["reason"]
-    assert all("host_context" not in b["gates"] for b in h.ledger(root, rid)["form_batches"])
+    assert h.ledger(root, rid)["form_batches"] == []
+    st = h.status(root, rid)
+    assert (st["status"], st["code"], st["waiting_on"]) == ("waiting", "PRE_ANSWER_MALFORMED", "host_context")
+    # Once the corrected line resumes the run, the mode is asked.
+    assert h.start(root, "ic-sim", _lines(_ctx_line(_value([GOOD])), no_ask=False)).returncode == 0
+    again = _open(root, rid, "ic_mode", "host_context")
+    assert again.returncode == 0, again.stdout + again.stderr
+    assert [n["gate"] for n in _out(again)["needs_input"]] == ["ic_mode"]
+    assert "request_waiting" not in _out(again)
+
+
+def test_an_attended_compose_waits_on_a_request_only_question_and_the_run_resumes(tmp_path: Path) -> None:
+    root, rid, rd = h.start_bound(tmp_path, "ic-sim", lines=_lines(_ctx_line("not json"), no_ask=False))
+    _open(root, rid, "ic_mode", "ic_fund_mode", "host_context")
+    h.record(root, rid, "answer", "--gate", "ic_mode", "--answer-id", "auto_pilot")
+    h.record(root, rid, "answer", "--gate", "ic_fund_mode", "--answer-id", "generic")
+    _write_steps(rd, rid)
+    proc = _compose(rd)
+    assert proc.returncode == 10, proc.stdout + proc.stderr
+    out = _out(proc)
+    assert "needs_input" not in out and out["blocked_by_gate"] == "host_context"
+    assert [w["gate"] for w in out["request_waiting"]] == ["host_context"]
+    assert not (rd / "report.md").exists()
+    st = h.status(root, rid)
+    assert (st["status"], st["code"], st["waiting_on"]) == ("waiting", "PRE_ANSWER_MALFORMED", "host_context")
+    assert st.get("last_error_code") is None
+    resumed = h.start(root, "ic-sim", _lines(_ctx_line(_value([GOOD])), no_ask=False))
+    assert resumed.returncode == 0, resumed.stdout + resumed.stderr
+    assert _out(resumed)["resume"] == 1
+    assert _hc(rd, rid).returncode == 0
+    done = _compose(rd)
+    assert done.returncode == 0, done.stdout + done.stderr
 
 
 # --- numbers that are not finite --------------------------------------------------------------------------

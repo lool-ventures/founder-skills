@@ -1243,7 +1243,9 @@ SKILL_MD_CEILING: dict[str, int] = {
     # compose refusals.
     # 97,378 -> 97,490 (+112 B) on 2026-10-16: Steps 2-3 say what exit 10 or 12 from host_context.py means (the
     # context sent with the request could not be read: stop), and Step 4's label reads as a label.
-    "ic-sim": 97_490,
+    # 97,490 -> 97,663 (+173 B) on 2026-10-16: Steps 2-3 route host_context.py's RUN_FINISHED to a new simulation,
+    # and Step 9 says a compose exit 10 carrying request_waiting is a stop, not a question to ask.
+    "ic-sim": 97_663,
     # deck-review +1,165 B: Step 0 carried only a parenthetical fresh-shell mention buried in a code
     # comment, unlike the four skills that mint RUN_ID in a LATER block and so carry the shared banner.
     # deck-review mints RUN_ID INSIDE this re-runnable Step-0 block (like cap-table), so the shared

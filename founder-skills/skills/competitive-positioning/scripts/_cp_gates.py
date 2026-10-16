@@ -235,10 +235,11 @@ def basis_mismatch(recorded: str, used: Any, where: str) -> NoReturn:
 
 
 def refuse_open_gates(ledger: Any) -> None:
-    """A question the run opened and never recorded leaves it unable to complete, so compose refuses before
-    writing anything and names it (exit 10). The status it reads is settled: compose's own require
-    transaction, which runs first, closes any gate the run no longer owes. The run reads `running` with
-    `GATE_UNRESOLVED`: never a `waiting` no host answer could clear."""
+    """A question the run opened and never recorded leaves it unable to complete, so compose refuses before writing
+    anything and names it (exit 10). The status it reads is settled: compose's own require transaction, which runs
+    first, closes any gate the run no longer owes. The run reads `running` with `GATE_UNRESOLVED`: never a `waiting`
+    no host answer could clear. The one exception is a question only a corrected request line can answer: it exits
+    10 with `request_waiting` and leaves the run `waiting`, which a resume carrying that line clears."""
     gates, paths = ledger
     rs = sys.modules["_run_status"]
     open_now = rs.open_gate_ids(paths)
@@ -254,7 +255,17 @@ def refuse_open_gates(ledger: Any) -> None:
             return
         gates.print_waiting_and_exit(stop)
     key = open_now[0]
-    needs = gates.transact(paths, lambda ctx, led, st: gates.needs_input(ctx, led, key))
+
+    def decide(ctx: Any, led: Any, st: Any) -> Any:
+        # A question only a corrected request line can answer is never put: the run stays `waiting` on it.
+        for k in open_now:
+            if gates.request_only_open(ctx, k):
+                return gates.waiting_exit(ctx, led, k)
+        return gates.needs_input(ctx, led, key)
+
+    needs = gates.transact(paths, decide)
+    if isinstance(needs, tuple):
+        gates.print_waiting_and_exit(needs)
 
     def unresolved(st: dict[str, Any]) -> None:
         if st.get("status") in rs.FINAL_STATUSES:
