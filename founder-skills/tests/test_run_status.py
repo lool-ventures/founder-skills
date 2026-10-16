@@ -397,6 +397,25 @@ def _finish(root: Path, run_id: str, *args: str) -> subprocess.CompletedProcess[
     return h.run(h.RUN_STATUS, "finish", "--run-id", run_id, "--artifacts-root", str(root), *args)
 
 
+@pytest.mark.parametrize("mode_args", [(), ("--mode", "full")], ids=["bare", "not-a-mode"])
+def test_a_finish_usage_error_names_the_coaching_step(tmp_path: Path, mode_args: tuple[str, ...]) -> None:
+    """A full run that lost its place reaches for a bare `finish`: the usage error says that `finish` is
+    for the modes with no coaching and that a full run ends at its coaching step. Exit 2 and nothing
+    written, as any usage error; another subcommand's usage error carries no such line."""
+    root = _root(tmp_path)
+    run_id = h.start_ok(root, "market-sizing")
+    before = h.snapshot(root, run_id)
+    proc = _finish(root, run_id, *mode_args)
+    assert proc.returncode == 2
+    assert proc.stdout == ""
+    assert "coaching is inserted (the skill's coaching step); read that step in SKILL.md" in proc.stderr
+    assert "quick_check, fast_assess, concise, rule_lookup, extraction_only" in proc.stderr
+    assert h.snapshot(root, run_id) == before
+    other = h.run(h.RUN_STATUS, "show", "--artifacts-root", str(root))
+    assert other.returncode == 2
+    assert "coaching step" not in other.stderr
+
+
 @pytest.mark.parametrize("mode", ["quick_check", "fast_assess", "concise"])
 def test_finish_completes_with_its_output_and_the_pages_are_final(tmp_path: Path, mode: str) -> None:
     suffix = {"quick_check": "-quickcheck", "fast_assess": "-fastassess", "concise": "-concise"}[mode]

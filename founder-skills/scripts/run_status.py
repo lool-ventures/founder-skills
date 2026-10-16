@@ -591,8 +591,25 @@ def cmd_check(args: argparse.Namespace) -> int:
     return int(code)
 
 
+_FINISH_MODES = ("quick_check", "fast_assess", "concise", "rule_lookup", "extraction_only")
+FINISH_HINT = (
+    f"finish ends a mode with no coaching ({', '.join(_FINISH_MODES)}). A full run completes when its "
+    "coaching is inserted (the skill's coaching step); read that step in SKILL.md."
+)
+
+
+class _Parser(argparse.ArgumentParser):
+    """A usage error on `finish` also says what `finish` is for: a full run that lost its place reaches
+    for a bare `finish`. Subparsers inherit this class, so `prog` tells the subcommand apart."""
+
+    def error(self, message: str) -> NoReturn:
+        if self.prog.endswith(" finish"):
+            message = f"{message}\n{FINISH_HINT}"
+        super().error(message)
+
+
 def main() -> int:
-    p = argparse.ArgumentParser(description="A run's status file: start, bind, finish, show, deliverables, fail")
+    p = _Parser(description="A run's status file: start, bind, finish, show, deliverables, fail")
     sub = p.add_subparsers(dest="command", required=True)
 
     def common(sp: argparse.ArgumentParser, *, run_id: bool = True) -> None:
@@ -614,9 +631,7 @@ def main() -> int:
     sp.set_defaults(func=cmd_bind)
 
     sp = sub.add_parser("finish", help="complete a run whose mode has no coaching")
-    sp.add_argument(
-        "--mode", required=True, choices=("quick_check", "fast_assess", "concise", "rule_lookup", "extraction_only")
-    )
+    sp.add_argument("--mode", required=True, choices=_FINISH_MODES)
     sp.add_argument("--run-id", required=True)
     sp.add_argument("--artifacts-root", required=True)
     sp.add_argument("--output", default=None, help="the JSON artifact this run wrote")
