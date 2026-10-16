@@ -22,6 +22,8 @@ import tempfile
 import types
 from typing import Any
 
+from _dom import Element, by_attr, by_id, parse
+
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 IC_SIM_DIR = os.path.join(os.path.dirname(SCRIPT_DIR), "skills", "ic-sim", "scripts")
 
@@ -286,6 +288,27 @@ def _run_visualize(
     return result.returncode, result.stdout, result.stderr
 
 
+def _ring(doc: Element) -> Element:
+    (ring,) = [e for e in doc.iter() if e.tag == "figure" and " percent" in (e.get("aria-label") or "")]
+    return ring
+
+
+def _ring_tone(doc: Element) -> str | None:
+    """The ring's tone: its modifier class, the only place `_ui.score_ring` carries it."""
+    m = re.search(r"\bui-ring--(\w+)\b", _ring(doc).get("class") or "")
+    return m.group(1) if m else None
+
+
+def _verdict(doc: Element) -> str:
+    (verdict,) = by_attr(doc, "data-verdict")
+    return verdict.text()
+
+
+def _pill_tone(el: Element) -> str | None:
+    m = re.search(r"\bui-pill--(\w+)\b", el.get("class") or "")
+    return m.group(1) if m else None
+
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
@@ -413,6 +436,75 @@ def test_xss_safety_text() -> None:
     assert "&lt;script&gt;" in stdout
 
 
+_XSS = "<script>alert(1)</script> & deal_flow"
+
+
+def test_xss_safety_text_in_the_fund_and_the_verdicts() -> None:
+    """Every string the page builds itself (outside the shared components' own escaping) is put through the
+    founder-text policy and then escaped: the fund's name, a thesis area, a focus area, the check size's
+    currency, the committee's verdict and a partner's verdict. The `&` beside a snake_case token shows the
+    order: the token is still reworded, and the `&` arrives escaped once."""
+    arts = _all_required_artifacts()
+    fund = json.loads(json.dumps(_VALID_FUND))
+    fund["fund_name"] = _XSS
+    fund["thesis_areas"] = [_XSS]
+    fund["archetypes"][0]["focus_areas"] = [_XSS]
+    fund["check_size_range"]["currency"] = _XSS
+    arts["fund_profile.json"] = fund
+    score = json.loads(json.dumps(_VALID_SCORE))
+    score["summary"]["verdict"] = _XSS
+    arts["score_dimensions.json"] = score
+    disc = json.loads(json.dumps(_VALID_DISCUSSION))
+    disc["partner_verdicts"][0]["verdict"] = _XSS
+    arts["discussion.json"] = disc
+    d = _make_artifact_dir(arts)
+    rc, stdout, stderr = _run_visualize(d)
+    assert rc == 0, f"exit {rc}, stderr={stderr}"
+    assert "<script>alert(1)</script>" not in stdout
+    escaped = "&lt;script&gt;alert(1)&lt;/script&gt; &amp; deal flow"
+    assert stdout.count(escaped) >= 6, stdout.count(escaped)
+    assert "&amp;amp;" not in stdout and "deal_flow" not in stdout
+    fund_section = by_id(parse(stdout), "fund")
+    assert fund_section is not None and fund_section.text().count("<script>alert(1)</script> & deal flow") >= 4
+
+
+def test_the_fund_panel_reads_only_the_role_and_its_focus_areas() -> None:
+    """Partners are role names only. A generic profile's archetype may carry an old invented `background` (the
+    one exemption the people rule allows); it never reaches the page. An archetype may carry a `name` equal to
+    its role's label; the panel's partner labels are the role labels, read from the role."""
+    arts = _all_required_artifacts()
+    fund = json.loads(json.dumps(_VALID_FUND))
+    labels = {"visionary": "The Visionary", "operator": "The Operator", "analyst": "The Analyst"}
+    for arch in fund["archetypes"]:
+        arch["background"] = "Distinctive invented background marker"
+        arch["name"] = labels[arch["role"]]
+    arts["fund_profile.json"] = fund
+    d = _make_artifact_dir(arts)
+    rc, stdout, stderr = _run_visualize(d)
+    assert rc == 0, f"exit {rc}, stderr={stderr}"
+    assert "Distinctive invented background marker" not in stdout
+    fund_section = by_id(parse(stdout), "fund")
+    assert fund_section is not None
+    rows = [e for e in fund_section.iter() if e.tag == "tr"]
+    partner_rows = [r for r in rows if [c.tag for c in r.children if isinstance(c, Element)] == ["td", "td"]]
+    got = [[c.text() for c in r.children if isinstance(c, Element)] for r in partner_rows]
+    assert got == [["The Visionary", "market"], ["The Operator", "execution"], ["The Analyst", "numbers"]]
+
+
+def test_a_profile_that_names_a_person_is_refused_before_the_page_is_written() -> None:
+    arts = _all_required_artifacts()
+    fund = json.loads(json.dumps(_VALID_FUND))
+    fund["archetypes"][0]["name"] = "Invented Person"
+    arts["fund_profile.json"] = fund
+    d = _make_artifact_dir(arts)
+    out = os.path.join(d, "report.html")
+    rc, stdout, _stderr = _run_visualize(d, extra_args=["-o", out])
+    assert rc != 0
+    assert "FUND_PROFILE_NAMES_PEOPLE" in stdout
+    assert "Invented Person" not in stdout
+    assert not os.path.exists(out)
+
+
 def test_xss_safety_attribute() -> None:
     """Partner rationale with attribute injection -> properly escaped."""
     arts = _all_required_artifacts()
@@ -472,7 +564,7 @@ def test_html_structural_sanity() -> None:
 
 
 def test_dealbreaker_verdict() -> None:
-    """score_dimensions with verdict=hard_pass and dealbreaker -> gauge shows hard_pass."""
+    """A hard-pass render rings as a fail and its verdict reads "Decline — Hard Pass"."""
     arts = _all_required_artifacts()
     score = dict(_VALID_SCORE)
     items = list(_VALID_SCORE["items"])
@@ -501,27 +593,34 @@ def test_dealbreaker_verdict() -> None:
     d = _make_artifact_dir(arts)
     rc, stdout, stderr = _run_visualize(d)
     assert rc == 0, f"exit {rc}, stderr={stderr}"
-    # Should show "Hard Pass" text
-    assert "Hard Pass" in stdout
-    # hard_pass color (#92301F) should appear
-    assert "#92301F" in stdout
+    doc = parse(stdout)
+    assert _ring_tone(doc) == "fail"
+    assert _verdict(doc).startswith("Decline — Hard Pass")
+    assert "Decline — Hard Pass" in (_ring(doc).get("aria-label") or "")
 
 
 def test_gauge_pass_verdict_says_decline_not_bare_pass() -> None:
-    """The conviction gauge must never render a bare 'Pass' label for a 'pass'
-    verdict — it reads as 'passes the bar' to a founder skimming the report.
-    It must render an unambiguous decline word instead."""
+    """The ring, the hero verdict and the partner pills never render a bare 'Pass' for a 'pass' verdict —
+    it reads as 'passes the bar' to a founder skimming the report. They say "Decline"."""
     arts = _all_required_artifacts()
     score = json.loads(json.dumps(_VALID_SCORE))
     score["summary"]["verdict"] = "pass"
     score["summary"]["conviction_score"] = 30.0
     arts["score_dimensions.json"] = score
+    disc = json.loads(json.dumps(_VALID_DISCUSSION))
+    disc["partner_verdicts"][2]["verdict"] = "pass"
+    arts["discussion.json"] = disc
     d = _make_artifact_dir(arts)
     rc, stdout, stderr = _run_visualize(d)
     assert rc == 0, f"exit {rc}, stderr={stderr}"
-    assert "Decline" in stdout
+    doc = parse(stdout)
+    assert (_ring(doc).get("aria-label") or "").endswith(", Decline")
+    assert _verdict(doc).startswith("Decline")
+    pills = [e.text() for e in by_attr(doc, "data-partner") if e.tag == "span"]
+    assert "Analyst: Decline" in pills
     # No bare "Pass" text node (Hard Pass is fine, a bare Pass is not).
     assert re.search(r"(?<!Hard )>Pass<", stdout) is None, stdout
+    assert not re.search(r"\bpass\b", " ".join(pills + [_verdict(doc)]), re.I)
 
 
 def test_partner_card_pass_verdict_says_decline() -> None:
@@ -543,8 +642,7 @@ def test_partner_card_pass_verdict_says_decline() -> None:
 
 
 def test_summary_bar_pass_verdict_says_decline() -> None:
-    """The compact summary bar's per-partner verdict label must also avoid a
-    bare 'Pass' for a 'pass' verdict."""
+    """The header's partners row names a 'pass' partner verdict "Decline", as report.md's Partner Split does."""
     arts = _all_required_artifacts()
     disc = dict(arts["discussion.json"])
     disc["partner_verdicts"] = [
@@ -556,7 +654,8 @@ def test_summary_bar_pass_verdict_says_decline() -> None:
     d = _make_artifact_dir(arts)
     rc, stdout, stderr = _run_visualize(d)
     assert rc == 0, f"exit {rc}, stderr={stderr}"
-    assert "Analyst: Decline" in stdout
+    (row,) = by_attr(parse(stdout), "data-partners")
+    assert "Analyst: Decline" in row.text()
 
 
 def test_malformed_list_elements() -> None:
@@ -603,7 +702,7 @@ def test_partner_role_case_insensitive() -> None:
 
 
 def test_verdict_color_case_insensitive() -> None:
-    """Capitalized verdict like 'Invest' still gets correct color, not gray fallback."""
+    """A capitalized verdict still gets its tone and its word, never the neutral fallback."""
     arts = _all_required_artifacts()
     disc = dict(arts["discussion.json"])
     disc["partner_verdicts"] = [
@@ -612,15 +711,23 @@ def test_verdict_color_case_insensitive() -> None:
         {"partner": "analyst", "verdict": "Pass", "rationale": "Weak"},
     ]
     arts["discussion.json"] = disc
+    score = json.loads(json.dumps(_VALID_SCORE))
+    score["summary"]["verdict"] = "INVEST"
+    arts["score_dimensions.json"] = score
     d = _make_artifact_dir(arts)
     rc, stdout, _stderr = _run_visualize(d)
     assert rc == 0
-    # Invest -> green (#2F8A56), not gray fallback (#A6AEB5)
-    assert "#2F8A56" in stdout, "Invest verdict should map to green color"
+    doc = parse(stdout)
+    assert _ring_tone(doc) == "pass"
+    assert (_ring(doc).get("aria-label") or "").endswith(", Invest")
+    pills = {e.get("data-partner"): e for e in by_attr(doc, "data-partner") if e.tag == "span"}
+    assert pills["visionary"].text() == "Visionary: Invest" and _pill_tone(pills["visionary"]) == "pass"
+    assert pills["operator"].text() == "Operator: More Diligence" and _pill_tone(pills["operator"]) == "warn"
+    assert pills["analyst"].text() == "Analyst: Decline" and _pill_tone(pills["analyst"]) == "fail"
 
 
 def test_severity_color_case_insensitive() -> None:
-    """Capitalized severity like 'Blocking' still gets correct color."""
+    """A capitalized severity like 'Blocking' still shows its word and its tone in the conflicts table."""
     arts = _all_required_artifacts()
     arts["conflict_check.json"] = {
         "conflicts": [
@@ -636,8 +743,11 @@ def test_severity_color_case_insensitive() -> None:
     d = _make_artifact_dir(arts)
     rc, stdout, _stderr = _run_visualize(d)
     assert rc == 0
-    # Blocking -> red (#C0392B), not gray fallback
-    assert "#C0392B" in stdout, "Blocking severity should map to red color"
+    section = by_id(parse(stdout), "conflicts")
+    assert section is not None
+    (sev,) = by_attr(section, "data-severity")
+    assert sev.text() == "Blocking" and _pill_tone(sev) == "fail"
+    assert "Overall severity: Blocking" in section.text()
 
 
 def test_empty_partner_role_skipped() -> None:
@@ -670,27 +780,21 @@ def test_visualize_partner_disclaimer() -> None:
 
 
 def test_dealbreaker_color_visible() -> None:
-    """Dealbreaker bars use visible color (#92301F), not near-invisible #7f1d1d."""
+    """A dealbreaker dimension is a fail row that says "Dealbreaker" in words, not by colour alone."""
     arts = _all_required_artifacts()
-    # Create a score with dealbreakers to trigger bar rendering
-    score = dict(_VALID_SCORE)
-    summary = dict(score["summary"])
-    summary["by_category"] = dict(summary["by_category"])
-    summary["by_category"]["Team"] = {
-        "strong_conviction": 0,
-        "moderate_conviction": 0,
-        "concern": 1,
-        "dealbreaker": 2,
-        "not_applicable": 1,
-    }
-    score["summary"] = summary
+    score = json.loads(json.dumps(_VALID_SCORE))
+    score["items"][0]["status"] = "dealbreaker"
+    score["items"][1]["status"] = "to_confirm"
     arts["score_dimensions.json"] = score
     d = _make_artifact_dir(arts)
     rc, stdout, stderr = _run_visualize(d)
     assert rc == 0, f"exit {rc}, stderr={stderr}"
-    # New visible color should appear; old invisible color should not
-    assert "#92301F" in stdout, "Dealbreaker should use visible #92301F"
-    assert "#7f1d1d" not in stdout, "Old invisible dealbreaker color should be gone"
+    doc = parse(stdout)
+    (row,) = by_attr(doc, "data-criterion", _DIMENSION_IDS[0])
+    assert row.get("data-status") == "fail" and row.get("data-status-word") == "Dealbreaker"
+    assert "Dealbreaker" in row.text()
+    (tbc,) = by_attr(doc, "data-criterion", _DIMENSION_IDS[1])
+    assert tbc.get("data-status") == "na" and tbc.get("data-status-word") == "To confirm"
 
 
 def test_visualize_conviction_disclaimer() -> None:
@@ -752,12 +856,15 @@ def test_radar_zero_score_not_at_center() -> None:
     rc, stdout, stderr = _run_visualize(d)
     assert rc == 0, f"exit {rc}, stderr={stderr}"
     # The data polygon has fill-opacity="0.2" — find it loosely
-    polygon_match = re.search(r'<polygon points="([^"]+)"[^>]*fill-opacity="0\.2"', stdout)
+    polygon_match = re.search(
+        r'<polygon points="([^"]+)"[^>]*fill-opacity="0\.2"', stdout[stdout.index('data-chart="radar"') :]
+    )
     assert polygon_match, "Radar data polygon not found"
     points_str = polygon_match.group(1)
     # Derive center and radius from SVG so the test doesn't hardcode geometry.
     # Every spoke line originates from center (x1, y1) and ends at the rim (x2, y2).
-    spoke = re.search(r'<line x1="([\d.]+)" y1="([\d.]+)" x2="([\d.]+)" y2="([\d.]+)"', stdout)
+    radar = stdout[stdout.index('data-chart="radar"') :]
+    spoke = re.search(r'<line x1="([\d.]+)" y1="([\d.]+)" x2="([\d.]+)" y2="([\d.]+)"', radar)
     assert spoke, "No spoke line found in radar chart"
     cx, cy = float(spoke.group(1)), float(spoke.group(2))
     sx, sy = float(spoke.group(3)), float(spoke.group(4))
@@ -780,27 +887,14 @@ def test_html_title_includes_company() -> None:
 
 
 def test_css_has_responsive_breakpoint() -> None:
-    """CSS media query should collapse chart-grid and partner-grid to single column."""
+    """The debate's three partner cards fall to one column on a phone."""
     d = _make_artifact_dir(_all_required_artifacts())
     rc, stdout, stderr = _run_visualize(d)
     assert rc == 0, f"exit {rc}, stderr={stderr}"
-    assert "@media" in stdout, "Should have at least one media query"
-    assert "max-width" in stdout, "Should have max-width breakpoint"
-    # Extract the @media block by matching braces (handles nested rules).
-    media_start = stdout.find("@media")
-    assert media_start != -1, "Media query not found"
-    open_brace = stdout.index("{", media_start)
-    depth, pos = 1, open_brace + 1
-    while depth > 0 and pos < len(stdout):
-        if stdout[pos] == "{":
-            depth += 1
-        elif stdout[pos] == "}":
-            depth -= 1
-        pos += 1
-    media_body = stdout[open_brace:pos]
-    assert ".chart-grid" in media_body, "chart-grid should be restyled in media query"
-    assert ".partner-grid" in media_body, "partner-grid should be restyled in media query"
-    assert "grid-template-columns" in media_body, "Grids should collapse to single column"
+    m = re.search(r"@media \(max-width: (\d+)px\) \{ \.ic-debate \{ grid-template-columns: 1fr; \} \}", stdout)
+    assert m, "the debate grid has no single-column rule for narrow screens"
+    assert 390 <= int(m.group(1)) < 720
+    assert re.search(r"\.ic-debate \{[^}]*grid-template-columns: repeat\(3,", stdout)
 
 
 def test_svg_scales_on_mobile() -> None:
@@ -811,20 +905,8 @@ def test_svg_scales_on_mobile() -> None:
     assert "max-width: 100%" in stdout or "max-width:100%" in stdout
 
 
-def test_h2_border_visible_in_chart_box() -> None:
-    """h2 inside chart-box should use a visible border color, not a bg-matching one."""
-    d = _make_artifact_dir(_all_required_artifacts())
-    rc, stdout, stderr = _run_visualize(d)
-    assert rc == 0, f"exit {rc}, stderr={stderr}"
-    assert ".chart-box h2" in stdout
-    match = re.search(r"\.chart-box h2\s*\{([^}]+)\}", stdout)
-    assert match, ".chart-box h2 CSS rule not found"
-    rule_body = match.group(1)
-    assert "var(--lool-line-2)" in rule_body, "h2 border should use visible var(--lool-line-2), not bg-matching #1e293b"
-
-
-def test_rationale_truncation_respects_sentences() -> None:
-    """Rationale truncation should break at sentence boundary when possible."""
+def test_rationale_is_shown_whole() -> None:
+    """A partner's rationale is shown whole on the page, as report.md shows it."""
     arts = _all_required_artifacts()
     disc = dict(arts["discussion.json"])
     long_rationale = (
@@ -842,28 +924,82 @@ def test_rationale_truncation_respects_sentences() -> None:
     d = _make_artifact_dir(arts)
     rc, stdout, stderr = _run_visualize(d)
     assert rc == 0, f"exit {rc}, stderr={stderr}"
-    assert "enterprise companies." in stdout, "Should include up to the second sentence"
-    assert "further validation" not in stdout, "Third sentence should not appear"
+    (card,) = [e for e in by_attr(parse(stdout), "data-partner", "visionary") if e.tag == "article"]
+    assert long_rationale in card.text()
+
+
+_LONG_TOKEN = ("https://example.invalid/" + "a" * 620)[:620]
+
+
+def test_a_long_unbroken_token_cannot_widen_the_page() -> None:
+    """Model-written text can carry one long unbroken token (a cited URL). It reaches the page whole, in the
+    one-liner, a dimension's evidence, a rationale, a supplied fact and a finding, and the page's stylesheet
+    breaks it rather than widening the page: the body wraps anywhere and the header's text column may shrink.
+    Layout itself needs a browser (measured at a phone's width, with this fixture); what a test can see is
+    that the token is in each container and the rules are on the page."""
+    assert len(_LONG_TOKEN) == 620
+    arts = _all_required_artifacts()
+    startup = dict(_VALID_STARTUP, one_liner=_LONG_TOKEN)
+    startup["host_context"] = {
+        "provenance": "supplied_with_request",
+        "sha256": "0" * 64,
+        "items": [{"index": 1, "fact": _LONG_TOKEN, "source": "Invented note", "date": "2026-01-15"}],
+        "dropped": [],
+    }
+    arts["startup_profile.json"] = startup
+    score = json.loads(json.dumps(_VALID_SCORE))
+    score["items"][0]["evidence"] = _LONG_TOKEN
+    score["items"][1]["status"] = "some_new_status"
+    arts["score_dimensions.json"] = score
+    disc = json.loads(json.dumps(_VALID_DISCUSSION))
+    disc["partner_verdicts"][0]["rationale"] = _LONG_TOKEN
+    disc["diligence_requirements"] = [_LONG_TOKEN]
+    arts["discussion.json"] = disc
+    d = _make_artifact_dir(arts)
+    rc, stdout, stderr = _run_visualize(d)
+    assert rc == 0, f"exit {rc}, stderr={stderr}"
+    doc = parse(stdout)
+    (hero,) = [e for e in doc.iter() if e.tag == "header"]
+    context = by_id(doc, "context")
+    (evidence_row,) = by_attr(doc, "data-criterion", _DIMENSION_IDS[0])
+    (card,) = [e for e in by_attr(doc, "data-partner", "visionary") if e.tag == "article"]
+    (actions,) = by_attr(doc, "data-findings", "actions")
+    for name, el in (
+        ("hero", hero),
+        ("context", context),
+        ("evidence", evidence_row),
+        ("rationale", card),
+        ("finding", actions),
+    ):
+        assert el is not None and _LONG_TOKEN in el.text(), name
+    css = " ".join(e.text() for e in doc.iter() if e.tag == "style")
+    assert re.search(r"body\.ui-body \{[^}]*overflow-wrap: anywhere", css)
+    assert re.search(r"\.ui-hero__text \{[^}]*min-width: 0", css)
+    # An unknown status is not scored, in the closed set's word, never the model's text.
+    (unknown,) = by_attr(doc, "data-criterion", _DIMENSION_IDS[1])
+    assert unknown.get("data-status") == "na" and unknown.get("data-status-word") == "Not scored"
+    assert "some_new_status" not in stdout and "Some new status" not in stdout
 
 
 def test_summary_bar_present() -> None:
-    """HTML should include a text summary with one-liner, sector, breakdown, and partner verdicts."""
+    """The header carries the one-liner, the sector and every partner's verdict; the Dimensions chips carry
+    each status's count."""
     d = _make_artifact_dir(_all_required_artifacts())
     rc, stdout, stderr = _run_visualize(d)
     assert rc == 0, f"exit {rc}, stderr={stderr}"
-    assert _VALID_STARTUP["one_liner"] in stdout, "One-liner should appear in summary bar"
-    assert _VALID_STARTUP["sector"] in stdout, "Sector should appear in summary bar"
-    strong_count = _VALID_SCORE["summary"]["strong_conviction"]
-    moderate_count = _VALID_SCORE["summary"]["moderate_conviction"]
-    concern_count = _VALID_SCORE["summary"]["concern"]
-    db_count = _VALID_SCORE["summary"]["dealbreaker"]
-    assert f"{strong_count} strong" in stdout, "Strong count should appear"
-    assert f"{moderate_count} moderate" in stdout, "Moderate count should appear"
-    assert f"{concern_count} concern" in stdout, "Concern count should appear"
-    assert f"{db_count} dealbreaker" in stdout, "Dealbreaker count should appear"
-    assert "Visionary: Invest" in stdout, "Summary bar should show Visionary verdict"
-    assert "Operator: More Diligence" in stdout, "Summary bar should show Operator verdict"
-    assert "Analyst: More Diligence" in stdout, "Summary bar should show Analyst verdict"
+    doc = parse(stdout)
+    (hero,) = [e for e in doc.iter() if e.tag == "header"]
+    assert _VALID_STARTUP["one_liner"] in hero.text(), "One-liner should appear in the header"
+    assert _VALID_STARTUP["sector"] in hero.text(), "Sector should appear in the header"
+    chips = {e.get("for"): e.text() for e in doc.iter() if e.tag == "label" and e.has("for")}
+    summary = _VALID_SCORE["summary"]
+    assert chips["ck-f-pass"] == f"Strong {summary['strong_conviction']}"
+    assert chips["ck-f-neutral"] == f"Moderate {summary['moderate_conviction']}"
+    assert chips["ck-f-warn"] == f"Concern {summary['concern']}"
+    assert chips["ck-f-fail"] == f"Dealbreaker {summary['dealbreaker']}"
+    (row,) = by_attr(doc, "data-partners")
+    for want in ("Visionary: Invest", "Operator: More Diligence", "Analyst: More Diligence"):
+        assert want in row.text(), want
 
 
 def test_radar_outer_labels_show_scores() -> None:
@@ -986,9 +1122,7 @@ def test_key_findings_distinguishes_mixed_strong_from_all_strong() -> None:
 
 
 def test_gauge_shows_coverage_denominator_when_basis_insufficient() -> None:
-    """conviction_basis.sufficient=False must render the 'X of Y' denominator
-    next to the gauge — the gauge's ':.1f' score is MORE precise than the
-    Markdown's rounded integer, so the caveat is at least as necessary here."""
+    """conviction_basis.sufficient=False puts the 'X of Y' denominator in the header, under the verdict."""
     arts = _all_required_artifacts()
     score = json.loads(json.dumps(_VALID_SCORE))
     summary = score["summary"]
@@ -1000,7 +1134,8 @@ def test_gauge_shows_coverage_denominator_when_basis_insufficient() -> None:
     d = _make_artifact_dir(arts)
     rc, stdout, stderr = _run_visualize(d)
     assert rc == 0, f"exit {rc}, stderr={stderr}"
-    assert "Scored on 2 of 28" in stdout
+    (note,) = by_attr(parse(stdout), "data-note", "basis")
+    assert note.text().startswith("Scored on 2 of 28")
 
 
 def test_gauge_omits_coverage_denominator_when_basis_sufficient() -> None:
@@ -1010,6 +1145,7 @@ def test_gauge_omits_coverage_denominator_when_basis_sufficient() -> None:
     rc, stdout, stderr = _run_visualize(d)
     assert rc == 0, f"exit {rc}, stderr={stderr}"
     assert "Scored on" not in stdout
+    assert not by_attr(parse(stdout), "data-note", "basis")
 
 
 def test_verdict_label_distinguishes_coverage_floored_held_from_capped_and_merits() -> None:
@@ -1030,9 +1166,7 @@ def test_verdict_label_distinguishes_coverage_floored_held_from_capped_and_merit
         d = _make_artifact_dir(arts)
         rc, stdout, stderr = _run_visualize(d)
         assert rc == 0, f"exit {rc}, stderr={stderr}"
-        match = re.search(r'font-size="14"[^>]*>([^<]*)</text>', stdout)
-        assert match, f"No gauge verdict-label text found: {stdout}"
-        return match.group(1)
+        return _verdict(parse(stdout))
 
     merits_label = _label_for({})
     floored_label = _label_for({"coverage_floored": True})
@@ -1045,7 +1179,7 @@ def test_verdict_label_distinguishes_coverage_floored_held_from_capped_and_merit
     assert capped_label != floored_label, "coverage_capped must have its own distinct label"
     assert merits_label != floored_label, "the plain-merits default must differ from the coverage labels"
     assert merits_label != capped_label, "the plain-merits default must differ from the coverage labels"
-    assert merits_label == "More Diligence", f"unexpected merits-default label: {merits_label!r}"
+    assert merits_label == "More Diligence — promising but needs more evidence", merits_label
 
 
 def test_dealbreaker_provenance_distinguishes_debated_from_scoring_only() -> None:
@@ -1175,29 +1309,20 @@ def _load_ic_sim_detect_conflicts() -> types.ModuleType:
 
 
 # ---------------------------------------------------------------------------
-# Test A: dimension statuses → visualize._STATUS_COLORS coverage
+# Test A: dimension statuses → a checklist tone and a word
 # ---------------------------------------------------------------------------
 
 
 class TestIcSimDimensionStatusColorCoverage:
-    """Every dimension status that score_dimensions.py can emit must appear
-    in visualize.py's _STATUS_COLORS so category bars receive the correct colour.
+    """Every dimension status that score_dimensions.py can emit has a checklist tone and a word on the page,
+    so no row renders under the fallback. Produced set is derived live from score_dimensions.VALID_STATUSES."""
 
-    Produced set is derived live from score_dimensions.VALID_STATUSES.
-    """
-
-    def test_all_dimension_statuses_in_status_colors(self) -> None:
-        """Every dimension status the producer emits must map to a colour."""
+    def test_all_dimension_statuses_have_a_tone_and_a_word(self) -> None:
         produced = _load_ic_sim_score_dimensions().VALID_STATUSES
         viz = _load_ic_sim_visualize()
-        color_keys: set[str] = set(viz._STATUS_COLORS.keys())
-
-        missing = produced - color_keys
-        assert not missing, (
-            f"visualize._STATUS_COLORS is missing a colour entry for dimension status(es) "
-            f"emitted by score_dimensions.py: {sorted(missing)}. "
-            f"Add entries to _STATUS_COLORS for each."
-        )
+        missing = (produced - set(viz._STATUS_TONE)) | (produced - set(viz._STATUS_WORD))
+        assert not missing, f"visualize has no tone or word for dimension status(es): {sorted(missing)}"
+        assert set(viz._STATUS_TONE.values()) <= set(viz._CHECKLIST_STATUSES)
 
     def test_producer_dimension_statuses_min_count(self) -> None:
         """Guard against vacuous tests: VALID_STATUSES must have at least 5 statuses."""
@@ -1206,32 +1331,25 @@ class TestIcSimDimensionStatusColorCoverage:
             f"VALID_STATUSES expected >= 5 entries, got {len(produced)}. Check score_dimensions.VALID_STATUSES."
         )
 
-    def test_status_colors_min_count(self) -> None:
-        """_STATUS_COLORS must cover at least the producer statuses."""
-        produced = _load_ic_sim_score_dimensions().VALID_STATUSES
+    def test_the_words_tell_apart_statuses_that_share_a_tone(self) -> None:
         viz = _load_ic_sim_visualize()
-        assert len(viz._STATUS_COLORS) >= len(produced), (
-            f"visualize._STATUS_COLORS has only {len(viz._STATUS_COLORS)} entries; expected >= {len(produced)}."
-        )
+        words = list(viz._STATUS_WORD.values())
+        assert len(set(words)) == len(words)
 
 
 # ---------------------------------------------------------------------------
-# Test B: partner verdict values → visualize._VERDICT_COLORS coverage
+# Test B: verdict values → a decision word and a tone
 # ---------------------------------------------------------------------------
 
 
 class TestIcSimPartnerVerdictColorCoverage:
-    """Every verdict value that score_dimensions.py's summary can emit must
-    appear in visualize.py's _VERDICT_COLORS so the conviction gauge shows
-    the correct colour instead of the neutral fallback.
+    """Every verdict value that score_dimensions.py's summary can emit has a decision word
+    (`_ic_view.VERDICT_WORD`), a ring tone and a partner-pill tone, so nothing renders under the fallback.
 
-    The 4 verdicts come from _summarize() branches in score_dimensions.py —
-    there is no exported constant, so they are pinned here. A source-grep
-    guard ensures each literal is still present in the source so a rename
-    fails loudly.
+    The 4 verdicts come from _summarize() branches in score_dimensions.py — there is no exported constant,
+    so they are pinned here. A source-grep guard ensures each literal is still present in the source.
     """
 
-    # Verdict strings emitted by score_dimensions._summarize() branches.
     PRODUCER_VERDICTS: set[str] = {
         "invest",
         "more_diligence",
@@ -1240,11 +1358,7 @@ class TestIcSimPartnerVerdictColorCoverage:
     }
 
     def test_verdict_literals_present_in_source(self) -> None:
-        """Each hardcoded verdict must appear as a string literal in score_dimensions.py.
-
-        Guards against silent renames: if a verdict string is removed from the
-        source, this test fails before any runtime path needs to exercise it.
-        """
+        """Each hardcoded verdict must appear as a string literal in score_dimensions.py."""
         with open(_IC_SIM_SCORE_DIMENSIONS_SCRIPT, encoding="utf-8") as fh:
             src = fh.read()
         for verdict in self.PRODUCER_VERDICTS:
@@ -1253,17 +1367,13 @@ class TestIcSimPartnerVerdictColorCoverage:
                 f"Update PRODUCER_VERDICTS if _summarize() was changed."
             )
 
-    def test_all_verdicts_in_verdict_colors(self) -> None:
-        """Every verdict the producer emits must map to a colour."""
+    def test_every_verdict_has_a_word_a_ring_tone_and_a_pill_tone(self) -> None:
         viz = _load_ic_sim_visualize()
-        color_keys: set[str] = set(viz._VERDICT_COLORS.keys())
-
-        missing = self.PRODUCER_VERDICTS - color_keys
-        assert not missing, (
-            f"visualize._VERDICT_COLORS is missing a colour entry for verdict(s) "
-            f"emitted by score_dimensions.py: {sorted(missing)}. "
-            f"Add entries to _VERDICT_COLORS for each."
-        )
+        view = viz._ic_view
+        for verdict in self.PRODUCER_VERDICTS:
+            assert verdict in view.VERDICT_WORD, verdict
+            assert verdict in viz._VERDICT_TONE, verdict
+            assert view.ring_tone({"verdict": verdict}) != "neutral", verdict
 
     def test_producer_verdicts_min_count(self) -> None:
         """Guard against vacuous tests: producer set must have exactly 4 verdicts."""
@@ -1271,46 +1381,25 @@ class TestIcSimPartnerVerdictColorCoverage:
             f"PRODUCER_VERDICTS expected 4 entries, got {len(self.PRODUCER_VERDICTS)}."
         )
 
-    def test_verdict_colors_min_count(self) -> None:
-        """_VERDICT_COLORS must cover at least the 4 producer verdicts."""
-        viz = _load_ic_sim_visualize()
-        assert len(viz._VERDICT_COLORS) >= 4, (
-            f"visualize._VERDICT_COLORS has only {len(viz._VERDICT_COLORS)} entries; expected >= 4."
-        )
-
-    def test_verdict_colors_pairwise_distinct(self) -> None:
-        """Each producer verdict must have a colour distinct from every other
-        verdict's colour — in particular hard_pass must NOT share pass's colour,
-        or the gauge cannot distinguish the two most severe outcomes.
-        """
-        viz = _load_ic_sim_visualize()
-        colors = {v: viz._VERDICT_COLORS.get(v) for v in self.PRODUCER_VERDICTS}
-        seen: dict[str, str] = {}
-        for verdict, color in sorted(colors.items()):
-            assert color is not None, f"_VERDICT_COLORS missing entry for {verdict!r}."
-            assert color not in seen, (
-                f"_VERDICT_COLORS gives {verdict!r} the same colour {color!r} as {seen[color]!r}. "
-                f"Each verdict on the spectrum needs a visually distinct colour."
-            )
-            seen[color] = verdict
+    def test_verdict_words_pairwise_distinct(self) -> None:
+        """Each verdict's word differs from every other's. The tones cannot: pass and hard_pass are both a
+        decline, so the word is what tells the two most severe outcomes apart."""
+        view = _load_ic_sim_visualize()._ic_view
+        words = {v: view.VERDICT_WORD[v] for v in self.PRODUCER_VERDICTS}
+        assert len(set(words.values())) == len(words), words
 
 
 # ---------------------------------------------------------------------------
-# Test C: conflict severity values → visualize._SEVERITY_COLORS coverage
+# Test C: conflict severity values → a word and a tone
 # ---------------------------------------------------------------------------
 
 
 class TestIcSimConflictSeverityColorCoverage:
-    """Every conflict severity value that detect_conflicts.py can emit must
-    appear in visualize.py's _SEVERITY_COLORS so the conflict summary chart
-    shows the correct colour instead of the neutral fallback.
-
-    VALID_SEVERITIES ({"blocking", "manageable"}) is loaded live.
-    "clear" is not in VALID_SEVERITIES (it is computed in overall_severity
-    when no conflicts exist); it is pinned here with a source-grep guard.
+    """Every conflict severity value that detect_conflicts.py can emit has a word and a tone in the conflicts
+    table. VALID_SEVERITIES ({"blocking", "manageable"}) is loaded live; "clear" is computed in
+    overall_severity when no conflicts exist and is pinned here with a source-grep guard.
     """
 
-    # "clear" is emitted in detect_conflicts.py but is not in VALID_SEVERITIES.
     _HARDCODED_EXTRA: set[str] = {"clear"}
 
     def _producer_severities(self) -> set[str]:
@@ -1326,31 +1415,31 @@ class TestIcSimConflictSeverityColorCoverage:
             "Update _HARDCODED_EXTRA if the severity was renamed."
         )
 
-    def test_all_severities_in_severity_colors(self) -> None:
-        """Every conflict severity the producer emits must map to a colour."""
+    def test_all_severities_have_a_word_and_a_tone(self) -> None:
         produced = self._producer_severities()
         viz = _load_ic_sim_visualize()
-        color_keys: set[str] = set(viz._SEVERITY_COLORS.keys())
-
-        missing = produced - color_keys
-        assert not missing, (
-            f"visualize._SEVERITY_COLORS is missing a colour entry for severity value(s) "
-            f"emitted by detect_conflicts.py: {sorted(missing)}. "
-            f"Add entries to _SEVERITY_COLORS for each."
-        )
+        missing = (produced - set(viz._SEVERITY_WORD)) | (produced - set(viz._SEVERITY_TONE))
+        assert not missing, f"visualize has no word or tone for severity value(s): {sorted(missing)}"
 
     def test_producer_severities_min_count(self) -> None:
         """Guard against vacuous tests: produced set must have at least 3 severities."""
         produced = self._producer_severities()
         assert len(produced) >= 3, f"VALID_SEVERITIES + extras expected >= 3 entries, got {len(produced)}."
 
-    def test_severity_colors_min_count(self) -> None:
-        """_SEVERITY_COLORS must cover at least the producer severities."""
-        produced = self._producer_severities()
+    def test_each_severity_is_shown_in_words_on_the_page(self) -> None:
+        arts = _all_required_artifacts()
+        produced = sorted(self._producer_severities())
+        arts["conflict_check.json"] = {
+            "conflicts": [{"company": f"Co{i}", "type": "adjacent", "severity": sev} for i, sev in enumerate(produced)],
+            "summary": {"overall_severity": "blocking", "conflict_count": len(produced)},
+        }
+        d = _make_artifact_dir(arts)
+        rc, stdout, _stderr = _run_visualize(d)
+        assert rc == 0
+        section = by_id(parse(stdout), "conflicts")
+        assert section is not None
         viz = _load_ic_sim_visualize()
-        assert len(viz._SEVERITY_COLORS) >= len(produced), (
-            f"visualize._SEVERITY_COLORS has only {len(viz._SEVERITY_COLORS)} entries; expected >= {len(produced)}."
-        )
+        assert [e.text() for e in by_attr(section, "data-severity")] == [viz._SEVERITY_WORD[s] for s in produced]
 
 
 # ---------------------------------------------------------------------------

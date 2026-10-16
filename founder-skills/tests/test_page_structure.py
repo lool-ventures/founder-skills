@@ -34,16 +34,50 @@ REDESIGNED: tuple[tuple[str, str], ...] = (
     ("financial-model-review", "explore.py"),
     ("deck-review", "visualize.py"),
     ("market-sizing", "visualize.py"),
+    ("ic-sim", "visualize.py"),
 )
 
 # The statuses each skill's checklist can carry, as filter chips. market-sizing grades pass / fail only
 # (its `checklist.py` has no warn), so its page offers no Warn chip and no "Needs attention" chip, which
 # would only repeat Fail.
 _CHIPS_ALL = ["ck-f-all", "ck-f-attn", "ck-f-fail", "ck-f-warn", "ck-f-pass", "ck-f-na"]
-_CHIPS = {"market-sizing": ["ck-f-all", "ck-f-fail", "ck-f-pass", "ck-f-na"]}
+# ic-sim's dimensions carry a moderate result, which is neither a problem nor a pass: its own chip.
+_CHIPS = {
+    "market-sizing": ["ck-f-all", "ck-f-fail", "ck-f-pass", "ck-f-na"],
+    "ic-sim": ["ck-f-all", "ck-f-attn", "ck-f-fail", "ck-f-warn", "ck-f-neutral", "ck-f-pass", "ck-f-na"],
+}
 
 # The status each skill's checklist item carries, as the page's `data-status` names it.
-_TONE = {"pass": "pass", "fail": "fail", "warn": "warn", "not_applicable": "na"}
+_TONE_DEFAULT = {"pass": "pass", "fail": "fail", "warn": "warn", "not_applicable": "na"}
+_TONES = {
+    "ic-sim": {
+        "strong_conviction": "pass",
+        "moderate_conviction": "neutral",
+        "concern": "warn",
+        "dealbreaker": "fail",
+        "to_confirm": "na",
+        "not_applicable": "na",
+    }
+}
+
+
+def _tone(skill: str) -> dict[str, str]:
+    return _TONES.get(skill, _TONE_DEFAULT)
+
+
+# Where each skill's checklist items live: (artifact, path to the list). ic-sim's are its 28 dimensions.
+_ITEMS: dict[str, tuple[str, tuple[str, ...]]] = {"ic-sim": ("score_dimensions.json", ("items",))}
+# Where each skill's checklist score lives, for the ring test.
+_SCORE: dict[str, tuple[str, tuple[str, ...]]] = {"ic-sim": ("score_dimensions.json", ("summary", "conviction_score"))}
+
+
+def _items_of(skill: str, work: Path) -> list[dict[str, Any]]:
+    artifact, path = _ITEMS.get(skill, ("checklist.json", ("items",)))
+    node: Any = json.loads((work / artifact).read_text())
+    for key in path:
+        node = node[key]
+    items: list[dict[str, Any]] = node
+    return items
 
 
 def _many_problems_fmr(work: Path) -> None:
@@ -101,10 +135,39 @@ def _many_problems_ms(work: Path) -> None:
     path.write_text(json.dumps(ck))
 
 
+def _many_problems_ic(work: Path) -> None:
+    """ic-sim's shape: 3 dealbreakers on startup-side categories (Team, Market, Product, never Fund Fit, so
+    the verdict is a hard pass in generic mode too), 8 concerns and 4 to confirm, with the summary recomputed
+    by the producer itself (`score_dimensions.validate_dimensions`)."""
+    import importlib.util
+
+    path = work / "score_dimensions.json"
+    sd = json.loads(path.read_text())
+    spec = importlib.util.spec_from_file_location(
+        "_ps_score_dimensions",
+        Path(__file__).resolve().parents[1] / "skills" / "ic-sim" / "scripts" / "score_dimensions.py",
+    )
+    assert spec is not None and spec.loader is not None
+    producer = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(producer)
+    items = sd["items"]
+    for cat in ("Team", "Market", "Product"):
+        next(i for i in items if i["category"] == cat)["status"] = "dealbreaker"
+    rest = [i for i in items if i["status"] not in ("dealbreaker", "not_applicable")]
+    for n, it in enumerate(rest[:12]):
+        it["status"] = "concern" if n < 8 else "to_confirm"
+        it["evidence"] = f"Invented evidence {n}: the materials state this with nothing behind it."
+    result = producer.validate_dimensions(items, fund_mode=sd["summary"].get("fund_mode", "generic"))
+    assert result["summary"]["verdict"] == "hard_pass", result["summary"]["verdict"]
+    sd["items"], sd["summary"] = result["items"], result["summary"]
+    path.write_text(json.dumps(sd))
+
+
 _MANY_PROBLEMS: dict[str, Callable[[Path], None]] = {
     "financial-model-review": _many_problems_fmr,
     "deck-review": _many_problems_dr,
     "market-sizing": _many_problems_ms,
+    "ic-sim": _many_problems_ic,
 }
 _VARIANTS = ("fixture", "many-problems")
 _CACHE: dict[tuple[str, str, str], tuple[str, list[dict[str, Any]]]] = {}
@@ -124,7 +187,7 @@ def _render(skill: str, script: str, variant: str) -> tuple[str, list[dict[str, 
                 [sys.executable, *html_argv(skill, script, work, out)], capture_output=True, text=True
             )
             assert proc.returncode == 0, proc.stderr
-            items = json.loads((work / "checklist.json").read_text())["items"]
+            items = _items_of(skill, work)
             _CACHE[key] = (out.read_text(encoding="utf-8"), items)
     return _CACHE[key]
 
@@ -152,6 +215,7 @@ _REPORT_SCORE = {
     "financial-model-review": r"\*\*Overall:\*\* [^(\n]*\(([\d.]+)%\)",
     "deck-review": r"\*\*Deck-craft score:\*\* ([\d.]+)%",
     "market-sizing": r"Self-check: ([\d.]+)%",
+    "ic-sim": r"\*\*Conviction Score:\*\* ([\d.]+)%",
 }
 
 
@@ -168,9 +232,13 @@ def test_the_ring_states_the_score_as_the_report_states_it(skill: str, script: s
         fix, work = Path(td) / "fix", Path(td) / "work"
         shutil.copytree(FIXTURES / skill, fix)
         work.mkdir()
-        ck = json.loads((fix / "checklist.json").read_text())
-        ck["summary"]["score_pct"] = 63.7
-        (fix / "checklist.json").write_text(json.dumps(ck))
+        artifact, path = _SCORE.get(skill, ("checklist.json", ("summary", "score_pct")))
+        ck = json.loads((fix / artifact).read_text())
+        ck[path[0]][path[1]] = 63.7
+        if skill == "ic-sim":
+            # A score in the more-diligence band with that verdict, so no score-verdict mismatch fires.
+            ck["summary"]["verdict"] = "more_diligence"
+        (fix / artifact).write_text(json.dumps(ck))
         md = json.loads(drive_compose(skill, fix, work).read_text())["report_markdown"]
         out = work / "page.html"
         proc = subprocess.run([sys.executable, *html_argv(skill, script, work, out)], capture_output=True, text=True)
@@ -194,6 +262,7 @@ _SKILL_NAMES = {
     "financial-model-review": "Financial Model Review",
     "deck-review": "Deck Review",
     "market-sizing": "Market Sizing",
+    "ic-sim": "IC Simulation",
 }
 
 
@@ -239,7 +308,7 @@ def test_every_checklist_criterion_appears_once_with_its_status(skill: str, scri
     seen: dict[str, list[Element]] = {}
     for r in rows:
         seen.setdefault(r.get("data-criterion") or "", []).append(r)
-    want = {i["id"]: _TONE[i["status"]] for i in items}
+    want = {i["id"]: _tone(skill)[i["status"]] for i in items}
     assert set(seen) == set(want), (sorted(set(want) - set(seen)), sorted(set(seen) - set(want)))
     for cid, els in seen.items():
         assert len(els) == 1, f"{cid} appears {len(els)} times"
@@ -258,7 +327,7 @@ def test_every_checklist_group_names_the_statuses_it_holds(skill: str, script: s
     assert groups, "no checklist group carries data-has"
     want: dict[str, set[str]] = {}
     for i in items:
-        want.setdefault(i["category"], set()).add(_TONE[i["status"]])
+        want.setdefault(i["category"], set()).add(_tone(skill)[i["status"]])
     assert len(groups) == len(want)
     for g in groups:
         # A weightless row (a criterion whose result counts under another) is counted nowhere.

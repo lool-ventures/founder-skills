@@ -202,7 +202,7 @@
     "skills/ic-sim/scripts/host_context.py": "72b0516666718bca953b9220d6057d2ef641b4241452d2bf702f06ffcf54f39d",
     "skills/ic-sim/scripts/persist_partner.py": "bbc9be0b9167711ed0fe5618e13e02f63621dce10326b681bfb4d93c62a409d8",
     "skills/ic-sim/scripts/score_dimensions.py": "46b119dbaf46e41d16c7fa2138e554700c18a7e5b551b19c5f13713cee08af4d",
-    "skills/ic-sim/scripts/visualize.py": "1ad7eae74870fe63d32a6a6870186731a7b8d79dc786b74a5ae7e6645c7a4b68",
+    "skills/ic-sim/scripts/visualize.py": "1de7078ee5982c031a177097d65a45b7309514648250ab11b6cbf85b246240ec",
     "skills/market-sizing/scripts/_compose_result.py": "2d46d5302d1fe2c2084da7ca9ec71cc187734149eb35eba07296b1bf57374ebf",
     "skills/market-sizing/scripts/_dispatch_json.py": "f3940de50c7ed5a54467c18076fdf959c015e7ba175f49e5d79f982b5f45698f",
     "skills/market-sizing/scripts/_ms_gates.py": "902e1bf026caa2e24dc5a54bee762d595c26b08343184a7c0daab25406737323",

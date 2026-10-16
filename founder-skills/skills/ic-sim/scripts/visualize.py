@@ -4,7 +4,13 @@
 # dependencies = []
 # ///
 """
-Generate self-contained HTML visualization from IC simulation JSON artifacts.
+Generate the self-contained IC simulation report page from the simulation's JSON artifacts.
+
+The page is built on the shared page components (`_ui.py`): a header card with the committee's verdict and
+conviction score, the key findings, the context supplied with the request (when there is any), the debate,
+all 28 dimensions grouped by category with filters, the category radar, the fund profile the partners argued
+from and the conflict check. The verdict and score wording is `_ic_view`'s and the fund lines are
+`fund_profile.founder_lines`, so the page and report.md state them the same way.
 
 Outputs HTML (not JSON). See compose_report.py for JSON output.
 
@@ -25,6 +31,12 @@ import os
 import sys
 from types import ModuleType
 from typing import Any, TypeGuard
+
+# The shared page components and the IC wording owner, same-dir imports (each skill carries its own copy).
+if os.path.dirname(os.path.abspath(__file__)) not in sys.path:
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _ic_view  # noqa: E402
+import _ui  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Artifact loading infrastructure
@@ -108,22 +120,20 @@ def _num(value: Any, default: float = 0.0) -> float:
         return default
 
 
-def _smart_truncate(text: str, max_len: int = 250) -> str:
-    """Truncate text at sentence boundary within max_len, falling back to word boundary."""
-    if len(text) <= max_len:
-        return text
-    truncated = text[:max_len]
-    best = -1
-    for sep in (".", "!", "?"):
-        pos = truncated.rfind(sep)
-        if pos > best:
-            best = pos
-    if best > max_len // 3:
-        return text[: best + 1]
-    last_space = truncated.rfind(" ")
-    if last_space > max_len // 3:
-        return text[:last_space] + "..."
-    return text[: max_len - 3] + "..."
+class _Text:
+    """The one rule for every string this page builds from an artifact: the founder-text policy first (with
+    the keep-set report.md was substituted with), then HTML escaping. Escaping first would turn an `&` into
+    `&amp;` before the policy reads it."""
+
+    def __init__(self, keep: frozenset[str]) -> None:
+        self.keep = keep
+
+    def plain(self, text: Any) -> str:
+        """The policy's words, not escaped (for a component that escapes its own strings)."""
+        return _ui.founder_text(str(text), self.keep or None)
+
+    def __call__(self, text: Any) -> str:
+        return _esc(self.plain(text))
 
 
 # ---------------------------------------------------------------------------
@@ -142,70 +152,47 @@ _CANONICAL_CATEGORIES = [
 
 _CANONICAL_PARTNERS = ["visionary", "operator", "analyst"]
 
-_VERDICT_COLORS: dict[str, str] = {
-    "invest": "#2F8A56",
-    "more_diligence": "#C9892B",
-    "pass": "#C0392B",
-    "hard_pass": "#92301F",
+# A dimension's status as a checklist tone and as the word the row shows. A tone groups statuses (both
+# "to confirm" and "not applicable" are not scored), so the word is what tells them apart.
+_STATUS_TONE: dict[str, str] = {
+    "strong_conviction": "pass",
+    "moderate_conviction": "neutral",
+    "concern": "warn",
+    "dealbreaker": "fail",
+    "to_confirm": "na",
+    "not_applicable": "na",
 }
-
-# VC "pass"/"hard_pass" mean DECLINE, but a bare "Pass" label reads to a
-# founder as "passes the bar." Never render the internal enum value alone.
-_VERDICT_LABELS: dict[str, str] = {
-    "invest": "Invest",
-    "more_diligence": "More Diligence",
-    "pass": "Decline",
-    "hard_pass": "Decline — Hard Pass",
+_STATUS_WORD: dict[str, str] = {
+    "strong_conviction": "Strong",
+    "moderate_conviction": "Moderate",
+    "concern": "Concern",
+    "dealbreaker": "Dealbreaker",
+    "to_confirm": "To confirm",
+    "not_applicable": "Not applicable",
 }
+_CHECKLIST_STATUSES = ("fail", "warn", "neutral", "pass", "na")
+_CHIP_LABELS = {"fail": "Dealbreaker", "warn": "Concern", "neutral": "Moderate", "pass": "Strong", "na": "Not scored"}
+
+# A partner's verdict as a pill tone (the word is `_ic_view.VERDICT_WORD`'s).
+_VERDICT_TONE: dict[str, str] = {"invest": "pass", "more_diligence": "warn", "pass": "fail", "hard_pass": "fail"}
+
+# A portfolio conflict's severity as a word and a pill tone: never colour alone.
+_SEVERITY_WORD: dict[str, str] = {"clear": "Clear", "manageable": "Manageable", "blocking": "Blocking"}
+_SEVERITY_TONE: dict[str, str] = {"clear": "pass", "manageable": "warn", "blocking": "fail"}
 
 
-def _verdict_label(verdict: str) -> str:
-    """Founder-facing verdict label — never a bare 'Pass' for the internal
-    'pass'/'hard_pass' enum values."""
-    return _VERDICT_LABELS.get(verdict, verdict.replace("_", " ").title())
+def _norm(value: Any) -> str:
+    return str(value or "").strip().lower()
 
 
-def _overall_verdict_label(verdict: str, summary: dict[str, Any]) -> str:
-    """Founder-facing label for the OVERALL score verdict, coverage-aware.
-
-    A 'more_diligence' verdict can mean three different things, per
-    score_dimensions.py: genuinely promising-but-unproven (the merits
-    default), held/floored to more_diligence because too little was
-    disclosed to score at all (`coverage_floored` / `coverage_held` — these
-    two SHARE one label, see that script's module comments), or capped down
-    from an invest-band score because too much is undisclosed to underwrite
-    (`coverage_capped` — its own, separate label). Collapsing all three into
-    a bare "More Diligence" drops the exact distinction compose_report.py's
-    markdown draws for the same summary dict.
-    """
-    label = _verdict_label(verdict)
-    if verdict == "more_diligence":
-        if summary.get("coverage_floored") is True or summary.get("coverage_held") is True:
-            return f"{label} — Low Coverage"
-        if summary.get("coverage_capped") is True:
-            return f"{label} — Capped"
-    return label
+def _severity_word(severity: Any, text: _Text) -> str:
+    key = _norm(severity)
+    return _SEVERITY_WORD.get(key) or text.plain(str(severity or "?").strip()).title()
 
 
-_STATUS_COLORS: dict[str, str] = {
-    "strong_conviction": "#2F8A56",
-    "moderate_conviction": "#C9892B",
-    "concern": "#C0392B",
-    "dealbreaker": "#92301F",
-    "not_applicable": "#A6AEB5",
-    "to_confirm": "#6C7A89",
-}
-
-_SEVERITY_COLORS: dict[str, str] = {
-    "clear": "#2F8A56",
-    "manageable": "#C9892B",
-    "blocking": "#C0392B",
-}
-
-_CLR_NEUTRAL = "#A6AEB5"
-
-_CLR_PRIMARY = "#0D549D"
-_CLR_ACCENT = "#21A2E3"
+def _pill(tone: str, label_html: str, attrs: str = "") -> str:
+    cls = f"ui-pill ui-pill--{tone}" if tone in ("pass", "warn", "fail", "neutral") else "ui-pill"
+    return f'<span class="{cls}"{attrs}>{label_html}</span>'
 
 
 # ---------------------------------------------------------------------------
@@ -213,93 +200,37 @@ _CLR_ACCENT = "#21A2E3"
 # ---------------------------------------------------------------------------
 
 
-def _css(brand_css: str) -> str:
-    """Return the full CSS block for the report."""
-    return (
-        "\n    <style>\n"
-        + brand_css
-        + """
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: var(--font-body);
-            background: var(--lool-white); color: var(--lool-ink); line-height: 1.6;
-            padding: 2rem; max-width: 1100px; margin: 0 auto;
-            -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+def _css() -> str:
+    """This page's own styles, after `_ui.UI_CSS` (the shell, cards, ring and checklist)."""
+    return """
+        svg text { font-family: var(--font-body); }
+        .ic-placeholder {
+            text-align: center; color: var(--ui-ink-2); font-style: italic; margin: 0;
+            padding: 2rem; background: var(--ui-surface-2); border-radius: var(--ui-r1);
         }
-        h1 { color: var(--lool-blue); font-weight: 400; font-size: 1.8rem; margin-bottom: 0.25rem; }
-        h2 {
-            color: var(--lool-royal); font-weight: 500; font-size: 1.2rem; margin: 2rem 0 1rem;
-            border-bottom: 1px solid var(--lool-line-2); padding-bottom: 0.5rem;
+        .ic-oneliner { margin: var(--ui-s3) 0 0; color: var(--ui-ink-2); max-width: 68ch; }
+        .ic-partners { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: var(--ui-s3) 0 0; }
+        .ic-partners .ui-pill { font-size: 0.8rem; padding: 3px 10px; }
+        .ic-note { margin: var(--ui-s3) 0 0; font-size: 0.82rem; font-style: italic; color: var(--ui-ink-2); }
+        .ic-debate { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--ui-s3); }
+        .ic-debate > .ui-card { margin-top: 0; box-shadow: none; padding: var(--ui-s4); }
+        .ic-debate h3 { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }
+        .ic-rationale { margin: var(--ui-s2) 0 0; font-size: 0.9rem; color: var(--ui-ink-2); }
+        @media (max-width: 719px) { .ic-debate { grid-template-columns: 1fr; } }
+        .ic-radar { margin: 0; }
+        /* The radar fits its card at any width: its viewBox is drawn tight around the labels, so on a phone the
+           whole chart shows, scaled, with nothing cut and nothing to scroll. */
+        .ic-radar svg { display: block; width: 100%; max-width: 520px; height: auto; margin: 0 auto; }
+        .ic-radar figcaption {
+            margin-top: var(--ui-s2); font-size: 0.78rem; color: var(--ui-ink-2); text-align: center;
         }
-        .subtitle { color: var(--lool-mute); font-size: 0.9rem; margin-bottom: 2rem; }
-        .chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-bottom: 1.5rem; }
-        .chart-box {
-            background: var(--lool-paper); padding: 1.5rem;
-            border: 1px solid var(--lool-line-2);
-        }
-        .chart-box.full { grid-column: 1 / -1; }
-        .partner-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
-        .partner-card {
-            padding: 1rem; border: 1px solid var(--lool-line-2);
-            border-left: 4px solid var(--lool-line);
-            background: var(--lool-paper);
-        }
-        .partner-card h3 { font-size: 1rem; font-weight: 500; margin-bottom: 0.25rem; }
-        .partner-card .verdict { font-size: 0.85rem; font-weight: 600; margin-bottom: 0.5rem; }
-        .partner-card .rationale { font-size: 0.8rem; color: var(--lool-mute); }
-        .badge {
-            display: inline-block; padding: 0.25rem 0.75rem; border-radius: var(--r-pill);
-            font-size: 0.8rem; font-weight: 600; color: #fff;
-        }
-        .conflict-table { width: 100%; border-collapse: collapse; margin-top: 1rem; font-size: 0.85rem; }
-        .conflict-table th {
-            text-align: left; color: var(--lool-subtle); padding: 0.5rem;
-            border-bottom: 1px solid var(--lool-line-2);
-        }
-        .conflict-table td { padding: 0.5rem; border-bottom: 1px solid var(--lool-line-2); }
-        .placeholder { color: var(--lool-mute); font-style: italic; padding: 2rem; text-align: center; }
-        .footer {
-            margin-top: 3rem; padding-top: 1rem;
-            border-top: 1px solid var(--lool-line-2); color: var(--lool-faint);
-            font-size: 0.75rem; text-align: center;
-        }
-        .footer a { color: var(--lool-azure); text-decoration: none; }
-        .footer a:hover { color: var(--lool-azure-deep); }
-        .footer-credit { text-align: center; }
-        .chart-box h2 { border-bottom-color: var(--lool-line-2); margin-top: 0; }
-        svg { max-width: 100%; height: auto; }
-        .collapsible-toggle {
-            cursor: pointer; user-select: none; display: flex;
-            align-items: center; gap: 0.5rem;
-        }
-        .collapsible-toggle::before { content: "\\25b6"; font-size: 0.6rem; transition: transform 0.2s; }
-        .collapsible-toggle.open::before { transform: rotate(90deg); }
-        .collapsible-body { display: none; }
-        .collapsible-body.open { display: block; }
-        .finding-strong { color: var(--lool-success); }
-        .finding-attention { color: var(--lool-danger); }
-        [data-tooltip] { position: relative; cursor: help; }
-        #tooltip-box {
-            display: none; position: fixed; background: var(--lool-slate); color: var(--lool-white);
-            padding: 0.5rem 0.75rem; border-radius: var(--r-input); font-size: 0.8rem;
-            max-width: 300px; z-index: 9999; pointer-events: none;
-            box-shadow: var(--shadow-soft);
-        }
-        @media (max-width: 768px) {
-            body { padding: 1rem; }
-            .chart-grid { grid-template-columns: 1fr; }
-            .partner-grid { grid-template-columns: 1fr; }
-        }
-        @media print {
-            body { background: #fff; padding: 0; }
-            .chart-box { break-inside: avoid; border: 1px solid var(--lool-line); }
-            .collapsible-body { display: block !important; }
-            .collapsible-toggle::before { content: ""; }
-            #tooltip-box { display: none !important; }
-        }
-    </style>
-"""
-    )
+        .ic-fund-line { margin: var(--ui-s2) 0 0; max-width: 75ch; }
+        .ic-fund-name { margin: 0; font-weight: 600; font-size: 1rem; }
+        .ic-context ul { margin: var(--ui-s3) 0 0; padding-left: 1.2rem; }
+        .ic-context li { margin: 0.3rem 0; max-width: 75ch; }
+        .ic-context p { margin: var(--ui-s2) 0 0; max-width: 75ch; }
+        .ic-table-gap { margin-top: var(--ui-s4); }
+    """
 
 
 # ---------------------------------------------------------------------------
@@ -308,8 +239,8 @@ def _css(brand_css: str) -> str:
 
 
 def _placeholder(message: str) -> str:
-    """Render a placeholder div for missing/corrupt/stub data."""
-    return f'<div class="placeholder">{_esc(message)}</div>'
+    """Render a placeholder for missing/corrupt/stub data (`message` is plain text)."""
+    return f'<p class="ic-placeholder">{_esc(message)}</p>'
 
 
 def _artifact_placeholder(
@@ -323,54 +254,8 @@ def _artifact_placeholder(
         return _placeholder("Data unavailable")
     if _is_stub(data):
         reason = data.get("reason", "Skipped")
-        return _placeholder(f"{artifact_name} skipped: {_esc(reason)}")
+        return _placeholder(f"{artifact_name} skipped: {reason}")
     return None
-
-
-# ---------------------------------------------------------------------------
-# JavaScript helpers
-# ---------------------------------------------------------------------------
-
-
-def _tooltip_js() -> str:
-    """Return tooltip hover JS + container div."""
-    return (
-        '<div id="tooltip-box"></div><script>\n'
-        "(function(){\n"
-        "  var box=document.getElementById('tooltip-box');\n"
-        "  document.addEventListener('mouseover',function(e){\n"
-        "    var t=e.target.closest('[data-tooltip]');\n"
-        "    if(!t)return;\n"
-        "    box.textContent=t.getAttribute('data-tooltip');\n"
-        "    box.style.display='block';\n"
-        "  });\n"
-        "  document.addEventListener('mousemove',function(e){\n"
-        "    if(box.style.display==='block'){\n"
-        "      box.style.left=Math.min(e.clientX+12,window.innerWidth-320)+'px';\n"
-        "      box.style.top=(e.clientY+12)+'px';\n"
-        "    }\n"
-        "  });\n"
-        "  document.addEventListener('mouseout',function(e){\n"
-        "    if(e.target.closest('[data-tooltip]'))box.style.display='none';\n"
-        "  });\n"
-        "})();\n"
-        "</script>"
-    )
-
-
-def _collapsible_js() -> str:
-    """Return collapsible toggle JS."""
-    return (
-        "<script>\n"
-        "document.querySelectorAll('.collapsible-toggle').forEach(function(el){\n"
-        "  el.addEventListener('click',function(){\n"
-        "    this.classList.toggle('open');\n"
-        "    var body=this.nextElementSibling;\n"
-        "    if(body)body.classList.toggle('open');\n"
-        "  });\n"
-        "});\n"
-        "</script>"
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -417,16 +302,20 @@ def _dealbreaker_provenance_suffix(db_id: str, provenance: dict[str, list[str]] 
 # Key Findings
 # ---------------------------------------------------------------------------
 
+# (text, tone): a finding is one sentence, coloured by what it says.
+_Finding = tuple[str, str]
+
 
 def _key_findings(
     score_dims: dict[str, Any] | None,
     discussion: dict[str, Any] | None,
     conflict: dict[str, Any] | None,
+    text: _Text,
 ) -> str:
-    """Render key findings section with strong/attention/actions."""
-    strong: list[str] = []
-    attention: list[str] = []
-    actions: list[str] = []
+    """The findings: what's strong, what needs attention, the top actions."""
+    strong: list[_Finding] = []
+    attention: list[_Finding] = []
+    actions: list[_Finding] = []
 
     if _usable(score_dims):
         summary = _as_dict(score_dims.get("summary"))
@@ -443,9 +332,9 @@ def _key_findings(
             d = int(_num(counts.get("dealbreaker"), 0))
             if s > 0 and c == 0 and d == 0:
                 if m == 0:
-                    strong.append(f"{cat} scores all strong conviction")
+                    strong.append((f"{cat} scores all strong conviction", "pass"))
                 else:
-                    strong.append(f"{cat} leans strong with no concerns")
+                    strong.append((f"{cat} leans strong with no concerns", "pass"))
 
         # Dealbreakers — labelled with debate provenance so a partner-argued
         # dealbreaker isn't presented identically to a scoring-pass-only one.
@@ -456,192 +345,231 @@ def _key_findings(
                 cat = str(db.get("category", ""))
                 db_id = str(db.get("id", ""))
                 suffix = _dealbreaker_provenance_suffix(db_id, provenance)
-                attention.append(f"Dealbreaker in {cat}: {label}{suffix}")
+                attention.append((f"Dealbreaker in {cat}: {label}{suffix}", "fail"))
 
         # Top concerns
         for tc in _as_list(summary.get("top_concerns")):
             if isinstance(tc, dict):
                 label = str(tc.get("label", tc.get("id", "?")))
                 cat = str(tc.get("category", ""))
-                attention.append(f"Concern in {cat}: {label}")
+                attention.append((f"Concern in {cat}: {label}", "warn"))
 
     if _usable(conflict):
         conf_summary = _as_dict(conflict.get("summary"))
-        severity = str(conf_summary.get("overall_severity", "")).lower()
+        severity = _norm(conf_summary.get("overall_severity"))
         if severity == "clear":
-            strong.append("No portfolio conflicts found")
+            strong.append(("No portfolio conflicts found", "pass"))
         elif severity in ("manageable", "blocking"):
             count = int(_num(conf_summary.get("conflict_count"), 0))
-            attention.append(f"{count} portfolio conflict(s) — severity: {severity}")
+            attention.append(
+                (f"{count} portfolio conflict(s) — severity: {severity}", _SEVERITY_TONE.get(severity, "warn"))
+            )
 
     if _usable(discussion):
         for req in _as_list(discussion.get("diligence_requirements")):
             if isinstance(req, str) and req.strip():
-                actions.append(req.strip())
+                actions.append((req.strip(), "action"))
         if not actions:
             for kc in _as_list(discussion.get("key_concerns")):
                 if isinstance(kc, str) and kc.strip():
-                    actions.append(kc.strip())
+                    actions.append((kc.strip(), "action"))
 
     if not strong and not attention and not actions:
         return ""
 
-    parts: list[str] = ['<div class="chart-box full"><h2>Key Findings</h2>']
+    def _cards(items: list[_Finding]) -> str:
+        return "".join(f'<div class="ui-finding ui-finding--{tone}">{text(s)}</div>' for s, tone in items)
 
+    def _column(key: str, heading: str, items: list[_Finding]) -> str:
+        # Show five; the rest behind a disclosure, so nothing report.md carries is dropped.
+        head, tail = items[:5], items[5:]
+        more = f'<details class="ui-more"><summary>{len(tail)} more</summary>{_cards(tail)}</details>' if tail else ""
+        return f'<div class="ui-finding-col" data-findings="{key}"><h3>{heading}</h3>{_cards(head)}{more}</div>'
+
+    parts: list[str] = []
     if strong:
-        parts.append(
-            '<div style="margin-bottom:1rem;">'
-            '<strong class="finding-strong">What\'s strong</strong>'
-            '<ul style="margin:0.25rem 0 0 1.25rem;color:var(--lool-mute);'
-            'font-size:0.9rem;">'
-        )
-        for item in strong:
-            parts.append(f"<li>{_esc(item)}</li>")
-        parts.append("</ul></div>")
-
+        parts.append(_column("strong", "What's strong", strong))
     if attention:
-        parts.append(
-            '<div style="margin-bottom:1rem;">'
-            '<strong class="finding-attention">What needs attention</strong>'
-            '<ul style="margin:0.25rem 0 0 1.25rem;color:var(--lool-mute);'
-            'font-size:0.9rem;">'
-        )
-        for item in attention:
-            parts.append(f"<li>{_esc(item)}</li>")
-        parts.append("</ul></div>")
-
+        parts.append(_column("attention", "What needs attention", attention))
     if actions:
-        parts.append(
-            '<div style="margin-bottom:1rem;">'
-            "<strong>Top actions</strong>"
-            '<ul style="margin:0.25rem 0 0 1.25rem;color:var(--lool-mute);'
-            'font-size:0.9rem;">'
+        parts.append(_column("actions", "Top actions", actions))
+    return '<div class="ui-findings">' + "".join(parts) + "</div>"
+
+
+# ---------------------------------------------------------------------------
+# Header card
+# ---------------------------------------------------------------------------
+
+
+def _partner_verdicts(discussion: dict[str, Any] | None) -> list[tuple[str, dict[str, Any]]]:
+    """(role, verdict entry) in the canonical order, then any other role alphabetically; an entry with no role is
+    skipped. Roles are matched case-insensitively."""
+    if not _usable(discussion):
+        return []
+    by_partner: dict[str, dict[str, Any]] = {}
+    for pv in _as_list(discussion.get("partner_verdicts")):
+        if isinstance(pv, dict):
+            role = _norm(pv.get("partner"))
+            if role:
+                by_partner[role] = pv
+    ordered = [p for p in _CANONICAL_PARTNERS if p in by_partner]
+    ordered += sorted(set(by_partner) - set(_CANONICAL_PARTNERS))
+    return [(p, by_partner[p]) for p in ordered]
+
+
+def _partners_row(discussion: dict[str, Any] | None, text: _Text) -> str:
+    """One pill per partner, "<Role>: <decision word>", as report.md's Partner Split states it."""
+    pills = []
+    for role, pv in _partner_verdicts(discussion):
+        verdict = pv.get("verdict")
+        word = text(_ic_view.verdict_word(verdict))
+        pills.append(
+            _pill(
+                _VERDICT_TONE.get(_norm(verdict), "neutral"),
+                f"{text(role.title())}: {word}",
+                f' data-partner="{_esc(role)}"',
+            )
         )
-        for item in actions:
-            parts.append(f"<li>{_esc(item)}</li>")
-        parts.append("</ul></div>")
+    if not pills:
+        return ""
+    return f'<p class="ic-partners" data-partners><span class="ui-eyebrow">Partners</span>{"".join(pills)}</p>'
 
-    parts.append("</div>")
-    return "\n".join(parts)
+
+def _score_ring(score_dims: dict[str, Any] | None, text: _Text) -> str:
+    if not _usable(score_dims):
+        return ""
+    summary = _as_dict(score_dims.get("summary"))
+    score = _ic_view.score_text(summary)
+    word = text.plain(_ic_view.verdict_word(summary.get("verdict")))
+    return _ui.score_ring(
+        _num(summary.get("conviction_score"), 0.0),
+        tone=_ic_view.ring_tone(summary),
+        value_text=f"{score}%",
+        label="Conviction score",
+        aria_label=f"Conviction score {score} percent, {word}",
+        href="#checklist",
+    )
+
+
+def _header(
+    startup: dict[str, Any] | None,
+    score_dims: dict[str, Any] | None,
+    discussion: dict[str, Any] | None,
+    text: _Text,
+) -> str:
+    company = str(startup.get("company_name", "Unknown")) if _usable(startup) else "IC Simulation Report"
+    chips: list[str] = []
+    body: list[str] = []
+    if _usable(startup):
+        chips += [
+            _ui.stage_label(startup.get("stage")),
+            str(startup.get("sector") or ""),
+            str(startup.get("simulation_date") or ""),
+        ]
+        one_liner = str(startup.get("one_liner") or "")
+        if one_liner:
+            body.append(f'<p class="ic-oneliner">{text(one_liner)}</p>')
+    meta_html = "".join(f'<span class="ui-chip">{text(c)}</span>' for c in chips if c)
+    verdict_html = ""
+    if _usable(score_dims):
+        summary = _as_dict(score_dims.get("summary"))
+        verdict_html = text(_ic_view.verdict_line(summary))
+        note = _ic_view.thin_basis_note(summary)
+        if note is not None:
+            body.append(f'<p class="ui-callout ui-callout--warn" data-note="basis">{text(note)}</p>')
+    else:
+        body.append(_artifact_placeholder(score_dims, "Score dimensions") or "")
+    body.append(_partners_row(discussion, text))
+    body.append(
+        '<p class="ic-note">AI-generated assessment: an AI simulation of a committee, not actual VC feedback.</p>'
+    )
+    return _ui.header_card(
+        eyebrow="IC Simulation",
+        title=company,
+        meta_html=meta_html,
+        verdict_html=verdict_html,
+        body_html="".join(body),
+        ring_html=_score_ring(score_dims, text),
+    )
 
 
 # ---------------------------------------------------------------------------
-# Chart 1: Conviction Gauge (semi-circle)
+# The debate
 # ---------------------------------------------------------------------------
 
 
-def _chart_conviction_gauge(score_dims: dict[str, Any] | None) -> str:
-    """Render semi-circle conviction gauge SVG."""
+def _debate(discussion: dict[str, Any] | None, text: _Text) -> str:
+    ph = _artifact_placeholder(discussion, "Discussion")
+    if ph is not None:
+        return ph
+    present = dict(_partner_verdicts(discussion))
+    roles = list(_CANONICAL_PARTNERS) + sorted(set(present) - set(_CANONICAL_PARTNERS))
+    cards: list[str] = []
+    for role in roles:
+        pv = present.get(role)
+        if pv is None:
+            cards.append(
+                f'<article class="ui-card" data-partner="{_esc(role)}"><h3>{text(role.title())}'
+                f"{_pill('neutral', 'No verdict')}</h3></article>"
+            )
+            continue
+        verdict = pv.get("verdict")
+        word = text(_ic_view.verdict_word(verdict))
+        # Whole, as report.md shows it (the page breaks a long token rather than widening).
+        rationale = str(pv.get("rationale") or "")
+        rationale_html = f'<p class="ic-rationale">{text(rationale)}</p>' if rationale else ""
+        cards.append(
+            f'<article class="ui-card" data-partner="{_esc(role)}"><h3>{text(role.title())}'
+            f"{_pill(_VERDICT_TONE.get(_norm(verdict), 'neutral'), word)}</h3>{rationale_html}</article>"
+        )
+    return (
+        '<p class="ic-note">AI-simulated partner perspectives — not actual investor views</p>'
+        f'<div class="ic-debate">{"".join(cards)}</div>'
+    )
+
+
+# ---------------------------------------------------------------------------
+# Dimensions
+# ---------------------------------------------------------------------------
+
+
+def _dimensions(score_dims: dict[str, Any] | None, text: _Text) -> str:
     ph = _artifact_placeholder(score_dims, "Score dimensions")
     if ph is not None:
-        return f'<div class="chart-box"><h2>Conviction Gauge</h2>{ph}</div>'
-
-    summary = _as_dict(score_dims.get("summary"))  # type: ignore[union-attr]
-    conviction = _num(summary.get("conviction_score"), 0.0)
-    verdict = str(summary.get("verdict", "unknown")).strip().lower()
-
-    # Clamp 0-100
-    conviction = max(0.0, min(100.0, conviction))
-
-    # SVG parameters
-    cx, cy, r = 150.0, 130.0, 100.0
-    score_frac = conviction / 100.0
-    # Semi-circle: angle sweeps from pi (left, 0%) to 0 (right, 100%)
-    score_angle = math.pi * (1.0 - score_frac)
-
-    # Zone boundaries
-    z50_angle = math.pi * 0.5
-    z75_angle = math.pi * 0.25
-
-    z50_x = cx + r * math.cos(z50_angle)
-    z50_y = cy - r * math.sin(z50_angle)
-    z75_x = cx + r * math.cos(z75_angle)
-    z75_y = cy - r * math.sin(z75_angle)
-
-    start_x = cx - r
-    start_y = cy
-    arc_end_x = cx + r
-    arc_end_y = cy
-
-    verdict_color = _VERDICT_COLORS.get(verdict, _CLR_NEUTRAL)
-    verdict_label = _esc(_overall_verdict_label(verdict, summary))
-
-    # Coverage denominator — mirrors compose_report.py's executive-summary
-    # guard: "50.0%" off two applicable dimensions reads as a considered
-    # midpoint across the whole framework, and the gauge's ".1f" is MORE
-    # precision than the Markdown's rounded integer, so the caveat is at
-    # least as necessary here.
-    basis = _as_dict(summary.get("conviction_basis"))
-    coverage_note: str | None = None
-    if basis.get("sufficient") is False and basis.get("applicable") is not None:
-        coverage_note = f"Scored on {basis.get('applicable')} of {basis.get('total', '?')} dims"
-
-    # Needle tip on the arc
-    needle_len = r - 10.0
-    needle_x = cx + needle_len * math.cos(score_angle)
-    needle_y = cy - needle_len * math.sin(score_angle)
-
-    view_h = 170 if coverage_note is None else 192
-
-    svg_parts = [
-        f'<svg viewBox="0 0 300 {view_h}" xmlns="http://www.w3.org/2000/svg">',
-        # Background arc zones (no overlay arc — just zones + needle)
-        # Red zone: full semi-circle
-        f'<path d="M {start_x:.2f} {start_y:.2f}'
-        f" A {r:.2f} {r:.2f} 0 1 1"
-        f' {arc_end_x:.2f} {arc_end_y:.2f}"'
-        ' fill="none" stroke="#C0392B" stroke-width="18"'
-        ' stroke-opacity="0.25"/>',
-        # Yellow zone: 50%–75%
-        f'<path d="M {z50_x:.2f} {z50_y:.2f}'
-        f" A {r:.2f} {r:.2f} 0 0 1"
-        f' {z75_x:.2f} {z75_y:.2f}"'
-        ' fill="none" stroke="#C9892B" stroke-width="18"'
-        ' stroke-opacity="0.25"/>',
-        # Green zone: 75%–100%
-        f'<path d="M {z75_x:.2f} {z75_y:.2f}'
-        f" A {r:.2f} {r:.2f} 0 0 1"
-        f' {arc_end_x:.2f} {arc_end_y:.2f}"'
-        ' fill="none" stroke="#2F8A56" stroke-width="18"'
-        ' stroke-opacity="0.25"/>',
-        # Needle line
-        f'<line x1="{cx:.2f}" y1="{cy:.2f}"'
-        f' x2="{needle_x:.2f}" y2="{needle_y:.2f}"'
-        f' stroke="{_esc(verdict_color)}" stroke-width="3"'
-        ' stroke-linecap="round"/>',
-        # Needle hub circle
-        f'<circle cx="{cx:.2f}" cy="{cy:.2f}" r="5" fill="{_esc(verdict_color)}"/>',
-    ]
-
-    # Score text
-    svg_parts.append(
-        f'<text x="{cx:.2f}" y="{cy - 18:.2f}" text-anchor="middle"'
-        f' font-size="36" font-weight="bold" fill="{_esc(verdict_color)}">'
-        f"{conviction:.1f}</text>"
+        return ph
+    items = [i for i in _as_list(score_dims.get("items")) if isinstance(i, dict)]  # type: ignore[union-attr]
+    by_cat: dict[str, list[dict[str, Any]]] = {}
+    for item in items:
+        by_cat.setdefault(str(item.get("category") or "Other"), []).append(item)
+    order = [c for c in _CANONICAL_CATEGORIES if c in by_cat] + sorted(set(by_cat) - set(_CANONICAL_CATEGORIES))
+    groups: list[dict[str, Any]] = []
+    for cat in order:
+        rows = []
+        for item in by_cat[cat]:
+            status = _norm(item.get("status"))
+            # The word is the closed set's, never model text: an unknown status is not scored (tone `na`).
+            word = _STATUS_WORD.get(status, "Not scored")
+            rows.append(
+                {
+                    "tone": _STATUS_TONE.get(status, "na"),
+                    "status_label": word,
+                    "title": text.plain(str(item.get("label") or item.get("id") or "?")),
+                    "criterion": str(item.get("id") or ""),
+                    "evidence": text.plain(str(item.get("evidence") or "")),
+                }
+            )
+        n = len(rows)
+        groups.append({"name": cat, "count_text": f"{n} dimension{'s' if n != 1 else ''}", "items": rows})
+    return _ui.checklist(
+        groups,
+        summary_html="Dimensions are scored once by the committee as a whole, not per partner.",
+        labels=_CHIP_LABELS,
+        statuses=_CHECKLIST_STATUSES,
     )
-    # Verdict label
-    svg_parts.append(
-        f'<text x="{cx:.2f}" y="{cy + 8:.2f}" text-anchor="middle" font-size="14" fill="#7D90A3">{verdict_label}</text>'
-    )
-    # Coverage caveat — the score never appears without its denominator when
-    # the base is too thin for the percentage to be meaningful.
-    if coverage_note is not None:
-        svg_parts.append(
-            f'<text x="{cx:.2f}" y="{cy + 26:.2f}" text-anchor="middle"'
-            f' font-size="10" fill="#7D90A3">{_esc(coverage_note)}</text>'
-        )
-    svg_parts.append("</svg>")
-
-    svg = "\n".join(svg_parts)
-    ai_note = (
-        '<div style="color:var(--lool-mute);font-size:0.75rem;text-align:center;'
-        'margin-top:0.5rem;font-style:italic;">AI-generated assessment</div>'
-    )
-    return f'<div class="chart-box"><h2>Conviction Gauge</h2>{svg}{ai_note}</div>'
 
 
 # ---------------------------------------------------------------------------
-# Chart 2: Category Radar Chart (7-point spider)
+# Category radar (7-point spider)
 # ---------------------------------------------------------------------------
 
 
@@ -652,42 +580,40 @@ def _category_weighted_score(by_cat: dict[str, Any], cat: str) -> float:
     moderate = _num(counts.get("moderate_conviction"), 0.0)
     concern = _num(counts.get("concern"), 0.0)
     db = _num(counts.get("dealbreaker"), 0.0)
-    na = _num(counts.get("not_applicable"), 0.0)
     applicable = strong + moderate + concern + db
     if applicable <= 0:
-        # All N/A or empty
-        if na > 0:
-            return 0.0
         return 0.0
     weighted = strong * 1.0 + moderate * 0.5
     return round(weighted / applicable * 100.0, 2)
 
 
 def _chart_category_radar(score_dims: dict[str, Any] | None) -> str:
-    """Render 7-point radar/spider chart SVG."""
+    """The 7-point radar as a figure (the categories' strong-and-moderate share, 0-100)."""
     ph = _artifact_placeholder(score_dims, "Score dimensions")
     if ph is not None:
-        return f'<div class="chart-box"><h2>Category Radar</h2>{ph}</div>'
+        return ph
 
     summary = _as_dict(score_dims.get("summary"))  # type: ignore[union-attr]
     by_cat = _as_dict(summary.get("by_category"))
 
-    # Ordered categories with their scores
+    # Ordered categories with their scores; any unknown category appended alphabetically.
     categories = list(_CANONICAL_CATEGORIES)
-    # Append any unknown categories alphabetically
     extra = sorted(set(by_cat.keys()) - set(categories))
     categories.extend(extra)
 
     scores = [_category_weighted_score(by_cat, cat) for cat in categories]
     n = len(categories)
-    if n == 0:
-        return f'<div class="chart-box"><h2>Category Radar</h2>{_placeholder("No categories")}</div>'
 
-    # SVG parameters — wide viewBox to avoid label clipping
-    cx, cy = 230.0, 160.0
+    # SVG parameters: the viewBox is drawn tight around the longest labels ("Business Model", "Fund Fit"), so
+    # the chart scales to a phone's width with its labels still about 10 px tall.
+    view_w, view_h = 380, 262
+    cx, cy = view_w / 2, 130.0
     max_r = 100.0
 
-    svg_lines: list[str] = ['<svg viewBox="0 0 460 330" xmlns="http://www.w3.org/2000/svg">']
+    svg_lines: list[str] = [
+        f'<svg viewBox="0 0 {view_w} {view_h}" xmlns="http://www.w3.org/2000/svg" role="img" '
+        'aria-label="Category radar: each category\'s share of strong and moderate conviction">'
+    ]
 
     # Angle offset: start from top (-90 degrees)
     def _angle(i: int) -> float:
@@ -738,7 +664,7 @@ def _chart_category_radar(score_dims: dict[str, Any] | None) -> str:
     # Labels
     for i in range(n):
         a = _angle(i)
-        label_r = max_r + 20
+        label_r = max_r + 12
         lx = cx + label_r * math.cos(a)
         ly = cy + label_r * math.sin(a)
         anchor = "middle"
@@ -749,288 +675,128 @@ def _chart_category_radar(score_dims: dict[str, Any] | None) -> str:
         score_str = f"{scores[i]:.0f}%"
         svg_lines.append(
             f'<text x="{lx:.2f}" y="{ly:.2f}" text-anchor="{anchor}"'
-            f' font-size="10" fill="#7D90A3">'
+            f' font-size="12" fill="#5E6A78">'
             f"{_esc(categories[i])}</text>"
         )
         svg_lines.append(
-            f'<text x="{lx:.2f}" y="{ly + 12:.2f}" text-anchor="{anchor}"'
-            f' font-size="9" fill="#A6AEB5">{_esc(score_str)}</text>'
+            f'<text x="{lx:.2f}" y="{ly + 13:.2f}" text-anchor="{anchor}"'
+            f' font-size="11" fill="#5E6A78">{_esc(score_str)}</text>'
         )
 
     svg_lines.append("</svg>")
     svg = "\n".join(svg_lines)
-    note = (
-        '<div style="color:var(--lool-mute);font-size:0.7rem;margin-top:0.25rem;">'
-        "Values below 5% rendered at 5% for readability.</div>"
+    return (
+        f'<figure class="ic-radar" data-chart="radar">{svg}'
+        "<figcaption>Each category's strong and moderate dimensions as a share of the scored ones. "
+        "Values below 5% are drawn at 5% for readability.</figcaption></figure>"
     )
-    return f'<div class="chart-box"><h2>Category Radar</h2>{svg}{note}</div>'
 
 
 # ---------------------------------------------------------------------------
-# Chart 3: Category Breakdown (horizontal stacked bars)
+# Fund profile
 # ---------------------------------------------------------------------------
 
 
-def _chart_category_bars(score_dims: dict[str, Any] | None) -> str:
-    """Render horizontal stacked bar chart SVG for category breakdowns."""
-    ph = _artifact_placeholder(score_dims, "Score dimensions")
-    if ph is not None:
-        return f'<div class="chart-box full"><h2>Category Breakdown</h2>{ph}</div>'
-
-    summary = _as_dict(score_dims.get("summary"))  # type: ignore[union-attr]
-    by_cat = _as_dict(summary.get("by_category"))
-
-    categories = list(_CANONICAL_CATEGORIES)
-    extra = sorted(set(by_cat.keys()) - set(categories))
-    categories.extend(extra)
-
-    bar_height = 24.0
-    bar_gap = 8.0
-    label_width = 110.0
-    bar_width = 400.0
-    y_start = 10.0
-    total_height = y_start + len(categories) * (bar_height + bar_gap) + 40
-    total_w = label_width + bar_width + 30
-
-    svg_lines: list[str] = [f'<svg viewBox="0 0 {total_w:.0f} {total_height:.0f}" xmlns="http://www.w3.org/2000/svg">']
-
-    status_order = [
-        "strong_conviction",
-        "moderate_conviction",
-        "concern",
-        "dealbreaker",
-        "to_confirm",
-        "not_applicable",
-    ]
-    status_labels = {
-        "strong_conviction": "Strong",
-        "moderate_conviction": "Moderate",
-        "concern": "Concern",
-        "dealbreaker": "Dealbreaker",
-        "to_confirm": "To Confirm",
-        "not_applicable": "N/A",
-    }
-
-    for ci, cat in enumerate(categories):
-        counts = _as_dict(by_cat.get(cat))
-        total = sum(_num(counts.get(s), 0.0) for s in status_order)
-        y = y_start + ci * (bar_height + bar_gap)
-
-        # Category label
-        svg_lines.append(
-            f'<text x="{label_width - 8:.2f}" y="{y + bar_height / 2 + 4:.2f}"'
-            f' text-anchor="end" font-size="11" fill="#374B65">'
-            f"{_esc(cat)}</text>"
+def _fund(fund: dict[str, Any] | None, text: _Text) -> str:
+    """The fund the partners argued from: its name, then `fund_profile.founder_lines` verbatim (the kind line
+    first), the generic fund's note, and a table of thesis, check size and the partners' roles. From an
+    archetype only its role's label and its focus areas are read, never anything that could name a person."""
+    if fund is None or fund is _CORRUPT or _is_stub(fund):
+        return _artifact_placeholder(fund, "Fund profile") or ""
+    fp = _fund_profile_module()
+    parts = [f'<p class="ic-fund-name">{text(fund.get("fund_name", "?"))}</p>']
+    parts += [f'<p class="ic-fund-line" data-fund-line>{_esc(line)}</p>' for line in fp.founder_lines(fund)]
+    note = fp.illustrative_note(fund)
+    if note is not None:
+        parts.append(
+            f'<p class="ui-callout" data-note="illustrative"><strong>{_esc(note[0])}</strong> {_esc(note[1])}</p>'
         )
-
-        # Stacked segments
-        x_offset = label_width
-        for status in status_order:
-            count = _num(counts.get(status), 0.0)
-            if total > 0 and count > 0:
-                seg_w = (count / total) * bar_width
-                color = _STATUS_COLORS.get(status, _CLR_NEUTRAL)
-                svg_lines.append(
-                    f'<rect x="{x_offset:.2f}" y="{y:.2f}"'
-                    f' width="{seg_w:.2f}" height="{bar_height:.2f}"'
-                    f' fill="{_esc(color)}" rx="2"/>'
-                )
-                # Label inside bar: "N Label" if wide enough, else just "N"
-                slabel = status_labels.get(status, "")
-                bar_text = f"{int(count)} {slabel}" if seg_w > 60 else str(int(count))
-                if seg_w > 20:
-                    svg_lines.append(
-                        f'<text x="{x_offset + seg_w / 2:.2f}"'
-                        f' y="{y + bar_height / 2 + 4:.2f}"'
-                        f' text-anchor="middle" font-size="10"'
-                        f' fill="#fff">{_esc(bar_text)}</text>'
-                    )
-                x_offset += seg_w
-
-    # Legend
-    legend_y = y_start + len(categories) * (bar_height + bar_gap) + 10
-    lx = label_width
-    for status in status_order:
-        color = _STATUS_COLORS.get(status, _CLR_NEUTRAL)
-        label = status_labels.get(status, status)
-        svg_lines.append(f'<rect x="{lx:.2f}" y="{legend_y:.2f}" width="10" height="10" fill="{_esc(color)}" rx="2"/>')
-        svg_lines.append(
-            f'<text x="{lx + 14:.2f}" y="{legend_y + 9:.2f}" font-size="9" fill="#7D90A3">{_esc(label)}</text>'
+    rows: list[tuple[str, str]] = []
+    thesis = [str(t) for t in _as_list(fund.get("thesis_areas"))]
+    if thesis:
+        rows.append(("Thesis areas", text(", ".join(thesis))))
+    check = _ic_view.check_size_text(fund)
+    if check is not None:
+        rows.append(("Check size", text(check)))
+    if rows:
+        parts.append(
+            '<div class="ui-table-wrap ic-table-gap"><table class="ui-table"><tbody>'
+            + "".join(f'<tr><th scope="row">{k}</th><td>{v}</td></tr>' for k, v in rows)
+            + "</tbody></table></div>"
         )
-        lx += len(label) * 6.5 + 24
-
-    svg_lines.append("</svg>")
-    svg = "\n".join(svg_lines)
-    return f'<div class="chart-box full"><h2>Category Breakdown</h2>{svg}</div>'
-
-
-# ---------------------------------------------------------------------------
-# Chart 4: Partner Verdicts Cards
-# ---------------------------------------------------------------------------
-
-
-def _chart_partner_verdicts(discussion: dict[str, Any] | None) -> str:
-    """Render partner verdict cards."""
-    ph = _artifact_placeholder(discussion, "Discussion")
-    if ph is not None:
-        return f'<div class="chart-box full"><h2>Partner Verdicts</h2>{ph}</div>'
-
-    verdicts_list = _as_list(discussion.get("partner_verdicts"))  # type: ignore[union-attr]
-
-    # Index by partner role (normalize to lowercase/stripped for matching)
-    by_partner: dict[str, dict[str, Any]] = {}
-    for pv in verdicts_list:
-        if isinstance(pv, dict):
-            role = str(pv.get("partner", "")).strip().lower()
-            if role:  # skip empty partner roles
-                by_partner[role] = pv
-
-    # Build ordered list: canonical partners first, then any extras alphabetically
-    ordered_partners = list(_CANONICAL_PARTNERS)
-    extra = sorted(set(by_partner.keys()) - set(ordered_partners))
-    ordered_partners.extend(extra)
-
-    cards: list[str] = []
-    for partner in ordered_partners:
-        pv = by_partner.get(partner)
-        if pv is None:
-            cards.append(
-                '<div class="partner-card" style="border-left-color: var(--lool-line);">'
-                f"<h3>{_esc(partner.title())}</h3>"
-                '<div class="verdict" style="color: var(--lool-mute);">No verdict</div>'
-                "</div>"
-            )
+    partner_rows: list[str] = []
+    for arch in _as_list(fund.get("archetypes")):
+        if not isinstance(arch, dict):
             continue
-
-        verdict = str(pv.get("verdict", "unknown")).strip().lower()
-        rationale = str(pv.get("rationale", ""))
-        color = _VERDICT_COLORS.get(verdict, _CLR_NEUTRAL)
-        verdict_label = _esc(_verdict_label(verdict))
-
-        rationale = _smart_truncate(rationale)
-
-        cards.append(
-            f'<div class="partner-card" style="border-left-color: {_esc(color)};">'
-            f"<h3>{_esc(partner.title())}</h3>"
-            f'<div class="verdict" style="color: {_esc(color)};">'
-            f"{verdict_label}</div>"
-            f'<div class="rationale">{_esc(rationale)}</div>'
-            f"</div>"
+        label = fp.ROLE_LABELS.get(str(arch.get("role", "")))
+        if label is None:
+            continue
+        focus = ", ".join(str(a) for a in _as_list(arch.get("focus_areas")))
+        partner_rows.append(f"<tr><td>{_esc(label)}</td><td>{text(focus)}</td></tr>")
+    if partner_rows:
+        parts.append(
+            '<div class="ui-table-wrap ic-table-gap"><table class="ui-table">'
+            '<thead><tr><th scope="col">Partner</th><th scope="col">Focus areas</th></tr></thead>'
+            f"<tbody>{''.join(partner_rows)}</tbody></table></div>"
         )
-
-    subtitle = (
-        '<div style="color:var(--lool-mute);font-size:0.8rem;margin-bottom:0.75rem;'
-        'font-style:italic;">AI-simulated partner perspectives '
-        "— not actual investor views</div>"
-    )
-    inner = f'<div class="partner-grid">{"".join(cards)}</div>'
-    return f'<div class="chart-box full"><h2>Partner Verdicts</h2>{subtitle}{inner}</div>'
+    return "".join(parts)
 
 
 # ---------------------------------------------------------------------------
-# Chart 5: Conflict Summary
+# Conflicts
 # ---------------------------------------------------------------------------
 
 
-def _chart_conflict_summary(conflict: dict[str, Any] | None) -> str:
-    """Render conflict summary badge + table."""
+def _conflicts(conflict: dict[str, Any] | None, text: _Text) -> str:
     ph = _artifact_placeholder(conflict, "Conflict check")
     if ph is not None:
-        return f'<div class="chart-box full"><h2>Conflict Check</h2>{ph}</div>'
-
+        return ph
     summary = _as_dict(conflict.get("summary"))  # type: ignore[union-attr]
-    severity = str(summary.get("overall_severity", "unknown")).strip().lower()
-    badge_color = _SEVERITY_COLORS.get(severity, _CLR_NEUTRAL)
-
-    parts: list[str] = [f'<span class="badge" style="background: {_esc(badge_color)};">{_esc(severity.title())}</span>']
-
-    conflicts = _as_list(conflict.get("conflicts"))  # type: ignore[union-attr]
-    if conflicts:
-        rows: list[str] = []
-        for c in conflicts:
-            if not isinstance(c, dict):
-                continue
-            company = _esc(str(c.get("company", "?")))
-            ctype = _esc(str(c.get("type", "?")))
-            csev = str(c.get("severity", "?")).strip().lower()
-            csev_color = _SEVERITY_COLORS.get(csev, _CLR_NEUTRAL)
-            rows.append(
-                f"<tr><td>{company}</td><td>{ctype}</td>"
-                f'<td style="color: {_esc(csev_color)};">'
-                f"{_esc(csev.title())}</td></tr>"
-            )
+    severity = summary.get("overall_severity", "unknown")
+    overall = _pill(_SEVERITY_TONE.get(_norm(severity), "neutral"), _esc(_severity_word(severity, text)))
+    facts = [f"Overall severity: {overall}"]
+    if summary.get("total_checked") is not None:
+        facts.append(f"{text(summary.get('total_checked'))} portfolio companies checked")
+    if summary.get("conflict_count") is not None:
+        facts.append(f"{text(summary.get('conflict_count'))} conflicts found")
+    parts = [f'<p class="ic-oneliner" data-conflict-summary>{" · ".join(facts)}</p>']
+    rows: list[str] = []
+    for c in _as_list(conflict.get("conflicts")):  # type: ignore[union-attr]
+        if not isinstance(c, dict):
+            continue
+        sev = c.get("severity", "?")
+        sev_pill = _pill(_SEVERITY_TONE.get(_norm(sev), "neutral"), _esc(_severity_word(sev, text)), " data-severity")
+        rows.append(
+            f"<tr><td>{text(c.get('company', '?'))}</td><td>{text(str(c.get('type', '?')))}</td>"
+            f"<td>{sev_pill}</td>"
+            f"<td>{text(c.get('rationale') or c.get('detail') or '')}</td></tr>"
+        )
+    if rows:
         parts.append(
-            '<table class="conflict-table">'
-            "<tr><th>Company</th><th>Type</th><th>Severity</th></tr>"
-            f"{''.join(rows)}</table>"
+            '<div class="ui-table-wrap ic-table-gap"><table class="ui-table">'
+            '<thead><tr><th scope="col">Company</th><th scope="col">Type</th><th scope="col">Severity</th>'
+            '<th scope="col">Why</th></tr></thead>'
+            f"<tbody>{''.join(rows)}</tbody></table></div>"
         )
-
-    inner = "".join(parts)
-    return f'<div class="chart-box full"><h2>Conflict Check</h2>{inner}</div>'
+    return "".join(parts)
 
 
 # ---------------------------------------------------------------------------
-# Summary bar (between title and charts)
+# Context supplied with the request
 # ---------------------------------------------------------------------------
 
 
-def _section_summary_bar(
-    startup: dict[str, Any] | None,
-    score_dims: dict[str, Any] | None,
-    discussion: dict[str, Any] | None = None,
-) -> str:
-    """Render a compact text summary bar between title and charts."""
-    if not _usable(startup) and not _usable(score_dims) and not _usable(discussion):
+def _host_context(startup: dict[str, Any] | None) -> str:
+    """The context supplied with the request, verbatim (escaped, never reworded), in `host_context`'s words."""
+    parts = _host_context_module().host_context_parts(startup if _usable(startup) else None)
+    if parts is None:
         return ""
-
-    parts: list[str] = []
-
-    if _usable(startup):
-        one_liner = str(startup.get("one_liner", ""))
-        sector = str(startup.get("sector", ""))
-        if one_liner:
-            parts.append(f'<div style="color:var(--lool-ink);font-size:0.95rem;">{_esc(one_liner)}</div>')
-        if sector:
-            parts.append(f'<div style="color:var(--lool-mute);font-size:0.85rem;">Sector: {_esc(sector)}</div>')
-
-    if _usable(discussion):
-        verdict_spans: list[str] = []
-        for pv in _as_list(discussion.get("partner_verdicts")):
-            if not isinstance(pv, dict):
-                continue
-            name = str(pv.get("partner", "")).strip().title()
-            verdict = str(pv.get("verdict", "")).lower().replace(" ", "_")
-            if not name:
-                continue
-            color = _VERDICT_COLORS.get(verdict, _CLR_NEUTRAL)
-            label = _verdict_label(verdict)
-            verdict_spans.append(f'<span style="color:{color};">{_esc(name)}: {_esc(label)}</span>')
-        if verdict_spans:
-            parts.append(f'<div style="font-size:0.85rem;margin-top:0.25rem;">{" · ".join(verdict_spans)}</div>')
-
-    if _usable(score_dims):
-        summary = _as_dict(score_dims.get("summary"))
-        strong = int(_num(summary.get("strong_conviction"), 0))
-        moderate = int(_num(summary.get("moderate_conviction"), 0))
-        concern = int(_num(summary.get("concern"), 0))
-        db = int(_num(summary.get("dealbreaker"), 0))
-        breakdown = (
-            f'<span style="color:#2F8A56;">{strong} strong</span>'
-            f' · <span style="color:#C9892B;">{moderate} moderate</span>'
-            f' · <span style="color:#C0392B;">{concern} concern</span>'
-            f' · <span style="color:#92301F;">{db} dealbreaker</span>'
-        )
-        parts.append(f'<div style="font-size:0.85rem;margin-top:0.25rem;">{breakdown}</div>')
-
-    if not parts:
-        return ""
-
-    inner = "\n".join(parts)
-    return (
-        '<div style="background:var(--lool-paper);padding:1rem 1.5rem;'
-        'margin-bottom:1.5rem;border:1px solid var(--lool-line-2);">'
-        f"{inner}</div>"
-    )
+    intro, items, closing = parts
+    out = [f'<p data-context-line="intro">{_esc(intro)}</p>']
+    if items:
+        out.append("<ul>" + "".join(f"<li data-context-item>{_esc(i)}</li>" for i in items) + "</ul>")
+    out += [f'<p data-context-line="closing">{_esc(c)}</p>' for c in closing]
+    return f'<div class="ic-context">{"".join(out)}</div>'
 
 
 # ---------------------------------------------------------------------------
@@ -1040,90 +806,70 @@ def _section_summary_bar(
 
 def compose_html(dir_path: str) -> str:
     """Load artifacts and compose the full HTML document."""
-    scripts_dir = os.path.dirname(os.path.abspath(__file__))
-    if scripts_dir not in sys.path:
-        sys.path.insert(0, scripts_dir)
     import _theme
 
-    all_names = REQUIRED_ARTIFACTS + OPTIONAL_ARTIFACTS
     artifacts: dict[str, dict[str, Any] | None] = {}
-    for name in all_names:
+    for name in REQUIRED_ARTIFACTS + OPTIONAL_ARTIFACTS:
         artifacts[name] = _load_artifact(dir_path, name)
 
     startup = artifacts.get("startup_profile.json")
     score_dims = artifacts.get("score_dimensions.json")
     discussion = artifacts.get("discussion.json")
     conflict = artifacts.get("conflict_check.json")
+    fund = artifacts.get("fund_profile.json")
 
-    # Title
-    if _usable(startup):
-        company = _esc(str(startup.get("company_name", "Unknown")))
-        date = _esc(str(startup.get("simulation_date", "")))
-        stage = _esc(str(startup.get("stage", "unknown")).replace("_", " ").title())
-        title_html = (
-            f'<h1>IC Simulation: {company}</h1><div class="subtitle">{date} | {stage}</div>'
-            '<div class="subtitle">Generated by '
-            '<a href="https://github.com/lool-ventures/founder-skills">founder skills</a>'
-            ' by <a href="https://lool.vc">lool ventures</a>'
-            " — IC Simulation Agent</div>"
+    # The keep-set report.md was substituted with (the tokens in the context supplied with the request), from
+    # the same function, so the page leaves the same tokens alone.
+    policy = _ui.founder_text_policy()
+    keep = _host_context_module().keep_set(startup if _usable(startup) else None, policy.scan if policy else None)
+    text = _Text(keep)
+
+    header = _header(startup, score_dims, discussion, text)
+
+    # (section id, heading, body, in the nav)
+    sections: list[tuple[str, str, str, bool]] = []
+    findings = _key_findings(score_dims, discussion, conflict, text)
+    if findings:
+        sections.append(("findings", "Key Findings", findings, False))
+    context = _host_context(startup)
+    if context:
+        sections.append(("context", "Context Supplied With This Request", context, True))
+    sections += [
+        ("debate", "The Debate", _debate(discussion, text), True),
+        ("checklist", "Dimensions", _dimensions(score_dims, text), True),
+        ("radar", "Category Radar", f'<div class="ui-scroll">{_chart_category_radar(score_dims)}</div>', False),
+        ("fund", "Fund Profile", _fund(fund, text), True),
+        ("conflicts", "Conflict Check", _conflicts(conflict, text), True),
+    ]
+    nav_names = {
+        "debate": "Debate",
+        "checklist": "Dimensions",
+        "fund": "Fund profile",
+        "conflicts": "Conflicts",
+        "context": "Context",
+    }
+    nav = (
+        '<nav class="ui-nav" aria-label="Sections">'
+        + "".join(f'<a href="#{sid}">{nav_names[sid]}</a>' for sid, _t, _b, in_nav in sections if in_nav)
+        + "</nav>"
+    )
+    body = (
+        header
+        + nav
+        + "".join(
+            f'<section class="ui-section" id="{sid}" aria-labelledby="{sid}-h"><h2 id="{sid}-h">{_esc(title)}</h2>'
+            f"{content}</section>"
+            for sid, title, content, _nav in sections
         )
-    else:
-        title_html = (
-            "<h1>IC Simulation Report</h1>"
-            '<div class="subtitle">Generated by '
-            '<a href="https://github.com/lool-ventures/founder-skills">founder skills</a>'
-            ' by <a href="https://lool.vc">lool ventures</a>'
-            " — IC Simulation Agent</div>"
-        )
-
-    # Charts
-    gauge = _chart_conviction_gauge(score_dims)
-    radar = _chart_category_radar(score_dims)
-    bars = _chart_category_bars(score_dims)
-    partners = _chart_partner_verdicts(discussion)
-    conflicts = _chart_conflict_summary(conflict)
-    findings = _key_findings(score_dims, discussion, conflict)
-
-    if _usable(startup):
-        page_title = f"IC Simulation: {_esc(str(startup.get('company_name', 'Report')))}"
-    else:
-        page_title = "IC Simulation Report"
-
-    summary_bar = _section_summary_bar(startup, score_dims, discussion)
-
-    body = f"""
-{title_html}
-{summary_bar}
-<div class="chart-grid">
-{gauge}
-{radar}
-</div>
-{findings}
-{bars}
-{partners}
-{conflicts}
-<div class="footer">
-  Generated by <a href="https://github.com/lool-ventures/founder-skills">founder skills</a>
-  by <a href="https://lool.vc">lool ventures</a> — IC Simulation Agent
-</div>
-{_tooltip_js()}
-{_collapsible_js()}
-"""
-
-    return f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>{page_title}</title>
-{_css(_theme.brand_css())}
-</head>
-<body>
-{body}
-{_theme.FOOTER_CREDIT_HTML}
-</body>
-</html>
-"""
+    )
+    company = str(startup.get("company_name", "Report")) if _usable(startup) else ""
+    return _ui.page_shell(
+        title=f"IC Simulation: {company}" if company else "IC Simulation Report",
+        body_html=body,
+        brand_css=_theme.brand_css(),
+        page_css=_css(),
+        skill_name="IC Simulation",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1169,13 +915,23 @@ def _run_ref_module() -> ModuleType:
 
 
 def _fund_profile_module() -> ModuleType:
-    """The sibling `fund_profile`, for its check of a profile that names people."""
+    """The sibling `fund_profile`: its check of a profile that names people, and the fund lines it owns."""
     scripts_dir = os.path.dirname(os.path.abspath(__file__))
     if scripts_dir not in sys.path:
         sys.path.insert(0, scripts_dir)
     import fund_profile
 
     return fund_profile
+
+
+def _host_context_module() -> ModuleType:
+    """The sibling `host_context`, the one owner of the supplied context's wording and keep-set."""
+    scripts_dir = os.path.dirname(os.path.abspath(__file__))
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    import host_context
+
+    return host_context
 
 
 def _own_run_id(dir_path: str) -> str | None:

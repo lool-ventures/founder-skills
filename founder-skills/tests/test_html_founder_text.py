@@ -75,6 +75,9 @@ _TEXT_FLOOR_BY_PAGE = {
     ("deck-review", "visualize.py"): 4000,
     # market-sizing's report lists all 22 self-check criteria (about 3.8 KB of text on the fixture).
     ("market-sizing", "visualize.py"): 3000,
+    # ic-sim's report lists all 28 dimensions with their evidence, the debate and the fund profile (about
+    # 6 KB of text on the fixture).
+    ("ic-sim", "visualize.py"): 4500,
 }
 
 
@@ -127,6 +130,16 @@ def _cap_table_keep() -> frozenset[str]:
     return frozenset(k for m in mod.MAPS.values() for k in m)
 
 
+def _report_keep(work: Path) -> frozenset[str]:
+    """The tokens a report left as written (`report.json.host_context.keep_tokens`: ic-sim's keep-set for the
+    context supplied with the request, which the page leaves alone too). Empty when the report records none."""
+    import json
+
+    report = json.loads((work / "report.json").read_text(encoding="utf-8"))
+    block = report.get("host_context") if isinstance(report, dict) else None
+    return frozenset(block.get("keep_tokens") or []) if isinstance(block, dict) else frozenset()
+
+
 # The DELIVERABLE's own filename is not internal plumbing. A page that tells a founder "open
 # explore.html directly in Chrome" is naming the file in their hands and giving them something they
 # can act on — which is precisely the test `_founder_text` applies. The filename class cannot make
@@ -161,6 +174,7 @@ def test_generated_html_carries_no_internal_tokens(skill: str, generator: str) -
         result = subprocess.run([sys.executable, *argv], capture_output=True, text=True)
         assert result.returncode == 0, f"{skill}/{generator} failed: {result.stderr[-400:]}"
         html = out.read_text(encoding="utf-8")
+        report_keep = _report_keep(work)
 
     # Non-vacuity: a trivially small page would pass without proving anything.
     assert len(html) > 2000, f"{skill}/{generator} produced only {len(html)}B"
@@ -171,8 +185,8 @@ def test_generated_html_carries_no_internal_tokens(skill: str, generator: str) -
         f"stripper broke or the page stopped rendering static text"
     )
 
-    keep = _cap_table_keep() if skill == "cap-table" else None
-    found = ft.scan(text, extra_keep=keep)
+    keep = (_cap_table_keep() if skill == "cap-table" else frozenset()) | report_keep
+    found = ft.scan(text, extra_keep=keep or None)
     assert found["enums"] == [], (
         f"{skill}/{generator} shows internal token(s) in founder-visible text: {found['enums']}. "
         f"Render them through the shared founder-text policy, or stop writing them into the artifact."
@@ -546,8 +560,10 @@ def test_fmr_checklist_evidence_goes_through_the_founder_text_policy_on_both_pag
 # it never had to read.
 # ---------------------------------------------------------------------------------------------------
 
-# (skill, the checklist item field the page shows under each criterion)
-_SEEDED_REPORT_PAGES = [("deck-review", "evidence"), ("market-sizing", "notes")]
+# (skill, the checklist item field the page shows under each criterion). ic-sim's checklist is its 28
+# dimensions, in score_dimensions.json, and its passing status is strong conviction.
+_SEEDED_REPORT_PAGES = [("deck-review", "evidence"), ("market-sizing", "notes"), ("ic-sim", "evidence")]
+_SEEDED_SOURCE = {"ic-sim": ("score_dimensions.json", "strong_conviction")}
 
 
 def _report_page_with_seeded_pass_item(skill: str, field: str) -> str:
@@ -558,10 +574,16 @@ def _report_page_with_seeded_pass_item(skill: str, field: str) -> str:
     with tempfile.TemporaryDirectory() as td:
         work = Path(td)
         drive_compose(skill, FIXTURES / skill, work)
-        ck = json.loads((work / "checklist.json").read_text())
-        seeded = next(i for i in ck["items"] if i["status"] == "pass" and i.get("weight", 1) != 0)
+        artifact, passing = _SEEDED_SOURCE.get(skill, ("checklist.json", "pass"))
+        ck = json.loads((work / artifact).read_text())
+        seeded = next(i for i in ck["items"] if i["status"] == passing and i.get("weight", 1) != 0)
         seeded[field] = _FMR_SEEDED_EVIDENCE
-        (work / "checklist.json").write_text(json.dumps(ck))
+        (work / artifact).write_text(json.dumps(ck))
+        if skill == "ic-sim":
+            # The fund panel is page-built text too: seed one thesis area with the same tokens.
+            fund = json.loads((work / "fund_profile.json").read_text())
+            fund["thesis_areas"] = [*fund.get("thesis_areas", []), _FMR_SEEDED_EVIDENCE]
+            (work / "fund_profile.json").write_text(json.dumps(fund))
         out = work / "page.html"
         result = subprocess.run(
             [sys.executable, *html_argv(skill, "visualize.py", work, out)], capture_output=True, text=True
@@ -577,6 +599,75 @@ def test_the_scan_reaches_passing_checklist_rows_on_the_report_page(skill: str, 
         f"{skill}/visualize.py: a token seeded into a PASSING item's {field} was not seen by the "
         f"founder-text scan ({found}), so the scan does not reach those rows"
     )
+
+
+def test_the_ic_sim_seeded_thesis_area_reaches_the_fund_panel_through_the_policy() -> None:
+    text = _text_nodes(_report_page_with_seeded_pass_item("ic-sim", "evidence"))
+    assert text.count("seeded snake token") >= 2, "the evidence row and the thesis area both carry the seed"
+    assert text.count("SEEDED_SHOUT_TOKEN") >= 2, "the scan sees both seeded places"
+
+
+# ---------------------------------------------------------------------------------------------------
+# ic-sim: the context supplied with the request is rendered verbatim, and the page leaves alone the tokens
+# report.md leaves alone. A kept fact carrying an invented snake_case token must reach the page as written,
+# and the fleet scan, given report.json's keep_tokens, must not flag it.
+# ---------------------------------------------------------------------------------------------------
+
+_HOST_FACT = {
+    "fact": "Pilot cohort tracked as widget_yield_index rose in Q1",
+    "source": "Invented pilot log",
+    "date": "2026-01-15",
+}
+
+
+def test_ic_sim_host_context_is_verbatim_and_keeps_the_reports_keep_set() -> None:
+    import json
+
+    from no_ledger_goldens import html_argv
+
+    ft = _founder_text()
+    assert ft.scan(_HOST_FACT["fact"])["enums"] == ["widget_yield_index"], "the seed no longer carries its token"
+    with tempfile.TemporaryDirectory() as td:
+        work = Path(td) / "sim"
+        work.mkdir()
+        for src in (FIXTURES / "ic-sim").glob("*.json"):
+            (work / src.name).write_bytes(src.read_bytes())
+        profile = json.loads((work / "startup_profile.json").read_text())
+        profile["host_context"] = {
+            "provenance": "supplied_with_request",
+            "sha256": "0" * 64,
+            "items": [dict(_HOST_FACT, index=1)],
+            "dropped": [],
+        }
+        (work / "startup_profile.json").write_text(json.dumps(profile))
+        # The same token in a dimension's evidence: report.md keeps it there too (one keep-set for the whole
+        # document), so the page must keep it in the same row, or the two deliverables read it two ways.
+        sd = json.loads((work / "score_dimensions.json").read_text())
+        sd["items"][0]["evidence"] = "Checked against the widget_yield_index in the pilot log"
+        (work / "score_dimensions.json").write_text(json.dumps(sd))
+        scripts = REPO_ROOT / "founder-skills" / "skills" / "ic-sim" / "scripts"
+        composed = subprocess.run(
+            [sys.executable, str(scripts / "compose_report.py"), "--dir", str(work), "-o", str(work / "report.json")],
+            capture_output=True,
+            text=True,
+        )
+        assert composed.returncode == 0, composed.stderr[-400:]
+        keep = _report_keep(work)
+        out = work / "page.html"
+        page = subprocess.run(
+            [sys.executable, *html_argv("ic-sim", "visualize.py", work, out)], capture_output=True, text=True
+        )
+        assert page.returncode == 0, page.stderr[-400:]
+        html = out.read_text(encoding="utf-8")
+        md = json.loads((work / "report.json").read_text())["report_markdown"]
+    assert keep == frozenset({"widget_yield_index"})
+    text = _text_nodes(html)
+    line = f"{_HOST_FACT['fact']} ({_HOST_FACT['source']}, {_HOST_FACT['date']})"
+    assert line in text and line in md, "the kept fact reached both deliverables as written"
+    assert ft.scan(text, extra_keep=keep)["enums"] == [], ft.scan(text, extra_keep=keep)
+    assert "widget_yield_index" in ft.scan(text)["enums"], "without the keep-set the scan would flag the fact"
+    evidence = "Checked against the widget_yield_index in the pilot log"
+    assert evidence in md and evidence in text, "the page and report.md keep the same tokens in the same row"
 
 
 @pytest.mark.parametrize(("skill", "field"), _SEEDED_REPORT_PAGES)
