@@ -169,6 +169,33 @@ def test_the_last_reply_line_wins(tmp_path: Path) -> None:
     assert _blocks(_run(tmp_path, _whole_send(line=f"{REPLY_LINE}\nFS_HOST_REPLY_TOOL mcp__other__tool text")))
 
 
+@pytest.mark.parametrize("invalid_last", [True, False], ids=["invalid-after-valid", "invalid-before-valid"])
+def test_an_invalid_line_never_cancels_a_valid_one(tmp_path: Path, invalid_last: bool) -> None:
+    """The last VALID line wins: a malformed line (here a refused name) is ignored with a stderr line, in either
+    order, and the valid line still names the tool."""
+    _handover(tmp_path)
+    bad = "FS_HOST_REPLY_TOOL Bash command"
+    r = _run(tmp_path, _whole_send(line=f"{REPLY_LINE}\n{bad}" if invalid_last else f"{bad}\n{REPLY_LINE}"))
+    assert r.stdout == "", r.stdout
+    assert "reply tool line ignored" in r.stderr
+
+
+def test_a_malformed_line_writes_nothing_on_a_stop_that_is_not_ours(tmp_path: Path) -> None:
+    """The line is looked for only when the prompt ran a closing script: any other stop stays silent."""
+    rows = [_user("Size this market.\nFS_HOST_REPLY_TOOL Bash command"), _assistant_text("What is 2+2? It is 4.")]
+    r = _run(tmp_path, rows)
+    assert r.stdout == "" and r.stderr == "", r
+    assert "reply tool line ignored" in _run(tmp_path, _whole_send(line="FS_HOST_REPLY_TOOL Bash command")).stderr
+
+
+def test_a_hand_over_written_only_as_plain_text_passes_with_the_line(tmp_path: Path) -> None:
+    """The accepted residual: with the line and no send, the plain text is judged as before, so a whole hand-over
+    there passes, though on such a host it may never be seen (blocking it would block every run on a host whose
+    tool calls do not reach the transcript)."""
+    _handover(tmp_path)
+    assert _run(tmp_path, _reply_rows(_assistant_text(PRINTED))).stdout == ""
+
+
 @pytest.mark.parametrize("send", [True, False], ids=["send", "lever-no-send"])
 def test_unseen_text_with_a_figure_beside_a_whole_send_passes(tmp_path: Path, send: bool) -> None:
     """R3. The plain text is unseen on this host, so a figure in it is not added to the founder's message (the
@@ -206,30 +233,31 @@ def test_a_turn_ending_on_a_send_ignores_the_payloads_last_text(tmp_path: Path, 
         assert json.loads(r.stdout)["decision"] == "block"
 
 
-CLAUSE = f"with {REPLY_NAME}, the tool your last message went through, not as plain text"
+CLAUSE = f"with {REPLY_NAME}, the tool the founder reads replies through, not as plain text"
 
 
-@pytest.mark.parametrize("send", [True, False], ids=["send", "lever-no-send"])
-def test_a_rewritten_send_is_blocked_and_told_to_use_the_same_tool(tmp_path: Path, send: bool) -> None:
-    """R5. The reason's lead asks for the follow-up through the same tool, before the correction lead -- which
-    is resent to the founder, so the clause never sits inside or after it. Lever: no send, no clause."""
+@pytest.mark.parametrize("case", ["send", "no-send", "lever-no-line"])
+def test_a_block_asks_for_the_follow_up_through_the_named_tool(tmp_path: Path, case: str) -> None:
+    """R5. Whenever the line names the tool -- the turn sent through it or not, since on that host a plain-text
+    follow-up may never be seen -- the reason's lead asks for the follow-up through it, before the correction lead
+    (which is resent to the founder, so the clause never sits inside or after it). Lever: no line, no clause."""
     _handover(tmp_path)
     after: list[dict[str, Any]] = []
-    if send:
+    if case == "send":
         after += [_assistant_send(REPLY_NAME, "toolu_r1", text=OWN_VERDICT), _sent("toolu_r1")]
-    else:
-        after.append(_assistant_text(OWN_VERDICT))
     after.append(_assistant_text(DONE))
-    reason = json.loads(_run(tmp_path, _reply_rows(*after)).stdout)["reason"]
-    if send:
+    reason = json.loads(
+        _run(tmp_path, _reply_rows(*after, line=None if case == "lever-no-line" else REPLY_LINE)).stdout
+    )["reason"]
+    if case == "lever-no-line":
+        assert CLAUSE not in reason and REPLY_NAME not in reason
+    else:
         assert CLAUSE in reason and reason.index(CLAUSE) < reason.index(LEAD)
         assert REPLY_NAME not in reason[reason.index(LEAD) :]
-    else:
-        assert CLAUSE not in reason and REPLY_NAME not in reason
 
 
 def test_a_refused_closer_asks_for_its_follow_up_through_the_tool(tmp_path: Path) -> None:
-    """The refused-closer reason asks for a follow-up too; with a send in the turn it names the tool."""
+    """The refused-closer reason asks for a follow-up too; with the line it names the tool."""
     _handover(tmp_path)
     rows = base._rows_with_result(
         _result_for("toolu_close", base.REFUSED, is_error=True, as_string=True),
@@ -284,10 +312,32 @@ def test_second_stop_logs_whether_the_hand_over_passed(tmp_path: Path, case: str
             _assistant_text(DONE),
         ],
     }[case]
-    rows = _reply_rows(_assistant_text(OWN_VERDICT), _feedback(), *follow)
+    rows = _reply_rows(
+        _assistant_text(OWN_VERDICT), _feedback(f"Your last message did not deliver ...\n\n{LEAD}"), *follow
+    )
     r = _run(tmp_path, rows, {"stop_hook_active": True})
     assert r.returncode == 0 and r.stdout == ""
     assert r.stderr.strip() == f"stop_handover_check: {want}", r.stderr
+
+
+@pytest.mark.parametrize("first_block", ["delivery", "no-ask-end", "lever-hand-over"])
+def test_a_second_stop_after_another_block_writes_nothing(tmp_path: Path, first_block: str) -> None:
+    """The measurement is of hand-over corrections only: after a delivery or no-ask-end block the follow-up was
+    never asked to carry the hand-over, so judging it would count correct runs as failed corrections. Lever: the
+    same follow-up after a hand-over block (its feedback carries the correction lead) is judged."""
+    _handover(tmp_path)
+    feedback = {
+        "delivery": "Your last message points the founder to the finished files but did not attach them.",
+        "no-ask-end": "[no-ask-end] The run is still marked running.",
+        "lever-hand-over": f"Your last message did not deliver ...\n\n{LEAD}",
+    }[first_block]
+    rows = _reply_rows(_assistant_text(PRINTED), _feedback(feedback), _assistant_text("Attached the files."))
+    r = _run(tmp_path, rows, {"stop_hook_active": True})
+    assert r.stdout == ""
+    if first_block == "lever-hand-over":
+        assert "second stop: hand-over failed" in r.stderr
+    else:
+        assert r.stderr == "", r.stderr
 
 
 def test_a_second_stop_with_no_closing_call_writes_nothing(tmp_path: Path) -> None:
@@ -564,14 +614,50 @@ def test_start_records_the_line_and_a_later_line_replaces_it(tmp_path: Path) -> 
     rec = h.ledger(root, RID)["reply_tool"]
     assert (rec["name"], rec["key"], rec["raw"], rec["by"]) == (REPLY_NAME, "text", REPLY_LINE, "run_status.py")
     assert "not_used_by_skill" not in rec
-    # Open a question so the run waits: its resume repeats the recorded line, and a later line replaces it.
+    assert h.status(root, RID)["reply_tool"] == REPLY_LINE
+    # Open a question so the run waits. Its resume prompt never repeats the line: the ledger's lines are typed by
+    # the model, and the hook trusts the line only in a founder's own message, which a pasted resume prompt is.
     opened = h.record(root, RID, "open", "--gate", "ms_methodology")
     assert h.status(root, RID)["status"] == "waiting", opened.stdout + opened.stderr
-    assert REPLY_LINE in h.status(root, RID)["resume_prompt"]
+    prompt = h.status(root, RID)["resume_prompt"]
+    assert f"FS_HOST_RUN_ID={RID}" in prompt and "FS_HOST_REPLY_TOOL" not in prompt
     newer = "FS_HOST_REPLY_TOOL mcp__hostchat__post body"
     proc = h.start(root, "market-sizing", f"FS_HOST_RUN_ID={RID}\n{newer}\n")
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert h.ledger(root, RID)["reply_tool"]["raw"] == newer
+    assert h.status(root, RID)["reply_tool"] == newer
+
+
+def test_a_run_with_no_line_shows_none(tmp_path: Path) -> None:
+    root = tmp_path / "artifacts"
+    root.mkdir()
+    assert h.start_ok(root, "market-sizing", f"FS_HOST_RUN_ID={RID}\n") == RID
+    status = h.status(root, RID)
+    assert "reply_tool" in status and status["reply_tool"] is None
+    assert "reply_tool" not in h.ledger(root, RID)
+
+
+@pytest.mark.parametrize(
+    "rest",
+    [
+        f" {REPLY_NAME} text",
+        f"\t{REPLY_NAME} text",
+        f"\u00a0{REPLY_NAME} text",
+        f"  {REPLY_NAME} text",
+        f" {REPLY_NAME}",
+        f" {REPLY_NAME} text more",
+        " Bash command",
+        f" {REPLY_NAME} 1x",
+    ],
+    ids=["ok", "tab", "nbsp", "two-spaces", "one-word", "three-words", "refused", "bad-key"],
+)
+def test_the_hooks_line_shape_is_starts(rest: str) -> None:
+    """The hook's whole-line check accepts exactly what `start` accepts, separator included."""
+    hook = base._load_hook()
+    line = "FS_HOST_REPLY_TOOL" + rest
+    _rid, _pre, bad, _flags = _gates().parse_request(line + "\n", "market-sizing")
+    parsed, _why = hook.reply_tool_line_problem(rest)
+    assert (parsed is not None) == (not bad), (rest, bad)
 
 
 def test_start_refuses_a_bad_line(tmp_path: Path) -> None:

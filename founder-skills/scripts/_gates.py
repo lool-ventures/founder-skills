@@ -186,7 +186,8 @@ REQUEST_TOKENS = {
 #
 # Read by the Stop hook from a founder's own message (never from this ledger: the model types the lines that
 # reach `start`), so it can judge the text sent through that tool in place of unseen plain text. Recorded here
-# so the run's own record shows it; a later request that carries the line replaces it. The skills with a
+# so the run's own record shows it (`run_status.json` `reply_tool`); a later request that carries the line
+# replaces it; `resume_prompt` never repeats it (`flag_lines`). The skills with a
 # closing step the hook judges use it; the others accept it and list it `not_used_by_skill`. The hook carries a
 # copy of the two patterns, the refused names and the problem check, held equal by test_stop_reply_tool.py.
 REPLY_TOOL_NAME_MAX = 128
@@ -460,12 +461,15 @@ CONTRACT_NOTES = (
     "agent-message or file-delivery tool (anything else is `PRE_ANSWER_INVALID`). Send it in the request's own "
     "message: the end-of-turn check reads it there (any message of the session, the last line winning), never "
     "from the run's records. It then judges the text sent through that tool after the closing step, and only that, "
-    "whenever the turn sent any; with no send it judges the plain text as before. If it sends the model back, it "
-    "asks for the follow-up through the same tool, still at most once per turn; the follow-up itself is logged, "
+    "whenever the turn sent any; with no send it judges the plain text as before (so a hand-over written only "
+    "as plain text still passes, though the founder may not see it). If it sends the model back, it asks for the "
+    "follow-up through that tool, still at most once per turn; the follow-up itself is logged, "
     "not re-checked. Without the line nothing changes. The tool's calls must appear in the session transcript as "
     "the main thread's tool calls; a host whose runtime does not record them gains nothing from the line. "
     "market-sizing, competitive-positioning and financial-model-review use it; the other skills accept it and list "
-    "it in `notices` as `PRE_ANSWER_IGNORED` with reason `not_used_by_skill` and `gate: null`. Plugin versions "
+    "it in `notices` as `PRE_ANSWER_IGNORED` with reason `not_used_by_skill` and `gate: null`. `run_status.json` "
+    "`reply_tool` is the line the run recorded (null without one); `resume_prompt` never repeats it, so a resume "
+    "request carries it only when you send it again. Plugin versions "
     "before 0.22 refuse the line (`PRE_ANSWER_INVALID`), so send it only to 0.22 and later; `run_status.py check` "
     "tells you.",
     "`host_context=supplied` carries context about the company supplied with the request: a JSON array of "
@@ -4828,16 +4832,16 @@ def derive_authorized(ledger: dict[str, Any], key: str) -> bool:
 
 
 def flag_lines(ledger: dict[str, Any]) -> list[str]:
-    """The flag lines a resume repeats (no-ask, then the reply tool), in the order the request may send them."""
-    reply = ledger.get("reply_tool")
-    tail = [reply["raw"]] if isinstance(reply, dict) and isinstance(reply.get("raw"), str) else []
+    """The no-ask lines a resume repeats, in the order the request may send them. Never the reply-tool line: the
+    model types the ledger's lines, and the Stop hook trusts that line only in a founder's own message, so a
+    resume prompt that repeated it would carry a model-typed line into one. A host repeats its own lines."""
     na = ledger.get("no_ask")
     if not isinstance(na, dict):
-        return tail
+        return []
     lines = list(na.get("raw") or [])
     for kw in ("wait", "derive"):
         lines += [v["raw"] for v in (na.get(kw) or {}).values()]
-    return lines + tail
+    return lines
 
 
 def _pre_event(ledger: dict[str, Any], key: str, record: dict[str, Any], event: str, by: str, **extra: Any) -> None:
@@ -5152,6 +5156,8 @@ def derive_status(
     status["disclosures"] += [d for _k, e in entries for d in option_disclosures(e)]
     status["notices"] = list(ledger.get("notices") or [])
     status["no_ask"] = no_ask(ledger)
+    reply = ledger.get("reply_tool")
+    status["reply_tool"] = reply.get("raw") if isinstance(reply, dict) else None
     if status.get("status") in _run_status.FINAL_STATUSES:
         return
     if refused_code is not None:
