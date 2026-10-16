@@ -69,6 +69,13 @@ def test_deck_review_lane_options_switch_connectors_off(deck_lane: Any, tmp_path
     _assert_isolated(deck_lane._deck_review_options(tmp_path, TESTS.parents[1] / "founder-skills"))
 
 
+def test_deck_review_lane_options_ask_the_cli_for_hook_events(deck_lane: Any, tmp_path: Path) -> None:
+    # The CHECKLIST dispatch gate reads each dispatch's PreToolUse response; without the flag the stream
+    # carries none, and the gate could pass with the plugin's hook never having run.
+    options = deck_lane._deck_review_options(tmp_path, TESTS.parents[1] / "founder-skills")
+    assert options.include_hook_events is True
+
+
 def test_connector_check_flags_every_place_a_connector_can_show(harness: Any) -> None:
     check = harness.assert_no_account_connectors
     clean = ["Bash", "Read", "Task", "mcp__plugin_other__tool"]

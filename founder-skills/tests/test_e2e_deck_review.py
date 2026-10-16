@@ -56,8 +56,9 @@ import pytest
 # were (a safety control is not a place for a second copy that can drift); and the pure readers of the run
 # status a host sees (no SDK, no options). Those it RECORDS rather than failing on: it is the release gate,
 # and a run status not yet complete beside a correct report would red a tag on model pacing. Harden after
-# two tagged releases. It also folds the stream into a RunCapture for the CHECKLIST dispatch report, which is
-# RECORDED for one release too (see `_record_checklist_dispatches`).
+# two tagged releases. It also folds the stream into a RunCapture for the CHECKLIST dispatch report, whose
+# two dispatch assertions are GATED, as on the FMR and market-sizing lanes, along with a PreToolUse response
+# for every CHECKLIST dispatch (see `_record_checklist_dispatches`).
 from _e2e_harness import (
     CONNECTOR_ISOLATION_ENV,
     RunCapture,
@@ -303,6 +304,9 @@ def _deck_review_options(workdir: Path, plugin_path: Path) -> Any:
         skills="all",
         # Allow what the inline-skill model needs end-to-end:
         allowed_tools=["Bash", "Read", "Write", "Edit", "Glob", "Grep", "Task", "Skill"],
+        # Hook lifecycle events in the stream, as the shared harness asks for: the CHECKLIST dispatch gate
+        # reads each dispatch's PreToolUse response, so without them it could pass with the hook never run.
+        include_hook_events=True,
         # SKILL.md bodies reference ${CLAUDE_PLUGIN_ROOT} (v0.4.3 invariant).
         # The SDK lane fills it into the skill text at load time, as
         # production does (measured: the token arrives substituted), so
@@ -409,8 +413,8 @@ def _drive_deck_review_lane(
     session_tools: list[str] = []
     mcp_servers: list[Any] = []
     tool_call_names: list[str] = []
-    # The structured record for the CHECKLIST dispatch report. Folding a message never fails the run: the
-    # report is recorded, and a bug in it must not red the release gate.
+    # The structured record for the CHECKLIST dispatch report. A message that cannot be folded never stops the
+    # run, so the stream file stays complete; it fails the lane after the run instead (`_fold_failures`).
     cap = RunCapture()
     capture_errors: list[str] = []
 
@@ -423,7 +427,7 @@ def _drive_deck_review_lane(
                 captured_messages.append(str(msg))
                 try:
                     record_message(cap, msg)
-                except Exception as e:  # noqa: BLE001 -- recorded, never a failure on the release gate
+                except Exception as e:  # noqa: BLE001 -- kept, and a failure once the run has ended
                     capture_errors.append(repr(e))
                 if isinstance(msg, SystemMessage) and msg.subtype == "init":
                     session_tools.extend(str(t) for t in msg.data.get("tools") or [])
@@ -734,10 +738,12 @@ def _drive_deck_review_lane(
                     "fixture's assertion means items, not categories, and the golden file should say so"
                 )
 
-    # 6f. Step 5's CHECKLIST dispatches against the prompt dr_dispatch_prompt.py printed -- RECORDED, never a
-    # failure on this lane for one release (see `_record_checklist_dispatches`). 6b' above stays the gated check.
+    # 6f. Step 5's CHECKLIST dispatches against the prompt dr_dispatch_prompt.py printed -- GATED, as on the FMR
+    # and market-sizing lanes (see `_record_checklist_dispatches`), beside 6b' above. A stream message that could
+    # not be folded fails too: the report would be built from a partial record.
     observed["checklist_dispatch.capture_errors"] = capture_errors[:3]
-    _record_checklist_dispatches(cap, review_dir, run_id, observed)
+    failures.extend(_fold_failures(capture_errors))
+    _record_checklist_dispatches(cap, review_dir, run_id, observed, failures)
 
     # 7. The run status a host reads -- recorded and printed, never a failure on this lane (see the import).
     try:
@@ -819,15 +825,84 @@ def _regenerated_checklist(prompt: str, review_dir: Path, run_id: str) -> str | 
     return r.stdout if r.returncode == 0 else None
 
 
-def _record_checklist_dispatches(cap: RunCapture, review_dir: Path, run_id: str, observed: dict[str, Any]) -> None:
-    """Step 5's CHECKLIST dispatches judged against the prompt the generator printed. RECORDED for one release
-    (job summary and run log), never a failure here: the person running the release reads this report in the
-    paid-gate run summary and records its verdict in the next release's plan, and both dispatch assertions
-    become gated at the next tag unless the record shows a non-hold error class or a false hold.
+def _fold_failures(capture_errors: list[str]) -> list[str]:
+    """The lane's failure line for stream messages the capture could not fold, naming the first error."""
+    if not capture_errors:
+        return []
+    return [f"{len(capture_errors)} stream message(s) could not be folded: {capture_errors[0]}"]
 
-    Known misattribution, accepted for that release: when the hook's holds run out and checklist.py refuses a
-    blind grade, the gated stamp check (6b') is skipped, not failed, because checklist.json does not exist; the
-    lane then reds later on the missing artifact. This report names the right cause."""
+
+_PRETOOLUSE_DISPATCH = ("PreToolUse:Agent", "PreToolUse:Task")
+
+
+def _hook_decision(response: dict[str, Any]) -> str:
+    """What a PreToolUse response decided, read from its stdout: `deny`, `rewrite` (an allow carrying
+    `updatedInput`), `allow` (an explicit allow, or no output with exit 0), else `unknown`. Exit 2 is a deny."""
+    if response.get("exit_code") == 2:
+        return "deny"
+    stdout = str(response.get("stdout") or "").strip()
+    if not stdout:
+        return "allow" if response.get("exit_code") in (0, None) else "unknown"
+    try:
+        out = (json.loads(stdout).get("hookSpecificOutput") or {}) if stdout.startswith("{") else {}
+    except (ValueError, AttributeError):
+        return "unknown"
+    decision = out.get("permissionDecision") if isinstance(out, dict) else None
+    if decision == "deny":
+        return "deny"
+    if decision == "allow":
+        return "rewrite" if "updatedInput" in out else "allow"
+    return "unknown"
+
+
+def _pretooluse_decisions(cap: RunCapture) -> dict[str, str]:
+    """Each dispatch's PreToolUse response, by dispatch id, as the decision it made.
+
+    The stream carries no tool id on a hook event, so the pairing goes by position: every dispatch (Agent or
+    Task, in stream order) takes the next unclaimed `PreToolUse:Agent|Task` response that arrived after it. A
+    kept stream shows each dispatch's response right after its call, siblings sent in parallel included; a
+    dispatch whose hook never ran is left out."""
+    responses = [
+        h for h in cap.hook_events if h.get("subtype") == "hook_response" and h.get("name") in _PRETOOLUSE_DISPATCH
+    ]
+    out: dict[str, str] = {}
+    taken = 0
+    for at, event in enumerate(cap.events):
+        if event.get("kind") != "tool_use" or event.get("name") not in ("Agent", "Task"):
+            continue
+        while taken < len(responses) and responses[taken]["at"] <= at:
+            taken += 1
+        if taken < len(responses):
+            out[str(event["id"])] = _hook_decision(responses[taken])
+            taken += 1
+    return out
+
+
+def _assert_hook_ran(checklists: list[dict[str, Any]], decisions: dict[str, str]) -> None:
+    missing = [str(c["id"]) for c in checklists if str(c["id"]) not in decisions]
+    assert not missing, (
+        f"CHECKLIST dispatch(es) {missing} have no PreToolUse hook response: the plugin's hook may not have run, "
+        "so no other dispatch check here says anything about it"
+    )
+
+
+def _record_checklist_dispatches(
+    cap: RunCapture, review_dir: Path, run_id: str, observed: dict[str, Any], failures: list[str]
+) -> None:
+    """Step 5's CHECKLIST dispatches judged against the prompt the generator printed, GATED as on the FMR and
+    market-sizing lanes: each failing assertion appends a line to `failures` (and is recorded in `observed`, the
+    job summary and the run log). Each line carries `equals_offline_regeneration` and the held count, so the
+    release's rule for a red lane (variance or a real failure) can be applied in one read.
+
+    Gated: no CHECKLIST dispatch failed with an error that is not a hold, and no hold caught the printed prompt
+    (a `[dispatch-type]` hold judges the agent, so it never counts); every dispatch that went through delivered
+    the printed prompt, or, where the hook found no comparand, the lane's own offline regeneration of it; every
+    CHECKLIST dispatch has a PreToolUse response. A report that cannot be built fails too. Recorded only: the
+    count, holds, rewrites, parallel dispatches, the offline comparison and each dispatch's hook decision.
+
+    Known misattribution: when the hook's holds run out and checklist.py refuses a blind grade, the gated stamp
+    check (6b') is skipped, not failed, because checklist.json does not exist, and the lane reds on the missing
+    artifact. The received-prompt failure here now reds alongside it and names the right cause."""
     try:
         checklists = _dispatch_rows(cap, "CONTEXT: CHECKLIST")
         slide_reviews = _dispatch_rows(cap, "CONTEXT: SLIDE_REVIEWS")
@@ -846,27 +921,39 @@ def _record_checklist_dispatches(cap: RunCapture, review_dir: Path, run_id: str,
                     parallel.append(c["id"])
                     break
         observed["checklist_dispatch.beside_slide_reviews"] = parallel
-        regenerated = []
+        regenerated: list[bool | None] = []
+        offline: dict[str, str] = {}
         for c in checklists:
             res = cap.result(str(c["id"])) or {}
             received = (res.get("tool_use_result") or {}).get("prompt") if isinstance(res, dict) else None
             prompt = received if isinstance(received, str) else str((c.get("input") or {}).get("prompt", ""))
             again = _regenerated_checklist(prompt, review_dir, run_id)
             regenerated.append(None if again is None else same_prompt(prompt, again))
+            if again is not None:
+                offline[str(c["id"])] = again
         observed["checklist_dispatch.equals_offline_regeneration"] = regenerated
+        decisions = _pretooluse_decisions(cap)
+        observed["checklist_dispatch.hook_decisions"] = [decisions.get(str(c["id"])) for c in checklists]
         for name, check in (
             ("outcomes", lambda: assert_dispatch_outcomes(report, "CHECKLIST")),
-            ("received_prompt", lambda: assert_received_prompt(report, "CHECKLIST", enabled=True)),
+            ("received_prompt", lambda: assert_received_prompt(report, "CHECKLIST", fallback=offline)),
+            ("hook_ran", lambda: _assert_hook_ran(checklists, decisions)),
         ):
             try:
                 check()
                 observed[f"checklist_dispatch.{name}"] = "pass"
             except AssertionError as e:
-                observed[f"checklist_dispatch.{name}"] = "FAIL: " + str(e).splitlines()[0]
+                first = str(e).splitlines()[0]
+                observed[f"checklist_dispatch.{name}"] = "FAIL: " + first
+                failures.append(
+                    f"CHECKLIST dispatch {name}: {first} "
+                    f"(equals_offline_regeneration={regenerated}, held={report['held']})"
+                )
         print("[e2e] " + text.replace("\n", "\n[e2e] "), flush=True)
-        step_summary("### deck-review CHECKLIST dispatches (recorded, not gated)\n" + text)
-    except Exception as e:  # noqa: BLE001 -- recorded, never a failure on the release gate
+        step_summary("### deck-review CHECKLIST dispatches\n" + text)
+    except Exception as e:  # noqa: BLE001 -- a report that cannot be built fails the lane, by name
         observed["checklist_dispatch.error"] = repr(e)
+        failures.append(f"CHECKLIST dispatch report could not be built: {e!r}")
 
 
 @pytest.mark.e2e

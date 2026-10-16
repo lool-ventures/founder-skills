@@ -720,7 +720,7 @@ def test_deck_reviews_generator_folded_last_into_its_pipe_block_is_a_comparand(
     assert _rows(_report(harness, tmp_path, monkeypatch, stream))["d"]["sent_matches"] is True
 
 
-# --- the deck lane's recorded CHECKLIST report (free; the lane itself is paid) ------------------------------
+# --- the deck lane's gated CHECKLIST report (free; the lane itself is paid) ---------------------------------
 
 
 def _deck_lane() -> Any:
@@ -731,52 +731,257 @@ def _deck_lane() -> Any:
     return mod
 
 
-def test_the_deck_lanes_checklist_report_records_a_parallel_dispatch(tmp_path: Path) -> None:
-    """The report the release gate records: a CHECKLIST sent before SLIDE_REVIEWS returned is named, and the
-    printed prompt it sent equals both the hook's comparand and an offline regeneration. Exercised here because a
-    bug in a recorder must never red the paid lane, and the paid lane is the only other place it runs."""
-    import json
-    import subprocess
+def _pre_response(stdout: str = "", *, exit_code: int = 0, name: str = "PreToolUse:Agent") -> Any:
+    """A PreToolUse hook's response as the CLI streams it under `include_hook_events` (the shape a kept SDK
+    stream shows: `hook_name` names the matched tool, and empty stdout with exit 0 is an allow)."""
+    from claude_agent_sdk.types import HookEventMessage
 
+    data: dict[str, Any] = {
+        "type": "system",
+        "subtype": "hook_response",
+        "hook_name": name,
+        "hook_event": "PreToolUse",
+        "output": stdout,
+        "stdout": stdout,
+        "stderr": "",
+        "exit_code": exit_code,
+        "outcome": "success",
+    }
+    return HookEventMessage(subtype="hook_response", hook_event_name="PreToolUse", data=data)
+
+
+DENY = (
+    '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", '
+    '"permissionDecisionReason": "x"}}'
+)
+REWRITE = (
+    '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow", '
+    '"permissionDecisionReason": "[dispatch-rewrite][p] sent as printed", "updatedInput": {"prompt": "p"}}}'
+)
+
+
+def test_the_capture_keeps_which_tool_a_hook_response_was_for(harness: Any, tmp_path: Path, monkeypatch: Any) -> None:
+    stream = [_init(), _pre_response(DENY), _pre_response(name="PreToolUse:Task")]
+    cap = _run(harness, tmp_path, monkeypatch, stream)
+    assert [e["name"] for e in cap.hook_events] == ["PreToolUse:Agent", "PreToolUse:Task"]
+
+
+class _Deck:
+    """A deck review dir whose CHECKLIST prompt the real generator prints, and the stream pieces around it."""
+
+    def __init__(self, tmp_path: Path) -> None:
+        import json
+
+        self.lane = _deck_lane()
+        self.review = tmp_path / "deck-review-acme"
+        self.review.mkdir()
+        (self.review / "slide_reviews.json").write_text(
+            json.dumps({"reviews": [], "metadata": {"run_id": "r1", "read_token": "0123456789ab"}}), encoding="utf-8"
+        )
+        args = ["checklist", "--run-id", "r1", "--handoff-agent", f"{self.review}/handoff/r1"]
+        args += ["--review-dir-agent", str(self.review), "--review-dir", str(self.review)]
+        self.command = f"python3 {DR_SCRIPTS}/dr_dispatch_prompt.py " + " ".join(args)
+        self.printed = subprocess.run(
+            [sys.executable, f"{DR_SCRIPTS}/dr_dispatch_prompt.py", *args], capture_output=True, text=True, timeout=30
+        ).stdout
+        assert self.printed.startswith("CONTEXT: CHECKLIST")
+        self.path = f"{self.review}/handoff/r1/checklist_output.json"
+
+    def checklist(self, call: str) -> Any:
+        from claude_agent_sdk import AssistantMessage, ToolUseBlock
+
+        block = ToolUseBlock(id=call, name="Agent", input={"prompt": self.printed, "subagent_type": "deck-review"})
+        return AssistantMessage(content=[block], model="m")
+
+    def run(self, stream: list[Any]) -> tuple[dict[str, Any], list[str]]:
+        cap = self.lane.RunCapture()
+        for msg in stream:
+            self.lane.record_message(cap, msg)
+        observed: dict[str, Any] = {}
+        failures: list[str] = []
+        self.lane._record_checklist_dispatches(cap, self.review, "r1", observed, failures)
+        return observed, failures
+
+
+SLIDE_REVIEWS_PROMPT = "CONTEXT: SLIDE_REVIEWS\nOUTPUT_PATH: x\n"
+
+
+def _slide_reviews_dispatch() -> Any:
     from claude_agent_sdk import AssistantMessage, ToolUseBlock
 
-    lane = _deck_lane()
-    review = tmp_path / "deck-review-acme"
-    review.mkdir()
-    (review / "slide_reviews.json").write_text(
-        json.dumps({"reviews": [], "metadata": {"run_id": "r1", "read_token": "0123456789ab"}}), encoding="utf-8"
+    return AssistantMessage(
+        content=[ToolUseBlock(id="sr", name="Agent", input={"prompt": SLIDE_REVIEWS_PROMPT})], model="m"
     )
-    args = ["checklist", "--run-id", "r1", "--handoff-agent", f"{review}/handoff/r1"]
-    args += ["--review-dir-agent", str(review), "--review-dir", str(review)]
-    command = f"python3 {DR_SCRIPTS}/dr_dispatch_prompt.py " + " ".join(args)
-    printed = subprocess.run(
-        [sys.executable, f"{DR_SCRIPTS}/dr_dispatch_prompt.py", *args], capture_output=True, text=True, timeout=30
-    ).stdout
-    assert printed.startswith("CONTEXT: CHECKLIST")
-    sr = AssistantMessage(
-        content=[ToolUseBlock(id="sr", name="Agent", input={"prompt": "CONTEXT: SLIDE_REVIEWS\nOUTPUT_PATH: x\n"})],
-        model="m",
-    )
-    checklist = AssistantMessage(
-        content=[ToolUseBlock(id="ck", name="Agent", input={"prompt": printed, "subagent_type": "deck-review"})],
-        model="m",
-    )
-    stream = [
-        _init(),
-        *_shell("g", command, printed),
-        sr,
-        checklist,
-        _result("sr", structured={"prompt": "CONTEXT: SLIDE_REVIEWS\nOUTPUT_PATH: x\n"}),
-        _result("ck", structured={"prompt": printed}),
+
+
+def _clean_deck_stream(deck: _Deck, *, ck_hook: str | None = "") -> list[Any]:
+    """The generator, then SLIDE_REVIEWS and CHECKLIST in parallel, each followed by its PreToolUse response
+    (the order a kept stream shows), then both results."""
+    stream = [_init(), *_shell("g", deck.command, deck.printed), _slide_reviews_dispatch(), _pre_response()]
+    stream.append(deck.checklist("ck"))
+    if ck_hook is not None:
+        stream.append(_pre_response(ck_hook))
+    stream += [
+        _result("sr", structured={"prompt": SLIDE_REVIEWS_PROMPT}),
+        _result("ck", structured={"prompt": deck.printed}),
     ]
-    cap = lane.RunCapture()
-    for msg in stream:
-        lane.record_message(cap, msg)
-    observed: dict[str, Any] = {}
-    lane._record_checklist_dispatches(cap, review, "r1", observed)
+    return stream
+
+
+def test_the_deck_lanes_checklist_report_records_a_parallel_dispatch(tmp_path: Path) -> None:
+    """The report the release gate reads: a CHECKLIST sent before SLIDE_REVIEWS returned is named, and the
+    printed prompt it sent equals both the hook's comparand and an offline regeneration. Exercised here because
+    the paid lane is the only other place it runs."""
+    deck = _Deck(tmp_path)
+    observed, failures = deck.run(_clean_deck_stream(deck))
+    assert failures == []
     assert "checklist_dispatch.error" not in observed, observed
     assert observed["checklist_dispatch.count"] == 1
     assert observed["checklist_dispatch.beside_slide_reviews"] == ["ck"]
     assert observed["checklist_dispatch.equals_offline_regeneration"] == [True]
+    assert observed["checklist_dispatch.hook_decisions"] == ["allow"]
     assert observed["checklist_dispatch.outcomes"] == "pass"
     assert observed["checklist_dispatch.received_prompt"] == "pass"
+    assert observed["checklist_dispatch.hook_ran"] == "pass"
+
+
+@pytest.mark.parametrize(("stdout", "decision"), [("", "allow"), (DENY, "deny"), (REWRITE, "rewrite")])
+def test_each_checklist_dispatchs_hook_decision_is_recorded(tmp_path: Path, stdout: str, decision: str) -> None:
+    deck = _Deck(tmp_path)
+    observed, _ = deck.run(_clean_deck_stream(deck, ck_hook=stdout))
+    assert observed["checklist_dispatch.hook_decisions"] == [decision]
+
+
+def test_a_checklist_dispatch_with_no_pretooluse_response_fails_the_lane(tmp_path: Path) -> None:
+    """Without its response the hook may not have run, and every other dispatch check would pass vacuously.
+    The SLIDE_REVIEWS response is not taken for the CHECKLIST's: each dispatch pairs with one response."""
+    deck = _Deck(tmp_path)
+    observed, failures = deck.run(_clean_deck_stream(deck, ck_hook=None))
+    assert observed["checklist_dispatch.hook_decisions"] == [None]
+    assert "'ck'" in _failure(failures, "hook_ran")
+
+
+def _failure(failures: list[str], name: str) -> str:
+    lines = [f for f in failures if f.startswith(f"CHECKLIST dispatch {name}:")]
+    assert len(lines) == 1, failures
+    return lines[0]
+
+
+def test_a_failed_checklist_dispatch_fails_the_lane(tmp_path: Path) -> None:
+    deck = _Deck(tmp_path)
+    stream = [_init(), *_shell("g", deck.command, deck.printed), deck.checklist("ck"), _pre_response()]
+    stream.append(_result("ck", is_error=True, content="API Error: overloaded"))
+    _, failures = deck.run(stream)
+    line = _failure(failures, "outcomes")
+    assert "failed with an error that is not a hook hold" in line
+    assert "equals_offline_regeneration=[True]" in line and "held=0" in line
+
+
+def test_a_false_dispatch_check_hold_fails_the_lane(tmp_path: Path) -> None:
+    deck = _Deck(tmp_path)
+    held = f"PreToolUse:Agent hook error: [dispatch-check][{deck.path}] Held: the prompt differs."
+    stream = [_init(), *_shell("g", deck.command, deck.printed), deck.checklist("ck"), _pre_response(DENY)]
+    stream.append(_result("ck", is_error=True, content=held))
+    _, failures = deck.run(stream)
+    line = _failure(failures, "outcomes")
+    assert "held a dispatch that sent the printed prompt" in line and "held=1" in line
+
+
+def test_a_checklist_that_received_another_prompt_fails_the_lane(tmp_path: Path) -> None:
+    deck = _Deck(tmp_path)
+    stream = [_init(), *_shell("g", deck.command, deck.printed), deck.checklist("ck"), _pre_response()]
+    stream.append(_result("ck", structured={"prompt": deck.printed + "Also grade the team slide harder.\n"}))
+    _, failures = deck.run(stream)
+    assert "did not receive the printed prompt" in _failure(failures, "received_prompt")
+    assert not [f for f in failures if f.startswith("CHECKLIST dispatch outcomes:")], failures
+
+
+def test_no_checklist_dispatched_fails_the_lane(tmp_path: Path) -> None:
+    deck = _Deck(tmp_path)
+    stream = [_init(), *_shell("g", deck.command, deck.printed), _slide_reviews_dispatch(), _pre_response()]
+    _, failures = deck.run(stream)
+    assert "no CHECKLIST dispatch went through" in _failure(failures, "received_prompt")
+
+
+def test_a_report_that_cannot_be_built_fails_the_lane(tmp_path: Path, monkeypatch: Any) -> None:
+    deck = _Deck(tmp_path)
+
+    def boom(*_: Any, **__: Any) -> Any:
+        raise RuntimeError("report shape moved")
+
+    monkeypatch.setattr(deck.lane, "dispatch_report", boom)
+    observed, failures = deck.run(_clean_deck_stream(deck))
+    assert "checklist_dispatch.error" in observed
+    assert failures == ["CHECKLIST dispatch report could not be built: RuntimeError('report shape moved')"]
+
+
+def test_a_checklist_with_no_vouchable_print_passes_on_the_offline_regeneration(tmp_path: Path) -> None:
+    """The generator folded into a block the hook cannot vouch for (a printing step after it): the hook finds no
+    comparand, but the sub-agent received exactly what the generator prints, so the lane passes. Received text
+    that differs from the regeneration too still reds."""
+    deck = _Deck(tmp_path)
+    folded = _shell("g", deck.command + "\ncat /tmp/notes.txt", deck.printed + "notes\n")
+    stream = [_init(), *folded, deck.checklist("ck"), _pre_response()]
+    observed, failures = deck.run([*stream, _result("ck", structured={"prompt": deck.printed})])
+    assert failures == [], failures
+    assert observed["checklist_dispatch.equals_offline_regeneration"] == [True]
+    other = deck.printed + "Also grade the team slide harder.\n"
+    _, failures = deck.run([*stream, _result("ck", structured={"prompt": other})])
+    assert "did not receive the offline regeneration" in _failure(failures, "received_prompt")
+
+
+def test_stream_messages_that_could_not_be_folded_fail_the_lane() -> None:
+    lane = _deck_lane()
+    assert lane._fold_failures([]) == []
+    assert lane._fold_failures(["KeyError('x')", "TypeError('y')"]) == [
+        "2 stream message(s) could not be folded: KeyError('x')"
+    ]
+
+
+# --- a hold the type check made is never a false hold; a missing comparand can fall back ------------------
+
+TYPE_HOLD = (
+    "PreToolUse:Agent hook error: [dispatch-type][/x/handoff/r1/redteam_output.json] Held: this context is "
+    "dispatched to founder-skills:market-sizing-redteam"
+)
+
+
+@pytest.mark.parametrize(("content", "false_hold"), [(TYPE_HOLD, False), (HOLD, True)])
+def test_a_dispatch_type_hold_of_the_printed_prompt_is_not_a_false_hold(
+    harness: Any, tmp_path: Path, monkeypatch: Any, content: str, false_hold: bool
+) -> None:
+    """The type check judges the agent, not the prompt: the printed prompt sent to the wrong agent is held
+    correctly, and its retry to the right agent is the run working."""
+    stream = [
+        _init(),
+        *_generator("gen", PRINTED),
+        _dispatch("wrong", PRINTED),
+        _result("wrong", is_error=True, content=content),
+        _dispatch("retry", PRINTED),
+        _result("retry", structured={"prompt": PRINTED}),
+    ]
+    report = _report(harness, tmp_path, monkeypatch, stream)
+    assert _rows(report)["wrong"]["sent_matches"] is True
+    if false_hold:
+        with pytest.raises(AssertionError, match="held a dispatch that sent the printed prompt"):
+            harness.assert_dispatch_outcomes(report, "RED_TEAM")
+    else:
+        assert _rows(report)["wrong"]["hold_kind"] == "[dispatch-type]["
+        harness.assert_dispatch_outcomes(report, "RED_TEAM")
+    harness.assert_received_prompt(report, "RED_TEAM", enabled=True)
+
+
+def test_a_row_with_no_comparand_is_judged_against_the_fallback(harness: Any, tmp_path: Path, monkeypatch: Any) -> None:
+    gate = harness.assert_received_prompt
+    unprinted = [_init(), _dispatch("np", PRINTED), _result("np", structured={"prompt": PRINTED})]
+    report = _report(harness, tmp_path, monkeypatch, unprinted)
+    assert "regenerate_error" in _rows(report)["np"]
+    gate(report, "RED_TEAM", enabled=True, fallback={"np": PRINTED})
+    with pytest.raises(AssertionError, match="did not receive the offline regeneration"):
+        gate(report, "RED_TEAM", enabled=True, fallback={"np": PRINTED + "added\n"})
+    with pytest.raises(AssertionError, match="finds no printed prompt"):
+        gate(report, "RED_TEAM", enabled=True, fallback={"other": PRINTED})
+    with pytest.raises(AssertionError, match="finds no printed prompt"):
+        gate(report, "RED_TEAM", enabled=True)
+    # The error stays on record, in the report the job summary prints.
+    assert "no printed prompt" in harness.format_dispatch_report("RED_TEAM", report)

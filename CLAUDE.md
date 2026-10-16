@@ -108,7 +108,9 @@
   (`ENABLE_CLAUDEAI_MCP_SERVERS=false`) and its post-run check, which every lane runs
   (`test_lane_connector_isolation.py` holds both, free); the run-status readers; and the capture
   pieces (`RunCapture`, `record_message`, `dispatch_report` and the two dispatch assertions), into
-  which it folds each message for its RECORDED CHECKLIST dispatch report, never a failure there.
+  which it folds each message for its CHECKLIST dispatch report. Both dispatch assertions are gated,
+  as on the FMR and market-sizing lanes. A report that cannot be built, or a CHECKLIST dispatch with
+  no PreToolUse hook response, fails the lane. A `[dispatch-type]` hold is never a false hold.
   Each lane answers its questions up front with `FS_HOST_` lines and asserts the run status;
   `test_lane_host_lines.py` checks, free, that every line a lane sends is one the contract accepts.
   **One lane per changed coaching-payload builder is the rule**: contract tests pin that a payload
@@ -578,10 +580,6 @@ run with fifteen dispatches recorded zero boundaries. Truncation is head-preserv
    `publish-release`. Wait for both green.
    - A red lane: read the failing assertion before anything else. A re-run is PAID (the three lanes
      again), so re-run once only when the assertion reads as LLM variance; never re-run blind.
-   - Read the deck lane's recorded CHECKLIST dispatch report in the run summary (recorded, not
-     gated, for one release) and record its verdict in the next release's plan: both dispatch
-     assertions become gated at the next tag unless the record shows a non-hold error class or a
-     false hold.
    - A real failure: the version has not shipped, so it needs no new bump. Put the fix below the
      release commit, so `release: vX.Y.Z` stays last (amend it in with `git commit --amend -s`, or
      commit it and rebase it under the release commit), add it to that version's CHANGELOG section,

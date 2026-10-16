@@ -28,7 +28,7 @@ import json
 import os
 import re
 import shutil
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -266,7 +266,7 @@ class RunCapture:
         # From the init message: which CLI and model the run was on, reported beside each other.
         self.cli_version: str | None = None
         self.model: str | None = None
-        # Hook lifecycle events (`include_hook_events`): {"event", "subtype", "stdout", "exit_code", "outcome"}.
+        # Hook lifecycle events (`include_hook_events`): {"event", "name", "subtype", "stdout", "exit_code", "outcome"}.
         self.hook_events: list[dict[str, Any]] = []
         # The stream as transcript-shaped rows (the shape the plugin's hooks read), in stream order: an
         # assistant row per tool call or text, a user row per result. `isSidechain` marks a sub-agent's.
@@ -452,6 +452,8 @@ def record_message(cap: RunCapture, msg: object) -> None:
                 "at": len(cap.events),
                 "parent_tool_use_id": data.get("parent_tool_use_id"),
                 "event": getattr(msg, "hook_event_name", "") or data.get("hook_event") or "",
+                # Which tool's hook ran ("PreToolUse:Agent"): a dispatch's response told from a question's.
+                "name": str(data.get("hook_name") or ""),
                 "subtype": msg.subtype,
                 "stdout": stdout if isinstance(stdout, str) else str(data.get("output") or ""),
                 "exit_code": data.get("exit_code"),
@@ -623,7 +625,10 @@ def assert_dispatch_outcomes(
     A hold of a dispatch that sent exactly what the generator printed is the hook misfiring; a failure
     followed by a retry would otherwise read as one clean dispatch. A question hold (`QUESTION_HOLD_MARKERS`)
     is a misfire too, unless the lane names its marker in `expected_question_holds`: only a lane that leaves
-    that gate unanswered in its request may, since a lane that answers it expects the hook to pass."""
+    that gate unanswered in its request may, since a lane that answers it expects the hook to pass.
+
+    A `[dispatch-type]` hold is never a false hold: the type check judges the agent a dispatch names, not its
+    prompt, so the printed prompt sent to the wrong agent is held correctly and its retry is the run working."""
     assert expected_question_holds <= set(QUESTION_HOLD_MARKERS), expected_question_holds
     text = format_dispatch_report(step, report)
     failed = [r["id"] for r in report["dispatches"] if r["status"] == "failed"]
@@ -631,7 +636,10 @@ def assert_dispatch_outcomes(
     false_holds = [
         r["id"]
         for r in report["dispatches"]
-        if r["status"] == "held" and r["sent_matches"] is True and r.get("hold_kind") not in expected_question_holds
+        if r["status"] == "held"
+        and r["sent_matches"] is True
+        and r.get("hold_kind") != "[dispatch-type]["
+        and r.get("hold_kind") not in expected_question_holds
     ]
     assert not false_holds, f"the hook held a dispatch that sent the printed prompt: {false_holds}\n{text}"
 
@@ -642,12 +650,23 @@ def assert_dispatch_outcomes(
 RECEIVED_PROMPT_GATE_ENABLED = True
 
 
-def assert_received_prompt(report: dict[str, Any], step: str, *, enabled: bool | None = None) -> None:
+def assert_received_prompt(
+    report: dict[str, Any],
+    step: str,
+    *,
+    enabled: bool | None = None,
+    fallback: Mapping[str, str] | None = None,
+) -> None:
     """The outcome gate: every dispatch that went through delivered the printed prompt to its sub-agent.
 
     Judged on the prompt the CLI recorded as received, so a dispatch the hook rewrote to the printed
     prompt passes and one whose record carries no prompt fails. A no-op unless `enabled` (default: the
-    module switch above)."""
+    module switch above).
+
+    `fallback` maps a dispatch id to the lane's own offline regeneration of its prompt. It is read only for a
+    row the hook found no comparand for (`regenerate_error`, kept in the report): such a row is judged
+    against the regeneration instead of failing outright, so a generator folded into a block the hook cannot
+    vouch for, whose output was sent and received unchanged, passes. A row with no fallback fails as before."""
     if not (RECEIVED_PROMPT_GATE_ENABLED if enabled is None else enabled):
         return
     text = format_dispatch_report(step, report)
@@ -655,6 +674,12 @@ def assert_received_prompt(report: dict[str, Any], step: str, *, enabled: bool |
     assert succeeded, f"no {step} dispatch went through:\n{text}"
     for row in succeeded:
         assert row["received"] is not None, f"{step} dispatch {row['id']} has no received prompt on record:\n{text}"
+        if "regenerate_error" in row and fallback is not None and row["id"] in fallback:
+            assert same_prompt(row["received"], fallback[row["id"]]), (
+                f"the {step} sub-agent of dispatch {row['id']} did not receive the offline regeneration "
+                f"({row['regenerate_error']}):\n{text}"
+            )
+            continue
         assert "regenerate_error" not in row, f"{step} dispatch {row['id']}: {row['regenerate_error']}\n{text}"
         assert row.get("received_matches") is True, (
             f"the {step} sub-agent of dispatch {row['id']} did not receive the printed prompt:\n{text}"
