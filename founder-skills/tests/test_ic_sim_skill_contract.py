@@ -1138,13 +1138,16 @@ def test_main_thread_headline_renders_verdict_never_bare_enum() -> None:
     The compose-side rendering fix alone is too narrow: it fixes the report
     artifact but leaves the deliver step free to echo the raw enum in chat.
     """
-    compose_src = (SCRIPTS_DIR / "compose_report.py").read_text(encoding="utf-8")
-
-    # Extract compose's canonical verdict -> label mapping (the source of truth).
+    # The canonical verdict -> sentence mapping report.md and the page render (the source of truth) is
+    # `_ic_view._VERDICT_SENTENCE`, which compose calls.
+    view_src = (SCRIPTS_DIR / "_ic_view.py").read_text(encoding="utf-8")
+    assert "_ic_view_module().verdict_word" in (SCRIPTS_DIR / "compose_report.py").read_text(encoding="utf-8")
+    block = view_src[view_src.index("_VERDICT_SENTENCE") :]
+    block = block[: block.index("}")]
     labels = dict(
         re.findall(
             r'"(invest|more_diligence|pass|hard_pass)"\s*:\s*"([^"]+)"',
-            compose_src,
+            block,
         )
     )
     assert set(labels) == {"invest", "more_diligence", "pass", "hard_pass"}, (

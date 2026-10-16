@@ -4478,9 +4478,9 @@ def _all_required_with_rich_partners() -> dict[str, dict]:
 
 
 def test_compose_scorecard_has_evidence_column() -> None:
-    """Dimension scorecard includes an Evidence column with truncated text."""
+    """Dimension scorecard includes an Evidence column, with each dimension's evidence whole (the page
+    shows it whole too)."""
     arts = _all_required_artifacts()
-    # Give one item long evidence to test truncation
     score = json.loads(json.dumps(_VALID_SCORE))
     score["items"][0]["evidence"] = "A" * 200  # 200-char evidence string
     arts["score_dimensions.json"] = score
@@ -4492,8 +4492,9 @@ def test_compose_scorecard_has_evidence_column() -> None:
     scorecard = md.split("## Dimension Scorecard")[1].split("##")[0]
     # Evidence column header must appear
     assert "| Evidence |" in scorecard
-    # Truncated evidence must end with ellipsis
-    assert "..." in scorecard
+    # The whole string survives, with no cut
+    assert "| " + "A" * 200 + " |" in scorecard
+    assert "..." not in scorecard
 
 
 def test_compose_scorecard_evidence_empty_safe() -> None:
@@ -4530,7 +4531,8 @@ def test_compose_exec_summary_conviction_footnote() -> None:
     assert data is not None
     md = data["report_markdown"]
     assert "Conviction score = (strong" in md or "strong × 1.0" in md
-    assert "Decline — hard pass" in md  # humanized by the shared founder-text policy (_founder_text.py)
+    # The footnote names the decision words itself (`_ic_view.VERDICT_WORD`), never the raw value.
+    assert "forces a Decline — Hard Pass regardless of score" in md
     assert "applicable dimensions" in md
 
 

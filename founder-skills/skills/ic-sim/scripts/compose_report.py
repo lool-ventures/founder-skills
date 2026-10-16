@@ -393,6 +393,16 @@ def _fund_profile_module() -> Any:
     return fund_profile
 
 
+def _ic_view_module() -> Any:
+    """The sibling `_ic_view` (the one owner of the verdict, score and check-size wording the page shares)."""
+    scripts_dir = os.path.dirname(os.path.abspath(__file__))
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    import _ic_view
+
+    return _ic_view
+
+
 def _handoff_bypassed(dir_path: str, artifacts: dict[str, Any]) -> list[str]:
     """Which sub-agent steps this report's artifacts came from have no gated hand-off in this run.
 
@@ -476,16 +486,6 @@ def _warn(code: str, message: str, founder_message: str | None = None) -> dict[s
     if founder_message is not None:
         w["founder_message"] = founder_message
     return w
-
-
-def _fmt_number(val: Any, fallback: str = "?") -> str:
-    """Format a number with commas, or return fallback for non-numeric values."""
-    if val is None:
-        return fallback
-    try:
-        return f"{val:,}"
-    except (TypeError, ValueError):
-        return str(val)
 
 
 def _normalize_ws(s: str) -> str:
@@ -653,6 +653,11 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
                         "VERDICT_SCORE_MISMATCH",
                         f"Verdict '{verdict}' does not match score {conviction_score}% "
                         f"(expected range: {low}%-{high}%)",
+                        founder_message=(
+                            f"The verdict ({_ic_view_module().verdict_word(verdict)}) does not match the "
+                            f"{conviction_score}% conviction score, which falls outside that verdict's "
+                            f"{low}%-{high}% range."
+                        ),
                     )
                 )
 
@@ -722,6 +727,12 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
                     f"Discussion consensus verdict '{discussion.get('consensus_verdict')}' "
                     f"differs from score verdict '{_as_dict(score_dims.get('summary')).get('verdict')}' "
                     "— review for consistency",
+                    founder_message=(
+                        "The discussion's consensus "
+                        f"({_ic_view_module().verdict_word(discussion.get('consensus_verdict'))}) differs from "
+                        "the scored verdict "
+                        f"({_ic_view_module().verdict_word(_as_dict(score_dims.get('summary')).get('verdict'))})."
+                    ),
                 )
             )
 
@@ -758,6 +769,14 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
             # Also check unanimous same-verdict mismatch (e.g., all "more_diligence" vs consensus "invest")
             unanimous_exact = len(set(partner_verdicts_list)) == 1 and partner_verdicts_list[0] != consensus
             if opposite_polarity or unanimous_exact:
+                word = _ic_view_module().verdict_word
+                consensus_word = word(discussion.get("consensus_verdict"))
+                if opposite_polarity:
+                    founder_detail = (
+                        f"{'positive' if all_positive else 'negative'}, but the consensus is {consensus_word}"
+                    )
+                else:
+                    founder_detail = f"at {word(partner_verdicts_list[0])}, but the consensus is {consensus_word}"
                 if opposite_polarity:
                     detail = (
                         f"{'positive' if all_positive else 'negative'} "
@@ -776,6 +795,10 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
                             f"All {len(partner_verdicts_list)} partners are {detail}"
                             " — partner_verdicts or consensus_verdict likely not "
                             "updated after debate"
+                        ),
+                        founder_message=(
+                            f"All {len(partner_verdicts_list)} partners are {founder_detail}: the consensus "
+                            "was likely not updated after the debate."
                         ),
                     )
                 )
@@ -1137,53 +1160,19 @@ def _section_executive_summary(
 
     if score_dims is not None and not _is_stub(score_dims):
         summary = _as_dict(score_dims.get("summary"))
-        score = summary.get("conviction_score", 0)
-        verdict = summary.get("verdict", "unknown")
+        view = _ic_view_module()
+        score = view.score_text(summary)
         strong = summary.get("strong_conviction", 0)
         moderate = summary.get("moderate_conviction", 0)
         concern = summary.get("concern", 0)
         db = summary.get("dealbreaker", 0)
 
-        # VC "pass"/"hard_pass" mean DECLINE — but a bare "Pass" reads to a
-        # founder as "passes the bar." Never render the internal enum value
-        # alone; always lead with an unambiguous decision word.
-        verdict_label = {
-            "invest": "Invest — strong enough for a term sheet discussion",
-            "more_diligence": "More Diligence — promising but needs more evidence",
-            "pass": "Decline — too many concerns to proceed at this time",
-            "hard_pass": "Decline — Hard Pass: fatal flaw identified",
-        }.get(verdict, verdict)
-
-        # When the verdict was HELD by coverage rather than earned on the merits, the
-        # default wording is wrong in opposite directions: "promising but needs more
-        # evidence" flatters a floored verdict (nothing was assessed, so nothing is
-        # promising) and undersells a capped one (the conviction was in the invest
-        # band). Make the coverage framing the DEFAULT rendering rather than a caveat
-        # the narrator has to remember further down the report.
-        if verdict == "more_diligence":
-            # coverage_held is the case that used to fall through to the merits
-            # wording: nothing moved the verdict, but coverage was too thin for
-            # "promising" to describe anything that was actually assessed.
-            if summary.get("coverage_floored") is True or summary.get("coverage_held") is True:
-                verdict_label = (
-                    "More Diligence — too little disclosed to reach a verdict (this is NOT a negative signal)"
-                )
-            elif summary.get("coverage_capped") is True:
-                verdict_label = (
-                    "More Diligence — the confirmed dimensions score well, but too much is undisclosed to underwrite"
-                )
-
-        # The score never appears without its denominator when the base is thin. "50.0%"
-        # off two applicable dimensions reads as a considered midpoint across the whole
-        # framework; the decimal place implies evidence that does not exist.
-        basis = _as_dict(summary.get("conviction_basis"))
-        if basis.get("sufficient") is False and basis.get("applicable"):
-            lines.append(
-                f"**Conviction Score:** {score}% — {verdict_label}  \n"
-                f"*Scored on {basis.get('applicable')} of {basis.get('total')} dimensions — "
-                f"too thin a base for the percentage to be meaningful. Read the breakdown below, "
-                f"not the headline number.*"
-            )
+        # The verdict sentence and the thin-basis note are worded once, in `_ic_view`, for this report and the
+        # page alike: never a bare "pass", and never the score without its denominator when the base is thin.
+        verdict_label = view.verdict_line(summary)
+        note = view.thin_basis_note(summary)
+        if note is not None:
+            lines.append(f"**Conviction Score:** {score}% — {verdict_label}  \n*{note}*")
         else:
             lines.append(f"**Conviction Score:** {score}% — {verdict_label}")
         to_confirm_ct = summary.get("to_confirm", 0)
@@ -1193,13 +1182,15 @@ def _section_executive_summary(
         )
         lines.append(
             "\n*Conviction score = (strong × 1.0 + moderate × 0.5) ÷ applicable dimensions × 100. "
-            "Concerns and N/A earn no credit. A real dealbreaker forces hard_pass regardless of score "
-            "(in generic-fund mode a Fund-Fit dealbreaker is non-blocking — see note below if shown).*"
+            "Concerns and N/A earn no credit. A real dealbreaker forces a Decline — Hard Pass regardless of "
+            "score (in generic-fund mode a Fund-Fit dealbreaker is non-blocking — see note below if shown).*"
         )
+        # The legend names the decision words only: an internal value in a code span is still a bare "pass" to
+        # a founder, and the founder-text pass rewrites the other one inside its backticks.
         lines.append(
             "\n*Verdict legend: **Invest** = proceed to term sheet discussion. "
-            "**More Diligence** = promising, needs more evidence. **Decline** (internal `pass`) "
-            "= would not proceed today. **Decline — Hard Pass** (internal `hard_pass`) = a fatal "
+            "**More Diligence** = promising, needs more evidence. **Decline** "
+            "= would not proceed today. **Decline — Hard Pass** = a fatal "
             "flaw makes this a decline regardless of score.*"
         )
 
@@ -1222,8 +1213,9 @@ def _section_executive_summary(
     if discussion is not None and not _is_stub(discussion):
         partner_verdicts = _as_list(discussion.get("partner_verdicts"))
         if partner_verdicts:
+            # Each partner's verdict as its decision word (`_ic_view.VERDICT_WORD`), as the page states it.
             verdict_strs = [
-                f"{(pv.get('partner') or '?').title()}: {pv.get('verdict') or '?'}"
+                f"{(pv.get('partner') or '?').title()}: {_ic_view_module().verdict_word(pv.get('verdict'))}"
                 for pv in partner_verdicts
                 if isinstance(pv, dict)
             ]
@@ -1235,9 +1227,10 @@ def _section_executive_summary(
         score_v = _normalize_verdict(_as_dict(score_dims.get("summary")).get("verdict"))
         if consensus_v and score_v and consensus_v != score_v:
             lines.append("")
-            score_verdict = _as_dict(score_dims.get("summary")).get("verdict")
+            view = _ic_view_module()
+            score_verdict = view.verdict_word(_as_dict(score_dims.get("summary")).get("verdict"))
             lines.append(
-                f"> **Note:** The IC discussion consensus (*{discussion.get('consensus_verdict')}*) "
+                f"> **Note:** The IC discussion consensus (*{view.verdict_word(discussion.get('consensus_verdict'))}*) "
                 f"differs from the quantitative score verdict (*{score_verdict}*). "
                 "This can occur when qualitative debate conclusions override borderline numeric scores."
             )
@@ -1286,15 +1279,6 @@ def _section_host_context(profile: dict[str, Any] | None) -> str:
     return "\n".join(out) + "\n"
 
 
-def _host_text_module() -> Any:
-    scripts_dir = os.path.dirname(os.path.abspath(__file__))
-    if scripts_dir not in sys.path:
-        sys.path.insert(0, scripts_dir)
-    import _host_text
-
-    return _host_text
-
-
 def _host_context_report(profile: dict[str, Any] | None, keep: frozenset[str]) -> dict[str, Any]:
     """report.json's record of the context supplied with the request (absent when none was): the kept items, the
     dropped ones by index and cause, the tokens kept verbatim, and the disclosures."""
@@ -1325,24 +1309,18 @@ def _section_fund_profile(fund: dict[str, Any] | None) -> str:
     founder_lines = _fund_profile_module().founder_lines(fund)
     lines.extend(f"\n{line}" for line in founder_lines)
 
-    if fund.get("mode") == "generic":
-        lines.append(
-            "\n> **Illustrative fund profile.** This is a synthesized generic-fund persona "
-            "built for this simulation — not a real fund's actual thesis, partners, or "
-            "portfolio holdings. Any portfolio companies and conflicts referenced anywhere "
-            "in this report are fictional constructs, not real investments."
-        )
+    illustrative = _fund_profile_module().illustrative_note(fund)
+    if illustrative is not None:
+        title, body = illustrative
+        lines.append(f"\n> **{title}** {body}")
 
     thesis = _as_list(fund.get("thesis_areas"))
     if thesis:
         lines.append(f"**Thesis Areas:** {', '.join(str(t) for t in thesis)}")
 
-    check_size = fund.get("check_size_range", {})
-    if isinstance(check_size, dict) and check_size:
-        currency = check_size.get("currency", "USD")
-        min_str = _fmt_number(check_size.get("min"))
-        max_str = _fmt_number(check_size.get("max"))
-        lines.append(f"**Check Size:** {currency} {min_str} - {max_str}")
+    check_size = _ic_view_module().check_size_text(fund)
+    if check_size is not None:
+        lines.append(f"**Check Size:** {check_size}")
 
     # Partners are role names only: the label comes from the role, never from the file's `name` or
     # `background`, and the line carries the archetype's focus areas.
@@ -1392,14 +1370,16 @@ def _section_discussion(discussion: dict[str, Any] | None) -> str:
 
     lines = ["## Discussion Summary\n"]
     lines.append(f"**Assessment Mode:** {discussion.get('assessment_mode', '?')}")
-    lines.append(f"**Consensus Verdict:** {discussion.get('consensus_verdict', '?')}")
+    # Verdicts as their decision words (`_ic_view.verdict_word`), never a bare "pass".
+    view = _ic_view_module()
+    lines.append(f"**Consensus Verdict:** {view.verdict_word(discussion.get('consensus_verdict'))}")
 
     # Partner positions
     for pv in _as_list(discussion.get("partner_verdicts")):
         if not isinstance(pv, dict):
             continue
         partner = (pv.get("partner") or "?").title()
-        verdict = pv.get("verdict") or "?"
+        verdict = view.verdict_word(pv.get("verdict"))
         rationale = pv.get("rationale") or ""
         lines.append(f"\n### {partner}: {verdict}")
         if rationale:
@@ -1482,11 +1462,8 @@ def _section_scorecard(score_dims: dict[str, Any] | None) -> str:
         cat = item.get("category", "?")
         label = item.get("label", item.get("id", "?"))
         status = status_icons.get(item.get("status", "?"), "?")
-        raw_evidence = item.get("evidence") or ""
-        evidence = str(raw_evidence)
-        if len(evidence) > 120:
-            evidence = evidence[:117] + "..."
-        evidence = evidence.replace("|", "\\|").replace("\n", " ")
+        # Shown whole, as the page shows it; only the table's own separators are escaped.
+        evidence = str(item.get("evidence") or "").replace("|", "\\|").replace("\n", " ")
         lines.append(f"| {i} | {cat} | {label} | {status} | {evidence} |")
 
     return "\n".join(lines) + "\n"
@@ -1874,13 +1851,9 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
     _ft = _founder_text_policy()
     # Context supplied with the request is rendered verbatim: the tokens the scan would flag in its kept facts and
     # sources are kept by BOTH the substitution and the scan (one set, so neither rewrites nor warns about them).
-    # Residual: such a token is also left alone where our own text uses it in this report.
-    host_items = _host_context_module().kept_texts(profile)
-    host_keep = (
-        frozenset(_host_text_module().keep_tokens(host_items, _ft.scan))
-        if (_ft is not None and host_items)
-        else frozenset()
-    )
+    # Residual: such a token is also left alone where our own text uses it in this report. The page derives the
+    # same set from the same function.
+    host_keep = _host_context_module().keep_set(profile, _ft.scan if _ft is not None else None)
     if _ft is not None:
         # No data-derived keep-set here. `identifier_values` is cap-table-only by design: this skill
         # uses `id` for a metric's NAME (`unit_economics.metrics[].id == "gross_margin"`), which is our

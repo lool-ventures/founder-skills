@@ -119,6 +119,16 @@ def kept_texts(profile: dict[str, Any] | None) -> list[dict[str, Any]]:
     return [i for i in items or [] if isinstance(i, dict)]
 
 
+def keep_set(profile: dict[str, Any] | None, scan: Callable[..., dict[str, list[str]]] | None) -> frozenset[str]:
+    """The tokens left as written in the founder-facing text beside the kept facts (`_host_text.keep_tokens`);
+    report.md and the page pass this one set to the founder-text policy, and report.json records it. Empty
+    when the profile carries no context or the policy (`scan`) is not reachable."""
+    items = kept_texts(profile)
+    if scan is None or not items:
+        return frozenset()
+    return frozenset(_host_text.keep_tokens(items, scan))
+
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Add the context supplied with the request to startup_profile.json")
     p.add_argument("--run-id", required=True, help="the run's id")

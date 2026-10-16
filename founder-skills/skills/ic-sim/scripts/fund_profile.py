@@ -608,6 +608,22 @@ def founder_lines(profile: dict[str, Any] | None) -> list[str]:
     return lines
 
 
+ILLUSTRATIVE_TITLE = "Illustrative fund profile."
+ILLUSTRATIVE_BODY = (
+    "This is a synthesized generic-fund persona built for this simulation — not a real fund's actual thesis, "
+    "partners, or portfolio holdings. Any portfolio companies and conflicts referenced anywhere in this report "
+    "are fictional constructs, not real investments."
+)
+
+
+def illustrative_note(profile: dict[str, Any] | None) -> tuple[str, str] | None:
+    """(title, body) of the note a generic fund's profile carries, or None for a specific fund. The one owner of
+    this wording, beside `founder_lines`: report.md sets it as a quote, the page as a callout."""
+    if isinstance(profile, dict) and profile.get("mode") == "generic":
+        return ILLUSTRATIVE_TITLE, ILLUSTRATIVE_BODY
+    return None
+
+
 def _refuse(code: str, message: str, output_path: str | None) -> NoReturn:
     sys.stdout.write(json.dumps({"status": "rejected", "code": code, "message": message}) + "\n")
     where = f"; {os.path.abspath(output_path)} was left unchanged" if output_path else ""

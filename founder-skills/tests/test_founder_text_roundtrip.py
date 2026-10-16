@@ -177,13 +177,8 @@ def test_ratchet_is_not_vacuous() -> None:
 #
 # So: every accepted span is named, with the reason. A new span reds, and the fix is either to stop
 # mangling it or to add a line here saying why it is fine. Both are a human decision.
-_ALLOWED_DELIVERED: dict[str, str] = {
-    # ic-sim's verdict legend renders `**Decline — Hard Pass** (internal `hard_pass`)`; substitute
-    # de-snakes the parenthetical, destroying the legend's purpose (it exists to show the raw token
-    # beside the label). A REAL defect, allowlisted because fixing it belongs to the `substitute`
-    # code-span work. Remove this line when that lands.
-    "ic-sim/report.md: `Decline — hard pass`": "known: verdict legend, pending code-span protection",
-}
+# Empty: ic-sim's verdict legend, the one known case, now names the decision words only and carries no code span.
+_ALLOWED_DELIVERED: dict[str, str] = {}
 
 
 def _looks_substituted(span: str) -> bool:
@@ -272,9 +267,9 @@ def test_delivered_scan_actually_examines_code_spans() -> None:
 def test_delivered_artifacts_carry_no_de_snaked_code_span() -> None:
     """Fleet scan over every composed report.md.
 
-    Non-vacuous on the committed fixtures with no seeding: ic-sim's verdict legend renders
-    `**Decline — Hard Pass** (internal \\`hard_pass\\`)` as `(internal \\`Decline — hard pass\\`)`,
-    which destroys the legend's whole purpose — it exists to show the raw token beside the label.
+    The fixtures carried one case until ic-sim's verdict legend dropped its code spans (it rendered
+    `(internal \\`hard_pass\\`)` as `(internal \\`Decline — hard pass\\`)`). The scan still sees every
+    delivered code span (the companion test above asserts there are some), so a new de-snaked span reds here.
     """
     import re
     import tempfile
