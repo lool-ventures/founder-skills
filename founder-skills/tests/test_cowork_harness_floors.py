@@ -44,9 +44,19 @@ CANARY = REPO_ROOT / "cowork-tests" / "canary" / "email-canary.cassette.json"
 # questions -- "which CLI runs this gate" vs "is this CLI new enough for the check to mean anything"
 # -- and collapsing them is the error this split exists to prevent. Rationale:
 # docs/internal/2026-08-27-cowork-harness-2.4.0-adoption-plan.md SS7.4-7.5.
-_CI_PIN = "4.6.0"
+_CI_PIN = "4.10.0"
 
 # The declared floor per site, with the reason it differs where it does.
+#
+# 2026-10-16 (4.10.0): CI pin and recording floor move to 4.10.0; the replay floor stays 3.8.0.
+#   CI pin 4.10.0 -- the release adopted; plan in the internal docs dir.
+#   Recording 4.10.0 -- reason (3) plus a moved `latest`, NOT a re-record trigger: 4.6.0 pins agent 2.1.293,
+#     which Desktop has pruned; 4.10.0's `latest` (2.42304.0) pins the staged 2.1.299 (doctor: sha256 match).
+#     spawn, mountLayout, network and the system prompt are unchanged at every `latest` hop 2.26454.2 ->
+#     2.42304.0. No re-stamp: the agent moved, and no committed cassette ran 2.1.299.
+#   Replay 3.8.0 -- unchanged, and _CASSETTE_VERSION stays 12: no scenario adopts a cassette-v15 key this round
+#     (one _CASSETTE_VERSION holds every committed cassette, so a v15 key would have to be adopted fleet-wide or
+#     this test given a per-cassette map, a deliberate edit of its own).
 #
 # 2026-10-08 (4.6.0): CI pin and recording floor move to 4.6.0; the replay floor stays 3.8.0.
 #   CI pin 4.6.0 -- the release adopted; plan in the internal docs dir.
@@ -102,7 +112,7 @@ _CI_PIN = "4.6.0"
 #     An older CLI cannot grade that key, and a silent skip is worse than a red. This is the first
 #     time the replay floor has moved; it moved because a scenario needed it, not to match anything.
 # CASSETTE_VERSION/MIN_SUPPORTED are unchanged at 12/9, so old cassettes stay readable.
-_RECORDING_FLOOR = "4.6.0"
+_RECORDING_FLOOR = "4.10.0"
 _REPLAY_FLOOR = "3.8.0"
 
 # Sites that SELECT the CLI a gate runs. Exact, never a range: a caret auto-adopted every upstream

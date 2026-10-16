@@ -31,12 +31,19 @@ command -v cowork-harness >/dev/null || { echo "FATAL: cowork-harness not on PAT
 ver="$(cowork-harness --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
 [ -n "$ver" ] || { echo "FATAL: could not parse cowork-harness version"; exit 1; }
 echo "cowork-harness $ver"
-# FLOOR: >=4.6.0 with no upper bound. Recording is the one operation where the harness version is
+# FLOOR: >=4.10.0 with no upper bound. Recording is the one operation where the harness version is
 #   THIS HEADER WAS ONE MINOR BEHIND THE GATE when 2.3.0 was adopted (header said 2.1.0, gate required
 #   2.2) — the exact drift the next paragraph warns about, sitting unfixed in the file that warns about
 #   it. If you are here to change the floor, change all FOUR sites: this header, the numeric gate, its
 #   FATAL message, and `_RECORDING_FLOOR` in founder-skills/tests/test_cowork_harness_floors.py.
-#   * 4.6.0 is the current floor (2026-10-08), a reason-(3) raise plus a moved `latest`, and NOT a
+#   * 4.10.0 is the current floor (2026-10-16), a reason-(3) raise plus a moved `latest`, and NOT a
+#     re-record trigger. 4.6.0 pins agent 2.1.293, which Desktop has pruned (its `doctor` falls back to
+#     the staged 2.1.299 with a sha256 mismatch); 4.10.0's `latest` (2.42304.0) pins the staged 2.1.299,
+#     so `doctor --tier hostloop` reports a sha256 match. spawn, mountLayout, network and the system
+#     prompt are unchanged at every `latest` hop from 2.26454.2. NO re-stamp: the agent moved and no
+#     committed cassette ran 2.1.299, so only a re-record clears `baseline moved`. Full analysis:
+#     docs/internal/2026-10-16-cowork-harness-4.10.0-adoption-plan.md.
+#   * 4.6.0 was the floor before (2026-10-08), a reason-(3) raise plus a moved `latest`, and NOT a
 #     re-record trigger. 4.5.0 pins agent 2.1.289, which Desktop no longer stages; 4.6.0's `latest`
 #     (2.26454.2) pins the staged 2.1.293, so `doctor --tier hostloop` reports a sha256 match and a
 #     recording carries NO `agent-version:` note. 2.26454.2 differs from 2.26454.0 only in the agent
@@ -52,8 +59,9 @@ echo "cowork-harness $ver"
 #     committed cassettes read `[stale] baseline moved` (WARN in CI) until the release re-records them.
 #     Desktop 2.26454.2 stages agent 2.1.293, which 4.5.0 ran by patch tolerance, so each recording
 #     made on it carried an `agent-version:` note naming 2.1.293 vs the pinned 2.1.289 (no longer
-#     expected under 4.6.0). CASSETTE_VERSION is 14 but only v14 keys stamp it;
-#     ours stamp v12. 4.2.0 can no longer record at hostloop at all on such a Mac: its `doctor` does
+#     expected under 4.6.0). The harness's CASSETTE_VERSION is 18 as of 4.10.0, but a recording
+#     stamps a version above 12 only when it uses that version's keys (or, from 4.7.0's v16, when its
+#     hook inventory lists an event or is unknown); ours stamp v12. 4.2.0 can no longer record at hostloop at all on such a Mac: its `doctor` does
 #     not read Desktop's nested `claude-code/<ver>/<build>/` layout. Full analysis:
 #     docs/internal/2026-10-08-cowork-harness-4.5.0-adoption-plan.md.
 #   * 4.2.0 was the floor before (2026-10-01), and NOT a re-record trigger: 4.2.0 resolves `latest` to
@@ -296,13 +304,13 @@ echo "cowork-harness $ver"
 # themselves are unchanged and still `::warning::`. Parse the JSON envelope instead.
 major="${ver%%.*}"; minor="$(echo "$ver" | cut -d. -f2)"
 # `-gt 4` first so a future 5.x passes — a bare minor check would FATAL on 5.0.
-# The `-ge 6` minor clause is what refuses 4.0.x-4.5.x. Its SHAPE is kept deliberately: the shape
+# The `-ge 10` minor clause is what refuses 4.0.x-4.9.x. Its SHAPE is kept deliberately: the shape
 # `[ "$major" -eq N ] && [ "$minor" -ge M ]` is what test_cowork_harness_floors.py's gate regex reads,
 # and that test asserts its own pattern matched — so collapsing this to `[ "$major" -ge 3 ]` does not
 # simplify the gate, it makes the guard that watches the gate match nothing. (At a .0 floor, as at 4.0.0,
 # the minor clause is vacuous and is kept for the same reason.)
-{ [ "$major" -gt 4 ] || { [ "$major" -eq 4 ] && [ "$minor" -ge 6 ]; }; } \
-  || { echo "FATAL: need >=4.6.0 (have $ver) — see the floor note above"; exit 1; }
+{ [ "$major" -gt 4 ] || { [ "$major" -eq 4 ] && [ "$minor" -ge 10 ]; }; } \
+  || { echo "FATAL: need >=4.10.0 (have $ver) — see the floor note above"; exit 1; }
 if [ -n "${COWORK_AGENT_BINARY:-}" ]; then
   [ -x "$COWORK_AGENT_BINARY" ] || { echo "FATAL: agent binary not executable: $COWORK_AGENT_BINARY"; exit 1; }
 fi
@@ -354,9 +362,18 @@ echo "re-recording: ${scns[*]}"
 #   * It must go on a BATCH-form invocation. Threading it into the per-scenario record_one loop below
 #     would cap each of ~16 invocations separately and permit ~16x the number typed — a false guarantee
 #     the harness's own docs warn about. So this runs once, here, as a gate.
-# Deliberately checks the WHOLE scenarios/ dir, which is a SUPERSET of the selected set: conservative in
-# the right direction (if the superset fits the cap, any subset does), and it avoids staging a temp dir
-# of copies whose relative `session: ../sessions/*.yaml` paths would break.
+# It prices ONLY the scenarios being recorded (`record scenarios/ --case <stem> ...`, harness >=4.7.0).
+# It used to price the whole scenarios/ dir, a deliberate superset (if the superset fits the cap, any
+# subset does), which avoided staging a temp dir of copies whose relative `session: ../sessions/*.yaml`
+# paths would break. `--case` keeps the directory form, so those paths still resolve, and narrows every
+# pre-spend check to the named stems. That superset stopped being usable: measured 2026-10-16 under
+# 4.10.0, the whole dir priced $123.76 (a LOWER BOUND, 7 of 35 unpriced) against the $120 default cap, so
+# a bare refresh of the 10 committed lanes ($41.30, 0 unpriced) halted here before recording anything.
+# WHAT `--case` GIVES UP: the superset also LOADED every scenario in the dir, so a broken scenario nobody
+# is recording was caught here. With `--case` it is not; CI's directory arm
+# (`record scenarios/ --dry-run --quiet`, cowork-replay.yml) still loads them all, so run that before a
+# batch if scenarios changed. `--case` is refused with a single-file target, which is why the
+# per-scenario record loop below does not use it.
 # WHAT THIS CANNOT DO, stated plainly so the cap is not over-trusted:
 #   * It CANNOT catch a runaway. It refuses from HISTORY before spending; a run that goes pathological
 #     is not abortable mid-flight (no live cost signal exists), and the mid-batch running-total stop
@@ -364,16 +381,11 @@ echo "re-recording: ${scns[*]}"
 #     getting historically more expensive (more scenarios, pricier skills) — before you pay for it.
 #   * It is BLIND to scenarios with no priced history: they contribute $0, are named in a ::warning::,
 #     and make the printed total a LOWER BOUND until each has run once.
-# RE-DERIVED 2026-08-27 (cowork-harness 2.4.0, 27 scenarios, ALL PRICED — 131 prior runs on this
-# machine, thinnest scenario has 1):
-#     estimated batch cost: $118.8390    against the $120 default cap
-# ** THAT IS $1.16 OF HEADROOM, AND THE GATE IS SCOPE-BLIND. ** Measured by bisection today:
-# --max-budget-usd 120/119 -> rc=0, 118 -> rc=2 ("refused before spending"). The preflight runs over
-# the WHOLE scenarios/ dir by design (a deliberate superset), so it compares the all-27 estimate
-# REGARDLESS of how many cassettes you are refreshing — "I'm only refreshing 10" does not shrink it.
-# One added scenario, or the +/-25% variance noted below, trips it, and the FATAL reads like a broken
-# preflight rather than a cap that needs raising. Before any refresh: re-run the one-liner in the
-# FATAL message, and raise COWORK_RERECORD_MAX_USD deliberately if the estimate has grown.
+# HISTORY (2026-08-27, cowork-harness 2.4.0, 27 scenarios): the whole-dir estimate was $118.84 against
+# the $120 cap, $1.16 of headroom, and the gate was then scope-blind ("I'm only refreshing 10" did not
+# shrink it). `--case` (above) removed the scope-blindness; the cap itself was not re-sized when it did,
+# and could now be about half for the 10 committed lanes (an owner's call). Before any refresh: re-run the
+# one-liner in the FATAL message, and raise COWORK_RERECORD_MAX_USD deliberately if the estimate has grown.
 # The 2026-08-01 derivation below is KEPT because its METHOD is right (worst-observed per scenario,
 # summed, matching the harness's own statistic) — but every NUMBER in it is stale: it was taken at 22
 # scenarios / 4 unpriced against a 22-cassette corpus, and the corpus was cut to 10 on 2026-08-24.
@@ -424,7 +436,10 @@ if [ "$BUDGET" != "0" ]; then
   . ./preflight_classify.sh
   preflight_rc=0
   preflight_err="$(mktemp)"
-  cowork-harness record scenarios/ --dry-run --max-budget-usd "$BUDGET" >/dev/null 2>"$preflight_err" || preflight_rc=$?
+  # An array, not `$(printf -- '--case %s ' ...)`: that relies on word splitting (it mis-splits under zsh).
+  case_args=()
+  for n in "${scns[@]}"; do case_args+=(--case "$n"); done
+  cowork-harness record scenarios/ "${case_args[@]}" --dry-run --max-budget-usd "$BUDGET" >/dev/null 2>"$preflight_err" || preflight_rc=$?
   cat "$preflight_err" >&2
   preflight_kind="$(classify_preflight "$preflight_rc" "$preflight_err")"
   rm -f "$preflight_err"
@@ -433,20 +448,20 @@ if [ "$BUDGET" != "0" ]; then
     cost)
       echo "FATAL: batch cost pre-flight refused ON COST — re-run the command below to see the"
       echo "       estimate, then raise COWORK_RERECORD_MAX_USD deliberately or narrow the list."
-      echo "       cowork-harness record scenarios/ --dry-run --max-budget-usd $BUDGET"
+      echo "       cowork-harness record scenarios/ ${case_args[*]} --dry-run --max-budget-usd $BUDGET"
       exit 1
       ;;
     load_and_cost)
       echo "FATAL: cost pre-flight: a scenario did not LOAD (the '✗' line(s) above), and the batch is"
       echo "       also over the cap. Fix the scenario first; the estimate may change once it loads."
-      echo "       cowork-harness record scenarios/ --dry-run"
+      echo "       cowork-harness record scenarios/ ${case_args[*]} --dry-run"
       exit 1
       ;;
     *)
       echo "FATAL: cost pre-flight exited $preflight_rc — a scenario did not LOAD or was refused."
       echo "       THIS IS NOT A COST PROBLEM: raising COWORK_RERECORD_MAX_USD will not help. The '✗' or"
       echo "       '⚠ input error:' line(s) above name the file and the reason. Fix the scenario, then re-run. To see it again:"
-      echo "       cowork-harness record scenarios/ --dry-run"
+      echo "       cowork-harness record scenarios/ ${case_args[*]} --dry-run"
       exit 1
       ;;
   esac
@@ -461,6 +476,38 @@ fi
 # SCRIPTED-only on purpose: a live decider stamps the cassette `authoring.nonDeterministic`, and
 # committed cassettes must be reproducible via this script without a decider.
 # Full authoring walkthrough: README.md "Authoring a new scenario".
+
+# --- hook-failure inventory pre-check (harness >=4.7.0) ---
+# Every recording since 4.7.0 carries `hookFailureBlocks`: the hook events that may carry an
+# `onFailure: "block"` hook, read after the run. At hostloop the harness reads the staged plugins, the
+# config dir it materialized for the run (not ~/.claude), and the host's MANAGED settings
+# (dist/run/execute.js `scanRunHookSources`, 4.10.0). Our plugin declares no `onFailure`, so a recording
+# should carry `{"events": []}` and stamp v12. But ONE managed settings file that does not parse makes
+# the inventory `unknown`, and a managed `onFailure` lists an event: either stamps cassette v16, raises
+# the replay floor, and reds test_cowork_harness_floors.py's single _CASSETTE_VERSION AFTER the spend.
+# So refuse here, before anything is paid. (CLAUDE_CODE_RESTRICT_PERSONAL_CONFIG also widens the scan,
+# from the environment or a settings file's `env`; refuse it too.) The user's ~/.claude settings files
+# are checked as well although 4.10.0 does not read them at hostloop: over-including costs nothing, and
+# missing a source the harness starts reading would cost a paid batch.
+managed_dir="/Library/Application Support/ClaudeCode"
+[ "$(uname -s)" = "Linux" ] && managed_dir="/etc/claude-code"
+inv_bad=0
+for f in "$managed_dir/managed-settings.json" "$managed_dir"/managed-settings.d/*.json \
+         "$HOME/.claude/settings.json" "$HOME/.claude/settings.local.json"; do
+  [ -f "$f" ] || continue
+  if ! python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$f" 2>/dev/null; then
+    echo "FATAL: settings file does not parse (the hook inventory would read as unknown -> cassette v16): $f"; inv_bad=1
+  elif grep -q 'onFailure' "$f"; then
+    echo "FATAL: settings file names onFailure (the hook inventory would list an event -> cassette v16): $f"; inv_bad=1
+  elif grep -q 'CLAUDE_CODE_RESTRICT_PERSONAL_CONFIG' "$f"; then
+    echo "FATAL: settings file sets CLAUDE_CODE_RESTRICT_PERSONAL_CONFIG (it widens the hook inventory): $f"; inv_bad=1
+  fi
+done
+case "${CLAUDE_CODE_RESTRICT_PERSONAL_CONFIG:-}" in
+  ""|0|false|no|off|FALSE|False|NO|No|OFF|Off) ;;
+  *) echo "FATAL: CLAUDE_CODE_RESTRICT_PERSONAL_CONFIG is set; unset it for a re-record (it widens the hook inventory)"; inv_bad=1 ;;
+esac
+[ "$inv_bad" -eq 0 ] || exit 1
 
 # --- snapshot the previous cassettes for the normalized-diff review below ---
 prev="$(mktemp -d)"
@@ -553,9 +600,10 @@ for t in "${targets[@]}"; do
   # because CI can't re-record; here we just did, so green is the correct expectation.)
   # 4.2.0 also prints an `agent-version:` [note] when a recording's agent differs from the one its
   # baseline pins for that tier. It never fails verify-cassettes, so it is surfaced here, loudly: it
-  # replaces the manual "agent version uniform" check. Under the 4.6.0 floor NO note is expected:
-  # 4.6.0 pins the agent Desktop stages (2.1.293). Any note is a defect signal (under 4.5.0 one
-  # 2.1.293-vs-2.1.289 note per recording was the accepted hostloop patch substitution).
+  # replaces the manual "agent version uniform" check. Under the 4.10.0 floor NO note is expected:
+  # 4.10.0 pins the agent Desktop stages (2.1.299). Any note is a defect signal (under 4.5.0 one
+  # 2.1.293-vs-2.1.289 note per recording was the accepted hostloop patch substitution; a cassette
+  # hand re-stamped across an agent bump carries one too, which is why 4.10.0 re-stamps none).
   echo "=== staleness: $t ==="; st_tmp="$(mktemp)"; st_rc=0
   cowork-harness verify-cassettes "$t" --skip-privacy 2>"$st_tmp" || st_rc=$?
   cat "$st_tmp" >&2

@@ -10,14 +10,20 @@ Docker); replay/verify are **token/agent-free** (stock CI).
 > version, and the sites are NOT uniform — do not bump them as a block. Enumerate them, never count
 > them from prose:
 >
-> - **`cowork-tests/rerecord.sh` — `>= 4.6.0` (a FLOOR).** Recording bakes
+> - **`cowork-tests/rerecord.sh` — `>= 4.10.0` (a FLOOR).** Recording bakes
 >   the harness version into the artifact, and a lane asserting `present_files_called` at hostloop
 >   cannot be recorded below 2.2.0: presence there comes from the count of `present_files` invocations
 >   (input shape), whereas below that floor it comes from the classified `presentedFiles` list, which
 >   drops the non-absolute path that host-path redaction produces — so the assert flips under redaction
 >   and `record` refuses to write. The numeric gate and its FATAL message are ADJACENT lines; edit both
 >   (`grep -n 'minor.*-ge' rerecord.sh`).
->   **4.6.0 raised it (reason 3, plus a moved `latest`), NOT as a re-record trigger.** 4.5.0 pins agent
+>   **4.10.0 raised it (reason 3, plus a moved `latest`), NOT as a re-record trigger.** 4.6.0 pins agent
+>   2.1.293, which Desktop has pruned (`doctor` under 4.6.0 falls back to the staged 2.1.299 with a
+>   sha256 mismatch); 4.10.0's `latest` (`desktop-2.42304.0`) pins the staged 2.1.299, so `doctor
+>   --tier hostloop` reports a sha256 match. `spawn`, `mountLayout`, `network` and the system prompt are
+>   unchanged at every `latest` hop from 2.26454.2. No cassette is re-stamped: the agent moved and no
+>   committed cassette ran 2.1.299, so only a re-record clears `baseline moved`.
+>   **4.6.0 raised it (history; reason 3, plus a moved `latest`), NOT as a re-record trigger.** 4.5.0 pins agent
 >   2.1.289, which Desktop no longer stages; 4.6.0's `latest` (`desktop-2.26454.2`) pins the staged
 >   2.1.293, so `doctor --tier hostloop` reports a sha256 match and recordings carry no `agent-version:`
 >   note. 2.26454.2 differs from 2.26454.0 only in the agent, so `deck-review-smoke` (recorded under
@@ -28,7 +34,7 @@ Docker); replay/verify are **token/agent-free** (stock CI).
 >   plugin's host path to its VM mount. Upstream forbids re-stamping across the auto-memory change, so
 >   the committed cassettes stay `[stale] baseline moved` (WARN in CI) until the release re-records
 >   them. (Under 4.5.0, a recording on a Desktop staging agent 2.1.293 carried an expected `agent-version:` note;
->   under 4.6.0 none is expected.)
+>   under 4.6.0 none was expected, and under 4.10.0 none is expected on a recording made under it.)
 >   **4.2.0 raised it (history) because `latest` MOVED, not as a re-record trigger.** 4.2.0 resolves `latest` to
 >   `desktop-2.16120.0`; a cassette recorded under an older CLI resolves 2.9939.4 and is stale against
 >   the 4.2.0 CI pin the day it is recorded. Its one spawn-env change (`PYTHONDONTWRITEBYTECODE=1`) was
@@ -61,12 +67,12 @@ Docker); replay/verify are **token/agent-free** (stock CI).
 >   records silently and freezes a vacuous assert into a paid cassette — and nothing downstream will
 >   ever flag it (the new cassette-satisfiability guard covers `tool_not_called` only, and lives in
 >   upstream's test suite, not a CLI surface). See the dispatch-contract bullet below.
-> - **The four `version:` inputs in the `replay` job — PINNED EXACTLY at `4.6.0`.** LINT, PRIVACY,
+> - **The four `version:` inputs in the `replay` job — PINNED EXACTLY at `4.10.0`.** LINT, PRIVACY,
 >   STALENESS and REPLAY. Exact, not a floor, since 2026-08-27: a caret auto-adopted every upstream
 >   release into CI with nobody choosing it, and five CI steps red on rules the harness adds.
 >   Enumerate with `grep -n 'version: "' ../.github/workflows/cowork-replay.yml`. The **email canary is
 >   not among them**: it is a bare `run:` step riding the CLI the preceding Action step installed.
-> - **The `skill-static-analysis` job's standalone `npm i -g` — PINNED EXACTLY at `4.6.0`.** That step runs
+> - **The `skill-static-analysis` job's standalone `npm i -g` — PINNED EXACTLY at `4.10.0`.** That step runs
 >   `record --dry-run`, i.e. the LOADER, which is the strict surface `lint` cannot substitute for.
 > - **`test_cowork_cassette_replay.py::_MIN_HARNESS` — `(3, 8, 0)`, and it STAYS A FLOOR.** It is a
 >   skip guard, not a selector: raising it turns a below-floor developer's red into a silent skip.
@@ -95,7 +101,7 @@ Docker); replay/verify are **token/agent-free** (stock CI).
 >
 > Node **22+** as of 1.14.0 (20 is EOL; `doctor` fails on it).
 >
-> **Why not below 2.2.0 for RECORDING (the original reason; the floor is now 4.6.0 — see above).**
+> **Why not below 2.2.0 for RECORDING (the original reason; the floor is now 4.10.0 — see above).**
 > `present_files_called` at hostloop is unrecordable below it
 > (see the floor list above). Adopting 2.2.0 changed nothing else here: measured against a pinned
 > 2.1.0, every token-free surface on this repo is byte-identical — `replay` ×10, `verify-cassettes`,
