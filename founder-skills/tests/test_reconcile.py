@@ -486,6 +486,39 @@ def test_a_material_percentage_gap_still_fires() -> None:
     assert _immaterial_percent(3.55, e)
 
 
+# A sum of a range is a range (32 to 38 below), and the classes that read the computed side's
+# middle read its end NEAREST the stated figure instead. Constructed cases: no pinned corpus line
+# has a range operand in a sum, difference or product. Both pins were found by sweeping stated
+# values against reconcile with the interval sum on, off, and with the middle reading back.
+
+
+def _range_sum(part_c: str, stated: str) -> Relation:
+    a = fig("30.0-36.0%", 30, "percent", label="share a", id="f1")
+    c = fig(part_c, float(part_c.rstrip("%")), "percent", label="share c", id="f2")
+    e = fig(stated, float(stated.rstrip("%")), "percent", label="total share", id="f3")
+    return _cmp("sum", ["f1", "f2"], "f3", {"f1": a, "f2": c, "f3": e})
+
+
+def test_a_disjoint_range_sum_keeps_its_convention_class_at_the_near_end() -> None:
+    """The stated figure sits just below the lowest the parts can reach, closer than the materiality
+    floor, so the class it had from the low end alone (`convention_differs`) stands. Read at the middle
+    of the range, the same gap was several times the floor and became a contradiction shown to the founder."""
+    r = _range_sum("1.7%", "31.5%")
+    assert (r.span_lo, r.span_hi) == pytest.approx((31.7, 37.7))
+    assert r.verdict == "convention_differs", (r.verdict, r.rendered)
+    assert "materiality" in " ".join(r.reasons)
+
+
+def test_an_agreement_within_the_parts_rounding_stays_one_at_the_near_end() -> None:
+    """Printed without a decimal the part carries a half-point of rounding, so the same stated figure is inside
+    what the parts' rounding allows and the sum agrees, as it did from the low end alone. Read at the middle,
+    the gap looked material and the agreement became a rounding gap. With one decimal (above) the part
+    carries a twentieth of a point, which is why that case is disjoint and this one is not."""
+    r = _range_sum("2%", "31.5%")
+    assert (r.span_lo, r.span_hi) == pytest.approx((32, 38))
+    assert r.verdict == "confirmation", (r.verdict, r.rendered)
+
+
 # ---------------------------------------------------------------------------
 # What "approximate" means: the author ROUNDED. Not that the author is unsure
 # about the future. A bound can only ever suppress a contradiction, so every

@@ -226,8 +226,6 @@ def _scale_fig(raw: str, value: float, unit_kind: str) -> dict:
         ("4", 4.3, "count"),
         # A bound marker does not widen the window: value is the number printed.
         ("$1M+", 1_200_000, "money"),
-        # A range is recorded as its FIRST number, so its other end is not a reading of it.
-        ("10-12", 12, "count"),
     ],
 )
 def test_a_round_raw_refuses_a_value_it_does_not_print(raw: str, value: float, unit_kind: str) -> None:
@@ -297,26 +295,82 @@ def test_full_scale_is_said_only_for_a_power_of_ten_slip(value: float, rescale: 
     assert ("record the number the slide prints" in err) is not rescale, err
 
 
-def test_a_refused_range_names_its_first_number() -> None:
-    """The model records either end of a range; the check reads the first. Say so, and name it.
+# A range is accepted at either of its two numbers and no other. reconcile reads a range from its
+# low end whichever was recorded, so the recorded end reaches no arithmetic and no founder text.
+RANGE_ACCEPTED = [
+    ("10-12", 12, "count"),
+    ("10-12", 10, "count"),
+    ("37-41", 41, "count"),
+    ("37-41", 37, "count"),
+    # Written high to low, still either end.
+    ("41-37", 37, "count"),
+    ("41-37", 41, "count"),
+    ("$35-40B", 40_000_000_000, "money"),
+    ("$35-40B", 35_000_000_000, "money"),
+]
 
-    For a range the range sentence IS the remedy: "record the number the slide prints" is
-    ambiguous when the slide prints two, and "use that string as raw" invites replacing it.
-    """
-    rc, _, err = _run({"figures": [_scale_fig("10-12", 12, "count")]})
+
+@pytest.mark.parametrize(("raw", "value", "unit_kind"), RANGE_ACCEPTED)
+def test_a_range_is_accepted_at_either_of_its_two_numbers(raw: str, value: float, unit_kind: str) -> None:
+    rc, _, err = _run({"figures": [_scale_fig(raw, value, unit_kind)]})
+    assert rc == 0, err
+
+
+@pytest.mark.parametrize(("raw", "value", "unit_kind"), RANGE_ACCEPTED)
+def test_an_accepted_range_reaches_reconcile_as_its_low_end(raw: str, value: float, unit_kind: str) -> None:
+    """The interlock that makes either end safe: what the ledger accepts, reconcile reads from its low end."""
+    if SCRIPTS not in sys.path:
+        sys.path.insert(0, SCRIPTS)
+    import reconcile  # type: ignore[import-not-found]  # noqa: PLC0415
+
+    rc, _, err = _run({"figures": [_scale_fig(raw, value, unit_kind)]})
+    assert rc == 0, err
+    (figure,) = reconcile.load_figures({"figures": [_scale_fig(raw, value, unit_kind)]})
+    lo, _hi = reconcile.parse_range(raw)
+    assert figure.value == lo == figure.lo
+
+
+def test_a_value_between_a_ranges_ends_is_refused_and_named_both_ends() -> None:
+    """For a range the range sentence IS the remedy: "record the number the slide prints" is ambiguous
+    when the slide prints two, and "use that string as raw" invites replacing it.
+
+    39 is refused only because the window is the raw's own precision, 0.5/37: 39 is within the 5% CAP
+    of 41, but outside a half-unit of either end. A rounder range is looser: "40-50" recorded as 48 is accepted, since
+    "40" carries the CAP and 48 is 4% from 50. That is the window working, not a hole to close."""
+    rc, _, err = _run({"figures": [_scale_fig("37-41", 39, "count")]})
     assert rc != 0
     assert "disagrees with raw" in err, err
-    assert "record the range's first number, 10" in err, err
+    assert "a range is recorded as either of its two numbers: record 37 or 41" in err, err
     assert "full scale" not in err, err
     assert "record the number the slide prints" not in err, err
     assert "use that string as raw" not in err, err
+    assert "first number" not in err, err
+    rc, _, err = _run({"figures": [_scale_fig("40-50", 48, "count")]})
+    assert rc == 0, err
 
 
-def test_a_large_range_names_its_first_number_in_full() -> None:
-    """ "$35-40B" recorded at its second number names thirty-five billion, not 3.5e+10."""
-    rc, _, err = _run({"figures": [_scale_fig("$35-40B", 40_000_000_000, "money")]})
+def test_a_large_range_names_both_its_ends_in_full() -> None:
+    """ "$35-40B" recorded between its ends names thirty-five and forty billion, not 3.5e+10."""
+    rc, _, err = _run({"figures": [_scale_fig("$35-40B", 37_500_000_000, "money")]})
     assert rc != 0
-    assert "record the range's first number, 35,000,000,000" in err, err
+    assert "record 35,000,000,000 or 40,000,000,000" in err, err
+
+
+def test_a_number_printed_before_a_range_is_not_a_reading_of_it() -> None:
+    """ "5 of 37-41 pilots" recorded as 5: the first token is not the figure once the raw states a range,
+    and reconcile would read 37. The raw itself is the problem; the remedy names both ends."""
+    rc, _, err = _run({"figures": [_scale_fig("5 of 37-41 pilots", 5, "count")]})
+    assert rc != 0
+    assert "record 37 or 41" in err, err
+
+
+def test_a_scale_slip_at_a_ranges_end_is_still_refused() -> None:
+    """ "$417-463K" recorded as 463: a 1000x slip of the high end lands on neither end, so it is refused
+    and told both to rescale and which two numbers a range may be recorded as."""
+    rc, _, err = _run({"figures": [_scale_fig("$417-463K", 463, "money")]})
+    assert rc != 0
+    assert "record the figure at full scale" in err, err
+    assert "record 417,000 or 463,000" in err, err
 
 
 def test_a_unit_suffix_range_at_its_second_number_is_still_ambiguous() -> None:

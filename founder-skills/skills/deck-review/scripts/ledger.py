@@ -84,8 +84,9 @@ floor under it: that floor answers whether a computed sum contradicts a stated t
 only whether `value` is the number `raw` prints, which needs no floor. A window of exactly
 `CAP` is inside it (the test is `>`), as in `reconcile.py`.
 
-A range is read as its FIRST number (`_parsed_magnitude` reads the first token), so "10-12"
-is recorded as 10.
+A range is accepted at either of its two numbers and no other; reconcile reads it from its low
+end, which is what makes either safe. So "10-12" is recorded as 10 or 12, never 11, and a number
+printed before the range ("5 of 10-12 pilots") is not a reading of it.
 """
 
 
@@ -287,6 +288,25 @@ def _ambiguous_suffix(raw: str, value: float, unit_kind: object, currency: objec
     return any(abs(abs(value) - m) <= max(abs(m) * 1e-9, 1e-9) for m in _numeric_tokens(raw))
 
 
+def _ambiguous_message(where: str, raw: str, parsed: float | None, value: float) -> str:
+    """The refusal for a trailing suffix that may be a unit (see `_ambiguous_suffix`)."""
+    reading = f" ({parsed:,.4g})" if parsed is not None else ""
+    return (
+        f"{where} raw {raw!r} is ambiguous: the trailing suffix reads as a "
+        f"multiplier{reading} but value is {value!r}. If the suffix is a "
+        f"UNIT rather than a multiplier, spell it out in raw (e.g. "
+        f"'200-400 metres', '18 months'); if it is a multiplier, record value "
+        f"at full scale"
+    )
+
+
+def _reads_as(observed: float, end: float, relative: float) -> bool:
+    """Is `observed` a reading of one printed number, within the raw's own window? Zero absolutely."""
+    if end == 0:
+        return abs(observed) <= 1e-9
+    return abs(observed - end) / abs(end) <= relative
+
+
 def validate_ledger(data: dict[str, Any], total_slides: int | None = None) -> tuple[list[str], list[str]]:
     """Return (errors, warnings). A non-empty errors list means the ledger is refused."""
     errors: list[str] = []
@@ -429,7 +449,36 @@ def validate_ledger(data: dict[str, Any], total_slides: int | None = None) -> tu
                 errors.append(f"{where} value {value!r} is not a date the raw {raw!r} states (it states {printed})")
         elif value is not None and isinstance(raw, str):
             parsed = _parsed_magnitude(raw)
-            if parsed == 0:
+            rng = parse_range(raw)
+            if rng is not None:
+                # EITHER END, AND NO OTHER NUMBER. This REPLACES the first-token test for a raw
+                # that states a range: reconcile reads every range from its low end, so either
+                # printed end is a safe recording, and anything else (a number printed before the
+                # range, a value between its ends, a scale slip) is refused. The window is the
+                # raw's own precision, which reads the FIRST end and is applied to both: right
+                # within rounding, since the two ends are printed to the same place.
+                precision = _precision(raw)
+                relative = min(precision[0] / precision[1], CAP) if precision and precision[1] else 0.0
+                if not any(_reads_as(abs(value), end, relative) for end in rng):
+                    if _ambiguous_suffix(raw, value, unit_kind, fig.get("currency")):
+                        errors.append(_ambiguous_message(where, raw, parsed, value))
+                    else:
+                        ends = [e for e in rng if e] or [0.0]
+                        nearest = min(ends, key=lambda e: abs(abs(value) - e))
+                        ratio = abs(value) / nearest if nearest else 0
+                        sentence = (
+                            f"a range is recorded as either of its two numbers: record "
+                            f"{_printed(rng[0])} or {_printed(rng[1])}"
+                        )
+                        # The slide prints two numbers, so "the number the slide prints" does not
+                        # say which; the range sentence does, after the rescale for a slip.
+                        slip = ratio <= 0 or abs(math.log10(ratio)) >= 1
+                        remedy = f"record the figure at full scale; {sentence}" if slip else sentence
+                        errors.append(
+                            f"{where} value {value!r} disagrees with raw {raw!r}, a range from "
+                            f"{_printed(rng[0])} to {_printed(rng[1])} — {remedy}"
+                        )
+            elif parsed == 0:
                 # ZERO NEEDS AN ABSOLUTE COMPARISON, NOT A SKIPPED ONE. The guard used to be
                 # `parsed is not None and parsed != 0`, so a zero `raw` bypassed the whole
                 # check: `raw="$0"` with `value=100` validated. The relative test is
@@ -464,32 +513,15 @@ def validate_ledger(data: dict[str, Any], total_slides: int | None = None) -> tu
                         # it -- and the existing word-boundary guard already reads the
                         # spelled-out form correctly ("200-400 metres" -> 200). Note a bare
                         # space does NOT help: "200-400 m" still parses as millions.
-                        errors.append(
-                            f"{where} raw {raw!r} is ambiguous: the trailing suffix reads as a "
-                            f"multiplier ({parsed:,.4g}) but value is {value!r}. If the suffix is a "
-                            f"UNIT rather than a multiplier, spell it out in raw (e.g. "
-                            f"'200-400 metres', '18 months'); if it is a multiplier, record value "
-                            f"at full scale"
-                        )
+                        errors.append(_ambiguous_message(where, raw, parsed, value))
                     else:
                         # A scale slip is a power of ten (1000x, a percent as a fraction);
                         # anything closer is a wrong reading, and "record the figure at full
                         # scale" asks a model that wrote 12 or 30 for "10" to make a correction
-                        # it cannot make.
+                        # it cannot make. A range never reaches here (its branch is above).
                         scale_slip = ratio <= 0 or abs(math.log10(ratio)) >= 1
-                        range_sentence = (
-                            f"a range is recorded as its first number: record the range's "
-                            f"first number, {_printed(parsed)}"
-                        )
-                        is_range = parse_range(raw) is not None
                         if scale_slip:
                             remedy = "record the figure at full scale"
-                            if is_range:
-                                remedy += "; " + range_sentence
-                        elif is_range:
-                            # The slide prints two numbers, so "the number the slide prints"
-                            # does not say which; the range sentence does.
-                            remedy = range_sentence
                         else:
                             remedy = (
                                 "record the number the slide prints, or, if this figure is printed "

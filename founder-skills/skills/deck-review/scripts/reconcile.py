@@ -1053,12 +1053,19 @@ def load_figures(ledger: dict[str, Any]) -> list[Figure]:
         v = _norm(raw.get("value"))
         if v is None:
             continue
+        unit_kind = str(raw.get("unit_kind", ""))
+        rng = _range_kwargs(str(raw.get("raw", "")))
+        # A RANGE IS READ FROM ITS LOW END, whichever end the ledger recorded: the value
+        # `merge_range_twins` already chooses. The ledger accepts either end, so this is what
+        # keeps the recorded end out of the arithmetic. A date keeps the year the ledger accepted.
+        if rng and unit_kind != DATE:
+            v = rng["lo"]
         out.append(
             Figure(
                 id=str(raw.get("id", "")),
                 value=v,
                 raw=str(raw.get("raw", "")),
-                unit_kind=str(raw.get("unit_kind", "")),
+                unit_kind=unit_kind,
                 label=str(raw.get("label", "")),
                 slide=raw.get("slide"),
                 quote=str(raw.get("quote", "")),
@@ -1070,7 +1077,7 @@ def load_figures(ledger: dict[str, Any]) -> list[Figure]:
                 # off the raw string and the label.
                 bound=detect_bound(str(raw.get("raw", "")), str(raw.get("label", "")), str(raw.get("quote", ""))),
                 visible=is_visible(str(raw.get("quote", ""))),
-                **_range_kwargs(str(raw.get("raw", ""))),
+                **rng,
             )
         )
     return out
@@ -2035,6 +2042,13 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
         for f in real:
             acc *= as_fraction(f)
         r.computed, r.rendered = acc, " × ".join(f.raw for f in real) + f" = {acc:,.2f}".rstrip("0").rstrip(".")
+        # INTERVAL arithmetic, as `ratio` does: a product of a range is a range. The corners'
+        # min and max, so a negative operand cannot swap the ends.
+        if any(f.lo is not None for f in real):
+            corners = [1.0]
+            for f in real:
+                corners = [c * as_fraction_v(v, f) for c in corners for v in f.span()]
+            r.span_lo, r.span_hi = min(corners), max(corners)
         # A COUNT IS A MULTIPLIER, NOT A DIMENSION -- same as a percent, and for the same
         # reason. This dropped PERCENT and kept COUNT, so `412 customers x $95/month` typed
         # as `mixed` and was incomparable to a stated MRR: the engine computed 39,140
@@ -2062,6 +2076,10 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
         all_pct = all(f.unit_kind == PERCENT for f in real)
         acc = sum(f.value if all_pct else as_fraction(f) for f in real)
         r.computed, r.rendered = acc, " + ".join(f.raw for f in real) + f" = {acc:,.2f}".rstrip("0").rstrip(".")
+        # A sum of a range is a range: the low ends' sum to the high ends', in the space `acc` uses.
+        if any(f.lo is not None for f in real):
+            r.span_lo = sum(f.span()[0] if all_pct else as_fraction_v(f.span()[0], f) for f in real)
+            r.span_hi = sum(f.span()[1] if all_pct else as_fraction_v(f.span()[1], f) for f in real)
         pers2 = {f.period for f in real if f.period}
         r.computed_unit = real[0].unit_kind + (f":{pers2.pop()}" if len(pers2) == 1 else "")
     elif r.operator == "increase_by":
@@ -2111,6 +2129,12 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
             return r
         both_pct = a.unit_kind == PERCENT and b.unit_kind == PERCENT
         r.computed = (a.value - b.value) if both_pct else (as_fraction(a) - as_fraction(b))
+        # A difference of a range runs from a's low minus b's high to a's high minus b's low.
+        if a.lo is not None or b.lo is not None:
+            (a_lo, a_hi), (b_lo, b_hi) = a.span(), b.span()
+            if not both_pct:
+                a_lo, a_hi, b_lo, b_hi = (as_fraction_v(v, f) for v, f in ((a_lo, a), (a_hi, a), (b_lo, b), (b_hi, b)))
+            r.span_lo, r.span_hi = a_lo - b_hi, a_hi - b_lo
         r.computed_unit = a.unit_kind + (f":{a.period}" if a.period else "")
         r.rendered = f"{a.raw} − {b.raw} = {r.computed:,.2f}".rstrip("0").rstrip(".")
     elif r.operator in ("runway", "inverse_change", "implied_base"):
@@ -2385,6 +2409,13 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
         conv: str | None = None
         if disjoint:
             mid = (c_lo + c_hi) / 2.0
+            # A sum, difference or product of a range is a range, and these classes are judged at
+            # its end NEAREST the stated figure, as `_is_rounding_gap` is: the middle made a gap the
+            # materiality floor calls immaterial at the near end into a contradiction. Only those
+            # three operators: before they took ranges they never set a span, so near == mid on
+            # every earlier path, while `ratio` and `increase_by` keep the middle they always used.
+            if r.operator in ("sum", "difference", "product"):
+                mid = c_hi if e_lo > c_hi else c_lo if c_lo > e_hi else mid
             if _growth_convention(mid, exp, _convention_tolerance(exp, mid, r.operator, real), r.computed_unit):
                 conv = (
                     f"the deck reports growth ({exp.raw}) where this computes the multiple "
@@ -2527,7 +2558,14 @@ def _is_rounding_gap(operator: str, relation: str, exp: Figure, c_lo: float, c_h
     magnitude = max(abs(e_lo), abs(e_hi))
     # A percentage gap under the materiality floor is not worth a founder's attention as a
     # disagreement, and it is not worth it as a rounding question either.
-    if gap <= tol_stated or not magnitude or _immaterial_percent((c_lo + c_hi) / 2.0, exp):
+    #
+    # Judged at the computed END NEAREST the stated figure, the end `gap` is measured from, not
+    # at the middle of the computed range. A sum or difference of a range is a range, and its
+    # middle sits further from the stated figure than its near end, so reading the middle made
+    # an agreement inside the parts' rounding into a new rounding gap. For a point the two are
+    # the same number.
+    near = c_hi if e_lo > c_hi else c_lo if c_lo > e_hi else (c_lo + c_hi) / 2.0
+    if gap <= tol_stated or not magnitude or _immaterial_percent(near, exp):
         return False
     return gap / magnitude >= ROUNDING_GAP_MIN_REL
 

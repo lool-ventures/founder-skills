@@ -15,6 +15,7 @@ import pathlib
 import subprocess
 import sys
 import tempfile
+from typing import Any
 
 import pytest
 
@@ -1180,3 +1181,161 @@ def test_a_longer_runway_keeps_its_finding_when_both_operators_are_proposed() ->
     assert [(r["operator"], r["verdict"]) for r in out["relations"]] == [("runway", "contradiction")]
     assert out["suppressed"].get("superseded") == 1
     assert out["interpretation"]["status"] == "not_run"
+
+
+# ---------------------------------------------------------------------------
+# Range figures. The ledger accepts a range at either of its two numbers, so reconcile reads
+# every range from its LOW end, and sums, differences and products of a range use the whole
+# range, as ratios and growth figures already did. The recorded end then reaches no
+# arithmetic: two ledgers that differ only in which end they recorded give the same result.
+# ---------------------------------------------------------------------------
+
+
+def _reconcile() -> object:
+    if SCRIPTS not in sys.path:
+        sys.path.insert(0, SCRIPTS)
+    import reconcile as rec  # noqa: PLC0415
+
+    return rec
+
+
+def test_a_range_is_read_from_its_low_end() -> None:
+    rec: Any = _reconcile()
+    (f,) = rec.load_figures(
+        {"figures": [_fig("eng", 463_000, "$417-463K", "money", "engineering budget", "engineering $417-463K")]}
+    )
+    assert (f.value, f.lo, f.hi) == (417_000, 417_000, 463_000)
+
+
+def test_a_descending_range_is_read_from_its_low_end() -> None:
+    rec: Any = _reconcile()
+    (f,) = rec.load_figures({"figures": [_fig("pilots", 41, "41-37", "count", "paid pilots", "41-37 paid pilots")]})
+    assert (f.value, f.lo, f.hi) == (37, 37, 41)
+
+
+@pytest.mark.parametrize(
+    ("raw", "value", "unit"),
+    [
+        ("$129K", 129_000, "money"),
+        # A currency sign on both ends is not a range to parse_range, so it stays a point.
+        ("$150K-$250K", 250_000, "money"),
+        # A date is the year the ledger accepted, never a range's low end.
+        ("2024-2026", 2026, "date"),
+    ],
+)
+def test_a_point_and_a_date_keep_their_recorded_value(raw: str, value: float, unit: str) -> None:
+    rec: Any = _reconcile()
+    (f,) = rec.load_figures({"figures": [_fig("x", value, raw, unit, "a figure", f"a figure {raw}")]})
+    assert f.value == value
+
+
+_RANGE_CASES = {
+    # operator: (range row id, its raw, low and high values, the other operand, the stated figure)
+    "sum": ("eng", "$417-463K", 417_000, 463_000, ("sales", 129_000, "$129K"), ("total", 546_000, "$546K")),
+    "difference": ("eng", "$417-463K", 417_000, 463_000, ("sales", 129_000, "$129K"), ("net", 288_000, "$288K")),
+    "product": ("share", "17-19%", 17, 19, ("base", 650_000, "$650K"), ("cut", 110_500, "$110.5K")),
+}
+
+
+def _range_ledger(operator: str, recorded: float) -> tuple[dict, str, dict]:
+    rid, raw, _lo, _hi, (oid, oval, oraw), (sid, sval, sraw) = _RANGE_CASES[operator]
+    unit = "percent" if raw.endswith("%") else "money"
+    figures = [
+        _fig(rid, recorded, raw, unit, f"{rid} figure", f"{rid} figure {raw}"),
+        _fig(oid, oval, oraw, "money", f"{oid} figure", f"{oid} figure {oraw}"),
+        _fig(sid, sval, sraw, "money", f"{sid} figure", f"{sid} figure {sraw}"),
+    ]
+    transcript = "Slide 9: " + "; ".join(f["quote"] for f in figures) + "."
+    relation = {"kind": "derived_ratio", "operator": operator, "operands": [rid, oid], "expected_id": sid}
+    return {"figures": figures}, transcript, relation
+
+
+@pytest.mark.parametrize("operator", sorted(_RANGE_CASES))
+def test_which_end_of_a_range_was_recorded_changes_nothing(operator: str) -> None:
+    """The high copy used to compute from its high end and report a contradiction the low copy did not."""
+    _rid, _raw, lo, hi, *_ = _RANGE_CASES[operator]
+    outs = []
+    for recorded in (lo, hi):
+        ledger, transcript, relation = _range_ledger(operator, recorded)
+        rc, out, err = _run([relation], ledger=ledger, transcript=transcript, slides=[9])
+        assert rc == 0, err
+        outs.append(out)
+    low, high = outs
+    assert high["relations"] == low["relations"]
+    assert high["suppressed"] == low["suppressed"]
+    assert not [r for r in high["relations"] if r["verdict"] == "contradiction"], high["relations"]
+
+
+def _computed(ledger_figures: list[dict], operator: str, operands: list[str], expected: str) -> Any:
+    rec: Any = _reconcile()
+    figures = rec.load_figures({"figures": ledger_figures})
+    for f in figures:
+        f.verified = True
+    by_id = {f.id: f for f in figures}
+    return rec.compute(
+        {"kind": "derived_ratio", "operator": operator, "operands": operands, "expected_id": expected}, by_id
+    )
+
+
+def test_a_sum_of_a_range_is_a_range() -> None:
+    """ "3-5" engineers plus 2 sales is 5 to 7 hires, so a stated exact 7 agrees. From the low end alone it
+    computed 5 against 7 at a count's zero tolerance and reported a contradiction."""
+    r = _computed(
+        [
+            _fig("eng", 3, "3-5", "count", "engineers to hire", "3-5 engineers"),
+            _fig("sales", 2, "2", "count", "sales hires", "2 sales hires"),
+            _fig("hires", 7, "7", "count", "hires this year", "7 hires this year"),
+        ],
+        "sum",
+        ["eng", "sales"],
+        "hires",
+    )
+    assert r.verdict != "contradiction", (r.verdict, r.rendered, r.reasons)
+    assert (r.span_lo, r.span_hi) == (5, 7)
+    assert "5.00–7.00" in r.rendered, r.rendered
+
+
+def test_a_difference_of_a_range_runs_from_low_minus_high_to_high_minus_low() -> None:
+    r = _computed(
+        [
+            _fig("rev", 417_000, "$417-463K", "money", "revenue", "revenue $417-463K"),
+            _fig("cost", 129_000, "$129-141K", "money", "cost", "cost $129-141K"),
+            _fig("margin", 300_000, "$300K", "money", "margin", "margin $300K"),
+        ],
+        "difference",
+        ["rev", "cost"],
+        "margin",
+    )
+    assert (r.span_lo, r.span_hi) == (417_000 - 141_000, 463_000 - 129_000)
+    assert r.verdict != "contradiction", (r.verdict, r.rendered)
+
+
+def test_a_product_of_a_range_is_an_agreement_when_the_stated_figure_is_inside_it() -> None:
+    """17-19% of $650K is $110.5K to $123.5K. A stated $117K is inside it; the low-end product alone
+    (110,500) contradicted it."""
+    r = _computed(
+        [
+            _fig("share", 17, "17-19%", "percent", "share of base", "17-19% share"),
+            _fig("base", 650_000, "$650K", "money", "base", "base of $650K"),
+            _fig("cut", 117_000, "$117K", "money", "our cut", "our cut of $117K"),
+        ],
+        "product",
+        ["share", "base"],
+        "cut",
+    )
+    assert r.verdict != "contradiction", (r.verdict, r.rendered)
+    assert r.span_lo == pytest.approx(110_500) and r.span_hi == pytest.approx(123_500)
+
+
+def test_a_product_with_a_negative_operand_takes_the_min_and_max_corner() -> None:
+    r = _computed(
+        [
+            _fig("change", -4, "-4", "count", "net change", "net change -4"),
+            _fig("units", 3, "3-5", "count", "units", "3-5 units"),
+            _fig("total", -17, "-17", "count", "total", "total -17"),
+        ],
+        "product",
+        ["change", "units"],
+        "total",
+    )
+    assert (r.span_lo, r.span_hi) == (-20, -12)
