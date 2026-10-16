@@ -258,6 +258,33 @@ def test_the_stop_hook_decides_the_same_under_the_system_python(tmp_path: Path) 
     assert json.loads(dev)["decision"] == "block"
 
 
+@needs_old
+@pytest.mark.parametrize("whole", [True, False], ids=["whole-send", "rewritten-send"])
+def test_the_stop_hooks_reply_tool_judgement_is_the_same_under_the_system_python(tmp_path: Path, whole: bool) -> None:
+    from test_stop_handover_hook import OWN_VERDICT, PRINTED, _handover
+    from test_stop_reply_tool import DONE, REPLY_NAME, _assistant_send, _assistant_text, _reply_rows, _sent
+
+    _handover(tmp_path)
+    rows = _reply_rows(
+        _assistant_send(REPLY_NAME, "toolu_r1", text=PRINTED if whole else OWN_VERDICT),
+        _sent("toolu_r1"),
+        _assistant_text(DONE),
+    )
+    transcript = tmp_path / "t.jsonl"
+    transcript.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+    payload = {
+        "session_id": "s",
+        "transcript_path": str(transcript),
+        "cwd": str(tmp_path / "outputs"),
+        "hook_event_name": "Stop",
+        "stop_hook_active": False,
+        "last_assistant_message": DONE,
+    }
+    dev, system = _both(SCRIPTS / "stop_handover_check.py", payload)
+    assert dev == system
+    assert (dev == "") is whole
+
+
 def test_every_hook_module_is_linted_as_3_9() -> None:
     """pyproject.toml's per-file target lists exactly the hook modules and the modules kept ready for one,
     so ruff never suggests a 3.10 construct in one of them."""

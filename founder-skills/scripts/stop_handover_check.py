@@ -52,9 +52,26 @@ which is `stop_hook_active` spending the one-rewrite budget. So a `stop-hook-err
 transcript is the host's label for "a Stop hook returned a block", not evidence this script failed.
 Check `stderr` on the frame before believing otherwise.
 
+A REPLY THE HOST SAYS GOES THROUGH A TOOL. On some hosts the founder reads only what a message tool sends;
+the plain text is unseen (often just "Done."), so judging it blocks a run that sent the hand-over whole. The
+hook cannot know which tool reaches the founder, and a guess fails in the unsafe direction (a hand-over relayed
+to a third party would pass), so the host names it: `FS_HOST_REPLY_TOOL <tool_name> <input_key>`, read from a
+founder's own message (any prompt of the session, last valid line wins, a slash command's `<command-args>`
+unwrapped) and NEVER from the run's ledger, whose lines the model types into `run_status.py start`: a ledger
+route would let the model name any tool as the founder's message and remove the hold by writing it. When the
+turn sent through that tool after the closing call (exact name, the named input a non-empty string, a
+main-thread call whose result is not `is_error`), the sends alone are the message: plain text and the payload's
+`last_assistant_message` are not read, so the hand-over sent, then contradicted in plain text, passes -- right
+where the plain text is unseen. With no send, or no line, the text is judged as before. A block then asks for
+the follow-up through the same tool, in the lead sentence and never beside `CORRECTION_LEAD` (that text is
+resent to the founder). The line's shape and refused names are a copy of `_gates.py`'s, held equal by a test.
+
 FAIL OPEN. Any error, any unexpected shape, any other skill's stop: exit 0, no stdout, one stderr
-line at most. `stop_hook_active` true: exit 0 -- one rewrite is the budget. The skill does not
-depend on this hook (test_skill_orchestration.py forbids that); it is enforcement, not plumbing.
+line at most. `stop_hook_active` true: exit 0 and no stdout -- one rewrite is the budget -- but the
+follow-up is judged anyway and one stderr line says whether the hand-over passed (`second stop:
+hand-over passed` / `… failed: <why>`), which measures the closing-rewrite rate; a stop that ran no
+closing script writes nothing. The skill does not depend on this hook (test_skill_orchestration.py
+forbids that); it is enforcement, not plumbing.
 """
 
 from __future__ import annotations
@@ -115,6 +132,69 @@ CORRECTION_LEAD = (
 
 def _log(msg: str) -> None:
     print(f"stop_handover_check: {msg}", file=sys.stderr)
+
+
+# --- the reply tool a request names (FS_HOST_REPLY_TOOL) --------------------------------------------------------
+# A copy of `_gates.py`'s rules (a hook never loads `_gates`), held equal by test_stop_reply_tool.py.
+REPLY_TOOL_KEYWORD = "FS_HOST_REPLY_TOOL"
+REPLY_TOOL_NAME_MAX = 128
+REPLY_TOOL_NAME_RE = re.compile(r"[A-Za-z0-9_-]{1," + str(REPLY_TOOL_NAME_MAX) + "}")
+REPLY_TOOL_KEY_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,63}")
+# Names the hook already reads as something else: the shells, dispatch, the question tool, agent-to-agent
+# messages and the file-delivery tool. Any name containing `present_files` is a delivery tool too.
+REPLY_TOOL_REFUSED = ("Bash", "mcp__workspace__bash", "Agent", "Task", "AskUserQuestion", "SendMessage", "SendUserFile")
+
+
+def reply_tool_name_problem(name: str) -> str | None:
+    """Why `name` cannot be a reply tool, or None."""
+    if not REPLY_TOOL_NAME_RE.fullmatch(name):
+        return f"the tool name is not letters, digits, underscores or hyphens, at most {REPLY_TOOL_NAME_MAX} long"
+    if name in REPLY_TOOL_REFUSED or "present_files" in name:
+        return f"{name} is read as another kind of tool"
+    return None
+
+
+def reply_tool_line_problem(rest: str) -> tuple[tuple[str, str] | None, str]:
+    """((name, key), "") for a valid line's text after the keyword, else (None, why)."""
+    parts = rest.split()
+    if not rest[:1].isspace() or len(parts) != 2:
+        return None, f"{REPLY_TOOL_KEYWORD} takes two words: <tool_name> <input_key>"
+    name, key = parts
+    why = reply_tool_name_problem(name)
+    if why is not None:
+        return None, why
+    if not REPLY_TOOL_KEY_RE.fullmatch(key):
+        return None, "the input key is not an identifier"
+    return (name, key), ""
+
+
+def reply_tool_in(rows: list[dict[str, Any]], figures: Any) -> tuple[str, str] | None:
+    """(tool name, input key) from the last valid `FS_HOST_REPLY_TOOL` line in any founder's own message of the
+    session, or None. The rows `no_ask_in` reads (never a tool's text, `isMeta`, a sub-agent, a compaction summary
+    or a delivered agent result); never the ledger. A line that breaks the shape is ignored, with a stderr line."""
+    found: tuple[str, str] | None = None
+    for row in rows:
+        if not figures.founders_message(row, _is_real_user_prompt):
+            continue
+        for text in figures._founder_texts(row):
+            for raw in text.splitlines():
+                line = raw.strip()
+                if not line.startswith(REPLY_TOOL_KEYWORD):
+                    continue
+                rest = line[len(REPLY_TOOL_KEYWORD) :]
+                if rest and not rest[:1].isspace():
+                    continue  # another keyword sharing the prefix
+                parsed, why = reply_tool_line_problem(rest)
+                if parsed is None:
+                    _log(f"reply tool line ignored ({why}): {line[:200]}")
+                    continue
+                found = parsed
+    return found
+
+
+def _send_clause(sent_via: str | None) -> str:
+    """The follow-up's route, for the lead sentence of a reason that asks for one."""
+    return f" with {sent_via}, the tool your last message went through, not as plain text" if sent_via else ""
 
 
 def _load_delivery() -> Any:
@@ -313,7 +393,7 @@ def refused_closing_call(rows: list[dict[str, Any]]) -> tuple[str, str] | None:
 _SHARED_TMP_HELD = re.compile(r"\[shared-tmp\]\[([^\]]+)\]")
 
 
-def refused_reason(skill: str, error: str) -> str:
+def refused_reason(skill: str, error: str, sent_via: str | None = None) -> str:
     """The once-only follow-up for a closing step that refused. It states what the closing step did, never
     that the message above was wrong (the rule cannot tell), and dictates no earlier run's hand-over.
 
@@ -326,15 +406,15 @@ def refused_reason(skill: str, error: str) -> str:
         return (
             f"The {label} closing step's last run never ran: its command would have written {', '.join(held)}, "
             "a fixed name in the shared temp folder, and was held before it started, so it printed nothing. "
-            "Your last message is already in front of the founder, so send a follow-up: run the closing step "
-            "again with no redirect into the shared temp folder, and send what it prints exactly as printed. "
-            "If it cannot be run again, say so in one line, and add nothing with a number."
+            f"Your last message is already in front of the founder, so send a follow-up{_send_clause(sent_via)}: "
+            "run the closing step again with no redirect into the shared temp folder, and send what it prints "
+            "exactly as printed. If it cannot be run again, say so in one line, and add nothing with a number."
         )
     return (
         f"The {label} closing step's last run stopped with an error and printed no hand-over ({error}). Your "
-        "last message is already in front of the founder, so send a follow-up: compose the report again for "
-        "this run, run the closing step again, and send what it prints exactly as printed. If it cannot be "
-        "run again, say so in one line, and add nothing with a number."
+        f"last message is already in front of the founder, so send a follow-up{_send_clause(sent_via)}: compose "
+        "the report again for this run, run the closing step again, and send what it prints exactly as printed. "
+        "If it cannot be run again, say so in one line, and add nothing with a number."
     )
 
 
@@ -350,29 +430,78 @@ def closing_call(rows: list[dict[str, Any]]) -> tuple[str, str, str | None] | No
     prompt, restarting after any Stop-hook feedback turn, the printed hand-over sliced from that
     last call's result -- else None), or None when the current prompt made no such call: this stop
     is not ours. Only the last call's result is read: an earlier closing call of the same prompt
-    printed for figures the run has since replaced (a what-if, a refused re-run)."""
+    printed for figures the run has since replaced (a what-if, a refused re-run). The judgement with
+    no reply tool named, which the cassette checker shares (`closing_window` with None)."""
+    found = closing_window(rows, None)
+    return None if found is None else (found[0], found[1], found[2])
+
+
+def _failed_results(rows: list[dict[str, Any]]) -> set[str]:
+    """Ids of top-level tool results marked `is_error: true`."""
+    out: set[str] = set()
+    for row in rows:
+        if row.get("type") != "user" or row.get("isSidechain"):
+            continue
+        content = (row.get("message") or {}).get("content")
+        for b in content if isinstance(content, list) else []:
+            if isinstance(b, dict) and b.get("type") == "tool_result" and b.get("is_error") is True:
+                rid = b.get("tool_use_id")
+                if isinstance(rid, str) and rid:
+                    out.add(rid)
+    return out
+
+
+def _sends_of(content: Any, reply_tool: tuple[str, str], failed: set[str]) -> list[str]:
+    """The text of each call to the reply tool in one assistant row: exact name, the named input a non-empty
+    string, its result not an error. A call with no result yet counts: it went out."""
+    name, key = reply_tool
+    out: list[str] = []
+    for b in content if isinstance(content, list) else []:
+        if not (isinstance(b, dict) and b.get("type") == "tool_use" and b.get("name") == name):
+            continue
+        tool_input = b.get("input")
+        text = tool_input.get(key) if isinstance(tool_input, dict) else None
+        if isinstance(text, str) and text.strip() and b.get("id") not in failed:
+            out.append(text)
+    return out
+
+
+def closing_window(
+    rows: list[dict[str, Any]], reply_tool: tuple[str, str] | None
+) -> tuple[str, str, str | None, str | None] | None:
+    """(skill, the founder's message after the last closing-message call, the printed hand-over sliced from
+    that call's result or None, the reply tool the message went through or None), or None when the current
+    prompt made no such call. The message is the text of every send through `reply_tool` after the call when
+    there is one (plain text unread: on that host it is unseen), else every top-level assistant text, as
+    before. Both restart after a Stop-hook feedback turn."""
     latest = _latest_closing_call(rows)
     if latest is None:
         return None
     start, call_at, call_skill, last_id = latest
+    failed = _failed_results(rows[call_at + 1 :]) if reply_tool is not None else set()
     texts: list[str] = []
+    sends: list[str] = []
     for row in rows[call_at + 1 :]:
         if row.get("isSidechain"):
             continue
         content = (row.get("message") or {}).get("content")
         if row.get("type") == "user" and row.get("isMeta") and _text_of(content).startswith(STOP_FEEDBACK_PREFIX):
             # A hook already sent the model back once; judge its latest attempt, not the history.
-            texts = []
+            texts, sends = [], []
             continue
         if row.get("type") != "assistant":
             continue
+        if reply_tool is not None:
+            sends.extend(_sends_of(content, reply_tool, failed))
         t = _text_of(content)
         if t.strip():
             texts.append(t)
     results = _results_by_id(rows[start:])
     opener = next(o for name, _t, _g, o in SKILLS if name == call_skill)
     printed = printed_from_result(results[last_id], opener) if last_id in results else None
-    return call_skill, "\n".join(texts), printed
+    if sends and reply_tool is not None:
+        return call_skill, "\n".join(sends), printed, reply_tool[0]
+    return call_skill, "\n".join(texts), printed, None
 
 
 def _ends_on_tool_result(rows: list[dict[str, Any]]) -> bool:
@@ -410,21 +539,32 @@ def _printed(skill: str, cwd: Any, from_transcript: str | None) -> str | None:
     return from_transcript
 
 
-def _handover_problem(payload: dict[str, Any], rows: list[dict[str, Any]] | None) -> tuple[str, str] | None:
-    """(why, printed hand-over) when the closing message did not carry the printed hand-over, else None."""
+def _judgement(
+    payload: dict[str, Any], rows: list[dict[str, Any]] | None, reply_tool: tuple[str, str] | None = None
+) -> tuple[bool, str, str, str | None] | None:
+    """(ok, why, printed hand-over, the reply tool the message went through or None), or None when there is
+    nothing to judge: this stop ran no closing script, or no printed hand-over could be found (a stderr line)."""
     final: str | None = None
     skill: str | None = None
     from_transcript: str | None = None
+    sent_via: str | None = None
     if rows is not None:
-        found = closing_call(rows)
+        found = closing_window(rows, reply_tool)
         if found is not None:
-            skill, final, from_transcript = found
+            skill, final, from_transcript, sent_via = found
         last = payload.get("last_assistant_message")
-        if final is not None and isinstance(last, str) and last.strip() and _ends_on_tool_result(rows):
+        if (
+            final is not None
+            and sent_via is None
+            and isinstance(last, str)
+            and last.strip()
+            and _ends_on_tool_result(rows)
+        ):
             # The Stop event can arrive before the final text reaches the transcript file (measured:
             # 65 ms after it was written, not yet there), and a verbatim hand-over read as missing.
             # Added only when the transcript visibly lacks a final text, so the payload's copy never
-            # stands in for text the transcript already holds.
+            # stands in for text the transcript already holds; never when the message went through the
+            # reply tool, where the plain text the payload carries is unseen.
             final = f"{final}\n{last}" if final else last
     else:
         # No transcript to trigger from: the message's own opener is the only key left.
@@ -445,7 +585,33 @@ def _handover_problem(payload: dict[str, Any], rows: list[dict[str, Any]] | None
         )
         return None
     ok, why = _load_contained()(printed, final)
-    return None if ok else (why, printed)
+    return ok, why, printed, sent_via
+
+
+def _handover_problem(
+    payload: dict[str, Any], rows: list[dict[str, Any]] | None, reply_tool: tuple[str, str] | None = None
+) -> tuple[str, str, str | None] | None:
+    """(why, printed hand-over, the reply tool the message went through or None) when the closing message did
+    not carry the printed hand-over, else None."""
+    judged = _judgement(payload, rows, reply_tool)
+    if judged is None or judged[0]:
+        return None
+    return judged[1], judged[2], judged[3]
+
+
+def second_stop(payload: dict[str, Any], rows: list[dict[str, Any]] | None, reply_tool: tuple[str, str] | None) -> None:
+    """On `stop_hook_active`: never a second block, but one stderr line saying whether the follow-up carried the
+    printed hand-over (the window restarts at the feedback turn). Silent when this stop is not ours, or when the
+    closing step refused (any handover.txt on disk is then an earlier run's)."""
+    try:
+        if rows is None or refused_closing_call(rows) is not None:
+            return
+        judged = _judgement(payload, rows, reply_tool)
+        if judged is None:
+            return
+        _log("second stop: hand-over passed" if judged[0] else f"second stop: hand-over failed: {judged[1]}")
+    except Exception as e:  # noqa: BLE001 - a measurement never fails the stop
+        _log(f"second stop: {type(e).__name__}: {e}")
 
 
 NO_ASK_END_MARKER = "[no-ask-end]"
@@ -525,15 +691,28 @@ def decide(payload: dict[str, Any]) -> dict[str, str] | None:
     apply in one prompt's tail -- a report build after the page ends the page's ask -- and the ask names
     the pending question, never a finished run.
     """
-    if payload.get("hook_event_name") != "Stop" or payload.get("stop_hook_active"):
+    if payload.get("hook_event_name") != "Stop":
         return None
     transcript = payload.get("transcript_path")
     rows = read_transcript(transcript) if isinstance(transcript, str) and os.path.isfile(transcript) else None
+    reply_tool: tuple[str, str] | None = None
+    if rows is not None:
+        try:
+            # The tool the founder reads replies through, named by the host in a founder's own message (never
+            # the ledger, whose lines the model types).
+            reply_tool = reply_tool_in(rows, _load_figures())
+        except Exception as e:  # noqa: BLE001 - fail open: today's judgement of the plain text
+            _log(f"reply tool check: {type(e).__name__}: {e}")
+    if payload.get("stop_hook_active"):
+        # One rewrite is the budget: no second block, but the follow-up is measured.
+        second_stop(payload, rows, reply_tool)
+        return None
     refused = refused_closing_call(rows) if rows is not None else None
     if refused is not None:
         # Before anything reads a handover.txt: the one on disk is an earlier run's. Once, as every block is.
-        return {"decision": "block", "reason": refused_reason(*refused)}
-    handover = _handover_problem(payload, rows)
+        window = closing_window(rows, reply_tool) if rows is not None and reply_tool is not None else None
+        return {"decision": "block", "reason": refused_reason(*refused, window[3] if window is not None else None)}
+    handover = _handover_problem(payload, rows, reply_tool)
     tool: str | None = None
     quiet = False
     if rows is not None:
@@ -605,10 +784,10 @@ def decide(payload: dict[str, Any]) -> dict[str, str] | None:
             f"link or a name alone does not reach the founder on every host. {attach} Add nothing else."
         )
     else:
-        why, printed = handover
+        why, printed, sent_via = handover
         lead = (
             f"Your last message did not deliver the printed hand-over as written ({why}). "
-            "That message is already in front of the founder, so send a follow-up: "
+            f"That message is already in front of the founder, so send a follow-up{_send_clause(sent_via)}: "
         )
         steps = f"first, {attach[0].lower()}{attach[1:]} Then send " if tool is not None else "send "
         reason = (

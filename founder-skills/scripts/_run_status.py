@@ -788,6 +788,12 @@ def _unused_request_notices(paths: RunPaths, status: dict[str, Any]) -> None:
             else:
                 reason = "not_reached"
             out.append({"code": "PRE_ANSWER_IGNORED", "gate": key, "lines": pa.get("raw") or [], "reason": reason})
+        reply = ledger.get("reply_tool")
+        if isinstance(reply, dict) and reply.get("not_used_by_skill"):
+            # FS_HOST_REPLY_TOOL on a skill with no closing step the end-of-turn check judges.
+            out.append(
+                {"code": "PRE_ANSWER_IGNORED", "gate": None, "lines": [reply.get("raw")], "reason": "not_used_by_skill"}
+            )
         na = ledger.get("no_ask")
         if isinstance(na, dict):
             for kw, reason in (("wait", "wait_not_reached"), ("derive", "derive_not_used")):

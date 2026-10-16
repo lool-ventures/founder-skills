@@ -179,7 +179,32 @@ REQUEST_TOKENS = {
     "no_ask": "FS_HOST_NO_ASK",
     "wait": "FS_HOST_WAIT <gate>[.<instance>]",
     "derive": "FS_HOST_DERIVE <gate>[.<instance>]",
+    "reply_tool": "FS_HOST_REPLY_TOOL <tool_name> <input_key>",
 }
+
+# --- the tool the founder reads replies through (FS_HOST_REPLY_TOOL) ---------------------------------------
+#
+# Read by the Stop hook from a founder's own message (never from this ledger: the model types the lines that
+# reach `start`), so it can judge the text sent through that tool in place of unseen plain text. Recorded here
+# so the run's own record shows it; a later request that carries the line replaces it. The skills with a
+# closing step the hook judges use it; the others accept it and list it `not_used_by_skill`. The hook carries a
+# copy of the two patterns, the refused names and the problem check, held equal by test_stop_reply_tool.py.
+REPLY_TOOL_NAME_MAX = 128
+REPLY_TOOL_NAME_RE = re.compile(r"[A-Za-z0-9_-]{1," + str(REPLY_TOOL_NAME_MAX) + "}")
+REPLY_TOOL_KEY_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,63}")
+REPLY_TOOL_REFUSED = ("Bash", "mcp__workspace__bash", "Agent", "Task", "AskUserQuestion", "SendMessage", "SendUserFile")
+REPLY_TOOL_SKILLS = ("market-sizing", "competitive-positioning", "financial-model-review")
+
+
+def reply_tool_name_problem(name: str) -> str | None:
+    """Why `name` cannot be a reply tool, or None. Refused: the names the hook already reads as another kind of
+    tool (the shells, dispatch, the question tool, agent-to-agent messages, file delivery)."""
+    if not REPLY_TOOL_NAME_RE.fullmatch(name):
+        return f"the tool name is not letters, digits, underscores or hyphens, at most {REPLY_TOOL_NAME_MAX} long"
+    if name in REPLY_TOOL_REFUSED or "present_files" in name:
+        return f"{name} is read as another kind of tool"
+    return None
+
 
 # --- a request that says not to ask (FS_HOST_NO_ASK) -------------------------------------------------
 #
@@ -428,6 +453,21 @@ CONTRACT_NOTES = (
     "is that JSON for `host_profile` and a fund name for `specific`: branch on `answer_id`. Problems found when the "
     "profile is built (roles, portfolio row keys, a person's page, check-size numbers) end the run `refused` with "
     "`INPUT_REJECTED`; start a new run with a corrected line. `disclosures` then lists `FUND_PROFILE_SUPPLIED`.",
+    "`FS_HOST_REPLY_TOOL <tool_name> <input_key>` names the tool your founder reads replies through, when it is "
+    "not the model's plain text (for example `FS_HOST_REPLY_TOOL mcp__hostchat__reply text`). Give the name exactly "
+    "as the model's tool list shows it, and the input field that carries the message's text; exactly two words, "
+    "the name letters, digits, `_` or `-`, the field an identifier, never a shell, dispatch, question, "
+    "agent-message or file-delivery tool (anything else is `PRE_ANSWER_INVALID`). Send it in the request's own "
+    "message: the end-of-turn check reads it there (any message of the session, the last line winning), never "
+    "from the run's records. It then judges the text sent through that tool after the closing step, and only that, "
+    "whenever the turn sent any; with no send it judges the plain text as before. If it sends the model back, it "
+    "asks for the follow-up through the same tool, still at most once per turn; the follow-up itself is logged, "
+    "not re-checked. Without the line nothing changes. The tool's calls must appear in the session transcript as "
+    "the main thread's tool calls; a host whose runtime does not record them gains nothing from the line. "
+    "market-sizing, competitive-positioning and financial-model-review use it; the other skills accept it and list "
+    "it in `notices` as `PRE_ANSWER_IGNORED` with reason `not_used_by_skill` and `gate: null`. Plugin versions "
+    "before 0.22 refuse the line (`PRE_ANSWER_INVALID`), so send it only to 0.22 and later; `run_status.py check` "
+    "tells you.",
     "`host_context=supplied` carries context about the company supplied with the request: a JSON array of "
     "`{fact, source, date}` (`request_values.host_context` lists the caps and the causes an item is dropped for). "
     "Every skill accepts the line; only the skills in a gate's `reads_in` use it (ic-sim), and the others list it "
@@ -4647,14 +4687,14 @@ def parse_request(
     `FS_HOST_` are ignored. Within one request the last line for a key wins (an answer and a note separately).
     Checked against the registry only: whether a script-built option exists is `open`'s check.
 
-    The flags are `{"no_ask": [raw] , "wait": {key: raw}, "derive": {key: raw}}`: FS_HOST_NO_ASK, and the
-    FS_HOST_WAIT / FS_HOST_DERIVE lines, which are valid only beside FS_HOST_NO_ASK, as FS_HOST_NO_ASK is only
-    beside FS_HOST_RUN_ID."""
+    The flags are `{"no_ask": [raw] , "wait": {key: raw}, "derive": {key: raw}, "reply_tool": {name, key, raw}
+    or None}`: FS_HOST_NO_ASK, and the FS_HOST_WAIT / FS_HOST_DERIVE lines, which are valid only beside
+    FS_HOST_NO_ASK, as FS_HOST_NO_ASK is only beside FS_HOST_RUN_ID; and FS_HOST_REPLY_TOOL, valid alone."""
     run_id: str | None = None
     pre: dict[str, dict[str, Any]] = {}
     notes: dict[str, tuple[str, str]] = {}
     bad: list[dict[str, str]] = []
-    flags: dict[str, Any] = {"no_ask": [], "wait": {}, "derive": {}}
+    flags: dict[str, Any] = {"no_ask": [], "wait": {}, "derive": {}, "reply_tool": None}
     for line in request_lines(text):
         if not line.startswith("FS_HOST_"):
             continue
@@ -4672,6 +4712,17 @@ def parse_request(
                 if rest.strip():
                     raise ValueError("FS_HOST_NO_ASK takes nothing after it")
                 flags["no_ask"] = [line]
+                continue
+            if kw == "REPLY_TOOL":
+                parts = rest.split()
+                if not rest.startswith(" ") or len(parts) != 2:
+                    raise ValueError("FS_HOST_REPLY_TOOL takes two words: <tool_name> <input_key>")
+                why = reply_tool_name_problem(parts[0])
+                if why is not None:
+                    raise ValueError(why)
+                if not REPLY_TOOL_KEY_RE.fullmatch(parts[1]):
+                    raise ValueError("the input key is not an identifier")
+                flags["reply_tool"] = {"name": parts[0], "key": parts[1], "raw": line}
                 continue
             if kw in ("WAIT", "DERIVE"):
                 key, _gid, _g = _flag_key(kw, rest, skill)
@@ -4741,8 +4792,17 @@ def parse_request(
 
 
 def store_request_flags(ledger: dict[str, Any], flags: dict[str, Any], by: str) -> None:
-    """Record a request's FS_HOST_NO_ASK / WAIT / DERIVE lines. Sticky: once a run is no-ask it stays so, and
-    WAIT / DERIVE keys only accumulate; a later request that omits the lines changes nothing."""
+    """Record a request's FS_HOST_NO_ASK / WAIT / DERIVE / REPLY_TOOL lines. Sticky: once a run is no-ask it stays
+    so, and WAIT / DERIVE keys only accumulate; a later request that omits the lines changes nothing. A reply-tool
+    line replaces the recorded one (a different line only); it is a record, which no check reads."""
+    reply = flags.get("reply_tool")
+    if isinstance(reply, dict):
+        cur_reply = ledger.get("reply_tool")
+        if not (isinstance(cur_reply, dict) and cur_reply.get("raw") == reply["raw"]):
+            rec = {**reply, "set_at": _run_status.now_iso(), "by": by}
+            if ledger.get("skill") not in REPLY_TOOL_SKILLS:
+                rec["not_used_by_skill"] = True
+            ledger["reply_tool"] = rec
     if not flags.get("no_ask"):
         return
     cur = ledger.get("no_ask")
@@ -4768,14 +4828,16 @@ def derive_authorized(ledger: dict[str, Any], key: str) -> bool:
 
 
 def flag_lines(ledger: dict[str, Any]) -> list[str]:
-    """The no-ask lines a resume repeats, in the order the request may send them."""
+    """The flag lines a resume repeats (no-ask, then the reply tool), in the order the request may send them."""
+    reply = ledger.get("reply_tool")
+    tail = [reply["raw"]] if isinstance(reply, dict) and isinstance(reply.get("raw"), str) else []
     na = ledger.get("no_ask")
     if not isinstance(na, dict):
-        return []
+        return tail
     lines = list(na.get("raw") or [])
     for kw in ("wait", "derive"):
         lines += [v["raw"] for v in (na.get(kw) or {}).values()]
-    return lines
+    return lines + tail
 
 
 def _pre_event(ledger: dict[str, Any], key: str, record: dict[str, Any], event: str, by: str, **extra: Any) -> None:
@@ -5182,10 +5244,15 @@ def dry_check(text: str, skill: str, as_of: str) -> tuple[int, dict[str, Any]]:
     (`DRY_REQUIRES`, against `as_of` as the run's start date); any other check needs the run and is
     `not_checked_here`. Writes nothing. Exit 0 accepted, 1 start would refuse the request, 4 a checked value
     would wait at its question."""
-    _rid, pre, bad, _flags = parse_request(text, skill)
+    _rid, pre, bad, flags = parse_request(text, skill)
     out: dict[str, Any] = {"skill": skill, "would_start": not bad, "invalid": bad, "values": []}
     if bad:
         return 1, out
+    reply = flags.get("reply_tool")
+    if isinstance(reply, dict):
+        # A request line with no gate: `gate` is null, `line` names it.
+        verdict = "applies" if skill in REPLY_TOOL_SKILLS else "not_used_by_skill"
+        out["values"].append({"gate": None, "line": reply["raw"], "verdict": verdict})
     ctx = Ctx(None, {"invocations": [{"started_at": f"{as_of}T00:00:00Z"}]}, skill)  # type: ignore[arg-type]
     ctx.ledger = {"skill": skill, "pre_answers": {k: {**v, "applied_at": None} for k, v in pre.items()}}
     waits = False
