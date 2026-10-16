@@ -5,6 +5,109 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.21.0] - 2026-10-16 — IC simulation: a fund profile and context supplied with the request, and a redesigned report page
+
+### Highlights
+
+**The IC simulation can judge a startup against a fund profile you supply.** A request can now carry the fund
+profile itself, and the simulation argues from it instead of researching the fund. The profile is checked when the
+run starts; one that cannot be read leaves the run waiting with the reason, never falling back to a generic fund.
+The report says the profile was supplied with the request and not researched. The partners are still role-played,
+and the profile may name no person.
+
+**Context about the company can come with the request.** A request can carry dated, sourced facts about the
+company. Every skill accepts them; the IC simulation uses them: the partners and the scorer see them, and the
+report shows them in their own section, marked as supplied with the request, not checked, and not the founder's
+own statements. A fact carrying contact details, a future date or a broken shape is dropped and listed by number
+and reason, never shown. A host can check a request before starting a run.
+
+**The IC simulation's report page is redesigned.** It opens with the committee's verdict and conviction score,
+then the key findings, any supplied context, the partners' debate, all 28 dimensions grouped by category with
+filters, the radar chart, the fund profile and the conflicts. Evidence and reasoning are shown in full, and every
+verdict reads the same way in the report and on the page ("Decline", never "pass"). No score or verdict changed.
+
+**A deck's checklist is graded only after its slide-by-slide review.** The checklist grader's instructions are
+now printed by the plugin and sent exactly as written; a checklist sent before the slide review is written is
+held until it is, where the plugin's checks run, and refused before it is graded everywhere.
+
+### Scoring changes
+
+- Deck review: no criterion, threshold or formula changed. The checklist grader's instructions are printed by the
+  plugin instead of being copied from the skill text; they are reordered, not reworded. A figure whose recorded
+  value differs by more than 5% from the number its slide prints is now sent back for re-extraction before the
+  numbers check runs, so that check works from the printed number; the figure extraction check now counts as a
+  scoring file.
+- IC simulation: when the fund profile is supplied with the request, the scorer scores against it as given; Fund
+  Fit is otherwise scored as before. Partners and the scorer may cite context supplied with the request, weighed
+  as unverified and never as the founder's own statements; it is evidence, never a score. Dimension definitions
+  unchanged.
+- Every other skill: none.
+
+### Added
+
+- IC simulation: a fund profile supplied with the request (`FS_HOST_VALUE ic_fund_mode=host_profile | <one line
+  of JSON>`), used as given and never merged with research.
+- All skills: context about the company supplied with the request (`FS_HOST_VALUE host_context=supplied | <JSON
+  array of {fact, source, date}>`). The IC simulation uses it; the other skills list it as not used. Founder
+  context never carries it.
+- `run_status.py check` tells a host, without starting a run, whether a request would be accepted, refused at
+  start, or left waiting on a value it carries.
+
+### Changed
+
+- IC simulation: the report page is rebuilt on the shared page components, and reads well on a phone.
+- IC simulation: the report shows each dimension's evidence and each partner's reasoning in full, and states the
+  fund's kind in plain words.
+- All report pages: long unbroken text, such as a cited web address, wraps instead of widening the page on a
+  phone. The financial model review, deck review and market sizing pages otherwise render as before.
+- Deck review: the checklist's grading instructions are printed by the plugin and sent unchanged. A steered or
+  hand-written checklist dispatch is replaced with the printed instructions where the host allows it, and held
+  otherwise; every redo is a fresh grade from the printed instructions.
+- Each skill's start step asks for request lines to be copied byte for byte.
+
+### Fixed
+
+- Deck review: a checklist dispatched in the same step as the slide-by-slide review was graded without it.
+- Deck review: a figure recorded with a different number than the slide prints, for example 14 for "10" or 1.4M
+  for "$1M", passed the extraction check because round numbers were given a wide margin. The margin is now at most
+  5%, the same as the numbers check uses. Unless the number is off by about a power of ten, the extraction is told
+  to record the number the slide prints rather than to rescale; a range is recorded as its first number, and a
+  refused range names it.
+- All skills: once a dispatch had been held twice for having no printed instructions yet, a later dispatch that
+  changed them could go through unchecked. Holds are now counted by what they are for.
+- A run interrupted by a long conversation continues from the right step: when the conversation is compacted
+  mid-run, the plugin tells the run in progress to re-read its instructions from the step it is on, and where its
+  scripts live. The note appears only while a run is open.
+- The check that the closing message carries the printed summary, and the reminder to attach finished files,
+  still apply when the conversation was compacted or a background task reported in after the report was built;
+  before, either one made the check skip.
+- A full run that tried to end with the quick-check "finish" command is told that it ends at its coaching step,
+  instead of getting a bare usage error.
+
+### Development
+
+Contributor-facing only; nothing here changes what a founder installs or runs.
+
+- Hosts: the new request lines, their caps and per-item drop causes, the new codes (`PRE_ANSWER_MALFORMED`
+  waiting, `INPUT_REJECTED`, `REQUEST_ONLY_OPTION`, `VALUE_TOO_LONG`, `HOST_CONTEXT_MISSING` and the producer
+  codes) and `run_status.py check` (exit 0 / 1 / 4 / 2; writes nothing) are in `data/host-contract.json`. A value
+  only a request line can answer is never put to the founder: on an attended run the step exits 10 with
+  `request_waiting`, compose included, and the run stays `waiting` so a corrected line resumes it. A plugin
+  before 0.21.0 refuses a whole request carrying either new line.
+- IC simulation: `report.json`'s `report_markdown` now carries each dimension's evidence whole and names
+  verdicts by their decision words; the verdict-mismatch warnings gain a `founder_message` (their `message` is
+  unchanged).
+- Deck review: Step 5 runs `dr_dispatch_prompt.py checklist`, registered with the dispatch-prompt hook. The
+  hook's rewrite floor is lowered from CLI 2.1.286 to 2.1.141 after a probe on 2.1.141. Holds are counted per
+  hand-off path and phase (two per phase, four per path), the hold text carries a phase tag after its marker, and
+  every "no printed prompt" hold names the generator and its flags.
+- The SessionStart hook is a POSIX shell script; after a compaction it adds one note for a founder-skills run in
+  progress (`compaction_reread.py`), and starts no interpreter on any other session start. An opt-in end-to-end
+  lane forces a mid-run compaction on a market sizing and reports whether the run re-read its instructions; it is
+  run by hand, never by a release.
+- The deck lane records its checklist dispatch report in the paid gate's summary; its two new dispatch assertions
+  are recorded, not gated, for this release.
+
 ## [0.20.1] - 2026-10-15 — A delivered report is never rewritten in place
 
 ### Highlights
