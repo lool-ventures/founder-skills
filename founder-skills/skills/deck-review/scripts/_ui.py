@@ -49,9 +49,12 @@ from collections.abc import Mapping, Sequence
 from types import ModuleType
 from typing import Any
 
-TONES = ("fail", "warn", "pass", "na")
-_GLYPH = {"fail": "✕", "warn": "!", "pass": "✓", "na": "–"}
-_DEFAULT_LABELS = {"fail": "Fail", "warn": "Warn", "pass": "Pass", "na": "Not applicable"}
+# The tones a checklist item may carry, and the statuses a page gets chips for when it names none. `neutral`
+# is a status that is neither a problem nor a pass (a moderate result); only a page that names it offers it.
+TONES = ("fail", "warn", "pass", "na", "neutral")
+DEFAULT_STATUSES = ("fail", "warn", "pass", "na")
+_GLYPH = {"fail": "✕", "warn": "!", "pass": "✓", "na": "–", "neutral": "•"}
+_DEFAULT_LABELS = {"fail": "Fail", "warn": "Warn", "pass": "Pass", "na": "Not applicable", "neutral": "Neutral"}
 _RING_TONES = ("pass", "warn", "fail", "neutral")
 _EMPTY_CHIP = ' class="is-empty"'
 
@@ -102,16 +105,19 @@ def founder_text_policy() -> ModuleType | None:
     return _policy_cache[0]
 
 
-def founder_text(text: str) -> str:
+def founder_text(text: str, extra_keep: frozenset[str] | None = None) -> str:
     """`text` with internal tokens (snake_case enums and field names) rewritten by the founder-text
     policy, or `text` unchanged when the policy is not reachable. For text an assessor wrote and only
-    the page shows; clean text comes back byte-for-byte."""
+    the page shows; clean text comes back byte-for-byte. `extra_keep` names tokens left as written (the
+    keep-set the skill's report.md was substituted with), so the page and the report agree."""
     if not text:
         return text
     ft = founder_text_policy()
     if ft is None:
         return text
     try:
+        if extra_keep:
+            return str(ft.substitute(text, extra_keep=extra_keep))
         return str(ft.substitute(text))
     except Exception:  # noqa: BLE001 - a policy failure must never stop a page rendering
         return text
@@ -175,6 +181,7 @@ UI_CSS = """\
   --st-na: #5F6B79;
   --st-na-bar: #C7CED7;
   --st-na-tint: #EEF1F5;
+  --st-neutral-bar: #8E9BAB;
   --ui-s1: 4px; --ui-s2: 8px; --ui-s3: 12px; --ui-s4: 16px; --ui-s5: 24px; --ui-s6: 32px;
   --ui-r1: 10px; --ui-r2: 14px;
   --ui-shadow: 0 1px 2px rgba(16, 32, 64, 0.04), 0 6px 20px rgba(16, 32, 64, 0.06);
@@ -185,6 +192,8 @@ body.ui-body {
   margin: 0; background: var(--ui-bg); color: var(--ui-ink);
   font-family: var(--font-body); font-size: 15px; line-height: 1.55;
   -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+  /* Text a model wrote can carry one long unbroken token (a URL); it breaks rather than widening the page. */
+  overflow-wrap: anywhere;
 }
 .ui-page { max-width: 1120px; margin: 0 auto; padding: var(--ui-s6) var(--ui-s5) var(--ui-s5); }
 .ui-page a { color: var(--ui-accent-2); }
@@ -218,6 +227,7 @@ body.ui-body {
   padding: var(--ui-s5) var(--ui-s6); box-shadow: var(--ui-shadow);
   border-top: 4px solid var(--ui-accent);
 }
+.ui-hero__text { min-width: 0; }
 .ui-hero h1 {
   margin: 0.15rem 0 0.35rem; font-size: clamp(1.45rem, 3.2vw, 2.1rem); line-height: 1.2;
   font-weight: 600; letter-spacing: -0.02em; color: var(--ui-accent);
@@ -339,6 +349,7 @@ body.ui-body {
 .ui-pill--pass { background: var(--st-pass-tint); color: var(--st-pass-ink); }
 .ui-pill--warn { background: var(--st-warn-tint); color: var(--st-warn); }
 .ui-pill--fail { background: var(--st-fail-tint); color: var(--st-fail); }
+.ui-pill--neutral { background: var(--ui-surface-2); color: var(--ui-ink-2); }
 
 /* Checklist: the radios are siblings that precede the chips and the groups, so CSS alone filters. */
 .ui-ck__sum { margin: 0 0 var(--ui-s3); color: var(--ui-ink-2); font-size: 0.9rem; }
@@ -358,12 +369,14 @@ body.ui-body {
 #ck-f-fail:checked ~ .ui-ck__chips [for="ck-f-fail"],
 #ck-f-warn:checked ~ .ui-ck__chips [for="ck-f-warn"],
 #ck-f-pass:checked ~ .ui-ck__chips [for="ck-f-pass"],
-#ck-f-na:checked ~ .ui-ck__chips [for="ck-f-na"] {
+#ck-f-na:checked ~ .ui-ck__chips [for="ck-f-na"],
+#ck-f-neutral:checked ~ .ui-ck__chips [for="ck-f-neutral"] {
   background: var(--ui-accent); border-color: var(--ui-accent); color: var(--ui-on-accent);
 }
 #ck-f-all:checked ~ .ui-ck__chips [for="ck-f-all"] b, #ck-f-attn:checked ~ .ui-ck__chips [for="ck-f-attn"] b,
 #ck-f-fail:checked ~ .ui-ck__chips [for="ck-f-fail"] b, #ck-f-warn:checked ~ .ui-ck__chips [for="ck-f-warn"] b,
-#ck-f-pass:checked ~ .ui-ck__chips [for="ck-f-pass"] b, #ck-f-na:checked ~ .ui-ck__chips [for="ck-f-na"] b {
+#ck-f-pass:checked ~ .ui-ck__chips [for="ck-f-pass"] b, #ck-f-na:checked ~ .ui-ck__chips [for="ck-f-na"] b,
+#ck-f-neutral:checked ~ .ui-ck__chips [for="ck-f-neutral"] b {
   color: var(--ui-on-accent);
 }
 #ck-f-all:focus-visible ~ .ui-ck__chips [for="ck-f-all"],
@@ -371,17 +384,22 @@ body.ui-body {
 #ck-f-fail:focus-visible ~ .ui-ck__chips [for="ck-f-fail"],
 #ck-f-warn:focus-visible ~ .ui-ck__chips [for="ck-f-warn"],
 #ck-f-pass:focus-visible ~ .ui-ck__chips [for="ck-f-pass"],
-#ck-f-na:focus-visible ~ .ui-ck__chips [for="ck-f-na"] { outline: 2px solid var(--ui-accent); outline-offset: 2px; }
+#ck-f-na:focus-visible ~ .ui-ck__chips [for="ck-f-na"],
+#ck-f-neutral:focus-visible ~ .ui-ck__chips [for="ck-f-neutral"] {
+  outline: 2px solid var(--ui-accent); outline-offset: 2px;
+}
 #ck-f-attn:checked ~ .ui-ck__groups .ui-ck__item:not([data-status="fail"]):not([data-status="warn"]),
 #ck-f-fail:checked ~ .ui-ck__groups .ui-ck__item:not([data-status="fail"]),
 #ck-f-warn:checked ~ .ui-ck__groups .ui-ck__item:not([data-status="warn"]),
 #ck-f-pass:checked ~ .ui-ck__groups .ui-ck__item:not([data-status="pass"]),
 #ck-f-na:checked ~ .ui-ck__groups .ui-ck__item:not([data-status="na"]),
+#ck-f-neutral:checked ~ .ui-ck__groups .ui-ck__item:not([data-status="neutral"]),
 #ck-f-attn:checked ~ .ui-ck__groups .ui-ck__grp:not([data-has~="fail"]):not([data-has~="warn"]),
 #ck-f-fail:checked ~ .ui-ck__groups .ui-ck__grp:not([data-has~="fail"]),
 #ck-f-warn:checked ~ .ui-ck__groups .ui-ck__grp:not([data-has~="warn"]),
 #ck-f-pass:checked ~ .ui-ck__groups .ui-ck__grp:not([data-has~="pass"]),
 #ck-f-na:checked ~ .ui-ck__groups .ui-ck__grp:not([data-has~="na"]),
+#ck-f-neutral:checked ~ .ui-ck__groups .ui-ck__grp:not([data-has~="neutral"]),
 .ui-ck__r:not(#ck-f-all):checked ~ .ui-ck__groups .ui-ck__item[data-weight="0"] { display: none; }
 .ui-ck__grp {
   border: 1px solid var(--ui-line); border-radius: var(--ui-r1); margin: 0 0 var(--ui-s2);
@@ -406,6 +424,7 @@ body.ui-body {
 .ui-ck__bar .w { background: var(--st-warn-bar); }
 .ui-ck__bar .f { background: var(--st-fail); }
 .ui-ck__bar .n { background: var(--st-na-bar); }
+.ui-ck__bar .u { background: var(--st-neutral-bar); }
 .ui-ck__cnt {
   font-size: 0.85rem; color: var(--ui-ink-2); font-variant-numeric: tabular-nums;
   white-space: nowrap; text-align: right;
@@ -419,6 +438,7 @@ body.ui-body {
 .ui-ck__item[data-status="warn"] { background: linear-gradient(90deg, var(--st-warn-tint), transparent 40%); }
 .ui-ck__title { font-weight: 600; font-size: 0.92rem; line-height: 1.4; align-self: center; }
 .ui-ck__item[data-status="pass"] .ui-ck__title, .ui-ck__item[data-status="na"] .ui-ck__title { font-weight: 500; }
+.ui-ck__word { margin-left: 8px; font-size: 0.75rem; font-weight: 600; color: var(--ui-ink-2); white-space: nowrap; }
 .ui-ck__item[data-weight="0"] { background: none; }
 .ui-ck__item[data-weight="0"] .ui-ck__title { font-weight: 500; color: var(--ui-ink-2); }
 .ui-ck__item[data-weight="0"] .ui-st { background: var(--st-na-tint); color: var(--st-na); }
@@ -433,6 +453,7 @@ body.ui-body {
 .ui-st--warn { background: var(--st-warn); color: #FFFFFF; }
 .ui-st--pass { background: var(--st-pass-tint); color: var(--st-pass-ink); }
 .ui-st--na { background: var(--st-na-tint); color: var(--st-na); }
+.ui-st--neutral { background: var(--ui-surface-2); color: var(--ui-ink-2); }
 
 @media (max-width: 640px) {
   .ui-page { padding: var(--ui-s4) var(--ui-s4) var(--ui-s4); }
@@ -635,14 +656,17 @@ def checklist(
     *,
     summary_html: str = "",
     labels: Mapping[str, str] | None = None,
-    statuses: Sequence[str] = TONES,
+    statuses: Sequence[str] = DEFAULT_STATUSES,
 ) -> str:
     """Criteria grouped by category, with CSS-only filter chips.
 
     Each group: ``{"name": str, "count_text": str, "items": [item, ...]}``. Each item:
-    ``{"tone": "fail"|"warn"|"pass"|"na", "title": str, "criterion": str}`` plus either
+    ``{"tone": "fail"|"warn"|"pass"|"na"|"neutral", "title": str, "criterion": str}`` plus either
     ``"evidence"`` (plain text) or ``"evidence_html"`` (trusted markup). An unknown tone raises: an
-    item must never render blank. `labels` overrides the status names (chip and glyph labels).
+    item must never render blank. `labels` overrides the status names (chip and glyph labels). An item
+    may carry ``"status_label"``, the skill's own word for its status (a tone groups several of a
+    skill's statuses): it is what the glyph says and is shown after the title, and the row carries it as
+    ``data-status-word``; ``data-status`` stays the tone.
 
     An item marked ``"weightless": True`` is a criterion whose result already counts under another
     one: it is listed (muted, ``data-weight="0"``), but no chip, group bar, pill or ``data-has``
@@ -650,7 +674,8 @@ def checklist(
     filter other than All hides it. So every chip's count is the rows it shows: All counts every listed
     row (weightless ones included, since All shows them), each other chip only the rows that count.
 
-    `statuses` names the statuses the skill's checklist can carry; only those get a chip, and the
+    `statuses` names the statuses the skill's checklist can carry (`DEFAULT_STATUSES` when it names
+    none, so `neutral` is offered only by a page that asks for it); only those get a chip, and the
     "Needs attention" chip appears only when both fail and warn exist (with one, it would repeat it).
 
     Every group renders `open` and carries `data-has` (the tones it holds), so the chips hide a group
@@ -690,16 +715,21 @@ def checklist(
             crit_attr = f' data-criterion="{_esc(crit)}"' if crit else ""
             if weightless:
                 crit_attr += ' data-weight="0"'
+            word = str(it.get("status_label") or "")
+            word_html = f'<span class="ui-ck__word">{_esc(word)}</span>' if word else ""
+            if word:
+                crit_attr += f' data-status-word="{_esc(word)}"'
             rows.append(
                 f'<li class="ui-ck__item" data-status="{tone}"{crit_attr}>'
-                f'<span class="ui-st ui-st--{tone}" role="img" aria-label="{_esc(names[tone])}">{_GLYPH[tone]}</span>'
-                f'<span class="ui-ck__title">{_esc(it.get("title") or "")}</span>'
+                f'<span class="ui-st ui-st--{tone}" role="img" aria-label="{_esc(word or names[tone])}">'
+                f"{_GLYPH[tone]}</span>"
+                f'<span class="ui-ck__title">{_esc(it.get("title") or "")}{word_html}</span>'
                 f"{ev_p}</li>"
             )
         has = " ".join(t for t in TONES if gcounts[t])
         bar = "".join(
             f'<i class="{cls}" style="--n:{gcounts[t]}"></i>'
-            for t, cls in (("pass", "p"), ("warn", "w"), ("fail", "f"), ("na", "n"))
+            for t, cls in (("pass", "p"), ("neutral", "u"), ("warn", "w"), ("fail", "f"), ("na", "n"))
             if gcounts[t]
         )
         flags = "".join(
@@ -725,6 +755,7 @@ def checklist(
         ("attn", "Needs attention", counts["fail"] + counts["warn"]),
         ("fail", names["fail"], counts["fail"]),
         ("warn", names["warn"], counts["warn"]),
+        ("neutral", names["neutral"], counts["neutral"]),
         ("pass", names["pass"], counts["pass"]),
         ("na", names["na"], counts["na"]),
     ]

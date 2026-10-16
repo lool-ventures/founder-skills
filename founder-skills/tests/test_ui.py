@@ -52,7 +52,7 @@ def test_constants_never_name_the_embedded_payload(name: str) -> None:
 
 def test_the_css_has_a_filter_rule_for_every_chip() -> None:
     css = ui.UI_CSS
-    for key, status in (("fail", "fail"), ("warn", "warn"), ("pass", "pass"), ("na", "na")):
+    for key, status in (("fail", "fail"), ("warn", "warn"), ("pass", "pass"), ("na", "na"), ("neutral", "neutral")):
         assert f'#ck-f-{key}:checked ~ .ui-ck__groups .ui-ck__item:not([data-status="{status}"])' in css
         assert f'#ck-f-{key}:checked ~ .ui-ck__groups .ui-ck__grp:not([data-has~="{status}"])' in css
         assert f'#ck-f-{key}:checked ~ .ui-ck__chips [for="ck-f-{key}"]' in css
@@ -74,6 +74,16 @@ def test_the_section_nav_wraps_and_never_clips() -> None:
     assert "flex-wrap: wrap" in block
     assert "overflow" not in block and "scrollbar-width" not in ui.UI_CSS
     assert "::-webkit-scrollbar" not in ui.UI_CSS
+
+
+def test_a_long_unbroken_token_breaks_rather_than_widening_the_page() -> None:
+    """Model-written text (evidence, a rationale, a supplied fact) can carry a 600-character URL. Measured in a
+    browser at a phone's width, a page with no wrap rule panned sideways for many screens. The body breaks any
+    token anywhere, and the
+    header's text column may shrink below its content's width (a grid child's min-width is otherwise auto)."""
+    assert "overflow-wrap: anywhere" in _rule("body.ui-body")
+    assert "min-width: 0" in _rule(".ui-hero__text")
+    assert "--st-neutral-bar" in _rule(":root") and "var(--st-neutral-bar)" in _rule(".ui-ck__bar .u")
 
 
 def _tokens() -> dict[str, str]:
@@ -475,6 +485,88 @@ def test_a_skill_with_no_warn_status_gets_no_warn_or_attention_chip() -> None:
     assert {e.get("for") for e in by_tag(doc, "label")} == set(radios)
     with pytest.raises(ValueError):
         ui.checklist(groups, statuses=("fail", "not_applicable"))
+
+
+# sha256 of `checklist()` output for `_groups()` as the module rendered it before the `neutral` tone and
+# `status_label` existed: default statuses, a skill with no warn, and renamed labels with a summary. A page
+# that names neither must get exactly that markup, so the pages already on the shell are untouched.
+_FROZEN_FOUR_TONE = {
+    "default": "92593121edb80a3fba443d96a8b62214fd269f6c814eee928655eb1ce90227dd",
+    "no_warn": "5ed3bcbaeb9fbca242e0f8148329a1c5375ae65728aa29cbdf480a9dcae760b2",
+    "labels_summary": "ab3f55acfab9d9e6224f139917e2f3d8d73d492456471f708f5e4d6b285f5bd7",
+}
+
+
+def test_a_page_that_names_no_new_status_gets_the_four_tone_markup_unchanged() -> None:
+    import hashlib
+
+    assert ui.DEFAULT_STATUSES == ("fail", "warn", "pass", "na")
+    outs = {
+        "default": ui.checklist(_groups()),
+        "no_warn": ui.checklist(_groups(), statuses=("fail", "pass", "na")),
+        "labels_summary": ui.checklist(_groups(), labels={"na": "N/A"}, summary_html="<b>s</b>"),
+    }
+    assert {k: hashlib.sha256(v.encode()).hexdigest() for k, v in outs.items()} == _FROZEN_FOUR_TONE
+    assert "ck-f-neutral" not in outs["default"] and "data-status-word" not in outs["default"]
+
+
+def _neutral_groups() -> list[dict[str, object]]:
+    return [
+        {
+            "name": "Team",
+            "count_text": "",
+            "items": [
+                {"tone": "neutral", "title": "M", "criterion": "N_1", "status_label": "Moderate", "evidence": "e"},
+                {"tone": "fail", "title": "D", "criterion": "N_2", "status_label": f"Dealbreaker {XSS}"},
+                {"tone": "pass", "title": "S", "criterion": "N_3"},
+            ],
+        }
+    ]
+
+
+def test_the_neutral_tone_renders_its_glyph_bar_and_chip_when_a_page_names_it() -> None:
+    out = ui.checklist(_neutral_groups(), statuses=("fail", "warn", "neutral", "pass", "na"))
+    doc = parse(out)
+    radios = [e.get("id") for e in by_tag(doc, "input") if e.get("name") == "ck-f"]
+    assert radios == ["ck-f-all", "ck-f-attn", "ck-f-fail", "ck-f-warn", "ck-f-neutral", "ck-f-pass", "ck-f-na"]
+    chips = {e.get("for"): e.text() for e in by_tag(doc, "label")}
+    assert chips["ck-f-neutral"] == "Neutral 1" and chips["ck-f-attn"] == "Needs attention 1"
+    (row,) = by_attr(doc, "data-criterion", "N_1")
+    assert row.get("data-status") == "neutral"
+    assert 'class="ui-st ui-st--neutral"' in out and "•" in out
+    (grp,) = by_tag(doc, "details")
+    assert grp.get("data-has") == "fail pass neutral"
+    assert '<i class="u" style="--n:1"></i>' in out
+    for rule in (".ui-st--neutral", ".ui-pill--neutral", ".ui-ck__bar .u", ".ui-ck__word"):
+        assert rule in ui.UI_CSS, rule
+    # Named but absent from the statuses, it still raises nothing: the tone is known, only the chip is not
+    # offered. An unknown tone still raises.
+    assert "ck-f-neutral" not in ui.checklist(_neutral_groups())
+    with pytest.raises(ValueError):
+        ui.checklist([{"name": "G", "items": [{"tone": "moderate", "title": "x"}]}])
+
+
+def test_a_status_label_is_what_the_glyph_says_and_is_shown_after_the_title() -> None:
+    doc = parse(ui.checklist(_neutral_groups(), statuses=("fail", "warn", "neutral", "pass", "na")))
+    (row,) = by_attr(doc, "data-criterion", "N_1")
+    assert row.get("data-status-word") == "Moderate"
+    (glyph,) = [e for e in row.iter() if e.get("role") == "img"]
+    assert glyph.get("aria-label") == "Moderate"
+    assert "M" in row.text() and "Moderate" in row.text()
+    (dealbreaker,) = by_attr(doc, "data-criterion", "N_2")
+    assert dealbreaker.get("data-status-word") == f"Dealbreaker {XSS}"
+    out = ui.checklist(_neutral_groups(), statuses=("fail", "warn", "neutral", "pass", "na"))
+    assert "<script>" not in out
+    # A row without a word keeps the tone's name.
+    (plain,) = by_attr(doc, "data-criterion", "N_3")
+    assert not plain.has("data-status-word")
+    assert [e.get("aria-label") for e in plain.iter() if e.get("role") == "img"] == ["Pass"]
+
+
+def test_founder_text_leaves_a_kept_token_as_written() -> None:
+    assert ui.founder_text("the widget_count rose") == "the widget count rose"
+    assert ui.founder_text("the widget_count rose", frozenset({"widget_count"})) == "the widget_count rose"
+    assert ui.founder_text("the widget_count rose", frozenset()) == "the widget count rose"
 
 
 def test_a_weightless_item_is_listed_but_never_counted() -> None:

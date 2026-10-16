@@ -15,7 +15,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CANONICAL = REPO_ROOT / "founder-skills" / "scripts" / "_ui.py"
 SKILLS = REPO_ROOT / "founder-skills" / "skills"
-ADOPTERS = ("financial-model-review", "deck-review", "market-sizing")
+ADOPTERS = ("financial-model-review", "deck-review", "market-sizing", "ic-sim")
 
 
 def test_the_canonical_module_exists() -> None:
