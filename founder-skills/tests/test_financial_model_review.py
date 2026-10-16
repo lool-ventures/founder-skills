@@ -6857,7 +6857,11 @@ class TestChecklistSummaryKeysCoverage:
         # The summary reads the rating through `_quality_line`, which it shares with the report's verdict.
         helper = re.search(r"def _quality_line\(.*?\n(?=def |\Z)", src, re.DOTALL)
         assert helper and "_quality_line(" in fn_match.group(0), "the summary no longer reads through _quality_line"
-        fn_body = fn_match.group(0) + helper.group(0)
+        # ...and `_quality_line` takes which score to headline, and under which name, from `_fmr_score_view`.
+        assert helper and "_fmr_score_view.headline(" in helper.group(0), "the rating no longer reads the owner"
+        with open(os.path.join(FMR_SCRIPTS_DIR, "_fmr_score_view.py"), encoding="utf-8") as fh:
+            owner = fh.read()
+        fn_body = fn_match.group(0) + helper.group(0) + owner
 
         exec_read_keys = set(re.findall(r'summary\.get\("([^"]+)"', fn_body))
 

@@ -483,17 +483,20 @@ def test_runway_chart() -> None:
 
 
 def test_deck_format_summary_cards() -> None:
-    """Deck format shows Business Quality and deck-only label in HTML."""
+    """Deck format (estimated figures, no structural criterion) is headlined as report.md headlines it:
+    business quality, "Deck Financial Readiness", with the deck-only label in HTML."""
     inputs_deck = dict(_VALID_INPUTS)
     inputs_deck["company"] = dict(_VALID_INPUTS["company"])
     inputs_deck["company"]["model_format"] = "deck"
+    inputs_deck["company"]["data_confidence"] = "estimated"
     checklist_deck = json.loads(json.dumps(_VALID_CHECKLIST))
     checklist_deck["summary"]["business_quality_pct"] = 95.0
     checklist_deck["summary"]["model_maturity_pct"] = None
     d = _make_artifact_dir(overrides={"inputs.json": inputs_deck, "checklist.json": checklist_deck})
     rc, stdout, _stderr = run_script_raw("visualize.py", ["--dir", d])
     assert rc == 0
-    assert "Business Quality" in stdout
+    assert "Deck Financial Readiness" in stdout
+    assert "Business Quality" not in stdout
     assert "deck" in stdout.lower() or "N/A" in stdout
 
 
@@ -1168,14 +1171,14 @@ class TestExploreBurnMultipleFormula:
 def test_explore_checklist_score_and_counts_rendered() -> None:
     """The explorer must surface the checklist score and fail/warn counts.
 
-    _VALID_CHECKLIST's summary has score_pct=95.9 (printed as report.md prints it, 96%), 1 failed
+    _VALID_CHECKLIST's summary has score_pct=95.9 (printed as report.md prints it, 95.9%), 1 failed
     item, 1 warned item.
     """
     d = _make_artifact_dir()
     rc, stdout, _stderr = run_script_raw("explore.py", ["--dir", d])
     assert rc == 0
     assert "Review Checklist" in stdout
-    assert "96%" in stdout
+    assert "95.9%" in stdout
     assert "1 failing" in stdout
     assert "1 warning" in stdout
 

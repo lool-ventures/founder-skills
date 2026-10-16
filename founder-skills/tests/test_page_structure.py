@@ -210,21 +210,28 @@ def test_the_page_has_a_phone_viewport_a_language_and_one_main(skill: str, scrip
     assert len(by_tag(doc, "main")) == 1
 
 
-# The line each skill's report.md prints its checklist score on, and the score in it.
+# The line each skill's report prints its headline score on, and the score in it. financial-model-review's is
+# its verdict (report.json `verdict`, the report's first paragraph and the printed hand-over), which names the
+# score the ring shows; its `**Overall:**` line always prints the checklist score, which a deck-only review
+# does not headline. Which score and which name is held, per combination, by `test_score_owners.py`.
 _REPORT_SCORE = {
-    "financial-model-review": r"\*\*Overall:\*\* [^(\n]*\(([\d.]+)%\)",
+    "financial-model-review": r"(?:Model Quality|Deck Financial Readiness): [^(\n]*\(([\d.]+)%\)",
     "deck-review": r"\*\*Deck-craft score:\*\* ([\d.]+)%",
     "market-sizing": r"Self-check: ([\d.]+)%",
     "ic-sim": r"\*\*Conviction Score:\*\* ([\d.]+)%",
 }
 
 
+# Two invented scores: one with a decimal (a page that rounds drifts from a report that does not) and one
+# whole (a page or report that prints the raw float says "63.0" where the fleet format says "63").
+_INVENTED_SCORES = (63.7, 63.0)
+
+
+@pytest.mark.parametrize("score", _INVENTED_SCORES)
 @pytest.mark.parametrize(("skill", "script"), REDESIGNED)
-def test_the_ring_states_the_score_as_the_report_states_it(skill: str, script: str) -> None:
-    """The ring (and its spoken label) and report.md state one score one way. An invented score with a
-    decimal makes the two formats differ if a page drifts: financial-model-review's report prints it
-    rounded, market-sizing's with its decimal. deck-review's report prints the raw float ("63.0"), so
-    there the VALUE is held equal and the trailing zero is a known difference."""
+def test_the_ring_states_the_score_as_the_report_states_it(skill: str, script: str, score: float) -> None:
+    """The ring (and its spoken label) and the report state one score one way, the fleet's: one decimal at
+    most and no trailing zero ("63.7%", "63%")."""
     import re
     import shutil
 
@@ -234,12 +241,13 @@ def test_the_ring_states_the_score_as_the_report_states_it(skill: str, script: s
         work.mkdir()
         artifact, path = _SCORE.get(skill, ("checklist.json", ("summary", "score_pct")))
         ck = json.loads((fix / artifact).read_text())
-        ck[path[0]][path[1]] = 63.7
+        ck[path[0]][path[1]] = score
         if skill == "ic-sim":
             # A score in the more-diligence band with that verdict, so no score-verdict mismatch fires.
             ck["summary"]["verdict"] = "more_diligence"
         (fix / artifact).write_text(json.dumps(ck))
-        md = json.loads(drive_compose(skill, fix, work).read_text())["report_markdown"]
+        report = json.loads(drive_compose(skill, fix, work).read_text())
+        md = report["verdict"] if skill == "financial-model-review" else report["report_markdown"]
         out = work / "page.html"
         proc = subprocess.run([sys.executable, *html_argv(skill, script, work, out)], capture_output=True, text=True)
         assert proc.returncode == 0, proc.stderr
@@ -250,10 +258,8 @@ def test_the_ring_states_the_score_as_the_report_states_it(skill: str, script: s
     (ring,) = [e for e in doc.iter() if e.get("role") == "img" and " percent" in (e.get("aria-label") or "")]
     ring_score = re.search(r"([\d.]+) percent", ring.get("aria-label") or "")
     assert ring_score
-    if skill == "deck-review":
-        assert float(ring_score.group(1)) == float(report_score)
-    else:
-        assert ring_score.group(1) == report_score, (ring_score.group(1), report_score)
+    assert ring_score.group(1) == report_score, (ring_score.group(1), report_score)
+    assert report_score == f"{round(score, 1):g}", (report_score, score)
     shown = [e.text() for e in doc.iter() if e.text() == f"{ring_score.group(1)}%"]
     assert shown, "the ring prints the same figure it speaks"
 

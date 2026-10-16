@@ -636,7 +636,7 @@ def score_ring(
         )
     cap = f"<span>{_esc(caption)}</span>" if caption else ""
     fig = (
-        f'<figure class="ui-ring ui-ring--{tone}" role="img" aria-label="{_esc(aria_label)}">'
+        f'<figure class="ui-ring ui-ring--{tone}" data-tone="{tone}" role="img" aria-label="{_esc(aria_label)}">'
         '<div class="ui-ring__dial">'
         '<svg viewBox="0 0 120 120" aria-hidden="true">'
         '<circle class="ui-ring__track" cx="60" cy="60" r="50"/>'
@@ -716,7 +716,8 @@ def checklist(
             if weightless:
                 crit_attr += ' data-weight="0"'
             word = str(it.get("status_label") or "")
-            word_html = f'<span class="ui-ck__word">{_esc(word)}</span>' if word else ""
+            # The glyph's name is the word, so the visible copy is hidden from a screen reader: said once.
+            word_html = f'<span class="ui-ck__word" aria-hidden="true">{_esc(word)}</span>' if word else ""
             if word:
                 crit_attr += f' data-status-word="{_esc(word)}"'
             rows.append(

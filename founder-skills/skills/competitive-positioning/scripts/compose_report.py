@@ -1394,7 +1394,9 @@ def _section_executive_summary(
         # Prefer summary block (post-v0.4.2), fall back to legacy flat field.
         cl_summary = _as_dict(checklist.get("summary"))
         checklist_score = cl_summary.get("score_pct") if cl_summary else checklist.get("score_pct")
-        if checklist_score is not None:
+        if isinstance(checklist_score, (int, float)) and not isinstance(checklist_score, bool):
+            lines.append(f"**Analysis Quality Score:** {_view.score_text(checklist_score)}%")
+        elif checklist_score is not None:
             lines.append(f"**Analysis Quality Score:** {checklist_score}%")
 
     return "\n".join(lines) + "\n"

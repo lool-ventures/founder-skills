@@ -188,6 +188,17 @@ CP_FIXTURES = REPO_ROOT / "founder-skills" / "tests" / "fixtures" / "competitive
 CP_SCRIPTS = REPO_ROOT / "founder-skills" / "skills" / "competitive-positioning" / "scripts"
 
 
+def _cp_view_module() -> Any:
+    """competitive-positioning's `_cp_view`, loaded by path under a name of its own."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("_ci_cp_view", CP_SCRIPTS / "_cp_view.py")
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
 def _cp_compose(tmp_path: Path, mutate: object = None) -> str:
     """Stage the competitive-positioning fixtures, optionally mutate them, compose, return report.md.
 
@@ -349,7 +360,9 @@ def test_cp_quality_score_verdict_matches_the_checklist_canon(tmp_path: Path) ->
         _write(d, "checklist.json", cl)
 
     md = _cp_compose(tmp_path, mutate)
-    assert "82.0%" in md, "the quality score no longer reaches the report"
+    shown = _cp_view_module().score_text(82.0)
+    assert shown == "82"
+    assert f"{shown}%" in md, "the quality score no longer reaches the report"
     assert "thorough competitive analysis" not in md, (
         "82% is 'solid' under the documented 85/70/50 canon, but the report calls it thorough — the "
         "report is re-banding the number instead of reading the computed status"

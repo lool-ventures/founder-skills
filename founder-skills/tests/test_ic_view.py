@@ -102,13 +102,13 @@ _FUNDS = {"generic": lambda: _fx("fund_profile.json"), "request": _request_profi
 
 
 _FROZEN = {
-    "exec/fixture": "ad72e8bdca0aec60f5f41dc4cb64e3b5638a716acc41b065e52907a337e11c45",
-    "exec/floored": "59489357a1c17022173f8cff90249964321f37aa579ced246ff382fc868c107a",
-    "exec/capped": "e3df71255c56aa303d9ce96ecd592b4008f6ed195f8bc62fe096dc916d12cf3a",
-    "exec/hard_pass": "4de5753907eba7c0d7fa2fabcda562a26f83a5ea985834e74bd8fc543f9f622e",
-    "exec/invest": "63b1b3a3773e0ec5d2793a592e1e4ab596c66e1977f9f7dd5328c79f241eed24",
-    "exec/pass": "750688fe571a3af58dfb3ba15cf4ca5b937da0d0cc0dd91967068e5cce7060d1",
-    "exec/unknown": "eb6f27a0f3442676bb2b644e52782c475a1579a6e418b22ff9cd96e913bafe02",
+    "exec/fixture": "c73cd9b44eb46f70c0a04e76d74a360fa2994225f0864a57f4b05fdc26dd08d0",
+    "exec/floored": "0c7635e32a13930a7ac9759895ea7678b91693b018876b13ece523a3a6c1fb8d",
+    "exec/capped": "873fd5ea5e5cf6c829233510f0f1a2aec57a16c17f822a3554d9feb12eb40544",
+    "exec/hard_pass": "dd57fba8c76484d1a00392c9a0c00c6a95d3a24879c341b4c3164f25875ed3c4",
+    "exec/invest": "c9852978c3fb92fbc1769f39a17b6a8bb87c6458e03c4633bb53fdcb945bf6f9",
+    "exec/pass": "79b71643fe90acdd72d658a5e14b0fe1ee419451c96af2c44fa989952eb270ec",
+    "exec/unknown": "21b2bb67f12a7eb4441f8d5ed9701b39e3ded2a72ad777004339bb6df68192e0",
     "fund/generic": "ad0df3ef389697db3b4d3d7c6b9dc4263e72c28898ce5f27e1aefd7b3963b77a",
     "fund/request": "12d305200baca12863b04ae3b46a8bec940665008b3ba275ac2d0a0c930c2bf1",
     "fund/researched": "d03f38cc78f27a2a5a173aa807a7e98b2a6fc27c3db24b1ce5a8e198c06120e7",
@@ -325,14 +325,13 @@ def test_the_page_states_the_verdict_report_md_states(case: str) -> None:
 
 
 def test_a_held_verdict_rings_neutral_and_a_merits_one_warns() -> None:
-    """The tone is the ring's modifier class (`_ui.score_ring` carries it nowhere else)."""
+    """The tone, read from the ring's `data-tone` (never from a class name)."""
     tones = {}
     for case in ("merits", "floored"):
         with tempfile.TemporaryDirectory() as td:
             _md, html = _render(Path(td), _score(**_PAGE_VERDICTS[case]))
         (ring,) = [e for e in parse(html).iter() if e.tag == "figure" and "percent" in (e.get("aria-label") or "")]
-        m = re.search(r"\bui-ring--(\w+)\b", ring.get("class") or "")
-        tones[case] = m.group(1) if m else None
+        tones[case] = ring.get("data-tone")
     assert tones == {"merits": "warn", "floored": "neutral"}
 
 

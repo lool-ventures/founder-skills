@@ -93,12 +93,6 @@ def tone(status: Any) -> str:
     return _TONE.get(str(status), "na")
 
 
-# The places the score prints with on both pages: compose_report.py prints the checklist score and the
-# business-quality score as `f"{score:.0f}%"`, and a ring that said "20.6%" beside a report saying "21%"
-# would state one score two ways.
-SCORE_DECIMALS = 0
-
-
 def score_tone(score_pct: float) -> str:
     """The score's band, the thresholds both pages have always used."""
     if score_pct >= 80:

@@ -33,6 +33,7 @@ from typing import Any, TypeGuard
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _checklist_view  # noqa: E402
+import _fmr_score_view  # noqa: E402
 import _growth_rate  # noqa: E402
 import _theme  # noqa: E402
 import _ui  # noqa: E402
@@ -465,8 +466,14 @@ def _build_data_payload(
             for _ids in _unresolved.values():
                 if isinstance(_ids, list):
                     _not_assessed += len(_ids)
+        # Which score the review is headlined with, and under which name: `_fmr_score_view.headline`, the
+        # choice report.md and report.html make too (a deck-only review is headlined on business quality).
+        _label, _score = _fmr_score_view.headline(
+            summary, _fmr_score_view.data_confidence(_deep_get(inputs, "company", default={}))
+        )
         checklist_summary = {
-            "score_pct": summary.get("score_pct"),
+            "score_pct": _score,
+            "score_label": _label,
             "overall": summary.get("overall_status"),
             "fails": summary.get("failed_items", []),
             "warns": summary.get("warned_items", []),
@@ -572,18 +579,23 @@ def _render_checklist(checklist: dict[str, Any] | None) -> tuple[str, str]:
 
     ring = ""
     head_bits: list[str] = []
-    if isinstance(score_pct, (int, float)):
+    if isinstance(score_pct, (int, float)) and not isinstance(score_pct, bool):
         tone = _checklist_view.score_tone(float(score_pct))
         # The score as report.md prints it, so the page and the report never state it two ways.
-        shown = _ui.score_text(score_pct, decimals=_checklist_view.SCORE_DECIMALS)
+        shown = _fmr_score_view.score_text(score_pct)
         head_bits.append(f'<span class="ui-pill ui-pill--{tone}">{shown}%</span>')
-        spoken = f"Review checklist score {shown} percent" + (f", {overall_text}" if overall_text else "")
+        if checklist.get("score_label") == _fmr_score_view.DECK_LABEL:
+            label, caption = _fmr_score_view.DECK_LABEL, "Based on pitch deck (no spreadsheet provided)"
+            spoken = f"{label} {shown} percent, based on pitch deck"
+        else:
+            label, caption = "Review Checklist", overall_text
+            spoken = f"Review checklist score {shown} percent" + (f", {overall_text}" if overall_text else "")
         ring = _ui.score_ring(
             float(score_pct),
             tone=tone,
             value_text=f"{shown}%",
-            label="Review Checklist",
-            caption=overall_text,
+            label=label,
+            caption=caption,
             aria_label=spoken,
             href="#checklist",
         )

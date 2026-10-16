@@ -55,6 +55,7 @@ _URL_EMAIL_RE = re.compile(r"\S+@\S+|https?://\S+|www\.\S+|\b[A-Za-z0-9-]+(?:\.[
 
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _dr_score_view  # noqa: E402
 import _notes  # noqa: E402
 import _reconciliation_prose  # noqa: E402
 from _artifact_writer import load_schema  # noqa: E402
@@ -870,18 +871,8 @@ def _section_title(inventory: dict[str, Any] | None) -> str:
 
 
 def _scored_criteria(checklist: dict[str, Any] | None) -> int:
-    """How many criteria the score counts, read from the artifact (`summary.scored`).
-
-    Not `total`: one of the 35 listed criteria duplicates another and carries no weight, so the
-    founder is told the number the score is actually taken over. A checklist written before
-    `scored` existed counted every listed criterion, so its `total` is the honest figure there.
-    """
-    summary = _as_dict(_as_dict(checklist).get("summary"))
-    for key in ("scored", "total"):
-        value = summary.get(key)
-        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
-            return value
-    return 34
+    """How many criteria the score counts (`_dr_score_view.scored_criteria`, which the page reads too)."""
+    return _dr_score_view.scored_criteria(_as_dict(_as_dict(checklist).get("summary")))
 
 
 def _section_executive_summary(
@@ -903,30 +894,20 @@ def _section_executive_summary(
 
     if checklist is not None and not _is_stub(checklist):
         summary = _as_dict(checklist.get("summary"))
-        score = summary.get("score_pct", 0)
-        status = summary.get("overall_status", "unknown")
         pass_c = summary.get("pass", 0)
         fail_c = summary.get("fail", 0)
         warn_c = summary.get("warn", 0)
         na_c = summary.get("not_applicable", 0)
-        scored_n = _scored_criteria(checklist)
 
-        status_label = {
-            # Craft language only. These used to promise investability ("investor-ready"),
-            # which this same block now disclaims one line below — and half credit for a
-            # warn widened that string's reach (25 pass / 10 warn moved Solid -> Strong).
-            # A deck can meet every craft criterion and still be uninvestable.
-            "strong": f"Strong — meets nearly all {scored_n} scored craft criteria; what is left is polish",
-            "solid": "Solid — a well-built deck with a few craft gaps to close",
-            "needs_work": "Needs Work — several craft gaps to close before sending",
-            "major_revision": "Major Revision — worth reworking before it goes out; see the fixes below",
-        }.get(status, status)
-
+        # The score and the band's verdict are worded once, in `_dr_score_view`, for this report and the
+        # page alike (craft language only; a band the scripts do not know is banded from the score).
         # "Deck-craft score", not "Overall Score": this measures conformance to 34 scored
         # deck-craft criteria and does NOT predict investability. Measured across four
         # decks, it does not even rank with an experienced reader's verdict — the
         # strongest company scored among the weakest decks.
-        lines.append(f"**Deck-craft score:** {score}% — {status_label}")
+        score, _band = _dr_score_view.band(summary)
+        scored_n = _dr_score_view.scored_criteria(summary)
+        lines.append(f"**Deck-craft score:** {_dr_score_view.score_text(score)}% — {_dr_score_view.verdict(summary)}")
         lines.append(f"**Breakdown:** {pass_c} pass, {fail_c} fail, {warn_c} warn, {na_c} N/A")
 
         # WHERE THE FAILURES CONCENTRATE. A bare count reads as that many independent

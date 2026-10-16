@@ -4078,7 +4078,10 @@ def test_gauge_zones_match_band_thresholds() -> None:
     """
     T = _thresholds_mod()
     viz = Path(os.path.join(DECK_REVIEW_DIR, "visualize.py")).read_text(encoding="utf-8")
-    assert "_thresholds.band_for(" in viz, "the ring's band must be derived, not re-typed"
+    owner = Path(os.path.join(DECK_REVIEW_DIR, "_dr_score_view.py")).read_text(encoding="utf-8")
+    # The band is decided once, for report.md and the page, by `_dr_score_view`; there it is derived.
+    assert "_thresholds.band_for(" in owner, "the ring's band must be derived, not re-typed"
+    assert "_dr_score_view.band(" in viz, "the page must take its band from the owner"
     assert "(0, 50, _COLOR_FAIL)" not in viz, "hardcoded zone literals are back"
     assert T.zone_edges() == (0.0, T.NEEDS_WORK, T.SOLID, T.STRONG, 100.0)
 

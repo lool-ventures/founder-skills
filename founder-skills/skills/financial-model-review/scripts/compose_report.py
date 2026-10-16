@@ -32,6 +32,7 @@ from typing import Any, TypeGuard
 # flagged figure is caveated on every founder-facing surface, not just the one compose renders.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _evidence_multiple  # noqa: E402
+import _fmr_score_view  # noqa: E402
 import _growth_rate  # noqa: E402
 
 # Sentinel for corrupt (unparseable) artifact files
@@ -1163,12 +1164,9 @@ def _quality_line(checklist: dict[str, Any] | None, data_confidence: str) -> tup
         return None
     summary = _as_dict(checklist.get("summary"))
     status = str(summary.get("overall_status", "unknown"))
-    score = summary.get("score_pct", 0)
-    if summary.get("model_maturity_pct") is None and data_confidence != "exact":
-        bq_score = summary.get("business_quality_pct")
-        if bq_score is not None:
-            return "Deck Financial Readiness", status, f"{bq_score:.0f}%"
-    return "Model Quality", status, f"{score:.0f}%"
+    # Which score, under which name, printed which way: `_fmr_score_view`, which both pages read too.
+    label, score = _fmr_score_view.headline(summary, str(data_confidence))
+    return label, status, f"{_fmr_score_view.score_text(score if score is not None else 0)}%"
 
 
 def _runway_figures(runway: dict[str, Any] | None) -> tuple[str, str, str | None, bool] | None:
@@ -1205,7 +1203,7 @@ def _verdict(inputs: dict[str, Any] | None, checklist: dict[str, Any] | None, ru
     in the Executive Summary's words and figures. Empty when neither exists."""
     data_confidence = "exact"
     if inputs is not None and not _is_stub(inputs):
-        data_confidence = str(_as_dict(inputs.get("company")).get("data_confidence", "exact"))
+        data_confidence = _fmr_score_view.data_confidence(_as_dict(inputs.get("company")))
     parts: list[str] = []
     quality = _quality_line(checklist, data_confidence)
     if quality is not None:
@@ -1271,7 +1269,7 @@ def _section_executive_summary(
     if quality is not None:
         label, status, score = quality
         # All business items gated N/A leaves no deck-readiness score; the overall score is used, labelled so.
-        tail = " (business quality only — no spreadsheet model)" if label == "Deck Financial Readiness" else ""
+        tail = " (business quality only — no spreadsheet model)" if label == _fmr_score_view.DECK_LABEL else ""
         lines.append(f"**{label}:** {status} ({score}){tail}  ")
 
     if unit_economics is not None and not _is_stub(unit_economics):
@@ -1412,7 +1410,7 @@ def _section_checklist(checklist: dict[str, Any] | None, inputs: dict[str, Any] 
     na_ct = summary.get("not_applicable", 0)
     status = summary.get("overall_status", "unknown")
 
-    lines.append(f"**Overall:** {status} ({score:.0f}%)  ")
+    lines.append(f"**Overall:** {status} ({_fmr_score_view.score_text(score)}%)  ")
     lines.append(f"**Breakdown:** {pass_ct} pass, {fail_ct} fail, {warn_ct} warn, {na_ct} N/A out of {total} items\n")
 
     # Criteria excluded during assessment that the company profile says apply. Rendered next to

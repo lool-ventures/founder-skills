@@ -19,6 +19,13 @@ from collections.abc import Iterable, Mapping
 from typing import Any
 
 
+def score_text(pct: Any) -> str:
+    """The checklist score as report.md and the page print it, without the percent sign: one decimal at most
+    and no trailing zero ("82", "97.7"). The fleet's format; a test holds it equal to `_ui.score_text`, which
+    this module does not import."""
+    return f"{round(float(pct), 1):g}"
+
+
 def _as_dict(v: Any) -> dict[str, Any]:
     return v if isinstance(v, dict) else {}
 

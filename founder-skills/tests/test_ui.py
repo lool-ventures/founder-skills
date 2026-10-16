@@ -348,6 +348,8 @@ def test_the_ring_says_its_label_and_links_where_asked() -> None:
     (fig,) = [e for e in doc.iter() if e.get("role") == "img"]
     assert fig.get("aria-label") == f"say {XSS}"
     assert "ui-ring--pass" in (fig.get("class") or "")
+    # The tone is read by meaning too, so a page's tests never read it from a class name.
+    assert fig.get("data-tone") == "pass"
     (a,) = by_tag(doc, "a")
     assert a.get("href") == "#checklist"
     assert "<script>" not in out
@@ -557,6 +559,16 @@ def test_a_status_label_is_what_the_glyph_says_and_is_shown_after_the_title() ->
     assert dealbreaker.get("data-status-word") == f"Dealbreaker {XSS}"
     out = ui.checklist(_neutral_groups(), statuses=("fail", "warn", "neutral", "pass", "na"))
     assert "<script>" not in out
+    # The visible word repeats the glyph's name, so it is hidden from a screen reader: the row says it once.
+    (word,) = [e for e in row.iter() if e.text() == "Moderate" and e.get("role") != "img"]
+    assert word.get("aria-hidden") == "true"
+    spoken = [e.get("aria-label") for e in row.iter() if e.get("role") == "img"]
+    spoken += [
+        e.text()
+        for e in row.iter()
+        if e.text() == "Moderate" and not any(a.get("aria-hidden") for a in [e, *e.ancestors()])
+    ]
+    assert spoken == ["Moderate"], spoken
     # A row without a word keeps the tone's name.
     (plain,) = by_attr(doc, "data-criterion", "N_3")
     assert not plain.has("data-status-word")

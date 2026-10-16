@@ -27,9 +27,9 @@ from typing import Any, TypeGuard
 # Same-dir import, matching the guarded pattern used for _theme below.
 if os.path.dirname(os.path.abspath(__file__)) not in sys.path:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _dr_score_view  # noqa: E402
 import _notes  # noqa: E402
 import _reconciliation_prose  # noqa: E402
-import _thresholds  # noqa: E402
 import _ui  # noqa: E402
 
 # ---------------------------------------------------------------------------
@@ -458,47 +458,25 @@ def _key_findings(
 # Score ring and verdict
 # ---------------------------------------------------------------------------
 
-# The one-line verdict report.md prints after the score, keyed on the band `checklist.py` wrote. Word
-# for word compose_report.py's `status_label` (craft language only; a test renders both pages from one
-# dir and holds them equal). `{scored}` is the criteria count the score is taken over.
-_BAND_VERDICT: dict[str, str] = {
-    "strong": "Strong — meets nearly all {scored} scored craft criteria; what is left is polish",
-    "solid": "Solid — a well-built deck with a few craft gaps to close",
-    "needs_work": "Needs Work — several craft gaps to close before sending",
-    "major_revision": "Major Revision — worth reworking before it goes out; see the fixes below",
-}
-
 # The ring's colour per band: the two upper bands read as pass, the lower two as warn and fail.
 _BAND_TONE = {"strong": "pass", "solid": "pass", "needs_work": "warn", "major_revision": "fail"}
 
 
 def _scored_criteria(checklist: dict[str, Any] | None) -> int:
-    """How many criteria the score counts (`summary.scored`, else `total`, else 34), as compose reads it."""
-    summary = _as_dict(_as_dict(checklist).get("summary"))
-    for key in ("scored", "total"):
-        value = summary.get(key)
-        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
-            return value
-    return 34
+    """How many criteria the score counts (`_dr_score_view.scored_criteria`, which report.md reads too)."""
+    return _dr_score_view.scored_criteria(_as_dict(_as_dict(checklist).get("summary")))
 
 
 def _band(checklist: dict[str, Any]) -> tuple[float, str]:
-    """(score, band). The band is the one `checklist.py` wrote; a checklist with none (or one this page
-    does not know) is banded from its score by the same module that scored it, never by re-typed edges."""
-    summary = _as_dict(checklist.get("summary"))
-    pct = max(0.0, min(100.0, _num(summary.get("score_pct"), 0.0)))
-    status = str(summary.get("overall_status") or "").strip()
-    if status not in _BAND_TONE:
-        status = _thresholds.band_for(pct)
-    return pct, status
+    """(score, band), as `_dr_score_view` decides them for report.md and this page alike."""
+    return _dr_score_view.band(_as_dict(checklist.get("summary")))
 
 
 def _verdict(checklist: dict[str, Any] | None) -> str:
     """The report's one-line verdict for this score; "" without a usable checklist."""
     if not _usable(checklist):
         return ""
-    _pct, band = _band(checklist)
-    return _BAND_VERDICT.get(band, "").format(scored=_scored_criteria(checklist))
+    return _dr_score_view.verdict(_as_dict(checklist.get("summary")))
 
 
 def _score_ring(checklist: dict[str, Any] | None) -> str:
@@ -514,9 +492,9 @@ def _score_ring(checklist: dict[str, Any] | None) -> str:
     return _ui.score_ring(
         pct,
         tone=_BAND_TONE.get(band, "neutral"),
-        value_text=f"{_ui.score_text(pct)}%",
+        value_text=f"{_dr_score_view.score_text(pct)}%",
         label="Deck-craft score",
-        aria_label=f"Deck-craft score {_ui.score_text(pct)} percent, {band_text}",
+        aria_label=f"Deck-craft score {_dr_score_view.score_text(pct)} percent, {band_text}",
         href="#checklist",
     )
 

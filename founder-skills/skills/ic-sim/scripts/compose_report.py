@@ -634,6 +634,9 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
         score_summary = _as_dict(score_dims.get("summary"))
         score_warnings = _as_list(score_summary.get("warnings"))
         conviction_score = score_summary.get("conviction_score", 0.0)
+        # The coverage warnings below print the score as report.md does (`_ic_view.score_text`); the
+        # mismatch warning keeps the raw figure, since it is high and its message reaches the coach.
+        score_shown = _ic_view_module().score_text(score_summary)
         verdict = score_summary.get("verdict", "")
 
         # Suppress if ZERO_APPLICABLE_DIMENSIONS present, OR if the verdict was intentionally
@@ -669,11 +672,11 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
                 _warn(
                     "LOW_COVERAGE_VERDICT_CAP",
                     f"{to_confirm_n} dimensions are undisclosed (to_confirm) — verdict capped at "
-                    f"'more_diligence' (conviction {conviction_score}% reflects only the confirmed "
+                    f"'more_diligence' (conviction {score_shown}% reflects only the confirmed "
                     "dimensions). Supply the missing data to lift the cap.",
                     founder_message=(
                         f"{to_confirm_n} of the scoring dimensions are still undisclosed, so the "
-                        f"verdict is being held at 'More Diligence' — the {conviction_score}% score "
+                        f"verdict is being held at 'More Diligence' — the {score_shown}% score "
                         "reflects only what could be confirmed so far. Share the missing "
                         "information to get a fuller verdict."
                     ),
@@ -703,11 +706,11 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
                 _warn(
                     "LOW_COVERAGE_VERDICT_FLOOR",
                     f"{to_confirm_n} dimensions are undisclosed (to_confirm) — the low conviction "
-                    f"({conviction_score}%) reflects missing information, not assessed weakness, so the "
+                    f"({score_shown}%) reflects missing information, not assessed weakness, so the "
                     "verdict is held at 'more_diligence' rather than a decline. This is NOT a negative "
                     "signal about the company; supply the missing data for a real verdict.",
                     founder_message=(
-                        f"The {conviction_score}% score is low because {to_confirm_n} scoring "
+                        f"The {score_shown}% score is low because {to_confirm_n} scoring "
                         "dimensions are still undisclosed — not because of anything weak in what "
                         "was reviewed. The verdict is being held at 'More Diligence' rather than "
                         "scored as a decline. This is not a negative signal; share the missing "

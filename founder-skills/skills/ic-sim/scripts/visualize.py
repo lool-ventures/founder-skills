@@ -191,8 +191,10 @@ def _severity_word(severity: Any, text: _Text) -> str:
 
 
 def _pill(tone: str, label_html: str, attrs: str = "") -> str:
-    cls = f"ui-pill ui-pill--{tone}" if tone in ("pass", "warn", "fail", "neutral") else "ui-pill"
-    return f'<span class="{cls}"{attrs}>{label_html}</span>'
+    """A pill this page builds; its tone rides `data-tone` as well as the class, so it is read by meaning."""
+    if tone in ("pass", "warn", "fail", "neutral"):
+        return f'<span class="ui-pill ui-pill--{tone}" data-tone="{tone}"{attrs}>{label_html}</span>'
+    return f'<span class="ui-pill"{attrs}>{label_html}</span>'
 
 
 # ---------------------------------------------------------------------------

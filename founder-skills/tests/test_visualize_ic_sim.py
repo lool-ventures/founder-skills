@@ -294,9 +294,8 @@ def _ring(doc: Element) -> Element:
 
 
 def _ring_tone(doc: Element) -> str | None:
-    """The ring's tone: its modifier class, the only place `_ui.score_ring` carries it."""
-    m = re.search(r"\bui-ring--(\w+)\b", _ring(doc).get("class") or "")
-    return m.group(1) if m else None
+    """The ring's tone, by meaning (`data-tone`), never by class name."""
+    return _ring(doc).get("data-tone")
 
 
 def _verdict(doc: Element) -> str:
@@ -305,8 +304,8 @@ def _verdict(doc: Element) -> str:
 
 
 def _pill_tone(el: Element) -> str | None:
-    m = re.search(r"\bui-pill--(\w+)\b", el.get("class") or "")
-    return m.group(1) if m else None
+    """A page-built pill's tone, by meaning (`data-tone`), never by class name."""
+    return el.get("data-tone")
 
 
 # ---------------------------------------------------------------------------
@@ -411,12 +410,14 @@ def test_self_contained() -> None:
 
 
 def test_chart_data_values() -> None:
-    """Conviction score 100.0 appears, partner verdicts appear."""
+    """Conviction score 100.0 appears, as `_ic_view.score_text` prints it; partner verdicts appear."""
     d = _make_artifact_dir(_all_required_artifacts())
     rc, stdout, stderr = _run_visualize(d)
     assert rc == 0, f"exit {rc}, stderr={stderr}"
-    # Score value
-    assert "100.0" in stdout
+    # Score value, in the owner's words ("100", the fleet format), never re-typed here.
+    shown = _load_ic_sim_visualize()._ic_view.score_text({"conviction_score": 100.0})
+    assert shown == "100"
+    assert f">{shown}%<" in stdout
     # Partner verdicts
     assert "Invest" in stdout
     assert "More Diligence" in stdout

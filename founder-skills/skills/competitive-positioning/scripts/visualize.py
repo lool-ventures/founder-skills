@@ -444,9 +444,14 @@ def _section_header(
         scoring = _as_dict(report.get("scoring_summary"))
         checklist_pct = _num(scoring.get("checklist_score_pct"), -1)
         if checklist_pct >= 0:
-            badges.append(
-                f'<span class="badge" style="background:var(--lool-slate-blue);">Checklist: {checklist_pct:.0f}%</span>'
-            )
+            scripts_dir = os.path.dirname(os.path.abspath(__file__))
+            if scripts_dir not in sys.path:
+                sys.path.insert(0, scripts_dir)
+            import _cp_view
+
+            # As report.md prints it (`_cp_view.score_text`), so the page and the report never state it two ways.
+            shown = _cp_view.score_text(checklist_pct)
+            badges.append(f'<span class="badge" style="background:var(--lool-slate-blue);">Checklist: {shown}%</span>')
 
     if _usable(moat_scores):
         startup_data = _as_dict(_as_dict(moat_scores.get("companies")).get("_startup"))

@@ -29,6 +29,7 @@ from typing import Any, TypeGuard
 
 import _checklist_view  # noqa: E402
 import _evidence_multiple  # noqa: E402
+import _fmr_score_view  # noqa: E402
 import _ui  # noqa: E402
 
 # ---------------------------------------------------------------------------
@@ -1105,37 +1106,38 @@ def _score_coverage_note(summary: dict[str, Any]) -> str:
     )
 
 
-def _score_ring(checklist: dict[str, Any] | None) -> tuple[str, str]:
+def _score_ring(checklist: dict[str, Any] | None, inputs: dict[str, Any] | None = None) -> tuple[str, str]:
     """(the header card's score ring, the note under it that the score left criteria out).
 
-    A deck-only review (no spreadsheet) is scored on Business Quality, said under the ring; any other
+    Which score and which name is `_fmr_score_view.headline`'s choice, the one report.md and the explorer
+    make: a deck-only review is headlined on its business-quality score, said under the ring; any other
     review on the checklist score, its status beneath. The 80 / 60 bands are the page's own.
     """
     if not _usable(checklist):
         return "", ""
     summary = _as_dict(checklist.get("summary"))
-    score_pct = summary.get("score_pct")
     overall = str(summary.get("overall_status") or "")
     overall_text = overall.replace("_", " ").title()
-    biz_pct = summary.get("business_quality_pct")
-    mat_pct = summary.get("model_maturity_pct")
-    if biz_pct is not None and mat_pct is None:
-        pct = _num(biz_pct)
-        shown = _ui.score_text(pct, decimals=_checklist_view.SCORE_DECIMALS)  # as report.md prints it
+    company = _as_dict(inputs.get("company")) if _usable(inputs) else {}
+    confidence = _fmr_score_view.data_confidence(company)
+    label, score = _fmr_score_view.headline(summary, confidence)
+    if label == _fmr_score_view.DECK_LABEL:
+        pct = _num(score)
+        shown = _fmr_score_view.score_text(pct)  # as report.md prints it
         ring = _ui.score_ring(
             pct,
             tone=_checklist_view.score_tone(pct),
             value_text=f"{shown}%",
-            label="Business Quality",
+            label=label,
             caption="Based on pitch deck (no spreadsheet provided)",
-            aria_label=f"Business quality {shown} percent, based on pitch deck",
+            aria_label=f"{label} {shown} percent, based on pitch deck",
             href="#checklist",
         )
         return ring, ""
-    if score_pct is None:
+    if score is None:
         return "", ""
-    pct = _num(score_pct)
-    shown = _ui.score_text(pct, decimals=_checklist_view.SCORE_DECIMALS)  # as report.md prints it
+    pct = _num(score)
+    shown = _fmr_score_view.score_text(pct)  # as report.md prints it
     ring = _ui.score_ring(
         pct,
         tone=_checklist_view.score_tone(pct),
@@ -1438,7 +1440,7 @@ def compose_html(dir_path: str, review_note: str = "") -> str:
     # The revenue the inputs state, as tiles, and the monthly trend when there are two or more months.
     revenue_html = _revenue_overview(inputs)
 
-    ring_html, coverage_html = _score_ring(checklist)
+    ring_html, coverage_html = _score_ring(checklist, inputs)
     note_html = (
         f'<p class="ui-callout review-note" data-note="review"><em>{_esc(review_note)}</em></p>' if review_note else ""
     )

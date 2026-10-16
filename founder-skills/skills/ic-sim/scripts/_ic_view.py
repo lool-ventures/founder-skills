@@ -46,8 +46,13 @@ def _held(summary: dict[str, Any]) -> bool:
 
 
 def score_text(summary: dict[str, Any]) -> str:
-    """The conviction score as report.md prints it ("63.0"), without the percent sign."""
-    return f"{summary.get('conviction_score', 0)}"
+    """The conviction score as report.md and the page print it, without the percent sign: one decimal at most
+    and no trailing zero ("63", "63.7"), the fleet's format (a test holds it equal to `_ui.score_text`, which
+    this module does not import). A value that is not a number comes back as written."""
+    value = summary.get("conviction_score", 0)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return f"{value}"
+    return f"{round(float(value), 1):g}"
 
 
 def verdict_line(summary: dict[str, Any]) -> str:
