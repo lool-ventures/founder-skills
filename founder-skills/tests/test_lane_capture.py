@@ -731,9 +731,18 @@ def _deck_lane() -> Any:
     return mod
 
 
-def _pre_response(stdout: str = "", *, exit_code: int = 0, name: str = "PreToolUse:Agent") -> Any:
-    """A PreToolUse hook's response as the CLI streams it under `include_hook_events` (the shape a kept SDK
-    stream shows: `hook_name` names the matched tool, and empty stdout with exit 0 is an allow)."""
+def _pre_response(
+    stdout: str = "",
+    *,
+    exit_code: int = 0,
+    name: str = "PreToolUse:Agent",
+    stderr: str = "",
+    parent: str | None = None,
+) -> Any:
+    """A PreToolUse hook's response as the CLI streams it under `include_hook_events`, in the shape kept SDK
+    streams show: `hook_name` names the matched tool, `stdout` and `stderr` are the hook's own streams, and
+    `output` is both together (a let-through notice arrives with empty `stdout` and its text in `stderr` and
+    `output`). Empty stdout with exit 0 is an allow. The fold reads `stdout`; `output` is only its fallback."""
     from claude_agent_sdk.types import HookEventMessage
 
     data: dict[str, Any] = {
@@ -741,13 +750,25 @@ def _pre_response(stdout: str = "", *, exit_code: int = 0, name: str = "PreToolU
         "subtype": "hook_response",
         "hook_name": name,
         "hook_event": "PreToolUse",
-        "output": stdout,
+        "output": stdout + stderr,
         "stdout": stdout,
-        "stderr": "",
+        "stderr": stderr,
         "exit_code": exit_code,
         "outcome": "success",
     }
+    if parent is not None:
+        data["parent_tool_use_id"] = parent
     return HookEventMessage(subtype="hook_response", hook_event_name="PreToolUse", data=data)
+
+
+def test_a_let_through_notice_on_stderr_is_read_as_an_allow(tmp_path: Path) -> None:
+    """The decision is read from stdout. A hook that lets a dispatch through after its holds prints a notice on
+    stderr, which the CLI also puts in `output`; reading `output` would see text that is no decision at all."""
+    deck = _Deck(tmp_path)
+    notice = "dispatch_prompt_check: /x/checklist_output.json sent unlike the printed prompt after 2 holds\n"
+    stream = [_init(), *_shell("g", deck.command, deck.printed), deck.checklist("ck"), _pre_response(stderr=notice)]
+    observed, _ = deck.run([*stream, _result("ck", structured={"prompt": deck.printed})])
+    assert observed["checklist_dispatch.hook_decisions"] == ["allow"]
 
 
 DENY = (
@@ -985,3 +1006,105 @@ def test_a_row_with_no_comparand_is_judged_against_the_fallback(harness: Any, tm
         gate(report, "RED_TEAM", enabled=True)
     # The error stays on record, in the report the job summary prints.
     assert "no printed prompt" in harness.format_dispatch_report("RED_TEAM", report)
+
+
+# --- pairing each dispatch with its own PreToolUse response -------------------------------------------------
+
+
+def _batched(deck: _Deck) -> Any:
+    """SLIDE_REVIEWS and CHECKLIST sent in ONE assistant message, so both calls precede both responses."""
+    from claude_agent_sdk import AssistantMessage, ToolUseBlock
+
+    return AssistantMessage(
+        content=[
+            ToolUseBlock(id="sr", name="Agent", input={"prompt": SLIDE_REVIEWS_PROMPT}),
+            ToolUseBlock(id="ck", name="Agent", input={"prompt": deck.printed, "subagent_type": "deck-review"}),
+        ],
+        model="m",
+    )
+
+
+def _results(deck: _Deck) -> list[Any]:
+    return [
+        _result("sr", structured={"prompt": SLIDE_REVIEWS_PROMPT}),
+        _result("ck", structured={"prompt": deck.printed}),
+    ]
+
+
+def test_batched_siblings_each_take_their_own_response(tmp_path: Path) -> None:
+    """Both calls arrive before both responses: the second response is the CHECKLIST's, not the first again."""
+    deck = _Deck(tmp_path)
+    stream = [_init(), *_shell("g", deck.command, deck.printed), _batched(deck), _pre_response(), _pre_response(DENY)]
+    observed, failures = deck.run([*stream, *_results(deck)])
+    assert observed["checklist_dispatch.hook_decisions"] == ["deny"]
+    assert not [f for f in failures if f.startswith("CHECKLIST dispatch hook_ran:")], failures
+
+
+def test_batched_siblings_with_one_response_name_the_second_missing(tmp_path: Path) -> None:
+    """One response for two batched calls: it is the first call's, so the CHECKLIST is named missing rather than
+    sharing it."""
+    deck = _Deck(tmp_path)
+    stream = [_init(), *_shell("g", deck.command, deck.printed), _batched(deck), _pre_response()]
+    observed, failures = deck.run([*stream, *_results(deck)])
+    assert observed["checklist_dispatch.hook_decisions"] == [None]
+    line = _failure(failures, "hook_ran")
+    assert "'ck'" in line and "'sr'" not in line
+    assert "PreToolUse:<tool>" in line, "the triage line names the CLI-shape cause too"
+
+
+def test_a_sub_agents_dispatch_response_is_never_a_main_thread_dispatchs(tmp_path: Path) -> None:
+    """A main-thread CHECKLIST whose hook never ran, then a dispatch made INSIDE a sub-agent with its own response:
+    the sub-agent's response is not taken for the CHECKLIST's."""
+    from claude_agent_sdk import AssistantMessage, ToolUseBlock
+
+    deck = _Deck(tmp_path)
+    inner = AssistantMessage(
+        content=[ToolUseBlock(id="inner", name="Agent", input={"prompt": "help"})],
+        model="m",
+        parent_tool_use_id="ck",
+    )
+    stream = [_init(), *_shell("g", deck.command, deck.printed), deck.checklist("ck"), inner]
+    stream += [_pre_response(parent="ck"), _result("ck", structured={"prompt": deck.printed})]
+    observed, failures = deck.run(stream)
+    assert observed["checklist_dispatch.hook_decisions"] == [None]
+    assert "'ck'" in _failure(failures, "hook_ran")
+
+
+def test_a_checklist_sent_to_another_agent_fails_the_lane(tmp_path: Path) -> None:
+    """After two type holds the hook lets a wrong-agent dispatch through; nothing else here would notice."""
+    from claude_agent_sdk import AssistantMessage, ToolUseBlock
+
+    deck = _Deck(tmp_path)
+    wrong = AssistantMessage(
+        content=[
+            ToolUseBlock(id="ck", name="Agent", input={"prompt": deck.printed, "subagent_type": "general-purpose"})
+        ],
+        model="m",
+    )
+    stream = [_init(), *_shell("g", deck.command, deck.printed), wrong, _pre_response()]
+    _, failures = deck.run([*stream, _result("ck", structured={"prompt": deck.printed})])
+    assert "general-purpose" in _failure(failures, "agent")
+
+
+def test_an_unvouchable_corrective_redo_passes_on_its_own_regeneration(tmp_path: Path) -> None:
+    """A producer-rejected redo folded into a block the hook cannot vouch for: the offline regeneration carries the
+    same correction, so the redo the sub-agent received is the generator's own output and passes."""
+    deck = _Deck(tmp_path)
+    detail = tmp_path / "producer_rejected.txt"
+    detail.write_text("Error: criterion 'team_slide' has no evidence\nline two of the message\n", encoding="utf-8")
+    args = ["checklist", "--run-id", "r1", "--handoff-agent", f"{deck.review}/handoff/r1"]
+    args += ["--review-dir-agent", str(deck.review), "--review-dir", str(deck.review)]
+    args += ["--correction", "producer-rejected", "--detail-file", str(detail)]
+    redo = subprocess.run(
+        [sys.executable, f"{DR_SCRIPTS}/dr_dispatch_prompt.py", *args], capture_output=True, text=True, timeout=30
+    ).stdout
+    assert "The producer rejected your previous file" in redo
+    folded = _shell("g", f"python3 {DR_SCRIPTS}/dr_dispatch_prompt.py {' '.join(args)}\ncat /tmp/x", redo + "x\n")
+    from claude_agent_sdk import AssistantMessage, ToolUseBlock
+
+    send = AssistantMessage(
+        content=[ToolUseBlock(id="ck", name="Agent", input={"prompt": redo, "subagent_type": "deck-review"})], model="m"
+    )
+    observed, failures = deck.run([_init(), *folded, send, _pre_response(), _result("ck", structured={"prompt": redo})])
+    assert observed["checklist_dispatch.equals_offline_regeneration"] == [True]
+    assert failures == [], failures

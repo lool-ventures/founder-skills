@@ -811,8 +811,14 @@ def _row_index(cap: RunCapture, *, tool_use_id: str, result: bool) -> int | None
 
 def _regenerated_checklist(prompt: str, review_dir: Path, run_id: str) -> str | None:
     """Step 5's prompt printed again after the run, from the identifiers the dispatched prompt carries: the only
-    check that sees a run in which no print was ever vouched for (the hook's comparand then does not exist)."""
+    check that sees a run in which no print was ever vouched for (the hook's comparand then does not exist).
+
+    A corrective redo is printed again WITH its correction, read back from the prompt's added line (for a producer
+    rejection, the quoted message, unquoted into a file), so a redo the hook could not vouch for is compared with
+    the redo the generator prints, not with the plain prompt. A message the generator cut at its cap is not
+    reproduced and stays unequal."""
     import re
+    import tempfile
 
     output = re.search(r"^OUTPUT_PATH:\s*(.+?)\s*$", prompt, re.MULTILINE)
     review_agent = re.search(r"using the slide reviews at (\S+)/slide_reviews\.json", " ".join(prompt.split()))
@@ -821,8 +827,38 @@ def _regenerated_checklist(prompt: str, review_dir: Path, run_id: str) -> str | 
     generator = REPO_ROOT / "founder-skills" / "skills" / "deck-review" / "scripts" / "dr_dispatch_prompt.py"
     args = ["checklist", "--run-id", run_id, "--handoff-agent", os.path.dirname(output.group(1))]
     args += ["--review-dir-agent", review_agent.group(1), "--review-dir", str(review_dir)]
-    r = subprocess.run([sys.executable, str(generator), *args], capture_output=True, text=True, timeout=60)
+    gen = _generator_module(generator)
+    with tempfile.TemporaryDirectory() as tmp:
+        for kind, line in gen.CORRECTIONS.items():
+            if line in prompt:
+                args += ["--correction", kind]
+                break
+        else:
+            if gen.REJECTION_LEAD in prompt and gen.REJECTION_TAIL in prompt:
+                quoted = prompt.split(gen.REJECTION_LEAD, 1)[1].split(gen.REJECTION_TAIL, 1)[0].strip("\n")
+                lines = [
+                    ln[2:] if ln.startswith("> ") else ln[1:] if ln.startswith(">") else ln
+                    for ln in quoted.splitlines()
+                ]
+                detail = Path(tmp) / "producer_rejected.txt"
+                detail.write_text("\n".join(lines) + "\n", encoding="utf-8")
+                args += ["--correction", gen.PRODUCER_REJECTED, "--detail-file", str(detail)]
+        r = subprocess.run([sys.executable, str(generator), *args], capture_output=True, text=True, timeout=60)
     return r.stdout if r.returncode == 0 else None
+
+
+def _generator_module(path: Path) -> Any:
+    """The CHECKLIST generator, loaded by path for its correction wording (never re-typed here, so it cannot drift)."""
+    import importlib.util
+
+    scripts = str(path.parent)
+    if scripts not in sys.path:
+        sys.path.insert(0, scripts)
+    spec = importlib.util.spec_from_file_location("_e2e_dr_dispatch_prompt", path)
+    assert spec is not None and spec.loader is not None, path
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
 
 def _fold_failures(capture_errors: list[str]) -> list[str]:
@@ -859,22 +895,27 @@ def _pretooluse_decisions(cap: RunCapture) -> dict[str, str]:
     """Each dispatch's PreToolUse response, by dispatch id, as the decision it made.
 
     The stream carries no tool id on a hook event, so the pairing goes by position: every dispatch (Agent or
-    Task, in stream order) takes the next unclaimed `PreToolUse:Agent|Task` response that arrived after it. A
-    kept stream shows each dispatch's response right after its call, siblings sent in parallel included; a
-    dispatch whose hook never ran is left out."""
+    Task, in stream order) takes the next unclaimed `PreToolUse:Agent|Task` response that arrived after it and
+    belongs to the same thread (`parent_tool_use_id`, None on the main thread), so a sub-agent's own dispatch
+    never lends its response to a main-thread one. Kept streams show each dispatch's response right after its
+    call; calls batched in one message come first and their responses follow in call order. A dispatch whose
+    hook never ran is left out."""
     responses = [
         h for h in cap.hook_events if h.get("subtype") == "hook_response" and h.get("name") in _PRETOOLUSE_DISPATCH
     ]
+    claimed = [False] * len(responses)
     out: dict[str, str] = {}
-    taken = 0
     for at, event in enumerate(cap.events):
         if event.get("kind") != "tool_use" or event.get("name") not in ("Agent", "Task"):
             continue
-        while taken < len(responses) and responses[taken]["at"] <= at:
-            taken += 1
-        if taken < len(responses):
-            out[str(event["id"])] = _hook_decision(responses[taken])
-            taken += 1
+        for index, response in enumerate(responses):
+            if claimed[index] or response["at"] <= at:
+                continue
+            if response.get("parent_tool_use_id") != event.get("parent_tool_use_id"):
+                continue
+            claimed[index] = True
+            out[str(event["id"])] = _hook_decision(response)
+            break
     return out
 
 
@@ -882,8 +923,25 @@ def _assert_hook_ran(checklists: list[dict[str, Any]], decisions: dict[str, str]
     missing = [str(c["id"]) for c in checklists if str(c["id"]) not in decisions]
     assert not missing, (
         f"CHECKLIST dispatch(es) {missing} have no PreToolUse hook response: the plugin's hook may not have run, "
-        "so no other dispatch check here says anything about it"
+        "so no other dispatch check here says anything about it (or the CLI no longer names hook responses "
+        "`PreToolUse:<tool>`, which reds every dispatch at once)"
     )
+
+
+_DECK_AGENTS = ("deck-review", "founder-skills:deck-review")
+
+
+def _assert_checklist_agent(checklists: list[dict[str, Any]], report: dict[str, Any]) -> None:
+    """Every CHECKLIST dispatch that went through ran on the deck-review agent. The type check lets a wrong agent
+    through after two holds, and nothing else on the lane would see it."""
+    by_id = {str(c["id"]): c for c in checklists}
+    wrong = [
+        (row["id"], (by_id[str(row["id"])].get("input") or {}).get("subagent_type"))
+        for row in report["dispatches"]
+        if row["status"] == "succeeded"
+        and (by_id[str(row["id"])].get("input") or {}).get("subagent_type") not in _DECK_AGENTS
+    ]
+    assert not wrong, f"CHECKLIST dispatch(es) went through on another agent: {wrong}"
 
 
 def _record_checklist_dispatches(
@@ -938,6 +996,7 @@ def _record_checklist_dispatches(
             ("outcomes", lambda: assert_dispatch_outcomes(report, "CHECKLIST")),
             ("received_prompt", lambda: assert_received_prompt(report, "CHECKLIST", fallback=offline)),
             ("hook_ran", lambda: _assert_hook_ran(checklists, decisions)),
+            ("agent", lambda: _assert_checklist_agent(checklists, report)),
         ):
             try:
                 check()
