@@ -50,9 +50,10 @@ CAUSES = {
 
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 # C0, DEL and C1 (U+0085 among them); the line and paragraph separators `str.splitlines()` also breaks a line on;
-# and the zero-width and bidirectional controls (U+200B-U+200F, U+202A-U+202E, U+2066-U+2069, U+FEFF),
-# which can reorder or hide a fact as rendered.
-_CONTROL_RE = re.compile("[\\x00-\\x1f\\x7f-\\x9f\\u200b-\\u200f\\u2028-\\u202e\\u2066-\\u2069\\ufeff]")
+# and the zero-width space and the bidirectional controls (U+200B, U+200E-U+200F, U+202A-U+202E, U+2066-U+2069,
+# U+FEFF), which can reorder or hide a fact as rendered. The zero-width non-joiner and joiner (U+200C, U+200D) are
+# kept: Persian, Urdu and Kurdish spell words with the first, Indic conjuncts and joined emoji need the second.
+_CONTROL_RE = re.compile("[\\x00-\\x1f\\x7f-\\x9f\\u200b\\u200e\\u200f\\u2028-\\u202e\\u2066-\\u2069\\ufeff]")
 _HEADER_PREFIXES = ("CONTEXT:", "OUTPUT_PATH:", "RUN_ID:")
 _EMAIL_RE = re.compile(r"[^\s@<>()\[\]{},;:\"'`]+@[^\s@<>()\[\]{},;:\"'`]+\.[^\W\d_]{2,}")
 _TEL_RE = re.compile(r"\btel:", re.IGNORECASE)

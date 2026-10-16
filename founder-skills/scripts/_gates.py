@@ -429,8 +429,9 @@ CONTRACT_NOTES = (
     "as `PRE_ANSWER_IGNORED` with reason `not_used_by_skill`. Founder context never carries it. The items are "
     "third-party to the analysis and never the founder's statements, whatever the source label says. An item that "
     "breaks a rule is dropped and the rest are used (`control_characters` covers C0, DEL, C1, the line and "
-    "paragraph separators, and the zero-width and bidirectional controls U+200B-U+200F, U+202A-U+202E, "
-    "U+2066-U+2069 and U+FEFF; `person_detail` matches an e-mail address in any script after NFKC "
+    "paragraph separators, the zero-width space and the bidirectional controls, each listed in "
+    "`request_values.host_context.control_characters`; the zero-width non-joiner and joiner are kept; "
+    "`person_detail` matches an e-mail address in any script after NFKC "
     "normalisation): `notices` lists `HOST_CONTEXT_ITEMS_DROPPED` with each "
     "dropped item's 1-based `index` and `cause` and `lines: []`, and `disclosures` lists `HOST_CONTEXT_SUPPLIED` "
     "(and `HOST_CONTEXT_ITEMS_DROPPED`). The run's outputs and that notice never carry a dropped item; "
@@ -6318,7 +6319,9 @@ REQUEST_VALUES = {
         "date_grace_days": _host_text.DATE_GRACE_DAYS,
         "drop_causes": list(_host_text.CAUSES),
         # What `control_characters` (and a fund profile's control-character rule) covers.
-        "control_characters": "C0, DEL, C1, U+2028, U+2029, U+200B-U+200F, U+202A-U+202E, U+2066-U+2069, U+FEFF",
+        "control_characters": (
+            "C0, DEL, C1, U+2028, U+2029, U+200B, U+200E, U+200F, U+202A-U+202E, U+2066-U+2069, U+FEFF"
+        ),
     },
     "ic_fund_profile": {
         "gate": "ic_fund_mode",

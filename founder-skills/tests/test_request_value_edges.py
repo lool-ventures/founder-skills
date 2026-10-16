@@ -189,10 +189,27 @@ def test_an_e_mail_address_in_any_script_is_person_detail(text: str) -> None:
     assert ht.has_person_detail(text)
 
 
-@pytest.mark.parametrize("ch", ["‮", "⁦", "​", "﻿"])
+@pytest.mark.parametrize("ch", ["‮", "⁦", "​", "‎", "‏", "﻿"])
 def test_a_bidirectional_or_zero_width_character_is_dropped(ch: str) -> None:
     kept, dropped = ht.filter_items([{**GOOD, "fact": f"Revenue {ch}grew"}], __import__("datetime").date(2026, 2, 1))
     assert kept == [] and dropped == [{"index": 1, "cause": "control_characters"}]
+
+
+# The zero-width non-joiner (U+200C) is part of how Persian, Urdu and Kurdish words are spelled, and the
+# zero-width joiner (U+200D) of Indic conjuncts and every joined emoji: neither reorders or hides text.
+@pytest.mark.parametrize("fact", ["می‌خواهم seed", "Team \U0001f468‍\U0001f469‍\U0001f467 grew to 12"])
+def test_a_joiner_or_non_joiner_is_kept(fact: str) -> None:
+    kept, dropped = ht.filter_items([{**GOOD, "fact": fact}], __import__("datetime").date(2026, 2, 1))
+    assert dropped == [] and [k["fact"] for k in kept] == [fact]
+
+
+def test_a_fund_name_with_a_non_joiner_is_a_usable_profile() -> None:
+    gates = _module("_edge_gates", h.SHARED / "_gates.py")
+    fund = json.loads(REQUEST_FIXTURE.read_text(encoding="utf-8"))
+    fund["fund_name"] = "سرمایه‌گذاری Example Partners"
+    assert gates.fund_value_problem(fund) is None
+    fund["fund_name"] = "Example‮Partners"
+    assert gates.fund_value_problem(fund) == ("invalid_chars", "fund_name contains a control character")
 
 
 def test_a_numbered_line_marker_is_escaped() -> None:
