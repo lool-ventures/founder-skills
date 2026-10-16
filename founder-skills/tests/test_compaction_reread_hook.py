@@ -291,15 +291,24 @@ def test_the_wrapper_fails_open_with_its_body_missing_and_still_writes_the_env_f
     assert r.returncode == 0 and r.stdout == ""
 
 
-@pytest.mark.parametrize("shell", SHELLS)
-def test_the_env_file_reads_back_the_same_root_when_sourced(tmp_path: Path, shell: str) -> None:
+_ROOTS = [
+    "/tmp/it's a $path with `quotes` and \\ back",
+    # Backslash escapes an `echo` would read: dash's and macOS /bin/sh's do.
+    "/tmp/x\\tab\\nnl",
+    "/tmp/trail\\\\",
+    "/tmp/all of it: ' $HOME `x` \\t \\n \\\\",
+]
+
+
+@pytest.mark.parametrize("root", _ROOTS)
+@pytest.mark.parametrize("shell", [*SHELLS, "/bin/sh"])
+def test_the_env_file_reads_back_the_same_root_when_sourced(tmp_path: Path, shell: str, root: str) -> None:
     exe = _shell(shell)
     bash = shutil.which("bash")
     if bash is None:
         pytest.skip("bash not available")
     env_file = tmp_path / "env"
     env_file.write_text("export OTHER=1\nexport CLAUDE_PLUGIN_ROOT=/old\n", encoding="utf-8")
-    root = "/tmp/it's a $path with `quotes` and \\ back"
     r = _wrap(exe, WRAPPER, "{}", {"CLAUDE_PLUGIN_ROOT": root, "CLAUDE_ENV_FILE": str(env_file)})
     assert r.returncode == 0 and r.stdout == "" and r.stderr == ""
     lines = env_file.read_text(encoding="utf-8").splitlines()

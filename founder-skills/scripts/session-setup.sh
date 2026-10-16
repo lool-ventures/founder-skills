@@ -13,7 +13,8 @@ if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -n "${CLAUDE_ENV_FILE:-}" ]; then
     grep -v '^export CLAUDE_PLUGIN_ROOT=' "$CLAUDE_ENV_FILE" > "$tmp" 2>/dev/null || true
     mv "$tmp" "$CLAUDE_ENV_FILE" 2>/dev/null || true
   fi
-  echo "$new_line" >> "$CLAUDE_ENV_FILE" 2>/dev/null || true
+  # printf, never echo: dash's and macOS /bin/sh's echo read backslash escapes in the path.
+  printf '%s\n' "$new_line" >> "$CLAUDE_ENV_FILE" 2>/dev/null || true
 fi
 # 2. After a compaction only, tell a run in progress to re-read its SKILL.md (compaction_reread.py).
 #    The payload is tested here, so no other session start launches an interpreter. The match relies on
