@@ -1157,7 +1157,7 @@ def _section_title(inputs: dict[str, Any] | None) -> str:
     return f"# Financial Model Review: {company_name}\n"
 
 
-def _quality_line(checklist: dict[str, Any] | None, data_confidence: str) -> tuple[str, str, str] | None:
+def _quality_line(checklist: dict[str, Any] | None, company: dict[str, Any]) -> tuple[str, str, str] | None:
     """(label, status, score) exactly as the Executive Summary prints the model's rating; None without a
     checklist. One owner, so the verdict and the summary can never round or label the same figure apart."""
     if checklist is None or _is_stub(checklist):
@@ -1165,7 +1165,7 @@ def _quality_line(checklist: dict[str, Any] | None, data_confidence: str) -> tup
     summary = _as_dict(checklist.get("summary"))
     status = str(summary.get("overall_status", "unknown"))
     # Which score, under which name, printed which way: `_fmr_score_view`, which both pages read too.
-    label, score = _fmr_score_view.headline(summary, str(data_confidence))
+    label, score = _fmr_score_view.headline(summary, company)
     return label, status, f"{_fmr_score_view.score_text(score if score is not None else 0)}%"
 
 
@@ -1201,11 +1201,11 @@ def _runway_figures(runway: dict[str, Any] | None) -> tuple[str, str, str | None
 def _verdict(inputs: dict[str, Any] | None, checklist: dict[str, Any] | None, runway: dict[str, Any] | None) -> str:
     """The report's own first paragraph, and the one the printed hand-over carries: the rating and the runway,
     in the Executive Summary's words and figures. Empty when neither exists."""
-    data_confidence = "exact"
+    company: dict[str, Any] = {}
     if inputs is not None and not _is_stub(inputs):
-        data_confidence = _fmr_score_view.data_confidence(_as_dict(inputs.get("company")))
+        company = _as_dict(inputs.get("company"))
     parts: list[str] = []
-    quality = _quality_line(checklist, data_confidence)
+    quality = _quality_line(checklist, company)
     if quality is not None:
         label, status, score = quality
         parts.append(f"{label}: {status} ({score}).")
@@ -1247,9 +1247,11 @@ def _section_executive_summary(
     """Executive summary with stage, overall status, and key metrics."""
     lines = ["## Executive Summary\n"]
     data_confidence = "exact"  # safe default; overwritten if inputs present
+    rating_company: dict[str, Any] = {}
 
     if inputs is not None and not _is_stub(inputs):
         company = _as_dict(inputs.get("company"))
+        rating_company = company
         stage = company.get("stage", "unknown")
         sector = company.get("sector", "unknown")
         data_confidence = company.get("data_confidence", "exact")
@@ -1265,7 +1267,7 @@ def _section_executive_summary(
         if growth_note is not None:
             lines.append(f"**Monthly Growth:** {growth_note}  ")
 
-    quality = _quality_line(checklist, data_confidence)
+    quality = _quality_line(checklist, rating_company)
     if quality is not None:
         label, status, score = quality
         # All business items gated N/A leaves no deck-readiness score; the overall score is used, labelled so.

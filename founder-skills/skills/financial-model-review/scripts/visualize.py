@@ -1111,7 +1111,7 @@ def _score_ring(checklist: dict[str, Any] | None, inputs: dict[str, Any] | None 
 
     Which score and which name is `_fmr_score_view.headline`'s choice, the one report.md and the explorer
     make: a deck-only review is headlined on its business-quality score, said under the ring; any other
-    review on the checklist score, its status beneath. The 80 / 60 bands are the page's own.
+    review on the checklist score as "Model Quality", its status beneath. The 80 / 60 bands are the page's own.
     """
     if not _usable(checklist):
         return "", ""
@@ -1119,8 +1119,7 @@ def _score_ring(checklist: dict[str, Any] | None, inputs: dict[str, Any] | None 
     overall = str(summary.get("overall_status") or "")
     overall_text = overall.replace("_", " ").title()
     company = _as_dict(inputs.get("company")) if _usable(inputs) else {}
-    confidence = _fmr_score_view.data_confidence(company)
-    label, score = _fmr_score_view.headline(summary, confidence)
+    label, score = _fmr_score_view.headline(summary, company)
     if label == _fmr_score_view.DECK_LABEL:
         pct = _num(score)
         shown = _fmr_score_view.score_text(pct)  # as report.md prints it
@@ -1142,9 +1141,9 @@ def _score_ring(checklist: dict[str, Any] | None, inputs: dict[str, Any] | None 
         pct,
         tone=_checklist_view.score_tone(pct),
         value_text=f"{shown}%",
-        label="Checklist Score",
+        label=label,
         caption=overall_text,
-        aria_label=f"Checklist score {shown} percent" + (f", {overall_text}" if overall_text else ""),
+        aria_label=f"{label} {shown} percent" + (f", {overall_text}" if overall_text else ""),
         href="#checklist",
     )
     return ring, _score_coverage_note(summary)

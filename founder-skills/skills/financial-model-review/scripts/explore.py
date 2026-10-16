@@ -468,9 +468,7 @@ def _build_data_payload(
                     _not_assessed += len(_ids)
         # Which score the review is headlined with, and under which name: `_fmr_score_view.headline`, the
         # choice report.md and report.html make too (a deck-only review is headlined on business quality).
-        _label, _score = _fmr_score_view.headline(
-            summary, _fmr_score_view.data_confidence(_deep_get(inputs, "company", default={}))
-        )
+        _label, _score = _fmr_score_view.headline(summary, _deep_get(inputs, "company", default={}))
         checklist_summary = {
             "score_pct": _score,
             "score_label": _label,
@@ -584,12 +582,13 @@ def _render_checklist(checklist: dict[str, Any] | None) -> tuple[str, str]:
         # The score as report.md prints it, so the page and the report never state it two ways.
         shown = _fmr_score_view.score_text(score_pct)
         head_bits.append(f'<span class="ui-pill ui-pill--{tone}">{shown}%</span>')
-        if checklist.get("score_label") == _fmr_score_view.DECK_LABEL:
-            label, caption = _fmr_score_view.DECK_LABEL, "Based on pitch deck (no spreadsheet provided)"
+        label = str(checklist.get("score_label") or _fmr_score_view.MODEL_LABEL)
+        if label == _fmr_score_view.DECK_LABEL:
+            caption = "Based on pitch deck (no spreadsheet provided)"
             spoken = f"{label} {shown} percent, based on pitch deck"
         else:
-            label, caption = "Review Checklist", overall_text
-            spoken = f"Review checklist score {shown} percent" + (f", {overall_text}" if overall_text else "")
+            caption = overall_text
+            spoken = f"{label} {shown} percent" + (f", {overall_text}" if overall_text else "")
         ring = _ui.score_ring(
             float(score_pct),
             tone=tone,

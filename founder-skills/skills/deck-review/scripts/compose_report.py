@@ -905,9 +905,8 @@ def _section_executive_summary(
         # deck-craft criteria and does NOT predict investability. Measured across four
         # decks, it does not even rank with an experienced reader's verdict — the
         # strongest company scored among the weakest decks.
-        score, _band = _dr_score_view.band(summary)
         scored_n = _dr_score_view.scored_criteria(summary)
-        lines.append(f"**Deck-craft score:** {_dr_score_view.score_text(score)}% — {_dr_score_view.verdict(summary)}")
+        lines.append(f"**Deck-craft score:** {_dr_score_view.score_line(summary)}")
         lines.append(f"**Breakdown:** {pass_c} pass, {fail_c} fail, {warn_c} warn, {na_c} N/A")
 
         # WHERE THE FAILURES CONCENTRATE. A bare count reads as that many independent

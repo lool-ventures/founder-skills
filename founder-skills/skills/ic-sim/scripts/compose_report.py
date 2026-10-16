@@ -634,8 +634,8 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
         score_summary = _as_dict(score_dims.get("summary"))
         score_warnings = _as_list(score_summary.get("warnings"))
         conviction_score = score_summary.get("conviction_score", 0.0)
-        # The coverage warnings below print the score as report.md does (`_ic_view.score_text`); the
-        # mismatch warning keeps the raw figure, since it is high and its message reaches the coach.
+        # Every warning below prints the score (and the mismatch warning its range) as report.md does
+        # (`_ic_view`), so one report never states one score two ways.
         score_shown = _ic_view_module().score_text(score_summary)
         verdict = score_summary.get("verdict", "")
 
@@ -651,15 +651,16 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
         if not has_zero_applicable and not coverage_capped and not coverage_floored and verdict in VERDICT_SCORE_RANGES:
             low, high = VERDICT_SCORE_RANGES[verdict]
             if not (low <= conviction_score <= high) and verdict != "hard_pass":
+                low_shown, high_shown = _ic_view_module().pct_text(low), _ic_view_module().pct_text(high)
                 warnings.append(
                     _warn(
                         "VERDICT_SCORE_MISMATCH",
-                        f"Verdict '{verdict}' does not match score {conviction_score}% "
-                        f"(expected range: {low}%-{high}%)",
+                        f"Verdict '{verdict}' does not match score {score_shown}% "
+                        f"(expected range: {low_shown}%-{high_shown}%)",
                         founder_message=(
                             f"The verdict ({_ic_view_module().verdict_word(verdict)}) does not match the "
-                            f"{conviction_score}% conviction score, which falls outside that verdict's "
-                            f"{low}%-{high}% range."
+                            f"{score_shown}% conviction score, which falls outside that verdict's "
+                            f"{low_shown}%-{high_shown}% range."
                         ),
                     )
                 )

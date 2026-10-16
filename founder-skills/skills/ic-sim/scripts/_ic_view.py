@@ -45,14 +45,18 @@ def _held(summary: dict[str, Any]) -> bool:
     return summary.get("coverage_floored") is True or summary.get("coverage_held") is True
 
 
-def score_text(summary: dict[str, Any]) -> str:
-    """The conviction score as report.md and the page print it, without the percent sign: one decimal at most
-    and no trailing zero ("63", "63.7"), the fleet's format (a test holds it equal to `_ui.score_text`, which
+def pct_text(value: Any) -> str:
+    """A percentage figure as every IC surface prints it, without the percent sign: one decimal at most and no
+    trailing zero ("63", "63.7", "74.9"), the fleet's format (a test holds it equal to `_ui.score_text`, which
     this module does not import). A value that is not a number comes back as written."""
-    value = summary.get("conviction_score", 0)
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return f"{value}"
     return f"{round(float(value), 1):g}"
+
+
+def score_text(summary: dict[str, Any]) -> str:
+    """The conviction score as report.md, its warnings and the page print it (`pct_text`)."""
+    return pct_text(summary.get("conviction_score", 0))
 
 
 def verdict_line(summary: dict[str, Any]) -> str:

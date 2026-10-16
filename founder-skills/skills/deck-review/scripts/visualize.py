@@ -467,7 +467,7 @@ def _scored_criteria(checklist: dict[str, Any] | None) -> int:
     return _dr_score_view.scored_criteria(_as_dict(_as_dict(checklist).get("summary")))
 
 
-def _band(checklist: dict[str, Any]) -> tuple[float, str]:
+def _band(checklist: dict[str, Any]) -> tuple[float | None, str | None]:
     """(score, band), as `_dr_score_view` decides them for report.md and this page alike."""
     return _dr_score_view.band(_as_dict(checklist.get("summary")))
 
@@ -488,6 +488,8 @@ def _score_ring(checklist: dict[str, Any] | None) -> str:
     if not _usable(checklist):
         return ""
     pct, band = _band(checklist)
+    if pct is None or band is None:
+        return ""  # no number to draw: report.md says "not recorded", never "0%"
     band_text = band.replace("_", " ").title()
     return _ui.score_ring(
         pct,

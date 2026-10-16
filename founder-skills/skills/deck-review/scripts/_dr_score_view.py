@@ -20,6 +20,10 @@ from typing import Any
 
 if os.path.dirname(os.path.abspath(__file__)) not in sys.path:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# By bare name, as compose and the page load it. market-sizing ships its own `_thresholds.py`, and
+# `sys.modules` is process-global: a test that calls `band()` in-process after importing a market-sizing
+# module would get market-sizing's edges. Production runs one skill per process; in-process tests call only
+# `score_text` (the subprocess composes exercise `band()`).
 import _thresholds  # noqa: E402
 
 # The one-line verdict printed after the score, keyed on the band. Craft language only: these used to
@@ -55,25 +59,37 @@ def scored_criteria(summary: Mapping[str, Any] | None) -> int:
     return 34
 
 
-def _num(value: Any) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return 0.0
-    f = float(value)
-    return f if math.isfinite(f) else 0.0
-
-
-def band(summary: Mapping[str, Any] | None) -> tuple[float, str]:
-    """(score, band). The score is clamped to 0-100; the band is the one `checklist.py` wrote, or, for a
-    checklist with none or one this module does not know, the band its score falls in."""
+def score(summary: Mapping[str, Any] | None) -> float | None:
+    """The score, clamped to 0-100; None when `score_pct` is not a finite number (a checklist compose flags as
+    a schema violation but still renders), so no surface prints a figure the artifact does not hold."""
     summary = summary if isinstance(summary, Mapping) else {}
-    pct = max(0.0, min(100.0, _num(summary.get("score_pct"))))
-    status = str(summary.get("overall_status") or "").strip()
+    value = summary.get("score_pct")
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+        return None
+    return max(0.0, min(100.0, float(value)))
+
+
+def band(summary: Mapping[str, Any] | None) -> tuple[float | None, str | None]:
+    """(score, band). The band is the one `checklist.py` wrote, or, for a checklist with none or one this
+    module does not know, the band its score falls in; None when there is neither."""
+    summary = summary if isinstance(summary, Mapping) else {}
+    pct = score(summary)
+    status: str | None = str(summary.get("overall_status") or "").strip()
     if status not in BAND_VERDICT:
-        status = _thresholds.band_for(pct)
+        status = _thresholds.band_for(pct) if pct is not None else None
     return pct, status
 
 
 def verdict(summary: Mapping[str, Any] | None) -> str:
-    """The band's one-line verdict for this score."""
+    """The band's one-line verdict for this score; "" when there is no band."""
     _pct, name = band(summary)
-    return BAND_VERDICT[name].format(scored=scored_criteria(summary))
+    return BAND_VERDICT[name].format(scored=scored_criteria(summary)) if name else ""
+
+
+def score_line(summary: Mapping[str, Any] | None) -> str:
+    """The figure and verdict report.md prints after "Deck-craft score:" ("63% — Needs Work — …"); "not
+    recorded" in place of the figure when the checklist holds no number."""
+    pct = score(summary)
+    shown = f"{score_text(pct)}%" if pct is not None else "not recorded"
+    said = verdict(summary)
+    return f"{shown} — {said}" if said else shown
