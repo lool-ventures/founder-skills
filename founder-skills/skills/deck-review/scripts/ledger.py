@@ -37,11 +37,13 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _artifact_writer import load_schema, write_artifact  # type: ignore[import-not-found]  # noqa: E402
 from reconcile import (  # type: ignore[import-not-found]  # noqa: E402
     _NUM_RE,
+    CAP,
     DATE,
     MONEY,
     _precision,
     _raw_scale,
     numeral_form,
+    parse_range,
     quote_is_identifying,
     strip_group_marks,
 )
@@ -49,7 +51,7 @@ from reconcile import (  # type: ignore[import-not-found]  # noqa: E402
 UNIT_KINDS = {"money", "count", "percent", "multiple", "duration", "date"}
 
 SIGFIG_ONLY = True
-"""`value` must agree with `raw` to within RAW'S OWN precision. No relative floor.
+"""`value` must agree with `raw` to within RAW'S OWN precision, capped at `CAP`. No floor.
 
 There used to be a 2% floor here, applied as a `max()` over the significant-figure
 tolerance, and it was the reason a real defect shipped. A live deck recorded
@@ -61,15 +63,28 @@ revenue disagreed with itself by 1 part in 16,904.
 Significant figures alone discriminate correctly on every case the floor was meant to
 cover, which is why the floor is gone rather than tuned. Measured:
 
-    raw          value      sigfig tol      gap      verdict
-    15873.2      15873        0.0003%   0.0013%     reject   <- the precision loss
-    $1.2M      1238400        4.1667%   3.2000%     accept   <- a genuinely rounded figure
-    $493K            493      0.1014%  99.9000%     reject   <- the 1000x scale slip
-    100               97     50.0000%   3.0000%     accept   <- one sig fig, loose by design
+    raw          value      sigfig tol   capped tol      gap      verdict
+    15873.2      15873        0.0003%      0.0003%   0.0013%     reject   <- the precision loss
+    $1.2M      1238400        4.1667%      4.1667%   3.2000%     accept   <- a genuinely rounded figure
+    $493K            493      0.1014%      0.1014%  99.9000%     reject   <- the 1000x scale slip
+    100               97     50.0000%      5.0000%   3.0000%     accept   <- a round figure, rounded
+    10                14     50.0000%      5.0000%  40.0000%     reject   <- not the number printed
 
 The floor was introduced when this check used a FLAT percentage, which genuinely could not
 express "$1.2M legitimately covers 1.15M-1.25M". Switching to significant figures solved
 that; keeping the floor afterwards was leftover scaffolding that only ever loosened.
+
+Significant figures alone over-claim in the other direction, on round numbers: "10" is one
+significant figure, which claims +/-5, so a value of 14 passed as a reading of "10", and "$1M"
+covered 1.4M. So the window is capped at `CAP` (5%), the same ceiling `reconcile.py` puts on
+the same ratio in `figure_tolerance`. Unlike `figure_tolerance`, there is no implied-tolerance
+floor under it: that floor answers whether a computed sum contradicts a stated total, and
+`implied_tolerance("$1M")` is half a million, which would reopen "$1M" as 1.4M. This check asks
+only whether `value` is the number `raw` prints, which needs no floor. A window of exactly
+`CAP` is inside it (the test is `>`), as in `reconcile.py`.
+
+A range is read as its FIRST number (`_parsed_magnitude` reads the first token), so "10-12"
+is recorded as 10.
 """
 
 
@@ -425,13 +440,13 @@ def validate_ledger(data: dict[str, Any], total_slides: int | None = None) -> tu
                     )
             elif parsed is not None:
                 observed = abs(value)
-                # Tolerance from the raw string's OWN significant figures, floored.
+                # Tolerance from the raw string's OWN significant figures, capped at CAP.
                 # "$1.2M" claims two figures and covers 1.15M-1.25M; "$1,238,400" claims
-                # seven and covers almost nothing. One constant cannot serve both.
-                # `raw`'s own precision, and nothing looser. A figure printed to six
-                # significant figures is a claim to six significant figures.
+                # seven and covers almost nothing. One constant cannot serve both. The cap
+                # stops a round number over-claiming ("10" is not +/-5), and there is no
+                # implied-tolerance floor under it (see SIGFIG_ONLY for why).
                 precision = _precision(raw)
-                relative = (precision[0] / precision[1]) if precision and precision[1] else 0.0
+                relative = min(precision[0] / precision[1], CAP) if precision and precision[1] else 0.0
                 if observed == 0 or abs(observed - parsed) / parsed > relative:
                     ratio = observed / parsed if parsed else 0
                     if _ambiguous_suffix(raw, value, unit_kind, fig.get("currency")):
@@ -455,9 +470,24 @@ def validate_ledger(data: dict[str, Any], total_slides: int | None = None) -> tu
                             f"at full scale"
                         )
                     else:
+                        # A ratio near 1 is a wrong reading, not a scale slip: "record the
+                        # figure at full scale" asks a model that wrote 12 for "10" to make a
+                        # correction it cannot make.
+                        if 0.5 <= ratio <= 2:
+                            remedy = (
+                                "record the number the slide prints, or, if this figure is printed "
+                                "elsewhere more precisely, use that string as raw"
+                            )
+                        else:
+                            remedy = "record the figure at full scale"
+                        if parse_range(raw) is not None:
+                            remedy += (
+                                f"; a range is recorded as its first number: record the range's "
+                                f"first number, {parsed:,.10g}"
+                            )
                         errors.append(
                             f"{where} value {value!r} disagrees with raw {raw!r}, which reads as "
-                            f"{parsed:,.4g} (ratio {ratio:,.4g}) — record the figure at full scale"
+                            f"{parsed:,.4g} (ratio {ratio:,.4g}) — {remedy}"
                         )
 
     return errors, warnings

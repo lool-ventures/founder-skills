@@ -68,6 +68,8 @@ SCORING_FILES: dict[str, list[str]] = {
         f"{PLUGIN}/skills/deck-review/scripts/_thresholds.py",
         # The arithmetic numbers_consistent is scored from: its verdicts decide that criterion's status.
         f"{PLUGIN}/skills/deck-review/scripts/reconcile.py",
+        # Admission to that arithmetic: which recorded figures reach reconcile.py, and with what value.
+        f"{PLUGIN}/skills/deck-review/scripts/ledger.py",
         # The criteria definitions with their pass/fail/warn thresholds; the CHECKLIST dispatch grades from it.
         f"{PLUGIN}/skills/deck-review/references/checklist-criteria.md",
         # The stage table written into stage_profile.json, which the CHECKLIST dispatch grades the

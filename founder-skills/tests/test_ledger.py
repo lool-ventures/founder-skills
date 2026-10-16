@@ -16,6 +16,8 @@ import subprocess
 import sys
 import tempfile
 
+import pytest
+
 SCRIPTS = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "skills",
@@ -183,6 +185,105 @@ def test_tolerates_the_rounding_a_slide_actually_does() -> None:
 def test_scale_check_survives_a_raw_string_with_no_scale_suffix() -> None:
     rc, _, err = _run({"figures": [_fig(id="seats", value=120, raw="120", unit_kind="count", quote="120 seats")]})
     assert rc == 0, err
+
+
+# ---------------------------------------------------------------------------
+# The window is capped. Significant figures alone give a round raw a huge window: "10" is
+# one significant figure, which claims +/-5, so a value of 14 passed as a reading of "10".
+# The window is raw's own precision capped at reconcile's CAP (5%), the same ceiling the
+# arithmetic applies, so the ledger and the engine agree on what a round number covers.
+# ---------------------------------------------------------------------------
+
+
+def _scale_fig(raw: str, value: float, unit_kind: str) -> dict:
+    over: dict[str, object] = {
+        "id": "pilot_count",
+        "value": value,
+        "raw": raw,
+        "unit_kind": unit_kind,
+        "label": "paid pilots",
+        "quote": f"Running {raw} paid pilots this quarter",
+    }
+    if unit_kind != "money":
+        over["currency"] = None
+    return _fig(**over)
+
+
+@pytest.mark.parametrize(
+    ("raw", "value", "unit_kind"),
+    [
+        ("10", 14, "count"),
+        ("20", 25, "count"),
+        ("100", 149, "count"),
+        ("twenty", 25, "count"),
+        ("a hundred", 130, "count"),
+        # A scale-suffixed single-digit mantissa. Flooring the window at the raw's implied
+        # tolerance (half a million on "$1M") would let this through again; there is no floor.
+        ("$1M", 1_400_000, "money"),
+        ("$10M", 10_600_000, "money"),
+        ("40%", 44, "percent"),
+        # A single digit claims +/-0.5, which is 12.5% of "4"; capped, 4.3 is not "4".
+        ("4", 4.3, "count"),
+        # A bound marker does not widen the window: value is the number printed.
+        ("$1M+", 1_200_000, "money"),
+        # A range is recorded as its FIRST number, so its other end is not a reading of it.
+        ("10-12", 12, "count"),
+    ],
+)
+def test_a_round_raw_refuses_a_value_it_does_not_print(raw: str, value: float, unit_kind: str) -> None:
+    rc, _, err = _run({"figures": [_scale_fig(raw, value, unit_kind)]})
+    assert rc != 0, f"raw {raw!r} accepted value {value}"
+    assert "disagrees with raw" in err, err
+
+
+@pytest.mark.parametrize(
+    ("raw", "value", "unit_kind"),
+    [
+        ("10", 10, "count"),
+        ("100", 97, "count"),
+        ("$1.2M", 1_238_400, "money"),
+        ("$10M", 10_400_000, "money"),
+        ("twenty", 20, "count"),
+        ("10-12", 10, "count"),
+        # Exactly 5% off is inside the window: the test is `>` CAP, as in reconcile.
+        ("20", 21, "count"),
+        ("twenty", 21, "count"),
+    ],
+)
+def test_the_cap_keeps_what_the_check_was_built_to_accept(raw: str, value: float, unit_kind: str) -> None:
+    rc, _, err = _run({"figures": [_scale_fig(raw, value, unit_kind)]})
+    assert rc == 0, err
+
+
+def test_a_near_miss_is_not_told_to_rescale() -> None:
+    """A value about 1.2x the printed number is a wrong reading, not a scale slip.
+
+    "record the figure at full scale" is the remedy for a 1000x slip; said to a model that
+    wrote 12 for "10" it asks for a correction the model cannot make.
+    """
+    rc, _, err = _run({"figures": [_scale_fig("10", 12, "count")]})
+    assert rc != 0
+    assert "disagrees with raw" in err, err
+    assert "full scale" not in err, err
+    assert "record the number the slide prints" in err, err
+    assert "'10'" in err, err
+
+
+def test_a_scale_slip_is_still_told_to_rescale() -> None:
+    """At a ratio of 0.001 the full-scale remedy is the right one, and stays."""
+    rc, _, err = _run({"figures": [_fig(value=493)]})
+    assert rc != 0
+    assert "full scale" in err, err
+    assert "record the number the slide prints" not in err, err
+
+
+def test_a_refused_range_names_its_first_number() -> None:
+    """The model records either end of a range; the check reads the first. Say so, and name it."""
+    rc, _, err = _run({"figures": [_scale_fig("10-12", 12, "count")]})
+    assert rc != 0
+    assert "disagrees with raw" in err, err
+    assert "record the range's first number, 10" in err, err
+    assert "full scale" not in err, err
 
 
 # ---------------------------------------------------------------------------
