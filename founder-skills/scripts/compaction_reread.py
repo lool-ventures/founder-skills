@@ -105,7 +105,7 @@ def decide(payload: dict[str, Any]) -> dict[str, Any] | None:
     if not isinstance(status, dict):
         return None
     state, skill, run_id = status.get("status"), status.get("skill"), status.get("run_id")
-    if state not in OPEN or skill not in started or not isinstance(run_id, str):
+    if state not in OPEN or not isinstance(skill, str) or skill not in started or not isinstance(run_id, str):
         return None
     return {
         "hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": note(skill, run_id, state, status)}
