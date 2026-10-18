@@ -746,9 +746,16 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
                     for token in re.findall(r"\b[A-Za-z][A-Za-z0-9]{2,}\b", text):
                         if token == canonical:
                             continue
+                        # All-caps is a typographic register for the brand (logo or
+                        # headline caps), not drift — owner-approved reversal of the
+                        # earlier true-positive pin. Same-letters mixed-case and fuzzy
+                        # variants (including all-caps misspellings) still flag.
+                        if token.isupper() and token.lower() == canonical_lower:
+                            continue
                         # Lowercase is the conventional register for domains,
                         # handles, and ordinary prose words; genuine drifted
-                        # variants of a brand are cased (ALL-CAPS or mixed).
+                        # variants of a brand are mixed-case or misspelled (in
+                        # any case).
                         if token.islower():
                             continue
                         tl = token.lower()

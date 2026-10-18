@@ -153,7 +153,7 @@
     "skills/deck-review/scripts/_thresholds.py": "a70d49ad4454bee523cb9a57e1d6281d5aaa96afd301cefbd072d1db0d046d4a",
     "skills/deck-review/scripts/_ui.py": "d1e832c657840459afb57b821106600c268886b582b3f081fc21d3bb1f9c8215",
     "skills/deck-review/scripts/checklist.py": "0b04735c8b9f86cc04ce76fb159ab51f32430ceb2683e98f6fdfa169bf67eb4a",
-    "skills/deck-review/scripts/compose_report.py": "4f324402ad2ca08ab9dbd17a644044eaea3788bac5c7bc84b91587dcb24c0452",
+    "skills/deck-review/scripts/compose_report.py": "cbcf57e55245e9aed3f15ce2f29e459b5a74aa65b6596c251335facb3f4b3d84",
     "skills/deck-review/scripts/deck_inventory.py": "7ed0ba09634b5f4faac3fb77d8dffbc60056b30cdbd8bdb717b071c84d1ef709",
     "skills/deck-review/scripts/dr_dispatch_prompt.py": "0925d6dfe0d8bad3ccbc5dc1775d88682ea2843458a4deaa8608a2dfb0bc1d64",
     "skills/deck-review/scripts/gate_state.py": "10b08fd7d8dcf2a343ca966e579fdc9d76e28a3da419d12826e86f332ce9faef",

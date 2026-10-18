@@ -2477,9 +2477,9 @@ def test_compose_writes_report_md_directly(tmp_path: Path) -> None:
 def test_compose_emits_name_drift_when_report_contains_close_variant(tmp_path: Path) -> None:
     """NAME_DRIFT fires when slide content has variants of company_name.
 
-    Fixture uses placeholder names ('Acmecorp' canonical, 'ACMECORP' case-variant in
-    headline, 'Acmacorp' near-miss spelling in content_summary) — never use real
-    founder names from prior reviews in committed test fixtures.
+    Fixture uses placeholder names ('Acmecorp' canonical, 'AcmeCorp' mixed-case
+    variant in headline, 'Acmacorp' near-miss spelling in content_summary) — never
+    use real founder names from prior reviews in committed test fixtures.
     """
     review_dir = tmp_path / "deck-review-acmecorp"
     review_dir.mkdir()
@@ -2497,7 +2497,7 @@ def test_compose_emits_name_drift_when_report_contains_close_variant(tmp_path: P
                 "slides": [
                     {
                         "number": 1,
-                        "headline": "ACMECORP: Cloud platform for SMBs",
+                        "headline": "AcmeCorp: Cloud platform for SMBs",
                         "content_summary": "Acmacorp provides accounting tools.",
                     }
                 ],
@@ -2605,9 +2605,25 @@ def test_compose_name_drift_fires_for_cased_misspelling() -> None:
     assert "NAME_DRIFT" in codes
 
 
-def test_compose_name_drift_fires_for_all_caps_variant() -> None:
-    """An ALL-CAPS variant of the brand still flags NAME_DRIFT (true positive preserved)."""
+def test_compose_no_name_drift_for_all_caps_brand() -> None:
+    """An ALL-CAPS spelling of the brand is a typographic register, not drift.
+
+    Reverses the earlier true-positive pin: owner approved treating logo/headline
+    all-caps as style, so same-letters all-caps no longer flags NAME_DRIFT.
+    """
     codes = _name_drift_codes("Acmecorp", headline="ACMECORP: Cloud platform for SMBs")
+    assert "NAME_DRIFT" not in codes
+
+
+def test_compose_name_drift_fires_for_mixed_case_variant() -> None:
+    """A mixed-case same-letters variant of the brand still flags NAME_DRIFT."""
+    codes = _name_drift_codes("Acmecorp", headline="AcmeCorp: Cloud platform for SMBs")
+    assert "NAME_DRIFT" in codes
+
+
+def test_compose_name_drift_fires_for_all_caps_misspelling() -> None:
+    """An ALL-CAPS misspelling of the brand still flags NAME_DRIFT (fuzzy path)."""
+    codes = _name_drift_codes("Acmecorp", headline="ACMECROP: Cloud platform for SMBs")
     assert "NAME_DRIFT" in codes
 
 
