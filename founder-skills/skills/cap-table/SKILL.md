@@ -292,6 +292,8 @@ python3 "<printed PLUGIN_ROOT>/scripts/run_status.py" start --skill cap-table --
 FS_HOST_EOF
 ```
 
+If the request carries no `FS_HOST_` lines, leave the heredoc body empty.
+
 **A resume** (`resume: 1`) continues at the question `waiting_on` names: Steps 0 and 1 run again, then ask that question from its `needs_input`, record the reply and re-run the step that stopped. Never redo an extraction or re-ask a question already recorded.
 
 Plugin folder for Reads and prompts (as loaded): `${CLAUDE_PLUGIN_ROOT}` — this skill's references are in `${CLAUDE_PLUGIN_ROOT}/skills/cap-table/references/`. If Step 0 printed `READ_ROOT=`, use that value instead.

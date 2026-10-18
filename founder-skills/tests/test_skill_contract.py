@@ -992,7 +992,9 @@ SKILL_MD_CEILING: dict[str, int] = {
     # the same generator arguments again when the redo was printed in a block it cannot vouch for.
     # 107,281 -> 107,326 (+45 B) on 2026-10-16: Step 0's `start` sentence asks for each request line to be copied
     # byte for byte, never reformatted or wrapped (a value sent with the request is checked as sent).
-    "market-sizing": 107_326,
+    # 107,326 -> 107,401 (+75 B) on 2026-10-19: Step 0 says to leave the request heredoc empty
+    # when the request carries no `FS_HOST_` lines.
+    "market-sizing": 107_401,
     # fmr raised for two founder-facing-correctness items measured in a live run: the CHECKLIST
     # dispatch now forbids citing our artifact filenames in evidence (that run put `inputs.json` in 10
     # items' evidence, printed verbatim into the founder's report), and the producer pipe passes
@@ -1139,7 +1141,9 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 85,797 -> 85,799 (+2): the r1 mkdir moved to its own line and spells `${RUN_ID}`, a rewording.
     # 85,799 -> 85,844 (+45 B) on 2026-10-16: Step 0's `start` sentence asks for each request line to be copied byte
     # for byte, never reformatted or wrapped (a value sent with the request is checked as sent).
-    "financial-model-review": 85_844,
+    # 85,844 -> 85,919 (+75 B) on 2026-10-19: Step 0 says to leave the request heredoc empty
+    # when the request carries no `FS_HOST_` lines.
+    "financial-model-review": 85_919,
     # ic-sim SHRANK: the REQUIRED ic-dynamics.md read at Step 7 is deleted. Step 7 is a pure producer
     # pipe — compose_discussion.py derives discussion.json from the partners' own files and nothing
     # is authored by the main thread — so the read informed no decision while pulling a whole
@@ -1245,7 +1249,9 @@ SKILL_MD_CEILING: dict[str, int] = {
     # context sent with the request could not be read: stop), and Step 4's label reads as a label.
     # 97,490 -> 97,663 (+173 B) on 2026-10-16: Steps 2-3 route host_context.py's RUN_FINISHED to a new simulation,
     # and Step 9 says a compose exit 10 carrying request_waiting is a stop, not a question to ask.
-    "ic-sim": 97_663,
+    # 97,663 -> 97,738 (+75 B) on 2026-10-19: Step 0 says to leave the request heredoc empty
+    # when the request carries no `FS_HOST_` lines.
+    "ic-sim": 97_738,
     # deck-review +1,165 B: Step 0 carried only a parenthetical fresh-shell mention buried in a code
     # comment, unlike the four skills that mint RUN_ID in a LATER block and so carry the shared banner.
     # deck-review mints RUN_ID INSIDE this re-runnable Step-0 block (like cap-table), so the shared
@@ -1638,7 +1644,9 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 113,256 -> 113,305 (+49 B) on 2026-10-19: image_only no longer gates design: input_quality redefined
     # (`good`/`image_only`/`partial`), the gate now names only `partial`, and pitfall 1 says design
     # IS scored for an image-only deck. The enum is unchanged; only the prose moved.
-    "deck-review": 113_305,
+    # 113,305 -> 113,380 (+75 B) on 2026-10-19: Step 0 says to leave the request heredoc empty
+    # when the request carries no `FS_HOST_` lines.
+    "deck-review": 113_380,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
@@ -1826,7 +1834,9 @@ SKILL_MD_CEILING: dict[str, int] = {
     # -1 B, LOWERED, commit 13: a derived stage takes its option id and no value; the sentence is shortened to pay.
     # 129,773 -> 129,818 (+45 B) on 2026-10-16: Step 0's `start` sentence asks for each request line to be copied
     # byte for byte, never reformatted or wrapped (a value sent with the request is checked as sent).
-    "competitive-positioning": 129_818,
+    # 129,818 -> 129,893 (+75 B) on 2026-10-19: Step 0 says to leave the request heredoc empty
+    # when the request carries no `FS_HOST_` lines.
+    "competitive-positioning": 129_893,
     # cap-table, the largest raise (+2,383 B) and the one with the most founder-visible payoff:
     #   * Main-Thread Return named THREE of the four files Step 12 copies; a live run delivered exactly
     #     three and dropped `{Company}_Cap_Table.html`. All four are now named explicitly.
@@ -1960,7 +1970,9 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 156,814 -> 156,859 (+45 B): Step 12 says report_disclosures also carries a flip's unmodelled Section 102 line.
     # 156,859 -> 156,904 (+45 B) on 2026-10-16: Step 0's `start` sentence asks for each request line to be copied
     # byte for byte, never reformatted or wrapped (a value sent with the request is checked as sent).
-    "cap-table": 156_904,
+    # +75 B on 2026-10-19: Step 0 says to leave the request heredoc empty
+    # when the request carries no `FS_HOST_` lines.
+    "cap-table": 156_979,
 }
 
 

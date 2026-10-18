@@ -151,6 +151,8 @@ python3 "<printed PLUGIN_ROOT>/scripts/run_status.py" start --skill deck-review 
 FS_HOST_EOF
 ```
 
+If the request carries no `FS_HOST_` lines, leave the heredoc body empty.
+
 After Step 1 (when the slug is known) — substitute `$SLUG` below with the company slug from Step 1's printed JSON, then call `setup_run.py` to resolve `REVIEW_DIR`, detect whether this is a resume, and clean stale state in one atomic step. **Always** call `setup_run.py` with `--clean` and `--run-id "$RUN_ID"`; do not pre-read `gate_state.json` yourself. `setup_run.py` decides resume vs. fresh by comparing the answered `gate_state.json`'s `run_id` against `--run-id`, and on a fresh (non-resume) run it deletes a stale answered `gate_state.json` so a prior completed run cannot be misread as a resume:
 
 ```bash

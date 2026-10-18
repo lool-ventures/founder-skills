@@ -158,6 +158,8 @@ python3 "<printed PLUGIN_ROOT>/scripts/run_status.py" start --skill ic-sim --art
 FS_HOST_EOF
 ```
 
+If the request carries no `FS_HOST_` lines, leave the heredoc body empty.
+
 After Step 1 (when the slug is known):
 
 ```bash

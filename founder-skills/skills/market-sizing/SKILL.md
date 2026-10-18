@@ -142,6 +142,8 @@ python3 "<printed PLUGIN_ROOT>/scripts/run_status.py" start --skill market-sizin
 FS_HOST_EOF
 ```
 
+If the request carries no `FS_HOST_` lines, leave the heredoc body empty.
+
 Plugin folder for Reads and prompts (as loaded): `${CLAUDE_PLUGIN_ROOT}` — this skill's references are in `${CLAUDE_PLUGIN_ROOT}/skills/market-sizing/references/`. If Step 0 printed `READ_ROOT=`, use that value instead.
 
 **Plugin paths.** If Step 0 printed `READ_ROOT=`, this skill's text arrived without its plugin folder filled in. Use that value in place of `${CLAUDE_PLUGIN_ROOT}` in every Read and sub-agent prompt, including where a later step says to leave that path literal. If it did not print `READ_ROOT=`, use the paths as shown. The folder comes from Step 0's filesystem search, not from a skill file or the "Base directory" line, which can name a folder that does not exist. These are setup details: updates to the founder are about their company, not file locations, printed paths or plugin versions.
