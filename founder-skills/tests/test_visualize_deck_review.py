@@ -911,7 +911,7 @@ def test_gated_category_is_not_drawn_as_a_perfect_score() -> None:
     """A category nobody could assess must not appear at 100% or as a strength.
 
     Every category percentage on this page divides by pass+fail+warn, which EXCLUDES
-    not_applicable. So an image-only deck -- four design criteria gated, one survivor --
+    not_applicable. So a partially-read deck -- four design criteria gated, one survivor --
     scored 1/1 = 100%, drawn on the radar's outer ring, printed as its label, and listed
     under "What's strong". The markdown was the honest surface; this one was not.
 
@@ -943,7 +943,7 @@ def test_gated_category_is_not_drawn_as_a_perfect_score() -> None:
     ]
     result, errors, _ = ck.validate_checklist(json.loads(json.dumps(items)))
     assert not errors, errors
-    gated = ck._apply_design_gating(result, "pdf", "image_only")
+    gated = ck._apply_design_gating(result, "pdf", "partial")
 
     artifacts = _all_artifacts()
     artifacts["checklist.json"] = gated
@@ -957,6 +957,39 @@ def test_gated_category_is_not_drawn_as_a_perfect_score() -> None:
     radar = stdout.split("Category Pass Rates")[1] if "Category Pass Rates" in stdout else stdout
     labels = re.findall(r"Design &amp; Readability</text>\s*<text[^>]*>([^<]*)</text>", radar)
     assert not any(lbl.strip() == "100%" for lbl in labels), f"the radar plots the gated category at 100%: {labels}"
+
+
+def test_visualize_legacy_image_only_reason() -> None:
+    """A checklist stamped by the old image_only gate still says so on the page.
+
+    `image_only` no longer gates design, so `checklist.py` never stamps this reason now -- but
+    a page rendered from a checklist written before that change must still explain the gap in
+    the image_only words, not the text-deck ones.
+    """
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "ck_viz_legacy_io",
+        os.path.join(os.path.dirname(SCRIPT_DIR), "skills", "deck-review", "scripts", "checklist.py"),
+    )
+    assert spec and spec.loader
+    ck = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ck)
+    items = [{"id": i["id"], "status": "pass", "evidence": "e"} for i in ck.CHECKLIST_ITEMS]
+    result, errors, _ = ck.validate_checklist(json.loads(json.dumps(items)))
+    assert not errors, errors
+    for item in result["items"]:
+        if item["id"] in ck._DESIGN_CRITERIA_IDS:
+            item["status"] = "not_applicable"
+            item["evidence"] = "Auto-gated: not_applicable — input_quality=image_only"
+    result["summary"] = ck._recompute_summary(result["items"])
+
+    artifacts = _all_artifacts()
+    artifacts["checklist.json"] = result
+    d = _make_artifact_dir(artifacts)
+    rc, stdout, stderr = _run_viz(d)
+    assert rc == 0, f"rc={rc}, stderr={stderr}"
+    assert "its slides are images with no readable text layer" in stdout
 
 
 # ---------------------------------------------------------------------------

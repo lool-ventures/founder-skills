@@ -55,7 +55,7 @@
         "image_only",
         "partial"
       ],
-      "description": "Required. How well the deck could actually be read. 'good' = every slide rendered and legible; 'image_only' = slides are images with no extractable text; 'partial' = some slides unread. Required rather than optional because its ABSENCE used to be indistinguishable from 'good', so a review of a deck nobody could read looked identical to a review of one that was read."
+      "description": "Required. How well the deck could actually be read. 'good' = every page rendered legibly and has an extractable text layer; 'image_only' = every page rendered but there is no extractable text layer (design is still scored); 'partial' = some page did not render. Required rather than optional because its ABSENCE used to be indistinguishable from 'good', so a review of a deck nobody could read looked identical to a review of one that was read."
     },
     "claimed_stage": {
       "type": [

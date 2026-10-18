@@ -216,12 +216,16 @@ _AI_CRITERIA_IDS = frozenset(
 # pptx render; these two do not.
 _UNRENDERED_FORMATS = frozenset({"text", "markdown"})
 
-# A format that renders is necessary but NOT sufficient: a PDF whose slides are images with
-# no text layer, or whose pages were never all read, cannot support a design judgement
-# either. Gating on `input_format` alone let a partially-read deck score design criteria as
-# if every slide had been seen -- the same defect as scoring a PowerPoint nobody converted,
-# one layer down.
-_UNRENDERED_QUALITY = frozenset({"image_only", "partial"})
+# A format that renders is necessary but NOT sufficient: a page that never rendered, or that
+# was never all read, cannot support a design judgement. Gating on `input_format` alone let a
+# partially-read deck score design criteria as if every slide had been seen -- the same defect
+# as scoring a PowerPoint nobody converted, one layer down.
+#
+# `image_only` is deliberately NOT here. It means the deck rendered with no extractable text
+# layer: the slide image is there and was seen, so a design judgement IS still possible -- only
+# the text layer is missing, which is informational. `partial` (some page did not render) and a
+# per-slide `visual_evidence_captured: false` still gate.
+_UNRENDERED_QUALITY = frozenset({"partial"})
 
 # The Design & Readability IDs gated when there is no rendered page: scoring them fail/warn
 # would penalize the founder for evidence that cannot exist.

@@ -284,7 +284,7 @@ run, whatever the transcript says.
 
 **Ingestion pitfalls — common issues that degrade review quality:**
 
-1. **PDF image-only slides:** Some PDFs embed slides as images with no extractable text. If Read returns blank or garbled content, note `input_quality: "image_only"` in `deck_inventory.json` and base the review on visual description + OCR-level best effort. Flag reduced confidence in coaching commentary.
+1. **PDF image-only slides:** Some PDFs embed slides as images with no extractable text. If Read returns blank or garbled content, set `input_quality: "image_only"` in `deck_inventory.json` and read the slides from their images. Design is still scored, because the rendered slides were seen.
 2. **PPTX speaker notes vs. slide content:** Speaker notes often contain the real narrative; slide text is abbreviated. Extract both — notes go into `content_summary`, slide text into `headline`. Do not discard notes.
 3. **Multi-file submissions:** Founder sends v1 + v2, or deck + appendix as separate files. Ask which is the primary deck before proceeding. <!-- gate: dr_primary_deck --> Do not merge or review both simultaneously.
 4. **Partial decks:** Deck has fewer than 5 slides or is clearly a subset. Proceed but set `confidence: "low"` in stage_profile and note the limitation. Missing-slides detection still runs normally.
@@ -430,14 +430,15 @@ support that judgement any more than a PowerPoint nobody converted can.
 
 Two fields carry the record, and both are load-bearing rather than bookkeeping:
 
-- `input_quality` (**required**): `"good"` when every page rendered and was legible;
-  `"image_only"` when slides are pictures with no extractable text; `"partial"` when any
-  page went unread. It is required precisely because its absence used to be
+- `input_quality` (**required**): `"good"` when every page rendered legibly and has an
+  extractable text layer; `"image_only"` when every page rendered but there is no extractable
+  text layer (the images were seen, so design is still scored); `"partial"` when some page did
+  not render. It is required precisely because its absence used to be
   indistinguishable from `"good"` — a review of a deck nobody could read looked identical to
   a review of one that was read. A per-slide `visual_evidence_captured: false` gates them
   too, whatever `input_quality` claims — a slide nobody rendered cannot support a design
-  judgement. `"image_only"` and `"partial"` gate the 4 visual Design &
-  Readability criteria to `not_applicable` automatically, the same way `"text"` does.
+  judgement. `"partial"` gates the 4 visual Design & Readability criteria to `not_applicable`
+  automatically, the same way `"text"` does.
 - `visual_evidence_captured` (per slide): `true` when you rendered and saw that slide,
   `false` when you have only its text.
 
@@ -1391,7 +1392,7 @@ stale answered gate (run_id mismatch) at the start of the next run.
 - **"Looks polished" bias:** A well-designed deck is not a strong deck. Score content, narrative, and evidence independently of visual quality. The checklist separates design (5 items) from content (8 items) for this reason.
 - **Template / AI-generated copy:** If multiple slides use generic phrasing ("revolutionize," "disrupt," "world-class team") with no specifics, flag this in coaching commentary as a credibility risk — investors notice formulaic decks. This is not a checklist item but affects overall narrative assessment.
 - **Benchmarks are medians, not gates:** A $3M seed round in a $1B TAM market is not automatically wrong — context matters. Use benchmarks from `deck-best-practices.md` as reference points, not hard pass/fail thresholds. The coaching commentary should explain deviations rather than penalize them.
-- **Founder provided text, not a file:** When the founder describes slides in conversation rather than uploading a file, adapt: write `deck_inventory.json` from the conversation, set `input_format: "text"`, and note reduced confidence in visual/design assessments. This is enforced deterministically, not just by prose: `checklist.py` reads `input_format` from `deck_inventory.json` (the same `--inventory` flag that drives AI-criteria gating) and forces the 4 visual Design & Readability criteria to `not_applicable` whenever it is `"text"` (or whenever `input_quality` is `"image_only"`/`"partial"`, or any slide carries `visual_evidence_captured: false`), regardless of what the sub-agent scored them — `slide_count_appropriate` stays scored, since a slide count survives a text description. If the founder later shares screenshots, set `input_format` to whatever format now applies (e.g. `pdf`) so the gate does not fire and Design gets scored normally.
+- **Founder provided text, not a file:** When the founder describes slides in conversation rather than uploading a file, adapt: write `deck_inventory.json` from the conversation, set `input_format: "text"`, and note reduced confidence in visual/design assessments. This is enforced deterministically, not just by prose: `checklist.py` reads `input_format` from `deck_inventory.json` (the same `--inventory` flag that drives AI-criteria gating) and forces the 4 visual Design & Readability criteria to `not_applicable` whenever it is `"text"` (or whenever `input_quality` is `"partial"`, or any slide carries `visual_evidence_captured: false`), regardless of what the sub-agent scored them — `slide_count_appropriate` stays scored, since a slide count survives a text description. If the founder later shares screenshots, set `input_format` to whatever format now applies (e.g. `pdf`) so the gate does not fire and Design gets scored normally.
 - **Cross-skill context:** If `founder_context.py` returned prior market-sizing or financial-model-review runs, mention relevant findings in coaching commentary (e.g., "Your market sizing calculated $X TAM — your deck claims $Y"). Do not hard-fail on discrepancies; flag them for the founder.
 
 ## Main-Thread Return

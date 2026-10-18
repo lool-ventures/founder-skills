@@ -512,6 +512,8 @@ def _gate_reason(evidence: str) -> str:
     """Why a design criterion could not be reviewed, in words, from the reason `checklist.py` stamped."""
     reason = evidence[len(_GATE_EVIDENCE) :]
     if reason.startswith("quality=image_only"):
+        # LEGACY ONLY: `image_only` no longer gates design, so `checklist.py` never stamps this
+        # reason now; it survives to render evidence from checklists written before that change.
         return "its slides are images with no readable text layer"
     if reason.startswith("quality=partial"):
         return "not every page could be read"

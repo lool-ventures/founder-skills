@@ -1008,9 +1008,13 @@ def _scope_note(checklist: dict[str, Any] | None = None) -> list[str]:
 # The evidence string `checklist.py` stamps when it gates a criterion on the input format.
 # The prefix `checklist.py` stamps when it gates a design criterion. It stamps ONE of two
 # reasons -- `input_format=` or `input_quality=` -- and this used to name only the first, which
-# meant an image-only or partially-read PDF lost four criteria in total silence. The two reason
-# sets are DISJOINT (`{text, markdown}` vs `{image_only, partial}`), so a PDF gates on quality
-# alone and never matched. Match the shared stem and read the reason off the end.
+# meant a partially-read PDF lost four criteria in total silence. The two reason sets are
+# DISJOINT, so a PDF gates on quality alone and never matched. Match the shared stem and read
+# the reason off the end.
+#
+# The quality reasons are now `partial` and `slide_not_rendered`; `image_only` no longer gates
+# -- its slides rendered, so design is still scored -- and survives below only as legacy evidence
+# from checklists written before that change.
 _DESIGN_GATE_EVIDENCE = "Auto-gated: not_applicable — input_"
 
 # One sentence per reason. A single sentence cannot serve all three: widening the old prefix
@@ -1023,6 +1027,8 @@ _DESIGN_GATE_REASONS: dict[str, str] = {
         "judges how the deck *looks*: layout, typography, whitespace, or how it reads on a phone. "
         "Sending the deck as a PDF gets them reviewed."
     ),
+    # LEGACY ONLY. `image_only` no longer gates design, so `checklist.py` never stamps this
+    # reason now; it is kept to render evidence from checklists written before that change.
     "quality:image_only": (
         "This deck's slides are images with no readable text layer, so nothing here judges how the "
         "deck *looks*: layout, typography, whitespace, or how it reads on a phone. Exporting the "
@@ -1085,6 +1091,8 @@ def _design_gate_payload(checklist: dict[str, Any] | None) -> dict[str, Any]:
         "reason": {
             None: "",
             "format": "the deck reached the review as text rather than as a rendered file",
+            # LEGACY ONLY: `image_only` no longer gates design, so this reason survives only
+            # for checklists written before that change.
             "quality:image_only": "the slides are images with no readable text layer",
             "quality:partial": "not every page of the deck could be read",
         }.get(reason, "the slides could not be rendered"),

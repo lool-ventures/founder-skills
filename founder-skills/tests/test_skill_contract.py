@@ -1635,7 +1635,10 @@ SKILL_MD_CEILING: dict[str, int] = {
     # the model); only the re-run after a rejection saves it with `2> F`, the form financial-model-review uses.
     # 113,211 -> 113,256 (+45 B) on 2026-10-16: Step 0's `start` sentence asks for each request line to be copied
     # byte for byte, never reformatted or wrapped (a value sent with the request is checked as sent).
-    "deck-review": 113_256,
+    # 113,256 -> 113,305 (+49 B) on 2026-10-19: image_only no longer gates design: input_quality redefined
+    # (`good`/`image_only`/`partial`), the gate now names only `partial`, and pitfall 1 says design
+    # IS scored for an image-only deck. The enum is unchanged; only the prose moved.
+    "deck-review": 113_305,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.

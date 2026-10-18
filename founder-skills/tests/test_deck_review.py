@@ -3503,6 +3503,72 @@ def test_checklist_gating_input_format_pdf_keeps_sub_agent_statuses(tmp_path: Pa
         )
 
 
+def test_checklist_gating_image_only_keeps_design_scored(tmp_path: Path) -> None:
+    """`input_quality: "image_only"` means the deck rendered with no extractable text layer.
+
+    The slide images were seen, so a design judgement is still possible and the 4 visual
+    criteria stay scored rather than gated. Only `partial` (a page that never rendered) and a
+    per-slide `visual_evidence_captured: false` gate them.
+    """
+    inv_path = tmp_path / "deck_inventory.json"
+    inventory = _inventory_with_input_format("pdf")
+    inventory["input_quality"] = "image_only"
+    inventory["slides"] = [
+        {"number": n, "headline": "h", "content_summary": "s", "visual_evidence_captured": True} for n in (1, 2)
+    ]
+    inv_path.write_text(json.dumps(inventory))
+    out_path = str(tmp_path / "checklist.json")
+    payload = json.dumps({"items": _make_all_evaluated_checklist_items_design_fail()})
+
+    sr_args, payload = _sighted(tmp_path, "r1", payload)
+    rc, stdout, stderr = run_script_raw(
+        "checklist.py",
+        ["--run-id", "r1", "--inventory", str(inv_path), "--pretty", *sr_args, "-o", out_path],
+        stdin_data=payload,
+    )
+    assert rc == 0, stderr
+    with open(out_path) as f:
+        data = json.load(f)
+
+    items_by_id = {i["id"]: i for i in data["items"]}
+    for design_id in _DESIGN_CRITERIA_IDS:
+        item = items_by_id[design_id]
+        assert item["status"] == "fail", (
+            f"{design_id} must stay scored for image_only (the slides were seen), got {item['status']}"
+        )
+        assert not item.get("evidence", "").startswith("Auto-gated:"), f"{design_id} must not be gated for image_only"
+
+
+def test_checklist_gating_partial_still_gates_design(tmp_path: Path) -> None:
+    """`input_quality: "partial"` means some page did not render, so it still gates the 4
+    visual criteria to not_applicable with the `input_quality=` reason shape."""
+    inv_path = tmp_path / "deck_inventory.json"
+    inventory = _inventory_with_input_format("pdf")
+    inventory["input_quality"] = "partial"
+    inv_path.write_text(json.dumps(inventory))
+    out_path = str(tmp_path / "checklist.json")
+    payload = json.dumps({"items": _make_all_evaluated_checklist_items_design_fail()})
+
+    sr_args, payload = _sighted(tmp_path, "r1", payload)
+    rc, stdout, stderr = run_script_raw(
+        "checklist.py",
+        ["--run-id", "r1", "--inventory", str(inv_path), "--pretty", *sr_args, "-o", out_path],
+        stdin_data=payload,
+    )
+    assert rc == 0, stderr
+    with open(out_path) as f:
+        data = json.load(f)
+
+    items_by_id = {i["id"]: i for i in data["items"]}
+    for design_id in _DESIGN_CRITERIA_IDS:
+        item = items_by_id[design_id]
+        assert item["status"] == "not_applicable", design_id
+        assert "input_quality=partial" in item.get("evidence", ""), design_id
+    assert items_by_id[_UNGATED_DESIGN_ID]["status"] != "not_applicable", (
+        f"{_UNGATED_DESIGN_ID} is a slide COUNT and must stay scored even when other pages did not render"
+    )
+
+
 def test_checklist_gating_absent_inventory_no_design_gating(tmp_path: Path) -> None:
     """When --inventory is NOT provided, no Design gating is applied either —
     backward-compatible, same as the AI-criteria gate."""
@@ -4254,13 +4320,12 @@ def test_the_coverage_line_says_a_careful_reader_would_find_more() -> None:
 
 
 # ---------------------------------------------------------------------------
-# The design gate fires on TWO reasons; the disclosure used to name one.
+# The design gate fires on TWO reason axes -- format and quality; the disclosure used to name one.
 # ---------------------------------------------------------------------------
 
 _GATE_ROWS = [
     ("text", "good", "reached the review as text"),
     ("markdown", "good", "reached the review as text"),
-    ("pdf", "image_only", "images with no readable text layer"),
     ("pdf", "partial", "Not every page"),
 ]
 
@@ -4283,8 +4348,8 @@ def test_design_disclosure_fires_on_every_gate_reason() -> None:
     """Table-driven over BOTH reason axes, because only one of them was covered.
 
     `_UNRENDERED_FORMATS` and `_UNRENDERED_QUALITY` are disjoint, so a PDF gates on quality
-    alone. The disclosure matched a prefix naming `input_format=` only, and an image-only or
-    partially-read PDF therefore lost four design criteria in total silence -- with the scope
+    alone. The disclosure matched a prefix naming `input_format=` only, and a partially-read
+    PDF therefore lost four design criteria in total silence -- with the scope
     note still telling the founder that design was among what the review assessed.
     """
     mod = _load_compose_report_module()
@@ -4319,6 +4384,38 @@ def test_design_gate_reaches_the_coaching_payload() -> None:
         assert payload["reason"], f"{fmt}/{quality}: no founder-facing reason for the coach"
     clean = mod._design_gate_payload(_gated_checklist("pdf", "good"))
     assert clean["design_reviewed"] is True and clean["gated_count"] == 0
+
+
+def test_legacy_image_only_evidence_still_renders() -> None:
+    """A checklist stamped before `image_only` stopped gating still gets its own disclosure.
+
+    `image_only` no longer gates design -- its slides rendered, so `_apply_design_gating`
+    leaves the criteria scored and `checklist.py` never stamps this reason now -- but a report
+    composed from a checklist written before that change still carries the old evidence. The
+    note must still be emitted, and in the image_only sentence from `_DESIGN_GATE_REASONS`
+    rather than the "reached the review as text" one, which is false for a deck that rendered.
+    """
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("ck_gate_legacy_io", os.path.join(DECK_REVIEW_DIR, "checklist.py"))
+    assert spec and spec.loader
+    ck = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ck)
+
+    mod = _load_compose_report_module()
+    items = [{"id": i["id"], "status": "pass", "evidence": "e"} for i in ck.CHECKLIST_ITEMS]
+    result, errors, _ = ck.validate_checklist(json.loads(json.dumps(items)))
+    assert not errors, errors
+    for item in result["items"]:
+        if item["id"] in ck._DESIGN_CRITERIA_IDS:
+            item["status"] = "not_applicable"
+            item["evidence"] = "Auto-gated: not_applicable — input_quality=image_only"
+    result["summary"] = ck._recompute_summary(result["items"])
+
+    note = mod._unreviewed_design_note(result)
+    assert note, "legacy image_only evidence must still be disclosed"
+    assert mod._DESIGN_GATE_REASONS["quality:image_only"] in note[0]
+    assert "reached the review as text" not in note[0], "a deck that rendered is not a text deck"
 
 
 # ---------------------------------------------------------------------------
