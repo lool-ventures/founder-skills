@@ -5,6 +5,116 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.23.0] - 2026-10-19 — Deck review: one deck text for every step, figures read as the deck states them, and image decks scored for design
+
+### Highlights
+
+**Every deck review step reads the same deck text.** The review now writes the deck's words to one file, slide by
+slide, before any figure is recorded: a PDF page's own text, a PowerPoint slide with its speaker notes, a deck
+pasted into the chat, or, for a slide that is an image, the review's record of what that slide says. The steps that
+record the deck's figures, read them a second time and review each slide all read that file, where before each was
+handed a copy the model had typed out again. A figure check no longer depends on how well one of those copies was
+typed, and the review refuses to compare figures and a second read that were taken from different versions of it.
+
+**Figures are read as the deck states them.** A figure in basis points ("30 bps") is read as the percent it is
+(0.3%). A label such as "Month-over-month growth" no longer makes every growth rate a minimum, and a growth rate is
+tested only against figures that can measure it. A total that misses its parts by more than the deck's own "≈" is
+shown to the founder instead of passing in silence.
+
+**A deck whose slides are images is scored on its design.** Its slides were seen; only their text layer is
+missing. The four design criteria are no longer marked not applicable for it, and the report and its page say that
+the deck's words and figures were read from the images, so the founder should check any figure quoted.
+
+### Scoring changes
+
+- Deck review: a deck whose slides are images, with no text layer, now has its four visual design criteria scored
+  instead of marked not applicable. A deck with a page that did not render, or a slide whose visuals were not
+  captured, still has them marked not applicable. The score of an image deck can change.
+- Deck review: a figure stated in basis points ("30 bps") is now read and computed as the percent it is (0.3%).
+  Before, it was read as 30, so the correct 0.3 was refused and a value 100 times too large was accepted.
+- Deck review: a growth-rate label containing "over" ("Month-over-month growth") no longer makes the rate a
+  minimum, so a computed growth above it is no longer reported consistent whatever the rate. A ratio is tested
+  against a stated growth rate only when both figures measure the same thing, are dated and are exactly one period
+  of the rate apart, or when it is an increase over its own base across one period; otherwise the claim is listed as not checked, with the reason. A per-period rate can now be
+  tested across several periods. Criterion 33 (numbers consistent) can change.
+- Deck review: a total that misses the sum of its parts by more than the deck's own stated approximation ("≈"),
+  though within the parts' rounding, was confirmed in silence; it is now shown as a total that does not quite add
+  up. Inside that "≈" it still confirms, and when every remaining gap sits inside it, criterion 33's passing sentence
+  and its notes say so.
+- Deck review: a duplicate comparison that was computed but not shown is now counted, so the number of comparisons
+  criterion 33 states can be higher than before. No status changes from this.
+- Deck review: the figure-relation step now also proposes stated per-period growth rates, fee pools (a balance
+  times an annual rate) and stated remainders (a whole minus a part). Criterion 33 can therefore check more
+  comparisons on decks that state these, and its status can change.
+- Deck review: the checklist grader may now use the review's own notes on what the slides show that their text
+  does not (a chart, a photo) as it uses the slide visuals, and never quotes them as the deck's words. This can
+  change how a design or proof criterion is graded on a deck whose slides are mostly images.
+- Deck review: the steps that record the deck's figures, re-read them and review each slide now read one deck text
+  file the plugin writes, instead of each being handed a copy retyped by the model; for a deck whose slides are
+  images, that text is the review's per-slide record. Figure checks and slide reviews can change where the retyped
+  copies differed.
+- Deck review: the numbers check refuses to compare the deck's figures with their second reading when the two were
+  taken from different versions of the deck text, or when only one of them records which version it used. No
+  verdict changes from this.
+- Deck review: a monthly figure multiplied by a figure the deck labels as 12 (or 3) months is now read as a
+  yearly (or quarterly) total and checked against the deck's stated annual (or quarterly) figure, which it can
+  confirm or contradict. A monthly figure times any other number of months is no longer compared as if it were
+  still monthly. A total stated for a dated year, such as "Revenue 2025", is not tested against it unless it is a
+  run rate (ARR, MRR). The figure step now records such a multiplier when the deck prints it, and the relation
+  step proposes the product; a deck that states a monthly and an annual figure without printing the multiplier is
+  not checked this way. Criterion 33 can change.
+- Deck review: the numbers check gains a maintainer flag that prints every computed comparison. No verdict
+  changes from this.
+- Every other skill: none.
+
+### Added
+
+- Deck review writes the deck's text to one file per review, slide by slide, with where each page's words came
+  from. A text deck (`.txt` or `.md`) with "SLIDE N" lines is split on them, and a deck pasted into the chat is
+  saved as a file first. A slide count that disagrees with the review's own count of slides, or a text deck with
+  no slide lines, is warned about; no text is dropped.
+- Deck review may record notes on what the slides show that their text does not, and the page label printed on a
+  slide. They are the review's notes, never the deck's words, are kept short, and are never copied into the deck
+  text.
+- Deck review: a deck whose slides are images says so in the report and on its page, and asks the founder to check
+  any figure quoted against the deck.
+
+### Changed
+
+- Deck review refuses to compare the deck's figures with their second reading when the two were taken from
+  different versions of the deck text, or when only one says which version it used, and says which step to redo.
+- Deck review: totals that miss their parts are listed under "Totals that don't quite add up", and each says
+  whether the gap is inside the parts' rounding or past the deck's own "≈".
+- Deck review: the figure step accepts a full date (October 6, 2026; 6 October 2026; 2026-10-06).
+
+### Fixed
+
+- Deck review: "ACMECORP" written for the brand "Acmecorp" is how logos and headlines set a name, and is no longer
+  flagged as the company name drifting. A mixed-case variant or a misspelling still is.
+- Deck review: the second reading of the deck's figures was copied into the review without any check. A reading
+  with no transcript, or with slide numbers that are not whole numbers, is now refused and the step is redone.
+- Deck review: a gap past the deck's own "≈" was headed and introduced as a rounding gap.
+
+### Development
+
+Contributor-facing only; nothing here changes what a founder installs or runs.
+
+- Hosts: deck review's checklist values can shift (see Scoring changes): criterion 33 can read warn where it
+  passed, an image deck's design criteria are scored, and the grader may use the review's slide notes. The run's
+  files gain `deck_text.md` and a `deck_text_sha256` stamp on the ledger, the second read and the slide reviews;
+  `reconciliation.json` gains `untested_claim_kinds` beside `untested_claims`, and a rounding gap carries its
+  `gap_basis`. Nothing in `data/host-contract.json` changed.
+- Deck review's new producers (`deck_text.py`, `second_read.py`) and their helpers refuse loudly with `-o`
+  untouched, like the others; `reconcile.py` refuses `DECK_TEXT_MISMATCH` and `DECK_TEXT_STAMP_MISSING`.
+- The deck lane of the release gate fails on a missing deck text or deck-text stamps that differ, and records,
+  without yet failing on it, whether each deck-reading dispatch named and read the file.
+- Every analysis skill's Step 0 says to leave the request block empty when the request carries no host lines.
+- The deck-review SKILL.md size ceiling is raised three times in this release (to 119,018 bytes), and each analysis
+  skill's by 75 bytes.
+- Deck review's numbers check has a maintainer flag, `--explain`, that prints every computed comparison with its
+  working and writes nothing. The check no longer accepts abbreviated command-line flags.
+- The committed deck-review recordings predate the deck text and are not re-recorded in this release.
+
 ## [0.22.0] - 2026-10-17 — Scores read the same everywhere, range figures in deck review, and replies sent through a host's tool
 
 ### Highlights
