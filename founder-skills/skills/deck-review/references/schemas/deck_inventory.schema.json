@@ -106,6 +106,12 @@
       "type": "string",
       "description": "Evidence or claim found for AI classification. Recommended when ai_company_status is not 'not_ai'."
     },
+    "observations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
     "slides": {
       "type": "array",
       "items": {
@@ -130,6 +136,9 @@
           },
           "word_count_estimate": {
             "type": "integer"
+          },
+          "printed_label": {
+            "type": "string"
           },
           "visual_evidence_captured": {
             "type": "boolean",

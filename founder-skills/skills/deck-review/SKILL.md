@@ -459,7 +459,7 @@ Record what evidence or claim was found in `ai_evidence` (required for `ai_core`
 
 `claimed_stage` holds the stage token the deck itself states (`pre_seed`, `seed`, `series_a`, `series_b`, `growth`); optional `prior_rounds` lists rounds it says were already closed (`stage`, optional `year`). If the deck never states a stage, **omit the field or set it to `null` — never invent a descriptive placeholder** (a made-up value misfires the stage cross-checks downstream).
 
-**`claimed_raise`, `ai_evidence` and `slides[].visuals` are optional: `null` and omission mean the same thing** — the producer normalises an explicit `null` away before validating, so either spelling is accepted. Prefer omission. A deck that states no ask is a real and notable finding, so say so in the review rather than treating the empty field as the whole story.
+**`claimed_raise`, `ai_evidence`, `slides[].visuals` and `slides[].printed_label` are optional: `null` and omission mean the same thing** — the producer drops an explicit `null`, so either is accepted. Prefer omission. A deck that states no ask is a real and notable finding, so say so in the review rather than treating the empty field as the whole story.
 
 ```bash
 cat <<'INVENTORY_EOF' | python3 "$SCRIPTS/deck_inventory.py" --run-id "$RUN_ID" -o "$REVIEW_DIR/deck_inventory.json" --pretty

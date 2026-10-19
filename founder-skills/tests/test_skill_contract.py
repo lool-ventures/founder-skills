@@ -1654,7 +1654,9 @@ SKILL_MD_CEILING: dict[str, int] = {
     # annual-rate product and the whole/part-removed/remainder difference, replacing a bare delta
     # with no stated counterpart (which is not a check); and the compound_growth/growth bullets
     # cover ANY per-period rate, not only a CAGR or a per-year one.
-    "deck-review": 115_027,
+    # 115,027 -> 115,016 (-11 B) on 2026-10-19: the omit-or-null sentence names `slides[].printed_label`
+    # and says the same in fewer words.
+    "deck-review": 115_016,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
@@ -2307,7 +2309,9 @@ REFERENCES_CEILING: dict[str, int] = {
     # 52_206 -> 52_810 (+604 B): `numbers_consistent` is scored from the arithmetic. checklist-criteria.md
     # says so on the criterion; artifact-schemas.md and checklist.schema.json declare the item's
     # `scored_by` and `reviewer_status`.
-    "deck-review": 52_810,
+    # 52_810 -> 53_160 (+350 B): optional reviewer notes (`observations`, `printed_label`) in
+    # artifact-schemas.md and deck_inventory.schema.json.
+    "deck-review": 53_160,
     # competitive-positioning +474 B: artifact-schemas.md documented the `startup_rank` RENDERING
     # convention but not its SENTINEL. `score_moats.py` stamps {"rank": -1, "total": 0} when the
     # startup is not_applicable on a dimension, and compose_report.py rendered it verbatim —

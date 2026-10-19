@@ -25,6 +25,7 @@ JSON schemas for all artifacts deposited during the deck review workflow. Each a
 | `prior_rounds` | object[] | no | Rounds already closed: `stage` token, optional `year` (1990 to next year); the stage gate prints them. A round raised now is `claimed_stage` |
 | `ai_company_status` | string | **yes** | One of: `"ai_core"`, `"ai_claimed_unverified"`, `"not_ai"` |
 | `ai_evidence` | string | no | Evidence or claim found; recommended when status is not `not_ai` |
+| `observations` | string[] | no | Your own notes on what the slides show that their text does not (at most 12, each at most 300 characters). Reviewer notes, never deck text: no dispatch quotes them as the deck |
 | `slides` | object[] | yes | Per-slide extraction |
 
 ### slides[] entry
@@ -36,6 +37,7 @@ JSON schemas for all artifacts deposited during the deck review workflow. Each a
 | `content_summary` | string | yes | Slide content in 2-3 sentences |
 | `visuals` | string | no | Description of charts, screenshots, diagrams |
 | `word_count_estimate` | integer | no | Approximate word count on the slide |
+| `printed_label` | string | no | The page number or label printed on the slide, when it differs from `number` (at most 16 characters) |
 
 **Example:**
 ```json

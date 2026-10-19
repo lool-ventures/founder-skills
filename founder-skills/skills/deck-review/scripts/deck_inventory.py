@@ -32,8 +32,8 @@ from _artifact_writer import ArtifactValidationError, load_schema, write_artifac
 # reader, and no downstream consumer has to learn null-vs-absent. Note the same shape exists in
 # cap-table (`jurisdiction.incorporated_date`, `common_batches[].issuance_date` are optional and
 # bare `"string"`), so this is a class, not a one-off -- survey before calling it settled.
-_NULLABLE_AS_ABSENT = ("claimed_raise", "ai_evidence", "prior_rounds")
-_NULLABLE_AS_ABSENT_PER_SLIDE = ("visuals", "word_count_estimate", "visual_evidence_captured")
+_NULLABLE_AS_ABSENT = ("claimed_raise", "ai_evidence", "prior_rounds", "observations")
+_NULLABLE_AS_ABSENT_PER_SLIDE = ("visuals", "word_count_estimate", "visual_evidence_captured", "printed_label")
 
 
 def _drop_nulls_from_optional_fields(data: dict[str, Any]) -> None:
@@ -57,6 +57,9 @@ def _drop_nulls_from_optional_fields(data: dict[str, Any]) -> None:
                     del r["year"]
                 elif isinstance(year, str) and year.strip().isdigit() and len(year.strip()) == 4:
                     r["year"] = int(year.strip())
+    # `observations`: an empty list is absence too, like an empty `prior_rounds`.
+    if data.get("observations") == []:
+        del data["observations"]
     slides = data.get("slides")
     if isinstance(slides, list):
         for slide in slides:
@@ -83,6 +86,31 @@ def _prior_round_year_errors(data: dict[str, Any]) -> list[str]:
                 f"prior_rounds[{i}].year: {year} is not a year a round closed in "
                 f"({PRIOR_ROUND_FIRST_YEAR}-{last}); omit it when the deck does not say"
             )
+    return errors
+
+
+OBSERVATIONS_MAX = 12
+OBSERVATION_MAX_CHARS = 300
+PRINTED_LABEL_MAX_CHARS = 16
+
+
+def _reviewer_note_errors(data: dict[str, Any]) -> list[str]:
+    """Caps on the reviewer's own notes, not deck text; deck_text.py never reads them. The schema
+    validator ignores `maxItems`/`maxLength`, so the bounds live here, checked before anything is
+    written. Over a cap is refused, never truncated."""
+    errors = []
+    observations = data.get("observations")
+    if isinstance(observations, list):
+        if len(observations) > OBSERVATIONS_MAX:
+            errors.append(f"observations: {len(observations)} notes, at most {OBSERVATIONS_MAX}")
+        for i, note in enumerate(observations):
+            if isinstance(note, str) and len(note) > OBSERVATION_MAX_CHARS:
+                errors.append(f"observations[{i}]: {len(note)} chars, at most {OBSERVATION_MAX_CHARS}")
+    slides = data.get("slides")
+    for i, slide in enumerate(slides if isinstance(slides, list) else []):
+        label = slide.get("printed_label") if isinstance(slide, dict) else None
+        if isinstance(label, str) and len(label) > PRINTED_LABEL_MAX_CHARS:
+            errors.append(f"slides[{i}].printed_label: {len(label)} chars, at most {PRINTED_LABEL_MAX_CHARS}")
     return errors
 
 
@@ -117,6 +145,11 @@ def main() -> int:
     year_errors = _prior_round_year_errors(data)
     if year_errors:
         print(f"Error: deck_inventory validation failed: {'; '.join(year_errors)}", file=sys.stderr)
+        return 1
+
+    note_errors = _reviewer_note_errors(data)
+    if note_errors:
+        print(f"Error: deck_inventory validation failed: {'; '.join(note_errors)}", file=sys.stderr)
         return 1
 
     try:
