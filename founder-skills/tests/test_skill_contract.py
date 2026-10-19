@@ -3975,6 +3975,15 @@ _REJECTING_PAYLOADS: list[tuple[str, str, list[str], str] | tuple[str, str, list
         ["--run-id", "RID", "--reason", "not_needed"],
         "",
     ),
+    # The second read's hand-off. A missing `transcript` is the failure mode the old inline
+    # `python3 -c` copy could not see: it wrote a `second_read.json` whose haystack was absent,
+    # so every quote it was meant to check "verified" against nothing.
+    (
+        "deck-review",
+        "second_read.py",
+        ["--run-id", "RID"],
+        '{"slides_transcribed": [6]}',
+    ),
 ]
 
 
