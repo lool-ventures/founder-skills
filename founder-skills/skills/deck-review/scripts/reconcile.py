@@ -124,12 +124,21 @@ class Relation:
     expected_id: str | None = None
     expected_value: float | None = None
     verdict: str = "derived"  # contradiction | rounding_gap | confirmation | derived | restatement | ...
+    # WHY A ROUNDING GAP IS ONE. "stated_approximation" when the parts fall short of the stated
+    # figure by more than its own "~" but within what the parts' stacked rounding allows;
+    # "parts_rounding" when the parts' rounding alone is what covers the gap. Carried on a
+    # relation a downgrade later withdraws, so a slot it held stays accounted for.
+    gap_basis: str | None = None
     # A CLAIM THE DECK MAKES THAT THIS RUN COULD NOT TEST. Set when the time guard refuses a
     # rate-over-time binding. Suppression alone is invisible -- `suppressed` carries counts by
     # verdict and nothing else -- so without this the founder is told "your figures line up"
     # about the one claim an investor will probe hardest. Carries the claim's own wording, so
     # a renderer can name it rather than gesture at it.
     untested_claim: str = ""
+    # WHY the claim was untested, so a renderer can say the true thing rather than reuse the
+    # within-year explanation for a refusal that has nothing to do with a single year.
+    # "within_year" | "not_one_period"; empty means the claim did not come from a guard.
+    untested_kind: str = ""
     # Rendering parts for operators whose line is rebuilt once the comparison has fixed the
     # number space: `head` is everything before " = ", `unit_word` follows the number and
     # `note` closes the line. Never emitted; `rendered` is the only founder-facing text.
@@ -506,7 +515,18 @@ _LEAD_AT_LEAST = re.compile(r"^\s*[>≥]")
 _LEAD_AT_LEAST_WORDS = re.compile(r"^\s*(over|above|at least|more than|minimum of|no less than)\s+\$?\d", re.I)
 _LEAD_AT_MOST_WORDS = re.compile(r"^\s*(under|below|fewer than|less than|at most|up to|no more than)\s+\$?\d", re.I)
 _AT_MOST_WORDS = re.compile(r"\b(fewer than|less than|under|up to|at most|no more than|below)\b", re.I)
-_AT_LEAST_WORDS = re.compile(r"\b(at least|more than|over|exceeds|minimum|or more)\b", re.I)
+# `over` IS NOT A FLOOR WHEN THE LABEL USES IT AS A TIME PREPOSITION. It sat in this
+# alternation searched over the whole label, so `detect_bound("44%", "Month-over-month
+# growth")` read "at_least" and every relation landing ABOVE the stated rate came back
+# "consistent" -- a deck could understate its own growth and the engine would agree. A
+# label "over" is a floor only before a NUMERAL that is neither a year nor a quantity
+# followed by a time unit ("customers over 100", but not "growth over 2024" or "CAGR over
+# 5 years"), or as the bare parenthesised bound "(over)". The X-over-X forms are the same
+# preposition, not a bound; see `_label_over_is_floor`. The other words are unchanged.
+_AT_LEAST_WORDS = re.compile(r"\b(at least|more than|exceeds|minimum|or more)\b", re.I)
+# A label "over" binds only when a numeral follows. The numeral itself is filtered below,
+# because "over 2024" and "over 5 years" are both prose about time.
+_OVER_IN_LABEL = re.compile(r"\bover\b\s+\$?(\d[\d,]*(?:\.\d+)?)", re.I)
 # These words mean the AUTHOR ROUNDED. They do not mean the author is unsure about the
 # future, and conflating the two is what `target` and `projected` did here.
 #
@@ -665,6 +685,28 @@ def _approx_symbol_marks_this_figure_in_quote(raw: str, quote: str) -> bool:
     return False
 
 
+def _label_over_is_floor(label: str) -> bool:
+    """Does a prose "over" in the LABEL bound this figure, or merely place it in time?
+
+    A BOUND WORD THAT IS ALSO A PREPOSITION MUST BE READ IN CONTEXT. "over" was matched
+    anywhere in the label, so "Month-over-month growth" made a stated rate a floor and any
+    higher computed value "consistent" with it. Only two readings bind: "over" before a
+    numeral that is a quantity ("customers over 100", "buildings over 200m tall"), and the
+    bare parenthesised bound "(over)". A year ("growth over 2024") and a duration ("CAGR
+    over 5 years") are the preposition, and the X-over-X forms never carry a numeral at all.
+    """
+    if re.search(r"\(\s*over\s*\)", label, re.I):
+        return True
+    for match in _OVER_IN_LABEL.finditer(label):
+        digits = match.group(1).replace(",", "")
+        if re.fullmatch(r"(?:19|20)\d{2}", digits):
+            continue
+        if _TIME_UNIT_LEAD.match(label[match.end() :]):
+            continue
+        return True
+    return False
+
+
 def detect_bound(raw: str, label: str, quote: str = "") -> str | None:
     """Is this figure a floor, a ceiling, an approximation, or an exact claim?
 
@@ -704,6 +746,8 @@ def detect_bound(raw: str, label: str, quote: str = "") -> str | None:
     if _AT_MOST_WORDS.search(label):
         votes.add("at_most")
     if _AT_LEAST_WORDS.search(label):
+        votes.add("at_least")
+    if _label_over_is_floor(label):
         votes.add("at_least")
     if {"at_least", "at_most"} <= votes:
         return None  # contradictory signals -- fall back to the plain two-sided test
@@ -842,6 +886,14 @@ _TIME_UNITS: tuple[tuple[tuple[str, ...], float], ...] = (
     (("months", "month", "mos", "mo"), 2_629_800.0),
     (("quarters", "quarter"), 7_889_400.0),
     (("years", "year", "yrs", "yr"), 31_557_600.0),
+)
+
+# A TIME UNIT DIRECTLY AFTER A NUMERAL TURNS "over" INTO A PREPOSITION, not a bound. This
+# is what separates "CAGR over 5 years" from "customers over 100". Only the LEADING position
+# counts: a unit later in the tail belongs to some other quantity, not to this numeral.
+_TIME_UNIT_LEAD = re.compile(
+    r"^\s*(?:" + "|".join(sorted({n for names, _ in _TIME_UNITS for n in names}, key=len, reverse=True)) + r")\b",
+    re.I,
 )
 
 
@@ -1584,6 +1636,219 @@ def _within_year_pair(figs: list[Figure]) -> bool:
     return not (years[0] and years[1] and years[0] != years[1])
 
 
+# A GROWTH RATE IS A CLAIM ABOUT ONE MEASURE ACROSS ONE PERIOD. The stated figure's own
+# wording says so, and everything else is deliberately excluded: no bare period word
+# ("monthly", "annual", "per month") and no bare month/year token, because those describe a
+# LEVEL rather than a rate of change.
+_GROWTH_CLAIM = re.compile(
+    r"\b(?:grew|grow(?:th|ing|s)?|cagr|mom|yoy|qoq|m/m|y/y|q/q|"
+    r"month[- ]over[- ]month|year[- ]over[- ]year|quarter[- ]over[- ]quarter|"
+    r"week[- ]over[- ]week|period[- ]over[- ]period)\b",
+    re.I,
+)
+
+# THE MEASURE A LABEL NAMES, with everything that only says WHEN stripped away. Two
+# figures are the same measure when their keys are equal and non-empty: "ARR FY2024" and
+# "ARR FY2025" reduce to "arr", while "Net revenue" and "Customers" never meet.
+_MEASURE_DATES = re.compile(
+    r"\b(?:"
+    r"\d{4}-\d{2}|fy\s?\d{2,4}|q[1-4]|h[12]|'(?:19|20)?\d{2}|(?:19|20)\d{2}|"
+    r"jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|"
+    r"aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?"
+    r")\b",
+    re.I,
+)
+_MEASURE_CONNECTORS = re.compile(r"\b(?:as of|end of|in|at|of|by)\b", re.I)
+_MEASURE_FILLERS = re.compile(r"\b(?:starting|ending|opening|closing|actual|forecast|projected)\b", re.I)
+
+# PERIOD PHRASES NAME WHEN, NOT WHAT. "year on year" and "year over year" say the span a
+# rate runs over and nothing about the measure, so they are stripped like a date --
+# otherwise "new subscription ARR added year on year" could never reduce to the base's
+# "arr". A bare "period" is the same kind of word ("ARR at end of period").
+_MEASURE_PERIODS = re.compile(r"\b(?:year[- ](?:over|on)[- ]year|yoy|y/y|period)\b", re.I)
+
+# A NUMERATOR THAT NAMES A CHANGE IS AN INCREMENT OVER ITS BASE, and an increment divided
+# by its base IS the growth rate itself -- not a multiple of two snapshots. These are the
+# words that mark the change; removed, the numerator's remaining key is the measure the
+# base is a snapshot of. "new subscription arr added year on year" -> "subscription arr", the
+# base's own key.
+_CHANGE_WORDS = re.compile(
+    r"\b(?:"
+    r"add(?:ed|itional|ition|ing|s)?|"
+    r"net\s+new|new|"
+    r"increas(?:e|ed|es|ing|al)?|increment(?:al|s)?|"
+    r"change[sd]?|"
+    r"grow(?:th|s|ing|n)?|grew|"
+    r"gain(?:ed|s)?"
+    r")\b",
+    re.I,
+)
+
+
+def _measure_key(label: str) -> str:
+    """The identity of the quantity a label names, with its point in time removed."""
+    text = (label or "").lower()
+    text = _MEASURE_DATES.sub(" ", text)
+    text = _NOW_WORDS.sub(" ", text)
+    text = _EOY_WORDS.sub(" ", text)
+    text = _MEASURE_PERIODS.sub(" ", text)
+    text = _MEASURE_FILLERS.sub(" ", text)
+    text = _MEASURE_CONNECTORS.sub(" ", text)
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", text).split())
+
+
+_MONTH_INDEX = dict(
+    zip(
+        ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"),
+        range(1, 13),
+        strict=True,
+    )
+)
+_SNAP_HALF = re.compile(r"\bh[12]\b", re.I)
+_SNAP_FY_QUARTER = re.compile(r"\bq([1-4])\s*fy\s?(\d{2,4})\b", re.I)
+_SNAP_QUARTER = re.compile(r"\bq([1-4])\s+(\d{4})\b", re.I)
+_SNAP_FY = re.compile(r"\bfy\s?(\d{2,4})\b", re.I)
+_SNAP_YYYY_MM = re.compile(r"\b((?:19|20)\d{2})-(0[1-9]|1[0-2])\b")
+_SNAP_MONTH_YEAR = re.compile(
+    r"\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|"
+    r"aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+((?:19|20)\d{2})\b",
+    re.I,
+)
+_SNAP_YEAR = re.compile(r"\b((?:19|20)\d{2})\b")
+
+
+def _fy_year(digits: str) -> int:
+    return 2000 + int(digits) if len(digits) == 2 else int(digits)
+
+
+def _month_num(name: str) -> int:
+    return _MONTH_INDEX[name[:3].lower()]
+
+
+def _snapshot_date(fig: Figure) -> tuple[str, int] | None:
+    """The point in time this figure names, as (granularity, ordinal), or None undecidable.
+
+    LABEL AND RAW ONLY -- never the quote, which names dates belonging to other figures.
+    A date is undecidable when there is none, when a month name carries no year, when the
+    figure is a half (H1/H2), or when it names two different dates. Undecidable is the safe
+    answer: it makes the one-period test below refuse rather than guess.
+    """
+    text = f"{fig.label or ''} {fig.raw or ''}"
+    if _SNAP_HALF.search(text):
+        return None
+    spans: list[tuple[int, int, str, int]] = []
+
+    def found(m: re.Match[str], gran: str, ordinal: int) -> None:
+        spans.append((m.start(), m.end(), gran, ordinal))
+
+    def overlaps(m: re.Match[str]) -> bool:
+        return any(m.start() < e and s < m.end() for s, e, _, _ in spans)
+
+    for m in _SNAP_FY_QUARTER.finditer(text):
+        found(m, "fyquarter", _fy_year(m.group(2)) * 4 + int(m.group(1)) - 1)
+    for m in _SNAP_QUARTER.finditer(text):
+        if not overlaps(m):
+            found(m, "quarter", int(m.group(2)) * 4 + int(m.group(1)) - 1)
+    for m in _SNAP_FY.finditer(text):
+        if not overlaps(m):
+            found(m, "fy", _fy_year(m.group(1)))
+    for m in _SNAP_YYYY_MM.finditer(text):
+        if not overlaps(m):
+            found(m, "month", int(m.group(1)) * 12 + int(m.group(2)) - 1)
+    for m in _SNAP_MONTH_YEAR.finditer(text):
+        if not overlaps(m):
+            found(m, "month", int(m.group(2)) * 12 + _month_num(m.group(1)) - 1)
+    for m in _SNAP_YEAR.finditer(text):
+        if not overlaps(m):
+            found(m, "year", int(m.group(1)))
+    dates = {(gran, ordinal) for _, _, gran, ordinal in spans}
+    return dates.pop() if len(dates) == 1 else None
+
+
+def _growth_period(exp: Figure) -> str | None:
+    """The period the stated growth rate runs over, from its declared basis or its wording."""
+    if exp.period in ("month", "quarter", "year"):
+        return exp.period
+    text = f"{exp.label or ''} {exp.raw or ''}"
+    if re.search(r"\b(?:mom|m/m|month[- ]over[- ]month)\b", text, re.I):
+        return "month"
+    if re.search(r"\b(?:qoq|q/q|quarter[- ]over[- ]quarter)\b", text, re.I):
+        return "quarter"
+    if re.search(r"\b(?:yoy|y/y|year[- ]over[- ]year|annual\s+growth)\b", text, re.I):
+        return "year"
+    return None
+
+
+def _one_period_apart(first: Figure, second: Figure, rate_period: str | None) -> bool:
+    """Do these two figures date the SAME measure exactly one period of the stated rate apart?
+
+    MIXED GRANULARITY IS NOT ONE PERIOD, and neither is an FY year against a calendar year:
+    a quarter rate needs two quarters, a month rate two months, and only a year rate can be
+    measured by annual snapshots. The difference is absolute, so operand order does not matter.
+    """
+    a, b = _snapshot_date(first), _snapshot_date(second)
+    if a is None or b is None or a[0] != b[0] or abs(a[1] - b[1]) != 1:
+        return False
+    if a[0] in ("year", "fy"):
+        return rate_period == "year"
+    if a[0] in ("quarter", "fyquarter"):
+        return rate_period == "quarter"
+    return a[0] == "month" and rate_period == "month"
+
+
+def _increment_over_base(real: list[Figure], exp: Figure) -> bool:
+    """Is this ratio an increment (a change in a measure) divided by that measure's base?
+
+    An increment over its own base IS the growth rate, so the ratio can test the stated
+    rate even though the two labels name different quantities. Two things must hold: the
+    numerator marks a change, and once that word is removed its key names the same measure
+    as the base's. Keys match when one's words are a subset of the other's, so a numerator
+    narrowed to "subscription arr" still matches the base's "arr".
+
+    THE INCREMENT MUST SPAN ONE PERIOD OF THE STATED RATE. That division is the rate itself
+    only when the change covers the same span the rate is quoted over: a six-month increment
+    over its base is a six-month rate, and comparing it directly with a monthly one is the
+    false-contradiction direction. So the numerator's period -- declared in `period`, else
+    read off its own wording exactly as `_growth_period` reads the stated figure's -- must
+    equal the stated rate's. A missing or different period refuses the binding, which errs
+    toward silence.
+    """
+    if len(real) != 2:
+        return False
+    numerator, base = real
+    label = numerator.label or ""
+    if not _CHANGE_WORDS.search(label):
+        return False
+    num_key = _measure_key(_CHANGE_WORDS.sub(" ", label))
+    base_key = _measure_key(base.label)
+    if not num_key or not base_key:
+        return False
+    num_words, base_words = set(num_key.split()), set(base_key.split())
+    if not (num_words <= base_words or base_words <= num_words):
+        return False
+    numerator_period = _growth_period(numerator)
+    return numerator_period is not None and numerator_period == _growth_period(exp)
+
+
+def _ratio_can_test_growth(real: list[Figure], exp: Figure) -> bool:
+    """Can a ratio of these two operands actually test this stated growth rate?
+
+    Two shapes qualify. An INCREMENT divided by its BASE is the rate itself
+    (`_increment_over_base`). Otherwise both operands must be the SAME measure exactly one
+    period apart -- a ratio of two snapshots is a growth multiple only under that
+    condition, and the same-measure test stays exact there.
+    """
+    if len(real) != 2:
+        return False
+    if _increment_over_base(real, exp):
+        return True
+    first, second = real
+    key_a, key_b = _measure_key(first.label), _measure_key(second.label)
+    if not key_a or not key_b or key_a != key_b:
+        return False
+    return _one_period_apart(first, second, _growth_period(exp))
+
+
 def _stated(exp: Figure) -> str:
     """Render the stated side in the SAME number space as the computed side.
 
@@ -1940,6 +2205,54 @@ def _implied_base(r: Relation, real: list[Figure]) -> str | None:
     return None
 
 
+def _compound_growth(
+    r: Relation, real: list[Figure], rel_spec: dict[str, Any], alias: dict[str, str], by_id: dict[str, Figure]
+) -> str | None:
+    """A stated per-period growth rate tested against two snapshots `periods` apart.
+
+    A ratio can test a growth rate only when its two operands are the same measure exactly ONE
+    period apart (`_ratio_can_test_growth`). Two snapshots several periods apart need the
+    period COUNT declared, which is what `periods` is; the rate is the geometric mean of the
+    multiple, and it compares to a stated percent as a percent -- never through
+    `_growth_convention`, which is for a dimensionless multiple.
+    """
+    if len(real) != 2:
+        return f"compound_growth needs exactly 2 operands (a start snapshot and an end snapshot), got {len(real)}"
+    start, end = real
+    if start.unit_kind != end.unit_kind or start.unit_kind not in (MONEY, COUNT):
+        return (
+            "compound_growth needs two snapshots of one money or count measure, "
+            f"got {start.unit_kind} and {end.unit_kind}"
+        )
+    if start.value <= 0 or end.value <= 0:
+        return f"compound_growth needs two positive snapshots, got {start.raw} and {end.raw}"
+    periods = rel_spec.get("periods")
+    if isinstance(periods, bool) or not isinstance(periods, int) or periods < 1:
+        return f"compound_growth needs `periods` to be an integer of at least 1, got {periods!r}"
+    exp_ref = rel_spec.get("expected_id")
+    exp = by_id.get(str(alias.get(str(exp_ref), exp_ref))) if exp_ref else None
+    if exp is None:
+        return "compound_growth needs an `expected_id` naming the stated growth rate to test"
+    if exp.unit_kind != PERCENT:
+        return f"compound_growth tests a stated percent, but {exp.raw} is a {exp.unit_kind}"
+    period = exp.period or _growth_period(exp)
+    if not period:
+        return f"{exp.raw} names no period; state the period this growth rate runs over"
+    t_s, t_e = figure_tolerance(start), figure_tolerance(end)
+    lo_num, lo_den = end.value - t_e, start.value + t_s
+    hi_num, hi_den = end.value + t_e, start.value - t_s
+    if lo_num <= 0 or lo_den <= 0 or hi_num <= 0 or hi_den <= 0:
+        return f"{start.raw} is too close to zero for its own precision, so the growth rate cannot be bounded"
+    r.computed = ((end.value / start.value) ** (1 / periods) - 1) * 100
+    r.computed_unit = PERCENT
+    r.span_lo = ((lo_num / lo_den) ** (1 / periods) - 1) * 100
+    r.span_hi = ((hi_num / hi_den) ** (1 / periods) - 1) * 100
+    r.head = f"{end.raw} from {start.raw} over {periods} {period}s"
+    r.unit_word = f"% a {period}"
+    r.rendered = f"{r.head} = {r.computed:.1f}{r.unit_word}"
+    return None
+
+
 def _computed_time_unit(r: Relation, real: list[Figure]) -> tuple[str, float] | None:
     """The time unit the computed side of a duration comparison is in, or None if unknown.
 
@@ -2230,6 +2543,11 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
         if refusal:
             r.dropped, r.reasons = True, [refusal]
             return r
+    elif r.operator == "compound_growth":
+        refusal = _compound_growth(r, real, rel_spec, alias, by_id)
+        if refusal:
+            r.dropped, r.reasons = True, [refusal]
+            return r
     else:
         r.dropped, r.reasons = True, [f"unsupported operator: {r.operator!r}"]
         return r
@@ -2296,6 +2614,33 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
             "no disagreement is established"
         )
         r.untested_claim = f"{exp.raw}{f' ({exp.label})' if exp.label else ''}"
+        r.untested_kind = "within_year"
+        exp_id = None
+    # A GROWTH RATE IS TESTED BY A RATIO ONLY WHEN THE RATIO IS THAT RATE. A ratio of two
+    # snapshots is a growth multiple only if they are the SAME measure exactly one period
+    # apart; otherwise the division establishes nothing about the rate. Measured: "MRR in
+    # February" over "MRR in October" against a "Month-over-month growth" was decided as if
+    # twelve-fold, so a deck could not be caught overstating its own rate. An INCREMENT over
+    # its BASE is the one exception, because that division IS the rate (`_increment_over_
+    # base`): refusing it printed a false "could not test" against a real, correct check.
+    # The same refusal shape as the within-year guard above -- refuse the BINDING, keep the
+    # relation, and record the untested claim rather than suppressing it into silence.
+    if (
+        r.operator == "ratio"
+        and len(real) == 2
+        and exp_id
+        and (exp := by_id.get(str(exp_id))) is not None
+        and exp.unit_kind == PERCENT
+        and _GROWTH_CLAIM.search(f"{exp.label or ''} {exp.raw or ''}")
+        and not _ratio_can_test_growth(real, exp)
+    ):
+        r.reasons.append(
+            f"{exp.raw} is a growth rate per {_growth_period(exp) or 'period'}, and these two "
+            "figures are not the same measure dated exactly one period apart — a ratio of them "
+            "cannot test it, so nothing is established"
+        )
+        r.untested_claim = f"{exp.raw}{f' ({exp.label})' if exp.label else ''}"
+        r.untested_kind = "not_one_period"
         exp_id = None
     if r.operator == "inverse_change":
         # THE DECLARED DIRECTION MUST AGREE WITH THE DECK'S OWN WORDING, on both sides: the
@@ -2356,6 +2701,11 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
                 return r
             dur_scale, dur_unit = c_unit[1] / e_unit[1], e_unit[0]
             comparable = r.computed * dur_scale
+        elif r.operator == "compound_growth" and cu == PERCENT and exp.unit_kind == PERCENT:
+            # The rate is already in the stated figure's period -- `periods` and the stated
+            # basis agree by construction -- so the bare percent compares directly. The
+            # `:period` the stated side carries names the rate's basis, not a unit to convert.
+            comparable = r.computed
         elif cu == exp_unit or (cu.startswith(exp.unit_kind) and not exp.period):
             comparable = r.computed
         elif cu == "dimensionless" and exp.unit_kind == PERCENT and _is_reduction(exp):
@@ -2498,7 +2848,7 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
             # always a point, while `ratio` and `increase_by` keep the middle and the stated value
             # they always used. The growth class needs a dimensionless result, which only `ratio`
             # produces, so it keeps the middle.
-            on_intervals = r.operator in ("sum", "difference", "product")
+            on_intervals = r.operator in ("sum", "difference", "product", "compound_growth")
             immaterial = (
                 _immaterial_between(c_lo, c_hi, exp)
                 if on_intervals
@@ -2571,11 +2921,15 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
                 )
         elif _is_rounding_gap(r.operator, relation, exp, c_lo, c_hi, tol_stated):
             r.verdict = "rounding_gap"
+            r.gap_basis = "stated_approximation" if exp.bound == "approximate" else "parts_rounding"
             src = "the deck states" if exp.visible else "the underlying data behind that chart gives"
             r.rendered += (
                 f"  — {src} {_stated(exp)} ({exp.label}), more than its own rounding away but within what "
                 "rounding of the parts allows: check the unrounded parts"
             )
+            if r.gap_basis == "stated_approximation":
+                gap_pct = _rounding_gap_rel(exp, c_lo, c_hi) * 100
+                r.rendered += f' — inside the deck\'s own "≈", but {gap_pct:.0f}% apart'
         else:
             r.verdict = "confirmation"
             # A satisfied bound is not a match. 1,195 against "fewer than 2,000" agrees
@@ -2629,17 +2983,35 @@ The corpus therefore shows no flip at 1%, and this verdict is pinned by syntheti
 """
 
 
+def _rounding_gap_rel(exp: Figure, c_lo: float, c_hi: float) -> float:
+    """The interval gap between the computed and stated sides, as a fraction of the stated magnitude.
+
+    The same quantity `_is_rounding_gap` thresholds on `ROUNDING_GAP_MIN_REL`, exposed so the
+    rendered line names the percentage actually measured rather than one recomputed beside it.
+    """
+    e_lo, e_hi = exp.span()
+    magnitude = max(abs(e_lo), abs(e_hi))
+    if not magnitude:
+        return 0.0
+    return max(e_lo - c_hi, c_lo - e_hi, 0.0) / magnitude
+
+
 def _is_rounding_gap(operator: str, relation: str, exp: Figure, c_lo: float, c_hi: float, tol_stated: float) -> bool:
     """A total the parts reach only through their own rounding, by a gap worth a look.
 
     Sums and differences only (the only operators whose tolerance the parts widen), a plain
-    `equals` claim only, and never a stated side carrying any bound. "$200B+" or a stated floor
-    is satisfied one-sidedly, and testing it two-sided would turn the agreement into a gap; an
-    APPROXIMATE stated total (one marked "~") is excluded too, because the author's "~" already
-    claims more slack than the parts' rounding could explain, so a gap inside it is not a
-    question about rounding.
+    `equals` claim only, and never a stated side carrying a one-sided bound. "$200B+" or any
+    other stated floor or ceiling is satisfied one-sidedly, and testing it two-sided would turn
+    the agreement into a gap.
+
+    An APPROXIMATE stated total (one marked "~" or "≈") DOES qualify. The author's "~" claims
+    more slack than the parts' ordinary rounding -- that is what `APPROX_WIDENING` encodes -- and
+    the argument that it therefore cannot be a rounding question holds only up to `tol_stated`.
+    Inside the stated figure's own "≈" the gap is covered by that approximation and the claim is
+    confirmed; beyond it the gap is exactly what the parts' stacked rounding may or may not
+    explain, so it is a question rather than a match.
     """
-    if operator not in ("sum", "difference") or relation != "equals" or exp.bound is not None:
+    if operator not in ("sum", "difference") or relation != "equals" or exp.bound in ("at_least", "at_most"):
         return False
     e_lo, e_hi = exp.span()
     gap = max(e_lo - c_hi, c_lo - e_hi, 0.0)
@@ -2654,7 +3026,7 @@ def _is_rounding_gap(operator: str, relation: str, exp: Figure, c_lo: float, c_h
     # other side. For two points this is `_immaterial_percent`.
     if gap <= tol_stated or not magnitude or _immaterial_between(c_lo, c_hi, exp) is not None:
         return False
-    return gap / magnitude >= ROUNDING_GAP_MIN_REL
+    return _rounding_gap_rel(exp, c_lo, c_hi) >= ROUNDING_GAP_MIN_REL
 
 
 def select(relations: list[Relation], max_derived: int = 3, max_rounding_gaps: int = 3) -> list[Relation]:
@@ -2710,9 +3082,36 @@ def select(relations: list[Relation], max_derived: int = 3, max_rounding_gaps: i
     # A ROUNDING GAP IS A QUESTION, not a disagreement, so it follows the findings and is
     # capped like the derived readings: `max_rounding_gaps` is a CAP, and 3 is a choice made
     # for the same reason `max_derived` is -- volume is the enemy of the few that count.
-    rounding = sorted((r for r in live if r.verdict == "rounding_gap"), key=_wrongness, reverse=True)
+    #
+    # INSIDE that total, at most two slots go to `stated_approximation` gaps: a gap the deck's
+    # own "~" just fails to cover is a question about that figure, and a run of them would let
+    # one loose stated figure crowd out the part-rounding questions the class exists for. The
+    # two bases are ranked together by `_wrongness`, and slots are filled in that order, so a
+    # worse parts_rounding gap still outranks a milder stated_approximation one.
+    #
+    # A WITHDRAWN gap keeps its slot. `apply_downgrades` sets the verdict to `downgraded` and
+    # leaves `gap_basis` in place, so the ranking below still sees it, still spends a slot on
+    # it, and only then is it dropped from the returned list. Without that a withdrawal would
+    # promote the unreviewed gap below it into view. A withdrawn CONTRADICTION carries no
+    # `gap_basis`, so it never consumes a rounding slot.
+    approx_slots = 2
+    ranked = sorted(
+        (r for r in live if r.verdict == "rounding_gap" or (r.verdict == "downgraded" and r.gap_basis)),
+        key=_wrongness,
+        reverse=True,
+    )
+    rounding: list[Relation] = []
+    approx_shown = 0
+    for r in ranked:
+        if len(rounding) >= max_rounding_gaps:
+            break
+        if r.gap_basis == "stated_approximation":
+            if approx_shown >= approx_slots:
+                continue
+            approx_shown += 1
+        rounding.append(r)
     derived = [r for r in live if r.verdict == "derived" and r.confidence == "high"]
-    return contradictions + rounding[:max_rounding_gaps] + derived[:max_derived]
+    return contradictions + [r for r in rounding if r.verdict != "downgraded"] + derived[:max_derived]
 
 
 DOWNGRADE_CLASSES = {
@@ -3054,6 +3453,18 @@ def build(
     # A statement ALONGSIDE `select()`'s decision, never a way around it — the same shape as
     # the coverage line, which exists because silence reads as "your numbers are fine".
     untested_claims = sorted({rel.untested_claim for rel in computed if rel.untested_claim})
+    # The kind travels BESIDE the unchanged list rather than replacing it, so every reader of
+    # `untested_claims` keeps working. One string can be refused by both guards; the within-year
+    # explanation is the safer one to print in that case, because it is true of at least one
+    # refusal and says only that the comparison could not be made.
+    untested_claim_kinds: dict[str, str] = {}
+    for rel in computed:
+        if not rel.untested_claim:
+            continue
+        kind = rel.untested_kind or "within_year"
+        if untested_claim_kinds.get(rel.untested_claim) == "within_year":
+            continue
+        untested_claim_kinds[rel.untested_claim] = kind
 
     return {
         "status": status,
@@ -3090,6 +3501,7 @@ def build(
                     ("rendered", r.rendered),
                     ("confidence", r.confidence),
                     ("verdict", r.verdict),
+                    ("gap_basis", r.gap_basis),
                     ("expected_id", r.expected_id),
                     ("expected_value", r.expected_value),
                     ("span_lo", r.span_lo),
@@ -3101,6 +3513,7 @@ def build(
         ],
         "suppressed": suppressed,
         "untested_claims": untested_claims,
+        "untested_claim_kinds": untested_claim_kinds,
         "relations_proposed": len(rel_specs),
         # not_needed = nothing to interpret. not_run = contradictions survived and no
         # interpretation pass was supplied, so the founder is seeing the un-reviewed set.

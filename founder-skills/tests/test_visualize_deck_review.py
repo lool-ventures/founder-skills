@@ -1199,6 +1199,27 @@ def test_html_carries_the_same_coverage_counts_as_markdown() -> None:
     assert "not a clean bill of health" in text, "the qualifier never reaches the HTML"
 
 
+def test_html_uses_the_one_period_explanation_for_a_one_period_refusal() -> None:
+    """The HTML and the markdown share one prose source, so the kind must reach this renderer."""
+    recon = {
+        "status": "checked",
+        "figures_total": 4,
+        "figures_verified": 4,
+        "relations_proposed": 1,
+        "relations": [],
+        "suppressed": {},
+        "untested_claims": ["44% (MoM growth)"],
+        "untested_claim_kinds": {"44% (MoM growth)": "not_one_period"},
+        "metadata": {"run_id": "run-test"},
+    }
+    d = _make_artifact_dir({**_all_artifacts(), "reconciliation.json": recon})
+    code, html, err = _run_viz(d)
+    assert code == 0, err
+    text = _visible_text(html)
+    assert "aren't the same measure dated exactly one period apart" in text
+    assert "single year" not in text, "the HTML printed the within-year explanation for a one-period refusal"
+
+
 _SIX_FAILING_IDS = (
     "purpose_clear",
     "headlines_carry_story",

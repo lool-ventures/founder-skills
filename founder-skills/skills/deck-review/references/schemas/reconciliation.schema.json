@@ -167,7 +167,7 @@
             ]
           },
           "operator": {
-            "description": "ratio, product, sum, increase_by, difference, runway (the cash the deck names against its burn plan), inverse_change (the change implied in a reciprocal measure) or implied_base (the whole a stated share implies; a reading only, never compared).",
+            "description": "ratio, product, sum, increase_by, difference, runway (the cash the deck names against its burn plan), inverse_change (the change implied in a reciprocal measure), implied_base (the whole a stated share implies; a reading only, never compared) or compound_growth (a stated per-period growth rate tested against two snapshots `periods` apart).",
             "type": "string"
           },
           "operands": {
@@ -192,7 +192,7 @@
             ]
           },
           "verdict": {
-            "description": "contradiction, exceeds_stated_limit, rounding_gap and derived are the only four that reach a founder. rounding_gap: a sum or difference whose gap to the stated figure exceeds that figure's own rounding (and is at least 1% of it) but not the rounding its parts add. convention_differs, confirmation and restatement are suppressed by select() and appear only in the counts above.",
+            "description": "contradiction, exceeds_stated_limit, rounding_gap and derived are the only four that reach a founder. rounding_gap: a sum or difference whose gap to the stated figure exceeds that figure's own rounding (and is at least 1% of it) but not the rounding its parts add; `gap_basis` says which allowance covers it. convention_differs, confirmation and restatement are suppressed by select() and appear only in the counts above.",
             "type": "string",
             "enum": [
               "contradiction",
@@ -203,6 +203,14 @@
               "downgraded",
               "exceeds_stated_limit",
               "rounding_gap"
+            ]
+          },
+          "gap_basis": {
+            "description": "Why a rounding_gap is one. `stated_approximation`: the stated figure is itself marked approximate (\"~\" / \"≈\") and the parts fall short of it by more than that figure's own approximation covers, but within what the parts' stacked rounding allows. `parts_rounding`: the stated figure is exact and only the parts' rounding covers the gap. Absent on every other verdict.",
+            "type": "string",
+            "enum": [
+              "stated_approximation",
+              "parts_rounding"
             ]
           },
           "expected_id": {
@@ -263,6 +271,17 @@
       "type": "array",
       "items": {
         "type": "string"
+      }
+    },
+    "untested_claim_kinds": {
+      "description": "Why each claim above could not be tested, keyed by the claim string. `within_year`: the two operands sit inside a single year, so they cannot measure a year-over-year rate. `not_one_period`: the operands are not the same measure dated exactly one period apart, so a simple ratio cannot test the stated rate. Optional: an artifact written before this field existed has no key, and renderers must treat every claim as `within_year`.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "string",
+        "enum": [
+          "within_year",
+          "not_one_period"
+        ]
       }
     }
   }

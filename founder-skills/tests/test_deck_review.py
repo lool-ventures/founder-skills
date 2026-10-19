@@ -5674,6 +5674,98 @@ def test_no_untested_claims_adds_no_line() -> None:
     assert "could not check" not in md.lower(), "a deck with nothing untested was told something was"
 
 
+def test_a_within_year_untested_claim_renders_exactly_as_before() -> None:
+    """The original paragraph is still the wording for a within-year refusal."""
+    prose = _load_prose_module()
+    recon = {
+        "untested_claims": ["~4x (YoY Growth multiple)"],
+        "untested_claim_kinds": {"~4x (YoY Growth multiple)": "within_year"},
+    }
+    assert prose.untested_claims_line(recon, str) == (
+        "One thing this review could not check. Your deck states ~4x (YoY Growth multiple), "
+        "and the figures needed to test that claim are not both on the deck — a growth rate "
+        "needs two points in time, and the ones here sit inside a single year. So this claim is "
+        "neither confirmed nor disputed below. If an investor asks, that is the number they will "
+        "ask about; adding the earlier figure makes it checkable.\n"
+    )
+
+
+def test_a_missing_kind_map_renders_as_within_year() -> None:
+    """Older artifacts carry no kind map; they must render as they always did."""
+    prose = _load_prose_module()
+    without_key = {"untested_claims": ["~4x (YoY Growth multiple)"]}
+    explicit = {
+        "untested_claims": ["~4x (YoY Growth multiple)"],
+        "untested_claim_kinds": {"~4x (YoY Growth multiple)": "within_year"},
+    }
+    assert prose.untested_claims_line(without_key, str) == prose.untested_claims_line(explicit, str)
+    assert "single year" in prose.untested_claims_line(without_key, str)
+
+
+def test_a_not_one_period_claim_renders_its_own_true_explanation() -> None:
+    """The within-year sentences are FALSE for an N4 refusal: the operands may span months."""
+    prose = _load_prose_module()
+    line = prose.untested_claims_line(
+        {
+            "untested_claims": ["44% (MoM growth)"],
+            "untested_claim_kinds": {"44% (MoM growth)": "not_one_period"},
+        },
+        str,
+    )
+    assert "aren't the same measure dated exactly one period apart" in line
+    assert "single year" not in line, "the within-year explanation survived into a one-period refusal"
+    assert "can't test that claim" in line
+    assert "So this claim is neither confirmed nor disputed below." in line
+
+
+def test_not_one_period_pluralises_its_subject() -> None:
+    prose = _load_prose_module()
+    line = prose.untested_claims_line(
+        {
+            "untested_claims": ["44% (MoM growth)", "40% (YoY revenue growth)"],
+            "untested_claim_kinds": {
+                "44% (MoM growth)": "not_one_period",
+                "40% (YoY revenue growth)": "not_one_period",
+            },
+        },
+        str,
+    )
+    assert "can't test those claims" in line
+    assert "So these claims are neither confirmed nor disputed below." in line
+    assert "single year" not in line
+
+
+def test_mixed_kinds_print_both_explanations_in_one_paragraph() -> None:
+    prose = _load_prose_module()
+    line = prose.untested_claims_line(
+        {
+            "untested_claims": ["44% (MoM growth)", "~4x (YoY Growth multiple)"],
+            "untested_claim_kinds": {
+                "44% (MoM growth)": "not_one_period",
+                "~4x (YoY Growth multiple)": "within_year",
+            },
+        },
+        str,
+    )
+    assert "single year" in line, "the within-year explanation is missing"
+    assert "aren't the same measure dated exactly one period apart" in line, "the one-period explanation is missing"
+    assert line.count("One thing this review could not check.") == 1, "the lead must appear once"
+    assert line.endswith("\n") and "\n\n" not in line, "the two explanations must stay one paragraph"
+
+
+def test_compose_prints_the_true_explanation_for_a_one_period_refusal() -> None:
+    md = _compose_md(
+        {
+            "reconciliation.json": _recon_artifact(
+                untested_claims=["44% (MoM growth)"],
+                untested_claim_kinds={"44% (MoM growth)": "not_one_period"},
+            ),
+        }
+    )
+    assert "aren't the same measure dated exactly one period apart" in md
+    assert "single year" not in md, "compose printed the within-year explanation for a one-period refusal"
+
+
 def test_deck_inventory_treats_null_on_optional_string_fields_as_absence(tmp_path: Path) -> None:
     """`null` on an optional bare-`"string"` field must normalise away, not fail the producer.
 

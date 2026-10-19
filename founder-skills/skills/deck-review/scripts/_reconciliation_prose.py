@@ -240,6 +240,35 @@ def coverage_line(
     return ", ".join(bits) + tail
 
 
+def _within_year_explanation(listed: str, plural: str, escape: Callable[[str], str]) -> str:
+    """The original paragraph's body, byte-for-byte, minus its emphasised lead."""
+    return (
+        f"Your deck states {escape(listed)}, and the figures needed to test that {plural} are not "
+        f"both on the deck — a growth rate needs two points in time, and the ones here sit inside "
+        f"a single year. So this {plural} is neither confirmed nor disputed below. If an investor "
+        f"asks, that is the number they will ask about; adding the earlier figure makes it checkable."
+    )
+
+
+def _not_one_period_explanation(listed: str, plural: str, escape: Callable[[str], str]) -> str:
+    """For a refusal whose real reason is that the two figures are not one period apart.
+
+    Reusing the within-year sentences here would be FALSE: the operands may sit years apart,
+    or span a quarter against a year. What is missing is the correspondence of measure and
+    period, not a second point in time.
+    """
+    if plural == "claims":
+        tested, subject = "those claims", "these claims are"
+    else:
+        tested, subject = "that claim", "this claim is"
+    return (
+        f"Your deck states {escape(listed)}, but the two figures it would be checked against "
+        f"aren't the same measure dated exactly one period apart, so a simple ratio of them "
+        f"can't test {tested}. So {subject} neither confirmed nor disputed below. Printing the "
+        f"figure for each period, or the date of each figure, makes it checkable."
+    )
+
+
 def untested_claims_line(
     reconciliation: dict[str, Any],
     emphasis: Callable[[str], str],
@@ -266,16 +295,29 @@ def untested_claims_line(
     the one place that must not have them. Both cases are therefore the same case -- the
     figures needed are not both on the deck in a usable form -- and a vaguer true sentence
     beats a precise invented one.
+
+    ONE EXPLANATION PER KIND. The within-year guard and the N4 growth guard refuse for
+    different reasons, and the within-year sentences are false of an N4 refusal. The kind map
+    travels beside the unchanged claim list; a missing map or a missing entry falls back to
+    "within_year", so artifacts written before the map existed render exactly as before.
     """
     claims = [str(c) for c in _as_list(reconciliation.get("untested_claims")) if str(c).strip()]
     if not claims:
         return ""
-    listed = "; ".join(claims)
-    plural = "claims" if len(claims) > 1 else "claim"
-    return (
-        f"{emphasis('One thing this review could not check.')} Your deck states {escape(listed)}, and the figures "
-        f"needed to test that {plural} are not both on the deck — a growth rate needs two points "
-        f"in time, and the ones here sit inside a single year. So this {plural} is neither "
-        f"confirmed nor disputed below. If an investor asks, that is the number they will ask "
-        f"about; adding the earlier figure makes it checkable.\n"
-    )
+    raw_kinds = reconciliation.get("untested_claim_kinds")
+    kinds = raw_kinds if isinstance(raw_kinds, dict) else {}
+    within_year: list[str] = []
+    not_one_period: list[str] = []
+    for claim in claims:
+        if kinds.get(claim) == "not_one_period":
+            not_one_period.append(claim)
+        else:
+            within_year.append(claim)
+    parts: list[str] = []
+    if within_year:
+        plural = "claims" if len(within_year) > 1 else "claim"
+        parts.append(_within_year_explanation("; ".join(within_year), plural, escape))
+    if not_one_period:
+        plural = "claims" if len(not_one_period) > 1 else "claim"
+        parts.append(_not_one_period_explanation("; ".join(not_one_period), plural, escape))
+    return f"{emphasis('One thing this review could not check.')} " + " ".join(parts) + "\n"

@@ -1011,6 +1011,12 @@ def test_a_rounding_gap_reaches_the_founder_and_owes_a_review() -> None:
     assert out["interpretation"]["contradictions_before"] == 0
 
 
+def test_a_rounding_gap_names_the_allowance_that_covers_it() -> None:
+    rc, out, err = _run_gap(None)
+    assert rc == 0, err
+    assert out["relations"][0]["gap_basis"] == "parts_rounding"
+
+
 def test_a_rounding_gap_can_be_withdrawn_as_a_partial_enumeration() -> None:
     withdrawal = {
         "operator": "sum",

@@ -29,6 +29,7 @@ from reconcile import (  # type: ignore[import-not-found]  # noqa: E402
     Figure,
     Relation,
     _is_exact_count,
+    _is_rounding_gap,
     _raw_scale,
     _scale_divergent,
     _stated,
@@ -426,16 +427,24 @@ def test_unrelated_figures_sharing_a_label_are_not_fused() -> None:
 # --------------------------------------------------------------------------
 
 
-def _cmp(op: str, ops: list[str], exp: str | None, by: dict[str, Figure]) -> Relation:
-    return compute({"operator": op, "operands": ops, "kind": "contradiction", "expected_id": exp}, by)
+def _cmp(op: str, ops: list[str], exp: str | None, by: dict[str, Figure], periods: int | None = None) -> Relation:
+    spec: dict[str, Any] = {"operator": op, "operands": ops, "kind": "contradiction", "expected_id": exp}
+    if periods is not None:
+        spec["periods"] = periods
+    return compute(spec, by)
 
 
 def test_growth_convention_is_not_a_contradiction() -> None:
     """A deck saying ARR "grew 22%" and a tool computing the multiple (122%) differ by
-    exactly 100 points and by nothing else. Measured three times in one corpus."""
-    a = fig("$19m", 19_000_000, "money", id="f1")
-    b = fig("15,571", 15_571_000, "money", id="f2")
-    e = fig("22%", 22, "percent", label="ARR growth rate", id="f3")
+    exactly 100 points and by nothing else. Measured three times in one corpus.
+
+    The operands are labelled as the same measure one year apart so the comparison is one
+    the engine can make: under N4 a ratio of undated figures against a growth rate is
+    refused outright, and this test's subject is the convention, not that refusal.
+    """
+    a = fig("$19m", 19_000_000, "money", label="ARR FY2024", id="f1")
+    b = fig("15,571", 15_571_000, "money", label="ARR FY2025", id="f2")
+    e = fig("22%", 22, "percent", label="ARR growth rate", id="f3", period="year")
     r = _cmp("ratio", ["f1", "f2"], "f3", {"f1": a, "f2": b, "f3": e})
     assert r.verdict == "convention_differs", r.rendered
     assert "growth" in " ".join(r.reasons)
@@ -1384,6 +1393,10 @@ def test_a_yoy_claim_is_refused_when_both_operands_sit_inside_one_year() -> None
     assert any("year-over-year" in x.lower() and "inside one year" in x.lower() for x in r.reasons), (
         f"the refusal must say WHY, or a reader cannot tell it from a unit mismatch: {r.reasons}"
     )
+    assert r.untested_kind == "within_year", (
+        "the renderer needs to know this refusal is about two points inside one year, not about "
+        f"the operands failing to be one period apart: {r.untested_kind!r}"
+    )
 
 
 def test_a_genuine_same_period_contradiction_still_fires() -> None:
@@ -1471,6 +1484,396 @@ def test_a_three_operand_relation_is_not_time_checked() -> None:
         {"f1": a, "f2": b, "f3": c, "e": exp},
     )
     assert r.expected_id == "e", "a three-operand sum was time-checked as if it were a two-point rate"
+
+
+# ---------------------------------------------------------------------------
+# N4 — a label "over" is a time preposition unless a quantity follows it, and a stated
+# growth rate is tested only by a ratio that actually spans one period.
+#
+# Two linked defects. `_AT_LEAST_WORDS` searched the whole label, so "Month-over-month
+# growth" made a stated rate a FLOOR: every relation above it read as "consistent", and a
+# deck could understate its own growth unchecked. And a ratio of any two snapshots was
+# compared against any growth-worded percent, so "MRR in February" over "MRR in October" was
+# decided as if it were a month-over-month rate when it is not one.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "label",
+    [
+        "Month-over-month growth",
+        "MoM growth",
+        "year over year growth",
+        "CAGR over 5 years",
+        "Revenue growth over 2024",
+        "Churn over last 12 months",
+        "Growth over the period",
+    ],
+)
+def test_a_label_over_is_not_a_floor_without_a_quantity(label: str) -> None:
+    """A label "over" places the figure in time here; it does not bound it."""
+    assert detect_bound("44%", label) is None
+
+
+def test_a_label_over_before_a_quantity_is_still_a_floor() -> None:
+    assert detect_bound("120", "customers (over)") == "at_least"
+    assert detect_bound("120", "customers over 100") == "at_least"
+
+
+def _growth_ratio(
+    numerator: tuple[str, float, str, str],
+    denominator: tuple[str, float, str, str],
+    stated: tuple[str, float, str, str | None],
+    num_period: str | None = None,
+    den_period: str | None = None,
+) -> Relation:
+    num = fig(numerator[0], numerator[1], numerator[2], label=numerator[3], id="num", period=num_period)
+    den = fig(denominator[0], denominator[1], denominator[2], label=denominator[3], id="den", period=den_period)
+    exp = fig(stated[0], stated[1], "percent", label=stated[2], id="e", period=stated[3])
+    return _cmp("ratio", ["num", "den"], "e", {"num": num, "den": den, "e": exp})
+
+
+def _assert_binding_refused(r: Relation) -> None:
+    assert r.expected_id is None, f"the binding was kept: {r.expected_id}"
+    assert r.untested_claim, "the refused claim must be recorded, not silently suppressed"
+    assert r.verdict not in ("contradiction", "confirmation"), f"a refused binding still reached {r.verdict!r}"
+
+
+_GROWTH_GUARD_NON_CASES = [
+    (
+        ("$9K", 9_000.0, "money", "Net revenue"),
+        ("$90K", 90_000.0, "money", "GMV"),
+        ("20%", 20.0, "Take rate", "month"),
+    ),
+    (
+        ("2", 2.0, "count", "Churned customers"),
+        ("400", 400.0, "count", "Customers"),
+        ("8%", 8.0, "Monthly churn", None),
+    ),
+    (
+        ("$10M", 10_000_000.0, "money", "Gross profit FY2025"),
+        ("$100M", 100_000_000.0, "money", "Revenue FY2025"),
+        ("50%", 50.0, "Gross margin", "year"),
+    ),
+]
+
+
+@pytest.mark.parametrize(("numerator", "denominator", "stated"), _GROWTH_GUARD_NON_CASES)
+def test_a_non_growth_percent_is_still_compared(
+    numerator: tuple[str, float, str, str],
+    denominator: tuple[str, float, str, str],
+    stated: tuple[str, float, str, str | None],
+) -> None:
+    """A take rate, a churn rate and a margin are rates, not GROWTH claims -- the guard keys
+    on the stated figure's own words, so each of these still disagrees as it did before."""
+    r = _growth_ratio(numerator, denominator, stated)
+    assert r.verdict == "contradiction", (r.verdict, r.reasons)
+    assert not r.untested_claim
+
+
+def test_a_yoy_ratio_one_year_apart_is_tested_against_the_stated_rate() -> None:
+    numerator = ("$2.0M", 2_000_000.0, "money", "Revenue FY2025")
+    denominator = ("$1.0M", 1_000_000.0, "money", "Revenue FY2024")
+    assert _growth_ratio(numerator, denominator, ("40%", 40.0, "YoY revenue growth", "year")).verdict == "contradiction"
+    assert (
+        _growth_ratio(numerator, denominator, ("100%", 100.0, "YoY revenue growth", "year")).verdict
+        == "convention_differs"
+    )
+
+
+def test_a_qoq_ratio_one_quarter_apart_is_tested() -> None:
+    numerator = ("$1.2M", 1_200_000.0, "money", "Revenue Q2 2025")
+    denominator = ("$1.0M", 1_000_000.0, "money", "Revenue Q1 2025")
+    r = _growth_ratio(numerator, denominator, ("20%", 20.0, "QoQ growth", "quarter"))
+    assert r.expected_id == "e"
+    assert r.computed is not None
+
+
+_MRR_IN_MONTHS = (
+    ("$10K", 10_000.0, "money", "MRR in February"),
+    ("$186K", 186_000.0, "money", "MRR in October"),
+)
+
+
+@pytest.mark.parametrize("stated_raw", ["5%", "44%", "900%"])
+def test_a_mom_ratio_of_undated_months_is_refused_at_any_stated_rate(stated_raw: str) -> None:
+    value = float(stated_raw.rstrip("%"))
+    r = _growth_ratio(*_MRR_IN_MONTHS, (stated_raw, value, "Month-over-month growth", "month"))
+    _assert_binding_refused(r)
+    assert r.untested_claim.startswith(stated_raw)
+    assert r.untested_kind == "not_one_period", (
+        "the operands are two undated months, not two points inside one year; the renderer must "
+        f"not print the within-year explanation for this refusal: {r.untested_kind!r}"
+    )
+
+
+@pytest.mark.parametrize("stated_raw", ["5%", "44%", "900%"])
+def test_a_monthly_growth_label_is_refused_on_the_same_undated_pair(stated_raw: str) -> None:
+    value = float(stated_raw.rstrip("%"))
+    r = _growth_ratio(*_MRR_IN_MONTHS, (stated_raw, value, "Monthly growth", None))
+    _assert_binding_refused(r)
+
+
+def test_a_mom_label_with_no_period_is_still_refused() -> None:
+    r = _growth_ratio(*_MRR_IN_MONTHS, ("44%", 44.0, "MoM", None))
+    _assert_binding_refused(r)
+
+
+def test_labels_that_only_differ_by_deixis_are_still_refused_without_dates() -> None:
+    r = _growth_ratio(
+        ("$1M", 1_000_000.0, "money", "Starting ARR"),
+        ("$3M", 3_000_000.0, "money", "Current ARR"),
+        ("44%", 44.0, "MoM growth", "month"),
+    )
+    _assert_binding_refused(r)
+
+
+def test_different_measures_against_a_growth_rate_are_refused() -> None:
+    r = _growth_ratio(
+        ("$100K", 100_000.0, "money", "Net revenue"),
+        ("400", 400.0, "count", "Customers"),
+        ("20%", 20.0, "Revenue growth", "month"),
+    )
+    _assert_binding_refused(r)
+
+
+def test_a_quarter_against_a_year_is_not_one_period() -> None:
+    r = _growth_ratio(
+        ("$1M", 1_000_000.0, "money", "Revenue Q1 2025"),
+        ("$4M", 4_000_000.0, "money", "Revenue 2025"),
+        ("25%", 25.0, "YoY growth", "year"),
+    )
+    _assert_binding_refused(r)
+
+
+def test_an_fy_year_against_a_calendar_year_is_not_one_period() -> None:
+    r = _growth_ratio(
+        ("$4M", 4_000_000.0, "money", "Revenue FY2025"),
+        ("$3M", 3_000_000.0, "money", "Revenue 2024"),
+        ("33%", 33.0, "YoY growth", "year"),
+    )
+    _assert_binding_refused(r)
+
+
+def test_a_half_year_is_undecidable_and_refused() -> None:
+    r = _growth_ratio(
+        ("$2M", 2_000_000.0, "money", "Revenue H2 2025"),
+        ("$1M", 1_000_000.0, "money", "Revenue H1 2025"),
+        ("100%", 100.0, "Growth", "year"),
+    )
+    _assert_binding_refused(r)
+
+
+def test_a_six_month_step_is_not_a_mom_rate() -> None:
+    r = _growth_ratio(
+        ("$100K", 100_000.0, "money", "MRR March 2025"),
+        ("$150K", 150_000.0, "money", "MRR September 2025"),
+        ("44%", 44.0, "MoM growth", "month"),
+    )
+    _assert_binding_refused(r)
+
+
+def test_a_month_over_month_ratio_one_month_apart_is_tested() -> None:
+    r = _growth_ratio(
+        ("$100K", 100_000.0, "money", "MRR Sept 2025"),
+        ("$90K", 90_000.0, "money", "MRR Aug 2025"),
+        ("44%", 44.0, "MoM growth", "month"),
+    )
+    assert r.expected_id == "e"
+    assert r.computed is not None
+
+
+# AN INCREMENT OVER ITS BASE IS THE GROWTH RATE ITSELF. Synthetic: "New subscription ARR
+# added year on year, FY2025" of $3M over "Subscription ARR, FY2024" of $12M is 25% -- a
+# correct test of a stated 25%. The same-measure guard saw two different labels and refused
+# it, printing a false "could not test" line; the labels differ only by the change words that
+# make the numerator an increment.
+_INCREMENT_OVER_BASE = (
+    ("$3M", 3_000_000.0, "money", "New subscription ARR added year on year, FY2025"),
+    ("$12M", 12_000_000.0, "money", "Subscription ARR, FY2024"),
+)
+
+
+def test_an_increment_over_its_base_keeps_the_growth_binding() -> None:
+    r = _growth_ratio(
+        *_INCREMENT_OVER_BASE,
+        ("25%", 25.0, "Subscription ARR growth year on year, FY2025", "year"),
+        num_period="year",
+    )
+    assert r.expected_id == "e", (r.verdict, r.reasons)
+    assert not r.untested_claim
+    assert r.verdict == "confirmation", (r.verdict, r.rendered, r.reasons)
+
+
+def test_an_increment_over_its_base_contradicts_a_wrong_rate() -> None:
+    r = _growth_ratio(
+        *_INCREMENT_OVER_BASE,
+        ("50%", 50.0, "Subscription ARR growth year on year, FY2025", "year"),
+        num_period="year",
+    )
+    assert r.expected_id == "e", (r.verdict, r.reasons)
+    assert not r.untested_claim
+    assert r.verdict == "contradiction", (r.verdict, r.rendered, r.reasons)
+
+
+def test_a_six_month_increment_against_a_mom_rate_is_refused() -> None:
+    """The increment exception is only for a change spanning ONE period of the stated rate:
+    "Net new ARR, March to September" is six months of growth, and dividing it by its base
+    cannot be tested against a monthly rate."""
+    r = _growth_ratio(
+        ("$70K", 70_000.0, "money", "Net new ARR, March to September"),
+        ("$100K", 100_000.0, "money", "ARR"),
+        ("44%", 44.0, "MoM growth", "month"),
+    )
+    _assert_binding_refused(r)
+
+
+def test_a_year_increment_against_a_mom_rate_is_refused() -> None:
+    """An increment declared to span a year and a monthly rate quote spans of different
+    length, so the binding is refused rather than comparing a 12-month change with a
+    one-month rate."""
+    r = _growth_ratio(
+        ("$70K", 70_000.0, "money", "Net new ARR, March to September"),
+        ("$100K", 100_000.0, "money", "ARR"),
+        ("44%", 44.0, "MoM growth", "month"),
+        num_period="year",
+    )
+    _assert_binding_refused(r)
+
+
+def test_an_increment_over_a_different_measure_is_still_refused() -> None:
+    """The exception is only for an increment of the SAME measure: "Net revenue" over
+    "Customers" names two different quantities and stays refused."""
+    r = _growth_ratio(
+        ("$100K", 100_000.0, "money", "Net new revenue"),
+        ("400", 400.0, "count", "Customers"),
+        ("20%", 20.0, "Revenue growth", "month"),
+    )
+    _assert_binding_refused(r)
+
+
+def test_two_snapshots_are_still_tested_by_same_measure_not_a_subset() -> None:
+    """A change word on the numerator alone does not loosen the two-snapshot case:
+    "Current ARR" is not an increment of "Starting ARR", so the binding stays refused."""
+    r = _growth_ratio(
+        ("$3M", 3_000_000.0, "money", "Current ARR"),
+        ("$1M", 1_000_000.0, "money", "Starting ARR"),
+        ("44%", 44.0, "MoM growth", "month"),
+    )
+    _assert_binding_refused(r)
+
+
+# ---------------------------------------------------------------------------
+# compound_growth — a stated per-period growth rate tested against two snapshots
+# `periods` apart. A ratio can test a growth rate only one period apart; declaring the
+# number of periods is what lets two snapshots eight months apart measure a monthly rate.
+# ---------------------------------------------------------------------------
+
+
+def _compound(start: Figure, end: Figure, exp: Figure, periods: int) -> Relation:
+    return _cmp("compound_growth", [start.id, end.id], exp.id, {start.id: start, end.id: end, exp.id: exp}, periods)
+
+
+def _eight_month_snapshots(start_raw: str, start_value: float) -> tuple[Figure, Figure]:
+    return (
+        fig(start_raw, start_value, "money", label="MRR February 2025", id="f1"),
+        fig("$186K", 186_000, "money", label="MRR October 2025", id="f2"),
+    )
+
+
+def test_a_compound_growth_rate_is_confirmed_against_two_snapshots() -> None:
+    start, end = _eight_month_snapshots("$10K", 10_000)
+    exp = fig("44%", 44, "percent", label="MoM growth", period="month", id="f3")
+    r = _compound(start, end, exp, 8)
+    assert r.verdict == "confirmation", (r.verdict, r.rendered, r.reasons)
+    assert r.span_lo == pytest.approx(43.18, abs=0.05)
+    assert r.span_hi == pytest.approx(45.08, abs=0.05)
+    assert not r.untested_claim, "the ratio-only N4 growth guard must not fire for compound_growth"
+
+
+def test_a_compound_growth_rate_below_a_smaller_stated_one_contradicts() -> None:
+    start, end = _eight_month_snapshots("$10K", 10_000)
+    exp = fig("25%", 25, "percent", label="MoM growth", period="month", id="f3")
+    r = _compound(start, end, exp, 8)
+    assert r.verdict == "contradiction", (r.verdict, r.rendered, r.reasons)
+
+
+def test_a_compound_growth_rate_inside_the_materiality_floor_is_a_convention() -> None:
+    """$10.5K is written to three significant figures, so its interval is narrow: the computed
+    rate's high end falls just short of the stated 44%, and the gap is under the materiality
+    floor, so the two are the same claim under different rounding rather than a disagreement."""
+    start, end = _eight_month_snapshots("$10.5K", 10_500)
+    exp = fig("44%", 44, "percent", label="MoM growth", period="month", id="f3")
+    r = _compound(start, end, exp, 8)
+    assert r.verdict == "convention_differs", (r.verdict, r.rendered, r.reasons)
+    assert "materiality" in " ".join(r.reasons), r.reasons
+
+
+def test_compound_growth_compares_in_percent_space_not_the_growth_convention() -> None:
+    start, end = _eight_month_snapshots("$10K", 10_000)
+    exp = fig("144%", 144, "percent", label="MoM growth", period="month", id="f3")
+    r = _compound(start, end, exp, 8)
+    assert r.computed_unit == "percent"
+    assert r.verdict == "contradiction", (r.verdict, r.rendered, r.reasons)
+    assert not any("growth" in reason for reason in r.reasons), r.reasons
+
+
+def test_compound_growth_refuses_without_exactly_two_operands() -> None:
+    start, end = _eight_month_snapshots("$10K", 10_000)
+    exp = fig("44%", 44, "percent", label="MoM growth", period="month", id="f3")
+    one = _cmp("compound_growth", ["f1"], "f3", {"f1": start, "f3": exp}, periods=8)
+    assert one.dropped and "exactly 2 operands" in one.reasons[0], one.reasons
+    three = _cmp("compound_growth", ["f1", "f2", "f3"], "f3", {"f1": start, "f2": end, "f3": exp}, periods=8)
+    assert three.dropped and "exactly 2 operands" in three.reasons[0], three.reasons
+
+
+def test_compound_growth_refuses_mismatched_or_non_quantity_operands() -> None:
+    start, end = _eight_month_snapshots("$10K", 10_000)
+    count = fig("200", 200, "count", id="c")
+    exp = fig("44%", 44, "percent", label="MoM growth", period="month", id="f3")
+    mismatch = _cmp("compound_growth", ["f1", "c"], "f3", {"f1": start, "c": count, "f3": exp}, periods=8)
+    assert mismatch.dropped and "money or count" in mismatch.reasons[0], mismatch.reasons
+    pct_a = fig("10%", 10, "percent", id="p1")
+    pct_b = fig("20%", 20, "percent", id="p2")
+    non_quantity = _cmp("compound_growth", ["p1", "p2"], "f3", {"p1": pct_a, "p2": pct_b, "f3": exp}, periods=8)
+    assert non_quantity.dropped and "money or count" in non_quantity.reasons[0], non_quantity.reasons
+
+
+def test_compound_growth_refuses_non_positive_snapshots() -> None:
+    zero = fig("$0", 0, "money", label="MRR February 2025", id="f1")
+    end = fig("$186K", 186_000, "money", id="f2")
+    exp = fig("44%", 44, "percent", label="MoM growth", period="month", id="f3")
+    r = _cmp("compound_growth", ["f1", "f2"], "f3", {"f1": zero, "f2": end, "f3": exp}, periods=8)
+    assert r.dropped and "positive" in r.reasons[0], r.reasons
+
+
+def test_compound_growth_refuses_a_bad_period_count() -> None:
+    start, end = _eight_month_snapshots("$10K", 10_000)
+    exp = fig("44%", 44, "percent", label="MoM growth", period="month", id="f3")
+    by = {"f1": start, "f2": end, "f3": exp}
+    for bad in (0, -1, "6", 2.5, True):
+        r = _cmp("compound_growth", ["f1", "f2"], "f3", by, periods=bad)  # type: ignore[arg-type]
+        assert r.dropped and "periods" in r.reasons[0], (bad, r.reasons)
+
+
+def test_compound_growth_refuses_without_an_expected_figure() -> None:
+    start, end = _eight_month_snapshots("$10K", 10_000)
+    r = _cmp("compound_growth", ["f1", "f2"], None, {"f1": start, "f2": end}, periods=8)
+    assert r.dropped and "expected_id" in r.reasons[0], r.reasons
+
+
+def test_compound_growth_refuses_a_non_percent_stated_figure() -> None:
+    start, end = _eight_month_snapshots("$10K", 10_000)
+    exp = fig("$186K", 186_000, "money", label="target ARR", id="f3")
+    r = _cmp("compound_growth", ["f1", "f2"], "f3", {"f1": start, "f2": end, "f3": exp}, periods=8)
+    assert r.dropped and "percent" in r.reasons[0], r.reasons
+
+
+def test_compound_growth_refuses_a_stated_rate_with_no_period() -> None:
+    start, end = _eight_month_snapshots("$10K", 10_000)
+    exp = fig("44%", 44, "percent", label="growth", id="f3")
+    r = _cmp("compound_growth", ["f1", "f2"], "f3", {"f1": start, "f2": end, "f3": exp}, periods=8)
+    assert r.dropped and "period" in r.reasons[0], r.reasons
 
 
 # ---------------------------------------------------------------------------
@@ -1612,6 +2015,10 @@ def test_untested_claims_survive_into_the_artifact_even_though_the_relation_does
         "founder is told their figures line up about a claim that was never checked"
     )
     assert any("4x" in c for c in artifact["untested_claims"]), artifact["untested_claims"]
+    assert artifact["untested_claim_kinds"] == {"~4x (YoY Growth multiple)": "within_year"}, (
+        "the kind must travel beside the unchanged claim list so a renderer can pick the true "
+        f"explanation: {artifact.get('untested_claim_kinds')!r}"
+    )
 
 
 # --------------------------------------------------------------------------
@@ -2569,6 +2976,128 @@ def test_select_orders_findings_then_rounding_gaps_then_readings() -> None:
     shown = select([reading, *gaps, contra])
     assert shown[0] is contra and shown[-1] is reading
     assert [r.operands for r in shown[1:-1]] == [["g4"], ["g3"], ["g2"]], "most wrong first, capped at three"
+
+
+# --------------------------------------------------------------------------
+# A gap the stated figure's own "~" does not cover, but the parts' stacking does.
+# --------------------------------------------------------------------------
+
+_APPROX_PARTS = [
+    ("≈$31B", 31_000_000_000),
+    ("≈$18B", 18_000_000_000),
+    ("≈$7B", 7_000_000_000),
+]
+
+
+def test_an_approximate_total_its_parts_fall_short_of_is_a_rounding_gap() -> None:
+    """The parts sum to $56B against a stated "≈$64B": 12% short, beyond the stated figure's
+    own 10% approximation but inside the 10%-each slack the three approximate parts stack. That
+    was reported as a match while the stated figure being approximate excluded it outright."""
+    r = _total(_APPROX_PARTS, "≈$64B", 64_000_000_000)
+    assert r.verdict == "rounding_gap", (r.rendered, r.reasons)
+    assert r.gap_basis == "stated_approximation"
+    assert r.rendered.endswith('— inside the deck\'s own "≈", but 12% apart'), r.rendered
+
+
+def test_an_approximate_stated_total_is_a_rounding_gap_where_it_used_to_confirm() -> None:
+    """The same input under the old predicate -- which returned False for ANY bound, "~"
+    included -- was not a rounding gap. The gap exceeds the figure's own approximation, so the
+    "~" no longer explains it; admitting it is the whole change."""
+    exp = fig("≈$64B", 64_000_000_000, "money", label="total bookings", id="t")
+    c_lo = c_hi = 56_000_000_000
+    tol_stated = figure_tolerance(exp)
+
+    def old(operator: str, relation: str) -> bool:
+        """The predicate before APPROXIMATE was admitted: every bound excluded it."""
+        if exp.bound is not None:
+            return False
+        return bool(_is_rounding_gap(operator, relation, exp, c_lo, c_hi, tol_stated))
+
+    assert _is_rounding_gap("sum", "equals", exp, c_lo, c_hi, tol_stated) is True
+    assert old("sum", "equals") is False
+
+
+def test_a_gap_inside_the_stated_figures_own_approximation_still_confirms() -> None:
+    """5% short of "≈$64B" is inside that figure's own 10% "~", so nothing is a question."""
+    parts = [("≈$31B", 31_000_000_000), ("≈$18B", 18_000_000_000), ("≈$11.6B", 11_600_000_000)]
+    r = _total(parts, "≈$64B", 64_000_000_000)
+    assert r.verdict == "confirmation", (r.rendered, r.reasons)
+    assert r.gap_basis is None
+
+
+def test_a_difference_falling_short_of_an_approximate_total_is_a_rounding_gap() -> None:
+    """≈$8.0T - ≈$5.3T against a stated "≈$2.0T": 35% apart, within the stacked parts."""
+    x = fig("≈$8.0T", 8_000_000_000_000, "money", label="revenue", id="x")
+    a = fig("≈$5.3T", 5_300_000_000_000, "money", label="costs", id="a")
+    e = fig("≈$2.0T", 2_000_000_000_000, "money", label="profit", id="e")
+    r = compute(
+        {"operator": "difference", "operands": ["x", "a"], "expected_id": "e", "kind": "derived_ratio"},
+        {"x": x, "a": a, "e": e},
+    )
+    assert r.verdict == "rounding_gap", (r.rendered, r.reasons)
+    assert r.gap_basis == "stated_approximation"
+    assert "35% apart" in r.rendered, r.rendered
+
+
+def test_a_bounded_approximate_total_is_still_never_a_rounding_gap() -> None:
+    parts = [("≈$31B", 31_000_000_000), ("≈$18B", 18_000_000_000), ("≈$12.6B", 12_600_000_000)]
+    floor = _total(parts, "~$64B+", 64_000_000_000)
+    ceiling = _total(parts, "≈$64B", 64_000_000_000, relation="at_most")
+    assert floor.verdict == "confirmation", (floor.rendered, floor.reasons)
+    assert floor.gap_basis is None
+    assert ceiling.verdict == "confirmation", (ceiling.rendered, ceiling.reasons)
+    assert ceiling.gap_basis is None
+
+
+def test_a_stated_exact_total_keeps_the_parts_rounding_basis() -> None:
+    """~$100M + ~$100M against an exact $220M: the parts' rounding is the only allowance."""
+    r = _total([("~$100M", 100_000_000), ("~$100M", 100_000_000)], "$220M", 220_000_000)
+    assert r.verdict == "rounding_gap", (r.rendered, r.reasons)
+    assert r.gap_basis == "parts_rounding"
+    assert "inside the deck's own" not in r.rendered
+
+
+def _gap(n: int, basis: str | None, *, downgraded: bool = False) -> Relation:
+    """A rounding gap whose wrongness grows with n, so rank order is n descending."""
+    return Relation(
+        kind="derived_ratio",
+        operands=[f"g{n}"],
+        operator="sum",
+        verdict="downgraded" if downgraded else "rounding_gap",
+        computed=100.0 - n,
+        expected_value=100.0 + n,
+        gap_basis=basis,
+    )
+
+
+def test_select_caps_stated_approximation_gaps_within_the_total() -> None:
+    approx = [_gap(n, "stated_approximation") for n in (10, 9, 8)]
+    parts = [_gap(n, "parts_rounding") for n in (3, 2, 1)]
+    shown = select([*parts, *approx])
+    assert len(shown) == 3
+    assert sum(r.gap_basis == "stated_approximation" for r in shown) == 2
+    assert sum(r.gap_basis == "parts_rounding" for r in shown) == 1
+    assert [r.operands for r in shown] == [["g10"], ["g9"], ["g3"]], "ranked together, approx capped at two"
+
+
+def test_select_shows_at_most_two_stated_approximation_gaps() -> None:
+    shown = select([_gap(n, "stated_approximation") for n in (5, 4, 3)])
+    assert len(shown) == 2
+    assert [r.operands for r in shown] == [["g5"], ["g4"]]
+
+
+def test_a_withdrawn_gap_keeps_its_slot_and_does_not_promote_the_next() -> None:
+    top = _gap(10, "parts_rounding", downgraded=True)
+    others = [_gap(n, "parts_rounding") for n in (9, 8, 7)]
+    shown = select([top, *others])
+    assert [r.operands for r in shown] == [["g9"], ["g8"]], "the withdrawn gap spent a slot; g7 must not appear"
+
+
+def test_a_withdrawn_contradiction_does_not_consume_a_rounding_slot() -> None:
+    contra = Relation(kind="contradiction", operands=["c"], operator="ratio", verdict="downgraded")
+    gaps = [_gap(n, "parts_rounding") for n in (3, 2, 1)]
+    shown = select([contra, *gaps])
+    assert [r.operands for r in shown] == [["g3"], ["g2"], ["g1"]]
 
 
 # --------------------------------------------------------------------------
