@@ -1380,3 +1380,69 @@ def test_a_derived_reading_of_a_range_shows_the_whole_range(operator: str, rows:
         {"kind": "derived_ratio", "operator": operator, "operands": [f.id for f in figures]}, {f.id: f for f in figures}
     )
     assert shown in r.rendered, r.rendered
+
+
+# ---------------------------------------------------------------------------
+# Every proposal is accounted for: shown in `relations`, or counted in `suppressed`.
+# `Relation` is a dataclass, so membership by VALUE conflated a deduped twin with the
+# object `select()` kept — the twin landed in neither list and undercounted the
+# comparison count. Membership is by identity, so the twin is counted.
+# ---------------------------------------------------------------------------
+
+
+def test_a_deduped_twin_is_counted_as_suppressed_not_lost() -> None:
+    """Two proposals of the SAME relation are one comparison kept and one counted suppressed.
+
+    `select()` dedupes on (operator, operands, expected_id) and keeps the first. The twin is a
+    `Relation` dataclass that compares EQUAL to the kept one, so a value-membership test
+    (`rel in selected`) matched the twin to the kept object and counted it in neither
+    `relations` nor `suppressed` — undercounting the checklist's comparison count. The twin was
+    computed and not shown, so `suppressed` is where it belongs.
+    """
+    rc, out, err = _run([_TAKE_RATE_RELATION, _TAKE_RATE_RELATION])
+    assert rc == 0, err
+    assert out["status"] == "checked"
+    assert out["relations_proposed"] == 2
+    assert [r["verdict"] for r in out["relations"]] == ["contradiction"], out["relations"]
+    assert sum(out["suppressed"].values()) == 1, out["suppressed"]
+    assert len(out["relations"]) + sum(out["suppressed"].values()) == out["relations_proposed"]
+
+
+_MIXED_LEDGER = {
+    "figures": [
+        _fig("gross_volume", 388_000, "$388K", "money", "GMV 2024", "GMV of $388K in 2024"),
+        _fig("net_revenue", 6_200, "$6.2K", "money", "net revenue 2024", "net revenue of $6.2K"),
+        _fig("reconciled_rate", 1.6, "1.6%", "percent", "take rate, reconciled", "our take rate is 1.6%"),
+        _fig("stated_rate", 5.4, "5.4%", "percent", "take rate as stated", "our take rate is 5.4%"),
+    ]
+}
+_MIXED_TRANSCRIPT = "Slide 9: GMV of $388K in 2024; net revenue of $6.2K; our take rate is 1.6%; our take rate is 5.4%."
+
+
+def test_the_proposed_count_is_accounted_for_across_relations_and_suppressed() -> None:
+    """A small fixture with mixed verdicts: every proposal is shown or counted, once.
+
+    The deduped twin is deliberately included so the invariant fails under a value-membership
+    test — it is the shape this file's fix exists for. No proposal is dropped at the gate, so
+    `relations_proposed` equals what was computed and the two buckets must exhaust it.
+    """
+    confirmation = {
+        "kind": "derived_ratio",
+        "operator": "ratio",
+        "operands": ["net_revenue", "gross_volume"],
+        "expected_id": "reconciled_rate",
+    }
+    contradiction = {**confirmation, "expected_id": "stated_rate"}
+    derived = {"kind": "derived_ratio", "operator": "ratio", "operands": ["net_revenue", "gross_volume"]}
+    relations = [confirmation, contradiction, derived, dict(confirmation)]
+    rc, out, err = _run(relations, ledger=_MIXED_LEDGER, transcript=_MIXED_TRANSCRIPT, slides=[9])
+    assert rc == 0, err
+    assert out["status"] == "checked"
+    assert out["relations"], "fixture selected nothing"
+    assert out["suppressed"], "fixture suppressed nothing"
+    assert len(out["relations"]) + sum(out["suppressed"].values()) == out["relations_proposed"], (
+        f"proposals are accounted for twice or not at all: {out['relations']} {out['suppressed']} "
+        f"of {out['relations_proposed']}"
+    )
+    verdicts = {r["verdict"] for r in out["relations"]} | set(out["suppressed"])
+    assert len(verdicts) >= 2, f"fixture did not produce mixed verdicts: {out['relations']} {out['suppressed']}"

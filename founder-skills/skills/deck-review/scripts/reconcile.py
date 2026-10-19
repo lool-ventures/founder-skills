@@ -3437,9 +3437,19 @@ def build(
     # Counts, not contents. A suppressed relation must not be reachable from the
     # artifact: `select()` is the one place that decides what a founder sees, and
     # shipping the full list beside it invites a renderer to reach past it.
+    #
+    # MEMBERSHIP BY IDENTITY, NOT VALUE. `Relation` is a dataclass, so `rel in selected`
+    # compares by value -- and when two proposals compute the same relation (same operator,
+    # operands and expected_id), `select()` keeps one and drops the duplicate. The dropped
+    # twin then compares EQUAL to the kept one, so value membership skipped it and it was
+    # counted in neither `relations` nor `suppressed`, undercounting the checklist's
+    # comparison count. `id()` distinguishes the two objects, so a deduped duplicate is
+    # counted in `suppressed` under its own verdict -- correct, because it was computed and
+    # not shown.
+    selected_ids = {id(r) for r in selected}
     suppressed: dict[str, int] = {}
     for rel in computed:
-        if rel in selected:
+        if id(rel) in selected_ids:
             continue
         key = "dropped" if rel.dropped else rel.verdict
         suppressed[key] = suppressed.get(key, 0) + 1
