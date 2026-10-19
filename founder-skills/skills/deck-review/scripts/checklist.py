@@ -726,7 +726,15 @@ def _apply_numeric_scoring(result: dict[str, Any], reconciliation: dict[str, Any
     relations = [_as_dict(r) for r in _as_list(reconciliation.get("relations"))]
     disagree = _rendered([r for r in relations if r.get("verdict") == "contradiction"])
     exceeded = _rendered([r for r in relations if r.get("verdict") == "exceeds_stated_limit"])
-    rounding = _rendered([r for r in relations if r.get("verdict") == "rounding_gap"])
+    rounding_rels = [r for r in relations if r.get("verdict") == "rounding_gap"]
+    rounding = _rendered(rounding_rels)
+    # A gap the deck's own "≈" does not cover is not answered by the parts' rounding, so the fix
+    # asks a different question. Only when EVERY rounding relation is approximation-basis; a
+    # mixed or parts-only set keeps the parts wording. Reading the basis is the same fallback the
+    # renderers use: a relation written before the field existed counts as parts_rounding.
+    all_approximate = bool(rounding_rels) and all(
+        str(r.get("gap_basis") or "parts_rounding") == "stated_approximation" for r in rounding_rels
+    )
     comparisons = count_comparisons(reconciliation)
 
     notes: str | None = None
@@ -766,15 +774,24 @@ def _apply_numeric_scoring(result: dict[str, Any], reconciliation: dict[str, Any
     elif rounding:
         status = "warn"
         evidence = "Scored from the arithmetic: " + "; ".join(rounding) + "."
-        notes = (
-            "Check these totals against the unrounded parts and print figures that add up: " + "; ".join(rounding) + "."
-        )
+        if all_approximate:
+            notes = (
+                "Check these totals against their parts and print figures that agree, or say which "
+                "one the deck means: " + "; ".join(rounding) + "."
+            )
+        else:
+            notes = (
+                "Check these totals against the unrounded parts and print figures that add up: "
+                + "; ".join(rounding)
+                + "."
+            )
     else:
         status = "pass"
         plural = "comparison" if comparisons == 1 else "comparisons"
         evidence = (
             f"Scored from the arithmetic: {comparisons} {plural} between figures the deck states "
-            f"{'was' if comparisons == 1 else 'were'} computed, and none disagrees." + _untested_tail(reconciliation)
+            f"{'was' if comparisons == 1 else 'were'} computed, and none disagrees beyond the "
+            "approximations the deck itself states." + _untested_tail(reconciliation)
         )
 
     item["status"] = status

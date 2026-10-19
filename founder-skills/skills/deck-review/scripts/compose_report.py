@@ -1495,9 +1495,13 @@ def _section_numbers(
         lines.append("")
 
     if rounding:
-        # Heading and lead from the shared prose module, so report.html says the same words.
-        lines.append(f"### {_reconciliation_prose.ROUNDING_GAP_HEADING}\n")
-        lines.append(_reconciliation_prose.ROUNDING_GAP_LEAD + "\n")
+        # Heading and lead from the shared prose module, so report.html says the same words. The
+        # basis decides which words: a gap the deck's own "≈" does not cover is not the same
+        # question as one the parts' rounding could still explain. A relation written before
+        # `gap_basis` existed has none, and counts as parts_rounding.
+        bases = {str(r.get("gap_basis") or "parts_rounding") for r in rounding}
+        lines.append(f"### {_reconciliation_prose.rounding_gap_heading(bases)}\n")
+        lines.append(_reconciliation_prose.rounding_gap_lead(bases) + "\n")
         for rel in rounding:
             rendered = str(rel.get("rendered", "")).strip()
             if rendered:
@@ -1740,8 +1744,15 @@ def numeric_findings(reconciliation: dict[str, Any] | None) -> list[dict[str, st
     for verdict, label in _NUMERIC_FINDING_LABELS:
         for rel in relations:
             line = str(rel.get("rendered", "")).strip()
-            if rel.get("verdict") == verdict and line:
-                out.append({"label": label, "line": line})
+            if rel.get("verdict") != verdict or not line:
+                continue
+            # The rounding-gap heading is per-relation: its basis decides whether the report
+            # said "off by more than their rounding" or "don't quite add up", and the coach
+            # must write the same words the report did.
+            if verdict == "rounding_gap":
+                basis = str(rel.get("gap_basis") or "parts_rounding")
+                label = _reconciliation_prose.rounding_gap_heading({basis})
+            out.append({"label": label, "line": line})
     return out
 
 

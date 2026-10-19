@@ -1192,9 +1192,12 @@ def _numbers_section(reconciliation: dict[str, Any] | None) -> str:
     if contradictions:
         parts.append(f"<h3>Figures that disagree</h3>{_relation_cards(contradictions, 'fail')}")
     if rounding:
+        # Same words as report.md, and the same per-basis choice of words. A relation written
+        # before `gap_basis` existed carries none, and counts as parts_rounding.
+        bases = {str(r.get("gap_basis") or "parts_rounding") for r in rounding}
         parts.append(
-            f"<h3>{_esc(_reconciliation_prose.ROUNDING_GAP_HEADING)}</h3>"
-            f'<p class="dr-lead">{_esc(_reconciliation_prose.ROUNDING_GAP_LEAD)}</p>'
+            f"<h3>{_esc(_reconciliation_prose.rounding_gap_heading(bases))}</h3>"
+            f'<p class="dr-lead">{_esc(_reconciliation_prose.rounding_gap_lead(bases))}</p>'
             f"{_relation_cards(rounding, 'warn')}"
         )
     if derived:

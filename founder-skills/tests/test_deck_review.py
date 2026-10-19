@@ -6671,6 +6671,114 @@ def test_both_renderers_place_rounding_gaps_between_disagreements_and_readings()
         assert positions == sorted(positions), f"{name} orders the numbers sections {positions}"
 
 
+# -- rounding gaps carry a `gap_basis`, and the wording follows it --
+#
+# A parts-rounding gap (the parts' own rounding could still explain it) and a stated-approximation
+# gap (the total is stated with "≈" and the parts' sum still misses it by more) are different
+# questions, so the heading and lead differ. A relation written before `gap_basis` existed carries
+# none and must render as parts_rounding, so those artifacts are unchanged.
+
+_STATED_APPROX_LEAD = (
+    'Each of these totals is further from the sum of its parts than even the deck\'s own "≈" on '
+    "it covers. Check whether the total or the parts are the figure the deck means; they are "
+    "questions, not errors."
+)
+_PARTS_RENDERED = str(_ROUNDING_GAP_RELATION["rendered"])
+_APPROX_RENDERED = _PARTS_RENDERED + ' — inside the deck\'s own "≈", but 2% apart'
+
+
+def _rounding_relation(*, basis: str | None, rendered: str) -> dict:
+    rel = {**_ROUNDING_GAP_RELATION, "rendered": rendered}
+    if basis is None:
+        rel.pop("gap_basis", None)
+    else:
+        rel["gap_basis"] = basis
+    return rel
+
+
+def _reconciliation_with_bases(bases: list[str | None]) -> dict:
+    relations = [
+        _rounding_relation(basis=b, rendered=_APPROX_RENDERED if b == "stated_approximation" else _PARTS_RENDERED)
+        for b in bases
+    ]
+    return {**_VALID_RECONCILIATION, "relations_proposed": len(relations), "relations": relations}
+
+
+def test_a_parts_rounding_gap_renders_the_unchanged_wording_in_both_renderers() -> None:
+    import html as html_mod
+
+    prose = _load_prose_module()
+    assert prose.rounding_gap_heading({"parts_rounding"}) == prose.ROUNDING_GAP_HEADING
+    assert prose.rounding_gap_lead({"parts_rounding"}) == prose.ROUNDING_GAP_LEAD
+    report, d = _compose_from_reconciliation(_reconciliation_with_bases(["parts_rounding"]))
+    md = report["report_markdown"]
+    assert f"### {prose.ROUNDING_GAP_HEADING}\n" in md
+    assert prose.ROUNDING_GAP_LEAD + "\n" in md
+    code, html, err = run_script_raw("visualize.py", ["--dir", d, "--ungated"])
+    assert code == 0, err
+    assert html_mod.unescape(prose.ROUNDING_GAP_HEADING) in html_mod.unescape(html)
+    assert html_mod.unescape(prose.ROUNDING_GAP_LEAD) in html_mod.unescape(html)
+    assert "Totals that don't quite add up" not in md and "Totals that don't quite add up" not in html
+
+
+def test_a_gap_without_a_basis_renders_as_parts_rounding() -> None:
+    prose = _load_prose_module()
+    assert prose.rounding_gap_heading(set()) == prose.ROUNDING_GAP_HEADING
+    assert prose.rounding_gap_lead(set()) == prose.ROUNDING_GAP_LEAD
+    report, d = _compose_from_reconciliation(_reconciliation_with_bases([None]))
+    md = report["report_markdown"]
+    assert prose.ROUNDING_GAP_HEADING in md
+    assert prose.ROUNDING_GAP_LEAD in md
+    code, html, err = run_script_raw("visualize.py", ["--dir", d, "--ungated"])
+    assert code == 0, err
+    assert prose.ROUNDING_GAP_HEADING in html
+
+
+def test_a_stated_approximation_gap_gets_the_new_heading_and_lead_in_both_renderers() -> None:
+    import html as html_mod
+
+    prose = _load_prose_module()
+    report, d = _compose_from_reconciliation(_reconciliation_with_bases(["stated_approximation"]))
+    md = report["report_markdown"]
+    code, html, err = run_script_raw("visualize.py", ["--dir", d, "--ungated"])
+    assert code == 0, err
+    heading = prose.rounding_gap_heading({"stated_approximation"})
+    for text in (heading, _STATED_APPROX_LEAD):
+        assert text in md, f"report.md lacks {text!r}"
+        assert html_mod.unescape(text) in html_mod.unescape(html), f"report.html lacks {text!r}"
+    assert prose.ROUNDING_GAP_HEADING not in md, "an approximation gap must not use the parts heading"
+    assert prose.ROUNDING_GAP_LEAD not in md, "an approximation gap must not use the parts lead"
+
+
+def test_a_mixed_rounding_set_gets_the_new_heading_and_a_joined_lead() -> None:
+    import html as html_mod
+
+    prose = _load_prose_module()
+    both = {"parts_rounding", "stated_approximation"}
+    lead = prose.rounding_gap_lead(both)
+    assert "Some of these totals" in lead and "others are further" in lead
+    report, d = _compose_from_reconciliation(_reconciliation_with_bases(["parts_rounding", "stated_approximation"]))
+    md = report["report_markdown"]
+    code, html, err = run_script_raw("visualize.py", ["--dir", d, "--ungated"])
+    assert code == 0, err
+    for text in (prose.rounding_gap_heading(both), lead):
+        assert text in md, f"report.md lacks {text!r}"
+        assert html_mod.unescape(text) in html_mod.unescape(html), f"report.html lacks {text!r}"
+    assert prose.ROUNDING_GAP_HEADING not in md
+
+
+def test_numeric_findings_labels_a_rounding_gap_by_its_basis() -> None:
+    mod = _load_compose_module()
+    prose = _load_prose_module()
+    recon = _reconciliation_with_bases(["parts_rounding", "stated_approximation"])
+    findings = mod.numeric_findings(recon)
+    assert [f["label"] for f in findings] == [
+        prose.ROUNDING_GAP_HEADING,
+        prose.rounding_gap_heading({"stated_approximation"}),
+    ]
+    assert [f["line"] for f in findings] == [_PARTS_RENDERED, _APPROX_RENDERED]
+
+
 # -- numbers_consistent is scored from the arithmetic (`checklist.py --reconciliation`) --
 #
 # Invented figures throughout; none is from a real deck.
@@ -6730,6 +6838,16 @@ _NC_ROUNDING = {
     "confidence": "high",
     "verdict": "rounding_gap",
 }
+# The same gap, but the stated total carries the deck's own "≈" and the parts still miss it.
+_NC_APPROX_ROUNDING = {
+    **_NC_ROUNDING,
+    "rendered": (
+        "$1.47M + $1.38M + $1.21M = $4.06M — the deck states $4.27M (total), more than its own "
+        "rounding away but within what rounding of the parts allows: check the unrounded parts "
+        '— inside the deck\'s own "≈", but 5% apart'
+    ),
+    "gap_basis": "stated_approximation",
+}
 _NC_DERIVED = {
     "kind": "derived_ratio",
     "operator": "ratio",
@@ -6788,7 +6906,10 @@ def test_a_reviewer_fail_is_overridden_to_pass_when_the_arithmetic_found_nothing
     item = _nc_item(out)
     assert item["status"] == "pass"
     assert item["reviewer_status"] == "fail"
-    assert "3 comparisons between figures the deck states were computed, and none disagrees" in item["evidence"]
+    assert (
+        "3 comparisons between figures the deck states were computed, and none disagrees beyond the "
+        "approximations the deck itself states" in item["evidence"]
+    )
     assert "growth of 3x year on year" in item["evidence"], "an untested claim must be named on a pass"
     assert "notes" not in item, "a pass carries no fix"
     assert out is not None and out["summary"]["fail"] == 0
@@ -6882,6 +7003,38 @@ def test_a_rounding_gap_alone_warns(tmp_path: Path) -> None:
     assert item["status"] == "warn"
     assert _load_notes_module().usable_fix(item["notes"])
     assert out is not None and "numbers_consistent" in [w["id"] for w in out["summary"]["warned_items"]]
+
+
+def test_an_approximation_only_gap_asks_for_agreeing_figures_or_the_meant_one(tmp_path: Path) -> None:
+    code, out, err = _nc_score(tmp_path, _nc_recon(relations=[_NC_APPROX_ROUNDING]))
+    assert code == 0, err
+    item = _nc_item(out)
+    assert item["status"] == "warn"
+    assert (
+        "Check these totals against their parts and print figures that agree, or say which one the "
+        "deck means" in item["notes"]
+    )
+    assert "against the unrounded parts and print figures that add up" not in item["notes"], (
+        "an approximation gap is not answered by the parts' rounding"
+    )
+    assert _load_notes_module().usable_fix(item["notes"])
+
+
+def test_a_mixed_rounding_set_keeps_the_parts_wording(tmp_path: Path) -> None:
+    parts = {**_NC_ROUNDING, "gap_basis": "parts_rounding"}
+    code, out, err = _nc_score(tmp_path, _nc_recon(relations=[_NC_APPROX_ROUNDING, parts]))
+    assert code == 0, err
+    item = _nc_item(out)
+    assert item["status"] == "warn"
+    assert "Check these totals against the unrounded parts and print figures that add up" in item["notes"]
+
+
+def test_a_pass_names_the_approximations_the_deck_itself_states(tmp_path: Path) -> None:
+    code, out, err = _nc_score(tmp_path, _nc_recon(suppressed={"confirmation": 1}))
+    assert code == 0, err
+    item = _nc_item(out)
+    assert item["status"] == "pass"
+    assert "none disagrees beyond the approximations the deck itself states" in item["evidence"]
 
 
 def test_a_contradiction_outranks_a_rounding_gap(tmp_path: Path) -> None:

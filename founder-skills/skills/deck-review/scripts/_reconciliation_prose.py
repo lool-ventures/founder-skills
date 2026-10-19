@@ -25,13 +25,59 @@ from typing import Any
 # -- see the note where it gets its own sentence.
 INCONCLUSIVE_SUPPRESSION_CLASSES = ("incomparable", "downgraded")
 
-# The rounding-gap subsection's heading and lead, one copy for both renderers.
+# The rounding-gap subsection's heading and lead, one copy for both renderers. These are the
+# parts-rounding wording: a relation whose gap the parts' own rounding could still explain.
 ROUNDING_GAP_HEADING = "Totals off by more than their rounding"
 ROUNDING_GAP_LEAD = (
     "Each of these totals is further from the sum of its parts than the total's own rounding "
     "explains, though the parts' rounding could still account for it. Check them against the "
     "unrounded figures; they are questions, not errors."
 )
+
+# The basis a reconciliation relation carries for a rounding gap. `select()` writes `gap_basis`
+# for every one; an artifact written before that field existed carries none, and is read as
+# parts_rounding so old artifacts render exactly as they always did.
+_PARTS_ROUNDING = "parts_rounding"
+
+# The gap is INSIDE the deck's own "≈" on the total -- the total is stated as approximate and the
+# parts' sum still misses it by more than that approximation covers -- so the parts' rounding is
+# not the question. Named separately from the constants above, which stay the parts wording.
+_STATED_APPROXIMATION_HEADING = "Totals that don't quite add up"
+_STATED_APPROXIMATION_LEAD = (
+    'Each of these totals is further from the sum of its parts than even the deck\'s own "≈" on '
+    "it covers. Check whether the total or the parts are the figure the deck means; they are "
+    "questions, not errors."
+)
+# Both bases in one subsection: parts-only and approximation-only each get a clause, joined.
+_ROUNDING_GAP_BOTH_LEAD = (
+    "Some of these totals are further from the sum of their parts than the total's own rounding "
+    "explains, though the parts' rounding could still account for it; others are further from it "
+    'than even the deck\'s own "≈" on them covers. Check them against the unrounded figures, or '
+    "whether the total or the parts are the figure the deck means; they are questions, not errors."
+)
+
+
+def rounding_gap_heading(bases: set[str]) -> str:
+    """The rounding-gap subsection heading for the given bases.
+
+    The existing heading when every basis is parts_rounding (or `bases` is empty); the
+    approximation heading otherwise, so a gap the deck's own "≈" does not cover is not filed
+    under wording that says only the parts' rounding is in question.
+    """
+    if not bases or bases <= {_PARTS_ROUNDING}:
+        return ROUNDING_GAP_HEADING
+    return _STATED_APPROXIMATION_HEADING
+
+
+def rounding_gap_lead(bases: set[str]) -> str:
+    """The rounding-gap subsection lead for the given bases, in the founder's terms."""
+    has_approx = bool(bases - {_PARTS_ROUNDING})
+    has_parts = _PARTS_ROUNDING in bases
+    if has_approx and has_parts:
+        return _ROUNDING_GAP_BOTH_LEAD
+    if has_approx:
+        return _STATED_APPROXIMATION_LEAD
+    return ROUNDING_GAP_LEAD
 
 
 def _as_list(value: Any) -> list[Any]:
