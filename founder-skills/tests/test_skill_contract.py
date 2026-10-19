@@ -3904,6 +3904,14 @@ _REJECTING_PAYLOADS: list[tuple[str, str, list[str], str] | tuple[str, str, list
         ["--run-id", "RID", "--ledger", "/nonexistent/ledger.json", "--second-read", "/nonexistent/second.json"],
         '{"relations":[]}',
     ),
+    # deck_text.py writes the canonical deck-text file every later step reads, so a refused deck
+    # must not destroy the prior good transcription. A missing --deck is refused before any read.
+    (
+        "deck-review",
+        "deck_text.py",
+        ["--run-id", "RID", "--deck", "/nonexistent/deck.pdf", "--inventory", "/nonexistent/deck_inventory.json"],
+        "",
+    ),
     # THE GATE THAT AUTHORIZES A REPORT. `emit` wrote gate_state.json and only then checked
     # whether the prose named a different stage, so a refused gate sat on disk and `answer` --
     # which only checks that a file exists -- answered it with `{"ok":true}`. `authorize()`
