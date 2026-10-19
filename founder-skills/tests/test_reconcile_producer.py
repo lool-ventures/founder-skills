@@ -1538,3 +1538,162 @@ def test_no_sha_on_either_side_reconciles_as_before() -> None:
     rc, out, err, _ = _run_metadata()
     assert rc == 0, err
     assert out["status"] == "checked"
+
+
+# ---------------------------------------------------------------------------
+# `--explain`: a maintainer flag that prints every computed relation with its working,
+# selected or not, and writes nothing. It never changes what `build()` returns.
+# ---------------------------------------------------------------------------
+
+
+def _run_explain(
+    relations: list[dict],
+    *,
+    ledger: dict | None = None,
+    transcript: str | None = None,
+    slides: list | None = None,
+    extra: list[str] | None = None,
+) -> tuple[int, dict, str]:
+    with tempfile.TemporaryDirectory() as d:
+        lp = os.path.join(d, "ledger.json")
+        sp = os.path.join(d, "second.json")
+        with open(lp, "w", encoding="utf-8") as f:
+            json.dump(_LEDGER if ledger is None else ledger, f)
+        with open(sp, "w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "transcript": _TRANSCRIPT if transcript is None else transcript,
+                    "slides_transcribed": [6] if slides is None else slides,
+                },
+                f,
+            )
+        args = [sys.executable, SCRIPT, "--ledger", lp, "--second-read", sp, "--run-id", "r1"]
+        args += ["--explain"] if extra is None else extra
+        res = subprocess.run(args, input=json.dumps({"relations": relations}), capture_output=True, text=True)
+    try:
+        parsed = json.loads(res.stdout)
+    except json.JSONDecodeError:
+        parsed = {}
+    return res.returncode, parsed, res.stderr
+
+
+_UNKNOWN_OPERAND = {"kind": "derived_ratio", "operator": "ratio", "operands": ["net_revenue", "no_such_figure"]}
+
+
+def _mixed_relations() -> list[dict]:
+    confirmation = {
+        "kind": "derived_ratio",
+        "operator": "ratio",
+        "operands": ["net_revenue", "gross_volume"],
+        "expected_id": "reconciled_rate",
+    }
+    contradiction = {**confirmation, "expected_id": "stated_rate"}
+    derived = {"kind": "derived_ratio", "operator": "ratio", "operands": ["net_revenue", "gross_volume"]}
+    return [confirmation, contradiction, derived, dict(confirmation), _UNKNOWN_OPERAND]
+
+
+def test_explain_prints_one_row_per_proposal_and_marks_what_select_kept() -> None:
+    relations = _mixed_relations()
+    rc, explained, err = _run_explain(relations, ledger=_MIXED_LEDGER, transcript=_MIXED_TRANSCRIPT, slides=[9])
+    assert rc == 0, err
+    assert explained["status"] == "checked"
+    rows = explained["relations"]
+    assert len(rows) == explained["relations_proposed"] == len(relations)
+    assert [row["index"] for row in rows] == list(range(len(relations)))
+    assert rows[-1]["dropped"] is True, rows[-1]
+    rc, out, err = _run(relations, ledger=_MIXED_LEDGER, transcript=_MIXED_TRANSCRIPT, slides=[9])
+    assert rc == 0, err
+    assert sum(1 for row in rows if row["selected"]) == len(out["relations"])
+
+
+def test_explain_with_an_output_is_refused_and_leaves_the_file_as_it_was(tmp_path: pathlib.Path) -> None:
+    existing = tmp_path / "reconciliation.json"
+    existing.write_bytes(_PRIOR_ARTIFACT)
+    rc, _out, err = _run_explain([_TAKE_RATE_RELATION], extra=["--explain", "-o", str(existing)])
+    assert rc == 1
+    assert "drop -o" in err
+    assert existing.read_bytes() == _PRIOR_ARTIFACT
+
+    absent = tmp_path / "never.json"
+    rc, _out, err = _run_explain([_TAKE_RATE_RELATION], extra=["--explain", "--output", str(absent)])
+    assert rc == 1
+    assert "drop -o" in err
+    assert not absent.exists()
+
+
+def test_explain_cannot_be_combined_with_the_downgrade_stanza(tmp_path: pathlib.Path) -> None:
+    recon = _write(tmp_path, "reconciliation.json", {"relations": []})
+    ledger = _write(tmp_path, "ledger.json", _LEDGER)
+    res = subprocess.run(
+        [sys.executable, SCRIPT, "--explain", "--print-downgrade-stanza", recon, "--ledger", ledger],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode == 1
+    assert "--print-downgrade-stanza" in res.stderr
+    assert json.loads(res.stdout)["validation"]["status"] == "invalid"
+
+
+def test_an_abbreviated_explain_is_not_accepted() -> None:
+    rc, _out, err = _run_explain([_TAKE_RATE_RELATION], extra=["--expl"])
+    assert rc == 2
+    assert "unrecognized arguments: --expl" in err
+
+
+def test_build_returns_what_the_artifact_path_prints() -> None:
+    rec: Any = _reconcile()
+    relations = _mixed_relations()
+    result, error = rec.build(json.loads(json.dumps(_MIXED_LEDGER)), _MIXED_TRANSCRIPT, relations, None, [9], None)
+    assert error is None
+    rc, out, err = _run(relations, ledger=_MIXED_LEDGER, transcript=_MIXED_TRANSCRIPT, slides=[9])
+    assert rc == 0, err
+    printed = {k: v for k, v in out.items() if k not in ("validation", "metadata")}
+    assert json.loads(json.dumps(result)) == printed
+    assert not any(key in rel for rel in printed["relations"] for key in ("tolerance", "gap"))
+
+
+def test_an_operand_that_is_a_merged_range_twin_shows_the_merged_raw() -> None:
+    relations = [
+        {"kind": "derived_ratio", "operator": "ratio", "operands": ["throughput_high", "contracts_before"]},
+        {
+            "kind": "derived_ratio",
+            "operator": "ratio",
+            "operands": ["contracts_after", "contracts_before"],
+            "expected_id": "throughput_high",
+        },
+    ]
+    rc, explained, err = _run_explain(
+        relations, ledger=_SPLIT_RANGE_LEDGER, transcript=_SPLIT_RANGE_TRANSCRIPT, slides=[3]
+    )
+    assert rc == 0, err
+    first, second = explained["relations"]
+    assert first["operands"][0]["id"] == "throughput_low"
+    assert first["operands"][0]["raw"] == "40x-60x"
+    assert second["expected_id"] == "throughput_low"
+    assert second["expected_raw"] == "40x-60x"
+
+
+def test_tolerance_and_gap_are_set_only_where_a_comparison_was_made() -> None:
+    incomparable = {
+        "kind": "derived_ratio",
+        "operator": "ratio",
+        "operands": ["net_revenue", "gross_volume"],
+        "expected_id": "gross_volume",
+    }
+    confirmation = _mixed_relations()[0]
+    rc, explained, err = _run_explain(
+        [incomparable, confirmation], ledger=_MIXED_LEDGER, transcript=_MIXED_TRANSCRIPT, slides=[9]
+    )
+    assert rc == 0, err
+    bad, good = explained["relations"]
+    assert bad["verdict"] == "incomparable", bad
+    assert bad["tolerance"] is None and bad["gap"] is None
+    assert good["verdict"] == "confirmation", good
+    assert good["tolerance"] is not None and good["gap"] is not None
+    assert 0 <= good["gap"] <= good["tolerance"]
+
+
+def test_explain_on_a_deck_with_no_figures_prints_its_status_and_no_rows() -> None:
+    rc, explained, err = _run_explain([], ledger={"figures": []})
+    assert rc == 0, err
+    assert explained == {"status": "no_figures", "relations_proposed": 0, "relations": []}

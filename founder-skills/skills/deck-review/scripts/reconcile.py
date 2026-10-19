@@ -149,6 +149,12 @@ class Relation:
     # into that period's total (`_months_multiplier`). Private: read only by the dated-claim
     # guard in `compute`, never emitted.
     promoted_period: str | None = None
+    # FOR `--explain` ONLY, never written to the artifact. `tolerance` is the `tol` the comparison
+    # used; `gap` is the distance it tested against `tol` in the branch taken, in that branch's
+    # scaled space (0 when the two sides meet; for a one-sided bound only the violating side). Both
+    # stay None on every early return, so a row that compared nothing shows nothing here.
+    tolerance: float | None = None
+    gap: float | None = None
 
 
 # A single-letter suffix must not be the first letter of a WORD. Without this guard
@@ -2918,14 +2924,19 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
         # figure is bounded -- see `_runway` for why it is not one-sided.
         if relation == "at_most":
             disjoint = c_lo > e_hi + tol
+            gap = max(0.0, c_lo - e_hi)
         # A bounded figure gets a ONE-SIDED test. "$200B+" is satisfied by anything at or
         # above it, so a computed $212.3B confirms it rather than contradicting it.
         elif exp.bound == "at_least":
             disjoint = c_hi < e_lo - tol
+            gap = max(0.0, e_lo - c_hi)
         elif exp.bound == "at_most":
             disjoint = c_lo > e_hi + tol
+            gap = max(0.0, c_lo - e_hi)
         else:
             disjoint = c_hi < e_lo - tol or c_lo > e_hi + tol
+            gap = max(0.0, e_lo - c_hi, c_lo - e_hi)
+        r.tolerance, r.gap = tol, gap
         # Render the computed side in the STATED figure's unit. "145.5%" printed beside
         # "20–40×" is arithmetically right and reads as apples to oranges; 1.45x beside
         # 20–40x is the same fact, comparable at a glance.
@@ -3479,6 +3490,93 @@ def build(
     Returns (result, error). Exactly one is None. Kept separate from `main` so the
     offline corpus parity check can call it without a filesystem.
     """
+    result, error, _computed, _selected, _by_id = _build_all(
+        ledger, transcript, rel_specs, inventory, slides_transcribed, downgrades
+    )
+    return result, error
+
+
+def build_explain(
+    ledger: dict[str, Any],
+    transcript: str,
+    rel_specs: list[dict[str, Any]],
+    inventory: dict[str, Any] | None = None,
+    slides_transcribed: list[Any] | None = None,
+    downgrades: list[dict[str, Any]] | None = None,
+) -> tuple[list[dict[str, Any]], str | None, str | None]:
+    """Every computed relation with its working, for a maintainer. Returns (rows, status, error).
+
+    One row per proposal, in stdin order, selected or not -- the one place the suppressed
+    relations are shown, which is why `--explain` prints and writes nothing. `selected` is
+    membership in `select()`'s output by identity, so a row decides nothing `build()` does not.
+    Rows are empty unless the status is `checked`.
+    """
+    result, error, computed, selected, by_id = _build_all(
+        ledger, transcript, rel_specs, inventory, slides_transcribed, downgrades
+    )
+    if error or result is None:
+        return [], None, error or "reconciliation failed"
+    status = str(result["status"])
+    if status != "checked":
+        return [], status, None
+
+    def _operand(fid: str) -> dict[str, Any]:
+        fig = by_id.get(fid)
+        return {
+            "id": fid,
+            "raw": fig.raw if fig else None,
+            "unit_kind": fig.unit_kind if fig else None,
+            "period": fig.period if fig else None,
+        }
+
+    selected_ids = {id(r) for r in selected}
+    rows: list[dict[str, Any]] = []
+    for index, (spec, r) in enumerate(zip(rel_specs, computed, strict=True)):
+        row: dict[str, Any] = {
+            "index": index,
+            "kind": r.kind,
+            "operator": r.operator,
+            "operands": [_operand(o) for o in r.operands],
+        }
+        for key in ("relation", "per", "schedule"):
+            if isinstance(spec, dict) and key in spec:
+                row[key] = spec[key]
+        exp = by_id.get(r.expected_id) if r.expected_id else None
+        row.update(
+            {
+                "dropped": r.dropped,
+                "verdict": r.verdict,
+                "computed": r.computed,
+                "computed_unit": r.computed_unit,
+                "span_lo": r.span_lo,
+                "span_hi": r.span_hi,
+                "expected_id": r.expected_id,
+                "expected_raw": exp.raw if exp else None,
+                "tolerance": r.tolerance,
+                "gap": r.gap,
+                "gap_basis": r.gap_basis,
+                "reasons": list(r.reasons),
+                "untested_claim": r.untested_claim,
+                "selected": id(r) in selected_ids,
+            }
+        )
+        rows.append(row)
+    return rows, status, None
+
+
+def _build_all(
+    ledger: dict[str, Any],
+    transcript: str,
+    rel_specs: list[dict[str, Any]],
+    inventory: dict[str, Any] | None = None,
+    slides_transcribed: list[Any] | None = None,
+    downgrades: list[dict[str, Any]] | None = None,
+) -> tuple[dict[str, Any] | None, str | None, list[Relation], list[Relation], dict[str, Figure]]:
+    """`build()`'s body, also returning what `build_explain` reads.
+
+    Returns (result, error, computed, selected, by_id): every computed relation in proposal
+    order, `select()`'s output, and the figures keyed by id after the range-twin merge.
+    """
     figures = load_figures(ledger)
     # DATE ROWS ARE NOT CHECKABLE FIGURES. Every operator refuses a date participant, so a
     # date can never support or contradict anything -- yet it counted toward
@@ -3511,11 +3609,12 @@ def build(
 
     if len(figures) < MIN_FIGURES:
         if inventory is not None and _inventory_numerals(inventory) >= NUMERAL_REFUSAL_THRESHOLD:
-            return None, (
+            refusal = (
                 f"ledger holds {len(figures)} figure(s) but the deck's own text carries "
                 f">= {NUMERAL_REFUSAL_THRESHOLD} numerals — extract the deck's figures rather "
                 "than reporting that it has none"
             )
+            return None, refusal, [], [], {}
         status = "no_figures"
     elif len(verified) < MIN_FIGURES:
         status = "gate_failed"
@@ -3539,7 +3638,7 @@ def build(
     if downgrades:
         applied, downgrade_errors = apply_downgrades(computed, downgrades)
         if downgrade_errors:
-            return None, "; ".join(downgrade_errors)
+            return None, "; ".join(downgrade_errors), computed, [], by_id
     if reviewable_before == 0:
         interpretation = "not_needed"
     elif downgrades is None:
@@ -3591,7 +3690,7 @@ def build(
             continue
         untested_claim_kinds[rel.untested_claim] = kind
 
-    return {
+    result: dict[str, Any] = {
         "status": status,
         "figures_total": len(figures),
         "figures_verified": len(verified),
@@ -3649,7 +3748,8 @@ def build(
             "contradictions_before": contradictions_before,
             "downgraded": applied,
         },
-    }, None
+    }
+    return result, None, computed, selected, by_id
 
 
 def _read_json(path: str, label: str) -> tuple[dict[str, Any] | None, str | None]:
@@ -3731,6 +3831,10 @@ def _print_downgrade_stanza(recon_path: str, ledger_path: str) -> int:
 def main() -> int:
     import argparse  # noqa: PLC0415
 
+    # By text, before either parser: the pre-pass below ignores flags it does not know, so an
+    # `--explain` beside it would otherwise be dropped in silence.
+    if "--print-downgrade-stanza" in sys.argv and any(a.startswith("--explain") for a in sys.argv[1:]):
+        return _fail("--explain cannot be combined with --print-downgrade-stanza")
     # A PRE-PASS, because this mode reads one artifact pair and writes nothing -- it cannot
     # satisfy --second-read/--run-id, and it must run before the stdin check below.
     if "--print-downgrade-stanza" in sys.argv:
@@ -3740,7 +3844,9 @@ def main() -> int:
         known, _unused = pre.parse_known_args()
         return _print_downgrade_stanza(known.print_downgrade_stanza, known.ledger)
 
-    ap = argparse.ArgumentParser(description="Verify a deck's numeric ledger and reconcile it against itself.")
+    ap = argparse.ArgumentParser(
+        description="Verify a deck's numeric ledger and reconcile it against itself.", allow_abbrev=False
+    )
     ap.add_argument("--ledger", required=True, help="ledger.json from LEDGER_EXTRACTION")
     ap.add_argument("--second-read", required=True, help="second_read.json — the second-read transcript")
     ap.add_argument("--inventory", help="deck_inventory.json; enables the no_figures refusal")
@@ -3751,7 +3857,14 @@ def main() -> int:
     ap.add_argument("--run-id", required=True)
     ap.add_argument("-o", "--output")
     ap.add_argument("--pretty", action="store_true")
+    ap.add_argument(
+        "--explain",
+        action="store_true",
+        help="maintainer tool: print every computed relation with its working, selected or not; writes nothing",
+    )
     args = ap.parse_args()
+    if args.explain and args.output:
+        return _fail("--explain prints and writes nothing; drop -o")
     # FIRST: an output naming one of this step's own input files is refused before anything is written.
     import _out_guard
 
@@ -3829,6 +3942,13 @@ def main() -> int:
             return _fail("'downgrades' must be an array")
 
     assert ledger is not None
+    if args.explain:
+        rows, status, err = build_explain(ledger, transcript, rel_specs, inventory, slides_transcribed, downgrades)
+        if err:
+            return _fail(err)
+        explained = {"status": status, "relations_proposed": len(rel_specs), "relations": rows}
+        print(json.dumps(explained, indent=2 if args.pretty else None))
+        return 0
     result, err = build(ledger, transcript, rel_specs, inventory, slides_transcribed, downgrades)
     if err or result is None:
         return _fail(err or "reconciliation failed")
