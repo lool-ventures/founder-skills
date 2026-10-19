@@ -333,7 +333,8 @@ def _deck_review_options(workdir: Path, plugin_path: Path) -> Any:
             # Measured on this test, n=1 each way: at the default it aborted after 61
             # messages with `API Error: Stream idle timeout - partial response received`,
             # while composing the SLIDE_REVIEWS dispatch — this skill's largest tool_use
-            # block, since it inlines the whole deck plus the instruction body. With this
+            # block when it inlined the whole deck (it now names the deck-text file) plus the
+            # instruction body. With this
             # value set, the same test ran to completion in 189 messages. One failure and
             # one pass is consistent with the threshold being the cause but does NOT
             # establish it; a transient upstream stall that happened to clear on the retry
@@ -637,6 +638,45 @@ def _drive_deck_review_lane(
     ledger = _artifact("ledger.json")
     if ledger is not None:
         observed["ledger.figures"] = len(ledger.get("figures") or [])
+
+    # 6b''. Every deck-reading step read the one deck text. Its producer wrote deck_text.md, and the three
+    # pipes stamped the same body hash, so no step worked from another version of the text. A stamp says
+    # which file was on disk at pipe time, not what a sub-agent read; the per-dispatch record below shows that.
+    deck_text = review_dir / "deck_text.md"
+    if not deck_text.is_file():
+        failures.append("deck_text.md missing: Step 2's deck_text.py did not run")
+    stamps = {
+        name: ((_artifact(name) or {}).get("metadata") or {}).get("deck_text_sha256")
+        for name in ("ledger.json", "second_read.json", "slide_reviews.json")
+    }
+    observed["deck_text.stamps_equal"] = len(set(stamps.values())) == 1 and None not in stamps.values()
+    if not observed["deck_text.stamps_equal"]:
+        failures.append(f"the deck-text stamps do not all match: {stamps}")
+    # Each dispatch that reads the deck names the file, carries no retyped copy of it (the fixture's first
+    # slide line), and Reads it. RECORDED, NOT GATED in 0.23: these follow the model's behaviour and have
+    # never run live, and a false red is a paid re-run. Promote them to failures once a run shows them green.
+    # With no child call of any tool captured the instrument is blind, recorded apart from the wiring.
+    dispatch_notes: list[str] = []
+    slide_one = next(line.strip() for line in deck_fixture.read_text(encoding="utf-8").splitlines()[1:] if line.strip())
+    child_calls = 0
+    for context in ("LEDGER_EXTRACTION", "SECOND_READ", "SLIDE_REVIEWS"):
+        rows = _dispatch_rows(cap, f"CONTEXT: {context}")
+        if not rows:
+            dispatch_notes.append(f"no {context} dispatch")
+        for row in rows:
+            prompt = str((row.get("input") or {}).get("prompt", ""))
+            child_calls += sum(1 for c in cap.tool_uses if c["parent_tool_use_id"] == row["id"])
+            if "deck_text.md" not in prompt:
+                dispatch_notes.append(f"a {context} dispatch does not name deck_text.md")
+            if slide_one in prompt:
+                dispatch_notes.append(f"a {context} dispatch inlines the deck's text ({slide_one!r})")
+            reads = cap.calls("Read", parent=str(row["id"]))
+            if not any(str((r.get("input") or {}).get("file_path", "")).endswith("deck_text.md") for r in reads):
+                dispatch_notes.append(f"a {context} dispatch never Read deck_text.md")
+    observed["deck_text.dispatch_child_calls"] = child_calls
+    if child_calls == 0:
+        dispatch_notes.append("child calls not captured: no deck-reading dispatch recorded a tool call of its own")
+    observed["deck_text.dispatch_checks"] = dispatch_notes or "pass"
 
     # 6b'. Step 5 graded THIS run's slide reviews. checklist.py -o refuses a grade that does not echo
     # slide_reviews.json's read token and stamps the token it accepted, so the two must agree. A mismatch or

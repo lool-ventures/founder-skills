@@ -667,7 +667,15 @@ def _run_deck_block(
     skill: str, tmp_path: Path, deck_name: str, *, agent_differs: bool, upload: bool = True
 ) -> tuple[str, Path, Path]:
     """Run the skill's conversion block in a fresh shell (no Step 0 variables) with a stand-in converter.
-    Returns (last printed line, hand-off folder, the shell's temp folder)."""
+    Returns (the last printed line that is not deck-review's DECK_TEXT_ARGS, hand-off folder, temp folder)."""
+    lines, handoff, tmp = _run_deck_block_lines(skill, tmp_path, deck_name, agent_differs=agent_differs, upload=upload)
+    return [ln for ln in lines if not ln.startswith("DECK_TEXT_ARGS=")][-1], handoff, tmp
+
+
+def _run_deck_block_lines(
+    skill: str, tmp_path: Path, deck_name: str, *, agent_differs: bool, upload: bool = True
+) -> tuple[list[str], Path, Path]:
+    """The conversion block's printed lines, the hand-off folder and the shell's temp folder."""
     block = _deck_block(skill)
     handoff, tmp, uploads, bin_dir = (tmp_path / d for d in ("handoff", "tmp", "uploads", "bin"))
     for d in (handoff, tmp, uploads, bin_dir):
@@ -696,7 +704,19 @@ def _run_deck_block(
         timeout=60,
     )
     assert proc.returncode == 0, proc.stderr
-    return proc.stdout.strip().splitlines()[-1], handoff, tmp
+    return proc.stdout.strip().splitlines(), handoff, tmp
+
+
+def test_the_deck_text_arguments_are_shell_paths(tmp_path: Path) -> None:
+    """deck_text.py runs in the shell, so its --deck is the converted PDF's shell path (never the Read tool's
+    path the block printed first) and a .pptx adds its own speaker notes; a PDF is read where it was uploaded."""
+    (tmp_path / "pptx").mkdir()
+    lines, handoff, _ = _run_deck_block_lines("deck-review", tmp_path / "pptx", "Acme Deck.pptx", agent_differs=True)
+    uploads = tmp_path / "pptx" / "uploads"
+    assert lines[-1] == f"DECK_TEXT_ARGS=--deck '{handoff}/Acme Deck.pdf' --notes-from '{uploads}/Acme Deck.pptx'"
+    (tmp_path / "pdf").mkdir()
+    lines, _, _ = _run_deck_block_lines("deck-review", tmp_path / "pdf", "acme.pdf", agent_differs=True)
+    assert lines[-1] == f"DECK_TEXT_ARGS=--deck '{tmp_path / 'pdf' / 'uploads'}/acme.pdf'"
 
 
 @pytest.mark.parametrize("skill", ["deck-review", "market-sizing"])

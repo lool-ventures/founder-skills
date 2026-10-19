@@ -7,7 +7,7 @@ so the check catches a quote that was invented or paraphrased. That is the whole
 WHAT IS FALSE, and what this test exists to keep out:
 
   * that the second reader reads the DECK. It does not. `SKILL.md`'s SECOND_READ dispatch
-    inlines the main thread's own extracted text, so both readings descend from one act of
+    hands it the same deck_text.md the ledger agent read, so both readings descend from one act of
     reading. Measured on a live run: 12 of the second read's 13 transcript paragraphs were
     byte-identical substrings of the prompt it was given.
   * that it is a VISION transcription. It is not, and the calibration numbers that were

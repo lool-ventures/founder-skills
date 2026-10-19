@@ -133,7 +133,7 @@ Plugin folder for Reads and prompts (as loaded): `${CLAUDE_PLUGIN_ROOT}` — thi
 
 **Plugin paths.** If Step 0 printed `READ_ROOT=`, this skill's text arrived without its plugin folder filled in. Use that value in place of `${CLAUDE_PLUGIN_ROOT}` in every Read and sub-agent prompt, including where a later step says to leave that path literal. If it did not print `READ_ROOT=`, use the paths as shown. The folder comes from Step 0's filesystem search, not from a skill file or the "Base directory" line, which can name a folder that does not exist. These are setup details: updates to the founder are about their company, not file locations, printed paths or plugin versions.
 
-**Outputs mount is append-only.** Everything under the promoted outputs mount (`.../mnt/outputs/`, not just `$REVIEW_DIR`) is write-allowed; by this skill's rule, not a platform limit, nothing there is deleted, since a removed file may be one the founder or a later step still needs: never `rm`, move away, or empty anything under it — **including files you created yourself** (scripts remove only their own files, e.g. `setup_run.py --clean` its earlier-run checkpoints). Never create ad-hoc scratch anywhere under the outputs mount (no `_src/` copies, no run-state note files); scratch belongs in `$STAGING_DIR` (a `/tmp` dir, defined below). Do not "clean up" the outputs folder before delivering — extra working files there are expected and harmless. One exception: Step 2's block may put the deck (its PDF rendering, or a copy) in this run's hand-off folder, the one place the Read tool reaches it; that is working data, never a deliverable.
+**Outputs mount is append-only.** Everything under the promoted outputs mount (`.../mnt/outputs/`, not just `$REVIEW_DIR`) is write-allowed; by this skill's rule, not a platform limit, nothing there is deleted, since a removed file may be one the founder or a later step still needs: never `rm`, move away, or empty anything under it — **including files you created yourself** (scripts remove only their own files, e.g. `setup_run.py --clean` its earlier-run checkpoints). Never create ad-hoc scratch anywhere under the outputs mount (no `_src/` copies, no run-state note files); scratch belongs in `$STAGING_DIR` (a `/tmp` dir, defined below). Do not "clean up" the outputs folder before delivering — extra working files there are expected and harmless. One exception: Step 2's block may put the deck (its PDF rendering, a copy, or the slide text you staged from the founder's message) in this run's hand-off folder, the one place the Read tool reaches it; that is working data, never a deliverable.
 
 **There is no quick-check lane here, and that is deliberate.** The 35 criteria are scored from per-slide sub-agent reviews — those reviews ARE the work, so dropping them leaves only the checklist scaffolding. So when the founder asks a small
 conversational question, do not improvise an answer from your own reasoning under this skill's name —
@@ -212,7 +212,7 @@ A run resumed through `FS_HOST_RUN_ID` is already bound, so `setup_run.py` keeps
 
 Pass `RUN_ID` to every producer script via `--run-id`. Producer scripts inject it into `metadata.run_id` automatically. `compose_report.py` enforces that all required artifacts share the same `run_id` and emits a `MISSING_METADATA` (high) warning for any artifact without one. Keeping `RUN_ID` stable across the gate is what prevents a `STALE_ARTIFACT` mismatch with the pre-gate artifacts.
 
-**When `reuse_checkpoints` is true:** `--clean` kept this run's checkpoints. Skip Steps 2 and 3 if both `deck_inventory.json` and `stage_profile.json` exist and their `metadata.run_id` matches `$RUN_ID`; otherwise re-run them with the same `RUN_ID`.
+**When `reuse_checkpoints` is true:** `--clean` kept this run's checkpoints. Skip Steps 2 and 3 if both `deck_inventory.json` and `stage_profile.json` exist and their `metadata.run_id` matches `$RUN_ID`; otherwise re-run them with the same `RUN_ID`. Either way, if `deck_text.md` is missing or its front matter's `run_id` is not `$RUN_ID`, run Step 2's `deck_text.py` command again, after the conversion block when the PDF it read is gone (Keynote's lives in a temp folder).
 
 **Read `reuse_checkpoints`, not `resume`, for this decision — they are different questions and they do come apart.** `resume` says the gate may be skipped; `reuse_checkpoints` says the artifacts on disk are this run's. A same-run gate answered without a recorded source yields `resume: false` with `reuse_checkpoints: true`: ask the founder again, but keep what Steps 2-3 already produced. Apply the same rule to Steps 3.5-3.8: skip them when `reconciliation.json` exists with a matching `metadata.run_id`. It is the most expensive stretch of the pipeline — three dispatches, two of which read the deck — and re-running it on a gate round-trip spends that twice for an identical result.
 
@@ -292,13 +292,14 @@ run, whatever the transcript says.
 4. **Partial decks:** Deck has fewer than 5 slides or is clearly a subset. Proceed but set `confidence: "low"` in stage_profile and note the limitation. Missing-slides detection still runs normally.
 5. **Wrong file type:** File named `.pdf` but is actually a Word doc or image. If Read fails, try alternate format before asking the founder for a re-upload. <!-- gate: dr_input_request.wrong_file_type -->
 
-**When the deck is image-rendered, `deck_inventory` IS the canonical text.** For a PDF whose
-slides are images, Read returns page images and there is no extracted text to inline — so build
-the per-slide record here once (headline / `content_summary` / visuals) and inline THAT, verbatim
-and identically, everywhere a dispatch below asks for the deck's text. Do not let each dispatch
-re-transcribe: LEDGER_EXTRACTION and SECOND_READ are the two halves of one corroboration, and
-two different transcriptions make the second read a second read of a different deck — which
-weakens the check silently instead of failing it.
+**`deck_text.md` is the deck's one canonical text, and for an image-rendered deck `deck_inventory`
+IS that text.** Step 2's `deck_text.py` writes each page's own text, or that slide's inventory
+record when the page has none, and every dispatch below reads this one file. For a PDF whose
+slides are images, build the per-slide record (headline / `content_summary` / visuals) carefully:
+it becomes the text both halves of the corroboration read. Your own notes on a slide go in
+`observations` / `printed_label`, never in `content_summary`. LEDGER_EXTRACTION and SECOND_READ
+are the two halves of one corroboration, and two transcriptions would make the second read a
+second read of a different deck — which weakens the check silently instead of failing it.
 
 **Find the deck before anything else — do not assume it is missing.** An attached file is
 already on disk under the uploads mount; nothing tells you its name up front, so list it:
@@ -337,6 +338,7 @@ Do this FIRST, before reading anything. Substitute the uploaded deck's path for 
 DECK_SRC="<deck path>"
 HANDOFF_DIR="<REVIEW_DIR>/handoff/<RUN_ID>"; HANDOFF_AGENT="<printed HANDOFF_AGENT>"
 DECK_READ="$DECK_SRC"; CONVERTER=""; SOFFICE=""; B="$(basename "$DECK_SRC")"
+DT_DECK="$DECK_SRC"; DT_NOTES=""
 case "$DECK_SRC" in
   *.pptx|*.PPTX|*.ppt|*.PPT)
     DECK_READ="no-converter"
@@ -389,6 +391,7 @@ KEYNOTE_EOF
     esac
     if [ -s "$PDF_OUT" ]; then
       case "$PDF_OUT" in "$HANDOFF_DIR"/*) DECK_READ="$HANDOFF_AGENT/${B%.*}.pdf" ;; *) DECK_READ="$PDF_OUT" ;; esac
+      DT_DECK="$PDF_OUT"; case "$DECK_SRC" in *.pptx|*.PPTX) DT_NOTES="$DECK_SRC" ;; esac
     elif [ -n "$CONVERTER" ]; then
       DECK_READ="convert-failed"
     fi
@@ -401,6 +404,9 @@ KEYNOTE_EOF
     ;;
 esac
 echo "$DECK_READ"
+# Step 2's deck text reads shell paths, never $DECK_READ. A path holding ' is not quoted.
+DTA="--deck '$DT_DECK'"; if [ -n "$DT_NOTES" ]; then DTA="$DTA --notes-from '$DT_NOTES'"; fi
+echo "DECK_TEXT_ARGS=$DTA"
 ```
 
 Then branch on what it printed:
@@ -481,6 +487,27 @@ INVENTORY_EOF
 ```
 
 The script validates against `references/schemas/deck_inventory.schema.json` and injects `metadata.run_id`. **Never write `deck_inventory.json` directly via heredoc** — the schema-validation gate is what keeps the pipeline honest.
+
+Then write the deck text, the one file every dispatch from Step 3.5 on reads, with the
+`DECK_TEXT_ARGS` the conversion block printed pasted in place (never an agent path):
+
+```bash
+python3 "$SCRIPTS/deck_text.py" --run-id "$RUN_ID" --inventory "$REVIEW_DIR/deck_inventory.json" \
+  <printed DECK_TEXT_ARGS> -o "$REVIEW_DIR/deck_text.md" --pretty
+```
+
+A deck pasted into the chat has no file: write the founder's text with a quoted heredoc to
+`"$HANDOFF_DIR/deck.txt"`, a `SLIDE N:` line above each slide and nothing else changed, and pass
+`--deck "$HANDOFF_DIR/deck.txt" --staged` instead.
+
+Exit 1 prints `{"status": "rejected", "code": …}` and leaves any earlier file untouched.
+`DECK_UNREADABLE`, `DECK_FORMAT` or a `NOTES_` code: fix that argument (usually an agent path
+where a shell path belongs; a `.ppt` with no converter needs a PDF). An `INVENTORY_` code: run the
+inventory pipe again first. The receipt's `warnings` may name `PAGE_COUNT_MISMATCH` (correct the
+inventory, which skipped or merged a page, then run again) or, for an uploaded text file,
+`NO_SLIDE_MARKERS` (stage a copy as above with `SLIDE N:` lines at the slide boundaries, then run
+again with `--staged`). Never write `deck_text.md` by hand, and dispatch nothing from Step 3.5 on
+until it exists.
 
 ### Step 3: Detect Stage -> `stage_profile.json`
 
@@ -724,8 +751,7 @@ a founder sees in the numbers section of the report comes from here.
 
 **Dispatch the deck-review sub-agent in Context A (LEDGER_EXTRACTION).** **Call the `Task`
 tool with `subagent_type: "founder-skills:deck-review"`.** Substitute `<HANDOFF_AGENT>` /
-`<REVIEW_DIR_AGENT>` with the agent-namespace values and `<RUN_ID>` with `$RUN_ID`; inline
-the deck's full text under `DECK:` (same idiom as SLIDE_REVIEWS).
+`<REVIEW_DIR_AGENT>` with the agent-namespace values and `<RUN_ID>` with `$RUN_ID`.
 
 **Dispatch prompt template:**
 
@@ -738,8 +764,9 @@ You are the deck-review agent dispatched in Context A (LEDGER_EXTRACTION). Recor
 every number the deck states. Do not compute anything, do not relate figures to
 each other, and do not record a number the deck does not state.
 
-DECK:
-<inline the deck's full extracted text here — verbatim, all slides>
+DECK TEXT: read <REVIEW_DIR_AGENT>/deck_text.md (a required read): one "## Slide N" section
+per page, speaker notes labelled "Speaker notes:". The front matter is metadata, not deck
+text: never quote it or record a number from it.
 
 
 Record each figure at FULL SCALE. A slide reading "$493K" is 493000, never 493 —
@@ -797,13 +824,13 @@ Do NOT write any file other than OUTPUT_PATH.
 ```bash
 cat "$HANDOFF_DIR/ledger_output.json" | \
   python3 "$SCRIPTS/ledger.py" --run-id "$RUN_ID" --inventory "$REVIEW_DIR/deck_inventory.json" \
-    -o "$REVIEW_DIR/ledger.json" --pretty
+    --deck-text "$REVIEW_DIR/deck_text.md" -o "$REVIEW_DIR/ledger.json" --pretty
 ```
 <!-- skill-quality-ci: bash-after-subagent-ok -->
 
 If the pipe fails, the ledger disagreed with itself — most often a figure recorded at the
 wrong scale. The error names the figure. Re-dispatch with the correction; do not hand-edit
-the file.
+the file. A `DECK_TEXT_` code is not the ledger: run Step 2's `deck_text.py` again, then this pipe.
 
 ### Step 3.6: Re-Search the Extracted Text, Ledger-Blind -> `second_read.json` (Context A dispatch)
 
@@ -833,7 +860,7 @@ OUTPUT_PATH: <HANDOFF_AGENT>/second_read_output.json
 RUN_ID: <RUN_ID>
 
 You are the deck-review agent dispatched in Context A (SECOND_READ). Copy out the
-slides listed below from the extracted deck text supplied under DECK, verbatim.
+slides listed below from the extracted deck text in the file named below, verbatim.
 Include every number, label, axis value, table cell and footnote it contains.
 
 You are NOT re-reading the original file: this is the same extracted text the ledger
@@ -842,8 +869,9 @@ not that the extraction matched the slide.
 
 SLIDES TO COPY OUT: <comma-separated slide numbers>
 
-DECK:
-<inline the deck's full extracted text here — verbatim, all slides>
+DECK TEXT: read <REVIEW_DIR_AGENT>/deck_text.md (a required read): one "## Slide N" section
+per page, speaker notes labelled "Speaker notes:". The front matter is metadata, not deck
+text: never quote it or record a number from it.
 
 
 Do not summarise, do not interpret, do not correct anything that looks wrong, and do
@@ -859,16 +887,17 @@ Then return ONLY the receipt JSON in your final assistant message:
 Do NOT write any file other than OUTPUT_PATH.
 ```
 
-**After the sub-agent returns:** gate the hand-off, then copy it into place:
+**After the sub-agent returns:** gate the hand-off, then pipe:
 
 ```bash
-cat "$HANDOFF_DIR/second_read_output.json" | \
-  python3 -c 'import json,sys; d=json.load(sys.stdin); d.setdefault("metadata",{})["run_id"]=sys.argv[1]; json.dump(d,open(sys.argv[2],"w"),indent=2)' \
-    "$RUN_ID" "$REVIEW_DIR/second_read.json"
+cat "$HANDOFF_DIR/second_read_output.json" | python3 "$SCRIPTS/second_read.py" --run-id "$RUN_ID" \
+  --deck-text "$REVIEW_DIR/deck_text.md" -o "$REVIEW_DIR/second_read.json"
 ```
 <!-- skill-quality-ci: bash-after-subagent-ok -->
 
-**If this copy fails, treat it as a bad hand-off and repair-dispatch** (same branch as exit 4).
+**If the pipe fails with `SECOND_READ_INVALID`, treat it as a bad hand-off and repair-dispatch** with
+its error (same branch as exit 4). A `DECK_TEXT_` code: run Step 2's `deck_text.py` again (the
+resume rule), then this pipe; no dispatch.
 `reconcile.py` consumes `second_read.json` unconditionally, so a missing or malformed one takes
 down the numeric chain that `slide_reviews.py --reconciliation` gates on.
 
@@ -967,6 +996,14 @@ cat "$HANDOFF_DIR/relations_output.json" | \
     --run-id "$RUN_ID" -o "$REVIEW_DIR/reconciliation.json"
 ```
 <!-- skill-quality-ci: bash-after-subagent-ok -->
+
+`DECK_TEXT_STAMP_MISSING`: the step it names piped without the deck text, which has not changed.
+Run that step's pipe again on its existing hand-off with `--deck-text "$REVIEW_DIR/deck_text.md"`,
+with no dispatch, then this one.
+`DECK_TEXT_MISMATCH`: `deck_text.md` changed between Steps 3.5 and 3.6. Rewrite it with Step 2's
+`deck_text.py` command. Redo each step whose `metadata.deck_text_sha256` is not the receipt's
+`deck_text_sha256` (both, if neither is): dispatch again, then pipe, never only re-pipe, since its
+sub-agent read the old text. Step 3.5 (then 3.7) for `ledger.json`, Step 3.6 for `second_read.json`.
 
 `status` records what happened, and all three outcomes are legitimate:
 
@@ -1097,7 +1134,7 @@ artifact is untouched and still valid.
 
 **Dispatch the deck-review sub-agent in Context A (SLIDE_REVIEWS).** Do not do the slide analysis yourself in the main thread — dispatch it. **Call the `Task` tool with `subagent_type: "founder-skills:deck-review"`** and the prompt below, so the analysis runs in the scoped agent (its `tools:` allowlist binds; a type-less dispatch falls back to the wildcard `general-purpose` agent).
 
-**Before dispatching, substitute placeholders in the template below:** replace `<HANDOFF_AGENT>` and `<REVIEW_DIR_AGENT>` with the agent-namespace values (from `resolve_artifacts_root.py --agent` — absolute file-tool paths, proven at Step 0; NOT absolute `/sessions/...` paths, which the host-loop gate denies), `<RUN_ID>` with `$RUN_ID`, and inline the deck's full text under `DECK:` (the sub-agent needs verbatim figures — do not point it at an upload path). Leave the `${CLAUDE_PLUGIN_ROOT}/...` reference paths **literal** — they are pre-resolved to a host-readable path. The sub-agent has no access to your shell variables.
+**Before dispatching, substitute placeholders in the template below:** replace `<HANDOFF_AGENT>` and `<REVIEW_DIR_AGENT>` with the agent-namespace values (from `resolve_artifacts_root.py --agent` — absolute file-tool paths, proven at Step 0; NOT absolute `/sessions/...` paths, which the host-loop gate denies), `<RUN_ID>` with `$RUN_ID`. The sub-agent reads the deck text from the review dir, never from the upload path. Leave the `${CLAUDE_PLUGIN_ROOT}/...` reference paths **literal** — they are pre-resolved to a host-readable path. The sub-agent has no access to your shell variables.
 
 **Dispatch prompt template:**
 
@@ -1106,16 +1143,19 @@ CONTEXT: SLIDE_REVIEWS
 OUTPUT_PATH: <HANDOFF_AGENT>/slide_reviews_output.json
 RUN_ID: <RUN_ID>
 
-You are the deck-review agent dispatched in Context A (SLIDE_REVIEWS). The deck's
-full text is inlined below under DECK. Read the stage profile at
+You are the deck-review agent dispatched in Context A (SLIDE_REVIEWS). Read the stage profile at
 <REVIEW_DIR_AGENT>/stage_profile.json. Compare each slide against the stage-specific
 framework and non-negotiable principles from the two files below.
 If a reference path below cannot be read (refused or not found), read the same file under the plugin folder your own instructions name.
 ${CLAUDE_PLUGIN_ROOT}/skills/deck-review/references/deck-best-practices.md and
 ${CLAUDE_PLUGIN_ROOT}/skills/deck-review/references/checklist-criteria.md.
 
-DECK:
-<inline the deck's full extracted text here — verbatim, all slides>
+DECK TEXT: read <REVIEW_DIR_AGENT>/deck_text.md (a required read): one "## Slide N" section
+per page, speaker notes labelled "Speaker notes:". The front matter is metadata, not deck
+text: never quote it or record a number from it.
+Reviewer notes, not deck text: `observations` and any slide's `printed_label` in
+<REVIEW_DIR_AGENT>/deck_inventory.json, if present. Use them to decide what to check; quote
+only the deck text.
 
 
 For each slide: identify strengths, weaknesses, and specific recommendations.
@@ -1159,9 +1199,11 @@ run_id stamping.
 ```bash
 cat "$HANDOFF_DIR/slide_reviews_output.json" | \
   python3 "$SCRIPTS/slide_reviews.py" --run-id "$RUN_ID" -o "$REVIEW_DIR/slide_reviews.json" \
-    --reconciliation "$REVIEW_DIR/reconciliation.json" --pretty
+    --reconciliation "$REVIEW_DIR/reconciliation.json" --deck-text "$REVIEW_DIR/deck_text.md" --pretty
 ```
 <!-- skill-quality-ci: bash-after-subagent-ok -->
+
+A `DECK_TEXT_` code: run Step 2's `deck_text.py` again (the resume rule), then this pipe.
 
 ### Step 5: Score Checklist -> `checklist.json` (Context A dispatch)
 

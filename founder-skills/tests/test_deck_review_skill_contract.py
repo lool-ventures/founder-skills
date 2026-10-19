@@ -484,7 +484,8 @@ def test_slide_reviews_dispatch_return_shape_keys() -> None:
     anchor = "CONTEXT: SLIDE_REVIEWS"
     start = skill_text.find(anchor)
     assert start != -1, f"{SKILL_MD.name} has no '{anchor}' section"
-    section = skill_text[start : start + 2000]
+    # Bounded on the template's closing fence, not a character count.
+    section = skill_text[start : skill_text.index("\n```", start)]
     for key in required_keys:
         assert f'"{key}"' in section, f"{SKILL_MD.name} SLIDE_REVIEWS return shape is missing key '{key}'"
 
@@ -1828,30 +1829,79 @@ def test_optional_string_fields_say_omit_not_null() -> None:
         )
 
 
-def test_image_rendered_decks_have_one_canonical_inlined_text() -> None:
-    """A6. Three dispatches say "inline the deck's full extracted text -- verbatim", but for
-    an image-rendered PDF the Read tool returns page images and there is no such text. Two of
-    those three (LEDGER_EXTRACTION, SECOND_READ) are the halves of the numeric chain's
-    corroboration, so independent re-transcription means the second read reads a DIFFERENT
-    deck -- the corroboration silently weakens rather than failing.
+_DECK_TEXT_READ = "DECK TEXT: read <REVIEW_DIR_AGENT>/deck_text.md (a required read)"
+
+
+def _fence_after(text: str, anchor: str) -> str:
+    """The fenced block an anchor opens: from the anchor to the next closing fence."""
+    start = text.index(anchor)
+    return text[start : text.index("\n```", start)]
+
+
+def _bash_fence_running(text: str, script: str) -> str:
+    """The one bash block that pipes into `script` and writes with -o."""
+    blocks = [b for b in re.findall(r"```bash\n(.*?)```", text, re.S) if f'"$SCRIPTS/{script}"' in b and " -o " in b]
+    assert len(blocks) == 1, f"expected one bash block running {script} with -o, found {len(blocks)}"
+    return str(blocks[0])
+
+
+def test_every_deck_reading_dispatch_reads_the_one_deck_text_file() -> None:
+    """The three dispatches that read the deck read the producer-written deck_text.md, the same file,
+    with the same sentence, never a copy the main thread retyped into the prompt. For an image-rendered
+    deck the inventory record is that text (deck_text.py falls back to it), so Step 2 says so.
     """
     text = SKILL_MD.read_text(encoding="utf-8")
-    inline_sites = text.count("inline the deck's full extracted text")
-    assert inline_sites >= 2, f"expected the shared instruction on multiple dispatches, found {inline_sites}"
-    # TIGHTENED after a vacuous first pass: Step 2 already mentions `deck_inventory.json` and
-    # already has an image-only pitfall, so "both strings appear" passed with the defect intact.
-    # The contract is that ONE canonical transcription is named and reused ACROSS dispatches.
-    start = text.find("### Step 2")
-    assert start != -1
-    window = text[start : start + 6000]
-    assert "canonical" in window.lower(), (
-        "Step 2 must name a CANONICAL inlined text -- the word carries the contract that every "
-        "dispatch gets the SAME transcription, which is what keeps the second read a second read "
-        "of the same deck rather than of a differently-transcribed one"
-    )
-    canon = window[window.lower().find("canonical") - 500 : window.lower().find("canonical") + 700]
-    assert "deck_inventory" in canon, "the canonical text must BE the structured deck_inventory"
-    assert "image" in canon.lower(), "and the instruction must be scoped to image-rendered sources"
+    assert text.count(_DECK_TEXT_READ) == 3
+    for context in ("LEDGER_EXTRACTION", "SECOND_READ", "SLIDE_REVIEWS"):
+        assert _fence_after(text, f"CONTEXT: {context}\n").count(_DECK_TEXT_READ) == 1, context
+    assert "\nDECK:\n" not in text, "a dispatch still inlines a retyped copy of the deck"
+    assert "inline the deck's full extracted text" not in text
+    step2 = text[text.index("### Step 2") : text.index("### Step 3:")]
+    i = step2.lower().index("canonical")
+    canon = step2[max(0, i - 500) : i + 700]
+    assert "deck_text.md" in canon and "deck_inventory" in canon and "image" in canon.lower()
+
+
+def test_step_2_writes_the_deck_text_from_the_printed_shell_paths() -> None:
+    """The conversion block prints DECK_TEXT_ARGS from shell paths (an agent path refuses on a local
+    session), and the deck_text.py call takes them."""
+    text = SKILL_MD.read_text(encoding="utf-8")
+    step2 = text[text.index("### Step 2") : text.index("### Step 3:")]
+    assert 'echo "DECK_TEXT_ARGS=$DTA"' in step2
+    call = _bash_fence_running(step2, "deck_text.py")
+    assert "<printed DECK_TEXT_ARGS>" in call and '-o "$REVIEW_DIR/deck_text.md"' in call
+    assert "--staged" in step2, "a pasted deck must be staged as a file first"
+
+
+@pytest.mark.parametrize("script", ["ledger.py", "second_read.py", "slide_reviews.py"])
+def test_each_stamping_pipe_passes_the_deck_text(script: str) -> None:
+    """Without --deck-text a pipe records no stamp, and reconcile.py can then only refuse
+    DECK_TEXT_STAMP_MISSING (or, with neither stamped, compare nothing)."""
+    block = _bash_fence_running(SKILL_MD.read_text(encoding="utf-8"), script)
+    assert '--deck-text "$REVIEW_DIR/deck_text.md"' in block
+
+
+def test_step_3_8_names_both_deck_text_refusals_and_their_remedies() -> None:
+    text = SKILL_MD.read_text(encoding="utf-8")
+    step = text[text.index("### Step 3.8") : text.index("### Step 3.9")]
+    reconcile = (SCRIPTS_DIR / "reconcile.py").read_text(encoding="utf-8")
+    for code in ("DECK_TEXT_STAMP_MISSING", "DECK_TEXT_MISMATCH"):
+        assert f"{code}:" in reconcile, f"reconcile.py no longer emits {code}"
+        assert f"`{code}`" in step, f"Step 3.8 has no branch for {code}"
+    missing = step[step.index("`DECK_TEXT_STAMP_MISSING`") : step.index("`DECK_TEXT_MISMATCH`")]
+    assert "no dispatch" in missing, "a missing stamp is a re-pipe, never a paid dispatch"
+    mismatch = step[step.index("`DECK_TEXT_MISMATCH`") :]
+    assert "deck_text.py" in mismatch
+    assert "dispatch again" in mismatch, "a mismatched step's sub-agent read the old text: a re-pipe is not a redo"
+
+
+def test_the_agent_body_reads_the_deck_text_file_safely() -> None:
+    """Context A: copy the deck text without the Read tool's line numbers, and block rather than
+    improvise when the file cannot be read."""
+    agent = AGENT_MD.read_text(encoding="utf-8")
+    ctx = agent[agent.index("### Context A") : agent.index("For `SLIDE_REVIEWS`:")]
+    assert "never\nthe line numbers the Read tool prefixes" in ctx
+    assert '{"status": "blocked", "reason": "deck_text_unreadable"}' in ctx
 
 
 def test_reconciliation_schema_is_cross_linked_from_the_numeric_steps() -> None:

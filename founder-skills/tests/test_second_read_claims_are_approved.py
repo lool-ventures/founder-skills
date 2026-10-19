@@ -19,7 +19,7 @@ WHAT THE SECOND READ ACTUALLY ESTABLISHES, which is the contract this file pins:
 WHAT IT DOES NOT ESTABLISH, and what no surface may imply:
 
   * NOT an independent reading of the deck. The reader receives the main thread's own
-    extraction (`SKILL.md`'s SECOND_READ dispatch inlines it), so both readings descend
+    extraction (`SKILL.md`'s SECOND_READ dispatch names the same deck_text.md), so both readings descend
     from one act of reading. Measured on a live run: 12 of the second read's 13 transcript
     paragraphs were byte-identical substrings of the prompt it was given.
   * NOT a re-reading of the slides. The slides were read once; the text was read twice.

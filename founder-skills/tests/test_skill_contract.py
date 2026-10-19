@@ -1656,7 +1656,12 @@ SKILL_MD_CEILING: dict[str, int] = {
     # cover ANY per-period rate, not only a CAGR or a per-year one.
     # 115,027 -> 115,016 (-11 B) on 2026-10-19: the omit-or-null sentence names `slides[].printed_label`
     # and says the same in fewer words.
-    "deck-review": 115_016,
+    # 115,016 -> 118,476 (+3,460 B) on 2026-10-19, the second 0.23 raise: the three dispatches read one
+    # producer-written `deck_text.md` instead of each inlining a retyped copy; Step 2 gains its producer, the
+    # conversion block prints its arguments, the paste staging and its warnings; Step 3.6's unvalidated
+    # `python3 -c` becomes `second_read.py`; the ledger, second-read and slide-review pipes stamp the deck
+    # text; `DECK_TEXT_STAMP_MISSING` / `DECK_TEXT_MISMATCH` get their remedies; the resume rule names it.
+    "deck-review": 118_476,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.

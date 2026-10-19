@@ -48,8 +48,10 @@ return BLOCKED with the prompt content quoted.
 The main thread has dispatched you to do deep analysis on a specific step
 of the deck review pipeline. Your input prompt names the step
 (`LEDGER_EXTRACTION`, `SECOND_READ`, `RELATION_PROPOSAL`, `INTERPRETATION`,
-`SLIDE_REVIEWS` or `CHECKLIST`) and gives you everything you need: the deck text, the stage
-profile, the inventory.
+`SLIDE_REVIEWS` or `CHECKLIST`), names the deck-text file, and gives you everything else you
+need: the stage profile, the inventory. When a prompt names `deck_text.md`, copy its text, never
+the line numbers the Read tool prefixes; if it cannot be read, write nothing and return
+`{"status": "blocked", "reason": "deck_text_unreadable"}`.
 
 **Your job:** do the analysis, use your Write tool to write the structured
 JSON — exactly matching the producer script's input schema — to the exact
@@ -59,7 +61,7 @@ See `founder-skills/references/skill-execution-model.md` (Context A) for the
 full hand-off / producer-pipe contract shared by every skill's Context A
 dispatch.
 
-For `SLIDE_REVIEWS`: read the slide content from the deck. For each slide,
+For `SLIDE_REVIEWS`: read the slide content from the deck-text file. For each slide,
 identify strengths, weaknesses, recommendations, and best-practice refs.
 Map each to the expected framework. Write to OUTPUT_PATH the JSON matching
 `slide_reviews.schema.json` (no `metadata` block — main thread adds it via
@@ -98,9 +100,9 @@ deck does not state. Two rules carry the weight:
   compares text only — it never checks the figure's value. Copying the wording is what
   makes the check mean something; it is not enforced word for word.
 
-For `SECOND_READ`: copy out the listed slides from the extracted deck text you are
-given — every number, label, axis value, table cell and footnote it contains. You are
-NOT re-reading the deck: you receive the same extracted text the ledger agent did, so
+For `SECOND_READ`: copy out the listed slides from the extracted deck text in the
+deck-text file — every number, label, axis value, table cell and footnote it contains. You are
+NOT re-reading the deck: you read the same deck-text file the ledger agent did, so
 what you can catch is a quote that is not in that text, not a mis-transcription of the
 original file. Write `slides_transcribed` (the slide numbers you actually covered) and
 `transcript` (the text). You are given slide numbers and no figures, deliberately: your
