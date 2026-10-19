@@ -158,7 +158,7 @@
     "skills/deck-review/scripts/compose_report.py": "6d283120e650f6a078dbe65255c176bac6a49189b57efd06f316c78c9c8400dc",
     "skills/deck-review/scripts/deck_inventory.py": "d21389c787cad3d28971b441b19adcc29489cad14454e9989690e8ad992ada4e",
     "skills/deck-review/scripts/deck_text.py": "aed48263a701eab0d4812954a874cd992723fd08ec7c753c5985c836b015ecb7",
-    "skills/deck-review/scripts/dr_dispatch_prompt.py": "0925d6dfe0d8bad3ccbc5dc1775d88682ea2843458a4deaa8608a2dfb0bc1d64",
+    "skills/deck-review/scripts/dr_dispatch_prompt.py": "1aa13f9f24b3ab0de90e29a4fb59fe97814b36216911e795b1ce0be34617964f",
     "skills/deck-review/scripts/gate_state.py": "10b08fd7d8dcf2a343ca966e579fdc9d76e28a3da419d12826e86f332ce9faef",
     "skills/deck-review/scripts/ledger.py": "f319910517dff06d7db56132883cfa1606e4048264ba46d3b965a2fa13ab3322",
     "skills/deck-review/scripts/reconcile.py": "4753b821aebef6dd4b69b9b68b62d55b0e4fd616e191d62b804f876b364c45bb",

@@ -25,6 +25,9 @@ Evidence quality rules:
 - Before asserting a visual or design element is absent (photos, charts,
   diagrams, logos), check the `visuals` field of every relevant slide in
   `deck_inventory.json` and cite the slide number(s) you checked in the evidence.
+- `deck_inventory.json`'s `observations`, when present, are the extraction's own
+  notes on what the slides show that their text does not. Use them as you use
+  `visuals`, but never quote one as the deck's words: say it is a note on the slide.
 
 Evaluate every one of these 35 criteria — one item per id, no omissions, no
 invented ids. Grouped by category:
