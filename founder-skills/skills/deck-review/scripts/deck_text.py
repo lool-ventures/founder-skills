@@ -15,6 +15,16 @@ dependency. Speaker notes are read from `--notes-from` (the original PowerPoint 
 converted from) or from the deck itself when it is already a `.pptx`, through each slide's
 notes relationship, so a slide-number placeholder never reaches the notes block.
 
+A `.txt`, `.md` or `.markdown` deck is read as UTF-8 and split into slides on `SLIDE N` marker
+lines (optionally under a `#` heading). A `--staged` deck is one the main thread wrote from the
+founder's own message rather than extracted from a file, so its marker sections are recorded as
+`pasted`; `--staged` on a binary deck is refused. When a deck's markers and the inventory do not
+agree, no text is dropped: a marked slide the inventory does not know is still written, and an
+inventory slide with no marker falls back to its inventory record.
+
+Every warning goes to stderr, into the receipt's `warnings` list, and onto the front matter as a
+`warnings: [CODE, ...]` line of codes only.
+
 The output is markdown with YAML front matter. Nothing here renders a slide or judges it; this
 is a faithful, deterministic transcription and nothing else.
 """
@@ -27,6 +37,7 @@ import hashlib
 import json
 import os
 import posixpath
+import re
 import sys
 import tempfile
 import xml.etree.ElementTree as ET
@@ -35,6 +46,7 @@ from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import _deck_text_file  # type: ignore[import-not-found]  # noqa: E402
 import _out_guard  # type: ignore[import-not-found]  # noqa: E402
 import _pdf_pages  # type: ignore[import-not-found]  # noqa: E402
 import _run_ref  # type: ignore[import-not-found]  # noqa: E402
@@ -51,6 +63,12 @@ _NOTES_REL_SUFFIX = "/notesSlide"
 
 _PDF_SUFFIX = ".pdf"
 _PPTX_SUFFIX = ".pptx"
+_TEXT_SUFFIXES = (".txt", ".md", ".markdown")
+
+_SLIDE_MARKER_RE = re.compile(
+    r"^(?:#{1,6}\s*)?slide\s+(\d+)\s*(?:[:.\-\u2013\u2014]|$)",
+    re.IGNORECASE,
+)
 
 
 def _reject(code: str, message: str) -> int:
@@ -228,11 +246,62 @@ def _inventory_text(slide: Any) -> str:
 
 def _source(pages_source: dict[int, str]) -> str:
     values = set(pages_source.values())
-    if values == {"extracted"}:
-        return "extracted"
-    if not values or values == {"inventory"}:
+    if not values:
         return "inventory"
+    if len(values) == 1:
+        return next(iter(values))
     return "mixed"
+
+
+def _warn(warnings: list[str], message: str) -> None:
+    warnings.append(message)
+    print(f"Warning: {message}", file=sys.stderr)
+
+
+def _warning_codes(warnings: list[str]) -> list[str]:
+    return [message.split(":", 1)[0].strip() for message in warnings]
+
+
+def _distinct(numbers: list[int]) -> list[int]:
+    seen: set[int] = set()
+    out: list[int] = []
+    for number in numbers:
+        if number not in seen:
+            seen.add(number)
+            out.append(number)
+    return out
+
+
+def _parse_text_deck(text: str) -> tuple[dict[int, str], list[int], list[int]]:
+    """(per-slide text, marker numbers in file order, duplicated marker numbers).
+
+    A marker is a line beginning `slide N`, optionally under a `#`..`######` heading, separated
+    from the rest of the line by a colon, a period, a dash or nothing. Text from a marker to the
+    next marker is that slide's; a marker repeated later in the file joins its sections in file
+    order. Text before the first marker joins slide 1. A line such as "Slide 4 shows our traction"
+    is not a marker, because a word follows the number rather than a separator.
+    """
+    sections: dict[int, list[str]] = {}
+    markers: list[int] = []
+    duplicates: list[int] = []
+    preamble: list[str] = []
+    current: int | None = None
+    for line in text.split("\n"):
+        match = _SLIDE_MARKER_RE.match(line)
+        if match is None:
+            (preamble if current is None else sections[current]).append(line)
+            continue
+        number = int(match.group(1))
+        if number not in sections:
+            sections[number] = []
+            markers.append(number)
+        else:
+            duplicates.append(number)
+        current = number
+        sections[number].append(line)
+    if preamble and "\n".join(preamble).strip():
+        sections[1] = preamble + sections.get(1, [])
+    return {number: "\n".join(lines).strip() for number, lines in sections.items()}, markers, duplicates
 
 
 def _flow_mapping(mapping: dict[int, str]) -> str:
@@ -259,11 +328,12 @@ def _write_atomic(path: str, text: str) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Write one canonical deck-text file.")
-    ap.add_argument("--deck", required=True, help="The deck: a .pdf or a .pptx")
+    ap.add_argument("--deck", required=True, help="The deck: a .pdf, .pptx, .txt, .md or .markdown")
     ap.add_argument("--inventory", required=True, help="deck_inventory.json")
     ap.add_argument("--run-id", required=True)
     ap.add_argument("-o", "--output", required=True, help="The deck_text.md to write")
     ap.add_argument("--notes-from", help="The original .pptx, when --deck is its PDF conversion")
+    ap.add_argument("--staged", action="store_true", help="A text deck the main thread wrote from the message")
     ap.add_argument("--pretty", action="store_true")
     args = ap.parse_args()
 
@@ -282,8 +352,18 @@ def main() -> int:
         return _reject("DECK_UNREADABLE", f"cannot read --deck {args.deck!r}")
 
     suffix = os.path.splitext(args.deck)[1].lower()
-    if suffix not in (_PDF_SUFFIX, _PPTX_SUFFIX):
-        return _reject("DECK_FORMAT", f"--deck must be a .pdf or .pptx, got {args.deck!r}")
+    is_text = suffix in _TEXT_SUFFIXES
+    if suffix not in (_PDF_SUFFIX, _PPTX_SUFFIX, *_TEXT_SUFFIXES):
+        return _reject("DECK_FORMAT", f"--deck must be a .pdf, .pptx, .txt, .md or .markdown, got {args.deck!r}")
+    if args.staged and not is_text:
+        return _reject("STAGED_FORMAT", f"--staged is for a text deck, got {args.deck!r}")
+
+    deck_text: str | None = None
+    if is_text:
+        try:
+            deck_text = deck_bytes.decode("utf-8")
+        except UnicodeDecodeError:
+            return _reject("DECK_UNREADABLE", f"cannot decode --deck {args.deck!r} as UTF-8")
 
     try:
         with open(args.inventory, encoding="utf-8") as handle:
@@ -304,10 +384,64 @@ def main() -> int:
     elif suffix == _PPTX_SUFFIX:
         notes_deck = args.deck
 
-    try:
-        extracted = _pptx_slide_texts(args.deck) if suffix == _PPTX_SUFFIX else _pdf_pages.page_texts(args.deck)
-    except (OSError, zipfile.BadZipFile, ET.ParseError) as exc:
-        return _reject("DECK_UNREADABLE", f"cannot read --deck {args.deck!r}: {exc}")
+    pages_source: dict[int, str] = {}
+    slide_texts: dict[int, str] = {}
+    warnings: list[str] = []
+
+    if is_text:
+        assert deck_text is not None
+        text_sections, markers, duplicates = _parse_text_deck(deck_text)
+        marker_source = "pasted" if args.staged else "extracted"
+        if not markers:
+            text_sections = {}
+            _warn(warnings, "NO_SLIDE_MARKERS")
+        for number in _distinct(duplicates):
+            _warn(warnings, f"DUPLICATE_SLIDE_MARKER: {number}")
+        if markers and len(markers) != len(slides):
+            _warn(
+                warnings,
+                f"PAGE_COUNT_MISMATCH: deck has {len(markers)} slides, inventory has {len(slides)} slides",
+            )
+        for index, slide in enumerate(slides):
+            number = _slide_key(slide, index + 1)
+            if number in text_sections:
+                slide_texts[number] = text_sections[number]
+                pages_source[number] = marker_source
+            else:
+                slide_texts[number] = _inventory_text(slide)
+                pages_source[number] = "inventory"
+        for number, section in text_sections.items():
+            if number not in slide_texts:
+                slide_texts[number] = section
+                pages_source[number] = marker_source
+    else:
+        try:
+            extracted = _pptx_slide_texts(args.deck) if suffix == _PPTX_SUFFIX else _pdf_pages.page_texts(args.deck)
+        except (OSError, zipfile.BadZipFile, ET.ParseError) as exc:
+            return _reject("DECK_UNREADABLE", f"cannot read --deck {args.deck!r}: {exc}")
+        for index, slide in enumerate(slides):
+            number = _slide_key(slide, index + 1)
+            page = extracted.get(number) if extracted is not None else None
+            if suffix == _PDF_SUFFIX:
+                if page is not None and _nonblank(page) >= _pdf_pages.TEXT_LAYER_FLOOR:
+                    slide_texts[number] = page.rstrip()
+                    pages_source[number] = "extracted"
+                else:
+                    slide_texts[number] = _inventory_text(slide)
+                    pages_source[number] = "inventory"
+            elif number in (extracted or {}):
+                slide_texts[number] = (extracted or {})[number].rstrip()
+                pages_source[number] = "extracted"
+            else:
+                slide_texts[number] = _inventory_text(slide)
+                pages_source[number] = "inventory"
+        if suffix == _PDF_SUFFIX:
+            count = _pdf_pages.page_count(args.deck)
+            if count is not None and count != len(slides):
+                _warn(
+                    warnings,
+                    f"PAGE_COUNT_MISMATCH: deck has {count} pages, inventory has {len(slides)} slides",
+                )
 
     slide_notes: dict[int, str] = {}
     if notes_deck is not None:
@@ -315,33 +449,6 @@ def main() -> int:
             slide_notes = _pptx_notes(notes_deck)
         except (OSError, zipfile.BadZipFile, ET.ParseError) as exc:
             return _reject("NOTES_UNREADABLE", f"cannot read --notes-from {notes_deck!r}: {exc}")
-
-    pages_source: dict[int, str] = {}
-    slide_texts: dict[int, str] = {}
-    for index, slide in enumerate(slides):
-        number = _slide_key(slide, index + 1)
-        page = extracted.get(number) if extracted is not None else None
-        if suffix == _PDF_SUFFIX:
-            if page is not None and _nonblank(page) >= _pdf_pages.TEXT_LAYER_FLOOR:
-                slide_texts[number] = page.rstrip()
-                pages_source[number] = "extracted"
-            else:
-                slide_texts[number] = _inventory_text(slide)
-                pages_source[number] = "inventory"
-        elif number in (extracted or {}):
-            slide_texts[number] = (extracted or {})[number].rstrip()
-            pages_source[number] = "extracted"
-        else:
-            slide_texts[number] = _inventory_text(slide)
-            pages_source[number] = "inventory"
-
-    warnings: list[str] = []
-    if suffix == _PDF_SUFFIX:
-        count = _pdf_pages.page_count(args.deck)
-        if count is not None and count != len(slides):
-            message = f"PAGE_COUNT_MISMATCH: deck has {count} pages, inventory has {len(slides)} slides"
-            warnings.append(message)
-            print(f"Warning: {message}", file=sys.stderr)
 
     source = _source(pages_source)
     deck_sha256 = hashlib.sha256(deck_bytes).hexdigest()
@@ -354,16 +461,17 @@ def main() -> int:
             section += f"\n\nSpeaker notes:\n{notes}"
         sections.append(section)
 
-    front_matter = "\n".join(
-        [
-            "---",
-            f"run_id: {args.run_id}",
-            f"source: {source}",
-            f"pages_source: {_flow_mapping(pages_source)}",
-            f"deck_sha256: {deck_sha256}",
-            "---",
-        ]
-    )
+    front_lines = [
+        "---",
+        f"run_id: {args.run_id}",
+        f"source: {source}",
+        f"pages_source: {_flow_mapping(pages_source)}",
+        f"deck_sha256: {deck_sha256}",
+    ]
+    if warnings:
+        front_lines.append(f"warnings: [{', '.join(_warning_codes(warnings))}]")
+    front_lines.append("---")
+    front_matter = "\n".join(front_lines)
     body = front_matter + "\n\n" + "\n\n".join(sections) + "\n" if sections else front_matter + "\n"
 
     try:
@@ -377,7 +485,7 @@ def main() -> int:
         "source": source,
         "slides": len(slides),
         "pages_source": pages_source,
-        "deck_text_sha256": hashlib.sha256(body.encode("utf-8")).hexdigest(),
+        "deck_text_sha256": _deck_text_file.body_sha256(body.encode("utf-8")),
     }
     if warnings:
         receipt["warnings"] = warnings

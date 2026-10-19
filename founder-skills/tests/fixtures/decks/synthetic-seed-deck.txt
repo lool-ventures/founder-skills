@@ -17,8 +17,3 @@ Two founders, ex-Stripe (eng) and ex-Notion (product).
 
 SLIDE 6: ASK
 Raising $1.2M seed at $8M post.
-
-[Note: 6 slides. Strong on traction + team. Weak on TAM, advisors, GTM,
-competition, financial projections. Expected deck-review score: 40-55%
-(major_revision per checklist thresholds).
-This is a synthetic fixture — Acmecorp is fictional. No real founder data.]
