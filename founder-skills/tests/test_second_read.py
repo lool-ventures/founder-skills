@@ -9,7 +9,6 @@ that the artifact it writes is the one the numeric chain consumes.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import subprocess
 import sys
@@ -24,6 +23,12 @@ SCRIPT = SCRIPTS / "second_read.py"
 _TESTS_DIR = str(TESTS)
 if _TESTS_DIR not in sys.path:
     sys.path.insert(0, _TESTS_DIR)
+
+_SCRIPTS_DIR = str(SCRIPTS)
+if _SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPTS_DIR)
+
+import _deck_text_file  # type: ignore[import-not-found]  # noqa: E402
 
 _TRANSCRIPT = "Slide 6: gross volume of $6.83M in 2024. Slide 7: an invented take rate of 5.37%."
 
@@ -71,19 +76,39 @@ def test_a_valid_handoff_is_written_with_the_run_id_stamped_and_overwritten(tmp_
     }
 
 
-def test_deck_text_sha256_hashes_the_files_bytes(tmp_path: Path) -> None:
+def test_deck_text_sha256_hashes_the_files_body(tmp_path: Path) -> None:
     deck_text = tmp_path / "deck_text.md"
-    deck_text.write_bytes(b"## Slide 6\n\nGross volume of $6.83M in 2024.\n")
+    deck_text.write_bytes(
+        b"---\nrun_id: RID-A\nsource: extracted\n---\n## Slide 6\n\nGross volume of $6.83M in 2024.\n"
+    )
     out = tmp_path / "second_read.json"
 
-    proc = _run("--run-id", "R", "-o", out, "--deck-text", deck_text, stdin=_handoff())
+    proc = _run("--run-id", "RID-A", "-o", out, "--deck-text", deck_text, stdin=_handoff())
 
     assert proc.returncode == 0, proc.stderr
-    expected = hashlib.sha256(deck_text.read_bytes()).hexdigest()
+    expected = _deck_text_file.body_sha256(deck_text.read_bytes())
     written = json.loads(out.read_text(encoding="utf-8"))
     assert written["metadata"]["deck_text_sha256"] == expected
     receipt = json.loads(proc.stdout)
     assert receipt["deck_text_sha256"] == expected
+
+
+def test_another_runs_deck_text_is_refused_and_leaves_o_untouched(tmp_path: Path) -> None:
+    deck_text = tmp_path / "deck_text.md"
+    deck_text.write_text("---\nrun_id: RID-A\n---\n## Slide 6\n\nInvented text.\n", encoding="utf-8")
+    out = tmp_path / "second_read.json"
+    sentinel = b'{"sentinel": true}\n'
+    out.write_bytes(sentinel)
+
+    proc = _run("--run-id", "RID-B", "-o", out, "--deck-text", deck_text, stdin=_handoff())
+
+    assert proc.returncode == 1, (proc.stdout, proc.stderr)
+    diagnostic = json.loads(proc.stdout)
+    assert diagnostic["status"] == "rejected"
+    assert diagnostic["code"] == "DECK_TEXT_OTHER_RUN"
+    assert "RID-A" in diagnostic["message"] and "RID-B" in diagnostic["message"]
+    assert proc.stderr.strip()
+    assert out.read_bytes() == sentinel
 
 
 def test_without_deck_text_no_sha_key_is_written(tmp_path: Path) -> None:

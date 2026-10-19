@@ -20,15 +20,15 @@ against.
 
 TWO STAMPS, BOTH ABOUT PROVENANCE. `metadata.run_id` binds the artifact to the run that staged it,
 overwriting whatever the hand-off carried. `metadata.deck_text_sha256` (written only when
-`--deck-text` is given) records the bytes the transcript was taken against, so a transcript left
-beside a later-edited deck text is detectable downstream.
+`--deck-text` is given) records the hash of the deck text's BODY -- everything after its front
+matter -- so a transcript left beside a later-edited deck text is detectable downstream. A deck
+text stamped with another run's id is refused.
 """
 
 from __future__ import annotations
 
 import argparse
 import contextlib
-import hashlib
 import json
 import os
 import sys
@@ -37,6 +37,7 @@ from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import _deck_text_file  # type: ignore[import-not-found]  # noqa: E402
 import _out_guard  # type: ignore[import-not-found]  # noqa: E402
 import _run_ref  # type: ignore[import-not-found]  # noqa: E402
 
@@ -119,11 +120,9 @@ def main() -> int:
 
     deck_text_sha256: str | None = None
     if args.deck_text:
-        try:
-            with open(args.deck_text, "rb") as handle:
-                deck_text_sha256 = hashlib.sha256(handle.read()).hexdigest()
-        except OSError as exc:
-            return _reject("DECK_TEXT_UNREADABLE", f"cannot read --deck-text {args.deck_text!r}: {exc}")
+        deck_text_sha256, refusal = _deck_text_file.stamp(args.deck_text, args.run_id)
+        if refusal is not None:
+            return _reject(refusal["code"], refusal["message"])
 
     metadata: Any = data.get("metadata")
     if not isinstance(metadata, dict):

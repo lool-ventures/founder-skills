@@ -94,3 +94,33 @@ def run_id_of(path: str | os.PathLike[str]) -> str | None:
     if front is None:
         return None
     return front.get("run_id")
+
+
+def stamp(path: str | os.PathLike[str], run_id: str) -> tuple[str | None, dict[str, str] | None]:
+    """(the body's sha256, None) for this run's deck text, else (None, a refusal).
+
+    The bytes are read once so the hash is over exactly what the front matter was read from. A file
+    that cannot be read or decoded, that carries no front matter, or whose front matter names another
+    or no run is refused by code rather than raising. Pure: prints nothing.
+    """
+    try:
+        with open(path, "rb") as handle:
+            data = handle.read()
+    except OSError as exc:
+        return None, {"code": "DECK_TEXT_UNREADABLE", "message": f"cannot read deck_text.md: {exc}"}
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        return None, {"code": "DECK_TEXT_UNREADABLE", "message": f"deck_text.md is not UTF-8: {exc}"}
+    front, _ = split(text)
+    if front is None:
+        return None, {"code": "DECK_TEXT_INVALID", "message": "deck_text.md carries no front matter"}
+    found = front.get("run_id")
+    if found != run_id:
+        return None, {
+            "code": "DECK_TEXT_OTHER_RUN",
+            "message": (
+                f"deck_text.md belongs to run {found!r}, not {run_id!r}; run Step 2's deck_text.py again for this run"
+            ),
+        }
+    return body_sha256(data), None

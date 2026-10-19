@@ -38,19 +38,21 @@ _CLEANABLE_NAMES = {
     "report.html",
     "coaching_commentary.json",  # Context-B coaching scratch, now staged under the review dir (F4)
     "compose_result.json",  # compose's record of its last exit; an earlier run's is not this run's
+    "deck_text.md",
     # gate_state.json is handled separately: it must persist across a gate
     # round-trip (same run_id) but be deleted when --clean runs for a fresh
     # run (resume is false). See _read_gate_state / the --clean block below.
 }
 _GATE_STATE_NAME = "gate_state.json"
 
-# THE PIPELINE'S OWN CHECKPOINTS, each stamped `metadata.run_id` by its producer. On a `--clean` that is not
-# already keeping everything (no answered gate of this run, no ledger), one of these stamped with THIS run's
-# id is still this run's work and is kept; anything unstamped, unreadable or another run's is removed as
-# before. This trusts run-id equality, as the answered-gate path does: a driver that reuses one `--run-id`
-# for a different deck inherits the earlier deck's checkpoints, so every review needs a fresh id. The
-# deliverables and the coaching scratch are not here: compose rebuilds them whole, and keeping a report.json
-# beside a removed report.md would leave a half pair.
+# THE PIPELINE'S OWN CHECKPOINTS. The JSON ones are stamped `metadata.run_id` by their producer;
+# `deck_text.md` is stamped in its front matter. On a `--clean` that is not already keeping everything
+# (no answered gate of this run, no ledger), one of these stamped with THIS run's id is still this
+# run's work and is kept; anything unstamped, unreadable or another run's is removed as before. This
+# trusts run-id equality, as the answered-gate path does: a driver that reuses one `--run-id` for a
+# different deck inherits the earlier deck's checkpoints, so every review needs a fresh id. The
+# deliverables and the coaching scratch are not here: compose rebuilds them whole, and keeping a
+# report.json beside a removed report.md would leave a half pair.
 _CHECKPOINT_NAMES = frozenset(
     {
         "deck_inventory.json",
@@ -60,6 +62,7 @@ _CHECKPOINT_NAMES = frozenset(
         "ledger.json",
         "second_read.json",
         "reconciliation.json",
+        "deck_text.md",
     }
 )
 
@@ -76,6 +79,7 @@ class UnreadableGate(Exception):
 # decision should not rest on a single choke point. IMPORTED rather than restated — a
 # hand-copied pair here is a fourth copy waiting to drift from the other three.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _deck_text_file  # noqa: E402
 import _run_ref  # noqa: E402
 from gate_state import gate_action, validate_answered_gate  # noqa: E402
 
@@ -173,7 +177,12 @@ def _mirror_stage(review_dir: str, gate_id: str) -> str | None:
 
 
 def _stamped_with(path: str, run_id: str) -> bool:
-    """True only when `path` parses as a JSON object whose `metadata.run_id` is `run_id`. Fails toward removal."""
+    """True only when `path` carries `run_id` in the place its producer stamps it. Fails toward removal.
+
+    JSON checkpoints carry `metadata.run_id`; `deck_text.md` carries it in its front matter.
+    """
+    if path.endswith(".md"):
+        return _deck_text_file.run_id_of(path) == run_id
     try:
         with open(path, encoding="utf-8") as f:
             data = json.load(f)

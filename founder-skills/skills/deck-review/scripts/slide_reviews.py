@@ -15,7 +15,15 @@ import re
 import sys
 from typing import Any
 
+import _deck_text_file
 from _artifact_writer import ArtifactValidationError, load_schema, write_artifact
+
+
+def _reject(code: str, message: str) -> int:
+    """A loud refusal: one JSON diagnostic on stdout, one line on stderr, `-o` untouched."""
+    sys.stdout.write(json.dumps({"status": "rejected", "code": code, "message": message}) + "\n")
+    print(f"Error ({code}): {message}; nothing was written", file=sys.stderr)
+    return 1
 
 
 def _check_reconciliation(path: str, run_id: str) -> tuple[str | None, dict[str, Any]]:
@@ -175,6 +183,7 @@ def main() -> int:
         required=True,
         help="reconciliation.json for this run; the numeric chain must have run before slide reviews",
     )
+    p.add_argument("--deck-text", help="deck_text.md; its body hash is stamped into metadata")
     p.add_argument("--pretty", action="store_true")
     args = p.parse_args()
     # FIRST: an output naming one of this step's own input files is refused before anything is written.
@@ -187,7 +196,7 @@ def main() -> int:
     _run_ref.refuse_not_this_runs(
         os.path.dirname(os.path.abspath(args.output)) if args.output else None,
         args.run_id,
-        [args.reconciliation],
+        [args.reconciliation, args.deck_text],
         noun="review dir",
     )
 
@@ -195,6 +204,12 @@ def main() -> int:
     if gate_error:
         print(f"Error: {gate_error}", file=sys.stderr)
         return 1
+
+    deck_text_sha256: str | None = None
+    if args.deck_text:
+        deck_text_sha256, problem = _deck_text_file.stamp(args.deck_text, args.run_id)
+        if problem is not None:
+            return _reject(problem["code"], problem["message"])
 
     raw = sys.stdin.read()
     try:
@@ -217,8 +232,12 @@ def main() -> int:
     )
 
     meta = data.get("metadata")
-    meta = {k: v for k, v in meta.items() if k != "read_token"} if isinstance(meta, dict) else {}
+    meta = (
+        {k: v for k, v in meta.items() if k not in ("read_token", "deck_text_sha256")} if isinstance(meta, dict) else {}
+    )
     meta["read_token"] = read_token(args.run_id, data)
+    if deck_text_sha256 is not None:
+        meta["deck_text_sha256"] = deck_text_sha256
     data = {**data, "metadata": meta}
 
     try:
