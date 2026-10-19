@@ -940,3 +940,55 @@ def test_the_five_convertible_periods_are_all_accepted() -> None:
             out = os.path.join(d, "ledger.json")
             rc, _, err = _run({"figures": [_fig(), _fig(id="x", value=9000, raw="$9K", period=period)]}, ["-o", out])
         assert rc == 0, f"{period!r} is convertible by the engine but refused by the schema: {err}"
+
+
+# ---------------------------------------------------------------------------
+# Basis points. "30 bps" is 0.3%, but every grammar read the bare 30, so the CORRECT value
+# 0.3 was refused as disagreeing with the raw while 30 (100x too big) was accepted.
+# ---------------------------------------------------------------------------
+
+
+def _bps_fig(raw: str, value: float, unit_kind: str = "percent", **over: object) -> dict:
+    fig = _fig(
+        id="take_rate",
+        value=value,
+        raw=raw,
+        unit_kind=unit_kind,
+        label="take rate",
+        currency=None,
+        quote=f"take rate of {raw}",
+    )
+    fig.update(over)
+    return fig
+
+
+@pytest.mark.parametrize(
+    ("raw", "value"),
+    [
+        ("30 bps", 0.3),
+        ("~25 basis points", 0.25),
+        ("25–50 bps", 0.25),
+        ("25–50 bps", 0.5),
+    ],
+)
+def test_a_basis_point_figure_is_recorded_as_a_percent(raw: str, value: float) -> None:
+    rc, _, err = _run({"figures": [_bps_fig(raw, value)]})
+    assert rc == 0, f"{raw!r} with its correct value {value} was rejected: {err}"
+
+
+def test_a_basis_point_value_100x_too_big_names_the_percent_to_record() -> None:
+    rc, _, err = _run({"figures": [_bps_fig("30 bps", 30)]})
+    assert rc != 0
+    assert "record value 0.3" in err, err
+
+
+def test_a_basis_point_figure_with_a_non_percent_unit_is_refused_by_name() -> None:
+    rc, _, err = _run({"figures": [_bps_fig("30 bps", 30, unit_kind="count")]})
+    assert rc != 0
+    assert "a basis-point figure is a percent" in err, err
+
+
+def test_ordinary_percent_and_money_figures_are_untouched_by_the_basis_point_rule() -> None:
+    """Regression: no raw without a basis-point unit may move."""
+    rc, _, err = _run({"figures": [_fig(value=3_000_000, raw="$3M", quote="$3M ARR"), _bps_fig("30%", 30)]})
+    assert rc == 0, err

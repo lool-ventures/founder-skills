@@ -2626,3 +2626,56 @@ def test_an_implied_base_prints_in_the_figures_own_currency_and_scale(
     p = fig("12%", 12, "percent", label="share of revenue", id="p")
     r = compute({"operator": "implied_base", "operands": ["m", "p"], "kind": "derived_ratio"}, {"m": m, "p": p})
     assert r.rendered.endswith(f"implies a total of about {shown}"), r.rendered
+
+
+# --------------------------------------------------------------------------
+# Basis points. "30 bps" is 0.3%, and every grammar now scales it by a hundredth -- which
+# is what lets the correct value 0.3 be recorded, and computed, as the percent it is.
+# --------------------------------------------------------------------------
+
+
+def test_a_basis_point_range_parses_as_a_percent() -> None:
+    assert parse_range("25–50 bps") == pytest.approx((0.25, 0.5))
+
+
+def test_a_basis_point_raw_scales_by_a_hundredth() -> None:
+    assert _raw_scale("30 bps") == pytest.approx(0.01)
+
+
+def test_a_basis_point_tolerance_is_not_the_old_half_value_floor() -> None:
+    """The precision floor read "30 bps" as 30, so tolerance floored at 0.5 -- five times a
+    0.3 percent figure. The basis-point scale removes it."""
+    assert figure_tolerance(fig("~30 bps", 0.3, "percent")) < 0.1
+
+
+def _bps_product(stated: str, value: float) -> Relation:
+    balance = fig("$2T", 2e12, "money", label="total market", id="bal")
+    rate = fig("40 bps", 0.4, "percent", label="take rate", id="rate", period="year")
+    expected = fig(stated, value, "money", label="revenue", id="e", period="year")
+    return _cmp("product", ["bal", "rate"], "e", {"bal": balance, "rate": rate, "e": expected})
+
+
+def test_a_balance_times_a_basis_point_rate_confirms_the_stated_money() -> None:
+    """2e12 x 40 bps = 8e9; the product is money, not 2e12 x 0.4."""
+    r = _bps_product("$8B", 8e9)
+    assert r.computed == pytest.approx(8e9)
+    assert r.verdict == "confirmation", r.rendered
+
+
+def test_a_balance_times_a_basis_point_rate_contradicts_a_wrong_stated_money() -> None:
+    assert _bps_product("$800B", 8e11).verdict == "contradiction"
+
+
+def test_ledger_and_reconcile_agree_on_a_basis_point_raw() -> None:
+    """One shared grammar: the ledger's magnitude is the range's low end, or else the
+    mantissa at the basis-point scale."""
+    import ledger  # type: ignore[import-not-found]
+
+    for raw in ("30 bps", "~25 basis points", "25–50 bps"):
+        magnitude = ledger._parsed_magnitude(raw)
+        rng = parse_range(raw)
+        if rng is not None:
+            assert magnitude == pytest.approx(rng[0]), raw
+        else:
+            mantissa = float(re.search(r"\d+", raw).group())  # type: ignore[union-attr]
+            assert magnitude == pytest.approx(mantissa * 0.01), raw

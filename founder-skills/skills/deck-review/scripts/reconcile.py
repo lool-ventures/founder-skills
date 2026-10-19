@@ -364,6 +364,28 @@ explicit "~" is the author overriding that concern in the other direction.
 """
 
 
+# A BASIS POINT IS A PERCENT IN DIFFERENT CLOTHES, AND ITS FACE VALUE IS 100x TOO BIG. "30
+# bps" is 0.3%, yet every grammar above reads the mantissa as a bare 30, so the CORRECT
+# value 0.3 is refused as disagreeing with a raw that "reads as 30" while the 100x-wrong 30
+# is accepted. The test is whole-WORD, so "bp"/"bps" cannot be read inside another token,
+# and "basis points" -- two words -- gets its own pattern rather than an entry in `_SCALE` /
+# `_SCALE_WORDS`, which know single suffix tokens only.
+_BPS_RE = re.compile(r"\bbasis\s+points?\b", re.I)
+_BPS_ABBREV_RE = re.compile(r"\bbps?\b", re.I)
+
+
+def bps_factor(raw: str) -> float:
+    """0.01 for a raw written in basis points, else 1.0. See `_BPS_RE` above.
+
+    The scale every grammar multiplies in, so a basis-point figure is recorded and computed
+    as the percent it is: applied in `_raw_scale` (hence `implied_tolerance` and the ledger's
+    `_parsed_magnitude`) and to both ends in `parse_range`. `_precision` is deliberately left
+    alone -- it is scale-free by design.
+    """
+    text = numeral_form(raw)
+    return 0.01 if _BPS_RE.search(text) or _BPS_ABBREV_RE.search(text) else 1.0
+
+
 def _raw_scale(raw: str) -> float:
     """The scale multiplier written on a raw string, preferring a range's shared suffix.
 
@@ -373,12 +395,14 @@ def _raw_scale(raw: str) -> float:
     that is 26% of every ledger.
     """
     raw = numeral_form(raw)
+    # A basis-point unit is a scale like any other, so it rides every return path below.
+    factor = bps_factor(raw)
     rng = _RANGE_RE.search(raw)
     if rng and rng.group("suf"):
-        return _SCALE.get(rng.group("suf").lower(), 1.0)
+        return _SCALE.get(rng.group("suf").lower(), 1.0) * factor
     m = _NUM_RE.search(raw)
     if not m:
-        return 1.0
+        return factor
     scale = _SCALE.get((m.group("suf") or "").lower(), 1.0)
     # Scientific notation is a scale like any other: "$20×10⁶" is twenty million, and
     # reading it as a bare 20 was the same admit-the-error direction as an unknown suffix.
@@ -389,7 +413,7 @@ def _raw_scale(raw: str) -> float:
     if exponent:
         with contextlib.suppress(ValueError):
             scale *= 10 ** int(exponent.translate(_SUPERSCRIPT_DIGITS))
-    return scale
+    return scale * factor
 
 
 def implied_tolerance(raw: str) -> float:
@@ -462,7 +486,8 @@ def parse_range(raw: str) -> tuple[float, float] | None:
     m = _RANGE_RE.search(numeral_form(raw))
     if not m:
         return None
-    scale = _SCALE.get((m.group("suf") or "").lower(), 1.0)
+    # A basis-point unit scales BOTH ends, like any other suffix. See `bps_factor`.
+    scale = _SCALE.get((m.group("suf") or "").lower(), 1.0) * bps_factor(raw)
     lo = float(strip_group_marks(m.group("a"))) * scale
     hi = float(strip_group_marks(m.group("b"))) * scale
     return (lo, hi) if lo <= hi else (hi, lo)

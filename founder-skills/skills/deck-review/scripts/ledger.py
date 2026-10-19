@@ -44,6 +44,7 @@ from reconcile import (  # type: ignore[import-not-found]  # noqa: E402
     MONEY,
     _precision,
     _raw_scale,
+    bps_factor,
     numeral_form,
     parse_range,
     quote_is_identifying,
@@ -301,6 +302,27 @@ def _ambiguous_message(where: str, raw: str, parsed: float | None, value: float)
     )
 
 
+def _bps_remedy(raw: str) -> str:
+    """What to record instead, for a basis-point raw recorded as a percent.
+
+    A BASIS POINT IS A PERCENT TIMES 100, and the number in the message is built from the
+    raw's own parsed magnitude, so it always names the figure the slide prints rather than a
+    value hard-coded here.
+    """
+    factor = bps_factor(raw)
+    rng = parse_range(raw)
+    if rng is not None:
+        points = f"{_printed(rng[0] / factor)}–{_printed(rng[1] / factor)}"
+        return (
+            f"{points} basis points is {_printed(rng[0])}–{_printed(rng[1])} percent; "
+            f"record value {_printed(rng[0])} or {_printed(rng[1])}"
+        )
+    parsed = _parsed_magnitude(raw)
+    if parsed is None:
+        return "record the figure's value as a percent"
+    return f"{_printed(parsed / factor)} basis points is {_printed(parsed)} percent; record value {_printed(parsed)}"
+
+
 def _reads_as(observed: float, end: float, relative: float) -> bool:
     """Is `observed` a reading of one printed number, within the raw's own window? Zero absolutely."""
     if end == 0:
@@ -392,6 +414,16 @@ def validate_ledger(data: dict[str, Any], total_slides: int | None = None) -> tu
                 f"record what the slide prints, or omit the figure"
             )
 
+        # A BASIS-POINT FIGURE IS A PERCENT, and its own unit says so. The scale check below
+        # reads the mantissa through `_raw_scale`, which now applies `bps_factor`, so a
+        # bps figure recorded as a percent validates; recording it as money or a count is
+        # the mismatch this refuses, by name, whatever its value.
+        if isinstance(raw, str) and unit_kind != "percent" and bps_factor(raw) != 1.0:
+            errors.append(
+                f"{where} raw {raw!r} is written in basis points — a basis-point figure is a percent; "
+                f"set unit_kind to 'percent' and record its value as a percent"
+            )
+
         # A money figure with no currency divides fine and compares meaninglessly.
         if unit_kind == MONEY and not fig.get("currency"):
             warnings.append(f"{where} is money with no currency; cross-currency relations will be refused")
@@ -449,6 +481,11 @@ def validate_ledger(data: dict[str, Any], total_slides: int | None = None) -> tu
                 printed = ", ".join(f"{v:g}" for v in sorted(allowed)) or "nothing numeric"
                 errors.append(f"{where} value {value!r} is not a date the raw {raw!r} states (it states {printed})")
         elif value is not None and isinstance(raw, str):
+            is_bps = bps_factor(raw) != 1.0
+            if is_bps and unit_kind != "percent":
+                # The unit-kind error above already says what to fix; a scale-disagreement
+                # message here would only restate it in a vocabulary the figure is not in.
+                continue
             parsed = _parsed_magnitude(raw)
             rng = parse_range(raw)
             if rng is not None:
@@ -463,7 +500,12 @@ def validate_ledger(data: dict[str, Any], total_slides: int | None = None) -> tu
                 precision = _precision(span_text.group(0) if span_text else raw)
                 relative = min(precision[0] / precision[1], CAP) if precision and precision[1] else 0.0
                 if not any(_reads_as(abs(value), end, relative) for end in rng):
-                    if _ambiguous_suffix(raw, value, unit_kind, fig.get("currency")):
+                    if is_bps:
+                        errors.append(
+                            f"{where} value {value!r} disagrees with raw {raw!r}, a basis-point range — "
+                            f"{_bps_remedy(raw)}"
+                        )
+                    elif _ambiguous_suffix(raw, value, unit_kind, fig.get("currency")):
                         errors.append(_ambiguous_message(where, raw, parsed, value))
                     else:
                         ends = [e for e in rng if e] or [0.0]
@@ -515,7 +557,12 @@ def validate_ledger(data: dict[str, Any], total_slides: int | None = None) -> tu
                 relative = min(precision[0] / precision[1], CAP) if precision and precision[1] else 0.0
                 if observed == 0 or abs(observed - parsed) / parsed > relative:
                     ratio = observed / parsed if parsed else 0
-                    if _ambiguous_suffix(raw, value, unit_kind, fig.get("currency")):
+                    if is_bps:
+                        # A BASIS POINT IS NOT A SCALE SLIP TOLD TO RESCALE. The 100x gap
+                        # here is exactly the notation's own, so name the percent the raw
+                        # states instead of asking the model to infer it from "full scale".
+                        errors.append(f"{where} value {value!r} disagrees with raw {raw!r}: {_bps_remedy(raw)}")
+                    elif _ambiguous_suffix(raw, value, unit_kind, fig.get("currency")):
                         # NOT a scale error, and the usual advice would make it one. A real
                         # deck stated tower heights as "200-400m" and the model recorded 200
                         # with a label saying "(metres)" -- correct, and "record at full
