@@ -1011,7 +1011,8 @@ def _legacy_image_only_checklist_for_viz() -> dict:
             item["status"] = "not_applicable"
             item["evidence"] = "Auto-gated: not_applicable — input_quality=image_only"
     result["summary"] = ck._recompute_summary(result["items"])
-    return result
+    legacy: dict = result
+    return legacy
 
 
 def test_image_only_callout_appears_for_image_only_inventory() -> None:
