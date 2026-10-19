@@ -51,3 +51,6 @@ cowork-tests/*-critique.json
 cowork-canary-hooks.log
 cowork-canary-report.md
 cowork-canary-facts.json
+
+# A local OpenCode delegation policy; kept on each machine, never tracked.
+opencode.json
