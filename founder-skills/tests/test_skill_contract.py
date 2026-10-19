@@ -1661,7 +1661,10 @@ SKILL_MD_CEILING: dict[str, int] = {
     # conversion block prints its arguments, the paste staging and its warnings; Step 3.6's unvalidated
     # `python3 -c` becomes `second_read.py`; the ledger, second-read and slide-review pipes stamp the deck
     # text; `DECK_TEXT_STAMP_MISSING` / `DECK_TEXT_MISMATCH` get their remedies; the resume rule names it.
-    "deck-review": 118_476,
+    # 118,476 -> 119,018 (+542 B) on 2026-10-19: LEDGER_EXTRACTION records a printed months multiplier
+    # as its own `months` figure, and RELATION_PROPOSAL proposes a monthly figure times it as one product
+    # against the stated annual or quarterly total, which the engine now reads as that period's total.
+    "deck-review": 119_018,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.

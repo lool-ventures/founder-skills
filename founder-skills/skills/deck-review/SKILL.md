@@ -813,6 +813,9 @@ year (`2025`), `FY25`, `Q4 2025`, or a day (`October 4, 2026`, `2026-10-04`) —
 year). A figure written in basis points (`30 bps`) is a percent: set `unit_kind` to
 `percent` and record `value` as a percent (`0.3`). A fee or rate charged per year also
 carries `period: "year"`.
+When the deck multiplies a monthly figure by a number of months it prints ("× 12",
+"12 months"), record that multiplier as its own figure: `unit_kind` `count`, `label`
+exactly `months`, `raw` as printed. Never fold it into another figure.
 All string values must be JSON-escaped; the file must parse with a strict JSON parser.
 Then return ONLY the receipt JSON in your final assistant message:
 {"status": "complete", "output_path": "<echo of OUTPUT_PATH>"}
@@ -938,6 +941,10 @@ Propose a relation whenever the deck implies one an investor would run:
     inferred.
   - a price the deck states beside the quantity it states, where the product is a
     figure the deck also states (seats × price = ARR): propose `product`
+  - a monthly figure times the deck's `months` figure (and any count it is per) against
+    the annual or quarterly total the deck states: one `product`. Operands are ledger
+    ids only; when the monthly figure is a sum the deck never states, propose that sum
+    against its own stated total instead
   - a balance and an annual fee rate against a stated annual fee pool: product of the
     balance and the rate
   - a whole, a part removed from it, and a stated remainder ("X; of that, A ...; what
