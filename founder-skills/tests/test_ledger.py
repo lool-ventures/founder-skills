@@ -27,6 +27,10 @@ SCRIPTS = os.path.join(
 SCRIPT = os.path.join(SCRIPTS, "ledger.py")
 SCHEMAS = os.path.join(os.path.dirname(SCRIPTS), "references", "schemas")
 
+sys.path.insert(0, SCRIPTS)
+
+import _deck_text_file  # type: ignore[import-not-found]  # noqa: E402
+
 
 def _fig(**over: object) -> dict:
     base = {
@@ -1100,3 +1104,109 @@ def test_run_id_is_still_required_when_writing_the_ledger() -> None:
     assert rc == 2
     assert out == ""
     assert "the following arguments are required: --run-id" in err, err
+
+
+# ---------------------------------------------------------------------------
+# `--deck-text`: the artifact records which deck text its figures were read from, so a
+# ledger left beside a later-edited deck text is detectable downstream.
+# ---------------------------------------------------------------------------
+
+
+def _write_deck_text(directory: str, run_id: str = "r1") -> tuple[str, bytes]:
+    path = os.path.join(directory, "deck_text.md")
+    data = f"---\nrun_id: {run_id}\nsource: test\n---\nSLIDE 1: INVENTED\nA made-up line\n".encode()
+    with open(path, "wb") as fh:
+        fh.write(data)
+    return path, data
+
+
+def test_deck_text_sha_is_recorded_on_the_printed_result_and_the_written_ledger() -> None:
+    with tempfile.TemporaryDirectory() as d:
+        deck, data = _write_deck_text(d)
+        expected = _deck_text_file.body_sha256(data)
+
+        rc, out, err = _run({"figures": [_fig()]}, ["--deck-text", deck])
+        assert rc == 0, err
+        printed = json.loads(out)
+        assert printed["metadata"]["deck_text_sha256"] == expected
+        assert printed["metadata"]["run_id"] == "r1"
+
+        out_path = os.path.join(d, "ledger.json")
+        rc, _, err = _run({"figures": [_fig()]}, ["--deck-text", deck, "-o", out_path])
+        assert rc == 0, err
+        with open(out_path, encoding="utf-8") as fh:
+            written = json.load(fh)
+    assert written["metadata"]["deck_text_sha256"] == expected
+    assert written["metadata"]["run_id"] == "r1"
+
+
+def test_without_deck_text_no_sha_appears_in_metadata() -> None:
+    rc, out, err = _run({"figures": [_fig()]})
+    assert rc == 0, err
+    assert "deck_text_sha256" not in json.loads(out)["metadata"]
+
+    with tempfile.TemporaryDirectory() as d:
+        out_path = os.path.join(d, "ledger.json")
+        rc, _, err = _run({"figures": [_fig()]}, ["-o", out_path])
+        assert rc == 0, err
+        with open(out_path, encoding="utf-8") as fh:
+            written = json.load(fh)
+    assert "deck_text_sha256" not in written["metadata"]
+
+
+def test_a_piped_ledger_sha_is_not_carried_into_the_result() -> None:
+    """The hash states which deck text THIS run read, so it must not be echoed from stdin.
+
+    A ledger staged against another deck text carries its sha in its own metadata. Without
+    `--deck-text` this run has read no deck text, so recording that value would claim a
+    provenance this run never established.
+    """
+    foreign = "c" * 64
+    payload = {"figures": [_fig()], "metadata": {"deck_text_sha256": foreign}}
+
+    rc, out, err = _run(payload)
+    assert rc == 0, err
+    assert "deck_text_sha256" not in json.loads(out)["metadata"]
+
+    with tempfile.TemporaryDirectory() as d:
+        out_path = os.path.join(d, "ledger.json")
+        rc, _, err = _run(payload, ["-o", out_path])
+        assert rc == 0, err
+        with open(out_path, encoding="utf-8") as fh:
+            written = json.load(fh)
+        assert "deck_text_sha256" not in written["metadata"]
+
+        deck, data = _write_deck_text(d)
+        expected = _deck_text_file.body_sha256(data)
+        out_path = os.path.join(d, "stamped.json")
+        rc, _, err = _run(payload, ["--deck-text", deck, "-o", out_path])
+        assert rc == 0, err
+        with open(out_path, encoding="utf-8") as fh:
+            stamped = json.load(fh)
+    assert stamped["metadata"]["deck_text_sha256"] == expected
+    assert stamped["metadata"]["deck_text_sha256"] != foreign
+
+
+def test_a_deck_text_from_another_run_is_refused_and_leaves_the_output_untouched() -> None:
+    with tempfile.TemporaryDirectory() as d:
+        deck, _ = _write_deck_text(d, run_id="r2")
+        out_path = os.path.join(d, "ledger.json")
+        original = b"a pre-existing ledger\n"
+        with open(out_path, "wb") as fh:
+            fh.write(original)
+
+        rc, out, err = _run({"figures": [_fig()]}, ["--deck-text", deck, "-o", out_path])
+
+        assert rc == 1
+        assert json.loads(out)["code"] == "DECK_TEXT_OTHER_RUN"
+        assert "nothing was written" in err
+        with open(out_path, "rb") as fh:
+            assert fh.read() == original
+
+
+def test_an_unreadable_deck_text_is_refused() -> None:
+    with tempfile.TemporaryDirectory() as d:
+        rc, out, err = _run({"figures": [_fig()]}, ["--deck-text", os.path.join(d, "absent.md")])
+    assert rc == 1
+    assert json.loads(out)["code"] == "DECK_TEXT_UNREADABLE"
+    assert "nothing was written" in err

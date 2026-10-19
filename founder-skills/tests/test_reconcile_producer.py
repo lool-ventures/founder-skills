@@ -1446,3 +1446,95 @@ def test_the_proposed_count_is_accounted_for_across_relations_and_suppressed() -
     )
     verdicts = {r["verdict"] for r in out["relations"]} | set(out["suppressed"])
     assert len(verdicts) >= 2, f"fixture did not produce mixed verdicts: {out['relations']} {out['suppressed']}"
+
+
+# ---------------------------------------------------------------------------
+# The deck-text stamp. Both artifacts record which deck text they were staged against, so a
+# ledger and a second read that disagree about it must not be reconciled silently.
+# ---------------------------------------------------------------------------
+
+_PRIOR_ARTIFACT = b"a pre-existing reconciliation\n"
+
+
+def _run_metadata(
+    *,
+    ledger_metadata: dict | None = None,
+    second_metadata: dict | None = None,
+    with_output: bool = False,
+) -> tuple[int, dict, str, bytes | None]:
+    with tempfile.TemporaryDirectory() as d:
+        lp = os.path.join(d, "ledger.json")
+        sp = os.path.join(d, "second.json")
+        ledger = json.loads(json.dumps(_LEDGER))
+        if ledger_metadata is not None:
+            ledger["metadata"] = ledger_metadata
+        with open(lp, "w", encoding="utf-8") as f:
+            json.dump(ledger, f)
+        second: dict[str, Any] = {"transcript": _TRANSCRIPT, "slides_transcribed": [6]}
+        if second_metadata is not None:
+            second["metadata"] = second_metadata
+        with open(sp, "w", encoding="utf-8") as f:
+            json.dump(second, f)
+        args = [sys.executable, SCRIPT, "--ledger", lp, "--second-read", sp, "--run-id", "r1"]
+        out_path = os.path.join(d, "reconciliation.json")
+        if with_output:
+            with open(out_path, "wb") as f:
+                f.write(_PRIOR_ARTIFACT)
+            args += ["-o", out_path]
+        res = subprocess.run(
+            args, input=json.dumps({"relations": [_TAKE_RATE_RELATION]}), capture_output=True, text=True
+        )
+        after = None
+        if with_output:
+            with open(out_path, "rb") as f:
+                after = f.read()
+    try:
+        parsed = json.loads(res.stdout)
+    except json.JSONDecodeError:
+        parsed = {}
+    return res.returncode, parsed, res.stderr, after
+
+
+def test_differing_deck_text_shas_are_refused_and_leave_the_output_untouched() -> None:
+    rc, out, err, after = _run_metadata(
+        ledger_metadata={"deck_text_sha256": "a" * 64},
+        second_metadata={"deck_text_sha256": "b" * 64},
+        with_output=True,
+    )
+    assert rc == 1
+    assert "DECK_TEXT_MISMATCH" in json.dumps(out)
+    assert "DECK_TEXT_MISMATCH" in err
+    assert after == _PRIOR_ARTIFACT
+
+
+def test_equal_deck_text_shas_reconcile_as_before() -> None:
+    rc, out, err, _ = _run_metadata(
+        ledger_metadata={"deck_text_sha256": "a" * 64},
+        second_metadata={"deck_text_sha256": "a" * 64},
+    )
+    assert rc == 0, err
+    assert out["status"] == "checked"
+
+
+def test_a_missing_sha_on_the_ledger_side_is_refused() -> None:
+    rc, out, err, after = _run_metadata(second_metadata={"deck_text_sha256": "b" * 64}, with_output=True)
+    assert rc == 1
+    assert "DECK_TEXT_STAMP_MISSING" in json.dumps(out)
+    assert "DECK_TEXT_STAMP_MISSING" in err
+    assert "redo the ledger step" in err
+    assert after == _PRIOR_ARTIFACT
+
+
+def test_a_missing_sha_on_the_second_read_side_is_refused() -> None:
+    rc, out, err, after = _run_metadata(ledger_metadata={"deck_text_sha256": "a" * 64}, with_output=True)
+    assert rc == 1
+    assert "DECK_TEXT_STAMP_MISSING" in json.dumps(out)
+    assert "DECK_TEXT_STAMP_MISSING" in err
+    assert "redo the second read step" in err
+    assert after == _PRIOR_ARTIFACT
+
+
+def test_no_sha_on_either_side_reconciles_as_before() -> None:
+    rc, out, err, _ = _run_metadata()
+    assert rc == 0, err
+    assert out["status"] == "checked"

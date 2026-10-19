@@ -3550,6 +3550,15 @@ def _read_json(path: str, label: str) -> tuple[dict[str, Any] | None, str | None
     return data, None
 
 
+def _deck_text_sha(doc: dict[str, Any] | None) -> str | None:
+    """The deck text body hash `doc` was staged against, or None when it records none."""
+    metadata = doc.get("metadata") if isinstance(doc, dict) else None
+    if not isinstance(metadata, dict):
+        return None
+    value = metadata.get("deck_text_sha256")
+    return value if isinstance(value, str) else None
+
+
 def _print_downgrade_stanza(recon_path: str, ledger_path: str) -> int:
     """Print the interpretation pass's `downgrades` skeleton, ready to fill in.
 
@@ -3661,6 +3670,26 @@ def main() -> int:
     second, err = _read_json(args.second_read, "second read")
     if err:
         return _fail(err)
+
+    ledger_sha = _deck_text_sha(ledger)
+    second_sha = _deck_text_sha(second)
+    # Both absent is a run staged before the deck text was stamped; one absent is a step that ran
+    # without --deck-text, which would otherwise switch the comparison below off in silence.
+    if (ledger_sha is None) != (second_sha is None):
+        stamped, unstamped = ("ledger", "second read") if ledger_sha is not None else ("second read", "ledger")
+        sha = ledger_sha or second_sha or ""
+        return _fail(
+            f"DECK_TEXT_STAMP_MISSING: the {stamped} records the deck text it was staged against "
+            f"({sha[:12]}) and the {unstamped} records none; redo the {unstamped} step with "
+            f'--deck-text "$REVIEW_DIR/deck_text.md"'
+        )
+    if ledger_sha is not None and second_sha is not None and ledger_sha != second_sha:
+        return _fail(
+            f"DECK_TEXT_MISMATCH: the ledger was staged against deck text {ledger_sha[:12]} and the "
+            f"second read against {second_sha[:12]}; rewrite deck_text.md, then redo whichever step "
+            f"used the old one"
+        )
+
     inventory = None
     if args.inventory:
         inventory, err = _read_json(args.inventory, "inventory")

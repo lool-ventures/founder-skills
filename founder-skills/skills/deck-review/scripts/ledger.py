@@ -35,6 +35,7 @@ from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import _deck_text_file  # type: ignore[import-not-found]  # noqa: E402
 from _artifact_writer import load_schema, write_artifact  # type: ignore[import-not-found]  # noqa: E402
 from reconcile import (  # type: ignore[import-not-found]  # noqa: E402
     _NUM_RE,
@@ -661,6 +662,7 @@ def _print_slides(path: str) -> int:
 def main() -> int:
     ap = argparse.ArgumentParser(description="Validate a deck's extracted numeric ledger.")
     ap.add_argument("--inventory", help="deck_inventory.json; enables the slide-bounds check")
+    ap.add_argument("--deck-text", help="deck_text.md; its body hash is recorded in metadata")
     ap.add_argument("--run-id")
     ap.add_argument("-o", "--output")
     ap.add_argument("--pretty", action="store_true")
@@ -694,7 +696,7 @@ def main() -> int:
     _run_ref.refuse_not_this_runs(
         os.path.dirname(os.path.abspath(args.output)) if args.output else None,
         args.run_id,
-        [args.inventory],
+        [args.inventory, args.deck_text],
         noun="review dir",
     )
 
@@ -737,11 +739,21 @@ def main() -> int:
             print(f"Error: ledger validation failed: {err}", file=sys.stderr)
         return 1
 
+    deck_text_sha256: str | None = None
+    if args.deck_text:
+        deck_text_sha256, refusal = _deck_text_file.stamp(args.deck_text, args.run_id)
+        if refusal is not None:
+            print(json.dumps({"status": "rejected", "code": refusal["code"], "message": refusal["message"]}))
+            print(f"Error ({refusal['code']}): {refusal['message']}; nothing was written", file=sys.stderr)
+            return 1
+
     result: dict[str, Any] = {
         "figures": data["figures"],
         "figures_total": len(data["figures"]),
         "validation": {"status": "valid", "errors": [], "warnings": warnings},
     }
+    if deck_text_sha256 is not None:
+        result.setdefault("metadata", {})["deck_text_sha256"] = deck_text_sha256
 
     if args.output:
         schema_path = pathlib.Path(__file__).resolve().parents[1] / "references" / "schemas" / "ledger.schema.json"
@@ -755,7 +767,7 @@ def main() -> int:
         print(json.dumps(receipt, indent=2))
         return 0
 
-    result["metadata"] = {"run_id": args.run_id}
+    result.setdefault("metadata", {})["run_id"] = args.run_id
     print(json.dumps(result, indent=2 if args.pretty else None))
     return 0
 
