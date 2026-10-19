@@ -940,6 +940,7 @@ def _section_executive_summary(
         )
 
     lines.extend(_ai_classification_note(inventory))
+    lines.extend(_image_only_note(inventory, checklist))
     lines.extend(_unreviewed_design_note(checklist))
     lines.extend(_scope_note(checklist))
     return "\n".join(lines) + "\n"
@@ -1131,6 +1132,35 @@ def _unreviewed_design_note(checklist: dict[str, Any] | None) -> list[str]:
         f"\n> **{len(gated)} design criteria could not be reviewed.** {body} Those criteria are "
         "excluded from the score rather than counted against you."
     ]
+
+
+# `input_quality: "image_only"` means the deck rendered but has no text layer, so the words and
+# figures in it were read from the images by the model, with no text to check them against. A founder should be told
+# about wherever a figure is quoted back to them. Byte-identical in visualize.py, which pins the
+# pair in the test suite.
+IMAGE_ONLY_NOTE = (
+    "This deck's slides are images with no text layer, so its words and figures were read from the "
+    "images. Check any figure quoted here against your deck."
+)
+
+
+def _image_only_note(inventory: dict[str, Any] | None, checklist: dict[str, Any] | None) -> list[str]:
+    """Say, in the summary, that the deck's words and figures were read from images.
+
+    An image-only deck now renders, so its design is scored rather than gated -- but every
+    quotation in this report was read off a picture, and a misread figure presented back
+    as the founder's own is worse than a missing one. The disclosure keys on the inventory's
+    `input_quality`, the field that records how the deck was read.
+
+    Excepted: a checklist stamped by the legacy `quality:image_only` gate already carries the
+    image-only sentence in its design note, so emitting this too would say it twice.
+    """
+    quality = str(_as_dict(inventory).get("input_quality") or "").strip().lower()
+    if quality != "image_only":
+        return []
+    if design_gate_reason(checklist) == "quality:image_only":
+        return []
+    return [f"\n> **Read from images.** {IMAGE_ONLY_NOTE}"]
 
 
 AUTO_SATISFY_DISCLOSURE = (

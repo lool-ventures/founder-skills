@@ -546,6 +546,23 @@ def _load_compose_report_module() -> Any:
     return mod
 
 
+def _load_visualize_module() -> Any:
+    """Import deck-review's visualize.py as a module, to compare constants the two renderers
+    must keep byte-identical. Its sibling imports (_dr_score_view, _notes, _reconciliation_prose,
+    _ui) need DECK_REVIEW_DIR on sys.path, same as _load_compose_report_module."""
+    import importlib.util
+
+    if DECK_REVIEW_DIR not in sys.path:
+        sys.path.insert(0, DECK_REVIEW_DIR)
+    path = os.path.join(DECK_REVIEW_DIR, "visualize.py")
+    spec = importlib.util.spec_from_file_location("deck_review_visualize_module", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 def test_skill_md_stage_choice_options_match_stage_profile_enum() -> None:
     """SKILL.md's stage_choice gate (offered when the founder says the detected
     stage is wrong) must offer exactly the stages stage_profile.py's
@@ -4432,6 +4449,81 @@ def test_legacy_image_only_evidence_still_renders() -> None:
     assert note, "legacy image_only evidence must still be disclosed"
     assert mod._DESIGN_GATE_REASONS["quality:image_only"] in note[0]
     assert "reached the review as text" not in note[0], "a deck that rendered is not a text deck"
+
+
+# ---------------------------------------------------------------------------
+# An `image_only` deck's words and figures were read from pictures, and the founder
+# quoting them back deserves to know. The disclosure keys on the inventory's `input_quality`.
+# ---------------------------------------------------------------------------
+
+
+def _compose_md_for_quality(quality: str, checklist: dict | None = None) -> str:
+    """Compose a report for a deck whose `input_quality` is `quality`; return report.md."""
+    inventory = dict(_VALID_INVENTORY)
+    inventory["input_quality"] = quality
+    artifacts: dict[str, dict] = {
+        "deck_inventory.json": inventory,
+        "stage_profile.json": _VALID_PROFILE,
+        "slide_reviews.json": _VALID_REVIEWS,
+        "checklist.json": checklist if checklist is not None else _VALID_CHECKLIST,
+    }
+    rc, data, err = _run_compose(_make_artifact_dir(artifacts))
+    assert rc == 0, err
+    assert data is not None
+    return str(data["report_markdown"])
+
+
+def _legacy_image_only_checklist() -> dict:
+    """A checklist whose design criteria carry the legacy `input_quality=image_only` gate evidence."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("ck_gate_legaio_note", os.path.join(DECK_REVIEW_DIR, "checklist.py"))
+    assert spec and spec.loader
+    ck = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ck)
+    items = [{"id": i["id"], "status": "pass", "evidence": "e"} for i in ck.CHECKLIST_ITEMS]
+    result, errors, _ = ck.validate_checklist(json.loads(json.dumps(items)))
+    assert not errors, errors
+    for item in result["items"]:
+        if item["id"] in ck._DESIGN_CRITERIA_IDS:
+            item["status"] = "not_applicable"
+            item["evidence"] = "Auto-gated: not_applicable — input_quality=image_only"
+    result["summary"] = ck._recompute_summary(result["items"])
+    return result
+
+
+def test_image_only_inventory_is_disclosed_in_report_md() -> None:
+    """An image_only deck's report tells the founder its words and figures were read from images."""
+    mod = _load_compose_report_module()
+    md = _compose_md_for_quality("image_only")
+    assert "Read from images." in md
+    assert mod.IMAGE_ONLY_NOTE in md
+    assert "Check any figure quoted here against your deck." in md
+
+
+def test_image_only_disclosure_is_absent_for_good_and_partial() -> None:
+    """Only image_only gets the note; a good or partially-read deck does not."""
+    mod = _load_compose_report_module()
+    for quality in ("good", "partial"):
+        md = _compose_md_for_quality(quality)
+        assert "Read from images." not in md, quality
+        assert mod.IMAGE_ONLY_NOTE not in md, quality
+
+
+def test_image_only_disclosure_is_suppressed_for_legacy_gate_evidence() -> None:
+    """Legacy `quality:image_only` evidence already carries the image-only design note, so no double."""
+    mod = _load_compose_report_module()
+    legacy = _legacy_image_only_checklist()
+    md = _compose_md_for_quality("image_only", checklist=legacy)
+    assert "Read from images." not in md, "the legacy design note already says the slides are images"
+    assert mod._DESIGN_GATE_REASONS["quality:image_only"] in md
+
+
+def test_image_only_note_is_byte_identical_across_the_two_renderers() -> None:
+    """report.md and report.html must disclose the read from the SAME sentence."""
+    compose = _load_compose_report_module()
+    viz = _load_visualize_module()
+    assert compose.IMAGE_ONLY_NOTE == viz.IMAGE_ONLY_NOTE
 
 
 # ---------------------------------------------------------------------------

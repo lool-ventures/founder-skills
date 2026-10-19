@@ -992,6 +992,63 @@ def test_visualize_legacy_image_only_reason() -> None:
     assert "its slides are images with no readable text layer" in stdout
 
 
+def _legacy_image_only_checklist_for_viz() -> dict:
+    """A checklist whose design criteria carry the legacy `input_quality=image_only` gate evidence."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "ck_viz_legacy_io_note",
+        os.path.join(os.path.dirname(SCRIPT_DIR), "skills", "deck-review", "scripts", "checklist.py"),
+    )
+    assert spec and spec.loader
+    ck = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ck)
+    items = [{"id": i["id"], "status": "pass", "evidence": "e"} for i in ck.CHECKLIST_ITEMS]
+    result, errors, _ = ck.validate_checklist(json.loads(json.dumps(items)))
+    assert not errors, errors
+    for item in result["items"]:
+        if item["id"] in ck._DESIGN_CRITERIA_IDS:
+            item["status"] = "not_applicable"
+            item["evidence"] = "Auto-gated: not_applicable — input_quality=image_only"
+    result["summary"] = ck._recompute_summary(result["items"])
+    return result
+
+
+def test_image_only_callout_appears_for_image_only_inventory() -> None:
+    """The shareable page says the words and figures were read from images."""
+    artifacts = _all_artifacts()
+    artifacts["deck_inventory.json"] = {**_VALID_INVENTORY, "input_quality": "image_only"}
+    d = _make_artifact_dir(artifacts)
+    rc, stdout, stderr = _run_viz(d)
+    assert rc == 0, f"rc={rc}, stderr={stderr}"
+    assert 'data-note="image-only"' in stdout
+    assert "Read from images." in stdout
+    assert "Check any figure quoted here against your deck." in stdout
+
+
+def test_image_only_callout_absent_for_good_inventory() -> None:
+    """A good-quality read gets no callout."""
+    artifacts = _all_artifacts()
+    artifacts["deck_inventory.json"] = {**_VALID_INVENTORY, "input_quality": "good"}
+    d = _make_artifact_dir(artifacts)
+    rc, stdout, stderr = _run_viz(d)
+    assert rc == 0, f"rc={rc}, stderr={stderr}"
+    assert 'data-note="image-only"' not in stdout
+    assert "Read from images." not in stdout
+
+
+def test_image_only_callout_suppressed_for_legacy_gate_evidence() -> None:
+    """Legacy `quality=image_only` evidence already explains the gap, so the callout is skipped."""
+    artifacts = _all_artifacts()
+    artifacts["deck_inventory.json"] = {**_VALID_INVENTORY, "input_quality": "image_only"}
+    artifacts["checklist.json"] = _legacy_image_only_checklist_for_viz()
+    d = _make_artifact_dir(artifacts)
+    rc, stdout, stderr = _run_viz(d)
+    assert rc == 0, f"rc={rc}, stderr={stderr}"
+    assert 'data-note="image-only"' not in stdout
+    assert "its slides are images with no readable text layer" in stdout
+
+
 # ---------------------------------------------------------------------------
 # G2: the authorization boundary sat only on compose_report.py.
 #

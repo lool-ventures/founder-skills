@@ -197,6 +197,14 @@ _CANONICAL_CATEGORIES = [
 # across each other, and `test_deck_review.py` pins the two in sync.
 _GATE_EVIDENCE = "Auto-gated: not_applicable — input_"
 
+# Byte-identical to `compose_report.py`'s `IMAGE_ONLY_NOTE`; the test suite pins the pair. An
+# image-only deck's words and figures were read from pictures, and the founder opening the
+# shareable page is the reader most likely to quote a figure back as their own.
+IMAGE_ONLY_NOTE = (
+    "This deck's slides are images with no text layer, so its words and figures were read from the "
+    "images. Check any figure quoted here against your deck."
+)
+
 
 def _gated_categories(checklist: dict[str, Any] | None) -> set[str]:
     """Categories with nothing left to measure, so no percentage can honestly describe them.
@@ -253,6 +261,28 @@ def _design_gate_note(checklist: dict[str, Any] | None) -> str:
         f"{_esc(why)}, so nothing here judges how the deck looks. They are excluded from the "
         f"score rather than counted against it, and the Design &amp; Readability category is left "
         f"out of the charts above rather than scored on whichever criterion survived.</p>"
+    )
+
+
+def _image_only_callout(inventory: dict[str, Any] | None, checklist: dict[str, Any] | None) -> str:
+    """Header callout: this deck's words and figures were read from images, not a text layer.
+
+    An image-only deck now renders, so design is scored and `_design_gate_note` stays silent --
+    but every quotation on the page was read off a picture. Excepted when a checklist
+    carries the legacy `quality=image_only` gate evidence, whose design note already says the
+    slides are images.
+    """
+    quality = str(_as_dict(inventory).get("input_quality") or "").strip().lower()
+    if quality != "image_only":
+        return ""
+    for item in _as_list(_as_dict(checklist).get("items")):
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("evidence", "")).startswith(_GATE_EVIDENCE + "quality=image_only"):
+            return ""
+    return (
+        '<p class="ui-callout ui-callout--warn" data-note="image-only">'
+        f"<strong>Read from images.</strong> {_esc(IMAGE_ONLY_NOTE)}</p>"
     )
 
 
@@ -1235,6 +1265,9 @@ def compose_html(dir_path: str, stage_note: str = "") -> str:
     body_bits: list[str] = []
     if stage_note:
         body_bits.append(f'<p class="ui-callout ui-callout--warn" data-note="stage">{html.escape(stage_note)}</p>')
+    image_only_note = _image_only_callout(inventory, checklist)
+    if image_only_note:
+        body_bits.append(image_only_note)
     body_bits.append(
         '<p class="dr-framing">Scores and assessments are agent-generated against best-practice frameworks</p>'
     )
