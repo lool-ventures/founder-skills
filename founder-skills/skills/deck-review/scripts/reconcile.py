@@ -145,6 +145,10 @@ class Relation:
     head: str = ""
     unit_word: str = ""
     note: str = ""
+    # "year" | "quarter" when a product read a months multiplier as turning a monthly figure
+    # into that period's total (`_months_multiplier`). Private: read only by the dated-claim
+    # guard in `compute`, never emitted.
+    promoted_period: str | None = None
 
 
 # A single-letter suffix must not be the first letter of a WORD. Without this guard
@@ -2268,6 +2272,73 @@ def _computed_time_unit(r: Relation, real: list[Figure]) -> tuple[str, float] | 
     return units.pop()
 
 
+# A MONTHS MULTIPLIER, read by its label alone. A deck that multiplies a monthly figure by 12
+# states an annual total, and the product's unit algebra kept the monthly period -- so
+# orders per month x a fee x 12 typed as money per MONTH and contradicted the deck's own annual
+# figure by twelve-fold. Only these exact labels are read; anything else ("months of runway",
+# "orders per year", a bare "(months)") is computed exactly as before. The last two name a
+# year and are read only when the multiplier is 12.
+_MONTHS_LABELS = frozenset({"months", "month multiplier", "months multiplier", "number of months", "# of months"})
+_MONTHS_LABELS_YEAR = frozenset({"months per year", "months in a year"})
+_TRAILING_PAREN = re.compile(r"\s*\([^()]*\)\s*$")
+_MONTH_FACTOR = {"month": 1, "quarter": 3, "year": 12}
+# A dated claim that is still a rate: a run-rate figure IS a monthly figure annualised, so a
+# promoted product tests it whatever year it carries.
+_RUN_RATE = re.compile(r"\bARR\b|\bMRR\b|run[- ]rate|annuali[sz]ed", re.I)
+
+
+def _months_label(label: str) -> str:
+    """A label read for the months multiplier: one trailing parenthetical off, trimmed, collapsed, lowercased."""
+    return " ".join(_TRAILING_PAREN.sub("", label or "", count=1).split()).lower()
+
+
+def _months_multiplier(real: list[Figure]) -> tuple[Figure, int, int] | None:
+    """The product's months multiplier as (figure, N, months factor), or None when there is none.
+
+    Every condition must hold, or the product is computed exactly as it always was: exactly one
+    operand carries a period and it is per month; exactly one other operand is a count or a
+    duration written in months, quarters or years, labelled as a months multiplier, a point value
+    with no bound; N, the months it stands for, is a whole number (3 or 12 for a duration); and,
+    with counts, percents and the multiplier set aside, exactly one unit kind is left.
+    """
+    rated = [f for f in real if f.period]
+    if len(rated) != 1 or rated[0].period != "month":
+        return None
+    found: list[tuple[Figure, int]] = []
+    for f in real:
+        if f is rated[0]:
+            continue
+        if f.unit_kind == COUNT:
+            factor = 1
+        elif f.unit_kind == DURATION:
+            unit = written_time_unit(f)
+            if unit is None or unit[0] not in _MONTH_FACTOR:
+                continue
+            factor = _MONTH_FACTOR[unit[0]]
+        else:
+            continue
+        name = _months_label(f.label)
+        if name and (name in _MONTHS_LABELS or name in _MONTHS_LABELS_YEAR):
+            found.append((f, factor))
+    if len(found) != 1:
+        return None
+    m, factor = found[0]
+    if m.lo is not None or m.bound is not None:
+        return None
+    n = m.value * factor
+    if not float(n).is_integer():
+        return None
+    n_int = int(n)
+    if m.unit_kind == DURATION and n_int not in (3, 12):
+        return None
+    if _months_label(m.label) in _MONTHS_LABELS_YEAR and n_int != 12:
+        return None
+    left = [f.unit_kind for f in real if f is not m and f.unit_kind not in (PERCENT, COUNT)]
+    if len(left) != 1:
+        return None
+    return m, n_int, factor
+
+
 def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
     """Compute one proposed relation, or refuse it.
 
@@ -2430,9 +2501,14 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
             r.computed_unit = "dimensionless"
 
     elif r.operator == "product":
+        months = _months_multiplier(real)
+        # A duration multiplier counts in its own unit ("1 year"), so the product is scaled to
+        # months before anything is printed: the operands keep their raw text, the total is right.
+        scale = float(months[2]) if months and months[0].unit_kind == DURATION else 1.0
         acc = 1.0
         for f in real:
             acc *= as_fraction(f)
+        acc *= scale
         r.computed, r.rendered = acc, " × ".join(f.raw for f in real) + f" = {acc:,.2f}".rstrip("0").rstrip(".")
         # INTERVAL arithmetic, as `ratio` does: a product of a range is a range. The corners'
         # min and max, so a negative operand cannot swap the ends.
@@ -2440,6 +2516,7 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
             corners = [1.0]
             for f in real:
                 corners = [c * as_fraction_v(v, f) for c in corners for v in f.span()]
+            corners = [c * scale for c in corners]
             r.span_lo, r.span_hi = min(corners), max(corners)
             _with_range(r)
         # A COUNT IS A MULTIPLIER, NOT A DIMENSION -- same as a percent, and for the same
@@ -2451,9 +2528,24 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
         # own customer count and price refute, and the disagreement was filed as a unit
         # mismatch. An empty survivor list (a product of counts alone) still reads as
         # `mixed`: a count of things is not a typed quantity and must stay untestable.
-        kinds = [f.unit_kind for f in real if f.unit_kind not in (PERCENT, COUNT)]
-        pers = [f.period for f in real if f.period]
-        r.computed_unit = (kinds[0] if len(kinds) == 1 else "mixed") + (f":{pers[0]}" if len(pers) == 1 else "")
+        if months:
+            # A MONTHLY FIGURE TIMES N MONTHS IS A TOTAL, not a monthly rate: per year for 12,
+            # per quarter for 3, and no period at all otherwise.
+            m, n, _ = months
+            kind = next(f.unit_kind for f in real if f is not m and f.unit_kind not in (PERCENT, COUNT))
+            r.promoted_period = {12: "year", 3: "quarter"}.get(n)
+            r.computed_unit = kind + (f":{r.promoted_period}" if r.promoted_period else "")
+            if r.promoted_period:
+                r.reasons.append(
+                    f"read {n} months as one {r.promoted_period}: a monthly figure × {n} is "
+                    f"{'an annual' if n == 12 else 'a quarterly'} figure"
+                )
+            else:
+                r.reasons.append(f"read {m.raw} as {n} months: a monthly figure × {n} is a {n}-month total")
+        else:
+            kinds = [f.unit_kind for f in real if f.unit_kind not in (PERCENT, COUNT)]
+            pers = [f.period for f in real if f.period]
+            r.computed_unit = (kinds[0] if len(kinds) == 1 else "mixed") + (f":{pers[0]}" if len(pers) == 1 else "")
     elif r.operator == "sum":
         sum_kinds = {f.unit_kind for f in real}
         if len(sum_kinds) > 1:
@@ -2616,6 +2708,29 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
         r.untested_claim = f"{exp.raw}{f' ({exp.label})' if exp.label else ''}"
         r.untested_kind = "within_year"
         exp_id = None
+    # A MONTHLY FIGURE TIMES 12 IS ONE YEAR'S WORTH, NOT A GIVEN YEAR'S. A stated figure dated
+    # to a year or quarter ("Revenue 2025") is that period's actual or forecast, which twelve
+    # times one month's figure does not test -- so a promoted product never binds to it. A
+    # run-rate figure (ARR, MRR, annualised) is the exception: it IS the monthly figure
+    # annualised, whatever year it carries. Read from the stated figure's own label and raw,
+    # never its quote. Suppresses, never manufactures.
+    if (
+        r.promoted_period
+        and exp_id
+        and (exp := by_id.get(str(exp_id))) is not None
+        and _TIME_ANCHOR.search(f"{exp.label or ''} {exp.raw or ''}")
+        and not _RUN_RATE.search(f"{exp.label or ''} {exp.raw or ''}")
+    ):
+        # INCOMPARABLE, not a derived reading: refusing only the binding would fall through to a
+        # `derived` verdict that select() shows the founder, where before this the pair was an
+        # incomparable unit mismatch that showed nothing.
+        r.verdict = "incomparable"
+        r.reasons.append(
+            f"{exp.raw}{f' ({exp.label})' if exp.label else ''} is dated to a period, and a monthly figure × "
+            f"{12 if r.promoted_period == 'year' else 3} is one {r.promoted_period}'s worth rather than that "
+            "period's figure, so it is not tested against it"
+        )
+        return r
     # A GROWTH RATE IS TESTED BY A RATIO ONLY WHEN THE RATIO IS THAT RATE. A ratio of two
     # snapshots is a growth multiple only if they are the SAME measure exactly one period
     # apart; otherwise the division establishes nothing about the rate. Measured: "MRR in

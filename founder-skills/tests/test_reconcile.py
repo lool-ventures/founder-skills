@@ -1317,6 +1317,176 @@ def test_a_count_is_a_multiplier_in_a_product_not_a_dimension() -> None:
     )
 
 
+# --------------------------------------------------------------------------
+# A months multiplier turns a monthly figure into a period's total.
+# --------------------------------------------------------------------------
+
+
+def _months_product(
+    multiplier: Figure,
+    stated: Figure | None = None,
+    rated: Figure | None = None,
+) -> Relation:
+    """40 orders/month x $25 x the multiplier, optionally against a stated figure."""
+    import reconcile
+
+    orders = rated or fig("40", 40, unit_kind="count", label="orders", id="orders", period="month")
+    fee = fig("$25", 25, unit_kind="money", label="fee per order", id="fee")
+    multiplier.id = "mult"
+    figs = [orders, fee, multiplier, *([stated] if stated is not None else [])]
+    spec: dict[str, Any] = {"kind": "derived_product", "operator": "product", "operands": ["orders", "fee", "mult"]}
+    if stated is not None:
+        stated.id = "stated"
+        spec["expected_id"] = "stated"
+    return reconcile.compute(spec, {f.id: f for f in figs})
+
+
+def _yearly(raw: str, value: float, label: str = "revenue", period: str | None = "year") -> Figure:
+    return fig(raw, value, unit_kind="money", label=label, period=period)
+
+
+def _count_mult(raw: str, value: float, label: str) -> Figure:
+    return fig(raw, value, unit_kind="count", label=label)
+
+
+def test_a_months_multiplier_makes_a_monthly_product_annual() -> None:
+    """40 orders/month x $25 x 12 is a year's revenue, so it tests a stated annual figure both ways."""
+    mult = _count_mult("12", 12, "Months multiplier (scenario A)")
+    ok = _months_product(mult, _yearly("$12,000", 12000))
+    assert ok.computed == 40 * 25 * 12 and ok.computed_unit == "money:year", (ok.computed, ok.computed_unit)
+    assert ok.verdict == "confirmation", (ok.verdict, ok.reasons)
+    assert any("12 months as one year" in x and "is an annual figure" in x for x in ok.reasons), ok.reasons
+    bad = _months_product(_count_mult("12", 12, "Months multiplier (scenario A)"), _yearly("$20,000", 20000))
+    assert bad.verdict == "contradiction", (bad.verdict, bad.reasons)
+
+
+def test_a_duration_months_multiplier_is_read_in_its_own_unit() -> None:
+    """ "12 months" and "1 year" are both twelve months; the total printed is the scaled one."""
+    twelve = _months_product(fig("12 months", 12, unit_kind="duration", label="months"), _yearly("$12,000", 12000))
+    assert twelve.computed_unit == "money:year" and twelve.verdict == "confirmation", (
+        twelve.computed_unit,
+        twelve.verdict,
+        twelve.reasons,
+    )
+    bad = _months_product(fig("12 months", 12, unit_kind="duration", label="months"), _yearly("$20,000", 20000))
+    assert bad.verdict == "contradiction", (bad.verdict, bad.reasons)
+    year = _months_product(fig("1 year", 1, unit_kind="duration", label="months"))
+    assert year.computed == 40 * 25 * 12, year.computed
+    assert year.computed_unit == "money:year", year.computed_unit
+    assert "12,000" in year.rendered and "1 year" in year.rendered, year.rendered
+
+
+def test_a_months_multiplier_other_than_three_or_twelve_has_no_period() -> None:
+    """x 10 months is a ten-month total: neither a year nor a month, so neither is tested (pinned)."""
+    vs_year = _months_product(_count_mult("10", 10, "months"), _yearly("$10,000", 10000))
+    assert vs_year.computed_unit == "money", vs_year.computed_unit
+    assert vs_year.verdict == "incomparable", (vs_year.verdict, vs_year.reasons)
+    vs_month = _months_product(_count_mult("10", 10, "months"), _yearly("$1,000", 1000, label="MRR", period="month"))
+    assert vs_month.verdict == "incomparable", (vs_month.verdict, vs_month.reasons)
+
+
+def test_a_three_months_multiplier_makes_a_quarterly_product() -> None:
+    rel = _months_product(_count_mult("3", 3, "months"), _yearly("$3,000", 3000, period="quarter"))
+    assert rel.computed_unit == "money:quarter", rel.computed_unit
+    assert rel.verdict == "confirmation", (rel.verdict, rel.reasons)
+
+
+def test_a_ranged_monthly_operand_gives_an_annual_range() -> None:
+    rated = fig("30-50", 40, unit_kind="count", label="orders", id="orders", period="month")
+    rel = _months_product(_count_mult("12", 12, "Months multiplier (scenario A)"), _yearly("$9K-$15K", 12000), rated)
+    assert (rel.span_lo, rel.span_hi) == (30 * 25 * 12, 50 * 25 * 12), (rel.span_lo, rel.span_hi)
+    assert rel.computed_unit == "money:year", rel.computed_unit
+    assert rel.verdict == "confirmation", (rel.verdict, rel.reasons)
+
+
+def test_a_promoted_product_still_tests_a_stated_total_with_no_period() -> None:
+    """Pinned: a stated "$12,000" with no period compares against the promoted total."""
+    rel = _months_product(_count_mult("12", 12, "months"), _yearly("$12,000", 12000, label="revenue", period=None))
+    assert rel.expected_id == "stated", rel.reasons
+    assert rel.verdict == "confirmation", (rel.verdict, rel.reasons)
+
+
+def test_a_promoted_product_is_not_tested_against_a_dated_figure() -> None:
+    """A figure dated to a year is that year's figure, not one year's worth of a month."""
+    dated = _months_product(_count_mult("12", 12, "months"), _yearly("$20,000", 20000, label="Revenue 2025"))
+    assert dated.verdict == "incomparable", (dated.verdict, dated.reasons)
+    assert select([dated]) == [], dated.reasons
+    assert any("(Revenue 2025) is dated to a period" in x for x in dated.reasons), dated.reasons
+    assert dated.expected_id is None, dated.expected_id
+    assert dated.untested_claim == "", dated.untested_claim
+    dated_ok = _months_product(_count_mult("12", 12, "months"), _yearly("$12,000", 12000, label="Revenue 2025"))
+    assert dated_ok.expected_id is None and dated_ok.verdict != "confirmation", (dated_ok.verdict, dated_ok.reasons)
+
+
+def test_a_dated_figure_with_no_period_is_not_shown_as_a_reading() -> None:
+    """With no period on the stated figure the old code compared it; the guard must not turn it into a shown reading."""
+    rel = _months_product(_count_mult("12", 12, "months"), _yearly("$20,000", 20000, label="Revenue 2025", period=None))
+    assert rel.verdict == "incomparable" and select([rel]) == [], (rel.verdict, rel.reasons)
+
+
+@pytest.mark.parametrize("label", ["months per year", "months in a year"])
+def test_a_months_per_year_label_is_read_only_for_twelve(label: str) -> None:
+    twelve = _months_product(_count_mult("12", 12, label), _yearly("$12,000", 12000))
+    assert twelve.computed_unit == "money:year" and twelve.verdict == "confirmation", (twelve.verdict, twelve.reasons)
+    six = _months_product(_count_mult("6", 6, label))
+    assert six.computed_unit == "money:month", six.computed_unit
+
+
+def test_a_dated_run_rate_figure_keeps_its_binding() -> None:
+    rel = _months_product(_count_mult("12", 12, "months"), _yearly("$12,000", 12000, label="ARR 2025"))
+    assert rel.expected_id == "stated", rel.reasons
+    assert rel.verdict == "confirmation", (rel.verdict, rel.reasons)
+
+
+@pytest.mark.parametrize(
+    "multiplier",
+    [
+        pytest.param(("12", 12, "count", "orders per year", "money:month"), id="label-orders-per-year"),
+        pytest.param(("12", 12, "count", "months of runway", "money:month"), id="label-months-of-runway"),
+        pytest.param(("12", 12, "count", "runway (months)", "money:month"), id="label-runway-months"),
+        pytest.param(("12", 12, "count", "(months)", "money:month"), id="label-bare-parenthetical"),
+        pytest.param(("12 weeks", 12, "duration", "months", "mixed:month"), id="duration-weeks"),
+        pytest.param(("18 months", 18, "duration", "months", "mixed:month"), id="duration-18-months"),
+        pytest.param(("10-12 months", 11, "duration", "months", "mixed:month"), id="range-multiplier"),
+        pytest.param(("~12", 12, "count", "months", "money:month"), id="approximate-multiplier"),
+    ],
+)
+def test_a_product_without_a_months_multiplier_is_unchanged(multiplier: tuple[str, float, str, str, str]) -> None:
+    """Anything short of the exact rule types the product exactly as it always was (a duration
+    operand is a dimension there, hence `mixed`)."""
+    raw, value, kind, label, before = multiplier
+    rel = _months_product(fig(raw, value, unit_kind=kind, label=label))
+    assert rel.computed_unit == before, (rel.computed_unit, rel.reasons)
+    assert rel.promoted_period is None
+    assert not any("as one year" in x for x in rel.reasons), rel.reasons
+
+
+def test_two_periods_or_no_surviving_kind_leave_a_product_unchanged() -> None:
+    import reconcile
+
+    # Two operands carry a period: the product is read as before.
+    orders = fig("40", 40, unit_kind="count", label="orders", id="orders", period="month")
+    fee = fig("$25/month", 25, unit_kind="money", label="fee", id="fee", period="month")
+    mult = _count_mult("12", 12, "months")
+    mult.id = "mult"
+    two = reconcile.compute(
+        {"kind": "derived_product", "operator": "product", "operands": ["orders", "fee", "mult"]},
+        {f.id: f for f in (orders, fee, mult)},
+    )
+    assert two.computed_unit == "money", two.computed_unit
+    assert two.promoted_period is None
+    # A percent rate times 12 months leaves no unit kind: still `mixed:month`, as before.
+    rate = fig("5%", 5, unit_kind="percent", label="churn", id="rate", period="month")
+    mult2 = _count_mult("12", 12, "months")
+    mult2.id = "mult"
+    pct = reconcile.compute(
+        {"kind": "derived_product", "operator": "product", "operands": ["rate", "mult"]},
+        {f.id: f for f in (rate, mult2)},
+    )
+    assert pct.computed_unit == "mixed:month", pct.computed_unit
+    assert pct.promoted_period is None
+
+
 def test_a_product_of_only_counts_stays_untestable() -> None:
     """Excluding COUNT must not make a count-only product look like a typed quantity.
 
