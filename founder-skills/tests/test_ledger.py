@@ -830,6 +830,45 @@ def test_real_date_expressions_including_trailing_punctuation() -> None:
         assert rc == 0, f"{raw!r}/{value} rejected: {err}"
 
 
+def test_day_precision_date_forms_are_representable() -> None:
+    """A deck prints days as often as years: "October 4, 2026", "4 October 2026", "2026-10-04".
+
+    The grammar knew only year- and quarter-precision forms, so a correctly extracted day-
+    precision date had no representable raw and the model was pushed toward something else.
+    Each component the string prints — day, month, year — is a value it states.
+    """
+    for raw, value in (
+        ("October 4, 2026", 2026),
+        ("October 4, 2026", 10),
+        ("October 4, 2026", 4),
+        ("Oct 4, 2026", 4),
+        ("4 October 2026", 4),
+        ("4 Oct 2026", 10),
+        ("4 October 2026", 2026),
+        ("2026-10-04", 2026),
+        ("2026-10-04", 10),
+        ("2026-10-04", 4),
+        ("Founded October 4, 2026", 4),
+    ):
+        rc, _, err = _run({"figures": [_date(raw=raw, value=value, label="x", quote=raw)]})
+        assert rc == 0, f"{raw!r}/{value} rejected: {err}"
+
+
+def test_a_day_precision_date_value_must_be_a_component_it_prints() -> None:
+    """The component rule survives the new forms: 2025 is not a number "October 4, 2026" prints."""
+    rc, _, err = _run({"figures": [_date(raw="October 4, 2026", value=2025, label="x", quote="October 4, 2026")]})
+    assert rc != 0
+    assert "2025" in err, err
+
+
+def test_an_out_of_range_day_is_not_a_date() -> None:
+    """ "October 41, 2026" is a misbinding or a typo, not a date: 41 is not a day, so the raw is
+    refused rather than read as a count, exactly as a year outside 1900-2100 is."""
+    rc, _, err = _run({"figures": [_date(raw="October 41, 2026", value=41, label="x", quote="October 41, 2026")]})
+    assert rc != 0
+    assert "not a date expression" in err, err
+
+
 def test_the_scale_forms_the_quote_grammar_knows_are_the_ones_the_ledger_validates() -> None:
     """ "One grammar" was claimed and was still false for three forms.
 
@@ -992,3 +1031,72 @@ def test_ordinary_percent_and_money_figures_are_untouched_by_the_basis_point_rul
     """Regression: no raw without a basis-point unit may move."""
     rc, _, err = _run({"figures": [_fig(value=3_000_000, raw="$3M", quote="$3M ARR"), _bps_fig("30%", 30)]})
     assert rc == 0, err
+
+
+# ---------------------------------------------------------------------------
+# `--print-slides`: Step 3.6 scopes the second read to the slides the ledger covers. The
+# numbers are not figures, so this prints them from the artifact rather than asking the
+# main thread to parse the ledger by hand — the parse is the same one validation does.
+# ---------------------------------------------------------------------------
+
+
+def _run_ledger(args: list[str], payload: dict | None = None) -> tuple[int, str, str]:
+    res = subprocess.run(
+        [sys.executable, SCRIPT, *args],
+        input=json.dumps(payload) if payload is not None else "",
+        capture_output=True,
+        text=True,
+    )
+    return res.returncode, res.stdout, res.stderr
+
+
+def _write_ledger(directory: str, payload: dict) -> str:
+    path = os.path.join(directory, "ledger.json")
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(payload, fh)
+    return path
+
+
+def test_print_slides_lists_the_distinct_slides_ascending_as_one_line() -> None:
+    with tempfile.TemporaryDirectory() as d:
+        path = _write_ledger(
+            d,
+            {"figures": [_fig(slide=6), _fig(id="a", slide=2), _fig(id="b", slide=6), _fig(id="c", slide=10)]},
+        )
+        rc, out, err = _run_ledger(["--print-slides", path])
+    assert rc == 0, err
+    assert out == "2,6,10\n", f"expected one ascending comma-joined line, got {out!r}"
+
+
+def test_print_slides_refuses_an_output_path() -> None:
+    """A read-and-print mode writes no artifact, so `-o` is a contradiction, refused (exit 2)."""
+    with tempfile.TemporaryDirectory() as d:
+        path = _write_ledger(d, {"figures": [_fig()]})
+        rc, out, err = _run_ledger(["--print-slides", path, "-o", os.path.join(d, "out.json")])
+    assert rc == 2, err
+    assert out == "", "the refusal must not print a slide line"
+
+
+def test_print_slides_refuses_a_missing_file_with_only_stderr() -> None:
+    rc, out, err = _run_ledger(["--print-slides", "/nonexistent/ledger.json"])
+    assert rc == 1
+    assert out == "", "a missing ledger is not an empty slide list"
+    assert err.strip(), "the refusal must say why on stderr"
+
+
+def test_print_slides_refuses_a_ledger_with_no_slide_numbers() -> None:
+    with tempfile.TemporaryDirectory() as d:
+        path = _write_ledger(d, {"figures": [_fig(slide=None)]})
+        rc, out, err = _run_ledger(["--print-slides", path])
+    assert rc == 1
+    assert out == "", "no slide numbers is a failure, never an empty list"
+    assert err.strip()
+
+
+def test_run_id_is_still_required_when_writing_the_ledger() -> None:
+    """`--run-id` is only optional for `--print-slides`; the artifact path still demands it, with
+    the same argparse message a `required=True` parser would print."""
+    rc, out, err = _run_ledger([], {"figures": [_fig()]})
+    assert rc == 2
+    assert out == ""
+    assert "the following arguments are required: --run-id" in err, err

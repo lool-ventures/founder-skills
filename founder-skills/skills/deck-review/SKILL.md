@@ -780,7 +780,12 @@ ledger.py (no metadata block; the producer script adds it):
 `duration`, `date`. `id` must be unique and descriptive; pick a word that is not
 ordinary English prose. `currency` is required for money. `period` is required for
 any rate ("month", "year") — a monthly figure compared against an annual one is
-refused rather than guessed at.
+refused rather than guessed at. A `date`'s raw is the date's own printed string — a
+year (`2025`), `FY25`, `Q4 2025`, or a day (`October 4, 2026`, `2026-10-04`) — and
+`value` must be one of the numbers that string prints (the day, the month, or the
+year). A figure written in basis points (`30 bps`) is a percent: set `unit_kind` to
+`percent` and record `value` as a percent (`0.3`). A fee or rate charged per year also
+carries `period: "year"`.
 All string values must be JSON-escaped; the file must parse with a strict JSON parser.
 Then return ONLY the receipt JSON in your final assistant message:
 {"status": "complete", "output_path": "<echo of OUTPUT_PATH>"}
@@ -802,17 +807,23 @@ the file.
 
 ### Step 3.6: Re-Search the Extracted Text, Ledger-Blind -> `second_read.json` (Context A dispatch)
 
-A quote is trusted when it is re-found by a second reader who never saw the ledger.
-Checking the ledger's quote against the ledger itself would prove nothing.
+A quote is trusted when it is re-found by a second reader who never saw the
+ledger. Checking the ledger's quote against the ledger itself would prove nothing.
 
-**Dispatch a FRESH sub-agent in Context A (SECOND_READ)** — **call the `Task` tool with
-`subagent_type: "founder-skills:deck-review"`**. Give it the slide numbers and
+Get the slide numbers the ledger covers — the numbers only, never a figure, so the second
+reader stays ledger-blind:
+
+```bash
+python3 "$SCRIPTS/ledger.py" --print-slides "$REVIEW_DIR/ledger.json"
+```
+
+**Dispatch a FRESH sub-agent in Context A (SECOND_READ)** — **call the `Task`
+tool with `subagent_type: "founder-skills:deck-review"`**. Give it the slide numbers and
 nothing else. **It must not receive the ledger, any figure from it, or any summary of it** —
-the independence is the whole value, and it is a property of this prompt.
-
-Read `$REVIEW_DIR/ledger.json` and collect the distinct `slide` values. Only those slides
-are transcribed; a full re-read of every slide costs the founder time and money for pages
-that carry no figures.
+the independence is the whole value, and it is a property of this prompt. Only the slides the
+command printed are transcribed; a full re-read of every slide costs the founder time and
+money for pages that carry no figures. Paste the printed line into `SLIDES TO COPY OUT`
+below, unchanged.
 
 **Dispatch prompt template:**
 
@@ -889,11 +900,19 @@ Propose a relation whenever the deck implies one an investor would run:
   - a total the deck states AND lists the components of
   - a runway, a multiple, or a per-unit figure the deck states and the inputs to
   - **two dated magnitudes plus a growth multiple or CAGR between them** — a market
-    slide stating a size now, a size in N years, and a "4X" or a rate is three
-    claims about the same two numbers, so propose `end / start` against the stated
-    multiple. This is the slide founders paste third-party
+    slide stating a size now, a size in N years, and a "4X" is three claims about the
+    same two numbers, so propose `end / start` against the stated multiple; the same
+    slide stating any per-period rate instead — a CAGR, a per-year rate, a
+    month-over-month rate — is a `compound_growth` over the `periods` between the two
+    dates. This is the slide founders paste third-party
     research onto and rarely re-check, and every operand is printed rather than
     inferred.
+  - a price the deck states beside the quantity it states, where the product is a
+    figure the deck also states (seats × price = ARR): propose `product`
+  - a balance and an annual fee rate against a stated annual fee pool: product of the
+    balance and the rate
+  - a whole, a part removed from it, and a stated remainder ("X; of that, A ...; what
+    remains is B"): difference(X, A) against B
   - a characterisation the numbers support that the deck never states at all
 
 Where the deck states a figure your relation should reproduce, name it as
@@ -911,7 +930,7 @@ Use your Write tool to write to OUTPUT_PATH:
 components is `derived_ratio`; the name refers to how the comparison is framed, not to
 the operator, and a value invented to fit the operator is rejected.
 `operator` must be one of `ratio`, `product`, `sum`, `increase_by`, `difference`,
-`runway`, `inverse_change`, `implied_base`.
+`runway`, `inverse_change`, `implied_base`, `compound_growth`.
   - `runway`: cash ids, then burn ids. Given a burn plan, never divide by one year's burn:
     add `"schedule": [{"id": "<burn id>", "from": "YYYY-MM", "to": "YYYY-MM"}]` (`to`
     inclusive; only the last segment omits it) and optional `"start": "YYYY-MM"`.
@@ -919,6 +938,11 @@ the operator, and a value invented to fit the operator is rejected.
     the stated change in its reciprocal (only resistivity/conductivity,
     resistance/conductance, cost per unit/units per dollar).
   - `implied_base`: a money figure, then the percent of a whole it is; no `expected_id`.
+  - `compound_growth`: a start snapshot, then an end snapshot several periods later, with
+    `"periods": <integer of at least 1>` and an `expected_id` naming the stated growth rate
+    to test. Use it for any per-period rate — a CAGR, a per-year rate, a month-over-month
+    rate — between two dated figures: `ratio` tests a multiple, and a spaced pair needs the
+    period count that a single-step ratio cannot carry.
 Two optional fields go with `expected_id`. `"relation": "at_most"` says the deck states a
 **ceiling** the other figures must not exceed — a production capacity, a budget, a headcount
 cap — rather than a target they should match; the default is `equals`. `"per": "year"` says

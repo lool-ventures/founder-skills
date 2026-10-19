@@ -1646,7 +1646,15 @@ SKILL_MD_CEILING: dict[str, int] = {
     # IS scored for an image-only deck. The enum is unchanged; only the prose moved.
     # 113,305 -> 113,380 (+75 B) on 2026-10-19: Step 0 says to leave the request heredoc empty
     # when the request carries no `FS_HOST_` lines.
-    "deck-review": 113_380,
+    # 0.23: ledger date and bps sentences, print-slides step, compound_growth / product / difference
+    # examples. 113,380 -> 114,764 (+1,384 B) on 2026-10-19.
+    # 114,764 -> 115,027 (+263 B) on 2026-10-19: three corrections to the dispatch templates. A
+    # per-year fee/rate now carries `period: "year"` (without it a balance times an annual rate
+    # cannot be compared with a stated annual total); RELATION_PROPOSAL names the balance-times-
+    # annual-rate product and the whole/part-removed/remainder difference, replacing a bare delta
+    # with no stated counterpart (which is not a check); and the compound_growth/growth bullets
+    # cover ANY per-period rate, not only a CAGR or a per-year one.
+    "deck-review": 115_027,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.

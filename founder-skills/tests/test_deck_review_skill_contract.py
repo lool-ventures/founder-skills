@@ -1895,6 +1895,37 @@ def test_relation_proposal_names_the_market_slide_case() -> None:
     )
 
 
+def test_relation_proposal_names_the_operators_the_engine_can_settle() -> None:
+    """Every operator `reconcile.py` evaluates must be named: a model that cannot name a shape
+    proposes nothing for it. The two-dated CAGR is `compound_growth` over `periods`, and
+    `product` / `difference` are the remaining arithmetic kinds the engine settles, so the
+    `operator` enum and the `periods` form have to read as the engine reads them."""
+    text = SKILL_MD.read_text(encoding="utf-8")
+    start = text.index("CONTEXT: RELATION_PROPOSAL")
+    block = text[start : text.index("```", start)]
+    for operator in ("ratio", "product", "sum", "increase_by", "difference", "compound_growth"):
+        assert f"`{operator}`" in block, f"the operator enum must name `{operator}`"
+    periods = next((ln for ln in block.splitlines() if '"periods"' in ln), None)
+    assert periods is not None and "integer" in periods and "1" in periods, (
+        "`compound_growth` must pin `periods` as an integer of at least 1, the shape the engine reads"
+    )
+
+
+def test_step_3_6_scopes_the_second_read_through_print_slides() -> None:
+    """The second read's slide list comes from `ledger.py --print-slides`, and the command sits
+    BEFORE the dispatch cue: it is a main-thread read-and-print of the numbers (never a figure),
+    not a bash block handed to the sub-agent — a bash fence after the cue is the sub-agent-bash
+    pattern the orchestration contract forbids."""
+    text = SKILL_MD.read_text(encoding="utf-8")
+    start = text.index("### Step 3.6:")
+    step = text[start : text.index("\n### ", start + 1)]
+    assert "--print-slides" in step and "ledger.py" in step
+    assert step.index("--print-slides") < step.index("Dispatch a FRESH sub-agent in Context A (SECOND_READ)"), (
+        "the --print-slides block must precede the dispatch cue"
+    )
+    assert "SLIDES TO COPY OUT" in step
+
+
 # ---------------------------------------------------------------------------
 # purpose_clear / no_vague_purpose: where fail ends and warn begins
 # ---------------------------------------------------------------------------

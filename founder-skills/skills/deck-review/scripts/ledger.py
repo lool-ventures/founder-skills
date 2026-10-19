@@ -210,16 +210,33 @@ _MONTH_NAMES = (
     "november",
     "december",
 )
-_MONTH_ALT = "|".join(_MONTH_NAMES)
+# Decks print abbreviations ("Oct 2026") as often as full names, and a day-precision date
+# ("Oct 4, 2026") is unrepresentable without them. The three-letter prefix is the shortest
+# unambiguous form across the twelve (jan..dec are all distinct), so it is the abbreviation.
+_MONTH_NUMBERS = {name: index + 1 for index, name in enumerate(_MONTH_NAMES)}
+_MONTH_NUMBERS.update({name[:3]: index + 1 for index, name in enumerate(_MONTH_NAMES)})
+_MONTH_ALT = "|".join([*_MONTH_NAMES, *[name[:3] for name in _MONTH_NAMES]])
 
 # Each alternative captures the components it licenses, named so the value can be bound to
 # one of them rather than to "some number that appeared".
 _DATE_FORMS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    # ISO 8601: 2026-10-04
+    (r"(?P<iy>\d{4})-(?P<im>\d{2})-(?P<id>\d{2})", ("iy", "im", "id")),
     # 2024-2030 (a range of two years)
     (r"(?P<y1>\d{4})\s*[-–—/]\s*(?P<y2>\d{4})", ("y1", "y2")),
     # Q4 2025 / Q4 '25 / Q4
     (r"Q\s?(?P<q>[1-4])(?:\s*(?:FY|')?\s?(?P<qy>\d{4}|\d{2}))?", ("q", "qy")),
-    # March 2026 / March
+    # October 4, 2026 / Oct 4, 2026 / October 4 2026
+    (
+        rf"(?P<mon2>{_MONTH_ALT})\s+(?P<day>\d{{1,2}})(?:st|nd|rd|th)?,?\s+(?P<dy>\d{{4}})",
+        ("mon2", "day", "dy"),
+    ),
+    # 4 October 2026 / 4 Oct 2026
+    (
+        rf"(?P<day2>\d{{1,2}})(?:st|nd|rd|th)?\s+(?P<mon3>{_MONTH_ALT}),?\s+(?P<dy2>\d{{4}})",
+        ("day2", "mon3", "dy2"),
+    ),
+    # March 2026 / Mar 2026 / March
     (rf"(?P<mon>{_MONTH_ALT})(?:\s+(?P<my>\d{{4}}))?", ("mon", "my")),
     # FY25 / FY2025 / '25
     (r"(?:FY|')\s?(?P<fy>\d{4}|\d{2})", ("fy",)),
@@ -247,13 +264,19 @@ def _date_values(raw: str) -> set[float] | None:
             captured = match.groupdict().get(name)
             if captured is None:
                 continue
-            if name == "mon":
-                values.add(float(_MONTH_NAMES.index(captured.lower()) + 1))
+            if name in ("mon", "mon2", "mon3"):
+                values.add(float(_MONTH_NUMBERS[captured.lower()]))
                 continue
             number = int(captured)
-            if name in ("y", "y1", "y2", "my") and not 1900 <= number <= 2100:
+            if name in ("y", "y1", "y2", "my", "dy", "dy2", "iy") and not 1900 <= number <= 2100:
                 # A four-digit token outside plausible years is not a year, and this is the
                 # form that let "Headcount 2000" through when the bound was missing.
+                return None
+            if name in ("day", "day2", "id") and not 1 <= number <= 31:
+                # A day outside 1-31 is not a day: "October 41, 2026" is a typo or a
+                # misbinding, and every component of a day-precision date is range-checked.
+                return None
+            if name == "im" and not 1 <= number <= 12:
                 return None
             values.add(float(number))
         return values
@@ -475,7 +498,8 @@ def validate_ledger(data: dict[str, Any], total_slides: int | None = None) -> tu
             if allowed is None:
                 errors.append(
                     f"{where} raw {raw!r} is not a date expression — record the date's own printed "
-                    f"string (a year, FY25, Q4 2025, March 2026), not the sentence around it"
+                    f"string (a year, FY25, Q4 2025, March 2026, October 4, 2026), not the sentence "
+                    f"around it"
                 )
             elif value not in allowed:
                 printed = ", ".join(f"{v:g}" for v in sorted(allowed)) or "nothing numeric"
@@ -597,13 +621,69 @@ def validate_ledger(data: dict[str, Any], total_slides: int | None = None) -> tu
     return errors, warnings
 
 
+def _print_slides(path: str) -> int:
+    """Print the distinct slide numbers a ledger covers, ascending, as one comma-joined line.
+
+    Step 3.6 has to tell the second reader WHICH slides to transcribe, and the numbers are not
+    figures: the ledger itself must never reach that sub-agent, but the slide list is what
+    scopes its read. Reading the ledger in the main thread and hand-copying the numbers is the
+    step this replaces — the parse is the same one `validate_ledger` does, so the scope cannot
+    drift from the artifact the arithmetic consumes.
+
+    Writes only the one line to stdout; every failure (missing, unreadable, non-JSON, no slide
+    numbers at all) is a stderr-only refusal with a non-zero exit, so the caller never mistakes
+    an error for an empty list.
+    """
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"Error: could not read ledger {path!r}: {exc}", file=sys.stderr)
+        return 1
+    if not isinstance(data, dict):
+        print("Error: ledger JSON must be an object", file=sys.stderr)
+        return 1
+    figures = data.get("figures")
+    if not isinstance(figures, list):
+        print("Error: ledger has no 'figures' array", file=sys.stderr)
+        return 1
+    slides: set[int] = set()
+    for fig in figures:
+        if isinstance(fig, dict) and isinstance(fig.get("slide"), int) and not isinstance(fig["slide"], bool):
+            slides.add(fig["slide"])
+    if not slides:
+        print("Error: ledger records no slide numbers, so there is nothing to re-read", file=sys.stderr)
+        return 1
+    print(",".join(str(slide) for slide in sorted(slides)))
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Validate a deck's extracted numeric ledger.")
     ap.add_argument("--inventory", help="deck_inventory.json; enables the slide-bounds check")
-    ap.add_argument("--run-id", required=True)
+    ap.add_argument("--run-id")
     ap.add_argument("-o", "--output")
     ap.add_argument("--pretty", action="store_true")
+    ap.add_argument(
+        "--print-slides",
+        metavar="LEDGER",
+        help="print the distinct slide numbers a ledger covers, ascending, and exit",
+    )
     args = ap.parse_args()
+
+    if args.print_slides is not None:
+        # A read-and-print mode writes no artifact, so an output path is a contradiction, not
+        # a no-op: refuse rather than silently ignore it.
+        if args.output:
+            print("Error: --print-slides reads a ledger and writes nothing; drop -o", file=sys.stderr)
+            return 2
+        return _print_slides(args.print_slides)
+
+    if args.run_id is None:
+        # `--run-id` is required only when writing the artifact; kept as argparse's own message
+        # so the missing-flag error reads identically to a `required=True` parser.
+        ap.error("the following arguments are required: --run-id")
+
     # FIRST: an output naming one of this step's own input files is refused before anything is written.
     import _out_guard
 
