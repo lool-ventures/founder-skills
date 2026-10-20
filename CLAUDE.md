@@ -128,7 +128,7 @@
 
 - `.claude-plugin/marketplace.json` — Marketplace manifest (root level)
 - `founder-skills/.claude-plugin/plugin.json` — Plugin manifest with hooks
-- marketplace.json must match Anthropic's format: only `name`, `owner`, `plugins` (each with `name`, `source`, `description`)
+- marketplace.json carries `name`, a top-level `description` (shown to users; `claude plugin validate` warns without it), `owner` and `plugins` (each with `name`, `source`, `description`), the shape Anthropic's own catalogs use
 - Do NOT add `version` or `metadata` fields to marketplace.json
 
 ## Script Conventions

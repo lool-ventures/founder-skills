@@ -46,8 +46,8 @@ def humanize_claim(text: str) -> str:
 
     `humanize_param` is built for snake_case parameter NAMES: its fallback is
     `.replace("_", " ").title()`, which on a sentence Title-Cases every word and mangles it --
-    measured on a live run, "top-down SAM of $60M from a $3B TAM" came out as "Top-Down Sam Of
-    $60M From A $3B Tam", downcasing two acronyms this skill is entirely about.
+    a claim like "top-down SAM of $74M from a $3.7B TAM" came out as
+    "Top-Down Sam Of $74M From A $3.7B Tam", downcasing two acronyms this skill is entirely about.
 
     So humanize only what is actually a parameter name: a known label, or a single bare
     snake_case token, or -- measured on a later run -- a token EMBEDDED in the prose: the verdict

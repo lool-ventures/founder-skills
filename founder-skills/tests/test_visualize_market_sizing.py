@@ -1579,7 +1579,7 @@ def test_html_close_agreement_is_not_presented_as_a_strength() -> None:
 
     Regression for the worst defect the 3-deck A/B found: `report.html` listed
     "TAM (Top-down) within 20% of deck claim" as a strength -- on one real deck it was the ONLY
-    strength in the report, for a row where the tool had reproduced the founder's own $22B exactly.
+    strength in the report, for a row where the tool had reproduced the founder's own TAM claim exactly.
     It survived a whole pilot because every check read report.md and nobody opened the HTML.
     """
     arts = _all_artifacts()

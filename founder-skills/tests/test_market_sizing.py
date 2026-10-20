@@ -6041,7 +6041,7 @@ def test_valid_and_container_inputs_are_unaffected() -> None:
 # inert on every real run.
 # ---------------------------------------------------------------------------
 
-# deck-01: top-down TAM reproduced the founder's own $22B exactly (delta 0.0%).
+# deck-01: the top-down TAM matched the stated TAM claim exactly (delta 0.0%).
 # deck-02: +22.8%. deck-03: -8.6%. All three were rendered with no caveat, and in
 # report.html the deck-01 row was the ONLY item under "What's strong".
 _MEASURED_CLOSE_DELTAS = (0.0, 22.8, -8.6)
@@ -7879,18 +7879,18 @@ def test_a_prose_claim_is_not_title_cased_into_nonsense() -> None:
     """`claim_attacked` is free text and is usually a sentence, not a parameter name.
 
     Caught on a live run, not by a unit test: every fixture here says `claim_attacked:
-    "segment_pct"`, which is the one shape `_humanize_param` handles. A real agent wrote
-    "...top-down SAM of $60M from a $3B TAM" and the report rendered "Top-Down Sam Of $60M From
-    A $3B Tam" — Title-Casing the sentence and downcasing the two acronyms the skill is about.
+    "segment_pct"`, which is the one shape `_humanize_param` handles. A real agent wrote a claim like
+    "...top-down SAM of $74M from a $3.7B TAM" and the report rendered "Top-Down Sam Of $74M From
+    A $3.7B Tam" — Title-Casing the sentence and downcasing the two acronyms the skill is about.
     """
-    prose = "segment_pct = 2% used to derive top-down SAM of $60M from a $3B TAM"
+    prose = "segment_pct = 2% used to derive top-down SAM of $74M from a $3.7B TAM"
     rc, data, d = _compose_with_redteam(
         {**_REDTEAM_ARTIFACT, "findings": [{**_REDTEAM_ARTIFACT["findings"][0], "claim_attacked": prose}]}
     )
     assert rc == 0 and data is not None
     section = _compose_md_text(Path(d)).split("## Adversarial Findings")[1].split("\n## ")[0]
     assert "SAM" in section and "TAM" in section, section
-    assert "Sam Of" not in section and "$3B Tam" not in section, section
+    assert "Sam Of" not in section and "$3.7B Tam" not in section, section
     # The payload the coach reads gets the same treatment.
     assert "SAM" in json.dumps(data["coaching_payload"]["red_team_findings"])
 
