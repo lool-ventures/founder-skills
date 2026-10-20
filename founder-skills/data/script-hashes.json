@@ -231,7 +231,7 @@
     "skills/market-sizing/scripts/_view.py": "d32ff0c785d7807d3fd91b60fb887d02f1a6348be5cc7f77354d3ad63a402af2",
     "skills/market-sizing/scripts/checklist.py": "177171db113aff4df22b51f87b8a0a9a707b47794c0e9c9da283b0419c6720ea",
     "skills/market-sizing/scripts/closing_message.py": "c98aecf28dfe38ec3beb496df7306b74e37fc8a1780893196688b556becd3faa",
-    "skills/market-sizing/scripts/compose_report.py": "d0c927425b2ff1347465d1e479fe5640ce979e088525fe4fb8505fe48cd3dc67",
+    "skills/market-sizing/scripts/compose_report.py": "3efbd67b9d53fe8eafac0c128fa1f4f58a246a42f3ab17bdc2c238226d3ae4f9",
     "skills/market-sizing/scripts/dispatch_prompt.py": "1b28cd262f421e9e73c7e04b19b8bf329c2fe1bfbd3ac7e638e1b16b37e22c07",
     "skills/market-sizing/scripts/market_sizing.py": "5807a3e2d06d18beadf4808820cc1c31a51761b71731888e79b5900cb9c505be",
     "skills/market-sizing/scripts/ocr_uploads.py": "4e834d417cfdcd5dfdf3f8e310909efe2bc79f50ac362fa5e1c1665bfbb2ca75",

@@ -1929,3 +1929,25 @@ def test_the_views_policy_loader_leaves_sys_path_alone() -> None:
     policy = view._founder_text_policy()
     assert policy is not None and hasattr(policy, "scan")
     assert sys.path == before
+
+
+def test_composes_shared_loaders_leave_sys_path_alone() -> None:
+    """compose's `_founder_text_policy` and `_handoff_audit` load the shared modules by path, as the view's
+    loader does, and both come from the plugin's own scripts folder."""
+    import importlib.util as ilu
+
+    for name in ("_founder_text", "_handoff_audit"):
+        sys.modules.pop(name, None)
+    spec = ilu.spec_from_file_location("_ms_compose_syspath", os.path.join(MARKET_SIZING_DIR, "compose_report.py"))
+    assert spec and spec.loader
+    compose = ilu.module_from_spec(spec)
+    spec.loader.exec_module(compose)  # compose puts its own folder first on import; that is not under test
+    before = list(sys.path)
+    policy = compose._founder_text_policy()
+    audit = compose._handoff_audit()
+    assert sys.path == before
+    shared = os.path.normpath(os.path.join(MARKET_SIZING_DIR, "..", "..", "..", "scripts"))
+    assert policy is not None and hasattr(policy, "scan")
+    assert audit is not None and hasattr(audit, "founder_message")
+    assert os.path.dirname(os.path.abspath(policy.__file__)) == shared
+    assert os.path.dirname(os.path.abspath(audit.__file__)) == shared

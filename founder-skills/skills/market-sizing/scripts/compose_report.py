@@ -19,6 +19,7 @@ Output: JSON to stdout with report_markdown and validation results.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import math
 import os
@@ -496,37 +497,39 @@ def _md_safe(text: str) -> str:
     return text.replace("|", "\\|").replace("\n", " ")
 
 
-def _founder_text_policy() -> Any:
-    """Import the fleet's shared founder-text policy from `founder-skills/scripts/`.
+def _shared_module(name: str) -> Any:
+    """Load `founder-skills/scripts/<name>.py` by path, leaving sys.path as the caller had it.
 
-    Parent-relative rather than duplicated: this file lives at
-    `skills/<skill>/scripts/compose_report.py`, so `parents[2]/scripts` is the shared dir. Returns
-    None if unavailable — a missing policy module must never block a report, since the scan is a
-    warning and not a gate.
+    This file lives at `skills/<skill>/scripts/compose_report.py`, so the shared dir is three levels up.
+    Returns None if unavailable: a missing shared module must never block a report.
     """
+    loaded = sys.modules.get(name)
+    if loaded is not None:
+        return loaded
+    path = os.path.normpath(
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "scripts", f"{name}.py")
+    )
     try:
-        shared = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "scripts"))
-        if shared not in sys.path:
-            sys.path.insert(0, shared)
-        import _founder_text  # type: ignore[import-not-found]
-
-        return _founder_text
-    except ImportError:
+        spec = importlib.util.spec_from_file_location(name, path)
+        if spec is None or spec.loader is None:
+            return None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+    except (ImportError, OSError):
         return None
+    sys.modules[name] = module
+    return module
+
+
+def _founder_text_policy() -> Any:
+    """The fleet's shared founder-text policy, or None if unavailable: the scan is a warning and not a
+    gate."""
+    return _shared_module("_founder_text")
 
 
 def _handoff_audit() -> Any:
-    """The fleet's shared gate-record check from `founder-skills/scripts/` (same loading as
-    `_founder_text_policy`). None if unavailable: a missing module must never block a report."""
-    try:
-        shared = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "scripts"))
-        if shared not in sys.path:
-            sys.path.insert(0, shared)
-        import _handoff_audit  # type: ignore[import-not-found]
-
-        return _handoff_audit
-    except ImportError:
-        return None
+    """The fleet's shared gate-record check, or None if unavailable."""
+    return _shared_module("_handoff_audit")
 
 
 def _revision_not_offered(dir_path: str, run_id: str | None, redteam: Any, *, rounds: int) -> list[str]:
