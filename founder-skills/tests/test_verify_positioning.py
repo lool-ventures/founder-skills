@@ -577,3 +577,11 @@ def test_the_real_pages_scan_clean_and_a_seeded_filename_is_caught(tmp_path: Pat
     assert pages_warnings(seed=False) == []
     seeded = pages_warnings(seed=True)
     assert any("report.html shows the internal file 'landscape.json'" in w for w in seeded), seeded
+
+
+def test_a_malformed_page_never_crashes_the_gate(tmp_path: Path) -> None:
+    _publishable(tmp_path)
+    _write(tmp_path, "report.html", "<html><body><p>ok</p><![if !IE]><p>x</p><![endif]> <script>unclosed")
+    _rc, out, err = _run(tmp_path)
+    assert out is not None and "Traceback" not in err, err
+    assert not any(" shows the " in w for w in out["summary"]["warnings"])

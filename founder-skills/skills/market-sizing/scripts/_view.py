@@ -1439,7 +1439,7 @@ def _founder_text_policy() -> Any:
             return None
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
-    except (ImportError, OSError):
+    except Exception:  # noqa: BLE001 - a policy module that cannot load must never block a report
         return None
     sys.modules["_founder_text"] = module
     return module

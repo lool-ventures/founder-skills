@@ -249,9 +249,13 @@ class _TextNodes(HTMLParser):
 
 
 def _page_text(page_html: str) -> str:
+    """The page's visible text, or "" when the page cannot be parsed: a warning-only scan never fails the gate."""
     parser = _TextNodes()
-    parser.feed(page_html)
-    parser.close()
+    try:
+        parser.feed(page_html)
+        parser.close()
+    except Exception:  # noqa: BLE001 - a malformed page is reported by nothing here, never a crash
+        return ""
     return " ".join(parser.parts)
 
 

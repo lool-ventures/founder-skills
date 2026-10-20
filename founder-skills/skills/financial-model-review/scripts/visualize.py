@@ -671,10 +671,6 @@ def _chart_runway(runway: dict[str, Any] | None) -> str:
             f'x2="{_num(margin_left + chart_width):.2f}" y2="{zero_y:.2f}" '
             f'stroke="{_CLR_FAIL}" stroke-width="1.5" stroke-dasharray="4,3" />'
         )
-        parts.append(
-            f'<text x="{_num(margin_left + chart_width + 5):.2f}" y="{zero_y:.2f}" '
-            f'dominant-baseline="central" font-size="9" fill="{_CLR_FAIL}">{_esc(zero_label)}</text>'
-        )
 
     # X-axis label
     parts.append(
@@ -1290,7 +1286,7 @@ def _key_findings(
         seen_categories: set[str] = set()
         for candidate in [*fail_items, *warn_items]:
             category = str(candidate.get("category", ""))
-            if category in seen_categories:
+            if category and category in seen_categories:
                 continue
             seen_categories.add(category)
             picked.append(candidate)
@@ -1376,8 +1372,18 @@ def _key_findings(
     def _column(
         key: str, heading: str, items: list[str] | list[str | tuple[str, str, str, str]], tone: str, max_items: int = 3
     ) -> str:
+        # The first three, then the rest behind a disclosure: a later finding (the runway's own warning, say)
+        # is one click away, never dropped from the page.
         cards = "".join(_card(item, tone) for item in items[:max_items])
-        return f'<div class="ui-finding-col" data-findings="{key}"><h3>{heading}</h3>{cards}</div>'
+        tail = items[max_items:]
+        more = (
+            f'<details class="ui-more"><summary>{len(tail)} more</summary>'
+            + "".join(_card(item, tone) for item in tail)
+            + "</details>"
+            if tail
+            else ""
+        )
+        return f'<div class="ui-finding-col" data-findings="{key}"><h3>{heading}</h3>{cards}{more}</div>'
 
     if strong:
         parts.append(_column("strong", "What's strong", strong, "pass"))

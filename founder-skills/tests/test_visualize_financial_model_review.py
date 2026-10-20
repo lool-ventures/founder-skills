@@ -1703,5 +1703,42 @@ def test_attention_shows_the_worst_first_and_at_most_one_card_per_category() -> 
     doc = parse(viz._key_findings(checklist, None, None))
     (column,) = by_attr(doc, "data-findings", "attention")
     shown = [e.get("data-finding") for e in column.iter() if e.has("data-finding")]
-    # The column shows three cards: both fails (one per category), then the first warn.
-    assert shown == ["A1", "B1", "W1"], shown
+    # Both fails (one per category), then the warns; past the third, behind the "more" disclosure.
+    assert shown == ["A1", "B1", "W1", "W2"], shown
+    (more,) = by_tag(column, "details")
+    assert [e.get("data-finding") for e in more.iter() if e.has("data-finding")] == ["W2"]
+
+
+def test_attention_past_the_third_card_is_behind_a_disclosure_not_dropped() -> None:
+    """Three checklist cards used to fill the column and push the runway's own warning off the page."""
+    viz = _load_visualize_module()
+    items = [
+        {"id": f"F{n}", "category": f"Cat {n}", "label": f"Criterion {n}", "status": "fail", "evidence": "x."}
+        for n in range(3)
+    ]
+    runway = {
+        "scenarios": [{"name": "base", "runway_months": 6, "default_alive": False, "monthly_projections": []}],
+        "risk_assessment": "",
+    }
+    doc = parse(viz._key_findings({"items": items}, None, runway))
+    (column,) = by_attr(doc, "data-findings", "attention")
+    assert "Cash runs out in 6 months" in column.text(), column.text()
+    (more,) = by_tag(column, "details")
+    assert "1 more" in more.text()
+
+
+def test_criteria_with_no_category_are_not_merged_into_one_card() -> None:
+    viz = _load_visualize_module()
+    items = [{"id": f"N{n}", "category": "", "label": f"C{n}", "status": "fail", "evidence": "x."} for n in range(2)]
+    doc = parse(viz._key_findings({"items": items}, None, None))
+    (column,) = by_attr(doc, "data-findings", "attention")
+    assert [e.get("data-finding") for e in column.iter() if e.has("data-finding")] == ["N0", "N1"]
+
+
+def test_a_zero_crossing_axis_says_zero_once() -> None:
+    viz = _load_visualize_module()
+    runway = {"scenarios": [{"name": "base", "monthly_projections": [
+        {"month": m, "cash_balance": c} for m, c in enumerate([300_000, 100_000, -100_000], start=1)
+    ]}]}  # fmt: skip
+    svg = viz._chart_runway(runway)
+    assert re.findall(r">\$0<", svg) == [">$0<"], "one $0: the axis tick, not a second label beside the line"
