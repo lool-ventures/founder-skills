@@ -506,3 +506,74 @@ def test_a_publication_missing_from_report_html_is_a_gap(tmp_path: Path) -> None
     _write(tmp_path, "report.html", "<html><body>no record here</body></html>")
     rc, _, stderr = _with_record(tmp_path, "Nothing about patents.")
     assert rc == 1 and "report.html" in stderr and "WO2024000001A1" in stderr
+
+
+# --- the pages' text: internal filenames and criterion ids (a warning; pages P2a) -------------------------------
+
+
+def test_a_page_naming_an_internal_file_is_a_warning_not_a_gap(tmp_path: Path) -> None:
+    _publishable(tmp_path)
+    _write(
+        tmp_path, "explore.html", "<html><body><p>To use 3D: Open the explore.html file in Chrome.</p></body></html>"
+    )
+    rc, out, _err = _run(tmp_path)
+    assert out is not None
+    warnings = out["summary"]["warnings"]
+    assert any("explore.html shows the internal file 'explore.html'" in w for w in warnings), warnings
+    assert rc == 0 and out["status"] == "publishable", "a warning never fails the gate"
+
+
+def test_a_criterion_id_in_a_page_is_a_warning(tmp_path: Path) -> None:
+    _publishable(tmp_path)
+    _write(tmp_path, "report.html", "<html><body><p>POS_04 fails: the map has one axis.</p></body></html>")
+    _rc, out, _err = _run(tmp_path)
+    assert out is not None
+    assert any("report.html shows the criterion ID 'POS_04'" in w for w in out["summary"]["warnings"])
+
+
+def test_script_and_style_text_is_not_founder_text(tmp_path: Path) -> None:
+    """The explorer's DATA block names artifacts and keys; nobody reads it on the page."""
+    _publishable(tmp_path)
+    page = (
+        "<html><head><style>.x{}/* landscape.json */</style></head><body><p>Clean prose.</p>"
+        '<script>const DATA = {"src": "landscape.json", "id": "POS_04"}; var a = DATA.src;</script></body></html>'
+    )
+    _write(tmp_path, "explore.html", page)
+    _rc, out, _err = _run(tmp_path)
+    assert out is not None
+    assert not any("shows the" in w for w in out["summary"]["warnings"]), out["summary"]["warnings"]
+
+
+def test_the_real_pages_scan_clean_and_a_seeded_filename_is_caught(tmp_path: Path) -> None:
+    """On the fixture's own rendered pages the scan finds nothing; seed a field report.html renders as-is (a
+    competitor's funding line) with an internal filename, render again, and the scan names it.
+
+    Limit, stated: it reads the pages' static text. The explorer builds most of its text in the browser from
+    its data block, so text only the explorer's script renders is outside this scan."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from compose_invocations import drive_compose
+    from no_ledger_goldens import FIXTURES, html_argv
+
+    def pages_warnings(seed: bool) -> list[str]:
+        work = tmp_path / ("seeded" if seed else "clean")
+        work.mkdir()
+        drive_compose("competitive-positioning", FIXTURES / "competitive-positioning", work)
+        if seed:
+            path = work / "landscape.json"
+            land = json.loads(path.read_text())
+            land["competitors"][0]["funding"] = "Public company, per landscape.json"
+            path.write_text(json.dumps(land))
+        for script, name in (("visualize.py", "report.html"), ("explore.py", "explore.html")):
+            proc = subprocess.run(
+                [sys.executable, *html_argv("competitive-positioning", script, work, work / name)],
+                capture_output=True,
+                text=True,
+            )
+            assert proc.returncode == 0, proc.stderr
+        _rc, out, _err = _run(work)
+        assert out is not None
+        return [w for w in out["summary"]["warnings"] if " shows the " in w]
+
+    assert pages_warnings(seed=False) == []
+    seeded = pages_warnings(seed=True)
+    assert any("report.html shows the internal file 'landscape.json'" in w for w in seeded), seeded

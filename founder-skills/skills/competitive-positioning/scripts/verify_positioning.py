@@ -54,6 +54,7 @@ import json
 import os
 import re
 import sys
+from html.parser import HTMLParser
 from typing import Any
 
 # ---------------------------------------------------------------------------
@@ -223,6 +224,55 @@ _PENDING_RE = re.compile(
 _GRANTED_RE = re.compile(
     r"(?i)\b(?:granted|issued) patents?\b|\bpatents? (?:was |were |has been |have been |is |are )?(?:granted|issued)\b"
 )
+
+
+class _TextNodes(HTMLParser):
+    """The text a reader sees: text nodes only, never inside <script> or <style> (the explorer's `DATA` carries
+    artifact keys and file names that are not shown)."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+        self._skip = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in ("script", "style"):
+            self._skip += 1
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in ("script", "style") and self._skip:
+            self._skip -= 1
+
+    def handle_data(self, data: str) -> None:
+        if not self._skip:
+            self.parts.append(data)
+
+
+def _page_text(page_html: str) -> str:
+    parser = _TextNodes()
+    parser.feed(page_html)
+    parser.close()
+    return " ".join(parser.parts)
+
+
+def _check_page_text(artifacts: dict[str, dict[str, Any]]) -> list[dict[str, str]]:
+    """The two pages' text names no internal file and no criterion id. A WARNING, not an error: a measurement
+    of the sections the checklist's drop step does not clean (moat evidence, the outside review's findings,
+    competitor descriptions, the explorer's rationales); it is promoted only once each is measured clean or
+    routed through the same drop step."""
+    issues: list[dict[str, str]] = []
+    for page in ("report.html", "explore.html"):
+        raw = artifacts.get(page, {}).get("_text")
+        if not raw:
+            continue
+        text = _page_text(raw)
+        for name in _internal_files_in(text):
+            issues.append(_issue("warning", f"{page} shows the internal file '{name}' — the founder never saw it"))
+        for m in sorted(set(_CRITERION_ID_RE.findall(text))):
+            issues.append(
+                _issue("warning", f"{page} shows the criterion ID '{m}' — render the criterion's label instead")
+            )
+    return issues
 
 
 def _check_rendered(artifacts: dict[str, dict[str, Any]], gate: int) -> list[dict[str, str]]:
@@ -635,7 +685,7 @@ def _check_cross(artifacts: dict[str, dict[str, Any]]) -> list[dict[str, str]]:
 
 def verify(dir_path: str, gate: int = 2) -> dict[str, Any]:
     artifacts = _check_existence(dir_path, gate)
-    rendered = _check_rendered(artifacts, gate)
+    rendered = _check_rendered(artifacts, gate) + (_check_page_text(artifacts) if gate >= 2 else [])
     cross = _check_cross(artifacts)
 
     errors: list[str] = []

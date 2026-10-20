@@ -537,8 +537,8 @@ def compose_explorer(dir_path: str) -> str:
           It cannot load inside embedded viewers like Claude Cowork.</p>
         <p style="font-size: 0.85rem; color: var(--lool-mute); background: var(--lool-paper-2);
                   border-radius: var(--r-input); padding: 0.75rem 1rem; line-height: 1.5;">
-          <strong>To use 3D:</strong> Open the <code>explore.html</code> file
-          directly in Chrome, Firefox, or Safari.</p>
+          <strong>To use 3D:</strong> Open this file in Chrome, Safari or Firefox
+          (from where you saved it), not inside the viewer.</p>
       </div>
     </div>
   </div>
