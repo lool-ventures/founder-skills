@@ -42,6 +42,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="light">
 <title>Financial Model Review</title>
 <style>
 /*__BRAND_CSS__*/
@@ -53,12 +54,8 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
   }
 
-  /* Header */
-  .header { padding: 24px 32px 16px; display: flex; align-items: center; gap: 12px; }
-  .header h1 {
-    font-size: 1.6rem; font-weight: 400; color: var(--lool-blue);
-    letter-spacing: -0.01em; margin: 0;
-  }
+  /* Header card (the shared .ui-hero), inset like the sections below it */
+  .page-head { padding: 24px 32px 16px; }
   .stage-badge {
     display: inline-block; padding: 3px 10px; border-radius: var(--r-input);
     font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
@@ -66,31 +63,20 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     background: var(--lool-white); letter-spacing: 0.06em;
   }
 
-  /* Sanity strip */
-  .sanity-strip { display: flex; gap: 16px; padding: 0 32px 16px; flex-wrap: wrap; }
-  .sanity-card {
-    background: var(--lool-paper); padding: 14px 20px;
-    min-width: 160px; flex: 1;
-    border: 1px solid var(--lool-line-2);
-    border-left: 3px solid var(--lool-line);
-  }
-  .sanity-card.pass { border-left-color: var(--lool-success); }
-  .sanity-card.warn { border-left-color: var(--lool-warning); }
-  .sanity-card .label {
-    font-size: 0.7rem; color: var(--lool-subtle); text-transform: uppercase;
-    letter-spacing: 0.06em; margin-bottom: 4px; font-weight: 500;
-  }
-  .sanity-card .value {
-    font-family: var(--font-mono);
-    font-size: 1.25rem; font-weight: 600; color: var(--lool-slate);
+  /* Sanity strip: the shared tiles (.ui-tiles / .ui-tile) */
+  .sanity-strip { padding: 0 32px 16px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+  /* Phone: tighter insets, two tiles a row, and the tab bar scrolls sideways rather than off the page. */
+  @media (max-width: 560px) {
+    .page-head, .sanity-strip { padding-left: 16px; padding-right: 16px; }
+    .page-head .ui-hero { padding: 16px; }
+    .tab-bar { overflow-x: auto; padding: 0 16px; }
+    .tab-btn { white-space: nowrap; padding: 10px 14px; }
   }
 
   /* Warnings container */
   #warnings-container { padding: 0 32px; }
   .warning-card {
-    background: var(--lool-warning-tint); border-left: 3px solid var(--lool-warning);
-    padding: 0.75rem 1rem; margin-bottom: 0.5rem;
-    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 0.5rem; display: flex; justify-content: space-between; align-items: center; gap: 12px;
   }
   .warning-card .msg { color: var(--lool-ink); font-size: 0.9rem; }
   .warning-card .dismiss-btn {
@@ -302,13 +288,18 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
 </head>
 <body>
 
-<div class="header">
-  <h1 id="header-title"></h1>
-  <span class="stage-badge" id="stage-badge"></span>
-  <div style="font-size:0.75rem;color:var(--lool-subtle);margin-top:4px;">All values in USD</div>
+<main>
+<div class="page-head">
+<header class="ui-hero" aria-labelledby="ui-hero-title">
+  <div class="ui-hero__text">
+    <p class="ui-eyebrow">Financial model review · values check</p>
+    <h1 id="ui-hero-title">/*__COMPANY__*/</h1>
+    <p class="ui-hero__meta"><span class="stage-badge" id="stage-badge"></span><span>All values in USD</span></p>
+  </div>
+</header>
 </div>
 
-<div class="sanity-strip" id="sanity-strip"></div>
+<div class="sanity-strip ui-tiles" id="sanity-strip"></div>
 
 <div id="warnings-container"></div>
 
@@ -316,7 +307,8 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
 
 <div id="tab-panels"></div>
 
-<div class="footer-credit">founder-skills by lool ventures &middot; <a href="https://github.com/lool-ventures/founder-skills/discussions/new?category=ideas-feedback" style="color:inherit">Share feedback</a></div>
+</main>
+<!--__FOOTER__-->
 
 <div class="corrections-bar" id="corrections-bar">
   <div class="corrections-summary" id="corrections-summary">
@@ -547,7 +539,7 @@ function updateMetricCard(id, value, unit, warn) {
   var valEl = card.querySelector(".value");
   if (valEl) valEl.textContent = value != null ? String(value) + (unit || "") : "\u2014";
   /* warn === null: a figure shown without a grade, so neither colour. */
-  card.className = "sanity-card" + (value == null || warn === null ? "" : (warn ? " warn" : " pass"));
+  card.className = "ui-tile" + (value == null || warn === null ? "" : (warn ? " ui-tile--warn" : " ui-tile--pass"));
 }
 
 /* Runway is computed two different ways depending on where the number came
@@ -573,13 +565,13 @@ function buildSanityStrip() {
   ];
   cards.forEach(function(c) {
     var div = document.createElement("div");
-    div.className = "sanity-card";
+    div.className = "ui-tile";
     div.id = "sanity-" + c.id;
     var lbl = document.createElement("div");
-    lbl.className = "label";
+    lbl.className = "ui-tile__label label";
     lbl.textContent = c.label;
     var val = document.createElement("div");
-    val.className = "value";
+    val.className = "ui-tile__value value";
     val.textContent = "\u2014";
     div.appendChild(lbl);
     div.appendChild(val);
@@ -627,7 +619,7 @@ function updateWarnings(warnings) {
     var w = warnings[i];
     if (warningOverrides.has(w.code)) continue;
     var card = document.createElement("div");
-    card.className = "warning-card";
+    card.className = "ui-callout ui-callout--warn warning-card";
     var msg = document.createElement("span");
     msg.className = "msg";
     msg.textContent = w.message || w.code || "Warning";
@@ -1650,7 +1642,6 @@ function buildTabs() {
 /* ===== Init ===== */
 function init() {
   var company = getByPath(state, "company") || {};
-  document.getElementById("header-title").textContent = (company.company_name || "Unknown") + " \u2014 Financial Model Review";
   document.getElementById("stage-badge").textContent = company.stage || "";
   buildSanityStrip();
   buildTabs();
@@ -1713,6 +1704,7 @@ def _build_html(
     if scripts_dir not in sys.path:
         sys.path.insert(0, scripts_dir)
     import _theme
+    import _ui
 
     canonical = json.dumps(inputs, sort_keys=True, separators=(",", ":"))
     base_hash = "sha256:" + hashlib.sha256(canonical.encode()).hexdigest()
@@ -1729,8 +1721,13 @@ def _build_html(
         'const CUR_PREFIX = CURRENCY === "USD" ? "$" : "";\n'
         'const CUR_SUFFIX = CURRENCY === "USD" ? "" : " " + CURRENCY;'
     )
-    html = _HTML_TEMPLATE.replace("/*__BRAND_CSS__*/", _theme.brand_css())
-    html = html.replace("/*__EMBEDDED_DATA__*/", data_js)
+    company = str(((inputs.get("company") or {}).get("company_name")) or "Unknown company")
+    html = _HTML_TEMPLATE.replace("/*__BRAND_CSS__*/", _theme.brand_css() + "\n" + _ui.UI_CSS)
+    html = html.replace("/*__EMBEDDED_DATA__*/", data_js, 1)
+    # After the data, first occurrence only: these placeholders sit in the body ahead of the data script, so the
+    # first one is the template's own, whatever the data carries; and the company name goes in last of all.
+    html = html.replace("<!--__FOOTER__-->", _ui.footer("Financial Model Review"), 1)
+    html = html.replace("/*__COMPANY__*/", _ui._esc(company), 1)
 
     # Inject extraction warnings banner above the warnings container
     # And the computed values (status "info") in a neutral card: a computed value is not an extraction error.

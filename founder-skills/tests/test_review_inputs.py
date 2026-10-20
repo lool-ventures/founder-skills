@@ -302,9 +302,10 @@ class TestStaticHTML:
         assert "font-family: 'Sora'" in html
 
     def test_footer_credit(self) -> None:
-        """Subtle provenance footer present."""
+        """The shared footer, once: the skill, the credit and "Share feedback"."""
         rc, html, stderr = _generate_static(_FULL_INPUTS)
-        assert "founder-skills by lool ventures" in html
+        assert html.count('<footer class="ui-footer">') == 1
+        assert "<span>Financial Model Review</span>" in html and "lool ventures</a>" in html
 
     def test_stage_badge(self) -> None:
         """Stage badge rendered."""
@@ -1649,3 +1650,58 @@ def test_the_guard_check_sees_a_fetch_whatever_its_quote(quote: str) -> None:
     guarded = f"if (IS_STATIC) {{ a(); }} else {{ fetch({quote}/api/check{quote}, {{}}); }}"
     assert len(_unguarded_api_fetches(bare)) == 1
     assert _unguarded_api_fetches(guarded) == []
+
+
+# --- the values page on the shared shell (pages P4) ------------------------------------------------------------
+
+
+def _both_modes(inputs: dict[str, Any]) -> dict[str, str]:
+    """The page as the static file (`_write_static`) and as the server serves it (`_build_html`, not static)."""
+    ri = _load_review_inputs_module()
+    with tempfile.TemporaryDirectory() as td:
+        out = os.path.join(td, "review.html")
+        ri._write_static(inputs, out)
+        with open(out, encoding="utf-8") as f:
+            static = f.read()
+    return {"static": static, "server": ri._build_html(inputs, is_static=False)}
+
+
+@pytest.mark.parametrize("mode", ["static", "server"])
+def test_the_values_page_has_the_shell_in_both_modes(mode: str) -> None:
+    import sys
+
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from _dom import by_tag, parse
+
+    html = _both_modes(_FULL_INPUTS)[mode]
+    doc = parse(html)
+    metas = {m.get("name"): m.get("content") for m in by_tag(doc, "meta") if m.has("name")}
+    assert "width=device-width" in (metas.get("viewport") or "")
+    assert metas.get("color-scheme") == "light"
+    (html_el,) = by_tag(doc, "html")
+    assert html_el.get("lang") == "en"
+    assert len(by_tag(doc, "main")) == 1 and len(by_tag(doc, "footer")) == 1
+    (h1,) = by_tag(doc, "h1")
+    company: dict[str, Any] = _FULL_INPUTS["company"]  # type: ignore[assignment]
+    assert h1.text() == company["company_name"]  # rendered server-side, escaped
+    # The shell's stylesheet, not its script: the page's own JS runs the values check.
+    assert ".ui-tile {" in html and "beforeprint" not in html
+
+
+def test_the_two_modes_differ_only_in_the_data_block() -> None:
+    """A template edit that lands in one mode only reds here: outside the embedded data, both are one page."""
+    pages = _both_modes(_FULL_INPUTS)
+
+    def outside_data(html: str) -> str:
+        return re.sub(r"const DATA = .*?const CUR_SUFFIX[^\n]*", "", html, flags=re.S)
+
+    assert "const IS_STATIC = true" in pages["static"] and "const IS_STATIC = false" in pages["server"]
+    assert outside_data(pages["static"]) == outside_data(pages["server"])
+
+
+def test_a_company_name_cannot_inject_markup_or_a_placeholder() -> None:
+    company: dict[str, Any] = _FULL_INPUTS["company"]  # type: ignore[assignment]
+    hostile = {**_FULL_INPUTS, "company": {**company, "company_name": "<b>X</b> /*__EMBEDDED_DATA__*/"}}
+    html = _both_modes(hostile)["server"]
+    assert '<h1 id="ui-hero-title">&lt;b&gt;X&lt;/b&gt; /*__EMBEDDED_DATA__*/</h1>' in html
+    assert html.count("const DATA = ") == 1

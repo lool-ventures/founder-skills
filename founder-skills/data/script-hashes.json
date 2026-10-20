@@ -188,7 +188,7 @@
     "skills/financial-model-review/scripts/extract_model.py": "c99ba8429cc8403d276c5b49ee485b9aacfb761f99ff6ca1d05155b5eefcde20",
     "skills/financial-model-review/scripts/fmr_closing_message.py": "257a840567d2eabf876a6b511899c1bc6fc313e546171070ea2123445c7484e7",
     "skills/financial-model-review/scripts/fmr_dispatch_prompt.py": "160b371b21d4416fee8f0f7d774af0e1cf54d0e72054dff17fed30787d3e4e6f",
-    "skills/financial-model-review/scripts/review_inputs.py": "1d43773b918a2479a71a4e99e13c67b4a4a41f000854b3912973a664b364be88",
+    "skills/financial-model-review/scripts/review_inputs.py": "80e8047adf9e7ffeadb0ba56fe6cec427c7201a13faa3b5dac8994c41bdb70b1",
     "skills/financial-model-review/scripts/runway.py": "aed4ffb1d7f8c017212c616d1312b394eede5d8aa24c902d21afce0d227ed88b",
     "skills/financial-model-review/scripts/unit_economics.py": "251f387b8af64f5adfe749b361365d7ea332ab896c45dc482838f2d95d284cb6",
     "skills/financial-model-review/scripts/validate_extraction.py": "5fa7ef6272e8535b962e7c2390c117ce5f5ae62b2d3ca438cfa7944495e3a48b",
