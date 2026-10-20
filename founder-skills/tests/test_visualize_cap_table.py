@@ -2134,8 +2134,9 @@ class TestExploreNoEmoji:
     def test_chrome_uses_svg_icons(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             html = _render_explorer_full(d)
-        assert 'id="theme-ico"' in html, "theme toggle should be an SVG icon, not an emoji"
-        assert 'id="print-btn"' in html
+        # P3: the dark toggle and the Export PDF button are gone (the browser's own print keeps the print CSS).
+        assert 'id="theme-toggle"' not in html and 'id="theme-ico"' not in html and "data-theme" not in html
+        assert 'id="print-btn"' not in html
 
 
 class TestExploreDefaultView:
@@ -2219,7 +2220,7 @@ class TestExplorePrint:
             html = _render_explorer_full(d)
         assert "@media print" in html
         app = _script_blocks(html)[-1]
-        assert "window.print()" in app
+        assert "window.print()" not in app and "Export PDF" not in html
         # print CSS must respect the [hidden] attribute so torn-down widgets
         # don't print empty.
         assert "[hidden] {{ display: none".replace("{{", "{") in html
@@ -2837,11 +2838,15 @@ def test_report_redesign_integration() -> None:
     assert "Comparing the priced rounds" in html_doc
     assert "least dilutive" in html_doc
     assert "@media print" in html_doc and "@page" in html_doc
-    assert "doc-sheet" in html_doc
+    # On the shared shell (P3): one <main>, a phone viewport, one footer, and no print button (the browser's own
+    # print keeps the @page and print rules; the shell's script opens every <details> before printing).
+    assert html_doc.count('<main class="ui-page">') == 1
+    assert 'name="viewport"' in html_doc and html_doc.count("<footer") == 1
+    assert "Print / Save PDF" not in html_doc and "window.print()" not in html_doc
     assert "#7A5EA8" in html_doc or "#C9892B" in html_doc  # new palette present
     # B1: no raw data keys leak
     assert "founders pct" not in html_doc
     # eyebrow + bare company h1 (decision 9) but <title> preserved (decision 20)
     assert "Cap table report" in html_doc
-    assert "<h1>Northwind Robotics</h1>" in html_doc
+    assert '<h1 id="ui-hero-title">Northwind Robotics</h1>' in html_doc
     assert "Cap Table — Northwind Robotics" in html_doc

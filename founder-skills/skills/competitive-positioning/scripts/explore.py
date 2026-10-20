@@ -51,6 +51,28 @@ OPTIONAL_ARTIFACTS = [
 _IGNORED_OTHER_RUN: set[str] = set()
 
 
+# The shared footer's rules, copied from `_ui.UI_CSS` (held equal by a test): this page renders `_ui.footer()` but
+# not the shell's stylesheet, so it carries the footer's rules and the variables they read, scoped to the footer.
+FOOTER_CSS = """\
+.ui-footer {
+  --ui-ink-2: #5E6A78; --ui-accent: var(--lool-blue); --ui-accent-2: var(--lool-royal); --ui-on-accent: #FFFFFF;
+  --ui-s2: 8px; --ui-s3: 12px; --ui-s4: 16px; --ui-s5: 24px; --ui-s6: 32px;
+}
+.ui-footer {
+  max-width: 1120px; margin: 0 auto; padding: var(--ui-s4) var(--ui-s5) var(--ui-s6);
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--ui-s2) var(--ui-s3);
+  color: var(--ui-ink-2); font-size: 0.82rem;
+}
+.ui-footer a { color: var(--ui-accent-2); }
+.ui-footer a.ui-feedback {
+  display: inline-block; padding: 6px 14px; border-radius: var(--r-pill); font-weight: 600;
+  background: var(--ui-accent); color: var(--ui-on-accent); text-decoration: none;
+}
+.ui-footer a.ui-feedback:hover { background: var(--lool-blue-deep); color: var(--ui-on-accent); }
+.ui-footer a.ui-feedback:focus-visible { outline: 2px solid var(--ui-accent); outline-offset: 3px; }
+"""
+
+
 def _load_artifact(dir_path: str, name: str) -> dict[str, Any] | None:
     if name in _IGNORED_OTHER_RUN:
         return None
@@ -394,7 +416,9 @@ def compose_explorer(dir_path: str) -> str:
     import _theme
 
     brand_css = _theme.brand_css()
-    footer_credit = _theme.FOOTER_CREDIT_HTML
+    import _ui
+
+    footer_credit = _ui.footer("Competitive Positioning")
 
     payload = _build_data_payload(dir_path)
     data_json = _safe_json_embed(payload)
@@ -433,13 +457,13 @@ def compose_explorer(dir_path: str) -> str:
 <title>Competitive Explorer: {company_name}</title>
 <script>{_chartjs_source()}</script>
 {_css(brand_css)}
+<style>
+{FOOTER_CSS}</style>
 </head>
 <body>
 <div class="header">
   <h1>Competitive Explorer: {company_name}</h1>
-  <div class="subtitle">Interactive positioning analysis &mdash;
-    <a href="https://github.com/lool-ventures/founder-skills">founder skills</a>
-    by <a href="https://lool.vc">lool ventures</a></div>
+  <div class="subtitle">Interactive positioning analysis</div>
 </div>
 {verdict_html}
 

@@ -394,7 +394,96 @@ def render_comparison_table(
         + _row("Price per share", lambda c: f"${c['price']:.2f}" if c["price"] is not None else "—")
         + _row("Shares after round", lambda c: f"{int(c['fd']):,}" if c["fd"] is not None else "—")
     )
-    return f'<div class="cmp-wrap"><table class="cmp"><thead><tr>{head}</tr></thead><tbody>{rows}</tbody></table></div>'
+    return f'<div class="ui-table-wrap"><table class="ui-table cmp"><thead><tr>{head}</tr></thead><tbody>{rows}</tbody></table></div>'
+
+
+# The report page's own styles, after the shared shell's (`_ui.UI_CSS`): the donut panel, the scenario cards'
+# insides, the counsel list and print. The shell owns the page, the header, the sections, tables and callouts.
+REPORT_CSS = """\
+  @page { size: A4; margin: 18mm 16mm 20mm; }
+  .section-note { font-size: 14px; color: var(--lool-mute); margin: 0 0 14px; }
+  .section-note--inline { display: inline; font-weight: 400; }
+  .panel { display: flex; gap: 32px; align-items: center; padding: 22px 24px; flex-wrap: wrap;
+         border: 1px solid var(--lool-line); border-radius: 8px; }
+  .legend { list-style: none; padding: 0; margin: 0; flex: 1; min-width: 240px; }
+  .lg-row { display: flex; align-items: center; gap: 11px; padding: 7px 0;
+         border-bottom: 1px solid var(--lool-paper-2); font-size: 15px; }
+  .lg-sw { width: 13px; height: 13px; border-radius: 3px; flex: none; }
+  .lg-label { flex: 1; min-width: 0; color: var(--lool-ink); overflow-wrap: normal; }
+  .lg-pct { font-variant-numeric: tabular-nums; font-weight: 700; min-width: 60px; text-align: right; }
+  .lg-sh { font-variant-numeric: tabular-nums; color: var(--lool-faint); min-width: 96px;
+         text-align: right; font-size: 14px; }
+  .ui-section .scenario-card { box-shadow: none; }
+  .card-dashed { border-style: dashed; border-color: var(--lool-line-form); }
+  .card-head { display: flex; justify-content: space-between; align-items: baseline;
+         gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
+  .card-body { display: flex; gap: 28px; align-items: center; flex-wrap: wrap; }
+  .card-main { flex: 1; min-width: 0; }
+  .metric-trio { display: flex; gap: 28px; flex-wrap: wrap; margin-bottom: 14px; }
+  .metric-n { font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums;
+         line-height: 1; color: var(--lool-ink); }
+  .metric-blue { color: var(--lool-blue); }
+  .metric-l { font-size: 12px; color: var(--lool-mute); margin-top: 4px; }
+  .delta { color: var(--lool-danger); font-weight: 600; }
+  .pool-section { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--lool-cloud, #e5e7eb);
+    font-size: 13px; line-height: 1.55; }
+  .pool-section h4 { margin: 0 0 6px; font-size: 13px; }
+  .pool-section p { margin: 0 0 6px; }
+  .pool-callout { background: var(--lool-warning-tint); border-left: 3px solid var(--lool-warning); padding: 6px 10px; }
+  .pool-note, .pool-action { color: var(--lool-slate); }
+  .impact { font-size: 14px; line-height: 1.55; color: var(--lool-slate);
+         margin: 16px 0 0; padding-top: 14px; border-top: 1px solid var(--lool-paper-2); }
+  .gloss { font-size: 13px; color: var(--lool-mute); margin: 0 0 12px; }
+  .blockers { margin: 8px 0 0; padding-left: 18px; font-size: 13px; color: var(--lool-mute); }
+  .pill { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
+         padding: 3px 11px; border-radius: 50px; background: var(--lool-paper-2); color: var(--lool-subtle); }
+  .pill-ok { background: var(--lool-success-tint); color: var(--lool-success); }
+  .pill-warn { background: var(--lool-warning-tint); color: var(--lool-warning); }
+  .pill-danger { background: var(--lool-danger-tint); color: var(--lool-danger); }
+  .panel-badge { position: absolute; top: 14px; right: 16px; }
+  .panel-vacuous, .panel-unverified { position: relative; }
+  .panel-unverified { border-color: var(--lool-warning); border-style: dashed;
+         background: var(--lool-warning-tint); }
+  .panel-vacuous { border-color: var(--lool-danger); border-style: dashed;
+         background: var(--lool-danger-tint); }
+  .donut-dim { filter: grayscale(0.85) opacity(0.55); }
+  .solver-warnings ul { margin: 0; padding-left: 18px; }
+  .num, .ui-table th.num, .ui-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .cmp-best { display: block; font-size: 10px; font-weight: 600; text-transform: uppercase;
+         letter-spacing: 0.05em; color: var(--lool-success); margin-top: 2px; }
+  .cmp-metric { text-align: left; color: var(--lool-mute); }
+  .cmp-best-col { background: var(--lool-success-tint); }
+  .cmp, .data { min-width: 420px; }
+  .ci-group { margin-bottom: 20px; }
+  .ci-domain { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em;
+         color: var(--lool-azure-deep); margin-bottom: 8px; }
+  .ci { padding: 12px 0; border-top: 1px solid var(--lool-paper-2); }
+  .ci-title { font-size: 15px; font-weight: 600; color: var(--lool-ink); margin-bottom: 4px; line-height: 1.35; }
+  .ci-q { font-size: 14px; line-height: 1.55; color: var(--lool-mute); margin-bottom: 6px; }
+  .ci-meta { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+  .ci-src { font-size: 13px; color: var(--lool-azure-deep); text-decoration: none; font-weight: 500; }
+  .ci-also { font-size: 12px; color: var(--lool-mute); }
+  .ci-code { font-family: var(--font-mono); font-size: 10px; color: var(--lool-faint); }
+  .ad-summary { font-size: 13px; color: var(--lool-slate); margin: 14px 0 4px; }
+  .ad-series { font-size: 12px; color: var(--lool-mute); margin: 0; }
+  .wl-do { color: var(--lool-slate); font-size: 13px; line-height: 1.45; }
+  code { background: var(--lool-paper-2); padding: 1px 4px; border-radius: 3px;
+          font-size: 0.9em; font-family: var(--font-mono); }
+  .term { border-bottom: 1px dotted var(--lool-line); cursor: help; }
+  .rule-code { font-size: 11px; color: var(--lool-mute); }
+  .rule-extra { font-size: 11px; color: var(--lool-mute); }
+  .avoid-break { break-inside: avoid; }
+  @media (max-width: 560px) {
+    .panel { padding: 16px; gap: 16px; }
+    .lg-sh { min-width: 0; font-size: 12px; }
+    .lg-pct { min-width: 0; }
+  }
+  @media print {
+    body.ui-body { background: #fff; }
+    .ui-section, .ui-card, .ui-hero { box-shadow: none; }
+    .pg-break { break-before: page; }
+  }
+"""
 
 
 def render_report_html(
@@ -406,7 +495,6 @@ def render_report_html(
     counsel_packet: dict[str, Any],
     disclosure_banner: str = "",
 ) -> str:
-    company = _esc(inputs.get("company_name", "Company"))
     scenarios = scenarios_doc.get("scenarios", [])
 
     # Step 1: founders-only pre_breakdown + other_common slice
@@ -461,11 +549,11 @@ def render_report_html(
             for n, c, s, vrm, vu in rows_v
         )
         voting_pct_html = (
-            "<h2>Voting power (dual-class)</h2>"
+            '<section class="ui-section" id="voting"><h2>Voting power (dual-class)</h2>'
             "<p class='section-note'>Dual-class structure detected. Voting % = shares × voting_rights_multiple, normalized across all voting holders. "
             "Preferred treated as 1× per v0.5.0 simplification; see <code>dual_class.founder_super_voting</code> counsel item.</p>"
-            '<table class="data"><thead><tr><th>Holder</th><th>Class</th><th>Shares</th><th>Voting units</th><th>Voting %</th></tr></thead>'
-            f"<tbody>{voting_rows_html}</tbody></table>"
+            '<div class="ui-table-wrap"><table class="ui-table data"><thead><tr><th>Holder</th><th>Class</th><th>Shares</th><th>Voting units</th><th>Voting %</th></tr></thead>'
+            f"<tbody>{voting_rows_html}</tbody></table></div></section>"
         )
 
     # AoA Findings section — rendered when aoa_findings has extracted data.
@@ -497,9 +585,9 @@ def render_report_html(
                 rendered = _esc(str(val))
             aoa_rows_html += f"<tr><td>{_esc(label)}</td><td>{rendered}</td></tr>"
         aoa_findings_html = (
-            "<h2>Articles of Association — extracted findings</h2>"
-            '<table class="data"><thead><tr><th>Finding</th><th>Value</th></tr></thead>'
-            f"<tbody>{aoa_rows_html}</tbody></table>"
+            '<section class="ui-section" id="aoa"><h2>Articles of Association — extracted findings</h2>'
+            '<div class="ui-table-wrap"><table class="ui-table data"><thead><tr><th>Finding</th><th>Value</th></tr>'
+            f"</thead><tbody>{aoa_rows_html}</tbody></table></div></section>"
         )
 
     # Step 2: classify scenarios into ordered buckets
@@ -564,7 +652,7 @@ def render_report_html(
             )
             ad_html = f'<p class="ad-summary">{" | ".join(parts)}</p><ul class="ad-series">{series}</ul>'
         scenario_cards.append(f"""
-<div class="card avoid-break">
+<div class="ui-card scenario-card avoid-break">
   <div class="card-head">
     <h3>{_esc(s.get("label", s["scenario_id"]))}</h3>
     <span class="pill pill-ok">Fully modeled</span>
@@ -594,14 +682,14 @@ def render_report_html(
             for r in co["per_safe"]
         )
         scenario_cards.append(f"""
-<div class="card card-dashed avoid-break">
+<div class="ui-card scenario-card card-dashed avoid-break">
   <div class="card-head">
     <h3>{_esc(s.get("label", s["scenario_id"]))}</h3>
     <span class="pill pill-warn">Structure only</span>
   </div>
   <p class="gloss">{_esc(_labels.CAP_IMPLIED_GLOSS)}</p>
-  <table class="data"><thead><tr><th>SAFE</th><th class="num">Cap-implied %</th>
-    <th class="num">Price</th><th class="num">Shares</th></tr></thead><tbody>{rows}</tbody></table>
+  <div class="ui-table-wrap"><table class="ui-table data"><thead><tr><th>SAFE</th><th class="num">Cap-implied %</th>
+    <th class="num">Price</th><th class="num">Shares</th></tr></thead><tbody>{rows}</tbody></table></div>
 </div>""")
 
     for s in pending:
@@ -615,7 +703,7 @@ def render_report_html(
         else:
             body = "<p class='gloss'>No resolved ownership yet.</p>"
         scenario_cards.append(f"""
-<div class="card avoid-break">
+<div class="ui-card scenario-card avoid-break">
   <div class="card-head">
     <h3>{_esc(s.get("label", s["scenario_id"]))}</h3>
     <span class="pill">{_esc(_labels.humanize("completeness", co.get("completeness", "structural_only")))}</span>
@@ -629,13 +717,7 @@ def render_report_html(
     banner_html = ""
     if disclosure_banner:
         banner_text = _esc(_strip_md_markers(disclosure_banner))
-        banner_html = (
-            '<div class="disclosure-banner" '
-            'style="background:var(--lool-warning-tint);border-left:4px solid var(--lool-warning);'
-            "padding:14px 18px;border-radius:4px;margin-bottom:24px;font-size:14px;"
-            'line-height:1.55;color:var(--lool-ink);">'
-            f"{banner_text}</div>"
-        )
+        banner_html = f'<div class="ui-callout ui-callout--warn disclosure-banner">{banner_text}</div>'
 
     # R-5: cap-base confidence-tier banner, sourced directly from cap_state.warnings (independent of the
     # narrower disclosure_banner mechanism above, which is about acquisition-coverage, not base confidence).
@@ -649,13 +731,10 @@ def render_report_html(
             _strip_md_markers(line) for line in _warning_callouts.render_warning_callouts(conf_warnings) if line.strip()
         ]
         conf_text = _esc(" ".join(conf_lines))
-        tint_var = "--lool-danger-tint" if conf_tier == "vacuous" else "--lool-warning-tint"
-        border_var = "--lool-danger" if conf_tier == "vacuous" else "--lool-warning"
+        tone = "fail" if conf_tier == "vacuous" else "warn"
         confidence_banner_html = (
-            f'<div class="confidence-banner confidence-banner-{conf_tier}" '
-            f'style="background:var({tint_var});border-left:4px solid var({border_var});'
-            "padding:14px 18px;border-radius:4px;margin-bottom:16px;font-size:14px;"
-            f'line-height:1.55;color:var(--lool-ink);">{conf_text}</div>'
+            f'<div class="ui-callout ui-callout--{tone} confidence-banner confidence-banner-{conf_tier}">'
+            f"{conf_text}</div>"
         )
 
     # SOLVER warnings -- a SEPARATE block from the confidence banner above, deliberately. Those are
@@ -671,12 +750,7 @@ def render_report_html(
     )
     if _solver_lines:
         _items = "".join(f"<li>{_esc(line)}</li>" for line in _solver_lines)
-        solver_banner_html = (
-            '<div class="solver-warnings" style="background:var(--lool-warning-tint);'
-            "border-left:4px solid var(--lool-warning);padding:12px 16px;border-radius:4px;"
-            'margin-bottom:16px;font-size:13px;line-height:1.5;color:var(--lool-ink);">'
-            '<ul style="margin:0;padding-left:18px;">' + _items + "</ul></div>"
-        )
+        solver_banner_html = '<div class="ui-callout ui-callout--warn solver-warnings"><ul>' + _items + "</ul></div>"
 
     scripts_dir = os.path.dirname(os.path.abspath(__file__))
     if scripts_dir not in sys.path:
@@ -715,7 +789,7 @@ def render_report_html(
         watchlist_html = (
             "<h2>Date-sensitive watchlist</h2>"
             '<p class="section-note">Rules with a time window — one row each.</p>'
-            '<div class="cmp-wrap avoid-break"><table class="data"><thead><tr>'
+            '<div class="ui-table-wrap avoid-break"><table class="ui-table data"><thead><tr>'
             "<th>Rule</th><th>Status</th><th>Next date</th><th>What to do</th>"
             f"</tr></thead><tbody>{wl_rows}</tbody></table></div>"
         )
@@ -723,162 +797,67 @@ def render_report_html(
         watchlist_html = "<h2>Date-sensitive watchlist</h2><p>No date-sensitive rules apply.</p>"
 
     counsel_count = len(counsel_items)
-    return f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>Cap Table — {company}</title>
-<style>
-{brand_css}
-  @page {{ size: A4; margin: 18mm 16mm 20mm; }}
-  body {{ font-family: var(--font-body); color: var(--lool-ink); background: var(--lool-paper);
-         margin: 0; padding: 40px 24px; line-height: 1.5; font-size: 15px;
-         -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }}
-  .doc-sheet {{ max-width: 820px; margin: 0 auto; background: var(--lool-white);
-         box-shadow: var(--shadow-soft); padding: 56px 64px 48px; }}
-  .topbar {{ max-width: 820px; margin: 0 auto 16px; display: flex; justify-content: flex-end; }}
-  .printbtn {{ display: inline-flex; align-items: center; gap: 7px; padding: 8px 14px;
-         border: 1px solid var(--lool-blue); border-radius: 4px; background: var(--lool-blue);
-         color: #fff; font: 600 13px var(--font-body); cursor: pointer; }}
-  h1 {{ font-family: var(--font-body); font-size: 34px; font-weight: 400; margin: 0;
-         color: var(--lool-blue); letter-spacing: -0.01em; }}
-  h2 {{ font-family: var(--font-body); font-size: 20px; font-weight: 500; color: var(--lool-royal);
-         margin: 34px 0 10px; }}
-  h3 {{ font-family: var(--font-body); font-size: 18px; font-weight: 500; color: var(--lool-ink); margin: 0; }}
-  .eyebrow {{ font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.10em;
-         color: var(--lool-subtle); margin-bottom: 8px; }}
-  .title-row {{ display: flex; justify-content: space-between; align-items: flex-end; gap: 24px;
-         border-bottom: 2px solid var(--lool-blue); padding-bottom: 18px; }}
-  .title-meta {{ text-align: right; font-size: 13px; color: var(--lool-mute); line-height: 1.5; }}
-  .section-note {{ font-size: 14px; color: var(--lool-mute); margin: 0 0 14px; }}
-  .panel {{ display: flex; gap: 32px; align-items: center; padding: 22px 24px;
-         border: 1px solid var(--lool-line); border-radius: 8px; }}
-  .legend {{ list-style: none; padding: 0; margin: 0; flex: 1; }}
-  .lg-row {{ display: flex; align-items: center; gap: 11px; padding: 7px 0;
-         border-bottom: 1px solid var(--lool-paper-2); font-size: 15px; }}
-  .lg-sw {{ width: 13px; height: 13px; border-radius: 3px; flex: none; }}
-  .lg-label {{ flex: 1; color: var(--lool-ink); }}
-  .lg-pct {{ font-variant-numeric: tabular-nums; font-weight: 700; min-width: 60px; text-align: right; }}
-  .lg-sh {{ font-variant-numeric: tabular-nums; color: var(--lool-faint); min-width: 96px;
-         text-align: right; font-size: 14px; }}
-  .card {{ border: 1px solid var(--lool-line); border-radius: 8px; padding: 22px 24px; margin: 16px 0; }}
-  .card-dashed {{ border-style: dashed; border-color: var(--lool-line-form); }}
-  .card-head {{ display: flex; justify-content: space-between; align-items: baseline;
-         gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }}
-  .card-body {{ display: flex; gap: 28px; align-items: center; }}
-  .card-main {{ flex: 1; min-width: 0; }}
-  .metric-trio {{ display: flex; gap: 28px; flex-wrap: wrap; margin-bottom: 14px; }}
-  .metric-n {{ font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums;
-         line-height: 1; color: var(--lool-ink); }}
-  .metric-blue {{ color: var(--lool-blue); }}
-  .metric-l {{ font-size: 12px; color: var(--lool-mute); margin-top: 4px; }}
-  .delta {{ color: var(--lool-danger); font-weight: 600; }}
-  .pool-section {{ margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--lool-cloud, #e5e7eb);
-    font-size: 13px; line-height: 1.55; }}
-  .pool-section h4 {{ margin: 0 0 6px; font-size: 13px; }}
-  .pool-section p {{ margin: 0 0 6px; }}
-  .pool-callout {{ background: var(--lool-warning-tint); border-left: 3px solid var(--lool-warning); padding: 6px 10px; }}
-  .impact {{ font-size: 14px; line-height: 1.55; color: var(--lool-slate);
-         margin: 16px 0 0; padding-top: 14px; border-top: 1px solid var(--lool-paper-2); }}
-  .gloss {{ font-size: 13px; color: var(--lool-mute); margin: 0 0 12px; }}
-  .blockers {{ margin: 8px 0 0; padding-left: 18px; font-size: 13px; color: var(--lool-mute); }}
-  .pill {{ font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
-         padding: 3px 11px; border-radius: 50px; background: var(--lool-paper-2); color: var(--lool-subtle); }}
-  .pill-ok {{ background: var(--lool-success-tint); color: var(--lool-success); }}
-  .pill-warn {{ background: var(--lool-warning-tint); color: var(--lool-warning); }}
-  .pill-danger {{ background: var(--lool-danger-tint); color: var(--lool-danger); }}
-  .panel-badge {{ position: absolute; top: 14px; right: 16px; }}
-  .panel-vacuous, .panel-unverified {{ position: relative; }}
-  .panel-unverified {{ border-color: var(--lool-warning); border-style: dashed;
-         background: var(--lool-warning-tint); }}
-  .panel-vacuous {{ border-color: var(--lool-danger); border-style: dashed;
-         background: var(--lool-danger-tint); }}
-  .donut-dim {{ filter: grayscale(0.85) opacity(0.55); }}
-  table.data, table.cmp {{ border-collapse: collapse; width: 100%; font-size: 14px; }}
-  table.data th, table.data td, table.cmp th, table.cmp td {{ padding: 10px 14px; text-align: left;
-         border-top: 1px solid var(--lool-line); }}
-  table.cmp thead th, table.data thead th {{ background: var(--lool-paper-2); color: var(--lool-subtle);
-         font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; border-top: none; }}
-  .cmp-wrap {{ border: 1px solid var(--lool-line); border-radius: 8px; overflow: hidden; margin: 8px 0; }}
-  .num {{ text-align: right; font-variant-numeric: tabular-nums; }}
-  th.num {{ text-align: right; }}
-  .cmp-best {{ display: block; font-size: 10px; font-weight: 600; text-transform: uppercase;
-         letter-spacing: 0.05em; color: var(--lool-success); margin-top: 2px; }}
-  .cmp-metric {{ text-align: left; color: var(--lool-mute); }}
-  .cmp-best-col {{ background: var(--lool-success-tint); }}
-  .ci-group {{ margin-bottom: 20px; }}
-  .ci-domain {{ font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em;
-         color: var(--lool-azure-deep); margin-bottom: 8px; }}
-  .ci {{ padding: 12px 0; border-top: 1px solid var(--lool-paper-2); }}
-  .ci-title {{ font-size: 15px; font-weight: 600; color: var(--lool-ink); margin-bottom: 4px; line-height: 1.35; }}
-  .ci-q {{ font-size: 14px; line-height: 1.55; color: var(--lool-mute); margin-bottom: 6px; }}
-  .ci-meta {{ display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }}
-  .ci-src {{ font-size: 13px; color: var(--lool-azure-deep); text-decoration: none; font-weight: 500; }}
-  .ci-also {{ font-size: 12px; color: var(--lool-mute); }}
-  .ci-code {{ font-family: var(--font-mono); font-size: 10px; color: var(--lool-faint); }}
-  .ad-summary {{ font-size: 13px; color: var(--lool-slate); margin: 14px 0 4px; }}
-  .ad-series {{ font-size: 12px; color: var(--lool-mute); margin: 0; }}
-  .wl-do {{ color: var(--lool-slate); font-size: 13px; line-height: 1.45; }}
-  .footer {{ margin-top: 36px; padding-top: 14px; border-top: 1px solid var(--lool-line);
-         display: flex; justify-content: space-between; flex-wrap: wrap; gap: 10px;
-         font-size: 12px; color: var(--lool-subtle); }}
-  code {{ background: var(--lool-paper-2); padding: 1px 4px; border-radius: 3px;
-          font-size: 0.9em; font-family: var(--font-mono); }}
-  .term {{ border-bottom: 1px dotted var(--lool-line); cursor: help; }}
-  .rule-code {{ font-size: 11px; color: var(--lool-mute); }}
-  .rule-extra {{ font-size: 11px; color: var(--lool-mute); }}
-  @media print {{
-    body {{ background: #fff; padding: 0; }}
-    .doc-sheet {{ box-shadow: none; margin: 0; max-width: none; }}
-    .screen-only {{ display: none !important; }}
-    .avoid-break {{ break-inside: avoid; }}
-    .pg-break {{ break-before: page; }}
-  }}
-</style>
-</head>
-<body>
-<div class="topbar screen-only">
-  <button class="printbtn" onclick="window.print()">Print / Save PDF</button>
-</div>
-<div class="doc-sheet">
-  {confidence_banner_html}{solver_banner_html}{banner_html}<div class="title-row">
-    <div>
-      <div class="eyebrow">Cap table report</div>
-      <h1>{company}</h1>
-    </div>
-    <div class="title-meta">As of {_esc(as_of)}<br>{fd_total_str} FD shares today</div>
-  </div>
+    import _ui
 
+    company_raw = str(inputs.get("company_name", "Company"))
+    meta = f"As of {_esc(as_of)} · {fd_total_str} FD shares today · rule pack v{_esc(RULE_PACK_VERSION)}"
+    hero = _ui.header_card(eyebrow="Cap table report", title=company_raw, meta_html=meta)
+    nav_items = [("ownership", "Ownership")]
+    if comparison_html:
+        nav_items.append(("rounds", "Rounds"))
+    nav_items += [("scenarios", "Scenarios"), ("lawyer", "Lawyer questions"), ("watchlist", "Watchlist")]
+    nav = (
+        '<nav class="ui-nav" aria-label="Sections">'
+        + "".join(f'<a href="#{sid}">{label}</a>' for sid, label in nav_items)
+        + "</nav>"
+    )
+    tier_badge = (
+        f'<span class="pill pill-{"danger" if conf_tier == "vacuous" else "warn"} panel-badge">'
+        f"{_esc(_confidence.TIER_BADGE_TEXT[conf_tier])}</span>"
+        if conf_tier != "ok"
+        else ""
+    )
+    panel_class = f"panel avoid-break panel-{conf_tier}" if conf_tier != "ok" else "panel avoid-break "
+    rounds_html = (
+        f'<section class="ui-section" id="rounds"><h2>Comparing the priced rounds</h2>{comparison_html}</section>'
+        if comparison_html
+        else ""
+    )
+    body = f"""{hero}
+{confidence_banner_html}{solver_banner_html}{banner_html}
+{nav}
+<section class="ui-section" id="ownership">
   <h2>Ownership today (pre-financing)</h2>
-  <div class="panel avoid-break {f"panel-{conf_tier}" if conf_tier != "ok" else ""}">
-    {f'<span class="pill pill-{"danger" if conf_tier == "vacuous" else "warn"} panel-badge">{_esc(_confidence.TIER_BADGE_TEXT[conf_tier])}</span>' if conf_tier != "ok" else ""}
+  <div class="{panel_class}">
+    {tier_badge}
     <div class="{"donut-dim" if conf_tier == "vacuous" else ""}">
       {render_donut(pre_breakdown, size=150, center_value=_pct(today_founder_pct), center_label="founders")}
     </div>
     {render_legend(pre_breakdown, fd=fd)}
   </div>
-  {voting_pct_html}
-
-  {f"<h2>Comparing the priced rounds</h2>{comparison_html}" if comparison_html else ""}
-
+</section>
+{voting_pct_html}
+{rounds_html}
+<section class="ui-section" id="scenarios">
   <h2>Each scenario in detail</h2>
   {"".join(scenario_cards)}
-  {aoa_findings_html}
-
-  <h2 class="pg-break">Questions for your lawyer <span class="section-note" style="display:inline;">· {counsel_count} items</span></h2>
+</section>
+{aoa_findings_html}
+<section class="ui-section pg-break" id="lawyer">
+  <h2>Questions for your lawyer <span class="section-note section-note--inline">· {counsel_count} items</span></h2>
   <p class="section-note">Not legal advice — a checklist to raise with qualified counsel. Each item links to its primary source.</p>
   {counsel_html or "<p>No counsel items.</p>"}
-
+</section>
+<section class="ui-section" id="watchlist">
   {watchlist_html}
-
-  <div class="footer">
-    <span>{company} · cap table report · generated {_esc(as_of)} · rule pack v{RULE_PACK_VERSION}</span>
-    <span>founder-skills by lool ventures</span>
-  </div>
-</div>
-</body>
-</html>
-"""
+</section>"""
+    return _ui.page_shell(
+        title=f"Cap Table — {company_raw}",
+        body_html=body,
+        brand_css=brand_css,
+        page_css=REPORT_CSS,
+        skill_name="Cap Table",
+    )
 
 
 def _run_ref_module() -> ModuleType:

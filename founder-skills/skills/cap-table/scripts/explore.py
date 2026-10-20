@@ -41,6 +41,27 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _palette  # noqa: E402
 import _pool_text  # noqa: E402
 
+# The shared footer's rules, copied from `_ui.UI_CSS` (held equal by a test): this page renders `_ui.footer()` but
+# not the shell's stylesheet, so it carries the footer's rules and the variables they read, scoped to the footer.
+FOOTER_CSS = """\
+.ui-footer {
+  --ui-ink-2: #5E6A78; --ui-accent: var(--lool-blue); --ui-accent-2: var(--lool-royal); --ui-on-accent: #FFFFFF;
+  --ui-s2: 8px; --ui-s3: 12px; --ui-s4: 16px; --ui-s5: 24px; --ui-s6: 32px;
+}
+.ui-footer {
+  max-width: 1120px; margin: 0 auto; padding: var(--ui-s4) var(--ui-s5) var(--ui-s6);
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--ui-s2) var(--ui-s3);
+  color: var(--ui-ink-2); font-size: 0.82rem;
+}
+.ui-footer a { color: var(--ui-accent-2); }
+.ui-footer a.ui-feedback {
+  display: inline-block; padding: 6px 14px; border-radius: var(--r-pill); font-weight: 600;
+  background: var(--ui-accent); color: var(--ui-on-accent); text-decoration: none;
+}
+.ui-footer a.ui-feedback:hover { background: var(--lool-blue-deep); color: var(--ui-on-accent); }
+.ui-footer a.ui-feedback:focus-visible { outline: 2px solid var(--ui-accent); outline-offset: 3px; }
+"""
+
 
 def _js_palette_block() -> str:
     """JS object body for the explorer's PALETTE, sourced from _palette so the
@@ -139,6 +160,7 @@ def render_explorer_html(
     import _labels
     import _rules
     import _theme
+    import _ui
 
     brand_css = _theme.brand_css()
     conf_warnings = _confidence.confidence_warnings(cap_state.get("warnings") or [])
@@ -249,9 +271,12 @@ def render_explorer_html(
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="light">
 <title>Cap Table Explorer — {company}</title>
 <style>
 {brand_css}
+{FOOTER_CSS}
   :root {{
     --bg: var(--lool-white); --fg: var(--lool-ink); --muted: var(--lool-mute);
     --border: var(--lool-line-2);
@@ -259,12 +284,6 @@ def render_explorer_html(
     --accent-bg: var(--lool-line-2);
     --heading: var(--lool-blue); --heading-2: var(--lool-royal);
     --label: var(--lool-subtle);
-  }}
-  [data-theme="dark"] {{
-    --bg: #0E1B2C; --fg: #F1F4F4; --muted: #A6AEB5; --border: #2A3B52;
-    --surface: #16263B; --surface-2: #1E3048; --accent-bg: #173A5E;
-    --heading: #6CCDFF; --heading-2: #48B4EA;
-    --label: #A6AEB5;
   }}
   * {{ box-sizing: border-box; }}
   body {{ font-family: var(--font-body); margin: 0;
@@ -303,6 +322,8 @@ def render_explorer_html(
     .metric-row {{ grid-template-columns: 1fr !important; }}
     .graphics-row {{ grid-template-columns: 1fr !important; }}
     .compare-grid {{ grid-template-columns: 1fr !important; }}
+    header {{ flex-wrap: wrap; gap: 12px; padding: 14px 16px; }}
+    .controls {{ flex-wrap: wrap; }}
   }}
   aside {{ padding: 16px; border-right: 1px solid var(--border); background: var(--surface); }}
   .section-label {{ font-size: 11px; color: var(--label); margin-bottom: 8px;
@@ -522,10 +543,6 @@ def render_explorer_html(
       <svg class="ico" viewBox="0 0 24 24" style="stroke:var(--lool-warning);"><path d="M12 3v18M5 7h14M7 7l-3 7h6l-3-7zM17 7l-3 7h6l-3-7z"/></svg><span id="counsel-cue-label"></span></button>
     <button class="btn" id="compare-toggle" title="Compare two scenarios side by side">
       <svg class="ico" viewBox="0 0 24 24"><rect x="3" y="4" width="7" height="16" rx="1"/><rect x="14" y="4" width="7" height="16" rx="1"/></svg><span id="compare-label">Compare</span></button>
-    <button class="btn" id="theme-toggle" title="Toggle light/dark" aria-label="Toggle light/dark theme">
-      <svg class="ico" id="theme-ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg></button>
-    <button class="btn" id="print-btn" title="Print or save as PDF">
-      <svg class="ico" viewBox="0 0 24 24"><path d="M6 9V3h12v6"/><rect x="6" y="13" width="12" height="8"/><path d="M6 17H3v-5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v5h-3"/></svg>Export PDF</button>
     <button class="btn primary" id="walkthrough-btn">
       <svg class="ico" id="walkthrough-ico" viewBox="0 0 24 24" style="fill:currentColor;stroke:none;"><path d="M8 5v14l11-7z"/></svg><span id="walkthrough-label">Walkthrough</span></button>
   </div>
@@ -1415,28 +1432,6 @@ function renderCounselCue(n) {{
 }}
 
 // ---------------------------------------------------------------------------
-// Theme toggle
-// ---------------------------------------------------------------------------
-function toggleTheme() {{
-  const current = document.body.dataset.theme || "light";
-  const next = current === "light" ? "dark" : "light";
-  document.body.dataset.theme = next;
-  // Swap the SVG icon (sun ↔ moon) — no emoji in product chrome.
-  const ico = document.getElementById("theme-ico");
-  if (ico) {{
-    ico.innerHTML = next === "dark"
-      ? '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>'
-      : '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>';
-  }}
-  // Re-tint every live donut's border to the new --bg without re-animating.
-  const bg = getComputedStyle(document.body).getPropertyValue("--bg");
-  for (const id in _charts) {{
-    _charts[id].data.datasets[0].borderColor = bg;
-    _charts[id].update("none");
-  }}
-}}
-
-// ---------------------------------------------------------------------------
 // Walkthrough demo mode
 // ---------------------------------------------------------------------------
 
@@ -1664,11 +1659,7 @@ function initSweep() {{
 // ---------------------------------------------------------------------------
 // Wire up event handlers
 // ---------------------------------------------------------------------------
-document.getElementById("theme-toggle").addEventListener("click", toggleTheme);
 document.getElementById("walkthrough-btn").addEventListener("click", startWalkthrough);
-
-// Export to PDF via the browser's print dialog.
-document.getElementById("print-btn").addEventListener("click", () => window.print());
 
 // Two-up side-by-side scenario compare.
 document.getElementById("compare-toggle").addEventListener("click", toggleCompare);
@@ -1710,7 +1701,7 @@ renderFoundersBlock();
 renderScenarioList();
 renderCounsel();
 </script>
-{_theme.FOOTER_CREDIT_HTML}
+{_ui.footer("Cap Table")}
 </body>
 </html>
 """

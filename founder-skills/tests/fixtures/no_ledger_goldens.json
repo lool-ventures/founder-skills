@@ -901,34 +901,34 @@
     "cap-table/explore.py": {
       "exit": 0,
       "files": {
-        "page.html": "83cc1db6c2a5f52e13ebd3fd677fe717dcc681363d0d901e2434de17be8285e4"
+        "page.html": "6fd3dce2e428aac0d37c1cd5d7fac8a29fd36be296f36279c3551243d57420d7"
       },
       "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout": "f2056f561ff218ee063b90c5c4b22d98703505ea897cdc24178c142920753f17"
+      "stdout": "c08895479a7c6148543fa53c579ba48d574f1d94abd59c246c8b567a8c84afde"
     },
     "cap-table/visualize.py": {
       "exit": 0,
       "files": {
-        "page.html": "b2c93ecd6e30759a2f6be42c04453702887814b84f9b7d7393607a7e0aee2641"
+        "page.html": "307982da3d5e13c8cb0910289bb7662e65b30e6f702aa76f5f80836fe3de24cc"
       },
       "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout": "a50a57dbe97af473f59acd21b470f1335fd3c1682c861df8c614985252aed02c"
+      "stdout": "59e466b6e910bf6a2e373817add0cb71fd14580368af00b8219807ec2bafc8fb"
     },
     "competitive-positioning/explore.py": {
       "exit": 0,
       "files": {
-        "page.html": "bd7ae06d6db8224cd129cd34f9dc3d3745472632b5596302efa13ccc38a40e53"
+        "page.html": "2fec3eb1f733b47f8e3e97340cec7ce402bc06e1630f0df33105a14ce548f0d3"
       },
       "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout": "1911f66d5ea9f7a249a970664385f5657d4cabd3a418b0244566386ec0923a80"
+      "stdout": "79cbb3f062b233148cbc08088b96282b02a37ab6f3360e50b330e43a8722e9ad"
     },
     "competitive-positioning/visualize.py": {
       "exit": 0,
       "files": {
-        "page.html": "8179f2fd6ed99b6503c1e46eb0f45dcfa270280b4053b429924e9f88cdf5ab86"
+        "page.html": "ab07bff591848664733d9c9c63dabd1c7bbed6412f9d5f6174e92bd98ac5acf0"
       },
       "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout": "7d1f1e14a20230d6bf256498665879dd9237357897998cfa2203f8c67dd4942a"
+      "stdout": "0e266e44a1146f9f3b56086a224cb10651d778d49288265cb3510d0ee735d94b"
     },
     "deck-review/visualize.py": {
       "exit": 0,

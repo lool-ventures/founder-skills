@@ -1,8 +1,9 @@
 """Structure every redesigned page keeps, read by meaning (ids, data-*, tags), never by class name.
 
-The pages adopt the shared UI module one skill at a time; `REDESIGNED` lists the writers that have.
-A writer joins the list in the same change that moves it onto the shared shell, so these checks land
-red before the rewrite and stay as the guard after it.
+The pages adopt the shared UI module one skill at a time; `SHELL_PAGES` lists the writers on the shared
+shell, and `CHECKLIST_PAGES` those of them that also render a scored checklist with a ring. A writer joins
+in the same change that moves it onto the shell, so these checks land red before the rewrite and stay as
+the guard after it.
 
 Two families:
   * the page shell: a phone viewport, a language, one `<main>`, an explicit light colour scheme,
@@ -28,14 +29,16 @@ from _dom import Element, by_attr, by_id, by_tag, parse
 from compose_invocations import drive_compose
 from no_ledger_goldens import FIXTURES, html_argv
 
-# (skill, script) of every writer on the shared shell.
-REDESIGNED: tuple[tuple[str, str], ...] = (
+# (skill, script) of every writer that renders a scored checklist and a ring on the shared shell.
+CHECKLIST_PAGES: tuple[tuple[str, str], ...] = (
     ("financial-model-review", "visualize.py"),
     ("financial-model-review", "explore.py"),
     ("deck-review", "visualize.py"),
     ("market-sizing", "visualize.py"),
     ("ic-sim", "visualize.py"),
 )
+# (skill, script) of every writer on the shared shell: the checklist pages, and pages with no score.
+SHELL_PAGES: tuple[tuple[str, str], ...] = (*CHECKLIST_PAGES, ("cap-table", "visualize.py"))
 
 # The statuses each skill's checklist can carry, as filter chips. market-sizing grades pass / fail only
 # (its `checklist.py` has no warn), so its page offers no Warn chip and no "Needs attention" chip, which
@@ -187,12 +190,19 @@ def _render(skill: str, script: str, variant: str) -> tuple[str, list[dict[str, 
                 [sys.executable, *html_argv(skill, script, work, out)], capture_output=True, text=True
             )
             assert proc.returncode == 0, proc.stderr
-            items = _items_of(skill, work)
+            items = _items_of(skill, work) if (skill, script) in CHECKLIST_PAGES else []
             _CACHE[key] = (out.read_text(encoding="utf-8"), items)
     return _CACHE[key]
 
 
-_PAGES = [pytest.param(s, w, v, id=f"{s}/{w}/{v}") for s, w in REDESIGNED for v in _VARIANTS]
+# A page with no checklist has no many-problems variant (`_MANY_PROBLEMS` seeds checklist failures).
+_PAGES = [
+    pytest.param(s, w, v, id=f"{s}/{w}/{v}")
+    for s, w in SHELL_PAGES
+    for v in _VARIANTS
+    if v == "fixture" or s in _MANY_PROBLEMS
+]
+_CK_PAGES = [pytest.param(s, w, v, id=f"{s}/{w}/{v}") for s, w in CHECKLIST_PAGES for v in _VARIANTS]
 
 
 def _doc(skill: str, script: str, variant: str) -> Element:
@@ -228,7 +238,7 @@ _INVENTED_SCORES = (63.7, 63.0)
 
 
 @pytest.mark.parametrize("score", _INVENTED_SCORES)
-@pytest.mark.parametrize(("skill", "script"), REDESIGNED)
+@pytest.mark.parametrize(("skill", "script"), CHECKLIST_PAGES)
 def test_the_ring_states_the_score_as_the_report_states_it(skill: str, script: str, score: float) -> None:
     """The ring (and its spoken label) and the report state one score one way, the fleet's: one decimal at
     most and no trailing zero ("63.7%", "63%")."""
@@ -269,6 +279,7 @@ _SKILL_NAMES = {
     "deck-review": "Deck Review",
     "market-sizing": "Market Sizing",
     "ic-sim": "IC Simulation",
+    "cap-table": "Cap Table",
 }
 
 
@@ -306,7 +317,7 @@ def test_no_content_is_hidden_by_an_inline_display_none(skill: str, script: str,
     assert not hidden, [(e.tag, e.attrs, e.text()[:60]) for e in hidden]
 
 
-@pytest.mark.parametrize(("skill", "script", "variant"), _PAGES)
+@pytest.mark.parametrize(("skill", "script", "variant"), _CK_PAGES)
 def test_every_checklist_criterion_appears_once_with_its_status(skill: str, script: str, variant: str) -> None:
     html, items = _render(skill, script, variant)
     doc = parse(html)
@@ -325,7 +336,7 @@ def test_every_checklist_criterion_appears_once_with_its_status(skill: str, scri
         assert by_id_label[cid] in el.text(), cid
 
 
-@pytest.mark.parametrize(("skill", "script", "variant"), _PAGES)
+@pytest.mark.parametrize(("skill", "script", "variant"), _CK_PAGES)
 def test_every_checklist_group_names_the_statuses_it_holds(skill: str, script: str, variant: str) -> None:
     html, items = _render(skill, script, variant)
     doc = parse(html)
@@ -345,7 +356,7 @@ def test_every_checklist_group_names_the_statuses_it_holds(skill: str, script: s
         assert g.tag == "details" and g.has("open"), g.attrs
 
 
-@pytest.mark.parametrize(("skill", "script", "variant"), _PAGES)
+@pytest.mark.parametrize(("skill", "script", "variant"), _CK_PAGES)
 def test_the_checklist_filters_cover_every_status(skill: str, script: str, variant: str) -> None:
     doc = _doc(skill, script, variant)
     radios = [e for e in by_tag(doc, "input") if e.get("type") == "radio" and e.get("name") == "ck-f"]
@@ -384,7 +395,7 @@ def test_every_class_on_the_page_has_a_rule(skill: str, script: str, variant: st
     assert not orphans, f"class(es) with no CSS rule: {orphans}"
 
 
-@pytest.mark.parametrize(("skill", "script", "variant"), _PAGES)
+@pytest.mark.parametrize(("skill", "script", "variant"), _CK_PAGES)
 def test_the_score_links_to_the_checklist(skill: str, script: str, variant: str) -> None:
     doc = _doc(skill, script, variant)
     target = by_id(doc, "checklist")
