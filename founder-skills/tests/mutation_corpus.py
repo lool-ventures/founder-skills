@@ -65,7 +65,8 @@ NEVER MUTATES THE WORKING TREE. Everything happens in a copy under pytest's tmp 
 permanently dirty by design and an agent has already destroyed uncommitted work in it.
 
 RUN IT: `uv run pytest founder-skills/tests/test_mutation_corpus.py -m mutation`. It is deselected
-from the default suite by `addopts` (~3 min) and runs in its own CI job.
+from the default suite by `addopts` (~14 min serial, ~3.5 across 10 workers, ~4.5 on half the cores
+beside the suite) and runs in its own CI job.
 """
 
 from __future__ import annotations
@@ -98,7 +99,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # symptom surfaces as the no-op control failing -- i.e. pointing at the harness rather than at the
 # copy list. With these roots the sandbox runs the whole free suite to exactly the same result as
 # the real tree, so `_SELECTION` can be widened to anything without touching this. The cost that
-# buys it is 0.13 s of copying (`cowork-tests/` is 9.9 MB and 0.04 s of that), against a ~3 min run.
+# buys it is 0.13 s of copying (`cowork-tests/` is 9.9 MB and 0.04 s of that), against a run of minutes.
 _COPY_DIRS = ("founder-skills", "evals", "scripts", ".github", "cowork-tests")
 _COPY_FILES = ("pyproject.toml", "CLAUDE.md", "CHANGELOG.md", "CONTRIBUTING.md", "README.md")
 _IGNORE = shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache", "artifacts", ".git", ".venv")

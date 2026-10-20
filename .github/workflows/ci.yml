@@ -52,7 +52,7 @@ jobs:
       - run: uv python install ${{ matrix.python-version }}
       - run: uv sync --extra dev --python ${{ matrix.python-version }}
       # A command-line `-m` OVERRIDES pyproject's `addopts`, so both deselections have to be
-      # named here or this gate silently re-selects the ~3-minute mutation corpus (which has its
+      # named here or this gate silently re-selects the ~14-minute mutation corpus (which has its
       # own job in skill-quality.yml, on dispatch only).
       - run: uv run pytest founder-skills/tests/ -v -m "not e2e and not mutation"
       - run: uv run pytest evals/cap-table/ -v

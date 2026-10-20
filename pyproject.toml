@@ -21,7 +21,9 @@ dependencies = [
 # fixes the seed, but the GENERATOR is the library's -- a minor bump can change which examples are
 # drawn, so an unpinned hypothesis turns "this property held" into "this property held on whatever
 # examples CI happened to draw today", and a red would land on a commit that changed nothing.
-dev = ["ruff", "mypy==2.3.0", "pytest", "pyyaml", "types-openpyxl", "types-PyYAML", "claude-agent-sdk==0.2.163", "hypothesis==6.165.10"]
+# pytest-xdist is pinned like the others: `scripts/pre-tag.sh` runs the suite across the cores with it
+# (`-n`), and a worker-scheduling change in a new release is a change to how the gate runs.
+dev = ["ruff", "mypy==2.3.0", "pytest", "pytest-xdist==3.8.0", "pyyaml", "types-openpyxl", "types-PyYAML", "claude-agent-sdk==0.2.163", "hypothesis==6.165.10"]
 
 [tool.ruff]
 target-version = "py310"
@@ -93,7 +95,7 @@ python_files = "test_*.py"
 pythonpath = ["founder-skills/tests"]
 markers = [
     "e2e: end-to-end tests that invoke real LLMs (any of ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN / local `claude /login`; ~5-20 min wall time per run; ~$5-15 on API; subscription rate limits change — check Anthropic policy before using subscription for CI)",
-    "mutation: curated mutant-corpus regression (test_mutation_corpus.py). Copies the repo to a temp dir, injects each named defect, and asserts the cap-table selection notices (or records that it does not). ~3 min (measured), deselected from the default suite; run with `uv run pytest -m mutation`. NOTE: a command line `-m` OVERRIDES addopts, so every explicit `-m \"not e2e\"` invocation must say `-m \"not e2e and not mutation\"` or it silently re-selects this lane.",
+    "mutation: curated mutant-corpus regression (test_mutation_corpus.py). Copies the repo to a temp dir, injects each named defect, and asserts the cap-table selection notices (or records that it does not). ~14 min serial and ~3.5 across 10 workers, ~4.5 on half the cores beside the suite (measured), deselected from the default suite; run with `uv run pytest -m mutation`. NOTE: a command line `-m` OVERRIDES addopts, so every explicit `-m \"not e2e\"` invocation must say `-m \"not e2e and not mutation\"` or it silently re-selects this lane.",
     "cowork: token-free cowork-harness cassette replay via the shipped pytest helper (needs `npm i -g cowork-harness@4.10.0` (exact, matching CI); no Docker/token — deterministic replay only). Auto-skips when the CLI is absent. Run with `uv run pytest -m cowork`.",
 ]
 

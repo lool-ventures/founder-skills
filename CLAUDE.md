@@ -392,17 +392,22 @@ uv run pytest                                       # all tests (e2e auto-skips 
 uv run pytest founder-skills/tests/ -v              # verbose
 uv run pytest founder-skills/tests/ -v -m "not e2e and not mutation" # explicitly skip the paid + slow lanes
 uv run pytest -m cowork                             # token-free cowork-harness cassette replay (needs `npm i -g cowork-harness@4.10.0` — exact, matching CI; no Docker/token)
-uv run pytest -m mutation                           # curated mutant corpus (~3 min; deselected by default — see the WARNING below)
+uv run pytest -m mutation                           # curated mutant corpus (~14 min serial, ~3.5 across 10 workers, ~4.5 on half the cores beside the suite; deselected by default — see the WARNING below)
+uv run pytest founder-skills/tests/ -q -m "not e2e and not mutation" -n auto  # the suite across the cores (pytest-xdist, a dev dependency): ~2 min instead of ~10
 ```
 
 **`addopts` deselects `e2e` AND `mutation`, and a command-line `-m` OVERRIDES `addopts` rather than
-adding to it.** So a bare `-m "not e2e"` silently RE-SELECTS the ~3-minute mutation corpus — and on a
+adding to it.** So a bare `-m "not e2e"` silently RE-SELECTS the ~14-minute mutation corpus — and on a
 working tree that is red for any unrelated reason it reports `THE NO-OP CONTROL FAILED`, which reads as
 a break the contributor did not cause. Every explicit `-m` in this repo therefore says
 `-m "not e2e and not mutation"`: `ci.yml`'s test job, `skill-quality.yml`'s contract-tests job,
 `scripts/pre-tag.sh`, `CONTRIBUTING.md`, and the two invocations in this file. That list was wrong when
 first written — it named three sites and this file itself disproved it six lines up. The mutation lane has its own `mutation-corpus` job (dispatch only) and its own
-preflight gate; both must pass `-m mutation`, since naming the file alone collects nothing and reports green.
+preflight gate; both must pass `-m mutation`, since naming the file alone collects nothing and reports green. `scripts/pre-tag.sh` runs the
+suite and the mutation corpus at the same time, each across half the cores (`-n`), with the other gates
+in the background, and prints every gate's output in a fixed order (about 5 minutes, against about 27 one
+after another); `PRETAG_SERIAL=1` runs them one after another. The corpus re-proves its no-op control in
+each worker's sandbox at teardown, so it runs the same serially and in parallel.
 
 **After editing any plugin `.py` or agent body, run `python3 founder-skills/scripts/script_hashes.py --write`** (and commit `data/script-hashes.json` with the change) before the hook suites: they run the hook against this checkout, which then reads as a modified plugin; the modules that run it fail once with that command (`plugin_hashes_current` in `conftest.py`). After merging two branches that each changed plugin `.py` files, run the same one command and commit the manifest by name: a merge runs no pre-commit hook, so only the sync test notices.
 

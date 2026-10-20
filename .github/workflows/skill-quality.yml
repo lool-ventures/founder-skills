@@ -107,7 +107,7 @@ jobs:
   mutation-corpus:
     name: Curated mutant corpus (cap-table)
     # DISPATCH ONLY: part of the paid release gate, run once on the release branch. Free, but a
-    # ~3-minute structural check whose value is periodic, and the per-PR gate is already the thing
+    # ~14-minute structural check whose value is periodic, and the per-PR gate is already the thing
     # people wait on. It also runs on the free release-notes rehearsal dispatch. A tag push no
     # longer runs it: verify-branch-gate finds this job's green conclusion on the dispatched run at
     # the tagged commit, by its display name `name:` above (pinned by test_release_gating.py).

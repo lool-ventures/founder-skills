@@ -13,6 +13,7 @@ gates and `scripts/pre-tag.sh` say `-m "not e2e and not mutation"` for that reas
 from __future__ import annotations
 
 import shutil
+from collections.abc import Iterator
 
 import pytest
 from mutation_corpus import (
@@ -32,8 +33,15 @@ pytestmark = pytest.mark.mutation
 
 
 @pytest.fixture(scope="module")
-def harness(tmp_path_factory: pytest.TempPathFactory) -> _Harness:
-    """Build the sandbox and PROVE it works before any verdict is read from it."""
+def harness(tmp_path_factory: pytest.TempPathFactory) -> Iterator[_Harness]:
+    """Build the sandbox and PROVE it works before any verdict is read from it, and again after the
+    last verdict read from it.
+
+    One sandbox per process: run in parallel (`pytest -n`), each worker builds its own copy, reads its
+    share of the verdicts from it, and re-proves its own copy at teardown. The after-run check lives in
+    the teardown rather than in a test that runs last, because no test is last once the mutants are
+    spread across workers, and the copy the verdicts were read from is the instrument that has to
+    still work."""
     tree = tmp_path_factory.mktemp("mutation-corpus")
     for name in _COPY_DIRS:
         shutil.copytree(REPO_ROOT / name, tree / name, ignore=_IGNORE)
@@ -56,7 +64,15 @@ def harness(tmp_path_factory: pytest.TempPathFactory) -> _Harness:
             "add the root, not to debug the harness.\n"
             f"{control.tail}"
         )
-    return h
+    yield h
+    after = h.verdict(NO_OP)
+    if after.killed:
+        pytest.fail(
+            "the no-op control passed when this sandbox was built and fails after its last verdict. Every "
+            "verdict read from it came from an instrument that stopped working at some point during the run "
+            "(a revert that silently no-ops, state a child left behind, a file handle), so none of them can "
+            f"be trusted.\n{after.tail}"
+        )
 
 
 def test_noop_control_leaves_the_selection_passing(harness: _Harness) -> None:
@@ -173,24 +189,15 @@ def test_no_mutant_payload_lives_in_this_scanned_test_file() -> None:
     )
 
 
-def test_noop_control_still_passes_after_every_mutant(harness: _Harness) -> None:
-    """Re-establish the instrument AFTER the verdicts, not only before them.
+def test_the_after_run_control_is_in_the_sandboxs_teardown() -> None:
+    """The control is re-proved after the verdicts by the `harness` fixture's teardown, per sandbox, so
+    it holds whether the corpus runs in one process or across workers. Guard that it stays there."""
+    from pathlib import Path
 
-    The module-scoped fixture proves the harness worked when it was built. Nothing proved it still
-    worked when the last verdict was read, and every mechanism that could degrade it mid-run --
-    a revert that silently no-ops, state the child leaves in the sandbox, a file handle -- degrades
-    it in the direction that makes `MUST_KILL` entries pass and survivors look guarded.
-
-    Definition order is load-bearing: this must run last, which holds because pytest collects a
-    module in definition order and no shuffling plugin is installed (`pytest-randomly` is absent --
-    if one is ever added, this needs an explicit ordering).
-    """
-    verdict = harness.verdict(NO_OP)
-    assert not verdict.killed, (
-        "the no-op control passed before the corpus ran and fails after it. Every verdict above was "
-        "read from an instrument that stopped working at some point during the run, so none of them "
-        f"can be trusted.\n{verdict.tail}"
-    )
+    text = Path(__file__).read_text(encoding="utf-8")
+    src = text.split("def harness(", 1)[1].split("\ndef ", 1)[0]
+    after = src.split("yield h", 1)
+    assert len(after) == 2 and "verdict(NO_OP)" in after[1] and "pytest.fail(" in after[1]
 
 
 def test_every_must_kill_entry_names_the_test_that_must_notice() -> None:
