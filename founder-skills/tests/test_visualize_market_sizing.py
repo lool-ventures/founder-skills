@@ -1323,6 +1323,8 @@ def test_key_findings_structured_subsections() -> None:
     (attention,) = by_attr(parse(stdout), "data-findings", "attention")
     assert by_attr(attention, "data-finding", "data_current"), "the failed criterion is not a card under attention"
     assert "Data is current" in stdout
+    # No "Top actions" column (owner decision): its cards only restated these.
+    assert not by_attr(parse(stdout), "data-findings", "actions") and "Top actions" not in stdout
 
 
 def test_key_findings_past_the_third_are_behind_a_disclosure_not_dropped() -> None:
@@ -1909,3 +1911,21 @@ def test_html_labels_an_internal_finding_instead_of_linking_it() -> None:
     assert "internal:analysis" not in html, "the internal marker leaked to the founder"
     assert 'href="internal' not in html, "rendered as a link to nowhere"
     assert "own output, not an outside source" in html
+
+
+def test_the_views_policy_loader_leaves_sys_path_alone() -> None:
+    """`_view._founder_text_policy` loads the shared policy by path: it used to prepend the plugin's scripts
+    folder to sys.path for the rest of the process."""
+    import importlib.util as ilu
+
+    sys.modules.pop("_founder_text", None)
+    if MARKET_SIZING_DIR not in sys.path:
+        sys.path.insert(0, MARKET_SIZING_DIR)  # _view imports its siblings; that is not under test
+    spec = ilu.spec_from_file_location("_ms_view_syspath", os.path.join(MARKET_SIZING_DIR, "_view.py"))
+    assert spec and spec.loader
+    view = ilu.module_from_spec(spec)
+    spec.loader.exec_module(view)
+    before = list(sys.path)
+    policy = view._founder_text_policy()
+    assert policy is not None and hasattr(policy, "scan")
+    assert sys.path == before

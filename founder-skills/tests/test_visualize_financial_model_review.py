@@ -1592,3 +1592,116 @@ def test_no_stated_revenue_means_no_revenue_section() -> None:
     doc, stdout = _revenue_page(None)
     assert by_id(doc, "revenue") is None
     assert "Revenue Overview" not in stdout
+
+
+# --- pages P5: the runway chart's value axis ----------------------------------------------------------------
+
+
+def _runway_axis_labels(cash: list[int] | list[float]) -> list[str]:
+    viz = _load_visualize_module()
+    runway = {"scenarios": [{"name": "base", "monthly_projections": [
+        {"month": m, "cash_balance": c} for m, c in enumerate(cash, start=1)
+    ]}]}  # fmt: skip
+    svg = viz._chart_runway(runway)
+    # The value-axis labels: the chart's only 11px grey text.
+    return re.findall(r'font-size="11" fill="#5E6A78">([^<]*)<', svg)
+
+
+def _amount(label: str) -> float:
+    m = re.fullmatch(r"(-?)\$([\d,.]+)([KMB]?)", label)
+    assert m, label
+    scale = {"": 1, "K": 1e3, "M": 1e6, "B": 1e9}[m.group(3)]
+    return (-1 if m.group(1) else 1) * float(m.group(2).replace(",", "")) * scale
+
+
+def test_a_zero_tick_reads_dollar_zero() -> None:
+    labels = _runway_axis_labels([400_000, 250_000, 90_000, -60_000, -210_000])
+    assert "$0" in labels and "$0.00" not in labels, labels
+
+
+def test_the_value_ticks_sit_on_round_steps() -> None:
+    """Quarters of the raw range gave labels such as "$290.6K"; each tick is now a multiple of one step of
+    1, 2, 2.5 or 5 x 10^n, and the axis still reaches below zero when the cash does."""
+    import math
+
+    for cash in ([1_162_400, 900_000, 700_000, 500_000], [400_000, 250_000, 90_000, -60_000, -210_000]):
+        values = [_amount(lbl) for lbl in _runway_axis_labels(cash)]
+        steps = {round(b - a, 6) for a, b in zip(values, values[1:], strict=False)}
+        assert len(steps) == 1, values
+        (step,) = steps
+        mantissa = step / 10 ** math.floor(math.log10(step))
+        assert any(math.isclose(mantissa, m) for m in (1, 2, 2.5, 5)), (step, values)
+        assert all(math.isclose(v / step, round(v / step), abs_tol=1e-9) for v in values), values
+        assert values[0] <= min(cash) and values[-1] >= max(cash), (values, cash)
+
+
+def test_the_runway_tone_bounds_are_runway_pys_own_numbers() -> None:
+    """The page tones a runway below 12 months fail and up to 18 warn: runway.py's decision lead (a raise starts
+    12 months before cash-out) and its default `target_runway`. Read from both sources, so either moving reds."""
+    import ast
+
+    def source(name: str) -> ast.Module:
+        with open(os.path.join(FMR_SCRIPTS_DIR, name), encoding="utf-8") as f:
+            return ast.parse(f.read())
+
+    runway = source("runway.py")
+    leads = [
+        n.right.value
+        for n in ast.walk(runway)
+        if isinstance(n, ast.BinOp)
+        and isinstance(n.op, ast.Sub)
+        and isinstance(n.left, ast.Name)
+        and n.left.id == "runway_months"
+        and isinstance(n.right, ast.Constant)
+    ]
+    targets: list[Any] = []
+    for f in ast.walk(runway):
+        if not isinstance(f, ast.FunctionDef):
+            continue
+        a = f.args
+        pos = a.args[len(a.args) - len(a.defaults) :]
+        for arg, default in [*zip(pos, a.defaults, strict=True), *zip(a.kwonlyargs, a.kw_defaults, strict=True)]:
+            if arg.arg == "target_runway" and isinstance(default, ast.Constant):
+                targets.append(default.value)
+    assert leads == [12] and targets == [18], (leads, targets)
+
+    tones = [
+        n
+        for n in ast.walk(source("visualize.py"))
+        if isinstance(n, ast.IfExp) and isinstance(n.test, ast.Compare) and isinstance(n.body, ast.Constant)
+        and n.body.value == "fail" and isinstance(n.test.left, ast.Name) and n.test.left.id == "months_n"
+    ]  # fmt: skip
+    assert len(tones) == 1, tones
+    fail_test = tones[0].test
+    assert isinstance(fail_test, ast.Compare)
+    fail_bound = fail_test.comparators[0]
+    warn = tones[0].orelse
+    assert isinstance(fail_bound, ast.Constant) and fail_bound.value == leads[0]
+    assert isinstance(warn, ast.IfExp) and isinstance(warn.test, ast.Compare)
+    warn_bound = warn.test.comparators[0]
+    assert isinstance(warn_bound, ast.Constant) and warn_bound.value == targets[0]
+
+
+def test_attention_shows_the_worst_first_and_at_most_one_card_per_category() -> None:
+    """Three fails in one category used to fill the attention column, in item order, hiding a fail elsewhere
+    and putting a warn above a later fail. Now: every fail before any warn, and one card per category."""
+    viz = _load_visualize_module()
+
+    def item(i: str, cat: str, status: str) -> dict[str, Any]:
+        return {"id": i, "category": cat, "label": f"Criterion {i}", "status": status, "evidence": f"Note {i}."}
+
+    checklist = {
+        "items": [
+            item("W1", "Structure", "warn"),
+            item("A1", "Revenue", "fail"),
+            item("A2", "Revenue", "fail"),
+            item("A3", "Revenue", "fail"),
+            item("B1", "Cash", "fail"),
+            item("W2", "Team", "warn"),
+        ]
+    }
+    doc = parse(viz._key_findings(checklist, None, None))
+    (column,) = by_attr(doc, "data-findings", "attention")
+    shown = [e.get("data-finding") for e in column.iter() if e.has("data-finding")]
+    # The column shows three cards: both fails (one per category), then the first warn.
+    assert shown == ["A1", "B1", "W1"], shown

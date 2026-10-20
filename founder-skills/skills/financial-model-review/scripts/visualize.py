@@ -628,6 +628,13 @@ def _chart_runway(runway: dict[str, Any] | None) -> str:
     max_cash = max(all_cash) if all_cash else 1
     if min_cash == max_cash:
         max_cash = min_cash + 1
+    # Value ticks on one round step (1 / 2 / 2.5 / 5 x 10^n), widened outward to whole steps so a dip below
+    # zero stays on the axis; quarters of the raw range printed figures such as "$290.6K".
+    tick_step = _nice_ceiling((max_cash - min_cash) / 4)
+    min_cash = math.floor(min_cash / tick_step) * tick_step
+    max_cash = math.ceil(max_cash / tick_step) * tick_step
+    tick_values = [min_cash + k * tick_step for k in range(round((max_cash - min_cash) / tick_step) + 1)]
+    zero_label = "$0" if currency_code == "USD" else f"0 {currency_code}"
 
     def x_pos(month: int) -> float:
         return _num(margin_left + (month - min_month) / (max_month - min_month) * chart_width)
@@ -641,14 +648,13 @@ def _chart_runway(runway: dict[str, Any] | None) -> str:
     ]
 
     # Y-axis labels
-    for i in range(5):
-        frac = i / 4
-        cash_val = min_cash + frac * (max_cash - min_cash)
-        y = _num(margin_top + (1 - frac) * chart_height)
+    for cash_val in tick_values:
+        y = y_pos(cash_val)
+        label = zero_label if abs(cash_val) < tick_step / 1e6 else _fmt_usd(cash_val, currency_code)
         parts.append(
             f'<text x="{_num(margin_left - 8):.2f}" y="{y:.2f}" '
             f'text-anchor="end" dominant-baseline="central" '
-            f'font-size="11" fill="#5E6A78">{_esc(_fmt_usd(cash_val, currency_code))}</text>'
+            f'font-size="11" fill="#5E6A78">{_esc(label)}</text>'
         )
         # Grid line
         parts.append(
@@ -665,7 +671,6 @@ def _chart_runway(runway: dict[str, Any] | None) -> str:
             f'x2="{_num(margin_left + chart_width):.2f}" y2="{zero_y:.2f}" '
             f'stroke="{_CLR_FAIL}" stroke-width="1.5" stroke-dasharray="4,3" />'
         )
-        zero_label = "$0" if currency_code == "USD" else f"0 {currency_code}"
         parts.append(
             f'<text x="{_num(margin_left + chart_width + 5):.2f}" y="{zero_y:.2f}" '
             f'dominant-baseline="central" font-size="9" fill="{_CLR_FAIL}">{_esc(zero_label)}</text>'
@@ -1279,7 +1284,17 @@ def _key_findings(
         total_applicable = sum(1 for i in items if isinstance(i, dict) and i.get("status") != "not_applicable")
         if total_applicable > 0 and pass_count / total_applicable >= 0.7:
             strong.append(f"Checklist: {pass_count} of {total_applicable} criteria pass")
-        for item in [*fail_items[:3], *warn_items[:2]]:
+        # The worst first (every fail before any warn), then at most one card per category, so one weak
+        # category cannot fill the column and hide a fail elsewhere. At most five cards, as before.
+        picked: list[dict[str, Any]] = []
+        seen_categories: set[str] = set()
+        for candidate in [*fail_items, *warn_items]:
+            category = str(candidate.get("category", ""))
+            if category in seen_categories:
+                continue
+            seen_categories.add(category)
+            picked.append(candidate)
+        for item in picked[:5]:
             item_id = str(item.get("id") or "")
             cat = str(item.get("category", ""))
             title = (

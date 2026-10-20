@@ -13,6 +13,7 @@ the tests that reach through compose keep their spelling.
 from __future__ import annotations
 
 import contextlib
+import importlib.util
 import json as _json
 import math
 import os
@@ -1425,15 +1426,23 @@ def _founder_text_policy() -> Any:
     Same contract as compose's copy: None when unavailable, because a missing policy module must never
     block a report.
     """
+    loaded = sys.modules.get("_founder_text")
+    if loaded is not None:
+        return loaded
+    # By path, so importing it leaves sys.path as the caller had it.
+    path = os.path.normpath(
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "scripts", "_founder_text.py")
+    )
     try:
-        shared = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "scripts"))
-        if shared not in sys.path:
-            sys.path.insert(0, shared)
-        import _founder_text  # type: ignore[import-not-found]
-
-        return _founder_text
-    except ImportError:
+        spec = importlib.util.spec_from_file_location("_founder_text", path)
+        if spec is None or spec.loader is None:
+            return None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+    except (ImportError, OSError):
         return None
+    sys.modules["_founder_text"] = module
+    return module
 
 
 def _founder_prose(text: str) -> str:

@@ -194,7 +194,7 @@
     "skills/financial-model-review/scripts/validate_extraction.py": "5fa7ef6272e8535b962e7c2390c117ce5f5ae62b2d3ca438cfa7944495e3a48b",
     "skills/financial-model-review/scripts/validate_inputs.py": "a57a5e9df282b30cca3ea8008e4ecf1dea76d3c102a21a28bd42cbd4e2ea084c",
     "skills/financial-model-review/scripts/verify_review.py": "c38dc30df78ea9c6eab6060abb80f0e210fa1617bd4c72aaef24e4bd6c2308e0",
-    "skills/financial-model-review/scripts/visualize.py": "8b889e160160868494199a28ffaa413ccd31ea04c39293f4086afb8b46a4bdff",
+    "skills/financial-model-review/scripts/visualize.py": "95cce64341a04ebd188374403cf41c9da62f5c35270a8e2ebb780c454b2333f4",
     "skills/ic-sim/scripts/_compose_result.py": "2d46d5302d1fe2c2084da7ca9ec71cc187734149eb35eba07296b1bf57374ebf",
     "skills/ic-sim/scripts/_dispatch_json.py": "f3940de50c7ed5a54467c18076fdf959c015e7ba175f49e5d79f982b5f45698f",
     "skills/ic-sim/scripts/_host_text.py": "84c38cecf1128fa392b8fc1ab40ea44ad43a5cc6a84fa561a9565fc7b9d01b4b",
@@ -228,7 +228,7 @@
     "skills/market-sizing/scripts/_thresholds.py": "56dfbc55df8353249f1f5504b5e34fab5dbc45c99b5615ca0978d021aae046f0",
     "skills/market-sizing/scripts/_ui.py": "d1e832c657840459afb57b821106600c268886b582b3f081fc21d3bb1f9c8215",
     "skills/market-sizing/scripts/_upload_names.py": "9e396e29eda3476efa3080405103a5c222a226434eefbd8ffb18bb80404ea1ef",
-    "skills/market-sizing/scripts/_view.py": "eea4d7b6dfb89243a6eb8113605ad53ed9a773cc6b6843b95134689ee646a7a9",
+    "skills/market-sizing/scripts/_view.py": "b237c431d37a6dbb6b6373193c700f9e865ae1f8aced664be6d042dc6a27d667",
     "skills/market-sizing/scripts/checklist.py": "177171db113aff4df22b51f87b8a0a9a707b47794c0e9c9da283b0419c6720ea",
     "skills/market-sizing/scripts/closing_message.py": "7d8ca52c118ade719b32293341a6d98016c80a5e73c16b7c606cdbe6fa7b8a9f",
     "skills/market-sizing/scripts/compose_report.py": "d0c927425b2ff1347465d1e479fe5640ce979e088525fe4fb8505fe48cd3dc67",
@@ -239,7 +239,7 @@
     "skills/market-sizing/scripts/record_revision_answer.py": "25638a1f70f0ec1cab89b6e37d505e84d9fdbbafeb3a71350b86e26b19219946",
     "skills/market-sizing/scripts/red_team.py": "441daa4d5e060314e5c8489d24fcae52f9ec8c8316aa342d62c9178ffab7dfb2",
     "skills/market-sizing/scripts/sensitivity.py": "88541e89f12942e3293f33200a56f097e89a530d354f727dd1d3c3bc8c0d6ff8",
-    "skills/market-sizing/scripts/visualize.py": "3063e1df8d1feecd4d7bcd818eb34180d493b8cc1406cb23bcfaa4513938eb83"
+    "skills/market-sizing/scripts/visualize.py": "acb04ba71b2b8f15d7d29f17432f5039ce5bc8f44c36e22720401bc15afe0071"
   },
   "line_endings": "crlf-as-lf",
   "schema": 1

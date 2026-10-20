@@ -1413,7 +1413,8 @@ def _chart_key_findings(
     validation: dict[str, Any] | None,
     provenance: dict[str, dict[str, Any]] | None,
 ) -> str:
-    """Key Findings: what's strong, what needs attention and the top actions, as cards.
+    """Key Findings: what's strong and what needs attention, as cards. No "Top actions" column: each action
+    only restated an attention card ("Address: <the failed criterion>").
 
     A failed criterion's card is its label as the title, its category above and its notes below, so
     nothing repeats; every other finding is one sentence. Each column shows its first three and puts the
@@ -1421,7 +1422,6 @@ def _chart_key_findings(
     """
     strong: list[_Card] = []
     attention: list[_Card] = []
-    actions: list[_Card] = []
 
     # --- Checklist findings ---
     if _usable(checklist):
@@ -1438,7 +1438,6 @@ def _chart_key_findings(
                 raw_notes = item.get("notes")
                 notes = _view._founder_prose(str(raw_notes)) if raw_notes is not None else ""
                 attention.append((str(item.get("id") or ""), str(item.get("category") or ""), label, notes))
-                actions.append(f"Address: {label}")
 
     # --- Validation findings ---
     if _usable(validation):
@@ -1458,7 +1457,6 @@ def _chart_key_findings(
                 prefix = "Refuted" if status == "refuted" else "Unsupported"
                 text = f"{prefix}: {figure_name}" + (f" — {notes}" if notes else "")
                 attention.append(text)
-                actions.append(f"Find independent source for {figure_name}")
         if total_figs > 0 and confirmed / total_figs >= 0.7:
             strong.append(f"{confirmed} of {total_figs} figures independently validated")
 
@@ -1509,7 +1507,7 @@ def _chart_key_findings(
                             f"{metric.upper()} ({method}): {_params.fmt_delta(delta, signed=True)} vs your figure"
                         )
 
-    if not strong and not attention and not actions:
+    if not strong and not attention:
         return ""
 
     def _card(item: _Card, tone: str) -> str:
@@ -1546,8 +1544,6 @@ def _chart_key_findings(
         parts.append(_column("strong", "What's strong", strong, "pass"))
     if attention:
         parts.append(_column("attention", "What needs attention", attention, "fail"))
-    if actions:
-        parts.append(_column("actions", "Top actions", actions, "action"))
 
     return '<div class="ui-findings">' + "".join(parts) + "</div>"
 

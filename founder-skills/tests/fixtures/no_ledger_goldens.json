@@ -949,10 +949,10 @@
     "financial-model-review/visualize.py": {
       "exit": 0,
       "files": {
-        "page.html": "47145138f165571bc2437db76f2bce7769936bf4434ffb36b02fd001e550edd6"
+        "page.html": "7b38512e12458c6a29b2bb72ec5854ba050a955bfb0f60cb334f814bdce8493c"
       },
       "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout": "661d4deb67ad09707476627dbf3d3c0884a6ce8abf3abab36e04b25c93fb0ae6"
+      "stdout": "38f4b8b47ad4c957d442df3d5d8411593a40d60f98397dcbaa2bede8f4f3623d"
     },
     "ic-sim/visualize.py": {
       "exit": 0,
