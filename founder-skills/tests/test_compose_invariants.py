@@ -1371,3 +1371,41 @@ def test_an_all_digit_insertion_marker_is_not_reported_as_a_leak(tmp_path: Path,
     assert marker in (work_dir / "report.md").read_text(), f"{skill}: the pinned marker was not written"
     report = json.loads((work_dir / "report.json").read_text())
     assert _warnings_naming(report, marker) == [], skill
+
+
+_SYS_PATH_PROBE = """
+import importlib.util, json, os, sys
+path = sys.argv[1]
+sys.path.insert(0, os.path.dirname(path))
+spec = importlib.util.spec_from_file_location("_compose_probe", path)
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+for name in ("_founder_text", "_handoff_audit"):
+    sys.modules.pop(name, None)
+before = list(sys.path)
+ft, ha = mod._founder_text_policy(), mod._handoff_audit()
+print(json.dumps({
+    "same": sys.path == before,
+    "ft": getattr(ft, "__file__", None),
+    "ha": getattr(ha, "__file__", None),
+    "scan": hasattr(ft, "scan"),
+}))
+"""
+
+
+@pytest.mark.parametrize("skill", ["market-sizing", "deck-review", "cap-table", "competitive-positioning"])
+def test_compose_loads_the_shared_modules_without_touching_sys_path(skill: str) -> None:
+    """Each compose loads the shared founder-text policy and gate-record check by path, from the plugin's own
+    scripts folder, leaving sys.path as the caller had it. One process per skill: the skills' composes share
+    sibling module names."""
+    compose = SKILLS_DIR / skill / "scripts" / "compose_report.py"
+    proc = subprocess.run(
+        [sys.executable, "-c", _SYS_PATH_PROBE, str(compose)], capture_output=True, text=True, timeout=60
+    )
+    assert proc.returncode == 0, proc.stderr
+    got = json.loads(proc.stdout.strip().splitlines()[-1])
+    shared = REPO_ROOT / "founder-skills" / "scripts"
+    assert got["same"] is True
+    assert got["scan"] is True
+    assert Path(got["ft"]).resolve() == shared / "_founder_text.py"
+    assert Path(got["ha"]).resolve() == shared / "_handoff_audit.py"
