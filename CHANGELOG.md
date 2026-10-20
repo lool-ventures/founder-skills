@@ -5,6 +5,86 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.24.0] - 2026-10-20 — Hosts that deliver their own output, steadier deck grades, and the remaining pages on the shared layout
+
+### Highlights
+
+**A host can deliver the output itself.** A request line, `FS_HOST_NO_HANDOVER`, tells market sizing, competitive
+positioning and financial model review that the host delivers the files. Their closing step then prints one fixed
+line, "The analysis is complete. The host delivers its output.", in place of the message written for the founder,
+and the end-of-turn check stops asking for that message. When the line is also in the request's own message,
+the host's final message is not checked, so a host can end the run with its own summary; otherwise the final
+message must carry the fixed line.
+
+**A deck review's grade is refused less often.** When the grader marked an AI criterion failed on a company that is
+not an AI company, with no fix written for it, the whole grade was rejected and the step ran again, though the
+criterion was about to be set to not applicable anyway. The criteria the deck's own facts rule out no longer need a
+fix note.
+
+**The cap-table report and the financial model's values check now match the other pages.** They open with the
+same header card, use the same tables, tiles and warning boxes, and end with the same footer, and they read
+better on a phone. The cap-table explorer keeps its own layout but gains the same footer and fits a phone, and
+its dark mode and the extra print buttons are gone (printing from the browser still works).
+
+### Scoring changes
+
+- Deck review: the checklist step applies the deck's own gates (no AI company, no rendered slides) before it checks
+  the grade, so a grade that leaves a gated-out criterion without evidence or a fix note is accepted instead of
+  sent back. No status or score changes: those criteria were set to not applicable either way.
+- Market sizing and IC simulation: a mistyped command now adds a line saying how to run that step beside the
+  usual error. No verdict or score changes.
+- Every other skill: none.
+
+### Added
+
+- `FS_HOST_NO_HANDOVER`, a request line for a host that delivers its own output (see Highlights). It needs a
+  started run, cannot be sent together with `FS_HOST_REPLY_TOOL` (in one request, or on a resume that adds one to a
+  run holding the other), and stays on for the run once recorded. The run's status shows `no_handover`, and
+  `handover: "host"` once the closing step has run (a reopened revision clears it). Skills without a closing step
+  accept the line and list it as not used; the request check reports which.
+
+### Changed
+
+- Cap-table report: on the shared page layout, with a section menu, and without the "Print / Save PDF" button.
+  The cap-table explorer drops its light/dark toggle and its "Export PDF" button.
+- Financial model values check: the shared header card, figure tiles and warning boxes (the extraction warnings
+  and computed-value notes included); at phone width its tabs scroll sideways instead of running off the page.
+- Financial model review page: the runway chart's money axis now steps in round amounts and shows "$0" at zero,
+  and "What needs attention" puts failed criteria before warned ones, one card per category (at most five), so
+  one weak category can no longer fill the column. Findings past the third in a column sit behind "N more"
+  instead of being left off the page.
+- Market sizing page: the "Top actions" column is gone; each action only repeated a card under "What needs
+  attention".
+- Competitive positioning pages carry the shared footer in place of their own credit lines.
+
+### Fixed
+
+- Competitive positioning explorer: the 3D view's note asked the founder to open a file by a name they never
+  received. It now says to open this file in a browser.
+- A mistyped step command after a long conversation now says how to run the step: the coaching insert and IC
+  simulation's fund mode print the exact command the skill uses, and market sizing's sensitivity step names the
+  template to send (it has no command), so the retry is right the first time.
+
+### Development
+
+Contributor-facing only; nothing here changes what a founder installs or runs.
+
+- Hosts: `FS_HOST_NO_HANDOVER` is new in the host contract (`data/host-contract.json`: the request token and a
+  note). `run_status.json` gains `no_handover` and `handover`. In a run folder the closing step of the three skills
+  now opens the run's records whether or not the line was sent, so a broken plugin install, or a run folder whose
+  records cannot be read, stops there with a clear error where it used to print the message.
+- The deck lanes (the release gate's smoke lane and the two opt-in lanes) now fail when a deck-reading step was
+  not given, or did not read, the deck text. They only recorded this before.
+- The competitive positioning delivery check reports, as a warning, an internal file name or criterion id in the
+  two pages' visible text.
+- The shared page components are now used by cap-table (the report on the full layout, the explorer for its
+  footer) and competitive positioning (the footer); the old footer constants are removed from every skill's theme
+  file. Deck review's checklist step warns, instead of failing, on a deck inventory that is not a JSON object.
+- The marketplace manifest carries a description again, which the plugin catalog shows and
+  `claude plugin validate` asks for.
+- The committed Cowork recordings were not re-recorded for this release. They are re-recorded once, right after
+  it ships.
+
 ## [0.23.1] - 2026-10-20 — The plugin's checks run from a folder whose path contains a space
 
 ### Highlights
