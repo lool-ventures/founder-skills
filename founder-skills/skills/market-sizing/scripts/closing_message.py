@@ -188,6 +188,27 @@ def main() -> None:
     except (OSError, ValueError) as e:
         print(f"Error: cannot build the hand-over from report {a.report}: {e}", file=sys.stderr)
         sys.exit(2)
+    host_run = _ms_gates.host_delivers(a.report)
+    if host_run is not None:
+        # FS_HOST_NO_HANDOVER: the host delivers its own output. After every refusal above, so a report that
+        # cannot build never prints the line. A failed write removes this folder's older handover.txt instead,
+        # so an earlier hand-over is never left as the newest; only a failed removal too exits 2.
+        line = _ms_gates.host_delivers_line() + "\n"
+        handover = os.path.join(os.path.dirname(os.path.abspath(a.report)), HANDOVER_FILENAME)
+        try:
+            with open(handover, "w", encoding="utf-8") as fh:
+                fh.write(line)
+        except OSError as e:
+            try:
+                if os.path.lexists(handover):
+                    os.remove(handover)
+            except OSError as e2:
+                print(f"Error: could not write {handover} ({e}) or remove it ({e2})", file=sys.stderr)
+                sys.exit(2)
+            print(f"Warning: could not write {handover} ({e}); removed the older one", file=sys.stderr)
+        _ms_gates.stamp_handed_over(a.report, host=host_run)
+        sys.stdout.write(line)
+        return
     handover = os.path.join(os.path.dirname(os.path.abspath(a.report)), HANDOVER_FILENAME)
     try:
         with open(handover, "w", encoding="utf-8") as fh:

@@ -814,6 +814,16 @@ def test_the_closer_stamps_the_hand_over(tmp_path: Path) -> None:
     assert h.status(root, rid)["handed_over_at"]
 
 
+def test_the_closer_under_no_handover_prints_only_the_host_line(tmp_path: Path) -> None:
+    root, rid, rd = _fixture_run(tmp_path)
+    _answer_all(root, rid, rd)
+    _ok(_compose(rd))
+    report = _read(rd / "report.json")
+    report["verdict"] = "Example Co leads its map on one axis of two."
+    _write(rd / "report.json", report)
+    h.check_host_closer(SCRIPTS / "cp_closing_message.py", root, rid, rd)
+
+
 def test_the_closer_refuses_a_report_composed_for_another_run(tmp_path: Path) -> None:
     root, rid, rd = _fixture_run(tmp_path)
     _answer_all(root, rid, rd)
@@ -852,12 +862,21 @@ def test_a_scorer_into_a_run_dir_names_its_run(tmp_path: Path, script: str) -> N
         "refuse_open_gates",
         "coaching_pending",
         "stamp_handed_over",
+        "host_delivers",
+        "host_delivers_line",
     ],
 )
 def test_the_helpers_are_market_sizings_word_for_word(name: str) -> None:
     cp = _load("_cp_gates_pin", SCRIPTS / "_cp_gates.py")
     ms = _load("_ms_gates_pin3", h.SKILLS / "market-sizing" / "scripts" / "_ms_gates.py")
     assert inspect.getsource(getattr(cp, name)) == inspect.getsource(getattr(ms, name))
+
+
+@pytest.mark.parametrize("name", ["stamp_handed_over", "host_delivers", "host_delivers_line"])
+def test_the_hand_over_helpers_are_the_same_in_financial_model_review(name: str) -> None:
+    fmr = _load("_fmr_gates_pin_nh", h.SKILLS / "financial-model-review" / "scripts" / "_fmr_gates.py")
+    ms = _load("_ms_gates_pin_nh", h.SKILLS / "market-sizing" / "scripts" / "_ms_gates.py")
+    assert inspect.getsource(getattr(fmr, name)) == inspect.getsource(getattr(ms, name))
 
 
 def test_the_set_cap_is_one_number() -> None:

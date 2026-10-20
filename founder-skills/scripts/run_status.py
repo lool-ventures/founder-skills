@@ -225,6 +225,15 @@ def _resume(
             invalid=bad,
         )
     ledger = gates.load_ledger(paths)
+    conflict = gates.request_flag_conflict(ledger, flags)
+    if conflict is not None:
+        _print_only(
+            paths,
+            "PRE_ANSWER_INVALID",
+            f"{conflict['line']!r}: {conflict['reason']}; the waiting run is unchanged",
+            args.pretty,
+            invalid=[conflict],
+        )
     waiting_on = status.get("waiting_on")
     resume_step = None
     if isinstance(waiting_on, str):

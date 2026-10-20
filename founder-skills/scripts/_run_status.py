@@ -182,11 +182,13 @@ FIELDS: tuple[str, ...] = (
     "resume_prompt",
     "no_ask",
     "reply_tool",
+    "no_handover",
     "gates",
     "coaching",
     "deliverables",
     "deliverables_status",
     "handed_over_at",
+    "handover",
     "disclosures",
     "notices",
     "failure",
@@ -633,6 +635,7 @@ def blank_status(skill: str, paths: RunPaths) -> dict[str, Any]:
             "artifacts_root_shell": paths.artifacts_root,
             "no_ask": False,
             "reply_tool": None,
+            "no_handover": False,
             "gates": [],
             "disclosures": [],
             "notices": [],
@@ -795,6 +798,12 @@ def _unused_request_notices(paths: RunPaths, status: dict[str, Any]) -> None:
             # FS_HOST_REPLY_TOOL on a skill with no closing step the end-of-turn check judges.
             out.append(
                 {"code": "PRE_ANSWER_IGNORED", "gate": None, "lines": [reply.get("raw")], "reason": "not_used_by_skill"}
+            )
+        nh = ledger.get("no_handover")
+        if isinstance(nh, dict) and nh.get("not_used_by_skill"):
+            # FS_HOST_NO_HANDOVER on a skill with no closing step.
+            out.append(
+                {"code": "PRE_ANSWER_IGNORED", "gate": None, "lines": [nh.get("raw")], "reason": "not_used_by_skill"}
             )
         na = ledger.get("no_ask")
         if isinstance(na, dict):

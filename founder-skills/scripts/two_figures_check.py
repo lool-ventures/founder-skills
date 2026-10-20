@@ -473,6 +473,20 @@ def no_ask_in(rows: list[dict[str, Any]], start: int, is_prompt: Any = None) -> 
     return False
 
 
+NO_HANDOVER_LINE = re.compile(r"(?m)^[ \t]*FS_HOST_NO_HANDOVER[ \t]*$")
+
+
+def no_handover_in(rows: list[dict[str, Any]], start: int, is_prompt: Any = None) -> bool:
+    """Whether a founder's own message since `start` carries an `FS_HOST_NO_HANDOVER` line, as a whole line
+    anywhere in it (a scheduled task's prompt carries it below its header). Same exclusions as `no_ask_in`."""
+    if is_prompt is None:
+        is_prompt = _transcript_tools()._is_real_user_prompt
+    for row in rows[start:]:
+        if founders_message(row, is_prompt) and any(NO_HANDOVER_LINE.search(t) for t in _founder_texts(row)):
+            return True
+    return False
+
+
 def host_line_in(
     rows: list[dict[str, Any]], start: int, gate: str, kinds: tuple[str, ...], is_prompt: Any = None
 ) -> bool:

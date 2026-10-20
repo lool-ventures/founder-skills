@@ -118,6 +118,15 @@ def test_a_verbatim_hand_over_passes_for_every_skill_the_hook_knows(skill: str) 
     assert r.outcome == "PASS" and r.skill == skill, r
 
 
+@pytest.mark.parametrize("skill", sorted(PRINTED))
+def test_a_closer_that_printed_the_host_line_passes_when_the_line_is_sent(skill: str) -> None:
+    """FS_HOST_NO_HANDOVER: the checker inherits the hook's recognition of the host line."""
+    script, _printed = PRINTED[skill]
+    line = "The analysis is complete. The host delivers its output.\n"
+    r = _check([_call(script), _result(line), _say(line), _stop()])
+    assert r.outcome == "PASS" and r.skill == skill, r
+
+
 def test_a_rewritten_hand_over_fails() -> None:
     script, printed = PRINTED["market-sizing"]
     rewrite = printed.replace("TAM is $4.2B.", "Your TAM comes to roughly $4B, a strong result.")

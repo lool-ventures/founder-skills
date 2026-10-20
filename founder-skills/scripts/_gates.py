@@ -180,6 +180,7 @@ REQUEST_TOKENS = {
     "wait": "FS_HOST_WAIT <gate>[.<instance>]",
     "derive": "FS_HOST_DERIVE <gate>[.<instance>]",
     "reply_tool": "FS_HOST_REPLY_TOOL <tool_name> <input_key>",
+    "no_handover": "FS_HOST_NO_HANDOVER",
 }
 
 # --- the tool the founder reads replies through (FS_HOST_REPLY_TOOL) ---------------------------------------
@@ -195,6 +196,19 @@ REPLY_TOOL_NAME_RE = re.compile(r"[A-Za-z0-9_-]{1," + str(REPLY_TOOL_NAME_MAX) +
 REPLY_TOOL_KEY_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,63}")
 REPLY_TOOL_REFUSED = ("Bash", "mcp__workspace__bash", "Agent", "Task", "AskUserQuestion", "SendMessage", "SendUserFile")
 REPLY_TOOL_SKILLS = ("market-sizing", "competitive-positioning", "financial-model-review")
+
+# --- a host that delivers the output itself (FS_HOST_NO_HANDOVER) ------------------------------------------
+#
+# Read only by the three closing scripts, from the run's own ledger: under it they print one fixed line in place
+# of the founder hand-over (`_handover_check.HOST_DELIVERS_LINE`) and stamp `handover: "host"`. The Stop hook never
+# reads this record; it keys on what the closer printed, and on the line in a founder's own message. Sticky once
+# recorded; never repeated by `resume_prompt` (`flag_lines`), as the reply-tool line is not. The same skills use
+# it as the reply-tool line (an alias, not a second list); the others list it `not_used_by_skill`.
+HANDOVER_SKILLS = REPLY_TOOL_SKILLS
+FLAG_CONFLICT_REASON = (
+    "FS_HOST_NO_HANDOVER and FS_HOST_REPLY_TOOL cannot both apply to one run: with no hand-over there is no reply "
+    "to send through a tool"
+)
 
 
 def reply_tool_name_problem(name: str) -> str | None:
@@ -472,6 +486,25 @@ CONTRACT_NOTES = (
     "request carries it only when you send it again. Plugin versions "
     "before 0.22 refuse the line (`PRE_ANSWER_INVALID`), so send it only to 0.22 and later; `run_status.py check` "
     "tells you.",
+    "`FS_HOST_NO_HANDOVER`, with nothing after it, says the host delivers its own output. The closing step of "
+    "market-sizing, competitive-positioning and financial-model-review then prints only `The analysis is complete. "
+    "The host delivers its output.` in place of the founder hand-over, writes that line to `handover.txt`, and stamps "
+    '`handed_over_at` with `handover: "host"`; the other skills accept the line and list it in `notices` as '
+    "`PRE_ANSWER_IGNORED` with reason `not_used_by_skill` and `gate: null`. Deliver the files `deliverables` lists. "
+    "It needs a run ledger (a request with no `start` gets the normal hand-over), it cannot be sent with "
+    "`FS_HOST_REPLY_TOOL` (`PRE_ANSWER_INVALID`, also on a resume that adds one to a run holding the other), and "
+    "once recorded it stays on (`run_status.json` `no_handover`, true for those three skills only). When the "
+    "closing step printed the line AND the line also stands on its own line in the request's own message (not "
+    "only in a skill's arguments), the end-of-turn check judges nothing about the final message, so it may be the "
+    "host's own text; when only the closing step printed it, the final message must carry the line and add "
+    "nothing with a number; when the run never recorded it (the line was left out of `start`), the founder "
+    "hand-over is printed and judged as usual. `resume_prompt` never repeats it: a resume message must carry it "
+    "again for that check. In a run folder, the closing step now reads the run's ledger whether or not the line "
+    "was sent, so an unreachable plugin install there exits 2 (`REGISTRY_UNREACHABLE`) where it printed before. "
+    "What financial-model-review's hand-over would have said is in the run's records: unreviewed values in "
+    "`disclosures`; no cash balance as report.json `runway_status` `no_cash_balance` with the `fmr_cash_followup` "
+    "gate in `gates` (check it is listed before asking); a cash update as the reopened revision. Plugin versions "
+    "before 0.24 refuse the line (`PRE_ANSWER_INVALID`); `run_status.py check` tells you.",
     "`host_context=supplied` carries context about the company supplied with the request: a JSON array of "
     "`{fact, source, date}` (`request_values.host_context` lists the caps and the causes an item is dropped for). "
     "Every skill accepts the line; only the skills in a gate's `reads_in` use it (ic-sim), and the others list it "
@@ -4611,6 +4644,7 @@ def _reopen_complete(
     status["deliverables_status"] = None
     # The hand-over belongs to the revision it handed over; the closer stamps the new one.
     status["handed_over_at"] = None
+    status["handover"] = None
     _run_status.set_state(status, "running", "RUNNING")
     _run_status.open_invocation(
         status, "reopen", {"gate": key, "step": g["step"] if g is not None else step, "reason": "reopened"}
@@ -4692,13 +4726,14 @@ def parse_request(
     Checked against the registry only: whether a script-built option exists is `open`'s check.
 
     The flags are `{"no_ask": [raw] , "wait": {key: raw}, "derive": {key: raw}, "reply_tool": {name, key, raw}
-    or None}`: FS_HOST_NO_ASK, and the FS_HOST_WAIT / FS_HOST_DERIVE lines, which are valid only beside
-    FS_HOST_NO_ASK, as FS_HOST_NO_ASK is only beside FS_HOST_RUN_ID; and FS_HOST_REPLY_TOOL, valid alone."""
+    or None, "no_handover": raw or None}`: FS_HOST_NO_ASK, and the FS_HOST_WAIT / FS_HOST_DERIVE lines, which
+    are valid only beside FS_HOST_NO_ASK, as FS_HOST_NO_ASK is only beside FS_HOST_RUN_ID; and
+    FS_HOST_REPLY_TOOL and FS_HOST_NO_HANDOVER, each valid alone, never together."""
     run_id: str | None = None
     pre: dict[str, dict[str, Any]] = {}
     notes: dict[str, tuple[str, str]] = {}
     bad: list[dict[str, str]] = []
-    flags: dict[str, Any] = {"no_ask": [], "wait": {}, "derive": {}, "reply_tool": None}
+    flags: dict[str, Any] = {"no_ask": [], "wait": {}, "derive": {}, "reply_tool": None, "no_handover": None}
     for line in request_lines(text):
         if not line.startswith("FS_HOST_"):
             continue
@@ -4716,6 +4751,11 @@ def parse_request(
                 if rest.strip():
                     raise ValueError("FS_HOST_NO_ASK takes nothing after it")
                 flags["no_ask"] = [line]
+                continue
+            if kw == "NO_HANDOVER":
+                if rest.strip():
+                    raise ValueError("FS_HOST_NO_HANDOVER takes nothing after it")
+                flags["no_handover"] = line
                 continue
             if kw == "REPLY_TOOL":
                 parts = rest.split()
@@ -4780,6 +4820,8 @@ def parse_request(
             continue
         pre[key]["note"] = note
         pre[key]["raw"].append(line)
+    if flags["no_handover"] is not None and flags["reply_tool"] is not None:
+        bad.append({"line": flags["no_handover"], "reason": FLAG_CONFLICT_REASON})
     if not flags["no_ask"]:
         for kw in ("wait", "derive"):
             for line in flags[kw].values():
@@ -4795,10 +4837,31 @@ def parse_request(
     return run_id, pre, bad, flags
 
 
+def request_flag_conflict(ledger: dict[str, Any], flags: dict[str, Any]) -> dict[str, str] | None:
+    """The invalid-line record when a request adds FS_HOST_NO_HANDOVER to a run that recorded FS_HOST_REPLY_TOOL,
+    or the reverse, else None. `parse_request` refuses both in one request; this covers a resume adding one."""
+    if flags.get("no_handover") is not None and isinstance(ledger.get("reply_tool"), dict):
+        return {"line": str(flags["no_handover"]), "reason": FLAG_CONFLICT_REASON}
+    reply = flags.get("reply_tool")
+    if isinstance(reply, dict) and isinstance(ledger.get("no_handover"), dict):
+        return {"line": str(reply["raw"]), "reason": FLAG_CONFLICT_REASON}
+    return None
+
+
+def no_handover(ledger: dict[str, Any] | None) -> bool:
+    return isinstance(ledger, dict) and isinstance(ledger.get("no_handover"), dict)
+
+
 def store_request_flags(ledger: dict[str, Any], flags: dict[str, Any], by: str) -> None:
-    """Record a request's FS_HOST_NO_ASK / WAIT / DERIVE / REPLY_TOOL lines. Sticky: once a run is no-ask it stays
-    so, and WAIT / DERIVE keys only accumulate; a later request that omits the lines changes nothing. A reply-tool
-    line replaces the recorded one (a different line only); it is a record, which no check reads."""
+    """Record a request's FS_HOST_NO_ASK / WAIT / DERIVE / REPLY_TOOL / NO_HANDOVER lines. Sticky: once a run is
+    no-ask or no-handover it stays so, and WAIT / DERIVE keys only accumulate; a later request that omits the lines
+    changes nothing. A reply-tool line replaces the recorded one (a different line only); it is a record, which no
+    check reads. The caller has refused a request that conflicts with the ledger (`request_flag_conflict`)."""
+    if flags.get("no_handover") is not None and not no_handover(ledger):
+        rec_nh: dict[str, Any] = {"raw": flags["no_handover"], "set_at": _run_status.now_iso(), "by": by}
+        if ledger.get("skill") not in HANDOVER_SKILLS:
+            rec_nh["not_used_by_skill"] = True
+        ledger["no_handover"] = rec_nh
     reply = flags.get("reply_tool")
     if isinstance(reply, dict):
         cur_reply = ledger.get("reply_tool")
@@ -5158,6 +5221,8 @@ def derive_status(
     status["no_ask"] = no_ask(ledger)
     reply = ledger.get("reply_tool")
     status["reply_tool"] = reply.get("raw") if isinstance(reply, dict) else None
+    # Shown as in effect only for a skill whose closer reads it; elsewhere the line is a `not_used_by_skill` notice.
+    status["no_handover"] = no_handover(ledger) and not (ledger.get("no_handover") or {}).get("not_used_by_skill")
     if status.get("status") in _run_status.FINAL_STATUSES:
         return
     if refused_code is not None:
@@ -5259,6 +5324,9 @@ def dry_check(text: str, skill: str, as_of: str) -> tuple[int, dict[str, Any]]:
         # A request line with no gate: `gate` is null, `line` names it.
         verdict = "applies" if skill in REPLY_TOOL_SKILLS else "not_used_by_skill"
         out["values"].append({"gate": None, "line": reply["raw"], "verdict": verdict})
+    if flags.get("no_handover") is not None:
+        verdict = "applies" if skill in HANDOVER_SKILLS else "not_used_by_skill"
+        out["values"].append({"gate": None, "line": flags["no_handover"], "verdict": verdict})
     ctx = Ctx(None, {"invocations": [{"started_at": f"{as_of}T00:00:00Z"}]}, skill)  # type: ignore[arg-type]
     ctx.ledger = {"skill": skill, "pre_answers": {k: {**v, "applied_at": None} for k, v in pre.items()}}
     waits = False

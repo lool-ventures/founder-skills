@@ -25,6 +25,9 @@ from __future__ import annotations
 
 import re
 
+# What a closing script prints in place of the founder hand-over when the request says the host delivers its own
+# output (FS_HOST_NO_HANDOVER). One copy: the closers load it from here, and the Stop hook recognises it.
+HOST_DELIVERS_LINE = "The analysis is complete. The host delivers its output."
 _LINK_TARGET = re.compile(r"\]\([^)]*\)")
 _DIGIT = re.compile(r"\d")
 

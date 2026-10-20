@@ -440,6 +440,14 @@ def test_unreviewed_values_are_disclosed_in_the_report_the_json_the_status_and_t
     assert h.status(root, run_id)["handed_over_at"] is not None
 
 
+def test_the_closer_under_no_handover_prints_only_the_host_line(tmp_path: Path) -> None:
+    root, run_id, run_dir = _run(tmp_path)
+    _settle_step1(root, run_id)
+    _ok(_rec(root, run_id, "default", "--gate", "fmr_extracted_values", "--reason", "asked_not_to_be_asked"))
+    _ok(_compose(run_dir))
+    h.check_host_closer(FMR / "fmr_closing_message.py", root, run_id, run_dir)
+
+
 def test_the_closer_refuses_a_report_composed_for_another_run(tmp_path: Path) -> None:
     """Bound: the refusal prints nothing, writes no handover.txt and leaves the run status byte-identical (so a
     what-if after an earlier hand-over keeps that hand-over's stamp, and an unhanded run gains none)."""

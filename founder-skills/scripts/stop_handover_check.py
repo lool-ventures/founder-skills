@@ -128,6 +128,9 @@ STOP_FEEDBACK_PREFIX = "Stop hook feedback:"
 OPENER_PREFIX = "Here's your "
 OFFER_START = "If you want to keep the working data behind this"
 OFFER_END = "as a single archive."
+# The lead of a block whose comparand is the host line (FS_HOST_NO_HANDOVER): the reader is the host's, so it never
+# says "founder" and carries no CORRECTION_LEAD.
+HOST_LINE_LEAD = "Send only the line below as your final message, and nothing else."
 CORRECTION_LEAD = (
     "For the record, this is the summary as the analysis produced it; "
     "if a figure in my message above differs from one here, use the one here, "
@@ -249,14 +252,23 @@ def _current_prompt_start(rows: list[dict[str, Any]]) -> int:
     return start
 
 
-def _load_contained() -> Any:
+def _handover_module() -> Any:
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_handover_check.py")
     spec = importlib.util.spec_from_file_location("_handover_check", path)
     if spec is None or spec.loader is None:
         raise ImportError(path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    return mod.contained
+    return mod
+
+
+def _load_contained() -> Any:
+    return _handover_module().contained
+
+
+def host_line() -> str:
+    """The line a closer prints under FS_HOST_NO_HANDOVER, from `_handover_check.py`."""
+    return str(_handover_module().HOST_DELIVERS_LINE)
 
 
 def _text_of(content: Any) -> str:
@@ -308,8 +320,22 @@ def _skill_of_call(tool_input: Any) -> str | None:
 
 def printed_from_result(text: str, opener: str) -> str | None:
     """The printed hand-over inside a closing call's tool result, or None when the result holds no
-    whole one: the lines from the last opener line to the first closing offer after it."""
+    whole one: the lines from the last opener line to the first closing offer after it.
+
+    Or the host line (FS_HOST_NO_HANDOVER), when a line of the result equals it (the host loop's `[exit N]` lead
+    dropped, CRLF folded, trailing whitespace stripped) and NO line is a hand-over opener: a compound block that
+    printed something else first still yields it, and a result that printed the real hand-over and also the host
+    line yields the real hand-over, so an appended `echo` cannot swap it out. Whether the call that printed it
+    counts is `_runs_closer` (the caller's check)."""
     lines = text.splitlines()
+    if not any(ln.startswith(OPENER_PREFIX) for ln in lines):
+        want = host_line()
+        for ln in lines:
+            t = ln.replace("\r", "").strip()
+            if _EXIT_PREFIX.match(t):
+                t = _EXIT_PREFIX.sub("", t, count=1).strip()
+            if t == want:
+                return want + "\n"
     for start in reversed(range(len(lines))):
         if not (lines[start].startswith(OPENER_PREFIX) and opener in lines[start]):
             continue
@@ -398,7 +424,10 @@ def refused_closing_call(rows: list[dict[str, Any]]) -> tuple[str, str] | None:
         return None
     text = _results_by_id(rows[start:]).get(cid, "")
     opener = next(o for name, _t, _g, o in SKILLS if name == skill)
-    if printed_from_result(text, opener) is not None:
+    printed = printed_from_result(text, opener)
+    if printed is not None and printed.strip() == host_line() and not _runs_closer(rows[start:], cid):
+        printed = None
+    if printed is not None:
         return None
     lines = [ln.strip() for ln in text.splitlines() if ln.strip() and not _EXIT_PREFIX.fullmatch(ln.strip())]
     return skill, (lines[0][:300] if lines else "no output")
@@ -408,7 +437,7 @@ def refused_closing_call(rows: list[dict[str, Any]]) -> tuple[str, str] | None:
 _SHARED_TMP_HELD = re.compile(r"\[shared-tmp\]\[([^\]]+)\]")
 
 
-def refused_reason(skill: str, error: str, sent_via: str | None = None) -> str:
+def refused_reason(skill: str, error: str, sent_via: str | None = None, host: bool = False) -> str:
     """The once-only follow-up for a closing step that refused. It states what the closing step did, never
     that the message above was wrong (the rule cannot tell), and dictates no earlier run's hand-over.
 
@@ -416,18 +445,19 @@ def refused_reason(skill: str, error: str, sent_via: str | None = None) -> str:
     without its redirect into the shared temp folder. The check's marker is not repeated, since that check
     counts every main-thread row carrying it as one of its holds."""
     label = skill.replace("-", " ")
+    reader = "whoever asked" if host else "the founder"
     held = _SHARED_TMP_HELD.findall(error) if "hook error:" in error else []
     if held:
         return (
             f"The {label} closing step's last run never ran: its command would have written {', '.join(held)}, "
             "a fixed name in the shared temp folder, and was held before it started, so it printed nothing. "
-            f"Your last message is already in front of the founder, so send a follow-up{_send_clause(sent_via)}: "
+            f"Your last message is already in front of {reader}, so send a follow-up{_send_clause(sent_via)}: "
             "run the closing step again with no redirect into the shared temp folder, and send what it prints "
             "exactly as printed. If it cannot be run again, say so in one line, and add nothing with a number."
         )
     return (
         f"The {label} closing step's last run stopped with an error and printed no hand-over ({error}). Your "
-        f"last message is already in front of the founder, so send a follow-up{_send_clause(sent_via)}: compose "
+        f"last message is already in front of {reader}, so send a follow-up{_send_clause(sent_via)}: compose "
         "the report again for this run, run the closing step again, and send what it prints exactly as printed. "
         "If it cannot be run again, say so in one line, and add nothing with a number."
     )
@@ -514,9 +544,40 @@ def closing_window(
     results = _results_by_id(rows[start:])
     opener = next(o for name, _t, _g, o in SKILLS if name == call_skill)
     printed = printed_from_result(results[last_id], opener) if last_id in results else None
+    if printed is not None and printed.strip() == host_line() and not _runs_closer(rows[call_at:], last_id):
+        printed = None
     if sends and reply_tool is not None:
         return call_skill, "\n".join(sends), printed, reply_tool[0]
     return call_skill, "\n".join(texts), printed, None
+
+
+# The closer as the script argument of a python call, over the command with `\`-newline continuations folded.
+_PY_CLOSER = re.compile(
+    r"\bpython(?:3(?:\.\d+)?)?\s+(?:-\S+\s+)*[\"']?[^\s\"';|&]*(?<![\w-])(?:cp_|fmr_)?closing_message\.py[\"']?(?=\s|$|;|&|\|)"
+)
+_CONTINUATION = re.compile(r"\\\r?\n")
+
+
+def _runs_closer(rows: list[dict[str, Any]], call_id: str | None) -> bool:
+    """The closing call is a shell call whose command runs the closer through python. Tighter than
+    `_skill_of_call`'s name-anywhere match: a Read or grep of the closer, or `echo <line> # closing_message.py`,
+    is not a closer run, so its output never stands for the host line."""
+    if call_id is None:
+        return False
+    for row in rows:
+        if row.get("type") != "assistant" or row.get("isSidechain"):
+            continue
+        content = (row.get("message") or {}).get("content")
+        if not isinstance(content, list):
+            continue
+        for b in content:
+            if not (isinstance(b, dict) and b.get("type") == "tool_use" and b.get("id") == call_id):
+                continue
+            name = str(b.get("name") or "")
+            command = (b.get("input") or {}).get("command") if isinstance(b.get("input"), dict) else None
+            shell = name == "Bash" or name.endswith("__bash") or name.endswith("_bash")
+            return shell and isinstance(command, str) and bool(_PY_CLOSER.search(_CONTINUATION.sub(" ", command)))
+    return False
 
 
 def _ends_on_tool_result(rows: list[dict[str, Any]]) -> bool:
@@ -592,7 +653,13 @@ def _judgement(
     if final is None or skill is None:
         return None
     cwd = payload.get("cwd")
-    printed = _printed(skill, cwd, from_transcript)
+    # The host line from a real closer run is the comparand ahead of any handover.txt: a newer file of another
+    # folder's is irrelevant, and the closer's failed write exits before printing it.
+    is_host = from_transcript is not None and from_transcript.strip() == host_line()
+    printed = from_transcript if is_host else _printed(skill, cwd, from_transcript)
+    if printed is not None and from_transcript is not None and not is_host and printed.strip() == host_line():
+        # The transcript's whole real hand-over beats a handover.txt that holds the host line.
+        printed = from_transcript
     if printed is None:
         _log(
             f"{skill}'s closing message ran but no handover.txt under {cwd}, "
@@ -625,21 +692,24 @@ def _last_feedback_asked_for_the_hand_over(rows: list[dict[str, Any]], after: in
         body = _text_of(message.get("content")) if isinstance(message, dict) else ""
         if body.startswith(STOP_FEEDBACK_PREFIX):
             last = body
-    return last is not None and CORRECTION_LEAD in last
+    return last is not None and (CORRECTION_LEAD in last or HOST_LINE_LEAD in last)
 
 
 def second_stop(payload: dict[str, Any], rows: list[dict[str, Any]] | None, figures: Any) -> None:
     """On `stop_hook_active`: never a second block, but one stderr line saying whether the follow-up carried the
     printed hand-over (the window restarts at the feedback turn). Only after a hand-over block (the feedback row
-    carries `CORRECTION_LEAD`): a follow-up to a delivery or no-ask block was never asked to carry it. Silent when
-    this stop is not ours, or when the closing step refused (any handover.txt on disk is then an earlier run's)."""
+    carries `CORRECTION_LEAD`, or `HOST_LINE_LEAD` for the host line): a follow-up to a delivery or no-ask block
+    was never asked to carry it. Silent when this stop is not ours, or when the closing step refused (any
+    handover.txt on disk is then an earlier run's)."""
     try:
         latest = _latest_closing_call(rows) if rows is not None else None
         if rows is None or latest is None or refused_closing_call(rows) is not None:
             return
         if not _last_feedback_asked_for_the_hand_over(rows, latest[1]):
             return
-        judged = _judgement(payload, rows, _reply_tool_or_none(rows, figures))
+        window = closing_window(rows, None)
+        host = window is not None and window[2] is not None and window[2].strip() == host_line()
+        judged = _judgement(payload, rows, None if host else _reply_tool_or_none(rows, figures))
         if judged is None:
             return
         _log("second stop: hand-over passed" if judged[0] else f"second stop: hand-over failed: {judged[1]}")
@@ -735,12 +805,30 @@ def decide(payload: dict[str, Any]) -> dict[str, str] | None:
     # The tool the founder reads replies through, named by the host in a founder's own message (never the ledger,
     # whose lines the model types). Looked for only when this prompt ran a closing script: no other stop scans.
     ours = rows is not None and _latest_closing_call(rows) is not None
-    reply_tool = _reply_tool_or_none(rows, None) if ours and rows is not None else None
+    # FS_HOST_NO_HANDOVER, as the hook sees it: (a) the last closing call is a real closer run that printed the host
+    # line; (b) the line stands in a founder's own message of this prompt. The hook never reads the ledger's flag.
+    host_printed = False
+    line_in_request = False
+    if ours and rows is not None:
+        try:
+            window = closing_window(rows, None)
+            host_printed = window is not None and window[2] is not None and window[2].strip() == host_line()
+            line_in_request = bool(
+                _load_figures().no_handover_in(rows, _current_prompt_start(rows), _is_real_user_prompt)
+            )
+        except Exception as e:  # noqa: BLE001 - fail open to the founder hand-over's rules
+            _log(f"host-line check: {type(e).__name__}: {e}")
+    # Under the host line a reply-tool line from an earlier prompt is not read: the ledger cannot hold both.
+    reply_tool = _reply_tool_or_none(rows, None) if ours and rows is not None and not host_printed else None
     refused = refused_closing_call(rows) if rows is not None else None
     if refused is not None:
         # Before anything reads a handover.txt: the one on disk is an earlier run's. Once, as every block is.
-        return {"decision": "block", "reason": refused_reason(*refused, reply_tool[0] if reply_tool else None)}
-    handover = _handover_problem(payload, rows, reply_tool)
+        reason = refused_reason(*refused, reply_tool[0] if reply_tool else None, host=line_in_request)
+        return {"decision": "block", "reason": reason}
+    # (a) and (b): the host's own final message (its memo) is not judged at all: no containment, no delivery or
+    # review-page ask, no reply-tool follow-up. Only (a): the host line is the comparand.
+    host_free = host_printed and line_in_request
+    handover = None if host_free else _handover_problem(payload, rows, reply_tool)
     tool: str | None = None
     quiet = False
     if rows is not None:
@@ -756,6 +844,8 @@ def decide(payload: dict[str, Any]) -> dict[str, str] | None:
             )
         except Exception as e:  # noqa: BLE001 - fail open
             _log(f"no-ask check: {type(e).__name__}: {e}")
+    if host_free and not quiet:
+        return None
     if quiet and rows is not None:
         # A request that said not to ask: no delivery or review-page ask (the host reads `deliverables`); only a
         # run left `running` is asked to record why.
@@ -775,6 +865,9 @@ def decide(payload: dict[str, Any]) -> dict[str, str] | None:
         try:
             found = closing_call(rows_for_delivery)
             printed = _printed(found[0], payload.get("cwd"), found[2]) if found is not None else None
+            if host_printed:
+                # The host line names no file: the ask fires only if the model's own text links one unattached.
+                printed = None
             tool = _load_delivery().missing_delivery(
                 rows_for_delivery, _current_prompt_start(rows_for_delivery), printed
             )
@@ -804,12 +897,24 @@ def decide(payload: dict[str, Any]) -> dict[str, str] | None:
         f"If the files your message points to are the finished deliverables, attach them now with {tool}; "
         "if they are not finished, say so in one line instead."
     )
-    if handover is None:
+    if handover is None and host_printed:
+        reason = (
+            "Your last message points to the finished files but did not attach them, and a link or a name "
+            f"alone does not reach the reader on every host. {attach} Add nothing else."
+        )
+    elif handover is None:
         reason = (
             # True on both shapes the check fires on: a message that links the files, and a cloud closing
             # message that names each document by its label with no link.
             "Your last message points the founder to the finished files but did not attach them, and a "
             f"link or a name alone does not reach the founder on every host. {attach} Add nothing else."
+        )
+    elif host_printed:
+        why, printed, _sent_via = handover
+        steps = f"First, {attach[0].lower()}{attach[1:]} Then: " if tool is not None else ""
+        reason = (
+            f"Your last message did not end with the closing step's line as printed ({why}). {steps}"
+            f"{HOST_LINE_LEAD}\n\n{printed.rstrip()}"
         )
     else:
         why, printed, _sent_via = handover

@@ -917,6 +917,14 @@ def test_the_closer_stamps_the_hand_over_and_prints_the_same(tmp_path: Path) -> 
     assert again.returncode == 0 and again.stdout == first.stdout
 
 
+def test_the_closer_under_no_handover_prints_only_the_host_line(tmp_path: Path) -> None:
+    root, run_id, run_dir = _run_dir(tmp_path)
+    _artifacts(run_dir, run_id)
+    _ok(_answer(root, run_id, "ms_methodology", "looks_good"))
+    _ok(_compose(run_dir))
+    h.check_host_closer(MS / "closing_message.py", root, run_id, run_dir)
+
+
 def test_the_closer_refuses_a_report_composed_for_another_run(tmp_path: Path) -> None:
     root, run_id, run_dir = _run_dir(tmp_path)
     _artifacts(run_dir, run_id)

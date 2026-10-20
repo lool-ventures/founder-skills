@@ -116,3 +116,100 @@ def snapshot(root: Path, run_id: str) -> tuple[bytes, bytes]:
 
 def record(root: Path, run_id: str, *args: str, stdin: str | None = None) -> subprocess.CompletedProcess[str]:
     return run(RECORD, args[0], "--run-id", run_id, "--artifacts-root", str(root), *args[1:], stdin=stdin)
+
+
+HOST_DELIVERS_LINE = "The analysis is complete. The host delivers its output."
+
+
+def set_no_handover(root: Path, run_id: str) -> None:
+    """Record FS_HOST_NO_HANDOVER in the run's ledger, as `start` would have."""
+    path = ledger_path(root, run_id)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["no_handover"] = {"raw": "FS_HOST_NO_HANDOVER", "set_at": "2026-10-20T00:00:00Z", "by": "test"}
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+
+def check_host_closer(closer: Path, root: Path, run_id: str, run_dir: Path) -> None:
+    """Under FS_HOST_NO_HANDOVER a closer prints the host line alone, overwrites handover.txt with it, and stamps
+    `handover: "host"` beside `handed_over_at`; an unreadable ledger, a report with no verdict, another run's
+    report and a failed handover.txt write each exit 2 and print nothing."""
+    report_path = run_dir / "report.json"
+    argv: list[str] = [
+        str(closer), "--report", str(report_path), "--link", "path", "--deliverable", f"the report={run_dir}/report.md"
+    ]  # fmt: skip
+    handover = run_dir / "handover.txt"
+    handover.write_text("Here's your finished analysis: an earlier hand-over.\n", encoding="utf-8")
+    set_no_handover(root, run_id)
+
+    good = report_path.read_text(encoding="utf-8")
+    report = json.loads(good)
+    report.pop("verdict", None)
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+    no_verdict = run(*argv)
+    assert no_verdict.returncode == 2 and no_verdict.stdout == "", no_verdict
+    report = json.loads(good)
+    report["run_id"] = "20261001T090000Z-0f0f0f"
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+    other = run(*argv)
+    assert other.returncode == 2 and other.stdout == "", other
+    report_path.write_text(good, encoding="utf-8")
+    assert status(root, run_id)["handed_over_at"] is None
+
+    # handover.txt cannot be written but can be removed: the older one goes, and the line is still printed.
+    handover.chmod(0o444)
+    try:
+        unwritable = run(*argv)
+    finally:
+        if handover.exists():
+            handover.chmod(0o644)
+    assert unwritable.returncode == 0 and unwritable.stdout == HOST_DELIVERS_LINE + "\n", unwritable
+    assert not handover.exists()
+    # Neither written nor removed: exit 2, nothing printed.
+    handover.write_text("Here's your finished analysis: an earlier hand-over.\n", encoding="utf-8")
+    handover.chmod(0o444)
+    run_dir.chmod(0o555)
+    try:
+        stuck = run(*argv)
+    finally:
+        run_dir.chmod(0o755)
+        handover.chmod(0o644)
+    assert stuck.returncode == 2 and stuck.stdout == "", stuck
+
+    _set_status(root, run_id, handed_over_at=None, handover=None)
+    proc = run(*argv)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert proc.stdout == HOST_DELIVERS_LINE + "\n"
+    assert handover.read_text(encoding="utf-8") == HOST_DELIVERS_LINE + "\n"
+    st = status(root, run_id)
+    assert st["handed_over_at"] and st["handover"] == "host"
+
+    lp = ledger_path(root, run_id)
+    saved = lp.read_bytes()
+    lp.write_text("{not json", encoding="utf-8")
+    try:
+        broken = run(*argv)
+    finally:
+        lp.write_bytes(saved)
+    assert broken.returncode == 2, broken
+    assert HOST_DELIVERS_LINE not in broken.stdout and "Here's your" not in broken.stdout
+    assert json.loads(broken.stdout.strip().splitlines()[-1])["code"] == "LEDGER_MISSING"
+
+    # A bound folder whose only ref names no usable run: exit 2, never the founder hand-over.
+    refs = list(run_dir.glob("handoff/*/run_ref.json"))
+    saved_refs = {r: r.read_bytes() for r in refs}
+    for r in refs:
+        r.write_text("{not json", encoding="utf-8")
+    try:
+        unbound = run(*argv)
+    finally:
+        for r, b in saved_refs.items():
+            r.write_bytes(b)
+    assert unbound.returncode == 2 and "Here's your" not in unbound.stdout and HOST_DELIVERS_LINE not in unbound.stdout
+    assert json.loads(unbound.stdout.strip().splitlines()[-1])["code"] == "LEDGER_MISSING"
+
+
+def _set_status(root: Path, run_id: str, **fields: Any) -> None:
+    path = status_path(root, run_id)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data.update(fields)
+    path.write_text(json.dumps(data), encoding="utf-8")

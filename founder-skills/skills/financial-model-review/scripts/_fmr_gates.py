@@ -346,15 +346,46 @@ def coaching_pending(ledger: Any) -> None:
         print(f"warning: the run status was not updated: {exc}", file=sys.stderr)
 
 
-def stamp_handed_over(report_path: str) -> None:
-    """The closer printed the hand-over: `handed_over_at`. A failure is one stderr line; stdout is unchanged."""
+def stamp_handed_over(report_path: str, *, host: str | None = None) -> None:
+    """The closer printed the hand-over: `handed_over_at`. With `host` (FS_HOST_NO_HANDOVER: the run id the flag
+    was read from, so the stamp lands on that run) also `handover: "host"`. A failure is one stderr line; stdout
+    is unchanged."""
     run_dir = os.path.dirname(os.path.abspath(report_path))
-    run_id = run_id_of(run_dir)
+    run_id = host if host is not None else run_id_of(run_dir)
     if not _run_ref.has_ledger(run_dir, run_id):
         return
+    fields: dict[str, Any] = {"handover": "host"} if host else {}
     try:
         rs = _run_ref.load_shared("_run_status")
         paths = rs.locate_from_run_dir(run_dir, run_id)
-        rs.update(paths, lambda st: st.update(handed_over_at=rs.now_iso()))
+        rs.update(paths, lambda st: st.update(handed_over_at=rs.now_iso(), **fields))
     except Exception as exc:  # noqa: BLE001 -- the hand-over is printed whatever happens here
         print(f"warning: the hand-over time was not recorded in the run status: {exc}", file=sys.stderr)
+
+
+def host_delivers(report_path: str) -> str | None:
+    """The id of the run that holds the report's folder when it recorded FS_HOST_NO_HANDOVER, else None. Keyed on
+    the folder carrying any `handoff/*/run_ref.json` file, never on `has_ledger`, which is False for an id it
+    cannot validate. A folder with no ref is None and loads nothing; a bound folder whose current run cannot be
+    told, or whose ledger cannot be read, exits 2 here, never falling back to the founder hand-over."""
+    run_dir = os.path.dirname(os.path.abspath(report_path))
+    current = _run_ref.folder_current_run(run_dir)
+    if current is None:
+        if glob.glob(os.path.join(run_dir, "handoff", "*", "run_ref.json")):
+            failure = _run_ref.LedgerUnavailable("LEDGER_MISSING", "this folder's run refs name no usable run")
+            sys.exit(_run_ref.report_failure(failure))
+        return None
+    opened = open_ledger_or_exit(run_dir, current)
+    if opened is None:
+        sys.exit(_run_ref.report_failure(_run_ref.LedgerUnavailable("LEDGER_MISSING", f"no gate ledger for {current}")))
+    gates, paths = opened
+    try:
+        ledger = gates.load_ledger(paths)
+    except Exception as exc:  # noqa: BLE001 -- any unreadable ledger is the one refusal
+        sys.exit(_run_ref.report_failure(_run_ref.LedgerUnavailable("LEDGER_MISSING", str(exc))))
+    return current if gates.no_handover(ledger) else None
+
+
+def host_delivers_line() -> str:
+    """What a closer prints under FS_HOST_NO_HANDOVER, from the plugin's one copy."""
+    return str(_run_ref.load_shared("_handover_check").HOST_DELIVERS_LINE)
