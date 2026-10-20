@@ -107,7 +107,7 @@ import re
 import subprocess
 import sys
 import textwrap
-from typing import Any
+from typing import Any, NoReturn
 
 REQUIRED_ARTIFACTS = ("inputs.json", "sizing.json", "validation.json")
 DOCUMENT_SUFFIXES = (".pdf", ".md", ".txt", ".docx", ".pptx", ".xlsx", ".csv")
@@ -903,8 +903,27 @@ def _refuse_empty(args: argparse.Namespace, flags: tuple[str, ...]) -> None:
             sys.exit(2)
 
 
+# The SKILL.md heading whose template a SENSITIVITY_TEST dispatch sends; held to SKILL.md by a test.
+SENSITIVITY_HEADING = "SENSITIVITY_TEST dispatch prompt template"
+
+
+class _UsageParser(argparse.ArgumentParser):
+    """A usage error naming the sensitivity step also says it has no generator (exit 2, writes nothing)."""
+
+    def error(self, message: str) -> NoReturn:
+        self.print_usage(sys.stderr)
+        print(f"{self.prog}: error: {message}", file=sys.stderr)
+        if "sensitivity" in message.lower():
+            print(
+                "fix: SENSITIVITY_TEST has no generator; send the template under SKILL.md's "
+                f'"{SENSITIVITY_HEADING}" heading (Steps 6a & 6b).',
+                file=sys.stderr,
+            )
+        sys.exit(2)
+
+
 def main() -> None:
-    p = argparse.ArgumentParser(description="Generate a sub-agent dispatch prompt from identifiers on disk")
+    p = _UsageParser(description="Generate a sub-agent dispatch prompt from identifiers on disk")
     p.add_argument("context", choices=["red_team", "checklist", *SIZING_CONTEXTS])
     p.add_argument("--run-id", required=True)
     p.add_argument("--analysis-dir", required=True, help="the artifacts dir in THIS shell's namespace")

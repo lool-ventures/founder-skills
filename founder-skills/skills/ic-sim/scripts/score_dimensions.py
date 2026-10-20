@@ -380,14 +380,36 @@ def validate_dimensions(items: list[dict[str, Any]], fund_mode: str = "fund_spec
     }
 
 
+# SKILL.md's Step 8 line, which takes the value from fund_profile.json's `mode`; held to SKILL.md by a test.
+FUND_MODE_LINE = (
+    '--fund-mode "$(python3 -c \'import json,sys; print(json.load(open(sys.argv[1])).get("mode","fund_specific"))\''
+    ' "$SIM_DIR/fund_profile.json")"'
+)
+FUND_MODES = ("generic", "fund_specific")
+
+
+class _UsageParser(argparse.ArgumentParser):
+    """A --fund-mode usage error also prints SKILL.md's line for it (exit 2, writes nothing)."""
+
+    def error(self, message: str) -> NoReturn:
+        self.print_usage(sys.stderr)
+        print(f"{self.prog}: error: {message}", file=sys.stderr)
+        if "--fund-mode" in message:
+            print(
+                f"fix: pass fund_profile.json's mode ({' or '.join(FUND_MODES)}) as SKILL.md does: {FUND_MODE_LINE}",
+                file=sys.stderr,
+            )
+        sys.exit(2)
+
+
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="IC dimension scorer (reads JSON from stdin)")
+    p = _UsageParser(description="IC dimension scorer (reads JSON from stdin)")
     p.add_argument("--pretty", action="store_true", help="Pretty-print JSON")
     p.add_argument("-o", "--output", help="Write JSON to file instead of stdout")
     p.add_argument("--run-id", required=True, help="Run identifier injected into metadata.run_id")
     p.add_argument(
         "--fund-mode",
-        choices=["generic", "fund_specific"],
+        choices=list(FUND_MODES),
         default="fund_specific",
         help=(
             "fund_profile.json's mode. 'fund_specific' (default, back-compat): a dealbreaker "

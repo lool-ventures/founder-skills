@@ -75,6 +75,7 @@ import json
 import os
 import re
 import sys
+from typing import NoReturn
 
 COMMENTARY_HEADING = "## Coaching Commentary"
 # A report that declares its commentary needs a passing check record. Written by a skill's compose beside the
@@ -384,8 +385,90 @@ def _verify_run_id_parity(artifact_paths: list[str]) -> tuple[str | None, str | 
     return (distinct[0] if distinct else None), None
 
 
+_SKILLS = (
+    "competitive-positioning",
+    "financial-model-review",
+    "market-sizing",
+    "deck-review",
+    "cap-table",
+    "ic-sim",
+)
+# Shown when the calling skill cannot be told from --report, or its SKILL.md cannot be read.
+_GENERIC_FORMS = (
+    "deck-review, market-sizing, ic-sim, financial-model-review, competitive-positioning: "
+    'python3 "$SHARED_SCRIPTS/md_to_commentary.py" "$HANDOFF_DIR/coaching.md" | '
+    'python3 "$SHARED_SCRIPTS/insert_coaching.py" --report ... --report-json ... --marker ... --verify-artifact ...',
+    'cap-table: python3 "$SHARED_SCRIPTS/insert_coaching.py" --commentary-file "$HANDOFF_DIR/coaching.released.json" '
+    "--report ... --report-json ... --marker ... --verify-artifact ...",
+)
+
+
+def _report_arg(argv: list[str]) -> str | None:
+    """--report's value, read from argv: argparse fails before `args` exists."""
+    for i, word in enumerate(argv):
+        if word == "--report" and i + 1 < len(argv):
+            return argv[i + 1]
+        if word.startswith("--report="):
+            return word.split("=", 1)[1]
+    return None
+
+
+def skill_of_report(report: str | None) -> str | None:
+    """The skill whose artifacts folder (`<skill>-<slug>`) holds the report, or None."""
+    if not report:
+        return None
+    folder = os.path.basename(os.path.dirname(os.path.abspath(report)))
+    return next((s for s in _SKILLS if folder.startswith(s + "-")), None)
+
+
+def skill_insert_command(skill: str, skills_dir: str | None = None) -> list[str] | None:
+    """The insert command as `skill`'s SKILL.md writes it: from the command that starts the pipe into
+    insert_coaching.py (md_to_commentary.py's line when it pipes, else insert_coaching.py's own) through
+    its last continuation line, in the first bash block that runs it. None when it cannot be read."""
+    base = skills_dir or os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "skills")
+    try:
+        with open(os.path.join(base, skill, "SKILL.md"), encoding="utf-8") as f:
+            text = f.read()
+    except OSError:
+        return None
+    blocks: list[str] = re.findall(r"^```bash\n(.*?)^```", text, flags=re.M | re.S)
+    for block in blocks:
+        lines = block.splitlines()
+        at = next(
+            (i for i, ln in enumerate(lines) if ln.lstrip().startswith("python3") and "insert_coaching.py" in ln), None
+        )
+        if at is None:
+            continue
+        piped = at > 0 and "md_to_commentary.py" in lines[at - 1] and "|" in lines[at - 1]
+        start = at - 1 if piped else at
+        end = at
+        while end + 1 < len(lines) and lines[end].rstrip().endswith("\\"):
+            end += 1
+        return lines[start : end + 1]
+    return None
+
+
+class _UsageParser(argparse.ArgumentParser):
+    """A usage error also prints the insert command the calling skill's SKILL.md gives (exit 2, writes nothing)."""
+
+    def error(self, message: str) -> NoReturn:
+        self.print_usage(sys.stderr)
+        print(f"{self.prog}: error: {message}", file=sys.stderr)
+        skill = skill_of_report(_report_arg(sys.argv[1:]))
+        command = skill_insert_command(skill) if skill else None
+        if command:
+            print(f"fix: run the insert as {skill}'s SKILL.md writes it:", file=sys.stderr)
+            for line in command:
+                print(line, file=sys.stderr)
+        else:
+            print("fix: run the insert as your skill's SKILL.md writes it:", file=sys.stderr)
+            for form in _GENERIC_FORMS:
+                print(form, file=sys.stderr)
+        sys.exit(2)
+
+
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Insert coaching commentary into report.md")
+    p = _UsageParser(description="Insert coaching commentary into report.md")
     p.add_argument("--report", required=True, help="Path to report.md")
     p.add_argument(
         "--marker",
