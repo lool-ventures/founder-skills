@@ -305,6 +305,8 @@ starts the skill:
 | `FS_HOST_NO_ASK` | With `FS_HOST_RUN_ID`: the run asks nothing. A question with a default takes it (listed as `DEFAULT_TAKEN:<question>`); any other leaves the run `waiting` for an answer you send on resume. |
 | `FS_HOST_WAIT <question>` | With `FS_HOST_NO_ASK`: stop `waiting` at this question even though it has a default, so someone can answer it later. |
 | `FS_HOST_DERIVE <question>` | With `FS_HOST_NO_ASK`: the run may take this answer from the materials, recording where it says it found it (`DERIVED:<question>`). Company name, sector, geography and competitive positioning's product questions only; never the stage. Without it, those product questions wait for a line. |
+| `FS_HOST_REPLY_TOOL <tool_name> <input_key>` | Names the tool your founder reads replies through, when it is not the model's plain text; the end-of-turn check then judges what was sent through it. Market sizing, competitive positioning and financial model review use it. |
+| `FS_HOST_NO_HANDOVER` | Your host delivers its own output: the closing step of market sizing, competitive positioning and financial model review prints one fixed line in place of the founder message. Needs a started run; not with `FS_HOST_REPLY_TOOL`. |
 
 `<question>` is a question id, or `<id>.<instance>` for a question asked once per item (for example
 `ctx_basics.stage`). A question that allows several options takes them comma-joined. Send each skill only its

@@ -28,7 +28,13 @@ Usage:
 Exit 2 if the report cannot be read, carries no verdict, or was composed for another run than this
 folder's inputs (`RUN_ID_MISMATCH`: stdout empty, no handover.txt, no hand-over time); a failed
 handover.txt write is a stderr line.
-"""
+
+Under FS_HOST_NO_HANDOVER (recorded in the ledger of the run that holds this folder): after every refusal
+above, print only the host line ("The analysis is complete. The host delivers its output."), write it to
+handover.txt and stamp `handover: "host"` beside `handed_over_at` on that run. A failed write removes the
+older handover.txt and still prints; exit 2 when neither works, or when the folder is bound but its current
+run cannot be told or its ledger read (`LEDGER_MISSING` / `REGISTRY_UNREACHABLE`, a JSON line on stdout).
+In a bound folder the ledger is opened whether or not the line was sent."""
 
 from __future__ import annotations
 
