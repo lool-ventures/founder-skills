@@ -243,7 +243,7 @@ def test_the_dispatcher_is_the_one_declared_hook_for_dispatches() -> None:
     # AskUserQuestion reaches the same process for the review-page check (test_review_page_hook.py), and
     # the Cowork shell for the shared-/tmp check (test_shared_tmp_hook.py).
     assert set(entries[0]["matcher"].split("|")) == {"Agent", "Task", "AskUserQuestion", "mcp__workspace__bash"}
-    assert [h["command"].rsplit("/", 1)[-1] for h in entries[0]["hooks"]] == ["pretooluse-dispatch.sh"]
+    assert [h["command"].strip('"').rsplit("/", 1)[-1] for h in entries[0]["hooks"]] == ["pretooluse-dispatch.sh"]
 
 
 def test_a_prompt_read_back_from_its_file_counts_as_printed(tmp_path: Path) -> None:

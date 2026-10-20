@@ -303,7 +303,7 @@ def test_the_manifest_sends_dispatches_and_questions_to_the_hook() -> None:
     manifest = json.loads((PLUGIN / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
     entries = manifest["hooks"]["PreToolUse"]
     assert [e["matcher"] for e in entries] == ["Agent|Task|AskUserQuestion|mcp__workspace__bash"]
-    assert entries[0]["hooks"][0]["command"] == "${CLAUDE_PLUGIN_ROOT}/scripts/pretooluse-dispatch.sh"
+    assert entries[0]["hooks"][0]["command"] == '"${CLAUDE_PLUGIN_ROOT}/scripts/pretooluse-dispatch.sh"'
 
 
 @pytest.mark.parametrize(

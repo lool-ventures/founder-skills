@@ -32,7 +32,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/session-setup.sh",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/session-setup.sh\"",
             "timeout": 30,
             "statusMessage": "Setting up founder-skills..."
           }
@@ -45,7 +45,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/pretooluse-dispatch.sh",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/pretooluse-dispatch.sh\"",
             "timeout": 30
           }
         ]
@@ -57,7 +57,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/stop-handover-check.sh",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/stop-handover-check.sh\"",
             "timeout": 30
           }
         ]

@@ -29,7 +29,7 @@ def _hook_wrappers() -> list[str]:
     for entries in manifest["hooks"].values():
         for entry in entries:
             for hook in entry["hooks"]:
-                name = hook["command"].rsplit("/", 1)[-1]
+                name = hook["command"].strip('"').rsplit("/", 1)[-1]
                 if name.endswith(".sh") and "exec python3" in (SCRIPTS / name).read_text(encoding="utf-8"):
                     names.add(name)
     return sorted(names)
@@ -92,7 +92,7 @@ def _hook_files(plugin: Path) -> list[str]:
     for entries in manifest["hooks"].values():
         for entry in entries:
             for hook in entry["hooks"]:
-                todo.append(hook["command"].replace("${CLAUDE_PLUGIN_ROOT}/", ""))
+                todo.append(hook["command"].strip('"').replace("${CLAUDE_PLUGIN_ROOT}/", ""))
     seen: list[str] = []
     while todo:
         rel = todo.pop()
@@ -155,3 +155,50 @@ def test_a_hook_body_missing_from_the_tree_is_reported(tmp_path: Path) -> None:
     files = _hook_files(tmp_path)
     assert files == ["scripts/body.py", "scripts/w.sh"]
     assert [f for f in files if f not in _shipped(tmp_path)] == ["scripts/body.py"]
+
+
+# --- a plugin root with a space in it -------------------------------------------------------------------
+# Local Cowork installs plugins under "~/Library/Application Support/...". The CLI runs a hook command through
+# a shell, so an unquoted ${CLAUDE_PLUGIN_ROOT} splits at the space: the hook exits 126 or 127, never 2, so
+# nothing blocks and the hook silently never runs. Each command is run both ways the placeholder can reach the
+# shell (substituted into the text, or expanded from the environment) from a root that contains a space.
+
+
+def _hook_commands() -> list[tuple[str, str]]:
+    manifest = json.loads((PLUGIN / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+    return [
+        (event, hook["command"])
+        for event, entries in manifest["hooks"].items()
+        for entry in entries
+        for hook in entry["hooks"]
+    ]
+
+
+def test_every_hook_command_quotes_the_plugin_root() -> None:
+    commands = _hook_commands()
+    assert len(commands) == 3, commands
+    for event, command in commands:
+        assert command.startswith('"${CLAUDE_PLUGIN_ROOT}/') and command.endswith('"'), (event, command)
+
+
+def _run_from_spaced_root(command: str, tmp_path: Path, how: str) -> subprocess.CompletedProcess[str]:
+    root = tmp_path / "Application Support" / "founder-skills"
+    root.parent.mkdir(parents=True, exist_ok=True)
+    if not root.exists():
+        root.symlink_to(PLUGIN, target_is_directory=True)
+    env = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path), "CLAUDE_ENV_FILE": str(tmp_path / "env")}
+    if how == "text":
+        command = command.replace("${CLAUDE_PLUGIN_ROOT}", str(root))
+    else:
+        env["CLAUDE_PLUGIN_ROOT"] = str(root)
+    return subprocess.run(["sh", "-c", command], input="{}", capture_output=True, text=True, timeout=60, env=env)
+
+
+@pytest.mark.parametrize("how", ["text", "env"])
+@pytest.mark.parametrize(("event", "command"), _hook_commands())
+def test_every_hook_runs_from_a_plugin_root_with_a_space(event: str, command: str, how: str, tmp_path: Path) -> None:
+    r = _run_from_spaced_root(command, tmp_path, how)
+    assert r.returncode == 0, f"{event} hook exited {r.returncode} from a spaced root ({how}): {r.stderr!r}"
+    # Lever: the same command unquoted fails from this root, so the root really does split.
+    bare = _run_from_spaced_root(command.strip('"'), tmp_path, how)
+    assert bare.returncode in (126, 127), (event, how, bare.returncode, bare.stderr)
