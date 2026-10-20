@@ -183,7 +183,7 @@
 
 ## Deck Review Scripts
 
-- **`checklist.py`** — Scores 35 criteria across 7 categories (pass/fail/warn/not_applicable) with overall score percentage
+- **`checklist.py`** — Scores 35 criteria across 7 categories (pass/fail/warn/not_applicable) with overall score percentage. It reads `--inventory` before validating, so a criterion its gates force to not_applicable (AI on a `not_ai` deck, design on an unrendered one) needs no evidence or fix; ids and statuses are still checked
 - **`dr_dispatch_prompt.py`** — Prints Step 5's CHECKLIST sub-agent prompt from identifiers (`checklist --run-id --handoff-agent --review-dir-agent --review-dir`, `--correction` for a redo, `producer-rejected --detail-file` for every producer rejection, `SLIDE_REVIEWS_NOT_READ` included). Prints nothing until this run's `slide_reviews.json` carries a read token (`SLIDE_REVIEWS_MISSING`, exit 1, no context line, its own `fix`: run Step 4's pipe, then the generator again), and refuses `ARTIFACT_OTHER_RUN` in a bound folder when a file the grader reads is another run's. It never reads the token: `_slide_reviews_file.py` holds the "is this run's file usable" half both it and `checklist.py` use, the generator importing only `usable`, and the token comparison stays in `checklist.py`. Every option takes a value (the dispatch hook reads the first positional after the script as the context). Registered with the dispatch-prompt hook; a scoring file.
 - **`compose_report.py`** — Assembles deck review artifacts into final report with cross-artifact validation
 - **`visualize.py`** — Generates self-contained HTML with SVG charts; outputs HTML (not JSON)

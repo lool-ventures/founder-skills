@@ -3435,6 +3435,80 @@ _DESIGN_CRITERIA_IDS = [
     "mobile_readable",
 ]
 
+
+def _gate_inventory(tmp_path: Path, ai_company_status: str, input_format: str = "pdf") -> Path:
+    inv_path = tmp_path / "deck_inventory.json"
+    inv_path.write_text(
+        json.dumps(
+            {
+                "metadata": {"run_id": "r1"},
+                "company_name": "TestCo",
+                "review_date": "2026-06-01",
+                "input_format": input_format,
+                "input_quality": "good",
+                "total_slides": 10,
+                "ai_company_status": ai_company_status,
+                "ai_evidence": "Stated.",
+                "slides": [{"number": 1, "headline": "h", "content_summary": "s"}],
+            }
+        )
+    )
+    return inv_path
+
+
+def _bare(ids: list[str], status: str) -> list[dict]:
+    """Items graded fail/warn with neither evidence nor a fix note."""
+    return _make_checklist_items(overrides={cid: {"status": status} for cid in ids})
+
+
+@pytest.mark.parametrize(
+    ("ai_status", "input_format", "ids", "status", "expect_rc"),
+    [
+        # The gate replaces these whole, so a grade with no fix note on them is not refused.
+        ("not_ai", "pdf", _AI_CRITERIA_IDS, "fail", 0),
+        ("not_ai", "text", _AI_CRITERIA_IDS + _DESIGN_CRITERIA_IDS, "warn", 0),
+        # Scored criteria still need their evidence and fix.
+        ("ai_core", "pdf", _AI_CRITERIA_IDS, "fail", 1),
+        ("not_ai", "pdf", _DESIGN_CRITERIA_IDS, "warn", 1),
+    ],
+)
+def test_checklist_gated_out_criteria_need_no_notes(
+    tmp_path: Path, ai_status: str, input_format: str, ids: list[str], status: str, expect_rc: int
+) -> None:
+    """Gating used to run after validation, so a fail with no notes on a criterion the gate was about
+    to force to not_applicable refused the whole grade and cost a corrective dispatch."""
+    inv_path = _gate_inventory(tmp_path, ai_status, input_format)
+    out_path = tmp_path / "checklist.json"
+    sr_args, payload = _sighted(tmp_path, "r1", json.dumps({"items": _bare(ids, status)}))
+    rc, _stdout, stderr = run_script_raw(
+        "checklist.py",
+        ["--run-id", "r1", "--inventory", str(inv_path), *sr_args, "-o", str(out_path)],
+        stdin_data=payload,
+    )
+    assert rc == expect_rc, stderr
+    if expect_rc:
+        assert "no notes" in stderr
+        assert not out_path.exists()
+        return
+    items = {i["id"]: i for i in json.loads(out_path.read_text())["items"]}
+    for cid in ids:
+        assert items[cid]["status"] == "not_applicable"
+        assert items[cid]["evidence"].startswith("Auto-gated:")
+        assert "notes" not in items[cid]
+
+
+def test_checklist_without_inventory_still_refuses_bare_ai_fails(tmp_path: Path) -> None:
+    """The exemption comes from the inventory: with none, nothing is gated and nothing is exempt."""
+    out_path = tmp_path / "checklist.json"
+    sr_args, payload = _sighted(tmp_path, "r1", json.dumps({"items": _bare(_AI_CRITERIA_IDS, "fail")}))
+    rc, _stdout, stderr = run_script_raw(
+        "checklist.py", ["--run-id", "r1", *sr_args, "-o", str(out_path)], stdin_data=payload
+    )
+    assert rc == 1
+    assert "no notes" in stderr
+    assert not out_path.exists()
+
+
 # Counting slides is arithmetic, not a visual judgement, so it stays scored in every
 # format. Pinned by name: a live run gated it and then made the criticism anyway in
 # prose ("the deck runs long at 25 slides"), reaching the founder outside the rubric.

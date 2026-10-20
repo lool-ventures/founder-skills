@@ -407,6 +407,47 @@ def _every_slide_was_seen(inventory: dict[str, Any] | None) -> bool:
     return not any(isinstance(s, dict) and s.get("visual_evidence_captured") is False for s in slides)
 
 
+def _design_gate_reason(
+    input_format: str, input_quality: str = "", inventory: dict[str, Any] | None = None
+) -> str | None:
+    """Why the design criteria are gated out, or None when the deck rendered and they are scored."""
+    quality = str(input_quality or "").lower()
+    # A THIRD AXIS. `input_quality: good` asserts every page rendered; the per-slide flag
+    # asserts it per slide, and nothing compared them -- so a deck could claim good quality
+    # while carrying a slide the ingesting agent says it never saw, and all four design
+    # criteria were scored off it anyway.
+    every_slide_seen = _every_slide_was_seen(inventory)
+    if input_format not in _UNRENDERED_FORMATS and quality not in _UNRENDERED_QUALITY and every_slide_seen:
+        return None
+    # The evidence string is PARSED downstream, not just displayed: compose_report's
+    # `design_gate_reason` reads the `input_` prefix and then a `format=`/`quality=` tail,
+    # and visualize.py keys its category charts on the same prefix. A reason outside that
+    # shape makes the disclosure vanish while the scope note still claims design was
+    # reviewed -- so the new reason wears the `quality=` shape deliberately.
+    if input_format in _UNRENDERED_FORMATS:
+        return f"input_format={input_format}"
+    if quality in _UNRENDERED_QUALITY:
+        return f"input_quality={quality}"
+    return "input_quality=slide_not_rendered"
+
+
+def _gated_out_ids(inventory: dict[str, Any] | None) -> frozenset[str]:
+    """The criteria the inventory's gates force to not_applicable after validation.
+
+    Their status, evidence and notes are all replaced, so validation does not demand evidence or a
+    fix for them: a grade that failed an AI criterion on a `not_ai` deck with no fix note was
+    otherwise refused whole, costing a corrective dispatch for text the gate discards.
+    """
+    if not isinstance(inventory, dict):
+        return frozenset()
+    ids: set[str] = set()
+    if inventory.get("ai_company_status") == "not_ai":
+        ids |= _AI_CRITERIA_IDS
+    if _design_gate_reason(inventory.get("input_format", ""), inventory.get("input_quality", ""), inventory):
+        ids |= _DESIGN_CRITERIA_IDS
+    return frozenset(ids)
+
+
 def _apply_design_gating(
     result: dict[str, Any],
     input_format: str,
@@ -428,25 +469,9 @@ def _apply_design_gating(
 
     "pdf" and "pptx" render, and pass through unchanged.
     """
-    quality = str(input_quality or "").lower()
-    # A THIRD AXIS. `input_quality: good` asserts every page rendered; the per-slide flag
-    # asserts it per slide, and nothing compared them -- so a deck could claim good quality
-    # while carrying a slide the ingesting agent says it never saw, and all four design
-    # criteria were scored off it anyway.
-    every_slide_seen = _every_slide_was_seen(inventory)
-    if input_format not in _UNRENDERED_FORMATS and quality not in _UNRENDERED_QUALITY and every_slide_seen:
+    reason = _design_gate_reason(input_format, input_quality, inventory)
+    if reason is None:
         return result
-    # The evidence string is PARSED downstream, not just displayed: compose_report's
-    # `design_gate_reason` reads the `input_` prefix and then a `format=`/`quality=` tail,
-    # and visualize.py keys its category charts on the same prefix. A reason outside that
-    # shape makes the disclosure vanish while the scope note still claims design was
-    # reviewed -- so the new reason wears the `quality=` shape deliberately.
-    if input_format in _UNRENDERED_FORMATS:
-        reason = f"input_format={input_format}"
-    elif quality in _UNRENDERED_QUALITY:
-        reason = f"input_quality={quality}"
-    else:
-        reason = "input_quality=slide_not_rendered"
 
     items: list[dict[str, Any]] = result.get("items", [])
     _force_not_applicable(items, _DESIGN_CRITERIA_IDS, f"Auto-gated: not_applicable — {reason}")
@@ -475,13 +500,19 @@ def _apply_design_gating(
 
 
 def validate_checklist(
-    items: list[dict[str, Any]], *, numbers_from_arithmetic: bool = False
+    items: list[dict[str, Any]],
+    *,
+    numbers_from_arithmetic: bool = False,
+    gated_out: frozenset[str] = frozenset(),
 ) -> tuple[dict[str, Any], list[str], list[str]]:
     """Validate checklist input and produce scored summary. Returns (result, errors, warnings).
 
     `numbers_from_arithmetic` (set when `--reconciliation` is given) means `numbers_consistent`'s
     status and evidence are replaced by the arithmetic afterwards, so a reviewer's fail on it
     needs no notes: demanding them would cost a corrective dispatch for text that is discarded.
+    `gated_out` (from `_gated_out_ids`) names the criteria the inventory's gates replace whole, so
+    they need neither evidence nor notes, for the same reason. Ids, statuses and duplicates are
+    still checked for every item.
 
     `errors` is fatal (missing/duplicate/unknown IDs, invalid status, or a
     fail/warn item with no evidence) — a non-empty `errors` blocks the run.
@@ -559,9 +590,9 @@ def validate_checklist(
     # fail/warn (scrutinized above) it was previously never checked at all.
     pass_evidence_warnings: list[str] = []
     for item in enriched:
-        if item["id"] in ZERO_WEIGHT:
-            # Its evidence and fix are replaced by the mirror, so requiring them would spend a
-            # corrective dispatch on text nobody reads.
+        if item["id"] in ZERO_WEIGHT or item["id"] in gated_out:
+            # Its evidence and fix are replaced (by the mirror, or by the gate), so requiring them
+            # would spend a corrective dispatch on text nobody reads.
             continue
         if item["status"] in ("fail", "warn"):
             ev = item.get("evidence")
@@ -1037,9 +1068,25 @@ def main() -> None:
     elif not isinstance(data["items"], list):
         errors.append("'items' must be an array")
 
+    # The inventory is read before validation, so the criteria its gates replace are not refused
+    # for text the gate discards. An unreadable inventory skips gating, and then exempts nothing.
+    inventory_data: dict[str, Any] | None = None
+    if args.inventory:
+        try:
+            with open(args.inventory, encoding="utf-8") as inv_f:
+                inventory_data = json.load(inv_f)
+        except (OSError, json.JSONDecodeError) as e:
+            print(f"Warning: could not read --inventory file: {e} — gating skipped", file=sys.stderr)
+        else:
+            if not isinstance(inventory_data, dict):
+                print("Warning: --inventory is not a JSON object — gating skipped", file=sys.stderr)
+                inventory_data = None
+
     if not errors:
         result, errors, pass_warnings = validate_checklist(
-            data["items"], numbers_from_arithmetic=reconciliation is not None
+            data["items"],
+            numbers_from_arithmetic=reconciliation is not None,
+            gated_out=_gated_out_ids(inventory_data),
         )
     else:
         result = {"items": [], "summary": None}
@@ -1069,28 +1116,22 @@ def main() -> None:
     # does not self-gate — this covers both AI-criteria gating (ai_company_status)
     # and Design-criteria gating (input_format=="text": a text-described deck has
     # no rendered slide to score visual design against).
-    if args.inventory:
-        try:
-            with open(args.inventory, encoding="utf-8") as inv_f:
-                inventory_data = json.load(inv_f)
-        except (OSError, json.JSONDecodeError) as e:
-            print(f"Warning: could not read --inventory file: {e} — gating skipped", file=sys.stderr)
+    if inventory_data is not None:
+        ai_company_status = inventory_data.get("ai_company_status", "")
+        if ai_company_status in ("not_ai", "ai_core", "ai_claimed_unverified"):
+            result = _apply_ai_gating(result, ai_company_status)
         else:
-            ai_company_status = inventory_data.get("ai_company_status", "")
-            if ai_company_status in ("not_ai", "ai_core", "ai_claimed_unverified"):
-                result = _apply_ai_gating(result, ai_company_status)
-            else:
-                print(
-                    f"Warning: --inventory ai_company_status '{ai_company_status}'"
-                    " is not a recognised value — gating skipped",
-                    file=sys.stderr,
-                )
-            result = _apply_design_gating(
-                result,
-                inventory_data.get("input_format", ""),
-                inventory_data.get("input_quality", ""),
-                inventory_data,
+            print(
+                f"Warning: --inventory ai_company_status '{ai_company_status}'"
+                " is not a recognised value — gating skipped",
+                file=sys.stderr,
             )
+        result = _apply_design_gating(
+            result,
+            inventory_data.get("input_format", ""),
+            inventory_data.get("input_quality", ""),
+            inventory_data,
+        )
 
     # After every other gate, so nothing later can overwrite the arithmetic's status.
     if reconciliation is not None:
