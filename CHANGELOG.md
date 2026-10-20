@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.23.1] - 2026-10-20 — The plugin's checks run from a folder whose path contains a space
+
+### Highlights
+
+**The plugin's checks now run when the plugin is installed in a folder whose path contains a space.** This happens,
+for example, with a plugin your organization installed, opened in the Claude Desktop Code tab. The plugin's three
+hooks named their folder without quotes, so in such a folder none of them ran. They failed silently, and nothing
+was blocked. This switched off three checks:
+- the check that a sub-agent receives the prompt the plugin printed;
+- the check that a question was asked before the step that depends on it;
+- the end-of-turn check that the closing message carries the printed summary and the report files are attached.
+
+All three now run there. Cowork sessions, local and cloud, and the Claude Code CLI were not affected.
+
+### Scoring changes
+
+None.
+
+### Fixed
+
+- The session-start, dispatch and end-of-turn hooks did not run when the plugin's folder path contains a space,
+  because the hook commands did not quote it. They are quoted now, and a test runs each hook from a folder whose
+  path contains a space.
+
+### Notes
+
+- The recorded Cowork test runs were not re-recorded for this patch. They are re-recorded once, after 0.24.0.
+
 ## [0.23.0] - 2026-10-19 — Deck review: one deck text for every step, figures read as the deck states them, and image decks scored for design
 
 ### Highlights
