@@ -170,7 +170,6 @@ def test_render_donut_centers_value_and_drops_sub_eps() -> None:
     mod.__file__ = os.path.join(SCRIPTS, "visualize.py")
     ts = types.ModuleType("_theme")
     ts.brand_css = lambda: ""  # type: ignore[attr-defined]
-    ts.FOOTER_CREDIT_HTML = ""  # type: ignore[attr-defined]
     sys.modules.setdefault("_theme", ts)
     spec.loader.exec_module(mod)  # type: ignore[union-attr]
 
@@ -970,7 +969,6 @@ class TestVisualizeOwnershipKeyCoverage:
         # Pre-stub _theme so visualize.py loads without needing to import it
         _theme_stub = types.ModuleType("_theme")
         _theme_stub.brand_css = lambda: ""  # type: ignore[attr-defined]
-        _theme_stub.FOOTER_CREDIT_HTML = ""  # type: ignore[attr-defined]
         sys.modules.setdefault("_theme", _theme_stub)
         sys.modules[mod_name] = mod
         spec.loader.exec_module(mod)  # type: ignore[union-attr]
@@ -1097,7 +1095,6 @@ class TestExploreOwnershipKeyCoverage:
         # explore.py imports _theme at call time; stub it
         _theme_stub = types.ModuleType("_theme")
         _theme_stub.brand_css = lambda: ""  # type: ignore[attr-defined]
-        _theme_stub.FOOTER_CREDIT_HTML = ""  # type: ignore[attr-defined]
         sys.modules.setdefault("_theme", _theme_stub)
 
         # explore.py reads the vendored Chart.js at render time; it is tracked
@@ -1205,7 +1202,6 @@ class TestExploreOwnershipKeyCoverage:
 
         _theme_stub = types.ModuleType("_theme")
         _theme_stub.brand_css = lambda: ""  # type: ignore[attr-defined]
-        _theme_stub.FOOTER_CREDIT_HTML = ""  # type: ignore[attr-defined]
         sys.modules.setdefault("_theme", _theme_stub)
         script_path = os.path.join(SCRIPTS, "visualize.py")
         spec = importlib.util.spec_from_file_location(  # type: ignore[attr-defined]
@@ -2676,7 +2672,6 @@ def _load_viz() -> Any:
     mod.__file__ = os.path.join(SCRIPTS, "visualize.py")
     ts = types.ModuleType("_theme")
     ts.brand_css = lambda: ""  # type: ignore[attr-defined]
-    ts.FOOTER_CREDIT_HTML = ""  # type: ignore[attr-defined]
     sys.modules.setdefault("_theme", ts)
     spec.loader.exec_module(mod)  # type: ignore[union-attr]
     return mod

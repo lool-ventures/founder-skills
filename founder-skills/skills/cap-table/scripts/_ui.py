@@ -529,8 +529,7 @@ UI_JS = """\
 """
 
 
-# The credit links and the feedback link, as every page's footer has always carried them (the feedback
-# href is `_theme.FOOTER_CREDIT_HTML`'s; a test holds the two equal).
+# The credit links and the feedback link every page's footer carries.
 REPO_URL = "https://github.com/lool-ventures/founder-skills"
 LOOL_URL = "https://lool.vc"
 FEEDBACK_URL = "https://github.com/lool-ventures/founder-skills/discussions/new?category=ideas-feedback"

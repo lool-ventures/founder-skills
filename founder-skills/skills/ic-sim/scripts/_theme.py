@@ -69,20 +69,6 @@ TOKENS_CSS = """\
 }
 """
 
-# Subtle provenance line rendered at the bottom of each artifact.
-FOOTER_CREDIT_HTML = (
-    '<div class="footer-credit">founder-skills by lool ventures'
-    ' &middot; <a href="https://github.com/lool-ventures/founder-skills/discussions/new?category=ideas-feedback"'
-    ' style="color:inherit">Share feedback</a></div>'
-)
-
-FOOTER_CREDIT_CSS = """\
-.footer-credit {
-  font-size: 0.75rem; color: var(--lool-subtle);
-  padding: 24px 32px 8px; letter-spacing: 0.02em;
-}
-"""
-
 
 def font_face_css() -> str:
     """``@font-face`` rule with Sora embedded base64-inline.
@@ -103,5 +89,5 @@ def font_face_css() -> str:
 
 def brand_css() -> str:
     """Font-face + token CSS, ready to inject at the top of a <style> block."""
-    parts = [font_face_css(), TOKENS_CSS, FOOTER_CREDIT_CSS]
+    parts = [font_face_css(), TOKENS_CSS]
     return "\n".join(p for p in parts if p)

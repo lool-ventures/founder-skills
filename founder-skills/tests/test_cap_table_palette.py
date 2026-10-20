@@ -26,7 +26,6 @@ def _import_visualize() -> Any:
     mod.__file__ = path
     theme_stub = types.ModuleType("_theme")
     theme_stub.brand_css = lambda: ""  # type: ignore[attr-defined]
-    theme_stub.FOOTER_CREDIT_HTML = ""  # type: ignore[attr-defined]
     sys.modules.setdefault("_theme", theme_stub)
     sys.modules[mod_name] = mod
     spec.loader.exec_module(mod)

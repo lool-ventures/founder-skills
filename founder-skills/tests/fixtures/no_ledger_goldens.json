@@ -901,74 +901,74 @@
     "cap-table/explore.py": {
       "exit": 0,
       "files": {
-        "page.html": "6fd3dce2e428aac0d37c1cd5d7fac8a29fd36be296f36279c3551243d57420d7"
+        "page.html": "b13ccbeb7171d09ad693b4e88b85a2572af64130f92d9e9810618f452652a68e"
       },
       "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout": "c08895479a7c6148543fa53c579ba48d574f1d94abd59c246c8b567a8c84afde"
+      "stdout": "741e080e426c15716a383fdeb30763e249802ddcd99aca43216de165343f924a"
     },
     "cap-table/visualize.py": {
       "exit": 0,
       "files": {
-        "page.html": "307982da3d5e13c8cb0910289bb7662e65b30e6f702aa76f5f80836fe3de24cc"
+        "page.html": "6597102b711febc18a495d211aa72bf93515170bad841f451be3bead9096be15"
       },
       "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout": "59e466b6e910bf6a2e373817add0cb71fd14580368af00b8219807ec2bafc8fb"
+      "stdout": "5a152f6da57fbeac580dc5dd15a109bac550495bdbb58d18f206092a04175880"
     },
     "competitive-positioning/explore.py": {
       "exit": 0,
       "files": {
-        "page.html": "209e1ed542c3606dcade10b2b6f55d3df089bbe25256ee69032d35e8cbbd1bad"
+        "page.html": "79a26da329f39c37938ce0abe87e5a0a332bf7571bb23e777ce7bee0e43aa145"
       },
       "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout": "0c3216a9ffb35993110e1f35b2a9527c37308af7c8565347146ca55a08d2c2b0"
+      "stdout": "ac0d2f65fe3e9e4b2fda201d918a5f52a6e6511488630e4a51aee79f8b054264"
     },
     "competitive-positioning/visualize.py": {
       "exit": 0,
       "files": {
-        "page.html": "ab07bff591848664733d9c9c63dabd1c7bbed6412f9d5f6174e92bd98ac5acf0"
+        "page.html": "c32dc1435c2b88fdff674ff2606309ce343d9d728895075409a20afccb784142"
       },
       "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout": "0e266e44a1146f9f3b56086a224cb10651d778d49288265cb3510d0ee735d94b"
+      "stdout": "7941d714694f46753bd996782e0d457275155fac8ea5baeb7f25366206a315a5"
     },
     "deck-review/visualize.py": {
       "exit": 0,
       "files": {
-        "page.html": "ce25e83f1fc0bcf5d99966bbaebbb1f193d0f077bcb43375238ab0c971e36575"
+        "page.html": "f8e7526d92a1d8649bb0c8df431b86c75a07f327b5688c4e7508127ad23e12c7"
       },
       "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout": "d31d65c75cda005005086061639c7a4ced59936df15eb298bd2113f5190b360e"
+      "stdout": "c4db07581b9815d25b947829239076e65a0bc36809beac20354fb664e37b8d47"
     },
     "financial-model-review/explore.py": {
       "exit": 0,
       "files": {
-        "page.html": "4af057c90f7d6cbebb8e0dd14bdf153e04a247b9b2d889aa3913d8473baee57c"
+        "page.html": "ccfd99d45cf843f875f6a638effb9fdcaffeccc1facfa1cdb1cb5cdb550669fc"
       },
       "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout": "28f5c6c2d5c0005171bef6ed1ff2660961fdf8989524702284a325ee0d5117ea"
+      "stdout": "b51347dc00b45d0a23a6f71f2f70bea532199fba7e63caa2d46b2501932ae1bf"
     },
     "financial-model-review/visualize.py": {
       "exit": 0,
       "files": {
-        "page.html": "7b38512e12458c6a29b2bb72ec5854ba050a955bfb0f60cb334f814bdce8493c"
+        "page.html": "971dfb470ae93fcad00f6735a03debcf05dd2b2389d95de27b43ca24f73a2d74"
       },
       "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout": "38f4b8b47ad4c957d442df3d5d8411593a40d60f98397dcbaa2bede8f4f3623d"
+      "stdout": "871fc4b4a7d3b144908ff520e14b105df2214f50fe4cfaa4590aed5976564417"
     },
     "ic-sim/visualize.py": {
       "exit": 0,
       "files": {
-        "page.html": "66bf2ea325f2b14504da106b6c33275dafc49ad525944ccee46ddec2f78303b0"
+        "page.html": "e1778a64b4414db60551c2ad72d75e0f37da12170b5d9cf707a474ebb3bef416"
       },
       "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout": "9e0c6c13b18b789664f31729f1ec01c9653c97c08c9315e0b33a15ddd9392b41"
+      "stdout": "ae572b75b1f78e5f49ab92f668fbd1b756e38184c4cbc574a0fb9f790b103ad8"
     },
     "market-sizing/visualize.py": {
       "exit": 0,
       "files": {
-        "page.html": "c97890eaf730a3d2e32702f1dc606cab36be2e7a7c01a576effdba849c0eb268"
+        "page.html": "e99db12cddb7941f6b4c6ae66bdfe4d94f7460ab5eadbac32d563b228c905f9a"
       },
       "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout": "80c1409e9b66884a581bacfe97cd3a5e1416293a5040aba1e5d549bcecd00982"
+      "stdout": "9dcdc656bd155ee2738f5c7d51d341c4eda8a7fee5ff9b998a942e2e12b79588"
     }
   },
   "html_stdout": {
@@ -976,7 +976,7 @@
       "exit": 0,
       "files": {},
       "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout": "c97890eaf730a3d2e32702f1dc606cab36be2e7a7c01a576effdba849c0eb268"
+      "stdout": "e99db12cddb7941f6b4c6ae66bdfe4d94f7460ab5eadbac32d563b228c905f9a"
     }
   },
   "ic_compose": {

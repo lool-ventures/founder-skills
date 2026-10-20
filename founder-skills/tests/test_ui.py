@@ -233,9 +233,11 @@ def test_the_shell_carries_exactly_one_footer_line_with_the_skill_and_a_feedback
     assert text.endswith("Share feedback")
     links = {a.text(): a for a in footer.iter() if a.tag == "a"}
     assert links["Share feedback"].get("class") == "ui-feedback"
-    # The feedback link is the one every page has always carried (`_theme.FOOTER_CREDIT_HTML`).
-    theme = (REPO_ROOT / "founder-skills" / "skills" / "deck-review" / "scripts" / "_theme.py").read_text()
-    assert f'href="{links["Share feedback"].get("href")}"' in theme
+    # Held to a literal, not to `ui.FEEDBACK_URL`: the footer is built from that constant, so comparing the two
+    # would check nothing.
+    assert links["Share feedback"].get("href") == (
+        "https://github.com/lool-ventures/founder-skills/discussions/new?category=ideas-feedback"
+    )
     assert links["founder skills"].get("href") == ui.REPO_URL and links["lool ventures"].get("href") == ui.LOOL_URL
 
 
