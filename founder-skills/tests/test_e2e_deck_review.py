@@ -71,6 +71,7 @@ from _e2e_harness import (
     dispatch_report,
     format_dispatch_report,
     host_request,
+    is_hook_hold,
     lane_run_id,
     mirror_problems,
     read_run_ledger,
@@ -653,30 +654,12 @@ def _drive_deck_review_lane(
     if not observed["deck_text.stamps_equal"]:
         failures.append(f"the deck-text stamps do not all match: {stamps}")
     # Each dispatch that reads the deck names the file, carries no retyped copy of it (the fixture's first
-    # slide line), and Reads it. RECORDED, NOT GATED in 0.23: these follow the model's behaviour and have
-    # never run live, and a false red is a paid re-run. Promote them to failures once a run shows them green.
-    # With no child call of any tool captured the instrument is blind, recorded apart from the wiring.
-    dispatch_notes: list[str] = []
+    # slide line), and Reads it. Gated since 0.24, on the dispatches that succeeded only.
     slide_one = next(line.strip() for line in deck_fixture.read_text(encoding="utf-8").splitlines()[1:] if line.strip())
-    child_calls = 0
-    for context in ("LEDGER_EXTRACTION", "SECOND_READ", "SLIDE_REVIEWS"):
-        rows = _dispatch_rows(cap, f"CONTEXT: {context}")
-        if not rows:
-            dispatch_notes.append(f"no {context} dispatch")
-        for row in rows:
-            prompt = str((row.get("input") or {}).get("prompt", ""))
-            child_calls += sum(1 for c in cap.tool_uses if c["parent_tool_use_id"] == row["id"])
-            if "deck_text.md" not in prompt:
-                dispatch_notes.append(f"a {context} dispatch does not name deck_text.md")
-            if slide_one in prompt:
-                dispatch_notes.append(f"a {context} dispatch inlines the deck's text ({slide_one!r})")
-            reads = cap.calls("Read", parent=str(row["id"]))
-            if not any(str((r.get("input") or {}).get("file_path", "")).endswith("deck_text.md") for r in reads):
-                dispatch_notes.append(f"a {context} dispatch never Read deck_text.md")
+    text_failures, dispatch_notes, child_calls = deck_text_dispatch_problems(cap, slide_one)
+    failures.extend(text_failures)
     observed["deck_text.dispatch_child_calls"] = child_calls
-    if child_calls == 0:
-        dispatch_notes.append("child calls not captured: no deck-reading dispatch recorded a tool call of its own")
-    observed["deck_text.dispatch_checks"] = dispatch_notes or "pass"
+    observed["deck_text.dispatch_checks"] = (text_failures + dispatch_notes) or "pass"
 
     # 6b'. Step 5 graded THIS run's slide reviews. checklist.py -o refuses a grade that does not echo
     # slide_reviews.json's read token and stamps the token it accepted, so the two must agree. A mismatch or
@@ -816,6 +799,50 @@ def _drive_deck_review_lane(
     assert not failures, "live deck-review run failed {} check(s):\n{}\n\nreview_dir: {}".format(
         len(failures), "\n".join(f"  - {f}" for f in failures), review_dir
     )
+
+
+DECK_TEXT_CONTEXTS = ("LEDGER_EXTRACTION", "SECOND_READ", "SLIDE_REVIEWS")
+
+
+def deck_text_dispatch_problems(cap: RunCapture, slide_one: str) -> tuple[list[str], list[str], int]:
+    """(failures, notes, child calls) for the three dispatches that read the deck.
+
+    Only a dispatch whose result arrived and is not an error counts, so a hook hold or a failed attempt
+    followed by a good retry is not a failure; each context needs at least one such dispatch. Every one
+    must name deck_text.md and carry no retyped copy of the deck (its first slide line), and must Read
+    the file. When no succeeded dispatch recorded a tool call of its own the instrument is blind: the Read
+    checks are skipped and that is a note, never a failure.
+    """
+    failures: list[str] = []
+    notes: list[str] = []
+    child_calls = 0
+    succeeded: list[tuple[str, dict[str, Any]]] = []
+    for context in DECK_TEXT_CONTEXTS:
+        rows = [r for r in _dispatch_rows(cap, f"CONTEXT: {context}") if _dispatch_succeeded(cap, r)]
+        if not rows:
+            failures.append(f"no {context} dispatch succeeded")
+        for row in rows:
+            prompt = str((row.get("input") or {}).get("prompt", ""))
+            child_calls += sum(1 for c in cap.tool_uses if c["parent_tool_use_id"] == row["id"])
+            if "deck_text.md" not in prompt:
+                failures.append(f"a {context} dispatch does not name deck_text.md")
+            if slide_one in prompt:
+                failures.append(f"a {context} dispatch inlines the deck's text ({slide_one!r})")
+            succeeded.append((context, row))
+    if child_calls == 0:
+        notes.append("child calls not captured: no deck-reading dispatch recorded a tool call of its own")
+        return failures, notes, child_calls
+    for context, row in succeeded:
+        reads = cap.calls("Read", parent=str(row["id"]))
+        if not any(str((r.get("input") or {}).get("file_path", "")).endswith("deck_text.md") for r in reads):
+            failures.append(f"a {context} dispatch never Read deck_text.md")
+    return failures, notes, child_calls
+
+
+def _dispatch_succeeded(cap: RunCapture, row: dict[str, Any]) -> bool:
+    """The dispatch's result arrived and is not an error (a hook hold is one)."""
+    result = cap.result(str(row["id"]))
+    return result is not None and not result.get("is_error") and not is_hook_hold(result)
 
 
 def _dispatch_rows(cap: RunCapture, context: str) -> list[dict[str, Any]]:
