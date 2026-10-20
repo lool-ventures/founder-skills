@@ -456,7 +456,7 @@ def test_the_review_page_shows_the_computed_rate_in_a_neutral_card(tmp_path: Pat
     assert row is not None
     info_only = {"status": "pass", "checks": [row], "summary": {"total": 1, "info": 1}}
     page = _load("review_inputs")._build_html(copy.deepcopy(inputs), extraction_warnings=info_only, is_static=True)
-    info_at = page.index("extraction-info-card")
+    info_at = page.index('extraction-info-card">')  # the card's markup, not its CSS rule
     card = page[info_at : page.index("</div>", info_at)]
     assert "computed value, not a problem" in card
     assert "lool-danger" not in card

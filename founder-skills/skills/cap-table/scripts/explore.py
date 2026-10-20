@@ -9,7 +9,7 @@ Per design doc §10: polished demo/video-friendly interactive explorer for
 the cap-table skill's distinctive output. Features:
 
   * Vanilla JS + vendored Chart.js (no CDN; runs offline)
-  * CSS variables + light/dark theme toggle
+  * CSS variables
   * Scenario picker (left rail) with active highlighting
   * Donut chart (Chart.js, animated) + ownership table
   * Custom Sankey SVG dilution flow (~200 lines)

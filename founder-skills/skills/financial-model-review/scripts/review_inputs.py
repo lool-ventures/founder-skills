@@ -79,12 +79,21 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     margin-bottom: 0.5rem; display: flex; justify-content: space-between; align-items: center; gap: 12px;
   }
   .warning-card .msg { color: var(--lool-ink); font-size: 0.9rem; }
-  .warning-card .dismiss-btn {
+  /* Extraction warnings and computed values: the shared callouts, under a small heading */
+  .extraction-banner { padding: 0 32px; margin-bottom: 8px; }
+  .extraction-banner__title { margin-bottom: 6px; }
+  .extraction-warn-card { display: flex; justify-content: space-between; align-items: center; gap: 12px;
+    margin-bottom: 0.5rem; }
+  .extraction-banner .extraction-warn-card .dismiss-btn { border-color: var(--lool-danger); color: var(--lool-danger); }
+  .extraction-info-card { margin-bottom: 0.5rem; }
+  .extraction-banner .msg { color: var(--lool-ink); font-size: 0.9rem; }
+  .extraction-detail { color: var(--lool-mute); font-size: 0.8rem; }
+  .warning-card .dismiss-btn, .extraction-warn-card .dismiss-btn {
     background: none; border: 1px solid var(--lool-warning); color: var(--lool-warning);
     padding: 0.25rem 0.5rem; border-radius: var(--r-input); cursor: pointer; font-size: 0.8rem;
     flex-shrink: 0; margin-left: 12px;
   }
-  .warning-card .dismiss-btn:hover { background: var(--lool-white); }
+  .warning-card .dismiss-btn:hover, .extraction-warn-card .dismiss-btn:hover { background: var(--lool-white); }
 
   /* Field warning highlight */
   .field-warning { border-color: var(--lool-warning) !important; box-shadow: 0 0 0 2px rgba(201,137,43,0.2); }
@@ -1752,34 +1761,27 @@ def _extraction_warnings_html(ew: dict[str, Any]) -> str:
         detail = ""
         if w.get("candidates"):
             detail = (
-                f' <span style="color:var(--lool-mute);font-size:0.8rem">'
+                f' <span class="extraction-detail">'
                 f"(candidates: {', '.join(_html.escape(str(c)) for c in w['candidates'][:3])})</span>"
             )
         if w.get("untraceable"):
             items = w["untraceable"]
             if w["id"] == "SALARY_TRACEABILITY":
                 names = [_html.escape(str(u.get("role", "?"))) for u in items]
-                detail = f' <span style="color:var(--lool-mute);font-size:0.8rem">({", ".join(names)})</span>'
+                detail = f' <span class="extraction-detail">({", ".join(names)})</span>'
             elif w["id"] == "REVENUE_TRACEABILITY":
                 names = [_html.escape(str(u.get("field", "?"))) for u in items]
-                detail = f' <span style="color:var(--lool-mute);font-size:0.8rem">({", ".join(names)})</span>'
+                detail = f' <span class="extraction-detail">({", ".join(names)})</span>'
         cards.append(
-            '<div class="extraction-warn-card" style="background:var(--lool-danger-tint);'
-            "border-left:3px solid var(--lool-danger);"
-            "padding:0.75rem 1rem;margin-bottom:0.5rem;"
-            'display:flex;justify-content:space-between;align-items:center;">'
-            f'<span style="color:var(--lool-ink);font-size:0.9rem">{msg}{detail}</span>'
-            '<button onclick="this.parentElement.remove()" style="background:none;'
-            "border:1px solid var(--lool-danger);"
-            "color:var(--lool-danger);padding:0.25rem 0.5rem;border-radius:var(--r-input);cursor:pointer;font-size:0.8rem;"
-            'flex-shrink:0;margin-left:12px;">Dismiss</button>'
+            '<div class="ui-callout ui-callout--fail extraction-warn-card">'
+            f'<span class="msg">{msg}{detail}</span>'
+            '<button class="dismiss-btn" onclick="this.parentElement.remove()">Dismiss</button>'
             "</div>"
         )
 
     return (
-        '<div id="extraction-warnings" style="padding:0 32px;margin-bottom:8px;">'
-        '<div style="font-size:0.8rem;font-weight:600;color:var(--lool-danger);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.06em;">'
-        "Extraction Warnings</div>" + "\n".join(cards) + "</div>"
+        '<div id="extraction-warnings" class="extraction-banner">'
+        '<p class="ui-eyebrow extraction-banner__title">Extraction Warnings</p>' + "\n".join(cards) + "</div>"
     )
 
 
@@ -1789,16 +1791,14 @@ def _extraction_info_html(ew: dict[str, Any]) -> str:
     if not infos:
         return ""
     cards = [
-        '<div class="extraction-info-card" style="background:var(--lool-paper-2);'
-        'border-left:3px solid var(--lool-azure);padding:0.75rem 1rem;margin-bottom:0.5rem;">'
-        f'<span style="color:var(--lool-ink);font-size:0.9rem">{_html.escape(str(c.get("message", "")))}</span>'
+        '<div class="ui-callout extraction-info-card">'
+        f'<span class="msg">{_html.escape(str(c.get("message", "")))}</span>'
         "</div>"
         for c in infos
     ]
     return (
-        '<div id="extraction-info" style="padding:0 32px;margin-bottom:8px;">'
-        '<div style="font-size:0.8rem;font-weight:600;color:var(--lool-ink);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.06em;">'
-        "Computed Values</div>" + "\n".join(cards) + "</div>"
+        '<div id="extraction-info" class="extraction-banner">'
+        '<p class="ui-eyebrow extraction-banner__title">Computed Values</p>' + "\n".join(cards) + "</div>"
     )
 
 

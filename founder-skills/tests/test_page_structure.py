@@ -38,7 +38,11 @@ CHECKLIST_PAGES: tuple[tuple[str, str], ...] = (
     ("ic-sim", "visualize.py"),
 )
 # (skill, script) of every writer on the shared shell: the checklist pages, and pages with no score.
-SHELL_PAGES: tuple[tuple[str, str], ...] = (*CHECKLIST_PAGES, ("cap-table", "visualize.py"))
+SHELL_PAGES: tuple[tuple[str, str], ...] = (
+    *CHECKLIST_PAGES,
+    ("cap-table", "visualize.py"),
+    ("financial-model-review", "review_inputs.py"),
+)
 
 # The statuses each skill's checklist can carry, as filter chips. market-sizing grades pass / fail only
 # (its `checklist.py` has no warn), so its page offers no Warn chip and no "Needs attention" chip, which
@@ -166,7 +170,17 @@ def _many_problems_ic(work: Path) -> None:
     path.write_text(json.dumps(sd))
 
 
+def _many_problems_ct(work: Path) -> None:
+    """cap-table has no checklist: its weak shape is a base the confidence check calls vacuous, which renders
+    the confidence banner, the tier badge and the dimmed donut."""
+    path = work / "cap_state.json"
+    cs = json.loads(path.read_text())
+    cs["warnings"] = [*(cs.get("warnings") or []), "W_BASE_VACUOUS"]
+    path.write_text(json.dumps(cs))
+
+
 _MANY_PROBLEMS: dict[str, Callable[[Path], None]] = {
+    "cap-table": _many_problems_ct,
     "financial-model-review": _many_problems_fmr,
     "deck-review": _many_problems_dr,
     "market-sizing": _many_problems_ms,
@@ -186,9 +200,11 @@ def _render(skill: str, script: str, variant: str) -> tuple[str, list[dict[str, 
             if variant == "many-problems":
                 _MANY_PROBLEMS[skill](work)
             out = work / "page.html"
-            proc = subprocess.run(
-                [sys.executable, *html_argv(skill, script, work, out)], capture_output=True, text=True
-            )
+            argv = html_argv(skill, script, work, out)
+            if script == "review_inputs.py":
+                # The values page takes the inputs file and writes its static build (the Cowork branch).
+                argv = [argv[0], str(work / "inputs.json"), "--static", str(out)]
+            proc = subprocess.run([sys.executable, *argv], capture_output=True, text=True)
             assert proc.returncode == 0, proc.stderr
             items = _items_of(skill, work) if (skill, script) in CHECKLIST_PAGES else []
             _CACHE[key] = (out.read_text(encoding="utf-8"), items)
@@ -375,6 +391,11 @@ def test_the_checklist_filters_cover_every_status(skill: str, script: str, varia
 # them, or a parent's rule reaches the children). Every other class on a page must have a rule: a class
 # with no rule is markup a restyle orphaned, which renders as bare text.
 _UNSTYLED_STRUCTURAL = frozenset({"ui-ck", "ui-hero__text", "ui-finding-col", "active-eligible"})
+# cap-table's banner hooks: the shell's callout classes style them; these names are what its own tests find a
+# banner by, as a substring of the page, so they must never appear in the page's CSS.
+_UNSTYLED_STRUCTURAL |= frozenset(
+    {"confidence-banner", "confidence-banner-vacuous", "confidence-banner-unverified", "disclosure-banner"}
+)
 
 
 @pytest.mark.parametrize(("skill", "script", "variant"), _PAGES)

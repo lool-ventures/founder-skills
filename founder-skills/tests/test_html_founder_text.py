@@ -78,6 +78,13 @@ _TEXT_FLOOR_BY_PAGE = {
     # ic-sim's report lists all 28 dimensions with their evidence, the debate and the fund profile (about
     # 6 KB of text on the fixture).
     ("ic-sim", "visualize.py"): 4500,
+    # cap-table's report renders its counsel questions and watchlist server-side (about 3.7 KB on the fixture);
+    # its explorer, the scenario rail and the counsel rail (about 1.6 KB).
+    ("cap-table", "visualize.py"): 3000,
+    ("cap-table", "explore.py"): 1200,
+    # The values page builds its fields in the browser; its static text is the header card, the tabs' frame and
+    # the corrections bar (well under 1 KB on the fixture).
+    ("financial-model-review", "review_inputs.py"): 500,
 }
 
 
