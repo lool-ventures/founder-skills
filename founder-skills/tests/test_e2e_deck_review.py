@@ -655,7 +655,14 @@ def _drive_deck_review_lane(
         failures.append(f"the deck-text stamps do not all match: {stamps}")
     # Each dispatch that reads the deck names the file, carries no retyped copy of it (the fixture's first
     # slide line), and Reads it. Gated since 0.24, on the dispatches that succeeded only.
-    slide_one = next(line.strip() for line in deck_fixture.read_text(encoding="utf-8").splitlines()[1:] if line.strip())
+    # A text fixture's first slide line; for a PDF, the first line of this run's deck text, which is what a
+    # dispatch would have retyped (an image deck has no text of its own to compare against).
+    if deck_fixture.suffix.lower() in (".txt", ".md"):
+        source_lines = deck_fixture.read_text(encoding="utf-8").splitlines()[1:]
+    else:
+        body = deck_text.read_text(encoding="utf-8").split("\n---\n", 1)[-1] if deck_text.is_file() else ""
+        source_lines = [ln for ln in body.splitlines() if not ln.startswith("## ")]
+    slide_one = next((line.strip() for line in source_lines if line.strip()), "")
     text_failures, dispatch_notes, child_calls = deck_text_dispatch_problems(cap, slide_one)
     failures.extend(text_failures)
     observed["deck_text.dispatch_child_calls"] = child_calls
@@ -826,7 +833,7 @@ def deck_text_dispatch_problems(cap: RunCapture, slide_one: str) -> tuple[list[s
             child_calls += sum(1 for c in cap.tool_uses if c["parent_tool_use_id"] == row["id"])
             if "deck_text.md" not in prompt:
                 failures.append(f"a {context} dispatch does not name deck_text.md")
-            if slide_one in prompt:
+            if slide_one and slide_one in prompt:
                 failures.append(f"a {context} dispatch inlines the deck's text ({slide_one!r})")
             succeeded.append((context, row))
     if child_calls == 0:
