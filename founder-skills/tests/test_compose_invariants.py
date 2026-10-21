@@ -319,7 +319,9 @@ def test_cp_one_differentiation_score_gets_one_verdict(tmp_path: Path, score: fl
         text=True,
     )
     assert proc.returncode == 0, proc.stderr
-    page = html.unescape(proc.stdout)
+    # What a reader sees: the page's styles and scripts are not founder-facing (the shared stylesheet carries
+    # its own percentages).
+    page = html.unescape(re.sub(r"<(style|script)\b.*?</\1>", " ", proc.stdout, flags=re.S))
 
     tiers = (
         "Overall Differentiation",

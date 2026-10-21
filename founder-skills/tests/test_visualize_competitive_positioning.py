@@ -94,6 +94,12 @@ def _run_visualize(
 # ---------------------------------------------------------------------------
 
 
+def _section(page: str, sid: str) -> str:
+    """One section of the page, by its id: from its opening tag to its closing one."""
+    start = page.index(f'id="{sid}"')
+    return page[start : page.index("</section>", start)]
+
+
 def test_generates_html() -> None:
     """Produces output containing <html> and </html>."""
     with _make_artifact_dir(_all_artifacts()) as d:
@@ -184,7 +190,7 @@ def test_competitor_table_distinguishes_verified_from_unverified() -> None:
     with _make_artifact_dir(artifacts) as d:
         rc, stdout, stderr = _run_visualize(d)
         assert rc == 0, f"exit {rc}, stderr={stderr}"
-        table = stdout.split("Competitor Comparison")[1].split("</div>")[0]
+        table = _section(stdout, "competitors")
         assert "<th>Verification</th>" in table, f"no verification column:\n{table[:600]}"
         assert "Not a competitor" in table and "Genuine" in table and "Adjacent" in table
         assert table.count("Not challenged") == 2, f"expected the two unjudged rows marked, got:\n{table}"
@@ -204,7 +210,7 @@ def test_competitor_table_makes_no_verification_claim_when_the_pass_did_not_run(
     with _make_artifact_dir(artifacts) as d:
         rc, stdout, stderr = _run_visualize(d)
         assert rc == 0, f"exit {rc}, stderr={stderr}"
-        table = stdout.split("Competitor Comparison")[1].split("</div>")[0]
+        table = _section(stdout, "competitors")
         assert "<th>Verification</th>" not in table
         assert "challenged" not in table
 
@@ -222,7 +228,7 @@ def test_a_stale_verification_file_is_not_trusted_by_the_html() -> None:
     with _make_artifact_dir(artifacts) as d:
         rc, stdout, stderr = _run_visualize(d)
         assert rc == 0, f"exit {rc}, stderr={stderr}"
-        table = stdout.split("Competitor Comparison")[1].split("</div>")[0]
+        table = _section(stdout, "competitors")
         assert "<th>Verification</th>" not in table, "a stale verification vouched for the current set"
 
 
@@ -278,7 +284,7 @@ def test_moat_radar_discloses_non_applicable_dimensions() -> None:
     with _make_artifact_dir(_all_artifacts()) as d:
         rc, stdout, stderr = _run_visualize(d)
         assert rc == 0, f"exit {rc}, stderr={stderr}"
-        radar = stdout.split("Moat Radar")[1].split("</div>\n</div>")[0]
+        radar = _section(stdout, "moats")
         note = radar.split("</svg>")[-1]  # caption/legend area, past the axis labels
         assert "not apply" in note.lower(), f"no disclosure of non-applicability:\n{note}"
         assert "Network Effects" in note, f"the non-applicable dimension is not named:\n{note}"
@@ -344,7 +350,7 @@ def test_defensibility_timeline_labels_fit_viewbox() -> None:
         assert rc == 0, f"exit {rc}, stderr={stderr}"
 
         # Isolate the Defensibility Timeline SVG
-        m = re.search(r"Defensibility Timeline</h2>(<svg.*?</svg>)", stdout, re.DOTALL)
+        m = re.search(r"(<svg.*?</svg>)", _section(stdout, "timeline"), re.DOTALL)
         assert m, "Defensibility Timeline SVG not found"
         svg = m.group(1)
 
@@ -1269,7 +1275,7 @@ def test_competitor_table_reports_a_dropped_competitor_as_removed_not_retained()
     with _make_artifact_dir(artifacts) as d:
         rc, stdout, stderr = _run_visualize(d)
     assert rc == 0, f"exit {rc}, stderr={stderr}"
-    table = stdout.split("Competitor Comparison")[1].split("</div>")[0]
+    table = _section(stdout, "competitors")
     retained = table.split("Retained despite the challenge:")[1].split("</p>")[0]
     removed = table.split("Removed after the challenge:")[1].split("</p>")[0]
     # Positive control: a challenged competitor still in the set is still reported as retained.

@@ -36,6 +36,7 @@ CHECKLIST_PAGES: tuple[tuple[str, str], ...] = (
     ("deck-review", "visualize.py"),
     ("market-sizing", "visualize.py"),
     ("ic-sim", "visualize.py"),
+    ("competitive-positioning", "visualize.py"),
 )
 # (skill, script) of every writer on the shared shell: the checklist pages, and pages with no score.
 SHELL_PAGES: tuple[tuple[str, str], ...] = (
@@ -179,12 +180,38 @@ def _many_problems_ct(work: Path) -> None:
     path.write_text(json.dumps(cs))
 
 
+def _many_problems_cp(work: Path) -> None:
+    """competitive-positioning's shape: 8 fails and 6 warns, evidence naming a criterion id, with the summary
+    recomputed the way its `checklist.py` scores (pass 1, warn 0.5, not applicable out of the denominator)."""
+    path = work / "checklist.json"
+    ck = json.loads(path.read_text())
+    applicable = [i for i in ck["items"] if i["status"] != "not_applicable"]
+    for n, it in enumerate(applicable[:14]):
+        it["status"] = "fail" if n < 8 else "warn"
+        it["evidence"] = f"Invented evidence {n}: POS_05 says this with nothing behind it."
+    s = ck["summary"]
+    for k in ("pass", "fail", "warn", "not_applicable"):
+        s[k] = sum(1 for i in ck["items"] if i["status"] == k)
+    scored = len(ck["items"]) - s["not_applicable"]
+    s["score_pct"] = round((s["pass"] + 0.5 * s["warn"]) / scored * 100, 1)
+    s["overall_status"] = "major_revision"
+    for status, key in (("fail", "failed_items"), ("warn", "warned_items")):
+        s[key] = [
+            {"id": i["id"], "category": i["category"], "criterion": i["label"], "status": status}
+            | {"evidence": i["evidence"], "principle": ""}
+            for i in ck["items"]
+            if i["status"] == status
+        ]
+    path.write_text(json.dumps(ck))
+
+
 _MANY_PROBLEMS: dict[str, Callable[[Path], None]] = {
     "cap-table": _many_problems_ct,
     "financial-model-review": _many_problems_fmr,
     "deck-review": _many_problems_dr,
     "market-sizing": _many_problems_ms,
     "ic-sim": _many_problems_ic,
+    "competitive-positioning": _many_problems_cp,
 }
 _VARIANTS = ("fixture", "many-problems")
 _CACHE: dict[tuple[str, str, str], tuple[str, list[dict[str, Any]]]] = {}
@@ -245,6 +272,7 @@ _REPORT_SCORE = {
     "deck-review": r"\*\*Deck-craft score:\*\* ([\d.]+)%",
     "market-sizing": r"Self-check: ([\d.]+)%",
     "ic-sim": r"\*\*Conviction Score:\*\* ([\d.]+)%",
+    "competitive-positioning": r"\*\*Analysis Quality Score:\*\* ([\d.]+)%",
 }
 
 
@@ -296,6 +324,7 @@ _SKILL_NAMES = {
     "market-sizing": "Market Sizing",
     "ic-sim": "IC Simulation",
     "cap-table": "Cap Table",
+    "competitive-positioning": "Competitive Positioning",
 }
 
 

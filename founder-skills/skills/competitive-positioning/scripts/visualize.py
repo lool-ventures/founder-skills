@@ -41,6 +41,7 @@ REQUIRED_ARTIFACTS = [
 
 OPTIONAL_ARTIFACTS = [
     "report.json",
+    "checklist.json",
     "competitor_verification.json",
     "landscape_draft.json",
     "startup_research.json",
@@ -50,28 +51,6 @@ OPTIONAL_ARTIFACTS = [
 # Optional artifacts another run wrote, in a folder that belongs to a run: read as absent (`main` sets this from
 # `_run_ref.foreign_artifacts` when given --run-id; empty for a folder with no ref, and in-process callers).
 _IGNORED_OTHER_RUN: set[str] = set()
-
-
-# The shared footer's rules, copied from `_ui.UI_CSS` (held equal by a test): this page renders `_ui.footer()` but
-# not the shell's stylesheet, so it carries the footer's rules and the variables they read, scoped to the footer.
-FOOTER_CSS = """\
-.ui-footer {
-  --ui-ink-2: #5E6A78; --ui-accent: var(--lool-blue); --ui-accent-2: var(--lool-royal); --ui-on-accent: #FFFFFF;
-  --ui-s2: 8px; --ui-s3: 12px; --ui-s4: 16px; --ui-s5: 24px; --ui-s6: 32px;
-}
-.ui-footer {
-  max-width: 1120px; margin: 0 auto; padding: var(--ui-s4) var(--ui-s5) var(--ui-s6);
-  display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--ui-s2) var(--ui-s3);
-  color: var(--ui-ink-2); font-size: 0.82rem;
-}
-.ui-footer a { color: var(--ui-accent-2); }
-.ui-footer a.ui-feedback {
-  display: inline-block; padding: 6px 14px; border-radius: var(--r-pill); font-weight: 600;
-  background: var(--ui-accent); color: var(--ui-on-accent); text-decoration: none;
-}
-.ui-footer a.ui-feedback:hover { background: var(--lool-blue-deep); color: var(--ui-on-accent); }
-.ui-footer a.ui-feedback:focus-visible { outline: 2px solid var(--ui-accent); outline-offset: 3px; }
-"""
 
 
 def _load_artifact(dir_path: str, name: str) -> dict[str, Any] | None:
@@ -332,79 +311,39 @@ def _build_point_style_lookup(
 # ---------------------------------------------------------------------------
 
 
-def _css(brand_css: str) -> str:
-    """Return the full CSS block for the report."""
-    return (
-        "\n    <style>\n"
-        + brand_css
-        + """
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: var(--font-body);
-            background: var(--lool-white); color: var(--lool-ink); line-height: 1.6;
-            padding: 2rem; max-width: 1100px; margin: 0 auto;
-            -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
-        }
-        a { color: var(--lool-azure); }
-        a:hover { color: var(--lool-azure-deep); }
-        h1 { color: var(--lool-blue); font-size: 1.8rem; font-weight: 400; margin-bottom: 0.25rem; }
-        h2 {
-            color: var(--lool-royal); font-size: 1.2rem; font-weight: 500; margin: 2rem 0 1rem;
-            border-bottom: 1px solid var(--lool-line-2); padding-bottom: 0.5rem;
-        }
-        .subtitle { color: var(--lool-mute); font-size: 0.9rem; margin-bottom: 0.5rem; }
-        .verdict { font-size: 1rem; line-height: 1.55; max-width: 60rem; margin: 0.75rem 0 1.25rem; }
-        .chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-bottom: 1.5rem; }
-        .chart-box {
-            background: var(--lool-paper); padding: 1.5rem;
-            border: 1px solid var(--lool-line-2);
-        }
-        .chart-box.full { grid-column: 1 / -1; }
-        .chart-box h2 { border-bottom-color: var(--lool-line-2); margin-top: 0; }
-        .badge {
-            display: inline-block; padding: 0.25rem 0.75rem; border-radius: var(--r-pill);
-            font-size: 0.8rem; font-weight: 600; color: #fff;
-        }
-        .comp-table { width: 100%; border-collapse: collapse; margin-top: 1rem; font-size: 0.85rem; }
-        .comp-table th {
-            text-align: left; color: var(--lool-subtle); letter-spacing: 0.06em;
-            padding: 0.5rem; border-bottom: 2px solid var(--lool-line-2);
-        }
-        .comp-table td { padding: 0.5rem; border-bottom: 1px solid var(--lool-line-2); }
-        .placeholder { color: var(--lool-mute); font-style: italic; padding: 2rem; text-align: center; }
-        .score-bar {
-            display: inline-block; height: 8px; border-radius: 4px;
-            background: var(--lool-line-2); width: 80px; vertical-align: middle;
-        }
-        .score-fill { display: block; height: 100%; border-radius: 4px; }
-        .legend {
-            display: flex; gap: 1rem; flex-wrap: wrap; margin-top: 0.75rem;
-            font-size: 0.8rem; color: var(--lool-mute);
-        }
-        .legend-item { display: flex; align-items: center; gap: 0.25rem; }
-        .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
-        .vanity-warning {
-            color: var(--lool-warning); font-size: 0.75rem; font-style: italic;
-            margin-top: 0.25rem;
-        }
-        .axis-rationale, .scoring-basis, .chart-note {
-            font-size: 0.75rem; color: var(--lool-mute); background: var(--lool-paper);
-            border: 1px solid var(--lool-line-2);
-            padding: 0.75rem; margin-top: 0.5rem; line-height: 1.5;
-        }
-        .axis-rationale strong, .scoring-basis strong { color: var(--lool-slate); }
-        svg { max-width: 100%; height: auto; }
-        @media (max-width: 768px) {
-            body { padding: 1rem; }
-            .chart-grid { grid-template-columns: 1fr; }
-        }
-        @media print {
-            body { background: #fff; padding: 0; }
-            .chart-box { break-inside: avoid; border: 1px solid var(--lool-line); }
-        }
-    </style>
+def _css() -> str:
+    """The page's own styles, after the shared shell's (`_ui.UI_CSS` owns the body, headings, sections, tables,
+    chips and pills)."""
+    return """
+.chart-box { background: var(--lool-paper); padding: 1.25rem; border: 1px solid var(--lool-line-2); }
+.chart-box + .chart-box { margin-top: 1rem; }
+.chart-box h3 { color: var(--lool-royal); font-size: 1.05rem; font-weight: 500; margin: 0 0 0.75rem; }
+.placeholder { color: var(--lool-mute); font-style: italic; padding: 2rem; text-align: center; }
+.chart-box .ui-table { min-width: 52rem; }  /* scrolls inside its wrapper rather than breaking words */
+.chart-box .ui-table th, .chart-box .ui-table td { overflow-wrap: normal; word-break: normal; }
+@media (max-width: 640px) { .chart-box { padding: 0.75rem; } }
+.score-bar {
+    display: inline-block; height: 8px; border-radius: 4px;
+    background: var(--lool-line-2); width: 80px; vertical-align: middle;
+}
+.score-fill { display: block; height: 100%; border-radius: 4px; }
+.legend {
+    display: flex; gap: 1rem; flex-wrap: wrap; margin-top: 0.75rem;
+    font-size: 0.8rem; color: var(--lool-mute);
+}
+.legend-item { display: flex; align-items: center; gap: 0.25rem; }
+.size-legend { display: flex; gap: 1.5rem; align-items: center; flex-wrap: wrap; }
+.color-legend { display: flex; flex-wrap: wrap; gap: 1rem; }
+.legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+.vanity-warning { color: var(--lool-warning); font-size: 0.75rem; font-style: italic; margin-top: 0.25rem; }
+.axis-rationale, .scoring-basis, .chart-note {
+    font-size: 0.75rem; color: var(--lool-mute); background: var(--lool-paper);
+    border: 1px solid var(--lool-line-2); padding: 0.75rem; margin-top: 0.5rem; line-height: 1.5;
+}
+.axis-rationale strong, .scoring-basis strong { color: var(--lool-slate); }
+.chart-box svg { max-width: 100%; height: auto; overflow: visible; }  /* edge labels draw into the padding */
+@media print { .chart-box { break-inside: avoid; border: 1px solid var(--lool-line); } }
 """
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -437,54 +376,71 @@ def _artifact_placeholder(
 # ---------------------------------------------------------------------------
 
 
+_BAND_TONE = {"strong": "pass", "solid": "pass", "needs_work": "warn", "major_revision": "fail"}
+_DEFENSIBILITY_TONE = {"high": "pass", "moderate": "warn", "low": "fail"}
+
+
+def _score_ring(checklist: dict[str, Any] | None) -> str:
+    """The header's ring: the analysis quality score report.md states, from the same checklist, coloured by the
+    band `checklist.py` wrote, linking to the checklist. Nothing without a score: never a "0%"."""
+    import _cp_view
+    import _ui
+
+    if not _usable(checklist):
+        return ""
+    summary = _as_dict(checklist.get("summary"))
+    raw = summary.get("score_pct")
+    if not isinstance(raw, (int, float)) or isinstance(raw, bool):
+        return ""
+    band = str(summary.get("overall_status") or "")
+    band_text = band.replace("_", " ").title() if band in _BAND_TONE else ""
+    shown = _cp_view.score_text(raw)
+    return _ui.score_ring(
+        float(raw),
+        tone=_BAND_TONE.get(band, "neutral"),
+        value_text=f"{shown}%",
+        label="Analysis quality",
+        caption=band_text,
+        aria_label=f"Analysis quality {shown} percent" + (f", {band_text}" if band_text else ""),
+        href="#checklist",
+    )
+
+
 def _section_header(
     report: dict[str, Any] | None,
-    positioning_scores: dict[str, Any] | None,
     moat_scores: dict[str, Any] | None,
+    checklist: dict[str, Any] | None,
+    verdict_text: str | None,
 ) -> str:
-    """Render the header with title, date, and score summary."""
+    """The header card: the company, the date and the defensibility as a pill (word and colour), the report's
+    own verdict paragraph, and the analysis quality score as a ring that opens the checklist."""
+    import _ui
+
     company = "Unknown"
     date = ""
     if _usable(report):
         meta = _as_dict(report.get("metadata"))
         company = str(meta.get("company_name", "Unknown"))
         date = str(meta.get("analysis_date", ""))
-
-    title_html = f'<h1>Competitive Positioning: {_esc(company)}</h1><div class="subtitle">{_esc(date)}</div>'
-
-    # Score summary badges
-    badges: list[str] = []
-
-    if _usable(report):
-        scoring = _as_dict(report.get("scoring_summary"))
-        checklist_pct = _num(scoring.get("checklist_score_pct"), -1)
-        if checklist_pct >= 0:
-            scripts_dir = os.path.dirname(os.path.abspath(__file__))
-            if scripts_dir not in sys.path:
-                sys.path.insert(0, scripts_dir)
-            import _cp_view
-
-            # As report.md prints it (`_cp_view.score_text`), so the page and the report never state it two ways.
-            shown = _cp_view.score_text(checklist_pct)
-            badges.append(f'<span class="badge" style="background:var(--lool-slate-blue);">Checklist: {shown}%</span>')
-
+    chips: list[str] = []
+    if date:
+        chips.append(f'<span class="ui-chip">{_esc(date)}</span>')
     if _usable(moat_scores):
         startup_data = _as_dict(_as_dict(moat_scores.get("companies")).get("_startup"))
         defensibility = str(startup_data.get("overall_defensibility", "")).lower()
-        color = _DEFENSIBILITY_COLORS.get(defensibility, "#A6AEB5")
-        if defensibility:
-            badges.append(
-                f'<span class="badge" style="background:{_esc(color)};">'
+        tone = _DEFENSIBILITY_TONE.get(defensibility)
+        if tone:
+            chips.append(
+                f'<span class="ui-pill ui-pill--{tone}" data-tone="{tone}">'
                 f"Defensibility: {_esc(defensibility.title())}</span>"
             )
-
-    badge_html = ""
-    if badges:
-        badge_html = (
-            '<div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-bottom:1.5rem;">' + "".join(badges) + "</div>"
-        )
-
-    return f"{title_html}{badge_html}"
+    return _ui.header_card(
+        eyebrow="Competitive positioning",
+        title=company,
+        meta_html=" ".join(chips),
+        verdict_html=_esc(verdict_text) if verdict_text else "",
+        ring_html=_score_ring(checklist),
+    )
 
 
 def _section_scoring_basis(scoring_basis: Any) -> str:
@@ -728,7 +684,7 @@ def _chart_positioning_map(
     # Where the startup stands, in words -- the same sentence report.md carries (`_cp_view`).
     stand = _cp_view.view_sentence(view_scores or {}, name_by_slug)
     stand_html = f'<p class="where-you-stand"><strong>Where you stand:</strong> {_esc(stand)}</p>' if stand else ""
-    return f'<div class="chart-box full"><h2>{title}</h2>{"".join(svg)}{stand_html}{vanity_note}</div>'
+    return f'<div class="chart-box"><h3>{title}</h3>{"".join(svg)}{stand_html}{vanity_note}</div>'
 
 
 def _chart_legends(point_styles: dict[str, dict[str, Any]] | None, company_name: str | None = None) -> str:
@@ -743,7 +699,7 @@ def _chart_legends(point_styles: dict[str, dict[str, Any]] | None, company_name:
     parts.append(
         '<h3 style="margin: 0 0 0.5rem; font-size: 0.85rem; color: var(--lool-slate);">Size = Defensibility</h3>'
     )
-    parts.append('<div class="size-legend" style="display: flex; gap: 1.5rem; align-items: center;">')
+    parts.append('<div class="size-legend">')
     for label, radius in [("Low", 5), ("Moderate", 8), ("High", 12)]:
         d = radius * 2
         parts.append(
@@ -758,7 +714,7 @@ def _chart_legends(point_styles: dict[str, dict[str, Any]] | None, company_name:
     parts.append(
         '<h3 style="margin: 1rem 0 0.5rem; font-size: 0.85rem; color: var(--lool-slate);">Color = Category</h3>'
     )
-    parts.append('<div class="color-legend" style="display: flex; flex-wrap: wrap; gap: 1rem;">')
+    parts.append('<div class="color-legend">')
     legend_items = [
         (
             _esc(company_name) if company_name and company_name != "Unknown" else "This company",
@@ -827,7 +783,7 @@ def _chart_moat_radar(
     """Render hexagonal radar chart for moat dimensions."""
     ph = _artifact_placeholder(moat_scores, "Moat scores")
     if ph is not None:
-        return f'<div class="chart-box"><h2>Moat Radar</h2>{ph}</div>'
+        return f'<div class="chart-box">{ph}</div>'
 
     ms = _as_dict(moat_scores)
     companies = _as_dict(ms.get("companies"))
@@ -835,7 +791,7 @@ def _chart_moat_radar(
     startup_moats = _as_list(startup_data.get("moats"))
 
     if not startup_moats:
-        return f'<div class="chart-box"><h2>Moat Radar</h2>{_placeholder("No moat data for startup")}</div>'
+        return f'<div class="chart-box">{_placeholder("No moat data for startup")}</div>'
 
     # Find strongest competitor for overlay
     comp_slug, comp_moats = _find_strongest_competitor(ms)
@@ -971,7 +927,7 @@ def _chart_moat_radar(
             f"Plotted at zero so the shape stays comparable — not scored as a weakness.</div>"
         )
 
-    return f'<div class="chart-box"><h2>Moat Radar</h2>{"".join(svg)}{"".join(legend_parts)}{na_note}</div>'
+    return f'<div class="chart-box">{"".join(svg)}{"".join(legend_parts)}{na_note}</div>'
 
 
 # ---------------------------------------------------------------------------
@@ -1037,7 +993,7 @@ def _section_outside_review(dir_path: str, artifacts: dict[str, Any]) -> str:
     outcome = _cp_view.review_outcome(review, skip)
     if outcome is None:
         return ""
-    parts = ['<div class="chart-box full"><h2>What an Outside Review Found</h2>', f"<p><em>{_esc(outcome)}</em></p>"]
+    parts = ['<div class="chart-box">', f"<p><em>{_esc(outcome)}</em></p>"]
 
     def _finding(f: dict[str, Any]) -> str:
         sev = _cp_view.SEVERITY_WORDS.get(str(f.get("severity")), "")
@@ -1085,7 +1041,7 @@ def _section_startup_record(first: dict[str, Any] | None, current: dict[str, Any
     record = first if _usable(first) else (current if _usable(current) else None)
     if record is None:
         return ""
-    parts = ['<div class="chart-box full"><h2>What Public Records Show</h2>']
+    parts = ['<div class="chart-box">']
     legal = _as_dict(record.get("legal_name"))
     if legal.get("value"):
         parts.append(
@@ -1098,13 +1054,13 @@ def _section_startup_record(first: dict[str, Any] | None, current: dict[str, Any
     rows = _cp_view.publication_rows(record)
     if rows:
         parts.append(
-            '<table class="comp-table"><tr><th>Publication</th><th>Office</th><th>Status</th>'
+            '<div class="ui-table-wrap"><table class="ui-table"><tr><th>Publication</th><th>Office</th><th>Status</th>'
             "<th>What was read</th><th>Source</th></tr>"
         )
         for r in rows:
             cells = "".join(f"<td>{_esc(r[k])}</td>" for k in ("number", "office", "status", "read", "source"))
             parts.append(f"<tr>{cells}</tr>")
-        parts.append("</table>")
+        parts.append("</table></div>")
         parts.append(
             "<p><em>Each record above was found by the analysis's web research; check it at its source "
             "before relying on it.</em></p>"
@@ -1127,18 +1083,19 @@ def _section_proof_gap(positioning_scores: dict[str, Any] | None) -> str:
     gap = _cp_view.proof_gap(positioning_scores if _usable(positioning_scores) else None)
     if gap is None:
         return ""
-    parts = ['<div class="chart-box full"><h2>What Is Shown and What Is Claimed</h2>']
+    parts = ['<div class="chart-box">']
     parts.append(f"<p>{_esc(_cp_view.ASYMMETRY)}</p>")
     if gap["availability"]:
         quote = f" (&ldquo;{_esc(gap['availability_quote'])}&rdquo;)" if gap["availability_quote"] else ""
         parts.append(f"<p><strong>How far the product has got:</strong> {_esc(gap['availability'])}{quote}</p>")
     parts.append(
-        '<table class="comp-table"><tr><th>Map</th><th>Axis</th><th>Planned position</th><th>What backs it</th></tr>'
+        '<div class="ui-table-wrap"><table class="ui-table">'
+        "<tr><th>Map</th><th>Axis</th><th>Planned position</th><th>What backs it</th></tr>"
     )
     for r in gap["rows"]:
         cells = "".join(f"<td>{_esc(v or '—')}</td>" for v in (r["map"], r["axis"], r["proof"], r["quote"]))
         parts.append(f"<tr>{cells}</tr>")
-    parts.append("</table>")
+    parts.append("</table></div>")
     if gap["open_claims"]:
         items = "".join(f"<li>{_esc(c)}</li>" for c in gap["open_claims"])
         parts.append(f"<p><strong>Claims not yet settled:</strong></p><ul>{items}</ul>")
@@ -1164,7 +1121,7 @@ def _section_competitor_table(
     """
     ph = _artifact_placeholder(landscape, "Landscape")
     if ph is not None:
-        return f'<div class="chart-box full"><h2>Competitor Comparison</h2>{ph}</div>'
+        return f'<div class="chart-box">{ph}</div>'
 
     land = _as_dict(landscape)
     competitors = _as_list(land.get("competitors"))
@@ -1222,9 +1179,9 @@ def _section_competitor_table(
 
     verification_th = "<th>Verification</th>" if verdicts is not None else ""
     table = (
-        '<table class="comp-table">'
+        '<div class="ui-table-wrap"><table class="ui-table">'
         "<tr><th>Name</th><th>Category</th><th>Defensibility</th><th>Funding</th>"
-        f"<th>Research Depth</th>{verification_th}</tr>" + "".join(r[2] for r in rows) + "</table>"
+        f"<th>Research Depth</th>{verification_th}</tr>" + "".join(r[2] for r in rows) + "</table></div>"
     )
 
     # The two sentences the markdown carries beneath its verdicts, so the two renderers say the
@@ -1266,7 +1223,7 @@ def _section_competitor_table(
                 f"{'It is' if one else 'They are'} scored and ranked alongside the rest.</p>"
             )
 
-    return f'<div class="chart-box full"><h2>Competitor Comparison</h2>{table}{"".join(notes)}</div>'
+    return f'<div class="chart-box">{table}{"".join(notes)}</div>'
 
 
 # ---------------------------------------------------------------------------
@@ -1360,7 +1317,7 @@ def _section_defensibility_timeline(
 
     svg.append("</svg>")
 
-    return f'<div class="chart-box full"><h2>Defensibility Timeline</h2>{"".join(svg)}</div>'
+    return f'<div class="chart-box">{"".join(svg)}</div>'
 
 
 # ---------------------------------------------------------------------------
@@ -1398,13 +1355,12 @@ def compose_html(dir_path: str) -> str:
     # Build point style lookup for bubble encoding
     point_styles = _build_point_style_lookup(moat_scores, landscape)
 
-    # Header, then the report's own verdict paragraph
-    header = _section_header(report, positioning_scores, moat_scores)
     import _cp_view
 
+    checklist = artifacts.get("checklist.json")
+    # The header card carries the report's own verdict paragraph.
     verdict_text = _cp_view.report_verdict(report, positioning_scores, moat_scores)
-    if verdict_text:
-        header += f'\n<p class="verdict">{_esc(verdict_text)}</p>'
+    header = _section_header(report, moat_scores, checklist, verdict_text)
 
     # Scoring basis — rendered next to the positioning map since it determines
     # what the map's coordinates mean.
@@ -1434,10 +1390,7 @@ def compose_html(dir_path: str) -> str:
             positioning_maps.append(_chart_positioning_map(view, view_score, company_name, point_styles, map_names))
 
     if not positioning_maps:
-        positioning_maps.append(
-            f'<div class="chart-box full"><h2>Positioning Map</h2>'
-            f"{_placeholder('Positioning data not available')}</div>"
-        )
+        positioning_maps.append(f'<div class="chart-box">{_placeholder("Positioning data not available")}</div>')
 
     # Legends for positioning maps
     legends_html = _chart_legends(point_styles if _usable(moat_scores) or _usable(landscape) else None, company_name)
@@ -1458,42 +1411,58 @@ def compose_html(dir_path: str) -> str:
     # Defensibility timeline
     timeline = _section_defensibility_timeline(positioning, moat_scores)
 
-    # Page title
-    page_title = f"Competitive Positioning: {_esc(company_name)}"
+    # (section id, nav text, heading, body). A section with nothing to show drops out, nav entry and all.
+    sections: list[tuple[str, str, str, str]] = [
+        ("map", "Map", "Positioning Map", basis_note + "\n".join(positioning_maps) + legends_html),
+        ("moats", "Moats", "Moat Radar", moat_radar),
+        ("review", "Outside review", "What an Outside Review Found", outside_review),
+        ("record", "Public record", "What Public Records Show", startup_record),
+        ("proof", "Proof gaps", "What Is Shown and What Is Claimed", proof_gap),
+        ("competitors", "Competitors", "Competitor Comparison", comp_table),
+        ("timeline", "Timeline", "Defensibility Timeline", timeline),
+        ("checklist", "Checklist", "Analysis Checklist", _section_checklist(checklist)),
+    ]
+    sections = [row for row in sections if row[3].strip()]
+    nav = (
+        '<nav class="ui-nav" aria-label="Sections">'
+        + "".join(f'<a href="#{sid}">{_esc(label)}</a>' for sid, label, _, _ in sections)
+        + "</nav>"
+    )
+    body = (
+        header
+        + nav
+        + "".join(
+            f'<section class="ui-section" id="{sid}" aria-labelledby="{sid}-h"><h2 id="{sid}-h">{_esc(heading)}</h2>'
+            f"{content}</section>"
+            for sid, _, heading, content in sections
+        )
+    )
+    return _ui.page_shell(
+        title=f"Competitive Positioning: {company_name}",
+        body_html=body,
+        brand_css=brand_css,
+        page_css=_css(),
+        skill_name="Competitive Positioning",
+    )
 
-    maps_html = "\n".join(positioning_maps)
 
-    body = f"""
-{header}
-{basis_note}
-{maps_html}
-{legends_html}
-<div class="chart-grid">
-{moat_radar}
-</div>
-{outside_review}
-{startup_record}
-{proof_gap}
-{comp_table}
-{timeline}
-"""
+def _section_checklist(checklist: dict[str, Any] | None) -> str:
+    """Every criterion of the analysis checklist, as report.md lists it (`_cp_view.checklist_groups`)."""
+    import _cp_view
+    import _ui
 
-    return f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>{page_title}</title>
-{_css(brand_css)}
-<style>
-{FOOTER_CSS}</style>
-</head>
-<body>
-{body}
-{_ui.footer("Competitive Positioning")}
-</body>
-</html>
-"""
+    if not _usable(checklist):
+        return ""
+    groups = _cp_view.checklist_groups(checklist)
+    if not groups:
+        return ""
+    return _ui.checklist(groups, summary_html=_esc(_CHECKLIST_SUMMARY))
+
+
+_CHECKLIST_SUMMARY = (
+    "Score = (pass + half credit per warn) ÷ applicable. It measures how complete and well-evidenced this "
+    "analysis is, not how strong the company's position is."
+)
 
 
 # ---------------------------------------------------------------------------

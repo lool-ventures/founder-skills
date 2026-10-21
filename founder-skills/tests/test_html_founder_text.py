@@ -570,7 +570,12 @@ def test_fmr_checklist_evidence_goes_through_the_founder_text_policy_on_both_pag
 
 # (skill, the checklist item field the page shows under each criterion). ic-sim's checklist is its 28
 # dimensions, in score_dimensions.json, and its passing status is strong conviction.
-_SEEDED_REPORT_PAGES = [("deck-review", "evidence"), ("market-sizing", "notes"), ("ic-sim", "evidence")]
+_SEEDED_REPORT_PAGES = [
+    ("deck-review", "evidence"),
+    ("market-sizing", "notes"),
+    ("ic-sim", "evidence"),
+    ("competitive-positioning", "evidence"),
+]
 _SEEDED_SOURCE = {"ic-sim": ("score_dimensions.json", "strong_conviction")}
 
 

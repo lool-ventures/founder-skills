@@ -139,7 +139,7 @@
     "skills/competitive-positioning/scripts/validate_startup_research.py": "4ce338fc49277038d869fa09b594d7e58dd6e83341364f8b2c103c28055fdeeb",
     "skills/competitive-positioning/scripts/verify_competitors.py": "5ac39408830ae9fb304a40055fd527f9c113fd574eb7df6320c0ae969340e29e",
     "skills/competitive-positioning/scripts/verify_positioning.py": "d440a8e8749d663db524ca20a21e2f264112ff6346b9c0d6c82aa1739ba6a828",
-    "skills/competitive-positioning/scripts/visualize.py": "cc82cabee66d8a0b40e3d679fa5f3a391cb8a5d9c018c50617cb428169d33310",
+    "skills/competitive-positioning/scripts/visualize.py": "750b5e0b8a716add0d57a3f00071511ab6b4d2b6b51fd5a1eab266e1a44a3660",
     "skills/deck-review/scripts/_artifact_writer.py": "3d662d9349668b60d9987c600873042298fd970cee9a84f7cb55c7275f15096a",
     "skills/deck-review/scripts/_compose_result.py": "2d46d5302d1fe2c2084da7ca9ec71cc187734149eb35eba07296b1bf57374ebf",
     "skills/deck-review/scripts/_deck_text_file.py": "3e69bf316bf40f8c3513607315b7c21310d57b61d7723927a1ec4224cafb19e0",

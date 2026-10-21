@@ -925,10 +925,10 @@
     "competitive-positioning/visualize.py": {
       "exit": 0,
       "files": {
-        "page.html": "c32dc1435c2b88fdff674ff2606309ce343d9d728895075409a20afccb784142"
+        "page.html": "38fa545ed014da1659e514662c3d7f5c69a7f1bf6b90eeadb7ca8163cff7013a"
       },
       "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout": "7941d714694f46753bd996782e0d457275155fac8ea5baeb7f25366206a315a5"
+      "stdout": "d42e96e2015c3fa06a27bd9485fdb4fae8d8821507e3a3a3d3ed45d9899f882e"
     },
     "deck-review/visualize.py": {
       "exit": 0,
