@@ -49,6 +49,7 @@ Every review deposits structured JSON artifacts into a working directory. The fi
 | 3.5 | `ledger.json` | `ledger.py` (agent provides JSON via stdin) |
 | 3.6 | `second_read.json` | a ledger-blind re-read of the figure-bearing slide text |
 | 3.8 | `reconciliation.json` | `reconcile.py` (agent proposes relations via stdin) |
+| 3.95 | `ocr_check.json` | `deck_ocr.py` + `ocr_check.py` (image slides only) |
 | 4 | `slide_reviews.json` | `slide_reviews.py` (agent provides JSON via stdin) |
 | 5 | `checklist.json` | `checklist.py` |
 | 6 | Report | `compose_report.py` (writes both `report.json` and `report.md`) |
@@ -214,7 +215,7 @@ Pass `RUN_ID` to every producer script via `--run-id`. Producer scripts inject i
 
 **When `reuse_checkpoints` is true:** `--clean` kept this run's checkpoints. Skip Steps 2 and 3 if both `deck_inventory.json` and `stage_profile.json` exist and their `metadata.run_id` matches `$RUN_ID`; otherwise re-run them with the same `RUN_ID`. Either way, if `deck_text.md` is missing or its front matter's `run_id` is not `$RUN_ID`, run Step 2's `deck_text.py` command again, after the conversion block when the PDF it read is gone (Keynote's lives in a temp folder).
 
-**Read `reuse_checkpoints`, not `resume`, for this decision — they are different questions and they do come apart.** `resume` says the gate may be skipped; `reuse_checkpoints` says the artifacts on disk are this run's. A same-run gate answered without a recorded source yields `resume: false` with `reuse_checkpoints: true`: ask the founder again, but keep what Steps 2-3 already produced. Apply the same rule to Steps 3.5-3.8: skip them when `reconciliation.json` exists with a matching `metadata.run_id`. It is the most expensive stretch of the pipeline — three dispatches, two of which read the deck — and re-running it on a gate round-trip spends that twice for an identical result.
+**Read `reuse_checkpoints`, not `resume`, for this decision — they are different questions and they do come apart.** `resume` says the gate may be skipped; `reuse_checkpoints` says the artifacts on disk are this run's. A same-run gate answered without a recorded source yields `resume: false` with `reuse_checkpoints: true`: ask the founder again, but keep what Steps 2-3 already produced. Apply the same rule to Steps 3.5-3.8: skip them when `reconciliation.json` exists with a matching `metadata.run_id`. It is the most expensive stretch of the pipeline — three dispatches, two of which read the deck — and re-running it on a gate round-trip spends that twice for an identical result. Step 3.95 is run again either way: its read resumes and its check is cheap.
 
 ### Step 1: Read or Create Founder Context
 

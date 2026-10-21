@@ -71,7 +71,7 @@ def _check_reconciliation(path: str, run_id: str) -> tuple[str | None, dict[str,
 _OCR_FIX = "run Step 3.95 (deck_ocr.py until it prints complete, then ocr_check.py), then this pipe again"
 _WRONG_DECK_FIX = (
     "the deck file changed since its text was read: run Step 2's conversion block (for PowerPoint or Keynote) and "
-    "deck_text.py again, then Steps 3.5-3.95 as the deck-text rule requires, then this pipe"
+    "deck_text.py again, then Steps 3.5-3.95, then this pipe"
 )
 
 

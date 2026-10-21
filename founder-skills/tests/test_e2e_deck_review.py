@@ -1290,8 +1290,9 @@ def _check_machine_read(
 @pytest.mark.skipif(
     not _image_lane_authorized(),
     reason=(
-        "Image-deck lane: needs RUN_PAID_E2E=1 AND RUN_PAID_E2E_OCR=1 plus Claude auth, and tesseract with "
-        "poppler on PATH. Billed separately; the only paid run that reaches Step 3.95."
+        "Image-deck lane: needs RUN_PAID_E2E=1 AND RUN_PAID_E2E_OCR=1 plus Claude auth. Without tesseract and "
+        "poppler on PATH it runs and fails (the read is unavailable). Billed separately; the only paid run that "
+        "reaches Step 3.95."
     ),
 )
 def test_deck_review_image_deck_lane(tmp_path: Path) -> None:

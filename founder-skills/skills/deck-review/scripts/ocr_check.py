@@ -19,8 +19,9 @@ Exits:
      scope's): run Step 3.95's command again. Never a producer rejection.
 
 The numeral rule matches each raw figure's numbers against the page's, by value, scale and percent, built from
-reconcile's shared grammar (never a copy of it). See the 0.25 OCR plan (3.1-F, 3.2, 3.3) for why each part is
-the way it is; the named residuals are pinned in the tests.
+reconcile's shared grammar (a copy would drift from the grammar the ledger was validated with). Counts only,
+because on clean renders about one correct figure in nine goes unfound (charts, styled text), so a per-figure list
+would wrongly single figures out. The named residuals are pinned in the tests.
 """
 
 from __future__ import annotations

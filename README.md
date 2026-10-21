@@ -262,7 +262,7 @@ claude plugin install founder-skills@lool-founder-skills
 
 No additional configuration required. Each skill activates when you ask for that analysis **and give it something to work with** — a deck, a model, a described business. A general question about fundraising won't trigger a full analysis, by design: say "review this deck", "size this market", or attach the file.
 
-Unlike Cowork, Claude Code runs the skills' scripts on **your** machine, so you need **Python 3.10+** available. Reading Excel models needs `openpyxl` and reading PDFs needs `pdfplumber`; install them into whatever Python `python3` resolves to if you hit a missing-module error on your first file.
+Unlike Cowork, Claude Code runs the skills' scripts on **your** machine, so you need **Python 3.10+** available. Reading Excel models needs `openpyxl` and reading PDFs needs `pdfplumber`; install them into whatever Python `python3` resolves to if you hit a missing-module error on your first file. Optionally, with `tesseract` and `pdftoppm` (Poppler) installed, a deck review also machine-reads slides that are images and says how many of the figures it uses from them were found as written; without them the review runs as before.
 
 ### What to expect on your first run
 

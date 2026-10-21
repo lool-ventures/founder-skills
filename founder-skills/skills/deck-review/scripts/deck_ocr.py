@@ -6,7 +6,7 @@
 """Step 3.95's machine read: render and OCR the image slides whose figures the numbers section uses.
 
     deck_ocr.py --deck PDF --ledger L --reconciliation R --deck-text D --run-id ID -o "$HANDOFF_DIR/ocr"
-                [--max-pages 40] [--budget-seconds 60] [--dpi 200]
+                [--max-pages 40] [--budget-seconds 40] [--dpi 200]
 
 `-o` is a folder: it gets `receipt.json` and one `p<N>.txt` per page read. Run it again until it prints
 `"complete": true`; each call resumes where the last stopped, starting a new page only while the call is
