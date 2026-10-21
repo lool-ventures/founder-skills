@@ -496,3 +496,52 @@ def test_a_slide_reviews_not_read_redo_pairs_with_step_5s_own_pipe(tmp_path: Pat
     assert bare != pipe
     rows = _shell_rows([(bare, _DR_REJECTION, False), (_DR_REDO_CMD, redo, False)])
     assert hook.latest_printed(rows, "CONTEXT: CHECKLIST", path) is None
+
+
+# --- `$PWD` in a CLI block, filled from the row's working folder ------------------------------------------
+
+_P_PWD = (
+    'RD="$PWD/artifacts/r"; H="$RD/handoff/R"; cat "$H/checklist_output.json" | python3 "$SCRIPTS/checklist.py" '
+    '--run-id R -o "$RD/checklist.json" 2> "$H/producer_rejected.txt"; echo "EXIT=$?"'
+)
+_R_PWD = (
+    'REVIEW_DIR="$PWD/artifacts/r"; python3 "$SCRIPTS/dispatch_prompt.py" checklist --run-id R '
+    '--correction producer-rejected --detail-file "$REVIEW_DIR/handoff/R/producer_rejected.txt"'
+)
+_R_ABS = _R.replace('"$HANDOFF_DIR/producer_rejected.txt"', '"/w/artifacts/r/handoff/R/producer_rejected.txt"')
+
+
+def _rows_at(calls: list[tuple[str, str, bool]], cwd: str | None, tool: str = "Bash") -> list[dict[str, Any]]:
+    rows = _shell_rows(calls)
+    for row in rows:
+        if row["type"] == "assistant":
+            row["message"]["content"][0]["name"] = tool
+            if cwd is not None:
+                row["cwd"] = cwd
+    return rows
+
+
+@pytest.mark.parametrize(
+    ("redo", "cwd", "tool", "accepted"),
+    [
+        # The saved message named through `$PWD` under another variable, and the redo through a third or in full.
+        (_R_PWD, "/w", "Bash", True),
+        (_R_ABS, "/w", "Bash", True),
+        (_R_ABS, "/private/w", "Bash", False),
+        # No folder on the row, or a Cowork shell, whose row folder is the host's: `$PWD` stays unknown.
+        (_R_ABS, None, "Bash", False),
+        (_R_ABS, "/w", "mcp__workspace__bash", False),
+    ],
+)
+def test_a_redo_naming_the_saved_message_through_pwd_is_paired(
+    redo: str, cwd: str | None, tool: str, accepted: bool
+) -> None:
+    hook = _load(HOOK, "hook_pwd")
+    rows = _rows_at([(_P_PWD, "EXIT=1", False), (redo, _REDO, False)], cwd, tool)
+    assert (hook.latest_printed(rows, "CONTEXT: CHECKLIST", "/h/o.json") is not None) is accepted
+
+
+def test_a_block_that_changes_folder_does_not_read_pwd_from_the_row() -> None:
+    hook = _load(HOOK, "hook_pwd_cd")
+    rows = _rows_at([("cd /elsewhere; " + _P_PWD, "EXIT=1", False), (_R_ABS, _REDO, False)], "/w")
+    assert hook.latest_printed(rows, "CONTEXT: CHECKLIST", "/h/o.json") is None

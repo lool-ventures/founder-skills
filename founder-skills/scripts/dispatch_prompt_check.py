@@ -547,10 +547,11 @@ def _expand(word: str, env: dict[str, str]) -> str | None:
     return None if unknown or "$" in out or _SUBST_RE.search(out) else out
 
 
-def _env(cmds: list[_Cmd]) -> tuple[dict[str, str], dict[str, str], set[str]]:
-    """The block's own assignments, in order: literal values (expanded), values as written, and names."""
-    env: dict[str, str] = {}
-    raw: dict[str, str] = {}
+def _env(cmds: list[_Cmd], seed: dict[str, str] | None = None) -> tuple[dict[str, str], dict[str, str], set[str]]:
+    """The block's own assignments, in order: literal values (expanded), values as written, and names.
+    `seed` holds values known before the block runs (`_pwd_seed`); the block's own assignments replace them."""
+    env: dict[str, str] = dict(seed or {})
+    raw: dict[str, str] = dict(seed or {})
     assigned: set[str] = set()
     for c in cmds:
         if c.substituted:
@@ -1021,6 +1022,18 @@ def _heredoc_bodies(lines: list[str], quoted_ok: bool = False) -> set[int] | Non
     return None if pending else bodies
 
 
+def _pwd_seed(cmds: list[_Cmd], cwd: Any) -> dict[str, str]:
+    """`$PWD` for a CLI `Bash` block: the working folder its transcript row records (the shell's, since that
+    tool keeps one shell folder and the row is written before the block runs), only when nothing in the
+    block changes folder. Empty otherwise: the Cowork shell runs in the VM, where the row's folder is the
+    host's."""
+    if not isinstance(cwd, str) or not cwd.startswith("/"):
+        return {}
+    if any(_words(c.argv)[:1] in (["cd"], ["pushd"], ["popd"]) for c in cmds):
+        return {}
+    return {"PWD": cwd}
+
+
 def _file_keys(word: str, env: dict[str, str]) -> frozenset[str]:
     """How a file named in a block is matched across blocks: the words as written
     (`$HANDOFF_DIR/producer_rejected.txt`), and its normalised path when the block's own assignments
@@ -1032,16 +1045,16 @@ def _file_keys(word: str, env: dict[str, str]) -> frozenset[str]:
     return frozenset(keys)
 
 
-def producer_outputs(command: str) -> list[tuple[frozenset[str], re.Pattern[str] | None]]:
+def producer_outputs(command: str, cwd: Any = None) -> list[tuple[frozenset[str], re.Pattern[str] | None]]:
     """Files a plugin producer's output was saved to in this block (`... checklist.py ... 2> F`, a
     truncating redirect), where no other command in the block names the file; each with the pattern of
     the block's own `echo "EXIT=$?"` run straight after the producer, if there is one. A redo's message
     must come from one of these files, written by a run that failed: the call exited non-zero, or that
-    echo printed a non-zero code."""
+    echo printed a non-zero code. `cwd`: a CLI `Bash` row's working folder, for `$PWD` (`_pwd_seed`)."""
     cmds = _parse_block(command)
     if cmds is None:
         return []
-    env, raw, _assigned = _env(cmds)
+    env, raw, _assigned = _env(cmds, _pwd_seed(cmds, cwd))
     out = []
     for i, c in enumerate(cmds):
         script = _script(_words(c.argv))
@@ -1068,13 +1081,13 @@ def producer_outputs(command: str) -> list[tuple[frozenset[str], re.Pattern[str]
     return out
 
 
-def redo_details(command: str) -> list[frozenset[str]] | None:
+def redo_details(command: str, cwd: Any = None) -> list[frozenset[str]] | None:
     """The --detail-file of each `--correction producer-rejected` generator run in this block (as file
-    keys), or None when the block runs no such redo."""
+    keys), or None when the block runs no such redo. `cwd` as in `producer_outputs`."""
     cmds = _parse_block(command)
     if cmds is None:
         return None
-    env, _raw, _assigned = _env(cmds)
+    env, _raw, _assigned = _env(cmds, _pwd_seed(cmds, cwd))
     found: list[frozenset[str]] | None = None
     for c in cmds:
         words = _words(c.argv)
@@ -1150,15 +1163,16 @@ def _comparands(rows: list[dict[str, Any]]) -> list[tuple[str, frozenset[str] | 
                     if not isinstance(cmd, str):
                         continue
                     verdict: Verdict = (False, [], None) if side else _generator_block(cmd, distrusted)
-                    details = redo_details(cmd)
+                    cwd = row.get("cwd") if name == "Bash" else None
+                    details = redo_details(cmd, cwd)
                     if details is not None and not (details and all(any(d & r for r in rejected) for d in details)):
                         verdict = (False, [], None)  # a redo whose message is not a failed producer's own output
                     if not side and not verdict[0] and shows_file(cmd, readable, distrusted):
                         verdict = (True, [], _shown_contexts(cmd, readable, only))
                     readable = {path for path in readable if not touches_file(cmd, path, distrusted)}
                     rejected = [r for r in rejected if not _entry_touched(cmd, r, distrusted)]
-                    if not side and producer_outputs(cmd):
-                        producing[str(b.get("id"))] = producer_outputs(cmd)
+                    if not side and producer_outputs(cmd, cwd):
+                        producing[str(b.get("id"))] = producer_outputs(cmd, cwd)
                     if verdict[0] or verdict[1]:
                         pending[str(b.get("id"))] = verdict
                 elif name != "Read":

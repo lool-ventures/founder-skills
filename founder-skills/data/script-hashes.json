@@ -25,7 +25,7 @@
     "scripts/asked_gate_check.py": "6c98b457c4b0e0e7f331ac5e652135517e87d2c3fc2fcdf6ff81a2f7fd89609f",
     "scripts/check_handoff.py": "7cda2343cc245326a22e1ca6c6785a6ed0facf187bd5500d77fbd73df9cae331",
     "scripts/compaction_reread.py": "d41e93361953b6aabbd7826c1b9d88d09597eab61a1aebc28fc434c51ed28fe4",
-    "scripts/dispatch_prompt_check.py": "9694220c5fb0f77c796bed36c7140089bd3a2adb0f7b79a5306eb7862c7e6dd5",
+    "scripts/dispatch_prompt_check.py": "47acb0775eaad66b793b60be19cb7c68c503cc640bc0a4bff413d30891700077",
     "scripts/dispatch_type_check.py": "db9bed86b51dc6dffcef2607c41755b7be169024828dc49c7593b480d44520d7",
     "scripts/find_artifact.py": "f26fd5824a5f15d8bf05189be8aa62827858bde49fa908b7efe5f61ca07046a3",
     "scripts/founder_context.py": "1f8a801a1a55805677447534afbb83765c7f4fc25118112a6d56d55d8bfa3762",
