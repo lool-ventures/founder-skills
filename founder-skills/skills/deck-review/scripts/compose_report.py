@@ -249,7 +249,7 @@ REQUIRED_ARTIFACTS = [
 # OPTIONAL, deliberately. Absent, nothing fires -- every review predating the check stays
 # valid. Present, it joins the run_id parity loop, which is the point: a stale ledger would
 # otherwise clear the prose check by agreeing with nothing.
-OPTIONAL_ARTIFACTS: list[str] = ["ledger.json"]
+OPTIONAL_ARTIFACTS: list[str] = ["ledger.json", "ocr_check.json"]
 
 
 def _write_output(data: str, output_path: str | None, *, summary: dict[str, Any] | None = None) -> None:
@@ -1414,6 +1414,7 @@ def _untested_claims_line(reconciliation: dict[str, Any]) -> str:
 def _section_numbers(
     reconciliation: dict[str, Any] | None,
     checklist: dict[str, Any] | None,
+    ocr_line: str = "",
 ) -> str:
     """What the deck's own numbers say about each other.
 
@@ -1449,7 +1450,7 @@ def _section_numbers(
     if not relations:
         # BOTH branches must carry it, and this one matters most: with no surviving relations
         # the founder is at maximum risk of reading silence as a clean bill of health.
-        body = "\n".join(x for x in (counts, untested) if x)
+        body = "\n".join(x for x in (counts, untested, ocr_line) if x)
         return "## What Your Numbers Say About Each Other\n\n" + body if body else ""
 
     # Split on VERDICT, not `kind`. `kind` is what the model PROPOSED the relation was;
@@ -1478,6 +1479,8 @@ def _section_numbers(
         lines.append(counts)
     if untested:
         lines.append(untested)
+    if ocr_line:
+        lines.append(ocr_line)
 
     if exceeded:
         # A SEPARATE HEADING, not folded under "figures that disagree": the deck is not
@@ -2325,7 +2328,13 @@ def compose(
         marker,
         _section_stage_context(stage_profile, gate_auto_satisfied, gate_by_request),
         _section_slide_feedback(slide_reviews, inventory),
-        _section_numbers(reconciliation, checklist_data),
+        _section_numbers(
+            reconciliation,
+            checklist_data,
+            _reconciliation_prose.ocr_read_line_for(
+                dir_path, _render_safe(artifacts.get("ocr_check.json")), reconciliation, inventory
+            ),
+        ),
         _section_checklist(checklist_data),
         _section_priority_fixes(checklist_data, slide_reviews),
     ]

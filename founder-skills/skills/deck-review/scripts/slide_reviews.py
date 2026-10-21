@@ -68,6 +68,59 @@ def _check_reconciliation(path: str, run_id: str) -> tuple[str | None, dict[str,
     return None, data
 
 
+_OCR_FIX = "run Step 3.95 (deck_ocr.py until it prints complete, then ocr_check.py), then this pipe again"
+_WRONG_DECK_FIX = (
+    "the deck file changed since its text was read: run Step 2's conversion block (for PowerPoint or Keynote) and "
+    "deck_text.py again, then Steps 3.5-3.95 as the deck-text rule requires, then this pipe"
+)
+
+
+def _check_ocr(
+    ledger_path: str,
+    deck_text_path: str,
+    reconciliation_path: str,
+    ocr_check_path: str | None,
+    reconciliation: dict[str, Any],
+    run_id: str,
+) -> tuple[str, str] | None:
+    """Gate Step 3.95: when a figure the numbers section uses sits on a slide read from how it looks, this run's
+    machine-read check must exist for this reconciliation. (code, message) when it does not, else None. A deck
+    with no such figure needs no file."""
+    import _ocr_scope
+
+    try:
+        with open(ledger_path, encoding="utf-8") as fh:
+            ledger = json.load(fh)
+        if not isinstance(ledger, dict):
+            raise ValueError("not a JSON object")
+    except (OSError, ValueError) as exc:
+        return "LEDGER_UNREADABLE", f"cannot read {ledger_path}: {exc}"
+    with open(deck_text_path, encoding="utf-8") as fh:
+        pages_source = _deck_text_file.pages_source(_deck_text_file.front_matter(fh.read()))
+    if not _ocr_scope.in_scope(ledger, reconciliation, pages_source):
+        return None
+    if not ocr_check_path or not os.path.exists(ocr_check_path):
+        return "OCR_CHECK_MISSING", f"figures on image slides were not machine-read; {_OCR_FIX}"
+    try:
+        with open(ocr_check_path, encoding="utf-8") as fh:
+            check = json.load(fh)
+        if not isinstance(check, dict):
+            raise ValueError("not a JSON object")
+    except (OSError, ValueError):
+        return "OCR_CHECK_MISSING", f"{ocr_check_path} is unreadable; {_OCR_FIX}"
+    raw_meta = check.get("metadata")
+    meta: dict[str, Any] = raw_meta if isinstance(raw_meta, dict) else {}
+    if meta.get("run_id") != run_id:
+        return "OCR_CHECK_OTHER_RUN", f"{ocr_check_path} belongs to run {meta.get('run_id')!r}; {_OCR_FIX}"
+    with open(reconciliation_path, "rb") as fh:
+        current = hashlib.sha256(fh.read()).hexdigest()
+    if meta.get("reconciliation_sha256") != current:
+        return "OCR_CHECK_STALE", f"{ocr_check_path} was made for an earlier reconciliation; {_OCR_FIX}"
+    if check.get("status") == "not_applicable" and check.get("reason") == "deck_mismatch":
+        return "OCR_CHECK_WRONG_DECK", _WRONG_DECK_FIX
+    return None
+
+
 # ---------------------------------------------------------------------------
 # NUMERIC LINT: a slide review saying two figures disagree when the arithmetic did not find it.
 #
@@ -183,7 +236,9 @@ def main() -> int:
         required=True,
         help="reconciliation.json for this run; the numeric chain must have run before slide reviews",
     )
-    p.add_argument("--deck-text", help="deck_text.md; its body hash is stamped into metadata")
+    p.add_argument("--deck-text", required=True, help="deck_text.md; its body hash is stamped into metadata")
+    p.add_argument("--ledger", required=True, help="ledger.json: with the deck text, decides whether Step 3.95 ran")
+    p.add_argument("--ocr-check", help="ocr_check.json, required when a figure the numbers use is on an image slide")
     p.add_argument("--pretty", action="store_true")
     args = p.parse_args()
     # FIRST: an output naming one of this step's own input files is refused before anything is written.
@@ -196,7 +251,7 @@ def main() -> int:
     _run_ref.refuse_not_this_runs(
         os.path.dirname(os.path.abspath(args.output)) if args.output else None,
         args.run_id,
-        [args.reconciliation, args.deck_text],
+        [args.reconciliation, args.deck_text, args.ledger],
         noun="review dir",
     )
 
@@ -210,6 +265,9 @@ def main() -> int:
         deck_text_sha256, problem = _deck_text_file.stamp(args.deck_text, args.run_id)
         if problem is not None:
             return _reject(problem["code"], problem["message"])
+    ocr_problem = _check_ocr(args.ledger, args.deck_text, args.reconciliation, args.ocr_check, recon, args.run_id)
+    if ocr_problem is not None:
+        return _reject(*ocr_problem)
 
     raw = sys.stdin.read()
     try:

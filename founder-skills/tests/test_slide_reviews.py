@@ -10,6 +10,8 @@ import tempfile
 from types import ModuleType
 from typing import Any
 
+from slide_review_inputs import slide_review_inputs
+
 SCRIPT = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "skills",
@@ -20,6 +22,9 @@ SCRIPT = os.path.join(
 
 
 def _run(args: list[str], stdin_data: str) -> tuple[int, str, str]:
+    if "--ledger" not in args:  # a test about something else: no figure on an image slide, so no Step 3.95 file
+        out = args[args.index("-o") + 1]
+        args = [*args, *slide_review_inputs(os.path.dirname(out), args[args.index("--run-id") + 1])]
     res = subprocess.run([sys.executable, SCRIPT, *args], input=stdin_data, capture_output=True, text=True)
     return res.returncode, res.stdout, res.stderr
 
@@ -257,10 +262,13 @@ def test_lint_is_warn_only_receipt_and_stderr() -> None:
         assert "47%" not in err
         with open(out, encoding="utf-8") as fh:
             written = json.load(fh)
-        # The metadata is the run id plus Step 5's read token (a 12-hex value from the body); the lint adds nothing.
+        # The metadata is the run id, Step 5's read token (a 12-hex value from the body) and the deck text's body
+        # hash; the lint adds nothing.
         token = written["metadata"].get("read_token")
         assert isinstance(token, str) and re.fullmatch(r"[0-9a-f]{12}", token), written["metadata"]
-        assert written == dict(payload, metadata={"run_id": "r1", "read_token": token})
+        stamp = written["metadata"].get("deck_text_sha256")
+        assert isinstance(stamp, str) and re.fullmatch(r"[0-9a-f]{64}", stamp), written["metadata"]
+        assert written == dict(payload, metadata={"run_id": "r1", "read_token": token, "deck_text_sha256": stamp})
 
 
 def test_lint_backed_hit_prints_nothing() -> None:

@@ -39,6 +39,7 @@ _CLEANABLE_NAMES = {
     "coaching_commentary.json",  # Context-B coaching scratch, now staged under the review dir (F4)
     "compose_result.json",  # compose's record of its last exit; an earlier run's is not this run's
     "deck_text.md",
+    "ocr_check.json",  # Step 3.95's machine-read check
     # gate_state.json is handled separately: it must persist across a gate
     # round-trip (same run_id) but be deleted when --clean runs for a fresh
     # run (resume is false). See _read_gate_state / the --clean block below.
@@ -63,6 +64,7 @@ _CHECKPOINT_NAMES = frozenset(
         "second_read.json",
         "reconciliation.json",
         "deck_text.md",
+        "ocr_check.json",
     }
 )
 

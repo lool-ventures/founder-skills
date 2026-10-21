@@ -1151,7 +1151,7 @@ def _chart_slide_map(
 # ---------------------------------------------------------------------------
 
 
-def _numbers_section(reconciliation: dict[str, Any] | None) -> str:
+def _numbers_section(reconciliation: dict[str, Any] | None, ocr_line: str = "") -> str:
     """The numeric-reconciliation findings, for the page the founder actually opens.
 
     `report.md` and `report.html` are two renderers over one artifact set, and a finding
@@ -1176,7 +1176,7 @@ def _numbers_section(reconciliation: dict[str, Any] | None) -> str:
     exceeded = [r for r in relations if r.get("verdict") == "exceeds_stated_limit"]
     rounding = [r for r in relations if r.get("verdict") == "rounding_gap"]
     derived = [r for r in relations if r.get("verdict") == "derived"]
-    if not contradictions and not exceeded and not rounding and not derived and not coverage:
+    if not contradictions and not exceeded and not rounding and not derived and not coverage and not ocr_line:
         return ""
 
     parts: list[str] = []
@@ -1185,6 +1185,8 @@ def _numbers_section(reconciliation: dict[str, Any] | None) -> str:
         parts.append(f'<p class="dr-coverage">{coverage}</p>')
     if untested:
         parts.append(f'<p class="dr-coverage">{untested}</p>')
+    if ocr_line:
+        parts.append(f'<p class="dr-coverage" data-note="machine-read">{_esc(ocr_line)}</p>')
     # ORDER MATCHES report.md. Two renderers over one artifact set must not disagree about
     # what comes first either -- that is the same drift in a quieter costume.
     if exceeded:
@@ -1288,7 +1290,17 @@ def compose_html(dir_path: str, stage_note: str = "") -> str:
     findings_html = _key_findings(checklist, reviews)
     if findings_html:
         sections.append(("findings", "Key Findings", findings_html))
-    numbers_html = _numbers_section(artifacts.get("reconciliation.json"))
+    reconciliation = artifacts.get("reconciliation.json")
+    ocr_check = _load_artifact(dir_path, "ocr_check.json")
+    numbers_html = _numbers_section(
+        reconciliation,
+        _reconciliation_prose.ocr_read_line_for(
+            dir_path,
+            ocr_check if _usable(ocr_check) else None,
+            reconciliation if _usable(reconciliation) else None,
+            inventory if _usable(inventory) else None,
+        ),
+    )
     if numbers_html:
         sections.append(("numbers", "What Your Numbers Say About Each Other", numbers_html))
     sections += [

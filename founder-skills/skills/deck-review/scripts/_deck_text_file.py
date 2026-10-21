@@ -124,3 +124,24 @@ def stamp(path: str | os.PathLike[str], run_id: str) -> tuple[str | None, dict[s
             ),
         }
     return body_sha256(data), None
+
+
+def pages_source(front: dict[str, str] | None) -> dict[int, str] | None:
+    """The front matter's `pages_source` flow mapping (`{1: extracted, 2: inventory}`) as {page: source}, or
+    None when it is absent or does not parse. `deck_text.py` writes it; this reads exactly that shape."""
+    raw = (front or {}).get("pages_source")
+    if raw is None:
+        return None
+    text = raw.strip()
+    if not (text.startswith("{") and text.endswith("}")):
+        return None
+    inner = text[1:-1].strip()
+    out: dict[int, str] = {}
+    if not inner:
+        return out
+    for part in inner.split(","):
+        number, sep, value = part.partition(":")
+        if not sep or not number.strip().isdigit() or not value.strip():
+            return None
+        out[int(number.strip())] = value.strip()
+    return out

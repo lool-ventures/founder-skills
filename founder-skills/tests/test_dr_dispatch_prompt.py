@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from slide_review_inputs import slide_review_inputs
 
 PLUGIN = Path(__file__).resolve().parents[1]
 SCRIPTS = PLUGIN / "skills" / "deck-review" / "scripts"
@@ -49,7 +50,7 @@ def _slide_reviews(review: Path, run_id: str = RUN) -> str:
     out = review / "slide_reviews.json"
     r = subprocess.run(
         [sys.executable, str(SCRIPTS / "slide_reviews.py"), "--run-id", run_id, "-o", str(out)]
-        + ["--reconciliation", str(recon)],
+        + ["--reconciliation", str(recon), *slide_review_inputs(review, run_id)],
         input=json.dumps(body),
         capture_output=True,
         text=True,

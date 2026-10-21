@@ -6392,6 +6392,12 @@ CLI_CODES = {
     # The producers that stamp the deck text's hash (slide_reviews.py, second_read.py, ledger.py with --deck-text)
     # refuse a deck_text.md they cannot use: DECK_TEXT_UNREADABLE (cannot be read, or not UTF-8), DECK_TEXT_INVALID
     # (no front matter), DECK_TEXT_OTHER_RUN (another run's); the skill runs Step 2's deck_text.py again.
+    # Step 3.95's machine read (deck_ocr.py) and its check (ocr_check.py) refuse, exit 1, nothing written:
+    # DECK_NOT_FOUND, OUTPUT_NOT_DIR (-o is a file), LEDGER_UNREADABLE, RECONCILIATION_UNREADABLE, OCR_OTHER_RUN (the
+    # receipt is another run's); ocr_check.py exits 2 OCR_NOT_RUN / OCR_INCOMPLETE until the read finished, and the
+    # skill runs Step 3.95 again. slide_reviews.py (Step 4) refuses OCR_CHECK_MISSING / OCR_CHECK_OTHER_RUN /
+    # OCR_CHECK_STALE when a figure the numbers section uses is on an image slide and this run's check for this
+    # reconciliation is absent, and OCR_CHECK_WRONG_DECK when the check was made against another deck file.
     "dr_producers": [
         "OUTPUT_IS_INPUT",
         "RUN_ID_REQUIRED",
@@ -6403,6 +6409,17 @@ CLI_CODES = {
         "DECK_TEXT_UNREADABLE",
         "DECK_TEXT_INVALID",
         "DECK_TEXT_OTHER_RUN",
+        "DECK_NOT_FOUND",
+        "OUTPUT_NOT_DIR",
+        "LEDGER_UNREADABLE",
+        "RECONCILIATION_UNREADABLE",
+        "OCR_NOT_RUN",
+        "OCR_INCOMPLETE",
+        "OCR_OTHER_RUN",
+        "OCR_CHECK_MISSING",
+        "OCR_CHECK_OTHER_RUN",
+        "OCR_CHECK_STALE",
+        "OCR_CHECK_WRONG_DECK",
     ],
     # ic-sim's compose: a simulation dir that belongs to a run, whose files do not agree on which.
     # FUND_PROFILE_NAMES_PEOPLE: compose and the page refuse (exit 1, nothing written) a fund profile written

@@ -22,6 +22,7 @@ SCRIPTS = TESTS.parent / "skills" / "deck-review" / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
 import _deck_text_file  # type: ignore[import-not-found]  # noqa: E402
+from slide_review_inputs import slide_review_inputs  # noqa: E402
 
 DECK_TEXT = SCRIPTS / "deck_text.py"
 SLIDE_REVIEWS = SCRIPTS / "slide_reviews.py"
@@ -192,6 +193,7 @@ def _slide_reviews(
         out,
         "--reconciliation",
         _reconciliation(tmp_path, run_id),
+        *slide_review_inputs(tmp_path, run_id),  # a later --deck-text in `extra` replaces this one
         *extra,
     ]
     return _run(SLIDE_REVIEWS, *argv, stdin=stdin)
@@ -207,21 +209,22 @@ def _slide_reviews_module() -> ModuleType:
 
 def test_slide_reviews_stamps_the_body_hash_and_keeps_the_read_token(tmp_path: Path) -> None:
     deck_text = _write_deck_text(tmp_path / "deck_text.md", run_id=RUN_B)
-    expected = _deck_text_file.body_sha256(deck_text.read_bytes())
+    other = _write_deck_text(tmp_path / "other_deck_text.md", run_id=RUN_B, body="## Slide 1\n\nOther words\n")
     payload = dict(_VALID, metadata={"deck_text_sha256": "0" * 64})
 
-    plain = _slide_reviews(tmp_path, RUN_B, tmp_path / "plain.json", stdin=json.dumps(payload))
+    first = _slide_reviews(tmp_path, RUN_B, tmp_path / "a.json", "--deck-text", other, stdin=json.dumps(payload))
     stamped = _slide_reviews(
         tmp_path, RUN_B, tmp_path / "stamped.json", "--deck-text", deck_text, stdin=json.dumps(payload)
     )
 
-    assert plain.returncode == 0, plain.stderr
+    assert first.returncode == 0, first.stderr
     assert stamped.returncode == 0, stamped.stderr
-    plain_written = json.loads((tmp_path / "plain.json").read_text(encoding="utf-8"))
+    first_written = json.loads((tmp_path / "a.json").read_text(encoding="utf-8"))
     stamped_written = json.loads((tmp_path / "stamped.json").read_text(encoding="utf-8"))
-    assert "deck_text_sha256" not in plain_written["metadata"]
-    assert stamped_written["metadata"]["deck_text_sha256"] == expected
-    assert stamped_written["metadata"]["read_token"] == plain_written["metadata"]["read_token"]
+    # Each carries its own deck text's body hash, never the hand-off's; the read token ignores the deck text.
+    assert first_written["metadata"]["deck_text_sha256"] == _deck_text_file.body_sha256(other.read_bytes())
+    assert stamped_written["metadata"]["deck_text_sha256"] == _deck_text_file.body_sha256(deck_text.read_bytes())
+    assert stamped_written["metadata"]["read_token"] == first_written["metadata"]["read_token"]
 
 
 def test_read_token_hashes_the_body_without_metadata() -> None:

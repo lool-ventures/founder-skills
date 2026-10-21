@@ -24,6 +24,7 @@ from typing import Any
 
 import pytest
 from html_text import visible_text  # noqa: E402
+from slide_review_inputs import slide_review_inputs  # noqa: E402
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DECK_REVIEW_DIR = os.path.join(os.path.dirname(SCRIPT_DIR), "skills", "deck-review", "scripts")
@@ -79,7 +80,7 @@ def _tokened_slide_reviews(directory: str | Path, run_id: str, body: dict | None
     out = d / "slide_reviews.json"
     rc, _stdout, err = run_script_raw(
         "slide_reviews.py",
-        ["--run-id", run_id, "-o", str(out), "--reconciliation", str(recon)],
+        ["--run-id", run_id, "-o", str(out), "--reconciliation", str(recon), *slide_review_inputs(d, run_id)],
         stdin_data=json.dumps(body),
     )
     assert rc == 0, err
@@ -7342,12 +7343,24 @@ def test_slide_reviews_overwrites_a_token_the_hand_off_carries_and_never_prints_
         out = tmp_path / f"slide_reviews{len(pretty)}.json"
         rc, stdout, err = run_script_raw(
             "slide_reviews.py",
-            ["--run-id", _SR_RUN, "-o", str(out), "--reconciliation", str(recon), *pretty],
+            [
+                "--run-id",
+                _SR_RUN,
+                "-o",
+                str(out),
+                "--reconciliation",
+                str(recon),
+                *slide_review_inputs(tmp_path, _SR_RUN),
+                *pretty,
+            ],
             json.dumps(body),
         )
         assert rc == 0, err
         written = json.loads(out.read_text(encoding="utf-8"))["metadata"]
-        assert written == {"read_token": honest, "run_id": _SR_RUN}, "a hand-off's token must be replaced"
+        assert {k: written[k] for k in ("read_token", "run_id")} == {"read_token": honest, "run_id": _SR_RUN}, (
+            "a hand-off's token must be replaced"
+        )
+        assert set(written) == {"read_token", "run_id", "deck_text_sha256"}
         _no_secret_printed(stdout + err, honest)
 
 

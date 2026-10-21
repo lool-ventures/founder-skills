@@ -24,6 +24,7 @@ from pathlib import Path
 import _critique_corpus
 import pytest
 import yaml
+from slide_review_inputs import slide_review_inputs
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SKILLS_ROOT = REPO_ROOT / "founder-skills" / "skills"
@@ -1664,7 +1665,10 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 118,476 -> 119,018 (+542 B) on 2026-10-19: LEDGER_EXTRACTION records a printed months multiplier
     # as its own `months` figure, and RELATION_PROPOSAL proposes a monthly figure times it as one product
     # against the stated annual or quarterly total, which the engine now reads as that period's total.
-    "deck-review": 119_018,
+    # 119,018 -> 119,936 on 2026-10-21: Step 3.95 machine-reads the image slides whose figures the
+    # numbers section uses (its two commands, the run-again rule, no sub-agent reading the result), and Step 4's
+    # pipe passes `--ledger` and `--ocr-check` to the gate that checks the step ran.
+    "deck-review": 119_936,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
@@ -3818,6 +3822,7 @@ def _deck_review_slide_reviews() -> tuple[str, str]:
             str(out),
             "--reconciliation",
             str(recon),
+            *slide_review_inputs(work, "RID"),
         ],
         input=json.dumps(body),
         capture_output=True,
@@ -4009,7 +4014,37 @@ _REJECTING_PAYLOADS: list[tuple[str, str, list[str], str] | tuple[str, str, list
         ["--run-id", "RID"],
         '{"slides_transcribed": [6]}',
     ),
+    # Step 3.95's machine read and its check. Every required flag is given, so each refuses for the named
+    # reason (a missing deck; a missing ledger) and never at argparse.
+    (
+        "deck-review",
+        "deck_ocr.py",
+        ["--deck", "/nonexistent/deck.pdf", "--ledger", "/nonexistent/l.json", "--reconciliation", "/nonexistent/r"]
+        + ["--deck-text", "/nonexistent/d.md", "--run-id", "RID"],
+        "",
+    ),
+    (
+        "deck-review",
+        "ocr_check.py",
+        ["--ledger", "/nonexistent/l.json", "--reconciliation", "/nonexistent/r", "--deck-text", "/nonexistent/d"]
+        + ["--ocr-dir", "/nonexistent/ocr", "--run-id", "RID"],
+        "",
+    ),
 ]
+
+
+def test_the_deck_ocr_entry_refuses_for_the_missing_deck_not_the_output(tmp_path: Path) -> None:
+    """Control for the `deck_ocr.py` entry: its `-o` is a folder, so the registry's sentinel FILE at `-o` would
+    also be refused (`OUTPUT_NOT_DIR`). The missing deck is checked first, so that is the refusal it names."""
+    out = tmp_path / "artifact.json"
+    out.write_text('{"sentinel": true}', encoding="utf-8")
+    entry = next(e for e in _REJECTING_PAYLOADS if e[1] == "deck_ocr.py")
+    proc = subprocess.run(
+        [sys.executable, str(SKILLS_ROOT / "deck-review" / "scripts" / "deck_ocr.py"), *entry[2], "-o", str(out)],
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 1 and json.loads(proc.stdout)["code"] == "DECK_NOT_FOUND", proc.stdout
 
 
 @pytest.mark.parametrize("entry", _REJECTING_PAYLOADS, ids=lambda e: f"{e[0]}/{e[1]}")

@@ -1137,6 +1137,22 @@ If it fails, a withdrawal named a comparison that does not exist or gave a reaso
 the two above. The error names which. Re-dispatch with the correction; the previous
 artifact is untouched and still valid.
 
+### Step 3.95: Machine-Read the Image Slides -> `ocr_check.json`
+
+Only when Step 2's `source` was `inventory` or `mixed`; `--deck` is Step 2's `--deck` path. Repeat until
+`deck_ocr.py` prints `"complete": true` and `ocr_check.py` exits 0:
+
+```bash
+python3 "$SCRIPTS/deck_ocr.py" --deck "<Step 2's --deck>" --ledger "$REVIEW_DIR/ledger.json" \
+  --reconciliation "$REVIEW_DIR/reconciliation.json" --deck-text "$REVIEW_DIR/deck_text.md" \
+  --run-id "$RUN_ID" -o "$HANDOFF_DIR/ocr"
+python3 "$SCRIPTS/ocr_check.py" --ledger "$REVIEW_DIR/ledger.json" \
+  --reconciliation "$REVIEW_DIR/reconciliation.json" --deck-text "$REVIEW_DIR/deck_text.md" \
+  --ocr-dir "$HANDOFF_DIR/ocr" --run-id "$RUN_ID" -o "$REVIEW_DIR/ocr_check.json"
+```
+
+No sub-agent reads `ocr/` or `ocr_check.json`.
+
 ### Step 4: Review Each Slide -> `slide_reviews.json` (Context A dispatch)
 
 **Dispatch the deck-review sub-agent in Context A (SLIDE_REVIEWS).** Do not do the slide analysis yourself in the main thread — dispatch it. **Call the `Task` tool with `subagent_type: "founder-skills:deck-review"`** and the prompt below, so the analysis runs in the scoped agent (its `tools:` allowlist binds; a type-less dispatch falls back to the wildcard `general-purpose` agent).
@@ -1206,11 +1222,13 @@ run_id stamping.
 ```bash
 cat "$HANDOFF_DIR/slide_reviews_output.json" | \
   python3 "$SCRIPTS/slide_reviews.py" --run-id "$RUN_ID" -o "$REVIEW_DIR/slide_reviews.json" \
-    --reconciliation "$REVIEW_DIR/reconciliation.json" --deck-text "$REVIEW_DIR/deck_text.md" --pretty
+    --reconciliation "$REVIEW_DIR/reconciliation.json" --deck-text "$REVIEW_DIR/deck_text.md" \
+    --ledger "$REVIEW_DIR/ledger.json" --ocr-check "$REVIEW_DIR/ocr_check.json" --pretty
 ```
 <!-- skill-quality-ci: bash-after-subagent-ok -->
 
-A `DECK_TEXT_` code: run Step 2's `deck_text.py` again (the resume rule), then this pipe.
+A `DECK_TEXT_` code: run Step 2's `deck_text.py` again (the resume rule), then this pipe. An `OCR_CHECK_` code: follow
+its message, then this pipe.
 
 ### Step 5: Score Checklist -> `checklist.json` (Context A dispatch)
 

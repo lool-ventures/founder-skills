@@ -367,3 +367,93 @@ def untested_claims_line(
         plural = "claims" if len(not_one_period) > 1 else "claim"
         parts.append(_not_one_period_explanation("; ".join(not_one_period), plural, escape))
     return f"{emphasis('One thing this review could not check.')} " + " ".join(parts) + "\n"
+
+
+# --- Step 3.95: the machine read of image slides ------------------------------------------------------------------
+# What a founder is told about the figures this section uses from slides with no text to read: which slides, and how
+# many of those figures a separate machine read found as written. Counts only, never which figure: a per-figure list
+# would single out about one correct figure in nine (the machine read misses numbers in charts and styled text).
+
+
+def _slides(numbers: list[int], *, capital: bool) -> str:
+    word = ("Slide" if capital else "slide") if len(numbers) == 1 else ("Slides" if capital else "slides")
+    shown = [str(n) for n in numbers]
+    listed = shown[0] if len(shown) == 1 else ", ".join(shown[:-1]) + " and " + shown[-1]
+    return f"{word} {listed}"
+
+
+def _read_from_looks(numbers: list[int]) -> str:
+    verb = "carries" if len(numbers) == 1 else "carry"
+    return (
+        f"{_slides(numbers, capital=True)} {verb} little or no selectable text, so the figures this section uses "
+        "from them were read from how the slides look."
+    )
+
+
+def ocr_read_line(
+    ocr_check: dict[str, Any] | None,
+    *,
+    reconciliation_sha256: str | None,
+    run_id: str | None,
+    image_only_deck: bool,
+) -> str:
+    """The sentence(s) about Step 3.95's machine read, or "" when there is nothing to say. Plain text: the caller
+    escapes or emphasises. `ocr_check` counts only when it is this run's and was made for this reconciliation."""
+    check = _as_dict(ocr_check)
+    meta = _as_dict(check.get("metadata"))
+    if not check or meta.get("run_id") != run_id or meta.get("reconciliation_sha256") != reconciliation_sha256:
+        return ""
+    status = check.get("status")
+    counts = _as_dict(check.get("counts"))
+    read = sorted(n for n in _as_list(check.get("pages_machine_read")) if isinstance(n, int))
+    in_scope = sorted(n for n in _as_list(check.get("slides")) if isinstance(n, int)) or read
+    checked, found_n, not_checked = (int(counts.get(k) or 0) for k in ("checked", "found", "not_checked"))
+    if status == "checked" and read and checked:
+        lead = _read_from_looks(read)
+        if found_n == checked:
+            if checked == 1:
+                tail = (
+                    "A separate machine read of that slide found it as written."
+                    if len(read) == 1
+                    else ("A separate machine read of those slides found it as written.")
+                )
+            else:
+                tail = f"A separate machine read of {'that slide' if len(read) == 1 else 'those slides'} found all "
+                tail += f"{checked} of them as written."
+            line = f"{lead} {tail}"
+        elif checked >= 3:
+            line = (
+                f"{lead} A separate machine read of {'that slide' if len(read) == 1 else 'those slides'} found "
+                f"{found_n} of those {checked} figures as written. Machine reads often miss numbers in charts and "
+                "styled text, so a figure it did not find may well be right; if one matters to you, compare it with "
+                "the slide itself."
+            )
+        else:
+            return "" if image_only_deck else _read_from_looks(in_scope)
+        if not_checked:
+            line += f" {not_checked} {'was' if not_checked == 1 else 'were'} not machine-read."
+        return line
+    if status in ("low_match", "unavailable", "none_read") and in_scope and not image_only_deck:
+        return _read_from_looks(in_scope)
+    return ""
+
+
+def ocr_read_line_for(
+    dir_path: str,
+    ocr_check: dict[str, Any] | None,
+    reconciliation: dict[str, Any] | None,
+    inventory: dict[str, Any] | None,
+) -> str:
+    """`ocr_read_line` for a review folder: the reconciliation's bytes (the check must have been made for them)
+    and run id, and whether the whole deck is images (its own note then already says so)."""
+    import hashlib
+    import os
+
+    try:
+        with open(os.path.join(dir_path, "reconciliation.json"), "rb") as fh:
+            sha = hashlib.sha256(fh.read()).hexdigest()
+    except OSError:
+        return ""
+    run_id = _as_dict(_as_dict(reconciliation).get("metadata")).get("run_id")
+    quality = str(_as_dict(inventory).get("input_quality") or "").strip().lower()
+    return ocr_read_line(ocr_check, reconciliation_sha256=sha, run_id=run_id, image_only_deck=quality == "image_only")

@@ -12,6 +12,7 @@ Ids and figures are synthetic.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 import subprocess
@@ -126,6 +127,46 @@ def _ct_cap_state(d: Path, rid: str) -> tuple[list[str], str | None, Path]:
     return [*argv, "--instruments", str(d / "instruments.json"), "--run-id", rid, "-o", str(out)], None, out
 
 
+_DR_DECK = b"%PDF synthetic"
+
+
+def _dr_ocr_build(d: Path) -> None:
+    """Step 3.95's inputs: a deck, a ledger and a reconciliation with no relation (so nothing needs reading)."""
+    (d / "deck.pdf").write_bytes(_DR_DECK)
+    (d / "ledger.json").write_text(json.dumps({"figures": [], "metadata": {"run_id": "builder"}}), encoding="utf-8")
+    recon = {"status": "checked", "relations": [], "metadata": {"run_id": "builder"}}
+    (d / "reconciliation.json").write_text(json.dumps(recon), encoding="utf-8")
+
+
+def _dr_deck_text(d: Path, rid: str) -> Path:
+    sha = hashlib.sha256(_DR_DECK).hexdigest()
+    path = d / "deck_text.md"
+    path.write_text(
+        f"---\nrun_id: {rid}\nsource: inventory\npages_source: {{1: inventory}}\ndeck_sha256: {sha}\n---\n"
+        "## Slide 1\n\nText\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def _dr_deck_ocr(d: Path, rid: str) -> tuple[list[str], str | None, Path]:
+    out = d / "handoff" / "ocr-check-run" / "ocr"
+    argv = [str(SKILLS / "deck-review" / "scripts" / "deck_ocr.py"), "--deck", str(d / "deck.pdf")]
+    argv += ["--ledger", str(d / "ledger.json"), "--reconciliation", str(d / "reconciliation.json")]
+    return [*argv, "--deck-text", str(_dr_deck_text(d, rid)), "--run-id", rid, "-o", str(out)], None, out
+
+
+def _dr_ocr_check(d: Path, rid: str) -> tuple[list[str], str | None, Path]:
+    ocr = d / "handoff" / "ocr-check-run" / "ocr"
+    ocr.mkdir(parents=True, exist_ok=True)
+    receipt = {"run_id": rid, "complete": True, "status": "no_figures", "reason": "no_figures"}
+    (ocr / "receipt.json").write_text(json.dumps(receipt), encoding="utf-8")
+    out = d / "ocr_check_out.json"
+    argv = [str(SKILLS / "deck-review" / "scripts" / "ocr_check.py"), "--ledger", str(d / "ledger.json")]
+    argv += ["--reconciliation", str(d / "reconciliation.json"), "--deck-text", str(_dr_deck_text(d, rid))]
+    return [*argv, "--ocr-dir", str(ocr), "--run-id", rid, "-o", str(out)], None, out
+
+
 PRODUCERS = {
     "market-sizing/checklist.py": Producer("market-sizing", goldens._ms_ref_dir, _ms_checklist),  # type: ignore[arg-type]
     "financial-model-review/unit_economics.py": Producer(
@@ -134,6 +175,8 @@ PRODUCERS = {
     "competitive-positioning/checklist.py": Producer("competitive-positioning", goldens._cp_dir, _cp_checklist),
     "ic-sim/fund_profile.py": Producer("ic-sim", goldens._ic_dir, _ic_fund_profile),
     "cap-table/cap_state.py": Producer("cap-table", goldens.ct_dir, _ct_cap_state),
+    "deck-review/deck_ocr.py": Producer("deck-review", _dr_ocr_build, _dr_deck_ocr),
+    "deck-review/ocr_check.py": Producer("deck-review", _dr_ocr_build, _dr_ocr_check),
 }
 
 
