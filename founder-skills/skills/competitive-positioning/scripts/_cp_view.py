@@ -14,7 +14,10 @@ purpose is to steer what the founder sees.
 
 from __future__ import annotations
 
+import importlib.util
+import os
 import re
+import sys
 from collections.abc import Iterable, Mapping
 from typing import Any
 
@@ -864,3 +867,151 @@ def review_sentences(redteam: Mapping[str, Any] | None, skip_reason: str | None)
         truth = str(f.get("what_is_true") or "").strip()
         out.append(f"{sev}: {claim}. {truth}".strip())
     return out
+
+
+# --- the analysis checklist ------------------------------------------------------------------
+# report.md's "Analysis checklist" section and the checklist on both pages render from here. The evidence
+# is the assessor's own text, so it passes one owner before any surface shows it: criterion ids become their
+# quoted labels, our dispatch-context words become plain words, the fleet policy humanizes private tokens, and
+# any sentence still naming a file by an internal-looking filename is DROPPED, never renamed (renaming a file
+# in prose would be a lie; the policy says stop mentioning it). Each drop is marked. The marker says what was
+# done, never whose file it was: `.md` / `.json` read as internal by extension and may be the founder's upload.
+
+CATEGORY_NAMES: dict[str, str] = {
+    "COVER": "Competitor Coverage",
+    "POS": "Positioning Quality",
+    "MOAT": "Moat Assessment",
+    "EVID": "Evidence Quality",
+    "NARR": "Narrative Readiness",
+    "MISS": "Common Mistakes",
+}
+STATUS_WORDS = {"pass": "Pass", "warn": "Warn", "fail": "Fail", "not_applicable": "Not applicable"}
+_STATUS_TONE = {"pass": "pass", "warn": "warn", "fail": "fail", "not_applicable": "na"}
+
+# Held equal to verify_positioning.py's by a test.
+CRITERION_ID_RE = re.compile(r"\b(?:COVER|POS|MOAT|EVID|NARR|MISS)_\d{2}\b")
+
+# Every competitive-positioning dispatch context (held to the dispatch-type table by a test).
+CONTEXT_WORDS: dict[str, str] = {
+    "COMPETITOR_RECALL": "the competitor recall check",
+    "COMPETITOR_VERIFICATION": "the competitor check",
+    "LANDSCAPE_RESEARCH": "the competitor research",
+    "MOAT_SCORING": "the moat scoring",
+    "POSITIONING_SCORING": "the positioning scoring",
+    "STARTUP_RESEARCH": "the research on your company",
+    "CHECKLIST": "the quality check",
+    "RED_TEAM": "the outside review",
+    "POST_COMPOSE_COACHING": "the coaching",
+}
+_CONTEXT_RE = re.compile(r"\b(" + "|".join(sorted(CONTEXT_WORDS, key=len, reverse=True)) + r")\b")
+
+EVIDENCE_DROPPED_ALL = "Evidence not shown: its only sentence named a file by its filename."
+_DROPPED_ONE = "(One sentence was left out because it named a file by its filename.)"
+_DROPPED_MANY = "({n} sentences were left out because they named a file by its filename.)"
+
+# A sentence ends at . ! or ? followed by whitespace and an upper-case letter, a digit or an opening quote or
+# bracket -- never after these abbreviations.
+_ABBREVIATIONS = ("e.g.", "i.e.", "vs.", "Inc.", "Ltd.", "Co.", "No.", "approx.")
+_BOUNDARY_RE = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9\"'“‘(\[])")
+
+_POLICY_PATH = os.path.normpath(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "scripts", "_founder_text.py")
+)
+
+
+def _policy() -> Any:
+    """The fleet's founder-text policy, loaded by path. Raises when it cannot be loaded: the caller fails closed,
+    because a page that cannot check its evidence must not show it."""
+    loaded = sys.modules.get("_founder_text")
+    if loaded is not None:
+        return loaded
+    spec = importlib.util.spec_from_file_location("_founder_text", _POLICY_PATH)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load {_POLICY_PATH}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    sys.modules["_founder_text"] = module
+    return module
+
+
+def split_sentences(text: str) -> list[str]:
+    """The evidence's sentences, by the boundary rule above."""
+    out: list[str] = []
+    start = 0
+    for m in _BOUNDARY_RE.finditer(text):
+        head = text[start : m.start()]
+        if any(head.endswith(a) for a in _ABBREVIATIONS):
+            continue
+        out.append(head)
+        start = m.end()
+    out.append(text[start:])
+    return [s.strip() for s in out if s.strip()]
+
+
+def criterion_labels(items: Iterable[Any]) -> dict[str, str]:
+    """id -> label, from the run's own checklist items."""
+    out: dict[str, str] = {}
+    for item in items:
+        item = _as_dict(item)
+        cid, label = str(item.get("id") or ""), " ".join(str(item.get("label") or "").split())
+        if cid and label:
+            out[cid] = label
+    return out
+
+
+def criterion_text(text: Any, labels: Mapping[str, str]) -> str:
+    """One criterion's evidence, as the founder may see it (see the section note above). Fails closed: if the
+    policy cannot be loaded or anything here raises, the row says its evidence is not shown."""
+    try:
+        body = " ".join(str(text or "").split())
+        if not body:
+            return ""
+        body = CRITERION_ID_RE.sub(lambda m: f"“{labels[m.group(0)]}”" if m.group(0) in labels else m.group(0), body)
+        body = _CONTEXT_RE.sub(lambda m: CONTEXT_WORDS[m.group(0)], body)
+        policy = _policy()
+        body = policy.substitute(body)
+        kept, dropped = [], 0
+        for sentence in split_sentences(body):
+            if policy.scan(sentence)["filenames"]:
+                dropped += 1
+            else:
+                kept.append(sentence)
+        if not dropped:
+            return " ".join(kept)
+        if not kept:
+            return EVIDENCE_DROPPED_ALL
+        return " ".join(kept) + " " + (_DROPPED_ONE if dropped == 1 else _DROPPED_MANY.format(n=dropped))
+    except Exception:  # noqa: BLE001 - fail closed on anything, never show unchecked evidence
+        return EVIDENCE_DROPPED_ALL
+
+
+def checklist_groups(checklist: Mapping[str, Any] | None) -> list[dict[str, Any]]:
+    """The checklist as `_ui.checklist` groups, in the categories' order, evidence through `criterion_text`.
+    Each group carries `code` (the category's code) beside `name`."""
+    items = [_as_dict(i) for i in _as_list(_as_dict(checklist).get("items")) if isinstance(i, dict)]
+    labels = criterion_labels(items)
+    groups: list[dict[str, Any]] = []
+    order = list(CATEGORY_NAMES) + sorted({str(i.get("category") or "") for i in items} - set(CATEGORY_NAMES))
+    for code in order:
+        rows = [i for i in items if str(i.get("category") or "") == code]
+        if not rows:
+            continue
+        passed = sum(1 for i in rows if i.get("status") == "pass")
+        applicable = sum(1 for i in rows if i.get("status") in ("pass", "warn", "fail"))
+        groups.append(
+            {
+                "code": code,
+                "name": CATEGORY_NAMES.get(code, code or "Other"),
+                "count_text": f"{passed}/{applicable} pass" if applicable else "Not applicable",
+                "items": [
+                    {
+                        "tone": _STATUS_TONE.get(str(i.get("status")), "na"),
+                        "title": labels.get(str(i.get("id") or ""), "Checklist item"),
+                        "criterion": str(i.get("id") or ""),
+                        "evidence": criterion_text(i.get("evidence"), labels),
+                    }
+                    for i in rows
+                ],
+            }
+        )
+    return groups
