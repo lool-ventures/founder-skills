@@ -80,9 +80,9 @@ Search the whole deck and cite the slide before failing; an unsourced argument i
 
 ### `business_model_clear`
 **Label:** Business model explains money flow and margins
-**Pass:** Pricing model clear (seat, usage, outcome, per workflow, take-rate). Who pays vs. who uses distinguished. Gross margin structure shown (especially for AI/compute-heavy products).
+**Pass:** Pricing model clear (seat, usage, outcome, per workflow, take-rate), with a price level or range stated (per seat, per unit, per contract, or a take-rate %). Who pays vs. who uses distinguished. Gross margin structure shown (especially for AI/compute-heavy products).
 **Fail:** No business model slide or just "SaaS" with no detail.
-**Warn:** Pricing mentioned but gross margin or buyer vs. user distinction missing.
+**Warn:** Pricing model named without a price level, or pricing mentioned but gross margin or buyer vs. user distinction missing.
 **Basis:** Sequoia framework — pricing model, buyer vs. user, gross margin structure.
 
 ### `gtm_has_proof`
@@ -94,18 +94,41 @@ Search the whole deck and cite the slide before failing; an unsourced argument i
 
 ### `team_has_depth`
 **Label:** Team slide demonstrates founder-market fit
-**Pass:** Bios, photos, LinkedIn links. Founder-market fit highlighted. Complementary skills shown. Advisory board if adding real credibility.
-**Fail:** Just names or roles without context. No photos.
+**Pass:** Bios. Founder-market fit highlighted. Complementary skills shown. Advisory board if adding real credibility. On an uploaded file (`input_format` `pdf` or `pptx`), also photos and LinkedIn links.
+**Fail:** Just names or roles without context. On an uploaded file, no photos.
 **Warn:** Some bios but founder-market fit not explicitly addressed.
+**Scope:** When `deck_inventory.json` `input_format` is `text` or `markdown`, do not judge photos or links: their absence is not a Warn or a Fail. This scope is yours to apply; unlike the Design gate, no script applies it.
 **Basis:** DocSend — team slide gets ~46 seconds out of ~2:30 total (~30% of attention). Storydoc: 43% of reading time on interactive decks.
 
 ## Category 3 — Stage Fit (5 items)
 
 ### `stage_appropriate_structure`
 **Label:** Slide order matches stage-specific framework
-**Pass:** Slide ordering follows the reference outline for the detected stage.
-**Fail:** Uses wrong stage's structure (e.g., pre-seed deck with Series A cohort data expectations).
-**Warn:** Mostly appropriate but 1-2 slides out of expected order.
+**Pass:** The slides the deck has appear in the order of `stage_profile.json` `expected_framework` for the detected stage.
+**Fail:** Slides follow another stage's order, or most of them are out of the expected order.
+**Warn:** Mostly in order, with 1-2 slides out of the expected order.
+**Scope:** This criterion judges ORDER only. The comparand is `expected_framework` in `stage_profile.json`, not the reference outlines in `deck-best-practices.md` (those are guidance for the founder). A missing slide is not scored here: it is scored once, by the criterion that owns it (table below), or not at all. Extra slides beyond the framework are not a Warn by themselves. When `expected_framework` is empty (Series B, growth), judge order against the general Problem → Solution → Proof → Ask arc and score nothing for absence. The entries may be worded freely ("Company purpose with traction hint"); match each to the row it describes. "Stages" names where the stage table lists a slide; a row applies at any stage whose framework lists it.
+
+| Framework slide | Stages | Scored when absent by |
+|---|---|---|
+| Company purpose (`purpose`) | pre-seed | `purpose_clear` |
+| Company purpose with a traction hint (`purpose_traction`) | seed, Series A | `purpose_clear` (the purpose half); `stage_appropriate_traction` (the traction half) |
+| Problem (`problem`) | pre-seed, seed, Series A | `problem_quantified` (it fails on thin content; a missing problem slide is the thinnest) |
+| Solution / product (`solution_product`) | pre-seed, seed, Series A | `solution_shows_workflow` (it fails on thin content) |
+| Why now (`why_now`) | pre-seed | `why_now_has_catalyst` |
+| Market (`market`) | pre-seed, seed, Series A | `market_bottom_up` |
+| Early signals (`early_signals`) | pre-seed | `stage_appropriate_traction` |
+| Traction KPIs (`traction_kpis`) | seed, Series A | `stage_appropriate_traction` |
+| Cohort data (`cohort_data`) | Series A | not scored when absent (`stage_appropriate_traction` may still warn on missing cohorts, by its own text) |
+| LTV / CAC (`ltv_cac`) | Series A | not scored when absent |
+| Competition (`competition`) | seed, Series A | `competition_honest` |
+| Pricing and business model (`business_model_pricing`) | seed, Series A | `business_model_clear` |
+| Go-to-market (`gtm`) | seed, Series A | `gtm_has_proof` |
+| Unit economics (`unit_economics`) | seed, Series A | not scored when absent (`stage_appropriate_traction` may still warn on Series A unit economics, by its own text) |
+| Team (`team`) | pre-seed, seed, Series A | `team_has_depth` (it fails on thin content) |
+| Financials (`financials`) | seed, Series A | `stage_appropriate_financials` |
+| Ask and milestones (`ask_milestones`) | pre-seed, seed, Series A | `ask_ties_to_milestones` |
+
 **Basis:** All sources — pre-seed, seed, and Series A have different emphasis and ordering.
 
 ### `stage_appropriate_traction`
@@ -139,7 +162,7 @@ Several raise scenarios with dollar amounts are an ask, not a missing one: warn,
 
 ## Category 4 — Design & Readability (5 items)
 
-Score all 5 normally for an uploaded file (PDF/PPTX/markdown). When there is no
+Score all 5 normally for an uploaded file (PDF/PPTX). When there is no
 rendered page (`input_format` is `"text"` or `"markdown"` — a deck described in
 conversation, or a PowerPoint that could not be converted), the producer script
 forces **four** of them to `not_applicable` after you return: there is no slide to

@@ -11,7 +11,8 @@ read), the stage profile at /agent/review/stage_profile.json, and the
 deck inventory at /agent/review/deck_inventory.json.
 
 Assess ALL 35 criteria including the 4 AI criteria and the 5 Design & Readability
-criteria — do NOT self-gate. `checklist.py` applies deterministic AI-criteria
+criteria — do NOT self-gate, except where a criterion states its own scope
+(`team_has_depth`). `checklist.py` applies deterministic AI-criteria
 gating from `deck_inventory.json`'s `ai_company_status` AND deterministic
 Design-criteria gating from its `input_format` (forcing Design & Readability to
 `not_applicable` when the deck was described in text rather than uploaded as a

@@ -2319,7 +2319,12 @@ REFERENCES_CEILING: dict[str, int] = {
     # `scored_by` and `reviewer_status`.
     # 52_810 -> 53_160 (+350 B): optional reviewer notes (`observations`, `printed_label`) in
     # artifact-schemas.md and deck_inventory.schema.json.
-    "deck-review": 53_160,
+    # 53_160 -> 56_173 (+3,013 B): three criteria worded precisely in checklist-criteria.md. Business
+    # model asks for a price level; the team criterion carries its own text-deck scope (and
+    # deck-best-practices.md's team bullet the same); slide structure judges order only, with the table
+    # of which criterion scores each framework slide's absence, its rows named in words because the
+    # stage profile's entries are written freely.
+    "deck-review": 56_173,
     # competitive-positioning +474 B: artifact-schemas.md documented the `startup_rank` RENDERING
     # convention but not its SENTINEL. `score_moats.py` stamps {"rank": -1, "total": 0} when the
     # startup is not_applicable on a dimension, and compose_report.py rendered it verbatim —

@@ -159,7 +159,8 @@ Readability criterion too, even when `deck_inventory.json`'s `input_format` is `
 (the founder described slides in conversation rather than uploading a
 file) — `checklist.py` applies deterministic Design-criteria gating from
 `input_format` after you return, the same way it gates AI criteria from
-`ai_company_status`; you do not self-gate either category. Every
+`ai_company_status`; you do not self-gate either category, except where a
+criterion states its own scope (`team_has_depth`). Every
 `fail`/`warn` `evidence` MUST include BOTH what the deck actually does
 (quote or describe the specific slide content) AND the best-practice
 principle it falls short of — the deck observation is not optional.

@@ -106,7 +106,7 @@ Based on Sequoia's "Writing a Business Plan" + modern additions from DocSend, YC
 
 ### Slide 10 — Team (why you can win)
 - **This slide is disproportionately scrutinized.** DocSend: ~46 seconds out of ~2:30 total (~30% of attention). Storydoc: 43% of reading time on interactive decks. All sources agree: invest heavily here.
-- Bios, photos, LinkedIn. Highlight founder-market fit + complementary skills.
+- Bios; when `input_format` is `pdf` or `pptx`, photos and LinkedIn links. Highlight founder-market fit + complementary skills.
 - Advisory board if it adds real credibility.
 
 ### Slide 11 — Financials (what exists + what changes with funding)
