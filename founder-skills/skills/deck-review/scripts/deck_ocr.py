@@ -6,7 +6,7 @@
 """Step 3.95's machine read: render and OCR the image slides whose figures the numbers section uses.
 
     deck_ocr.py --deck PDF --ledger L --reconciliation R --deck-text D --run-id ID -o "$HANDOFF_DIR/ocr"
-                [--max-pages 40] [--budget-seconds 40] [--dpi 200]
+                [--max-pages 40] [--budget-seconds 30] [--dpi 200]
 
 `-o` is a folder: it gets `receipt.json` and one `p<N>.txt` per page read. Run it again until it prints
 `"complete": true`; each call resumes where the last stopped, starting a new page only while the call is
@@ -150,7 +150,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("-o", "--output", required=True, help="a folder: the run's hand-off ocr/")
     p.add_argument("--max-pages", type=int, default=_ocr_scope.MAX_PAGES)
     # 40 s + a 15 s render + a 30 s read is 85 s at worst, under the shell tool's 120 s kill on cloud and locally.
-    p.add_argument("--budget-seconds", type=float, default=40.0)
+    p.add_argument("--budget-seconds", type=float, default=30.0)
     p.add_argument("--dpi", type=int, default=200)
     p.add_argument("--pretty", action="store_true")
     args = p.parse_args(argv)
