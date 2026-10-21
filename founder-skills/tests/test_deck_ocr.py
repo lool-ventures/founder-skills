@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -205,3 +206,34 @@ def test_an_unreadable_ledger_is_refused(tmp_path: Path) -> None:
     rc, out = _run(tmp_path, _stubs(tmp_path))
     assert (rc, out["code"]) == (1, "LEDGER_UNREADABLE")
     assert not (rv / "handoff" / "ocr").exists()
+
+
+FIXTURE_DECK = Path(__file__).resolve().parent / "fixtures" / "deck-review" / "synthetic-image-deck.pdf"
+
+
+@pytest.mark.skipif(
+    not (shutil.which("pdftoppm") and shutil.which("tesseract")), reason="needs pdftoppm and tesseract on PATH"
+)
+def test_the_real_tools_find_the_fixture_decks_figures(tmp_path: Path) -> None:
+    """With real binaries, the image fixture's three unit-economics and revenue figures are found as written."""
+    rv = _review(tmp_path, slides=6, figure_slides=(), deck=FIXTURE_DECK.read_bytes())
+    figs = [
+        {"id": "rev", "raw": "$1.2M", "unit_kind": "money", "slide": 3},
+        {"id": "gm", "raw": "75%", "unit_kind": "percent", "slide": 4},
+        {"id": "gp", "raw": "$690K", "unit_kind": "money", "slide": 4},
+    ]
+    (rv / "ledger.json").write_text(json.dumps({"figures": figs, "metadata": {"run_id": RUN}}))
+    recon = {"status": "checked", "relations": [{"operands": ["rev", "gm"], "expected_id": "gp"}]}
+    (rv / "reconciliation.json").write_text(json.dumps({**recon, "metadata": {"run_id": RUN}}))
+    rc, out = _run(tmp_path, Path(shutil.which("tesseract") or "").parent)
+    assert rc == 0 and out["complete"] is True, out
+    check = subprocess.run(
+        [sys.executable, str(SCRIPTS / "ocr_check.py"), "--ledger", str(rv / "ledger.json")]
+        + ["--reconciliation", str(rv / "reconciliation.json"), "--deck-text", str(rv / "deck_text.md")]
+        + ["--ocr-dir", str(rv / "handoff" / "ocr"), "--run-id", RUN, "-o", str(rv / "ocr_check.json")],
+        capture_output=True,
+        text=True,
+    )
+    assert check.returncode == 0, check.stdout
+    written = json.loads((rv / "ocr_check.json").read_text())
+    assert written["status"] == "checked" and written["counts"]["found"] == 3, written
