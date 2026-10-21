@@ -1,0 +1,34 @@
+{
+  "fixture_version": 1,
+  "skill": "deck-review",
+  "input": "synthetic-image-deck.pdf",
+  "assertions": {
+    "report_json_exists": true,
+    "report_md_exists": true,
+    "all_artifacts_have_run_id": true,
+    "schema_validation_passes": true,
+    "coaching_payload_present": true,
+    "score_pct_range": [5, 80],
+    "overall_status_in": ["solid", "needs_work", "major_revision"],
+    "reconciliation_status_in": ["checked"],
+    "ocr_status_in": ["checked", "low_match"],
+    "ocr_in_scope_min": 3
+  },
+  "_calibration_notes": [
+    "THIS LANE EXISTS FOR ONE REASON: every other deck lane is text, so no paid run reached Step 3.95.",
+    "The deck is six image-only slides (no text layer). Its unit-economics slide states a 2025 gross profit",
+    "of $690K beside $1.2M revenue at a 75% margin ($900K implied, about 23% apart), so the numbers section",
+    "keeps that contradiction and its three figures sit on image slides: in_scope >= 3, and the M >= 3",
+    "wording is reachable.",
+    "",
+    "ocr_status_in admits low_match: on a clean render 89-91% of correct figures are found, so a run where",
+    "the model's transcription differs from the slide can legitimately land there; the lane then asserts",
+    "only the status. On checked it asserts the exact founder line the counts imply.",
+    "",
+    "Whether the model proposes the gross-profit relation is model-dependent and unmeasured on this deck;",
+    "in_scope >= 3 can fail on proposal variance, which a red should be read as before anything else.",
+    "Score and status bands are wide: an image deck's design is scored and has not been calibrated here.",
+    "",
+    "Larkspur Kilns is fictional. No real founder or company data."
+  ]
+}

@@ -1237,6 +1237,77 @@ def test_deck_review_contradiction_lane(tmp_path: Path) -> None:
     )
 
 
+IMAGE_DECK = FIXTURES / "deck-review" / "synthetic-image-deck.pdf"
+IMAGE_GOLDEN = FIXTURES / "golden" / "deck-review" / "synthetic-image-deck.expected.json"
+IMAGE_COMPANY = "Larkspur Kilns"
+
+# The image-deck lane bills separately too, and runs on the same `extra_deck_lanes` dispatch: it is the only paid
+# run that reaches Step 3.95 (every other deck lane is text). The dispatch installs tesseract and poppler first.
+IMAGE_OPT_IN_ENV = "RUN_PAID_E2E_OCR"
+
+
+def _image_lane_authorized() -> bool:
+    return _has_claude_auth() and os.environ.get(IMAGE_OPT_IN_ENV, "").strip().lower() in {"1", "true", "yes"}
+
+
+def _check_machine_read(
+    *,
+    review_dir: Path,
+    report: dict,
+    assertions: dict,
+    observed: dict,
+    failures: list,
+) -> None:
+    """Step 3.95 ran on the image slides and the founder line is the one its counts imply."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills" / "deck-review" / "scripts"))
+    import _reconciliation_prose  # type: ignore[import-not-found]
+
+    path = review_dir / "ocr_check.json"
+    if not path.exists():
+        failures.append("ocr_check.json absent: Step 3.95 did not run on an image-only deck")
+        return
+    check = json.loads(path.read_text())
+    counts = check.get("counts") or {}
+    observed["ocr_status"], observed["ocr_counts"] = check.get("status"), counts
+    if check.get("status") not in assertions.get("ocr_status_in", []):
+        failures.append(f"ocr_check status {check.get('status')!r} not in {assertions.get('ocr_status_in')}")
+        return
+    if int(counts.get("in_scope") or 0) < assertions.get("ocr_in_scope_min", 0):
+        failures.append(f"ocr_check in_scope {counts.get('in_scope')} under {assertions.get('ocr_in_scope_min')}")
+    if check.get("status") != "checked":
+        return
+    recon = json.loads((review_dir / "reconciliation.json").read_text())
+    inventory = json.loads((review_dir / "deck_inventory.json").read_text())
+    want = _reconciliation_prose.ocr_read_line_for(str(review_dir), check, recon, inventory)
+    md = (review_dir / "report.md").read_text()
+    if want and want not in md:
+        failures.append(f"report.md lacks the machine-read line its counts imply: {want!r}")
+    if not want and "carry little or no selectable text" in md:
+        failures.append("report.md carries a machine-read line where its counts imply none")
+
+
+@pytest.mark.e2e
+@pytest.mark.skipif(
+    not _image_lane_authorized(),
+    reason=(
+        "Image-deck lane: needs RUN_PAID_E2E=1 AND RUN_PAID_E2E_OCR=1 plus Claude auth, and tesseract with "
+        "poppler on PATH. Billed separately; the only paid run that reaches Step 3.95."
+    ),
+)
+def test_deck_review_image_deck_lane(tmp_path: Path) -> None:
+    """An image-only deck: the figures the numbers section uses are machine-read, and the founder is told how many
+    were found."""
+    _drive_deck_review_lane(
+        tmp_path,
+        deck_fixture=IMAGE_DECK,
+        golden_path=IMAGE_GOLDEN,
+        company=IMAGE_COMPANY,
+        slug="larkspur",
+        extra_checks=_check_machine_read,
+        lane="dr-image",
+    )
+
+
 NUMERIC_DECK = FIXTURES / "decks" / "synthetic-numeric-operators-deck.txt"
 NUMERIC_GOLDEN = FIXTURES / "golden" / "deck-review" / "synthetic-numeric-operators-deck.expected.json"
 NUMERIC_COMPANY = "Kestrelline"

@@ -167,6 +167,18 @@ jobs:
           enable-cache: true
           cache-dependency-glob: "**/pyproject.toml"
       - run: uv sync --extra dev
+      # The image-deck lane machine-reads its slides (deck-review Step 3.95), so a dispatch with
+      # `-f extra_deck_lanes=true` installs the two tools first. Guarded on the opt-in's env var in the
+      # shell, never an `if:` (test_release_gating.py freezes this job's `if:` strings). On that dispatch the
+      # market-sizing lane's scanned upload also meets a real tesseract and takes its OCR path: expected.
+      - name: Install OCR tools for the image-deck lane (extra_deck_lanes only)
+        env:
+          RUN_PAID_E2E_OCR: ${{ inputs.extra_deck_lanes }}
+        run: |
+          if [ "$RUN_PAID_E2E_OCR" = "true" ]; then
+            sudo apt-get update -q && sudo apt-get install -y -q tesseract-ocr poppler-utils
+            tesseract --version | head -1
+          fi
       # Auth: pass BOTH possible secrets through; the SDK / `claude` CLI
       # picks whichever is set. Configure ONE of them in repo settings:
       #   - ANTHROPIC_API_KEY_CI       — per-token API billing (~$2-5/run)
@@ -213,6 +225,7 @@ jobs:
           # "false" otherwise, which neither does, so the lanes skip as named in ALLOWED_SKIPS below.
           RUN_PAID_E2E_CONTRADICTION: ${{ inputs.extra_deck_lanes }}
           RUN_PAID_E2E_NUMERIC: ${{ inputs.extra_deck_lanes }}
+          RUN_PAID_E2E_OCR: ${{ inputs.extra_deck_lanes }}
           # "true" on a dispatch with `-f extra_lanes=true`; "false" otherwise, so the lane skips as named below.
           RUN_PAID_E2E_FMR_UNCLASSIFIED: ${{ inputs.extra_lanes }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY_CI }}
@@ -273,6 +286,9 @@ jobs:
               # that shows the model proposing runway / inverse_change / implied_base from a real deck.
               # Both deck lanes run when a dispatch passes `-f extra_deck_lanes=true`.
               "test_deck_review_numeric_operators_lane",
+              # deck-review's image-deck lane: its own RUN_PAID_E2E_OCR opt-in, set by the same `extra_deck_lanes`
+              # dispatch, which also installs tesseract and poppler. The only paid run that reaches Step 3.95.
+              "test_deck_review_image_deck_lane",
               # cap-table's lane, same precedent: its own RUN_PAID_E2E_CAP_TABLE opt-in, run
               # on demand rather than per release. It exists to answer a question a release does not
               # ask — does the reliance boundary hold, and does a SKILL.md edit move
