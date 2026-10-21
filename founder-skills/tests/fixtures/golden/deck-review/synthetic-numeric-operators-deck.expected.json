@@ -80,6 +80,8 @@
     "score_pct and overall_status ranges copied from the contradiction lane (same slide count, same",
     "kind of deck); never measured on this fixture. Re-derive both from the first two runs.",
     "",
-    "Kestrelline is fictional. No real founder or company data. Figures invented for this fixture."
+    "Kestrelline is fictional. No real founder or company data. Figures invented for this fixture.",
+    "",
+    "Checked against the reworded rubric (2026-10-21; business model names a price level, the team criterion does not judge photos or links on a text deck, slide structure judges order only): the assertions stand unchanged. The last release-gate run scored this deck 38.5%, team at warn; on a text deck team now passes, which a 19-grade regrade of another text deck measured as about +2 points on the mean with no band change. That leaves the score range and the status band with room at both ends, and the change adds no failed criterion."
   ]
 }
