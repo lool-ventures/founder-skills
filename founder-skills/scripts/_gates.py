@@ -6389,6 +6389,9 @@ CLI_CODES = {
     # --correction producer-rejected, never a repair). Neither prints the token. dr_dispatch_prompt.py (Step 5's
     # prompt generator) also prints SLIDE_REVIEWS_MISSING, before any dispatch, with its own fix (run Step 4's pipe,
     # then the generator again), and ARTIFACT_OTHER_RUN for another run's file the grader reads.
+    # The producers that stamp the deck text's hash (slide_reviews.py, second_read.py, ledger.py with --deck-text)
+    # refuse a deck_text.md they cannot use: DECK_TEXT_UNREADABLE (cannot be read, or not UTF-8), DECK_TEXT_INVALID
+    # (no front matter), DECK_TEXT_OTHER_RUN (another run's); the skill runs Step 2's deck_text.py again.
     "dr_producers": [
         "OUTPUT_IS_INPUT",
         "RUN_ID_REQUIRED",
@@ -6397,6 +6400,9 @@ CLI_CODES = {
         "ARTIFACT_OTHER_RUN",
         "SLIDE_REVIEWS_MISSING",
         "SLIDE_REVIEWS_NOT_READ",
+        "DECK_TEXT_UNREADABLE",
+        "DECK_TEXT_INVALID",
+        "DECK_TEXT_OTHER_RUN",
     ],
     # ic-sim's compose: a simulation dir that belongs to a run, whose files do not agree on which.
     # FUND_PROFILE_NAMES_PEOPLE: compose and the page refuse (exit 1, nothing written) a fund profile written
