@@ -1,0 +1,13 @@
+{
+  "claim_verdicts": "ff37823931ec06a7b5767c83127d0e750567896815e094dbeecb274f978d8c47",
+  "company_name": "6fb1a5a2d79f6adaf09ea97e790352a527b8364a9dcfdae81f4689e013723536",
+  "defensibility": "9a94454a7aa93046e129acc1f884e2717902a0ae42ba08cb9b20b36b6fc18c0f",
+  "failed_items": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+  "high_severity_warnings": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+  "outside_review": "772d6606ff12314c1a40e6b20dc93c4953317e51db95c13cea3c7fe88d643551",
+  "positioning": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+  "schema_version": "c4ac99561b69556bf74c6f558946ddbb45e776c0c8211666ec48e5c5d2b48115",
+  "startup_record": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+  "summary": "f329b83504e9d9a01297453838fee597f9604af9abb04f4f5815565f7e786415",
+  "warned_items": "e37ecfca000b59b6b24fcad9abc1cd4e873a84284d59f7f69b50237c5fea71dd"
+}
