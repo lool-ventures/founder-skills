@@ -27,7 +27,7 @@ def _stubs(tmp: Path, pages: int = 3, fail_page: int | None = None, sleep: float
     bin_dir.mkdir()
     (bin_dir / "pdfinfo").write_text(f"#!/bin/sh\necho 'Pages:          {pages}'\n")
     fail = f'[ "$2" = "{fail_page}" ] && exit 1\n' if fail_page else ""
-    pause = f"sleep {sleep}\n" if sleep else ""
+    pause = f"/bin/sleep {sleep}\n" if sleep else ""  # the stubs' PATH holds only this folder
     # pdftoppm -f N -l N -r DPI -png -singlefile PDF STEM: write STEM.png.
     (bin_dir / "pdftoppm").write_text(f'#!/bin/sh\n{fail}{pause}for a; do last="$a"; done\n: > "$last.png"\n')
     row = "5\t1\t1\t1\t1\t{n}\t0\t0\t10\t10\t91\t{w}"
@@ -128,6 +128,21 @@ def test_a_page_that_fails_twice_is_failed(tmp_path: Path) -> None:
     assert _receipt(tmp_path)["pages"]["2"] == {"kind": "failed", "attempts": 2}
 
 
+def test_a_page_whose_calls_were_killed_twice_is_failed_not_retried(tmp_path: Path) -> None:
+    """A call the shell tool kills mid-page never reaches the script's own failure branch; the attempts it wrote
+    first are what stop the page being retried forever."""
+    _review(tmp_path)
+    bin_dir = _stubs(tmp_path)
+    _run(tmp_path, bin_dir)
+    receipt = _receipt(tmp_path)
+    receipt["complete"] = False
+    receipt["pages"]["2"] = {"kind": "pending", "attempts": 2}
+    (tmp_path / "review" / "handoff" / "ocr" / "receipt.json").write_text(json.dumps(receipt))
+    rc, out = _run(tmp_path, bin_dir)
+    assert rc == 0 and out["complete"] is True and out["failed"] == 1
+    assert _receipt(tmp_path)["pages"]["2"] == {"kind": "failed", "attempts": 2}
+
+
 def test_pages_past_the_cap_are_not_read(tmp_path: Path) -> None:
     _review(tmp_path, slides=4, figure_slides=(2, 3, 4))
     rc, out = _run(tmp_path, _stubs(tmp_path, pages=4), "--max-pages", "2")
@@ -208,7 +223,7 @@ def test_an_unreadable_ledger_is_refused(tmp_path: Path) -> None:
     assert not (rv / "handoff" / "ocr").exists()
 
 
-FIXTURE_DECK = Path(__file__).resolve().parent / "fixtures" / "deck-review" / "synthetic-image-deck.pdf"
+FIXTURE_DECK = Path(__file__).resolve().parent / "fixtures" / "decks" / "synthetic-image-deck.pdf"
 
 
 @pytest.mark.skipif(
@@ -225,7 +240,13 @@ def test_the_real_tools_find_the_fixture_decks_figures(tmp_path: Path) -> None:
     (rv / "ledger.json").write_text(json.dumps({"figures": figs, "metadata": {"run_id": RUN}}))
     recon = {"status": "checked", "relations": [{"operands": ["rev", "gm"], "expected_id": "gp"}]}
     (rv / "reconciliation.json").write_text(json.dumps({**recon, "metadata": {"run_id": RUN}}))
-    rc, out = _run(tmp_path, Path(shutil.which("tesseract") or "").parent)
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    for name in ("pdftoppm", "tesseract", "pdfinfo"):
+        found = shutil.which(name)
+        if found:
+            (tools / name).symlink_to(found)
+    rc, out = _run(tmp_path, tools)
     assert rc == 0 and out["complete"] is True, out
     check = subprocess.run(
         [sys.executable, str(SCRIPTS / "ocr_check.py"), "--ledger", str(rv / "ledger.json")]

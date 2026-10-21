@@ -342,7 +342,8 @@ def main(argv: list[str] | None = None) -> int:
     if problem is not None:
         return _fail(problem["code"], problem["message"], "run Step 2's deck_text.py again", 1)
     with open(args.deck_text, encoding="utf-8") as fh:
-        pages_source = _deck_text_file.pages_source(_deck_text_file.front_matter(fh.read()))
+        deck_text = fh.read()
+    pages_source = _deck_text_file.pages_source(_deck_text_file.front_matter(deck_text))
 
     receipt_path = os.path.join(args.ocr_dir, "receipt.json")
     if not os.path.exists(receipt_path):
@@ -362,10 +363,20 @@ def main(argv: list[str] | None = None) -> int:
         )
     if not receipt.get("complete"):
         return _fail("OCR_INCOMPLETE", "the machine read has not finished", _RERUN, 2)
-    if receipt.get("status") not in ("not_applicable", "unavailable"):
-        wanted, _over = _ocr_scope.pages(_ocr_scope.in_scope(ledger, reconciliation, pages_source))
-        if receipt.get("status") != "no_figures" and receipt.get("scope_pages") != wanted:
-            return _fail("OCR_INCOMPLETE", "the machine read covered other pages than this run's figures", _RERUN, 2)
+    # The receipt must be for this deck and this scope: re-running only this check after the deck file or the
+    # kept relations changed must not pass on an earlier read.
+    deck_sha = (_deck_text_file.front_matter(deck_text) or {}).get("deck_sha256")
+    if receipt.get("reason") != "deck_mismatch" and receipt.get("deck_sha256") != deck_sha:
+        return _fail("OCR_INCOMPLETE", "the machine read was made from another deck file", _RERUN, 2)
+    figures = _ocr_scope.in_scope(ledger, reconciliation, pages_source)
+    recorded = receipt.get("max_pages")
+    max_pages: int = recorded if isinstance(recorded, int) else _ocr_scope.MAX_PAGES
+    wanted, _over = _ocr_scope.pages(figures, max_pages)
+    status = receipt.get("status")
+    if status == "no_figures" and figures:
+        return _fail("OCR_INCOMPLETE", "the machine read found no figures to read, and this run has some", _RERUN, 2)
+    if status not in ("not_applicable", "unavailable", "no_figures") and receipt.get("scope_pages") != wanted:
+        return _fail("OCR_INCOMPLETE", "the machine read covered other pages than this run's figures", _RERUN, 2)
 
     summary, results = check(ledger, reconciliation, pages_source, receipt, args.ocr_dir)
     out: dict[str, Any] = {

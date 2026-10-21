@@ -52,8 +52,8 @@ def test_all_found() -> None:
 
 def test_one_slide_one_figure_is_singular() -> None:
     assert _line(_check("checked", checked=1, found=1, read=(4,))) == (
-        "Slide 4 carries little or no selectable text, so the figures this section uses from them were read from "
-        "how the slides look. A separate machine read of that slide found it as written."
+        "Slide 4 carries little or no selectable text, so the figures this section uses from it were read from "
+        "how the slide looks. A separate machine read of that slide found it as written."
     )
 
 

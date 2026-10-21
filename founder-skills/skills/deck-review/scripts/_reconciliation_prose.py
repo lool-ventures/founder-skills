@@ -383,10 +383,11 @@ def _slides(numbers: list[int], *, capital: bool) -> str:
 
 
 def _read_from_looks(numbers: list[int]) -> str:
-    verb = "carries" if len(numbers) == 1 else "carry"
+    one = len(numbers) == 1
     return (
-        f"{_slides(numbers, capital=True)} {verb} little or no selectable text, so the figures this section uses "
-        "from them were read from how the slides look."
+        f"{_slides(numbers, capital=True)} {'carries' if one else 'carry'} little or no selectable text, so the "
+        f"figures this section uses from {'it' if one else 'them'} were read from how the "
+        f"{'slide looks' if one else 'slides look'}."
     )
 
 

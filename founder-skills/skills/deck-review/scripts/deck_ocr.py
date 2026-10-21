@@ -149,7 +149,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--run-id", required=True)
     p.add_argument("-o", "--output", required=True, help="a folder: the run's hand-off ocr/")
     p.add_argument("--max-pages", type=int, default=_ocr_scope.MAX_PAGES)
-    p.add_argument("--budget-seconds", type=float, default=60.0)
+    # 40 s + a 15 s render + a 30 s read is 85 s at worst, under the shell tool's 120 s kill on cloud and locally.
+    p.add_argument("--budget-seconds", type=float, default=40.0)
     p.add_argument("--dpi", type=int, default=200)
     p.add_argument("--pretty", action="store_true")
     args = p.parse_args(argv)
@@ -229,6 +230,7 @@ def main(argv: list[str] | None = None) -> int:
         prior.get("run_id") == args.run_id
         and prior.get("deck_sha256") == deck_sha
         and prior.get("scope_pages") == wanted
+        and prior.get("max_pages") == args.max_pages
         and isinstance(prior.get("pages"), dict)
     )
     pages: dict[str, dict[str, Any]] = dict(prior["pages"]) if same else {}
@@ -245,6 +247,7 @@ def main(argv: list[str] | None = None) -> int:
         "tesseract_version": _tesseract_version(),
         "pages_total": count,
         "scope_pages": wanted,
+        "max_pages": args.max_pages,
         "pages": pages,
         "complete": False,
     }
@@ -252,6 +255,11 @@ def main(argv: list[str] | None = None) -> int:
     for n in wanted:
         entry = pages[str(n)]
         if entry["kind"] != "pending":
+            continue
+        if int(entry.get("attempts", 0)) >= MAX_ATTEMPTS:
+            # A page whose earlier calls were killed mid-read never reached the `except` below.
+            entry["kind"] = "failed"
+            _write_receipt(out_dir, receipt)
             continue
         if started and time.monotonic() - _START >= args.budget_seconds:
             break

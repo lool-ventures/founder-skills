@@ -1237,7 +1237,7 @@ def test_deck_review_contradiction_lane(tmp_path: Path) -> None:
     )
 
 
-IMAGE_DECK = FIXTURES / "deck-review" / "synthetic-image-deck.pdf"
+IMAGE_DECK = FIXTURES / "decks" / "synthetic-image-deck.pdf"
 IMAGE_GOLDEN = FIXTURES / "golden" / "deck-review" / "synthetic-image-deck.expected.json"
 IMAGE_COMPANY = "Larkspur Kilns"
 

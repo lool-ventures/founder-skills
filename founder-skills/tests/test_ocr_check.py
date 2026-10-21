@@ -65,6 +65,12 @@ def test_the_numeral_rule(raw: str, page: str, want: bool) -> None:
         ("$14M", "runway 14Months", True),  # a glued "Months" reads as M: accepted, lowers nothing called wrong
         ("1.5", "$1.5Millionin", True),
         ("$460K", "Clients: 7, 460 K", False),  # the guarded mantissa reads "7, 460"
+        # Sign, currency and a multiple's `x` are not compared; a space-grouped neighbour joins the mantissa.
+        ("-5%", "fell 5%", True),
+        ("\u20ac3M", "raised $3M", True),
+        ("3x", "grew 3 times", True),
+        ("12,500", "Year 12 500 customers", True),
+        ("40%", "40 percent", False),
     ],
 )
 def test_the_named_residuals(raw: str, page: str, want: bool) -> None:
@@ -104,6 +110,7 @@ def _review(tmp: Path, pages_source: str = "{1: inventory, 2: inventory}", relat
 
 def _receipt(rv: Path, page_text: str | None = "ARR $1.2M MRR $100K GP $900K", **over: Any) -> None:
     receipt: dict[str, Any] = {"run_id": RUN, "complete": True, "status": "read", "scope_pages": [2]}
+    receipt["deck_sha256"] = "abc"  # the deck text's
     receipt["pages"] = {"2": {"kind": "ocr" if page_text is not None else "failed", "attempts": 1}}
     receipt.update(over)
     (rv / "handoff" / "ocr" / "receipt.json").write_text(json.dumps(receipt))
@@ -148,6 +155,13 @@ def test_checked_counts_the_relations_figures_and_leaves_out_dates(tmp_path: Pat
     assert "figures" not in written, "per-figure results stay in the hand-off folder"
     figures = json.loads((rv / "handoff" / "ocr" / "figures.json").read_text())["figures"]
     assert [f["id"] for f in figures] == ["f0", "f1", "f2", "f3"]
+
+
+def test_the_cap_the_read_used_is_the_cap_the_check_uses(tmp_path: Path) -> None:
+    rv = _review(tmp_path)
+    _receipt(rv, scope_pages=[], max_pages=0, pages={"2": {"kind": "not_read", "attempts": 0}})
+    assert _run(rv)[0] == 0
+    assert json.loads((rv / "ocr_check.json").read_text())["status"] == "none_read"
 
 
 def test_low_match_hides_the_count_at_the_boundary(tmp_path: Path) -> None:
@@ -197,6 +211,8 @@ def test_unavailable_is_carried(tmp_path: Path) -> None:
         ("none", 2, "OCR_NOT_RUN"),
         ("incomplete", 2, "OCR_INCOMPLETE"),
         ("other_scope", 2, "OCR_INCOMPLETE"),
+        ("other_deck", 2, "OCR_INCOMPLETE"),
+        ("no_figures_then", 2, "OCR_INCOMPLETE"),
         ("other_run", 1, "OCR_OTHER_RUN"),
     ],
 )
@@ -208,6 +224,10 @@ def test_refusals_leave_the_output_untouched(tmp_path: Path, setup: str, rc: int
         _receipt(rv, scope_pages=[1, 2])
     elif setup == "other_run":
         _receipt(rv, run_id="20200101T000000Z")
+    elif setup == "other_deck":
+        _receipt(rv, deck_sha256="def")
+    elif setup == "no_figures_then":  # read when the kept relations used no image slide; they now do
+        _receipt(rv, status="no_figures", reason="no_figures", scope_pages=[])
     sentinel = rv / "ocr_check.json"
     sentinel.write_text("SENTINEL")
     got_rc, out = _run(rv)

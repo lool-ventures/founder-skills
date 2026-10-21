@@ -160,6 +160,7 @@ def _dr_ocr_check(d: Path, rid: str) -> tuple[list[str], str | None, Path]:
     ocr = d / "handoff" / "ocr-check-run" / "ocr"
     ocr.mkdir(parents=True, exist_ok=True)
     receipt = {"run_id": rid, "complete": True, "status": "no_figures", "reason": "no_figures"}
+    receipt["deck_sha256"] = hashlib.sha256(_DR_DECK).hexdigest()
     (ocr / "receipt.json").write_text(json.dumps(receipt), encoding="utf-8")
     out = d / "ocr_check_out.json"
     argv = [str(SKILLS / "deck-review" / "scripts" / "ocr_check.py"), "--ledger", str(d / "ledger.json")]

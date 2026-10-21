@@ -1665,10 +1665,10 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 118,476 -> 119,018 (+542 B) on 2026-10-19: LEDGER_EXTRACTION records a printed months multiplier
     # as its own `months` figure, and RELATION_PROPOSAL proposes a monthly figure times it as one product
     # against the stated annual or quarterly total, which the engine now reads as that period's total.
-    # 119,018 -> 119,936 on 2026-10-21: Step 3.95 machine-reads the image slides whose figures the
-    # numbers section uses (its two commands, the run-again rule, no sub-agent reading the result), and Step 4's
-    # pipe passes `--ledger` and `--ocr-check` to the gate that checks the step ran.
-    "deck-review": 119_936,
+    # 119,018 -> 120,044 on 2026-10-21: Step 3.95 machine-reads the image slides whose figures the
+    # numbers section uses (its two commands, the run-again rule, what a refusal means, no sub-agent reading the
+    # result), and Step 4's pipe passes `--ledger` and `--ocr-check` to the gate that checks the step ran.
+    "deck-review": 120_044,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
