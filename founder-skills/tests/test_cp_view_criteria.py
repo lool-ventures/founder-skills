@@ -94,6 +94,24 @@ def test_two_dropped_sentences_are_counted() -> None:
     assert out == "A holds. (2 sentences were left out because they named a file by its filename.)"
 
 
+@pytest.mark.parametrize(
+    ("text", "want"),
+    [
+        ("A RED_TEAM pass ran.", "An outside review pass ran."),
+        ("Our CHECKLIST ran.", "Our quality check ran."),
+        ("An LANDSCAPE_RESEARCH step.", "A competitor research step."),
+    ],
+)
+def test_a_determiner_before_a_context_word_is_kept_once(text: str, want: str) -> None:
+    assert VIEW.criterion_text(text, LABELS) == want
+
+
+def test_an_unknown_id_opening_a_sentence_is_capitalised_and_stays_its_own_sentence() -> None:
+    assert VIEW.criterion_text("COVER_99 was skipped. Fine.", LABELS) == "Another check was skipped. Fine."
+    out = VIEW.criterion_text("See landscape.json. COVER_99 was skipped.", LABELS)
+    assert out.startswith("Another check was skipped."), out
+
+
 def test_a_capitalised_internal_file_is_dropped_too() -> None:
     out = VIEW.criterion_text("Landscape.json lists six. Good spread.", LABELS)
     assert "Landscape.json" not in out and out.startswith("Good spread.")

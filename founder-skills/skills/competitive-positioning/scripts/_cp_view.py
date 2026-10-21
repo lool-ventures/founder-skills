@@ -904,7 +904,10 @@ CONTEXT_WORDS: dict[str, str] = {
     "POST_COMPOSE_COACHING": "the coaching",
 }
 # An article before the context word is the phrase's own ("the CHECKLIST step" reads "the quality check step").
-_CONTEXT_RE = re.compile(r"\b(?:([Tt]he)\s+)?(" + "|".join(sorted(CONTEXT_WORDS, key=len, reverse=True)) + r")\b")
+_DETERMINERS = r"[Tt]he|[Aa]n?|[Oo]ur|[Tt]his|[Tt]hat|[Ee]ach|[Ee]very|[Ii]ts|[Tt]heir"
+_CONTEXT_RE = re.compile(
+    r"\b(?:(" + _DETERMINERS + r")\s+)?(" + "|".join(sorted(CONTEXT_WORDS, key=len, reverse=True)) + r")\b"
+)
 
 EVIDENCE_DROPPED_ALL = "Evidence not shown: its only sentence named a file by its filename."
 # When the evidence could not be checked at all (the policy did not load): say so, never claim a file was named.
@@ -982,9 +985,7 @@ def criterion_text(text: Any, labels: Mapping[str, str]) -> str:
         if gated:
             mode = _MODE_WORDS.get(gated.group(1), "the materials given")
             return f"Not applicable: this analysis was run from {mode}."
-        body = CRITERION_ID_RE.sub(
-            lambda m: f"“{labels[m.group(0)]}”" if m.group(0) in labels else UNKNOWN_CRITERION, body
-        )
+        body = CRITERION_ID_RE.sub(lambda m: _criterion_words(m, labels), body)
         body = _CONTEXT_RE.sub(_context_words, body)
         policy = _policy()
         body = policy.substitute(body)
@@ -1004,9 +1005,27 @@ def criterion_text(text: Any, labels: Mapping[str, str]) -> str:
         return EVIDENCE_UNCHECKED
 
 
+def _criterion_words(m: re.Match[str], labels: Mapping[str, str]) -> str:
+    """A criterion id as its quoted label; one the run does not carry as plain words, capitalised where a
+    sentence starts (so the splitter still sees the sentence)."""
+    if m.group(0) in labels:
+        return f"“{labels[m.group(0)]}”"
+    before = m.string[: m.start()].rstrip()
+    starts = not before or before[-1] in ".!?"
+    return UNKNOWN_CRITERION[0].upper() + UNKNOWN_CRITERION[1:] if starts else UNKNOWN_CRITERION
+
+
 def _context_words(m: re.Match[str]) -> str:
+    """The plain words for a context, keeping a determiner the text already put before it ("a RED_TEAM pass"
+    reads "an outside review pass", "the CHECKLIST" reads "the quality check")."""
     words = CONTEXT_WORDS[m.group(2)]
-    return words[0].upper() + words[1:] if m.group(1) == "The" else words
+    det = m.group(1)
+    if det is None:
+        return words
+    noun = words.removeprefix("the ")
+    if det.lower() in ("a", "an"):
+        det = ("An" if det[0].isupper() else "an") if noun[0] in "aeiou" else ("A" if det[0].isupper() else "a")
+    return f"{det} {noun}"
 
 
 def checklist_groups(checklist: Mapping[str, Any] | None) -> list[dict[str, Any]]:

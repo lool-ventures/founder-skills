@@ -917,10 +917,10 @@
     "competitive-positioning/explore.py": {
       "exit": 0,
       "files": {
-        "page.html": "87c51bf4b84854a6379b9ffeade7f20adc75f4e955b001d61fa3a77c0e8ec90e"
+        "page.html": "46844197680660b73d4c058733b6631873d52f575b8858c3091f445acc97451d"
       },
       "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout": "7247edd03fb1bfbb22547c15d99de5dd7c2a8d1ade91e1015dddb30e21cdb516"
+      "stdout": "84d508f959b661eee67be4149c072d4d267ce29cb8de98bd6d3320ea812e577f"
     },
     "competitive-positioning/visualize.py": {
       "exit": 0,

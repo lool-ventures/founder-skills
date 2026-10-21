@@ -290,10 +290,11 @@ def _css() -> str:
     .toolbar select { font-size: 0.8rem; padding: 4px 8px; border: 1px solid var(--lool-line-form);
                       border-radius: var(--r-input); background: var(--lool-white);
                       font-family: var(--font-body); color: var(--lool-ink); max-width: 100%; }
-    .main { display: flex; gap: 0; height: calc(100vh - 180px); overflow: hidden; }
+    .main { display: flex; gap: 0; height: max(520px, calc(100vh - 120px)); overflow: hidden; }
     .chart-area { flex: 1; padding: 1rem 1.5rem; min-width: 0; display: flex;
                   flex-direction: column; overflow-y: auto; }
-    .chart-area canvas { flex: 1; min-height: 300px; }
+    /* Chart.js sizes the canvas to this box; a canvas sized by flex instead drew stretched bubbles. */
+    .chart-canvas { position: relative; flex: none; height: clamp(320px, 62vh, 600px); }
     .sidebar { width: 320px; border-left: 1px solid var(--lool-line-2); background: var(--lool-paper);
                overflow-y: auto; padding: 1rem; }
     .sidebar h3 { font-size: 0.85rem; font-weight: 500; color: var(--lool-royal);
@@ -322,7 +323,9 @@ def _css() -> str:
     .placeholder { padding: 3rem; text-align: center; color: var(--lool-faint); font-size: 0.9rem; }
     .tab-bar { display: flex; flex-wrap: wrap; gap: 0; background: var(--lool-white);
                border-bottom: 1px solid var(--lool-line-2); }
-    a.tab { text-decoration: none; }
+    .tab-list { display: flex; }
+    .cp-app a.tab { text-decoration: none; color: var(--lool-nav); }  /* reads as a tab, not a link */
+    .cp-app a.tab:hover { color: var(--lool-blue); }
     .tab { padding: 0.5rem 1.5rem; font-size: 0.85rem; cursor: pointer; border: none;
            background: none; color: var(--lool-nav); border-bottom: 2px solid transparent;
            font-family: var(--font-body); }
@@ -367,7 +370,7 @@ def _css() -> str:
     .scoring-basis-caption strong { color: var(--lool-slate); }
     @media (max-width: 768px) {
       .main { flex-direction: column; height: auto; overflow: visible; }  /* the sidebar below, never cut off */
-      .chart-area { flex: none; height: 460px; }  /* a definite height: Chart.js sizes the canvas to it */
+      .chart-canvas { height: 320px; }
       .sidebar { width: 100%; border-left: none; border-top: 1px solid var(--lool-line-2); }
       .toolbar { flex-direction: column; }
     }
@@ -504,11 +507,13 @@ def compose_explorer(dir_path: str) -> str:
 
     body = f"""{header}
 <div class="cp-app">
-<div class="tab-bar" role="tablist" aria-label="Views">
+<div class="tab-bar">
+<div class="tab-list" role="tablist" aria-label="Views">
   <button class="tab active" role="tab" aria-selected="true" aria-controls="panel-2d" data-tab="2d"
     id="tab-2d" onclick="switchTab('2d')">2D Explorer</button>
   <button class="tab" role="tab" aria-selected="false" aria-controls="panel-3d" data-tab="3d" id="tab-3d"
     onclick="switchTab('3d')" title="Requires opening in a browser (Chrome, Firefox, Safari)">3D View &#127760;</button>
+</div>
 {checklist_tab}</div>
 
 <div class="toolbar" id="toolbar-2d">
@@ -539,7 +544,7 @@ def compose_explorer(dir_path: str) -> str:
 <div class="tab-panel active" id="panel-2d" role="tabpanel" aria-labelledby="tab-2d">
   <div class="main">
     <div class="chart-area">
-      <canvas id="chart-2d"></canvas>
+      <div class="chart-canvas"><canvas id="chart-2d"></canvas></div>
       <div id="axis-rationale" class="axis-rationale" hidden></div>
       <div id="view-score-panel" class="view-score-panel" hidden></div>
     </div>
