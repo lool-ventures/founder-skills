@@ -593,11 +593,27 @@ def test_cp_checklist_section_carries_none_of_the_seeded_tokens(tmp_path: Path) 
     section = report.split("## Analysis Checklist", 1)[1].split("\n## ", 1)[0]
     for token in ("POS_05", "POSITIONING_SCORING", "research_depth", "landscape.json"):
         assert token not in section, token
-    assert "the positioning scoring" in section
+    assert "The positioning scoring step agrees." in section
     assert "(One sentence was left out because it named a file by its filename.)" in section
     warnings = json.loads((tmp_path / "work" / "report.json").read_text(encoding="utf-8"))["warnings"]
     leaks = [w["message"] for w in warnings if w["code"] == "FOUNDER_TEXT_TOKEN"]
     assert not leaks, leaks
+
+
+def test_cp_checklist_evidence_cannot_open_an_image_or_a_link_in_report_md(tmp_path: Path) -> None:
+    """The assessor's evidence is model-written: markdown it carries reaches report.md inert."""
+
+    def seed(stage: Path) -> None:
+        checklist = _read(stage, "checklist.json")
+        checklist["items"][0]["evidence"] = (
+            "See ![x](https://evil.example/p.png) and [click](https://evil.example) `x`."
+        )
+        _write(stage, "checklist.json", checklist)
+
+    report = _cp_compose(tmp_path, seed)
+    section = report.split("## Analysis Checklist", 1)[1].split("\n## ", 1)[0]
+    assert "![x](" not in section and "[click](" not in section and " `x`" not in section
+    assert "!\\[x\\](https://evil.example/p.png)" in section
 
 
 def test_cp_checklist_stale_vs_positioning_fires_on_fingerprint_mismatch(tmp_path: Path) -> None:

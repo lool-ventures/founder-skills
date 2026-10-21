@@ -43,34 +43,13 @@ OPTIONAL_ARTIFACTS = [
     "moat_scores.json",
     "product_profile.json",
     "report.json",
+    "checklist.json",
 ]
 
 
 # Optional artifacts another run wrote, in a folder that belongs to a run: read as absent (`main` sets this from
 # `_run_ref.foreign_artifacts` when given --run-id; empty for a folder with no ref, and in-process callers).
 _IGNORED_OTHER_RUN: set[str] = set()
-
-
-# The shared footer's rules, copied from `_ui.UI_CSS` (held equal by a test): this page renders `_ui.footer()` but
-# not the shell's stylesheet, so it carries the footer's rules and the variables they read, scoped to the footer.
-FOOTER_CSS = """\
-.ui-footer {
-  --ui-ink-2: #5E6A78; --ui-accent: var(--lool-blue); --ui-accent-2: var(--lool-royal); --ui-on-accent: #FFFFFF;
-  --ui-s2: 8px; --ui-s3: 12px; --ui-s4: 16px; --ui-s5: 24px; --ui-s6: 32px;
-}
-.ui-footer {
-  max-width: 1120px; margin: 0 auto; padding: var(--ui-s4) var(--ui-s5) var(--ui-s6);
-  display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--ui-s2) var(--ui-s3);
-  color: var(--ui-ink-2); font-size: 0.82rem;
-}
-.ui-footer a { color: var(--ui-accent-2); }
-.ui-footer a.ui-feedback {
-  display: inline-block; padding: 6px 14px; border-radius: var(--r-pill); font-weight: 600;
-  background: var(--ui-accent); color: var(--ui-on-accent); text-decoration: none;
-}
-.ui-footer a.ui-feedback:hover { background: var(--lool-blue-deep); color: var(--ui-on-accent); }
-.ui-footer a.ui-feedback:focus-visible { outline: 2px solid var(--ui-accent); outline-offset: 3px; }
-"""
 
 
 def _load_artifact(dir_path: str, name: str) -> dict[str, Any] | None:
@@ -296,30 +275,21 @@ def _chartjs_source() -> str:
     return js_path.read_text(encoding="utf-8")
 
 
-def _css(brand_css: str) -> str:
-    """Return embedded CSS for the explorer."""
-    return (
-        "\n    <style>\n"
-        + brand_css
-        + """
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: var(--font-body);
-           background: var(--lool-white); color: var(--lool-ink); line-height: 1.5;
-           -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
-    a { color: var(--lool-azure); }
-    a:hover { color: var(--lool-azure-deep); }
-    .header { padding: 1.5rem 2rem; background: var(--lool-white);
-              border-bottom: 1px solid var(--lool-line-2); }
-    .header h1 { font-size: 1.5rem; font-weight: 400; color: var(--lool-blue); }
-    .header .subtitle { font-size: 0.875rem; color: var(--lool-mute); }
-    .verdict { font-size: 1rem; line-height: 1.55; max-width: 60rem; margin: 0.75rem 0 1.25rem; }
+def _css() -> str:
+    """The explorer's own styles, after the shared shell's (`_ui.UI_CSS` owns the body, the header card, sections,
+    chips, pills and the checklist)."""
+    return """
+    [hidden] { display: none !important; }  /* the attribute wins over a class's display */
+    .axes-bar { display: flex; flex-wrap: wrap; gap: 2rem; padding: 0.5rem 2rem; background: var(--lool-white);
+                border-bottom: 1px solid var(--lool-line-2); font-size: 0.8rem; color: var(--lool-mute); }
+    .cp-app { background: var(--lool-white); border: 1px solid var(--lool-line-2); margin-top: 1rem; }
     .toolbar { display: flex; flex-wrap: wrap; gap: 1rem; padding: 1rem 2rem;
                background: var(--lool-white); border-bottom: 1px solid var(--lool-line-2);
                align-items: center; }
-    .toolbar label { font-size: 0.8rem; color: var(--lool-nav); font-weight: 500; }
+    .toolbar label { font-size: 0.8rem; color: var(--lool-nav); font-weight: 500; max-width: 100%; min-width: 0; }
     .toolbar select { font-size: 0.8rem; padding: 4px 8px; border: 1px solid var(--lool-line-form);
                       border-radius: var(--r-input); background: var(--lool-white);
-                      font-family: var(--font-body); color: var(--lool-ink); }
+                      font-family: var(--font-body); color: var(--lool-ink); max-width: 100%; }
     .main { display: flex; gap: 0; height: calc(100vh - 180px); overflow: hidden; }
     .chart-area { flex: 1; padding: 1rem 1.5rem; min-width: 0; display: flex;
                   flex-direction: column; overflow-y: auto; }
@@ -350,8 +320,9 @@ def _css(brand_css: str) -> str:
     .legend-item { display: flex; align-items: center; gap: 4px; }
     .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
     .placeholder { padding: 3rem; text-align: center; color: var(--lool-faint); font-size: 0.9rem; }
-    .tab-bar { display: flex; gap: 0; background: var(--lool-white);
+    .tab-bar { display: flex; flex-wrap: wrap; gap: 0; background: var(--lool-white);
                border-bottom: 1px solid var(--lool-line-2); }
+    a.tab { text-decoration: none; }
     .tab { padding: 0.5rem 1.5rem; font-size: 0.85rem; cursor: pointer; border: none;
            background: none; color: var(--lool-nav); border-bottom: 2px solid transparent;
            font-family: var(--font-body); }
@@ -395,7 +366,8 @@ def _css(brand_css: str) -> str:
         border-bottom: 1px solid var(--lool-line-2); }
     .scoring-basis-caption strong { color: var(--lool-slate); }
     @media (max-width: 768px) {
-      .main { flex-direction: column; }
+      .main { flex-direction: column; height: auto; overflow: visible; }  /* the sidebar below, never cut off */
+      .chart-area { flex: none; height: 460px; }  /* a definite height: Chart.js sizes the canvas to it */
       .sidebar { width: 100%; border-left: none; border-top: 1px solid var(--lool-line-2); }
       .toolbar { flex-direction: column; }
     }
@@ -403,8 +375,90 @@ def _css(brand_css: str) -> str:
       .toolbar, .tab-bar, .sidebar { display: none; }
       .main { display: block; }
     }
-    </style>
     """
+
+
+# The header card and the checklist, as report.html builds them (the page-structure tests hold the two pages to
+# the same ring and the same rows). Copied rather than imported: the test suite imports every skill's
+# `visualize` into one process, so a second import by that name would be another skill's.
+_BAND_TONE = {"strong": "pass", "solid": "pass", "needs_work": "warn", "major_revision": "fail"}
+_DEFENSIBILITY_TONE = {"high": "pass", "moderate": "warn", "low": "fail"}
+_CHECKLIST_SUMMARY = (
+    "Score = (pass + half credit per warn) ÷ applicable. It measures how complete and well-evidenced this "
+    "analysis is, not how strong the company's position is."
+)
+
+
+def _score_ring(checklist: dict[str, Any] | None, linked: bool = True) -> str:
+    import _cp_view
+    import _ui
+
+    if not _usable(checklist):
+        return ""
+    summary = _as_dict(checklist.get("summary"))
+    raw = summary.get("score_pct")
+    if not isinstance(raw, (int, float)) or isinstance(raw, bool):
+        return ""
+    band = str(summary.get("overall_status") or "")
+    band_text = band.replace("_", " ").title() if band in _BAND_TONE else ""
+    shown = _cp_view.score_text(raw)
+    return _ui.score_ring(
+        float(raw),
+        tone=_BAND_TONE.get(band, "neutral"),
+        value_text=f"{shown}%",
+        label="Analysis quality",
+        caption=band_text,
+        aria_label=f"Analysis quality {shown} percent" + (f", {band_text}" if band_text else ""),
+        href="#checklist" if linked else None,
+    )
+
+
+def _header(
+    report: dict[str, Any] | None,
+    moat_scores: dict[str, Any] | None,
+    checklist: dict[str, Any] | None,
+    verdict_text: str | None,
+    company_name: str,
+) -> str:
+    import _ui
+
+    date = str(_as_dict(report.get("metadata")).get("analysis_date", "")) if _usable(report) else ""
+    chips: list[str] = []
+    if date:
+        chips.append(f'<span class="ui-chip">{_esc(date)}</span>')
+    if _usable(moat_scores):
+        startup = _as_dict(_as_dict(moat_scores.get("companies")).get("_startup"))
+        defensibility = str(startup.get("overall_defensibility", "")).lower()
+        tone = _DEFENSIBILITY_TONE.get(defensibility)
+        if tone:
+            chips.append(
+                f'<span class="ui-pill ui-pill--{tone}" data-tone="{tone}">'
+                f"Defensibility: {_esc(defensibility.title())}</span>"
+            )
+    return _ui.header_card(
+        eyebrow="Competitive explorer",
+        title=company_name,
+        meta_html=" ".join(chips),
+        verdict_html=_esc(verdict_text) if verdict_text else "",
+        ring_html=_score_ring(checklist, linked=bool(_checklist_section(checklist))),
+    )
+
+
+def _checklist_section(checklist: dict[str, Any] | None) -> str:
+    """The analysis checklist, server-rendered outside the tab panels (visible with scripts off) and never in
+    `DATA`: the same rows report.md and report.html show."""
+    import _cp_view
+    import _ui
+
+    if not _usable(checklist):
+        return ""
+    groups = _cp_view.checklist_groups(checklist)
+    if not groups:
+        return ""
+    return (
+        '<section class="ui-section" id="checklist" aria-labelledby="checklist-h">'
+        '<h2 id="checklist-h">Analysis Checklist</h2>'
+        f"{_ui.checklist(groups, summary_html=_esc(_CHECKLIST_SUMMARY))}</section>"
     )
 
 
@@ -418,8 +472,6 @@ def compose_explorer(dir_path: str) -> str:
     brand_css = _theme.brand_css()
     import _ui
 
-    footer_credit = _ui.footer("Competitive Positioning")
-
     payload = _build_data_payload(dir_path)
     data_json = _safe_json_embed(payload)
     company_name = _esc(payload["company_name"])
@@ -427,12 +479,13 @@ def compose_explorer(dir_path: str) -> str:
     # embedded in DATA: the page's script has no use for it.
     import _cp_view
 
-    verdict_text = _cp_view.report_verdict(
-        _load_artifact(dir_path, "report.json"),
-        _load_artifact(dir_path, "positioning_scores.json"),
-        _load_artifact(dir_path, "moat_scores.json"),
-    )
-    verdict_html = f'<p class="verdict">{_esc(verdict_text)}</p>' if verdict_text else ""
+    report = _load_artifact(dir_path, "report.json")
+    moat_scores = _load_artifact(dir_path, "moat_scores.json")
+    checklist = _load_artifact(dir_path, "checklist.json")
+    verdict_text = _cp_view.report_verdict(report, _load_artifact(dir_path, "positioning_scores.json"), moat_scores)
+    header = _header(report, moat_scores, checklist, verdict_text, payload["company_name"])
+    checklist_section = _checklist_section(checklist)
+    checklist_tab = '  <a class="tab" href="#checklist">Checklist</a>\n' if checklist_section else ""
 
     # Build legend bar
     legend_parts: list[str] = []
@@ -449,29 +502,14 @@ def compose_explorer(dir_path: str) -> str:
         )
     legend_html = "\n".join(legend_parts)
 
-    return f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Competitive Explorer: {company_name}</title>
-<script>{_chartjs_source()}</script>
-{_css(brand_css)}
-<style>
-{FOOTER_CSS}</style>
-</head>
-<body>
-<div class="header">
-  <h1>Competitive Explorer: {company_name}</h1>
-  <div class="subtitle">Interactive positioning analysis</div>
-</div>
-{verdict_html}
-
-<div class="tab-bar">
-  <button class="tab active" data-tab="2d" onclick="switchTab('2d')">2D Explorer</button>
-  <button class="tab" data-tab="3d" id="tab-3d" onclick="switchTab('3d')"
-    title="Requires opening in a browser (Chrome, Firefox, Safari)">3D View &#127760;</button>
-</div>
+    body = f"""{header}
+<div class="cp-app">
+<div class="tab-bar" role="tablist" aria-label="Views">
+  <button class="tab active" role="tab" aria-selected="true" aria-controls="panel-2d" data-tab="2d"
+    id="tab-2d" onclick="switchTab('2d')">2D Explorer</button>
+  <button class="tab" role="tab" aria-selected="false" aria-controls="panel-3d" data-tab="3d" id="tab-3d"
+    onclick="switchTab('3d')" title="Requires opening in a browser (Chrome, Firefox, Safari)">3D View &#127760;</button>
+{checklist_tab}</div>
 
 <div class="toolbar" id="toolbar-2d">
   <label>View:
@@ -498,17 +536,17 @@ def compose_explorer(dir_path: str) -> str:
 
 <div class="scoring-basis-caption" id="scoring-basis-caption"></div>
 
-<div class="tab-panel active" id="panel-2d">
+<div class="tab-panel active" id="panel-2d" role="tabpanel" aria-labelledby="tab-2d">
   <div class="main">
     <div class="chart-area">
       <canvas id="chart-2d"></canvas>
-      <div id="axis-rationale" class="axis-rationale" style="display:none;"></div>
-      <div id="view-score-panel" class="view-score-panel" style="display:none;"></div>
+      <div id="axis-rationale" class="axis-rationale" hidden></div>
+      <div id="view-score-panel" class="view-score-panel" hidden></div>
     </div>
     <div class="sidebar" id="sidebar">
       <h3>Companies</h3>
       <div id="company-list"></div>
-      <div class="detail-panel" id="detail-panel" style="display:none;"></div>
+      <div class="detail-panel" id="detail-panel" hidden></div>
       <div class="detail-panel" id="diff-claims-panel">
         <h3>Differentiation Stress-Test</h3>
         <div id="diff-claims-list"></div>
@@ -517,16 +555,13 @@ def compose_explorer(dir_path: str) -> str:
   </div>
 </div>
 
-<div class="tab-panel" id="panel-3d">
-  <div id="3d-axes-bar" style="display:none; padding: 0.5rem 2rem; background: var(--lool-white);
-       border-bottom: 1px solid var(--lool-line-2); font-size: 0.8rem; color: var(--lool-mute);
-       gap: 2rem; flex-wrap: wrap;">
-  </div>
+<div class="tab-panel" id="panel-3d" role="tabpanel" aria-labelledby="tab-3d">
+  <div id="3d-axes-bar" class="axes-bar" hidden></div>
   <div id="chart-3d-container">
     <div class="placeholder" id="3d-placeholder">
       <span class="spinner"></span> Loading 3D view&hellip;
     </div>
-    <div id="3d-fallback" style="display:none; padding: 3rem 2rem; text-align: center;">
+    <div id="3d-fallback" hidden style="padding: 3rem 2rem; text-align: center;">
       <div style="max-width: 480px; margin: 0 auto; background: var(--lool-paper);
                   border: 1px solid var(--lool-line-2); padding: 2.5rem;">
         <div style="font-size: 2.5rem; margin-bottom: 1rem;">&#127760;</div>
@@ -544,7 +579,9 @@ def compose_explorer(dir_path: str) -> str:
   </div>
 </div>
 
-<script>
+</div>
+{checklist_section}"""
+    script = f"""<script>
 /*DATA_START*/
 const DATA = {data_json};
 /*DATA_END*/
@@ -730,7 +767,7 @@ function selectCompany(slug) {{
     }}
   }}
 
-  if (!comp) {{ panel.style.display = 'none'; return; }}
+  if (!comp) {{ panel.hidden = true; return; }}
 
   var h = '<h4>' + escHtml(comp.name || slug) + '</h4>';
 
@@ -778,7 +815,7 @@ function selectCompany(slug) {{
   }}
 
   panel.innerHTML = h;
-  panel.style.display = 'block';
+  panel.hidden = false;
 }}
 
 // ---- 2D Chart ----
@@ -881,9 +918,9 @@ function render2D() {{
     ratDiv.innerHTML =
       (xRat ? '<div><strong>X \u2014 ' + escHtml(xName) + ':</strong> ' + escHtml(xRat) + '</div>' : '') +
       (yRat ? '<div><strong>Y \u2014 ' + escHtml(yName) + ':</strong> ' + escHtml(yRat) + '</div>' : '');
-    ratDiv.style.display = 'block';
+    ratDiv.hidden = false;
   }} else {{
-    ratDiv.style.display = 'none';
+    ratDiv.hidden = true;
   }}
 
   // Update view score panel (differentiation score, per-axis rank, vanity flags).
@@ -919,12 +956,12 @@ function render2D() {{
     }}
     if (lines.length) {{
       scorePanel.innerHTML = lines.join('');
-      scorePanel.style.display = 'block';
+      scorePanel.hidden = false;
     }} else {{
-      scorePanel.style.display = 'none';
+      scorePanel.hidden = true;
     }}
   }} else {{
-    scorePanel.style.display = 'none';
+    scorePanel.hidden = true;
   }}
 }}
 
@@ -994,14 +1031,16 @@ function onEncodingChange() {{
 }}
 
 function switchTab(tab) {{
-  document.querySelectorAll('.tab').forEach(function(el) {{
-    el.classList.toggle('active', el.getAttribute('data-tab') === tab);
+  document.querySelectorAll('.tab[data-tab]').forEach(function(el) {{
+    var on = el.getAttribute('data-tab') === tab;
+    el.classList.toggle('active', on);
+    el.setAttribute('aria-selected', on ? 'true' : 'false');
   }});
   document.querySelectorAll('.tab-panel').forEach(function(el) {{
     el.classList.toggle('active', el.id === 'panel-' + tab);
   }});
-  document.getElementById('toolbar-2d').style.display = tab === '2d' ? 'flex' : 'none';
-  document.getElementById('legend-bar').style.display = tab === '2d' ? 'flex' : 'none';
+  document.getElementById('toolbar-2d').hidden = tab !== '2d';
+  document.getElementById('legend-bar').hidden = tab !== '2d';
 
   if (tab === '3d' && !plotly3dInitialized) {{
     load3D();
@@ -1020,16 +1059,16 @@ function load3D() {{
   script.onload = function() {{
     try {{
       render3D();
-      placeholder.style.display = 'none';
+      placeholder.hidden = true;
       plotly3dInitialized = true;
     }} catch(e) {{
-      placeholder.style.display = 'none';
-      fallback.style.display = 'block';
+      placeholder.hidden = true;
+      fallback.hidden = false;
     }}
   }};
   script.onerror = function() {{
-    placeholder.style.display = 'none';
-    fallback.style.display = 'block';
+    placeholder.hidden = true;
+    fallback.hidden = false;
   }};
   document.head.appendChild(script);
 }}
@@ -1071,14 +1110,14 @@ function render3D() {{
     '<span style="display:inline-flex;align-items:center;gap:6px;">' +
       '<span style="width:14px;height:3px;background:#2F8A56;border-radius:2px;"></span>' +
       '<strong style="color:#2F8A56;">Z:</strong> Defensibility</span>';
-  axesBar.style.display = 'flex';
+  axesBar.hidden = false;
 
   // Build custom hover text with axis names and defensibility label
   var defLabels = {{1: 'Low', 2: 'Moderate', 3: 'High'}};
   var hoverText = text.map(function(name, i) {{
-    return '<b>' + name + '</b><br>' +
-      xName + ': ' + x[i] + '<br>' +
-      yName + ': ' + y[i] + '<br>' +
+    return '<b>' + escHtml(name) + '</b><br>' +
+      escHtml(xName) + ': ' + x[i] + '<br>' +
+      escHtml(yName) + ': ' + y[i] + '<br>' +
       'Defensibility: ' + (defLabels[z[i]] || 'Unknown');
   }});
 
@@ -1135,9 +1174,16 @@ if (DATA.views.length > 0) {{
     '<div class="placeholder">No positioning views available.</div>';
 }}
 </script>
-{footer_credit}
-</body>
-</html>"""
+"""
+    return _ui.page_shell(
+        title=f"Competitive Explorer: {payload['company_name']}",
+        body_html=body,
+        brand_css=brand_css,
+        page_css=_css(),
+        head_html=f"<script>{_chartjs_source()}</script>\n",
+        skill_name="Competitive Positioning",
+        scripts_html=script,
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -903,15 +903,27 @@ CONTEXT_WORDS: dict[str, str] = {
     "RED_TEAM": "the outside review",
     "POST_COMPOSE_COACHING": "the coaching",
 }
-_CONTEXT_RE = re.compile(r"\b(" + "|".join(sorted(CONTEXT_WORDS, key=len, reverse=True)) + r")\b")
+# An article before the context word is the phrase's own ("the CHECKLIST step" reads "the quality check step").
+_CONTEXT_RE = re.compile(r"\b(?:([Tt]he)\s+)?(" + "|".join(sorted(CONTEXT_WORDS, key=len, reverse=True)) + r")\b")
 
 EVIDENCE_DROPPED_ALL = "Evidence not shown: its only sentence named a file by its filename."
+# When the evidence could not be checked at all (the policy did not load): say so, never claim a file was named.
+EVIDENCE_UNCHECKED = "Evidence not shown: it could not be checked before display."
+# A criterion id the run's checklist does not carry has no label to show; the founder cannot look it up either.
+UNKNOWN_CRITERION = "another check"
+# `checklist.py`'s note on a row its mode gate forced to not applicable, and what the founder reads instead.
+_GATE_RE = re.compile(r"^Auto-gated: not applicable in (\w+) mode$")
+_MODE_WORDS = {
+    "conversation": "a conversation, with no document",
+    "deck": "a pitch deck",
+    "document": "documents",
+}
 _DROPPED_ONE = "(One sentence was left out because it named a file by its filename.)"
 _DROPPED_MANY = "({n} sentences were left out because they named a file by its filename.)"
 
 # A sentence ends at . ! or ? followed by whitespace and an upper-case letter, a digit or an opening quote or
 # bracket -- never after these abbreviations.
-_ABBREVIATIONS = ("e.g.", "i.e.", "vs.", "Inc.", "Ltd.", "Co.", "No.", "approx.")
+_ABBREVIATIONS = ("e.g.", "i.e.", "vs.", "inc.", "ltd.", "co.", "no.", "approx.")  # compared case-folded
 _BOUNDARY_RE = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9\"'“‘(\[])")
 
 _POLICY_PATH = os.path.normpath(
@@ -940,7 +952,7 @@ def split_sentences(text: str) -> list[str]:
     start = 0
     for m in _BOUNDARY_RE.finditer(text):
         head = text[start : m.start()]
-        if any(head.endswith(a) for a in _ABBREVIATIONS):
+        if any(head.casefold().endswith(a) for a in _ABBREVIATIONS):
             continue
         out.append(head)
         start = m.end()
@@ -966,13 +978,20 @@ def criterion_text(text: Any, labels: Mapping[str, str]) -> str:
         body = " ".join(str(text or "").split())
         if not body:
             return ""
-        body = CRITERION_ID_RE.sub(lambda m: f"“{labels[m.group(0)]}”" if m.group(0) in labels else m.group(0), body)
-        body = _CONTEXT_RE.sub(lambda m: CONTEXT_WORDS[m.group(0)], body)
+        gated = _GATE_RE.match(body)
+        if gated:
+            mode = _MODE_WORDS.get(gated.group(1), "the materials given")
+            return f"Not applicable: this analysis was run from {mode}."
+        body = CRITERION_ID_RE.sub(
+            lambda m: f"“{labels[m.group(0)]}”" if m.group(0) in labels else UNKNOWN_CRITERION, body
+        )
+        body = _CONTEXT_RE.sub(_context_words, body)
         policy = _policy()
         body = policy.substitute(body)
         kept, dropped = [], 0
         for sentence in split_sentences(body):
-            if policy.scan(sentence)["filenames"]:
+            # Case-folded for the check only: a sentence often OPENS with the file's name ("Landscape.json lists").
+            if policy.scan(sentence.casefold())["filenames"]:
                 dropped += 1
             else:
                 kept.append(sentence)
@@ -982,7 +1001,12 @@ def criterion_text(text: Any, labels: Mapping[str, str]) -> str:
             return EVIDENCE_DROPPED_ALL
         return " ".join(kept) + " " + (_DROPPED_ONE if dropped == 1 else _DROPPED_MANY.format(n=dropped))
     except Exception:  # noqa: BLE001 - fail closed on anything, never show unchecked evidence
-        return EVIDENCE_DROPPED_ALL
+        return EVIDENCE_UNCHECKED
+
+
+def _context_words(m: re.Match[str]) -> str:
+    words = CONTEXT_WORDS[m.group(2)]
+    return words[0].upper() + words[1:] if m.group(1) == "The" else words
 
 
 def checklist_groups(checklist: Mapping[str, Any] | None) -> list[dict[str, Any]]:

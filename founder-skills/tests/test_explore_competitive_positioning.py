@@ -132,7 +132,7 @@ def test_3d_tab_degrades_gracefully_in_cowork() -> None:
         assert 'id="3d-fallback"' in stdout, "missing #3d-fallback degradation card"
         # ...both failure paths (CDN load error AND render error) must reveal it...
         assert "script.onerror" in stdout, "missing CDN-load-failure (onerror) handler"
-        assert stdout.count("fallback.style.display = 'block'") >= 2, (
+        assert stdout.count("fallback.hidden = false") >= 2, (
             "both the onerror and the render-catch handlers must reveal the fallback card"
         )
         # ...and it must name Cowork so the user knows why and what to do.
@@ -331,19 +331,18 @@ def test_non_dict_artifact_does_not_crash() -> None:
 
 
 def test_3d_axes_bar_initially_hidden() -> None:
-    """The #3d-axes-bar div must not carry a live 'display: flex' in its static
-    style — the dead duplicate that overrode the intended display:none is removed
-    (audit cp-scripts-8). render3D sets display='flex' at runtime instead."""
+    """The #3d-axes-bar div starts hidden by the `hidden` attribute, with no inline display that could mask it
+    (audit cp-scripts-8), and the page's `[hidden]` rule wins over its class's `display: flex`. render3D
+    clears the attribute at runtime."""
     with _make_artifact_dir(_all_artifacts()) as d:
         rc, stdout, _stderr = _run_explore(d)
         assert rc == 0
-        # Isolate the axes-bar div's opening tag.
         idx = stdout.find('id="3d-axes-bar"')
         assert idx != -1
         tag = stdout[idx : stdout.find(">", idx)]
-        assert "display:none" in tag
-        # The static style must not also declare display:flex (that masked the hide).
-        assert "display: flex" not in tag and "display:flex" not in tag
+        assert re.search(r"\bhidden\b", tag) and "style=" not in tag
+        assert "[hidden] { display: none !important; }" in stdout
+        assert "axesBar.hidden = false" in stdout
 
 
 def _extract_data_payload(stdout: str) -> dict[str, Any]:

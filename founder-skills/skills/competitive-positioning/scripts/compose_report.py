@@ -2031,6 +2031,12 @@ def _section_key_findings(
     return "\n".join(lines) + "\n"
 
 
+def _md_inert(text: str) -> str:
+    """Model-written prose made inert for markdown: no image, link or code span can open (a renderer would
+    otherwise fetch a remote image or show a live link the assessor wrote)."""
+    return text.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]").replace("`", "\\`")
+
+
 def _section_checklist(checklist: dict[str, Any] | None) -> str:
     """Every criterion of the analysis checklist, per category: its result and the assessor's evidence, through
     `_cp_view.criterion_text` (ids to labels, no sentence naming a file of ours). The pages show the same rows."""
@@ -2048,7 +2054,7 @@ def _section_checklist(checklist: dict[str, Any] | None) -> str:
             cells = (
                 _md_escape(_view.md_inline(row["title"])),
                 row["result"],
-                _md_escape(_view.md_inline(row["evidence"])),
+                _md_escape(_view.md_inline(_md_inert(row["evidence"]))),
             )
             lines.append("| " + " | ".join(cells) + " |")
         lines.append("")

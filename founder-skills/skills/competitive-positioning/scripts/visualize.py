@@ -380,7 +380,7 @@ _BAND_TONE = {"strong": "pass", "solid": "pass", "needs_work": "warn", "major_re
 _DEFENSIBILITY_TONE = {"high": "pass", "moderate": "warn", "low": "fail"}
 
 
-def _score_ring(checklist: dict[str, Any] | None) -> str:
+def _score_ring(checklist: dict[str, Any] | None, linked: bool = True) -> str:
     """The header's ring: the analysis quality score report.md states, from the same checklist, coloured by the
     band `checklist.py` wrote, linking to the checklist. Nothing without a score: never a "0%"."""
     import _cp_view
@@ -402,7 +402,7 @@ def _score_ring(checklist: dict[str, Any] | None) -> str:
         label="Analysis quality",
         caption=band_text,
         aria_label=f"Analysis quality {shown} percent" + (f", {band_text}" if band_text else ""),
-        href="#checklist",
+        href="#checklist" if linked else None,
     )
 
 
@@ -439,7 +439,7 @@ def _section_header(
         title=company,
         meta_html=" ".join(chips),
         verdict_html=_esc(verdict_text) if verdict_text else "",
-        ring_html=_score_ring(checklist),
+        ring_html=_score_ring(checklist, linked=bool(_section_checklist(checklist))),
     )
 
 

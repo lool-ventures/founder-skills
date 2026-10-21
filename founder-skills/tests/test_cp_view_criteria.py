@@ -69,14 +69,16 @@ def test_every_fixture_id_maps_to_its_own_label() -> None:
         assert VIEW.criterion_text(f"See {item['id']}.", labels) == f"See “{labels[item['id']]}”."
 
 
-def test_an_unknown_id_is_left_as_written() -> None:
-    assert VIEW.criterion_text("As MOAT_99 notes, this holds.", LABELS) == "As MOAT_99 notes, this holds."
+def test_an_unknown_id_becomes_neutral_words() -> None:
+    """An id the run's checklist does not carry has no label; the delivery gate fails on a bare id in report.md,
+    and a founder cannot look it up, so it reads as plain words."""
+    assert VIEW.criterion_text("As MOAT_99 notes, this holds.", LABELS) == "As another check notes, this holds."
 
 
 def test_context_words_become_plain_words() -> None:
     out = VIEW.criterion_text("The POSITIONING_SCORING step and RED_TEAM agree.", LABELS)
-    assert "POSITIONING_SCORING" not in out and "RED_TEAM" not in out
-    assert "the positioning scoring" in out and "the outside review" in out
+    assert out == "The positioning scoring step and the outside review agree."
+    assert VIEW.criterion_text("So the CHECKLIST passes.", LABELS) == "So the quality check passes."
 
 
 def test_a_sentence_naming_an_internal_file_is_dropped_and_its_neighbour_kept() -> None:
@@ -92,13 +94,28 @@ def test_two_dropped_sentences_are_counted() -> None:
     assert out == "A holds. (2 sentences were left out because they named a file by its filename.)"
 
 
+def test_a_capitalised_internal_file_is_dropped_too() -> None:
+    out = VIEW.criterion_text("Landscape.json lists six. Good spread.", LABELS)
+    assert "Landscape.json" not in out and out.startswith("Good spread.")
+
+
+def test_a_mode_gated_row_reads_in_plain_words() -> None:
+    out = VIEW.criterion_text("Auto-gated: not applicable in conversation mode", LABELS)
+    assert out == "Not applicable: this analysis was run from a conversation, with no document."
+
+
 def test_a_row_whose_only_sentence_is_dropped_prints_the_empty_note() -> None:
     assert VIEW.criterion_text("Read positioning_scores.json for this.", LABELS) == VIEW.EVIDENCE_DROPPED_ALL
 
 
 @pytest.mark.parametrize(
     "text",
-    ["Rivals, e.g. a rival with scale, were named.", "Rival A vs. Rival B is close.", "Example Inc. sells it."],
+    [
+        "Rivals, e.g. a rival with scale, were named.",
+        "Rivals, E.g. a rival with scale, were named.",
+        "Rival A vs. Rival B is close.",
+        "Example Inc. sells it.",
+    ],
 )
 def test_the_splitter_keeps_abbreviations_whole(text: str) -> None:
     assert VIEW.split_sentences(text) == [text]
@@ -124,7 +141,9 @@ def test_it_fails_closed_when_the_policy_cannot_be_loaded(monkeypatch: pytest.Mo
     monkeypatch.setattr(VIEW, "_POLICY_PATH", str(tmp_path / "missing" / "_founder_text.py"))
     items: list[dict[str, Any]] = json.loads(FIXTURE.read_text(encoding="utf-8"))["items"]
     rows = [row for group in VIEW.checklist_groups({"items": items}) for row in group["items"]]
-    assert rows and all(row["evidence"] == VIEW.EVIDENCE_DROPPED_ALL for row in rows)
+    # A mode-gated row shows our own note, which needs no check; every row of assessor text shows none of it.
+    assessed = [row for row, item in zip(rows, items, strict=True) if not item["evidence"].startswith("Auto-gated")]
+    assert assessed and all(row["evidence"] == VIEW.EVIDENCE_UNCHECKED for row in assessed)
     assert "_founder_text" not in sys.modules
 
 

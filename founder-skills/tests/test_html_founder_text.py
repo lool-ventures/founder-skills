@@ -561,6 +561,29 @@ def test_fmr_checklist_evidence_goes_through_the_founder_text_policy_on_both_pag
         )
 
 
+def test_cp_explorer_checklist_evidence_is_scanned_and_goes_through_the_policy() -> None:
+    """competitive-positioning's explorer lists every criterion too (server-rendered, outside its script)."""
+    import json
+
+    with tempfile.TemporaryDirectory() as td:
+        work = Path(td)
+        drive_compose("competitive-positioning", FIXTURES / "competitive-positioning", work)
+        ck = json.loads((work / "checklist.json").read_text())
+        next(i for i in ck["items"] if i["status"] == "pass")["evidence"] = _FMR_SEEDED_EVIDENCE
+        (work / "checklist.json").write_text(json.dumps(ck))
+        out = work / "explore.html"
+        script = REPO_ROOT / "founder-skills" / "skills" / "competitive-positioning" / "scripts" / "explore.py"
+        result = subprocess.run(
+            [sys.executable, str(script), "--dir", str(work), "-o", str(out)], capture_output=True, text=True
+        )
+        assert result.returncode == 0, result.stderr[-400:]
+        text = _text_nodes(out.read_text(encoding="utf-8"))
+    found = _founder_text().scan(text)
+    assert "seeded snake token" in text, "the seeded row did not render"
+    assert "SEEDED_SHOUT_TOKEN" in found["enums"], f"the scan does not reach the explorer's checklist ({found})"
+    assert "seeded_snake_token" not in found["enums"], "checklist evidence reached the explorer without the policy"
+
+
 # ---------------------------------------------------------------------------------------------------
 # The same two proofs for the report pages that began listing every criterion: deck-review (whose
 # checklist shows each item's evidence) and market-sizing (whose checklist shows each item's notes).

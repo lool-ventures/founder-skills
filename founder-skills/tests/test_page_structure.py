@@ -37,6 +37,7 @@ CHECKLIST_PAGES: tuple[tuple[str, str], ...] = (
     ("market-sizing", "visualize.py"),
     ("ic-sim", "visualize.py"),
     ("competitive-positioning", "visualize.py"),
+    ("competitive-positioning", "explore.py"),
 )
 # (skill, script) of every writer on the shared shell: the checklist pages, and pages with no score.
 SHELL_PAGES: tuple[tuple[str, str], ...] = (

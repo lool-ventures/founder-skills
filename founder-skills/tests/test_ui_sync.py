@@ -43,10 +43,7 @@ def test_every_copy_is_an_adopter_and_every_importer_has_a_copy() -> None:
 
 
 # Pages that render `_ui.footer()` without the shell's stylesheet carry a copy of the footer's rules, `FOOTER_CSS`.
-FOOTER_CSS_COPIES = (
-    ("cap-table", "explore.py"),
-    ("competitive-positioning", "explore.py"),
-)
+FOOTER_CSS_COPIES = (("cap-table", "explore.py"),)
 
 
 @pytest.mark.parametrize(("skill", "script"), FOOTER_CSS_COPIES)
