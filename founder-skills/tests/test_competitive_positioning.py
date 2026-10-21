@@ -2714,7 +2714,7 @@ def _make_checklist_artifact(
             {
                 "id": item_id,
                 "category": item_id.split("_")[0],
-                "label": f"Label for {item_id}",
+                "label": ITEM_LABELS[item_id],
                 "status": "pass",
                 "evidence": f"Evidence for {item_id}",
             }
@@ -2850,7 +2850,7 @@ class TestCompose:
                     {
                         "id": item_id,
                         "category": item_id.split("_")[0],
-                        "label": f"Label for {item_id}",
+                        "label": ITEM_LABELS[item_id],
                         "status": "pass",
                         "evidence": f"Evidence for {item_id}",
                     }
@@ -4209,7 +4209,7 @@ class TestVisualizeChecklistShapes:
                     {
                         "id": item_id,
                         "category": item_id.split("_")[0],
-                        "label": f"Label for {item_id}",
+                        "label": ITEM_LABELS[item_id],
                         "status": "pass",
                         "evidence": f"Evidence for {item_id}",
                     }
@@ -4272,7 +4272,7 @@ class TestVisualizeChecklistShapes:
                     {
                         "id": item_id,
                         "category": item_id.split("_")[0],
-                        "label": f"Label for {item_id}",
+                        "label": ITEM_LABELS[item_id],
                         "status": "pass",
                         "evidence": f"Evidence for {item_id}",
                     }
@@ -4331,7 +4331,7 @@ def _make_checklist_with_summary(
             {
                 "id": item_id,
                 "category": item_id.split("_")[0],
-                "label": f"Label for {item_id}",
+                "label": ITEM_LABELS[item_id],
                 "status": "pass",
                 "evidence": f"Evidence for {item_id}",
             }

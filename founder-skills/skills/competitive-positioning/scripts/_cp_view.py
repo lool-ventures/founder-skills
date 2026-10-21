@@ -987,7 +987,7 @@ def criterion_text(text: Any, labels: Mapping[str, str]) -> str:
 
 def checklist_groups(checklist: Mapping[str, Any] | None) -> list[dict[str, Any]]:
     """The checklist as `_ui.checklist` groups, in the categories' order, evidence through `criterion_text`.
-    Each group carries `code` (the category's code) beside `name`."""
+    Each group carries `code` (the category's code) beside `name`, and each row its `result` word."""
     items = [_as_dict(i) for i in _as_list(_as_dict(checklist).get("items")) if isinstance(i, dict)]
     labels = criterion_labels(items)
     groups: list[dict[str, Any]] = []
@@ -1006,6 +1006,7 @@ def checklist_groups(checklist: Mapping[str, Any] | None) -> list[dict[str, Any]
                 "items": [
                     {
                         "tone": _STATUS_TONE.get(str(i.get("status")), "na"),
+                        "result": STATUS_WORDS.get(str(i.get("status")), "Not applicable"),
                         "title": labels.get(str(i.get("id") or ""), "Checklist item"),
                         "criterion": str(i.get("id") or ""),
                         "evidence": criterion_text(i.get("evidence"), labels),

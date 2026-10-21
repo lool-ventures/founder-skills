@@ -2031,6 +2031,30 @@ def _section_key_findings(
     return "\n".join(lines) + "\n"
 
 
+def _section_checklist(checklist: dict[str, Any] | None) -> str:
+    """Every criterion of the analysis checklist, per category: its result and the assessor's evidence, through
+    `_cp_view.criterion_text` (ids to labels, no sentence naming a file of ours). The pages show the same rows."""
+    if checklist is None or _is_stub(checklist):
+        return ""
+    groups = _view.checklist_groups(checklist)
+    if not groups:
+        return ""
+    lines = ["## Analysis Checklist\n"]
+    for group in groups:
+        lines.append(f"### {group['name']} ({group['count_text']})\n")
+        lines.append("| Criterion | Result | Evidence |")
+        lines.append("|---|---|---|")
+        for row in group["items"]:
+            cells = (
+                _md_escape(_view.md_inline(row["title"])),
+                row["result"],
+                _md_escape(_view.md_inline(row["evidence"])),
+            )
+            lines.append("| " + " | ".join(cells) + " |")
+        lines.append("")
+    return "\n".join(lines) + "\n"
+
+
 def _substitute_slugs(text: str, name_by_slug: dict[str, str] | None) -> str:
     """Replace competitor slugs with display names in founder-visible prose.
 
@@ -2339,6 +2363,7 @@ def compose(dir_path: str, report_path: str | None = None, no_ask: bool = False)
         ),
         _section_stress_test(positioning_scores),
         _section_key_findings(positioning_scores, moat_scores, checklist, name_by_slug),
+        _section_checklist(checklist),
     ]
 
     report_markdown = "\n".join(s for s in sections if s)

@@ -570,6 +570,34 @@ def test_cp_verification_section_absent_when_artifact_absent(tmp_path: Path) -> 
     assert "## Competitor Set Verification" not in md
 
 
+_CP_SEEDED_EVIDENCE = (
+    "Graded with POS_05 in mind. The POSITIONING_SCORING step agrees. The research_depth was thin. "
+    "The set is in landscape.json."
+)
+
+
+def test_cp_checklist_section_carries_none_of_the_seeded_tokens(tmp_path: Path) -> None:
+    """The Analysis Checklist section shows the assessor's evidence through `_cp_view.criterion_text`: an id, a
+    context word, a private token and a file of ours seeded into every row reach neither the section nor a
+    FOUNDER_TEXT_TOKEN warning."""
+
+    def seed(stage: Path) -> None:
+        checklist = _read(stage, "checklist.json")
+        for item in checklist["items"]:
+            item["evidence"] = _CP_SEEDED_EVIDENCE
+        _write(stage, "checklist.json", checklist)
+
+    report = _cp_compose(tmp_path, seed)
+    section = report.split("## Analysis Checklist", 1)[1].split("\n## ", 1)[0]
+    for token in ("POS_05", "POSITIONING_SCORING", "research_depth", "landscape.json"):
+        assert token not in section, token
+    assert "the positioning scoring" in section
+    assert "(One sentence was left out because it named a file by its filename.)" in section
+    warnings = json.loads((tmp_path / "work" / "report.json").read_text(encoding="utf-8"))["warnings"]
+    leaks = [w["message"] for w in warnings if w["code"] == "FOUNDER_TEXT_TOKEN"]
+    assert not leaks, leaks
+
+
 def test_cp_checklist_stale_vs_positioning_fires_on_fingerprint_mismatch(tmp_path: Path) -> None:
     """A re-score without re-running the checklist is invisible to run_id parity (the run_id does
     not change), so the fingerprint comparison is the only detector. POS_04 reads rank data
