@@ -905,16 +905,22 @@ Final assembled report with cross-artifact validation.
 The `report_markdown` field contains these sections in order:
 
 1. `# Competitive Positioning Analysis: {company_name}`
-2. `## Executive Summary` — overall positioning, key strengths, primary concerns
-3. `## Competitor Landscape` — competitor profiles with categories and evidence quality
-4. `## Competitor Set Verification` — optional; present only when `competitor_verification.json` was loaded. Per-competitor verdicts, notes naming each `not_a_competitor` entry as retained or removed, and the blind-recall gaps.
-5. `## Positioning Analysis` — per map: axis rationale, a "Where you stand" sentence built from the geometry fields above (no differentiation score is shown), and the points table with `~` on estimated positions
-6. `## Moat Assessment` — per-dimension ratings for startup vs. key competitors, trajectory
-7. `## Differentiation Stress-Test` — claim-by-claim results with investor challenges
-8. `## Key Findings` — prioritized findings from scoring data (script-generated)
-9. `## Warnings` — any quality warnings with severity and context
-10. `---` (separator — agent inserts `## Coaching Commentary` before this)
-11. Footer
+2. The verdict paragraph (no heading)
+3. `## Executive Summary` — overall positioning, key strengths, primary concerns
+4. `## What an Outside Review Found` — optional
+5. `## What Public Records Show` — optional
+6. `## Competitor Landscape` — competitor profiles with categories and evidence quality
+7. `## What's Changed Recently` — optional
+8. `## Competitor Set Verification` — optional; present only when `competitor_verification.json` was loaded. Per-competitor verdicts, notes naming each `not_a_competitor` entry as retained or removed, and the blind-recall gaps.
+9. `## Positioning Analysis` — per map: axis rationale, a "Where you stand" sentence built from the geometry fields above (no differentiation score is shown), and the points table with `~` on estimated positions
+10. `## What Is Shown and What Is Claimed` — optional
+11. `## Moat Assessment` — per-dimension ratings for startup vs. key competitors, trajectory
+12. `## Differentiation Stress-Test` — claim-by-claim results with investor challenges
+13. `## Key Findings` — prioritized findings from scoring data (script-generated)
+14. `## Analysis Checklist` — optional; each criterion's label, result and evidence
+15. `## Warnings` — any quality warnings with severity and context
+16. The coaching marker (replaced by `## Coaching Commentary`), then `---`
+17. Footer
 
 **Example:**
 ```json

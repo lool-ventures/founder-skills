@@ -149,7 +149,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--run-id", required=True)
     p.add_argument("-o", "--output", required=True, help="a folder: the run's hand-off ocr/")
     p.add_argument("--max-pages", type=int, default=_ocr_scope.MAX_PAGES)
-    # 40 s + a 15 s render + a 30 s read is 85 s at worst, under the shell tool's 120 s kill on cloud and locally.
+    # 30 s + a 15 s render + a 30 s read is 75 s at worst, under the cloud shell's 120 s kill
+    # (the local Cowork limit is unmeasured).
     p.add_argument("--budget-seconds", type=float, default=30.0)
     p.add_argument("--dpi", type=int, default=200)
     p.add_argument("--pretty", action="store_true")

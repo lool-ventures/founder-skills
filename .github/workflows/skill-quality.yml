@@ -53,13 +53,13 @@ on:
         description: "Rehearse release-note extraction for this tag (e.g. v0.10.0). Publishes NOTHING."
         required: false
         type: string
-      # The two opt-in deck-review lanes (contradiction, numeric operators), billed on top of the gate's
+      # The three opt-in deck-review lanes (contradiction, numeric operators, image deck), billed on top of the gate's
       # three. Read only by the paid job's env, never by an `if:`: off, the job is exactly the release
-      # gate; on, the same job also runs both lanes, and a red one reds the job. verify-branch-gate
+      # gate; on, the same job also runs all three lanes, and a red one reds the job. verify-branch-gate
       # accepts ANY green dispatched run at the tagged commit, so dispatch the lanes as a separate
       # run from the gate's: a red lane then cannot cost the release its green gate run.
       extra_deck_lanes:
-        description: "Also run the two opt-in deck-review lanes (contradiction, numeric operators). Adds ~$10-30."
+        description: "Also run the three opt-in deck-review lanes (contradiction, numeric operators, image deck). Adds ~$10-30."
         required: false
         type: boolean
         default: false
@@ -221,8 +221,8 @@ jobs:
           # until the variable was set here. A safety fix that no-ops its own consumer has
           # moved the defect rather than removed it.
           RUN_PAID_E2E: "1"
-          # "true" on a dispatch with `-f extra_deck_lanes=true`, which both lanes' opt-ins accept;
-          # "false" otherwise, which neither does, so the lanes skip as named in ALLOWED_SKIPS below.
+          # "true" on a dispatch with `-f extra_deck_lanes=true`, which every lane's opt-in accepts;
+          # "false" otherwise, which none does, so the lanes skip as named in ALLOWED_SKIPS below.
           RUN_PAID_E2E_CONTRADICTION: ${{ inputs.extra_deck_lanes }}
           RUN_PAID_E2E_NUMERIC: ${{ inputs.extra_deck_lanes }}
           RUN_PAID_E2E_OCR: ${{ inputs.extra_deck_lanes }}
@@ -284,7 +284,7 @@ jobs:
               "test_deck_review_contradiction_lane",
               # deck-review's numeric-operators lane: its own RUN_PAID_E2E_NUMERIC opt-in. The only run
               # that shows the model proposing runway / inverse_change / implied_base from a real deck.
-              # Both deck lanes run when a dispatch passes `-f extra_deck_lanes=true`.
+              # All three deck lanes run when a dispatch passes `-f extra_deck_lanes=true`.
               "test_deck_review_numeric_operators_lane",
               # deck-review's image-deck lane: its own RUN_PAID_E2E_OCR opt-in, set by the same `extra_deck_lanes`
               # dispatch, which also installs tesseract and poppler. The only paid run that reaches Step 3.95.

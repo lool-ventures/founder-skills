@@ -47,11 +47,13 @@ tool result counts only when the call that produced it is paired by tool id and 
     path (`> /dev/stdout`, `/proc/self/fd/1`): such a run printed no comparand, and none is read back.
 A redo printed with `--correction producer-rejected --detail-file F` quotes F inside the prompt, so it
 counts only when the transcript shows F written by a plugin producer run in the main thread (a
-truncating `2> F`, no other command in that block naming F) that failed -- the call exited non-zero,
-or the block's own `echo "EXIT=$?"` straight after the producer printed a non-zero code -- and nothing
-has written F since (reading it is fine). The two blocks name the same F when they spell it the same
-way or resolve it to the same path. Residual: a producer echoes parts of its input in its message, so
-a hand-off crafted to fail can carry text into the redo; the cap and the quoting bound it.
+truncating `2> F`, no other command in that block naming F) that failed -- the call exited non-zero, or
+the block's own `echo "EXIT=$?"` straight after the producer printed a non-zero code -- and nothing has
+written F since (reading it is fine). The two blocks name the same F when they spell it the same way or
+resolve it to the same path; in a CLI `Bash` block that does not change folder, `$PWD` is the folder its
+transcript row records (never on the Cowork shell, whose row folder is the host's). Residual: a producer
+echoes parts of its input in its message, so a hand-off crafted to fail can carry text into the redo;
+the cap and the quoting bound it.
 A Read of any other file, a sub-agent's reply, or a block that also prints
 text is never the comparand. Residual: the generator's arguments are typed by the model, and `$SCRIPTS` set in an
 earlier shell is trusted as the skill's own folder.

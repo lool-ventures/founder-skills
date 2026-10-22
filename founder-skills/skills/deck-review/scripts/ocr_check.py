@@ -14,9 +14,11 @@ step's template names.
 
 Exits:
   0  written;
-  1  refused, `-o` untouched: an unreadable input, or `OCR_OTHER_RUN` (the receipt is another run's);
-  2  `OCR_NOT_RUN` (no receipt) or `OCR_INCOMPLETE` (the read has not finished, or its pages are not this
-     scope's): run Step 3.95's command again. Never a producer rejection.
+  1  refused, `-o` untouched: an unreadable input, a `DECK_TEXT_` code, or `OCR_OTHER_RUN` (the receipt is
+     another run's);
+  2  `OCR_NOT_RUN` (no receipt) or `OCR_INCOMPLETE` (the receipt is unreadable, the read has not finished, was
+     made from another deck file, or its pages are not this scope's): run Step 3.95's command again. Never a
+     producer rejection.
 
 The numeral rule matches each raw figure's numbers against the page's, by value, scale and percent, built from
 reconcile's shared grammar (a copy would drift from the grammar the ledger was validated with). Counts only,

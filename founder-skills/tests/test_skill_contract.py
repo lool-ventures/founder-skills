@@ -1669,7 +1669,7 @@ SKILL_MD_CEILING: dict[str, int] = {
     # numbers section uses (its two commands, the run-again rule, what a refusal means, no sub-agent reading the
     # result, its row in the pipeline table, and that a resume runs it again), and Step 4's pipe passes `--ledger`
     # and `--ocr-check` to the gate that checks the step ran.
-    "deck-review": 120_201,
+    "deck-review": 120_199,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
@@ -2378,7 +2378,10 @@ REFERENCES_CEILING: dict[str, int] = {
     # outside_review (the review's outcome and one sentence per finding).
     # +176 B on 2026-10-08 (commit 13): who writes `deferred_recall_candidates` (the deferral script after Gate 1),
     # and that it waits for Gate 1's final answer.
-    "competitive-positioning": 145_405,
+    # +323 B on 2026-10-22: artifact-schemas.md's list of report.md sections named 11 of the 17 the compose writes
+    # (no outside review, public records, recent changes, proof gap or analysis checklist; warnings and the
+    # coaching marker in the wrong order). The list is now complete, with terse entries.
+    "competitive-positioning": 145_728,
     # cap-table +422 B: inputs-skeleton.md promised "no warning, and downstream artifacts that look
     # right but contain zeros" — the PRE-FIX world. cap_state.py hard-errors E_NO_EQUITY_BASE now,
     # and prose telling a model that a missing base yields plausible zeros invites it to invent one.

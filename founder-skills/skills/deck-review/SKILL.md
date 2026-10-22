@@ -1152,8 +1152,8 @@ python3 "$SCRIPTS/ocr_check.py" --ledger "$REVIEW_DIR/ledger.json" \
   --ocr-dir "$HANDOFF_DIR/ocr" --run-id "$RUN_ID" -o "$REVIEW_DIR/ocr_check.json"
 ```
 
-Exit 1 is a refusal: follow its message (`DECK_NOT_FOUND` after a resume: Step 2's conversion block first). No
-sub-agent reads `ocr/` or `ocr_check.json`.
+Exit 1: follow its message (`DECK_NOT_FOUND`: Step 2's conversion and `deck_text.py`, then Steps 3.5 on).
+No sub-agent reads `ocr/` or `ocr_check.json`.
 
 ### Step 4: Review Each Slide -> `slide_reviews.json` (Context A dispatch)
 
