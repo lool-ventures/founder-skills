@@ -5,6 +5,114 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.25.0] - 2026-10-22 — Image slides read by machine, a sharper deck rubric, and the positioning checklist on every page
+
+### Highlights
+
+**A deck review now machine-reads the image slides its numbers come from.** When some slides carry little or no
+selectable text, the figures the numbers section uses from them were read from how the slides look. A new step
+reads just those slides with a text-recognition tool and the numbers section says how many of those figures the
+machine read found as written, for example "A separate machine read of those slides found all 3 of them as
+written." It never names a figure or calls one wrong. When a count would mislead (fewer than half found, a miss among only
+one or two figures, nothing read) it says only that those figures were read from how the slides look, and on a deck
+that is all images it adds nothing, since the deck's own note already says so. It reads PDF decks, and needs
+`tesseract` and `pdftoppm` (Poppler); without them the numbers section says only how those figures were read. A deck
+whose numbers all come from selectable text is reviewed as before.
+
+**Three deck checklist criteria say exactly what they judge.** The business model passes only with a price level
+or range, not just a named pricing model. On a deck described in text or markdown, the team criterion no longer
+judges photos and profile links, which such a deck cannot carry. Deck structure is about slide order alone: a
+missing slide is scored once, by the criterion that owns it, and never twice.
+
+**Competitive positioning shows its analysis checklist.** report.md gains an "Analysis Checklist" section after
+the key findings, with each criterion's result and the assessor's evidence in plain words. The report page and the
+explorer move to the shared page layout (the header card, a quality ring that links to the checklist, a section
+menu) and show the same checklist; both read better on a phone.
+
+### Scoring changes
+
+- Deck review: `business_model_clear` passes only when a price level or range is stated; a pricing model named
+  without one is a warn. `team_has_depth` does not judge photos or profile links on a deck given as text or
+  markdown (input format `text` or `markdown`), so on such a deck their absence is no longer a warn or a fail.
+  `stage_appropriate_structure` judges slide order against the stage profile's expected outline only: a missing
+  slide is scored by the criterion the criteria file names for it, or not at all; extra slides are not a warn by
+  themselves; a fail is another stage's order or most slides out of order; and a stage with no expected outline
+  (Series B and later) is judged against the general problem, solution, proof, ask arc. The CHECKLIST prompt and agent
+  body allow the team criterion's scope as the one exception to "do not self-gate". So a text or markdown deck can
+  score a little higher, and a deck that names a pricing model with no price a little lower. The machine read (Step 3.95)
+  changes no status or score.
+- Every other skill: none.
+
+### Added
+
+- Deck review Step 3.95, the machine read of image slides (see Highlights). It reads only the slides that hold a
+  figure the numbers section uses, one page at a time, starting a new page only within the first 30 seconds of a
+  call, and picks up where it stopped when called again; a page that fails twice is left unread. At most 40 slides
+  are read; the numbers section says how many figures were not machine-read. A missing tool or an unreadable PDF never
+  blocks the review. No later step's sub-agent reads the machine read.
+- Competitive positioning's "Analysis Checklist" section in report.md, report.html and the explorer. Criterion ids
+  read as their labels and internal step names as plain words; a sentence that names a file by its internal name
+  is left out, with a note saying so. The pages add filter chips and a line saying the score measures how complete
+  and well-evidenced the analysis is, not how strong the company's position is.
+
+### Changed
+
+- Deck review's slide-review step refuses to run while a figure the numbers section uses sits on an image slide
+  and this run's machine-read check is missing, another run's, made for an earlier version of the numbers, or made
+  against another deck file. A deck whose figures all come from selectable text needs no check.
+- Competitive positioning report page: the shared header card, with the company as the title, the defensibility
+  pill and an analysis-quality ring (with its band) in place of the "Checklist: N%" badge, a section menu, the shared tables (they scroll inside their card on a phone), and the moat radar's
+  edge labels are no longer clipped.
+- Competitive positioning explorer: the same header card and ring (it now shows the defensibility pill too, and
+  loses its "Interactive positioning analysis" subtitle), a Checklist link beside the view tabs that jumps to the
+  checklist below the map, real tab semantics for the view tabs, and on a phone the toolbar fits and the sidebar sits below the map. The 2D map draws round bubbles at every width.
+- Deck review's design category is scored for an uploaded PDF or PPTX only, as the scoring already did; the
+  criteria file said markdown too.
+
+### Fixed
+
+- Competitive positioning explorer: company and axis names are escaped in the 3D view's hover text.
+
+### Known limits
+
+- The machine read's 30-second budget keeps each call well inside the cloud shell's two-minute limit (pages took
+  about 2 seconds each there). The shell limit of a local Cowork session has not been measured. If a call is cut
+  short anyway, that page is tried once more and then left unread, and the review continues.
+- The machine read covers PDF decks only. A deck given as a PowerPoint file, or a PDF whose page count does not
+  match the deck text, is not machine-read, and the report adds no sentence about it.
+- Competitive positioning's checklist shows the assessor's own evidence notes, cleaned of internal names. The
+  assessor is not yet told that founders read them, so a note can still read like a working note.
+
+### Development
+
+Contributor-facing only; nothing here changes what a founder installs or runs.
+
+- Hosts: the host contract lists deck review's new refusal codes: the deck-text codes `DECK_TEXT_UNREADABLE`,
+  `DECK_TEXT_INVALID` and `DECK_TEXT_OTHER_RUN` (already returned, not listed before), and Step 3.95's
+  `DECK_NOT_FOUND`, `OUTPUT_NOT_DIR`, `LEDGER_UNREADABLE` (also returned by the slide-review step),
+  `RECONCILIATION_UNREADABLE`, `OCR_NOT_RUN`,
+  `OCR_INCOMPLETE`, `OCR_OTHER_RUN`, `OCR_CHECK_MISSING`, `OCR_CHECK_OTHER_RUN`, `OCR_CHECK_STALE` and
+  `OCR_CHECK_WRONG_DECK`. Deck review's slide-review step now requires the deck text and the ledger and takes
+  the machine-read check, so a driver using the old command line fails on usage. Deck review's run gains
+  `ocr_check.json` (cleaned or kept with the other earlier-run files on a fresh run); report.md's numbers section
+  and the report page can carry the machine-read sentence.
+- A third opt-in deck lane runs an image-only synthetic deck on the `extra_deck_lanes` dispatch, which now installs
+  `tesseract-ocr` and `poppler-utils` first; on that dispatch the market-sizing lane's scanned upload meets a real tesseract too. Where the tools are
+  installed locally, a free test runs the two
+  machine-read scripts on the same deck.
+- The deck lanes' check that no deck-reading step retypes the deck now works on a PDF deck.
+- Competitive positioning's coaching payload is held to a golden (a hash per key), since the skill has no paid
+  lane to notice a change to what the coach reads.
+- The dispatch check: when a grading step is redone after a script rejected the grade, a command-line run whose
+  saved rejection path used `$PWD` had the correct redo held twice and then sent unchecked. In a command-line shell
+  block that does not change folder, `$PWD` is now read from the folder the run recorded. Cowork runs are unchanged.
+- The deck review, market sizing, cap table and competitive positioning report builders load the shared text policy
+  and gate-record check by path, leaving the caller's import path untouched.
+- `scripts/pre-tag.sh` runs the suite and the mutation corpus side by side across the cores, with the other gates
+  in the background: about 5 minutes instead of about 27. `PRETAG_SERIAL=1` runs them one after another.
+  `pytest-xdist` is pinned among the dev tools, and the mutation corpus runs under it with a sandbox per
+  worker.
+
 ## [0.24.0] - 2026-10-20 — Hosts that deliver their own output, steadier deck grades, and the remaining pages on the shared layout
 
 ### Highlights
