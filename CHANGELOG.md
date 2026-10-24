@@ -5,6 +5,61 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.26.0] - 2026-10-25 — Recorded source passages, a cap-table refusal that names the field, and checklist notes written for the founder
+
+### Highlights
+
+**A market sizing records the passage behind each sourced figure.** After its searches, a sizing now opens the
+pages its figures rest on (at most eight, only pages its own searches found) and records, beside each figure, the
+passage that states it. Sources Used in the report, and Assumption Confidence on the report page, say for how many
+of the sourced figures the sizing uses a passage containing the figure was recorded, for example "Of the 4 sourced
+market figures this sizing uses (exchange rates not counted), 3 have a recorded passage containing the figure."
+The sentence describes the record. It does not show that a page was opened. A page that does not open is left out;
+the run never stops or asks about it.
+
+**A cap table with a missing preferred-series field says which one.** A preferred series with no issue date, no
+share count or no series name, or with an empty price, conversion price or liquidation multiple, stopped the quick
+assessment with an internal error. It now stops with a message naming the series, the field and where to find the
+value.
+
+**Competitive positioning's checklist notes are written for the founder.** The checklist's evidence prints in the
+founder's report. Its grader is now asked to write each note for someone reading it beside their deck, leaving out
+the review's own vocabulary (step and gate names, statuses, field names).
+
+### Scoring changes
+
+- Competitive positioning: the CHECKLIST prompt and agent body ask for evidence written for the founder (wording
+  of the notes only). No criterion, status rule or score changes.
+- Every other skill: none.
+
+### Added
+
+- Market sizing: each research figure may carry a recorded `quote`; the report states how many of the sourced
+  market figures the sizing uses have one containing the figure (see Highlights).
+
+### Changed
+
+- Cap table: an empty (null) current conversion price or liquidation preference multiple on a preferred series is
+  refused by name; before, it stopped the run with an internal error. A series that leaves either out keeps its default (the original
+  conversion price, and 1x), as before. An empty issue date is now refused on the quick assessment too; the full
+  pipeline already refused it.
+- `record_gate_answer.py default`: a refused default reason now ends with the reasons that gate takes.
+
+### Fixed
+
+- Cap table: a preferred series missing `issuance_date`, `shares` or `series_name` stopped the quick assessment
+  with a KeyError; it is now `E_PREFERRED_MISSING_FIELD`.
+
+### Known limits
+
+- A recorded passage can be copied from a search result or paraphrased by the fetch tool; the report claims only
+  that a passage containing the figure was recorded. A round number can match by chance, and a percentage change
+  matches on its size, not its sign.
+- In the plain Claude Code CLI, opening a page from a new site may ask permission; a denial is treated as a page
+  that did not open.
+- Figures researched after the first research step may have no recorded passage.
+- Competitive positioning's sources carry no recorded passage yet.
+
 ## [0.25.0] - 2026-10-22 — Image slides read by machine, a sharper deck rubric, and the positioning checklist on every page
 
 ### Highlights
