@@ -31,12 +31,17 @@ command -v cowork-harness >/dev/null || { echo "FATAL: cowork-harness not on PAT
 ver="$(cowork-harness --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
 [ -n "$ver" ] || { echo "FATAL: could not parse cowork-harness version"; exit 1; }
 echo "cowork-harness $ver"
-# FLOOR: >=4.10.0 with no upper bound. Recording is the one operation where the harness version is
+# FLOOR: >=4.11.0 with no upper bound. Recording is the one operation where the harness version is
 #   THIS HEADER WAS ONE MINOR BEHIND THE GATE when 2.3.0 was adopted (header said 2.1.0, gate required
 #   2.2) — the exact drift the next paragraph warns about, sitting unfixed in the file that warns about
 #   it. If you are here to change the floor, change all FOUR sites: this header, the numeric gate, its
 #   FATAL message, and `_RECORDING_FLOOR` in founder-skills/tests/test_cowork_harness_floors.py.
-#   * 4.10.0 is the current floor (2026-10-16), a reason-(3) raise plus a moved `latest`, and NOT a
+#   * 4.11.0 is the current floor (2026-10-24), a reason-(3) raise plus a moved `latest`, and a re-record
+#     trigger: 4.10.0 pins agent 2.1.299, which Desktop has pruned (its `doctor` falls back to the staged
+#     2.1.308 with a sha256 mismatch); 4.11.0's `latest` (3.1623.4) pins the staged 2.1.308, and its spawn
+#     env adds CLAUDE_CODE_ENTRYPOINT_ON_REQUESTS="" (reason 1). NO re-stamp: the agent moved. Full
+#     analysis: docs/internal/2026-10-24-cowork-harness-4.11.0-adoption.md.
+#   * 4.10.0 was the floor before (2026-10-16), a reason-(3) raise plus a moved `latest`, and NOT a
 #     re-record trigger. 4.6.0 pins agent 2.1.293, which Desktop has pruned (its `doctor` falls back to
 #     the staged 2.1.299 with a sha256 mismatch); 4.10.0's `latest` (2.42304.0) pins the staged 2.1.299,
 #     so `doctor --tier hostloop` reports a sha256 match. spawn, mountLayout, network and the system
@@ -309,8 +314,8 @@ major="${ver%%.*}"; minor="$(echo "$ver" | cut -d. -f2)"
 # and that test asserts its own pattern matched — so collapsing this to `[ "$major" -ge 3 ]` does not
 # simplify the gate, it makes the guard that watches the gate match nothing. (At a .0 floor, as at 4.0.0,
 # the minor clause is vacuous and is kept for the same reason.)
-{ [ "$major" -gt 4 ] || { [ "$major" -eq 4 ] && [ "$minor" -ge 10 ]; }; } \
-  || { echo "FATAL: need >=4.10.0 (have $ver) — see the floor note above"; exit 1; }
+{ [ "$major" -gt 4 ] || { [ "$major" -eq 4 ] && [ "$minor" -ge 11 ]; }; } \
+  || { echo "FATAL: need >=4.11.0 (have $ver) — see the floor note above"; exit 1; }
 if [ -n "${COWORK_AGENT_BINARY:-}" ]; then
   [ -x "$COWORK_AGENT_BINARY" ] || { echo "FATAL: agent binary not executable: $COWORK_AGENT_BINARY"; exit 1; }
 fi
@@ -600,8 +605,8 @@ for t in "${targets[@]}"; do
   # because CI can't re-record; here we just did, so green is the correct expectation.)
   # 4.2.0 also prints an `agent-version:` [note] when a recording's agent differs from the one its
   # baseline pins for that tier. It never fails verify-cassettes, so it is surfaced here, loudly: it
-  # replaces the manual "agent version uniform" check. Under the 4.10.0 floor NO note is expected:
-  # 4.10.0 pins the agent Desktop stages (2.1.299). Any note is a defect signal (under 4.5.0 one
+  # replaces the manual "agent version uniform" check. Under the 4.11.0 floor NO note is expected:
+  # 4.11.0 pins the agent Desktop stages (2.1.308). Any note is a defect signal (under 4.5.0 one
   # 2.1.293-vs-2.1.289 note per recording was the accepted hostloop patch substitution; a cassette
   # hand re-stamped across an agent bump carries one too, which is why 4.10.0 re-stamps none).
   echo "=== staleness: $t ==="; st_tmp="$(mktemp)"; st_rc=0
