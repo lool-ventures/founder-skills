@@ -377,11 +377,17 @@ EVID_01..04, NARR_01..04, MISS_01..03. Mode-based gating applies: when
 Every `fail` and `warn` MUST cite specific evidence. Every `pass` MUST note what
 was checked. Empty evidence produces blank lines in the report.
 
-Evidence prints VERBATIM in the founder's report, so cite the source the way the
-founder knows it — never by our filename. They never saw `landscape.json` or
-`positioning.json`; they saw their deck and the competitors discussed. Write "no
-competitor slide appears in the deck", not "landscape.json reports input_mode:
-deck". State what is true of the COMPANY or its competitive set.
+Evidence prints VERBATIM in the founder's report. Picture them reading each note beside
+their deck: say what holds for the company, its rivals and its market, never how this
+review works. Name the source the way the founder knows it — never by our filename. They
+never saw `landscape.json` or `moat_scores.json`; they saw their deck and the competitors in
+it. Our step and gate names, statuses, field names and values, and words like "the
+analysis", "the pipeline", "the producer" or "the artifact" mean nothing to them.
+Write "the deck names three competitors and no others", not "landscape.json reports
+input_mode: deck"; "each competitor named sells to the same buyer for the same job", not
+"Gate 1 passed and the verification step raised no challenge"; "pricing is our estimate
+here, because no price appears in the deck", not "the producer marked the price axis as
+an agent estimate". State what is true of the COMPANY or its competitive set.
 
 Write to OUTPUT_PATH the JSON matching `checklist.py`'s input format (items
 only — producer script computes the summary):

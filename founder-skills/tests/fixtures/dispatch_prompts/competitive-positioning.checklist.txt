@@ -28,15 +28,22 @@ Evidence is MANDATORY for every item: every fail and warn MUST have a non-empty
 evidence string citing specific findings. Every pass MUST have evidence noting
 what was checked.
 
-Evidence prints VERBATIM in the founder's report, so name the source the way the
-founder knows it — never by our filename. They never saw `landscape.json` or
-`moat_scores.json`; they saw their deck and the competitors in it.
+Evidence prints VERBATIM in the founder's report. Picture them reading each note beside
+their deck: say what holds for the company, its rivals and its market, never how this
+review works. Name the source the way the founder knows it — never by our filename. They
+never saw `landscape.json` or `moat_scores.json`; they saw their deck and the competitors in
+it. Our step and gate names, statuses, field names and values, and words like "the
+analysis", "the pipeline", "the producer" or "the artifact" mean nothing to them.
   Instead of: "landscape.json reports input_mode: deck"
   Write:      "the deck names three competitors and no others"
   Instead of: "moat_scores.json shows switching_costs weak"
   Write:      "switching costs are weak — customers can leave in a day"
+  Instead of: "Gate 1 passed and the verification step raised no challenge"
+  Write:      "each competitor named sells to the same buyer for the same job"
+  Instead of: "the producer marked the price axis as an agent estimate"
+  Write:      "pricing is our estimate here, because no price appears in the deck"
 State what is true of the COMPANY or its competitive set. The delivery gate
-flags an internal filename in evidence, so this is checked.
+flags an internal filename in evidence, so that part is checked.
 
 **Copy each criterion's label verbatim into `criterion`.** It is a cross-check, not decoration:
 the label you are shown and the evidence you write are joined by `id` downstream, so if the id

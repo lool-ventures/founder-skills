@@ -2,7 +2,7 @@
   "agent_bodies": {
     "agents/cap-table.md": "c36dcbf5e67cecc4526e240030c93e974c628c9a5d8697f05a6cc5c9696f5edc",
     "agents/competitive-positioning-redteam.md": "8d76bc168bc2c4987b225c8a7c3160efa28fad853058e3a8abc1f5a9b4a5d7fc",
-    "agents/competitive-positioning.md": "4072a4d7b397bfbfeb45806f927d45cf0355b3edb497b001b6552c27cd162d18",
+    "agents/competitive-positioning.md": "dda8902811e256155f1ed0b33e9b2d9ee11350c0403ddb1e225e9382b5a6685c",
     "agents/deck-review.md": "dad49b57047a744c8c166583a2e6fce92961d41f0d2b2c8ea9ec018fceaf828e",
     "agents/financial-model-review.md": "48e3be5b79b3a6f402a17dbcce518ec099592228316176d9aff99803470ad33f",
     "agents/ic-sim.md": "e508a1d9839ea3789970353316b2de65c2481669be2ad1ad3ddcd0b9aa8b25e9",
@@ -126,7 +126,7 @@
     "skills/competitive-positioning/scripts/checklist.py": "84eb6b8cf56e0986ee7da76e95c5ccef2e71c7c2a9c0548a71d99fd065bf2a35",
     "skills/competitive-positioning/scripts/compose_report.py": "e91632dddbd8ebd58522e06930447b8368d0b5e1058079dd4305b00a97a49def",
     "skills/competitive-positioning/scripts/cp_closing_message.py": "3146c5c160fe1fcd0f06a27512ed92421e64825007a257118c1d0be81ba68d87",
-    "skills/competitive-positioning/scripts/cp_dispatch_prompt.py": "5e3bc12f26f2030c3d0266f01938c168c39737f256e6e3a5ae332d090bf042a3",
+    "skills/competitive-positioning/scripts/cp_dispatch_prompt.py": "59568ef044bb650e877c4e8f76daf06fa4ca0892ffe0460b814581fa5a9cb50f",
     "skills/competitive-positioning/scripts/cp_red_team.py": "22b56b4a17ac420d88bc39f5113d7df5879b3bf8eec5647263d44e7bf4fcf9ea",
     "skills/competitive-positioning/scripts/explore.py": "6453edf961a344dbf7e738ee742e7e27c4bf489fea340f21c97d2b86a55f147c",
     "skills/competitive-positioning/scripts/gate3_triggers.py": "b7d827270b8c585e28ee4cdba7a16eb01f11bcae62a21acadcf1dcf818a960b4",

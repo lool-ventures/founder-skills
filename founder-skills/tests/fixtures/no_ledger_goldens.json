@@ -101,7 +101,7 @@
         "red_team_skip.json": "09d2289cdfb0043aae9ef323ad1b2273eac53f0aca184ba13c0fa1423fd5380f"
       },
       "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout": "b334dbccc70ebca95c4ee9eeff837a5b30f680cb0fb0a40fc5603f9e6786b307"
+      "stdout": "3468bf5b5dbc07b43c3e5b1e79d78090f0a0f464316095b161dc380747af448c"
     },
     "checklist_dir": {
       "exit": 0,
@@ -116,7 +116,7 @@
         "red_team_skip.json": "09d2289cdfb0043aae9ef323ad1b2273eac53f0aca184ba13c0fa1423fd5380f"
       },
       "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout": "b334dbccc70ebca95c4ee9eeff837a5b30f680cb0fb0a40fc5603f9e6786b307"
+      "stdout": "3468bf5b5dbc07b43c3e5b1e79d78090f0a0f464316095b161dc380747af448c"
     },
     "checklist_missing_file": {
       "exit": 0,
@@ -131,7 +131,7 @@
         "red_team_skip.json": "09d2289cdfb0043aae9ef323ad1b2273eac53f0aca184ba13c0fa1423fd5380f"
       },
       "stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout": "20766b0d51b2b24edb295ef340c69170a1c04ec46a11d9ac14dfdc2b45939c4d"
+      "stdout": "bf212089833a61f62628770476559e89bfa3c9c019b9c40fbd3240c21084e3ff"
     },
     "moat_scoring": {
       "exit": 0,

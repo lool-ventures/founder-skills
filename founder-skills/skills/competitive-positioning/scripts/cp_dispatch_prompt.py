@@ -274,15 +274,22 @@ _CHECKLIST_TEMPLATE = (
     "evidence string citing specific findings. Every pass MUST have evidence noting\n"
     "what was checked.\n"
     "\n"
-    "Evidence prints VERBATIM in the founder's report, so name the source the way the\n"
-    "founder knows it — never by our filename. They never saw `landscape.json` or\n"
-    "`moat_scores.json`; they saw their deck and the competitors in it.\n"
+    "Evidence prints VERBATIM in the founder's report. Picture them reading each note beside\n"
+    "their deck: say what holds for the company, its rivals and its market, never how this\n"
+    "review works. Name the source the way the founder knows it — never by our filename. They\n"
+    "never saw `landscape.json` or `moat_scores.json`; they saw their deck and the competitors in\n"
+    'it. Our step and gate names, statuses, field names and values, and words like "the\n'
+    'analysis", "the pipeline", "the producer" or "the artifact" mean nothing to them.\n'
     '  Instead of: "landscape.json reports input_mode: deck"\n'
     '  Write:      "the deck names three competitors and no others"\n'
     '  Instead of: "moat_scores.json shows switching_costs weak"\n'
     '  Write:      "switching costs are weak — customers can leave in a day"\n'
+    '  Instead of: "Gate 1 passed and the verification step raised no challenge"\n'
+    '  Write:      "each competitor named sells to the same buyer for the same job"\n'
+    '  Instead of: "the producer marked the price axis as an agent estimate"\n'
+    '  Write:      "pricing is our estimate here, because no price appears in the deck"\n'
     "State what is true of the COMPANY or its competitive set. The delivery gate\n"
-    "flags an internal filename in evidence, so this is checked.\n"
+    "flags an internal filename in evidence, so that part is checked.\n"
     "\n"
     "**Copy each criterion's label verbatim into `criterion`.** It is a cross-check, not decoration:\n"
     "the label you are shown and the evidence you write are joined by `id` downstream, so if the id\n"
