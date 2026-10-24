@@ -69,7 +69,7 @@
     "skills/cap-table/scripts/_warning_callouts.py": "614da5cff485929d21ce9572f6cc6ff483103e4007f66346ab427fce9e4df604",
     "skills/cap-table/scripts/anti_dilution.py": "75cc3b0bcd6eb0d0a6367e221eef74811bb346025606f61c50728314e479a909",
     "skills/cap-table/scripts/backward_verifier.py": "11445b07bfc321680add3da3e27840d4b680bcf09a71550065b467daab9b816e",
-    "skills/cap-table/scripts/cap_state.py": "9c50ce0810cfdfbfe4c79c32a8fc006fa5ac6fcb124f7330a11d3cd1dda9edcd",
+    "skills/cap-table/scripts/cap_state.py": "e3be83d8d07014b7cb3c427c39214076ce5660a9ff6316e8b592bf957a7aae25",
     "skills/cap-table/scripts/cap_state_after_round.py": "3eb0b6c10dcb450a0b20aaf42c56d3276e1bdcb4b4bc91330b5c0e6b2a3b4099",
     "skills/cap-table/scripts/compose_extraction_report.py": "7244221f794070b3d26e6338ba5c9f7d73eedba5366030b96b61fe28e4a0f7b4",
     "skills/cap-table/scripts/compose_report.py": "0d18d89b31a4fd5ad346ce899f1598ad862cd01d8bdfd54216b1864b4eae0a8d",

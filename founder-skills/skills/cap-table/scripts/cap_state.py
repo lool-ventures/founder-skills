@@ -81,6 +81,33 @@ class CapStateInvariantError(ValueError):
     """Raised when a semantic invariant fails at canonicalization."""
 
 
+_PREFERRED_REQUIRED: tuple[tuple[str, str], ...] = (
+    ("series_name", "add 'series_name' (the series as the documents name it, e.g. 'Seed')"),
+    ("shares", "add 'shares' from the cap table, or ask the founder"),
+    (
+        "issuance_date",
+        "add 'issuance_date' from the SPA or the cap-table export (an AoA restatement may not state it), "
+        "e.g. '2024-01-15'",
+    ),
+    ("original_issue_price", "add 'original_issue_price' (price per share paid for the series)"),
+    ("original_conversion_price", "add 'original_conversion_price' (usually equal to the issue price)"),
+)
+# Fields whose absence keeps its old handling (the price guard's refusal); only an explicit null is "missing".
+_PREFERRED_ABSENT_OK_NULL_NOT = frozenset({"original_issue_price", "original_conversion_price"})
+
+
+def _resolved_ccp(s: dict[str, Any]) -> Any:
+    """current -> original -> ocp, where an explicit null means "not specified", like an absent key.
+
+    `is None`, never `or`: an explicit 0.0 must still reach the CCP > 0 guard and be refused.
+    """
+    if s.get("current_conversion_price") is not None:
+        return s["current_conversion_price"]
+    if s.get("original_conversion_price") is not None:
+        return s["original_conversion_price"]
+    return s.get("ocp", 0)
+
+
 def _check_invariants_preferred_series(preferred: list[dict[str, Any]]) -> None:
     """§4.5 semantic invariants for preferred series + dividend rejection (§6.2).
 
@@ -110,6 +137,23 @@ def _check_invariants_preferred_series(preferred: list[dict[str, Any]]) -> None:
         err.violations = dividend_violations  # type: ignore[attr-defined]
         raise err
 
+    # Required fields, read by subscript or with no usable default further down: an absent key or an explicit
+    # null is a named refusal rather than a KeyError / TypeError. OIP and OCP count only when present as null;
+    # an absent one is left to the price guard below, as before. A blank series_name is not "missing" here: the
+    # derived blank series_id is refused by `_check_unique_ids` (E_BLANK_ID_IN_CAP_TABLE).
+    for i, s in enumerate(preferred):
+        name = s.get("series_name") or f"index {i}"
+        for field, hint in _PREFERRED_REQUIRED:
+            if field in _PREFERRED_ABSENT_OK_NULL_NOT:
+                missing = field in s and s[field] is None
+            else:
+                missing = field not in s or s[field] is None
+            if missing:
+                raise CapStateInvariantError(
+                    f"E_PREFERRED_MISSING_FIELD: preferred_series[{i}] ('{name}') is missing required field "
+                    f"'{field}'. Remedy: {hint}."
+                )
+
     for s in preferred:
         # OIP > 0 / OCP > 0 divide-by-zero guard
         if float(s.get("original_issue_price", 0)) <= 0:
@@ -125,12 +169,7 @@ def _check_invariants_preferred_series(preferred: list[dict[str, Any]]) -> None:
         # Resolved current_conversion_price must be > 0 (same fallback chain the
         # canonicalizer uses: current -> original -> ocp). A resolved CCP <= 0
         # would silently corrupt the as-converted ratio and blow up AD math.
-        ccp = float(
-            s.get(
-                "current_conversion_price",
-                s.get("original_conversion_price", s.get("ocp", 0)),
-            )
-        )
+        ccp = float(_resolved_ccp(s))
         if ccp <= 0:
             sname = s.get("series_name", "?")
             raise CapStateInvariantError(
@@ -779,16 +818,12 @@ def build_cap_state(
             "shares": int(s["shares"]),
             "original_issue_price": float(s.get("original_issue_price", s.get("oip", 0))),
             "original_conversion_price": float(s.get("original_conversion_price", s.get("ocp", 0))),
-            "current_conversion_price": float(
-                s.get(
-                    "current_conversion_price",
-                    # Third slot (ocp alias) is unreachable: OCP > 0 is
-                    # validated above before this dict is built.
-                    s.get("original_conversion_price", s.get("ocp", 0)),
-                )
-            ),
+            # Third slot (ocp alias) is unreachable: OCP > 0 is validated above before this dict is built.
+            "current_conversion_price": float(_resolved_ccp(s)),
             "issuance_date": s["issuance_date"],
-            "liquidation_preference_multiple": float(s.get("liquidation_preference_multiple", 1.0)),
+            "liquidation_preference_multiple": float(
+                1.0 if s.get("liquidation_preference_multiple") is None else s["liquidation_preference_multiple"]
+            ),
             "liquidation_preference_type": s.get("liquidation_preference_type", "non_participating"),
             "participation_cap_multiple": s.get("participation_cap_multiple"),
             "anti_dilution_protection": s.get("anti_dilution_protection", "none"),

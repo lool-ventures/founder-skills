@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -6554,6 +6555,91 @@ class TestPreferredSeriesCCPFallback:
         with pytest.raises(cap_state_mod.CapStateInvariantError) as exc:
             cap_state_mod.build_cap_state(self._inputs_with_series(series), self._instruments())
         assert "E_PREFERRED_SERIES_INVALID_PRICE" in str(exc.value)
+
+    _SEED = {
+        "series_name": "Seed",
+        "shares": 2_000_000,
+        "original_issue_price": 2.0,
+        "original_conversion_price": 2.0,
+        "issuance_date": "2024-06-01",
+    }
+
+    @pytest.mark.parametrize(
+        ("field", "absent"),
+        [
+            ("series_name", True),
+            ("series_name", False),
+            ("shares", True),
+            ("shares", False),
+            ("issuance_date", True),
+            ("issuance_date", False),
+            ("original_issue_price", False),
+            ("original_conversion_price", False),
+        ],
+    )
+    def test_a_missing_or_null_required_field_is_named(self, field: str, absent: bool) -> None:
+        """An absent or null required field is E_PREFERRED_MISSING_FIELD, never a KeyError or TypeError."""
+        series = dict(self._SEED)
+        if absent:
+            del series[field]
+        else:
+            series[field] = None
+        with pytest.raises(cap_state_mod.CapStateInvariantError) as exc:
+            cap_state_mod.build_cap_state(self._inputs_with_series(series), self._instruments())
+        msg = str(exc.value)
+        assert "E_PREFERRED_MISSING_FIELD" in msg and f"'{field}'" in msg and "preferred_series[0]" in msg, msg
+
+    @pytest.mark.parametrize("field", ["original_issue_price", "original_conversion_price"])
+    def test_an_absent_price_keeps_the_price_guard(self, field: str) -> None:
+        series = dict(self._SEED)
+        del series[field]
+        with pytest.raises(cap_state_mod.CapStateInvariantError) as exc:
+            cap_state_mod.build_cap_state(self._inputs_with_series(series), self._instruments())
+        assert "E_PREFERRED_SERIES_INVALID_PRICE" in str(exc.value)
+
+    def test_a_blank_series_name_keeps_the_blank_id_refusal(self) -> None:
+        series = {**self._SEED, "series_name": ""}
+        with pytest.raises(cap_state_mod.CapStateInvariantError) as exc:
+            cap_state_mod.build_cap_state(self._inputs_with_series(series), self._instruments())
+        assert "E_BLANK_ID_IN_CAP_TABLE" in str(exc.value)
+
+    def test_a_null_ccp_takes_the_original_conversion_price(self) -> None:
+        series = {**self._SEED, "current_conversion_price": None}
+        cs = cap_state_mod.build_cap_state(self._inputs_with_series(series), self._instruments())
+        assert cs["preferred_series"][0]["current_conversion_price"] == 2.0
+
+    def test_a_null_liquidation_multiple_takes_the_default(self) -> None:
+        series = {**self._SEED, "liquidation_preference_multiple": None}
+        cs = cap_state_mod.build_cap_state(self._inputs_with_series(series), self._instruments())
+        assert cs["preferred_series"][0]["liquidation_preference_multiple"] == 1.0
+
+    def test_quick_assess_names_a_missing_issuance_date_and_writes_nothing(self, tmp_path: Path) -> None:
+        series = dict(self._SEED)
+        del series["issuance_date"]
+        inputs_path = tmp_path / "inputs.json"
+        safes_path = tmp_path / "safes.json"
+        inputs_path.write_text(json.dumps(self._inputs_with_series(series)))
+        safes_path.write_text("[]")
+        review = tmp_path / "review"
+        review.mkdir()
+        rc, stdout, stderr = _run(
+            "quick_assess.py",
+            [
+                "--inputs",
+                str(inputs_path),
+                "--safes",
+                str(safes_path),
+                "--pre-money",
+                "20000000",
+                "--new-money",
+                "5000000",
+                "--review-dir",
+                str(review),
+            ],
+        )
+        assert rc != 0
+        assert "E_PREFERRED_MISSING_FIELD" in stdout and "Traceback" not in stderr, stderr
+        assert list(review.iterdir()) == []
 
 
 class TestPricingUnknownSeries:

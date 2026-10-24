@@ -954,7 +954,7 @@ MUST_KILL: tuple[Mutant, ...] = (
     ),
     Mutant(
         id="cap_state_duplicate_ids_not_refused",
-        killed_by="TestCapStateRejectsDuplicateIds::test_duplicate_founder_ids_are_refused",
+        killed_by="TestPreferredSeriesCCPFallback::test_a_blank_series_name_keeps_the_blank_id_refusal",
         file=f"{_SCRIPTS}/cap_state.py",
         find="    for array_name, id_field, rows in arrays:",
         replace="    for array_name, id_field, rows in []:",
