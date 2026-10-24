@@ -491,11 +491,12 @@ def test_a_document_line_break_quoted_with_a_json_escape_still_blocks(tmp_path, 
 
 
 def test_line_numbering_never_blocks_a_recording_but_other_small_integers_do(tmp_path):
-    """Only the `cat -n` shape (six integers, each one more than the last) is skipped, and only on a
-    recording. Any other run of small integers that a document holds still blocks a recording."""
+    """Only the `cat -n` shape (six integers, each one more than the last, at any width) is skipped, and
+    only on a recording. Any other run of integers that a document holds still blocks a recording."""
     room = _fake_sources(tmp_path)[1] / "dataroom"
     (room / "numbered.csv").write_text("7,8,9,10,11,12\n")
     (room / "scores.csv").write_text("12,40,7,33,18,9\n")
+    (room / "numbered_long.csv").write_text("431,432,433,434,435,436\n")
     spec = pg.load_sources(str(tmp_path / "sources.txt"))
     idx = pg.build_private_index(
         spec, own_code_texts=[""], cache_dir=str(tmp_path / "cache2"), allowlist_path=_NO_ALLOWLIST
@@ -503,7 +504,10 @@ def test_line_numbering_never_blocks_a_recording_but_other_small_integers_do(tmp
     # space-separated, so this does not depend on the unescape
     assert pg.find_verbatim_leaks(CAS, [(1, "7 8 9 10 11 12")], idx) == []
     assert pg.find_verbatim_leaks(CAS, [(1, json.dumps({"text": "7\n8\n9\n10\n11\n12"}))], idx) == []
+    # a read past line 99: three-digit line numbers are the same shape
+    assert pg.find_verbatim_leaks(CAS, [(1, json.dumps({"text": "431\n432\n433\n434\n435\n436"}))], idx) == []
     assert pg.find_verbatim_leaks("notes.md", [(1, "7 8 9 10 11 12")], idx)  # hand-written: unchanged
+    assert pg.find_verbatim_leaks("notes.md", [(1, "431 432 433 434 435 436")], idx)
     # inverse control: non-consecutive small integers from a document still block a recording
     assert pg.find_verbatim_leaks(CAS, [(1, "12 40 7 33 18 9")], idx)
     assert pg.find_verbatim_leaks(CAS, [(1, json.dumps({"text": "12\n40\n7\n33\n18\n9"}))], idx)

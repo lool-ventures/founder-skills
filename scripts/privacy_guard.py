@@ -798,11 +798,11 @@ def find_figure_leaks(path: str, lines: list[tuple[int, str]], idx: PrivateIndex
 
 
 def _is_line_numbering(words: list[str]) -> bool:
-    """Six 1-2 digit integers each one more than the last: the `cat -n` / line-number shape a recording's
-    tool results carry once its `\\n` escapes are decoded, and a numbered column in a spreadsheet. It is
-    the only all-integer shape that collided (2 grams, one staged cassette line); any other run of small
-    integers still matches."""
-    if not all(w.isdigit() and len(w) <= 2 for w in words):
+    """Six integers each one more than the last: the `cat -n` / line-number shape a recording's tool
+    results carry once its `\\n` escapes are decoded, and a numbered column in a spreadsheet. Any width:
+    a file read past line 99 numbers its bracket-only lines 100, 101, ... It is the only all-integer shape
+    that has collided; any other run of integers still matches."""
+    if not all(w.isdigit() for w in words):
         return False
     nums = [int(w) for w in words]
     return all(nums[i + 1] == nums[i] + 1 for i in range(len(nums) - 1))
