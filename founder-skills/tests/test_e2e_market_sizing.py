@@ -246,6 +246,8 @@ def _quote_sentence(review_dir: Path) -> str | None:
     assert spec and spec.loader
     view = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(view)
+    if not (review_dir / "validation.json").is_file() or not (review_dir / "sizing.json").is_file():
+        return None  # the lane's own artifact check reports a missing file
     validation = json.loads((review_dir / "validation.json").read_text(encoding="utf-8"))
     sizing = json.loads((review_dir / "sizing.json").read_text(encoding="utf-8"))
     sentence: str | None = view.quote_sentence(validation, sizing)
