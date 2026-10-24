@@ -4415,22 +4415,27 @@ def resolve_default(gate_id: str, g: dict[str, Any], reason: str | None, answer_
     `stated_in_request` names the stated option. Any other reason only where the registry lists it.
     """
     listed = dict(g["defaults"])
+    takes = f"; {gate_id} takes: {', '.join(listed)}"
+
+    def _refuse(msg: str) -> GateRejection:
+        return GateRejection("DEFAULT_REASON_INVALID", msg + takes)
+
     if reason not in DEFAULT_REASONS:
-        raise GateRejection("DEFAULT_REASON_INVALID", f"{reason!r} is not a default reason")
+        raise _refuse(f"{reason!r} is not a default reason")
     if reason == "asked_not_to_be_asked":
         if g["no_ask_default"] is None:
-            raise GateRejection("DEFAULT_REASON_INVALID", f"{gate_id} has no default for a founder not to be asked")
+            raise _refuse(f"{gate_id} has no default for a founder not to be asked")
         if answer_id not in (None, g["no_ask_default"]):
-            raise GateRejection("DEFAULT_REASON_INVALID", f"{gate_id}'s default is {g['no_ask_default']!r}")
+            raise _refuse(f"{gate_id}'s default is {g['no_ask_default']!r}")
         return str(g["no_ask_default"])
     if reason not in listed:
-        raise GateRejection("DEFAULT_REASON_INVALID", f"{gate_id} does not take the default reason {reason!r}")
+        raise _refuse(f"{gate_id} does not take the default reason {reason!r}")
     if listed[reason] is not None:
         if answer_id not in (None, listed[reason]):
-            raise GateRejection("DEFAULT_REASON_INVALID", f"{gate_id}'s {reason} default is {listed[reason]!r}")
+            raise _refuse(f"{gate_id}'s {reason} default is {listed[reason]!r}")
         return str(listed[reason])
     if answer_id is None and reason != "producer_default_disclosed":
-        raise GateRejection("DEFAULT_REASON_INVALID", f"{reason} on {gate_id} needs the option it took")
+        raise _refuse(f"{reason} on {gate_id} needs the option it took")
     return answer_id
 
 

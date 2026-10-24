@@ -139,6 +139,37 @@ def test_default_refusals(tmp_path: Path, args: list[str], code: str) -> None:
     _rejected(root, run_id, h.record(root, run_id, "default", *args), code, before)
 
 
+def _takes(gate_id: str) -> str:
+    return f"; {gate_id} takes: " + ", ".join(dict(g.GATES[gate_id]["defaults"]))
+
+
+@pytest.mark.parametrize(
+    ("gate_id", "reason", "answer_id"),
+    [
+        pytest.param("ctx_basics", "made_up", None, id="not-a-reason"),
+        pytest.param("ctx_basics", "asked_not_to_be_asked", None, id="no-no-ask-default"),
+        pytest.param("ms_methodology", "asked_not_to_be_asked", "not_an_option", id="no-ask-default-mismatch"),
+        pytest.param("ctx_basics", "start_fresh_by_default", None, id="reason-not-listed"),
+        pytest.param("ct_pool_basis", "producer_default_disclosed", "post_money", id="listed-default-mismatch"),
+        pytest.param("ctx_basics", "stated_in_request", None, id="needs-the-option"),
+    ],
+)
+def test_every_default_refusal_names_the_gate_reasons(gate_id: str, reason: str, answer_id: str | None) -> None:
+    """Each of resolve_default's refusals ends by naming the gate's own reasons, so a caller can pick a valid one."""
+    with pytest.raises(g.GateRejection) as exc:
+        g.resolve_default(gate_id, g.GATES[gate_id], reason, answer_id)
+    assert exc.value.code == "DEFAULT_REASON_INVALID"
+    assert str(exc.value).endswith(_takes(gate_id)), str(exc.value)
+
+
+def test_the_recorder_prints_the_reasons_on_a_refused_default(tmp_path: Path) -> None:
+    root, run_id, _rd = h.start_bound(tmp_path, "deck-review")
+    before = h.snapshot(root, run_id)
+    proc = h.record(root, run_id, "default", "--gate", "ctx_basics.stage", "--reason", "made_up")
+    _rejected(root, run_id, proc, "DEFAULT_REASON_INVALID", before)
+    assert _takes("ctx_basics") in proc.stdout + proc.stderr
+
+
 def test_a_default_is_disclosed_and_an_answer_may_replace_it(tmp_path: Path) -> None:
     root, run_id, _rd = h.start_bound(tmp_path, "deck-review")
     proc = h.record(
