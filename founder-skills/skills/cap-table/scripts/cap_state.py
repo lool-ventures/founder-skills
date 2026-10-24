@@ -91,21 +91,31 @@ _PREFERRED_REQUIRED: tuple[tuple[str, str], ...] = (
     ),
     ("original_issue_price", "add 'original_issue_price' (price per share paid for the series)"),
     ("original_conversion_price", "add 'original_conversion_price' (usually equal to the issue price)"),
+    (
+        "current_conversion_price",
+        "give the price the series converts at today, or leave the key out if it was never adjusted",
+    ),
+    (
+        "liquidation_preference_multiple",
+        "give the multiple the terms state (e.g. 1.0), or leave the key out for the 1x default",
+    ),
 )
-# Fields whose absence keeps its old handling (the price guard's refusal); only an explicit null is "missing".
-_PREFERRED_ABSENT_OK_NULL_NOT = frozenset({"original_issue_price", "original_conversion_price"})
+# Fields whose absence keeps its old handling (the price guard's refusal, or the documented default); only an
+# explicit null is "missing". A null conversion price or multiple is never filled in: on a series repriced after
+# a down round, a guessed price would silently misstate every holder's stake.
+_PREFERRED_ABSENT_OK_NULL_NOT = frozenset(
+    {
+        "original_issue_price",
+        "original_conversion_price",
+        "current_conversion_price",
+        "liquidation_preference_multiple",
+    }
+)
 
 
 def _resolved_ccp(s: dict[str, Any]) -> Any:
-    """current -> original -> ocp, where an explicit null means "not specified", like an absent key.
-
-    `is None`, never `or`: an explicit 0.0 must still reach the CCP > 0 guard and be refused.
-    """
-    if s.get("current_conversion_price") is not None:
-        return s["current_conversion_price"]
-    if s.get("original_conversion_price") is not None:
-        return s["original_conversion_price"]
-    return s.get("ocp", 0)
+    """current -> original -> ocp, the canonicaliser's chain (a null was refused before this is read)."""
+    return s.get("current_conversion_price", s.get("original_conversion_price", s.get("ocp", 0)))
 
 
 def _check_invariants_preferred_series(preferred: list[dict[str, Any]]) -> None:
@@ -821,9 +831,7 @@ def build_cap_state(
             # Third slot (ocp alias) is unreachable: OCP > 0 is validated above before this dict is built.
             "current_conversion_price": float(_resolved_ccp(s)),
             "issuance_date": s["issuance_date"],
-            "liquidation_preference_multiple": float(
-                1.0 if s.get("liquidation_preference_multiple") is None else s["liquidation_preference_multiple"]
-            ),
+            "liquidation_preference_multiple": float(s.get("liquidation_preference_multiple", 1.0)),
             "liquidation_preference_type": s.get("liquidation_preference_type", "non_participating"),
             "participation_cap_multiple": s.get("participation_cap_multiple"),
             "anti_dilution_protection": s.get("anti_dilution_protection", "none"),

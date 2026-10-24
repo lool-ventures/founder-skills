@@ -6575,6 +6575,8 @@ class TestPreferredSeriesCCPFallback:
             ("issuance_date", False),
             ("original_issue_price", False),
             ("original_conversion_price", False),
+            ("current_conversion_price", False),
+            ("liquidation_preference_multiple", False),
         ],
     )
     def test_a_missing_or_null_required_field_is_named(self, field: str, absent: bool) -> None:
@@ -6603,14 +6605,9 @@ class TestPreferredSeriesCCPFallback:
             cap_state_mod.build_cap_state(self._inputs_with_series(series), self._instruments())
         assert "E_BLANK_ID_IN_CAP_TABLE" in str(exc.value)
 
-    def test_a_null_ccp_takes_the_original_conversion_price(self) -> None:
-        series = {**self._SEED, "current_conversion_price": None}
-        cs = cap_state_mod.build_cap_state(self._inputs_with_series(series), self._instruments())
+    def test_an_absent_ccp_and_multiple_keep_their_defaults(self) -> None:
+        cs = cap_state_mod.build_cap_state(self._inputs_with_series(dict(self._SEED)), self._instruments())
         assert cs["preferred_series"][0]["current_conversion_price"] == 2.0
-
-    def test_a_null_liquidation_multiple_takes_the_default(self) -> None:
-        series = {**self._SEED, "liquidation_preference_multiple": None}
-        cs = cap_state_mod.build_cap_state(self._inputs_with_series(series), self._instruments())
         assert cs["preferred_series"][0]["liquidation_preference_multiple"] == 1.0
 
     def test_quick_assess_names_a_missing_issuance_date_and_writes_nothing(self, tmp_path: Path) -> None:
