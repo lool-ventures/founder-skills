@@ -548,13 +548,15 @@ record_one() {
   # The verify-time one was DELETED from ALLOW at 1.19.0 (see the floor note above); do NOT read that
   # deletion as a reason to drop this. Passing either where the other belongs fails as unknown-flag.
   [ -f "cassettes/$n.cassette.json" ] || new_fixture=(--allow-host-inventory-fixture)
-  # A larger body cap for ONE lane. deck-review-smoke asserts verdicts inside checklist.json, which
+  # A larger body cap for TWO lanes. deck-review-smoke asserts verdicts inside checklist.json, which
   # runs 29-62 KB against the default 64 KiB; an artifact_json over a truncated body refuses the record
   # AFTER the run is paid for. This also stores this lane's report bodies (report.json/.md/.html,
   # 70-100 KB each), which the default cap leaves out. Per lane, not global, so no other lane's
-  # bodies enter its cassette. A hand `record` of this scenario must pass the same flag.
+  # bodies enter its cassette. competitive-positioning-smoke asserts inside report.json, which now
+  # carries the checklist's evidence and passed 64 KiB (67 KB). A hand `record` of either scenario must
+  # pass the same flag.
   local cap=()
-  [ "$n" = deck-review-smoke ] && cap=(--max-artifact-bytes 131072)
+  case "$n" in deck-review-smoke|competitive-positioning-smoke) cap=(--max-artifact-bytes 131072) ;; esac
   cowork-harness record "scenarios/$n.yaml" --out "cassettes/$n.cassette.json" "${new_fixture[@]}" "${cap[@]}" \
     || { echo "RECORD FAILED: $n"; return 1; }
 }
