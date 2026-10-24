@@ -2017,6 +2017,43 @@ def redo_outcome(record: dict[str, Any] | None) -> str | None:
     return out
 
 
+def quote_sentence(validation: Any, sizing: Any) -> str | None:
+    """How many of the sourced market figures the sizing uses carry a recorded passage containing the figure.
+
+    Counted on the rows the pages list (`assumption_rows`): used, graded sourced, a unit the calculator knows,
+    exchange rates aside. Each is looked up in the `quote_checks` stamp `market_sizing.py` wrote; a sizing with
+    no stamp, or a counted entry the stamp does not name, gets no sentence rather than a wrong count. The
+    sentence states what the record shows, never why a passage is missing.
+    """
+    checks = sizing.get("quote_checks") if isinstance(sizing, dict) else None
+    if not isinstance(checks, dict):
+        return None
+    names = sorted(
+        {
+            str(r["entry"].get("name"))
+            for r in assumption_rows(validation, sizing)
+            if r["kind"] == "record"
+            and r["used"] is True
+            and r["grade"] == "sourced"
+            and r["entry"].get("unit") in _params.UNITS
+            and r["entry"].get("unit") != _params.FX_RATE
+        }
+    )
+    if not names or any(n not in checks for n in names):
+        return None
+    n, m = sum(1 for x in names if checks[x] is True), len(names)
+    if m == 1:
+        has = "has" if n else "does not have"
+        return (
+            f"The one sourced market figure this sizing uses (exchange rates not counted) {has} a recorded passage "
+            "containing the figure."
+        )
+    return (
+        f"Of the {m} sourced market figures this sizing uses (exchange rates not counted), {n} "
+        f"{'has' if n == 1 else 'have'} a recorded passage containing the figure."
+    )
+
+
 def redo_sentence(record: dict[str, Any] | None, validation: Any) -> str | None:
     """The founder-facing account of a redo the sizing used; None when there is none to tell."""
     outcome = redo_outcome(record)

@@ -2813,8 +2813,8 @@ def _section_warnings(warnings: list[dict[str, str]]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _section_sources(validation: dict[str, Any] | None) -> str:
-    """Section 9: Sources used."""
+def _section_sources(validation: dict[str, Any] | None, sizing: dict[str, Any] | None = None) -> str:
+    """Section 9: Sources used, closed by how many sourced figures carry a recorded passage (`_view`)."""
     if validation is None:
         return "## Sources Used\n\n*No validation data available.*\n"
     if _is_stub(validation):
@@ -2863,6 +2863,9 @@ def _section_sources(validation: dict[str, Any] | None) -> str:
         if supported:
             line += f" — supports: {supported}"
         lines.append(line)
+    quoted = _view.quote_sentence(validation, sizing)
+    if quoted:
+        lines.append(f"\n{quoted}")
     return "\n".join(lines) + "\n"
 
 
@@ -3496,7 +3499,7 @@ def _compose(
         _section_validation(validation_data),
         _section_sensitivity(sensitivity),
         _WARNINGS_PLACEHOLDER,
-        _section_sources(validation_data),
+        _section_sources(validation_data, sizing),
     ]
 
     body_without_warnings = "\n".join(s for s in sections if s != _WARNINGS_PLACEHOLDER)

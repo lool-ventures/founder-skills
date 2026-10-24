@@ -40,6 +40,7 @@ from typing import Any, NoReturn
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _params  # noqa: E402
 import _provenance  # noqa: E402
+import _quote_value  # noqa: E402
 
 # Convention this analysis' headline figures follow — see
 # references/tam-sam-som-methodology.md §5. Optional and NOT defaulted here: an
@@ -938,8 +939,12 @@ def _keep_unit_rejections(
 
 def _resolve_references(
     data: dict[str, Any], args: argparse.Namespace, approach: str
-) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], list[dict[str, Any]], list[str]]:
-    """Resolve the reference payload. Returns (numeric_data, refs, provenance, conversions, errors)."""
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], list[dict[str, Any]], list[str], Any]:
+    """Resolve the reference payload.
+
+    Returns (numeric_data, refs, provenance, conversions, errors, validation): the record `resolve()` read, so the
+    quote stamp is taken from the same read (None when it could not be read).
+    """
     errors: list[str] = []
     if not args.validation or not args.inputs:
         return (
@@ -951,6 +956,7 @@ def _resolve_references(
                 "E_REF_CONTEXT_MISSING: the sizing inputs are references, so the producer needs the record: "
                 "pass --validation <validation.json> --inputs <inputs.json>."
             ],
+            None,
         )
     caller_fx = [
         name
@@ -977,6 +983,7 @@ def _resolve_references(
                 f"any exchange rate come from the research record: record the rate there, with its source and "
                 f"date, and re-run."
             ],
+            None,
         )
     validation, verr = _load_json(args.validation)
     inputs, ierr = _load_json(args.inputs)
@@ -990,6 +997,7 @@ def _resolve_references(
                 f"E_REF_CONTEXT_MISSING: could not read the record ({args.validation}: {verr or 'ok'}; "
                 f"{args.inputs}: {ierr or 'ok'})."
             ],
+            None,
         )
     refs = {p: data[p] for p in _needed_params(approach) if p in data}
     resolved, refusals = _provenance.resolve(refs, validation=validation, inputs=inputs, currency=args.currency)
@@ -1017,7 +1025,7 @@ def _resolve_references(
             meta.append((st.get("as_of"), st.get("source")))
     args.fx_as_of = next((a for a, _ in meta if a), None)
     args.fx_source = next((src for _, src in meta if src), None)
-    return numeric, refs, resolved, conversions, errors
+    return numeric, refs, resolved, conversions, errors, validation
 
 
 _FOUNDER_QUESTION_RE = re.compile(r"^E_[A-Z_]+: (\w+): .*\(remedy: founder_question\)$", re.DOTALL)
@@ -1150,9 +1158,10 @@ def main() -> None:
     resolved: dict[str, Any] = {}
     ref_conversions: list[dict[str, Any]] = []
     ref_errors: list[str] = []
+    ref_validation: Any = None
     if ref_mode:
         assert isinstance(data, dict)
-        data, refs, resolved, ref_conversions, ref_errors = _resolve_references(data, args, approach)
+        data, refs, resolved, ref_conversions, ref_errors, ref_validation = _resolve_references(data, args, approach)
         if ref_errors and args.output:
             # A period only the founder can give: with a ledger it is a recorded question.
             import _ms_gates  # noqa: PLC0415
@@ -1235,6 +1244,11 @@ def main() -> None:
         if ref_mode:
             result["input_refs"] = refs
             result["input_provenance"] = resolved
+            # Which research entries carry a quoted passage containing their figure (`_quote_value.py`), from
+            # the same read `resolve()` used. Not written when a name repeats: the report then says nothing.
+            checks = _quote_value.quote_checks(ref_validation)
+            if checks is not None:
+                result["quote_checks"] = checks
         else:
             consumed = {
                 "td": ("industry_total", "segment_pct", "share_pct"),

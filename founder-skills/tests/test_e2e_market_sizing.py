@@ -237,6 +237,21 @@ def _script(name: str, args: list[str]) -> str:
         "CLAUDE_CODE_OAUTH_TOKEN, or run `claude /login` (subscription)"
     ),
 )
+def _quote_sentence(review_dir: Path) -> str | None:
+    """The sentence `_view.quote_sentence` builds from this run's own validation.json and sizing.json."""
+    scripts = PLUGIN_PATH / "skills" / "market-sizing" / "scripts"
+    if str(scripts) not in sys.path:
+        sys.path.insert(0, str(scripts))
+    spec = importlib.util.spec_from_file_location("ms_view_e2e", scripts / "_view.py")
+    assert spec and spec.loader
+    view = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(view)
+    validation = json.loads((review_dir / "validation.json").read_text(encoding="utf-8"))
+    sizing = json.loads((review_dir / "sizing.json").read_text(encoding="utf-8"))
+    sentence: str | None = view.quote_sentence(validation, sizing)
+    return sentence
+
+
 def test_market_sizing_smoke(tmp_path: Path) -> None:
     """Run a both-methodologies sizing; assert the delivered chain."""
     workdir = tmp_path / "workspace"
@@ -244,7 +259,7 @@ def test_market_sizing_smoke(tmp_path: Path) -> None:
 
     run_id = lane_run_id(LANE)
     prompt = host_request(PROMPT, run_id, answers=HOST_ANSWERS, values=HOST_VALUES, notes=HOST_NOTES)
-    cap = run_skill_capture(prompt, workdir, label="market-sizing", uploads=[SCANNED_DECK])
+    cap = run_skill_capture(prompt, workdir, label="market-sizing", uploads=[SCANNED_DECK], extra_tools=("WebFetch",))
     captured = cap.messages
     review_dir = locate_review_dir(workdir, "market-sizing-*", captured, "market-sizing")
 
@@ -410,6 +425,11 @@ def test_market_sizing_smoke(tmp_path: Path) -> None:
     report_md = json.loads((review_dir / "report.json").read_text(encoding="utf-8"))["report_markdown"]
     head = report_md[report_md.index("## Executive Summary") : report_md.index("| Metric | Value | Method |")]
     assert "An outside review" in head or "No adversarial review ran" in head, head
+    # The quoted-passage sentence: whenever the sizing uses a sourced market figure, report.md says how many
+    # carry a recorded passage. Its presence is the check, not its count (pages may or may not open).
+    expected = _quote_sentence(review_dir)
+    if expected is not None:
+        assert expected in report_md, f"report.md lacks the quoted-passage sentence: {expected!r}"
 
     payload = assert_coaching_commentary_landed(review_dir, payload_key="comparison_blocked")
 

@@ -577,6 +577,8 @@ re-dispatch from a done one.
 
 **When methodology is single:** Perform one research pass for the chosen approach.
 
+**After searching:** open the pages the sized figures rest on and record each figure's passage as `${CLAUDE_PLUGIN_ROOT}/skills/market-sizing/references/web-sources.md` describes; a page that will not open is left out, never a stop.
+
 **When pure calculation (user provides all numbers):** Skip research. Write a stub `validation.json` with `{"skipped": true, "reason": "User-provided inputs, no external validation required"}`, and size with the founder's numbers as they gave them (no `--validation`). Record each in `inputs.json` (`founder_stated_inputs` or `existing_claims`): the report then says the figures are theirs and unchecked. A figure that is not theirs makes it an unchecked sizing, reported as such.
 
 **Source quality hierarchy:** Government/regulatory > Established analysts > Industry associations > Academic > Business press > Company blogs (product facts only).

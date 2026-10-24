@@ -995,7 +995,10 @@ SKILL_MD_CEILING: dict[str, int] = {
     # byte for byte, never reformatted or wrapped (a value sent with the request is checked as sent).
     # 107,326 -> 107,401 (+75 B) on 2026-10-19: Step 0 says to leave the request heredoc empty
     # when the request carries no `FS_HOST_` lines.
-    "market-sizing": 107_401,
+    # 107,401 -> 107,635 (+234 B) on 2026-10-24: Step 4 points to references/web-sources.md, which says to open
+    # the pages the sized figures rest on and record each figure's passage, and that a page that will not open
+    # is left out. The procedure itself lives in the reference file.
+    "market-sizing": 107_635,
     # fmr raised for two founder-facing-correctness items measured in a live run: the CHECKLIST
     # dispatch now forbids citing our artifact filenames in evidence (that run put `inputs.json` in 10
     # items' evidence, printed verbatim into the founder's report), and the producer pipe passes
@@ -2217,7 +2220,10 @@ REFERENCES_CEILING: dict[str, int] = {
     # 55,402 -> 55,719 (+317 B) on 2026-10-05: methodology.json's `red_team_skipped_run_id` row.
     # +395 B on 2026-10-08 (commit 13): artifact-schemas.md says the report reads the run ledger instead of
     # `founder_stated_choice` / `gate_defaults` when one exists, and documents the checklist's `inputs.json` stamp.
-    "market-sizing": 56_114,
+    # 56,114 -> 59,413 (+3,299 B) on 2026-10-24: a new web-sources.md (opening the pages the sized figures rest
+    # on and recording each figure's passage, kept out of SKILL.md, whose ceiling is exact), plus `quote` and
+    # `quote_checks` in artifact-schemas.md.
+    "market-sizing": 59_413,
     # fmr raised to document `graded_against` on the three producer outputs that stamp it — a new
     # artifact field is not discoverable from a schema doc that omits it, and the field exists to make
     # staleness detectable at all (run_id parity cannot see corrections applied within a run).

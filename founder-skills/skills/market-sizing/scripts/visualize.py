@@ -1063,6 +1063,12 @@ def _chart_confidence_donut(validation: dict[str, Any] | None, sizing: dict[str,
         if r["kind"] == "estimate"
     )
 
+    # How many sourced figures the sizing uses carry a recorded passage: report.md's Sources Used sentence,
+    # from its one owner. "uses" is what separates it from the legend above, which counts unused research too.
+    quoted = _view.quote_sentence(validation, sizing)
+    if quoted:
+        notes += f'<p class="estimate-note">{_esc(quoted)}</p>'
+
     return '<div class="chart-container">' + svg + "</div>" + legend + notes
 
 

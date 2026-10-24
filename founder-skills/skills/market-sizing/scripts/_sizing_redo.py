@@ -131,8 +131,10 @@ def run_id_of(data: Any) -> str | None:
     return rid if isinstance(rid, str) and rid else None
 
 
-# An entry's label is how it is shown, not what it records; every other field is part of its digest.
-_NOT_DIGESTED = ("label",)
+# An entry's label is how it is shown, not what it records, and its quote is the passage that states the figure,
+# recorded beside it (`_quote_value.py`): adding one is not a change to the research. Every other field is part
+# of its digest.
+_NOT_DIGESTED = ("label", "quote")
 
 
 def research_digest(validation: Any) -> dict[str, str]:

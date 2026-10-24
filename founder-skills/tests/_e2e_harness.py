@@ -170,7 +170,10 @@ def assert_no_account_connectors(
         )
 
 
-def build_options(workdir: Path, env_extra: dict[str, str] | None = None) -> Any:
+BASE_ALLOWED_TOOLS = ("Bash", "Read", "Write", "Edit", "Glob", "Grep", "Task", "Skill", "WebSearch")
+
+
+def build_options(workdir: Path, env_extra: dict[str, str] | None = None, extra_tools: Sequence[str] = ()) -> Any:
     """SDK options shared by every lane.
 
     See `test_e2e_deck_review.py` for the full derivation of each field; the two that
@@ -214,7 +217,11 @@ def build_options(workdir: Path, env_extra: dict[str, str] | None = None) -> Any
         # Accepted because the alternative is a market-sizing lane that green-lights a feature it
         # never touches -- and because production DOES offer it: tool allowlists are per-agent
         # there, so only the red-team agent receives it.
-        allowed_tools=["Bash", "Read", "Write", "Edit", "Glob", "Grep", "Task", "Skill", "WebSearch"],
+        #
+        # `extra_tools` is per lane. The market-sizing lane adds WebFetch: its main thread opens the pages the
+        # sized figures rest on (references/web-sources.md), and a lane without the tool would only ever
+        # exercise the path where no page opens. The other lanes keep the base list.
+        allowed_tools=[*BASE_ALLOWED_TOOLS, *extra_tools],
         disallowed_tools=list(CATCH_ALL_AGENT_DENY),
         # Hook lifecycle events in the stream: the Stop hook's own responses are the second count of its
         # blocks, checked against the "Stop hook feedback:" turns the hand-over assertions key on.
@@ -794,6 +801,7 @@ def run_skill_capture(
     env_extra: dict[str, str] | None = None,
     max_budget_usd: float | None = None,
     model: str | None = None,
+    extra_tools: Sequence[str] = (),
 ) -> RunCapture:
     """Drive one skill run to completion, with sub-agent tool calls attributed.
 
@@ -811,7 +819,7 @@ def run_skill_capture(
         for src in uploads:
             shutil.copy(src, uploads_dir / src.name)
         env_extra["COWORK_UPLOADS_DIR"] = str(uploads_dir)
-    options = build_options(workdir, env_extra)
+    options = build_options(workdir, env_extra, extra_tools)
     if max_budget_usd is not None:
         # The SDK's own per-run cap: past it the run ends with an `error_max_budget_usd` result.
         options.max_budget_usd = max_budget_usd
