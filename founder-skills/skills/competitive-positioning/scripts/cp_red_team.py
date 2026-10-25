@@ -36,7 +36,8 @@ from typing import Any, NoReturn
 
 import _cp_redteam_copy
 import _cp_view
-from _cp_redteam_text import humanize_review_text
+import _upload_names
+from _cp_redteam_text import _URL_RE, humanize_review_text
 from _quote_match import quote_in_doc
 
 _SHARED_SCRIPTS = os.path.normpath(
@@ -94,7 +95,19 @@ def validate_findings(
     core = _cp_redteam_copy.core()
 
     def humanize(text: str, documents: list[str]) -> tuple[str, int]:
-        return humanize_review_text(text, documents, name_by_slug=name_by_slug, startup_name=startup_name)
+        # The founder's file names as uploaded, before anything rewrites a word inside one (the policy's
+        # substitute runs after this and would leave `<8-hex>-pitch deck.pdf` no renderer can match).
+        # Outside URL spans only: a link that contains a stored name is the link, not a file name.
+        shown = _upload_names.display_map(documents)
+        if shown:
+            parts = _URL_RE.split(text)
+            urls = _URL_RE.findall(text)
+            text = "".join(
+                _upload_names.humanize(p, shown) + (urls[i] if i < len(urls) else "") for i, p in enumerate(parts)
+            )
+        return humanize_review_text(
+            text, [*documents, *shown.values()], name_by_slug=name_by_slug, startup_name=startup_name
+        )
 
     result: dict[str, Any] = core.validate_findings(
         data,

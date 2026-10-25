@@ -80,6 +80,27 @@ def _is_stub(data: dict[str, Any] | None) -> bool:
     return isinstance(data, dict) and data.get("skipped") is True
 
 
+def _upload_names_for(dir_path: str, artifacts: dict[str, Any]) -> dict[str, str]:
+    """{name as a cloud session stored an upload: the founder's name} for this page's run
+    (`_cp_redteam_copy.upload_display`); empty when it cannot be told."""
+    try:
+        import _cp_redteam_copy
+
+        run_id = _cp_redteam_copy.primary_run_id_in(dir_path, artifacts, REQUIRED_ARTIFACTS)
+        return _cp_redteam_copy.upload_display(dir_path, run_id)
+    except Exception:  # noqa: BLE001 - a display nicety must never stop the page
+        return {}
+
+
+def _humanized(data: Any, upload_names: dict[str, str]) -> Any:
+    """`data` with the founder's file names as uploaded; a missing or corrupt artifact stays what it was."""
+    if not upload_names or data is None or data is _CORRUPT:
+        return data
+    import _cp_redteam_copy
+
+    return _cp_redteam_copy.humanize_tree(data, upload_names)
+
+
 def _usable(data: dict[str, Any] | None) -> TypeGuard[dict[str, Any]]:
     """Check if artifact is loaded, not corrupt, and not a stub."""
     return data is not None and data is not _CORRUPT and not _is_stub(data)
@@ -988,7 +1009,8 @@ def _section_outside_review(dir_path: str, artifacts: dict[str, Any]) -> str:
     shown, _codes, facts = _cp_redteam_copy.resolve(
         dir_path, run_id, redteam if _usable(redteam) else None, skip_record if _usable(skip_record) else None
     )
-    review = shown if _usable(shown) else None
+    upload_names = _cp_redteam_copy.upload_display(dir_path, run_id)
+    review = _cp_redteam_copy.humanize_tree(shown, upload_names) if _usable(shown) else None
     skip = _cp_redteam_copy.skip_reason(skip_record if _usable(skip_record) else None, run_id)
     outcome = _cp_view.review_outcome(review, skip)
     if outcome is None:
@@ -1023,7 +1045,7 @@ def _section_outside_review(dir_path: str, artifacts: dict[str, Any]) -> str:
             parts.append(f"<p><strong>Your documents the review did not open:</strong> {_esc(', '.join(unread))}</p>")
     for n, doc in _cp_redteam_copy.other_rounds(dir_path, run_id, facts.get("round_shown")):
         parts.append(f"<h3>Another review of this analysis (review {n})</h3>")
-        extra = _cp_view.review_findings(doc)
+        extra = _cp_view.review_findings(_cp_redteam_copy.humanize_tree(doc, upload_names))
         if not extra:
             parts.append("<p>It raised no challenges it could evidence.</p>")
         parts.extend(_finding(f) for f in extra)
@@ -1339,6 +1361,9 @@ def compose_html(dir_path: str) -> str:
     artifacts: dict[str, dict[str, Any] | None] = {}
     for name in all_names:
         artifacts[name] = _load_artifact(dir_path, name)
+    # Every string the page shows, with the founder's file names as uploaded (`_upload_names_for`).
+    upload_names = _upload_names_for(dir_path, artifacts)
+    artifacts = {name: _humanized(data, upload_names) for name, data in artifacts.items()}
 
     landscape = artifacts.get("landscape.json")
     positioning = artifacts.get("positioning.json")
@@ -1404,7 +1429,8 @@ def compose_html(dir_path: str) -> str:
     )
     proof_gap = _section_proof_gap(positioning_scores)
     startup_record = _section_startup_record(
-        _load_artifact(dir_path, _cp_view.FIRST_STARTUP_RESEARCH), artifacts.get("startup_research.json")
+        _humanized(_load_artifact(dir_path, _cp_view.FIRST_STARTUP_RESEARCH), upload_names),
+        artifacts.get("startup_research.json"),
     )
     outside_review = _section_outside_review(dir_path, artifacts)
 

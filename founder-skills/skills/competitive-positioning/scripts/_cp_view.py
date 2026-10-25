@@ -974,11 +974,18 @@ def criterion_labels(items: Iterable[Any]) -> dict[str, str]:
     return out
 
 
-def criterion_text(text: Any, labels: Mapping[str, str]) -> str:
+def criterion_text(text: Any, labels: Mapping[str, str], names: Mapping[str, str] | None = None) -> str:
     """One criterion's evidence, as the founder may see it (see the section note above). Fails closed: if the
-    policy cannot be loaded or anything here raises, the row says its evidence is not shown."""
+    policy cannot be loaded or anything here raises, the row says its evidence is not shown. `names` maps a
+    stored upload name to the founder's (`_cp_redteam_copy.upload_display`), applied FIRST, before the policy
+    rewrites anything in it."""
     try:
-        body = " ".join(str(text or "").split())
+        body = str(text or "")
+        if names:
+            import _upload_names
+
+            body = _upload_names.humanize(body, dict(names))
+        body = " ".join(body.split())
         if not body:
             return ""
         gated = _GATE_RE.match(body)
@@ -1028,9 +1035,12 @@ def _context_words(m: re.Match[str]) -> str:
     return f"{det} {noun}"
 
 
-def checklist_groups(checklist: Mapping[str, Any] | None) -> list[dict[str, Any]]:
-    """The checklist as `_ui.checklist` groups, in the categories' order, evidence through `criterion_text`.
-    Each group carries `code` (the category's code) beside `name`, and each row its `result` word."""
+def checklist_groups(
+    checklist: Mapping[str, Any] | None, names: Mapping[str, str] | None = None
+) -> list[dict[str, Any]]:
+    """The checklist as `_ui.checklist` groups, in the categories' order, evidence through `criterion_text`
+    (with `names`, see there). Each group carries `code` (the category's code) beside `name`, and each row its
+    `result` word."""
     items = [_as_dict(i) for i in _as_list(_as_dict(checklist).get("items")) if isinstance(i, dict)]
     labels = criterion_labels(items)
     groups: list[dict[str, Any]] = []
@@ -1052,7 +1062,7 @@ def checklist_groups(checklist: Mapping[str, Any] | None) -> list[dict[str, Any]
                         "result": STATUS_WORDS.get(str(i.get("status")), "Not applicable"),
                         "title": labels.get(str(i.get("id") or ""), "Checklist item"),
                         "criterion": str(i.get("id") or ""),
-                        "evidence": criterion_text(i.get("evidence"), labels),
+                        "evidence": criterion_text(i.get("evidence"), labels, names),
                     }
                     for i in rows
                 ],

@@ -222,3 +222,50 @@ def other_rounds(analysis_dir: str, run_id: str | None, round_shown: Any) -> lis
         for n, doc in c.list_copies(analysis_dir, run_id)
         if isinstance(doc, dict) and n != round_shown
     ]
+
+
+def upload_display(analysis_dir: str, run_id: str | None) -> dict[str, str]:
+    """{name as stored: name as the founder uploaded it} for this run's documents (`_upload_names`' rules).
+
+    A cloud Cowork session stores each upload as `<8-hex>-<original name>`, and the review step mirrors them
+    under those names. The names are every readable review copy of this run plus this run's mirror
+    (`handoff/<run_id>/docs`), so a review that ran and failed still maps; never `redteam.json` as it stands,
+    which may be another run's and adds no names. Empty with no run id, a mixed batch, or on any error: a
+    prefix left showing is the failure, never a wrong name.
+    """
+    if not run_id:
+        return {}
+    try:
+        import _upload_names
+
+        c = core()
+        names: list[str] = []
+        for _n, doc in c.list_copies(analysis_dir, run_id):
+            names.extend(_upload_names.known_names(doc))
+        names.extend(c.list_documents(os.path.join(c.copies_dir(analysis_dir, run_id), "docs")))
+        return _upload_names.display_map(names)
+    except Exception:  # noqa: BLE001 - a display nicety must never stop a render
+        return {}
+
+
+# A review quote stays byte-exact on every surface: report.md lifts it out before its pass.
+_KEEP_KEYS = frozenset({"evidence_quote"})
+
+
+def humanize_tree(obj: Any, mapping: dict[str, str]) -> Any:
+    """A copy of `obj` with every string value humanized by `mapping` (keys and `evidence_quote` untouched).
+    The input itself when the mapping is empty."""
+    if not mapping:
+        return obj
+    import _upload_names
+
+    def walk(v: Any) -> Any:
+        if isinstance(v, str):
+            return _upload_names.humanize(v, mapping)
+        if isinstance(v, dict):
+            return {k: (x if k in _KEEP_KEYS else walk(x)) for k, x in v.items()}
+        if isinstance(v, list):
+            return [walk(x) for x in v]
+        return v
+
+    return walk(obj)

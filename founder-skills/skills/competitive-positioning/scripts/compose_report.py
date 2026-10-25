@@ -35,6 +35,7 @@ if _SCRIPTS_DIR not in sys.path:
 import _cp_gates  # noqa: E402
 import _cp_redteam_copy  # noqa: E402
 import _cp_view as _view  # noqa: E402
+import _upload_names  # noqa: E402
 
 # Sentinel for corrupt artifacts
 _CORRUPT: dict[str, Any] = {"__corrupt__": True}
@@ -2037,12 +2038,13 @@ def _md_inert(text: str) -> str:
     return text.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]").replace("`", "\\`")
 
 
-def _section_checklist(checklist: dict[str, Any] | None) -> str:
+def _section_checklist(checklist: dict[str, Any] | None, upload_names: dict[str, str] | None = None) -> str:
     """Every criterion of the analysis checklist, per category: its result and the assessor's evidence, through
-    `_cp_view.criterion_text` (ids to labels, no sentence naming a file of ours). The pages show the same rows."""
+    `_cp_view.criterion_text` (ids to labels, no sentence naming a file of ours, the founder's file names as
+    uploaded). The pages show the same rows."""
     if checklist is None or _is_stub(checklist):
         return ""
-    groups = _view.checklist_groups(checklist)
+    groups = _view.checklist_groups(checklist, upload_names)
     if not groups:
         return ""
     lines = ["## Analysis Checklist\n"]
@@ -2230,6 +2232,8 @@ def compose(dir_path: str, report_path: str | None = None, no_ask: bool = False)
     # once made an earlier run's review count as this run's.
     _rt_required = [a for a in (artifacts.get(n) for n in REQUIRED_ARTIFACTS) if _usable(a)]
     _rt_run_id = _cp_redteam_copy.primary_run_id_in(dir_path, artifacts, REQUIRED_ARTIFACTS)
+    # The founder's file names as uploaded, not as a cloud session stored them (`<8-hex>-name`).
+    _upload_display = _cp_redteam_copy.upload_display(dir_path, _rt_run_id)
     _rt_shown, _rt_codes, _rt_facts = _cp_redteam_copy.resolve(
         dir_path,
         _rt_run_id,
@@ -2369,7 +2373,7 @@ def compose(dir_path: str, report_path: str | None = None, no_ask: bool = False)
         ),
         _section_stress_test(positioning_scores),
         _section_key_findings(positioning_scores, moat_scores, checklist, name_by_slug),
-        _section_checklist(checklist),
+        _section_checklist(checklist, _upload_display),
     ]
 
     report_markdown = "\n".join(s for s in sections if s)
@@ -2420,6 +2424,9 @@ def compose(dir_path: str, report_path: str | None = None, no_ask: bool = False)
         return f"\ue002{len(_quotes) - 1}\ue003"
 
     report_markdown = _QUOTE_RE.sub(_lift, report_markdown)
+    # Before the policy rewrites anything (a `pitch_deck (1).pdf` would no longer match), after the quotes are
+    # lifted (a quote stays as written). The checklist rows were mapped already, in `criterion_text`.
+    report_markdown = _upload_names.humanize(report_markdown, _upload_display)
     _ft = _founder_text_policy()
     if _ft is not None:
         report_markdown = _ft.substitute(report_markdown)

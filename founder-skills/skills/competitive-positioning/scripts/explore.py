@@ -74,6 +74,27 @@ def _is_stub(data: dict[str, Any] | None) -> bool:
     return isinstance(data, dict) and data.get("skipped") is True
 
 
+def _upload_names_for(dir_path: str, artifacts: dict[str, Any]) -> dict[str, str]:
+    """{name as a cloud session stored an upload: the founder's name} for this page's run
+    (`_cp_redteam_copy.upload_display`); empty when it cannot be told."""
+    try:
+        import _cp_redteam_copy
+
+        run_id = _cp_redteam_copy.primary_run_id_in(dir_path, artifacts, REQUIRED_ARTIFACTS)
+        return _cp_redteam_copy.upload_display(dir_path, run_id)
+    except Exception:  # noqa: BLE001 - a display nicety must never stop the page
+        return {}
+
+
+def _humanized(data: Any, upload_names: dict[str, str]) -> Any:
+    """`data` with the founder's file names as uploaded; a missing or corrupt artifact stays what it was."""
+    if not upload_names or data is None or data is _CORRUPT:
+        return data
+    import _cp_redteam_copy
+
+    return _cp_redteam_copy.humanize_tree(data, upload_names)
+
+
 def _usable(data: dict[str, Any] | None) -> TypeGuard[dict[str, Any]]:
     return data is not None and data is not _CORRUPT and not _is_stub(data)
 
@@ -173,6 +194,9 @@ def _build_data_payload(dir_path: str) -> dict[str, Any]:
     artifacts: dict[str, dict[str, Any] | None] = {}
     for name in REQUIRED_ARTIFACTS + OPTIONAL_ARTIFACTS:
         artifacts[name] = _load_artifact(dir_path, name)
+    # Every string DATA carries, with the founder's file names as uploaded (`_upload_names_for`).
+    upload_names = _upload_names_for(dir_path, artifacts)
+    artifacts = {name: _humanized(data, upload_names) for name, data in artifacts.items()}
 
     positioning = artifacts["positioning.json"]
     landscape = artifacts["landscape.json"]
@@ -482,10 +506,15 @@ def compose_explorer(dir_path: str) -> str:
     # embedded in DATA: the page's script has no use for it.
     import _cp_view
 
-    report = _load_artifact(dir_path, "report.json")
-    moat_scores = _load_artifact(dir_path, "moat_scores.json")
-    checklist = _load_artifact(dir_path, "checklist.json")
-    verdict_text = _cp_view.report_verdict(report, _load_artifact(dir_path, "positioning_scores.json"), moat_scores)
+    upload_names = _upload_names_for(
+        dir_path, {name: _load_artifact(dir_path, name) for name in REQUIRED_ARTIFACTS + OPTIONAL_ARTIFACTS}
+    )
+    report = _humanized(_load_artifact(dir_path, "report.json"), upload_names)
+    moat_scores = _humanized(_load_artifact(dir_path, "moat_scores.json"), upload_names)
+    checklist = _humanized(_load_artifact(dir_path, "checklist.json"), upload_names)
+    verdict_text = _cp_view.report_verdict(
+        report, _humanized(_load_artifact(dir_path, "positioning_scores.json"), upload_names), moat_scores
+    )
     header = _header(report, moat_scores, checklist, verdict_text, payload["company_name"])
     checklist_section = _checklist_section(checklist)
     checklist_tab = '  <a class="tab" href="#checklist">Checklist</a>\n' if checklist_section else ""
