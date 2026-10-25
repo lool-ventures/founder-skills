@@ -36,7 +36,7 @@
     "scripts/pptx_to_text.py": "429c361b2e37e0fd6c912300c307452a3523dad5aeb036204e2e1d7dff82ed04",
     "scripts/pretooluse_dispatch.py": "561a9fc94b52a6a10b752ac61f6ab11ab0a07002b11bc220bfcc1b9ebbe6027b",
     "scripts/record_gate_answer.py": "79314066bdd6072c79b467da25bb740643b39d60b844f30b0f6ba025efb2cd7b",
-    "scripts/resolve_artifacts_root.py": "801faad4ea328fa51ac60369877f64852d8a8b17e0ac0194ed89cc9a67a69e45",
+    "scripts/resolve_artifacts_root.py": "f39f8e7c6ec0ac1697c554d934e95945e8e922e426ab86e70fc97542a44a69a7",
     "scripts/review_page_check.py": "05cd0f4a1d25547184ae2e88e430bfe1091a99c3a8851287bf94c81fbe619f37",
     "scripts/run_status.py": "064015f3b2b12e5784ea55a030401c38b2ee6c0f2ead437195389e33edaec5df",
     "scripts/script_hashes.py": "87eb99af7feffc0105badbd18e135a46c3d5d167cce57300afc9bfa40af237bb",

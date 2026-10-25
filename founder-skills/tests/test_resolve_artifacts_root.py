@@ -652,6 +652,75 @@ def test_ambiguous_session_folders_are_not_masked_by_the_fallback(tmp_path: Path
     assert "could not tell which session's uploads folder is this one's" in err.lower(), err
 
 
+def _attachments(tmp_path: Path, *conversations: str) -> Path:
+    """`/mnt/user-data/attachments/`, the uploads folder's sibling, with one attached file per conversation."""
+    base = tmp_path / "mnt-user-data" / "attachments"
+    base.mkdir(parents=True)
+    for conv in conversations:
+        (base / conv).mkdir()
+        (base / conv / "85451e6d-deck.pdf").write_bytes(b"%PDF")
+    return base
+
+
+def test_an_attachment_with_empty_uploads_is_found_in_its_conversation_folder(tmp_path: Path) -> None:
+    """The cloud session seen: `uploads/` exists and is empty, the file is under `attachments/<conversation>/`."""
+    ud = _user_data(tmp_path, files=False)
+    base = _attachments(tmp_path, "c0ffee00")
+    env = {**_FALLBACK_ENV, "HOME": str(tmp_path), "COWORK_UPLOADS_DIR": "", "FS_USER_DATA_UPLOADS": str(ud)}
+    assert resolve_uploads_dir("/home/claude", env) == str(base / "c0ffee00")
+    rc, out, err = _run_cli(["--uploads"], env)
+    assert rc == 0, err
+    assert out.strip() == str(base / "c0ffee00")
+
+
+def test_a_file_directly_in_attachments_is_found(tmp_path: Path) -> None:
+    ud = _user_data(tmp_path, files=False)
+    base = _attachments(tmp_path)
+    (base / "deck.pdf").write_bytes(b"%PDF")
+    env = {**_FALLBACK_ENV, "HOME": str(tmp_path), "FS_USER_DATA_UPLOADS": str(ud)}
+    assert resolve_uploads_dir("/home/claude", env) == str(base)
+
+
+def test_uploads_with_a_file_still_wins_over_attachments(tmp_path: Path) -> None:
+    ud = _user_data(tmp_path, files=True)
+    _attachments(tmp_path, "c0ffee00")
+    env = {**_FALLBACK_ENV, "HOME": str(tmp_path), "FS_USER_DATA_UPLOADS": str(ud)}
+    assert resolve_uploads_dir("/home/claude", env) == str(ud)
+
+
+def test_the_session_folder_with_a_file_still_wins_over_attachments(tmp_path: Path) -> None:
+    up = tmp_path / ".claude" / "uploads" / _SESSION
+    up.mkdir(parents=True)
+    (up / "85451e6d-deck.pdf").write_bytes(b"%PDF")
+    ud = _user_data(tmp_path, files=False)
+    _attachments(tmp_path, "c0ffee00")
+    env = {**_FALLBACK_ENV, "HOME": str(tmp_path), "FS_USER_DATA_UPLOADS": str(ud)}
+    assert resolve_uploads_dir("/home/claude", env) == str(up)
+
+
+def test_empty_attachment_folders_are_not_an_uploads_folder(tmp_path: Path) -> None:
+    ud = _user_data(tmp_path, files=False)
+    base = _attachments(tmp_path)
+    (base / "c0ffee00").mkdir()
+    env = {**_FALLBACK_ENV, "HOME": str(tmp_path), "COWORK_UPLOADS_DIR": "", "FS_USER_DATA_UPLOADS": str(ud)}
+    assert resolve_uploads_dir("/home/claude", env) is None
+    rc, out, err = _run_cli(["--uploads"], env)
+    assert rc == 3, (rc, out, err)
+    _assert_exit_3_note_true_on_both_hosts(err)
+
+
+def test_several_attachment_folders_are_ambiguous_not_the_newest(tmp_path: Path) -> None:
+    ud = _user_data(tmp_path, files=False)
+    _attachments(tmp_path, "aaaa1111", "bbbb2222")
+    env = {**_FALLBACK_ENV, "HOME": str(tmp_path), "COWORK_UPLOADS_DIR": "", "FS_USER_DATA_UPLOADS": str(ud)}
+    assert resolve_uploads_dir("/home/claude", env) is None
+    rc, out, err = _run_cli(["--uploads"], env)
+    assert rc == 3, (rc, out, err)
+    assert out.strip() == ""
+    assert "the attachments folder is ambiguous" in err, err
+    assert "2 folders under /mnt/user-data/attachments" in err, err
+
+
 _SKILLS_DIR = _SCRIPT.parent.parent / "skills"
 _UPLOADS_CALL = 'resolve_artifacts_root.py" --uploads   # prints UPLOADS_DIR, or exits 3'
 

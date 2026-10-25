@@ -317,7 +317,8 @@ def _has_file(path: str) -> bool:
 
 
 def _user_data_uploads_dir(env: dict[str, str]) -> str | None:
-    """`/mnt/user-data/uploads`, only when it exists AND holds at least one file.
+    """`/mnt/user-data/uploads`, only when it exists AND holds at least one file; else the single
+    `/mnt/user-data/attachments/` folder that holds one (see `_attachment_folders`).
 
     Present on some cloud sessions, sometimes beside the `~/.claude/uploads/<session>` folder and
     sometimes alone. An EMPTY folder is answered with None, not with the path: the folder can exist
@@ -327,7 +328,31 @@ def _user_data_uploads_dir(env: dict[str, str]) -> str | None:
     # `$FS_USER_DATA_UPLOADS` exists FOR TESTS: /mnt cannot be written on a macOS dev machine or a CI
     # runner, so the suite points this at a tmp folder. No skill or host sets it.
     root = env.get("FS_USER_DATA_UPLOADS") or USER_DATA_UPLOADS
-    return os.path.abspath(root) if _has_file(root) else None
+    if _has_file(root):
+        return os.path.abspath(root)
+    folders = _attachment_folders(env)
+    return folders[0] if len(folders) == 1 else None
+
+
+def _attachment_folders(env: dict[str, str]) -> list[str]:
+    """The folders under `/mnt/user-data/attachments/` that hold a file: where a cloud session put a file
+    the founder attached in the conversation, as `<conversation id>/<8-hex>-<original name>`, while
+    `uploads/` beside it stayed empty. The folder itself counts when it holds a file directly.
+
+    The sibling of the uploads folder, so `$FS_USER_DATA_UPLOADS` moves both. Only ONE such folder is an
+    answer: several are an ambiguity the caller reports, never answered with the newest (the same posture
+    as `_remote_session_dirs`). The conversation subfolder and the name prefix were seen on one session,
+    so a file directly in `attachments/` is accepted too.
+    """
+    root = env.get("FS_USER_DATA_UPLOADS") or USER_DATA_UPLOADS
+    base = os.path.join(os.path.dirname(os.path.abspath(root)), "attachments")
+    if _has_file(base):
+        return [base]
+    try:
+        names = sorted(os.listdir(base))
+    except OSError:
+        return []
+    return [os.path.join(base, d) for d in names if _has_file(os.path.join(base, d))]
 
 
 def _remote_uploads_dir(env: dict[str, str]) -> str | None:
@@ -490,6 +515,15 @@ def main() -> int:
                     "which is this one's, so this script could not tell which session's uploads folder is "
                     "this one's. Ask the user to give the file's path, or to attach it again, instead of "
                     "reporting it missing. Set $COWORK_UPLOADS_DIR to declare the folder.\n"
+                )
+                return 3
+            attached = _attachment_folders(env)
+            if len(attached) > 1:
+                sys.stderr.write(
+                    f"No uploads folder could be chosen for this session (the attachments folder is ambiguous): "
+                    f"{len(attached)} folders under /mnt/user-data/attachments hold files, so this script could "
+                    "not tell which is this conversation's. Ask the user to give the file's path, or to attach "
+                    "it again, instead of reporting it missing. Set $COWORK_UPLOADS_DIR to declare the folder.\n"
                 )
                 return 3
             sys.stderr.write(

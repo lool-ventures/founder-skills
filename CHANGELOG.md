@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- A file attached to a cloud Cowork conversation is found when it lands in the session's attachments folder rather
+  than its uploads folder. The run used to report that no uploads folder was found, and went on only when the model
+  used the file's own path.
+
 ## [0.26.0] - 2026-10-25 — Recorded source passages, a cap-table refusal that names the field, and checklist notes written for the founder
 
 ### Highlights
