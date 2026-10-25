@@ -52,3 +52,33 @@ def test_only_the_market_sizing_smoke_gets_webfetch() -> None:
     (caller,) = callers
     lane_file, function = caller.split("::")
     assert lane_file == "test_e2e_market_sizing.py" and function.endswith("_smoke"), caller
+
+
+def _marks(fn: ast.FunctionDef) -> set[str]:
+    """The `pytest.mark.<name>` decorators on a function, by name (`skipif(...)` included)."""
+    out = set()
+    for d in fn.decorator_list:
+        node = d.func if isinstance(d, ast.Call) else d
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Attribute) and node.value.attr == "mark":
+            out.add(node.attr)
+    return out
+
+
+def test_every_lane_test_is_marked_e2e_and_gated_and_no_helper_is() -> None:
+    """A paid lane that loses `e2e` and its auth `skipif` runs in the default suite and in CI's free jobs.
+
+    A helper placed between a lane's decorators and its `def` takes both, which is how that happens.
+    """
+    lanes, misplaced = [], []
+    for path in sorted(_TESTS.glob("test_e2e_*.py")):
+        for fn in ast.parse(path.read_text(encoding="utf-8")).body:
+            if not isinstance(fn, ast.FunctionDef):
+                continue
+            marks = _marks(fn)
+            if fn.name.startswith("test_"):
+                lanes.append(fn.name)
+                assert {"e2e", "skipif"} <= marks, f"{path.name}::{fn.name} carries {sorted(marks)}"
+            elif "e2e" in marks:
+                misplaced.append(f"{path.name}::{fn.name}")
+    assert len(lanes) >= 8, lanes
+    assert misplaced == [], misplaced

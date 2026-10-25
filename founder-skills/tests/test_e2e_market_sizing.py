@@ -229,14 +229,6 @@ def _script(name: str, args: list[str]) -> str:
     return r.stdout
 
 
-@pytest.mark.e2e
-@pytest.mark.skipif(
-    not has_claude_auth(),
-    reason=(
-        "End-to-end smoke needs Claude auth: set ANTHROPIC_API_KEY, "
-        "CLAUDE_CODE_OAUTH_TOKEN, or run `claude /login` (subscription)"
-    ),
-)
 def _quote_sentence(review_dir: Path) -> str | None:
     """The sentence `_view.quote_sentence` builds from this run's own validation.json and sizing.json."""
     scripts = PLUGIN_PATH / "skills" / "market-sizing" / "scripts"
@@ -254,6 +246,14 @@ def _quote_sentence(review_dir: Path) -> str | None:
     return sentence
 
 
+@pytest.mark.e2e
+@pytest.mark.skipif(
+    not has_claude_auth(),
+    reason=(
+        "End-to-end smoke needs Claude auth: set ANTHROPIC_API_KEY, "
+        "CLAUDE_CODE_OAUTH_TOKEN, or run `claude /login` (subscription)"
+    ),
+)
 def test_market_sizing_smoke(tmp_path: Path) -> None:
     """Run a both-methodologies sizing; assert the delivered chain."""
     workdir = tmp_path / "workspace"
