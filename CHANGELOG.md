@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.26.1] - 2026-10-26 — Files attached in a cloud conversation found and named as uploaded
+
+### Highlights
+
+**A file attached to a cloud Cowork conversation is found and named as the founder uploaded it.** When an
+attachment lands in the session's attachments folder instead of its uploads folder, the run now finds it there.
+Competitive positioning's report and pages also show the file's own name, without the prefix the cloud session
+adds. This release has not yet been tried in a real cloud session.
+
 ### Fixed
 
 - A file attached to a cloud Cowork conversation is found when it lands in the session's attachments folder rather
