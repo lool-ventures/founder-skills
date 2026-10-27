@@ -9229,6 +9229,7 @@ def test_red_team_fails_loudly_when_the_shared_scripts_are_missing(tmp_path: Pat
         "red_team.py",
         "_redteam_text.py",
         "_redteam_copy.py",
+        "_upload_names.py",
         "_quote_match.py",
         "_out_guard.py",
         "_run_ref.py",

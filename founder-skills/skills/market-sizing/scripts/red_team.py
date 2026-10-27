@@ -30,8 +30,9 @@ import sys
 from typing import Any, NoReturn
 
 import _redteam_copy
+import _upload_names
 from _quote_match import quote_in_doc
-from _redteam_text import humanize_review_text
+from _redteam_text import _URL_RE, humanize_review_text
 
 # The review's prose goes to the founder verbatim, so it is worded here, once, before anyone else
 # can see it -- see _redteam_text for the two runs that made this necessary. The fleet's shared
@@ -143,13 +144,30 @@ def validate_findings(
 ) -> dict[str, Any]:
     """Split the sub-agent's findings into accepted and rejected, keeping both."""
     policy = _founder_text_policy()
+
+    def humanize(text: str, documents: list[str]) -> tuple[str, int]:
+        # Our own wording first, the stored names protected as always; then the founder's file names as
+        # uploaded, before the policy's substitute runs and rewrites a word inside one (it would leave
+        # `<8-hex>-pitch deck.pdf`, which no renderer can match). In this order an upload named like one
+        # of our files cannot shield our own mentions of it. Outside URL spans only: a link that contains
+        # a stored name is the link, not a file name.
+        worded, n = humanize_review_text(text, documents)
+        shown = _upload_names.display_map(documents)
+        if shown:
+            parts = _URL_RE.split(worded)
+            urls = _URL_RE.findall(worded)
+            worded = "".join(
+                _upload_names.humanize(p, shown) + (urls[i] if i < len(urls) else "") for i, p in enumerate(parts)
+            )
+        return worded, n
+
     result: dict[str, Any] = _redteam_copy.core().validate_findings(
         data,
         uploads_dir,
         ocr_dir,
         page_text=_page_text,
         quote_in_doc=quote_in_doc,
-        humanize=humanize_review_text,
+        humanize=humanize,
         substitute=policy.substitute,
         prose_fields=_PROSE_FIELDS,
         parameter_names=_PARAMETER_NAMES,

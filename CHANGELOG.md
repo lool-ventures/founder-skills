@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Market sizing's outside review names a document attached in a cloud conversation by the name the founder gave
+  it, also for a name such as `pitch_deck (1).pdf`. The review's wording step used to change a word inside the
+  stored name, which left the cloud session's eight-character prefix on the report and page. The coaching
+  commentary can still repeat a stored name with its prefix.
+
 ## [0.26.1] - 2026-10-26 — Files attached in a cloud conversation found and named as uploaded
 
 ### Highlights

@@ -21,8 +21,12 @@ Known names come from `redteam.json`: `sources_read` + `sources_unread` + every 
 citation. Those are the names the validator checked against the mirrored directory. Free text is
 rewritten by exact match on those names only, never by a pattern over arbitrary prose.
 
-NOT covered, by design: the coaching payload carries the raw names (its builder is not touched
-here), so the coaching commentary can still repeat one.
+The review's prose is also mapped once at pipe time, by the review's validator (its names then
+are the uploads folder the validator lists), because the
+founder-text policy rewords it there and can rewrite a word inside a prefixed name, which this
+module could not match afterwards. So the coaching payload's review sentences carry the uploaded
+names, while its citations, quotes and source lists carry the stored ones; the coaching commentary
+can still repeat a stored name.
 """
 
 from __future__ import annotations

@@ -84,6 +84,7 @@ def test_a_missing_core_is_refused_loudly_even_when_the_text_policy_is_present(t
         "red_team.py",
         "_redteam_text.py",
         "_redteam_copy.py",
+        "_upload_names.py",
         "_quote_match.py",
         "_out_guard.py",
         "_run_ref.py",
