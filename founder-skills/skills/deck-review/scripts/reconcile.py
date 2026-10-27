@@ -2124,23 +2124,25 @@ _DIRECTION_WORDS = re.compile(
 # full match of its allowlist (an as-of month is allowed on the revenue, never on the count, and
 # an ACV qualifier only from a short list), the two parts sit on one slide that states exactly
 # one recurring-revenue figure, and a paid pilot count pairs only with a pilot-pricing ACV.
-# Forecasts, targets, segment ACVs, pipeline counts and users all fall outside the lists.
+# Forecasts, targets, segment ACVs, pipeline counts and users all fall outside the lists, and so
+# does a bare "Customers" or "Logos" (free or unpaid logos are counted too) and a "(current)"
+# ACV (today's price for new deals, which older customers may not pay).
 _MON = r"(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)"
 _PER_CUSTOMER_NUM_FULL = re.compile(
     r"(arr|mrr|annual recurring revenue|recurring revenue|run[- ]rate( arr| revenue)?)"
     r"( " + _MON + r" (19|20)\d\d)?"
 )
 _PER_CUSTOMER_DEN_FULL = re.compile(
-    r"(?:(?:paying|paid|active paying|current paying)?\s*(?:customers?|clients?|logos?)"
+    r"(?:(?:paying|paid|active paying|current paying)\s+(?:customers?|clients?|logos?)"
     r"|paid pilots?|pilots? converted( to paid)?|converted pilots?|paying pilots?)"
 )
 _PER_CUSTOMER_EXP_FULL = re.compile(
     r"(acv|annual contract value|(average|avg\.?) (contract )?(acv|annual contract value))"
-    r"( \((pilot pricing|current|today|blended)\))?"
+    r"( \((pilot pricing|blended)\))?"
 )
 _PER_CUSTOMER_EXP_YEAR_ONLY = re.compile(
     r"(average|avg\.?) (contract( value)?|deal( size)?)"
-    r"( \((pilot pricing|current|today|blended)\))?"
+    r"( \((pilot pricing|blended)\))?"
 )
 _PER_CUSTOMER_PERIOD_WORD = {"day": "daily", "week": "weekly", "month": "monthly", "quarter": "quarterly"}
 
@@ -2181,11 +2183,13 @@ def _per_customer_floor(num: Figure, den: Figure, exp: Figure, by_id: dict[str, 
 # compared. The rule only ever suppresses, so its lists are wide and checked only where the floor above
 # did not decide: any money over a count of customers, clients, logos or accounts whose label names no
 # deal (total value over a number of deals IS the average deal size, a real identity), or a recurring
-# revenue over paid pilots (pilot revenue over pilots is one deal each). Residual: a label outside the
-# lists keeps the two-sided comparison.
+# revenue over paid pilots (pilot revenue over pilots is one deal each). A period-less ACV the floor
+# did not take is refused the same way, but only when revenue per customer is at or above it: below
+# it keeps the comparison it had. Residual: a label outside the lists keeps the two-sided comparison.
 _DEAL_SIZE_NO_PERIOD = re.compile(
     r"(average|avg\.?|mean|median|typical)( [a-z0-9-]+){0,2} (contract|deal)( size| value)?( \([^()]{1,30}\))?"
 )
+_ACV_NO_PERIOD = re.compile(r"((average|avg\.?) )?(acv|annual contract value)( \([^()]{1,30}\))?")
 _CUSTOMER_WORD = re.compile(r"\b(customers?|clients?|logos?|accounts?)\b")
 _PILOT_WORD = re.compile(r"\bpilots?\b")
 _DEAL_WORD = re.compile(
@@ -2195,10 +2199,16 @@ _DEAL_WORD = re.compile(
 _PILOT_DEN_FULL = re.compile(r"paid pilots?|pilots? converted( to paid)?|converted pilots?|paying pilots?")
 
 
-def _deal_size_without_period(num: Figure, den: Figure, exp: Figure) -> bool:
+def _deal_size_without_period(num: Figure, den: Figure, exp: Figure, computed: float | None) -> bool:
     if not (num.unit_kind == "money" and den.unit_kind == "count" and exp.unit_kind == "money"):
         return False
-    if exp.period is not None or not _DEAL_SIZE_NO_PERIOD.fullmatch(_pc_norm(exp.label or "")):
+    if exp.period is not None:
+        return False
+    el = _pc_norm(exp.label or "")
+    if _ACV_NO_PERIOD.fullmatch(el):
+        if computed is None or computed < (exp.lo if exp.lo is not None else exp.value):
+            return False
+    elif not _DEAL_SIZE_NO_PERIOD.fullmatch(el):
         return False
     dl = _pc_norm(den.label or "")
     if _CUSTOMER_WORD.search(dl) and not _PILOT_WORD.search(dl) and not _DEAL_WORD.search(dl):
@@ -2920,7 +2930,7 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
             r.operator == "ratio"
             and len(real) == 2
             and cu == "money_per_count"
-            and _deal_size_without_period(real[0], real[1], exp)
+            and _deal_size_without_period(real[0], real[1], exp, r.computed)
         ):
             r.verdict = "incomparable"
             r.reasons.append(

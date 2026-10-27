@@ -151,8 +151,10 @@ def validate_findings(
         # can match). The wording protects the stored names and every name as uploaded except one that is
         # also one of our files: unprotected, a founder's `customer_list.json` would read as our records,
         # and protected, an upload named like our file would shield our own mentions of it. Residual: one
-        # of our files with no phrase of its own is still shielded by an upload of that name. Outside URL
-        # spans only: a link that contains a stored name is the link, not a file name.
+        # of our files with no phrase of its own is still shielded by an upload of that name. Every file
+        # with a phrase here is `.json`, never a document, so the filter is idle in this skill; it keeps
+        # the rule competitive-positioning's copy needs (its `report.md`). Outside URL spans only: a link
+        # that contains a stored name is the link, not a file name.
         shown = _upload_names.display_map(documents)
         keep = [*documents, *(v for v in shown.values() if v not in INTERNAL_FILE_PHRASES)]
         worded, n = humanize_review_text(text, keep)

@@ -88,8 +88,8 @@ def test_at_or_above_the_stated_acv_confirms_the_floor() -> None:
     ("num_label", "den_label", "exp_label"),
     [
         ("Annual recurring revenue", "Pilots converted to paid", "ACV"),
-        ("ARR", "Customers", "Annual contract value"),
-        ("Run-rate revenue", "Paying logos", "ACV (current)"),
+        ("ARR", "Paying customers", "Annual contract value"),
+        ("Run-rate revenue", "Paying logos", "ACV (blended)"),
         ("ARR", "Paying customers", "Avg. ACV"),
         ("ARR", "Paying customers", "Average deal size"),
     ],
@@ -124,11 +124,17 @@ def test_a_range_numerator_renders_its_span() -> None:
         ("ARR", "Customer interviews", "ACV"),
         ("ARR", "Paying customers (Oct 2026)", "ACV"),
         ("ARR", "Customers 2027", "ACV"),
+        # A bare count may include free or unpaid logos.
+        ("ARR", "Customers", "ACV"),
+        ("ARR", "Logos", "ACV"),
         # Not the average contract today.
         ("ARR", "Paying customers", "ACV (target)"),
         ("ARR", "Paying customers", "ACV (projected)"),
         ("ARR", "Paying customers", "Enterprise ACV"),
         ("ARR", "Paying customers", "ACV 2028"),
+        # Today's price for new deals, which older customers may not pay.
+        ("ARR", "Paying customers", "ACV (current)"),
+        ("ARR", "Paying customers", "ACV (today)"),
         ("ARR", "Paying customers", "Contract value"),
         # A paid pilot count pairs only with pilot pricing.
         ("ARR", "Paid pilots", "ACV"),
@@ -271,3 +277,48 @@ def test_a_revenue_figure_that_is_not_annual_is_incomparable(period: str | None,
 def test_a_ceiling_is_incomparable() -> None:
     assert run(spec={"relation": "at_most"}).verdict == "incomparable"
     assert run(exp=("up to $60K", 60_000.0)).verdict == "incomparable"
+
+
+@pytest.mark.parametrize(
+    "kw",
+    [
+        {"den_kw": {"slide": 5}},  # another slide: the floor does not take it
+        {"extra": [fig("n2", "$240K", 240_000.0, "money", "ARR Dec 2026", period="year")]},  # a second ARR
+    ],
+)
+def test_a_period_less_acv_the_floor_skips_is_refused_only_above_it(kw: dict[str, Any]) -> None:
+    above = run(
+        "ARR",
+        "Paying customers",
+        "ACV",
+        num=("$1.5M", 1_500_000.0),
+        den=("40", 40.0),
+        exp=("$31K", 31_000.0),
+        exp_kw=_NONE,
+        **kw,
+    )
+    assert above.verdict == "incomparable" and NO_PERIOD in above.reasons, (above.verdict, above.reasons)
+    below = run(
+        "ARR",
+        "Paying customers",
+        "ACV",
+        num=("$600K", 600_000.0),
+        den=("40", 40.0),
+        exp=("$31K", 31_000.0),
+        exp_kw=_NONE,
+        **kw,
+    )
+    assert NO_PERIOD not in below.reasons  # below keeps the comparison it had
+
+
+def test_a_period_less_acv_against_another_customer_count_is_refused_above_it() -> None:
+    r = run(
+        "ARR",
+        "Active customers",
+        "ACV",
+        num=("$1.5M", 1_500_000.0),
+        den=("40", 40.0),
+        exp=("$31K", 31_000.0),
+        exp_kw=_NONE,
+    )
+    assert r.verdict == "incomparable" and NO_PERIOD in r.reasons, (r.verdict, r.reasons)

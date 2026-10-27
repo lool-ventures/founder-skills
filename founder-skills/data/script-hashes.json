@@ -167,7 +167,7 @@
     "skills/deck-review/scripts/gate_state.py": "10b08fd7d8dcf2a343ca966e579fdc9d76e28a3da419d12826e86f332ce9faef",
     "skills/deck-review/scripts/ledger.py": "ab0c4bb31b71361a29cd049f6b0684d44166cb22e09d2104b3b39b0567409738",
     "skills/deck-review/scripts/ocr_check.py": "00637e92a07fb765c4d1fa9321f2133c23348495d276131ba10010e769fe1768",
-    "skills/deck-review/scripts/reconcile.py": "4eb658a9e57ba46a3d14e22c423bdb6c960db926f27bba9d36919a4fba0cb103",
+    "skills/deck-review/scripts/reconcile.py": "10e66a67bce87362359b09695d7171f519cb3382ed944461871d24ff5ea8589f",
     "skills/deck-review/scripts/second_read.py": "9320ec5e140d23702872d37c181239be4030652a796bd55d5e49feb70f64922b",
     "skills/deck-review/scripts/setup_run.py": "7213f2c476553e813e8157e10b7786051c22040a33b461cef6d6950ade801f5a",
     "skills/deck-review/scripts/slide_reviews.py": "11c3754fcc1037c4387e7ccb7e920d6688f36acab9c06bc27fcd64776e704b50",
@@ -242,7 +242,7 @@
     "skills/market-sizing/scripts/ocr_uploads.py": "4e834d417cfdcd5dfdf3f8e310909efe2bc79f50ac362fa5e1c1665bfbb2ca75",
     "skills/market-sizing/scripts/pdf_probe.py": "68bd63b6e7c05c7cc2ee5622d9285a1d9c36a02a7d5894cbc1dec256a6cbe705",
     "skills/market-sizing/scripts/record_revision_answer.py": "25638a1f70f0ec1cab89b6e37d505e84d9fdbbafeb3a71350b86e26b19219946",
-    "skills/market-sizing/scripts/red_team.py": "f62ac4adbc3e3af48b812bed186dea32d7d914071f192da76036080d5bf02b1a",
+    "skills/market-sizing/scripts/red_team.py": "e00c8f41cd75d244e4796c25f800ad3316c972ab6a4479045849e198b7ff2eb4",
     "skills/market-sizing/scripts/sensitivity.py": "88541e89f12942e3293f33200a56f097e89a530d354f727dd1d3c3bc8c0d6ff8",
     "skills/market-sizing/scripts/visualize.py": "1a686724cad79857b76b306c28bb6817827093651554ba72df803ffde59604cd"
   },
