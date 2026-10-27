@@ -17,7 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Market sizing's outside review names a document attached in a cloud conversation by the name the founder gave
   it, also for a name such as `pitch_deck (1).pdf`. The review's wording step used to change a word inside the
   stored name, which left the cloud session's eight-character prefix on the report and page. The coaching
-  commentary can still repeat a stored name with its prefix.
+  commentary can still repeat a stored name with its prefix. A document the review names without its prefix is
+  shown as the founder's, never described as the analysis's own records.
+- Competitive positioning's outside review explains one of the analysis's own files in plain words even when an
+  uploaded document has the same name, and never describes a founder's document as the analysis's working files.
 - Deck review checks a deck's revenue per paying customer against the average contract value (ACV) it states.
   When annual recurring revenue divided by the paying customers on the same slide comes out below the stated ACV,
   the numbers section reports it. Before, the two could never be compared. Only plainly labelled figures are
@@ -25,11 +28,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Deck review's slide reviews are told never to praise a figure that the deck's own arithmetic shows is wrong. A
   review had called a stated runway a strength on the slide where the numbers section found that runway did not
   follow from cash and burn. A strength like that is now also reported as a warning when the reviews are saved.
+- Deck review no longer reports a contradiction between revenue per customer and an average deal or contract size
+  that states no period. Such a figure may be one-off, monthly or several years, and revenue per customer above a
+  deal size is normal, so the two are no longer compared. Total value over a number of deals is still checked
+  against an average deal size.
 
 ### Scoring changes
 
 - Deck review: revenue per paying customer is tested one way against a stated annual ACV; a figure below it is a
-  contradiction in the numbers section. No checklist criterion, status rule or score changes.
+  contradiction in the numbers section. An average deal or contract size with no stated period is no longer
+  compared with revenue per customer. No checklist criterion, status rule or score changes.
 - Every other skill: none.
 
 ## [0.26.1] - 2026-10-26 — Files attached in a cloud conversation found and named as uploaded

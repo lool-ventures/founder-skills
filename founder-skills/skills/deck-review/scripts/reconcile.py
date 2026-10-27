@@ -2175,6 +2175,37 @@ def _per_customer_floor(num: Figure, den: Figure, exp: Figure, by_id: dict[str, 
     return n == 1
 
 
+# A DEAL OR CONTRACT SIZE WITH NO PERIOD IS NEVER TESTED AGAINST REVENUE PER CUSTOMER. It may be
+# one-off, monthly or multi-year, and revenue per customer above it is normal (a customer holds several
+# deals), so the generic two-sided comparison called both directions a contradiction. Refused, never
+# compared. The rule only ever suppresses, so its lists are wide and checked only where the floor above
+# did not decide: any money over a count of customers, clients, logos or accounts whose label names no
+# deal (total value over a number of deals IS the average deal size, a real identity), or a recurring
+# revenue over paid pilots (pilot revenue over pilots is one deal each). Residual: a label outside the
+# lists keeps the two-sided comparison.
+_DEAL_SIZE_NO_PERIOD = re.compile(
+    r"(average|avg\.?|mean|median|typical)( [a-z0-9-]+){0,2} (contract|deal)( size| value)?( \([^()]{1,30}\))?"
+)
+_CUSTOMER_WORD = re.compile(r"\b(customers?|clients?|logos?|accounts?)\b")
+_PILOT_WORD = re.compile(r"\bpilots?\b")
+_DEAL_WORD = re.compile(
+    r"\b(deals?|(?<!under )contracts?|orders?|bookings?|transactions?|invoices?|sales"
+    r"|subscriptions?|seats?|licen[cs]es?)\b"
+)
+_PILOT_DEN_FULL = re.compile(r"paid pilots?|pilots? converted( to paid)?|converted pilots?|paying pilots?")
+
+
+def _deal_size_without_period(num: Figure, den: Figure, exp: Figure) -> bool:
+    if not (num.unit_kind == "money" and den.unit_kind == "count" and exp.unit_kind == "money"):
+        return False
+    if exp.period is not None or not _DEAL_SIZE_NO_PERIOD.fullmatch(_pc_norm(exp.label or "")):
+        return False
+    dl = _pc_norm(den.label or "")
+    if _CUSTOMER_WORD.search(dl) and not _PILOT_WORD.search(dl) and not _DEAL_WORD.search(dl):
+        return True
+    return bool(_PILOT_DEN_FULL.fullmatch(dl) and _PER_CUSTOMER_NUM_FULL.fullmatch(_pc_norm(num.label or "")))
+
+
 def _known_reciprocals(a: str, b: str) -> bool:
     for x, y in _RECIPROCAL_PAIRS:
         if (re.search(x, a, re.I) and re.search(y, b, re.I)) or (re.search(y, a, re.I) and re.search(x, b, re.I)):
@@ -2885,6 +2916,17 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
                 return r
             per_unit_floor = True
             comparable = r.computed
+        elif (
+            r.operator == "ratio"
+            and len(real) == 2
+            and cu == "money_per_count"
+            and _deal_size_without_period(real[0], real[1], exp)
+        ):
+            r.verdict = "incomparable"
+            r.reasons.append(
+                "a deal or contract size with no stated period cannot be tested against revenue per customer"
+            )
+            return r
         # A DURATION IS COMPARED IN THE STATED FIGURE'S OWN WRITTEN UNIT. The magnitude lives
         # in `value` and the unit only in the raw string, and the old gate compared the bare
         # magnitudes -- so a cash / monthly burn of 30.0 months contradicted a stated "2.5

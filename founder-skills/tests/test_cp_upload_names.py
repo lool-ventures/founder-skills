@@ -183,3 +183,45 @@ def test_the_stored_review_strips_its_prose_but_never_inside_a_link(tmp_path: Pa
     assert " See plan.pdf and " in finding["what_is_true"]  # prose: stripped
     assert f"https://files.example.com/{plan}" in finding["what_is_true"]  # the link: as written
     assert finding["source_url"] == f"document:{STUDY}"  # the citation keeps the stored name
+
+
+def _stored_prose(tmp_path: Path, docs: dict[str, str], extra: str) -> str:
+    d = _analysis(tmp_path, docs)
+    _review(d, extra=extra)
+    text: str = json.loads((d / "redteam.json").read_text(encoding="utf-8"))["findings"][0]["what_is_true"]
+    return text
+
+
+def test_an_upload_named_like_our_file_does_not_shield_our_mention_of_it(tmp_path: Path) -> None:
+    # Under the old order the display name `report.md` was protected, so our own mention stayed raw.
+    docs = {DECK: "deck", STUDY: STUDY_TEXT, "b1c2d3e4-report.md": "Last year's board report."}
+    text = _stored_prose(tmp_path, docs, " The ranking in report.md leaves them out.")
+    assert "ranking in the report leaves" in text, text
+
+
+def test_a_protected_name_inside_one_of_our_file_names_does_not_shield_it() -> None:
+    if str(SCRIPTS) not in sys.path:
+        sys.path.insert(0, str(SCRIPTS))
+    import _cp_redteam_text  # type: ignore[import-not-found]
+
+    out, n = _cp_redteam_text.humanize_review_text("Even moat_scores.json ignores them.", ["scores.json"])
+    assert n == 1 and "moat_scores.json" not in out, out
+
+
+def test_an_upload_named_by_its_display_name_is_never_called_our_working_files(tmp_path: Path) -> None:
+    docs = {DECK: "deck", STUDY: STUDY_TEXT, "c1d2e3f4-customer_notes.md": "Three brokers."}
+    text = _stored_prose(tmp_path, docs, " Your customer_notes.md names three of them.")
+    assert "working files" not in text, text
+    assert "Your customer_notes.md names three" in text, text
+
+
+def test_a_slug_inside_a_founder_file_path_is_never_rewritten() -> None:
+    if str(SCRIPTS) not in sys.path:
+        sys.path.insert(0, str(SCRIPTS))
+    import _cp_redteam_text  # type: ignore[import-not-found]
+
+    text = "See docs/acme-freight.pdf and the acme-freight.pdf-based claim."
+    out, _ = _cp_redteam_text.humanize_review_text(
+        text, ["acme-freight.pdf"], name_by_slug={"acme-freight": "Acme Freight"}
+    )
+    assert out == text

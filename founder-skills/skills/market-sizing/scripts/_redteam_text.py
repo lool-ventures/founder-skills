@@ -149,8 +149,10 @@ def humanize_review_text(text: str, protected: Iterable[str] = ()) -> tuple[str,
         return f"\x00{len(slots) - 1}\x00"
 
     masked = _URL_RE.sub(_mask, text)
+    # Whole tokens only (`\w` on neither side): an upload named `scores.json` must not mask part of our
+    # `moat_scores.json`. Residual: a name with a space, wrapped in markdown `_italics_`, is not masked.
     for name in keep:
-        masked = re.sub(re.escape(name), _mask, masked)
+        masked = re.sub(r"(?<!\w)" + re.escape(name) + r"(?!\w)", _mask, masked)
 
     count = 0
 

@@ -37,7 +37,7 @@ from typing import Any, NoReturn
 import _cp_redteam_copy
 import _cp_view
 import _upload_names
-from _cp_redteam_text import _URL_RE, humanize_review_text
+from _cp_redteam_text import _URL_RE, INTERNAL_FILE_PHRASES, humanize_review_text
 from _quote_match import quote_in_doc
 
 _SHARED_SCRIPTS = os.path.normpath(
@@ -95,19 +95,23 @@ def validate_findings(
     core = _cp_redteam_copy.core()
 
     def humanize(text: str, documents: list[str]) -> tuple[str, int]:
-        # The founder's file names as uploaded, before anything rewrites a word inside one (the policy's
-        # substitute runs after this and would leave `<8-hex>-pitch deck.pdf` no renderer can match).
-        # Outside URL spans only: a link that contains a stored name is the link, not a file name.
+        # Our own wording first, then the founder's file names as uploaded, before the policy's substitute
+        # runs and rewrites a word inside one (it would leave `<8-hex>-pitch deck.pdf`, which no renderer
+        # can match). The wording protects the stored names and every name as uploaded except one that is
+        # also one of our files: unprotected, a founder's `customer_list.json` would read as our working
+        # files, and protected, an upload named like our file would shield our own mentions of it.
+        # Residual: one of our files with no phrase of its own is still shielded by an upload of that
+        # name. Outside URL spans only: a link that contains a stored name is the link, not a file name.
         shown = _upload_names.display_map(documents)
+        keep = [*documents, *(v for v in shown.values() if v not in INTERNAL_FILE_PHRASES)]
+        worded, n = humanize_review_text(text, keep, name_by_slug=name_by_slug, startup_name=startup_name)
         if shown:
-            parts = _URL_RE.split(text)
-            urls = _URL_RE.findall(text)
-            text = "".join(
+            parts = _URL_RE.split(worded)
+            urls = _URL_RE.findall(worded)
+            worded = "".join(
                 _upload_names.humanize(p, shown) + (urls[i] if i < len(urls) else "") for i, p in enumerate(parts)
             )
-        return humanize_review_text(
-            text, [*documents, *shown.values()], name_by_slug=name_by_slug, startup_name=startup_name
-        )
+        return worded, n
 
     result: dict[str, Any] = core.validate_findings(
         data,

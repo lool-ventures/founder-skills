@@ -32,7 +32,7 @@ from typing import Any, NoReturn
 import _redteam_copy
 import _upload_names
 from _quote_match import quote_in_doc
-from _redteam_text import _URL_RE, humanize_review_text
+from _redteam_text import _URL_RE, INTERNAL_FILE_PHRASES, humanize_review_text
 
 # The review's prose goes to the founder verbatim, so it is worded here, once, before anyone else
 # can see it -- see _redteam_text for the two runs that made this necessary. The fleet's shared
@@ -146,13 +146,16 @@ def validate_findings(
     policy = _founder_text_policy()
 
     def humanize(text: str, documents: list[str]) -> tuple[str, int]:
-        # Our own wording first, the stored names protected as always; then the founder's file names as
-        # uploaded, before the policy's substitute runs and rewrites a word inside one (it would leave
-        # `<8-hex>-pitch deck.pdf`, which no renderer can match). In this order an upload named like one
-        # of our files cannot shield our own mentions of it. Outside URL spans only: a link that contains
-        # a stored name is the link, not a file name.
-        worded, n = humanize_review_text(text, documents)
+        # Our own wording first, then the founder's file names as uploaded, before the policy's substitute
+        # runs and rewrites a word inside one (it would leave `<8-hex>-pitch deck.pdf`, which no renderer
+        # can match). The wording protects the stored names and every name as uploaded except one that is
+        # also one of our files: unprotected, a founder's `customer_list.json` would read as our records,
+        # and protected, an upload named like our file would shield our own mentions of it. Residual: one
+        # of our files with no phrase of its own is still shielded by an upload of that name. Outside URL
+        # spans only: a link that contains a stored name is the link, not a file name.
         shown = _upload_names.display_map(documents)
+        keep = [*documents, *(v for v in shown.values() if v not in INTERNAL_FILE_PHRASES)]
+        worded, n = humanize_review_text(text, keep)
         if shown:
             parts = _URL_RE.split(worded)
             urls = _URL_RE.findall(worded)

@@ -294,6 +294,48 @@ def test_an_upload_named_like_our_file_does_not_shield_our_mention_of_it(tmp_pat
     assert "nor does the sizing calculation" in text, text
 
 
+def _prose(tmp_path: Path, docs: dict[str, str], what_is_true: str) -> str:
+    """A review whose only prose is `what_is_true`, piped; the stored text back."""
+    import subprocess
+
+    uploads = tmp_path / "docs"
+    uploads.mkdir()
+    for name, body in docs.items():
+        (uploads / name).write_text(body, encoding="utf-8")
+    finding = {
+        "claim_attacked": "The SAM assumes every broker buys",
+        "what_is_true": what_is_true,
+        "evidence_quote": "counts nine hundred regional freight brokers operating in the region",
+        "source_url": f"document:{STUDY}",
+        "source_title": "Market study",
+        "severity": "medium",
+    }
+    out = tmp_path / "redteam.json"
+    r = subprocess.run(
+        [sys.executable, str(SCRIPTS / "red_team.py"), "--run-id", "20260101T000000Z"]
+        + ["--uploads-dir", str(uploads), "-o", str(out)],
+        input=json.dumps({"findings": [finding], "sources_read": [STUDY]}),
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert r.returncode == 0, r.stderr[-600:]
+    text: str = json.loads(out.read_text(encoding="utf-8"))["findings"][0]["what_is_true"]
+    return text
+
+
+def test_an_upload_named_by_its_display_name_is_never_called_our_records(tmp_path: Path) -> None:
+    text = _prose(tmp_path, {SNAKE: "deck", STUDY: STUDY_TEXT}, "The founder's market_study.md counts brokers.")
+    assert "the analysis records" not in text, text
+    assert "market_study.md counts brokers" in text, text
+
+
+def test_a_protected_name_inside_one_of_our_file_names_does_not_shield_it() -> None:
+    text = _load("_redteam_text")
+    out, n = text.humanize_review_text("Brokers are missing, and checklist.json passes it anyway.", ["list.json"])
+    assert n == 1 and "and the self-check passes it" in out, out
+
+
 def test_a_batch_with_one_unprefixed_upload_keeps_every_prefix(tmp_path: Path) -> None:
     docs = {SNAKE: "deck", STUDY: STUDY_TEXT, "notes.pdf": "notes"}
     assert names.display_map(list(docs)) == {}  # the mapping does not engage

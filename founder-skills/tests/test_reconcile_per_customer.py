@@ -5,7 +5,9 @@ Annual recurring revenue over the paying customers who produce it is at least th
 contract, so a quotient below the stated ACV is a contradiction and one above it only confirms the
 floor. The test fires only on the label table in `_per_customer_floor`; every negative here is a
 label, slide or period shape the table must refuse, because a wrong pair tells a founder their deck
-is inconsistent when it is not. The cases are constructed and the figures synthetic.
+is inconsistent when it is not. An average deal or contract size with no stated period is refused instead
+(`_deal_size_without_period`): never compared, unless the floor already decided or the count is of deals.
+The cases are constructed and the figures synthetic.
 
 Run: uv run pytest founder-skills/tests/test_reconcile_per_customer.py -q
 """
@@ -139,9 +141,101 @@ def test_other_labels_never_pair(num_label: str, den_label: str, exp_label: str)
 FLOOR = "revenue per paying customer is normally at least the average contract"
 
 
-def test_a_deal_size_with_no_period_is_not_the_floor() -> None:
-    # The generic comparison still runs on it, as it did before the floor existed.
-    assert FLOOR not in run("ARR", "Paying customers", "Average deal size", exp_kw={"period": None}).rendered
+NO_PERIOD = "a deal or contract size with no stated period cannot be tested against revenue per customer"
+_NONE = {"period": None}
+
+
+@pytest.mark.parametrize("num", [("$180K", 180_000.0), ("$508K", 508_000.0)])  # below and above $60K
+@pytest.mark.parametrize(
+    ("num_label", "den_label", "exp_label"),
+    [
+        ("ARR", "Paying customers", "Average deal size"),
+        ("ARR", "Paying customers", "Average contract value"),
+        ("ARR", "Paying customers", "Average contract size"),
+        ("ARR", "Paying customers", "Average deal value"),
+        ("ARR", "Paying customers", "Median deal size"),
+        ("ARR", "Paying customers", "Average deal size (USD)"),
+        ("ARR", "Paying customers", "Average enterprise deal size"),
+        ("ARR", "Paying customers", "Average annual deal size"),
+        ("ARR", "Paid pilots", "Average contract"),
+        # The refusal does not need the floor's tables: these never reach the floor.
+        ("Revenue FY2025", "Paying customers", "Average deal size"),
+        ("ARR", "Enterprise customers", "Average deal size"),
+        ("ARR", "Enterprise accounts", "Average deal size"),
+        ("ARR", "Customers under contract", "Average deal size"),
+        ("ARR", "Customers (Sep 2026)", "Average deal size"),
+    ],
+)
+def test_a_deal_size_with_no_period_is_never_compared(
+    num_label: str, den_label: str, exp_label: str, num: tuple[str, float]
+) -> None:
+    r = run(num_label, den_label, exp_label, num=num, exp_kw=_NONE)
+    assert r.verdict == "incomparable" and NO_PERIOD in r.reasons, (r.verdict, r.reasons)
+
+
+@pytest.mark.parametrize(
+    "kw",
+    [
+        {"den_kw": {"slide": 5}},  # another slide
+        {"extra": [fig("n2", "$240K", 240_000.0, "money", "ARR Dec 2026", period="year")]},  # a second ARR
+        {"num_kw": {"currency": "USD"}, "exp_kw": {"period": None, "currency": "EUR"}},
+    ],
+)
+def test_the_refusal_does_not_need_the_floors_slide_or_currency_rules(kw: dict[str, Any]) -> None:
+    kw = {"exp_kw": _NONE, **kw}
+    r = run("ARR", "Paying customers", "Average deal size", **kw)
+    assert r.verdict == "incomparable" and NO_PERIOD in r.reasons, (r.verdict, r.reasons)
+
+
+@pytest.mark.parametrize(
+    ("num_label", "den_label", "exp_label", "num", "den", "exp"),
+    [
+        # Total value over a number of deals IS the average deal size: a real identity.
+        ("Total contract value", "Customer contracts", "Average contract value", 500_000.0, 10.0, 60_000.0),
+        ("Bookings", "Deals with new customers", "Average deal size", 500_000.0, 10.0, 60_000.0),
+        ("Bookings", "Deals", "Average deal size", 500_000.0, 10.0, 60_000.0),
+        # Pilot revenue over paid pilots is one deal each.
+        ("Pilot revenue", "Paid pilots", "Average deal size (pilot pricing)", 300_000.0, 6.0, 80_000.0),
+    ],
+)
+def test_a_count_of_deals_keeps_the_two_sided_comparison(
+    num_label: str, den_label: str, exp_label: str, num: float, den: float, exp: float
+) -> None:
+    def money(v: float) -> str:
+        return f"${v / 1000:g}K"
+
+    r = run(
+        num_label,
+        den_label,
+        exp_label,
+        num=(money(num), num),
+        den=(f"{den:g}", den),
+        exp=(money(exp), exp),
+        num_kw={"period": None},
+        exp_kw=_NONE,
+    )
+    assert r.verdict == "contradiction", (r.verdict, r.reasons)
+    assert NO_PERIOD not in r.reasons
+
+
+def test_a_count_of_deals_matching_the_stated_size_is_no_contradiction() -> None:
+    r = run(
+        "Total contract value",
+        "Customer contracts",
+        "Average contract value",
+        num=("$600K", 600_000.0),
+        den=("10", 10.0),
+        num_kw={"period": None},
+        exp_kw=_NONE,
+    )
+    assert r.verdict != "contradiction" and NO_PERIOD not in r.reasons
+
+
+def test_a_spelled_out_acv_with_no_period_stays_on_the_floor() -> None:
+    # The refusal's wide label list also matches "average annual contract value"; the floor decides first.
+    for label in ("Average annual contract value", "Avg. annual contract value"):
+        r = run("ARR", "Paying customers", label, exp_kw=_NONE)
+        assert r.verdict == "contradiction" and FLOOR in r.rendered, (label, r.verdict, r.reasons)
 
 
 def test_a_plain_acv_with_no_period_is_the_floor() -> None:
