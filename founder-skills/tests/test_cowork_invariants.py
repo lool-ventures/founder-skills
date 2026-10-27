@@ -268,3 +268,13 @@ def test_agents_with_search_tools_state_the_path_rule(agent_path: Path) -> None:
     text = agent_path.read_text(encoding="utf-8")
     assert text.count(SEARCH_PATH_RULE) == 1, agent_path.name
     assert text.index(SEARCH_PATH_RULE) < text.index("\n## "), agent_path.name
+
+
+def test_every_agent_runs_at_medium_effort() -> None:
+    """Every agent sets `effort: medium`, which the CLI applies to a plugin agent over the session's own.
+
+    Measured on one test deck: the default effort cost more and thought more, and was no more accurate.
+    A plugin agent that names no effort runs at the main thread's.
+    """
+    assert len(AGENT_FILES) == 8
+    assert {p.stem: _parse_frontmatter(p).get("effort") for p in AGENT_FILES} == {p.stem: "medium" for p in AGENT_FILES}

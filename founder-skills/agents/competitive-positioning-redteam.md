@@ -17,6 +17,7 @@ description: >
   reviewer loaded with the builder's rubric inherits the frame it exists to
   escape.
 model: inherit
+effort: medium
 color: red
 tools: ["Read", "Write", "Glob", "Grep", "WebSearch"]
 skills: ["competitive-positioning"]

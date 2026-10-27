@@ -20,6 +20,7 @@ description: >
   main thread gates it via check_handoff.py and inserts it into
   report.md via the shared insert_coaching.py script. No Bash required.
 model: inherit
+effort: medium
 color: orange
 tools: ["Read", "Write", "Edit", "Glob", "Grep"]
 skills: ["ic-sim"]

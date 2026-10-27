@@ -17,6 +17,7 @@ description: >
   the shared insert_coaching.py script. No Bash required. Does NOT read
   the full report.md.
 model: inherit
+effort: medium
 color: cyan
 tools: ["Read", "Write", "Edit", "Glob", "Grep"]
 skills: ["market-sizing"]

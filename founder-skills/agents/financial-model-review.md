@@ -17,6 +17,7 @@ description: >
   check_handoff.py and inserts it into report.md via the shared
   insert_coaching.py script. No Bash required.
 model: inherit
+effort: medium
 color: green
 tools: ["Read", "Write", "Edit", "Glob", "Grep"]
 skills: ["financial-model-review"]

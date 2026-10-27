@@ -17,6 +17,7 @@ description: >
   including the two that state in writing that they have no network tools and
   therefore cannot have applied an exchange rate from anywhere but memory.
 model: inherit
+effort: medium
 color: red
 tools: ["Read", "Write", "Glob", "Grep", "WebSearch"]
 skills: ["market-sizing"]

@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- The analysis sub-agents of every skill now think at medium effort, whatever effort the main conversation runs at.
+  On a test deck this cost about a third less, finished sooner, and was no less accurate.
+
 ### Fixed
 
 - Market sizing's outside review names a document attached in a cloud conversation by the name the founder gave

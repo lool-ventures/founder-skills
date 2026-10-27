@@ -19,6 +19,7 @@ description: >
   the main thread gates it via check_handoff.py and inserts it into
   report.md via the shared insert_coaching.py script. No Bash required.
 model: inherit
+effort: medium
 color: "#E67E22"
 tools: ["Read", "Write", "Edit", "Glob", "Grep", "WebSearch"]
 skills: ["competitive-positioning"]
