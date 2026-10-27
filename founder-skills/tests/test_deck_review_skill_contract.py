@@ -2449,3 +2449,25 @@ def test_the_orchestration_marker_sits_between_the_cue_and_the_generator() -> No
     marker = step.index("<!-- skill-quality-ci: bash-after-subagent-ok -->", cue)
     fence = step.index("```bash", cue)
     assert cue < marker < fence
+
+
+def _template(anchor: str) -> str:
+    """The dispatch template that opens with `anchor`, up to its closing fence."""
+    text = SKILL_MD.read_text(encoding="utf-8")
+    start = text.index(anchor)
+    return text[start : text.index("```", start)]
+
+
+def test_slide_reviews_never_praises_a_figure_the_arithmetic_refutes() -> None:
+    """slide_reviews.py only warns on such a strength, so the template's sentence is what prevents it."""
+    section = " ".join(_template("CONTEXT: SLIDE_REVIEWS").split())
+    assert (
+        'A figure reconciliation.json shows the deck got wrong (a relation with verdict "contradiction": '
+        "its expected_id) is never a strength: say on that slide what the numbers found." in section
+    )
+
+
+def test_relation_proposal_names_revenue_per_customer_against_a_stated_acv() -> None:
+    """The engine tests revenue over customers against a stated ACV only when the proposer pairs them."""
+    section = " ".join(_template("CONTEXT: RELATION_PROPOSAL").split())
+    assert "revenue over customers vs a stated average contract value (ACV)" in section

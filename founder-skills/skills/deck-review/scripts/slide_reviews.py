@@ -206,6 +206,38 @@ def numeric_lint(data: dict[str, Any], recon: dict[str, Any]) -> list[dict[str, 
     return hits
 
 
+# A STRENGTH THE ARITHMETIC REFUTES: a slide review praising a figure that reconciliation.json
+# shows the deck got wrong (a kept relation with verdict "contradiction", its stated figure).
+# Warn-only, like the lint above: the reviewer is told not to (Step 4's template), and a strength
+# that cites the figure neutrally ("Runway: 22 months is stated") is common enough that a refusal
+# would stop runs nothing is wrong with. A hit is a strength on the stated figure's own slide that
+# writes its numerals; spelled small numbers do not count ("two founders" is not "2 customers").
+def contradicted_strengths(data: dict[str, Any], recon: dict[str, Any], ledger: dict[str, Any]) -> list[str]:
+    """Where each strength citing a contradicted stated figure is. Pure: reads nothing from disk."""
+    import ocr_check
+
+    by_id = {
+        str(f.get("id")): f for f in ledger.get("figures") or [] if isinstance(f, dict) and f.get("id") is not None
+    }
+    stated: dict[int, list[str]] = {}
+    for rel in recon.get("relations") or []:
+        if not isinstance(rel, dict) or rel.get("verdict") != "contradiction":
+            continue
+        fig = by_id.get(str(rel.get("expected_id")))
+        if fig and isinstance(fig.get("slide"), int) and isinstance(fig.get("raw"), str):
+            stated.setdefault(fig["slide"], []).append(fig["raw"])
+    out: list[str] = []
+    for review in data.get("reviews") or []:
+        if not isinstance(review, dict) or review.get("slide_number") not in stated:
+            continue
+        for i, text in enumerate(review.get("strengths") or []):
+            if isinstance(text, str) and any(
+                ocr_check.found(raw, text, allow_spelled=False) for raw in stated[review["slide_number"]]
+            ):
+                out.append(f"slide {review['slide_number']} strengths[{i}]")
+    return out
+
+
 # ---------------------------------------------------------------------------
 # READ TOKEN: proof that Step 5's grader opened this file.
 #
@@ -320,6 +352,21 @@ def main() -> int:
             file=sys.stderr,
         )
     receipt["numeric_lint"] = {"hits": len(hits), "unbacked": len(unbacked)}
+    # Warn-only as well, and never allowed to fail the pipe: the artifact is already written.
+    try:
+        with open(args.ledger, encoding="utf-8") as fh:
+            ledger = json.load(fh)
+        praised = contradicted_strengths(data, recon or {}, ledger if isinstance(ledger, dict) else {})
+    except Exception as exc:  # noqa: BLE001 -- a warning that cannot be computed is no warning
+        print(f"Warning: contradicted_strengths: not checked ({type(exc).__name__})", file=sys.stderr)
+    else:
+        for where in praised:
+            print(
+                f"Warning: contradicted_strengths: {where} praises a figure reconciliation.json shows "
+                "the deck got wrong; say on that slide what the numbers found",
+                file=sys.stderr,
+            )
+        receipt["contradicted_strengths"] = {"hits": len(praised)}
     sys.stdout.write(json.dumps(receipt, separators=(",", ":")) + "\n")
     return 0
 

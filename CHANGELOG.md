@@ -18,6 +18,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   it, also for a name such as `pitch_deck (1).pdf`. The review's wording step used to change a word inside the
   stored name, which left the cloud session's eight-character prefix on the report and page. The coaching
   commentary can still repeat a stored name with its prefix.
+- Deck review checks a deck's revenue per paying customer against the average contract value (ACV) it states.
+  When annual recurring revenue divided by the paying customers on the same slide comes out below the stated ACV,
+  the numbers section reports it. Before, the two could never be compared. Only plainly labelled figures are
+  paired: a forecast, a target, a segment's ACV or a pipeline count is left alone.
+- Deck review's slide reviews are told never to praise a figure that the deck's own arithmetic shows is wrong. A
+  review had called a stated runway a strength on the slide where the numbers section found that runway did not
+  follow from cash and burn. A strength like that is now also reported as a warning when the reviews are saved.
+
+### Scoring changes
+
+- Deck review: revenue per paying customer is tested one way against a stated annual ACV; a figure below it is a
+  contradiction in the numbers section. No checklist criterion, status rule or score changes.
+- Every other skill: none.
 
 ## [0.26.1] - 2026-10-26 — Files attached in a cloud conversation found and named as uploaded
 

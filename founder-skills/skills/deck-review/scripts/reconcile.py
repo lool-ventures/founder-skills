@@ -2115,6 +2115,66 @@ _DIRECTION_WORDS = re.compile(
 )
 
 
+# REVENUE PER PAYING CUSTOMER IS TESTED AGAINST A STATED AVERAGE CONTRACT, ONE WAY. Annual
+# recurring revenue over the paying customers who produce it is at least their average annual
+# contract (a customer holds one contract or more), so a quotient below the stated figure is a
+# contradiction and one above it confirms nothing more than the floor. The generic comparison
+# cannot see this: the ratio's unit drops the numerator's period, so a money:year ACV was always
+# incomparable. Like `_known_reciprocals`, the test is the table only: every label must be a
+# full match of its allowlist (an as-of month is allowed on the revenue, never on the count, and
+# an ACV qualifier only from a short list), the two parts sit on one slide that states exactly
+# one recurring-revenue figure, and a paid pilot count pairs only with a pilot-pricing ACV.
+# Forecasts, targets, segment ACVs, pipeline counts and users all fall outside the lists.
+_MON = r"(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)"
+_PER_CUSTOMER_NUM_FULL = re.compile(
+    r"(arr|mrr|annual recurring revenue|recurring revenue|run[- ]rate( arr| revenue)?)"
+    r"( " + _MON + r" (19|20)\d\d)?"
+)
+_PER_CUSTOMER_DEN_FULL = re.compile(
+    r"(?:(?:paying|paid|active paying|current paying)?\s*(?:customers?|clients?|logos?)"
+    r"|paid pilots?|pilots? converted( to paid)?|converted pilots?|paying pilots?)"
+)
+_PER_CUSTOMER_EXP_FULL = re.compile(
+    r"(acv|annual contract value|(average|avg\.?) (contract )?(acv|annual contract value))"
+    r"( \((pilot pricing|current|today|blended)\))?"
+)
+_PER_CUSTOMER_EXP_YEAR_ONLY = re.compile(
+    r"(average|avg\.?) (contract( value)?|deal( size)?)"
+    r"( \((pilot pricing|current|today|blended)\))?"
+)
+_PER_CUSTOMER_PERIOD_WORD = {"day": "daily", "week": "weekly", "month": "monthly", "quarter": "quarterly"}
+
+
+def _pc_norm(label: str) -> str:
+    return " ".join(label.lower().split()).strip(" .,:;-\u2013\u2014")
+
+
+def _per_customer_floor(num: Figure, den: Figure, exp: Figure, by_id: dict[str, Figure]) -> bool:
+    if not (num.unit_kind == "money" and den.unit_kind == "count" and exp.unit_kind == "money"):
+        return False
+    if num.slide is None or den.slide is None or num.slide != den.slide:
+        return False
+    if exp.period not in ("year", None):
+        return False
+    if num.currency and exp.currency and str(num.currency).upper() != str(exp.currency).upper():
+        return False
+    if not _PER_CUSTOMER_NUM_FULL.fullmatch(_pc_norm(num.label or "")):
+        return False
+    if not _PER_CUSTOMER_DEN_FULL.fullmatch(_pc_norm(den.label or "")):
+        return False
+    el = _pc_norm(exp.label or "")
+    if not (
+        _PER_CUSTOMER_EXP_FULL.fullmatch(el) or (exp.period == "year" and _PER_CUSTOMER_EXP_YEAR_ONLY.fullmatch(el))
+    ):
+        return False
+    if re.fullmatch(r"(paid|paying) pilots?", _pc_norm(den.label or "")) and not el.endswith("(pilot pricing)"):
+        return False
+    n = sum(
+        1 for f in by_id.values() if f.slide == num.slide and _PER_CUSTOMER_NUM_FULL.fullmatch(_pc_norm(f.label or ""))
+    )
+    return n == 1
+
+
 def _known_reciprocals(a: str, b: str) -> bool:
     for x, y in _RECIPROCAL_PAIRS:
         if (re.search(x, a, re.I) and re.search(y, b, re.I)) or (re.search(y, a, re.I) and re.search(x, b, re.I)):
@@ -2803,6 +2863,28 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
             r.computed_unit = f"{r.computed_unit}:{per}"
         cu = r.computed_unit or ""
         comparable: float | None = None
+        per_unit_floor = False
+        if (
+            r.operator == "ratio"
+            and len(real) == 2
+            and cu == "money_per_count"
+            and _per_customer_floor(real[0], real[1], exp, by_id)
+        ):
+            if real[0].period != "year" or exp.period not in ("year", None):
+                r.verdict = "incomparable"
+                per_word = _PER_CUSTOMER_PERIOD_WORD.get(str(real[0].period), str(real[0].period))
+                r.reasons.append(
+                    "the revenue figure carries no period"
+                    if real[0].period is None
+                    else f"a {per_word} figure against an annual contract value"
+                )
+                return r
+            if relation == "at_most" or exp.bound == "at_most":
+                r.verdict = "incomparable"
+                r.reasons.append("a stated ceiling says nothing about a floor on revenue per customer")
+                return r
+            per_unit_floor = True
+            comparable = r.computed
         # A DURATION IS COMPARED IN THE STATED FIGURE'S OWN WRITTEN UNIT. The magnitude lives
         # in `value` and the unit only in the raw string, and the old gate compared the bare
         # magnitudes -- so a cash / monthly burn of 30.0 months contradicted a stated "2.5
@@ -2822,6 +2904,8 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
                 return r
             dur_scale, dur_unit = c_unit[1] / e_unit[1], e_unit[0]
             comparable = r.computed * dur_scale
+        elif per_unit_floor:
+            pass
         elif r.operator == "compound_growth" and cu == PERCENT and exp.unit_kind == PERCENT:
             # The rate is already in the stated figure's period -- `periods` and the stated
             # basis agree by construction -- so the bare percent compares directly. The
@@ -2922,7 +3006,10 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
             return r
         # `runway` takes the same test as every other operator, two-sided unless the stated
         # figure is bounded -- see `_runway` for why it is not one-sided.
-        if relation == "at_most":
+        if per_unit_floor:
+            disjoint = c_hi < e_lo - tol
+            gap = max(0.0, e_lo - c_hi)
+        elif relation == "at_most":
             disjoint = c_lo > e_hi + tol
             gap = max(0.0, c_lo - e_hi)
         # A bounded figure gets a ONE-SIDED test. "$200B+" is satisfied by anything at or
@@ -2940,7 +3027,17 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
         # Render the computed side in the STATED figure's unit. "145.5%" printed beside
         # "20–40×" is arithmetically right and reads as apples to oranges; 1.45x beside
         # 20–40x is the same fact, comparable at a glance.
-        if dur_unit:
+        if per_unit_floor:
+            money = (
+                _money_text(c_lo, real[0])
+                if c_lo == c_hi
+                else f"{_money_text(c_lo, real[0])}–{_money_text(c_hi, real[0])}"
+            )
+            # The count's label is one of a closed list, so it is safe to name it in the singular here,
+            # which `_denominator_noun` deliberately never does for an arbitrary label.
+            noun = "paid pilot" if "pilot" in _pc_norm(real[1].label or "") else "customer"
+            r.rendered = f"{real[0].raw} ÷ {real[1].raw} = {money} per {noun}"
+        elif dur_unit:
             # Printed in the unit it was compared in, which is the unit the deck wrote.
             head = r.head or r.rendered.partition(" = ")[0]
             r.rendered = f"{head} = {_span_text(c_lo, c_hi)} {dur_unit}s{r.note}"
@@ -3037,7 +3134,13 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
             # but never labelled is not something the deck states -- asserting otherwise
             # would describe the deck falsely while sounding maximally confident.
             src = "the deck states" if exp.visible else "the underlying data behind that chart gives"
-            r.rendered += f"  — but {src} {_stated(exp)} ({exp.label})"
+            if per_unit_floor:
+                r.rendered += (
+                    f"  — below the average contract of {_stated(exp)} {src} ({exp.label}); "
+                    "revenue per paying customer is normally at least the average contract"
+                )
+            else:
+                r.rendered += f"  — but {src} {_stated(exp)} ({exp.label})"
             if exp.visible and any(not f.visible for f in real):
                 # The most useful shape this produces: a claim printed on the slide that
                 # its own chart data contradicts.
@@ -3065,10 +3168,13 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
                 "is within the stated"
                 if relation == "at_most"
                 else "is consistent with the stated"
-                if exp.bound in ("at_least", "at_most") or r.operator == "runway"
+                if exp.bound in ("at_least", "at_most") or r.operator == "runway" or per_unit_floor
                 else "matches the stated"
             )
-            r.rendered += f"  — {verb} {_stated(exp)}"
+            if per_unit_floor:
+                r.rendered += f"  — at least the stated average contract of {_stated(exp)}"
+            else:
+                r.rendered += f"  — {verb} {_stated(exp)}"
     elif r.operator == "sum" and len(real) == 2 and r.kind != "contradiction":
         # "52 + 3 = 55 customers" restates the deck rather than testing it.
         r.verdict = "restatement"

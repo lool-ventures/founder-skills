@@ -929,7 +929,8 @@ you compute here is not checked by anything and will not be used.
 
 Propose a relation whenever the deck implies one an investor would run:
   - a rate the deck states AND states the parts of (revenue over volume vs a stated
-    take rate; spend over customers vs a stated CAC)
+    take rate; spend over customers vs a stated CAC; revenue over customers vs a
+    stated average contract value (ACV))
   - a total the deck states AND lists the components of
   - a runway, a multiple, or a per-unit figure the deck states and the inputs to
   - **two dated magnitudes plus a growth multiple or CAGR between them** — a market
@@ -1210,6 +1211,9 @@ Say two deck figures disagree only when <REVIEW_DIR_AGENT>/reconciliation.json
 lists that disagreement, or the deck writes one quantity two ways (quote both). A
 metric and its inverse, a part of a later total, or a figure labelled conservative
 is not a disagreement.
+A figure reconciliation.json shows the deck got wrong (a relation with verdict
+"contradiction": its expected_id) is never a strength: say on that slide what the
+numbers found.
 All string values must be JSON-escaped (`\n` for line breaks, `\"` for embedded
 quotes); the file must parse with a strict JSON parser.
 Then return ONLY the receipt JSON in your final assistant message:

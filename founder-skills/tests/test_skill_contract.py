@@ -1672,7 +1672,11 @@ SKILL_MD_CEILING: dict[str, int] = {
     # numbers section uses (its two commands, the run-again rule, what a refusal means, no sub-agent reading the
     # result, its row in the pipeline table, and that a resume runs it again), and Step 4's pipe passes `--ledger`
     # and `--ocr-check` to the gate that checks the step ran.
-    "deck-review": 120_199,
+    # 120,199 -> 120,444 (+245 B) on 2026-10-27: RELATION_PROPOSAL names revenue over customers against
+    # a stated average contract value, which the engine now tests one way (no such relation could ever be
+    # compared before), and SLIDE_REVIEWS says a figure the arithmetic shows wrong is never a strength (a
+    # review praised a stated runway on the slide whose runway the kept contradiction refuted).
+    "deck-review": 120_444,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.

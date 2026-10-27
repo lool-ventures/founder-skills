@@ -189,14 +189,17 @@ def raw_tokens(raw: str) -> list[tuple[Decimal, float, bool]] | None:
     return [(v, next(iter(s)), pct) for v, s, pct in guarded(numeral_form(raw))[0]]
 
 
-def found(raw: str, page: str) -> bool:
+def found(raw: str, page: str, allow_spelled: bool = True) -> bool:
     """Whether every number of `raw` appears on `page` as written: equal value, the raw's scale among the page
-    token's, and the same percent flag. A raw with no digits is matched by its spelled-out words."""
+    token's, and the same percent flag. A raw with no digits is matched by its spelled-out words, and a small
+    integer also by its word; `allow_spelled=False` matches numerals only."""
     if not page:
         return False
     low = normalize_text(page).lower()
     rt = raw_tokens(raw)
     if rt is None:
+        if not allow_spelled:
+            return False
         spelled = spelled_number(raw)
         if spelled is None:
             return False
@@ -209,7 +212,7 @@ def found(raw: str, page: str) -> bool:
     pt = page_tokens(page, with_glued=any(s != 1.0 for _, s, _ in rt))
     for v, s, pct in rt:
         hit = any(p[0] == v and s in p[1] and p[2] == pct for p in pt)
-        if not hit and not pct and s == 1.0 and v == v.to_integral_value() and 0 <= v <= 10:
+        if not hit and allow_spelled and not pct and s == 1.0 and v == v.to_integral_value() and 0 <= v <= 10:
             hit = re.search(rf"\b{SMALL_WORDS[int(v)]}\b", low) is not None
         if not hit:
             return False
