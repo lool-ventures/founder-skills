@@ -145,7 +145,8 @@ assert:
   - dispatch_count_max: 13
   # Efficiency budgets — generous ceilings; tightened to observed x1.5 post-record.
   - max_turns: 130
-  - tool_calls_max: 120
+  # 135: a correct 0.27.0 run made 121 calls; dispatch_count_max and max_turns catch a runaway.
+  - tool_calls_max: 135
   # Stray-file guard (new-files-only; overwrite-in-place is covered by producer stamps).
   # Allowlist = artifact namespace (incl. handoff/**) + founder-context sidecar + promoted
   # deliverables. Pre-0.24 cassettes exclude loudly (no preRunPaths). tightened from discovery actuals (observed x1.5).
