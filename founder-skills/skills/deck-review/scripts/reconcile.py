@@ -2191,6 +2191,10 @@ def _per_customer_floor(num: Figure, den: Figure, exp: Figure, by_id: dict[str, 
 # (ARPU, CAC, ASP, ...), an average deal size over a count of deals, pilot revenue over paid pilots, and a
 # period-less ACV that revenue per buyer falls below. A share or multiple divided by anything is never a
 # rate a stated figure gives (a percent over years is a simple average; compounding is `compound_growth`).
+# Every admitted label may carry only a currency, scale or descriptive parenthetical (`_RATE_PAREN`), and a deal size
+# only a word saying which deals (`_DEAL_SIZE_WORDS`): a target, a forecast year, today's price or a term is
+# another quantity. A bare "Deal size" and an ACV over a count of deals stay unchecked: a bare contract value is
+# often multi-year, and a count of deals is a flow over all time set against ARR's level today.
 _DEAL_SIZE_NO_PERIOD = re.compile(
     r"(average|avg\.?|mean|median|typical)( [a-z0-9-]+){0,2} (contract|deal)( size| value)?( \([^()]{1,30}\))?"
 )
@@ -2216,7 +2220,8 @@ _RATE_TIME_UNITS: tuple[tuple[str, re.Pattern[str]], ...] = (
 # A count that is not yet, or not wholly, actual buyers or heads: a forecast, a goal, a pipeline or a dated
 # snapshot. Read on the whole label before anything is dropped, so a comma cannot hide one.
 _NOT_ACTUALS = re.compile(
-    r"\b(target|projected|forecast|planned|expected|pipeline|prospective|potential|addressable|m\d+|(19|20)\d\d|\d+e)\b"
+    r"\b(target|projected|forecast|planned|expected|pipeline|prospective|potential|addressable|m\d+|(19|20)\d\d|\d+e"
+    r"|to date|cumulative|since inception|lifetime|ever)\b"
 )
 _COUNT_LEAD = re.compile(r"^(total number of|number of|# of) ")
 _COUNT_COMMA_UNIT = re.compile(r", (fte|headcount|total|count|#)$")
@@ -2231,7 +2236,7 @@ _RATE_QUALIFIERS_CEILING = r"(blended|average|avg|fully-loaded|current|budget|ta
 _NAMED_RATES: tuple[tuple[str, re.Pattern[str]], ...] = (
     (r"arpu|average revenue per user", re.compile(r"\busers?\b")),
     (r"arpa", re.compile(r"\baccounts?\b")),
-    (r"arpc", re.compile(r"\bcustomers?\b")),
+    (r"arpc", re.compile(r"\b(customers?|clients?)\b")),
     (r"arppu", re.compile(r"\bpaying users?\b")),
     (
         r"cac|customer acquisition cost|cpa|cost per acquisition",
@@ -2240,6 +2245,22 @@ _NAMED_RATES: tuple[tuple[str, re.Pattern[str]], ...] = (
     (r"asp|average selling price", re.compile(r"\bunits?\b")),
     (r"aov|average order value", re.compile(r"\borders?\b")),
 )
+# The only parentheticals an admitted stated label may carry: a currency or scale, or a descriptive word. A target,
+# a forecast year, "(current)" (today's price for new deals) or a term ("(3-year)", "(TCV)") is another quantity.
+_RATE_PAREN = re.compile(r"\((usd|us\$|\$|€|£|eur|gbp|ils)( ?(k|m|000s?))?\)|\((k|m)\$\)|\((blended|fully[- ]loaded)\)")
+_PILOT_PAREN = re.compile(r"\(pilot pricing\)")
+# A deal size names one deal: a word between the average word and "contract"/"deal" may only say which deals.
+_DEAL_SIZE_WORDS = frozenset({"contract", "deal", "sales", "signed", "closed", "won", "customer"})
+# A stated rate that names recurring revenue names its period too: "ARR per customer" is annual, "MRR per user"
+# monthly. Read only to REFUSE a numerator stated over another period; a numerator with no period is not refused.
+_RECURRING_UNIT: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("year", re.compile(r"\barr\b|annual recurring")),
+    ("month", re.compile(r"\bmrr\b|monthly recurring")),
+)
+# A numerator that is a forecast or a goal is not an actual a stated rate can be checked against. Narrower than
+# `_NOT_ACTUALS`: a dated actual ("ARR (Sep 2026)") is still an actual.
+_FORECAST_NUM = re.compile(r"\b(target|projected|forecast|plan|planned|budget|expected|pipeline|goal|\d+e)\b")
+_NEW_BUYERS_TAIL = re.compile(r" with new (customers?|clients?|logos?)$")
 _NO_PERIOD_DEAL_REASON = "a deal or contract size with no stated period cannot be tested against revenue per customer"
 
 
@@ -2266,6 +2287,21 @@ def _den_counts_actuals(den_label: str) -> str | None:
     return base or None
 
 
+def _parens_ok(label: str, *, pilot: bool = False) -> bool:
+    """Every parenthetical in the stated label is a currency, a scale or a descriptive word (or pilot pricing)."""
+    return all(
+        _RATE_PAREN.fullmatch(p) or (pilot and _PILOT_PAREN.fullmatch(p)) for p in re.findall(r"\([^()]*\)", label)
+    )
+
+
+def _deal_size_words_ok(label: str) -> bool:
+    m = _DEAL_SIZE_NO_PERIOD.fullmatch(label)
+    if m is None:
+        return False
+    words = label[m.end(1) : m.start(3)].split()
+    return len(words) <= 1 and set(words) <= _DEAL_SIZE_WORDS
+
+
 def _stated_time_unit(exp: Figure) -> str | None:
     text = f"{_pc_norm(exp.label or '')} {(exp.raw or '').lower()}"
     return next((unit for unit, pat in _RATE_TIME_UNITS if pat.search(text)), None)
@@ -2278,8 +2314,13 @@ def _stated_is_the_rate(num: Figure, den: Figure, exp: Figure, computed: float |
     if den.unit_kind == COUNT:
         stated_unit = _stated_time_unit(exp)
         same_period = stated_unit is None or num.period == stated_unit
+        recurring = next((unit for unit, pat in _RECURRING_UNIT if pat.search(el)), None)
+        nl = _pc_norm(num.label or "")
+        num_unit = num.period or next((unit for unit, pat in _RECURRING_UNIT if pat.search(nl)), None)
+        same_period = same_period and (recurring is None or num_unit in (None, recurring))
+        same_period = same_period and not _FORECAST_NUM.search(nl)
         base = _den_counts_actuals(dl)
-        if same_period and base:
+        if same_period and base and _parens_ok(el):
             words = {_singular(w) for w in base.split()}
             for text in (el, (exp.raw or "").lower()):
                 if any({_singular(w) for w in m.group(1).split()} == words for m in _PER_PHRASE.finditer(text)):
@@ -2287,21 +2328,21 @@ def _stated_is_the_rate(num: Figure, den: Figure, exp: Figure, computed: float |
             q = _RATE_QUALIFIERS_CEILING if ceiling else _RATE_QUALIFIERS
             for name, den_words in _NAMED_RATES:
                 if re.fullmatch(rf"({q} ){{0,2}}({name})( {q}){{0,2}}( \([^()]*\))?", el) and den_words.search(dl):
+                    # The parenthetical was read by `_parens_ok` above.
                     return True
     if den.unit_kind == DURATION and num.unit_kind in (MONEY, COUNT):
         den_unit = written_time_unit(den)
         return den_unit is not None and _stated_time_unit(exp) == den_unit[0]
     if num.unit_kind == MONEY and exp.unit_kind == MONEY and den.unit_kind == COUNT:
-        if _DEAL_SIZE_NO_PERIOD.fullmatch(el) and (
-            _DEAL_COUNT_WORD.search(dl)
-            or (_PILOT_DEN_FULL.fullmatch(dl) and not _PER_CUSTOMER_NUM_FULL.fullmatch(_pc_norm(num.label or "")))
-        ):
+        deals = _DEAL_COUNT_WORD.search(dl) and _den_counts_actuals(_NEW_BUYERS_TAIL.sub("", dl)) is not None
+        pilots = _PILOT_DEN_FULL.fullmatch(dl) and not _PER_CUSTOMER_NUM_FULL.fullmatch(_pc_norm(num.label or ""))
+        if _deal_size_words_ok(el) and ((deals and _parens_ok(el)) or (pilots and _parens_ok(el, pilot=True))):
             return True
         buyers = _den_counts_actuals(dl) is not None and bool(
             (_CUSTOMER_WORD.search(dl) and not _PILOT_WORD.search(dl) and not _DEAL_WORD.search(dl))
             or _PILOT_DEN_FULL.fullmatch(dl)
         )
-        if buyers and _ACV_NO_PERIOD.fullmatch(el) and computed is not None:
+        if buyers and _ACV_NO_PERIOD.fullmatch(el) and _parens_ok(el, pilot=True) and computed is not None:
             return computed < (exp.lo if exp.lo is not None else exp.value)
     return False
 

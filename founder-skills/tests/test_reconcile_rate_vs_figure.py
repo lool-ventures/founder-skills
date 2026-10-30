@@ -75,6 +75,9 @@ YEARS: Side = ("duration", "3 years", 3.0, "Contract term", {})
 
 # --- admitted: the figure is that rate (each off-value, so the comparison reports a contradiction) ------------
 
+CAC_SPEND_A = money("S&M spend", "$500K", 5e5)
+BOOKINGS = money("Bookings", "$500K", 5e5)
+
 ADMITTED = {
     "per employee": (ARR, count("Employees"), money("ARR per employee", "$120K", 120_000.0)),
     "per paying customer": (ARR, count("Paying customers"), money("Revenue per paying customer", "$120K", 120_000.0)),
@@ -128,6 +131,34 @@ ADMITTED = {
         money("ACV", "$60K", 60_000.0),
     ),
 }
+
+# ARPC over clients, and a deal size naming which deals.
+ADMITTED.update(
+    {
+        "ARPC over clients": (money("Revenue"), count("Clients", "1,000", 1000.0), money("ARPC", "$1K", 1e3)),
+        "currency scale paren": (ARR, count("Employees"), money("ARR per employee ($K)", "$120K", 120_000.0)),
+        "fully loaded CAC": (
+            CAC_SPEND_A,
+            count("New customers", "100", 100.0),
+            money("CAC (fully loaded)", "$2K", 2e3),
+        ),
+        "average closed deal size": (
+            BOOKINGS,
+            count("Deals", "10", 10.0),
+            money("Average closed deal size", "$60K", 6e4),
+        ),
+        "average signed contract value": (
+            BOOKINGS,
+            count("Contracts", "10", 10.0),
+            money("Average signed contract value", "$60K", 6e4),
+        ),
+        "deals with new customers": (
+            BOOKINGS,
+            count("Deals with new customers", "10", 10.0),
+            money("Average deal size", "$60K", 6e4),
+        ),
+    }
+)
 
 
 @pytest.mark.parametrize("case", sorted(ADMITTED))
@@ -231,6 +262,116 @@ REFUSED = {
         ("multiple", "7x", 7.0, "Return", {}),
     ),
 }
+
+# Not that rate: a target, a forecast, today's price, a term, a cumulative or pipeline count, or a deal size that
+# names a kind of contract rather than which deals. The last block are wordings refused on purpose: a later
+# widening has to delete them deliberately.
+REFUSED.update(
+    {
+        "CAC (2027E)": (CAC_SPEND, count("New customers", "100", 100.0), money("CAC (2027E)", "$2K", 2e3)),
+        "CAC (projected)": (CAC_SPEND, count("New customers", "100", 100.0), money("CAC (projected)", "$2K", 2e3)),
+        "ARPA (target)": (money("Revenue"), count("Accounts", "1,000", 1e3), money("ARPA (target)", "$1K", 1e3)),
+        "ARPA (target, monthly)": (
+            money("Revenue"),
+            count("Accounts", "1,000", 1e3),
+            money("ARPA (target, monthly)", "$1K", 1e3),
+        ),
+        "ARPU over customers": (money("Revenue"), count("Customers", "1,000", 1e3), money("ARPU", "$1K", 1e3)),
+        "ARPA over customers": (money("Revenue"), count("Customers", "1,000", 1e3), money("ARPA", "$1K", 1e3)),
+        "per customer (target)": (ARR, count("Customers"), money("ARR per customer (target)", "$120K", 1.2e5)),
+        "per customer (2027E)": (ARR, count("Customers"), money("Revenue per customer (2027E)", "$120K", 1.2e5)),
+        "per employee (goal)": (ARR, count("Employees"), money("ARR per employee (goal)", "$120K", 1.2e5)),
+        "ACV (target) below": (ACV_BELOW[0], count("Customers", "4", 4.0), money("ACV (target)", "$60K", 6e4)),
+        "ACV (2027E) below": (ACV_BELOW[0], count("Customers", "4", 4.0), money("ACV (2027E)", "$60K", 6e4)),
+        "ACV (current) below": (ACV_BELOW[0], count("Customers", "4", 4.0), money("ACV (current)", "$60K", 6e4)),
+        "ACV (today) below": (ACV_BELOW[0], count("Active customers", "4", 4.0), money("ACV (today)", "$60K", 6e4)),
+        "deal size (current)": (
+            BOOKINGS,
+            count("Deals", "10", 10.0),
+            money("Average deal size (current)", "$60K", 6e4),
+        ),
+        "deal size (target)": (BOOKINGS, count("Deals", "10", 10.0), money("Average deal size (target)", "$60K", 6e4)),
+        "deal size (TCV)": (BOOKINGS, count("Deals", "10", 10.0), money("Average deal size (TCV)", "$60K", 6e4)),
+        "average total contract value": (
+            BOOKINGS,
+            count("Contracts", "10", 10.0),
+            money("Average total contract value", "$60K", 6e4),
+        ),
+        "average annual contract value over contracts": (
+            BOOKINGS,
+            count("Contracts", "10", 10.0),
+            money("Average annual contract value", "$60K", 6e4),
+        ),
+        "average first-year contract value": (
+            BOOKINGS,
+            count("Contracts", "10", 10.0),
+            money("Average first-year contract value", "$60K", 6e4),
+        ),
+        "average three-year contract value": (
+            BOOKINGS,
+            count("Contracts", "10", 10.0),
+            money("Average three-year contract value", "$60K", 6e4),
+        ),
+        "average enterprise deal size": (
+            BOOKINGS,
+            count("Deals", "10", 10.0),
+            money("Average enterprise deal size", "$60K", 6e4),
+        ),
+        "deal size over pipeline deals": (
+            BOOKINGS,
+            count("Pipeline deals", "10", 10.0),
+            money("Average deal size", "$60K", 6e4),
+        ),
+        "deal size over deals in pipeline": (
+            BOOKINGS,
+            count("Deals in pipeline", "10", 10.0),
+            money("Average deal size", "$60K", 6e4),
+        ),
+        "deal size over contracts signed to date": (
+            BOOKINGS,
+            count("Contracts signed to date", "10", 10.0),
+            money("Average contract value", "$60K", 6e4),
+        ),
+        "bare deal size over deals": (ARR, count("Deals closed", "10", 10.0), money("Deal size", "$60K", 6e4)),
+        "bare contract value over contracts": (
+            ARR,
+            count("Contracts", "10", 10.0),
+            money("Contract value", "$60K", 6e4),
+        ),
+        "ACV over deals": (ARR, count("Deals", "10", 10.0), money("ACV", "$60K", 6e4)),
+        "MRR over customers, stated ARR per customer": (
+            money("MRR", "$250K", 2.5e5, period="month"),
+            count("Customers"),
+            money("ARR per customer", "$120K", 1.2e5),
+        ),
+        "ARR label, no period, stated MRR per customer": (
+            money("ARR", "$3M", 3e6),
+            count("Customers"),
+            money("MRR per customer", "$9K", 9e3),
+        ),
+        "forecast numerator": (
+            money("ARR 2027E", "$3M", 3e6, period="year"),
+            count("Customers"),
+            money("ARR per customer", "$120K", 1.2e5),
+        ),
+        "plan numerator": (
+            money("ARR plan", "$3M", 3e6, period="year"),
+            count("Customers"),
+            money("ARR per customer", "$120K", 1.2e5),
+        ),
+        "lost: bare # count": (ARR, count("# Customers"), money("ARR per customer", "$120K", 120_000.0)),
+        "lost: combined parenthetical": (
+            BOOKINGS,
+            count("Deals", "10", 10.0),
+            money("Average deal size (USD, blended)", "$60K", 6e4),
+        ),
+        "lost: to date over to date": (
+            money("S&M spend to date", "$500K", 5e5),
+            count("Customers acquired to date", "100", 100.0),
+            money("CAC", "$2K", 2e3),
+        ),
+    }
+)
 # Refused before this change too, with the reason kept: an ACV that revenue per customer is at or above.
 ALREADY_REFUSED = {
     "ACV above revenue per customer": (ARR, count("Customers", "4", 4.0), money("ACV", "$60K", 60_000.0)),
