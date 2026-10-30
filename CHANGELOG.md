@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-10-28 — Analysis sub-agents at medium effort, and a deck's revenue per customer checked against its ACV
+
+### Highlights
+
+**Every skill's analysis sub-agents run at medium effort.** They used to inherit the main conversation's effort.
+On a test deck the review cost about a third less and finished sooner, with no loss of accuracy.
+
+**Deck review checks revenue per paying customer against the deck's stated ACV.** When annual recurring revenue
+divided by the paying customers on the same slide comes out below the annual contract value the deck states, the
+numbers section reports it. A slide review no longer praises a figure that the numbers section shows is wrong.
+
 ### Changed
 
 - The analysis sub-agents of every skill now think at medium effort, whatever effort the main conversation runs at.
