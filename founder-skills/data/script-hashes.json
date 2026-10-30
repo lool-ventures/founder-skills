@@ -167,7 +167,7 @@
     "skills/deck-review/scripts/gate_state.py": "10b08fd7d8dcf2a343ca966e579fdc9d76e28a3da419d12826e86f332ce9faef",
     "skills/deck-review/scripts/ledger.py": "ab0c4bb31b71361a29cd049f6b0684d44166cb22e09d2104b3b39b0567409738",
     "skills/deck-review/scripts/ocr_check.py": "00637e92a07fb765c4d1fa9321f2133c23348495d276131ba10010e769fe1768",
-    "skills/deck-review/scripts/reconcile.py": "3e7289014aad719f2d32f5cca110899107e4d8a36cc265fa25f6d9caac24a8f3",
+    "skills/deck-review/scripts/reconcile.py": "6c880233122932a404f3a3b2b4087ff54a133b17d78ee815979073c8fcd49f54",
     "skills/deck-review/scripts/second_read.py": "9320ec5e140d23702872d37c181239be4030652a796bd55d5e49feb70f64922b",
     "skills/deck-review/scripts/setup_run.py": "7213f2c476553e813e8157e10b7786051c22040a33b461cef6d6950ade801f5a",
     "skills/deck-review/scripts/slide_reviews.py": "11c3754fcc1037c4387e7ccb7e920d6688f36acab9c06bc27fcd64776e704b50",

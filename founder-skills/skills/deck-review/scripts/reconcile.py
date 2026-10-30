@@ -2260,6 +2260,10 @@ _RECURRING_UNIT: tuple[tuple[str, re.Pattern[str]], ...] = (
 # A numerator that is a forecast or a goal is not an actual a stated rate can be checked against. Narrower than
 # `_NOT_ACTUALS`: a dated actual ("ARR (Sep 2026)") is still an actual.
 _FORECAST_NUM = re.compile(r"\b(target|projected|forecast|plan|planned|budget|expected|pipeline|goal|\d+e)\b")
+# The same on the stated side, wherever the word stands ("Target ARR per customer", "ARR per customer, target",
+# "... in 2027"): a goal or a forecast is not today's rate. A ceiling word is allowed on a limit (`ceiling`).
+_FORECAST_STATED = re.compile(r"\b(projected|forecast|plan|planned|expected|pipeline|goal|\d+e|(19|20)\d\d)\b")
+_CEILING_WORD = re.compile(r"\b(target|budget)\b")
 _NEW_BUYERS_TAIL = re.compile(r" with new (customers?|clients?|logos?)$")
 _NO_PERIOD_DEAL_REASON = "a deal or contract size with no stated period cannot be tested against revenue per customer"
 
@@ -2310,15 +2314,19 @@ def _stated_time_unit(exp: Figure) -> str | None:
 def _stated_is_the_rate(num: Figure, den: Figure, exp: Figure, computed: float | None, *, ceiling: bool) -> bool:
     if num.unit_kind in (PERCENT, MULTIPLE):
         return False
-    el, dl = _pc_norm(exp.label or ""), _pc_norm(den.label or "")
+    el, dl, nl = _pc_norm(exp.label or ""), _pc_norm(den.label or ""), _pc_norm(num.label or "")
+    # On every branch: an actual over an actual, and no parenthetical but a currency, scale or descriptive one.
+    if _FORECAST_NUM.search(nl) or _FORECAST_STATED.search(el) or (not ceiling and _CEILING_WORD.search(el)):
+        return False
+    if not _parens_ok(el, pilot=True):
+        return False
+    # A recurring numerator's period: its own, or the one its label names ("MRR" is monthly).
+    num_unit = num.period or next((unit for unit, pat in _RECURRING_UNIT if pat.search(nl)), None)
     if den.unit_kind == COUNT:
         stated_unit = _stated_time_unit(exp)
         same_period = stated_unit is None or num.period == stated_unit
         recurring = next((unit for unit, pat in _RECURRING_UNIT if pat.search(el)), None)
-        nl = _pc_norm(num.label or "")
-        num_unit = num.period or next((unit for unit, pat in _RECURRING_UNIT if pat.search(nl)), None)
         same_period = same_period and (recurring is None or num_unit in (None, recurring))
-        same_period = same_period and not _FORECAST_NUM.search(nl)
         base = _den_counts_actuals(dl)
         if same_period and base and _parens_ok(el):
             words = {_singular(w) for w in base.split()}
@@ -2334,15 +2342,22 @@ def _stated_is_the_rate(num: Figure, den: Figure, exp: Figure, computed: float |
         den_unit = written_time_unit(den)
         return den_unit is not None and _stated_time_unit(exp) == den_unit[0]
     if num.unit_kind == MONEY and exp.unit_kind == MONEY and den.unit_kind == COUNT:
-        deals = _DEAL_COUNT_WORD.search(dl) and _den_counts_actuals(_NEW_BUYERS_TAIL.sub("", dl)) is not None
-        pilots = _PILOT_DEN_FULL.fullmatch(dl) and not _PER_CUSTOMER_NUM_FULL.fullmatch(_pc_norm(num.label or ""))
+        # Recurring revenue over a count of deals is today's level over a flow of all time: never a deal size.
+        recurring_num = bool(_PER_CUSTOMER_NUM_FULL.fullmatch(nl) or any(pat.search(nl) for _, pat in _RECURRING_UNIT))
+        deals = (
+            not recurring_num
+            and _DEAL_COUNT_WORD.search(dl)
+            and _den_counts_actuals(_NEW_BUYERS_TAIL.sub("", dl)) is not None
+        )
+        pilots = _PILOT_DEN_FULL.fullmatch(dl) and not _PER_CUSTOMER_NUM_FULL.fullmatch(nl)
         if _deal_size_words_ok(el) and ((deals and _parens_ok(el)) or (pilots and _parens_ok(el, pilot=True))):
             return True
         buyers = _den_counts_actuals(dl) is not None and bool(
             (_CUSTOMER_WORD.search(dl) and not _PILOT_WORD.search(dl) and not _DEAL_WORD.search(dl))
             or _PILOT_DEN_FULL.fullmatch(dl)
         )
-        if buyers and _ACV_NO_PERIOD.fullmatch(el) and _parens_ok(el, pilot=True) and computed is not None:
+        annual = num_unit in (None, "year")
+        if buyers and annual and _ACV_NO_PERIOD.fullmatch(el) and computed is not None:
             return computed < (exp.lo if exp.lo is not None else exp.value)
     return False
 

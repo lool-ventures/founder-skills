@@ -359,6 +359,34 @@ REFUSED.update(
             count("Customers"),
             money("ARR per customer", "$120K", 1.2e5),
         ),
+        "target word before the rate": (ARR, count("Customers"), money("Target ARR per customer", "$120K", 1.2e5)),
+        "target word after a comma": (ARR, count("Customers"), money("ARR per customer, target", "$120K", 1.2e5)),
+        "a year in the stated label": (ARR, count("Customers"), money("ARR per customer in 2027", "$120K", 1.2e5)),
+        "monthly revenue under a period-less ACV": (
+            money("MRR", "$20K", 2e4, period="month"),
+            count("Customers", "4", 4.0),
+            money("ACV", "$65K", 6.5e4),
+        ),
+        "forecast revenue under a period-less ACV": (
+            money("ARR 2027E", "$180K", 1.8e5, period="year"),
+            count("Customers", "4", 4.0),
+            money("ACV", "$65K", 6.5e4),
+        ),
+        "plan bookings over deals": (
+            money("Bookings plan", "$500K", 5e5),
+            count("Deals", "10", 10.0),
+            money("Average deal size", "$65K", 6.5e4),
+        ),
+        "forecast in a time rate": (
+            money("Contract value", "$4M", 4e6),
+            YEARS,
+            money("Value per year (2027E)", "$650K", 6.5e5),
+        ),
+        "recurring revenue over deals": (
+            ARR,
+            count("Deals closed", "40", 40.0),
+            money("Average deal size", "$57K", 5.7e4),
+        ),
         "lost: bare # count": (ARR, count("# Customers"), money("ARR per customer", "$120K", 120_000.0)),
         "lost: combined parenthetical": (
             BOOKINGS,
@@ -384,7 +412,7 @@ def test_a_figure_that_is_not_the_rate_is_refused(case: str) -> None:
     r = run(num, den, exp)
     assert r.verdict == "incomparable", (case, r.verdict, r.reasons)
     # Reached the rate decision, not a refusal from elsewhere.
-    assert "_per_" in (r.computed_unit or "") and "period" not in exp[4], case
+    assert "_per_" in (r.computed_unit or ""), case
     assert r.reasons and (
         r.reasons[-1] == KEPT_REASON or r.reasons[-1].startswith(("a figure per ", "a share or multiple divided by "))
     ), (case, r.reasons)
@@ -408,6 +436,13 @@ def test_lever_forced_open_every_refusal_row_contradicts(case: str, monkeypatch:
     monkeypatch.setattr(reconcile, "_stated_is_the_rate", lambda *a, **k: True)
     r = run(*{**REFUSED, **ALREADY_REFUSED}[case])
     assert r.verdict == "contradiction", (case, r.verdict, r.reasons)
+
+
+@pytest.mark.parametrize("case", sorted(ADMITTED))
+def test_lever_forced_closed_every_admitted_row_is_refused(case: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The admitted rows reach `_stated_is_the_rate`: with it forced closed, none is compared."""
+    monkeypatch.setattr(reconcile, "_stated_is_the_rate", lambda *a, **k: False)
+    assert run(*ADMITTED[case]).verdict == "incomparable", case
 
 
 def test_a_duration_per_count_is_still_refused_for_its_time_unit() -> None:
