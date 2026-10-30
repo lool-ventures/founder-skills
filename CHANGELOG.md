@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.27.1] - 2026-10-31 — Fewer false contradictions in a deck's numbers
+
+### Highlights
+
+**Deck review stops telling founders their numbers contradict when they measure different things.** A figure
+computed from two different units, such as revenue per customer or customers per year, is now compared with a figure
+the deck states without a period only when that figure is the same rate. Before, revenue per customer could be
+reported as contradicting a deal size, an order value, a target or a forecast.
+
+### Fixed
+
+- Deck review compares a computed rate with a stated figure that gives no period only when the figure is that rate:
+  written per the same thing the deck counts ("ARR per paying customer" over paying customers), per the same unit of
+  time, a named rate over what it is named for (ARPU over users, CAC over new customers, ASP over units sold, average
+  order value over orders), an average deal size over a count of closed deals, pilot revenue over paid pilots, or an
+  ACV that revenue per customer comes out below. Every other pair is no longer compared, and the numbers section no
+  longer reports a contradiction for it.
+- A stated target, goal, plan, forecast or future year is never compared with today's figure, wherever the word
+  stands in the label ("Target ARR per customer", "CAC (2027E)", "ARR per customer, target"), and neither is a
+  figure at today's prices ("ACV (current)"). Revenue that is a plan or forecast is not compared either.
+- A rate named after annual recurring revenue is not compared with monthly revenue, nor one named after monthly
+  recurring revenue with annual revenue. An ACV that states no period is compared only with annual revenue.
+- An average deal size is not compared with recurring revenue divided by a count of deals, nor over a pipeline,
+  forecast or to-date count of deals, nor when it names a kind of contract (annual, total, first-year, multi-year,
+  or a segment such as enterprise).
+- A share or multiple divided by a count, a period or an amount is never compared with a stated figure: a percentage
+  over years is a simple average, not the annual rate a deck states.
+
+Some genuine contradictions are no longer checked either, because the same wording also covers figures that do not
+contradict: a bare "Deal size", "Contract value" or ACV over a count of deals, "ARR per customer" over paying or
+active customers, "# Customers" as a count, and a total to date over a count to date.
+
+### Scoring changes
+
+- Deck review: fewer computed rates are compared with figures the deck states without a period, so fewer
+  contradictions and confirmations reach the numbers section and the "numbers are consistent" checklist criterion
+  can pass where it failed before. No criterion, status rule or score formula changes.
+- Cap table, competitive positioning, financial model review, IC simulation and market sizing: none.
+
 ## [0.27.0] - 2026-10-28 — Analysis sub-agents at medium effort, and a deck's revenue per customer checked against its ACV
 
 ### Highlights
