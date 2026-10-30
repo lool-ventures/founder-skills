@@ -6,7 +6,7 @@ contract, so a quotient below the stated ACV is a contradiction and one above it
 floor. The test fires only on the label table in `_per_customer_floor`; every negative here is a
 label, slide or period shape the table must refuse, because a wrong pair tells a founder their deck
 is inconsistent when it is not. An average deal or contract size with no stated period is refused instead
-(`_deal_size_without_period`): never compared, unless the floor already decided or the count is of deals.
+(`_stated_is_the_rate`): never compared, unless the floor already decided or the count is of deals.
 The cases are constructed and the figures synthetic.
 
 Run: uv run pytest founder-skills/tests/test_reconcile_per_customer.py -q

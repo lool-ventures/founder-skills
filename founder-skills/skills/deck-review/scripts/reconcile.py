@@ -2177,15 +2177,20 @@ def _per_customer_floor(num: Figure, den: Figure, exp: Figure, by_id: dict[str, 
     return n == 1
 
 
-# A DEAL OR CONTRACT SIZE WITH NO PERIOD IS NEVER TESTED AGAINST REVENUE PER CUSTOMER. It may be
-# one-off, monthly or multi-year, and revenue per customer above it is normal (a customer holds several
-# deals), so the generic two-sided comparison called both directions a contradiction. Refused, never
-# compared. The rule only ever suppresses, so its lists are wide and checked only where the floor above
-# did not decide: any money over a count of customers, clients, logos or accounts whose label names no
-# deal (total value over a number of deals IS the average deal size, a real identity), or a recurring
-# revenue over paid pilots (pilot revenue over pilots is one deal each). A period-less ACV the floor
-# did not take is refused the same way, but only when revenue per customer is at or above it: below
-# it keeps the comparison it had. Residual: a label outside the lists keeps the two-sided comparison.
+# A RATE IS COMPARED WITH A BARE FIGURE ONLY WHEN THE FIGURE IS THAT RATE. A cross-unit ratio's unit is
+# "<numerator kind>_per_<denominator kind>", and the generic comparison below used to admit it against any
+# figure of the numerator's kind that states no period, two-sided: money per customer was tested for
+# equality against a deal size, an order value, a target ACV, whatever the figure measured, and both
+# directions were called a contradiction. `_stated_is_the_rate` is an ADMISSION list, never a refusal list,
+# and the asymmetry is the point: an entry missing here loses a check, which is this module's chosen
+# failure, while an entry missing from a refusal list reports a false contradiction. Every admission is a
+# subset of what the generic arm took before, so nothing new can be compared.
+#
+# Admitted: a stated figure written per the denominator's own words ("ARR per paying customer" over
+# "Paying customers"), a time rate written in the denominator's time unit, a closed table of named rates
+# (ARPU, CAC, ASP, ...), an average deal size over a count of deals, pilot revenue over paid pilots, and a
+# period-less ACV that revenue per buyer falls below. A share or multiple divided by anything is never a
+# rate a stated figure gives (a percent over years is a simple average; compounding is `compound_growth`).
 _DEAL_SIZE_NO_PERIOD = re.compile(
     r"(average|avg\.?|mean|median|typical)( [a-z0-9-]+){0,2} (contract|deal)( size| value)?( \([^()]{1,30}\))?"
 )
@@ -2196,24 +2201,126 @@ _DEAL_WORD = re.compile(
     r"\b(deals?|(?<!under )contracts?|orders?|bookings?|transactions?|invoices?|sales"
     r"|subscriptions?|seats?|licen[cs]es?)\b"
 )
+# One deal each: seats, licences, subscriptions and sales are not, so they are left out of (4).
+_DEAL_COUNT_WORD = re.compile(r"\b(deals?|(?<!under )contracts?|orders?|bookings?|transactions?|invoices?)\b")
 _PILOT_DEN_FULL = re.compile(r"paid pilots?|pilots? converted( to paid)?|converted pilots?|paying pilots?")
+# The one set of written time units a stated rate is read with. Not `time_unit()`, which also reads minutes,
+# hours and seconds.
+_RATE_TIME_UNITS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("year", re.compile(r"per year|/yr\b|/year|\bannual(ly)?\b|\byearly\b|per annum")),
+    ("quarter", re.compile(r"per quarter|/qtr\b|/quarter|\bquarterly\b")),
+    ("month", re.compile(r"per month|/mo\b|/month|\bmonthly\b")),
+    ("week", re.compile(r"per week|/wk\b|/week|\bweekly\b")),
+    ("day", re.compile(r"per day|/day\b|\bdaily\b")),
+)
+# A count that is not yet, or not wholly, actual buyers or heads: a forecast, a goal, a pipeline or a dated
+# snapshot. Read on the whole label before anything is dropped, so a comma cannot hide one.
+_NOT_ACTUALS = re.compile(
+    r"\b(target|projected|forecast|planned|expected|pipeline|prospective|potential|addressable|m\d+|(19|20)\d\d|\d+e)\b"
+)
+_COUNT_LEAD = re.compile(r"^(total number of|number of|# of) ")
+_COUNT_COMMA_UNIT = re.compile(r", (fte|headcount|total|count|#)$")
+_DEN_TAIL = re.compile(r"\(| in | of | with | under | from | at |\bper\b|/")
+_PER_PHRASE = re.compile(
+    r"(?:\bper |/|\beach )([a-z0-9][a-z0-9 -]*?)(?=$|,|\(| in | of | with | under | from | at | per |/)"
+)
+_RATE_QUALIFIERS = r"(blended|average|avg|fully-loaded|current)"
+_RATE_QUALIFIERS_CEILING = r"(blended|average|avg|fully-loaded|current|budget|target|max|maximum)"
+# CLOSED: a named rate the stated figure may carry, and the denominator words it is a rate over. "Paid CAC"
+# is absent on purpose: paid-channel spend over paid-acquired customers is another quantity.
+_NAMED_RATES: tuple[tuple[str, re.Pattern[str]], ...] = (
+    (r"arpu|average revenue per user", re.compile(r"\busers?\b")),
+    (r"arpa", re.compile(r"\baccounts?\b")),
+    (r"arpc", re.compile(r"\bcustomers?\b")),
+    (r"arppu", re.compile(r"\bpaying users?\b")),
+    (
+        r"cac|customer acquisition cost|cpa|cost per acquisition",
+        re.compile(r"\b(customers?|clients?|users?|logos?|accounts?|acquisitions?)\b"),
+    ),
+    (r"asp|average selling price", re.compile(r"\bunits?\b")),
+    (r"aov|average order value", re.compile(r"\borders?\b")),
+)
+_NO_PERIOD_DEAL_REASON = "a deal or contract size with no stated period cannot be tested against revenue per customer"
 
 
-def _deal_size_without_period(num: Figure, den: Figure, exp: Figure, computed: float | None) -> bool:
-    if not (num.unit_kind == "money" and den.unit_kind == "count" and exp.unit_kind == "money"):
+def _singular(word: str) -> str:
+    w = word.lower()
+    if w == "people":
+        return "person"
+    if w.endswith("ies"):
+        return w[:-3] + "y"
+    if w.endswith(("sses", "xes", "ches", "shes")):
+        return w[:-2]
+    if w.endswith("s") and not w.endswith("ss"):
+        return w[:-1]
+    return w
+
+
+def _den_counts_actuals(den_label: str) -> str | None:
+    """The denominator's label with its count words only, or None when it counts a forecast, a subset or a rate."""
+    if _NOT_ACTUALS.search(den_label):
+        return None
+    base = _COUNT_COMMA_UNIT.sub("", _COUNT_LEAD.sub("", den_label.strip()))
+    if "," in base or _DEN_TAIL.search(f" {base} "):
+        return None
+    return base or None
+
+
+def _stated_time_unit(exp: Figure) -> str | None:
+    text = f"{_pc_norm(exp.label or '')} {(exp.raw or '').lower()}"
+    return next((unit for unit, pat in _RATE_TIME_UNITS if pat.search(text)), None)
+
+
+def _stated_is_the_rate(num: Figure, den: Figure, exp: Figure, computed: float | None, *, ceiling: bool) -> bool:
+    if num.unit_kind in (PERCENT, MULTIPLE):
         return False
-    if exp.period is not None:
-        return False
-    el = _pc_norm(exp.label or "")
-    if _ACV_NO_PERIOD.fullmatch(el):
-        if computed is None or computed < (exp.lo if exp.lo is not None else exp.value):
-            return False
-    elif not _DEAL_SIZE_NO_PERIOD.fullmatch(el):
-        return False
-    dl = _pc_norm(den.label or "")
-    if _CUSTOMER_WORD.search(dl) and not _PILOT_WORD.search(dl) and not _DEAL_WORD.search(dl):
-        return True
-    return bool(_PILOT_DEN_FULL.fullmatch(dl) and _PER_CUSTOMER_NUM_FULL.fullmatch(_pc_norm(num.label or "")))
+    el, dl = _pc_norm(exp.label or ""), _pc_norm(den.label or "")
+    if den.unit_kind == COUNT:
+        stated_unit = _stated_time_unit(exp)
+        same_period = stated_unit is None or num.period == stated_unit
+        base = _den_counts_actuals(dl)
+        if same_period and base:
+            words = {_singular(w) for w in base.split()}
+            for text in (el, (exp.raw or "").lower()):
+                if any({_singular(w) for w in m.group(1).split()} == words for m in _PER_PHRASE.finditer(text)):
+                    return True
+            q = _RATE_QUALIFIERS_CEILING if ceiling else _RATE_QUALIFIERS
+            for name, den_words in _NAMED_RATES:
+                if re.fullmatch(rf"({q} ){{0,2}}({name})( {q}){{0,2}}( \([^()]*\))?", el) and den_words.search(dl):
+                    return True
+    if den.unit_kind == DURATION and num.unit_kind in (MONEY, COUNT):
+        den_unit = written_time_unit(den)
+        return den_unit is not None and _stated_time_unit(exp) == den_unit[0]
+    if num.unit_kind == MONEY and exp.unit_kind == MONEY and den.unit_kind == COUNT:
+        if _DEAL_SIZE_NO_PERIOD.fullmatch(el) and (
+            _DEAL_COUNT_WORD.search(dl)
+            or (_PILOT_DEN_FULL.fullmatch(dl) and not _PER_CUSTOMER_NUM_FULL.fullmatch(_pc_norm(num.label or "")))
+        ):
+            return True
+        buyers = _den_counts_actuals(dl) is not None and bool(
+            (_CUSTOMER_WORD.search(dl) and not _PILOT_WORD.search(dl) and not _DEAL_WORD.search(dl))
+            or _PILOT_DEN_FULL.fullmatch(dl)
+        )
+        if buyers and _ACV_NO_PERIOD.fullmatch(el) and computed is not None:
+            return computed < (exp.lo if exp.lo is not None else exp.value)
+    return False
+
+
+def _rate_refusal(num: Figure, den: Figure, exp: Figure) -> str:
+    """Why a rate was not tested against a bare figure, in the founder's words."""
+    if num.unit_kind in (PERCENT, MULTIPLE):
+        return (
+            f"a share or multiple divided by {_denominator_noun(den)} is a simple average, not a rate {exp.raw} states"
+        )
+    if num.unit_kind == MONEY and den.unit_kind == COUNT and exp.unit_kind == MONEY:
+        el, dl = _pc_norm(exp.label or ""), _pc_norm(den.label or "")
+        if _ACV_NO_PERIOD.fullmatch(el) or _DEAL_SIZE_NO_PERIOD.fullmatch(el):
+            if _CUSTOMER_WORD.search(dl) and not _PILOT_WORD.search(dl) and not _DEAL_WORD.search(dl):
+                return _NO_PERIOD_DEAL_REASON
+            if _PILOT_DEN_FULL.fullmatch(dl) and _PER_CUSTOMER_NUM_FULL.fullmatch(_pc_norm(num.label or "")):
+                return _NO_PERIOD_DEAL_REASON
+    noun = _denominator_noun(den)
+    return f"a figure per {noun} cannot be tested against {exp.raw}, which is not stated per {noun}"
 
 
 def _known_reciprocals(a: str, b: str) -> bool:
@@ -2926,17 +3033,6 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
                 return r
             per_unit_floor = True
             comparable = r.computed
-        elif (
-            r.operator == "ratio"
-            and len(real) == 2
-            and cu == "money_per_count"
-            and _deal_size_without_period(real[0], real[1], exp, r.computed)
-        ):
-            r.verdict = "incomparable"
-            r.reasons.append(
-                "a deal or contract size with no stated period cannot be tested against revenue per customer"
-            )
-            return r
         # A DURATION IS COMPARED IN THE STATED FIGURE'S OWN WRITTEN UNIT. The magnitude lives
         # in `value` and the unit only in the raw string, and the old gate compared the bare
         # magnitudes -- so a cash / monthly burn of 30.0 months contradicted a stated "2.5
@@ -2963,7 +3059,21 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
             # basis agree by construction -- so the bare percent compares directly. The
             # `:period` the stated side carries names the rate's basis, not a unit to convert.
             comparable = r.computed
-        elif cu == exp_unit or (cu.startswith(exp.unit_kind) and not exp.period):
+        elif cu == exp_unit:
+            comparable = r.computed
+        elif cu.startswith(exp.unit_kind) and not exp.period:
+            # A rate against a bare figure: only when the figure is that rate (`_stated_is_the_rate`).
+            if "_per_" in cu and not (
+                len(real) == 2
+                and _stated_is_the_rate(
+                    real[0], real[1], exp, r.computed, ceiling=relation == "at_most" or exp.bound == "at_most"
+                )
+            ):
+                r.verdict = "incomparable"
+                r.reasons.append(
+                    _rate_refusal(real[0], real[1], exp) if len(real) == 2 else f"cannot test against {exp.raw}"
+                )
+                return r
             comparable = r.computed
         elif cu == "dimensionless" and exp.unit_kind == PERCENT and _is_reduction(exp):
             # A REDUCTION AND A REMAINING RATIO ARE NOT THE SAME QUANTITY. They are
