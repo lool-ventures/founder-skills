@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.27.2] - 2026-10-31 — Fewer false contradictions in a deck's numbers, and a founder's own file names
+
+### Highlights
+
+**Deck review no longer compares figures that measure different kinds of money.** Spending per employee is no longer
+checked against revenue per employee, and cash per customer is no longer checked against revenue per customer. A
+count of all customers is no longer used as the basis for an acquisition cost.
+
+**Competitive positioning and market sizing stop treating a founder's own `.md` or `.json` document as one of our
+files.** Before, an uploaded `notes.md` named in the report could stop competitive positioning's report from being
+delivered.
+
+### Fixed
+
+- Deck review no longer compares a rate over a count with a stated figure of another kind of money: spending, payroll
+  or burn per employee against revenue per employee, cash or funding per customer against ARPC or ARPA, revenue per
+  customer against a cost per customer, gross profit per unit against an average selling price, operating costs per
+  order against an average order value, or burn per deal against an average deal size. A label that names two kinds of
+  money, or none, is compared as before. The numbers section says which two kinds differ.
+- Customer acquisition cost is no longer compared with spending over the whole customer base ("Total customers",
+  "Paying customers", "Active users"). A count marked new ("New paying customers", "Net new logos") is still compared.
+- ARPU, ARPA, ARPC and ARPPU that state no period ("$60K", not "$5K/mo") are no longer compared with revenue whose
+  period is known, such as annual recurring revenue over users: the deck may mean a monthly figure.
+- An ACV that states no period is compared only with revenue per paying customer, client, logo or account, or per paid
+  pilot. A bare "Customers", "Logos" or "Accounts" may include free, trial or churned accounts.
+- Competitive positioning's delivery check, its checklist evidence, both of its pages and its report warnings, and
+  market sizing's report warnings, no longer treat the names of this run's uploaded documents as internal file names.
+  A document named like one of our own files is never exempted, and no upload can hide a mention of ours.
+
+Some genuine contradictions are no longer checked either: a CAC over a count of the whole base, where the deck meant
+its new customers; and a period-less ACV is no longer compared over
+"Signed customers", "Contracted customers" or a paying segment such as "Paying enterprise customers". Revenue over
+users is still compared with an ARPU when neither states a period, and the ARPU check covers the short names
+(ARPU, ARPA, ARPC, ARPPU), not "Average revenue per customer" written out. A founder's `.md` or `.json` upload is still
+flagged when the outside review did not run, because the run then holds no list of the documents.
+
+### Scoring changes
+
+- Deck review: fewer computed rates are compared with figures the deck states without a period, so fewer
+  contradictions and confirmations reach the numbers section and the "numbers are consistent" checklist criterion
+  can pass where it failed before. No criterion, status rule or score formula changes.
+- Cap table, competitive positioning, financial model review, IC simulation and market sizing: none.
+
 ## [0.27.1] - 2026-10-31 — Fewer false contradictions in a deck's numbers
 
 ### Highlights
