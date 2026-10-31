@@ -86,6 +86,18 @@ def _upload_names_for(dir_path: str, artifacts: dict[str, Any]) -> dict[str, str
         return {}
 
 
+def _founder_names_for(dir_path: str, artifacts: dict[str, Any]) -> frozenset[str]:
+    """This page's run's documents by every name the founder may see (`_cp_redteam_copy.founder_document_names`);
+    empty when it cannot be told."""
+    try:
+        import _cp_redteam_copy
+
+        run_id = _cp_redteam_copy.primary_run_id_in(dir_path, artifacts, REQUIRED_ARTIFACTS)
+        return _cp_redteam_copy.founder_document_names(dir_path, run_id)
+    except Exception:  # noqa: BLE001 - an exemption that cannot be read is no exemption
+        return frozenset()
+
+
 def _humanized(data: Any, upload_names: dict[str, str]) -> Any:
     """`data` with the founder's file names as uploaded; a missing or corrupt artifact stays what it was."""
     if not upload_names or data is None or data is _CORRUPT:
@@ -471,7 +483,7 @@ def _header(
     )
 
 
-def _checklist_section(checklist: dict[str, Any] | None) -> str:
+def _checklist_section(checklist: dict[str, Any] | None, keep_files: frozenset[str] = frozenset()) -> str:
     """The analysis checklist, server-rendered outside the tab panels (visible with scripts off) and never in
     `DATA`: the same rows report.md and report.html show."""
     import _cp_view
@@ -479,7 +491,7 @@ def _checklist_section(checklist: dict[str, Any] | None) -> str:
 
     if not _usable(checklist):
         return ""
-    groups = _cp_view.checklist_groups(checklist)
+    groups = _cp_view.checklist_groups(checklist, keep_files=keep_files)
     if not groups:
         return ""
     return (
@@ -506,9 +518,9 @@ def compose_explorer(dir_path: str) -> str:
     # embedded in DATA: the page's script has no use for it.
     import _cp_view
 
-    upload_names = _upload_names_for(
-        dir_path, {name: _load_artifact(dir_path, name) for name in REQUIRED_ARTIFACTS + OPTIONAL_ARTIFACTS}
-    )
+    _raw = {name: _load_artifact(dir_path, name) for name in REQUIRED_ARTIFACTS + OPTIONAL_ARTIFACTS}
+    upload_names = _upload_names_for(dir_path, _raw)
+    founder_docs = _founder_names_for(dir_path, _raw)
     report = _humanized(_load_artifact(dir_path, "report.json"), upload_names)
     moat_scores = _humanized(_load_artifact(dir_path, "moat_scores.json"), upload_names)
     checklist = _humanized(_load_artifact(dir_path, "checklist.json"), upload_names)
@@ -516,7 +528,7 @@ def compose_explorer(dir_path: str) -> str:
         report, _humanized(_load_artifact(dir_path, "positioning_scores.json"), upload_names), moat_scores
     )
     header = _header(report, moat_scores, checklist, verdict_text, payload["company_name"])
-    checklist_section = _checklist_section(checklist)
+    checklist_section = _checklist_section(checklist, founder_docs)
     checklist_tab = '  <a class="tab" href="#checklist">Checklist</a>\n' if checklist_section else ""
 
     # Build legend bar

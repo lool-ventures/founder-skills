@@ -125,8 +125,9 @@ _OPTIONAL = [
 ]
 
 
-def _internal_files_in(text: str) -> list[str]:
-    """Internal artifact/script filenames present in founder-facing text.
+def _internal_files_in(text: str, keep_files: frozenset[str] = frozenset()) -> list[str]:
+    """Internal artifact/script filenames present in founder-facing text, never one of this run's documents
+    (`keep_files`, from `_founder_names`).
 
     Returns [] when the shared founder-text policy is unavailable: a missing policy must never fail a
     review that is otherwise complete.
@@ -138,7 +139,7 @@ def _internal_files_in(text: str) -> list[str]:
         import _founder_text  # type: ignore[import-not-found]
     except ImportError:
         return []
-    found: list[str] = _founder_text.scan(text)["filenames"]
+    found: list[str] = _founder_text.scan(text, keep_files=keep_files)["filenames"]
     return found
 
 
@@ -259,7 +260,9 @@ def _page_text(page_html: str) -> str:
     return " ".join(parser.parts)
 
 
-def _check_page_text(artifacts: dict[str, dict[str, Any]]) -> list[dict[str, str]]:
+def _check_page_text(
+    artifacts: dict[str, dict[str, Any]], keep_files: frozenset[str] = frozenset()
+) -> list[dict[str, str]]:
     """The two pages' text names no internal file and no criterion id. A WARNING, not an error: a measurement
     of the sections the checklist's drop step does not clean (moat evidence, the outside review's findings,
     competitor descriptions, the explorer's rationales); it is promoted only once each is measured clean or
@@ -270,7 +273,7 @@ def _check_page_text(artifacts: dict[str, dict[str, Any]]) -> list[dict[str, str
         if not raw:
             continue
         text = _page_text(raw)
-        for name in _internal_files_in(text):
+        for name in _internal_files_in(text, keep_files):
             issues.append(_issue("warning", f"{page} shows the internal file '{name}' — the founder never saw it"))
         for m in sorted(set(_CRITERION_ID_RE.findall(text))):
             issues.append(
@@ -279,7 +282,9 @@ def _check_page_text(artifacts: dict[str, dict[str, Any]]) -> list[dict[str, str
     return issues
 
 
-def _check_rendered(artifacts: dict[str, dict[str, Any]], gate: int) -> list[dict[str, str]]:
+def _check_rendered(
+    artifacts: dict[str, dict[str, Any]], gate: int, keep_files: frozenset[str] = frozenset()
+) -> list[dict[str, str]]:
     """The deliverable must SHOW what the artifacts contain, and nothing internal."""
     issues: list[dict[str, str]] = []
     if gate < 2:
@@ -357,7 +362,7 @@ def _check_rendered(artifacts: dict[str, dict[str, Any]], gate: int) -> list[dic
     # `inputs.json` in ten items' evidence. Delegated to the shared policy so "internal" means one thing
     # fleet-wide, and so a founder's OWN uploaded filename is never flagged — naming their file back to
     # them is useful.
-    for name in _internal_files_in(report_md):
+    for name in _internal_files_in(report_md, keep_files):
         issues.append(
             _issue(
                 "error",
@@ -561,7 +566,9 @@ def _check_rendered(artifacts: dict[str, dict[str, Any]], gate: int) -> list[dic
 # ---------------------------------------------------------------------------
 
 
-def _check_cross(artifacts: dict[str, dict[str, Any]]) -> list[dict[str, str]]:
+def _check_cross(
+    artifacts: dict[str, dict[str, Any]], keep_files: frozenset[str] = frozenset()
+) -> list[dict[str, str]]:
     issues: list[dict[str, str]] = []
     landscape = _as_dict(artifacts.get("landscape.json", {}).get("_data"))
     ps = _as_dict(artifacts.get("positioning_scores.json", {}).get("_data"))
@@ -583,7 +590,7 @@ def _check_cross(artifacts: dict[str, dict[str, Any]]) -> list[dict[str, str]]:
         _ev = _item.get("evidence")
         if not isinstance(_ev, str):
             continue
-        for _name in _internal_files_in(_ev):
+        for _name in _internal_files_in(_ev, keep_files):
             issues.append(
                 _issue(
                     "warning",
@@ -687,10 +694,27 @@ def _check_cross(artifacts: dict[str, dict[str, Any]]) -> list[dict[str, str]]:
 # ---------------------------------------------------------------------------
 
 
+def _founder_names(dir_path: str, artifacts: dict[str, dict[str, Any]]) -> frozenset[str]:
+    """This run's documents by every name the founder may see, read as compose reads them: the run is the id
+    most of the required artifacts carry. Empty when it cannot be told, so every name is checked as before."""
+    try:
+        here = os.path.dirname(os.path.abspath(__file__))
+        if here not in sys.path:
+            sys.path.append(here)
+        import _cp_redteam_copy
+
+        loaded = {name: entry.get("_data") for name, entry in artifacts.items()}
+        run_id = _cp_redteam_copy.primary_run_id_in(dir_path, loaded, _ALWAYS_REQUIRED)
+        return _cp_redteam_copy.founder_document_names(dir_path, run_id)
+    except Exception:  # noqa: BLE001 - an exemption that cannot be read is no exemption
+        return frozenset()
+
+
 def verify(dir_path: str, gate: int = 2) -> dict[str, Any]:
     artifacts = _check_existence(dir_path, gate)
-    rendered = _check_rendered(artifacts, gate) + (_check_page_text(artifacts) if gate >= 2 else [])
-    cross = _check_cross(artifacts)
+    keep = _founder_names(dir_path, artifacts)
+    rendered = _check_rendered(artifacts, gate, keep) + (_check_page_text(artifacts, keep) if gate >= 2 else [])
+    cross = _check_cross(artifacts, keep)
 
     errors: list[str] = []
     warnings: list[str] = []

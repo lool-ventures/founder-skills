@@ -92,6 +92,18 @@ def _upload_names_for(dir_path: str, artifacts: dict[str, Any]) -> dict[str, str
         return {}
 
 
+def _founder_names_for(dir_path: str, artifacts: dict[str, Any]) -> frozenset[str]:
+    """This page's run's documents by every name the founder may see (`_cp_redteam_copy.founder_document_names`);
+    empty when it cannot be told."""
+    try:
+        import _cp_redteam_copy
+
+        run_id = _cp_redteam_copy.primary_run_id_in(dir_path, artifacts, REQUIRED_ARTIFACTS)
+        return _cp_redteam_copy.founder_document_names(dir_path, run_id)
+    except Exception:  # noqa: BLE001 - an exemption that cannot be read is no exemption
+        return frozenset()
+
+
 def _humanized(data: Any, upload_names: dict[str, str]) -> Any:
     """`data` with the founder's file names as uploaded; a missing or corrupt artifact stays what it was."""
     if not upload_names or data is None or data is _CORRUPT:
@@ -1363,6 +1375,7 @@ def compose_html(dir_path: str) -> str:
         artifacts[name] = _load_artifact(dir_path, name)
     # Every string the page shows, with the founder's file names as uploaded (`_upload_names_for`).
     upload_names = _upload_names_for(dir_path, artifacts)
+    founder_docs = _founder_names_for(dir_path, artifacts)
     artifacts = {name: _humanized(data, upload_names) for name, data in artifacts.items()}
 
     landscape = artifacts.get("landscape.json")
@@ -1446,7 +1459,7 @@ def compose_html(dir_path: str) -> str:
         ("proof", "Proof gaps", "What Is Shown and What Is Claimed", proof_gap),
         ("competitors", "Competitors", "Competitor Comparison", comp_table),
         ("timeline", "Timeline", "Defensibility Timeline", timeline),
-        ("checklist", "Checklist", "Analysis Checklist", _section_checklist(checklist)),
+        ("checklist", "Checklist", "Analysis Checklist", _section_checklist(checklist, founder_docs)),
     ]
     sections = [row for row in sections if row[3].strip()]
     nav = (
@@ -1472,14 +1485,14 @@ def compose_html(dir_path: str) -> str:
     )
 
 
-def _section_checklist(checklist: dict[str, Any] | None) -> str:
+def _section_checklist(checklist: dict[str, Any] | None, keep_files: frozenset[str] = frozenset()) -> str:
     """Every criterion of the analysis checklist, as report.md lists it (`_cp_view.checklist_groups`)."""
     import _cp_view
     import _ui
 
     if not _usable(checklist):
         return ""
-    groups = _cp_view.checklist_groups(checklist)
+    groups = _cp_view.checklist_groups(checklist, keep_files=keep_files)
     if not groups:
         return ""
     return _ui.checklist(groups, summary_html=_esc(_CHECKLIST_SUMMARY))

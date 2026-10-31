@@ -2038,13 +2038,17 @@ def _md_inert(text: str) -> str:
     return text.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]").replace("`", "\\`")
 
 
-def _section_checklist(checklist: dict[str, Any] | None, upload_names: dict[str, str] | None = None) -> str:
+def _section_checklist(
+    checklist: dict[str, Any] | None,
+    upload_names: dict[str, str] | None = None,
+    keep_files: frozenset[str] = frozenset(),
+) -> str:
     """Every criterion of the analysis checklist, per category: its result and the assessor's evidence, through
     `_cp_view.criterion_text` (ids to labels, no sentence naming a file of ours, the founder's file names as
     uploaded). The pages show the same rows."""
     if checklist is None or _is_stub(checklist):
         return ""
-    groups = _view.checklist_groups(checklist, upload_names)
+    groups = _view.checklist_groups(checklist, upload_names, keep_files)
     if not groups:
         return ""
     lines = ["## Analysis Checklist\n"]
@@ -2234,6 +2238,8 @@ def compose(dir_path: str, report_path: str | None = None, no_ask: bool = False)
     _rt_run_id = _cp_redteam_copy.primary_run_id_in(dir_path, artifacts, REQUIRED_ARTIFACTS)
     # The founder's file names as uploaded, not as a cloud session stored them (`<8-hex>-name`).
     _upload_display = _cp_redteam_copy.upload_display(dir_path, _rt_run_id)
+    # This run's documents by every name the founder may see: the founder-text scan never calls one ours.
+    _founder_docs = _cp_redteam_copy.founder_document_names(dir_path, _rt_run_id)
     _rt_shown, _rt_codes, _rt_facts = _cp_redteam_copy.resolve(
         dir_path,
         _rt_run_id,
@@ -2373,7 +2379,7 @@ def compose(dir_path: str, report_path: str | None = None, no_ask: bool = False)
         ),
         _section_stress_test(positioning_scores),
         _section_key_findings(positioning_scores, moat_scores, checklist, name_by_slug),
-        _section_checklist(checklist, _upload_display),
+        _section_checklist(checklist, _upload_display, _founder_docs),
     ]
 
     report_markdown = "\n".join(s for s in sections if s)
@@ -2435,7 +2441,7 @@ def compose(dir_path: str, report_path: str | None = None, no_ask: bool = False)
         # caught by the skill's own gate, not by widening this scan into a false positive.
         # The same pass over the verdict alone, so the pages and the hand-over match report.md.
         verdict_text = _ft.substitute(verdict_text) if verdict_text else verdict_text
-        found = _ft.scan(report_markdown, extra_keep=frozenset(WARNING_SEVERITY))
+        found = _ft.scan(report_markdown, extra_keep=frozenset(WARNING_SEVERITY), keep_files=_founder_docs)
         for token in found["enums"]:
             warnings.append(
                 _warn(

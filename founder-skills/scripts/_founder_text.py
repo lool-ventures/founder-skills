@@ -32,6 +32,7 @@ The test is whether the founder can ACT on the token. An identifier is a key; an
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 
 # ---------------------------------------------------------------------------
 # Type 3 + 4 — keep verbatim. Matched BEFORE humanization so nothing rewrites them.
@@ -296,6 +297,152 @@ def _is_internal_file(token: str) -> bool:
     return ext in _INTERNAL_FILE_EXTS and ext not in _FOUNDER_FILE_EXTS
 
 
+# A FOUNDER'S OWN .md / .json DOCUMENT IS NOT ONE OF OUR FILES. The extension rule above calls every
+# `.json` and `.md` ours, so a founder who uploaded `notes.md` or `customer_list.json` and saw it named back
+# was told our report leaked an internal file. A caller that knows this run's document names passes them to
+# `scan(keep_files=...)`; each is blanked before the scan, as written, at filename boundaries only, so a kept
+# `scores.json` never hides our `moat_scores.json` and a kept `notes.md` never hides `xnotes.md`.
+#
+# A name is never kept when the token the scan would report for it is one of OUR names: an upload called
+# `report.md` (or `My Report.md`, or `my-report.md`, which the scan reads as `report.md`) cannot shield a
+# mention of ours. Conservative on purpose: such an upload is flagged as before.
+#
+# The names below are every artifact, page and hand-off file the skills write. A test derives the artifact
+# constants of each skill and both review-wording tables and asserts they are here; a hand-off file added later
+# without joining HANDOFF_FILE_NAMES or matching a suffix rule is not caught (a stated limit).
+HANDOFF_FILE_NAMES: frozenset[str] = frozenset(
+    {
+        "coaching.released.json",
+        "coaching.checked.json",
+        "coaching.md.pool-check.json",
+        "unit_rejections.json",
+        "recall_input.json",
+        "coaching_payload.json",
+        "slide_reviews.json",
+        "figures.json",
+        "run_ref.json",
+        "gates.json",
+        "run_status.json",
+        "compose_result.json",
+    }
+)
+OUR_OUTPUT_NAMES: frozenset[str] = HANDOFF_FILE_NAMES | frozenset(
+    {
+        # Pages and reports, every skill.
+        "report.md",
+        "report.json",
+        "report.html",
+        "explore.html",
+        "explorer.html",
+        "review.html",
+        "inputs_review.html",
+        "report_fast_assess.md",
+        "report_extraction_only.md",
+        "coaching.md",
+        "deck_text.md",
+        "redteam.json",
+        "red_team_skip.json",
+        "commentary.json",
+        "coaching_commentary.json",
+        "receipt.json",
+        # competitive-positioning
+        "checklist.json",
+        "competitor_verification.json",
+        "landscape.json",
+        "landscape_draft.json",
+        "moat_scores.json",
+        "positioning.json",
+        "positioning_scores.json",
+        "product_profile.json",
+        "startup_research.json",
+        # market-sizing
+        "inputs.json",
+        "methodology.json",
+        "validation.json",
+        "sizing.json",
+        "sensitivity.json",
+        "sizing_redo.json",
+        "sizing_research_at_print.json",
+        "revision_answer.json",
+        # deck-review
+        "deck_inventory.json",
+        "stage_profile.json",
+        "reconciliation.json",
+        "ledger.json",
+        "ocr_check.json",
+        "second_read.json",
+        "gate_state.json",
+        # financial-model-review
+        "unit_economics.json",
+        "runway.json",
+        "model_data.json",
+        "extraction_corrections.json",
+        "corrected_inputs.json",
+        "corrections.json",
+        "extraction_validation.json",
+        # ic-sim
+        "startup_profile.json",
+        "fund_profile.json",
+        "conflict_check.json",
+        "discussion.json",
+        "score_dimensions.json",
+        "prior_artifacts.json",
+        "partner_assessment_visionary.json",
+        "partner_assessment_operator.json",
+        "partner_assessment_analyst.json",
+        "partner_rebuttal_visionary.json",
+        "partner_rebuttal_operator.json",
+        "partner_rebuttal_analyst.json",
+        # cap-table
+        "instruments.json",
+        "cap_state.json",
+        "scenarios.json",
+        "rule_audit.json",
+        "counsel_packet.json",
+        "counsel_packet.md",
+        "extraction_audit.json",
+        "extraction_pending.json",
+        "coverage_result.json",
+        "coverage_disclosure.json",
+        "coverage.json",
+        "sweep.json",
+        "scenario.json",
+        "fast_assess_only.json",
+        "extraction_only.json",
+    }
+)
+# Pattern-named hand-off files: every sub-agent's `<context>_output.json`, a gate record, a review round, a
+# producer's first copy, a rejected-artifact sidecar and a schema.
+_OUR_NAME_PATTERN = re.compile(
+    r"[a-z0-9_.]+(?:_output\.json|\.gate\.json|\.first\.json|\.rejected\.json|\.schema\.json)|redteam\.r\d+\.json"
+)
+
+
+def is_our_output_name(token: str) -> bool:
+    """True when a file-shaped token (as `scan` reports it) is one of the files the skills write."""
+    t = token.casefold()
+    return t in OUR_OUTPUT_NAMES or bool(_OUR_NAME_PATTERN.fullmatch(t))
+
+
+def _kept_file_names(keep_files: Iterable[str]) -> list[str]:
+    """The names a caller asked to keep, minus every one the scan would report as one of ours; longest first."""
+    out: set[str] = set()
+    for name in keep_files:
+        if not isinstance(name, str) or not name.strip():
+            continue
+        if any(is_our_output_name(m.group(0)) for m in _FILENAME_RE.finditer(name.casefold())):
+            continue
+        out.add(name)
+    return sorted(out, key=lambda n: (-len(n), n))
+
+
+def blank_kept_files(text: str, keep_files: Iterable[str]) -> str:
+    """`text` with each kept document name blanked, as written, where it stands as a whole filename."""
+    for name in _kept_file_names(keep_files):
+        text = re.sub(rf"(?<![A-Za-z0-9_.]){re.escape(name)}(?![A-Za-z0-9_])", lambda m: " " * len(m.group(0)), text)
+    return text
+
+
 # ALLCAPS internal tokens — a class the lowercase rule above is blind to by construction.
 #
 # `_CANDIDATE_RE` is lowercase-only so it does not flag every English word. That deliberate choice made
@@ -430,7 +577,11 @@ def _blank_ranges(text: str, ranges: list[tuple[int, int]]) -> str:
 
 
 def scan(
-    text: str, *, extra_keep: frozenset[str] | None = None, protect_code_spans: bool = False
+    text: str,
+    *,
+    extra_keep: frozenset[str] | None = None,
+    protect_code_spans: bool = False,
+    keep_files: Iterable[str] = (),
 ) -> dict[str, list[str]]:
     """Find founder-facing text that violates the policy.
 
@@ -443,9 +594,13 @@ def scan(
 
     Matches the TOKEN, never its surrounding markdown: a shape regex keyed on `**Label:** value` does
     not survive the fleet's differing report dialects (`**Label**: value` and others).
+
+    `keep_files` names this run's own documents (see `blank_kept_files`): none of them is reported.
     """
     keep = (extra_keep or frozenset()) | DIAGNOSTIC_CODES
     text = _INSERTION_MARKER_RE.sub(" ", text)
+    if keep_files:
+        text = blank_kept_files(text, keep_files)
     # A code span is the author marking a literal. `substitute` (below) leaves those alone under the
     # same flag, so reporting them here would warn about text the policy deliberately preserved.
     if protect_code_spans:

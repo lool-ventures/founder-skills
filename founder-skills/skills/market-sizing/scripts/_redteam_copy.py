@@ -196,3 +196,36 @@ def rewritten_inputs(before: dict[str, Any], inputs: Any) -> list[tuple[str, dic
         if was != is_:
             out.append((field, was, is_))
     return out
+
+
+def founder_document_names(analysis_dir: str, run_id: str | None, redteam: Any) -> frozenset[str]:
+    """This run's documents by every name the founder may see: as stored and as uploaded. Passed to the
+    founder-text scan as `keep_files`, so a founder's own `notes.md` is not called one of our files (the scan
+    never keeps a name of ours, which the review's list of files it read also carries). The names are those
+    `redteam.json` gives when it is this run's review, this run's review copies, and every file in this run's
+    document mirror (`handoff/<run_id>/docs`). Empty with no run id or on any error: the scan then flags as
+    before, never less. A run whose review never ran has no names on disk (a stated residual)."""
+    if not run_id:
+        return frozenset()
+    try:
+        import _upload_names
+
+        names: list[str] = []
+        if _as_dict(_as_dict(redteam).get("metadata")).get("run_id") == run_id:
+            names.extend(_upload_names.known_names(redteam))
+        for _n, doc in list_copies(analysis_dir, run_id):
+            names.extend(_upload_names.known_names(doc))
+        names.extend(mirrored_documents(analysis_dir, run_id))
+        return frozenset(names) | frozenset(_upload_names.display_map(names).values())
+    except Exception:  # noqa: BLE001 - an exemption that cannot be read is no exemption
+        return frozenset()
+
+
+def mirrored_documents(analysis_dir: str, run_id: str) -> list[str]:
+    """Every regular file in this run's copy of the founder's documents, dotfiles excluded."""
+    docs = os.path.join(copies_dir(analysis_dir, run_id), "docs")
+    try:
+        entries = sorted(os.listdir(docs))
+    except OSError:
+        return []
+    return [n for n in entries if not n.startswith(".") and os.path.isfile(os.path.join(docs, n))]

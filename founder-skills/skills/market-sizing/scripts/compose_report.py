@@ -3557,6 +3557,8 @@ def _compose(
     # MUST run on the FINAL assembled markdown, after the warnings section and the footer: that is the
     # exact string the founder reads, and producer warning messages are where the internal tokens
     # live. Hooking in before the warnings splice substitutes nothing and reports a clean body.
+    # This run's documents by every name the founder may see: the founder-text scan never calls one ours.
+    _founder_docs = _redteam_copy.founder_document_names(dir_path, _rt_run_id, artifacts.get("redteam.json"))
     _ft = _founder_text_policy()
     if _ft is not None:
         # No data-derived keep-set here. `identifier_values` is cap-table-only by design: this skill
@@ -3568,7 +3570,7 @@ def _compose(
         # Our own warning codes are kept: compose renders them in small print beside a humanized
         # label (the md_term convention), which is deliberate. A code leaking anywhere else is
         # caught by the skill's own gate, not by widening this scan into a false positive.
-        _found = _ft.scan(report_markdown, extra_keep=frozenset(WARNING_SEVERITY))
+        _found = _ft.scan(report_markdown, extra_keep=frozenset(WARNING_SEVERITY), keep_files=_founder_docs)
         for _tok in _found["enums"]:
             warnings.append(
                 _warn(
@@ -3588,7 +3590,7 @@ def _compose(
             )
         # A token inside a quote is the source's own word. Same code, different remedy: a reworded
         # quote is a false one, so the only thing to do is know it is there.
-        _in_quotes = _ft.scan("\n".join(_quotes), extra_keep=frozenset(WARNING_SEVERITY))
+        _in_quotes = _ft.scan("\n".join(_quotes), extra_keep=frozenset(WARNING_SEVERITY), keep_files=_founder_docs)
         for _tok in [*_in_quotes["enums"], *_in_quotes["filenames"]]:
             warnings.append(
                 _warn(

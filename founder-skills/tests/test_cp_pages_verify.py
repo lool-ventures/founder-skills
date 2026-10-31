@@ -86,7 +86,7 @@ def test_without_the_drop_step_the_gate_names_the_file(tmp_path: Path) -> None:
     shutil.copytree(HERE.parent, plugin, ignore=shutil.ignore_patterns("tests", "__pycache__"))
     view = plugin / "skills" / "competitive-positioning" / "scripts" / "_cp_view.py"
     src = view.read_text(encoding="utf-8")
-    old = 'if policy.scan(sentence.casefold())["filenames"]:'
+    old = 'if policy.scan(policy.blank_kept_files(sentence, keep_files).casefold())["filenames"]:'
     assert src.count(old) == 1, "the lever's anchor moved"
     view.write_text(src.replace(old, "if False:"), encoding="utf-8")
     work = tmp_path / "work"

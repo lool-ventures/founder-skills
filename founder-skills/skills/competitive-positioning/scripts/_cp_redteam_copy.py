@@ -238,14 +238,44 @@ def upload_display(analysis_dir: str, run_id: str | None) -> dict[str, str]:
     try:
         import _upload_names
 
-        c = core()
-        names: list[str] = []
-        for _n, doc in c.list_copies(analysis_dir, run_id):
-            names.extend(_upload_names.known_names(doc))
-        names.extend(c.list_documents(os.path.join(c.copies_dir(analysis_dir, run_id), "docs")))
-        return _upload_names.display_map(names)
+        return _upload_names.display_map(_stored_document_names(analysis_dir, run_id))
     except Exception:  # noqa: BLE001 - a display nicety must never stop a render
         return {}
+
+
+def _stored_document_names(analysis_dir: str, run_id: str) -> list[str]:
+    """Every name this run's review copies name, plus this run's document mirror (`handoff/<run_id>/docs`)."""
+    import _upload_names
+
+    c = core()
+    names: list[str] = []
+    for _n, doc in c.list_copies(analysis_dir, run_id):
+        names.extend(_upload_names.known_names(doc))
+    names.extend(c.list_documents(os.path.join(c.copies_dir(analysis_dir, run_id), "docs")))
+    return names
+
+
+def founder_document_names(analysis_dir: str, run_id: str | None) -> frozenset[str]:
+    """This run's documents by every name the founder may see: as stored and as uploaded. Passed to the
+    founder-text scan as `keep_files`, so a founder's own `notes.md` is not called one of our files (the scan
+    itself never keeps a name of ours, which the review's list of files it read also carries). Empty with no
+    run id or on any error: the scan then flags as before, never less. A run whose review never ran has no
+    names on disk, so its documents are still flagged (a stated residual)."""
+    if not run_id:
+        return frozenset()
+    try:
+        import _upload_names
+
+        names = _stored_document_names(analysis_dir, run_id)
+        # Every file of the mirror, not only the document suffixes the review reads: a `.json` upload is there too.
+        docs = os.path.join(core().copies_dir(analysis_dir, run_id), "docs")
+        if os.path.isdir(docs):
+            names.extend(
+                n for n in sorted(os.listdir(docs)) if not n.startswith(".") and os.path.isfile(os.path.join(docs, n))
+            )
+        return frozenset(names) | frozenset(_upload_names.display_map(names).values())
+    except Exception:  # noqa: BLE001 - an exemption that cannot be read is no exemption
+        return frozenset()
 
 
 # A review quote stays byte-exact on every surface: report.md lifts it out before its pass.

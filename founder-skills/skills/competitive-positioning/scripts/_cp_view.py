@@ -974,11 +974,17 @@ def criterion_labels(items: Iterable[Any]) -> dict[str, str]:
     return out
 
 
-def criterion_text(text: Any, labels: Mapping[str, str], names: Mapping[str, str] | None = None) -> str:
+def criterion_text(
+    text: Any,
+    labels: Mapping[str, str],
+    names: Mapping[str, str] | None = None,
+    keep_files: Iterable[str] = (),
+) -> str:
     """One criterion's evidence, as the founder may see it (see the section note above). Fails closed: if the
     policy cannot be loaded or anything here raises, the row says its evidence is not shown. `names` maps a
     stored upload name to the founder's (`_cp_redteam_copy.upload_display`), applied FIRST, before the policy
-    rewrites anything in it."""
+    rewrites anything in it. `keep_files` is this run's documents (`_cp_redteam_copy.founder_document_names`):
+    a sentence naming only those is kept."""
     try:
         body = str(text or "")
         if names:
@@ -999,7 +1005,8 @@ def criterion_text(text: Any, labels: Mapping[str, str], names: Mapping[str, str
         kept, dropped = [], 0
         for sentence in split_sentences(body):
             # Case-folded for the check only: a sentence often OPENS with the file's name ("Landscape.json lists").
-            if policy.scan(sentence.casefold())["filenames"]:
+            # The founder's own document names are blanked as written, before the fold.
+            if policy.scan(policy.blank_kept_files(sentence, keep_files).casefold())["filenames"]:
                 dropped += 1
             else:
                 kept.append(sentence)
@@ -1036,11 +1043,11 @@ def _context_words(m: re.Match[str]) -> str:
 
 
 def checklist_groups(
-    checklist: Mapping[str, Any] | None, names: Mapping[str, str] | None = None
+    checklist: Mapping[str, Any] | None, names: Mapping[str, str] | None = None, keep_files: Iterable[str] = ()
 ) -> list[dict[str, Any]]:
     """The checklist as `_ui.checklist` groups, in the categories' order, evidence through `criterion_text`
-    (with `names`, see there). Each group carries `code` (the category's code) beside `name`, and each row its
-    `result` word."""
+    (with `names` and `keep_files`, see there). Each group carries `code` (the category's code) beside `name`,
+    and each row its `result` word."""
     items = [_as_dict(i) for i in _as_list(_as_dict(checklist).get("items")) if isinstance(i, dict)]
     labels = criterion_labels(items)
     groups: list[dict[str, Any]] = []
@@ -1062,7 +1069,7 @@ def checklist_groups(
                         "result": STATUS_WORDS.get(str(i.get("status")), "Not applicable"),
                         "title": labels.get(str(i.get("id") or ""), "Checklist item"),
                         "criterion": str(i.get("id") or ""),
-                        "evidence": criterion_text(i.get("evidence"), labels, names),
+                        "evidence": criterion_text(i.get("evidence"), labels, names, keep_files),
                     }
                     for i in rows
                 ],
