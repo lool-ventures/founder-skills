@@ -337,6 +337,7 @@ OUR_OUTPUT_NAMES: frozenset[str] = HANDOFF_FILE_NAMES | frozenset(
         "review.html",
         "inputs_review.html",
         "report_fast_assess.md",
+        "report_concise.md",
         "report_extraction_only.md",
         "coaching.md",
         "deck_text.md",
@@ -350,6 +351,8 @@ OUR_OUTPUT_NAMES: frozenset[str] = HANDOFF_FILE_NAMES | frozenset(
         "competitor_verification.json",
         "landscape.json",
         "landscape_draft.json",
+        "landscape_input.json",
+        "landscape_enriched.json",
         "moat_scores.json",
         "positioning.json",
         "positioning_scores.json",
@@ -430,7 +433,10 @@ def _kept_file_names(keep_files: Iterable[str]) -> list[str]:
     for name in keep_files:
         if not isinstance(name, str) or not name.strip():
             continue
-        if any(is_our_output_name(m.group(0)) for m in _FILENAME_RE.finditer(name.casefold())):
+        tokens = [m.group(0) for m in _FILENAME_RE.finditer(name.casefold())]
+        # A name the scan reports nothing for is never flagged, so it has nothing to keep; kept, an
+        # extension-less `report` would blank the stem of our `report.md`.
+        if not tokens or any(is_our_output_name(t) for t in tokens):
             continue
         out.add(name)
     return sorted(out, key=lambda n: (-len(n), n))
@@ -439,7 +445,9 @@ def _kept_file_names(keep_files: Iterable[str]) -> list[str]:
 def blank_kept_files(text: str, keep_files: Iterable[str]) -> str:
     """`text` with each kept document name blanked, as written, where it stands as a whole filename."""
     for name in _kept_file_names(keep_files):
-        text = re.sub(rf"(?<![A-Za-z0-9_.]){re.escape(name)}(?![A-Za-z0-9_])", lambda m: " " * len(m.group(0)), text)
+        text = re.sub(
+            rf"(?<![A-Za-z0-9_.]){re.escape(name)}(?![A-Za-z0-9_]|\.[A-Za-z0-9])", lambda m: " " * len(m.group(0)), text
+        )
     return text
 
 

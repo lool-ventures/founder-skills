@@ -13,7 +13,7 @@
   "files": {
     "scripts/_delivery_check.py": "57c0798f437e593611d53ddfe5b6a39e062952f5fbabd08cd62cad4eff9363df",
     "scripts/_form_reply.py": "95e687ce792aa6a5be56fd2901fcf4d4c04116a074fbf751967a7613c25a82ae",
-    "scripts/_founder_text.py": "c8c9505e4fc16020edcb6020917cc1ecf62b94e644b65b01933b640288c25d43",
+    "scripts/_founder_text.py": "b6a1051cefb79dc62f6d2d383b1e80795a49c8c1b03df66e24b64c9571a7f159",
     "scripts/_gates.py": "8244cb7f8de69612bb69b2220a4352c465191fba4116ebd53ace3aadeab1189b",
     "scripts/_handoff_audit.py": "cd8aed6e6a71df40fd0416af5890e9d9490b1465f8a75ab8f8530d6716f6e26d",
     "scripts/_handover_check.py": "9e0b90ba52668a3ca17f711d86a652c88cb2296c477b43e6038c76d924c6cd01",
@@ -167,7 +167,7 @@
     "skills/deck-review/scripts/gate_state.py": "10b08fd7d8dcf2a343ca966e579fdc9d76e28a3da419d12826e86f332ce9faef",
     "skills/deck-review/scripts/ledger.py": "ab0c4bb31b71361a29cd049f6b0684d44166cb22e09d2104b3b39b0567409738",
     "skills/deck-review/scripts/ocr_check.py": "00637e92a07fb765c4d1fa9321f2133c23348495d276131ba10010e769fe1768",
-    "skills/deck-review/scripts/reconcile.py": "7e72dd0d382bd7294b2d26c0b50371a686e473f561b4e002e3e047112afe4ecb",
+    "skills/deck-review/scripts/reconcile.py": "ab4275f50d252f388c3e36bc19aae9dcbbf6c35561c75f00ae107e58c3c872a3",
     "skills/deck-review/scripts/second_read.py": "9320ec5e140d23702872d37c181239be4030652a796bd55d5e49feb70f64922b",
     "skills/deck-review/scripts/setup_run.py": "7213f2c476553e813e8157e10b7786051c22040a33b461cef6d6950ade801f5a",
     "skills/deck-review/scripts/slide_reviews.py": "11c3754fcc1037c4387e7ccb7e920d6688f36acab9c06bc27fcd64776e704b50",

@@ -587,10 +587,7 @@ def test_a_kind_refusal_says_which_kinds_differ() -> None:
 
 def test_cac_over_the_whole_base_and_arpu_of_no_period_say_why() -> None:
     r = run(*REFUSED["CAC over Total customers"])
-    assert (
-        r.reasons[-1]
-        == "a figure per Total customers counts the whole customer base, and $2K is a cost per new customer"
-    )
+    assert r.reasons[-1] == "a figure per Total customers counts the whole base, and $2K is a cost per new customer"
     r = run(*REFUSED["ARPU over ARR"])
     assert r.reasons[-1] == "a figure per Users is for one year, and $1K does not state its period"
 

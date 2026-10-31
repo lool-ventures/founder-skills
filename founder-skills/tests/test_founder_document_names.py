@@ -65,10 +65,24 @@ KEEP = (
         ("Read customer_list.json.", []),
         ("Read my-report.md beside report.md.", ["report.md"]),  # an upload named like ours is never kept
         ("The set is in landscape.json.", ["landscape.json"]),
+        ("Read notes.md.first.json.", ["first.json", "notes.md"]),  # never the stem of a longer name
     ],
 )
 def test_kept_names_are_blanked_at_filename_boundaries_only(text: str, reported: list[str]) -> None:
     assert FT.scan(text, keep_files=KEEP)["filenames"] == reported
+
+
+@pytest.mark.parametrize(
+    "kept, text, ours",
+    [
+        ("report", "see report.md", "report.md"),
+        ("landscape", "in landscape.json", "landscape.json"),
+        ("deck_text", "from deck_text.md", "deck_text.md"),
+    ],
+)
+def test_a_name_with_no_extension_never_hides_ours(kept: str, text: str, ours: str) -> None:
+    """A name the scan reports nothing for has nothing to keep; kept, it would blank the stem of ours."""
+    assert FT.scan(text, keep_files=[kept])["filenames"] == [ours]
 
 
 def test_without_keep_files_every_name_is_reported_as_before() -> None:

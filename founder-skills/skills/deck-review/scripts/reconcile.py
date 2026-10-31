@@ -2470,7 +2470,7 @@ def _rate_refusal(num: Figure, den: Figure, exp: Figure) -> str:
     if kinds:
         return f"a figure per {noun} is {kinds[0]}, and {exp.raw} is {kinds[1]}: they are not the same quantity"
     if _cac_over_base(den, exp):
-        return f"a figure per {noun} counts the whole customer base, and {exp.raw} is a cost per new customer"
+        return f"a figure per {noun} counts the whole base, and {exp.raw} is a cost per new customer"
     period = _arpx_period_unknown(num, den, exp)
     if period:
         return f"a figure per {noun} is for one {period}, and {exp.raw} does not state its period"
