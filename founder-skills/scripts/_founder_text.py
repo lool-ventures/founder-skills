@@ -433,10 +433,11 @@ def _kept_file_names(keep_files: Iterable[str]) -> list[str]:
     for name in keep_files:
         if not isinstance(name, str) or not name.strip():
             continue
-        tokens = [m.group(0) for m in _FILENAME_RE.finditer(name.casefold())]
+        # Read as written and folded: a character whose fold is a letter can hide a boundary in one of them.
+        tokens = [m.group(0) for form in (name, name.casefold()) for m in _FILENAME_RE.finditer(form)]
         # A name the scan reports nothing for is never flagged, so it has nothing to keep; kept, an
-        # extension-less `report` would blank the stem of our `report.md`.
-        if not tokens or any(is_our_output_name(t) for t in tokens):
+        # extension-less `report` would blank the stem of our `report.md`. A script name is always ours.
+        if not tokens or any(is_our_output_name(t) or t.endswith(".py") for t in tokens):
             continue
         out.add(name)
     return sorted(out, key=lambda n: (-len(n), n))

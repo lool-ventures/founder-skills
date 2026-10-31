@@ -85,6 +85,17 @@ def test_a_name_with_no_extension_never_hides_ours(kept: str, text: str, ours: s
     assert FT.scan(text, keep_files=[kept])["filenames"] == [ours]
 
 
+@pytest.mark.parametrize(
+    "kept, text, ours",
+    [
+        ("compose_report.py", "built by compose_report.py", "compose_report.py"),
+        ("a.pdf \u0345report.md", "Sources: a.pdf \u0345report.md", "report.md"),
+    ],
+)
+def test_a_script_name_or_a_folded_boundary_never_hides_ours(kept: str, text: str, ours: str) -> None:
+    assert FT.scan(text, keep_files=[kept])["filenames"] == [ours]
+
+
 def test_without_keep_files_every_name_is_reported_as_before() -> None:
     """Lever for the rows above: with nothing kept, the founder's names are reported."""
     assert FT.scan("Read notes.md and customer_list.json.")["filenames"] == ["customer_list.json", "notes.md"]
