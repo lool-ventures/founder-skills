@@ -2195,6 +2195,11 @@ def _per_customer_floor(num: Figure, den: Figure, exp: Figure, by_id: dict[str, 
 # only a word saying which deals (`_DEAL_SIZE_WORDS`): a target, a forecast year, today's price or a term is
 # another quantity. A bare "Deal size" and an ACV over a count of deals stay unchecked: a bare contract value is
 # often multi-year, and a count of deals is a flow over all time set against ARR's level today.
+#
+# Before any admission, three refusals over a count, each a known mismatch (a wording they do not name keeps the
+# admission above): money of another kind than the stated figure names (`_kinds_differ`: spending per employee is
+# not revenue per employee), CAC over a count marked as the whole base, and an ARPU-like figure that writes no period
+# over a numerator whose period is known.
 _DEAL_SIZE_NO_PERIOD = re.compile(
     r"(average|avg\.?|mean|median|typical)( [a-z0-9-]+){0,2} (contract|deal)( size| value)?( \([^()]{1,30}\))?"
 )
@@ -2265,6 +2270,44 @@ _FORECAST_NUM = re.compile(r"\b(target|projected|forecast|plan|planned|budget|ex
 _FORECAST_STATED = re.compile(r"\b(projected|forecast|plan|planned|expected|pipeline|goal|\d+e|(19|20)\d\d)\b")
 _CEILING_WORD = re.compile(r"\b(target|budget)\b")
 _NEW_BUYERS_TAIL = re.compile(r" with new (customers?|clients?|logos?)$")
+# A buyer count revenue per buyer may fall below a period-less ACV over: paying buyers only. A bare count may hold
+# free, trial or churned accounts, which pull revenue per buyer down, the very direction that arm reports.
+_PAYING_BUYERS = re.compile(
+    r"(# |total )?(paying|paid|active paying|current paying) (customers?|clients?|logos?|accounts?)"
+)
+# THE KIND OF MONEY A LABEL NAMES, read only to REFUSE: a figure per employee that is spending is not revenue per
+# employee. Whole phrases claim first ("sales and marketing" is a cost before "sales" is revenue), then single
+# words; a label holding words of two kinds, or none, has no kind and keeps today's behaviour.
+_KIND_PHRASES = re.compile(
+    r"\b(s&m|sales (and|&) marketing|cost of (sales|revenue|goods sold)|cash burn|net burn|gross burn"
+    r"|customer acquisition cost|sales commissions?)\b"
+)
+_KIND_WORDS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    (
+        "a cost",
+        re.compile(
+            r"\b(burn|spend|spending|opex|expenses?|costs?|payroll|salary|salaries|wages|compensation|cogs|capex|cac"
+            r"|commissions?)\b"
+        ),
+    ),
+    ("cash", re.compile(r"\b(cash|funding|raised|capital|investment|runway|valuation|bank)\b")),
+    ("profit", re.compile(r"\b(profit|ebitda|margins?|contribution|net income|operating income)\b")),
+    ("revenue", re.compile(r"\b(revenues?|arr|mrr|sales|bookings|gmv|run[- ]?rate|tcv|acv|billings)\b")),
+)
+_REVENUE_RATES = re.compile(
+    r"\b(arpu|arpa|arpc|arppu|asp|aov|acv|average revenue per user|average selling price|average order value"
+    r"|annual contract value)\b"
+)
+_COST_RATES = re.compile(r"\b(cac|cpa|customer acquisition cost|cost per acquisition)\b")
+# CAC is spending per NEW customer: a count marked as the whole base is another denominator. A bare "Customers"
+# may be the period's new customers and stays compared.
+_WHOLE_BASE = re.compile(
+    r"\b(total|all|active|paying|paid|current|live|existing|installed|base)\b|customer (count|base)"
+)
+_NEW_BUYERS = re.compile(r"\b(new|acquired|added|won|onboarded)\b")
+# ARPU and its kin are monthly in many decks and yearly in many others: one that writes no period is not compared
+# with a numerator whose period is known.
+_ARPX = re.compile(r"arpu|average revenue per user|arpa|arpc|arppu")
 _NO_PERIOD_DEAL_REASON = "a deal or contract size with no stated period cannot be tested against revenue per customer"
 
 
@@ -2311,6 +2354,59 @@ def _stated_time_unit(exp: Figure) -> str | None:
     return next((unit for unit, pat in _RATE_TIME_UNITS if pat.search(text)), None)
 
 
+def _money_kind(label: str, *, stated: bool = False) -> str | None:
+    """The one kind of money a normalised label names, or None. On the stated side "spend" names no kind."""
+    kinds = set()
+    if _KIND_PHRASES.search(label):
+        kinds.add("a cost")
+        label = _KIND_PHRASES.sub(" ", label)
+    for kind, pat in _KIND_WORDS:
+        words = {m.group(1) for m in pat.finditer(label)}
+        if stated and kind == "a cost":
+            words -= {"spend", "spending"}
+        if words:
+            kinds.add(kind)
+    return next(iter(kinds)) if len(kinds) == 1 else None
+
+
+def _stated_kind(el: str) -> str | None:
+    if _COST_RATES.search(el):
+        return "a cost"
+    if _REVENUE_RATES.search(el) or _DEAL_SIZE_NO_PERIOD.fullmatch(el):
+        return "revenue"
+    m = _PER_PHRASE.search(el)
+    return _money_kind(el[: m.start()] if m else el, stated=True)
+
+
+def _kinds_differ(num: Figure, den: Figure, exp: Figure) -> tuple[str, str] | None:
+    """The numerator's kind and the stated figure's, when both are known and differ (money over a count only)."""
+    if not (num.unit_kind == MONEY and exp.unit_kind == MONEY and den.unit_kind == COUNT):
+        return None
+    nk, ek = _money_kind(_pc_norm(num.label or "")), _stated_kind(_pc_norm(exp.label or ""))
+    return (nk, ek) if nk and ek and nk != ek else None
+
+
+def _cac_over_base(den: Figure, exp: Figure) -> bool:
+    dl = _pc_norm(den.label or "")
+    return bool(
+        den.unit_kind == COUNT
+        and _COST_RATES.search(_pc_norm(exp.label or ""))
+        and _WHOLE_BASE.search(dl)
+        and not _NEW_BUYERS.search(dl)
+    )
+
+
+def _arpx_period_unknown(num: Figure, den: Figure, exp: Figure) -> str | None:
+    """The numerator's period, when the stated ARPU-like figure writes none and the numerator's is known."""
+    if den.unit_kind != COUNT or _stated_time_unit(exp) is not None:
+        return None
+    q = _RATE_QUALIFIERS_CEILING
+    if not re.fullmatch(rf"({q} ){{0,2}}({_ARPX.pattern})( {q}){{0,2}}( \([^()]*\))?", _pc_norm(exp.label or "")):
+        return None
+    nl = _pc_norm(num.label or "")
+    return num.period or next((unit for unit, pat in _RECURRING_UNIT if pat.search(nl)), None)
+
+
 def _stated_is_the_rate(num: Figure, den: Figure, exp: Figure, computed: float | None, *, ceiling: bool) -> bool:
     if num.unit_kind in (PERCENT, MULTIPLE):
         return False
@@ -2319,6 +2415,9 @@ def _stated_is_the_rate(num: Figure, den: Figure, exp: Figure, computed: float |
     if _FORECAST_NUM.search(nl) or _FORECAST_STATED.search(el) or (not ceiling and _CEILING_WORD.search(el)):
         return False
     if not _parens_ok(el, pilot=True):
+        return False
+    # Over a count: never another kind of money, CAC over the whole base, or ARPU of an unwritten period.
+    if _kinds_differ(num, den, exp) or _cac_over_base(den, exp) or _arpx_period_unknown(num, den, exp):
         return False
     # A recurring numerator's period: its own, or the one its label names ("MRR" is monthly).
     num_unit = num.period or next((unit for unit, pat in _RECURRING_UNIT if pat.search(nl)), None)
@@ -2352,10 +2451,8 @@ def _stated_is_the_rate(num: Figure, den: Figure, exp: Figure, computed: float |
         pilots = _PILOT_DEN_FULL.fullmatch(dl) and not _PER_CUSTOMER_NUM_FULL.fullmatch(nl)
         if _deal_size_words_ok(el) and ((deals and _parens_ok(el)) or (pilots and _parens_ok(el, pilot=True))):
             return True
-        buyers = _den_counts_actuals(dl) is not None and bool(
-            (_CUSTOMER_WORD.search(dl) and not _PILOT_WORD.search(dl) and not _DEAL_WORD.search(dl))
-            or _PILOT_DEN_FULL.fullmatch(dl)
-        )
+        base = _den_counts_actuals(dl)
+        buyers = base is not None and bool(_PAYING_BUYERS.fullmatch(base) or _PILOT_DEN_FULL.fullmatch(dl))
         annual = num_unit in (None, "year")
         if buyers and annual and _ACV_NO_PERIOD.fullmatch(el) and computed is not None:
             return computed < (exp.lo if exp.lo is not None else exp.value)
@@ -2368,6 +2465,15 @@ def _rate_refusal(num: Figure, den: Figure, exp: Figure) -> str:
         return (
             f"a share or multiple divided by {_denominator_noun(den)} is a simple average, not a rate {exp.raw} states"
         )
+    noun = _denominator_noun(den)
+    kinds = _kinds_differ(num, den, exp)
+    if kinds:
+        return f"a figure per {noun} is {kinds[0]}, and {exp.raw} is {kinds[1]}: they are not the same quantity"
+    if _cac_over_base(den, exp):
+        return f"a figure per {noun} counts the whole customer base, and {exp.raw} is a cost per new customer"
+    period = _arpx_period_unknown(num, den, exp)
+    if period:
+        return f"a figure per {noun} is for one {period}, and {exp.raw} does not state its period"
     if num.unit_kind == MONEY and den.unit_kind == COUNT and exp.unit_kind == MONEY:
         el, dl = _pc_norm(exp.label or ""), _pc_norm(den.label or "")
         if _ACV_NO_PERIOD.fullmatch(el) or _DEAL_SIZE_NO_PERIOD.fullmatch(el):
@@ -2375,7 +2481,6 @@ def _rate_refusal(num: Figure, den: Figure, exp: Figure) -> str:
                 return _NO_PERIOD_DEAL_REASON
             if _PILOT_DEN_FULL.fullmatch(dl) and _PER_CUSTOMER_NUM_FULL.fullmatch(_pc_norm(num.label or "")):
                 return _NO_PERIOD_DEAL_REASON
-    noun = _denominator_noun(den)
     return f"a figure per {noun} cannot be tested against {exp.raw}, which is not stated per {noun}"
 
 

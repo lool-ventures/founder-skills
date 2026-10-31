@@ -5,7 +5,10 @@ A cross-unit ratio (money per customer, customers per year) used to be compared 
 its numerator's kind that states no period, so revenue per customer "contradicted" a deal size, an order value
 or a target. `_stated_is_the_rate` admits only a figure written per the denominator's own words, a time rate in
 the denominator's time unit, a closed table of named rates, a deal size over a count of deals, pilot revenue
-over paid pilots, and a period-less ACV that revenue per buyer falls below. Everything else is refused.
+over paid pilots, and a period-less ACV that revenue per paying buyer falls below. Everything else is refused.
+Over a count, three known mismatches are refused before any admission: money of another kind than the stated
+figure names, CAC over the whole customer base, and an ARPU-like figure that writes no period over a numerator
+whose period is known.
 
 Each refusal row is built off-value, and the lever test forces the admission open to prove the row reaches
 that decision rather than a refusal from elsewhere. The cases are constructed and the figures synthetic.
@@ -120,17 +123,63 @@ ADMITTED = {
         count("Paid pilots", "6", 6.0),
         money("Average deal size (pilot pricing)", "$80K", 80_000.0),
     ),
-    "period-less ACV below, customers": (
-        money("ARR", "$180K", 180_000.0, period="year"),
-        count("Customers", "4", 4.0),
-        money("ACV", "$60K", 60_000.0),
-    ),
-    "period-less ACV below, customer accounts": (
-        money("ARR", "$180K", 180_000.0, period="year"),
-        count("Customer accounts", "4", 4.0),
-        money("ACV", "$60K", 60_000.0),
-    ),
 }
+
+# A period-less ACV that revenue per PAYING buyer falls below. "Revenue" is outside the stated-annual floor's
+# numerators, so each row reaches `_stated_is_the_rate`.
+REVENUE_BELOW = money("Revenue", "$180K", 180_000.0)
+ADMITTED.update(
+    {
+        f"period-less ACV below, {label}": (REVENUE_BELOW, count(label, "4", 4.0), money("ACV", "$60K", 6e4))
+        for label in (
+            "Paying customers",
+            "# paying customers",
+            "Total paying customers",
+            "Paying accounts",
+            "Paid logos",
+        )
+    }
+)
+ADMITTED["period-less ACV below, ARR over # paying customers"] = (
+    money("ARR", "$180K", 180_000.0, period="year"),
+    count("# paying customers", "4", 4.0),
+    money("ACV", "$60K", 6e4),
+)
+
+# The numerator and the stated figure name the same kind of money.
+ADMITTED.update(
+    {
+        "cost per employee over opex": (
+            money("Opex", "$3M", 3e6, period="year"),
+            count("Employees"),
+            money("Cost per employee", "$120K", 1.2e5),
+        ),
+        "CAC over new paying customers": (
+            CAC_SPEND_A,
+            count("New paying customers", "100", 100.0),
+            money("CAC", "$2K", 2e3),
+        ),
+        "CAC over net new paid logos": (
+            CAC_SPEND_A,
+            count("Net new paid logos", "100", 100.0),
+            money("CAC", "$2K", 2e3),
+        ),
+        "CAC over bare customers": (CAC_SPEND_A, count("Customers", "100", 100.0), money("CAC", "$2K", 2e3)),
+        "monthly ARPU over monthly revenue": (
+            money("MRR", "$20K", 2e4, period="month"),
+            count("Users", "1,000", 1000.0),
+            money("ARPU", "$3.7/mo", 3.7),
+        ),
+        "GMV over orders": (money("GMV"), count("Orders", "1,000", 1000.0), money("AOV", "$1K", 1e3)),
+        "unknown-kind numerator": (money("Platform fees"), count("Users", "1,000", 1000.0), money("ARPU", "$1K", 1e3)),
+        "two-kind numerator": (
+            money("Marketing spend revenue"),
+            count("Users", "1,000", 1000.0),
+            money("ARPU", "$1K", 1e3),
+        ),
+        "spend per customer over GMV": (money("GMV"), count("Customers"), money("Spend per customer", "$120K", 1.2e5)),
+    }
+)
 
 # ARPC over clients, and a deal size naming which deals.
 ADMITTED.update(
@@ -400,6 +449,68 @@ REFUSED.update(
         ),
     }
 )
+# A bare buyer count may hold free, trial or churned accounts: never compared below a period-less ACV.
+BARE_BUYERS = ("Customers", "Customer accounts", "Logos", "Accounts", "Active customers", "Customer logos")
+REFUSED.update(
+    {f"period-less ACV below, {label}": (ACV_BELOW[0], count(label, "4", 4.0), ACV_BELOW[1]) for label in BARE_BUYERS}
+)
+# Another kind of money than the stated figure names.
+KIND_REFUSED = {
+    "ARR over users vs CAC": (ARR, count("Users", "1,000", 1e3), money("CAC", "$3.7K", 3.7e3)),
+    "funding over customers vs CAC": (money("Total funding"), count("Customers"), money("CAC", "$3.7K", 3.7e3)),
+    "burn over customers vs ARPC": (money("Burn"), count("Customers"), money("ARPC", "$3.7K", 3.7e3)),
+    "payroll over employees vs revenue per employee": (
+        money("Payroll", "$3M", 3e6, period="year"),
+        count("Employees"),
+        money("Revenue per employee", "$3.7K", 3.7e3),
+    ),
+    "burn over employees vs revenue per employee": (
+        money("Burn"),
+        count("Employees"),
+        money("Revenue per employee", "$3.7K", 3.7e3),
+    ),
+    "ARR over employees vs cost per employee": (ARR, count("Employees"), money("Cost per employee", "$3.7K", 3.7e3)),
+    "cash over customers vs ARPC": (money("Cash"), count("Customers"), money("ARPC", "$3.7K", 3.7e3)),
+    "funding over accounts vs ARPA": (money("Total funding"), count("Accounts"), money("ARPA", "$3.7K", 3.7e3)),
+    "gross profit over units vs ASP": (money("Gross profit"), count("Units"), money("ASP", "$3.7K", 3.7e3)),
+    "opex over orders vs AOV": (money("Opex"), count("Orders"), money("AOV", "$3.7K", 3.7e3)),
+    "burn over closed deals vs deal size": (
+        money("Burn"),
+        count("Closed deals"),
+        money("Average deal size", "$3.7K", 3.7e3),
+    ),
+    "sales and marketing over employees vs revenue per employee": (
+        money("Sales and marketing"),
+        count("Employees"),
+        money("Revenue per employee", "$3.7K", 3.7e3),
+    ),
+    "revenue over customers vs burn per customer": (
+        money("Revenue"),
+        count("Customers"),
+        money("Burn per customer", "$3.7K", 3.7e3),
+    ),
+}
+REFUSED.update(KIND_REFUSED)
+# CAC is spending per new customer: never over a count marked as the whole base.
+REFUSED.update(
+    {
+        f"CAC over {label}": (CAC_SPEND, count(label, "100", 100.0), CAC)
+        for label in ("Total customers", "Paying customers", "Active users", "Customer base")
+    }
+)
+# ARPU and its kin with no written period, over a numerator whose period is known.
+REFUSED.update(
+    {
+        "ARPU over ARR": (ARR, count("Users", "1,000", 1e3), money("ARPU", "$1K", 1e3)),
+        "ARPU over MRR": (money("MRR", "$20K", 2e4), count("Users", "1,000", 1e3), money("ARPU", "$1K", 1e3)),
+        "ARPA over yearly revenue": (
+            money("Revenue", "$3M", 3e6, period="year"),
+            count("Accounts", "1,000", 1e3),
+            money("ARPA", "$1K", 1e3),
+        ),
+        "ARPC over ARR": (ARR, count("Customers", "1,000", 1e3), money("Blended ARPC", "$1K", 1e3)),
+    }
+)
 # Refused before this change too, with the reason kept: an ACV that revenue per customer is at or above.
 ALREADY_REFUSED = {
     "ACV above revenue per customer": (ARR, count("Customers", "4", 4.0), money("ACV", "$60K", 60_000.0)),
@@ -467,3 +578,30 @@ def test_a_rate_against_a_figure_with_a_period_is_untouched() -> None:
     r = run(ARR, count("Customers"), money("Deal size", "$60K", 60_000.0, period="year"))
     assert r.verdict == "incomparable"
     assert not any(x.startswith("a figure per ") for x in r.reasons), r.reasons
+
+
+def test_a_kind_refusal_says_which_kinds_differ() -> None:
+    r = run(*KIND_REFUSED["payroll over employees vs revenue per employee"])
+    assert r.reasons[-1] == "a figure per Employees is a cost, and $3.7K is revenue: they are not the same quantity"
+
+
+def test_cac_over_the_whole_base_and_arpu_of_no_period_say_why() -> None:
+    r = run(*REFUSED["CAC over Total customers"])
+    assert (
+        r.reasons[-1]
+        == "a figure per Total customers counts the whole customer base, and $2K is a cost per new customer"
+    )
+    r = run(*REFUSED["ARPU over ARR"])
+    assert r.reasons[-1] == "a figure per Users is for one year, and $1K does not state its period"
+
+
+@pytest.mark.parametrize("stated", ["Monthly burn", "Burn per month"])
+@pytest.mark.parametrize("numerator", ["Cash", "Total funding raised"])
+def test_cash_over_runway_months_is_still_compared_with_a_monthly_burn(numerator: str, stated: str) -> None:
+    """The kind check reads money over a count only: cash over a runway in months is a burn rate."""
+    r = run(
+        money(numerator, "$180K", 1.8e5),
+        ("duration", "4 months", 4.0, "Runway (months)", {}),
+        money(stated, "$60K", 6e4),
+    )
+    assert r.verdict == "contradiction", (numerator, stated, r.verdict, r.reasons)

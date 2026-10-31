@@ -774,7 +774,7 @@ def test_the_stated_side_must_clear_the_gate_the_operands_clear() -> None:
 def test_a_corroborated_stated_side_still_produces_findings() -> None:
     """The counter-test: the gate must not blunt the engine when the figure IS found."""
     a = fig("$100k", 100_000, "money", "revenue", id="a")
-    b = fig("4", 4, "count", "customers", id="b")
+    b = fig("4", 4, "count", "paying customers", id="b")
     e = fig("$50k", 50_000, "money", "ACV", id="e")
     assert _cmp("ratio", ["a", "b"], "e", {"a": a, "b": b, "e": e}).verdict == "contradiction"
 
