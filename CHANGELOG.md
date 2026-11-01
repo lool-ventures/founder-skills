@@ -7,6 +7,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.27.3] - 2026-11-01 — Fewer false contradictions in a deck's acquisition cost, GMV and burn figures
+
+### Highlights
+
+**Deck review checks a customer acquisition cost only against acquisition spending over new customers.** Before, a CAC
+could be reported as contradicting spending that was not acquisition spend, such as operating costs including
+marketing, or a count that was not of new customers, such as net new customers or company acquisitions.
+
+### Fixed
+
+- A CAC is compared only when it is computed from acquisition spending and a count of new customers, both from a fixed
+  list of labels. The spending is sales and marketing ("S&M", "Sales & marketing", "Marketing & sales",
+  "Marketing/sales"), marketing (digital, online, growth, performance or paid), paid media, search or social, customer
+  or user acquisition, paid acquisition, acquisition spend, UA, advertising, ads, demand generation, or "CAC spend",
+  optionally with a spend, expense, cost or budget word, a currency or scale, or a cash basis. The count is new,
+  acquired or added customers, clients, logos, users or accounts ("New customers", "Customers acquired", "Customer
+  additions", "New enterprise customers", "Paid users acquired"), or a count the stated CAC is itself written per
+  ("$2K per net new customer" over net new customers). Before, "Marketing & sales", "Marketing and sales",
+  "Marketing/sales" and a cash-basis label such as "Marketing (cash)" were read as revenue or cash and never compared;
+  they now are.
+- This applies to a stated CAC, CPA or customer acquisition cost written as that rate ("CAC", "Blended CAC", "Max
+  CAC", "CAC per new customer"). A label that only mentions CAC, such as "Paid CAC", "Fully-loaded CAC per paying
+  customer" or "CAC per lead", is checked as before. A figure stated net of or after acquisition cost ("Gross profit
+  per customer, net of CAC") is still not compared.
+- Gross transaction value (GMV, GMS, GTV, TPV, gross merchandise value or volume, payments or processing volume) is no
+  longer compared with ARPU, ARPA, ARPC, ARPPU, revenue, ARR or MRR per customer, an ACV, or an average deal size. It
+  is still compared with an average order value and an average selling price.
+- Bookings are no longer compared with ARPU, ARPA, ARPC, ARPPU, or revenue, ARR or MRR per customer. How they are
+  compared with an average deal size, an ACV or an average order value is unchanged.
+- ARR, MRR, run-rate, recurring or subscription revenue and annualised revenue over units are no longer compared with
+  an average selling price.
+- Acquisition spending and payroll, salaries, wages, personnel, headcount or compensation costs over a count are no
+  longer compared with burn per employee or another burn per count.
+
+Some genuine contradictions are no longer checked either:
+
+- a CAC over spending outside the list above, such as "Selling expenses", "Commissions", "GTM spend" or a label with
+  "incl." in it;
+- a CAC over a count outside the list above, unless the CAC is written per that count: a bare "Customers", net new
+  customers or net adds, signed, won, onboarded, gained or converted customers, renewals, additions or acquisitions
+  with no customer word ("Acquisitions", "Company acquisitions"), and new customers of a kind the list does not name;
+- bookings against ARPU or revenue, ARR or MRR per customer, for a business whose bookings are its revenue;
+- GMV against ARPU, revenue per customer, an ACV or a deal size, for a business whose GMV is its revenue or deal
+  value;
+- ARR or recurring revenue over licensed units against an average selling price;
+- acquisition spending or payroll against burn per employee, when that cost is most of the burn.
+
+### Scoring changes
+
+- Deck review: fewer computed rates are compared with figures the deck states without a period, and CAC over
+  "Marketing & sales", "Marketing and sales", "Marketing/sales" or a cash-basis acquisition-spend figure is now
+  compared, so the contradictions and confirmations that reach the numbers section change and the "numbers are
+  consistent" checklist criterion can pass or fail where it did not before. No criterion, status rule or score formula
+  changes.
+- Cap table, competitive positioning, financial model review, IC simulation and market sizing: none.
+
 ## [0.27.2] - 2026-10-31 — Fewer false contradictions in a deck's numbers, and a founder's own file names
 
 ### Highlights
