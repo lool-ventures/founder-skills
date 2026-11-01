@@ -6,9 +6,11 @@ its numerator's kind that states no period, so revenue per customer "contradicte
 or a target. `_stated_is_the_rate` admits only a figure written per the denominator's own words, a time rate in
 the denominator's time unit, a closed table of named rates, a deal size over a count of deals, pilot revenue
 over paid pilots, and a period-less ACV that revenue per paying buyer falls below. Everything else is refused.
-Over a count, three known mismatches are refused before any admission: money of another kind than the stated
-figure names, CAC over the whole customer base, and an ARPU-like figure that writes no period over a numerator
-whose period is known.
+Over a count, known mismatches are refused before any admission: a stated CAC over anything but an acquisition-spend
+label and a count of new customers (two closed lists), gross transaction value or bookings against revenue, recurring
+revenue over units against a selling price, part of spending against burn per head, money of another kind than the
+stated figure names, CAC over the whole customer base, and an ARPU-like figure that writes no period over a numerator
+whose period is known. Each has an exact-reason row.
 
 Each refusal row is built off-value, and the lever test forces the admission open to prove the row reaches
 that decision rather than a refusal from elsewhere. The cases are constructed and the figures synthetic.
@@ -159,12 +161,6 @@ ADMITTED.update(
             count("New paying customers", "100", 100.0),
             money("CAC", "$2K", 2e3),
         ),
-        "CAC over net new paid logos": (
-            CAC_SPEND_A,
-            count("Net new paid logos", "100", 100.0),
-            money("CAC", "$2K", 2e3),
-        ),
-        "CAC over bare customers": (CAC_SPEND_A, count("Customers", "100", 100.0), money("CAC", "$2K", 2e3)),
         "monthly ARPU over monthly revenue": (
             money("MRR", "$20K", 2e4, period="month"),
             count("Users", "1,000", 1000.0),
@@ -207,6 +203,93 @@ ADMITTED.update(
             money("Average deal size", "$60K", 6e4),
         ),
     }
+)
+
+
+def rate(num: str, den: str, stated: str, raw: str = "$2K") -> tuple[Side, Side, Side]:
+    """$500K over 100 against a stated $2K: off-value, so a comparison reports a contradiction."""
+    return money(num, "$500K", 5e5), count(den, "100", 100.0), money(stated, raw, 2e3)
+
+
+def add_rows(table: dict[str, Any], rows: dict[str, Any]) -> None:
+    assert not set(rows) & set(table), set(rows) & set(table)
+    table.update(rows)
+
+
+# CAC is compared only over an acquisition-spend label and a count of new customers, both closed lists. These are
+# the labels they read; "Marketing & sales", "Marketing/sales", "Marketing + sales" and "Marketing (cash)" were
+# refused before as revenue or cash.
+CAC_SPEND_LABELS = (
+    "Sales & marketing expenses",
+    "Marketing + sales",
+    "Marketing/sales",
+    "Marketing & sales",
+    "Paid marketing",
+    "Marketing",
+    "Demand generation spend",
+    "Customer acquisition spend",
+    "Total CAC spend",
+    "Advertising costs",
+    "Digital marketing",
+    "Online marketing",
+    "Growth marketing",
+    "User acquisition",
+    "UA spend",
+    "Acquisition spend",
+    "Ads spend",
+    "Yearly S&M",
+    "S&M ($000)",
+    "Sales & marketing (S&M)",
+    "Marketing (cash)",
+    "S&M (cash basis)",
+)
+NEW_CUSTOMER_LABELS = (
+    "New paying logos",
+    "Customers acquired",
+    "Customer additions",
+    "Newly added users",
+    "Number of new customers",
+    "# of new customers",
+    "Total new customers",
+    "New customers acquired",
+    "New enterprise customers",
+    "New customer accounts",
+    "Paid users acquired",
+)
+add_rows(ADMITTED, {f"CAC spend {label}": rate(label, "New customers", "CAC") for label in CAC_SPEND_LABELS})
+add_rows(ADMITTED, {f"CAC count {label}": rate("S&M spend", label, "CAC") for label in NEW_CUSTOMER_LABELS})
+add_rows(
+    ADMITTED,
+    {
+        "CAC marketing spend over customers acquired": rate("Marketing spend", "Customers acquired", "CAC"),
+        # Not CAC over buyers, so neither grammar reads it: written per the count's own words.
+        "CAC per lead over leads": rate("S&M spend", "Leads", "CAC per lead"),
+        "CAC written per new trial": rate("S&M spend", "New trials", "CAC", "$2K per new trial"),
+        # Gross value against an order value or a unit price, and revenue that is not gross value.
+        **{
+            f"{label} over {den} vs {stated}": rate(label, den, stated)
+            for label in (
+                "Gross merchandise volume",
+                "GTV",
+                "TPV",
+                "Total processing volume",
+                "Payments volume",
+                "Total payments processed",
+            )
+            for den, stated in (("Orders", "AOV"), ("Units", "ASP"))
+        },
+        "non-GMV revenue vs ARPC": rate("Non-GMV revenue", "Customers", "ARPC"),
+        "revenue on GMV vs ARPC": rate("Revenue on GMV", "Customers", "ARPC"),
+        "booking fees vs ARPC": rate("Booking fees", "Customers", "ARPC"),
+        "non-recurring revenue vs ASP": rate("Non-recurring revenue", "Units", "ASP"),
+        "MRR over monthly orders vs AOV": rate("MRR", "Monthly orders", "AOV"),
+        # Burn per head against a whole cost line, not a part of spending.
+        "opex incl. payroll vs burn per employee": rate("Opex (incl. payroll)", "Employees", "Burn per employee"),
+        "burn ex-payroll vs burn per employee": rate("Burn ex-payroll", "Employees", "Burn per employee"),
+        "opex vs burn per employee": rate("Opex", "Employees", "Burn per employee"),
+        "opex vs gross burn per employee": rate("Opex", "Employees", "Gross burn per employee"),
+        "payroll vs cost per employee": rate("Payroll", "Employees", "Cost per employee"),
+    },
 )
 
 
@@ -517,6 +600,156 @@ ALREADY_REFUSED = {
 }
 
 
+# Four more known mismatches over a count, each refused with its own reason.
+def not_spend(noun: str, raw: str = "$2K") -> str:
+    return (
+        f"a figure per {noun} is not among the acquisition-spend labels this check reads, and {raw} is a cost per new"
+        " customer"
+    )
+
+
+def not_new(noun: str, raw: str = "$2K") -> str:
+    return f"a figure per {noun} is not a count this check reads as new customers, and {raw} is a cost per new customer"
+
+
+def whole_base(noun: str) -> str:
+    return f"a figure per {noun} counts the whole base, and $2K is a cost per new customer"
+
+
+def net_of(noun: str) -> str:
+    return (
+        f"$2K is stated net of or after acquisition cost, so it is not one quantity a figure per {noun} can be tested"
+        " against"
+    )
+
+
+MISMATCH_REFUSED: dict[str, tuple[Side, Side, Side, str]] = {
+    # CAC over a numerator that is not acquisition spend ("CAC" alone is already a cost per customer).
+    **{
+        f"CAC over {label}": (*rate(label, "New customers", "CAC"), not_spend("New customers"))
+        for label in (
+            "Opex incl. marketing",
+            "Payroll and marketing",
+            "Sales, marketing and G&A",
+            "Marketing and R&D",
+            "Acquisition of Company X",
+            "Commissions earned",
+            "GTM spend",
+            "Selling expenses",
+            "CAC",
+            "Total CAC",
+            "Paid CAC",
+            "Monthly CAC",
+            "Revenue",
+            "Acquisition (cash)",
+        )
+    },
+    # CAC over a count that is not of new customers.
+    **{
+        f"CAC over the count {label}": (*rate("S&M spend", label, "CAC"), not_new(label))
+        for label in (
+            "Customers",
+            "Net-new customers",
+            "Net new customers",
+            "Net adds",
+            "Net customer adds",
+            "Net new paid logos",
+            "Total signed customers",
+            "Customers onboarded",
+            "Customers won",
+            "Signed renewals",
+            "Customers won back",
+            "Total acquisitions",
+            "Acquisitions",
+            "Company acquisitions",
+            "Customers converted",
+            "Reactivated customers added",
+            "Returning users acquired",
+        )
+    },
+    # A label that is not CAC over buyers keeps the whole-base and kind refusals.
+    "fully-loaded CAC per paying customer": (
+        *rate("S&M", "Paying customers", "Fully-loaded CAC per paying customer"),
+        whole_base("Paying customers"),
+    ),
+    "paid CAC over active customers": (
+        *rate("S&M spend", "Active customers", "Paid CAC"),
+        whole_base("Active customers"),
+    ),
+    "gross profit net of CAC": (
+        *rate("Gross profit", "Customers", "Gross profit per customer, net of CAC"),
+        net_of("Customers"),
+    ),
+    "gross profit after CAC": (
+        *rate("Gross profit", "New customers", "Gross profit per new customer, after CAC"),
+        net_of("New customers"),
+    ),
+    "revenue net of CAC": (
+        *rate("Revenue", "New customers", "Revenue per new customer, net of CAC"),
+        net_of("New customers"),
+    ),
+    # Gross transaction value is not revenue, a contract value or a deal size; bookings are not revenue earned.
+    **{
+        f"{label} over customers vs ARPC": (
+            *rate(label, "Customers", "ARPC"),
+            "a figure per Customers is gross transaction value, and $2K is revenue",
+        )
+        for label in (
+            "GMV",
+            "Gross merchandise volume",
+            "GTV",
+            "TPV",
+            "Total processing volume",
+            "Payments volume",
+            "Total payments processed",
+        )
+    },
+    "GMV vs revenue per customer": (
+        *rate("GMV", "Customers", "Revenue per customer"),
+        "a figure per Customers is gross transaction value, and $2K is revenue",
+    ),
+    "GMV vs ACV": (
+        *rate("GMV", "Customers", "ACV"),
+        "a figure per Customers is gross transaction value, and $2K is revenue",
+    ),
+    "GMV over deals vs deal size": (
+        *rate("GMV", "Deals", "Average deal size"),
+        "a figure per Deals is gross transaction value, and $2K is a deal or contract value",
+    ),
+    "bookings vs ARPC": (
+        *rate("Bookings", "Customers", "ARPC"),
+        "a figure per Customers is bookings, and $2K is revenue earned",
+    ),
+    "bookings vs revenue per customer": (
+        *rate("Bookings", "Customers", "Revenue per customer"),
+        "a figure per Customers is bookings, and $2K is revenue earned",
+    ),
+    # Recurring revenue over units is not a price per unit sold.
+    **{
+        f"{label} over units vs ASP": (
+            *rate(label, "Units", "ASP"),
+            "a figure per Units is recurring revenue, and $2K is a price per unit sold",
+        )
+        for label in ("ARR", "Run rate", "Subscriptions revenue", "Annualized revenue")
+    },
+    # Part of spending over heads is not burn per head.
+    **{
+        f"{label} vs {stated}": (
+            *rate(label, "Employees", stated),
+            "a figure per Employees is part of spending, and $2K is burn",
+        )
+        for label, stated in (
+            ("Marketing spend", "Burn per employee"),
+            ("Payroll", "Burn per employee"),
+            ("Personnel costs", "Burn per employee"),
+            ("S&M", "Burn per employee"),
+            ("Payroll", "Net burn per employee"),
+        )
+    },
+}
+add_rows(REFUSED, {case: row[:3] for case, row in MISMATCH_REFUSED.items()})
+
+
 @pytest.mark.parametrize("case", sorted(REFUSED) + sorted(ALREADY_REFUSED))
 def test_a_figure_that_is_not_the_rate_is_refused(case: str) -> None:
     num, den, exp = {**REFUSED, **ALREADY_REFUSED}[case]
@@ -525,7 +758,9 @@ def test_a_figure_that_is_not_the_rate_is_refused(case: str) -> None:
     # Reached the rate decision, not a refusal from elsewhere.
     assert "_per_" in (r.computed_unit or ""), case
     assert r.reasons and (
-        r.reasons[-1] == KEPT_REASON or r.reasons[-1].startswith(("a figure per ", "a share or multiple divided by "))
+        r.reasons[-1] == KEPT_REASON
+        or r.reasons[-1].startswith(("a figure per ", "a share or multiple divided by "))
+        or " is stated net of or after acquisition cost, " in r.reasons[-1]
     ), (case, r.reasons)
 
 
@@ -587,7 +822,9 @@ def test_a_kind_refusal_says_which_kinds_differ() -> None:
 
 def test_cac_over_the_whole_base_and_arpu_of_no_period_say_why() -> None:
     r = run(*REFUSED["CAC over Total customers"])
-    assert r.reasons[-1] == "a figure per Total customers counts the whole base, and $2K is a cost per new customer"
+    assert r.reasons[-1] == not_new("Total customers")
+    r = run(*REFUSED["paid CAC over active customers"])
+    assert r.reasons[-1] == whole_base("Active customers")
     r = run(*REFUSED["ARPU over ARR"])
     assert r.reasons[-1] == "a figure per Users is for one year, and $1K does not state its period"
 
@@ -602,3 +839,33 @@ def test_cash_over_runway_months_is_still_compared_with_a_monthly_burn(numerator
         money(stated, "$60K", 6e4),
     )
     assert r.verdict == "contradiction", (numerator, stated, r.verdict, r.reasons)
+
+
+@pytest.mark.parametrize("case", sorted(MISMATCH_REFUSED))
+def test_a_known_mismatch_says_which(case: str) -> None:
+    num, den, exp, reason = MISMATCH_REFUSED[case]
+    assert run(num, den, exp).reasons[-1] == reason
+
+
+def test_a_stated_cac_over_another_kind_of_money_names_the_spend_it_reads() -> None:
+    r = run(*KIND_REFUSED["ARR over users vs CAC"])
+    assert r.reasons[-1] == not_spend("Users", "$3.7K")
+    r = run(*KIND_REFUSED["funding over customers vs CAC"])
+    assert r.reasons[-1] == not_spend("Customers", "$3.7K")
+
+
+@pytest.mark.parametrize("num", ["S&M spend", "Marketing & sales"])
+def test_a_cac_ceiling_over_a_count_not_of_new_customers_is_refused(num: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    row = rate(num, "Customers", "Max CAC")
+    r = run(*row, "at_most")
+    assert r.verdict == "incomparable", (num, r.verdict, r.reasons)
+    assert r.reasons[-1] == not_new("Customers")
+    # Reached the rate decision: forced open, the ceiling is tested.
+    monkeypatch.setattr(reconcile, "_stated_is_the_rate", lambda *a, **k: True)
+    assert run(*row, "at_most").verdict == "exceeds_stated_limit"
+
+
+def test_gross_adds_are_not_read_as_new_customers_by_any_admission() -> None:
+    """The count grammar takes "Gross adds", but no admission reads it for CAC: refused with the plain reason."""
+    r = run(*rate("S&M spend", "Gross adds", "CAC"))
+    assert r.reasons[-1] == "a figure per Gross adds cannot be tested against $2K, which is not stated per Gross adds"

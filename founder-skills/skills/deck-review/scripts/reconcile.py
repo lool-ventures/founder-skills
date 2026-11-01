@@ -2196,10 +2196,13 @@ def _per_customer_floor(num: Figure, den: Figure, exp: Figure, by_id: dict[str, 
 # another quantity. A bare "Deal size" and an ACV over a count of deals stay unchecked: a bare contract value is
 # often multi-year, and a count of deals is a flow over all time set against ARR's level today.
 #
-# Before any admission, three refusals over a count, each a known mismatch (a wording they do not name keeps the
-# admission above): money of another kind than the stated figure names (`_kinds_differ`: spending per employee is
-# not revenue per employee), CAC over a count marked as the whole base, and an ARPU-like figure that writes no period
-# over a numerator whose period is known.
+# Before any admission, refusals over a count, each a known mismatch. Four are closed grammars (`_known_mismatch`): a
+# stated CAC over anything but acquisition spend and a count of new customers, gross transaction value or bookings
+# against revenue, recurring revenue over units against a selling price, and part of spending against burn per head.
+# Three more keep the admission above for a wording they do not name: money of another kind than the stated figure
+# names (`_kinds_differ`: spending per employee is not revenue per employee), CAC over a count marked as the whole
+# base (both only where the stated figure is not CAC over buyers), and an ARPU-like figure that writes no period over
+# a numerator whose period is known.
 _DEAL_SIZE_NO_PERIOD = re.compile(
     r"(average|avg\.?|mean|median|typical)( [a-z0-9-]+){0,2} (contract|deal)( size| value)?( \([^()]{1,30}\))?"
 )
@@ -2308,6 +2311,55 @@ _NEW_BUYERS = re.compile(r"\b(new|acquired|added|won|onboarded)\b")
 # ARPU and its kin are monthly in many decks and yearly in many others: one that writes no period is not compared
 # with a numerator whose period is known.
 _ARPX = re.compile(r"arpu|average revenue per user|arpa|arpc|arppu")
+# FOUR MORE KNOWN MISMATCHES over a count, read only to REFUSE. Each is a CLOSED grammar matched on the whole label,
+# so a wording it does not list is refused (CAC) or keeps today's behaviour (the others), never newly compared.
+# A parenthetical a numerator may carry: a currency, scale or descriptive one, "(S&M)" or a cash basis.
+_MISMATCH_PAREN = rf"(?: (?:{_RATE_PAREN.pattern}|\((?:s ?& ?m|cash(?: basis)?)\)))*"
+_MISMATCH_Q = r"(?:total|blended|paid|gross|monthly|quarterly|annual|yearly)"
+_CAC_NAMES = r"cac|customer acquisition cost|cpa|cost per acquisition"
+# CAC is the stated figure only when the label IS that rate: the named-rate form, or CAC per buyer words. A label
+# that merely contains CAC ("Gross profit per customer, net of CAC", "CAC per lead") is not.
+_CAC_PER_MONEY = re.compile(rf"((blended|average|avg) )?({_CAC_NAMES})")
+_CAC_PER_BUYER = re.compile(r"((new|paying|paid) )?(customers?|clients?|logos?|users?|accounts?)")
+# The acquisition spend CAC divides. A bare "CAC" (a CAC already divided by customers) is not spend.
+_ACQUISITION_SPEND = re.compile(
+    rf"(?:{_MISMATCH_Q} )?(?:s ?& ?m|sales ?(?:and|&|/|\+) ?marketing|marketing ?(?:and|&|/|\+) ?sales"
+    r"|(?:(?:digital|online|growth|performance|paid) )?marketing|paid (?:media|search|social|acquisition)"
+    r"|(?:customer|user|paid) acquisition|acquisition (?:spend|spending|expenses?|costs?|budget)|ua|advertising"
+    r"|ads?|demand gen(?:eration)?|(?P<cac>cac))"
+    rf"(?P<spend> (?:spend|spending|expenses?|costs?|budget))?{_MISMATCH_PAREN}"
+)
+# The new-customer counts CAC divides by. "Net new" is net of churn; a word between "new" and the buyer may only
+# say which buyers.
+_BUYER_WORDS = r"(?:customers?|clients?|logos?|users?|accounts?)"
+_BUYER_SLOT = (
+    r"(?:enterprise|smb|mid-market|business|consumer|b2b|b2c|self-serve|direct|organic|paid|trial|customer|client"
+    r"|user|logo|account)"
+)
+_NEW_CUSTOMER_COUNTS = (
+    re.compile(
+        rf"(?:total )?(?:(?:gross|newly) )?(?:new|acquired|added) (?:{_BUYER_SLOT} )?(?:(?:paying|paid) )?"
+        rf"{_BUYER_WORDS}(?: (?:acquired|added))?"
+    ),
+    re.compile(rf"(?:total )?(?:{_BUYER_SLOT} )?{_BUYER_WORDS} (?:acquired|added)"),
+    re.compile(r"gross adds|(?:customer|client|logo|user|account) (?:acquisitions|additions|adds)"),
+)
+_NET_OF_CAC = re.compile(rf".*,? (net of|after|less|minus) ({_CAC_NAMES})")
+_GROSS_VALUE = re.compile(
+    rf"(?:{_MISMATCH_Q} )?(?:gmv|gms|gtv|tpv|gross (?:merchandise|transaction|order) (?:value|volume|sales)"
+    rf"|(?:payments?|processing|transaction|processed) volume|payments processed){_MISMATCH_PAREN}"
+)
+_BOOKINGS = re.compile(rf"(?:(?:{_MISMATCH_Q}|net|new) )?bookings{_MISMATCH_PAREN}")
+_RECURRING_REVENUE = re.compile(
+    rf"(?:{_MISMATCH_Q} )?(?:arr|mrr|run[- ]?rate(?: revenue)?|(?:recurring|subscriptions?) revenue"
+    rf"|annuali[sz]ed revenue){_MISMATCH_PAREN}"
+)
+_PAYROLL = re.compile(
+    rf"(?:{_MISMATCH_Q} )?(?:payroll|salaries|wages|salaries (?:and|&) wages|personnel|headcount|compensation)"
+    rf"(?: (?:and|&) benefits)?(?: (?:costs?|expenses?))?{_MISMATCH_PAREN}"
+)
+_REVENUE_PER_MONEY = re.compile(r"(average |avg )?(revenue|arr|mrr)")
+_BURN_PER_MONEY = re.compile(r"(average |avg |monthly )?(gross |net |cash )?burn")
 _NO_PERIOD_DEAL_REASON = "a deal or contract size with no stated period cannot be tested against revenue per customer"
 
 
@@ -2407,6 +2459,101 @@ def _arpx_period_unknown(num: Figure, den: Figure, exp: Figure) -> str | None:
     return num.period or next((unit for unit, pat in _RECURRING_UNIT if pat.search(nl)), None)
 
 
+def _named_rate(names: str, el: str, *, ceiling: bool = True) -> bool:
+    q = _RATE_QUALIFIERS_CEILING if ceiling else _RATE_QUALIFIERS
+    return bool(re.fullmatch(rf"({q} ){{0,2}}({names})( {q}){{0,2}}( \([^()]*\))?", el))
+
+
+def _money_per(el: str, money: re.Pattern[str]) -> re.Match[str] | None:
+    """The stated label's per-phrase, when the words before it fullmatch `money`."""
+    m = _PER_PHRASE.search(el)
+    return m if m and money.fullmatch(el[: m.start()].strip()) else None
+
+
+def _money_count_money(num: Figure, den: Figure, exp: Figure) -> bool:
+    return num.unit_kind == MONEY and den.unit_kind == COUNT and exp.unit_kind == MONEY
+
+
+def _cac_gated(num: Figure, den: Figure, exp: Figure, *, ceiling: bool) -> bool:
+    """The stated figure IS CAC over buyers: its named-rate form, or CAC per buyer words."""
+    if not _money_count_money(num, den, exp):
+        return False
+    el = _pc_norm(exp.label or "")
+    if _named_rate(_CAC_NAMES, el, ceiling=ceiling):
+        return True
+    m = _money_per(el, _CAC_PER_MONEY)
+    return bool(m and _CAC_PER_BUYER.fullmatch(m.group(1).strip()))
+
+
+def _cac_mismatch(num: Figure, den: Figure, exp: Figure, *, ceiling: bool) -> str | None:
+    """CAC over a numerator that is not acquisition spend, or a count that is not of new customers."""
+    if not _cac_gated(num, den, exp, ceiling=ceiling):
+        return None
+    noun = _denominator_noun(den)
+    m = _ACQUISITION_SPEND.fullmatch(_pc_norm(num.label or ""))
+    if not m or (m.group("cac") and not m.group("spend")):
+        return (
+            f"a figure per {noun} is not among the acquisition-spend labels this check reads, and {exp.raw} is a cost"
+            " per new customer"
+        )
+    base = _den_counts_actuals(_pc_norm(den.label or ""))
+    if base is None:
+        new = False
+    elif any(p.fullmatch(base) for p in _NEW_CUSTOMER_COUNTS):
+        new = True
+    else:
+        # The stated figure written per these very words, when they say "new" ("$2K per new trial").
+        words = {_singular(w) for w in base.split()}
+        new = "new" in words and any(
+            {_singular(w) for w in per.group(1).split()} == words
+            for text in (_pc_norm(exp.label or ""), (exp.raw or "").lower())
+            for per in _PER_PHRASE.finditer(text)
+        )
+    if not new:
+        return (
+            f"a figure per {noun} is not a count this check reads as new customers, and {exp.raw} is a cost per new"
+            " customer"
+        )
+    return None
+
+
+def _gross_value_mismatch(num: Figure, den: Figure, exp: Figure) -> str | None:
+    """Gross transaction value against revenue or a deal size, or bookings against revenue earned."""
+    el, nl = _pc_norm(exp.label or ""), _pc_norm(num.label or "")
+    revenue = _named_rate(r"arpu|arpa|arpc|arppu|average revenue per user", el) or bool(
+        _money_per(el, _REVENUE_PER_MONEY)
+    )
+    contract = bool(_ACV_NO_PERIOD.fullmatch(el) or el == "annual contract value")
+    deal = bool(_DEAL_SIZE_NO_PERIOD.fullmatch(el))
+    noun = _denominator_noun(den)
+    if (revenue or contract or deal) and _GROSS_VALUE.fullmatch(nl):
+        if deal and not revenue and not contract:
+            return f"a figure per {noun} is gross transaction value, and {exp.raw} is a deal or contract value"
+        return f"a figure per {noun} is gross transaction value, and {exp.raw} is revenue"
+    if revenue and _BOOKINGS.fullmatch(nl):
+        return f"a figure per {noun} is bookings, and {exp.raw} is revenue earned"
+    return None
+
+
+def _known_mismatch(num: Figure, den: Figure, exp: Figure, *, ceiling: bool) -> str | None:
+    """The reason a rate over a count is one of the closed known mismatches, or None (money over a count only)."""
+    if not _money_count_money(num, den, exp):
+        return None
+    cac = _cac_mismatch(num, den, exp, ceiling=ceiling)
+    if cac or _cac_gated(num, den, exp, ceiling=ceiling):
+        return cac
+    gross = _gross_value_mismatch(num, den, exp)
+    if gross:
+        return gross
+    el, nl = _pc_norm(exp.label or ""), _pc_norm(num.label or "")
+    noun = _denominator_noun(den)
+    if _named_rate(r"asp|average selling price", el) and _RECURRING_REVENUE.fullmatch(nl):
+        return f"a figure per {noun} is recurring revenue, and {exp.raw} is a price per unit sold"
+    if _money_per(el, _BURN_PER_MONEY) and (_ACQUISITION_SPEND.fullmatch(nl) or _PAYROLL.fullmatch(nl)):
+        return f"a figure per {noun} is part of spending, and {exp.raw} is burn"
+    return None
+
+
 def _stated_is_the_rate(num: Figure, den: Figure, exp: Figure, computed: float | None, *, ceiling: bool) -> bool:
     if num.unit_kind in (PERCENT, MULTIPLE):
         return False
@@ -2416,8 +2563,13 @@ def _stated_is_the_rate(num: Figure, den: Figure, exp: Figure, computed: float |
         return False
     if not _parens_ok(el, pilot=True):
         return False
-    # Over a count: never another kind of money, CAC over the whole base, or ARPU of an unwritten period.
-    if _kinds_differ(num, den, exp) or _cac_over_base(den, exp) or _arpx_period_unknown(num, den, exp):
+    # Over a count: never a known mismatch, another kind of money, CAC over the whole base, or ARPU of an unwritten
+    # period. A stated CAC is decided by its own two grammars alone.
+    if _known_mismatch(num, den, exp, ceiling=ceiling):
+        return False
+    if not _cac_gated(num, den, exp, ceiling=ceiling) and (_kinds_differ(num, den, exp) or _cac_over_base(den, exp)):
+        return False
+    if _arpx_period_unknown(num, den, exp):
         return False
     # A recurring numerator's period: its own, or the one its label names ("MRR" is monthly).
     num_unit = num.period or next((unit for unit, pat in _RECURRING_UNIT if pat.search(nl)), None)
@@ -2459,18 +2611,27 @@ def _stated_is_the_rate(num: Figure, den: Figure, exp: Figure, computed: float |
     return False
 
 
-def _rate_refusal(num: Figure, den: Figure, exp: Figure) -> str:
+def _rate_refusal(num: Figure, den: Figure, exp: Figure, *, ceiling: bool) -> str:
     """Why a rate was not tested against a bare figure, in the founder's words."""
     if num.unit_kind in (PERCENT, MULTIPLE):
         return (
             f"a share or multiple divided by {_denominator_noun(den)} is a simple average, not a rate {exp.raw} states"
         )
     noun = _denominator_noun(den)
-    kinds = _kinds_differ(num, den, exp)
-    if kinds:
-        return f"a figure per {noun} is {kinds[0]}, and {exp.raw} is {kinds[1]}: they are not the same quantity"
-    if _cac_over_base(den, exp):
-        return f"a figure per {noun} counts the whole base, and {exp.raw} is a cost per new customer"
+    mismatch = _known_mismatch(num, den, exp, ceiling=ceiling)
+    if mismatch:
+        return mismatch
+    if not _cac_gated(num, den, exp, ceiling=ceiling):
+        kinds = _kinds_differ(num, den, exp)
+        if kinds and _NET_OF_CAC.fullmatch(_pc_norm(exp.label or "")):
+            return (
+                f"{exp.raw} is stated net of or after acquisition cost, so it is not one quantity a figure per {noun}"
+                " can be tested against"
+            )
+        if kinds:
+            return f"a figure per {noun} is {kinds[0]}, and {exp.raw} is {kinds[1]}: they are not the same quantity"
+        if _cac_over_base(den, exp):
+            return f"a figure per {noun} counts the whole base, and {exp.raw} is a cost per new customer"
     period = _arpx_period_unknown(num, den, exp)
     if period:
         return f"a figure per {noun} is for one {period}, and {exp.raw} does not state its period"
@@ -3224,15 +3385,15 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
             comparable = r.computed
         elif cu.startswith(exp.unit_kind) and not exp.period:
             # A rate against a bare figure: only when the figure is that rate (`_stated_is_the_rate`).
+            ceiling = relation == "at_most" or exp.bound == "at_most"
             if "_per_" in cu and not (
-                len(real) == 2
-                and _stated_is_the_rate(
-                    real[0], real[1], exp, r.computed, ceiling=relation == "at_most" or exp.bound == "at_most"
-                )
+                len(real) == 2 and _stated_is_the_rate(real[0], real[1], exp, r.computed, ceiling=ceiling)
             ):
                 r.verdict = "incomparable"
                 r.reasons.append(
-                    _rate_refusal(real[0], real[1], exp) if len(real) == 2 else f"cannot test against {exp.raw}"
+                    _rate_refusal(real[0], real[1], exp, ceiling=ceiling)
+                    if len(real) == 2
+                    else f"cannot test against {exp.raw}"
                 )
                 return r
             comparable = r.computed
