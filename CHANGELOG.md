@@ -81,7 +81,8 @@ delivered.
   or burn per employee against revenue per employee, cash or funding per customer against ARPC or ARPA, revenue per
   customer against a cost per customer, gross profit per unit against an average selling price, operating costs per
   order against an average order value, or burn per deal against an average deal size. A label that names two kinds of
-  money, or none, is compared as before. The numbers section says which two kinds differ.
+  money, or none, is compared as before. The founder's report counts these as figures it could not settle; it does
+  not say why.
 - Customer acquisition cost is no longer compared with spending over the whole customer base ("Total customers",
   "Paying customers", "Active users"). A count marked new ("New paying customers", "Net new logos") is still compared.
 - ARPU, ARPA, ARPC and ARPPU that state no period ("$60K", not "$5K/mo") are no longer compared with revenue whose
