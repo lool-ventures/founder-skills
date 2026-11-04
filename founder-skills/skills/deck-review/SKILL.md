@@ -514,7 +514,7 @@ until it exists.
 
 Determine pre-seed/seed/series-a from signals in the deck. Read `${CLAUDE_PLUGIN_ROOT}/skills/deck-review/references/deck-best-practices.md` for stage-specific frameworks. Record: detected stage, confidence, evidence, whether AI company, expected slide framework, stage benchmarks.
 
-**Stage signals:** Pre-seed: no revenue, LOIs/waitlist, prototype, <$2.5M ask. Seed: early ARR, paying customers, <$6M ask. Series A: $1M+ ARR, cohort data, repeatable GTM, $10M+ ask. Later-stage: set detected_stage to `"series_b"` or `"growth"` — use the Gate below. Do not ask outside the gate.
+**Stage signals:** Pre-seed: no revenue, LOIs/waitlist, prototype, <$2500K ask. Seed: early ARR, paying customers, <$6M ask. Series A: $1M+ ARR, cohort data, repeatable GTM, $10M+ ask. Later-stage: set detected_stage to `"series_b"` or `"growth"` — use the Gate below. Do not ask outside the gate.
 
 **AI company note:** `ai_company_status` was determined in Step 2 (deck inventory) and is already in `deck_inventory.json`. Set `is_ai_company` in `stage_profile.json` to `true` if `ai_company_status` is `"ai_core"` or `"ai_claimed_unverified"`, otherwise `false`. Record the same evidence in `ai_evidence`.
 
@@ -592,7 +592,7 @@ cat <<'GATE_EOF' | python3 "$SCRIPTS/gate_state.py" emit --run-id "$RUN_ID" --st
   "gate_id": "stage_confirmation",
   "question": "Does this stage detection look right?",
   "options": ["Looks right", "Different stage", "Not sure — proceed anyway"],
-  "context_summary": "Detected stage: Seed (high confidence). Key evidence: $4.2M ARR, 3 paying enterprise customers, $5M raise ask. AI company: Yes — inference costs in COGS. Expected framework: Sequoia seed (12-15 slides). Slides in deck: 14."
+  "context_summary": "Detected stage: Seed (high confidence). Key evidence: $4M ARR, 3 paying enterprise customers, $5M raise ask. AI company: Yes — inference costs in COGS. Expected framework: Sequoia seed (12-15 slides). Slides in deck: 14."
 }
 GATE_EOF
 ```

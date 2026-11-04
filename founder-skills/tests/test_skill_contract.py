@@ -154,6 +154,34 @@ def test_the_loader_expansion_matcher_sees_each_form_and_spares_spreadsheet_erro
     assert not _loader_expansion_hits(fmr_agent)
 
 
+# The runtime's own pattern for a positional argument: `$1,884` becomes the second word typed after the
+# command, while `$8M` is left alone. Agent bodies and references never pass through that step.
+_POSITIONAL_ARGUMENT = re.compile(r"\$(\d+)(?!\w)")
+
+
+def _positional_argument_hits(text: str) -> list[str]:
+    return [f"line {text.count(chr(10), 0, m.start()) + 1}: {m.group(0)}" for m in _POSITIONAL_ARGUMENT.finditer(text)]
+
+
+def test_no_dollar_figure_in_a_skill_body_reads_as_a_positional_argument() -> None:
+    """A `$` and digits with no letter after them is replaced by what the founder typed.
+
+    An escaped `\\$` is no answer: a skill expanded outside Claude Code keeps the backslash. Reword.
+    """
+    files = [*SKILLS_ROOT.glob("*/SKILL.md"), *PLUGIN_ROOT_DIR.glob("commands/*.md")]
+    assert len(files) >= 7, f"expected the seven skills; found {len(files)}"
+    offenders = [f"{p.relative_to(REPO_ROOT)} {hit}" for p in files for hit in _positional_argument_hits(p.read_text())]
+    assert not offenders, "reword these so no digit follows a `$`:\n" + "\n".join(offenders)
+
+
+def test_the_positional_argument_matcher_sees_each_shape_and_spares_a_scaled_figure() -> None:
+    """Seeded control: the shapes the runtime replaces are caught, and the ones it leaves are not."""
+    for text in ("$1,884", "<$2.5M ask", "$157/month", "cost $20", "`$8`"):
+        assert _positional_argument_hits(text), text
+    for text in ("$8M", "<$2500K ask", "$RUN_ID", "$@", "157/month"):
+        assert not _positional_argument_hits(text), text
+
+
 @pytest.mark.parametrize("skill_md", _skill_md_files(), ids=lambda p: p.parent.name)
 def test_frontmatter_only_documented_keys(skill_md: Path) -> None:
     """Custom keys are silently dropped by the parser — keep them out."""
@@ -998,7 +1026,7 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 107,401 -> 107,635 (+234 B) on 2026-10-24: Step 4 points to references/web-sources.md, which says to open
     # the pages the sized figures rest on and record each figure's passage, and that a page that will not open
     # is left out. The procedure itself lives in the reference file.
-    "market-sizing": 107_635,
+    "market-sizing": 107_624,
     # fmr raised for two founder-facing-correctness items measured in a live run: the CHECKLIST
     # dispatch now forbids citing our artifact filenames in evidence (that run put `inputs.json` in 10
     # items' evidence, printed verbatim into the founder's report), and the producer pipe passes
@@ -1255,7 +1283,7 @@ SKILL_MD_CEILING: dict[str, int] = {
     # and Step 9 says a compose exit 10 carrying request_waiting is a stop, not a question to ask.
     # 97,663 -> 97,738 (+75 B) on 2026-10-19: Step 0 says to leave the request heredoc empty
     # when the request carries no `FS_HOST_` lines.
-    "ic-sim": 97_738,
+    "ic-sim": 97_719,
     # deck-review +1,165 B: Step 0 carried only a parenthetical fresh-shell mention buried in a code
     # comment, unlike the four skills that mint RUN_ID in a LATER block and so carry the shared banner.
     # deck-review mints RUN_ID INSIDE this re-runnable Step-0 block (like cap-table), so the shared
@@ -1676,7 +1704,7 @@ SKILL_MD_CEILING: dict[str, int] = {
     # a stated average contract value, which the engine now tests one way (no such relation could ever be
     # compared before), and SLIDE_REVIEWS says a figure the arithmetic shows wrong is never a strength (a
     # review praised a stated runway on the slide whose runway the kept contradiction refuted).
-    "deck-review": 120_444,
+    "deck-review": 120_443,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
@@ -2002,7 +2030,7 @@ SKILL_MD_CEILING: dict[str, int] = {
     # byte for byte, never reformatted or wrapped (a value sent with the request is checked as sent).
     # +75 B on 2026-10-19: Step 0 says to leave the request heredoc empty
     # when the request carries no `FS_HOST_` lines.
-    "cap-table": 156_979,
+    "cap-table": 156_968,
 }
 
 

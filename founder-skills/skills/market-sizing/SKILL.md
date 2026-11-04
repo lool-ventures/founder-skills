@@ -397,8 +397,8 @@ the sizing math actually consumed and raises `FOUNDER_VALUE_OVERRIDDEN` if they 
 silently replace what the founder said. A discrepancy is a question for the founder, never an
 edit: a figure the founder did not confirm is not founder-stated. If the founder quoted a rate per
 month or per quarter, say so in `founder_stated_inputs_period` (`{"arpu": "month"}`) and the check
-normalises it to the annual figure the math uses — a founder-stated $157/month against a computed
-$1,884 is agreement, not an override.
+normalises it to the annual figure the math uses — a founder-stated 157/month against a computed
+1,884 is agreement, not an override.
 
 **Two figures for one input.** When the founder's materials state more than one figure for the same
 input (a rate typed in chat and a blended rate in the deck, or two rates in the deck), ask before
@@ -482,7 +482,7 @@ cat <<'INPUTS_EOF' > "$ANALYSIS_DIR/inputs.json"
 INPUTS_EOF
 ```
 
-**Heredoc guardrail:** every templated heredoc in this file uses a single-quoted delimiter (`<<'INPUTS_EOF'`, `<<'METH_EOF'`, etc.) on purpose. An UNQUOTED delimiter (`<<EOF`) lets the shell expand `$`-bearing values inside the body, so a literal dollar amount like `$8M` silently shell-expands away (`$8` is read as a variable, `M` is left dangling) before it ever reaches the file. This applies to any heredoc you improvise too, not just the templates above: always single-quote the delimiter when the body may contain a `$`.
+**Heredoc guardrail:** every templated heredoc in this file uses a single-quoted delimiter (`<<'INPUTS_EOF'`, `<<'METH_EOF'`, etc.) on purpose. An UNQUOTED delimiter (`<<EOF`) lets the shell expand `$`-bearing values inside the body, so a literal dollar amount like `$8M` silently shell-expands away (`$` then a digit names a shell variable) before it ever reaches the file. This applies to any heredoc you improvise too, not just the templates above: always single-quote the delimiter when the body may contain a `$`.
 
 Write `methodology.json`:
 ```bash

@@ -465,8 +465,8 @@ append-only rule in Step 0.
 **General heredoc guardrail:** every templated heredoc in this file already uses a single-quoted
 delimiter (`<<'PROFILE_EOF'`, `<<'FUND_EOF'`, etc.) — this is deliberate, not incidental. An
 UNQUOTED heredoc delimiter (`<<EOF` without quotes) lets the shell perform variable/parameter
-expansion inside the body, so a literal dollar amount like `$8M` silently shell-expands away (`$8`
-is read as a variable reference, `M` is left dangling) before it ever reaches the file. This applies
+expansion inside the body, so a literal dollar amount like `$8M` silently shell-expands away
+(`$` then a digit names a shell variable) before it ever reaches the file. This applies
 to ad-hoc/improvised writes too, not just the provided templates: if you ever compose a heredoc that
 isn't one of the templates above, always single-quote its delimiter when the body may contain a `$`.
 
