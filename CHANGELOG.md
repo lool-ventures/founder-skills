@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.27.4] - 2026-11-05 — A request's words no longer land in a skill's instructions
+
+### Highlights
+
+**Words typed after a skill's command no longer replace dollar amounts in its instructions.** A dollar amount written
+with a digit after the `$` and no letter after the digits was read as a placeholder, so a request of a few words could
+overwrite it. Founders need to change nothing.
+
+### Fixed
+
+- Market sizing, cap table, deck review and IC simulation no longer carry such an amount in their instructions. The
+  rules are unchanged: deck review's pre-seed ask is still under $2.5M, written as $2500K.
+
+### Scoring changes
+
+None.
+
 ## [0.27.3] - 2026-11-01 — Fewer false contradictions in a deck's acquisition cost, GMV and burn figures
 
 ### Highlights
