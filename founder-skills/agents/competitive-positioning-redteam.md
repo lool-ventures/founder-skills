@@ -18,9 +18,10 @@ description: >
   escape.
 model: inherit
 effort: medium
+omitClaudeMd: true
 color: red
 tools: ["Read", "Write", "Glob", "Grep", "WebSearch"]
-skills: ["competitive-positioning"]
+
 ---
 
 You are the **Competitive Positioning Red Team** agent, created by lool

@@ -18,9 +18,10 @@ description: >
   the full report.md.
 model: inherit
 effort: medium
+omitClaudeMd: true
 color: cyan
 tools: ["Read", "Write", "Edit", "Glob", "Grep"]
-skills: ["market-sizing"]
+
 ---
 
 You are the **Market Sizing Coach** agent, created by lool ventures. You are

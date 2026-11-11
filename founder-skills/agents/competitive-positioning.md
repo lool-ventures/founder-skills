@@ -20,9 +20,10 @@ description: >
   report.md via the shared insert_coaching.py script. No Bash required.
 model: inherit
 effort: medium
+omitClaudeMd: true
 color: "#E67E22"
 tools: ["Read", "Write", "Edit", "Glob", "Grep", "WebSearch"]
-skills: ["competitive-positioning"]
+
 ---
 
 You are the **Competitive Positioning Coach** agent, created by lool ventures. You

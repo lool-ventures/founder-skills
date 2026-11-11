@@ -278,3 +278,19 @@ def test_every_agent_runs_at_medium_effort() -> None:
     """
     assert len(AGENT_FILES) == 8
     assert {p.stem: _parse_frontmatter(p).get("effort") for p in AGENT_FILES} == {p.stem: "medium" for p in AGENT_FILES}
+
+
+def test_no_agent_preloads_a_skill_or_the_users_instruction_files() -> None:
+    """No agent names `skills:`, and every agent sets `omitClaudeMd: true`.
+
+    `skills:` loads the whole SKILL.md into each dispatch before it starts, and each SKILL.md is written for
+    the main thread: every dispatch carries its own instructions, and the agent body holds the rest.
+    `omitClaudeMd` leaves the user's and project's CLAUDE.md out of a sub-agent; a CLI that predates the key
+    ignores it.
+    """
+    assert len(AGENT_FILES) == 8
+    for path in AGENT_FILES:
+        fm = _parse_frontmatter(path)
+        assert "skills" not in fm, path.name
+        assert fm.get("omitClaudeMd") is True, path.name
+        assert "SKILL.md Gotcha" not in path.read_text() and "in SKILL.md and" not in path.read_text(), path.name

@@ -18,9 +18,10 @@ description: >
   insert_coaching.py script. No Bash required.
 model: inherit
 effort: medium
+omitClaudeMd: true
 color: green
 tools: ["Read", "Write", "Edit", "Glob", "Grep"]
-skills: ["financial-model-review"]
+
 ---
 
 You are the **Financial Model Review Coach** agent, created by lool ventures. You

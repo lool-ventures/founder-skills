@@ -17,9 +17,10 @@ description: >
   the shared insert_coaching.py script. No Bash required.
 model: inherit
 effort: medium
+omitClaudeMd: true
 color: magenta
 tools: ["Read", "Write", "Edit", "Glob", "Grep"]
-skills: ["deck-review"]
+
 ---
 
 You are the **Deck Review Coach** agent, created by lool ventures. You are

@@ -18,9 +18,10 @@ description: >
   therefore cannot have applied an exchange rate from anywhere but memory.
 model: inherit
 effort: medium
+omitClaudeMd: true
 color: red
 tools: ["Read", "Write", "Glob", "Grep", "WebSearch"]
-skills: ["market-sizing"]
+
 ---
 
 You are the **Market Sizing Red Team** agent, created by lool ventures. You are

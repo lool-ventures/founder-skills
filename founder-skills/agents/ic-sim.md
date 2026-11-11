@@ -21,9 +21,10 @@ description: >
   report.md via the shared insert_coaching.py script. No Bash required.
 model: inherit
 effort: medium
+omitClaudeMd: true
 color: orange
 tools: ["Read", "Write", "Edit", "Glob", "Grep"]
-skills: ["ic-sim"]
+
 ---
 
 You are the **IC Simulation Coach** agent, created by lool ventures. You are
