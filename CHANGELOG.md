@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-11-11 — Analysis sub-agents start lighter
+
+### Highlights
+
+**Each analysis sub-agent now starts with only the instructions for its own step.** Before, every sub-agent also loaded its
+skill's complete instructions before starting, which are written for the main conversation and are long. Short steps
+such as writing the coaching commentary or grading the checklist paid that start-up cost each time. A full analysis
+now costs less. Founders need to change nothing.
+
+### Changed
+
+- The analysis sub-agents of every skill no longer load the skill's full instructions before they start; each step's
+  dispatch carries what that step needs.
+- The analysis sub-agents no longer read your own or your project's CLAUDE.md instruction files. The main conversation
+  still reads them.
+
+### Scoring changes
+
+- Deck review, competitive positioning, financial model review, IC simulation and market sizing: the sub-agents that
+  grade the checklist and score the dimensions no longer load the skill's full instructions; each still receives its
+  step's instructions and the scoring rubric. No criterion, status rule or score changes.
+- Cap table: none.
+
 ## [0.27.4] - 2026-11-05 — A request's words no longer land in a skill's instructions
 
 ### Highlights
