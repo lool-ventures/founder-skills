@@ -35,6 +35,7 @@ from test_market_sizing import (  # noqa: E402
     run_script_raw,
 )
 from test_market_sizing_view import (  # noqa: E402
+    _REFS,
     _RUN,
     _SCRIPTS,
     _codes,
@@ -46,6 +47,7 @@ from test_market_sizing_view import (  # noqa: E402
     _review,
     _reviewed_dir,
     _run_dir,
+    _stamp_downstream,
 )
 
 _FIRST = "The first review found the share is 6.1%."
@@ -234,3 +236,109 @@ def test_the_two_pages_show_the_same_review() -> None:
     first_md = _section(md).index(_FIRST) < _section(md).index(_SECOND)
     first_html = html_page.index(_FIRST) < html_page.index(_SECOND)
     assert first_md and first_html
+
+
+# --- a base rebuilt from a different figure between reviews ------------------------------------------
+
+
+def _ref(name: str, value: float) -> dict[str, Any]:
+    return {"ref": {"assumption": name}, "value_consumed": value}
+
+
+def _bottom_up(count: dict[str, Any], share: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "sizing": {
+            "customer_count": count,
+            "arpu": _ref("price_per_unit", 120),
+            "serviceable_pct": share,
+            "target_pct": {"ref": {"estimate": 4, "unit": "percent_points", "why": "x"}, "value_consumed": 4},
+        }
+    }
+
+
+def _changes(first: dict[str, Any], shown: dict[str, Any]) -> list[str]:
+    view = importlib.import_module("_view")
+    facts = {"reviewed_first": first, "reviewed_shown": shown, "round_shown": 2}
+    return list(view.review_changes(facts, {}, "USD"))
+
+
+def test_a_count_rebuilt_from_a_new_population_names_the_figures_left_as_they_were() -> None:
+    """A revision widened a count to a second population and kept a share sourced for the first one."""
+    share = _ref("adoption_share_population_a", 20)
+    lines = _changes(
+        _bottom_up(_ref("population_a_units", 1_000_000), share),
+        _bottom_up(_ref("population_a_and_b_units", 1_300_000), share),
+    )
+    kept = [line for line in lines if "now built from a different figure" in line]
+    label = importlib.import_module("_redteam_text").humanize_param
+    names = f"{label('arpu')}, {label('serviceable_pct')} and {label('target_pct')}"
+    assert kept == [
+        f"{label('customer_count')} is now built from a different figure, and the {names} applied to it are unchanged"
+    ], lines
+
+
+def test_a_rate_changed_with_the_count_is_not_named_as_kept() -> None:
+    lines = _changes(
+        _bottom_up(_ref("population_a_units", 1_000_000), _ref("adoption_share_population_a", 20)),
+        _bottom_up(_ref("population_a_and_b_units", 1_300_000), _ref("adoption_share_blended", 17)),
+    )
+    kept = [line for line in lines if "now built from a different figure" in line]
+    assert kept == [
+        "Customer Count is now built from a different figure, and the ARPU and Target Capture % "
+        "applied to it are unchanged"
+    ], lines
+
+
+def test_a_new_value_from_the_same_figure_is_not_a_new_base() -> None:
+    """Updated research for the same population is not a change of what the count covers."""
+    share = _ref("adoption_share_population_a", 20)
+    lines = _changes(
+        _bottom_up(_ref("population_a_units", 1_000_000), share),
+        _bottom_up(_ref("population_a_units", 1_050_000), share),
+    )
+    assert not [line for line in lines if "now built from a different figure" in line], lines
+
+
+def test_the_kept_figures_reach_both_pages(tmp_path: Path) -> None:
+    """End to end: the market total rebuilt from a wider population, its segment share left as it was."""
+    d = _reviewed_dir(tmp_path)
+    _edit(
+        d,
+        "validation.json",
+        lambda v: v["assumptions"].append(
+            {**v["assumptions"][0], "name": "eligible_population_wider", "value": 52_000_000}
+        ),
+    )
+    refs = {
+        **_REFS,
+        "industry_total": {
+            "derived": {
+                "op": "multiply",
+                "factors": [{"assumption": "eligible_population_wider"}, {"assumption": "care_price"}],
+            }
+        },
+    }
+    rc, out, err = run_script_raw(
+        "market_sizing.py",
+        [
+            "--stdin",
+            "--validation",
+            str(d / "validation.json"),
+            "--inputs",
+            str(d / "inputs.json"),
+            "--run-id",
+            _RUN,
+            "-o",
+            str(d / "sizing.json"),
+        ],
+        stdin_data=json.dumps(refs),
+    )
+    assert rc == 0, out + err
+    _stamp_downstream(d)
+    assert _review(d, "Round two: the wider total is supported.") == 2
+    data = _compose(d)
+    expected = "Industry Total is now built from a different figure, and the Segment %"
+    w = next(w for w in data["validation"]["warnings"] if w["code"] == "ANALYSIS_CHANGED_BETWEEN_REVIEWS")
+    assert expected in w["message"], w
+    assert expected in _section(data["report_markdown"])
+    assert expected in _html(d)

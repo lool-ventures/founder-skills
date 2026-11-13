@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Competitive positioning: the report, its page and the explorer now say when research found that two
   competitors are one company and the analysis shows them separately, whether the founder chose that or an
   unattended run did.
+- Market sizing: when the analysis changed between two outside reviews and a market total or customer count
+  is now built from a different figure, the report and its page name the figures applied to it (shares, the
+  price per customer) that stayed as they were, so a share sourced for the earlier population is visible.
 
 ### Scoring changes
 

@@ -1365,7 +1365,43 @@ def review_changes(facts: dict[str, Any], validation: Any, currency: str) -> lis
                 )
         elif name not in covered:
             lines.append(f"{_describe((kind, name), validation)}: revised")
+    lines.extend(_rates_kept_on_a_new_base(changes, fs, ss))
     return lines
+
+
+# The figures each build applies to its base: a market total is narrowed by two percentages, a count
+# is priced and narrowed by two. When a base is rebuilt from a different figure (a new population),
+# each of these was sourced for the old one.
+_APPLIED_TO: dict[str, tuple[str, ...]] = {
+    "industry_total": ("segment_pct", "share_pct"),
+    "customer_count": ("arpu", "serviceable_pct", "target_pct"),
+}
+
+
+def _rates_kept_on_a_new_base(
+    changes: list[tuple[str, str]], first: dict[str, Any], shown: dict[str, Any]
+) -> list[str]:
+    """For a base now built from a different figure: the figures applied to it that did not change.
+
+    A fact, never a verdict -- an unchanged rate may still be right for the new base. Keyed on the
+    base's reference, not its value: a new value from the same figure is the same population.
+    """
+    changed = {name for kind, name in changes if kind == "param"}
+    out = []
+    for base, applied in _APPLIED_TO.items():
+        if base not in changed or base not in first or base not in shown:
+            continue
+        if _computed(_as_dict(first[base]).get("ref")) == _computed(_as_dict(shown[base]).get("ref")):
+            continue
+        kept = [p for p in applied if p in first and p in shown and p not in changed]
+        if kept:
+            names = " and ".join(", ".join(_humanize_param(p) for p in kept).rsplit(", ", 1))
+            verb = "is" if len(kept) == 1 else "are"
+            out.append(
+                f"{_humanize_param(base)} is now built from a different figure, and the "
+                f"{names} applied to it {verb} unchanged"
+            )
+    return out
 
 
 def review_note(facts: dict[str, Any]) -> str | None:
