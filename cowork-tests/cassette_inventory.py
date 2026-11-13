@@ -2,7 +2,7 @@
 """Print the measured state of the committed cassette corpus.
 
 Why this exists: the corpus size, its `environment.harnessVersion` spread and its
-`cassetteVersion` split are VOLATILE facts that were restated in prose across CLAUDE.md,
+`cassetteVersion` split are VOLATILE facts that were restated in prose across CLAUDE.md (now `.claude/rules/`),
 cowork-tests/README.md, cowork-tests/rerecord.sh and .github/workflows/cowork-replay.yml —
 and went wrong in every one of them, repeatedly, including inside a sentence that itself
 said "re-derive this count after every re-record". Prose cannot be kept true by instruction.

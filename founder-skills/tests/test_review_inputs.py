@@ -461,7 +461,7 @@ class TestCurrencyAwareRendering:
     def test_currency_baked_in_at_build_time_non_usd(self) -> None:
         """A non-USD inputs.currency bakes CURRENCY/CUR_PREFIX/CUR_SUFFIX in as
         build-time consts — never fetched, so the static/Cowork branch stays
-        write-back-safe (CLAUDE.md's dual-mode constraint)."""
+        write-back-safe (the dual-mode constraint in `.claude/rules/scripts-financial-model-review.md`)."""
         inputs = _no_israel_fx(_FULL_INPUTS)
         inputs["currency"] = "INR"
         rc, html, stderr = _generate_static(inputs)

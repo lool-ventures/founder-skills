@@ -325,7 +325,7 @@ def test_explorer_gm_names_case_two() -> None:
 def test_coaching_payload_does_not_depend_on_the_reason() -> None:
     """Forward guard, not a proof: the case only changes report wording, never the coach's payload.
 
-    If this starts failing, the reason reached the payload builder's call graph, and CLAUDE.md's
+    If this starts failing, the reason reached the payload builder's call graph, and `.claude/rules/repo-map.md`'s
     one-paid-lane-per-changed-payload-builder rule applies.
     """
     masked = ("insertion_marker", "review_dir", "report_path")

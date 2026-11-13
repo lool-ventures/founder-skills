@@ -1,0 +1,69 @@
+---
+paths:
+  - "founder-skills/skills/financial-model-review/**"
+  - "founder-skills/skills/*/scripts/_theme.py"
+  - "founder-skills/tests/test_fmr_*"
+  - "founder-skills/tests/test_financial_model_review*"
+  - "founder-skills/tests/test_review_inputs*"
+  - "founder-skills/tests/test_theme_sync.py"
+  - "founder-skills/tests/test_visualize_financial_model_review.py"
+  - "founder-skills/tests/test_e2e_financial_model_review.py"
+  - "evals/financial-model-review/**"
+  - "founder-skills/tests/evidence_multiple_corpus.py"
+  - "founder-skills/tests/no_ledger_goldens.py"
+  - "founder-skills/tests/test_apply_corrections.py"
+  - "founder-skills/tests/test_dead_payload.py"
+  - "founder-skills/tests/test_delivery_coverage.py"
+  - "founder-skills/tests/test_explore.py"
+  - "founder-skills/tests/test_folder_ownership.py"
+  - "founder-skills/tests/test_founder_document_names.py"
+  - "founder-skills/tests/test_founder_facing_leaks.py"
+  - "founder-skills/tests/test_gate_registry.py"
+  - "founder-skills/tests/test_gate_writers_mirror.py"
+  - "founder-skills/tests/test_handover_check_cassette.py"
+  - "founder-skills/tests/test_html_founder_text.py"
+  - "founder-skills/tests/test_lane_capture.py"
+  - "founder-skills/tests/test_lane_fmr_unclassified_checks.py"
+  - "founder-skills/tests/test_lane_numeric_checks.py"
+  - "founder-skills/tests/test_out_guard.py"
+  - "founder-skills/tests/test_out_guard_coverage.py"
+  - "founder-skills/tests/test_out_guard_wiring.py"
+  - "founder-skills/tests/test_page_structure.py"
+  - "founder-skills/tests/test_plugin_root_not_through_bash.py"
+  - "founder-skills/tests/test_rating_bounds.py"
+  - "founder-skills/tests/test_report_run_id.py"
+  - "founder-skills/tests/test_resume_evidence.py"
+  - "founder-skills/tests/test_run_ref_sync.py"
+  - "founder-skills/tests/test_score_owners.py"
+  - "founder-skills/tests/test_script_hashes.py"
+  - "founder-skills/tests/test_skill_orchestration.py"
+  - "founder-skills/tests/test_skill_script_flags.py"
+  - "founder-skills/tests/test_stage_coverage.py"
+  - "founder-skills/tests/test_stage_profile.py"
+  - "founder-skills/tests/test_step0_paths.py"
+  - "founder-skills/tests/test_superseded_deliverables.py"
+  - "founder-skills/tests/test_validate_extraction.py"
+  - "founder-skills/tests/test_validate_inputs.py"
+  - "founder-skills/tests/test_verify_review.py"
+---
+# Financial Model Review Scripts
+
+- **`extract_model.py`** — Extracts structured data from Excel (.xlsx) and CSV files into model_data.json
+- **`validate_extraction.py`** — Anti-hallucination gate: cross-references model_data.json against inputs.json (company name, salary, revenue, cash traceability, scale plausibility); `--fix` auto-corrects scale denomination issues (e.g., model in $000)
+- **`validate_inputs.py`** — Four-layer validation of inputs.json (structural, consistency, sanity, completeness); `--fix` auto-corrects sign errors
+- **`checklist.py`** — Scores 46 criteria across 7 categories with profile-based auto-gating by stage/geography/sector; `--inputs <path>` supplies the document to fingerprint (the sub-agent's payload carries `company`, not the whole inputs, so without it the fingerprint is null and staleness is undetectable for this artifact)
+- **`unit_economics.py`** — Computes and benchmarks 11 unit economics metrics against stage-appropriate targets. With a run ref in its `-o` dir it refuses (exit 10, `-o` untouched) until the values check (`fmr_extracted_values`) is recorded for the run and still matches `inputs.json`; `runway.py` also waits for the Step 1 cash questions. A finished run whose figures changed is `RUN_FINISHED`; a bound dir with no run id is `RUN_ID_REQUIRED`. The checks live in the skill-local `_fmr_gates.py`.
+- **`runway.py`** — Multi-scenario runway stress-test with decision points and default-alive analysis
+- **`compose_report.py`** — Assembles financial model review artifacts into final report with cross-artifact validation
+- **`visualize.py`** — Generates self-contained HTML with SVG charts; outputs HTML (not JSON)
+- **`explore.py`** — Generates self-contained interactive HTML explorer from review artifacts; outputs HTML (not JSON)
+- **`review_inputs.py`** — Dual-mode review viewer: HTTP server with live validation (Claude Code) or self-contained static HTML with JS sanity metrics (Cowork); outputs HTML. The static/Cowork branch must stay write-back-safe: guard every `/api/*` `fetch` behind the build-time `IS_STATIC` flag with a lexical `if/else` (an early-return guard reads as unguarded to the write-back analyzer), name the fetch response `resp`/`res`/`response` and check `resp.ok`, and keep literal `<script>`/`</script>` tokens out of docstrings (the block extractor mis-reads them). `test_review_inputs.py::test_every_api_fetch_in_the_static_page_is_in_an_is_static_else_branch` pins the guard on every `/api/` fetch of a static build (the harness analyzer reports `/api/feedback` as advisory with or without it, so it cannot).
+- **`_theme.py`** — Brand theme helper: design-token CSS + base64 @font-face from `references/brand/`; every skill's scripts dir carries an identical copy (standalone scripts can't import across skills) and all HTML generators inject `_theme.brand_css()`; `tests/test_theme_sync.py` enforces the copies stay identical — edit one, re-copy to all
+- **`apply_corrections.py`** — Processes founder's downloaded corrections file: coerces, normalizes, merges overrides, writes corrected_inputs.json + extraction_corrections.json. Its `--run-id` history is the evidence `corrections_applied` and the cash follow-up's `provided` are checked against (`_gates` `REQUIRES`). A delivered review's one cash update must give a finite balance and a `YYYY-MM` date (`_cash_given`, which cleans the two values with `_coerce_state` itself); one that blanks either is `RUN_FINISHED`
+- **`_evidence_multiple.py`** — Detects a "times" comparison an assessor's own cited figures contradict, and appends the founder-facing caveat. A sibling module because FOUR surfaces render the same assessor-written evidence and none sees the others' output (`compose_report.py` → `report.md` and the coaching payload, `visualize.py` → `report.html`, `explore.py` → `explorer.html`); the first cut lived in compose and left both HTML pages showing the unsupported number plain. Calibration is a measured false-positive rate, not a judgement: `founder-skills/tests/evidence_multiple_corpus.py` re-runs it over kept run dirs and **imports this module** rather than restating the grammar — a tool with its own copy reports a healthy rate for a detector that has stopped working, which is how an earlier attempt shipped a pattern containing a literal backspace that matched nothing. Baseline 2026-09-19: 2,854 real findings, 39 stating a comparison, 1 fire (the defect). **Re-run it as reviews accumulate**; a fire count above the number of real defects means the check is miscalibrated.
+- **`_fingerprint.py`** — Stable fingerprints of a producer's inputs, so a stale output is detectable. `run_id` parity cannot see this class: `apply_corrections.py` rewrites `inputs.json` **within** a run, so pre- and post-correction outputs share a run_id. `checklist.py` / `unit_economics.py` / `runway.py` stamp `graded_against`; `verify_review.py` recomputes the current `inputs.json` hash and compares. Comparing outputs to each other is insufficient — they agree while all are stale.
+- **`verify_review.py`** — Review completeness gate: checks artifact existence, content quality (evidence, critical fields, metrics), and cross-artifact consistency; exit 0 = publishable, exit 1 = gaps
+- **`fmr_closing_message.py`** — Prints the founder-facing hand-over from `report.json`'s computed `verdict` (the report's own first paragraph: model quality, base runway, and the runway at today's burn when that is the planning number) and writes it to `handover.txt` for the Stop hook; exit 2 without a verdict. Same contract as `cp_closing_message.py`, named apart so the hook can tell the skills apart (`closing_message.py` is a substring of it; the hook matches whole names). Prints the unreviewed-values sentence before the offer when report.json's `disclosures` say so, and stamps `handed_over_at` on a run with a ledger (stdout never changes). Refuses another run's report.json as `closing_message.py` does. The quick-check path has no closer.
+- **`_fmr_gates.py`** — financial-model-review's gate checks for its producers, compose and the closer. Acts only when the review dir carries this run's `run_ref.json`; with none it returns at once and loads nothing. `unit_economics.py`, `runway.py` and compose exit 10 until `fmr_extracted_values` (and, for runway, the cash questions) is recorded or after `inputs.json` changes outside the two cash paths; a producer call into a bound dir with no run id is `RUN_ID_REQUIRED`; a changed figure after `complete` is `RUN_FINISHED`, except the cash follow-up, which reopens the run (`revision` + 1). A delivered (or stopped) review is never rebuilt in place: `settle_cash_followup` makes compose exit 10 for a post-delivery cash reply that reached runway unrecorded and otherwise refuse `RUN_FINISHED`, a plain recompose included; compose's own disclosed default is recorded only while the run is running, and the recorder's `default` on the follow-up of a `complete` run is `RUN_FINISHED` once a post-delivery cash call is on record. The parts shared with `_ms_gates.py` are copies held to it by a test.
+- **`fmr_dispatch_prompt.py`** — Prints the CHECKLIST sub-agent prompt from identifiers (`checklist --run-id --handoff-agent --review-dir-agent --review-dir`), with `--correction` for a corrective redo (incl. `producer-rejected --detail-file`). It decides the template's one condition itself: this run's `inputs.json` `model_format` (deck or conversational: no extraction, whatever is on disk) and then the presence of `model_data.json` pick the one structural-error sentence printed. An empty identifier flag is refused (exit 2). Named apart from the other two generators, which the test suite imports into the same process.
+

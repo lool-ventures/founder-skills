@@ -193,7 +193,7 @@ The `models:` axis overrides the scenario session's pinned model per cell; the J
 envelope carries an additive `matrixRepeat.cells[]` (one full rollup per tier). Any cell
 below `--min-pass-rate` fails the matrix — it is a compatibility gate, not a survey.
 **Sonnet 4.6 is the support floor**; a candidate tier must at least match it. Record the
-per-tier results in the model-tier acceptance note (see the repo `CLAUDE.md` release
+per-tier results in the model-tier acceptance note (see `.claude/rules/release.md`, the release
 process) alongside the `bypass_telemetry.py` rate.
 
 ### Reliability trend across re-records (`stats`)

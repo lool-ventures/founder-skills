@@ -35,6 +35,7 @@ RERECORD = REPO_ROOT / "cowork-tests" / "rerecord.sh"
 PYPROJECT = REPO_ROOT / "pyproject.toml"
 CONTRIBUTING = REPO_ROOT / "CONTRIBUTING.md"
 CLAUDE_MD = REPO_ROOT / "CLAUDE.md"
+RULES_DIR = REPO_ROOT / ".claude" / "rules"
 COWORK_README = REPO_ROOT / "cowork-tests" / "README.md"
 REPLAY_TEST = REPO_ROOT / "founder-skills" / "tests" / "test_cowork_cassette_replay.py"
 CASSETTE_DIR = REPO_ROOT / "cowork-tests" / "cassettes"
@@ -338,6 +339,9 @@ def test_prose_pin_statements_are_not_stale() -> None:
     """
     wf = WORKFLOW.read_text(encoding="utf-8")
     claude = CLAUDE_MD.read_text(encoding="utf-8")
+    release_md = (RULES_DIR / "release.md").read_text(encoding="utf-8")
+    harness_md = (RULES_DIR / "cowork-harness.md").read_text(encoding="utf-8")
+    repo_map_md = (RULES_DIR / "repo-map.md").read_text(encoding="utf-8")
     readme = COWORK_README.read_text(encoding="utf-8")
 
     # (label, text, pattern, expected occurrences, expected value)
@@ -346,26 +350,36 @@ def test_prose_pin_statements_are_not_stale() -> None:
         ("workflow 'now PINNED at' note", wf, r"sites are now PINNED at (\d+\.\d+\.\d+)", 1, _CI_PIN),
         ("workflow 'the exact' note", wf, r"all four are now the exact `(\d+\.\d+\.\d+)`", 1, _CI_PIN),
         ("workflow install step NAME", wf, r"- name: Install cowork-harness \(pinned (\d+\.\d+\.\d+)", 1, _CI_PIN),
-        ("CLAUDE.md 'PINNED EXACTLY at'", claude, r"PINNED EXACTLY at `(\d+\.\d+\.\d+)`", 2, _CI_PIN),
-        ("CLAUDE.md registry description (pin)", claude, r"pinned exactly, `(\d+\.\d+\.\d+)`\)", 1, _CI_PIN),
-        # Two sites: the version-posture headline in Release Process and the privacy-gate clause. The
-        # headline was written "Recording floor" (title case) once, to keep this count at 1 -- which put
-        # the sentence a fresh session reads OUTSIDE every pattern, the exact miss the file used to warn
-        # about (then via whitespace: `>= 3.0.0`). Spell it RECORDING or the count reds; that is the point.
-        ("CLAUDE.md 'RECORDING floor'", claude, r"RECORDING floor `>=(\d+\.\d+\.\d+)`", 2, _RECORDING_FLOOR),
+        # CLAUDE.md's reference sections live in `.claude/rules/` since the 2026-11-13 split; each pinned
+        # sentence is counted in the file that now carries it. `release.md` holds the version-posture
+        # headline and the re-record gate; `cowork-harness.md` the privacy-gate clause; `repo-map.md` the
+        # floors-test description. Spell it RECORDING, not "Recording floor": title case once put the
+        # sentence a fresh session reads OUTSIDE every pattern. The count reds on either change; that is
+        # the point.
+        ("release.md 'PINNED EXACTLY at'", release_md, r"PINNED EXACTLY at `(\d+\.\d+\.\d+)`", 1, _CI_PIN),
+        ("cowork-harness.md 'PINNED EXACTLY at'", harness_md, r"PINNED EXACTLY at `(\d+\.\d+\.\d+)`", 1, _CI_PIN),
+        ("repo-map.md registry description (pin)", repo_map_md, r"pinned exactly, `(\d+\.\d+\.\d+)`\)", 1, _CI_PIN),
+        ("release.md 'RECORDING floor'", release_md, r"RECORDING floor `>=(\d+\.\d+\.\d+)`", 1, _RECORDING_FLOOR),
+        (
+            "cowork-harness.md 'RECORDING floor'",
+            harness_md,
+            r"RECORDING floor `>=(\d+\.\d+\.\d+)`",
+            1,
+            _RECORDING_FLOOR,
+        ),
         # `>=`, not `^`: the guard is `version < _MIN_HARNESS` with no upper bound (4.0.0 runs it). The caret
         # spelling, pinned here until 2026-09-29, told a reader a 4.x CLI would skip.
-        ("CLAUDE.md 'Replay skip-guard'", claude, r"Replay skip-guard `>=(\d+\.\d+\.\d+)`", 1, _REPLAY_FLOOR),
+        ("release.md 'Replay skip-guard'", release_md, r"Replay skip-guard `>=(\d+\.\d+\.\d+)`", 1, _REPLAY_FLOOR),
         (
-            "CLAUDE.md registry description (floor)",
-            claude,
+            "repo-map.md registry description (floor)",
+            repo_map_md,
             r"FLOORS \(recording `>=(\d+\.\d+\.\d+)`",
             1,
             _RECORDING_FLOOR,
         ),
         (
-            "CLAUDE.md 'rerecord.sh enforces'",
-            claude,
+            "release.md 'rerecord.sh enforces'",
+            release_md,
             r"`rerecord\.sh` enforces a \*\*harness floor of `>=(\d+\.\d+\.\d+)`\*\*",
             1,
             _RECORDING_FLOOR,
@@ -381,3 +395,11 @@ def test_prose_pin_statements_are_not_stale() -> None:
             f"non-emptiness check let a DELETED sentence pass)"
         )
         assert set(got) == {want}, f"{label} states {sorted(set(got))}, registry says {want}"
+
+    # CLAUDE.md itself carries none of these sentences since the split (its install line is checked by
+    # the CI-pin test). One pasted back into it would sit outside every count above, so it reds here.
+    for pattern in {pattern for _, text, pattern, _, _ in sites if text in (release_md, harness_md, repo_map_md)}:
+        assert not re.findall(pattern, claude), (
+            f"CLAUDE.md states a pinned version sentence ({pattern}); it lives in `.claude/rules/`. Put it "
+            f"there, or add a counted site for CLAUDE.md here"
+        )

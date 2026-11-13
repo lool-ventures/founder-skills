@@ -1,0 +1,57 @@
+---
+paths:
+  - "founder-skills/skills/competitive-positioning/**"
+  - "founder-skills/skills/*/scripts/_ui.py"
+  - "founder-skills/tests/test_cp_*"
+  - "founder-skills/tests/test_competitive_positioning*"
+  - "founder-skills/tests/test_ui*"
+  - "founder-skills/tests/test_visualize_competitive_positioning.py"
+  - "founder-skills/tests/no_ledger_goldens.py"
+  - "founder-skills/tests/test_agent_dispatch_contracts.py"
+  - "founder-skills/tests/test_compose_invariants.py"
+  - "founder-skills/tests/test_delivery_coverage.py"
+  - "founder-skills/tests/test_folder_ownership.py"
+  - "founder-skills/tests/test_founder_document_names.py"
+  - "founder-skills/tests/test_gate3_triggers.py"
+  - "founder-skills/tests/test_gate_prefix_check.py"
+  - "founder-skills/tests/test_gate_registry.py"
+  - "founder-skills/tests/test_gate_writers_mirror.py"
+  - "founder-skills/tests/test_handover_check_cassette.py"
+  - "founder-skills/tests/test_html_founder_text.py"
+  - "founder-skills/tests/test_out_guard_coverage.py"
+  - "founder-skills/tests/test_out_guard_wiring.py"
+  - "founder-skills/tests/test_plugin_root_not_through_bash.py"
+  - "founder-skills/tests/test_record_deferred_recall.py"
+  - "founder-skills/tests/test_redteam_core.py"
+  - "founder-skills/tests/test_report_run_id.py"
+  - "founder-skills/tests/test_resume_evidence.py"
+  - "founder-skills/tests/test_score_owners.py"
+  - "founder-skills/tests/test_script_hashes.py"
+  - "founder-skills/tests/test_step0_paths.py"
+  - "founder-skills/tests/test_superseded_deliverables.py"
+  - "founder-skills/tests/test_verify_competitors.py"
+  - "founder-skills/tests/test_verify_positioning.py"
+  - "founder-skills/tests/conftest_competitive_positioning.py"
+  - "founder-skills/tests/test_explore_competitive_positioning.py"
+---
+# Competitive Positioning Scripts
+
+- **`validate_landscape.py`** — Validates competitor list structure, checks slug uniqueness, preserves provenance
+- **`verify_competitors.py`** — Adversarial competitor-set verification validator (Step 3.5, before Gate 1): validates the COMPETITOR_VERIFICATION sub-agent's per-competitor verdicts (genuine/adjacent/not_a_competitor), enforces the show-your-work gate (a flag must carry reasoning + independent buyer/job characterization), cross-checks landscape slug coverage, computes summary. Validator, not detector. Catches false-positive competitors (surface-level matches that don't genuinely compete). Emits `summary.challenge_slugs` — the subset of `flagged_slugs` that actually challenges the draft — so Gate 1 reads a judgement rather than re-deriving one across two disjoint vocabularies. On rejection it leaves `-o` untouched and keeps the artifact in a `.rejected.json` sidecar; `compose_report.py` raises `VERIFICATION_REJECTED` (high) on it, keyed on run_id so a prior run's file cannot silence a fresh refusal.
+- **`cp_red_team.py`** — Validates the RED_TEAM reviewer's findings under the shared `_redteam_core.py`, rewords them (`_cp_redteam_text.py`) and writes this run's copy first (`_cp_redteam_copy.py`); every page renders from the copy, so editing `redteam.json` changes nothing the founder sees. Refuses loudly without the shared core or a readable `landscape.json` (a review with no competitor names would print slugs). `_cp_redteam_text.py` leaves a one-word slug alone: in prose it is more likely the ordinary word.
+- **`record_red_team_skip.py`** — Records why the review did not run, from a closed list of reasons. Under `FS_HOST_NO_ASK` `founder_declined` is refused before the write (`NO_ASK_FOUNDER_DECLINED`, top level and under `validation`); competitive-positioning's compose refuses a hand-written one, and market-sizing's compose the same reason in `methodology.json`. **compose refuses a run with neither this run's review nor this run's skip** (exit 1, `-o` untouched), keyed on this run's id (the id most usable required artifacts carry, an even split going to the id whose files were produced last, so one leftover file cannot decide it; the id the review is resolved for; a stub's id never counts), never on the hand-off dir, so deleting `handoff/<run_id>/` cannot silence it (the Cowork outputs folder allows deletes since Desktop 2.16120.0; "never delete under outputs" is our rule). A review or skip of another id the set carries does not satisfy it: a mixed set with no review of this run is refused, naming the ids; one reviewed for this run passes to `STALE_ARTIFACT` (high). A run that dispatched no sub-agent records `no_subagent_dispatch`. market-sizing's `REVISION_NOT_OFFERED` likewise no longer goes silent without the dir. The four deliver-only review codes are medium and cannot be accepted away, not high as in market-sizing, because Step 7 composes under `--strict` and a high code there would stop a run nothing can fix.
+- **`_quote_match.py`** — A copy of cap-table's matcher, held to it by `test_quote_match_sync.py`.
+- **`cp_closing_message.py`** — Prints the founder-facing hand-over from `report.json`'s computed `verdict` (the map sentences with "If delivered" and the competitor asymmetry, the claims tally, defensibility, the public record) and writes it to `handover.txt` for the Stop hook; refuses without a verdict, or a report.json of another run than its artifacts' majority; stamps `handed_over_at` with a run ledger. Same contract as market-sizing's `closing_message.py`.
+- **`cp_dispatch_prompt.py`** — Prints the MOAT_SCORING, POSITIONING_SCORING, CHECKLIST, STARTUP_RESEARCH and RED_TEAM sub-agent prompts (RED_TEAM lists the founder's documents before the analysis's files, and leaves out the checklist, which is the analysis grading itself) (`--correction` for a corrective redo); each is registered with the dispatch-prompt hook, so a prompt that is not the printed one is held. Named apart from market-sizing's `dispatch_prompt.py`, which the test suite imports into the same process. With a run ledger it prints nothing (exit 10) while a question a prompt rests on is unrecorded or open, and takes the recorded scoring basis (another is `GATE_RECORD_MISMATCH`).
+- **`record_deferred_recall.py`** — Appends the recall candidates the founder declined at Gate 1 to `landscape_draft.json`'s `deferred_recall_candidates[]` in place, keeping the `_produced_by` stamp. `--from-verification` reads them from `competitor_verification.json` (no hand-built list); with a run ledger it refuses (exit 10) while Gate 1 has no final answer.
+- **`_cp_gates.py`** — competitive-positioning's gate checks for `record_deferred_recall.py --from-verification` (Gate 1's deferral, and the check before Step 4), `validate_landscape.py`, the generator, `persist_agent_artifact.py`, compose and the closer: exit 10 naming the question, `RUN_ID_REQUIRED`, `RUN_FINISHED` only for a new analysis's first writes; compose on a `complete` run starts a new revision. The parts shared with `_ms_gates.py` are copies held to it by a test. Gate 1's question and its lines are printed by `open` (`_gates.py`'s CP fillers).
+- **`score_moats.py`** — Scores 6+ moat dimensions per company; refuses a patent/licence/certification custom moat (scored under `regulatory_barriers`) and a custom moat with no `definition`; rewords our file names in evidence at pipe time; keeps the run's first copy (`_cp_first_copy.py`) so "Founder Override" shows only for a value that changed
+- **`score_positioning.py`** — Scores positioning views: ranks with ties recorded, the geometry the founder-facing sentences are built from (who is ahead on both axes, nearest competitor, lead over the best rival per axis), a planned position kept apart from today's (`scored_point`, `today`), and claim `verdict_counts`
+- **`validate_startup_research.py`** — Validates the STARTUP_RESEARCH hand-off and COMPUTES each patent publication's status from its office and kind code (granted / published / unknown, never "pending"); rejects loudly.
+- **`_cp_view.py`** — The one place founder-facing wording is decided: the map sentences ("If delivered", ties, bands), the verdict paragraph, the proof-gap rows, the public-record rows and the outside review's outcome sentence. Every renderer and the coaching payload call it. It also owns the analysis checklist's wording for report.md and both pages (`checklist_groups`, `criterion_text`: ids become their labels, context words plain words, the fleet policy, loaded by path, humanizes, and a sentence naming an internal file is dropped with a note; it fails closed).
+- **`checklist.py`** — Scores ~25 quality criteria across 6 categories with mode-based gating
+- **`verify_positioning.py`** — The delivery gate (`--gate 1` mid-run, `--gate 2` at the end): artifacts present, rendered checks (what the artifacts hold reaches report.md and report.html; no internal field name, artifact filename or criterion id in report.md), cross-artifact checks; exit 1 on any error. At gate 2 it also scans the two pages' visible text (text nodes only, never script or style; an unparseable page is skipped) for internal file names and criterion ids, reported as WARNINGS only, never a gap; it reads static text, so text the explorer's script builds in the browser is outside it.
+- **`compose_report.py`** — Assembles report with cross-artifact validation, warning system, and accepted warnings; its last body section, before Warnings, is the "Analysis Checklist" (every criterion per category, its evidence through `_cp_view.criterion_text`, made inert for markdown)
+- **`visualize.py`** — Generates self-contained HTML on the shared `_ui.py` shell (header card with the analysis-quality ring, section menu, the checklist) with SVG positioning map, moat radar, competitor table; outputs HTML (not JSON)
+- **`explore.py`** — Generates interactive HTML explorer on the shared `_ui.py` shell (the report page's header card and ring; a Checklist tab leading to the analysis checklist, rendered on the page outside the tab panels and never in `DATA`) with Chart.js scatter plot (vendored, no CDN for the 2D view; the optional 3D View tab lazy-loads Plotly from a CDN on demand), view switching, bubble encoding controls, and company detail panels; outputs HTML (not JSON)
+

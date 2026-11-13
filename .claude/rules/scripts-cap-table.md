@@ -1,0 +1,112 @@
+---
+paths:
+  - "founder-skills/skills/cap-table/**"
+  - "founder-skills/tests/test_cap_table*"
+  - "founder-skills/tests/test_cap_state*"
+  - "founder-skills/tests/test_pool_*"
+  - "founder-skills/tests/test_mutation_corpus.py"
+  - "founder-skills/tests/mutation_corpus.py"
+  - "founder-skills/tests/test_e2e_cap_table.py"
+  - "evals/cap-table/**"
+  - "founder-skills/tests/_pool_sizing_claims.py"
+  - "founder-skills/tests/no_ledger_goldens.py"
+  - "founder-skills/tests/test_backward_verifier.py"
+  - "founder-skills/tests/test_chain_integration_v050.py"
+  - "founder-skills/tests/test_compose_invariants.py"
+  - "founder-skills/tests/test_compose_result.py"
+  - "founder-skills/tests/test_concise_report.py"
+  - "founder-skills/tests/test_corpus_scripts.py"
+  - "founder-skills/tests/test_coupled_solver_goldens.py"
+  - "founder-skills/tests/test_cross_checker.py"
+  - "founder-skills/tests/test_ct_gates.py"
+  - "founder-skills/tests/test_dead_payload.py"
+  - "founder-skills/tests/test_delivery_coverage.py"
+  - "founder-skills/tests/test_docx_text.py"
+  - "founder-skills/tests/test_eval_harness.py"
+  - "founder-skills/tests/test_evidence_verifier.py"
+  - "founder-skills/tests/test_extract_cap_table_xls.py"
+  - "founder-skills/tests/test_extract_pdf_tables.py"
+  - "founder-skills/tests/test_extractors_types.py"
+  - "founder-skills/tests/test_folder_ownership.py"
+  - "founder-skills/tests/test_form_reply.py"
+  - "founder-skills/tests/test_founder_facing_leaks.py"
+  - "founder-skills/tests/test_founder_text.py"
+  - "founder-skills/tests/test_founder_text_keep_parity.py"
+  - "founder-skills/tests/test_founder_text_roundtrip.py"
+  - "founder-skills/tests/test_gate_registry.py"
+  - "founder-skills/tests/test_gate_writers_mirror.py"
+  - "founder-skills/tests/test_handoff_audit.py"
+  - "founder-skills/tests/test_html_founder_text.py"
+  - "founder-skills/tests/test_html_run_stamp.py"
+  - "founder-skills/tests/test_insert_coaching_status.py"
+  - "founder-skills/tests/test_invariant_checker.py"
+  - "founder-skills/tests/test_lane_host_lines.py"
+  - "founder-skills/tests/test_out_guard.py"
+  - "founder-skills/tests/test_out_guard_wiring.py"
+  - "founder-skills/tests/test_p2p_detection.py"
+  - "founder-skills/tests/test_plugin_root_not_through_bash.py"
+  - "founder-skills/tests/test_quick_check_lane.py"
+  - "founder-skills/tests/test_record_gate_answer.py"
+  - "founder-skills/tests/test_reliability_bench_scorer.py"
+  - "founder-skills/tests/test_report_run_id.py"
+  - "founder-skills/tests/test_request_value_edges.py"
+  - "founder-skills/tests/test_resolve_artifacts_root.py"
+  - "founder-skills/tests/test_resume_evidence.py"
+  - "founder-skills/tests/test_retention_pins.py"
+  - "founder-skills/tests/test_run_ref_folder.py"
+  - "founder-skills/tests/test_run_ref_sync.py"
+  - "founder-skills/tests/test_run_status.py"
+  - "founder-skills/tests/test_score_owners.py"
+  - "founder-skills/tests/test_select_plugin_root.py"
+  - "founder-skills/tests/test_skill_orchestration.py"
+  - "founder-skills/tests/test_solver_convergence_guards.py"
+  - "founder-skills/tests/test_solver_warning_surfaces.py"
+  - "founder-skills/tests/test_stage_coverage.py"
+  - "founder-skills/tests/test_superseded_deliverables.py"
+  - "founder-skills/tests/test_synthetic_eval_fixtures.py"
+  - "founder-skills/tests/test_v48_hotfix_regressions.py"
+  - "founder-skills/tests/test_verify_one.py"
+  - "founder-skills/tests/test_visualize_cap_table.py"
+  - "founder-skills/tests/test_visualize_deck_review.py"
+  - "founder-skills/tests/test_extractors_safe.py"
+  - "founder-skills/tests/test_pdf_probe.py"
+  - "founder-skills/tests/test_pdf_probe_sync.py"
+---
+# Cap Table Scripts
+
+Rule-pack-driven cap-table math. Every math producer cites a `rule_id` from `cap-table-rules.json` (v0.2.8+). The pipeline is two-phase per design §9 Step 4.5 / Step 6: `rule_audit.py --phase=pre_math` writes the gating block math producers consume; `--phase=post_math` composes watchlist + counsel items after math runs.
+
+- **`cap_state.py`** — Aggregates inputs + instruments into `cap_state.json` with `as_converted_totals` (the pre-financing snapshot the YC SAFE `company_capitalization` denominator binds to per Gotcha #1)
+- **`safe_conversion.py`** — YC post-money SAFE math; all 5 forms; cap-implied + post-financing output sets; MFN cycle detection (Gotcha #4)
+- **`note_conversion.py`** — Convertible-note math with full 7-branch enum (cap_conversion / discount_only / maturity_* / threshold_not_met) + override branch
+- **`option_pool.py`** — Option-pool top-up math over the rule pack's five `target_basis` values (rule pack 0.4.10). Three are computed: `post_money` (the unallocated pool after the round is the target), `post_money_increase` (only the options ADDED in the round are the target — a different number whenever unallocated options already exist) and `pre_money`. The other two are refused, never approximated: `post_money_excluding_converting_securities` has no sourced definition as a pool denominator (every source sizes the pool on fully-diluted post-money INCLUDING conversions; "excluding converting securities" is real practice for the PRICE, not the pool), so the solver's basis gate (`priced_round.py`) blocks it with `E_POOL_BASIS_EXCLUDING_NOT_MODELED` when SAFEs or notes convert, unless the founder chooses the plain post-money reading (then `W_EXCLUDING_BASIS_MODELED_AS_POST_MONEY`, high); `custom` is blocked with `E_POOL_BASIS_NOT_MODELED` unless the founder states which computed measure the document matches (then `W_CUSTOM_BASIS_STATED_BY_FOUNDER`, medium). Either post-money reading beside existing unallocated options is ALWAYS disclosed — `post_money` as `W_POOL_BASIS_READING_NOT_CONFIRMED` plus the computed figure for the new-options-only reading, `post_money_increase` as `W_POOL_BASIS_READ_AS_NEW_OPTIONS_ONLY` with the whole-pool reading as its comparison — and no parameter clears it: a founder-answer flag the model writes is satisfied by writing it (it was tried, and a paid run wrote it with no question asked); a priced round also carries the pool on the other sizing basis, as computed figures or a stated reason it was not computed. **Each scenario's Option pool section in the report states another sizing, with its computed figures** (`_pool_text.py`); the coaching commentary does not discuss the pool's sizing at all.
+- **`_pool_text.py`** — The option pool's founder-facing text in one place: the sizing labels (named by the share count each measure counts; the plain post-money measure bridges once to a term sheet's "10% post-money pool", and "pre-money" is never printed beside "pool"), the comparison and new-options digests, and `pool_section()`, which report.md, report.html and explorer.html all render per scenario. compose re-exports its names. The coaching payload carries none of it: the pool's dilution-driver entry has a `reference` to the section, and the pool-basis disclosures ride report.json's `report_disclosures` for the hand-over, as does a flip's unmodelled Section 102 line.
+- **`pool_claims_check.py`** — Step 11's option-pool backstop. Judges the coach's commentary with `_pool_sizing_claims.py` against the run's computed figures (only for a single post-money or pre-money basis; otherwise `not_judged`, which adds the same founder line as a check that could not run plus `POOL_CHECK_NOT_RUN`), exempting only the sentences this run's own Option pool sections state, rebuilt from `scenarios.json` by the section builder rather than parsed out of a report. Exit 9 on findings (one corrective dispatch inside the 2-dispatch budget; with the budget spent, straight to `--strip`), then `--strip` removes the flagged claims, keeps `coaching.md` as written, and adds one founder line. Writes `coaching.md.pool-check.json` every run. Refuses (exit 2, `-o` unwritten) when this run's `scenarios.json` is missing, unreadable or has no run_id — failing open there would let a mistyped path skip the judge; past that point it fails open (`action: error`, this run's id). Its `-o` file is NOT an envelope `insert_coaching.py` accepts: **`pool_check_release.py`** turns it into one only when the record exists, matches the commentary and the checked file by sha256, is this run's, and its action is not `findings`.
+- **The insertion requires the check.** cap-table's compose writes a `COACHING_REQUIRES_CHECK_RECORD` declaration beside the insertion marker; `insert_coaching.py` then refuses any envelope without a passing `check_record` for that run whose checked text is the text being inserted, and removes the declaration on insert. No other skill declares it, so their insertions are unchanged. What it does not stop: hand-editing `report.md`, or a hand-written record naming this run. The paid cap-table lanes assert the record exists for the run and that report.md carries the checked file.
+- **`pool_clause.py`** — Checks that a pool sentence quoted from an uploaded document is really in it, so it may be shown inside the *Pool basis* question. Exact or whitespace/dash/quote-normalized matching ONLY, bounded to a whole sentence or clause, with a `(cid:N)` glyph as a barrier. Deliberately narrower than `evidence_verifier.quote_in_doc`: fuzzy matching accepted a meaning-flipped pool sentence, and compact matching makes `10.5%` equal `105%`. It is evidence, never the basis — only the answer to that question chooses the reading.
+- **`anti_dilution.py`** — BBWA (with CP1 divisor per Gotcha #2) + full ratchet
+- **`priced_round.py`** — Solver/orchestrator: fixed-point iteration for coupled SAFE + note + pool + new_money + AD systems. `solve_priced_round` is the ONE pool-basis gate every entry point (run_scenario, quick_assess, the CLI) reaches: it refuses or substitutes the basis and appends the pool-basis disclosures.
+- **`flip_scenario.py`** — Israeli ↔ Delaware flip (v0.1: 1:1 share-for-share only per Gotcha #7)
+- **`rule_audit.py`** — Two-phase (`--phase=pre_math` / `--phase=post_math`); scope-aware apply contract (`legal_tax_applicability` / `benchmark_freshness` / `not_applicable`); 5 mutually exclusive statuses + 2 near-edge overlays
+- **`run_scenario.py`** — Top-level scenario orchestrator (routes by `scenario.type`); re-solves a priced round with a pool target on the other sizing (`pool_sizing_counterfactual`) and, where the reading was not confirmed, on the new-options-only reading (`pool_increase_reading`). `sweep.py` turns both off.
+- **`counsel_packet.py`** — Counsel-handoff packet (json + md); standalone deliverable
+- **`compose_report.py`** — Assembles report.md + report.json (with embedded `coaching_payload` block, schema_version `v0.5.0-cap-table`); priced-round reports carry a source-document reconciliation section (computed vs source-stated PPS / pre-money / FD from `inputs.stated_totals`). It does not compare `--run-id` with the artifacts: unbound, it stamps the id it is given and the insert and the pages refuse a foreign one (`RUN_ID_MISMATCH`); bound, `_ct_gates` refuses an id not bound there (`RUN_NOT_BOUND`)
+- **`concise_report.py`** — Concise-mode report: renders the headline numbers straight from `scenarios.json` (lightweight math path; skips counsel_packet / full compose / visualize / explore / coaching)
+- **`verify_one.py`** — Single-question cited rule-pack lookup (`--rule-lookup <rule_id>` → the cited constant + reliance boundary; lightweight answer path, writes no artifact)
+- **`visualize.py`** — Self-contained `report.html` on the shared `_ui.py` shell (header card, section menu, callouts, shared tables and cards; inline SVG donut, no CDN; no print button, its `@page` and print rules kept)
+- **`explore.py`** — Self-contained `explorer.html` (vanilla JS interactive scenario picker; number tickers, donut value-morph, Sankey transition, card slide-in, and an optional pre-money sweep slider when `sweep.json` is present)
+- **`sweep.py`** — Optional `sweep.json` generator: a pre-money parametric sweep (K real priced-round solver frames, `new_money` held fixed) powering the explorer's slider; reuses the existing `run_all_scenarios` path (no new math). Slider snaps to discrete real frames.
+- **`extract_instrument.py`** — Lane-1 anti-hallucination validator (sub-agent does extraction; this validates returned JSON, normalizes `discount_multiplier` per Gotcha #3). Supports `--verify` / `--verify-blocking` / `--invariants` / `--cross-check` / `--source-doc` flags, all default-on; uses `--no-<flag>` to opt out. Skips evidence checks on a ~30-field synthesized-fields list (form, jurisdiction, derived counts, etc.). The blocking gates run **before** `write_artifact`, so a refusal leaves `--instruments` untouched rather than persisting the extraction it just rejected. `--instruments` itself is a checked precondition: unreadable, non-object, a non-list array, a non-dict `metadata`, or an object carrying none of the four instrument arrays (i.e. the wrong file) are refused with `E_INSTRUMENTS_FILE_UNUSABLE`. It APPENDS, so a wrong-path write is unrecoverable — and the schema cannot stand in for the check, since the validator ignores `additionalProperties`.
+- **`_ct_gates.py`** — cap-table's gate checks for `cap_state.py`, `run_scenario.py`, `quick_assess.py`, `extract_instrument.py`, compose and the terms-only renderer: exit 10 naming the question, exit 1 `GATE_RECORD_MISMATCH` for a request or file that disagrees with a recorded answer, `RUN_ID_REQUIRED` for an empty `--run-id` in a bound dir (every producer), and `RUN_NOT_BOUND` for a `--run-id` with no `run_ref.json` in a dir that carries another run's (every script that takes a `--run-id`: the producers, both pages, and the four that open no ledger, `sweep.py`, `detect_structure.py`, `write_coverage_disclosure.py`, `cap_state_after_round.py`; exit 1 and no artifact written, though compose still leaves its `compose_result.json` record of the refusal, stamped with the refused id: without the guard that id had no ledger, so every gate check was skipped in silence and the artifacts carried the wrong run). A dir carrying two runs' refs (a later run bound into an earlier run's folder) belongs to the newest bind: the earlier id is `RUN_SUPERSEDED`. compose checks this before `reopen_if_complete`, so a replaced review never takes the folder back by a what-if. A what-if on a `complete` review reopens it as a new revision, and a request a recorded answer rules out asks that question again. With a ledger, `extract_instrument.py` writes `extraction_pending.json` and asks the founder to confirm flagged values before it saves them (`--doc-text` / `--doc-text-source` verify a transcription in place of the text layer); the freeform emit records a spreadsheet-built base exempt from the base question, bound to that base. A priced round that converts a note with no stated qualified-financing threshold carries a disclosure that it was treated as met.
+- **`extract_cap_table.py`** — Lane-2/3/4 (validate mode + Carta/Pulley stub + freeform Context-A output validator). `--mode=freeform-emit` deterministically maps Lane-3 SPREADSHEET_STRUCTURE_DETECTION blocks → schema-valid `inputs.json`+`instruments.json` (founder answers to gate blockers via repeatable `--answer BLOCK.FIELD=VALUE`).
+- **`freeform_mapper.py`** — Pure `map_freeform(blocks, grid, existing_inputs, answers)` behind `--mode=freeform-emit`. Maps detected blocks via the closed `references/schemas/freeform-role-map.json` contract; off-contract roles + required-but-unsupplied fields (interest_rate_type, preferred OIP, enum plan_type) become blockers (no fabrication); per-target-array stable ids; merges equity into existing inputs (keep-existing-on-conflict). Deterministic.
+- **`pdf_probe.py`** — Per-page probe of whether a cap-table PDF has a text layer or is image-only (decides if OCR/table extraction is needed vs raw text). [dep: pdfplumber]
+- **`extract_pdf_tables.py`** — OCRs an image-only cap-table PDF (no text layer) into a cell grid for ingestion.
+- **`_docx_text.py`** — Tracked-changes-aware `.docx` reader (stdlib `zipfile` + `xml.etree`): `detect_tracked_changes()` + `extract_text(revisions="accept")` keep `<w:ins>` and drop `<w:del>` so accepted-redline terms survive (python-docx drops both).
+- **`evidence_verifier.py`** — Forward verifier. Three-layer check (quote_in_doc / value_in_quote / value_in_doc) catching HALLUCINATIONS. 3.6% FPR / 100% TPR on the private eval set.
+- **`backward_verifier.py`** — Backward verifier (two-phase `--phase=prompt`/`--phase=score` CLI). Catches SEMANTIC CONFUSION via fresh-sub-agent re-extraction. WARN-mode default.
+- **`invariant_checker.py`** — Real-world-bounds checker. Per-field ranges + cross-field math invariants. 0% FPR / 63% TPR.
+- **`cross_checker.py`** — Demote-only confidence modulator when multiple extractors disagree.
+- **`_normalize.py`** — Shared text-normalization primitives (normalize_text, compact_form, numeric_tokens, date_tokens).
+- **`extractors/`** — Span-preserving extraction module: `FieldExtraction`, `SourceSpan`, `ExtractionContext`, `ExtractorProtocol` types + 5 SAFE backstop extractors (`extractors/safe/`).
+

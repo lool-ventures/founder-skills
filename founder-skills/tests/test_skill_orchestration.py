@@ -82,6 +82,13 @@ _PLATFORM_DELETE_DENIAL = re.compile(
 )
 
 
+def _rules_files() -> list[Path]:
+    # CLAUDE.md's reference sections, split out of it; an empty glob would drop them from the scan silently.
+    files = sorted((REPO_ROOT / ".claude" / "rules").glob("*.md"))
+    assert files, "no .claude/rules/*.md found: the scan would silently skip CLAUDE.md's reference files"
+    return files
+
+
 def _delete_rule_texts() -> list[Path]:
     root = REPO_ROOT / "founder-skills"
     files = [
@@ -92,6 +99,7 @@ def _delete_rule_texts() -> list[Path]:
         *sorted((root / "scripts").glob("*.py")),
         *sorted(SKILLS_DIR.glob("*/scripts/*.py")),
         REPO_ROOT / "CLAUDE.md",
+        *_rules_files(),
         REPO_ROOT / "CONTRIBUTING.md",
         REPO_ROOT / "README.md",
         REPO_ROOT / "cowork-tests" / "README.md",

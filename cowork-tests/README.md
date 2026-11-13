@@ -372,7 +372,7 @@ here, and is now held by an assertion in this directory:
 
 | Cowork-only behaviour | What it broke | What holds it now |
 |---|---|---|
-| Generated HTML is served from Cowork's **own origin**, not `file:` | financial-model-review's review page fired `POST /api/feedback` at a server that isn't there. If the origin answered `200`, the founder was told their corrections were **saved** when nothing was. | `analyze-skill`'s write-back analyzer found it; the `financial-model-review-smoke` cassette's `no_lost_write_back` assert locks it in. `CLAUDE.md` records the coding rules the analyzer enforces. |
+| Generated HTML is served from Cowork's **own origin**, not `file:` | financial-model-review's review page fired `POST /api/feedback` at a server that isn't there. If the origin answered `200`, the founder was told their corrections were **saved** when nothing was. | `analyze-skill`'s write-back analyzer found it; the `financial-model-review-smoke` cassette's `no_lost_write_back` assert locks it in. `.claude/rules/scripts-financial-model-review.md` records the coding rules the analyzer enforces. |
 | Nothing under `outputs/` is deleted — the skills' own rule; older hosts also rejected the delete there, newer ones allow it | Steps that promoted a file with `mv` failed mid-pipeline | `no_delete_in_outputs` on every scenario; the skills use `cp` |
 | **Host/VM split**: the agent loop and in-VM bash see different filesystems, and `${CLAUDE_PLUGIN_ROOT}` is host-side | Script paths resolved in the CLI and not in Cowork; sub-agent hand-off files landed where the orchestrator couldn't read them | `lint-skill`'s plugin-root linter, `analyze-skill`'s `/sessions` path scan, and the path-gate asserts |
 | Real host paths are visible to the agent | Host paths leaked into founder-visible text | the `host-path-canary` scenario (container tier) |
@@ -478,7 +478,7 @@ gates as CI scoped to what it recorded (lint, privacy with the shared allowlist,
 prints a **normalized `cowork-harness diff`** per refreshed cassette (per-run noise masked — this is
 the primary drift review; `git diff -- cassettes/` is the secondary synthetic-only check), and tails
 `cowork-harness stats` (cross-run health) + `prune` (kept-run disk bound). On green, commit cassettes
-by name. See the release-process note in the repo `CLAUDE.md`.
+by name. See the release-process note in `.claude/rules/release.md`.
 
 ### Future: automated live lane (deferred)
 

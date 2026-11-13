@@ -100,7 +100,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # copy list. With these roots the sandbox runs the whole free suite to exactly the same result as
 # the real tree, so `_SELECTION` can be widened to anything without touching this. The cost that
 # buys it is 0.13 s of copying (`cowork-tests/` is 9.9 MB and 0.04 s of that), against a run of minutes.
-_COPY_DIRS = ("founder-skills", "evals", "scripts", ".github", "cowork-tests")
+_COPY_DIRS = ("founder-skills", "evals", "scripts", ".github", "cowork-tests", ".claude/rules")
 _COPY_FILES = ("pyproject.toml", "CLAUDE.md", "CHANGELOG.md", "CONTRIBUTING.md", "README.md")
 _IGNORE = shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache", "artifacts", ".git", ".venv")
 

@@ -136,7 +136,7 @@ def _override(tag: str) -> str:
     return (
         f"To publish {tag} without a branch run: `gh workflow run {WORKFLOW_FILE} --ref {tag}`, wait for "
         "it to go green, then `gh run rerun <this run's id> --failed` (within 30 days of this run's first "
-        "attempt). Past that, publish by hand with `gh release create` (CLAUDE.md, Release Process)."
+        "attempt). Past that, publish by hand with `gh release create` (`.claude/rules/release.md`, step 8)."
     )
 
 

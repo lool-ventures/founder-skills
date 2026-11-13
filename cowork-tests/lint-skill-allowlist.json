@@ -5,37 +5,37 @@
       "rule": "skill-body-over-reattach-cap",
       "file": "founder-skills/skills/cap-table/SKILL.md",
       "count": 1,
-      "reason": "SKILL.md is over the ~19,000 B re-attach cap on purpose. CLAUDE.md records the measured decision: compaction is ~1.6% of transcripts, truncation is head-preserving and a directory-owning skill is recoverable, and front-loading a survival core was withdrawn because the window is fixed-size. Shrinking every body below the cap needs an e2e A/B."
+      "reason": "SKILL.md is over the ~19,000 B re-attach cap on purpose. `.claude/rules/skill-md-conventions.md` records the measured decision: compaction is ~1.6% of transcripts, truncation is head-preserving and a directory-owning skill is recoverable, and front-loading a survival core was withdrawn because the window is fixed-size. Shrinking every body below the cap needs an e2e A/B."
     },
     {
       "rule": "skill-body-over-reattach-cap",
       "file": "founder-skills/skills/competitive-positioning/SKILL.md",
       "count": 1,
-      "reason": "SKILL.md is over the ~19,000 B re-attach cap on purpose. CLAUDE.md records the measured decision: compaction is ~1.6% of transcripts, truncation is head-preserving and a directory-owning skill is recoverable, and front-loading a survival core was withdrawn because the window is fixed-size. Shrinking every body below the cap needs an e2e A/B."
+      "reason": "SKILL.md is over the ~19,000 B re-attach cap on purpose. `.claude/rules/skill-md-conventions.md` records the measured decision: compaction is ~1.6% of transcripts, truncation is head-preserving and a directory-owning skill is recoverable, and front-loading a survival core was withdrawn because the window is fixed-size. Shrinking every body below the cap needs an e2e A/B."
     },
     {
       "rule": "skill-body-over-reattach-cap",
       "file": "founder-skills/skills/deck-review/SKILL.md",
       "count": 1,
-      "reason": "SKILL.md is over the ~19,000 B re-attach cap on purpose. CLAUDE.md records the measured decision: compaction is ~1.6% of transcripts, truncation is head-preserving and a directory-owning skill is recoverable, and front-loading a survival core was withdrawn because the window is fixed-size. Shrinking every body below the cap needs an e2e A/B."
+      "reason": "SKILL.md is over the ~19,000 B re-attach cap on purpose. `.claude/rules/skill-md-conventions.md` records the measured decision: compaction is ~1.6% of transcripts, truncation is head-preserving and a directory-owning skill is recoverable, and front-loading a survival core was withdrawn because the window is fixed-size. Shrinking every body below the cap needs an e2e A/B."
     },
     {
       "rule": "skill-body-over-reattach-cap",
       "file": "founder-skills/skills/financial-model-review/SKILL.md",
       "count": 1,
-      "reason": "SKILL.md is over the ~19,000 B re-attach cap on purpose. CLAUDE.md records the measured decision: compaction is ~1.6% of transcripts, truncation is head-preserving and a directory-owning skill is recoverable, and front-loading a survival core was withdrawn because the window is fixed-size. Shrinking every body below the cap needs an e2e A/B."
+      "reason": "SKILL.md is over the ~19,000 B re-attach cap on purpose. `.claude/rules/skill-md-conventions.md` records the measured decision: compaction is ~1.6% of transcripts, truncation is head-preserving and a directory-owning skill is recoverable, and front-loading a survival core was withdrawn because the window is fixed-size. Shrinking every body below the cap needs an e2e A/B."
     },
     {
       "rule": "skill-body-over-reattach-cap",
       "file": "founder-skills/skills/ic-sim/SKILL.md",
       "count": 1,
-      "reason": "SKILL.md is over the ~19,000 B re-attach cap on purpose. CLAUDE.md records the measured decision: compaction is ~1.6% of transcripts, truncation is head-preserving and a directory-owning skill is recoverable, and front-loading a survival core was withdrawn because the window is fixed-size. Shrinking every body below the cap needs an e2e A/B."
+      "reason": "SKILL.md is over the ~19,000 B re-attach cap on purpose. `.claude/rules/skill-md-conventions.md` records the measured decision: compaction is ~1.6% of transcripts, truncation is head-preserving and a directory-owning skill is recoverable, and front-loading a survival core was withdrawn because the window is fixed-size. Shrinking every body below the cap needs an e2e A/B."
     },
     {
       "rule": "skill-body-over-reattach-cap",
       "file": "founder-skills/skills/market-sizing/SKILL.md",
       "count": 1,
-      "reason": "SKILL.md is over the ~19,000 B re-attach cap on purpose. CLAUDE.md records the measured decision: compaction is ~1.6% of transcripts, truncation is head-preserving and a directory-owning skill is recoverable, and front-loading a survival core was withdrawn because the window is fixed-size. Shrinking every body below the cap needs an e2e A/B."
+      "reason": "SKILL.md is over the ~19,000 B re-attach cap on purpose. `.claude/rules/skill-md-conventions.md` records the measured decision: compaction is ~1.6% of transcripts, truncation is head-preserving and a directory-owning skill is recoverable, and front-loading a survival core was withdrawn because the window is fixed-size. Shrinking every body below the cap needs an e2e A/B."
     },
     {
       "rule": "skill-reference-over-read-cap",

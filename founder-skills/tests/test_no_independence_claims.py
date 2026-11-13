@@ -151,6 +151,7 @@ def test_the_scan_reaches_the_files_that_carry_the_claim() -> None:
     }
     must_reach = [
         pathlib.Path("CLAUDE.md"),
+        pathlib.Path(".claude/rules/scripts-deck-review.md"),
         pathlib.Path("founder-skills/agents/deck-review.md"),
         pathlib.Path("founder-skills/skills/deck-review/SKILL.md"),
         pathlib.Path("founder-skills/skills/deck-review/scripts/reconcile.py"),

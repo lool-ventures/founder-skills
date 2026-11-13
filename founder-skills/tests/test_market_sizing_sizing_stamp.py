@@ -7,8 +7,8 @@ disagree with the sizing the founder sees, and let a self-check pass against an 
 
 `--sizing PATH` on both producers closes this: a v1-stamped `sizing.json` (as `market_sizing.py`'s
 references path writes it) becomes the source of truth for base values (sensitivity.py) and the
-thing `graded_against` records (both). See the two scripts' module docstrings and CLAUDE.md's
-"Market Sizing Scripts" entries for the shape of `input_provenance`.
+thing `graded_against` records (both). See the two scripts' module docstrings and
+`.claude/rules/scripts-market-sizing.md`'s entries for the shape of `input_provenance`.
 
 These tests run the real scripts via subprocess, the same way test_market_sizing_provenance.py
 does; the small helpers below are copied from it rather than imported (skill scripts and their
