@@ -11,9 +11,9 @@ Two reasons, and the second is the one that paid for it.
 
 2. It is the FALSIFIER for a SKILL.md change. `docs/internal/2026-08-28-skill-frontloading-plan.md`
    rev 2 established that any front-loading change must be gated on a live A/B, because contract
-   tests structurally cannot see behavioural change — and CLAUDE.md's own "landed + unit-green is not
-   behaviourally verified" rule has a worked example of a shipped fleet prose guardrail that turned
-   out inert. cap-table is the skill that change targets, so the gate needs a cap-table lane.
+   tests structurally cannot see behavioural change — and a shipped fleet prose guardrail has already
+   turned out inert once: landed and unit-green, but never behaviourally verified. cap-table is the
+   skill that change targets, so the gate needs a cap-table lane.
 
 NOT in the paid release gate, deliberately. `skill-quality.yml` names exactly three lanes in its
 EXPECTED set; a release run pays for one document per skill and that gate is already a measured coin-flip

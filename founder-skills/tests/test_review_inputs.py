@@ -471,7 +471,7 @@ class TestCurrencyAwareRendering:
         assert 'const CUR_SUFFIX = CURRENCY === "USD" ? "" : " " + CURRENCY;' in html
 
     def test_currency_baked_in_at_build_time_eur(self) -> None:
-        """Same, for EUR — the CLAUDE.md-named second currency to check."""
+        """Same, for EUR, a second currency to check."""
         inputs = _no_israel_fx(_FULL_INPUTS)
         inputs["currency"] = "EUR"
         rc, html, stderr = _generate_static(inputs)

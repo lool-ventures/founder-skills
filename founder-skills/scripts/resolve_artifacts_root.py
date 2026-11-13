@@ -493,7 +493,7 @@ def main() -> int:
     # PermissionError in a read-only cwd — a third exit state the callers' prose does not document.
     if args.uploads:
         # A caller who typed `--uploads --json | jq` used to get a bare path and
-        # `Expecting value: line 1 column 1` — the exact silent-format-mismatch class CLAUDE.md
+        # `Expecting value: line 1 column 1` — the exact silent-format-mismatch class `.claude/rules/cowork-harness.md`
         # already records for `critique --out` without `--output-format json`. Refuse instead.
         conflicting = [
             f"--{name.replace('_', '-')}"
