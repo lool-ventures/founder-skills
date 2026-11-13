@@ -9,6 +9,7 @@ revision. Every company name, slug and figure here is invented.
 
 from __future__ import annotations
 
+import html
 import importlib.util
 import inspect
 import json
@@ -690,6 +691,37 @@ def test_an_open_documents_question_stops_compose_and_a_skipped_review_closes_it
     _ok(h.run(*argv, "-o", str(rd / "red_team_skip.json")))
     assert h.ledger(root, rid)["gates"]["cp_upload_path"]["state"] == "not_owed"
     _ok(_compose(rd))
+
+
+def test_a_merger_kept_separate_is_named_in_the_report_and_on_the_page(tmp_path: Path) -> None:
+    """Two points on the map that research says are one company: report.md and report.html both say so, for a
+    pair kept separate only; a combined pair, or one naming a company outside the set, adds no line."""
+    root, rid, rd = _fixture_run(tmp_path)
+    _answer_all(root, rid, rd)
+    comps = json.loads((rd / "landscape.json").read_text(encoding="utf-8"))["competitors"]
+    (a, na), (b, nb), (c, _nc) = [(x["slug"], x["name"]) for x in comps[1:4]]
+    answers = {f"{a}+{b}": "keep_separate", f"{b}+{c}": "combine", f"{a}+not-in-the-set": "keep_separate"}
+    for pair, answer in answers.items():
+        _ok(h.record(root, rid, "open", "--gate", f"cp_consolidation_merge.{pair}"))
+        _ok(h.record(root, rid, "answer", "--gate", f"cp_consolidation_merge.{pair}", "--answer-id", answer))
+    _ok(_compose(rd))
+    sentence = f"Research found that {na} and {nb} are now one company."
+    report_md = (rd / "report.md").read_text(encoding="utf-8")
+    assert report_md.count("are now one company") == 1 and sentence in report_md
+    landscape_section = report_md.split("## Competitor Landscape", 1)[1].split("\n## ", 1)[0]
+    assert sentence in landscape_section
+    assert json.loads((rd / "report.json").read_text(encoding="utf-8"))["mergers_kept_separate"] == [[na, nb]]
+    page = h.run(SCRIPTS / "visualize.py", "--dir", str(rd))
+    assert page.returncode == 0, page.stderr[-600:]
+    assert page.stdout.count("are now one company") == 1 and html.escape(sentence) in page.stdout
+
+
+def test_without_a_merger_the_report_adds_no_line(tmp_path: Path) -> None:
+    root, rid, rd = _fixture_run(tmp_path)
+    _answer_all(root, rid, rd)
+    _ok(_compose(rd))
+    assert "are now one company" not in (rd / "report.md").read_text(encoding="utf-8")
+    assert "mergers_kept_separate" not in json.loads((rd / "report.json").read_text(encoding="utf-8"))
 
 
 def _skip(rd: Path, rid: str, reason: str) -> Any:

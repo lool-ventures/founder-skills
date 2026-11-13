@@ -322,6 +322,8 @@ REFUSED_NA = [
     ("cap-table", "ct_lane1_counsel_review.safes.0.purchase_amount"),
     ("cap-table", "ct_lane2_column_mapping.holder_name"),
 ]
+# The ones with no no-ask default: their open stops the run (exit 12) and leaves the question open.
+REFUSED_NA_OPEN = [(s, k) for s, k in REFUSED_NA if g.GATES[g.parse_key(k)[0]]["no_ask_default"] is None]
 PRODUCT = [f"cp_product_profile.{f}" for f in ("product", "customers", "differentiation")]
 CP = "competitive-positioning"
 
@@ -341,7 +343,7 @@ def test_the_model_owed_questions_the_recorder_closes_are_exactly_these() -> Non
     assert accepted == {g.parse_key(k)[0] for _s, k in REFUSED_NA} | set(g.NA_REPLACES_NO_ASK_DEFAULT)
 
 
-@pytest.mark.parametrize(("skill", "key"), REFUSED_NA)
+@pytest.mark.parametrize(("skill", "key"), REFUSED_NA_OPEN)
 def test_a_question_left_open_cannot_be_recorded_as_not_applying(tmp_path: Path, skill: str, key: str) -> None:
     root, _rid, _rd = _bound(tmp_path, skill)
     _stops(_open(root, key))
@@ -354,7 +356,7 @@ def test_a_question_left_open_cannot_be_recorded_as_not_applying(tmp_path: Path,
     assert _entry(root, key)["state"] == "open"
 
 
-@pytest.mark.parametrize(("skill", "key"), [REFUSED_NA[0], REFUSED_NA[5]])
+@pytest.mark.parametrize(("skill", "key"), [REFUSED_NA[0], REFUSED_NA[6]])
 def test_an_unopened_question_is_refused_and_the_message_says_to_open_it(tmp_path: Path, skill: str, key: str) -> None:
     root, _rid, _rd = _bound(tmp_path, skill)
     before = h.snapshot(root, RID)
@@ -526,15 +528,25 @@ def test_a_refused_input_question_is_answered_by_the_resume_line(tmp_path: Path)
     assert _entry(root, "dr_input_request.copy_failed")["state"] == "answered"
 
 
-def test_a_refused_merger_question_is_answered_by_the_resume_line(tmp_path: Path) -> None:
+MERGER = "cp_consolidation_merge.alpha+beta"
+
+
+def test_a_merger_keeps_the_two_companies_separate_and_says_so(tmp_path: Path) -> None:
+    """Its pair is known only once research has run, so a request cannot answer it ahead; under no-ask it takes
+    `keep_separate` (nothing is combined without a person's word) and the status discloses it per pair."""
     root, _rid, _rd = _bound(tmp_path, CP)
-    key = "cp_consolidation_merge.alpha+beta"
-    _stops(_open(root, key))
-    _refused_na(_na(root, key))
-    _resume(root, CP, f"FS_HOST_ANSWER {key}=keep_separate\n")
-    _ok(_open(root, key))
-    cur = _entry(root, key)
+    _ok(_open(root, MERGER))
+    cur = _entry(root, MERGER)
     assert (cur["state"], cur["current"]["answer_id"]) == ("answered", "keep_separate")
+    assert (cur["current"]["resolution"], cur["current"]["resolution_basis"]) == ("default_taken", "host_no_ask")
+    assert f"DEFAULT_TAKEN:{MERGER}" in h.status(root, RID)["disclosures"]
+    assert "its recorded answer stands" in _refused_na(_na(root, MERGER))
+
+
+def test_a_request_line_still_decides_a_merger_pair(tmp_path: Path) -> None:
+    root, _rid, _rd = _bound(tmp_path, CP, f"FS_HOST_ANSWER {MERGER}=combine\n")
+    _ok(_open(root, MERGER))
+    assert _entry(root, MERGER)["current"]["answer_id"] == "combine"
 
 
 def test_without_the_flag_not_applicable_is_unchanged(tmp_path: Path) -> None:

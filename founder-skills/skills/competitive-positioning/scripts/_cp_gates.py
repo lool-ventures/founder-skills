@@ -41,7 +41,8 @@ SCORING_GATES = (GATE1, *STEP4_GATES, "cp_gate2_axes", BASIS_GATE)
 # `require` would open them on every run; an open one is caught by `refuse_open_gates` instead.
 ALL_KEYS = (*PRODUCT_GATES, *SCORING_GATES, "cp_gate3_position")
 # Questions a printed prompt waits for while they are open.
-OPEN_FOLLOW_UPS = ("cp_consolidation_merge",)
+MERGE_GATE = "cp_consolidation_merge"
+OPEN_FOLLOW_UPS = (MERGE_GATE,)
 # The artifacts this run's id is read from, as compose and the pages read it.
 REQUIRED_ARTIFACTS = (
     "landscape.json",
@@ -222,6 +223,28 @@ def recorded_basis(run_dir: str, run_id: str | None) -> str | None:
     if entry.get("state") == "answered" and isinstance(cur.get("answer_id"), str):
         return str(cur["answer_id"])
     return DEFAULT_BASIS
+
+
+def kept_separate_mergers(run_dir: str, run_id: str | None, competitors: list[Any]) -> list[list[str]]:
+    """The mergers this run kept as two companies (`cp_consolidation_merge` answered `keep_separate`), as
+    [name_a, name_b] from the final competitor set, sorted; a pair whose company left the set is not listed.
+    Empty with no ledger. Read only."""
+    ledger = open_ledger_or_exit(run_dir, run_id)
+    if ledger is None:
+        return []
+    gates, paths = ledger
+    names = gates._cp_names([c for c in competitors if isinstance(c, dict)])
+    out = set()
+    for entry in (gates.load_ledger(paths).get("gates") or {}).values():
+        if not isinstance(entry, dict) or entry.get("gate") != MERGE_GATE or entry.get("state") != "answered":
+            continue
+        if (entry.get("current") or {}).get("answer_id") != "keep_separate":
+            continue
+        a, sep, b = str(entry.get("instance") or "").partition("+")
+        na, nb = names.get(gates.cp_slug(a)), names.get(gates.cp_slug(b))
+        if sep and na and nb and na != nb:
+            out.add((na, nb))
+    return [list(p) for p in sorted(out)]
 
 
 def basis_mismatch(recorded: str, used: Any, where: str) -> NoReturn:

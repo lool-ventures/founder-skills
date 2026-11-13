@@ -1440,6 +1440,9 @@ def compose_html(dir_path: str) -> str:
     comp_table = _section_competitor_table(
         landscape, moat_scores, artifacts.get("competitor_verification.json"), artifacts.get("landscape_draft.json")
     )
+    # A merger research found that the run kept as two companies: the line report.md carries under its table.
+    merged = _cp_view.merger_sentences(_as_dict(report).get("mergers_kept_separate") or [])
+    comp_table += "".join(f"<p><em>{_esc(m)}</em></p>" for m in merged)
     proof_gap = _section_proof_gap(positioning_scores)
     startup_record = _section_startup_record(
         _humanized(_load_artifact(dir_path, _cp_view.FIRST_STARTUP_RESEARCH), upload_names),

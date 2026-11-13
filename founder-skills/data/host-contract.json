@@ -194,7 +194,7 @@
         "full"
       ],
       "multi": false,
-      "no_ask_default": null,
+      "no_ask_default": "keep_separate",
       "options": [
         {
           "hidden": false,
@@ -2916,7 +2916,7 @@
     "`ic_decline_confirmation` is owed only while this run's scored verdict is a Decline (`pass` or `hard_pass`); a request line for it applies only then. `hold_off` cannot be sent ahead: recorded, it leaves the run `waiting` until `finish` is. A scores file that cannot be read or carries another run's id makes the gate `GATE_UNDECIDABLE` (exit 2) rather than not owed.",
     "ic-sim refuses `RUN_FINISHED` (exit 1, nothing written) when its fund profile or report is built again for a `complete` run: new materials after delivery are a new simulation, under a new run id.",
     "competitive-positioning: `open --gate cp_gate1_landscape` prints the question naming every competitor the independent search found that the set lacks, and `context_lines`, one per candidate; when it applies a request line (or the gate is already answered) the same lines are under `context.<gate>`. `missing`, `remove` and `change_axes` leave the question open (asked again after the change) and cannot be sent ahead.",
-    "competitive-positioning's Step 4 additions question offers only the form the open slots allow (all / top <n> / free a slot by merging) and is not owed when nothing can be added; an option of another form is `OPTION_UNLISTED`. `include_top` takes research's first <n>; only `include_some` asks `cp_research_pick`, which records any candidate (comma-joined ids, at most the open slots) though it shows four. `cp_consolidation_merge` has one instance per merger research found (`<slug_a>+<slug_b>`); an answered pair is never offered again.",
+    "competitive-positioning's Step 4 additions question offers only the form the open slots allow (all / top <n> / free a slot by merging) and is not owed when nothing can be added; an option of another form is `OPTION_UNLISTED`. `include_top` takes research's first <n>; only `include_some` asks `cp_research_pick`, which records any candidate (comma-joined ids, at most the open slots) though it shows four. `cp_consolidation_merge` has one instance per merger research found (`<slug_a>+<slug_b>`); an answered pair is never offered again. Under `FS_HOST_NO_ASK` each pair takes `keep_separate` (`DEFAULT_TAKEN:cp_consolidation_merge.<slug_a>+<slug_b>`), unless a request line answers that pair.",
     "A competitive-positioning report composed again after `complete` (the delivery check's fix, or a coordinate the founder disputes) starts a new revision: `running`, `revision` + 1, deliverables and `handed_over_at` cleared, until the coaching is inserted again.",
     "A cap-table what-if after `complete` (a new scenario or pool, re-run through the scenario solver or the fast assessment) reopens the run the same way. A what-if that asks for something a recorded answer rules out supersedes that answer (`what_if:<reason>`) and the question is asked again (exit 10); on the first revision the same disagreement is `GATE_RECORD_MISMATCH` (exit 1). A fast assessment or concise answer finishes again.",
     "cap-table's no-cap-base fork ends with `run_status.py finish --mode extraction_only`, allowed on a full run only once `ct_no_cap_base_fork` is answered `terms_only`; finishing closes the questions that mode does not ask. A rule lookup's finish closes Step 1's unanswered questions the same way.",

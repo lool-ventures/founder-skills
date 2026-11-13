@@ -399,7 +399,8 @@ CONTRACT_NOTES = (
     "`OPTION_UNLISTED`. `include_top` takes research's first <n>; only `include_some` asks `cp_research_pick`, which "
     "records any candidate (comma-joined ids, at most the open slots) though it shows four. "
     "`cp_consolidation_merge` has one instance per merger research found (`<slug_a>+<slug_b>`); an answered pair is "
-    "never offered again.",
+    "never offered again. Under `FS_HOST_NO_ASK` each pair takes `keep_separate` (`DEFAULT_TAKEN:"
+    "cp_consolidation_merge.<slug_a>+<slug_b>`), unless a request line answers that pair.",
     "A competitive-positioning report composed again after `complete` (the delivery check's fix, or a coordinate the "
     "founder disputes) starts a new revision: `running`, `revision` + 1, deliverables and `handed_over_at` cleared, "
     "until the coaching is inserted again.",
@@ -1643,8 +1644,8 @@ GATES: dict[str, dict[str, Any]] = {
         "asked_check": "none",
         "writer": "record_gate_answer.py",
         "binds": None,
-        "no_ask_default": None,
-        "defaults": _STATED,
+        "no_ask_default": "keep_separate",
+        "defaults": _no_ask("keep_separate"),
         "reopens_complete": False,
         "mandatory": False,
         "catalog_row": None,

@@ -1475,8 +1475,8 @@ def _section_proof_gap(positioning_scores: dict[str, Any] | None) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _section_competitor_landscape(landscape: dict[str, Any] | None) -> str:
-    """Competitor landscape table."""
+def _section_competitor_landscape(landscape: dict[str, Any] | None, mergers: list[list[str]] | None = None) -> str:
+    """Competitor landscape table, then a line per merger the run kept as two companies (`_view.merger_sentences`)."""
     if landscape is None or _is_stub(landscape):
         return "## Competitor Landscape\n\n*No landscape data available.*\n"
 
@@ -1511,6 +1511,11 @@ def _section_competitor_landscape(landscape: dict[str, Any] | None) -> str:
         if len(funding) > 60:
             funding = funding[:57].rstrip() + "..."
         lines.append(f"| {name} | {cat} | {pricing} | {funding} | {rd} | {sfc} |")
+
+    merged = _view.merger_sentences(mergers or [])
+    if merged:
+        lines.append("")
+        lines.extend(f"*{_view.md_inline(m)}*" for m in merged)
 
     return "\n".join(lines) + "\n"
 
@@ -2212,9 +2217,16 @@ def _emit_coaching_payload(
     }
 
 
-def compose(dir_path: str, report_path: str | None = None, no_ask: bool = False) -> dict[str, Any]:
+def compose(
+    dir_path: str,
+    report_path: str | None = None,
+    no_ask: bool = False,
+    mergers_kept_separate: list[list[str]] | None = None,
+) -> dict[str, Any]:
     """Main composition: load artifacts, validate, assemble report. `no_ask`: the run's request said not to ask
-    (read from the ledger), so a review skip the founder declined is refused."""
+    (read from the ledger), so a review skip the founder declined is refused. `mergers_kept_separate`: the
+    mergers research found that the run kept as two companies, [name_a, name_b] each (from the ledger)."""
+    mergers = [list(p) for p in (mergers_kept_separate or [])]
     all_names = REQUIRED_ARTIFACTS + OPTIONAL_ARTIFACTS
     artifacts: dict[str, dict[str, Any] | None] = {}
     for name in all_names:
@@ -2369,7 +2381,7 @@ def compose(dir_path: str, report_path: str | None = None, no_ask: bool = False)
             _render_safe(artifacts.get(_view.FIRST_STARTUP_RESEARCH)),
             _render_safe(artifacts.get("startup_research.json")),
         ),
-        _section_competitor_landscape(landscape),
+        _section_competitor_landscape(landscape, mergers),
         _section_recent_developments(landscape),
         _section_competitor_verification(competitor_verification, name_by_slug, landscape),
         _section_positioning(positioning_scores, positioning_safe, name_by_slug, startup_name),
@@ -2596,6 +2608,8 @@ def compose(dir_path: str, report_path: str | None = None, no_ask: bool = False)
             "scoring_basis": scoring_basis_label,
         },
         "coaching_payload": coaching_payload,
+        # Only when there is one: a run with no ledger writes the report.json it always did.
+        **({"mergers_kept_separate": mergers} if mergers else {}),
     }
 
 
@@ -2665,7 +2679,14 @@ def main() -> None:
     report_path = os.path.abspath(args.write_md) if args.write_md else None
     # The request said not to ask: read once from the ledger, for the review gate's founder_declined refusal.
     quiet = ledger is not None and bool(ledger[0].no_ask(ledger[0].load_ledger(ledger[1])))
-    result = compose(args.dir, report_path=report_path, no_ask=quiet)
+    mergers: list[list[str]] = []
+    if ledger is not None:
+        landscape = _load_artifact(args.dir, "landscape.json") or {}
+        comps = landscape.get("competitors") if isinstance(landscape, dict) else None
+        mergers = _cp_gates.kept_separate_mergers(
+            args.dir, _cp_gates.run_id_of(args.dir), comps if isinstance(comps, list) else []
+        )
+    result = compose(args.dir, report_path=report_path, no_ask=quiet, mergers_kept_separate=mergers)
 
     if args.write_md:
         report_markdown = result.get("report_markdown", "")

@@ -488,6 +488,21 @@ def _first_sentence(text: Any, limit: int = 240) -> str:
     return sentence
 
 
+def merger_sentences(pairs: Iterable[Any]) -> list[str]:
+    """One sentence per merger research found that the run kept as two companies (`cp_consolidation_merge`
+    answered `keep_separate`, by the founder or as an unattended run's default), so a reader of the map knows
+    two of its points are one company. `pairs`: [name_a, name_b] each, as report.json carries them."""
+    out = []
+    for pair in pairs or []:
+        if isinstance(pair, (list, tuple)) and len(pair) == 2 and all(str(n or "").strip() for n in pair):
+            a, b = (str(n).strip() for n in pair)
+            out.append(
+                f"Research found that {a} and {b} are now one company. This analysis shows them as two "
+                "separate competitors."
+            )
+    return out
+
+
 def claim_sentences(positioning_scores: Mapping[str, Any] | None) -> list[str]:
     """One sentence per stress-tested pitch claim: the claim, its verdict, and -- when it does not
     fully hold -- the first sentence of the evidence, so the coach has something to address."""

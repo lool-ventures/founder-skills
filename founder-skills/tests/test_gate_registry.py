@@ -61,9 +61,11 @@ def test_there_are_61_gates() -> None:
 
 def test_only_listed_gates_let_the_materials_replace_a_no_ask_default() -> None:
     """The recorder lets a not-applicable replace a no-ask default only for the allow-set, and the allow-set is
-    exactly the model-owed gates that carry a no-ask default: a new one must be listed (or not) on purpose."""
+    a deliberate subset of the model-owed gates that carry a no-ask default: a new one must be listed (or not) on
+    purpose. A merger kept separate is not one: its default stands, so no merger is ever withdrawn by hand."""
     reachable = {k for k, v in GATES.items() if v["owed"] == "model" and v["no_ask_default"] is not None}
-    assert set(_gates.NA_REPLACES_NO_ASK_DEFAULT) == reachable == {"cp_product_availability"}
+    assert reachable == {"cp_product_availability", "cp_consolidation_merge"}
+    assert set(_gates.NA_REPLACES_NO_ASK_DEFAULT) == {"cp_product_availability"}
 
 
 def test_the_contract_file_is_the_registry() -> None:

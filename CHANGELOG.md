@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Competitive positioning: when research finds that two competitors in the set are now one company, a run that
+  was asked not to ask questions keeps them as two separate competitors and carries on, instead of stopping to
+  wait for an answer. The run's status lists it as a default it took, one entry per pair. A request can still
+  answer a pair ahead of time.
+
+### Added
+
+- Competitive positioning: the report and its page now say when research found that two competitors are one
+  company and the analysis shows them separately, whether the founder chose that or an unattended run did.
+
+### Scoring changes
+
+None.
+
 ## [0.28.0] - 2026-11-11 — Analysis sub-agents start lighter
 
 ### Highlights
