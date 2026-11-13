@@ -16,8 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- Competitive positioning: the report and its page now say when research found that two competitors are one
-  company and the analysis shows them separately, whether the founder chose that or an unattended run did.
+- Competitive positioning: the report, its page and the explorer now say when research found that two
+  competitors are one company and the analysis shows them separately, whether the founder chose that or an
+  unattended run did.
 
 ### Scoring changes
 

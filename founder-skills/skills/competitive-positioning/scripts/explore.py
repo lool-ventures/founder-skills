@@ -545,6 +545,15 @@ def compose_explorer(dir_path: str) -> str:
             f'<span class="legend-item"><span class="legend-dot" style="background:{color}"></span>{label}</span>'
         )
     legend_html = "\n".join(legend_parts)
+    # Two points on the map research says are one company, kept apart by the run: the same line report.md
+    # and report.html carry, from report.json.
+    merged = _cp_view.merger_sentences((report if isinstance(report, dict) else {}).get("mergers_kept_separate") or [])
+    # Styled inline, so a page with no merger stays byte-identical to before.
+    merger_style = (
+        "font-size: 0.8rem; color: var(--lool-slate); padding: 0.5rem 2rem; margin: 0; "
+        "background: var(--lool-paper); border-bottom: 1px solid var(--lool-line-2);"
+    )
+    merger_html = "".join(f'<p style="{merger_style}"><em>{_esc(m)}</em></p>\n' for m in merged)
 
     body = f"""{header}
 <div class="cp-app">
@@ -581,7 +590,7 @@ def compose_explorer(dir_path: str) -> str:
 </div>
 
 <div class="scoring-basis-caption" id="scoring-basis-caption"></div>
-
+{merger_html}
 <div class="tab-panel active" id="panel-2d" role="tabpanel" aria-labelledby="tab-2d">
   <div class="main">
     <div class="chart-area">

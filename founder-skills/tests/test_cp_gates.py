@@ -694,7 +694,7 @@ def test_an_open_documents_question_stops_compose_and_a_skipped_review_closes_it
 
 
 def test_a_merger_kept_separate_is_named_in_the_report_and_on_the_page(tmp_path: Path) -> None:
-    """Two points on the map that research says are one company: report.md and report.html both say so, for a
+    """Two points on the map that research says are one company: report.md, report.html and the explorer say so, for a
     pair kept separate only; a combined pair, or one naming a company outside the set, adds no line."""
     root, rid, rd = _fixture_run(tmp_path)
     _answer_all(root, rid, rd)
@@ -714,6 +714,9 @@ def test_a_merger_kept_separate_is_named_in_the_report_and_on_the_page(tmp_path:
     page = h.run(SCRIPTS / "visualize.py", "--dir", str(rd))
     assert page.returncode == 0, page.stderr[-600:]
     assert page.stdout.count("are now one company") == 1 and html.escape(sentence) in page.stdout
+    explorer = h.run(SCRIPTS / "explore.py", "--dir", str(rd))
+    assert explorer.returncode == 0, explorer.stderr[-600:]
+    assert explorer.stdout.count("are now one company") == 1 and html.escape(sentence) in explorer.stdout
 
 
 def test_without_a_merger_the_report_adds_no_line(tmp_path: Path) -> None:
@@ -722,6 +725,8 @@ def test_without_a_merger_the_report_adds_no_line(tmp_path: Path) -> None:
     _ok(_compose(rd))
     assert "are now one company" not in (rd / "report.md").read_text(encoding="utf-8")
     assert "mergers_kept_separate" not in json.loads((rd / "report.json").read_text(encoding="utf-8"))
+    explorer = h.run(SCRIPTS / "explore.py", "--dir", str(rd))
+    assert explorer.returncode == 0 and "are now one company" not in explorer.stdout
 
 
 def _skip(rd: Path, rid: str, reason: str) -> Any:
