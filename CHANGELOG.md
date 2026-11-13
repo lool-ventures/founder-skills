@@ -16,8 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Market sizing: each researched share now records the population its source measured it on (`of`), and the
   sizing refuses a segment or serviceable share applied to a population it was not measured on, unless the
   share is declared a proxy for that population with a reason. The report and its page state each proxy and
-  its reason, and say when a population count changed under a share that was kept as it was. Analyses sized
-  before this change replay unchecked. `sizing.json` gains a `base_checks` key (additive).
+  its reason, and say when a population count changed under a share that was kept as it was. Declaring a
+  proxy, or changing what a share was measured on, after the outside review is reported as a change the review
+  did not see. Analyses sized before this change replay unchecked. `sizing.json` gains a `base_checks` key (additive).
 
 ### Added
 

@@ -21,11 +21,13 @@ from test_market_sizing import run_script_raw  # noqa: E402
 from test_market_sizing_view import (  # noqa: E402
     _REFS,
     _RUN,
+    _codes,
     _compose,
     _edit,
     _html,
     _record,
     _replay,
+    _reviewed_dir,
     _run_dir,
     _sourced,
     _stamp_downstream,
@@ -224,3 +226,40 @@ def test_nothing_is_said_when_every_share_matches(tmp_path: Path) -> None:
     _stamp_downstream(d)
     md = _compose(d)["report_markdown"]
     assert "as a proxy" not in md and "since the earlier sizing" not in md
+
+
+def test_a_proxy_declared_after_the_review_is_a_change_the_review_did_not_see(tmp_path: Path) -> None:
+    """`of` is the main thread's word, and only the outside review can attack it: rewriting it, or declaring a
+    proxy, after the review is disclosed like any other research change after it."""
+    d = _reviewed_dir(tmp_path)
+    _edit(
+        d,
+        "validation.json",
+        lambda v: _segment(v, of="seniors in two states", proxy={"for": "eligible_population", "why": _WHY}),
+    )
+    rc, out = _size(d, _REFS)
+    assert rc == 0, out
+    _stamp_downstream(d)
+    assert "RECORD_CHANGED_AFTER_REVIEW" in _codes(_compose(d))
+
+
+def test_a_base_cannot_be_built_from_two_populations(tmp_path: Path) -> None:
+    """Why matching a share against any one of the base's entries is safe: the calculator's algebra admits no
+    count times a count and has no sum, so a base holds at most one population. A wider one arrives as a new
+    entry (refused above) or the same entry with a new value (disclosed above)."""
+    refs = {
+        **_REFS,
+        "industry_total": {
+            "derived": {
+                "op": "multiply",
+                "factors": [
+                    {"assumption": "eligible_population"},
+                    {"assumption": "other_population"},
+                    {"assumption": "care_price"},
+                ],
+            }
+        },
+    }
+    d = _run_dir(tmp_path, _record(_sourced("other_population", 3, "count")))
+    rc, out = _size(d, refs)
+    assert rc == 1 and "E_ALGEBRA" in out

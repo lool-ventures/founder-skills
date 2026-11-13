@@ -2120,9 +2120,11 @@ def base_sentences(validation: Any, sizing: Any) -> list[str]:
             if not (share and base and why):
                 continue
             why = _founder_prose(why).rstrip(".")
+            label, param = _label(share, validation), _humanize_param(rate)
+            named = label if label == param else f"{label} ({param})"
             out.append(
-                f"{_humanize_param(rate)} applies {_label(share, validation)}, measured on {_measured_on(share)}, "
-                f"to {_label(base, validation)} as a proxy: {why}."
+                f"{named} was measured on {_measured_on(share)} and is applied to {_label(base, validation)} as a "
+                f"proxy: {why}."
             )
         for c in _as_list(row.get("base_changed")):
             c = _as_dict(c)

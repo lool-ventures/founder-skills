@@ -629,13 +629,19 @@ def _same_figure_entries(validation: Any, key: str, value: float, period: Any, c
 def record_snapshot(validation: Any, inputs: Any) -> dict[str, dict[str, Any]]:
     """Every quantitative record entry, by name, as it stands: what a review is taken against.
 
-    The grade an entry earned is part of it: listing a source raises a grade without touching a value.
+    The grade an entry earned is part of it: listing a source raises a grade without touching a value. So is a
+    share's `of` and `proxy` (`check_bases`): rewriting what a share was measured on, or declaring it a proxy,
+    after the review is a change the review did not see. Recorded only when present, so a review taken before
+    either existed compares as it did.
     """
     snap: dict[str, dict[str, Any]] = {}
     for a in _assumptions(validation):
         if a.get("unit") in P.UNITS and isinstance(a.get("name"), str):
             snap[a["name"]] = {k: a.get(k) for k in ("value", "unit", "currency", "period", "from", "to")}
             snap[a["name"]]["grade"] = entry_grade(a, validation)
+            for k in ("of", "proxy"):
+                if a.get(k) not in (None, ""):
+                    snap[a["name"]][k] = a.get(k)
     stated = _as_dict(_as_dict(inputs).get("founder_stated_inputs"))
     periods = _as_dict(_as_dict(inputs).get("founder_stated_inputs_period"))
     for key in sorted(FOUNDER_FACT_PARAMS):

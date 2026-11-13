@@ -2259,7 +2259,9 @@ REFERENCES_CEILING: dict[str, int] = {
     # 56,114 -> 59,413 (+3,299 B) on 2026-10-24: a new web-sources.md (opening the pages the sized figures rest
     # on and recording each figure's passage, kept out of SKILL.md, whose ceiling is exact), plus `quote` and
     # `quote_checks` in artifact-schemas.md.
-    "market-sizing": 59_413,
+    # 59,413 -> 60,393 (+980 B) on 2026-11-14: artifact-schemas.md documents a share's `of` and `proxy` and
+    # the sizing's `base_checks` stamp, the record and the stamp `market_sizing.py` checks a share's population by.
+    "market-sizing": 60_393,
     # fmr raised to document `graded_against` on the three producer outputs that stamp it — a new
     # artifact field is not discoverable from a schema doc that omits it, and the field exists to make
     # staleness detectable at all (run_id parity cannot see corrections applied within a run).

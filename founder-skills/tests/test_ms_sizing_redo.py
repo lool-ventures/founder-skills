@@ -702,6 +702,24 @@ def test_research_edited_after_the_first_print_is_named_even_with_the_same_input
     assert "Research the sizing uses was changed after the two builds were first made: Orchard sensor spend" in sentence
 
 
+def test_the_population_a_share_was_measured_on_added_after_the_first_print_is_not_research(tmp_path: Path) -> None:
+    """The first print snapshots the research before the sizing that refuses a share with no `of`. The `of`
+    that refusal asks for, added afterwards, is not research changed after the builds were made."""
+    a, h = _run_dir(tmp_path)
+    no_of = [{k: v for k, v in x.items() if k != "of"} for x in _VALIDATION["assumptions"]]
+    _write(a / "validation.json", {**_VALIDATION, "assumptions": no_of})
+    assert _gen(a, h).returncode == 0
+    refused = _pipe(a, h)
+    assert refused.returncode == 1 and "E_RATE_BASE_MISSING" in refused.stdout
+    _write(a / "validation.json", _VALIDATION)
+    assert _pipe(a, h).returncode == 0
+    assert _redo(a, h).returncode == 0
+    _rewrite_handoff(h, dict(_TD))
+    assert _pipe(a, h).returncode == 0
+    rec = json.loads((a / sr.RECORD_NAME).read_text())
+    assert sr.research_since(rec) == ([], [])
+
+
 def test_the_outcome_is_settled_once_the_sizing_used_the_redo(tmp_path: Path) -> None:
     """Step 6d's sizing re-dispatch runs before HANDOFF_DIR points at r2/, so it rewrites round 1's hand-off.
     That must not turn a redo that ran into "not run"."""
