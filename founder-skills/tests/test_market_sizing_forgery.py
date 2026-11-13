@@ -234,7 +234,10 @@ def test_a_relabelled_unit_is_caught_under_a_new_name_too(tmp_path: Path) -> Non
     _forge(
         d,
         "validation.json",
-        lambda v: v["assumptions"][3].update(name="market_spend", unit="money_total_per_year", currency="USD"),
+        lambda v: (
+            v["assumptions"][3].update(name="market_spend", unit="money_total_per_year", currency="USD"),
+            v["assumptions"][2].update(of="market_spend"),
+        ),
     )
     rc, out = _size_from(d, {**_REFS, "industry_total": {"assumption": "market_spend"}})
     assert rc == 0, out

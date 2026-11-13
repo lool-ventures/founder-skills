@@ -1806,8 +1806,8 @@ def test_html_reports_the_factors_the_two_narrowing_chains_share() -> None:
     params = ("industry_total", "segment_pct", "share_pct", "customer_count", "arpu", "serviceable_pct", "target_pct")
     validation, sizing = _v1_run(
         [
-            _v1_entry("segment_pct", 10.0, "percent_points", "derived", factors=factors_td),
-            _v1_entry("serviceable_pct", 9.1, "percent_points", "derived", factors=factors_bu),
+            _v1_entry("segment_pct", 10.0, "percent_points", "derived", of="industry_total", factors=factors_td),
+            _v1_entry("serviceable_pct", 9.1, "percent_points", "derived", of="customer_count", factors=factors_bu),
             _v1_entry("industry_total", 114_924_000_000, "money_total_per_year", currency="USD"),
             _v1_entry("share_pct", 0.3, "percent_points"),
             _v1_entry("customer_count", 61_000_000, "count"),

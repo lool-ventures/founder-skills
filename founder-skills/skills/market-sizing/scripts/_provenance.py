@@ -713,3 +713,135 @@ def load_stamped_sizing(path: str) -> tuple[dict[str, Any] | None, str | None]:
             f"market_sizing.py on the references path, or drop --sizing."
         )
     return sizing, None
+
+
+# --- what a share is a share of ---------------------------------------------------------------------------
+
+# The narrowing share each build applies directly to its base. Capture shares (share_pct, target_pct) are of
+# the serviceable market, which is never a recorded entry, and the price is not a share.
+_BASE_PAIRS: dict[str, str] = {"segment_pct": "industry_total", "serviceable_pct": "customer_count"}
+_SHARE_UNITS = (P.PERCENT_POINTS, P.FRACTION)
+_BASE_UNITS = (P.COUNT, P.MONEY_TOTAL)
+
+
+def _proxy(entry: dict[str, Any]) -> tuple[str, str] | None:
+    """(the base entry this share is used as a proxy for, why), when both are written."""
+    s = entry.get("proxy")
+    if not isinstance(s, dict):
+        return None
+    base, why = str(s.get("for") or "").strip(), str(s.get("why") or "").strip()
+    return (base, why) if base and why else None
+
+
+def check_bases(
+    resolved: dict[str, dict[str, Any]], validation: Any, prior: Any
+) -> tuple[dict[str, dict[str, Any]], list[dict[str, Any]]]:
+    """Whether each narrowing share was measured on the population it is applied to. Returns (stamp, refusals).
+
+    A share entry records `of`: the recorded entry naming the population its source measured it on (the same
+    population, possibly counted by another source), or that population in plain words. The share matches when
+    `of` names one of the base's own entries -- the base itself or the counts and money totals it is built from,
+    never a price or an exchange rate -- or another share of the same rate (a chain: "B of what A selects"). A
+    share used for a population it was not measured on passes only as a declared proxy, `proxy: {"for": <base
+    entry>, "why": ...}`, bound to that base: a new base needs a new reason. (One word on purpose: the
+    founder-text policy rewrites snake_case, and the refusal names the key the model must write.)
+
+    `prior` is the sizing this one replaces. When a base entry's value moved under the same name and the share's
+    did not, the stamp says so (`base_changed`): a count updated to a newer year is legitimate, so it is disclosed,
+    never refused.
+
+    What it cannot see: `of` is the main thread's word. It is written at research time, but by a writer who knows
+    the planned formula, and after a refusal with the pairing in front of it; on a revision it could be rewritten
+    to match. The outside review is what can attack it. Turning the share into an estimate also leaves it
+    unchecked; the stamp records that, so the mix of outcomes shows it.
+    """
+    by_name = {str(a.get("name")): a for a in _assumptions(validation) if isinstance(a.get("name"), str)}
+    old = _as_dict(_as_dict(prior).get("base_checks"))
+    stamp: dict[str, dict[str, Any]] = {}
+    refusals: list[dict[str, Any]] = []
+    for rate, base in _BASE_PAIRS.items():
+        if rate not in resolved or base not in resolved:
+            continue
+        base_entries = sorted(
+            n for n in resolved[base].get("entries") or [] if _as_dict(by_name.get(n)).get("unit") in _BASE_UNITS
+        )
+        shares = sorted(
+            n for n in resolved[rate].get("entries") or [] if _as_dict(by_name.get(n)).get("unit") in _SHARE_UNITS
+        )
+        row: dict[str, Any] = {
+            "base": base,
+            "status": "not_checked",
+            "of": [],
+            "base_entries": base_entries,
+            "proxy": None,
+            "reason": None,
+            "base_values": {n: by_name[n].get("value") for n in base_entries},
+            "share_values": {n: by_name[n].get("value") for n in shares},
+        }
+        stamp[rate] = row
+        if not base_entries:
+            row["reason"] = "base_not_recorded"  # an estimate or the founder's own figure
+            continue
+        if not shares:
+            row["reason"] = (
+                "estimate"
+                if resolved[rate].get("kind") == "estimate" or not resolved[rate].get("entries")
+                else "not_a_recorded_share"  # founder-stated, or built from counts
+            )
+            continue
+        missing = [n for n in shares if not str(by_name[n].get("of") or "").strip()]
+        if missing:
+            refusals.append(
+                {
+                    "code": "E_RATE_BASE_MISSING",
+                    "param": rate,
+                    "message": (
+                        f"the share {', '.join(repr(n) for n in missing)} does not say what population its source "
+                        f"measured it on. Record `of` on it: the recorded entry for that population, or the "
+                        f"population in plain words, as the source states it."
+                    ),
+                    "remedy_kind": "record_research",
+                }
+            )
+            continue
+        ofs = {n: str(by_name[n]["of"]).strip() for n in shares}
+        row["of"] = [ofs[n] for n in shares]
+        on_base = [n for n in shares if ofs[n] in base_entries]
+        chained = [n for n in shares if ofs[n] in shares and ofs[n] != n]
+        stood = {n: si for n in shares if (si := _proxy(by_name[n])) and si[0] in base_entries}
+        unmatched = [n for n in shares if n not in on_base and n not in chained and n not in stood]
+        if unmatched or not (on_base or stood):
+            bad = unmatched or shares
+            refusals.append(
+                {
+                    "code": "E_RATE_BASE_MISMATCH",
+                    "param": rate,
+                    "message": (
+                        f"{'; '.join(repr(n) + ' is a share of ' + repr(ofs[n]) for n in bad)}, and it is applied "
+                        f"to {base} built from {', '.join(repr(n) for n in base_entries)}. `of` records what the "
+                        f"source measured; do not change it to match. Either use a share measured on that "
+                        f'population, or record on the share `proxy`: {{"for": "<the base entry>", '
+                        f'"why": "<why this share is a fair proxy for it>"}}.'
+                    ),
+                    "remedy_kind": "record_research",
+                }
+            )
+            continue
+        if stood:
+            row["status"] = "proxy"
+            row["proxy"] = [{"share": n, "for": si[0], "why": si[1]} for n, si in sorted(stood.items())]
+        else:
+            row["status"] = "match"
+        was = _as_dict(old.get(rate))
+        before = _as_dict(was.get("base_values"))
+        if (
+            set(before) == set(row["base_values"])
+            and _as_dict(was.get("share_values")) == row["share_values"]
+            and before != row["base_values"]
+        ):
+            row["base_changed"] = [
+                {"entry": n, "from": before[n], "to": row["base_values"][n]}
+                for n in base_entries
+                if before[n] != row["base_values"][n]
+            ]
+    return stamp, refusals

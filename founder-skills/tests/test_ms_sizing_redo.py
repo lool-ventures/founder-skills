@@ -60,6 +60,7 @@ _VALIDATION: dict[str, Any] = {
             "category": "sourced",
             "unit": "percent_points",
             "label": "Pear-belt share",
+            "of": "orchard_sensor_total",
         },
         {
             "name": "reachable_share",
@@ -78,7 +79,14 @@ _VALIDATION: dict[str, Any] = {
             "category": "sourced",
             "label": "Sensor plan price",
         },
-        {"name": "served_share", "value": 60, "category": "sourced", "unit": "percent_points", "label": "Served share"},
+        {
+            "name": "served_share",
+            "value": 60,
+            "category": "sourced",
+            "unit": "percent_points",
+            "label": "Served share",
+            "of": "pear_growers",
+        },
         {
             "name": "target_share",
             "value": 8,
@@ -573,6 +581,8 @@ def test_the_sizing_over_a_consumed_redo_records_after_once(tmp_path: Path) -> N
                     "factors": [{"assumption": "pear_growers"}, {"assumption": "sensor_price"}],
                 }
             },
+            # The rebuilt total takes a share measured on its own population.
+            "segment_pct": {"assumption": "served_share"},
         },
     )
     assert _pipe(a, h).returncode == 0
@@ -653,7 +663,14 @@ def test_research_recorded_after_the_first_print_is_named(tmp_path: Path) -> Non
         "category": "sourced",
         "label": "Pear-belt sensor spend",
     }
-    _write(a / "validation.json", {**_VALIDATION, "assumptions": [*_VALIDATION["assumptions"], extra]})
+    # The share kept on the new total is declared a proxy; that is not research, so it is not named below.
+    stood = [
+        {**x, "proxy": {"for": "pear_belt_total", "why": "No source splits pear-belt spend."}}
+        if x["name"] == "pear_belt_share"
+        else x
+        for x in _VALIDATION["assumptions"]
+    ]
+    _write(a / "validation.json", {**_VALIDATION, "assumptions": [*stood, extra]})
     assert _redo(a, h).returncode == 0
     _rewrite_handoff(h, {**_TD, "industry_total": {"assumption": "pear_belt_total"}})
     assert _pipe(a, h).returncode == 0

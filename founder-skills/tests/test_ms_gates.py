@@ -384,7 +384,7 @@ def _period_case(tmp_path: Path) -> tuple[Path, str, Path, dict[str, Any], dict[
                 "source_title": "Example Report",
                 "source_url": "https://example.org/r",
             },
-            {"name": "reachable", "value": 30, "unit": "percent_points", "category": "derived"},
+            {"name": "reachable", "value": 30, "unit": "percent_points", "category": "derived", "of": "accounts"},
             {"name": "capture", "value": 4, "unit": "percent_points", "category": "agent_estimate"},
         ],
         "metadata": {"run_id": run_id},

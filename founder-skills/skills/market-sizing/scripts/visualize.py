@@ -1068,6 +1068,10 @@ def _chart_confidence_donut(validation: dict[str, Any] | None, sizing: dict[str,
     quoted = _view.quote_sentence(validation, sizing)
     if quoted:
         notes += f'<p class="estimate-note">{_esc(quoted)}</p>'
+    # Each share used as a proxy for another population, and each base moved under a kept share: report.md's
+    # Sources Used sentences, from the same owner.
+    for based in _view.base_sentences(validation, sizing):
+        notes += f'<p class="estimate-note">{_esc(based)}</p>'
 
     return '<div class="chart-container">' + svg + "</div>" + legend + notes
 

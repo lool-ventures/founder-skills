@@ -43,12 +43,14 @@ def _sourced(name: str, value: float, unit: str, **extra: Any) -> dict[str, Any]
     }
 
 
-def _record(*extra: dict[str, Any]) -> dict[str, Any]:
+def _record(*extra: dict[str, Any], segment_of: str = "eligible_population") -> dict[str, Any]:
+    """`segment_of`: the population the segment share was measured on, which must be the one the
+    market total is built from (the share-base check refuses any other)."""
     return {
         "assumptions": [
             _sourced("eligible_population", 41_000_000, "count"),
             _sourced("care_price", 157, "money_per_customer", currency="USD", period="month"),
-            _sourced("segment_pct", 37, "percent_points"),
+            _sourced("segment_pct", 37, "percent_points", of=segment_of),
             *extra,
         ],
         "sources": [_SRC],
@@ -249,7 +251,10 @@ def test_a_unit_relabelled_after_the_calculator_refused_it_is_disclosed(tmp_path
     _edit(
         d,
         "validation.json",
-        lambda v: v["assumptions"][3].update(unit="money_total_per_year", currency="USD"),
+        lambda v: (
+            v["assumptions"][3].update(unit="money_total_per_year", currency="USD"),
+            v["assumptions"][2].update(of="eligible_total"),
+        ),
     )
     rc, out, err = run_script_raw(
         "market_sizing.py",
@@ -506,7 +511,7 @@ def test_an_estimate_is_found_from_what_the_sizing_used_not_from_a_name(tmp_path
 
 
 def test_the_founders_figure_is_found_by_what_the_sizing_references(tmp_path: Path) -> None:
-    record = _record(_sourced("addressable", 100_000, "count"), _sourced("svc", 50, "percent_points"))
+    record = _record(_sourced("addressable", 100_000, "count"), _sourced("svc", 50, "percent_points", of="addressable"))
     inputs_extra = {"founder_stated_inputs": {"arpu": 157}, "founder_stated_inputs_period": {"arpu": "month"}}
     bu = {
         "approach": "bottom_up",
@@ -820,7 +825,7 @@ def test_the_figures_a_used_figure_is_built_from_are_not_called_unused(tmp_path:
     """A live report labelled the 41M-style population and the 3.4% rate "research context; not used
     in the sizing" while their product was the customer count the sizing consumed: `used` held only
     the figures the sizing named directly and never followed a derivation's factors."""
-    d = _run_dir(tmp_path, _record(*_BUILT_FROM), _REFS_BUILT_FROM)
+    d = _run_dir(tmp_path, _record(*_BUILT_FROM, segment_of="enrolled_population"), _REFS_BUILT_FROM)
     md = _compose(d)["report_markdown"]
     section = md[md.index("## Assumptions") :]
     rows = {line.split("**")[1]: line for line in section.splitlines() if line.startswith("- **")}
@@ -963,7 +968,9 @@ def _stated_arpu_dir(tmp_path: Path, *extra: dict[str, Any], stated: float = 157
     `_run_dir` sizes before `inputs.json` can carry `founder_stated_inputs`, so the founder-stated
     reference is sized in a second pass, the way the live pipeline reaches it.
     """
-    record = _record(_sourced("addressable", 100_000, "count"), _sourced("svc", 50, "percent_points"), *extra)
+    record = _record(
+        _sourced("addressable", 100_000, "count"), _sourced("svc", 50, "percent_points", of="addressable"), *extra
+    )
     d = _run_dir(tmp_path, record, _STATED_BU)
     _edit(
         d,
@@ -1072,6 +1079,7 @@ def _inlined_estimate_dir(tmp_path: Path, *extra: dict[str, Any]) -> Path:
         _sourced("employment", 2_000_000, "count"),
         _sourced("access_pct", 35, "percent_points", label="Share of workers with access"),
         *extra,
+        segment_of="employment",
     )
     return _run_dir(tmp_path, record, refs)
 
@@ -1124,7 +1132,7 @@ def test_matching_the_founders_figure_does_not_silence_a_real_override(tmp_path:
     figure must not make a sizing that used a DIFFERENT figure look like it used theirs."""
     record = _record(
         _sourced("addressable", 100_000, "count"),
-        _sourced("svc", 50, "percent_points"),
+        _sourced("svc", 50, "percent_points", of="addressable"),
         _sourced("other_price", 300, "money_per_customer", currency="USD", period="month"),
     )
     d = _run_dir(tmp_path, record, _STATED_BU)  # arpu references care_price (157), not the founder
@@ -1143,7 +1151,7 @@ def test_matching_the_founders_figure_does_not_silence_a_real_override(tmp_path:
 def test_listed_factors_without_a_source_are_named_as_such(tmp_path: Path) -> None:
     """The same run warned the derivation's factors were "not recorded separately" -- they were, by
     factor_id, and lacked only a source. The warning names what is missing."""
-    d = _run_dir(tmp_path, _record(*_BUILT_FROM), _REFS_BUILT_FROM)
+    d = _run_dir(tmp_path, _record(*_BUILT_FROM, segment_of="enrolled_population"), _REFS_BUILT_FROM)
     w = next(w for w in _compose(d)["validation"]["warnings"] if w["code"] == "UNSTRUCTURED_DERIVATION")
     assert "not recorded separately" not in w["message"]
     assert "source" in w["message"]

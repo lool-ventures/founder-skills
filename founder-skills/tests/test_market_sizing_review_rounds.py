@@ -305,8 +305,12 @@ def test_the_kept_figures_reach_both_pages(tmp_path: Path) -> None:
     _edit(
         d,
         "validation.json",
-        lambda v: v["assumptions"].append(
-            {**v["assumptions"][0], "name": "eligible_population_wider", "value": 52_000_000}
+        lambda v: (
+            v["assumptions"].append({**v["assumptions"][0], "name": "eligible_population_wider", "value": 52_000_000}),
+            # Kept on the wider base, the share must be declared a proxy, or the calculator refuses it.
+            v["assumptions"][2].update(
+                proxy={"for": "eligible_population_wider", "why": "No source splits the wider population."}
+            ),
         ),
     )
     refs = {

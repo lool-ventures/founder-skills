@@ -1002,6 +1002,12 @@ def _resolve_references(
     refs = {p: data[p] for p in _needed_params(approach) if p in data}
     resolved, refusals = _provenance.resolve(refs, validation=validation, inputs=inputs, currency=args.currency)
     _keep_unit_rejections(args.output, args.run_id, refs, refusals, validation)
+    args.base_checks = None
+    if not refusals:
+        prior = _base_check_prior(args)
+        if prior is not None:
+            args.base_checks, base_refusals = _provenance.check_bases(resolved, validation, prior)
+            refusals = refusals + base_refusals
     for r in refusals:
         errors.append(f"{r['code']}: {r['param']}: {r['message']} (remedy: {r['remedy_kind']})")
     numeric = dict(data)
@@ -1026,6 +1032,26 @@ def _resolve_references(
     args.fx_as_of = next((a for a, _ in meta if a), None)
     args.fx_source = next((src for _, src in meta if src), None)
     return numeric, refs, resolved, conversions, errors, validation
+
+
+def _base_check_prior(args: argparse.Namespace) -> dict[str, Any] | None:
+    """The sizing this one replaces, for the share-base check; None when the check does not run.
+
+    A replay of a sizing that was never checked (sized before the check existed) stays unchecked: refusing it would
+    break every re-run of an older analysis. Any other by-reference sizing is checked. The prior is the replayed
+    sizing, or for a fresh sizing the file it overwrites when that is this run's.
+    """
+    if args.replay:
+        prior, _ = _load_json(args.replay)
+        return prior if isinstance(prior, dict) and isinstance(prior.get("base_checks"), dict) else None
+    current, _ = _load_json(args.output) if args.output and os.path.isfile(args.output) else (None, None)
+    if (
+        isinstance(current, dict)
+        and isinstance(current.get("base_checks"), dict)
+        and _provenance._as_dict(current.get("metadata")).get("run_id") == args.run_id
+    ):
+        return current
+    return {}
 
 
 _FOUNDER_QUESTION_RE = re.compile(r"^E_[A-Z_]+: (\w+): .*\(remedy: founder_question\)$", re.DOTALL)
@@ -1249,6 +1275,8 @@ def main() -> None:
             checks = _quote_value.quote_checks(ref_validation)
             if checks is not None:
                 result["quote_checks"] = checks
+            if getattr(args, "base_checks", None) is not None:
+                result["base_checks"] = args.base_checks
         else:
             consumed = {
                 "td": ("industry_total", "segment_pct", "share_pct"),

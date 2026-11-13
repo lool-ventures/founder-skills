@@ -568,14 +568,12 @@ re-dispatch from a done one.
 
 ### Step 4: External Validation -> `validation.json`
 
-**The main thread performs the web research.** Do NOT dispatch a sub-agent for this step — the main thread has web-research capability (WebSearch/WebFetch, or the host's equivalents), and this skill's sub-agent allowlist deliberately includes no network tools. Perform all web research calls yourself.
+**The main thread performs the web research.** Do NOT dispatch a sub-agent for this step — the main thread has web-research capability (WebSearch/WebFetch, or the host's equivalents), and this skill's sub-agent allowlist deliberately includes no network tools.
 
 **When methodology is "both":** Research both approaches in parallel (two WebSearch calls in one assistant turn — one for top-down market data, one for bottom-up customer/ARPU data).
 
 - **Top-down research:** WebSearch for industry reports, government statistics, analyst estimates for total market size, segment percentages, market growth rates. For the industry total, prefer a figure for the product's own geography and category; label a broader one as broader.
 - **Bottom-up research:** WebSearch for customer counts, pricing/ARPU benchmarks, competitor data, serviceable segment data.
-
-**When methodology is single:** Perform one research pass for the chosen approach.
 
 **After searching:** open the pages the sized figures rest on and record each figure's passage as `${CLAUDE_PLUGIN_ROOT}/skills/market-sizing/references/web-sources.md` describes; a page that will not open is left out, never a stop.
 
@@ -583,7 +581,7 @@ re-dispatch from a done one.
 
 **Source quality hierarchy:** Government/regulatory > Established analysts > Industry associations > Academic > Business press > Company blogs (product facts only).
 
-Triangulate key numbers with 2+ independent sources. Every figure goes in the `assumptions` array under a name of its own, with a `category` of `sourced`, `derived`, or `agent_estimate`, and a **`unit`** saying what it measures: `money_total_per_year` or `money_per_customer` (both with `currency`; per-customer also with `period`: month, quarter or year), `count`, `fraction` (0-1), `ratio`, `percent_points` (35 = 35%). Record a figure as its source states it: a head-count is a `count`, even if the market total is built from it. A `sourced` figure names a `sources[]` entry in `source_title`/`source_url`, or it is graded as an estimate. **A figure in another currency needs its rate here too**: `{"name": "fx_usd_ils", "unit": "fx_rate", "from": "USD", "to": "ILS", "value": 3.72, "as_of": "YYYY-MM-DD", "category": "sourced", ...}`, looked up now, never from memory.
+Triangulate key numbers with 2+ independent sources. Every figure goes in the `assumptions` array under a name of its own, with a `category` of `sourced`, `derived`, or `agent_estimate`, and a **`unit`** saying what it measures: `money_total_per_year` or `money_per_customer` (both with `currency`; per-customer also with `period`: month, quarter or year), `count`, `fraction` (0-1), `ratio`, `percent_points` (35 = 35%). Record a figure as its source states it: a head-count is a `count`, even if the market total is built from it. A share (`percent_points` or `fraction`) carries `of`: the population its source measured it on, as the entry recording it or in plain words, written from the source, not from how the sizing will use it. A share applied to another population also carries `proxy`: `{"for": <that entry>, "why": ...}`. A `sourced` figure names a `sources[]` entry in `source_title`/`source_url`, or it is graded as an estimate. **A figure in another currency needs its rate here too**: `{"name": "fx_usd_ils", "unit": "fx_rate", "from": "USD", "to": "ILS", "value": 3.72, "as_of": "YYYY-MM-DD", "category": "sourced", ...}`, looked up now, never from memory.
 
 Every `figure_validations[]` entry's `status` MUST be one of exactly 4 canonical values —
 do not invent others (e.g. `validated_with_caveat`, `unverified` are NOT valid and will
@@ -599,7 +597,7 @@ cat <<'VAL_EOF' > "$ANALYSIS_DIR/validation.json"
 {
   "assumptions": [
     {"name": "regtech_market", "value": 50000000000, "unit": "money_total_per_year", "currency": "USD", "category": "sourced", "label": "Global RegTech market", "source_url": "...", "source_title": "...", "confidence": "high"},
-    {"name": "regulated_smb_share", "value": 16, "unit": "percent_points", "category": "derived", "label": "Regulated SMB share", "factors": [{"factor_id": "regulated_share", "value": 0.40, "source_id": "Regulator register 2025"}, {"factor_id": "smb_share", "value": 0.40, "source_id": "company_stated"}]},
+    {"name": "regulated_smb_share", "value": 16, "unit": "percent_points", "category": "derived", "label": "Regulated SMB share", "of": "regtech_market", "factors": [{"factor_id": "regulated_share", "value": 0.40, "source_id": "Regulator register 2025"}, {"factor_id": "smb_share", "value": 0.40, "source_id": "company_stated"}]},
     ...
   ],
   "figure_validations": [

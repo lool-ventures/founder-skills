@@ -2090,6 +2090,53 @@ def quote_sentence(validation: Any, sizing: Any) -> str | None:
     )
 
 
+def base_sentences(validation: Any, sizing: Any) -> list[str]:
+    """What the `base_checks` stamp `market_sizing.py` wrote has to tell the founder: each share used as a proxy
+    for a population it was not measured on, with the reason recorded beside it, and each count or total that
+    moved under a share kept as it was. Nothing for a share measured on its own base, or one not checked.
+
+    A proxy is routine in market sizing (a national rate applied to a wider region is the common case), so the
+    sentence states it and its reason, and does not call it a defect.
+    """
+    checks = sizing.get("base_checks") if isinstance(sizing, dict) else None
+    if not isinstance(checks, dict):
+        return []
+    by_name = {str(a.get("name")): a for a in _as_list(_as_dict(validation).get("assumptions")) if isinstance(a, dict)}
+
+    def _measured_on(share: str) -> str:
+        of = str(_as_dict(by_name.get(share)).get("of") or "").strip()
+        return _label(of, validation) if of in by_name else _founder_prose(of)
+
+    def _value(name: str, value: Any) -> str:
+        e = _as_dict(by_name.get(name))
+        return _params.format_value(e.get("unit"), value, str(e.get("currency") or _CURRENCY))
+
+    out: list[str] = []
+    for rate in sorted(checks):
+        row = _as_dict(checks[rate])
+        for p in _as_list(row.get("proxy")):
+            p = _as_dict(p)
+            share, base, why = str(p.get("share") or ""), str(p.get("for") or ""), str(p.get("why") or "").strip()
+            if not (share and base and why):
+                continue
+            why = _founder_prose(why).rstrip(".")
+            out.append(
+                f"{_humanize_param(rate)} applies {_label(share, validation)}, measured on {_measured_on(share)}, "
+                f"to {_label(base, validation)} as a proxy: {why}."
+            )
+        for c in _as_list(row.get("base_changed")):
+            c = _as_dict(c)
+            name = str(c.get("entry") or "")
+            if not name:
+                continue
+            out.append(
+                f"{_label(name, validation)} changed from {_value(name, c.get('from'))} to "
+                f"{_value(name, c.get('to'))} since the earlier sizing, and {_humanize_param(rate)}, applied to "
+                "it, was kept as it was."
+            )
+    return out
+
+
 def redo_sentence(record: dict[str, Any] | None, validation: Any) -> str | None:
     """The founder-facing account of a redo the sizing used; None when there is none to tell."""
     outcome = redo_outcome(record)

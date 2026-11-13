@@ -384,9 +384,9 @@ def _full_record() -> dict[str, Any]:
     return _record(
         _sourced("eligible_population", 41_000_000, "count"),
         _sourced("care_price", 157, "money_per_customer", currency="USD", period="month"),
-        _sourced("segment_pct", 37, "percent_points"),
+        _sourced("segment_pct", 37, "percent_points", of="eligible_population"),
         _sourced("addressable_accounts", 232_800, "count"),
-        _sourced("serviceable_pct", 50, "percent_points"),
+        _sourced("serviceable_pct", 50, "percent_points", of="addressable_accounts"),
         _sourced("target_pct", 15, "percent_points"),
         sources=[_SRC],
     )

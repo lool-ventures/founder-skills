@@ -132,9 +132,11 @@ def run_id_of(data: Any) -> str | None:
 
 
 # An entry's label is how it is shown, not what it records, and its quote is the passage that states the figure,
-# recorded beside it (`_quote_value.py`): adding one is not a change to the research. Every other field is part
-# of its digest.
-_NOT_DIGESTED = ("label", "quote")
+# recorded beside it (`_quote_value.py`): adding one is not a change to the research. A share's `proxy` says
+# why it is used for a population it was not measured on (`_provenance.check_bases`), and the report shows it.
+# Every other field is part of its digest, `of` included: what a source measured a share on is research, so an
+# `of` rewritten after the first print is named as an edit.
+_NOT_DIGESTED = ("label", "quote", "proxy")
 
 
 def research_digest(validation: Any) -> dict[str, str]:

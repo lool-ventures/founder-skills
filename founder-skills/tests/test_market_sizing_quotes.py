@@ -117,7 +117,9 @@ def _sourced(name: str, value: float, unit: str, **extra: Any) -> dict[str, Any]
 
 def _validation(*, accounts_quote: str | None, reachable_quote: str | None) -> dict[str, Any]:
     accounts = _sourced("accounts", 42_000, "count", **({"quote": accounts_quote} if accounts_quote else {}))
-    reachable = _sourced("reachable", 30, "percent_points", **({"quote": reachable_quote} if reachable_quote else {}))
+    reachable = _sourced(
+        "reachable", 30, "percent_points", of="accounts", **({"quote": reachable_quote} if reachable_quote else {})
+    )
     return {
         "sources": [_SRC],
         "assumptions": [

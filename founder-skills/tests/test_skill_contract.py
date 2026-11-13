@@ -1026,7 +1026,11 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 107,401 -> 107,635 (+234 B) on 2026-10-24: Step 4 points to references/web-sources.md, which says to open
     # the pages the sized figures rest on and record each figure's passage, and that a page that will not open
     # is left out. The procedure itself lives in the reference file.
-    "market-sizing": 107_624,
+    # 107,624 -> 107,824 (+200 B) on 2026-11-14: Step 4 tells the main thread to record on each share the
+    # population its source measured it on (`of`), and `proxy` when it is applied to another one;
+    # `market_sizing.py` refuses a share applied to a population it was not measured on. 125 B were trimmed
+    # from Step 4 first (a repeated "do the research yourself" and the single-methodology line); +325 B added.
+    "market-sizing": 107_824,
     # fmr raised for two founder-facing-correctness items measured in a live run: the CHECKLIST
     # dispatch now forbids citing our artifact filenames in evidence (that run put `inputs.json` in 10
     # items' evidence, printed verbatim into the founder's report), and the producer pipe passes

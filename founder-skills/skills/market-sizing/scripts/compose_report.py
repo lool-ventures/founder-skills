@@ -2866,6 +2866,9 @@ def _section_sources(validation: dict[str, Any] | None, sizing: dict[str, Any] |
     quoted = _view.quote_sentence(validation, sizing)
     if quoted:
         lines.append(f"\n{quoted}")
+    based = _view.base_sentences(validation, sizing)
+    if based:
+        lines.append("\n" + " ".join(based))
     return "\n".join(lines) + "\n"
 
 

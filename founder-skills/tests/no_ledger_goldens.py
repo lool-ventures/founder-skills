@@ -667,7 +667,7 @@ MS_VALIDATION = {
             "source_title": MS_SOURCE["title"],
             "source_url": MS_SOURCE["url"],
         },
-        {"name": "reachable", "value": 30, "unit": "percent_points", "category": "derived"},
+        {"name": "reachable", "value": 30, "unit": "percent_points", "category": "derived", "of": "accounts"},
         {"name": "capture", "value": 4, "unit": "percent_points", "category": "agent_estimate"},
     ],
     "figure_validations": [],

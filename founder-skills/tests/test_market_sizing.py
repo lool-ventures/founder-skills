@@ -718,11 +718,11 @@ _V1_RECORD: dict[str, tuple[float, str, dict[str, Any]]] = {
     # figures (a $100B vs a $67.5B TAM) did not have. serviceable_pct is high confidence because the
     # fixture's sensitivity never varies it.
     "industry_total": (70000000000, "money_total_per_year", {"currency": "USD"}),
-    "segment_pct": (33, "percent_points", {}),
+    "segment_pct": (33, "percent_points", {"of": "industry_total"}),
     "share_pct": (0.52, "percent_points", {}),
     "customer_count": (4500000, "count", {}),
     "arpu": (15000, "money_per_customer", {"currency": "USD", "period": "year"}),
-    "serviceable_pct": (35, "percent_points", {"confidence": "high"}),
+    "serviceable_pct": (35, "percent_points", {"confidence": "high", "of": "customer_count"}),
     "target_pct": (0.5, "percent_points", {}),
 }
 
@@ -7421,8 +7421,8 @@ def _compose_both_with_factors(
     # those of the figures each input actually used.
     v, sizing = _v1_run(
         [
-            _v1_entry("segment_pct", sp, "percent_points", "derived", factors=td_factors),
-            _v1_entry("serviceable_pct", svc, "percent_points", "derived", factors=bu_factors),
+            _v1_entry("segment_pct", sp, "percent_points", "derived", of="industry_total", factors=td_factors),
+            _v1_entry("serviceable_pct", svc, "percent_points", "derived", of="customer_count", factors=bu_factors),
             _v1_entry("industry_total", 114_924_000_000, "money_total_per_year", currency="USD"),
             _v1_entry("share_pct", 0.3, "percent_points"),
             _v1_entry("customer_count", 61_000_000, "count"),
