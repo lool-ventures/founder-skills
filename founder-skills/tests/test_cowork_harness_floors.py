@@ -45,10 +45,13 @@ CANARY = REPO_ROOT / "cowork-tests" / "canary" / "email-canary.cassette.json"
 # questions -- "which CLI runs this gate" vs "is this CLI new enough for the check to mean anything"
 # -- and collapsing them is the error this split exists to prevent. Rationale:
 # docs/internal/2026-08-27-cowork-harness-2.4.0-adoption-plan.md SS7.4-7.5.
-_CI_PIN = "4.11.0"
+_CI_PIN = "5.0.0"
 
 # The declared floor per site, with the reason it differs where it does.
 #
+# 2026-11-14 (5.0.0): CI pin and recording floor move to 5.0.0; the replay floor stays 3.8.0 (a 5.0.0 recording
+#   stamps the lowest cassette version its features need, v12 for ours). A major, and reason (1): agent 2.1.317 and a
+#   hostloop spawn env that no longer inherits the shell. Recorded patch-tolerated on the staged 2.1.321 (owner call).
 # 2026-10-24 (4.11.0): CI pin and recording floor move to 4.11.0; the replay floor stays 3.8.0.
 #   CI pin 4.11.0 -- the release adopted; plan in the internal docs dir.
 #   Recording 4.11.0 -- reason (3) plus a moved `latest`, and a re-record trigger: 4.10.0 pins agent 2.1.299,
@@ -119,7 +122,7 @@ _CI_PIN = "4.11.0"
 #     An older CLI cannot grade that key, and a silent skip is worse than a red. This is the first
 #     time the replay floor has moved; it moved because a scenario needed it, not to match anything.
 # CASSETTE_VERSION/MIN_SUPPORTED are unchanged at 12/9, so old cassettes stay readable.
-_RECORDING_FLOOR = "4.11.0"
+_RECORDING_FLOOR = "5.0.0"
 _REPLAY_FLOOR = "3.8.0"
 
 # Sites that SELECT the CLI a gate runs. Exact, never a range: a caret auto-adopted every upstream

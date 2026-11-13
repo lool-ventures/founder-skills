@@ -102,7 +102,7 @@ uv run mypy founder-skills/scripts/
 uv run pytest                                       # all tests (e2e auto-skips without auth; cowork auto-skips without the harness CLI)
 uv run pytest founder-skills/tests/ -v              # verbose
 uv run pytest founder-skills/tests/ -v -m "not e2e and not mutation" # explicitly skip the paid + slow lanes
-uv run pytest -m cowork                             # token-free cowork-harness cassette replay (needs `npm i -g cowork-harness@4.11.0` — exact, matching CI; no Docker/token)
+uv run pytest -m cowork                             # token-free cowork-harness cassette replay (needs `npm i -g cowork-harness@5.0.0` — exact, matching CI; no Docker/token)
 uv run pytest -m mutation                           # curated mutant corpus (~14 min serial, ~3.5 across 10 workers, ~4.5 on half the cores beside the suite; deselected by default — see the WARNING below)
 uv run pytest founder-skills/tests/ -q -m "not e2e and not mutation" -n auto  # the suite across the cores (pytest-xdist, a dev dependency): ~2 min instead of ~11
 ```
