@@ -92,7 +92,7 @@ npm install -g claude-plugin-doctor
 
 **The full safe dev loop is:**
 
-1. `./scripts/sync-test-repo.sh` — push your changes to the test repo.
+1. **Only when the owner has asked for it in this session**, run `./scripts/sync-test-repo.sh`. It pushes the working tree to the PUBLIC test repo (`yaniv-golan/founderskills-test`). A request to test, fix or ship is not a request for it (see the `sync-test-repo` guard in CLAUDE.md). Without that ask, stop here and tell the owner the sync is the next step.
 2. **In the Cowork UI**, click Refresh on the marketplace.
 3. **In your terminal**, run `cpd refresh lool-founder-skills` to confirm the clone advanced and surface any other drift.
 4. If the clone is stale, run `cpd refresh lool-founder-skills --force-fetch -y` — bypasses the broken refresh path with a direct `git fetch && git reset --hard`.
