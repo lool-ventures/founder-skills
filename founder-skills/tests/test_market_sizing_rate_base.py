@@ -367,3 +367,19 @@ def test_the_proxy_sentence_reads_what_the_sizing_checked(tmp_path: Path) -> Non
     _stamp_downstream(d)
     md = _compose(d)["report_markdown"]
     assert "measured on seniors in two states" in md and "seniors everywhere" not in md
+
+
+def test_a_base_moved_twice_keeps_the_figure_it_started_from(tmp_path: Path) -> None:
+    d = _run_dir(tmp_path, _record())
+    for value in (52_000_000, 60_000_000):
+        _edit(
+            d,
+            "validation.json",
+            lambda v, value=value: next(a for a in v["assumptions"] if a["name"] == "eligible_population").update(
+                value=value
+            ),
+        )
+        _replay(d)
+    assert _checks(d)["segment_pct"]["base_changed"] == [
+        {"entry": "eligible_population", "from": 41_000_000, "to": 60_000_000}
+    ]

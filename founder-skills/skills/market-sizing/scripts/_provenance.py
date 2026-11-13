@@ -757,7 +757,8 @@ def check_bases(
     never refused.
 
     A rate built by dividing one population by another (counts or money totals, no share entry) names its
-    population by those entries: one of them must be an entry the base is built from, or carry a proxy for one.
+    population by those entries: one of them, numerator or divisor, must be an entry the base is built from, or
+    carry a proxy for one.
     A share matched only through another share is stamped `chain`, not `match`: the rule cannot tell a real
     "B of what A selects" from a 100% entry inserted to carry B.
 
@@ -767,7 +768,9 @@ def check_bases(
     Also unchecked, each recorded in the stamp so the mix of outcomes shows it: a share or a base turned into an
     estimate or the founder's own figure. Compared by name, not population: a base of a count times a ratio
     (accounts times seats per account) matches a share of the count. A `proxy.why` is not judged, only
-    required. A sizing.json with its `base_checks` removed by hand replays unchecked.
+    required. A sizing.json with its `base_checks` removed by hand replays unchecked. And the exit the mismatch
+    refusal offers (record under the same name a share measured on the base) and the move it forbids (rewrite
+    `of` to match) are the same edit to the code: both change the entry's value and its `of`.
     """
     by_name = {str(a.get("name")): a for a in _assumptions(validation) if isinstance(a.get("name"), str)}
     old = _as_dict(_as_dict(prior).get("base_checks"))
@@ -807,7 +810,7 @@ def check_bases(
                         "param": rate,
                         "message": (
                             f"{rate} is built from {', '.join(repr(n) for n in populations)}, and it is applied to "
-                            f"{base} built from {', '.join(repr(n) for n in base_entries)}. Either divide by an "
+                            f"{base} built from {', '.join(repr(n) for n in base_entries)}. Either build it over an "
                             f"entry the base is built from, or record on the population it was measured on "
                             f'`proxy`: {{"for": "<the base entry>", "why": "<why it is a fair proxy for it>"}}.'
                         ),
@@ -886,10 +889,15 @@ def _carry_base_changed(row: dict[str, Any], was: dict[str, Any], base_entries: 
     if set(before) != set(row["base_values"]) or _as_dict(was.get("share_values")) != row["share_values"]:
         return
     if before != row["base_values"]:
-        row["base_changed"] = [
-            {"entry": n, "from": before[n], "to": row["base_values"][n]}
+        # A second move keeps the figure the first one started from.
+        first = {str(c.get("entry")): c.get("from") for c in _as_list(was.get("base_changed")) if isinstance(c, dict)}
+        moved = [
+            {"entry": n, "from": first.get(n, before[n]), "to": row["base_values"][n]}
             for n in base_entries
-            if before[n] != row["base_values"][n]
+            if before[n] != row["base_values"][n] or n in first
         ]
+        moved = [c for c in moved if c["from"] != c["to"]]
+        if moved:
+            row["base_changed"] = moved
     elif isinstance(was.get("base_changed"), list) and was["base_changed"]:
         row["base_changed"] = was["base_changed"]
