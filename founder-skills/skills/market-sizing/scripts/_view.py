@@ -2121,10 +2121,13 @@ def base_sentences(validation: Any, sizing: Any) -> list[str]:
                 continue
             why = _founder_prose(why).rstrip(".")
             label, param = _label(share, validation), _humanize_param(rate)
+            of = str(p.get("of") or "").strip()  # what the sizing checked; a later edit is not shown
+            measured_on = (
+                (_label(of, validation) if of in by_name else _founder_prose(of)) if of else _measured_on(share)
+            )
             named = label if label == param else f"{label} ({param})"
             out.append(
-                f"{named} was measured on {_measured_on(share)} and is applied to {_label(base, validation)} as a "
-                f"proxy: {why}."
+                f"{named} was measured on {measured_on} and is applied to {_label(base, validation)} as a proxy: {why}."
             )
         for c in _as_list(row.get("base_changed")):
             c = _as_dict(c)

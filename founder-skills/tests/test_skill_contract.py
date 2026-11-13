@@ -1030,7 +1030,8 @@ SKILL_MD_CEILING: dict[str, int] = {
     # population its source measured it on (`of`), and `proxy` when it is applied to another one;
     # `market_sizing.py` refuses a share applied to a population it was not measured on. 125 B were trimmed
     # from Step 4 first (a repeated "do the research yourself" and the single-methodology line); +325 B added.
-    "market-sizing": 107_824,
+    # 107,824 -> 107,791 (-33 B) the same day: a ratio share is checked too, so "A share" loses its unit list.
+    "market-sizing": 107_791,
     # fmr raised for two founder-facing-correctness items measured in a live run: the CHECKLIST
     # dispatch now forbids citing our artifact filenames in evidence (that run put `inputs.json` in 10
     # items' evidence, printed verbatim into the founder's report), and the producer pipe passes
@@ -2261,7 +2262,9 @@ REFERENCES_CEILING: dict[str, int] = {
     # `quote_checks` in artifact-schemas.md.
     # 59,413 -> 60,393 (+980 B) on 2026-11-14: artifact-schemas.md documents a share's `of` and `proxy` and
     # the sizing's `base_checks` stamp, the record and the stamp `market_sizing.py` checks a share's population by.
-    "market-sizing": 60_393,
+    # 60,393 -> 60,625 (+232 B) the same day: a ratio share, a share divided from two counts, and the `chain`
+    # status, after the post-build review reproduced each as a way past the check.
+    "market-sizing": 60_625,
     # fmr raised to document `graded_against` on the three producer outputs that stamp it — a new
     # artifact field is not discoverable from a schema doc that omits it, and the field exists to make
     # staleness detectable at all (run_id parity cannot see corrections applied within a run).

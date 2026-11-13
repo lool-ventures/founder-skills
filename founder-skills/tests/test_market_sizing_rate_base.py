@@ -42,6 +42,16 @@ _WIDER = {
 _WHY = "No published survey splits the wider population"
 
 
+def _a(name: str) -> dict[str, str]:
+    """A reference to a recorded entry."""
+    return {"assumption": name}
+
+
+def _op(op: str, *factors: dict[str, Any]) -> dict[str, Any]:
+    """A derivation over references."""
+    return {"derived": {"op": op, "factors": list(factors)}}
+
+
 def _size(d: Path, refs: dict[str, Any]) -> tuple[int, str]:
     rc, out, err = run_script_raw(
         "market_sizing.py",
@@ -81,7 +91,7 @@ def test_a_share_measured_on_its_base_matches(tmp_path: Path) -> None:
     assert row["base_entries"] == ["eligible_population"], "a price is not a population"
 
 
-def test_a_share_of_what_another_share_selects_matches(tmp_path: Path) -> None:
+def test_a_share_of_what_another_share_selects_passes_as_a_chain(tmp_path: Path) -> None:
     sub = _sourced("adult_child_pct", 50, "percent_points", of="segment_pct")
     refs = {
         **_REFS,
@@ -91,7 +101,8 @@ def test_a_share_of_what_another_share_selects_matches(tmp_path: Path) -> None:
     }
     d = _run_dir(tmp_path, _record(sub), refs)
     row = _checks(d)["segment_pct"]
-    assert row["status"] == "match" and sorted(row["of"]) == ["eligible_population", "segment_pct"]
+    assert row["status"] == "chain" and sorted(row["of"]) == ["eligible_population", "segment_pct"]
+    assert row["chained"] == ["adult_child_pct"]
 
 
 def test_a_share_with_no_of_is_refused_and_the_sizing_is_left_alone(tmp_path: Path) -> None:
@@ -150,7 +161,9 @@ def test_a_declared_proxy_passes_and_both_pages_say_why(tmp_path: Path) -> None:
     assert rc == 0, out
     row = _checks(d)["segment_pct"]
     assert row["status"] == "proxy"
-    assert row["proxy"] == [{"share": "segment_pct", "for": "wider_population", "why": _WHY}]
+    assert row["proxy"] == [
+        {"share": "segment_pct", "of": "seniors in the surveyed states", "for": "wider_population", "why": _WHY}
+    ]
     _stamp_downstream(d)
     md = _compose(d)["report_markdown"]
     html = visible_text(_html(d))
@@ -263,3 +276,94 @@ def test_a_base_cannot_be_built_from_two_populations(tmp_path: Path) -> None:
     d = _run_dir(tmp_path, _record(_sourced("other_population", 3, "count")))
     rc, out = _size(d, refs)
     assert rc == 1 and "E_ALGEBRA" in out
+
+
+# --- the post-build review's reproductions -------------------------------------------------------------------
+
+
+def test_a_widened_base_is_still_disclosed_after_another_replay(tmp_path: Path) -> None:
+    """A re-run of the pipe after the revision (a second replay, a downstream rejection) compares with a prior
+    that already holds the new value; the disclosure is carried, not lost."""
+    d = _run_dir(tmp_path, _record())
+    _edit(
+        d,
+        "validation.json",
+        lambda v: next(a for a in v["assumptions"] if a["name"] == "eligible_population").update(value=52_000_000),
+    )
+    _replay(d)
+    _replay(d)
+    assert _checks(d)["segment_pct"]["base_changed"] == [
+        {"entry": "eligible_population", "from": 41_000_000, "to": 52_000_000}
+    ]
+
+
+def test_a_share_matched_only_through_another_share_is_stamped_as_a_chain(tmp_path: Path) -> None:
+    """The chain rule cannot tell a real "B of what A selects" from a 100% entry inserted to carry B: it is
+    stamped `chain`, so the mix of outcomes and the review can see it."""
+    head = _sourced("all_members_pct", 100, "percent_points", of="eligible_population")
+    refs = {
+        **_REFS,
+        "segment_pct": {
+            "derived": {"op": "multiply", "factors": [{"assumption": "all_members_pct"}, {"assumption": "segment_pct"}]}
+        },
+    }
+    d = _run_dir(tmp_path, _record(head, segment_of="all_members_pct"), refs)
+    row = _checks(d)["segment_pct"]
+    assert row["status"] == "chain" and row["chained"] == ["segment_pct"]
+
+
+def test_a_share_recorded_as_a_ratio_is_checked(tmp_path: Path) -> None:
+    d = _run_dir(tmp_path, _record())
+    _edit(d, "validation.json", lambda v: v["assumptions"].append(_sourced("segment_ratio", 0.37, "ratio")))
+    refs = {**_REFS, "segment_pct": _op("to_percent", _a("segment_ratio"))}
+    rc, out = _size(d, refs)
+    assert rc == 1 and "E_RATE_BASE_MISSING" in out
+
+
+_DIVIDED = {**_REFS, "segment_pct": _op("to_percent", _op("divide", _a("local_users"), _a("local_total")))}
+
+
+def test_a_share_divided_from_counts_must_divide_by_the_base(tmp_path: Path) -> None:
+    """A share built as one count over another names its population by its divisor: one of its populations
+    must be one the base is built from, or carry a proxy for it."""
+    d = _run_dir(tmp_path, _record())
+    _edit(
+        d,
+        "validation.json",
+        lambda v: v["assumptions"].extend(
+            [_sourced("local_users", 3_000_000, "count"), _sourced("local_total", 9_000_000, "count")]
+        ),
+    )
+    rc, out = _size(d, _DIVIDED)
+    assert rc == 1 and "E_RATE_BASE_MISMATCH" in out
+    _edit(
+        d,
+        "validation.json",
+        lambda v: next(a for a in v["assumptions"] if a["name"] == "local_total").update(
+            proxy={"for": "eligible_population", "why": _WHY}
+        ),
+    )
+    rc, out = _size(d, _DIVIDED)
+    assert rc == 0, out
+    assert _checks(d)["segment_pct"]["status"] == "proxy"
+
+
+def test_a_share_divided_by_the_base_matches(tmp_path: Path) -> None:
+    refs = {**_REFS, "segment_pct": _op("to_percent", _op("divide", _a("local_users"), _a("eligible_population")))}
+    d = _run_dir(tmp_path, _record(_sourced("local_users", 3_000_000, "count")), refs)
+    assert _checks(d)["segment_pct"]["status"] == "match"
+
+
+def test_the_proxy_sentence_reads_what_the_sizing_checked(tmp_path: Path) -> None:
+    """An `of` edited after the sizing does not change what the pages say the share was measured on."""
+    d = _wider_dir(tmp_path)
+    _edit(
+        d,
+        "validation.json",
+        lambda v: _segment(v, of="seniors in two states", proxy={"for": "wider_population", "why": _WHY}),
+    )
+    assert _size(d, _WIDER)[0] == 0
+    _edit(d, "validation.json", lambda v: _segment(v, of="seniors everywhere"))
+    _stamp_downstream(d)
+    md = _compose(d)["report_markdown"]
+    assert "measured on seniors in two states" in md and "seniors everywhere" not in md
